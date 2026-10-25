@@ -62,10 +62,10 @@
   import { asOf, hasHistory, isTracked, momentLabel, momentNow, stateAt } from '../lib/map/layerHistory.js';
   import { revealPlates } from '../lib/plateExport.js';
   import '../lib/plateFontFaces.js';
-  import { plateCredits } from '../lib/plate/credits.js';
+  import { creditParts, plateCredits } from '../lib/plate/credits.js';
   import { canvasBlob, composePage, copyPage, evolutionSheet, postExport, QUALITIES, release, scaleFor, scaleForWidth, stagedPictures, videoSize } from '../lib/plate/exportPlate.js';
-  import { KIND_LABELS, PAPERS, longDay, MAP_KINDS, MAX_MAPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, facesOf, mapCount, inLook, addStep, pickedDays, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
-    fromTemplate, hasSteps, houseLayout, labelBox, listedOf, mainMap, mapsFirst, movedStep, newId, onPaper, pageSize, placeOf, settleOn, shownOn, stepsOf, SYMBOL, templateOf, textMeasurer,
+  import { KIND_LABELS, PAPERS, longDay, MAP_KINDS, MAX_MAPS, MAX_STEPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, facesOf, mapCount, inLook, addStep, pickedDays, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
+    duplicatedStep, fromTemplate, hasSteps, houseLayout, labelBox, listedOf, mainMap, mapsFirst, movedStep, newId, onPaper, pageSize, placeOf, settleOn, shownOn, stepsOf, SYMBOL, templateOf, textMeasurer,
     transitionsOf, unsettled, withoutStep, restacked, stepOf } from '../lib/plate/page.js';
   import { changes, transitionPlan, tweenFrames } from '../lib/plate/tween.js';
   import { defaultSize } from '../lib/plate/words.js';
@@ -75,6 +75,18 @@
   import { drawOver, pictureKey } from '../lib/plate/draw.js';
   import { inFrame, project, scaleRatio } from '../lib/plate/geo.js';
   import { WAYBACK_ID } from '../lib/wayback.js';
+  import { CLOUDLESS_ID, cloudlessSaid, cloudlessYear } from '../lib/plate/cloudless.js';
+  import { SENTINEL_ID, passCredit } from '../lib/plate/sentinelPass.js';
+  import { endExport, exportShare, exportSays, plateExport, startExport, stopExport } from '../lib/plate/exportRun.svelte.js';
+  import { PLAIN_GROUNDS } from '../lib/plate/plainBasemap.js';
+  import { BLOCK_ADDS, block } from '../lib/plate/design.js';
+  import { FORMATS, GALLERY, formatPage, readyTemplate, relaid } from '../lib/plate/gallery.js';
+  import { annotationsLayer } from '../lib/plate/toLayer.js';
+  import { countFeatures } from '../lib/plate/counts.js';
+  import { SEQUENCES, withSequence } from '../lib/plate/sequences.js';
+  import { formatCoords, formatMGRS } from '../lib/coords.js';
+  import NewPlateDialog from './plate/NewPlateDialog.svelte';
+  import TemplateSketch from './plate/TemplateSketch.svelte';
   import { inspectorWidth, layout, listWidth, togglePanel } from '../lib/plate/layout.svelte.js';
   import { plateTabs } from '../lib/plate/oneTab.js';
   import { buildHash, readSolo, splitHash } from '../lib/hash.js';
@@ -103,9 +115,10 @@
   let providers = $state([]);
   let relief = $state(null);
   let releases = $state([]);
+  /** The years of Sentinel-2 cloudless, newest first, each with its credit and licence. */
+  let years = $state([]);
   let exporting = $state(false);
   let exportPreview = $state('');
-  let progress = $state('');
   /** The day an export is drawing, ahead of the plate's own. */
   let exportTime = $state(null);
   /** The days a played export's legend speaks for, so it stays still from frame to frame. */
@@ -124,6 +137,8 @@
   let overflow = $state(new Map());
   let menu = $state(null);
   let templateMenu = $state(null);
+  /** Whether New plate's dialog is open. */
+  let creating = $state(false);
   /** The button the Add panel opens under, while it is open. */
   let adding = $state(null);
   let addButton = $state(null);
@@ -138,16 +153,20 @@
   const handles = new Map();
   let images = $state(new Map());
 
-  // What the plate offers to draw its maps on, read once: free grounds, no quota spent.
-  const FREE = ['esri-world-imagery', WAYBACK_ID, 'osm', 'opentopomap'];
-  const grounds = $derived([['plain', 'Plain'], ['plain-dark', 'Plain, dark'], ['plain-topo', 'Topographic, heights in colour'], ['plain-staff', 'Staff map'],
-    ...providers.filter((entry) => FREE.includes(entry.id)).map((entry) => [entry.id, entry.id === WAYBACK_ID ? 'World Imagery Wayback, dated' : entry.label ?? entry.id])]);
+  // What the plate offers to draw its maps on, read once: the free grounds, and Sentinel-2
+  // once a Copernicus account is set up, whose quota a map spends only once it is picked.
+  const OFFERED = ['esri-world-imagery', WAYBACK_ID, CLOUDLESS_ID, SENTINEL_ID, 'osm', 'opentopomap'];
+  const PICTURE_NAMES = { [WAYBACK_ID]: 'World Imagery Wayback, dated', [CLOUDLESS_ID]: "Sentinel-2 cloudless, a year's mosaic",
+    [SENTINEL_ID]: 'Sentinel-2, one dated pass' };
+  const grounds = $derived([...PLAIN_GROUNDS,
+    ...providers.filter((entry) => OFFERED.includes(entry.id) && !entry.needs_key).map((entry) => [entry.id, PICTURE_NAMES[entry.id] ?? entry.label ?? entry.id])]);
   let asked = false;
   $effect(() => {
     if (uiState.tool !== 'plate' || asked) return;
     asked = true;
     api.get('/api/satellite/providers').then((list) => { providers = Array.isArray(list) ? list : []; }, () => {});
     api.get('/api/terrain/sources').then((info) => { relief = info; }, () => {});
+    api.get('/api/satellite/cloudless/years').then((answer) => { years = answer?.years ?? []; }, () => {});
   });
   /** The Wayback releases, read when a map is first set on one: the dates a dated ground offers. */
   let releasesAsked = false;
@@ -172,7 +191,8 @@
   }
   $effect(() => { if (uiState.tool === 'plate') untrack(() => { refresh(); readTemplates(); }); });
   // Another case: whatever was waiting is written to the case it was made in (the plate carries it), then let go.
-  $effect(() => { void caseId; untrack(() => { autosave.flush(); plate = null; selection = []; refresh(); }); });
+  // another case: an export of this one's plate stops, its maps going with the plate
+  $effect(() => { void caseId; untrack(() => { exportRun?.abort(); autosave.flush(); plate = null; selection = []; refresh(); }); });
 
   /**
    * Where a new plate looks: the Map's ground, at the Map's zoom, turned as the Map
@@ -220,6 +240,32 @@
   function newPlate(template = null) {
     const spec = template ? fromTemplate(template.data, { view: mapGround(), layers: mapLayers() })
       : houseLayout({ view: mapGround(), layers: mapLayers() });
+    startPlate(spec);
+  }
+
+  /**
+   * A new plate as the questions answered it (`NewPlateDialog`): the house layout, a
+   * ready plate laid out for the paper picked or one of the analyst's templates set on
+   * it, over the ground the Map looks at or round the layers picked, in its own look or
+   * the one picked.
+   */
+  function makePlate({ from, where, layers, format, look }) {
+    creating = false;
+    const view = (where === 'layers' && framed(rows.filter((row) => layers.includes(row.name)).map((row) => row.bbox).filter(Boolean))) || mapGround(layers);
+    const page = format ? formatPage(format) : null;
+    let spec;
+    if (from.kind === 'ready') spec = fromTemplate(readyTemplate(from.id, page), { view, layers });
+    else if (from.kind === 'mine') {
+      const template = templates.find((entry) => entry.id === from.id);
+      if (!template) { toast('That template is no longer kept', 'warn'); return; }
+      spec = fromTemplate(template.data, { view, layers });
+      if (page) spec = onPaper(spec, page);
+    } else spec = houseLayout({ ...(page ?? {}), view, layers });
+    if (look) spec = inLook(spec, look);
+    startPlate(spec);
+  }
+
+  function startPlate(spec) {
     openSpec({ name: null, title: caseState.current?.name ? `${caseState.current.name} map` : 'Map plate', spec });
     // never written yet: the first save files it, whether or not anything moves
     saved = '';
@@ -396,6 +442,16 @@
     } catch (error) { toast(error.message, 'danger'); }
   }
 
+  /** A copy of a plate on another paper, laid out again for it: the same map for a story, a feed post, a slide. */
+  async function copyFor(row, [, label, page]) {
+    try {
+      const loaded = await api.get(`/api/cases/${caseId}/map-plates/${encodeURIComponent(row.name)}`);
+      const answer = await api.post(`/api/cases/${caseId}/map-plates`, { title: `${loaded.title}, ${label.split(',')[0].toLowerCase()}`, spec: relaid(loaded.spec, page) });
+      toast(`“${answer.title}” made`, 'ok');
+      await refresh();
+    } catch (error) { toast(error.message, 'danger'); }
+  }
+
   async function renamePlate(row, title) {
     const name = title.trim();
     if (!name || name === row.title) return;
@@ -479,7 +535,7 @@
   }
   async function drawPreview() {
     clearTimeout(previewTimer);
-    if (!plate?.name || plate.template || !plate.caseId || exporting || playing) return;
+    if (!plate?.name || plate.template || !plate.caseId || exporting || plateExport.running || playing) return;
     previewOwed = false;
     const { name, caseId: owner } = plate;
     try {
@@ -587,6 +643,14 @@
   /** The play bar under the page: the plate's days, the day's steps; nothing on a plate that plays nothing. */
   const barShown = $derived(!!plate && !plate.template && (moments.length > 0 || daySteps.length > 0));
   const stepIndex = $derived(daySteps.findIndex((item) => item.id === stepId));
+  /** How long a played map flies to the next framing: the step's own transition, the plate's, or none for a step that cuts in. */
+  const glide = $derived.by(() => {
+    const moves = plate ? transitionsOf(plate.spec) : null;
+    if (!moves?.on || !moves.move) return 0;
+    const into = daySteps.find((item) => item.id === stepId);
+    if (into?.transition === 'none') return 0;
+    return ((into?.transition_seconds ?? moves.seconds) * 1000) / speed;
+  });
 
   function pickStep(id) {
     if (playing) stop();
@@ -602,6 +666,26 @@
     spec.time.step = made.step.id;
     selection = [];
     return made.step.id;
+  }
+  /** A ready sequence of steps after the one shown, the main map framed by each as it looks now, the transitions on. */
+  function addSequence(kind) {
+    if (playing) stop();
+    const main = mainMap(spec);
+    const made = withSequence(spec, at, kind, { map: main, view: main ? views[main.id]?.view ?? main.view : null, after: stepId ?? daySteps.at(-1)?.id ?? null });
+    if (!made) return;
+    Object.assign(spec, { steps: made.steps, framing: made.framing, elements: made.elements, transitions: made.transitions });
+    spec.time.step = made.step;
+    selection = [];
+    toast(`${SEQUENCES[kind].label} added: each step is renamed, timed or removed from its ⋯`, 'ok', 5000);
+  }
+  /** A copy of a step right after it, shown at once. */
+  function duplicateStep(id) {
+    if (playing) stop();
+    const made = duplicatedStep(spec, at, id);
+    if (!made) { toast(`A day holds ${MAX_STEPS} steps at most`, 'warn'); return; }
+    Object.assign(spec, { steps: made.steps, framing: made.framing, elements: made.elements });
+    spec.time.step = made.step;
+    selection = [];
   }
   function dropStep(id) {
     plate.spec = withoutStep(plate.spec, id);
@@ -703,9 +787,11 @@
     selection = [added.at(-1).id];
   }
 
+  const BLOCK_KINDS = new Set(BLOCK_ADDS.map(([kind]) => kind));
   function add(kind) {
     if (!spec) return;
     if (kind === 'step') { if (!plate.template) newStep(); return; }
+    if (SEQUENCES[kind]) { if (!plate.template) addSequence(kind); return; }
     const was = placing;
     placing = null;
     const main = mainMap(spec);
@@ -718,6 +804,12 @@
       return;
     }
     const { width, height } = pageSize(spec.page);
+    if (BLOCK_KINDS.has(kind)) {
+      const made = block(kind, { width, height, map: main?.box ?? null, theme: spec.theme, id: newId });
+      if (stepId) for (const element of made) Object.assign(element, bornAt(at, playable, stepId));
+      put(...made);
+      return;
+    }
     const of = main?.id;
     const needsMap = ['inset', 'legend', 'scale', 'north', 'credits', 'detail'].includes(kind);
     if (needsMap && !of) { toast('Put a map on the page first', 'warn'); return; }
@@ -767,6 +859,21 @@
     put(element);
   }
 
+  /** A text on the map: no leader, standing over its point at `page` (millimetres), moved with it. */
+  function textOnMap(of, point, page, text, name = text) {
+    const element = { id: newId('label'), kind: 'label', name, of, at: point.map((value) => Math.round(value * 1e6) / 1e6),
+      box: [page[0], page[1], 20, 6], text, size: 10, weight: 600, style: 'plain', leader: 'none', end: 'none', ...birth() };
+    const [, , w, h] = labelBox(element, measure);
+    element.box = [Math.round((page[0] - w / 2) * 10) / 10, Math.round((page[1] - h / 2) * 10) / 10, w, h];
+    return element;
+  }
+
+  /** A name of the ground, taken off it, written as the plate's own text on the map where it stood: it moves and restyles. */
+  function nameToLabel(map, text, point, page) {
+    const element = textOnMap(map.id, point, page, text);
+    put(element);
+  }
+
   /** What a press on a map placed, made into its element, on the plate's day when the plate is played. */
   function placed({ map, at: point, to, page, points }) {
     const kind = placing?.kind;
@@ -784,13 +891,8 @@
     let element;
     // words on the ground are given their size, so the plate saved and opened again writes them as it does now
     const size = (of) => ({ size: defaultSize(of) });
-    if (kind === 'label' && preset === 'note') {
-      // a text on the map: no leader, standing over its point, moved with it
-      element = { id: newId('label'), kind: 'label', name: 'Text on the map', of, at: point.map((value) => Math.round(value * 1e6) / 1e6),
-        box: [page[0], page[1], 20, 6], text: 'Text', size: 10, weight: 600, style: 'plain', leader: 'none', end: 'none', ...day };
-      const [, , w, h] = labelBox(element, measure);
-      element.box = [Math.round((page[0] - w / 2) * 10) / 10, Math.round((page[1] - h / 2) * 10) / 10, w, h];
-    } else if (kind === 'label') {
+    if (kind === 'label' && preset === 'note') element = textOnMap(of, point, page, 'Text', 'Text on the map');
+    else if (kind === 'label') {
       element = { id: newId('label'), kind: 'label', of, at: point.map((value) => Math.round(value * 1e6) / 1e6), box: [page[0] + 3, page[1] - 9, 28, 6],
         text: preset === 'number' ? 'What this number marks' : 'Label', size: 9, weight: 600, style: preset === 'number' ? 'number' : 'bubble', ...day };
       element.box = labelBox(element, measure);
@@ -867,9 +969,40 @@
   function restack(id, index) {
     spec.elements = restacked(spec.elements, listed, id, index);
   }
+  /** Another paper: a plate made from a ready plate is laid out again for it (`gallery.relaid`). */
   function paper(page) {
-    plate.spec = onPaper(plate.spec, page);
+    plate.spec = relaid(plate.spec, page);
   }
+  /**
+   * A new layer of the case for this map: drawn on it, and opened for editing in the
+   * Map where the map looks, so what lasts is drawn with the layer editor. The plate is
+   * saved first; Back comes back to it.
+   */
+  async function newLayerHere(map) {
+    const row = await addedLayers.createEditable(`${plate?.title || 'Plate'} layer`);
+    if (!row) return;
+    map.layers = [...(map.layers ?? []), { name: row.name, hidden: [], stroke: 1, icons: 1 }];
+    await autosave.flush();
+    // where the map shows the ground now, on the day or step shown
+    const view = views[map.id]?.view ?? map.view;
+    uiState.editLayer = { name: row.name, title: row.title, view: { lat: view.lat, lon: view.lon, zoom: view.zoom + 1 } };
+    uiState.tool = 'satellite';
+  }
+
+  /** What was drawn by hand on this map, made into a layer of the case it then draws in its place; Undo puts it back. */
+  async function keepDrawn(map) {
+    const title = `${plate?.title || 'Plate'}, drawn`;
+    const { geojson, used } = annotationsLayer(spec, map.id, title);
+    if (!used.length) return;
+    const file = new File([JSON.stringify(geojson)], `${title}.geojson`, { type: 'application/geo+json' });
+    const row = await addedLayers.importEditable(file, title);
+    if (!row) return;
+    spec.elements = spec.elements.filter((element) => !used.includes(element.id));
+    map.layers = [...(map.layers ?? []), { name: row.name, hidden: [], stroke: 1, icons: 1 }];
+    selection = [map.id];
+    toast(`Kept as the layer “${row.title}”`, 'ok');
+  }
+
   /** A look set at one press: the page, its face and colours, and every map's ground. */
   function applyTheme(id) {
     if (THEMES[id]) plate.spec = inLook(plate.spec, id);
@@ -957,7 +1090,8 @@
   }
 
   function keydown(event) {
-    if (uiState.tool !== 'plate' || !plate) return;
+    // the plate holds still while it is exported
+    if (uiState.tool !== 'plate' || !plate || plateExport.running) return;
     const typing = event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]');
     const ctrl = event.ctrlKey || event.metaKey;
     const key = event.key.toLowerCase();
@@ -1034,13 +1168,17 @@
   function featuresOf(names) {
     return names.flatMap((name) => addedLayers.collection(name)?.features ?? []);
   }
-  const credits = $derived.by(() => {
-    if (!spec) return {};
+  /** What the plate's maps draw from, for its credits. */
+  const creditSources = $derived.by(() => {
     const names = elements.filter((element) => element.kind === 'map').flatMap((map) => (map.layers ?? []).map((entry) => entry.name));
     const extra = [...new Set(featuresOf(names).map((feature) => feature.properties?.credit).filter(Boolean))];
-    const text = plateCredits(spec, { providers, rows, relief, releases, extra });
-    return Object.fromEntries(elements.filter((element) => element.kind === 'map').map((map) => [map.id, text]));
+    return { providers, rows, relief, releases, years, extra };
   });
+  /** Each credit the plate owes, `{ text, owed }`, for the credits box's inspector. */
+  const creditList = $derived(spec ? creditParts(spec, creditSources) : []);
+  /** The words of each credits box, by its id, but the credits taken off it. */
+  const credits = $derived(spec ? Object.fromEntries(elements.filter((element) => element.kind === 'credits')
+    .map((element) => [element.id, plateCredits(spec, creditSources, element.dropped ?? [])])) : {});
   const tables = $derived.by(() => {
     if (!spec) return {};
     const main = mainMap(spec);
@@ -1081,11 +1219,36 @@
     .map((row) => String(row.updated_at ?? '').slice(0, 10)).sort().at(-1) ?? '');
   const imagery = $derived.by(() => {
     const main = mainMap(spec);
+    if (main?.basemap === CLOUDLESS_ID) return cloudlessSaid(cloudlessYear(main, years));
+    if (main?.basemap === SENTINEL_ID) return passCredit(main);
     if (main?.basemap !== WAYBACK_ID) return '';
     return (releases.find((entry) => entry.release === main.release) ?? releases[0])?.date ?? '';
   });
+  /** Where the main map looks on the day or step shown: its middle, for `{coords}` and `{mgrs}`. */
+  const middle = $derived.by(() => {
+    const main = mainMap(spec);
+    return main ? views[main.id]?.view ?? main.view : null;
+  });
+  /** What the main map shows in its frame on the plate's day, as each feature stood then; read only when a text counts it. */
+  const counted = $derived.by(() => {
+    if (!spec || !elements.some((element) => String(element.text ?? '').includes('{count'))) return [];
+    const main = mainMap(spec);
+    const live = main ? views[main.id] : null;
+    if (!live?.view || !live.frame) return [];
+    const place = live.project ? (point) => live.project(point) : null;
+    return (main.layers ?? []).flatMap((entry) => {
+      const row = rows.find((item) => item.name === entry.name);
+      return (addedLayers.collection(entry.name)?.features ?? [])
+        .map((feature) => (row && isTracked(row) ? stateAt(feature, at ?? '￿') : feature))
+        .filter((feature) => feature && !(entry.hidden ?? []).includes(feature.properties?.category) && inFrame(feature.geometry, live.view, live.frame, 0, place));
+    });
+  });
   const tokens = $derived({ date: at, updated, imagery, caseName: caseState.current?.name ?? '', title: plate?.title ?? '',
-    scale: mainMap(spec)?.view ? scaleRatio(mainMap(spec).view, PX_PER_MM) : '', handle: prefs.signatureHandle ?? '' });
+    scale: mainMap(spec)?.view ? scaleRatio(mainMap(spec).view, PX_PER_MM) : '', handle: prefs.signatureHandle ?? '',
+    coords: middle ? formatCoords(middle.lat, middle.lon, prefs.coordFormat) : '',
+    mgrs: middle ? formatMGRS(middle.lat, middle.lon) : '',
+    from: playable ? moments[0] ?? '' : '', to: playable ? moments.at(-1) ?? '' : '',
+    count: (key) => countFeatures(counted, key) });
 
   // The pictures the page shows, each loaded once, and again when it changes.
   const sources = new Map();
@@ -1152,7 +1315,13 @@
     return canvas;
   }
 
-  const decor = $derived({ legend, credits, images, markerImage, iconsRead, tokens, imperial: prefs.units === 'imperial', numbered: numbers,
+  /** Natural Earth's countries for a globe inset or a country lit, read the first time a plate holds one (`globe2d.js`, `spotlight.js`). */
+  let world = $state.raw(null);
+  $effect(() => {
+    if (world || !elements.some((element) => (element.kind === 'inset' && element.globe) || element.spotlight?.country)) return;
+    import('../lib/plate/world.json').then((module) => { world = module.default; }, () => {});
+  });
+  const decor = $derived({ legend, credits, images, markerImage, iconsRead, tokens, world, imperial: prefs.units === 'imperial', numbered: numbers,
     numberOf: (id) => numbers.find((item) => item.id === id)?.number, tables, moments, dayLabel: momentLabel, refShown, place });
 
   // -- export --------------------------------------------------------------------------
@@ -1233,6 +1402,7 @@
     const name = filename || plate.title;
     const run = new AbortController();
     exportRun = run;
+    startExport(name, plate.caseId ?? caseId ?? '', () => run.abort());
     const check = () => { if (run.signal.aborted) throw stopped(); };
     framing = ''; selection = [];
     tilesMissing = 0;
@@ -1241,11 +1411,11 @@
     try {
       let answer;
       if (format === 'png' || format === 'pdf') {
-        progress = 'Drawing the page…';
+        exportSays('Drawing the page…');
         const scale = format === 'png' && pixels ? scaleForWidth(spec, pixels) : scaleFor(spec, QUALITIES[quality].dpi);
         const canvas = await render(scale, undefined, { transparent: format === 'png' && transparent });
         check();
-        progress = 'Writing…';
+        exportSays('Writing…');
         const page = await canvasBlob(canvas);
         release(canvas);
         answer = await postExport(caseId, { format, frames: [page], widthMm, heightMm, transparent: format === 'png' && transparent,
@@ -1259,11 +1429,11 @@
           const pages = [];
           for (const [index, day] of picked.entries()) {
             check();
-            progress = `Drawing ${momentLabel(day) || 'the page'} (${index + 1} of ${picked.length})…`;
+            exportSays(`Drawing ${momentLabel(day) || 'the page'} (${index + 1} of ${picked.length})…`, index, picked.length);
             pages.push(await render(scale, day));
           }
           check();
-          progress = 'Writing…';
+          exportSays('Writing…');
           const sheet = evolutionSheet(pages, picked.map((day) => momentLabel(day) || 'The page'), spec.theme);
           const drawn = await canvasBlob(sheet);
           release(sheet, ...pages);
@@ -1279,7 +1449,8 @@
           let before = null;
           for (const [index, beat] of list.entries()) {
             check();
-            progress = `Drawing ${momentLabel(beat.day) || 'the page'}${beat.step ? `, ${stepName(stepsOf(spec, beat.day).findIndex((item) => item.id === beat.step), beat.day)}` : ''} (${index + 1} of ${list.length})…`;
+            exportSays(`Drawing ${momentLabel(beat.day) || 'the page'}${beat.step ? `, ${stepName(stepsOf(spec, beat.day).findIndex((item) => item.id === beat.step), beat.day)}` : ''} (${index + 1} of ${list.length})…`,
+              index, list.length);
             const drawn = await drawBeat(scale, beat.day, { step: beat.step });
             await pictures.add('frames', await canvasBlob(drawn.canvas, 'image/jpeg', 0.9));
             // a transition is drawn from what the page was drawn from, never from the page itself
@@ -1287,13 +1458,13 @@
             let tween = null;
             if (before && moves.on) {
               const changed = changes(spec, before, drawn);
-              const cut = !!beat.step && stepsOf(spec, beat.day).find((item) => item.id === beat.step)?.transition === 'none';
-              const plan = transitionPlan(moves, changed, { cut });
+              const into = beat.step ? stepsOf(spec, beat.day).find((item) => item.id === beat.step) : null;
+              const plan = transitionPlan(moves, changed, { cut: into?.transition === 'none', seconds: into?.transition_seconds ?? null });
               if (plan && pictures.count('tweens') + plan.frames <= MAX_TWEENS) {
                 const start = pictures.count('tweens');
                 // a map on the move is drawn again by its own engine at each frame of the way
                 const sitting = (id) => handles.get(id)?.sitting?.(scale / PX_PER_MM) ?? null;
-                if (plan.move) progress = `Drawing the move to ${momentLabel(beat.day) || 'the next step'}…`;
+                if (plan.move) exportSays(`Drawing the move to ${momentLabel(beat.day) || 'the next step'}…`, index, list.length);
                 for await (const canvas of tweenFrames(spec, scale, before, drawn, plan, changed, { sitting })) {
                   check();
                   await pictures.add('tweens', await canvasBlob(canvas, 'image/jpeg', 0.88));
@@ -1319,7 +1490,7 @@
           }
           if (before) release(...Object.values(before.context.maps));
           check();
-          progress = format === 'mp4' && pictures.count('overs') ? 'Making the video, clips included…' : 'Writing…';
+          exportSays(format === 'mp4' && pictures.count('overs') ? 'Making the video, clips included…' : 'Writing…');
           // beats all held alike and nothing else to say go out as one interval; otherwise each beat says its own
           const held = sent[0]?.seconds ?? 1;
           const alike = !stepped && !pictures.count('tweens') && sent.every((beat) => beat.seconds === held) && held >= 0.15 && held <= 6;
@@ -1340,11 +1511,8 @@
       exportTime = null;
       exportStep = null;
       legendDays = null;
-      progress = '';
+      endExport();
     }
-  }
-  function stopExport() {
-    exportRun?.abort();
   }
 
   async function copyImage() {
@@ -1382,7 +1550,6 @@
     return [paper ? `${paper}${turned}` : '', longDay(String(row.updated_at ?? '').slice(0, 10))].filter(Boolean).join(' · ');
   }
   /** A template drawn as its page: each box in the colour of what it holds. */
-  const TINTS = { map: '#8fb2c9', inset: '#b8cbd8', legend: '#d9c8a5', text: '#5d6470', credits: '#a0a0a0', image: '#c2a5d9', scale: '#5d6470', north: '#5d6470' };
 </script>
 
 <svelte:window onkeydown={keydown} onpointerdowncapture={press} />
@@ -1444,8 +1611,8 @@
         {#key opened}
           <PlatePage spec={plate.spec} bind:selection bind:framing {placing} onplace={placed} caseId={plate.caseId ?? caseId ?? ''} {rows} {providers} {relief}
             {time} stepPlace={place} {playing} {speed} bind:views {decor} bind:overflow {grounds} ghosts={ghosts && playable}
-            {framingFor} onmapview={mapView} onkeep={keepFraming} beat={shownKey} {written}
-            glide={transitionsOf(plate.spec).on && transitionsOf(plate.spec).move ? (transitionsOf(plate.spec).seconds * 1000) / speed : 0}
+            {framingFor} onmapview={mapView} onkeep={keepFraming} beat={shownKey} {written} onnamelabel={nameToLabel}
+            {glide}
             onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} />
         {/key}
         {#if focus}
@@ -1488,12 +1655,12 @@
             {/if}
             <!-- the day itself and its steps, each tile saying how long it holds in the video -->
             <PlateSteps steps={daySteps} current={stepId} dayLabel={at ? momentLabel(at) : 'The page'} elements={plate.spec.elements}
-              transitions={transitionsOf(plate.spec).on} daySeconds={daySeconds(plate.spec, at)} dayOwn={!!plate.spec.holds?.[dayOf(at)]}
+              transitions={transitionsOf(plate.spec).on} transitionSeconds={transitionsOf(plate.spec).seconds} daySeconds={daySeconds(plate.spec, at)} dayOwn={!!plate.spec.holds?.[dayOf(at)]}
               plateSeconds={plateSeconds(plate.spec)} ondayhold={holdDay}
               {dayPlayed} dayPicked={(plate.spec.days ?? []).includes(dayOf(at))}
               onplayday={playable ? (on) => (spec.days = pickedDays(spec, dayOf(at), on)) : null}
               caseId={plate.caseId ?? caseId ?? ''} onpick={pickStep} onadd={newStep} onremove={dropStep} onchange={changeStep}
-              onmove={(id, index) => (spec.steps = movedStep(spec, at, id, index))} />
+              onmove={(id, index) => (spec.steps = movedStep(spec, at, id, index))} onduplicate={duplicateStep} />
           </div>
         {/if}
       </div>
@@ -1501,9 +1668,9 @@
       {#if inspectorShown}
         <div class="dock right" style:width="{layout.inspectorW}px" data-guide="plate.inspector">
           <PanelEdge bind:width={layout.inspectorW} helpers={inspectorWidth} side="left" label="Resize the inspector" />
-          <PlateInspector spec={plate.spec} {selection} caseId={plate.caseId ?? caseId ?? ''} {rows} {grounds} {releases} {legend} {framing} {at} moments={playable ? moments : []}
+          <PlateInspector bind:spec={plate.spec} {selection} caseId={plate.caseId ?? caseId ?? ''} {rows} {grounds} {releases} {years} {legend} {creditList} {framing} {at} moments={playable ? moments : []}
             {place} step={stepIndex >= 0 ? { id: stepId, name: stepName(stepIndex) } : null}
-            {overflow} {featurePictures} onpaper={paper} ontheme={applyTheme} onremove={removeElement} onduplicate={duplicate} onorder={restackBy} canorder={(element, by) => stepOf(listed, element.id, by) !== null} ongroup={group} onwayback={readReleases}
+            {overflow} {featurePictures} onpaper={paper} ontheme={applyTheme} onremove={removeElement} onduplicate={duplicate} onorder={restackBy} canorder={(element, by) => stepOf(listed, element.id, by) !== null} ongroup={group} onwayback={readReleases} onnewlayer={newLayerHere} onkeepdrawn={keepDrawn}
             {framingFor} onmapview={mapView} onkeep={keepFraming} plays={!plate.template && sequence.length > 1}
             onsymbol={(style) => (lastSymbol = { ...lastSymbol, ...style })}
             onframe={(element) => (framing = framing === element.id ? '' : element.id)} onlabels={labelFeatures}
@@ -1525,30 +1692,9 @@
             <h3>Map plates</h3>
             <p>A page laid out round the case's maps, exported as an image, a PDF or a video.</p>
           </div>
-          <button class="btn btn-primary" onclick={() => newPlate()}><Icon name="plus" size={15} /> New plate</button>
+          <button class="btn btn-primary" onclick={() => (creating = true)}><Icon name="plus" size={15} /> New plate</button>
         </div>
-        <p class="hint">A new plate opens on the ground the Map is looking at, with the layers switched on there.</p>
-        {#if templates.length}
-          <h4>From a template</h4>
-          <div class="tiles">
-            {#each templates as template (template.id)}
-              {@const size = pageSize(template.data?.page)}
-              <div class="tile template">
-                <button type="button" class="open" onclick={() => newPlate(template)} title="A new plate laid out as this template">
-                  <svg class="sketch" viewBox="0 0 {size.width} {size.height}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-                    <rect width={size.width} height={size.height} fill={template.data?.theme?.paper ?? '#ffffff'} />
-                    {#each template.data?.elements ?? [] as element (element.id)}
-                      <rect x={element.box[0]} y={element.box[1]} width={element.box[2]} height={element.box[3]}
-                        fill={TINTS[element.kind] ?? '#9aa3ad'} opacity={element.kind === 'text' ? 0.55 : 0.8} />
-                    {/each}
-                  </svg>
-                  <span class="name">{template.name}</span><span class="said">{PAPERS[template.data?.page?.paper]?.label.split(',')[0] ?? ''}</span></button>
-                <button type="button" class="more" aria-label={`Actions for ${template.name}`} title="More"
-                  onclick={(event) => (templateMenu = { template, anchor: event.currentTarget })}><Icon name="more" size={13} /></button>
-              </div>
-            {/each}
-          </div>
-        {/if}
+        <p class="hint">A plate opens where the Map is looking. A ready plate starts at once; New plate first asks for its layers, paper and look.</p>
         <h4>In this case</h4>
         {#if plates.length}
           <div class="tiles">
@@ -1564,9 +1710,47 @@
             {/each}
           </div>
         {:else}
-          <p class="empty-note">No plate yet.</p>
+          <p class="empty-note">No plate yet. Start from a ready plate below.</p>
         {/if}
+        {#if templates.length}
+          <h4>Your templates</h4>
+          <div class="tiles">
+            {#each templates as template (template.id)}
+              <div class="tile template">
+                <button type="button" class="open" onclick={() => newPlate(template)} title="A new plate laid out as this template">
+                  <span class="sketch"><TemplateSketch data={template.data} width={168} /></span>
+                  <span class="name">{template.name}</span><span class="said">{PAPERS[template.data?.page?.paper]?.label.split(',')[0] ?? ''}</span></button>
+                <button type="button" class="more" aria-label={`Actions for ${template.name}`} title="More"
+                  onclick={(event) => (templateMenu = { template, anchor: event.currentTarget })}><Icon name="more" size={13} /></button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        <h4>Ready plates</h4>
+        <div class="tiles">
+          {#each GALLERY as entry (entry.id)}
+            <div class="tile template">
+              <button type="button" class="open" onclick={() => makePlate({ from: { kind: 'ready', id: entry.id }, where: 'map', layers: mapLayers(), format: '', look: '' })}
+                title="A new plate from it, where the Map is looking">
+                <span class="sketch"><TemplateSketch data={readyTemplate(entry.id)} width={168} /></span>
+                <span class="name">{entry.name}</span><span class="said">{entry.note}</span></button>
+            </div>
+          {/each}
+        </div>
       </div>
+    </div>
+  {/if}
+  {#if plate && plateExport.running}
+    {@const share = exportShare(plateExport)}
+    <!-- the plate holds still while it is exported; the rest of the app does not -->
+    <div class="export-lock">
+      <div class="export-card" role="status">
+        <span class="pulse" aria-hidden="true"></span>
+        <div class="export-said"><b>Exporting {plateExport.name}</b><span>{plateExport.said || 'Starting…'}</span>
+          {#if share !== null}<span class="export-bar"><i style:width="{share}%"></i></span>{/if}</div>
+        <button type="button" class="btn btn-sm" title="Stop the export; nothing is written" onclick={stopExport}>Stop</button>
+      </div>
+      <p class="export-note">The plate holds still until it is written. Other tools can be used meanwhile.</p>
     </div>
   {/if}
 </div>
@@ -1575,10 +1759,21 @@
   <FloatingMenu anchor={menu.anchor} align="end" width={190} label="Plate actions" onclose={() => (menu = null)}>
     <button type="button" class="fm-item" onclick={() => { const row = menu.row; menu = null; open(row.name); }}><Icon name="edit" size={14} /><span class="fm-grow">Open</span></button>
     <button type="button" class="fm-item" onclick={() => { const row = menu.row; menu = null; duplicatePlate(row); }}><Icon name="copy" size={14} /><span class="fm-grow">Duplicate</span></button>
+    <div class="fm-sep"></div>
+    <div class="fm-head">Copy, laid out for</div>
+    {#each FORMATS as format (format[0])}
+      <button type="button" class="fm-item" title="A copy of the plate on this paper, laid out again for it"
+        onclick={() => { const row = menu.row; menu = null; copyFor(row, format); }}><span class="fm-grow">{format[1]}</span></button>
+    {/each}
+    <div class="fm-sep"></div>
     <button type="button" class="fm-item" onclick={() => { const row = menu.row; menu = null; renaming = { kind: 'plate', row, value: row.title }; }}><Icon name="text" size={14} /><span class="fm-grow">Rename…</span></button>
     <div class="fm-sep"></div>
     <button type="button" class="fm-item danger" onclick={() => { const row = menu.row; menu = null; remove(row); }}><Icon name="trash" size={14} /><span class="fm-grow">Move to the Trash</span></button>
   </FloatingMenu>
+{/if}
+
+{#if creating}
+  <NewPlateDialog {templates} {rows} layers={mapLayers()} onmake={makePlate} onclose={() => (creating = false)} />
 {/if}
 
 {#if templateMenu}
@@ -1592,9 +1787,9 @@
 {/if}
 
 {#if exporting}
-  <PlateExportDialog moments={playedDays} {stepped} {runtime} {progress} past={pastBox} name={plate?.title ?? 'Map plate'} preview={exportPreview} transparent={!!spec?.page?.transparent}
+  <PlateExportDialog moments={playedDays} {stepped} {runtime} past={pastBox} name={plate?.title ?? 'Map plate'} preview={exportPreview} transparent={!!spec?.page?.transparent}
     page={spec?.page} hold={spec ? plateSeconds(spec) : 1} onhold={holdPlate}
-    onexport={runExport} oncopy={copyImage} oncancel={stopExport} onclose={() => (exporting = false)} />
+    onexport={runExport} oncopy={copyImage} onclose={() => (exporting = false)} />
 {/if}
 
 {#if naming}
@@ -1622,7 +1817,19 @@
 {/if}
 
 <style>
-  .tool { display: flex; flex-direction: column; height: 100%; }
+  .tool { position: relative; display: flex; flex-direction: column; height: 100%; }
+  .export-lock { position: absolute; inset: 0; z-index: 40; display: grid; place-content: center; justify-items: center; gap: 8px;
+    background: color-mix(in srgb, var(--bg-0, #0d0f12) 45%, transparent); }
+  .export-card { display: flex; align-items: center; gap: 12px; min-width: 320px; max-width: 460px; padding: 12px 14px; border: 1px solid var(--border-strong);
+    border-radius: var(--r-lg); background: var(--bg-1); box-shadow: var(--shadow-2); }
+  .export-card .pulse { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: export-pulse 1.4s var(--ease) infinite; }
+  @keyframes export-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  @media (prefers-reduced-motion: reduce) { .export-card .pulse { animation: none; } }
+  .export-said { display: grid; gap: 3px; flex: 1; min-width: 0; color: var(--text-2); font-size: var(--fs-sm); }
+  .export-said b { overflow: hidden; color: var(--text-1); text-overflow: ellipsis; white-space: nowrap; }
+  .export-bar { display: block; height: 3px; border-radius: 2px; background: var(--bg-3); overflow: hidden; }
+  .export-bar i { display: block; height: 100%; background: var(--accent); transition: width .3s var(--ease); }
+  .export-note { margin: 0; padding: 3px 8px; border-radius: var(--r-sm); background: var(--bg-1); color: var(--text-3); font-size: var(--fs-xs); }
   .tool:fullscreen { background: var(--bg-0, #0d0f12); }
   .tool-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .title-input { width: 280px; }
@@ -1685,6 +1892,7 @@
   .open { display: flex; flex-direction: column; width: 100%; padding: 0; cursor: pointer; text-align: left; }
   /* the whole page shows, whatever its shape, on the tile's ground */
   .open img, .blank, .sketch { display: grid; place-items: center; width: 100%; aspect-ratio: 1.414; object-fit: contain; background: var(--bg-2); color: var(--text-3); }
+  .sketch :global(svg) { max-width: 88%; max-height: 88%; width: auto; box-shadow: 0 1px 4px rgba(0, 0, 0, .35); }
   .name { padding: 7px 9px 0; color: var(--text-1); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .said { padding: 1px 9px 7px; color: var(--text-3); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .more { position: absolute; top: 4px; right: 4px; display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--r-sm);

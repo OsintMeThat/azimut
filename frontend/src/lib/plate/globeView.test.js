@@ -33,6 +33,16 @@ describe('the ground the globe draws for a plate', () => {
     expect(globeGround('plain-topo', { intensity: 3 }).shade).toBe(1);
   });
 
+  it('draws a self-shaded ground with its own tints and shading, at its presence', () => {
+    const relief = globeGround('plain-relief');
+    expect(relief.tints).toBe(TINTS.relief);
+    expect(relief.shade).toBeCloseTo(0.88, 6);
+    expect(globeGround('plain-news').tints).toBe(null);
+    expect(globeGround('plain-news').shade).toBeCloseTo(0.72, 6);
+    // presence leaves the land's own colour as it is
+    expect(globeGround('plain-grey', { plain: { presence: 0.3 } }).colour).toBe(PALETTES.grey.ground);
+  });
+
   it('leaves imagery on the page’s own colour, which a faded picture shows through', () => {
     expect(globeGround('esri-world-imagery')).toEqual({ colour: PAGE_GROUND, shade: 0 });
   });

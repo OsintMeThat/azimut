@@ -579,8 +579,10 @@
   // On the globe a double click is two clicks while a layer is edited: corners, and a shape opened, not a zoom.
   $effect(() => {
     if (!editing) return;
-    engine.readClicks?.(true);
-    return () => engine.readClicks?.(false);
+    // the map it was asked of is the one given back: the prop may be gone by the time this is torn down
+    const map = engine;
+    map.readClicks?.(true);
+    return () => map.readClicks?.(false);
   });
   $effect(() => { if (!editing) featureMenu = null; });
 

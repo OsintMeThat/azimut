@@ -413,7 +413,7 @@ export const PAGES = {
       { anchor: 'plate.export', title: 'Export', text: 'A PNG, a PDF, or a video of the plate’s days.' },
     ],
     tips: [
-      { title: 'A new plate starts from the Map', text: 'It opens on the ground Satellite is looking at, with the layers switched on there.' },
+      { title: 'A new plate starts from the Map', text: 'A ready plate opens at once; New plate first picks its layout, layers, paper and look.' },
       { title: 'Days and steps', text: 'A tracked layer is drawn on the plate’s day, and the video plays through its days.' },
       { title: 'Templates', text: 'Keep as template saves the layout without its data, to start other plates from.' },
       { title: 'Texts that fill themselves', text: '{date}, {case}, {title}, {scale} and {imagery} are written in when the page is drawn.' },

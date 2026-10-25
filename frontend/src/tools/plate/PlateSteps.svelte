@@ -4,7 +4,7 @@
    * first, then each step in the order it is played. A press shows one; what is added then
    * belongs to it. **+** adds a step after the one shown. A step is dragged to
    * another place, and its ⋯, always in sight, names it, sets how long it holds, cuts straight into it
-   * when the video's transitions are on, or removes it with what stands on it.
+   * when the video's transitions are on, duplicates it, or removes it with what stands on it.
    *
    * A day the play does not go through (no layer changes on it, no steps) says so, and a
    * press on it adds it to the play; its ⋯ lets a day added that way go again.
@@ -37,12 +37,16 @@
     onremove,
     /** `(id, index)`: the step moved to that place. */
     onmove,
+    /** `(id)`: a copy of the step played right after it. */
+    onduplicate = null,
     /** `(id, patch)`: the step renamed, held longer, or cut straight into. */
     onchange,
     /** `(seconds)`: the day held its own seconds, or the plate's again with null. */
     ondayhold = null,
-    /** The video's transitions are on, so a step can do without its own. */
+    /** The video's transitions are on, so a step can do without its own or take its own time. */
     transitions = false,
+    /** How long the plate's transitions last, which a step takes unless it says otherwise. */
+    transitionSeconds = 0.8,
     /** Whether the play goes through the day shown, and whether it does because it was added to it. */
     dayPlayed = true,
     dayPicked = false,
@@ -74,6 +78,11 @@
     await tick();
     secondsField?.focus();
     secondsField?.select();
+  }
+  /** A step's own transition time from its field: 0.2 to 3 seconds, or none to follow the plate's. */
+  function transitionOf(value) {
+    const seconds = Number.parseFloat(value);
+    return Number.isFinite(seconds) ? Math.round(Math.min(3, Math.max(0.2, seconds)) * 10) / 10 : null;
   }
   function setStepSeconds(step, value) {
     const bound = boundSeconds(value);
@@ -180,6 +189,11 @@
       {#if transitions}
         <label class="cut" title="This step comes in at once, without the plate's transition"><input type="checkbox" checked={menu?.step.transition === 'none'}
           onchange={(event) => onchange?.(menu?.step.id, { transition: event.currentTarget.checked ? 'none' : '' })} /> Cut straight in, no transition</label>
+        {#if menu?.step.transition !== 'none'}
+          <label title="How long the video takes to come to this step; empty, as long as the plate's transitions">Transition, seconds
+            <input class="input" type="number" min="0.2" max="3" step="0.1" placeholder={String(transitionSeconds)} value={menu?.step.transition_seconds ?? ''}
+              onchange={(event) => onchange?.(menu?.step.id, { transition_seconds: transitionOf(event.currentTarget.value) })} /></label>
+        {/if}
       {/if}
     </div>
     <div class="fm-sep"></div>
@@ -187,6 +201,10 @@
       <Icon name="chevronLeft" size={14} /><span class="fm-grow">Play it earlier</span></button>
     <button type="button" class="fm-item" disabled={menu?.index === steps.length - 1} onclick={() => { const { step, index } = menu; menu = null; onmove?.(step.id, index + 2); }}>
       <Icon name="chevronRight" size={14} /><span class="fm-grow">Play it later</span></button>
+    {#if onduplicate}
+      <button type="button" class="fm-item" title="A copy of the step, with what stands on it and its framing, played right after it"
+        onclick={() => { const { step } = menu; menu = null; onduplicate(step.id); }}><Icon name="copy" size={14} /><span class="fm-grow">Duplicate</span></button>
+    {/if}
     <div class="fm-sep"></div>
     <button type="button" class="fm-item danger" onclick={() => { const { step } = menu; menu = null; onremove?.(step.id); }}>
       <Icon name="trash" size={14} /><span class="fm-grow">{menu?.step && owned(menu.step) ? `Remove it and its ${owned(menu.step) === 1 ? 'element' : `${owned(menu.step)} elements`}` : 'Remove it'}</span></button>

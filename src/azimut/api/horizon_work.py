@@ -16,7 +16,9 @@ from pydantic import BaseModel, Field
 from ..engine import horizon_work, terrain
 from ..workspace import CaseError
 from .cases import get_case
-from .horizon_finds import ALIGNMENTS_MAX, AREA_CORNERS_MAX, ZONES_MAX, Direction, Stand, View, WhoIn
+from .horizon_finds import (
+    ALIGNMENTS_MAX, AREA_CORNERS_MAX, AREAS_MAX, STROKES_MAX, ZONES_MAX, Direction, Stand, StrokeIn, View, WhoIn,
+)
 from .horizon_views import Photo, PhotoPoint, ViewSpec, _photo_here
 
 router = APIRouter(prefix="/api", tags=["horizon"])
@@ -54,12 +56,22 @@ class AlignmentWork(BaseModel):
     heights: Heights = Field(default_factory=Heights)
 
 
+#: A grid as Find offers it (state/find.svelte.js SPACINGS), metres between points.
+Spacing = Literal["auto", 20, 50, 100, 250, 500, 1000]
+
+
 class ZoneWork(BaseModel):
     """A zone beside the area as Find holds it: its corners, its grid, and whether it is left out."""
 
     points: list[MapPoint] = Field(default_factory=list, max_length=AREA_CORNERS_MAX)
-    spacing: Literal["auto", 100, 250, 500, 1000] = "auto"
+    spacing: Spacing = "auto"
     out: bool = False
+
+
+class AreaWork(BaseModel):
+    """An area searched with the first as Find holds it: its corners."""
+
+    points: list[MapPoint] = Field(default_factory=list, max_length=AREA_CORNERS_MAX)
 
 
 class SunWork(BaseModel):
@@ -77,9 +89,11 @@ class FindWork(BaseModel):
     area: list[MapPoint] = Field(default_factory=list, max_length=AREA_CORNERS_MAX)
     alignments: list[AlignmentWork] = Field(default_factory=list, max_length=ALIGNMENTS_MAX)
     who: WhoIn = Field(default_factory=WhoIn)
-    spacing: Literal["auto", 100, 250, 500, 1000] = "auto"
+    spacing: Spacing = "auto"
     tolerance: float = Field(default=1.0, gt=0, le=10)
-    speed: Literal["gentle", "fast"] = "fast"
+    speed: Literal["gentle", "fast", "fastest"] = "fast"
+    #: How thorough Auto's grid is against the time it takes.
+    effort: Literal["quick", "normal", "thorough"] = "normal"
     #: The compass directions the photo may face, none for any.
     facing: list[Direction] = Field(default_factory=list, max_length=8)
     #: The ground the eye may stand on, none for any.
@@ -88,7 +102,16 @@ class FindWork(BaseModel):
     view: list[View] = Field(default_factory=list, max_length=2)
     #: A selfie, searched mirrored too.
     mirror: bool = False
+    #: Near lines judged rounded where the relief is coarse.
+    round: bool = False
+    #: Water the photo shows, the sea or the sea or a lake (`True`, as an older setup said it); the eye stands
+    #: above the land round it, or below.
+    water: Literal["sea", "lake"] | bool = False
+    over: Literal["above", "below"] | None = None
     zones: list[ZoneWork] = Field(default_factory=list, max_length=ZONES_MAX)
+    #: More areas searched with the first, and the brush's strokes in the order painted.
+    areas: list[AreaWork] = Field(default_factory=list, max_length=AREAS_MAX)
+    strokes: list[StrokeIn] = Field(default_factory=list, max_length=STROKES_MAX)
     #: Where the sun stood against the camera, as Find holds it (its day may be blank while typed).
     sun: SunWork | None = None
     search: str | None = Field(default=None, max_length=200)

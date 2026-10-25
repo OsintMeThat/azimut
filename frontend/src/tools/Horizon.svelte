@@ -54,7 +54,7 @@
   import { shareView } from '../lib/map/sharedView.js';
   import { formatDistance } from '../lib/measure.js';
   import { seenLens } from '../lib/horizon/camera.js';
-  import { bearingBetween, elsewhere, faceTowards, footprint, groundPoint } from '../lib/horizon/geometry.js';
+  import { bearingBetween, distanceBetween, elsewhere, faceTowards, footprint, groundPoint } from '../lib/horizon/geometry.js';
   import { inspectorWidth, mapHeightFor } from '../lib/horizon/inspector.js';
   import { HZ } from '../lib/horizon/marks.js';
   import { pieceOf, sameCuts, skySamples } from '../lib/horizon/traceMarks.js';
@@ -421,6 +421,7 @@
 
   function leaveView() {
     discarding = null;
+    fromFind = null;
     overlay.remove();
     views.fresh();
     viewTitle = '';
@@ -1323,11 +1324,73 @@
   }
 
   /**
+   * The place of Find's search looked from, `{ search, place, confirmed, view }`: the view offers to confirm
+   * it while the eye stands near it, which keeps the view and stops the search.
+   */
+  let fromFind = $state(null);
+  /** The eye stands this near the place looked from, metres, for it to be the one confirmed. */
+  const FOUND_NEAR_M = 2_000;
+  const offerFound = $derived(
+    Boolean(fromFind && mode === 'overlay' && layout === 'looking' && overlay.source && view.observer && distanceBetween(view.observer, fromFind.place) <= FOUND_NEAR_M)
+  );
+  let confirming = $state(false);
+
+  /**
+   * The place looked from confirmed: the view kept in the case as it stands (another than one opened before),
+   * then kept on the search as its `found`, where the eye stands and how it looks, which stops it.
+   */
+  async function confirmPlace() {
+    const from = fromFind;
+    const caseId = caseState.current?.id;
+    if (!from || confirming || !caseId || !view.observer) return;
+    confirming = true;
+    try {
+      if (views.current && views.current.name !== from.view) {
+        views.fresh();
+        viewTitle = '';
+      }
+      const kept = views.current && !unsaved ? views.current : await views.save(viewTitle);
+      if (!kept) return;
+      const eye = view.observer;
+      const look = view.camera;
+      await finder.confirm({
+        search: from.search,
+        lat: eye.lat,
+        lon: eye.lon,
+        height: eye.height,
+        heading: (((look.heading ?? 0) % 360) + 360) % 360,
+        tilt: look.tilt,
+        roll: look.roll,
+        fov: look.fov,
+        explained: Math.max(-1, Math.min(1, from.place.explained ?? 0)),
+        view: kept.name,
+      });
+      fromFind = { ...from, confirmed: true, view: kept.name };
+      toast(`Place confirmed, kept as the view ${kept.title ?? kept.name}`, 'ok');
+    } catch (failure) {
+      toast(failure.message || 'The place could not be confirmed', 'danger');
+    } finally {
+      confirming = false;
+    }
+  }
+
+  /** Look again from the place confirmed: the view kept of it, else from where it stood. */
+  function lookFromFound(found) {
+    if (found.view && views.list.some((one) => one.name === found.view)) {
+      fromFind = { search: finder.search?.name ?? null, place: found, confirmed: true, view: found.view };
+      openView(found.view);
+      return;
+    }
+    lookFromPlace(found);
+  }
+
+  /**
    * Look from a place the search found, the view turned and the lens set as it
    * found them. A collage the search read frame by frame is laid as the
    * panorama it spans, its middle where the frames say it faces.
    */
   function lookFromPlace(place) {
+    fromFind = { search: finder.search?.name ?? null, place, confirmed: Boolean(finder.search?.found && place === finder.search.found), view: null };
     mode = 'overlay';
     view.standAt(place, { mode: finder.who.mode, height: place.height ?? finder.who.low });
     const framed = place.frames ?? finder.search?.result?.frames;
@@ -1746,6 +1809,24 @@
               onclose={() => (side = null)}
             />
           {/if}
+          {#if offerFound}
+            <div class="hz-found" class:confirmed={fromFind.confirmed} role="group" aria-label="A place from the search">
+              {#if fromFind.confirmed}
+                <Icon name="check" size={14} />
+                <span>Place confirmed{fromFind.view ? `, kept as the view ${fromFind.view}` : ''}</span>
+              {:else}
+                <span>From the search{Number.isFinite(fromFind.place.explained) ? `, explains ${Math.round(Math.max(0, fromFind.place.explained) * 100)}%` : ''}. Is it the place?</span>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-primary"
+                  disabled={confirming || Boolean(saveBlocked)}
+                  title={saveBlocked || 'Keep this view in the case and the place on the search, which stops it'}
+                  onclick={confirmPlace}><Icon name="check" size={13} />This is the place</button
+                >
+              {/if}
+              <button type="button" class="btn btn-sm btn-ghost" onclick={() => pickMode('find')}>Back to Find</button>
+            </div>
+          {/if}
           {#if dropping}
             <div class="drop" aria-hidden="true">
               <p>Drop to lay it over the view{caseState.current ? ': it is added to the case' : ''}</p>
@@ -1987,6 +2068,7 @@
       onstand={standFromFind}
       onsearch={searchFromFind}
       onplace={lookFromPlace}
+      onfound={lookFromFound}
       caseOpen={Boolean(caseState.current)}
       onopensearch={openSearch}
       onremovesearch={removeSearch}
@@ -2002,6 +2084,11 @@
     onpick={layCase}
     onfile={layFile}
     onclose={() => (photoDialog = false)}
+    searches={mode === 'find' && caseState.current ? finder.list : null}
+    onopensearch={(name) => {
+      photoDialog = false;
+      openSearch(name);
+    }}
   />
 {/if}
 
@@ -2177,6 +2264,33 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
+  }
+  /* the place of the search looked from, to confirm: low over the view, out of the photo's way */
+  .hz-found {
+    position: absolute;
+    left: 50%;
+    bottom: 14px;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: max-content;
+    max-width: calc(100% - 24px);
+    padding: 5px 6px 5px 12px;
+    border-radius: var(--r-md);
+    transform: translateX(-50%);
+    background: var(--hz-glass);
+    box-shadow:
+      0 0 0 1px var(--accent),
+      0 4px 14px rgba(0, 0, 0, 0.35);
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+  }
+  .hz-found.confirmed {
+    box-shadow:
+      0 0 0 1px var(--ok),
+      0 4px 14px rgba(0, 0, 0, 0.35);
+    color: var(--ok);
   }
   .frame-slot {
     position: relative;

@@ -7,7 +7,7 @@ import zipfile
 
 import pytest
 
-from azimut.engine import layerediting
+from azimut.engine import layerediting, maplayers
 from azimut.workspace import Case
 from mediafixture import _png_bytes, _upload
 
@@ -468,7 +468,7 @@ def test_a_kmz_stamps_the_day_on_the_placemark(client, owner):
 
 def test_the_case_names_its_colours_and_the_map_reads_the_names(client, owner):
     url = f"/api/cases/{owner}/layer-palette"
-    assert client.get(url).json() == {"colours": []}
+    assert client.get(url).json() == {"colours": [], "icons": []}
     saved = client.put(url, json={"colours": [{"name": "Side A", "colour": "#0072B2"}, {"name": "Side B", "colour": "#d55e00"}]})
     assert saved.status_code == 200, saved.text
     assert saved.json()["colours"][0] == {"name": "Side A", "colour": "#0072b2"}
@@ -498,13 +498,62 @@ def test_a_palette_that_names_ambiguously_is_refused(client, owner, colours):
     assert client.get(url).json()["colours"] == [{"name": "Kept", "colour": "#009e73"}]
 
 
-def test_the_named_colours_travel_with_the_case_bundle(client, owner):
+def test_the_named_colours_and_icons_travel_with_the_case_bundle(client, owner):
     from azimut.engine import bundles
 
-    client.put(f"/api/cases/{owner}/layer-palette", json={"colours": [{"name": "Side A", "colour": "#0072b2"}]})
+    client.put(f"/api/cases/{owner}/layer-palette", json={"colours": [{"name": "Side A", "colour": "#0072b2"}],
+                                                          "icons": [{"name": "Strike", "key": "badge-explosion"}]})
     destination = Case.create(bundles.imported_name("Palette travels"))
     imported = Case.open(bundles.import_into(destination, bundles.export_case(Case.open(owner)))["case_id"])
-    assert client.get(f"/api/cases/{imported.id}/layer-palette").json()["colours"] == [{"name": "Side A", "colour": "#0072b2"}]
+    assert client.get(f"/api/cases/{imported.id}/layer-palette").json() == {
+        "colours": [{"name": "Side A", "colour": "#0072b2"}], "icons": [{"name": "Strike", "key": "badge-explosion"}]}
+
+
+def test_the_case_names_its_icons_and_the_map_counts_and_reads_them(client, owner):
+    url = f"/api/cases/{owner}/layer-palette"
+    row = create(client, owner)
+    marker(client, owner, row, symbol="badge-explosion")
+    marker(client, owner, row, symbol="badge-explosion")
+    marker(client, owner, row, symbol="flag")
+    line(client, owner, row, [[2.35, 48.85], [2.36, 48.86]])
+    listed = next(one for one in client.get(f"/api/cases/{owner}/map-layers").json() if one["name"] == row["name"])
+    # markers only, by the icon they wear
+    assert listed["symbols"] == {"badge-explosion": 2, "flag": 1}
+    assert "icon_meaning" not in client.get(f"{url_of(owner, row)}/data").json()["features"][0]["properties"]
+    saved = client.put(url, json={"colours": [], "icons": [{"name": "Strike", "key": "badge-explosion"}]})
+    assert saved.status_code == 200, saved.text
+    assert saved.json() == {"colours": [], "icons": [{"name": "Strike", "key": "badge-explosion"}]}
+    # a save that leaves the icons out keeps their names
+    client.put(url, json={"colours": [{"name": "Side A", "colour": "#0072b2"}]})
+    assert client.get(url).json()["icons"] == [{"name": "Strike", "key": "badge-explosion"}]
+    # a drawing already cached reads the new name
+    drawn = client.get(f"{url_of(owner, row)}/data").json()["features"]
+    assert sorted(feature["properties"].get("icon_meaning") or "" for feature in drawn) == ["", "", "Strike", "Strike"]
+
+
+def test_a_layer_saved_before_icons_were_counted_counts_them_when_listed(client, owner):
+    row = create(client, owner)
+    marker(client, owner, row, symbol="flag")
+    spec = maplayers._read_spec(Case.open(owner), row["name"])
+    spec["summary"].pop("symbols")
+    maplayers._write_spec(Case.open(owner), row["name"], spec)
+    listed = next(one for one in client.get(f"/api/cases/{owner}/map-layers").json() if one["name"] == row["name"])
+    assert listed["symbols"] == {"flag": 1}
+
+
+@pytest.mark.parametrize("body", [
+    {"colours": [], "icons": [{"name": "A", "key": "not-a-badge"}]},
+    {"colours": [], "icons": [{"name": "A", "key": "flag"}, {"name": "B", "key": "flag"}]},
+    {"colours": [], "icons": [{"name": "Same", "key": "flag"}, {"name": "same", "key": "pin"}]},
+    # a good icon list does not save past a bad colour, nor the other way round
+    {"colours": [{"name": "A", "colour": "blue"}], "icons": [{"name": "New", "key": "flag"}]},
+    {"colours": [{"name": "New", "colour": "#d55e00"}], "icons": [{"name": "A", "key": "../x"}]},
+])
+def test_icon_names_that_name_ambiguously_are_refused_and_nothing_is_kept(client, owner, body):
+    url = f"/api/cases/{owner}/layer-palette"
+    client.put(url, json={"colours": [{"name": "Kept", "colour": "#009e73"}], "icons": [{"name": "Held", "key": "pin"}]})
+    assert client.put(url, json=body).status_code == 422
+    assert client.get(url).json() == {"colours": [{"name": "Kept", "colour": "#009e73"}], "icons": [{"name": "Held", "key": "pin"}]}
 
 
 def test_a_point_added_from_the_case_says_what_state_it_shows(client, owner):

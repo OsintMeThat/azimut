@@ -60,6 +60,9 @@ it('says what a pick will restyle, and shows a line by its colour alone', () => 
   open();
   expect(document.body.textContent).toContain('restyles the whole group');
   expect(document.querySelector('[aria-label="Marker find icon"]')).toBeNull();
+  // the picker and the code wait behind "+"
+  expect(document.querySelector('[aria-label="Marker colour"]')).toBeNull();
+  document.querySelector('[aria-label="More colours"]').click(); flushSync();
   expect(document.querySelector('[aria-label="Marker colour"]')).toBeTruthy();
 });
 

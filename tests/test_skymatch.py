@@ -664,3 +664,74 @@ def test_a_turn_places_azimuths_as_remainder_does_to_the_bit():
                     np.array([np.nan, 10.0])):
         plain = np.remainder(azimuth - 0.25, 360.0) / 0.5
         assert np.array_equal(turn.place(azimuth).view(np.int64), plain.view(np.int64))
+
+
+@pytest.mark.parametrize("fov, step, sure", [(9.0, 0.1, False), (40.0, 0.25, True), (120.0, 0.5, False)])
+def test_a_cut_slid_after_another_gives_what_its_own_slide_gives(fov, step, sure, monkeypatch):
+    """A cut's slide takes the cut before's numbers where its trace reads no column the two tell apart: every
+    heading's cost, tilt and roll are the very ones a slide of its own gives, to the bit."""
+    rng = np.random.default_rng(int(fov))
+    count = int(round(360.0 / step))
+    angles = rng.normal(1.0, 1.0, count)
+    angles[rng.random(count) < 0.03] = np.nan
+    distance = rng.uniform(500.0, 5_000.0, count)
+    near = skymatch.Turn(0.0, step, angles, reach=5_000.0, distance=distance)
+    # the farther cut: ridges past the nearer one rise over it across a few stretches
+    farther, far_distance = angles.copy(), distance.copy()
+    for start in rng.integers(0, count, 4):
+        stretch = (start + np.arange(count // 40)) % count
+        farther[stretch] += rng.uniform(0.1, 0.5, stretch.size)
+        far_distance[stretch] = rng.uniform(5_000.0, 20_000.0, stretch.size)
+    far = skymatch.Turn(0.0, step, farther, reach=20_000.0, distance=far_distance)
+    x = np.linspace(-0.9, 0.9, 80)
+    y = 0.05 * np.sin(5 * x)
+    marked = rng.random(80) < 0.3 if sure else None
+    bands = (np.full(80, 300.0), np.full(80, 15_000.0))
+    seen = skymatch._through(x, y, fov, 0.0, 0.0, HALF, twist=True, bands=bands, sure=marked)
+    tops = skymatch._tops([near, far]) if sure else [None, None]
+    headings = skymatch._headings(max(skymatch._step(fov), skymatch.COARSE_MIN, step), None)
+    first = skymatch._slide(seen, near, headings, (-10.0, 10.0), tops[0])
+    alone = skymatch._slide(seen, far, headings, (-10.0, 10.0), tops[1])
+    slid = []
+    slide = skymatch._slide
+    monkeypatch.setattr(skymatch, "_slide", lambda seen, turn, some, *rest: slid.append(some.size) or slide(seen, turn, some, *rest))
+    after = skymatch._slide_after(seen, far, headings, (-10.0, 10.0), tops[1], (near, tops[0], headings, first))
+    for a, b in zip(after, alone):
+        assert np.array_equal(a.view(np.int64), b.view(np.int64))
+    assert not np.array_equal(first[0], alone[0])
+    # a narrow lens slides again only the headings near the stretches the cuts tell apart
+    if fov < 20.0:
+        assert sum(slid) < headings.size / 2
+
+
+def test_a_lens_keeps_the_places_the_row_by_row_spread_kept():
+    """Each lens's few places apart are picked off arrays (`_places`): the very rows, in the same order, that
+    spreading out the cheapest headings one row at a time keeps."""
+    rng = np.random.default_rng(5)
+    for count, apart, most in ((720, 36.0, 6), (3600, 5.0, 6), (300, 73.5, 6), (720, 5.0, 1), (50, 200.0, 6)):
+        headings = np.arange(0.0, 360.0, 360.0 / count)
+        cost = rng.random(count).round(2)
+        cost[rng.random(count) < 0.2] = np.inf
+        rows = [(float(cost[i]), float(headings[i]), 0.0, 0.0, 0, 0.0)
+                for i in skymatch._cheapest(cost, count) if np.isfinite(cost[i])]
+        spread = skymatch._spread_out(rows, apart, most)
+        picked = skymatch._places(cost, headings, apart, most)
+        assert [(float(cost[i]), float(headings[i])) for i in picked] == [(c, h) for c, h, *_ in spread]
+    assert skymatch._places(np.full(10, np.inf), np.arange(10.0), 5.0, 6).size == 0
+
+
+def test_a_turn_reads_between_its_columns_as_it_always_has():
+    """A read starts from each column pair laid ready, a hole's neighbour standing for both: the very numbers
+    the interpolation with its holes patched after gives, to the bit."""
+    rng = np.random.default_rng(8)
+    angles = rng.normal(2.0, 1.0, 720)
+    angles[rng.random(720) < 0.1] = np.nan
+    angles[100:103] = np.nan
+    turn = skymatch.Turn(0.0, 0.5, angles)
+    place = np.concatenate([rng.uniform(0.0, 720.0, 50_000), [0.0, 719.0, 719.999, 720.0, 100.5, 101.0]])
+    below = np.floor(place)
+    i0 = np.minimum(below.astype(np.int64), 719)
+    ring = np.append(angles, angles[:1])
+    a, b = ring[i0], ring[i0 + 1]
+    plain = np.where(np.isnan(b), a, np.where(np.isnan(a), b, a + (b - a) * (place - below)))
+    assert np.array_equal(turn.at_place(place).view(np.int64), plain.view(np.int64))

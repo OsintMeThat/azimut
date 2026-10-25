@@ -266,6 +266,15 @@ describe('the map façade keeps the engine on its own side', () => {
     expect(map.calls.panBy).toEqual([[[3, -7], { duration: 0 }]]);
   });
 
+  it('holds the drag pan while the hand paints on the map, and gives it back', () => {
+    const said = [];
+    const map = stubMap({ dragPan: { enable: () => said.push('on'), disable: () => said.push('off') } });
+    const facade = mapFacade(map);
+    facade.setPanning(false);
+    facade.setPanning(true);
+    expect(said).toEqual(['off', 'on']);
+  });
+
   it('re-reads the container on request', () => {
     const map = stubMap();
     mapFacade(map).resize();

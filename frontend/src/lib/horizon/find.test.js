@@ -9,6 +9,7 @@ import {
   areaPoints,
   areaProblem,
   areaText,
+  bestSoFar,
   chanceFit,
   cleanFacing,
   cleanStands,
@@ -23,7 +24,10 @@ import {
   fromLocal,
   groundText,
   HEAT_RAMP,
+  heatFloor,
   heatOf,
+  latticeNear,
+  mapCells,
   heatStyle,
   overText,
   inArea,
@@ -33,6 +37,8 @@ import {
   onAlignment,
   photoOffset,
   reliability,
+  resultOf,
+  ruledText,
   sameAsk,
   searchedReach,
   ringsOf,
@@ -47,7 +53,7 @@ import {
   lookingOf,
   traceSpan,
 } from './find.js';
-import { destination, haversine } from '../measure.js';
+import { containsPoint, destination, haversine } from '../measure.js';
 import { bearingBetween } from './geometry.js';
 
 const CAMERA = { lat: 16.9988, lon: 45.0938 };
@@ -179,6 +185,67 @@ describe('alignments crossing', () => {
 });
 
 describe('the heatmap', () => {
+  it('shows the grid before the search, while it runs and once the setup changed, the scores once it is done', () => {
+    const previewed = { points: [[46.5, 7.8, 'slope', true]] };
+    const scored = { status: 'done', result: { points: [{ lat: 46.5, lon: 7.8, explained: 0.4 }] } };
+    expect(mapCells({ previewed })).toEqual({ kind: 'grid', points: previewed.points });
+    expect(mapCells({ search: { status: 'running', result: null }, edited: false, previewed }).kind).toBe('grid');
+    expect(mapCells({ search: scored, edited: false, previewed })).toEqual({ kind: 'scores', points: scored.result.points });
+    expect(mapCells({ search: scored, edited: true, previewed }).kind).toBe('grid');
+    // a search that scored nothing leaves the grid on the map
+    expect(mapCells({ search: { status: 'done', result: { points: [] } }, edited: false, previewed }).kind).toBe('grid');
+    expect(mapCells({ drawing: 'area', previewed }).points).toEqual([]);
+    // while it runs, the points scored so far over the grid; stopped, what it had found
+    const live = [{ lat: 46.5, lon: 7.8, explained: 0.3 }];
+    expect(mapCells({ search: { status: 'running', result: null }, previewed, live })).toEqual({ kind: 'live', points: previewed.points, scored: live });
+    const stopped = { status: 'cancelled', result: { partial: true, points: live } };
+    expect(mapCells({ search: stopped, edited: false, previewed })).toEqual({ kind: 'scores', points: live });
+    expect(resultOf(stopped)).toBe(stopped.result);
+    expect(resultOf({ status: 'running', result: null })).toBeNull();
+  });
+
+  it('says what the photo rules out of the grid, a line for each reason', () => {
+    expect(ruledText({ total: 200, ruled: { nosea: 150, high: 1 } })).toEqual([
+      'No sea within its horizon: 150 points left out (75%)',
+      'Higher than the land round it: 1 point left out (1%)',
+    ]);
+    expect(ruledText({ total: 200, ruled: {} })).toEqual([]);
+    expect(ruledText(null)).toEqual([]);
+    // what is said of the photo is part of what a search was asked
+    expect(sameAsk({ area: [], water: true }, { area: [] })).toBe(false);
+    expect(sameAsk({ area: [], over: 'above' }, { area: [], over: 'above' })).toBe(true);
+  });
+
+  it('lays the points the brush paints in where the app’s grid lays them, the area’s own lattice held', () => {
+    // as engine/finder.py lays a 250 m grid over a stroke 400 m wide painted in south of the area (its points, rounded)
+    const area = [[-4.08, 28.67], [-4.086, 28.748], [-4.142, 28.74], [-4.138, 28.662]].map(([lat, lon]) => ({ lat, lon }));
+    const app = [[-4.16227, 28.717212], [-4.16227, 28.719972], [-4.16227, 28.722733], [-4.159885, 28.713071], [-4.159885, 28.715832], [-4.159885, 28.718592], [-4.159885, 28.721353], [-4.1575, 28.70893], [-4.1575, 28.711691], [-4.1575, 28.714451], [-4.1575, 28.717212], [-4.1575, 28.719972], [-4.155116, 28.704789], [-4.155116, 28.70755], [-4.155116, 28.71031], [-4.155116, 28.713071], [-4.155116, 28.715832], [-4.152731, 28.697888], [-4.152731, 28.700648], [-4.152731, 28.703409], [-4.152731, 28.706169], [-4.152731, 28.70893], [-4.152731, 28.711691], [-4.150346, 28.696507], [-4.150346, 28.699268], [-4.150346, 28.702029], [-4.150346, 28.704789], [-4.150346, 28.70755], [-4.147962, 28.697888], [-4.147962, 28.700648], [-4.147962, 28.703409]];
+    const painted = latticeNear(area, 250, { lat: -4.15, lon: 28.72 - 0.02 }, { lat: -4.16, lon: 28.72 }, 400);
+    const beyond = painted.filter(([lat, lon]) => !containsPoint(area, { lat, lon }));
+    const key = ([lat, lon]) => `${lat},${lon}`;
+    expect(beyond.map(key).sort()).toEqual(app.map(key).sort());
+    expect(latticeNear(area.slice(0, 2), 250, area[0], area[0], 400)).toEqual([]);
+  });
+
+  it('starts the heat at the middle of the points scored, so the best stand out of the better half', () => {
+    expect(heatFloor([{ explained: 0.2 }, { explained: 0.5 }, { explained: 0.7 }])).toBe(0.5);
+    expect(heatFloor([{ explained: -0.1 }, { explained: -0.2 }, { explained: 0.6 }])).toBe(0);
+    expect(heatFloor([])).toBe(0);
+    const heats = heatOf([{ explained: 0.62 }, { explained: 0.4 }, { explained: 0.3 }, { explained: 0.77 }, { explained: 0.2 }]);
+    expect(heats[3].fill).toBe(HEAT_RAMP.at(-1));
+    expect(heats[1].fill).toBe(HEAT_RAMP[0]);
+    expect(HEAT_RAMP.indexOf(heats[0].fill)).toBeLessThan(HEAT_RAMP.length - 1);
+  });
+
+  it('names the best points a running search has scored so far, apart from each other', () => {
+    const at = (north, explained) => ({ ...fromLocal({ lat: 46.5, lon: 7.8 }, { x: 0, y: north }), explained });
+    const points = [at(0, 0.5), at(300, 0.6), at(2_000, 0.55), at(5_000, 0.2), at(9_000, 0), at(12_000, 0.4)];
+    // the 0.5 stands 300 m from the 0.6: one hot spot, its best named
+    expect(bestSoFar(points).map((p) => p.explained)).toEqual([0.6, 0.55, 0.4]);
+    expect(bestSoFar(points, 1_500, 2)).toHaveLength(2);
+    expect(bestSoFar([at(0, 0)])).toEqual([]);
+  });
+
   it('draws the best ground in the ramp’s lightest step, nearly opaque, and the worst kept faint and dark', () => {
     expect(heatStyle(0.9, 0.9, 0.2)).toEqual({ fill: HEAT_RAMP.at(-1), opacity: 0.72 });
     expect(heatStyle(0.2, 0.9, 0.2)).toEqual({ fill: HEAT_RAMP[0], opacity: 0.12 });

@@ -148,12 +148,12 @@ describe("a pin's point on its card", () => {
 });
 
 describe('what a personal feature says on its card', () => {
-  it('names its colour, states its day and state, and links its sources', () => {
+  it('names its colour and its icon, states its day and state, and links its sources', () => {
     const card = layerCard('Front', { coords: () => '' })({
-      name: 'Depot', category: 'Strikes', colour_name: 'Side A', date: '2026-09-13', status: 'destroyed',
+      name: 'Depot', category: 'Strikes', colour_name: 'Side A', icon_meaning: 'Drone strike', date: '2026-09-13', status: 'destroyed',
       provenance: 'external', links: ['https://x.com/a/1', 'javascript:alert(1)'],
     }, null);
-    expect(card.querySelector('.layer-card-group').textContent).toBe('Strikes · Side A');
+    expect(card.querySelector('.layer-card-group').textContent).toBe('Strikes · Side A · Drone strike');
     expect(card.querySelector('.layer-card-facts').textContent).toBe('2026-09-13 · Destroyed · Geolocated by someone else');
     const links = [...card.querySelectorAll('a.layer-card-link')];
     expect(links.map((link) => link.getAttribute('href'))).toEqual(['https://x.com/a/1']);

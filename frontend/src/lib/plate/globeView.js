@@ -11,7 +11,7 @@
  *
  * Pure, so the conversions are read off a test.
  */
-import { groundPalette, paletteOf, TINTS, topographic } from './plainBasemap.js';
+import { groundStyle, paletteOf, present, shadeStrength, TINTS } from './plainBasemap.js';
 
 /** The page's own colour under a map, where imagery is faded or not yet in. */
 export const PAGE_GROUND = '#e9e6df';
@@ -40,14 +40,13 @@ export function plateView(camera, zoom) {
 export function globeGround(basemap, { plain = {}, shaded = false, intensity = 1 } = {}) {
   const ground = basemap || 'plain';
   if (!ground.startsWith('plain')) return { colour: PAGE_GROUND, shade: 0 };
-  const name = groundPalette(ground);
-  const colours = paletteOf(name, plain.colours);
-  const topo = topographic(ground);
+  const style = groundStyle(ground);
+  const colours = present(paletteOf(style.palette, plain.colours), plain.presence);
   // the flat map's hillshade exaggeration (`showPlain`), read on the globe's own light
-  const strength = shaded || topo ? Math.min(1, (topo ? 0.45 : 0.35) * intensity) : 0;
+  const strength = shadeStrength(ground, { shaded, intensity });
   return {
     colour: colours.ground,
-    tints: topo && plain.tints !== false ? TINTS[name] : null,
+    tints: style.tints && plain.tints !== false ? TINTS[style.tints] : null,
     tintOpacity: 0.85,
     shade: Math.min(1, strength * 1.6),
   };

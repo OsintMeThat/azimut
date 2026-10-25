@@ -15,6 +15,7 @@
  *   any of them draws, so the legend does not jump from one frame to the next.
  */
 import { inFrame } from './geo.js';
+import { roleLabel } from './roles.js';
 
 const KIND_WORDS = { point: 'marks', line: 'lines', area: 'areas' };
 const STATUS_WORDS = { damaged: 'damaged', destroyed: 'destroyed' };
@@ -51,6 +52,12 @@ export function legendRows(map, context) {
   for (const entry of map.layers ?? []) {
     const row = rows.find((item) => item.name === entry.name);
     if (!row) continue;
+    // a layer standing for held, claimed or contested ground, a front or the context says so of its areas and lines, once
+    const role = entry.role && entry.role !== 'events' ? roleLabel(entry.role) : '';
+    const asRole = (kind, colour, geometry) => {
+      const key = `${row.name}/role/${kind}`;
+      if (!looks.has(key) && (!geometry || drawn(geometry))) looks.set(key, { key, label: role, kind, colour, symbol: '', status: '', fill: entry.fill || '', group: row.title });
+    };
     const features = collection?.(row.name);
     if (!features) {
       // not read yet: the groups stand in for the looks
@@ -58,6 +65,7 @@ export function legendRows(map, context) {
         if (entry.hidden?.includes(group.name)) return;
         const kinds = group.kinds ?? [];
         const kind = kinds.includes('point') ? 'point' : kinds.includes('line') ? 'line' : 'area';
+        if (role && kind !== 'point') { asRole(kind, entry.colour || group.colour || categoryColour(group, index)); return; }
         const key = `${row.name}/${group.name}`;
         if (!looks.has(key)) looks.set(key, { key, label: group.name, kind, colour: entry.colour || group.colour || categoryColour(group, index), symbol: group.symbol || 'pin', status: '',
           ...(group.icon ? { icon: { key: group.icon, mode: group.icon_mode === 'disc' ? 'disc' : 'image', layer: row.name } } : {}) });
@@ -78,6 +86,7 @@ export function legendRows(map, context) {
         const groupAt = groupIndex.get(properties.category) ?? -1;
         const group = groups[groupAt];
         const colour = String(entry.colour || properties.colour || categoryColour(group, Math.max(0, groupAt))).toLowerCase();
+        if (role && kind !== 'point') { asRole(kind, colour, state.geometry); continue; }
         const symbol = kind === 'point' ? properties.symbol || group?.symbol || 'pin' : '';
         const icon = kind === 'point' ? properties.icon || '' : '';
         const status = kind === 'point' ? properties.status ?? '' : '';
@@ -86,7 +95,8 @@ export function legendRows(map, context) {
         if (looks.has(key) || !drawn(state.geometry)) continue;
         const named = colourName(colour);
         const uniform = group?.mode === 'uniform';
-        let label = uniform ? group.name : kind === 'point' ? (icon && properties.icon_name) || symbolName(symbol) : named || properties.category || row.title;
+        // a point is said by what the case says its icon means, else by the icon's own name
+        let label = uniform ? group.name : kind === 'point' ? properties.icon_meaning || (icon && properties.icon_name) || symbolName(symbol) : named || properties.category || row.title;
         if (!uniform && named && label !== named) label = `${label}, ${named}`;
         if (STATUS_WORDS[status]) label = `${label}, ${STATUS_WORDS[status]}`;
         looks.set(key, { key, label, kind, colour, symbol, status, group: properties.category || row.title,

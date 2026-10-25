@@ -74,6 +74,9 @@ describe('a transition between two beats', () => {
     expect(transitionPlan(TRANSITIONS, { moved: ['map'], fresh: ['z'] })).toBeNull();
     const on = { ...TRANSITIONS, on: true };
     expect(transitionPlan(on, {}, { cut: true })).toBeNull();
+    // a step that takes its own time to come in
+    expect(transitionPlan(on, {}, { seconds: 2 }).frames).toBe(2 * TWEEN_FPS);
+    expect(transitionPlan(on, {}, { seconds: null }).frames).toBe(Math.round(0.8 * TWEEN_FPS));
     // nothing moves and nothing is new: only the fade
     expect(transitionPlan(on, {})).toEqual({ move: false, blur: false, fade: true, appear: 'none', frames: 24, first: 24 });
     // the maps move first, then what is new comes in

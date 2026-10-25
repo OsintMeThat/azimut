@@ -64,6 +64,18 @@ describe('the steps of a day', () => {
     cut.click();
     expect(calls.onchange).toHaveBeenLastCalledWith('s1', { transition: 'none' });
     unmount(held); held = null; document.body.innerHTML = '';
+    // a step that takes the plate's transition takes its own time too, the plate's said until then
+    const timed = show({ transitions: true, transitionSeconds: 0.8 });
+    document.body.querySelector('button[aria-label="Set Strike"]').click(); flushSync();
+    const field = [...document.body.querySelectorAll('.fields label')].find((label) => label.textContent.includes('Transition, seconds')).querySelector('input');
+    expect(field.placeholder).toBe('0.8');
+    field.value = '1.75'; field.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+    expect(timed.onchange).toHaveBeenLastCalledWith('s1', { transition_seconds: 1.8 });
+    field.value = '9'; field.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+    expect(timed.onchange).toHaveBeenLastCalledWith('s1', { transition_seconds: 3 });
+    field.value = ''; field.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+    expect(timed.onchange).toHaveBeenLastCalledWith('s1', { transition_seconds: null });
+    unmount(held); held = null; document.body.innerHTML = '';
     show({ transitions: false });
     document.body.querySelector('button[aria-label="Set Strike"]').click(); flushSync();
     expect(document.body.querySelector('.cut')).toBeNull();

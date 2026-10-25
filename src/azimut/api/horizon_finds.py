@@ -1,17 +1,19 @@
 """Searches for where a photo was taken: started, followed, stopped and kept (engine/horizon_finds.py).
 
 A search is started by the analyst's press and runs on the case's background
-queue; the browser follows its progress by reading it again, stops it with
-`cancel`, and opens a finished one with every point it scored. A search is case
-work like a saved view: listed, renamed by nothing but its own name, deleted to
-the Trash.
+queue; the browser follows its progress by reading it again, and the points it
+has scored so far (`points`) to fill the map in, stops it with `cancel`, and
+opens a finished one with every point it scored. The place the analyst
+confirmed is kept on it (`found`), which stops it too. A search is case work
+like a saved view: listed, renamed by nothing but its own name, deleted to the
+Trash.
 """
 
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 
 from .. import layout
@@ -34,6 +36,11 @@ View = Literal["down", "up"]
 AREA_CORNERS_MAX = 200
 ALIGNMENTS_MAX = 12
 ZONES_MAX = 12
+# Areas beside the first, and strokes of the brush (each a path this long at most, this wide either side).
+AREAS_MAX = 12
+STROKES_MAX = 200
+STROKE_POINTS_MAX = 500
+STROKE_RADIUS_M = (5.0, 5_000.0)
 # An area or a zone is this large at the most, square metres, and this small at the least.
 AREA_MAX_M2 = 10_000e6
 AREA_MIN_M2 = 1e4
@@ -132,6 +139,14 @@ class ZoneIn(BaseModel):
         return self
 
 
+class StrokeIn(BaseModel):
+    """A stroke of the brush: the points within `radius` metres of its path left out (`out`), or searched."""
+
+    path: list[LatLon] = Field(min_length=1, max_length=STROKE_POINTS_MAX)
+    radius: float = Field(ge=STROKE_RADIUS_M[0], le=STROKE_RADIUS_M[1], allow_inf_nan=False)
+    out: bool = True
+
+
 class GroundIn(BaseModel):
     """Where a search would look, by whom and on what ground: what its grid is laid from, the trace aside."""
 
@@ -146,12 +161,29 @@ class GroundIn(BaseModel):
     near: float | None = Field(default=None, ge=0, le=MARK_FAR_MAX)
     #: Zones searched on their own grid beside the area, or left out.
     zones: list[ZoneIn] = Field(default_factory=list, max_length=ZONES_MAX)
+    #: More areas searched beside the first, on the same grid.
+    areas: list[list[LatLon]] = Field(default_factory=list, max_length=AREAS_MAX)
+    #: The brush's strokes, in the order painted: each over the ones before.
+    strokes: list[StrokeIn] = Field(default_factory=list, max_length=STROKES_MAX)
+    #: How thorough Auto's grid is against the time it takes (engine/finder.py EFFORTS).
+    effort: Literal["quick", "normal", "thorough"] = "normal"
+    #: What the photo shows that rules points out before the search (engine/ruleout.py): a line along the
+    #: sea's horizon (said of the trace once drawn), the sea or a lake, the eye above the land round it or below.
+    sea: bool = False
+    water: bool = False
+    over: Literal["above", "below"] | None = None
 
     @model_validator(mode="after")
     def _sane(self) -> GroundIn:
         if self.reach is not None and self.reach not in {int(c) for c in SKYLINE_CUTS}:
             raise ValueError("a reach is one the panorama keeps its skyline at")
         _sized(self.area, "area")
+        for area in self.areas:
+            if not 3 <= len(area) <= AREA_CORNERS_MAX:
+                raise ValueError(f"an area has 3 to {AREA_CORNERS_MAX} corners")
+            _sized(area, "area")
+        if sum(finder.area_m2([(p.lat, p.lon) for p in area]) for area in [self.area, *self.areas]) > AREA_MAX_M2:
+            raise ValueError(f"the areas are too large together: keep them under {AREA_MAX_M2 / 1e6:.0f} km²")
         return self
 
 
@@ -190,8 +222,9 @@ class FindIn(GroundIn):
     round: bool = False
     #: Where the sun stood against the camera, when the analyst says it.
     sun: SunIn | None = None
-    #: Fast scores a large grid on several cores; gentle on one, leaving the computer free.
-    speed: Literal["gentle", "fast"] = "fast"
+    #: Fastest scores a large grid on every core of the machine, fast on up to four, gentle on one, leaving
+    #: the computer free.
+    speed: Literal["gentle", "fast", "fastest"] = "fast"
     hints: dict[str, Any] | None = None
 
     @model_validator(mode="after")
@@ -212,6 +245,8 @@ def _asked(body: GroundIn) -> dict[str, Any]:
         **body.model_dump(),
         "area": [[p.lat, p.lon] for p in body.area],
         "zones": [{**zone.model_dump(), "area": [[p.lat, p.lon] for p in zone.area]} for zone in body.zones],
+        "areas": [[[p.lat, p.lon] for p in area] for area in body.areas],
+        "strokes": [{**stroke.model_dump(), "path": [[p.lat, p.lon] for p in stroke.path]} for stroke in body.strokes],
     }
 
 
@@ -258,6 +293,23 @@ def estimate_find(body: FindIn) -> dict[str, Any]:
     """How many points a search would lay and refine, and the columns of its turns, before it runs."""
     plan, trace = horizon_finds.plan_of(_asked(body))
     return {**finder.estimate(plan), "step": finder.column_step(trace), "turn": round(finder.turn_share(trace), 3)}
+
+
+@router.post("/cases/{case_id}/horizon/finds/pace")
+def pace_find(case_id: str, body: FindIn) -> dict[str, Any]:
+    """How long this machine takes to rank one point of the search, timed on a few points of its grid as the
+    search would (a collage read frame by frame), with the lanes each speed would run in: what the time a
+    search takes is worked out from, before it runs."""
+    case = get_case(case_id)
+    ask = _asked(body)
+    plan, trace = horizon_finds.plan_of(ask)
+    plan, trace, _ = horizon_finds.on_frames(case, ask, plan, trace)
+    try:
+        timed = finder.pace(plan, trace)
+    except terrain.TerrainUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"The terrain could not be loaded: {exc}") from exc
+    lanes = {speed: horizon_finds.lanes_for(speed) for speed in horizon_finds.SPEEDS}
+    return {**timed, "lanes": lanes, "lane_min": finder.LANE_MIN_POINTS}
 
 
 @router.post("/horizon/finds/preview")
@@ -349,15 +401,60 @@ def get_find(case_id: str, name: str) -> dict[str, Any]:
     return {"name": safe, **record}
 
 
+@router.get("/cases/{case_id}/horizon/finds/{name}/points")
+def find_points(
+    case_id: str, name: str, since: int = Query(default=0, ge=0), started: float | None = None,
+) -> dict[str, Any]:
+    """The points a running search has scored so far, from the `since`-th of the run `started` on, for
+    the map to fill in as it runs; every point when that run is not the one under way."""
+    return horizon_finds.live(get_case(case_id), layout.slugify(name, FALLBACK), since, started)
+
+
 @router.post("/cases/{case_id}/horizon/finds/{name}/cancel")
 def cancel_find(case_id: str, name: str) -> dict[str, Any]:
-    """Stop a search that is queued or running: it stops between two points."""
+    """Stop a search that is queued or running: it stops between two points, keeping what it found."""
     case = get_case(case_id)
     safe, record = _one(case, name)
     if record.get("status") in horizon_finds.ACTIVE:
-        record["status"] = "cancelled"
+        horizon_finds.stop(record)
         horizon_finds.write(case, safe, record)
     return horizon_finds.row(safe, record)
+
+
+class FoundIn(BaseModel):
+    """The place the analyst confirmed: where the eye stood, how the camera looked, what the search
+    scored there, and the view kept of it."""
+
+    lat: float = Field(ge=-terrain.MAX_LAT, le=terrain.MAX_LAT)
+    lon: float = Field(ge=-180, le=180)
+    height: float | None = Field(default=None, ge=0, le=15000)
+    heading: float | None = Field(default=None, ge=-360, le=720, allow_inf_nan=False)
+    tilt: float | None = Field(default=None, ge=-90, le=90, allow_inf_nan=False)
+    roll: float | None = Field(default=None, ge=-180, le=180, allow_inf_nan=False)
+    fov: float | None = Field(default=None, gt=0, le=360, allow_inf_nan=False)
+    explained: float | None = Field(default=None, ge=-1, le=1, allow_inf_nan=False)
+    view: str | None = Field(default=None, max_length=200)
+
+
+@router.post("/cases/{case_id}/horizon/finds/{name}/found")
+def found_place(case_id: str, name: str, body: FoundIn) -> dict[str, Any]:
+    """Keep the place the analyst confirmed on the search; one still running stops, keeping what it found."""
+    case = get_case(case_id)
+    safe, record = _one(case, name)
+    record["found"] = {**body.model_dump(exclude_none=True), "at": horizon_finds.now()}
+    horizon_finds.stop(record)
+    horizon_finds.write(case, safe, record)
+    return {"name": safe, **record}
+
+
+@router.delete("/cases/{case_id}/horizon/finds/{name}/found")
+def unfound_place(case_id: str, name: str) -> dict[str, Any]:
+    """Take back the place confirmed: the search is as it ended, its view kept."""
+    case = get_case(case_id)
+    safe, record = _one(case, name)
+    if record.pop("found", None) is not None:
+        horizon_finds.write(case, safe, record)
+    return {"name": safe, **record}
 
 
 @router.post("/cases/{case_id}/horizon/finds/{name}/check")

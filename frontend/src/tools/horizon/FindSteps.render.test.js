@@ -44,6 +44,29 @@ function fakeFind(over = {}) {
     mirror: false,
     tried: null,
     tryProblem: '',
+    live: [],
+    pace: null,
+    paceFor(speed) {
+      return this.pace ? { ...this.pace, lanes: { fastest: 8, fast: 4, gentle: 1 }[speed] ?? 1 } : null;
+    },
+    pacing: false,
+    water: false,
+    over: null,
+    setWater: vi.fn(),
+    toggleOver: vi.fn(),
+    tryAt: vi.fn(),
+    unconfirm: vi.fn(),
+    areas: [],
+    moreDrawn: null,
+    strokes: [],
+    brush: { out: true, radius: 250 },
+    drawMore: vi.fn(),
+    removeMore: vi.fn(),
+    startBrush: vi.fn(),
+    stopBrush: vi.fn(),
+    setBrush: vi.fn(),
+    undoStroke: vi.fn(),
+    clearStrokes: vi.fn(),
     zones: [],
     zoneDrawn: null,
     sun: { date: '', start: '06:00', end: '18:00', sides: [] },
@@ -126,6 +149,57 @@ describe('the steps of Find', () => {
     expect(auto.textContent).not.toContain('Too large for a');
   });
 
+  it('asks whether the sea or a lake shows and where the eye stands, and says what that leaves out', () => {
+    const find = fakeFind();
+    const root = steps({ find });
+    buttonNamed(root, 'Above the land round').click();
+    expect(find.toggleOver).toHaveBeenCalledWith('above');
+    buttonNamed(root, 'Sea or a lake').click();
+    expect(find.setWater).toHaveBeenCalledWith('lake');
+    buttonNamed(root, 'The sea').click();
+    expect(find.setWater).toHaveBeenCalledWith('sea');
+    // said again, it is taken back
+    buttonNamed(steps({ find: fakeFind({ water: 'sea', setWater: find.setWater }) }), 'The sea').click();
+    expect(find.setWater).toHaveBeenLastCalledWith(false);
+    expect(steps({ find: fakeFind({ water: 'sea' }) }).textContent).toContain('the sea in sight');
+    const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
+    const previewed = { total: 1000, kept: 400, kinds: {}, points: [], ruled: { low: 450, nowater: 150 } };
+    const said = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', over: 'above', water: 'lake', previewed, estimated: { points: 1003, step: 0.5, coarse: 1000 } }) });
+    expect(said.textContent).toContain('Lower than the land round it: 450 points left out (45%).');
+    expect(said.textContent).toContain('No sea or lake within reach: 150 points left out (15%).');
+    expect(buttonNamed(said, 'Above the land round').getAttribute('aria-pressed')).toBe('true');
+    expect(said.textContent).toContain('the sea or a lake in sight');
+  });
+
+  it('offers Auto’s grid quick, normal or thorough, each with its time on this computer once timed', () => {
+    const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
+    const efforts = {
+      quick: { points: 300, most: 900, spacing: 500, coarse: 250 },
+      normal: { points: 1003, most: 3205, spacing: 250, coarse: 900 },
+      thorough: { points: 3000, most: 9000, spacing: 145, coarse: 2800 },
+    };
+    const pace = { seconds: 0.5, lanes: 4, lane_min: 200, full: 8, lane_power: 0.46, top: 5 };
+    const find = fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 1003, most: 3205, step: 0.5, efforts }, pace, settings: { spacing: 'auto', tolerance: 1, effort: 'normal' } });
+    const root = steps({ find });
+    const group = root.querySelector('[aria-label="How thorough the search is"]');
+    expect([...group.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['Quick · a minute', 'Normal · 5 min', 'Thorough · 13 min']);
+    expect(root.textContent).toContain('1,003 points, about 5 min on this computer; up to 14 min where relief stands near.');
+    buttonNamed(group, 'Thorough · 13 min').click();
+    expect(find.setSettings).toHaveBeenCalledWith({ effort: 'thorough' });
+    // how hard the computer works, beside it: each speed with its time here, its cores said
+    const speeds = root.querySelector('[aria-label="How hard the computer works"]');
+    expect([...speeds.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['Fastest · 3 min', 'Fast · 5 min', 'Gentle · 9 min']);
+    expect(buttonNamed(speeds, 'Fastest · 3 min').title).toContain('8 cores here');
+    buttonNamed(speeds, 'Fastest · 3 min').click();
+    expect(find.setSettings).toHaveBeenCalledWith({ speed: 'fastest' });
+    // being timed, or not yet: said so
+    expect(steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 1003, step: 0.5 }, pacing: true }) }).textContent).toContain('Timing a few points on this computer');
+    // a grid picked has no effort to choose
+    const picked = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 1003, step: 0.5, efforts }, settings: { spacing: 250, tolerance: 1 } }) });
+    expect(picked.querySelector('[aria-label="How thorough the search is"]')).toBeNull();
+    expect(picked.textContent).toContain('a point every 250 m, set in More settings');
+  });
+
   it('offers what the trace says: a camera looking down past the bounds, a wide picture to cut', () => {
     const find = fakeFind({ traceSays: { looking: 'down', span: 50 } });
     const root = steps({ find });
@@ -155,6 +229,43 @@ describe('the steps of Find', () => {
     expect(root.querySelector('.fs-bar span').style.width).toBe('26%');
     buttonNamed(root, 'Stop').click();
     expect(find.stop).toHaveBeenCalledOnce();
+  });
+
+  it('names the best points so far as it runs, a press trying one in full', () => {
+    const live = [
+      { lat: 17.0, lon: 45.1, explained: 0.42 },
+      { lat: 17.001, lon: 45.1, explained: 0.4 },
+      { lat: 17.1, lon: 45.1, explained: 0.3 },
+    ];
+    const find = fakeFind({ searching: true, live, search: { name: 's', status: 'running', progress: { done: 120, total: 469 } } });
+    const root = steps({ find });
+    const rows = [...root.querySelectorAll('.fs-place')];
+    // the second stands 111 m from the first: one hot spot
+    expect(rows.map((r) => r.querySelector('strong').textContent)).toEqual(['explains 42% so far', 'explains 30% so far']);
+    rows[1].click();
+    expect(find.tryAt).toHaveBeenCalledWith(live[2]);
+  });
+
+  it('says it stops, then what it found by then, the place confirmed first', () => {
+    const stopping = fakeFind({ searching: true, search: { name: 's', status: 'stopping', progress: { done: 120, total: 469 } } });
+    const halted = steps({ find: stopping });
+    expect(halted.textContent).toContain('Stopping: it keeps what it found');
+    expect(buttonNamed(halted, 'Stop')).toBeUndefined();
+    const onfound = vi.fn();
+    const found = { lat: 17.00123, lon: 45.1, heading: 80, view: 'Barry found' };
+    const places = [{ lat: 17.0, lon: 45.1, explained: 0.42 }];
+    const ended = fakeFind({ search: { name: 's', status: 'cancelled', found, progress: { done: 120, total: 469 }, result: { partial: true, verdict: 'loose', places, points: places } } });
+    const root = steps({ find: ended, onfound });
+    expect(root.textContent).toContain('Place confirmed');
+    expect(root.textContent).toContain('kept as the view Barry found');
+    expect(root.textContent).toContain('Stopped after 120 of 469 points');
+    // a search stopped short is not judged
+    expect(root.textContent).not.toContain('The best place explains less than half');
+    expect(root.querySelector('.fs-trust')).toBeNull();
+    buttonNamed(root, 'Look from it').click();
+    expect(onfound).toHaveBeenCalledWith(found);
+    buttonNamed(root, 'Not it after all').click();
+    expect(ended.unconfirm).toHaveBeenCalledOnce();
   });
 
   it('lists the best places with what each explains, a click looking from one', () => {
@@ -324,6 +435,35 @@ describe('the steps of Find', () => {
     expect(drawing.textContent).toContain('Click each corner of the zone to leave out.');
   });
 
+  it('lists the areas searched with the first, and paints with the brush, its strokes taken back one by one', () => {
+    const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 1.1 }, { lat: 1.1, lon: 1.1 }];
+    const areas = [{ id: 'm', points: [{ lat: 2, lon: 2 }, { lat: 2, lon: 2.05 }, { lat: 2.05, lon: 2.05 }] }];
+    const strokes = [{ path: [{ lat: 1.05, lon: 1.05 }], radius: 250, out: true }];
+    const find = fakeFind({ area, areaProblem: '', areas, strokes });
+    const root = steps({ find });
+    const row = root.querySelector('.fs-zone.more');
+    expect(row.textContent).toContain('Area 2 ·');
+    row.querySelector('[aria-label="Take area 2 away"]').click();
+    expect(find.removeMore).toHaveBeenCalledWith('m');
+    buttonNamed(root, 'Another area').click();
+    expect(find.drawMore).toHaveBeenCalledOnce();
+    // the strokes painted stay listed while the brush is off
+    expect(root.querySelector('.fs-brush').textContent).toContain('1 stroke of the brush');
+    buttonNamed(root, 'Undo').click();
+    expect(find.undoStroke).toHaveBeenCalledOnce();
+    buttonNamed(root, 'Brush').click();
+    expect(find.startBrush).toHaveBeenCalledOnce();
+    const painting = fakeFind({ area, areaProblem: '', drawing: 'brush', strokes: [] });
+    const brush = steps({ find: painting }).querySelector('.fs-brush.on');
+    buttonNamed(brush, 'On').click();
+    expect(painting.setBrush).toHaveBeenCalledWith({ out: false });
+    buttonNamed(brush, '1 km').click();
+    expect(painting.setBrush).toHaveBeenCalledWith({ radius: 1000 });
+    expect(buttonNamed(brush, '250 m').getAttribute('aria-pressed')).toBe('true');
+    const another = steps({ find: fakeFind({ area, areaProblem: '', drawing: 'more', moreDrawn: { id: 'n', points: [] } }) });
+    expect(another.textContent).toContain('Click each corner of another area');
+  });
+
   it('tries a point on the map, says what it explains there and looks from it', () => {
     const find = fakeFind();
     const onplace = vi.fn();
@@ -333,7 +473,7 @@ describe('the steps of Find', () => {
     const place = { lat: 12.9, lon: 43.6, explained: 0.71, heading: 92, fov: 41, relief: 2_400 };
     const tried = steps({ find: fakeFind({ drawing: 'try', tried: { at: place, place, frames: { span: 97 }, busy: false, error: '' } }), onplace });
     const card = tried.querySelector('[aria-label="The point tried"]');
-    expect(card.textContent).toContain('Tried here: explains 71%');
+    expect(card.textContent).toContain('Tried here, in full: explains 71%');
     expect(card.textContent).toContain('41° lens · ridges about 2.40 km out');
     buttonNamed(card, 'Look from here').click();
     expect(onplace).toHaveBeenCalledWith({ ...place, frames: { span: 97 } });

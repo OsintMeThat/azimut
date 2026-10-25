@@ -11,8 +11,9 @@
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import LayerFeatureSheet from './LayerFeatureSheet.svelte';
   import LayerGroupMenu from './LayerGroupMenu.svelte';
+  import LayerKeyButton from './LayerKeyButton.svelte';
   import MarkerSymbol from './MarkerSymbol.svelte';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import ConfirmDialog from '../../components/ConfirmDialog.svelte';
   import { moveName } from '../../lib/map/addedLayers.js';
   import { caseState } from '../../lib/state.svelte.js';
@@ -31,6 +32,20 @@
   $effect(() => layerPalette.load(controller.editor?.caseId));
   const selected = $derived(controller.selected);
   const groups = $derived(controller.groups ?? []);
+  /** The colours the layer's features wear and the icons its markers wear, as their groups draw them, for the key to name. */
+  const worn = $derived.by(() => {
+    const byId = new Map(groups.map((group) => [group.id, group]));
+    const colours = new Set(), keys = new Set();
+    for (const feature of controller.features ?? []) {
+      const group = byId.get(feature.properties.group);
+      const own = group?.mode === 'uniform' || group?.mode === 'colour' ? group : feature.properties;
+      if (own?.colour || group?.colour) colours.add(String(own?.colour || group.colour).toLowerCase());
+      if (!String(feature.geometry?.type ?? '').includes('Point')) continue;
+      const style = group?.mode === 'uniform' ? group : feature.properties;
+      keys.add(style.icon || style.symbol || 'pin');
+    }
+    return { colours: [...colours], keys: [...keys] };
+  });
   let folded = $state(new Set());
   let groupMenu = $state(null);
   let layerMenu = $state(false);
@@ -87,6 +102,45 @@
     return result;
   });
   const found = $derived(needle ? [...membersByGroup.values()].reduce((sum, members) => sum + members.length, 0) : 0);
+  /** How many rows of a group the list shows, the newest first. */
+  const limitOf = (id) => limits[id] ?? 100;
+  /** The rows on show, each group open and cut at its limit. */
+  const shownKeys = $derived.by(() => {
+    const keys = new Set();
+    for (const group of groups) {
+      const members = membersByGroup.get(group.id) ?? [];
+      if (needle ? !members.length : folded.has(group.id)) continue;
+      for (const feature of members.slice(-limitOf(group.id))) keys.add(feature.properties.key);
+    }
+    return keys;
+  });
+  /**
+   * One feature picked opens its sheet under its row, the rest of the list in view;
+   * several picked, or one whose row is not on show, open it above the list.
+   */
+  const inlineKey = $derived(selection.length <= 1 && selected && shownKeys.has(selected.properties.key) ? selected.properties.key : '');
+  /** A feature picked on the map: its group opens and its row comes into the list, then into view. */
+  let fromList = '';
+  let revealed = '';
+  $effect(() => {
+    const key = selection.length <= 1 ? selected?.properties.key ?? '' : '';
+    if (!key || key === revealed) { if (!key) revealed = ''; return; }
+    revealed = key;
+    const picked = selected;
+    untrack(() => {
+      if (needle && !matches(picked)) return;
+      const id = picked.properties.group;
+      const members = membersByGroup.get(id) ?? [];
+      const at = members.findIndex((feature) => feature.properties.key === key);
+      if (at < 0) return;
+      const from = members.length - at;
+      if (folded.has(id)) { const next = new Set(folded); next.delete(id); folded = next; }
+      if (from > limitOf(id)) limits[id] = Math.min(members.length, Math.ceil(from / 100) * 100);
+      // a row pressed stays under the pointer (`keepPlace`); only a pick on the map scrolls the list
+      if (fromList === key) { fromList = ''; return; }
+      tick().then(() => root?.querySelector(`[data-feature-key="${CSS.escape(key)}"]`)?.scrollIntoView?.({ block: 'nearest' }));
+    });
+  });
   let foldedFor = '';
   $effect(() => {
     const name = controller.editor.name;
@@ -141,7 +195,7 @@
         if (event.clientY < box.top + 20) list.scrollTop -= 12;
         else if (event.clientY > box.bottom - 20) list.scrollTop += 12;
         const nodes = [...list.children].filter((node) => !moving.has(node.dataset.featureKey));
-        const next = nodes.find((node) => { const rect = node.getBoundingClientRect(); return event.clientY < rect.top + rect.height / 2; });
+        const next = nodes.find((node) => { const rect = (node.querySelector('.line') ?? node).getBoundingClientRect(); return event.clientY < rect.top + rect.height / 2; });
         if (next) before = next.dataset.featureKey;
         else if (nodes.length) {
           const order = (membersByGroup.get(id) ?? []).toReversed().filter((feature) => !moving.has(feature.properties.key));
@@ -209,8 +263,9 @@
   }
 
   /**
-   * Pick from the list without the list jumping: the sheet opening above it pushes the
-   * rows down, so the panel scrolls by as much and the pressed row stays under the pointer.
+   * Pick from the list without the list jumping: the sheet folding away above it, or
+   * opening above the list, moves the rows, so the panel scrolls by as much and the
+   * pressed row stays under the pointer.
    */
   async function keepPlace(row, act) {
     const before = row?.getBoundingClientRect().top ?? 0;
@@ -242,6 +297,7 @@
     <Icon name="stack" size={13} />
     <input class="title" aria-label="Layer name" title="Rename the layer" bind:value={layerDetails.title} maxlength="200"
       disabled={controller.loading} onchange={saveDetails} onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
+    <LayerKeyButton caseId={controller.editor?.caseId} colours={worn.colours} worn={worn.keys} look={iconOf} disabled={controller.loading} />
     <button type="button" class="icon-act more-btn" aria-label="Layer actions" title="Description, time, download" aria-expanded={layerMenu}
       bind:this={layerMenuAnchor} disabled={controller.loading} onclick={() => (layerMenu = !layerMenu)}><Icon name="more" size={14} /></button>
     <!-- with nothing changed it is a way back out: no question to ask -->
@@ -267,10 +323,10 @@
     <p class="note">Opening layer…</p>
   {:else}
     {#if controller.pending}<p class="saving" role="status">Saving {controller.pending}…</p>{/if}
-    <!-- the day shown and the sheet stay in view at the top while the list scrolls under them -->
+    <!-- the day shown stays in view at the top while the list scrolls under it, with the sheet of what is not a row on show -->
     <div class="sheet-dock">
       {#if controller.editor.track?.on}<LayerTrackPanel {controller} />{/if}
-      <LayerFeatureSheet {controller} onfollowed={(id) => openFollowed(caseState.current?.id, id)} {ondeleteplace} />
+      {#if !inlineKey}<LayerFeatureSheet {controller} onfollowed={(id) => openFollowed(caseState.current?.id, id)} {ondeleteplace} />{/if}
     </div>
 
     <input type="search" class="find" aria-label="Find in this layer" placeholder="Find in this layer" bind:value={query} />
@@ -307,12 +363,16 @@
             <LayerGroupMenu {controller} {group} anchor={groupMenu?.anchor ?? null} members={members.length} onclose={() => (groupMenu = null)} />
           {/if}
           {#if open}
-            <ul class="features" class:drop-end={featureDrop?.group === group.id && !featureDrop.before}>
-              {#each members.slice(-(limits[group.id] ?? 100)).toReversed() as feature (feature.properties.key)}
+            <!-- a group holding the open sheet lets the panel scroll it, the sheet never squeezed into its box -->
+            <ul class="features" class:holding={members.some((feature) => feature.properties.key === inlineKey)}
+              class:drop-end={featureDrop?.group === group.id && !featureDrop.before}>
+              {#each members.slice(-limitOf(group.id)).toReversed() as feature (feature.properties.key)}
                 {@const paint = group.mode === 'uniform' || group.mode === 'colour' ? group.colour : feature.properties.colour || group.colour}
-                <li data-feature-key={feature.properties.key} draggable={controller.pending > 0 || !!controller.sketch ? 'false' : 'true'}
+                <li data-feature-key={feature.properties.key}
                   class:dragging={draggedFeatures.includes(feature.properties.key)}
-                  class:drop-before={featureDrop?.group === group.id && featureDrop.before === feature.properties.key}
+                  class:drop-before={featureDrop?.group === group.id && featureDrop.before === feature.properties.key}>
+                <!-- the line drags, not the sheet under it, whose fields select text -->
+                <div class="line" role="none" draggable={controller.pending > 0 || !!controller.sketch ? 'false' : 'true'}
                   ondragstart={(event) => startFeatureDrag(event, feature)} ondragend={() => { draggedFeatures = []; featureDrop = null; }}>
                 <button class="icon-act grip" data-feature-grip={feature.properties.key}
                   aria-label={`Move ${feature.properties.name || 'Unnamed feature'}`} title="Drag to reorder or move to a group"
@@ -322,7 +382,7 @@
                   title={feature.properties.$absent ? 'Not on the map on the layer\'s day' : null}
                   class:active={selection.includes(feature.properties.key) || selected?.properties.key === feature.properties.key}
                   onclick={async (event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) controller.toggleSelected(feature.properties.key, members.toReversed().map((feature) => feature.properties.key), event.shiftKey);
-                    else { await keepPlace(event.currentTarget, () => controller.select(feature.properties.key)); onfly?.(feature); } }}>
+                    else { fromList = feature.properties.key; await keepPlace(event.currentTarget, () => controller.select(feature.properties.key)); onfly?.(feature); } }}>
                   <span class="feature-symbol" style={`color:${paint}`}>
                     {#if feature.geometry.type === 'Point'}
                       <MarkerSymbol symbol={(group.mode === 'uniform' ? group.symbol : feature.properties.symbol) || 'pin'} colour={paint}
@@ -337,12 +397,16 @@
                     <span class="day" class:open-ended={said === 'Always' || said === 'No day'}>{said}</span>
                   {:else if feature.properties.date}<span class="day">{day(feature.properties.date)}</span>{/if}
                   {#if feature.properties.entity_id}<Icon name="link" size={10} />{/if}
-                </button></li>
+                </button></div>
+                {#if feature.properties.key === inlineKey}
+                  <LayerFeatureSheet {controller} inline onfollowed={(id) => openFollowed(caseState.current?.id, id)} {ondeleteplace} />
+                {/if}
+                </li>
               {/each}
             </ul>
             {#if !members.length}<p class="group-empty">Empty group</p>{/if}
-            {#if members.length > (limits[group.id] ?? 100)}
-              <button class="add" onclick={() => { limits[group.id] = Math.min(members.length, (limits[group.id] ?? 100) + 100); }}>Show 100 more ({members.length})</button>
+            {#if members.length > limitOf(group.id)}
+              <button class="add" onclick={() => { limits[group.id] = Math.min(members.length, limitOf(group.id) + 100); }}>Show 100 more ({members.length})</button>
               <button class="text-act" onclick={() => { limits[group.id] = members.length; }}>Show all {members.length}</button>
             {/if}
           {/if}
@@ -430,8 +494,8 @@
   .eye.on { color: var(--accent); }
   /* The grips show on the row the pointer or the keyboard is on: the row is what drags. */
   .grip { width: 16px; color: var(--text-3); cursor: grab; opacity: 0; }
-  .group-head:hover .grip, .features li:hover .grip, .grip:focus-visible { opacity: 1; }
-  .group-head[draggable='true'], .features li[draggable='true'] { cursor: grab; }
+  .group-head:hover .grip, .features .line:hover .grip, .grip:focus-visible { opacity: 1; }
+  .group-head[draggable='true'], .features .line[draggable='true'] { cursor: grab; }
   .groups { margin-top: 8px; }
   .group { margin-bottom: 2px; }
   .group-head { display: flex; align-items: center; gap: 1px; min-height: 30px; padding-right: 2px; border-radius: var(--r-sm); }
@@ -460,7 +524,9 @@
   .features .feature-row.active { box-shadow: inset 2px 0 var(--accent); }
   .features .feature-row.absent { opacity: .45; }
   .features { max-height: min(340px, 45vh); overflow-y: auto; }
-  .features li { display: flex; align-items: center; padding-left: 10px; }
+  .features.holding { max-height: none; overflow-y: visible; }
+  .features li { padding-left: 10px; }
+  .features .line { display: flex; align-items: center; }
   .feature-symbol { display: grid; place-items: center; flex: none; }
   .group-empty { padding-left: 34px; }
   .add { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 6px; padding: 5px 8px; border: 1px dashed var(--border); border-radius: var(--radius-1); color: var(--text-3); font-size: var(--fs-xs); cursor: pointer; }

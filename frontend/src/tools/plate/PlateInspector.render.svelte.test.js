@@ -185,6 +185,40 @@ describe('hover help on every setting', () => {
     expect(bare()).toEqual([]);
   });
 
+  it('gives a layer what it stands for in one press, its fill with it, and its own look back', () => {
+    const spec = $state(houseLayout());
+    const map = spec.elements.find((element) => element.kind === 'map');
+    map.layers = [{ name: 'front', hidden: [], stroke: 1, icons: 1 }];
+    const rows = [{ name: 'front', title: 'Front', categories: [{ name: 'Lines' }] }];
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows } });
+    flushSync();
+    const role = document.body.querySelector('[aria-label="Front stands for"]');
+    role.value = 'claimed'; role.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+    expect(map.layers[0]).toMatchObject({ name: 'front', role: 'claimed', colour: spec.theme.accent, fill: 'hatch', dash: 'dashed' });
+    const fill = (label) => [...document.body.querySelectorAll('[aria-label="Front areas on this plate"] button')].find((node) => node.textContent === label);
+    expect(fill('Hatched').getAttribute('aria-pressed')).toBe('true');
+    fill('Full').click(); flushSync();
+    expect(map.layers[0].fill).toBe('solid');
+    const again = document.body.querySelector('[aria-label="Front stands for"]');
+    again.value = ''; again.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+    expect(map.layers[0]).toMatchObject({ role: '', colour: null, fill: '', dash: '' });
+  });
+
+  it('lights the country under the map, and lets the rest be darkened or faded', async () => {
+    const spec = $state(houseLayout({ view: { lat: 50.45, lon: 30.52, zoom: 5, bearing: 0 } }));
+    const map = spec.elements.find((element) => element.kind === 'map');
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id] } });
+    flushSync();
+    [...document.body.querySelectorAll('button')].find((node) => node.textContent.trim() === 'Light the country here').click();
+    await vi.waitFor(() => expect(map.spotlight).toEqual({ country: 'Ukraine', dim: 0.55, mode: 'dark' }));
+    flushSync();
+    [...document.body.querySelectorAll('[aria-label="The rest of the world"] button')].find((node) => node.textContent === 'Faded').click(); flushSync();
+    expect(map.spotlight.mode).toBe('fade');
+    const lit = document.body.querySelector('[aria-label="Country lit"]');
+    lit.value = ''; lit.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+    expect(map.spotlight).toBeNull();
+  });
+
   it('says it in the words kept for it, and follows a setting whose name changes', async () => {
     show({ kind: 'text' });
     await settle();
@@ -192,5 +226,186 @@ describe('hover help on every setting', () => {
     // a key says what the control beside it does
     const key = [...document.body.querySelectorAll('.key')].find((node) => node.textContent === 'Spacing');
     expect(key.getAttribute('title')).toBe('Space between the letters');
+  });
+});
+
+describe('the ground, the type and the layers of a plate', () => {
+  const settings = () => [...document.body.querySelectorAll('.inspector :is(select, input:not([type="file"]), textarea, [role="group"], [role="radiogroup"], .key, button.btn)')];
+  const bare = () => settings().filter((node) => !node.closest('[title]')?.getAttribute('title'))
+    .map((node) => node.getAttribute('aria-label') || node.textContent.trim() || node.outerHTML.slice(0, 60));
+  const settle = async () => { for (let i = 0; i < 4; i += 1) await Promise.resolve(); flushSync(); };
+  const grounds = [['plain', 'Plain'], ['plain-relief', 'Shaded relief'], ['s2cloudless', "Sentinel-2 cloudless, a year's mosaic"]];
+  const years = [{ year: 2025, licence: 'CC BY-NC-SA 4.0, non-commercial use', free: false }, { year: 2016, licence: 'CC BY 4.0', free: true }];
+
+  function showMap(props = {}) {
+    const spec = $state(houseLayout());
+    const map = spec.elements.find((element) => element.kind === 'map');
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], grounds, years, ...props } });
+    flushSync();
+    return { spec, map };
+  }
+
+  it('picks a ground from its tiles, and a year of Sentinel-2 cloudless with its licence', async () => {
+    const { map } = showMap();
+    const tile = (label) => [...document.body.querySelectorAll('.ground-tile')].find((node) => node.textContent.trim() === label);
+    expect(tile('Plain').getAttribute('aria-checked')).toBe('true');
+    tile('Shaded relief').click(); flushSync();
+    expect(map.basemap).toBe('plain-relief');
+    // a ground that shades its own relief has its strength, and no shading to ask for
+    expect(document.body.querySelector('[aria-label="Relief strength"]')).not.toBeNull();
+    expect([...document.body.querySelectorAll('.checks label')].some((node) => node.textContent.trim() === 'Relief shading')).toBe(false);
+    expect([...document.body.querySelectorAll('.checks label')].some((node) => node.textContent.trim() === 'Heights in colour')).toBe(true);
+    await settle();
+    expect(bare()).toEqual([]);
+    tile("Sentinel-2 cloudless, a year's mosaic").click(); flushSync();
+    expect(document.body.textContent).toContain('Free for non-commercial use only');
+    const year = document.body.querySelector('[aria-label="Cloudless year"]');
+    year.value = '2016'; year.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+    expect(map.year).toBe(2016);
+    expect(document.body.textContent).toContain('Free for any use, with its credit.');
+    await settle();
+    expect(bare()).toEqual([]);
+  });
+
+  /** Copernicus as a fake: the passes of any month, and the layers the configuration serves. */
+  function copernicus(dates) {
+    const asked = [];
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      asked.push(String(url));
+      const body = String(url).includes('/sentinel/layers')
+        ? { layers: [{ id: 'TRUE_COLOR', label: 'True colour' }, { id: 'SWIR', label: 'Short-wave infrared' }], source: 'instance' }
+        : { dates };
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    return { asked, restore: () => fetch.mockRestore() };
+  }
+  const passes = [{ date: '2026-10-18', cloud: 76 }, { date: '2026-10-13', cloud: 8.2 }, { date: '2026-10-08', cloud: 0 }];
+
+  it('draws Sentinel-2 on one pass, the newest under 30% cloud, picked on Satellite\'s own calendar and layers', async () => {
+    const copernicus$ = copernicus(passes);
+    try {
+      const { map } = showMap({ grounds: [...grounds, ['sentinel2', 'Sentinel-2, one dated pass']] });
+      await settle();
+      expect(copernicus$.asked).toEqual([]);
+      const tile = (label) => [...document.body.querySelectorAll('.ground-tile')].find((node) => node.textContent.trim() === label);
+      tile('Sentinel-2, one dated pass').click(); flushSync();
+      await vi.waitFor(() => expect(map.acquired).toBe('2026-10-13'));
+      flushSync();
+      expect(copernicus$.asked[0]).toContain('/api/satellite/sentinel/dates?');
+      expect(map).toMatchObject({ basemap: 'sentinel2', maxcc: 30 });
+      expect(map.product ?? '').toBe('');
+      expect(document.body.textContent).toContain('the pass of 2026-10-13, the newest under 30% cloud.');
+      // the calendar and the layers are Satellite's: another layer is the map's
+      document.body.querySelector('[aria-label="Sentinel-2 layer and date"]').click(); flushSync();
+      await settle();
+      const layer = document.body.querySelector('.s2-menu select');
+      await vi.waitFor(() => expect([...layer.options].map((option) => option.value)).toContain('SWIR'));
+      expect(document.body.querySelectorAll('.cal-day.has').length).toBeGreaterThan(0);
+      // a ceiling of any cloud: the newest pass is the map's, cloudy as it is
+      const ceiling = document.body.querySelector('[aria-label="Maximum cloud cover"]');
+      ceiling.value = '100'; ceiling.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+      await vi.waitFor(() => expect(map.acquired).toBe('2026-10-18'));
+      expect(map.maxcc).toBe(100);
+      expect(bare()).toEqual([]);
+    } finally { copernicus$.restore(); }
+  });
+
+  it('looks for the newest pass of a map set on Sentinel-2 from its bar too, and not for one already on a pass', async () => {
+    const copernicus$ = copernicus(passes);
+    try {
+      const { map } = showMap({ grounds: [...grounds, ['sentinel2', 'Sentinel-2, one dated pass']] });
+      map.basemap = 'sentinel2'; flushSync();
+      await vi.waitFor(() => expect(map.acquired).toBe('2026-10-13'));
+      const asked = copernicus$.asked.length;
+      map.basemap = 'plain'; flushSync();
+      map.basemap = 'sentinel2'; flushSync();
+      await settle();
+      expect(copernicus$.asked.length).toBe(asked);
+      expect(map.acquired).toBe('2026-10-13');
+    } finally { copernicus$.restore(); }
+  });
+
+  it('keeps Sentinel-2 in sight, locked, with the steps to a free account, while Copernicus is not set up', () => {
+    showMap();
+    const locked = document.body.querySelector('.ground-tile.locked');
+    expect(locked.textContent).toContain('Sentinel-2, one dated pass');
+    expect(document.body.querySelector('.setup')).toBeNull();
+    locked.click(); flushSync();
+    expect(document.body.querySelector('.setup').textContent).toContain('dataspace.copernicus.eu');
+    expect(document.body.textContent).toContain('free and with no card');
+  });
+
+  it('sets a plain ground\'s detail, presence and borders, its colours folded until asked', async () => {
+    const { map } = showMap();
+    expect(document.body.querySelector('[aria-label="Land colour"]')).toBeNull();
+    [...document.body.querySelectorAll('[aria-label="Ground detail"] button')].find((node) => node.textContent === 'Less').click(); flushSync();
+    expect(map.plain.density).toBe('low');
+    const presence = document.body.querySelector('[aria-label="Ground presence"]');
+    presence.value = '0.5'; presence.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    expect(map.plain.presence).toBe(0.5);
+    [...document.body.querySelectorAll('[aria-label="Borders drawn"] button')].find((node) => node.textContent === 'Districts').click(); flushSync();
+    expect(map.plain.admin).toBe('districts');
+    [...document.body.querySelectorAll('button')].find((node) => node.textContent.startsWith('Change the colours')).click(); flushSync();
+    expect(document.body.querySelector('[aria-label="Land colour"]')).not.toBeNull();
+    await settle();
+    expect(bare()).toEqual([]);
+  });
+
+  it('offers a new layer here, and a layer of what was drawn on the map once something is', () => {
+    const made = [];
+    const spec = $state(houseLayout());
+    const map = spec.elements.find((element) => element.kind === 'map');
+    spec.elements.push({ id: 'z', kind: 'zone', of: map.id, box: [0, 0, 1, 1], points: [[2, 48], [2.1, 48], [2.1, 48.1]] });
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], grounds,
+      onnewlayer: (element) => made.push(['new', element.id]), onkeepdrawn: (element) => made.push(['keep', element.id]) } });
+    flushSync();
+    const button = (start) => [...document.body.querySelectorAll('button')].find((node) => node.textContent.trim().startsWith(start));
+    button('New layer here').click();
+    button('Make a layer of the 1 drawn here').click();
+    expect(made).toEqual([['new', map.id], ['keep', map.id]]);
+  });
+
+  it('sets a text in a style of the page, and draws an inset as a globe', async () => {
+    const note = show({ kind: 'text' });
+    const style = document.body.querySelector('[aria-label="Text role"]');
+    style.value = 'kicker'; style.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+    expect(note).toMatchObject({ role: 'kicker', upper: true, weight: 700 });
+    unmount(held); held = null; document.body.innerHTML = '';
+    const inset = show({ kind: 'inset', element: { of: 'map' } });
+    const globe = [...document.body.querySelectorAll('label')].find((node) => node.textContent.trim() === 'Drawn as a globe').querySelector('input');
+    globe.click(); flushSync();
+    expect(inset.globe).toBe(true);
+    await settle();
+    expect(bare()).toEqual([]);
+  });
+});
+
+describe('the words a text fills in', () => {
+  it('are put in by a press, where the cursor stands, each saying what it writes', () => {
+    const note = show({ kind: 'text', element: { text: 'As of ' } });
+    const chip = (token) => [...document.body.querySelectorAll('.token')].find((node) => node.textContent === token);
+    expect(chip('{coords}').title).toMatch(/^The main map's middle/);
+    chip('{date}').click(); flushSync();
+    expect(note.text).toBe('As of {date}');
+    const field = document.body.querySelector('[aria-label="Text"]');
+    field.focus(); field.setSelectionRange(0, 0);
+    chip('{case}').click(); flushSync();
+    expect(note.text).toBe('{case}As of {date}');
+  });
+});
+
+describe('the credits box', () => {
+  it('takes a layer\'s credit off and puts it back, and keeps what a ground\'s terms ask for', () => {
+    const spec = $state(houseLayout());
+    const credits = spec.elements.find((element) => element.kind === 'credits');
+    const creditList = [{ text: 'Esri', owed: true }, { text: 'GeoConfirmed — geoconfirmed.org', owed: false }];
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [credits.id], creditList } });
+    flushSync();
+    const boxes = [...document.body.querySelectorAll('.credit-list input')];
+    expect(boxes.map((box) => [box.checked, box.disabled])).toEqual([[true, true], [true, false]]);
+    boxes[1].click(); flushSync();
+    expect(credits.dropped).toEqual(['GeoConfirmed — geoconfirmed.org']);
+    boxes[1].click(); flushSync();
+    expect(credits.dropped).toEqual([]);
   });
 });

@@ -1655,17 +1655,14 @@
     setBearing(row.bearing);
   }
 
-  // Google rejected the Maps JavaScript key. Persist the verdict (which benches
-  // the basemap), tell the user, and let the provider refetch fall the map back
-  // to Esri.
-  async function onWidgetAuthFailure(provider) {
+  // Google refused the map, its tiles dimmed under a watermark. Persist the
+  // verdict (which benches the basemap), say why, and let the provider refetch
+  // fall the map back to Esri.
+  async function onWidgetAuthFailure(provider, reason) {
     try {
-      await api.post(`/api/settings/keys/${provider.meter}/status`, {
-        ok: false,
-        detail: 'Google rejected the Maps JavaScript key (gm_authFailure)',
-      });
+      await api.post(`/api/settings/keys/${provider.meter}/status`, { ok: false, detail: reason });
     } catch { /* the toast still tells the user */ }
-    toast('Google rejected the Maps JavaScript key. Basemap disabled; see Settings', 'danger', 8000);
+    toast(`Google basemap turned off. ${reason}`, 'danger', 12000);
     await imagery.loadProviders();
   }
 
@@ -1746,6 +1743,19 @@
     await tick();
     engine?.resize();
   }
+
+  // A plate made a layer to draw in (`uiState.editLayer`): it opens here for editing,
+  // the map looking where the plate's map does.
+  $effect(() => {
+    const asked = uiState.editLayer;
+    if (uiState.tool !== 'satellite' || !asked || !engine) return;
+    uiState.editLayer = null;
+    untrack(() => {
+      if (asked.view) engine.setView({ lat: asked.view.lat, lon: asked.view.lon }, asked.view.zoom);
+      const row = addedLayers.rows.find((one) => one.name === asked.name) ?? { name: asked.name, title: asked.title, editable: true };
+      editMyLayer(row).catch((error) => toast(error.message, 'danger'));
+    });
+  });
 
   function flyToLayerFeature(feature) {
     if (!engine || !feature.geometry) return;

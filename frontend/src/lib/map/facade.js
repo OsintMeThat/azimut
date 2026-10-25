@@ -330,6 +330,8 @@ export function mapFacade(map, container, mapId = '') {
     maxZoom: () => viewZoom(map.getMaxZoom()),
     /** Never animated: a rotation pans the map once per pointer move. */
     panBy: (dx, dy) => map.panBy([dx, dy], { duration: 0 }),
+    /** Whether a drag pans the map: held while the hand paints on it instead (Find's brush). */
+    setPanning: (on) => (on ? map.dragPan.enable() : map.dragPan.disable()),
     fitBounds,
     fitPoints,
 

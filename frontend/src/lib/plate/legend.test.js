@@ -24,6 +24,23 @@ describe('a plate legend', () => {
     expect(labels).toEqual(['Home', 'Drone', 'Home, destroyed', 'Front line']);
   });
 
+  it('says a layer\'s role of its areas and lines, once, and keeps its points\' own words', () => {
+    const claimed = { id: 'map', layers: [{ name: 'front', hidden: [], role: 'claimed', colour: '#c8102e', fill: 'hatch' }] };
+    const listed = legendRows(claimed, context());
+    expect(listed.map((row) => row.label)).toEqual(['Home', 'Drone', 'Home, destroyed', 'Claimed']);
+    expect(listed.at(-1)).toMatchObject({ kind: 'line', colour: '#c8102e', fill: 'hatch' });
+    // not read yet: the groups stand in, the role still said
+    expect(legendRows(claimed, context({ collection: () => null })).map((row) => row.label)).toEqual(['Claimed']);
+    // events keep every look of their own
+    const events = { id: 'map', layers: [{ name: 'front', hidden: [], role: 'events' }] };
+    expect(legendRows(events, context()).map((row) => row.label)).toEqual(['Home', 'Drone', 'Home, destroyed', 'Front line']);
+  });
+
+  it('names a point by what the case says its icon means', () => {
+    const meant = { front: { features: [point(0, 0, { category: 'Sites', symbol: 'badge-drone', colour: '#0072b2', icon_meaning: 'Drone strike' })] } };
+    expect(legendRows(map, context({ collection: (name) => meant[name] })).map((row) => row.label)).toEqual(['Drone strike']);
+  });
+
   it('lists what the layers hold off the map when asked', () => {
     const labels = legendRows({ ...map, offmap: true }, context()).map((row) => row.label);
     expect(labels).toContain('Tank');

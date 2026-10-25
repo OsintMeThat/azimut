@@ -74,12 +74,15 @@ test('a copied map wearing its own icons edits, and offers them beside the libra
   await panel.getByRole('button', { name: 'Site 2', exact: true }).click();
   await panel.getByRole('button', { name: 'Feature style', exact: true }).click();
   const palette = page.getByRole('group', { name: 'Feature style picker', exact: true });
-  await expect(palette.getByText("This layer's icons", { exact: true })).toBeVisible();
-  await expect(palette.getByText('Armour', { exact: true })).toBeVisible();
+  // each group is titled in the grid, a chip over it scrolling there
+  await expect(palette.locator('.icons .theme').getByText("This layer's icons", { exact: true })).toBeVisible();
+  await expect(palette.locator('.icons .theme').getByText('Armour', { exact: true })).toBeVisible();
+  await expect(palette.getByRole('button', { name: 'Armour', exact: true })).toBeVisible();
   await expect(palette.getByText('This icon keeps its own colours.', { exact: true })).toBeVisible();
   await expect(palette.getByRole('button', { name: 'Feature style Strike icon, this layer', exact: true })).toHaveAttribute('aria-pressed', 'true');
 
   // a colour leaves the icon on; the library's icon replaces it
+  await palette.getByRole('button', { name: 'More colours', exact: true }).click();
   await palette.getByRole('button', { name: 'Feature style orange', exact: true }).click();
   await expect.poll(() => sent.selection.at(-1)).toEqual({ colour: '#d55e00' });
   await palette.getByRole('button', { name: 'Feature style Tank icon, Armour', exact: true }).click();

@@ -360,7 +360,7 @@ export function imageryError(error, failed = 1, reason = '') {
  * @param {object} [hooks]
  * @param {(provider: object) => void} [hooks.onMeteredTiles] a billed layer painted
  * @param {(provider: object) => void} [hooks.onWidgetLoad] a billed map load happened
- * @param {(provider: object) => void} [hooks.onWidgetAuthFailure] Google rejected the key
+ * @param {(provider: object, reason: string) => void} [hooks.onWidgetAuthFailure] Google refused the map, and what to do
  * @param {(provider: object, error: Error) => void} [hooks.onWidgetFailed] the script never loaded
  */
 export function createBasemaps(engine, hooks = {}) {
@@ -389,6 +389,8 @@ export function createBasemaps(engine, hooks = {}) {
   let wanted = null; // the provider id last asked for, so a slow load can tell
   let metered = null; // the billed provider whose tiles we are counting
   let current = null; // the provider the zoom cap was last taken from
+  // how deep the view goes with no picture ground under it, given back when one goes
+  const ownCeiling = map.getMaxZoom?.() ?? null;
   let sharedCeiling = null; // a view zoom this map must not pass, whatever it shows
   let alternate = null; // `${providerId}@${cell}` of the second picture, when there is one
   let alternateMetered = null;
@@ -524,9 +526,8 @@ export function createBasemaps(engine, hooks = {}) {
   async function showWidget(provider) {
     try {
       await loadGoogleMaps(provider.url, {
-        // Google's only key-rejection signal — it can fire minutes after a
-        // clean load, so the caller handles it as a runtime event.
-        onAuthFailure: () => onWidgetAuthFailure(provider),
+        // it can come minutes after a clean load, so the caller handles it as a runtime event
+        onRefused: (reason) => onWidgetAuthFailure(provider, reason),
       });
     } catch (error) {
       onWidgetFailed(provider, error);
@@ -612,6 +613,19 @@ export function createBasemaps(engine, hooks = {}) {
         return;
       }
       showTiles(provider, providerId, cell);
+    },
+
+    /**
+     * No picture ground: the imagery goes, and the view goes as deep again as it
+     * did before one capped it. A plate's map takes a plain ground this way, its
+     * engine kept.
+     */
+    hide() {
+      wanted = null;
+      glass?.hide();
+      dropTiles();
+      current = null;
+      if (ownCeiling !== null && map.getMaxZoom?.() !== ownCeiling) map.setMaxZoom(ownCeiling);
     },
 
     retry(provider, providerId, cell) {

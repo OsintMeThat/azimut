@@ -38,7 +38,7 @@
   import { iconVersion, layerIconUrl } from '../../lib/map/ownIcons.js';
   import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
   import { asOf, isTracked } from '../../lib/map/layerHistory.js';
-  import { groundPalette, setContours, showPlain, topographic } from '../../lib/plate/plainBasemap.js';
+  import { NAME_LAYER_IDS, darkGround, hideImageryRelief, hidePlain, nameOf, readsHeights, setContours, shadeStrength, showImageryRelief, showPlain, topographic } from '../../lib/plate/plainBasemap.js';
   import { PX_PER_MM, fontFamily } from '../../lib/plate/page.js';
   import { corners as flatCorners, sameView } from '../../lib/plate/geo.js';
   import { gridLevel, halved, heightGrid } from '../../lib/plate/heights.js';
@@ -46,6 +46,11 @@
   import { ridgeLines } from '../../lib/plate/ridges.js';
   import { browserHeights } from '../../lib/map/reliefHeights.js';
   import { WAYBACK_ID, waybackId } from '../../lib/wayback.js';
+  import { CLOUDLESS_ID, cloudlessId } from '../../lib/plate/cloudless.js';
+  import { SENTINEL_ID, passId } from '../../lib/plate/sentinelPass.js';
+  import { turnFromPress } from '../../lib/map/gestures.js';
+  import { fillProperties } from '../../lib/plate/roles.js';
+  import TurnGuide from '../../components/TurnGuide.svelte';
   import { layerCell } from '../../lib/usage.js';
   import { uiState } from '../../lib/state.svelte.js';
 
@@ -72,6 +77,8 @@
     onview = null,
     /** `(handle)` once the map is drawn: `{ snapshot(ratio), sitting(ratio) }`; a snapshot is `{ canvas, complete }`. */
     onready = null,
+    /** `({ text, at, point, client })`: a name of the ground clicked while the map is framed, `point` in the map's pixels. */
+    onname = null,
   } = $props();
 
   const width = $derived(element.box[2] * PX_PER_MM);
@@ -180,25 +187,52 @@
     start();
   }
 
-  /** The ground's own settings, as one key: a change rebuilds the plain ground, never the map. */
-  const plainKey = $derived(JSON.stringify([element.basemap, element.plain ?? {}, element.relief ?? 1, (element.overlays ?? []).includes('relief'), font]));
+  /** Which ground the map stands on: its style, or its picture and the date of it. */
+  const groundKey = $derived(JSON.stringify([element.basemap, element.release ?? null, element.year ?? null, element.acquired ?? null,
+    element.product ?? '', element.maxcc ?? null]));
+  /** The ground and its own settings, as one key: a change lays the ground again, never the map. */
+  const plainKey = $derived(JSON.stringify([groundKey, element.plain ?? {}, element.relief ?? 1, (element.overlays ?? []).includes('relief'), font]));
 
   function showGround(map) {
     const ground = untrack(() => element.basemap) || 'plain';
     if (ground.startsWith('plain')) {
       const plain = untrack(() => element.plain) ?? {};
-      const shaded = untrack(() => element.overlays ?? []).includes('relief');
-      // a topographic ground reads the heights for its tints whether or not it is shaded
-      showPlain(map, { palette: groundPalette(ground), relief: shaded || topographic(ground) ? untrack(() => relief) : null, shade: shaded,
-        intensity: untrack(() => element.relief) ?? 1, font: fontFamily(untrack(() => font)), ...plain });
+      const overlays = untrack(() => element.overlays ?? []);
+      // a ground that tints or shades its own heights reads them whether or not the shading is asked for
+      basemaps?.hide();
+      hideImageryRelief(map);
+      showPlain(map, { ground, relief: readsHeights(ground, overlays) ? untrack(() => relief) : null,
+        shade: overlays.includes('relief'), intensity: untrack(() => element.relief) ?? 1, font: fontFamily(untrack(() => font)), ...plain });
       traced = '';
       traceSoon();
       return;
     }
+    // a picture ground: the plain one goes, its names with it
+    hidePlain(map);
+    traced = '';
+    traceSoon();
     const provider = untrack(() => providers).find((entry) => entry.id === ground) ?? null;
-    if (!provider) return;
-    const id = ground === WAYBACK_ID ? waybackId(ground, untrack(() => element.release)) : provider.id;
+    const id = provider ? sourceId(ground, provider) : null;
+    // a Sentinel-2 map draws nothing until its pass is picked: never a mix of passes
+    if (!id) { basemaps.hide(); hideImageryRelief(map); return; }
     basemaps.show(provider, id, layerCell(provider, Math.round(map.getZoom() + 1)));
+    shadeImagery(map);
+  }
+
+  /** The tiles a picture ground is asked for: a Wayback release, a year of Sentinel-2 cloudless, or one Sentinel-2 pass, when the map names one. */
+  function sourceId(ground, provider) {
+    if (ground === WAYBACK_ID) return waybackId(ground, untrack(() => element.release));
+    if (ground === CLOUDLESS_ID) return cloudlessId(untrack(() => element.year));
+    if (ground === SENTINEL_ID) return untrack(() => passId(element));
+    return provider.id;
+  }
+
+  /** The relief shaded over the imagery, when the map asks for it: the slopes read on a flat picture. */
+  function shadeImagery(map) {
+    const shaded = untrack(() => element.overlays ?? []).includes('relief');
+    if (!shaded) { hideImageryRelief(map); return; }
+    showImageryRelief(map, { relief: untrack(() => relief), over: IMAGERY_SOURCE,
+      strength: shadeStrength('', { shaded, intensity: untrack(() => element.relief) ?? 1 }) });
   }
 
   async function build() {
@@ -219,6 +253,7 @@
     map.jumpTo({ center: [start.lon, start.lat], zoom: start.zoom, bearing: start.bearing ?? 0, pitch: start.pitch ?? 0 });
     map.on('move', report);
     map.on('moveend', traceSoon);
+    map.on('click', nameClicked);
     basemaps = createBasemaps(engine);
     showGround(map);
     applyGestures(untrack(() => interactive));
@@ -238,15 +273,27 @@
     };
   }
 
-  // The plain ground's colours, roads, names or relief changed: it is laid again.
+  // Another ground, or the plain ground's colours, roads, names or relief changed: it is laid
+  // again on the same map, which keeps its engine, its tiles and the drawing it was given.
   let lastPlain = '';
+  let lastGround = '';
   $effect(() => {
     const key = plainKey;
+    const ground = groundKey;
     if (!ready || !engine) return;
-    if (!lastPlain) { lastPlain = key; return; }
+    if (!lastPlain) { lastPlain = key; lastGround = ground; return; }
     if (key === lastPlain) return;
+    const moved = ground !== lastGround;
     lastPlain = key;
-    if (String(untrack(() => element.basemap)).startsWith('plain')) untrack(() => showGround(engine.impl));
+    lastGround = ground;
+    if (moved || String(untrack(() => element.basemap)).startsWith('plain')) untrack(() => showGround(engine.impl));
+    else untrack(() => shadeImagery(engine.impl));
+  });
+
+  // the providers read after the map was built: a picture ground comes in then
+  $effect(() => {
+    void providers;
+    if (ready && engine && !String(untrack(() => element.basemap)).startsWith('plain')) untrack(() => showGround(engine.impl));
   });
 
   // The key-less layers laid over the ground, switched one by one: the map is never built again for one,
@@ -284,12 +331,54 @@
     const map = engine?.impl;
     // on the globe, the globe takes the hand, and its canvas only while the map is framed
     if (!map || globe) return;
-    // the hand turns a plate's map too: a right-drag or a Ctrl-drag, and two fingers
+    // the engine's own turn (a right-drag, a Ctrl-drag, two fingers) stays, beside the app's gesture below
     for (const handler of [map.dragPan, map.scrollZoom, map.doubleClickZoom, map.touchZoomRotate, map.keyboard, map.dragRotate]) {
       if (on) handler?.enable?.(); else handler?.disable?.();
     }
   }
   $effect(() => { if (ready) applyGestures(interactive); });
+
+  /** The grabbed point a turn goes round, in the map's own pixels, while the hand turns it. */
+  let turning = $state(null);
+  /** A click on one of the ground's names while the map is framed: the page offers to take it off or make it a label. */
+  function nameClicked(event) {
+    const map = engine?.impl;
+    if (!map || !untrack(() => interactive) || globe || !onname) return;
+    const layers = NAME_LAYER_IDS.filter((id) => map.getLayer(id));
+    const [hit] = layers.length ? map.queryRenderedFeatures(event.point, { layers }) : [];
+    const text = hit ? nameOf(hit.properties, untrack(() => element.plain?.lang) ?? 'latin') : '';
+    if (!text) return;
+    // a town's own point, a river's where it was clicked
+    const [lon, lat] = hit.geometry?.type === 'Point' ? hit.geometry.coordinates : [event.lngLat.lng, event.lngLat.lat];
+    const point = map.project([lon, lat]);
+    onname({ text, at: [lon, lat], point: [point.x, point.y], client: { x: event.originalEvent.clientX, y: event.originalEvent.clientY } });
+  }
+
+  /** How many screen pixels one of the map's pixels takes: the page is drawn scaled, the map's own pixels are not. */
+  const handScale = () => container.getBoundingClientRect().width / (container.offsetWidth || 1) || 1;
+  /** The engine as the hand sees it, in screen pixels, for the app's turn gesture. */
+  function handEngine() {
+    const scale = handScale();
+    return {
+      container,
+      camera: () => engine.camera(),
+      setBearing: (bearing) => engine.setBearing(bearing),
+      containerPointToLatLng: ({ x, y }) => engine.containerPointToLatLng({ x: x / scale, y: y / scale }),
+      latLngToContainerPoint: (at) => { const point = engine.latLngToContainerPoint(at); return { x: point.x * scale, y: point.y * scale }; },
+      panBy: (dx, dy) => engine.panBy(dx / scale, dy / scale),
+    };
+  }
+  // a framed flat map turns as the app's other maps do: a middle-drag, a Shift-drag, or a double click held and dragged
+  $effect(() => {
+    if (!interactive || !ready || onGlobe || !container) return;
+    const down = (event) => {
+      const scale = handScale();
+      turnFromPress(handEngine(), event, { double: true, onPivot: (point) => (turning = { x: point.x / scale, y: point.y / scale }),
+        onEnd: () => (turning = null) });
+    };
+    container.addEventListener('mousedown', down, true);
+    return () => container.removeEventListener('mousedown', down, true);
+  });
 
   // A view set from outside (the inspector, an inset following its map, a drag on the page) moves the camera.
   $effect(() => {
@@ -381,7 +470,12 @@
       drawn.setTone(null);
       return;
     }
-    const id = ground === WAYBACK_ID ? waybackId(ground, untrack(() => element.release)) : provider.id;
+    const id = sourceId(ground, provider);
+    if (!id) {
+      drawn.setImagery(null);
+      drawn.setTone(null);
+      return;
+    }
     const cell = layerCell(provider, Math.round(cameraOf().zoom + 1));
     drawn.setImagery({ id, metered: Boolean(provider.meter), cell, deepest: sourceMaxZoom(provider, cell) });
     drawn.setTone(untrack(() => element.tone) ?? {});
@@ -392,6 +486,10 @@
     void plainKey;
     void JSON.stringify(element.tone ?? {});
     void element.release;
+    void element.year;
+    void element.acquired;
+    void element.product;
+    void element.maxcc;
     void providers;
     if (globe) untrack(() => lookOnGlobe());
   });
@@ -487,7 +585,7 @@
     }
     if (want.ridges) {
       const lines = ridgeLines(halved(grid));
-      const dark = (untrack(() => element.basemap) || '') === 'plain-dark' || !String(untrack(() => element.basemap)).startsWith('plain');
+      const dark = darkGround(untrack(() => element.basemap) || 'plain');
       if (map.getSource(RIDGES)) map.getSource(RIDGES).setData(lines);
       else {
         map.addSource(RIDGES, { type: 'geojson', data: lines });
@@ -505,10 +603,11 @@
   function features(entry, data) {
     const stroke = entry.stroke ?? 1;
     const icons = entry.icons ?? stroke;
-    if (stroke === 1 && icons === 1 && !entry.colour && !entry.dash) return data;
+    const fill = fillProperties(entry.fill);
+    if (stroke === 1 && icons === 1 && !entry.colour && !entry.dash && !fill) return data;
     return { ...data, features: data.features.map((feature) => ({ ...feature, properties: { ...feature.properties,
       stroke_width: (feature.properties.stroke_width ?? 2) * stroke, icon_scale: (feature.properties.icon_scale ?? 1) * icons,
-      ...(entry.colour ? { colour: entry.colour } : {}), ...(entry.dash ? { line_dash: entry.dash } : {}) } })) };
+      ...(entry.colour ? { colour: entry.colour } : {}), ...(entry.dash ? { line_dash: entry.dash } : {}), ...(fill ?? {}) } })) };
   }
 
   /** How the layers are read: the day and how much of its past, never the step, which changes none of it. */
@@ -547,14 +646,14 @@
       // a layer switched to tracked, or back, needs the engine layers its past is drawn on
       if (held && held.tracked !== tracked) { held.layer.destroy(); drawn.delete(entry.name); held = null; }
       if (!held) {
-        const layer = createAddedLayer(engine, { editable: !!row.editable, history: tracked,
+        const layer = createAddedLayer(engine, { editable: !!row.editable, history: tracked, page: true,
           iconUrl: row.icons ? (icon) => layerIconUrl(caseId, row.name, icon, iconVersions.get(row.name)) : null });
         layer.interactive(false);
         held = { layer, tracked, data: null, look: '' };
         drawn.set(entry.name, held);
       }
       const record = held;
-      const look = JSON.stringify([row.sha256, entry.stroke ?? 1, entry.icons ?? 1, entry.colour ?? '', entry.dash ?? '', entry.hidden]);
+      const look = JSON.stringify([row.sha256, entry.stroke ?? 1, entry.icons ?? 1, entry.colour ?? '', entry.dash ?? '', entry.fill ?? '', entry.hidden]);
       work.push(addedLayers.drawing(caseId, row.name).then((collection) => {
         if (drawn.get(entry.name) !== record) return;
         // a day where nothing of the layer moved reads the same, and the engine is spared cutting it again
@@ -686,6 +785,7 @@
     <canvas class="globe" style:pointer-events={interactive ? null : 'none'} bind:this={globeCanvas} aria-label="The map in 3D, on its relief"></canvas>
     <canvas class="globe-marks" bind:this={marksCanvas} aria-hidden="true"></canvas>
   {/if}
+  {#if turning}<TurnGuide x={turning.x} y={turning.y} />{/if}
   {#if relieved && globeRefused}<p class="refused flat">This browser cannot draw the map in 3D: it needs WebGL2. It is drawn flat.</p>{/if}
   {#if failed}<p class="refused">This browser cannot draw the map.</p>
   {:else if crowded}<p class="refused">The browser has too many maps open to draw this one. Close another tab or tool with a map, then come back to the plate.</p>{/if}

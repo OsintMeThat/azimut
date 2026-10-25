@@ -10,12 +10,13 @@
    *
    * Items take the `fm-*` classes styled here, so every floating menu reads the
    * same: `fm-item` (a row, `danger` for one that removes), `fm-head`, `fm-sep`
-   * and `fm-note`.
+   * and `fm-note`. A `column` menu lays its parts out top to bottom and lets the
+   * part that scrolls of its own give way, the rest staying in view.
    */
   import { portal } from '../lib/fullscreen.js';
   import { placeFloating } from '../lib/floatingPlace.js';
 
-  let { anchor = null, at = null, width = 220, align = 'start', label, role = 'menu', onclose, children } = $props();
+  let { anchor = null, at = null, width = 220, align = 'start', label, role = 'menu', column = false, onclose, children } = $props();
   let node = $state(null);
   let place = $state({ left: -9999, top: -9999, maxHeight: 480 });
 
@@ -61,7 +62,7 @@
   });
 </script>
 
-<div class="float-menu" {role} aria-label={label} tabindex="-1" bind:this={node} use:portal
+<div class="float-menu" class:column {role} aria-label={label} tabindex="-1" bind:this={node} use:portal
   style:left={`${place.left}px`} style:top={`${place.top}px`} style:width={`${width}px`} style:max-height={`${place.maxHeight}px`}>
   {@render children?.()}
 </div>
@@ -70,6 +71,8 @@
   /* Above the map's own controls and above a modal (900), as the other floating menus. */
   .float-menu { position: fixed; z-index: 950; overflow-y: auto; padding: 5px; background: var(--bg-1); border: 1px solid var(--border);
     border-radius: var(--r-sm); box-shadow: var(--shadow-2); color: var(--text-1); font-size: var(--fs-xs); outline: none; }
+  /* a flex item keeps its content's height unless it scrolls: the scrolling part is the one that gives */
+  .float-menu.column { display: flex; flex-direction: column; }
   .float-menu :global(.fm-item) { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 5px 8px;
     border-radius: var(--r-sm); color: var(--text-1); font-size: var(--fs-sm); text-align: left; cursor: pointer; }
   .float-menu :global(.fm-item:hover:not(:disabled)), .float-menu :global(.fm-item:focus-visible) { background: var(--bg-3); }

@@ -69,8 +69,9 @@ already). Each point refined about a kept one stays inside what is searched.
 
 A large grid is scored by several processes at once (`lanes`), each with the
 plan and its own terrain reader, its tiles bounded: threads would not help, the
-work holds Python's lock (measured: 4 threads slower than 1, 4 processes 2.2
-times faster than 1 over 480 points, 8 no faster than 4).
+work holds Python's lock (measured: 4 threads slower than 1; 4 processes 1.9
+times as fast as 1 over 600 points of a DRC search on an 8-core laptop, 8 2.6
+times, 12 no faster than 8).
 
 Alignments (frontend lib/horizon/find.js) narrow it twice. A point off any
 alignment's line is not searched at all. And with the lens known, an alignment
@@ -100,7 +101,7 @@ from typing import Any, Literal
 
 import numpy as np
 
-from . import horizon, landform, skymatch, terrain, turncache
+from . import horizon, landform, ruleout, skymatch, terrain, turncache
 
 # Searched when the analyst left the reach to Auto: these cuts and the turn out to the last.
 AUTO_FAR = 50_000.0
@@ -136,6 +137,8 @@ STANDOUT_MIN = 0.06
 # The coarse grid's spacing when left to Auto: about this many points over the area, some ten minutes of
 # search, so a small area is searched every 50 or 20 m.
 AUTO_POINTS = 4_000
+# How thorough Auto's grid is, as the analyst picks it against the time it takes: these times AUTO_POINTS.
+EFFORTS = {"quick": 0.25, "normal": 1.0, "thorough": 3.0}
 NICE_SPACINGS = (20.0, 50.0, 100.0, 150.0, 250.0, 400.0, 500.0, 750.0, 1_000.0, 1_500.0, 2_000.0, 3_000.0)
 # The most points a coarse grid may hold: past it the spacing widens, and the estimate says so. Auto's grid
 # holds COARSE_MAX at the most and the zones' own grids ZONES_MAX more between them; a spacing the analyst
@@ -161,6 +164,13 @@ WORKERS = 2
 # A grid this large is scored by several processes, when asked; and the tiles a search's terrain reader holds.
 LANE_MIN_POINTS = 200
 SEARCH_TILES = 256
+# A search in n lanes goes n to this power times as fast (measured over 600 points of a DRC search on an
+# 8-core laptop: 4 processes 1.9 times as fast as one, 8 2.6 times; engine/horizon_finds.py SPEEDS).
+LANE_POWER = 0.46
+# A search's pace is timed on this many points of its grid, after one that reads the terrain in; a place
+# searched in full takes about this many times as long as one ranked roughly.
+PACE_POINTS = 3
+FULL_COST = 8.0
 # A sector searched about the heading an alignment gives, degrees either side at the least.
 FACING_MIN = 3.0
 # A line the analyst says nothing of is laid on no ground nearer than this, metres: on foot, the
@@ -190,12 +200,16 @@ SUN_SIDES = {"ahead": 0.0, "right": -90.0, "behind": 180.0, "left": 90.0}
 # Half the headings each side stands for, degrees, and the minutes between the sun's positions read.
 SUN_HALF = 45.0
 SUN_EVERY_MIN = 10
+# The ground the grid's preview says of a point the brush left out.
+PAINTED = "painted"
 
 Verdict = Literal["match", "loose", "ambiguous", "none", "flat", "unclear"]
 
 
 class Cancelled(Exception):
-    """The analyst stopped the search."""
+    """The analyst stopped the search: `result` is what it had found by then (`so_far`), once `search` says."""
+
+    result: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -281,6 +295,16 @@ class Zone:
 
 
 @dataclass(frozen=True)
+class Stroke:
+    """A stroke of the brush across the map: the points within `radius` metres of its `path` left out (`out`),
+    or searched though no area covers them. A stroke paints over the strokes before it."""
+
+    path: Sequence[tuple[float, float]]
+    radius: float
+    out: bool = True
+
+
+@dataclass(frozen=True)
 class Plan:
     """Where to search and who took the photo."""
 
@@ -299,6 +323,17 @@ class Plan:
     near: float | None = None
     # zones searched on their own grid beside the area, or left out
     zones: Sequence[Zone] = field(default_factory=tuple)
+    # more areas searched beside the first, on the same grid
+    areas: Sequence[Sequence[tuple[float, float]]] = field(default_factory=tuple)
+    # the brush's strokes, in the order they were painted
+    strokes: Sequence[Stroke] = field(default_factory=tuple)
+    # how thorough Auto's grid is (EFFORTS): it lays this many times AUTO_POINTS
+    effort: float = 1.0
+    # what the photo shows that rules points out before any sweep (engine/ruleout.py): a line along the sea's
+    # horizon, water (the sea or a lake), the eye standing above the land round it or below it
+    sea: bool = False
+    water: bool = False
+    over: str | None = None
 
 
 def marks_of(trace: dict[str, Any]) -> skymatch.Marks | None:
@@ -348,11 +383,55 @@ def area_m2(area: Sequence[tuple[float, float]]) -> float:
     return float(abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))) / 2)
 
 
-def auto_spacing(area: Sequence[tuple[float, float]]) -> float:
-    """The coarse spacing a square grid would lay about `AUTO_POINTS` points over the area at, rounded to a plain
-    number: the hex lattice lays a quarter fewer, as close to every spot."""
-    wanted = math.sqrt(max(area_m2(area), 1.0) / AUTO_POINTS)
-    return next((s for s in NICE_SPACINGS if s >= wanted), NICE_SPACINGS[-1])
+def auto_spacing(area: Sequence[tuple[float, float]] | float, effort: float = 1.0) -> float:
+    """The coarse spacing a square grid would lay about `AUTO_POINTS` points over the area (a polygon, or square
+    metres) at, rounded to a plain number, for about `effort` times as many: the hex lattice lays a quarter
+    fewer, as close to every spot."""
+    size = float(area) if isinstance(area, (int, float)) else area_m2(area)
+    wanted = math.sqrt(max(size, 1.0) / AUTO_POINTS)
+    plain = next((s for s in NICE_SPACINGS if s >= wanted), NICE_SPACINGS[-1])
+    if effort == 1.0:
+        return plain
+    # another effort scales the plain spacing itself, so a small area's 50 m grid still tightens: to 5 m
+    return max(NICE_SPACINGS[0], round(plain / math.sqrt(effort) / 5) * 5)
+
+
+def areas_of(plan: Plan) -> list[Sequence[tuple[float, float]]]:
+    """Every area the plan searches on its grid: the first and those beside it."""
+    return [plan.area, *plan.areas]
+
+
+def searched_m2(plan: Plan) -> float:
+    """How much ground the plan's grid covers, square metres: its areas and what the brush painted in."""
+    size = sum(area_m2(area) for area in areas_of(plan))
+    for stroke in plan.strokes:
+        if not stroke.out:
+            size += _path_length(stroke.path) * 2 * stroke.radius + math.pi * stroke.radius**2
+    return size
+
+
+def _path_length(path: Sequence[tuple[float, float]]) -> float:
+    return sum(terrain.distance(*a, *b) for a, b in zip(path, path[1:]))
+
+
+def near_path(path: Sequence[tuple[float, float]], radius: float, lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+    """Which points lie within `radius` metres of the path (a stroke of the brush), worked flat about its start."""
+    lat = np.asarray(lat, dtype=np.float64)
+    lon = np.asarray(lon, dtype=np.float64)
+    if not path or not lat.size:
+        return np.zeros(lat.shape, dtype=bool)
+    lat0, lon0 = path[0]
+    px, py = _local(lat0, lon0, lat, lon)
+    sx, sy = _local(lat0, lon0, np.array([p[0] for p in path]), np.array([p[1] for p in path]))
+    best = np.hypot(px - sx[0], py - sy[0])
+    for i in range(len(path) - 1):
+        dx, dy = sx[i + 1] - sx[i], sy[i + 1] - sy[i]
+        length = dx * dx + dy * dy
+        if length <= 0:
+            continue
+        share = np.clip(((px - sx[i]) * dx + (py - sy[i]) * dy) / length, 0.0, 1.0)
+        best = np.minimum(best, np.hypot(px - (sx[i] + share * dx), py - (sy[i] + share * dy)))
+    return best <= radius
 
 
 def inside(area: Sequence[tuple[float, float]], lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
@@ -393,9 +472,13 @@ def _along(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray]:
     apart along it and across it, the line itself always among them.
     """
     line = plan.alignments[0]
-    corners = [(float(a), float(o)) for a, o in plan.area]
+    corners = [(float(a), float(o)) for area in areas_of(plan) for a, o in area]
     corners += [(float(a), float(o)) for zone in plan.zones if not zone.out for a, o in zone.area]
     reach = max(terrain.distance(line.lat, line.lon, a, o) for a, o in corners)
+    # what the brush painted in reaches as far as its strokes, and their width beyond
+    for stroke in plan.strokes:
+        if not stroke.out:
+            reach = max(reach, *(terrain.distance(line.lat, line.lon, a, o) + stroke.radius for a, o in stroke.path))
     lats: list[float] = []
     lons: list[float] = []
     for distance in np.arange(spacing / 2, reach + spacing, spacing):
@@ -410,16 +493,22 @@ def _along(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray]:
 
 
 def within(plan: Plan, lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
-    """Which points are searched: in the area or a zone searched, and in no zone left out."""
+    """Which points are searched: in an area or a zone searched, and in no zone left out; then as the brush
+    painted them, each stroke over the ones before."""
     lat = np.asarray(lat, dtype=np.float64)
     lon = np.asarray(lon, dtype=np.float64)
     keep = inside(plan.area, lat, lon)
+    for area in plan.areas:
+        keep |= inside(area, lat, lon)
     for zone in plan.zones:
         if not zone.out:
             keep |= inside(zone.area, lat, lon)
     for zone in plan.zones:
         if zone.out:
             keep &= ~inside(zone.area, lat, lon)
+    for stroke in plan.strokes:
+        painted = near_path(stroke.path, stroke.radius, lat, lon)
+        keep = keep & ~painted if stroke.out else keep | painted
     return keep
 
 
@@ -455,8 +544,8 @@ def zones_wider(plan: Plan, spacing: float) -> float | None:
 
 
 def grid(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray]:
-    """The grid's points over the area, and each zone searched on its own, out of the zones left out and on
-    the alignments' lines."""
+    """The grid's points over the areas, and each zone searched on its own, out of the zones left out, as the
+    brush painted them and on the alignments' lines."""
     lat, lon, _ = spaced_grid(plan, spacing)
     return lat, lon
 
@@ -469,7 +558,9 @@ def spaced_grid(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray, np.
         keep = within(plan, lat, lon) & on_lines(plan.alignments, lat, lon)
         return lat[keep], lon[keep], np.full(int(keep.sum()), spacing)
     spacings = zone_spacings(plan, spacing) if plan.zones else []
-    parts = [(*_polygon_grid(plan.area, spacing), spacing)]
+    painted = any(not stroke.out for stroke in plan.strokes)
+    # several areas, or ground painted in, share one lattice: overlapping areas lay each point once
+    parts = [(*(_union_grid(plan, spacing) if plan.areas or painted else _polygon_grid(plan.area, spacing)), spacing)]
     for zone, step in zip(plan.zones, spacings):
         if step:
             parts.append((*_polygon_grid(zone.area, step), step))
@@ -489,30 +580,92 @@ def spaced_grid(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray, np.
         lat, lon, steps = lat[first], lon[first], steps[first]
         keep = within(plan, lat, lon)
         lat, lon, steps = lat[keep], lon[keep], steps[keep]
+    elif plan.strokes:
+        keep = within(plan, lat, lon)
+        lat, lon, steps = lat[keep], lon[keep], steps[keep]
     return lat, lon, steps
 
 
-def _polygon_grid(area: Sequence[tuple[float, float]], spacing: float) -> tuple[np.ndarray, np.ndarray]:
-    """Points over a polygon as close to every spot as a square grid `spacing` metres apart: a hex lattice
-    (`HEX_ACROSS`, `HEX_ROWS`)."""
-    lat0, lon0 = area[0]
-    lats = np.array([p[0] for p in area])
-    lons = np.array([p[1] for p in area])
-    x, y = _local(lat0, lon0, lats, lons)
+def _lattice(
+    lat0: float, lon0: float, x: np.ndarray, y: np.ndarray, spacing: float,
+    origin: tuple[float, float] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """A hex lattice (`HEX_ACROSS`, `HEX_ROWS`) as close to every spot as a square grid `spacing` metres apart,
+    over the box of the local points (x, y) about (lat0, lon0): from the box's corner, or set on `origin`, a
+    corner in local metres the box may grow past, so the points it held stay where they were (the map lays
+    the ones the brush paints in on the same lattice, frontend lib/horizon/find.js `latticeNear`)."""
     across = spacing * HEX_ACROSS
+    rows = spacing * HEX_ROWS
     gxs: list[np.ndarray] = []
     gys: list[np.ndarray] = []
-    for i, row in enumerate(np.arange(y.min() + spacing * HEX_ROWS / 2, y.max() + spacing * HEX_ROWS / 2,
-                                      spacing * HEX_ROWS)):
-        # every other row shifted by half, its first point on the polygon's edge
-        xs = np.arange(x.min(), x.max() + across / 2, across) if i % 2 else np.arange(x.min() + across / 2, x.max(), across)
-        gxs.append(xs)
-        gys.append(np.full(xs.size, row))
+    if origin is None:
+        for i, row in enumerate(np.arange(y.min() + rows / 2, y.max() + rows / 2, rows)):
+            # every other row shifted by half, its first point on the box's edge
+            xs = np.arange(x.min(), x.max() + across / 2, across) if i % 2 else np.arange(x.min() + across / 2, x.max(), across)
+            gxs.append(xs)
+            gys.append(np.full(xs.size, row))
+    else:
+        x0, y0 = origin
+        # the rows and columns over the box and one more each way; the caller keeps those inside
+        for i in range(math.floor((y.min() - y0) / rows - 0.5) - 1, math.ceil((y.max() - y0) / rows - 0.5) + 2):
+            shift = 0.0 if i % 2 else across / 2
+            columns = np.arange(math.floor((x.min() - x0 - shift) / across) - 1, math.ceil((x.max() - x0 - shift) / across) + 2)
+            xs = x0 + shift + columns * across
+            gxs.append(xs)
+            gys.append(np.full(xs.size, y0 + rows / 2 + i * rows))
     if not gxs:
         return np.empty(0), np.empty(0)
-    lat, lon = _from_local(lat0, lon0, np.concatenate(gxs), np.concatenate(gys))
+    return _from_local(lat0, lon0, np.concatenate(gxs), np.concatenate(gys))
+
+
+def _polygon_grid(area: Sequence[tuple[float, float]], spacing: float) -> tuple[np.ndarray, np.ndarray]:
+    """Points over a polygon as close to every spot as a square grid `spacing` metres apart (`_lattice`)."""
+    lat0, lon0 = area[0]
+    x, y = _local(lat0, lon0, np.array([p[0] for p in area]), np.array([p[1] for p in area]))
+    lat, lon = _lattice(lat0, lon0, x, y, spacing)
     keep = inside(area, lat, lon)
     return lat[keep], lon[keep]
+
+
+def _union_grid(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray]:
+    """One lattice over every area and every stroke painted in (`_lattice`, about the first area's first corner
+    and set on the corner of its box, so it lays the first area's points as that area alone does), each point
+    laid once however the areas overlap; `within` then says which are searched."""
+    lat0, lon0 = plan.area[0]
+    xs: list[np.ndarray] = []
+    ys: list[np.ndarray] = []
+    for area in areas_of(plan):
+        x, y = _local(lat0, lon0, np.array([p[0] for p in area]), np.array([p[1] for p in area]))
+        xs.append(x)
+        ys.append(y)
+    origin = (float(xs[0].min()), float(ys[0].min()))
+    for stroke in plan.strokes:
+        if stroke.out:
+            continue
+        x, y = _local(lat0, lon0, np.array([p[0] for p in stroke.path]), np.array([p[1] for p in stroke.path]))
+        xs.extend([x - stroke.radius, x + stroke.radius])
+        ys.extend([y - stroke.radius, y + stroke.radius])
+    lat, lon = _lattice(lat0, lon0, np.concatenate(xs), np.concatenate(ys), spacing, origin)
+    covered = np.zeros(lat.shape, dtype=bool)
+    for area in areas_of(plan):
+        covered |= inside(area, lat, lon)
+    for stroke in plan.strokes:
+        if not stroke.out:
+            covered |= near_path(stroke.path, stroke.radius, lat, lon)
+    return lat[covered], lon[covered]
+
+
+def rules_out(plan: Plan) -> bool:
+    """Whether the plan says something of the photo that rules points out before any sweep (engine/ruleout.py)."""
+    return bool(plan.sea or plan.water or plan.over)
+
+
+def seen_from(plan: Plan, lat: np.ndarray, lon: np.ndarray, sampler: terrain.Sampler) -> np.ndarray:
+    """Which points may have taken the photo for what it shows (engine/ruleout.py): all of them when it says
+    nothing that rules one out."""
+    if not rules_out(plan) or not np.size(lat):
+        return np.ones(np.size(lat), dtype=bool)
+    return ruleout.ruled(plan, np.asarray(lat), np.asarray(lon), sampler) == ""
 
 
 def standing(plan: Plan, lat: np.ndarray, lon: np.ndarray, sampler: terrain.Sampler, *, kinds: bool = True) -> np.ndarray:
@@ -533,20 +686,39 @@ def standing(plan: Plan, lat: np.ndarray, lon: np.ndarray, sampler: terrain.Samp
 
 
 def preview(plan: Plan, sampler: terrain.Sampler | None = None) -> dict[str, Any]:
-    """The coarse grid before a search, each point with the ground it stands on and whether it is searched."""
+    """The coarse grid before a search, each point with the ground it stands on and whether it is searched; a
+    point the brush left out stays on it, greyed, its ground said `PAINTED` and the ground under it after (the
+    map turns it back on in its colour while the brush paints), and one what the photo shows rules out its
+    reason (engine/ruleout.py `REASONS`), counted in `ruled`."""
     sampler = sampler or terrain.Sampler()
     spacing = coarse_spacing(plan)
-    lat, lon = grid(plan, spacing)
-    ground = landform.kinds(lat, lon, sampler) if lat.size else np.array([], dtype=object)
-    kept = standing(plan, lat, lon, sampler)
+    # the grid laid as if the brush had painted nothing out, then what it painted out said so
+    shown = replace(plan, strokes=tuple(stroke for stroke in plan.strokes if not stroke.out)) if plan.strokes else plan
+    lat, lon = grid(shown, spacing)
+    painted = ~within(plan, lat, lon) if plan.strokes else np.zeros(lat.size, dtype=bool)
+    under = landform.kinds(lat, lon, sampler) if lat.size else np.empty(0, dtype=object)
+    ground = np.where(painted, PAINTED, under).astype(object)
+    kept = np.zeros(lat.size, dtype=bool)
+    if (~painted).any():
+        kept[~painted] = standing(plan, lat[~painted], lon[~painted], sampler)
     counts = {kind: int(np.sum(ground == kind)) for kind in landform.STANDS}
+    # what the photo shows rules out, said as the ground those points stand on
+    ruled: dict[str, int] = {}
+    if rules_out(plan) and kept.any():
+        why = ruleout.ruled(plan, lat[kept], lon[kept], sampler)
+        out = np.flatnonzero(kept)[why != ""]
+        ground[out] = why[why != ""]
+        kept[out] = False
+        ruled = {reason: int(np.sum(why == reason)) for reason in ruleout.REASONS if np.any(why == reason)}
     return {
         "spacing": spacing,
         "total": int(lat.size),
         "kept": int(kept.sum()),
         "kinds": counts,
+        "ruled": ruled,
         "points": [
-            [round(float(a), 6), round(float(o), 6), str(k), bool(on)] for a, o, k, on in zip(lat, lon, ground, kept)
+            [round(float(a), 6), round(float(o), 6), str(k), bool(on), *([str(u)] if k == PAINTED else [])]
+            for a, o, k, on, u in zip(lat, lon, ground, kept, under)
         ],
     }
 
@@ -555,7 +727,7 @@ def asked_spacing(plan: Plan) -> float:
     """The coarse spacing asked: the analyst's, else Auto's, no wider than the nearest line said asks for."""
     if plan.spacing:
         return float(plan.spacing)
-    spacing = auto_spacing(plan.area)
+    spacing = auto_spacing(searched_m2(plan), plan.effort)
     if plan.near:
         spacing = min(spacing, max(FINE_MIN, SAID_SHARE * plan.near))
     return spacing
@@ -565,11 +737,11 @@ def coarse_spacing(plan: Plan) -> float:
     """The coarse grid's spacing: the one asked (`asked_spacing`), widened until the grid is within `COARSE_MAX`,
     or `PICKED_MAX` for a spacing the analyst picked."""
     spacing = asked_spacing(plan)
-    most = PICKED_MAX if plan.spacing else COARSE_MAX
+    most = PICKED_MAX if plan.spacing else round(COARSE_MAX * max(1.0, plan.effort))
     if not plan.alignments:
         # a fine grid over a large area starts about as wide as it must end, not by laying millions of points:
         # the hex lattice lays one point every HEX_ACROSS·HEX_ROWS square spacings
-        spacing = max(spacing, math.sqrt(area_m2(plan.area) / (most * HEX_ACROSS * HEX_ROWS)))
+        spacing = max(spacing, math.sqrt(searched_m2(plan) / (most * HEX_ACROSS * HEX_ROWS)))
     while grid(plan, spacing)[0].size > most:
         spacing *= 1.05
     return spacing
@@ -604,8 +776,9 @@ def _polish_count() -> int:
     return POLISH * ((2 * POLISH_STEPS + 1) ** 2 - 1)
 
 
-def estimate(plan: Plan) -> dict[str, Any]:
-    """How many points a search lays and refines, before it is run, the terrain left unread."""
+def estimate(plan: Plan, *, efforts: bool = True) -> dict[str, Any]:
+    """How many points a search lays and refines, before it is run, the terrain left unread; with Auto's grid,
+    as many for each effort the analyst may pick (`efforts`)."""
     spacing = coarse_spacing(plan)
     fine = fine_spacing(plan, probe=False)
     coarse = int(grid(plan, spacing)[0].size)
@@ -622,7 +795,38 @@ def estimate(plan: Plan) -> dict[str, Any]:
         "zones_wider": zones_wider(plan, spacing),
         # where relief stands near, the cells are filled in: at most this many points in all
         "most": points + int(DENSE_MAX * coarse),
+        **({"efforts": {
+            name: {key: told[key] for key in ("points", "most", "spacing", "coarse")}
+            for name, effort in EFFORTS.items()
+            for told in [estimate(replace(plan, effort=effort), efforts=False)]
+        }} if efforts and not plan.spacing else {}),
     }
+
+
+# Which points the next pace is timed on: other ones each time, so a point timed before, its turn kept, does not
+# pass for the grid's (only points a search swept already are as quick).
+_PACED = {"round": 0}
+
+
+def pace(plan: Plan, trace: Trace, sampler: terrain.Sampler | None = None) -> dict[str, Any]:
+    """How long this machine takes to rank one point of the search, seconds: timed on `PACE_POINTS` points of
+    the grid, after one that reads the terrain in, as the search ranks them. Their turns are kept
+    (engine/turncache.py), so the search does not sweep them again."""
+    sampler = sampler or terrain.Sampler(keep=SEARCH_TILES, plates=True)
+    spacing = coarse_spacing(plan)
+    lat, lon = grid(plan, spacing)
+    if not lat.size:
+        return {"seconds": None, "timed": 0}
+    _PACED["round"] += 1
+    picks = np.random.default_rng(_PACED["round"]).permutation(lat.size)[:PACE_POINTS + 1]
+    timed = picks[1:] if picks.size > 1 else picks
+    if picks.size > 1:
+        _score_stage(float(lat[picks[0]]), float(lon[picks[0]]), spacing, "rough", None, trace, plan, sampler)
+    started = time.monotonic()
+    for index in timed:
+        _score_stage(float(lat[index]), float(lon[index]), spacing, "rough", None, trace, plan, sampler)
+    seconds = (time.monotonic() - started) / timed.size
+    return {"seconds": round(seconds, 3), "timed": int(timed.size), "full": FULL_COST, "lane_power": LANE_POWER, "top": TOP}
 
 
 # -- one point -----------------------------------------------------------------
@@ -966,13 +1170,15 @@ def search(
     plan: Plan, trace: Trace, *, sampler: terrain.Sampler | None = None,
     progress: Callable[[int, int], None] = lambda done, total: None,
     cancelled: Callable[[], bool] = lambda: False, lanes: int = 1,
+    scored_one: Callable[[dict[str, Any]], None] = lambda point: None,
 ) -> dict[str, Any]:
     """Search the area for where the trace lies best: every point scored, the best places, a verdict.
 
-    `progress(done, total)` is told as points are scored, one call at a time;
-    `cancelled()` is asked before each and stops the search by raising
-    `Cancelled`. `lanes` points are scored at once, each on its own thread: the
-    work is numpy's and lets the others run meanwhile.
+    `progress(done, total)` is told as points are scored, one call at a time,
+    and `scored_one(point)` each point itself, for a map that fills in while the
+    search runs; `cancelled()` is asked before each and stops the search by
+    raising `Cancelled`, which carries what was found by then (`so_far`).
+    `lanes` points are scored at once, each in its own process.
     """
     sampler = sampler or terrain.Sampler(keep=SEARCH_TILES, plates=True)
     started = time.monotonic()
@@ -981,16 +1187,22 @@ def search(
     lat, lon, steps = spaced_grid(plan, spacing)
     on_ground = standing(plan, lat, lon, sampler)
     lat, lon, steps = lat[on_ground], lon[on_ground], steps[on_ground]
+    visible = seen_from(plan, lat, lon, sampler)
+    lat, lon, steps = lat[visible], lon[visible], steps[visible]
     depth = levels(spacing, fine)
     count = {"total": int(lat.size) + depth * KEEP * 8 + _polish_count() + TOP}
     done = 0
     scored: list[dict[str, Any]] = []
+    # every point as it was scored, the stage under way's too: what a search stopped had found
+    heard: list[dict[str, Any]] = []
     seen: set[tuple[float, float]] = set()
     pool = _lanes(lanes, plan, trace) if lanes > 1 and lat.size >= LANE_MIN_POINTS else None
 
-    def tell() -> None:
+    def tell(point: dict[str, Any]) -> None:
         nonlocal done
         done += 1
+        heard.append(point)
+        scored_one(point)
         progress(min(done, count["total"]), count["total"])
 
     def score(
@@ -999,7 +1211,7 @@ def search(
         if cancelled():
             raise Cancelled
         point = _score_stage(a, o, step, stage, heights, trace, plan, sampler)
-        tell()
+        tell(point)
         return point
 
     def batch(
@@ -1012,8 +1224,9 @@ def search(
         out: list[dict[str, Any] | None] = [None] * len(jobs)
         try:
             for future in as_completed(futures):
-                out[futures[future]] = future.result()
-                tell()
+                point = future.result()
+                out[futures[future]] = point
+                tell(point)
                 if cancelled():
                     raise Cancelled
         except BaseException:
@@ -1024,6 +1237,9 @@ def search(
 
     try:
         return _search(plan, trace, sampler, spacing, fine, lat, lon, steps, depth, count, scored, seen, batch, progress, started)
+    except Cancelled as stopped:
+        stopped.result = so_far(heard, spacing, fine, trace, started)
+        raise
     finally:
         if pool is not None:
             pool.shutdown(wait=False, cancel_futures=True)
@@ -1101,10 +1317,11 @@ def _search(
                     continue
                 seen.add(key)
                 out.append((a, o))
-        # the refinement about a kept point is free, but never out on the water
-        if out and plan.mode == "ground":
-            dry = standing(plan, np.array([a for a, _ in out]), np.array([o for _, o in out]), sampler, kinds=False)
-            out = [one for one, keep in zip(out, dry) if keep]
+        # the refinement about a kept point is free, but never out on the water, nor where the photo could not be
+        if out and (plan.mode == "ground" or rules_out(plan)):
+            lats, lons = np.array([a for a, _ in out]), np.array([o for _, o in out])
+            dry = standing(plan, lats, lons, sampler, kinds=False) if plan.mode == "ground" else np.ones(len(out), dtype=bool)
+            out = [one for one, keep in zip(out, dry & seen_from(plan, lats, lons, sampler)) if keep]
         return out
 
     # ranked roughly over the whole grid
@@ -1114,7 +1331,8 @@ def _search(
     # the cells near relief filled in, and ranked as roughly
     extra = filled(plan, scored, spacing, fine, seen)
     if extra:
-        dry = standing(plan, np.array([a for a, _, _ in extra]), np.array([o for _, o, _ in extra]), sampler)
+        lats, lons = np.array([a for a, _, _ in extra]), np.array([o for _, o, _ in extra])
+        dry = standing(plan, lats, lons, sampler) & seen_from(plan, lats, lons, sampler)
         extra = [one for one, keep in zip(extra, dry) if keep]
     count["total"] += len(extra)
     scored.extend(batch(extra, "rough"))
@@ -1140,24 +1358,45 @@ def _search(
     places = [full if full["explained"] >= point["explained"] else point for point, full in zip(best, fulls)]
     places.sort(key=lambda p: -p["explained"])
     progress(count["total"], count["total"])
+    return _answer(places, scored, spacing, fine, trace, started)
+
+
+def _answer(
+    places: list[dict[str, Any]], scored: list[dict[str, Any]], spacing: float, fine: float, trace: Trace,
+    started: float,
+) -> dict[str, Any]:
+    """A search's answer from its places and every point it scored."""
     rise = standout(places, scored)
     return {
         "verdict": verdict(places, rise),
         "standout": None if rise is None else round(rise, 3),
         "places": places,
-        # each point with how far off the terrain the trace lies there, degrees: where nothing explains the
-        # trace, the map still shows where it lies nearest; a point ruled out by land over a line with only
-        # sky above says so, and how far out that land stands
-        "points": [
-            {"lat": p["lat"], "lon": p["lon"], "explained": p["explained"], "spacing": round(p["spacing"], 1),
-             "gap": round(p["gap"], 2), **_ruled(p)}
-            for p in scored if p["explained"] >= 0
-        ],
+        "points": [shown(p) for p in scored if p["explained"] >= 0],
         "spacing": round(spacing, 1),
         "fine": round(fine, 1),
         "step": column_step(trace),
         "seconds": round(time.monotonic() - started, 1),
     }
+
+
+def shown(point: dict[str, Any]) -> dict[str, Any]:
+    """A point scored as the map draws it: with how far off the terrain the trace lies there, degrees, so
+    that where nothing explains the trace the map still shows where it lies nearest; a point ruled out by
+    land over a line with only sky above says so, and how far out that land stands."""
+    return {
+        "lat": point["lat"], "lon": point["lon"], "explained": point["explained"],
+        "spacing": round(point["spacing"], 1), "gap": round(point["gap"], 2), **_ruled(point),
+    }
+
+
+def so_far(
+    heard: list[dict[str, Any]], spacing: float, fine: float, trace: Trace, started: float,
+) -> dict[str, Any]:
+    """What a search stopped had found (`partial`): the points it had scored, each once as last scored,
+    and its best places among them, as finely as they were scored by then."""
+    latest = list({(p["lat"], p["lon"]): p for p in heard}.values())
+    places = _spread(latest, max(APART_M, 2 * fine), TOP)
+    return {**_answer(places, latest, spacing, fine, trace, started), "partial": True}
 
 
 def _ruled(point: dict[str, Any]) -> dict[str, Any]:

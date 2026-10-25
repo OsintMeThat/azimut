@@ -85,6 +85,7 @@
         'EEA billing accounts: since 8 July 2025 Google no longer serves satellite tiles to Europe (403). Use a Maps JavaScript API key instead.',
       steps: [
         'In the Google Cloud Console, enable the "Map Tiles API" on your project.',
+        'Attach a billing account to the project. Google asks for one even inside the free tier.',
         'Create an API key (Credentials) and restrict it to that API.',
         'Use an IP restriction, not a referrer one: Azimut calls Google from its own backend, not the browser.',
       ],
@@ -104,6 +105,7 @@
       browserTest: true,
       steps: [
         'In the Google Cloud Console, enable the "Maps JavaScript API" on your project.',
+        'Attach a billing account to the project. Without one, Google dims the map under "For development purposes only".',
         'Create an API key (Credentials) and restrict it to that API.',
         'Optional but recommended: restrict the key to your own referrers.',
       ],

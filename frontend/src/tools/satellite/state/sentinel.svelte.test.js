@@ -86,6 +86,19 @@ describe('asking for a month of passes', () => {
     expect(s2.stale).toBe(false); // there is nothing on screen to be stale
   });
 
+  it('says why the lookup failed when Copernicus refused it', async () => {
+    // a spent allowance or a refused key is something to go and fix, not a
+    // hiccup to retry, so the note carries the service's answer
+    get = vi.fn(async () => {
+      throw new Error("date lookup failed: the service's allowance or rate limit is spent (429).");
+    });
+    const s2 = store();
+    await s2.loadPasses();
+    expect(s2.passesNote).toBe(
+      "Could not read this month’s passes: date lookup failed: the service's allowance or rate limit is spent (429). The days below do not confirm coverage."
+    );
+  });
+
   it('calls what is on screen stale once the map has moved off it', async () => {
     const s2 = store();
     await s2.loadPasses();

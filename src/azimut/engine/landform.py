@@ -59,7 +59,7 @@ WATER_FLAT_M = 0.05
 ZOOM = terrain.PLANET_ZOOM
 
 
-def _ring(lat: np.ndarray, lon: np.ndarray, metres: float, count: int, sampler: terrain.Sampler) -> np.ndarray:
+def ring(lat: np.ndarray, lon: np.ndarray, metres: float, count: int, sampler: terrain.Sampler) -> np.ndarray:
     """Heights on a ring about each point: one row per point."""
     bearings = np.arange(count) * 360.0 / count
     lats, lons = terrain.destination(lat[:, None], lon[:, None], bearings[None, :], metres)
@@ -75,11 +75,11 @@ def kinds(lat: np.ndarray, lon: np.ndarray, sampler: terrain.Sampler | None = No
         return out
     sampler = sampler or terrain.Sampler()
     here = np.asarray(sampler.heights(lat, lon, ZOOM), dtype=np.float64)
-    near = _ring(lat, lon, WATER_RING_M, WATER_RING, sampler)
+    near = ring(lat, lon, WATER_RING_M, WATER_RING, sampler)
     local = np.concatenate(
-        [here[:, None], _ring(lat, lon, LOCAL_M / 2, RING, sampler), _ring(lat, lon, LOCAL_M, RING, sampler)], axis=1,
+        [here[:, None], ring(lat, lon, LOCAL_M / 2, RING, sampler), ring(lat, lon, LOCAL_M, RING, sampler)], axis=1,
     )
-    around = np.concatenate([local, _ring(lat, lon, INNER_M, RING, sampler), _ring(lat, lon, AROUND_M, RING, sampler)], axis=1)
+    around = np.concatenate([local, ring(lat, lon, INNER_M, RING, sampler), ring(lat, lon, AROUND_M, RING, sampler)], axis=1)
     low = local.min(axis=1)
     relief = local.max(axis=1) - low
     share = np.where(relief > 0, (here - low) / np.where(relief > 0, relief, 1.0), 0.5)

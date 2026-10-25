@@ -8,6 +8,12 @@ background queue (engine/workqueue.py) as Detect's runs do: started only by the
 analyst's press, stopped by theirs, and a search an app restart cut short starts
 again from the beginning.
 
+While it runs, the points it has scored are held in memory (`LIVE`) for the map
+to fill in as it goes, never written: the record would grow with every write. A
+search stopped (`stopping`, then `cancelled`) keeps what it had found by then as
+its result, marked `partial`. The place the analyst confirmed, from the search
+or by looking from one of its points, is kept on it as `found`, and stops it.
+
 The search itself is engine/finder.py; this module turns the saved question into
 its plan and writes the answer back. A photo exported from a collage Azimut
 stitched is read frame by frame on the bubble the pan was filmed on
@@ -17,6 +23,7 @@ was filmed in, read through one camera of the frames' own lens.
 
 from __future__ import annotations
 
+import functools
 import json
 import time
 from dataclasses import replace
@@ -36,10 +43,18 @@ TYPE = "horizon-find"
 JOB = "horizon-find"
 VERSION = 1
 ACTIVE = ("queued", "running")
+# Asked to stop while it runs: it stops between two points, keeping what it found.
+STOPPING = "stopping"
+# The points each running search has scored, by case and name: `{ started, points }`.
+LIVE: dict[tuple[str, str], dict[str, Any]] = {}
 # Progress is written this often while a search runs, seconds, and the stop asked for read as often.
 WRITE_EVERY = 3.0
-# A fast search scores its grid in this many processes at the most, half the cores, each counted at this
-# much memory, leaving the machine this much free (light on the analyst's machine).
+# How hard a search works the machine (`lanes_for`): the fastest in a process for each of its own cores, a
+# fast one in half the cores and this many processes at the most, a gentle one in one. Each process is
+# counted at this much memory, leaving the machine this much free (light on the analyst's machine).
+# Measured over 600 points of a DRC search on an 8-core laptop (16 threads): 4 processes 1.9 times as fast
+# as one, 8 2.6 times, 12 no faster than 8.
+SPEEDS = ("fastest", "fast", "gentle")
 LANES_MAX = 4
 LANE_BYTES = 400e6
 SPARE_BYTES = 2e9
@@ -57,14 +72,42 @@ def _available_memory() -> float | None:
     return None
 
 
+@functools.lru_cache(maxsize=1)
+def cores(listed: str = "/proc/cpuinfo") -> int:
+    """The machine's own cores, not their threads: counted where Linux lists them (`listed`), every one of an
+    Apple chip's (one thread each), else half the threads (two a core on most others)."""
+    import os
+    import platform
+
+    threads = os.cpu_count() or 1
+    try:
+        with open(listed, encoding="ascii", errors="replace") as info:
+            ids = set()
+            chip = core = ""
+            for line in info:
+                key, _, value = line.partition(":")
+                if key.strip() == "physical id":
+                    chip = value.strip()
+                elif key.strip() == "core id":
+                    core = value.strip()
+                    ids.add((chip, core))
+            if ids:
+                return len(ids)
+    except OSError:
+        pass
+    if platform.system() == "Darwin" and platform.machine() == "arm64":
+        return threads
+    return max(1, threads // 2)
+
+
 def lanes_for(speed: str | None) -> int:
-    """How many processes a search scores in: one when gentle, else up to `LANES_MAX`, half the cores, as
-    the free memory allows."""
+    """How many processes a search scores in: one when gentle, one for each of the machine's own cores when
+    fastest, else half the threads up to `LANES_MAX`; never more than the free memory allows."""
     import os
 
     if speed == "gentle":
         return 1
-    lanes = min(LANES_MAX, (os.cpu_count() or 1) // 2)
+    lanes = cores() if speed == "fastest" else min(LANES_MAX, (os.cpu_count() or 1) // 2)
     free = _available_memory()
     if free is not None:
         lanes = min(lanes, int((free - SPARE_BYTES) // LANE_BYTES))
@@ -107,6 +150,33 @@ def new_record(name: str, ask: dict[str, Any]) -> dict[str, Any]:
         "error": "",
         "result": None,
     }
+
+
+def stop(record: dict[str, Any]) -> None:
+    """Ask a search to stop: one running stops between two points and keeps what it found, one queued at once."""
+    if record.get("status") == "running":
+        record["status"] = STOPPING
+    elif record.get("status") == "queued":
+        record["status"] = "cancelled"
+
+
+def live(case: Case, name: str, since: int = 0, started: float | None = None) -> dict[str, Any]:
+    """The points a running search has scored, from the `since`-th on: all of them when `started` names
+    another run than the one under way. `{ started, since, points }`, no points when none runs."""
+    held = LIVE.get((case.id, name))
+    if held is None:
+        return {"started": None, "since": 0, "points": []}
+    if started != held["started"]:
+        since = 0
+    return {"started": held["started"], "since": since, "points": held["points"][since:]}
+
+
+def _carried(record: dict[str, Any], on_disk: dict[str, Any] | None) -> dict[str, Any]:
+    """The search's record with the place the analyst confirmed meanwhile, which the run never sets."""
+    found = (on_disk or {}).get("found")
+    if found:
+        record["found"] = found
+    return record
 
 
 def plan_of(ask: dict[str, Any]) -> tuple[finder.Plan, finder.Trace]:
@@ -203,6 +273,20 @@ def plan_from(ask: dict[str, Any]) -> finder.Plan:
             )
             for zone in ask.get("zones") or []
         ),
+        areas=tuple([(float(lat), float(lon)) for lat, lon in area] for area in ask.get("areas") or []),
+        strokes=tuple(
+            finder.Stroke(
+                path=[(float(lat), float(lon)) for lat, lon in stroke["path"]],
+                radius=float(stroke["radius"]),
+                out=bool(stroke.get("out", True)),
+            )
+            for stroke in ask.get("strokes") or []
+        ),
+        effort=finder.EFFORTS.get(str(ask.get("effort") or "normal"), 1.0),
+        # a line along the sea's horizon, said of the trace or, before it is drawn, of the ground
+        sea=bool((ask.get("trace") or {}).get("sea") or ask.get("sea")),
+        water=bool(ask.get("water")),
+        over=ask.get("over") if ask.get("over") in ("above", "below") else None,
     )
 
 
@@ -286,6 +370,10 @@ def run(case: Case, job: dict[str, Any]) -> None:
     payload = job.get("payload") or {}
     name = str(payload.get("name") or "")
     record = read(case, name)
+    if record is not None and record.get("status") == STOPPING:
+        # asked to stop as an app restart cut it short: nothing found by then is held any more
+        record.update(status="cancelled")
+        write(case, name, record)
     if record is None or record.get("status") not in ACTIVE:
         raise workqueue.JobCancelled(f"search {name!r} is gone or no longer asked for")
     started = time.time()
@@ -295,6 +383,12 @@ def run(case: Case, job: dict[str, Any]) -> None:
     plan, trace, framed = on_frames(case, record["ask"], plan, trace)
     clock = {"last": time.monotonic()}
     stopped = {"asked": False}
+    heard: list[dict[str, Any]] = []
+    LIVE[(case.id, name)] = {"started": started, "points": heard}
+
+    def scored_one(point: dict[str, Any]) -> None:
+        if point["explained"] >= 0:
+            heard.append(finder.shown(point))
 
     def progress(done: int, total: int) -> None:
         # the time left, from this machine's own pace so far
@@ -305,35 +399,42 @@ def run(case: Case, job: dict[str, Any]) -> None:
         if time.monotonic() - clock["last"] >= WRITE_EVERY:
             clock["last"] = time.monotonic()
             on_disk = read(case, name)
-            if on_disk is None or on_disk.get("status") == "cancelled":
+            if on_disk is None or on_disk.get("status") in ("cancelled", STOPPING):
                 stopped["asked"] = True
                 return
-            write(case, name, record)
+            write(case, name, _carried(record, on_disk))
 
     try:
         result = finder.search(
             plan, trace, progress=progress, cancelled=lambda: stopped["asked"],
-            lanes=lanes_for(record["ask"].get("speed")),
+            lanes=lanes_for(record["ask"].get("speed")), scored_one=scored_one,
         )
     except finder.Cancelled as exc:
         turncache.sweep(since=started)
-        if read(case, name) is not None:
-            record.update(status="cancelled")
-            write(case, name, record)
+        on_disk = read(case, name)
+        if on_disk is not None:
+            partial = exc.result if exc.result is not None and exc.result["points"] else None
+            if partial is not None and framed is not None:
+                partial["frames"] = framed
+            record.update(status="cancelled", result=partial)
+            write(case, name, _carried(record, on_disk))
         raise workqueue.JobCancelled(f"search {name!r} stopped") from exc
     except terrain.TerrainUnavailable as exc:
         record.update(status="failed", error=f"The terrain could not be loaded: {exc}")
-        write(case, name, record)
+        write(case, name, _carried(record, read(case, name)))
         raise workqueue.JobRefused(record["error"]) from exc
+    finally:
+        LIVE.pop((case.id, name), None)
     # the turns this search kept, held under their budget, its first ones last to go
     turncache.sweep(since=started)
-    if read(case, name) is None:
+    on_disk = read(case, name)
+    if on_disk is None:
         raise workqueue.JobCancelled(f"search {name!r} was deleted while it ran")
     total = record["progress"]["total"]
     if framed is not None:
         result["frames"] = framed
     record.update(status="done", result=result, progress={"done": total, "total": total, "started": started, "left": 0})
-    write(case, name, record)
+    write(case, name, _carried(record, on_disk))
 
 
 def check(case: Case, record: dict[str, Any]) -> list[dict[str, Any]]:
@@ -382,6 +483,7 @@ def row(name: str, record: dict[str, Any]) -> dict[str, Any]:
         "photo": photo.get("path"),
         "verdict": result.get("verdict"),
         "best": {k: best[k] for k in ("lat", "lon", "explained") if k in best} if best else None,
+        "found": bool(record.get("found")),
     }
 
 

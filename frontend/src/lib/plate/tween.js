@@ -115,13 +115,14 @@ export function pictureTransform(from, to, frame) {
  * what is new appears over the rest. `moved` are the maps framed otherwise on the next
  * beat, `fresh` the elements it shows that the one before did not.
  */
-export function transitionPlan(settings, { moved = [], fresh = [] } = {}, { cut = false } = {}) {
+export function transitionPlan(settings, { moved = [], fresh = [] } = {}, { cut = false, seconds = null } = {}) {
   if (!settings?.on || cut) return null;
   const move = !!settings.move && moved.length > 0;
   const appear = settings.appear && settings.appear !== 'none' && fresh.length > 0 ? settings.appear : 'none';
   const fade = !!settings.fade;
   if (!move && !fade && appear === 'none') return null;
-  const frames = Math.max(2, Math.round((settings.seconds ?? 0.8) * TWEEN_FPS));
+  // a step may take its own time to come in
+  const frames = Math.max(2, Math.round((seconds ?? settings.seconds ?? 0.8) * TWEEN_FPS));
   const first = appear === 'none' ? frames : move || fade ? Math.round(frames * MOVE_SHARE) : 0;
   return { move, blur: move && settings.blur !== false, fade, appear, frames, first };
 }

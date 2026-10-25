@@ -41,6 +41,8 @@
   import Toasts from './components/Toasts.svelte';
   import UpdateModal from './components/UpdateModal.svelte';
   import DetectActivity from './components/DetectActivity.svelte';
+  import PlateActivity from './components/PlateActivity.svelte';
+  import { plateExport } from './lib/plate/exportRun.svelte.js';
   import WorkspaceStopped from './components/WorkspaceStopped.svelte';
   import NoteBar from './components/NoteBar.svelte';
   import MoveDialog from './components/MoveDialog.svelte';
@@ -345,6 +347,7 @@
     </div>
     <div class="spacer"></div>
     <DetectActivity />
+    <PlateActivity />
     <button class="btn btn-ghost btn-sm" title="Go to (Ctrl+K / ⌘K)" aria-label="Go to" data-guide="start.goto"
             aria-keyshortcuts="Control+k Meta+k" onclick={() => (paletteOpen = true)}>
       <Icon name="search" size={16} />
@@ -458,7 +461,8 @@
         {#each ALL_TOOLS as tool (tool.id)}
           {#if visited[tool.id]}
             {@const ToolComponent = toolComponents[tool.id]}
-            <div class="tool-host" class:hidden={uiState.tool !== tool.id}>
+            <!-- a plate exporting while another tool is open stays laid out, unseen: its maps draw the pictures -->
+            <div class="tool-host" class:hidden={uiState.tool !== tool.id} class:working={tool.id === 'plate' && plateExport.running}>
               {#if ToolComponent}
                 <ToolComponent />
               {:else if toolErrors[tool.id]}
@@ -642,6 +646,14 @@
   }
   .tool-host.hidden {
     display: none;
+  }
+  .tool-host.hidden.working {
+    display: block;
+    position: fixed;
+    inset: 0;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: -1;
   }
   .tool-loading {
     width: 100%;

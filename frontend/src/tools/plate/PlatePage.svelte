@@ -13,10 +13,11 @@
    *   in one group are picked together. A drag moves what is picked once the
    *   pointer has really moved, and catches on the page's lines and the other
    *   boxes (Alt lets go of them). A locked element stays where it is.
-   * - **A drag inside a map moves the ground under it**; its frame is moved by its
-   *   edge. A double click (or the bar's button) frames it fully: pan, zoom, turn.
-   * - A detail's square on the map it is drawn from is dragged there too: it moves
-   *   what the detail shows, as a drag inside the detail does.
+   * - A drag on a map moves its frame, as any element's; its ground stays put until a
+   *   double click (or the bar's button) goes into it: pan, zoom, and turn by a
+   *   middle-drag, a Shift-drag or a double click held, as the app's other maps.
+   * - A detail's square on the map it is drawn from is dragged there: it moves what
+   *   the detail shows.
    * - What stands on the ground (a label's point, an arrow, a zone, a line, rings, a
    *   cone, a distance) is dragged there, by its handles or by its body. A text on the
    *   map, a label without a leader, takes its point along when it is moved.
@@ -29,7 +30,9 @@
   import PlateMapBar from './PlateMapBar.svelte';
   import PlateVideo from './PlateVideo.svelte';
   import { drawPage } from '../../lib/plate/draw.js';
+  import { GRAIN_MM, grainStrength, grainUrl } from '../../lib/plate/grain.js';
   import Icon from '../../components/Icon.svelte';
+  import FloatingMenu from '../../components/FloatingMenu.svelte';
   import { BOXED_ON_THE_GROUND, ON_THE_GROUND, decorDensity, facesOf, fitPage, insetView, PX_PER_MM, pageSize, shownOn, standsOver, zoomPageAt } from '../../lib/plate/page.js';
   import { bearingTo, circle, corners, distance, project as flatProject, sameView, sector, travel, unproject as flatUnproject } from '../../lib/plate/geo.js';
 
@@ -60,6 +63,8 @@
     overflow = $bindable(new Map()),
     /** `(id, handle)` as each map comes up, for the export. */
     onmap = null,
+    /** `(map, text, at, page)`: a name of the ground made a label standing at `at`, `page` its point on the page in millimetres. */
+    onnamelabel = null,
     /** `[id, label]` of the grounds a plate's maps can be drawn on. */
     grounds = [],
     /** Draw the annotations of the plate's other days, faintly. */
@@ -95,6 +100,8 @@
   $effect(() => { void width; void height; camera = null; });
   let pageEl = $state();
   let canvas = $state();
+  /** The paper's grain as a picture, made the first time a page asks for it. */
+  const grain = $derived(grainStrength(spec.page?.grain) > 0 ? grainUrl() : '');
   let guides = $state([]);
   let fontsReady = $state(0);
   const dpr = typeof window === 'undefined' ? 1 : Math.min(2, window.devicePixelRatio || 1);
@@ -109,7 +116,8 @@
   const at = $derived(time?.at ?? null);
   const selected = $derived(selection.at(-1) ?? '');
 
-  const maps = $derived(spec.elements.filter((element) => element.kind === 'map' || element.kind === 'inset'));
+  // a globe inset is drawn on the page itself, not as a live map
+  const maps = $derived(spec.elements.filter((element) => element.kind === 'map' || (element.kind === 'inset' && !element.globe)));
 
   /** The view a map is drawn at: as the day or step shown frames it, or an inset's, over its map's centre. */
   function viewOf(element) {
@@ -353,6 +361,13 @@
     item.box = [item.box[0], item.box[1], side, side];
   }
 
+  /** A name of the ground clicked in a framed map, while its menu is open: `{ element, text, at, point, client }`. */
+  let nameMenu = $state(null);
+  function hideName({ element, text }) {
+    const hidden = element.plain?.hidden_names ?? [];
+    element.plain = { ...(element.plain ?? {}), hidden_names: hidden.includes(text) ? hidden : [...hidden, text] };
+  }
+
   /** Says, a moment, why the map did not move: the day or step shown holds the framing before it. */
   let held = $state('');
   let heldTimer = null;
@@ -362,51 +377,6 @@
     heldTimer = setTimeout(() => { held = ''; }, 3200);
   }
   const lockedMap = (element) => element.kind === 'map' && !framingFor(element).own && !framingFor(element).first;
-
-  /** How near a map's edge, in screen pixels, a press takes its frame rather than its ground. */
-  const EDGE_PIXELS = 10;
-  function nearEdge(event, element) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    return x < EDGE_PIXELS || y < EDGE_PIXELS || rect.width - x < EDGE_PIXELS || rect.height - y < EDGE_PIXELS || element.kind === 'inset';
-  }
-
-  /** A drag inside a map moves its ground; a press without a drag picks it. */
-  function panMap(event, element) {
-    if (event.button !== 0) return;
-    if (element.locked || event.shiftKey || nearEdge(event, element)) { grab(event, element); return; }
-    event.preventDefault();
-    event.stopPropagation();
-    pick(element, false);
-    if (framing && framing !== element.id) framing = '';
-    const live = views[element.id];
-    if (!live) return;
-    const screen = [event.clientX, event.clientY];
-    const start = toMm(event);
-    const from = { ...live.view };
-    let started = false;
-    const move = (next) => {
-      if (!started && Math.hypot(next.clientX - screen[0], next.clientY - screen[1]) < DRAG_PIXELS) return;
-      if (!started && lockedMap(element)) { sayHeld(); up(); return; }
-      started = true;
-      panning = true;
-      const [mx, my] = toMm(next);
-      const dx = (mx - start[0]) * PX_PER_MM;
-      const dy = (my - start[1]) * PX_PER_MM;
-      const [lon, lat] = flatUnproject({ ...from, pitch: 0 }, live.frame, [live.frame.width / 2 - dx, live.frame.height / 2 - dy]);
-      onmapview(element, { ...from, lat: Math.max(-85, Math.min(85, round(lat, 6))), lon: round(lon, 6) });
-    };
-    const up = () => {
-      panning = false;
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
-  }
 
   /**
    * Drag one of an element's ground points over its map: `at`, `to`, a zone's corner
@@ -622,7 +592,8 @@
    * picked elements and the framed map go. The middle button drags over anything.
    */
   function pressViewport(event) {
-    if (event.button === 0 && event.target.closest?.('.plate-map.live, .zoom')) return;
+    // the framed map has the left and the middle button: it pans and turns
+    if (event.button <= 1 && event.target.closest?.('.plate-map.live, .zoom')) return;
     if (event.button !== 0 && event.button !== 1) return;
     if (event.button === 1) event.preventDefault();
     const start = [event.clientX, event.clientY];
@@ -690,11 +661,12 @@
   <div class="page" bind:this={pageEl} style:width="{width}px" style:height="{height}px"
     style:transform="translate({shown.x}px, {shown.y}px) scale({scale})"
     style:background={paperStyle} role="presentation">
-    <!-- a new ground builds the map again; an overlay switched on or off does not -->
-    {#each maps as element (`${element.id}:${element.basemap}:${element.release ?? ''}`)}
+    <!-- a map is built once: another ground, a date or an overlay is laid on it -->
+    {#each maps as element (element.id)}
       <PlateMap {element} view={viewOf(element)} {time} {caseId} {rows} {providers} {relief} font={spec.theme.font}
         interactive={framing === element.id} away={!shownOn(element, at, stepPlace)} glide={playing ? glide : 0}
         onview={(view, frame, placer) => reported(element, view, frame, placer)}
+        onname={(hit) => (nameMenu = { element, ...hit })}
         onready={(handle) => onmap?.(element.id, handle)} />
     {/each}
     {#each spec.elements.filter((item) => item.kind === 'video' && !item.hidden && shownOn(item, at, stepPlace)) as element (element.id)}
@@ -702,6 +674,10 @@
     {/each}
     <canvas class="decor" bind:this={canvas} width={Math.round(width * density)} height={Math.round(height * density)}
       style:width="{width}px" style:height="{height}px"></canvas>
+    {#if grainStrength(spec.page?.grain) > 0 && grain}
+      <div class="grain" style:background-image="url({grain})" style:background-size="{GRAIN_MM * PX_PER_MM}px"
+        style:opacity={grainStrength(spec.page.grain)}></div>
+    {/if}
 
     <div class="hand" class:placing={!!placing} class:framing={!!framing}>
       {#each spec.elements as element (element.id)}
@@ -712,7 +688,7 @@
             style:left={px(element.box[0])} style:top={px(element.box[1])} style:width={px(element.box[2])} style:height={px(element.box[3])}
             data-element={element.id}
             onpointerdown={(event) => placing && element.kind === 'map' ? place(event, element)
-              : element.kind === 'map' ? panMap(event, element) : grab(event, element)}
+              : grab(event, element)}
             ondblclick={() => { if (element.kind !== 'map') return; if (lockedMap(element)) sayHeld(); else framing = element.id; }}></div>
         {/if}
       {/each}
@@ -825,9 +801,23 @@
     <button type="button" class="fit" disabled={!camera} title="Fit the page to the window" onclick={() => (camera = null)}>Fit</button>
   </div>
   {#if held}<p class="tip" role="status">{held}</p>
-  {:else if framing}<p class="tip">Drag and scroll to frame the map, right-drag or Ctrl-drag to turn it. Esc when done.</p>
+  {:else if framing}<p class="tip">Drag and scroll to frame the map, Shift-drag or double-click and hold to turn it. Esc when done.</p>
   {:else if placing}<p class="tip">{HINTS[placing.kind] ?? ''} Esc to stop.</p>{/if}
 </div>
+
+{#if nameMenu}
+  <FloatingMenu at={nameMenu.client} width={240} label="Name of the ground" onclose={() => (nameMenu = null)}>
+    <div class="fm-head">{nameMenu.text}</div>
+    <button type="button" class="fm-item" onclick={() => { const hit = nameMenu; nameMenu = null; hideName(hit); }}>
+      <Icon name="eyeOff" size={14} /><span class="fm-grow">Hide it on this map</span></button>
+    {#if onnamelabel}
+      <button type="button" class="fm-item" title="Hidden from the ground and written as a label of the plate's, which moves, resizes and restyles"
+        onclick={() => { const hit = nameMenu; nameMenu = null; hideName(hit);
+          onnamelabel(hit.element, hit.text, hit.at, [hit.element.box[0] + hit.point[0] / PX_PER_MM, hit.element.box[1] + hit.point[1] / PX_PER_MM]); }}>
+        <Icon name="text" size={14} /><span class="fm-grow">Make it a label to move</span></button>
+    {/if}
+  </FloatingMenu>
+{/if}
 
 <style>
   .viewport { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg-0, #0d0f12); }
@@ -836,10 +826,11 @@
   .decor { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 2; }
   .hand { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
   .hit { position: absolute; pointer-events: auto; cursor: move; border-radius: 1px; }
+  .grain { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: multiply; background-repeat: repeat; }
   .hit:hover { outline: 1px dashed rgba(64, 132, 255, .7); }
   .hit.selected { outline: 1.5px solid #3b82f6; }
   .hit.ghost { outline: 1px dotted rgba(64, 132, 255, .45); }
-  .hit.map { cursor: grab; box-shadow: inset 0 0 0 10px transparent; }
+  .hit.map { box-shadow: inset 0 0 0 10px transparent; }
   .hit.map:hover { box-shadow: inset 0 0 0 3px rgba(64, 132, 255, .25); }
   .hit.locked { cursor: default; }
   .hit.placing { cursor: crosshair; }

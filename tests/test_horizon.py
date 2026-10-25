@@ -254,6 +254,25 @@ def test_a_kept_plate_reads_what_a_fresh_mosaic_reads():
                 assert np.array_equal(plain.heights(lat, lon, zoom), kept.heights(lat, lon, zoom))
 
 
+def test_a_level_known_empty_is_read_a_level_down_at_once(monkeypatch):
+    """Where the plate knows no tile exists this deep, a read starts at the level its points would climb to: the
+    same heights, without placing every point on the empty levels first."""
+    fetch = _no_survey_past_the_planet(Relief(peaks=(NEAR, FAR, LONE), ripple=40.0))
+    plain, kept = terrain.Sampler(fetch=fetch), terrain.Sampler(fetch=fetch, plates=True)
+    rng = np.random.default_rng(4)
+    lat = EYE[0] + rng.uniform(-0.01, 0.01, 2_000)
+    lon = EYE[1] + rng.uniform(-0.01, 0.01, 2_000)
+    expected = plain.heights(lat, lon, 14)
+    # the first read learns the deep levels are empty there
+    assert np.array_equal(kept.heights(lat, lon, 14), expected)
+    placed: list[tuple[int, int]] = []
+    pixels = terrain._pixels
+    monkeypatch.setattr(terrain, "_pixels", lambda la, lo, z: placed.append((z, np.size(la))) or pixels(la, lo, z))
+    assert np.array_equal(kept.heights(lat, lon, 14), expected)
+    assert (terrain.PLANET_ZOOM, lat.size) in placed
+    assert all(size <= 2 for zoom, size in placed if zoom > terrain.PLANET_ZOOM)
+
+
 def test_a_ceiling_stands_over_every_read_between_its_ends():
     relief = Relief(peaks=(NEAR, FAR, LONE), ripple=40.0)
     for fetch in (relief, _no_survey_past_the_planet(relief)):

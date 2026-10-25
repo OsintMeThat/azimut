@@ -6,7 +6,7 @@
    * and one can be sent to the Trash from its row.
    */
   import Icon from '../../components/Icon.svelte';
-  import { searchedWhen } from '../../lib/horizon/find.js';
+  import { searchEnding, searchedWhen } from '../../lib/horizon/find.js';
 
   let {
     /** The case's searches (api/horizon_finds.py rows), newest first. */
@@ -36,14 +36,6 @@
     open = false;
     run();
   }
-
-  /** How a search ended, in a few words. */
-  function ending(row) {
-    if (row.status === 'done') return row.best ? `best explains ${Math.round(row.best.explained * 100)}%` : 'nothing found';
-    if (row.status === 'running' || row.status === 'queued') return 'running';
-    if (row.status === 'cancelled') return 'stopped';
-    return row.status === 'failed' ? 'failed' : (row.status ?? '');
-  }
 </script>
 
 <svelte:window onpointerdown={close} onkeydown={onKey} />
@@ -69,7 +61,7 @@
           <div class="sm-row" class:current={current === row.name}>
             <button type="button" role="menuitem" class="sm-open" onclick={() => pick(() => onopen(row.name))}>
               <span class="sm-title">{row.title}</span>
-              <small>{[searchedWhen(row.created_at), ending(row)].filter(Boolean).join(' · ')}</small>
+              <small>{[searchedWhen(row.created_at), searchEnding(row)].filter(Boolean).join(' · ')}</small>
             </button>
             <button type="button" class="sm-x" onclick={() => onremove(row.name)} title="Move this search to the Trash" aria-label="Delete {row.title}">
               <Icon name="trash" size={12} />

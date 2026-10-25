@@ -72,20 +72,22 @@ describe('exporting a plate', () => {
     expect(radio('mp4').checked).toBe(true);
   });
 
-  it('says what runs past its box, and stops an export under way rather than closing', async () => {
-    let finish;
-    const onexport = vi.fn(() => new Promise((resolve, reject) => { finish = reject; }));
-    const oncancel = vi.fn(() => finish(new Error('stopped')));
+  it('says what runs past its box, and closes once the export is started, which goes on behind', async () => {
+    const onexport = vi.fn(() => new Promise(() => {}));
     const onclose = vi.fn();
-    held = mount(PlateExportDialog, { target: document.body, props: { moments: [], onexport, oncancel, onclose, past: ['Legend'] } });
+    held = mount(PlateExportDialog, { target: document.body, props: { moments: [], onexport, onclose, past: ['Legend'] } });
     flushSync();
     expect(document.body.querySelector('.warn').textContent).toContain('Runs past its box: Legend');
     go().click(); flushSync();
-    const stop = [...document.body.querySelectorAll('.acts .btn')].find((node) => node.textContent.trim() === 'Stop');
-    stop.click(); await settle();
-    expect(oncancel).toHaveBeenCalledOnce();
-    expect(onclose).not.toHaveBeenCalled();
-    expect([...document.body.querySelectorAll('.acts .btn')].some((node) => node.textContent.trim() === 'Cancel')).toBe(true);
+    expect(onexport).toHaveBeenCalledOnce();
+    expect(onclose).toHaveBeenCalledOnce();
+    // a failed export says so through the tool, never as an error out of the dialog
+    const failing = vi.fn(() => Promise.reject(new Error('no room')));
+    unmount(held); held = null; document.body.innerHTML = '';
+    held = mount(PlateExportDialog, { target: document.body, props: { moments: [], onexport: failing, onclose } });
+    flushSync();
+    go().click(); await settle();
+    expect(onclose).toHaveBeenCalledTimes(2);
   });
 
   it('names the file, sizes a PNG for a post, keeps its paper see-through and copies the page', async () => {
@@ -106,13 +108,4 @@ describe('exporting a plate', () => {
     expect(onexport).toHaveBeenCalledWith(expect.objectContaining({ format: 'png', filename: 'Front for the post', pixels: 1080, transparent: true }));
   });
 
-  it('stays open when the export fails, so it can be tried again', async () => {
-    const onexport = vi.fn(async () => { throw new Error('refused'); });
-    const onclose = vi.fn();
-    held = mount(PlateExportDialog, { target: document.body, props: { moments: [], onexport, onclose } });
-    flushSync();
-    go().click(); await settle();
-    expect(onclose).not.toHaveBeenCalled();
-    expect(go().disabled).toBe(false);
-  });
 });

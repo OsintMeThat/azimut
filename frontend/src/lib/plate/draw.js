@@ -19,6 +19,11 @@ import { bearingTo, circle, corners, decimalLabel, degreeLabel, distance, gratic
 import { backColourOf, backOf, defaultSize, inkOf } from './words.js';
 import { qrMatrix } from './qr.js';
 import { drawSignature, signatureWidth } from '../brandMark.js';
+import { PALETTES, darkGround, groundStyle } from './plainBasemap.js';
+import { drawGlobe } from './globe2d.js';
+import { drawGrain } from './grain.js';
+import { shadeOf, spotlightShape } from './spotlight.js';
+import { drawnOnce } from './drawnOnce.js';
 
 /** How a legend row is drawn: a marker, a line, an area, or the past. */
 export const SWATCHES = ['point', 'line', 'area', 'trail', 'gained', 'lost', 'new'];
@@ -203,7 +208,7 @@ const overlaps = (a, b) => a[0] < b[0] + b[2] && a[0] + a[2] > b[0] && a[1] < b[
 /** The grid's ink: what the analyst set, else light over imagery or a dark ground, dark over a pale one. */
 function gridInk(map, theme) {
   if (map.grid_style?.colour) return { line: `${map.grid_style.colour}99`, label: map.grid_style.colour, halo: theme.paper };
-  const dark = map.basemap === 'plain-dark' || (map.basemap && !String(map.basemap).startsWith('plain'));
+  const dark = darkGround(map.basemap);
   return dark ? { line: 'rgba(255,255,255,0.55)', label: '#ffffff', halo: 'rgba(0,0,0,0.75)' }
     : { line: 'rgba(21,24,30,0.35)', label: theme.ink, halo: HALO };
 }
@@ -226,6 +231,74 @@ function edgeCrossings(points, frame) {
     }
   }
   return found;
+}
+
+/** One country lit on a flat map, the rest of the world drawn back under a soft edge (`spotlight.js`). */
+function drawSpotlight(ctx, element, context) {
+  const name = element.spotlight?.country;
+  const placed = name && context.world ? frameOfMap(element, context) : null;
+  const shape = placed && !tilted(placed.view) ? spotlightShape(context.world, name) : null;
+  if (!shape) return;
+  const { box, at, view, frame } = placed;
+  const { colour, strength } = shadeOf(element.spotlight, context.spec.theme.paper);
+  const soft = Math.max(2, Math.min(box.w, box.h) * 0.012);
+  // past the frame by enough that the soft edge falls only where the shade meets the country
+  const margin = Math.ceil(soft * 4);
+  const trace = (target, rings, [dx, dy], k = 1) => {
+    target.beginPath();
+    for (const ring of rings) {
+      ring.forEach(([lon, lat], index) => {
+        const [x, y] = at([lon, Math.max(-85, Math.min(85, lat))]);
+        if (index) target.lineTo((x + dx) * k, (y + dy) * k); else target.moveTo((x + dx) * k, (y + dy) * k);
+      });
+      target.closePath();
+    }
+  };
+  // the shade, blurred, at half the page's resolution since its edge is soft anyway; made
+  // again only when the map moves or the shade changes, never for a drag elsewhere
+  const k = 0.5;
+  const key = JSON.stringify([name, colour, view.lat, view.lon, view.zoom, view.bearing ?? 0, frame.width, frame.height, Math.round(box.w), Math.round(box.h)]);
+  const picture = drawnOnce(`spot:${element.id}`, key, (box.w + margin * 2) * k, (box.h + margin * 2) * k, (canvas) => {
+    // cut out on a sheet the processor draws: a GPU-drawn canvas erases the whole of it on a cut-out this shaped (Chrome on Vulkan)
+    const sheet = document.createElement('canvas');
+    sheet.width = canvas.width;
+    sheet.height = canvas.height;
+    const shade = sheet.getContext('2d', { willReadFrequently: true });
+    const own = canvas.getContext('2d');
+    if (!shade || !own) return false;
+    const onSheet = [margin - box.x, margin - box.y];
+    shade.fillStyle = colour;
+    shade.fillRect(0, 0, sheet.width, sheet.height);
+    // the lit areas add up there however their coarse outlines overlap
+    shade.globalCompositeOperation = 'destination-out';
+    trace(shade, [...shape.lit, ...shape.half], onSheet, k);
+    shade.fill();
+    // the disputed areas touching it, half shaded
+    shade.globalCompositeOperation = 'source-over';
+    shade.globalAlpha = 0.5;
+    trace(shade, shape.half, onSheet, k);
+    shade.fill();
+    own.filter = `blur(${soft * k}px)`;
+    own.drawImage(sheet, 0, 0);
+    sheet.width = 0;
+    sheet.height = 0;
+    return true;
+  });
+  if (!picture) return;
+  ctx.save();
+  clipToMap(ctx, element, context);
+  ctx.globalAlpha = strength;
+  ctx.drawImage(picture, box.x - margin, box.y - margin, picture.width / k, picture.height / k);
+  if (shape.half.length) {
+    // dotted round, neither in nor out
+    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = context.spec.theme.ink;
+    ctx.lineWidth = Math.max(1, 0.25 * context.scale);
+    ctx.setLineDash([Math.max(1, 0.4 * context.scale), Math.max(1.5, 0.7 * context.scale)]);
+    trace(ctx, shape.half, [0, 0]);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawGrid(ctx, element, context) {
@@ -327,9 +400,33 @@ function drawFootprint(ctx, outer, inner, context, { connect = false } = {}) {
   ctx.restore();
 }
 
+/** An inset drawn as a globe, turned to the middle of the map it locates, its ground's sea and land, the accent on the country. */
+function drawGlobeInset(ctx, element, context) {
+  const { scale, spec } = context;
+  const outer = spec.elements.find((item) => item.id === element.of);
+  const view = context.views?.[outer?.id]?.view ?? outer?.view;
+  if (!view) return;
+  const palette = PALETTES[groundStyle(element.basemap).palette] ?? PALETTES.light;
+  const box = boxPx(element, scale);
+  const look = { centre: view, world: context.world ?? null, line: Math.max(1, 0.3 * scale * (element.width ?? 1)),
+    colours: { sea: palette.water, land: palette.ground, border: palette.border, accent: spec.theme.accent, ink: spec.theme.ink } };
+  // drawn again only when its middle, its size or its colours change, never for a drag elsewhere on the page
+  const key = JSON.stringify([view.lat.toFixed(4), view.lon.toFixed(4), Math.round(box.w), Math.round(box.h), look.line, look.colours, !!look.world]);
+  const picture = drawnOnce(`globe:${element.id}`, key, box.w, box.h, (canvas) => {
+    const own = canvas.getContext('2d');
+    if (!own) return false;
+    drawGlobe(own, { x: 0, y: 0, w: canvas.width, h: canvas.height }, look);
+    return true;
+  });
+  if (picture) ctx.drawImage(picture, box.x, box.y, box.w, box.h);
+  else drawGlobe(ctx, box, look);
+}
+
 function drawFrame(ctx, element, context) {
   const { scale, spec } = context;
   const box = boxPx(element, scale);
+  if (element.kind === 'inset' && element.globe) { drawGlobeInset(ctx, element, context); return; }
+  if (element.kind === 'map') drawSpotlight(ctx, element, context);
   if (element.kind === 'map') drawGrid(ctx, element, context);
   if (element.kind === 'inset') {
     const outer = spec.elements.find((item) => item.id === element.of);
@@ -367,7 +464,14 @@ function drawSwatch(ctx, entry, x, y, size, context) {
     ctx.beginPath(); ctx.rect(x + 1, y + size * 0.15, size - 2, size * 0.7);
     ctx.save(); ctx.clip();
     if (entry.kind === 'area') {
-      ctx.fillStyle = entry.colour; ctx.globalAlpha = 0.25; ctx.fillRect(x, y, size, size);
+      // a full tint, or a light one under the hatching, as the map draws the layer
+      ctx.fillStyle = entry.colour; ctx.globalAlpha = entry.fill === 'solid' ? 0.42 : 0.25; ctx.fillRect(x, y, size, size);
+      if (entry.fill === 'hatch') {
+        ctx.strokeStyle = entry.colour; ctx.lineWidth = Math.max(1, 0.3 * scale); ctx.globalAlpha = 0.85;
+        for (let offset = -size; offset < size * 2; offset += size / 4) {
+          ctx.beginPath(); ctx.moveTo(x + offset, y + size); ctx.lineTo(x + offset + size, y); ctx.stroke();
+        }
+      }
     } else {
       // gains in close stripes one way, losses in sparser ones the other, as on the map
       ctx.strokeStyle = entry.colour; ctx.lineWidth = Math.max(1, (entry.kind === 'gained' ? 0.35 : 0.25) * scale);
@@ -543,6 +647,14 @@ function drawImage(ctx, element, context) {
     ctx.save();
     ctx.strokeStyle = context.spec.theme.ink; ctx.globalAlpha = 0.35; ctx.setLineDash([4, 3]);
     ctx.strokeRect(box.x, box.y, box.w, box.h);
+    // an empty picture of a ready plate says what goes in it, on the screen only
+    if (element.text) {
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = context.spec.theme.ink;
+      ctx.font = `600 ${Math.max(9, Math.min(box.h / 6, 3.2 * context.scale))}px ${fontFamily(context.spec.theme.font)}`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(element.text, box.x + box.w / 2, box.y + box.h / 2, box.w - 8);
+    }
     ctx.restore();
     return;
   }
@@ -1290,7 +1402,7 @@ function drawPageFrame(ctx, spec, context) {
  * @param {CanvasRenderingContext2D} ctx
  * @param {object} spec the plate
  * @param {object} context `scale` (canvas pixels a millimetre), `views` (`{ id: { view, frame } }`
- *   of each map), `legend` (`{ legendId: rows }`), `credits` (`{ mapId: text }`), `images`
+ *   of each map), `legend` (`{ legendId: rows }`), `credits` (`{ creditsId: text }`), `images`
  *   (a Map of the pictures by `pictureKey`), `markerImage(symbol, colour, marks)`, `tokens`
  *   (`fillTokens`' words), `at` (the plate's day), `place` (the step it is on, `placeOf`), `numbered`, `numberOf(id)`, `tables`,
  *   `moments`, `dayLabel`, `refShown(element)`, and for an export `paper` (fill the page)
@@ -1337,7 +1449,7 @@ export function drawPage(ctx, spec, context) {
       case 'map':
       case 'inset': drawFrame(ctx, element, full); break;
       case 'text': ran = writeBox(ctx, element, full, fillTokens(element.text, context.tokens)); break;
-      case 'credits': ran = writeCredits(ctx, element, full, context.credits?.[element.of] || 'Map data credits'); break;
+      case 'credits': ran = writeCredits(ctx, element, full, context.credits?.[element.id] || 'Map data credits'); break;
       case 'legend': ran = drawLegend(ctx, element, full); break;
       case 'scale': drawScale(ctx, element, full); break;
       case 'north': drawNorth(ctx, element, full); break;
@@ -1366,5 +1478,7 @@ export function drawPage(ctx, spec, context) {
     ctx.restore();
   }
   drawPageFrame(ctx, spec, full);
+  // the paper's grain over all of it, on an export: the screen lays it as a layer over the page
+  if (context.paper) drawGrain(ctx, spec, scale);
   return overflow;
 }

@@ -46,6 +46,9 @@
   import { iconVersion, layerIconUrl } from '../../lib/map/ownIcons.js';
   import { ICON_HELP } from '../../lib/map/layerHelp.js';
   import LayerIconsToLibrary from './LayerIconsToLibrary.svelte';
+  import LayerKeyButton from './LayerKeyButton.svelte';
+  import { iconLibrary } from '../../lib/iconLibrary.svelte.js';
+  import choices from '../../lib/map/layerSymbols.json';
   import {
     countLabel,
     followed,
@@ -95,6 +98,12 @@
     ontime = null,
   } = $props();
   $effect(() => { if (rows.some((row) => row.editable)) layerPalette.load(caseState.current?.id); });
+  const BADGES = new Set(choices.map((choice) => choice.id));
+  /** An own icon a layer wears, drawn from the layer; an app badge draws itself. */
+  const ownLook = (row, key) => (BADGES.has(key) ? null : iconLibrary.look(key, { caseId: caseState.current?.id, layer: row.name }));
+  /** Whether a layer wears a colour or an icon the case has not named. */
+  const unnamed = (row) => Object.keys(row.colours ?? {}).some((colour) => !layerPalette.nameOf(colour))
+    || Object.keys(row.symbols ?? {}).some((key) => !layerPalette.iconNameOf(key));
 
   const live = $derived(rows.filter((row) => row.enabled).length);
   /** The layer whose icons are being filed in the library. */
@@ -464,11 +473,20 @@
                     </button>
                   </li>
                 {/each}
-                <!-- the colours this case named, as many as wear each one here -->
+                <!-- the colours and icons this case named, as many as wear each one here -->
                 {#each Object.entries(row.colours ?? {}).filter(([colour]) => layerPalette.nameOf(colour)) as [colour, count] (colour)}
                   <li class="named"><span class="swatch" style="--swatch: {colour}"></span>
                     <span class="cat-name">{layerPalette.nameOf(colour)}</span><span class="cat-count">{count}</span></li>
                 {/each}
+                {#each Object.entries(row.symbols ?? {}).filter(([key]) => layerPalette.iconNameOf(key)) as [key, count] (key)}
+                  <li class="named"><MarkerSymbol symbol={BADGES.has(key) ? key : 'pin'} colour="#5b6470" size={14} icon={ownLook(row, key)} />
+                    <span class="cat-name">{layerPalette.iconNameOf(key)}</span><span class="cat-count">{count}</span></li>
+                {/each}
+                <!-- what is worn here with no name yet: the key that names it, in words -->
+                {#if row.editable && unnamed(row)}
+                  <li class="key-row"><LayerKeyButton caseId={caseState.current?.id} colours={Object.keys(row.colours ?? {})} worn={Object.keys(row.symbols ?? {})}
+                    look={(key) => ownLook(row, key)} text="Name colours and icons" /></li>
+                {/if}
               </ul>
             {/if}
           {/if}
@@ -713,6 +731,7 @@
     color: var(--text-3);
   }
   .named { display: flex; align-items: center; gap: 6px; padding: 2px 6px; color: var(--text-3); font-size: var(--fs-xs); }
+  .key-row { padding: 1px 0; }
   .swatch {
     flex: none;
     width: 9px;

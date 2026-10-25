@@ -250,7 +250,8 @@ Three modelling calls the table alone does not show:
   bounded to 4,096 coordinates. Polygon holes remain in the working collection.
   A feature may carry `date` (a day), `status` (`damaged`, `destroyed`), `bearing`,
   `links` (up to ten addresses) and `provenance` (`external`); none is an entity.
-  The case's named colours are a setting in the case database, not an entity.
+  The case's named colours and icons (an app badge's id or an own icon's key) are
+  two settings in the case database, not entities.
   Opening the editor stores a trusted `edit_checkpoint` in the owned spec.
   **Done** ends that session; **Back** can restore its working collection, groups,
   hidden groups, serials and removal journal. A revision guard refuses stale

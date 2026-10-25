@@ -37,10 +37,11 @@
   const worn = $derived(icon ? iconLibrary.look(icon, { caseId, layer, meta }) : null);
   const wornName = $derived(worn ? worn.name || 'own icon' : picked.label);
   const colourName = $derived(layerPalette.nameOf(colour));
+  const meaning = $derived(layerPalette.iconNameOf(icon || symbol));
 </script>
 
 <button type="button" class="style-button" bind:this={trigger} aria-label={label} aria-expanded={open} {disabled}
-  title={mixed ? `${title}: several` : point ? `${title}: ${wornName}${colourName ? `, ${colourName}` : ''}` : title}
+  title={mixed ? `${title}: several` : point ? `${title}: ${meaning || wornName}${colourName ? `, ${colourName}` : ''}` : title}
   onclick={() => (open = !open)}>
   {#if point}<MarkerSymbol symbol={picked.id} {colour} icon={worn} {size} />
   {:else}<span class="dot" style={`--swatch:${colour}`}></span>{/if}
@@ -49,7 +50,7 @@
 </button>
 
 {#if open}
-  <FloatingMenu anchor={trigger} width={256} role="group" label={`${label} picker`} onclose={() => (open = false)}>
+  <FloatingMenu anchor={trigger} width={256} role="group" column label={`${label} picker`} onclose={() => (open = false)}>
     {#if note}<p class="fm-note">{note}</p>{/if}
     {#if groups.length > 1 && ongroup}
       <label class="group-row"><span>{groupLabel}</span>

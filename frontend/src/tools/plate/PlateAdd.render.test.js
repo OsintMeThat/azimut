@@ -26,7 +26,7 @@ function type(text) {
 describe('the Add panel', () => {
   it('opens on every group, its field ready to type in', () => {
     show();
-    expect(heads()).toEqual(['Maps', 'On the map', 'Round the map', 'Writing', 'Signing', 'Pictures and shapes', 'Playing']);
+    expect(heads()).toEqual(['Maps', 'On the map', 'Round the map', 'Writing', 'Blocks', 'Signing', 'Pictures and shapes', 'Playing']);
     expect(document.activeElement).toBe(field());
   });
 

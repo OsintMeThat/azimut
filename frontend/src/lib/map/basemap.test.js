@@ -307,6 +307,24 @@ describe('the layers on a map', () => {
     });
   });
 
+  it('takes the picture off for a plain ground and gives the view its own depth back', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = { ...stubMap(), getMaxZoom: () => current };
+      let current = 22;
+      map.setMaxZoom = (zoom) => { map.calls.setMaxZoom.push([zoom]); current = zoom; };
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.show({ ...ESRI, max_zoom: 17 }, ESRI.id, 256);
+      expect(map.sources.size).toBe(1);
+      basemaps.hide();
+      expect(map.sources.size).toBe(0);
+      expect(map.layers).toEqual([]);
+      expect(map.calls.setMaxZoom).toEqual([[16], [22]]);
+      // the same picture again is put back, not taken for the one still there
+      basemaps.show({ ...ESRI, max_zoom: 17 }, ESRI.id, 256);
+      expect(map.sources.size).toBe(1);
+    });
+  });
+
   it('stops a linked map at the shallower of its own and the shared ceiling', async () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();

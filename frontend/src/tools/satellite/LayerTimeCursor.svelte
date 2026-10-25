@@ -2,7 +2,7 @@
   /**
    * The moment a tracked layer is read at, in two lines of its row.
    *
-   * - **the track**: one tick per moment the layer changes at, and the cursor.
+   * - **the track**: one tick per day the layer changes on, and the cursor.
    *   Dragged, it moves a day at a time and catches on a tick it passes near; a
    *   double click goes back to today;
    * - **the line under it**: the moment, pressed for a calendar (and the time,
@@ -49,6 +49,19 @@
   const last = $derived(Math.max(days.length ? Math.max(...days) : today, today, cursorDay) + 1);
   const span = $derived(Math.max(1, last - first));
   const place = (day) => ((day - first) / span) * 100;
+  /** One tick a day, however many changes it holds, the one shown lit. */
+  const ticks = $derived.by(() => {
+    const byDay = new Map();
+    for (const item of moments) {
+      const day = dayNumber(item.slice(0, 10));
+      if (day === null) continue;
+      const tick = byDay.get(day) ?? { day, first: item, count: 0, on: false };
+      tick.count += 1;
+      tick.on ||= item === at;
+      byDay.set(day, tick);
+    }
+    return [...byDay.values()];
+  });
   /** How many days an event stays after its own, null for good. */
   const stay = $derived(time?.window ?? null);
 
@@ -129,9 +142,9 @@
   <div class="track" bind:this={track} onpointerdown={grab} ondblclick={() => go(nowOn())}
     title="Drag to read the layer at another day. Double-click goes back to today.">
     <span class="rail"></span>
-    {#each moments as item (item)}
-      {@const day = dayNumber(item.slice(0, 10))}
-      {#if day !== null}<span class="tick" class:on={item === at} style:left="{place(day)}%" title={momentLabel(item)}></span>{/if}
+    {#each ticks as tick (tick.day)}
+      <span class="tick" class:on={tick.on} style:left="{place(tick.day)}%"
+        title={tick.count > 1 ? `${momentLabel(isoDay(tick.day))}, ${tick.count} changes` : momentLabel(tick.first)}></span>
     {/each}
     <span class="handle" style:left="{place(cursorDay)}%" role="slider" tabindex="0" aria-label={label}
       aria-valuemin={first} aria-valuemax={last} aria-valuenow={cursorDay}

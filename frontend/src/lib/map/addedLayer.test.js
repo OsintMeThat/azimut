@@ -96,7 +96,7 @@ describe('personal marker symbols', () => {
     expect(features[0].properties.$badge).toBe(true); expect(features[1].properties.$native).toBe(true);
     expect(buildPersonal).toHaveBeenCalledWith('pin', '#0072b2', { status: '', external: false });
     const own = [...engine.map.layers.values()].find((entry) => entry.id.endsWith('-own'));
-    expect(own.layout['symbol-sort-key']).toEqual(['get', 'index']);
+    expect(own.layout['symbol-sort-key']).toEqual(['coalesce', ['get', 'index'], 0]);
     expect(own.layout['icon-anchor']).toEqual(['case', ['has', '$native'], 'bottom', 'center']);
   });
 
@@ -148,6 +148,20 @@ describe('personal marker symbols', () => {
     expect(main.data.features[1].properties.$fillhatch).toMatch(/fillhatch-0072b2$/);
     expect(heads.data.features).toHaveLength(2);
     expect(heads.data.features.map((feature) => Math.round(feature.properties.$angle))).toEqual([45, 225]);
+  });
+
+  it('hatches a source layer\'s areas on a plate\'s page only, as the plate asks', async () => {
+    const hatch = () => ({ width: 12, height: 12, data: new Uint8Array(12 * 12 * 4) });
+    const area = { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] },
+      properties: { index: 0, category: 'Front', colour: '#c8102e', area_fill: 'hatch' } };
+    const page = stubEngine();
+    await createAddedLayer(page, { page: true, buildHatch: hatch }).set({ type: 'FeatureCollection', features: [area] });
+    expect([...page.map.sources.values()][0].data.features[0].properties.$fillhatch).toMatch(/fillhatch-c8102e$/);
+    expect([...page.map.layers.values()].some((layer) => layer.id.endsWith('-fill-hatch'))).toBe(true);
+    // the live map draws a source's layer as it always did
+    const live = stubEngine();
+    await createAddedLayer(live, { buildHatch: hatch }).set({ type: 'FeatureCollection', features: [{ ...area, properties: { ...area.properties, area_fill: '' } }] });
+    expect([...live.map.layers.values()].some((layer) => layer.id.endsWith('-fill-hatch'))).toBe(false);
   });
 
   it('draws a tracked layer\'s past under it, dashed and hatched, and never on the layers that answer clicks', async () => {
@@ -656,7 +670,17 @@ describe('an added layer on the map', () => {
 
     const marks = [...engine.map.layers.values()].find((layer) => layer.type === 'symbol');
     expect(marks.layout['icon-allow-overlap']).toBe(false);
-    expect(marks.layout['symbol-sort-key']).toEqual(['get', 'index']);
+    expect(marks.layout['symbol-sort-key']).toEqual(['coalesce', ['get', 'index'], 0]);
+  });
+
+  it('drops nothing on a plate: every symbol drawn, and no dot standing for a dropped one', async () => {
+    const engine = stubEngine();
+    await createAddedLayer(engine, { page: true }).set(COLLECTION, { categories: CATEGORIES });
+    const layers = [...engine.map.layers.values()];
+    for (const marks of layers.filter((layer) => layer.id.endsWith('-mark') || layer.id.endsWith('-own'))) {
+      expect([marks.layout['icon-allow-overlap'], marks.layout['icon-ignore-placement']]).toEqual([true, true]);
+    }
+    expect(layers.find((layer) => /^added-\d+-dot$/.test(layer.id)).paint['circle-radius']).toBe(0);
   });
 
   it('draws no text: a feature’s name is read in the hover and the card', async () => {

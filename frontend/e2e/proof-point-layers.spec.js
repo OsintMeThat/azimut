@@ -51,6 +51,7 @@ test('a point’s menu goes from the layer to its group to the marker’s icon, 
   await menu.getByRole('button', { name: 'Positions', exact: true }).click();
   await expect(menu.locator('.step-back')).toHaveText('Front › Positions');
   await menu.getByRole('button', { name: 'Point icon Tank icon', exact: true }).click();
+  await menu.getByRole('button', { name: 'More colours', exact: true }).click();
   await menu.getByRole('button', { name: 'Point icon orange', exact: true }).click();
   const add = menu.getByRole('button', { name: 'Add to Positions', exact: true });
   await expect(add).toBeInViewport();

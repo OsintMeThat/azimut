@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { drawPage, partOf, smoothThrough, wrap } from './draw.js';
 import { PX_PER_MM, houseLayout } from './page.js';
+import world from './world.json';
 
 /** A canvas context that records what is written and drawn, measuring a character as 5 pixels. */
 function recorder() {
@@ -31,7 +32,7 @@ describe('drawing a plate page', () => {
       legend: { legend: [{ key: 'front/Lines', label: 'Front line', kind: 'line', colour: '#d55e00' },
         { key: 'front/Posts', label: 'Posts', kind: 'point', colour: '#0072b2', symbol: 'badge-tank' },
         { key: 'gained', label: 'Gained since 3 Oct', kind: 'gained', colour: '#15181e' }] },
-      credits: { map: '© OpenMapTiles' },
+      credits: { credits: '© OpenMapTiles' },
       markerImage,
       tokens: { date: '2026-10-12', caseName: 'Kupiansk', today: new Date('2026-10-14T00:00:00Z') },
     });
@@ -89,7 +90,7 @@ describe('drawing a plate page', () => {
     const credits = spec.elements.find((element) => element.kind === 'credits');
     credits.box = [credits.box[0], credits.box[1], 20, 2];
     const ctx = recorder();
-    const ran = drawPage(ctx, spec, { scale: 3, views: {}, legend: {}, credits: { map: 'Esri, Maxar, Earthstar Geographics · OpenFreeMap © OpenMapTiles' } });
+    const ran = drawPage(ctx, spec, { scale: 3, views: {}, legend: {}, credits: { credits: 'Esri, Maxar, Earthstar Geographics · OpenFreeMap © OpenMapTiles' } });
     expect(ran.has('tight')).toBe(true);
     expect(ran.has(credits.id)).toBe(true);
     const written = ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text).join(' ');
@@ -116,7 +117,7 @@ describe('drawing a plate page', () => {
     const credits = spec.elements.find((element) => element.kind === 'credits');
     credits.box = [map.box[0] + 5, map.box[1] + map.box[3] - 6, map.box[2] - 10, 5];
     const ctx = recorder();
-    drawPage(ctx, spec, { scale: 3, views: {}, legend: {}, credits: { map: '© OpenMapTiles' } });
+    drawPage(ctx, spec, { scale: 3, views: {}, legend: {}, credits: { credits: '© OpenMapTiles' } });
     const at = ctx.calls.findIndex(([name, text]) => name === 'fillText' && text === '© OpenMapTiles');
     expect(at).toBeGreaterThan(-1);
     expect(ctx.calls.some(([name, text]) => name === 'strokeText' && text === '© OpenMapTiles')).toBe(false);
@@ -319,5 +320,25 @@ describe('the drawing of lines', () => {
     const curve = smoothThrough(through, 4);
     for (const point of through) expect(curve.some(([x, y]) => Math.abs(x - point[0]) < 1e-9 && Math.abs(y - point[1]) < 1e-9)).toBe(true);
     expect(curve.length).toBe(9);
+  });
+
+  it('draws the rest of the world back round a country lit, under a soft edge, and nothing on a tilted map', () => {
+    const spec = houseLayout({ view: { lat: 49, lon: 31, zoom: 5, bearing: 0 } });
+    const map = spec.elements.find((element) => element.kind === 'map');
+    map.spotlight = { country: 'Ukraine', dim: 0.5, mode: 'dark' };
+    const views = { [map.id]: { view: map.view, frame: { width: 700, height: 500 } } };
+    // the shade is made on a sheet apart: the lit areas cut out of it, then the sheet laid over the map, blurred
+    const sheet = recorder();
+    vi.stubGlobal('document', { createElement: () => ({ width: 0, height: 0, getContext: () => sheet }) });
+    try {
+      const ctx = recorder();
+      drawPage(ctx, spec, { scale: 3, views, legend: {}, credits: {}, world });
+      expect(sheet.globalCompositeOperation).toBe('source-over');
+      expect(sheet.calls.filter(([name]) => name === 'fill')).toHaveLength(2);
+      expect(ctx.calls.some(([name, picture]) => name === 'drawImage' && picture?.getContext)).toBe(true);
+      const tiltedCtx = recorder();
+      drawPage(tiltedCtx, spec, { scale: 3, views: { [map.id]: { ...views[map.id], view: { ...map.view, pitch: 40 } } }, legend: {}, credits: {}, world });
+      expect(tiltedCtx.calls.some(([name, picture]) => name === 'drawImage' && picture?.getContext)).toBe(false);
+    } finally { vi.unstubAllGlobals(); }
   });
 });

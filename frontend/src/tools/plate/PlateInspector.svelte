@@ -9,6 +9,7 @@
    * its place), the part of it the clip runs, its sound, and the line saying where
    * it comes from, read from the file's record and written over as wanted.
    */
+  import { untrack } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import MonthGrid from '../../components/MonthGrid.svelte';
@@ -17,14 +18,25 @@
   import { fileUrl } from '../../lib/fileUrl.js';
   import { buildMediaQuery } from '../../lib/mediaQuery.js';
   import { isTracked, momentLabel } from '../../lib/map/layerHistory.js';
-  import { prefs } from '../../lib/state.svelte.js';
-  import { FONTS, KIND_LABELS, PAGE, PAPERS, PLATE_OVERLAYS, SIGNATURE, THEMES, TOKENS, bornOn, bringTo, dayOf, endOn, labelBox, mainMap,
+  import { prefs, toast } from '../../lib/state.svelte.js';
+  import { FONTS, KIND_LABELS, PAGE, PAPERS, PLATE_OVERLAYS, SIGNATURE, THEMES, TOKENS, TOKEN_SAID, bornOn, bringTo, dayOf, endOn, labelBox, mainMap,
     pageSize, shownOn, startOn, textMeasurer, transitionsOf, turnable } from '../../lib/plate/page.js';
   import { FIRST_SECONDS, captionOf, clipRange, readTimecode, timecode } from '../../lib/plate/clip.js';
   import { GRATICULE_STEPS } from '../../lib/plate/geo.js';
   import { align, distribute, fittedHeight, sameSize } from '../../lib/plate/arrange.js';
   import { moveRow } from '../../lib/plate/legend.js';
-  import { PALETTES, groundPalette, topographic } from '../../lib/plate/plainBasemap.js';
+  import { GROUNDS, PALETTES, groundPalette, readsHeights, topographic } from '../../lib/plate/plainBasemap.js';
+  import { CLOUDLESS_ID, cloudlessYear } from '../../lib/plate/cloudless.js';
+  import { PLATE_MAXCC, SENTINEL_ID } from '../../lib/plate/sentinelPass.js';
+  import { DEFAULT_LAYER, cloudClass, cloudLabel, maxccLabel, monthGrid, monthLabel } from '../../lib/sentinel.js';
+  import { createSentinelState } from '../satellite/state/sentinel.svelte.js';
+  import SentinelPicker from '../satellite/SentinelPicker.svelte';
+  import { ACCOUNT_STEPS } from '../../lib/copernicusSetup.js';
+  import GroundSwatch from './GroundSwatch.svelte';
+  import { TEXT_STYLES, styled } from '../../lib/plate/design.js';
+  import { drawnOn } from '../../lib/plate/toLayer.js';
+  import { ROLE_LIST, withRole } from '../../lib/plate/roles.js';
+  import { countryAt, countryNames } from '../../lib/plate/spotlight.js';
   import { WAYBACK_ID } from '../../lib/wayback.js';
   import { shrinkPicture } from '../../lib/plate/picture.js';
   import PlateColour from './PlateColour.svelte';
@@ -35,7 +47,8 @@
   import { PLATE_HELP, hoverHelp } from '../../lib/plate/plateHelp.js';
 
   let {
-    spec,
+    /** The plate, which the inspector sets in place: bound, so the page and the inspector own it together. */
+    spec = $bindable(),
     selection = [],
     caseId = '',
     rows = [],
@@ -43,8 +56,12 @@
     grounds = [],
     /** The Wayback releases, `{ release, date }`, newest first, once read. */
     releases = [],
+    /** The years of Sentinel-2 cloudless, `{ year, licence, free }`, newest first. */
+    years = [],
     /** The rows each legend shows now, by legend id. */
     legend = {},
+    /** Each credit the plate owes, `{ text, owed }`: `owed` for what a ground's terms ask for. */
+    creditList = [],
     /** The plate's day, and the days it changes on. */
     at = null,
     moments = [],
@@ -68,6 +85,10 @@
     onpoint,
     ongroup,
     onwayback,
+    /** `(map)`: a new layer of the case, drawn on this map and opened for editing in the Map. */
+    onnewlayer = null,
+    /** `(map)`: what was drawn by hand on this map, made into a layer of the case. */
+    onkeepdrawn = null,
     /** The pictures the main map's features carry (a proof's plate, a video's frame), each with its point. */
     featurePictures = [],
     /** How a map is framed on the day or step shown (`page.framingOf`), `(map, view)` to frame it, `(map, keep)` to hold the one before. */
@@ -97,7 +118,95 @@
   const TONES = { none: ['As it is', { opacity: 1, saturation: 0, brightness: 1, contrast: 0, hue: 0 }],
     grey: ['Greyed', { opacity: 1, saturation: -0.85, brightness: 0.9, contrast: 0.05, hue: 0 }],
     faded: ['Faded', { opacity: 0.55, saturation: -0.4, brightness: 1, contrast: -0.1, hue: 0 }],
-    dark: ['Darkened', { opacity: 1, saturation: -0.5, brightness: 0.55, contrast: 0.1, hue: 0 }] };
+    dark: ['Darkened', { opacity: 1, saturation: -0.5, brightness: 0.55, contrast: 0.1, hue: 0 }],
+    muted: ['Muted', { opacity: 1, saturation: -0.6, brightness: 0.82, contrast: 0.12, hue: 0 }] };
+  /** Whether the fine colours of a plain ground are shown, folded until asked. */
+  let colouring = $state(false);
+  /** The text's field, and a word put where its cursor is, or at its end. */
+  let words = $state(null);
+  function putToken(token) {
+    const text = element.text ?? '';
+    const [from, to] = words && document.activeElement === words ? [words.selectionStart, words.selectionEnd] : [text.length, text.length];
+    element.text = `${text.slice(0, from)}${token}${text.slice(to)}`;
+    queueMicrotask(() => { words?.focus(); words?.setSelectionRange(from + token.length, from + token.length); });
+  }
+  /** Sets the ground a map is drawn on, and reads what a dated one offers. */
+  function setGround(id) {
+    element.basemap = id;
+    if (id === WAYBACK_ID) onwayback?.();
+  }
+
+  /**
+   * Satellite's own Sentinel-2 choices (`state/sentinel.svelte.js`), for the map picked:
+   * its layer, its cloud ceiling and its pass, picked on the same calendar over the
+   * map's middle. What is picked is written into the map; another map picked reads its own.
+   */
+  const s2 = createSentinelState({
+    place: () => { const { lat, lon } = framingFor(element).view; return { lat, lon }; },
+    onBilled: () => {},
+    notify: toast,
+    api,
+  });
+  let s2MenuEl = $state();
+  /** The map the choices were last read from. */
+  let s2For = '';
+  /** Natural Earth's countries, read the first time a map is to light one; and whether the list is open for a map that found none. */
+  let world = $state.raw(null);
+  let choosing = $state('');
+  async function readWorld() {
+    if (!world) world = (await import('../../lib/plate/world.json')).default;
+    return world;
+  }
+  /** Light the country under the map's middle, or open the list when it stands at sea or in a disputed area. */
+  async function lightHere(target) {
+    const read = await readWorld();
+    const { lat, lon } = framingFor(target).view;
+    const name = countryAt(read, lon, lat);
+    if (name) target.spotlight = { country: name, dim: 0.55, mode: 'dark' };
+    else choosing = target.id;
+  }
+
+  /** Whether the steps to a Copernicus account are shown under the locked Sentinel-2 ground. */
+  let copernicusShown = $state(false);
+  // a map on Sentinel-2 picked: the choices read from it, its pass pinned as the day it holds
+  $effect(() => {
+    const target = element;
+    if (target?.basemap !== SENTINEL_ID || s2For === target.id) return;
+    s2For = target.id;
+    untrack(() => {
+      s2.layer = target.product || DEFAULT_LAYER;
+      s2.setMaxcc(target.maxcc ?? PLATE_MAXCC);
+      s2.date = target.acquired ?? '';
+    });
+  });
+  // "Most recent", or a map set on Sentinel-2 just now with no pass yet, here or from its bar: the newest
+  // pass under the ceiling is looked for, a request or two the analyst's choice asks for
+  $effect(() => {
+    const [date, maxcc] = [s2.date, s2.maxcc];
+    if (element?.basemap !== SENTINEL_ID || s2For !== element.id || date) return;
+    void maxcc;
+    untrack(() => s2.resolveLatest());
+  });
+  $effect(() => { if (element?.basemap !== SENTINEL_ID) s2For = ''; });
+  // what is picked on the calendar is the map's: one day, its layer, its ceiling
+  $effect(() => {
+    const target = element;
+    const [day, layer, maxcc] = [s2.day, s2.layer, s2.maxcc];
+    if (target?.basemap !== SENTINEL_ID || s2For !== target.id) return;
+    untrack(() => {
+      if (day && target.acquired !== day) target.acquired = day;
+      const product = layer === DEFAULT_LAYER ? '' : layer;
+      if ((target.product ?? '') !== product) target.product = product;
+      if ((target.maxcc ?? null) !== maxcc) target.maxcc = maxcc;
+    });
+  });
+  // the calendar closes on a press anywhere else, as on Satellite's map
+  $effect(() => {
+    if (!s2.menuOpen) return;
+    const away = (event) => { if (s2MenuEl && !s2MenuEl.contains(event.target)) s2.menuOpen = false; };
+    window.addEventListener('pointerdown', away, true);
+    return () => window.removeEventListener('pointerdown', away, true);
+  });
   const name = (map) => map.name || (map.of ? 'Detail map' : maps.indexOf(map) ? `Map ${maps.indexOf(map) + 1}` : 'Map');
 
   function toggleOverlay(id) {
@@ -251,7 +360,8 @@
     <div class="themes">
       {#each Object.entries(THEMES) as [id, preset] (id)}
         <button type="button" class="theme" class:on={spec.theme.preset === id} onclick={() => theme(id)} title={`Set the page and its maps as ${preset.label}`}>
-          <span class="sample" style:background={preset.theme.paper} style:color={preset.theme.ink} style:border-color={preset.theme.accent}>Aa</span>
+          <span class="sample" style:background={preset.theme.paper} style:color={preset.theme.ink} style:border-color={preset.theme.accent}>
+            <GroundSwatch id={preset.ground} width={30} height={20} /><b>Aa</b><i style:background={preset.theme.accent}></i></span>
           <span>{preset.label}</span></button>
       {/each}
     </div>
@@ -306,6 +416,12 @@
       <label><input type="checkbox" bind:checked={spec.page.guides} /> Show the margins and the feed crop</label>
       <label><input type="checkbox" bind:checked={spec.page.transparent} /> See-through paper in a PNG</label>
     </div>
+    <div class="rows">
+      <span class="key">Grain</span>
+      <span class="pair"><input type="range" aria-label="Paper grain" min="0" max="1" step="0.05" value={spec.page.grain ?? 0}
+        oninput={(event) => (spec.page.grain = Number(event.currentTarget.value))} />
+        <span class="quiet">{spec.page.grain ? `${Math.round(spec.page.grain * 100)}%` : 'None'}</span></span>
+    </div>
     </PlateSection>
     <PlateSection title="Face and colours" summary={FONTS[spec.theme.font]?.label ?? ''}>
     <div class="rows">
@@ -350,7 +466,7 @@
       </PlateSection>
     {/if}
     <p class="note">Pick an element on the page to set it, Shift to pick several. A drag inside a map moves its ground; its edge moves the frame.</p>
-    <p class="note">Texts fill in {TOKENS.join(' ')}.</p>
+    <p class="note">A text fills in words such as {'{date}'} and {'{case}'}; pick one to see them all.</p>
   {:else if picked.length > 1}
     <h3>{picked.length} picked</h3>
     <PlateSection title="Line up">
@@ -465,18 +581,6 @@
           <span class="key">Detail of</span>
           <select aria-label="Detail of" bind:value={element.of}>{#each maps.filter((map) => map.id !== element.id) as map (map.id)}<option value={map.id}>{name(map)}</option>{/each}</select>
         {/if}
-        <span class="key">Ground</span>
-        <select aria-label="Ground" value={element.basemap} onchange={(event) => { element.basemap = event.currentTarget.value; if (element.basemap === WAYBACK_ID) onwayback?.(); }}>
-          {#each grounds as [id, label] (id)}<option value={id}>{label}</option>{/each}
-        </select>
-        {#if element.basemap === WAYBACK_ID}
-          <span class="key">Release</span>
-          <select aria-label="Wayback release" value={String(element.release ?? '')}
-            onchange={(event) => (element.release = event.currentTarget.value ? Number(event.currentTarget.value) : null)}>
-            <option value="">Newest</option>
-            {#each releases as entry (entry.release)}<option value={String(entry.release)}>{entry.date}</option>{/each}
-          </select>
-        {/if}
         <span class="key">Zoom</span>
         <input type="number" aria-label="Zoom" step="0.1" min="0" max="22" value={framed.view.zoom.toFixed(2)} disabled={held}
           onchange={(event) => onmapview(element, { ...framed.view, zoom: Math.min(22, Math.max(0, number(event.currentTarget.value, framed.view.zoom))) })} />
@@ -487,6 +591,84 @@
         <span class="pair"><input type="checkbox" aria-label="Map frame" checked={element.border !== false} onchange={(event) => (element.border = event.currentTarget.checked)} />
           <input type="range" aria-label="Frame weight" min="0.5" max="4" step="0.25" value={element.width ?? 1} oninput={(event) => (element.width = Number(event.currentTarget.value))} /></span>
       </div>
+
+      <PlateSection title="Ground" summary={grounds.find(([id]) => id === element.basemap)?.[1] ?? ''}>
+      <div class="grounds" role="radiogroup" aria-label="Ground">
+        {#each grounds as [id, label] (id)}
+          <button type="button" class="ground-tile" role="radio" aria-checked={element.basemap === id} title={label}
+            onclick={() => setGround(id)}><GroundSwatch {id} width={58} height={38} /><span>{label}</span></button>
+        {/each}
+        {#if !grounds.some(([id]) => id === SENTINEL_ID)}
+          <button type="button" class="ground-tile locked" aria-expanded={copernicusShown} title="Needs a free Copernicus account"
+            onclick={() => (copernicusShown = !copernicusShown)}><GroundSwatch id={SENTINEL_ID} width={58} height={38} />
+            <span><Icon name="lock" size={10} /> Sentinel-2, one dated pass</span></button>
+        {/if}
+      </div>
+      {#if copernicusShown && !grounds.some(([id]) => id === SENTINEL_ID)}
+        <p class="note">Sentinel-2's dated passes need a Copernicus account, free and with no card:</p>
+        <ol class="setup">{#each ACCOUNT_STEPS as line (line)}<li>{line}</li>{/each}</ol>
+      {/if}
+      {#if element.basemap === WAYBACK_ID}
+        <div class="rows">
+          <span class="key">Release</span>
+          <select aria-label="Wayback release" value={String(element.release ?? '')}
+            onchange={(event) => (element.release = event.currentTarget.value ? Number(event.currentTarget.value) : null)}>
+            <option value="">Newest</option>
+            {#each releases as entry (entry.release)}<option value={String(entry.release)}>{entry.date}</option>{/each}
+          </select>
+        </div>
+      {:else if element.basemap === CLOUDLESS_ID}
+        {@const shown = cloudlessYear(element, years)}
+        <div class="rows">
+          <span class="key">Year</span>
+          <select aria-label="Cloudless year" value={String(element.year ?? '')}
+            onchange={(event) => (element.year = event.currentTarget.value ? Number(event.currentTarget.value) : null)}>
+            <option value="">Newest</option>
+            {#each years as entry (entry.year)}<option value={String(entry.year)}>{entry.year}{entry.free ? ', free for any use' : ''}</option>{/each}
+          </select>
+        </div>
+        <p class="note">One cloud-free picture of that year, made of many passes: it holds no single date.</p>
+        {#if shown}<p class="note">{shown.free ? 'Free for any use, with its credit.' : 'Free for non-commercial use only, with its credit. 2016 is free for any use.'}</p>{/if}
+      {:else if element.basemap === SENTINEL_ID}
+        <div class="rows s2">
+          <span class="key">Pass</span>
+          <span class="s2-pick"><SentinelPicker bind:menuEl={s2MenuEl} {s2} {maxccLabel} {monthLabel} {monthGrid} {cloudClass} {cloudLabel} /></span>
+        </div>
+        <p class="note">{s2.latestBusy && !element.acquired ? 'Looking for the newest pass…' : !element.acquired ? 'No pass picked yet.'
+          : `${s2.layerLabel}, the pass of ${element.acquired}${s2.date ? '' : s2.maxcc < 100 ? `, the newest under ${s2.maxcc}% cloud` : ', the newest'}.`}</p>
+        <p class="note">One pass, on the day it was taken, 10 m a pixel: where it did not reach, the map stays empty. Its tiles spend your Copernicus quota.</p>
+      {/if}
+      </PlateSection>
+
+      <PlateSection title="Focus" summary={element.spotlight?.country ?? 'None'}>
+      {#if element.spotlight?.country || choosing === element.id}
+        <div class="rows">
+          <span class="key">Lit</span>
+          <select aria-label="Country lit" value={element.spotlight?.country ?? ''} onfocus={readWorld}
+            onchange={(event) => { const country = event.currentTarget.value; choosing = '';
+              element.spotlight = country ? { dim: 0.55, mode: 'dark', ...(element.spotlight ?? {}), country } : null; }}>
+            <option value="">None</option>
+            {#each world ? countryNames(world) : [element.spotlight?.country].filter(Boolean) as name (name)}<option value={name}>{name}</option>{/each}
+          </select>
+          {#if element.spotlight?.country}
+            <span class="key">The rest</span>
+            <div class="segments" role="group" aria-label="The rest of the world">
+              {#each [['dark', 'Darkened'], ['fade', 'Faded']] as [value, label] (value)}
+                <button type="button" aria-pressed={(element.spotlight.mode ?? 'dark') === value} onclick={() => (element.spotlight = { ...element.spotlight, mode: value })}>{label}</button>
+              {/each}
+            </div>
+            <span class="key">Strength</span>
+            <input type="range" aria-label="Focus strength" min="0.1" max="0.9" step="0.05" value={element.spotlight.dim ?? 0.55}
+              oninput={(event) => (element.spotlight = { ...element.spotlight, dim: Number(event.currentTarget.value) })} />
+          {/if}
+        </div>
+        {#if choosing === element.id && !element.spotlight?.country}<p class="note">No country under the map's middle: pick one.</p>{/if}
+        <p class="note">Disputed areas touching it stand half lit, dotted round. A flat map only.</p>
+      {:else}
+        <button type="button" class="btn btn-sm" title="The country under the map's middle stays lit, the rest of the world is drawn back"
+          onclick={() => lightHere(element)}>Light the country here</button>
+      {/if}
+      </PlateSection>
 
       <PlateSection title="3D" summary={(element.terrain ?? 0) > 0 ? `Tilted ${Math.round(framed.view.pitch ?? 0)}°` : 'Flat'}>
       <label class="check"><input type="checkbox" checked={(element.terrain ?? 0) > 0}
@@ -550,17 +732,48 @@
       <PlateSection title={element.basemap?.startsWith('plain') ? 'The plain ground' : 'The imagery'}>
       {#if element.basemap?.startsWith('plain')}
         {@const plain = element.plain ?? {}}
-        <div class="swatches">
-          {#each PLAIN_COLOURS as [key, label] (key)}
-            <label class="swatch" title={label}><input type="color" aria-label={`${label} colour`}
-              value={plain.colours?.[key] ?? PALETTES[groundPalette(element.basemap)][key]}
-              onchange={(event) => (element.plain = { ...plain, colours: { ...(plain.colours ?? {}), [key]: event.currentTarget.value } })} /><span>{label}</span></label>
-          {/each}
-          {#if Object.keys(plain.colours ?? {}).length}<button type="button" class="text-act" onclick={() => (element.plain = { ...plain, colours: {} })}>Reset</button>{/if}
+        <div class="rows">
+          <span class="key">Detail</span>
+          <div class="segments" role="group" aria-label="Ground detail">
+            {#each [['low', 'Less'], ['normal', 'Usual'], ['high', 'More']] as [value, label] (value)}
+              <button type="button" aria-pressed={(plain.density ?? 'normal') === value} onclick={() => (element.plain = { ...plain, density: value })}>{label}</button>
+            {/each}
+          </div>
+          <span class="key">Presence</span>
+          <input type="range" aria-label="Ground presence" min="0.2" max="1" step="0.05" value={plain.presence ?? 1}
+            oninput={(event) => (element.plain = { ...plain, presence: Number(event.currentTarget.value) })} />
+          {#if readsHeights(element.basemap, element.overlays ?? [])}
+            <span class="key">Relief</span>
+            <input type="range" aria-label="Relief strength" min="0.25" max="2" step="0.25" value={element.relief ?? 1} oninput={(event) => (element.relief = Number(event.currentTarget.value))} />
+          {/if}
+          <span class="key">Names in</span>
+          <select aria-label="Place names language" value={plain.lang ?? 'latin'} onchange={(event) => (element.plain = { ...plain, lang: event.currentTarget.value })}>
+            {#each LANGS as [value, label] (value)}<option {value}>{label}</option>{/each}
+          </select>
         </div>
+        {#if plain.hidden_names?.length}
+          <p class="note hidden-names">Hidden: {plain.hidden_names.join(', ')}. <button type="button" class="text-act"
+            onclick={() => (element.plain = { ...plain, hidden_names: [] })}>Show them again</button></p>
+        {:else}
+          <p class="note">Framed, a click on a name hides it or makes it a label to move.</p>
+        {/if}
+        <button type="button" class="text-act" aria-expanded={colouring} onclick={() => (colouring = !colouring)}>
+          {colouring ? 'Hide the colours' : 'Change the colours'}{Object.keys(plain.colours ?? {}).length ? ' · changed' : ''}</button>
+        {#if colouring}
+          <div class="swatches">
+            {#each PLAIN_COLOURS as [key, label] (key)}
+              <label class="swatch" title={label}><input type="color" aria-label={`${label} colour`}
+                value={plain.colours?.[key] ?? PALETTES[groundPalette(element.basemap)][key]}
+                onchange={(event) => (element.plain = { ...plain, colours: { ...(plain.colours ?? {}), [key]: event.currentTarget.value } })} /><span>{label}</span></label>
+            {/each}
+            {#if Object.keys(plain.colours ?? {}).length}<button type="button" class="text-act" onclick={() => (element.plain = { ...plain, colours: {} })}>Reset</button>{/if}
+          </div>
+        {/if}
         <div class="checks">
-          {#if topographic(element.basemap)}
+          {#if GROUNDS[element.basemap]?.tints}
             <label><input type="checkbox" checked={plain.tints !== false} onchange={(event) => (element.plain = { ...plain, tints: event.currentTarget.checked })} /> Heights in colour</label>
+          {/if}
+          {#if topographic(element.basemap)}
             <label><input type="checkbox" checked={plain.contours !== false} onchange={(event) => (element.plain = { ...plain, contours: event.currentTarget.checked })} /> Contour lines</label>
             <label><input type="checkbox" checked={plain.peaks !== false} onchange={(event) => (element.plain = { ...plain, peaks: event.currentTarget.checked })} /> Summits and their heights</label>
           {/if}
@@ -568,22 +781,18 @@
           <label><input type="checkbox" checked={plain.rails !== false} onchange={(event) => (element.plain = { ...plain, rails: event.currentTarget.checked })} /> Railways</label>
           <label><input type="checkbox" checked={plain.buildings !== false} onchange={(event) => (element.plain = { ...plain, buildings: event.currentTarget.checked })} /> Buildings</label>
           <label><input type="checkbox" checked={plain.names !== false} onchange={(event) => (element.plain = { ...plain, names: event.currentTarget.checked })} /> Place names</label>
+          <label><input type="checkbox" checked={plain.refs !== false} onchange={(event) => (element.plain = { ...plain, refs: event.currentTarget.checked })} /> Road numbers</label>
+          <label><input type="checkbox" checked={plain.airfields !== false} onchange={(event) => (element.plain = { ...plain, airfields: event.currentTarget.checked })} /> Airfields and runways</label>
+          <label><input type="checkbox" checked={plain.military !== false} onchange={(event) => (element.plain = { ...plain, military: event.currentTarget.checked })} /> Military ground</label>
+          <label><input type="checkbox" checked={plain.cover !== false} onchange={(event) => (element.plain = { ...plain, cover: event.currentTarget.checked })} /> Fields, sand and ice</label>
         </div>
         <div class="rows">
-          <span class="key">Names in</span>
-          <select aria-label="Place names language" value={plain.lang ?? 'latin'} onchange={(event) => (element.plain = { ...plain, lang: event.currentTarget.value })}>
-            {#each LANGS as [value, label] (value)}<option {value}>{label}</option>{/each}
-          </select>
-          <span class="key">How many</span>
-          <div class="segments" role="group" aria-label="Place names density">
-            {#each [['low', 'Fewer'], ['normal', 'Usual'], ['high', 'More']] as [value, label] (value)}
-              <button type="button" aria-pressed={(plain.density ?? 'normal') === value} onclick={() => (element.plain = { ...plain, density: value })}>{label}</button>
+          <span class="key">Borders</span>
+          <div class="segments" role="group" aria-label="Borders drawn">
+            {#each [['countries', 'Countries'], ['regions', 'Regions'], ['districts', 'Districts']] as [value, label] (value)}
+              <button type="button" aria-pressed={(plain.admin ?? 'regions') === value} onclick={() => (element.plain = { ...plain, admin: value })}>{label}</button>
             {/each}
           </div>
-          {#if (element.overlays ?? []).includes('relief') || topographic(element.basemap)}
-            <span class="key">Relief</span>
-            <input type="range" aria-label="Relief strength" min="0.25" max="2" step="0.25" value={element.relief ?? 1} oninput={(event) => (element.relief = Number(event.currentTarget.value))} />
-          {/if}
         </div>
       {:else}
         {@const tone = element.tone ?? {}}
@@ -592,6 +801,10 @@
             onclick={() => (element.tone = { ...values })}>{label}</button>{/each}
         </div>
         <div class="rows">
+          {#if (element.overlays ?? []).includes('relief')}
+            <span class="key">Relief</span>
+            <input type="range" aria-label="Relief strength" min="0.25" max="2" step="0.25" value={element.relief ?? 1} oninput={(event) => (element.relief = Number(event.currentTarget.value))} />
+          {/if}
           {#each [['opacity', 'Strength', 0, 1, 0.05], ['saturation', 'Colour', -1, 1, 0.05], ['brightness', 'Light', 0.2, 1, 0.05], ['contrast', 'Contrast', -1, 1, 0.05], ['hue', 'Tint', 0, 360, 5]] as [key, label, min, max, step] (key)}
             <span class="key">{label}</span>
             <input type="range" aria-label={`Imagery ${label.toLowerCase()}`} {min} {max} {step} value={tone[key] ?? (key === 'opacity' || key === 'brightness' ? 1 : 0)}
@@ -601,7 +814,7 @@
       {/if}
       <div class="checks">
         {#each PLATE_OVERLAYS as [id, label] (id)}
-          {#if id !== 'relief' || element.basemap?.startsWith('plain')}
+          {#if id !== 'relief' || !GROUNDS[element.basemap]?.shade?.own}
             <label><input type="checkbox" checked={(element.overlays ?? []).includes(id)} onchange={() => toggleOverlay(id)} /> {label}</label>
           {/if}
         {/each}
@@ -609,7 +822,14 @@
       </PlateSection>
 
       <PlateSection title="Layers" summary={`${(element.layers ?? []).length} drawn`}>
-      {#if !rows.length}<p class="note">The case has no map layers yet. Add some in the Map.</p>{/if}
+      {@const drawn = drawnOn(spec, element.id).length}
+      {#if !rows.length}<p class="note">The case has no map layers yet. Draw on the plate from Add, or make one here.</p>{/if}
+      <div class="tools wide">
+        {#if onnewlayer}<button type="button" class="btn btn-xs" title="A new layer of the case, drawn here and opened for editing in the Map, where this map looks"
+          onclick={() => onnewlayer(element)}><Icon name="plus" size={11} /> New layer here</button>{/if}
+        {#if onkeepdrawn && drawn}<button type="button" class="btn btn-xs" title="What was drawn by hand on this map becomes a layer of the case, kept for the Map and other plates"
+          onclick={() => onkeepdrawn(element)}>Make a layer of the {drawn} drawn here</button>{/if}
+      </div>
       <ul class="layers">
         {#each [...(element.layers ?? []).map((entry) => rows.find((row) => row.name === entry.name)).filter(Boolean), ...rows.filter((row) => !(element.layers ?? []).some((entry) => entry.name === row.name))] as row (row.name)}
           {@const entry = (element.layers ?? []).find((item) => item.name === row.name)}
@@ -623,6 +843,12 @@
             </div>
             {#if entry}
               <div class="layer-set">
+                <label class="weight role" title="What the layer stands for on this map: one press sets its colour, fill and lines, and the legend says it">Stands for
+                  <select aria-label={`${row.title} stands for`} value={entry.role ?? ''}
+                    onchange={(event) => { const index = element.layers.indexOf(entry); element.layers[index] = withRole(entry, event.currentTarget.value, spec.theme); }}>
+                    <option value="">Its own look</option>
+                    {#each ROLE_LIST as [value, label] (value)}<option {value}>{label}</option>{/each}
+                  </select></label>
                 <div class="groups">
                   {#each row.categories as group (group.name)}
                     <button type="button" class="chip" class:off={entry.hidden.includes(group.name)} title={entry.hidden.includes(group.name) ? 'Show on this plate' : 'Leave out of this plate'}
@@ -636,6 +862,11 @@
                 <div class="segments thin" role="group" aria-label={`${row.title} lines on this plate`}>
                   {#each [['', 'Its lines'], ['dashed', 'Dashed'], ['dotted', 'Dotted']] as [value, label] (value)}
                     <button type="button" aria-pressed={(entry.dash ?? '') === value} onclick={() => (entry.dash = value)}>{label}</button>
+                  {/each}
+                </div>
+                <div class="segments thin" role="group" aria-label={`${row.title} areas on this plate`}>
+                  {#each [['', 'Its fill'], ['solid', 'Full'], ['hatch', 'Hatched'], ['none', 'Outline']] as [value, label] (value)}
+                    <button type="button" aria-pressed={(entry.fill ?? '') === value} onclick={() => (entry.fill = value)}>{label}</button>
                   {/each}
                 </div>
                 <button type="button" class="text-act" title="A label beside each named feature in the frame, none covering another" onclick={() => onlabels(element, row)}>Label its named features</button>
@@ -658,6 +889,8 @@
         <select aria-label="Inset of" bind:value={element.of}>{#each maps as map (map.id)}<option value={map.id}>{name(map)}</option>{/each}</select>
         <span class="key">Frame</span><input type="checkbox" aria-label="Inset frame" checked={element.border !== false} onchange={(event) => (element.border = event.currentTarget.checked)} />
       </div>
+      <label class="check"><input type="checkbox" checked={!!element.globe} onchange={(event) => (element.globe = event.currentTarget.checked)} /> Drawn as a globe</label>
+      {#if element.globe}<p class="note">The world turned to the map's middle, its country in the accent. Drawn on the page, it is not one of the plate's eight maps.</p>{/if}
       <p class="note">The inset follows its map and outlines the ground it shows.</p>
     {:else if element.kind === 'legend'}
       <div class="rows">
@@ -732,11 +965,38 @@
       {:else if element.kind === 'timeline'}
         <p class="note">The days the plate's followed layers change on, the one shown picked out. Made for the video.</p>
       {:else if element.kind !== 'credits'}
-        <textarea aria-label="Text" rows={element.kind === 'label' ? 2 : 4} bind:value={element.text} maxlength="4000"
+        {#if element.kind === 'text'}
+          <div class="rows">
+            <span class="key">Style</span>
+            <select aria-label="Text role" value={element.role ?? ''}
+              onchange={(event) => Object.assign(element, styled(element, event.currentTarget.value, spec.theme))}>
+              <option value="">Set by hand</option>
+              {#each Object.entries(TEXT_STYLES) as [id, style] (id)}<option value={id}>{style.label}</option>{/each}
+            </select>
+          </div>
+        {/if}
+        <textarea aria-label="Text" rows={element.kind === 'label' ? 2 : 4} bind:value={element.text} maxlength="4000" bind:this={words}
           oninput={() => { if (element.kind === 'label') element.box = labelBox(element, measure); }}></textarea>
-        {#if element.kind === 'text'}<p class="note">{TOKENS.join(' ')} are filled in.</p>{/if}
+        {#if element.kind === 'text'}
+          <div class="tokens" role="group" aria-label="Words filled in">
+            {#each TOKENS as token (token)}
+              <button type="button" class="token" title={`${TOKEN_SAID[token]}. Put it where the cursor is`} onclick={() => putToken(token)}>{token}</button>
+            {/each}
+          </div>
+        {/if}
       {:else}
-        <p class="note">The map's sources, written for you. A plate always carries them, and they shrink rather than lose one.</p>
+        <p class="note">The map's sources, written for you. They shrink to fit rather than lose one.</p>
+        {#if creditList.length}
+          <ul class="credit-list" aria-label="Credits printed">
+            {#each creditList as part (part.text)}
+              <li><label title={part.owed ? 'Its terms ask for this credit wherever its pictures are shown' : 'Print this credit, or take it off'}>
+                <input type="checkbox" checked={part.owed || !(element.dropped ?? []).includes(part.text)} disabled={part.owed}
+                  onchange={(event) => { const others = (element.dropped ?? []).filter((text) => text !== part.text);
+                    element.dropped = event.currentTarget.checked ? others : [...others, part.text]; }} />
+                <span>{part.text}</span>{#if part.owed}<Icon name="lock" size={10} />{/if}</label></li>
+            {/each}
+          </ul>
+        {/if}
       {/if}
       {#if element.kind === 'qr'}
         <div class="rows">
@@ -1145,6 +1405,7 @@
   .chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; background: var(--accent-soft); color: var(--text-1); font-size: 10.5px; cursor: pointer; }
   .chip.off { background: none; color: var(--text-3); text-decoration: line-through; }
   .weight { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 10.5px; }
+  .weight.role select { flex: 1; min-width: 0; }
   .weight input[type='range'] { flex: 1; }
   .quiet { color: var(--text-3); }
   .frame { width: 100%; justify-content: center; margin-bottom: 4px; }
@@ -1163,11 +1424,34 @@
   .tools { display: flex; flex-wrap: wrap; gap: 2px; margin: 4px 0; }
   .tools.wide { gap: 4px; }
   .btn.danger { color: var(--danger); }
-  .themes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+  .themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 4px; }
   .theme { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 2px; border: 1px solid var(--border); border-radius: var(--r-sm);
     color: var(--text-2); font-size: 9.5px; cursor: pointer; }
   .theme.on, .theme:hover { border-color: var(--accent); color: var(--text-1); }
-  .sample { display: grid; place-items: center; width: 100%; height: 22px; border-bottom: 3px solid; border-radius: 3px; font-weight: 700; font-size: 11px; }
+  .sample { position: relative; display: flex; align-items: center; gap: 4px; width: 100%; height: 26px; padding: 3px; border: 1px solid var(--border);
+    border-radius: 3px; font-size: 11px; overflow: hidden; }
+  .sample b { flex: 1; text-align: center; font-weight: 700; }
+  .sample i { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; }
+  .tokens { display: flex; flex-wrap: wrap; gap: 3px; }
+  .token { padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-1); color: var(--text-2);
+    font-family: var(--font-mono); font-size: 10px; cursor: pointer; }
+  .token:hover { border-color: var(--accent); color: var(--text-1); }
+  .grounds { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 6px; }
+  .ground-tile { display: flex; flex-direction: column; align-items: stretch; gap: 3px; padding: 3px; border: 1px solid var(--border);
+    border-radius: var(--r-sm); background: var(--bg-1); color: var(--text-2); font-size: 10px; line-height: 1.2; text-align: left; cursor: pointer; }
+  .ground-tile :global(svg.ground-swatch) { width: 100%; height: auto; aspect-ratio: 58 / 38; }
+  .ground-tile span { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
+  .ground-tile:hover { border-color: var(--border-strong, var(--text-3)); color: var(--text-1); }
+  .s2-pick { display: flex; justify-content: flex-end; }
+  .credit-list { margin: 0 0 6px; padding: 0; list-style: none; }
+  .credit-list label { display: flex; align-items: flex-start; gap: 6px; padding: 2px 0; color: var(--text-1); font-size: 11px; line-height: 1.35; cursor: pointer; }
+  .credit-list input { margin-top: 1px; }
+  .credit-list input:disabled + span { color: var(--text-2); }
+  .credit-list span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .ground-tile.locked { color: var(--text-3); }
+  .ground-tile.locked :global(svg.ground-swatch) { opacity: .5; }
+  .setup { margin: 0 0 6px; padding-left: 18px; color: var(--text-2); font-size: 10.5px; line-height: 1.45; }
+  .ground-tile[aria-checked='true'] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--text-1); }
   .swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .swatch { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--text-3); font-size: 9.5px; cursor: pointer; }
   .days { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 4px 6px; align-items: center; margin: 6px 0; padding: 6px; border: 1px solid var(--border); border-radius: var(--r-sm); }

@@ -83,6 +83,8 @@ export function createSentinelState({ place, onBilled, notify, api }) {
 
   const passCache = new Map();
   const passPending = new Map();
+  /** Why a month's lookup failed, by its cache key: a refused key and a spent allowance are not a hiccup. */
+  const passFailures = new Map();
   const coverageCache = new Map();
   let passRequestId = 0;
   let pickRequestId = 0;
@@ -155,9 +157,11 @@ export function createSentinelState({ place, onBilled, notify, api }) {
         const byDay = {};
         for (const d of r.dates) byDay[d.date] = { cloud: d.cloud, granules: d.granules };
         passCache.set(key, byDay);
+        passFailures.delete(key);
         onBilled(); // the lookup is billed: keep the pill honest
         return byDay;
-      } catch {
+      } catch (e) {
+        passFailures.set(key, String(e?.message ?? '').replace(/\.$/, ''));
         return null;
       }
     })();
@@ -193,7 +197,8 @@ export function createSentinelState({ place, onBilled, notify, api }) {
       // what exists.
       passes = {};
       passesFor = '';
-      passesNote = 'Could not read this month’s passes. The days below do not confirm coverage.';
+      const why = passFailures.get(key);
+      passesNote = `Could not read this month’s passes${why ? `: ${why}` : ''}. The days below do not confirm coverage.`;
     }
     passesBusy = false;
   }

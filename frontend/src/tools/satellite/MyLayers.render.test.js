@@ -52,11 +52,21 @@ function picked(feature, extra = {}) {
 }
 const type = (node, value) => { node.value = value; node.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); };
 const leave = (node) => { node.dispatchEvent(new Event('change', { bubbles: true })); flushSync(); };
-/** Open the sheet's Look rows, which stay as the last sheet left them. */
-function openLook() {
-  const look = document.querySelector('button.look');
-  if (look?.getAttribute('aria-expanded') === 'false') { look.click(); flushSync(); }
+/** Open sections of the sheet, which stay as the last sheet left them. */
+function unfold(...ids) {
+  for (const id of ids) {
+    const head = document.querySelector(`.fold[data-section="${id}"]`);
+    if (head?.getAttribute('aria-expanded') === 'false') { head.click(); flushSync(); }
+  }
 }
+/** Fold sections of the sheet, for what a folded one says on its line. */
+function fold(...ids) {
+  for (const id of ids) {
+    const head = document.querySelector(`.fold[data-section="${id}"]`);
+    if (head?.getAttribute('aria-expanded') === 'true') { head.click(); flushSync(); }
+  }
+}
+const openLook = () => unfold('look');
 const menuItem = (label) => [...document.querySelectorAll('.float-menu .fm-item')].find((node) => node.textContent.trim() === label);
 
 describe('personal layers', () => {
@@ -86,8 +96,9 @@ describe('personal layers', () => {
     expect(reorderFeatures).toHaveBeenCalledExactlyOnceWith(['one', 'two'], 'second', null);
     handle.dispatchEvent(drag('dragstart')); target.dispatchEvent(drag('dragover')); document.body.dispatchEvent(drag('drop'));
     expect(reorderFeatures).toHaveBeenCalledOnce();
-    // two selected: one sheet for both
-    expect(document.querySelector('[aria-label="Selected features"]').textContent).toContain('2 selected');
+    // two selected: one sheet for both, above the list
+    expect(document.querySelector('.sheet-dock [aria-label="Selected features"]').textContent).toContain('2 selected');
+    unfold('details');
     expect(document.querySelector('[aria-label="Feature group"]')).toBeTruthy();
   });
   it('reorders a focused feature with the keyboard without changing its geometry', () => {
@@ -203,6 +214,7 @@ describe('personal layers', () => {
     controller.select('m1');
     show(MyLayers, { controller });
     const path = '/api/cases/case/map-layers/work/markers/m1';
+    unfold('status', 'sources');
     byText('Destroyed').click(); await controller.whenSaved(); flushSync();
     // a status is the day shown's: it goes for what is picked, never from the sheet's form
     expect(api.post).toHaveBeenLastCalledWith('/api/cases/case/map-layers/work/selection', { keys: ['m1'], changes: { status: 'destroyed' } });
@@ -210,7 +222,7 @@ describe('personal layers', () => {
     expect(document.querySelector('[aria-label="Feature"]').textContent).toContain('90° E');
     document.querySelector('[aria-label="Clear the direction"]').click(); await controller.whenSaved(); flushSync();
     expect(api.patch).toHaveBeenLastCalledWith(path, { bearing: null });
-    expect(document.querySelector('[aria-label="Feature"]').textContent).toContain('Turn the ring on the map');
+    expect(document.querySelector('[aria-label="Feature"]').textContent).toContain('Facing: turn the ring on the map');
     document.querySelector('[aria-label="Add a source"]').click(); flushSync();
     const source = document.querySelector('[aria-label="New source"]');
     type(source, 'x.com/a/1');
@@ -220,7 +232,11 @@ describe('personal layers', () => {
     source.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await controller.whenSaved(); flushSync();
     expect(api.patch).toHaveBeenLastCalledWith(path, { links: ['https://x.com/a/1'] });
     expect(document.querySelector('.chip a').textContent).toBe('x.com');
-    byText('Others').click(); await controller.whenSaved(); flushSync();
+    // folded, the section says what it holds
+    fold('sources');
+    expect(document.querySelector('.fold[data-section="sources"]').textContent).toContain('x.com · By me');
+    unfold('sources');
+    document.querySelector('[aria-label="Geolocated by me"]').click(); await controller.whenSaved(); flushSync();
     expect(api.patch).toHaveBeenLastCalledWith(path, { provenance: 'external' });
     expect(api.patch).toHaveBeenCalledTimes(3);
     expect(byText('Save changes')).toBeUndefined();
@@ -233,13 +249,14 @@ describe('personal layers', () => {
     show(MyLayers, { controller: { editor: { title: 'Working map' }, features, groups: [{ id: 'g', name: 'Markers' }],
       selection: ['a', 'b'], pending: 0, updateSelection, setStatus } });
     const sheet = document.querySelector('[aria-label="Selected features"]');
+    unfold('status', 'sources');
     expect(sheet.querySelector('[aria-pressed="true"]').textContent).toBe('Damaged');
     expect(sheet.textContent).toContain('Several days');
     // nothing said is the first choice, not "Intact": most markers are no building
     expect(byText('Intact')).toBeUndefined();
     sheet.querySelector('[aria-label="No damage said, drawn plain"]').click();
     expect(setStatus).toHaveBeenCalledWith('');
-    byText('Others').click();
+    document.querySelector('[aria-label="Geolocated by me"]').click();
     expect(updateSelection).toHaveBeenCalledWith({ provenance: 'external' });
   });
 
@@ -291,11 +308,15 @@ describe('personal layers', () => {
       entity_picture: 'proofs/strike.png', date: '2024-05-10', links: ['https://example.org/post/1'] }, geometry: { type: 'Point' } };
     show(MyLayers, { controller: picked(marker) });
     const sheet = document.querySelector('[aria-label="Feature"]');
+    unfold('evidence', 'details');
     const plate = sheet.querySelector('.follows .follow-picture');
     expect(plate.title).toBe('Open the proof');
     expect(plate.querySelector('img').getAttribute('src')).toContain('proofs/strike.png');
     // above the rows the proof filled in
     expect(plate.compareDocumentPosition(sheet.querySelector('.rows')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fold('evidence');
+    expect(sheet.querySelector('.fold[data-section="evidence"]').textContent).toContain('proof “Strike”');
+    unfold('evidence');
     plate.querySelector('img').dispatchEvent(new Event('error')); flushSync();
     expect(sheet.querySelector('.follow-picture')).toBeNull();
     expect(sheet.textContent).toContain('Follows the proof “Strike”');
@@ -306,6 +327,7 @@ describe('personal layers', () => {
       entity_picture: 'proofs/strike.png', source_id: 'v1', source_label: 'rooftop', source_picture: 'thumbs/v.webp' }, geometry: { type: 'Point' } };
     const onfollowed = vi.fn();
     show(LayerFeatureSheet, { controller: picked(marker), onfollowed });
+    unfold('evidence');
     const shown = [...document.querySelectorAll('.follows .follow-picture')];
     expect(shown.map((one) => one.textContent.trim())).toEqual(['Source', 'Proof']);
     shown[0].click();
@@ -317,6 +339,7 @@ describe('personal layers', () => {
     const line = { properties: { key: 'line', name: 'Road' }, geometry: { type: 'LineString', coordinates: [[2, 48], [2.01, 48]] } };
     show(MyLayers, { controller: picked(line) });
     expect(document.querySelector('[aria-label="Feature style"] .dot')).toBeTruthy();
+    unfold('status', 'details');
     expect(document.querySelector('[aria-label="Feature"]').textContent).not.toContain('Facing');
     expect(document.querySelector('[aria-label="Feature"]').textContent).toContain('Length');
     document.querySelector('[aria-label="Feature actions"]').click(); flushSync();
@@ -366,10 +389,12 @@ describe('personal layers', () => {
     show(MyLayers, { controller: picked(point, { groups, group: 'g1', updateGroup, saveForm }) });
     document.querySelector('[aria-label="Feature style"]').click(); flushSync();
     expect(document.body.textContent).toContain('Checked has one style for all its features. A pick here restyles the whole group.');
+    document.querySelector('[aria-label="More colours"]').click(); flushSync();
     document.querySelector('[aria-label="Feature style orange"]').click();
     expect(updateGroup).toHaveBeenCalledWith('g1', { colour: '#d55e00' });
     // the sheet's own Group row moves it; the picker leaves that to the row
     expect(document.querySelector('[aria-label="Feature style group"]')).toBeNull();
+    unfold('details');
     const select = document.querySelector('[aria-label="Feature group"]');
     select.value = 'g2'; select.dispatchEvent(new Event('change', { bubbles: true }));
     expect(saveForm).toHaveBeenCalledOnce();
@@ -384,6 +409,7 @@ describe('personal layers', () => {
     expect(document.body.textContent).toContain('Side A has one colour for all its features. A colour picked here recolours the whole group.');
     // the list draws it in the group's colour
     expect(document.querySelector('.feature-symbol').getAttribute('style')).toContain('#cc79a7');
+    document.querySelector('[aria-label="More colours"]').click(); flushSync();
     document.querySelector('[aria-label="Feature style orange"]').click();
     expect(updateGroup).toHaveBeenCalledWith('g1', { colour: '#d55e00' });
     expect(updateSelection).not.toHaveBeenCalled();
@@ -508,6 +534,7 @@ describe('a feature with a history', () => {
     const held = () => ({ shape: '', status: '2026-10-12' });
     show(MyLayers, { controller: picked(marker, { editor: TRACKED, cursor: null, timeMode: 'new', held }) });
     expect(document.querySelector('.held').textContent.trim()).toBe(`Status changes on ${shortMoment('2026-10-12')}: pick a day to set it.`);
+    unfold('status');
     const statuses = [...document.querySelectorAll('[aria-label="Feature status"] button')];
     expect(statuses.every((button) => button.disabled)).toBe(true);
     expect(statuses[0].title).toBe('Changes on 12 Oct 2026: pick a day to set it');
@@ -518,6 +545,17 @@ describe('a feature with a history', () => {
     expect(rows().map(said)).toEqual([[shortMoment('2026-10-03'), 'Appears'], [shortMoment('2026-10-12'), 'Reshaped · Damaged'],
       [shortMoment('2026-10-15'), 'Next edit']]);
     expect(rows()[2].classList.contains('ghost')).toBe(true);
+  });
+
+  it('folds a long history round the date edited, and unfolds it on a press', () => {
+    const states = Array.from({ length: 30 }, (_, index) => ({ at: `2026-09-${String(index + 1).padStart(2, '0')}`, geometry: line(index) }));
+    const long = { type: 'Feature', geometry: line(29), properties: { key: 'long', name: 'Front', states } };
+    show(MyLayers, { controller: picked(long, { editor: TRACKED, cursor: '2026-09-15', timeMode: 'new' }) });
+    expect(rows().map((row) => row.querySelector('.at')?.textContent ?? row.textContent.trim())).toEqual([
+      shortMoment('2026-09-01'), '12 more dates', shortMoment('2026-09-14'), shortMoment('2026-09-15'), shortMoment('2026-09-16'),
+      '13 more dates', shortMoment('2026-09-30')]);
+    byText('12 more dates').click(); flushSync();
+    expect(rows()).toHaveLength(30);
   });
 
   it('gives an undated feature no history until a dated edit is about to', () => {
@@ -684,6 +722,8 @@ describe('a feature with a history', () => {
     show(MyLayers, { controller });
     const sheet = () => document.querySelector('[aria-label="Feature"]');
     // a line has no status: it is not damaged or destroyed
+    unfold('status');
+    expect(sheet().querySelector('[aria-label="Feature confidence"]')).not.toBeNull();
     expect(sheet().querySelector('[aria-label="Feature status"]')).toBeNull();
     openLook();
     sheet().querySelector('[aria-label="Line dash"] button:nth-child(2)').click(); await controller.whenSaved(); flushSync();
@@ -711,26 +751,92 @@ describe('a feature with a history', () => {
   });
 });
 
+describe('the key of the case', () => {
+  it('names colours and icons from a tag in the header, offering the icons the markers wear', async () => {
+    const at = (key, properties) => ({ type: 'Feature', properties: { key, group: 'g', ...properties }, geometry: { type: 'Point', coordinates: [2, 48] } });
+    const line = { type: 'Feature', properties: { key: 'l', group: 'g', symbol: 'star' }, geometry: { type: 'LineString', coordinates: [[2, 48], [2.1, 48]] } };
+    const { controller } = await editing({ features: [at('a', { symbol: 'badge-tank' }), at('b', { symbol: 'flag' }), at('c', { symbol: 'badge-tank' }), line] });
+    show(MyLayers, { controller });
+    document.querySelector('.editor-head [aria-label="Name colours and icons"]').click(); flushSync();
+    const icons = [...document.querySelectorAll('[aria-label="Named colours and icons"] input[aria-label^="Name of icon"]')];
+    expect(icons.map((input) => input.getAttribute('aria-label'))).toEqual(['Name of icon Tank', 'Name of icon Flag']);
+  });
+});
+
+describe('where the sheet opens', () => {
+  const point = (key, group = 'g') => ({ type: 'Feature', properties: { key, name: `Point ${key}`, group }, geometry: { type: 'Point', coordinates: [2, 48] } });
+  const inRow = (key) => document.querySelector(`[data-feature-key="${key}"] [aria-label="Feature"]`);
+  const docked = () => document.querySelector('.sheet-dock .sheet');
+
+  it('opens under the row pressed, the rest of the list still in view', async () => {
+    const { controller } = await editing({ features: [point('a'), point('b'), point('c')] });
+    show(MyLayers, { controller });
+    document.querySelector('[data-feature-key="b"] .feature-row').click(); flushSync(); await settle(); flushSync();
+    expect(inRow('b')).toBeTruthy();
+    expect(docked()).toBeNull();
+    expect(document.querySelectorAll('.features .feature-row')).toHaveLength(3);
+    // the group holding it lets the panel scroll it whole
+    expect(document.querySelector('.features').classList.contains('holding')).toBe(true);
+    // the line drags, never the sheet under it
+    expect(document.querySelector('[data-feature-key="b"]').getAttribute('draggable')).toBeNull();
+    expect(document.querySelector('[data-feature-key="b"] .line').getAttribute('draggable')).toBe('true');
+  });
+
+  it('opens a group folded or cut short for a feature picked on the map', async () => {
+    const many = Array.from({ length: 150 }, (_, index) => point(`m${index}`, 'g'));
+    const { controller } = await editing({ features: many });
+    show(MyLayers, { controller });
+    // the oldest is past the first hundred rows
+    expect(document.querySelector('[data-feature-key="m0"]')).toBeNull();
+    controller.select('m0'); flushSync();
+    expect(inRow('m0')).toBeTruthy();
+    document.querySelector('.group-title').click(); flushSync();
+    // folded by hand, the group lets the sheet go above the list
+    expect(docked()).toBeTruthy();
+    controller.select('m1'); flushSync();
+    expect(inRow('m1')).toBeTruthy();
+  });
+
+  it('opens above the list for several features, or one a search hides', async () => {
+    const { controller } = await editing({ features: [point('a'), point('b')] });
+    show(MyLayers, { controller });
+    controller.toggleSelected('a', ['a', 'b']); controller.toggleSelected('b', ['a', 'b']); flushSync();
+    expect(document.querySelector('.sheet-dock [aria-label="Selected features"]')).toBeTruthy();
+    controller.select('a'); flushSync();
+    const find = document.querySelector('[aria-label="Find in this layer"]'); find.value = 'Point b';
+    find.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    expect(document.querySelector('.sheet-dock [aria-label="Feature"]')).toBeTruthy();
+    expect(inRow('a')).toBeNull();
+  });
+});
+
 describe('what the sheet says on hover', () => {
   const line = { type: 'Feature', properties: { key: 'l1', name: 'Front', group: 'g', line_width: 4, line_dash: 'dashed' },
     geometry: { type: 'LineString', coordinates: [[2, 48], [2.1, 48]] } };
   const looks = { line_width: 4, line_dash: 'dashed', line_arrow: '', area_fill: '', fill_opacity: '', marker_size: '', label: '', label_size: '', confidence: '' };
 
-  it('explains every row, and folds how a feature is drawn under Look, saying what it sets', () => {
+  it('folds what it says into sections named on hover, Look last, each saying what it holds', () => {
     const controller = picked(line, { groups: [{ id: 'g', name: 'Markers', stroke: 2 }, { id: 'h', name: 'Posts' }] });
     controller.form = { ...controller.form, ...looks };
     show(LayerFeatureSheet, { controller });
-    const look = document.querySelector('button.look');
-    if (look.getAttribute('aria-expanded') === 'true') { look.click(); flushSync(); }
-    // what it says comes first, each row named on hover
-    const keys = [...document.querySelectorAll('.rows .key')].filter((key) => key.textContent !== 'Length');
-    expect(keys.map((key) => key.textContent)).toEqual(['Group', 'How sure', 'Day', 'Sources', 'Geolocated by', 'Note']);
-    expect(keys.every((key) => key.title)).toBe(true);
+    fold('status', 'sources', 'note', 'details', 'look');
+    const heads = [...document.querySelectorAll('.fold')];
+    expect(heads.map((head) => head.querySelector('.fold-name').textContent)).toEqual(['Status', 'Sources', 'Note', 'Details', 'Look']);
+    expect(heads.every((head) => head.title)).toBe(true);
+    // a folded section says what it holds, so a short sheet still reads whole
+    expect(heads[3].querySelector('.fold-holds').textContent).toMatch(/^Markers · \d[\d.,]* km$/);
     expect(document.querySelector('[aria-label="Line dash"]')).toBeNull();
+    const look = heads[4];
     expect(look.title).toBe('How it is drawn: its size, line, fill and name');
     expect(look.textContent).toContain('Width · Dash');
+    // the rows inside each section are named on hover too
+    unfold('details');
+    const keys = [...document.querySelectorAll('.rows .key')].filter((key) => key.textContent !== 'Length');
+    expect(keys.map((key) => key.textContent)).toEqual(['Group', 'Day']);
+    expect(keys.every((key) => key.title)).toBe(true);
+    fold('details');
     look.click(); flushSync();
-    const drawn = [...document.querySelectorAll('.look-rows .key')];
+    const drawn = [...document.querySelectorAll('.rows.section .key')];
     expect(drawn.map((key) => key.textContent)).toEqual(['Width', 'Dash', 'Arrow', 'Name']);
     expect(drawn.every((key) => key.title)).toBe(true);
     // a slider says its value, and goes back to its group's with Reset
@@ -743,6 +849,7 @@ describe('what the sheet says on hover', () => {
     const marker = { type: 'Feature', properties: { key: 'm1', name: 'Depot', group: 'g' }, geometry: { type: 'Point', coordinates: [2, 48] } };
     const setStatus = vi.fn();
     show(LayerFeatureSheet, { controller: picked(marker, { groups: [{ id: 'g', name: 'Markers' }], setStatus }) });
+    unfold('status');
     const buttons = [...document.querySelectorAll('[aria-label="Feature status"] button')];
     expect(buttons.map((button) => [button.textContent, button.title])).toEqual([
       ['–', 'No damage said, drawn plain'], ['Damaged', 'Drawn with a stroke across it'], ['Destroyed', 'Drawn with a cross over it']]);
@@ -757,6 +864,7 @@ describe('what the sheet says on hover', () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     show(LayerFeatureSheet, { controller: picked(marker, { groups: [{ id: 'g', name: 'Markers' }], placeAt }) });
+    unfold('details');
     const field = document.querySelector('[aria-label="Feature position"]');
     expect(field.value).toBe('48.000000, 2.000000');
     document.querySelector('[aria-label="Copy the position"]').click();
@@ -777,6 +885,7 @@ describe('what the sheet says on hover', () => {
   it('keeps a marker that follows a case item where it stands, its position still copied', () => {
     const marker = { type: 'Feature', properties: { key: 'm1', name: 'Depot', group: 'g', entity_id: 'place-1', entity_type: 'place' }, geometry: { type: 'Point', coordinates: [2, 48] } };
     show(LayerFeatureSheet, { controller: picked(marker, { groups: [{ id: 'g', name: 'Markers' }], placeAt: vi.fn() }) });
+    unfold('details');
     expect(document.querySelector('[aria-label="Feature position"]').readOnly).toBe(true);
     expect(document.querySelector('[aria-label="Copy the position"]')).not.toBeNull();
   });
@@ -787,6 +896,7 @@ describe('what the sheet says on hover', () => {
     show(LayerFeatureSheet, { controller: picked(away, { editor: { name: 'work', title: 'Working', track: { on: true } }, cursor: '2026-10-05',
       timeMode: 'new', groups: [{ id: 'g', name: 'Markers' }] }) });
     expect(document.querySelector('.away').textContent.trim()).toBe('Not on the map on 5 Oct 2026: set when it shows to change it there.');
+    unfold('status');
     expect([...document.querySelectorAll('[aria-label="Feature status"] button')].every((button) => button.disabled)).toBe(true);
   });
 });

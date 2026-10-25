@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  asOf, changedBy, changes, changesOn, inForce, isTracked, lifeline, lifeRows, moment, momentLabel, momentNow, moments,
+  asOf, changedBy, changes, changesOn, foldRows, inForce, isTracked, lifeline, lifeRows, moment, momentLabel, momentNow, moments,
   previousState, seenAt, shortMoment, spanLabel, spanOf, stateAt, stepMoment,
 } from './layerHistory.js';
 
@@ -314,5 +314,29 @@ describe('when a feature shows, as the editor says it', () => {
     expect(changesOn(plain({ date: '2026-10-15' }), '2026-10-15')).toBe(true);
     expect(changesOn(plain(), '2026-10-15')).toBe(false);
     expect(changesOn(front, null)).toBe(false);
+  });
+});
+
+describe('a long history', () => {
+  const day = (index) => `2026-${String(1 + Math.floor(index / 28)).padStart(2, '0')}-${String(1 + (index % 28)).padStart(2, '0')}`;
+  const many = (count, extra = {}) => Array.from({ length: count }, (_, index) => ({ at: day(index), what: 'Moved', current: false, ...(extra[index] ?? {}) }));
+
+  it('keeps a short one whole', () => {
+    const rows = many(7, { 6: { current: true } });
+    expect(foldRows(rows)).toBe(rows);
+  });
+
+  it('keeps the first, the last and the dates round the edit, counting the rest', () => {
+    const rows = many(100, { 50: { editing: true }, 99: { current: true } });
+    const shown = foldRows(rows);
+    expect(shown.map((row) => (row.fold ? `+${row.fold}` : row.at))).toEqual([day(0), '+48', day(49), day(50), day(51), '+47', day(99)]);
+    expect(shown[1].at).toBe(day(1));
+  });
+
+  it('falls back to the date shown, then to the last, and never folds a lone date', () => {
+    expect(foldRows(many(9, { 2: { current: true } })).map((row) => (row.fold ? `+${row.fold}` : row.at)))
+      .toEqual([day(0), day(1), day(2), day(3), '+4', day(8)]);
+    expect(foldRows(many(9)).map((row) => (row.fold ? `+${row.fold}` : row.at)))
+      .toEqual([day(0), '+6', day(7), day(8)]);
   });
 });

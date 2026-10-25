@@ -8,7 +8,7 @@ afterEach(() => { if (held) unmount(held); held = null; document.body.innerHTML 
 
 function show(element, props = {}) {
   const state = $state(element);
-  held = mount(PlateMapBar, { target: document.body, props: { element: state, grounds: [['plain', 'Plain'], ['plain-dark', 'Plain, dark'],
+  held = mount(PlateMapBar, { target: document.body, props: { element: state, grounds: [['plain', 'Plain'], ['plain-news', 'Newsroom'], ['plain-dark', 'Plain, dark'],
     ['esri-world-imagery', 'Esri World Imagery']], ...props } });
   flushSync();
   return state;
@@ -35,7 +35,7 @@ describe('a plate map\'s own bar', () => {
     expect(element.view.bearing).toBe(-170);
   });
 
-  it('changes the ground and what lies over it from one menu, relief only on the plain ground', () => {
+  it('changes the ground and what lies over it from one menu, the relief asked for wherever the ground does not shade its own', () => {
     const element = show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [] });
     button('Ground').click(); flushSync();
     item('Relief shading').click(); flushSync();
@@ -43,8 +43,12 @@ describe('a plate map\'s own bar', () => {
     item('Esri World Imagery').click(); flushSync();
     expect(element.basemap).toBe('esri-world-imagery');
     button('Ground').click(); flushSync();
-    expect(item('Relief shading')).toBeUndefined();
+    expect(item('Relief shading')).toBeDefined();
     expect(item('Borders and big names')).toBeDefined();
+    item('Newsroom').click(); flushSync();
+    expect(element.basemap).toBe('plain-news');
+    button('Ground').click(); flushSync();
+    expect(item('Relief shading')).toBeUndefined();
   });
 
   it('frames and turns a map, only changes the ground of an inset', () => {

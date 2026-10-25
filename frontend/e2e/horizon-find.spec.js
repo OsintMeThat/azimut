@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { awaitMapReady, CASE_ID, installAppFixture, PANEL_PATH } from './app.fixture.js';
+import { awaitMapReady, CASE_ID, installAppFixture, PANEL_PATH, repainted } from './app.fixture.js';
 
 // Find where it was taken: Horizon's third mode, three columns, the area drawn
 // and an alignment made by its four clicks, then the search, its places and a
@@ -418,5 +418,227 @@ test.describe('Find where it was taken', () => {
     // and Back leaves Find
     await page.goBack();
     await expect(again).toHaveCount(0);
+  });
+
+  test('arriving without a photo, the dialog offers the searches the case keeps, one opened by a click', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installAppFixture(page);
+    await page.route('**/api/horizon/**', (route) => route.fulfill({ status: 404, json: { detail: 'No terrain in the browser fixture' } }));
+    await page.route(`**/api/cases/${CASE_ID}/horizon/finds**`, (route) => {
+      if (route.request().url().endsWith('/horizon/finds')) {
+        return route.fulfill({ json: [{ name: 'panel search', title: 'Ridge search', status: 'done', created_at: '2026-10-18T09:30:00', best: { explained: 0.86 } }] });
+      }
+      return route.fulfill({ json: DONE });
+    });
+    await page.goto('/#horizon?ll=46.5586,7.8353&hd=95&tl=0&fov=60&r=plain');
+    await modes(page).getByRole('button', { name: 'Find' }).click();
+    const pick = page.getByRole('dialog', { name: 'Open a search or add a photo' });
+    await expect(pick).toBeVisible();
+    await pick.getByRole('button', { name: /Ridge search/ }).click();
+    await expect(pick).toBeHidden();
+    const find = page.getByRole('region', { name: 'Find where it was taken' });
+    await expect(find.locator('.fs-place').first()).toContainText('explains 86%');
+  });
+
+  test('times the search on this computer, offers it quicker or more thorough, and asks what the photo shows', async ({ page }) => {
+    const { find } = await openFind(page);
+    await awaitMapReady(page, 2);
+    const estimates = [];
+    const previews = [];
+    await page.route('**/api/horizon/finds/estimate', (route) => {
+      estimates.push(route.request().postDataJSON());
+      const efforts = { quick: { points: 300, most: 300, spacing: 500, coarse: 250 }, normal: { points: 1000, most: 1000, spacing: 250, coarse: 900 }, thorough: { points: 3000, most: 3000, spacing: 145, coarse: 2900 } };
+      return route.fulfill({ json: { points: 1000, coarse: 900, spacing: 250, step: 0.5, turn: 1, efforts } });
+    });
+    await page.route('**/api/horizon/finds/preview', (route) => {
+      const body = route.request().postDataJSON();
+      previews.push(body);
+      const points = Array.from({ length: 64 }, (_, i) => [46.55 + Math.floor(i / 8) * 0.0025, 7.82 + (i % 8) * 0.004, body.over === 'above' && i < 16 ? 'low' : 'slope', !(body.over === 'above' && i < 16)]);
+      return route.fulfill({ json: { spacing: 250, total: 64, kept: points.filter((p) => p[3]).length, kinds: { slope: 64 }, points, ruled: body.over === 'above' ? { low: 16 } : {} } });
+    });
+    await page.route(`**/api/cases/${CASE_ID}/horizon/finds/pace`, (route) =>
+      route.fulfill({ json: { seconds: 0.5, timed: 3, lanes: { fastest: 8, fast: 4, gentle: 1 }, lane_min: 200, full: 8, lane_power: 0.46, top: 5 } })
+    );
+    await trace(page, find);
+    const map = await find.getByRole('region', { name: 'Map and the area' }).boundingBox();
+    const at = (fx, fy) => [map.x + map.width * fx, map.y + map.height * fy];
+    await find.getByRole('button', { name: 'Draw the area' }).click();
+    for (const [fx, fy] of [[0.35, 0.35], [0.65, 0.35], [0.65, 0.65], [0.35, 0.65]]) await page.mouse.click(...at(fx, fy));
+    await find.getByRole('button', { name: 'Done', exact: true }).first().click();
+    // a few points timed on this computer: the time said is its own
+    await expect(find.getByText(/points, about \d+ min on this computer/)).toBeVisible({ timeout: 10_000 });
+    const efforts = find.getByRole('group', { name: 'How thorough the search is' });
+    await efforts.getByRole('button', { name: /^Thorough/ }).click();
+    await expect.poll(() => estimates.at(-1)?.effort).toBe('thorough');
+    // what the photo shows rules points out before the search, and the side says how many
+    const help = find.getByRole('region', { name: 'Help the search' });
+    await help.locator('summary', { hasText: 'What you know' }).click();
+    await help.getByRole('button', { name: 'Above the land round' }).click();
+    await help.getByRole('button', { name: 'Sea or a lake' }).click();
+    await expect.poll(() => previews.at(-1)?.water).toBe(true);
+    expect(previews.at(-1).over).toBe('above');
+    await expect(find.getByText('Lower than the land round it: 16 points left out (25%).')).toBeVisible();
+  });
+
+  test('draws another area and paints points out with the brush, the map holding still, a stroke taken back', async ({ page }) => {
+    const { find } = await openFind(page);
+    await awaitMapReady(page, 2);
+    const previews = [];
+    await page.route('**/api/horizon/finds/preview', (route) => {
+      const body = route.request().postDataJSON();
+      previews.push(body);
+      const painted = (body.strokes ?? []).some((stroke) => stroke.out);
+      const points = Array.from({ length: 64 }, (_, i) => [46.55 + Math.floor(i / 8) * 0.0025, 7.82 + (i % 8) * 0.004, painted && i < 8 ? 'painted' : 'slope', !(painted && i < 8)]);
+      return route.fulfill({ json: { spacing: 250, total: 64, kept: points.filter((p) => p[3]).length, kinds: { slope: 64 }, points } });
+    });
+    const map = await find.getByRole('region', { name: 'Map and the area' }).boundingBox();
+    const at = (fx, fy) => [map.x + map.width * fx, map.y + map.height * fy];
+    await find.getByRole('button', { name: 'Draw the area' }).click();
+    for (const [fx, fy] of [[0.3, 0.3], [0.5, 0.3], [0.5, 0.5], [0.3, 0.5]]) await page.mouse.click(...at(fx, fy));
+    await find.getByRole('button', { name: 'Done', exact: true }).first().click();
+
+    // another area, searched with the first
+    await find.getByRole('button', { name: 'Another area' }).click();
+    for (const [fx, fy] of [[0.6, 0.6], [0.75, 0.6], [0.75, 0.75]]) await page.mouse.click(...at(fx, fy));
+    await page.keyboard.press('Enter');
+    await expect(find.locator('.fs-zone.more')).toContainText('Area 2');
+    await expect.poll(() => previews.at(-1)?.areas?.length ?? 0).toBe(1);
+
+    // the brush paints while the map holds still
+    await find.getByRole('button', { name: 'Brush' }).click();
+    await expect(find.getByText('Brush over points to turn them off.', { exact: false }).first()).toBeVisible();
+    // a corner of the area stays where it was on screen: the map did not pan under the stroke
+    const centre = () => find.locator('.find-corner').first().boundingBox();
+    const still = await centre();
+    await page.mouse.move(...at(0.32, 0.35));
+    await page.mouse.down();
+    for (let i = 1; i <= 10; i += 1) await page.mouse.move(...at(0.32 + i * 0.015, 0.35), { steps: 2 });
+    await page.mouse.up();
+    expect(await centre()).toEqual(still);
+    await expect(find.getByText('1 stroke of the brush')).toBeVisible();
+    await expect.poll(() => previews.at(-1)?.strokes?.length ?? 0).toBe(1);
+    const stroke = previews.at(-1).strokes[0];
+    expect(stroke.out).toBe(true);
+    expect(stroke.path.length).toBeGreaterThan(2);
+    // Ctrl+Z takes it back, Escape puts the brush down
+    await page.keyboard.press('Control+z');
+    await expect(find.getByText('1 stroke of the brush')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(find.getByRole('button', { name: 'Brush' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('the brush turns points off and paints ground in on the map at once, before the app reads the stroke', async ({ page }) => {
+    const { find } = await openFind(page);
+    await awaitMapReady(page, 2);
+    // a dense grid over the area drawn; once a stroke is asked about, the app answers late
+    let answered = 0;
+    await page.route('**/api/horizon/finds/preview', async (route) => {
+      const body = route.request().postDataJSON();
+      const lats = body.area.map((p) => p.lat);
+      const lons = body.area.map((p) => p.lon);
+      const [south, north, west, east] = [Math.min(...lats), Math.max(...lats), Math.min(...lons), Math.max(...lons)];
+      const points = [];
+      for (let i = 0; i <= 24; i += 1) for (let j = 0; j <= 24; j += 1) points.push([south + ((north - south) * i) / 24, west + ((east - west) * j) / 24, 'slope', true]);
+      if (body.strokes?.length) await new Promise((resolve) => setTimeout(resolve, 4000));
+      answered += body.strokes?.length ? 1 : 0;
+      return route.fulfill({ json: { spacing: 250, total: points.length, kept: points.length, kinds: { slope: points.length }, points } });
+    });
+    const region = find.getByRole('region', { name: 'Map and the area' });
+    const map = await region.boundingBox();
+    const at = (fx, fy) => [map.x + map.width * fx, map.y + map.height * fy];
+    await find.getByRole('button', { name: 'Draw the area' }).click();
+    for (const [fx, fy] of [[0.3, 0.3], [0.6, 0.3], [0.6, 0.6], [0.3, 0.6]]) await page.mouse.click(...at(fx, fy));
+    await find.getByRole('button', { name: 'Done', exact: true }).first().click();
+    await page.waitForTimeout(1500);
+    await find.getByRole('button', { name: 'Brush' }).click();
+    const picture = async () => {
+      // the ring under the hand is put away first, so only the points differ
+      await page.mouse.move(map.x + map.width + 40, map.y + 10);
+      await page.waitForTimeout(250);
+      return region.locator('.map[data-map-ready="true"]').screenshot();
+    };
+    const before = await picture();
+    // Off across the grid: the points it passes over are grey at once
+    await page.mouse.move(...at(0.32, 0.45));
+    await page.mouse.down();
+    for (let i = 1; i <= 10; i += 1) await page.mouse.move(...at(0.32 + i * 0.025, 0.45), { steps: 2 });
+    await page.mouse.up();
+    const greyed = await picture();
+    expect(answered).toBe(0);
+    expect(repainted(before, greyed)).toBe(true);
+    // On (Alt) past the area: the ground painted in shows its points at once too
+    await page.keyboard.down('Alt');
+    await page.mouse.move(...at(0.65, 0.75));
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i += 1) await page.mouse.move(...at(0.65 + i * 0.02, 0.75), { steps: 2 });
+    await page.mouse.up();
+    await page.keyboard.up('Alt');
+    const paintedIn = await picture();
+    expect(answered).toBe(0);
+    expect(repainted(greyed, paintedIn)).toBe(true);
+    await expect(find.getByText('2 strokes of the brush')).toBeVisible();
+  });
+
+  test('fills the map in as it runs; a point tried, looked from and confirmed is kept and stops the search', async ({ page }) => {
+    const { find } = await openFind(page);
+    await awaitMapReady(page, 2);
+    const scored = [
+      { lat: 46.5586, lon: 7.8353, explained: 0.81, spacing: 250, gap: 0.1 },
+      { lat: 46.5402, lon: 7.8601, explained: 0.4, spacing: 250, gap: 0.3 },
+    ];
+    const tried = { lat: 46.5586, lon: 7.8353, explained: 0.83, heading: 95.4, fov: 58, tilt: 1.2, roll: 0, reach: 20000, height: 1.7 };
+    let record = { name: 'panel search', status: 'running', progress: { done: 30, total: 64 }, ask: DONE.ask, result: null };
+    const found = [];
+    await page.route(`**/api/cases/${CASE_ID}/horizon/finds**`, (route) => {
+      const request = route.request();
+      const url = request.url();
+      if (request.method() === 'POST' && url.endsWith('/horizon/finds')) return route.fulfill({ json: { name: 'panel search', status: 'queued', progress: { done: 0, total: 0 } } });
+      if (url.endsWith('/horizon/finds')) return route.fulfill({ json: [] });
+      if (url.includes('/points')) return route.fulfill({ json: { started: 5, since: 0, points: url.includes('since=0') ? scored : [] } });
+      if (url.endsWith('/finds/try')) return route.fulfill({ json: { place: tried, frames: null } });
+      if (url.endsWith('/found')) {
+        found.push(request.postDataJSON());
+        record = { ...record, status: 'stopping', found: found[0] };
+        return route.fulfill({ json: record });
+      }
+      const now = record;
+      // stopping, it ends with what it had found
+      if (record.status === 'stopping') record = { ...record, status: 'cancelled', result: { partial: true, verdict: 'match', places: [tried], points: scored } };
+      return route.fulfill({ json: now });
+    });
+    await page.route(`**/api/cases/${CASE_ID}/horizon/views**`, (route) => {
+      const request = route.request();
+      if (request.method() === 'POST') return route.fulfill({ json: { name: 'Panel found', title: 'Panel found', spec_path: '.horizon/Panel found.json', thumb: null } });
+      if (request.method() === 'PUT') return route.fulfill({ json: {} });
+      return route.fulfill({ json: found.length ? [{ name: 'Panel found', title: 'Panel found' }] : [] });
+    });
+    await trace(page, find);
+    const map = await find.getByRole('region', { name: 'Map and the area' }).boundingBox();
+    const at = (fx, fy) => [map.x + map.width * fx, map.y + map.height * fy];
+    await find.getByRole('button', { name: 'Draw the area' }).click();
+    for (const [fx, fy] of [[0.35, 0.35], [0.65, 0.35], [0.65, 0.65], [0.35, 0.65]]) await page.mouse.click(...at(fx, fy));
+    await find.getByRole('button', { name: 'Done', exact: true }).first().click();
+    await find.getByRole('button', { name: 'Search', exact: true }).click();
+
+    // the best points so far, as it runs: a press tries one in full
+    const result = find.getByRole('region', { name: 'The search on show' });
+    await expect(result.getByText('Best so far')).toBeVisible({ timeout: 10_000 });
+    await result.locator('.fs-place').first().click();
+    await expect(result.getByText('Tried here, in full: explains 83%')).toBeVisible();
+    await result.getByRole('button', { name: 'Look from here' }).click();
+    await expect(find).toHaveCount(0);
+
+    // looked from it, the place is confirmed: the view kept, the search told
+    const offer = page.getByRole('group', { name: 'A place from the search' });
+    await expect(offer).toContainText('Is it the place?');
+    await offer.getByRole('button', { name: 'This is the place' }).click();
+    await expect(offer).toContainText('Place confirmed, kept as the view Panel found');
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ lat: 46.5586, lon: 7.8353, view: 'Panel found', explained: 0.83 });
+
+    // back in Find, the search stopped with what it had found, the place confirmed first
+    await offer.getByRole('button', { name: 'Back to Find' }).click();
+    await expect(result.getByText('Place confirmed')).toBeVisible({ timeout: 10_000 });
+    await expect(result.getByText('Stopped after 30 of 64 points')).toBeVisible();
   });
 });

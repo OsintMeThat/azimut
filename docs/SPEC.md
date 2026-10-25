@@ -172,12 +172,13 @@ proof for publication.
 | ✅ **Map navigation & captures** | Links map cameras, places case media and uncertainty footprints, and saves attributed captures with scale and north. |
 | ✅ **Map layers** | Stacks infrastructure overlays, FIRMS fires and VIIRS night lights, with case pins filtered by kind and folder. |
 | ✅ **Imported & followed layers** | Imports KML, KMZ, GeoJSON and GPX, follows public My Maps and GeoConfirmed, and filters their legends and dates. |
-| ✅ **Personal map layers** | Starts blank, from a file or from a My Maps link read once, then draws and edits markers, lines and areas on any map from a movable bar, styled with pictograms, every edit undoable, each feature described in a sheet that saves as it goes and explains itself on hover. |
+| ✅ **Personal map layers** | Starts blank, from a file or from a My Maps link read once, then draws and edits markers, lines and areas on any map from a movable bar, styled with pictograms, every edit undoable, each feature described in a sheet that opens under its row, folds into sections, saves as it goes and explains itself on hover. |
 | ✅ **Points into a layer** | Follows places, proofs and files of the case as they move and as they are saved (a proof and its footage are one marker, named by the proof's description), reads pasted coordinates, map links and posts, and takes a Geo Proof point, a file played on the map or another layer's feature from the same step-by-step menu. |
 | ✅ **Layer days** | Filters a personal layer by day on its time strip and draws its dated features on an optional Timeline track. |
 | ✅ **Layer downloads** | Download personal layers as KMZ with icons, KML or GeoJSON. |
 | ✅ **Own icons** | Imports the analyst's icons in Settings (files, folders, zipped packs, SVG) for every layer's palette, in a disc or as they are; a layer keeps its copy and a copied map keeps its own. |
-| ✅ **Layer colours** | Gives a group one colour while each feature keeps its icon, offers back the colours a layer wears and those picked lately, and takes a colour code typed or pasted. |
+| ✅ **Layer colours** | Gives a group one colour while each feature keeps its icon, offers the colours a layer wears first, the plain ones, those picked lately and a typed code behind one press. |
+| ✅ **Case key** | Names what each colour and icon stands for in the case, from a tag in the layer editor, its palette and its legend, and counts the legends by name. |
 | ✅ **Layers followed over time** | Keeps a layer's features as dated states read on any day, today until the cursor moves, so every edit is dated, with what changed that day ringed and each feature's days said in its editor. |
 | ✅ **Layers kept per case** | Reopens each case on the layers every map had on, fires and night lights excepted, and leaves off with a toast a layer that stopped the last session while drawing. |
 | ✅ **Send to My Maps** | Saves a layer as it stood on one day as a KMZ, opens the analyst's My Maps beside it and says the three steps that replace its layer. |
@@ -190,6 +191,12 @@ proof for publication.
 | ✅ **Topographic & 3D plates** | Draws a plate's map on a topographic or staff-map ground (heights in colour, contour lines, summits, the Map's key-less layers), or in 3D on its heights with its ridge lines. |
 | ✅ **Plate framing & transitions** | Frames a map day by day or step by step, and goes from one to the next in the MP4 by a fade, the map flying there drawn frame by frame (blurred or sharp) and what is new fading in or drawn. |
 | ✅ **Plate workspace** | Widens or puts away the plate's list and inspector, folds the inspector's sections, finds what to add by a word, gives the page the whole screen in focus, and opens a plate in a tab of its own, edited in one tab at a time. |
+| ✅ **Ready plates** | Starts a plate in one press or from New plate's one screen (layout, map, paper, look), on ten ready plates laid out for each paper (situation, geolocation card, before and after, incidents, track, line of sight, site, locator, briefing, post) and copied laid out for another paper. |
+| ✅ **Plate grounds** | Draws a plate's map on ten vector grounds (newsroom, light grey, humanitarian, shaded relief, toner, tactical…) with airfields, military ground, road numbers, fine and disputed borders, set by detail and presence, names hidden or made labels by a click, or on Sentinel-2 cloudless, a year's mosaic said as one, or one dated Sentinel-2 pass. |
+| ✅ **Plate type & blocks** | Sets a text in the page's styles (kicker, title, standfirst, caption, badge, key figure), adds ready blocks and editorial looks, and fills in coordinates, a played plate's period and counts of what the map shows. |
+| ✅ **Plate locator & films** | Draws an inset as a globe with disputed areas apart, makes a layer of what was drawn or a new one to edit in the Map, and adds ready sequences, title and end cards, duplicated steps and each step's own transition time to the video. |
+| ✅ **Plate focus & roles** | Lights one country and draws the rest of the world back (disputed areas half lit), gives a layer a role's look (held, claimed hatched, contested, front, events, context) named in the legend, draws every point, grains the paper and lets credits be taken off but a ground's. |
+| ✅ **Plate export behind** | Exports a plate while the analyst works in another tool, the plate held still under a veil and the top bar saying how far, stopped in one press. |
 | ✅ **Layers in every map** | Offers every layer, added ones included, in Compare, Detect and Horizon (Find's map included) from one Layers menu; Compare draws its one list on A, B or both, fires and nights on each side's day. |
 | ✅ **Find hints & trust** | Takes several zoom words and compass directions when unsure (none ticked is any), draws the directions as a fan on Find's map, and says how far a search's best place can be trusted, why, and what the area fits by chance. |
 | ✅ **Find: lines, ground and frames** | Says how far each traced line stands, where the eye stands (sea included) shown on the grid before the search, how the camera looks and whether it is a selfie, reads a phone's zoom by the picture's shape, and reads a stitched collage frame by frame. |
@@ -342,8 +349,7 @@ stops making sense.
 - **Update ffmpeg from the app:** download a static build into the workspace and prefer it at runtime, like the scraper update, if the bundled copy ever lags in a way users hit.
 - **Vector text in plate PDFs:** the PDF holds the page as one print-resolution picture; selectable text needs the plate's faces as TTF on the Python side.
 - **Place names kept whole at a plate map's edge:** the engine cuts a name the frame crosses; placing them away from the frame would need its own label pass.
-- **Copernicus imagery as a plate ground:** a Sentinel-2 pass per day of a played plate, which spends the analyst's quota on every export.
-- **Say what a new plate starts from:** the ground and the layers it opens on, chosen before it opens, rather than the Map's view or a default place.
+- **A Sentinel-2 pass per day of a played plate:** a plate's map holds one dated pass; following the play's days would spend the analyst's quota on every export.
 - **Place names in their own script:** the Arabic or Cyrillic name under the Latin one, for searching local sources. Needs the engine's right-to-left text plugin, bundled rather than fetched.
 - **Free band formulas in Detect:** a rule read on an expression the analyst writes. A normalised difference and a single band already work, including from a layer they wrote, so what is left is the general case — an arbitrary expression needs its own product family, a generated evalscript and thresholds calibrated on real scenes.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
@@ -525,7 +531,9 @@ stops making sense.
   yes to their size. They are third-party binaries parsed locally (a zip, a
   shapefile, a PMTiles archive, a GeoTIFF), an accepted risk bounded by fixed hosts and readers
   that refuse what they do not know: zip members are written by their stem only,
-  never by their path. Remote images embedded in a
+  never by their path. A plate's Sentinel-2 cloudless ground reaches EOX's tile
+  server (`tiles.maps.eox.at`) only once the analyst picks it, through the same proxy
+  as every basemap; the years it offers and their licences are answered by the app. Remote images embedded in a
   Notebook note contact their host whenever the preview opens; Notebook warns
   about that behavior and local Case media avoids it. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the preview

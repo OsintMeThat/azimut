@@ -5,8 +5,8 @@
    *
    * - **Zoom**: a half step in or out, round the map's middle.
    * - **Turn**: a step to either side, or the compass dragged round; a press on the
-   *   compass puts north back up. While the map is framed, a right-drag or a
-   *   Ctrl-drag turns it too.
+   *   compass puts north back up. While the map is framed, a Shift-drag, a
+   *   middle-drag or a double click held turns it too.
    * - **Tilt**: a map drawn in 3D leans further or less.
    * - **Ground**: the basemaps a plate offers, and what can be laid over them.
    * - **Keep the previous framing**: on a played plate, a day or a step after the
@@ -16,6 +16,8 @@
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import { PLATE_OVERLAYS } from '../../lib/plate/page.js';
+  import { GROUNDS } from '../../lib/plate/plainBasemap.js';
+  import GroundSwatch from './GroundSwatch.svelte';
 
   let {
     element,
@@ -94,7 +96,7 @@
         <input type="checkbox" checked={keep} onchange={(event) => onkeep?.(event.currentTarget.checked)} /> Keep the previous framing</label>
       <span class="rule"></span>
     {/if}
-    <button type="button" class:on={framing} aria-pressed={framing} disabled={held} title={framing ? 'Done framing (Esc)' : 'Frame by the hand: zoom with the wheel, turn with a right-drag'}
+    <button type="button" class:on={framing} aria-pressed={framing} disabled={held} title={framing ? 'Done framing (Esc)' : 'Frame by the hand: zoom with the wheel, turn with a Shift-drag'}
       aria-label="Frame the map" onclick={onframe}><Icon name="move" size={14} />{#if framing}<span>Done</span>{/if}</button>
     <button type="button" aria-label="Zoom the map out" title="Zoom out" disabled={held} onclick={() => zoom(-0.5)}><Icon name="minus" size={13} /></button>
     <button type="button" aria-label="Zoom the map in" title="Zoom in" disabled={held} onclick={() => zoom(0.5)}><Icon name="plus" size={13} /></button>
@@ -124,16 +126,16 @@
 </div>
 
 {#if menu}
-  <FloatingMenu {anchor} width={230} label="Ground" onclose={() => (menu = false)}>
+  <FloatingMenu {anchor} width={260} label="Ground" onclose={() => (menu = false)}>
     {#each grounds as [id, label] (id)}
       <button type="button" class="fm-item" role="menuitemradio" aria-checked={element.basemap === id}
         onclick={() => { element.basemap = id; menu = false; }}>
-        <span class="swatch {id}"></span><span class="fm-grow">{label}</span>
+        <GroundSwatch {id} width={28} height={19} /><span class="fm-grow">{label}</span>
         {#if element.basemap === id}<Icon name="check" size={13} />{/if}</button>
     {/each}
     <div class="fm-sep"></div>
     {#each PLATE_OVERLAYS as [id, label] (id)}
-      {#if id !== 'relief' || element.basemap?.startsWith('plain')}
+      {#if id !== 'relief' || !GROUNDS[element.basemap]?.shade?.own}
         <button type="button" class="fm-item" role="menuitemcheckbox" aria-checked={(element.overlays ?? []).includes(id)}
           onclick={() => toggleOverlay(id)}>
           {#if (element.overlays ?? []).includes(id)}<Icon name="check" size={14} />{:else}<span class="room"></span>{/if}
@@ -160,13 +162,5 @@
   .north { fill: #e5484d; }
   .south { fill: var(--text-3); }
   .ground span { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
-  .swatch { flex: none; width: 16px; height: 16px; border: 1px solid var(--border); border-radius: 3px; background: #888; }
-  .swatch.plain { background: linear-gradient(135deg, #f3f1ec 60%, #c6d4de 60%); }
-  .swatch.plain-dark { background: linear-gradient(135deg, #1d2126 60%, #2b3a47 60%); }
-  .swatch.esri-world-imagery { background: linear-gradient(135deg, #4a5a33, #8b7d5a); }
-  .swatch.osm { background: linear-gradient(135deg, #f2efe9 55%, #f7c46c 55%); }
-  .swatch.opentopomap { background: linear-gradient(135deg, #d7e3b8, #b9a27a); }
-  .swatch.plain-topo { background: linear-gradient(135deg, #c3dba9 35%, #efdcab 35% 65%, #d4ad84 65%); }
-  .swatch.plain-staff { background: linear-gradient(135deg, #d8d4ae 40%, #a8b886 40% 70%, #7f5f33 70%); }
   .room { flex: none; width: 14px; }
 </style>

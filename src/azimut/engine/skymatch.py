@@ -180,6 +180,13 @@ QUICK_REFINED = 2
 # points slid, lenses this much wider than the last across a range, one place refined.
 ROUGH_POINTS = 80
 ROUGH_RATIO = 1.25
+# A rough slide over at least `SIFT_HEADINGS` headings (a narrow lens) is read first off every `SIFT_EVERY`th
+# point, and only its `SIFT_KEEP` cheapest headings are slid with them all. Measured on the owner's telephoto
+# views (2026-10-24): the best place of 90 points stood within the sifted 89 cheapest of up to 3,600; across a
+# wide lens the sift lost it, so a wide lens is slid whole.
+SIFT_HEADINGS = 1500
+SIFT_EVERY = 5
+SIFT_KEEP = 256
 # The score: the trace is judged in this many parts across its width, the weakest
 # `LET_GO` of them let go and the next `WEAKEST` averaged, so one stretch the
 # terrain cannot hold (a collage's edge, a ridge too near for its cell) does not
@@ -301,9 +308,11 @@ class Turn:
 
     def __post_init__(self) -> None:
         angles = np.asarray(self.angles, dtype=np.float64)
-        # the first column again at the end, so the column after the last needs no wrap
-        object.__setattr__(self, "_ring", np.append(angles, angles[:1]))
-        object.__setattr__(self, "_holes", bool(np.isnan(angles).any()))
+        # each column and the one after it (the first again after the last), where one has no ground the other
+        # standing for both, as in the browser: what a read between them starts from and goes to
+        after = np.roll(angles, -1)
+        object.__setattr__(self, "_from", np.where(np.isnan(angles), after, angles))
+        object.__setattr__(self, "_to", np.where(np.isnan(after), angles, after))
 
     def place(self, azimuth: np.ndarray | float) -> np.ndarray:
         """Where each azimuth falls among the columns, in columns from the first: what `at` and `far` read off."""
@@ -323,20 +332,13 @@ class Turn:
 
     def at_place(self, place: np.ndarray) -> np.ndarray:
         """`at`, the azimuths given by their `place`."""
-        count = self.angles.size
-        below = np.floor(place)
+        # a place is never below the first column: its whole part is its floor
+        below = np.asarray(place).astype(np.int64)
         share = place - below
         # 360° itself can round onto the column past the last
-        i0 = np.minimum(below.astype(np.int64), count - 1)
-        ring: np.ndarray = self._ring  # type: ignore[attr-defined]
-        a = ring[i0]
-        b = ring[i0 + 1]
-        out = a + (b - a) * share
-        if not self._holes:  # type: ignore[attr-defined]
-            return out
-        # one column without ground: the other stands for both, as in the browser
-        out = np.where(np.isnan(a), b, out)
-        return np.where(np.isnan(b), a, out)
+        i0 = np.minimum(below, self.angles.size - 1)
+        a = self._from.take(i0)  # type: ignore[attr-defined]
+        return a + (self._to.take(i0) - a) * share  # type: ignore[attr-defined]
 
     def far(self, azimuth: np.ndarray) -> np.ndarray:
         """How far out the skyline stands at each azimuth, the nearest column's: NaN when the sweep did not say."""
@@ -819,6 +821,74 @@ def _slide(
     return cost, tilt, roll
 
 
+def _alike(a: Turn | None, b: Turn | None) -> np.ndarray | None:
+    """The columns two turns read alike, angle and distance; None when they cannot be told apart column by column."""
+    if a is None or b is None:
+        return None if a is not b else np.ones(0, dtype=bool)
+    if (a.start, a.step, a.angles.size) != (b.start, b.step, b.angles.size) or (a.distance is None) != (b.distance is None):
+        return None
+    same = (a.angles == b.angles) | (np.isnan(a.angles) & np.isnan(b.angles))
+    if a.distance is not None and b.distance is not None:
+        far_a, far_b = np.asarray(a.distance), np.asarray(b.distance)
+        same &= (far_a == far_b) | (np.isnan(far_a) & np.isnan(far_b))
+    return same
+
+
+def _slide_after(
+    seen: _Seen, turn: Turn, headings: np.ndarray, tilts: tuple[float, float] | None, top: Turn | None,
+    last: tuple[Turn, Turn | None, np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]] | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """`_slide` over a cut of the turn, the slide `last` made over the cut before it (turn, top, headings, result)
+    taken as it is at every heading whose trace reads no column the two cuts tell apart: the same numbers in give
+    the same numbers out. Most of a narrow lens's headings, where a nearer cut already holds the skyline."""
+    if last is None or not np.array_equal(last[2], headings):
+        return _slide(seen, turn, headings, tilts, top)
+    same = _alike(last[0], turn)
+    if seen.sure is not None and seen.sure.any():
+        tops = _alike(last[1], top)
+        if top is not None and (top.start, top.step) != (turn.start, turn.step):
+            tops = None
+        same = None if same is None or tops is None else same & tops if tops.size else same
+    azimuth = seen.azimuth
+    # the columns must close the turn, for a column's number to say where it stands
+    if same is None or not np.isfinite(azimuth).all() or abs(same.size * turn.step - 360.0) > 1e-9:
+        return _slide(seen, turn, headings, tilts, top)
+    count = same.size
+    # the columns a heading's points can read: floor and the one after for the skyline, the nearest for the
+    # distance, a column more either side for rounding
+    first = np.floor((headings + float(azimuth.min()) - turn.start) / turn.step).astype(np.int64) - 1
+    width = np.floor((headings + float(azimuth.max()) - turn.start) / turn.step).astype(np.int64) + 3 - first
+    differ = np.concatenate([[0], np.cumsum(np.tile(~same, 2))])
+    at = first % count
+    kept = (width < count) & (differ[at + np.minimum(width, count)] == differ[at])
+    cost, change, turned = (np.array(one) for one in last[3])
+    redo = ~kept
+    if redo.any():
+        cost[redo], change[redo], turned[redo] = _slide(seen, turn, headings[redo], tilts, top)
+    return cost, change, turned
+
+
+def _sift(
+    seen: _Seen, turn: Turn, headings: np.ndarray, tilts: tuple[float, float] | None, top: Turn | None,
+    last: tuple[Turn, Turn | None, np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]] | None,
+) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[Turn, Turn | None, np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]]]:
+    """A rough `_slide` over many headings: every `SIFT_EVERY`th point slid first (over the cut before's sift,
+    `last`, as `_slide_after` does), then every point at the `SIFT_KEEP` cheapest headings only, the others
+    costing everything. Also gives the sift, for the next cut's."""
+    pick = np.arange(0, seen.azimuth.size, SIFT_EVERY)
+
+    def few(values: np.ndarray | None) -> np.ndarray | None:
+        return None if values is None else values[pick]
+
+    thin = replace(seen, azimuth=seen.azimuth[pick], elevation=seen.elevation[pick], lift=seen.lift[pick],
+                   twist=few(seen.twist), low=few(seen.low), high=few(seen.high), sure=few(seen.sure))
+    sifted = _slide_after(thin, turn, headings, tilts, top, last)
+    keep = np.sort(np.argpartition(sifted[0], SIFT_KEEP)[:SIFT_KEEP])
+    cost, change, turned = np.full(headings.size, np.inf), np.zeros(headings.size), np.zeros(headings.size)
+    cost[keep], change[keep], turned[keep] = _slide(seen, turn, headings[keep], tilts, top)
+    return (cost, change, turned), (turn, top, headings, sifted)
+
+
 def _apart(a: float, b: float) -> float:
     return abs((a - b + 180.0) % 360.0 - 180.0)
 
@@ -836,6 +906,24 @@ def _spread_out(order: list[_Row], apart: float, most: int) -> list[_Row]:
             if len(kept) == most:
                 break
     return kept
+
+
+def _places(cost: np.ndarray, headings: np.ndarray, apart: float, most: int) -> np.ndarray:
+    """`_spread_out` over the cheapest finite headings (`_cheapest`), as indices: the first `most` whose headings
+    stand `apart` degrees from each other's, each the cheapest left once those near the ones kept are put by."""
+    order = _cheapest(cost, headings.size)
+    order = order[np.isfinite(cost[order])]
+    free = np.ones(order.size, dtype=bool)
+    kept: list[int] = []
+    while len(kept) < most:
+        left = np.flatnonzero(free)
+        if not left.size:
+            break
+        first = int(left[0])
+        kept.append(int(order[first]))
+        # `_apart`, the same float steps as the Python one
+        free &= np.abs(np.remainder(headings[order] - headings[order[first]] + 180.0, 360.0) - 180.0) >= apart
+    return np.asarray(kept, dtype=np.int64)
 
 
 def _cheapest(cost: np.ndarray, count: int) -> np.ndarray:
@@ -1171,15 +1259,19 @@ def match(
         seen = _through(xs, ys, lens, tilt, roll, half_width, twist=not level, projection=projection, bands=picked,
                         sure=None if sure is None else sure[pick])
         widths[lens] = float(seen.azimuth.max() - seen.azimuth.min())
+        last = None
         for index, one in enumerate(turns):
             headings = _headings(max(_step(lens), COARSE_MIN, one.step), sectors)
-            cost, change, turned = _slide(seen, one, headings, tilts, tops[index])
-            order = [
-                (float(cost[i]), float(headings[i]), lens, tilt + float(change[i]), index, roll + float(turned[i]))
-                for i in _cheapest(cost, headings.size) if np.isfinite(cost[i])
-            ]
+            if rough and headings.size >= SIFT_HEADINGS:
+                (cost, change, turned), last = _sift(seen, one, headings, tilts, tops[index], last)
+            else:
+                cost, change, turned = _slide_after(seen, one, headings, tilts, tops[index], last)
+                last = (one, tops[index], headings, (cost, change, turned))
             # each lens's and cut's own few places, so one cannot crowd out the others
-            rows.extend(_spread_out(order, max(APART_MIN, widths[lens] / 2), PER_LENS))
+            rows.extend(
+                (float(cost[i]), float(headings[i]), lens, tilt + float(change[i]), index, roll + float(turned[i]))
+                for i in _places(cost, headings, max(APART_MIN, widths[lens] / 2), PER_LENS)
+            )
     if not rows:
         return Match("none", [])
     rows.sort(key=lambda row: row[0])

@@ -269,8 +269,15 @@ class PaletteEntryIn(BaseModel):
     colour: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
 
 
+class IconNameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    key: str = Field(min_length=1, max_length=64)
+
+
 class PaletteIn(BaseModel):
     colours: list[PaletteEntryIn] = Field(default_factory=list, max_length=layerediting.MAX_PALETTE)
+    # left out, the icons keep their names
+    icons: list[IconNameIn] | None = Field(default=None, max_length=layerediting.MAX_ICON_NAMES)
 
 
 class LinkItemIn(BaseModel):
@@ -558,17 +565,19 @@ def remove_layer_group(case_id: str, name: str, key: str) -> dict[str, Any]:
 
 @router.get("/{case_id}/layer-palette")
 def layer_palette(case_id: str) -> dict[str, Any]:
-    return {"colours": layerediting.palette(get_case(case_id))}
+    case = get_case(case_id)
+    return {"colours": layerediting.palette(case), "icons": layerediting.icon_names(case)}
 
 
 @router.put("/{case_id}/layer-palette")
 def save_layer_palette(case_id: str, body: PaletteIn) -> dict[str, Any]:
     try:
-        colours = layerediting.set_palette(get_case(case_id), [entry.model_dump() for entry in body.colours])
+        kept = layerediting.set_names(get_case(case_id), [entry.model_dump() for entry in body.colours],
+                                      None if body.icons is None else [entry.model_dump() for entry in body.icons])
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
     events.publish({"type": "saved", "case_id": case_id})
-    return {"colours": colours}
+    return {"colours": kept[0], "icons": kept[1]}
 
 
 @router.get("/{case_id}/layer-links")

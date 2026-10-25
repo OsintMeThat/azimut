@@ -280,6 +280,8 @@ test('feature grips reorder rows, move selected rows into groups and retain the 
   await panel.getByRole('button', { name: 'Move Point 1', exact: true }).dragTo(panel.getByRole('button', { name: 'Move group Reviewed', exact: true }));
   const reviewed = panel.locator('.group').filter({ has: page.getByRole('button', { name: 'Move group Reviewed', exact: true }) });
   await expect(reviewed.locator('.feature-row .name')).toHaveText(['Point 1', 'Point 4']);
+  // the group is among the sheet's details, folded until opened
+  await panel.locator('.fold[data-section="details"][aria-expanded="false"]').click();
   await panel.getByLabel('Feature group', { exact: true }).selectOption('markers');
   await expect(reviewed.locator('.feature-row')).toHaveCount(0);
   const current = fixture.collections.get(fixture.rows[0].name).map((feature) => feature.geometry);
@@ -968,6 +970,8 @@ test('a right-click on a marker opens its menu, and its status and style change 
   const features = fixture.collections.get(fixture.rows[0].name);
   await expect.poll(() => features[0].properties.status).toBe('destroyed');
   await menu.getByRole('button', { name: 'Feature style', exact: true }).click();
+  // the layer's own colours come first, the plain ones behind "+"
+  await page.getByRole('button', { name: 'More colours', exact: true }).click();
   await page.getByRole('button', { name: 'Feature style orange', exact: true }).click();
   await expect.poll(() => features[0].properties.colour).toBe('#d55e00');
   await page.screenshot({ path: test.info().outputPath('feature-right-click-menu.png') });
@@ -990,6 +994,7 @@ test('a group in one colour keeps each icon, its colour typed as a code', async 
   await modes.getByRole('button', { name: 'One colour', exact: true }).click();
   await expect.poll(() => group().mode).toBe('colour');
   await page.getByRole('button', { name: 'Group colour', exact: true }).click();
+  await page.getByRole('button', { name: 'More colours', exact: true }).click();
   const code = page.getByRole('textbox', { name: 'Group colour colour code', exact: true });
   await code.fill('rgb(204, 121, 167)');
   await code.press('Enter');

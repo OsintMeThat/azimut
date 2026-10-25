@@ -12,10 +12,13 @@
    * settings.
    *
    * **Result** is the search on show: when it was made and what it was asked
-   * with, how far it has gone, then its verdict, how far its best place can be
-   * trusted and why (lib/horizon/find.js `reliability`), and its places. Change and
-   * search again goes back to Prepare, the setup still the search's. The
-   * case's earlier searches are opened from the header's Open menu.
+   * with, how far it has gone and the best points so far, each tried in full by
+   * a press as a cell of the map is by a click; then its verdict, how far its
+   * best place can be trusted and why (lib/horizon/find.js `reliability`), and
+   * its places. The place the analyst confirmed while looking from one leads.
+   * A search stopped keeps what it had found by then. Change and search again
+   * goes back to Prepare, the setup still the search's. The case's earlier
+   * searches are opened from the header's Open menu.
    */
   import Icon from '../../components/Icon.svelte';
   import PhotoHints from './PhotoHints.svelte';
@@ -23,6 +26,7 @@
     ALIGN_TOLERANCES,
     areaPoints,
     areaText,
+    bestSoFar,
     DIRECTIONS,
     facingText,
     groundText,
@@ -31,6 +35,8 @@
     SUN_SIDES,
     overText,
     reliability,
+    resultOf,
+    ruledText,
     searchedReach,
     searchedWhen,
     TRUST,
@@ -42,7 +48,7 @@
   } from '../../lib/horizon/find.js';
   import { AUTO_REACH, cleanZoom, reachText, zoomText } from '../../lib/horizon/hints.js';
   import { headingText } from '../../lib/horizon/geometry.js';
-  import { estimateText, SPACINGS, SPEEDS, VIEWS, WHO, widenedText } from './state/find.svelte.js';
+  import { BRUSH_SIZES, durationText, EFFORTS, estimateText, OVERS, SPACINGS, SPEEDS, VIEWS, WATERS, WHO, widenedText } from './state/find.svelte.js';
   import { farLabel } from '../../lib/horizon/traceMarks.js';
   import { marksSummary } from '../../lib/horizon/traceTools.js';
   import { COARSE_RELIEF_M, reliefWords } from '../../lib/horizon/overlay.js';
@@ -60,6 +66,8 @@
     onsearch = () => {},
     /** Asked to look from a place the search found, `{ lat, lon, heading, fov, tilt, roll, reach, height }`. */
     onplace = () => {},
+    /** Asked to look again from the place the analyst confirmed (the search's `found`). */
+    onfound = () => {},
     /** The place the map lights, by its index in the results, or -1. */
     lit = $bindable(-1),
   } = $props();
@@ -70,30 +78,6 @@
   const help = $state({ align: false, know: false });
   $effect(() => {
     if (find.pending) help.align = true;
-  });
-
-  // how large the search would be, asked again a moment after what it depends on changes
-  let estimateTimer = null;
-  $effect(() => {
-    void [find.area, find.zones, find.settings, find.who, find.facing, find.stands, find.view, find.mirror, find.alignments.length, overlay.strokes, overlay.marks, overlay.hints, overlay.lens];
-    clearTimeout(estimateTimer);
-    estimateTimer = setTimeout(() => find.estimate(), 500);
-    return () => clearTimeout(estimateTimer);
-  });
-
-  // how fine the heights are where the area lies, read once it is closed
-  $effect(() => {
-    void [find.area, find.drawing];
-    find.readDetail();
-  });
-
-  // the headings the compass and the sun leave, read again a moment after either or the area changes
-  let sectorsTimer = null;
-  $effect(() => {
-    void [find.area, find.drawing, find.facing, find.sun];
-    clearTimeout(sectorsTimer);
-    sectorsTimer = setTimeout(() => find.readSectors?.(), 500);
-    return () => clearTimeout(sectorsTimer);
   });
 
   /** What the sun said, in a line: the headings it leaves, or why it says nothing. */
@@ -108,18 +92,11 @@
     return `Sun at ${Math.round(read.sun?.from ?? 0)}° to ${Math.round(read.sun?.to ?? 0)}° then: ${Math.round(width)}° of headings left, drawn on the map.`;
   });
 
-  // the grid and the ground under it, read again a moment after the area, who or the ground ticked change
-  let previewTimer = null;
-  $effect(() => {
-    void [find.area, find.zones, find.drawing, find.who, find.settings, find.stands, find.alignments.length, overlay.marks];
-    clearTimeout(previewTimer);
-    previewTimer = setTimeout(() => find.preview?.(), 600);
-    return () => clearTimeout(previewTimer);
-  });
-
   const search = $derived(find.search);
-  const result = $derived(search?.status === 'done' ? search.result : null);
+  const result = $derived(resultOf(search));
   const progress = $derived(search?.progress?.total ? Math.round((100 * search.progress.done) / search.progress.total) : 0);
+  /** The best points scored so far while the search runs, apart from each other. */
+  const leading = $derived(find.searching ? bestSoFar(find.live ?? []) : []);
 
   /** Back on Prepare while a search is on show; a search started or opened shows its Result. */
   let preparing = $state(false);
@@ -133,7 +110,7 @@
   const resultFace = $derived(Boolean(search) && !preparing);
 
   /** What a search runs with, in a line: the lens, which way it faces, how far it reads, who took the photo. */
-  function toldOf({ hints = {}, lens = null, panorama = false, who = 'ground', facing = [], stands = [], marks = null, looking = [], mirror = false, round = false, framed = null, sun = null }) {
+  function toldOf({ hints = {}, lens = null, panorama = false, who = 'ground', facing = [], stands = [], marks = null, looking = [], mirror = false, round = false, framed = null, sun = null, water = false, over = null }) {
     const zoom = cleanZoom(hints.zoom);
     const anyLens = !framed && !lens && !panorama && !zoom.length;
     const lensWords = framed
@@ -171,6 +148,8 @@
       ...VIEWS.filter((v) => looking.includes(v.id)).map((v) => v.label.toLowerCase()),
       ...(mirror ? ['mirrored too'] : []),
       ...(round ? ['near lines rounded'] : []),
+      ...(water === 'sea' ? ['the sea in sight'] : water ? ['the sea or a lake in sight'] : []),
+      ...(over ? [over === 'above' ? 'above the land round' : 'below the land round'] : []),
     ];
     return { line: parts.join(' · '), anyLens, near: allSaid ? null : near };
   }
@@ -190,6 +169,8 @@
       round: find.round && find.detail >= COARSE_RELIEF_M,
       framed: overlay.framesRead ?? null,
       sun: find.sun,
+      water: find.water,
+      over: find.over,
     })
   );
 
@@ -210,12 +191,12 @@
     if (!ask) return '';
     const area = areaText(areaPoints(ask.area));
     const aligned = ask.alignments?.length ? `${ask.alignments.length} ${ask.alignments.length === 1 ? 'alignment' : 'alignments'}` : '';
-    const line = toldOf({ hints: ask.hints ?? {}, panorama: ask.hints?.picture === 'panorama', who: ask.who?.mode, facing: ask.facing ?? [], stands: ask.stands ?? [], marks: ask.photo?.marks ?? null, looking: ask.view ?? [], mirror: Boolean(ask.mirror), round: Boolean(ask.round), sun: ask.sun ?? null }).line;
+    const line = toldOf({ hints: ask.hints ?? {}, panorama: ask.hints?.picture === 'panorama', who: ask.who?.mode, facing: ask.facing ?? [], stands: ask.stands ?? [], marks: ask.photo?.marks ?? null, looking: ask.view ?? [], mirror: Boolean(ask.mirror), round: Boolean(ask.round), sun: ask.sun ?? null, water: Boolean(ask.water), over: ask.over ?? null }).line;
     return [area, line, aligned].filter(Boolean).join(' · ');
   });
 
-  /** How far the best place can be trusted, and what lowers it. */
-  const trust = $derived(result ? reliability(result, { ask: search.ask, name: search.name, others: find.list }) : null);
+  /** How far the best place can be trusted, and what lowers it: a search stopped short is not judged. */
+  const trust = $derived(result && !result.partial ? reliability(result, { ask: search.ask, name: search.name, others: find.list }) : null);
 
   /** The compass as it is laid out: north at the top, any way in the middle. */
   const COMPASS = ['nw', 'n', 'ne', 'w', null, 'e', 'sw', 's', 'se'].map((id) => (id ? DIRECTIONS.find((d) => d.id === id) : null));
@@ -227,6 +208,9 @@
       : 'None'
   );
   const knowGist = $derived(told.line[0].toUpperCase() + told.line.slice(1));
+
+  /** A brush's size on its pill: "250 m", "2.5 km". */
+  const sizeText = (metres) => (units === 'metric' ? (metres < 1000 ? `${metres} m` : `${metres / 1000} km`) : formatDistance(metres, units));
 
   /** Time left as this machine has gone so far: "3 min", "40 s". */
   function leftText(seconds) {
@@ -268,6 +252,43 @@
   }
 </script>
 
+{#snippet triedPanel()}
+  {#if find.drawing === 'try' || find.tried}
+    <section class="fs-tried" aria-label="The point tried">
+      {#if find.drawing === 'try' && !find.tried}
+        <p class="fs-say">Click a place on the map to try the trace from there. Esc to stop.</p>
+      {:else if find.tried?.busy}
+        <p class="fs-say" role="status">Reading the terrain from there…</p>
+      {:else if find.tried?.error}
+        <p class="fs-say bad">{find.tried.error}</p>
+      {:else if find.tried?.place}
+        {@const place = find.tried.place}
+        <p class="fs-say strong">Tried here, in full: explains {Math.round(Math.max(0, place.explained) * 100)}%</p>
+        <p class="fs-say quiet">
+          {place.mirrored ? 'mirrored · ' : ''}{place.heading != null ? `facing ${headingText(place.heading, place.fov ?? 60)} · ` : ''}{place.fov != null
+            ? `${place.fov < 10 ? place.fov.toFixed(1) : Math.round(place.fov)}° lens · `
+            : ''}{Number.isFinite(place.relief) ? `ridges about ${formatDistance(place.relief, units)} out · ` : ''}{place.lat.toFixed(4)}, {place.lon.toFixed(4)}
+        </p>
+        {#if place.over}
+          <p class="fs-say quiet">{place.explained <= 0 ? 'Ruled out: ' : ''}{overText(place.over, place.over_far)}</p>
+        {/if}
+        <div class="fs-acts">
+          {#if place.heading != null}
+            <button
+              type="button"
+              class="btn btn-sm btn-primary"
+              title="The photo laid over the view from here: if it is the place, confirm it there"
+              onclick={() => onplace({ ...place, frames: find.tried.frames })}>Look from here</button
+            >
+          {/if}
+          <button type="button" class="btn btn-sm btn-ghost" onclick={() => find.clearTried()}>Clear</button>
+        </div>
+        {#if find.drawing === 'try'}<p class="fs-say quiet">Click another place to try it too.</p>{/if}
+      {/if}
+    </section>
+  {/if}
+{/snippet}
+
 <div class="fs">
   {#if resultFace}
     <section class="fs-result" aria-label="The search on show">
@@ -276,25 +297,67 @@
       </button>
       <h3 class="fs-title">{search.title || 'Search'}</h3>
       <p class="fs-say quiet">{[searchedWhen(search.created_at), asked].filter(Boolean).join(' · ')}</p>
+      {#if search.found}
+        {@const found = search.found}
+        <div class="fs-found">
+          <p class="fs-say strong"><Icon name="check" size={13} />Place confirmed</p>
+          <p class="fs-say quiet">{found.lat.toFixed(5)}, {found.lon.toFixed(5)}{found.view ? ` · kept as the view ${found.view}` : ''}</p>
+          <div class="fs-acts">
+            <button type="button" class="btn btn-sm" onclick={() => onfound(found)}>Look from it</button>
+            <button type="button" class="btn btn-sm btn-ghost" onclick={() => find.unconfirm()} title="The search stays as it ended, the view with it">Not it after all</button>
+          </div>
+        </div>
+      {/if}
       {#if find.searching}
         <p class="fs-say" role="status">
-          {search.status === 'queued' ? 'Waiting its turn…' : `Searching: ${search.progress?.done ?? 0} of ${search.progress?.total || '…'} points`}{Number.isFinite(
-            search.progress?.left
-          ) && search.progress.left > 0
+          {search.status === 'queued'
+            ? 'Waiting its turn…'
+            : search.status === 'stopping'
+              ? 'Stopping: it keeps what it found…'
+              : `Searching: ${search.progress?.done ?? 0} of ${search.progress?.total || '…'} points`}{search.status === 'running' &&
+          Number.isFinite(search.progress?.left) &&
+          search.progress.left > 0
             ? `, ${leftText(search.progress.left)} left`
             : ''}
         </p>
         <div class="fs-bar" aria-hidden="true"><span style:width="{progress}%"></span></div>
-        <div class="fs-acts">
-          <button type="button" class="btn btn-sm" onclick={() => find.stop()}>Stop</button>
-        </div>
+        {#if search.status !== 'stopping'}
+          <div class="fs-acts">
+            <button type="button" class="btn btn-sm" onclick={() => find.stop()} title="It keeps what it found so far">Stop</button>
+          </div>
+        {/if}
+        {#if leading.length}
+          <p class="fs-say strong">Best so far</p>
+          <ol class="fs-places">
+            {#each leading as point, index (`${point.lat},${point.lon}`)}
+              <li>
+                <button type="button" class="fs-place" onclick={() => find.tryAt(point)} title="Try the trace here in full, then look from it">
+                  <span class="fs-rank soon">{index + 1}</span>
+                  <span class="fs-place-text">
+                    <strong>explains {Math.round(point.explained * 100)}% so far</strong>
+                    <small>{point.lat.toFixed(4)}, {point.lon.toFixed(4)}</small>
+                  </span>
+                  <Icon name="crosshair" size={13} />
+                </button>
+              </li>
+            {/each}
+          </ol>
+          <p class="fs-say quiet">Read roughly for now: the best are read again in full at the end, as a try is, and usually explain more.</p>
+          <p class="fs-say quiet">A click on a cell of the map tries it too. Look from it, and if it is the place, confirm it: the search stops there.</p>
+        {/if}
+        {@render triedPanel()}
         <p class="fs-say quiet">It runs in the app: you can leave Find and come back.</p>
       {:else if result}
-        <p class="fs-say strong">{VERDICTS[result.verdict] ?? ''}</p>
+        {#if result.partial}
+          <p class="fs-say strong">Stopped after {(search.progress?.done ?? 0).toLocaleString('en-US')} of {(search.progress?.total ?? 0).toLocaleString('en-US')} points</p>
+          <p class="fs-say">The map and the places are what it had scored by then.</p>
+        {:else}
+          <p class="fs-say strong">{VERDICTS[result.verdict] ?? ''}</p>
+        {/if}
         {#if !(result.places?.[0]?.explained > 0) && result.points?.some((p) => Number.isFinite(p.gap))}
           <p class="fs-say">The map shades where the trace lies nearest the terrain.</p>
         {/if}
-        {#if result.verdict === 'unclear'}
+        {#if result.verdict === 'unclear' && !result.partial}
           <p class="fs-say">{UNCLEAR_HELP}</p>
         {/if}
         {#if trust && result.places?.length}
@@ -323,6 +386,7 @@
             {/if}
           </div>
         {/if}
+        {@render triedPanel()}
         <ol class="fs-places">
           {#each result.places as place, index (index)}
             <li>
@@ -374,6 +438,7 @@
           <span>more</span>
         </div>
         <p class="fs-say quiet">A score, not a probability: far ridges look alike over wide ground.</p>
+        <p class="fs-say quiet">A click on a cell of the map tries it in full.</p>
       {:else if search.status === 'failed'}
         <p class="fs-say bad">{search.error || 'The search failed'}</p>
       {:else if search.status === 'cancelled'}
@@ -440,9 +505,26 @@
             >
             <button type="button" class="btn btn-sm" onclick={() => find.zoneDrawn && find.removeZone(find.zoneDrawn.id)}>Cancel</button>
           </div>
+        {:else if find.drawing === 'more'}
+          <p class="fs-say">Click each corner of another area, searched with the first. Press the first one, or Enter, to close it.</p>
+          <div class="fs-acts">
+            <button type="button" class="btn btn-sm btn-primary" disabled={(find.moreDrawn?.points.length ?? 0) < 3} onclick={() => find.closeArea()}
+              >Done</button
+            >
+            <button type="button" class="btn btn-sm" onclick={() => find.moreDrawn && find.removeMore(find.moreDrawn.id)}>Cancel</button>
+          </div>
         {:else if find.area.length >= 3}
           <p class="fs-say">{areaText(find.area)}</p>
           {#if find.areaProblem}<p class="fs-say bad">{find.areaProblem}</p>{/if}
+          {#each find.areas ?? [] as more, index (more.id)}
+            <div class="fs-zone more">
+              <span class="fs-zone-what">Area {index + 2} · {areaText(more.points)}</span>
+              {#if find.zoneProblem(more)}<p class="fs-say bad">{find.zoneProblem(more).replace('zone', 'area')}</p>{/if}
+              <button type="button" class="fs-x" onclick={() => find.removeMore(more.id)} title="Take this area away" aria-label="Take area {index + 2} away"
+                ><Icon name="x" size={12} /></button
+              >
+            </div>
+          {/each}
           {#each find.zones ?? [] as zone, index (zone.id)}
             <div class="fs-zone" class:out={zone.out}>
               <span class="fs-zone-what">{zone.out ? 'Left out' : 'Finer'} · {areaText(zone.points)}</span>
@@ -465,13 +547,66 @@
               >
             </div>
           {/each}
+          {#if find.drawing === 'brush' || find.strokes?.length}
+            <div class="fs-brush" class:on={find.drawing === 'brush'}>
+              {#if find.drawing === 'brush'}
+                <div class="fs-pills" role="group" aria-label="What the brush does">
+                  <button
+                    type="button"
+                    class:on={find.brush.out}
+                    aria-pressed={find.brush.out}
+                    title="Points the brush passes over are greyed: not searched"
+                    onclick={() => find.setBrush({ out: true })}>Off</button
+                  >
+                  <button
+                    type="button"
+                    class:on={!find.brush.out}
+                    aria-pressed={!find.brush.out}
+                    title="Points the brush passes over are searched again"
+                    onclick={() => find.setBrush({ out: false })}>On</button
+                  >
+                </div>
+                <div class="fs-pills" role="group" aria-label="How wide the brush paints">
+                  {#each BRUSH_SIZES as size (size)}
+                    <button
+                      type="button"
+                      class:on={find.brush.radius === size}
+                      aria-pressed={find.brush.radius === size}
+                      title="{sizeText(size)} either side of the stroke"
+                      onclick={() => find.setBrush({ radius: size })}>{sizeText(size)}</button
+                    >
+                  {/each}
+                </div>
+              {/if}
+              {#if find.strokes?.length}
+                <div class="fs-acts">
+                  <span class="fs-say quiet">{find.strokes.length} {find.strokes.length === 1 ? 'stroke' : 'strokes'} of the brush</span>
+                  <button type="button" class="btn btn-sm btn-ghost" onclick={() => find.undoStroke()} title="Take the last stroke back (Ctrl+Z)"
+                    ><Icon name="undo" size={13} />Undo</button
+                  >
+                  <button type="button" class="btn btn-sm btn-ghost" onclick={() => find.clearStrokes()}>Clear</button>
+                </div>
+              {/if}
+            </div>
+          {/if}
           <div class="fs-acts">
             <button type="button" class="btn btn-sm" onclick={() => find.drawArea()}>Draw again</button>
+            <button type="button" class="btn btn-sm" onclick={() => find.drawMore()} title="Another area, searched with the first on the same grid"
+              ><Icon name="plus" size={13} />Another area</button
+            >
             <button type="button" class="btn btn-sm" onclick={() => find.drawZone({ out: false })} title="A zone searched on a finer grid of its own"
               ><Icon name="plus" size={13} />Finer zone</button
             >
             <button type="button" class="btn btn-sm" onclick={() => find.drawZone({ out: true })} title="A zone never searched: a lake, a place checked already"
               ><Icon name="minus" size={13} />Leave out</button
+            >
+            <button
+              type="button"
+              class="btn btn-sm"
+              class:on={find.drawing === 'brush'}
+              aria-pressed={find.drawing === 'brush'}
+              onclick={() => (find.drawing === 'brush' ? find.stopBrush() : find.startBrush())}
+              title="Paint over points of the grid to leave them out, or to search them again"><Icon name="freehand" size={13} />Brush</button
             >
             <button type="button" class="btn btn-sm btn-ghost" onclick={() => find.clearArea()}>Clear</button>
           </div>
@@ -492,7 +627,52 @@
         {:else}
           <p class="fs-say">With {told.line}.</p>
           {#if find.estimated}
-            <p class="fs-say">{estimateText(withGround(find.estimated, find.previewed))}</p>
+            {@const sized = withGround(find.estimated, find.previewed)}
+            <div class="fs-row fs-how">
+              <span class="fs-name">Grid</span>
+              {#if find.settings.spacing === 'auto' && find.estimated.efforts}
+                <div class="fs-pills" role="group" aria-label="How thorough the search is">
+                  {#each EFFORTS as one (one.id)}
+                    {@const grid = withGround(find.estimated.efforts[one.id], find.previewed)}
+                    <button
+                      type="button"
+                      class:on={find.settings.effort === one.id}
+                      aria-pressed={find.settings.effort === one.id}
+                      title="{one.title}: {grid.points.toLocaleString('en-US')} points"
+                      onclick={() => find.setSettings({ effort: one.id })}
+                      >{one.label} · {durationText(grid.points, find.estimated.step, find.estimated.turn, find.pace).replace('about ', '')}</button
+                    >
+                  {/each}
+                </div>
+              {:else}
+                <span class="fs-say quiet">a point every {formatDistance(find.settings.spacing, units)}, set in More settings</span>
+              {/if}
+            </div>
+            <div class="fs-row fs-how">
+              <span class="fs-name">Speed</span>
+              <div class="fs-pills" role="group" aria-label="How hard the computer works">
+                {#each SPEEDS as one (one.id)}
+                  {@const paced = find.paceFor?.(one.id) ?? null}
+                  <button
+                    type="button"
+                    class:on={(find.settings.speed ?? 'fast') === one.id}
+                    aria-pressed={(find.settings.speed ?? 'fast') === one.id}
+                    title={paced ? `${one.title}: ${paced.lanes} ${paced.lanes === 1 ? 'core' : 'cores'} here` : one.title}
+                    onclick={() => find.setSettings({ speed: one.id })}
+                    >{one.label}{paced ? ` · ${durationText(sized.points, find.estimated.step, find.estimated.turn, paced).replace('about ', '')}` : ''}</button
+                  >
+                {/each}
+              </div>
+            </div>
+            <p class="fs-say">{estimateText(sized, find.pace)}</p>
+            {#each ruledText(find.previewed) as line (line)}
+              <p class="fs-say quiet">{line}.</p>
+            {/each}
+            {#if find.pacing}
+              <p class="fs-say quiet" role="status">Timing a few points on this computer…</p>
+            {:else if !find.pace}
+              <p class="fs-say quiet">A guess until a few points are timed on this computer.</p>
+            {/if}
             {#each widenedText(find.estimated, units, find.settings.spacing !== 'auto') as line (line)}
               <p class="fs-say warn">{line}</p>
             {/each}
@@ -538,35 +718,7 @@
       </li>
     </ol>
 
-    {#if find.drawing === 'try' || find.tried}
-      <section class="fs-tried" aria-label="The point tried">
-        {#if find.drawing === 'try' && !find.tried}
-          <p class="fs-say">Click a place on the map to try the trace from there. Esc to stop.</p>
-        {:else if find.tried?.busy}
-          <p class="fs-say" role="status">Reading the terrain from there…</p>
-        {:else if find.tried?.error}
-          <p class="fs-say bad">{find.tried.error}</p>
-        {:else if find.tried?.place}
-          {@const place = find.tried.place}
-          <p class="fs-say strong">Tried here: explains {Math.round(Math.max(0, place.explained) * 100)}%</p>
-          <p class="fs-say quiet">
-            {place.mirrored ? 'mirrored · ' : ''}{place.heading != null ? `facing ${headingText(place.heading, place.fov ?? 60)} · ` : ''}{place.fov != null
-              ? `${place.fov < 10 ? place.fov.toFixed(1) : Math.round(place.fov)}° lens · `
-              : ''}{Number.isFinite(place.relief) ? `ridges about ${formatDistance(place.relief, units)} out · ` : ''}{place.lat.toFixed(4)}, {place.lon.toFixed(4)}
-          </p>
-          {#if place.over}
-            <p class="fs-say quiet">{place.explained <= 0 ? 'Ruled out: ' : ''}{overText(place.over, place.over_far)}</p>
-          {/if}
-          <div class="fs-acts">
-            {#if place.heading != null}
-              <button type="button" class="btn btn-sm" onclick={() => onplace({ ...place, frames: find.tried.frames })}>Look from here</button>
-            {/if}
-            <button type="button" class="btn btn-sm btn-ghost" onclick={() => find.clearTried()}>Clear</button>
-          </div>
-          {#if find.drawing === 'try'}<p class="fs-say quiet">Click another place to try it too.</p>{/if}
-        {/if}
-      </section>
-    {/if}
+    {@render triedPanel()}
 
     <section class="fs-help" aria-label="Help the search">
       <h4 class="fs-help-head">Help the search <span class="fs-optional">optional</span></h4>
@@ -740,6 +892,32 @@
               </p>
             </div>
           </div>
+          <div class="fs-row fs-facing-row">
+            <span class="fs-name" id="find-over">Eye stands</span>
+            <div class="fs-facing">
+              <div class="fs-pills" role="group" aria-labelledby="find-over">
+                {#each OVERS as one (one.id)}
+                  <button type="button" class:on={find.over === one.id} aria-pressed={find.over === one.id} title={one.title} onclick={() => find.toggleOver(one.id)}
+                    >{one.label}</button
+                  >
+                {/each}
+              </div>
+            </div>
+          </div>
+          <div class="fs-row">
+            <span class="fs-name" id="find-water">Water</span>
+            <div class="fs-pills" role="group" aria-labelledby="find-water">
+              {#each WATERS as one (one.id)}
+                <button
+                  type="button"
+                  class:on={find.water === one.id}
+                  aria-pressed={find.water === one.id}
+                  title={one.title}
+                  onclick={() => find.setWater(find.water === one.id ? false : one.id)}>{one.label}</button
+                >
+              {/each}
+            </div>
+          </div>
           <div class="fs-row">
             <span class="fs-name" id="find-view">Camera</span>
             <div class="fs-pills" role="group" aria-labelledby="find-view">
@@ -784,21 +962,6 @@
                 aria-checked={find.settings.spacing === spacing}
                 title={spacing === 'auto' ? 'As fine as about ten minutes of search allow' : `A point every ${spacing} m`}
                 onclick={() => find.setSettings({ spacing })}>{spacing === 'auto' ? 'Auto' : formatDistance(spacing, units)}</button
-              >
-            {/each}
-          </div>
-        </div>
-        <div class="fs-row">
-          <span class="fs-name" id="find-speed">Speed</span>
-          <div class="fs-pills" role="radiogroup" aria-labelledby="find-speed">
-            {#each SPEEDS as one (one.id)}
-              <button
-                type="button"
-                role="radio"
-                class:on={(find.settings.speed ?? 'fast') === one.id}
-                aria-checked={(find.settings.speed ?? 'fast') === one.id}
-                title={one.title}
-                onclick={() => find.setSettings({ speed: one.id })}>{one.label}</button
               >
             {/each}
           </div>
@@ -986,6 +1149,14 @@
   .fs-name {
     color: var(--text-2);
     font-size: var(--fs-xs);
+  }
+  /* how hard the search works, under its estimate: the names narrow, the pills wide */
+  .fs-row.fs-how {
+    grid-template-columns: 44px 1fr;
+    align-items: start;
+  }
+  .fs-how .fs-name {
+    padding-top: 5px;
   }
   .fs-pills {
     display: flex;
@@ -1188,6 +1359,9 @@
   .fs-zone.out {
     border-left-color: #ff6b6b;
   }
+  .fs-zone.more {
+    border-left-color: #f5a524;
+  }
   .fs-zone-what {
     color: var(--text-2);
     font-size: var(--fs-xs);
@@ -1222,6 +1396,40 @@
     border-left: 3px solid #ff7ad9;
     border-radius: var(--r-sm);
     background: color-mix(in srgb, var(--text-1) 4%, transparent);
+  }
+  /* the brush's settings and strokes, under the area */
+  .fs-brush {
+    display: grid;
+    gap: 6px;
+    padding: 8px 10px;
+    border-left: 3px solid var(--border);
+    border-radius: var(--r-sm);
+    background: color-mix(in srgb, var(--text-1) 4%, transparent);
+  }
+  .fs-brush.on {
+    border-left-color: #ff6b6b;
+  }
+  .fs-brush .fs-acts {
+    align-items: center;
+  }
+  /* the place the analyst confirmed, leading the result */
+  .fs-found {
+    display: grid;
+    gap: 6px;
+    padding: 8px 10px;
+    border-left: 3px solid var(--ok);
+    border-radius: var(--r-sm);
+    background: var(--ok-soft);
+  }
+  .fs-found .fs-say.strong {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ok);
+  }
+  .fs-rank.soon {
+    background: var(--bg-3);
+    color: var(--text-1);
   }
   .fs-trust {
     display: grid;

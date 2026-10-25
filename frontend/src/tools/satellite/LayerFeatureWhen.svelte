@@ -9,7 +9,9 @@
    * one shows as a dashed row at the day the layer is shown at, before it is
    * made. A row pressed shows the layer that day; "Change" goes to a day picked,
    * where the next move or status is a change from it. While edits carry no date
-   * a line says what a date holds: a feature moved on a day moves from a day.
+   * a line says what a date holds: a feature moved on a day moves from a day. A
+   * long history shows its first and last dates and those round the edit, the
+   * rest counted on a row that unfolds them (`foldRows`).
    *
    * Given several `features`, the two days are theirs together: a day they share
    * is said, else "Mixed", and one picked goes to all of them in one edit. The
@@ -24,7 +26,7 @@
   import MonthGrid from '../../components/MonthGrid.svelte';
   import LayerClock from './LayerClock.svelte';
   import { dayNumber, isoDay } from '../../lib/map/layerDates.js';
-  import { lifeRows, momentLabel, momentNow, shortMoment, spanOf } from '../../lib/map/layerHistory.js';
+  import { foldRows, lifeRows, momentLabel, momentNow, shortMoment, spanOf } from '../../lib/map/layerHistory.js';
   import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
 
   let { controller, feature = null, features = null, event = false } = $props();
@@ -75,7 +77,10 @@
   /** Which calendar is open: 'start', 'end', 'change' or ''. */
   let open = $state('');
   let anchors = $state({});
-  $effect(() => { void key; open = ''; });
+  /** Whether the whole history is shown, for this feature only. */
+  let whole = $state(false);
+  $effect(() => { void key; open = ''; whole = false; });
+  const shownRows = $derived(whole ? rows : foldRows(rows));
 
   const zone = $derived(controller.editor?.track?.zone || 'UTC');
   const timed = $derived(controller.editor?.track?.precision === 'time');
@@ -143,7 +148,11 @@
 
 {#if rows.length > 1}
   <ol class="life" aria-label="Feature history">
-    {#each rows as row (row.ghost ? 'ghost' : row.at)}
+    {#each shownRows as row (row.fold ? `fold ${row.at}` : row.ghost ? 'ghost' : row.at)}
+      {#if row.fold}
+        <li class="folded"><span class="dot" aria-hidden="true"></span>
+          <button type="button" class="more" title="Show every date" onclick={() => (whole = true)}>{row.fold} more dates</button></li>
+      {:else}
       <li class:current={row.current && !row.ghost} class:gone={row.gone} class:ghost={row.ghost}>
         <span class="dot" aria-hidden="true"></span>
         <button type="button" class="moment" disabled={row.ghost || !row.at || row.at === cursor}
@@ -158,6 +167,7 @@
             onclick={() => controller.dropState(key, row.at)}><Icon name="x" size={9} /></button>
         {/if}
       </li>
+      {/if}
     {/each}
   </ol>
 {/if}
@@ -237,6 +247,10 @@
   .current .dot { border-color: var(--accent); background: var(--accent); }
   .ghost .dot { border-color: var(--accent); border-style: dashed; }
   .gone .dot { border-color: var(--border); }
+  /* dates folded away: the rail runs on through a hollow dot, dashed */
+  .folded .dot { border-style: dotted; background: transparent; }
+  .more { padding: 2px 6px; color: var(--text-3); font-size: 10.5px; font-style: italic; cursor: pointer; }
+  .more:hover { color: var(--text-1); text-decoration: underline; }
   .moment { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; align-items: center; gap: 6px; flex: 1; min-width: 0;
     padding: 2px 6px; border-radius: var(--r-sm); color: var(--text-2); font-size: 11px; text-align: left; cursor: pointer; }
   .moment:hover:not(:disabled) { background: var(--bg-3); color: var(--text-1); }

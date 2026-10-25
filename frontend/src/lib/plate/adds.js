@@ -3,6 +3,8 @@
  * a word: its name, the group it is in, or a word it is often called by (a title
  * is a text, a photo a picture).
  */
+import { BLOCK_ADDS } from './design.js';
+import { SEQUENCE_ADDS } from './sequences.js';
 
 /** `[kind, label, icon, words]`, by group. */
 export const ADDS = [
@@ -18,10 +20,11 @@ export const ADDS = [
   { title: 'Writing', items: [['text', 'Text', 'text', 'title words heading caption'], ['banner', 'Banner', 'columns', 'band strip'],
     ['stamp', 'Stamp', 'tag', 'unconfirmed seal'], ['key', 'Numbered list', 'numbered', 'key numbers'],
     ['table', 'Table', 'table', 'chronology sources'], ['qr', 'QR code', 'qr', 'link address']] },
+  { title: 'Blocks', note: 'Laid out together, in the page\'s colours', items: BLOCK_ADDS },
   { title: 'Signing', items: [['signature', 'Signature', 'edit', 'handle author'], ['brand', 'Made with Azimut', 'brand', 'mark logo']] },
   { title: 'Pictures and shapes', items: [['image', 'Picture', 'image', 'photo proof'], ['logo', 'Logo', 'shield', 'badge signature'],
     ['rect', 'Box', 'square', 'rectangle frame'], ['ellipse', 'Ellipse', 'circle', 'oval'], ['rule', 'Rule', 'lineSolid', 'separator divider']] },
-  { title: 'Playing', note: 'Played after the day', items: [['step', 'Step', 'stack', 'sequence beat'], ['video', 'Video', 'video', 'clip footage film']] },
+  { title: 'Playing', note: 'Played after the day', items: [['step', 'Step', 'stack', 'sequence beat'], ['video', 'Video', 'video', 'clip footage film'], ...SEQUENCE_ADDS] },
 ];
 
 const plain = (text) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();

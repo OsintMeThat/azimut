@@ -2084,12 +2084,14 @@ restyles the group, and the palette says so. A group with one colour does the sa
 for the colour alone: each feature keeps its icon, and a colour picked recolours
 the group.
 
-The colours are the case's named ones (or five plain ones), then the colours the
-layer already wears and those picked lately anywhere, a layer's palette or a
-plate's, so a colour made once is one press away after. Any other comes from the
-browser's picker or the code field beside it, which shows the colour worn for
-copying and takes one typed or pasted as `#d55e00`, `d55e00` or `rgb(213, 94, 0)`.
-The case's named colours take a code the same way.
+The palette offers at once the case's named colours, each said by its name, and
+the colours the layer already wears; the styles the layer shows fill one row, **+**
+showing the rest. The colours' **+** unfolds the five plain colours, those picked
+lately anywhere (a layer's palette or a plate's), the browser's picker and the code
+field, which shows the colour worn for copying and takes one typed or pasted as
+`#d55e00`, `d55e00` or `rgb(213, 94, 0)`. A layer with no colour yet offers the
+plain ones at once. In the Icon part a chip per group scrolls the grid to it, and
+only the grid scrolls, so the colours stay in view above it.
 
 The analyst's own icons come first in the palette's Icon part. **This layer's
 icons** are the ones the layer holds that the library does not, such as a copied
@@ -2124,17 +2126,22 @@ style shows its pictogram in the list and in the layer's legend. Menus, settings
 and palettes close on a press outside or Escape. Individual styles survive a
 temporary group override.
 
-A feature's sheet holds its style and name, then what it says: its group;
-for a marker, a status, **–** (nothing said, the first choice, since most markers
-are no building), **Damaged** or **Destroyed**, drawn on the map as a stroke or a
-cross across the marker (a line or an area has no status); **How sure**: **Sure**,
-**Likely** or **Claimed**, a likely line drawn dashed and a claimed one dotted, a
-marker drawn fainter, unless the feature sets its own dash; a **Day**, which the
-layer's time strip and the Timeline read; which way it faces; its sources, each a
-chip that opens in a tab of its own; **Geolocated by** **Me** or **Others**, the
-second giving the marker a dashed rim; the **Credit** a feature copied from somebody
-else's layer keeps, which a plate that draws it prints; and a note. A line states
-its length and an area its surface. A marker states its **Position** in the
+A feature's sheet opens under its row in the list, the rest of the list still in
+view; a feature picked on the map unfolds its group and brings its row into view.
+Several features, or one whose row the search or a folded group hides, open it above
+the list. It holds its style and name, then sections that fold to one line saying
+what they hold, the ones opened staying open from one feature to the next.
+**Evidence** shows the case item a marker follows. **Status**: for a marker, **–**
+(nothing said, the first choice, since most markers are no building), **Damaged** or
+**Destroyed**, drawn on the map as a stroke or a cross across the marker (a line or
+an area has no status); beside it how sure, **Sure**, **Likely** or **Claimed**, a
+likely line drawn dashed and a claimed one dotted, a marker drawn fainter, unless the
+feature sets its own dash; and which way it faces. **Sources**: each a chip that
+opens in a tab of its own, **Geolocated by me** (off gives the marker a dashed rim),
+and the **Credit** a feature copied from somebody else's layer keeps, which a plate
+that draws it prints. **Note**. **Details**: its group, a **Day**, which the layer's
+time strip and the Timeline read, a line's length and an area's surface. A marker
+states its **Position** in the
 analyst's coordinate format, with a copy button; a position typed or pasted over it
 (decimal, DMS, MGRS or a plus code) moves the marker there as one edit Ctrl+Z takes
 back. A marker that follows a case item, or that a date holds, stays and says why. How it is drawn folds under **Look**, which
@@ -2154,10 +2161,13 @@ The one selected marker wears a ring on the map. Dragging its knob turns the
 marker toward the pointer, by steps of five degrees (Shift lets it go free), so
 pulling it out to a target aims the marker at it; the direction is drawn as a
 wedge round the marker. A double-click on the knob, or the sheet's ×, clears it.
-The knob also turns from the keyboard. The tag in the palette names the case's
-colours ("Side A", "Unknown"): every layer of the case offers them, the card names
-a feature's colour by them, and the layer's legend counts its features under each
-name.
+The knob also turns from the keyboard. The tag in the editor's header, in the
+palette beside the colours, and under a layer's legend while something in it has no
+name, names what the case's colours and icons stand for ("Side A", "Drone strike").
+It lists the colours and icons worn where it opened, and a colour added there; the
+names the case gives elsewhere fold under one line. Every layer of the case offers
+the named colours, the card and a plate's legend name a feature by them, and the
+layer's legend counts its features under each name.
 
 Enter, or a double click on the map, saves a line or an area being drawn, even from
 the layer's search field or with the style palette open. While a shape is drawn or
@@ -2207,7 +2217,7 @@ map**. Its day is changed on the layer, not by dragging it on the axis.
 **Track over time**, in the editor's ⋯, follows a layer through its changes
 instead of overwriting them. It is off until asked for, and a layer that stays
 off behaves as above. On, the layer's row and its editor read it at one moment
-on a cursor: a tick per change, steps to the one before and the next, **Today**,
+on a cursor: a tick per day that holds a change, steps to the one before and the next, **Today**,
 and a calendar, which offers no day after today: a state is what was seen. The
 cursor is always on a day of the calendar, today on the layer's clock until it is
 moved, never on a "now" that would slide to the next day. The axis
@@ -2244,7 +2254,9 @@ set unless pressed, the feature is drawn as still there, and its row reads
 **13 Oct → ?**. The round
 **+** goes to a day picked to change the feature from. Its history lists each date
 with what it brought (**Appears**, **Moved**, **Destroyed**, **Gone**), pressed to
-show the layer then and × to take it out. A pencil marks the date an edit will
+show the layer then and × to take it out. A long one shows its first and last dates
+and those round the one edited, the rest counted on a row (**48 more dates**) that
+unfolds them. A pencil marks the date an edit will
 change, and a dashed **Next edit** row shows where a dated edit would start a new
 one, so a feature with no date shows that a move now gives it a history. With no
 date, a line under it says what a date holds (**Moved on 8 Oct**). Several
@@ -3032,6 +3044,15 @@ from the area, ringed at 2, 5, 10, 20, 50 and 100 km out to the reach searched.
 **Eye on** ticks a summit or ridge, a slope, a valley, a plain or the sea or a
 lake, each judged on the ground round the point; the map shows the grid in
 those colours, grey where a point is left out, and says how many points stay.
+**Eye stands** says the eye stood **Above the land round** it or **Below it**,
+against the land 1 to 3 km out, and **Water** that **The sea** shows (within
+the sea's horizon from each eye, no line to trace: an island is traced as any
+skyline) or the **Sea or a lake** (within the reach, rivers aside): the points
+it rules out are greyed, a hover saying why, and under the estimate a line says
+how many each leaves out. A line traced along the sea's horizon says the sea
+too. The sea
+and the lakes are the map's (OpenFreeMap's water, read once and kept), else
+the terrain's flat ground when the map cannot be reached.
 **Camera** opens the tilt down (**Looking down**, from a height) or up
 (**Looking up**, at a summit), and **Selfie** searches the trace mirrored too.
 **Sun** says where the sun stood against the camera (ahead, left, right,
@@ -3062,24 +3083,55 @@ place explains its own trace far better, and one a decoy fits nearly as well is
 marked so. **Change and
 search again** goes back to Prepare with the search's setup. The case's
 earlier searches are in the **Open** menu of Find's header, with when each was
-made and how it ended; opening one replaces the setup on screen. **New** beside
+made and how it ended; opening one replaces the setup on screen. Arriving in
+Find without a photo, the dialog that asks for one shows them first, as cards
+with the photo, when each was made and how it ended (four, the rest behind
+**Show all**). **New** beside
 it lets the photo, its trace and the setup go and asks for the next photo,
-asking first when no search keeps what is on screen.
+asking first when no search keeps what is on screen. The map shows the grid the
+setup lays before the search and once the setup is changed from the search on
+show. While a search runs, the points it has scored fill the grid in as cells
+of the heatmap, coloured from the middle of the scores so far up to the best,
+and Result names the **Best so far**, three places apart, read roughly as a
+first pass reads them (the best are read again in full at the end). A
+click on a cell, or a press on one of them, tries the trace there in full and
+offers to look from it. Looking from it, a band over the view asks **Is it the
+place?**: **This is the place** keeps the view in the case and the place on the
+search, which stops it, a green mark on the map and the first thing Result says
+(**Not it after all** takes it back). **Stop** keeps what the search scored by
+then: its map and its best places, said to be what it had scored, not judged.
 
-The Area step adds **Finer zone**s, each searched on a grid of its own (Auto
-is a third of the area's), and **Leave out** zones never searched, drawn
-dashed red. An area or a zone goes up to 10,000 km². **Try a point** tries the
+The Area step adds **Another area**, searched with the first on the same grid
+(twelve at most, 10,000 km² together), **Finer zone**s, each searched on a grid
+of its own (Auto is a third of the area's), and **Leave out** zones never
+searched, drawn dashed red. **Brush** passes over the grid while the map holds
+still: **Off** greys the points it passes over, so they are not searched, and
+**On** turns them back on and lays white points where it paints ground in past
+the grid, all as the hand moves, however large the grid (each point restyled
+where it is drawn, the grid never sent to the map again); Alt paints the other
+way for a stroke, each stroke over the ones before, and the app's grid then
+lays the new points where the brush showed them. It reaches 50 m to 2.5 km
+either side, a ring under the hand shows how far, and Ctrl+Z or **Undo** takes
+the last stroke back. An area or a zone goes up to
+10,000 km². **Try a point** tries the
 trace from a place clicked on the map, as a search scores its best places, and
-offers to look from there. **Speed** under More settings searches a large grid
-on several cores (Fast, the default) or on one (Gentle), and **Grid** lays a
+offers to look from there. The time said is this computer's: a few points are
+timed a moment after the setup settles (the search reuses them). The Search
+step offers two rows, each choice with its time: **Grid**, Auto's grid
+**Quick** (twice as wide), **Normal** or **Thorough** (about three times the
+points), and **Speed**, a large grid searched on every core of the computer
+(**Fastest**, its own cores counted, not their threads), on up to four (**Fast**,
+the default) or on one (**Gentle**, the computer left free); on an 8-core
+laptop four cores search 1.9 times as fast as one and eight 2.6 times.
+**Grid** under More settings lays a
 point every 20 m to 1 km, or Auto, as fine as about ten minutes of search
 allows: 20 m over a square kilometre, 50 m over a few. The points stand in a
 hex lattice, as close to every spot as a square grid that fine with a quarter
 fewer of them. A grid picked is laid as picked, the map showing it before the
 search and the estimate saying the hours it takes, up to 100,000 points; past
 that it is laid wider, and Find says how wide. A search run again over the same
-ground reads back the skylines it swept (kept beside the terrain, a quarter of
-a gigabyte at most) and only matches the trace again.
+ground reads back the skylines it swept (kept beside the terrain, a gigabyte at
+most and less on a nearly full disk) and only matches the trace again.
 
 Find's map has the small map's **Layers** button at its top right: the base
 map, then the same switches, so a layer turned on in Find stays on in Horizon.
@@ -4993,23 +5045,44 @@ says what it is checking.
 ## Map plate
 
 **Map plate**, in Compose, lays a page out round the case's maps, for a report,
-a print or a post. **New plate**, or **Map plate…** in the Map's capture menu, opens
-on the house layout over the ground the Map is looking at, with the layers switched
-on there (the analyst's own layers when none is; before the Map has looked anywhere,
-the ground the case's layers cover, else the whole world): a title naming the case by its
-`{case}` token, a subtitle, the map, a legend, an inset, a cartouche, the scale, the
-north and the credits, the column beside the map on a wide page and a band under it
-on an upright one. The plate saves itself into the case it was opened in; its name
+a print or a post. **New plate** opens one screen, each choice answered until
+changed, so **Create plate** works at once: the layout on the left (the house layout,
+one of the ready plates or one of the analyst's templates, each drawn as its page),
+and on the right where the map looks (where the Map is looking, or round the layers
+picked), which of the case's layers it draws, the paper (a report, a slide or post, a
+feed post, a square, a story or a print) and the look, its own or another. **Map plate…** in the
+Map's capture menu opens the house layout at once. A new plate looks where the Map is
+looking, with the layers switched on there (the analyst's own layers when none is;
+before the Map has looked anywhere, the ground the case's layers cover, else the
+whole world). The house layout is a title naming the case by its `{case}` token, a
+subtitle, the map, a legend, an inset, a cartouche, the scale, the north and the
+credits, the column beside the map on a wide page and a band under it on an upright
+one. The plate saves itself into the case it was opened in; its name
 is its file, renaming it in the header moves it, and a name another plate holds is
 refused with the reason, the plate keeping the name it had. The case's own column
 folds while a plate is open, and **Plates**, first in the header, goes back to the list,
-the plate's preview drawn first when one is owed. The list shows each plate whole,
-whatever its paper, with its paper and the day it last changed, and offers **Open**,
-**Duplicate** (its preview copied with it), **Rename** and the Trash; templates are
-drawn as their page, with **New plate from it**, **Edit**, **Rename** and **Delete**.
+the plate's preview drawn first when one is owed. The list shows the case's plates
+first, each whole whatever its paper, with its paper and the day it last changed, and
+offers **Open**, **Duplicate** (its preview copied with it), a copy **laid out for**
+another paper, **Rename** and the Trash. The analyst's templates, then the ready
+plates, follow, each drawn as its page; a press makes a plate from it at once, where
+the Map is looking, on its own paper and look, and a template's ⋯ holds **New plate from it**, **Edit**, **Rename** and **Delete**.
 A plate holds eight maps and insets at most, since a browser draws only so many
-maps at once; a map whose drawing the browser takes back for another is drawn again
+maps at once (an inset drawn as a globe is drawn on the page and is not one of them); a map whose drawing the browser takes back for another is drawn again
 once the plate is in sight, and says so when it keeps losing it.
+
+**Ready plates** are the maps an open investigation publishes, laid out by a
+designer's rules for each paper rather than stretched from one: **Situation map**
+(the line on a quiet ground, its key and locator beside it), **Geolocation card** (the
+footage beside the place it was filmed, the matches numbered, `{coords}` under it),
+**Before and after** (one ground on two dates, side by side, a key figure),
+**Incidents** (the events with their chronology), **Route or track**, **Line of
+sight**, **Site profile**, **Locator** (a closer detail and a globe), **Briefing** and
+**Post** (the map to the edges, its title on a card). Each comes in its look and its
+grounds, its words in the page's text styles, and an empty picture says on the
+screen what goes in it. A plate made from one remembers it: set on another paper, or
+copied for one, each element the recipe made takes its place there with its words,
+its ground and its layers kept, and what was added since keeps its share of the page.
 
 The page is laid out in millimetres and shown at its true size, scaled to the
 window, so a line weighs on the screen what it weighs on the paper. The wheel
@@ -5023,11 +5096,14 @@ an inset), **On the map** (a label, a **Map
 text**, a **Symbol**, a number, an arrow, a **Line**, a distance, range rings, a view cone, a zone, a
 spotlight, each placed by pressing the map), **Round the map**
 (legend, scale bar, north arrow, credits, a date strip), **Writing** (text, banner,
-stamp, the numbered list, a table, a QR code), **Signing** (the analyst's signature:
+stamp, the numbered list, a table, a QR code), **Blocks** (a title block of
+kicker, title and standfirst, a date badge, a classification band, a source line, a
+key figure, each laid out together in the page's colours), **Signing** (the analyst's signature:
 the picture set in Settings → Publishing beside `{handle}` and the day, rewritten at
 will; and **Made with Azimut**, the app's mark and name set tight beside the words,
 without the air of the app's corner), **Pictures and shapes** (a picture, the signature picture as a logo,
-a box, an ellipse, a rule) and **Playing** (a step, a video). A tool placed by pressing the map is put down by a second press
+a box, an ellipse, a rule) and **Playing** (a step, a video, and ready sequences:
+**Reveal in four beats**, **Zoom in**, a **Title card** and an **End card**). A tool placed by pressing the map is put down by a second press
 on it, or Esc.
 
 The list of elements on the left and the inspector on the right are widened by
@@ -5045,14 +5121,15 @@ A press picks an element, Shift adds to the picked ones, and elements put in one
 group (Ctrl+G, Ctrl+Shift+G to undo it) are picked together. A drag moves what is
 picked once the pointer has gone four pixels, so a click never nudges; it catches on
 the page's edges and middle and on the other boxes (Alt lets go), and a corner with
-Shift keeps the box's proportions. **A drag inside a map moves its ground; the map's
-frame is moved by its edge.** A double click frames it fully (scroll to zoom, a
-right-drag or a Ctrl-drag to turn, Esc when done). The arrow keys move, Delete
+Shift keeps the box's proportions. **A drag on a map moves its frame, as any
+element's; its ground stays put** until a double click goes into it (drag to pan,
+scroll to zoom, and a Shift-drag, a middle-drag or a double click held and dragged to
+turn, as on the app's other maps; Esc when done). The arrow keys move, Delete
 removes, Ctrl+C and Ctrl+V copy to this plate or another, Ctrl+D duplicates and
 Ctrl+Z undoes, after a press on the page: a key pressed on a button of the
 inspector never deletes. Escape lets the picked elements go. A **Detail**'s square
 on the map it is drawn from is picked by a press and dragged there to move what the
-detail shows, as a drag inside the detail does; a locked detail only picks. Maps stay under the
+detail shows; a locked detail only picks. Maps stay under the
 page's writing, at the foot of the list. The list, top first, restacks by a drag
 that offers only the places a row can take, and the inspector's arrows step an
 element among the rows listed. A double click names an element, and its row hides
@@ -5086,16 +5163,50 @@ ground round it. A picture can point at the ground, and the picture picker offer
 the proofs and footage the main map's features carry, set pointing at their place.
 
 A map picked on the page carries its own bar: **Frame**, a half step of zoom
-either way, a step to either side and a compass to turn it, and **Ground**: Plain,
-Plain dark, **Topographic** and **Staff map**, Esri imagery, **World Imagery Wayback,
-dated** (a release picked in the inspector, its date said in the credits and in
-`{imagery}`), OpenStreetMap or OpenTopoMap, with relief shading, borders and names,
-roads, railways, power lines, sea marks, GPS traces or night lights over it, the Map's
-key-less layers each credited on the page. **Topographic** (a national survey's
-colours) and **Staff map** (a military map's khaki and olive) tint the heights from
-lowland green to rock and snow, shade them, trace contour lines every ten metres to a
-kilometre by the map's scale (every fifth one bolder and written with its height), and
-name the summits with theirs; each of the three can be left off.
+either way, a step to either side and a compass to turn it, and **Ground**. The
+grounds are drawn small as they look, in the bar's menu and in the inspector's
+**Ground** gallery. The plain ones are drawn from OpenStreetMap's vector tiles in a
+style each: **Plain**, **Light grey**, **Newsroom** (warm paper, its relief shaded by
+four lights, the coast drawn as lines going out into the water), **Humanitarian**,
+**Shaded relief** (a survey's tinted heights under bluish shadows and a warm light),
+**Topographic**, **Staff map**, **Toner** (black and white), **Plain, dark** and
+**Tactical** (dark blue, its coast glowing). Then the pictures: Esri imagery, **World
+Imagery Wayback, dated** (a release picked in the inspector, its date said in the
+credits and in `{imagery}`), **Sentinel-2 cloudless** (EOX's cloud-free picture of the
+world a year, made of many passes, so it holds no single date and says so: its year
+is picked in the inspector, 2016 free for any use and the later ones for
+non-commercial use only, each credited in EOX's words), **Sentinel-2, one dated
+pass** once a Copernicus account is set up (one pass on the day it was taken, never a
+mosaic of several: its layer, cloud ceiling and day are picked on Satellite's own
+calendar over the map's middle, and it starts on the newest pass under 30% cloud, said
+under it; where the pass did not reach, the map stays empty; without an account the
+tile stays in the gallery, locked, with the steps to a free one),
+OpenStreetMap or OpenTopoMap. Relief shading, borders and names, roads, railways, power lines, sea
+marks, GPS traces or night lights go over any of them, the relief over imagery
+included, the Map's key-less layers each credited on the page. **Topographic** (a
+national survey's colours) and **Staff map** (a military map's khaki and olive) tint
+the heights from lowland green to rock and snow, shade them, trace contour lines every
+ten metres to a kilometre by the map's scale (every fifth one bolder and written with
+its height), and name the summits with theirs; each of the three can be left off.
+
+A plain ground writes the countries and their regions in spaced capitals while the map
+is wide, the seas and rivers in italic (a river along its course), and a capital in
+bold. It draws what an investigation reads, each left off by its box: the road
+numbers on their shields, airfields with their runways, taxiways and names, military
+ground, farmland, sand, ice and marsh, ferries and piers; its borders go to the
+countries, their regions or the districts in them, the disputed ones dotted and the
+ones at sea faint. **Detail** draws fewer or more names, small roads and buildings,
+**Presence** brings every colour but the land's nearer the land's own, and the fine
+colours wait behind **Change the colours**. In a framed map, a click on one of its
+names offers **Hide it on this map** or **Make it a label to move**, which writes it
+as the plate's own text on the map where it stood; the inspector lists the names
+hidden and brings them back.
+
+A map's **Focus** lights one country (the one under the map's middle, or any picked)
+and draws the rest of the world back, darkened or faded toward the paper, at the
+strength set. It is drawn on the page from the same Natural Earth countries as the
+globe inset, under a soft edge, as the outline is coarse at that scale; the disputed
+areas touching the country stand half lit, dotted round. A tilted map has none.
 
 There is one kind of map: its inspector's **Show the map in 3D** box stands it on its
 heights, tilted (from the bar, or to the degree in the inspector), the heights drawn as they are or up to three times as tall, said under it.
@@ -5108,14 +5219,34 @@ the horizon. The inspector sets the
 rest: the zoom and the turn to the decimal; a grid in latitude and longitude
 (degrees and minutes or decimal), UTM or MGRS, at a chosen step, labelled on two
 sides or four, or as ticks on the frame only, its ink light over imagery and dark
-over a pale ground unless set; the plain ground's colours, its roads, railways,
-buildings and names, the language and the number of those names, and the relief's strength; the
-imagery's strength, colour, light, contrast and tint, with **Greyed**, **Faded** and
-**Darkened** as starts; and the case's layers it draws, each with its groups left
-out or in, its lines and its marks sized apart, its own colour and dash on this
-plate alone, drawn higher or lower, and **Label its named features**, which places
+over a pale ground unless set; the plain ground's detail, presence, borders and
+colours, what it draws, the language of its names, and the relief's strength; the
+imagery's strength, colour, light, contrast and tint, with **Greyed**, **Faded**,
+**Darkened** and **Muted** as starts; and the case's layers it draws, each with its groups left
+out or in, its lines and its marks sized apart, its own colour, dash and area fill (full,
+hatched or the outline alone) on this plate alone, drawn higher or lower. **Stands
+for** gives it a role's look in one press, on the page's colours: **Held** (a full
+tint of the accent), **Claimed** (hatched, dashed), **Contested** (amber, hatched,
+dotted), **Front line**, **Events** (larger marks) or **Context** (grey and thin); the
+legend then names its areas and lines by the role, its points keeping their words.
+A plate draws every point of a layer at every zoom, where the Map lets the ones that
+overlap drop out far out: a page leaving the app must not lose one. And
+**Label its named features**, and **Label its named features**, which places
 a label beside each feature in the frame without two covering each other, tied to
-its feature so it shows when the feature does.
+its feature so it shows when the feature does. **New layer here** makes a layer of the
+case, draws it on the map and opens it for editing in the Map where the map looks,
+Back coming back to the plate. **Make a layer of the N drawn here** turns what was
+drawn by hand on the map (zones, lines, arrows, distances, rings, cones, symbols and
+labels) into a layer of the case, each in its group, its colour and its days, which
+the map then draws in their place; Undo puts them back on the plate.
+
+An inset's **Drawn as a globe** draws it as a small globe turned to its map's middle,
+from Natural Earth's countries (public domain, shipped with the app): the sea, the
+land, the country the map looks at in the accent, a ring and a dot where it looks.
+Natural Earth draws a country as it is held, so the areas one country holds and
+another claims (Crimea, the Donbas, Abkhazia and the others it lists) are drawn
+apart, dotted round: none takes the colour of the country holding it, and a map
+looking at one picks out the area itself.
 
 The legend lists only what the map draws in its frame on the plate's day, one row a
 look, named after the group when it has one style, else after its icon and the
@@ -5123,7 +5254,10 @@ case's name for its colour, with the status after it. **List what the layers hol
 off the map too** brings the rest back. Each row is renamed, moved up or down, and
 removed by its ×, kept under **Removed** to be put back; rows are written by hand.
 
-**Words** sets what every element writes the same way, a text, a label, the words
+A text is set in one of the page's **Styles** at one press: a kicker, a title, a
+standfirst, the body, a caption, a source line, a date badge or a key figure, each a
+size, a weight, capitals or not, a spacing and a colour of the page (its accent, its
+ink, or a muted ink between the ink and the paper), the words kept. **Words** sets what every element writes the same way, a text, a label, the words
 of a zone, an arrow, a line, rings, a cone or a distance, the legend, the table, the
 credits, the scale, a video's source line: their size, face, weight, italic or
 capitals, colour, and what stands behind them (nothing, a halo, or a box of a colour).
@@ -5133,23 +5267,33 @@ or rows run past (a text, a label, the legend, the table, the numbered list, the
 credits) carries a **!** at its corner on the page and says so in the inspector,
 whose **Fit the box** grows it to what it holds; the export names it before the file
 goes out. Every setting of the inspector says what it does when the pointer rests on it. They fill in `{date}` (the plate's day, else the day its layers
-last changed), `{today}`, `{updated}`, `{case}`, `{title}`, `{scale}`, `{imagery}` and
-`{handle}`. The credits are what the sources are owed, a copied feature's credit
+last changed), `{today}`, `{updated}`, `{case}`, `{title}`, `{scale}`, `{imagery}`,
+`{handle}`, `{coords}` and `{mgrs}` (the main map's middle), `{from}` and `{to}` (the
+first and last day a played plate shows), and `{count}`, `{count:destroyed}`,
+`{count:damaged}` or `{count:<group>}` (what the main map shows in its frame on the
+plate's day). Under a text they stand as small tags, each saying what it writes, a
+press putting it where the cursor is. A word that fills in empty (no handle set, no
+imagery dated) takes the separators it leaves at the ends of its line with it. The credits are what the sources are owed, a copied feature's credit
 among them: they stay on the page, shrink rather than lose a source, and stand on a
-band of the paper over a map. The page is drawn again at the zoom it is shown at, so
+band of the paper over a map. The credits box's inspector lists each credit with a
+box: a layer's or a feature's can be taken off, what a ground's, a relief's or an
+overlay's terms ask for stays, locked. A layer of the analyst's own files owes nobody
+and is not credited. The page is drawn again at the zoom it is shown at, so
 the smallest words stay sharp. A table lists the dated features as a chronology, up to the
 plate's day, or each source the features cite. A QR code carries a link.
 
 With nothing picked, the inspector sets the page: **Looks** (Press, Sand, Night,
 Report, Black and white, **Survey** on the topographic ground, **Staff** on the staff
-map) set the paper, ink, accent and face, every map's ground and
+map, and the editorial ones, each on its own ground: **Newsroom**, **Situation
+room**, **Tactical**, **Humanitarian**, **Atlas** and **Brief**) set the paper, ink, accent and face, every map's ground and
 its imagery's whole tone (a look that is not grey gives the imagery its colour back),
 and what wore the page's colours, at one press; the paper (A5, A4, A3, Letter, 16:9 or 9:16, a square, a 4:5 post, or a
 size typed in), turned either way when it can be; the face (Inter, Barlow Condensed,
 Roboto Condensed, Source Serif, Oxanium, IBM Plex Mono, each with Arabic behind it);
 the colours; a plain paper, a gradient or a picture under everything; a rule round
 the page; the margins and the feed crop drawn as guides; a see-through paper for a
-PNG. A colour is picked from the page's own, the case's named colours and the last
+PNG; the paper's **Grain**, fine specks over the whole page and its maps as printed
+paper shows them, the same on the screen and in every export. A colour is picked from the page's own, the case's named colours and the last
 ones used, or the browser's picker.
 
 A plate that draws a layer followed over time has a day of its own, on a bar under
@@ -5184,7 +5328,12 @@ that step's, the step's marked. The inspector keeps a step's element on **This
 step** or **And after** (the steps after it, on the same day), or puts it back on
 the whole day; an element of the day goes **Only on** the step shown by a press. A
 step is dragged to another place in the strip, and its ⋯, always shown, names it, sets how long it
-holds, moves it, or removes it with what stands on it.
+holds, moves it, duplicates it (what stands on it and its framing copied, the copy
+played right after it), or removes it with what stands on it. A ready sequence from
+Add puts its steps after the one shown and turns the video's transitions on:
+**Reveal in four beats** (the region, the place, closer, the whole picture) and
+**Zoom in** frame the main map from where it looks, and a **Title card** or an **End
+card** covers the page with its paper and its words, sized to the page.
 
 **A day or a step frames a map its own way.** Past the first, each one shows the map
 as the one before it does, the map bar's **Keep the previous framing** ticked and the
@@ -5220,17 +5369,23 @@ map framed otherwise flies there, rising over a long way, drawn again at each fr
 its marks keep their size, blurred as it goes fastest or sharp, its inset following
 and what is written over it placed through its camera as it leans,
 and what is new fades in or is drawn along its lines, or comes at once. The frames play
-at the video's own 30 a second. A step's ⋯ can cut straight into it.
+at the video's own 30 a second. A step's ⋯ can cut straight into it, or give the
+transition into it a time of its own (0.2 to 3 seconds), which the play follows too.
 Play shows the maps moving too. Everything goes into the folder saved for views.
-**Stop** ends an export under way and nothing is written; a map whose tiles had not
+**Export** closes the dialog and the export goes on behind: the plate holds still under
+a veil saying what is drawn and how far, the top bar says **Plate export** with its
+share from any tool (a press goes back to the plate), and the other tools can be used
+meanwhile. **Stop** ends it and nothing is written; another case stops it too; a map whose tiles had not
 all come in is drawn as it stood and the export says so. A long video's pictures go
 to disk in batches as they are drawn, so neither the tab nor the app holds them all.
 The PDF holds the page as one picture at print resolution.
 
-**Keep as template** keeps the layout, its paper and colours, and the pictures kept
-inside it (a logo from this computer, the signature), without the ground, the
-layers or what stands on them, but with how long a day holds. A new plate can start
-from one. Settings → Templates lists them: **Edit** opens one here over the Map's
+**Keep as template** keeps the layout, its paper and colours, the style of each
+map's ground, and the pictures kept inside it (a logo from this computer, the
+signature), without where the maps look, the layers or what stands on them, but
+with how long a day holds. An element locked in it stays locked on the plates made
+from it, so a team's house style holds. A new plate can start from one; a template
+made from a ready plate is the analyst's own layout from then on. Settings → Templates lists them: **Edit** opens one here over the Map's
 ground, **Done** goes back where it was opened from, and one goes out and comes back
 as a file.
 

@@ -308,12 +308,12 @@ describe('what the surface puts on the map', () => {
     expect(map.layers.every((l) => l.source.endsWith('-shapes'))).toBe(true);
   });
 
-  it('paints a filled outline from both the fill and the line layer', () => {
+  it('paints a filled outline from both the fill and the line layer, an outline 0 wide from none', () => {
     const map = stubMap();
     createSurface(stubEngine(map)).set([CELL('a', 1)]);
     const [fill, line] = map.layers;
     expect(fill.filter).toEqual(['has', 'fill']);
-    expect(line.filter).toEqual(['all', ['has', 'stroke'], ['!', ['has', 'dashKey']]]);
+    expect(line.filter).toEqual(['all', ['has', 'stroke'], ['!', ['has', 'dashKey']], ['>', ['to-number', ['get', 'strokeWidth']], 0]]);
   });
 
   it('keeps the circle layer to real points', () => {
@@ -580,6 +580,76 @@ describe('changing one shape', () => {
     expect(surface.has('b')).toBe(false);
     surface.clear();
     expect(surface.has('a')).toBe(false);
+  });
+});
+
+describe('a map filling in', () => {
+  it('sends only the shapes added or dropped, and keeps them for the next whole push', () => {
+    const map = stubMap();
+    const engine = stubEngine(map);
+    const surface = createSurface(engine);
+    surface.set([CELL('a', 1)]);
+    const pushes = map.calls.setData.length;
+    surface.add([CELL('b', 2), CELL('a', 9), { id: 'm', kind: 'marker', at: { lat: 0, lon: 0 } }, { ...CELL('c', 3), onClick: () => {} }]);
+    expect(map.calls.setData).toHaveLength(pushes);
+    const [, { add }] = map.calls.updateData.at(-1);
+    // a shape already there, or a mark, is not added this way
+    expect(add.map((feature) => feature.properties.sid)).toEqual(['b', 'c']);
+    expect(surface.has('c')).toBe(true);
+    // a cell that answers a click keeps the map's own click off it
+    expect(engine.claims).toHaveLength(1);
+    surface.drop(['a', 'nope']);
+    expect(map.calls.updateData.at(-1)[1]).toEqual({ remove: [pushed(map)[0].id] });
+    expect(surface.has('a')).toBe(false);
+    // an added shape is changed as any other
+    expect(surface.patch('b', { style: { stroke: '#000' } })).toBe(true);
+  });
+});
+
+describe('a tint over a shape', () => {
+  function tintable() {
+    const map = stubMap();
+    const states = new Map();
+    map.calls.states = [];
+    map.setFeatureState = (target, state) => {
+      map.calls.states.push(['set', target, state]);
+      states.set(target.id, { ...(states.get(target.id) ?? {}), ...state });
+    };
+    map.removeFeatureState = (target) => {
+      map.calls.states.push(['remove', target]);
+      if (target.id == null) states.clear();
+      else states.delete(target.id);
+    };
+    return { map, states };
+  }
+
+  it('restyles a shape without sending the source again, and is taken off as easily', () => {
+    const { map, states } = tintable();
+    const surface = createSurface(stubEngine(map), { tints: true });
+    surface.set([CELL('a', 1), CELL('b', 2)]);
+    const sent = [map.calls.setData.length, map.calls.updateData.length];
+    expect(surface.tint('b', { fill: '#8a8f98', fillOpacity: 0.35, radius: 2 }, 'Left out')).toBe(true);
+    expect([map.calls.setData.length, map.calls.updateData.length]).toEqual(sent);
+    const b = pushed(map)[1].id;
+    expect(states.get(b)).toMatchObject({ fill: '#8a8f98', fillOpacity: 0.35, radius: 2 });
+    expect(surface.tint('b', null)).toBe(true);
+    expect(states.has(b)).toBe(false);
+    // a shape laid again starts with no tint
+    surface.tint('a', { fill: '#fff' });
+    surface.set([CELL('a', 1)]);
+    expect(states.size).toBe(0);
+  });
+
+  it('reads the tint first in the paint, only on a surface that takes tints', () => {
+    const { map } = tintable();
+    createSurface(stubEngine(map), { tints: true }).set([CELL('a', 1)]);
+    const dot = map.layers.find((layer) => layer.type === 'circle');
+    expect(dot.paint['circle-color']).toEqual(['to-color', ['coalesce', ['feature-state', 'fill'], ['get', 'fill'], ['get', 'stroke']]]);
+    const plain = stubMap();
+    const surface = createSurface(stubEngine(plain));
+    surface.set([CELL('a', 1)]);
+    expect(plain.layers.find((layer) => layer.type === 'circle').paint['circle-radius']).toEqual(['to-number', ['get', 'radius']]);
+    expect(surface.tint('a', { fill: '#fff' })).toBe(false);
   });
 });
 

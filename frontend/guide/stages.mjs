@@ -292,8 +292,10 @@ export const STAGES = [
     settle: 6000,
     async run({ go, page }) {
       await go('plate');
-      // a new plate starts on the Map's ground, with the layers the Satellite stage put on
+      // a new plate starts on the Map's ground, with the layers the Satellite stage put on,
+      // its questions answered as they stand
       await seen(page, '.canvas-body button:has-text("New plate")').click();
+      await seen(page, '[role="dialog"] button:has-text("Create plate")').click();
       // the plate puts the sidebar away itself once its page is laid out
       await seen(page, '[data-guide="plate.page"]').waitFor();
       await page.waitForTimeout(1500);

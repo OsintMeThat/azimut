@@ -77,6 +77,9 @@ MAX_CREDIT = 300
 #: case, offered in every layer's palette, read by the legend and the card.
 PALETTE_KEY = "layer_palette"
 MAX_PALETTE = 12
+# what the case's icons mean, beside its colours: an app badge's id or an own icon's key
+ICON_NAMES_KEY = "layer_icon_names"
+MAX_ICON_NAMES = 40
 _HEX = re.compile(r"^#[0-9a-f]{6}$")
 
 
@@ -89,8 +92,8 @@ def palette(case: Case) -> list[dict[str, str]]:
             and _HEX.match(str(entry.get("colour", ""))) and str(entry.get("name", "")).strip()]
 
 
-def set_palette(case: Case, entries: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Name up to `MAX_PALETTE` colours for the case, one name per colour."""
+def _named_colours(entries: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Up to `MAX_PALETTE` colours, one name per colour."""
     kept: list[dict[str, str]] = []
     for entry in entries:
         name = str(entry.get("name", "")).strip()[:40]
@@ -102,8 +105,60 @@ def set_palette(case: Case, entries: list[dict[str, str]]) -> list[dict[str, str
         kept.append({"name": name, "colour": colour})
     if len(kept) > MAX_PALETTE:
         raise maplayers.LayerError(f"a case names at most {MAX_PALETTE} colours")
-    case.set_setting(PALETTE_KEY, json.dumps(kept) if kept else None)
     return kept
+
+
+def icon_names(case: Case) -> list[dict[str, str]]:
+    try:
+        entries = json.loads(case.get_setting(ICON_NAMES_KEY) or "[]")
+    except ValueError:
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)
+            and _icon_ref(entry.get("key")) and str(entry.get("name", "")).strip()]
+
+
+def _icon_ref(key: Any) -> bool:
+    return key in SYMBOLS or iconlibrary.is_key(key)
+
+
+def _named_icons(entries: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Up to `MAX_ICON_NAMES` icons, one name per icon."""
+    kept: list[dict[str, str]] = []
+    for entry in entries:
+        name = str(entry.get("name", "")).strip()[:40]
+        key = str(entry.get("key", ""))
+        if not name or not _icon_ref(key):
+            raise maplayers.LayerError("each named icon needs a name and an icon")
+        if any(other["key"] == key or other["name"].casefold() == name.casefold() for other in kept):
+            raise maplayers.LayerError("give each icon one name, and each name one icon")
+        kept.append({"name": name, "key": key})
+    if len(kept) > MAX_ICON_NAMES:
+        raise maplayers.LayerError(f"a case names at most {MAX_ICON_NAMES} icons")
+    return kept
+
+
+def set_names(case: Case, colours: list[dict[str, str]],
+              icons: list[dict[str, str]] | None = None) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Name the case's colours and, when given, its icons: both are checked before either is kept."""
+    kept = _named_colours(colours), _named_icons(icon_names(case) if icons is None else icons)
+    case.set_setting(PALETTE_KEY, json.dumps(kept[0]) if kept[0] else None)
+    case.set_setting(ICON_NAMES_KEY, json.dumps(kept[1]) if kept[1] else None)
+    return kept
+
+
+def worn_symbols(spec: dict[str, Any]) -> dict[str, int]:
+    """How many markers wear each icon, its own icon's key or else its badge, as its group draws it."""
+    groups = {group["id"]: group for group in _groups(spec)}
+    counts: dict[str, int] = {}
+    for feature in spec["document"]["features"]:
+        if "Point" not in str((feature.get("geometry") or {}).get("type") or ""):
+            continue
+        properties = feature.get("properties") or {}
+        group = groups.get(properties.get("group")) or {}
+        worn = group if group.get("mode") == "uniform" else properties
+        key = str(worn.get("icon") or worn.get("symbol") or "pin")
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def editable(spec: dict[str, Any]) -> bool:
@@ -312,6 +367,7 @@ def drawing(spec: dict[str, Any], case: Case | None = None) -> dict[str, Any]:
     features = [{**feature, "geometry": dict(feature["geometry"]), "properties": dict(feature["properties"])}
                 for feature in spec["document"]["features"]]
     named = {entry["colour"]: entry["name"] for entry in palette(case)} if case else {}
+    meanings = {entry["key"]: entry["name"] for entry in icon_names(case)} if case else {}
     meta = spec.get(ICON_META) or {}
     if case:
         layerlinks.follow(case, features, rendered=True)
@@ -341,6 +397,10 @@ def drawing(spec: dict[str, Any], case: Case | None = None) -> dict[str, Any]:
                 properties["icon_name"] = look["name"]
         if named.get(str(properties.get("colour") or "").lower()):
             properties["colour_name"] = named[str(properties["colour"]).lower()]
+        if meanings and "Point" in str(feature["geometry"].get("type") or ""):
+            meaning = meanings.get(str(properties.get("icon") or properties.get("symbol") or "pin"))
+            if meaning:
+                properties["icon_meaning"] = meaning
     # The first group is on top, for points and shapes alike.
     ranks = {key: index for index, key in enumerate(groups)}
     features.sort(key=lambda feature: -ranks[feature["properties"]["group"]])
@@ -410,6 +470,9 @@ def render_digest(case: Case, spec: dict[str, Any], content: str | None = None) 
     links = layerlinks.digest_part(case, spec["document"]["features"])
     # a layer with no icon looks keeps the fingerprint it had, so its cache is not rebuilt for nothing
     looks = json.dumps([links, palette(case)]) + (json.dumps(spec[ICON_META], sort_keys=True) if spec.get(ICON_META) else "")
+    # likewise a case that names no icons
+    if meanings := icon_names(case):
+        looks += json.dumps(meanings)
     return maplayers.digest(((content or digest(spec)) + looks).encode())
 
 
@@ -443,6 +506,7 @@ def _save(case: Case, name: str, spec: dict[str, Any]) -> dict[str, Any]:
         if colour:
             colours[colour] = colours.get(colour, 0) + 1
     spec["summary"]["colours"] = colours
+    spec["summary"]["symbols"] = worn_symbols(spec)
     live = {group["name"] for group in _groups(spec)}
     spec["hidden"] = [group for group in spec.get("hidden", []) if group in live]
     spec["updated_at"] = maplayers._now()

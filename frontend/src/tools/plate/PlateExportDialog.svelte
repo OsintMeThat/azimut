@@ -10,7 +10,8 @@
    * Each day and step holds its own seconds, set on its tile under the page; the
    * seconds here are the plate's, for every day that says nothing of its own. The
    * format and the sizes picked last are kept on this computer for the next export.
-   * A long export is stopped by Stop, and then nothing is written.
+   * Export closes the dialog: the export goes on behind, the top bar says how far, and
+   * the plate holds still until it is done or stopped.
    */
   import { timecode } from '../../lib/plate/clip.js';
   import Modal from '../../components/Modal.svelte';
@@ -24,14 +25,10 @@
     stepped = false,
     /** `(days, format)`: how long the played plate runs, in seconds. */
     runtime = null,
-    /** `({ format, quality, side, days, filename, pixels, transparent })`, resolving when the file is written. */
+    /** `({ format, quality, side, days, filename, pixels, transparent })`, which goes on once the dialog is closed. */
     onexport,
     /** The picture of the page copied to the clipboard. */
     oncopy = null,
-    /** Stops the export under way. */
-    oncancel = null,
-    /** What the export is doing now, said under its buttons. */
-    progress = '',
     /** The file's name, before it is changed here. */
     name = 'Map plate',
     /** A small picture of the page, once drawn. */
@@ -87,28 +84,19 @@
   const seconds = $derived(played && format !== 'sheet' && runtime ? runtime(days, format) : 0);
   const sizeOf = (value) => (page ? videoSize({ page }, value) : { width: value, height: Math.round((value * 9) / 16) });
 
-  async function run() {
-    busy = true;
-    try {
-      await onexport({ format, quality, side, days: played ? days : null, filename: filename.trim(),
-        pixels: format === 'png' ? pixels : 0, transparent: format === 'png' && see });
-      onclose();
-    } catch {
-      // the tool said what went wrong, or that it was stopped; the dialog stays for another try
-    } finally { busy = false; }
+  function run() {
+    // the tool says when it is written, what went wrong, or that it was stopped
+    onexport({ format, quality, side, days: played ? days : null, filename: filename.trim(),
+      pixels: format === 'png' ? pixels : 0, transparent: format === 'png' && see })?.catch?.(() => {});
+    onclose();
   }
   async function copy() {
     busy = true;
     try { await oncopy?.(); copied = 'Copied'; } catch { copied = ''; } finally { busy = false; }
   }
-  /** Stops an export under way, and closes the dialog otherwise. */
-  function cancel() {
-    if (busy) oncancel?.();
-    else onclose();
-  }
 </script>
 
-<Modal title="Export the plate" onclose={cancel} width="460px">
+<Modal title="Export the plate" {onclose} width="460px">
   <div class="head">
     {#if preview}<img class="preview" src={preview} alt="The page as it will be exported" />{:else}<span class="preview blank">Drawing…</span>{/if}
     <label class="name" title="The file's name in the folder saved for views">File name<input class="input" aria-label="File name" maxlength="120" bind:value={filename} /></label>
@@ -186,12 +174,11 @@
   {/if}
 
   <p class="note">Written to the folder saved for views, like the analysis plates.</p>
-  {#if progress}<p class="progress" role="status">{progress}</p>{/if}
   <div class="acts">
     {#if oncopy && format === 'png'}<button class="btn" disabled={busy} title="The page as a picture, to paste elsewhere" onclick={copy}>{copied || 'Copy image'}</button>{/if}
     <span class="grow"></span>
-    <button class="btn" title={busy ? 'Stop the export; nothing is written' : 'Close without exporting'} onclick={cancel}>{busy ? 'Stop' : 'Cancel'}</button>
-    <button class="btn btn-primary" disabled={busy || !ready} onclick={run}>{busy ? 'Exporting…' : 'Export'}</button>
+    <button class="btn" title="Close without exporting" onclick={onclose}>Cancel</button>
+    <button class="btn btn-primary" disabled={busy || !ready} title="Goes on behind: the top bar says how far" onclick={run}>Export</button>
   </div>
 </Modal>
 
@@ -223,7 +210,6 @@
   .note { margin: 6px 0; color: var(--text-3); font-size: 11px; }
   .warn { margin: 0 0 10px; padding: 6px 8px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--warn) 16%, transparent);
     color: var(--text-1); font-size: 11px; }
-  .progress { margin: 6px 0; color: var(--accent); font-size: 11px; }
   .acts { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
   .grow { flex: 1; }
 </style>

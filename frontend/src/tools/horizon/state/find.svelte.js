@@ -3,8 +3,10 @@
  *
  * The photo and its trace are the overlay's (state/overlay.svelte.js), so a
  * skyline traced in the view is the one searched, and the other way round.
- * What is Find's own: the area, a polygon drawn on the map, and zones beside it
- * (each searched on a finer grid of its own, or left out); the alignments, two
+ * What is Find's own: the area, a polygon drawn on the map, more areas searched
+ * with it on the same grid, and zones beside it (each searched on a finer grid
+ * of its own, or left out); the brush's strokes, painted over the grid to leave
+ * points out or take them back, each over the ones before; the alignments, two
  * things one behind the other clicked on the photo then on the map
  * (lib/horizon/find.js), each with its tops touching or not; who took the
  * photo, a person, a drone or an aircraft, with a range of heights; which way
@@ -22,8 +24,10 @@
  *
  * The search runs in the app, on the case's background queue
  * (api/horizon_finds.py): started by the analyst's press, followed while it
- * runs, stopped by theirs, and kept in the case once done with every point it
- * scored, so a search reopened shows its map without running again.
+ * runs with the points it has scored so far (`live`), for the map to fill in,
+ * stopped by theirs, and kept in the case with every point it scored, so a
+ * search reopened shows its map without running again. A place the analyst
+ * looked from and confirmed is kept on the search (`confirm`), which stops it.
  *
  * The setup is part of Horizon's bench (state/work.svelte.js): `snapshot` is
  * what the case keeps of it, `restore` puts it back after a reload.
@@ -33,6 +37,7 @@ import {
   ALIGN_STEPS,
   ALIGN_TOLERANCE,
   alignmentBearing,
+  areaMiddle,
   areaProblem,
   cleanFacing,
   cleanStands,
@@ -65,11 +70,31 @@ export const WHO = {
 /** The grid a search is laid on, metres between points; auto picks it from the area. */
 export const SPACINGS = ['auto', 20, 50, 100, 250, 500, 1000];
 
-/** Nothing set yet: on foot, auto spacing, the usual tolerance. */
-export const NO_SETTINGS = Object.freeze({ spacing: 'auto', tolerance: ALIGN_TOLERANCE, speed: 'fast' });
+/** Nothing set yet: on foot, auto spacing at its usual effort, the usual tolerance. */
+export const NO_SETTINGS = Object.freeze({ spacing: 'auto', tolerance: ALIGN_TOLERANCE, speed: 'fast', effort: 'normal' });
 
-/** How hard a search works the computer: fast on several cores, gentle on one. */
+/** How thorough Auto's grid is against the time it takes (engine/finder.py EFFORTS). */
+export const EFFORTS = [
+  { id: 'quick', label: 'Quick', title: 'A grid twice as wide: a quarter of the points' },
+  { id: 'normal', label: 'Normal', title: 'The grid Auto lays' },
+  { id: 'thorough', label: 'Thorough', title: 'A grid about three times as dense' },
+];
+
+/** Water the photo shows, a river aside: the sea alone (seen as far as the sea's horizon), or the sea or a lake. */
+export const WATERS = [
+  { id: 'sea', label: 'The sea', title: 'The sea shows: points it could not be seen from are left out. An island is traced as any skyline' },
+  { id: 'lake', label: 'Sea or a lake', title: 'The sea or a lake shows, a river aside: points with none within reach are left out' },
+];
+
+/** Water said of the photo as Find keeps it: 'sea', 'lake' (the sea or a lake, as an older search said `true`), or false. */
+export function cleanWater(value) {
+  if (value === true) return 'lake';
+  return WATERS.some((one) => one.id === value) ? value : false;
+}
+
+/** How hard a search works the computer: on each of its own cores, on up to four, or on one. */
 export const SPEEDS = [
+  { id: 'fastest', label: 'Fastest', title: 'A large grid is searched on every core this computer has, as the free memory allows' },
   { id: 'fast', label: 'Fast', title: 'A large grid is searched on several cores, up to four, as the free memory allows' },
   { id: 'gentle', label: 'Gentle', title: 'One core: slower, and the computer stays free for the rest' },
 ];
@@ -79,16 +104,34 @@ const PLANE_W = 1200;
 /** A running search is read again this often, milliseconds. */
 export const POLL_MS = 2000;
 /**
- * Seconds a point of the grid takes, about, for the estimate before a search runs (measured on a
- * recent laptop; turns read finer cost more). Once it runs, the time left is the machine's own pace.
+ * Seconds a point of the grid takes, about, for the estimate until this machine's pace is timed
+ * (`/horizon/finds/pace`; measured on a recent laptop, turns read finer cost more). Once it runs, the
+ * time left is the machine's own pace.
  */
 const SECONDS_PER_POINT = { fine: 1, coarse: 0.3 };
-/** A search's statuses while it runs. */
-export const ACTIVE = ['queued', 'running'];
+/** Find's pace is timed this long after the setup last changed, milliseconds. */
+export const PACE_WAIT_MS = 2000;
+/** A search's statuses while it runs, asked to stop included: it keeps what it found once it has. */
+export const ACTIVE = ['queued', 'running', 'stopping'];
 
-/** The time a search should take, in words: "about 6 min". `turn` is the share of the turn each point reads. */
-export function durationText(points, step, turn = 1) {
-  const seconds = points * (step <= 0.2 ? SECONDS_PER_POINT.fine : SECONDS_PER_POINT.coarse) * Math.min(1, Math.max(0.05, turn));
+/**
+ * The seconds a search of `points` takes on this machine, from its pace (`/horizon/finds/pace`): each point
+ * as long as the ones timed, the best places searched in full `full` times as long, in `lanes` processes
+ * `lanes` to the `lane_power` times as fast once the grid holds `lane_min` points.
+ */
+export function pacedSeconds(points, { seconds, lanes = 1, lane_min: laneMin = 200, full = 8, lane_power: power = 0.46, top = 5 }) {
+  const speedup = points >= laneMin ? Math.max(1, lanes) ** power : 1;
+  return (seconds * (Math.max(0, points - top) + top * full)) / speedup;
+}
+
+/**
+ * The time a search should take, in words: "about 6 min". From this machine's pace once timed (`paced`),
+ * else guessed: `turn` is the share of the turn each point reads.
+ */
+export function durationText(points, step, turn = 1, paced = null) {
+  const seconds = Number.isFinite(paced?.seconds)
+    ? pacedSeconds(points, paced)
+    : points * (step <= 0.2 ? SECONDS_PER_POINT.fine : SECONDS_PER_POINT.coarse) * Math.min(1, Math.max(0.05, turn));
   if (seconds < 90) return 'about a minute';
   if (seconds < 3600) return `about ${Math.round(seconds / 60)} min`;
   return `about ${(seconds / 3600).toFixed(1)} h`;
@@ -99,10 +142,11 @@ export function durationText(points, step, turn = 1) {
  * points and time, and how far both may grow where relief stands near and the
  * grid is filled in (`most`).
  */
-export function estimateText({ points, most = points, step, turn = 1 }) {
-  const size = `${points.toLocaleString('en-US')} points, ${durationText(points, step, turn)}`;
+export function estimateText({ points, most = points, step, turn = 1 }, paced = null) {
+  const where = Number.isFinite(paced?.seconds) ? ' on this computer' : '';
+  const size = `${points.toLocaleString('en-US')} points, ${durationText(points, step, turn, paced)}${where}`;
   if (!(most > points)) return `${size}.`;
-  return `${size}; up to ${durationText(most, step, turn).replace('about ', '')} where relief stands near.`;
+  return `${size}; up to ${durationText(most, step, turn, paced).replace('about ', '')} where relief stands near.`;
 }
 
 /**
@@ -118,8 +162,23 @@ export function widenedText({ asked, spacing, zones_wider: wider } = {}, units =
   return lines;
 }
 
-/** The most zones a search keeps beside its area. */
+/** The most zones a search keeps beside its area, and the most areas searched with it. */
 export const ZONES_MAX = 12;
+export const AREAS_MAX = 12;
+
+/** How wide the brush paints, metres either side of the hand's path; the strokes a search keeps, each this long at most. */
+export const BRUSH_SIZES = [50, 100, 250, 500, 1000, 2500];
+export const STROKES_MAX = 200;
+export const STROKE_POINTS_MAX = 500;
+
+/** The brush's size nearest a grid `spacing` apart: about a cell either side. */
+export function brushFor(spacing) {
+  const want = Number.isFinite(spacing) && spacing > 0 ? spacing : 250;
+  return BRUSH_SIZES.reduce((best, size) => (Math.abs(Math.log(size / want)) < Math.abs(Math.log(best / want)) ? size : best));
+}
+
+const effortOf = (word) => (EFFORTS.some((one) => one.id === word) ? word : 'normal');
+const latLon = (p) => (Array.isArray(p) ? { lat: p[0], lon: p[1] } : { lat: p.lat, lon: p.lon });
 
 /** Zones as a search kept them (`[lat, lon]` corners, a spacing in metres or null) made Find's again. */
 function zonesOf(kept, name) {
@@ -135,6 +194,12 @@ function zonesOf(kept, name) {
 export const VIEWS = [
   { id: 'down', label: 'Looking down', title: 'From a height down onto the land: the camera may tilt far down' },
   { id: 'up', label: 'Looking up', title: 'From below up at a summit: the camera may tilt far up' },
+];
+
+/** Where the eye stands against the land 1 to 3 km round it, when the analyst says (engine/ruleout.py). */
+export const OVERS = [
+  { id: 'above', label: 'Above the land round', title: 'Higher than most of the land within 3 km: a hilltop, a slope over a plain. Lower points are left out' },
+  { id: 'below', label: 'Below it', title: 'Lower than most of the land within 3 km: a valley, the foot of a range. Higher points are left out' },
 ];
 
 /** The views ticked, in the menu's order, once each. */
@@ -165,6 +230,12 @@ export function createFindState({ api, overlay, view }) {
   let zones = $state.raw([]);
   /** The zone being drawn, by its id, or null. */
   let zoneDrawn = null;
+  /** More areas searched with the first on the same grid, each `{ id, points }`; the one being drawn by its id. */
+  let areas = $state.raw([]);
+  let moreDrawn = null;
+  /** The brush's strokes, in the order painted, each `{ path, radius, out }`, and how it paints next. */
+  let strokes = $state.raw([]);
+  let brush = $state.raw({ out: true, radius: null });
   /** The alignments made, each `{ id, colour, photo: { near, far }, map: { near, far }, offset, tops, heights, touch }`. */
   let alignments = $state.raw([]);
   /** The alignment being made: `{ step, photo, map }`, or null. */
@@ -181,6 +252,9 @@ export function createFindState({ api, overlay, view }) {
   let trying = 0;
   /** A selfie: searched mirrored too. */
   let mirror = $state(false);
+  /** The sea or a lake shows in the photo; where the eye stands against the land round it ('above', 'below' or null). */
+  let water = $state(false);
+  let over = $state(null);
   /** Near lines judged rounded where the relief is coarse. */
   let rounding = $state(false);
   /** Where the sun stood against the camera, on a day between two local hours (lib/horizon/find.js NO_SUN). */
@@ -192,14 +266,21 @@ export function createFindState({ api, overlay, view }) {
   let previewed = $state.raw(null);
   let previewAsked = '';
   let settings = $state.raw(NO_SETTINGS);
-  /** The search on show: `{ name, status, progress, error, result, ask }` as the app keeps it, or null. */
+  /** The search on show: `{ name, status, progress, error, result, ask, found }` as the app keeps it, or null. */
   let search = $state.raw(null);
+  /** The points the search on show has scored so far while it runs: `{ name, started, points }`, or null. */
+  let soFar = $state.raw(null);
   /** Checking the search on show against decoys of its trace. */
   let checking = $state(false);
   /** The case's searches, newest first, as the list shows them. */
   let list = $state.raw([]);
   /** How large the search would be: `{ points, coarse, spacing, step }`, or null. */
   let estimated = $state.raw(null);
+  /** This machine's pace for the search as set up, as `/finds/pace` timed it, or null; whether it is being timed. */
+  let paced = $state.raw(null);
+  let pacing = $state(false);
+  let pacedFor = '';
+  let paceAgain = false;
   /** How fine the heights over the area are, metres, once read; and where they were read. */
   let detail = $state(null);
   let detailAt = '';
@@ -337,18 +418,37 @@ export function createFindState({ api, overlay, view }) {
       }));
   }
 
+  /** The more areas a search is asked with: those drawn whole. */
+  function areasAsked() {
+    return areas.filter((one) => one.points.length >= 3 && !areaProblem(one.points)).map((one) => one.points.map(latLon));
+  }
+
+  /** The brush's strokes as a search is asked with them. */
+  function strokesAsked() {
+    return strokes.map((one) => ({ path: one.path.map(latLon), radius: one.radius, out: one.out }));
+  }
+
   /** Where the search would look, by whom and on what ground: what its grid is laid from; null while the area is not ready. */
   function groundNow() {
-    if (area.length < 3 || areaProblem(area) || drawing === 'area' || drawing === 'zone') return null;
+    if (area.length < 3 || areaProblem(area) || ['area', 'zone', 'more'].includes(drawing)) return null;
     return {
       area: area.map((p) => ({ lat: p.lat, lon: p.lon })),
+      areas: areasAsked(),
+      strokes: strokesAsked(),
       zones: zonesAsked(),
       who: { mode: who.mode, low: who.low, high: who.high },
       spacing: settings.spacing === 'auto' ? null : settings.spacing,
+      effort: settings.effort,
       alignments: alignmentsAsked(),
       stands,
       ...(nearSaid() ? { near: nearSaid() } : {}),
+      ...seenSaid(),
     };
+  }
+
+  /** What the photo shows that rules points out before the search (engine/ruleout.py), as a search asks it. */
+  function seenSaid() {
+    return { sea: Boolean(overlay.marks?.sea?.length) || water === 'sea', water: water === 'lake', over };
   }
 
   /** The nearest a traced line is said to stand, metres, or null when no line's distance is said. */
@@ -361,8 +461,47 @@ export function createFindState({ api, overlay, view }) {
   function tryAsk(at) {
     const ask = askNow({ anyArea: true });
     if (!ask) return null;
-    const { area: _area, zones: _zones, spacing: _spacing, stands: _stands, title: _title, ...rest } = ask;
+    const { area: _area, areas: _areas, strokes: _strokes, zones: _zones, spacing: _spacing, stands: _stands, title: _title, ...rest } = ask;
     return { ...rest, at: { lat: at.lat, lon: at.lon } };
+  }
+
+  /**
+   * What a search's pace depends on: the trace and what is known of it, who took it, about where (the
+   * area's middle, to a few kilometres); not the grid, its areas, what rules its points out nor how many lanes run it.
+   */
+  function paceKeyOf(ask) {
+    const { area: corners, areas: _areas, strokes: _strokes, zones: _zones, spacing: _spacing, effort: _effort, speed: _speed, title: _title, sea: _sea, water: _water, over: _over, photo, ...rest } =
+      ask;
+    const middle = areaMiddle(corners);
+    return JSON.stringify({ ...rest, photo: photo?.path ?? null, at: [middle.lat.toFixed(2), middle.lon.toFixed(2)] });
+  }
+
+  /** Time this machine's pace for the search as set up, once a case holds it and none runs; a change meanwhile is timed next. */
+  async function timePace() {
+    if (!caseOf || (search && ACTIVE.includes(search.status))) return;
+    const ask = askNow();
+    if (!ask) return;
+    const key = paceKeyOf(ask);
+    if (key === pacedFor) return;
+    if (pacing) {
+      paceAgain = true;
+      return;
+    }
+    pacedFor = key;
+    pacing = true;
+    try {
+      const answer = await api.post(`/api/cases/${encodeURIComponent(caseOf)}/horizon/finds/pace`, ask);
+      if (pacedFor === key) paced = Number.isFinite(answer?.seconds) ? answer : null;
+    } catch {
+      // the time stays guessed, and is timed again once the setup changes
+      if (pacedFor === key) pacedFor = '';
+    } finally {
+      pacing = false;
+      if (paceAgain) {
+        paceAgain = false;
+        timePace();
+      }
+    }
   }
 
   /** What a search asks the app, from the photo, its trace and what Find holds; null while it cannot be asked. */
@@ -388,6 +527,8 @@ export function createFindState({ api, overlay, view }) {
         : null,
       trace,
       area: area.map((p) => ({ lat: p.lat, lon: p.lon })),
+      areas: areasAsked(),
+      strokes: strokesAsked(),
       zones: zonesAsked(),
       who: { mode: who.mode, low: who.low, high: who.high },
       facing,
@@ -396,13 +537,17 @@ export function createFindState({ api, overlay, view }) {
       mirror,
       round: rounding && detail >= COARSE_RELIEF_M,
       sun: sunAsked(sun),
+      ...seenSaid(),
       speed: settings.speed,
       reach: Number.isFinite(reach) ? reach : reach === 'all' ? 100_000 : null,
       spacing: settings.spacing === 'auto' ? null : settings.spacing,
+      effort: settings.effort,
       alignments: alignmentsAsked(),
       hints: overlay.hints,
     };
   }
+
+  const findPath = (caseId, name) => `/api/cases/${encodeURIComponent(caseId)}/horizon/finds/${encodeURIComponent(name)}`;
 
   function follow(caseId, name) {
     stopPoll?.();
@@ -410,15 +555,28 @@ export function createFindState({ api, overlay, view }) {
       () => Boolean(search && search.name === name && ACTIVE.includes(search.status)),
       async () => {
         try {
-          const now = await api.get(`/api/cases/${encodeURIComponent(caseId)}/horizon/finds/${encodeURIComponent(name)}`);
+          const now = await api.get(findPath(caseId, name));
           if (search?.name === name) search = { ...now, name };
-          if (!ACTIVE.includes(now.status)) refreshList(caseId);
+          if (ACTIVE.includes(now.status)) await readLive(caseId, name);
+          else refreshList(caseId);
         } catch {
           // read again at the next tick; a search deleted meanwhile stops being followed
         }
       },
       POLL_MS
     );
+  }
+
+  /** The points scored since the last read, added to the ones held; all of them again for another run. */
+  async function readLive(caseId, name) {
+    const held = soFar?.name === name ? soFar : null;
+    const since = held?.points.length ?? 0;
+    const query = held?.started != null ? `?since=${since}&started=${held.started}` : '?since=0';
+    const answer = await api.get(`${findPath(caseId, name)}/points${query}`);
+    // nothing held there: the run just ended, and its record says what it found
+    if (search?.name !== name || answer.started == null) return;
+    const kept = answer.started === held?.started && answer.since === since ? held.points : [];
+    soFar = { name, started: answer.started, points: answer.points.length ? [...kept, ...answer.points] : kept };
   }
 
   async function refreshList(caseId = caseOf) {
@@ -468,6 +626,10 @@ export function createFindState({ api, overlay, view }) {
     },
     addCorner(point) {
       if (!point) return;
+      if (drawing === 'more') {
+        areas = areas.map((one) => (one.id === moreDrawn ? { ...one, points: [...one.points, { lat: point.lat, lon: point.lon }] } : one));
+        return;
+      }
       if (drawing === 'zone') {
         zones = zones.map((zone) => (zone.id === zoneDrawn ? { ...zone, points: [...zone.points, { lat: point.lat, lon: point.lon }] } : zone));
         return;
@@ -484,6 +646,13 @@ export function createFindState({ api, overlay, view }) {
     },
     /** The last corner placed: the area (or the zone being drawn) is closed and the map reads clicks no more. */
     closeArea() {
+      if (drawing === 'more') {
+        // an area given fewer than three corners is no area
+        areas = areas.filter((one) => one.id !== moreDrawn || one.points.length >= 3);
+        moreDrawn = null;
+        drawing = null;
+        return;
+      }
       if (drawing === 'zone') {
         // a zone given fewer than three corners is no zone
         zones = zones.filter((zone) => zone.id !== zoneDrawn || zone.points.length >= 3);
@@ -530,7 +699,74 @@ export function createFindState({ api, overlay, view }) {
     },
     clearArea() {
       area = [];
-      if (drawing === 'area') drawing = null;
+      areas = [];
+      moreDrawn = null;
+      if (drawing === 'area' || drawing === 'more') drawing = null;
+    },
+
+    // -- more areas, searched with the first ---------------------------------------
+
+    get areas() {
+      return areas;
+    },
+    /** The area being drawn beside the first, or null. */
+    get moreDrawn() {
+      return areas.find((one) => one.id === moreDrawn) ?? null;
+    },
+    /** Start another area, searched with the first on the same grid: its corners are clicked on the map. */
+    drawMore() {
+      pending = null;
+      if (drawing === 'more' || drawing === 'zone') this.closeArea();
+      if (areas.length >= AREAS_MAX) return;
+      const id = `ar_${Date.now().toString(36)}_${(made += 1)}`;
+      areas = [...areas, { id, points: [] }];
+      moreDrawn = id;
+      drawing = 'more';
+    },
+    removeMore(id) {
+      areas = areas.filter((one) => one.id !== id);
+      if (moreDrawn === id) {
+        moreDrawn = null;
+        if (drawing === 'more') drawing = null;
+      }
+    },
+
+    // -- the brush -------------------------------------------------------------------
+
+    get strokes() {
+      return strokes;
+    },
+    /** How the brush paints next: `out` leaves points out, else takes them back; `radius` metres either side. */
+    get brush() {
+      return { out: brush.out, radius: brush.radius ?? brushFor(previewed?.spacing) };
+    },
+    setBrush(change) {
+      brush = {
+        out: typeof change?.out === 'boolean' ? change.out : brush.out,
+        radius: BRUSH_SIZES.includes(change?.radius) ? change.radius : brush.radius,
+      };
+    },
+    /** The map paints instead of panning; Escape or a second press stops it. */
+    startBrush() {
+      pending = null;
+      if (drawing === 'more' || drawing === 'zone') this.closeArea();
+      drawing = 'brush';
+    },
+    stopBrush() {
+      if (drawing === 'brush') drawing = null;
+    },
+    /** A stroke painted, `{ path, radius, out }` its path `{ lat, lon }` points: kept over the ones before. */
+    addStroke(stroke) {
+      const path = (stroke?.path ?? []).slice(0, STROKE_POINTS_MAX).map(latLon);
+      if (!path.length || strokes.length >= STROKES_MAX) return;
+      strokes = [...strokes, { path, radius: Number(stroke.radius) || this.brush.radius, out: stroke.out ?? brush.out }];
+    },
+    /** The last stroke taken back. */
+    undoStroke() {
+      strokes = strokes.slice(0, -1);
+    },
+    clearStrokes() {
+      strokes = [];
     },
     /** A whole area at once (a saved search, a test). */
     setArea(points) {
@@ -617,6 +853,33 @@ export function createFindState({ api, overlay, view }) {
     get searching() {
       return Boolean(search && ACTIVE.includes(search.status));
     },
+    /** The points the search on show has scored so far while it runs (as its result's), or [] when none runs. */
+    get live() {
+      return search && soFar?.name === search.name && ACTIVE.includes(search.status) ? soFar.points : [];
+    },
+    /**
+     * Keep a place on the search on show as the one the analyst confirmed, `{ lat, lon, height, heading, tilt,
+     * roll, fov, explained, view }` with `search` the search it came from (the one on show when not said): one
+     * still running stops, keeping what it found.
+     */
+    async confirm({ search: name = search?.name, ...place }) {
+      if (!name || !caseOf) return null;
+      const record = await api.post(`${findPath(caseOf, name)}/found`, place);
+      if (search?.name === name) {
+        search = { ...record, name };
+        if (ACTIVE.includes(record.status)) follow(caseOf, name);
+      }
+      refreshList(caseOf);
+      return record;
+    },
+    /** The place confirmed taken back: the search is as it ended. */
+    async unconfirm() {
+      if (!search?.found || !caseOf) return;
+      const name = search.name;
+      const record = await api.del(`${findPath(caseOf, name)}/found`);
+      if (search?.name === name) search = { ...record, name };
+      refreshList(caseOf);
+    },
     /**
      * Whether the setup changed since the search on show was asked; true while
      * none is on show. Read off what the analyst set, never the trace worked
@@ -629,8 +892,11 @@ export function createFindState({ api, overlay, view }) {
         area,
         who,
         spacing: settings.spacing === 'auto' ? null : settings.spacing,
+        effort: settings.effort,
         alignments: live.map((one) => ({ near: one.map.near, far: one.map.far, tops: one.tops, heights: one.heights })),
         zones: zonesAsked(),
+        areas: areasAsked(),
+        strokes: strokesAsked(),
         photo: source?.path ? { path: source.path, strokes: overlay.strokes, marks: overlay.marks } : null,
         hints: overlay.hints,
         facing,
@@ -639,6 +905,7 @@ export function createFindState({ api, overlay, view }) {
         mirror,
         round: rounding && detail >= COARSE_RELIEF_M,
         sun: sunAsked(sun),
+        ...seenSaid(),
       });
     },
     get list() {
@@ -648,6 +915,19 @@ export function createFindState({ api, overlay, view }) {
     get estimated() {
       return estimated;
     },
+    /** This machine's pace for the search as set up, with the lanes the speed picked runs, once timed; else null. */
+    get pace() {
+      return this.paceFor(settings.speed);
+    },
+    /** This machine's pace at a speed (`SPEEDS`): its lanes on this computer, or null until timed. */
+    paceFor(speed) {
+      return paced ? { ...paced, lanes: paced.lanes?.[speed] ?? 1 } : null;
+    },
+    /** Whether the pace is being timed. */
+    get pacing() {
+      return pacing;
+    },
+    timePace,
     /** Ask the app how large the search would be, for the line under the button. */
     async estimate() {
       const ask = askNow();
@@ -668,6 +948,7 @@ export function createFindState({ api, overlay, view }) {
       caseOf = caseId;
       const row = await api.post(`/api/cases/${encodeURIComponent(caseId)}/horizon/finds`, ask);
       search = { ...row, ask, result: null };
+      soFar = null;
       follow(caseId, row.name);
       refreshList(caseId);
       return row;
@@ -688,16 +969,20 @@ export function createFindState({ api, overlay, view }) {
         checking = false;
       }
     },
-    /** Stop the search on show. */
+    /** Stop the search on show: followed on until it has kept what it found. */
     async stop() {
       if (!search || !caseOf) return;
-      const row = await api.post(`/api/cases/${encodeURIComponent(caseOf)}/horizon/finds/${encodeURIComponent(search.name)}/cancel`);
+      const name = search.name;
+      const row = await api.post(`${findPath(caseOf, name)}/cancel`);
+      if (search?.name !== name) return;
       search = { ...search, ...row };
+      if (ACTIVE.includes(row.status)) follow(caseOf, name);
     },
     /** Put the search away, its map and its places with it (it stays in the case). */
     closeSearch() {
       stopPoll?.();
       search = null;
+      soFar = null;
     },
     /** Open a search the case keeps: its area, alignments and settings come back with its map. */
     async openSearch(caseId, name) {
@@ -707,6 +992,9 @@ export function createFindState({ api, overlay, view }) {
       area = (ask.area ?? []).map(([lat, lon]) => ({ lat, lon }));
       zones = zonesOf(ask.zones, name);
       zoneDrawn = null;
+      areas = (ask.areas ?? []).map((points, index) => ({ id: `ar_${name}_${index}`, points: points.map(latLon) }));
+      moreDrawn = null;
+      strokes = (ask.strokes ?? []).map((one) => ({ path: one.path.map(latLon), radius: one.radius, out: one.out !== false }));
       drawing = null;
       pending = null;
       who = ask.who ? { mode: ask.who.mode, low: ask.who.low, high: ask.who.high } : who;
@@ -714,10 +1002,17 @@ export function createFindState({ api, overlay, view }) {
       stands = cleanStands(ask.stands);
       looking = cleanView(ask.view);
       mirror = Boolean(ask.mirror);
+      water = ask.water ? 'lake' : ask.sea && !ask.photo?.marks?.sea?.length ? 'sea' : false;
+      over = OVERS.some((one) => one.id === ask.over) ? ask.over : null;
       rounding = Boolean(ask.round);
       sun = cleanSun(ask.sun ?? NO_SUN);
       const kept = (ask.alignments ?? [])[0];
-      settings = { spacing: ask.spacing ?? 'auto', tolerance: kept?.tolerance ?? settings.tolerance, speed: ask.speed === 'gentle' ? 'gentle' : 'fast' };
+      settings = {
+        spacing: ask.spacing ?? 'auto',
+        tolerance: kept?.tolerance ?? settings.tolerance,
+        speed: SPEEDS.some((one) => one.id === ask.speed) ? ask.speed : 'fast',
+        effort: effortOf(ask.effort),
+      };
       alignments = (ask.alignments ?? []).map((one, index) => ({
         id: `al_${name}_${index}`,
         colour: one.colour ?? ALIGN_COLOURS[index % ALIGN_COLOURS.length],
@@ -730,6 +1025,7 @@ export function createFindState({ api, overlay, view }) {
         touch: null,
       }));
       search = { ...record, name };
+      soFar = null;
       if (ACTIVE.includes(record.status)) follow(caseId, name);
       return record;
     },
@@ -883,6 +1179,21 @@ export function createFindState({ api, overlay, view }) {
     setMirror(on) {
       mirror = Boolean(on);
     },
+    /** Water the photo shows (`WATERS`): 'sea', 'lake' for the sea or a lake, or false. */
+    get water() {
+      return water;
+    },
+    setWater(value) {
+      water = cleanWater(value);
+    },
+    /** Where the eye stands against the land round it: 'above', 'below', or null for either. */
+    get over() {
+      return over;
+    },
+    /** Say where the eye stands, or, said again, either. */
+    toggleOver(id) {
+      over = OVERS.some((one) => one.id === id) && over !== id ? id : null;
+    },
     /** The grid read before the search, each point with its ground, or null. */
     get previewed() {
       return previewed;
@@ -901,9 +1212,11 @@ export function createFindState({ api, overlay, view }) {
         previewed = null;
         return;
       }
+      // the strokes the answer reads: the map lays those painted since over it until the next one comes
+      const read = strokes;
       try {
         const answer = await api.post('/api/horizon/finds/preview', ground);
-        if (previewAsked === key) previewed = answer;
+        if (previewAsked === key) previewed = { ...answer, strokesRead: read };
       } catch {
         if (previewAsked === key) previewed = null;
       }
@@ -921,15 +1234,17 @@ export function createFindState({ api, overlay, view }) {
       const spacing = SPACINGS.includes(change?.spacing) ? change.spacing : settings.spacing;
       const tolerance = Number(change?.tolerance) > 0 ? Number(change.tolerance) : settings.tolerance;
       const speed = SPEEDS.some((one) => one.id === change?.speed) ? change.speed : settings.speed;
-      settings = { spacing, tolerance, speed };
+      const effort = EFFORTS.some((one) => one.id === change?.effort) ? change.effort : settings.effort;
+      settings = { spacing, tolerance, speed, effort };
     },
 
     // -- the bench ----------------------------------------------------------------------
 
     /** The setup as the bench keeps it (api/horizon_work.py), or null while nothing is set. */
     get snapshot() {
-      const plain = who.mode === 'ground' && settings.spacing === 'auto' && settings.tolerance === ALIGN_TOLERANCE && settings.speed === 'fast';
-      if (!area.length && !zones.length && !alignments.length && !search && !facing.length && !stands.length && !looking.length && !mirror && !rounding && !sunAsked(sun) && !sun.sides.length && !sun.date && plain) return null;
+      const plain =
+        who.mode === 'ground' && settings.spacing === 'auto' && settings.tolerance === ALIGN_TOLERANCE && settings.speed === 'fast' && settings.effort === 'normal';
+      if (!area.length && !areas.length && !strokes.length && !zones.length && !alignments.length && !search && !facing.length && !stands.length && !looking.length && !mirror && !water && !over && !rounding && !sunAsked(sun) && !sun.sides.length && !sun.date && plain) return null;
       return {
         area: area.map(({ lat, lon }) => ({ lat, lon })),
         alignments: live.map((one) => ({
@@ -945,15 +1260,20 @@ export function createFindState({ api, overlay, view }) {
         spacing: settings.spacing,
         tolerance: settings.tolerance,
         speed: settings.speed,
+        effort: settings.effort,
         facing,
         stands,
         view: looking,
         mirror,
+        water,
+        over,
         round: rounding,
         sun,
         zones: zones
           .filter((zone) => zone.points.length >= 3)
           .map((zone) => ({ points: zone.points.map(({ lat, lon }) => ({ lat, lon })), spacing: zone.spacing, out: zone.out })),
+        areas: areas.filter((one) => one.points.length >= 3).map((one) => ({ points: one.points.map(latLon) })),
+        strokes: strokesAsked(),
         search: search?.name ?? null,
       };
     },
@@ -967,10 +1287,12 @@ export function createFindState({ api, overlay, view }) {
         } catch {
           stopPoll?.();
           search = null;
+          soFar = null;
         }
       } else {
         stopPoll?.();
         search = null;
+        soFar = null;
       }
       area = (setup?.area ?? []).map(({ lat, lon }) => ({ lat, lon }));
       zones = (setup?.zones ?? []).map((zone, index) => ({
@@ -980,6 +1302,9 @@ export function createFindState({ api, overlay, view }) {
         out: Boolean(zone.out),
       }));
       zoneDrawn = null;
+      areas = (setup?.areas ?? []).map((one, index) => ({ id: `ar_kept_${index}_${(made += 1)}`, points: (one.points ?? []).map(latLon) }));
+      moreDrawn = null;
+      strokes = (setup?.strokes ?? []).map((one) => ({ path: (one.path ?? []).map(latLon), radius: one.radius, out: one.out !== false }));
       alignments = (setup?.alignments ?? []).map((one, index) => ({
         id: `al_${Date.now().toString(36)}_${(made += 1)}`,
         colour: one.colour ?? ALIGN_COLOURS[index % ALIGN_COLOURS.length],
@@ -996,12 +1321,15 @@ export function createFindState({ api, overlay, view }) {
       stands = cleanStands(setup?.stands);
       looking = cleanView(setup?.view);
       mirror = Boolean(setup?.mirror);
+      water = cleanWater(setup?.water);
+      over = OVERS.some((one) => one.id === setup?.over) ? setup.over : null;
       rounding = Boolean(setup?.round);
       sun = cleanSun(setup?.sun ?? NO_SUN);
       settings = {
         spacing: SPACINGS.includes(setup?.spacing) ? setup.spacing : 'auto',
         tolerance: Number(setup?.tolerance) > 0 ? Number(setup.tolerance) : ALIGN_TOLERANCE,
-        speed: setup?.speed === 'gentle' ? 'gentle' : 'fast',
+        speed: SPEEDS.some((one) => one.id === setup?.speed) ? setup.speed : 'fast',
+        effort: effortOf(setup?.effort),
       };
       // where the tops touch was read off the terrain the analyst already looked at: read again
       for (const one of alignments) if (one.tops) askTouch(one.id);

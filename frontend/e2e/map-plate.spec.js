@@ -47,6 +47,12 @@ async function plateFixture(page, store = { plates: new Map(), saves: [], export
 
 const lastSave = (store) => store.saves.at(-1);
 
+/** A new plate on the house layout: New plate, then its questions answered as they stand. */
+async function newPlate(page) {
+  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await page.getByRole('dialog', { name: 'New plate' }).getByRole('button', { name: 'Create plate' }).click();
+}
+
 /** An element added from the Add panel, by its tile. */
 async function addOnPage(page, label) {
   await page.getByRole('button', { name: 'Add', exact: true }).click();
@@ -57,7 +63,7 @@ test('a new plate opens on the house layout and saves itself', async ({ page }) 
   const store = await plateFixture(page);
   await page.goto('/#plate');
   await expect(page.getByRole('heading', { name: 'Map plates' })).toBeVisible();
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
   await expect.poll(() => store.saves.length).toBeGreaterThan(0);
   const kinds = lastSave(store).spec.elements.map((element) => element.kind);
@@ -76,7 +82,7 @@ test('a new plate opens on the house layout and saves itself', async ({ page }) 
 test('the page zooms round the wheel, moves by a drag, and Fit brings it back', async ({ page }) => {
   await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   const paper = page.locator('.page');
   await expect(page.locator('.plate-map')).toHaveCount(2);
   const fitted = await paper.boundingBox();
@@ -99,7 +105,7 @@ test('the page zooms round the wheel, moves by a drag, and Fit brings it back', 
 test('a framed map goes as far as the hand drags it', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await expect.poll(() => store.saves.length).toBeGreaterThan(0);
   const map = page.locator('.plate-map').first();
   const box = await map.boundingBox();
@@ -121,10 +127,57 @@ test('a framed map goes as far as the hand drags it', async ({ page }) => {
   await expect.poll(() => mainOf(lastSave(store).spec).lon - before.lon).toBeGreaterThan(expected * 0.8);
 });
 
+test('a drag moves a map\'s frame, never its ground, until a double click goes in, where a held double click turns it', async ({ page }) => {
+  const store = await plateFixture(page);
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect.poll(() => store.saves.length).toBeGreaterThan(0);
+  const mainOf = () => lastSave(store).spec.elements.find((element) => element.kind === 'map');
+  const before = mainOf();
+  let box = await page.locator('.plate-map').first().boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2 + 30, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => mainOf().box[0]).toBeGreaterThan(before.box[0]);
+  expect(mainOf().view).toEqual(before.view);
+  // in it, the second press of a double click held and dragged round turns the ground, as on the app's other maps
+  box = await page.locator('.plate-map').first().boundingBox();
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.dblclick(x, y);
+  await expect(page.locator('.plate-map.live')).toHaveCount(1);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.up();
+  await page.mouse.down({ clickCount: 2 });
+  for (const [px, py] of [[x + 120, y], [x + 85, y + 85], [x, y + 120]]) await page.mouse.move(px, py, { steps: 6 });
+  await page.mouse.up({ clickCount: 2 });
+  await expect.poll(() => Math.abs(mainOf().view.bearing ?? 0)).toBeGreaterThan(20);
+});
+
+test('another ground is laid on the same map, picture or plain, never a map built again', async ({ page }) => {
+  const store = await plateFixture(page);
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect.poll(() => store.saves.length).toBeGreaterThan(0);
+  const canvas = page.locator('.plate-map canvas.maplibregl-canvas').first();
+  await expect(canvas).toBeVisible();
+  await canvas.evaluate((node) => { node.dataset.first = 'yes'; });
+  const box = await page.locator('.plate-map').first().boundingBox();
+  await page.mouse.click(box.x + box.width * 0.8, box.y + 6);
+  const tile = (label) => page.locator('.inspector .ground-tile', { hasText: label }).first();
+  const mainOf = () => lastSave(store).spec.elements.find((element) => element.kind === 'map');
+  for (const [label, id] of [['Light grey', 'plain-grey'], ['Esri World Imagery', 'esri-world-imagery'], ['Newsroom', 'plain-news']]) {
+    await tile(label).click();
+    await expect.poll(() => mainOf().basemap).toBe(id);
+    await expect(page.locator('.plate-map canvas.maplibregl-canvas[data-first="yes"]')).toHaveCount(1);
+  }
+});
+
 test('a map in 3D goes as far as the hand drags it', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
   // there is one kind of map: its 3D box stands it on its heights
   await addOnPage(page, 'Map');
@@ -161,7 +214,7 @@ test('a map in 3D goes as far as the hand drags it', async ({ page }) => {
 test('symbols are stamped on the map one after the other, and the next takes the marker picked', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
   const box = await page.locator('.plate-map').first().boundingBox();
   const symbols = () => lastSave(store)?.spec.elements.filter((element) => element.kind === 'symbol') ?? [];
@@ -183,7 +236,7 @@ test('symbols are stamped on the map one after the other, and the next takes the
 test('an element moves by the keyboard, goes with Delete, and Undo brings it back', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await page.locator('.list button', { hasText: 'Legend' }).click();
   await expect(page.getByRole('heading', { name: 'Legend', exact: true })).toBeVisible();
   const before = await page.locator('.hit.selected').boundingBox();
@@ -200,7 +253,7 @@ test('an element moves by the keyboard, goes with Delete, and Undo brings it bac
 test('a row of the element list is dragged up or down, the writing above the maps', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await expect.poll(() => store.saves.length).toBeGreaterThan(0);
   const rows = page.locator('.elements .list > li');
   /** The saved elements, top first, as the list shows them. */
@@ -247,7 +300,7 @@ test('a row of the element list is dragged up or down, the writing above the map
 test('the credits stay on the page, and the export writes the page', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await page.locator('.list button', { hasText: 'Credits' }).click();
   await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Export', exact: true }).click();
@@ -261,10 +314,39 @@ test('the credits stay on the page, and the export writes the page', async ({ pa
   await expect(page.getByText('Map plate.png written')).toBeVisible();
 });
 
+test('an export goes on behind: the plate holds still, the top bar says it, and another tool can be used meanwhile', async ({ page }) => {
+  const store = await plateFixture(page);
+  let release;
+  const held = new Promise((resolve) => (release = resolve));
+  // the server takes its time writing the file
+  await page.route(`**/api/cases/${CASE_ID}/map-plates/export`, async (route) => {
+    await held;
+    store.exports.push(route.request().postDataBuffer()?.toString('latin1') ?? '');
+    await route.fulfill({ json: { file: 'Map plate.png', path: '/tmp/views', format: 'png' } });
+  });
+  await page.goto('/#plate');
+  await newPlate(page);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Export', exact: true }).click();
+  // the dialog is gone at once, the plate veiled, the top bar saying it
+  await expect(page.getByRole('dialog', { name: 'Export the plate' })).toHaveCount(0);
+  await expect(page.locator('.export-card')).toContainText('Exporting');
+  const pill = page.locator('.plate-activity');
+  await expect(pill).toContainText('Plate export');
+  await page.locator('.tabstrip').getByRole('button', { name: 'Notebook', exact: true }).click();
+  await expect(pill).toBeVisible();
+  release();
+  await expect.poll(() => store.exports.length, { timeout: 30_000 }).toBe(1);
+  await expect(page.getByText('Map plate.png written')).toBeVisible();
+  await expect(pill).toHaveCount(0);
+  await pill.or(page.locator('.tabstrip').getByRole('button', { name: 'Map plate', exact: true })).first().click();
+  await expect(page.locator('.export-card')).toHaveCount(0);
+});
+
 test('a plate kept as a template starts the next one', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await page.getByLabel('Paper', { exact: true }).selectOption('screen');
   await page.getByRole('button', { name: 'Keep as template' }).click();
   await page.getByLabel('Template name').fill('Slide');
@@ -286,7 +368,7 @@ test('a day plays its steps, and a step plays a video of the case', async ({ pag
   await page.route(`**/api/cases/${CASE_ID}/media/page**`, (route) => route.fulfill({ json: { items: [strike], next_cursor: null, total: 1, facets: {} } }));
   await page.route(`**/api/cases/${CASE_ID}/media/item**`, (route) => route.fulfill({ json: strike }));
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
   // a plate with no layer followed over time has no play bar, and still takes steps
   await expect(page.locator('.timebar')).toHaveCount(0);
@@ -334,7 +416,7 @@ test('a day plays its steps, and a step plays a video of the case', async ({ pag
 test('a line and a text go on the map, a step frames the map its own way, and the video moves between them', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
   const box = await page.locator('.plate-map').first().boundingBox();
   const at = (x, y) => [box.x + box.width * x, box.y + box.height * y];
@@ -384,7 +466,7 @@ test('a line and a text go on the map, a step frames the map its own way, and th
 test('a detail\'s square on the main map is dragged to move what the detail shows', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
   await addOnPage(page, 'Detail');
   await expect(page.locator('.plate-map')).toHaveCount(3);
@@ -422,7 +504,7 @@ test('a detail\'s square on the main map is dragged to move what the detail show
 test('each day and step holds its own time in the video, the export saying how long it runs', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
   await addOnPage(page, 'Step');
   const times = page.locator('.steps .time');
@@ -453,7 +535,7 @@ test('each day and step holds its own time in the video, the export saying how l
 test('a plate holds eight maps at most, and says why', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
   for (let index = 0; index < 6; index += 1) await addOnPage(page, 'Map');
   await expect(page.locator('.plate-map')).toHaveCount(8);
@@ -466,7 +548,7 @@ test('a plate holds eight maps at most, and says why', async ({ page }) => {
 test('the page takes the room: panels widened and put away, focus, and a tab of its own', async ({ page, context }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
-  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
   await expect.poll(() => store.saves.length).toBeGreaterThan(0);
   const inspector = page.getByLabel('Plate inspector');
@@ -490,7 +572,7 @@ test('the page takes the room: panels widened and put away, focus, and a tab of 
 
   // kept for the next plate opened
   await page.getByRole('button', { name: 'Plates', exact: true }).click();
-  await page.locator('.tile .open').first().click();
+  await page.locator('.tile:not(.template) .open').first().click();
   await expect(page.locator('.plate-map')).toHaveCount(2);
   await expect(inspector).toHaveCount(0);
   await page.getByRole('button', { name: 'The inspector', exact: true }).click();
@@ -538,7 +620,7 @@ test('the page takes the room: panels widened and put away, focus, and a tab of 
   await expect(page.getByRole('heading', { name: 'Map plates' })).toBeVisible();
 
   // one plate, one tab: opened here again, the other tab lets it go
-  await page.locator('.tile .open').first().click();
+  await page.locator('.tile:not(.template) .open').first().click();
   await expect(page.locator('.plate-map')).toHaveCount(2);
   await expect(second.getByRole('heading', { name: 'Map plates' })).toBeVisible();
   await second.close();
@@ -566,7 +648,7 @@ test('a plate saved on now reopens on the day it was last saved, with what stood
       { id: 'note', kind: 'text', box: [10, 4, 120, 12], text: 'Hit on the post', onward: 'now', until: null },
     ] } });
   await page.goto('/#plate');
-  await page.locator('.tile .open', { hasText: 'Front' }).click();
+  await page.locator('.tile:not(.template) .open', { hasText: 'Front' }).click();
   // the day it was left on, never a "now" that slid to today
   await expect(page.locator('.timebar .moment')).toHaveText('12 Oct 2026');
   await expect.poll(() => lastSave(store)?.spec.time.at ?? null).toBe('2026-10-12');
@@ -594,7 +676,7 @@ test('a day no layer changes on is added to the play from its tile, and let go f
     elements: [{ id: 'map', kind: 'map', box: [10, 20, 200, 150], view: { lat: 48.86, lon: 2.3, zoom: 12, bearing: 0 }, basemap: 'plain',
       overlays: [], layers: [{ name: 'front', hidden: [], stroke: 1, icons: 1 }], grid: 'none' }] } });
   await page.goto('/#plate');
-  await page.locator('.tile .open', { hasText: 'Front' }).click();
+  await page.locator('.tile:not(.template) .open', { hasText: 'Front' }).click();
   // the 6th falls between the layer's two changes: the play skips it until it is added
   const idle = page.locator('.steps .tile.idle');
   await expect(idle).toContainText('6 Oct 2026');
@@ -608,4 +690,30 @@ test('a day no layer changes on is added to the play from its tile, and let go f
   await page.locator('.float-menu').getByRole('button', { name: 'Take it out of the play' }).click();
   await expect.poll(() => lastSave(store)?.spec.days).toEqual([]);
   await expect(idle).toHaveCount(1);
+});
+
+test('a ready plate opens at once from the list, and New plate lays one out for the paper and look picked', async ({ page }) => {
+  const store = await plateFixture(page);
+  await page.goto('/#plate');
+  await expect(page.getByRole('heading', { name: 'Ready plates' })).toBeVisible();
+  // a press on a ready plate makes it, on its own paper, without a dialog
+  await page.locator('.tile.template', { hasText: 'Geolocation card' }).first().click();
+  await expect(page.getByRole('dialog', { name: 'New plate' })).toHaveCount(0);
+  await expect.poll(() => store.saves.length).toBeGreaterThan(0);
+  expect(lastSave(store).spec.ready).toBe('geolocation');
+  await page.getByRole('button', { name: 'Plates', exact: true }).click();
+  // New plate: one screen, the layout, the paper and the look picked together
+  const saved = store.saves.length;
+  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'New plate' });
+  await dialog.locator('.tile', { hasText: 'Geolocation card' }).click();
+  await dialog.getByRole('button', { name: 'Story, 9:16' }).click();
+  await dialog.locator('.look', { hasText: 'Tactical' }).click();
+  await dialog.getByRole('button', { name: 'Create plate' }).click();
+  await expect.poll(() => store.saves.length).toBeGreaterThan(saved);
+  const spec = lastSave(store).spec;
+  expect(spec.ready).toBe('geolocation');
+  expect(spec.page).toMatchObject({ paper: 'screen', orientation: 'portrait' });
+  expect(spec.theme.preset).toBe('tactical');
+  expect(spec.elements.find((element) => element.kind === 'image').text).toBe('The footage, a still');
 });

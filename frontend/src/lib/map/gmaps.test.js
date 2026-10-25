@@ -6,7 +6,7 @@ import { describe, it, expect, afterEach } from 'vitest';
  * (`tilesloaded`) or gets rejected (`gm_authFailure`), on the next microtask so
  * probeKey has installed its handlers first.
  */
-function stubGoogleMaps({ reject = false } = {}) {
+function stubGoogleMaps({ reject = false, logs = null } = {}) {
   const built = [];
   const once = [];
   window.google = {
@@ -25,6 +25,8 @@ function stubGoogleMaps({ reject = false } = {}) {
           queueMicrotask(() => {
             if (reject) window.gm_authFailure?.();
             else this._listeners.tilesloaded?.();
+            // a refused project still draws, and names its refusal in the console a moment later
+            if (logs) setTimeout(() => console.error(`Google Maps JavaScript API error: ${logs}\nhttps://developers.google.com/maps/documentation/javascript/error-messages`), 5);
           });
         }
         moveCamera(camera) {
@@ -216,7 +218,7 @@ describe('gmaps module', () => {
       const { probeKey } = await import('./gmaps.js');
       stubGoogleMaps();
 
-      const verdict = await probeKey('https://maps.googleapis.com/maps/api/js?key=good');
+      const verdict = await probeKey('https://maps.googleapis.com/maps/api/js?key=good', { graceMs: 20 });
 
       expect(verdict.ok).toBe(true);
       expect(verdict.billed).toBe(true);
@@ -232,6 +234,75 @@ describe('gmaps module', () => {
 
       expect(verdict.ok).toBe(false);
       expect(verdict.billed).toBe(false);
+    });
+  });
+
+  describe('Google refusing the map', () => {
+    afterEach(() => {
+      delete window.google;
+      delete window.gm_authFailure;
+    });
+
+    it('reads the refusal Google names in its console line', async () => {
+      const { refusalCode } = await import('./gmaps.js');
+      expect(refusalCode(['Google Maps JavaScript API error: BillingNotEnabledMapError\nhttps://…'])).toBe(
+        'BillingNotEnabledMapError'
+      );
+      expect(refusalCode([new Error('Google Maps JavaScript API error: OverQuotaMapError')])).toBe('OverQuotaMapError');
+      // a warning Google also logs by name, and lines that are not Google's, refuse nothing
+      expect(refusalCode(['Google Maps JavaScript API warning: RetiredVersion'])).toBe(null);
+      expect(refusalCode(['Google Maps JavaScript API error: SomethingNewMapError'])).toBe(null);
+      expect(refusalCode([{ any: 'object' }, 42, null])).toBe(null);
+    });
+
+    it('fails a key test on billing switched off, though the tiles drew', async () => {
+      // Google calls no gm_authFailure for this: it dims the map under "For
+      // development purposes only" and names it in the console. A test that
+      // trusted `tilesloaded` said "OK" over a dead map.
+      const { probeKey, GOOGLE_REFUSALS } = await import('./gmaps.js');
+      stubGoogleMaps({ logs: 'BillingNotEnabledMapError' });
+
+      const verdict = await probeKey('https://maps.googleapis.com/maps/api/js?key=unbilled', { graceMs: 1000 });
+
+      expect(verdict).toEqual({ ok: false, detail: GOOGLE_REFUSALS.BillingNotEnabledMapError, billed: false });
+      expect(verdict.detail).toMatch(/billing account/);
+    });
+
+    it('tells the map on show once, in Google’s own words over the bare signal', async () => {
+      const { loadGoogleMaps, GOOGLE_REFUSALS } = await import('./gmaps.js');
+      stubGoogleMaps();
+      const heard = [];
+      await loadGoogleMaps('https://maps.googleapis.com/maps/api/js?key=k', { onRefused: (why) => heard.push(why) });
+
+      // a bad referrer gets both signals, the bare one first
+      window.gm_authFailure();
+      console.error('Google Maps JavaScript API error: RefererNotAllowedMapError');
+      await new Promise((done) => setTimeout(done, 300));
+
+      expect(heard).toEqual([GOOGLE_REFUSALS.RefererNotAllowedMapError]);
+    });
+
+    it('gives the map on show its listener back after a key test', async () => {
+      const { loadGoogleMaps, probeKey } = await import('./gmaps.js');
+      stubGoogleMaps();
+      const heard = [];
+      await loadGoogleMaps('https://maps.googleapis.com/maps/api/js?key=k', { onRefused: (why) => heard.push(why) });
+      await probeKey('https://maps.googleapis.com/maps/api/js?key=k', { graceMs: 10 });
+
+      console.error('Google Maps JavaScript API error: OverQuotaMapError');
+      await new Promise((done) => setTimeout(done, 300));
+
+      expect(heard).toHaveLength(1);
+      expect(heard[0]).toMatch(/quota/);
+    });
+
+    it('says what to do for every refusal it knows, in one short line', async () => {
+      const { GOOGLE_REFUSALS } = await import('./gmaps.js');
+      for (const [code, reason] of Object.entries(GOOGLE_REFUSALS)) {
+        expect(code).toMatch(/MapError$/);
+        expect(reason.length).toBeLessThan(160);
+        expect(reason).not.toMatch(/[—.]$/);
+      }
     });
   });
 });

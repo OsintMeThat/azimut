@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { createFindState, estimateText, WHO, widenedText } from './find.svelte.js';
+import { brushFor, createFindState, durationText, estimateText, pacedSeconds, WHO, widenedText } from './find.svelte.js';
 import { destination } from '../../../lib/measure.js';
 
 const CAMERA = { lat: 16.9988, lon: 45.0938 };
@@ -102,6 +102,98 @@ describe('zones beside the area', () => {
     api.get = vi.fn(async () => ({ status: 'done', ask: { area: [[17, 45], [17, 45.1], [17.1, 45.1]], zones: [{ area: [[17, 45], [17, 45.01], [17.01, 45.01]], spacing: 250, out: false }] }, result: { places: [] } }));
     await find.openSearch('c1', 'zoned');
     expect(find.zones).toEqual([expect.objectContaining({ spacing: 250, out: false, points: [{ lat: 17, lon: 45 }, { lat: 17, lon: 45.01 }, { lat: 17.01, lon: 45.01 }] })]);
+  });
+});
+
+describe('more areas and the brush', () => {
+  const square = (lat, lon, d) => [
+    { lat: lat - d, lon: lon - d },
+    { lat: lat - d, lon: lon + d },
+    { lat: lat + d, lon: lon + d },
+    { lat: lat + d, lon: lon - d },
+  ];
+
+  it('draws another area corner by corner, one of fewer than three corners being none', () => {
+    const { find } = finder();
+    find.setArea(square(17, 45, 0.1));
+    find.drawMore();
+    expect(find.drawing).toBe('more');
+    for (const corner of square(17.5, 45.5, 0.05)) find.addCorner(corner);
+    expect(find.area).toHaveLength(4);
+    find.closeArea();
+    expect(find.drawing).toBeNull();
+    expect(find.areas).toHaveLength(1);
+    find.drawMore();
+    find.addCorner({ lat: 17, lon: 45 });
+    find.closeArea();
+    expect(find.areas).toHaveLength(1);
+    find.removeMore(find.areas[0].id);
+    expect(find.areas).toEqual([]);
+  });
+
+  it('paints strokes as wide as the brush, each over the ones before, the last taken back', () => {
+    const { find } = finder();
+    // a brush about a cell of the grid either side, until a size is picked
+    expect(brushFor(60)).toBe(50);
+    expect(brushFor(400)).toBe(500);
+    expect(brushFor(undefined)).toBe(250);
+    expect(find.brush).toEqual({ out: true, radius: 250 });
+    find.startBrush();
+    expect(find.drawing).toBe('brush');
+    find.addStroke({ path: [{ lat: 17, lon: 45 }, { lat: 17.01, lon: 45 }] });
+    find.setBrush({ out: false, radius: 1000 });
+    find.setBrush({ radius: 333 }); // no such size
+    find.addStroke({ path: [{ lat: 17, lon: 45 }] });
+    expect(find.strokes).toEqual([
+      { path: [{ lat: 17, lon: 45 }, { lat: 17.01, lon: 45 }], radius: 250, out: true },
+      { path: [{ lat: 17, lon: 45 }], radius: 1000, out: false },
+    ]);
+    find.addStroke({ path: [] });
+    expect(find.strokes).toHaveLength(2);
+    find.undoStroke();
+    expect(find.strokes).toHaveLength(1);
+    find.stopBrush();
+    expect(find.drawing).toBeNull();
+    find.clearStrokes();
+    expect(find.strokes).toEqual([]);
+  });
+
+  it('go with the preview, the search and the bench, say the setup changed, and come back with a search reopened', async () => {
+    const asked = [];
+    const post = vi.fn(async (url, body) => {
+      asked.push([url, body]);
+      if (url.endsWith('/preview')) return { spacing: 250, total: 1, kept: 1, kinds: {}, points: [] };
+      return { name: 'painted', status: 'queued', progress: { done: 0, total: 0 } };
+    });
+    const { find, api } = finder({ post });
+    find.setArea(square(17, 45, 0.1));
+    find.drawMore();
+    for (const corner of square(17.5, 45.5, 0.05)) find.addCorner(corner);
+    find.closeArea();
+    find.addStroke({ path: [{ lat: 17.02, lon: 45.02 }], radius: 500, out: true });
+    await find.preview();
+    expect(asked.at(-1)[1].areas).toEqual([square(17.5, 45.5, 0.05)]);
+    expect(asked.at(-1)[1].strokes).toEqual([{ path: [{ lat: 17.02, lon: 45.02 }], radius: 500, out: true }]);
+    const kept = structuredClone(find.snapshot);
+    expect(kept.areas).toEqual([{ points: square(17.5, 45.5, 0.05) }]);
+    const { find: again } = finder();
+    await again.restore(kept, 'c1');
+    expect(again.areas[0].points).toEqual(square(17.5, 45.5, 0.05));
+    expect(again.strokes).toEqual(find.strokes);
+    // a search kept as the case keeps it: corners as pairs
+    const ask = {
+      area: square(17, 45, 0.1).map(({ lat, lon }) => [lat, lon]),
+      areas: [square(17.5, 45.5, 0.05).map(({ lat, lon }) => [lat, lon])],
+      strokes: [{ path: [[17.02, 45.02]], radius: 500, out: true }],
+      who: { mode: 'ground', low: 1.7, high: 1.7 },
+    };
+    api.get = vi.fn(async () => ({ status: 'done', ask, result: { places: [] } }));
+    await find.openSearch('c1', 'painted');
+    expect(find.areas[0].points).toEqual(square(17.5, 45.5, 0.05));
+    expect(find.strokes).toEqual([{ path: [{ lat: 17.02, lon: 45.02 }], radius: 500, out: true }]);
+    expect(find.edited).toBe(false);
+    find.undoStroke();
+    expect(find.edited).toBe(true);
   });
 });
 
@@ -230,9 +322,9 @@ describe('who took it', () => {
     find.setSettings({ speed: 'reckless' });
     expect(find.settings.speed).toBe('gentle');
     find.setSettings({ speed: 'fast' });
-    expect(find.settings).toEqual({ spacing: 250, tolerance: 2, speed: 'fast' });
+    expect(find.settings).toEqual({ spacing: 250, tolerance: 2, speed: 'fast', effort: 'normal' });
     find.setSettings({ spacing: 333, tolerance: -1 });
-    expect(find.settings).toEqual({ spacing: 250, tolerance: 2, speed: 'fast' });
+    expect(find.settings).toEqual({ spacing: 250, tolerance: 2, speed: 'fast', effort: 'normal' });
     // grids as fine as 20 m, for a small area or a zone
     find.setSettings({ spacing: 20 });
     expect(find.settings.spacing).toBe(20);
@@ -331,6 +423,143 @@ describe('the search', () => {
     expect(body.facing).toEqual([]);
     expect(find.searching).toBe(true);
     find.closeSearch();
+  });
+
+  it('follows the points scored as it runs, adding only the new ones, and keeps a place confirmed', async () => {
+    vi.useFakeTimers();
+    try {
+      const point = (n, explained = 0.1 * n) => ({ lat: 17 + n / 100, lon: 45.1, explained, spacing: 250, gap: 0.2 });
+      const reads = [];
+      const record = { status: 'running', progress: { done: 3, total: 9 } };
+      const get = vi.fn(async (url) => {
+        if (!url.includes('/points')) return record;
+        reads.push(url);
+        // the first read is the whole run so far, the next ones what was scored since
+        return reads.length === 1 ? { started: 7, since: 0, points: [point(1), point(2)] } : { started: 7, since: 2, points: [point(3)] };
+      });
+      const post = vi.fn(async (url, body) => {
+        if (!url.endsWith('/found')) return { name: 'barry search', status: 'queued', progress: { done: 0, total: 0 } };
+        Object.assign(record, { status: 'stopping', found: body });
+        return { ...record };
+      });
+      const { find, api } = laid({ get, post });
+      find.setArea(area);
+      await find.start('c1');
+      expect(find.live).toEqual([]);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(find.live.map((p) => p.explained)).toEqual([0.1, 0.2]);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(reads.at(-1)).toBe('/api/cases/c1/horizon/finds/barry%20search/points?since=2&started=7');
+      expect(find.live).toHaveLength(3);
+      // looked from a point and confirmed it: kept on the search, which stops keeping what it found
+      await find.confirm({ lat: 17.03, lon: 45.1, heading: 80, view: 'Barry found' });
+      const [url, body] = api.post.mock.calls.at(-1);
+      expect(url).toBe('/api/cases/c1/horizon/finds/barry%20search/found');
+      expect(body).toEqual({ lat: 17.03, lon: 45.1, heading: 80, view: 'Barry found' });
+      expect(find.search.found.view).toBe('Barry found');
+      expect(find.searching).toBe(true);
+      // ended, the points held go: its record holds what it found
+      record.status = 'cancelled';
+      record.result = { partial: true, points: [point(1), point(2), point(3)], places: [point(3)] };
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(find.searching).toBe(false);
+      expect(find.live).toEqual([]);
+      expect(find.search.found.view).toBe('Barry found');
+      api.del = vi.fn(async () => ({ ...record, found: undefined }));
+      await find.unconfirm();
+      expect(find.search.found).toBeUndefined();
+      expect(api.del).toHaveBeenCalledWith('/api/cases/c1/horizon/finds/barry%20search/found');
+      find.closeSearch();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks with what the photo shows that rules points out, and keeps it', async () => {
+    const asked = [];
+    const post = vi.fn(async (url, body) => {
+      asked.push([url, body]);
+      return url.endsWith('/preview') ? { total: 0, kept: 0, kinds: {}, points: [] } : { name: 'barry search', status: 'queued', progress: { done: 0, total: 0 } };
+    });
+    const { find, overlay } = laid({ post });
+    find.setArea(area);
+    find.setWater(true);
+    find.toggleOver('below');
+    find.toggleOver('above');
+    expect(find.over).toBe('above');
+    find.toggleOver('above');
+    expect(find.over).toBeNull();
+    find.toggleOver('below');
+    overlay.marks = { lines: [0], inner: [], pairs: [], cuts: [], far: [], sea: [0], clear: [] };
+    await find.preview();
+    expect(asked.at(-1)[1]).toMatchObject({ water: true, over: 'below', sea: true });
+    await find.start('c1');
+    expect(asked.at(-1)[1]).toMatchObject({ water: true, over: 'below', sea: true });
+    expect(find.edited).toBe(false);
+    find.setWater(false);
+    expect(find.edited).toBe(true);
+    find.setWater(true);
+    const kept = structuredClone(find.snapshot);
+    expect(kept).toMatchObject({ water: 'lake', over: 'below' });
+    const { find: again } = laid();
+    await again.restore(kept, null);
+    expect([again.water, again.over]).toEqual(['lake', 'below']);
+    find.closeSearch();
+  });
+
+  it('asks for the sea alone without a line traced along it, and opens a search that said so as it was', async () => {
+    const asked = [];
+    const post = vi.fn(async (url, body) => {
+      asked.push([url, body]);
+      return url.endsWith('/preview') ? { total: 0, kept: 0, kinds: {}, points: [] } : { name: 'sea search', status: 'queued', progress: { done: 0, total: 0 } };
+    });
+    const { find } = laid({ post });
+    find.setArea(area);
+    find.setWater('sea');
+    await find.preview();
+    expect(asked.at(-1)[1]).toMatchObject({ sea: true, water: false });
+    find.setWater('river');
+    expect(find.water).toBe(false);
+    await find.preview();
+    expect(asked.at(-1)[1]).toMatchObject({ sea: false, water: false });
+    // a search kept with the sea said and no line along it opens with the sea said, one with the line with none
+    const kept = (marks) => ({ name: 'sea search', status: 'done', result: null, ask: { area: area.map((p) => [p.lat, p.lon]), sea: true, water: false, photo: { path: 'media/barry.png', marks } } });
+    const { find: again } = laid({ get: vi.fn(async () => kept(null)) });
+    await again.openSearch('c1', 'sea search');
+    expect(again.water).toBe('sea');
+    const { find: lined } = laid({ get: vi.fn(async () => kept({ sea: [0] })) });
+    await lined.openSearch('c1', 'sea search');
+    expect(lined.water).toBe(false);
+  });
+
+  it('times this machine’s pace once a case holds it, again only once what it depends on changes', async () => {
+    const paces = [];
+    const post = vi.fn(async (url, body) => {
+      if (url.endsWith('/pace')) {
+        paces.push(body);
+        return { seconds: 0.8, timed: 3, lanes: { fastest: 8, fast: 4, gentle: 1 }, lane_min: 200, full: 8, lane_power: 0.46, top: 5 };
+      }
+      return { points: 469, coarse: 400, spacing: 250, step: 0.5 };
+    });
+    const { find } = laid({ get: vi.fn(async () => []), post });
+    find.setArea(area);
+    await find.timePace();
+    expect(paces).toHaveLength(0); // no case holds the search yet
+    await find.refreshList('c1');
+    await find.timePace();
+    expect(post.mock.calls.at(-1)[0]).toBe('/api/cases/c1/horizon/finds/pace');
+    expect(find.pace).toMatchObject({ seconds: 0.8, lanes: 4 });
+    find.setSettings({ speed: 'gentle' });
+    expect(find.pace.lanes).toBe(1);
+    // the grid's density or speed leaves the pace as it was; which way the photo faces does not
+    find.setSettings({ effort: 'thorough' });
+    await find.timePace();
+    expect(paces).toHaveLength(1);
+    expect(paces[0].effort).toBe('normal');
+    find.toggleFacing('e');
+    await find.timePace();
+    expect(paces).toHaveLength(2);
+    expect(find.snapshot.effort).toBe('thorough');
   });
 
   it('asks with the directions ticked, and says the setup changed when they do', async () => {
@@ -577,7 +806,7 @@ describe('the search', () => {
     await find.openSearch('c1', 'barry search');
     expect(find.area).toHaveLength(4);
     expect(find.who).toEqual({ mode: 'drone', low: 20, high: 80 });
-    expect(find.settings).toEqual({ spacing: 250, tolerance: 2, speed: 'fast' });
+    expect(find.settings).toEqual({ spacing: 250, tolerance: 2, speed: 'fast', effort: 'normal' });
     expect(find.alignments[0].map.near).toEqual({ lat: 17, lon: 45.1 });
     expect(find.search.result.verdict).toBe('match');
     expect(find.searching).toBe(false);
@@ -622,7 +851,7 @@ describe('the setup kept on the bench', () => {
     expect(again.alignments).toHaveLength(1);
     expect(again.alignments[0].map).toEqual(find.alignments[0].map);
     expect(again.who).toEqual({ mode: 'drone', low: 20, high: 80 });
-    expect(again.settings).toEqual({ spacing: 250, tolerance: 2, speed: 'fast' });
+    expect(again.settings).toEqual({ spacing: 250, tolerance: 2, speed: 'fast', effort: 'normal' });
     expect(again.facing).toEqual(['sw']);
     expect(again.stands).toEqual(['valley']);
     expect(again.snapshot).toEqual(kept);
@@ -670,6 +899,16 @@ describe('the time a search takes', () => {
   it('shrinks with the share of the turn each point reads', () => {
     expect(estimateText({ points: 600, step: 0.5 })).toBe('600 points, about 3 min.');
     expect(estimateText({ points: 600, step: 0.5, turn: 0.25 })).toBe('600 points, about a minute.');
+  });
+
+  it('is this machine’s own once a few points are timed, several lanes faster on a large grid', () => {
+    const paced = { seconds: 0.5, lanes: 4, lane_min: 200, full: 8, lane_power: 0.46, top: 5 };
+    // 995 points as timed and 5 in full, on four lanes 4^0.46 (about 1.9) times as fast
+    expect(pacedSeconds(1000, paced)).toBeCloseTo((0.5 * (995 + 40)) / 4 ** 0.46, 6);
+    // a grid too small for lanes runs on one
+    expect(pacedSeconds(100, paced)).toBeCloseTo(0.5 * (95 + 40), 6);
+    expect(estimateText({ points: 6000, step: 0.5 }, paced)).toBe('6,000 points, about 27 min on this computer.');
+    expect(durationText(6000, 0.5, 1, { ...paced, lanes: 1 })).toBe('about 50 min');
   });
 });
 

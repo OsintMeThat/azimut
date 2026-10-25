@@ -27,6 +27,7 @@ from .. import config, errors
 from ..engine.analysis_models import Zone
 from ..engine import (
     cities,
+    cloudless,
     firms,
     firmspoints,
     geo,
@@ -627,6 +628,20 @@ def wayback_releases() -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"could not read the release list: {tiles.upstream_failure(exc)}") from exc
     return {"releases": [{"release": r.number, "date": r.date} for r in listed]}
+
+
+@router.get("/satellite/cloudless/years")
+def cloudless_years() -> dict[str, Any]:
+    """The years of EOX's Sentinel-2 cloudless a plate can be drawn on, newest first.
+
+    Each comes with the credit EOX asks for and the licence it is given under, so
+    a plate prints the right one. Answered from the app: no request leaves it.
+    """
+    return {"years": [
+        {"year": year, "attribution": cloudless.attribution(year), "licence": cloudless.licence(year),
+         "free": year in cloudless.FREE_FOR_ANY_USE}
+        for year in reversed(cloudless.YEARS)
+    ]}
 
 
 @router.get("/satellite/wayback/changes")

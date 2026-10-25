@@ -16,7 +16,7 @@ describe('what can be added to a plate', () => {
 
   it('finds an element by its name, the start of a word, or what it is often called', () => {
     expect(kinds(findAdds('arr'))).toEqual(['arrow', 'north']);
-    expect(kinds(findAdds('title'))).toEqual(['note', 'text']);
+    expect(kinds(findAdds('title'))).toEqual(['note', 'text', 'title-block', 'seq-title']);
     expect(kinds(findAdds('photo'))).toEqual(['image']);
     expect(kinds(findAdds('QR'))).toEqual(['qr']);
   });

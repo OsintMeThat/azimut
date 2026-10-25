@@ -70,6 +70,15 @@ describe('the moment a tracked layer is read at', () => {
     vi.useRealTimers();
   });
 
+  it('draws one tick a day, however many changes a day holds', () => {
+    const hundred = Array.from({ length: 100 }, (_, index) => `2026-10-${String(1 + (index % 20)).padStart(2, '0')}T${String(index % 24).padStart(2, '0')}:00`).sort();
+    show({ at: hundred[0], trail: true, since: null }, { moments: hundred, precision: 'time' });
+    const ticks = [...document.body.querySelectorAll('.tick')];
+    expect(ticks).toHaveLength(20);
+    expect(ticks[0].title).toBe('1 Oct 2026, 5 changes');
+    expect(document.body.querySelectorAll('.tick.on')).toHaveLength(1);
+  });
+
   it('steps from change to change, and goes back to today', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-25T12:00:00Z'));

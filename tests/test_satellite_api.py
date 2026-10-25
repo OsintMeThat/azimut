@@ -1523,7 +1523,7 @@ def test_a_refused_capture_key_is_never_echoed(client, keys_refused, monkeypatch
     )
 
     assert answer.status_code == 502
-    assert MAPBOX not in answer.text and "answered 401" in answer.text
+    assert MAPBOX not in answer.text and "refused the key or the account (401)" in answer.text
 
 
 def test_an_upstream_failure_names_the_code_and_not_the_address():
@@ -1531,9 +1531,39 @@ def test_an_upstream_failure_names_the_code_and_not_the_address():
 
     request = httpx.Request("GET", f"https://services.sentinel-hub.com/ogc/wfs/{INSTANCE}?x=1")
     refused = httpx.HTTPStatusError("x", request=request, response=httpx.Response(403, request=request))
-    assert tiles.upstream_failure(refused) == "the provider answered 403"
+    assert tiles.upstream_failure(refused) == "the service refused the key or the account (403)"
     assert tiles.upstream_failure(httpx.ConnectTimeout("t", request=request)) == "the provider did not answer in time"
     assert INSTANCE not in tiles.upstream_failure(ValueError(f"bad reply from {request.url}"))
+
+
+@pytest.mark.parametrize(
+    ("code", "said"),
+    [
+        (401, "the service refused the key or the account (401)"),
+        (429, "the service's allowance or rate limit is spent (429)"),
+        (503, "the service is failing (503); try again later"),
+        (400, "the service answered 400"),
+    ],
+)
+def test_a_copernicus_refusal_says_what_it_means_and_the_service_own_words(code, said):
+    # "answered 403" alone read like a bug in Azimut: a refused key or a spent
+    # allowance is something the analyst can go and fix, so it is said that way
+    import httpx
+
+    request = httpx.Request("GET", f"https://sh.dataspace.copernicus.eu/ogc/wfs/{INSTANCE}?x=1")
+    bare = httpx.HTTPStatusError("x", request=request, response=httpx.Response(code, request=request))
+    assert tiles.upstream_failure(bare) == said
+    # Sentinel Hub's own report follows, unwrapped, with nothing it was sent
+    report = (
+        '<ows:ExceptionReport><ows:Exception><ows:ExceptionText>Monthly processing units exhausted for '
+        f'https://sh.dataspace.copernicus.eu/ogc/wms/{INSTANCE}</ows:ExceptionText></ows:Exception></ows:ExceptionReport>'
+    )
+    reported = httpx.HTTPStatusError(
+        "x", request=request, response=httpx.Response(code, content=report.encode(), request=request)
+    )
+    told = tiles.upstream_failure(reported)
+    assert told.startswith(f"{said}: Monthly processing units exhausted")
+    assert INSTANCE not in told
 
 
 # -- the tile cache expires what nobody reads again (AUD-024) ----------------------

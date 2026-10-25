@@ -384,6 +384,33 @@ export function lifeRows(feature, cursor, mode = 'new') {
 }
 
 /**
+ * A long history in a few rows: the first date, the last, and those round the
+ * one the next edit goes to (or the one shown), the dates between folded into
+ * `{ fold, at }` rows that count them. A history of `limit` rows or fewer, or a
+ * run of one date, is never folded.
+ */
+export function foldRows(rows, { around = 1, limit = 7 } = {}) {
+  if (rows.length <= limit) return rows;
+  let focus = rows.findIndex((row) => row.ghost || row.editing);
+  if (focus < 0) focus = rows.findIndex((row) => row.current);
+  if (focus < 0) focus = rows.length - 1;
+  const kept = new Set([0, rows.length - 1]);
+  for (let index = focus - around; index <= focus + around; index += 1) kept.add(index);
+  const shown = [];
+  let run = [];
+  const close = () => {
+    if (run.length === 1) shown.push(run[0]);
+    else if (run.length) shown.push({ fold: run.length, at: run[0].at });
+    run = [];
+  };
+  rows.forEach((row, index) => {
+    if (kept.has(index)) { close(); shown.push(row); } else run.push(row);
+  });
+  close();
+  return shown;
+}
+
+/**
  * When a feature shows, as its sheet and its row in the list say it: `start`
  * ('' for always), `end` ('' while it is still there), `ends` saying whether the
  * end is the moment it is gone ('gone') or a plain feature's last day ('last'),

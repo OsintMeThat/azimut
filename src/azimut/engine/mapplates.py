@@ -144,6 +144,8 @@ class Page(Strict):
     guides: bool = False
     #: A PNG export leaves the paper see-through.
     transparent: bool = False
+    #: How much of the paper's grain shows over the page, 0 none.
+    grain: FiniteFloat = Field(default=0, ge=0, le=1)
 
 
 class Theme(Strict):
@@ -176,9 +178,12 @@ class FrameLayer(Strict):
     #: Marks drawn this many times their layer's size.
     icons: FiniteFloat = Field(default=1.0, ge=0.25, le=4)
     opacity: FiniteFloat = Field(default=1.0, ge=0.1, le=1)
-    #: This plate's own look for the layer, over the layer's: one colour, a dash.
+    #: This plate's own look for the layer, over the layer's: one colour, a dash, its areas' fill.
     colour: Hex | None = None
     dash: Literal["", "dashed", "dotted"] = ""
+    fill: Literal["", "solid", "hatch", "none"] = ""
+    #: What the layer stands for on this map (`roles.js`), which the legend says of its areas and lines.
+    role: Literal["", "held", "claimed", "contested", "line", "events", "context"] = ""
 
 
 class Tone(Strict):
@@ -200,12 +205,32 @@ class Plain(Strict):
     buildings: bool = True
     names: bool = True
     lang: Literal["latin", "local", "en", "fr", "ar", "ru", "uk"] = "latin"
-    #: How many place names it writes: fewer, as usual, or more.
+    #: How much it draws: fewer names and no small roads or buildings, as usual, or more of both.
     density: Literal["low", "normal", "high"] = "normal"
+    #: How far its colours come forward from the land's own, 1 as the style draws them.
+    presence: FiniteFloat = Field(default=1, ge=0.2, le=1)
+    #: The borders it draws: the countries, their regions, or the districts in them too.
+    admin: Literal["countries", "regions", "districts"] = "regions"
+    #: Fields, sand, ice and marsh; military ground; airfields with their runways; the road numbers.
+    cover: bool = True
+    military: bool = True
+    airfields: bool = True
+    refs: bool = True
     #: On a topographic ground: the heights tinted, the contour lines, the summits named.
     tints: bool = True
     contours: bool = True
     peaks: bool = True
+    #: The names of the ground the analyst took off this map, as it writes them.
+    hidden_names: list[Annotated[str, Field(max_length=120)]] = Field(default_factory=list, max_length=200)
+
+
+class Spotlight(Strict):
+    """One country lit on a map, the rest of the world darkened or faded toward the paper."""
+
+    #: The country, by its Natural Earth name.
+    country: Annotated[str, Field(min_length=1, max_length=80)]
+    dim: FiniteFloat = Field(default=0.55, ge=0.1, le=0.9)
+    mode: Literal["dark", "fade"] = "dark"
 
 
 class Grid(Strict):
@@ -265,6 +290,8 @@ class Step(Strict):
     duration: FiniteFloat = Field(default=3, ge=0.2, le=120)
     #: How the video comes to it: as the plate's transitions say, or cut straight in.
     transition: Literal["", "none"] = ""
+    #: How long the transition into it lasts; none, as long as the plate's transitions say.
+    transition_seconds: FiniteFloat | None = Field(default=None, ge=0.2, le=3)
 
 
 class Transitions(Strict):
@@ -307,12 +334,20 @@ class Element(Strict):
     basemap: Annotated[str, Field(max_length=80)] = "plain"
     #: A Wayback release, when the map is drawn on one.
     release: int | None = Field(default=None, gt=0, lt=1_000_000_000)
+    #: The year of Sentinel-2 cloudless a map is drawn on (`engine/cloudless.py`); none, the newest.
+    year: int | None = Field(default=None, ge=2016, le=2100)
+    #: The day of the Sentinel-2 pass a map is drawn on: one pass, never a mosaic of several.
+    acquired: Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None = None
+    #: The Sentinel-2 layer it is drawn in (`TRUE_COLOR` when empty), and the cloud ceiling its passes were picked under.
+    product: Annotated[str, Field(pattern=r"^$|^[A-Z0-9_]{1,40}$")] = ""
+    maxcc: int | None = Field(default=None, ge=0, le=100)
     overlays: list[Annotated[str, Field(max_length=40)]] = Field(default_factory=list, max_length=12)
     layers: list[FrameLayer] = Field(default_factory=list, max_length=MAX_LAYERS)
     grid: Literal["none", "latlon", "utm", "mgrs"] = "none"
     grid_style: Grid = Field(default_factory=Grid)
     tone: Tone = Field(default_factory=Tone)
     plain: Plain = Field(default_factory=Plain)
+    spotlight: Spotlight | None = None
     relief: FiniteFloat = Field(default=1, ge=0, le=2)
     #: A map drawn in 3D stands on the ground's heights, this many times as tall; 0 is flat.
     terrain: FiniteFloat = Field(default=0, ge=0, le=3)
@@ -320,6 +355,8 @@ class Element(Strict):
     ridges: bool = False
     # writing
     text: str = Field(default="", max_length=MAX_TEXT)
+    #: The text style it was last set in (`frontend/src/lib/plate/design.js`); none, set by hand.
+    role: Literal["", "kicker", "title", "dek", "body", "caption", "source", "badge", "figure"] = ""
     size: FiniteFloat = Field(default=10, ge=4, le=200)
     #: None: the weight the kind writes in (regular, a label semi-bold, words on the ground bold).
     weight: Literal[400, 600, 700] | None = None
@@ -381,6 +418,11 @@ class Element(Strict):
     mask: Mask = Field(default_factory=Mask)
     #: An inset's zoom.
     zoom: FiniteFloat | None = Field(default=None, ge=0, le=22)
+    #: An inset drawn as a small globe on the page, in place of a live map.
+    globe: bool = False
+    #: The credits the analyst took off a credits box, word for word: a layer's, a feature's.
+    #: What a ground's terms ask for is printed whatever this holds.
+    dropped: list[Annotated[str, Field(max_length=400)]] = Field(default_factory=list, max_length=40)
     columns: int = Field(default=1, ge=1, le=4)
     #: A legend's own names for its rows, by `layer/group`.
     names: dict[LegendKey, Annotated[str, Field(max_length=200)]] = Field(default_factory=dict, max_length=400)
@@ -443,6 +485,8 @@ MAX_MAPS = 8
 
 
 class PlateSpec(Strict):
+    #: The ready plate it was made from (`frontend/src/lib/plate/gallery.js`), so another paper lays it out again.
+    ready: Annotated[str, Field(pattern=r"^[a-z][a-z-]{0,39}$")] | None = None
     page: Page = Field(default_factory=Page)
     theme: Theme = Field(default_factory=Theme)
     time: Time = Field(default_factory=Time)
@@ -470,7 +514,8 @@ class PlateSpec(Strict):
             if element.step and element.step not in steps:
                 raise ValueError(f"the {element.kind} belongs to a step the plate does not hold")
         maps = {element.id for element in self.elements if element.kind == "map"}
-        if sum(1 for element in self.elements if element.kind in ("map", "inset")) > MAX_MAPS:
+        # a globe inset is drawn on the page, not as a live map
+        if sum(1 for element in self.elements if element.kind in ("map", "inset") and not element.globe) > MAX_MAPS:
             raise ValueError(f"a plate draws at most {MAX_MAPS} maps and insets")
         for element in self.elements:
             if element.of and element.of not in maps:
@@ -559,13 +604,14 @@ def template_of(spec: dict[str, Any]) -> dict[str, Any]:
         if element.get("kind") in ON_THE_GROUND or element.get("kind") == "video" or element.get("step"):
             continue
         kept = {key: value for key, value in element.items()
-                if key not in ("view", "layers", "names", "release", "onward", "until", "layer", "at", "to", "ref", "points",
+                if key not in ("view", "layers", "names", "release", "acquired", "dropped", "onward", "until", "layer", "at", "to", "ref", "points",
                                "step", "carry")}
         if kept.get("src") and kept["src"] != SIGNATURE:
             kept.pop("src")
         elements.append(kept)
     # how long a day holds in the video is the layout's; no day of its own is
     hold = (spec.get("time") or {}).get("hold")
+    # a template is the analyst's own layout from then on: it is laid out as kept, never as the ready plate was
     return {"page": spec.get("page", {}), "theme": spec.get("theme", {}), "time": {"hold": hold} if hold else {}, "elements": elements,
             **({"transitions": spec["transitions"]} if spec.get("transitions") else {})}
 

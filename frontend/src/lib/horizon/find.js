@@ -273,6 +273,107 @@ export function overText(over, far) {
 /** Why the search ruled a point out, when it did: land over a sky-only line (`over`, `over_far`). */
 const ruledTip = (p) => (Number.isFinite(p.over) ? `Ruled out: ${overText(p.over, p.over_far)}` : null);
 
+/** The answer of a search on show: once done, or what it had found when stopped (`partial`); null while it runs. */
+export function resultOf(search) {
+  return search?.result && (search.status === 'done' || search.status === 'cancelled') ? search.result : null;
+}
+
+/**
+ * What Find's map lays under the rest: the points a search scored once it ended and the setup on screen is still
+ * the one it searched (`scores`); while it runs, the grid with the points scored so far over it (`live`); else
+ * the grid the setup lays, before the search and once the setup changed (`grid`), none while the area is being drawn.
+ */
+export function mapCells({ search = null, edited = true, drawing = null, previewed = null, live = [] } = {}) {
+  const grid = drawing === 'area' ? [] : (previewed?.points ?? []);
+  const scored = resultOf(search)?.points ?? [];
+  if (scored.length && !edited) return { kind: 'scores', points: scored };
+  if (live.length) return { kind: 'live', points: grid, scored: live };
+  return { kind: 'grid', points: grid };
+}
+
+/** Why a point of the grid was left out before the search, as the map and the side say it (engine/ruleout.py REASONS). */
+export const RULED = {
+  nosea: 'No sea within its horizon',
+  nowater: 'No sea or lake within reach',
+  low: 'Lower than the land round it',
+  high: 'Higher than the land round it',
+};
+
+/** What the photo rules out of the grid read before the search (`preview.ruled`), a line each: "No sea…: 1,234 points (42%)". */
+export function ruledText(preview) {
+  const total = preview?.total ?? 0;
+  return Object.entries(preview?.ruled ?? {})
+    .filter(([reason, count]) => RULED[reason] && count > 0 && total > 0)
+    .map(([reason, count]) => `${RULED[reason]}: ${count.toLocaleString('en-US')} ${count === 1 ? 'point' : 'points'} left out (${Math.round((100 * count) / total)}%)`);
+}
+
+/** The hex lattice a search lays its grid on, as the app lays it (engine/finder.py HEX_ACROSS, HEX_ROWS). */
+const HEX_ACROSS = Math.sqrt(1.5);
+const HEX_ROWS = (HEX_ACROSS * Math.sqrt(3)) / 2;
+const round6 = (value) => Math.round(value * 1e6) / 1e6;
+
+/**
+ * The points of a search's grid `spacing` apart within `radius` metres of the path from `a` to `b`, `[lat, lon]`
+ * rounded as the app sends them: the lattice the app lays over ground the brush paints in, about the first
+ * area's first corner and set on the corner of its box (engine/finder.py `_lattice`), so the map shows them
+ * while the brush paints and the app's grid lays them where they were.
+ */
+export function latticeNear(area, spacing, a, b, radius) {
+  if (area.length < 3 || !(spacing > 0) || !(radius > 0)) return [];
+  const origin = area[0];
+  const corners = area.map((corner) => local(origin, corner));
+  const x0 = Math.min(...corners.map(({ x }) => x));
+  const y0 = Math.min(...corners.map(({ y }) => y));
+  const across = spacing * HEX_ACROSS;
+  const rows = spacing * HEX_ROWS;
+  const from = local(origin, a);
+  const to = local(origin, b);
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = dx * dx + dy * dy;
+  const out = [];
+  const firstRow = Math.floor((Math.min(from.y, to.y) - radius - y0) / rows - 0.5);
+  const lastRow = Math.ceil((Math.max(from.y, to.y) + radius - y0) / rows - 0.5);
+  for (let i = firstRow; i <= lastRow; i += 1) {
+    const y = y0 + rows / 2 + i * rows;
+    // every other row shifted by half, as the app lays them
+    const shift = Math.abs(i % 2) === 1 ? 0 : across / 2;
+    const firstColumn = Math.floor((Math.min(from.x, to.x) - radius - x0 - shift) / across);
+    const lastColumn = Math.ceil((Math.max(from.x, to.x) + radius - x0 - shift) / across);
+    for (let j = firstColumn; j <= lastColumn; j += 1) {
+      const x = x0 + shift + j * across;
+      const t = length > 0 ? Math.min(1, Math.max(0, ((x - from.x) * dx + (y - from.y) * dy) / length)) : 0;
+      if (Math.hypot(x - from.x - t * dx, y - from.y - t * dy) > radius) continue;
+      const at = fromLocal(origin, { x, y });
+      out.push([round6(at.lat), round6(at.lon)]);
+    }
+  }
+  return out;
+}
+
+/** Places a search lists apart, metres (engine/finder.py APART_M). */
+export const PLACES_APART_M = 1_500;
+
+/** The best points a running search has scored so far, `apart` metres from each other, the best first. */
+export function bestSoFar(points, apart = PLACES_APART_M, most = 3) {
+  const kept = [];
+  for (const point of [...points].sort((a, b) => b.explained - a.explained)) {
+    if (!(point.explained > 0)) break;
+    if (kept.every((one) => Math.hypot(...Object.values(local(one, point))) >= apart)) kept.push(point);
+    if (kept.length === most) break;
+  }
+  return kept;
+}
+
+/**
+ * Where the heat starts, what a point explains: the middle of the points scored, so the ramp is spent on the
+ * better half and the best stand out of it (a range from the worst laid most of a grid in its top colours).
+ */
+export function heatFloor(points) {
+  const scores = points.map((p) => p.explained).filter(Number.isFinite).sort((a, b) => a - b);
+  return scores.length ? Math.max(0, scores[Math.floor((scores.length - 1) / 2)]) : 0;
+}
+
 /**
  * Each scored point's heat on the map, `{ fill, opacity, tip }`: by what it explains, or, where no point
  * explains anything, by how far off the terrain the trace lies there (`gap`, degrees), so the places it lies
@@ -288,7 +389,7 @@ export function heatOf(points, best = Math.max(-1, ...points.map((p) => p.explai
       tip: ruledTip(p) ?? (Number.isFinite(p.gap) ? `Explains 0%: the trace lies ${p.gap.toFixed(1)}° off the terrain` : 'Explains 0%'),
     }));
   }
-  const low = Math.max(0, Math.min(...points.map((p) => p.explained)));
+  const low = heatFloor(points);
   return points.map((p) => ({
     ...heatStyle(p.explained, best, low),
     tip: ruledTip(p) ?? `Explains ${Math.round(Math.max(0, p.explained) * 100)}% of the trace`,
@@ -309,12 +410,14 @@ const corner = (p) => (Array.isArray(p) ? p : [p?.lat, p?.lon]).map((x) => Math.
 const farKey = (m) => JSON.stringify(m?.far ?? []);
 const zonesKey = (zones) =>
   (zones ?? []).map((zone) => [(zone.area ?? zone.points ?? []).map(corner), zone.out ? null : (zone.spacing ?? null), Boolean(zone.out)]);
+const areasKey = (areas) => (areas ?? []).map((one) => (one ?? []).map(corner));
+const strokesKey = (strokes) => (strokes ?? []).map((one) => [(one.path ?? []).map(corner), one.radius, one.out !== false]);
 const marksKey = (m) => (m && (m.inner?.length || m.pairs?.length || m.cuts?.length) ? JSON.stringify([m.inner ?? [], m.pairs ?? [], m.cuts ?? []]) : '');
 
 /**
  * Whether Find's setup now (`now`, shaped as the search asks it) is still the
- * one a search was asked with (`ask`, as the case keeps it): the same area,
- * who, grid, alignments, photo, trace and what is known of it. Anything that
+ * one a search was asked with (`ask`, as the case keeps it): the same areas,
+ * brush strokes, who, grid, alignments, photo, trace and what is known of it. Anything that
  * reads differently counts as changed, so work is never taken as kept when it is not.
  */
 export function sameAsk(ask, now) {
@@ -325,6 +428,7 @@ export function sameAsk(ask, now) {
     same((ask.area ?? []).map(corner), (now.area ?? []).map(corner)) &&
     same(ask.who ?? null, now.who ?? null) &&
     (ask.spacing ?? null) === (now.spacing ?? null) &&
+    (ask.effort ?? 'normal') === (now.effort ?? 'normal') &&
     same((ask.alignments ?? []).map(ends), (now.alignments ?? []).map(ends)) &&
     (ask.photo?.path ?? null) === (now.photo?.path ?? null) &&
     same(ask.photo?.strokes ?? [], now.photo?.strokes ?? []) &&
@@ -334,9 +438,14 @@ export function sameAsk(ask, now) {
     same(cleanStands(ask.stands), cleanStands(now.stands)) &&
     same([...(ask.view ?? [])].sort(), [...(now.view ?? [])].sort()) &&
     Boolean(ask.mirror) === Boolean(now.mirror) &&
+    Boolean(ask.water) === Boolean(now.water) &&
+    Boolean(ask.sea) === Boolean(now.sea) &&
+    (ask.over ?? null) === (now.over ?? null) &&
     Boolean(ask.round) === Boolean(now.round) &&
     farKey(ask.photo?.marks) === farKey(now.photo?.marks) &&
     same(zonesKey(ask.zones), zonesKey(now.zones)) &&
+    same(areasKey(ask.areas), areasKey(now.areas)) &&
+    same(strokesKey(ask.strokes), strokesKey(now.strokes)) &&
     same(ask.sun ?? null, now.sun ?? null)
   );
 }
@@ -349,6 +458,25 @@ export function searchedWhen(iso) {
   if (!iso || Number.isNaN(at.getTime())) return '';
   const pad = (n) => String(n).padStart(2, '0');
   return `${at.getDate()} ${MONTHS[at.getMonth()]} ${at.getFullYear()}, ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+/** How a kept search ended, in a few words (an api/horizon_finds.py row): a place the analyst confirmed first. */
+export function searchEnding(row) {
+  if (row.found) return 'place confirmed';
+  const best = row.best ? `best explains ${Math.round(row.best.explained * 100)}%` : '';
+  if (row.status === 'done') return best || 'nothing found';
+  if (row.status === 'running' || row.status === 'queued') return 'running';
+  if (row.status === 'stopping') return 'stopping';
+  if (row.status === 'cancelled') return best ? `stopped, ${best}` : 'stopped';
+  return row.status === 'failed' ? 'failed' : (row.status ?? '');
+}
+
+/** The colour a kept search's ending is said in: `found`, `done`, `running`, `failed`, or `quiet` for one stopped. */
+export function searchTone(row) {
+  if (row.found) return 'found';
+  if (row.status === 'done') return 'done';
+  if (['running', 'queued', 'stopping'].includes(row.status)) return 'running';
+  return row.status === 'failed' ? 'failed' : 'quiet';
 }
 
 /** An area as a search keeps it (`[lat, lon]` pairs) or as Find draws it (`{ lat, lon }`), drawn the second way. */

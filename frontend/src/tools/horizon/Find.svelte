@@ -16,6 +16,7 @@
   import FindMap from './FindMap.svelte';
   import FindSteps from './FindSteps.svelte';
   import SearchesMenu from './SearchesMenu.svelte';
+  import { PACE_WAIT_MS } from './state/find.svelte.js';
 
   let {
     find,
@@ -38,6 +39,8 @@
     onsearch = () => {},
     /** Asked to look from a place the search found. */
     onplace = () => {},
+    /** Asked to look again from the place the analyst confirmed (the search's `found`). */
+    onfound = () => {},
     /** Whether a case is open to keep searches in. */
     caseOpen = false,
     /** Asked to open or delete a search the case keeps, by name. */
@@ -49,6 +52,50 @@
 
   /** The place of the results the panel and the map light together, or -1. */
   let lit = $state(-1);
+
+  // What the setup reads off the app, asked here rather than in the steps, so a map with the steps folded
+  // away still shows the grid it would search. How large the search would be, a moment after what it
+  // depends on changes:
+  let estimateTimer = null;
+  $effect(() => {
+    void [find.area, find.areas, find.strokes, find.zones, find.settings, find.who, find.facing, find.stands, find.water, find.over, find.view, find.mirror, find.alignments.length, overlay.strokes, overlay.marks, overlay.hints, overlay.lens];
+    clearTimeout(estimateTimer);
+    estimateTimer = setTimeout(() => find.estimate(), 500);
+    return () => clearTimeout(estimateTimer);
+  });
+
+  // this machine's pace for the search as set up, timed a moment after the setup last changed, never while a search runs
+  let paceTimer = null;
+  $effect(() => {
+    void [find.area, find.who, find.facing, find.stands, find.view, find.mirror, find.round, find.sun, find.alignments.length, find.searching, overlay.strokes, overlay.marks, overlay.hints, overlay.lens];
+    clearTimeout(paceTimer);
+    paceTimer = setTimeout(() => find.timePace?.(), PACE_WAIT_MS);
+    return () => clearTimeout(paceTimer);
+  });
+
+  // how fine the heights are where the area lies, read once it is closed
+  $effect(() => {
+    void [find.area, find.drawing];
+    find.readDetail();
+  });
+
+  // the headings the compass and the sun leave, read again a moment after either or the area changes
+  let sectorsTimer = null;
+  $effect(() => {
+    void [find.area, find.drawing, find.facing, find.sun];
+    clearTimeout(sectorsTimer);
+    sectorsTimer = setTimeout(() => find.readSectors?.(), 500);
+    return () => clearTimeout(sectorsTimer);
+  });
+
+  // the grid and the ground under it, read again a moment after the area, who or the ground ticked change
+  let previewTimer = null;
+  $effect(() => {
+    void [find.area, find.areas, find.strokes, find.zones, find.drawing, find.who, find.settings, find.stands, find.water, find.over, find.alignments.length, overlay.marks];
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => find.preview?.(), 600);
+    return () => clearTimeout(previewTimer);
+  });
 
   const KEY = 'azimut.find.layout';
   const SHARE_MIN = 0.2;
@@ -110,6 +157,7 @@
   function onKey(event) {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
     if (find.pending) find.cancelAlignment();
+    else if (find.drawing === 'brush') find.stopBrush();
     else if (big) big = null;
     else return;
     event.stopPropagation();
@@ -124,6 +172,11 @@
       return { on: find.step?.on, text: `${find.pending.step + 1} of 4 · ${find.step?.text}`, act: 'Cancel', run: () => find.cancelAlignment() };
     }
     if (find.drawing === 'area') return { on: 'map', text: 'Click each corner of the area on the map. Press the first one, or Enter, to close it.', act: 'Done', run: () => find.closeArea() };
+    if (find.drawing === 'more') return { on: 'map', text: 'Click each corner of another area. Press the first one, or Enter, to close it.', act: 'Done', run: () => find.closeArea() };
+    if (find.drawing === 'brush') {
+      const text = find.brush.out ? 'Brush over points to turn them off. Alt turns them on.' : 'Brush over points to turn them back on. Alt turns them off.';
+      return { on: 'map', text: `${text} Ctrl+Z undoes a stroke.`, act: 'Done', run: () => find.stopBrush() };
+    }
     return null;
   });
 </script>
@@ -201,7 +254,7 @@
     {/if}
     <section class="find-col map" class:hidden={big === 'photo'} class:big={big === 'map'} aria-label="Map and the area">
       {#if home}
-        <FindMap {imagery} {overlays} {layers} {find} {home} imperial={units === 'imperial'} {onstand} {onplace} bind:lit />
+        <FindMap {imagery} {overlays} {layers} {find} {home} imperial={units === 'imperial'} {onstand} {onplace} {onfound} bind:lit />
       {/if}
       {@render guideIn('map')}
       <button
@@ -223,6 +276,7 @@
           {onstand}
           {onsearch}
           {onplace}
+          {onfound}
           bind:lit
         />
       </aside>

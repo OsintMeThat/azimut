@@ -7,6 +7,7 @@
  * export draws it again at print resolution, so a line is the same weight on the
  * screen and on the paper.
  */
+import { mutedOf } from './design.js';
 
 export const PX_PER_MM = 96 / 25.4;
 /** Points to millimetres: text sizes are set in points, as on paper. */
@@ -71,6 +72,13 @@ export const THEMES = {
   // the heights in colour and the contour lines of a survey's map, and the khaki of a staff map
   survey: { label: 'Survey', theme: { paper: '#ffffff', ink: '#2b2a26', accent: '#b4232a', font: 'condensed' }, ground: 'plain-topo' },
   staff: { label: 'Staff', theme: { paper: '#efe9d4', ink: '#24221a', accent: '#8a1c1c', font: 'barlow' }, ground: 'plain-staff' },
+  // the editorial looks: a newspaper's page, a situation room's screen, a humanitarian report, an atlas
+  newsroom: { label: 'Newsroom', theme: { paper: '#f7f4ee', ink: '#1b1a17', accent: '#c8102e', font: 'serif' }, ground: 'plain-news' },
+  situation: { label: 'Situation room', theme: { paper: '#0e1217', ink: '#e7eaee', accent: '#ff4b3e', font: 'condensed' }, ground: 'plain-dark' },
+  tactical: { label: 'Tactical', theme: { paper: '#0b1520', ink: '#d6f2ff', accent: '#4fd1ff', font: 'plexmono' }, ground: 'plain-tactical' },
+  humanitarian: { label: 'Humanitarian', theme: { paper: '#ffffff', ink: '#1f2d3a', accent: '#0a77c2', font: 'inter' }, ground: 'plain-humanitarian' },
+  atlas: { label: 'Atlas', theme: { paper: '#fbfaf6', ink: '#2b2a26', accent: '#8a1c1c', font: 'serif' }, ground: 'plain-relief' },
+  brief: { label: 'Brief', theme: { paper: '#ffffff', ink: '#111418', accent: '#d4351c', font: 'barlow' }, ground: 'plain-grey' },
 };
 
 /**
@@ -91,13 +99,14 @@ export function inLook(spec, id) {
         return { ...element, ...(plain ? { basemap: preset.ground, plain: { ...(element.plain ?? {}), colours: { ...(preset.plain ?? {}) } } } : {}),
           tone: { ...NEUTRAL_TONE, ...(preset.tone ?? {}) } };
       }
-      // what wore the page's paper, ink or accent wears the new ones; a colour of its own stays
+      // what wore the page's paper, ink, accent or muted ink wears the new ones; a colour of its own stays
       const swap = (hex) => {
         const was = String(hex ?? '').toLowerCase();
         if (!was) return hex;
         if (was === String(spec.theme.paper).toLowerCase()) return preset.theme.paper;
         if (was === String(spec.theme.ink).toLowerCase()) return preset.theme.ink;
         if (was === String(spec.theme.accent).toLowerCase()) return preset.theme.accent;
+        if (was === mutedOf(spec.theme).toLowerCase()) return mutedOf(preset.theme);
         return hex;
       };
       if (element.kind === 'qr') return element;
@@ -124,8 +133,8 @@ export const MAP_KINDS = ['map', 'inset'];
 export const MAX_MAPS = 8;
 /** The words that say so, wherever a map would be one too many. */
 export const TOO_MANY_MAPS = `A plate holds ${MAX_MAPS} maps and insets at most: the browser draws only so many at once`;
-/** How many maps and insets `elements` hold. */
-export const mapCount = (elements) => elements.filter((element) => MAP_KINDS.includes(element.kind)).length;
+/** How many maps and insets `elements` hold; a globe inset is drawn on the page, not as a live map, and is not one. */
+export const mapCount = (elements) => elements.filter((element) => MAP_KINDS.includes(element.kind) && !element.globe).length;
 
 /** The view an inset is drawn at over its map's view `of`: the same centre, its own zoom or four and a half levels out, north up. */
 export const insetView = (inset, of) => ({ lat: of.lat, lon: of.lon, zoom: inset.zoom ?? Math.max(0, of.zoom - 4.5), bearing: 0 });
@@ -422,6 +431,9 @@ export function templateOf(spec) {
 /** A picture's `src` naming the signature badge set in Settings. */
 export const SIGNATURE = '@signature';
 
+/** Where a template's map looks over `view`: there, or two and a half levels closer for a detail of another map. */
+const framedFor = (element, view) => (element.of ? { ...view, zoom: Math.min(20, view.zoom + 2.5) } : { ...view });
+
 /**
  * A new plate from a template: its maps look where `view` says and draw `layers`.
  * An element reading a map the template does not hold is left out.
@@ -429,6 +441,7 @@ export const SIGNATURE = '@signature';
 export function fromTemplate(data, { view, layers = [] } = {}) {
   const maps = new Set(data.elements.filter((element) => element.kind === 'map').map((element) => element.id));
   return {
+    ...(data.ready ? { ready: data.ready } : {}),
     page: { ...data.page },
     theme: { ...DEFAULT_THEME, ...data.theme },
     time: { at: null, trail: true, since: null, window: null, ...(data.time?.hold ? { hold: data.time.hold } : {}) },
@@ -436,7 +449,7 @@ export function fromTemplate(data, { view, layers = [] } = {}) {
     elements: mapsFirst(data.elements
       .filter((element) => !element.of || maps.has(element.of))
       .map((element) => element.kind === 'map'
-        ? { ...element, view: { ...(view ?? { lat: 20, lon: 0, zoom: 1, bearing: 0 }) },
+        ? { ...element, view: framedFor(element, view ?? { lat: 20, lon: 0, zoom: 1, bearing: 0 }),
           layers: layers.map((name) => ({ name, hidden: [], stroke: 1, icons: 1 })) }
         : { ...element })),
   };
@@ -457,25 +470,67 @@ export function longDay(moment) {
  * The words a plate's text stands for: `{date}` the day the plate is drawn on, else
  * the day its layers last changed (`updated`), else today; `{today}`, `{case}`,
  * `{title}`, `{updated}`, `{scale}` (the main map's, as `1:25,000`), `{imagery}` (the
- * date of the Wayback release the main map shows) and `{handle}` (the signature's,
- * from Settings).
+ * date of the Wayback release the main map shows), `{handle}` (the signature's, from
+ * Settings), `{coords}` and `{mgrs}` (the main map's middle, as the app writes
+ * coordinates and as MGRS), `{from}` and `{to}` (the first and last day a played plate
+ * shows), and `{count}` (what the main map shows in its frame on the plate's day),
+ * `{count:destroyed}` or `{count:damaged}` (of that state) and `{count:<group>}` (of a
+ * group), each counted by `count(key)`.
  */
-export function fillTokens(text, { date = null, updated = '', imagery = '', caseName = '', title = '', scale = '', handle = '', today = new Date() } = {}) {
+export function fillTokens(text, { date = null, updated = '', imagery = '', caseName = '', title = '', scale = '', handle = '', coords = '', mgrs = '',
+  from = '', to = '', count = null, today = new Date() } = {}) {
   // today on this computer's calendar, not on UTC's, which is still yesterday after midnight east of it
   const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  return String(text ?? '')
-    .replaceAll('{date}', longDay(date) || longDay(updated) || longDay(iso))
-    .replaceAll('{today}', longDay(iso))
-    .replaceAll('{updated}', longDay(updated) || longDay(iso))
-    .replaceAll('{case}', caseName)
-    .replaceAll('{title}', title)
-    .replaceAll('{scale}', scale)
-    .replaceAll('{imagery}', imagery)
-    .replaceAll('{handle}', handle);
+  // a line holding a word that fills in empty (no handle set, no imagery dated) drops the separators it leaves at its ends
+  const empty = Object.entries({ '{handle}': handle, '{imagery}': imagery, '{coords}': coords, '{mgrs}': mgrs, '{from}': from, '{to}': to,
+    '{case}': caseName, '{title}': title, '{scale}': scale }).filter(([, value]) => !value).map(([token]) => token);
+  return String(text ?? '').split('\n').map((line) => (empty.some((token) => line.includes(token)) ? tidied(fill(line)) : fill(line))).join('\n');
+
+  function fill(line) {
+    return line
+      .replaceAll('{date}', longDay(date) || longDay(updated) || longDay(iso))
+      .replaceAll('{today}', longDay(iso))
+      .replaceAll('{updated}', longDay(updated) || longDay(iso))
+      .replaceAll('{case}', caseName)
+      .replaceAll('{title}', title)
+      .replaceAll('{scale}', scale)
+      .replaceAll('{imagery}', imagery)
+      .replaceAll('{handle}', handle)
+      .replaceAll('{coords}', coords)
+      .replaceAll('{mgrs}', mgrs)
+      .replaceAll('{from}', longDay(from))
+      .replaceAll('{to}', longDay(to))
+      .replace(/\{count(?::([^{}]{1,60}))?\}/g, (_, key = '') => String(count?.(key.trim()) ?? 0));
+  }
+}
+
+/** A line with the separators a missing word left at its ends, or doubled in its middle, taken away. */
+function tidied(line) {
+  return line.replace(/\s*([·,|/–—-]\s*){2,}/g, ' · ').replace(/\s+[,;:](?=\s)/g, '').replace(/^[\s·,|/–—-]+/, '')
+    .replace(/[\s·,|/–—:-]+$/, '').replace(/\s+\./g, '.');
 }
 
 /** The words `fillTokens` knows, as the inspector lists them. */
-export const TOKENS = ['{date}', '{today}', '{updated}', '{case}', '{title}', '{scale}', '{imagery}', '{handle}'];
+export const TOKENS = ['{date}', '{today}', '{updated}', '{case}', '{title}', '{scale}', '{imagery}', '{handle}', '{coords}', '{mgrs}', '{from}', '{to}',
+  '{count}', '{count:destroyed}'];
+
+/** What each of the words says once filled in, as a hover on it says. */
+export const TOKEN_SAID = {
+  '{date}': 'The plate\'s day, else the day its layers last changed',
+  '{today}': 'Today',
+  '{updated}': 'The day the plate\'s layers last changed',
+  '{case}': 'The case\'s name',
+  '{title}': 'The plate\'s name',
+  '{scale}': 'The main map\'s scale, as 1:25,000',
+  '{imagery}': 'The date of the imagery the main map shows',
+  '{handle}': 'Your handle, set in Settings › Publishing',
+  '{coords}': 'The main map\'s middle, as the app writes coordinates',
+  '{mgrs}': 'The main map\'s middle, in MGRS',
+  '{from}': 'The first day the plate plays',
+  '{to}': 'The last day the plate plays',
+  '{count}': 'How many features the main map shows; {count:<group>} counts one group',
+  '{count:destroyed}': 'How many it shows destroyed; {count:damaged} counts the damaged',
+};
 
 // -- the days an annotation is shown on ------------------------------------------------
 
@@ -647,6 +702,26 @@ export function withoutStep(spec, id) {
   const framing = Object.fromEntries(Object.entries(spec.framing ?? {}).filter(([key]) => key !== id));
   return { ...spec, steps, framing, elements: spec.elements.filter((element) => element.step !== id),
     time: { ...spec.time, step: spec.time?.step === id ? null : spec.time?.step ?? null } };
+}
+
+/**
+ * The plate with a copy of the step `id` of the day `at` played right after it: its
+ * name, its seconds and how it comes in, what stands on it (each copied with an id of
+ * its own, its group kept together) and how it frames the maps.
+ * `{ steps, framing, elements, step }`, or null when the day holds no such step.
+ */
+export function duplicatedStep(spec, at, id) {
+  const list = stepsOf(spec, at);
+  const source = list.find((item) => item.id === id);
+  if (!source || list.length >= MAX_STEPS) return null;
+  const step = { ...source, id: newId('s'), ...(source.name ? { name: `${source.name}, again` } : {}) };
+  const { steps } = addStep(spec, at, id, step);
+  const groups = new Map();
+  const regroup = (group) => (group ? (groups.get(group) ?? groups.set(group, newId('g')).get(group)) : group);
+  const copies = spec.elements.filter((element) => element.step === id)
+    .map((element) => ({ ...JSON.parse(JSON.stringify(element)), id: newId(element.kind), step: step.id, group: regroup(element.group) }));
+  const framing = { ...(spec.framing ?? {}), ...(spec.framing?.[id] ? { [step.id]: { ...spec.framing[id] } } : {}) };
+  return { steps, framing, elements: mapsFirst([...spec.elements, ...copies]), step: step.id };
 }
 
 /** The day's steps with `id` moved to `index`. */

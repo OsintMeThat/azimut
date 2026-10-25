@@ -270,6 +270,7 @@ export const uiState = $state({
   openPlate: null, // map plate name to reopen in the Map plate tool
   openPlateTemplate: null, // map template id to edit in the Map plate tool, from Settings
   newPlate: false, // the Map asked for a plate of what it shows: the Map plate tool opens one
+  editLayer: null, // { name, title, view }: a plate made a layer to draw in; the Map opens it for editing there
   focusMode: false, // a tool gave its page the whole window (the plate's focus): the app's bars and rail step aside
   openAnalyzer: null, // saved Detect item stem to reopen without loading imagery
   // Entity id the Board should open Details on. The graph-only types — a person,

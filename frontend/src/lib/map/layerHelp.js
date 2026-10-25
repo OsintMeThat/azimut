@@ -35,9 +35,11 @@ export const LAYER_HELP = {
   facing: 'Where it points, set by the ring round it on the map',
   position: 'Type or paste another position to move it there',
   sources: 'The addresses it rests on, each opened in a tab of its own',
-  origin: 'Who found where it stands',
+  origin: 'Off when someone else found where it stands, drawn with a dashed rim',
   credit: 'Printed in the credits of a plate that draws it',
   note: 'What it shows and what it rests on',
+  evidence: 'The case item it follows, opened from its picture',
+  details: 'Its group, its day and where it stands',
   toGroup: 'Back to what its group says',
   // a group's settings
   groupName: 'Its name in the list and the legend',
@@ -64,12 +66,6 @@ export const CONFIDENCE_CHOICES = [
   ['confirmed', 'Sure', 'Confirmed'],
   ['probable', 'Likely', 'Probable: a line is dashed, a marker fainter'],
   ['claimed', 'Claimed', 'Claimed: a line is dotted, a marker fainter'],
-];
-
-/** Who geolocated it, as the sheet offers it: `[value, label, hover]`. */
-export const ORIGIN_CHOICES = [
-  ['', 'Me', 'Geolocated by me'],
-  ['external', 'Others', 'Geolocated by someone else, drawn with a dashed rim'],
 ];
 
 /**

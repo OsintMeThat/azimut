@@ -5,7 +5,8 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from azimut.engine import finder, horizon, horizon_finds, skymatch, terrain, workqueue
+from azimut.api import horizon_finds as horizon_finds_api
+from azimut.engine import finder, horizon, horizon_finds, landform, skymatch, terrain, workqueue
 from fakerelief import Peak, Relief, offset
 from skyturns import HALF, trace_on
 
@@ -227,6 +228,58 @@ def test_the_turn_is_marched_as_wide_as_the_trace_spans():
     assert finder.half_span(wide) == pytest.approx(np.degrees(np.arctan(4.0 * np.tan(np.radians(20.0)))))
 
 
+def test_several_areas_share_one_grid_and_the_spacing_counts_them_all():
+    first = _square(CAMERA, 2_000.0)
+    # one beside it and one overlapping it: every point is laid once
+    beside = _square(offset(*CAMERA, 90.0, 6_000.0), 1_000.0)
+    over = _square(offset(*CAMERA, 0.0, 1_500.0), 1_000.0)
+    plan = finder.Plan(area=first, spacing=500.0, areas=(beside, over))
+    lat, lon = finder.grid(plan, 500.0)
+    assert finder.inside(beside, lat, lon).sum() > 0
+    assert finder.within(plan, lat, lon).all()
+    assert len({(round(a, 6), round(o, 6)) for a, o in zip(lat, lon)}) == lat.size
+    assert lat.size > finder.grid(finder.Plan(area=first, spacing=500.0), 500.0)[0].size
+    # Auto lays its points over every area: wider than over the first alone
+    assert finder.searched_m2(plan) > finder.area_m2(first)
+    assert finder.asked_spacing(replace(plan, spacing=None)) >= finder.asked_spacing(finder.Plan(area=first))
+    # one area alone is laid as it always was
+    alone = finder.Plan(area=first, spacing=500.0)
+    assert np.array_equal(np.column_stack(finder.grid(alone, 500.0)), np.column_stack(finder._polygon_grid(first, 500.0)))
+
+
+def test_the_brush_paints_points_out_and_back_in_each_stroke_over_the_last():
+    area = _square(CAMERA, 2_000.0)
+    across = [offset(*CAMERA, 270.0, 2_500.0), offset(*CAMERA, 90.0, 2_500.0)]
+    out = finder.Stroke(path=across, radius=400.0)
+    plan = finder.Plan(area=area, spacing=250.0, strokes=(out,))
+    lat, lon = finder.grid(plan, 250.0)
+    plain = finder.grid(finder.Plan(area=area, spacing=250.0), 250.0)
+    assert lat.size < plain[0].size
+    assert not finder.near_path(across, 400.0, lat, lon).any()
+    # painted back over the middle: the middle comes back, the rest of the band stays out
+    back = finder.Stroke(path=[offset(*CAMERA, 270.0, 300.0), offset(*CAMERA, 90.0, 300.0)], radius=200.0, out=False)
+    again = finder.grid(replace(plan, strokes=(out, back)), 250.0)
+    middle = finder.near_path(back.path, 200.0, *again)
+    assert middle.sum() > 0 and again[0].size < plain[0].size
+    # painted in beyond every area: that ground is searched too
+    far = finder.Stroke(path=[offset(*CAMERA, 0.0, 5_000.0), offset(*CAMERA, 0.0, 6_000.0)], radius=300.0, out=False)
+    beyond = finder.grid(finder.Plan(area=area, spacing=250.0, strokes=(far,)), 250.0)
+    assert finder.near_path(far.path, 300.0, *beyond).sum() > 0
+    # ground painted in past the area's box leaves the area's own points where they were: the lattice holds
+    # to the area's corner, so the map lays the new ones beside them while the brush paints
+    south = finder.Stroke(path=[offset(*CAMERA, 200.0, 2_400.0), offset(*CAMERA, 250.0, 3_500.0)], radius=300.0, out=False)
+    grown = finder.grid(finder.Plan(area=area, spacing=250.0, strokes=(far, south)), 250.0)
+    held = {(round(a, 6), round(o, 6)) for a, o in zip(*grown)}
+    assert {(round(a, 6), round(o, 6)) for a, o in zip(*plain)} <= held
+    # the preview keeps what the brush left out on the map, greyed and said painted, the ground under it after
+    shown = finder.preview(plan)
+    painted = [point for point in shown["points"] if point[2] == finder.PAINTED]
+    assert painted and not any(point[3] for point in painted)
+    assert all(point[4] in landform.STANDS for point in painted)
+    assert all(len(point) == 4 for point in shown["points"] if point[2] != finder.PAINTED)
+    assert shown["total"] == plain[0].size and shown["kept"] == lat.size
+
+
 def test_zones_lay_their_own_grid_and_zones_left_out_are_never_searched():
     area = _square(CAMERA, 3_000.0)
     finer = finder.Zone(area=_square(offset(*CAMERA, 45.0, 1_000.0), 500.0), spacing=100.0)
@@ -331,11 +384,28 @@ def test_a_fast_search_takes_the_cores_the_machine_can_spare(monkeypatch):
     monkeypatch.setattr("os.cpu_count", lambda: 16)
     monkeypatch.setattr(horizon_finds, "_available_memory", lambda: 16e9)
     assert horizon_finds.lanes_for("fast") == horizon_finds.LANES_MAX
+    # the fastest takes one process for each of the machine's own cores, as the memory allows
+    monkeypatch.setattr(horizon_finds, "cores", lambda: 8)
+    assert horizon_finds.lanes_for("fastest") == 8
+    monkeypatch.setattr(horizon_finds, "_available_memory", lambda: 4e9)
+    assert horizon_finds.lanes_for("fastest") == 5
     monkeypatch.setattr(horizon_finds, "_available_memory", lambda: 2.5e9)
     assert horizon_finds.lanes_for("fast") == 1
     monkeypatch.setattr(horizon_finds, "_available_memory", lambda: None)
     monkeypatch.setattr("os.cpu_count", lambda: 4)
     assert horizon_finds.lanes_for(None) == 2
+
+
+def test_the_machine_s_own_cores_are_counted_not_their_threads(monkeypatch, tmp_path):
+    # four cores of two threads each, as Linux lists them
+    listed = tmp_path / "cpuinfo"
+    listed.write_text("".join(f"processor\t: {n}\nphysical id\t: 0\ncore id\t\t: {n % 4}\n\n" for n in range(8)), encoding="ascii")
+    assert horizon_finds.cores(str(listed)) == 4
+    # where they are not listed, half the threads
+    monkeypatch.setattr("os.cpu_count", lambda: 12)
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    assert horizon_finds.cores(str(tmp_path / "none")) == 6
+    horizon_finds.cores.cache_clear()
 
 
 def test_a_line_along_the_sea_lies_on_the_sea_s_horizon(monkeypatch):
@@ -423,8 +493,27 @@ def test_a_line_with_only_sky_above_is_read_as_far_as_the_photo_is_said_to_see(m
 
 def test_a_search_stops_when_asked():
     plan = finder.Plan(area=_square(CAMERA, 1_500.0), reach=REACH, spacing=500.0, fine=500.0)
-    with pytest.raises(finder.Cancelled):
+    with pytest.raises(finder.Cancelled) as stopped:
         finder.search(plan, _photo(), cancelled=lambda: True)
+    assert stopped.value.result["points"] == [] and stopped.value.result["partial"]
+
+
+def test_a_search_tells_each_point_and_stopped_keeps_what_it_found():
+    plan = finder.Plan(area=_square(offset(*CAMERA, 60.0, 600.0), 1_500.0), reach=REACH, spacing=500.0, fine=500.0)
+    told: list[dict] = []
+    whole = finder.search(plan, _photo(), scored_one=told.append)
+    # every point the answer maps was told as it was scored, as the map draws it
+    heard = [finder.shown(p) for p in told if p["explained"] >= 0]
+    assert all(point in heard for point in whole["points"]) and len(told) >= len(whole["points"])
+    # stopped part way, it keeps the points scored by then and its best places among them
+    count = len(whole["points"])
+    again: list[dict] = []
+    with pytest.raises(finder.Cancelled) as stopped:
+        finder.search(plan, _photo(), scored_one=again.append, cancelled=lambda: len(again) >= count // 2)
+    partial = stopped.value.result
+    assert partial["partial"] and 0 < len(partial["points"]) < count
+    assert partial["places"][0]["explained"] == max(p["explained"] for p in partial["points"])
+    assert len({(p["lat"], p["lon"]) for p in partial["points"]}) == len(partial["points"])
 
 
 def test_two_places_about_as_good_and_apart_are_ambiguous():
@@ -562,6 +651,104 @@ def test_a_search_is_kept_in_the_case_runs_and_lists(client):
     deleted = client.delete(f"/api/cases/{case_id}/horizon/finds/{name}")
     assert deleted.status_code == 200, deleted.text
     assert client.get(f"/api/cases/{case_id}/horizon/finds/{name}").status_code == 404
+
+
+def test_a_running_search_fills_the_map_in_and_a_place_confirmed_stops_it(client, monkeypatch):
+    from azimut.api.cases import get_case
+
+    case_id = client.post("/api/cases", json={"name": "Found"}).json()["id"]
+    case = get_case(case_id)
+    # the search is run here, not on the queue, so it can be stopped at a known point
+    monkeypatch.setattr(workqueue, "enqueue", lambda *args, **kwargs: None)
+    name = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask()).json()["name"]
+    monkeypatch.setattr(horizon_finds, "WRITE_EVERY", 0.0)
+    held: list[int] = []
+    real = finder.search
+
+    def search(plan, trace, **told):
+        def scored_one(point):
+            told["scored_one"](point)
+            answer = client.get(f"/api/cases/{case_id}/horizon/finds/{name}/points?since=0").json()
+            held.append(len(answer["points"]))
+            if len(held) == 6:
+                # the analyst looked from a point as it ran and confirmed it
+                sure = client.post(f"/api/cases/{case_id}/horizon/finds/{name}/found",
+                                   json={"lat": point["lat"], "lon": point["lon"], "heading": 80.0, "view": "Ridge found"})
+                assert sure.status_code == 200, sure.text
+                assert sure.json()["status"] == "stopping"
+
+        return real(plan, trace, **{**told, "scored_one": scored_one})
+
+    monkeypatch.setattr(finder, "search", search)
+    with pytest.raises(workqueue.JobCancelled):
+        horizon_finds.run(case, {"payload": {"name": name}})
+    # the map filled in as the points were scored, and stops being held once the search ends
+    assert held[0] >= 0 and held == sorted(held) and held[-1] > 0
+    assert client.get(f"/api/cases/{case_id}/horizon/finds/{name}/points").json() == {"started": None, "since": 0, "points": []}
+    record = client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()
+    # stopped, it keeps what it found by then, and the place confirmed
+    assert record["status"] == "cancelled" and record["result"]["partial"]
+    assert 0 < len(record["result"]["points"]) <= held[-1] + 1
+    assert record["found"]["view"] == "Ridge found" and record["found"]["heading"] == 80.0
+    [row] = client.get(f"/api/cases/{case_id}/horizon/finds").json()
+    assert row["found"] and row["status"] == "cancelled" and row["best"]
+    # taken back, the search is as it ended
+    back = client.delete(f"/api/cases/{case_id}/horizon/finds/{name}/found").json()
+    assert "found" not in back and back["status"] == "cancelled"
+    refused = client.post(f"/api/cases/{case_id}/horizon/finds/{name}/found", json={"lat": 95.0, "lon": 0.0})
+    assert refused.status_code == 422
+
+
+def test_the_points_held_are_sent_from_where_the_browser_is():
+    case = type("Case", (), {"id": "c1"})()
+    horizon_finds.LIVE[("c1", "s")] = {"started": 10.0, "points": [{"n": 0}, {"n": 1}, {"n": 2}]}
+    try:
+        assert horizon_finds.live(case, "s", 2, 10.0)["points"] == [{"n": 2}]
+        # another run than the one the browser read: all of them again
+        assert horizon_finds.live(case, "s", 2, 9.0) == {"started": 10.0, "since": 0, "points": [{"n": 0}, {"n": 1}, {"n": 2}]}
+    finally:
+        horizon_finds.LIVE.clear()
+    assert horizon_finds.live(case, "s")["points"] == []
+    # asked to stop: one running stops between two points, one queued at once, one ended stays as it ended
+    for status, after in (("running", "stopping"), ("queued", "cancelled"), ("done", "done")):
+        record = {"status": status}
+        horizon_finds.stop(record)
+        assert record["status"] == after
+
+
+def test_the_pace_is_timed_on_points_of_the_grid_with_the_lanes_this_machine_runs(client, monkeypatch):
+    case_id = client.post("/api/cases", json={"name": "Pace"}).json()["id"]
+    told = client.post(f"/api/cases/{case_id}/horizon/finds/pace", json=_ask(speed="gentle"))
+    assert told.status_code == 200, told.text
+    paced = told.json()
+    assert paced["seconds"] > 0 and paced["timed"] == finder.PACE_POINTS
+    assert paced["lanes"]["gentle"] == 1 and paced["lanes"]["fast"] >= 1
+    assert paced["lanes"]["fastest"] >= paced["lanes"]["fast"] or paced["lanes"]["fastest"] == horizon_finds.cores()
+    assert paced["full"] == finder.FULL_COST and paced["lane_power"] == finder.LANE_POWER and paced["top"] == finder.TOP
+    # other points each time: a point timed before, its turn kept, is not timed again
+    timed: list[tuple[float, float]] = []
+    real = finder._score_stage
+    monkeypatch.setattr(finder, "_score_stage", lambda a, o, *rest: timed.append((a, o)) or real(a, o, *rest))
+    plan, trace = horizon_finds.plan_of(horizon_finds_api._asked(horizon_finds_api.FindIn(**_ask())))
+    finder.pace(plan, trace)
+    first = set(timed)
+    timed.clear()
+    finder.pace(plan, trace)
+    assert len(first) == finder.PACE_POINTS + 1 and first != set(timed)
+
+
+def test_a_search_asked_to_stop_as_the_app_closed_ends_stopped(client, monkeypatch):
+    from azimut.api.cases import get_case
+
+    case_id = client.post("/api/cases", json={"name": "Restart"}).json()["id"]
+    monkeypatch.setattr(workqueue, "enqueue", lambda *args, **kwargs: None)
+    name = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask()).json()["name"]
+    case = get_case(case_id)
+    record = horizon_finds.read(case, name)
+    horizon_finds.write(case, name, {**record, "status": "stopping"})
+    with pytest.raises(workqueue.JobCancelled):
+        horizon_finds.run(case, {"payload": {"name": name}})
+    assert horizon_finds.read(case, name)["status"] == "cancelled"
 
 
 def test_a_search_keeps_the_directions_ticked_and_runs_with_them(client):
@@ -724,6 +911,16 @@ def test_a_search_says_its_size_first_and_refuses_what_it_cannot_run(client):
     # a direction ticked marches a share of the turn: the time said shrinks with it
     east = client.post("/api/horizon/finds/estimate", json=_ask(facing=["e"])).json()
     assert east["turn"] < 0.3 and east["points"] == estimate["points"]
+    # Auto's grid says as much for each effort the analyst may pick, the quick one the fewest; a grid picked says none
+    auto = client.post("/api/horizon/finds/estimate", json=_ask(spacing=None)).json()
+    efforts = auto["efforts"]
+    assert efforts["quick"]["points"] < efforts["normal"]["points"] < efforts["thorough"]["points"]
+    assert efforts["normal"]["points"] == auto["points"]
+    assert efforts["quick"]["spacing"] > efforts["normal"]["spacing"] > efforts["thorough"]["spacing"]
+    assert "efforts" not in estimate
+    thorough = client.post("/api/horizon/finds/estimate", json=_ask(spacing=None, effort="thorough")).json()
+    assert thorough["points"] == efforts["thorough"]["points"]
+    assert client.post("/api/horizon/finds/estimate", json=_ask(effort="all night")).status_code == 422
     # the grid before the search, each point with its ground, the ground ticked kept
     shown = client.post("/api/horizon/finds/preview", json=_ask(stands=["summit"])).json()
     assert shown["total"] > 0 and shown["kept"] == shown["kinds"]["summit"]
@@ -732,6 +929,16 @@ def test_a_search_says_its_size_first_and_refuses_what_it_cannot_run(client):
     bare = client.post("/api/horizon/finds/preview", json={"area": _ask()["area"], "spacing": 500.0})
     assert bare.status_code == 200, bare.text
     assert bare.json()["total"] == shown["total"]
+    # an area beside the first, and a stroke of the brush across both: the painted points stay on it, greyed
+    beside = [{"lat": lat, "lon": lon} for lat, lon in _square(offset(*CAMERA, 240.0, 5_000.0), 1_000.0)]
+    stroke = {"path": [{"lat": lat, "lon": lon} for lat, lon in (CAMERA, offset(*CAMERA, 60.0, 1_500.0))], "radius": 400.0}
+    painted = client.post("/api/horizon/finds/preview", json={"area": _ask()["area"], "spacing": 500.0, "areas": [beside],
+                                                               "strokes": [stroke]})
+    assert painted.status_code == 200, painted.text
+    assert painted.json()["total"] > bare.json()["total"]
+    assert any(point[2] == finder.PAINTED for point in painted.json()["points"])
+    for refused in ({"areas": [beside[:2]]}, {"strokes": [{**stroke, "radius": 1.0}]}, {"strokes": [{**stroke, "path": []}]}):
+        assert client.post("/api/horizon/finds/preview", json={"area": _ask()["area"], **refused}).status_code == 422
     case_id = client.post("/api/cases", json={"name": "Refused searches"}).json()["id"]
     url = f"/api/cases/{case_id}/horizon/finds"
     tiny = [{"lat": 45.0, "lon": 6.0}, {"lat": 45.0001, "lon": 6.0}, {"lat": 45.0, "lon": 6.0001}]

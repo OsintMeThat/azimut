@@ -219,7 +219,7 @@ export function layerCard(title, { coords = formatCoords, copy = null, pictures 
       element.append(row);
     }
 
-    const named = [properties.category, properties.colour_name].filter(Boolean).join(' · ');
+    const named = [properties.category, properties.colour_name, properties.icon_meaning].filter(Boolean).join(' · ');
     if (named) {
       const group = document.createElement('p');
       group.className = 'layer-card-group';

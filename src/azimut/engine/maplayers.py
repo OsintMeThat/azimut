@@ -2263,6 +2263,14 @@ def read(case: "Case", name: str) -> dict[str, Any]:
     return row(name, _read_spec(case, name), case=case)
 
 
+def _worn_symbols(spec: dict[str, Any], source: dict[str, Any]) -> dict[str, int]:
+    if source.get("kind") != "editable" or not isinstance((spec.get("document") or {}).get("features"), list):
+        return {}
+    from . import layerediting
+
+    return layerediting.worn_symbols(spec)
+
+
 def row(name: str, spec: dict[str, Any], *, case: "Case | None" = None) -> dict[str, Any]:
     """One layer as the panel reads it.
 
@@ -2291,6 +2299,8 @@ def row(name: str, spec: dict[str, Any], *, case: "Case | None" = None) -> dict[
         "categories": summary.get("categories") or [],
         # a personal layer's colours, `#hex → features`, which its legend names
         "colours": summary.get("colours") or {},
+        # and its markers' icons, `badge or icon key → markers`, counted anew for a layer saved before they were
+        "symbols": summary["symbols"] if "symbols" in summary else _worn_symbols(spec, source),
         "bbox": summary.get("bbox"),
         "format": summary.get("format") or source.get("format") or "",
         # How many of the source's own pictograms are stored, which is also what

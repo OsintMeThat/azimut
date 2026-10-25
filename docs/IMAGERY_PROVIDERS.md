@@ -27,6 +27,7 @@
 | Esri Wayback | no | — | yes | yes (a release never changes) | static string, release in provenance |
 | OpenStreetMap | no | — | yes | yes | static string |
 | OpenTopoMap | no | — | yes | yes | static string (CC-BY-SA² ) |
+| Sentinel-2 cloudless (EOX) | no | — | **no** (a year's mosaic, no single date) | yes | EOX's words for the year shown, with its licence |
 | **Mapbox Satellite** | yes | access token in URL | yes | yes¹ | `© Mapbox © OpenStreetMap` (+ Maxar) |
 | **Google Satellite** | yes | **session token** | yes (flattened+attributed only) | **NO** | dynamic copyright from viewport endpoint |
 | **Google Satellite (Maps JS)** | yes | key in script URL⁴ | screen crops only (user-initiated grab, attribution burned) | n/a (widget) | `Map data © Google` + the widget's own credits |
@@ -76,7 +77,7 @@ EEA, so Azimut supports both products:
 | Capture frame | any size (tiles are fetched) | limited to the map view; no resolution multiplier |
 | Rotation / oversample / marquee | yes | **rotation + marquee yes**, oversample no |
 | Meter | tiles | **map loads** (~10k free/month); one widget instance per page life, reused across tabs and basemap switches; eco mode disabled because a replacement instance bills another load |
-| Key test | `createSession` server-side | in-browser `gm_authFailure`; a changed key requires reload; an accepted key test bills and records one map load |
+| Key test | `createSession` server-side | a real map in the browser, failed by any refusal Google names (below); a changed key requires reload; an accepted key test bills and records one map load |
 
 Both keys can be saved at once: each lights its own basemap, and the EEA failure
 path benches the tiles one automatically (below) leaving the widget on offer.
@@ -154,8 +155,15 @@ credits ride along inside the pixels, attribution burned on top.
 `settings.json → provider_status` holds each credential's last verdict. Written
 by: the Settings key test (every provider), a `createSession` refusal or a tile
 401/403 that survives the re-mint retry (with Google's own sentence as the
-reason), and the browser's `gm_authFailure` for the JS key. **Never** by plain
-network errors; a timeout says nothing about the key. A key marked bad is
+reason), and a refusal of the JS map in the browser. **Never** by plain
+network errors; a timeout says nothing about the key.
+
+Google calls `gm_authFailure` for a bad key only. Billing switched off, the
+API not enabled, a spent quota or a blocked referrer are named in a console
+error alone (`BillingNotEnabledMapError`…), while the map keeps drawing dimmed
+tiles under "For development purposes only". `lib/map/gmaps.js` reads those
+lines as they pass, so each refusal benches the basemap with what to do about
+it, and the key test waits a few seconds past `tilesloaded` for one. A key marked bad is
 withheld from `all_providers()`, so the basemap vanishes from the selector (the
 live map falls back to Esri) until the key changes (verdict cleared) or a test
 passes. Settings shows the stored reason inline.
@@ -223,7 +231,9 @@ kept for one case only: no pass could be resolved at all (deep polar winter, a
 persistent gap), and then the map says "several dates" and the capture files no
 date rather than naming the newest pass it mostly is not showing. The radar
 basemap follows the same rule, where a blend would mix looks from opposite sides
-of the track.
+of the track. A map plate's Sentinel-2 ground holds the same rule with no
+fallback: its map is drawn on one pass picked from the dates over its middle
+(`TIME=day/day`), and draws nothing until one is.
 
 **`MAXCC` is always sent, and defaults to 100.** A configuration instance carries
 a cloud-coverage data filter of its own — the standard template ships 20% — and a
@@ -656,6 +666,27 @@ did; the proxy follows it and caches under the release asked for. The variant id
 cache directory; the plain `esri-wayback` resolves to the newest release, so its
 id and its cache always name one.
 
+## Sentinel-2 cloudless is a year, not a day
+
+EOX's Sentinel-2 cloudless (`engine/cloudless.py`) is one cloud-free picture of the
+world a year, assembled pixel by pixel from many passes of that year (and of the
+one before, for 2016 and 2018). It is the opposite of what the imagery dating rule
+asks of evidence, so it is a basemap to show and never to capture: `capturable` is
+off, and wherever it is printed it says a year's mosaic, never a day. Map plates
+use it for the wide map a reader needs to see a country without clouds or seams.
+
+| | |
+|---|---|
+| Tiles | `tiles.maps.eox.at/wmts/1.0.0/{layer}/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg`, key-less, asked only once the analyst picks this ground |
+| Layers | `s2cloudless_3857` (2016), `s2cloudless-{year}_3857` (2018–2025); 2017 has no licence of its own and is not offered |
+| Pixels | 10 m, native to level 14; the view magnifies past it up to 17 |
+| Variant id | `s2cloudless~{year}`, digits only; the plain `s2cloudless` is the newest year |
+| Licence | 2016: CC BY 4.0, free for any use. 2018 on: CC BY-NC-SA 4.0, non-commercial use only, and online publications carry the link ([EOX](https://cloudless.eox.at/license-non-commercial)) |
+| Credit | `EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data {years})`, then the licence; `/api/satellite/cloudless/years` hands the plate each year's, so the credits print the year shown |
+
+The inspector says the licence of the year picked under its picker, so an analyst
+publishing for a commercial outlet sees before exporting that only 2016 is theirs to use.
+
 ## Key-less overlays
 
 Drawn over any basemap, fetched by the browser straight from their own servers
@@ -687,6 +718,7 @@ only once a view needs them. Checked 2026-10-08.
 | Terrain heights | Mapterhorn `tiles.mapterhorn.com/{z}/{x}/{y}.webp` (terrarium, 512 px, planet to z12, surveys deeper) | open data sources, `© Mapterhorn`, attribution page linked | through the app (`api/terrain.py`), disk cache `cache/terrain/` bounded at 1 GiB with an LRU sweep at start, absences kept 30 days |
 | Terrain fallback | AWS Terrain Tiles `s3.amazonaws.com/elevation-tiles-prod/terrarium` (Mapzen, 256 px) | open data, Mapzen and AWS credited | asked only when Mapterhorn cannot be reached; four of its tiles one level deeper make one of ours, served with status 203 so the map knows, and a tilted capture of that map credits it |
 | Summit names | OpenFreeMap `planet` vector tiles, the `mountain_peak` layer (named `natural=peak` and `volcano`), found through the same TileJSON as place names | data ODbL © OSM contributors, © OpenMapTiles, OpenFreeMap credited; no key, no quota | Horizon only, once Summit names is switched on (`engine/peaks.py`). Zoom 12 within 15 km of the eye, 11 to 40 km, 10 to 100 km, 9 beyond: a 150 km view in the Alps is about 160 tiles and 15 MB, once. Each tile's summits are cached 90 days, nearest first, six at a time; a tile that fails waits 30 s, doubling to 10 min. Overpass was dropped on 2026-10-09: its public servers were busy, and `overpass-api.de` refused this address outright after a view's burst of cells |
+| Sea and lakes | OpenFreeMap `planet` vector tiles, the `water` layer (`ocean`, and `lake` with the reservoirs; rivers left out), found through the same TileJSON as place names | data ODbL © OSM contributors, © OpenMapTiles, OpenFreeMap credited; no key, no quota | Horizon's Find only, once the photo is said to show the sea or a lake, or a line along the sea's horizon is traced (`engine/water.py`): the tiles at z10 over the reach (the sea down to z6 for a far one), at most 64, each kept as a 256-pixel mask 90 days. Without them, the terrain's flat ground stands in. Checked 2026-10-25 |
 
 **The Horizon view's ground** is a mesh the browser draws on the GPU. It reads
 terrain tiles (to z14) and free imagery tiles itself, in batches of up to 64

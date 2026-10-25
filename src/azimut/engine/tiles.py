@@ -21,8 +21,8 @@ from typing import Any, Callable
 import httpx
 from PIL import Image, ImageDraw, ImageFont
 
-from .. import config
-from . import google_tiles, pdffonts, sentinel, wayback
+from .. import config, errors
+from . import cloudless, google_tiles, pdffonts, sentinel, wayback
 
 TILE_SIZE = 256
 SIZE_MAX = 4096  # hard cap on a capture's width/height, in px
@@ -187,6 +187,18 @@ BUILTIN_PROVIDERS: tuple[Provider, ...] = (
         url=wayback.TILE_TEMPLATE.format(release="{release}"),
         attribution="Esri, Maxar, Earthstar Geographics, and the GIS User Community · World Imagery Wayback",
         max_zoom=wayback.MAX_ZOOM,
+    ),
+    # A year of EOX's Sentinel-2 cloudless (engine/cloudless.py): one cloud-free
+    # picture of the world assembled from many passes, so it holds no single date.
+    # Shown, never captured, and the newest year until a plate picks another.
+    Provider(
+        id=cloudless.BASE_ID,
+        label=f"Sentinel-2 cloudless, {cloudless.NEWEST} (EOX, a year's mosaic)",
+        url=cloudless.tile_url(cloudless.NEWEST),
+        attribution=cloudless.attribution(cloudless.NEWEST),
+        max_zoom=cloudless.MAX_ZOOM,
+        max_native_zoom=cloudless.MAX_NATIVE_ZOOM,
+        capturable=False,
     ),
 )
 
@@ -373,6 +385,8 @@ def get_provider(provider_id: str) -> Provider:
     base_id, sep, spec = provider_id.partition(sentinel.VARIANT_SEP)
     if base_id == wayback.BASE_ID:
         return _wayback_provider(spec if sep else None)
+    if base_id == cloudless.BASE_ID and sep:
+        return _cloudless_provider(spec)
     for provider in all_providers():
         if provider.id == base_id:
             if not sep:
@@ -449,6 +463,22 @@ def _wayback_provider(spec: str | None) -> Provider:
         id=wayback.variant_id(number),
         label=f"Esri Wayback · {release.date if release else f'release {number}'}",
         url=wayback.tile_url(number),
+    )
+
+
+def _cloudless_provider(spec: str) -> Provider:
+    """One year of Sentinel-2 cloudless, its credit and licence that year's."""
+    try:
+        year = cloudless.parse_variant(spec)
+    except ValueError as exc:
+        raise KeyError(str(exc)) from exc
+    base = next(p for p in BUILTIN_PROVIDERS if p.id == cloudless.BASE_ID)
+    return replace(
+        base,
+        id=cloudless.variant_id(year),
+        label=f"Sentinel-2 cloudless, {year} (EOX, a year's mosaic)",
+        url=cloudless.tile_url(year),
+        attribution=cloudless.attribution(year),
     )
 
 
@@ -570,9 +600,18 @@ def upstream_failure(exc: BaseException) -> str:
     URL holds the whole instance id, for Mapbox, Google or FIRMS the key, and a
     message lands in the page, the network log and the screenshot attached to a
     bug report. So the answer names what went wrong and nothing it was sent with.
+
+    A refusal is named for what it means to the analyst (a key, an allowance),
+    the provider's own sentence after it when it sent one: "answered 403" alone
+    read like a bug in Azimut.
     """
     if isinstance(exc, httpx.HTTPStatusError):
-        return f"the provider answered {exc.response.status_code}"
+        said = errors.refused(exc.response.status_code)
+        try:
+            reason = upstream_reason(exc.response.content)
+        except httpx.ResponseNotRead:  # a streamed answer nobody read
+            reason = ""
+        return f"{said}: {reason}" if reason else said
     if isinstance(exc, httpx.TimeoutException):
         return "the provider did not answer in time"
     if isinstance(exc, httpx.HTTPError):

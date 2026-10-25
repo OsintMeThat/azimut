@@ -457,11 +457,15 @@ export function sameFeatures(a, b) {
  *   feature's point when it is a pin (with its properties), on the ground under
  *   the cursor for a line or an area (with none). The features claim their
  *   clicks, so without this a right-click on one opens nothing at all.
+ * @param {boolean} [opts.page] drawn for a plate's page: every symbol drawn, where
+ *   the live map lets overlapping ones drop out far out with a dot for each, since a
+ *   page that leaves the app must not lose a point the reader cannot zoom in to find;
+ *   and its areas may be hatched, as a plate draws a claimed ground.
  */
 export function createAddedLayer(
   engine,
   { card, popup = defaultPopup, iconUrl = null, loadIcon = defaultLoadIcon, menu = null,
-    editable = false, history = false, buildBadge = badgeImage, buildPersonal = personalMarkerImage, buildHatch = hatchImage,
+    editable = false, history = false, page = false, buildBadge = badgeImage, buildPersonal = personalMarkerImage, buildHatch = hatchImage,
     buildOwn = ownMarkerImage, readPicture = loadPicture } = {}
 ) {
   const map = engine.impl;
@@ -494,7 +498,9 @@ export function createAddedLayer(
   // A source draws no text and no direction: its names are read in the card,
   // and a personal layer is the one whose analyst asks for either.
   // a dash is drawn on any layer, a plate setting one for a source layer as for the analyst's own
-  const PAINTED = [FILL, ...(editable ? [FILL_HATCH] : []), LINE, LINE_DASH, LINE_DOT, DOT,
+  const hatched = editable || page;
+  const declutter = !page;
+  const PAINTED = [FILL, ...(hatched ? [FILL_HATCH] : []), LINE, LINE_DASH, LINE_DOT, DOT,
     ...(editable ? [BEARING] : []), MARK, OWN, ...(editable ? [LABEL, HIT, HIT_OWN] : [])];
   // Drawn, never clicked: the past says nothing a card on the feature would not.
   // Only a layer followed over time has a past, so only it pays for these.
@@ -595,7 +601,8 @@ export function createAddedLayer(
       paint: { 'fill-color': colour, 'fill-opacity': ['case', ['has', '$fade'], 0.07, ['==', ['get', 'area_fill'], 'none'], 0,
         ['coalesce', ['get', 'fill_opacity'], 0.18]] },
     });
-    if (editable) map.addLayer({ id: FILL_HATCH, type: 'fill', source: SOURCE, filter: BASE[FILL_HATCH],
+    // a personal area's hatching, or any layer's that a plate hatches
+    if (hatched) map.addLayer({ id: FILL_HATCH, type: 'fill', source: SOURCE, filter: BASE[FILL_HATCH],
       paint: { 'fill-pattern': ['get', '$fillhatch'] } });
     map.addLayer({
       id: LINE,
@@ -630,7 +637,7 @@ export function createAddedLayer(
       source: SOURCE,
       filter: BASE[DOT],
       paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2.5, 14, 0],
+        'circle-radius': declutter ? ['interpolate', ['linear'], ['zoom'], 11, 2.5, 14, 0] : 0,
         'circle-color': colour,
         'circle-opacity': 0.85,
       },
@@ -667,11 +674,12 @@ export function createAddedLayer(
         // The decluttering, and the whole of it: MapLibre hides a symbol that
         // overlaps one already placed, so the map spreads evenly and densifies
         // as it is zoomed into. A cap in file order would clump.
-        'icon-allow-overlap': editable,
-        'icon-ignore-placement': editable,
+        'icon-allow-overlap': editable || !declutter,
+        'icon-ignore-placement': editable || !declutter,
         // …and who wins a contested spot. File order, so the answer is at least
         // the same one twice running.
-        'symbol-sort-key': ['get', 'index'],
+        // a feature with no place in the file (one drawn by hand) comes first, never a null the engine warns of
+        'symbol-sort-key': ['coalesce', ['get', 'index'], 0],
       },
       paint: {
         'icon-color': colour,
@@ -704,9 +712,9 @@ export function createAddedLayer(
         // lands on the ground without a per-feature offset to carry.
         'icon-anchor': editable ? ['case', ['has', '$native'], 'bottom', 'center'] : 'center',
         'icon-offset': editable ? ['case', ['has', '$native'], ['literal', [0, 7.7]], ['literal', [0, 0]]] : [0, 0],
-        'icon-allow-overlap': editable,
-        'icon-ignore-placement': editable,
-        'symbol-sort-key': ['get', 'index'],
+        'icon-allow-overlap': editable || !declutter,
+        'icon-ignore-placement': editable || !declutter,
+        'symbol-sort-key': ['coalesce', ['get', 'index'], 0],
       },
       paint: { 'icon-opacity': ['case', ['has', '$fade'], 0.4, ['coalesce', ['get', '$opacity'], 0.95]] },
     });
@@ -894,8 +902,7 @@ export function createAddedLayer(
     const look = {};
     const dash = properties.line_dash || (editable ? CONFIDENCE_DASH[properties.confidence] : '');
     if (!point && (dash === 'dashed' || dash === 'dotted')) look.$dash = dash;
-    if (!editable) return Object.keys(look).length ? look : null;
-    if (point && CONFIDENCE_OPACITY[properties.confidence]) look.$opacity = CONFIDENCE_OPACITY[properties.confidence];
+    // hatched: a personal area asked so, or a plate hatches the layer
     if (String(feature.geometry?.type).includes('Polygon') && properties.area_fill === 'hatch') {
       const id = `${prefix}-fillhatch-${String(colour).replace(/[^0-9a-z]/gi, '')}`;
       if (!map.hasImage(id)) {
@@ -904,6 +911,8 @@ export function createAddedLayer(
       }
       if (map.hasImage(id)) look.$fillhatch = id;
     }
+    if (!editable) return Object.keys(look).length ? look : null;
+    if (point && CONFIDENCE_OPACITY[properties.confidence]) look.$opacity = CONFIDENCE_OPACITY[properties.confidence];
     return Object.keys(look).length ? look : null;
   }
 

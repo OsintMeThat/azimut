@@ -914,16 +914,13 @@
     engine.setView(item, item.zoom ?? Math.max(engine.getZoom(), 13));
   }
 
-  async function onWidgetAuthFailure(provider) {
+  async function onWidgetAuthFailure(provider, reason) {
     try {
-      await api.post(`/api/settings/keys/${provider.meter}/status`, {
-        ok: false,
-        detail: 'Google rejected the Maps JavaScript key (gm_authFailure)',
-      });
+      await api.post(`/api/settings/keys/${provider.meter}/status`, { ok: false, detail: reason });
     } catch {
       /* the toast still gives the result */
     }
-    toast('Google rejected the key. Basemap disabled; see Settings', 'danger', 8000);
+    toast(`Google basemap turned off. ${reason}`, 'danger', 12000);
     await loadProviders();
   }
 

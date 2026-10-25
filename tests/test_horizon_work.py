@@ -51,11 +51,17 @@ def _find_work() -> dict:
             "offset": 0.4, "offset_known": True, "tops": True, "heights": {"near": 12, "far": 0},
         }],
         "who": {"mode": "drone", "low": 10, "high": 120},
-        "spacing": 250,
+        "spacing": 50,
         "tolerance": 2,
         "facing": ["sw", "w"],
         "stands": ["summit", "slope"],
-        "zones": [{"points": [{"lat": 46.52, "lon": 7.82}, {"lat": 46.52, "lon": 7.84}, {"lat": 46.54, "lon": 7.84}], "spacing": 100, "out": False}],
+        "zones": [{"points": [{"lat": 46.52, "lon": 7.82}, {"lat": 46.52, "lon": 7.84}, {"lat": 46.54, "lon": 7.84}], "spacing": 20, "out": False}],
+        "round": True,
+        "effort": "thorough",
+        "water": True,
+        "over": "above",
+        "areas": [{"points": [{"lat": 46.7, "lon": 7.8}, {"lat": 46.7, "lon": 7.9}, {"lat": 46.8, "lon": 7.9}]}],
+        "strokes": [{"path": [{"lat": 46.52, "lon": 7.83}, {"lat": 46.53, "lon": 7.84}], "radius": 250, "out": True}],
         "search": None,
     }
 
@@ -78,10 +84,21 @@ def test_the_bench_comes_back_as_it_was_left(client):
     assert kept["photo"]["strokes"] == work["photo"]["strokes"]
     assert kept["find"]["alignments"][0]["heights"] == {"near": 12, "far": 0}
     assert kept["find"]["who"] == {"mode": "drone", "low": 10, "high": 120}
-    assert kept["find"]["spacing"] == 250
+    # every grid Find offers, the finest ones too, and near lines rounded
+    assert kept["find"]["spacing"] == 50 and kept["find"]["round"] is True and kept["find"]["effort"] == "thorough"
+    assert kept["find"]["water"] is True and kept["find"]["over"] == "above"
     assert kept["find"]["facing"] == ["sw", "w"]
     assert kept["find"]["stands"] == ["summit", "slope"]
-    assert kept["find"]["zones"][0]["spacing"] == 100 and kept["find"]["zones"][0]["out"] is False
+    assert kept["find"]["zones"][0]["spacing"] == 20 and kept["find"]["zones"][0]["out"] is False
+    # the areas searched with the first, and the brush's strokes
+    assert kept["find"]["areas"] == _find_work()["areas"]
+    assert kept["find"]["strokes"] == _find_work()["strokes"]
+    # the sea alone said of the photo comes back as said; anything else is refused
+    sea = {**work, "find": {**_find_work(), "water": "sea"}}
+    assert client.put(f"/api/cases/{cid}/horizon/work", json=sea).status_code == 200
+    assert client.get(f"/api/cases/{cid}/horizon/work").json()["work"]["find"]["water"] == "sea"
+    wrong = {**work, "find": {**_find_work(), "water": "river"}}
+    assert client.put(f"/api/cases/{cid}/horizon/work", json=wrong).status_code == 422
 
 
 def test_an_empty_case_has_no_bench_and_a_cleared_one_is_gone(client):

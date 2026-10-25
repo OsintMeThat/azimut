@@ -504,7 +504,7 @@ def test_test_key_mapbox_ok_and_failure(client, monkeypatch):
     monkeypatch.setattr(httpx, "get", unauthorized)
     result = client.post("/api/settings/keys/mapbox/test").json()
     assert result["ok"] is False
-    assert result["detail"] == "the provider answered 401"
+    assert result["detail"] == "the service refused the key or the account (401)"
     # httpx puts the URL, token included, in its message: none of it may reach
     # the page, settings.json or the backup that carries provider_status.
     assert "pk.abc" not in json.dumps(client.get("/api/settings").json()["provider_status"])
@@ -557,7 +557,7 @@ def test_test_key_sentinelhub_reports_the_services_own_words(client, monkeypatch
 
     monkeypatch.setattr(httpx, "get", forbidden)
     result = client.post("/api/settings/keys/sentinelhub/test").json()
-    assert result == {"ok": False, "detail": "the provider answered 403"}
+    assert result == {"ok": False, "detail": "the service refused the key or the account (403)"}
 
 
 def test_sentinel2_tile_proxy_offsets_the_matrix_and_counts_tiles(client, monkeypatch):

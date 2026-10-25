@@ -172,13 +172,18 @@ export function testReliefAtRest(marker, moving) {
   };
 }
 
+/** The style keys a tint may lay over a shape's own (`tint`). */
+const TINTED = ['stroke', 'strokeWidth', 'strokeOpacity', 'radius', 'fill', 'fillOpacity'];
+
 /**
  * @param {object} engine the façade from `engine.js`
  * @param {object} [opts]
  * @param {(id: any) => void} [opts.onPopupOpen] a card was opened on a mark
  * @param {(id: any) => void} [opts.onPopupClose] …and closed again
+ * @param {boolean} [opts.tints] the shapes may be restyled at once (`tint`), thousands of them under a brush:
+ *   their paint reads a style held beside the shape first, so a restyle never sends the source again
  */
-export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
+export function createSurface(engine, { onPopupOpen, onPopupClose, tints = false } = {}) {
   const map = engine.impl;
   const prefix = `sfc-${++surfaces}`;
   const SOURCE = `${prefix}-shapes`;
@@ -214,6 +219,12 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
     return [FILL, ...dashLayers.values(), LINE, DOT];
   }
 
+  /** A style value as the paint reads it: the tint laid over the shape first, when the surface takes tints. */
+  function read(key, ...otherwise) {
+    const own = [['get', key], ...otherwise];
+    return tints ? ['coalesce', ['feature-state', key], ...own] : own.length > 1 ? ['coalesce', ...own] : own[0];
+  }
+
   /**
    * Drawn shapes sit above the basemap and its labels, which is simply where
    * they land: `basemap.js` inserts below the first layer it does not own, and
@@ -232,16 +243,17 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
       source: SOURCE,
       filter: ['has', 'fill'],
       paint: {
-        'fill-color': ['to-color', ['get', 'fill']],
-        'fill-opacity': ['to-number', ['get', 'fillOpacity']],
+        'fill-color': ['to-color', read('fill')],
+        'fill-opacity': ['to-number', read('fillOpacity')],
       },
     });
     map.addLayer({
       id: LINE,
       type: 'line',
       source: SOURCE,
-      // a dashed stroke is painted by its own layer, below
-      filter: ['all', ['has', 'stroke'], ['!', ['has', 'dashKey']]],
+      // a dashed stroke is painted by its own layer, below; a stroke 0 wide is none, and laying thousands of
+      // unseen outlines (a search's cells) halved how smoothly the map moved
+      filter: ['all', ['has', 'stroke'], ['!', ['has', 'dashKey']], ['>', ['to-number', ['get', 'strokeWidth']], 0]],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: lineStroke(),
     });
@@ -254,15 +266,15 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
       // and polygon in the surface, which is what a circle layer does.
       filter: ['==', ['geometry-type'], 'Point'],
       paint: {
-        'circle-radius': ['to-number', ['get', 'radius']],
+        'circle-radius': ['to-number', read('radius')],
         // a dot with no fill of its own is filled with its own stroke colour,
         // as the engine we came from filled it — and `fillOpacity` is then 0,
         // so it stays an outline
-        'circle-color': ['to-color', ['coalesce', ['get', 'fill'], ['get', 'stroke']]],
-        'circle-opacity': ['to-number', ['get', 'fillOpacity']],
-        'circle-stroke-color': ['to-color', ['get', 'stroke']],
-        'circle-stroke-width': ['to-number', ['get', 'strokeWidth']],
-        'circle-stroke-opacity': ['to-number', ['get', 'strokeOpacity']],
+        'circle-color': ['to-color', read('fill', ['get', 'stroke'])],
+        'circle-opacity': ['to-number', read('fillOpacity')],
+        'circle-stroke-color': ['to-color', read('stroke')],
+        'circle-stroke-width': ['to-number', read('strokeWidth')],
+        'circle-stroke-opacity': ['to-number', read('strokeOpacity')],
       },
     });
     if (!shown) applyVisibility();
@@ -584,6 +596,7 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
       dropMarks();
       closeCard();
       hideTip();
+      if (tints) map.removeFeatureState?.({ source: SOURCE });
       features = [];
       byShape = new Map();
       shapes = new Map();
@@ -674,6 +687,71 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
       return true;
     },
 
+    /**
+     * Lay more painted shapes beside the ones there, sending only them: a map
+     * that fills in as a search runs adds its new cells every few seconds, and
+     * laying thousands again each time is what made it stutter. Marks are
+     * declared with `set`.
+     */
+    add(declared) {
+      build();
+      const added = [];
+      let answers = false;
+      for (const shape of declared ?? []) {
+        if (!shape || shape.kind === 'marker' || shape.id == null || byShape.has(shape.id)) continue;
+        const feature = nextFeature++;
+        const properties = styleProperties(shape.style);
+        if (properties.dashKey) dashLayer(properties.dashKey);
+        shapes.set(shape.id, shape);
+        byShape.set(shape.id, feature);
+        answers ||= !!(shape.onClick || shape.onContextMenu);
+        added.push({ type: 'Feature', id: feature, geometry: shapeGeometry(shape), properties: { ...properties, sid: shape.id } });
+      }
+      if (!added.length) return;
+      features = [...features, ...added];
+      source()?.updateData({ add: added });
+      if (answers && !answering) {
+        answering = true;
+        refreshClaim();
+      }
+      rebindHandlers();
+    },
+
+    /**
+     * Lay a style over a painted shape's own at once, or take it off (`style` null), and say its new reading
+     * (`tip`): the paint reads it beside the source, which is never sent again, so a brush over thousands of
+     * points restyles them as the hand moves. Only a surface made with `tints`.
+     */
+    tint(id, style, tip) {
+      const feature = byShape.get(id);
+      if (!tints || !built || feature == null) return false;
+      const target = { source: SOURCE, id: feature };
+      map.removeFeatureState(target);
+      if (style) {
+        const properties = styleProperties(style);
+        map.setFeatureState(target, Object.fromEntries(TINTED.filter((key) => key in properties).map((key) => [key, properties[key]])));
+      }
+      const shape = shapes.get(id);
+      if (shape && tip !== undefined) shapes.set(id, { ...shape, tip });
+      return true;
+    },
+
+    /** Take painted shapes off by id, the others left as they are. */
+    drop(ids) {
+      const gone = new Set();
+      for (const id of ids ?? []) {
+        const feature = byShape.get(id);
+        if (feature == null) continue;
+        byShape.delete(id);
+        shapes.delete(id);
+        gone.add(feature);
+      }
+      if (!gone.size) return;
+      features = features.filter((feature) => !gone.has(feature.id));
+      source()?.updateData({ remove: [...gone] });
+      if (tints) for (const feature of gone) map.removeFeatureState({ source: SOURCE, id: feature });
+    },
+
     /** Is this shape on the layer? */
     has(id) {
       return byShape.has(id) || marks.has(id);
@@ -697,6 +775,7 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
       dropMarks();
       closeCard();
       hideTip();
+      if (tints && built) map.removeFeatureState?.({ source: SOURCE });
       features = [];
       byShape = new Map();
       shapes = new Map();

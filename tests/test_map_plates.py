@@ -780,3 +780,99 @@ def test_every_ffmpeg_line_holds_its_threads_and_evens_the_sides(tmp_path):
         assert command[command.index("libx264") + 1:][:2] == ["-threads", mapplates.VIDEO_THREADS]
         assert mapplates.EVEN_SIDES in command[command.index("-filter_complex") + 1]
     assert 1 <= int(mapplates.VIDEO_THREADS) <= 4
+
+
+def test_a_plate_keeps_its_ready_recipe_its_text_styles_and_its_ground_options(client, owner):
+    spec = {"ready": "situation", "elements": [
+        {"id": "map", "kind": "map", "box": [0, 0, 100, 100], "view": {"lat": 0, "lon": 0, "zoom": 3}, "basemap": "plain-news",
+         "plain": {"admin": "districts", "cover": False, "military": False, "airfields": False, "refs": False, "presence": 0.6}},
+        {"id": "kicker", "kind": "text", "box": [0, 0, 50, 5], "text": "Situation", "role": "kicker"},
+    ]}
+    assert save(client, owner, spec=spec).status_code == 200
+    loaded = client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]
+    assert loaded["ready"] == "situation"
+    assert loaded["elements"][1]["role"] == "kicker"
+    assert loaded["elements"][0]["plain"]["admin"] == "districts"
+    for bad in ({"ready": "Bad Id"}, {"elements": [{**spec["elements"][1], "role": "headline"}]},
+                {"elements": [{**spec["elements"][0], "plain": {"admin": "streets"}}]}):
+        assert save(client, owner, title="Bad", spec={**spec, **bad}).status_code == 422
+    # a template is the analyst's layout from then on: it keeps no ready recipe
+    assert "ready" not in mapplates.template_of(spec)
+
+
+def test_a_globe_inset_is_drawn_on_the_page_and_is_not_one_of_the_eight_maps():
+    maps = [{"id": f"m{index}", "kind": "map", "box": [0, 0, 10, 10], "view": {"lat": 0, "lon": 0, "zoom": 3}} for index in range(8)]
+    globe = {"id": "globe", "kind": "inset", "of": "m0", "box": [0, 0, 10, 10], "globe": True}
+    assert mapplates.PlateSpec.model_validate({"elements": [*maps, globe]}).elements[-1].globe is True
+    with pytest.raises(ValueError):
+        mapplates.PlateSpec.model_validate({"elements": [*maps, {**globe, "globe": False}]})
+
+
+def test_a_map_on_sentinel_2_keeps_the_day_of_its_one_pass_and_a_template_drops_it():
+    spec = {"elements": [{"id": "map", "kind": "map", "box": [0, 0, 10, 10], "view": {"lat": 0, "lon": 0, "zoom": 9},
+                          "basemap": "sentinel2", "acquired": "2026-05-12"}]}
+    assert mapplates.PlateSpec.model_validate(spec).elements[0].acquired == "2026-05-12"
+    drawn = mapplates.PlateSpec.model_validate({"elements": [{**spec["elements"][0], "product": "SWIR", "maxcc": 30}]}).elements[0]
+    assert (drawn.product, drawn.maxcc) == ("SWIR", 30)
+    for bad in ({"product": "swir/../x"}, {"maxcc": 101}):
+        with pytest.raises(ValueError):
+            mapplates.PlateSpec.model_validate({"elements": [{**spec["elements"][0], **bad}]})
+    # one pass, named by its day: a window or a time is not a pass
+    for bad in ("2026-05-01/2026-05-31", "2026-05-12T10:00", "now"):
+        with pytest.raises(ValueError):
+            mapplates.PlateSpec.model_validate({"elements": [{**spec["elements"][0], "acquired": bad}]})
+    # the pass is the place's: a template keeps the ground, never the day
+    kept = mapplates.template_of(spec)["elements"][0]
+    assert kept["basemap"] == "sentinel2" and "acquired" not in kept
+
+
+def test_a_credits_box_keeps_the_credits_taken_off_it_and_a_template_forgets_them():
+    credits = {"id": "credits", "kind": "credits", "of": "map", "box": [0, 0, 10, 5], "dropped": ["GeoConfirmed — geoconfirmed.org"]}
+    spec = {"elements": [{"id": "map", "kind": "map", "box": [0, 0, 10, 10], "view": {"lat": 0, "lon": 0, "zoom": 3}}, credits]}
+    assert mapplates.PlateSpec.model_validate(spec).elements[1].dropped == ["GeoConfirmed — geoconfirmed.org"]
+    with pytest.raises(ValueError):
+        mapplates.PlateSpec.model_validate({"elements": [spec["elements"][0], {**credits, "dropped": ["x" * 401]}]})
+    # what a case's layers owed is that case's: a template starts with every credit
+    assert "dropped" not in mapplates.template_of(spec)["elements"][1]
+
+
+def test_a_step_takes_its_own_transition_time_within_the_plate_s_bounds():
+    step = mapplates.Step.model_validate({"id": "s1", "transition_seconds": 1.5})
+    assert step.transition_seconds == 1.5
+    assert mapplates.Step.model_validate({"id": "s1"}).transition_seconds is None
+    for bad in (0.1, 3.5):
+        with pytest.raises(ValueError):
+            mapplates.Step.model_validate({"id": "s1", "transition_seconds": bad})
+
+
+def test_the_page_keeps_its_paper_grain_between_none_and_full():
+    assert mapplates.Page.model_validate({"grain": 0.4}).grain == 0.4
+    assert mapplates.Page.model_validate({}).grain == 0
+    for bad in (-0.1, 1.5):
+        with pytest.raises(ValueError):
+            mapplates.Page.model_validate({"grain": bad})
+
+
+def test_a_plain_ground_keeps_the_names_taken_off_it():
+    plain = mapplates.Plain.model_validate({"hidden_names": ["Kyiv", "Dnipro"]})
+    assert plain.hidden_names == ["Kyiv", "Dnipro"]
+    with pytest.raises(ValueError):
+        mapplates.Plain.model_validate({"hidden_names": ["x" * 121]})
+    with pytest.raises(ValueError):
+        mapplates.Plain.model_validate({"hidden_names": ["n"] * 201})
+
+
+def test_a_map_s_layer_keeps_what_it_stands_for_and_its_fill():
+    entry = mapplates.FrameLayer.model_validate({"name": "front", "role": "claimed", "fill": "hatch", "colour": "#c8102e", "dash": "dashed"})
+    assert (entry.role, entry.fill) == ("claimed", "hatch")
+    for bad in ({"role": "enemy"}, {"fill": "dots"}):
+        with pytest.raises(ValueError):
+            mapplates.FrameLayer.model_validate({"name": "front", **bad})
+
+
+def test_a_map_keeps_the_country_it_lights_and_how_it_draws_the_rest_back():
+    spot = mapplates.Spotlight.model_validate({"country": "Ukraine", "dim": 0.4, "mode": "fade"})
+    assert (spot.country, spot.dim, spot.mode) == ("Ukraine", 0.4, "fade")
+    for bad in ({"country": ""}, {"country": "Ukraine", "dim": 1}, {"country": "Ukraine", "mode": "blur"}):
+        with pytest.raises(ValueError):
+            mapplates.Spotlight.model_validate(bad)

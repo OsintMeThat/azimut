@@ -551,9 +551,39 @@ class Sampler:
                          np.arange(flat_lat.size))
         return out.reshape(shape)
 
+    def _void(self, lat: np.ndarray, lon: np.ndarray, zoom: int) -> bool:
+        """Whether the level's kept plate already knows that no tile exists at `zoom` anywhere a read of these
+        points there touches: every point would climb a level, so the read may start a level down."""
+        if zoom <= PLANET_ZOOM or not self.plates or not lat.size:
+            return False
+        with self._plates_lock:
+            plate = self._plates.get(zoom)
+            if plate is None or not plate.absent.any():
+                return False
+            # pixels rise with longitude and fall with latitude: the corners bound every point's, a pixel more
+            # either way for rounding and for the right and lower neighbours a read takes
+            corners = np.array([np.max(lat), np.min(lat)]), np.array([np.min(lon), np.max(lon)])
+            if not np.isfinite(corners).all():
+                return False
+            px, py = _pixels(*corners, zoom)
+            world = TILE << zoom
+            x_lo, x_hi = int(np.floor(px[0])) - 1, int(np.floor(px[1])) + 2
+            y_lo, y_hi = max(0, int(np.floor(py[0])) - 1), min(world - 1, int(np.floor(py[1])) + 2)
+            if x_lo < 0 or x_hi >= world:
+                return False
+            tx_lo, tx_hi = (x_lo >> _SHIFT) - plate.tx, (x_hi >> _SHIFT) - plate.tx
+            ty_lo, ty_hi = (y_lo >> _SHIFT) - plate.ty, (y_hi >> _SHIFT) - plate.ty
+            if tx_lo < 0 or ty_lo < 0 or tx_hi >= plate.nx or ty_hi >= plate.ny:
+                return False
+            # a slot is marked absent only once its tile was asked for
+            return bool(plate.absent[ty_lo:ty_hi + 1, tx_lo:tx_hi + 1].all())
+
     def _sample(
         self, lat: np.ndarray, lon: np.ndarray, zoom: int, out: np.ndarray, where: np.ndarray
     ) -> None:
+        # where the plate knows the level holds nothing, every point would climb: read a level down at once
+        while self._void(lat, lon, zoom):
+            zoom -= 1
         world = TILE << zoom
         px, py = _pixels(lat, lon, zoom)
         x0 = np.floor(px).astype(np.int64)
@@ -745,6 +775,10 @@ class Sampler:
         exist this deep, as `heights` climbs. Infinite where the plates cannot say (a stretch across the
         antimeridian, or on more tiles than a mosaic takes). Needs `plates`."""
         lat = np.asarray(lat, dtype=np.float64)
+        ends = np.concatenate([lat.ravel(), np.ravel(lat_end)]), np.concatenate([np.ravel(lon), np.ravel(lon_end)])
+        if self._void(*ends, zoom):
+            # every read between these ends climbs a level: that level's ceiling stands over them
+            return self.ceiling(lat, lon, lat_end, lon_end, zoom - 1)
         out = np.full(lat.shape, -np.inf)
         world = TILE << zoom
         xa, ya = _pixels(lat, np.asarray(lon, dtype=np.float64), zoom)
@@ -865,6 +899,23 @@ class Sampler:
             if shared:
                 _remember(key, (heights, source))
         return before
+
+    def mosaic(self, zoom: int, tx: int, ty: int, nx: int, ny: int) -> np.ndarray:
+        """The heights of the tiles `nx` across and `ny` down from tile (`tx`, `ty`), laid side by side as one
+        array, at a level that covers the planet: where it holds no tile, the sea at zero."""
+        if zoom > PLANET_ZOOM:
+            raise ValueError("a mosaic is laid at a level that covers the planet")
+        across = 1 << zoom
+        slots = [((tx + i) % across, ty + j) for j in range(ny) for i in range(nx)]
+        held = self._load(zoom, np.unique([x * across + y for x, y in slots]), across)
+        out = np.zeros((ny * TILE, nx * TILE), dtype=np.float32)
+        for index, (x, y) in enumerate(slots):
+            heights = held[(zoom, x, y)]
+            if heights is not None:
+                row, column = divmod(index, nx)
+                out[row * TILE:(row + 1) * TILE, column * TILE:(column + 1) * TILE] = heights
+        self.zooms.add(zoom)
+        return out
 
     def credits(self) -> list[dict[str, str]]:
         """Who to credit for the heights this sampler read."""
