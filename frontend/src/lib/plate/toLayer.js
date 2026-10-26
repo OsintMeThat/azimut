@@ -17,9 +17,9 @@ const MOMENT = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/;
 const close = (ring) => (ring.length && (ring[0][0] !== ring.at(-1)[0] || ring[0][1] !== ring.at(-1)[1]) ? [...ring, ring[0]] : ring);
 const round = (point) => point.map((value) => Math.round(value * 1e6) / 1e6);
 
-/** The annotations standing on map `mapId` that can become features: everything on its ground but a feature's own label. */
+/** The annotations standing on map `mapId` that can become features: everything on its ground but a feature's own label and a country focus. */
 export function drawnOn(spec, mapId) {
-  return spec.elements.filter((element) => ON_THE_GROUND.includes(element.kind) && element.of === mapId && !element.ref);
+  return spec.elements.filter((element) => ON_THE_GROUND.includes(element.kind) && element.kind !== 'focus' && element.of === mapId && !element.ref);
 }
 
 /** The geometries one annotation becomes. */

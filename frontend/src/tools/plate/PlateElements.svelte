@@ -34,11 +34,13 @@
     onrestack,
     /** The list put away, from its own header. */
     onhide = null,
+    /** `(id, { x, y })`: a right-click on a row, which opens the element's menu. */
+    oncontext = null,
   } = $props();
 
   const ICONS = { map: 'satellite', inset: 'mapArea', legend: 'list', text: 'text', label: 'pin', arrow: 'arrowRight', scale: 'ruler',
     north: 'compass', image: 'image', credits: 'info', shape: 'square', ring: 'rings', cone: 'viewCone', zone: 'polygon', measure: 'line', line: 'curve',
-    key: 'numbered', table: 'table', qr: 'qr', timeline: 'clock', signature: 'edit', brand: 'brand', video: 'video', symbol: 'star' };
+    key: 'numbered', table: 'table', qr: 'qr', timeline: 'clock', signature: 'edit', brand: 'brand', video: 'video', symbol: 'star', focus: 'globe' };
 
   let naming = $state('');
   let nameField = $state('');
@@ -148,7 +150,8 @@
   <ul class="list" class:sorting={!!dragged} bind:this={listEl}>
     {#each list as element, index (element.id)}
       <li class:drop-before={target === index} class:drop-after={target === list.length && index === list.length - 1}
-        class:dragging={dragged === element.id} onpointerdown={(event) => press(event, element)}>
+        class:dragging={dragged === element.id} onpointerdown={(event) => press(event, element)}
+        oncontextmenu={(event) => { if (!oncontext || naming === element.id) return; event.preventDefault(); oncontext(element.id, { x: event.clientX, y: event.clientY }); }}>
         {#if naming === element.id}
           <!-- svelte-ignore a11y_autofocus -->
           <input class="name-field" aria-label="Element name" bind:value={nameField} maxlength="80" autofocus

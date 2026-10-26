@@ -54,7 +54,7 @@
     onplayday = null,
   } = $props();
 
-  /** `{ step, index, anchor }` of the step being set, or `{ day: true, anchor }`. */
+  /** `{ step, index, anchor }` of the step being set, or `{ day: true, anchor }`; `at` in place of `anchor` for a right-click. */
   let menu = $state(null);
   let dragged = $state('');
   let target = $state(-1);
@@ -84,6 +84,11 @@
     const seconds = Number.parseFloat(value);
     return Number.isFinite(seconds) ? Math.round(Math.min(3, Math.max(0.2, seconds)) * 10) / 10 : null;
   }
+  /** A right-click on a tile: its menu, where the pointer is. */
+  function context(event, next) {
+    event.preventDefault();
+    open({ ...next, at: { x: event.clientX, y: event.clientY } });
+  }
   function setStepSeconds(step, value) {
     const bound = boundSeconds(value);
     if (bound !== null) onchange?.(step.id, { duration: Math.max(bound, leastSeconds(step, elements)) });
@@ -104,7 +109,7 @@
 </script>
 
 <div class="steps" bind:this={strip} role="listbox" aria-label="Steps of the day" tabindex="-1" ondragover={(event) => event.preventDefault()} ondrop={drop}>
-  <div class="slot">
+  <div class="slot" role="presentation" oncontextmenu={(event) => context(event, { day: true })}>
     {#if !dayPlayed && onplayday}
       <button type="button" class="tile day idle" title="No layer changes on this day, so the play skips it. Press to add it"
         onclick={() => onplayday(true)}>
@@ -128,7 +133,7 @@
   {#each steps as step, index (step.id)}
     {@const clip = firstClip(step)}
     <div class="slot" class:drop-before={target === index} class:drop-after={target === steps.length && index === steps.length - 1}
-      role="presentation" ondragover={(event) => dragOver(event, index)}>
+      role="presentation" ondragover={(event) => dragOver(event, index)} oncontextmenu={(event) => context(event, { step, index })}>
       <button type="button" class="tile" class:on={current === step.id} role="option" aria-selected={current === step.id}
         draggable="true" title="Press to show it, drag to play it elsewhere"
         ondragstart={(event) => { dragged = step.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', step.id); }}
@@ -154,7 +159,7 @@
 </div>
 
 {#if menu?.day}
-  <FloatingMenu anchor={menu?.anchor} width={230} label="The day" role="dialog" onclose={() => (menu = null)}>
+  <FloatingMenu anchor={menu?.anchor} at={menu?.at} width={230} label="The day" role="dialog" onclose={() => (menu = null)}>
     {#if !dayPlayed && onplayday}
       <button type="button" class="fm-item" onclick={() => { menu = null; onplayday(true); }}>
         <Icon name="plus" size={14} /><span class="fm-grow">Add this day to the play</span></button>
@@ -178,7 +183,7 @@
   </FloatingMenu>
 {:else if menu}
   {@const least = menu?.step ? leastSeconds(menu.step, elements) : 0}
-  <FloatingMenu anchor={menu?.anchor} width={230} label="Step" role="dialog" onclose={() => (menu = null)}>
+  <FloatingMenu anchor={menu?.anchor} at={menu?.at} width={230} label="Step" role="dialog" onclose={() => (menu = null)}>
     <div class="fields">
       <label title="What the strip and the list call it">Name<input class="input" maxlength="80" placeholder={`Step ${menu?.index + 1}`} value={menu?.step.name ?? ''}
         onchange={(event) => onchange?.(menu?.step.id, { name: event.currentTarget.value.trim() })} /></label>

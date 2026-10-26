@@ -61,6 +61,7 @@ class TraceIn(MarksIn):
     known: bool = False
     within: list[float] | None = Field(default=None, min_length=2, max_length=2)
     projection: Literal["camera", "panorama"] = "camera"
+    lens_max: float | None = Field(default=None, ge=skymatch.FOV_MIN, le=skymatch.PANORAMA_FOV_MAX)
     facing: list[float] | None = Field(default=None, min_length=2, max_length=2)
 
     @model_validator(mode="after")
@@ -324,6 +325,25 @@ def preview_find(body: GroundIn) -> dict[str, Any]:
         return finder.preview(plan)
     except terrain.TerrainUnavailable as exc:
         raise HTTPException(status_code=503, detail=f"The terrain could not be loaded: {exc}") from exc
+
+
+@router.post("/horizon/finds/sight")
+def check_sight(body: GroundIn) -> dict[str, Any]:
+    """Start checking which points of the grid see the water the photo shows (the Mesh step), in the background:
+    the preview then greys the points it hides. `{ id, status, done, total }`; one check at a time."""
+    return horizon_finds.check_sight(_asked(body))
+
+
+@router.get("/horizon/finds/sight/{check}")
+def sight_check(check: str) -> dict[str, Any]:
+    """Where a check of water in sight stands: `running`, `done`, `cancelled`, `failed` or `missing`."""
+    return horizon_finds.sight_state(check)
+
+
+@router.post("/horizon/finds/sight/{check}/cancel")
+def cancel_sight(check: str) -> dict[str, Any]:
+    """Stop a check of water in sight: what it checked by then is kept."""
+    return horizon_finds.stop_sight(check)
 
 
 class TryIn(BaseModel):

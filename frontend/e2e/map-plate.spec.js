@@ -79,6 +79,27 @@ test('a new plate opens on the house layout and saves itself', async ({ page }) 
   await expect.poll(() => lastSave(store).title).toBe('Front, October');
 });
 
+test('an edit made while a save is on its way is written after it, never taken as saved', async ({ page }) => {
+  const store = await plateFixture(page);
+  let hold = null;
+  await page.route(`**/api/cases/${CASE_ID}/map-plates`, async (route) => {
+    if (route.request().method() === 'POST' && hold) await hold;
+    await route.fallback();
+  });
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect.poll(() => store.saves.length).toBeGreaterThan(0);
+  let release = null;
+  hold = new Promise((done) => { release = done; });
+  await addOnPage(page, 'Text');
+  // past the autosave's pause, the save holding the text is on its way and held there
+  await expect(page.locator('.status', { hasText: 'Saving' })).toBeVisible();
+  await page.waitForTimeout(1200);
+  await addOnPage(page, 'QR code');
+  release();
+  await expect.poll(() => lastSave(store).spec.elements.some((element) => element.kind === 'qr')).toBe(true);
+});
+
 test('the page zooms round the wheel, moves by a drag, and Fit brings it back', async ({ page }) => {
   await plateFixture(page);
   await page.goto('/#plate');
@@ -174,6 +195,23 @@ test('another ground is laid on the same map, picture or plain, never a map buil
   }
 });
 
+test('a country focus is put on the map by a press on the country, an annotation of the day shown', async ({ page }) => {
+  const store = await plateFixture(page);
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect.poll(() => store.saves.length).toBeGreaterThan(0);
+  await addOnPage(page, 'Country focus');
+  await expect(page.getByText('Press the country to light.')).toBeVisible();
+  const box = await page.locator('.plate-map').first().boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const focusOf = () => lastSave(store).spec.elements.find((element) => element.kind === 'focus');
+  await expect.poll(() => focusOf()?.spotlight?.country ?? '').not.toBe('');
+  const focus = focusOf();
+  expect(focus.of).toBe(lastSave(store).spec.elements.find((element) => element.kind === 'map').id);
+  expect(focus.name).toBe(focus.spotlight.country);
+  await expect(page.locator('.inspector [aria-label="Country lit"]')).toHaveValue(focus.spotlight.country);
+});
+
 test('a map in 3D goes as far as the hand drags it', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
@@ -248,6 +286,38 @@ test('an element moves by the keyboard, goes with Delete, and Undo brings it bac
   await page.waitForTimeout(700);
   await page.getByRole('button', { name: 'Undo (Ctrl+Z)' }).click();
   await expect(page.locator('.list button', { hasText: 'Legend' })).toHaveCount(1);
+});
+
+test('a right-click opens what can be done to the element under it, or to the page', async ({ page }) => {
+  const store = await plateFixture(page);
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect.poll(() => store.saves.length).toBeGreaterThan(0);
+  const legendOf = () => lastSave(store).spec.elements.filter((element) => element.kind === 'legend');
+  const { id } = legendOf()[0];
+  const hit = page.locator(`.hit[data-element="${id}"]`);
+  const menu = page.getByRole('menu');
+  // the element is picked, and its menu offers what the inspector and the keys do
+  await hit.click({ button: 'right' });
+  await expect(menu.locator('.fm-head')).toHaveText('Legend');
+  await expect(page.getByRole('heading', { name: 'Legend', exact: true })).toBeVisible();
+  await menu.getByRole('menuitem', { name: /Duplicate/ }).click();
+  await expect(menu).toHaveCount(0);
+  await expect.poll(() => legendOf().length).toBe(2);
+  // the copy lies a little lower and right: the original's corner is its own
+  await hit.click({ button: 'right', position: { x: 3, y: 3 } });
+  await menu.getByRole('menuitem', { name: /Hide it/ }).click();
+  await expect.poll(() => legendOf().find((element) => element.id === id).hidden).toBe(true);
+  // the list's row opens the same menu
+  await page.locator('.elements .row', { hasText: 'Scale bar' }).click({ button: 'right' });
+  await expect(menu.locator('.fm-head')).toHaveText('Scale bar');
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  // the paper's own: Add opens its panel
+  const paper = await page.locator('.page').first().boundingBox();
+  await page.mouse.click(paper.x + 4, paper.y + 4, { button: 'right' });
+  await menu.getByRole('menuitem', { name: /Add to the page/ }).click();
+  await expect(page.locator('.float-menu .tile').first()).toBeVisible();
 });
 
 test('a row of the element list is dragged up or down, the writing above the maps', async ({ page }) => {
@@ -411,6 +481,32 @@ test('a day plays its steps, and a step plays a video of the case', async ({ pag
   expect(store.exports[0]).toContain('name="staged"\r\n\r\nstaged-1');
   expect(store.pictures.some((body) => body.includes('name="series"\r\n\r\novers'))).toBe(true);
   expect(store.pictures.some((body) => body.includes('name="series"\r\n\r\nframes'))).toBe(true);
+});
+
+test('the play goes through each transition for as long as the video will', async ({ page }) => {
+  const store = { plates: new Map(), saves: [], exports: [], pictures: [], templates: [] };
+  const spec = { page: { paper: 'a4', orientation: 'landscape' }, theme: { paper: '#ffffff', ink: '#111111', accent: '#c8102e', font: 'inter' },
+    time: { at: null, trail: true, since: null, window: null },
+    transitions: { on: true, fade: true, move: false, blur: false, appear: 'fade', seconds: 1.5 },
+    steps: { now: [{ id: 's1', name: 'One', duration: 1 }, { id: 's2', name: 'Two', duration: 1 }] },
+    elements: [{ id: 'map', kind: 'map', box: [10, 24, 277, 176], view: { lat: 48.5, lon: 31.5, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [], layers: [], grid: 'none' },
+      { id: 'title', kind: 'text', box: [10, 6, 200, 14], text: 'Played', size: 22, weight: 700 },
+      { id: 'two', kind: 'text', box: [20, 40, 80, 10], text: 'On the second step', step: 's2' }] };
+  store.plates.set('Played', { title: 'Played', spec });
+  await plateFixture(page, store);
+  await page.goto('/#plate');
+  await page.locator('.tile:not(.template) .open', { hasText: 'Played' }).click();
+  const shown = page.locator('.steps .tile[aria-selected="true"] .tile-name');
+  // it opens on the day itself, under its steps
+  await expect(page.locator('.steps .tile.day')).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(shown).toHaveText('One', { timeout: 10_000 });
+  const into = Date.now();
+  await expect(shown).toHaveText('Two', { timeout: 10_000 });
+  // One holds its second after the transition into it, a second and a half, as in the video
+  const held = Date.now() - into;
+  expect(held).toBeGreaterThan(2000);
+  expect(held).toBeLessThan(4500);
 });
 
 test('a line and a text go on the map, a step frames the map its own way, and the video moves between them', async ({ page }) => {

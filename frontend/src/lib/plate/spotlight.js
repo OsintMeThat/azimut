@@ -75,6 +75,68 @@ function shapeOf(world, name) {
   return { lit, half };
 }
 
+const masks = new WeakMap();
+/** The finest a mask reads, in degrees: the outlines are drawn at 1:110 million, coarser than that. */
+const FINEST = 0.02;
+/** The most pixels a mask holds along its longer side. */
+const MOST_SIDE = 2048;
+
+/**
+ * A shape laid flat on longitudes and latitudes, for a map in 3D that reads it point by
+ * point where it cannot trace the outline (a ring passing behind the eye or the globe):
+ * how much shade each point takes, 0 lit, 0.5 half lit, 1 in the shade. Null where there
+ * is no canvas to rasterise on.
+ */
+export function shapeMask(world, name, shape) {
+  const known = world ? masks.get(world) ?? new Map() : null;
+  if (known?.has(name)) return known.get(name);
+  const mask = maskOf(shape);
+  if (known && mask) { known.set(name, mask); masks.set(world, known); }
+  return mask;
+}
+
+function maskOf(shape) {
+  if (!shape || typeof document === 'undefined') return null;
+  const [west, south, east, north] = boundsOf([...shape.lit, ...shape.half]).map((value, index) => value + (index < 2 ? -0.5 : 0.5));
+  const step = Math.max(FINEST, Math.max(east - west, north - south) / MOST_SIDE);
+  const width = Math.max(1, Math.ceil((east - west) / step));
+  const height = Math.max(1, Math.ceil((north - south) / step));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  const fill = (rings, colour) => {
+    ctx.beginPath();
+    for (const ring of rings) {
+      ring.forEach(([lon, lat], index) => {
+        const [x, y] = [(lon - west) / step, (north - lat) / step];
+        if (index) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      });
+      ctx.closePath();
+    }
+    ctx.fillStyle = colour;
+    ctx.fill();
+  };
+  // the lit areas in red, the half lit ones in green over them, each its own channel
+  ctx.globalCompositeOperation = 'lighter';
+  fill(shape.lit, '#ff0000');
+  fill(shape.half, '#00ff00');
+  const { data } = ctx.getImageData(0, 0, width, height);
+  canvas.width = 0;
+  canvas.height = 0;
+  return {
+    shadeAt(lon, lat) {
+      const x = Math.floor((lon - west) / step);
+      const y = Math.floor((north - lat) / step);
+      if (x < 0 || y < 0 || x >= width || y >= height) return 1;
+      const at = (y * width + x) * 4;
+      if (data[at + 1] > 127) return 0.5;
+      return data[at] > 127 ? 0 : 1;
+    },
+  };
+}
+
 /** Whether a point stands within reach of a ring's corners. */
 const near = ([x, y], ring) => ring.some(([rx, ry]) => Math.abs(rx - x) < REACH && Math.abs(ry - y) < REACH);
 

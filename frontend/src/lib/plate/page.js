@@ -121,10 +121,11 @@ export const KIND_LABELS = {
   image: 'Picture', label: 'Label', arrow: 'Arrow', credits: 'Credits', shape: 'Shape', ring: 'Range rings',
   cone: 'View cone', zone: 'Zone', measure: 'Distance', key: 'Numbered list', table: 'Table', qr: 'QR code',
   timeline: 'Date strip', signature: 'Signature', brand: 'Made with Azimut', video: 'Video', line: 'Line', symbol: 'Symbol',
+  focus: 'Country focus',
 };
 
 /** The kinds that stand on a map's ground: placed by a press on a map, kept out of templates. */
-export const ON_THE_GROUND = ['label', 'arrow', 'ring', 'cone', 'zone', 'measure', 'line', 'symbol'];
+export const ON_THE_GROUND = ['label', 'arrow', 'ring', 'cone', 'zone', 'measure', 'line', 'symbol', 'focus'];
 /** The kinds on the ground held by a box of their own on the page, moved and sized by it: a label, a symbol. */
 export const BOXED_ON_THE_GROUND = ['label', 'symbol'];
 /** The kinds a plate draws as maps, under everything else. */
@@ -243,6 +244,20 @@ export function newId(kind) {
 export function mainMap(spec) {
   const maps = spec?.elements?.filter((element) => element.kind === 'map') ?? [];
   return maps.find((element) => !element.of) ?? maps[0] ?? null;
+}
+
+/**
+ * A plate saved while a country focus was the map's own: each such map's focus made
+ * an element on its ground, on every day and step as it was, the map left without it.
+ */
+export function focusApart(elements) {
+  const out = [];
+  for (const element of elements) {
+    const { spotlight, ...rest } = element;
+    if (!MAP_KINDS.includes(element.kind) || !spotlight?.country) { out.push(element); continue; }
+    out.push(rest, { id: newId('focus'), kind: 'focus', name: spotlight.country, of: element.id, box: [0, 0, 1, 1], spotlight });
+  }
+  return out;
 }
 
 /**

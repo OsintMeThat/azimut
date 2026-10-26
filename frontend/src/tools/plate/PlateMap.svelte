@@ -138,11 +138,15 @@
         project: ([lon, lat]) => { const at = drawn.latLngToContainerPoint({ lat, lon }); return [at.x, at.y]; },
         // the sky has no ground under it: a point there is read as the middle of the view
         unproject: ([x, y]) => { const at = drawn.containerPointToLatLng({ x, y }) ?? drawn.camera(); return [((at.lon + 540) % 360) - 180, at.lat]; },
+        // read quickly for a grid of points, and null in the sky, where unproject gives the middle
+        ground: ([x, y]) => { const at = drawn.surfaceAt({ x, y }); return at ? [at.lon, at.lat] : null; },
       };
     }
+    const unproject = ([x, y]) => { const at = map.unproject([x, y]); return [((at.lng + 540) % 360) - 180, at.lat]; };
     return {
       project: ([lon, lat]) => { const point = map.project([lon, lat]); return [point.x, point.y]; },
-      unproject: ([x, y]) => { const at = map.unproject([x, y]); return [((at.lng + 540) % 360) - 180, at.lat]; },
+      unproject,
+      ground: unproject,
     };
   }
 

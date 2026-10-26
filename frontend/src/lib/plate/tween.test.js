@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { changes, ease, flight, motion, pictureTransform, transitionPlan, TWEEN_FPS, tweenFrames } from './tween.js';
+import { changes, ease, flight, motion, pictureTransform, playedTransit, transitionInto, transitionPlan, TWEEN_FPS, tweenFrames } from './tween.js';
 import { project, unproject } from './geo.js';
 import { PX_PER_MM, TRANSITIONS } from './page.js';
 
@@ -87,12 +87,46 @@ describe('a transition between two beats', () => {
     expect(transitionPlan({ ...on, fade: false, move: false, appear: 'none' }, { moved: ['map'], fresh: ['z'] })).toBeNull();
   });
 
-  it('finds the maps framed otherwise and what is new on the next beat', () => {
+  it('finds the maps framed otherwise, what is new on the next beat and what leaves it', () => {
     const spec = { elements: [{ id: 'map', kind: 'map' }, { id: 'old', kind: 'text', box: [0, 0, 1, 1] },
-      { id: 'z', kind: 'zone', step: 's1', box: [0, 0, 1, 1] }] };
-    const before = { context: { at: null, place: { steps: ['s1'], index: -1 }, views: { map: { view: far, frame } } } };
-    const after = { context: { at: null, place: { steps: ['s1'], index: 0 }, views: { map: { view: near, frame } } } };
-    expect(changes(spec, before, after)).toEqual({ moved: ['map'], fresh: ['z'] });
+      { id: 'z', kind: 'zone', step: 's1', box: [0, 0, 1, 1] }, { id: 'y', kind: 'text', step: 's0', box: [0, 0, 1, 1] }] };
+    const before = { context: { at: null, place: { steps: ['s0', 's1'], index: 0 }, views: { map: { view: far, frame } } } };
+    const after = { context: { at: null, place: { steps: ['s0', 's1'], index: 1 }, views: { map: { view: near, frame } } } };
+    expect(changes(spec, before, after)).toEqual({ moved: ['map'], fresh: ['z'], gone: ['y'] });
+  });
+
+  it('plays a transition as the video draws it: the page or the map first, then what is new', () => {
+    const fading = transitionPlan({ ...TRANSITIONS, on: true, fade: true, move: false, appear: 'none', seconds: 1 }, { moved: [], fresh: ['z'] });
+    // a fading page swaps the writing across the whole of it
+    expect(playedTransit(fading, 0)).toEqual({ coming: 0, going: 1, mode: 'fade' });
+    expect(playedTransit(fading, 0.5).coming).toBeCloseTo(0.5, 5);
+    expect(playedTransit(fading, 1)).toEqual({ coming: 1, going: 0, mode: 'fade' });
+    // a map on the move swaps it halfway, then what is new is drawn along its lines
+    const drawing = transitionPlan({ ...TRANSITIONS, on: true, fade: false, move: true, appear: 'draw', seconds: 1 }, { moved: ['map'], fresh: ['line'] });
+    const share = drawing.first / drawing.frames;
+    expect(playedTransit(drawing, share * 0.4)).toEqual({ coming: 0, going: 1, mode: 'fade' });
+    expect(playedTransit(drawing, share * 0.6)).toEqual({ coming: 0, going: 0, mode: 'fade' });
+    expect(playedTransit(drawing, share + (1 - share) / 2)).toMatchObject({ coming: 0.5, going: 0, mode: 'draw' });
+    expect(playedTransit(drawing, 1).coming).toBe(1);
+  });
+
+  it('finds how the video comes into each beat of the play: its plan and its time, none for a step that cuts in', () => {
+    const map = { id: 'map', kind: 'map', box: [0, 0, 10, 10], view: far };
+    const spec = { transitions: { on: true, fade: false, move: true, appear: 'fade', seconds: 1 }, elements: [map,
+      { id: 'n', kind: 'text', step: 's2', box: [0, 0, 1, 1] }],
+      steps: { now: [{ id: 's1' }, { id: 's2', transition_seconds: 2 }, { id: 's3', transition: 'none' }] },
+      framing: { s1: { map: near } } };
+    const list = [{ day: null, step: null }, { day: null, step: 's1' }, { day: null, step: 's2' }, { day: null, step: 's3' }];
+    const order = ['now', 's1', 's2', 's3'];
+    expect(transitionInto(spec, list, 0, order)).toBe(null);
+    // into s1 the map flies: the plate's second
+    const first = transitionInto(spec, list, 1, order);
+    expect([first.move, first.frames, first.changed.moved]).toEqual([true, TWEEN_FPS, ['map']]);
+    // into s2 the map stays, its text comes in, over the step's own two seconds
+    const second = transitionInto(spec, list, 2, order);
+    expect([second.move, second.appear, second.frames, second.changed.fresh]).toEqual([false, 'fade', 2 * TWEEN_FPS, ['n']]);
+    expect(transitionInto(spec, list, 3, order)).toBe(null);
+    expect(transitionInto({ ...spec, transitions: { on: false } }, list, 1, order)).toBe(null);
   });
 
   const spec = { page: { paper: 'a5', orientation: 'landscape' }, theme: { paper: '#ffffff', ink: '#000000', accent: '#c8102e', font: 'inter' },

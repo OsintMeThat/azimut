@@ -30,6 +30,8 @@ describe('a new plate on one screen', () => {
     show();
     expect(document.body.querySelectorAll('.tile')).toHaveLength(1 + GALLERY.length + 1);
     expect(document.body.querySelectorAll('.tile svg.sketch')).toHaveLength(1 + GALLERY.length + 1);
+    // each ready plate shows the Azimut logo it carries, the analyst's own templates only what they hold
+    expect(document.body.querySelectorAll('.tile svg.sketch .logo-mark')).toHaveLength(GALLERY.length);
     expect([...document.body.querySelectorAll('h4')].map((node) => node.textContent)).toEqual(['Layout', 'Map', 'Paper', 'Look']);
     expect(document.body.querySelector('[role="tab"]')).toBeNull();
     expect(button('Next')).toBeUndefined();

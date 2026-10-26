@@ -46,6 +46,7 @@
   import PlateExportDialog from './plate/PlateExportDialog.svelte';
   import PlateSteps from './plate/PlateSteps.svelte';
   import PlateAdd from './plate/PlateAdd.svelte';
+  import PlateContextMenu from './plate/PlateContextMenu.svelte';
   import PanelEdge from '../components/PanelEdge.svelte';
   import LayerTimeCursor from './satellite/LayerTimeCursor.svelte';
   import { api } from '../lib/api.js';
@@ -64,12 +65,12 @@
   import '../lib/plateFontFaces.js';
   import { creditParts, plateCredits } from '../lib/plate/credits.js';
   import { canvasBlob, composePage, copyPage, evolutionSheet, postExport, QUALITIES, release, scaleFor, scaleForWidth, stagedPictures, videoSize } from '../lib/plate/exportPlate.js';
-  import { KIND_LABELS, PAPERS, longDay, MAP_KINDS, MAX_MAPS, MAX_STEPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, facesOf, mapCount, inLook, addStep, pickedDays, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
+  import { KIND_LABELS, focusApart, PAPERS, longDay, MAP_KINDS, MAX_MAPS, MAX_STEPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, facesOf, mapCount, inLook, addStep, pickedDays, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
     duplicatedStep, fromTemplate, hasSteps, houseLayout, labelBox, listedOf, mainMap, mapsFirst, movedStep, newId, onPaper, pageSize, placeOf, settleOn, shownOn, stepsOf, SYMBOL, templateOf, textMeasurer,
-    transitionsOf, unsettled, withoutStep, restacked, stepOf } from '../lib/plate/page.js';
-  import { changes, transitionPlan, tweenFrames } from '../lib/plate/tween.js';
+    transitionsOf, unsettled, withoutStep, restacked, stepOf, bornOn } from '../lib/plate/page.js';
+  import { TWEEN_FPS, changes, playedTransit, transitionInto as transitionIntoBeat, transitionPlan, tweenFrames } from '../lib/plate/tween.js';
   import { defaultSize } from '../lib/plate/words.js';
-  import { FIRST_SECONDS, beatClips, beats, boundSeconds, clipRange, daySeconds, plateSeconds, playDays, posterKey, posterOf, totalSeconds } from '../lib/plate/clip.js';
+  import { FIRST_SECONDS, beatClips, beats, boundSeconds, clipRange, daySeconds, gifPoster, isGif, plateSeconds, playDays, posterKey, posterOf, totalSeconds } from '../lib/plate/clip.js';
   import { legendRows } from '../lib/plate/legend.js';
   import { numbered, pasted, placeLabels, tableRows } from '../lib/plate/arrange.js';
   import { drawOver, pictureKey } from '../lib/plate/draw.js';
@@ -78,6 +79,7 @@
   import { CLOUDLESS_ID, cloudlessSaid, cloudlessYear } from '../lib/plate/cloudless.js';
   import { SENTINEL_ID, passCredit } from '../lib/plate/sentinelPass.js';
   import { endExport, exportShare, exportSays, plateExport, startExport, stopExport } from '../lib/plate/exportRun.svelte.js';
+  import { countryAt } from '../lib/plate/spotlight.js';
   import { PLAIN_GROUNDS } from '../lib/plate/plainBasemap.js';
   import { BLOCK_ADDS, block } from '../lib/plate/design.js';
   import { FORMATS, GALLERY, formatPage, readyTemplate, relaid } from '../lib/plate/gallery.js';
@@ -137,6 +139,8 @@
   let overflow = $state(new Map());
   let menu = $state(null);
   let templateMenu = $state(null);
+  /** The right-click menu open, `{ at, title, items }` (`PlateContextMenu`). */
+  let contextMenu = $state(null);
   /** Whether New plate's dialog is open. */
   let creating = $state(false);
   /** The button the Add panel opens under, while it is open. */
@@ -228,7 +232,7 @@
     autosave.cancel();
     selection = []; framing = ''; placing = null; views = {}; handles.clear(); playing = false; playBeat = null;
     history = []; future = [];
-    next.spec.elements = mapsFirst(next.spec.elements);
+    next.spec.elements = mapsFirst(focusApart(next.spec.elements));
     plate = { ...next, caseId };
     opened += 1;
     titleField = next.title;
@@ -486,7 +490,9 @@
   async function write() {
     const doc = plate;
     if (!doc) return;
-    const signature = signed(doc.title, doc.spec);
+    // what is sent, read in the same moment the request takes it: an edit made while it travels is written next
+    const text = JSON.stringify(doc.spec);
+    const signature = signed(doc.title, null, text);
     if (signature === saved) return;
     if (doc.template) {
       await saveTemplate('map', { id: doc.template.id, name: doc.title, data: templateOf(doc.spec) });
@@ -508,12 +514,11 @@
       throw error;
     }
     if (plate !== doc) return;
-    saved = signed(answer.title, doc.spec);
+    saved = signed(answer.title, null, text);
     if (doc.name !== answer.name || doc.title !== answer.title) {
       doc.name = answer.name;
       doc.title = answer.title;
       titleField = answer.title;
-      saved = signed(doc.title, doc.spec);
     }
     keepPreview();
   }
@@ -643,14 +648,8 @@
   /** The play bar under the page: the plate's days, the day's steps; nothing on a plate that plays nothing. */
   const barShown = $derived(!!plate && !plate.template && (moments.length > 0 || daySteps.length > 0));
   const stepIndex = $derived(daySteps.findIndex((item) => item.id === stepId));
-  /** How long a played map flies to the next framing: the step's own transition, the plate's, or none for a step that cuts in. */
-  const glide = $derived.by(() => {
-    const moves = plate ? transitionsOf(plate.spec) : null;
-    if (!moves?.on || !moves.move) return 0;
-    const into = daySteps.find((item) => item.id === stepId);
-    if (into?.transition === 'none') return 0;
-    return ((into?.transition_seconds ?? moves.seconds) * 1000) / speed;
-  });
+  /** How long a played map flies to the next framing: the share of the transition the video gives the move, none where it cuts in. */
+  const glide = $derived(transit?.plan.move ? ((transit.plan.first / TWEEN_FPS) * 1000) / speed : 0);
 
   function pickStep(id) {
     if (playing) stop();
@@ -698,9 +697,11 @@
   /** How long a played export runs over `days`, each beat held its own seconds, an MP4's transitions included. */
   const runtime = (days, format = 'mp4') => {
     const list = beats(spec, playable ? days : [at]);
-    const moves = transitionsOf(spec);
-    return totalSeconds(list) + (moves.on && format === 'mp4' ? (list.length - 1) * moves.seconds : 0);
+    if (format !== 'mp4') return totalSeconds(list);
+    return totalSeconds(list) + list.reduce((sum, _, index) => sum + (transitionInto(list, index)?.frames ?? 0) / TWEEN_FPS, 0);
   };
+  /** How the video comes into the beat `index` of `list` from the one before, or null where it cuts (`tween.transitionInto`). */
+  const transitionInto = (list, index) => transitionIntoBeat(spec, list, index, order);
 
   // -- framing a map day by day ---------------------------------------------------------
 
@@ -741,6 +742,30 @@
   // -- playing -------------------------------------------------------------------------
 
   let playTimer = null;
+  /** The transition the play is going through: its plan, what comes and goes, and how far it has got (`k`, 0 to 1). */
+  let transit = $state(null);
+  let transitFrame = 0;
+  /** The play goes through `plan` over `lead` ms, frame by frame, as the video will; null ends it. */
+  function passing(plan, lead = 0) {
+    cancelAnimationFrame(transitFrame);
+    if (!plan || !(lead > 0)) { transit = null; return; }
+    const start = performance.now();
+    transit = { plan, fresh: new Set(plan.changed.fresh), gone: new Set(plan.changed.gone), k: 0 };
+    const tick = (now) => {
+      if (!transit) return;
+      const k = Math.min(1, (now - start) / lead);
+      if (k >= 1) { transit = null; return; }
+      transit = { ...transit, k };
+      transitFrame = requestAnimationFrame(tick);
+    };
+    transitFrame = requestAnimationFrame(tick);
+  }
+  /** What the page draws of the transition under way: what comes in and what goes. */
+  const transitDecor = $derived.by(() => {
+    if (!transit) return {};
+    const { coming, going, mode } = playedTransit(transit.plan, transit.k);
+    return { reveal: { ids: transit.fresh, t: coming, mode }, leaving: { ids: transit.gone, t: going } };
+  });
   /**
    * Through the days the plate's layers change on, each followed by its steps, the
    * steps' clips running in their boxes, without writing a day of it until it stops.
@@ -755,9 +780,12 @@
     const next = () => {
       if (!playing || !plate) return;
       const beat = list[index];
+      // the video comes into the beat by its transition, then holds it its own seconds
+      const plan = transitionInto(list, index);
+      const lead = plan ? ((plan.frames / TWEEN_FPS) * 1000) / speed : 0;
+      passing(plan, lead);
       playBeat = { day: beat.day, step: beat.step };
-      // the beat holds what it holds in the video
-      const held = (beat.seconds * 1000) / speed;
+      const held = lead + (beat.seconds * 1000) / speed;
       index += 1;
       if (index >= list.length) {
         if (!loop) { playTimer = setTimeout(stop, held); return; }
@@ -770,6 +798,7 @@
   /** The play stops on the day and the step it reached, which the plate then keeps. */
   function stop() {
     clearTimeout(playTimer);
+    passing(null);
     playing = false;
     if (playBeat && plate) { plate.spec.time.at = playBeat.day; plate.spec.time.step = playBeat.step; }
     playBeat = null;
@@ -796,7 +825,7 @@
     placing = null;
     const main = mainMap(spec);
     const placed = { label: 'label', number: 'label', note: 'label', arrow: 'arrow', measure: 'measure', ring: 'ring', cone: 'cone', zone: 'zone',
-      spotlight: 'zone', line: 'line', symbol: 'symbol' };
+      spotlight: 'zone', line: 'line', symbol: 'symbol', focus: 'focus' };
     if (placed[kind]) {
       if (!main) { toast('Put a map on the page first', 'warn'); return; }
       // a second press on the armed tool puts it down
@@ -859,6 +888,14 @@
     put(element);
   }
 
+  /** The country under `point` lit on map `of`, the rest of the world drawn back, on the plate's day or step `day`. */
+  async function focusAt(of, point, day) {
+    const read = world ?? (world = (await import('../lib/plate/world.json')).default);
+    const country = countryAt(read, point[0], point[1]);
+    if (!country) { toast('No country there: press inside one, a disputed area stands apart', 'warn'); return; }
+    put({ id: newId('focus'), kind: 'focus', name: country, of, box: [0, 0, 1, 1], spotlight: { country, dim: 0.55, mode: 'dark' }, ...day });
+  }
+
   /** A text on the map: no leader, standing over its point at `page` (millimetres), moved with it. */
   function textOnMap(of, point, page, text, name = text) {
     const element = { id: newId('label'), kind: 'label', name, of, at: point.map((value) => Math.round(value * 1e6) / 1e6),
@@ -883,6 +920,7 @@
     if (!kind || !map) return;
     const of = map.id;
     const day = birth();
+    if (kind === 'focus') { focusAt(of, point, day); return; }
     if (kind === 'callout') {
       const picture = spec.elements.find((item) => item.id === target);
       if (picture) Object.assign(picture, { at: point.map((value) => Math.round(value * 1e6) / 1e6), of, leader: picture.leader ?? 'straight' });
@@ -954,7 +992,7 @@
     selection = selection.filter((id) => spec.elements.some((item) => item.id === id));
   }
   function duplicate(element) {
-    if (MAP_KINDS.includes(element.kind) && mapCount(spec.elements) >= MAX_MAPS) { toast(TOO_MANY_MAPS, 'warn', 6000); return; }
+    if (MAP_KINDS.includes(element.kind) && !element.globe && mapCount(spec.elements) >= MAX_MAPS) { toast(TOO_MANY_MAPS, 'warn', 6000); return; }
     const copies = pasted([element], mainMap(spec)?.id, new Set(spec.elements.map((item) => item.id)));
     if (copies.length) put(...copies);
   }
@@ -1063,6 +1101,87 @@
   let pressedOnPage = false;
   function press(event) {
     pressedOnPage = !!event.target?.closest?.('.viewport, .elements .row');
+  }
+
+  // -- the right-click menu -----------------------------------------------------------
+
+  /** Whether the clipboard holds elements to paste. */
+  function canPaste() {
+    try { return Array.isArray(JSON.parse(localStorage.getItem(CLIPBOARD) ?? 'null')); } catch { return false; }
+  }
+  /**
+   * A right-click on an element of the page or the list: it is picked first, unless it
+   * is one of the elements picked, then the menu holds what can be done to them.
+   */
+  function elementMenu(id, at) {
+    const element = spec?.elements.find((item) => item.id === id);
+    if (!element || plateExport.running) return;
+    if (!selection.includes(id)) selection = [id];
+    pressedOnPage = true;
+    const chosen = spec.elements.filter((item) => selection.includes(item.id));
+    contextMenu = chosen.length > 1 ? { at, title: `${chosen.length} picked`, items: manyItems(chosen) }
+      : { at, title: element.name || KIND_LABELS[element.kind] || 'Element', items: oneItems(element) };
+  }
+  function oneItems(element) {
+    const owed = element.kind === 'credits' && spec.elements.filter((item) => item.kind === 'credits').length < 2;
+    const items = [];
+    if (element.kind !== 'credits') items.push({ label: 'Duplicate', icon: 'copy', keys: 'Ctrl+D', run: () => duplicate(element) });
+    items.push({ label: 'Copy', icon: 'clipboard', keys: 'Ctrl+C', run: copySelection });
+    if (canPaste()) items.push({ label: 'Paste', icon: 'clipboard', keys: 'Ctrl+V', run: pasteSelection });
+    items.push('sep',
+      { label: 'Bring forward', icon: 'chevronUp', disabled: stepOf(listed, element.id, 1) === null, run: () => restackBy(element, 1) },
+      { label: 'Send back', icon: 'chevronDown', disabled: stepOf(listed, element.id, -1) === null, run: () => restackBy(element, -1) },
+      'sep',
+      { label: element.hidden ? 'Show it' : 'Hide it', icon: element.hidden ? 'eye' : 'eyeOff', title: 'Hidden from the page and the export',
+        run: () => (element.hidden = !element.hidden) },
+      { label: element.locked ? 'Unlock' : 'Lock where it is', icon: element.locked ? 'unlock' : 'lock', run: () => (element.locked = !element.locked) });
+    items.push(...stepItems(element));
+    items.push('sep', { label: 'Remove', icon: 'trash', keys: 'Del', danger: true, disabled: owed,
+      title: owed ? 'The map\'s sources are owed their credit' : '', run: () => removeElement(element) });
+    return items;
+  }
+  /** Which steps an element is shown on, as its inspector sets it, while a step is shown. */
+  function stepItems(element) {
+    if (element.kind === 'video') return [];
+    if (element.step) {
+      return ['sep',
+        element.carry ? { label: 'Only on this step', icon: 'clock', title: 'Shown on its step alone', run: () => (element.carry = false) }
+          : { label: 'On this step and after', icon: 'clock', title: 'Shown on its step and the steps after it', run: () => (element.carry = true) },
+        { label: 'Put it on the whole day', icon: 'calendar', run: () => Object.assign(element, { step: null, carry: false, ...bornOn(at, playable) }) }];
+    }
+    if (stepIndex >= 0 && element.kind !== 'credits' && !MAP_KINDS.includes(element.kind)) {
+      return ['sep', { label: `Only on ${stepName(stepIndex)}`, icon: 'clock', run: () => Object.assign(element, { step: stepId, carry: false, onward: null, until: null }) }];
+    }
+    return [];
+  }
+  function manyItems(chosen) {
+    const locked = chosen.every((item) => item.locked);
+    const hidden = chosen.every((item) => item.hidden);
+    const grouped = chosen.some((item) => item.group);
+    return [
+      { label: 'Duplicate', icon: 'copy', keys: 'Ctrl+D', run: () => { for (const element of chosen) if (element.kind !== 'credits') duplicate(element); } },
+      { label: 'Copy', icon: 'clipboard', keys: 'Ctrl+C', run: copySelection },
+      'sep',
+      { label: 'Group', icon: 'layers', keys: 'Ctrl+G', title: 'Picked and moved as one from now on', run: () => group(true) },
+      ...(grouped ? [{ label: 'Ungroup', icon: 'layers', keys: 'Ctrl+Shift+G', run: () => group(false) }] : []),
+      'sep',
+      { label: hidden ? 'Show them' : 'Hide them', icon: hidden ? 'eye' : 'eyeOff', run: () => { for (const element of chosen) element.hidden = !hidden; } },
+      { label: locked ? 'Unlock them' : 'Lock them', icon: locked ? 'unlock' : 'lock', run: () => { for (const element of chosen) element.locked = !locked; } },
+      'sep',
+      { label: 'Remove', icon: 'trash', keys: 'Del', danger: true, title: 'The locked ones stay',
+        disabled: chosen.every((element) => element.locked), run: () => { for (const element of chosen) if (!element.locked) removeElement(element); } },
+    ];
+  }
+  /** A right-click on the paper: what adds to the page, and the undo. */
+  function pageMenu(at) {
+    if (!spec || plateExport.running) return;
+    contextMenu = { at, title: '', items: [
+      { label: 'Add to the page', icon: 'plus', keys: 'A', run: () => { adding = focus ? focusAdd : addButton; } },
+      ...(canPaste() ? [{ label: 'Paste', icon: 'clipboard', keys: 'Ctrl+V', run: pasteSelection }] : []),
+      'sep',
+      { label: 'Undo', icon: 'undo', keys: 'Ctrl+Z', disabled: !canUndo, run: undo },
+      { label: 'Redo', icon: 'redo', keys: 'Ctrl+Shift+Z', disabled: !canRedo, run: redo },
+    ] };
   }
 
   const CLIPBOARD = 'azimut:plate-clipboard';
@@ -1264,7 +1383,8 @@
         const key = posterKey(element);
         if (sources.has(key)) continue;
         sources.set(key, key);
-        posterOf(fileUrl(caseId, element.src), clipRange(element)[0]).then((still) => { if (still) images = new Map(images).set(key, still); });
+        const url = fileUrl(caseId, element.src);
+        (isGif(element.src) ? gifPoster(url) : posterOf(url, clipRange(element)[0])).then((still) => { if (still) images = new Map(images).set(key, still); });
       }
     });
     untrack(() => {
@@ -1318,11 +1438,11 @@
   /** Natural Earth's countries for a globe inset or a country lit, read the first time a plate holds one (`globe2d.js`, `spotlight.js`). */
   let world = $state.raw(null);
   $effect(() => {
-    if (world || !elements.some((element) => (element.kind === 'inset' && element.globe) || element.spotlight?.country)) return;
+    if (world || !elements.some((element) => (element.kind === 'inset' && element.globe) || element.kind === 'focus')) return;
     import('../lib/plate/world.json').then((module) => { world = module.default; }, () => {});
   });
   const decor = $derived({ legend, credits, images, markerImage, iconsRead, tokens, world, imperial: prefs.units === 'imperial', numbered: numbers,
-    numberOf: (id) => numbers.find((item) => item.id === id)?.number, tables, moments, dayLabel: momentLabel, refShown, place });
+    numberOf: (id) => numbers.find((item) => item.id === id)?.number, tables, moments, dayLabel: momentLabel, refShown, place, ...transitDecor });
 
   // -- export --------------------------------------------------------------------------
 
@@ -1602,7 +1722,8 @@
     <div class="work" class:focus style:--below="{barShown ? barHeight : 0}px">
       {#if listShown}
         <div class="dock left" style:width="{layout.listW}px" data-guide="plate.list">
-          <PlateElements spec={plate.spec} bind:selection {at} {place} {playable} bind:ghosts {tokens} onrestack={restack} onhide={() => panel('list')} />
+          <PlateElements spec={plate.spec} bind:selection {at} {place} {playable} bind:ghosts {tokens} onrestack={restack} onhide={() => panel('list')}
+            oncontext={elementMenu} />
           <PanelEdge bind:width={layout.listW} helpers={listWidth} side="right" label="Resize the list" />
         </div>
       {/if}
@@ -1612,7 +1733,7 @@
           <PlatePage spec={plate.spec} bind:selection bind:framing {placing} onplace={placed} caseId={plate.caseId ?? caseId ?? ''} {rows} {providers} {relief}
             {time} stepPlace={place} {playing} {speed} bind:views {decor} bind:overflow {grounds} ghosts={ghosts && playable}
             {framingFor} onmapview={mapView} onkeep={keepFraming} beat={shownKey} {written} onnamelabel={nameToLabel}
-            {glide}
+            {glide} oncontext={(id, point) => (id ? elementMenu(id, point) : pageMenu(point))}
             onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} />
         {/key}
         {#if focus}
@@ -1679,6 +1800,7 @@
       {/if}
     </div>
 
+    <PlateContextMenu menu={contextMenu} onclose={() => (contextMenu = null)} />
     {#if adding}
       <PlateAdd anchor={adding} {placing} template={!!plate.template} onadd={add} onclose={() => (adding = null)} />
     {/if}

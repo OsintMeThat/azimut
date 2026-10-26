@@ -42,6 +42,16 @@ describe('the area', () => {
     find.clearArea();
     expect(find.area).toEqual([]);
   });
+
+  it('asks the map to come over a search opened from the list, not one the bench puts back', async () => {
+    const { find, api } = finder();
+    api.get = vi.fn(async () => ({ status: 'done', ask: { area: [[17, 45], [17, 45.1], [17.1, 45.1]] }, result: { places: [] } }));
+    expect(find.opened).toBe(0);
+    await find.openSearch('c1', 'kept');
+    expect(find.opened).toBe(1);
+    await find.restore({ search: 'kept', area: find.area }, 'c1');
+    expect(find.opened).toBe(1);
+  });
 });
 
 describe('zones beside the area', () => {
@@ -769,6 +779,34 @@ describe('the search', () => {
     find.closeSearch();
   });
 
+  it('bounds a squat panorama of unknown width by the frame it could span, and a long one not at all', async () => {
+    const { find, api, overlay } = laid({ panorama: true });
+    overlay.aspect = 1.5;
+    overlay.hints = { picture: 'panorama', zoom: [], facing: null, reach: 'auto' };
+    find.setArea(area);
+    await find.start('c1');
+    expect(api.post.mock.calls.at(-1)[1].trace).toMatchObject({ projection: 'panorama', within: [60, 360], lens_max: 165 });
+    find.closeSearch();
+    const long = laid({ panorama: true });
+    long.overlay.aspect = 4;
+    long.overlay.hints = { picture: 'panorama', zoom: [], facing: null, reach: 'auto' };
+    long.find.setArea(area);
+    await long.find.start('c1');
+    expect(long.api.post.mock.calls.at(-1)[1].trace).not.toHaveProperty('lens_max');
+    long.find.closeSearch();
+  });
+
+  it('sends a lens measured on the video a twentieth either way, not held exact', async () => {
+    const { find, api } = laid({ lens: { fov: 42, measured: true, at: 72.4 } });
+    find.setArea(area);
+    await find.start('c1');
+    const body = api.post.mock.calls.at(-1)[1];
+    expect(body.trace).toMatchObject({ known: false, fov: 42 });
+    expect(body.trace.within[0]).toBeCloseTo(40, 9);
+    expect(body.trace.within[1]).toBeCloseTo(44.1, 9);
+    find.closeSearch();
+  });
+
   it('sends the lens the photo says and each alignment where it stands across the photo', async () => {
     const { find, api } = laid({ lens: { fov: 4.8 } });
     find.setArea(area);
@@ -927,5 +965,80 @@ describe('a grid laid wider than picked', () => {
 
   it('speaks the analyst’s units', () => {
     expect(widenedText({ asked: 20, spacing: 244.1 }, 'imperial')[0]).toBe('Too large for a 66 ft grid, even in hours: a point every 801 ft. A zone searches finer.');
+  });
+});
+
+describe('the Mesh step’s check of water in sight', () => {
+  const square = (lat, lon, d) => [
+    { lat: lat - d, lon: lon - d },
+    { lat: lat - d, lon: lon + d },
+    { lat: lat + d, lon: lon + d },
+    { lat: lat + d, lon: lon - d },
+  ];
+
+  it('starts, follows its progress, and reads the grid again once done, greying what it hid', async () => {
+    vi.useFakeTimers();
+    try {
+      let previews = 0;
+      const post = vi.fn(async (url) => {
+        if (url.endsWith('/preview')) {
+          previews += 1;
+          return previews === 1
+            ? { spacing: 250, total: 4, kept: 4, kinds: {}, points: [], ruled: {}, sight: { pending: 4, seconds: 1 } }
+            : { spacing: 250, total: 4, kept: 1, kinds: {}, points: [], ruled: { waterhidden: 3 }, sight: { pending: 0, seconds: 0 } };
+        }
+        if (url.endsWith('/sight')) return { id: 'c1', status: 'running', done: 0, total: 4 };
+        return {};
+      });
+      const { find, api } = finder({ post });
+      const states = [
+        { id: 'c1', status: 'running', done: 2, total: 4 },
+        { id: 'c1', status: 'done', done: 4, total: 4 },
+      ];
+      api.get.mockImplementation(async () => states.shift());
+      find.setArea(square(17, 45, 0.1));
+      find.setWater('lake');
+      await find.preview();
+      expect(find.previewed.sight.pending).toBe(4);
+      const checking = find.checkSight();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(post).toHaveBeenCalledWith('/api/horizon/finds/sight', expect.objectContaining({ water: true }));
+      expect(find.sighting).toEqual({ id: 'c1', done: 0, total: 4 });
+      await vi.advanceTimersByTimeAsync(400);
+      expect(find.sighting).toEqual({ id: 'c1', done: 2, total: 4 });
+      await vi.advanceTimersByTimeAsync(400);
+      await checking;
+      expect(api.get).toHaveBeenCalledWith('/api/horizon/finds/sight/c1');
+      expect(find.sighting).toBeNull();
+      expect(find.previewed.ruled).toEqual({ waterhidden: 3 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops when asked, and says a check that failed', async () => {
+    vi.useFakeTimers();
+    try {
+      const post = vi.fn(async (url) => {
+        if (url.endsWith('/preview')) return { spacing: 250, total: 4, kept: 4, kinds: {}, points: [], ruled: {}, sight: { pending: 4, seconds: 1 } };
+        if (url.endsWith('/sight')) return { id: 'c2', status: 'running', done: 0, total: 4 };
+        return { id: 'c2', status: 'running' };
+      });
+      const { find, api } = finder({ post });
+      api.get.mockResolvedValue({ id: 'c2', status: 'failed', error: 'The terrain could not be loaded: offline' });
+      find.setArea(square(17, 45, 0.1));
+      find.setWater('sea');
+      await find.preview();
+      const checking = find.checkSight();
+      await vi.advanceTimersByTimeAsync(0);
+      await find.stopSight();
+      expect(post).toHaveBeenCalledWith('/api/horizon/finds/sight/c2/cancel', {});
+      await vi.advanceTimersByTimeAsync(400);
+      await checking;
+      expect(find.sighting).toBeNull();
+      expect(find.sightFailed).toBe('The terrain could not be loaded: offline');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

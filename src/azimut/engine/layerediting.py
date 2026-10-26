@@ -2055,7 +2055,8 @@ def layer_targets(case: Case, entity_id: str | None = None) -> list[dict[str, An
     """The analyst's layers a case item can join, and its markers already in each.
 
     One row per editable layer, in listing order, with the groups a new marker
-    can join, the marker styles it already shows (at most twelve, as drawn) and,
+    can join, the marker styles it already shows (at most twelve, as drawn),
+    every colour its features are drawn in (what its key lists) and,
     when ``entity_id`` names an item, the markers that show it at the point they
     stand on now, a proof's own or its footage's (`layerlinks.family`). A layer
     whose working copy cannot be read is left out rather than failing the others.
@@ -2076,15 +2077,18 @@ def layer_targets(case: Case, entity_id: str | None = None) -> list[dict[str, An
             layerlinks.follow(case, linked, rendered=False)
             groups = {group["id"]: group for group in _groups(spec)}
             styles: list[dict[str, str]] = []
+            colours: list[str] = []
             for feature in spec["document"]["features"]:
-                if feature["geometry"]["type"] != "Point" or len(styles) >= 12:
-                    continue
                 properties = feature["properties"]
                 group = groups.get(properties.get("group")) or {}
                 drawn = group if group.get("mode") == "uniform" else properties
                 tint = group.get("colour") if group.get("mode") == "colour" else drawn.get("colour")
-                style = {"symbol": drawn.get("symbol") or "pin",
-                         "colour": str(tint or group.get("colour") or "#0072b2").lower()}
+                colour = str(tint or group.get("colour") or "#0072b2").lower()
+                if colour not in colours:
+                    colours.append(colour)
+                if feature["geometry"]["type"] != "Point" or len(styles) >= 12:
+                    continue
+                style = {"symbol": drawn.get("symbol") or "pin", "colour": colour}
                 if drawn.get("icon"):
                     look = (spec.get(ICON_META) or {}).get(drawn["icon"]) or {}
                     style.update(icon=drawn["icon"], icon_mode=look.get("mode") or "image")
@@ -2100,6 +2104,7 @@ def layer_targets(case: Case, entity_id: str | None = None) -> list[dict[str, An
                              "lon": f["geometry"]["coordinates"][0], "lat": f["geometry"]["coordinates"][1]}
                             for f in linked],
                 "styles": styles,
+                "colours": colours,
             })
         return rows
 

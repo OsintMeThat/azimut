@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import functools
 import json
+import threading
 import time
+import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -114,6 +116,57 @@ def lanes_for(speed: str | None) -> int:
     return max(1, lanes)
 
 
+# The Mesh step's check of water in sight (finder.check_sight), one at a time: `{ id, status, done, total }`,
+# the status `running`, `done`, `cancelled` or `failed` (its `error` said).
+_SIGHT: dict[str, dict[str, Any]] = {}
+_SIGHT_LOCK = threading.Lock()
+
+
+def check_sight(ask: dict[str, Any]) -> dict[str, Any]:
+    """Start checking which points of a setup's grid see the water the photo shows, stopping the check under
+    way: it runs beside the case's queue, the setup needing no case."""
+    plan = plan_from(ask)
+    state: dict[str, Any] = {"id": uuid.uuid4().hex[:12], "status": "running", "done": 0, "total": 0, "stop": False}
+    with _SIGHT_LOCK:
+        before = _SIGHT.get("now")
+        if before is not None:
+            before["stop"] = True
+        _SIGHT["now"] = state
+
+    def tell(done: int, total: int) -> None:
+        state.update(done=done, total=total)
+
+    def work() -> None:
+        try:
+            finder.check_sight(plan, tell=tell, cancelled=lambda: bool(state["stop"]))
+            state["status"] = "done"
+        except finder.Cancelled:
+            state["status"] = "cancelled"
+        except terrain.TerrainUnavailable as exc:
+            state.update(status="failed", error=f"The terrain could not be loaded: {exc}")
+
+    threading.Thread(target=work, name="find-sight", daemon=True).start()
+    return sight_state(state["id"])
+
+
+def sight_state(check: str) -> dict[str, Any]:
+    """Where a check of water in sight stands, by its id: `missing` once another took its place."""
+    with _SIGHT_LOCK:
+        state = _SIGHT.get("now")
+        if state is None or state["id"] != check:
+            return {"id": check, "status": "missing", "done": 0, "total": 0}
+        return {key: state[key] for key in ("id", "status", "done", "total", "error") if key in state}
+
+
+def stop_sight(check: str) -> dict[str, Any]:
+    """Ask a check of water in sight to stop: what it checked by then is kept."""
+    with _SIGHT_LOCK:
+        state = _SIGHT.get("now")
+        if state is not None and state["id"] == check:
+            state["stop"] = True
+    return sight_state(check)
+
+
 def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -199,6 +252,7 @@ def trace_from(ask: dict[str, Any]) -> finder.Trace:
         known=bool(lens.get("known")),
         within=(float(min(within)), float(max(within))) if within else None,
         projection=lens.get("projection", "camera"),
+        lens_max=float(lens["lens_max"]) if lens.get("lens_max") else None,
         facing=facing,
         marks=finder.marks_of(lens),
         floor=finder.FLOOR_M,

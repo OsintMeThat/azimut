@@ -177,6 +177,21 @@ describe('drawing a plate page', () => {
     expect(traced.length).toBeGreaterThan(5);
   });
 
+  it('draws the Azimut logo alone when no words stand before it, its right edge on the box\'s', async () => {
+    const { signatureWidth } = await import('../brandMark.js');
+    const spec = houseLayout({ view: { lat: 0, lon: 0, zoom: 4, bearing: 0 } });
+    spec.elements.push({ id: 'b', kind: 'brand', box: [100, 100, 20, 4], text: '', align: 'right', colour: '#777777' });
+    const ctx = recorder();
+    globalThis.Path2D = class {};
+    try {
+      drawPage(ctx, spec, { scale: 3, views: {}, legend: {} });
+    } finally { delete globalThis.Path2D; }
+    expect(ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text)).not.toContain('Made with');
+    // the lockup as high as the box, ending where the box ends
+    const left = 360 - signatureWidth(12, { tight: true });
+    expect(ctx.calls.some(([name, x]) => name === 'translate' && Math.abs(x - (left - (5.8 / 24) * 12)) < 0.01)).toBe(true);
+  });
+
   it('sets the Made with lockup tight, without the air of the app\'s corner', async () => {
     const { signatureWidth } = await import('../brandMark.js');
     expect(signatureWidth(10, { tight: true })).toBeLessThan(signatureWidth(10) * 0.8);
@@ -322,10 +337,38 @@ describe('the drawing of lines', () => {
     expect(curve.length).toBe(9);
   });
 
-  it('draws the rest of the world back round a country lit, under a soft edge, and nothing on a tilted map', () => {
+  it('reads a map in 3D point by point for a country focus, its sky in the shade', () => {
     const spec = houseLayout({ view: { lat: 49, lon: 31, zoom: 5, bearing: 0 } });
     const map = spec.elements.find((element) => element.kind === 'map');
-    map.spotlight = { country: 'Ukraine', dim: 0.5, mode: 'dark' };
+    spec.elements.push({ id: 'focus3d', kind: 'focus', of: map.id, box: [0, 0, 1, 1], spotlight: { country: 'Ukraine', dim: 0.5, mode: 'dark' } });
+    const frame = { width: 700, height: 500 };
+    // the left of the view is sky; the rest stands in the country, which the mask lights all over
+    const ground = ([x]) => (x < 100 ? null : [31, 49]);
+    const put = [];
+    const surface = () => {
+      const ctx = recorder();
+      ctx.getImageData = (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4).map((_, index) => (index % 4 === 0 ? 255 : 0)) });
+      ctx.createImageData = (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) });
+      ctx.putImageData = (image) => put.push(image);
+      return ctx;
+    };
+    vi.stubGlobal('document', { createElement: () => ({ width: 0, height: 0, getContext: surface }) });
+    try {
+      const ctx = recorder();
+      drawPage(ctx, spec, { scale: 3, views: { [map.id]: { view: { ...map.view, pitch: 50 }, frame, ground, project: () => [NaN, NaN] } }, legend: {}, credits: {}, world });
+      expect(ctx.calls.some(([name, picture]) => name === 'drawImage' && picture?.getContext)).toBe(true);
+      const [grid] = put;
+      const alpha = (col, row) => grid.data[(row * grid.width + col) * 4 + 3];
+      const middle = Math.floor(grid.height / 2);
+      expect(alpha(0, middle)).toBe(255);
+      expect(alpha(grid.width - 1, middle)).toBe(0);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('draws the rest of the world back round a country focus, under a soft edge, and nothing on a tilted map it cannot read', () => {
+    const spec = houseLayout({ view: { lat: 49, lon: 31, zoom: 5, bearing: 0 } });
+    const map = spec.elements.find((element) => element.kind === 'map');
+    spec.elements.push({ id: 'focus', kind: 'focus', of: map.id, box: [0, 0, 1, 1], spotlight: { country: 'Ukraine', dim: 0.5, mode: 'dark' } });
     const views = { [map.id]: { view: map.view, frame: { width: 700, height: 500 } } };
     // the shade is made on a sheet apart: the lit areas cut out of it, then the sheet laid over the map, blurred
     const sheet = recorder();
@@ -340,5 +383,57 @@ describe('the drawing of lines', () => {
       drawPage(tiltedCtx, spec, { scale: 3, views: { [map.id]: { ...views[map.id], view: { ...map.view, pitch: 40 } } }, legend: {}, credits: {}, world });
       expect(tiltedCtx.calls.some(([name, picture]) => name === 'drawImage' && picture?.getContext)).toBe(false);
     } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('draws what a played transition takes away while it fades, and nothing of it once gone', () => {
+    const spec = houseLayout({ view: { lat: 49, lon: 31, zoom: 5, bearing: 0 } });
+    spec.elements.push({ id: 'left', kind: 'text', box: [20, 20, 60, 10], text: 'Leaving now', step: 's1' });
+    const written = (leaving) => {
+      const ctx = recorder();
+      drawPage(ctx, spec, { scale: 3, views: {}, legend: {}, credits: {}, place: { steps: ['s1', 's2'], index: 1 }, leaving });
+      return ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
+    };
+    expect(written({ ids: new Set(['left']), t: 0.4 })).toContain('Leaving now');
+    expect(written({ ids: new Set(['left']), t: 0 })).not.toContain('Leaving now');
+    expect(written(null)).not.toContain('Leaving now');
+  });
+
+  it('leaves the corners of a globe inset to the map under it, cutting only its disc out of what the map draws', () => {
+    const spec = houseLayout({ view: { lat: 49, lon: 31, zoom: 5, bearing: 0 } });
+    const map = spec.elements.find((element) => element.kind === 'map');
+    map.grid = 'degrees';
+    const inset = spec.elements.find((element) => element.kind === 'inset');
+    inset.box = [map.box[0] + 10, map.box[1] + 10, 40, 30];
+    const views = { [map.id]: { view: map.view, frame: { width: map.box[2] * PX_PER_MM, height: map.box[3] * PX_PER_MM } } };
+    const cut = (globe) => {
+      inset.globe = globe;
+      const ctx = recorder();
+      ctx.createRadialGradient = () => ({ addColorStop() {} });
+      drawPage(ctx, spec, { scale: 3, views, legend: {}, credits: {} });
+      const clip = ctx.calls.findIndex(([name, rule]) => name === 'clip' && rule === 'evenodd');
+      return ctx.calls.slice(0, clip);
+    };
+    const [x, y, w, h] = inset.box.map((value) => value * 3);
+    const disc = cut(true).filter(([name]) => name === 'arc');
+    // the radius the globe is drawn at: half its box, less its rim
+    expect(disc.at(-1).slice(1, 4)).toEqual([x + w / 2, y + h / 2, h / 2 - Math.max(1, 0.3 * 3)]);
+    expect(cut(true).some(([name, ...box]) => name === 'rect' && box[0] === x && box[1] === y)).toBe(false);
+    expect(cut(false).some(([name, ...box]) => name === 'rect' && box[0] === x && box[1] === y && box[2] === w)).toBe(true);
+  });
+
+  it('leads a picture to its point while the map shows it, and to nothing once turned or framed away', () => {
+    const spec = houseLayout({ view: { lat: 48.85, lon: 2.35, zoom: 12, bearing: 0 } });
+    const map = spec.elements.find((element) => element.kind === 'map');
+    spec.elements.push({ id: 'pic', kind: 'image', box: [map.box[0] + 5, map.box[1] + 5, 30, 20], of: map.id, at: [2.36, 48.84], leader: 'straight', src: '' });
+    const frame = { width: map.box[2] * PX_PER_MM, height: map.box[3] * PX_PER_MM };
+    const lines = (view) => {
+      const ctx = recorder();
+      drawPage(ctx, spec, { scale: 3, views: { [map.id]: { view, frame } }, legend: {}, credits: {} });
+      return ctx.calls.filter(([name]) => name === 'lineTo').length;
+    };
+    const near = lines(map.view);
+    expect(near).toBeGreaterThan(0);
+    // framed far away, the point is off the map: its leader goes with it
+    expect(lines({ ...map.view, lat: 40, lon: 20 })).toBeLessThan(near);
   });
 });

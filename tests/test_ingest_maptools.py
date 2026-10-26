@@ -48,6 +48,7 @@ def _spec(south=48.85, west=2.29, north=48.87, east=2.31, statuses=None):
 MAP_ROUTES = [
     ("get", "/api/ingest/saved", {"case_id": "x"}),
     ("get", "/api/ingest/media", {"case_id": "x"}),
+    ("get", "/api/ingest/probe", {"case_id": "x", "path": "media/a.mp4"}),
     ("get", "/api/ingest/sky", {"lat": 48.8, "lon": 2.3}),
     ("get", "/api/ingest/grids", {"case_id": "x"}),
     ("get", "/api/ingest/grid", {"case_id": "x", "name": "a"}),
@@ -196,10 +197,57 @@ def test_reference_media_is_trimmed_to_what_the_picker_draws(client):
     answer = client.get("/api/ingest/media", params={"case_id": cid}, headers=headers).json()
     assert answer["total"] == 1
     # a thumbnail path, a name and which of the two kinds it is, is the whole of
-    # what a picker tile is; the app's own index carries metadata dumps, GPS,
-    # enrichment state and folder counts, none of which an extension can use
-    assert set(answer["items"][0]) == {"path", "filename", "title", "kind", "thumbnail"}
+    # what a picker tile is, and the notes, dates and origin are what a window
+    # unfolds; the app's own index carries metadata dumps, GPS, enrichment state
+    # and folder counts, none of which an extension can use
+    assert set(answer["items"][0]) == {
+        "path", "filename", "title", "kind", "thumbnail", "notes", "taken_at", "source",
+    }
     assert answer["items"][0]["filename"] == "roof.png"
+
+
+def test_reference_media_carries_what_a_window_unfolds(client):
+    headers = _headers(client)
+    cid = _case(client, "Facts")
+    item = _upload(client, cid, "roof.png")
+    client.patch(
+        f"/api/cases/{cid}/media",
+        json={"path": item["path"], "notes": "North wall, before noon", "source_url": "https://x.com/a/status/1"},
+    )
+
+    answer = client.get("/api/ingest/media", params={"case_id": cid}, headers=headers).json()
+    one = answer["items"][0]
+    assert one["notes"] == "North wall, before noon"
+    # the origin, and only the keys a window reads: an upload's type stays home
+    assert one["source"] == {"url": "https://x.com/a/status/1"}
+    assert one["taken_at"] == ""
+
+
+def test_probe_gives_a_window_the_frame_rate_and_nothing_else(client, monkeypatch):
+    from azimut.engine import inspect as inspect_engine
+
+    headers = _headers(client)
+    cid = _case(client, "Clip")
+    clip = _upload_video(client, cid)
+    monkeypatch.setattr(
+        inspect_engine,
+        "probe",
+        lambda case, path: {"path": path, "kind": "video", "fps": 25.0, "duration": 12.4, "codec": "h264"},
+    )
+
+    answer = client.get(
+        "/api/ingest/probe", params={"case_id": cid, "path": clip["path"]}, headers=headers
+    )
+    assert answer.status_code == 200
+    assert answer.json() == {"fps": 25.0, "duration": 12.4}
+
+
+def test_probe_stays_inside_the_case(client):
+    headers = _headers(client)
+    cid = _case(client, "Inside")
+    for path in ("../../settings.json", "media/missing.mp4"):
+        answer = client.get("/api/ingest/probe", params={"case_id": cid, "path": path}, headers=headers)
+        assert answer.status_code == 404, path
 
 
 def test_reference_media_offers_both_kinds_and_filters_to_one(client):

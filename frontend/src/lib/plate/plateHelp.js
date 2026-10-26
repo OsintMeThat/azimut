@@ -47,6 +47,7 @@ export const PLATE_HELP = {
   Ground: 'What the map is drawn on',
   'Wayback release': 'Which dated release of Esri\'s imagery it shows',
   'Cloudless year': 'Which year\'s cloud-free picture it shows; each has its own licence',
+  'GIF runs': 'How long the GIF plays, round and round, and so how long its step holds',
   'Sentinel-2 layer and date': 'The Sentinel-2 pass the map is drawn on: its layer, its day and the cloud it may hold',
   Zoom: 'How close the map is, to the decimal',
   Bearing: 'How far the map is turned from north, in degrees',

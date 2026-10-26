@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { drawnStyle, splitPick, styleTarget, usedStyles } from './layerStyle.js';
+import { drawnStyle, splitPick, styleTarget, usedStyles, wornColours } from './layerStyle.js';
 
 const groups = [
   { id: 'free', name: 'Sightings', mode: 'individual', colour: '#0072b2', symbol: 'pin' },
@@ -27,6 +27,12 @@ describe('the style a feature is drawn in', () => {
     expect(usedStyles(features, groups)).toEqual([{ symbol: 'flag', colour: '#D55E00' }, { symbol: 'star', colour: '#009e73' }]);
     expect(usedStyles(features, groups, { point: false })).toEqual([{ colour: '#cc79a7' }]);
     expect(usedStyles(features, groups, { limit: 1 })).toHaveLength(1);
+  });
+
+  it('lists every colour a layer is drawn in once, markers and lines together', () => {
+    const features = [point('a', { colour: '#D55E00' }), line('b', { colour: '#f0e442' }), point('c', { group: 'one', colour: '#d55e00' }),
+      line('d', { group: 'side' }), point('e', { colour: '#d55e00' })];
+    expect(wornColours(features, groups)).toEqual(['#d55e00', '#f0e442', '#009e73', '#cc79a7']);
   });
 });
 

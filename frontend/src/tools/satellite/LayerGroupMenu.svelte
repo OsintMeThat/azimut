@@ -8,7 +8,7 @@
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import LayerStyleButton from './LayerStyleButton.svelte';
-  import { usedStyles } from '../../lib/map/layerStyle.js';
+  import { usedStyles, wornColours } from '../../lib/map/layerStyle.js';
   import { LAYER_HELP as HELP } from '../../lib/map/layerHelp.js';
 
   let { controller, group, anchor, members = 0, onclose } = $props();
@@ -30,6 +30,7 @@
   const used = $derived(usedStyles(controller.features ?? [], controller.groups ?? []));
   /** Every colour the layer wears, its markers' and its lines', for a group given one colour. */
   const worn = $derived([...used, ...usedStyles(controller.features ?? [], controller.groups ?? [], { point: false })]);
+  const wears = $derived(wornColours(controller.features ?? [], controller.groups ?? []));
 
   async function slide(field, value, reset) {
     const result = await controller.updateGroup(group.id, { [field]: value });
@@ -50,7 +51,7 @@
   </div>
   {#if group.mode === 'uniform'}
     <div class="field" title={HELP.groupStyle}><span>Style</span>
-      <LayerStyleButton label="Group style" symbol={group.symbol} colour={group.colour} icon={group.icon ?? ''} {used}
+      <LayerStyleButton label="Group style" symbol={group.symbol} colour={group.colour} icon={group.icon ?? ''} {used} {wears}
         caseId={controller.editor?.caseId ?? null} layer={controller.editor?.name ?? null} meta={controller.icons}
         disabled={busy} onpick={(changes) => controller.updateGroup(group.id, changes)} /></div>
   {:else if group.mode === 'colour'}

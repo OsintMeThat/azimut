@@ -156,23 +156,42 @@ describe('the colours', () => {
 describe('what is offered at once', () => {
   afterEach(() => { answers.palette = { colours: [] }; });
 
-  it('offers the named colours by name and the layer’s own, the rest behind "+"', async () => {
-    answers.palette = { colours: [{ name: 'Side A', colour: '#0072b2' }], icons: [{ name: 'Strike', key: 'badge-explosion' }] };
+  const offered = () => [...document.querySelectorAll('.palette button')].map((node) => node.getAttribute('aria-label'));
+
+  it('offers the layer’s colours by their names, the rest behind "+"', async () => {
+    answers.palette = { colours: [{ name: 'Side A', colour: '#0072b2' }, { name: 'Side B', colour: '#00aa00' }], icons: [{ name: 'Strike', key: 'badge-explosion' }] };
     const onpick = vi.fn();
-    await show({ onpick, caseId: 'named', colour: '#ff0000', symbol: 'badge-explosion', used: [{ symbol: 'pin', colour: '#ff0000' }, { symbol: 'flag', colour: '#0000ff' }] });
-    const offered = () => [...document.querySelectorAll('.palette button')].map((node) => node.getAttribute('aria-label'));
+    await show({ onpick, caseId: 'named', colour: '#ff0000', symbol: 'badge-explosion', used: [{ symbol: 'pin', colour: '#ff0000' }, { symbol: 'flag', colour: '#0000ff' }],
+      wears: ['#ff0000', '#0072b2', '#0000ff'] });
+    // Side A is a line of this layer: said by its name; Side B is only named elsewhere in the case
     expect(offered()).toEqual(['Marker Side A', 'Marker #ff0000', 'Marker #0000ff', 'More colours']);
     expect(document.querySelector('[aria-label="Marker colour code"]')).toBeNull();
     pick('Marker Side A');
     expect(onpick).toHaveBeenLastCalledWith({ colour: '#0072b2' });
     pick('More colours');
-    // the plain colours unfold, blue once since it is Side A here, and the code to type
-    expect(offered()).toContain('Marker orange');
+    // the case's other names unfold first, then the plain colours, blue once since it is Side A here, and the code to type
+    expect(offered().slice(4, 6)).toEqual(['Marker Side B', 'Marker orange']);
     expect(offered()).not.toContain('Marker blue');
     expect(document.querySelector('[aria-label="Marker colour code"]')).toBeTruthy();
     // the icon worn says what the case says it means, and the tag says itself in words
     expect([...document.querySelectorAll('.fm-head')].map((node) => node.textContent)).toContain('Icon · Strike');
     expect(document.querySelector('[aria-label="Edit names"]')).toBeTruthy();
+  });
+
+  it('offers the colours of its own lines before those other layers name', async () => {
+    answers.palette = { colours: [{ name: 'Ansar Allah', colour: '#cc0000' }, { name: 'Yemen Gov', colour: '#2222ff' }] };
+    await show({ caseId: 'elsewhere', colour: '#d55e00', used: [{ symbol: 'pin', colour: '#0000ff' }, { symbol: 'pin', colour: '#d55e00' }],
+      wears: ['#0000ff', '#f0e442', '#d55e00'] });
+    expect(offered()).toEqual(['Marker #0000ff', 'Marker orange', 'Marker yellow', 'More colours']);
+    pick('More colours');
+    expect(offered()).toContain('Marker Ansar Allah');
+    expect(offered()).toContain('Marker Yemen Gov');
+  });
+
+  it('offers the case’s named colours at once in a layer in no colour yet', async () => {
+    answers.palette = { colours: [{ name: 'Side A', colour: '#0072b2' }] };
+    await show({ caseId: 'fresh', colour: '#0072b2' });
+    expect(offered()).toEqual(['Marker Side A', 'More colours']);
   });
 
   it('offers the plain colours at once in a layer with none yet', async () => {

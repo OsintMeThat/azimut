@@ -2070,6 +2070,7 @@
       onplace={lookFromPlace}
       onfound={lookFromFound}
       caseOpen={Boolean(caseState.current)}
+      caseId={caseState.current?.id ?? null}
       onopensearch={openSearch}
       onremovesearch={removeSearch}
       onnew={newSearch}

@@ -42,6 +42,7 @@
     resultOf,
     ringsOf,
     RULED,
+    searchedPoints,
     WATER_COLOUR,
   } from '../../lib/horizon/find.js';
   import MapSurface from '../satellite/MapSurface.svelte';
@@ -812,6 +813,15 @@
     const drawingNow = find.drawing === 'area';
     if (wasDrawing && !drawingNow) untrack(showArea);
     wasDrawing = drawingNow;
+  });
+
+  // a search opened from the list: the map comes over everything it was drawn with, once it can move
+  let framedAt = untrack(() => find.opened);
+  $effect(() => {
+    const opened = find.opened;
+    if (!engine || !ready || opened === framedAt) return;
+    framedAt = opened;
+    untrack(() => engine.fitPoints?.(searchedPoints(find), { padding: 40, maxZoom: 17 }));
   });
 
   /** The map over the area, once it is closed. */

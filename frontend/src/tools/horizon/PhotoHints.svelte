@@ -78,7 +78,7 @@
         {#if lens}{Math.round(lens.fov)}° across: Fit keeps it.{:else}Fit tries {PANORAMA_WITHIN[0]}° to {PANORAMA_WITHIN[1]}° across.{/if}
       </p>
     {:else if lens?.measured}
-      <p class="said">Measured on the video at {clockOf(lens.at)}: {Math.round(lens.fov)}° across. Fit and Find keep it.</p>
+      <p class="said">Measured on the video at {clockOf(lens.at)}: {Math.round(lens.fov)}° across. Fit keeps it, Find allows 5% either way.</p>
       <div class="acts">
         <button type="button" class="small" onclick={() => overlay.measureLens()}>Measure again here</button>
         <button type="button" class="small" onclick={() => overlay.forgetLens()}>Forget</button>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FORMATS, GALLERY, formatPage, readyTemplate, relaid } from './gallery.js';
 import { MAP_KINDS, MAX_MAPS, THEMES, fromTemplate, mapCount, onPaper, pageSize, templateOf } from './page.js';
-import { TEXT_STYLES } from './design.js';
+import { TEXT_STYLES, mutedOf } from './design.js';
 
 const view = { lat: 44.6, lon: 33.6, zoom: 9, bearing: 0 };
 
@@ -25,6 +25,32 @@ describe('the ready plates', () => {
         // the maps under everything else
         const firstOther = data.elements.findIndex((element) => !MAP_KINDS.includes(element.kind));
         expect(data.elements.slice(firstOther).some((element) => element.kind === 'map')).toBe(false);
+      }
+    }
+  });
+
+  it('carry the Azimut logo alone, in the source line\'s ink, in room of its own on every paper', () => {
+    const touches = (a, b) => a[0] < b[0] + b[2] - 0.05 && b[0] < a[0] + a[2] - 0.05 && a[1] < b[1] + b[3] - 0.05 && b[1] < a[1] + a[3] - 0.05;
+    const holds = (outer, inner) => outer[0] <= inner[0] && outer[1] <= inner[1] && outer[0] + outer[2] >= inner[0] + inner[2] && outer[1] + outer[3] >= inner[1] + inner[3];
+    for (const entry of GALLERY) {
+      for (const page of [null, ...FORMATS.map(([, , paper]) => paper)]) {
+        const data = readyTemplate(entry.id, page);
+        const where = `${entry.id} on ${data.page.paper} ${data.page.orientation}`;
+        const logos = data.elements.filter((element) => element.kind === 'brand');
+        expect(logos, where).toHaveLength(1);
+        const [logo] = logos;
+        // the mark and the name, no "Made with" before them
+        expect(logo.text, where).toBe('');
+        expect(logo.colour, where).toBe(mutedOf(data.theme));
+        const { width } = pageSize(data.page);
+        const [x, , w, h] = logo.box;
+        expect(h >= 3.5 && h <= 6.5, where).toBe(true);
+        expect(x + w, where).toBeLessThanOrEqual(width - 5);
+        // nothing else stands on it but the map it is set over and the card it signs
+        for (const other of data.elements) {
+          if (other === logo || other.kind === 'map' || (other.kind === 'shape' && holds(other.box, logo.box))) continue;
+          expect(touches(logo.box, other.box), `${where}: ${other.id}`).toBe(false);
+        }
       }
     }
   });

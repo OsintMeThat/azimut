@@ -5,7 +5,7 @@
    * and the feature sheet both carry it.
    */
   import LayerStyleButton from './LayerStyleButton.svelte';
-  import { splitPick, styleTarget, usedStyles } from '../../lib/map/layerStyle.js';
+  import { splitPick, styleTarget, usedStyles, wornColours } from '../../lib/map/layerStyle.js';
 
   /** `regroup`: whether the picker also moves features between groups, off where a Group row sits beside it. */
   let { controller, label = 'Style', size = 20, disabled = false, regroup = true, onopen = null } = $props();
@@ -14,6 +14,7 @@
   const chosen = $derived(controller.features.filter((feature) => selection.includes(feature.properties.key)));
   const target = $derived(styleTarget({ chosen, groups, into: controller.group, draft: controller.draft }));
   const used = $derived(usedStyles(controller.features, groups, { point: target.point }));
+  const wears = $derived(wornColours(controller.features, groups));
 
   function pick(changes) {
     if (target.uniform) return controller.updateGroup(target.uniform.id, changes);
@@ -30,7 +31,7 @@
   }
 </script>
 
-<LayerStyleButton {label} {size} {used} {groups} {disabled}
+<LayerStyleButton {label} {size} {used} {wears} {groups} {disabled}
   symbol={target.symbol} colour={target.colour} icon={target.icon ?? ''} point={target.point} mixed={target.mixed} note={target.note}
   layer={controller.editor?.name ?? null} meta={controller.icons}
   group={target.group} groupLabel={chosen.length ? 'Group' : 'Add to'} ongroup={regroup ? move : null}

@@ -236,8 +236,12 @@ TILT_SLACK = 1.0
 ROUND_SPAN = 0.5
 ROUND_FAR = 3_000.0
 ROUND_CLOSEST = 1_000.0
-# A pair of strokes standing in the wrong order takes this share of the score per pair asked.
+# A pair of strokes standing in the wrong order takes this share of the score per pair asked, shared as if there
+# were PAIR_MIN at least: one pair alone never halves a place (v29's truth: its two strokes 2,249 and 2,303 m out,
+# the front not a tenth nearer, lost half its score; a lone pair counted as one of three, 19th of 41 to 3rd, no
+# other case moved).
 PAIR_COST = 0.5
+PAIR_MIN = 3
 # A ridge stands in front of another when it is nearer by this share of the other's distance.
 PAIR_NEARER = 0.9
 # A point of a line said to have only sky above lies under the terrain when the terrain stands over it by more
@@ -385,20 +389,17 @@ class Ridges:
         return cls(start, step, angles, distances)
 
     def nearest(
-        self, azimuth: np.ndarray, elevation: np.ndarray, reach: float | None = None,
-        bands: tuple[np.ndarray, np.ndarray] | None = None,
+        self, azimuth: np.ndarray, elevation: np.ndarray, bands: tuple[np.ndarray, np.ndarray] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """For each direction, the angle (degrees, + above) to the nearest silhouette in its column within
-        `reach` metres, and within each direction's band (`bands`: low and high, metres) when given, and
-        that silhouette's distance: NaN where the column holds none."""
+        """For each direction, the angle (degrees, + above) to the nearest silhouette in its column, within
+        each direction's band (`bands`: low and high, metres) when given, and that silhouette's distance: NaN
+        where the column holds none."""
         azimuth = np.asarray(azimuth, dtype=np.float64)
         elevation = np.asarray(elevation, dtype=np.float64)
         count = self.angle.shape[0]
         column = np.rint(np.remainder(azimuth - self.start, 360.0) / self.step).astype(np.int64) % count
         angles = self.angle[column]
         distances = self.distance[column]
-        if reach is not None:
-            angles = np.where(distances <= reach, angles, np.nan)
         if bands is not None:
             low, high = bands
             angles = np.where((distances >= low[:, None]) & (distances <= high[:, None]), angles, np.nan)
@@ -1152,7 +1153,9 @@ def _judge(
     if ridges is not None and marks.ridge_x.size >= MIN_POINTS:
         azimuth, elevation, per = through(marks.ridge_x, marks.ridge_y, marks.ridge_piece)
         ridge_bands = bands_of(marks.ridge_line, marks.ridge_x.size, marks.far, floor)
-        off, ridge_far = ridges.nearest(azimuth, elevation, fit.reach, ridge_bands)
+        # read against every silhouette the sweep found, past the skyline's cut too: a ridge seen in front of
+        # farther land may stand past the cut the skyline fits best (a near cut once lost a night view's ridges)
+        off, ridge_far = ridges.nearest(azimuth, elevation, ridge_bands)
         cost = np.where(np.isnan(off), LOST_LOSS, _loss(np.nan_to_num(off) * per))
         inner = float(1.0 - cost.mean() / LOST_LOSS)
         # an inner edge with no ridge under it takes score away, one lying on its ridge adds none
@@ -1174,7 +1177,7 @@ def _judge(
         judged = [(front, back) for front, back in marks.pairs if front in far and back in far]
         if judged:
             good = sum(1 for front, back in judged if far[front] < PAIR_NEARER * far[back])
-            score *= 1.0 - PAIR_COST * (len(judged) - good) / len(judged)
+            score *= 1.0 - PAIR_COST * (len(judged) - good) / max(len(judged), PAIR_MIN)
             kept = (good, len(judged))
     over: float | None = None
     over_far: float | None = None
@@ -1200,7 +1203,7 @@ def match(
     level: bool = False, projection: Projection = "camera", quick: bool = False, rough: bool = False,
     marks: Marks | None = None, ridges: Ridges | None = None, floor: float = 0.0,
     tilts: tuple[float, float] | None = None, rounding: float | None = None, clear: Turn | None = None,
-    beyond: Sequence[Turn] = (),
+    beyond: Sequence[Turn] = (), lens_window: tuple[float, float] | None = None, lens_max: float | None = None,
 ) -> Match:
     """The headings, lenses and tilts that bring `turn` onto the trace (x, y), and a verdict.
 
@@ -1228,7 +1231,10 @@ def match(
     place lies on; without it, on the top of the land out to `CLEAR_NEAR` times
     the line's own distance (`_tops`), and against every cut of the turn
     (`_over`), and `beyond`'s: the turn read on past the farthest the trace is
-    searched, for them alone.
+    searched, for them alone. `lens_window` keeps the lenses slid over to those it holds, out of the ones the
+    slide would try, so a search narrowed about a neighbour's lens slides the very lenses a full one does.
+    `lens_max` leaves out, and bounds the refinement under, the lenses wider than the picture can span; the others
+    are the very ones tried without it.
     """
     if projection == "panorama":
         level, roll = True, 0.0
@@ -1255,7 +1261,14 @@ def match(
 
     rows: list[_Row] = []
     widths: dict[float, float] = {}
-    for lens in lenses(fov, known=known, within=within, projection=projection, ratio=ROUGH_RATIO if rough else RANGE_RATIO):
+    tried = lenses(fov, known=known, within=within, projection=projection, ratio=ROUGH_RATIO if rough else RANGE_RATIO)
+    if lens_max is not None and not known:
+        tried = [lens for lens in tried if lens <= lens_max] or [min(tried)]
+    if lens_window is not None:
+        held = [lens for lens in tried if lens_window[0] <= lens <= lens_window[1]]
+        # a window between two lenses slides the nearer
+        tried = held or [min(tried, key=lambda lens: abs(math.log(lens / math.sqrt(lens_window[0] * lens_window[1]))))]
+    for lens in tried:
         seen = _through(xs, ys, lens, tilt, roll, half_width, twist=not level, projection=projection, bands=picked,
                         sure=None if sure is None else sure[pick])
         widths[lens] = float(seen.azimuth.max() - seen.azimuth.min())
@@ -1278,6 +1291,8 @@ def match(
     apart = max(APART_MIN, widths[rows[0][2]] / 2)
     # a lens the analyst bounds stays within the bounds
     bounds = (min(within), max(within)) if within is not None and not known else None
+    if bounds is not None and lens_max is not None:
+        bounds = (bounds[0], max(bounds[0], min(bounds[1], lens_max)))
     refined = []
     for _, h, f, t, index, r in _spread_out(rows, apart, 1 if rough else QUICK_REFINED if quick else REFINED):
         fit = _refine(x, y, turns[index], heading=h, tilt=float(np.clip(t, -89.0, 89.0)), fov=f, roll=r,

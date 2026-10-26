@@ -8,6 +8,7 @@
    */
   import { pageSize } from '../../lib/plate/page.js';
   import { mutedOf } from '../../lib/plate/design.js';
+  import { AMBER } from '../../lib/brandMark.js';
   import GroundSwatch from './GroundSwatch.svelte';
 
   let { data, width = 160 } = $props();
@@ -22,6 +23,13 @@
     const step = Math.max(2.2, (element.size ?? 10) * 0.42);
     const count = Math.max(1, Math.min(4, Math.floor(h / step)));
     return Array.from({ length: count }, (_, index) => ({ y: index * step, w: index === count - 1 && count > 1 ? w * 0.6 : w * 0.92 }));
+  };
+  /** The Azimut logo alone, as wide as its box lets it: where it starts and how high it stands. */
+  const logo = (element) => {
+    const [x, , w, h] = element.box;
+    const high = Math.min(h, w / 2.81);
+    const left = element.align === 'left' ? x : element.align === 'center' ? x + (w - high * 2.81) / 2 : x + w - high * 2.81;
+    return { left, high };
   };
   const inkOf = (element) => element.colour || (element.role === 'kicker' || element.role === 'figure' ? theme.accent
     : ['dek', 'caption', 'source'].includes(element.role) ? muted : theme.ink);
@@ -70,6 +78,10 @@
       <rect {x} {y} width={w} height={h} fill="none" stroke={theme.ink} stroke-width="0.6" />
       <rect x={x + w * 0.2} y={y + h * 0.2} width={w * 0.25} height={h * 0.25} fill={theme.ink} />
       <rect x={x + w * 0.55} y={y + h * 0.55} width={w * 0.25} height={h * 0.25} fill={theme.ink} />
+    {:else if element.kind === 'brand' && !element.text}
+      {@const { left, high } = logo(element)}
+      <path class="logo-mark" d="M{left} {y + h / 2 + high / 2} L{left + high * 0.26} {y + h / 2 - high / 2} L{left + high * 0.52} {y + h / 2 + high / 2} Z" fill={AMBER} />
+      <rect x={left + high * 0.7} y={y + h / 2 - high * 0.2} width={high * 2.1} height={high * 0.4} rx={high * 0.2} fill={element.colour || muted} />
     {:else if element.kind === 'signature' || element.kind === 'brand'}
       <rect x={x + w * 0.4} y={y + h * 0.3} width={w * 0.6} height="1.4" rx="0.7" fill={muted} />
     {/if}

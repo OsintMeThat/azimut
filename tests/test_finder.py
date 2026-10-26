@@ -575,7 +575,11 @@ def test_cells_near_relief_are_filled_in_within_the_budget():
     many = finder.filled(plan, nearest, 500.0, 25.0, set(seen))
     assert len(many) <= finder.DENSE_MAX * len(coarse)
     assert many[0][2] == pytest.approx(cell / 9)  # the nearest relief's cell (63 m), filled first and finest
-    assert {round(own, 3) for _, _, own in many[100:]} <= {round(cell / 4, 3), round(cell / 2, 3)}
+    assert {round(own, 3) for _, _, own, _ in many[100:]} <= {round(cell / 4, 3), round(cell / 2, 3)}
+    # each point filling a cell in starts from its cell's fit, when it has one
+    assert {start for _, _, _, start in many} == {None}
+    fitted = [{**p, "heading": 80.0, "fov": 40.0} for p in coarse]
+    assert finder.filled(plan, fitted, 500.0, 60.0, set(seen))[0][3] == (0.1, 80.0, 40.0)
     # a plain seeing no relief, or relief far enough for the grid, is left as it is
     assert finder.filled(plan, [{**p, "relief": float("inf")} for p in coarse], 500.0, 60.0, set(seen)) == []
     assert finder.filled(plan, [{**p, "relief": 9_000.0} for p in coarse], 500.0, 60.0, set(seen)) == []
@@ -724,7 +728,7 @@ def test_the_pace_is_timed_on_points_of_the_grid_with_the_lanes_this_machine_run
     assert paced["seconds"] > 0 and paced["timed"] == finder.PACE_POINTS
     assert paced["lanes"]["gentle"] == 1 and paced["lanes"]["fast"] >= 1
     assert paced["lanes"]["fastest"] >= paced["lanes"]["fast"] or paced["lanes"]["fastest"] == horizon_finds.cores()
-    assert paced["full"] == finder.FULL_COST and paced["lane_power"] == finder.LANE_POWER and paced["top"] == finder.TOP
+    assert paced["full"] == finder.FULL_COST and paced["lane_power"] == finder.LANE_POWER and paced["top"] == finder.FULL_PLACES
     # other points each time: a point timed before, its turn kept, is not timed again
     timed: list[tuple[float, float]] = []
     real = finder._score_stage
@@ -762,6 +766,9 @@ def test_a_search_keeps_the_directions_ticked_and_runs_with_them(client):
     assert ask["facing"] == ["ne", "e"]
     plan, trace = horizon_finds.plan_of(ask)
     assert trace.facing == ((67.5, 45.0),)
+    assert trace.lens_max is None
+    _, squat = horizon_finds.plan_of({**ask, "trace": {**ask["trace"], "lens_max": 165.0}})
+    assert squat.lens_max == 165.0
     assert plan.stands == ()
     # every search keeps unsaid lines off the eye's own slope, and bounds the tilt as who took it
     assert trace.floor == finder.FLOOR_M and trace.tilts == finder.TILTS["ground"] and not trace.mirror
@@ -970,3 +977,203 @@ def test_a_search_says_its_size_first_and_refuses_what_it_cannot_run(client):
     ):
         assert client.post(url, json=_ask(**change)).status_code == 422
     assert client.get(f"{url}/nothing").status_code == 404
+
+
+def test_the_rough_passes_run_outward_each_point_beside_the_ones_before():
+    # a 20 by 20 grid: along the curve each point stands next to the one before
+    x, y = np.meshgrid(np.arange(20.0), np.arange(20.0))
+    x, y = x.ravel(), y.ravel()
+    order = finder.hilbert_order(x, y)
+    assert sorted(order.tolist()) == list(range(400))
+    steps = np.hypot(np.diff(x[order]), np.diff(y[order]))
+    assert np.median(steps) == 1.0 and np.mean(steps <= 1.5) > 0.9
+    assert finder.hilbert_order(np.array([3.0]), np.array([4.0])).tolist() == [0]
+
+
+def test_a_warm_start_slides_near_its_neighbours_within_what_was_said():
+    trace = replace(_photo(), known=False, within=(20.0, 85.0), fov=40.0)
+    plan = finder.Plan(area=_square(CAMERA, 1_000.0))
+    half = finder.warm_half(trace)
+    narrowed = finder.warmed(trace, plan, *CAMERA, [(80.0, 40.0), (300.0, 50.0)])
+    mask = finder.heading_mask(narrowed.facing)
+    assert mask[80] and mask[300] and not mask[180]
+    assert abs(int(mask.sum()) - 2 * 2 * round(half)) <= 4
+    # the lenses a full slide tries, kept to those near the seeds'
+    assert narrowed.within == trace.within
+    assert narrowed.lens_window == pytest.approx((40.0 / finder.WARM_LENS, 50.0 * finder.WARM_LENS))
+    assert finder.half_span(narrowed) < finder.half_span(trace)
+    # within the directions the analyst ticked, and none left when they do not meet
+    facing = replace(trace, facing=((90.0, 22.5),))
+    assert finder.heading_mask(finder.warmed(facing, plan, *CAMERA, [(80.0, 40.0)]).facing)[80]
+    assert finder.warmed(facing, plan, *CAMERA, [(270.0, 40.0)]) is None
+    # a known lens stays as it is
+    assert finder.warmed(_photo(), plan, *CAMERA, [(80.0, 30.0)]).within is None
+    assert finder.half_span(finder.warmed(_photo(), plan, *CAMERA, [(80.0, 30.0)])) == finder.half_span(_photo())
+
+
+def test_a_run_slides_in_full_every_few_points_with_no_start_or_after_a_fall(monkeypatch):
+    calls = []
+
+    def scored(a, o, step, stage, heights, trace, plan, sampler):
+        warm = trace.facing is not None
+        calls.append(warm)
+        # the third point's warm start falls far under its start, every other point keeps a fit
+        explained = 0.1 if warm and len(calls) == 3 else 0.6
+        return {"lat": a, "lon": o, "explained": explained, "heading": 80.0, "fov": 40.0, "spacing": step}
+
+    monkeypatch.setattr(finder, "_score_stage", scored)
+    monkeypatch.setattr(finder, "WARM_EVERY", 4)
+    monkeypatch.setattr(finder, "WARM_DROP", 0.1)
+    plan = finder.Plan(area=_square(CAMERA, 1_000.0))
+    jobs = [(CAMERA[0] + i * 1e-4, CAMERA[1], 50.0, None) for i in range(9)]
+    points = finder._warm_run(jobs, "rough", _photo(), plan, terrain.Sampler())
+    assert len(points) == 9
+    # first in full (no start), then warm; the third falls and is slid again in full; every fourth in full
+    assert calls == [False, True, True, False, True, False, True, True, True, False]
+    # a start that explains too little gives none
+    calls.clear()
+    weak = [(CAMERA[0], CAMERA[1], 50.0, (0.05, 80.0, 40.0)), (CAMERA[0] + 1e-4, CAMERA[1], 50.0, (0.05, 80.0, 40.0))]
+    monkeypatch.setattr(finder, "_score_stage", lambda a, o, step, *rest: calls.append(rest[2].facing is not None) or {"lat": a, "lon": o, "explained": 0.05, "spacing": step})
+    finder._warm_run(weak, "rough", _photo(), plan, terrain.Sampler())
+    assert calls == [False, False]
+
+
+def test_a_search_scored_outward_finds_the_camera_as_one_scored_in_full(monkeypatch):
+    area = _square(CAMERA, 1_500.0)
+    plan = finder.Plan(area=area, reach=REACH, spacing=500.0, fine=150.0)
+    found = finder.search(plan, _photo())
+    monkeypatch.setattr(finder, "WARM", False)
+    full = finder.search(plan, _photo())
+    best, best_full = found["places"][0], full["places"][0]
+    assert terrain.distance(best["lat"], best["lon"], *CAMERA) <= 300
+    assert best["explained"] >= best_full["explained"] - 0.02
+    assert abs(best["heading"] - best_full["heading"]) < 2.0
+
+
+def test_a_large_grid_is_gathered_in_cells_of_about_nine_points_the_middle_one_first():
+    plan = finder.Plan(area=_square(CAMERA, 2_000.0), spacing=100.0)
+    lat, lon = finder.grid(plan, 100.0)
+    jobs = [(float(a), float(o), 100.0, None) for a, o in zip(lat, lon)]
+    cells = finder.cells_of(plan.area[0], jobs)
+    members = sorted(i for cell in cells for i in cell)
+    assert members == list(range(len(jobs)))
+    sizes = np.array([len(cell) for cell in cells])
+    assert 7 <= np.median(sizes) <= 11
+    # the first point of a cell stands nearer its middle than the others
+    x, y = finder._local(*plan.area[0], lat, lon)
+    full = max(cells, key=len)
+    middle = (x[full].mean(), y[full].mean())
+    assert np.hypot(x[full[0]] - middle[0], y[full[0]] - middle[1]) <= np.hypot(x[full] - middle[0], y[full] - middle[1]).min() + 60
+
+
+def test_a_cell_is_bounded_by_its_score_and_the_rough_score_s_own_grain():
+    assert finder.bound({"explained": 0.4}) == pytest.approx(0.4 + finder.BOUND_SLACK)
+    assert finder.bound({"explained": -1.0}) == pytest.approx(finder.BOUND_SLACK)
+
+
+def test_best_first_fills_the_cells_that_could_change_the_places_and_draws_the_others_whole():
+    plan = finder.Plan(area=_square(CAMERA, 5_000.0), spacing=100.0)
+    lat, lon = finder.grid(plan, 100.0)
+    jobs = [(float(a), float(o), 100.0, None) for a, o in zip(lat, lon)]
+    # six hot spots 2.5 km apart, each lower than the last, over ground that explains little
+    peaks = [(offset(*CAMERA, bearing, 2_500.0), 0.9 - 0.06 * k) for k, bearing in enumerate(range(0, 360, 60))]
+    asked: list[list] = []
+
+    def explained(a, o):
+        return max([0.05, *(height - terrain.distance(a, o, *where) / 1_500.0 for where, height in peaks)])
+
+    def warm(batch, stage):
+        asked.append(list(batch))
+        return [{"lat": round(a, 6), "lon": round(o, 6), "explained": explained(a, o), "heading": 80.0, "fov": 40.0,
+                 "spacing": step} for a, o, step, start in batch]
+
+    def full(batch, stage):
+        # slid in full: no fit to start from
+        return warm([(*job, None) for job in batch], stage)
+
+    scored, told = finder._best_first(jobs, plan.area[0], warm, full)
+    cells = finder.cells_of(plan.area[0], jobs)
+    assert told["cells"] == len(cells) and 0 < told["filled"] < len(cells)
+    assert told["skipped"] + len(scored) == len(jobs)
+    # first one point a cell, in full and as large as its cell; then the rest of the cells about the hot spots, each
+    # from its first
+    assert len(asked[0]) == len(cells) and asked[0][0][2] > 250 and {start for *_, start in asked[0]} == {None}
+    assert all(start is not None for batch in asked[1:] for *_, start in batch)
+    # the places are those every point scored would give: the fifth's hot spot too, not the first's alone
+    every = [{"lat": a, "lon": o, "explained": explained(a, o)} for a, o, _, _ in jobs]
+    full = finder._spread(every, finder.APART_M, finder.TOP)
+    found = finder._spread(scored, finder.APART_M, finder.TOP)
+    assert [round(p["explained"], 2) for p in found] == [round(p["explained"], 2) for p in full]
+    assert all(terrain.distance(f["lat"], f["lon"], p["lat"], p["lon"]) <= 150 for f, p in zip(found, full))
+    # a cell left is drawn whole and filled in by nothing; a cell searched is drawn as its points are
+    left = [p for p in scored if p.get("bounded")]
+    assert left and all(p["spacing"] > 250 for p in left)
+    assert finder.filled(plan, left, 100.0, 25.0, set()) == []
+    assert all(p["spacing"] == 100.0 for p in scored if not p.get("bounded"))
+
+
+def test_a_large_grid_searched_best_first_finds_the_camera_as_one_searched_whole(monkeypatch):
+    plan = finder.Plan(area=_square(CAMERA, 3_000.0), reach=REACH, spacing=250.0, fine=250.0)
+    monkeypatch.setattr(finder, "BOUND", True)
+    monkeypatch.setattr(finder, "BOUND_MIN", 300)
+    assert finder.grid(plan, 250.0)[0].size >= finder.BOUND_MIN
+    found = finder.search(plan, _photo())
+    assert found["bounded"]["skipped"] > 0
+    monkeypatch.setattr(finder, "BOUND", False)
+    whole = finder.search(plan, _photo())
+    assert "bounded" not in whole
+    best, best_whole = found["places"][0], whole["places"][0]
+    assert terrain.distance(best["lat"], best["lon"], *CAMERA) <= 300
+    assert best["explained"] >= best_whole["explained"] - 0.02
+    assert len(found["points"]) < len(whole["points"])
+    # a small area, fewer places than the answer lists: every point is searched
+    small = replace(plan, area=_square(CAMERA, 1_000.0), spacing=100.0, fine=100.0)
+    monkeypatch.setattr(finder, "BOUND", True)
+    assert finder.search(small, _photo())["bounded"]["skipped"] == 0
+
+
+def test_a_place_read_low_roughly_but_first_in_full_is_listed_first(monkeypatch):
+    # ten hot spots 2 km apart, read roughly a little lower one after the other; the eighth is the place, which only
+    # a full fit reads as the best
+    spots = [finder._from_local(*CAMERA, np.array([(i % 4) * 2_000.0 - 3_000.0]), np.array([(i // 4) * 2_000.0 - 2_000.0]))
+             for i in range(10)]
+    spots = [(float(a[0]), float(o[0])) for a, o in spots]
+
+    def scored(a, o, step, stage, heights, trace, plan, sampler):
+        near = min(range(10), key=lambda i: terrain.distance(a, o, *spots[i]))
+        value = 0.8 - 0.02 * near - terrain.distance(a, o, *spots[near]) / 4_000.0
+        if stage == "full" and near == 7:
+            value += 0.2
+        return {"lat": round(a, 6), "lon": round(o, 6), "explained": round(value, 4), "heading": 80.0, "fov": 40.0,
+                "gap": 0.0, "spacing": step, "relief": 9_000.0}
+
+    monkeypatch.setattr(finder, "_score_stage", scored)
+    plan = finder.Plan(area=_square(CAMERA, 4_500.0), reach=REACH, spacing=500.0, fine=500.0)
+    found = finder.search(plan, _photo())
+    assert len(found["places"]) == finder.TOP
+    assert terrain.distance(found["places"][0]["lat"], found["places"][0]["lon"], *spots[7]) < 500.0
+    # searched in full only as many as are listed, the place is never reached
+    monkeypatch.setattr(finder, "FULL_PLACES", finder.TOP)
+    found = finder.search(plan, _photo())
+    assert all(terrain.distance(p["lat"], p["lon"], *spots[7]) > 1_000.0 for p in found["places"])
+
+
+def test_the_best_points_a_warm_start_scored_are_slid_again_in_full(monkeypatch):
+    # a warm start that always reads 0.12 under what a full slide reads, within the fall a run accepts
+    def true(a, o):
+        return round(0.9 - terrain.distance(a, o, *CAMERA) / 2_000.0, 4)
+
+    def scored(a, o, step, stage, heights, trace, plan, sampler):
+        warm = trace.lens_window is not None or trace.facing is not None
+        return {"lat": round(a, 6), "lon": round(o, 6), "explained": true(a, o) - (0.12 if warm else 0.0), "heading": 80.0,
+                "fov": 40.0, "gap": 0.0, "spacing": step, "relief": 9_000.0}
+
+    monkeypatch.setattr(finder, "_score_stage", scored)
+    plan = finder.Plan(area=_square(CAMERA, 1_000.0), reach=REACH, spacing=100.0, fine=100.0)
+    trace = replace(_photo(), known=False, within=(20.0, 85.0))
+    found = finder.search(plan, trace)
+    points = sorted(found["points"], key=lambda p: -p["explained"])
+    warm = [p for p in points if abs(p["explained"] - (true(p["lat"], p["lon"]) - 0.12)) < 1e-6]
+    assert warm, "some points were warm-started"
+    # the best of them read again in full: none of the leading points keeps its warm score
+    assert all(abs(p["explained"] - true(p["lat"], p["lon"])) < 1e-6 for p in points[:5])

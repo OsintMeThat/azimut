@@ -12,9 +12,9 @@
   import Modal from '../../components/Modal.svelte';
   import SourcePicker from '../../components/SourcePicker.svelte';
   import Icon from '../../components/Icon.svelte';
+  import SearchCard from './SearchCard.svelte';
   import { carriesOutsideFiles } from '../../lib/drag.js';
-  import { fileUrl } from '../../lib/fileUrl.js';
-  import { searchEnding, searchedWhen, searchTone } from '../../lib/horizon/find.js';
+  import { searchThumbs } from '../../lib/horizon/find.js';
 
   let {
     /** The open case's id, or null in one-shot mode. */
@@ -52,7 +52,7 @@
 
   const shownSearches = $derived(allSearches ? (searches ?? []) : (searches ?? []).slice(0, SEARCHES_SHOWN));
   /** Each search's photo by its path, for its picture once the case's files are read. */
-  const thumbs = $derived(new Map(media.filter((item) => item.thumbnail).map((item) => [item.path, item.thumbnail])));
+  const thumbs = $derived(searchThumbs(media));
 
   onMount(async () => {
     if (!caseId) return;
@@ -88,16 +88,8 @@
       <h4>Searches in this case <span class="count">{searches.length}</span></h4>
       <div class="searches">
         {#each shownSearches as row (row.name)}
-          {@const thumb = thumbs.get(row.photo)}
           <button type="button" class="search" onclick={() => onopensearch(row.name)} title="Open this search: its photo, area and map">
-            <span class="search-thumb">
-              {#if thumb}<img src={fileUrl(caseId, thumb)} alt="" loading="lazy" />{:else}<Icon name="search" size={16} />{/if}
-            </span>
-            <span class="search-text">
-              <span class="search-title">{row.title}</span>
-              <small>{searchedWhen(row.created_at)}</small>
-              <span class="search-end {searchTone(row)}">{searchEnding(row)}</span>
-            </span>
+            <SearchCard {row} {caseId} thumb={thumbs.get(row.photo) ?? null} />
             <Icon name="chevronRight" size={13} />
           </button>
         {/each}
@@ -232,76 +224,6 @@
     border-color: var(--accent);
     background: var(--bg-3);
     color: var(--text-1);
-  }
-  .search-thumb {
-    display: grid;
-    flex: none;
-    place-items: center;
-    width: 64px;
-    height: 48px;
-    overflow: hidden;
-    border-radius: var(--r-sm);
-    background: var(--bg-0);
-    color: var(--text-3);
-  }
-  .search-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .search-text {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1px;
-    min-width: 0;
-  }
-  .search-title,
-  .search-text small {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .search-title {
-    color: var(--text-1);
-    font-size: var(--fs-sm);
-    font-weight: 600;
-  }
-  .search-text small {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-  }
-  /* how it ended, as a chip in its own colour */
-  .search-end {
-    margin-top: 2px;
-    padding: 0 6px;
-    border-radius: 999px;
-    background: var(--bg-3);
-    color: var(--text-2);
-    font-size: 11px;
-    line-height: 18px;
-    white-space: nowrap;
-  }
-  .search-end.done {
-    color: var(--text-1);
-  }
-  .search-end.quiet {
-    color: var(--text-3);
-  }
-  .search-end.found {
-    background: var(--ok-soft);
-    color: var(--ok);
-    font-weight: 600;
-  }
-  .search-end.running {
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-  .search-end.failed {
-    background: color-mix(in srgb, var(--danger) 14%, transparent);
-    color: var(--danger);
   }
   .more {
     align-self: flex-start;

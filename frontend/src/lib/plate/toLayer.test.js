@@ -18,6 +18,9 @@ const spec = { theme: { accent: '#c8102e' }, elements: [
 describe('what was drawn on a plate\'s map, made into a layer', () => {
   it('takes what stands on that map\'s ground, but a feature\'s own label', () => {
     expect(drawnOn(spec, 'map').map((element) => element.id)).toEqual(['z', 'l', 'a', 'r', 'c', 's', 'n']);
+    // a country focus lights the map, it is no feature
+    expect(drawnOn({ elements: [...spec.elements, { id: 'f', kind: 'focus', of: 'map', spotlight: { country: 'Ukraine' } }] }, 'map')
+      .some((element) => element.id === 'f')).toBe(false);
   });
 
   it('writes each as a personal layer\'s feature, in its group and colour, its days kept', () => {

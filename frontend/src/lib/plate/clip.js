@@ -135,6 +135,27 @@ export function captionOf(item) {
 /** The key a video's still frame is kept under in the page's pictures. */
 export const posterKey = (element) => `video:${element.src}@${clipRange(element)[0]}`;
 
+/** Whether a clip's file is a GIF: it plays as a video does, looping for as long as its clip runs. */
+export const isGif = (src) => /\.gif$/i.test(String(src ?? ''));
+
+/** The first picture of a GIF, as a canvas; null when the browser cannot read it. */
+export function gifPoster(url) {
+  return new Promise((resolve) => {
+    const picture = new Image();
+    picture.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = picture.naturalWidth || 1;
+      canvas.height = picture.naturalHeight || 1;
+      try {
+        canvas.getContext('2d')?.drawImage(picture, 0, 0);
+        resolve(canvas);
+      } catch { resolve(null); }
+    };
+    picture.onerror = () => resolve(null);
+    picture.src = url;
+  });
+}
+
 /** The picture of a video at `seconds`, drawn once its frame is in; null when the browser cannot. */
 export function posterOf(url, seconds) {
   return new Promise((resolve) => {

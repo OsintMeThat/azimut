@@ -15,7 +15,7 @@
  */
 import { drawBackground, drawPage } from './draw.js';
 import { fromWorld, project, sameView, toWorld, unproject } from './geo.js';
-import { MAP_KINDS, PX_PER_MM, insetView, pageSize, shownOn } from './page.js';
+import { MAP_KINDS, PX_PER_MM, beatKey, framingOf, insetView, pageSize, placeOf, shownOn, stepsOf, transitionsOf } from './page.js';
 
 /** The frames a second a transition plays at, the video's own (`engine/mapplates.TWEEN_FPS`). */
 export const TWEEN_FPS = 30;
@@ -127,14 +127,63 @@ export function transitionPlan(settings, { moved = [], fresh = [] } = {}, { cut 
   return { move, blur: move && settings.blur !== false, fade, appear, frames, first };
 }
 
-/** The maps framed otherwise on `after` than on `before`, and the elements `after` shows that `before` did not. */
+/**
+ * The maps framed otherwise on `after` than on `before`, the elements `after` shows that
+ * `before` did not (`fresh`), and those `before` showed that `after` does not (`gone`).
+ */
 export function changes(spec, before, after) {
   const moved = spec.elements.filter((element) => element.kind === 'map' && before.context.views?.[element.id] && after.context.views?.[element.id]
     && !sameView(before.context.views[element.id].view, after.context.views[element.id].view)).map((element) => element.id);
-  const fresh = spec.elements.filter((element) => !MAP_KINDS.includes(element.kind) && !element.hidden
+  // a globe inset is drawn on the page, so it comes in with the writing
+  const fresh = spec.elements.filter((element) => (!MAP_KINDS.includes(element.kind) || element.globe) && !element.hidden
     && shownOn(element, after.context.at ?? null, after.context.place) && !shownOn(element, before.context.at ?? null, before.context.place))
     .map((element) => element.id);
-  return { moved, fresh };
+  const gone = spec.elements.filter((element) => (!MAP_KINDS.includes(element.kind) || element.globe) && !element.hidden
+    && shownOn(element, before.context.at ?? null, before.context.place) && !shownOn(element, after.context.at ?? null, after.context.place))
+    .map((element) => element.id);
+  return { moved, fresh, gone };
+}
+
+/** A beat of the play as `changes` reads one: where each map is framed on it (`order` the beats' keys, as framings are kept), its day, its step. */
+export function beatSide(spec, beat, order) {
+  const key = beatKey(beat.day, beat.step);
+  const views = Object.fromEntries(spec.elements.filter((element) => element.kind === 'map').map((map) => [map.id, { view: framingOf(spec, map, order, key).view }]));
+  return { context: { views, at: beat.day, place: placeOf(spec, beat.day, beat.step) } };
+}
+
+/**
+ * How the video comes into the beat `index` of `list` from the one before: the plan the
+ * export draws it by, with what changes between the two (`changed`), or null where it
+ * cuts or nothing moves. The play goes through the same, so it lasts what the video does.
+ */
+export function transitionInto(spec, list, index, order) {
+  const moves = transitionsOf(spec);
+  if (!moves.on || index <= 0 || index >= list.length) return null;
+  const beat = list[index];
+  const into = beat.step ? stepsOf(spec, beat.day).find((item) => item.id === beat.step) : null;
+  const changed = changes(spec, beatSide(spec, list[index - 1], order), beatSide(spec, beat, order));
+  const plan = transitionPlan(moves, changed, { cut: into?.transition === 'none', seconds: into?.transition_seconds ?? null });
+  return plan && { ...plan, changed };
+}
+
+/**
+ * Where a played plate stands `k` of the way through a transition (0 to 1), as the video
+ * draws it: `coming`, how far what is new has come in, by `mode` (faded in, or drawn
+ * along its lines), and `going`, how much of what leaves still shows. The page or the
+ * maps take the `first` frames: a fading page swaps the writing across them, a moving
+ * map swaps it halfway; what is new then appears over the rest.
+ */
+export function playedTransit(plan, k) {
+  const frame = Math.max(0, Math.min(1, k)) * plan.frames;
+  const appears = plan.appear !== 'none';
+  if (frame < plan.first) {
+    const u = frame / plan.first;
+    // as the frames do: a fade under a moving map swaps the writing over the middle of the way
+    const swapped = plan.fade ? (plan.move ? step(0.3, 0.7, u) : ease(u)) : u < 0.5 ? 0 : 1;
+    return { coming: appears ? 0 : swapped, going: 1 - swapped, mode: 'fade' };
+  }
+  const rest = plan.frames - plan.first;
+  return { coming: appears && rest > 0 ? ease((frame - plan.first) / rest) : 1, going: 0, mode: appears ? plan.appear : 'fade' };
 }
 
 /**

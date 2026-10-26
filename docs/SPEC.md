@@ -170,6 +170,7 @@ proof for publication.
 | Tool | What it does |
 |------|--------------|
 | ✅ **Map navigation & captures** | Links map cameras, places case media and uncertainty footprints, and saves attributed captures with scale and north. |
+| ✅ **Reference windows** | Fades a case picture over the map, steps and slows a clip and keeps a frame, unfolds dates, source and notes, and pins it to a corner clear of the map's controls or docks it in a column on either side, in the app and the extension. |
 | ✅ **Map layers** | Stacks infrastructure overlays, FIRMS fires and VIIRS night lights, with case pins filtered by kind and folder. |
 | ✅ **Imported & followed layers** | Imports KML, KMZ, GeoJSON and GPX, follows public My Maps and GeoConfirmed, and filters their legends and dates. |
 | ✅ **Personal map layers** | Starts blank, from a file or from a My Maps link read once, then draws and edits markers, lines and areas on any map from a movable bar, styled with pictograms, every edit undoable, each feature described in a sheet that opens under its row, folds into sections, saves as it goes and explains itself on hover. |
@@ -205,6 +206,8 @@ proof for publication.
 | ✅ **Find: as searched** | Levels a collage as it is laid, lets one stretch of the trace miss, rounds near lines on coarse relief when asked, searches grids down to 20 m, and lays a photo looked from a place as the search read it. |
 | ✅ **Find: sky only** | A line marked with only sky above lies on the top of the land and rules out the places where land stands behind it, saying how far out, read past the place's own reach on Auto; a grid picked is kept for hours of search, Auto goes down to 20 m on a small area. |
 | ✅ **Find: lattice and kept skylines** | Lays the search's points in a hex lattice, a quarter fewer for the same reach, and reads the skylines an earlier search swept back from a bounded cache. |
+| ✅ **Find: scored outward** | Scores each point of the grid from the camera its neighbours found, a third faster, keeping the places a full search finds. |
+| ✅ **Find: the grid on the map** | Shows the grid before, during and after a search, paints points off or on with a brush, searches several areas at once, fills in as it runs and stops on the place confirmed, times itself on this computer, and leaves out what the photo rules out, the water's view checked in a Mesh step. |
 | ✅ **3D map** | Stands Satellite's imagery on public relief, tilted by hand or key, and files a tilted view as a credited capture that reopens as it was taken. |
 | ✅ **Globe 3D view** | Draws Satellite's 3D and a plate's 3D maps on a globe of the app's own whose eye only the hand moves, so the view never jumps as the ground loads; the map engine's former 3D view and its code are gone. |
 | ✅ **Globe layers** | Draws what the flat map holds on the globe: borders, names and the analyst's layers, the case's places, measures and the sun's path, with clicks and cards as flat; active fires stay flat. |

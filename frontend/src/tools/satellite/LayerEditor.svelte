@@ -19,6 +19,7 @@
   import { caseState } from '../../lib/state.svelte.js';
   import { openFollowed } from '../../lib/map/followed.js';
   import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
+  import { wornColours } from '../../lib/map/layerStyle.js';
   import LayerTrackPanel from './LayerTrackPanel.svelte';
   import { changesOn, spanLabel, spanOf } from '../../lib/map/layerHistory.js';
   import { axisZone } from '../../lib/caseAxis.svelte.js';
@@ -35,16 +36,14 @@
   /** The colours the layer's features wear and the icons its markers wear, as their groups draw them, for the key to name. */
   const worn = $derived.by(() => {
     const byId = new Map(groups.map((group) => [group.id, group]));
-    const colours = new Set(), keys = new Set();
+    const keys = new Set();
     for (const feature of controller.features ?? []) {
-      const group = byId.get(feature.properties.group);
-      const own = group?.mode === 'uniform' || group?.mode === 'colour' ? group : feature.properties;
-      if (own?.colour || group?.colour) colours.add(String(own?.colour || group.colour).toLowerCase());
       if (!String(feature.geometry?.type ?? '').includes('Point')) continue;
+      const group = byId.get(feature.properties.group);
       const style = group?.mode === 'uniform' ? group : feature.properties;
       keys.add(style.icon || style.symbol || 'pin');
     }
-    return { colours: [...colours], keys: [...keys] };
+    return { colours: wornColours(controller.features ?? [], groups), keys: [...keys] };
   });
   let folded = $state(new Set());
   let groupMenu = $state(null);

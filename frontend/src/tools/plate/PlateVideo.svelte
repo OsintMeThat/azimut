@@ -6,7 +6,7 @@
    * source line drawn over it stay on top, as the export lays them.
    */
   import { PX_PER_MM } from '../../lib/plate/page.js';
-  import { clipRange } from '../../lib/plate/clip.js';
+  import { clipRange, isGif } from '../../lib/plate/clip.js';
   import { fileUrl } from '../../lib/fileUrl.js';
 
   let {
@@ -45,7 +45,13 @@
   }
 </script>
 
-{#if url}
+{#if url && isGif(element.src)}
+  <!-- a GIF plays round and round, as it will in the video -->
+  <img class="plate-video" src={url} alt=""
+    style:left="{element.box[0] * PX_PER_MM}px" style:top="{element.box[1] * PX_PER_MM}px"
+    style:width="{element.box[2] * PX_PER_MM}px" style:height="{element.box[3] * PX_PER_MM}px"
+    style:object-fit={element.fit === 'cover' ? 'cover' : 'contain'} style:opacity={element.opacity ?? 1} />
+{:else if url}
   <!-- svelte-ignore a11y_media_has_caption -->
   <video class="plate-video" bind:this={video} src={url} preload="auto" playsinline muted ontimeupdate={timeupdate}
     style:left="{element.box[0] * PX_PER_MM}px" style:top="{element.box[1] * PX_PER_MM}px"

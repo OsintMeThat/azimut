@@ -54,6 +54,10 @@ function fakeFind(over = {}) {
     over: null,
     setWater: vi.fn(),
     toggleOver: vi.fn(),
+    sighting: null,
+    sightFailed: '',
+    checkSight: vi.fn(),
+    stopSight: vi.fn(),
     tryAt: vi.fn(),
     unconfirm: vi.fn(),
     areas: [],
@@ -149,12 +153,12 @@ describe('the steps of Find', () => {
     expect(auto.textContent).not.toContain('Too large for a');
   });
 
-  it('asks whether the sea or a lake shows and where the eye stands, and says what that leaves out', () => {
+  it('asks whether the sea or other water shows and where the eye stands, and says what that leaves out', () => {
     const find = fakeFind();
     const root = steps({ find });
     buttonNamed(root, 'Above the land round').click();
     expect(find.toggleOver).toHaveBeenCalledWith('above');
-    buttonNamed(root, 'Sea or a lake').click();
+    buttonNamed(root, 'Sea, lake or river').click();
     expect(find.setWater).toHaveBeenCalledWith('lake');
     buttonNamed(root, 'The sea').click();
     expect(find.setWater).toHaveBeenCalledWith('sea');
@@ -166,9 +170,9 @@ describe('the steps of Find', () => {
     const previewed = { total: 1000, kept: 400, kinds: {}, points: [], ruled: { low: 450, nowater: 150 } };
     const said = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', over: 'above', water: 'lake', previewed, estimated: { points: 1003, step: 0.5, coarse: 1000 } }) });
     expect(said.textContent).toContain('Lower than the land round it: 450 points left out (45%).');
-    expect(said.textContent).toContain('No sea or lake within reach: 150 points left out (15%).');
+    expect(said.textContent).toContain('No sea, lake or river within reach: 150 points left out (15%).');
     expect(buttonNamed(said, 'Above the land round').getAttribute('aria-pressed')).toBe('true');
-    expect(said.textContent).toContain('the sea or a lake in sight');
+    expect(said.textContent).toContain('water in sight');
   });
 
   it('offers Auto’s grid quick, normal or thorough, each with its time on this computer once timed', () => {
@@ -534,6 +538,15 @@ describe('the steps of Find', () => {
     expect(solid.querySelector('.fs-trust.solid').textContent).toContain('Solid: nothing speaks against the best place');
   });
 
+  it('says how much of a large grid the search ranked best-first left out', () => {
+    const places = [{ lat: 1, lon: 1, explained: 0.75, heading: 280, fov: 22, reach: 5000 }];
+    const bounded = { cells: 1107, filled: 214, skipped: 7800 };
+    const root = steps({ find: fakeFind({ search: { name: 's', status: 'done', result: { verdict: 'match', places, points: [], bounded } } }) });
+    expect(root.textContent).toContain('Searched point by point in 214 of 1,107 cells, where a place could still win; 7,800 points elsewhere were not needed.');
+    const whole = steps({ find: fakeFind({ search: { name: 's', status: 'done', result: { verdict: 'match', places, points: [] } } }) });
+    expect(whole.textContent).not.toContain('Searched point by point');
+  });
+
   it('says when no place stands out, and what to change', () => {
     const places = [{ lat: 1, lon: 1, explained: 0.75, heading: 280, fov: 22, reach: 5000 }];
     const root = steps({ find: fakeFind({ search: { name: 's', status: 'done', result: { verdict: 'unclear', places, points: [] } } }) });
@@ -544,13 +557,68 @@ describe('the steps of Find', () => {
   });
 });
 
+describe('the Mesh step', () => {
+  const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
+  const ready = { area, areaProblem: '', searchProblem: '', estimated: { points: 1003, step: 0.5, coarse: 1000 } };
+  const meshOf = (root) => [...root.querySelectorAll('.fs-step')][2];
+
+  it('says the grid and what the photo rules out of it, each line taken back by its ×', () => {
+    const find = fakeFind({
+      ...ready,
+      water: 'lake',
+      over: 'above',
+      previewed: { total: 1000, kept: 400, spacing: 100, kinds: {}, points: [], ruled: { low: 450, waterhidden: 150 }, sight: { pending: 0, seconds: 0 } },
+    });
+    const mesh = meshOf(steps({ find }));
+    expect(mesh.textContent).toContain('400 of 1,000 points searched, one every 100 m.');
+    expect(mesh.textContent).toContain('Water hidden by the land: 150 points left out (15%).');
+    expect(mesh.classList.contains('done')).toBe(true);
+    mesh.querySelector('button[aria-label="Take back: Water hidden by the land"]').click();
+    expect(find.setWater).toHaveBeenCalledWith(false);
+    mesh.querySelector('button[aria-label="Take back: Lower than the land round it"]').click();
+    expect(find.toggleOver).toHaveBeenCalledWith('above');
+  });
+
+  it('offers to check which points see the water within reach, with its time, then shows it running', () => {
+    const previewed = { total: 1000, kept: 1000, spacing: 100, kinds: {}, points: [], ruled: {}, sight: { pending: 600, seconds: 15 } };
+    const find = fakeFind({ ...ready, water: 'lake', previewed });
+    const root = steps({ find });
+    const mesh = meshOf(root);
+    expect(mesh.textContent).toContain('Water lies within reach of 600 points. Check which see it, about 15 s.');
+    expect(mesh.classList.contains('done')).toBe(false);
+    // the search does it first otherwise, and says so with its time
+    expect(root.textContent).toContain('It checks what each point sees first: about 15 s more.');
+    buttonNamed(mesh, 'Check the view').click();
+    expect(find.checkSight).toHaveBeenCalled();
+    const running = meshOf(steps({ find: fakeFind({ ...ready, water: 'lake', previewed, sighting: { id: 'a', done: 120, total: 600 } }) }));
+    expect(running.textContent).toContain('Checking what each point sees: 120 of 600…');
+    expect(buttonNamed(running, 'Check the view')).toBeUndefined();
+  });
+
+  it('asks what the photo shows when nothing rules a point out, and says a check that failed', () => {
+    const previewed = { total: 50, kept: 50, spacing: 250, kinds: {}, points: [], ruled: {}, sight: { pending: 0, seconds: 0 } };
+    const mesh = meshOf(steps({ find: fakeFind({ ...ready, previewed, sightFailed: 'The terrain could not be loaded: offline' }) }));
+    expect(mesh.textContent).toContain('50 points, one every 250 m.');
+    expect(mesh.textContent).toContain('Say what the photo shows under Help the search');
+    expect(mesh.textContent).toContain('The terrain could not be loaded: offline');
+  });
+
+  it('stops a check under way', () => {
+    const previewed = { total: 10, kept: 10, spacing: 100, kinds: {}, points: [], ruled: {}, sight: { pending: 10, seconds: 1 } };
+    const find = fakeFind({ ...ready, water: 'sea', previewed, sighting: { id: 'a', done: 2, total: 10 } });
+    buttonNamed(meshOf(steps({ find })), 'Stop').click();
+    expect(find.stopSight).toHaveBeenCalled();
+  });
+});
+
 describe('the two faces of Find', () => {
-  it('numbers only the three steps a search needs, and folds what helps it under its gist', () => {
+  it('numbers the four steps a search runs through, and folds what helps it under its gist', () => {
     const root = steps({ find: fakeFind() });
-    expect([...root.querySelectorAll('.fs-num')].map((n) => n.textContent)).toEqual(['1', '2', '3']);
-    expect([...root.querySelectorAll('.fs-step h3')].map((h) => h.textContent.replace(/^\d/, ''))).toEqual(['Skyline', 'Area', 'Search']);
+    expect([...root.querySelectorAll('.fs-num')].map((n) => n.textContent)).toEqual(['1', '2', '3', '4']);
+    expect([...root.querySelectorAll('.fs-step h3')].map((h) => h.textContent.replace(/^\d/, ''))).toEqual(['Skyline', 'Area', 'Mesh', 'Search']);
     // the trace is done, so its number lights alone
-    expect([...root.querySelectorAll('.fs-step')].map((step) => step.classList.contains('done'))).toEqual([true, false, false]);
+    expect([...root.querySelectorAll('.fs-step')].map((step) => step.classList.contains('done'))).toEqual([true, false, false, false]);
+    expect(root.textContent).toContain('The grid shows on the map once the area is drawn.');
     const parts = [...root.querySelectorAll('.fs-part')];
     expect(parts.map((part) => [part.querySelector('.fs-part-title').textContent, part.querySelector('.fs-gist').textContent, part.open])).toEqual([
       ['Alignments', 'None', false],

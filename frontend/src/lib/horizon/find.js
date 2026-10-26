@@ -294,17 +294,34 @@ export function mapCells({ search = null, edited = true, drawing = null, preview
 /** Why a point of the grid was left out before the search, as the map and the side say it (engine/ruleout.py REASONS). */
 export const RULED = {
   nosea: 'No sea within its horizon',
-  nowater: 'No sea or lake within reach',
+  nowater: 'No sea, lake or river within reach',
+  seahidden: 'The sea hidden by the land',
+  waterhidden: 'Water hidden by the land',
   low: 'Lower than the land round it',
   high: 'Higher than the land round it',
 };
 
-/** What the photo rules out of the grid read before the search (`preview.ruled`), a line each: "No sea…: 1,234 points (42%)". */
-export function ruledText(preview) {
+/**
+ * What a search ranked best-first left out (engine/finder.py `_best_first`): its grid scored a point a cell first,
+ * then point by point only in the cells where a place could still win. '' when it searched every point.
+ */
+export function boundedText(bounded) {
+  if (!bounded?.skipped) return '';
+  const cells = bounded.cells.toLocaleString('en-US');
+  const left = bounded.skipped.toLocaleString('en-US');
+  return `Searched point by point in ${bounded.filled.toLocaleString('en-US')} of ${cells} cells, where a place could still win; ${left} points elsewhere were not needed.`;
+}
+
+/** What the photo rules out of the grid read before the search (`preview.ruled`), a line each with its reason:
+ * `{ reason, text }`, the text "No sea…: 1,234 points left out (42%)". */
+export function ruledLines(preview) {
   const total = preview?.total ?? 0;
   return Object.entries(preview?.ruled ?? {})
     .filter(([reason, count]) => RULED[reason] && count > 0 && total > 0)
-    .map(([reason, count]) => `${RULED[reason]}: ${count.toLocaleString('en-US')} ${count === 1 ? 'point' : 'points'} left out (${Math.round((100 * count) / total)}%)`);
+    .map(([reason, count]) => ({
+      reason,
+      text: `${RULED[reason]}: ${count.toLocaleString('en-US')} ${count === 1 ? 'point' : 'points'} left out (${Math.round((100 * count) / total)}%)`,
+    }));
 }
 
 /** The hex lattice a search lays its grid on, as the app lays it (engine/finder.py HEX_ACROSS, HEX_ROWS). */
@@ -479,6 +496,12 @@ export function searchTone(row) {
   return row.status === 'failed' ? 'failed' : 'quiet';
 }
 
+/** Each photo's thumbnail by its path in the case, from the case's files (`/api/cases/{id}/media`): a kept
+ * search's picture is its photo's (`row.photo`). */
+export function searchThumbs(media) {
+  return new Map((media ?? []).filter((item) => item.thumbnail).map((item) => [item.path, item.thumbnail]));
+}
+
 /** An area as a search keeps it (`[lat, lon]` pairs) or as Find draws it (`{ lat, lon }`), drawn the second way. */
 export function areaPoints(area) {
   return (area ?? []).map((p) => (Array.isArray(p) ? { lat: p[0], lon: p[1] } : { lat: p.lat, lon: p.lon }));
@@ -595,6 +618,13 @@ export function areaMiddle(points) {
   const list = areaPoints(points);
   if (!list.length) return null;
   return { lat: list.reduce((sum, p) => sum + p.lat, 0) / list.length, lon: list.reduce((sum, p) => sum + p.lon, 0) / list.length };
+}
+
+/** Every point a search was drawn with (its area, the other areas, the zones, the brush strokes): what the map frames when it opens. */
+export function searchedPoints({ area = [], areas = [], zones = [], strokes = [] } = {}) {
+  return [...area, ...areas.flatMap((one) => one.points ?? []), ...zones.flatMap((one) => one.points ?? []), ...strokes.flatMap((one) => one.path ?? [])].filter(
+    (point) => Number.isFinite(point?.lat) && Number.isFinite(point?.lon)
+  );
 }
 
 // -- how far a result can be trusted -------------------------------------------------
@@ -818,7 +848,7 @@ export const GROUNDS = [
   { id: 'water', label: 'Sea or lake', title: 'On a boat: points on the water are searched too', colour: '#2f6fe0' },
 ];
 
-/** Water on the map's grid: the sea or a lake, left out on foot unless ticked. */
+/** Water on the map's grid: the sea, a lake or a wide river, left out on foot unless ticked. */
 export const WATER_COLOUR = '#2f6fe0';
 
 /** The grounds ticked, in the menu's order, once each; anything else left out. */

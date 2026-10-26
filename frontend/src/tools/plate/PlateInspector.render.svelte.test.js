@@ -204,19 +204,17 @@ describe('hover help on every setting', () => {
     expect(map.layers[0]).toMatchObject({ role: '', colour: null, fill: '', dash: '' });
   });
 
-  it('lights the country under the map, and lets the rest be darkened or faded', async () => {
-    const spec = $state(houseLayout({ view: { lat: 50.45, lon: 30.52, zoom: 5, bearing: 0 } }));
-    const map = spec.elements.find((element) => element.kind === 'map');
-    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id] } });
-    flushSync();
-    [...document.body.querySelectorAll('button')].find((node) => node.textContent.trim() === 'Light the country here').click();
-    await vi.waitFor(() => expect(map.spotlight).toEqual({ country: 'Ukraine', dim: 0.55, mode: 'dark' }));
-    flushSync();
+  it('sets a country focus: the rest darkened or faded, how far, and its days like any annotation', async () => {
+    const focus = show({ kind: 'focus', element: { of: 'map', name: 'Ukraine', spotlight: { country: 'Ukraine', dim: 0.55, mode: 'dark' } } });
     [...document.body.querySelectorAll('[aria-label="The rest of the world"] button')].find((node) => node.textContent === 'Faded').click(); flushSync();
-    expect(map.spotlight.mode).toBe('fade');
-    const lit = document.body.querySelector('[aria-label="Country lit"]');
-    lit.value = ''; lit.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
-    expect(map.spotlight).toBeNull();
+    expect(focus.spotlight).toEqual({ country: 'Ukraine', dim: 0.55, mode: 'fade' });
+    const strength = document.body.querySelector('[aria-label="Focus strength"]');
+    strength.value = '0.3'; strength.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    expect(focus.spotlight.dim).toBe(0.3);
+    expect(document.body.querySelector('[aria-label="Country lit"]').value).toBe('Ukraine');
+    // on a played plate it is shown from a first to a last day, as the other annotations are
+    expect(end('First day shown')).not.toBeNull();
+    expect(document.body.textContent).toContain('faded in by the video');
   });
 
   it('says it in the words kept for it, and follows a setting whose name changes', async () => {
@@ -375,8 +373,27 @@ describe('the ground, the type and the layers of a plate', () => {
     const globe = [...document.body.querySelectorAll('label')].find((node) => node.textContent.trim() === 'Drawn as a globe').querySelector('input');
     globe.click(); flushSync();
     expect(inset.globe).toBe(true);
+    // a globe is never zoomed, and its rim is its frame
+    expect(document.body.querySelector('[aria-label="Inset zoom"]')).toBeNull();
+    expect(document.body.querySelector('[aria-label="Inset frame"]')).toBeNull();
     await settle();
     expect(bare()).toEqual([]);
+  });
+
+  it('keeps a globe a globe where laying it flat would make a ninth map', () => {
+    // the house layout's map and inset, and six more
+    const maps = Array.from({ length: 6 }, (_, index) => ({ id: `m${index}`, kind: 'map', box: [0, 0, 10, 10], view: { lat: 0, lon: 0, zoom: 3, bearing: 0 } }));
+    const spec = $state(houseLayout());
+    spec.elements = [...spec.elements.filter((element) => element.kind !== 'map' || element.id === 'map'), ...maps];
+    spec.elements.push({ id: 'note', kind: 'inset', of: 'map', box: [10, 10, 40, 30], globe: true });
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: ['note'], at: '2026-10-05', moments: [] } });
+    flushSync();
+    const before = spec.elements.filter((element) => ['map', 'inset'].includes(element.kind) && !element.globe).length;
+    expect(before).toBe(8);
+    const globe = [...document.body.querySelectorAll('label')].find((node) => node.textContent.trim() === 'Drawn as a globe').querySelector('input');
+    globe.click(); flushSync();
+    expect(spec.elements.at(-1).globe).toBe(true);
+    expect(globe.checked).toBe(true);
   });
 });
 
@@ -407,5 +424,17 @@ describe('the credits box', () => {
     expect(credits.dropped).toEqual(['GeoConfirmed — geoconfirmed.org']);
     boxes[1].click(); flushSync();
     expect(credits.dropped).toEqual([]);
+  });
+});
+
+describe('a GIF on a step', () => {
+  it('plays as a video does, its run time set rather than trimmed, and holds its step that long', () => {
+    const note = show({ kind: 'video', element: { src: 'media/loop.gif', clip: [0, 3], step: 's1', text: '' } });
+    expect(document.body.querySelector('img.trim')).not.toBeNull();
+    expect(document.body.querySelector('video.trim')).toBeNull();
+    const runs = document.body.querySelector('[aria-label="GIF runs"]');
+    runs.value = '0:07'; runs.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+    expect(note.clip).toEqual([0, 7]);
+    expect(document.body.textContent).toContain('A GIF plays round and round');
   });
 });

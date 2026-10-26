@@ -19,9 +19,9 @@
   import { buildMediaQuery } from '../../lib/mediaQuery.js';
   import { isTracked, momentLabel } from '../../lib/map/layerHistory.js';
   import { prefs, toast } from '../../lib/state.svelte.js';
-  import { FONTS, KIND_LABELS, PAGE, PAPERS, PLATE_OVERLAYS, SIGNATURE, THEMES, TOKENS, TOKEN_SAID, bornOn, bringTo, dayOf, endOn, labelBox, mainMap,
-    pageSize, shownOn, startOn, textMeasurer, transitionsOf, turnable } from '../../lib/plate/page.js';
-  import { FIRST_SECONDS, captionOf, clipRange, readTimecode, timecode } from '../../lib/plate/clip.js';
+  import { FONTS, KIND_LABELS, MAX_MAPS, PAGE, PAPERS, PLATE_OVERLAYS, SIGNATURE, THEMES, TOKENS, TOKEN_SAID, TOO_MANY_MAPS, bornOn, bringTo, dayOf, endOn, labelBox,
+    mainMap, mapCount, pageSize, shownOn, startOn, textMeasurer, transitionsOf, turnable } from '../../lib/plate/page.js';
+  import { FIRST_SECONDS, captionOf, clipRange, isGif, readTimecode, timecode } from '../../lib/plate/clip.js';
   import { GRATICULE_STEPS } from '../../lib/plate/geo.js';
   import { align, distribute, fittedHeight, sameSize } from '../../lib/plate/arrange.js';
   import { moveRow } from '../../lib/plate/legend.js';
@@ -36,7 +36,7 @@
   import { TEXT_STYLES, styled } from '../../lib/plate/design.js';
   import { drawnOn } from '../../lib/plate/toLayer.js';
   import { ROLE_LIST, withRole } from '../../lib/plate/roles.js';
-  import { countryAt, countryNames } from '../../lib/plate/spotlight.js';
+  import { countryNames } from '../../lib/plate/spotlight.js';
   import { WAYBACK_ID } from '../../lib/wayback.js';
   import { shrinkPicture } from '../../lib/plate/picture.js';
   import PlateColour from './PlateColour.svelte';
@@ -150,20 +150,11 @@
   let s2MenuEl = $state();
   /** The map the choices were last read from. */
   let s2For = '';
-  /** Natural Earth's countries, read the first time a map is to light one; and whether the list is open for a map that found none. */
+  /** Natural Earth's countries, read the first time a focus's list is opened. */
   let world = $state.raw(null);
-  let choosing = $state('');
   async function readWorld() {
     if (!world) world = (await import('../../lib/plate/world.json')).default;
     return world;
-  }
-  /** Light the country under the map's middle, or open the list when it stands at sea or in a disputed area. */
-  async function lightHere(target) {
-    const read = await readWorld();
-    const { lat, lon } = framingFor(target).view;
-    const name = countryAt(read, lon, lat);
-    if (name) target.spotlight = { country: name, dim: 0.55, mode: 'dark' };
-    else choosing = target.id;
   }
 
   /** Whether the steps to a Copernicus account are shown under the locked Sentinel-2 ground. */
@@ -289,9 +280,11 @@
     pickAnchor = event.currentTarget;
     pickingVideo = true;
     try {
-      const [page, located] = await Promise.all([api.get(buildMediaQuery(caseId, { kind: 'video', limit: 120 })),
+      // a GIF plays as a video does, round and round for as long as its clip runs
+      const [page, pictures, located] = await Promise.all([api.get(buildMediaQuery(caseId, { kind: 'video', limit: 120 })),
+        api.get(buildMediaQuery(caseId, { kind: 'image', limit: 200 })).catch(() => ({ items: [] })),
         api.get(`/api/cases/${caseId}/satellite/media`).catch(() => [])]);
-      videos = page.items ?? [];
+      videos = [...(page.items ?? []), ...(pictures.items ?? []).filter((item) => isGif(item.path))];
       footage = (Array.isArray(located) ? located : []).filter((row) => row.media_kind === 'video' && row.path).slice(0, 60);
     } catch { videos = []; footage = []; }
   }
@@ -407,7 +400,7 @@
         <span class="key">Picture</span>
         <span class="pair"><button type="button" class="btn btn-xs" title="A picture from this computer, kept inside the plate" onclick={() => backgroundInput?.click()}>{spec.page.background.data ? 'Another' : 'Choose…'}</button>
           {#if spec.page.background.data}<button type="button" class="text-act" onclick={() => (spec.page.background.data = null)}>Remove</button>{/if}</span>
-        <input type="file" accept="image/png,image/jpeg,image/webp" hidden bind:this={backgroundInput}
+        <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden bind:this={backgroundInput}
           onchange={(event) => readPicture(event.currentTarget.files?.[0], (data) => (spec.page.background.data = data))} />
       {/if}
     </div>
@@ -534,7 +527,7 @@
         onclick={() => Object.assign(element, { step: step.id, carry: false, onward: null, until: null })}>Only on {step.name}</button></p>
     {/if}
 
-    {#if !element.step && playable && ['label', 'symbol', 'arrow', 'ring', 'cone', 'zone', 'measure', 'line', 'shape', 'text', 'image'].includes(element.kind)}
+    {#if !element.step && playable && ['label', 'symbol', 'arrow', 'ring', 'cone', 'zone', 'measure', 'line', 'shape', 'text', 'image', 'focus'].includes(element.kind)}
       <div class="days" class:off={!shownToday}>
         <span class="key">Shown from</span>
         <button type="button" class="end" class:open={ending === 'onward'} aria-expanded={ending === 'onward'} aria-label="First day shown"
@@ -637,36 +630,6 @@
         <p class="note">{s2.latestBusy && !element.acquired ? 'Looking for the newest pass…' : !element.acquired ? 'No pass picked yet.'
           : `${s2.layerLabel}, the pass of ${element.acquired}${s2.date ? '' : s2.maxcc < 100 ? `, the newest under ${s2.maxcc}% cloud` : ', the newest'}.`}</p>
         <p class="note">One pass, on the day it was taken, 10 m a pixel: where it did not reach, the map stays empty. Its tiles spend your Copernicus quota.</p>
-      {/if}
-      </PlateSection>
-
-      <PlateSection title="Focus" summary={element.spotlight?.country ?? 'None'}>
-      {#if element.spotlight?.country || choosing === element.id}
-        <div class="rows">
-          <span class="key">Lit</span>
-          <select aria-label="Country lit" value={element.spotlight?.country ?? ''} onfocus={readWorld}
-            onchange={(event) => { const country = event.currentTarget.value; choosing = '';
-              element.spotlight = country ? { dim: 0.55, mode: 'dark', ...(element.spotlight ?? {}), country } : null; }}>
-            <option value="">None</option>
-            {#each world ? countryNames(world) : [element.spotlight?.country].filter(Boolean) as name (name)}<option value={name}>{name}</option>{/each}
-          </select>
-          {#if element.spotlight?.country}
-            <span class="key">The rest</span>
-            <div class="segments" role="group" aria-label="The rest of the world">
-              {#each [['dark', 'Darkened'], ['fade', 'Faded']] as [value, label] (value)}
-                <button type="button" aria-pressed={(element.spotlight.mode ?? 'dark') === value} onclick={() => (element.spotlight = { ...element.spotlight, mode: value })}>{label}</button>
-              {/each}
-            </div>
-            <span class="key">Strength</span>
-            <input type="range" aria-label="Focus strength" min="0.1" max="0.9" step="0.05" value={element.spotlight.dim ?? 0.55}
-              oninput={(event) => (element.spotlight = { ...element.spotlight, dim: Number(event.currentTarget.value) })} />
-          {/if}
-        </div>
-        {#if choosing === element.id && !element.spotlight?.country}<p class="note">No country under the map's middle: pick one.</p>{/if}
-        <p class="note">Disputed areas touching it stand half lit, dotted round. A flat map only.</p>
-      {:else}
-        <button type="button" class="btn btn-sm" title="The country under the map's middle stays lit, the rest of the world is drawn back"
-          onclick={() => lightHere(element)}>Light the country here</button>
       {/if}
       </PlateSection>
 
@@ -882,16 +845,25 @@
         <select aria-label="Ground" bind:value={element.basemap}>
           {#each grounds.filter(([id]) => id !== WAYBACK_ID) as [id, label] (id)}<option value={id}>{label}</option>{/each}
         </select>
-        <span class="key">Zoom</span>
-        <input type="number" aria-label="Inset zoom" step="0.5" min="0" max="18" placeholder="Auto" value={element.zoom ?? ''}
-          onchange={(event) => (element.zoom = event.currentTarget.value === '' ? null : number(event.currentTarget.value, null))} />
+        <!-- a globe is turned to its map's middle, never zoomed, and its rim is its frame -->
+        {#if !element.globe}
+          <span class="key">Zoom</span>
+          <input type="number" aria-label="Inset zoom" step="0.5" min="0" max="18" placeholder="Auto" value={element.zoom ?? ''}
+            onchange={(event) => (element.zoom = event.currentTarget.value === '' ? null : number(event.currentTarget.value, null))} />
+        {/if}
         <span class="key">Of</span>
         <select aria-label="Inset of" bind:value={element.of}>{#each maps as map (map.id)}<option value={map.id}>{name(map)}</option>{/each}</select>
-        <span class="key">Frame</span><input type="checkbox" aria-label="Inset frame" checked={element.border !== false} onchange={(event) => (element.border = event.currentTarget.checked)} />
+        {#if !element.globe}
+          <span class="key">Frame</span><input type="checkbox" aria-label="Inset frame" checked={element.border !== false} onchange={(event) => (element.border = event.currentTarget.checked)} />
+        {/if}
       </div>
-      <label class="check"><input type="checkbox" checked={!!element.globe} onchange={(event) => (element.globe = event.currentTarget.checked)} /> Drawn as a globe</label>
-      {#if element.globe}<p class="note">The world turned to the map's middle, its country in the accent. Drawn on the page, it is not one of the plate's eight maps.</p>{/if}
-      <p class="note">The inset follows its map and outlines the ground it shows.</p>
+      <label class="check"><input type="checkbox" checked={!!element.globe} onchange={(event) => {
+        // a globe laid flat again is one of the plate's maps
+        if (!event.currentTarget.checked && mapCount(spec.elements) >= MAX_MAPS) { event.currentTarget.checked = true; toast(TOO_MANY_MAPS, 'warn', 6000); return; }
+        element.globe = event.currentTarget.checked;
+      }} /> Drawn as a globe</label>
+      {#if element.globe}<p class="note">The world turned to the map's middle, its country in the accent. Drawn on the page, it is not one of the plate's eight maps.</p>
+      {:else}<p class="note">The inset follows its map and outlines the ground it shows.</p>{/if}
     {:else if element.kind === 'legend'}
       <div class="rows">
         <span class="key">Title</span><input aria-label="Legend title" bind:value={element.text} placeholder="Legend" maxlength="120" />
@@ -1135,7 +1107,7 @@
         <button type="button" class="btn btn-xs" title="A picture kept inside the plate, so a template keeps it too" onclick={() => fileInput?.click()}><Icon name="upload" size={12} /> From this computer</button>
         <button type="button" class="btn btn-xs" title="The badge set in Settings → Signature" onclick={() => { element.src = SIGNATURE; element.data = null; }}>Signature</button>
       </div>
-      <input type="file" accept="image/png,image/jpeg,image/webp" hidden bind:this={fileInput}
+      <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden bind:this={fileInput}
         onchange={(event) => readPicture(event.currentTarget.files?.[0], (data) => { element.data = data; element.src = ''; })} />
       <p class="note">{element.data ? 'Kept inside the plate, so a template keeps it too.' : element.src === SIGNATURE ? 'Your signature, as set in Settings.' : element.src ? 'A picture of the case.' : 'No picture yet.'}</p>
       <div class="rows">
@@ -1156,11 +1128,39 @@
           {/if}
         </span>
       </div>
+    {:else if element.kind === 'focus'}
+      <div class="rows">
+        <span class="key">Lit</span>
+        <select aria-label="Country lit" value={element.spotlight?.country ?? ''} onfocus={readWorld}
+          onchange={(event) => { const country = event.currentTarget.value;
+            if (country) { element.spotlight = { ...element.spotlight, country }; element.name = country; } }}>
+          {#each world ? countryNames(world) : [element.spotlight?.country].filter(Boolean) as name (name)}<option value={name}>{name}</option>{/each}
+        </select>
+        <span class="key">The rest</span>
+        <div class="segments" role="group" aria-label="The rest of the world">
+          {#each [['dark', 'Darkened'], ['fade', 'Faded']] as [value, label] (value)}
+            <button type="button" aria-pressed={(element.spotlight?.mode ?? 'dark') === value} onclick={() => (element.spotlight = { ...element.spotlight, mode: value })}>{label}</button>
+          {/each}
+        </div>
+        <span class="key">Strength</span>
+        <input type="range" aria-label="Focus strength" min="0.1" max="0.9" step="0.05" value={element.spotlight?.dim ?? 0.55}
+          oninput={(event) => (element.spotlight = { ...element.spotlight, dim: Number(event.currentTarget.value) })} />
+      </div>
+      <p class="note">Disputed areas touching it stand half lit, dotted round. Shown on its day or step, and faded in by the video's transitions. A flat map only.</p>
     {:else if element.kind === 'video'}
       <div class="tools wide">
-        <button type="button" class="btn btn-xs" title="The footage placed on the map first, then every video of the case" onclick={openVideos}><Icon name="video" size={12} /> {element.src ? 'Another video' : 'Choose a video'}</button>
+        <button type="button" class="btn btn-xs" title="The footage placed on the map first, then every video and GIF of the case" onclick={openVideos}><Icon name="video" size={12} /> {element.src ? 'Another video' : 'Choose a video'}</button>
       </div>
-      {#if element.src}
+      {#if element.src && isGif(element.src)}
+        <p class="note file" title={element.src}>{fileName(element.src)}</p>
+        <img class="trim" src={fileUrl(caseId, element.src)} alt="" />
+        <div class="rows">
+          <span class="key">Runs</span>
+          <input aria-label="GIF runs" value={timecode(range[1] - range[0])}
+            onchange={(event) => { const value = readTimecode(event.currentTarget.value); if (value !== null && value > 0) element.clip = clipRange({ clip: [0, value] }); else event.currentTarget.value = timecode(range[1] - range[0]); }} />
+        </div>
+        <p class="note">A GIF plays round and round for as long as it runs, and holds its step that long.</p>
+      {:else if element.src}
         <p class="note file" title={element.src}>{fileName(element.src)}</p>
         <!-- svelte-ignore a11y_media_has_caption -->
         <video class="trim" bind:this={trimVideo} src={fileUrl(caseId, element.src)} controls preload="metadata"
@@ -1340,7 +1340,7 @@
 {/if}
 
 {#if pickingVideo}
-  <FloatingMenu anchor={pickAnchor} width={300} label="Videos of the case" onclose={() => (pickingVideo = false)}>
+  <FloatingMenu anchor={pickAnchor} width={300} label="Videos and GIFs of the case" onclose={() => (pickingVideo = false)}>
     {#if footage.length}
       <p class="fm-label">Footage placed on the map, pointing at its place</p>
       <div class="pictures">
@@ -1350,7 +1350,7 @@
           </button>
         {/each}
       </div>
-      <p class="fm-label">Videos of the case</p>
+      <p class="fm-label">Videos and GIFs of the case</p>
     {/if}
     <div class="pictures">
       {#each videos as item (item.path)}
@@ -1358,7 +1358,7 @@
           {#if item.thumbnail}<img src={fileUrl(caseId, item.thumbnail)} alt={item.title || ''} loading="lazy" />{:else}<Icon name="video" size={16} />{/if}
         </button>
       {:else}
-        <p class="note">No video in this case yet.</p>
+        <p class="note">No video or GIF in this case yet.</p>
       {/each}
     </div>
   </FloatingMenu>

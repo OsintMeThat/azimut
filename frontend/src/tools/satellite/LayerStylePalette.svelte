@@ -4,11 +4,12 @@
    * already shows, then the colours, then the icons with a search. Every pick
    * is handed back at once (`onpick`); where it lands is the caller's.
    *
-   * The colours offered at once are the case's named ones, each said by its
-   * name, and those the layer wears; "+" unfolds the rest: the plain colours,
-   * those picked lately, the browser's picker and a code typed or pasted. With
-   * nothing named and nothing in the layer yet, the plain colours are offered at
-   * once. The tag
+   * The colours offered at once are the ones the layer is drawn in, as its key
+   * lists them, each said by its name when the case names it; "+" unfolds the
+   * rest: the colours the case names in its other layers, the plain colours,
+   * those picked lately, the browser's picker and a code typed or pasted. A
+   * layer in no colour yet offers the case's named colours at once, or the
+   * plain ones when none is named. The tag
    * names what the colours and icons worn here stand for (`LayerKeyButton`).
    *
    * The styles the layer shows fill one row, "+" showing the rest.
@@ -39,6 +40,8 @@
     icon = '',
     /** Styles already in the layer, `{ symbol, colour, icon? }`, offered first. */
     used = [],
+    /** Every colour the layer is drawn in, its lines' and areas' too: what its key lists. */
+    wears = [],
     caseId = null,
     /** The layer the pick lands in, whose own icons are offered; its `{key: {mode, name}}`. */
     layer = null, meta = null,
@@ -61,11 +64,18 @@
   const matches = (text) => words.every((word) => text.toLowerCase().includes(word));
   const named = $derived(layerPalette.colours);
   const hexes = (list) => list.map((hex) => String(hex ?? '').toLowerCase()).filter((hex) => /^#[0-9a-f]{6}$/.test(hex));
+  /** The colours the layer is drawn in, its styles' first. */
+  const layerColours = $derived([...new Set(hexes([...used.map((style) => style.colour), ...wears]))]);
+  /** The named colours offered at once: those the layer wears and the one worn now, every one in a layer in no colour yet. */
+  const namedHere = $derived(layerColours.length
+    ? named.filter((entry) => layerColours.includes(entry.colour) || (!mixed && same(entry.colour, colour))) : named);
+  /** The colours the case names in its other layers, behind "+". */
+  const namedElsewhere = $derived(named.filter((entry) => !namedHere.some((one) => one.colour === entry.colour)));
   /** The colours offered at once beyond the named ones: those the layer wears and the one worn now, `[hex, where]`. */
   const near = $derived.by(() => {
     const seen = new Set(named.map((entry) => entry.colour));
     const found = [];
-    for (const [hex, where] of [...hexes(used.map((style) => style.colour)).map((hex) => [hex, 'In this layer']),
+    for (const [hex, where] of [...layerColours.map((hex) => [hex, 'In this layer']),
       ...(mixed ? [] : hexes([colour]).map((hex) => [hex, 'Worn now']))]) {
       if (seen.has(hex)) continue;
       seen.add(hex);
@@ -74,7 +84,7 @@
     return found.slice(0, 10);
   });
   /** With nothing named and nothing in the layer yet, the plain colours are the ones offered at once. */
-  const bare = $derived(!named.length && !hexes(used.map((style) => style.colour)).length);
+  const bare = $derived(!named.length && !layerColours.length);
   /** What "+" unfolds: the plain colours not offered already, then those picked lately. */
   const rest = $derived.by(() => {
     const seen = new Set([...named.map((entry) => entry.colour), ...near.map(([hex]) => hex)]);
@@ -92,7 +102,7 @@
     onpick?.({ colour: hex });
   }
   /** The colours and icons worn where the palette opened, for the key to name. */
-  const wornColours = $derived(hexes([...used.map((style) => style.colour), ...(mixed ? [] : [colour])]));
+  const wornColours = $derived(hexes([...layerColours, ...(mixed ? [] : [colour])]));
   const wornKeys = $derived(point ? [...new Set([...used.map((style) => style.icon || style.symbol), ...(mixed ? [] : [icon || symbol])])].filter(Boolean) : []);
   /** The groups of the grid, as chips over it: a press scrolls the grid there. */
   const themes = $derived(words.length ? [] : [...(layerOwn.length ? [ICON_HELP.layerIcons] : []),
@@ -123,6 +133,13 @@
   const usedChosen = (style) => !mixed && same(style.colour, colour) && (style.icon ? style.icon === icon : !icon && style.symbol === symbol);
   $effect(() => { if (caseId) layerPalette.load(caseId); });
 </script>
+
+<!-- a colour the case names, said by its name -->
+{#snippet namedChip(entry)}
+  <button type="button" class="named-chip" class:chosen={!mixed && same(entry.colour, colour)} style={`--swatch:${entry.colour}`}
+    aria-label={`${label} ${entry.name}`} title={`${entry.name}, ${entry.colour}`} aria-pressed={!mixed && same(entry.colour, colour)}
+    onclick={() => pickColour(entry.colour)}><span class="chip-dot"></span><span class="chip-name">{entry.name}</span></button>
+{/snippet}
 
 <!-- a swatch: a plain colour said by its name, any other by its code and where it comes from -->
 {#snippet swatch(hex, where)}
@@ -155,22 +172,20 @@
   {#if caseId}<LayerKeyButton {caseId} colours={wornColours} worn={wornKeys} {look}
     text={named.length || layerPalette.icons.length ? 'Edit names' : 'Name colours and icons'} />{/if}
 </div>
-<!-- the case's named colours by their names, the layer's own, and "+" for the rest -->
+<!-- the layer's colours, by their names when the case names them, and "+" for the rest -->
 <div class="palette" role="group" aria-label={`${label} palette`}>
-  {#each named as entry (entry.colour)}
-    <button type="button" class="named-chip" class:chosen={!mixed && same(entry.colour, colour)} style={`--swatch:${entry.colour}`}
-      aria-label={`${label} ${entry.name}`} title={`${entry.name}, ${entry.colour}`} aria-pressed={!mixed && same(entry.colour, colour)}
-      onclick={() => pickColour(entry.colour)}><span class="chip-dot"></span><span class="chip-name">{entry.name}</span></button>
-  {/each}
+  {#each namedHere as entry (entry.colour)}{@render namedChip(entry)}{/each}
   {#each near as [hex, where] (hex)}{@render swatch(hex, where)}{/each}
   {#if bare}{#each rest as [hex, where] (hex)}{@render swatch(hex, where)}{/each}{/if}
   <button type="button" class="more-colours" aria-label="More colours" aria-expanded={allColours}
-    title={allColours ? 'Fewer colours' : 'The plain colours, those picked lately, and a code typed or pasted'}
+    title={allColours ? 'Fewer colours' : namedElsewhere.length ? 'The colours other layers use, the plain ones, and a code'
+      : 'The plain colours, those picked lately, and a code typed or pasted'}
     onclick={() => (allColours = !allColours)}><Icon name={allColours ? 'minus' : 'plus'} size={11} /></button>
 </div>
 {#if allColours}
-  {#if !bare && rest.length}
+  {#if !bare && (namedElsewhere.length || rest.length)}
     <div class="palette" role="group" aria-label={`${label} more colours`}>
+      {#each namedElsewhere as entry (entry.colour)}{@render namedChip(entry)}{/each}
       {#each rest as [hex, where] (hex)}{@render swatch(hex, where)}{/each}
     </div>
   {/if}

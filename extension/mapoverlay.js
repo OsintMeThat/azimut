@@ -1956,15 +1956,16 @@
    * The reference windows, painted by `mapref.js`.
    *
    * Created after the panel's own stylesheet so the look it states is the one
-   * the windows build on. It is handed two errands and told nothing else: read
-   * what the case has to offer, and fetch one file's bytes. The file that talks
-   * to the app stays this one.
+   * the windows build on. It is handed three errands and told nothing else: read
+   * what the case has to offer, fetch one file's bytes, and read a clip's frame
+   * rate. The file that talks to the app stays this one.
    */
   const refLayer = R.create({
     root,
     refs: tools.refs,
     file: fetchFile,
     search: loadRefMedia,
+    probe: (path) => call("GET", "/api/ingest/probe", { query: { case_id: state.caseId, path } }),
     onchange: () => render(),
     onnote: (message) => {
       state.note = message;

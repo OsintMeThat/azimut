@@ -92,6 +92,7 @@ the near ridges allow.
 
 from __future__ import annotations
 
+import heapq
 import math
 import time
 from collections.abc import Callable, Sequence
@@ -129,6 +130,9 @@ AMBIGUOUS_MARGIN = 0.04
 # Places in the answer, and how far apart they stand to be listed apart, metres.
 TOP = 5
 APART_M = 1_500.0
+# Places searched in full before the TOP best are listed: a rough read misjudges a place by a few hundredths, so
+# the place a full fit puts first may stand 6th or 12th roughly (the bench's v04 and v21).
+FULL_PLACES = 15
 # Two places nearer than this are one hot spot, however good both are: only farther ones make it ambiguous.
 SEPARATE_M = 3_000.0
 # The best place must stand this far above the area's top tenth of points to stand out: below,
@@ -173,6 +177,45 @@ PACE_POINTS = 3
 FULL_COST = 8.0
 # A sector searched about the heading an alignment gives, degrees either side at the least.
 FACING_MIN = 3.0
+# A point warm-started from its scored neighbours (C9) slides over the headings this many degrees either side of
+# theirs, or this share of the widest lens if more, and an unknown lens this many times either way of theirs.
+WARM_DEG = 6.0
+WARM_LENS_SHARE = 0.05
+WARM_LENS = 1.15
+# The rough passes are scored outward (C9): along a Hilbert curve, in runs of WARM_BLOCK points (a process takes a
+# run), each point warm-started from the best two fits within WARM_NEAR times its spacing scored before it in its
+# run, or from the point it refines, when they explain WARM_FLOOR or more; every WARM_EVERY-th point of a run, a
+# point with no such start, and one whose warm score falls WARM_DROP under its start's are slid in full. Measured
+# on 400 points about each of 19 working truths, no turn read back: 1.34 times as fast, every truth's best within
+# 300 m kept to 0.005 (every 4th and 0.1: 1.30 times, ranks a little worse).
+WARM = True
+WARM_BLOCK = 48
+# A run is shorter when the points are few, so every process has two at least, but no shorter than this.
+WARM_RUN_MIN = 12
+# Once ranked, the best points a warm start scored are slid again in full, a neighbour's fit may have led them
+# astray: the best RECHECK_PLACES places apart and the best RECHECK_NEAR a spacing apart; the better score is kept.
+RECHECK_PLACES = 10
+RECHECK_NEAR = 24
+WARM_NEAR = 1.6
+WARM_FLOOR = 0.1
+WARM_EVERY = 6
+WARM_DROP = 0.15
+# A grid of BOUND_MIN points or more is ranked best-first (C7): its points gathered in cells BOUND_CELL spacings a
+# side, the one nearest each cell's middle scored first; each cell then bounded by its score and BOUND_SLACK, as
+# much as a point within it may explain more, and its other points scored best bound first, BOUND_BATCH cells at a
+# time, while a bound reaches the last of the places the answer lists, and for the best BOUND_SHARE of the cells
+# whatever the bounds say. Measured on 28 real windows scored point by point: within a cell of 9 a point explains up to 0.26 more than
+# the middle one in 1 cell of 10, 0.49 in 1 of 100, and how near the relief stands says little of it (correlation
+# 0.22): the rough score's own grain. A slack of 0.4 scored 65% of the working windows' points and 82% of the held
+# out ones', no truth's best within 300 m lower by more than 0.013 (0.3: 47%, v17's lower by 0.09).
+# Off: the owner wants the grid the analyst lays scored whole, the best-first ranking kept for the refinement
+# finer than it (FIND_SMART_PLAN C7, 25 Oct).
+BOUND = False
+BOUND_MIN = 600
+BOUND_CELL = 3
+BOUND_SLACK = 0.4
+BOUND_SHARE = 0.1
+BOUND_BATCH = 16
 # A line the analyst says nothing of is laid on no ground nearer than this, metres: on foot, the
 # terrain's 30 m grain draws the eye's own slope as a ridge any trace can be laid on.
 FLOOR_M = 250.0
@@ -235,6 +278,10 @@ class Trace:
     mirror: bool = False
     # near lines judged rounded to the terrain's cell, metres (skymatch._rounded); None to judge them as drawn
     rounding: float | None = None
+    # an unknown lens slid only over the lenses within these, out of those a full slide tries (a warm start, C9)
+    lens_window: tuple[float, float] | None = None
+    # the widest lens the picture can span: a panorama no taller than a phone's tallest frame (R16)
+    lens_max: float | None = None
 
 
 def tilts_for(mode: str, view: Sequence[str] = ()) -> tuple[float, float]:
@@ -660,12 +707,15 @@ def rules_out(plan: Plan) -> bool:
     return bool(plan.sea or plan.water or plan.over)
 
 
-def seen_from(plan: Plan, lat: np.ndarray, lon: np.ndarray, sampler: terrain.Sampler) -> np.ndarray:
-    """Which points may have taken the photo for what it shows (engine/ruleout.py): all of them when it says
-    nothing that rules one out."""
+def seen_from(
+    plan: Plan, lat: np.ndarray, lon: np.ndarray, sampler: terrain.Sampler, *, sight: ruleout.Sight = "no",
+    tell: Callable[[int], None] | None = None,
+) -> np.ndarray:
+    """Which points may have taken the photo for what it shows (engine/ruleout.py), water in sight looked for
+    as `sight` says: all of them when it says nothing that rules one out."""
     if not rules_out(plan) or not np.size(lat):
         return np.ones(np.size(lat), dtype=bool)
-    return ruleout.ruled(plan, np.asarray(lat), np.asarray(lon), sampler) == ""
+    return ruleout.ruled(plan, np.asarray(lat), np.asarray(lon), sampler, sight=sight, tell=tell) == ""
 
 
 def standing(plan: Plan, lat: np.ndarray, lon: np.ndarray, sampler: terrain.Sampler, *, kinds: bool = True) -> np.ndarray:
@@ -689,7 +739,9 @@ def preview(plan: Plan, sampler: terrain.Sampler | None = None) -> dict[str, Any
     """The coarse grid before a search, each point with the ground it stands on and whether it is searched; a
     point the brush left out stays on it, greyed, its ground said `PAINTED` and the ground under it after (the
     map turns it back on in its colour while the brush paints), and one what the photo shows rules out its
-    reason (engine/ruleout.py `REASONS`), counted in `ruled`."""
+    reason (engine/ruleout.py `REASONS`), counted in `ruled`. Water in sight is said as far as it was checked
+    (the Mesh step's check, `ruleout.ruled` with `sight="known"`); `sight` says how many points with water
+    within reach are still to check, and about how long that takes here."""
     sampler = sampler or terrain.Sampler()
     spacing = coarse_spacing(plan)
     # the grid laid as if the brush had painted nothing out, then what it painted out said so
@@ -704,8 +756,9 @@ def preview(plan: Plan, sampler: terrain.Sampler | None = None) -> dict[str, Any
     counts = {kind: int(np.sum(ground == kind)) for kind in landform.STANDS}
     # what the photo shows rules out, said as the ground those points stand on
     ruled: dict[str, int] = {}
+    pending: list[int] = []
     if rules_out(plan) and kept.any():
-        why = ruleout.ruled(plan, lat[kept], lon[kept], sampler)
+        why = ruleout.ruled(plan, lat[kept], lon[kept], sampler, sight="known", pending=pending)
         out = np.flatnonzero(kept)[why != ""]
         ground[out] = why[why != ""]
         kept[out] = False
@@ -716,11 +769,43 @@ def preview(plan: Plan, sampler: terrain.Sampler | None = None) -> dict[str, Any
         "kept": int(kept.sum()),
         "kinds": counts,
         "ruled": ruled,
+        "sight": {"pending": sum(pending), "seconds": round(sum(pending) * ruleout.SIGHT_SECONDS, 1)},
         "points": [
             [round(float(a), 6), round(float(o), 6), str(k), bool(on), *([str(u)] if k == PAINTED else [])]
             for a, o, k, on, u in zip(lat, lon, ground, kept, under)
         ],
     }
+
+
+def check_sight(
+    plan: Plan, sampler: terrain.Sampler | None = None,
+    tell: Callable[[int, int], None] = lambda done, total: None, cancelled: Callable[[], bool] = lambda: False,
+) -> int:
+    """Look for water in sight (engine/ruleout.py) from each point of the grid the preview lays that has water
+    within reach and was not checked yet, so the preview and the search read it back: the Mesh step's check.
+    `tell(done, total)` is told as each point is; `cancelled()` stops it by raising `Cancelled`, what was
+    checked by then kept. How many points were checked."""
+    sampler = sampler or terrain.Sampler(keep=SEARCH_TILES, plates=True)
+    lat, lon = grid(plan, coarse_spacing(plan))
+    if not rules_out(plan) or not lat.size:
+        return 0
+    on_ground = standing(plan, lat, lon, sampler)
+    lat, lon = lat[on_ground], lon[on_ground]
+    pending: list[int] = []
+    ruleout.ruled(plan, lat, lon, sampler, sight="known", pending=pending)
+    total = sum(pending)
+    done = 0
+
+    def told(_: int) -> None:
+        nonlocal done
+        done += 1
+        tell(done, total)
+        if cancelled():
+            raise Cancelled
+
+    if total:
+        ruleout.ruled(plan, lat, lon, sampler, sight="all", tell=told)
+    return done
 
 
 def asked_spacing(plan: Plan) -> float:
@@ -784,7 +869,7 @@ def estimate(plan: Plan, *, efforts: bool = True) -> dict[str, Any]:
     coarse = int(grid(plan, spacing)[0].size)
     depth = levels(spacing, fine)
     refined = depth * KEEP * 8
-    points = coarse + refined + _polish_count() + TOP
+    points = coarse + refined + _polish_count() + FULL_PLACES
     asked = asked_spacing(plan)
     return {
         "spacing": spacing, "fine": round(fine, 1), "coarse": coarse,
@@ -826,7 +911,7 @@ def pace(plan: Plan, trace: Trace, sampler: terrain.Sampler | None = None) -> di
     for index in timed:
         _score_stage(float(lat[index]), float(lon[index]), spacing, "rough", None, trace, plan, sampler)
     seconds = (time.monotonic() - started) / timed.size
-    return {"seconds": round(seconds, 3), "timed": int(timed.size), "full": FULL_COST, "lane_power": LANE_POWER, "top": TOP}
+    return {"seconds": round(seconds, 3), "timed": int(timed.size), "full": FULL_COST, "lane_power": LANE_POWER, "top": FULL_PLACES}
 
 
 # -- one point -----------------------------------------------------------------
@@ -897,6 +982,9 @@ def half_span(trace: Trace) -> float:
     """Degrees the trace may reach either side of where the photo faces: half the widest lens tried,
     or half its own width when it spans more (a collage read frame by frame)."""
     lens = trace.fov if trace.known or trace.within is None else max(trace.within)
+    if trace.lens_window is not None and not trace.known:
+        # a warm start's lenses, and as far again as its refinement may ease them
+        lens = min(lens, max(trace.lens_window) * WARM_LENS)
     reach = float(np.abs(trace.x).max()) if trace.x.size else 1.0
     if trace.projection == "panorama":
         return max(lens / 2, reach * lens / 2)
@@ -1019,6 +1107,27 @@ def _facing(trace: Trace, plan: Plan, lat: float, lon: float) -> tuple[skymatch.
     return trace.facing
 
 
+def warm_half(trace: Trace) -> float:
+    """Degrees either side of a neighbour's heading a point warm-started from it slides over (`WARM_*`)."""
+    lens = trace.fov if trace.known or trace.within is None else max(trace.within)
+    return float(max(WARM_DEG, WARM_LENS_SHARE * min(lens, 360.0)))
+
+
+def warmed(trace: Trace, plan: Plan, lat: float, lon: float, seeds: Sequence[tuple[float, float]]) -> Trace | None:
+    """The trace as a point warm-started from its neighbours' fits searches it (C9): its headings narrowed to
+    `warm_half` about each seed's heading, within the analyst's own, and an unknown lens to the lenses a full
+    slide tries within `WARM_LENS` times the seeds' either way; None when no heading is left."""
+    half = warm_half(trace)
+    near = heading_mask(tuple((float(h) % 360.0, half) for h, _ in seeds))
+    facing = mask_sectors(heading_mask(_facing(trace, plan, lat, lon)) & near)
+    if facing == ():
+        return None
+    if trace.known:
+        return replace(trace, facing=facing)
+    fovs = [float(f) for _, f in seeds]
+    return replace(trace, facing=facing, lens_window=(min(fovs) / WARM_LENS, max(fovs) * WARM_LENS))
+
+
 def sea_horizon(altitude: float) -> float:
     """How far the sea's horizon stands from an eye this high above it, metres (with refraction)."""
     return math.sqrt(2 * horizon.effective_radius() * max(SEA_EYE_MIN, altitude))
@@ -1117,7 +1226,7 @@ def score_point(
                 x, trace.y, turns, half_width=trace.half_width, fov=trace.fov, known=trace.known,
                 within=trace.within, facing=facing, projection=trace.projection, quick=quick, rough=rough,
                 marks=marks, ridges=ridges, floor=trace.floor, tilts=trace.tilts, rounding=trace.rounding,
-                clear=clear, beyond=beyond,
+                clear=clear, beyond=beyond, lens_window=None if trace.known else trace.lens_window, lens_max=trace.lens_max,
             )
             if not found.fits or found.fits[0].explained <= best["explained"]:
                 continue
@@ -1187,10 +1296,16 @@ def search(
     lat, lon, steps = spaced_grid(plan, spacing)
     on_ground = standing(plan, lat, lon, sampler)
     lat, lon, steps = lat[on_ground], lon[on_ground], steps[on_ground]
-    visible = seen_from(plan, lat, lon, sampler)
+
+    def checking(_: int) -> None:
+        if cancelled():
+            raise Cancelled
+
+    # water in sight looked for where the Mesh step did not check it yet
+    visible = seen_from(plan, lat, lon, sampler, sight="all", tell=checking)
     lat, lon, steps = lat[visible], lon[visible], steps[visible]
     depth = levels(spacing, fine)
-    count = {"total": int(lat.size) + depth * KEEP * 8 + _polish_count() + TOP}
+    count = {"total": int(lat.size) + depth * KEEP * 8 + _polish_count() + FULL_PLACES}
     done = 0
     scored: list[dict[str, Any]] = []
     # every point as it was scored, the stage under way's too: what a search stopped had found
@@ -1235,14 +1350,129 @@ def search(
             raise
         return [point for point in out if point is not None]
 
+    def warm(jobs: Sequence[Job], stage: str) -> list[dict[str, Any]]:
+        """Points scored roughly outward (C9): along a Hilbert curve in runs of `WARM_BLOCK`, each from the fits
+        beside it; here, or a run to each process when the search has them."""
+        if not jobs:
+            return []
+        x, y = _local(plan.area[0][0], plan.area[0][1], np.array([j[0] for j in jobs]), np.array([j[1] for j in jobs]))
+        ordered = [jobs[i] for i in hilbert_order(x, y)]
+        # every process two runs at least, when there are points enough
+        length = WARM_BLOCK if pool is None else max(WARM_RUN_MIN, min(WARM_BLOCK, math.ceil(len(jobs) / (2 * lanes))))
+        runs = [ordered[i:i + length] for i in range(0, len(ordered), length)]
+
+        def told(point: dict[str, Any]) -> None:
+            tell(point)
+            if cancelled():
+                raise Cancelled
+
+        if pool is None or len(runs) < 2:
+            if cancelled():
+                raise Cancelled
+            return [point for run in runs for point in _warm_run(run, stage, trace, plan, sampler, told)]
+        futures = [pool.submit(_lane_run, (run, stage)) for run in runs]
+        out: list[dict[str, Any]] = []
+        try:
+            for future in as_completed(futures):
+                for point in future.result():
+                    out.append(point)
+                    told(point)
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+        return out
+
     try:
-        return _search(plan, trace, sampler, spacing, fine, lat, lon, steps, depth, count, scored, seen, batch, progress, started)
+        return _search(plan, trace, sampler, spacing, fine, lat, lon, steps, depth, count, scored, seen, batch, warm, progress, started)
     except Cancelled as stopped:
         stopped.result = so_far(heard, spacing, fine, trace, started)
         raise
     finally:
         if pool is not None:
             pool.shutdown(wait=False, cancel_futures=True)
+
+
+def hilbert_order(x: np.ndarray, y: np.ndarray, bits: int = 16) -> np.ndarray:
+    """The points' order along a Hilbert curve over their box: each point beside the ones before it."""
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    if x.size < 2:
+        return np.arange(x.size)
+    side = (1 << bits) - 1
+    span = max(float(np.ptp(x)), float(np.ptp(y)), 1e-9)
+    xi = np.clip(((x - x.min()) / span * side).astype(np.int64), 0, side)
+    yi = np.clip(((y - y.min()) / span * side).astype(np.int64), 0, side)
+    index = np.zeros(x.size, dtype=np.int64)
+    s = 1 << (bits - 1)
+    while s > 0:
+        rx = (xi & s) > 0
+        ry = (yi & s) > 0
+        index += s * s * ((3 * rx.astype(np.int64)) ^ ry.astype(np.int64))
+        # the quadrant turned so the curve runs on through it
+        turn = ~ry
+        flipped_x = np.where(turn & rx, side - xi, xi)
+        flipped_y = np.where(turn & rx, side - yi, yi)
+        xi, yi = np.where(turn, flipped_y, flipped_x), np.where(turn, flipped_x, flipped_y)
+        s >>= 1
+    return np.argsort(index, kind="stable")
+
+
+# a rough job: where, its spacing, and the fit it refines (explained, heading, lens), when it refines one
+Job = tuple[float, float, float, "tuple[float, float, float] | None"]
+
+
+def _starts(
+    a: float, o: float, step: float, given: tuple[float, float, float] | None, run: list[dict[str, Any]],
+    trace: Trace,
+) -> list[tuple[float, float, float]]:
+    """The fits a point may start from (C9), best first: the best two, headings apart, among the points scored
+    before it in its run within `WARM_NEAR` spacings and the fit it refines, each explaining `WARM_FLOOR` or more."""
+    found = [given] if given is not None else []
+    reach = WARM_NEAR * step
+    for point in run:
+        if point["explained"] < WARM_FLOOR or "heading" not in point:
+            continue
+        if terrain.distance(a, o, point["lat"], point["lon"]) <= reach:
+            found.append((point["explained"], point["heading"], point["fov"]))
+    found.sort(key=lambda one: -one[0])
+    half = warm_half(trace)
+    kept: list[tuple[float, float, float]] = []
+    for one in found:
+        if one[0] >= WARM_FLOOR and all(_apart(one[1], k[1]) > half for k in kept):
+            kept.append(one)
+            if len(kept) == 2:
+                break
+    return kept
+
+
+def _warm_run(
+    jobs: Sequence[Job], stage: str, trace: Trace, plan: Plan, sampler: terrain.Sampler,
+    tell: Callable[[dict[str, Any]], None] = lambda point: None,
+) -> list[dict[str, Any]]:
+    """A run of points scored in the order given, each warm-started where it may be (`_starts`, C9)."""
+    out: list[dict[str, Any]] = []
+    for i, (a, o, step, given) in enumerate(jobs):
+        point = None
+        starts = _starts(a, o, step, given, out[-WARM_BLOCK:], trace) if WARM and i % WARM_EVERY else []
+        if starts:
+            narrowed = warmed(trace, plan, a, o, [(h, f) for _, h, f in starts])
+            if narrowed is not None:
+                point = _score_stage(a, o, step, stage, None, narrowed, plan, sampler)
+                if point["explained"] < starts[0][0] - WARM_DROP:
+                    point = None
+                else:
+                    point["warm"] = True
+        if point is None:
+            point = _score_stage(a, o, step, stage, None, trace, plan, sampler)
+        out.append(point)
+        tell(point)
+    return out
+
+
+def _seed(point: dict[str, Any]) -> tuple[float, float, float] | None:
+    """The fit a point refined about it starts from: its score, heading and lens, when it has a fit."""
+    return (point["explained"], point["heading"], point["fov"]) if "heading" in point else None
 
 
 def _score_stage(
@@ -1276,6 +1506,11 @@ def _lane_score(job: tuple[float, float, float, str, Sequence[float] | None]) ->
     return _score_stage(a, o, step, stage, heights, _LANE["trace"], _LANE["plan"], _LANE["sampler"])
 
 
+def _lane_run(job: tuple[list[Job], str]) -> list[dict[str, Any]]:
+    jobs, stage = job
+    return _warm_run(jobs, stage, _LANE["trace"], _LANE["plan"], _LANE["sampler"])
+
+
 def _lanes(lanes: int, plan: Plan, trace: Trace) -> ProcessPoolExecutor:
     """Processes for a search, started the way every system can (spawn), told where tiles come from."""
     import multiprocessing
@@ -1296,7 +1531,8 @@ def _search(
     plan: Plan, trace: Trace, sampler: terrain.Sampler, spacing: float, fine: float, lat: np.ndarray,
     lon: np.ndarray, steps: np.ndarray, depth: int, count: dict[str, int], scored: list[dict[str, Any]],
     seen: set[tuple[float, float]],
-    batch: Callable[..., list[dict[str, Any]]], progress: Callable[[int, int], None], started: float,
+    batch: Callable[..., list[dict[str, Any]]], warm: Callable[..., list[dict[str, Any]]],
+    progress: Callable[[int, int], None], started: float,
 ) -> dict[str, Any]:
     """The search's stages, each scoring its points through `batch`; `count["total"]` grows as the
     filling-in adds points."""
@@ -1324,41 +1560,135 @@ def _search(
             out = [one for one, keep in zip(out, dry & seen_from(plan, lats, lons, sampler)) if keep]
         return out
 
-    # ranked roughly over the whole grid
+    # ranked roughly over the whole grid, best-first on a large one
     for a, o in zip(lat, lon):
         seen.add((round(float(a), 6), round(float(o), 6)))
-    scored.extend(batch([(float(a), float(o), float(own)) for a, o, own in zip(lat, lon, steps)], "rough"))
-    # the cells near relief filled in, and ranked as roughly
+    laid: list[Job] = [(float(a), float(o), float(own), None) for a, o, own in zip(lat, lon, steps)]
+    bounded = None
+    if BOUND and len(laid) >= BOUND_MIN and not plan.alignments:
+        ranked, bounded = _best_first(laid, plan.area[0], warm, batch)
+        count["total"] -= bounded["skipped"]
+        scored.extend(ranked)
+    else:
+        scored.extend(warm(laid, "rough"))
+    # the cells near relief filled in, and ranked as roughly, each from its cell's fit
     extra = filled(plan, scored, spacing, fine, seen)
     if extra:
-        lats, lons = np.array([a for a, _, _ in extra]), np.array([o for _, o, _ in extra])
+        lats, lons = np.array([one[0] for one in extra]), np.array([one[1] for one in extra])
         dry = standing(plan, lats, lons, sampler) & seen_from(plan, lats, lons, sampler)
         extra = [one for one, keep in zip(extra, dry) if keep]
     count["total"] += len(extra)
-    scored.extend(batch(extra, "rough"))
+    scored.extend(warm(extra, "rough"))
+    # the best points a warm start scored, slid again in full: a peak its neighbours' fit led astray (C9)
+    contenders = {id(p): p for p in [*_spread(scored, APART_M, RECHECK_PLACES), *_spread(scored, spacing, RECHECK_NEAR)] if p.get("warm")}
+    if contenders:
+        count["total"] += len(contenders)
+        held = list(contenders.values())
+        for point, again in zip(held, batch([(p["lat"], p["lon"], p["spacing"]) for p in held], "rough")):
+            point.pop("warm", None)
+            if again["explained"] > point["explained"]:
+                point.update(again)
     # refined three by three about the best, each from its own spacing, down to what the terrain is worth
     step = spacing
     for _ in range(depth):
         kept = _spread(scored, step, KEEP)
         step /= 3
-        jobs: list[tuple[float, float, float]] = []
+        refined: list[Job] = []
         for point in kept:
             own = max(fine, min(step, point["spacing"] / 3))
-            jobs.extend((a, o, own) for a, o in about(point, own, 1))
-        scored.extend(batch(jobs, "rough"))
+            refined.extend((a, o, own, _seed(point)) for a, o in about(point, own, 1))
+        scored.extend(warm(refined, "rough"))
     # the three best polished on a finer grid, with the ground near the eye read finely
     polish_step = step / 2
-    jobs = []  # the polish's points, reusing the list's type
+    jobs: list[tuple[float, float, float]] = []
     for point in _spread(scored, max(APART_M, 2 * fine), POLISH):
         jobs.extend((a, o, polish_step) for a, o in about(point, polish_step, POLISH_STEPS))
     scored.extend(batch(jobs, "polish"))
-    # the best places, searched in full as a Fit is
-    best = _spread(scored, max(APART_M, 2 * fine), TOP)
+    # the best places, searched in full as a Fit is, more of them than are listed
+    best = _spread(scored, max(APART_M, 2 * fine), FULL_PLACES)
     fulls = batch([(p["lat"], p["lon"], p["spacing"]) for p in best], "full", heights=plan.final_heights or None)
     places = [full if full["explained"] >= point["explained"] else point for point, full in zip(best, fulls)]
-    places.sort(key=lambda p: -p["explained"])
+    places = sorted(places, key=lambda p: -p["explained"])[:TOP]
     progress(count["total"], count["total"])
-    return _answer(places, scored, spacing, fine, trace, started)
+    answer = _answer(places, scored, spacing, fine, trace, started)
+    if bounded is not None:
+        answer["bounded"] = bounded
+    return answer
+
+
+def cells_of(origin: tuple[float, float], jobs: Sequence[Job]) -> list[list[int]]:
+    """The grid's points gathered in cells `BOUND_CELL` of their spacings a side (as much ground as that many
+    squared of the lattice's points stand for), each cell's points listed the one nearest its middle first."""
+    x, y = _local(origin[0], origin[1], np.array([j[0] for j in jobs]), np.array([j[1] for j in jobs]))
+    groups: dict[tuple[float, int, int], list[int]] = {}
+    for i, job in enumerate(jobs):
+        side = BOUND_CELL * job[2] * math.sqrt(HEX_ACROSS * HEX_ROWS)
+        groups.setdefault((job[2], math.floor(x[i] / side), math.floor(y[i] / side)), []).append(i)
+    cells = []
+    for (step, cx, cy), members in groups.items():
+        side = BOUND_CELL * step * math.sqrt(HEX_ACROSS * HEX_ROWS)
+        mx, my = (cx + 0.5) * side, (cy + 0.5) * side
+        cells.append(sorted(members, key=lambda i: (x[i] - mx) ** 2 + (y[i] - my) ** 2))
+    return cells
+
+
+def bound(point: dict[str, Any]) -> float:
+    """The most a point of a scored one's cell may explain (C7): its score and `BOUND_SLACK`."""
+    return max(0.0, point["explained"]) + BOUND_SLACK
+
+
+def _best_first(
+    jobs: Sequence[Job], origin: tuple[float, float], warm: Callable[..., list[dict[str, Any]]],
+    batch: Callable[..., list[dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """A large grid ranked best-first (C7): one point a cell first, drawn as large as its cell, then each cell's
+    others, the best bound first, while a bound can still reach the last of the `TOP` places found (places
+    `APART_M` apart, as the answer lists them: every place, not the first alone), or the cell is among the best
+    `BOUND_SHARE`. Each cell's first point is slid in full (`batch`): its bound rests on it, and a warm start reads
+    low at times (with both, two truths' best fell 0.15 where either alone kept it); the others start from it
+    (`warm`). What was scored, and `{ cells, filled, skipped }`: how many cells, how many were searched at the
+    grid's own spacing, how many of its points were never needed. A cell left keeps its first point as large as the
+    cell (`bounded` on it), so the map shows no hole."""
+    cells = cells_of(origin, jobs)
+    side = {i: BOUND_CELL * jobs[cell[0]][2] * math.sqrt(HEX_ACROSS * HEX_ROWS) for i, cell in enumerate(cells)}
+    firsts = [(jobs[cell[0]][0], jobs[cell[0]][1], side[i]) for i, cell in enumerate(cells)]
+    head: dict[int, dict[str, Any]] = dict(enumerate(batch(firsts, "rough")))
+    for point in head.values():
+        point["bounded"] = True
+    out = list(head.values())
+
+    def last_place() -> float:
+        """The score a cell must reach to change the places: the last of `TOP`, none while fewer are found."""
+        places = _spread(out, APART_M, TOP)
+        return places[-1]["explained"] if len(places) == TOP else -math.inf
+
+    floor = last_place()
+    queue = [(-bound(head[i]), i) for i in head if len(cells[i]) > 1]
+    heapq.heapify(queue)
+    least = math.ceil(BOUND_SHARE * len(queue))
+    filled = 0
+    while queue:
+        taken: list[int] = []
+        while queue and len(taken) < BOUND_BATCH:
+            top, i = queue[0]
+            if -top < floor and filled + len(taken) >= least:
+                queue.clear()
+                break
+            heapq.heappop(queue)
+            taken.append(i)
+        if not taken:
+            break
+        inside = [(jobs[j][0], jobs[j][1], jobs[j][2], _seed(head[i])) for i in taken for j in cells[i][1:]]
+        found = warm(inside, "rough")
+        for i in taken:
+            # its cell searched at the grid's own spacing: its first point drawn as one of them
+            head[i]["spacing"] = jobs[cells[i][0]][2]
+            head[i].pop("bounded", None)
+        out.extend(found)
+        floor = last_place()
+        filled += len(taken)
+    skipped = sum(len(cells[i]) - 1 for i in head if head[i].get("bounded"))
+    return out, {"cells": len(cells), "filled": filled, "skipped": skipped}
 
 
 def _answer(
@@ -1408,8 +1738,9 @@ def _ruled(point: dict[str, Any]) -> dict[str, Any]:
 
 def filled(
     plan: Plan, coarse: list[dict[str, Any]], spacing: float, fine: float, seen: set[tuple[float, float]],
-) -> list[tuple[float, float, float]]:
-    """Points filling in the cells of the coarse grid whose relief stands near: (lat, lon, spacing).
+) -> list[Job]:
+    """Points filling in the cells of the coarse grid whose relief stands near: (lat, lon, spacing, the cell's
+    fit to start from).
 
     Each cell, a square holding as much ground as its point's lattice gives it (√(HEX_ACROSS·HEX_ROWS) times its
     spacing, `spacing` where it says none), is filled in at `NEAR_SHARE` of
@@ -1420,11 +1751,14 @@ def filled(
     out; the ones it lays are added to `seen`.
     """
     budget = int(DENSE_MAX * len(coarse))
-    out: list[tuple[float, float, float]] = []
+    out: list[Job] = []
     for point in sorted(coarse, key=lambda p: p.get("relief", math.inf)):
         near = point.get("relief", math.inf)
         if not math.isfinite(near):
             break
+        # a cell the best-first ranking judged could not win is not filled in either
+        if point.get("bounded"):
+            continue
         # a square as large as the ground each point of the hex lattice stands for: wider ones overlap and would
         # spend the filling-in's budget twice on the same ground
         cell = float(point.get("spacing") or spacing) * math.sqrt(HEX_ACROSS * HEX_ROWS)
@@ -1446,7 +1780,7 @@ def filled(
             key = (round(float(a), 6), round(float(o), 6))
             if key not in seen:
                 seen.add(key)
-                out.append((float(a), float(o), own))
+                out.append((float(a), float(o), own, _seed(point)))
     return out
 
 

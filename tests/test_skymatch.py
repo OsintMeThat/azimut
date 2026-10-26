@@ -73,6 +73,46 @@ def test_an_unknown_lens_is_looked_for_about_the_views_own():
     assert skymatch.lenses(1.0, known=False)[0] == skymatch.FOV_MIN
 
 
+def test_a_lens_window_slides_the_very_lenses_a_full_slide_tries_near_it(monkeypatch):
+    x, y = trace_on(RANGE, heading=47.0, fov=52.0, tilt=3.0)
+    slid = []
+    slide = skymatch._slide_after
+
+    def sliding(seen, *rest, **named):
+        slid.append(seen.fov)
+        return slide(seen, *rest, **named)
+
+    monkeypatch.setattr(skymatch, "_slide_after", sliding)
+    skymatch.match(x, y, RANGE, half_width=HALF, fov=60.0, within=(20.0, 85.0), rough=True)
+    full = list(slid)
+    slid.clear()
+    found = skymatch.match(x, y, RANGE, half_width=HALF, fov=60.0, within=(20.0, 85.0), rough=True, lens_window=(45.0, 60.0))
+    assert slid and set(slid) <= set(full) and slid == [lens for lens in full if 45.0 <= lens <= 60.0]
+    assert found.fits[0].heading == pytest.approx(47.0, abs=0.5)
+    # a window between two of them slides the nearer
+    slid.clear()
+    skymatch.match(x, y, RANGE, half_width=HALF, fov=60.0, within=(20.0, 85.0), rough=True, lens_window=(52.0, 52.5))
+    assert len(slid) == 1 and slid[0] in full
+
+
+def test_a_widest_lens_leaves_the_wider_ones_out_and_tries_the_very_others(monkeypatch):
+    x, y = trace_on(RANGE, heading=47.0, fov=52.0, tilt=3.0)
+    slid = []
+    slide = skymatch._slide_after
+
+    def sliding(seen, *rest, **named):
+        slid.append(seen.fov)
+        return slide(seen, *rest, **named)
+
+    monkeypatch.setattr(skymatch, "_slide_after", sliding)
+    skymatch.match(x, y, RANGE, half_width=HALF, fov=60.0, within=(20.0, 85.0), rough=True)
+    full = list(slid)
+    slid.clear()
+    found = skymatch.match(x, y, RANGE, half_width=HALF, fov=60.0, within=(20.0, 85.0), rough=True, lens_max=60.0)
+    assert slid == [lens for lens in full if lens <= 60.0]
+    assert found.fits and all(fit.fov <= 60.0 + 1e-9 for fit in found.fits)
+
+
 def test_a_trace_is_found_at_its_heading_lens_and_tilt():
     x, y = trace_on(RANGE, heading=47.0, fov=52.0, tilt=3.0)
     found = skymatch.match(x, y, RANGE, half_width=HALF, fov=60.0, tilt=0.0)
@@ -438,8 +478,8 @@ def test_the_ridges_answer_the_nearest_silhouette_in_each_column():
     assert off[0] == pytest.approx(0.1) and far[0] == 100.0
     assert off[1] == pytest.approx(-0.5) and far[1] == 900.0
     assert np.isnan(off[2]) and np.isnan(far[2])
-    # a silhouette past the reach is not there
-    off, _ = ridges.nearest(np.array([7.0]), np.array([3.0]), reach=800.0)
+    # a silhouette outside the direction's band is not there
+    off, _ = ridges.nearest(np.array([7.0]), np.array([3.0]), (np.array([0.0]), np.array([800.0])))
     assert np.isnan(off[0])
 
 
@@ -487,6 +527,18 @@ def test_inner_edges_take_score_from_a_place_where_no_ridge_lies_and_add_none():
     assert missed.sky == pytest.approx(alone.explained, abs=1e-6)
 
 
+def test_inner_edges_lie_on_ridges_past_the_cut_the_skyline_was_found_on():
+    # the skyline fits the turn cut at 4 km, the ridge the inner edge lies on stands 6 km out
+    x, y = trace_on(RANGE, heading=47.0, fov=52.0)
+    rx, ry = _inner_edges(47.0, 52.0, 0.0, ridge_at=0.4)
+    cut = skymatch.Turn(RANGE.start, RANGE.step, RANGE.angles, reach=4_000.0)
+    held = skymatch.match(x, y, cut, half_width=HALF, fov=52.0, known=True,
+                          marks=skymatch.Marks(ridge_x=rx, ridge_y=ry),
+                          ridges=_ridges_under(RANGE, 0.4, distance=6_000.0)).fits[0]
+    assert held.reach == 4_000.0
+    assert held.inner > 0.9
+
+
 def test_a_pair_in_the_wrong_order_takes_a_share_of_the_score():
     x, y = trace_on(RANGE, heading=47.0, fov=52.0)
     near = np.full(RANGE.angles.size, 2_000.0)
@@ -505,7 +557,8 @@ def test_a_pair_in_the_wrong_order_takes_a_share_of_the_score():
                          marks=skymatch.Marks(line=line, pairs=((1, 0),))).fits[0]
     assert good.pairs == (1, 1) and good.explained == pytest.approx(alone.explained, abs=1e-6)
     assert bad.pairs == (0, 1)
-    assert bad.explained == pytest.approx(alone.explained * (1 - skymatch.PAIR_COST), abs=1e-6)
+    # one pair alone takes its share as one of `PAIR_MIN`: it never halves a place
+    assert bad.explained == pytest.approx(alone.explained * (1 - skymatch.PAIR_COST / skymatch.PAIR_MIN), abs=1e-6)
 
 
 def test_a_line_with_only_sky_above_loses_the_place_where_land_stands_over_it():

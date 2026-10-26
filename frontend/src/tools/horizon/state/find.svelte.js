@@ -53,7 +53,7 @@ import {
   toggleStand,
   traceSpan,
 } from '../../../lib/horizon/find.js';
-import { AUTO_REACH, searchHints } from '../../../lib/horizon/hints.js';
+import { AUTO_REACH, MEASURED_GIVE, PANORAMA_TALL, PANORAMA_WITHIN, searchHints } from '../../../lib/horizon/hints.js';
 import { farRange } from '../../../lib/horizon/traceMarks.js';
 import { marksSaid } from '../../../lib/horizon/traceMarks.js';
 import { COARSE_RELIEF_M, GAP_MIN_POINTS, markedPlane, traceSamples } from '../../../lib/horizon/overlay.js';
@@ -80,13 +80,14 @@ export const EFFORTS = [
   { id: 'thorough', label: 'Thorough', title: 'A grid about three times as dense' },
 ];
 
-/** Water the photo shows, a river aside: the sea alone (seen as far as the sea's horizon), or the sea or a lake. */
+/** Water the photo shows: the sea alone (seen as far as the sea's horizon), or any of the sea, a lake or a river
+ * the map draws as water. */
 export const WATERS = [
   { id: 'sea', label: 'The sea', title: 'The sea shows: points it could not be seen from are left out. An island is traced as any skyline' },
-  { id: 'lake', label: 'Sea or a lake', title: 'The sea or a lake shows, a river aside: points with none within reach are left out' },
+  { id: 'lake', label: 'Sea, lake or river', title: 'Water shows: points where none is within reach are left out' },
 ];
 
-/** Water said of the photo as Find keeps it: 'sea', 'lake' (the sea or a lake, as an older search said `true`), or false. */
+/** Water said of the photo as Find keeps it: 'sea', 'lake' (any water, as an older search said `true`), or false. */
 export function cleanWater(value) {
   if (value === true) return 'lake';
   return WATERS.some((one) => one.id === value) ? value : false;
@@ -103,6 +104,8 @@ export const SPEEDS = [
 const PLANE_W = 1200;
 /** A running search is read again this often, milliseconds. */
 export const POLL_MS = 2000;
+/** How often the Mesh step's check of water in sight is read while it runs, milliseconds. */
+export const SIGHT_POLL_MS = 400;
 /**
  * Seconds a point of the grid takes, about, for the estimate until this machine's pace is timed
  * (`/horizon/finds/pace`; measured on a recent laptop, turns read finer cost more). Once it runs, the
@@ -119,7 +122,7 @@ export const ACTIVE = ['queued', 'running', 'stopping'];
  * as long as the ones timed, the best places searched in full `full` times as long, in `lanes` processes
  * `lanes` to the `lane_power` times as fast once the grid holds `lane_min` points.
  */
-export function pacedSeconds(points, { seconds, lanes = 1, lane_min: laneMin = 200, full = 8, lane_power: power = 0.46, top = 5 }) {
+export function pacedSeconds(points, { seconds, lanes = 1, lane_min: laneMin = 200, full = 8, lane_power: power = 0.46, top = 15 }) {
   const speedup = points >= laneMin ? Math.max(1, lanes) ** power : 1;
   return (seconds * (Math.max(0, points - top) + top * full)) / speedup;
 }
@@ -252,7 +255,7 @@ export function createFindState({ api, overlay, view }) {
   let trying = 0;
   /** A selfie: searched mirrored too. */
   let mirror = $state(false);
-  /** The sea or a lake shows in the photo; where the eye stands against the land round it ('above', 'below' or null). */
+  /** Water shows in the photo; where the eye stands against the land round it ('above', 'below' or null). */
   let water = $state(false);
   let over = $state(null);
   /** Near lines judged rounded where the relief is coarse. */
@@ -262,9 +265,12 @@ export function createFindState({ api, overlay, view }) {
   /** The headings the compass and the sun leave, as the app read them: `{ sectors, sun }`, or null. */
   let sectors = $state.raw(null);
   let sectorsAsked = '';
-  /** The grid read before the search: `{ total, kept, kinds, points, spacing }`, or null. */
+  /** The grid read before the search: `{ total, kept, kinds, points, spacing, ruled, sight }`, or null. */
   let previewed = $state.raw(null);
   let previewAsked = '';
+  /** The Mesh step's check of water in sight under way, `{ id, done, total }`, or null; why the last one failed. */
+  let sighting = $state.raw(null);
+  let sightFailed = $state('');
   let settings = $state.raw(NO_SETTINGS);
   /** The search on show: `{ name, status, progress, error, result, ask, found }` as the app keeps it, or null. */
   let search = $state.raw(null);
@@ -274,6 +280,8 @@ export function createFindState({ api, overlay, view }) {
   let checking = $state(false);
   /** The case's searches, newest first, as the list shows them. */
   let list = $state.raw([]);
+  /** How many searches were opened from the list: the map comes over what one searched each time. */
+  let opened = $state(0);
   /** How large the search would be: `{ points, coarse, spacing, step }`, or null. */
   let estimated = $state.raw(null);
   /** This machine's pace for the search as set up, as `/finds/pace` timed it, or null; whether it is being timed. */
@@ -388,7 +396,14 @@ export function createFindState({ api, overlay, view }) {
     const fov = lens?.fov ?? Math.sqrt(told.within[0] * told.within[1]);
     const pieceAt = (s) => overlay.pieceAt?.({ u: s.x / size.width, v: s.y / size.height }) ?? 0;
     const plane = markedPlane(samples, { fov, ...size, projection, heading: 0, tilt: 0, roll: 0 }, marks, pieceAt);
-    return { ...plane, fov, known: Boolean(lens), ...(told.within ? { within: told.within } : {}), projection };
+    // a lens read off the video's pan is searched a little either way, one the file or the stitch says held exact
+    const within = lens?.measured ? [fov / MEASURED_GIVE, fov * MEASURED_GIVE] : told.within;
+    // a panorama of unknown width spans no more than a phone's frame up and down: wider lenses are never tried
+    const lensMax = projection === 'panorama' && !lens ? PANORAMA_TALL * aspect : Infinity;
+    return {
+      ...plane, fov, known: Boolean(lens) && !lens.measured, ...(within ? { within } : {}), projection,
+      ...(lensMax < PANORAMA_WITHIN[1] ? { lens_max: Math.round(lensMax * 10) / 10 } : {}),
+    };
   }
 
   /** The alignments as a search asks with them. */
@@ -449,6 +464,30 @@ export function createFindState({ api, overlay, view }) {
   /** What the photo shows that rules points out before the search (engine/ruleout.py), as a search asks it. */
   function seenSaid() {
     return { sea: Boolean(overlay.marks?.sea?.length) || water === 'sea', water: water === 'lake', over };
+  }
+
+  /**
+   * Read the grid the search would lay, and the ground under each point
+   * (`/api/horizon/finds/preview`): once the area is drawn, never before. An
+   * answer to an older question is dropped.
+   */
+  async function readPreview() {
+    const ground = groundNow();
+    const key = ground ? JSON.stringify(ground) : '';
+    if (key === previewAsked) return;
+    previewAsked = key;
+    if (!ground) {
+      previewed = null;
+      return;
+    }
+    // the strokes the answer reads: the map lays those painted since over it until the next one comes
+    const read = strokes;
+    try {
+      const answer = await api.post('/api/horizon/finds/preview', ground);
+      if (previewAsked === key) previewed = { ...answer, strokesRead: read };
+    } catch {
+      if (previewAsked === key) previewed = null;
+    }
   }
 
   /** The nearest a traced line is said to stand, metres, or null when no line's distance is said. */
@@ -911,6 +950,9 @@ export function createFindState({ api, overlay, view }) {
     get list() {
       return list;
     },
+    get opened() {
+      return opened;
+    },
     refreshList,
     get estimated() {
       return estimated;
@@ -984,8 +1026,11 @@ export function createFindState({ api, overlay, view }) {
       search = null;
       soFar = null;
     },
-    /** Open a search the case keeps: its area, alignments and settings come back with its map. */
-    async openSearch(caseId, name) {
+    /**
+     * Open a search the case keeps: its area, alignments and settings come back with its map, which is
+     * framed over them unless the search is only put back as the bench left it (`framed: false`).
+     */
+    async openSearch(caseId, name, { framed = true } = {}) {
       caseOf = caseId;
       const record = await api.get(`/api/cases/${encodeURIComponent(caseId)}/horizon/finds/${encodeURIComponent(name)}`);
       const ask = record.ask ?? {};
@@ -1026,6 +1071,7 @@ export function createFindState({ api, overlay, view }) {
       }));
       search = { ...record, name };
       soFar = null;
+      if (framed) opened += 1;
       if (ACTIVE.includes(record.status)) follow(caseId, name);
       return record;
     },
@@ -1179,7 +1225,7 @@ export function createFindState({ api, overlay, view }) {
     setMirror(on) {
       mirror = Boolean(on);
     },
-    /** Water the photo shows (`WATERS`): 'sea', 'lake' for the sea or a lake, or false. */
+    /** Water the photo shows (`WATERS`): 'sea', 'lake' for any water, or false. */
     get water() {
       return water;
     },
@@ -1198,27 +1244,61 @@ export function createFindState({ api, overlay, view }) {
     get previewed() {
       return previewed;
     },
-    /**
-     * Read the grid the search would lay, and the ground under each point
-     * (`/api/horizon/finds/preview`): once the area is drawn, never before. An
-     * answer to an older question is dropped.
-     */
+    /** Read the grid the search would lay, once the area is drawn (`readPreview`). */
     async preview() {
+      await readPreview();
+    },
+    /** The Mesh step's check of water in sight under way, `{ id, done, total }`, or null. */
+    get sighting() {
+      return sighting;
+    },
+    /** Why the last check of water in sight failed, or ''. */
+    get sightFailed() {
+      return sightFailed;
+    },
+    /**
+     * Check which points of the grid see the water the photo shows (`/api/horizon/finds/sight`), in the
+     * background; once it ends the grid is read again, greying the points it hid. The search reuses it.
+     */
+    async checkSight() {
       const ground = groundNow();
-      const key = ground ? JSON.stringify(ground) : '';
-      if (key === previewAsked) return;
-      previewAsked = key;
-      if (!ground) {
-        previewed = null;
+      if (!ground || sighting) return;
+      sightFailed = '';
+      try {
+        const started = await api.post('/api/horizon/finds/sight', ground);
+        sighting = { id: started.id, done: started.done, total: started.total };
+      } catch (failure) {
+        sightFailed = failure.message;
         return;
       }
-      // the strokes the answer reads: the map lays those painted since over it until the next one comes
-      const read = strokes;
+      const id = sighting.id;
+      while (sighting?.id === id) {
+        await new Promise((resolve) => setTimeout(resolve, SIGHT_POLL_MS));
+        let state;
+        try {
+          state = await api.get(`/api/horizon/finds/sight/${id}`);
+        } catch {
+          continue;
+        }
+        if (sighting?.id !== id) return;
+        if (state.status === 'running') {
+          sighting = { id, done: state.done, total: state.total };
+          continue;
+        }
+        sighting = null;
+        if (state.status === 'failed') sightFailed = state.error || 'The check failed';
+        // what it checked, the whole grid or as far as it went, shows on the map
+        previewAsked = '';
+        await readPreview();
+      }
+    },
+    /** Stop the check of water in sight: what it checked by then shows on the map. */
+    async stopSight() {
+      if (!sighting) return;
       try {
-        const answer = await api.post('/api/horizon/finds/preview', ground);
-        if (previewAsked === key) previewed = { ...answer, strokesRead: read };
+        await api.post(`/api/horizon/finds/sight/${sighting.id}/cancel`, {});
       } catch {
-        if (previewAsked === key) previewed = null;
+        // the next read says how it ended
       }
     },
     /** How far the search reads the turn, metres, as far as the map draws the directions ticked. */
@@ -1283,7 +1363,7 @@ export function createFindState({ api, overlay, view }) {
       pending = null;
       if (setup?.search && caseId) {
         try {
-          await this.openSearch(caseId, setup.search);
+          await this.openSearch(caseId, setup.search, { framed: false });
         } catch {
           stopPoll?.();
           search = null;

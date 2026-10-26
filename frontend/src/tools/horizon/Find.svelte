@@ -41,8 +41,9 @@
     onplace = () => {},
     /** Asked to look again from the place the analyst confirmed (the search's `found`). */
     onfound = () => {},
-    /** Whether a case is open to keep searches in. */
+    /** Whether a case is open to keep searches in, and its id (the searches' pictures are read from it). */
     caseOpen = false,
+    caseId = null,
     /** Asked to open or delete a search the case keeps, by name. */
     onopensearch = () => {},
     onremovesearch = () => {},
@@ -199,7 +200,7 @@
     >
       <Icon name="plus" size={13} /><span>New</span>
     </button>
-    <SearchesMenu searches={find.list} current={find.search?.name ?? null} ready={caseOpen} onopen={onopensearch} onremove={onremovesearch} />
+    <SearchesMenu searches={find.list} current={find.search?.name ?? null} ready={caseOpen} {caseId} onopen={onopensearch} onremove={onremovesearch} />
     <button
       type="button"
       class="btn btn-ghost btn-sm"
@@ -350,8 +351,10 @@
     color: var(--text-1);
     font-size: var(--fs-sm);
   }
+  /* its own stack: the map's controls (Layers, the brush's ring) stay under the header's menus */
   .find-cols {
     position: relative;
+    isolation: isolate;
     flex: 1;
     min-height: 0;
     display: flex;

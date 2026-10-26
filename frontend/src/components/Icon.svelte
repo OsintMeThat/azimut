@@ -92,6 +92,10 @@
     tagTR: 'M4 10h16v10H4V10Zm16 0V5h-9v5',
     tagBL: 'M4 4h16v10H4V4Zm0 10v5h9v-5',
     tagBR: 'M4 4h16v10H4V4Zm16 10v5h-9v-5',
+    cornerTL: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM6.5 8h5v4h-5Z',
+    cornerTR: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM12.5 8h5v4h-5Z',
+    cornerBL: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM6.5 12h5v4h-5Z',
+    cornerBR: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM12.5 12h5v4h-5Z',
     globe: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-9 9h18M12 3c2.5 2.5 3.8 5.7 3.8 9S14.5 18.5 12 21c-2.5-2.5-3.8-5.7-3.8-9S9.5 5.5 12 3Z',
     // a page the case points at, not a hostname: `domain` keeps the globe, and the
     // two stopped being the same row at a glance

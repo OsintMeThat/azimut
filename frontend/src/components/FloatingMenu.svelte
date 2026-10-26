@@ -68,8 +68,8 @@
 </div>
 
 <style>
-  /* Above the map's own controls and above a modal (900), as the other floating menus. */
-  .float-menu { position: fixed; z-index: 950; overflow-y: auto; padding: 5px; background: var(--bg-1); border: 1px solid var(--border);
+  /* Above the app's top bar (1200), so a tall menu reaching the window's top is whole, the map's controls and a modal (900). */
+  .float-menu { position: fixed; z-index: 1250; overflow-y: auto; padding: 5px; background: var(--bg-1); border: 1px solid var(--border);
     border-radius: var(--r-sm); box-shadow: var(--shadow-2); color: var(--text-1); font-size: var(--fs-xs); outline: none; }
   /* a flex item keeps its content's height unless it scrolls: the scrolling part is the one that gives */
   .float-menu.column { display: flex; flex-direction: column; }

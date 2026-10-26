@@ -78,11 +78,11 @@ PAPERS: dict[str, tuple[float, float]] = {
 #: The fonts shipped with the app, so a plate reads the same on every machine.
 FONTS = ("inter", "barlow", "oxanium", "plexmono", "serif", "condensed")
 KINDS = ("map", "inset", "legend", "text", "scale", "north", "image", "label", "arrow", "credits",
-         "shape", "ring", "cone", "zone", "measure", "line", "key", "table", "qr", "timeline", "signature", "brand", "video", "symbol")
+         "shape", "ring", "cone", "zone", "measure", "line", "key", "table", "qr", "timeline", "signature", "brand", "video", "symbol", "focus")
 #: The kinds that read one map of the plate, named by `of`.
-OF_A_MAP = ("inset", "legend", "scale", "north", "label", "arrow", "credits", "ring", "cone", "zone", "measure", "line", "symbol")
+OF_A_MAP = ("inset", "legend", "scale", "north", "label", "arrow", "credits", "ring", "cone", "zone", "measure", "line", "symbol", "focus")
 #: The kinds that stand on a map's ground, so a template, which keeps no ground, leaves them out.
-ON_THE_GROUND = ("label", "arrow", "ring", "cone", "zone", "measure", "line", "symbol")
+ON_THE_GROUND = ("label", "arrow", "ring", "cone", "zone", "measure", "line", "symbol", "focus")
 #: The kinds that write their words over the ground, bold unless the analyst says otherwise.
 GROUND_WORDS = ("arrow", "ring", "cone", "zone", "measure", "line")
 
@@ -311,7 +311,8 @@ class Transitions(Strict):
 class Element(Strict):
     id: Ident
     kind: Literal["map", "inset", "legend", "text", "scale", "north", "image", "label", "arrow", "credits",
-                  "shape", "ring", "cone", "zone", "measure", "line", "key", "table", "qr", "timeline", "signature", "brand", "video", "symbol"]
+                  "shape", "ring", "cone", "zone", "measure", "line", "key", "table", "qr", "timeline", "signature", "brand", "video", "symbol",
+                  "focus"]
     #: Left, top, width and height on the page, in millimetres.
     box: tuple[Mm, Mm, Size, Size]
     #: The map an element reads, by its id. A map with one is a detail of that map.
@@ -347,6 +348,8 @@ class Element(Strict):
     grid_style: Grid = Field(default_factory=Grid)
     tone: Tone = Field(default_factory=Tone)
     plain: Plain = Field(default_factory=Plain)
+    #: A country focus: the country it lights on its map, and how it draws the rest back. A map
+    #: saved before the focus was an element of its own carries it too, until the plate moves it.
     spotlight: Spotlight | None = None
     relief: FiniteFloat = Field(default=1, ge=0, le=2)
     #: A map drawn in 3D stands on the ground's heights, this many times as tall; 0 is flat.
@@ -875,7 +878,9 @@ def beat_command(exe: str, still: Path, seconds: float, clips: list[tuple[ClipOu
                "-threads", VIDEO_THREADS, "-framerate", str(VIDEO_FPS), "-i", str(still),
                "-f", "lavfi", "-t", held, "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
     for clip, file, _ in clips:
-        command += ["-threads", VIDEO_THREADS, "-ss", f"{clip.start:.3f}", "-t", f"{clip.end - clip.start:.3f}", "-i", str(file)]
+        # a GIF loops for as long as its clip runs, as a browser plays it
+        loop = ["-ignore_loop", "0"] if file.suffix.lower() == ".gif" else []
+        command += ["-threads", VIDEO_THREADS, *loop, "-ss", f"{clip.start:.3f}", "-t", f"{clip.end - clip.start:.3f}", "-i", str(file)]
     if over is not None:
         command += ["-threads", VIDEO_THREADS, "-framerate", str(VIDEO_FPS), "-i", str(over)]
     graph = [f"[0:v]{hold},{EVEN_SIDES},setsar=1[b0]"]

@@ -65,6 +65,8 @@
     onmap = null,
     /** `(map, text, at, page)`: a name of the ground made a label standing at `at`, `page` its point on the page in millimetres. */
     onnamelabel = null,
+    /** `(id, { x, y })`: a right-click on an element, or on the paper with `id` null. */
+    oncontext = null,
     /** `[id, label]` of the grounds a plate's maps can be drawn on. */
     grounds = [],
     /** Draw the annotations of the plate's other days, faintly. */
@@ -275,6 +277,18 @@
       selection = all ? selection.filter((id) => !ids.includes(id)) : [...selection.filter((id) => !ids.includes(id)), ...ids.filter((id) => id !== element.id), element.id];
     } else if (!selection.includes(element.id)) selection = [...ids.filter((id) => id !== element.id), element.id];
     else selection = [...selection.filter((id) => id !== element.id), element.id];
+  }
+
+  /**
+   * A right-click: the menu of the element under the pointer (a handle is its element's,
+   * a detail's square the detail's), or of the page. A framed map keeps the button for itself.
+   */
+  function context(event) {
+    if (!oncontext || placing || event.target.closest?.('.plate-map.live, .bar')) return;
+    const hit = event.target.closest?.('[data-element], [data-footprint]');
+    const id = hit?.dataset.element ?? hit?.dataset.footprint ?? (event.target.closest?.('.handle, .ground') ? selected : '');
+    event.preventDefault();
+    oncontext(id || null, { x: event.clientX, y: event.clientY });
   }
 
   /** The press moves only after the pointer has gone this far, in screen pixels: a click picks, it never nudges. */
@@ -509,7 +523,7 @@
     const from = groundAt(map, start);
     if (!from) return;
     const kind = placing.kind;
-    if (kind === 'label' || kind === 'callout' || kind === 'symbol') { onplace?.({ map, at: from, page: start }); return; }
+    if (kind === 'label' || kind === 'callout' || kind === 'symbol' || kind === 'focus') { onplace?.({ map, at: from, page: start }); return; }
     if (kind === 'zone' || kind === 'line') {
       const points = [...(zoneDraft?.map === map.id ? zoneDraft.points : []), from];
       zoneDraft = { kind, map: map.id, points };
@@ -651,13 +665,14 @@
     cone: 'Press where the view is from, drag toward what it sees.',
     zone: 'Click each corner. Double-click or Enter closes the zone, Backspace takes a corner back.',
     line: 'Click each point of the line. Double-click or Enter ends it, Backspace takes a point back.',
+    focus: 'Press the country to light.',
   };
 </script>
 
 <svelte:window onkeydown={keydown} />
 
 <div class="viewport" data-guide="plate.page" class:panning bind:this={viewportEl} bind:clientWidth={viewportWidth} bind:clientHeight={viewportHeight}
-  onpointerdown={pressViewport} onmousedown={(event) => { if (event.button === 1) event.preventDefault(); }} role="presentation">
+  onpointerdown={pressViewport} onmousedown={(event) => { if (event.button === 1) event.preventDefault(); }} oncontextmenu={context} role="presentation">
   <div class="page" bind:this={pageEl} style:width="{width}px" style:height="{height}px"
     style:transform="translate({shown.x}px, {shown.y}px) scale({scale})"
     style:background={paperStyle} role="presentation">
@@ -707,16 +722,16 @@
           {@const drawn = shape(element)}
           {#if drawn?.path}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <polyline class="hit-line" class:selected={selection.includes(element.id)} points={polygon(drawn.path)}
+            <polyline class="hit-line" class:selected={selection.includes(element.id)} data-element={element.id} points={polygon(drawn.path)}
               stroke-width={Math.max(2, 9 / scale / PX_PER_MM)} onpointerdown={(event) => grabGround(event, element, 'body')}></polyline>
           {:else if drawn?.line}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <line class="hit-line" class:selected={selection.includes(element.id)} x1={drawn.line[0]?.[0]} y1={drawn.line[0]?.[1]}
+            <line class="hit-line" class:selected={selection.includes(element.id)} data-element={element.id} x1={drawn.line[0]?.[0]} y1={drawn.line[0]?.[1]}
               x2={drawn.line[1]?.[0]} y2={drawn.line[1]?.[1]} stroke-width={Math.max(2, 9 / scale / PX_PER_MM)}
               onpointerdown={(event) => grabGround(event, element, 'body')}></line>
           {:else if drawn?.ring}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <polygon class="hit-area" class:selected={selection.includes(element.id)} class:outline={element.kind === 'ring'}
+            <polygon class="hit-area" class:selected={selection.includes(element.id)} class:outline={element.kind === 'ring'} data-element={element.id}
               points={polygon(drawn.ring)} stroke-width={Math.max(1.5, 8 / scale / PX_PER_MM)}
               onpointerdown={(event) => grabGround(event, element, 'body')}></polygon>
           {/if}

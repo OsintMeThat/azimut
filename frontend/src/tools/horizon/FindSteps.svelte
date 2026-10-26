@@ -2,9 +2,11 @@
   /**
    * Find's side, in two faces.
    *
-   * **Prepare** numbers only the three steps a search cannot run without: the
-   * skyline traced on the photo, the area drawn on the map, the search. Each
-   * says where it stands in a line, and its number lights once it is done.
+   * **Prepare** numbers the steps a search runs through: the skyline traced on
+   * the photo, the area drawn on the map, the mesh (how finely the grid is laid,
+   * what the photo rules out of it, and the check of what each point sees), the
+   * search. Each says where it stands in a line, and its number lights once it
+   * is done.
    * What narrows the search but is not needed (the alignments, what is known
    * about the photo and who took it) folds under Help the search, each part
    * saying its gist on its title line; the warnings about the lens and the
@@ -27,6 +29,7 @@
     areaPoints,
     areaText,
     bestSoFar,
+    boundedText,
     DIRECTIONS,
     facingText,
     groundText,
@@ -36,7 +39,8 @@
     overText,
     reliability,
     resultOf,
-    ruledText,
+    RULED,
+    ruledLines,
     searchedReach,
     searchedWhen,
     TRUST,
@@ -148,7 +152,7 @@
       ...VIEWS.filter((v) => looking.includes(v.id)).map((v) => v.label.toLowerCase()),
       ...(mirror ? ['mirrored too'] : []),
       ...(round ? ['near lines rounded'] : []),
-      ...(water === 'sea' ? ['the sea in sight'] : water ? ['the sea or a lake in sight'] : []),
+      ...(water === 'sea' ? ['the sea in sight'] : water ? ['water in sight'] : []),
       ...(over ? [over === 'above' ? 'above the land round' : 'below the land round'] : []),
     ];
     return { line: parts.join(' · '), anyLens, near: allSaid ? null : near };
@@ -211,6 +215,33 @@
 
   /** A brush's size on its pill: "250 m", "2.5 km". */
   const sizeText = (metres) => (units === 'metric' ? (metres < 1000 ? `${metres} m` : `${metres / 1000} km`) : formatDistance(metres, units));
+
+  /** The grid as the Mesh step says it: "1,234 of 2,000 points searched, one every 100 m". */
+  const meshText = $derived.by(() => {
+    const shown = find.previewed;
+    if (!shown?.total) return 'No point of the grid falls in the area';
+    const spacing = `one every ${formatDistance(Math.round(shown.spacing), units)}`;
+    if (shown.kept === shown.total) return `${shown.total.toLocaleString('en-US')} points, ${spacing}`;
+    return `${shown.kept.toLocaleString('en-US')} of ${shown.total.toLocaleString('en-US')} points searched, ${spacing}`;
+  });
+
+  /** What the photo rules out of the grid, a line each with what turns it off: the hint said, or none for the
+   * sea line traced on the photo. */
+  const meshLines = $derived.by(() => {
+    const drops = {
+      nosea: find.water === 'sea' ? () => find.setWater(false) : null,
+      seahidden: find.water === 'sea' ? () => find.setWater(false) : null,
+      nowater: () => find.setWater(false),
+      waterhidden: () => find.setWater(false),
+      low: () => find.toggleOver('above'),
+      high: () => find.toggleOver('below'),
+    };
+    return ruledLines(find.previewed).map((line) => ({ ...line, drop: drops[line.reason] ?? null }));
+  });
+  /** Points with water within reach whose view is not checked yet, and about how long checking them takes. */
+  const sightPending = $derived(find.previewed?.sight?.pending ?? 0);
+  const sightTime = $derived(leftText(find.previewed?.sight?.seconds ?? 0));
+  const meshDone = $derived(Boolean(find.previewed?.total) && !find.sighting && !sightPending);
 
   /** Time left as this machine has gone so far: "3 min", "40 s". */
   function leftText(seconds) {
@@ -385,6 +416,9 @@
               </div>
             {/if}
           </div>
+        {/if}
+        {#if boundedText(result.bounded)}
+          <p class="fs-say quiet">{boundedText(result.bounded)}</p>
         {/if}
         {@render triedPanel()}
         <ol class="fs-places">
@@ -618,16 +652,12 @@
         {/if}
       </li>
 
-      <li class="fs-step" class:done={Boolean(result)}>
-        <h3><span class="fs-num">3</span>Search</h3>
-        {#if find.searching}
-          <p class="fs-say">A search is running.</p>
-        {:else if find.searchProblem}
-          <p class="fs-say">{find.searchProblem}.</p>
+      <li class="fs-step" class:done={meshDone}>
+        <h3><span class="fs-num">3</span>Mesh</h3>
+        {#if find.area.length < 3 || find.areaProblem || ['area', 'zone', 'more'].includes(find.drawing)}
+          <p class="fs-say">The grid shows on the map once the area is drawn.</p>
         {:else}
-          <p class="fs-say">With {told.line}.</p>
           {#if find.estimated}
-            {@const sized = withGround(find.estimated, find.previewed)}
             <div class="fs-row fs-how">
               <span class="fs-name">Grid</span>
               {#if find.settings.spacing === 'auto' && find.estimated.efforts}
@@ -648,6 +678,55 @@
                 <span class="fs-say quiet">a point every {formatDistance(find.settings.spacing, units)}, set in More settings</span>
               {/if}
             </div>
+          {/if}
+          {#if find.previewed}
+            <p class="fs-say">{meshText}.</p>
+            {#each meshLines as line (line.reason)}
+              <div class="fs-ruled">
+                <span class="fs-say quiet">{line.text}.</span>
+                {#if line.drop}
+                  <button type="button" class="fs-x" onclick={line.drop} title="Search these points again: the hint is taken back" aria-label="Take back: {RULED[line.reason]}"
+                    ><Icon name="x" size={12} /></button
+                  >
+                {/if}
+              </div>
+            {/each}
+            {#if find.sighting}
+              <p class="fs-say" role="status">
+                Checking what each point sees: {find.sighting.done.toLocaleString('en-US')} of {find.sighting.total.toLocaleString('en-US')}…
+              </p>
+              <div class="fs-acts">
+                <button type="button" class="btn btn-sm" onclick={() => find.stopSight()} title="What was checked stays on the map">Stop</button>
+              </div>
+            {:else if sightPending}
+              <p class="fs-say">
+                Water lies within reach of {sightPending.toLocaleString('en-US')} {sightPending === 1 ? 'point' : 'points'}. Check which see it, about {sightTime}.
+              </p>
+              <div class="fs-acts">
+                <button type="button" class="btn btn-sm" onclick={() => find.checkSight()} title="Points the land hides the water from are greyed on the map"
+                  ><Icon name="eye" size={13} />Check the view</button
+                >
+              </div>
+            {:else if !meshLines.length}
+              <p class="fs-say quiet">Say what the photo shows under Help the search, water or where the eye stands, to leave out the points it rules out.</p>
+            {/if}
+            {#if find.sightFailed}<p class="fs-say bad">{find.sightFailed}</p>{/if}
+          {:else}
+            <p class="fs-say quiet" role="status">Reading the grid…</p>
+          {/if}
+        {/if}
+      </li>
+
+      <li class="fs-step" class:done={Boolean(result)}>
+        <h3><span class="fs-num">4</span>Search</h3>
+        {#if find.searching}
+          <p class="fs-say">A search is running.</p>
+        {:else if find.searchProblem}
+          <p class="fs-say">{find.searchProblem}.</p>
+        {:else}
+          <p class="fs-say">With {told.line}.</p>
+          {#if find.estimated}
+            {@const sized = withGround(find.estimated, find.previewed)}
             <div class="fs-row fs-how">
               <span class="fs-name">Speed</span>
               <div class="fs-pills" role="group" aria-label="How hard the computer works">
@@ -665,9 +744,9 @@
               </div>
             </div>
             <p class="fs-say">{estimateText(sized, find.pace)}</p>
-            {#each ruledText(find.previewed) as line (line)}
-              <p class="fs-say quiet">{line}.</p>
-            {/each}
+            {#if sightPending}
+              <p class="fs-say quiet">It checks what each point sees first: about {sightTime} more.</p>
+            {/if}
             {#if find.pacing}
               <p class="fs-say quiet" role="status">Timing a few points on this computer…</p>
             {:else if !find.pace}
@@ -1346,6 +1425,16 @@
   .fs-compass button:focus-visible {
     outline: none;
     box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  /* what the photo rules out of the grid, a line each, with what takes it back */
+  .fs-ruled {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .fs-ruled .fs-x {
+    flex: none;
   }
   .fs-zone {
     position: relative;

@@ -18,8 +18,19 @@ describe('placeFloating', () => {
 
   it('opens upward near the bottom when there is more room above', () => {
     expect(placeFloating({ anchor: box(300, 600), size, viewport }).top).toBe(600 - GAP - 200);
-    // no room either way: down, clamped inside the window
-    expect(placeFloating({ anchor: box(300, 20), size: { width: 220, height: 900 }, viewport }).top).toBe(MARGIN);
+    // no room either way, nor beside it: down, clamped inside the window
+    expect(placeFloating({ anchor: box(150, 20), size: { width: 220, height: 900 }, viewport: { width: 400, height: 700 } }))
+      .toMatchObject({ left: 150, top: MARGIN });
+  });
+
+  it('opens beside its opener when it fits neither under nor over it, on the side with more room', () => {
+    // a style button low in the right-hand panel: the palette goes over the map on its left, as tall as the window
+    const tall = { width: 256, height: 560 };
+    expect(placeFloating({ anchor: box(700, 520), size: tall, viewport })).toEqual({ left: 700 - GAP - 256, top: 700 - MARGIN - 560, maxHeight: 700 - 2 * MARGIN });
+    // near the window's left, it goes right; level with the opener when the window allows
+    expect(placeFloating({ anchor: box(40, 300), size: tall, viewport })).toMatchObject({ left: 66 + GAP, top: 313 - 280 });
+    // a menu taller than the window takes all of it
+    expect(placeFloating({ anchor: box(700, 300), size: { width: 256, height: 900 }, viewport }).top).toBe(MARGIN);
   });
 
   it('opens at the pointer for a right-click and flips above it at the bottom', () => {

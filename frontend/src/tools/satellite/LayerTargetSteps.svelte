@@ -105,7 +105,7 @@
     </button>
   {/if}
   <LayerStylePalette label="Point icon" symbol={style.symbol} colour={style.colour} icon={wearsOwn ? '' : style.icon ?? ''}
-    used={layer.styles ?? []} {caseId} layer={layer.name} meta={layer.icons ?? null} colours={group.mode !== 'colour'} onpick={pickStyle} />
+    used={layer.styles ?? []} wears={layer.colours ?? []} {caseId} layer={layer.name} meta={layer.icons ?? null} colours={group.mode !== 'colour'} onpick={pickStyle} />
   <div class="add-row">
     <button type="button" class="btn btn-primary btn-sm" disabled={busy}
       onclick={() => onadd({ layer, group, style: { ...style }, status })}>

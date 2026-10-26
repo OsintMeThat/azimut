@@ -216,6 +216,7 @@ def test_layer_targets_list_each_layer_its_groups_and_the_markers_following_an_i
     assert client.post(f"{url_of(owner, second)}/links", json={
         "items": [{"id": proof["id"], "lat": 48.86, "lon": 2.36}], "group": group["id"]}).status_code == 200
     marker(client, owner, first, name="Unrelated")
+    line(client, owner, first, [[2, 48], [2.1, 48]], colour="#F0E442")
 
     # newest first, so the order turns on the second each was made in
     bare = {row["title"]: row for row in client.get(f"/api/cases/{owner}/layer-targets").json()}
@@ -223,6 +224,8 @@ def test_layer_targets_list_each_layer_its_groups_and_the_markers_following_an_i
     # the styles each layer shows, as drawn: a marker of its own, and the proof's in its group's
     assert bare["Front"]["styles"] == [{"symbol": "pin", "colour": "#0072b2"}]
     assert bare["Strikes"]["styles"] == [{"symbol": group["symbol"], "colour": group["colour"].lower()}]
+    # and every colour it is drawn in, its lines' too, for the palette to offer
+    assert bare["Front"]["colours"] == ["#0072b2", "#f0e442"]
     assert [one["name"] for one in bare["Strikes"]["groups"]] == ["Features", "Craters"]
     assert set(bare["Strikes"]["groups"][0]) == {"id", "name", "mode", "colour", "symbol"}
 

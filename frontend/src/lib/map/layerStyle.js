@@ -50,6 +50,12 @@ export function usedStyles(features, groups, { point = true, limit = 12 } = {}) 
   return [...seen.values()];
 }
 
+/** Every colour a layer is drawn in, its markers', lines' and areas', once each: what its key lists. */
+export function wornColours(features, groups) {
+  const byId = new Map(groups.map((group) => [group.id, group]));
+  return [...new Set(features.map((feature) => drawnStyle(feature, byId.get(feature.properties.group)).colour.toLowerCase()))];
+}
+
 /**
  * The button's state for `chosen` features, or for the next markers (`draft`
  * into the group `into`) when none are chosen: the style it shows, whether the

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { beatClips, beats, boundSeconds, captionOf, clipRange, clipSeconds, daySeconds, leastSeconds, playDays, readTimecode, stepSeconds, timecode, totalSeconds } from './clip.js';
+import { beatClips, beats, boundSeconds, captionOf, clipRange, clipSeconds, daySeconds, isGif, leastSeconds, playDays, readTimecode, stepSeconds, timecode, totalSeconds } from './clip.js';
 
 describe('a clip', () => {
   it('runs forward, inside its video, ten minutes at most', () => {
@@ -78,5 +78,14 @@ describe('a played plate', () => {
     expect(playDays({ steps: { now: [{ id: 'p' }], '2026-10-11': [] } }, ['2026-10-14'])).toEqual(['2026-10-14']);
     // a day the plate was told to play is played, a change of its layers or not
     expect(playDays({ days: ['2026-10-12', 'now'] }, ['2026-10-10', '2026-10-14'])).toEqual(['2026-10-10', '2026-10-12', '2026-10-14']);
+  });
+});
+
+describe('a GIF on a step', () => {
+  it('is told by its name, whatever its case', () => {
+    expect(isGif('media/loop.gif')).toBe(true);
+    expect(isGif('media/LOOP.GIF')).toBe(true);
+    expect(isGif('media/strike.mp4')).toBe(false);
+    expect(isGif(null)).toBe(false);
   });
 });

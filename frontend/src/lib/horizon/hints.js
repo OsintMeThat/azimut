@@ -68,6 +68,18 @@ export const PANORAMA_WITHIN = [60, 360];
 /** Degrees a phone's frame spans up the sweep: a panorama's width is about its aspect times this. */
 export const PANORAMA_FRAME = 60;
 
+/**
+ * The most degrees a panorama spans from top to bottom: a phone's ultra-wide frame held upright. A panorama of
+ * unknown width is never searched wider than its aspect times this (the bench's truths stand at 83° at most).
+ */
+export const PANORAMA_TALL = 110;
+
+/**
+ * A lens measured on the video's pan is a reading, not the camera's own (a stabilised video crops): Find searches
+ * it this many times either way. Measured on the bench's one such case: the truth explains 0.44 held exact, 0.62 so.
+ */
+export const MEASURED_GIVE = 1.05;
+
 /** The reaches the panorama keeps its skyline at, metres: the app's SKYLINE_CUTS. */
 export const REACHES = [2_000, 5_000, 10_000, 20_000, 50_000, 100_000];
 

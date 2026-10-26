@@ -440,7 +440,7 @@ test.describe('Find where it was taken', () => {
     await expect(find.locator('.fs-place').first()).toContainText('explains 86%');
   });
 
-  test('times the search on this computer, offers it quicker or more thorough, and asks what the photo shows', async ({ page }) => {
+  test('times the search on this computer, offers it quicker or more thorough, asks what the photo shows and checks the view', async ({ page }) => {
     const { find } = await openFind(page);
     await awaitMapReady(page, 2);
     const estimates = [];
@@ -450,11 +450,21 @@ test.describe('Find where it was taken', () => {
       const efforts = { quick: { points: 300, most: 300, spacing: 500, coarse: 250 }, normal: { points: 1000, most: 1000, spacing: 250, coarse: 900 }, thorough: { points: 3000, most: 3000, spacing: 145, coarse: 2900 } };
       return route.fulfill({ json: { points: 1000, coarse: 900, spacing: 250, step: 0.5, turn: 1, efforts } });
     });
+    // the water in sight: unchecked until the Mesh step's check ran, then the last 24 points hidden
+    let checked = false;
     await page.route('**/api/horizon/finds/preview', (route) => {
       const body = route.request().postDataJSON();
       previews.push(body);
-      const points = Array.from({ length: 64 }, (_, i) => [46.55 + Math.floor(i / 8) * 0.0025, 7.82 + (i % 8) * 0.004, body.over === 'above' && i < 16 ? 'low' : 'slope', !(body.over === 'above' && i < 16)]);
-      return route.fulfill({ json: { spacing: 250, total: 64, kept: points.filter((p) => p[3]).length, kinds: { slope: 64 }, points, ruled: body.over === 'above' ? { low: 16 } : {} } });
+      const why = (i) => (body.over === 'above' && i < 16 ? 'low' : body.water && checked && i >= 40 ? 'waterhidden' : '');
+      const points = Array.from({ length: 64 }, (_, i) => [46.55 + Math.floor(i / 8) * 0.0025, 7.82 + (i % 8) * 0.004, why(i) || 'slope', !why(i)]);
+      const ruled = { ...(body.over === 'above' ? { low: 16 } : {}), ...(body.water && checked ? { waterhidden: 24 } : {}) };
+      const pending = body.water && !checked ? 48 : 0;
+      return route.fulfill({ json: { spacing: 250, total: 64, kept: points.filter((p) => p[3]).length, kinds: { slope: 64 }, points, ruled, sight: { pending, seconds: pending * 0.025 } } });
+    });
+    await page.route('**/api/horizon/finds/sight', (route) => route.fulfill({ json: { id: 'c1', status: 'running', done: 0, total: 48 } }));
+    await page.route('**/api/horizon/finds/sight/c1', (route) => {
+      checked = true;
+      return route.fulfill({ json: { id: 'c1', status: 'done', done: 48, total: 48 } });
     });
     await page.route(`**/api/cases/${CASE_ID}/horizon/finds/pace`, (route) =>
       route.fulfill({ json: { seconds: 0.5, timed: 3, lanes: { fastest: 8, fast: 4, gentle: 1 }, lane_min: 200, full: 8, lane_power: 0.46, top: 5 } })
@@ -474,10 +484,18 @@ test.describe('Find where it was taken', () => {
     const help = find.getByRole('region', { name: 'Help the search' });
     await help.locator('summary', { hasText: 'What you know' }).click();
     await help.getByRole('button', { name: 'Above the land round' }).click();
-    await help.getByRole('button', { name: 'Sea or a lake' }).click();
+    await help.getByRole('button', { name: 'Sea, lake or river' }).click();
     await expect.poll(() => previews.at(-1)?.water).toBe(true);
     expect(previews.at(-1).over).toBe('above');
     await expect(find.getByText('Lower than the land round it: 16 points left out (25%).')).toBeVisible();
+    // the Mesh step checks which points see the water, and the grid greys the ones the land hides it from
+    await expect(find.getByText('Water lies within reach of 48 points. Check which see it, about 5 s.')).toBeVisible();
+    await find.getByRole('button', { name: 'Check the view' }).click();
+    await expect(find.getByText('Water hidden by the land: 24 points left out (38%).')).toBeVisible();
+    await expect(find.getByRole('button', { name: 'Check the view' })).toHaveCount(0);
+    // taken back from its line, the hint goes
+    await find.getByRole('button', { name: 'Take back: Water hidden by the land' }).click();
+    await expect.poll(() => previews.at(-1)?.water).toBe(false);
   });
 
   test('draws another area and paints points out with the brush, the map holding still, a stroke taken back', async ({ page }) => {

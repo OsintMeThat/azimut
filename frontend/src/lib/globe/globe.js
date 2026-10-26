@@ -912,6 +912,18 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
       return at ? { x: at.x, y: at.y } : { x: NaN, y: NaN };
     },
     /**
+     * The ground under a point of the view, read on a sphere through the ground at the
+     * view's middle rather than marched over the heights: quick enough for a whole grid
+     * of points (a plate's lit country), near enough round the middle. Null in the sky.
+     */
+    surfaceAt({ x, y }) {
+      const dir = rayAt(camera, css, x, y);
+      const t = raySphere(camera.eye, dir, length(centre().target));
+      if (t == null) return null;
+      const g = geodetic(add(camera.eye, scale(dir, t)));
+      return { lat: g.lat, lon: wrapLon(g.lon) };
+    },
+    /**
      * Where a point `metres` above the sea stands on screen, raised as the
      * ground under it is (exaggeration), or null behind the eye: an eye or a
      * target standing in the air, which no ground point can place.

@@ -20,8 +20,8 @@
     label, symbol = 'pin', colour = '#0072b2', point = true, mixed = false,
     /** The own icon worn, '' for none; the layer it is in, and that layer's `{key: {mode, name}}`. */
     icon = '', layer = null, meta = null, own = true,
-    /** Styles already in the layer, `{ symbol, colour, icon? }`, offered first. */
-    used = [],
+    /** Styles already in the layer, `{ symbol, colour, icon? }`, offered first, and every colour it is drawn in. */
+    used = [], wears = [],
     /** The groups a feature can be moved into, with the one it is in ('' for several). */
     groups = [], group = '', groupLabel = 'Group', ongroup = null,
     note = '', caseId = null, disabled = false, size = 20, title = 'Style',
@@ -60,7 +60,7 @@
         </select>
       </label>
     {/if}
-    <LayerStylePalette {label} {symbol} {colour} {icon} {layer} {meta} {own} {point} {mixed} {used} {caseId} {onpick} />
+    <LayerStylePalette {label} {symbol} {colour} {icon} {layer} {meta} {own} {point} {mixed} {used} {wears} {caseId} {onpick} />
   </FloatingMenu>
 {/if}
 

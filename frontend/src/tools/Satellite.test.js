@@ -195,8 +195,18 @@ describe('reference windows', () => {
     // a rail seat that runs rather than arms: it opens a picker and a window
     expect(source).toContain("if (id === 'reference') return refs.openPicker();");
     expect(source).toContain('on: refs.open.length > 0,');
-    expect(source).toContain('{#each refs.open as pane (pane.id)}');
+    // over the map, and in a column on either side of it
+    expect(source).toContain('{#each refs.floating as pane (pane.id)}');
+    expect(source).toContain('{#each refs.dockedOn(side) as pane (pane.id)}');
+    expect(source).toContain("{@render refColumn('left')}");
+    expect(source).toContain("{@render refColumn('right')}");
     expect(source).toContain('onpick={(item) => refs.add(item)}');
+  });
+
+  it('remeasures the map when a column opens, closes or changes width', () => {
+    expect(source).toContain('void refs.dockedOn(side).length;');
+    expect(source).toContain('void refs.dockWidth(side);');
+    expect(source).toContain('tick().then(() => engine?.resize());');
   });
 
   it('keeps the windows in the session, never in the case', () => {

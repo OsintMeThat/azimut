@@ -2084,13 +2084,14 @@ restyles the group, and the palette says so. A group with one colour does the sa
 for the colour alone: each feature keeps its icon, and a colour picked recolours
 the group.
 
-The palette offers at once the case's named colours, each said by its name, and
-the colours the layer already wears; the styles the layer shows fill one row, **+**
-showing the rest. The colours' **+** unfolds the five plain colours, those picked
-lately anywhere (a layer's palette or a plate's), the browser's picker and the code
-field, which shows the colour worn for copying and takes one typed or pasted as
-`#d55e00`, `d55e00` or `rgb(213, 94, 0)`. A layer with no colour yet offers the
-plain ones at once. In the Icon part a chip per group scrolls the grid to it, and
+The palette offers at once the colours the layer is drawn in, its lines' and areas'
+too, as its key lists them, each said by its name when the case names it; the
+styles the layer shows fill one row, **+** showing the rest. The colours' **+**
+unfolds the colours the case names in its other layers, the five plain colours,
+those picked lately anywhere (a layer's palette or a plate's), the browser's picker
+and the code field, which shows the colour worn for copying and takes one typed or
+pasted as `#d55e00`, `d55e00` or `rgb(213, 94, 0)`. A layer in no colour yet offers
+the case's named colours at once, or the plain ones when none is named. In the Icon part a chip per group scrolls the grid to it, and
 only the grid scrolls, so the colours stay in view above it.
 
 The analyst's own icons come first in the palette's Icon part. **This layer's
@@ -2459,6 +2460,20 @@ which it is (`lib/map/tools.js`) rather than adding a button somewhere.
   search, one chip per facet that would hide something, a folder button, and
   **Show N working files**, held back by default since the reference is nearly
   always collected material. The chip and the switch stay as set for the session.
+  A **reference window** is a title and a picture at rest; its controls lie over
+  the bottom of the picture and come up on a hover, and a clip keeps a hairline
+  of progress. **Fade** lets the map show and move under the picture (only the
+  bars take the pointer) and remembers the value worked on the slider. **Details**
+  appears only when the file has dates, a source or notes. A clip gets its own
+  player: frame steps at the clip's probed rate (← →, Space), slow motion,
+  sound, and **Keep this frame**, which opens the frame as a picture beside it.
+  Dragged near an edge of the map, a window settles against it; let go in a
+  corner, it stays pinned there. The **pin** in its header swaps the title for
+  six places: a column on the left or right, where the map narrows instead of
+  being covered and the windows stack centred at their pictures' height, or one
+  of the four corners, over the map, clear of the map's own controls and kept
+  there as the map changes size. The place it is in sets it free. All of it is
+  session-only, like the window.
 - **Its settings** open in the rail's one **panel slot**, beside it. One mode is
   armed, so one panel is open; a panel cannot cross another or the map's own
   controls.
@@ -3026,9 +3041,18 @@ trace is its own crest drawn a little low, not land behind. A place keeps its
 score up to a fiftieth of the line under land and is ruled out past a tenth; it
 says the share and how far out that land stands, on its point of the map too.
 
-Find's side has two faces. **Prepare** numbers the three steps a search
-needs (Skyline, Area, Search), each lit once done; the warnings about the lens
-and the reach sit by the Search button. A skyline standing high or low in the
+Find's side has two faces. **Prepare** numbers the four steps a search runs
+through (Skyline, Area, Mesh, Search), each lit once done; the warnings about
+the lens and the reach sit by the Search button. **Mesh** is the grid before it
+is searched: how many points and how far apart, Auto's **Grid** row, and a
+line for each thing the photo rules points out by, with its share and an × that
+takes the hint back. When water is said to show and lies within reach of
+points, Mesh offers **Check the view**: rays are walked from each such point
+toward the water (the terrain raised 20 m for trees and its own error), the
+time said before it starts, a count while it runs and **Stop** keeping what was
+checked; the points the land hides the water from turn grey on the map, "Water
+hidden by the land" on hover. Unchecked, the search checks them first, and its
+step says how long that adds. A skyline standing high or low in the
 frame offers **Looking down** or **Looking up** when the camera must tilt about
 as far as is searched for who took it, or past it, and a picture read as one across 90° or more offers
 **Cut**, since its ends drift. Where the relief is the planet's 30 m model, the
@@ -3046,20 +3070,21 @@ lake, each judged on the ground round the point; the map shows the grid in
 those colours, grey where a point is left out, and says how many points stay.
 **Eye stands** says the eye stood **Above the land round** it or **Below it**,
 against the land 1 to 3 km out, and **Water** that **The sea** shows (within
-the sea's horizon from each eye, no line to trace: an island is traced as any
-skyline) or the **Sea or a lake** (within the reach, rivers aside): the points
-it rules out are greyed, a hover saying why, and under the estimate a line says
-how many each leaves out. A line traced along the sea's horizon says the sea
-too. The sea
-and the lakes are the map's (OpenFreeMap's water, read once and kept), else
-the terrain's flat ground when the map cannot be reached.
+the sea's horizon from each eye, as far as a mountain top sees it, no line to
+trace: an island is traced as any skyline) or **Sea, lake or river** (within
+the reach): the points it rules out are greyed, a hover saying why, and the
+Mesh step says how many each leaves out. A line traced along the sea's horizon
+says the sea too. The sea, the lakes and the rivers wide enough to be drawn as
+water are the map's (OpenFreeMap's water, read once and kept), else the
+terrain's flat ground when the map cannot be reached.
 **Camera** opens the tilt down (**Looking down**, from a height) or up
 (**Looking up**, at a summit), and **Selfie** searches the trace mirrored too.
 **Sun** says where the sun stood against the camera (ahead, left, right,
 behind) on a day between two local hours: the app turns it into the headings
 left, with the compass's, and draws them in the fan.
 For a video, **Measure from the video** reads the lens off the frames around
-the moment on show, where the camera pans; Fit and Find then keep it. The zoom
+the moment on show, where the camera pans; Fit then keeps it and Find allows 5%
+either way, since a stabilised video crops. The zoom
 words are a phone's (×0.5, ×1, ×2–3, ×5+), read across the picture's own shape, and take several ticks in Overlay as in Find: the search tries from
 the narrowest to the widest ticked, and none ticked is any lens. A line given a
 distance is searched only on ground that far, which also sets how far the turn
@@ -3082,18 +3107,19 @@ decoys** tries the places again with the trace mirrored and upside down: a real
 place explains its own trace far better, and one a decoy fits nearly as well is
 marked so. **Change and
 search again** goes back to Prepare with the search's setup. The case's
-earlier searches are in the **Open** menu of Find's header, with when each was
-made and how it ended; opening one replaces the setup on screen. Arriving in
-Find without a photo, the dialog that asks for one shows them first, as cards
-with the photo, when each was made and how it ended (four, the rest behind
-**Show all**). **New** beside
+earlier searches are in the **Open** menu of Find's header, as cards with the
+photo, when each was made and how it ended; opening one replaces the setup on
+screen. Arriving in Find without a photo, the dialog that asks for one shows the
+same cards first (four, the rest behind **Show all**). **New** beside
 it lets the photo, its trace and the setup go and asks for the next photo,
 asking first when no search keeps what is on screen. The map shows the grid the
 setup lays before the search and once the setup is changed from the search on
 show. While a search runs, the points it has scored fill the grid in as cells
 of the heatmap, coloured from the middle of the scores so far up to the best,
-and Result names the **Best so far**, three places apart, read roughly as a
-first pass reads them (the best are read again in full at the end). A
+patch by patch, since each point starts from the camera its scored neighbours
+found. Result names the
+**Best so far**, three places apart, read roughly as a first pass reads them
+(the best are read again in full at the end). A
 click on a cell, or a press on one of them, tries the trace there in full and
 offers to look from it. Looking from it, a band over the view asks **Is it the
 place?**: **This is the place** keeps the view in the case and the place on the
@@ -3116,10 +3142,10 @@ the last stroke back. An area or a zone goes up to
 10,000 km². **Try a point** tries the
 trace from a place clicked on the map, as a search scores its best places, and
 offers to look from there. The time said is this computer's: a few points are
-timed a moment after the setup settles (the search reuses them). The Search
-step offers two rows, each choice with its time: **Grid**, Auto's grid
-**Quick** (twice as wide), **Normal** or **Thorough** (about three times the
-points), and **Speed**, a large grid searched on every core of the computer
+timed a moment after the setup settles (the search reuses them). Each choice
+says its time: Mesh's **Grid**, Auto's grid **Quick** (twice as wide),
+**Normal** or **Thorough** (about three times the points), and the Search
+step's **Speed**, a large grid searched on every core of the computer
 (**Fastest**, its own cores counted, not their threads), on up to four (**Fast**,
 the default) or on one (**Gentle**, the computer left free); on an 8-core
 laptop four cores search 1.9 times as fast as one and eight 2.6 times.
@@ -3146,7 +3172,8 @@ they follow it as it straightens, and a search keeps the curve and corners it
 was read through. **Picture** in What you know reads any image as a Photo or a
 Panorama, the same degrees per pixel all along as a phone's sweep, so a
 hand-made collage of any shape can be searched either way; a wide one is
-pointed to Panorama.
+pointed to Panorama. Find never tries a panorama of unknown width wider than
+its picture could span, no more than 110° from top to bottom.
 
 An alignment is made by four clicks, the near thing and what stands behind it
 on the photo, then both on the map. What the next click is for is said in the
@@ -5080,7 +5107,11 @@ footage beside the place it was filmed, the matches numbered, `{coords}` under i
 sight**, **Site profile**, **Locator** (a closer detail and a globe), **Briefing** and
 **Post** (the map to the edges, its title on a card). Each comes in its look and its
 grounds, its words in the page's text styles, and an empty picture says on the
-screen what goes in it. A plate made from one remembers it: set on another paper, or
+screen what goes in it. Each is signed with the Azimut logo alone, in the source
+line's muted ink: at the foot's right end on the credits' line, or beside the title
+where a QR code holds that corner (Geolocation card) or the map runs to the edges
+(Post, on its card). It is a Made with Azimut element with no words before it, so a
+press deletes it or the inspector writes some. A plate made from one remembers it: set on another paper, or
 copied for one, each element the recipe made takes its place there with its words,
 its ground and its layers kept, and what was added since keeps its share of the page.
 
@@ -5094,7 +5125,7 @@ goes on a page by where it goes:
 **Maps** (a map, a **Detail** of the main map with lines to the ground it shows,
 an inset), **On the map** (a label, a **Map
 text**, a **Symbol**, a number, an arrow, a **Line**, a distance, range rings, a view cone, a zone, a
-spotlight, each placed by pressing the map), **Round the map**
+spotlight, a **Country focus**, each placed by pressing the map), **Round the map**
 (legend, scale bar, north arrow, credits, a date strip), **Writing** (text, banner,
 stamp, the numbered list, a table, a QR code), **Blocks** (a title block of
 kicker, title and standfirst, a date badge, a classification band, a source line, a
@@ -5127,7 +5158,12 @@ scroll to zoom, and a Shift-drag, a middle-drag or a double click held and dragg
 turn, as on the app's other maps; Esc when done). The arrow keys move, Delete
 removes, Ctrl+C and Ctrl+V copy to this plate or another, Ctrl+D duplicates and
 Ctrl+Z undoes, after a press on the page: a key pressed on a button of the
-inspector never deletes. Escape lets the picked elements go. A **Detail**'s square
+inspector never deletes. Escape lets the picked elements go. A right-click on an
+element, on the page or in the list, picks it and opens what can be done to it:
+duplicate, copy and paste, forward and back, hide, lock, the steps it shows on, and
+remove; on several picked, group them too; on the paper, Add, paste, undo and redo. A
+right-click on a step or on the day in the strip opens its ⋯ menu where the pointer is.
+A **Detail**'s square
 on the map it is drawn from is picked by a press and dragged there to move what the
 detail shows; a locked detail only picks. Maps stay under the
 page's writing, at the foot of the list. The list, top first, restacks by a drag
@@ -5202,11 +5238,17 @@ names offers **Hide it on this map** or **Make it a label to move**, which write
 as the plate's own text on the map where it stood; the inspector lists the names
 hidden and brings them back.
 
-A map's **Focus** lights one country (the one under the map's middle, or any picked)
-and draws the rest of the world back, darkened or faded toward the paper, at the
-strength set. It is drawn on the page from the same Natural Earth countries as the
-globe inset, under a soft edge, as the outline is coarse at that scale; the disputed
-areas touching the country stand half lit, dotted round. A tilted map has none.
+**Country focus**, on the map, lights the country pressed and draws the rest of the
+world back, darkened or faded toward the paper, at the strength set; another country
+is picked in its inspector. As every annotation it belongs to the day or step it is
+made on, so a video can come in wide and then light a country, the focus fading in
+with the transition. It is drawn on the page from the same Natural Earth countries as
+the globe inset, under a soft edge, as the outline is coarse at that scale; the
+disputed areas touching the country stand half lit, dotted round, and a press in one
+lights nothing. A map in 3D, tilted or seen as the whole globe, is read point by point
+through its camera, so the country is lit in perspective and the sky stays in the
+shade. A plate saved while the focus was the map's own has it moved onto the map as
+one of these, on every day and step.
 
 There is one kind of map: its inspector's **Show the map in 3D** box stands it on its
 heights, tilted (from the bar, or to the degree in the inspector), the heights drawn as they are or up to three times as tall, said under it.
@@ -5246,7 +5288,10 @@ land, the country the map looks at in the accent, a ring and a dot where it look
 Natural Earth draws a country as it is held, so the areas one country holds and
 another claims (Crimea, the Donbas, Abkhazia and the others it lists) are drawn
 apart, dotted round: none takes the colour of the country holding it, and a map
-looking at one picks out the area itself.
+looking at one picks out the area itself. It covers its disc only: the corners of
+its box show the map under it, and what is drawn on that map runs on under them. It
+has no zoom and no frame of its own, its rim being one, and it does not count among
+the plate's eight maps.
 
 The legend lists only what the map draws in its frame on the plate's day, one row a
 look, named after the group when it has one style, else after its icon and the
@@ -5343,7 +5388,9 @@ otherwise, its leader reaches to its point.
 
 **Video** puts a video on a step: on the one shown while it holds none, else on a new
 step after it. **Choose a video** lists the footage placed on the map first, set
-pointing at its place, then every video of the case. The inspector plays it, takes
+pointing at its place, then every video and GIF of the case. A GIF plays round and
+round for the time set, on the page as in the MP4, its first picture standing for it
+in a still. The inspector plays a video, takes
 the clip's start and end from the player (**Start here**, **End here**) or typed as
 minutes and seconds, and plays the clip alone; a new clip takes the first ten seconds.
 **Sound** keeps the video's own sound, at a volume, and is off until asked. **Source**
@@ -5351,7 +5398,9 @@ writes a line over the bottom of the video, read from the file's record (who pos
 it, where, when) and rewritten at will. The step holds at least as long as its longest clip.
 On the page the video holds on the clip's first frame, under the writing, and runs
 when the plate plays that step. Play goes through each day, then its steps, the
-clips running in their boxes.
+clips running in their boxes. A picture's or a video's leader to its point is drawn
+while the map shows the point, and goes once the map is turned or framed away from it
+or the point falls past a 3D map's horizon.
 
 **Export** shows the page and its file name first, and keeps the format and sizes
 picked last on this computer. It writes a PNG at screen or
@@ -5370,8 +5419,10 @@ its marks keep their size, blurred as it goes fastest or sharp, its inset follow
 and what is written over it placed through its camera as it leans,
 and what is new fades in or is drawn along its lines, or comes at once. The frames play
 at the video's own 30 a second. A step's ⋯ can cut straight into it, or give the
-transition into it a time of its own (0.2 to 3 seconds), which the play follows too.
-Play shows the maps moving too. Everything goes into the folder saved for views.
+transition into it a time of its own (0.2 to 3 seconds). Play goes through the
+transitions as the video will, for as long: the map flies, what leaves fades, what is
+new fades in or is drawn, then the day or step holds its own seconds, and the dialog
+counts each transition's own time in what the video runs. Everything goes into the folder saved for views.
 **Export** closes the dialog and the export goes on behind: the plate holds still under
 a veil saying what is drawn and how far, the top bar says **Plate export** with its
 share from any tool (a press goes back to the plate), and the other tools can be used

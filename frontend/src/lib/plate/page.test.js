@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { facesOf, inLook, addStep, beatKey, beatKeys, bornAt, bornOn, bringTo, carryOn, currentStep, dayBefore, DECOR_MAX_PIXELS, decorDensity, endOn, framedAs, framingOf, standsOver, TRANSITIONS, transitionsOf, fillTokens, fitPage, fromTemplate, hasSteps, houseLayout,
+import { facesOf, focusApart, inLook, addStep, beatKey, beatKeys, bornAt, bornOn, bringTo, carryOn, currentStep, dayBefore, DECOR_MAX_PIXELS, decorDensity, endOn, framedAs, framingOf, standsOver, TRANSITIONS, transitionsOf, fillTokens, fitPage, fromTemplate, hasSteps, houseLayout,
   labelBox, landingIn, listedOf, longDay, mainMap, mapsFirst, movedStep, restacked, stepOf, onPaper, PAGE, PAGE_ZOOM, pageSize, periodSaid, pickedDays, placeOf, settleOn, shownOn, SIGNATURE, startOn, stepsOf, templateOf,
   turnable, unsettled, withoutStep, zoomPageAt } from './page.js';
 
@@ -525,5 +525,19 @@ describe('the faces a plate writes in', () => {
     expect(faces).toContain('700 16px "Source Serif 4", "Noto Sans Arabic"');
     expect(faces).toContain('italic 400 16px "IBM Plex Mono", "Noto Sans Arabic"');
     expect(faces).toHaveLength(8);
+  });
+});
+
+describe('a plate saved while the focus was the map\'s own', () => {
+  it('moves each map\'s focus onto its ground as an element, on every day and step as it was', () => {
+    const elements = [{ id: 'map', kind: 'map', spotlight: { country: 'Ukraine', dim: 0.4, mode: 'fade' } }, { id: 'other', kind: 'map' },
+      { id: 't', kind: 'text', spotlight: { country: 'Nowhere' } }];
+    const moved = focusApart(elements);
+    expect(moved[0]).toEqual({ id: 'map', kind: 'map' });
+    expect(moved[1]).toMatchObject({ kind: 'focus', of: 'map', name: 'Ukraine', spotlight: { country: 'Ukraine', dim: 0.4, mode: 'fade' } });
+    expect(moved[1].step).toBeUndefined();
+    expect(moved.slice(2)).toEqual(elements.slice(1));
+    // a plate with none is handed back as it is
+    expect(focusApart(elements.slice(1))).toEqual(elements.slice(1));
   });
 });

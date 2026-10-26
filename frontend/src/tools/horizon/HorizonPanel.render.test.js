@@ -493,7 +493,7 @@ describe('a photo laid over the view, in the inspector', () => {
     const failed = await knows({ source: { name: 'clip.mp4', kind: 'video' }, measuring: { busy: false, error: 'The camera hardly turned' } });
     expect(failed.part.textContent).toContain('The camera hardly turned');
     const measured = await knows({ source: { name: 'clip.mp4', kind: 'video' }, lens: { fov: 41.2, measured: true, at: 72.4 }, forgetLens: vi.fn() });
-    expect(measured.part.textContent).toContain('Measured on the video at 1:12: 41° across. Fit and Find keep it.');
+    expect(measured.part.textContent).toContain('Measured on the video at 1:12: 41° across. Fit keeps it, Find allows 5% either way.');
     [...measured.part.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Forget').click();
     expect(measured.overlay.forgetLens).toHaveBeenCalledOnce();
     // a photo has no pan to read

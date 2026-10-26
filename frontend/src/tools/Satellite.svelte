@@ -115,6 +115,7 @@
   import ScreenshotDialog from './satellite/ScreenshotDialog.svelte';
   import ExtensionGate from './satellite/ExtensionGate.svelte';
   import RefPicker from './satellite/RefPicker.svelte';
+  import RefDock from './satellite/RefDock.svelte';
   import CaptureDetails from './satellite/CaptureDetails.svelte';
   import PlaceDialog from './satellite/PlaceDialog.svelte';
   import CaptureOptions from './satellite/CaptureOptions.svelte';
@@ -631,6 +632,15 @@
     caseId: () => caseState.current?.id,
     viewers: () => uiState.refViewers,
     setViewers: (windows) => (uiState.refViewers = windows),
+  });
+  // A docked reference narrows the map beside it, so the engine remeasures
+  // whenever a column opens, closes or changes width.
+  $effect(() => {
+    for (const side of ['left', 'right']) {
+      void refs.dockedOn(side).length;
+      void refs.dockWidth(side);
+    }
+    tick().then(() => engine?.resize());
   });
 
   // --- tracing a place's footprint: the shape it really is, rather than the
@@ -2505,8 +2515,30 @@
   }
 </script>
 
+{#snippet refWindow(pane)}
+  <RefViewer
+    viewer={pane}
+    caseId={caseState.current?.id}
+    onfocus={(id) => refs.focus(id)}
+    onclose={(id) => refs.close(id)}
+    onplace={(id, where) => refs.place(id, where)}
+    onkeep={(id, still, at) => refs.keepFrame(id, still, at)}
+  />
+{/snippet}
+
+{#snippet refColumn(side)}
+  {#if refs.dockedOn(side).length}
+    <RefDock {side} width={refs.dockWidth(side)} onwidth={(w, total) => refs.setDockWidth(side, w, total)}>
+      {#each refs.dockedOn(side) as pane (pane.id)}
+        {@render refWindow(pane)}
+      {/each}
+    </RefDock>
+  {/if}
+{/snippet}
+
 <div class="tool" class:fullscreen bind:this={toolEl}>
   <div class="body" style:--surface-ctl-reserve={`${12 + searchWidth + 8}px`}>
+    {@render refColumn('left')}
     {#if homeReady}
       <MapSurface
         bind:this={surface}
@@ -2954,16 +2986,13 @@
         />
       {/if}
       <!-- floating reference-image windows (scratch aids over the map) -->
-      {#each refs.open as pane (pane.id)}
-        <RefViewer
-          viewer={pane}
-          caseId={caseState.current?.id}
-          onfocus={(id) => refs.focus(id)}
-          onclose={(id) => refs.close(id)}
-        />
+      {#each refs.floating as pane (pane.id)}
+        {@render refWindow(pane)}
       {/each}
       </MapSurface>
     {/if}
+
+    {@render refColumn('right')}
 
     <aside
       class="captures"

@@ -687,9 +687,14 @@ def test_a_played_plate_s_pictures_wait_on_disk_in_their_order_until_its_export(
     assert export(client, owner, "png", [png()], staged=staged).status_code == 422
 
 
-def test_a_played_plate_s_pictures_are_let_go_when_they_cannot_be_used(client, owner, monkeypatch):
+def test_a_played_plate_s_pictures_are_let_go_when_they_cannot_be_used(client, owner, monkeypatch, tmp_path):
+    import tempfile
+
     from azimut.api import mapplates as api_plates
 
+    # a folder of its own: past the idle time below, every folder of the prefix in the system's would go,
+    # another test's export under way or a running app's among them
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     # a picture the export cannot take lets the whole folder go
     staged = stage(client, owner, "frames", [png(fmt="JPEG")]).json()["staged"]
     root = api_plates._staged[staged].root
@@ -876,3 +881,47 @@ def test_a_map_keeps_the_country_it_lights_and_how_it_draws_the_rest_back():
     for bad in ({"country": ""}, {"country": "Ukraine", "dim": 1}, {"country": "Ukraine", "mode": "blur"}):
         with pytest.raises(ValueError):
             mapplates.Spotlight.model_validate(bad)
+
+
+def test_a_gif_runs_as_a_clip_looped_for_as_long_as_its_clip_runs(tmp_path):
+    clip = mapplates.ClipOut(src="media/loop.gif", start=0, end=4, box=(10, 10, 100, 100))
+    command = mapplates.beat_command("ffmpeg", tmp_path / "f.png", 4, [(clip, tmp_path / "loop.gif", False)], None, tmp_path / "b.mp4")
+    at = command.index(str(tmp_path / "loop.gif"))
+    assert command[at - 7:at] == ["-ignore_loop", "0", "-ss", "0.000", "-t", "4.000", "-i"]
+    video = mapplates.ClipOut(src="media/a.mp4", start=0, end=2, box=(10, 10, 100, 100))
+    assert "-ignore_loop" not in mapplates.beat_command("ffmpeg", tmp_path / "f.png", 2, [(video, tmp_path / "a.mp4", False)], None, tmp_path / "c.mp4")
+
+
+@pytest.mark.skipif(not ffmpeg.ffmpeg_available(), reason="no ffmpeg on this machine")
+def test_a_short_gif_plays_round_and_round_through_its_beat(tmp_path):
+    import subprocess
+
+    frames = [Image.new("RGB", (40, 40), colour) for colour in ((255, 0, 0), (0, 255, 0), (0, 0, 255))]
+    gif = tmp_path / "loop.gif"
+    frames[0].save(gif, save_all=True, append_images=frames[1:], duration=100, loop=0)
+    still = tmp_path / "f0000.jpg"
+    still.write_bytes(png((161, 121), (20, 20, 20), fmt="JPEG"))
+    clip = mapplates.ClipOut(src="media/loop.gif", start=0, end=1.5, box=(10, 10, 40, 40))
+    target = tmp_path / "beat.mp4"
+    subprocess.run(mapplates.beat_command(ffmpeg.ffmpeg_exe(), still, 1.5, [(clip, gif, False)], None, target), check=True, timeout=120)
+    probe = subprocess.run([ffmpeg.ffprobe_exe(), "-v", "error", "-count_frames", "-select_streams", "v",
+                            "-show_entries", "stream=nb_read_frames", "-of", "json", str(target)], check=True, capture_output=True, text=True, timeout=60)
+    assert int(json.loads(probe.stdout)["streams"][0]["nb_read_frames"]) == 45
+    # past the GIF's own 0.3 s it is still running: the last second shows its colours, not a held frame
+    shots = subprocess.run([ffmpeg.ffmpeg_exe(), "-v", "error", "-ss", "1.1", "-i", str(target), "-frames:v", "4", "-vf", "crop=20:20:20:20,scale=1:1",
+                            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], check=True, capture_output=True, timeout=60).stdout
+    colours = {tuple(shots[index:index + 3]) for index in range(0, len(shots), 3)}
+    assert len(colours) > 1
+
+
+def test_a_country_focus_stands_on_its_map_s_ground_and_a_template_leaves_it():
+    focus = {"id": "focus", "kind": "focus", "of": "map", "box": [0, 0, 1, 1], "step": "s1",
+             "spotlight": {"country": "Ukraine", "dim": 0.5, "mode": "dark"}}
+    spec = {"steps": {"now": [{"id": "s1"}]},
+            "elements": [{"id": "map", "kind": "map", "box": [0, 0, 10, 10], "view": {"lat": 49, "lon": 31, "zoom": 5}}, focus]}
+    assert mapplates.PlateSpec.model_validate(spec).elements[1].spotlight.country == "Ukraine"
+    # it lights one map, named
+    with pytest.raises(ValueError):
+        mapplates.PlateSpec.model_validate({**spec, "elements": [spec["elements"][0], {**focus, "of": None}]})
+    # the country is the case's place: a template keeps none
+    assert [element["kind"] for element in mapplates.template_of(spec)["elements"]] == ["map"]

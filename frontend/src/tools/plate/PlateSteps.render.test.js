@@ -29,6 +29,21 @@ describe('the steps of a day', () => {
     expect(tiles()[1].querySelector('video').getAttribute('src')).toBe('/files/c1/media/strike.mp4#t=12');
   });
 
+  it('opens a step\'s menu, or the day\'s, where a right-click falls', () => {
+    const calls = show();
+    const right = (node) => { node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 40 })); flushSync(); };
+    right(tiles()[2]);
+    const menu = document.body.querySelector('.float-menu[aria-label="Step"]');
+    expect(menu).not.toBeNull();
+    // the same menu as its ⋯, nothing picked by the right-click
+    [...menu.querySelectorAll('.fm-item')].find((item) => item.textContent.includes('Play it earlier')).click();
+    flushSync();
+    expect(calls.onmove).toHaveBeenCalledWith('s2', 0);
+    expect(calls.onpick).not.toHaveBeenCalled();
+    right(tiles()[0]);
+    expect(document.body.querySelector('.float-menu[aria-label="The day"]')).not.toBeNull();
+  });
+
   it('shows a step or the day on a press, and adds a step', () => {
     const calls = show();
     tiles()[2].click(); tiles()[0].click();

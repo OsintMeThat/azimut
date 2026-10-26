@@ -38,8 +38,10 @@ import {
   photoOffset,
   reliability,
   resultOf,
-  ruledText,
+  ruledLines,
+  boundedText,
   sameAsk,
+  searchedPoints,
   searchedReach,
   ringsOf,
   searchedWhen,
@@ -204,13 +206,22 @@ describe('the heatmap', () => {
     expect(resultOf({ status: 'running', result: null })).toBeNull();
   });
 
+  it('says what a search ranked best-first left out, and nothing when it searched every point', () => {
+    expect(boundedText({ cells: 1107, filled: 214, skipped: 7800 })).toBe(
+      'Searched point by point in 214 of 1,107 cells, where a place could still win; 7,800 points elsewhere were not needed.'
+    );
+    expect(boundedText({ cells: 10, filled: 10, skipped: 0 })).toBe('');
+    expect(boundedText(undefined)).toBe('');
+  });
+
   it('says what the photo rules out of the grid, a line for each reason', () => {
-    expect(ruledText({ total: 200, ruled: { nosea: 150, high: 1 } })).toEqual([
-      'No sea within its horizon: 150 points left out (75%)',
-      'Higher than the land round it: 1 point left out (1%)',
+    expect(ruledLines({ total: 200, ruled: { nosea: 150, high: 1, waterhidden: 20, unknown: 3 } })).toEqual([
+      { reason: 'nosea', text: 'No sea within its horizon: 150 points left out (75%)' },
+      { reason: 'high', text: 'Higher than the land round it: 1 point left out (1%)' },
+      { reason: 'waterhidden', text: 'Water hidden by the land: 20 points left out (10%)' },
     ]);
-    expect(ruledText({ total: 200, ruled: {} })).toEqual([]);
-    expect(ruledText(null)).toEqual([]);
+    expect(ruledLines({ total: 200, ruled: {} })).toEqual([]);
+    expect(ruledLines(null)).toEqual([]);
     // what is said of the photo is part of what a search was asked
     expect(sameAsk({ area: [], water: true }, { area: [] })).toBe(false);
     expect(sameAsk({ area: [], over: 'above' }, { area: [], over: 'above' })).toBe(true);
@@ -383,6 +394,24 @@ describe('which way the photo faces', () => {
     expect(facingText(['nw', 'n', 'ne', 's'])).toBe('S, NW to NE');
     expect(facingText(['ne'])).toBe('NE');
     expect(facingText([])).toBe('');
+  });
+
+  it('frames a search over every point it was drawn with, the unusable left out', () => {
+    const points = searchedPoints({
+      area: [{ lat: 10, lon: 40 }, { lat: 10, lon: 41 }, { lat: 11, lon: 41 }],
+      areas: [{ points: [{ lat: 12, lon: 42 }] }],
+      zones: [{ points: [{ lat: 9, lon: 39 }, { lat: null, lon: 39 }] }],
+      strokes: [{ path: [{ lat: 13, lon: 43 }] }],
+    });
+    expect(points).toEqual([
+      { lat: 10, lon: 40 },
+      { lat: 10, lon: 41 },
+      { lat: 11, lon: 41 },
+      { lat: 12, lon: 42 },
+      { lat: 9, lon: 39 },
+      { lat: 13, lon: 43 },
+    ]);
+    expect(searchedPoints({})).toEqual([]);
   });
 
   it('draws a fan from the middle of the area, out as far as the search reads', () => {

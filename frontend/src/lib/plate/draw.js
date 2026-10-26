@@ -22,7 +22,7 @@ import { drawSignature, signatureWidth } from '../brandMark.js';
 import { PALETTES, darkGround, groundStyle } from './plainBasemap.js';
 import { drawGlobe } from './globe2d.js';
 import { drawGrain } from './grain.js';
-import { shadeOf, spotlightShape } from './spotlight.js';
+import { shadeOf, shapeMask, spotlightShape } from './spotlight.js';
 import { drawnOnce } from './drawnOnce.js';
 
 /** How a legend row is drawn: a marker, a line, an area, or the past. */
@@ -68,7 +68,7 @@ function frameOfMap(map, context) {
   if (!live) return null;
   const box = boxPx(map, context.scale);
   const ratio = context.scale / PX_PER_MM;
-  return { map, box, view: live.view, frame: live.frame,
+  return { map, box, live, view: live.view, frame: live.frame,
     // a map in 3D places the ground through its own camera, the heights included
     at: (point) => {
       const [px, py] = live.project ? live.project(point) : project(live.view, live.frame, point);
@@ -114,7 +114,13 @@ function clipToMap(ctx, map, context) {
   for (const other of after) {
     if (!MAP_KINDS.includes(other.kind) || other.hidden) continue;
     const o = boxPx(other, context.scale);
-    if (o.x < box.x + box.w && o.x + o.w > box.x && o.y < box.y + box.h && o.y + o.h > box.y) ctx.rect(o.x, o.y, o.w, o.h);
+    if (!(o.x < box.x + box.w && o.x + o.w > box.x && o.y < box.y + box.h && o.y + o.h > box.y)) continue;
+    // a globe covers its disc only: its box's corners show the map under it
+    if (other.globe) {
+      const radius = globeRadius(o, other, context.scale);
+      ctx.moveTo(o.x + o.w / 2 + radius, o.y + o.h / 2);
+      ctx.arc(o.x + o.w / 2, o.y + o.h / 2, radius, 0, Math.PI * 2);
+    } else ctx.rect(o.x, o.y, o.w, o.h);
   }
   ctx.clip('evenodd');
 }
@@ -233,13 +239,19 @@ function edgeCrossings(points, frame) {
   return found;
 }
 
-/** One country lit on a flat map, the rest of the world drawn back under a soft edge (`spotlight.js`). */
-function drawSpotlight(ctx, element, context) {
+/**
+ * A country focus: one country lit on its map, the rest of the world drawn back under a
+ * soft edge (`spotlight.js`). A flat map traces the outline; a map in 3D reads its ground
+ * point by point, since a ring may pass behind the eye or the globe.
+ */
+function drawFocus(ctx, element, context) {
   const name = element.spotlight?.country;
-  const placed = name && context.world ? frameOfMap(element, context) : null;
-  const shape = placed && !tilted(placed.view) ? spotlightShape(context.world, name) : null;
+  const placed = name && context.world ? frameOf(element, context) : null;
+  const ground = placed?.live.ground ?? null;
+  const shape = placed && (ground || !tilted(placed.view)) ? spotlightShape(context.world, name) : null;
   if (!shape) return;
   const { box, at, view, frame } = placed;
+  const alpha = ctx.globalAlpha;
   const { colour, strength } = shadeOf(element.spotlight, context.spec.theme.paper);
   const soft = Math.max(2, Math.min(box.w, box.h) * 0.012);
   // past the frame by enough that the soft edge falls only where the shade meets the country
@@ -247,25 +259,33 @@ function drawSpotlight(ctx, element, context) {
   const trace = (target, rings, [dx, dy], k = 1) => {
     target.beginPath();
     for (const ring of rings) {
-      ring.forEach(([lon, lat], index) => {
+      let open = false;
+      for (const [lon, lat] of ring) {
         const [x, y] = at([lon, Math.max(-85, Math.min(85, lat))]);
-        if (index) target.lineTo((x + dx) * k, (y + dy) * k); else target.moveTo((x + dx) * k, (y + dy) * k);
-      });
-      target.closePath();
+        // a corner behind the eye breaks the outline there
+        if (!Number.isFinite(x) || !Number.isFinite(y)) { open = false; continue; }
+        if (open) target.lineTo((x + dx) * k, (y + dy) * k); else target.moveTo((x + dx) * k, (y + dy) * k);
+        open = true;
+      }
+      if (!ground) target.closePath();
     }
   };
   // the shade, blurred, at half the page's resolution since its edge is soft anyway; made
   // again only when the map moves or the shade changes, never for a drag elsewhere
   const k = 0.5;
-  const key = JSON.stringify([name, colour, view.lat, view.lon, view.zoom, view.bearing ?? 0, frame.width, frame.height, Math.round(box.w), Math.round(box.h)]);
+  const key = JSON.stringify([name, colour, view.lat, view.lon, view.zoom, view.bearing ?? 0, view.pitch ?? 0, Boolean(ground),
+    frame.width, frame.height, Math.round(box.w), Math.round(box.h)]);
   const picture = drawnOnce(`spot:${element.id}`, key, (box.w + margin * 2) * k, (box.h + margin * 2) * k, (canvas) => {
+    const own = canvas.getContext('2d');
+    if (!own) return false;
+    own.filter = `blur(${soft * k}px)`;
+    if (ground) return shadeRead(own, { ground, mask: shapeMask(context.world, name, shape), colour, frame, ratio: context.scale / PX_PER_MM, margin, k });
     // cut out on a sheet the processor draws: a GPU-drawn canvas erases the whole of it on a cut-out this shaped (Chrome on Vulkan)
     const sheet = document.createElement('canvas');
     sheet.width = canvas.width;
     sheet.height = canvas.height;
     const shade = sheet.getContext('2d', { willReadFrequently: true });
-    const own = canvas.getContext('2d');
-    if (!shade || !own) return false;
+    if (!shade) return false;
     const onSheet = [margin - box.x, margin - box.y];
     shade.fillStyle = colour;
     shade.fillRect(0, 0, sheet.width, sheet.height);
@@ -278,7 +298,6 @@ function drawSpotlight(ctx, element, context) {
     shade.globalAlpha = 0.5;
     trace(shade, shape.half, onSheet, k);
     shade.fill();
-    own.filter = `blur(${soft * k}px)`;
     own.drawImage(sheet, 0, 0);
     sheet.width = 0;
     sheet.height = 0;
@@ -286,12 +305,12 @@ function drawSpotlight(ctx, element, context) {
   });
   if (!picture) return;
   ctx.save();
-  clipToMap(ctx, element, context);
-  ctx.globalAlpha = strength;
+  clipToMap(ctx, placed.map, context);
+  ctx.globalAlpha = alpha * strength;
   ctx.drawImage(picture, box.x - margin, box.y - margin, picture.width / k, picture.height / k);
   if (shape.half.length) {
     // dotted round, neither in nor out
-    ctx.globalAlpha = 0.7;
+    ctx.globalAlpha = alpha * 0.7;
     ctx.strokeStyle = context.spec.theme.ink;
     ctx.lineWidth = Math.max(1, 0.25 * context.scale);
     ctx.setLineDash([Math.max(1, 0.4 * context.scale), Math.max(1.5, 0.7 * context.scale)]);
@@ -299,6 +318,48 @@ function drawSpotlight(ctx, element, context) {
     ctx.stroke();
   }
   ctx.restore();
+}
+
+/** About how many points of a map in 3D a shade reads: enough for an edge the blur softens anyway. */
+const SHADE_POINTS = 15000;
+
+/**
+ * A shade read off a map in 3D: the ground under a grid of its points (`ground`, null in
+ * the sky, which is shaded), each shaded as `mask` says, the grid drawn smoothly on
+ * `own`, a canvas `margin` page pixels round the map's frame at `k` of the page's scale.
+ */
+function shadeRead(own, { ground, mask, colour, frame, ratio, margin, k }) {
+  if (!mask) return false;
+  const cell = Math.max(3, Math.sqrt((frame.width * frame.height) / SHADE_POINTS));
+  // read past the frame as far as the margin, so the blur has shade to draw from at the edge
+  const reach = Math.ceil(margin / ratio / cell) + 1;
+  const cols = Math.ceil(frame.width / cell) + 1 + 2 * reach;
+  const rows = Math.ceil(frame.height / cell) + 1 + 2 * reach;
+  const grid = document.createElement('canvas');
+  grid.width = cols;
+  grid.height = rows;
+  const read = grid.getContext('2d', { willReadFrequently: true });
+  if (!read) return false;
+  const pixels = read.createImageData(cols, rows);
+  const [red, green, blue] = /^#[0-9a-f]{6}$/i.test(colour) ? [1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16)) : [0, 0, 0];
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const point = ground([(col - reach) * cell, (row - reach) * cell]);
+      const at = (row * cols + col) * 4;
+      pixels.data[at] = red;
+      pixels.data[at + 1] = green;
+      pixels.data[at + 2] = blue;
+      pixels.data[at + 3] = Math.round(255 * (point ? mask.shadeAt(point[0], point[1]) : 1));
+    }
+  }
+  read.putImageData(pixels, 0, 0);
+  // each point drawn as a cell centred where it was read
+  const size = cell * ratio * k;
+  own.imageSmoothingEnabled = true;
+  own.drawImage(grid, (margin - reach * cell * ratio) * k - size / 2, (margin - reach * cell * ratio) * k - size / 2, cols * size, rows * size);
+  grid.width = 0;
+  grid.height = 0;
+  return true;
 }
 
 function drawGrid(ctx, element, context) {
@@ -400,6 +461,10 @@ function drawFootprint(ctx, outer, inner, context, { connect = false } = {}) {
   ctx.restore();
 }
 
+/** The weight of a globe's rim, and the radius it is drawn at in its box (`drawGlobe`). */
+const globeLine = (element, scale) => Math.max(1, 0.3 * scale * (element.width ?? 1));
+const globeRadius = (box, element, scale) => Math.min(box.w, box.h) / 2 - globeLine(element, scale);
+
 /** An inset drawn as a globe, turned to the middle of the map it locates, its ground's sea and land, the accent on the country. */
 function drawGlobeInset(ctx, element, context) {
   const { scale, spec } = context;
@@ -408,7 +473,7 @@ function drawGlobeInset(ctx, element, context) {
   if (!view) return;
   const palette = PALETTES[groundStyle(element.basemap).palette] ?? PALETTES.light;
   const box = boxPx(element, scale);
-  const look = { centre: view, world: context.world ?? null, line: Math.max(1, 0.3 * scale * (element.width ?? 1)),
+  const look = { centre: view, world: context.world ?? null, line: globeLine(element, scale),
     colours: { sea: palette.water, land: palette.ground, border: palette.border, accent: spec.theme.accent, ink: spec.theme.ink } };
   // drawn again only when its middle, its size or its colours change, never for a drag elsewhere on the page
   const key = JSON.stringify([view.lat.toFixed(4), view.lon.toFixed(4), Math.round(box.w), Math.round(box.h), look.line, look.colours, !!look.world]);
@@ -426,7 +491,6 @@ function drawFrame(ctx, element, context) {
   const { scale, spec } = context;
   const box = boxPx(element, scale);
   if (element.kind === 'inset' && element.globe) { drawGlobeInset(ctx, element, context); return; }
-  if (element.kind === 'map') drawSpotlight(ctx, element, context);
   if (element.kind === 'map') drawGrid(ctx, element, context);
   if (element.kind === 'inset') {
     const outer = spec.elements.find((item) => item.id === element.of);
@@ -762,6 +826,11 @@ function drawLeader(ctx, element, context, box, { colour }) {
   const map = frameOf(element, context);
   const point = map && element.at ? map.at(element.at) : null;
   if (!point || element.leader === 'none') return;
+  // a point the map does not show (turned or framed away, or past a 3D map's horizon) is led to by nothing
+  const [px, py] = point;
+  const slack = 0.5;
+  if (!Number.isFinite(px) || !Number.isFinite(py) || px < map.box.x - slack || py < map.box.y - slack
+    || px > map.box.x + map.box.w + slack || py > map.box.y + map.box.h + slack) return;
   const inside = point[0] >= box.x && point[0] <= box.x + box.w && point[1] >= box.y && point[1] <= box.y + box.h;
   if (inside) return;
   const { scale } = context;
@@ -1428,16 +1497,29 @@ export function drawPage(ctx, spec, context) {
     }
   }
   const reveal = context.reveal ?? null;
+  // what a played transition takes away, still drawn as it fades
+  const goingOf = (element) => (context.leaving?.ids?.has(element.id) ? Math.max(0, Math.min(1, context.leaving.t)) : 0);
+  // a country focus lies on its map, under everything drawn and written over the map
   for (const element of spec.elements) {
-    if (element.hidden) continue;
+    if (element.kind !== 'focus' || element.hidden) continue;
+    const shown = shownOn(element, context.at ?? null, context.place);
+    if (!shown && !goingOf(element)) continue;
+    ctx.save();
+    ctx.globalAlpha = (element.opacity ?? 1) * (!shown ? goingOf(element) : reveal?.ids?.has(element.id) ? Math.max(0, Math.min(1, reveal.t)) : 1);
+    drawFocus(ctx, element, full);
+    ctx.restore();
+  }
+  for (const element of spec.elements) {
+    if (element.hidden || element.kind === 'focus') continue;
     const today = shownOn(element, context.at ?? null, context.place) && (context.refShown?.(element) ?? true);
-    if (!today && !(context.editing && context.ghosts)) continue;
+    const going = today ? 0 : goingOf(element);
+    if (!today && !going && !(context.editing && context.ghosts)) continue;
     // what a transition brings in: faded in, or drawn as far as it has gone
     const coming = reveal?.ids?.has(element.id) ? Math.max(0, Math.min(1, reveal.t)) : 1;
     const drawn = reveal?.mode === 'draw' && ['arrow', 'line', 'measure'].includes(element.kind);
     if (coming <= 0) continue;
     ctx.save();
-    ctx.globalAlpha = (element.opacity ?? 1) * (today ? 1 : 0.22) * (drawn ? 1 : coming);
+    ctx.globalAlpha = (element.opacity ?? 1) * (today ? 1 : going || 0.22) * (drawn ? 1 : coming);
     if (element.rotate && !['map', 'inset', 'arrow', 'zone', 'ring', 'cone', 'measure', 'line', 'video', 'symbol'].includes(element.kind)) {
       const box = boxPx(element, scale);
       ctx.translate(box.x + box.w / 2, box.y + box.h / 2);

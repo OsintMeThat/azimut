@@ -224,7 +224,7 @@ def duplicate_plate(case_id: str, name: str) -> dict[str, Any]:
 
 
 def clip_files(case: Case, sequence: list[mapplates.Beat]) -> dict[str, Path]:
-    """The case's videos a sequence's clips name, each found inside the case; `ExportError` for any that is not."""
+    """The case's videos and GIFs a sequence's clips name, each found inside the case; `ExportError` for any that is not."""
     files: dict[str, Path] = {}
     for clip in (clip for beat in sequence for clip in beat.clips):
         if clip.src in files:
@@ -235,8 +235,8 @@ def clip_files(case: Case, sequence: list[mapplates.Beat]) -> dict[str, Path]:
             raise mapplates.ExportError("a clip names a file outside the case") from exc
         if not path.is_file():
             raise mapplates.ExportError(f"the video {PurePosixPath(clip.src).name} is no longer in the case")
-        if media_engine.media_kind(path.name) != "video":
-            raise mapplates.ExportError(f"{PurePosixPath(clip.src).name} is not a video")
+        if media_engine.media_kind(path.name) != "video" and path.suffix.lower() != ".gif":
+            raise mapplates.ExportError(f"{PurePosixPath(clip.src).name} is not a video or a GIF")
         files[clip.src] = path
     return files
 

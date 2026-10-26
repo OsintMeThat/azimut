@@ -69,11 +69,13 @@ let searches; // the narrowings it asked the case for
 let notes;
 let changes;
 let answer; // what the case says when the picker searches
+let probed; // the clips whose frame rate was asked for
 
-function mount({ file, search } = {}) {
+function mount({ file, search, probe } = {}) {
   asked = [];
   searches = [];
   notes = [];
+  probed = [];
   changes = 0;
   answer = { items: [PICTURE], total: 1 };
   document.body.innerHTML = '';
@@ -92,6 +94,12 @@ function mount({ file, search } = {}) {
       ((params) => {
         searches.push(params);
         return Promise.resolve(answer);
+      }),
+    probe:
+      probe ??
+      ((path) => {
+        probed.push(path);
+        return Promise.resolve({ fps: 25, duration: 10 });
       }),
     onchange: () => {
       changes += 1;
@@ -150,13 +158,68 @@ describe('opening a video over the map', () => {
     await settle();
   });
 
-  it('plays it in a video element, from an object URL', () => {
+  it('plays it in a player of its own, from an object URL', () => {
     const video = pane().querySelector('video');
     expect(video.src).toBe('blob:azimut/1');
-    expect(video.controls).toBe(true);
+    // native controls would zoom with the clip
+    expect(video.controls).toBe(false);
     expect(URL.createObjectURL).toHaveBeenCalled();
-    // nothing to zoom: a video has no fit-and-scale of its own here
-    expect(pane().querySelector('.rw-foot')).toBe(null);
+    for (const act of ['play', 'back', 'forward', 'rate', 'mute', 'keep']) {
+      expect(pane().querySelector(`[data-rw="${act}"]`), act).not.toBe(null);
+    }
+  });
+
+  it('reads the clip’s frame rate, so a step is one frame of it', () => {
+    expect(probed).toEqual(['media/walk.mp4']);
+    expect(refs.open[0].fps).toBe(25);
+    const video = pane().querySelector('video');
+    video.pause = vi.fn();
+    press(pane().querySelector('[data-rw="forward"]'));
+    expect(video.currentTime).toBeCloseTo(0.06, 6); // half a frame into the next
+    expect(video.pause).toHaveBeenCalled();
+  });
+
+  it('steps back on the arrow key, and keeps the key from the site', () => {
+    const video = pane().querySelector('video');
+    video.pause = vi.fn();
+    video.currentTime = 1.02;
+    const key = new window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true });
+    pane().dispatchEvent(key);
+    expect(video.currentTime).toBeCloseTo(0.98, 6);
+    expect(key.defaultPrevented).toBe(true);
+  });
+
+  it('slows down and mutes on its own buttons', () => {
+    const video = pane().querySelector('video');
+    press(pane().querySelector('[data-rw="rate"]'));
+    expect(refs.open[0].rate).toBe(0.5);
+    expect(video.playbackRate).toBe(0.5);
+    expect(pane().querySelector('[data-rw="rate"]').textContent).toBe('0.5×');
+    press(pane().querySelector('[data-rw="mute"]'));
+    expect(video.muted).toBe(true);
+    expect(pane().querySelector('[data-rw="mute"]').title).toBe('Sound on');
+  });
+
+  it('keeps the frame on screen as a picture of its own, fetched from nowhere', async () => {
+    const video = pane().querySelector('video');
+    video.pause = vi.fn();
+    Object.defineProperty(video, 'videoWidth', { value: 1920 });
+    asked = [];
+    press(pane().querySelector('[data-rw="keep"]'));
+    await settle();
+    expect(panes()).toHaveLength(2);
+    expect(refs.open[1]).toMatchObject({ kind: 'image', title: 'The walk · 0:00.000' });
+    expect(panes()[1].querySelector('.rw-wait')).toBe(null); // painted at once
+    expect(asked).toEqual([]);
+    expect(changes).toBe(1);
+  });
+
+  it('zooms into the clip on a wheel', () => {
+    const wheel = new window.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -120 });
+    pane().querySelector('.rw-body').dispatchEvent(wheel);
+    expect(refs.open[0].scale).toBeCloseTo(1.15, 6);
+    expect(pane().querySelector('video').style.transform).toContain('scale(1.15)');
+    expect(pane().querySelector('.rw-zoom').style.display).toBe('');
   });
 
   it('says so when the site will not play it, instead of sitting there black', () => {
@@ -168,12 +231,14 @@ describe('opening a video over the map', () => {
     expect(pane().querySelector('video')).toBe(null);
   });
 
-  it('leaves the video its own controls, and still keeps the map still', () => {
-    const down = new window.MouseEvent('pointerdown', { bubbles: true, cancelable: true });
+  it('plays on a click of the picture, and keeps the map still under it', () => {
+    const video = pane().querySelector('video');
+    video.play = vi.fn(() => Promise.resolve());
+    const down = new window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 });
     pane().querySelector('.rw-body').dispatchEvent(down);
-    // cancelling this would kill the scrub bar; the map is held off by the
-    // panel's own guard on anything inside the shadow root
-    expect(down.defaultPrevented).toBe(false);
+    point(window, 'pointerup');
+    expect(down.defaultPrevented).toBe(true);
+    expect(video.play).toHaveBeenCalled();
   });
 
   it('gives the URL back when the window closes', () => {
@@ -201,9 +266,9 @@ describe('working one window', () => {
 
   it('folds away to its header and comes back', () => {
     press(control('fold'));
-    expect(pane().querySelector('.rw-body').style.display).toBe('none');
+    expect(pane().querySelector('.rw-stage').style.display).toBe('none');
     press(control('fold'));
-    expect(pane().querySelector('.rw-body').style.display).toBe('');
+    expect(pane().querySelector('.rw-stage').style.display).toBe('');
   });
 
   it('zooms about the middle of the pane and resets to fit', () => {
@@ -232,8 +297,9 @@ describe('working one window', () => {
     expect(refs.open[0]).toMatchObject({ x: 100, y: 90 });
     point(window, 'pointermove', { x: 9000, y: 9000 });
     point(window, 'pointerup');
-    expect(refs.open[0].x).toBe(window.innerWidth - refs.open[0].w);
-    expect(pane().style.left).toBe(`${window.innerWidth - refs.open[0].w}px`);
+    // against the edge, the margin in
+    expect(refs.open[0].x).toBe(window.innerWidth - refs.open[0].w - 8);
+    expect(pane().style.left).toBe(`${window.innerWidth - refs.open[0].w - 8}px`);
   });
 
   it('keeps the fold chevron under the pointer that pressed it', () => {
@@ -255,9 +321,154 @@ describe('working one window', () => {
   it('folds on a double-click on the title bar', () => {
     pane().querySelector('header').dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
     expect(refs.open[0].collapsed).toBe(true);
-    expect(pane().querySelector('.rw-body').style.display).toBe('none');
+    expect(pane().querySelector('.rw-stage').style.display).toBe('none');
     // the panel lists the open windows, so it has to hear about it
     expect(changes).toBe(1);
+  });
+
+  it('fades so the map shows and takes the pointer, and comes back solid', () => {
+    press(control('fade'));
+    expect(refs.open[0].opacity).toBe(0.5);
+    expect(pane().querySelector('.rw-body').style.opacity).toBe('0.5');
+    expect(pane().classList.contains('see-through')).toBe(true);
+
+    const range = pane().querySelector('.rw-range');
+    range.value = '0.3';
+    range.dispatchEvent(new window.Event('input', { bubbles: true }));
+    expect(refs.open[0].opacity).toBe(0.3);
+    press(control('fade'));
+    expect(pane().classList.contains('see-through')).toBe(false);
+    press(control('fade'));
+    expect(refs.open[0].opacity).toBe(0.3); // the value worked on is the one it goes back to
+  });
+
+  it('offers no details for a file the case knows nothing about', () => {
+    expect(control('info')).toBe(null);
+  });
+
+  // happy-dom lays nothing out, so a header measures nothing and the column
+  // counts the 32 px a header is drawn at
+  const HEAD = 32;
+  const edge = (side) => document.body.querySelector(`.rw-dock-edge[data-side="${side}"]`);
+
+  const choose = (where) => {
+    press(control('place'));
+    press(pane().querySelector(`[data-rw-place="${where}"]`));
+  };
+
+  it('offers the six places in its header, and puts them away again', () => {
+    press(control('place'));
+    expect(pane().classList.contains('placing')).toBe(true);
+    expect([...pane().querySelectorAll('[data-rw-place]')].map((b) => b.dataset.rwPlace)).toEqual([
+      'left', 'right', 'tl', 'tr', 'bl', 'br',
+    ]);
+    press(control('place'));
+    expect(pane().classList.contains('placing')).toBe(false);
+  });
+
+  it('pins to a corner clear of the panel, and is freed from the same place', () => {
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+    panel.getBoundingClientRect = () => ({ left: window.innerWidth - 300, top: 76, width: 284, height: 300 });
+    document.body.appendChild(panel);
+    choose('tr');
+    expect(refs.open[0].corner).toBe('tr');
+    // beside the panel, a margin clear of it, which is nearer the corner than
+    // under it
+    expect(pane().style.top).toBe('8px');
+    expect(pane().style.left).toBe(`${window.innerWidth - 300 - 8 - 320}px`);
+    expect(pane().querySelector('.rw-resize').classList.contains('from-tr')).toBe(true);
+    expect(control('place').title).toBe('Top right corner: move or free it');
+
+    choose('tr');
+    expect(refs.open[0].corner).toBe(false);
+  });
+
+  it('pins on being let go in a corner, and comes free on being dragged out', () => {
+    const head = pane().querySelector('header');
+    point(head, 'pointerdown', { x: 100, y: 100 });
+    point(window, 'pointermove', { x: 40, y: 40 });
+    point(window, 'pointerup');
+    expect(refs.open[0].corner).toBe('tl');
+
+    point(head, 'pointerdown', { x: 20, y: 20 });
+    point(window, 'pointermove', { x: 21, y: 21 }); // a twitch is not a drag
+    expect(refs.open[0].corner).toBe('tl');
+    point(window, 'pointermove', { x: 300, y: 300 });
+    point(window, 'pointerup');
+    expect(refs.open[0].corner).toBe(false);
+  });
+
+  it('docks in the column picked, as tall as its picture, and floats back', async () => {
+    choose('left');
+    expect(refs.open[0].docked).toBe('left');
+    expect(changes).toBe(1);
+    expect(pane().classList.contains('docked')).toBe(true);
+    expect(pane().style.left).toBe('0px');
+    expect(pane().style.width).toBe('340px');
+    // the picture is 1600 by 1200, so 340 wide is 255 tall, under its header,
+    // in the middle of the screen's height
+    expect(pane().style.height).toBe(`${HEAD + 255}px`);
+    expect(pane().style.top).toBe(`${Math.round((window.innerHeight - HEAD - 255) / 2)}px`);
+    expect(pane().querySelector('.rw-resize').style.display).toBe('none');
+    expect(pane().querySelector('.rw-fade').style.display).toBe('none');
+    expect(edge('left').style.display).toBe('');
+    expect(edge('right').style.display).toBe('none');
+
+    // a second one on that side stacks under it, the two centred together
+    refs.add(PICTURE);
+    refs.place(refs.open[1].id, 'left');
+    layer.sync();
+    await settle();
+    const top = Math.round((window.innerHeight - 2 * (HEAD + 255)) / 2);
+    expect(panes()[0].style.top).toBe(`${top}px`);
+    expect(panes()[1].style.top).toBe(`${top + HEAD + 255}px`);
+
+    choose('left');
+    expect(pane().classList.contains('docked')).toBe(false);
+    expect(pane().style.left).toBe(`${refs.open[0].x}px`);
+  });
+
+  it('keeps a column on each side, each at its own edge', async () => {
+    refs.add(PICTURE);
+    layer.sync();
+    await settle();
+    refs.place(refs.open[0].id, 'left');
+    refs.place(refs.open[1].id, 'right');
+    layer.sync();
+    expect(panes()[0].style.left).toBe('0px');
+    expect(panes()[1].style.left).toBe(`${window.innerWidth - 340}px`);
+    expect(edge('left').style.display).toBe('');
+    expect(edge('right').style.display).toBe('');
+  });
+
+  it('squeezes a column that would run past the bottom of the screen', async () => {
+    for (let i = 0; i < 4; i += 1) refs.add(PICTURE);
+    layer.sync();
+    await settle();
+    for (const viewer of refs.open) refs.place(viewer.id, 'right');
+    layer.sync();
+    const bottom = panes().reduce((sum, el) => sum + parseFloat(el.style.height), 0);
+    expect(bottom).toBeLessThanOrEqual(window.innerHeight + panes().length); // rounding, one px a window
+  });
+
+  it('settles against an edge it is dragged near', () => {
+    const head = pane().querySelector('header');
+    point(head, 'pointerdown', { x: 100, y: 100 });
+    point(window, 'pointermove', { x: 50, y: 50 }); // 50 px up and left: 10 px from both edges
+    point(window, 'pointerup');
+    expect(refs.open[0]).toMatchObject({ x: 8, y: 8 });
+  });
+
+  it('widens the docked column from its edge, never past half the screen', () => {
+    choose('left');
+    const edge = document.body.querySelector('.rw-dock-edge[data-side="left"]');
+    point(edge, 'pointerdown', { x: 340 });
+    point(window, 'pointermove', { x: 420 });
+    expect(pane().style.width).toBe('420px');
+    point(window, 'pointermove', { x: 99999 });
+    point(window, 'pointerup');
+    expect(pane().style.width).toBe(`${Math.round(window.innerWidth / 2)}px`);
   });
 
   it('raises the window it is pointed at', () => {
@@ -266,6 +477,39 @@ describe('working one window', () => {
     expect(panes().map((el) => el.style.zIndex)).toEqual(['2', '3']);
     point(panes()[0], 'pointerdown');
     expect(panes().map((el) => el.style.zIndex)).toEqual(['3', '2']);
+  });
+});
+
+describe('what a window unfolds', () => {
+  it('shows the dates, the source and the notes, folded to start', async () => {
+    refs.add({
+      ...PICTURE,
+      notes: 'North wall',
+      taken_at: '2026-03-12T14:02:09',
+      source: { webpage_url: 'https://x.com/a/status/1', uploader: 'someone' },
+    });
+    layer.sync();
+    await settle();
+    const pane = panes()[0];
+    const facts = pane.querySelector('.rw-facts');
+    expect(facts.style.display).toBe('none');
+
+    press(pane.querySelector('[data-rw="info"]'));
+    expect(facts.style.display).toBe('');
+    expect(facts.textContent).toContain('Captured 12 Mar 2026, 14:02');
+    expect(facts.textContent).toContain('North wall');
+    const link = facts.querySelector('a');
+    expect(link.getAttribute('href')).toBe('https://x.com/a/status/1');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('writes what the case holds as text, never as markup', async () => {
+    refs.add({ ...PICTURE, notes: '<img src=x onerror=alert(1)>' });
+    layer.sync();
+    await settle();
+    const facts = panes()[0].querySelector('.rw-facts');
+    expect(facts.querySelector('img')).toBe(null);
+    expect(facts.textContent).toContain('<img src=x onerror=alert(1)>');
   });
 });
 

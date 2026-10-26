@@ -10,7 +10,8 @@
  * inside until a picture is chosen.
  */
 import { NEUTRAL_TONE, THEMES, onPaper, pageSize } from './page.js';
-import { styled } from './design.js';
+import { mutedOf, styled } from './design.js';
+import { signatureWidth } from '../brandMark.js';
 
 /** The papers a ready plate is offered on, `[id, label, page]`, the first its own. */
 export const FORMATS = [
@@ -30,6 +31,14 @@ function frame(page) {
   const { width: W, height: H } = pageSize(page);
   return { W, H, m: r(Math.max(6, Math.min(W, H) * 0.045)), wide: W >= H * 1.05 };
 }
+
+/** How far below a text box's top the capitals of its first line stand in the middle, in mm: a kicker's, a source line's. */
+const KICKER_MIDDLE = 1.3;
+const SOURCE_MIDDLE = 1;
+/** How high the Azimut logo stands on a page of margin `m`: a little over the source line's capitals. */
+const logoHeight = (m) => r(m * 0.42);
+/** How wide the logo is at `height`, to the tenth of a millimetre above. */
+const logoWidth = (height) => Math.ceil(signatureWidth(height, { tight: true }) * 10) / 10;
 
 /** The theme of a look, named so the inspector says which. */
 const lookOf = (id) => ({ ...THEMES[id].theme, preset: id });
@@ -53,6 +62,9 @@ function kit(t, ground = 'plain') {
     panel: (id, b) => ({ id, kind: 'shape', shape: 'rect', box: b, width: 1, border: false, fill: t.paper, opacity: 0.94 }),
     signature: (b) => ({ id: 'signature', kind: 'signature', box: b, text: '{handle}\n{today}', size: 7, align: 'right' }),
     qr: (b) => ({ id: 'qr', kind: 'qr', box: b, text: '' }),
+    // the mark and the name alone, set right to `right` and centred on the line at `middle`, in the source line's muted ink
+    logo: (right, middle, height) => ({ id: 'brand', kind: 'brand', name: 'Azimut logo', box: box(right - logoWidth(height), middle - height / 2, logoWidth(height), height),
+      text: '', align: 'right', colour: mutedOf(t) }),
   };
 }
 
@@ -77,6 +89,7 @@ function situation(page) {
   const t = lookOf('newsroom');
   const k = kit(t, THEMES.newsroom.ground);
   const ground = THEMES.newsroom.ground;
+  const lh = logoHeight(m);
   if (wide) {
     const head = header(k, m, m, W * 0.6, 'Situation', { dek: 'Where the line stands, from geolocated footage.' });
     const top = head.next + 2;
@@ -95,6 +108,7 @@ function situation(page) {
       k.scale(box(m + 4, top + mh - 9, 36, 5)),
       k.north(box(m + mw - 12, top + 4, 8, 12)),
       k.credits(box(m, top + mh + 1.5, mw, 4.5)),
+      k.logo(W - m, top + mh + 3.75, lh),
     ] };
   }
   const head = header(k, m, m, W - 2 * m, 'Situation', { dek: 'Where the line stands, from geolocated footage.', big: 18 });
@@ -108,10 +122,11 @@ function situation(page) {
     k.text('badge', 'badge', box(m, head.next, 46, 7), 'As of {date}'),
     k.legend(box(m, below, half, H - below - m - 9)),
     k.inset(box(m + half + 4, below, half, Math.min(half * 0.75, H - below - m - 9))),
-    k.text('source', 'source', box(m, H - m - 7, W - 2 * m, 7), 'Sources: geolocated footage and open imagery.'),
+    k.text('source', 'source', box(m, H - m - 7, W - 2 * m - logoWidth(lh) - 4, 7), 'Sources: geolocated footage and open imagery.'),
     k.scale(box(m + 4, top + mh - 9, 36, 5)),
     k.north(box(W - m - 12, top + 4, 8, 12)),
     k.credits(box(m, top + mh + 1, W - 2 * m, 4.5)),
+    k.logo(W - m, H - m - 7 + SOURCE_MIDDLE, lh),
   ] };
 }
 
@@ -120,7 +135,9 @@ function geolocation(page) {
   const { W, H, m, wide } = frame(page);
   const t = lookOf('brief');
   const k = kit(t, THEMES.brief.ground);
-  const head = header(k, m, m, W - 2 * m - (wide ? 60 : 0), 'Geolocation', { big: wide ? 18 : 16 });
+  const lh = logoHeight(m);
+  // the QR code holds the foot's corner, so the logo stands with the title
+  const head = header(k, m, m, W - 2 * m - (wide ? 60 : logoWidth(lh) + 6), 'Geolocation', { big: wide ? 18 : 16 });
   const top = head.next + 3;
   const foot = 16;
   if (wide) {
@@ -139,6 +156,7 @@ function geolocation(page) {
       k.north(box(mx + mw - 12, top + 4, 8, 12)),
       k.scale(box(mx + 4, top + mh - 9, 34, 5)),
       k.credits(box(mx, top + mh - 5, mw, 4.5), 'map', { align: 'right' }),
+      k.logo(W - m, m + KICKER_MIDDLE, lh),
     ] };
   }
   const ph = (H - top - m - foot - 4) / 2;
@@ -151,6 +169,7 @@ function geolocation(page) {
     k.qr(box(W - m - 14, H - m - 14, 14, 14)),
     k.north(box(W - m - 12, top + ph + 8, 8, 12)),
     k.credits(box(m, top + 2 * ph + 4 - 5, W - 2 * m, 4.5)),
+    k.logo(W - m, m + KICKER_MIDDLE, lh),
   ] };
 }
 
@@ -165,6 +184,7 @@ function beforeAfter(page) {
   const gap = 3;
   const [mw, mh] = wide ? [(W - 2 * m - gap) / 2, H - top - m - foot] : [W - 2 * m, (H - top - m - foot - gap) / 2];
   const [bx, by] = wide ? [m + mw + gap, top] : [m, top + mh + gap];
+  const lh = logoHeight(m);
   return { t, elements: [
     k.map('before', box(m, top, mw, mh), 'esri-wayback'),
     k.map('after', box(bx, by, mw, mh), 'esri-world-imagery'),
@@ -175,7 +195,8 @@ function beforeAfter(page) {
     k.text('figure-said', 'caption', box(m + 35, H - m - foot + 4, W * 0.35, 10), 'buildings destroyed or damaged between the two dates'),
     k.legend(box(W - m - Math.min(80, W * 0.38), H - m - foot + 3, Math.min(80, W * 0.38), foot - 9), 'after'),
     k.north(box(bx + mw - 11, by + 3, 7, 11), 'after'),
-    k.credits(box(m, H - m - 4, W - 2 * m, 4), 'before'),
+    k.credits(box(m, H - m - 4, W - 2 * m - logoWidth(lh) - 4, 4), 'before'),
+    k.logo(W - m, H - m - 2, lh),
   ] };
 }
 
@@ -187,6 +208,7 @@ function incidents(page) {
   const ground = THEMES.situation.ground;
   const head = header(k, m, m, W * (wide ? 0.6 : 1) - m, 'Incidents', { dek: 'Every reported event, placed and dated.', big: wide ? 20 : 17 });
   const top = head.next + 2;
+  const lh = logoHeight(m);
   if (wide) {
     const mw = W * 0.64 - m;
     const mh = H - top - m - 6;
@@ -200,6 +222,7 @@ function incidents(page) {
       k.legend(box(x, top + mh * 0.66 + 4, w, mh * 0.34 - 4)),
       k.scale(box(m + 4, top + mh - 9, 36, 5)),
       k.credits(box(m, top + mh + 1.2, mw, 4.5)),
+      k.logo(W - m, top + mh + 3.45, lh),
     ] };
   }
   const mh = (H - top - m) * 0.55;
@@ -208,8 +231,9 @@ function incidents(page) {
     k.map('map', box(m, top, W - 2 * m, mh), ground),
     ...head.elements,
     k.table(box(m, below, W - 2 * m, (H - below - m) * 0.7)),
-    k.legend(box(m, below + (H - below - m) * 0.7 + 3, W - 2 * m, (H - below - m) * 0.3 - 3), 'map', { columns: 2 }),
+    k.legend(box(m, below + (H - below - m) * 0.7 + 3, W - 2 * m, (H - below - m) * 0.3 - 5 - lh), 'map', { columns: 2 }),
     k.credits(box(m, top + mh + 1, W - 2 * m, 4.5)),
+    k.logo(W - m, H - m - lh / 2, lh),
   ] };
 }
 
@@ -224,14 +248,17 @@ function track(page) {
   const side = wide ? W * 0.26 : 0;
   const mw = W - 2 * m - (wide ? side + 5 : 0);
   const mh = wide ? H - top - m - 6 : (H - top - m) * 0.62;
+  const lh = logoHeight(m);
+  const rest = H - top - mh - m;
   return { t, elements: [
     k.map('map', box(m, top, mw, mh), ground),
     ...head.elements,
-    k.list(wide ? box(m + mw + 5, top, side, mh * 0.62) : box(m, top + mh + 7, W - 2 * m, (H - top - mh - m) * 0.55), 'Stops'),
-    k.legend(wide ? box(m + mw + 5, top + mh * 0.62 + 4, side, mh * 0.38 - 4) : box(m, H - m - (H - top - mh - m) * 0.35, W - 2 * m, (H - top - mh - m) * 0.35)),
+    k.list(wide ? box(m + mw + 5, top, side, mh * 0.62) : box(m, top + mh + 7, W - 2 * m, rest * 0.55), 'Stops'),
+    k.legend(wide ? box(m + mw + 5, top + mh * 0.62 + 4, side, mh * 0.38 - 4) : box(m, H - m - rest * 0.35, W - 2 * m, rest * 0.35 - lh - 2)),
     k.scale(box(m + 4, top + mh - 9, 36, 5)),
     k.north(box(m + mw - 12, top + 4, 8, 12)),
     k.credits(box(m, top + mh + 1.2, mw, 4.5)),
+    wide ? k.logo(W - m, top + mh + 3.45, lh) : k.logo(W - m, H - m - lh / 2, lh),
   ] };
 }
 
@@ -243,6 +270,7 @@ function sightline(page) {
   const ground = THEMES.atlas.ground;
   const head = header(k, m, m, W - 2 * m, 'Line of sight', { dek: 'Where the camera stood and what it could see.', big: wide ? 20 : 17 });
   const top = head.next + 2;
+  const lh = logoHeight(m);
   if (wide) {
     const mw = (W - 2 * m) * 0.62;
     const mh = H - top - m - 6;
@@ -257,6 +285,7 @@ function sightline(page) {
       k.scale(box(m + 4, top + mh - 9, 36, 5)),
       k.north(box(m + mw - 12, top + 4, 8, 12)),
       k.credits(box(m, top + mh + 1.2, mw, 4.5)),
+      k.logo(W - m, top + mh + 3.45, lh),
     ] };
   }
   const ph = (H - top - m) * 0.3;
@@ -265,9 +294,10 @@ function sightline(page) {
     k.map('map', box(m, top + ph + 4, W - 2 * m, mh), ground),
     ...head.elements,
     k.picture('view', box(m, top, W - 2 * m, ph), 'The view from the ground'),
-    k.text('caption', 'caption', box(m, top + ph + mh + 10, W - 2 * m, H - (top + ph + mh + 10) - m), 'What the picture shows, and how far away it is.'),
+    k.text('caption', 'caption', box(m, top + ph + mh + 10, W - 2 * m, H - (top + ph + mh + 10) - m - lh - 2), 'What the picture shows, and how far away it is.'),
     k.north(box(W - m - 12, top + ph + 8, 8, 12)),
     k.credits(box(m, top + ph + mh + 5, W - 2 * m, 4.5)),
+    k.logo(W - m, H - m - lh / 2, lh),
   ] };
 }
 
@@ -282,14 +312,18 @@ function site(page) {
   const mw = W - 2 * m - (wide ? side + 5 : 0);
   const mh = wide ? H - top - m - 6 : (H - top - m) * 0.64;
   const x = m + mw + 5;
+  const lh = logoHeight(m);
+  // under the map on a tall page, the list and the inset stop short of the logo's line
+  const below = H - top - mh - m - 7 - lh - 2;
   return { t, elements: [
     k.map('map', box(m, top, mw, mh), 'esri-world-imagery'),
     ...head.elements,
-    k.list(wide ? box(x, top, side, mh - side * 0.8 - 4) : box(m, top + mh + 7, (W - 2 * m) * 0.6, H - top - mh - m - 7), 'What stands there'),
-    k.inset(wide ? box(x, top + mh - side * 0.8, side, side * 0.8) : box(m + (W - 2 * m) * 0.6 + 4, top + mh + 7, (W - 2 * m) * 0.4 - 4, (W - 2 * m) * 0.3)),
+    k.list(wide ? box(x, top, side, mh - side * 0.8 - 4) : box(m, top + mh + 7, (W - 2 * m) * 0.6, below), 'What stands there'),
+    k.inset(wide ? box(x, top + mh - side * 0.8, side, side * 0.8) : box(m + (W - 2 * m) * 0.6 + 4, top + mh + 7, (W - 2 * m) * 0.4 - 4, Math.min((W - 2 * m) * 0.3, below))),
     k.scale(box(m + 4, top + mh - 9, 36, 5)),
     k.north(box(m + mw - 12, top + 4, 8, 12)),
     k.credits(box(m, top + mh + 1.2, mw, 4.5)),
+    wide ? k.logo(W - m, top + mh + 3.45, lh) : k.logo(W - m, H - m - lh / 2, lh),
   ] };
 }
 
@@ -305,13 +339,15 @@ function locator(page) {
   const mh = H - top - m - 6;
   const dw = Math.min(mw * 0.36, 90);
   const iw = Math.min(mw * 0.22, 52);
+  const lh = logoHeight(m);
   return { t, elements: [
     k.map('map', box(m, top, mw, mh), ground),
     k.map('detail', box(m + mw - dw - 4, top + 4, dw, dw * 0.75), 'esri-world-imagery', { of: 'map', name: 'Detail' }),
     ...head.elements,
     k.inset(box(m + 4, top + mh - iw - 4, iw, iw), 'map', { globe: true }),
     k.scale(box(m + iw + 10, top + mh - 9, 36, 5)),
-    k.credits(box(m, top + mh + 1.2, mw, 4.5)),
+    k.credits(box(m, top + mh + 1.2, mw - logoWidth(lh) - 4, 4.5)),
+    k.logo(W - m, top + mh + 3.45, lh),
   ] };
 }
 
@@ -324,10 +360,13 @@ function post(page) {
   const cw = wide ? W * 0.42 : W - 2 * m;
   const ch = wide ? 34 : 38;
   const cy = H - m - ch - 6;
+  const lh = logoHeight(m);
+  // the map runs to the edges, so the logo signs the title card, on its kicker's line
   return { t, elements: [
     k.map('map', box(0, 0, W, H), ground, { border: false }),
     k.panel('card', box(m, cy, cw, ch)),
-    k.text('kicker', 'kicker', box(m + 4, cy + 4, cw - 8, 4.5), 'Situation'),
+    k.text('kicker', 'kicker', box(m + 4, cy + 4, cw - 12 - logoWidth(lh), 4.5), 'Situation'),
+    k.logo(m + cw - 4, cy + 4 + KICKER_MIDDLE, lh),
     k.text('title', 'title', box(m + 4, cy + 9, cw - 8, 12), '{case}', { size: 18 }),
     k.text('dek', 'caption', box(m + 4, cy + 22, cw - 8, ch - 24), 'As of {date}. Sources: geolocated footage.'),
     k.text('badge', 'badge', box(m, m, 46, 7), 'As of {date}'),
@@ -349,6 +388,7 @@ function briefing(page) {
   const mw = W - 2 * m - (wide ? side + 6 : 0);
   const mh = wide ? H - top - m - 6 : (H - top - m) * 0.6;
   const x = m + mw + 6;
+  const lh = logoHeight(m);
   const words = '1. What happened.\n2. Where it happened, and how it was placed.\n3. What is not known yet.';
   return { t, elements: [
     k.map('map', box(m, top, mw, mh), ground),
@@ -356,9 +396,10 @@ function briefing(page) {
     k.text('points', 'body', wide ? box(x, top, side, mh * 0.45) : box(m, top + mh + 7, (W - 2 * m) * 0.6, 22), words),
     k.text('figure', 'figure', wide ? box(x, top + mh * 0.47, side, 13) : box(m + (W - 2 * m) * 0.64, top + mh + 7, (W - 2 * m) * 0.36, 13), '0'),
     k.text('figure-said', 'caption', wide ? box(x, top + mh * 0.47 + 14, side, 10) : box(m + (W - 2 * m) * 0.64, top + mh + 21, (W - 2 * m) * 0.36, 10), 'what the figure counts'),
-    k.legend(wide ? box(x, top + mh * 0.66, side, mh * 0.34) : box(m, top + mh + 33, W - 2 * m, H - (top + mh + 33) - m), 'map', wide ? {} : { columns: 2 }),
+    k.legend(wide ? box(x, top + mh * 0.66, side, mh * 0.34) : box(m, top + mh + 33, W - 2 * m, H - (top + mh + 33) - m - lh - 2), 'map', wide ? {} : { columns: 2 }),
     k.north(box(m + mw - 12, top + 4, 8, 12)),
     k.credits(box(m, top + mh + 1.2, mw, 4.5)),
+    wide ? k.logo(W - m, top + mh + 3.45, lh) : k.logo(W - m, H - m - lh / 2, lh),
   ] };
 }
 
