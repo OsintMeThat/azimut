@@ -70,6 +70,9 @@ MAX_PINS = 500
 #: A collage is cut in a few pieces, and a few pairs of strokes say which stands in front.
 MAX_CUTS = 12
 MAX_PAIRS = 24
+#: A few brushings over the bent parts of a picture, each a path of a few hundred points.
+MAX_BENT = 24
+MAX_BENT_POINTS = 2_000
 #: A stroke's id stays under this however many strokes were drawn and rubbed out.
 MAX_LINE_ID = 100_000
 #: The ground a view took in: a ring of points round the eye, a few per degree of lens.
@@ -167,10 +170,17 @@ class LineFar(BaseModel):
     bands: list[Literal["near", "b1", "b3", "b10", "b30"]] = Field(min_length=1, max_length=5)
 
 
+class BentZone(BaseModel):
+    """A part of the picture brushed as bent: the brush's path on the photo and its radius, a share of its width."""
+
+    path: list[PhotoPoint] = Field(min_length=1, max_length=MAX_BENT_POINTS)
+    r: float = Field(gt=0, le=0.5, allow_inf_nan=False)
+
+
 class Marks(BaseModel):
     """What the analyst marked beside the skyline (frontend lib/horizon/traceMarks.js): each stroke's id,
     the ids of inner edges, pairs of ids (in front, behind), where a collage is cut, across the photo,
-    how far some lines stand, which have only sky above them, and which matter most."""
+    how far some lines stand, which have only sky above them, which matter most, and the parts brushed as bent."""
 
     lines: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
     inner: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
@@ -183,6 +193,8 @@ class Marks(BaseModel):
     clear: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
     #: The ids of skyline lines the analyst marks as the ones that matter most.
     key: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
+    #: The parts of the picture the analyst brushed as bent.
+    bent: list[BentZone] = Field(default_factory=list, max_length=MAX_BENT)
 
     @field_validator("lines", "inner", "sea", "clear", "key")
     @classmethod

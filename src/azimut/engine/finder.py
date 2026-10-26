@@ -399,7 +399,8 @@ def marks_of(trace: dict[str, Any]) -> skymatch.Marks | None:
     sea = trace.get("sea") or []
     clear = trace.get("clear") or []
     key = trace.get("key") or []
-    if not trace.get("ridge_x") and not pairs and trace.get("piece") is None and not far and not sea and not clear and not key:
+    bent = any(trace.get("bent") or ()) or any(trace.get("ridge_bent") or ())
+    if not trace.get("ridge_x") and not pairs and trace.get("piece") is None and not far and not sea and not clear and not key and not bent:
         return None
 
     def ints(key: str) -> np.ndarray | None:
@@ -416,6 +417,8 @@ def marks_of(trace: dict[str, Any]) -> skymatch.Marks | None:
         sea=tuple(int(stroke) for stroke in sea),
         clear=tuple(int(stroke) for stroke in clear),
         key=tuple(int(stroke) for stroke in key),
+        bent=None if trace.get("bent") is None else np.asarray(trace["bent"], dtype=bool),
+        ridge_bent=None if trace.get("ridge_bent") is None else np.asarray(trace["ridge_bent"], dtype=bool),
     )
 
 

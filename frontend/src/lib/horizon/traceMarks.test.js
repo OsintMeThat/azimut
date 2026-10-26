@@ -32,6 +32,11 @@ import {
   toggleKey,
   keyBadges,
   KEYS_MAX,
+  addBent,
+  bentIndex,
+  BENT_MAX,
+  inBent,
+  removeBent,
   togglePair,
 } from './traceMarks.js';
 
@@ -39,7 +44,7 @@ const line = (v, from = 0, to = 1, count = 11) => Array.from({ length: count }, 
 
 describe('marks made whole', () => {
   it('gives each stroke an id and keeps only what names strokes there are', () => {
-    expect(cleanMarks(null, 3)).toEqual({ lines: [0, 1, 2], inner: [], pairs: [], cuts: [], far: [], sea: [], clear: [], key: [] });
+    expect(cleanMarks(null, 3)).toEqual({ lines: [0, 1, 2], inner: [], pairs: [], cuts: [], far: [], sea: [], clear: [], key: [], bent: [] });
     const kept = cleanMarks(
       {
         lines: [4, 7],
@@ -50,11 +55,12 @@ describe('marks made whole', () => {
         sea: [4, 4, 7, 9],
         clear: [9, 7, 4],
         key: [7, 4, 9],
+        bent: [{ path: [{ u: 0.123456, v: 0.5 }, { u: Infinity, v: 0 }], r: 0.05 }, { path: [{ u: 0.5, v: 0.5 }], r: 0 }, { path: [], r: 0.1 }],
       },
       2
     );
     // a sea line is skyline, and so are a line with only sky above and a key line: an inner edge can be none
-    expect(kept).toEqual({ lines: [4, 7], inner: [7], pairs: [[7, 4]], cuts: [0.3, 0.7], far: [{ line: 4, bands: ['b1', 'b3'] }], sea: [4], clear: [4], key: [4] });
+    expect(kept).toEqual({ lines: [4, 7], inner: [7], pairs: [[7, 4]], cuts: [0.3, 0.7], far: [{ line: 4, bands: ['b1', 'b3'] }], sea: [4], clear: [4], key: [4], bent: [{ path: [{ u: 0.1235, v: 0.5 }], r: 0.05 }] });
     // ids that do not match the strokes start again in order
     expect(cleanMarks({ lines: [1], inner: [1] }, 2).lines).toEqual([0, 1]);
   });
@@ -218,6 +224,30 @@ describe('lines with only sky above', () => {
     const marks = toggleClear(cleanMarks({ lines: [3, 3] }, 2), 3);
     expect(clearBadges(strokes, marks)).toEqual([{ line: 3, at: strokes[1][2] }]);
     expect(clearBadges(strokes, cleanMarks({ lines: [3, 3] }, 2))).toEqual([]);
+  });
+});
+
+describe('parts brushed as bent', () => {
+  it('hold a point within the brush’s radius of its path, in the photo’s own pixels', () => {
+    const zone = { path: [{ u: 0.6, v: 0.5 }, { u: 0.9, v: 0.5 }], r: 0.05 };
+    expect(inBent([zone], { u: 0.75, v: 0.52 })).toBe(true);
+    expect(inBent([zone], { u: 0.5, v: 0.5 })).toBe(false);
+    // a photo twice as wide as tall: a tenth of its height is a twentieth of its width
+    expect(inBent([zone], { u: 0.75, v: 0.6 }, 2)).toBe(true);
+    expect(inBent([zone], { u: 0.75, v: 0.6 }, 1)).toBe(false);
+    expect(inBent([], { u: 0.75, v: 0.5 })).toBe(false);
+    // a dab is a disc
+    expect(bentIndex([{ path: [{ u: 0.2, v: 0.2 }], r: 0.05 }, zone], { u: 0.22, v: 0.2 })).toBe(0);
+  });
+
+  it('are added and taken away, the oldest going past the most kept', () => {
+    let marks = cleanMarks(null, 1);
+    for (let i = 0; i < BENT_MAX + 2; i += 1) marks = addBent(marks, { path: [{ u: i / 100, v: 0.5 }], r: 0.01 });
+    expect(marks.bent).toHaveLength(BENT_MAX);
+    expect(marks.bent[0].path[0].u).toBe(0.02);
+    expect(marksSaid(marks)).toBe(true);
+    expect(sameMarks(marks, cleanMarks(null, 1))).toBe(false);
+    expect(removeBent(marks, 0).bent).toHaveLength(BENT_MAX - 1);
   });
 });
 

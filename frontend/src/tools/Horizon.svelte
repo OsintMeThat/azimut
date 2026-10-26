@@ -1225,6 +1225,7 @@
         ...searchHints(told, { lensKnown: !lens, aspect: overlay.aspect }),
         marks,
         pieceAt: (s) => overlay.pieceAt({ u: s.x / camera.width, v: s.y / camera.height }),
+        bentAt: (s) => overlay.bentAt({ u: s.x / camera.width, v: s.y / camera.height }),
       });
       if (body) found = await api.post('/api/horizon/match', body);
     } catch {

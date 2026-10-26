@@ -487,6 +487,9 @@ def test_a_line_with_only_sky_above_is_read_as_far_as_the_photo_is_said_to_see(m
     assert finder.marks_of({"line": [0, 0, 1], "clear": [1]}).clear == (1,)
     # and the lines it marks as key
     assert finder.marks_of({"line": [0, 0, 1], "key": [0]}).key == (0,)
+    # and the points that lie in a part brushed as bent
+    assert finder.marks_of({"bent": [0, 1, 1]}).bent.tolist() == [False, True, True]
+    assert finder.marks_of({"bent": [0, 0, 0]}) is None
     # a point ruled out says why on the map, one that keeps its score says nothing
     assert finder._ruled(auto) == {"over": auto["over"], "over_far": auto["over_far"]}
     assert finder._ruled(hazy) == {} and finder._ruled(found) == {}
@@ -979,6 +982,9 @@ def test_a_search_says_its_size_first_and_refuses_what_it_cannot_run(client):
         # so does a key line
         {"trace": {**_ask()["trace"], "key": [0]}},
         {"trace": {**_ask()["trace"], "line": [0] * len(_ask()["trace"]["x"]), "key": [100_000]}},
+        # a point brushed as bent is said with a 1 or a 0, one for each point
+        {"trace": {**_ask()["trace"], "bent": [1]}},
+        {"trace": {**_ask()["trace"], "bent": [2] * len(_ask()["trace"]["x"])}},
     ):
         assert client.post(url, json=_ask(**change)).status_code == 422
     assert client.get(f"{url}/nothing").status_code == 404

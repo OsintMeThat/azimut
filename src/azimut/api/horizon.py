@@ -592,7 +592,9 @@ class MarksIn(BaseModel):
     collage each point lies in. `far` says how far strokes stand: each a stroke,
     the nearest and the farthest it may be, metres. `sea` names the strokes
     traced along the sea's horizon, `clear` those with only sky above them,
-    `key` the skyline strokes marked as the ones that matter most.
+    `key` the skyline strokes marked as the ones that matter most. `bent` and
+    `ridge_bent` say, 1 or 0 for each point, whether it lies in a part of the
+    picture brushed as bent.
     """
 
     ridge_x: list[float] = Field(default_factory=list, max_length=MATCH_POINTS_MAX)
@@ -606,6 +608,8 @@ class MarksIn(BaseModel):
     sea: list[int] = Field(default_factory=list, max_length=MARK_STROKES_MAX)
     clear: list[int] = Field(default_factory=list, max_length=MARK_STROKES_MAX)
     key: list[int] = Field(default_factory=list, max_length=MARK_STROKES_MAX)
+    bent: list[int] | None = Field(default=None, max_length=MATCH_POINTS_MAX)
+    ridge_bent: list[int] | None = Field(default=None, max_length=MATCH_POINTS_MAX)
 
     def check_marks(self, points: int) -> None:
         """Each list as long as the points it describes, the strokes and pairs within bounds."""
@@ -647,12 +651,15 @@ class MarksIn(BaseModel):
             raise ValueError("a key line names a stroke out of range")
         if self.key and self.line is None:
             raise ValueError("a key line needs each point's stroke")
+        for name, flags, count in (("bent", self.bent, points), ("ridge_bent", self.ridge_bent, inner)):
+            if flags is not None and (len(flags) != count or any(v not in (0, 1) for v in flags)):
+                raise ValueError(f"{name} needs a 1 or a 0 for each point")
 
     def marks(self) -> skymatch.Marks | None:
         """The marks as the search reads them, or None when there are none."""
         if (
             not self.ridge_x and not self.pairs and self.piece is None and not self.far and not self.sea
-            and not self.clear and not self.key
+            and not self.clear and not self.key and not any(self.bent or ()) and not any(self.ridge_bent or ())
         ):
             return None
 
@@ -668,6 +675,8 @@ class MarksIn(BaseModel):
             sea=tuple(int(stroke) for stroke in self.sea),
             clear=tuple(int(stroke) for stroke in self.clear),
             key=tuple(int(stroke) for stroke in self.key),
+            bent=None if self.bent is None else np.asarray(self.bent, dtype=bool),
+            ridge_bent=None if self.ridge_bent is None else np.asarray(self.ridge_bent, dtype=bool),
         )
 
 

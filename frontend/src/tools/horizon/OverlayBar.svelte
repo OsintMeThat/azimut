@@ -94,6 +94,7 @@
         [['K'], 'Say how far a line stands'],
         [['O'], 'Say only sky stands above a line'],
         [['I'], 'Mark a key line, three at most'],
+        [['G'], 'Brush where the picture may be bent'],
         [['M'], 'Snap to edges, or not'],
         [['Alt', 'drag'], 'Draw the other way, snapped or not'],
         [['E'], 'Rub out'],
@@ -140,7 +141,7 @@
   // what the band holds changes its width: a trace, its tools, the gap
   $effect(() => {
     void [overlay.source?.kind, overlay.strokes.length, overlay.erasing, overlay.warped, overlay.tracing, overlay.busy, overlay.error];
-    void [overlay.linking, overlay.cutting, overlay.distancing, overlay.clearing, overlay.keying, overlay.pen, overlay.front];
+    void [overlay.linking, overlay.cutting, overlay.distancing, overlay.clearing, overlay.keying, overlay.bending, overlay.pen, overlay.front];
     void [gap, fitting, away];
     narrow();
   });
@@ -404,6 +405,8 @@
       <span class="say">Click a skyline line with only sky above it.</span>
     {:else if overlay.keying}
       <span class="say">Click a skyline line that matters most, three at most.</span>
+    {:else if overlay.bending}
+      <span class="say">Brush over the part that may be bent.</span>
     {:else if overlay.busy}
       <span class="say"><span class="spinner" aria-hidden="true"></span>Opening…</span>
     {:else if overlay.error}

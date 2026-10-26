@@ -45,6 +45,8 @@
   } = $props();
 
   const RUBBER_PX = 12;
+  /** How wide the brush over bent parts paints, in screen pixels either side of the hand. */
+  const BRUSH_PX = 22;
   const ZOOM_MAX = 16;
 
   let box = $state();
@@ -168,6 +170,11 @@
       drawing = [toFrame(at.x, at.y)];
       return;
     }
+    if (overlay.bending && !asking) {
+      press = { bending: true };
+      overlay.beginBend(toFrame(at.x, at.y), BRUSH_PX, scale());
+      return;
+    }
     if (overlay.erasing && !asking) {
       press = { erasing: true, last: toFrame(at.x, at.y) };
       overlay.beginErase();
@@ -179,8 +186,12 @@
 
   function onPointerMove(event) {
     const at = local(event);
-    rubberAt = overlay.erasing && rect ? at : null;
+    rubberAt = (overlay.erasing || overlay.bending) && rect ? at : null;
     if (!press) return;
+    if (press.bending) {
+      overlay.bendAlong(toFrame(at.x, at.y));
+      return;
+    }
     if (press.tracing) {
       drawing = [...drawing, toFrame(at.x, at.y)];
       return;
@@ -227,6 +238,10 @@
     }
     if (was.erasing) {
       overlay.endErase();
+      return;
+    }
+    if (was.bending) {
+      overlay.endBend();
       return;
     }
     if (!was.moved && asking) {
@@ -294,8 +309,8 @@
   class="fp"
   class:asking
   class:pen={(overlay.tracing || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying) && !asking}
-  class:rubber={overlay.erasing && !asking}
-  class:grab={zoom > 1 && !overlay.tracing && !overlay.erasing && !asking}
+  class:rubber={(overlay.erasing || overlay.bending) && !asking}
+  class:grab={zoom > 1 && !overlay.tracing && !overlay.erasing && !overlay.bending && !asking}
   bind:clientWidth={width}
   bind:clientHeight={height}
   tabindex="0"
@@ -322,6 +337,9 @@
         {#if !overlay.traceHidden}
           {#each overlay.cutsSeen as [top, bottom], index (index)}
             <line class="fp-cut" x1={toScreen(top).x} y1={toScreen(top).y} x2={toScreen(bottom).x} y2={toScreen(bottom).y} />
+          {/each}
+          {#each overlay.bentSeen ?? [] as zone, index (index)}
+            <polyline class="fp-bent" points={path(zone.path.length > 1 ? zone.path : [zone.path[0], zone.path[0]])} stroke-width={Math.max(2, 2 * zone.r * rect.w)} />
           {/each}
           {#each overlay.strokesSeen as stroke, index (index)}
             {@const id = overlay.marks?.lines?.[index]}
@@ -385,7 +403,7 @@
           <text class="fp-num" x={a.x + 9} y={a.y + 4}>{find.alignments.length + 1}</text>
         {/if}
         {#if rubberAt}
-          <circle class="fp-rubber" cx={rubberAt.x} cy={rubberAt.y} r={RUBBER_PX} />
+          <circle class="fp-rubber" class:brush={overlay.bending} cx={rubberAt.x} cy={rubberAt.y} r={overlay.bending ? BRUSH_PX : RUBBER_PX} />
         {/if}
       </svg>
     {/if}
@@ -646,6 +664,17 @@
     fill: none;
     stroke: #fff;
     stroke-width: 1.5;
+  }
+  .fp-rubber.brush {
+    fill: rgba(255, 179, 71, 0.18);
+    stroke: #ffb347;
+  }
+  /* a part of the picture that may be bent: a wash the trace shows through */
+  .fp-bent {
+    fill: none;
+    stroke: rgba(255, 179, 71, 0.3);
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   .fp-top {
     position: absolute;

@@ -96,6 +96,11 @@ line loses its score as that share of the line grows, and is ruled out past
 to Auto, land past `CLEAR_NEAR` times the line's own distance counts less and
 less out to `CLEAR_FAR` times it: haze grows ever likelier to hide it.
 
+A part of the picture the analyst brushes as bent (`Marks.bent`, a wide lens's
+edge, a piece of a collage stretched while laid) counts `BENT_WEIGHT` as much in
+what a place explains, and is no part the weakest-part rule judges: a place is
+not sunk by it, and given no freedom for it either.
+
 A skyline line the analyst marks as key (`Marks.key`, a peak or a notch they
 would know anywhere) is held to its own fit: a place that explains the whole
 trace better than it lays that line loses `KEY_COST` of the difference. A key
@@ -235,6 +240,9 @@ PIECE_STRIP_ROLL = 1.0
 # 27 real cases (rank among 40 rivals): v04 2nd → 1st, v16 2nd → 1st, v07s 4th → 3rd, v17 3rd → 2nd, v22 4th →
 # 3rd, none lower. Inner edges marked key cost v23, v24 and v28 places, so only skyline lines are held.
 KEY_COST = 0.5
+# What a point in a part brushed as bent weighs in what a place explains, beside a point elsewhere. A first guess
+# (2026-10-26), to be measured on the owner's brushed cases.
+BENT_WEIGHT = 0.25
 # A line said to stand between two distances may lie on ground this many times nearer than the
 # first and farther than the second: a guess, and ridges known only as finely as the terrain.
 BAND_SLACK = 1.33
@@ -438,7 +446,8 @@ class Marks:
     names the strokes traced along the sea's horizon, whose distance the eye's
     height above the sea sets (engine/finder.py). `clear` names the strokes the
     analyst is sure have only sky above them, `key` the skyline strokes they
-    mark as the ones that matter most.
+    mark as the ones that matter most. `bent` and `ridge_bent` say which points
+    (of the skyline, of the inner edges) lie in a part brushed as bent.
     """
 
     ridge_x: np.ndarray = field(default_factory=lambda: np.empty(0))
@@ -452,6 +461,8 @@ class Marks:
     sea: tuple[int, ...] = ()
     clear: tuple[int, ...] = ()
     key: tuple[int, ...] = ()
+    bent: np.ndarray | None = None
+    ridge_bent: np.ndarray | None = None
 
     @property
     def cut(self) -> bool:
@@ -687,7 +698,9 @@ def parts(x: np.ndarray) -> list[np.ndarray]:
     return found
 
 
-def explained_by(loss: np.ndarray, x: np.ndarray, y: np.ndarray, half_width: float) -> float:
+def explained_by(
+    loss: np.ndarray, x: np.ndarray, y: np.ndarray, half_width: float, bent: np.ndarray | None = None,
+) -> float:
     """How much of the trace's shape a fit explains, from 0 to 1: what each point costs against
     the terrain (`loss`) against what it would cost against the best straight line.
 
@@ -695,12 +708,21 @@ def explained_by(loss: np.ndarray, x: np.ndarray, y: np.ndarray, half_width: flo
     part with no shape of its own only asked to lie on the terrain: the score is
     the lesser of the whole's and the weakest parts' once the very weakest is let
     go. A straight trace explains nothing, however well it lies on some hillside.
+    Points `bent` (a part brushed as bent) weigh `BENT_WEIGHT` in the whole and are
+    left out of the parts.
     """
     line = _loss(off_line(x, y, half_width))
-    whole_line = float(line.mean())
+    if bent is None or not bent.any():
+        whole_line, whole_loss = float(line.mean()), float(loss.mean())
+        sound = None
+    else:
+        weight = np.where(bent, BENT_WEIGHT, 1.0)
+        whole_line, whole_loss = float(np.average(line, weights=weight)), float(np.average(loss, weights=weight))
+        sound = ~bent
     # a trace with next to no shape can be explained no more than it has
-    score = (whole_line - float(loss.mean())) / max(whole_line, LINE_FLOOR_LOSS)
-    each = sorted(1.0 - float(loss[part].mean()) / max(float(line[part].mean()), PART_FLOOR_LOSS) for part in parts(x))
+    score = (whole_line - whole_loss) / max(whole_line, LINE_FLOOR_LOSS)
+    judged = parts(x) if sound is None else [kept for part in parts(x) for kept in [part & sound] if kept.sum() >= MIN_POINTS]
+    each = sorted(1.0 - float(loss[part].mean()) / max(float(line[part].mean()), PART_FLOOR_LOSS) for part in judged)
     if each:
         score = min(score, float(np.mean(each[LET_GO:LET_GO + WEAKEST] or each)))
     return float(min(1.0, max(0.0, score)))
@@ -980,6 +1002,7 @@ def _refine(
     start: float | None = None, projection: Projection = "camera", bounds: tuple[float, float] | None = None,
     bands: tuple[np.ndarray, np.ndarray] | None = None, tilts: tuple[float, float] | None = None,
     rounding: float | None = None, top: Turn | None = None, sure: np.ndarray | None = None,
+    bent: np.ndarray | None = None,
 ) -> Fit | None:
     """A coarse place made exact: heading searched finely, tilt laid onto the trace, lens and roll eased.
 
@@ -1034,7 +1057,7 @@ def _refine(
         tilt=float(np.clip(tilt - middle, -89.0, 89.0)),
         fov=fov,
         gap=float(np.median(np.abs(gap[hit] - middle))),
-        explained=explained_by(loss, x, shape, half_width),
+        explained=explained_by(loss, x, shape, half_width, bent),
         points=int(hit.sum()),
         roll=roll,
         reach=turn.reach,
@@ -1159,6 +1182,14 @@ def _over(
     return float(weight.mean()), (float(np.median(far[held])) if held.any() else None)
 
 
+def _bent(marks: Marks | None, count: int) -> np.ndarray | None:
+    """Which of the trace's `count` points lie in a part brushed as bent, or None when none does."""
+    if marks is None or marks.bent is None or np.asarray(marks.bent).size != count:
+        return None
+    bent = np.asarray(marks.bent, dtype=bool)
+    return bent if bent.any() else None
+
+
 def _judge(
     fit: Fit, x: np.ndarray, y: np.ndarray, turn: Turn, marks: Marks, ridges: Ridges | None,
     half_width: float, projection: Projection, bands: tuple[np.ndarray, np.ndarray] | None = None,
@@ -1175,7 +1206,7 @@ def _judge(
     sky = fit.explained
     if piece is not None:
         loss, offsets, pivots = _pieces(x, y, piece, turn, fit, half_width, projection, bands, top, sure)
-        sky = explained_by(loss, x, y, half_width)
+        sky = explained_by(loss, x, y, half_width, _bent(marks, x.size))
 
     def through(px: np.ndarray, py: np.ndarray, which: np.ndarray | None) -> tuple[np.ndarray, np.ndarray, float]:
         """Directions of points through their piece's camera."""
@@ -1203,7 +1234,9 @@ def _judge(
         # farther land may stand past the cut the skyline fits best (a near cut once lost a night view's ridges)
         off, ridge_far = ridges.nearest(azimuth, elevation, ridge_bands)
         cost = np.where(np.isnan(off), LOST_LOSS, _loss(np.nan_to_num(off) * per))
-        inner = float(1.0 - cost.mean() / LOST_LOSS)
+        ridge_bent = marks.ridge_bent if marks.ridge_bent is not None and marks.ridge_bent.size == cost.size else None
+        weight = None if ridge_bent is None else np.where(ridge_bent, BENT_WEIGHT, 1.0)
+        inner = float(1.0 - np.average(cost, weights=weight) / LOST_LOSS)
         # an inner edge with no ridge under it takes score away, one lying on its ridge adds none
         score = min(sky, (sky + inner) / 2)
     key: float | None = None
@@ -1311,6 +1344,7 @@ def match(
     if marks is not None and marks.clear and marks.line is not None and np.asarray(marks.line).size == x.size:
         sure = np.isin(marks.line, marks.clear)
         sure = sure if sure.any() else None
+    bent = _bent(marks, x.size)
     tops: list[Turn | None] = [None] * len(turns)
     read = [*turns, *beyond]
     if sure is not None:
@@ -1355,7 +1389,7 @@ def match(
         fit = _refine(x, y, turns[index], heading=h, tilt=float(np.clip(t, -89.0, 89.0)), fov=f, roll=r,
                       half_width=half_width, free=not known, level=level, start=roll,
                       widen=RANGE_EASE if within is not None else 1.03, projection=projection, bounds=bounds,
-                      bands=bands, tilts=tilts, rounding=rounding, top=tops[index], sure=sure)
+                      bands=bands, tilts=tilts, rounding=rounding, top=tops[index], sure=sure, bent=bent)
         if fit is not None and marks is not None:
             fit = _judge(fit, x, y, turns[index], marks, ridges, half_width, projection, bands, floor, clear,
                          tops[index], read, sure)

@@ -387,6 +387,8 @@ def on_frames(
             ridge_x=reading.ridge_x, ridge_y=reading.ridge_y,
             line=None if marks.line is None else marks.line[keep],
             ridge_line=None if marks.ridge_line is None else marks.ridge_line[ridge_keep],
+            bent=None if marks.bent is None else marks.bent[keep],
+            ridge_bent=None if marks.ridge_bent is None else marks.ridge_bent[ridge_keep],
             # the frames are the pieces now: each is read through its own camera already
             piece=None, ridge_piece=None,
         )
@@ -512,7 +514,7 @@ def check(case: Case, record: dict[str, Any]) -> list[dict[str, Any]]:
                 # the marks name the trace's own points: a decoy is judged on its skyline alone
                 decoy = replace(decoy, marks=replace(
                     decoy.marks, ridge_x=np.empty(0), ridge_y=np.empty(0), pairs=(), piece=None, ridge_piece=None, clear=(),
-                    key=(),
+                    key=(), bent=None, ridge_bent=None,
                 ))
             scored = finder.score_point(
                 float(place["lat"]), float(place["lon"]), decoy, plan, sampler=sampler, quick=False,

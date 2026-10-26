@@ -88,11 +88,14 @@ import {
   zoomLoupe,
 } from '../../../lib/horizon/overlay.js';
 import {
+  addBent,
   addCut,
   cleanMarks,
   clearBadges,
   cutAt,
   farBadges,
+  bentIndex,
+  inBent,
   innerByShape,
   keyBadges,
   lineAt,
@@ -102,6 +105,7 @@ import {
   nextLine,
   pairBadges,
   pieceOf,
+  removeBent,
   removeCut,
   setFar,
   setInner,
@@ -263,6 +267,9 @@ export function createOverlayState({
   let clearing = $state(false);
   /** Saying a skyline line matters most: a click on the line, again to take it back. */
   let keying = $state(false);
+  /** Brushing over the parts of the picture that are bent; the path of the brush being drawn, on the photo. */
+  let bending = $state(false);
+  let brushing = $state.raw(null);
   let traceTime = $state(null);
   // the trace as it was before each change, newest last
   let history = $state.raw([]);
@@ -344,6 +351,12 @@ export function createOverlayState({
   const clearSeen = $derived(marks.clear?.length ? clearBadges(shown, marks) : []);
   /** Each key line, where the view shows it (`keyBadges`). */
   const keySeen = $derived(marks.key?.length ? keyBadges(shown, marks) : []);
+  /** The parts brushed as bent on the straightened photo, the one being brushed last: `{ path, r }`. */
+  const bentSeen = $derived(
+    [...(marks.bent ?? []), ...(brushing ? [brushing] : [])].map((zone) => ({ ...zone, path: zone.path.map(toSeen) }))
+  );
+  /** The same where the view shows them, on the photo laid as the search read it. */
+  const bentLaid = $derived(asSearched ? bentSeen.map((zone) => ({ ...zone, path: zone.path.map((p) => shownAt(p)) })) : bentSeen);
   /** The photo's grid as it shows, while its corners are out to be pulled (`photoGrid`). */
   const grid = $derived(warping ? photoGrid(toSeen) : []);
   /** The photo drawn between its pulled corners, which the view is handed in its place. */
@@ -445,6 +458,8 @@ export function createOverlayState({
     distancing = false;
     clearing = false;
     keying = false;
+    bending = false;
+    brushing = null;
     front = null;
     pen = 'sky';
     traceHidden = false;
@@ -679,6 +694,8 @@ export function createOverlayState({
     distancing = false;
     clearing = false;
     keying = false;
+    bending = false;
+    brushing = null;
     front = null;
   }
 
@@ -1316,6 +1333,18 @@ export function createOverlayState({
     get keyBadges() {
       return keySeen;
     },
+    /** The parts brushed as bent, straightened: `{ path, r }`, `r` a share of the photo's width. */
+    get bentSeen() {
+      return bentSeen;
+    },
+    /** The parts brushed as bent where the view shows them. */
+    get bentShown() {
+      return bentLaid;
+    },
+    /** Whether a point of the straightened photo lies in a part brushed as bent. */
+    bentAt(point) {
+      return marks.bent?.length ? inBent(marks.bent, toPhoto(point), aspect() || 1) : false;
+    },
     /** Which piece of the collage a point of the straightened photo lies in. */
     pieceAt(point) {
       return marks.cuts.length ? pieceOf(marks.cuts, toPhoto(point).u) : 0;
@@ -1508,6 +1537,47 @@ export function createOverlayState({
       keep();
       marks = toggleKey(marks, id);
       return id;
+    },
+    /** Whether a drag brushes a part of the picture as bent. */
+    get bending() {
+      return bending;
+    },
+    setBending(on) {
+      const next = Boolean(on) && Boolean(source);
+      if (next) toolsAway();
+      if (next) asSearched = null;
+      bending = next;
+      brushing = null;
+    },
+    /**
+     * A brush stroke over a bent part, on the straightened photo shown `scale`
+     * big, `radius` screen pixels wide: `beginBend` where it starts, `bendAlong`
+     * as it moves, `endBend` when let go. A click that does not move, on a part
+     * brushed already, takes that part away.
+     */
+    beginBend(point, radius, scale) {
+      if (!source || !(scale?.width > 0)) return;
+      brushing = { path: [toPhoto(point)], r: radius / scale.width };
+    },
+    bendAlong(point) {
+      if (!brushing) return;
+      brushing = { ...brushing, path: [...brushing.path, toPhoto(point)] };
+    },
+    endBend() {
+      if (!brushing) return;
+      const zone = brushing;
+      brushing = null;
+      const [first] = zone.path;
+      const still = zone.path.every((p) => Math.hypot(p.u - first.u, p.v - first.v) < zone.r / 4);
+      const hit = still ? bentIndex(marks.bent, first, aspect() || 1) : -1;
+      keep();
+      marks = hit >= 0 ? removeBent(marks, hit) : addBent(marks, zone);
+    },
+    /** Every part brushed as bent taken away. */
+    clearBent() {
+      if (!marks.bent?.length) return;
+      keep();
+      marks = { ...marks, bent: [] };
     },
     /** Every cut taken away. */
     clearCuts() {

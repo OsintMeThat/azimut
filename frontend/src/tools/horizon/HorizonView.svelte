@@ -170,7 +170,7 @@
    * want the whole photo under the hand.
    */
   const controlsShown = $derived(
-    Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying))
+    Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying || overlay.bending))
   );
   /** The loupe over the photo while it shows anything but the whole photo, which the camera is then seen through. */
   const loupe = $derived(laid && view.camera.projection === 'camera' && loupeMoved(overlay.loupe) ? overlay.loupe : null);
@@ -522,7 +522,7 @@
   const detailsOn = $derived(laid && detailsShown(overlay));
   /** The terrain's skyline on screen, while the trace shows; the pen and the rubber want the photo's own edge bare. */
   const terrainPaths = $derived(
-    laid && shown && !overlay.traceHidden && !overlay.tracing && !overlay.erasing ? terrain.map((run) => onScreen(run)) : []
+    laid && shown && !overlay.traceHidden && !overlay.tracing && !overlay.erasing && !overlay.bending ? terrain.map((run) => onScreen(run)) : []
   );
   /**
    * The band the terrain's skyline may be off by, while the details show, as
@@ -689,7 +689,7 @@
 
   const readout = $derived.by(() => {
     // the height the wheel just set is said where the pointer is: one reading there at a time
-    if (!pointer || dragging || !shown || heightNote || tracing || erasing) return null;
+    if (!pointer || dragging || !shown || heightNote || tracing || erasing || bending) return null;
     const text = hoverLabel
       ? summitReading(hoverLabel, units)
       : pointer.ground
@@ -729,6 +729,8 @@
   let drawing = $state.raw([]);
   const tracing = $derived(laid && overlay.tracing);
   const erasing = $derived(laid && overlay.erasing);
+  /** Brushing over a part of the picture that may be bent: a drag paints, a click on a part takes it away. */
+  const bending = $derived(laid && overlay.bending);
   /** Pairing lines or cutting the collage: a click picks, nothing is dragged. */
   const picking = $derived(laid && (overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying));
   /** The photo's corners out to be pulled. */
@@ -739,6 +741,8 @@
   const moves = $derived(laid ? overlay.moves : 'terrain');
   /** How far the rubber reaches, in screen pixels, and where it is while erasing. */
   const RUBBER_PX = 12;
+  /** How wide the brush over bent parts paints, in screen pixels either side of the hand. */
+  const BRUSH_PX = 22;
   let rubberAt = $state(null);
   /** Space held over a photo: a drag then moves the loupe; a tap still plays or pauses a video. */
   let spaceHeld = $state(false);
@@ -864,6 +868,12 @@
       drawing = [local(event)];
       return;
     }
+    if (bending) {
+      const at = local(event);
+      press = { ...at, bending: true };
+      overlay.beginBend(photoAt(shownLoupe, at.x, at.y, size), BRUSH_PX, photoScale);
+      return;
+    }
     if (erasing) {
       const at = local(event);
       press = { ...at, erasing: true };
@@ -909,14 +919,14 @@
     const at = local(event);
     shiftHeld = event.shiftKey;
     hovering = true;
-    rubberAt = erasing && !onControl(event) ? at : null;
+    rubberAt = (erasing || bending) && !onControl(event) ? at : null;
     overPhoto = warping && !onControl(event) && insideCorners(photoAt(shownLoupe, at.x, at.y, size), overlay.corners);
     if (press?.choosing) {
       chosen = { x: press.from.x, y: press.from.y, width: at.x - press.from.x, height: at.y - press.from.y };
       return;
     }
     if (!press) {
-      if (onControl(event) || tracing || erasing || picking || overPhoto || choosing) {
+      if (onControl(event) || tracing || erasing || bending || picking || overPhoto || choosing) {
         pointer = null;
         return;
       }
@@ -929,6 +939,10 @@
           if (buildings?.on) inspectSoon(ground);
         }
       });
+      return;
+    }
+    if (press.bending) {
+      overlay.bendAlong(photoAt(shownLoupe, at.x, at.y, size));
       return;
     }
     if (press.erasing) {
@@ -1023,6 +1037,11 @@
     if (press.erasing) {
       press = null;
       overlay.endErase();
+      return;
+    }
+    if (press.bending) {
+      press = null;
+      overlay.endBend();
       return;
     }
     if (press.picking) {
@@ -1124,7 +1143,7 @@
     const delta = event.deltaY || event.deltaX;
     const unit = event.deltaMode === 1 ? 0.05 : event.ctrlKey ? 0.01 : 0.0015;
     const factor = Math.exp(-delta * unit);
-    if (laid && (tracing || erasing || picking || locked || spaceHeld) && !event.shiftKey) {
+    if (laid && (tracing || erasing || bending || picking || locked || spaceHeld) && !event.shiftKey) {
       // not under a stroke being drawn, which is kept in screen pixels until the hand lifts
       if (!press?.tracing) overlay.zoomLoupe(factor, at, size);
       return;
@@ -1266,7 +1285,7 @@
     else if (key === 'l' || key === 'L') overlay.setLocked(!overlay.locked);
     else if ((key === 'h' || key === 'H') && overlay.strokes.length) overlay.setTraceHidden(!overlay.traceHidden);
     else if ((key === 'd' || key === 'D') && overlay.strokes.length) overlay.setDetails(!overlay.details);
-    else if (key === 'Escape' && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying)) {
+    else if (key === 'Escape' && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying || overlay.bending)) {
       event.stopPropagation();
       putAway(overlay);
       overlay.setWarping(false);
@@ -1316,7 +1335,7 @@
 
   /** A double click on the ground goes there, facing the same way. */
   function onDoubleClick(event) {
-    if (!view.observer || onControl(event) || tracing || erasing || picking || locked) return;
+    if (!view.observer || onControl(event) || tracing || erasing || bending || picking || locked) return;
     const at = local(event);
     const ground = groundAt(at.x, at.y);
     if (ground?.distance != null) view.standAt(ground);
@@ -1395,10 +1414,10 @@
   class="horizon-view"
   class:daylight={view.ground !== 'plain' || laid}
   class:dragging
-  class:tracing={tracing || erasing || picking || Boolean(choosing)}
+  class:tracing={tracing || erasing || bending || picking || Boolean(choosing)}
   class:shaping={overPhoto}
   class:panning={laid && spaceHeld}
-  class:sliding={moves === 'photo' && !tracing && !erasing}
+  class:sliding={moves === 'photo' && !tracing && !erasing && !bending}
   bind:this={box}
   tabindex="0"
   role="application"
@@ -1410,6 +1429,7 @@
   onpointerup={onPointerUp}
   onpointercancel={() => {
     if (press?.erasing) overlay.endErase();
+    if (press?.bending) overlay.endBend();
     if (press?.shaping) overlay.setPulling(false);
     press = null;
     drawing = [];
@@ -1524,6 +1544,9 @@
         <polyline class="cut under" {points} />
         <polyline class="cut over" {points} />
       {/each}
+      {#each overlay.bentShown ?? [] as zone, index (index)}
+        <polyline class="bent" points={onScreen(zone.path.length > 1 ? zone.path : [zone.path[0], zone.path[0]])} stroke-width={Math.max(2, 2 * zone.r * photoScale.width)} />
+      {/each}
       {#each overlay.strokesShown as stroke, index (index)}
         {@const points = onScreen(stroke)}
         {@const id = overlay.marks.lines[index]}
@@ -1601,7 +1624,7 @@
       </g>
     {/if}
     {#if rubberAt}
-      <circle class="rubber" cx={rubberAt.x} cy={rubberAt.y} r={RUBBER_PX} />
+      <circle class="rubber" class:brush={bending} cx={rubberAt.x} cy={rubberAt.y} r={bending ? BRUSH_PX : RUBBER_PX} />
     {/if}
     {#if chosen}
       {@const x = Math.min(chosen.x, chosen.x + chosen.width)}
@@ -2173,6 +2196,17 @@
     stroke: var(--text-1);
     stroke-width: 1;
   }
+  .rubber.brush {
+    fill: rgba(255, 179, 71, 0.18);
+    stroke: #ffb347;
+  }
+  /* a part of the picture that may be bent: a wash the trace shows through */
+  .bent {
+    fill: none;
+    stroke: rgba(255, 179, 71, 0.3);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
   .pivot .ring {
     stroke-dasharray: 5 4;
   }
@@ -2414,6 +2448,12 @@
     border: 1px solid #8fd3ff;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.7);
+  }
+  .swatch.bent {
+    width: 12px;
+    height: 8px;
+    border-radius: 4px;
+    background: rgba(255, 179, 71, 0.45);
   }
   .swatch.key {
     width: 12px;

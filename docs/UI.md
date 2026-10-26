@@ -3023,7 +3023,10 @@ or several of < 1 km, 1–3, 3–10, 10–30 and > 30 km, then click the line; i
 distance shows under it), **Sky only** (O) to say a skyline line has only sky
 above it, sure of it (a click on the line, again to take it back; "Sky only"
 shows over it), **Key line** (I) to say a skyline line matters most, a peak or
-a notch known anywhere (three at most, "Key" shows over it), and the rubber (E).
+a notch known anywhere (three at most, "Key" shows over it), **May be bent** (G)
+to brush over a part of the picture that may be bent, a wide lens's edge or a
+piece stretched while laid (an orange wash; a click on a brushed part takes it
+away), and the rubber (E).
 The **magnet** (M) says whether a
 line drawn snaps onto the photo's nearest edge; Alt does the other for one
 stroke. A click with a pen on a line makes it that pen's kind, and a skyline
@@ -3044,7 +3047,8 @@ trace is its own crest drawn a little low, not land behind. A place keeps its
 score up to a fiftieth of the line under land and is ruled out past a tenth; it
 says the share and how far out that land stands, on its point of the map too. A
 place that explains the whole trace better than it lays the key lines loses
-half the difference.
+half the difference. The lines in a part brushed as bent count a quarter as
+much, and that part never sinks a place on its own.
 
 Find's side has two faces. **Prepare** numbers the four steps a search runs
 through (Skyline, Area, Mesh, Search), each lit once done; the warnings about

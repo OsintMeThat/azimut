@@ -1159,6 +1159,35 @@ describe('the marks beside the trace', () => {
     expect(photo.clearing).toBe(false);
   });
 
+  it('brushes a part of the picture as bent with a drag, and a click on it takes it away', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.addStroke(across(0.3));
+    photo.setBending(true);
+    expect(photo.bending).toBe(true);
+    // 20 screen pixels on a photo shown 1000 wide: a fiftieth of its width either side
+    const scale = { width: 1000, height: 750 };
+    photo.beginBend({ u: 0.7, v: 0.3 }, 20, scale);
+    photo.bendAlong({ u: 0.8, v: 0.3 });
+    photo.bendAlong({ u: 0.9, v: 0.32 });
+    expect(photo.bentSeen).toHaveLength(1);
+    expect(photo.marks.bent).toEqual([]);
+    photo.endBend();
+    expect(photo.marks.bent).toHaveLength(1);
+    expect(photo.marks.bent[0].r).toBeCloseTo(0.02);
+    expect(photo.bentAt({ u: 0.85, v: 0.31 })).toBe(true);
+    expect(photo.bentAt({ u: 0.3, v: 0.31 })).toBe(false);
+    // a click that does not move, on the part, takes it away; one change to take back
+    photo.beginBend({ u: 0.8, v: 0.3 }, 20, scale);
+    photo.endBend();
+    expect(photo.marks.bent).toEqual([]);
+    photo.undoStroke();
+    expect(photo.marks.bent).toHaveLength(1);
+    // another tool out puts this one away
+    photo.setKeying(true);
+    expect(photo.bending).toBe(false);
+  });
+
   it('marks a skyline line as key on a click with the Key line tool, never a ridge', async () => {
     const photo = overlay();
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
@@ -1204,9 +1233,9 @@ describe('the marks beside the trace', () => {
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
     photo.restoreWork({
       strokes: [across(0.3), across(0.5, 0.3, 0.6)],
-      marks: { lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], clear: [4], key: [8] },
+      marks: { lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], clear: [4], key: [8], bent: [{ path: [{ u: 0.8, v: 0.3 }], r: 0.05 }] },
     });
-    expect(photo.marks).toEqual({ lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], sea: [], clear: [4], key: [8] });
+    expect(photo.marks).toEqual({ lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], sea: [], clear: [4], key: [8], bent: [{ path: [{ u: 0.8, v: 0.3 }], r: 0.05 }] });
     photo.restoreWork({ strokes: [across(0.3), across(0.5, 0.3, 0.6)] });
     expect(photo.marks.inner).toEqual([1]);
     // Detect lays the skyline afresh: the cuts stay, they belong to the photo

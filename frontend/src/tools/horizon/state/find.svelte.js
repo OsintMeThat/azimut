@@ -395,7 +395,8 @@ export function createFindState({ api, overlay, view }) {
     const told = searchHints(overlay.hints, { lensKnown: Boolean(lens), aspect });
     const fov = lens?.fov ?? Math.sqrt(told.within[0] * told.within[1]);
     const pieceAt = (s) => overlay.pieceAt?.({ u: s.x / size.width, v: s.y / size.height }) ?? 0;
-    const plane = markedPlane(samples, { fov, ...size, projection, heading: 0, tilt: 0, roll: 0 }, marks, pieceAt);
+    const bentAt = (s) => overlay.bentAt?.({ u: s.x / size.width, v: s.y / size.height }) ?? false;
+    const plane = markedPlane(samples, { fov, ...size, projection, heading: 0, tilt: 0, roll: 0 }, marks, pieceAt, bentAt);
     // a lens read off the video's pan is searched a little either way, one the file or the stitch says held exact
     const within = lens?.measured ? [fov / MEASURED_GIVE, fov * MEASURED_GIVE] : told.within;
     // a panorama of unknown width spans no more than a phone's frame up and down: wider lenses are never tried

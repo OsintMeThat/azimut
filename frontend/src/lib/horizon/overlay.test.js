@@ -887,6 +887,23 @@ describe('the marks beside the trace, as the search reads them', () => {
     expect(key.line).toEqual([0, 1, 1]);
     expect(key.key).toEqual([1]);
   });
+
+  it('says which points lie in a part brushed as bent, the frame read as the photo unless told', () => {
+    const samples = [
+      { x: 100, y: 150, stroke: 0 },
+      { x: 700, y: 140, stroke: 0 },
+      { x: 750, y: 180, stroke: 1 },
+    ];
+    const zone = { path: [{ u: 700 / FRAME.width, v: 140 / FRAME.height }], r: 0.1 };
+    const marks = { lines: [5, 9], inner: [9], pairs: [], cuts: [], bent: [zone] };
+    const plane = markedPlane(samples, FRAME, marks);
+    expect(plane.bent).toEqual([0, 1]);
+    expect(plane.ridge_bent).toEqual([1]);
+    // told by the caller (the photo curved or pulled), its own reading stands
+    expect(markedPlane(samples, FRAME, marks, null, () => false).bent).toBeUndefined();
+    // brushed where no line runs, nothing is sent
+    expect(markedPlane(samples, FRAME, { ...marks, bent: [{ path: [{ u: 0, v: 0.95 }], r: 0.01 }] }).bent).toBeUndefined();
+  });
 });
 
 describe('a collage’s pieces as the search eased them', () => {

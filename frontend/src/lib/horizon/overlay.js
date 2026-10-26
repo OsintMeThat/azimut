@@ -18,7 +18,7 @@
  */
 import { focal, principal, rayFor, toScreen, turnBetween } from './camera.js';
 import { headingText } from './geometry.js';
-import { farRange, pieceOf } from './traceMarks.js';
+import { farRange, inBent, pieceOf } from './traceMarks.js';
 import { distanceWithin, skylineWithin } from './panorama.js';
 import { FOV, heightFor } from './view.js';
 
@@ -996,18 +996,23 @@ export function tracePlane(samples, camera) {
  * as `tracePlane` gives them, the inner edges' apart (`ridge_x`, `ridge_y`),
  * and, when they matter, the stroke each point lies on (for the pairs, the
  * lines' distances, sent as `far`: a stroke, the nearest and farthest it
- * stands, metres, the sea lines, those with only sky above, `clear`, and the key lines, `key`) and the piece of a collage it lies in: `pieceAt(sample)`, by default how many
+ * stands, metres, the sea lines, those with only sky above, `clear`, and the key lines, `key`), whether it
+ * lies in a part brushed as bent (`bent`, `ridge_bent`, 1 or 0: `bentAt(sample)`, by default read off the marks'
+ * brushings with the frame as the photo) and the piece of a collage it lies in: `pieceAt(sample)`, by default how many
  * of the marks' cuts stand left of it across the frame. Samples come from
  * `traceSamples`, each saying its stroke. Without marks, the plane alone.
  */
-export function markedPlane(samples, camera, marks, pieceAt = null) {
+export function markedPlane(samples, camera, marks, pieceAt = null, bentAt = null) {
   const cuts = marks?.cuts ?? [];
   const inner = new Set(marks?.inner ?? []);
   const lineOf = (s) => marks?.lines?.[s.stroke] ?? s.stroke;
   const sky = inner.size ? samples.filter((s) => !inner.has(lineOf(s))) : samples;
   const plane = tracePlane(sky, camera);
   const named = marks?.pairs?.length || marks?.far?.length || marks?.sea?.length || marks?.clear?.length || marks?.key?.length;
-  if (!inner.size && !cuts.length && !named) return plane;
+  const brushed = marks?.bent?.length
+    ? (bentAt ?? ((s) => inBent(marks.bent, { u: s.x / camera.width, v: s.y / camera.height }, camera.width / camera.height)))
+    : null;
+  if (!inner.size && !cuts.length && !named && !brushed) return plane;
   const ridge = samples.filter((s) => inner.has(lineOf(s)));
   const ridges = ridge.length ? tracePlane(ridge, camera) : { x: [], y: [] };
   const out = { ...plane, ridge_x: ridges.x, ridge_y: ridges.y };
@@ -1027,6 +1032,14 @@ export function markedPlane(samples, camera, marks, pieceAt = null) {
     out.sea = (marks.sea ?? []).filter((id) => index.has(id)).map((id) => index.get(id));
     out.clear = (marks.clear ?? []).filter((id) => index.has(id)).map((id) => index.get(id));
     out.key = (marks.key ?? []).filter((id) => index.has(id)).map((id) => index.get(id));
+  }
+  if (brushed) {
+    const bent = sky.map((s) => (brushed(s) ? 1 : 0));
+    const ridgeBent = ridge.map((s) => (brushed(s) ? 1 : 0));
+    if (bent.includes(1) || ridgeBent.includes(1)) {
+      out.bent = bent;
+      out.ridge_bent = ridgeBent;
+    }
   }
   if (cuts.length) {
     const piece = pieceAt ?? ((s) => pieceOf(cuts, s.x / camera.width));
@@ -1049,12 +1062,12 @@ const sendable = (angles) => Array.from(angles, (v) => (Number.isFinite(v) ? Mat
  * for the search to try each (the whole turn when it keeps none); a number
  * sends that cut alone; anything else the whole turn alone. `within` and
  * `facing` are the hints (lib/horizon/hints.js searchHints). `marks` are
- * the trace's (lib/horizon/traceMarks.js), `pieceAt` as `markedPlane` takes it.
+ * the trace's (lib/horizon/traceMarks.js), `pieceAt` and `bentAt` as `markedPlane` takes them.
  *
  * @param {{ known?: boolean, reach?: 'auto' | number | null, autoReach?: number, within?: number[], facing?: number[] }} [options]
  *   `known`: the photo said its lens, which is then the only one tried
  */
-export function matchRequest(samples, camera, panorama, { known = false, reach = null, autoReach = Infinity, within, facing, marks = null, pieceAt = null } = {}) {
+export function matchRequest(samples, camera, panorama, { known = false, reach = null, autoReach = Infinity, within, facing, marks = null, pieceAt = null, bentAt = null } = {}) {
   if (!panorama?.skyline?.length || panorama.azimuth?.full === false) return null;
   const tried = reach === 'auto' ? (panorama.cuts ?? []).filter((cut) => cut.reach <= autoReach) : [];
   const outer = Number.isFinite(reach) && skylineWithin(panorama, reach) !== panorama.skyline ? reach : (tried.at(-1)?.reach ?? null);
@@ -1064,7 +1077,7 @@ export function matchRequest(samples, camera, panorama, { known = false, reach =
     cuts: tried.slice(0, -1).map((cut) => ({ reach: cut.reach, skyline: sendable(cut.skyline) })),
     start: panorama.azimuth.start,
     step: panorama.azimuth.step,
-    ...markedPlane(samples, camera, marks, pieceAt),
+    ...markedPlane(samples, camera, marks, pieceAt, bentAt),
     fov: camera.fov,
     known,
     tilt: camera.tilt,

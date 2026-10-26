@@ -629,6 +629,29 @@ def test_a_key_line_off_the_terrain_costs_the_place_and_one_on_it_adds_nothing()
     assert said(ridge).explained == pytest.approx(said(replace(ridge, key=())).explained, abs=1e-6)
 
 
+def test_a_part_brushed_as_bent_counts_less_and_never_sinks_the_place():
+    turn = skyturn([(40, 2.0, 3), (52, 1.5, 1.5), (61, 2.2, 4)], base=0.5)
+    x, y = trace_on(turn, heading=50.0, fov=40.0)
+    # the right quarter of the picture was stretched: a bump the terrain lacks
+    right = x > 0.5 * x.max()
+    y = y + np.where(right, 0.08 * np.sin(np.pi * np.clip((x - 0.5 * x.max()) / (0.5 * x.max()), 0, 1)), 0.0)
+
+    def said(marks=None):
+        return skymatch.match(x, y, turn, half_width=HALF, fov=40.0, known=True, facing=(50.0, 3.0),
+                              marks=marks).fits[0].explained
+
+    plain = said()
+    brushed = said(skymatch.Marks(bent=right))
+    assert brushed > plain + 0.1
+    # the very weights the score is read with: a bent point weighs BENT_WEIGHT, and no part it fills is judged
+    loss = np.where(right, 4.0, 0.0)
+    whole = skymatch.explained_by(loss, x, y, HALF)
+    assert skymatch.explained_by(loss, x, y, HALF, right) > whole
+    # brushed nowhere, or brushed for other points, it changes nothing
+    assert said(skymatch.Marks(bent=np.zeros(x.size, dtype=bool))) == pytest.approx(plain, abs=1e-9)
+    assert said(skymatch.Marks(bent=right[:-1])) == pytest.approx(plain, abs=1e-9)
+
+
 def test_the_lines_own_crest_off_the_trace_is_not_land_over_it(monkeypatch):
     ridge = skyturn([(40, 2.0, 3), (52, 1.5, 1.5), (61, 2.2, 4)], base=0.5)
     # nothing behind the ridge, 3 km out, however far the photo sees

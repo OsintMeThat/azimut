@@ -12,6 +12,7 @@
  *   far     the distances picked, then a click on a line says it stands that far
  *   clear   a click on a skyline line says only sky stands above it
  *   key     a click on a skyline line says it matters most
+ *   bent    a brush over a part of the picture that may be bent
  *   erase   the rubber
  *
  * The magnet beside them snaps what the pens draw onto the photo's edges;
@@ -85,6 +86,14 @@ export const TRACE_TOOLS = Object.freeze([
     title: "Click the skyline lines that matter most, a peak or a notch you would know anywhere: three at most (I)",
   },
   {
+    id: "bent",
+    icon: "brush",
+    label: "May be bent",
+    name: "Brush where the picture may be bent",
+    key: "G",
+    title: "Brush over a part of the picture that may be bent, a wide lens's edge or a stretched piece: its lines count less (G)",
+  },
+  {
     id: "erase",
     icon: "eraser",
     label: "Rub out",
@@ -115,6 +124,7 @@ export function toolOn(overlay, id) {
   if (id === "far") return Boolean(overlay.distancing);
   if (id === "clear") return Boolean(overlay.clearing);
   if (id === "key") return Boolean(overlay.keying);
+  if (id === "bent") return Boolean(overlay.bending);
   if (id === "erase") return Boolean(overlay.erasing);
   return false;
 }
@@ -128,7 +138,8 @@ export function editing(overlay) {
       overlay.cutting ||
       overlay.distancing ||
       overlay.clearing ||
-      overlay.keying,
+      overlay.keying ||
+      overlay.bending,
   );
 }
 
@@ -163,6 +174,7 @@ export function traceLegend(
       ]
     : [{ id: "trace", label: "Your trace" }];
   if (marks?.inner?.length) items.push({ id: "ridge", label: "Ridge" });
+  if (marks?.bent?.length) items.push({ id: "bent", label: "May be bent" });
   if (marks?.sea?.length) items.push({ id: "sea", label: "Sea line" });
   if (terrain) items.push({ id: "terrain", label: "Terrain skyline" });
   if (ridgeLines) items.push({ id: "ridge-lines", label: "Terrain ridges" });
@@ -199,6 +211,7 @@ export function pressTool(overlay, id) {
   else if (id === "far") overlay.setDistancing(!on);
   else if (id === "clear") overlay.setClearing(!on);
   else if (id === "key") overlay.setKeying(!on);
+  else if (id === "bent") overlay.setBending(!on);
   else if (id === "erase") overlay.setErasing(!on);
 }
 
@@ -211,6 +224,7 @@ export function putAway(overlay) {
   overlay.setDistancing(false);
   overlay.setClearing(false);
   overlay.setKeying(false);
+  overlay.setBending(false);
 }
 
 /** What the trace holds besides the skyline, in a few words: '' when nothing. */
@@ -237,6 +251,7 @@ export function marksSummary(marks) {
     parts.push(marks.clear.length === 1 ? "1 line with only sky above" : `${marks.clear.length} lines with only sky above`);
   if (marks.key?.length)
     parts.push(marks.key.length === 1 ? "1 key line" : `${marks.key.length} key lines`);
+  if (marks.bent?.length) parts.push("a part that may be bent");
   return parts.join(" · ");
 }
 
@@ -255,6 +270,8 @@ export function toolHint(overlay) {
     return "Click a skyline line with only sky above it, no land rising over it · the same again takes it back";
   if (overlay.keying)
     return "Click a skyline line that matters most, three at most · the same again takes it back";
+  if (overlay.bending)
+    return "Brush over the part of the picture that may be bent · a click on a brushed part takes it away";
   if (overlay.tracing) {
     const what =
       overlay.pen === "ridge"
