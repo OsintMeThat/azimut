@@ -1084,14 +1084,20 @@ def _pieces(
     return loss, offsets, pivots
 
 
-def pieces_of(fit: Fit) -> list[dict[str, Any]]:
+def pieces_of(fit: Fit, projection: Projection = "camera") -> list[dict[str, Any]]:
     """A fit's eased pieces as the app reads them: each piece, and its turn, tilt and roll from the whole's camera;
     a piece rolled on the panorama strip also says the middle it rolls about (`about`, x and y on the picture
-    plane, half widths, y up)."""
+    plane, half widths, y up), and one eased as far as a piece may go says so (`edge`): it may be laid off."""
     about = {k: (ax, ay) for k, ax, ay in fit.pivots or ()}
+    roll = PIECE_STRIP_ROLL if projection == "panorama" else PIECE_ROLL
+
+    def edge(t: float, lift: float, r: float) -> bool:
+        return abs(t) >= PIECE_TURN - 1e-9 or abs(lift) >= PIECE_TILT - 1e-9 or (roll > 0 and abs(r) >= roll - 1e-9)
+
     return [
         {"piece": k, "turn": round(t, 3), "tilt": round(lift, 3), "roll": round(r, 3),
-         **({"about": [round(about[k][0], 5), round(about[k][1], 5)]} if k in about else {})}
+         **({"about": [round(about[k][0], 5), round(about[k][1], 5)]} if k in about else {}),
+         **({"edge": True} if edge(t, lift, r) else {})}
         for k, t, lift, r in fit.pieces or ()
     ]
 

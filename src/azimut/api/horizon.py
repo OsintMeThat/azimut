@@ -765,7 +765,7 @@ def match_trace(body: MatchIn) -> dict[str, Any]:
                 "close": i == 0 or fit.explained >= skymatch.AMBIGUOUS_SHARE * best,
                 "points": fit.points,
                 **({} if fit.sky is None else {"sky": round(fit.sky, 3)}),
-                **({} if fit.pieces is None else {"pieces": skymatch.pieces_of(fit)}),
+                **({} if fit.pieces is None else {"pieces": skymatch.pieces_of(fit, body.projection)}),
             }
             for i, fit in enumerate(found.fits)
         ],

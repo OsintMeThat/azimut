@@ -306,6 +306,15 @@ def said_bands(trace: Trace) -> tuple[np.ndarray, np.ndarray] | None:
     return bands
 
 
+def unmarked(trace: Trace) -> Trace:
+    """The trace with the analyst's judging marks left out (lines' distances, Sky only, pairs), its strokes,
+    sea lines and pieces kept; the very trace when it has none."""
+    marks = trace.marks
+    if marks is None or not (marks.far or marks.clear or marks.pairs):
+        return trace
+    return replace(trace, marks=replace(marks, far=(), clear=(), pairs=()))
+
+
 def said_nearest(far: Sequence[Sequence[float]] | None) -> float | None:
     """The nearest distance a line is said to stand at, metres, a line said nearer than a kilometre read
     as `SAID_NEAREST`; None when no line's distance is said."""
@@ -911,7 +920,9 @@ def pace(plan: Plan, trace: Trace, sampler: terrain.Sampler | None = None) -> di
     for index in timed:
         _score_stage(float(lat[index]), float(lon[index]), spacing, "rough", None, trace, plan, sampler)
     seconds = (time.monotonic() - started) / timed.size
-    return {"seconds": round(seconds, 3), "timed": int(timed.size), "full": FULL_COST, "lane_power": LANE_POWER, "top": FULL_PLACES}
+    # the places listed are fitted once more without the judging marks, when the trace has any
+    top = FULL_PLACES + (TOP if unmarked(trace) is not trace else 0)
+    return {"seconds": round(seconds, 3), "timed": int(timed.size), "full": FULL_COST, "lane_power": LANE_POWER, "top": top}
 
 
 # -- one point -----------------------------------------------------------------
@@ -1247,7 +1258,7 @@ def score_point(
             if fit.pairs is not None:
                 best["pairs"] = list(fit.pairs)
             if fit.pieces is not None:
-                best["pieces"] = skymatch.pieces_of(fit)
+                best["pieces"] = skymatch.pieces_of(fit, trace.projection)
             if fit.over is not None:
                 best["over"] = round(fit.over, 4)
             if fit.over_far is not None:
@@ -1321,27 +1332,31 @@ def search(
         progress(min(done, count["total"]), count["total"])
 
     def score(
-        a: float, o: float, step: float, *, stage: str, heights: Sequence[float] | None = None,
+        a: float, o: float, step: float, *, stage: str, heights: Sequence[float] | None = None, quiet: bool = False,
     ) -> dict[str, Any]:
         if cancelled():
             raise Cancelled
         point = _score_stage(a, o, step, stage, heights, trace, plan, sampler)
-        tell(point)
+        if not quiet:
+            tell(point)
         return point
 
     def batch(
         jobs: Sequence[tuple[float, float, float]], stage: str, heights: Sequence[float] | None = None,
+        *, quiet: bool = False,
     ) -> list[dict[str, Any]]:
-        """Points scored in the order given: here, or by the processes when the search has them."""
+        """Points scored in the order given: here, or by the processes when the search has them. `quiet` ones are
+        not told: they score again a point told already."""
         if pool is None or len(jobs) < 2:
-            return [score(a, o, step, stage=stage, heights=heights) for a, o, step in jobs]
+            return [score(a, o, step, stage=stage, heights=heights, quiet=quiet) for a, o, step in jobs]
         futures = {pool.submit(_lane_score, (a, o, step, stage, heights)): i for i, (a, o, step) in enumerate(jobs)}
         out: list[dict[str, Any] | None] = [None] * len(jobs)
         try:
             for future in as_completed(futures):
                 point = future.result()
                 out[futures[future]] = point
-                tell(point)
+                if not quiet:
+                    tell(point)
                 if cancelled():
                     raise Cancelled
         except BaseException:
@@ -1479,11 +1494,14 @@ def _score_stage(
     a: float, o: float, step: float, stage: str, heights: Sequence[float] | None, trace: Trace, plan: Plan,
     sampler: terrain.Sampler,
 ) -> dict[str, Any]:
-    """One point scored as a stage of the search asks: roughly, polished, or in full."""
+    """One point scored as a stage of the search asks: roughly, polished, in full, or in full with the analyst's
+    judging marks left out (`bare`)."""
     if stage == "rough":
         point = score_point(a, o, trace, plan, sampler=sampler, rough=True, near_step=ROUGH_NEAR_M)
     elif stage == "polish":
         point = score_point(a, o, trace, plan, sampler=sampler, quick=True, near_step=POLISH_NEAR_M)
+    elif stage == "bare":
+        point = score_point(a, o, unmarked(trace), plan, sampler=sampler, quick=False, heights=heights)
     else:
         point = score_point(a, o, trace, plan, sampler=sampler, quick=False, heights=heights)
     point["spacing"] = step
@@ -1609,6 +1627,14 @@ def _search(
     fulls = batch([(p["lat"], p["lon"], p["spacing"]) for p in best], "full", heights=plan.final_heights or None)
     places = [full if full["explained"] >= point["explained"] else point for point, full in zip(best, fulls)]
     places = sorted(places, key=lambda p: -p["explained"])[:TOP]
+    # what each place listed explains with the analyst's distances, Sky only and pairs left out: a place they cost
+    # much says one of them may be wrong there
+    if unmarked(trace) is not trace:
+        bares = batch([(p["lat"], p["lon"], p["spacing"]) for p in places], "bare", heights=plan.final_heights or None,
+                      quiet=True)
+        for place, bare in zip(places, bares):
+            if bare["explained"] > place["explained"]:
+                place["bare"] = bare["explained"]
     progress(count["total"], count["total"])
     answer = _answer(places, scored, spacing, fine, trace, started)
     if bounded is not None:

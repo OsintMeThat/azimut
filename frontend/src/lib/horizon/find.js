@@ -651,6 +651,10 @@ const ROLL_NEAR = 0.2;
 export const DECOY_MARGIN = 0.15;
 /** A camera on foot tilted this far or more, degrees, is worth a look. */
 export const TILT_STEEP = 12;
+/** A place the lines' distances, Sky only and pairs cost this much or more (`bare`, engine/finder.py) may hold a wrong one. */
+export const MARKS_COST = 0.15;
+/** Land over this share of the lines said to have only sky above is worth saying (engine/skymatch.py pays from 2%). */
+export const OVER_SAID = 0.05;
 /**
  * The ground this near the best place, metres: where it is a real answer, the
  * points there explain nearly as much (measured on the owner's solved views: 91
@@ -750,15 +754,17 @@ export function chanceFit(points) {
 
 const km = (metres) => `${Math.round(metres / 1000)} km`;
 const percent = (share) => `${Math.round(Math.max(0, share) * 100)}%`;
+const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
 
 /**
  * How far the best place of a search can be trusted: `{ level, reasons, chance }`,
  * `level` a key of TRUST, `reasons` what lowers it in a line each, `chance` the
- * score the area reaches by chance. Read off the search alone and the case's
- * other searches (`others`, rows as the list gives them): no point is scored
- * again. A verdict that names no single place is weak whatever else; one that
- * does is solid with nothing against it, worth a check with one thing, weak
- * with two or more.
+ * score the area reaches by chance, and `photo: true` when a panorama may be a
+ * photo's width: its lens sat at the narrowest a panorama is tried, or little
+ * explains it (zoomed frames, or a collage that leans). Read off the search alone and the case's other searches
+ * (`others`, rows as the list gives them): no point is scored again. A verdict
+ * that names no single place is weak whatever else; one that does is solid
+ * with nothing against it, worth a check with one thing, weak with two or more.
  */
 export function reliability(result, { ask = null, name = null, others = [] } = {}) {
   const places = result?.places ?? [];
@@ -793,7 +799,15 @@ export function reliability(result, { ask = null, name = null, others = [] } = {
     if (turns < TURNS_MIN) reasons.push(`The trace turns only ${turns} ${turns === 1 ? 'time' : 'times'}: a plain shape fits many places`);
   }
   const within = trace && !trace.known && Array.isArray(trace.within) ? trace.within : null;
-  if (within && Number.isFinite(best.fov) && ask?.hints?.picture !== 'panorama') {
+  // a panorama is tried from a width up and never leaned: zoomed frames, or a collage that leans, a photo reads
+  const panorama = ask?.hints?.picture === 'panorama';
+  const narrowest = panorama && within && Number.isFinite(best.fov) && best.fov <= Math.min(...within) * LENS_EDGE;
+  const asPhoto = panorama && (narrowest || verdict === 'none' || verdict === 'loose');
+  if (narrowest) {
+    reasons.push(`The lens found, ${Math.round(best.fov)}°, is the narrowest a panorama is tried at: zoomed frames, or a collage that leans, may read better as a photo`);
+  } else if (asPhoto) {
+    reasons.push('Zoomed frames, or a collage that leans, may read better as a photo: a panorama is tried wide, and never leaned');
+  } else if (within && Number.isFinite(best.fov) && !panorama) {
     const [low, high] = [Math.min(...within), Math.max(...within)];
     const lens = best.fov < 10 ? best.fov.toFixed(1) : Math.round(best.fov);
     if (best.fov <= low * LENS_EDGE) reasons.push(`The lens found, ${lens}°, is the narrowest tried`);
@@ -812,6 +826,16 @@ export function reliability(result, { ask = null, name = null, others = [] } = {
   if (Array.isArray(best.pairs) && best.pairs[0] < best.pairs[1]) {
     reasons.push(`${best.pairs[1] - best.pairs[0]} of ${best.pairs[1]} front and behind pairs are out of order`);
   }
+  if (Number.isFinite(best.over) && best.over >= OVER_SAID) {
+    const out = Number.isFinite(best.over_far) ? `, ${best.over_far >= 1000 ? km(best.over_far) : `${Math.round(best.over_far)} m`} out` : '';
+    reasons.push(`Land stands over ${percent(best.over)} of the lines said to have only sky above${out}`);
+  }
+  if (Number.isFinite(best.bare) && best.bare - best.explained >= MARKS_COST) {
+    reasons.push(`Without the lines’ distances, Sky only and pairs it explains ${percent(best.bare)}: one of them may be wrong here`);
+  }
+  const held = (best.pieces ?? []).filter((p) => p.edge);
+  if (held.length === 1) reasons.push(`The ${ordinal(held[0].piece + 1)} piece from the left is eased as far as a piece may go: it may be laid off, or bent`);
+  else if (held.length > 1) reasons.push(`${held.length} pieces are eased as far as a piece may go: they may be laid off, or bent`);
 
   // another search of the same photo that names one place elsewhere, about as strongly
   const photo = ask?.photo?.path;
@@ -834,7 +858,7 @@ export function reliability(result, { ask = null, name = null, others = [] } = {
 
   const named = verdict === 'match';
   const level = !named || reasons.length >= 2 ? 'weak' : reasons.length === 1 ? 'check' : 'solid';
-  return { level, reasons, chance };
+  return { level, reasons, chance, ...(asPhoto ? { photo: true } : {}) };
 }
 
 // -- where the eye stands -------------------------------------------------------------

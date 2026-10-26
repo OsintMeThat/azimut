@@ -1158,6 +1158,40 @@ def test_a_place_read_low_roughly_but_first_in_full_is_listed_first(monkeypatch)
     assert all(terrain.distance(p["lat"], p["lon"], *spots[7]) > 1_000.0 for p in found["places"])
 
 
+def test_a_place_the_analysts_marks_cost_much_says_what_it_explains_without_them(monkeypatch):
+    # the place explains 0.5 with its distances and Sky only, 0.9 without
+    asked = []
+
+    def scored(a, o, trace, plan, *, sampler, quick=True, heights=None, rough=False, near_step=0.0):
+        marked = trace.marks is not None and bool(trace.marks.far or trace.marks.clear)
+        asked.append("rough" if rough else "quick" if quick else "full, marked" if marked else "full, bare")
+        value = round(0.9 - terrain.distance(a, o, *CAMERA) / 2_000.0 - (0.4 if marked else 0.0), 4)
+        return {"lat": round(a, 6), "lon": round(o, 6), "explained": value, "heading": 80.0, "fov": 40.0,
+                "gap": 0.0, "relief": 9_000.0}
+
+    monkeypatch.setattr(finder, "score_point", scored)
+    plan = finder.Plan(area=_square(CAMERA, 1_000.0), reach=REACH, spacing=100.0, fine=100.0)
+    photo = _photo()
+    marks = skymatch.Marks(line=np.zeros(photo.x.size, dtype=np.int64), far=((0, 0.0, 3_000.0),), clear=(0,))
+    found = finder.search(plan, replace(photo, marks=marks))
+    best = found["places"][0]
+    assert best["bare"] == pytest.approx(best["explained"] + 0.4, abs=1e-3)
+    assert asked.count("full, bare") == len(found["places"])
+    # scored again quietly: no point of the map is a bare one
+    assert all(p["explained"] < best["bare"] - 0.1 for p in found["points"])
+    # the pace counts the places fitted again
+    monkeypatch.setattr(finder, "_score_stage", lambda *args: {"explained": 0.0})
+    assert finder.pace(plan, replace(photo, marks=marks))["top"] == finder.FULL_PLACES + finder.TOP
+    assert finder.pace(plan, photo)["top"] == finder.FULL_PLACES
+    monkeypatch.undo()
+    monkeypatch.setattr(finder, "score_point", scored)
+    # a trace with no judging marks is not scored twice
+    fulls = asked.count("full, marked")
+    asked.clear()
+    found = finder.search(plan, photo)
+    assert asked.count("full, bare") == fulls and all("bare" not in p for p in found["places"])
+
+
 def test_the_best_points_a_warm_start_scored_are_slid_again_in_full(monkeypatch):
     # a warm start that always reads 0.12 under what a full slide reads, within the fall a run accepts
     def true(a, o):

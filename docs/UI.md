@@ -3101,7 +3101,13 @@ what shows is what the search scored. **Result** shows
 the search on show: its name, when it was made and what it was asked with, its
 progress, verdict, how far the best place can be trusted (**Solid**, **Check
 it** or **Weak**, with what lowers it and the score the area reaches by chance)
-and places, each with the area's chance score beside its own. Where no place
+and places, each with the area's chance score beside its own. What lowers it
+says what does not fit there: what the place explains without the lines'
+distances, Sky only and pairs when they cost it much, a piece of a cut collage
+eased as far as a piece may go, land over the lines said to have only sky
+above. A panorama is tried 60° wide and up and never leaned, so one whose lens
+sits at that floor, or that little explains, offers **Read as a photo**: zoomed
+frames, or a collage that leans, span what a photo spans. Where no place
 explains anything, the map shades where the trace lies nearest the terrain.
 **Check against
 decoys** tries the places again with the trace mirrored and upside down: a real

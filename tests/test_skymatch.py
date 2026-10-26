@@ -715,6 +715,17 @@ def test_a_piece_of_a_strip_laid_turned_rolls_about_its_own_middle(monkeypatch):
     assert flat.explained < cut.explained - 0.05 and flat.pivots is None
 
 
+def test_a_piece_eased_as_far_as_it_may_go_says_so():
+    fit = skymatch.Fit(heading=0.0, tilt=0.0, fov=60.0, gap=0.0, explained=0.5, points=100, pieces=(
+        (0, skymatch.PIECE_TURN, 0.0, 0.0), (1, 0.25, -skymatch.PIECE_TILT, 0.0), (2, 0.0, 0.0, 1.0), (3, 0.5, 0.25, 0.0),
+    ))
+    said = {one["piece"]: one for one in skymatch.pieces_of(fit)}
+    assert said[0]["edge"] and said[1]["edge"] and "edge" not in said[3]
+    # a roll of a degree is the most a strip's piece may take, not a photo's
+    assert "edge" not in said[2]
+    assert {one["piece"]: one for one in skymatch.pieces_of(fit, "panorama")}[2]["edge"]
+
+
 def test_one_placing_reads_what_the_separate_reads_give():
     """The slide reads the skyline and its distance off one placing of the azimuths (`_gap`), the top of the land
     for the sky-only points: the very numbers `_at` and `_gate` give apart."""

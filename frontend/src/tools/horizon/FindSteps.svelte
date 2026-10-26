@@ -399,6 +399,13 @@
                 {#each trust.reasons as reason (reason)}<li>{reason}</li>{/each}
               </ul>
             {/if}
+            {#if trust.photo && overlay.isPanorama}
+              <div class="fs-acts">
+                <button type="button" class="btn btn-sm" title="Then search again: a photo is tried at any lens, leaned as it was held"
+                  onclick={() => overlay.setHints({ picture: 'photo' })}>Read as a photo</button
+                >
+              </div>
+            {/if}
             {#if trust.chance != null}
               <p class="fs-say quiet">Chance fits in this area reach about {Math.round(trust.chance * 100)}%.</p>
             {/if}

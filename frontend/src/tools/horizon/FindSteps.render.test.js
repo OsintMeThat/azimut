@@ -538,6 +538,20 @@ describe('the steps of Find', () => {
     expect(solid.querySelector('.fs-trust.solid').textContent).toContain('Solid: nothing speaks against the best place');
   });
 
+  it('offers to read a panorama that little explains as a photo, while it is one', () => {
+    const ask = { area: [], hints: { picture: 'panorama' }, trace: { known: false, within: [60, 360] }, who: { mode: 'ground' } };
+    const place = { lat: 35.79, lon: 45.35, explained: 0, heading: 338, fov: 68, tilt: -8, roll: 0 };
+    const find = fakeFind({ search: { name: 's', status: 'done', ask, result: { verdict: 'none', places: [place], points: [] } } });
+    const setHints = vi.fn();
+    const root = steps({ find, overlay: { ...overlay, hints: { picture: 'panorama' }, isPanorama: true, setHints } });
+    expect(root.querySelector('.fs-trust').textContent).toContain('Zoomed frames, or a collage that leans, may read better as a photo');
+    buttonNamed(root, 'Read as a photo').click();
+    expect(setHints).toHaveBeenCalledWith({ picture: 'photo' });
+    // read as a photo already, nothing to offer
+    const read = steps({ find, overlay: { ...overlay, isPanorama: false } });
+    expect(buttonNamed(read, 'Read as a photo')).toBeUndefined();
+  });
+
   it('says how much of a large grid the search ranked best-first left out', () => {
     const places = [{ lat: 1, lon: 1, explained: 0.75, heading: 280, fov: 22, reach: 5000 }];
     const bounded = { cells: 1107, filled: 214, skipped: 7800 };
