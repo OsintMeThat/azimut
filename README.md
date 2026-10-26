@@ -442,5 +442,8 @@ Full spec: [docs/SPEC.md](docs/SPEC.md).
 
 ## License
 
+Copyright © 2026 the Azimut maintainer.
+
 [AGPL-3.0-only](LICENSE): free and open source; hosted or modified versions
-must share their source.
+must share their source. Contributions are welcome under the
+[Contributor License Agreement](CLA.md); see [CONTRIBUTING.md](CONTRIBUTING.md).
