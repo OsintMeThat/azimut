@@ -139,6 +139,32 @@ describe('its place', () => {
     expect(root.querySelector('.rv-resize').classList.contains('from-br')).toBe(true);
   });
 
+  // Drag the resize handle by (dx, dy) over a 1000×800 map.
+  function resize(root, dx, dy) {
+    root.parentElement.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 800 });
+    const at = (type, x, y, node = window) =>
+      node.dispatchEvent(new window.MouseEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+    at('pointerdown', 300, 300, root.querySelector('.rv-resize'));
+    at('pointermove', 300 + dx, 300 + dy);
+    at('pointerup', 300 + dx, 300 + dy);
+    flushSync();
+  }
+
+  it('free, resizes from its bottom right corner', () => {
+    const { viewer, root } = open(SHOT);
+    expect(viewer.corner).toBe(false);
+    resize(root, 60, 40);
+    expect(viewer.w).toBe(380);
+    expect(viewer.h).toBe(300);
+  });
+
+  it('pinned, grows away from its corner', () => {
+    const { viewer, root } = open(SHOT, { corner: 'br' });
+    resize(root, -60, -40);
+    expect(viewer.w).toBe(380);
+    expect(viewer.h).toBe(300);
+  });
+
   it('takes the shape of its picture once it has loaded', () => {
     const { viewer, root } = open(SHOT);
     const img = root.querySelector('img');

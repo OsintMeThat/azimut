@@ -106,9 +106,11 @@
     const sy = e.clientY;
     const w0 = viewer.w;
     const h0 = viewer.h;
-    // A pinned window grows away from its corner, toward the handle
-    const across = viewer.corner?.endsWith('r') ? -1 : 1;
-    const down = viewer.corner?.startsWith('b') ? -1 : 1;
+    // A pinned window grows away from its corner, toward the handle; a free
+    // one's corner is false, not a string
+    const corner = viewer.corner || '';
+    const across = corner.endsWith('r') ? -1 : 1;
+    const down = corner.startsWith('b') ? -1 : 1;
     drag((ev) => {
       const w = w0 + across * (ev.clientX - sx);
       const h = h0 + down * (ev.clientY - sy);
