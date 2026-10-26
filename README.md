@@ -410,7 +410,8 @@ nothing else reads it.
 **yt-dlp and gallery-dl are deliberately unbounded**: they track sites that
 change, so pinning them just schedules a breakage. They can also be updated
 from inside the app (Settings → System → Downloaders), which is what keeps a
-months-old binary working.
+months-old binary working. gallery-dl is GPL-2.0-only, so Azimut never imports
+it: it runs as a separate process through its own command line.
 
 Releases are automated: push a semver tag and GitHub Actions
 ([`.github/workflows/release.yml`](.github/workflows/release.yml)) builds the

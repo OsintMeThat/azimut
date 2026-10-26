@@ -1,7 +1,8 @@
 """Exercise a release binary as a running local application.
 
 The release workflow uses this after PyInstaller finishes. It verifies the
-server, bundled frontend and bundled ffmpeg from the artifact itself.
+server, bundled frontend, bundled ffmpeg and the binary's gallery-dl mode from
+the artifact itself.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -108,6 +110,31 @@ def stop(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=10)
 
 
+#: What the binary is started with to act as gallery-dl (engine/gallerydl.py FROZEN_FLAG).
+GALLERY_DL_FLAG = "--run-gallery-dl"
+
+
+def check_gallery_dl(binary: Path, env: dict[str, str]) -> None:
+    """The binary is gallery-dl too, started again with its flag.
+
+    gallery-dl runs as a program of its own, and in the binary that program is the
+    binary itself. Its version proves the flag reaches gallery-dl's entry point, and
+    an address no extractor knows (exit 64, offline) proves its extractors were bundled.
+    """
+    asked = [str(binary), GALLERY_DL_FLAG, "--config-ignore"]
+    version = subprocess.run(
+        [*asked, "--version"], env=env, capture_output=True, text=True, timeout=120, check=False
+    )
+    if version.returncode != 0 or not re.fullmatch(r"\d+\.\d+\.\d+\S*", version.stdout.strip()):
+        raise RuntimeError(f"the binary did not run as gallery-dl: {version.stderr.strip()!r}")
+    unknown = subprocess.run(
+        [*asked, "-j", "https://example.invalid/"],
+        env=env, capture_output=True, text=True, timeout=120, check=False,
+    )
+    if unknown.returncode != 64:
+        raise RuntimeError(f"gallery-dl's extractors are missing: {unknown.stderr.strip()!r}")
+
+
 def smoke(binary: Path) -> None:
     binary = binary.resolve()
     if not binary.is_file():
@@ -118,6 +145,7 @@ def smoke(binary: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="azimut-binary-smoke-") as workspace:
         env = os.environ.copy()
         env["AZIMUT_HOME"] = workspace
+        check_gallery_dl(binary, env)
         process = subprocess.Popen(
             [str(binary), "--no-browser", "--port", str(port)],
             env=env,

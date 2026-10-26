@@ -158,3 +158,47 @@ def test_stop_leaves_an_already_exited_process_alone(monkeypatch):
     )
 
     smoke_binary.stop(FakeProcess(alive=False))
+
+
+def test_check_gallery_dl_runs_the_binary_as_gallery_dl(monkeypatch):
+    """The flag must reach gallery-dl's entry point, extractors bundled."""
+    from types import SimpleNamespace
+
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        if "--version" in cmd:
+            return SimpleNamespace(returncode=0, stdout="1.32.6\n", stderr="")
+        return SimpleNamespace(returncode=64, stdout="", stderr="Unsupported URL")
+
+    monkeypatch.setattr(smoke_binary.subprocess, "run", run)
+    smoke_binary.check_gallery_dl(Path("azimut"), {})
+    assert [cmd[1] for cmd in calls] == ["--run-gallery-dl", "--run-gallery-dl"]
+
+
+@pytest.mark.parametrize(
+    ("version", "unknown", "said"),
+    [
+        # The binary ignored the flag and started the app, or crashed before gallery-dl.
+        ((1, "", "Traceback"), (64, "", ""), "did not run as gallery-dl"),
+        # gallery-dl ran, but without its extractors the address is not "unknown".
+        ((0, "1.32.6\n", ""), (1, "", "ModuleNotFoundError"), "extractors are missing"),
+    ],
+)
+def test_check_gallery_dl_fails_a_binary_that_is_not_gallery_dl(monkeypatch, version, unknown, said):
+    from types import SimpleNamespace
+
+    def run(cmd, **kw):
+        code, out, err = version if "--version" in cmd else unknown
+        return SimpleNamespace(returncode=code, stdout=out, stderr=err)
+
+    monkeypatch.setattr(smoke_binary.subprocess, "run", run)
+    with pytest.raises(RuntimeError, match=said):
+        smoke_binary.check_gallery_dl(Path("azimut"), {})
+
+
+def test_the_smoke_flag_is_the_one_the_app_starts_gallery_dl_with():
+    from azimut.engine import gallerydl
+
+    assert smoke_binary.GALLERY_DL_FLAG == gallerydl.FROZEN_FLAG

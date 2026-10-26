@@ -25,7 +25,9 @@ the install — no compiler, no resolver, no pip.
 
 Shadowing goes through a meta-path finder rather than a ``sys.path`` entry
 because PyInstaller's own importer answers first for anything it bundled, so a
-path entry would simply never be consulted for ``yt_dlp``.
+path entry would simply never be consulted for ``yt_dlp``. gallery-dl runs in a
+child process (engine/gallerydl.py), which gets the same finder in the binary
+and a ``PYTHONPATH`` entry otherwise.
 """
 
 from __future__ import annotations
@@ -51,6 +53,9 @@ from . import dirswap
 
 # distribution name on PyPI -> module name it imports as
 SCRAPERS: dict[str, str] = {"yt-dlp": "yt_dlp", "gallery-dl": "gallery_dl"}
+# Run as programs of their own, never imported by the app (engine/gallerydl.py):
+# gallery-dl's GPL-2.0-only cannot be combined with Azimut's AGPL-3.0-only.
+OUT_OF_PROCESS = frozenset({"gallery-dl"})
 
 PYPI_JSON = "https://pypi.org/pypi/{dist}/json"
 # Generous: a wheel is a few MB and the user pressed a button and is watching.
@@ -93,7 +98,10 @@ def bundled_version(dist: str) -> str | None:
     try:
         return importlib.metadata.version(dist)
     except importlib.metadata.PackageNotFoundError:
-        # PyInstaller can bundle the module without its .dist-info metadata.
+        # PyInstaller can bundle the module without its .dist-info metadata. A
+        # scraper that runs as its own program is not imported here, even for this.
+        if dist in OUT_OF_PROCESS:
+            return None
         try:
             module = __import__(SCRAPERS[dist])
         except Exception:
@@ -196,12 +204,12 @@ def activate() -> dict[str, str]:
 def needs_restart(dist: str) -> bool:
     """True when an update can't take effect until the process restarts.
 
-    media.py imports the scrapers lazily, inside the download call, so before
-    the first download an update goes live immediately. Once the old module
-    object is in sys.modules, every later import returns it from cache and only
-    a restart clears that.
+    media.py imports yt-dlp lazily, inside the download call, so before the
+    first download an update goes live immediately. Once the old module object
+    is in sys.modules, every later import returns it from cache and only a
+    restart clears that. gallery-dl never needs one: each read is a new process.
     """
-    return SCRAPERS[dist] in sys.modules
+    return dist not in OUT_OF_PROCESS and SCRAPERS[dist] in sys.modules
 
 
 # ---- fetching a newer copy --------------------------------------------------

@@ -244,6 +244,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
+| **One-click update** (urgent, 0.3.4) | The binary installs the next release in one press: it downloads beside itself, checks an Ed25519 signature made outside GitHub, starts the new binary once, swaps by renaming, restarts and keeps the old one to fall back on. Any failure leaves the installed version untouched and links to the release page; a pip install is told its command. Rehearsed on a pre-release before 0.3.5 relies on it. |
 | **Horizon buildings** | Buildings stand in Horizon round the eye, from open sources merged by a stated rule (national surveys, OpenStreetMap, Overture, 3D-GloBFP, Google's 2.5D heights), each saying where its height comes from; a saved view keeps them. |
 | **Fires on the globe** | Draws active fires on the globe within their allowance. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
@@ -399,6 +400,8 @@ stops making sense.
   package.
 - **Dependencies:** ranges in `pyproject.toml`, exact pins in `uv.lock`; yt-dlp
   + gallery-dl unbounded on purpose; scraper self-update keeps an old binary useful.
+  gallery-dl (GPL-2.0-only) is never imported: it runs as its own process through
+  its command line (`engine/gallerydl.py`), the binary starting itself as gallery-dl.
 - **Storage:** per-case SQLite `case.db` is the authoritative graph (files for
   media/notes/proofs); deleted artifacts wait in `.trash/`, and portable case
   bundles carry a cleaned database plus declared files under a SHA-256 manifest.
