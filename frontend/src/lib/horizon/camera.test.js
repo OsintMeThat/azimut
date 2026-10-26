@@ -178,6 +178,20 @@ describe('the panorama strip', () => {
     expect(rayFor(STRIP, 300, 100)).toEqual({ azimuth: 330, elevation: 15 });
   });
 
+  it('reads a piece laid turned about its own middle as the engine does, and lays it back', () => {
+    const piece = { ...STRIP, roll: 1, pivot: { x: 0.5, y: 0.1 } };
+    // skymatch._rolled turns (0.7, 0.12) about (0.5, 0.1) by a degree to (0.70032, 0.11651): pixels 1020.19, 130.10
+    const ray = rayFor(piece, 1020, 128);
+    expect(ray.azimuth).toBeCloseTo((1020.1911522960144 - 600) * 0.1, 9);
+    expect(ray.elevation).toBeCloseTo(5 - (130.0961164305973 - 200) * 0.1, 9);
+    const back = toScreen(piece, ray.azimuth, ray.elevation);
+    expect(back.x).toBeCloseTo(1020, 9);
+    expect(back.y).toBeCloseTo(128, 9);
+    // the pivot itself stays put, and with no pivot the strip has no roll
+    expect(rayFor(piece, 900, 140)).toEqual(rayFor(STRIP, 900, 140));
+    expect(rayFor({ ...STRIP, roll: 1 }, 1020, 128)).toEqual(rayFor(STRIP, 1020, 128));
+  });
+
   it('turns the short way round north', () => {
     expect(turnBetween(350, 10)).toBe(20);
     expect(turnBetween(10, 350)).toBe(-20);

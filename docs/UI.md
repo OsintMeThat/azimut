@@ -3029,7 +3029,8 @@ stroke lying under another one is read as a ridge, as is a trace saved before
 ridges had a pen. Fit lays the skyline strokes alone on the terrain, and Find
 also reads the ridges against the terrain's inner silhouettes and the pairs'
 order. Both let each piece of a cut collage turn, tilt and roll by a degree or
-so, and the view then reads each piece through its own camera. A line with
+so (on a panorama a piece rolls about its own middle), and the view then reads
+each piece through its own camera. A line with
 only sky above is laid on the top of the land the photo would show over it, and
 a place where land still stands over it loses its score as that share of the
 line grows, read as far as **Sees as far as** says, past where the line is

@@ -576,13 +576,17 @@ function median(values) {
  * (engine/skymatch.py `pieces_of`). With no pieces, the whole's everywhere.
  *
  * @param {object} camera the whole's
- * @param {{piece:number, turn:number, tilt:number, roll:number}[]|null} pieces
+ * @param {{piece:number, turn:number, tilt:number, roll:number, about?:number[]}[]|null} pieces
  * @returns {(piece: number) => object}
  */
 export function pieceCameras(camera, pieces) {
   if (!pieces?.length) return () => camera;
   const eased = new Map(
-    pieces.map((p) => [p.piece, { ...camera, heading: camera.heading + p.turn, tilt: camera.tilt + p.tilt, roll: (camera.roll ?? 0) + p.roll }])
+    pieces.map((p) => [
+      p.piece,
+      // a piece of the strip rolls about its own middle, which the search says (`about`)
+      { ...camera, heading: camera.heading + p.turn, tilt: camera.tilt + p.tilt, roll: (camera.roll ?? 0) + p.roll, ...(p.about ? { pivot: { x: p.about[0], y: p.about[1] } } : {}) },
+    ])
   );
   return (piece) => eased.get(piece) ?? camera;
 }

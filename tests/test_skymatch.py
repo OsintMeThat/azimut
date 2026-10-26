@@ -689,6 +689,32 @@ def test_a_collage_cut_in_pieces_fits_each_a_little_on_its_own_and_no_more():
     assert all(abs(tilt) <= skymatch.PIECE_TILT + 1e-9 for _, _, tilt, _ in loose.pieces)
 
 
+def test_a_piece_of_a_strip_laid_turned_rolls_about_its_own_middle(monkeypatch):
+    x, y = trace_on(RANGE, heading=47.0, fov=120.0, projection="panorama")
+    right = x > 0
+    about = (float(x[right].mean()), float(y[right].mean()))
+    # the right frame of a hand collage was laid turned a degree the other way about its middle
+    tx, ty = skymatch._rolled(x[right], y[right], -1.0, about)
+    laid_x, laid_y = x.copy(), y.copy()
+    laid_x[right], laid_y[right] = tx, ty
+    marks = skymatch.Marks(piece=right.astype(np.int64))
+    whole = skymatch.match(laid_x, laid_y, RANGE, half_width=HALF, fov=120.0, known=True, projection="panorama").fits[0]
+    cut = skymatch.match(laid_x, laid_y, RANGE, half_width=HALF, fov=120.0, known=True, projection="panorama",
+                         marks=marks).fits[0]
+    assert cut.explained > 0.99 and cut.explained > whole.explained + 0.05
+    rolled = {k: r for k, _, _, r in cut.pieces}
+    assert rolled[1] == pytest.approx(1.0) and rolled[0] == pytest.approx(0.0)
+    # the app is told the middle it rolls about, the left piece unrolled says none
+    said = {one["piece"]: one for one in skymatch.pieces_of(cut)}
+    assert said[1]["about"] == pytest.approx([float(laid_x[right].mean()), float(laid_y[right].mean())], abs=1e-4)
+    assert "about" not in said[0]
+    # without the roll the strip cannot follow it
+    monkeypatch.setattr(skymatch, "PIECE_STRIP_ROLL", 0.0)
+    flat = skymatch.match(laid_x, laid_y, RANGE, half_width=HALF, fov=120.0, known=True, projection="panorama",
+                          marks=marks).fits[0]
+    assert flat.explained < cut.explained - 0.05 and flat.pivots is None
+
+
 def test_one_placing_reads_what_the_separate_reads_give():
     """The slide reads the skyline and its distance off one placing of the azimuths (`_gap`), the top of the land
     for the sky-only points: the very numbers `_at` and `_gate` give apart."""

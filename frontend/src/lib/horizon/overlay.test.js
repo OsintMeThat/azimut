@@ -884,6 +884,10 @@ describe('a collage’s pieces as the search eased them', () => {
     const of = pieceCameras(TRUE, [{ piece: 1, turn: 0.4, tilt: -0.25, roll: 1 }]);
     expect(of(1)).toMatchObject({ heading: TRUE.heading + 0.4, tilt: TRUE.tilt - 0.25, roll: TRUE.roll + 1, fov: TRUE.fov });
     expect(of(0)).toBe(TRUE);
+    // a piece of the strip rolls about the middle the search says
+    const strip = pieceCameras(TRUE, [{ piece: 1, turn: 0, tilt: 0, roll: 1, about: [0.4, -0.05] }]);
+    expect(strip(1).pivot).toEqual({ x: 0.4, y: -0.05 });
+    expect(of(1)).not.toHaveProperty('pivot');
   });
 
   it('reads each piece of the trace through its own camera: on the terrain where one camera saw it off', () => {

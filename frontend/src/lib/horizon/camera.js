@@ -66,6 +66,22 @@ function stripScale({ fov, width }) {
   return fov / width;
 }
 
+/**
+ * A pixel of a piece of the strip laid turned (a frame of a collage joined by hand), where the strip reads it:
+ * turned clockwise by the camera's `roll` about its `pivot` (`{ x, y }` on the picture plane, half widths, y up),
+ * as the engine reads such a piece (skymatch.py `_rolled`); `back` undoes it. The strip itself has no roll.
+ */
+export function onStrip(camera, x, y, back = false) {
+  const { pivot, roll, width, height } = camera;
+  if (!pivot || !roll) return { x, y };
+  const px = width / 2 + (pivot.x * width) / 2;
+  const py = height / 2 - (pivot.y * width) / 2;
+  const r = ((back ? -roll : roll) * Math.PI) / 180;
+  const dx = x - px;
+  const dy = y - py;
+  return { x: px + dx * Math.cos(r) - dy * Math.sin(r), y: py + dx * Math.sin(r) + dy * Math.cos(r) };
+}
+
 /** The signed difference b − a, folded into (−180, 180]. */
 export function turnBetween(a, b) {
   const d = (((b - a) % 360) + 540) % 360 - 180;
@@ -80,9 +96,8 @@ export function toScreen(camera, azimuth, elevation) {
   const { width, height } = camera;
   if (camera.projection === 'panorama') {
     const scale = stripScale(camera);
-    const x = width / 2 + turnBetween(camera.heading, azimuth) / scale;
-    const y = height / 2 - (elevation - camera.tilt) / scale;
-    return { x, y, visible: true };
+    const laid = onStrip(camera, width / 2 + turnBetween(camera.heading, azimuth) / scale, height / 2 - (elevation - camera.tilt) / scale, true);
+    return { x: laid.x, y: laid.y, visible: true };
   }
   const { forward, right, up } = basis(camera);
   const d = vector(azimuth, elevation);
@@ -102,9 +117,10 @@ export function rayFor(camera, x, y) {
   const { width, height } = camera;
   if (camera.projection === 'panorama') {
     const scale = stripScale(camera);
+    const read = onStrip(camera, x, y);
     return {
-      azimuth: (((camera.heading + (x - width / 2) * scale) % 360) + 360) % 360,
-      elevation: camera.tilt - (y - height / 2) * scale,
+      azimuth: (((camera.heading + (read.x - width / 2) * scale) % 360) + 360) % 360,
+      elevation: camera.tilt - (read.y - height / 2) * scale,
     };
   }
   const { forward, right, up } = basis(camera);

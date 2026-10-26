@@ -13,6 +13,7 @@ import {
   photoTag,
   SEARCHED_TERRAIN_TAG,
   standingText,
+  stripLaid,
   TERRAIN_TAG,
   turnCamera,
   viewFilename,
@@ -45,6 +46,7 @@ function fakeCanvas() {
     moveTo: record('moveTo'),
     lineTo: record('lineTo'),
     translate: record('translate'),
+    rotate: record('rotate'),
     scale: record('scale'),
     setLineDash: record('setLineDash'),
   };
@@ -153,6 +155,30 @@ describe('an area of the view', () => {
     expect(kept.ticks).toEqual([{ x: 10, label: '90°' }]);
     expect(kept.trace).toEqual([[{ x: 10, y: 10 }]]);
     expect(kept.target).toBeNull();
+  });
+});
+
+describe('a piece of the strip laid turned', () => {
+  const STRIP = { heading: 0, tilt: 0, roll: 0, fov: 120, width: 1200, height: 400, projection: 'panorama' };
+
+  it('turns the drawn strip back about the piece middle, so it lies as the photo piece does', () => {
+    const source = { width: 2400, height: 800 };
+    const out = stripLaid(source, { ...STRIP, roll: 1, pivot: { x: 0.5, y: 0.1 } }, 2, { makeCanvas: fakeCanvas });
+    expect([out.width, out.height]).toEqual([2400, 800]);
+    const [first, turn, last, draw] = out.context.calls;
+    // the pivot at (900, 140) camera pixels, twice as big
+    expect(first).toEqual(['translate', 1800, 280]);
+    expect(turn[0]).toBe('rotate');
+    expect(turn[1]).toBeCloseTo(-Math.PI / 180, 12);
+    expect(last).toEqual(['translate', -1800, -280]);
+    expect(draw).toEqual(['drawImage', source, 0, 0]);
+  });
+
+  it('leaves a strip with no roll, and any camera, as drawn', () => {
+    const source = { width: 10, height: 10 };
+    expect(stripLaid(source, STRIP, 1, { makeCanvas: fakeCanvas })).toBe(source);
+    expect(stripLaid(source, { ...STRIP, roll: 1 }, 1, { makeCanvas: fakeCanvas })).toBe(source);
+    expect(stripLaid(source, { ...STRIP, projection: 'camera', roll: 1, pivot: { x: 0, y: 0 } }, 1, { makeCanvas: fakeCanvas })).toBe(source);
   });
 });
 

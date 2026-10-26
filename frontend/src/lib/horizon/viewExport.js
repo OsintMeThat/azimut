@@ -145,6 +145,27 @@ export function areaLens(camera, area) {
 }
 
 /**
+ * A strip drawn through the camera of a piece laid turned (`camera.pivot`, `camera.roll`: a frame of a collage
+ * joined by hand), turned about the piece's middle to lie as the photo's piece does; the renderer draws the strip
+ * with no roll (camera.js `onStrip`). `source` drawn `scale` times as big as the camera; anything else as it is.
+ */
+export function stripLaid(source, camera, scale, { makeCanvas } = {}) {
+  if (camera.projection !== 'panorama' || !camera.roll || !camera.pivot) return source;
+  const out = makeCanvas ? makeCanvas() : document.createElement('canvas');
+  out.width = source.width;
+  out.height = source.height;
+  const ctx = out.getContext('2d');
+  if (!ctx) return source;
+  const x = (camera.width / 2 + (camera.pivot.x * camera.width) / 2) * scale;
+  const y = (camera.height / 2 - (camera.pivot.y * camera.width) / 2) * scale;
+  ctx.translate(x, y);
+  ctx.rotate((-camera.roll * Math.PI) / 180);
+  ctx.translate(-x, -y);
+  ctx.drawImage(source, 0, 0);
+  return out;
+}
+
+/**
  * What the view wrote over itself, for an area of it: moved to the area's
  * corner, and the names and the marked point outside it left out (the ruler's
  * ticks are drawn only where the picture is).

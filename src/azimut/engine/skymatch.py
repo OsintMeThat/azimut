@@ -71,7 +71,8 @@ nearer and farther in that order, the place loses a share of its score. A
 collage joined by hand from frames of a pan is cut in pieces, and each piece's
 camera may turn, tilt and roll a little from the whole's, as much as joining
 frames by eye leaves between them and no more: each piece free would fit
-anywhere.
+anywhere. On the panorama strip, which has no roll of its own, a piece rolls
+about its own middle.
 
 How far each line stands, when the analyst says it (`Marks.far`: a stroke and
 the distances it may stand at, metres), bounds the ground it may lie on: a point
@@ -118,7 +119,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 from collections.abc import Sequence
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 
@@ -221,6 +222,10 @@ PIECE_TURN = 1.0
 PIECE_TILT = 1.0
 PIECE_ROLL = 1.5
 PIECE_STEPS = (9, 9, 5)
+# On the panorama strip a piece rolls about its own middle, at most this far: the frames of a collage laid by hand
+# sit turned a little. Measured on the bench's 15 cut strips (rank among 40 rivals): v04 9th → 2nd, v05 3rd → 1st,
+# v22 9th → 4th, v15 15th → 11th; v08 7th → 9th and v03 34th → 36th, whose truths are held back elsewhere.
+PIECE_STRIP_ROLL = 1.0
 # A line said to stand between two distances may lie on ground this many times nearer than the
 # first and farther than the second: a guess, and ridges known only as finely as the terrain.
 BAND_SLACK = 1.33
@@ -610,6 +615,8 @@ class Fit:
     # a collage's pieces, each (piece, turn, tilt, roll) from the whole's camera in degrees, which the view
     # lays each piece's skyline by
     pieces: tuple[tuple[int, float, float, float], ...] | None = None
+    # on the panorama strip, each rolled piece's middle on the picture plane (piece, x, y), which it rolls about
+    pivots: tuple[tuple[int, float, float], ...] | None = None
     # the share of the lines said to have only sky above that the terrain stands over, and how far out that
     # land stands, metres (the middle of it)
     over: float | None = None
@@ -1023,26 +1030,41 @@ def _refine(
     )
 
 
+def _rolled(x: np.ndarray, y: np.ndarray, roll: float, about: tuple[float, float]) -> tuple[np.ndarray, np.ndarray]:
+    """Points of the picture plane turned clockwise by `roll` degrees about `about`: a piece of a panorama strip
+    laid turned, which the strip's own projection cannot roll."""
+    r = math.radians(roll)
+    dx, dy = x - about[0], y - about[1]
+    return about[0] + dx * math.cos(r) + dy * math.sin(r), about[1] - dx * math.sin(r) + dy * math.cos(r)
+
+
 def _pieces(
     x: np.ndarray, y: np.ndarray, piece: np.ndarray, turn: Turn, fit: Fit, half_width: float, projection: Projection,
     bands: tuple[np.ndarray, np.ndarray] | None = None, top: Turn | None = None, sure: np.ndarray | None = None,
-) -> tuple[np.ndarray, dict[int, tuple[float, float, float]]]:
+) -> tuple[np.ndarray, dict[int, tuple[float, float, float]], dict[int, tuple[float, float]]]:
     """Each piece's camera eased from the whole's, no farther than the piece bounds: what every point
-    then costs, and each piece's (turn, tilt, roll) from the whole's."""
+    then costs, each piece's (turn, tilt, roll) from the whole's, and on the panorama strip the middle each
+    rolled piece rolls about."""
     loss = np.full(x.size, LOST_LOSS)
     offsets: dict[int, tuple[float, float, float]] = {}
+    pivots: dict[int, tuple[float, float]] = {}
+    strip = projection == "panorama"
     for k in np.unique(piece):
         inside = piece == k
+        about = (float(x[inside].mean()), float(y[inside].mean()))
         if inside.sum() < MIN_POINTS:
             turns, tilts, rolls = np.zeros(1), np.zeros(1), np.zeros(1)
         else:
             turns = np.linspace(-PIECE_TURN, PIECE_TURN, PIECE_STEPS[0])
             tilts = np.linspace(-PIECE_TILT, PIECE_TILT, PIECE_STEPS[1])
-            # a panorama's strip has no roll to give
-            rolls = np.zeros(1) if projection == "panorama" else np.linspace(-PIECE_ROLL, PIECE_ROLL, PIECE_STEPS[2])
+            rolls = np.linspace(-PIECE_STRIP_ROLL if strip else -PIECE_ROLL, PIECE_STRIP_ROLL if strip else PIECE_ROLL,
+                                PIECE_STEPS[2])
         best: tuple[float, np.ndarray, tuple[float, float, float]] | None = None
         for turned in rolls:
-            seen = _through(x[inside], y[inside], fit.fov, fit.tilt, fit.roll + turned, half_width, projection=projection,
+            px, py = x[inside], y[inside]
+            if strip and turned:
+                px, py = _rolled(px, py, float(turned), about)
+            seen = _through(px, py, fit.fov, fit.tilt, fit.roll + turned, half_width, projection=projection,
                             bands=None if bands is None else (bands[0][inside], bands[1][inside]),
                             sure=None if sure is None else sure[inside])
             azimuth = fit.heading + turns[:, None] + seen.azimuth[None, :]
@@ -1057,13 +1079,19 @@ def _pieces(
         assert best is not None
         loss[inside] = best[1]
         offsets[int(k)] = best[2]
-    return loss, offsets
+        if strip and best[2][2]:
+            pivots[int(k)] = about
+    return loss, offsets, pivots
 
 
-def pieces_of(fit: Fit) -> list[dict[str, float]]:
-    """A fit's eased pieces as the app reads them: each piece, and its turn, tilt and roll from the whole's camera."""
+def pieces_of(fit: Fit) -> list[dict[str, Any]]:
+    """A fit's eased pieces as the app reads them: each piece, and its turn, tilt and roll from the whole's camera;
+    a piece rolled on the panorama strip also says the middle it rolls about (`about`, x and y on the picture
+    plane, half widths, y up)."""
+    about = {k: (ax, ay) for k, ax, ay in fit.pivots or ()}
     return [
-        {"piece": k, "turn": round(t, 3), "tilt": round(lift, 3), "roll": round(r, 3)}
+        {"piece": k, "turn": round(t, 3), "tilt": round(lift, 3), "roll": round(r, 3),
+         **({"about": [round(about[k][0], 5), round(about[k][1], 5)]} if k in about else {})}
         for k, t, lift, r in fit.pieces or ()
     ]
 
@@ -1126,9 +1154,10 @@ def _judge(
     said to see, else every cut of it in `turns`)."""
     piece = marks.piece if marks.cut and marks.piece is not None and marks.piece.size == x.size else None
     offsets: dict[int, tuple[float, float, float]] = {}
+    pivots: dict[int, tuple[float, float]] = {}
     sky = fit.explained
     if piece is not None:
-        loss, offsets = _pieces(x, y, piece, turn, fit, half_width, projection, bands, top, sure)
+        loss, offsets, pivots = _pieces(x, y, piece, turn, fit, half_width, projection, bands, top, sure)
         sky = explained_by(loss, x, y, half_width)
 
     def through(px: np.ndarray, py: np.ndarray, which: np.ndarray | None) -> tuple[np.ndarray, np.ndarray, float]:
@@ -1141,8 +1170,8 @@ def _judge(
         per = _per_degree(fit.fov, half_width, projection)
         for k, inside in groups:
             turned, tilted, rolled = offsets.get(k, (0.0, 0.0, 0.0))
-            seen = _through(px[inside], py[inside], fit.fov, fit.tilt + tilted, fit.roll + rolled, half_width,
-                            projection=projection)
+            sx, sy = (_rolled(px[inside], py[inside], rolled, pivots[k]) if k in pivots else (px[inside], py[inside]))
+            seen = _through(sx, sy, fit.fov, fit.tilt + tilted, fit.roll + rolled, half_width, projection=projection)
             azimuth[inside] = fit.heading + turned + seen.azimuth
             elevation[inside] = seen.elevation
         return azimuth, elevation, per
@@ -1192,7 +1221,7 @@ def _judge(
     eased = tuple((k, *offsets[k]) for k in sorted(offsets)) or None
     return replace(
         fit, explained=float(min(1.0, max(0.0, score))), sky=sky, inner=inner, pairs=kept, pieces=eased, over=over,
-        over_far=over_far,
+        over_far=over_far, pivots=tuple((k, *pivots[k]) for k in sorted(pivots)) or None,
     )
 
 

@@ -71,7 +71,7 @@
   import { pointerReading, summitReading } from '../../lib/horizon/readings.js';
   import { formatDistance } from '../../lib/measure.js';
   import { MAP_LIGHT, shadowKeep } from '../../lib/horizon/sky.js';
-  import { areaLens, areaWithin, exportScale, layersIn, turnCamera } from '../../lib/horizon/viewExport.js';
+  import { areaLens, areaWithin, exportScale, layersIn, stripLaid, turnCamera } from '../../lib/horizon/viewExport.js';
   import { RIDGE_STEPS } from './state/horizon.svelte.js';
   import { detailsShown, pressTool, putAway, toolForKey, toolHint, traceLegend } from '../../lib/horizon/traceTools.js';
   import PictureControls from './PictureControls.svelte';
@@ -446,7 +446,9 @@
           await nextFrame();
           now = scene.draw(at, { ...options, ...change });
         }
-        frames.push(cut ? cutOf(canvas, cut, scale) : copyOf(canvas));
+        // a strip piece laid turned is drawn with no roll: turned back about its middle here
+        const drawn = stripLaid(canvas, at, scale);
+        frames.push(cut ? cutOf(drawn, cut, scale) : copyOf(drawn));
         const own = turn ? layersFor(at, kind) : null;
         turned.push(own ? { camera: at, layers: cut ? layersIn(own, cut) : own } : null);
       }
