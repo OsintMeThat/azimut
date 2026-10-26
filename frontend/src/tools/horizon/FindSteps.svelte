@@ -399,6 +399,13 @@
                 {#each trust.reasons as reason (reason)}<li>{reason}</li>{/each}
               </ul>
             {/if}
+            {#if trust.look && result.places[0].heading != null}
+              <div class="fs-acts">
+                <button type="button" class="btn btn-sm" title="The photo laid over the view from the best place: each line off the land says by how much"
+                  onclick={() => onplace(result.places[0])}>See which lines are off</button
+                >
+              </div>
+            {/if}
             {#if trust.photo && overlay.isPanorama}
               <div class="fs-acts">
                 <button type="button" class="btn btn-sm" title="Then search again: a photo is tried at any lens, leaned as it was held"

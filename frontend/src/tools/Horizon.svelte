@@ -92,6 +92,7 @@
     terrainMargin,
     traceOnTerrain,
     traceFit,
+    lineGaps,
     traceGap,
     traceSamples,
   } from '../lib/horizon/overlay.js';
@@ -1122,6 +1123,10 @@
   const traceKinds = $derived(
     photoOn && overlay.traceShown && frame.width && view.panorama ? traceFit(overlay.strokesShown, traceCamera, skyline, pieced) : null
   );
+  /** The skyline lines that lie off the terrain, each with by how much, which their badges say. */
+  const offLines = $derived(
+    traceKinds ? lineGaps(overlay.strokesShown, overlay.marks, traceCamera, skyline, pieced) : []
+  );
   /** The terrain's skyline over the photo, each piece of a collage where the search read it, with its margin. */
   const terrain = $derived(
     photoOn && overlay.traceShown && overlay.strokes.length && frame.width && view.panorama ? terrainLine(traceCamera, band, pieced) : []
@@ -1775,6 +1780,7 @@
               {view}
               overlay={photoOn ? overlay : null}
               fit={traceKinds}
+              gaps={offLines}
               {terrain}
               units={prefs.units}
               sky={view.light}

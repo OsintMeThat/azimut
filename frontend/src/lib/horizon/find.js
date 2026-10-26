@@ -764,7 +764,9 @@ const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st
  * `level` a key of TRUST, `reasons` what lowers it in a line each, `chance` the
  * score the area reaches by chance, and `photo: true` when a panorama may be a
  * photo's width: its lens sat at the narrowest a panorama is tried, or little
- * explains it (zoomed frames, or a collage that leans). Read off the search alone and the case's other searches
+ * explains it (zoomed frames, or a collage that leans), and `look: true` when a
+ * reason is about the lines or the pieces, which a look from the place shows
+ * line by line. Read off the search alone and the case's other searches
  * (`others`, rows as the list gives them): no point is scored again. A verdict
  * that names no single place is weak whatever else; one that does is solid
  * with nothing against it, worth a check with one thing, weak with two or more.
@@ -807,9 +809,9 @@ export function reliability(result, { ask = null, name = null, others = [] } = {
   const narrowest = panorama && within && Number.isFinite(best.fov) && best.fov <= Math.min(...within) * LENS_EDGE;
   const asPhoto = panorama && (narrowest || verdict === 'none' || verdict === 'loose');
   if (narrowest) {
-    reasons.push(`The lens found, ${Math.round(best.fov)}°, is the narrowest a panorama is tried at: zoomed frames, or a collage that leans, may read better as a photo`);
+    reasons.push(`Found with the narrowest panorama lens (${Math.round(best.fov)}°): if the frames are zoomed or the collage leans, try Read as a photo`);
   } else if (asPhoto) {
-    reasons.push('Zoomed frames, or a collage that leans, may read better as a photo: a panorama is tried wide, and never leaned');
+    reasons.push('Little fits as a panorama: if the frames are zoomed or the collage leans, try Read as a photo');
   } else if (within && Number.isFinite(best.fov) && !panorama) {
     const [low, high] = [Math.min(...within), Math.max(...within)];
     const lens = best.fov < 10 ? best.fov.toFixed(1) : Math.round(best.fov);
@@ -830,15 +832,17 @@ export function reliability(result, { ask = null, name = null, others = [] } = {
     reasons.push(`${best.pairs[1] - best.pairs[0]} of ${best.pairs[1]} front and behind pairs are out of order`);
   }
   if (Number.isFinite(best.over) && best.over >= OVER_SAID) {
-    const out = Number.isFinite(best.over_far) ? `, ${best.over_far >= 1000 ? km(best.over_far) : `${Math.round(best.over_far)} m`} out` : '';
-    reasons.push(`Land stands over ${percent(best.over)} of the lines said to have only sky above${out}`);
+    const out = Number.isFinite(best.over_far) ? `, ${best.over_far >= 1000 ? km(best.over_far) : `${Math.round(best.over_far)} m`} away` : '';
+    reasons.push(`Land rises over your Sky only lines here (${percent(best.over)}${out})`);
   }
   if (Number.isFinite(best.bare) && best.bare - best.explained >= MARKS_COST) {
-    reasons.push(`Without the lines’ distances, Sky only, pairs and key lines it explains ${percent(best.bare)}: one of them may be wrong here`);
+    reasons.push(`Without your distances, Sky only, pairs and key lines it explains ${percent(best.bare)}: one of them may be wrong here`);
   }
   const held = (best.pieces ?? []).filter((p) => p.edge);
-  if (held.length === 1) reasons.push(`The ${ordinal(held[0].piece + 1)} piece from the left is eased as far as a piece may go: it may be laid off, or bent`);
-  else if (held.length > 1) reasons.push(`${held.length} pieces are eased as far as a piece may go: they may be laid off, or bent`);
+  if (held.length === 1) reasons.push(`The ${ordinal(held[0].piece + 1)} piece from the left fits badly here: check how it is laid or stretched`);
+  else if (held.length > 1) reasons.push(`${held.length} pieces fit badly here: check how they are laid or stretched`);
+  // what a look from the place shows line by line (tools/horizon/HorizonView.svelte, `lineGaps`)
+  const look = held.length > 0 || (Number.isFinite(best.bare) && best.bare - best.explained >= MARKS_COST) || (Number.isFinite(best.over) && best.over >= OVER_SAID);
 
   // another search of the same photo that names one place elsewhere, about as strongly
   const photo = ask?.photo?.path;
@@ -861,7 +865,7 @@ export function reliability(result, { ask = null, name = null, others = [] } = {
 
   const named = verdict === 'match';
   const level = !named || reasons.length >= 2 ? 'weak' : reasons.length === 1 ? 'check' : 'solid';
-  return { level, reasons, chance, ...(asPhoto ? { photo: true } : {}) };
+  return { level, reasons, chance, ...(asPhoto ? { photo: true } : {}), ...(look ? { look: true } : {}) };
 }
 
 // -- where the eye stands -------------------------------------------------------------

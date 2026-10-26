@@ -66,6 +66,7 @@
     slidPhoto,
     strokeFrom,
     fitRuns,
+    gapLabel,
   } from '../../lib/horizon/overlay.js';
 
   import { pointerReading, summitReading } from '../../lib/horizon/readings.js';
@@ -97,6 +98,8 @@
     buildings = null,
     /** How each point of each stroke lies on the terrain (lib/horizon/overlay.js `traceFit`), or null: the trace then shows in one colour. */
     fit = null,
+    /** The skyline lines off the terrain, each with by how much (lib/horizon/overlay.js `lineGaps`): a badge on each. */
+    gaps = [],
     /**
      * The terrain's skyline over the photo, as runs across its frame with how
      * far it may be off (lib/horizon/overlay.js `terrainLine`): drawn as a line
@@ -1537,6 +1540,14 @@
           <polyline class="trace over" {points} />
         {/if}
       {/each}
+      {#each fit ? gaps : [] as one (one.line)}
+        {@const spot = screenAt(shownLoupe, one.at.u, one.at.v, size)}
+        {@const label = gapLabel(one)}
+        <g class="linegap" transform="translate({spot.x.toFixed(1)} {(spot.y - 16).toFixed(1)})">
+          <rect x={-label.length * 3.1 - 6} y="-8" width={label.length * 6.2 + 12} height="16" rx="8" />
+          <text text-anchor="middle" dy="3.5">{label}</text>
+        </g>
+      {/each}
       {#each detailsOn ? overlay.pairBadges : [] as badge (badge.label)}
         {#each [['front', badge.front], ['back', badge.back]] as [side, at] (side)}
           {@const spot = screenAt(shownLoupe, at.u, at.v, size)}
@@ -1981,6 +1992,16 @@
   .clear text {
     font: 600 10px var(--font-sans, system-ui);
     fill: #8fd3ff;
+  }
+  /* how far a line lies off the land, in the colour of a line off it */
+  .linegap rect {
+    fill: rgba(0, 0, 0, 0.75);
+    stroke: var(--hz-hidden);
+    stroke-width: 1;
+  }
+  .linegap text {
+    font: 600 10px var(--font-sans, system-ui);
+    fill: #fff;
   }
   /* a line that matters most */
   .keyline rect {

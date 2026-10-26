@@ -494,30 +494,32 @@ describe('how far a result can be trusted', () => {
 
   it('says what does not fit at the best place: marks it does better without, a piece at its edge, land over Sky only', () => {
     const costly = reliability({ verdict: 'match', places: [{ ...best, bare: 0.96 }], points }, { ask });
-    expect(costly.reasons).toEqual(['Without the lines’ distances, Sky only, pairs and key lines it explains 96%: one of them may be wrong here']);
+    expect(costly).toMatchObject({ look: true, reasons: ['Without your distances, Sky only, pairs and key lines it explains 96%: one of them may be wrong here'] });
     // marks that cost a little say nothing
     expect(reliability({ verdict: 'match', places: [{ ...best, bare: 0.9 }], points }, { ask }).level).toBe('solid');
     const pieces = [{ piece: 0, turn: 0.25 }, { piece: 1, turn: 1, edge: true }, { piece: 2, tilt: 0.5 }];
     expect(reliability({ verdict: 'match', places: [{ ...best, pieces }], points }, { ask }).reasons).toEqual([
-      'The 2nd piece from the left is eased as far as a piece may go: it may be laid off, or bent',
+      'The 2nd piece from the left fits badly here: check how it is laid or stretched',
     ]);
     const both = pieces.map((p) => ({ ...p, edge: true }));
     expect(reliability({ verdict: 'match', places: [{ ...best, pieces: both }], points }, { ask }).reasons).toEqual([
-      '3 pieces are eased as far as a piece may go: they may be laid off, or bent',
+      '3 pieces fit badly here: check how they are laid or stretched',
     ]);
     const over = reliability({ verdict: 'match', places: [{ ...best, over: 0.08, over_far: 4465 }], points }, { ask });
-    expect(over.reasons).toEqual(['Land stands over 8% of the lines said to have only sky above, 4 km out']);
+    expect(over).toMatchObject({ look: true, reasons: ['Land rises over your Sky only lines here (8%, 4 km away)'] });
     expect(reliability({ verdict: 'match', places: [{ ...best, over: 0.03 }], points }, { ask }).level).toBe('solid');
+    // a reason that is not about the lines offers no look at them
+    expect(reliability({ verdict: 'match', places: [{ ...best, inner: 0.3 }], points }, { ask }).look).toBeUndefined();
   });
 
   it('offers a photo when a panorama’s lens sits at the narrowest a panorama is tried, or little explains it', () => {
     const strip = { ...ask, hints: { picture: 'panorama' }, trace: { known: false, within: [60, 360] } };
     const narrow = reliability({ verdict: 'match', places: [{ ...best, fov: 60 }], points }, { ask: strip });
     expect(narrow).toMatchObject({ level: 'check', photo: true });
-    expect(narrow.reasons).toEqual(['The lens found, 60°, is the narrowest a panorama is tried at: zoomed frames, or a collage that leans, may read better as a photo']);
+    expect(narrow.reasons).toEqual(['Found with the narrowest panorama lens (60°): if the frames are zoomed or the collage leans, try Read as a photo']);
     for (const verdict of ['none', 'loose']) {
       const lost = reliability({ verdict, places: [{ ...best, fov: 68, explained: 0 }], points: [] }, { ask: strip });
-      expect(lost).toMatchObject({ photo: true, reasons: ['Zoomed frames, or a collage that leans, may read better as a photo: a panorama is tried wide, and never leaned'] });
+      expect(lost).toMatchObject({ photo: true, reasons: ['Little fits as a panorama: if the frames are zoomed or the collage leans, try Read as a photo'] });
     }
     // a photo that little explains is told nothing of the kind
     expect(reliability({ verdict: 'none', places: [{ ...best, explained: 0 }], points: [] }, { ask }).photo).toBeUndefined();

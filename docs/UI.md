@@ -3107,9 +3107,11 @@ progress, verdict, how far the best place can be trusted (**Solid**, **Check
 it** or **Weak**, with what lowers it and the score the area reaches by chance)
 and places, each with the area's chance score beside its own. What lowers it
 says what does not fit there: what the place explains without the lines'
-distances, Sky only, pairs and key lines when they cost it much, a piece of a cut collage
-eased as far as a piece may go, land over the lines said to have only sky
-above. A panorama is tried 60° wide and up and never leaned, so one whose lens
+distances, Sky only, pairs and key lines when they cost it much, a piece of a
+cut collage that fits badly (eased as far as a piece may go), land rising over
+the Sky only lines. When one of these is about the lines, **See which lines are
+off** looks from the best place, where each line off the land shows by how
+much. A panorama is tried 60° wide and up and never leaned, so one whose lens
 sits at that floor, or that little explains, offers **Read as a photo**: zoomed
 frames, or a collage that leans, span what a photo spans. Where no place
 explains anything, the map shades where the trace lies nearest the terrain.
@@ -3195,7 +3197,9 @@ up even when its lens is unknown.
 
 Over a matched photo the view keeps to two lines: the trace, green where it
 lies on the terrain, amber near it and red off it, and the terrain's skyline
-in white, each piece of a collage where the search read it. A legend under the
+in white, each piece of a collage where the search read it. A skyline line
+lying off the terrain says by how much on a red badge ("2.4° above the land",
+"No land there"). A legend under the
 view names every line it draws, the terrain's own ridge lines and the eye's
 level included. **Details** (D) adds the band the terrain's skyline may be off
 by (wide over a near ridge), the cuts and the pairs' letters, which also show

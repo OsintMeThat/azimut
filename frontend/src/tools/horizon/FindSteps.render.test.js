@@ -544,12 +544,26 @@ describe('the steps of Find', () => {
     const find = fakeFind({ search: { name: 's', status: 'done', ask, result: { verdict: 'none', places: [place], points: [] } } });
     const setHints = vi.fn();
     const root = steps({ find, overlay: { ...overlay, hints: { picture: 'panorama' }, isPanorama: true, setHints } });
-    expect(root.querySelector('.fs-trust').textContent).toContain('Zoomed frames, or a collage that leans, may read better as a photo');
+    expect(root.querySelector('.fs-trust').textContent).toContain('Little fits as a panorama: if the frames are zoomed or the collage leans, try Read as a photo');
     buttonNamed(root, 'Read as a photo').click();
     expect(setHints).toHaveBeenCalledWith({ picture: 'photo' });
     // read as a photo already, nothing to offer
     const read = steps({ find, overlay: { ...overlay, isPanorama: false } });
     expect(buttonNamed(read, 'Read as a photo')).toBeUndefined();
+  });
+
+  it('offers a look at the lines from the best place when a reason is about them', () => {
+    const ask = { area: [], trace: { known: false, within: [30, 65] }, who: { mode: 'ground' } };
+    const place = { lat: 35.79, lon: 45.35, explained: 0.6, heading: 66, fov: 46, tilt: -6, roll: 0, pieces: [{ piece: 1, turn: 1, edge: true }] };
+    const find = fakeFind({ search: { name: 's', status: 'done', ask, result: { verdict: 'match', places: [place], points: [] } } });
+    const onplace = vi.fn();
+    const root = steps({ find, onplace });
+    expect(root.querySelector('.fs-trust').textContent).toContain('The 2nd piece from the left fits badly here: check how it is laid or stretched');
+    buttonNamed(root, 'See which lines are off').click();
+    expect(onplace).toHaveBeenCalledWith(place);
+    // nothing about the lines, nothing to look at
+    const plain = fakeFind({ search: { name: 's', status: 'done', ask, result: { verdict: 'match', places: [{ ...place, pieces: null }], points: [] } } });
+    expect(buttonNamed(steps({ find: plain, onplace }), 'See which lines are off')).toBeUndefined();
   });
 
   it('says how much of a large grid the search ranked best-first left out', () => {

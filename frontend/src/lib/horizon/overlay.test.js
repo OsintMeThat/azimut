@@ -30,7 +30,9 @@ import {
   markedPlane,
   fitFrame,
   fitToTrace,
+  gapLabel,
   gapText,
+  lineGaps,
   heightStep,
   heightText,
   isZoned,
@@ -245,6 +247,27 @@ describe('how each traced point lies on the terrain', () => {
     const [kinds] = traceFit(traced(TRUE), { ...TRUE, tilt: TRUE.tilt + 1 / 3 }, skyline);
     expect(ON_PX).toBeLessThan(OFF_PX);
     expect(kinds.filter((kind) => kind === 'near').length).toBeGreaterThan(kinds.length / 2);
+  });
+
+  it('names the skyline lines off it, by how much, and none on it', () => {
+    const strokes = traced(TRUE);
+    const marks = { lines: [4], inner: [], sea: [] };
+    expect(lineGaps(strokes, marks, TRUE, skyline)).toEqual([]);
+    const [high] = lineGaps(strokes, marks, { ...TRUE, tilt: TRUE.tilt + 2 }, skyline);
+    expect(high.line).toBe(4);
+    expect(high.gap).toBeCloseTo(2, 1);
+    expect(high.at).toBe(strokes[0][Math.floor(strokes[0].length / 2)]);
+    expect(gapLabel(high)).toBe('2.0° above the land');
+    const [low] = lineGaps(strokes, marks, { ...TRUE, tilt: TRUE.tilt - 2 }, skyline);
+    expect(gapLabel(low)).toBe('2.0° below the land');
+    expect(gapLabel({ gap: -12.4 })).toBe('12° below the land');
+    // a line with no land under it says so
+    const [bare] = lineGaps(strokes, marks, TRUE, () => null);
+    expect(bare).toMatchObject({ line: 4, none: true });
+    expect(gapLabel(bare)).toBe('No land there');
+    // inner edges and sea lines are read against other lines
+    expect(lineGaps(strokes, { ...marks, inner: [4] }, { ...TRUE, tilt: TRUE.tilt + 2 }, skyline)).toEqual([]);
+    expect(lineGaps(strokes, { ...marks, sea: [4] }, { ...TRUE, tilt: TRUE.tilt + 2 }, skyline)).toEqual([]);
   });
 
   it('cuts a stroke into runs that join where the kind changes', () => {

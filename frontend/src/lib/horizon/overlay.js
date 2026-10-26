@@ -677,6 +677,64 @@ export function traceFit(strokes, camera, skyline, pieced = {}) {
 }
 
 /**
+ * The skyline lines that lie off the terrain through a camera, each with by
+ * how much: `{ line, at, gap }`, `gap` the median angle between the line and
+ * the terrain's skyline in degrees (+ the line stands above the land), or
+ * `{ line, at, none: true }` where most of it has no land under it. A line
+ * counts as off once that median passes `OFF_PX`, as the score counts it;
+ * inner edges and sea lines are read against other lines and left out. `at`
+ * is the middle of the line's longest stroke, where its badge goes.
+ *
+ * @param {{u:number, v:number}[][]} strokes the trace on the straightened photo
+ * @param {{lines:number[], inner:number[], sea?:number[]}} marks each stroke's line and the kinds said
+ * @param {object} camera the view's camera with its frame's width and height
+ * @param {(azimuth: number) => number|null} skyline the terrain's, in degrees
+ * @param {object} [pieced] a cut collage's eased pieces (`traceGap`)
+ * @returns {{line:number, at:{u:number, v:number}, gap?:number, none?:boolean}[]}
+ */
+export function lineGaps(strokes, marks, camera, skyline, pieced = {}) {
+  const { width, height } = camera;
+  if (!(width > 0) || !(height > 0) || !marks) return [];
+  const perDegree = pixelsPerDegree(camera);
+  const through = cameraOver(camera, pieced);
+  const skipped = new Set([...(marks.inner ?? []), ...(marks.sea ?? [])]);
+  const byLine = new Map();
+  strokes.forEach((stroke, index) => {
+    const line = marks.lines?.[index] ?? index;
+    if (skipped.has(line)) return;
+    const one = byLine.get(line) ?? { gaps: [], bare: 0, longest: null };
+    for (const p of stroke) {
+      const ray = rayFor(through(p), p.u * width, p.v * height);
+      const top = skyline(ray.azimuth);
+      if (top == null) one.bare += 1;
+      else one.gaps.push(ray.elevation - top);
+    }
+    if (!one.longest || stroke.length > one.longest.length) one.longest = stroke;
+    byLine.set(line, one);
+  });
+  const off = [];
+  for (const [line, one] of byLine) {
+    if (one.gaps.length + one.bare < GAP_MIN_POINTS) continue;
+    const at = one.longest[Math.floor(one.longest.length / 2)];
+    if (one.bare > one.gaps.length) {
+      off.push({ line, at, none: true });
+      continue;
+    }
+    const gap = median(one.gaps);
+    if (Math.abs(gap) * perDegree > OFF_PX) off.push({ line, at, gap });
+  }
+  return off;
+}
+
+/** What a line's badge says (`lineGaps`): how far above or below the land it lies, or that it has none under it. */
+export function gapLabel(one) {
+  if (one.none) return 'No land there';
+  const size = Math.abs(one.gap);
+  const degrees = size < 10 ? size.toFixed(1) : String(Math.round(size));
+  return `${degrees}° ${one.gap > 0 ? 'above' : 'below'} the land`;
+}
+
+/**
  * A stroke cut where its points change how they lie (`traceFit`), each run
  * sharing its first point with the run before so the line stays whole.
  *
