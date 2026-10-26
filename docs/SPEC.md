@@ -410,7 +410,9 @@ stops making sense.
   localhost, the hash-verified scraper updater, the release workflow's publish job
   running `softprops/action-gh-release` and `pypa/gh-action-pypi-publish` on mutable
   refs while it holds the PyPI OIDC identity (the branch ref is the form PyPA
-  documents; every other action in both workflows is pinned by tag or by commit),
+  documents; every other action in the workflows is pinned by tag or by commit),
+  the CLA workflow's write token on `pull_request_target` (it never checks out the
+  pull request's code, and its one action is pinned by commit),
   tile/media URL fetches (SSRF
   only matters if the localhost assumption breaks), and a download that fails
   saying only that the content is unavailable being retried with the stored
