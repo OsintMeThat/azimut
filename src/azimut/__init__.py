@@ -1,4 +1,8 @@
-"""Azimut, a local OSINT workspace."""
+"""Azimut, a local OSINT workspace.
+
+Copyright (C) 2026 the Azimut maintainer. Licensed under the GNU Affero General
+Public License, version 3 only (AGPL-3.0-only); see LICENSE.
+"""
 
 import warnings
 
