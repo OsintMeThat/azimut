@@ -167,7 +167,7 @@
    * want the whole photo under the hand.
    */
   const controlsShown = $derived(
-    Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing))
+    Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying))
   );
   /** The loupe over the photo while it shows anything but the whole photo, which the camera is then seen through. */
   const loupe = $derived(laid && view.camera.projection === 'camera' && loupeMoved(overlay.loupe) ? overlay.loupe : null);
@@ -727,7 +727,7 @@
   const tracing = $derived(laid && overlay.tracing);
   const erasing = $derived(laid && overlay.erasing);
   /** Pairing lines or cutting the collage: a click picks, nothing is dragged. */
-  const picking = $derived(laid && (overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing));
+  const picking = $derived(laid && (overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying));
   /** The photo's corners out to be pulled. */
   const warping = $derived(laid && overlay.warping);
   /** The photo held to the terrain: the view's gestures carry both, and none parts them. */
@@ -1030,6 +1030,7 @@
       else if (overlay.linking) overlay.linkAt(point, photoScale);
       else if (overlay.distancing) overlay.farAt(point, photoScale);
       else if (overlay.clearing) overlay.clearAt(point, photoScale);
+      else if (overlay.keying) overlay.keyAt(point, photoScale);
       return;
     }
     if (press.shaping) {
@@ -1262,7 +1263,7 @@
     else if (key === 'l' || key === 'L') overlay.setLocked(!overlay.locked);
     else if ((key === 'h' || key === 'H') && overlay.strokes.length) overlay.setTraceHidden(!overlay.traceHidden);
     else if ((key === 'd' || key === 'D') && overlay.strokes.length) overlay.setDetails(!overlay.details);
-    else if (key === 'Escape' && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing)) {
+    else if (key === 'Escape' && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying)) {
       event.stopPropagation();
       putAway(overlay);
       overlay.setWarping(false);
@@ -1557,6 +1558,13 @@
         <g class="clear" transform="translate({spot.x.toFixed(1)} {(spot.y - 16).toFixed(1)})">
           <rect x="-29" y="-8" width="58" height="16" rx="8" />
           <text text-anchor="middle" dy="3.5">Sky only</text>
+        </g>
+      {/each}
+      {#each detailsOn ? (overlay.keyBadges ?? []) : [] as badge (badge.line)}
+        {@const spot = screenAt(shownLoupe, badge.at.u, badge.at.v, size)}
+        <g class="keyline" transform="translate({spot.x.toFixed(1)} {(spot.y - 16).toFixed(1)})">
+          <rect x="-16" y="-8" width="32" height="16" rx="8" />
+          <text text-anchor="middle" dy="3.5">Key</text>
         </g>
       {/each}
     {/if}
@@ -1974,6 +1982,16 @@
     font: 600 10px var(--font-sans, system-ui);
     fill: #8fd3ff;
   }
+  /* a line that matters most */
+  .keyline rect {
+    fill: rgba(0, 0, 0, 0.7);
+    stroke: #ffb3e6;
+    stroke-width: 1;
+  }
+  .keyline text {
+    font: 600 10px var(--font-sans, system-ui);
+    fill: #ffb3e6;
+  }
   /* where a collage is cut */
   .cut {
     fill: none;
@@ -2373,6 +2391,13 @@
     width: 12px;
     height: 8px;
     border: 1px solid #8fd3ff;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.7);
+  }
+  .swatch.key {
+    width: 12px;
+    height: 8px;
+    border: 1px solid #ffb3e6;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.7);
   }

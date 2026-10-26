@@ -512,6 +512,7 @@ def check(case: Case, record: dict[str, Any]) -> list[dict[str, Any]]:
                 # the marks name the trace's own points: a decoy is judged on its skyline alone
                 decoy = replace(decoy, marks=replace(
                     decoy.marks, ridge_x=np.empty(0), ridge_y=np.empty(0), pairs=(), piece=None, ridge_piece=None, clear=(),
+                    key=(),
                 ))
             scored = finder.score_point(
                 float(place["lat"]), float(place["lon"]), decoy, plan, sampler=sampler, quick=False,

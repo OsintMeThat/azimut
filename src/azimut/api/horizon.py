@@ -591,7 +591,8 @@ class MarksIn(BaseModel):
     then the stroke behind it. `piece` and `ridge_piece` say which piece of a
     collage each point lies in. `far` says how far strokes stand: each a stroke,
     the nearest and the farthest it may be, metres. `sea` names the strokes
-    traced along the sea's horizon, `clear` those with only sky above them.
+    traced along the sea's horizon, `clear` those with only sky above them,
+    `key` the skyline strokes marked as the ones that matter most.
     """
 
     ridge_x: list[float] = Field(default_factory=list, max_length=MATCH_POINTS_MAX)
@@ -604,6 +605,7 @@ class MarksIn(BaseModel):
     far: list[list[float]] = Field(default_factory=list, max_length=MARK_STROKES_MAX)
     sea: list[int] = Field(default_factory=list, max_length=MARK_STROKES_MAX)
     clear: list[int] = Field(default_factory=list, max_length=MARK_STROKES_MAX)
+    key: list[int] = Field(default_factory=list, max_length=MARK_STROKES_MAX)
 
     def check_marks(self, points: int) -> None:
         """Each list as long as the points it describes, the strokes and pairs within bounds."""
@@ -641,10 +643,17 @@ class MarksIn(BaseModel):
             raise ValueError("a line with only sky above names a stroke out of range")
         if self.clear and self.line is None:
             raise ValueError("a line with only sky above needs each point's stroke")
+        if any(not 0 <= stroke < MARK_STROKES_MAX for stroke in self.key):
+            raise ValueError("a key line names a stroke out of range")
+        if self.key and self.line is None:
+            raise ValueError("a key line needs each point's stroke")
 
     def marks(self) -> skymatch.Marks | None:
         """The marks as the search reads them, or None when there are none."""
-        if not self.ridge_x and not self.pairs and self.piece is None and not self.far and not self.sea and not self.clear:
+        if (
+            not self.ridge_x and not self.pairs and self.piece is None and not self.far and not self.sea
+            and not self.clear and not self.key
+        ):
             return None
 
         def ints(values: list[int] | None) -> np.ndarray | None:
@@ -658,6 +667,7 @@ class MarksIn(BaseModel):
             far=tuple((int(stroke), float(nearest), float(farthest)) for stroke, nearest, farthest in self.far),
             sea=tuple(int(stroke) for stroke in self.sea),
             clear=tuple(int(stroke) for stroke in self.clear),
+            key=tuple(int(stroke) for stroke in self.key),
         )
 
 

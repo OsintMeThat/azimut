@@ -96,6 +96,11 @@ line loses its score as that share of the line grows, and is ruled out past
 to Auto, land past `CLEAR_NEAR` times the line's own distance counts less and
 less out to `CLEAR_FAR` times it: haze grows ever likelier to hide it.
 
+A skyline line the analyst marks as key (`Marks.key`, a peak or a notch they
+would know anywhere) is held to its own fit: a place that explains the whole
+trace better than it lays that line loses `KEY_COST` of the difference. A key
+line lying on the terrain adds nothing.
+
 The camera's tilt may be bounded too (`tilts`, degrees): a skyline filmed on foot
 is near level, and a place that needs the camera 40° down to lay the trace has
 found the ground, not the skyline.
@@ -226,6 +231,10 @@ PIECE_STEPS = (9, 9, 5)
 # sit turned a little. Measured on the bench's 15 cut strips (rank among 40 rivals): v04 9th → 2nd, v05 3rd → 1st,
 # v22 9th → 4th, v15 15th → 11th; v08 7th → 9th and v03 34th → 36th, whose truths are held back elsewhere.
 PIECE_STRIP_ROLL = 1.0
+# A place loses this share of what it explains past its key lines' own fit. Measured on the owner's key lines of
+# 27 real cases (rank among 40 rivals): v04 2nd → 1st, v16 2nd → 1st, v07s 4th → 3rd, v17 3rd → 2nd, v22 4th →
+# 3rd, none lower. Inner edges marked key cost v23, v24 and v28 places, so only skyline lines are held.
+KEY_COST = 0.5
 # A line said to stand between two distances may lie on ground this many times nearer than the
 # first and farther than the second: a guess, and ridges known only as finely as the terrain.
 BAND_SLACK = 1.33
@@ -428,7 +437,8 @@ class Marks:
     how far some strokes stand: (stroke, nearest, farthest) in metres. `sea`
     names the strokes traced along the sea's horizon, whose distance the eye's
     height above the sea sets (engine/finder.py). `clear` names the strokes the
-    analyst is sure have only sky above them.
+    analyst is sure have only sky above them, `key` the skyline strokes they
+    mark as the ones that matter most.
     """
 
     ridge_x: np.ndarray = field(default_factory=lambda: np.empty(0))
@@ -441,6 +451,7 @@ class Marks:
     far: tuple[tuple[int, float, float], ...] = ()
     sea: tuple[int, ...] = ()
     clear: tuple[int, ...] = ()
+    key: tuple[int, ...] = ()
 
     @property
     def cut(self) -> bool:
@@ -1195,6 +1206,17 @@ def _judge(
         inner = float(1.0 - cost.mean() / LOST_LOSS)
         # an inner edge with no ridge under it takes score away, one lying on its ridge adds none
         score = min(sky, (sky + inner) / 2)
+    key: float | None = None
+    if marks.key and marks.line is not None and marks.line.size == x.size:
+        held = np.isin(marks.line, marks.key)
+        if held.sum() >= MIN_POINTS:
+            azimuth, elevation, per = through(x[held], y[held], None if piece is None else piece[held])
+            gap = _gap(elevation, turn, top, None if sure is None else sure[held], azimuth,
+                       None if bands is None else bands[0][held], None if bands is None else bands[1][held])
+            cost = np.where(np.isnan(gap), LOST_LOSS, _loss(np.nan_to_num(gap) * per))
+            key = float(1.0 - cost.mean() / LOST_LOSS)
+            # a key line off the terrain costs the place, one lying on it adds nothing
+            score -= KEY_COST * max(0.0, score - key)
     kept: tuple[int, int] | None = None
     if marks.pairs:
         far: dict[int, float] = {}
@@ -1222,7 +1244,7 @@ def _judge(
         # past a fiftieth the place pays, past CLEAR_HARD it keeps CLEAR_KEEP of its score (none: ruled out)
         paid = float(np.clip((over - CLEAR_FREE) / (CLEAR_HARD - CLEAR_FREE), 0.0, 1.0))
         score *= 1.0 - (1.0 - CLEAR_KEEP) * paid
-    if piece is None and inner is None and kept is None and over is None:
+    if piece is None and inner is None and key is None and kept is None and over is None:
         return fit
     eased = tuple((k, *offsets[k]) for k in sorted(offsets)) or None
     return replace(

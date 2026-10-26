@@ -94,6 +94,7 @@ import {
   cutAt,
   farBadges,
   innerByShape,
+  keyBadges,
   lineAt,
   liesUnder,
   marksAfter,
@@ -106,6 +107,7 @@ import {
   setInner,
   setSea,
   toggleClear,
+  toggleKey,
   togglePair,
 } from '../../../lib/horizon/traceMarks.js';
 import { skylineField, smoothPlanes, snapPath, traceSkyline } from '../../../lib/horizon/skyline.js';
@@ -259,6 +261,8 @@ export function createOverlayState({
   let farPicked = $state.raw(['b1']);
   /** Saying a skyline line has only sky above it: a click on the line, again to take it back. */
   let clearing = $state(false);
+  /** Saying a skyline line matters most: a click on the line, again to take it back. */
+  let keying = $state(false);
   let traceTime = $state(null);
   // the trace as it was before each change, newest last
   let history = $state.raw([]);
@@ -338,6 +342,8 @@ export function createOverlayState({
   const farSeen = $derived(marks.far?.length ? farBadges(shown, marks) : []);
   /** Each line said to have only sky above, where the view shows it (`clearBadges`). */
   const clearSeen = $derived(marks.clear?.length ? clearBadges(shown, marks) : []);
+  /** Each key line, where the view shows it (`keyBadges`). */
+  const keySeen = $derived(marks.key?.length ? keyBadges(shown, marks) : []);
   /** The photo's grid as it shows, while its corners are out to be pulled (`photoGrid`). */
   const grid = $derived(warping ? photoGrid(toSeen) : []);
   /** The photo drawn between its pulled corners, which the view is handed in its place. */
@@ -438,6 +444,7 @@ export function createOverlayState({
     cutting = false;
     distancing = false;
     clearing = false;
+    keying = false;
     front = null;
     pen = 'sky';
     traceHidden = false;
@@ -671,6 +678,7 @@ export function createOverlayState({
     cutting = false;
     distancing = false;
     clearing = false;
+    keying = false;
     front = null;
   }
 
@@ -1304,6 +1312,10 @@ export function createOverlayState({
     get clearBadges() {
       return clearSeen;
     },
+    /** Each key line at its stroke, straightened: `{ line, at }`. */
+    get keyBadges() {
+      return keySeen;
+    },
     /** Which piece of the collage a point of the straightened photo lies in. */
     pieceAt(point) {
       return marks.cuts.length ? pieceOf(marks.cuts, toPhoto(point).u) : 0;
@@ -1470,6 +1482,31 @@ export function createOverlayState({
       if (marks.inner.includes(id)) return { ridge: id };
       keep();
       marks = toggleClear(marks, id);
+      return id;
+    },
+    /** Whether a click says the skyline line clicked matters most. */
+    get keying() {
+      return keying;
+    },
+    setKeying(on) {
+      const next = Boolean(on) && strokes.length > 0;
+      if (next) toolsAway();
+      if (next) asSearched = null;
+      keying = next;
+      if (keying) traceHidden = false;
+    },
+    /**
+     * A click while marking key lines, at `point` on the straightened photo
+     * shown `scale` big: the skyline line there is key, or no longer when it
+     * was. Says the line hit, `{ ridge }` for an inner edge, which cannot be
+     * key, or null.
+     */
+    keyAt(point, scale) {
+      const id = lineAt(strokes, marks.lines, toPhoto(point), PICK_PX, scale);
+      if (id === null) return null;
+      if (marks.inner.includes(id)) return { ridge: id };
+      keep();
+      marks = toggleKey(marks, id);
       return id;
     },
     /** Every cut taken away. */

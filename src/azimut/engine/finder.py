@@ -307,12 +307,12 @@ def said_bands(trace: Trace) -> tuple[np.ndarray, np.ndarray] | None:
 
 
 def unmarked(trace: Trace) -> Trace:
-    """The trace with the analyst's judging marks left out (lines' distances, Sky only, pairs), its strokes,
-    sea lines and pieces kept; the very trace when it has none."""
+    """The trace with the analyst's judging marks left out (lines' distances, Sky only, pairs, key lines), its
+    strokes, sea lines and pieces kept; the very trace when it has none."""
     marks = trace.marks
-    if marks is None or not (marks.far or marks.clear or marks.pairs):
+    if marks is None or not (marks.far or marks.clear or marks.pairs or marks.key):
         return trace
-    return replace(trace, marks=replace(marks, far=(), clear=(), pairs=()))
+    return replace(trace, marks=replace(marks, far=(), clear=(), pairs=(), key=()))
 
 
 def said_nearest(far: Sequence[Sequence[float]] | None) -> float | None:
@@ -398,7 +398,8 @@ def marks_of(trace: dict[str, Any]) -> skymatch.Marks | None:
     far = trace.get("far") or []
     sea = trace.get("sea") or []
     clear = trace.get("clear") or []
-    if not trace.get("ridge_x") and not pairs and trace.get("piece") is None and not far and not sea and not clear:
+    key = trace.get("key") or []
+    if not trace.get("ridge_x") and not pairs and trace.get("piece") is None and not far and not sea and not clear and not key:
         return None
 
     def ints(key: str) -> np.ndarray | None:
@@ -414,6 +415,7 @@ def marks_of(trace: dict[str, Any]) -> skymatch.Marks | None:
         far=tuple((int(stroke), float(nearest), float(farthest)) for stroke, nearest, farthest in far),
         sea=tuple(int(stroke) for stroke in sea),
         clear=tuple(int(stroke) for stroke in clear),
+        key=tuple(int(stroke) for stroke in key),
     )
 
 

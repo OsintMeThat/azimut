@@ -11,6 +11,7 @@
  *   cut     a click lays a cut across a collage where its frames meet
  *   far     the distances picked, then a click on a line says it stands that far
  *   clear   a click on a skyline line says only sky stands above it
+ *   key     a click on a skyline line says it matters most
  *   erase   the rubber
  *
  * The magnet beside them snaps what the pens draw onto the photo's edges;
@@ -76,6 +77,14 @@ export const TRACE_TOOLS = Object.freeze([
     title: "Click a skyline line you are sure has only sky above it (O)",
   },
   {
+    id: "key",
+    icon: "star",
+    label: "Key line",
+    name: "Mark a key line",
+    key: "I",
+    title: "Click the skyline lines that matter most, a peak or a notch you would know anywhere: three at most (I)",
+  },
+  {
     id: "erase",
     icon: "eraser",
     label: "Rub out",
@@ -105,6 +114,7 @@ export function toolOn(overlay, id) {
   if (id === "cut") return Boolean(overlay.cutting);
   if (id === "far") return Boolean(overlay.distancing);
   if (id === "clear") return Boolean(overlay.clearing);
+  if (id === "key") return Boolean(overlay.keying);
   if (id === "erase") return Boolean(overlay.erasing);
   return false;
 }
@@ -117,7 +127,8 @@ export function editing(overlay) {
       overlay.linking ||
       overlay.cutting ||
       overlay.distancing ||
-      overlay.clearing,
+      overlay.clearing ||
+      overlay.keying,
   );
 }
 
@@ -162,6 +173,7 @@ export function traceLegend(
     if (marks?.pairs?.length)
       items.push({ id: "pair", label: "In front, behind" });
     if (marks?.clear?.length) items.push({ id: "clear", label: "Only sky above" });
+    if (marks?.key?.length) items.push({ id: "key", label: "Key line" });
   }
   return items;
 }
@@ -172,7 +184,7 @@ export function toolBlocked(overlay, id) {
     return "Draw two lines first";
   if (id === "erase" && !overlay.strokes.length)
     return "Nothing to rub out yet";
-  if ((id === "far" || id === "clear") && !overlay.strokes.length) return "Draw a line first";
+  if ((id === "far" || id === "clear" || id === "key") && !overlay.strokes.length) return "Draw a line first";
   return "";
 }
 
@@ -186,6 +198,7 @@ export function pressTool(overlay, id) {
   else if (id === "cut") overlay.setCutting(!on);
   else if (id === "far") overlay.setDistancing(!on);
   else if (id === "clear") overlay.setClearing(!on);
+  else if (id === "key") overlay.setKeying(!on);
   else if (id === "erase") overlay.setErasing(!on);
 }
 
@@ -197,6 +210,7 @@ export function putAway(overlay) {
   overlay.setCutting(false);
   overlay.setDistancing(false);
   overlay.setClearing(false);
+  overlay.setKeying(false);
 }
 
 /** What the trace holds besides the skyline, in a few words: '' when nothing. */
@@ -221,6 +235,8 @@ export function marksSummary(marks) {
     parts.push(marks.sea.length === 1 ? "1 sea line" : `${marks.sea.length} sea lines`);
   if (marks.clear?.length)
     parts.push(marks.clear.length === 1 ? "1 line with only sky above" : `${marks.clear.length} lines with only sky above`);
+  if (marks.key?.length)
+    parts.push(marks.key.length === 1 ? "1 key line" : `${marks.key.length} key lines`);
   return parts.join(" · ");
 }
 
@@ -237,6 +253,8 @@ export function toolHint(overlay) {
     return "Pick how far, then click a line · the same again takes it away";
   if (overlay.clearing)
     return "Click a skyline line with only sky above it, no land rising over it · the same again takes it back";
+  if (overlay.keying)
+    return "Click a skyline line that matters most, three at most · the same again takes it back";
   if (overlay.tracing) {
     const what =
       overlay.pen === "ridge"

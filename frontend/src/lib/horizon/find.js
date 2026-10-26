@@ -429,7 +429,10 @@ const zonesKey = (zones) =>
   (zones ?? []).map((zone) => [(zone.area ?? zone.points ?? []).map(corner), zone.out ? null : (zone.spacing ?? null), Boolean(zone.out)]);
 const areasKey = (areas) => (areas ?? []).map((one) => (one ?? []).map(corner));
 const strokesKey = (strokes) => (strokes ?? []).map((one) => [(one.path ?? []).map(corner), one.radius, one.out !== false]);
-const marksKey = (m) => (m && (m.inner?.length || m.pairs?.length || m.cuts?.length) ? JSON.stringify([m.inner ?? [], m.pairs ?? [], m.cuts ?? []]) : '');
+const marksKey = (m) => {
+  const said = [m?.inner, m?.pairs, m?.cuts, m?.sea, m?.clear, m?.key].map((one) => one ?? []);
+  return said.some((one) => one.length) ? JSON.stringify(said) : '';
+};
 
 /**
  * Whether Find's setup now (`now`, shaped as the search asks it) is still the
@@ -651,7 +654,7 @@ const ROLL_NEAR = 0.2;
 export const DECOY_MARGIN = 0.15;
 /** A camera on foot tilted this far or more, degrees, is worth a look. */
 export const TILT_STEEP = 12;
-/** A place the lines' distances, Sky only and pairs cost this much or more (`bare`, engine/finder.py) may hold a wrong one. */
+/** A place the lines' distances, Sky only, pairs and key lines cost this much or more (`bare`, engine/finder.py) may hold a wrong one. */
 export const MARKS_COST = 0.15;
 /** Land over this share of the lines said to have only sky above is worth saying (engine/skymatch.py pays from 2%). */
 export const OVER_SAID = 0.05;
@@ -831,7 +834,7 @@ export function reliability(result, { ask = null, name = null, others = [] } = {
     reasons.push(`Land stands over ${percent(best.over)} of the lines said to have only sky above${out}`);
   }
   if (Number.isFinite(best.bare) && best.bare - best.explained >= MARKS_COST) {
-    reasons.push(`Without the lines’ distances, Sky only and pairs it explains ${percent(best.bare)}: one of them may be wrong here`);
+    reasons.push(`Without the lines’ distances, Sky only, pairs and key lines it explains ${percent(best.bare)}: one of them may be wrong here`);
   }
   const held = (best.pieces ?? []).filter((p) => p.edge);
   if (held.length === 1) reasons.push(`The ${ordinal(held[0].piece + 1)} piece from the left is eased as far as a piece may go: it may be laid off, or bent`);

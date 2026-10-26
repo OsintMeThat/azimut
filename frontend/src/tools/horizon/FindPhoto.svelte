@@ -159,7 +159,7 @@
     box.focus?.({ preventScroll: true });
     box.setPointerCapture?.(event.pointerId);
     const at = local(event);
-    if ((overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing) && !asking) {
+    if ((overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying) && !asking) {
       press = { picking: true };
       return;
     }
@@ -209,6 +209,7 @@
       else if (overlay.linking) overlay.linkAt(point, scale());
       else if (overlay.distancing) overlay.farAt(point, scale());
       else if (overlay.clearing) overlay.clearAt(point, scale());
+      else if (overlay.keying) overlay.keyAt(point, scale());
       return;
     }
     if (was.tracing) {
@@ -292,7 +293,7 @@
   bind:this={box}
   class="fp"
   class:asking
-  class:pen={(overlay.tracing || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing) && !asking}
+  class:pen={(overlay.tracing || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying) && !asking}
   class:rubber={overlay.erasing && !asking}
   class:grab={zoom > 1 && !overlay.tracing && !overlay.erasing && !asking}
   bind:clientWidth={width}
@@ -350,6 +351,13 @@
             <g class="fp-clear" transform="translate({spot.x.toFixed(1)} {(spot.y - 16).toFixed(1)})">
               <rect x="-29" y="-8" width="58" height="16" rx="8" />
               <text text-anchor="middle" dy="3.5">Sky only</text>
+            </g>
+          {/each}
+          {#each overlay.keyBadges ?? [] as badge (badge.line)}
+            {@const spot = toScreen(badge.at)}
+            <g class="fp-key" transform="translate({spot.x.toFixed(1)} {(spot.y - 16).toFixed(1)})">
+              <rect x="-16" y="-8" width="32" height="16" rx="8" />
+              <text text-anchor="middle" dy="3.5">Key</text>
             </g>
           {/each}
         {/if}
@@ -560,6 +568,17 @@
     font-size: 10px;
     font-weight: 600;
     fill: #ffd166;
+  }
+  /* a line that matters most */
+  .fp-key rect {
+    fill: rgba(0, 0, 0, 0.7);
+    stroke: #ffb3e6;
+    stroke-width: 1;
+  }
+  .fp-key text {
+    font-size: 10px;
+    font-weight: 600;
+    fill: #ffb3e6;
   }
   /* a line with only sky above it */
   .fp-clear rect {

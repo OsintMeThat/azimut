@@ -485,6 +485,8 @@ def test_a_line_with_only_sky_above_is_read_as_far_as_the_photo_is_said_to_see(m
     assert hazy["over"] == 0.0 and hazy["explained"] == pytest.approx(plain["explained"], abs=1e-3)
     # a saved trace carries the lines it says have only sky above
     assert finder.marks_of({"line": [0, 0, 1], "clear": [1]}).clear == (1,)
+    # and the lines it marks as key
+    assert finder.marks_of({"line": [0, 0, 1], "key": [0]}).key == (0,)
     # a point ruled out says why on the map, one that keeps its score says nothing
     assert finder._ruled(auto) == {"over": auto["over"], "over_far": auto["over_far"]}
     assert finder._ruled(hazy) == {} and finder._ruled(found) == {}
@@ -974,6 +976,9 @@ def test_a_search_says_its_size_first_and_refuses_what_it_cannot_run(client):
         # a line with only sky above needs each point's stroke, and a stroke there is
         {"trace": {**_ask()["trace"], "clear": [0]}},
         {"trace": {**_ask()["trace"], "line": [0] * len(_ask()["trace"]["x"]), "clear": [100_000]}},
+        # so does a key line
+        {"trace": {**_ask()["trace"], "key": [0]}},
+        {"trace": {**_ask()["trace"], "line": [0] * len(_ask()["trace"]["x"]), "key": [100_000]}},
     ):
         assert client.post(url, json=_ask(**change)).status_code == 422
     assert client.get(f"{url}/nothing").status_code == 404
@@ -1190,6 +1195,9 @@ def test_a_place_the_analysts_marks_cost_much_says_what_it_explains_without_them
     asked.clear()
     found = finder.search(plan, photo)
     assert asked.count("full, bare") == fulls and all("bare" not in p for p in found["places"])
+    # key lines are left out of the bare reading as well
+    keyed = replace(marks, far=(), clear=(), key=(0,))
+    assert finder.unmarked(replace(photo, marks=keyed)).marks == replace(keyed, key=())
 
 
 def test_the_best_points_a_warm_start_scored_are_slid_again_in_full(monkeypatch):

@@ -938,7 +938,7 @@ export function tracePlane(samples, camera) {
  * as `tracePlane` gives them, the inner edges' apart (`ridge_x`, `ridge_y`),
  * and, when they matter, the stroke each point lies on (for the pairs, the
  * lines' distances, sent as `far`: a stroke, the nearest and farthest it
- * stands, metres, the sea lines and those with only sky above, `clear`) and the piece of a collage it lies in: `pieceAt(sample)`, by default how many
+ * stands, metres, the sea lines, those with only sky above, `clear`, and the key lines, `key`) and the piece of a collage it lies in: `pieceAt(sample)`, by default how many
  * of the marks' cuts stand left of it across the frame. Samples come from
  * `traceSamples`, each saying its stroke. Without marks, the plane alone.
  */
@@ -948,7 +948,7 @@ export function markedPlane(samples, camera, marks, pieceAt = null) {
   const lineOf = (s) => marks?.lines?.[s.stroke] ?? s.stroke;
   const sky = inner.size ? samples.filter((s) => !inner.has(lineOf(s))) : samples;
   const plane = tracePlane(sky, camera);
-  const named = marks?.pairs?.length || marks?.far?.length || marks?.sea?.length || marks?.clear?.length;
+  const named = marks?.pairs?.length || marks?.far?.length || marks?.sea?.length || marks?.clear?.length || marks?.key?.length;
   if (!inner.size && !cuts.length && !named) return plane;
   const ridge = samples.filter((s) => inner.has(lineOf(s)));
   const ridges = ridge.length ? tracePlane(ridge, camera) : { x: [], y: [] };
@@ -968,6 +968,7 @@ export function markedPlane(samples, camera, marks, pieceAt = null) {
       .map((one) => [index.get(one.line), ...farRange(one.bands)]);
     out.sea = (marks.sea ?? []).filter((id) => index.has(id)).map((id) => index.get(id));
     out.clear = (marks.clear ?? []).filter((id) => index.has(id)).map((id) => index.get(id));
+    out.key = (marks.key ?? []).filter((id) => index.has(id)).map((id) => index.get(id));
   }
   if (cuts.length) {
     const piece = pieceAt ?? ((s) => pieceOf(cuts, s.x / camera.width));

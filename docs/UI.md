@@ -3022,7 +3022,9 @@ where its frames meet, **Distance** (K) to say how far a line stands (pick one
 or several of < 1 km, 1–3, 3–10, 10–30 and > 30 km, then click the line; its
 distance shows under it), **Sky only** (O) to say a skyline line has only sky
 above it, sure of it (a click on the line, again to take it back; "Sky only"
-shows over it), and the rubber (E). The **magnet** (M) says whether a
+shows over it), **Key line** (I) to say a skyline line matters most, a peak or
+a notch known anywhere (three at most, "Key" shows over it), and the rubber (E).
+The **magnet** (M) says whether a
 line drawn snaps onto the photo's nearest edge; Alt does the other for one
 stroke. A click with a pen on a line makes it that pen's kind, and a skyline
 stroke lying under another one is read as a ridge, as is a trace saved before
@@ -3040,7 +3042,9 @@ since haze grows likelier to hide it. Only land standing behind the ridge the
 line lies on counts, half as far again or more: that ridge a few pixels over the
 trace is its own crest drawn a little low, not land behind. A place keeps its
 score up to a fiftieth of the line under land and is ruled out past a tenth; it
-says the share and how far out that land stands, on its point of the map too.
+says the share and how far out that land stands, on its point of the map too. A
+place that explains the whole trace better than it lays the key lines loses
+half the difference.
 
 Find's side has two faces. **Prepare** numbers the four steps a search runs
 through (Skyline, Area, Mesh, Search), each lit once done; the warnings about
@@ -3103,7 +3107,7 @@ progress, verdict, how far the best place can be trusted (**Solid**, **Check
 it** or **Weak**, with what lowers it and the score the area reaches by chance)
 and places, each with the area's chance score beside its own. What lowers it
 says what does not fit there: what the place explains without the lines'
-distances, Sky only and pairs when they cost it much, a piece of a cut collage
+distances, Sky only, pairs and key lines when they cost it much, a piece of a cut collage
 eased as far as a piece may go, land over the lines said to have only sky
 above. A panorama is tried 60° wide and up and never leaned, so one whose lens
 sits at that floor, or that little explains, offers **Read as a photo**: zoomed

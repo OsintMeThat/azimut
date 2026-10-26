@@ -1159,6 +1159,30 @@ describe('the marks beside the trace', () => {
     expect(photo.clearing).toBe(false);
   });
 
+  it('marks a skyline line as key on a click with the Key line tool, never a ridge', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.addStroke(across(0.3));
+    photo.setPen('ridge');
+    photo.addStroke(across(0.6));
+    const [sky, ridge] = photo.marks.lines;
+    photo.setKeying(true);
+    expect(photo.keying).toBe(true);
+    expect(photo.keyAt({ u: 0.5, v: 0.3 }, SCALE)).toBe(sky);
+    expect(photo.marks.key).toEqual([sky]);
+    expect(photo.keyBadges.map((badge) => badge.line)).toEqual([sky]);
+    // a ridge is never key; a click off every line says nothing; the same line again takes it back
+    expect(photo.keyAt({ u: 0.5, v: 0.6 }, SCALE)).toEqual({ ridge });
+    expect(photo.keyAt({ u: 0.5, v: 0.95 }, SCALE)).toBeNull();
+    photo.keyAt({ u: 0.5, v: 0.3 }, SCALE);
+    expect(photo.marks.key).toEqual([]);
+    photo.undoStroke();
+    expect(photo.marks.key).toEqual([sky]);
+    // another tool out puts this one away
+    photo.setClearing(true);
+    expect(photo.keying).toBe(false);
+  });
+
   it('draws a line along the sea with the Sea line pen, and a click with another pen makes it that kind', async () => {
     const photo = overlay();
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
@@ -1180,9 +1204,9 @@ describe('the marks beside the trace', () => {
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
     photo.restoreWork({
       strokes: [across(0.3), across(0.5, 0.3, 0.6)],
-      marks: { lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], clear: [4] },
+      marks: { lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], clear: [4], key: [8] },
     });
-    expect(photo.marks).toEqual({ lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], sea: [], clear: [4] });
+    expect(photo.marks).toEqual({ lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], sea: [], clear: [4], key: [8] });
     photo.restoreWork({ strokes: [across(0.3), across(0.5, 0.3, 0.6)] });
     expect(photo.marks.inner).toEqual([1]);
     // Detect lays the skyline afresh: the cuts stay, they belong to the photo

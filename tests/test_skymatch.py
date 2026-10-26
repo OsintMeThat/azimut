@@ -1,5 +1,7 @@
 """Where a traced skyline lies on a turn: heading, lens and tilt, and the verdict."""
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -603,6 +605,28 @@ def test_a_line_with_only_sky_above_loses_the_place_where_land_stands_over_it():
     # the left half has sky above it wherever the photo sees
     assert said((0,), whole).over == 0.0
     assert said((0,)).over == 0.0
+
+
+def test_a_key_line_off_the_terrain_costs_the_place_and_one_on_it_adds_nothing():
+    turn = skyturn([(40, 2.0, 3), (52, 1.5, 1.5), (61, 2.2, 4)], base=0.5)
+    x, y = trace_on(turn, heading=50.0, fov=40.0)
+    # the right half is one stroke, and the analyst drew a bump into it that the terrain lacks
+    line = (x > 0).astype(np.int64)
+    y = y + np.where(x > 0, 0.08 * np.sin(np.pi * np.clip(x / x.max(), 0, 1)), 0.0)
+
+    def said(marks):
+        return skymatch.match(x, y, turn, half_width=HALF, fov=40.0, known=True, facing=(50.0, 3.0),
+                              marks=marks).fits[0]
+
+    plain = said(skymatch.Marks(line=line))
+    # the line that lies on the terrain, marked key, changes nothing
+    assert said(skymatch.Marks(line=line, key=(0,))).explained == pytest.approx(plain.explained, abs=1e-6)
+    # the bent one costs the place half of what it explains past that line's own fit
+    off = said(skymatch.Marks(line=line, key=(1,)))
+    assert off.explained < plain.explained - 0.05
+    # an inner edge marked key is not held: only skyline lines are (v23, v24 and v28 fell when they were)
+    ridge = skymatch.Marks(line=line, ridge_x=x[:40], ridge_y=y[:40] - 0.05, ridge_line=np.full(40, 2), key=(2,))
+    assert said(ridge).explained == pytest.approx(said(replace(ridge, key=())).explained, abs=1e-6)
 
 
 def test_the_lines_own_crest_off_the_trace_is_not_land_over_it(monkeypatch):

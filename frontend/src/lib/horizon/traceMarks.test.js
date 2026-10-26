@@ -29,6 +29,9 @@ import {
   setSea,
   skySamples,
   toggleClear,
+  toggleKey,
+  keyBadges,
+  KEYS_MAX,
   togglePair,
 } from './traceMarks.js';
 
@@ -36,7 +39,7 @@ const line = (v, from = 0, to = 1, count = 11) => Array.from({ length: count }, 
 
 describe('marks made whole', () => {
   it('gives each stroke an id and keeps only what names strokes there are', () => {
-    expect(cleanMarks(null, 3)).toEqual({ lines: [0, 1, 2], inner: [], pairs: [], cuts: [], far: [], sea: [], clear: [] });
+    expect(cleanMarks(null, 3)).toEqual({ lines: [0, 1, 2], inner: [], pairs: [], cuts: [], far: [], sea: [], clear: [], key: [] });
     const kept = cleanMarks(
       {
         lines: [4, 7],
@@ -46,11 +49,12 @@ describe('marks made whole', () => {
         far: [{ line: 4, bands: ['b3', 'b1', 'x'] }, { line: 4, bands: ['near'] }, { line: 9, bands: ['b1'] }, { line: 7, bands: [] }],
         sea: [4, 4, 7, 9],
         clear: [9, 7, 4],
+        key: [7, 4, 9],
       },
       2
     );
-    // a sea line is skyline, and so is a line with only sky above: an inner edge can be neither
-    expect(kept).toEqual({ lines: [4, 7], inner: [7], pairs: [[7, 4]], cuts: [0.3, 0.7], far: [{ line: 4, bands: ['b1', 'b3'] }], sea: [4], clear: [4] });
+    // a sea line is skyline, and so are a line with only sky above and a key line: an inner edge can be none
+    expect(kept).toEqual({ lines: [4, 7], inner: [7], pairs: [[7, 4]], cuts: [0.3, 0.7], far: [{ line: 4, bands: ['b1', 'b3'] }], sea: [4], clear: [4], key: [4] });
     // ids that do not match the strokes start again in order
     expect(cleanMarks({ lines: [1], inner: [1] }, 2).lines).toEqual([0, 1]);
   });
@@ -214,5 +218,35 @@ describe('lines with only sky above', () => {
     const marks = toggleClear(cleanMarks({ lines: [3, 3] }, 2), 3);
     expect(clearBadges(strokes, marks)).toEqual([{ line: 3, at: strokes[1][2] }]);
     expect(clearBadges(strokes, cleanMarks({ lines: [3, 3] }, 2))).toEqual([]);
+  });
+});
+
+describe('key lines', () => {
+  it('are said of a skyline line and taken back the same way, never of an inner edge', () => {
+    const marks = cleanMarks({ lines: [0, 1, 2], inner: [2] }, 3);
+    const keyed = toggleKey(marks, 1);
+    expect(keyed.key).toEqual([1]);
+    expect(marksSaid(keyed)).toBe(true);
+    expect(sameMarks(keyed, marks)).toBe(false);
+    expect(toggleKey(keyed, 1).key).toEqual([]);
+    // only skyline lines are held to their fit
+    expect(toggleKey(marks, 2)).toBe(marks);
+    expect(setInner(keyed, 1, true).key).toEqual([]);
+    expect(cleanMarks({ lines: [0, 1, 2], inner: [2], key: [2, 1, 7] }, 3).key).toEqual([1]);
+  });
+
+  it('are three at most: the newest takes the oldest one’s place', () => {
+    let marks = cleanMarks({ lines: [0, 1, 2, 3] }, 4);
+    for (const id of [3, 0, 2, 1]) marks = toggleKey(marks, id);
+    expect(KEYS_MAX).toBe(3);
+    expect(marks.key).toEqual([0, 2, 1]);
+    expect(cleanMarks({ lines: [0, 1, 2, 3], key: [3, 0, 2, 1] }, 4).key).toEqual([0, 2, 1]);
+  });
+
+  it('are named three quarters along their longest stroke, clear of the Sky only badge', () => {
+    const strokes = [line(0.3, 0, 0.4, 5), line(0.4, 0.5, 1, 9)];
+    const marks = toggleKey(cleanMarks({ lines: [3, 3] }, 2), 3);
+    expect(keyBadges(strokes, marks)).toEqual([{ line: 3, at: strokes[1][6] }]);
+    expect(keyBadges(strokes, cleanMarks({ lines: [3, 3] }, 2))).toEqual([]);
   });
 });

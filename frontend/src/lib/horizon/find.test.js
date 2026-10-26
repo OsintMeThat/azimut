@@ -340,6 +340,12 @@ describe('a search kept, against the setup now', () => {
     const cut = now();
     cut.photo.marks.cuts = [0.5];
     expect(sameAsk(ask, cut)).toBe(false);
+    // a line said sea, sky only or key is a change too
+    for (const said of ['sea', 'clear', 'key']) {
+      const marked = now();
+      marked.photo.marks[said] = [0];
+      expect(sameAsk(ask, marked)).toBe(false);
+    }
     expect(sameAsk(ask, { ...now(), facing: ['n'] })).toBe(false);
     expect(sameAsk(ask, { ...now(), stands: ['summit'] })).toBe(false);
     expect(sameAsk(ask, { ...now(), view: ['down'] })).toBe(false);
@@ -488,7 +494,7 @@ describe('how far a result can be trusted', () => {
 
   it('says what does not fit at the best place: marks it does better without, a piece at its edge, land over Sky only', () => {
     const costly = reliability({ verdict: 'match', places: [{ ...best, bare: 0.96 }], points }, { ask });
-    expect(costly.reasons).toEqual(['Without the lines’ distances, Sky only and pairs it explains 96%: one of them may be wrong here']);
+    expect(costly.reasons).toEqual(['Without the lines’ distances, Sky only, pairs and key lines it explains 96%: one of them may be wrong here']);
     // marks that cost a little say nothing
     expect(reliability({ verdict: 'match', places: [{ ...best, bare: 0.9 }], points }, { ask }).level).toBe('solid');
     const pieces = [{ piece: 0, turn: 0.25 }, { piece: 1, turn: 1, edge: true }, { piece: 2, tilt: 0.5 }];

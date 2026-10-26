@@ -859,6 +859,10 @@ describe('the marks beside the trace, as the search reads them', () => {
     const clear = markedPlane(samples, FRAME, { lines: [5, 9], inner: [], pairs: [], cuts: [], far: [], sea: [], clear: [5] });
     expect(clear.line).toEqual([0, 1, 1]);
     expect(clear.clear).toEqual([0]);
+    // and the key lines, for the search to hold each place to them
+    const key = markedPlane(samples, FRAME, { lines: [5, 9], inner: [], pairs: [], cuts: [], far: [], sea: [], clear: [], key: [9] });
+    expect(key.line).toEqual([0, 1, 1]);
+    expect(key.key).toEqual([1]);
   });
 });
 

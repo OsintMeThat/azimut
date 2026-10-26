@@ -23,6 +23,7 @@ function fakeOverlay(over = {}) {
     cutting: false,
     distancing: false,
     clearing: false,
+    keying: false,
     pen: 'sky',
     magnet: true,
     front: null,
@@ -33,6 +34,7 @@ function fakeOverlay(over = {}) {
     setCutting: vi.fn(),
     setDistancing: vi.fn(),
     setClearing: vi.fn(),
+    setKeying: vi.fn(),
     setPen: vi.fn(),
     ...over,
   };
@@ -45,6 +47,7 @@ describe('the trace tools', () => {
     expect(toolForKey('r')).toBe('ridge');
     expect(toolForKey('X')).toBe('cut');
     expect(toolForKey('o')).toBe('clear');
+    expect(toolForKey('i')).toBe('key');
     expect(toolForKey('q')).toBeNull();
   });
 
@@ -75,11 +78,16 @@ describe('the trace tools', () => {
     expect(idle.setClearing).toHaveBeenCalledWith(true);
     expect(toolOn(fakeOverlay({ clearing: true }), 'clear')).toBe(true);
     expect(editing(fakeOverlay({ clearing: true }))).toBe(true);
+    pressTool(idle, 'key');
+    expect(idle.setKeying).toHaveBeenCalledWith(true);
+    expect(toolOn(fakeOverlay({ keying: true }), 'key')).toBe(true);
+    expect(editing(fakeOverlay({ keying: true }))).toBe(true);
     putAway(drawing);
     expect(drawing.setLinking).toHaveBeenCalledWith(false);
     expect(drawing.setCutting).toHaveBeenCalledWith(false);
     expect(drawing.setDistancing).toHaveBeenCalledWith(false);
     expect(drawing.setClearing).toHaveBeenCalledWith(false);
+    expect(drawing.setKeying).toHaveBeenCalledWith(false);
   });
 
   it('say why one cannot come out yet', () => {
@@ -88,6 +96,7 @@ describe('the trace tools', () => {
     expect(toolBlocked(fakeOverlay(), 'cut')).toBe('');
     expect(toolBlocked(fakeOverlay({ strokes: [] }), 'far')).toBe('Draw a line first');
     expect(toolBlocked(fakeOverlay({ strokes: [] }), 'clear')).toBe('Draw a line first');
+    expect(toolBlocked(fakeOverlay({ strokes: [] }), 'key')).toBe('Draw a line first');
   });
 
   it('say what the one out asks for, and what the trace holds', () => {
@@ -96,12 +105,14 @@ describe('the trace tools', () => {
     expect(toolHint(fakeOverlay({ cutting: true }))).toMatch(/where two frames of the collage meet/);
     expect(toolHint(fakeOverlay({ distancing: true }))).toBe('Pick how far, then click a line · the same again takes it away');
     expect(toolHint(fakeOverlay({ clearing: true }))).toMatch(/^Click a skyline line with only sky above it/);
+    expect(toolHint(fakeOverlay({ keying: true }))).toMatch(/^Click a skyline line that matters most, three at most/);
     expect(toolHint(fakeOverlay({ tracing: true, pen: 'ridge', magnet: false }))).toMatch(/ridge seen against farther land · drawn as is/);
     expect(toolHint(fakeOverlay())).toBe('');
     expect(marksSummary({ lines: [0, 1, 2], inner: [1, 2], pairs: [[1, 0]], cuts: [0.5] })).toBe('2 ridges · 1 pair · 2 pieces');
     expect(marksSummary({ lines: [0], inner: [], pairs: [], cuts: [] })).toBe('');
     expect(marksSummary({ lines: [0, 1], inner: [], pairs: [], cuts: [], far: [{ line: 0, bands: ['b1'] }] })).toBe('1 distance');
     expect(marksSummary({ lines: [0, 1], inner: [], pairs: [], cuts: [], clear: [0, 1] })).toBe('2 lines with only sky above');
+    expect(marksSummary({ lines: [0, 1], inner: [], pairs: [], cuts: [], key: [1] })).toBe('1 key line');
   });
 });
 
@@ -125,6 +136,8 @@ describe('the trace as it reads over the photo', () => {
     expect(detailed.map((item) => item.id)).toEqual(['on', 'near', 'off', 'ridge', 'terrain', 'margin', 'cut', 'pair']);
     const sure = traceLegend(fakeOverlay({ marks: { ...marks, clear: [0] }, details: true }));
     expect(sure.at(-1)).toEqual({ id: 'clear', label: 'Only sky above' });
+    const keyed = traceLegend(fakeOverlay({ marks: { ...marks, key: [0] }, details: true }));
+    expect(keyed.at(-1)).toEqual({ id: 'key', label: 'Key line' });
     const lined = traceLegend(fakeOverlay({ marks }), { coloured: true, ridgeLines: true, level: true });
     expect(lined.slice(-2)).toEqual([
       { id: 'ridge-lines', label: 'Terrain ridges' },

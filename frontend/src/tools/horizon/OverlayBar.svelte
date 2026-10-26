@@ -90,6 +90,10 @@
         [['R'], 'Draw a ridge seen against farther land'],
         [['P'], 'Pair a line in front with the line behind it'],
         [['X'], 'Cut a collage where its frames meet'],
+        [['S'], "Draw along the sea's horizon"],
+        [['K'], 'Say how far a line stands'],
+        [['O'], 'Say only sky stands above a line'],
+        [['I'], 'Mark a key line, three at most'],
         [['M'], 'Snap to edges, or not'],
         [['Alt', 'drag'], 'Draw the other way, snapped or not'],
         [['E'], 'Rub out'],
@@ -136,7 +140,7 @@
   // what the band holds changes its width: a trace, its tools, the gap
   $effect(() => {
     void [overlay.source?.kind, overlay.strokes.length, overlay.erasing, overlay.warped, overlay.tracing, overlay.busy, overlay.error];
-    void [overlay.linking, overlay.cutting, overlay.distancing, overlay.clearing, overlay.pen, overlay.front];
+    void [overlay.linking, overlay.cutting, overlay.distancing, overlay.clearing, overlay.keying, overlay.pen, overlay.front];
     void [gap, fitting, away];
     narrow();
   });
@@ -398,6 +402,8 @@
       <DistanceChips {overlay} />
     {:else if overlay.clearing}
       <span class="say">Click a skyline line with only sky above it.</span>
+    {:else if overlay.keying}
+      <span class="say">Click a skyline line that matters most, three at most.</span>
     {:else if overlay.busy}
       <span class="say"><span class="spinner" aria-hidden="true"></span>Opening…</span>
     {:else if overlay.error}

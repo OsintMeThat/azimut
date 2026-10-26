@@ -14,6 +14,8 @@
  *          distances ticked (`DISTANCE_BANDS`), several when unsure
  *   sea    the ids of lines along the sea's horizon: sky above, open sea below
  *   clear  the ids of skyline lines the analyst is sure have only sky above them
+ *   key    the ids of skyline lines that matter most, a peak or a notch known
+ *          anywhere: a place that misses them pays (`KEYS_MAX` at most)
  *
  * A stroke drawn along the skyline that lies under another one is an inner
  * edge whatever pen drew it: nothing under a line can be the sky's edge.
@@ -27,7 +29,11 @@ export const NO_MARKS = Object.freeze({
   far: [],
   sea: [],
   clear: [],
+  key: [],
 });
+
+/** How many lines may be key: past that, the newest takes the oldest's place. */
+export const KEYS_MAX = 3;
 
 /**
  * How far a line may stand, in the words the tool offers, and the metres each
@@ -130,13 +136,14 @@ export function cleanMarks(marks, count) {
     .slice(0, CUTS_MAX);
   const sea = [...new Set((marks?.sea ?? []).filter((id) => known.has(id) && !inner.includes(id)))].sort((a, b) => a - b);
   const clear = [...new Set((marks?.clear ?? []).filter((id) => known.has(id) && !inner.includes(id)))].sort((a, b) => a - b);
+  const key = [...new Set((marks?.key ?? []).filter((id) => known.has(id) && !inner.includes(id)))].slice(-KEYS_MAX);
   const far = [];
   for (const one of marks?.far ?? []) {
     const bands = cleanBands(one?.bands);
     if (!known.has(one?.line) || !bands.length || far.some((f) => f.line === one.line)) continue;
     far.push({ line: one.line, bands });
   }
-  return { lines, inner, pairs: pairs.slice(0, PAIRS_MAX), cuts, far, sea, clear };
+  return { lines, inner, pairs: pairs.slice(0, PAIRS_MAX), cuts, far, sea, clear, key };
 }
 
 /** Whether two sets of marks say the same thing. */
@@ -151,7 +158,8 @@ export function sameMarks(a, b) {
     x.pairs.every((p, i) => p[0] === y.pairs[i][0] && p[1] === y.pairs[i][1]) &&
     JSON.stringify(x.far ?? []) === JSON.stringify(y.far ?? []) &&
     sameIds(x.sea ?? [], y.sea ?? []) &&
-    sameIds(x.clear ?? [], y.clear ?? [])
+    sameIds(x.clear ?? [], y.clear ?? []) &&
+    sameIds(x.key ?? [], y.key ?? [])
   );
 }
 
@@ -169,7 +177,8 @@ export function marksSaid(marks) {
         marks.cuts.length ||
         marks.far?.length ||
         marks.sea?.length ||
-        marks.clear?.length),
+        marks.clear?.length ||
+        marks.key?.length),
   );
 }
 
@@ -291,7 +300,7 @@ export function togglePair(marks, front, back) {
   };
 }
 
-/** Marks with a stroke's id said to be an inner edge (`true`) or the skyline; an inner edge is no sea line and has land above. */
+/** Marks with a stroke's id said to be an inner edge (`true`) or the skyline; an inner edge is no sea line, has land above and is no key line. */
 export function setInner(marks, id, inner) {
   const rest = marks.inner.filter((one) => one !== id);
   return {
@@ -299,7 +308,16 @@ export function setInner(marks, id, inner) {
     inner: inner ? [...rest, id].sort((a, b) => a - b) : rest,
     sea: inner ? (marks.sea ?? []).filter((one) => one !== id) : (marks.sea ?? []),
     clear: inner ? (marks.clear ?? []).filter((one) => one !== id) : (marks.clear ?? []),
+    key: inner ? (marks.key ?? []).filter((one) => one !== id) : (marks.key ?? []),
   };
+}
+
+/** Marks with a skyline line said to be key, or no longer when it was; past `KEYS_MAX` the oldest goes. An inner edge stays as it is. */
+export function toggleKey(marks, id) {
+  if (marks.inner.includes(id)) return marks;
+  const had = (marks.key ?? []).includes(id);
+  const rest = (marks.key ?? []).filter((one) => one !== id);
+  return { ...marks, key: had ? rest : [...rest, id].slice(-KEYS_MAX) };
 }
 
 /** Marks with a skyline line said to have only sky above it, or not when it was said already; an inner edge stays as it is. */
@@ -358,6 +376,13 @@ export function clearBadges(strokes, marks) {
     .filter((badge) => badge.at);
 }
 
+/** Where each key line is named: three quarters along its longest stroke (`{ line, at }`), clear of the other badges. */
+export function keyBadges(strokes, marks) {
+  return (marks?.key ?? [])
+    .map((line) => ({ line, at: alongOf(strokes, marks.lines, line, 0.75) }))
+    .filter((badge) => badge.at);
+}
+
 /** Marks with a cut added at `u`, or the cut at `index` taken away. */
 export function addCut(marks, u) {
   return cleanMarks({ ...marks, cuts: [...marks.cuts, u] }, marks.lines.length);
@@ -394,8 +419,13 @@ function middleOf(strokes, lines, id) {
 
 /** A quarter along a line's longest stroke. */
 function quarterOf(strokes, lines, id) {
+  return alongOf(strokes, lines, id, 0.25);
+}
+
+/** A share of the way along a line's longest stroke. */
+function alongOf(strokes, lines, id, share) {
   const longest = longestOf(strokes, lines, id);
-  return longest ? longest[Math.floor(longest.length / 4)] : null;
+  return longest ? longest[Math.floor(longest.length * share)] : null;
 }
 
 /**
