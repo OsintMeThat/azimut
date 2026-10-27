@@ -607,7 +607,9 @@ def test_a_line_with_only_sky_above_loses_the_place_where_land_stands_over_it():
     assert said((0,)).over == 0.0
 
 
-def test_a_key_line_off_the_terrain_costs_the_place_and_one_on_it_adds_nothing():
+def test_a_key_line_off_the_terrain_costs_the_place_and_one_on_it_adds_nothing(monkeypatch):
+    # the marked lines alone: nothing stands in for them where none is marked
+    monkeypatch.setattr(skymatch, "DISTINCT_FLOOR_PX", float("inf"))
     turn = skyturn([(40, 2.0, 3), (52, 1.5, 1.5), (61, 2.2, 4)], base=0.5)
     x, y = trace_on(turn, heading=50.0, fov=40.0)
     # the right half is one stroke, and the analyst drew a bump into it that the terrain lacks
@@ -627,6 +629,34 @@ def test_a_key_line_off_the_terrain_costs_the_place_and_one_on_it_adds_nothing()
     # an inner edge marked key is not held: only skyline lines are (v23, v24 and v28 fell when they were)
     ridge = skymatch.Marks(line=line, ridge_x=x[:40], ridge_y=y[:40] - 0.05, ridge_line=np.full(40, 2), key=(2,))
     assert said(ridge).explained == pytest.approx(said(replace(ridge, key=())).explained, abs=1e-6)
+
+
+def test_the_sharpest_stretches_stand_in_for_key_lines_where_none_is_marked(monkeypatch):
+    # gentle hills with one sharp peak in them, and the same hills where the peak is a plain hump
+    sharp = skyturn([(40, 2.0, 8), (52, 3.0, 0.6), (64, 1.5, 9)], base=0.5)
+    blunt = skyturn([(40, 2.0, 8), (52, 2.2, 1.2), (64, 1.5, 9)], base=0.5)
+    x, y = trace_on(sharp, heading=52.0, fov=40.0)
+    held = skymatch._distinct(x, y, HALF)
+    # the stretch round the peak is held, the gentle slopes are not
+    assert held is not None and 0.1 < held.mean() <= 0.3
+    assert np.all(np.abs(x[held]) < 0.4)
+    # a trace with no feature has nothing to hold
+    flat_x, flat_y = trace_on(skyturn([(52, 1.0, 30)], base=0.5), heading=52.0, fov=40.0)
+    assert skymatch._distinct(flat_x, flat_y, HALF) is None
+
+    def said(turn, marks=None):
+        return skymatch.match(x, y, turn, half_width=HALF, fov=40.0, known=True, facing=(52.0, 3.0),
+                              marks=marks).fits[0].explained
+
+    truth, rival = said(sharp), said(blunt)
+    monkeypatch.setattr(skymatch, "DISTINCT_FLOOR_PX", float("inf"))
+    # the place that has the peak loses nothing; the one that lays the hills but not the peak pays for it
+    assert said(sharp) == pytest.approx(truth, abs=1e-9)
+    assert said(blunt) > rival + 0.1
+    monkeypatch.undo()
+    # a line the analyst marks key is held in their stead
+    line = (x > 0.5).astype(np.int64)
+    assert said(blunt, skymatch.Marks(line=line, key=(1,))) != pytest.approx(rival, abs=1e-6)
 
 
 def test_a_part_brushed_as_bent_counts_less_and_never_sinks_the_place():

@@ -104,7 +104,10 @@ not sunk by it, and given no freedom for it either.
 A skyline line the analyst marks as key (`Marks.key`, a peak or a notch they
 would know anywhere) is held to its own fit: a place that explains the whole
 trace better than it lays that line loses `KEY_COST` of the difference. A key
-line lying on the terrain adds nothing.
+line lying on the terrain adds nothing. Where the analyst marks none, the
+trace's sharpest stretches stand in for them (`_distinct`: its peaks and
+notches, a stretch that fits almost nowhere by chance, as Baatz's contour words
+and Tzeng's concavities weigh them).
 
 The camera's tilt may be bounded too (`tilts`, degrees): a skyline filmed on foot
 is near level, and a place that needs the camera 40° down to lay the trace has
@@ -240,6 +243,14 @@ PIECE_STRIP_ROLL = 1.0
 # 27 real cases (rank among 40 rivals): v04 2nd → 1st, v16 2nd → 1st, v07s 4th → 3rd, v17 3rd → 2nd, v22 4th →
 # 3rd, none lower. Inner edges marked key cost v23, v24 and v28 places, so only skyline lines are held.
 KEY_COST = 0.5
+# Where no line is marked key, the trace's sharpest stretches are held so: the quarter of its points whose stretch
+# (a twentieth of the trace's width either way) bends most off its own straight line, past 6 px. Measured on the
+# owner's 30 real cases without their key lines (rank among 40 rivals): v04 2nd → 1st, v17 3rd → 2nd, v22 4th → 3rd,
+# v19 24th → 22nd, none lower; the window bench 22 → 23 of 31 first within 1 km (v29), none lower. Held past 4 px
+# instead, v23 fell.
+DISTINCT_SHARE = 0.25
+DISTINCT_REACH = 0.05
+DISTINCT_FLOOR_PX = 6.0
 # What a point in a part brushed as bent weighs in what a place explains, beside a point elsewhere. A first guess
 # (2026-10-26), to be measured on the owner's brushed cases.
 BENT_WEIGHT = 0.25
@@ -683,6 +694,42 @@ def off_line(x: np.ndarray, y: np.ndarray, half_width: float) -> np.ndarray:
         px = np.abs(off) * half_width
         weight = np.sqrt(np.where(px <= HUBER_PX, 1.0, HUBER_PX / np.maximum(px, 1e-9)))
     return off * half_width
+
+
+def _distinct(x: np.ndarray, y: np.ndarray, half_width: float) -> np.ndarray | None:
+    """The trace's sharpest stretches, as a mask: each point's bend off the straight line through its stretch,
+    the sharpest bend within half that stretch, its top `DISTINCT_SHARE`; None when nothing bends `DISTINCT_FLOOR_PX`."""
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    if x.size < 3 * MIN_POINTS:
+        return None
+    order = np.argsort(x, kind="stable")
+    xs, ys = x[order], y[order]
+    reach = DISTINCT_REACH * float(xs[-1] - xs[0])
+    lo = np.searchsorted(xs, xs - reach, side="left")
+    hi = np.searchsorted(xs, xs + reach, side="right")
+
+    def summed(v: np.ndarray) -> np.ndarray:
+        run = np.concatenate([[0.0], np.cumsum(v)])
+        return run[hi] - run[lo]
+
+    count = (hi - lo).astype(np.float64)
+    sx, sy, sxx, sxy = summed(xs), summed(ys), summed(xs * xs), summed(xs * ys)
+    den = count * sxx - sx * sx
+    flat = np.abs(den) <= 1e-12
+    slope = np.where(flat, 0.0, (count * sxy - sx * sy) / np.where(flat, 1.0, den))
+    cut = (sy - slope * sx) / np.maximum(count, 1.0)
+    bend = np.where(count >= 5, np.abs(ys - (cut + slope * xs)) * half_width, 0.0)
+    if bend.max() < DISTINCT_FLOOR_PX:
+        return None
+    # the stretch round a feature is held, not its one sharpest point
+    a = np.searchsorted(xs, xs - reach / 2, side="left")
+    b = np.searchsorted(xs, xs + reach / 2, side="right")
+    near = np.array([bend[i:j].max() for i, j in zip(a, b)])
+    top = near >= max(float(np.quantile(near, 1.0 - DISTINCT_SHARE)), DISTINCT_FLOOR_PX)
+    held = np.zeros(x.size, dtype=bool)
+    held[order] = top
+    return held if held.sum() >= MIN_POINTS else None
 
 
 def parts(x: np.ndarray) -> list[np.ndarray]:
@@ -1194,10 +1241,11 @@ def _judge(
     fit: Fit, x: np.ndarray, y: np.ndarray, turn: Turn, marks: Marks, ridges: Ridges | None,
     half_width: float, projection: Projection, bands: tuple[np.ndarray, np.ndarray] | None = None,
     floor: float = 0.0, clear: Turn | None = None, top: Turn | None = None, turns: Sequence[Turn] = (),
-    sure: np.ndarray | None = None,
+    sure: np.ndarray | None = None, distinct: np.ndarray | None = None, rounding: float | None = None,
 ) -> Fit:
     """A place judged on all the analyst marked: a collage's pieces eased, the inner edges read
-    against the terrain's ridges, the pairs' order checked, the lines said to have only sky above
+    against the terrain's ridges, the key lines held to their own fit (else the trace's sharpest stretches,
+    `distinct`), the pairs' order checked, the lines said to have only sky above
     (`sure`, laid on `top`) held clear of the terrain (`_over`: `clear`, the turn as far as the photo is
     said to see, else every cut of it in `turns`)."""
     piece = marks.piece if marks.cut and marks.piece is not None and marks.piece.size == x.size else None
@@ -1240,12 +1288,22 @@ def _judge(
         # an inner edge with no ridge under it takes score away, one lying on its ridge adds none
         score = min(sky, (sky + inner) / 2)
     key: float | None = None
+    held: np.ndarray | None = None
     if marks.key and marks.line is not None and marks.line.size == x.size:
         held = np.isin(marks.line, marks.key)
+    elif not marks.key and distinct is not None and distinct.size == x.size:
+        held = distinct
+    if held is not None:
         if held.sum() >= MIN_POINTS:
             azimuth, elevation, per = through(x[held], y[held], None if piece is None else piece[held])
-            gap = _gap(elevation, turn, top, None if sure is None else sure[held], azimuth,
-                       None if bands is None else bands[0][held], None if bands is None else bands[1][held])
+            on = None if sure is None else sure[held]
+            low, high = (None, None) if bands is None else (bands[0][held], bands[1][held])
+            if rounding:
+                # judged as the fit is: near lines rounded alike, so a hand's teeth on a near ridge are no feature
+                rise, ground = _rounded(azimuth, elevation, turn, rounding, top, on)
+                gap = _gate(rise - ground, turn, azimuth, low, high, top, on)
+            else:
+                gap = _gap(elevation, turn, top, on, azimuth, low, high)
             cost = np.where(np.isnan(gap), LOST_LOSS, _loss(np.nan_to_num(gap) * per))
             key = float(1.0 - cost.mean() / LOST_LOSS)
             # a key line off the terrain costs the place, one lying on it adds nothing
@@ -1345,6 +1403,15 @@ def match(
         sure = np.isin(marks.line, marks.clear)
         sure = sure if sure.any() else None
     bent = _bent(marks, x.size)
+    # where no line is marked key, the sharpest stretches stand in for them: never a sea line, nor a bent part
+    distinct = None if marks is not None and marks.key else _distinct(x, y, half_width)
+    if distinct is not None and marks is not None:
+        if marks.sea and marks.line is not None and marks.line.size == x.size:
+            distinct = distinct & ~np.isin(marks.line, marks.sea)
+        if bent is not None:
+            distinct = distinct & ~bent
+        if distinct.sum() < MIN_POINTS:
+            distinct = None
     tops: list[Turn | None] = [None] * len(turns)
     read = [*turns, *beyond]
     if sure is not None:
@@ -1390,9 +1457,9 @@ def match(
                       half_width=half_width, free=not known, level=level, start=roll,
                       widen=RANGE_EASE if within is not None else 1.03, projection=projection, bounds=bounds,
                       bands=bands, tilts=tilts, rounding=rounding, top=tops[index], sure=sure, bent=bent)
-        if fit is not None and marks is not None:
-            fit = _judge(fit, x, y, turns[index], marks, ridges, half_width, projection, bands, floor, clear,
-                         tops[index], read, sure)
+        if fit is not None and (marks is not None or distinct is not None):
+            fit = _judge(fit, x, y, turns[index], marks if marks is not None else Marks(), ridges, half_width, projection,
+                         bands, floor, clear, tops[index], read, sure, distinct, rounding)
         refined.append(fit)
     found = sorted((fit for fit in refined if fit is not None), key=lambda fit: -fit.explained)
     if sectors is not None:

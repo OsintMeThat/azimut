@@ -3047,7 +3047,8 @@ trace is its own crest drawn a little low, not land behind. A place keeps its
 score up to a fiftieth of the line under land and is ruled out past a tenth; it
 says the share and how far out that land stands, on its point of the map too. A
 place that explains the whole trace better than it lays the key lines loses
-half the difference. The lines in a part brushed as bent count a quarter as
+half the difference. Where no line is marked key, the trace's sharpest quarter, its
+peaks and notches, is held the same way. The lines in a part brushed as bent count a quarter as
 much, and that part never sinks a place on its own.
 
 Find's side has two faces. **Prepare** numbers the four steps a search runs
