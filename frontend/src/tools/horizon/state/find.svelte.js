@@ -67,8 +67,24 @@ export const WHO = {
   aircraft: { label: 'Aircraft', low: 300, high: 3000 },
 };
 
-/** A roof or a terrace: on the ground's mode, the eye this high over the ground. */
+/** A roof or a terrace: on the ground's mode, the eye this high over the ground when its floors are not said. */
 export const ROOF = { low: 3, high: 10 };
+
+/** A floor's height, metres: a roof `n` floors up stands n × FLOOR_M over the ground. */
+export const FLOOR_M = 3;
+
+/** The eye on a roof `floors` floors up, from the roof itself to someone standing on it; the usual roof unsaid. */
+export function roofFor(floors) {
+  const n = Math.round(Number(floors));
+  return floors !== null && floors !== '' && Number.isFinite(n) && n >= 1 ? { low: n * FLOOR_M, high: n * FLOOR_M + 2 } : { ...ROOF };
+}
+
+/** How many floors up a roof stands, or null when they were not said. */
+export function floorsOf(who) {
+  if (takenOf(who) !== 'roof') return null;
+  const n = Number(who.low) / FLOOR_M;
+  return Number.isInteger(n) && n >= 1 && Number(who.high) === Number(who.low) + 2 ? n : null;
+}
 
 /** Who took the photo as Find offers it, a roof or a terrace beside the modes. */
 export const TAKEN = [

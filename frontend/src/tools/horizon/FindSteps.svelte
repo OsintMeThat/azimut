@@ -52,7 +52,7 @@
   } from '../../lib/horizon/find.js';
   import { AUTO_REACH, cleanZoom, reachText, zoomText } from '../../lib/horizon/hints.js';
   import { headingText } from '../../lib/horizon/geometry.js';
-  import { BRUSH_SIZES, durationText, EFFORTS, estimateText, OVERS, SPACINGS, SPEEDS, TAKEN, takenOf, VIEWS, WATERS, whoFor, widenedText } from './state/find.svelte.js';
+  import { BRUSH_SIZES, durationText, EFFORTS, estimateText, FLOOR_M, floorsOf, OVERS, roofFor, SPACINGS, SPEEDS, TAKEN, takenOf, VIEWS, WATERS, whoFor, widenedText } from './state/find.svelte.js';
   import { farLabel } from '../../lib/horizon/traceMarks.js';
   import { marksSummary } from '../../lib/horizon/traceTools.js';
   import { COARSE_RELIEF_M, reliefWords } from '../../lib/horizon/overlay.js';
@@ -114,7 +114,7 @@
   const resultFace = $derived(Boolean(search) && !preparing);
 
   /** What a search runs with, in a line: the lens, which way it faces, how far it reads, who took the photo. */
-  function toldOf({ hints = {}, lens = null, panorama = false, who = 'ground', facing = [], stands = [], marks = null, looking = [], mirror = false, round = false, framed = null, sun = null, water = false, over = null }) {
+  function toldOf({ hints = {}, lens = null, panorama = false, who = 'ground', floors = null, facing = [], stands = [], marks = null, looking = [], mirror = false, round = false, framed = null, sun = null, water = false, over = null }) {
     const zoom = cleanZoom(hints.zoom);
     const anyLens = !framed && !lens && !panorama && !zoom.length;
     const lensWords = framed
@@ -147,7 +147,7 @@
       ...(way ? [`facing ${way}`] : []),
       ...(sun?.date && sun?.sides?.length ? [`sun ${sun.sides.join(' or ')} on ${sun.date}`] : []),
       reachWords,
-      (TAKEN.find((one) => one.id === who) ?? TAKEN[0]).label.toLowerCase(),
+      (TAKEN.find((one) => one.id === who) ?? TAKEN[0]).label.toLowerCase() + (floors ? `, ${floors} floor${floors > 1 ? 's' : ''} up` : ''),
       ...(ground ? [`on a ${ground}`] : []),
       ...VIEWS.filter((v) => looking.includes(v.id)).map((v) => v.label.toLowerCase()),
       ...(mirror ? ['mirrored too'] : []),
@@ -165,6 +165,7 @@
       lens: overlay.lens,
       panorama: overlay.isPanorama,
       who: takenOf(find.who),
+      floors: floorsOf(find.who),
       facing: find.facing,
       stands: find.stands,
       marks: overlay.marks,
@@ -195,7 +196,7 @@
     if (!ask) return '';
     const area = areaText(areaPoints(ask.area));
     const aligned = ask.alignments?.length ? `${ask.alignments.length} ${ask.alignments.length === 1 ? 'alignment' : 'alignments'}` : '';
-    const line = toldOf({ hints: ask.hints ?? {}, panorama: ask.hints?.picture === 'panorama', who: takenOf(ask.who), facing: ask.facing ?? [], stands: ask.stands ?? [], marks: ask.photo?.marks ?? null, looking: ask.view ?? [], mirror: Boolean(ask.mirror), round: Boolean(ask.round), sun: ask.sun ?? null, water: Boolean(ask.water), over: ask.over ?? null }).line;
+    const line = toldOf({ hints: ask.hints ?? {}, panorama: ask.hints?.picture === 'panorama', who: takenOf(ask.who), floors: floorsOf(ask.who), facing: ask.facing ?? [], stands: ask.stands ?? [], marks: ask.photo?.marks ?? null, looking: ask.view ?? [], mirror: Boolean(ask.mirror), round: Boolean(ask.round), sun: ask.sun ?? null, water: Boolean(ask.water), over: ask.over ?? null }).line;
     return [area, line, aligned].filter(Boolean).join(' · ');
   });
 
@@ -902,6 +903,17 @@
               {/each}
             </div>
           </div>
+          {#if takenOf(find.who) === 'roof'}
+            <div class="fs-row">
+              <span class="fs-name" id="find-floors">Floors</span>
+              <span class="fs-range">
+                <input type="number" min="1" max="30" step="1" value={floorsOf(find.who) ?? ''} placeholder="?" aria-labelledby="find-floors"
+                  title={`How many floors up the roof stands, ${FLOOR_M} m each; left empty, ${roofFor(null).low} to ${roofFor(null).high} m`}
+                  onchange={(event) => find.setWho({ mode: 'ground', ...roofFor(event.currentTarget.value) })} />
+                eye {find.who.low} to {find.who.high} m above the ground
+              </span>
+            </div>
+          {/if}
           {#if find.who.mode !== 'ground'}
             <div class="fs-row">
               <span class="fs-name">Height</span>

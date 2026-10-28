@@ -362,6 +362,22 @@ describe('the steps of Find', () => {
     expect(roof.textContent).toContain('ridges within 50 km · roof');
   });
 
+  it('asks a roof how many floors up it stands, three metres each, and says them in the line', () => {
+    const find = fakeFind({ who: { mode: 'ground', low: 3, high: 10 } });
+    const root = steps({ find });
+    const floors = root.querySelector('[aria-labelledby="find-floors"]');
+    expect(floors.value).toBe('');
+    floors.value = '4';
+    floors.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(find.setWho).toHaveBeenCalledWith({ mode: 'ground', low: 12, high: 14 });
+    const told = steps({ find: fakeFind({ who: { mode: 'ground', low: 12, high: 14 } }) });
+    expect(told.querySelector('[aria-labelledby="find-floors"]').value).toBe('4');
+    expect(told.textContent).toContain('roof, 4 floors up');
+    expect(told.textContent).toContain('eye 12 to 14 m above the ground');
+    // on foot there are no floors to say
+    expect(steps({ find: fakeFind() }).querySelector('[aria-labelledby="find-floors"]')).toBeNull();
+  });
+
   it('ticks the directions the photo may face on a compass, any way in its middle', () => {
     const find = fakeFind({ facing: ['ne'] });
     const root = steps({ find });

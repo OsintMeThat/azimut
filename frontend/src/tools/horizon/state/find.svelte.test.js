@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { brushFor, createFindState, durationText, estimateText, pacedSeconds, ROOF, TAKEN, takenOf, WHO, whoFor, widenedText } from './find.svelte.js';
+import { brushFor, createFindState, durationText, estimateText, FLOOR_M, floorsOf, pacedSeconds, ROOF, roofFor, TAKEN, takenOf, WHO, whoFor, widenedText } from './find.svelte.js';
 import { destination } from '../../../lib/measure.js';
 
 const CAMERA = { lat: 16.9988, lon: 45.0938 };
@@ -334,6 +334,21 @@ describe('who took it', () => {
     expect(takenOf(find.who)).toBe('ground');
     expect(takenOf({ mode: 'drone', low: 10, high: 120 })).toBe('drone');
     expect(TAKEN.map((one) => one.id)).toEqual(['ground', 'roof', 'drone', 'aircraft']);
+  });
+
+  it('stands a roof as many floors up as said, three metres each, the usual roof when they are not', () => {
+    const { find } = finder();
+    find.setWho({ mode: 'ground', ...roofFor(4) });
+    expect(find.who).toEqual({ mode: 'ground', low: 4 * FLOOR_M, high: 4 * FLOOR_M + 2 });
+    expect(takenOf(find.who)).toBe('roof');
+    expect(floorsOf(find.who)).toBe(4);
+    // left empty, or not a floor count, the roof is the usual one and its floors unsaid
+    expect(roofFor('')).toEqual(ROOF);
+    expect(roofFor(null)).toEqual(ROOF);
+    expect(roofFor(0)).toEqual(ROOF);
+    expect(floorsOf(whoFor('roof'))).toBeNull();
+    expect(floorsOf(whoFor('ground'))).toBeNull();
+    expect(floorsOf({ mode: 'drone', low: 12, high: 14 })).toBeNull();
   });
 
   it('keeps the settings a search runs with to what it offers', () => {

@@ -3225,7 +3225,9 @@ to one and a half times as tall, and each place keeps the height that explains
 most: the trace's colours and the terrain's line read the photo at it, and Find's
 look lays the picture taller or flatter. **Taken** says who
 took it: On foot, **Roof** (from a roof or a terrace, the eye 3 to 10 m over the
-ground), Drone or Aircraft, the last two with the heights they flew at.
+ground; **Floors** says how many floors up, 3 m each, and the eye then stands from
+that roof to 2 m over it), Drone or Aircraft, the last two with the heights they
+flew at.
 
 An alignment is made by four clicks, the near thing and what stands behind it
 on the photo, then both on the map. What the next click is for is said in the
