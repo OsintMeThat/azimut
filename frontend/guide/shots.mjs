@@ -15,10 +15,13 @@
  * guide cites is missing: a control that moved is followed, a control that went is
  * reported instead of framed in the void.
  *
+ * The Extension tabs are taken in a second browser with the capture extension loaded
+ * (extension.mjs), over OpenStreetMap's own tiles.
+ *
  * Needs `uv` for the backend, ffmpeg on PATH for the demo video, and the network for the
- * public imagery the maps are drawn from. Horizon draws 3D, so the browser asks for the
- * GPU and falls back to software where there is none. Run it before a release, look at
- * the pictures it changed, and commit them with the release.
+ * public imagery and the map tiles the pictures are drawn from. Horizon draws 3D, so the
+ * browser asks for the GPU and falls back to software where there is none. Run it
+ * before a release, look at the pictures it changed, and commit them with the release.
  */
 
 import { chromium } from '@playwright/test';
@@ -29,7 +32,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build, createServer, loadConfigFromFile, mergeConfig, preview } from 'vite';
 
-import { buildDemo, IMAGERY, PIER } from './demo.mjs';
+import { buildDemo, CHANNEL, IMAGERY } from './demo.mjs';
+import { openExtension } from './extension.mjs';
 import { DEFAULT_WINDOW, STAGES } from './stages.mjs';
 
 const frontend = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -46,7 +50,7 @@ const CLIP = 'main.canvas .canvas-body';
 /** Room kept round the frames when a picture is cut down to them, in CSS pixels. */
 const MARGIN = 28;
 /** Anchors that frame a group of controls rather than the first one found. */
-const UNION = new Set(['start.stages', 'notebook.insert', 'compare.session', 'proof.save']);
+const UNION = new Set(['start.stages', 'start.tabs', 'notebook.insert', 'compare.session', 'proof.save']);
 
 const say = (line) => process.stdout.write(`  ${line}\n`);
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -65,10 +69,18 @@ async function until(what, test, timeout = 60_000) {
 }
 
 async function call(method, path, body) {
-  const response = await fetch(`${api}${path}`, {
-    method,
-    headers: body instanceof FormData || !body ? undefined : { 'content-type': 'application/json' },
-    body: body instanceof FormData ? body : body && JSON.stringify(body),
+  const send = () =>
+    fetch(`${api}${path}`, {
+      method,
+      headers: body instanceof FormData || !body ? undefined : { 'content-type': 'application/json' },
+      body: body instanceof FormData ? body : body && JSON.stringify(body),
+    });
+  // The server drops a kept-alive connection after a few idle seconds (an ffmpeg encode
+  // is enough), and a request sent on it as it closes fails before reaching it. Once
+  // more on a fresh connection is safe: that request never arrived.
+  const response = await send().catch((error) => {
+    if (error?.message !== 'fetch failed') throw error;
+    return send();
   });
   if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`);
   return response.json();
@@ -195,7 +207,7 @@ async function run() {
     JSON.stringify({
       tile_providers: [IMAGERY],
       update_check_on_start: false,
-      home_view: { ...PIER, zoom: 15 },
+      home_view: { ...CHANNEL, zoom: 15 },
       api_keys: { sentinelhub: 'guide-demo-instance' },
     })
   );
@@ -206,6 +218,7 @@ async function run() {
   });
   let vite = null;
   let browser = null;
+  let ext = null;
   const failed = [];
   const made = [];
   try {
@@ -243,7 +256,7 @@ async function run() {
       channel: 'chromium',
       args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu'],
     });
-    const demo = await buildDemo({ call, browser, scratch });
+    const demo = await buildDemo({ call, scratch });
     say(`demo case filed: ${demo.caseId}`);
 
     const context = await browser.newContext({
@@ -274,31 +287,46 @@ async function run() {
     for (const stage of STAGES) {
       if (!take.has(stage.shot)) continue;
       const clip = stage.clip ?? CLIP;
+      // the extension's pictures are taken in its own browser, on the map tab
+      const outside = stage.browser === 'extension';
       try {
-        await page.setViewportSize(stage.window ?? DEFAULT_WINDOW);
+        if (outside && !ext) {
+          const { ingest_token: token } = await call('POST', '/api/settings/ingest-token');
+          ext = await openExtension({
+            source: join(root, 'extension'),
+            scratch,
+            api,
+            token,
+            caseId: demo.caseId,
+            view: { ...CHANNEL, zoom: 16 },
+            window: stage.window ?? DEFAULT_WINDOW,
+          });
+        }
+        const shooter = outside ? ext.map : page;
+        if (!outside) await page.setViewportSize(stage.window ?? DEFAULT_WINDOW);
         if (stage.from) await pause(300);
-        await stage.run({ page, go, demo });
+        await stage.run({ page, go, demo, ext });
         // The case sidebar is a second column the tool pages do not explain. A picture
         // taken from another keeps it as it was: pressing the toggle would close the
         // menu that picture is about.
         const sidebar = page.locator('aside[data-guide="start.sidebar"]');
-        if (!stage.from && (await sidebar.isVisible()) !== Boolean(stage.sidebar)) {
+        if (!outside && !stage.from && (await sidebar.isVisible()) !== Boolean(stage.sidebar)) {
           await page.locator('.topbar button[title="Toggle case sidebar"]').click();
         }
-        await settle(page, clip, stage.settle ?? (stage.map ? 5000 : 800));
-        await page.mouse.move(1, 1);
+        await settle(shooter, clip, stage.settle ?? (stage.map ? 5000 : 800));
+        await shooter.mouse.move(1, 1);
         // no caret or focus ring on the field the stage typed in; a picture taken from
         // another keeps its focus, which may be what holds its menu open
-        if (!stage.from) await page.evaluate(() => document.activeElement?.blur?.());
+        if (!stage.from) await shooter.evaluate(() => document.activeElement?.blur?.());
         const anchors = shots.get(stage.shot);
-        const { cut, rects, problems } = await measure(page, {
+        const { cut, rects, problems } = await measure(shooter, {
           anchors,
           clip,
           crop: stage.crop,
           focus: stage.focus ?? [],
         });
         if (problems.length) throw new Error(problems.join('; '));
-        const picture = await photograph(page, cut);
+        const picture = await photograph(shooter, cut);
         writeFileSync(join(OUT, `${stage.shot}.webp`), picture);
         writeFileSync(
           join(OUT, `${stage.shot}.json`),
@@ -310,12 +338,14 @@ async function run() {
         failed.push(`${stage.shot}: ${String(error.message ?? error).split('\n')[0]}`);
         // what the screen showed when it failed, for whoever is fixing the stage
         if (process.env.GUIDE_DEBUG_DIR) {
-          await page.screenshot({ path: join(process.env.GUIDE_DEBUG_DIR, `${stage.shot}.png`) }).catch(() => {});
+          const shown = outside ? ext?.map : page;
+          await shown?.screenshot({ path: join(process.env.GUIDE_DEBUG_DIR, `${stage.shot}.png`) }).catch(() => {});
         }
       } finally {
         // a picture taken from another one closes what it opened, for the next one
-        if (stage.from) {
-          await page.keyboard.press('Escape').catch(() => {});
+        if (stage.from && stage.after !== false) {
+          if (stage.after) await stage.after({ page }).catch(() => {});
+          else await page.keyboard.press('Escape').catch(() => {});
           await pause(300);
         }
       }
@@ -328,6 +358,7 @@ async function run() {
       }
     }
   } finally {
+    await ext?.close();
     await browser?.close();
     await vite?.close();
     backend.kill();

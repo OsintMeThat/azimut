@@ -311,7 +311,8 @@ cd frontend && npm run guide:shots && cd ..
 
 It builds the UI into a scratch folder, runs a private Azimut on a throwaway
 workspace, and needs `uv`, ffmpeg and the network (the maps are drawn from public
-USGS imagery). It fails when a control the guide frames is gone; fix the page in
+USGS imagery, the extension's from OpenStreetMap's tiles). The demo case is filed from
+public-domain photos, credited in `frontend/guide/photos/CREDITS.md`. It fails when a control the guide frames is gone; fix the page in
 `frontend/src/lib/guide.js` or its staging in `frontend/guide/stages.mjs`, then
 commit the pictures in `frontend/src/assets/guide/` with the release.
 

@@ -184,6 +184,15 @@
     fires: T.createFires(),
   };
   const ORDER = ["measure", "pins", "sky", "grid", "refs", "fires"];
+  /** What the app's guide calls each seat, so its picture can number the tab. */
+  const GUIDE = {
+    measure: "ext.measure",
+    pins: "ext.points",
+    sky: "ext.sky",
+    grid: "ext.grid",
+    refs: "ext.refs",
+    fires: "ext.fires",
+  };
   const current = () => (state.tool ? tools[state.tool] : null);
 
   /**
@@ -1989,7 +1998,7 @@
     const tool = tools[id];
     const usable = tool.offerable !== false;
     const why = usable ? "" : ` disabled title="${esc(tool.readout(state.units) ?? "")}"`;
-    return button("tab", tool.icon, tool.label, state.tool === id, ` data-tab="${id}"${why}`);
+    return button("tab", tool.icon, tool.label, state.tool === id, ` data-tab="${id}" data-guide="${GUIDE[id]}"${why}`);
   }
 
   /** Today, in the form every date in here is written in. */

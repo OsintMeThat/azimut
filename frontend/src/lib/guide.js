@@ -41,7 +41,7 @@ export const PAGES = {
   start: {
     title: 'Start here',
     icon: 'compass',
-    lead: 'A case is one folder on your disk, and everything you do in Azimut files into it.',
+    lead: 'Azimut is a toolkit for open-source investigations, strongest at geolocation. Each investigation is a case: a folder on your disk where everything you do is filed.',
     shot: 'start',
     marks: [
       { anchor: 'start.home', title: 'Home', text: 'The open case at a glance: recent work, what waits for you, its to-do lists.' },
@@ -64,28 +64,62 @@ export const PAGES = {
       { anchor: 'start.sidebar', title: 'The case sidebar', text: 'The case’s folders, to-do lists and recent work, beside every tool.' },
     ],
     tips: [
-      { title: 'Install the capture extension first', text: 'Without it, a map open in another tab has to be screenshotted and imported by hand.' },
+      { title: 'Install the capture extension first', text: 'It files what you see on other map sites into the case, and the Capture extension page sets it up.' },
       { title: 'You do not need a case to start', text: 'The first tool that saves something opens a scratch session, and Keep as case names it later.' },
       { title: 'The folder is half yours', text: 'Azimut owns the azimut/ directory inside a case and leaves the rest of the folder alone.' },
       { title: 'The network waits for you', text: 'Only an action that needs it reaches out, plus a check of GitHub and PyPI for new versions at start, which Settings turns off.' },
     ],
   },
+  // The extension's page comes in tabs (EXTENSION_TABS): setting it up, then using it.
   extension: {
     title: 'Capture extension',
     icon: 'crop',
-    lead: 'A browser add-on that files what you are looking at in another tab straight into the open case.',
+    lead: 'A browser add-on that files what you look at in another tab into the open case, and draws Azimut’s tools over the maps you already use.',
     shot: 'extension',
     marks: [
       { anchor: 'ext.status', title: 'Is it installed', text: 'Says whether this browser has it, and whether an update is ready.' },
-      { anchor: 'ext.folder', title: 'Chrome, Edge, Brave', text: 'Load this folder unpacked from the extensions page, then reload the tab.' },
-      { anchor: 'ext.firefox', title: 'Firefox', text: 'Install the signed .xpi from about:addons, Install Add-on From File.' },
-      { anchor: 'ext.pairing', title: 'Pairing', text: 'Paste the token in the extension’s options. Rotating it unpairs every copy.' },
+      { anchor: 'ext.folder', title: 'Chrome, Edge, Brave', text: 'Copy the path, turn on developer mode, press Load unpacked and paste it, then reload the tab.' },
+      { anchor: 'ext.firefox', title: 'Firefox', text: 'Download the signed .xpi, then Install Add-on From File in the gear menu of about:addons.' },
+      { anchor: 'ext.pairing', title: 'Pairing', text: 'Paste this token in the extension’s options. Rotating it unpairs every copy.' },
     ],
     tips: [
-      { title: 'It files three things', text: 'A screenshot of the map you are on with its coordinates, the point as a saved place, and any other page as a bookmark.' },
-      { title: 'It draws tools over other maps', text: 'Measure, media pins, sun and moon, a search grid and windows of case pictures, on the map sites you already use.' },
       { title: 'It reaches outside only when you ask', text: 'It can fill a composer on X or Bluesky and hand a picture to a reverse-search engine. Everything else goes to Azimut on this computer.' },
       { title: 'Updates follow the browser', text: 'Chromium updates its folder from Settings, Firefox updates the signed add-on, and Settings warns when two copies are loaded.' },
+    ],
+  },
+  'extension-capture': {
+    lead: 'On a map site, Alt+Shift+A opens the extension. Everything it fills in comes from the page’s address.',
+    shot: 'extension-capture',
+    marks: [
+      { anchor: 'ext.site', title: 'The site', text: 'The map site it recognised. On any other page it offers a bookmark instead.' },
+      { anchor: 'ext.case', title: 'Case', text: 'The case the capture goes into.' },
+      { anchor: 'ext.position', title: 'Lat / Lon', text: 'Read from the address, and yours to correct.' },
+      { anchor: 'ext.bearing', title: 'Zoom / Bearing', text: 'Most sites write no bearing, so type one for the north arrow to point right.' },
+      { anchor: 'ext.marks', title: 'Scale bar and north arrow', text: 'Drawn on the capture from the zoom, and remembered once ticked.' },
+      { anchor: 'ext.capture', title: 'Select area to capture', text: 'Draw the rectangle to keep. It lands in Media with its address, date and coordinates.' },
+      { anchor: 'ext.place', title: 'Save this place', text: 'Files the middle of the map as a place, with no picture.' },
+      { anchor: 'ext.tools', title: 'Draw tools over this map', text: 'Puts the tools of the next tab over the map.' },
+    ],
+    tips: [
+      { title: 'It reads the address, never the page', text: 'A capture’s coordinates are what the address bar says, so anyone with its saved link can check them.' },
+      { title: 'Any other page becomes a bookmark', text: 'A page that is not a map is filed as a link, with nothing downloaded.' },
+    ],
+  },
+  'extension-tools': {
+    lead: 'Azimut’s tools drawn over another site’s map. Nothing goes into the case until you ask.',
+    shot: 'extension-tools',
+    marks: [
+      { anchor: 'ext.measure', title: 'Measure', text: 'Distances, rings and lines of sight, to the map’s own scale.' },
+      { anchor: 'ext.points', title: 'Points', text: 'The case’s media, places and captures where they stand, and new points to file.' },
+      { anchor: 'ext.sky', title: 'Sun & moon', text: 'Where they stood at the hour you pick, to read a shadow.' },
+      { anchor: 'ext.grid', title: 'Search grid', text: 'A grid to sweep cell by cell, kept with the case.' },
+      { anchor: 'ext.refs', title: 'Refs', text: 'The case’s photos and videos held over the map while you pan.' },
+      { anchor: 'ext.ref', title: 'A reference window', text: 'Drag it, pin it beside the map or fold it. A capture never includes it.' },
+      { anchor: 'ext.fires', title: 'Fires', text: 'NASA FIRMS detections over whatever map is shown.' },
+    ],
+    tips: [
+      { title: 'Measuring needs a flat map', text: 'Street View, a tilted 3D view or a globe zoomed far out keep the reference windows but refuse to measure, and say why.' },
+      { title: 'The panel moves', text: 'Drag it by its header, and fold it to see the whole map.' },
     ],
   },
   settings: {
@@ -220,7 +254,16 @@ export const PAGES = {
     shot: 'satellite',
     marks: [
       { anchor: 'sat.search', title: 'Search', text: 'Saved places, a pasted coordinate and a bundled gazetteer answer as you type.' },
-      { anchor: 'sat.tools', title: 'Tools', text: 'Measure, a search grid, sun and moon, and windows of case pictures over the map.' },
+      {
+        anchor: 'sat.tools',
+        title: 'Tools',
+        text: 'Measure, a search grid, sun and moon, and windows of case pictures over the map.',
+        opens: {
+          shot: 'satellite-refs',
+          lead: 'Add reference holds a photo or video of the case over the map, to compare while you move the map under it.',
+          marks: [{ anchor: 'map.ref', title: 'Reference window', text: 'Drag it, dock it beside the map or fold it. A capture never includes it.' }],
+        },
+      },
       { anchor: 'map.imagery', title: 'Imagery', text: 'The provider and the date of the picture. Free ones are built in, keyed ones use yours.' },
       { anchor: 'map.3d', title: '3D', text: 'Lifts the imagery onto the relief, and the middle button then tilts as well as turns.' },
       {
@@ -528,13 +571,66 @@ export const JOURNEYS = [
     steps: [
       { tool: 'media', text: 'Import the photo, or paste the link of the post it came from so its origin comes with it.', marks: ['media.link', 'media.import'] },
       { tool: 'inspect', text: 'Crop and adjust what is hard to read, and look for edits in the error levels.', marks: ['inspect.tabs', 'inspect.strip'] },
-      { tool: 'reverse', text: 'Look for earlier copies: prepare the picture, then press an engine.', marks: ['reverse.adjust', 'reverse.engines'] },
-      { tool: 'satellite', text: 'Search the area and change provider and date until the ground matches, then capture the view.', marks: ['sat.search', 'map.imagery', 'sat.capture'] },
-      { tool: 'proof', text: 'Put the photo beside the capture, number what agrees, and name the point. It is filed as a place.', marks: ['proof.panels', 'proof.tools', 'proof.coords'] },
+      {
+        tool: 'reverse',
+        text: 'Optional for some pictures, but worth doing: an earlier copy found by an engine often dates the picture better than the post.',
+        marks: ['reverse.adjust', 'reverse.engines'],
+      },
+      {
+        tool: 'satellite',
+        shot: 'satellite-refs',
+        text: 'Search the area and hold the photo over the map in a reference window. Use whichever Map tool helps, Compare, Horizon, Measure or the sun, then capture the view.',
+        marks: ['sat.search', 'map.ref', 'sat.tools', 'sat.capture'],
+      },
+      { tool: 'proof', text: 'Put the photo beside the capture, mark what agrees in one colour per feature, and name the point. It is filed as a place.', marks: ['proof.panels', 'proof.tools', 'proof.coords'] },
       { tool: 'post', text: 'Turn the proof into a sourced thread, then Publish copies the posts and opens the site.', marks: ['post.first', 'post.publish'] },
     ],
+    result: {
+      shot: 'proof-result',
+      text: 'The proof as it leaves the case: the photo beside the imagery, each match in its own colour, the point named.',
+    },
   },
 ];
+
+/** The extension's page, in the tabs it is read in: setting it up, then using it. */
+export const EXTENSION_TABS = [
+  { id: 'extension', label: 'Install' },
+  { id: 'extension-capture', label: 'Capture' },
+  { id: 'extension-tools', label: 'Tools on the map' },
+  { id: 'extension-sites', label: 'Where it works' },
+];
+
+/**
+ * What the extension does where, read off `engine/mapsites.py`: every site it reads
+ * draws a flat map it can measure, and the views that are not flat keep everything
+ * but the drawing tools. A cell is `yes`, `no` or the sentence the extension says.
+ */
+export const EXTENSION_SITES = {
+  lead: 'The extension reads the page’s address, never its content. What it can do depends on the view.',
+  sites: [
+    'Google Maps',
+    'Google Earth',
+    'Bing Maps',
+    'Yandex Maps',
+    'OpenStreetMap',
+    'Apple Maps',
+    'Zoom Earth',
+    'Satellites.pro',
+    'Copernicus Browser',
+  ],
+  columns: ['Capture and save the place', 'Measure, grid, sun and fires', 'Points and Refs'],
+  rows: [
+    { view: 'A flat map on any of these sites', cells: ['yes', 'yes', 'yes'] },
+    { view: 'Street View', cells: ['yes', 'Work on the map, not in Street View', 'Refs, and points at the address’s coordinate'] },
+    { view: 'A tilted 3D view', cells: ['yes', 'Turn 3D off', 'Refs, and points at the address’s coordinate'] },
+    { view: 'A globe zoomed far out', cells: ['yes', 'Zoom in', 'Refs, and points at the address’s coordinate'] },
+    { view: 'Any other page', cells: ['Saved as a bookmark', 'no', 'no'] },
+  ],
+  elsewhere: [
+    { where: 'X and Bluesky', text: 'When Geo Report publishes, it fills the composer with the thread and the proof. Posting stays yours.' },
+    { where: 'Google Lens, Bing, Yandex, TinEye', text: 'When Reverse Search opens an engine, it hands the picture to the engine’s uploader.' },
+  ],
+};
 
 /** Every keystroke the app listens for, by where it is pressed. */
 export const KEYMAP = [
@@ -764,13 +860,18 @@ const REFERENCE = {
 
 const page = (id) => ({ id, label: PAGES[id].title, icon: PAGES[id].icon, kind: 'page', tools: [] });
 const reference = (id) => ({ id, label: REFERENCE[id].title, icon: REFERENCE[id].icon, kind: id, tools: [], lead: REFERENCE[id].lead });
+// a page read in tabs: its tabs stand where a workspace's tools do
+const tabbed = (id, tabs) => ({ id, label: PAGES[id].title, icon: PAGES[id].icon, kind: 'tabs', tools: tabs.map((tab) => tab.id) });
+
+/** The label of a tab, a workspace's tool or one of a tabbed page's own tabs. */
+export const tabLabel = (id) => EXTENSION_TABS.find((tab) => tab.id === id)?.label ?? toolLabel(id);
 
 /**
  * The menu, in the order somebody arriving reads it: what a case is, then a goal walked
  * end to end, then the tools by workspace, then the reference.
  */
 export const MENU = [
-  { title: null, items: [page('start'), page('extension')] },
+  { title: null, items: [page('start'), tabbed('extension', EXTENSION_TABS)] },
   {
     title: 'Journeys',
     items: JOURNEYS.map((journey) => ({
@@ -818,8 +919,9 @@ export function shotOf(name) {
  * `journey:` id), the tab of a tool a workspace holds, or the start.
  */
 export function landingFor(at) {
+  // an entry with tabs opens on its first, as choosing it from the menu does
   const item = MENU_ITEMS.find((entry) => entry.id === at);
-  if (item) return { item: item.id, tool: null };
+  if (item) return { item: item.id, tool: item.tools[0] ?? null };
   const holder = MENU_ITEMS.find((entry) => entry.tools.includes(at));
   if (holder) return { item: holder.id, tool: at };
   return { item: MENU_ITEMS[0].id, tool: null };
@@ -835,18 +937,40 @@ export function journeysThrough(tool) {
 
 /** The marks a journey step frames, read off the page of the tool it happens in. */
 export function stepMarks(step) {
-  const marks = PAGES[step.tool]?.marks ?? [];
+  const marks = [];
+  const gather = (list) => {
+    for (const mark of list ?? []) {
+      marks.push(mark);
+      gather(mark.opens?.marks);
+    }
+  };
+  gather(PAGES[step.tool]?.marks);
   return step.marks.map((anchor) => marks.find((mark) => mark.anchor === anchor)).filter(Boolean);
 }
 
-/** Every picture the guide shows, with the marks drawn on it: what `guide:shots` makes. */
+/** The picture a journey step is read on: its own, or its tool's. */
+export const stepShot = (step) => step.shot ?? PAGES[step.tool].shot;
+
+/**
+ * Every picture the guide shows, with the marks drawn on it: what `guide:shots` makes.
+ * A journey step taken on a picture of its own adds its frames to that picture's.
+ */
 export function allShots() {
   const shots = [];
+  const add = (shot, anchors) => {
+    const known = shots.find((one) => one.shot === shot);
+    if (known) known.anchors.push(...anchors.filter((anchor) => !known.anchors.includes(anchor)));
+    else shots.push({ shot, anchors: [...anchors] });
+  };
   const walk = (shot, marks) => {
-    shots.push({ shot, anchors: marks.map((mark) => mark.anchor) });
+    add(shot, marks.map((mark) => mark.anchor));
     for (const mark of marks) if (mark.opens) walk(mark.opens.shot, mark.opens.marks ?? []);
   };
   for (const one of Object.values(PAGES)) walk(one.shot, one.marks);
+  for (const journey of JOURNEYS) {
+    for (const step of journey.steps) if (step.shot) add(step.shot, step.marks);
+    if (journey.result) add(journey.result.shot, []);
+  }
   return shots;
 }
 

@@ -6,7 +6,7 @@ vi.mock('../lib/api.js', () => ({ api: { get: vi.fn(async () => []) } }));
 
 const { uiState } = await import('../lib/state.svelte.js');
 const { default: GuideDialog } = await import('./GuideDialog.svelte');
-const { JOURNEYS, KEYMAP, FIXES, PAGES } = await import('../lib/guide.js');
+const { EXTENSION_SITES, EXTENSION_TABS, JOURNEYS, KEYMAP, FIXES, PAGES, stepMarks } = await import('../lib/guide.js');
 
 let live;
 let onclose;
@@ -75,9 +75,12 @@ describe('the guide over a tool', () => {
     expect(document.querySelectorAll('.legend li')[1].classList.contains('on')).toBe(true);
   });
 
-  it('lists the subtleties under the picture', async () => {
+  it('lists the subtleties under the picture, under a heading that says they are tips', async () => {
     await open('media');
-    expect([...document.querySelectorAll('.tip strong')].map((t) => t.textContent)).toEqual(
+    const tips = document.querySelector('section.tips');
+    expect(tips.getAttribute('aria-label')).toBe('Tips');
+    expect(tips.querySelector('.tips-head').textContent.trim()).toBe('Tips');
+    expect([...tips.querySelectorAll('li strong')].map((t) => t.textContent)).toEqual(
       PAGES.media.tips.map((tip) => tip.title)
     );
   });
@@ -126,7 +129,7 @@ describe('a journey', () => {
   it('walks its steps on the picture of each tool, with only that step’s frames', async () => {
     const journey = JOURNEYS[0];
     await open(`journey:${journey.id}`);
-    expect([...document.querySelectorAll('.steps .step')]).toHaveLength(journey.steps.length);
+    expect([...document.querySelectorAll('.steps .step:not(.result)')]).toHaveLength(journey.steps.length);
     expect(document.querySelector('.lead').textContent).toBe(journey.steps[0].text);
     expect(lines()).toHaveLength(journey.steps[0].marks.length);
     press([...document.querySelectorAll('.walk button')].find((b) => b.textContent.includes('Next')));
@@ -136,12 +139,72 @@ describe('a journey', () => {
     expect(document.querySelector('.legend .leads')).toBeNull();
   });
 
+  it('takes a step on a picture of its own when the tool’s page has none of that moment', async () => {
+    const journey = JOURNEYS[0];
+    const at = journey.steps.findIndex((step) => step.shot);
+    await open(`journey:${journey.id}`);
+    press(document.querySelectorAll('.steps .step')[at]);
+    expect(document.querySelector('.lead').textContent).toBe(journey.steps[at].text);
+    expect(lines().map((line) => line.querySelector('strong').textContent)).toEqual(
+      stepMarks(journey.steps[at]).map((mark) => mark.title)
+    );
+  });
+
+  it('ends on what it made, past its last step', async () => {
+    const journey = JOURNEYS[0];
+    await open(`journey:${journey.id}`);
+    const next = () => [...document.querySelectorAll('.walk button')].find((b) => b.textContent.includes('Next'));
+    for (let step = 0; step < journey.steps.length; step += 1) press(next());
+    expect(current('.steps .step')).toBe('Result');
+    expect(document.querySelector('.lead').textContent).toBe(journey.result.text);
+    expect(document.querySelector('.shot img')).not.toBeNull();
+    expect(lines()).toHaveLength(0);
+    expect(next().disabled).toBe(true);
+  });
+
   it('is reached from a tool at the step it is used at', async () => {
     await open('satellite');
     const link = [...document.querySelectorAll('.journey')].find((b) => b.textContent.includes('Geolocate a photo'));
     press(link);
     expect(current('.menu .entry')).toBe('Geolocate a photo');
     expect(current('.steps .step')).toContain('Satellite');
+  });
+});
+
+describe('the extension, in tabs', () => {
+  it('opens on setting it up, with the tabs that follow it', async () => {
+    await open('extension');
+    expect(current('.menu .entry')).toBe('Capture extension');
+    expect([...document.querySelectorAll('.tabs .tab')].map((tab) => tab.textContent.trim())).toEqual(
+      EXTENSION_TABS.map((tab) => tab.label)
+    );
+    expect(current('.tabs .tab')).toBe('Install');
+    expect(lines()).toHaveLength(PAGES.extension.marks.length);
+    // a tab of the page explains it rather than opening a tool
+    expect(document.querySelector('.go')).toBeNull();
+  });
+
+  it('shows the popup and the tools on their own pictures', async () => {
+    await open('extension');
+    const tab = (label) => [...document.querySelectorAll('.tabs .tab')].find((b) => b.textContent.trim() === label);
+    press(tab('Capture'));
+    expect(document.querySelector('.lead').textContent).toBe(PAGES['extension-capture'].lead);
+    expect(lines()).toHaveLength(PAGES['extension-capture'].marks.length);
+    press(tab('Tools on the map'));
+    expect(lines()).toHaveLength(PAGES['extension-tools'].marks.length);
+  });
+
+  it('says where it works, Street View included, in a table', async () => {
+    await open('extension');
+    press([...document.querySelectorAll('.tabs .tab')].find((b) => b.textContent.trim() === 'Where it works'));
+    const rows = [...document.querySelectorAll('.sites tbody tr')];
+    expect(rows).toHaveLength(EXTENSION_SITES.rows.length);
+    expect(rows.map((row) => row.querySelector('th').firstChild.textContent.trim())).toContain('Street View');
+    expect(document.querySelectorAll('.sites .names span')).toHaveLength(EXTENSION_SITES.sites.length);
+    const street = rows.find((row) => row.textContent.includes('Street View'));
+    expect(street.querySelectorAll('.yes')).toHaveLength(1);
+    expect(street.textContent).toContain('not in Street View');
+    expect(document.querySelectorAll('.sites .elsewhere .card-block')).toHaveLength(EXTENSION_SITES.elsewhere.length);
   });
 });
 

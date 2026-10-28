@@ -134,6 +134,8 @@
     // A ghosted collage piece: an editing state, so it must stay distinct from an alert.
     ghost: 'M12 3a8 8 0 0 0-8 8v10l4-2 4 2 4-2 4 2V11a8 8 0 0 0-8-8Zm-3 8h.01m5.99 0H15',
     info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-11v6m0-10h.01',
+    // a light bulb: what the guide calls a tip
+    bulb: 'M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5M9 18h6M10 22h4',
     clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4v5l3.5 2',
     // a month with its head rule: what a field opens when a date is built rather
     // than typed

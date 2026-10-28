@@ -444,10 +444,11 @@
 
     <main class="canvas">
       {#if !bare && activeWs && activeWs.tools.length > 1}
-        <div class="tabstrip" data-guide="start.tabs">
+        <div class="tabstrip">
           {#each activeWs.tools as toolId (toolId)}
             <button
               class="tab-btn"
+              data-guide="start.tabs"
               class:active={uiState.tool === toolId}
               aria-current={uiState.tool === toolId ? 'page' : undefined}
               onclick={() => (uiState.tool = toolId)}

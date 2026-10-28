@@ -2926,12 +2926,15 @@
   </div>
 
   {#if both && (mode !== 'side' || difference)}
-    <div class="mode-footer" data-guide="compare.mix">
-      <ModeControl {mode} bind:divider bind:opacity bind:blinkB bind:blinkPaused bind:blinkInterval />
-      {#if difference}
-        <DifferenceBar bind:settings={changeOptions} bind:open={differenceOpen} status={changeStatus}
-          reading={changeState} onrun={() => refreshChangeAssist()} />
-      {/if}
+    <div class="mode-footer">
+      <!-- hugs its controls, so the guide frames them rather than the whole row -->
+      <div class="mix" data-guide="compare.mix">
+        <ModeControl {mode} bind:divider bind:opacity bind:blinkB bind:blinkPaused bind:blinkInterval />
+        {#if difference}
+          <DifferenceBar bind:settings={changeOptions} bind:open={differenceOpen} status={changeStatus}
+            reading={changeState} onrun={() => refreshChangeAssist()} />
+        {/if}
+      </div>
     </div>
   {/if}
   {#if rightPanel === 'export'}
@@ -3260,7 +3263,8 @@
      the row itself, not on a second frame. */
   .tool-header :global(.mode-dock) { padding: 0; border: 0; background: transparent; box-shadow: none; }
   /* Above the stage, which keeps its map layers to itself (see .compare-stage). */
-  .mode-footer { position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; padding: 6px; background: var(--bg-1); }
+  .mode-footer { position: relative; z-index: 1; display: flex; justify-content: center; padding: 6px; background: var(--bg-1); }
+  .mix { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; max-width: 100%; }
   .presets { display: flex; justify-content: center; gap: 8px; padding: 8px; }
   .locked small { color: var(--accent); }
   .provider-card.locked { opacity: 0.8; }

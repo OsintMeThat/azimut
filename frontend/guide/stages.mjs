@@ -11,8 +11,14 @@
  *   crop    'anchors' (default) keeps the frames and a margin; 'full' keeps the clip
  *   focus   more elements the crop must hold, such as a menu that opened
  *   sidebar true keeps the case sidebar open
- *   after   how a picture taken from another one is undone (Escape, by default)
+ *   after   false leaves what a picture taken from another one opened, which Escape
+ *           otherwise closes for the next
+ *   browser 'extension' takes the picture in the browser that has the capture
+ *           extension loaded, over a map site (extension.mjs)
  */
+
+import { CAMERA, CAMERA_PLACE, CHANNEL, TERMINAL } from './demo.mjs';
+import { layPopup, liftAnchors } from './extension.mjs';
 
 const TOOLS = { width: 1000, height: 700 };
 const WIDE = { width: 1100, height: 720 };
@@ -21,13 +27,47 @@ const TALL = { width: 1100, height: 900 };
 /** Wide enough for Board's Details to open beside the rows rather than over them. */
 const ROOMY = { width: 1360, height: 800 };
 
-const PIER_VIEW = 'll=33.7553,-118.2372&z=16';
+const CHANNEL_VIEW = `ll=${CHANNEL.lat},${CHANNEL.lon}&z=16`;
+/** How a capture's coordinates read in a picker, as the capture of the channel is listed. */
+const CAPTURED = `${CHANNEL.lat.toFixed(6)}, ${CHANNEL.lon.toFixed(6)}`;
 
 /** The one element of these on screen: tools stay mounted, hidden, once visited. */
 const seen = (page, selector) => page.locator(selector).filter({ visible: true }).first();
 
 /** The card of one file in a grid of cards. */
 const card = (page, name) => page.locator('.canvas-body .media-card', { hasText: name }).filter({ visible: true }).first();
+
+/**
+ * What agrees between the photo and the capture of the channel, as fractions of each
+ * picture: the bridge's east tower, and the green Evergreen cranes in front of it.
+ * Read off the two pictures, the capture's at the zoom it was taken at (`demo.mjs`).
+ */
+const MATCHES = [
+  { photo: [0.69, 0.09, 0.76, 0.36], capture: [0.66, 0.13, 0.74, 0.26] },
+  { photo: [0.6, 0.22, 0.9, 0.62], capture: [0.58, 0.31, 0.71, 0.5] },
+];
+
+/** The two pictures of a proof on screen, photo first, read off the canvas it is drawn on. */
+async function proofPictures(page) {
+  const canvas = await seen(page, '[data-guide="proof.canvas"] .konva').boundingBox();
+  const boxes = await page.evaluate(() => {
+    const stage = window.Konva?.stages?.[0];
+    if (!stage) return [];
+    return stage
+      .find('Image')
+      .map((node) => node.getClientRect())
+      .filter((r) => r.width > 120 && r.height > 80)
+      .sort((a, b) => a.x - b.x || a.y - b.y);
+  });
+  return boxes.slice(0, 2).map((r) => ({ x: canvas.x + r.x, y: canvas.y + r.y, w: r.width, h: r.height }));
+}
+
+async function drawBox(page, picture, [x0, y0, x1, y1]) {
+  await page.mouse.move(picture.x + picture.w * x0, picture.y + picture.h * y0);
+  await page.mouse.down();
+  await page.mouse.move(picture.x + picture.w * x1, picture.y + picture.h * y1, { steps: 6 });
+  await page.mouse.up();
+}
 
 async function pickImagery(page, label) {
   const chip = page.locator('[data-guide="map.imagery"] .chip').filter({ visible: true }).first();
@@ -55,7 +95,7 @@ export const STAGES = [
     sidebar: true,
     async run({ page }) {
       await page.keyboard.press('Control+k');
-      await page.locator('[data-guide="palette.search"] input').fill('pier');
+      await page.locator('[data-guide="palette.search"] input').fill('channel');
     },
   },
   {
@@ -67,6 +107,52 @@ export const STAGES = [
       await page.locator('[data-guide="ext.folder"] .row-hint').evaluate((el) => {
         el.textContent = '~/Azimut/.azimut/extension';
       });
+    },
+  },
+  {
+    shot: 'extension-capture',
+    browser: 'extension',
+    window: LARGE,
+    clip: 'body',
+    crop: 'full',
+    async run({ ext }) {
+      await ext.fresh();
+      const popup = await ext.popup();
+      // the map is north up, and a bearing typed in is what the arrow waits for
+      await popup.locator('#bearing').fill('0');
+      await layPopup(ext.map, popup);
+      await popup.close();
+    },
+  },
+  {
+    shot: 'extension-tools',
+    browser: 'extension',
+    window: LARGE,
+    clip: 'body',
+    crop: 'full',
+    settle: 2500,
+    async run({ ext }) {
+      const { map } = ext;
+      await ext.fresh();
+      const popup = await ext.popup();
+      // the popup closes itself once the panel is up
+      await popup.locator('#map-tools').click();
+      await map.locator('[data-guide="ext.measure"]').waitFor();
+      // the photo held over the map, then a line from where it was taken to the berth
+      await map.locator('[data-guide="ext.refs"]').click();
+      await map.locator('[data-act="ref-add"]').click();
+      await map.locator('.pick-item[title^="bridge_channel"]').click();
+      // the picture is decoded onto the window's canvas once its bytes are in
+      await map.locator('[data-guide="ext.ref"] canvas').waitFor();
+      await map.waitForTimeout(1500);
+      await map.locator('[data-guide="ext.measure"]').click();
+      await map.locator('[data-act="measure-distance"]').click();
+      for (const point of [CAMERA, TERMINAL]) {
+        const { x, y } = ext.at(point);
+        await map.mouse.click(x, y);
+      }
+      await map.mouse.move(1, 1);
+      await liftAnchors(map, ['ext.measure', 'ext.points', 'ext.sky', 'ext.grid', 'ext.refs', 'ext.ref', 'ext.fires']);
     },
   },
   {
@@ -87,7 +173,7 @@ export const STAGES = [
     from: 'media',
     focus: ['[data-guide="media.open-in-menu"]', '[title="Open in…"][aria-expanded="true"]'],
     async run({ page }) {
-      await card(page, 'harbour_smoke_0412').locator('[title="Open in…"]').click();
+      await card(page, 'bridge_channel').locator('[title="Open in…"]').click();
     },
   },
   {
@@ -95,7 +181,7 @@ export const STAGES = [
     async run({ go, page }) {
       await go('files');
       await page.locator('[data-guide="files.tree"] .trow', { hasText: 'Sources' }).first().click();
-      await page.locator('.grid-pane .tile.folder', { hasText: 'pier_watch' }).first().dblclick();
+      await page.locator('.grid-pane .tile.folder', { hasText: 'harbor_watch' }).first().dblclick();
     },
   },
   {
@@ -110,7 +196,7 @@ export const STAGES = [
     shot: 'reverse',
     async run({ go, page }) {
       await go('reverse');
-      await page.locator('.canvas-body').getByText('harbour_smoke_0412', { exact: true }).first().click();
+      await page.locator('.canvas-body').getByText('bridge_channel', { exact: true }).first().click();
     },
   },
   {
@@ -118,8 +204,10 @@ export const STAGES = [
     window: WIDE,
     async run({ go, page }) {
       await go('inspect');
-      await page.locator('.canvas-body').getByText('convoy_dashcam', { exact: true }).first().click();
-      await page.locator('[data-guide="inspect.strip"] img').first().waitFor();
+      await page.locator('.canvas-body').getByText('channel_departure', { exact: true }).first().click();
+      // the video's own picture first, then the frames cut from it, then their save
+      await page.locator('[data-guide="inspect.strip"] img').nth(2).waitFor({ timeout: 60_000 });
+      await seen(page, '[data-guide="inspect.save"]').waitFor({ timeout: 60_000 });
     },
   },
   {
@@ -135,7 +223,7 @@ export const STAGES = [
     window: WIDE,
     async run({ go, page }) {
       await go('collage');
-      await page.locator('.canvas-body').getByText('Harbour strip', { exact: true }).first().click();
+      await page.locator('.canvas-body').getByText('The bridge from both banks', { exact: true }).first().click();
     },
   },
   {
@@ -143,8 +231,8 @@ export const STAGES = [
     window: WIDE,
     map: true,
     async run({ go, page }) {
-      await go(`satellite?${PIER_VIEW}&p=usgs-imagery`);
-      const row = page.locator('[data-guide="sat.panel"] .row, [data-guide="sat.panel"] li, [data-guide="sat.panel"] div', { hasText: 'Pier observations' }).last();
+      await go(`satellite?${CHANNEL_VIEW}&p=usgs-imagery`);
+      const row = page.locator('[data-guide="sat.panel"] .row, [data-guide="sat.panel"] li, [data-guide="sat.panel"] div', { hasText: 'Channel observations' }).last();
       await row.locator('button').first().click();
       // folded, so the map has the room; its number opens it
       await seen(page, '[data-guide="sat.panel"] [title="Hide the panel"]').click();
@@ -173,6 +261,22 @@ export const STAGES = [
     },
   },
   {
+    shot: 'satellite-refs',
+    from: 'satellite',
+    window: WIDE,
+    map: true,
+    focus: ['[data-guide="map.ref"]'],
+    async run({ page }) {
+      await seen(page, '[data-guide="sat.tools"] [aria-label="Add reference"]').click();
+      await seen(page, '.ref-pick[title^="bridge_channel"]').click();
+      await seen(page, '[data-guide="map.ref"] img').waitFor();
+    },
+    // the window would sit over the pictures taken after this one
+    async after({ page }) {
+      await seen(page, '[data-guide="map.ref"] [title="Close"]').click();
+    },
+  },
+  {
     shot: 'satellite-layers',
     from: 'satellite',
     window: WIDE,
@@ -186,9 +290,9 @@ export const STAGES = [
     window: WIDE,
     map: true,
     async run({ go, page }) {
-      await go(`compare?${PIER_VIEW}`);
+      await go(`compare?${CHANNEL_VIEW}`);
       await page.locator('.canvas-body button', { hasText: 'Open' }).filter({ visible: true }).first().click();
-      await page.getByText('Pier T, imagery against the map').filter({ visible: true }).first().click();
+      await page.getByText('Main Channel, imagery against the map').filter({ visible: true }).first().click();
       // the empty comparison it opened on counts as unsaved work
       const discard = page.getByRole('button', { name: 'Discard changes' });
       if (await discard.isVisible().catch(() => false)) await discard.click();
@@ -209,7 +313,7 @@ export const STAGES = [
     window: WIDE,
     map: true,
     async run({ go, page }) {
-      await go(`detect?${PIER_VIEW}`);
+      await go(`detect?${CHANNEL_VIEW}`);
       await pickImagery(page, 'USGS Imagery').catch(() => {});
     },
   },
@@ -232,8 +336,6 @@ export const STAGES = [
       await go('horizon');
       await page.locator('.canvas-body button', { hasText: 'Open' }).filter({ visible: true }).first().click();
       await page.getByText('Half Dome from Glacier Point').filter({ visible: true }).first().click();
-      // the demo imagery stops at zoom 16, and Horizon says so where a reader would not
-      await page.addStyleTag({ content: '.horizon-panel .problem { display: none !important; }' });
       await seen(page, '[data-guide="horizon.side"]').click();
     },
   },
@@ -251,11 +353,11 @@ export const STAGES = [
     shot: 'coordinates',
     async run({ go, page }) {
       await go('coordinates');
-      await page.locator('[data-guide="coords.paste"] input').fill('33.7545, -118.2368');
+      await page.locator('[data-guide="coords.paste"] input').fill(`${CAMERA.lat}, ${CAMERA.lon}`);
       await page.locator('[data-guide="coords.paste"] button[type="submit"]').click();
       const sky = page.locator('[data-guide="coords.sky"]');
-      await sky.locator('input').first().fill('14/03/2026');
-      await sky.locator('input').nth(1).fill('21:40');
+      await sky.locator('input').first().fill('03/02/2009');
+      await sky.locator('input').nth(1).fill('11:40');
       await sky.locator('input').nth(1).press('Enter');
     },
   },
@@ -264,13 +366,63 @@ export const STAGES = [
     window: TALL,
     async run({ go, page }) {
       await go('media');
-      await card(page, 'harbour_smoke_0412').locator('[title="Open in…"]').click();
+      await card(page, 'bridge_channel').locator('[title="Open in…"]').click();
       await page.locator('[role="menuitem"]', { hasText: /proof/i }).first().click();
       await page.locator('[data-guide="proof.panels"] button', { hasText: 'Add panel' }).click();
-      await page.locator('[role="dialog"]').getByText('33.754500, -118.236800').first().click();
-      await page.locator('[data-guide="proof.coords"] input').first().fill('33.7545, -118.2368');
-      await page.locator('[data-guide="proof.coords"] input').nth(1).fill('Pier T, berth 4');
-      await page.getByPlaceholder('A formation of 13 helicopters heading east').fill('Smoke over the crane row at berth 4, seen from the Pier T quay.');
+      await page.locator('[role="dialog"]').getByText(CAPTURED).first().click();
+      await page.locator('[data-guide="proof.coords"] input').first().fill(`${CAMERA.lat}, ${CAMERA.lon}`);
+      await page.locator('[data-guide="proof.coords"] input').nth(1).fill(CAMERA_PLACE);
+      await page.getByPlaceholder('A formation of 13 helicopters heading east').fill('The YM Success under the Vincent Thomas Bridge, seen from the west bank of the Main Channel.');
+      await page.evaluate(() => document.activeElement?.blur?.());
+      // what agrees, boxed on both pictures in one colour per feature
+      const [photo, capture] = await proofPictures(page);
+      if (!capture) throw new Error('the proof did not draw its two pictures');
+      const tools = page.locator('[data-guide="proof.tools"]');
+      const box = tools.locator('button[title="Box (r)"]');
+      // a box drawn hands the cursor back, so the tool is taken up again for each one
+      const arm = async () => {
+        if ((await box.getAttribute('aria-pressed')) !== 'true') await box.click();
+      };
+      for (const [index, match] of MATCHES.entries()) {
+        await arm();
+        await tools.locator('[title="Annotation colour"]').click();
+        await tools.locator('.flyout-colors.open .color-btn').nth(index).click();
+        await drawBox(page, photo, match.photo);
+        await arm();
+        await drawBox(page, capture, match.capture);
+      }
+      // the last box let go, so no handles show
+      const canvas = await seen(page, '[data-guide="proof.canvas"] .konva').boundingBox();
+      await page.mouse.click(canvas.x + 6, canvas.y + 6);
+    },
+  },
+  {
+    shot: 'proof-result',
+    // wider than the composer's picture, so the page it fits fills more of it
+    window: { width: 1500, height: 900 },
+    clip: '[data-guide="proof.canvas"]',
+    focus: ['#guide-proof-page'],
+    async run({ page }) {
+      // the page fitted to its frame, then cut to it: its pictures and the line under them
+      await page.keyboard.press('f');
+      await page.waitForTimeout(400);
+      const pictures = await proofPictures(page);
+      const left = Math.min(...pictures.map((p) => p.x));
+      const top = Math.min(...pictures.map((p) => p.y));
+      const right = Math.max(...pictures.map((p) => p.x + p.w));
+      const bottom = Math.max(...pictures.map((p) => p.y + p.h));
+      await page.evaluate(
+        ({ left, top, width, height }) => {
+          const page = document.createElement('div');
+          page.id = 'guide-proof-page';
+          Object.assign(page.style, {
+            position: 'fixed', left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`,
+            pointerEvents: 'none',
+          });
+          document.body.appendChild(page);
+        },
+        { left, top, width: right - left, height: bottom - top + 24 }
+      );
     },
   },
   {
@@ -283,7 +435,7 @@ export const STAGES = [
       const keep = page.getByRole('button', { name: 'Use this point' });
       await keep.waitFor({ timeout: 8000 }).then(() => keep.click()).catch(() => {});
       await page.locator('[data-guide="post.first"]').waitFor();
-      await page.getByPlaceholder('A formation of 13 helicopters was spotted heading East').fill('Smoke rising over the crane row at Pier T');
+      await page.getByPlaceholder('A formation of 13 helicopters was spotted heading East').fill('Where this photo of the Vincent Thomas Bridge was taken');
     },
   },
   {
@@ -337,7 +489,7 @@ export const STAGES = [
     window: ROOMY,
     crop: 'full',
     async run({ page }) {
-      await page.locator('.canvas-body').getByText('Pier T, berth 4', { exact: true }).filter({ visible: true }).first().click();
+      await page.locator('.canvas-body').getByText(CAMERA_PLACE, { exact: true }).filter({ visible: true }).first().click();
       await seen(page, '[data-guide="board.details"]').waitFor();
     },
   },

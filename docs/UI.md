@@ -140,7 +140,9 @@ presses *Read the guide* on it, which opens the guide on its start page.
   `lib/guide.js`), from the `?` in the topbar on the tool being stood in, from Home on
   its start, from Settings on its own page. The tool underneath does not move, and
   Escape closes it. A menu on the left reads in the order somebody arriving needs it:
-  **Start here** and the **Capture extension**, then **journeys** (a goal walked across
+  **Start here** and the **Capture extension** (in tabs of its own: installing it, its
+  popup over a map, its tools drawn over a map, and a table of where it works, Street
+  View included), then **journeys** (a goal walked across
   the tools; one for now, a photo geolocated from its import to the published thread),
   then the **workspaces** with their tools as tabs, then the
   **reference**: every key by where it is pressed, Settings, and what to do when
@@ -150,19 +152,26 @@ presses *Read the guide* on it, which opens the guide on its start page.
   number stands beside the picture. At rest the picture carries its numbers and nothing
   else; reading a line, or pointing at its number, dims the rest, rings that control and
   names it by its number.
-  Under the picture, the subtleties the controls do not say. A column names the
+  Under the picture, the subtleties the controls do not say, set apart as one note
+  under a **Tips** heading in the info colour so they never pass for part of the
+  screen. A column names the
   journeys the tool takes part in, at their step, and *Open* goes to the tool.
 - **A number can lead to the next screen.** A control that opens something (a menu,
   the right-click menu of the map, Details beside a row, the Go to palette) carries a
   chevron on its number; pressing it shows the picture of what opens, with its own numbers
   and a trail back. A journey's step shows only that step's frames, on the picture of
-  the tool it happens in.
+  the tool it happens in, or on one of its own when the moment needs it (the photo held
+  over the map in a reference window). A journey ends on a **Result**: what it made.
 - **The pictures are made, not taken.** `npm run guide:shots` (`frontend/guide/`)
   builds the app into a scratch folder, starts a private Azimut on a throwaway
-  workspace, files a demo case into it (drawn pictures, a port in public-domain USGS
-  imagery, Horizon on a mountain), stages each picture with the clicks an analyst would
-  make (`stages.mjs`) and writes `src/assets/guide/<shot>.webp` with the rectangle of
-  every `data-guide` anchor drawn on it. A picture keeps the part of the window its
+  workspace, files a demo case into it (public-domain photos of a real port, credited in
+  `guide/photos/CREDITS.md`, the same port in public-domain USGS imagery, Horizon on a
+  mountain), stages each picture with the clicks an analyst would make (`stages.mjs`)
+  and writes `src/assets/guide/<shot>.webp` with the rectangle of every `data-guide`
+  anchor drawn on it. The case is true where it can be: where and when each photo was
+  taken is its own, and only the accounts that posted them are made up. The
+  extension's pictures come from a second browser with the extension loaded, over
+  OpenStreetMap's own tiles served at its own address (`extension.mjs`). A picture keeps the part of the window its
   frames are in, and a panel a page does not explain is folded first. A control that
   moved is followed; one that went fails the run, and `guide.test.js` fails when a
   frame points at an anchor no component carries, when a tool has no page, or when a

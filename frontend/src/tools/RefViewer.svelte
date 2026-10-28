@@ -318,6 +318,7 @@
 
 <div
   bind:this={el}
+  data-guide="map.ref"
   class="ref-viewer card"
   class:collapsed={viewer.collapsed}
   class:docked={viewer.docked}

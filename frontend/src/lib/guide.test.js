@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  EXTENSION_SITES,
+  EXTENSION_TABS,
   FIXES,
   JOURNEYS,
   KEYMAP,
@@ -16,16 +18,25 @@ import {
   pinSpots,
   shotOf,
   stepMarks,
+  stepShot,
+  tabLabel,
 } from './guide.js';
 import { CASE_WORKSPACE, TOOL_LABELS, WORKSPACES } from './workspaces.js';
 
 const RAIL_AND_CASE = [...WORKSPACES, CASE_WORKSPACE];
 const TOOLS = RAIL_AND_CASE.flatMap((ws) => ws.tools);
 
-/** Every component of the app, as written: where an anchor the guide frames must stand. */
-const COMPONENTS = Object.values(
-  import.meta.glob('../**/*.svelte', { query: '?raw', import: 'default', eager: true })
-).join('\n');
+/**
+ * Every component of the app, and the capture extension's pages and panel, as written:
+ * where an anchor the guide frames must stand.
+ */
+const EXTENSION = fileURLToPath(new URL('../../../extension/', import.meta.url));
+const COMPONENTS = [
+  ...Object.values(import.meta.glob('../**/*.svelte', { query: '?raw', import: 'default', eager: true })),
+  ...readdirSync(EXTENSION)
+    .filter((name) => /\.(js|html)$/.test(name))
+    .map((name) => readFileSync(join(EXTENSION, name), 'utf8')),
+].join('\n');
 
 /** Every sentence the guide puts in front of a reader. */
 function prose() {
@@ -64,7 +75,7 @@ describe('the guide tracks the app rather than falling behind it', () => {
   });
 
   it('pages nothing the app does not have', () => {
-    const own = new Set(['start', 'extension', 'settings']);
+    const own = new Set(['start', 'extension', 'extension-capture', 'extension-tools', 'settings']);
     for (const id of Object.keys(PAGES)) expect(own.has(id) || TOOLS.includes(id), id).toBe(true);
   });
 
@@ -72,6 +83,25 @@ describe('the guide tracks the app rather than falling behind it', () => {
     expect(MENU_ITEMS.slice(0, 2).map((item) => item.id)).toEqual(['start', 'extension']);
     const ids = MENU_ITEMS.map((item) => item.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('reads the extension in tabs, setting it up first, each tab a page or the table of sites', () => {
+    const extension = MENU_ITEMS.find((item) => item.id === 'extension');
+    expect(extension.kind).toBe('tabs');
+    expect(extension.tools).toEqual(EXTENSION_TABS.map((tab) => tab.id));
+    expect(extension.tools[0]).toBe('extension');
+    for (const tab of EXTENSION_TABS) {
+      expect(Boolean(PAGES[tab.id]) || tab.id === 'extension-sites', tab.id).toBe(true);
+      expect(tabLabel(tab.id)).toBe(tab.label);
+    }
+    expect(landingFor('extension-tools')).toEqual({ item: 'extension', tool: 'extension-tools' });
+  });
+
+  it('says where the extension works in a table as wide as its columns', () => {
+    for (const row of EXTENSION_SITES.rows) expect(row.cells, row.view).toHaveLength(EXTENSION_SITES.columns.length);
+    expect(EXTENSION_SITES.rows.map((row) => row.view)).toContain('Street View');
+    // the nine sites engine/mapsites.py reads a map from
+    expect(EXTENSION_SITES.sites).toHaveLength(9);
   });
 
   it('says to install the extension on the page somebody reads first', () => {
@@ -152,6 +182,18 @@ describe('journeys', () => {
     expect(journeysThrough('media')).toEqual([{ id: 'geolocate-a-photo', title: 'Geolocate a photo', step: 1 }]);
     expect(journeysThrough('post')).toEqual([{ id: 'geolocate-a-photo', title: 'Geolocate a photo', step: 6 }]);
     expect(journeysThrough('settings')).toEqual([]);
+  });
+
+  it('measure a step taken on a picture of its own on that picture', () => {
+    const shots = allShots();
+    for (const journey of JOURNEYS) {
+      for (const step of journey.steps.filter((one) => one.shot)) {
+        const taken = shots.find((one) => one.shot === stepShot(step));
+        expect(taken, step.shot).toBeTruthy();
+        for (const anchor of step.marks) expect(taken.anchors).toContain(anchor);
+      }
+      if (journey.result) expect(shots.map((one) => one.shot)).toContain(journey.result.shot);
+    }
   });
 
   it('take a geolocation as far as the published thread', () => {

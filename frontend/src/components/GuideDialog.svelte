@@ -7,7 +7,8 @@
    * what the reader then browses to is theirs. A number that leads somewhere opens the
    * screen it leads to in the same place, with a trail back, so a page reads as a
    * sequence. A journey walks one goal across the tools, each step on the picture of
-   * the tool it happens in. The pages and their pictures are `lib/guide.js`.
+   * the tool it happens in, and ends on what it made. A page can come in tabs of its
+   * own, as the extension's does. The pages and their pictures are `lib/guide.js`.
    */
   import { untrack } from 'svelte';
   import Modal from './Modal.svelte';
@@ -15,6 +16,7 @@
   import GuideShot from './GuideShot.svelte';
   import { uiState } from '../lib/state.svelte.js';
   import {
+    EXTENSION_SITES,
     FIXES,
     JOURNEYS,
     KEYMAP,
@@ -25,6 +27,8 @@
     landingFor,
     shotOf,
     stepMarks,
+    stepShot,
+    tabLabel,
     toolLabel,
   } from '../lib/guide.js';
 
@@ -43,15 +47,27 @@
     item.kind === 'journey' ? JOURNEYS.find((one) => `journey:${one.id}` === item.id) : null
   );
 
+  /** The step past a journey's last one, where what it made is shown. */
+  const resultStep = $derived(journey?.result ? journey.steps.length : null);
+  /** The furthest a journey's Next goes: its result, or its last step. */
+  const lastStep = $derived(journey ? (resultStep ?? journey.steps.length - 1) : 0);
+  /** The tab of a tabbed page that holds the table of where the extension works. */
+  const sites = $derived(item.kind === 'tabs' && tool === 'extension-sites');
+
   /** What the picture area shows: its page, the picture's name and the marks drawn on it. */
   const view = $derived.by(() => {
     if (item.kind === 'page') return pageView(PAGES[item.id], PAGES[item.id].title);
     if (item.kind === 'workspace' && tool) return pageView(PAGES[tool], toolLabel(tool));
+    // a page's own tabs explain the page, and open no tool
+    if (item.kind === 'tabs' && PAGES[tool]) return { ...pageView(PAGES[tool], tabLabel(tool)), tool: null };
+    if (journey && step === resultStep) {
+      return { lead: journey.result.text, shot: journey.result.shot, marks: [], tips: [], tool: null };
+    }
     if (journey) {
       const current = journey.steps[step];
       return {
         lead: current.text,
-        shot: PAGES[current.tool].shot,
+        shot: stepShot(current),
         // a step reads one control at a time, so its numbers lead nowhere else
         marks: stepMarks(current).map(({ opens, ...mark }) => mark),
         tips: [],
@@ -195,7 +211,7 @@
         </button>
       </header>
 
-      {#if item.kind === 'workspace'}
+      {#if item.kind === 'workspace' || item.kind === 'tabs'}
         <div class="tabs">
           {#each item.tools as option (option)}
             <button
@@ -204,7 +220,7 @@
               aria-current={option === tool ? 'page' : undefined}
               onclick={() => pick(option)}
             >
-              {toolLabel(option)}
+              {tabLabel(option)}
             </button>
           {/each}
         </div>
@@ -222,9 +238,22 @@
                 <span class="num">{index + 1}</span>
                 {toolLabel(one.tool)}
               </button>
-              {#if index < journey.steps.length - 1}<Icon name="chevronRight" size={13} />{/if}
+              {#if index < lastStep}<Icon name="chevronRight" size={13} />{/if}
             </li>
           {/each}
+          {#if resultStep !== null}
+            <li>
+              <button
+                class="step result"
+                class:on={step === resultStep}
+                aria-current={step === resultStep ? 'step' : undefined}
+                onclick={() => goStep(resultStep)}
+              >
+                <Icon name="flag" size={13} />
+                Result
+              </button>
+            </li>
+          {/if}
         </ol>
       {/if}
 
@@ -235,14 +264,17 @@
             <p class="lead" class:instruction={Boolean(journey)}>{view.lead}</p>
             <GuideShot shot={picture} marks={view.marks} bind:active onopen={follow} />
             {#if view.tips.length}
-              <div class="tips">
-                {#each view.tips as tip (tip.title)}
-                  <div class="tip">
-                    <strong>{tip.title}</strong>
-                    <span>{tip.text}</span>
-                  </div>
-                {/each}
-              </div>
+              <section class="tips" aria-label="Tips">
+                <p class="tips-head"><Icon name="bulb" size={14} /> Tips</p>
+                <ul>
+                  {#each view.tips as tip (tip.title)}
+                    <li>
+                      <strong>{tip.title}</strong>
+                      <span>{tip.text}</span>
+                    </li>
+                  {/each}
+                </ul>
+              </section>
             {/if}
           </div>
           <aside class="side">
@@ -263,11 +295,7 @@
                 <button class="btn btn-sm" disabled={step === 0} onclick={() => goStep(step - 1)}>
                   <Icon name="chevronLeft" size={13} /> Back
                 </button>
-                <button
-                  class="btn btn-sm"
-                  disabled={step === journey.steps.length - 1}
-                  onclick={() => goStep(step + 1)}
-                >
+                <button class="btn btn-sm" disabled={step === lastStep} onclick={() => goStep(step + 1)}>
                   Next <Icon name="chevronRight" size={13} />
                 </button>
               </div>
@@ -279,6 +307,53 @@
               </button>
             {/if}
           </aside>
+        </div>
+      {:else if sites}
+        <div class="sites">
+          <p class="lead">{EXTENSION_SITES.lead}</p>
+          <div class="grid-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">View</th>
+                  {#each EXTENSION_SITES.columns as column (column)}<th scope="col">{column}</th>{/each}
+                </tr>
+              </thead>
+              <tbody>
+                {#each EXTENSION_SITES.rows as row, index (row.view)}
+                  <tr>
+                    <th scope="row">
+                      {row.view}
+                      {#if index === 0}
+                        <span class="names">
+                          {#each EXTENSION_SITES.sites as name (name)}<span>{name}</span>{/each}
+                        </span>
+                      {/if}
+                    </th>
+                    {#each row.cells as cell, at (at)}
+                      <td>
+                        {#if cell === 'yes'}
+                          <span class="yes" role="img" aria-label="Yes"><Icon name="check" size={15} /></span>
+                        {:else if cell === 'no'}
+                          <span class="no" role="img" aria-label="No">–</span>
+                        {:else}
+                          <span class="says">{cell}</span>
+                        {/if}
+                      </td>
+                    {/each}
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+          <div class="elsewhere">
+            {#each EXTENSION_SITES.elsewhere as one (one.where)}
+              <section class="card-block">
+                <h3>{one.where}</h3>
+                <p>{one.text}</p>
+              </section>
+            {/each}
+          </div>
         </div>
       {:else if item.kind === 'shortcuts'}
         <div class="reference keys">
@@ -434,6 +509,9 @@
     background: var(--bg-3);
     color: var(--text-2);
   }
+  .step.result {
+    padding-left: 10px;
+  }
 
   .body {
     display: grid;
@@ -470,25 +548,45 @@
   .lead.instruction {
     color: var(--text-1);
   }
+  /* Tips read as one note under the picture, in the info colour, rather than as more
+     cards: framed like the picture's controls, they passed for part of the screen. */
   .tips {
+    margin-top: 18px;
+    padding: 12px 16px 14px;
+    border: 1px solid color-mix(in srgb, var(--info) 28%, transparent);
+    border-radius: var(--r-md);
+    background: var(--info-soft);
+  }
+  .tips-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--info);
+  }
+  .tips ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 10px;
-    margin-top: 16px;
+    gap: 12px 22px;
   }
-  .tip {
+  .tips li {
     display: flex;
     flex-direction: column;
-    gap: 3px;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    background: var(--bg-2);
+    gap: 2px;
+    padding-left: 11px;
+    border-left: 2px solid color-mix(in srgb, var(--info) 50%, transparent);
     font-size: var(--fs-sm);
     color: var(--text-2);
-    line-height: 1.4;
+    line-height: 1.45;
   }
-  .tip strong {
+  .tips strong {
     color: var(--text-1);
     font-weight: 600;
   }
@@ -603,6 +701,83 @@
   .go {
     align-self: flex-start;
     gap: 7px;
+  }
+
+  .sites {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px 22px 22px;
+  }
+  .sites .lead {
+    margin: 0;
+  }
+  .grid-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+  }
+  table {
+    width: 100%;
+    min-width: 640px;
+    border-collapse: collapse;
+    font-size: var(--fs-sm);
+  }
+  th,
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+    line-height: 1.4;
+  }
+  tbody tr:last-child th,
+  tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  thead th {
+    background: var(--bg-2);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+  tbody th {
+    width: 34%;
+    font-weight: 600;
+    color: var(--text-1);
+  }
+  .names {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 8px;
+  }
+  .names span {
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    color: var(--text-2);
+  }
+  .yes {
+    color: var(--ok);
+  }
+  .no {
+    color: var(--text-3);
+  }
+  .says {
+    color: var(--text-2);
+  }
+  .elsewhere {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+  }
+  .elsewhere .card-block {
+    margin: 0;
   }
 
   .reference {

@@ -363,6 +363,7 @@
       const facts = T.hasFacts(viewer.facts) ? viewer.facts : null;
       const el = document.createElement("div");
       el.className = "rw";
+      el.dataset.guide = "ext.ref";
       el.tabIndex = 0;
       el.innerHTML = `
         <header>

@@ -1,12 +1,12 @@
 {
   "width": 936,
-  "height": 417,
+  "height": 436,
   "anchors": {
     "reverse.picture": {
       "x": 20,
       "y": 65.3,
       "w": 516,
-      "h": 323.3
+      "h": 343.2
     },
     "reverse.adjust": {
       "x": 560,
