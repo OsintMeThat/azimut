@@ -54,7 +54,7 @@
   }
 </script>
 
-<section class="group">
+<section class="group" data-guide="settings.proof-templates">
   <h3>Geo Proof templates</h3>
   <p class="note">
     Reusable proof styles shared across cases.
@@ -86,7 +86,7 @@
   </button>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.report-templates">
   <h3>Geo Report templates</h3>
   <p class="note">
     Reusable thread structures for new Geo Reports.
@@ -126,7 +126,7 @@
   </button>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.plate-templates">
   <h3>Map plate templates</h3>
   <p class="note">
     A plate's layout, paper and colours, without a case's ground or layers. Share one as a file.

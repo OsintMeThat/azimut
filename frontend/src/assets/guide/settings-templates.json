@@ -1,0 +1,24 @@
+{
+  "width": 1263,
+  "height": 834,
+  "anchors": {
+    "settings.proof-templates": {
+      "x": 186,
+      "y": 34,
+      "w": 604,
+      "h": 232.5
+    },
+    "settings.report-templates": {
+      "x": 186,
+      "y": 266.5,
+      "w": 604,
+      "h": 232.5
+    },
+    "settings.plate-templates": {
+      "x": 186,
+      "y": 498.9,
+      "w": 604,
+      "h": 231
+    }
+  }
+}

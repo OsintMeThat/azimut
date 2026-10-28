@@ -186,7 +186,7 @@
     </div>
 
     {#if tab === 'rules'}
-      <div class="strip" class:stale={bench.stale} class:hidden={bench.locked} aria-label="The check on the map">
+      <div class="strip" class:stale={bench.stale} class:hidden={bench.locked} aria-label="The check on the map" data-guide="detect.verdict">
         <div class="said">
           <strong>{bench.check?.name ?? 'No check on the map'}</strong>
           <span aria-live="polite">{verdict}</span>

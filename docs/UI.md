@@ -146,8 +146,9 @@ presses *Read the guide* on it, which opens the guide on its start page.
   the tools: a photo geolocated from its import to the published thread, and an analyzer
   of your own built in Detect, from the library to its checks and its save),
   then the **workspaces** with their tools as tabs, then the
-  **reference**: every key by where it is pressed, Settings, and what to do when
-  something does not work, symptom by symptom.
+  **reference**: every key by where it is pressed, Settings (a tab per section of its
+  screen), and what to do when something does not work, symptom by symptom, ending on
+  **Report an issue**, which opens Settings on System where the report is written.
 - **A tool's page is a picture of it.** A number stands by each control it explains,
   on a panel's corner or just off a button's so it hides none of it, and a line per
   number stands beside the picture. At rest the picture carries its numbers and nothing
@@ -173,7 +174,10 @@ presses *Read the guide* on it, which opens the guide on its start page.
   taken is its own, and only the accounts that posted them are made up. The
   extension's pictures come from a second browser with the extension loaded, over
   OpenStreetMap's own tiles served at its own address (`extension.mjs`). A picture keeps the part of the window its
-  frames are in, and a panel a page does not explain is folded first. A control that
+  frames are in, and a panel a page does not explain is folded first. A picture stays
+  landscape, at most two thirds as tall as it is wide: a cut that follows a tall panel
+  takes in the screen beside it, and the dialog never shows a picture taller than the
+  room it has, so a picture is always seen whole. A control that
   moved is followed; one that went fails the run, and `guide.test.js` fails when a
   frame points at an anchor no component carries, when a tool has no page, or when a
   picture ships that the guide no longer shows. Rerun it before a release, look at the

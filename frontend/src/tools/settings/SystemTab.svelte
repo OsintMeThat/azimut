@@ -41,7 +41,7 @@
   const SCRAPER_LABELS = { 'yt-dlp': 'yt-dlp', 'gallery-dl': 'gallery-dl' };
 </script>
 
-<section class="group">
+<section class="group" data-guide="settings.about">
   <h3>Azimut</h3>
   <dl class="facts">
     <dt>Version</dt>
@@ -75,7 +75,7 @@
   </div>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.updates">
   <h3>Updates</h3>
   <div class="row">
     <div class="row-label">
@@ -126,7 +126,7 @@
   </p>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.issue">
   <h3>Report an issue</h3>
   <p class="note">
     Opens a new issue on the public GitHub tracker; anyone can read it.
@@ -185,7 +185,7 @@
   </p>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.downloaders">
   <h3>Downloaders</h3>
   <p class="note">
     Update these tools if a media link stops resolving.

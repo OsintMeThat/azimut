@@ -20,7 +20,7 @@
 
 <WorkspaceFolder onchange={(status) => (about.workspace_root = status.root)} />
 
-<section class="group">
+<section class="group" data-guide="settings.export-folders">
   <h3>Export folders</h3>
   <p class="note">Choose a folder for each export type.</p>
   {#each EXPORT_KINDS as kind (kind.id)}

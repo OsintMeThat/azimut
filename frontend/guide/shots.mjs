@@ -32,6 +32,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build, createServer, loadConfigFromFile, mergeConfig, preview } from 'vite';
 
+import { copyPasses } from './airbase.mjs';
 import { buildDemo, CHANNEL, IMAGERY } from './demo.mjs';
 import { openExtension } from './extension.mjs';
 import { DEFAULT_WINDOW, STAGES } from './stages.mjs';
@@ -49,6 +50,8 @@ const web = `http://127.0.0.1:${WEB_PORT}`;
 const CLIP = 'main.canvas .canvas-body';
 /** Room kept round the frames when a picture is cut down to them, in CSS pixels. */
 const MARGIN = 28;
+/** The tallest a picture may be against its width, so the guide shows it whole. */
+const LANDSCAPE = 0.66;
 /** Anchors that frame a group of controls rather than the first one found. */
 const UNION = new Set(['start.stages', 'start.tabs', 'notebook.insert', 'compare.session', 'proof.save', 'proof.meta', 'inspect.file', 'horizon.views']);
 
@@ -89,7 +92,7 @@ async function call(method, path, body) {
 /** Where each anchor and focus element stands, and the part of the clip that holds them. */
 async function measure(page, { anchors, clip, crop, focus }) {
   return page.evaluate(
-    ({ anchors, clip, crop, focus, union, margin }) => {
+    ({ anchors, clip, crop, focus, union, margin, landscape }) => {
       const seen = (el) => {
         const box = el.getBoundingClientRect();
         return box.width > 0 && box.height > 0 ? box : null;
@@ -139,6 +142,9 @@ async function measure(page, { anchors, clip, crop, focus }) {
         };
         [cut.left, cut.right] = grow(cut.left, cut.right, 620, frame.left, frame.right);
         [cut.top, cut.bottom] = grow(cut.top, cut.bottom, 360, frame.top, frame.bottom);
+        // a tall cut, a panel's column, takes in the screen beside it rather than
+        // standing as a strip the guide would have to scroll through
+        [cut.left, cut.right] = grow(cut.left, cut.right, (cut.bottom - cut.top) / landscape, frame.left, frame.right);
       }
       const round = (v) => Math.round(v * 10) / 10;
       const rects = Object.fromEntries(
@@ -160,7 +166,7 @@ async function measure(page, { anchors, clip, crop, focus }) {
         problems,
       };
     },
-    { anchors, clip, crop, focus, union: [...UNION], margin: MARGIN }
+    { anchors, clip, crop, focus, union: [...UNION], margin: MARGIN, landscape: LANDSCAPE }
   );
 }
 
@@ -211,6 +217,10 @@ async function run() {
       api_keys: { sentinelhub: 'guide-demo-instance' },
     })
   );
+  // the two Sentinel-2 passes the analyzer journey is photographed on, from a tile cache
+  // that already holds them: tiles only, so no Copernicus request is spent (airbase.mjs)
+  const passes = copyPasses(home);
+  say(passes ? `${passes} cached Sentinel-2 tile sets for the airbase` : 'no cached airbase passes: its pictures will fail');
   const backend = spawn('uv', ['run', 'azimut', '--port', String(API_PORT), '--no-browser'], {
     cwd: root,
     env: { ...process.env, AZIMUT_HOME: home },
@@ -308,7 +318,7 @@ async function run() {
         const shooter = outside ? ext.map : page;
         if (!outside) await page.setViewportSize(stage.window ?? DEFAULT_WINDOW);
         if (stage.from) await pause(300);
-        await stage.run({ page, go, demo, ext });
+        await stage.run({ page, go, demo, ext, passes });
         // The case sidebar is a second column the tool pages do not explain. A picture
         // taken from another keeps it as it was: pressing the toggle would close the
         // menu that picture is about.

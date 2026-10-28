@@ -406,3 +406,9 @@ export function openIconSettings() {
   uiState.settingsTab = 'icons';
   uiState.tool = 'settings';
 }
+
+/** Open Settings on System, where an issue is reported with what the app knows. */
+export function openIssueReport() {
+  uiState.settingsTab = 'system';
+  uiState.tool = 'settings';
+}

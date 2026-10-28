@@ -18,12 +18,18 @@
  */
 
 import { CAMERA, CAMERA_PLACE, CHANNEL, TERMINAL } from './demo.mjs';
+import { AIRBASE, airbaseAnalyzer } from './airbase.mjs';
 import { layPopup, liftAnchors } from './extension.mjs';
 
 const TOOLS = { width: 1000, height: 700 };
 const WIDE = { width: 1100, height: 720 };
 const LARGE = { width: 1200, height: 760 };
-const TALL = { width: 1100, height: 900 };
+/** The size the Detect film was made at, the map wide beside its column. */
+const FILM = { width: 1600, height: 900 };
+/** Room for a tall column, kept landscape so the guide shows the picture whole. */
+const TALL = { width: 1400, height: 880 };
+/** Settings with every section of a tab on screen. */
+const SETTINGS = { width: 1440, height: 900 };
 /** Wide enough for Board's Details to open beside the rows rather than over them. */
 const ROOMY = { width: 1360, height: 800 };
 
@@ -185,39 +191,42 @@ export const STAGES = [
   },
   {
     shot: 'settings',
-    async run({ go, page }) {
-      await go('settings');
-      await page.locator('.canvas-body button', { hasText: 'Imagery' }).first().click();
-    },
-  },
-  {
-    shot: 'settings-icons',
-    from: 'settings',
-    after: false,
+    window: SETTINGS,
     focus: ['[data-guide="settings.nav"]'],
-    async run({ page }) {
-      await seen(page, '[data-guide="settings.icons"]').click();
-      await seen(page, '[data-guide="settings.icons-library"]').waitFor();
+    async run({ go }) {
+      await go('settings');
     },
   },
-  {
-    shot: 'settings-storage',
+  ...[
+    ['settings-publishing', 'Publishing', 'settings.signature'],
+    ['settings-imagery', 'Imagery', 'settings.eco'],
+    ['settings-templates', 'Templates', 'settings.plate-templates'],
+    ['settings-icons', 'Icons', 'settings.icons-library'],
+    ['settings-storage', 'Storage', 'settings.backup'],
+    ['settings-system', 'System', 'settings.downloaders'],
+  ].map(([shot, section, last]) => ({
+    shot,
     from: 'settings',
+    window: SETTINGS,
     after: false,
     focus: ['[data-guide="settings.nav"]'],
     async run({ page }) {
       // the demo workspace is a throwaway folder named by the environment: shown as a
       // reader's own installation would be
-      await page.route('**/api/settings/workspace', async (route) => {
-        const answer = await (await route.fetch()).json();
-        await route.fulfill({ json: { ...answer, environment: false, root: '~/Azimut' } }).catch(() => {});
-      });
-      await seen(page, '[data-guide="settings.storage"]').click();
-      await seen(page, '[data-guide="settings.backup"]').waitFor();
-      await page.locator('[data-guide="settings.storage"]').page().waitForTimeout(500);
-      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      if (section === 'Storage') {
+        await page.route('**/api/settings/workspace', async (route) => {
+          const answer = await (await route.fetch()).json();
+          await route.fulfill({ json: { ...answer, environment: false, root: '~/Azimut' } }).catch(() => {});
+        });
+      }
+      await page.locator('[data-guide="settings.nav"] button', { hasText: section }).first().click();
+      await seen(page, `[data-guide="${last}"]`).waitFor();
+      if (section === 'Storage') {
+        await page.waitForTimeout(500);
+        await page.unrouteAll({ behavior: 'ignoreErrors' });
+      }
     },
-  },
+  })),
   {
     shot: 'media',
     crop: 'full',
@@ -494,31 +503,110 @@ export const STAGES = [
   {
     shot: 'detect-builder',
     from: 'detect-analyzer-new',
-    window: TALL,
+    window: FILM,
     map: true,
-    focus: ['[data-guide="detect.tabs"]'],
-    settle: 2500,
+    crop: 'full',
+    settle: 6000,
     after: false,
-    async run({ page }) {
-      // the burn example: copied into the library with its checks, then read on its rules
-      await page.locator('[data-guide="detect.start-from"] button', { hasText: 'Fresh burn' }).filter({ visible: true }).first().click();
-      await seen(page, '[data-guide="detect.checks"]').waitFor();
-      // its first check went on the map; taken off again, the map stays on the free imagery
-      const onMapCheck = page.locator('.checks button.open[aria-pressed="true"]').filter({ visible: true });
-      if (await onMapCheck.count()) await onMapCheck.first().click();
+    async run({ go, page, passes }) {
+      if (!passes) {
+        throw new Error('the airbase passes are not cached (airbase.mjs): reading them would spend Copernicus quota');
+      }
+      // the film's analyzer, filed as the library files one, then opened from the library
+      const filed = await page.evaluate(async (recipe) => {
+        const answer = await fetch('/api/compare/analyzers', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(recipe),
+        });
+        return answer.ok;
+      }, airbaseAnalyzer());
+      if (!filed) throw new Error('the airbase analyzer was refused');
+      // The bench asks the Copernicus configuration which layers it serves before it
+      // draws a pass. The run's stand-in id has none to ask, so the question is answered
+      // as the account the passes were cached from answered it: the standard layers and
+      // its colour infrared one. The passes themselves come from the cached tiles.
+      await page.route('**/api/satellite/sentinel/layers?check=true', async (route) => {
+        const plain = route.request().url().replace('?check=true', '');
+        const answer = await (await route.fetch({ url: plain })).json();
+        const layers = [...answer.layers, { id: 'COLOR_INFRARED', label: 'Color infrared', hint: 'Near infrared (B08) shown red.' }];
+        await route.fulfill({ json: { ...answer, layers, source: 'instance' } }).catch(() => {});
+      });
+      await go(`detect?ll=${AIRBASE.lat},${AIRBASE.lon}&z=${AIRBASE.zoom}`);
+      await seen(page, '[data-guide="detect.analyzers"]').click();
+      await page.getByRole('button', { name: 'Edit Aircraft activity' }).filter({ visible: true }).first().click();
+      // the check on the map: both passes, read from the cache
+      await page.locator('.builder [role="tab"]', { hasText: 'Checks' }).filter({ visible: true }).first().click();
+      await page.getByRole('button', { name: 'Put the check Apron check on the map' }).filter({ visible: true }).first().click();
+      await seen(page, '[data-guide="detect.bench"]').waitFor();
       await page.locator('.builder [role="tab"]', { hasText: 'Rules' }).filter({ visible: true }).first().click();
       await seen(page, '[data-guide="detect.rules"]').waitFor();
     },
   },
   {
-    shot: 'detect-mine',
+    shot: 'detect-check',
     from: 'detect-builder',
-    window: TALL,
+    window: FILM,
+    map: true,
+    crop: 'full',
+    settle: 5000,
+    after: false,
+    async run({ page }) {
+      await seen(page, '[data-guide="detect.checks"]').click();
+      await seen(page, '[data-guide="detect.pins"]').waitFor();
+      await page.locator('[data-guide="detect.bench"] button', { hasText: 'Split' }).first().click();
+    },
+  },
+  {
+    shot: 'detect-seeit',
+    from: 'detect-check',
+    window: FILM,
+    map: true,
+    crop: 'full',
+    settle: 8000,
+    after: false,
+    async run({ page }) {
+      await page.locator('.builder [role="tab"]', { hasText: 'Rules' }).filter({ visible: true }).first().click();
+      // both passes in colour infrared, where the second rule's band shows red
+      await seen(page, '[data-guide="detect.display"] button.select').click();
+      await page.getByRole('menuitemradio', { name: /Color infrared/ }).filter({ visible: true }).first().click();
+      await page.waitForFunction(
+        () => document.querySelector('[data-guide="detect.display"]')?.textContent?.includes('Color infrared'),
+        null,
+        { timeout: 60_000 }
+      );
+    },
+  },
+  {
+    shot: 'detect-tested',
+    from: 'detect-seeit',
+    window: FILM,
+    map: true,
+    crop: 'full',
+    settle: 5000,
+    after: false,
+    async run({ page }) {
+      // back on the passes in true colour, then the check read through every rule
+      await seen(page, '[data-guide="detect.display"] button.select').click();
+      await page.getByRole('menuitemradio', { name: /True colour/ }).filter({ visible: true }).first().click();
+      await seen(page, '[data-guide="detect.test"]').click();
+      await page.waitForFunction(
+        () => /found/.test(document.querySelector('[data-guide="detect.verdict"]')?.textContent ?? ''),
+        null,
+        { timeout: 120_000 }
+      );
+    },
+  },
+  {
+    shot: 'detect-mine',
+    from: 'detect-tested',
+    window: FILM,
     map: true,
     focus: ['[data-guide="detect.tabs"]', 'section[aria-label="My analyzers"]', '[data-guide="detect.library"]'],
     async run({ page }) {
-      await page.locator('.cmp-dock-foot button', { hasText: 'Cancel' }).filter({ visible: true }).first().click();
+      await seen(page, '[data-guide="detect.builder-save"]').click();
       await seen(page, 'section[aria-label="My analyzers"] .entry').waitFor();
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
     },
   },
   {

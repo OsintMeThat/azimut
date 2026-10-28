@@ -1,36 +1,48 @@
 {
-  "width": 818,
-  "height": 634,
+  "width": 1263,
+  "height": 834,
   "anchors": {
     "settings.nav": {
       "x": 0,
       "y": 28,
       "w": 168,
-      "h": 605.8
+      "h": 805.8
     },
-    "settings.providers": {
+    "settings.coordinates": {
       "x": 186,
       "y": 34,
       "w": 604,
-      "h": 469.5
+      "h": 170
     },
-    "settings.eco": {
+    "settings.units": {
       "x": 186,
-      "y": 503.5,
+      "y": 204,
       "w": 604,
-      "h": 109.4
+      "h": 144.8
     },
-    "settings.icons": {
-      "x": 12,
-      "y": 168.8,
-      "w": 147,
-      "h": 33.2
+    "settings.home-view": {
+      "x": 186,
+      "y": 348.8,
+      "w": 604,
+      "h": 144.7
     },
-    "settings.storage": {
-      "x": 12,
-      "y": 264.3,
-      "w": 147,
-      "h": 37.2
+    "settings.map-tabs": {
+      "x": 186,
+      "y": 493.5,
+      "w": 604,
+      "h": 123.7
+    },
+    "settings.proofs": {
+      "x": 186,
+      "y": 617.1,
+      "w": 604,
+      "h": 138.8
+    },
+    "settings.reverse": {
+      "x": 186,
+      "y": 756,
+      "w": 604,
+      "h": 77.9
     }
   }
 }

@@ -31,7 +31,7 @@
   ];
 </script>
 
-<section class="group">
+<section class="group" data-guide="settings.coordinates">
   <h3>Coordinates</h3>
   <div class="row">
     <div class="row-label">
@@ -54,7 +54,7 @@
   </p>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.units">
   <h3>Measurements</h3>
   <div class="row">
     <div class="row-label">
@@ -76,7 +76,7 @@
   </p>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.home-view">
   <h3>Satellite home view</h3>
   <p class="intro">
     Default opening position for Satellite; case navigation still takes priority.
@@ -97,7 +97,7 @@
   </div>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.map-tabs">
   <h3>Map tabs</h3>
   <div class="row">
     <div class="row-label">
@@ -116,7 +116,7 @@
   </div>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.proofs">
   <h3>Proofs</h3>
   <p class="intro">
     Saving a proof turns the coordinates it carries into a place on the map, and
@@ -138,7 +138,7 @@
   </div>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.reverse">
   <h3>Reverse search</h3>
   <div class="row">
     <div class="row-label">

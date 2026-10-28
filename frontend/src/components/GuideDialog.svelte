@@ -15,6 +15,7 @@
   import Icon from './Icon.svelte';
   import GuideShot from './GuideShot.svelte';
   import { uiState } from '../lib/state.svelte.js';
+  import { openIssueReport } from '../lib/navigate.js';
   import {
     EXTENSION_SITES,
     FIXES,
@@ -131,6 +132,12 @@
 
   function openTool(id) {
     uiState.tool = id;
+    onclose();
+  }
+
+  /** Settings, System: the report there carries what the app knows of the problem. */
+  function reportIssue() {
+    openIssueReport();
     onclose();
   }
 
@@ -378,6 +385,15 @@
             </section>
           {/each}
         </div>
+        <section class="report" aria-label="Report an issue">
+          <div class="report-words">
+            <h3>Still stuck?</h3>
+            <p>Report an issue writes the version, the system and the last warnings with your paths and keys removed, and opens it on GitHub.</p>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick={reportIssue}>
+            Report an issue <Icon name="arrowRight" size={13} />
+          </button>
+        </section>
       {/if}
     </section>
   </div>
@@ -544,6 +560,10 @@
     margin-bottom: 12px;
     color: var(--text-2);
     font-size: var(--fs-md);
+  }
+  /* the height a picture may take: the dialog's, less its header, tabs and lead */
+  .picture {
+    --shot-room: calc(min(860px, 100vh - 96px) - 200px);
   }
   .lead.instruction {
     color: var(--text-1);
@@ -784,6 +804,31 @@
     padding: 16px 22px 22px;
     columns: 2 340px;
     column-gap: 14px;
+  }
+  .report {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 0 22px 22px;
+    padding: 14px 16px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--bg-2);
+  }
+  .report-words {
+    flex: 1;
+    min-width: 0;
+  }
+  .report h3 {
+    margin-bottom: 4px;
+    font-size: var(--fs-sm);
+    font-weight: 700;
+    color: var(--text-1);
+  }
+  .report p {
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    line-height: 1.45;
   }
   .card-block {
     break-inside: avoid;

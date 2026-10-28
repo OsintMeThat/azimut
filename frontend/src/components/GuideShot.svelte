@@ -52,7 +52,13 @@
   const share = (value, total) => `${(value / total) * 100}%`;
 </script>
 
-<figure class="shot" style:aspect-ratio="{shot.width} / {shot.height}" bind:clientWidth={width}>
+<!-- never taller than the room the dialog leaves it, so a picture is seen whole without the wheel -->
+<figure
+  class="shot"
+  style:aspect-ratio="{shot.width} / {shot.height}"
+  style:max-width="calc(var(--shot-room, 100vh) * {shot.width / shot.height})"
+  bind:clientWidth={width}
+>
   <img src={shot.src} alt="" draggable="false" />
   <svg viewBox="0 0 {shot.width} {shot.height}" aria-hidden="true">
     <defs>

@@ -6,6 +6,7 @@ import {
   EXTENSION_SITES,
   EXTENSION_TABS,
   FIXES,
+  SETTINGS_TABS,
   JOURNEYS,
   KEYMAP,
   MENU,
@@ -75,7 +76,7 @@ describe('the guide tracks the app rather than falling behind it', () => {
   });
 
   it('pages nothing the app does not have', () => {
-    const own = new Set(['start', 'extension', 'extension-capture', 'extension-tools', 'settings']);
+    const own = new Set(['start', 'extension', 'extension-capture', 'extension-tools', ...SETTINGS_TABS.map((tab) => tab.id)]);
     for (const id of Object.keys(PAGES)) expect(own.has(id) || TOOLS.includes(id), id).toBe(true);
   });
 
@@ -95,6 +96,18 @@ describe('the guide tracks the app rather than falling behind it', () => {
       expect(tabLabel(tab.id)).toBe(tab.label);
     }
     expect(landingFor('extension-tools')).toEqual({ item: 'extension', tool: 'extension-tools' });
+  });
+
+  it('explains Settings section by section, in the order of its own screen', () => {
+    const settings = MENU_ITEMS.find((item) => item.id === 'settings');
+    expect(settings.kind).toBe('tabs');
+    expect(settings.tools).toEqual(SETTINGS_TABS.map((tab) => tab.id));
+    expect(SETTINGS_TABS.map((tab) => tab.label)).toEqual(['General', 'Publishing', 'Imagery', 'Templates', 'Icons', 'Storage', 'System']);
+    for (const tab of SETTINGS_TABS) {
+      expect(PAGES[tab.id], tab.id).toBeTruthy();
+      expect(tabLabel(tab.id)).toBe(tab.label);
+    }
+    expect(landingFor('settings')).toEqual({ item: 'settings', tool: 'settings' });
   });
 
   it('says where the extension works in a table as wide as its columns', () => {
@@ -147,6 +160,14 @@ describe('a page and its pictures', () => {
       }
     });
   }
+
+  it('keeps every picture landscape, so the guide shows it whole without scrolling', () => {
+    for (const { shot } of shots) {
+      const picture = shotOf(shot);
+      if (!picture) continue;
+      expect(picture.height / picture.width, `${shot} is ${picture.width}×${picture.height}, too tall`).toBeLessThanOrEqual(0.75);
+    }
+  });
 
   it('ships no picture the guide no longer shows', () => {
     const dir = fileURLToPath(new URL('../assets/guide/', import.meta.url));
@@ -308,7 +329,7 @@ describe('where the guide opens', () => {
   });
 
   it('on a page asked by its id, Settings included', () => {
-    expect(landingFor('settings')).toEqual({ item: 'settings', tool: null });
+    expect(landingFor('settings')).toEqual({ item: 'settings', tool: 'settings' });
     expect(landingFor('journey:geolocate-a-photo')).toEqual({ item: 'journey:geolocate-a-photo', tool: null });
   });
 

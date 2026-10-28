@@ -124,44 +124,86 @@ export const PAGES = {
       { title: 'The panel moves', text: 'Drag it by its header, and fold it to see the whole map.' },
     ],
   },
+  // Settings comes in tabs (SETTINGS_TABS), one per section of the screen.
   settings: {
     title: 'Settings',
     icon: 'settings',
-    lead: 'What applies to every case on this computer.',
+    lead: 'What applies to every case on this computer. General sets how points, units and the map tabs read.',
     shot: 'settings',
     marks: [
-      { anchor: 'settings.nav', title: 'Sections', text: 'General, Publishing, Imagery, Templates, Icons, the extension, Storage and System.' },
-      { anchor: 'settings.providers', title: 'Keys for more imagery', text: 'Each keyed provider says what it costs and what you used this month.' },
+      { anchor: 'settings.nav', title: 'Sections', text: 'General, Publishing, Imagery, Templates, Icons, the extension, Storage and System. A dot means something to install or update.' },
+      { anchor: 'settings.coordinates', title: 'Coordinates', text: 'How every tool writes a point, in decimal, in degrees or as MGRS. The case keeps decimal.' },
+      { anchor: 'settings.units', title: 'Measurements', text: 'Metric, imperial or nautical, for the rulers and the readouts.' },
+      { anchor: 'settings.home-view', title: 'Satellite home view', text: 'Where Satellite opens when the case gives it no place of its own.' },
+      { anchor: 'settings.map-tabs', title: 'Map tabs', text: 'Satellite, Compare, Detect and Horizon look at the same place, or each at its own.' },
+      { anchor: 'settings.proofs', title: 'Proofs', text: 'Whether saving a proof files its point as a place without asking.' },
+      { anchor: 'settings.reverse', title: 'Reverse search', text: 'Whether the extension hands the picture to the engine it opens.' },
+    ],
+    tips: [
+      { title: 'Hover to know', text: 'Each setting says what it does when the pointer rests on it.' },
+      { title: 'The capture extension', text: 'Its section installs and pairs it, and the Capture extension page of this guide shows it at work.' },
+    ],
+  },
+  'settings-publishing': {
+    lead: 'What a new thread starts with, and how your work is signed.',
+    shot: 'settings-publishing',
+    marks: [
+      { anchor: 'settings.report-defaults', title: 'Geo Report', text: 'The mention and the site a new thread starts with, and whether the extension may fill the composer.' },
+      { anchor: 'settings.signature', title: 'Signature', text: 'Your handle and your logo, for the proofs and plates that carry them.' },
+    ],
+    tips: [{ title: 'Posting stays yours', text: 'Even with the extension, the composer is filled and Post is left to you.' }],
+  },
+  'settings-imagery': {
+    lead: 'The imagery the maps can draw: free providers built in, keyed ones with your own keys.',
+    shot: 'settings-imagery',
+    marks: [
+      { anchor: 'settings.providers', title: 'Providers', text: 'Each keyed provider says what it costs, what you used this month and how to get its key.' },
       { anchor: 'settings.eco', title: 'Eco mode', text: 'Zoomed out, a billed map draws free imagery instead, up to the zoom you set.' },
-      {
-        anchor: 'settings.icons',
-        title: 'Icons',
-        text: 'Your own pictures for the markers of your layers.',
-        opens: {
-          shot: 'settings-icons',
-          lead: 'Icons you add here are offered in every layer’s palette, in every case.',
-          marks: [{ anchor: 'settings.icons-library', title: 'Your icons', text: 'A layer keeps a copy of each icon it wears, so removing one here changes no map.' }],
-        },
-      },
-      {
-        anchor: 'settings.storage',
-        title: 'Storage',
-        text: 'Where exports go, and the backup that moves Azimut to another computer.',
-        opens: {
-          shot: 'settings-storage',
-          lead: 'Export backup writes one file that Import backup reads on the other computer.',
-          marks: [{ anchor: 'settings.backup', title: 'Settings backup', text: 'Settings, keys, templates, icons and signature. It holds your keys, so keep it private.' }],
-        },
-      },
     ],
     tips: [
       { title: 'Most of the app needs no key', text: 'Esri, its Wayback archive, OpenStreetMap and OpenTopoMap work without one.' },
       { title: 'Copernicus is free', text: 'Sentinel-2 and radar need a free Copernicus account, and the tools that use them explain the setup field by field.' },
-      { title: 'Moving to another computer', text: 'Storage holds the settings backup, which carries everything but live secrets like your cookies.' },
-      { title: 'Thread styles live here', text: 'Templates holds the structures a Geo Report thread can follow.' },
-      { title: 'Your own icons', text: 'Icons keeps the pictures your layers can wear, shared by every case.' },
-      { title: 'Hover to know', text: 'Each setting says what it does when the pointer rests on it.' },
+      { title: 'Layers of your own', text: 'The Sentinel Hub card keeps the Copernicus layers you add, a radar one included.' },
     ],
+  },
+  'settings-templates': {
+    lead: 'Starting points shared by every case: how a proof looks, how a thread runs, how a plate is laid out.',
+    shot: 'settings-templates',
+    marks: [
+      { anchor: 'settings.proof-templates', title: 'Geo Proof templates', text: 'Proof styles offered as a house style in every proof.' },
+      { anchor: 'settings.report-templates', title: 'Geo Report templates', text: 'The structures a thread can follow, with words that fill themselves.' },
+      { anchor: 'settings.plate-templates', title: 'Map plate templates', text: 'A plate’s layout, paper and colours without its ground, to share as a file.' },
+    ],
+    tips: [{ title: 'From a plate', text: 'Keep as template, in a plate, files its layout here.' }],
+  },
+  'settings-icons': {
+    lead: 'Your own icons for the markers of your layers, offered in every layer’s palette and every case.',
+    shot: 'settings-icons',
+    marks: [
+      { anchor: 'settings.icons-library', title: 'Your icons', text: 'Drop pictures or a .zip pack. A layer keeps a copy of each icon it wears, so removing one here changes no map.' },
+    ],
+    tips: [{ title: 'A pack at once', text: 'The folders of a .zip pack become groups of icons.' }],
+  },
+  'settings-storage': {
+    lead: 'Where the cases live, where exports go, and the backup that moves Azimut to another computer.',
+    shot: 'settings-storage',
+    marks: [
+      { anchor: 'settings.workspace', title: 'Workspace folder', text: 'Where every case is kept. Pick another folder and Azimut moves them there.' },
+      { anchor: 'settings.export-folders', title: 'Export folders', text: 'Where each kind of export is written, the case’s exports folder until you choose.' },
+      { anchor: 'settings.backup', title: 'Settings backup', text: 'Settings, keys, templates, icons and signature in one file. It holds your keys, so keep it private.' },
+    ],
+    tips: [{ title: 'Moving to another computer', text: 'Import backup on the new one, and the cases follow with the workspace folder.' }],
+  },
+  'settings-system': {
+    lead: 'The version, the updates, and what to do when something breaks.',
+    shot: 'settings-system',
+    marks: [
+      { anchor: 'settings.about', title: 'Azimut', text: 'The version, the ffmpeg in use, and what reaches the network.' },
+      { anchor: 'settings.updates', title: 'Updates', text: 'Says when a new version is out, from GitHub and PyPI, and how to install it.' },
+      { anchor: 'settings.issue', title: 'Report an issue', text: 'Writes a report with the version, the system and the last warnings, your paths and keys removed, and opens it on GitHub.' },
+      { anchor: 'settings.downloaders', title: 'Downloaders', text: 'The tools that fetch media links, updated here when a link stops resolving.' },
+    ],
+    tips: [{ title: 'Offline is fine', text: 'Without a network the update check stays silent, and the switch turns it off for good.' }],
   },
 
   // -- Sources ----------------------------------------------------------------
@@ -469,11 +511,42 @@ export const PAGES = {
                     text: 'A blank rule, or a ready example with the checks that prove it.',
                     opens: {
                       shot: 'detect-builder',
-                      lead: 'An analyzer is the rules a pixel has to pass, proved by checks on real scenes.',
+                      lead: 'An analyzer is the rules a pixel has to pass, proved by checks on real passes, here new aircraft on an apron.',
                       marks: [
                         { anchor: 'detect.rules', title: 'Rules', text: 'Each is a sentence: a band or an index, before, after or as the change, crossing a line.' },
-                        { anchor: 'detect.checks', title: 'Checks', text: 'Pins where something must be found and where nothing may be, on two real passes.' },
-                        { anchor: 'detect.test', title: 'Test', text: 'Reads every pinned tile and turns each check green or red. It never runs on its own.' },
+                        {
+                          anchor: 'detect.checks',
+                          title: 'Checks',
+                          text: 'Two real passes and pins where something must be found and where nothing may be.',
+                          opens: {
+                            shot: 'detect-check',
+                            lead: 'A check on the map: the two passes, split or one at a time, and its pins.',
+                            marks: [
+                              { anchor: 'detect.bench', title: 'The passes', text: 'Before, after, or split to slide from one to the other.' },
+                              { anchor: 'detect.pins', title: 'Pins', text: 'Should be found, or should stay empty. Turn one, or take it away.' },
+                            ],
+                          },
+                        },
+                        {
+                          anchor: 'detect.display',
+                          title: 'Display',
+                          text: 'The passes in true colour, another Copernicus layer, or what a rule reads.',
+                          opens: {
+                            shot: 'detect-seeit',
+                            lead: 'Both passes in colour infrared, where near infrared shows red. See it on a rule draws what that rule reads.',
+                            marks: [{ anchor: 'detect.display', title: 'The layer shown', text: 'Any layer of your Copernicus account, on both passes at once.' }],
+                          },
+                        },
+                        {
+                          anchor: 'detect.test',
+                          title: 'Test',
+                          text: 'Reads every pinned tile and turns each check green or red. It never runs on its own.',
+                          opens: {
+                            shot: 'detect-tested',
+                            lead: 'Tested: what the rules keep is outlined on the map, and each pin says whether it came out as it should.',
+                            marks: [{ anchor: 'detect.verdict', title: 'The verdict', text: 'How many pins came out right, and what each rule adds.' }],
+                          },
+                        },
                         { anchor: 'detect.builder-save', title: 'Save', text: 'Needs one check with a pin found. Your analyzers are offered in every case.' },
                       ],
                     },
@@ -779,18 +852,29 @@ export const JOURNEYS = [
     lead: 'From a change you want Detect to find to an analyzer proved on real scenes, offered in every case.',
     steps: [
       { tool: 'detect', label: 'Library', shot: 'detect-library', text: 'In Detect, Analyzers opens the library. New analyzer starts one, and a built-in can be copied to tune instead.', marks: ['detect.library-new', 'detect.library'] },
-      { tool: 'detect', label: 'What it reads', shot: 'detect-analyzer-new', text: 'Say what it reads: Sentinel-2 or radar, one date to spot a thing, two to find a change. It is fixed from here on.', marks: ['detect.reads'] },
-      { tool: 'detect', label: 'Start from', shot: 'detect-analyzer-new', text: 'Start from a ready example rather than a blank rule: it comes with checks that turn red when a rule breaks.', marks: ['detect.start-from'] },
-      { tool: 'detect', label: 'Rules', shot: 'detect-builder', text: 'Read the rules as sentences, and change a line, add a rule, or keep what passes all of them or any.', marks: ['detect.rules'] },
-      { tool: 'detect', label: 'Checks', shot: 'detect-builder', text: 'Each check is two passes and pins: where something must be found, and traps where nothing may be.', marks: ['detect.checks'] },
-      { tool: 'detect', label: 'Test', shot: 'detect-builder', text: 'Test reads the pinned tiles in Copernicus and turns each check green or red. Change a rule and test again.', marks: ['detect.test'] },
-      { tool: 'detect', label: 'Save', shot: 'detect-builder', text: 'Save it. New detection then offers it in every case, and Share hands it to someone else as a file.', marks: ['detect.builder-save'] },
+      { tool: 'detect', label: 'What it reads', shot: 'detect-analyzer-new', text: 'Here, new aircraft on an airbase apron: Sentinel-2, two dates, from a blank rule. What it reads is fixed from here on.', marks: ['detect.reads', 'detect.start-from'] },
+      { tool: 'detect', label: 'Check', shot: 'detect-check', text: 'Pick a pass before and a pass after in the calendar, slide between them, and pin where aircraft appeared and where nothing changed.', marks: ['detect.bench', 'detect.pins'] },
+      { tool: 'detect', label: 'Rules', shot: 'detect-builder', text: 'A first rule keeps a change of colour in the visible bands, and a second a drop in near infrared against the ground around it.', marks: ['detect.rules'] },
+      { tool: 'detect', label: 'Display', shot: 'detect-seeit', text: 'Look at the passes through another layer, here colour infrared, or press See it on a rule to draw what it reads, and set its line where aircraft stand out.', marks: ['detect.display'] },
+      { tool: 'detect', label: 'Test', shot: 'detect-tested', text: 'Test reads the pinned tiles. When a pin is missed, ease the rule’s line and test again until every pin comes out right.', marks: ['detect.verdict'] },
+      { tool: 'detect', label: 'Save', shot: 'detect-tested', text: 'Save it. New detection then offers it in every case, and Share hands it to someone else as a file.', marks: ['detect.builder-save'] },
     ],
     result: {
       shot: 'detect-mine',
-      text: 'The analyzer in your library, with its checks, ready for a pass or a routine on any ground.',
+      text: 'The analyzer in your library with its check, ready for a pass or a routine over the apron, or any ground.',
     },
   },
+];
+
+/** Settings, in the tabs of its own screen. The extension's section has a page of its own. */
+export const SETTINGS_TABS = [
+  { id: 'settings', label: 'General' },
+  { id: 'settings-publishing', label: 'Publishing' },
+  { id: 'settings-imagery', label: 'Imagery' },
+  { id: 'settings-templates', label: 'Templates' },
+  { id: 'settings-icons', label: 'Icons' },
+  { id: 'settings-storage', label: 'Storage' },
+  { id: 'settings-system', label: 'System' },
 ];
 
 /** The extension's page, in the tabs it is read in: setting it up, then using it. */
@@ -1068,7 +1152,7 @@ const reference = (id) => ({ id, label: REFERENCE[id].title, icon: REFERENCE[id]
 const tabbed = (id, tabs) => ({ id, label: PAGES[id].title, icon: PAGES[id].icon, kind: 'tabs', tools: tabs.map((tab) => tab.id) });
 
 /** The label of a tab, a workspace's tool or one of a tabbed page's own tabs. */
-export const tabLabel = (id) => EXTENSION_TABS.find((tab) => tab.id === id)?.label ?? toolLabel(id);
+export const tabLabel = (id) => [...EXTENSION_TABS, ...SETTINGS_TABS].find((tab) => tab.id === id)?.label ?? toolLabel(id);
 
 /**
  * The menu, in the order somebody arriving reads it: what a case is, then a goal walked
@@ -1098,7 +1182,7 @@ export const MENU = [
       lead: WORKSPACE_LEADS[ws.id],
     })),
   },
-  { title: 'Reference', items: [reference('shortcuts'), page('settings'), reference('trouble')] },
+  { title: 'Reference', items: [reference('shortcuts'), tabbed('settings', SETTINGS_TABS), reference('trouble')] },
 ];
 
 export const MENU_ITEMS = MENU.flatMap((group) => group.items);

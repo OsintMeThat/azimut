@@ -82,7 +82,7 @@
           <div class="field">
             <span>Pins</span>
             {#if check.marks.length}
-              <ul class="marks">
+              <ul class="marks" data-guide="detect.pins">
                 {#each check.marks as mark, i (i)}
                   <li>
                     <span class="dot pin-{mark.expect}" aria-hidden="true"></span>

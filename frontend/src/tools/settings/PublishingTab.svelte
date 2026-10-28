@@ -22,7 +22,7 @@
   } = $props();
 </script>
 
-<section class="group">
+<section class="group" data-guide="settings.report-defaults">
   <h3>Geo Report</h3>
   <div class="row">
     <div class="row-label">
@@ -72,7 +72,7 @@
   </div>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.signature">
   <h3>Signature</h3>
   <div class="row">
     <div class="row-label">

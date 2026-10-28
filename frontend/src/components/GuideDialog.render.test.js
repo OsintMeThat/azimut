@@ -6,7 +6,7 @@ vi.mock('../lib/api.js', () => ({ api: { get: vi.fn(async () => []) } }));
 
 const { uiState } = await import('../lib/state.svelte.js');
 const { default: GuideDialog } = await import('./GuideDialog.svelte');
-const { EXTENSION_SITES, EXTENSION_TABS, JOURNEYS, KEYMAP, FIXES, PAGES, stepMarks } = await import('../lib/guide.js');
+const { EXTENSION_SITES, EXTENSION_TABS, JOURNEYS, KEYMAP, FIXES, PAGES, SETTINGS_TABS, stepMarks } = await import('../lib/guide.js');
 
 let live;
 let onclose;
@@ -232,10 +232,27 @@ describe('the reference', () => {
     expect(document.querySelectorAll('.fixes .card-block')).toHaveLength(FIXES.length);
   });
 
-  it('opens Settings on its own page from the gear', async () => {
+  it('opens Settings on its own page from the gear, a tab per section', async () => {
     await open('settings');
     expect(current('.menu .entry')).toBe('Settings');
-    expect(document.querySelector('.tabs')).toBeNull();
+    expect(current('.tabs .tab')).toBe('General');
+    expect([...document.querySelectorAll('.tabs .tab')].map((tab) => tab.textContent.trim())).toEqual(
+      SETTINGS_TABS.map((tab) => tab.label)
+    );
+    press([...document.querySelectorAll('.tabs .tab')].find((tab) => tab.textContent.trim() === 'System'));
+    expect(lines()).toHaveLength(PAGES['settings-system'].marks.length);
+    // a section of Settings explains it rather than opening a tool
+    expect(document.querySelector('.go')).toBeNull();
+  });
+
+  it('ends what to do when something does not work on reporting it, in Settings, System', async () => {
+    await open('start');
+    press(entry('When something does not work'));
+    uiState.tool = 'media';
+    press(document.querySelector('.report button'));
+    expect(uiState.tool).toBe('settings');
+    expect(uiState.settingsTab).toBe('system');
+    expect(onclose).toHaveBeenCalled();
   });
 });
 

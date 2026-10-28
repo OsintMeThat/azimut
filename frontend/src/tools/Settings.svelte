@@ -867,7 +867,6 @@
           class="rail-tab dotted"
           class:active={tab === t.id}
           class:rail-break={t.id === 'storage'}
-          data-guide={t.id === 'icons' ? 'settings.icons' : t.id === 'storage' ? 'settings.storage' : undefined}
           onclick={() => (tab = t.id)}
           aria-current={tab === t.id ? 'page' : undefined}
         >
