@@ -363,6 +363,7 @@ stops making sense.
 - **Find, narrower still:** near a road or a track (OpenFreeMap's transportation layer, a line decoder and a tile cap per area), turns kept between searches of one area, a mirrored place shown flipped in Overlay, and the lens searched for a collage laid wholly by hand.
 - **Sun and moon on the globe:** the bodies in the 3D view's sky at the hour the Sun & moon panel is on, and the relief lit from where the sun stands then.
 - **The sky over the area, not the tile:** Detect's pass list and its newest pass judged by the cloud over the drawn area (one small SCL read per pass) rather than the 110 km tile's figure.
+- **A mark of authorship on Proof and Plate exports:** a faint pattern in the pixels, drawn from a key kept on the analyst's machine, that survives a screenshot or a light retouch and that only that key can find. A signed hash beside the file would say the export is untouched.
 
 ## 8. Explicit non-goals
 
