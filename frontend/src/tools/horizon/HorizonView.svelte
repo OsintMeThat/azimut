@@ -1547,6 +1547,9 @@
       {#each overlay.bentShown ?? [] as zone, index (index)}
         <polyline class="bent" points={onScreen(zone.path.length > 1 ? zone.path : [zone.path[0], zone.path[0]])} stroke-width={Math.max(2, 2 * zone.r * photoScale.width)} />
       {/each}
+      {#each overlay.hazyShown ?? [] as zone, index (index)}
+        <polyline class="hazy" points={onScreen(zone.path.length > 1 ? zone.path : [zone.path[0], zone.path[0]])} stroke-width={Math.max(2, 2 * zone.r * photoScale.width)} />
+      {/each}
       {#each overlay.strokesShown as stroke, index (index)}
         {@const points = onScreen(stroke)}
         {@const id = overlay.marks.lines[index]}
@@ -2207,6 +2210,13 @@
     stroke-linecap: round;
     stroke-linejoin: round;
   }
+  /* a part where far land may be hidden: a pale blue wash */
+  .hazy {
+    fill: none;
+    stroke: rgba(160, 200, 255, 0.3);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
   .pivot .ring {
     stroke-dasharray: 5 4;
   }
@@ -2448,6 +2458,12 @@
     border: 1px solid #8fd3ff;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.7);
+  }
+  .swatch.hazy {
+    width: 12px;
+    height: 8px;
+    border-radius: 4px;
+    background: rgba(160, 200, 255, 0.45);
   }
   .swatch.bent {
     width: 12px;

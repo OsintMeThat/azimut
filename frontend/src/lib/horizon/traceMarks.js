@@ -20,6 +20,9 @@
  *          piece stretched: `{ path, r }`, the brush's path on the photo and
  *          its radius as a share of the photo's width (`BENT_MAX` at most).
  *          The lines there count less, whatever line runs through
+ *   hazy   the parts brushed where far land may be hidden, by haze or the
+ *          night, kept as `bent` is. A skyline line there is read as a ridge
+ *          is: an edge in front of land the photo does not show
  *
  * A stroke drawn along the skyline that lies under another one is an inner
  * edge whatever pen drew it: nothing under a line can be the sky's edge.
@@ -35,9 +38,13 @@ export const NO_MARKS = Object.freeze({
   clear: [],
   key: [],
   bent: [],
+  hazy: [],
 });
 
-/** How many brushings over bent parts a photo keeps, and how many points each path keeps. */
+/** The brushes' kinds: a part that may be bent, and one where far land may be hidden. */
+export const BRUSHES = Object.freeze(["bent", "hazy"]);
+
+/** How many brushings of each kind a photo keeps, and how many points each path keeps. */
 export const BENT_MAX = 24;
 const BENT_POINTS_MAX = 2000;
 
@@ -152,7 +159,10 @@ export function cleanMarks(marks, count) {
     if (!known.has(one?.line) || !bands.length || far.some((f) => f.line === one.line)) continue;
     far.push({ line: one.line, bands });
   }
-  return { lines, inner, pairs: pairs.slice(0, PAIRS_MAX), cuts, far, sea, clear, key, bent: cleanBent(marks?.bent) };
+  return {
+    lines, inner, pairs: pairs.slice(0, PAIRS_MAX), cuts, far, sea, clear, key,
+    bent: cleanBent(marks?.bent), hazy: cleanBent(marks?.hazy),
+  };
 }
 
 /** Whether two sets of marks say the same thing. */
@@ -169,7 +179,8 @@ export function sameMarks(a, b) {
     sameIds(x.sea ?? [], y.sea ?? []) &&
     sameIds(x.clear ?? [], y.clear ?? []) &&
     sameIds(x.key ?? [], y.key ?? []) &&
-    JSON.stringify(x.bent ?? []) === JSON.stringify(y.bent ?? [])
+    JSON.stringify(x.bent ?? []) === JSON.stringify(y.bent ?? []) &&
+    JSON.stringify(x.hazy ?? []) === JSON.stringify(y.hazy ?? [])
   );
 }
 
@@ -189,7 +200,8 @@ export function marksSaid(marks) {
         marks.sea?.length ||
         marks.clear?.length ||
         marks.key?.length ||
-        marks.bent?.length),
+        marks.bent?.length ||
+        marks.hazy?.length),
   );
 }
 
@@ -421,7 +433,7 @@ export function bentIndex(zones, p, aspect = 1) {
   return -1;
 }
 
-/** Whether a point of the photo lies in a part brushed as bent (`bentIndex`). */
+/** Whether a point of the photo lies in one of the brushed parts (`bentIndex`). */
 export function inBent(zones, p, aspect = 1) {
   return bentIndex(zones, p, aspect) >= 0;
 }
@@ -434,14 +446,14 @@ function nearSegment(x, y, ax, ay, bx, by) {
   return Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
 }
 
-/** Marks with a part brushed as bent added; past `BENT_MAX` the oldest goes. */
-export function addBent(marks, zone) {
-  return { ...marks, bent: cleanBent([...(marks.bent ?? []), zone]) };
+/** Marks with a part brushed added, as bent or, `kind` 'hazy', where far land may be hidden; past `BENT_MAX` the oldest goes. */
+export function addBent(marks, zone, kind = "bent") {
+  return { ...marks, [kind]: cleanBent([...(marks[kind] ?? []), zone]) };
 }
 
-/** Marks with the brushing at `index` taken away. */
-export function removeBent(marks, index) {
-  return { ...marks, bent: (marks.bent ?? []).filter((_, i) => i !== index) };
+/** Marks with the brushing of that kind at `index` taken away. */
+export function removeBent(marks, index, kind = "bent") {
+  return { ...marks, [kind]: (marks[kind] ?? []).filter((_, i) => i !== index) };
 }
 
 /** Where each key line is named: three quarters along its longest stroke (`{ line, at }`), clear of the other badges. */

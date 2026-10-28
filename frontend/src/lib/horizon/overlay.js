@@ -998,22 +998,27 @@ export function tracePlane(samples, camera) {
  * lines' distances, sent as `far`: a stroke, the nearest and farthest it
  * stands, metres, the sea lines, those with only sky above, `clear`, and the key lines, `key`), whether it
  * lies in a part brushed as bent (`bent`, `ridge_bent`, 1 or 0: `bentAt(sample)`, by default read off the marks'
- * brushings with the frame as the photo) and the piece of a collage it lies in: `pieceAt(sample)`, by default how many
+ * brushings with the frame as the photo), a skyline point brushed where far land may be hidden going with the
+ * inner edges (`hazyAt(sample)`, read the same way) and the piece of a collage it lies in: `pieceAt(sample)`, by default how many
  * of the marks' cuts stand left of it across the frame. Samples come from
  * `traceSamples`, each saying its stroke. Without marks, the plane alone.
  */
-export function markedPlane(samples, camera, marks, pieceAt = null, bentAt = null) {
+export function markedPlane(samples, camera, marks, pieceAt = null, bentAt = null, hazyAt = null) {
   const cuts = marks?.cuts ?? [];
   const inner = new Set(marks?.inner ?? []);
+  const sea = new Set(marks?.sea ?? []);
   const lineOf = (s) => marks?.lines?.[s.stroke] ?? s.stroke;
-  const sky = inner.size ? samples.filter((s) => !inner.has(lineOf(s))) : samples;
+  const within = (zones) => (s) => inBent(zones, { u: s.x / camera.width, v: s.y / camera.height }, camera.width / camera.height);
+  // where far land may be hidden, a skyline line is an edge in front of land the photo does not show: read as a
+  // ridge is, on any of the terrain's silhouettes rather than its skyline (a sea line stays one)
+  const hidden = marks?.hazy?.length ? (hazyAt ?? within(marks.hazy)) : null;
+  const ridgeLike = (s) => inner.has(lineOf(s)) || (hidden !== null && !sea.has(lineOf(s)) && hidden(s));
+  const sky = inner.size || hidden ? samples.filter((s) => !ridgeLike(s)) : samples;
   const plane = tracePlane(sky, camera);
   const named = marks?.pairs?.length || marks?.far?.length || marks?.sea?.length || marks?.clear?.length || marks?.key?.length;
-  const brushed = marks?.bent?.length
-    ? (bentAt ?? ((s) => inBent(marks.bent, { u: s.x / camera.width, v: s.y / camera.height }, camera.width / camera.height)))
-    : null;
-  if (!inner.size && !cuts.length && !named && !brushed) return plane;
-  const ridge = samples.filter((s) => inner.has(lineOf(s)));
+  const brushed = marks?.bent?.length ? (bentAt ?? within(marks.bent)) : null;
+  if (!inner.size && !cuts.length && !named && !brushed && !hidden) return plane;
+  const ridge = samples.filter(ridgeLike);
   const ridges = ridge.length ? tracePlane(ridge, camera) : { x: [], y: [] };
   const out = { ...plane, ridge_x: ridges.x, ridge_y: ridges.y };
   if (named) {
@@ -1062,12 +1067,12 @@ const sendable = (angles) => Array.from(angles, (v) => (Number.isFinite(v) ? Mat
  * for the search to try each (the whole turn when it keeps none); a number
  * sends that cut alone; anything else the whole turn alone. `within` and
  * `facing` are the hints (lib/horizon/hints.js searchHints). `marks` are
- * the trace's (lib/horizon/traceMarks.js), `pieceAt` and `bentAt` as `markedPlane` takes them.
+ * the trace's (lib/horizon/traceMarks.js), `pieceAt`, `bentAt` and `hazyAt` as `markedPlane` takes them.
  *
  * @param {{ known?: boolean, reach?: 'auto' | number | null, autoReach?: number, within?: number[], facing?: number[] }} [options]
  *   `known`: the photo said its lens, which is then the only one tried
  */
-export function matchRequest(samples, camera, panorama, { known = false, reach = null, autoReach = Infinity, within, facing, marks = null, pieceAt = null, bentAt = null } = {}) {
+export function matchRequest(samples, camera, panorama, { known = false, reach = null, autoReach = Infinity, within, facing, marks = null, pieceAt = null, bentAt = null, hazyAt = null } = {}) {
   if (!panorama?.skyline?.length || panorama.azimuth?.full === false) return null;
   const tried = reach === 'auto' ? (panorama.cuts ?? []).filter((cut) => cut.reach <= autoReach) : [];
   const outer = Number.isFinite(reach) && skylineWithin(panorama, reach) !== panorama.skyline ? reach : (tried.at(-1)?.reach ?? null);
@@ -1077,7 +1082,7 @@ export function matchRequest(samples, camera, panorama, { known = false, reach =
     cuts: tried.slice(0, -1).map((cut) => ({ reach: cut.reach, skyline: sendable(cut.skyline) })),
     start: panorama.azimuth.start,
     step: panorama.azimuth.step,
-    ...markedPlane(samples, camera, marks, pieceAt, bentAt),
+    ...markedPlane(samples, camera, marks, pieceAt, bentAt, hazyAt),
     fov: camera.fov,
     known,
     tilt: camera.tilt,
@@ -1095,7 +1100,8 @@ export function matchRequest(samples, camera, panorama, { known = false, reach =
  * whole), and is refined and measured against that cut: `skyline(azimuth,
  * reach)` reads it. A place the refinement cannot improve stays as the search
  * left it, and so does one whose collage pieces the search eased (`pieces`,
- * kept on the place): they were eased about that camera.
+ * kept on the place): they were eased about that camera; and one whose strip the
+ * search read at another height scale (`scale`, kept too, read as camera.js `stretch`).
  *
  * @param {{ fits: object[] }} found the search's answer
  * @param {{ lens?: boolean, pieceAt?: Function }} [options] `lens`: whether the field of view may change;
@@ -1113,10 +1119,11 @@ export function searchedPlaces(found, samples, camera, skyline, { lens = true, p
       fov: lens ? fit.fov : camera.fov,
     };
     const pieces = fit.pieces?.length && pieceAt ? fit.pieces : null;
-    const refined = pieces ? null : fitToTrace(samples, start, along, { lens });
+    const scale = Number.isFinite(fit.scale) && fit.scale !== 1 ? fit.scale : null;
+    const refined = pieces || scale ? null : fitToTrace(samples, start, along, { lens });
     const placed = refined?.improved ? refined.camera : start;
-    const gap = traceGap(samples, placed, along, { pieces, pieceAt });
-    return { camera: placed, gap, explained: fit.explained, close: fit.close, reach: on, pieces };
+    const gap = traceGap(samples, scale ? { ...placed, stretch: scale } : placed, along, { pieces, pieceAt });
+    return { camera: placed, gap, explained: fit.explained, close: fit.close, reach: on, pieces, ...(scale ? { scale } : {}) };
   });
 }
 

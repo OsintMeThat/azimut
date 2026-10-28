@@ -20,7 +20,8 @@ reads in batches here (`/tiles/terrain`, `/tiles/imagery`): a browser opens six
 connections to one host, so hundreds of small images would queue where one
 answer per few dozen tiles does not. Imagery goes through the map's own cache
 and proxy (api/satellite.py), so the meter, the native ceiling and the overzoom
-over gaps are the map's. `/tiles/estimate` says what Sentinel-2 laid near the
+over gaps are the map's; past a provider's own zoom limit, a tile is its
+ancestor's quarter magnified, since the near ground goes finer than some reach. `/tiles/estimate` says what Sentinel-2 laid near the
 eye would ask of Sentinel Hub, before anything is fetched.
 """
 
@@ -286,6 +287,8 @@ def _near_imagery(provider_id: str, *, check_quota: bool = True) -> Any:
 
 # Tiles one batch may ask for.
 TILES_MAX = 64
+# The finest imagery the 3D view asks for (lib/horizon/mesh/tiles.js MAX_Z).
+IMAGERY_MAX_Z = 18
 _TILE_KEY = re.compile(r"^\d+/\d+/\d+$")
 # Bounded: the laptop this runs on has other things to do.
 _TILE_WORKERS = 12
@@ -344,16 +347,51 @@ def tiles_imagery(
     from . import satellite as satellite_api
 
     source = _imagery_source(provider)
-    keys = _tile_keys(t, source.max_zoom)
+    ceiling = source.max_zoom
+    keys = _tile_keys(t, max(ceiling, IMAGERY_MAX_Z))
 
-    def one(z: int, x: int, y: int) -> bytes:
+    def fetch(z: int, x: int, y: int) -> bytes:
         try:
             answer = satellite_api.serve_tile(source, z, x, y)
         except HTTPException:
             return b""
         return bytes(answer.body) if answer.status_code == 200 else b""
 
+    # past the provider's ceiling a tile is its ancestor's quarter, magnified: each
+    # ancestor is fetched once, so four children never cost four (billed) tiles
+    above = sorted({(ceiling, x >> (z - ceiling), y >> (z - ceiling)) for z, x, y in keys if z > ceiling})
+    ancestors = dict(zip(above, _tile_pool.map(lambda key: fetch(*key), above)))
+
+    def one(z: int, x: int, y: int) -> bytes:
+        if z <= ceiling:
+            return fetch(z, x, y)
+        up = z - ceiling
+        return _magnified(ancestors[(ceiling, x >> up, y >> up)], up, x, y)
+
     return _batch(keys, one)
+
+
+def _magnified(picture: bytes, up: int, x: int, y: int) -> bytes:
+    """The quarter of an ancestor tile, `up` levels above, that holds tile x/y, at the ancestor's size."""
+    from PIL import Image
+
+    if not picture:
+        return b""
+    try:
+        image = Image.open(io.BytesIO(picture)).convert("RGB")
+    except OSError:
+        return b""
+    side = image.width >> up
+    if side < 1:
+        return b""
+    mask = (1 << up) - 1
+    left, top = (x & mask) * side, (y & mask) * side
+    tile = image.crop((left, top, left + side, top + side)).resize(
+        (image.width, image.width), Image.Resampling.LANCZOS
+    )
+    buf = io.BytesIO()
+    tile.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def _imagery_source(provider_id: str) -> Any:
@@ -785,6 +823,7 @@ def match_trace(body: MatchIn) -> dict[str, Any]:
                 "points": fit.points,
                 **({} if fit.sky is None else {"sky": round(fit.sky, 3)}),
                 **({} if fit.pieces is None else {"pieces": skymatch.pieces_of(fit, body.projection)}),
+                **({} if fit.scale == 1.0 else {"scale": fit.scale}),
             }
             for i, fit in enumerate(found.fits)
         ],

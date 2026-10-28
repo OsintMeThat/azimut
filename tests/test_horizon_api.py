@@ -357,6 +357,40 @@ def test_imagery_zoom_goes_up_to_the_providers_own_limit(client, monkeypatch):
     assert client.get("/api/horizon/tiles/imagery", params={**params, "t": f"{limit + 1}/0/0"}).status_code == 422
 
 
+def test_imagery_past_a_low_limit_is_its_ancestors_quarter_fetched_once(client, monkeypatch):
+    from PIL import Image
+
+    from azimut.api import satellite
+
+    # the fake Sentinel-2 stops at 16: its 16/1/1 tile in four coloured quarters
+    _sentinel(monkeypatch)
+    quarters = Image.new("RGB", (256, 256), (255, 0, 0))
+    quarters.paste((0, 255, 0), (128, 0, 256, 128))
+    quarters.paste((0, 0, 255), (0, 128, 128, 256))
+    buf = io.BytesIO()
+    quarters.save(buf, format="PNG")
+    served = _Served({(16, 1, 1): buf.getvalue()})
+    monkeypatch.setattr(satellite, "serve_tile", served)
+
+    answer = client.get("/api/horizon/tiles/imagery", params={"provider": "sentinel2", "t": "17/3/2,17/2/3,18/4/4"})
+    assert answer.status_code == 200
+    colours = [Image.open(io.BytesIO(frame)).getpixel((128, 128)) for frame in _framed(answer.content)]
+    assert colours == [(0, 255, 0), (0, 0, 255), (255, 0, 0)]
+    assert [Image.open(io.BytesIO(frame)).size for frame in _framed(answer.content)] == [(256, 256)] * 3
+    assert served.calls == [("sentinel2", 16, 1, 1)]
+    # past what the 3D view itself asks, the zoom is still refused
+    assert client.get("/api/horizon/tiles/imagery", params={"provider": "sentinel2", "t": "19/0/0"}).status_code == 422
+
+
+def test_the_imagery_ceiling_is_the_3d_views_finest_tile():
+    from pathlib import Path
+
+    from azimut.api import horizon as horizon_api
+
+    text = (Path(__file__).resolve().parents[1] / "frontend/src/lib/horizon/mesh/tiles.js").read_text(encoding="utf-8")
+    assert f"export const MAX_Z = {horizon_api.IMAGERY_MAX_Z};" in text
+
+
 def test_imagery_that_is_not_free_imagery_is_refused(client, monkeypatch):
     from azimut.api import satellite
 

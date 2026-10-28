@@ -192,6 +192,15 @@ describe('the panorama strip', () => {
     expect(rayFor({ ...STRIP, roll: 1 }, 1020, 128)).toEqual(rayFor(STRIP, 1020, 128));
   });
 
+  it('reads a strip laid by hand at its own height scale, and lays it back', () => {
+    const tall = { ...STRIP, stretch: 0.8 };
+    // a pixel 100 above the middle stands 8 degrees up, not 10
+    expect(rayFor(tall, 600, 100)).toEqual({ azimuth: 0, elevation: 5 + 8 });
+    expect(toScreen(tall, 0, 13).y).toBeCloseTo(100, 9);
+    expect(toScreen(tall, 30, 5).x).toBeCloseTo(900, 9);
+    expect(verticalFov(tall)).toBeCloseTo(32, 9);
+  });
+
   it('turns the short way round north', () => {
     expect(turnBetween(350, 10)).toBe(20);
     expect(turnBetween(10, 350)).toBe(-20);

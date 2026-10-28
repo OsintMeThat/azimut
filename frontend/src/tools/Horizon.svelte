@@ -1087,7 +1087,7 @@
    * stands within the reach the trace is read against, unless told another.
    */
   const skyline = (azimuth, reach = overlay.reach) => skylineBetween(view.panorama, azimuth, reach);
-  const traceCamera = $derived({ ...view.camera, width: frame.width, height: frame.height });
+  const traceCamera = $derived({ ...view.camera, width: frame.width, height: frame.height, ...(stretch !== 1 ? { stretch } : {}) });
   // the trace as it shows on the straightened photo, which is what meets the terrain: every stroke, and the skyline's alone
   const marked = $derived(photoOn && overlay.traceShown && frame.width ? traceSamples(overlay.strokesShown, frame) : []);
   const samples = $derived(skySamples(marked, overlay.marks));
@@ -1098,20 +1098,25 @@
    * gap, the trace's colours and the terrain's line read each piece through its own camera.
    */
   let eased = $state.raw(null);
-  const pieces = $derived(
-    eased &&
+  const held = $derived(
+    Boolean(eased) &&
       eased.photo === (overlay.source?.path ?? null) &&
       view.observer?.lat === eased.at.lat &&
       view.observer?.lon === eased.at.lon &&
       sameCuts(eased.cuts, overlay.marks.cuts)
-      ? eased.pieces
-      : null
   );
+  const pieces = $derived(held && eased.pieces?.length ? eased.pieces : null);
+  /** The height scale the search read a strip laid by hand at (camera.js `stretch`), while the place holds. */
+  const stretch = $derived(held && view.camera.projection === 'panorama' ? (eased.stretch ?? 1) : 1);
   // a photo laid as the search read it carries its pieces already: the terrain is read through one camera
   const pieced = $derived({ pieces: overlay.asSearched ? null : pieces, pieceAt: overlay.pieceAt });
-  /** Keep the pieces a place was found with, at the eye `at` and for the `cuts` the search read; none forgets them. */
-  function easePieces(found, at = view.observer, cuts = overlay.marks.cuts) {
-    eased = found?.length && at ? { pieces: found, cuts, at: { lat: at.lat, lon: at.lon }, photo: overlay.source?.path ?? null } : null;
+  /**
+   * Keep the pieces a place was found with and the height scale it read a strip at, at the eye `at` and for the
+   * `cuts` the search read; none forgets them.
+   */
+  function easePieces(found, at = view.observer, cuts = overlay.marks.cuts, scale = 1) {
+    const kept = found?.length || (Number.isFinite(scale) && scale !== 1);
+    eased = kept && at ? { pieces: found ?? null, cuts, at: { lat: at.lat, lon: at.lon }, photo: overlay.source?.path ?? null, stretch: scale ?? 1 } : null;
   }
 
   const gap = $derived(samples.length && view.panorama ? traceGap(samples, traceCamera, skyline, pieced) : null);
@@ -1226,6 +1231,7 @@
         marks,
         pieceAt: (s) => overlay.pieceAt({ u: s.x / camera.width, v: s.y / camera.height }),
         bentAt: (s) => overlay.bentAt({ u: s.x / camera.width, v: s.y / camera.height }),
+        hazyAt: (s) => overlay.hazyAt({ u: s.x / camera.width, v: s.y / camera.height }),
       });
       if (body) found = await api.post('/api/horizon/match', body);
     } catch {
@@ -1278,7 +1284,7 @@
     const reachBefore = overlay.reachFound;
     const easedBefore = eased;
     takeReach(place);
-    easePieces(place.pieces);
+    easePieces(place.pieces, view.observer, overlay.marks.cuts, place.scale ?? 1);
     view.look(lensOf(place.camera));
     toast(text, kind, 8000, {
       label: 'Undo',
@@ -1299,7 +1305,7 @@
     const place = searched?.places[index];
     if (!place || overlay.locked) return;
     takeReach(place);
-    easePieces(place.pieces);
+    easePieces(place.pieces, view.observer, overlay.marks.cuts, place.scale ?? 1);
     view.look(lensOf(place.camera));
   }
 
@@ -1409,11 +1415,11 @@
     } else {
       // the pieces were eased for the cuts the search was asked with
       const cuts = finder.search?.ask?.photo?.marks?.cuts ?? [];
-      easePieces(place.pieces, place, cuts);
+      easePieces(place.pieces, place, cuts, place.scale ?? 1);
       if (Number.isFinite(place.heading)) {
         view.look({ heading: place.heading, tilt: place.tilt ?? 0, roll: place.roll ?? 0, fov: place.fov ?? view.camera.fov });
         // each piece where the search eased it, the photo flipped where it was found mirrored
-        const how = { pieces: place.pieces, pieceOf: (u) => pieceOf(cuts, u), cuts, mirrored: Boolean(place.mirrored) };
+        const how = { pieces: place.pieces, pieceOf: (u) => pieceOf(cuts, u), cuts, mirrored: Boolean(place.mirrored), stretch: place.scale ?? 1 };
         overlay.layAsSearched(piecesLaid(view.camera, overlay.aspect, how));
       } else {
         overlay.layFlat();

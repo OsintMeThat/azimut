@@ -435,6 +435,36 @@ def test_a_line_along_the_sea_lies_on_the_sea_s_horizon(monkeypatch):
     terrain.forget_decoded()
 
 
+def test_a_line_with_only_sky_above_is_read_as_far_as_its_own_band_past_the_reach(monkeypatch):
+    # v27's case: the reach said 10 km, a Sky-only line said 3 to 30 km off lies on a mountain 13 km out
+    eye = (12.7, 43.5)
+    mountain = Peak(*offset(*eye, 90.0, 13_000.0), height=1_200.0, radius=2_500.0)
+    terrain.forget_decoded()
+    monkeypatch.setattr(terrain, "tile", Relief(peaks=(mountain,), plain=0.0))
+    swept = horizon.sweep(horizon.Observer(*eye), azimuths=np.arange(0.0, 360.0, 0.1), far=40_000.0)
+    x, y = trace_on(skymatch.Turn(0.0, 0.1, swept.skyline), heading=90.0, fov=40.0)
+    line = np.zeros(x.size, dtype=np.int64)
+    trace = finder.Trace(x=x, y=y, half_width=HALF, fov=40.0, known=True,
+                         marks=skymatch.Marks(line=line, far=((0, 3_000.0, 30_000.0),), clear=(0,)))
+    plan = finder.Plan(area=[eye] * 3, reach=10_000.0)
+    assert finder.sky_reaches(trace.marks, 10_000.0) == {0: 20_000.0}
+    found = finder.score_point(*eye, trace, plan, sampler=terrain.Sampler(), quick=False)
+    assert found["explained"] > 0.5 and found["over"] == 0.0
+    assert found["heading"] == pytest.approx(90.0, abs=1.0)
+    # read no farther than the reach, as it once was, the line cannot lie on its own mountain
+    monkeypatch.setattr(finder, "SKY_SLACK", 0.0)
+    assert finder.sky_reaches(trace.marks, 10_000.0) == {0: 10_000.0}
+    short = finder.score_point(*eye, trace, plan, sampler=terrain.Sampler(), quick=False)
+    assert short["explained"] < found["explained"] - 0.2
+    # a line said nothing of is read as far as the trace is searched, a line said near as far as the reach
+    near = skymatch.Marks(line=line, far=((1, 0.0, 1_000.0),), clear=(0, 1))
+    monkeypatch.setattr(finder, "SKY_SLACK", 1.0)
+    assert finder.sky_reaches(near, 10_000.0) == {0: 20_000.0, 1: 10_000.0}
+    # a band reaching past twice the reach is read no farther than the trace is searched
+    assert finder.sky_reaches(skymatch.Marks(far=((0, 3_000.0, 150_000.0),), clear=(0,)), 10_000.0) == {0: 20_000.0}
+    terrain.forget_decoded()
+
+
 def test_a_line_with_only_sky_above_is_read_as_far_as_the_photo_is_said_to_see(monkeypatch):
     eye = (12.7, 43.5)
     hill = Peak(*offset(*eye, 90.0, 3_000.0), height=300.0, radius=1_000.0)

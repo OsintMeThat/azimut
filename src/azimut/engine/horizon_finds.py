@@ -47,6 +47,10 @@ VERSION = 1
 ACTIVE = ("queued", "running")
 # Asked to stop while it runs: it stops between two points, keeping what it found.
 STOPPING = "stopping"
+# A collage is read frame by frame only when at least this share of its frames were stitched: frames laid by hand are
+# tied to the stitched ones by their overlaps, and many of them chained bend the pan (v11, eleven of twelve frames laid
+# by hand, its truth against the 100 best places of its search: read frame by frame 97th, as one picture 12th).
+FRAMES_STITCHED = 0.25
 # The points each running search has scored, by case and name: `{ started, points }`.
 LIVE: dict[tuple[str, str], dict[str, Any]] = {}
 # Progress is written this often while a search runs, seconds, and the stop asked for read as often.
@@ -362,7 +366,8 @@ def on_frames(
     and trace as they were otherwise.
 
     The trace must lie on the picture as exported: a curve or pulled corners laid over it since
-    leave it read as one photo, as does a collage with no frame stitched (its lens unknown).
+    leave it read as one photo, as does a collage with no frame stitched (its lens unknown) or with fewer than
+    `FRAMES_STITCHED` of its frames stitched, read as a collage laid by hand.
     """
     from . import frames, inspectwork
 
@@ -371,6 +376,8 @@ def on_frames(
         return plan, trace, None
     found = inspectwork.frames_of(case, str(photo["path"]))
     if found is None or found[1].get("lens") is None:
+        return plan, trace, None
+    if found[1].get("frames") and found[1].get("stitched", 0) < FRAMES_STITCHED * found[1]["frames"]:
         return plan, trace, None
     model, said = found
     export = (float(said["export"][0]), float(said["export"][1]))

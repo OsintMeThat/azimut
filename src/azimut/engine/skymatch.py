@@ -87,9 +87,10 @@ places lay on ground 25 to 150 m away).
 
 A line the analyst is sure has only sky above it (`Marks.clear`) says more than
 where it lies: no terrain stands over it. So it is laid on the top of the land
-the photo would show over it, not on a cut's: as far as the analyst says the
-photo sees (`clear`), else out to `CLEAR_NEAR` times as far as the ground the line
-lies on at that cut (`_tops`). A place cannot then lay it on a near ridge with a
+the photo would show over it, not on a cut's: with a reach said, each line as far
+as its own said distance reaches, never short of the reach (`clear`, a `Stack`
+of tops, one for each distance), else out to `CLEAR_NEAR` times as far as the
+ground the line lies on at that cut (`_tops`). A place cannot then lay it on a near ridge with a
 range standing behind. And a place where the terrain still stands over such a
 line loses its score as that share of the line grows, and is ruled out past
 `CLEAR_HARD` of it, saying how far out that land stands (`Fit.over_far`). Left
@@ -239,6 +240,13 @@ PIECE_STEPS = (9, 9, 5)
 # sit turned a little. Measured on the bench's 15 cut strips (rank among 40 rivals): v04 9th → 2nd, v05 3rd → 1st,
 # v22 9th → 4th, v15 15th → 11th; v08 7th → 9th and v03 34th → 36th, whose truths are held back elsewhere.
 PIECE_STRIP_ROLL = 1.0
+# A panorama strip of unknown width (frames laid side by side by hand, a phone's sweep) may span more or fewer degrees
+# up than across per pixel: each place it is fitted at is fitted again with the strip's height scaled so, the lens
+# eased as usual, and keeps the one that explains most. Measured on the owner's real cases (FIND_FIX_HANDOVER item
+# 9, each truth against the 100 best places of its Quick search): rdc1 8th → 1st, v04 101st → 1st, v06 15th → 1st,
+# v15 99th → 41st, v21 56th → 23rd, v17 77th → 55th, held out v05 92nd → 74th; v08 45th → 60th (its low hills drawn
+# twice as tall as the terrain's) and held out v18 60th → 80th (its left lines on a pylon and trees), truths unmoved.
+STRIP_SCALES = (0.67, 0.8, 1.25, 1.5)
 # A place loses this share of what it explains past its key lines' own fit. Measured on the owner's key lines of
 # 27 real cases (rank among 40 rivals): v04 2nd → 1st, v16 2nd → 1st, v07s 4th → 3rd, v17 3rd → 2nd, v22 4th →
 # 3rd, none lower. Inner edges marked key cost v23, v24 and v28 places, so only skyline lines are held.
@@ -500,8 +508,29 @@ def bands_of(
     return low, high
 
 
+@dataclass(frozen=True)
+class Stack:
+    """The tops of the land the lines with only sky above are laid on, one for each distance they are read to:
+    the line `stroke` is read on `turns[k]` for each `(stroke, k)` of `lines`. A point of the trace says its top
+    by its `sure` code, k + 1 (0: no such line)."""
+
+    turns: tuple[Turn, ...]
+    lines: tuple[tuple[int, int], ...]
+
+
+# The top a line with only sky above is laid on: one turn for them all (Auto's `_tops`), or a stack of them.
+Top = Turn | Stack
+
+
+def _layers(top: Top, sure: np.ndarray) -> list[tuple[Turn, np.ndarray]]:
+    """Each top and the points (along the last axis) laid on it."""
+    if isinstance(top, Stack):
+        return [(one, sure == k + 1) for k, one in enumerate(top.turns) if np.any(sure == k + 1)]
+    return [(top, sure > 0)]
+
+
 def _read(
-    turn: Turn, top: Turn | None, sure: np.ndarray | None, azimuth: np.ndarray, far: bool,
+    turn: Turn, top: Top | None, sure: np.ndarray | None, azimuth: np.ndarray, far: bool,
 ) -> tuple[np.ndarray, np.ndarray | None]:
     """`_at`, and `_far` when asked, read off one placing of the azimuths: the turn's for every point, the top's
     for the points of lines with only sky above (`sure`, along the last axis)."""
@@ -510,15 +539,16 @@ def _read(
     out = turn.far_place(place) if far else None
     if top is None or sure is None or not sure.any():
         return ground, out
-    held = place[..., sure] if (top.start, top.step) == (turn.start, turn.step) else top.place(azimuth[..., sure])
-    ground[..., sure] = top.at_place(held)
-    if out is not None:
-        out[..., sure] = top.far_place(held)
+    for one, mask in _layers(top, sure):
+        held = place[..., mask] if (one.start, one.step) == (turn.start, turn.step) else one.place(azimuth[..., mask])
+        ground[..., mask] = one.at_place(held)
+        if out is not None:
+            out[..., mask] = one.far_place(held)
     return ground, out
 
 
 def _gap(
-    elevation: np.ndarray, turn: Turn, top: Turn | None, sure: np.ndarray | None, azimuth: np.ndarray,
+    elevation: np.ndarray, turn: Turn, top: Top | None, sure: np.ndarray | None, azimuth: np.ndarray,
     low: np.ndarray | None, high: np.ndarray | None,
 ) -> np.ndarray:
     """How far each point stands over the skyline it is laid on (`_at`), NaN where that skyline's ground stands
@@ -531,26 +561,30 @@ def _gap(
     return gap
 
 
-def _at(turn: Turn, top: Turn | None, sure: np.ndarray | None, azimuth: np.ndarray) -> np.ndarray:
+def _at(turn: Turn, top: Top | None, sure: np.ndarray | None, azimuth: np.ndarray) -> np.ndarray:
     """The skyline each point is laid on: the turn's, or the top of the land for the points of lines said to
     have only sky above (`sure`, along the last axis of `azimuth`)."""
     ground = turn.at(azimuth)
     if top is None or sure is None or not sure.any():
         return ground
-    return np.where(sure, top.at(azimuth), ground)
+    for one, mask in _layers(top, sure):
+        ground = np.where(mask, one.at(azimuth), ground)
+    return ground
 
 
-def _far(turn: Turn, top: Turn | None, sure: np.ndarray | None, azimuth: np.ndarray) -> np.ndarray:
+def _far(turn: Turn, top: Top | None, sure: np.ndarray | None, azimuth: np.ndarray) -> np.ndarray:
     """How far out the skyline each point is laid on stands (`_at`), metres."""
     out = turn.far(azimuth)
     if top is None or sure is None or not sure.any():
         return out
-    return np.where(sure, top.far(azimuth), out)
+    for one, mask in _layers(top, sure):
+        out = np.where(mask, one.far(azimuth), out)
+    return out
 
 
 def _gate(
     gap: np.ndarray, turn: Turn, azimuth: np.ndarray, low: np.ndarray | None, high: np.ndarray | None,
-    top: Turn | None = None, sure: np.ndarray | None = None,
+    top: Top | None = None, sure: np.ndarray | None = None,
 ) -> np.ndarray:
     """The gaps of points whose skyline is set by ground outside their band made NaN: lost."""
     if low is None or high is None or turn.distance is None:
@@ -559,7 +593,7 @@ def _gate(
     return np.where((out < low) | (out > high), np.nan, gap)
 
 
-def _tops(turns: Sequence[Turn]) -> list[Turn | None]:
+def _tops(turns: Sequence[Turn]) -> list[Top | None]:
     """For each cut of a turn, the top of the land a line with only sky above is laid on there: in each column,
     the highest skyline among the cuts whose ground there stands within the cut, or within `CLEAR_NEAR` times
     as far as that cut's own ground, and never short of the cut itself. None for a cut whose distances the sweep
@@ -569,7 +603,7 @@ def _tops(turns: Sequence[Turn]) -> list[Turn | None]:
     reach = np.array([math.inf if one.reach is None else float(one.reach) for one in turns])
     angles = np.stack([np.asarray(one.angles, dtype=np.float64) for one in turns])
     distances = np.stack([np.asarray(one.distance, dtype=np.float64) for one in turns])
-    out: list[Turn | None] = []
+    out: list[Top | None] = []
     for i, one in enumerate(turns):
         sees = np.maximum(reach[i], CLEAR_NEAR * np.nan_to_num(distances[i], nan=0.0))
         held = (np.nan_to_num(distances, nan=np.inf) <= sees[None, :]) | (np.arange(len(turns)) == i)[:, None]
@@ -581,17 +615,17 @@ def _tops(turns: Sequence[Turn]) -> list[Turn | None]:
 
 def directions(
     x: np.ndarray, y: np.ndarray, *, fov: float, tilt: float = 0.0, roll: float = 0.0,
-    projection: Projection = "camera",
+    projection: Projection = "camera", scale: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Azimuth from the heading and elevation, in degrees, of picture-plane points.
 
     camera.js `rayFor` at heading 0: forward tilted up by `tilt`, the frame
     turned clockwise by `roll`; on the panorama strip, half a width is half the
-    field across and as many degrees up, and the strip has no roll.
+    field across and `scale` times as many degrees up, and the strip has no roll.
     """
     if projection == "panorama":
         half = float(fov) / 2
-        return np.asarray(x, dtype=np.float64) * half, np.asarray(y, dtype=np.float64) * half + tilt
+        return np.asarray(x, dtype=np.float64) * half, np.asarray(y, dtype=np.float64) * half * scale + tilt
     t, r = math.radians(tilt), math.radians(roll)
     scale = math.tan(math.radians(fov) / 2)
     sx = np.asarray(x, dtype=np.float64) * scale
@@ -654,6 +688,8 @@ class Fit:
     # land stands, metres (the middle of it)
     over: float | None = None
     over_far: float | None = None
+    # on the panorama strip, its degrees up per degree across (`STRIP_SCALES`)
+    scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -775,10 +811,11 @@ def explained_by(
     return float(min(1.0, max(0.0, score)))
 
 
-def _per_degree(fov: float, half_width: float, projection: Projection = "camera") -> float:
-    """Screen pixels a degree spans at the lens's middle: everywhere, on a panorama."""
+def _per_degree(fov: float, half_width: float, projection: Projection = "camera", scale: float = 1.0) -> float:
+    """Screen pixels a degree up spans at the lens's middle: everywhere, on a panorama (`scale` its degrees up per
+    degree across)."""
     if projection == "panorama":
-        return half_width / (fov / 2)
+        return half_width / (fov / 2) / scale
     return half_width / math.tan(math.radians(fov) / 2) * math.pi / 180
 
 
@@ -809,26 +846,26 @@ class _Seen:
 def _through(
     x: np.ndarray, y: np.ndarray, fov: float, tilt: float, roll: float, half_width: float,
     *, twist: bool = False, projection: Projection = "camera", bands: tuple[np.ndarray, np.ndarray] | None = None,
-    sure: np.ndarray | None = None,
+    sure: np.ndarray | None = None, scale: float = 1.0,
 ) -> _Seen:
-    azimuth, elevation = directions(x, y, fov=fov, tilt=tilt, roll=roll, projection=projection)
-    _, above = directions(x, y, fov=fov, tilt=tilt + 0.5, roll=roll, projection=projection)
-    _, below = directions(x, y, fov=fov, tilt=tilt - 0.5, roll=roll, projection=projection)
+    azimuth, elevation = directions(x, y, fov=fov, tilt=tilt, roll=roll, projection=projection, scale=scale)
+    _, above = directions(x, y, fov=fov, tilt=tilt + 0.5, roll=roll, projection=projection, scale=scale)
+    _, below = directions(x, y, fov=fov, tilt=tilt - 0.5, roll=roll, projection=projection, scale=scale)
     # a point never rises less than a tenth as fast as the middle, short of a lens wider than any
     lift = np.maximum(above - below, 0.1)
     turned = None
     if twist:
-        _, right = directions(x, y, fov=fov, tilt=tilt, roll=roll + 0.5, projection=projection)
-        _, left = directions(x, y, fov=fov, tilt=tilt, roll=roll - 0.5, projection=projection)
+        _, right = directions(x, y, fov=fov, tilt=tilt, roll=roll + 0.5, projection=projection, scale=scale)
+        _, left = directions(x, y, fov=fov, tilt=tilt, roll=roll - 0.5, projection=projection, scale=scale)
         turned = right - left
     return _Seen(
-        fov, tilt, azimuth, elevation, lift, _per_degree(fov, half_width, projection), turned, projection,
+        fov, tilt, azimuth, elevation, lift, _per_degree(fov, half_width, projection, scale), turned, projection,
         None if bands is None else bands[0], None if bands is None else bands[1], sure,
     )
 
 
 def _rounded(
-    azimuth: np.ndarray, rise: np.ndarray, turn: Turn, cell: float, top: Turn | None = None,
+    azimuth: np.ndarray, rise: np.ndarray, turn: Turn, cell: float, top: Top | None = None,
     sure: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """The trace's rise and the terrain's under it at each point, both rounded alike where the ground the point
@@ -869,7 +906,7 @@ def _nanmedian_rows(values: np.ndarray, count: np.ndarray) -> np.ndarray:
 
 
 def _slide(
-    seen: _Seen, turn: Turn, headings: np.ndarray, tilts: tuple[float, float] | None = None, top: Turn | None = None,
+    seen: _Seen, turn: Turn, headings: np.ndarray, tilts: tuple[float, float] | None = None, top: Top | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """The cost of the trace at each heading, and the tilt and roll changes that lay it there; a heading
     whose tilt falls outside `tilts` costs everything. The points of lines with only sky above are laid
@@ -923,8 +960,8 @@ def _alike(a: Turn | None, b: Turn | None) -> np.ndarray | None:
 
 
 def _slide_after(
-    seen: _Seen, turn: Turn, headings: np.ndarray, tilts: tuple[float, float] | None, top: Turn | None,
-    last: tuple[Turn, Turn | None, np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]] | None,
+    seen: _Seen, turn: Turn, headings: np.ndarray, tilts: tuple[float, float] | None, top: Top | None,
+    last: tuple[Turn, Top | None, np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]] | None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """`_slide` over a cut of the turn, the slide `last` made over the cut before it (turn, top, headings, result)
     taken as it is at every heading whose trace reads no column the two cuts tell apart: the same numbers in give
@@ -933,9 +970,13 @@ def _slide_after(
         return _slide(seen, turn, headings, tilts, top)
     same = _alike(last[0], turn)
     if seen.sure is not None and seen.sure.any():
-        tops = _alike(last[1], top)
-        if top is not None and (top.start, top.step) != (turn.start, turn.step):
-            tops = None
+        if isinstance(top, Stack) or isinstance(last[1], Stack):
+            # one stack laid alike on every cut reads alike wherever its columns do
+            tops = np.ones(0, dtype=bool) if last[1] is top else None
+        else:
+            tops = _alike(last[1], top)
+            if top is not None and (top.start, top.step) != (turn.start, turn.step):
+                tops = None
         same = None if same is None or tops is None else same & tops if tops.size else same
     azimuth = seen.azimuth
     # the columns must close the turn, for a column's number to say where it stands
@@ -957,9 +998,9 @@ def _slide_after(
 
 
 def _sift(
-    seen: _Seen, turn: Turn, headings: np.ndarray, tilts: tuple[float, float] | None, top: Turn | None,
-    last: tuple[Turn, Turn | None, np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]] | None,
-) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[Turn, Turn | None, np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]]]:
+    seen: _Seen, turn: Turn, headings: np.ndarray, tilts: tuple[float, float] | None, top: Top | None,
+    last: tuple[Turn, Top | None, np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]] | None,
+) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[Turn, Top | None, np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]]]:
     """A rough `_slide` over many headings: every `SIFT_EVERY`th point slid first (over the cut before's sift,
     `last`, as `_slide_after` does), then every point at the `SIFT_KEEP` cheapest headings only, the others
     costing everything. Also gives the sift, for the next cut's."""
@@ -1048,8 +1089,8 @@ def _refine(
     roll: float, half_width: float, free: bool, level: bool, widen: float = 1.03,
     start: float | None = None, projection: Projection = "camera", bounds: tuple[float, float] | None = None,
     bands: tuple[np.ndarray, np.ndarray] | None = None, tilts: tuple[float, float] | None = None,
-    rounding: float | None = None, top: Turn | None = None, sure: np.ndarray | None = None,
-    bent: np.ndarray | None = None,
+    rounding: float | None = None, top: Top | None = None, sure: np.ndarray | None = None,
+    bent: np.ndarray | None = None, scale: float = 1.0,
 ) -> Fit | None:
     """A coarse place made exact: heading searched finely, tilt laid onto the trace, lens and roll eased.
 
@@ -1068,7 +1109,8 @@ def _refine(
         for lens in ([fov / widen, fov, fov * widen] if free else [fov]):
             lens = min(high, widest(projection), max(low, FOV_MIN, lens))
             for turned in rolls:
-                seen = _through(x, y, lens, tilt, turned, half_width, projection=projection, bands=bands, sure=sure)
+                seen = _through(x, y, lens, tilt, turned, half_width, projection=projection, bands=bands, sure=sure,
+                                scale=scale)
                 headings = heading + np.linspace(-2 * step, 2 * step, 17)
                 cost, change, _ = _slide(seen, turn, headings, tilts, top)
                 i = int(np.argmin(cost))
@@ -1081,7 +1123,7 @@ def _refine(
         step /= 4
         widen = 1 + (widen - 1) / 2
         ease = ROLL_EASE if ease is None else ease / 2
-    seen = _through(x, y, fov, tilt, roll, half_width, projection=projection, bands=bands, sure=sure)
+    seen = _through(x, y, fov, tilt, roll, half_width, projection=projection, bands=bands, sure=sure, scale=scale)
     azimuth = heading + seen.azimuth
     if rounding:
         rise, ground = _rounded(azimuth, seen.elevation, turn, rounding, top, sure)
@@ -1108,6 +1150,7 @@ def _refine(
         points=int(hit.sum()),
         roll=roll,
         reach=turn.reach,
+        scale=scale,
     )
 
 
@@ -1121,7 +1164,7 @@ def _rolled(x: np.ndarray, y: np.ndarray, roll: float, about: tuple[float, float
 
 def _pieces(
     x: np.ndarray, y: np.ndarray, piece: np.ndarray, turn: Turn, fit: Fit, half_width: float, projection: Projection,
-    bands: tuple[np.ndarray, np.ndarray] | None = None, top: Turn | None = None, sure: np.ndarray | None = None,
+    bands: tuple[np.ndarray, np.ndarray] | None = None, top: Top | None = None, sure: np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict[int, tuple[float, float, float]], dict[int, tuple[float, float]]]:
     """Each piece's camera eased from the whole's, no farther than the piece bounds: what every point
     then costs, each piece's (turn, tilt, roll) from the whole's, and on the panorama strip the middle each
@@ -1145,7 +1188,7 @@ def _pieces(
             px, py = x[inside], y[inside]
             if strip and turned:
                 px, py = _rolled(px, py, float(turned), about)
-            seen = _through(px, py, fit.fov, fit.tilt, fit.roll + turned, half_width, projection=projection,
+            seen = _through(px, py, fit.fov, fit.tilt, fit.roll + turned, half_width, projection=projection, scale=fit.scale,
                             bands=None if bands is None else (bands[0][inside], bands[1][inside]),
                             sure=None if sure is None else sure[inside])
             azimuth = fit.heading + turns[:, None] + seen.azimuth[None, :]
@@ -1193,12 +1236,12 @@ def under_terrain(azimuth: np.ndarray, elevation: np.ndarray, turn: Turn, per_de
 
 
 def _over(
-    azimuth: np.ndarray, elevation: np.ndarray, turn: Turn, top: Turn | None, clear: Turn | None,
-    turns: Sequence[Turn], per_degree: float,
+    azimuth: np.ndarray, elevation: np.ndarray, turn: Turn, top: Top | None, clear: Stack | None,
+    turns: Sequence[Turn], per_degree: float, codes: np.ndarray | None = None,
 ) -> tuple[float, float | None]:
     """The share of the lines with only sky above that the terrain stands over, and how far out that land
-    stands, metres (the middle of it; None when none does). Read in full against `clear`, as far as the
-    analyst says the photo sees; else against every cut of the turn, land within the place's own cut in full,
+    stands, metres (the middle of it; None when none does). Read in full against `clear`, each line against its
+    top as far as it is read (`codes`, each point's top in the stack, k + 1); else against every cut of the turn, land within the place's own cut in full,
     land past it in full out to `CLEAR_NEAR` times as far as the ground the line lies on, then less and less out
     to `CLEAR_FAR` times it. Land `BEHIND` the ridge the place's own cut lays the line on counts in full, that
     ridge itself `OWN_SHARE`."""
@@ -1210,10 +1253,14 @@ def _over(
         return np.where(np.isfinite(ridge), own, 1.0)
 
     if clear is not None:
-        far = clear.far(azimuth)
-        weight = under_terrain(azimuth, elevation, clear, per_degree) * behind(far)
+        far = np.full(azimuth.size, np.nan)
+        weight = np.zeros(azimuth.size)
+        for one, mask in _layers(clear, codes if codes is not None else np.ones(azimuth.size, dtype=np.int8)):
+            far[mask] = one.far(azimuth[mask])
+            weight[mask] = under_terrain(azimuth[mask], elevation[mask], one, per_degree)
+        weight = weight * behind(far)
     else:
-        line = np.maximum((top or turn).far(azimuth), 1.0)
+        line = np.maximum((top if isinstance(top, Turn) else turn).far(azimuth), 1.0)
         own = math.inf if turn.reach is None else float(turn.reach)
         weight = np.zeros(azimuth.size)
         far = np.full(azimuth.size, np.nan)
@@ -1240,7 +1287,7 @@ def _bent(marks: Marks | None, count: int) -> np.ndarray | None:
 def _judge(
     fit: Fit, x: np.ndarray, y: np.ndarray, turn: Turn, marks: Marks, ridges: Ridges | None,
     half_width: float, projection: Projection, bands: tuple[np.ndarray, np.ndarray] | None = None,
-    floor: float = 0.0, clear: Turn | None = None, top: Turn | None = None, turns: Sequence[Turn] = (),
+    floor: float = 0.0, clear: Stack | None = None, top: Top | None = None, turns: Sequence[Turn] = (),
     sure: np.ndarray | None = None, distinct: np.ndarray | None = None, rounding: float | None = None,
 ) -> Fit:
     """A place judged on all the analyst marked: a collage's pieces eased, the inner edges read
@@ -1263,11 +1310,12 @@ def _judge(
         groups = [(-1, np.ones(px.size, dtype=bool))]
         if offsets and which is not None and which.size == px.size:
             groups = [(int(k), which == k) for k in np.unique(which)]
-        per = _per_degree(fit.fov, half_width, projection)
+        per = _per_degree(fit.fov, half_width, projection, fit.scale)
         for k, inside in groups:
             turned, tilted, rolled = offsets.get(k, (0.0, 0.0, 0.0))
             sx, sy = (_rolled(px[inside], py[inside], rolled, pivots[k]) if k in pivots else (px[inside], py[inside]))
-            seen = _through(sx, sy, fit.fov, fit.tilt + tilted, fit.roll + rolled, half_width, projection=projection)
+            seen = _through(sx, sy, fit.fov, fit.tilt + tilted, fit.roll + rolled, half_width, projection=projection,
+                            scale=fit.scale)
             azimuth[inside] = fit.heading + turned + seen.azimuth
             elevation[inside] = seen.elevation
         return azimuth, elevation, per
@@ -1330,8 +1378,9 @@ def _judge(
     over: float | None = None
     over_far: float | None = None
     if sure is not None and sure.any():
-        azimuth, elevation, per = through(x[sure], y[sure], None if piece is None else piece[sure])
-        over, over_far = _over(azimuth, elevation, turn, top, clear, turns, per)
+        on = sure > 0
+        azimuth, elevation, per = through(x[on], y[on], None if piece is None else piece[on])
+        over, over_far = _over(azimuth, elevation, turn, top, clear, turns, per, sure[on])
         # past a fiftieth the place pays, past CLEAR_HARD it keeps CLEAR_KEEP of its score (none: ruled out)
         paid = float(np.clip((over - CLEAR_FREE) / (CLEAR_HARD - CLEAR_FREE), 0.0, 1.0))
         score *= 1.0 - (1.0 - CLEAR_KEEP) * paid
@@ -1350,7 +1399,7 @@ def match(
     within: tuple[float, float] | None = None, facing: Sector | Sequence[Sector] | None = None,
     level: bool = False, projection: Projection = "camera", quick: bool = False, rough: bool = False,
     marks: Marks | None = None, ridges: Ridges | None = None, floor: float = 0.0,
-    tilts: tuple[float, float] | None = None, rounding: float | None = None, clear: Turn | None = None,
+    tilts: tuple[float, float] | None = None, rounding: float | None = None, clear: Top | None = None,
     beyond: Sequence[Turn] = (), lens_window: tuple[float, float] | None = None, lens_max: float | None = None,
 ) -> Match:
     """The headings, lenses and tilts that bring `turn` onto the trace (x, y), and a verdict.
@@ -1375,8 +1424,8 @@ def match(
     camera tilts past `tilts` (degrees, low and high) is not one. With
     `rounding`, the terrain's cell in metres, near lines are judged rounded.
     The lines `marks.clear` says have only sky above are laid on, and read against,
-    `clear`, the turn as far as the analyst says the photo sees, whatever cut a
-    place lies on; without it, on the top of the land out to `CLEAR_NEAR` times
+    `clear` when given, each line its own top in the stack (as far as its said distance and the reach
+    let the photo see over it), whatever cut a place lies on; without it, on the top of the land out to `CLEAR_NEAR` times
     the line's own distance (`_tops`), and against every cut of the turn
     (`_over`), and `beyond`'s: the turn read on past the farthest the trace is
     searched, for them alone. `lens_window` keeps the lenses slid over to those it holds, out of the ones the
@@ -1397,11 +1446,21 @@ def match(
     xs, ys = x[pick], y[pick]
     bands = bands_of(None if marks is None else marks.line, x.size, () if marks is None else marks.far, floor)
     picked = None if bands is None else (bands[0][pick], bands[1][pick])
-    # the points of lines said to have only sky above, and the top of the land each cut lays them on
-    sure = None
+    # the points of lines said to have only sky above, and the top of the land each cut lays them on: one turn for
+    # them all, or each line its own (a stack)
+    stack = clear if isinstance(clear, Stack) else None
+    if isinstance(clear, Turn) and marks is not None:
+        stack = Stack((clear,), tuple((int(stroke), 0) for stroke in marks.clear))
+    sure: np.ndarray | None = None
     if marks is not None and marks.clear and marks.line is not None and np.asarray(marks.line).size == x.size:
         sure = np.isin(marks.line, marks.clear)
         sure = sure if sure.any() else None
+        if sure is not None and stack is not None:
+            # each line laid on, and read against, the top its own distance reads: its code, k + 1
+            codes = np.zeros(x.size, dtype=np.int8)
+            for stroke, k in stack.lines:
+                codes[np.asarray(marks.line) == stroke] = k + 1
+            sure = codes if codes.any() else None
     bent = _bent(marks, x.size)
     # where no line is marked key, the sharpest stretches stand in for them: never a sea line, nor a bent part
     distinct = None if marks is not None and marks.key else _distinct(x, y, half_width)
@@ -1412,10 +1471,10 @@ def match(
             distinct = distinct & ~bent
         if distinct.sum() < MIN_POINTS:
             distinct = None
-    tops: list[Turn | None] = [None] * len(turns)
+    tops: list[Top | None] = [None] * len(turns)
     read = [*turns, *beyond]
     if sure is not None:
-        tops = [clear] * len(turns) if clear is not None else _tops(read)[:len(turns)]
+        tops = [stack] * len(turns) if stack is not None else _tops(read)[:len(turns)]
 
     rows: list[_Row] = []
     widths: dict[float, float] = {}
@@ -1452,15 +1511,25 @@ def match(
     if bounds is not None and lens_max is not None:
         bounds = (bounds[0], max(bounds[0], min(bounds[1], lens_max)))
     refined = []
+    # a strip of unknown width is fitted again with its height scaled, its places in full only
+    scales = (1.0, *STRIP_SCALES) if projection == "panorama" and not known and not rough and not quick else (1.0,)
     for _, h, f, t, index, r in _spread_out(rows, apart, 1 if rough else QUICK_REFINED if quick else REFINED):
-        fit = _refine(x, y, turns[index], heading=h, tilt=float(np.clip(t, -89.0, 89.0)), fov=f, roll=r,
-                      half_width=half_width, free=not known, level=level, start=roll,
-                      widen=RANGE_EASE if within is not None else 1.03, projection=projection, bounds=bounds,
-                      bands=bands, tilts=tilts, rounding=rounding, top=tops[index], sure=sure, bent=bent)
-        if fit is not None and (marks is not None or distinct is not None):
-            fit = _judge(fit, x, y, turns[index], marks if marks is not None else Marks(), ridges, half_width, projection,
-                         bands, floor, clear, tops[index], read, sure, distinct, rounding)
-        refined.append(fit)
+        first: Fit | None = None
+        for scale in scales:
+            if scale != 1.0 and first is None:
+                break
+            start_at = first if first is not None else Fit(h, float(np.clip(t, -89.0, 89.0)), f, 0.0, 0.0, 0, r)
+            fit = _refine(x, y, turns[index], heading=start_at.heading, tilt=float(np.clip(start_at.tilt, -89.0, 89.0)),
+                          fov=start_at.fov, roll=start_at.roll, half_width=half_width, free=not known, level=level,
+                          start=roll, widen=RANGE_EASE if within is not None else 1.03, projection=projection,
+                          bounds=bounds, bands=bands, tilts=tilts, rounding=rounding, top=tops[index], sure=sure,
+                          bent=bent, scale=scale)
+            if fit is not None and (marks is not None or distinct is not None):
+                fit = _judge(fit, x, y, turns[index], marks if marks is not None else Marks(), ridges, half_width,
+                             projection, bands, floor, stack, tops[index], read, sure, distinct, rounding)
+            if scale == 1.0:
+                first = fit
+            refined.append(fit)
     found = sorted((fit for fit in refined if fit is not None), key=lambda fit: -fit.explained)
     if sectors is not None:
         found = [fit for fit in found if within_sectors(fit.heading, sectors)]

@@ -451,6 +451,28 @@ def test_a_panorama_is_found_at_its_heading_and_width():
     level = skymatch.match(x, y, RANGE, half_width=HALF, fov=180.0, known=True, roll=4.0, projection="panorama")
     assert level.fits[0].roll == 0.0
     assert level.fits[0].heading == pytest.approx(60.0, abs=0.5)
+    # a strip drawn true is found at its own scale
+    assert best.scale == 1.0
+
+
+def test_a_strip_laid_by_hand_at_its_own_height_scale_is_found_at_it():
+    # frames laid side by side with gaps: the strip spans 0.8 times as many degrees up as across per pixel
+    x, y = trace_on(RANGE, heading=60.0, fov=180.0, tilt=1.5, projection="panorama")
+    y = y / 0.8
+    found = skymatch.match(x, y, RANGE, half_width=HALF, fov=150.0, within=(100.0, 260.0), projection="panorama")
+    best = found.fits[0]
+    assert best.scale == 0.8
+    assert best.heading == pytest.approx(60.0, abs=0.5) and best.fov == pytest.approx(180.0, rel=0.03)
+    _, up = skymatch.directions(np.array([0.0]), np.array([0.1]), fov=180.0, projection="panorama", scale=0.8)
+    assert up[0] == pytest.approx(7.2)
+    # read 1:1 it explains less; a lens the picture says (a stitched collage) keeps the strip true
+    assert best.explained > skymatch.match(x, y, RANGE, half_width=HALF, fov=150.0, within=(100.0, 260.0),
+                                           projection="panorama", quick=True).fits[0].explained
+    held = skymatch.match(x, y, RANGE, half_width=HALF, fov=180.0, known=True, projection="panorama")
+    assert held.fits[0].scale == 1.0
+    # a photo has no strip to scale
+    photo_x, photo_y = trace_on(RANGE, heading=60.0, fov=60.0, tilt=1.5)
+    assert skymatch.match(photo_x, photo_y, RANGE, half_width=HALF, fov=60.0, known=True).fits[0].scale == 1.0
 
 
 def test_a_panorama_read_as_a_photo_explains_less_of_itself():

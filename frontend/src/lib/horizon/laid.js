@@ -26,6 +26,7 @@ export const AS_SEARCHED = {
   frames: 'Each frame of the collage where the search read it: press to lay the photo flat',
   pieces: 'Each piece where the search eased it: press to lay the photo flat',
   mirrored: 'Flipped, as the search found it: press to lay the photo as taken',
+  stretched: 'Taller or flatter, as the search read the strip: press to lay the photo as taken',
 };
 
 /** Pixels across the virtual frames the arithmetic runs through: any size will do, the points are shares of it. */
@@ -98,23 +99,26 @@ export function framesLaid({ mesh, lens }, fit, view, aspect) {
 }
 
 /**
- * A cut collage laid piece by piece where the search eased each, flipped when the place was found mirrored.
- * With no pieces and no mirror there is nothing to lay: null.
+ * A cut collage laid piece by piece where the search eased each, flipped when the place was found mirrored, and a
+ * strip laid by hand at the height scale the search read it at. With none of these there is nothing to lay: null.
  *
  * @param {object} camera the place's, as the view looks through it
  * @param {number} aspect the frame's width over its height
- * @param {{ pieces?: {piece:number, turn:number, tilt:number, roll:number}[]|null, pieceOf?: (u:number) => number, cuts?: number[], mirrored?: boolean }} how
- *   the eased pieces, the piece a point across the photo lies in, the cuts across it (0 to 1) and whether it was found mirrored
+ * @param {{ pieces?: {piece:number, turn:number, tilt:number, roll:number}[]|null, pieceOf?: (u:number) => number, cuts?: number[], mirrored?: boolean, stretch?: number }} how
+ *   the eased pieces, the piece a point across the photo lies in, the cuts across it (0 to 1), whether it was found
+ *   mirrored, and the strip's degrees up per degree across (camera.js `stretch`)
  */
-export function piecesLaid(camera, aspect, { pieces = null, pieceOf = () => 0, cuts = [], mirrored = false } = {}) {
+export function piecesLaid(camera, aspect, { pieces = null, pieceOf = () => 0, cuts = [], mirrored = false, stretch = 1 } = {}) {
   const eased = pieces?.length ? pieces : null;
-  if (!eased && !mirrored) return null;
+  const scaled = camera.projection === 'panorama' && Number.isFinite(stretch) && stretch !== 1;
+  if (!eased && !mirrored && !scaled) return null;
   const view = sized(camera, aspect);
-  const of = pieceCameras(view, eased);
+  // the photo read through its own strip, the view drawn through the plain one
+  const of = pieceCameras(scaled ? { ...view, stretch } : view, eased);
   // the cuts are edges of the grid, so each side of a seam is laid by its own piece
   const us = [...new Set([...evenly(LAID_CELLS.across), ...(eased ? cuts : [])])].filter((u) => u >= 0 && u <= 1).sort((a, b) => a - b);
   return {
-    kind: eased ? 'pieces' : 'mirrored',
+    kind: eased ? 'pieces' : scaled ? 'stretched' : 'mirrored',
     us,
     vs: evenly(LAID_CELLS.down),
     place(u, v, cell = { u, v }) {

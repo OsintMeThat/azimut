@@ -267,8 +267,12 @@ export function createOverlayState({
   let clearing = $state(false);
   /** Saying a skyline line matters most: a click on the line, again to take it back. */
   let keying = $state(false);
-  /** Brushing over the parts of the picture that are bent; the path of the brush being drawn, on the photo. */
+  /**
+   * Brushing over parts of the picture, those that are bent or, `brushKind` 'hazy', those where far land may be
+   * hidden; the path of the brush being drawn, on the photo.
+   */
   let bending = $state(false);
+  let brushKind = $state('bent');
   let brushing = $state.raw(null);
   let traceTime = $state(null);
   // the trace as it was before each change, newest last
@@ -353,10 +357,15 @@ export function createOverlayState({
   const keySeen = $derived(marks.key?.length ? keyBadges(shown, marks) : []);
   /** The parts brushed as bent on the straightened photo, the one being brushed last: `{ path, r }`. */
   const bentSeen = $derived(
-    [...(marks.bent ?? []), ...(brushing ? [brushing] : [])].map((zone) => ({ ...zone, path: zone.path.map(toSeen) }))
+    [...(marks.bent ?? []), ...(brushing && brushKind === 'bent' ? [brushing] : [])].map((zone) => ({ ...zone, path: zone.path.map(toSeen) }))
   );
   /** The same where the view shows them, on the photo laid as the search read it. */
   const bentLaid = $derived(asSearched ? bentSeen.map((zone) => ({ ...zone, path: zone.path.map((p) => shownAt(p)) })) : bentSeen);
+  /** The parts brushed where far land may be hidden, as `bentSeen` and `bentLaid` are. */
+  const hazySeen = $derived(
+    [...(marks.hazy ?? []), ...(brushing && brushKind === 'hazy' ? [brushing] : [])].map((zone) => ({ ...zone, path: zone.path.map(toSeen) }))
+  );
+  const hazyLaid = $derived(asSearched ? hazySeen.map((zone) => ({ ...zone, path: zone.path.map((p) => shownAt(p)) })) : hazySeen);
   /** The photo's grid as it shows, while its corners are out to be pulled (`photoGrid`). */
   const grid = $derived(warping ? photoGrid(toSeen) : []);
   /** The photo drawn between its pulled corners, which the view is handed in its place. */
@@ -1345,6 +1354,17 @@ export function createOverlayState({
     bentAt(point) {
       return marks.bent?.length ? inBent(marks.bent, toPhoto(point), aspect() || 1) : false;
     },
+    /** The parts brushed where far land may be hidden, straightened and where the view shows them. */
+    get hazySeen() {
+      return hazySeen;
+    },
+    get hazyShown() {
+      return hazyLaid;
+    },
+    /** Whether a point of the straightened photo lies in a part brushed where far land may be hidden. */
+    hazyAt(point) {
+      return marks.hazy?.length ? inBent(marks.hazy, toPhoto(point), aspect() || 1) : false;
+    },
     /** Which piece of the collage a point of the straightened photo lies in. */
     pieceAt(point) {
       return marks.cuts.length ? pieceOf(marks.cuts, toPhoto(point).u) : 0;
@@ -1538,15 +1558,19 @@ export function createOverlayState({
       marks = toggleKey(marks, id);
       return id;
     },
-    /** Whether a drag brushes a part of the picture as bent. */
+    /** Whether a drag brushes a part of the picture, of the kind `brushKind` says: 'bent' or 'hazy'. */
     get bending() {
       return bending;
     },
-    setBending(on) {
+    get brushKind() {
+      return brushKind;
+    },
+    setBending(on, kind = 'bent') {
       const next = Boolean(on) && Boolean(source);
       if (next) toolsAway();
       if (next) asSearched = null;
       bending = next;
+      if (next) brushKind = kind === 'hazy' ? 'hazy' : 'bent';
       brushing = null;
     },
     /**
@@ -1569,9 +1593,9 @@ export function createOverlayState({
       brushing = null;
       const [first] = zone.path;
       const still = zone.path.every((p) => Math.hypot(p.u - first.u, p.v - first.v) < zone.r / 4);
-      const hit = still ? bentIndex(marks.bent, first, aspect() || 1) : -1;
+      const hit = still ? bentIndex(marks[brushKind], first, aspect() || 1) : -1;
       keep();
-      marks = hit >= 0 ? removeBent(marks, hit) : addBent(marks, zone);
+      marks = hit >= 0 ? removeBent(marks, hit, brushKind) : addBent(marks, zone, brushKind);
     },
     /** Every part brushed as bent taken away. */
     clearBent() {

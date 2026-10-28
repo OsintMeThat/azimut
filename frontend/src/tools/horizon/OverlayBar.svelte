@@ -95,6 +95,7 @@
         [['O'], 'Say only sky stands above a line'],
         [['I'], 'Mark a key line, three at most'],
         [['G'], 'Brush where the picture may be bent'],
+        [['F'], 'Brush where far land may be hidden'],
         [['M'], 'Snap to edges, or not'],
         [['Alt', 'drag'], 'Draw the other way, snapped or not'],
         [['E'], 'Rub out'],
@@ -405,6 +406,8 @@
       <span class="say">Click a skyline line with only sky above it.</span>
     {:else if overlay.keying}
       <span class="say">Click a skyline line that matters most, three at most.</span>
+    {:else if overlay.bending && overlay.brushKind === 'hazy'}
+      <span class="say">Brush over the part where far land may be hidden.</span>
     {:else if overlay.bending}
       <span class="say">Brush over the part that may be bent.</span>
     {:else if overlay.busy}

@@ -347,6 +347,21 @@ describe('the steps of Find', () => {
     expect(unsure.textContent).not.toContain('Any lens finds more chance fits');
   });
 
+  it('offers a roof or a terrace beside on foot, a drone and an aircraft', () => {
+    const find = fakeFind();
+    const root = steps({ find });
+    const taken = root.querySelector('[aria-labelledby="find-who"]');
+    expect([...taken.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['On foot', 'Roof', 'Drone', 'Aircraft']);
+    expect(taken.querySelector('[aria-checked="true"]').textContent.trim()).toBe('On foot');
+    buttonNamed(taken, 'Roof').click();
+    expect(find.setWho).toHaveBeenCalledWith({ mode: 'ground', low: 3, high: 10 });
+    // an eye raised on the ground is a roof, said so in the line and with no heights to type
+    const roof = steps({ find: fakeFind({ who: { mode: 'ground', low: 3, high: 10 } }) });
+    expect(roof.querySelector('[aria-labelledby="find-who"] [aria-checked="true"]').textContent.trim()).toBe('Roof');
+    expect(roof.querySelector('[aria-label="Lowest"]')).toBeNull();
+    expect(roof.textContent).toContain('ridges within 50 km · roof');
+  });
+
   it('ticks the directions the photo may face on a compass, any way in its middle', () => {
     const find = fakeFind({ facing: ['ne'] });
     const root = steps({ find });

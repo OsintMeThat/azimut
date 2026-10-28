@@ -3035,7 +3035,10 @@ shows over it), **Key line** (I) to say a skyline line matters most, a peak or
 a notch known anywhere (three at most, "Key" shows over it), **May be bent** (G)
 to brush over a part of the picture that may be bent, a wide lens's edge or a
 piece stretched while laid (an orange wash; a click on a brushed part takes it
-away), and the rubber (E).
+away), **Far land hidden** (F) to brush over a part where haze or the night may
+hide land behind the skyline (a pale blue wash: the skyline there is read as a
+ridge, laid on any of the terrain's silhouettes rather than its outermost), and
+the rubber (E).
 The **magnet** (M) says whether a
 line drawn snaps onto the photo's nearest edge; Alt does the other for one
 stroke. A click with a pen on a line makes it that pen's kind, and a skyline
@@ -3200,7 +3203,13 @@ was read through. **Picture** in What you know reads any image as a Photo or a
 Panorama, the same degrees per pixel all along as a phone's sweep, so a
 hand-made collage of any shape can be searched either way; a wide one is
 pointed to Panorama. Find never tries a panorama of unknown width wider than
-its picture could span, no more than 110° from top to bottom.
+its picture could span, no more than 110° from top to bottom. A panorama of unknown
+width, frames laid side by side by hand or a phone's sweep, is also read two thirds
+to one and a half times as tall, and each place keeps the height that explains
+most: the trace's colours and the terrain's line read the photo at it, and Find's
+look lays the picture taller or flatter. **Taken** says who
+took it: On foot, **Roof** (from a roof or a terrace, the eye 3 to 10 m over the
+ground), Drone or Aircraft, the last two with the heights they flew at.
 
 An alignment is made by four clicks, the near thing and what stands behind it
 on the photo, then both on the map. What the next click is for is said in the

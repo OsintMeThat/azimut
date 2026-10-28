@@ -70,6 +70,19 @@ describe('a photo laid as a search read it', () => {
     expect(laid.kind).toBe('mirrored');
     expect(laid.place(0.2, 0.3).u).toBeCloseTo(0.8, 9);
     expect(laid.place(0.2, 0.3).v).toBeCloseTo(0.3, 9);
-    expect(Object.keys(AS_SEARCHED)).toEqual(['frames', 'pieces', 'mirrored']);
+    expect(Object.keys(AS_SEARCHED)).toEqual(['frames', 'pieces', 'mirrored', 'stretched']);
+  });
+
+  it('lays a strip the search read at another height scale taller or flatter about its middle', () => {
+    const strip = { projection: 'panorama', heading: 30, tilt: 0, roll: 0, fov: 150 };
+    expect(piecesLaid(strip, 4, { stretch: 1 })).toBeNull();
+    // a photo has no strip to scale
+    expect(piecesLaid({ ...strip, projection: 'camera', fov: LENS }, ASPECT, { stretch: 0.8 })).toBeNull();
+    const laid = piecesLaid(strip, 4, { stretch: 0.8 });
+    expect(laid.kind).toBe('stretched');
+    // across as it was, up four fifths as far from the middle
+    expect(laid.place(0.3, 0.5).u).toBeCloseTo(0.3, 9);
+    expect(laid.place(0.3, 0.5).v).toBeCloseTo(0.5, 9);
+    expect(laid.place(0.3, 0.1).v).toBeCloseTo(0.5 - 0.4 * 0.8, 9);
   });
 });

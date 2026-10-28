@@ -44,7 +44,7 @@ const line = (v, from = 0, to = 1, count = 11) => Array.from({ length: count }, 
 
 describe('marks made whole', () => {
   it('gives each stroke an id and keeps only what names strokes there are', () => {
-    expect(cleanMarks(null, 3)).toEqual({ lines: [0, 1, 2], inner: [], pairs: [], cuts: [], far: [], sea: [], clear: [], key: [], bent: [] });
+    expect(cleanMarks(null, 3)).toEqual({ lines: [0, 1, 2], inner: [], pairs: [], cuts: [], far: [], sea: [], clear: [], key: [], bent: [], hazy: [] });
     const kept = cleanMarks(
       {
         lines: [4, 7],
@@ -60,7 +60,7 @@ describe('marks made whole', () => {
       2
     );
     // a sea line is skyline, and so are a line with only sky above and a key line: an inner edge can be none
-    expect(kept).toEqual({ lines: [4, 7], inner: [7], pairs: [[7, 4]], cuts: [0.3, 0.7], far: [{ line: 4, bands: ['b1', 'b3'] }], sea: [4], clear: [4], key: [4], bent: [{ path: [{ u: 0.1235, v: 0.5 }], r: 0.05 }] });
+    expect(kept).toEqual({ lines: [4, 7], inner: [7], pairs: [[7, 4]], cuts: [0.3, 0.7], far: [{ line: 4, bands: ['b1', 'b3'] }], sea: [4], clear: [4], key: [4], bent: [{ path: [{ u: 0.1235, v: 0.5 }], r: 0.05 }], hazy: [] });
     // ids that do not match the strokes start again in order
     expect(cleanMarks({ lines: [1], inner: [1] }, 2).lines).toEqual([0, 1]);
   });
@@ -248,6 +248,17 @@ describe('parts brushed as bent', () => {
     expect(marksSaid(marks)).toBe(true);
     expect(sameMarks(marks, cleanMarks(null, 1))).toBe(false);
     expect(removeBent(marks, 0).bent).toHaveLength(BENT_MAX - 1);
+  });
+
+  it('keep the parts where far land may be hidden apart from the bent ones', () => {
+    const zone = { path: [{ u: 0.3, v: 0.4 }], r: 0.02 };
+    const marks = addBent(cleanMarks(null, 1), zone, 'hazy');
+    expect(marks.hazy).toEqual([zone]);
+    expect(marks.bent).toEqual([]);
+    expect(marksSaid(marks)).toBe(true);
+    expect(sameMarks(marks, cleanMarks(null, 1))).toBe(false);
+    expect(cleanMarks(marks, 1).hazy).toEqual([zone]);
+    expect(removeBent(marks, 0, 'hazy').hazy).toEqual([]);
   });
 });
 

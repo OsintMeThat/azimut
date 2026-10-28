@@ -180,7 +180,8 @@ class BentZone(BaseModel):
 class Marks(BaseModel):
     """What the analyst marked beside the skyline (frontend lib/horizon/traceMarks.js): each stroke's id,
     the ids of inner edges, pairs of ids (in front, behind), where a collage is cut, across the photo,
-    how far some lines stand, which have only sky above them, which matter most, and the parts brushed as bent."""
+    how far some lines stand, which have only sky above them, which matter most, the parts brushed as bent and those
+    brushed where far land may be hidden."""
 
     lines: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
     inner: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
@@ -195,6 +196,8 @@ class Marks(BaseModel):
     key: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
     #: The parts of the picture the analyst brushed as bent.
     bent: list[BentZone] = Field(default_factory=list, max_length=MAX_BENT)
+    #: The parts brushed where far land may be hidden, by haze or the night: a skyline line there is read as a ridge.
+    hazy: list[BentZone] = Field(default_factory=list, max_length=MAX_BENT)
 
     @field_validator("lines", "inner", "sea", "clear", "key")
     @classmethod

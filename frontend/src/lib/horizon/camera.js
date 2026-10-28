@@ -8,7 +8,10 @@
  *   and field of view agree. This is the one a picture is matched against.
  * - **Panorama** is cylindrical, the strip a summit chart is drawn as: azimuth
  *   along, elevation up, the same number of degrees per pixel both ways. It
- *   holds the whole turn at once, and nothing in it is a photo.
+ *   holds the whole turn at once, and nothing in it is a photo. A photo's strip
+ *   laid by hand may span `stretch` times as many degrees up as across per pixel
+ *   (the search's `scale`, engine/skymatch.py `STRIP_SCALES`): a camera that
+ *   reads such a photo carries it.
  *
  * A direction is (azimuth, elevation) in degrees, azimuth clockwise from north.
  * The camera is `{ heading, tilt, roll, fov, width, height, projection }`: fov is
@@ -96,7 +99,7 @@ export function toScreen(camera, azimuth, elevation) {
   const { width, height } = camera;
   if (camera.projection === 'panorama') {
     const scale = stripScale(camera);
-    const laid = onStrip(camera, width / 2 + turnBetween(camera.heading, azimuth) / scale, height / 2 - (elevation - camera.tilt) / scale, true);
+    const laid = onStrip(camera, width / 2 + turnBetween(camera.heading, azimuth) / scale, height / 2 - (elevation - camera.tilt) / (scale * (camera.stretch ?? 1)), true);
     return { x: laid.x, y: laid.y, visible: true };
   }
   const { forward, right, up } = basis(camera);
@@ -120,7 +123,7 @@ export function rayFor(camera, x, y) {
     const read = onStrip(camera, x, y);
     return {
       azimuth: (((camera.heading + (read.x - width / 2) * scale) % 360) + 360) % 360,
-      elevation: camera.tilt - (read.y - height / 2) * scale,
+      elevation: camera.tilt - (read.y - height / 2) * scale * (camera.stretch ?? 1),
     };
   }
   const { forward, right, up } = basis(camera);
@@ -135,8 +138,8 @@ export function rayFor(camera, x, y) {
 }
 
 /** The vertical field of view a horizontal one makes in this frame, through the loupe. */
-export function verticalFov({ fov, width, height, projection, loupe }) {
-  if (projection === 'panorama') return (fov * height) / width;
+export function verticalFov({ fov, width, height, projection, loupe, stretch = 1 }) {
+  if (projection === 'panorama') return (fov * height * stretch) / width;
   return (2 * Math.atan(((height / width) * Math.tan((fov * RAD) / 2)) / (loupe?.zoom ?? 1))) / RAD;
 }
 

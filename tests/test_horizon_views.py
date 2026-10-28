@@ -462,13 +462,15 @@ def test_a_view_keeps_the_marks_beside_its_trace(client):
     spec["photo"]["strokes"] = [[{"u": 0.1, "v": 0.41}, {"u": 0.3, "v": 0.38}], [{"u": 0.1, "v": 0.45}, {"u": 0.2, "v": 0.44}]]
     spec["photo"]["marks"] = {"lines": [0, 3], "inner": [3], "pairs": [[3, 0]], "cuts": [0.42, 0.72],
                               "far": [{"line": 0, "bands": ["b1", "b3"]}], "sea": [0], "clear": [0], "key": [0],
-                              "bent": [{"path": [{"u": 0.7, "v": 0.4}, {"u": 0.9, "v": 0.42}], "r": 0.05}]}
+                              "bent": [{"path": [{"u": 0.7, "v": 0.4}, {"u": 0.9, "v": 0.42}], "r": 0.05}],
+                              "hazy": [{"path": [{"u": 0.1, "v": 0.4}], "r": 0.08}]}
     saved = _save(client, cid, "Marked", spec)
     assert saved.status_code == 200, saved.text
     kept = client.get(f"/api/cases/{cid}/horizon/views/Marked").json()["spec"]["photo"]
     assert kept["marks"] == {"lines": [0, 3], "inner": [3], "pairs": [[3, 0]], "cuts": [0.42, 0.72],
                              "far": [{"line": 0, "bands": ["b1", "b3"]}], "sea": [0], "clear": [0], "key": [0],
-                             "bent": [{"path": [{"u": 0.7, "v": 0.4}, {"u": 0.9, "v": 0.42}], "r": 0.05}]}
+                             "bent": [{"path": [{"u": 0.7, "v": 0.4}, {"u": 0.9, "v": 0.42}], "r": 0.05}],
+                              "hazy": [{"path": [{"u": 0.1, "v": 0.4}], "r": 0.08}]}
     # a trace of the skyline alone keeps none
     plain = _spec(_photo(client, cid))
     assert _save(client, cid, "Plain", plain).status_code == 200

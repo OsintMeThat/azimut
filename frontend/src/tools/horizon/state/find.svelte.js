@@ -67,6 +67,30 @@ export const WHO = {
   aircraft: { label: 'Aircraft', low: 300, high: 3000 },
 };
 
+/** A roof or a terrace: on the ground's mode, the eye this high over the ground. */
+export const ROOF = { low: 3, high: 10 };
+
+/** Who took the photo as Find offers it, a roof or a terrace beside the modes. */
+export const TAKEN = [
+  { id: 'ground', label: WHO.ground.label, title: 'Taken by someone standing on the ground' },
+  { id: 'roof', label: 'Roof', title: `From a roof or a terrace, ${ROOF.low} to ${ROOF.high} m above the ground` },
+  { id: 'drone', label: WHO.drone.label, title: 'From a drone: say how high below' },
+  { id: 'aircraft', label: WHO.aircraft.label, title: 'From an aircraft: say how high above the sea below' },
+];
+
+/** Which of `TAKEN` a setting is: an eye raised on the ground's mode is a roof. */
+export function takenOf(who) {
+  const mode = who?.mode ?? 'ground';
+  return mode === 'ground' && Number(who?.high) > WHO.ground.high ? 'roof' : mode;
+}
+
+/** The setting one of `TAKEN` stands for. */
+export function whoFor(taken) {
+  if (taken === 'roof') return { mode: 'ground', ...ROOF };
+  const one = WHO[taken] ?? WHO.ground;
+  return { mode: WHO[taken] ? taken : 'ground', low: one.low, high: one.high };
+}
+
 /** The grid a search is laid on, metres between points; auto picks it from the area. */
 export const SPACINGS = ['auto', 20, 50, 100, 250, 500, 1000];
 
@@ -396,7 +420,8 @@ export function createFindState({ api, overlay, view }) {
     const fov = lens?.fov ?? Math.sqrt(told.within[0] * told.within[1]);
     const pieceAt = (s) => overlay.pieceAt?.({ u: s.x / size.width, v: s.y / size.height }) ?? 0;
     const bentAt = (s) => overlay.bentAt?.({ u: s.x / size.width, v: s.y / size.height }) ?? false;
-    const plane = markedPlane(samples, { fov, ...size, projection, heading: 0, tilt: 0, roll: 0 }, marks, pieceAt, bentAt);
+    const hazyAt = (s) => overlay.hazyAt?.({ u: s.x / size.width, v: s.y / size.height }) ?? false;
+    const plane = markedPlane(samples, { fov, ...size, projection, heading: 0, tilt: 0, roll: 0 }, marks, pieceAt, bentAt, hazyAt);
     // a lens read off the video's pan is searched a little either way, one the file or the stitch says held exact
     const within = lens?.measured ? [fov / MEASURED_GIVE, fov * MEASURED_GIVE] : told.within;
     // a panorama of unknown width spans no more than a phone's frame up and down: wider lenses are never tried
@@ -1093,7 +1118,11 @@ export function createFindState({ api, overlay, view }) {
       const base = mode !== who.mode ? pick(WHO[mode]) : who;
       const low = Number.isFinite(change?.low) ? change.low : base.low;
       const high = Number.isFinite(change?.high) ? change.high : base.high;
-      who = mode === 'ground' ? { mode, low: Math.min(low, 100), high: Math.min(low, 100) } : { mode, low: Math.min(low, high), high: Math.max(low, high) };
+      // on the ground one height, or a range when both ends are said (a roof or a terrace)
+      const top = mode === 'ground' && !Number.isFinite(change?.high) ? low : high;
+      who = mode === 'ground'
+        ? { mode, low: Math.min(low, top, 100), high: Math.min(Math.max(low, top), 100) }
+        : { mode, low: Math.min(low, high), high: Math.max(low, high) };
       for (const one of alignments) if (one.tops) askTouch(one.id);
     },
     /** The compass directions the photo may face, none for any. */

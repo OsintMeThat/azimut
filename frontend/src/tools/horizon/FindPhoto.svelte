@@ -341,6 +341,9 @@
           {#each overlay.bentSeen ?? [] as zone, index (index)}
             <polyline class="fp-bent" points={path(zone.path.length > 1 ? zone.path : [zone.path[0], zone.path[0]])} stroke-width={Math.max(2, 2 * zone.r * rect.w)} />
           {/each}
+          {#each overlay.hazySeen ?? [] as zone, index (index)}
+            <polyline class="fp-hazy" points={path(zone.path.length > 1 ? zone.path : [zone.path[0], zone.path[0]])} stroke-width={Math.max(2, 2 * zone.r * rect.w)} />
+          {/each}
           {#each overlay.strokesSeen as stroke, index (index)}
             {@const id = overlay.marks?.lines?.[index]}
             {#if overlay.front === id}
@@ -673,6 +676,13 @@
   .fp-bent {
     fill: none;
     stroke: rgba(255, 179, 71, 0.3);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  /* a part where far land may be hidden: a pale blue wash */
+  .fp-hazy {
+    fill: none;
+    stroke: rgba(160, 200, 255, 0.3);
     stroke-linecap: round;
     stroke-linejoin: round;
   }

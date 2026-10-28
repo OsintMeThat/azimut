@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { brushFor, createFindState, durationText, estimateText, pacedSeconds, WHO, widenedText } from './find.svelte.js';
+import { brushFor, createFindState, durationText, estimateText, pacedSeconds, ROOF, TAKEN, takenOf, WHO, whoFor, widenedText } from './find.svelte.js';
 import { destination } from '../../../lib/measure.js';
 
 const CAMERA = { lat: 16.9988, lon: 45.0938 };
@@ -322,6 +322,18 @@ describe('who took it', () => {
     expect(find.who).toEqual({ mode: 'drone', low: 50, high: 200 });
     find.setWho({ mode: 'ground', low: 5 });
     expect(find.who).toEqual({ mode: 'ground', low: 5, high: 5 });
+  });
+
+  it('takes a roof or a terrace as the ground with the eye raised, and back on foot', () => {
+    const { find } = finder();
+    find.setWho(whoFor('roof'));
+    expect(find.who).toEqual({ mode: 'ground', low: ROOF.low, high: ROOF.high });
+    expect(takenOf(find.who)).toBe('roof');
+    find.setWho(whoFor('ground'));
+    expect(find.who).toEqual({ mode: 'ground', low: 1.7, high: 1.7 });
+    expect(takenOf(find.who)).toBe('ground');
+    expect(takenOf({ mode: 'drone', low: 10, high: 120 })).toBe('drone');
+    expect(TAKEN.map((one) => one.id)).toEqual(['ground', 'roof', 'drone', 'aircraft']);
   });
 
   it('keeps the settings a search runs with to what it offers', () => {

@@ -52,7 +52,7 @@
   } from '../../lib/horizon/find.js';
   import { AUTO_REACH, cleanZoom, reachText, zoomText } from '../../lib/horizon/hints.js';
   import { headingText } from '../../lib/horizon/geometry.js';
-  import { BRUSH_SIZES, durationText, EFFORTS, estimateText, OVERS, SPACINGS, SPEEDS, VIEWS, WATERS, WHO, widenedText } from './state/find.svelte.js';
+  import { BRUSH_SIZES, durationText, EFFORTS, estimateText, OVERS, SPACINGS, SPEEDS, TAKEN, takenOf, VIEWS, WATERS, whoFor, widenedText } from './state/find.svelte.js';
   import { farLabel } from '../../lib/horizon/traceMarks.js';
   import { marksSummary } from '../../lib/horizon/traceTools.js';
   import { COARSE_RELIEF_M, reliefWords } from '../../lib/horizon/overlay.js';
@@ -147,7 +147,7 @@
       ...(way ? [`facing ${way}`] : []),
       ...(sun?.date && sun?.sides?.length ? [`sun ${sun.sides.join(' or ')} on ${sun.date}`] : []),
       reachWords,
-      (WHO[who] ?? WHO.ground).label.toLowerCase(),
+      (TAKEN.find((one) => one.id === who) ?? TAKEN[0]).label.toLowerCase(),
       ...(ground ? [`on a ${ground}`] : []),
       ...VIEWS.filter((v) => looking.includes(v.id)).map((v) => v.label.toLowerCase()),
       ...(mirror ? ['mirrored too'] : []),
@@ -164,7 +164,7 @@
       hints: overlay.hints ?? {},
       lens: overlay.lens,
       panorama: overlay.isPanorama,
-      who: find.who.mode,
+      who: takenOf(find.who),
       facing: find.facing,
       stands: find.stands,
       marks: overlay.marks,
@@ -195,7 +195,7 @@
     if (!ask) return '';
     const area = areaText(areaPoints(ask.area));
     const aligned = ask.alignments?.length ? `${ask.alignments.length} ${ask.alignments.length === 1 ? 'alignment' : 'alignments'}` : '';
-    const line = toldOf({ hints: ask.hints ?? {}, panorama: ask.hints?.picture === 'panorama', who: ask.who?.mode, facing: ask.facing ?? [], stands: ask.stands ?? [], marks: ask.photo?.marks ?? null, looking: ask.view ?? [], mirror: Boolean(ask.mirror), round: Boolean(ask.round), sun: ask.sun ?? null, water: Boolean(ask.water), over: ask.over ?? null }).line;
+    const line = toldOf({ hints: ask.hints ?? {}, panorama: ask.hints?.picture === 'panorama', who: takenOf(ask.who), facing: ask.facing ?? [], stands: ask.stands ?? [], marks: ask.photo?.marks ?? null, looking: ask.view ?? [], mirror: Boolean(ask.mirror), round: Boolean(ask.round), sun: ask.sun ?? null, water: Boolean(ask.water), over: ask.over ?? null }).line;
     return [area, line, aligned].filter(Boolean).join(' · ');
   });
 
@@ -895,8 +895,8 @@
           <div class="fs-row">
             <span class="fs-name" id="find-who">Taken</span>
             <div class="fs-pills" role="radiogroup" aria-labelledby="find-who">
-              {#each Object.entries(WHO) as [mode, one] (mode)}
-                <button type="button" role="radio" class:on={find.who.mode === mode} aria-checked={find.who.mode === mode} onclick={() => find.setWho({ mode })}
+              {#each TAKEN as one (one.id)}
+                <button type="button" role="radio" title={one.title} class:on={takenOf(find.who) === one.id} aria-checked={takenOf(find.who) === one.id} onclick={() => find.setWho(whoFor(one.id))}
                   >{one.label}</button
                 >
               {/each}

@@ -1235,7 +1235,7 @@ describe('the marks beside the trace', () => {
       strokes: [across(0.3), across(0.5, 0.3, 0.6)],
       marks: { lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], clear: [4], key: [8], bent: [{ path: [{ u: 0.8, v: 0.3 }], r: 0.05 }] },
     });
-    expect(photo.marks).toEqual({ lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], sea: [], clear: [4], key: [8], bent: [{ path: [{ u: 0.8, v: 0.3 }], r: 0.05 }] });
+    expect(photo.marks).toEqual({ lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], sea: [], clear: [4], key: [8], bent: [{ path: [{ u: 0.8, v: 0.3 }], r: 0.05 }], hazy: [] });
     photo.restoreWork({ strokes: [across(0.3), across(0.5, 0.3, 0.6)] });
     expect(photo.marks.inner).toEqual([1]);
     // Detect lays the skyline afresh: the cuts stay, they belong to the photo

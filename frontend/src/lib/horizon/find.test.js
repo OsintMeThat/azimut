@@ -346,6 +346,12 @@ describe('a search kept, against the setup now', () => {
       marked.photo.marks[said] = [0];
       expect(sameAsk(ask, marked)).toBe(false);
     }
+    // and so is a part brushed as bent or where far land may be hidden
+    for (const brush of ['bent', 'hazy']) {
+      const brushed = now();
+      brushed.photo.marks[brush] = [{ path: [{ u: 0.3, v: 0.4 }], r: 0.05 }];
+      expect(sameAsk(ask, brushed)).toBe(false);
+    }
     expect(sameAsk(ask, { ...now(), facing: ['n'] })).toBe(false);
     expect(sameAsk(ask, { ...now(), stands: ['summit'] })).toBe(false);
     expect(sameAsk(ask, { ...now(), view: ['down'] })).toBe(false);

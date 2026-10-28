@@ -86,8 +86,14 @@ describe('the trace tools', () => {
     expect(toolOn(fakeOverlay({ keying: true }), 'key')).toBe(true);
     expect(editing(fakeOverlay({ keying: true }))).toBe(true);
     pressTool(idle, 'bent');
-    expect(idle.setBending).toHaveBeenCalledWith(true);
+    expect(idle.setBending).toHaveBeenCalledWith(true, 'bent');
     expect(toolOn(fakeOverlay({ bending: true }), 'bent')).toBe(true);
+    // one brush, two kinds: where far land may be hidden is the same brush, its own kind
+    pressTool(idle, 'hazy');
+    expect(idle.setBending).toHaveBeenLastCalledWith(true, 'hazy');
+    expect(toolOn(fakeOverlay({ bending: true, brushKind: 'hazy' }), 'hazy')).toBe(true);
+    expect(toolOn(fakeOverlay({ bending: true, brushKind: 'hazy' }), 'bent')).toBe(false);
+    expect(toolForKey('f')).toBe('hazy');
     putAway(drawing);
     expect(drawing.setLinking).toHaveBeenCalledWith(false);
     expect(drawing.setCutting).toHaveBeenCalledWith(false);

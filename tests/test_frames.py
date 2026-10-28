@@ -167,3 +167,8 @@ def test_a_search_on_a_stitched_collage_reads_its_trace_frame_by_frame(monkeypat
     # a curve laid over the picture since, or a photo of another kind, leaves it read as one photo
     for other in ({**ask, "photo": {**ask["photo"], "bend": 0.1}}, {**ask, "photo": {"path": "media/v.mp4", "kind": "video"}}):
         assert horizon_finds.on_frames(None, other, plan, trace)[2] is None
+    # a collage nearly all laid by hand is read as one picture: its frames tied by their overlaps bend the pan
+    monkeypatch.setattr(inspectwork, "frames_of", lambda case, path: (model, {**said, "frames": 12, "stitched": 1}))
+    assert horizon_finds.on_frames(None, ask, plan, trace)[2] is None
+    monkeypatch.setattr(inspectwork, "frames_of", lambda case, path: (model, {**said, "frames": 4, "stitched": 1}))
+    assert horizon_finds.on_frames(None, ask, plan, trace)[2] is not None

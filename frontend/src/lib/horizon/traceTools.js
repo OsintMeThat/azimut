@@ -13,6 +13,7 @@
  *   clear   a click on a skyline line says only sky stands above it
  *   key     a click on a skyline line says it matters most
  *   bent    a brush over a part of the picture that may be bent
+ *   hazy    a brush over a part where far land may be hidden, by haze or the night
  *   erase   the rubber
  *
  * The magnet beside them snaps what the pens draw onto the photo's edges;
@@ -94,6 +95,14 @@ export const TRACE_TOOLS = Object.freeze([
     title: "Brush over a part of the picture that may be bent, a wide lens's edge or a stretched piece: its lines count less (G)",
   },
   {
+    id: "hazy",
+    icon: "haze",
+    label: "Far land hidden",
+    name: "Brush where far land may be hidden",
+    key: "F",
+    title: "Brush over a part where haze or the night may hide far land: its skyline is read as a ridge in front of it (F)",
+  },
+  {
     id: "erase",
     icon: "eraser",
     label: "Rub out",
@@ -124,7 +133,7 @@ export function toolOn(overlay, id) {
   if (id === "far") return Boolean(overlay.distancing);
   if (id === "clear") return Boolean(overlay.clearing);
   if (id === "key") return Boolean(overlay.keying);
-  if (id === "bent") return Boolean(overlay.bending);
+  if (id === "bent" || id === "hazy") return Boolean(overlay.bending) && (overlay.brushKind ?? "bent") === id;
   if (id === "erase") return Boolean(overlay.erasing);
   return false;
 }
@@ -175,6 +184,7 @@ export function traceLegend(
     : [{ id: "trace", label: "Your trace" }];
   if (marks?.inner?.length) items.push({ id: "ridge", label: "Ridge" });
   if (marks?.bent?.length) items.push({ id: "bent", label: "May be bent" });
+  if (marks?.hazy?.length) items.push({ id: "hazy", label: "Far land hidden" });
   if (marks?.sea?.length) items.push({ id: "sea", label: "Sea line" });
   if (terrain) items.push({ id: "terrain", label: "Terrain skyline" });
   if (ridgeLines) items.push({ id: "ridge-lines", label: "Terrain ridges" });
@@ -211,7 +221,7 @@ export function pressTool(overlay, id) {
   else if (id === "far") overlay.setDistancing(!on);
   else if (id === "clear") overlay.setClearing(!on);
   else if (id === "key") overlay.setKeying(!on);
-  else if (id === "bent") overlay.setBending(!on);
+  else if (id === "bent" || id === "hazy") overlay.setBending(!on, id);
   else if (id === "erase") overlay.setErasing(!on);
 }
 
@@ -252,6 +262,7 @@ export function marksSummary(marks) {
   if (marks.key?.length)
     parts.push(marks.key.length === 1 ? "1 key line" : `${marks.key.length} key lines`);
   if (marks.bent?.length) parts.push("a part that may be bent");
+  if (marks.hazy?.length) parts.push("far land hidden in part");
   return parts.join(" · ");
 }
 
@@ -270,6 +281,8 @@ export function toolHint(overlay) {
     return "Click a skyline line with only sky above it, no land rising over it · the same again takes it back";
   if (overlay.keying)
     return "Click a skyline line that matters most, three at most · the same again takes it back";
+  if (overlay.bending && overlay.brushKind === "hazy")
+    return "Brush over the part where far land may be hidden · a click on a brushed part takes it away";
   if (overlay.bending)
     return "Brush over the part of the picture that may be bent · a click on a brushed part takes it away";
   if (overlay.tracing) {

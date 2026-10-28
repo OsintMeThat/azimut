@@ -430,7 +430,7 @@ const zonesKey = (zones) =>
 const areasKey = (areas) => (areas ?? []).map((one) => (one ?? []).map(corner));
 const strokesKey = (strokes) => (strokes ?? []).map((one) => [(one.path ?? []).map(corner), one.radius, one.out !== false]);
 const marksKey = (m) => {
-  const said = [m?.inner, m?.pairs, m?.cuts, m?.sea, m?.clear, m?.key].map((one) => one ?? []);
+  const said = [m?.inner, m?.pairs, m?.cuts, m?.sea, m?.clear, m?.key, m?.bent, m?.hazy].map((one) => one ?? []);
   return said.some((one) => one.length) ? JSON.stringify(said) : '';
 };
 

@@ -109,6 +109,13 @@ AUTO_FAR = 50_000.0
 AUTO_CUTS = (5_000.0, 10_000.0, 20_000.0)
 # A reach given is searched out to this many times as far too, within Auto's farthest.
 REACH_PAST = 2.0
+# With a reach given, a line with only sky above is read as far as the band said for it reaches, these many times
+# its far end, never short of the reach nor past REACH_PAST times it; a line said nothing of, to REACH_PAST times the
+# reach, as the trace is searched. Measured on the owner's real cases (FIND_FIX_HANDOVER item 2, each truth against
+# the 100 best places its Quick search found): read to the reach alone, v27's Sky-only lines could not lie on their
+# own mountain 12–14 km out (reach 10 km). Read so, v27 100th → 1st, v08 45th → 7th, v01 2nd → 1st, v21 56th → 45th,
+# v22 99th → 85th, v18 60th → 51st; v09 15th → 16th. With the band's third of slack, v29 fell 46th → 67th.
+SKY_SLACK = 1.0
 # A cell is filled in at this share of the distance to the ridges its point's best fit lies on, the
 # nearest first, and the filling-in adds at most this many times the grid's points.
 NEAR_SHARE = 0.1
@@ -313,6 +320,13 @@ def unmarked(trace: Trace) -> Trace:
     if marks is None or not (marks.far or marks.clear or marks.pairs or marks.key):
         return trace
     return replace(trace, marks=replace(marks, far=(), clear=(), pairs=(), key=()))
+
+
+def sky_reaches(marks: skymatch.Marks, reach: float) -> dict[int, float]:
+    """How far each line with only sky above is read, metres, a reach being given (`SKY_SLACK`)."""
+    said = {int(stroke): float(farthest) * SKY_SLACK for stroke, _, farthest in marks.far}
+    most = REACH_PAST * reach
+    return {int(stroke): min(most, max(reach, said[int(stroke)])) if int(stroke) in said else most for stroke in marks.clear}
 
 
 def said_nearest(far: Sequence[Sequence[float]] | None) -> float | None:
@@ -1187,14 +1201,17 @@ def score_point(
                 altitude = observer.altitude(float(sampler.heights(lat, lon, terrain.MAX_ZOOM)))
                 marks = _at_sea(marks, altitude)
                 reach = max(far, SEA_FAR * skymatch.BAND_SLACK * sea_horizon(altitude))
-            # a line said to have only sky above is read as far as the analyst says the photo sees, past
-            # where the trace is searched if need be: a range there would have shown over it. Left to Auto,
-            # it is read on as far as land standing over it may still count (skymatch.CLEAR_FAR times as far
-            # as the farthest line may stand), however near the lines are said to stand
-            sees = plan.reach if marks is not None and marks.clear and plan.reach else None
-            on = min(AUTO_FAR, skymatch.CLEAR_FAR * reach) if marks is not None and marks.clear and not sees else None
-            read = max(reach, sees) if sees is not None else max(reach, on) if on is not None else reach
-            extra = [reach] if read > reach else [sees] if sees is not None and sees < reach and sees not in cuts else []
+            # a line said to have only sky above is read as far as the photo may see over it, past where the trace
+            # is searched if need be: a range there would have shown over it. With a reach given, each line as far
+            # as its own said distance reaches (`sky_reaches`), on the top of the land that far; left to Auto, as far
+            # as land standing over it may still count (skymatch.CLEAR_FAR times as far as the farthest line may
+            # stand), however near the lines are said to stand
+            limits = sky_reaches(marks, plan.reach) if marks is not None and marks.clear and plan.reach else {}
+            wanted = sorted(set(limits.values()))
+            on = min(AUTO_FAR, skymatch.CLEAR_FAR * reach) if marks is not None and marks.clear and not wanted else None
+            read = max(reach, wanted[-1]) if wanted else max(reach, on) if on is not None else reach
+            extra = [reach] if read > reach else []
+            extra += [v for v in wanted if v < read and v not in cuts and v not in extra]
             # a turn swept by an earlier search over the same ground is read back (engine/turncache.py)
             swept = turncache.swept(
                 observer, azimuths=columns[marching], far=read, cuts=[*cuts, *extra], sampler=sampler,
@@ -1214,20 +1231,22 @@ def score_point(
         ]
         full = skymatch.Turn(0.0, step, whole(swept.skyline), reach=read, distance=whole(swept.skyline_distance))
         turns = rows[:len(cuts)]
+        by_cut = dict(zip([*cuts, *extra], rows))
         clear = None
         beyond: list[skymatch.Turn] = []
         if read > reach:
-            # the trace is searched out to the reach, its lines with only sky above read on to the full sweep:
-            # in full as far as the analyst says the photo sees, else as Auto reads them (skymatch._over)
-            turns.append(replace(rows[-1], reach=reach))
-            if sees is not None:
-                clear = full
-            else:
+            # the trace is searched out to the reach, its lines with only sky above read on past it: each as far as
+            # it is read, else as Auto reads them (skymatch._over)
+            turns.append(replace(by_cut[reach], reach=reach))
+            if not wanted:
                 beyond.append(full)
         else:
             turns.append(full)
-            if sees is not None:
-                clear = rows[-1] if extra else next((t for t, cut in zip(turns, cuts) if cut == sees), full)
+        if wanted:
+            clear = skymatch.Stack(
+                tuple(full if v >= read else by_cut[v] for v in wanted),
+                tuple((stroke, wanted.index(v)) for stroke, v in limits.items()),
+            )
         ridges = None
         if trace.marks is not None and trace.marks.ridge_x.size:
             ridges = skymatch.Ridges.of(
@@ -1264,6 +1283,8 @@ def score_point(
                 best["pairs"] = list(fit.pairs)
             if fit.pieces is not None:
                 best["pieces"] = skymatch.pieces_of(fit, trace.projection)
+            if fit.scale != 1.0:
+                best["scale"] = fit.scale
             if fit.over is not None:
                 best["over"] = round(fit.over, 4)
             if fit.over_far is not None:

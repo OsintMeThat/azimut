@@ -729,6 +729,12 @@ describe('a fit searched over the whole turn', () => {
     });
     expect(whole[0].reach).toBeNull();
     expect(whole[0].gap.median).toBeGreaterThan(0.5);
+    // a strip the search read at another height scale keeps it, and its camera is not refined at 1:1 here
+    const strip = { fits: [{ ...found.fits[0], scale: 0.8 }] };
+    const [scaled] = searchedPlaces(strip, samples, { ...TRUE, heading: 200, roll: 0 }, along, { lens: false });
+    expect(scaled.scale).toBe(0.8);
+    expect(scaled.camera.heading).toBe(95.4);
+    expect(place.scale).toBeUndefined();
   });
 
   it('brings each place the search found onto the trace', () => {
@@ -903,6 +909,29 @@ describe('the marks beside the trace, as the search reads them', () => {
     expect(markedPlane(samples, FRAME, marks, null, () => false).bent).toBeUndefined();
     // brushed where no line runs, nothing is sent
     expect(markedPlane(samples, FRAME, { ...marks, bent: [{ path: [{ u: 0, v: 0.95 }], r: 0.01 }] }).bent).toBeUndefined();
+  });
+
+  it('sends a skyline point brushed where far land may be hidden with the inner edges, its line kept', () => {
+    const samples = [
+      { x: 100, y: 150, stroke: 0 },
+      { x: 700, y: 140, stroke: 0 },
+      { x: 750, y: 180, stroke: 1 },
+    ];
+    const zone = { path: [{ u: 700 / FRAME.width, v: 140 / FRAME.height }], r: 0.1 };
+    const marks = { lines: [5, 9], inner: [], pairs: [], cuts: [], far: [{ line: 5, bands: ['b1'] }], sea: [], clear: [], key: [], hazy: [zone] };
+    const plane = markedPlane(samples, FRAME, marks);
+    // the first stroke's far end and the second line's point lie in the brushed part: they go with the ridges
+    expect(plane.x).toHaveLength(1);
+    expect(plane.ridge_x).toHaveLength(2);
+    expect(plane.line).toEqual([0]);
+    expect(plane.ridge_line).toEqual([0, 1]);
+    // a sea line stays one, brushed or not
+    const sea = markedPlane(samples, FRAME, { ...marks, sea: [5] });
+    expect(sea.x).toHaveLength(2);
+    expect(sea.ridge_x).toHaveLength(1);
+    // told by the caller, its own reading stands; nothing brushed, nothing moves
+    expect(markedPlane(samples, FRAME, marks, null, null, () => false).ridge_x).toHaveLength(0);
+    expect(markedPlane(samples, FRAME, { ...marks, hazy: [] }).x).toHaveLength(3);
   });
 });
 
