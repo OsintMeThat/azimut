@@ -201,7 +201,7 @@
   aria-label="Photo over the view"
 >
   {@render handButton('photo')}
-  <div class="zone fade" class:dim={overlay.blink}>
+  <div class="zone fade" class:dim={overlay.blink} data-guide="horizon.overlay">
     <!-- the two ends say which way the slider goes, and a press goes all the way there -->
     <button
       type="button"
@@ -256,7 +256,7 @@
 
   <span class="divider" aria-hidden="true"></span>
 
-  <div class="zone tools">
+  <div class="zone tools" data-guide="horizon.trace">
     <button
       type="button"
       class="act"

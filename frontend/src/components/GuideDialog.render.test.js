@@ -63,7 +63,7 @@ describe('the guide over a tool', () => {
     expect(lit).toHaveLength(1);
     expect(document.querySelector('.veil').classList.contains('on')).toBe(true);
     expect(document.querySelector('.shot .name').textContent).toBe(PAGES.media.marks[3].title);
-    expect(pins().map((pin) => pin.classList.contains('dim'))).toEqual([true, true, true, false, true]);
+    expect(pins().map((pin) => pin.classList.contains('dim'))).toEqual(PAGES.media.marks.map((_, i) => i !== 3));
     hover(lines()[3], false);
     expect(frames().some((frame) => frame.classList.contains('on'))).toBe(false);
     expect(document.querySelector('.shot .name')).toBeNull();
@@ -98,10 +98,11 @@ describe('a number that leads somewhere', () => {
   it('shows the screen its control opens, with the way back', async () => {
     await open('media');
     const leads = pins().filter((pin) => pin.classList.contains('leads'));
-    expect(leads).toHaveLength(1);
-    press(leads[0]);
+    expect(leads).toHaveLength(PAGES.media.marks.filter((mark) => mark.opens).length);
+    const at = PAGES.media.marks.findIndex((mark) => mark.title === 'Open in…');
+    press(pins()[at]);
     expect(document.querySelector('.trail').textContent).toContain('Open in…');
-    expect(document.querySelector('.lead').textContent).toBe(PAGES.media.marks[4].opens.lead);
+    expect(document.querySelector('.lead').textContent).toBe(PAGES.media.marks[at].opens.lead);
     expect(lines()).toHaveLength(1);
     press(document.querySelector('.trail button'));
     expect(document.querySelector('.trail')).toBeNull();
@@ -160,6 +161,15 @@ describe('a journey', () => {
     expect(document.querySelector('.shot img')).not.toBeNull();
     expect(lines()).toHaveLength(0);
     expect(next().disabled).toBe(true);
+  });
+
+  it('names a step for what it does when every step happens in one tool', async () => {
+    const build = JOURNEYS.find((journey) => journey.id === 'create-an-analyzer');
+    await open(`journey:${build.id}`);
+    expect([...document.querySelectorAll('.steps .step:not(.result)')].map((b) => b.textContent.replace(/^\d+/, '').trim())).toEqual(
+      build.steps.map((step) => step.label)
+    );
+    expect(document.querySelector('.go').textContent).toContain('Detect');
   });
 
   it('is reached from a tool at the step it is used at', async () => {

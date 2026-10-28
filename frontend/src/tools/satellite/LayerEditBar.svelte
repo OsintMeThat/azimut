@@ -223,7 +223,7 @@
 
 <div class="edit-dock" bind:this={dock} class:vertical class:two={vertical && rows > 0} class:wrapped={!vertical && wrap > 0} class:placed={!!box} class:held={!!held}
   style:left={box ? `${box.left}px` : null} style:top={box ? `${box.top}px` : null} style:--rows={rows || null} style:--wrap={wrap ? `${wrap}px` : null}>
-  <div class="edit-bar" role="toolbar" aria-label="Layer tools" aria-orientation={vertical ? 'vertical' : 'horizontal'}
+  <div class="edit-bar" data-guide="layer.tools" role="toolbar" aria-label="Layer tools" aria-orientation={vertical ? 'vertical' : 'horizontal'}
     bind:this={barEl} bind:offsetWidth={width} bind:offsetHeight={height}>
     <button type="button" class="grip" aria-label="Move the tool bar" title="Drag to move it. Double-click puts it back."
       onpointerdown={grab} ondblclick={() => settle({ ...DEFAULT_PLACE })} onkeydown={nudge}><Icon name="grip" size={14} stroke={2.5} /></button>

@@ -260,7 +260,7 @@
         aria-label="Playback speed"
         title={INSPECT_HELP.speed}
       >{speedLabel(rate)}</button>
-      <span class="loop-ctl" role="group" aria-label="Loop">
+      <span class="loop-ctl" role="group" aria-label="Loop" data-guide="inspect.loop">
         <button class="player-btn ab" class:on={loop.a != null} onclick={() => (loop = setLoopEnd(loop, 'a', shown))} title={INSPECT_HELP.loopA}>A</button>
         <button class="player-btn ab" class:on={loop.b != null} onclick={() => (loop = setLoopEnd(loop, 'b', shown + frameDuration(fps)))} title={INSPECT_HELP.loopB}>B</button>
         {#if loop.a != null || loop.b != null}

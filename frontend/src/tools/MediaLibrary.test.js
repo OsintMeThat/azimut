@@ -256,7 +256,7 @@ describe('Media Library browse controls', () => {
   });
 
   it('offers grids plus a plain, sortable details list', () => {
-    expect(source).toContain("let view = $state('large')");
+    expect(source).toContain("let view = $state(loadViewMode('media', 'large'))");
     expect(source).toContain("{ id: 'small', label: 'Small'");
     expect(source).toContain("{ id: 'large', label: 'Large'");
     expect(source).toContain("{ id: 'list', label: 'List'");

@@ -65,11 +65,15 @@
   import { createPagedList } from '../lib/pagedList.svelte.js';
   import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import { onBackForward, settlePlace } from '../lib/backButton.js';
+  import { anyOverlayOpen } from '../lib/overlayStack.js';
+  import { spaceTarget, viewerItem } from '../lib/fileViewer.js';
+  import { loadViewMode, saveViewMode } from '../lib/viewMode.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
+  import MediaViewer from '../components/MediaViewer.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
   import PasteDialog from '../components/PasteDialog.svelte';
   import SourceDialog from '../components/SourceDialog.svelte';
@@ -437,11 +441,12 @@
     query;
     selected = [];
     anchor = null;
+    viewingId = null;
   });
 
   // What is open or alone-selected here is what the topbar's Add event seats.
   $effect(() => {
-    const id = infoEntityId ?? (selected.length === 1 ? selected[0] : null);
+    const id = viewing ?? infoEntityId ?? (selected.length === 1 ? selected[0] : null);
     offerNote('files', curEntities.find((e) => e.id === id) ?? null);
   });
   onDestroy(() => withdrawNote('files'));
@@ -453,8 +458,19 @@
   }
 
   function onFilesKeydown(event) {
+    if (viewing) return; // the viewer hears its own keys
     if (event.key === 'Escape' && ctx) {
       ctx = null;
+      return;
+    }
+    if (event.key === ' ' && uiState.tool === 'files' && !event.repeat && !renaming && !anyOverlayOpen()) {
+      const target = event.target;
+      if (target instanceof Element && target.closest('button, a, input, textarea, select, [contenteditable]')) return;
+      const id = spaceTarget(selected, anchor);
+      if (id && viewerItems.some((item) => item.key === id)) {
+        event.preventDefault();
+        viewingId = id;
+      }
       return;
     }
     if (event.key === 'F2' && uiState.tool === 'files' && selected.length === 1 && !renaming) {
@@ -838,6 +854,10 @@
     e?.type === 'capture' && Number.isFinite(Number(e.attrs?.lat)) && Number.isFinite(Number(e.attrs?.lon));
 
   function openEntityTile(entity) {
+    if (viewerItems.some((item) => item.key === entity.id)) {
+      viewingId = entity.id;
+      return;
+    }
     if (entity.type === 'note') {
       openNotebook(entity.id);
       return;
@@ -1027,8 +1047,30 @@
     else infoEntityId = null;
   }
 
-  // View mode: small/large icon grids, plus a details list with columns.
-  let view = $state('small');
+  // View mode: small/large icon grids, plus a details list with columns. The
+  // choice is remembered (lib/viewMode.js).
+  let view = $state(loadViewMode('files', 'small'));
+  function setView(next) {
+    view = next;
+    saveViewMode('files', next);
+  }
+
+  // ── viewer ───────────────────────────────────────────────────────────────────
+  // A double press or Space opens a picture, video or sound full screen, and ←/→
+  // walk the ones on screen (components/MediaViewer.svelte). The selection follows,
+  // so the file last seen is the one picked once the viewer closes.
+  let viewingId = $state(null);
+  const viewerItems = $derived(
+    (showTrash ? [] : curEntities).map((e) => viewerItem(e, tileThumb(e))).filter(Boolean),
+  );
+  // A file that left the view (moved, deleted) closes the viewer rather than
+  // holding the keys for a viewer nobody sees.
+  const viewing = $derived(viewingId && viewerItems.some((item) => item.key === viewingId) ? viewingId : null);
+  function viewFile(id) {
+    viewingId = id;
+    selected = [id];
+    anchor = id;
+  }
   const dense = $derived(view === 'small');
   const VIEWS = [
     { id: 'small', label: 'Small', icon: 'grid' },
@@ -1143,7 +1185,7 @@
             class:active={view === v.id}
             title={`${v.label} view`}
             aria-pressed={view === v.id}
-            onclick={() => (view = v.id)}
+            onclick={() => setView(v.id)}
           >
             <Icon name={v.icon} size={14} /> {v.label}
           </button>
@@ -1857,6 +1899,14 @@
     onclose={() => (pasted = null)}
   />
 {/if}
+
+<MediaViewer
+  caseId={caseState.current?.id}
+  items={viewerItems}
+  current={viewing}
+  onmove={viewFile}
+  onclose={() => (viewingId = null)}
+/>
 
 <!-- details editor: the shared body, same as the sidebar and Media modal -->
 {#if infoEntityId}

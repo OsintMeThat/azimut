@@ -6387,7 +6387,7 @@
             <div class="point-hint">Order decides the conclusion.</div>
           {/if}
         </div>
-        <div class="meta-field">
+        <div class="meta-field" data-guide="proof.meta">
           <div class="meta-head">
             <Icon name="link" size={13} />
             <span>Source</span>
@@ -6464,7 +6464,7 @@
         <!-- One sentence about what the proof shows. It is the proof's notes, so
              the graph shows it and case search finds it, and it is what a post is
              written from instead of a filename. -->
-        <div class="meta-field">
+        <div class="meta-field" data-guide="proof.meta">
           <div class="meta-head">
             <Icon name="note" size={13} />
             <span>Description</span>
@@ -6484,7 +6484,7 @@
              day it was filed — the case already holds both of those, read off the
              file. This is the analyst's answer, and it is what the Timeline shows
              the proof at. Nothing of it reaches the plate. -->
-        <div class="meta-field">
+        <div class="meta-field" data-guide="proof.meta">
           <div class="meta-head">
             <Icon name="clock" size={13} />
             <span>Date</span>

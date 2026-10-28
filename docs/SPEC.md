@@ -219,7 +219,7 @@ proof for publication.
 | ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence. |
 | ✅ **Capture extension** | Adds case map tools to third-party maps, hands media to publishing and reverse search sites, and supports extension updates. |
 | ✅ **Home, Guide & tasks** | Opens recent case work and named task lists from Home, with contextual guidance for each tool. |
-| ✅ **Pictured guide** | Opens over any tool from the `?`: every tool photographed and numbered, numbers that open the next screen, a geolocation walked to its published thread, pictures remade by `npm run guide:shots`, and a welcome at each new version pointing at the `?`. |
+| ✅ **Pictured guide** | Opens over any tool from the `?`: every tool photographed and numbered, numbers that open the next screen, a geolocation walked to its published thread and an analyzer built and proved, pictures remade by `npm run guide:shots`, and a welcome at each new version pointing at the `?`. |
 | ✅ **Inspect, Collage & Reverse Search** | Autosaves work per file, arranges extracted frames into collages and sends original or cropped pictures to reverse search. |
 | ✅ **Collage: straighten** | A line drawn along something level bends the whole collage flat as one picture, seams kept; Find then reads it as one. |
 | ✅ **Inspect player & panel** | Captures the very frame on screen, lays frames, marks, shots and sound along the bar, and keeps Capture and Save above Info, Adjust, Moments and Analyze tabs. |
@@ -227,7 +227,7 @@ proof for publication.
 | ✅ **Dates & Timeline** | Shares date entry and clock selection, draws temporal precision explicitly and adds cited events from any tool. |
 | ✅ **Subjects & case analysis** | Corrects and merges subjects, indexes their events, searches across scripts and reviews proposed account and site connections. |
 | ✅ **Geolocation worklists** | Opens recent sheets, tracks imported files awaiting a proof and indexes every proof point with its date, source and coordinates. |
-| ✅ **Files & navigation** | Files work into the active folder, files a Media Library card dragged onto a sidebar folder, offers contextual actions and filters, and retraces tools and documents with guarded Back and Forward. |
+| ✅ **Files & navigation** | Files work into the active folder, files a Media Library card dragged onto a sidebar folder, offers contextual actions and filters, opens pictures, videos and sounds in one full-screen viewer, keeps each tool's view, and retraces tools and documents with guarded Back and Forward. |
 | ✅ **Command palette** | Ctrl+K or ⌘K searches tools, cases and current-case documents, starts with recently added items and protects unsaved work. |
 | ✅ **Shared analyzers & areas** | Exports an analyzer of your own as a file, checks included or left behind, and an area or a group as the ground it is, names, colours and folder kept. Imports either without overwriting what is here, so the work travels without the settings backup and its keys. |
 | ✅ **Copernicus layers & figures** | Writes composite, index and script layers with a preview on the map, offers them in every map tab, reads an index or single-band layer as a Detect rule, draws a rule back as a layer and moves its line live on the last test's readings, and lays several renderings of one pass out as a captioned figure. |

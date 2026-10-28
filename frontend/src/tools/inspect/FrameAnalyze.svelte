@@ -27,7 +27,7 @@
   }
 </script>
 
-<div class="module">
+<div class="module" data-guide="inspect.analyze">
   <div class="block">
     <span class="head">Readings</span>
     <div class="runs">

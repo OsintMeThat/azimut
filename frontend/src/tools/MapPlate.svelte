@@ -1686,7 +1686,7 @@
       {#if plate.template?.from === 'settings'}
         <BackButton label="Settings" title="Back to the templates in Settings" onclick={leaveTemplate} />
       {:else}
-        <BackButton label="Plates" title="Back to the plates" onclick={close} />
+        <BackButton label="Plates" title="Back to the plates" onclick={close} guide="plate.home" />
       {/if}
       {#if plate.template}<span class="kind">Template</span>{/if}
       <input class="input title-input" bind:value={titleField} onblur={commitTitle} maxlength="200"
@@ -1855,7 +1855,7 @@
           </div>
         {/if}
         <h4>Ready plates</h4>
-        <div class="tiles">
+        <div class="tiles" data-guide="plate.ready">
           {#each GALLERY as entry (entry.id)}
             <div class="tile template">
               <button type="button" class="open" onclick={() => makePlate({ from: { kind: 'ready', id: entry.id }, where: 'map', layers: mapLayers(), format: '', look: '' })}

@@ -50,7 +50,7 @@ const CLIP = 'main.canvas .canvas-body';
 /** Room kept round the frames when a picture is cut down to them, in CSS pixels. */
 const MARGIN = 28;
 /** Anchors that frame a group of controls rather than the first one found. */
-const UNION = new Set(['start.stages', 'start.tabs', 'notebook.insert', 'compare.session', 'proof.save']);
+const UNION = new Set(['start.stages', 'start.tabs', 'notebook.insert', 'compare.session', 'proof.save', 'proof.meta', 'inspect.file', 'horizon.views']);
 
 const say = (line) => process.stdout.write(`  ${line}\n`);
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -248,13 +248,16 @@ async function run() {
     for (const name of staged) if (!shots.has(name)) failed.push(`${name} is staged but the guide shows no such picture`);
     if (failed.length) throw new Error(failed.join('\n'));
 
-    // a picture taken from another needs that one staged first
+    // a picture taken from another needs that one staged first, and that one its own:
+    // read last to first, a chain is followed back to its start in one pass
     const take = new Set(wanted.length ? wanted : staged);
-    for (const stage of STAGES) if (take.has(stage.shot) && stage.from) take.add(stage.from);
+    for (const stage of [...STAGES].reverse()) if (take.has(stage.shot) && stage.from) take.add(stage.from);
 
+    // WebGL on the GPU for Horizon's 3D; 2D canvases in software, since a 2D canvas read
+    // back under Vulkan comes out empty, and a proof saved from it is a blank picture
     browser = await chromium.launch({
       channel: 'chromium',
-      args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu'],
+      args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--disable-accelerated-2d-canvas'],
     });
     const demo = await buildDemo({ call, scratch });
     say(`demo case filed: ${demo.caseId}`);
@@ -353,8 +356,9 @@ async function run() {
 
     // a full run leaves no picture the guide no longer shows
     if (!wanted.length && !failed.length) {
+      // a hidden entry is an editor's or a system's, never a picture
       for (const file of readdirSync(OUT)) {
-        if (!shots.has(file.replace(/\.(webp|json)$/, ''))) unlinkSync(join(OUT, file));
+        if (!file.startsWith('.') && !shots.has(file.replace(/\.(webp|json)$/, ''))) unlinkSync(join(OUT, file));
       }
     }
   } finally {

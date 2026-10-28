@@ -87,7 +87,7 @@
   }
 </script>
 
-<div class="measure-panel card" class:folded>
+<div class="measure-panel card" class:folded data-guide="map.measure">
   <header>
     <span class="title"><Icon name="ruler" size={13} /> Measure</span>
     <div class="segments units" role="group" aria-label="Units">

@@ -9,7 +9,7 @@
   const personal = $derived(rows.filter((row) => row.editable));
 </script>
 
-<section class="my-layers" aria-label="My layers">
+<section class="my-layers" aria-label="My layers" data-guide="sat.mylayers">
   {#if controller.editor}
     <LayerEditor {controller} {ondone} {onfly} {ondeleteplace} />
   {:else}

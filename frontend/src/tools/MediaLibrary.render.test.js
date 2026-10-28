@@ -414,3 +414,36 @@ describe('dragging a file out, and files in', () => {
     expect(overlay()).toBeNull();
   });
 });
+
+describe('opening a file from its card', () => {
+  const thumb = (path) => target.querySelector(`.media-card[data-path="${path}"] .thumb`);
+  const viewer = () => document.querySelector('.viewer');
+
+  beforeEach(() => localStorage.clear());
+
+  it('opens a video full screen on one press, as a picture does', async () => {
+    await open();
+    await press(thumb('media/clip.mp4'));
+    expect(viewer().querySelector('video').getAttribute('src')).toContain('media/clip.mp4');
+    await key('ArrowLeft');
+    expect(viewer().querySelector('img').getAttribute('src')).toContain('media/quai.jpg');
+    await key('Escape');
+    expect(viewer()).toBeNull();
+  });
+
+  it('retries a failed thumbnail without opening the file under it', async () => {
+    await open();
+    await press(thumb('media/clip.mp4').querySelector('.thumb-retry'));
+    expect(viewer()).toBeNull();
+  });
+
+  it('opens again on the view it was left on', async () => {
+    await open();
+    await press([...target.querySelectorAll('.view-btn')].find((b) => b.textContent.includes('List')));
+    unmount(live);
+    target.remove();
+    await open();
+    const active = target.querySelector('.view-btn.active');
+    expect(active.textContent).toContain('List');
+  });
+});

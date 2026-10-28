@@ -27,6 +27,8 @@
   import { revealMediaFolder } from '../lib/reveal.js';
   import { thisBrowser } from '../lib/thisBrowser.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
+  import { loadViewMode, saveViewMode } from '../lib/viewMode.js';
+  import { VIEWABLE_KINDS } from '../lib/fileViewer.js';
   import Icon from '../components/Icon.svelte';
   import PasteDialog from '../components/PasteDialog.svelte';
   import SourceDialog from '../components/SourceDialog.svelte';
@@ -34,6 +36,7 @@
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
+  import MediaViewer from '../components/MediaViewer.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
 
@@ -249,7 +252,7 @@
   // The map is where a claimed position gets judged, and enrichment's proposed
   // place is already waiting there as a mark.
   function showOnMap(item, event) {
-    event?.stopPropagation(); // the thumbnail behind this opens the lightbox
+    event?.stopPropagation(); // the thumbnail behind this opens the viewer
     const point = mediaPoint(item);
     if (point) gotoPoint(point.lat, point.lon);
   }
@@ -267,8 +270,13 @@
   }
 
   // The current card layout is the large view. Small is a denser grid and List
-  // uses the Files-style details table while the grids keep their cards.
-  let view = $state('large');
+  // uses the Files-style details table while the grids keep their cards. The
+  // choice is remembered (lib/viewMode.js).
+  let view = $state(loadViewMode('media', 'large'));
+  function setView(next) {
+    view = next;
+    saveViewMode('media', next);
+  }
   const VIEWS = [
     { id: 'small', label: 'Small', icon: 'grid' },
     { id: 'large', label: 'Large', icon: 'image' },
@@ -289,9 +297,9 @@
 
   let infoItem = $state(null); // the media row behind the details modal, for Export
   // What is open here is what the topbar's Add event seats: the picture in the
-  // lightbox, else the file whose Details are open.
+  // viewer, else the file whose Details are open.
   $effect(() => {
-    const row = lightboxItem?.entity_id ? lightboxItem : infoEntityId && infoItem ? infoItem : null;
+    const row = viewedItem?.entity_id ? viewedItem : infoEntityId && infoItem ? infoItem : null;
     const id = row === infoItem ? infoEntityId : row?.entity_id;
     offerNote(
       'media',
@@ -306,31 +314,32 @@
   let exportPicker = $state(false);
   let exportBusy = $state(false);
 
-  // --- lightbox (←/→ flips through the filtered images) ---
-  let lightboxItem = $state(null);
-  const lightboxImages = $derived(filteredItems.filter((i) => i.kind === 'image'));
+  // --- viewer: a press on a picture, video or sound opens it full screen, and
+  // ←/→ walk the filtered list (components/MediaViewer.svelte) ---
+  const viewable = (item) => VIEWABLE_KINDS.has(item.kind);
+  let viewedPath = $state(null);
+  const viewedItem = $derived(viewedPath ? (filteredItems.find((i) => i.path === viewedPath) ?? null) : null);
+  const viewerItems = $derived(
+    filteredItems.filter(viewable).map((i) => ({
+      key: i.path,
+      path: i.path,
+      kind: i.kind,
+      name: i.title ?? i.filename,
+      poster: i.thumb_state === 'ready' ? i.thumbnail : null,
+    })),
+  );
 
-  function lightboxStep(delta) {
-    if (!lightboxItem || !lightboxImages.length) return;
-    const idx = lightboxImages.findIndex((i) => i.path === lightboxItem.path);
-    const next = ((idx < 0 ? 0 : idx) + delta + lightboxImages.length) % lightboxImages.length;
-    lightboxItem = lightboxImages[next];
+  function openViewer(item) {
+    if (viewable(item)) viewedPath = item.path;
   }
 
-  // One handler for the tool's overlays: the lightbox owns the arrows, the two
-  // menus only need the Escape, and they read first because they are the ones
-  // that can be open while the lightbox is not.
+  // The two menus only need the Escape; the viewer hears its own keys.
   function onMediaKey(e) {
     if (uiState.tool !== 'media') return;
     if (e.key === 'Escape' && (upkeepOpen || openIn)) {
       upkeepOpen = false;
       openIn = null;
-      return;
     }
-    if (!lightboxItem) return;
-    if (e.key === 'Escape') lightboxItem = null;
-    else if (e.key === 'ArrowLeft') lightboxStep(-1);
-    else if (e.key === 'ArrowRight') lightboxStep(1);
   }
 
   // --- focus/highlight (a media clicked from the case sidebar) ---
@@ -951,7 +960,7 @@
       <Icon name="upload" size={15} /> Import
     </button>
     <!-- The pictures and videos brought in here, as the sheet they are worked down in. -->
-    <button class="btn" onclick={openWorklist} disabled={!items.length || worklistBusy}
+    <button class="btn" data-guide="media.worklist" onclick={openWorklist} disabled={!items.length || worklistBusy}
             title="Open as a worklist sheet">
       <Icon name="table" size={15} /> Worklist
     </button>
@@ -1022,14 +1031,14 @@
           <option value={s.id}>{s.label}</option>
         {/each}
       </select>
-      <div class="view-switch" role="group" aria-label="View">
+      <div class="view-switch" role="group" aria-label="View" data-guide="media.views">
         {#each VIEWS as v (v.id)}
           <button
             class="view-btn"
             class:active={view === v.id}
             title={`${v.label} view`}
             aria-pressed={view === v.id}
-            onclick={() => (view = v.id)}
+            onclick={() => setView(v.id)}
           >
             <Icon name={v.icon} size={14} /> {v.label}
           </button>
@@ -1185,16 +1194,16 @@
               ondragstart={(e) => onItemDragStart(e, item)}
               ondragend={() => (draggingPath = null)}
             >
-              <!-- The preview remains an image-only control; the row itself is not a card. -->
+              <!-- The preview opens what can be shown; the row itself is not a card. -->
               <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
               <div
                 class="list-preview"
-                class:clickable={item.kind === 'image'}
-                onclick={() => item.kind === 'image' && (lightboxItem = item)}
-                role={item.kind === 'image' ? 'button' : undefined}
-                tabindex={item.kind === 'image' ? 0 : undefined}
-                onkeydown={(e) => e.key === 'Enter' && item.kind === 'image' && (lightboxItem = item)}
-                aria-label={item.kind === 'image' ? `Preview ${item.filename}` : undefined}
+                class:clickable={viewable(item)}
+                onclick={() => openViewer(item)}
+                role={viewable(item) ? 'button' : undefined}
+                tabindex={viewable(item) ? 0 : undefined}
+                onkeydown={(e) => e.key === 'Enter' && openViewer(item)}
+                aria-label={viewable(item) ? `Open ${item.filename}` : undefined}
               >
                 {#if item.thumbnail && item.thumb_state === 'ready' && !brokenThumbs.has(mediaKey(item))}
                   <img
@@ -1210,7 +1219,10 @@
                   <button
                     class="thumb-status thumb-retry"
                     title="Retry thumbnail"
-                    onclick={() => regenerateThumbs(item.path)}
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      regenerateThumbs(item.path);
+                    }}
                   >
                     <Icon name="reset" size={16} />
                   </button>
@@ -1282,17 +1294,17 @@
             ondragstart={(e) => onItemDragStart(e, item)}
             ondragend={() => (draggingPath = null)}
           >
-            <!-- thumbnail — click to lightbox for images -->
-            <!-- The role and tab stop deliberately exist only for image previews. -->
+            <!-- thumbnail: a press opens a picture, video or sound full screen -->
+            <!-- The role and tab stop exist only for what the viewer can show. -->
             <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
             <div
               class="thumb"
-              class:clickable={item.kind === 'image'}
-              onclick={() => item.kind === 'image' && (lightboxItem = item)}
-              role={item.kind === 'image' ? 'button' : undefined}
-              tabindex={item.kind === 'image' ? 0 : undefined}
-              onkeydown={(e) => e.key === 'Enter' && item.kind === 'image' && (lightboxItem = item)}
-              aria-label={item.kind === 'image' ? `Preview ${item.filename}` : undefined}
+              class:clickable={viewable(item)}
+              onclick={() => openViewer(item)}
+              role={viewable(item) ? 'button' : undefined}
+              tabindex={viewable(item) ? 0 : undefined}
+              onkeydown={(e) => e.key === 'Enter' && openViewer(item)}
+              aria-label={viewable(item) ? `Open ${item.filename}` : undefined}
             >
               {#if item.thumbnail && item.thumb_state === 'ready' && !brokenThumbs.has(mediaKey(item))}
                 <img
@@ -1594,50 +1606,14 @@
   />
 {/if}
 
-<!-- lightbox -->
 <svelte:window onkeydown={onMediaKey} />
-{#if lightboxItem}
-  <div
-    class="lightbox"
-    onclick={(e) => e.target === e.currentTarget && (lightboxItem = null)}
-    onkeydown={(e) => e.key === 'Escape' && (lightboxItem = null)}
-    role="dialog"
-    aria-label="Image preview"
-    tabindex="-1"
-  >
-    <button class="lb-close btn btn-ghost" onclick={() => (lightboxItem = null)} aria-label="Close" title="Close">
-      <Icon name="x" size={20} />
-    </button>
-    {#if lightboxImages.length > 1}
-      <button
-        class="lb-nav prev btn btn-ghost"
-        onclick={(e) => (e.stopPropagation(), lightboxStep(-1))}
-        aria-label="Previous image"
-        title="Previous (←)"
-      >
-        <Icon name="chevronLeft" size={26} />
-      </button>
-      <button
-        class="lb-nav next btn btn-ghost"
-        onclick={(e) => (e.stopPropagation(), lightboxStep(1))}
-        aria-label="Next image"
-        title="Next (→)"
-      >
-        <Icon name="chevronRight" size={26} />
-      </button>
-    {/if}
-    <img
-      src={fileUrl(caseState.current.id, lightboxItem.path)}
-      alt={lightboxItem.filename}
-    />
-    <span class="lb-caption">
-      {lightboxItem.title ?? lightboxItem.filename}
-      {#if lightboxImages.length > 1}
-        · {lightboxImages.findIndex((i) => i.path === lightboxItem.path) + 1}/{lightboxImages.length}
-      {/if}
-    </span>
-  </div>
-{/if}
+<MediaViewer
+  caseId={caseState.current?.id}
+  items={viewerItems}
+  current={viewedPath}
+  onmove={(path) => (viewedPath = path)}
+  onclose={() => (viewedPath = null)}
+/>
 
 <!-- delete confirm: the file waits in the case trash with the entity -->
 {#if deleteTarget}
@@ -2326,61 +2302,5 @@
   .picker-title {
     flex: 1;
     min-width: 0;
-  }
-
-  /* lightbox */
-  .lightbox {
-    position: fixed;
-    inset: 0;
-    background: rgba(4, 7, 12, 0.92);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    z-index: 950;
-    cursor: zoom-out;
-  }
-  .lightbox img {
-    max-width: calc(100vw - 40px);
-    max-height: calc(100vh - 80px);
-    object-fit: contain;
-    border-radius: var(--r);
-    box-shadow: var(--shadow-2);
-    cursor: default;
-  }
-  .lb-close {
-    position: absolute;
-    top: 14px;
-    right: 14px;
-  }
-  .lb-nav {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    padding: 14px 8px;
-    color: var(--text-1);
-    background: rgba(16, 16, 16, 0.55);
-    border-radius: var(--r-md);
-  }
-  .lb-nav:hover {
-    background: rgba(16, 16, 16, 0.85);
-  }
-  .lb-nav.prev {
-    left: 14px;
-  }
-  .lb-nav.next {
-    right: 14px;
-  }
-  .lb-caption {
-    position: absolute;
-    bottom: 18px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: var(--fs-xs);
-    color: var(--text-2);
-    background: rgba(16, 16, 16, 0.75);
-    padding: 4px 12px;
-    border-radius: var(--r-sm);
-    white-space: nowrap;
   }
 </style>

@@ -43,7 +43,7 @@
   {/each}
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.backup">
   <h3>Settings backup</h3>
   <p class="note">
     Carries settings, keys, templates, your icons and your signature;

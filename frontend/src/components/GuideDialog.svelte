@@ -236,7 +236,7 @@
                 onclick={() => goStep(index)}
               >
                 <span class="num">{index + 1}</span>
-                {toolLabel(one.tool)}
+                {one.label ?? toolLabel(one.tool)}
               </button>
               {#if index < lastStep}<Icon name="chevronRight" size={13} />{/if}
             </li>

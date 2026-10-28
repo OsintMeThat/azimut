@@ -1737,6 +1737,7 @@
         <button
           type="button"
           class="btn btn-sm hz-act"
+          data-guide="horizon.views"
           onclick={saveView}
           disabled={Boolean(saveBlocked) || views.busy || !unsaved}
           title={saveBlocked || (unsaved ? 'Keep this view in the case (Ctrl+S)' : 'Saved')}

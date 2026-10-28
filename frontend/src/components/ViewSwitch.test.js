@@ -13,7 +13,8 @@ describe('the control that says how a screen renders its answer', () => {
     expect(source).toContain('class:active={value === option.id}');
     expect(source).toContain('aria-pressed={value === option.id}');
     for (const drawn of [files, media]) {
-      expect(drawn).toContain('<div class="view-switch" role="group" aria-label="View">');
+      // a guide anchor may ride along, as it does on the shared switch
+      expect(drawn).toMatch(/<div class="view-switch" role="group" aria-label="View"( data-guide="[a-z.]+")?>/);
       expect(drawn).toContain('aria-pressed={view === v.id}');
     }
   });

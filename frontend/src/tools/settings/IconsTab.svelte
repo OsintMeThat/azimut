@@ -125,7 +125,7 @@
   const opened = $derived(menu ? iconLibrary.find(menu.key) : null);
 </script>
 
-<section class="group">
+<section class="group" data-guide="settings.icons-library">
   <h3>Icons</h3>
   <p class="note">
     Your own icons, offered in every layer's palette. A layer keeps a copy of each icon it wears, so removing one here changes no map.

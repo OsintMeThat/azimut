@@ -291,7 +291,7 @@
 
 <svelte:window ondragover={dragOver} ondrop={drop} />
 
-<section class="editor" aria-label="Layer editor" bind:this={root}>
+<section class="editor" aria-label="Layer editor" data-guide="layer.panel" bind:this={root}>
   <header class="editor-head">
     <Icon name="stack" size={13} />
     <input class="title" aria-label="Layer name" title="Rename the layer" bind:value={layerDetails.title} maxlength="200"

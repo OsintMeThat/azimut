@@ -143,7 +143,8 @@ presses *Read the guide* on it, which opens the guide on its start page.
   **Start here** and the **Capture extension** (in tabs of its own: installing it, its
   popup over a map, its tools drawn over a map, and a table of where it works, Street
   View included), then **journeys** (a goal walked across
-  the tools; one for now, a photo geolocated from its import to the published thread),
+  the tools: a photo geolocated from its import to the published thread, and an analyzer
+  of your own built in Detect, from the library to its checks and its save),
   then the **workspaces** with their tools as tabs, then the
   **reference**: every key by where it is pressed, Settings, and what to do when
   something does not work, symptom by symptom.
@@ -1121,7 +1122,7 @@ ontology up front. Every surface says one verb for it, *Add event*.
 
 **Add event from anywhere.** The topbar's **Add event** button (`Alt+N`, never inside
 a field) opens the line over the bottom of whatever tool is on screen, over its own
-Details or lightbox too, with what that tool shows already seated: the file whose
+Details or viewer too, with what that tool shows already seated: the file whose
 Details or picture is open cites itself, and its one confirmed place is where it
 happened; the Board's or the Graph's open entity, the inspected file, the open proof
 or note, the place selected on the map. A place only suggested, or two of them, is
@@ -1586,6 +1587,17 @@ it was pulled from, and a frame's origin is the video it came out of.
 The row action for an image, a video or an audio file opens it; for anything the
 app cannot display it opens the folder the file sits in, so the original is opened
 in whatever program owns it rather than copied into Downloads.
+
+**A press on a card shows the file.** A picture, a video or a sound opens in the
+shared viewer (`components/MediaViewer.svelte`), below the top bar so its Add event
+still reaches the file. ← and → walk the list as it is filtered, and Escape, Space or
+a press beside the file closes it; a pressed video keeps the arrows and Space for its
+own controls. Files opens the same viewer on a double press or on Space over the
+selection, because one press there selects; Details stays on the tile's button and the
+right-click. The selection follows the viewer, so the file last seen is the one picked
+once it closes. A file the browser cannot draw (HEIC, TIFF, a missing codec) says so
+rather than showing a broken picture. Media and Files each keep their Small, Large or
+List view in the browser (`lib/viewMode.js`), the same for every case.
 
 **Open in…** is one button per picture or video, and the tools it can go on to
 sit behind it: Inspect, Reverse Search, and Geo Proof for a picture. Side by side

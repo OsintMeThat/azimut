@@ -151,7 +151,7 @@ describe('a page and its pictures', () => {
   it('ships no picture the guide no longer shows', () => {
     const dir = fileURLToPath(new URL('../assets/guide/', import.meta.url));
     const wanted = new Set(shots.map((one) => one.shot));
-    for (const file of readdirSync(dir)) {
+    for (const file of readdirSync(dir).filter((name) => !name.startsWith('.'))) {
       expect(wanted.has(file.replace(/\.(webp|json)$/, '')), `${file} is no longer shown`).toBe(true);
     }
   });
@@ -194,6 +194,24 @@ describe('journeys', () => {
       }
       if (journey.result) expect(shots.map((one) => one.shot)).toContain(journey.result.shot);
     }
+  });
+
+  it('build an analyzer inside Detect, each step named for what it does, ending on the saved one', () => {
+    const build = JOURNEYS.find((journey) => journey.id === 'create-an-analyzer');
+    expect(build.steps.every((step) => step.tool === 'detect')).toBe(true);
+    const labels = build.steps.map((step) => step.label);
+    expect(labels.every(Boolean)).toBe(true);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(build.steps.at(-1).marks).toEqual(['detect.builder-save']);
+    expect(build.result.shot).toBeTruthy();
+    expect(journeysThrough('detect')).toEqual([{ id: 'create-an-analyzer', title: 'Create your analyzer', step: 1 }]);
+  });
+
+  it('read a sequel of a sequel, as the analyzer builder opens from the library', () => {
+    const marks = stepMarks({ tool: 'detect', marks: ['detect.rules', 'detect.reads'] });
+    expect(marks.map((mark) => mark.title)).toEqual(['Rules', 'What it reads']);
+    const shots = allShots().map((one) => one.shot);
+    for (const shot of ['detect-library', 'detect-analyzer-new', 'detect-builder']) expect(shots).toContain(shot);
   });
 
   it('take a geolocation as far as the published thread', () => {

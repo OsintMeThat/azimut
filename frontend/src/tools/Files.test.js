@@ -76,11 +76,41 @@ describe('Files desktop affordances', () => {
   });
 
   it('offers three view modes: small, large, and a details list', () => {
-    expect(source).toContain("let view = $state('small')");
+    expect(source).toContain("let view = $state(loadViewMode('files', 'small'))");
     expect(source).toContain("{ id: 'small', label: 'Small'");
     expect(source).toContain("{ id: 'large', label: 'Large'");
     expect(source).toContain("{ id: 'list', label: 'List'");
     expect(source).toContain('const dense = $derived(');
+  });
+
+  it('remembers the view it was left on', () => {
+    expect(source).toContain("saveViewMode('files', next)");
+    expect(source).toContain('onclick={() => setView(v.id)}');
+    expect(source).not.toContain('onclick={() => (view = v.id)}');
+  });
+
+  it('opens a picture, video or sound full screen on a double press, and Details stays one press away', () => {
+    expect(source).toMatch(/function openEntityTile\(entity\) \{\s+if \(viewerItems\.some\(\(item\) => item\.key === entity\.id\)\) \{\s+viewingId = entity\.id;/);
+    expect(source).toContain('viewerItem(e, tileThumb(e))');
+    expect(source).toContain('onclick={(ev) => { ev.stopPropagation(); infoEntityId = e.id; }}');
+    expect(source).toContain('ctxRun((held) => (infoEntityId = held.one.id))');
+  });
+
+  it('opens the picked file on Space, out of the way of fields, buttons and dialogs', () => {
+    const at = source.indexOf("if (event.key === ' '");
+    const block = source.slice(at, source.indexOf('return;\n    }', at));
+    expect(block).toContain("uiState.tool === 'files'");
+    expect(block).toContain('!renaming');
+    expect(block).toContain('!anyOverlayOpen()');
+    expect(block).toContain("closest('button, a, input, textarea, select, [contenteditable]')");
+    expect(block).toContain('spaceTarget(selected, anchor)');
+    expect(block).toContain('event.preventDefault()');
+  });
+
+  it('leaves the keys to the viewer while it is open, and lets the selection follow it', () => {
+    expect(source).toContain('if (viewing) return; // the viewer hears its own keys');
+    expect(source).toMatch(/function viewFile\(id\) \{\s+viewingId = id;\s+selected = \[id\];\s+anchor = id;/);
+    expect(source).toContain('const id = viewing ?? infoEntityId');
   });
 
   it('renders the list view with Name/Type/Size/Added columns', () => {

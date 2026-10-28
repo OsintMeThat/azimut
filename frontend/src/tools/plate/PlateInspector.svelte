@@ -350,7 +350,7 @@
   {#if !picked.length}
     <h3>Page</h3>
     <PlateSection title="Looks" summary={THEMES[spec.theme.preset]?.label ?? 'Own colours'}>
-    <div class="themes">
+    <div class="themes" data-guide="plate.looks">
       {#each Object.entries(THEMES) as [id, preset] (id)}
         <button type="button" class="theme" class:on={spec.theme.preset === id} onclick={() => theme(id)} title={`Set the page and its maps as ${preset.label}`}>
           <span class="sample" style:background={preset.theme.paper} style:color={preset.theme.ink} style:border-color={preset.theme.accent}>

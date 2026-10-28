@@ -13,7 +13,9 @@
  * `guide.test.js` instead of leaving a frame that points at nothing.
  *
  * Journeys walk one goal across the tools, and each step reuses the picture of the tool
- * it happens in with only that step's frames on it.
+ * it happens in with only that step's frames on it, or a picture of its own when the
+ * moment is not on the tool's page. A step may name itself (`label`) where every step
+ * happens in one tool, and a journey ends on a picture of what it made (`result`).
  */
 import { CASE_WORKSPACE, TOOL_LABELS, WORKSPACES } from './workspaces.js';
 
@@ -131,12 +133,34 @@ export const PAGES = {
       { anchor: 'settings.nav', title: 'Sections', text: 'General, Publishing, Imagery, Templates, Icons, the extension, Storage and System.' },
       { anchor: 'settings.providers', title: 'Keys for more imagery', text: 'Each keyed provider says what it costs and what you used this month.' },
       { anchor: 'settings.eco', title: 'Eco mode', text: 'Zoomed out, a billed map draws free imagery instead, up to the zoom you set.' },
+      {
+        anchor: 'settings.icons',
+        title: 'Icons',
+        text: 'Your own pictures for the markers of your layers.',
+        opens: {
+          shot: 'settings-icons',
+          lead: 'Icons you add here are offered in every layer’s palette, in every case.',
+          marks: [{ anchor: 'settings.icons-library', title: 'Your icons', text: 'A layer keeps a copy of each icon it wears, so removing one here changes no map.' }],
+        },
+      },
+      {
+        anchor: 'settings.storage',
+        title: 'Storage',
+        text: 'Where exports go, and the backup that moves Azimut to another computer.',
+        opens: {
+          shot: 'settings-storage',
+          lead: 'Export backup writes one file that Import backup reads on the other computer.',
+          marks: [{ anchor: 'settings.backup', title: 'Settings backup', text: 'Settings, keys, templates, icons and signature. It holds your keys, so keep it private.' }],
+        },
+      },
     ],
     tips: [
       { title: 'Most of the app needs no key', text: 'Esri, its Wayback archive, OpenStreetMap and OpenTopoMap work without one.' },
       { title: 'Copernicus is free', text: 'Sentinel-2 and radar need a free Copernicus account, and the tools that use them explain the setup field by field.' },
       { title: 'Moving to another computer', text: 'Storage holds the settings backup, which carries everything but live secrets like your cookies.' },
       { title: 'Thread styles live here', text: 'Templates holds the structures a Geo Report thread can follow.' },
+      { title: 'Your own icons', text: 'Icons keeps the pictures your layers can wear, shared by every case.' },
+      { title: 'Hover to know', text: 'Each setting says what it does when the pointer rests on it.' },
     ],
   },
 
@@ -147,8 +171,19 @@ export const PAGES = {
     marks: [
       { anchor: 'media.link', title: 'Paste a link', text: 'A post on X, Telegram or YouTube comes down with its address kept as the source.' },
       { anchor: 'media.import', title: 'Import', text: 'Files from your disk, or dropped anywhere on the page.' },
-      { anchor: 'media.browse', title: 'Search and filter', text: 'Search by name or source, and narrow by type, folder or GPS.' },
-      { anchor: 'media.card', title: 'One card per file', text: 'Hashed on the way in, so a file never lands twice. Its source link leads back to the post.' },
+      { anchor: 'media.worklist', title: 'Worklist', text: 'Opens the pictures and videos still to place as a sheet, Files to geolocate.' },
+      { anchor: 'media.browse', title: 'Search and filter', text: 'Search by name or source, sort, and narrow by type, folder or GPS.' },
+      { anchor: 'media.views', title: 'Small, Large, List', text: 'Two sizes of grid or a list, kept from one visit to the next.' },
+      {
+        anchor: 'media.card',
+        title: 'One card per file',
+        text: 'Hashed on the way in, so a file never lands twice. A press opens it full screen.',
+        opens: {
+          shot: 'media-viewer',
+          lead: 'Pictures, videos and sounds full screen, one after the other.',
+          marks: [{ anchor: 'media.viewer', title: 'The viewer', text: '← and → walk the list as it is filtered, and Escape or Space closes it.' }],
+        },
+      },
       {
         anchor: 'media.open-in',
         title: 'Open in…',
@@ -165,6 +200,7 @@ export const PAGES = {
       { title: 'State the origin once', text: 'A batch dropped without an origin is offered one for the whole import, and Details corrects a single file later.' },
       { title: 'Paste a screenshot', text: 'Ctrl+V files the picture on the clipboard, with a title and an origin if you have them.' },
       { title: 'Working files stay apart', text: 'Frames and collages made in the case are held back by a switch, so the grid shows what was collected.' },
+      { title: 'Catch up an older import', text: 'The ⋮ menu holds Regenerate missing thumbnails and Read file metadata.' },
     ],
   },
   files: {
@@ -176,7 +212,7 @@ export const PAGES = {
       {
         anchor: 'files.tile',
         title: 'An item',
-        text: 'Double-click opens it in its tool. Right-click for the rest.',
+        text: 'Double-click opens it, full screen for a picture or a video. Right-click for the rest.',
         opens: {
           shot: 'files-menu',
           lead: 'The right-click menu acts on the item, or on everything selected.',
@@ -189,7 +225,8 @@ export const PAGES = {
     tips: [
       { title: 'Search reads inside notes', text: 'The sidebar matches labels, and this search also reads what notes say.' },
       { title: 'Nothing is lost at once', text: 'A deleted item waits in the case trash with its links until you empty it.' },
-      { title: 'Keys', text: 'F2 renames the selected item, and Delete removes it after asking.' },
+      { title: 'The view is kept', text: 'Small, Large or List is remembered, for Files and for Media apart.' },
+      { title: 'Keys', text: 'Space shows the selected picture or video, F2 renames it, and Delete removes it after asking.' },
     ],
   },
   reverse: {
@@ -205,6 +242,7 @@ export const PAGES = {
       { title: 'With the extension', text: 'The engine opens with the picture already in its uploader.' },
       { title: 'From anywhere', text: 'Open in… on a Media card, or Analyze on an Inspect frame, sends the picture here as you cropped it.' },
       { title: 'A video gives a frame', text: 'Pick the moment on the video, or step to it frame by frame in Inspect.' },
+      { title: 'Nothing found', text: 'Crop to the rarest detail, a sign or a crane, and search again.' },
     ],
   },
 
@@ -214,8 +252,20 @@ export const PAGES = {
     shot: 'inspect',
     marks: [
       { anchor: 'inspect.player', title: 'The player', text: '← and → step one frame, J and L change the speed, M marks a moment.' },
+      { anchor: 'inspect.loop', title: 'A and B', text: 'Bound a loop between two moments, to watch a passage again.' },
       { anchor: 'inspect.capture', title: 'Capture frame', text: 'Keeps the frame on screen with this video (C).' },
-      { anchor: 'inspect.strip', title: 'The strip', text: 'The video first, then the frames cut from it. Click one to adjust, crop or analyse it.' },
+      {
+        anchor: 'inspect.strip',
+        title: 'The strip',
+        text: 'The video first, then the frames cut from it. A frame can be adjusted, cropped or analysed.',
+        opens: {
+          shot: 'inspect-analyze',
+          lead: 'Analyze reads a frame or a picture, and the searches that start from it.',
+          marks: [
+            { anchor: 'inspect.analyze', title: 'Readings', text: 'Error levels are laid over the picture, brightest where a JPEG was changed most.' },
+          ],
+        },
+      },
       {
         anchor: 'inspect.tabs',
         title: 'Info, Adjust, Moments',
@@ -227,11 +277,14 @@ export const PAGES = {
         },
       },
       { anchor: 'inspect.save', title: 'Save to case', text: 'The one step that files frames as media, marked as made here.' },
+      { anchor: 'inspect.file', title: 'Change file, Clear work', text: 'Opens another file, or sends this one’s frames and edits to the Trash.' },
     ],
     tips: [
       { title: 'The work stays with the file', text: 'Frames and edits are kept as you make them, and opening the file again picks up where you left off.' },
       { title: 'Analyze a frame', text: 'Error levels show where a JPEG changed most, and the frame can go to Reverse Search or Horizon.' },
       { title: 'The original is never touched', text: 'An adjusted frame or video is saved as new media beside it.' },
+      { title: 'Everything the file says', text: 'All metadata unfolds every field of the file, its GPS and its software included.' },
+      { title: 'Keys', text: 'Space plays, C captures, O held shows the frame without its settings, and the keyboard button lists the rest.' },
     ],
   },
   collage: {
@@ -241,10 +294,22 @@ export const PAGES = {
       { anchor: 'collage.canvas', title: 'The canvas', text: 'Scroll to zoom, pull a corner to warp a piece, Shift-click to select several.' },
       { anchor: 'collage.add', title: 'Add pieces', text: 'Frames cut in Inspect and the case’s images.' },
       { anchor: 'collage.arrange', title: 'Auto panorama', text: 'Stitches overlapping pieces into one picture, planar, cylindrical or spherical.' },
-      { anchor: 'collage.save', title: 'Save to case', text: 'Files the collage as media, while its layout stays editable.' },
+      {
+        anchor: 'collage.straighten',
+        title: 'Straighten',
+        text: 'Lays a bent pan flat along a line you know is level.',
+        opens: {
+          shot: 'collage-straighten',
+          lead: 'Draw the line puts points along what should be level, a skyline or a shore, and Straighten bends the collage to it.',
+          marks: [{ anchor: 'collage.canvas', title: 'The level line', text: 'A click adds a point, and Ctrl+Z takes the last one back.' }],
+        },
+      },
+      { anchor: 'collage.save', title: 'Save to case', text: 'Files the collage as media at full resolution, while its layout stays editable.' },
     ],
     tips: [
       { title: 'A document of its own', text: 'Each collage keeps its layout, so it reopens from the Collage tab and edits.' },
+      { title: 'The seams hold', text: 'Straighten bends the whole collage without opening its seams.' },
+      { title: 'Never over the last one', text: 'A new export is filed beside the previous one rather than replacing it.' },
     ],
   },
 
@@ -264,6 +329,18 @@ export const PAGES = {
           marks: [{ anchor: 'map.ref', title: 'Reference window', text: 'Drag it, dock it beside the map or fold it. A capture never includes it.' }],
         },
       },
+      {
+        anchor: 'map.measure-tool',
+        title: 'Measure',
+        text: 'Distances, bearings and areas, drawn on the map and kept there.',
+        opens: {
+          shot: 'satellite-measure',
+          lead: 'A click per point, a double click to end, a click on the first point to close an area.',
+          marks: [
+            { anchor: 'map.measure', title: 'A line of two points', text: 'Becomes rings round A, the cone a camera at A saw, a shadow read for its hour, or the ground in sight.' },
+          ],
+        },
+      },
       { anchor: 'map.imagery', title: 'Imagery', text: 'The provider and the date of the picture. Free ones are built in, keyed ones use yours.' },
       { anchor: 'map.3d', title: '3D', text: 'Lifts the imagery onto the relief, and the middle button then tilts as well as turns.' },
       {
@@ -279,11 +356,26 @@ export const PAGES = {
       {
         anchor: 'sat.panel',
         title: 'Layers and Saved',
-        text: 'Folded here to give the map the room. Open it for the layers and the case’s saved work.',
+        text: 'Folded here to give the map the room. Open it for the layers, your own maps and the case’s saved work.',
         opens: {
           shot: 'satellite-layers',
           lead: 'Layers switches overlays on and off, My layers holds the maps you draw, Added layers the files you bring. Saved lists the case’s places and captures.',
-          marks: [{ anchor: 'sat.panel', title: 'The panel', text: 'An eye switches a layer, and nothing is fetched until it is on.' }],
+          marks: [
+            { anchor: 'sat.panel', title: 'The panel', text: 'An eye switches a layer, and nothing is fetched until it is on.' },
+            {
+              anchor: 'sat.mylayers',
+              title: 'My layers',
+              text: 'Maps you draw yourself, kept with the case. The pencil on a row edits it.',
+              opens: {
+                shot: 'satellite-mylayer',
+                lead: 'A layer of your own: markers, lines, areas, circles and boxes, each with its style, its icon and, once tracked, its days.',
+                marks: [
+                  { anchor: 'layer.tools', title: 'Draw', text: 'Markers, lines, areas, circles and boxes, or positions pasted and items of the case.' },
+                  { anchor: 'layer.panel', title: 'The layer', text: 'Its features by group. A group sets their style, and a feature can wear its own.' },
+                ],
+              },
+            },
+          ],
         },
       },
       { anchor: 'sat.place', title: 'Save place', text: 'Files the point as a place, with a title and a note if you want.' },
@@ -304,13 +396,15 @@ export const PAGES = {
       { title: 'A map of your own', text: 'New layer under My layers puts drawing tools on the map: pick, drag, draw, merge.' },
       { title: 'Your footage on the map', text: 'Photos and videos stand where a relation, their GPS or a proof puts them. Press a mark to play what was filed there.' },
       { title: 'The map tabs look at one place', text: 'Satellite, Compare and Detect open where you last looked, and Settings, General turns that off.' },
+      { title: 'A place has a shape', text: 'Trace footprint on a saved place draws what it really covers, a quay rather than a pin.' },
+      { title: 'Layers travel', text: 'A layer of your own downloads as KMZ, KML or GeoJSON.' },
     ],
   },
   compare: {
     lead: 'Two locked views of the same ground, read side by side, by swipe, fade or blink.',
     shot: 'compare',
     marks: [
-      { anchor: 'compare.modes', title: 'How to read them', text: 'Side by side, swipe, fade or blink. Difference highlights what changed on a matched pair.' },
+      { anchor: 'compare.modes', title: 'How to read them', text: 'Side by side, swipe, fade or blink. Difference shows what changed between the two dates.' },
       { anchor: 'compare.source', title: 'A and B', text: 'Each side picks its provider and its date.' },
       { anchor: 'compare.dates', title: 'All dates', text: 'With the same dated archive on both sides, every picture of the point, oldest first.' },
       { anchor: 'map.layers', title: 'Layers', text: 'One list over both maps, drawn on A, on B or on both.' },
@@ -326,12 +420,14 @@ export const PAGES = {
           marks: [{ anchor: 'compare.new-menu', title: 'Presets', text: 'Those that read Sentinel-2 ask for the free Copernicus setup, and say so until it is done.' }],
         },
       },
-      { anchor: 'compare.session', title: 'Open and Save', text: 'A saved comparison reopens with its views, marks and mode, and exports as a PNG or a GIF.' },
+      { anchor: 'compare.session', title: 'Open and Save', text: 'A saved comparison reopens with its views and marks, and exports as a PNG or an evolution GIF.' },
     ],
     tips: [
       { title: 'Difference reads one sky', text: 'Clouds are masked in the browser, and water counts only where both dates agree.' },
       { title: 'Keys', text: '1 to 4 switch the reading, 5 lays Difference over it, and Space pauses the blink.' },
       { title: 'Radar sees through cloud', text: 'Sentinel-1 comes through a layer added to your Copernicus setup, and A and B have to share a track.' },
+      { title: 'From a difference to a detection', text: 'Save as a Detect analyzer keeps the reading that made the change stand out.' },
+      { title: 'The annotations fold away', text: 'Their rail opens folded on each visit, and its arrow unfolds it.' },
     ],
   },
   detect: {
@@ -349,7 +445,46 @@ export const PAGES = {
         },
       },
       { anchor: 'detect.tabs', title: 'Routines, Saved, Areas', text: 'What runs again, what you kept, and the ground the case watches.' },
-      { anchor: 'detect.analyzers', title: 'Analyzers', text: 'What a detection looks for. Edit one, or write your own from rules.' },
+      { anchor: 'detect.area', title: 'A watched area', text: 'Drawn or imported, it can be reshaped and shared with another case.' },
+      {
+        anchor: 'detect.analyzers',
+        title: 'Analyzers',
+        text: 'What a detection looks for. Copy a built-in to tune it, or write your own from rules.',
+        opens: {
+          shot: 'detect-library',
+          lead: 'Your analyzers and the built-in ones, shared by every case.',
+          marks: [
+            {
+              anchor: 'detect.library-new',
+              title: 'New analyzer',
+              text: 'Starts from one blank rule, or from a ready example with its checks.',
+              opens: {
+                shot: 'detect-analyzer-new',
+                lead: 'What it reads is fixed from here on, so its rules and checks always fit it.',
+                marks: [
+                  { anchor: 'detect.reads', title: 'What it reads', text: 'Sentinel-2 or Sentinel-1 radar, one date or two.' },
+                  {
+                    anchor: 'detect.start-from',
+                    title: 'Start from',
+                    text: 'A blank rule, or a ready example with the checks that prove it.',
+                    opens: {
+                      shot: 'detect-builder',
+                      lead: 'An analyzer is the rules a pixel has to pass, proved by checks on real scenes.',
+                      marks: [
+                        { anchor: 'detect.rules', title: 'Rules', text: 'Each is a sentence: a band or an index, before, after or as the change, crossing a line.' },
+                        { anchor: 'detect.checks', title: 'Checks', text: 'Pins where something must be found and where nothing may be, on two real passes.' },
+                        { anchor: 'detect.test', title: 'Test', text: 'Reads every pinned tile and turns each check green or red. It never runs on its own.' },
+                        { anchor: 'detect.builder-save', title: 'Save', text: 'Needs one check with a pin found. Your analyzers are offered in every case.' },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+            { anchor: 'detect.library', title: 'The library', text: 'Built-ins are calibrated on real scenes. Copy one to change it.' },
+          ],
+        },
+      },
       { anchor: 'map.layers', title: 'Layers', text: 'The same overlays and your own layers as on Satellite, over the ground being watched.' },
     ],
     tips: [
@@ -358,15 +493,30 @@ export const PAGES = {
       { title: 'An analyzer is a list of rules', text: 'Each rule is a line a pixel has to cross, before, after or as the change between them.' },
       { title: 'Checks prove an analyzer', text: 'Pins where something should and should not be found turn green or red when tested, and one is needed to save it.' },
       { title: 'Review one by one', text: 'Pin, keep or dismiss each finding, and what you keep is remembered.' },
+      { title: 'Review by keyboard', text: 'K keeps, D dismisses and P pins the finding under review, and the arrows walk the queue.' },
+      { title: 'Findings on the map', text: 'Export as layer puts the findings you kept on the map as a layer.' },
     ],
   },
   horizon: {
     lead: 'Stands you on the ground and draws what you would see, from a terrain model with the curve of the Earth.',
     shot: 'horizon',
     marks: [
-      { anchor: 'horizon.modes', title: 'View, Overlay, Find', text: 'Look around, lay a photo over the view, or search a map for where it was taken.' },
+      {
+        anchor: 'horizon.modes',
+        title: 'View and Overlay',
+        text: 'Look around from the eye, or lay a photo over the view to see where it was taken from.',
+        opens: {
+          shot: 'horizon-overlay',
+          lead: 'A photo laid over the terrain. Drag the terrain under it until the ridges meet, and Fit closes the gap.',
+          marks: [
+            { anchor: 'horizon.overlay', title: 'Photo and terrain', text: 'The photo, the terrain, a blink between them, or one above the other.' },
+            { anchor: 'horizon.trace', title: 'The trace', text: 'The skyline drawn or detected on the photo, which Fit matches against the terrain.' },
+          ],
+        },
+      },
       { anchor: 'horizon.picture', title: 'Ground', text: 'Relief, satellite or plain, with ridge lines and summit names.' },
       { anchor: 'horizon.strip', title: 'The whole turn', text: 'All the way round the eye, with the part on screen framed. Drag to turn.' },
+      { anchor: 'horizon.views', title: 'Open and Save', text: 'A saved view reopens its eye, its look, its ground and its photo.' },
       { anchor: 'horizon.capture', title: 'Capture', text: 'Files the view into the case as a picture.' },
       {
         anchor: 'horizon.side',
@@ -386,6 +536,8 @@ export const PAGES = {
       { title: 'Look from anywhere', text: 'Right-click any map and choose Look from here.' },
       { title: 'A photo says where it was taken from', text: 'In Overlay, drag the terrain under the photo until the ridges meet, and Fit closes the gap.' },
       { title: 'Keys', text: 'The arrows walk and turn, Page Up and Down tilt, N faces north and T traces the skyline.' },
+      { title: 'Buildings stand up', text: 'In a city, buildings rise from open sources, and a saved view keeps them.' },
+      { title: 'Fit makes no promise', text: 'Explains 80% says how much of the trace fits, not how likely the place is.' },
     ],
   },
   coordinates: {
@@ -397,9 +549,11 @@ export const PAGES = {
       { anchor: 'coords.formats', title: 'Every notation', text: 'Click a line to copy it.' },
       { anchor: 'coords.open', title: 'Open on', text: 'The same point in Google, Apple, Bing, Yandex, Copernicus Browser and more.' },
       { anchor: 'coords.sky', title: 'Sun and moon', text: 'Sunrise, noon, sunset, twilight and the moon for the day, computed here, offline.' },
+      { anchor: 'coords.show-map', title: 'Show on map', text: 'Draws the day’s path of the sun on the map.' },
     ],
     tips: [
       { title: 'Two clocks', text: 'Each time is given in the place’s own zone and in UTC.' },
+      { title: 'Read a shadow', text: 'In Satellite, a measure used as a shadow gives the hour from the shadow’s direction.' },
     ],
   },
 
@@ -408,9 +562,11 @@ export const PAGES = {
     lead: 'Puts pictures side by side, marks what agrees, and files the point it proves.',
     shot: 'proof',
     marks: [
-      { anchor: 'proof.tools', title: 'Marks', text: 'Boxes, arrows, lines, text, numbered markers, callouts, zoom insets and blur boxes. The same colour means the same feature.' },
+      { anchor: 'proof.tools', title: 'Marks', text: 'Boxes, arrows, lines, text, numbered markers, callouts, view cones, zoom insets and blur boxes. The same colour means the same feature.' },
+      { anchor: 'proof.layout', title: 'Layout', text: 'Panels in a grid or free, and a preview of the crop X makes at 16:9 or square.' },
       { anchor: 'proof.canvas', title: 'The page', text: 'A mark dragged into the margin stays put, and an arrow between two pictures follows both.' },
       { anchor: 'proof.coords', title: 'The point', text: 'Filled from a satellite panel or typed. Each place can be named, and one can be the camera.' },
+      { anchor: 'proof.meta', title: 'Source, description, date', text: 'Several sources, a description, and a date read on a clock, at the point or in UTC.' },
       { anchor: 'proof.panels', title: 'Panels', text: 'The pictures, each with a caption, a crop and a zoom.' },
       { anchor: 'proof.save', title: 'Save and post', text: 'Saves the PNG with its spec, so it reopens and edits. To Post carries it into Geo Report.' },
     ],
@@ -419,6 +575,8 @@ export const PAGES = {
       { title: 'Numbers count by colour', text: 'Each colour counts its own series from 1, to tie a spot to a line of your text.' },
       { title: 'Paste a screenshot', text: 'Ctrl+V lays a picture over the proof, and it stays in this proof only.' },
       { title: 'The point becomes a place', text: 'Saving files its coordinates as a place on the map, and says the proof shows it.' },
+      { title: 'A house style', text: 'A template made in Settings, Templates gives every proof the same look.' },
+      { title: 'Right-click the page', text: 'Brings forward, sends back, duplicates or deletes the mark under the cursor.' },
     ],
   },
   post: {
@@ -429,11 +587,13 @@ export const PAGES = {
       { anchor: 'post.first', title: 'The geolocation post', text: 'Written from those fields, counted against the site’s limit, with the proof attached.' },
       { anchor: 'post.more', title: 'More posts', text: 'Add the media post and context posts, or copy the whole thread.' },
       { anchor: 'post.report', title: 'Save report', text: 'Writes the finding up as a Notebook note.' },
-      { anchor: 'post.publish', title: 'Publish', text: 'Copies the posts and opens the site. With the extension it fills the composer box by box.' },
+      { anchor: 'post.publish', title: 'Publish', text: 'Copies the posts and opens the site. With the extension it fills the composer box by box, and pressing Post stays yours.' },
     ],
     tips: [
       { title: 'Drafts', text: 'Save as draft keeps the thread to reopen and edit here.' },
       { title: 'Thread styles', text: 'Settings, Templates holds the structures a thread can follow.' },
+      { title: 'Counted for the site', text: 'Each post counts its characters against the limit of the site picked.' },
+      { title: 'The point, every way', text: 'The geolocation post gives the point in decimal, DMS and plus code, with links to the maps.' },
     ],
   },
   plate: {
@@ -452,14 +612,28 @@ export const PAGES = {
       },
       { anchor: 'plate.list', title: 'On the page', text: 'Every element in stacking order. Pick one to set it.' },
       { anchor: 'plate.page', title: 'The page', text: 'A drag inside a map moves its ground, and its edge moves the frame.' },
-      { anchor: 'plate.inspector', title: 'Inspector', text: 'Looks, paper, fonts and colours, or the settings of the element picked.' },
+      { anchor: 'plate.inspector', title: 'Inspector', text: 'Paper, fonts and colours, or the settings of the element picked.' },
+      { anchor: 'plate.looks', title: 'Looks', text: 'A whole look in one press: Press, Night, Newsroom, Humanitarian, Tactical and more.' },
       { anchor: 'plate.export', title: 'Export', text: 'A PNG, a PDF, or a video of the plate’s days.' },
+      {
+        anchor: 'plate.home',
+        title: 'Plates',
+        text: 'Back to the plates of the case, where a new one starts.',
+        opens: {
+          shot: 'plate-home',
+          lead: 'The plates of the case, your templates, and plates ready to fill from the map.',
+          marks: [{ anchor: 'plate.ready', title: 'Ready plates', text: 'Ten layouts, from a situation map to a line of sight, laid out from the map in one press.' }],
+        },
+      },
     ],
     tips: [
       { title: 'A new plate starts from the Map', text: 'A ready plate opens at once; New plate first picks its layout, layers, paper and look.' },
       { title: 'Days and steps', text: 'A tracked layer is drawn on the plate’s day, and the video plays through its days.' },
       { title: 'Templates', text: 'Keep as template saves the layout without its data, to start other plates from.' },
       { title: 'Texts that fill themselves', text: '{date}, {case}, {title}, {scale} and {imagery} are written in when the page is drawn.' },
+      { title: 'Focus', text: 'F sets one element apart, to adjust it without the rest of the page.' },
+      { title: 'A day left out of the video', text: 'Its ⋯ menu hides it from the play and every export, and it stays on the bar to edit.' },
+      { title: 'In relief', text: 'Show the map in 3D lays a map on the terrain, with its ridge lines.' },
     ],
   },
   notebook: {
@@ -475,6 +649,7 @@ export const PAGES = {
     tips: [
       { title: 'Diagrams', text: 'A mermaid code block becomes a diagram, in the preview and in the PDF.' },
       { title: 'Remote images say so', text: 'An image from the web contacts its host each time the preview opens, and the editor warns you.' },
+      { title: 'Several notes, one PDF', text: 'The bar above exports several notes at once, in the order you pick.' },
     ],
   },
 
@@ -493,6 +668,9 @@ export const PAGES = {
     tips: [
       { title: 'Shapes say how sure the date is', text: 'A point is an instant, a bracket a day, month or year, a dashed line a moment between two dates, a bar a period.' },
       { title: 'Keys', text: '+ and - zoom, Home shows everything, and Alt with an arrow walks a track.' },
+      { title: 'Correct a date', text: 'Right-click an entry and choose Correct this date.' },
+      { title: 'How far apart', text: 'Ctrl-click a second entry to measure the time between the two, or its range when a date is broad.' },
+      { title: 'The files’ own dates', text: 'File dates shows what the files themselves say, when you ask for it.' },
     ],
   },
   board: {
@@ -517,6 +695,8 @@ export const PAGES = {
     tips: [
       { title: 'The count is a proportion', text: '23 of 1204 keeps the whole case as the denominator, so it never shrinks with the answer.' },
       { title: 'One table', text: 'Group: None shows everything as a single table.' },
+      { title: 'Keep a reading', text: 'Views keeps the question and its columns, live or frozen as a snapshot.' },
+      { title: 'Take it out', text: 'Export writes the reading as an SVG, a PNG or a copied picture.' },
     ],
   },
   graph: {
@@ -533,6 +713,7 @@ export const PAGES = {
     tips: [
       { title: 'The case proposes links', text: 'Who posted a file and points under 300 m apart are proposed, and N proposed lists them to confirm or drop.' },
       { title: 'Keys', text: '1, 2 and 3 light the hops around the selected node, and the arrows nudge it.' },
+      { title: 'Lenses', text: 'Everything, Subjects, Ground, Claims and My work read the same case differently.' },
     ],
   },
   sheet: {
@@ -557,6 +738,8 @@ export const PAGES = {
     tips: [
       { title: 'Sheets the case could start', text: 'The Sheet home offers lists like Files to geolocate, built from what the case holds.' },
       { title: 'Into the case', text: 'A declared sheet turns into entities, places and dated claims, read as a plan first.' },
+      { title: 'A whole workbook', text: 'An .xlsx comes in as one sheet per tab, under the tabs’ own names.' },
+      { title: 'A colour can mean something', text: 'Tell a row colour what it stands for, and the sheet says it in its legend.' },
       { title: 'Every gesture', text: 'Press ? in a sheet for the full list.' },
     ],
   },
@@ -588,6 +771,24 @@ export const JOURNEYS = [
     result: {
       shot: 'proof-result',
       text: 'The proof as it leaves the case: the photo beside the imagery, each match in its own colour, the point named.',
+    },
+  },
+  {
+    id: 'create-an-analyzer',
+    title: 'Create your analyzer',
+    lead: 'From a change you want Detect to find to an analyzer proved on real scenes, offered in every case.',
+    steps: [
+      { tool: 'detect', label: 'Library', shot: 'detect-library', text: 'In Detect, Analyzers opens the library. New analyzer starts one, and a built-in can be copied to tune instead.', marks: ['detect.library-new', 'detect.library'] },
+      { tool: 'detect', label: 'What it reads', shot: 'detect-analyzer-new', text: 'Say what it reads: Sentinel-2 or radar, one date to spot a thing, two to find a change. It is fixed from here on.', marks: ['detect.reads'] },
+      { tool: 'detect', label: 'Start from', shot: 'detect-analyzer-new', text: 'Start from a ready example rather than a blank rule: it comes with checks that turn red when a rule breaks.', marks: ['detect.start-from'] },
+      { tool: 'detect', label: 'Rules', shot: 'detect-builder', text: 'Read the rules as sentences, and change a line, add a rule, or keep what passes all of them or any.', marks: ['detect.rules'] },
+      { tool: 'detect', label: 'Checks', shot: 'detect-builder', text: 'Each check is two passes and pins: where something must be found, and traps where nothing may be.', marks: ['detect.checks'] },
+      { tool: 'detect', label: 'Test', shot: 'detect-builder', text: 'Test reads the pinned tiles in Copernicus and turns each check green or red. Change a rule and test again.', marks: ['detect.test'] },
+      { tool: 'detect', label: 'Save', shot: 'detect-builder', text: 'Save it. New detection then offers it in every case, and Share hands it to someone else as a file.', marks: ['detect.builder-save'] },
+    ],
+    result: {
+      shot: 'detect-mine',
+      text: 'The analyzer in your library, with its checks, ready for a pass or a routine on any ground.',
     },
   },
 ];
@@ -812,13 +1013,16 @@ export const KEYMAP = [
   {
     where: 'Media',
     keys: [
-      { combo: 'Enter', does: 'opens the image under the cursor' },
-      { combo: '← / →', does: 'walks the preview through the folder' },
+      { combo: 'Enter', does: 'opens the picture, video or sound under the cursor' },
+      { combo: '← / →', does: 'walks the viewer through the list' },
+      { combo: 'Escape or Space', does: 'closes the viewer' },
     ],
   },
   {
     where: 'Files',
     keys: [
+      { combo: 'Space', does: 'shows the selected picture, video or sound, and closes it again' },
+      { combo: '← / →', does: 'walks the viewer through the folder' },
       { combo: 'F2', does: 'renames the selected item' },
       { combo: 'Delete', does: 'deletes the selected items, after asking' },
     ],

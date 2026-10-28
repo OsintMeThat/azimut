@@ -54,6 +54,7 @@
   <button
     type="button"
     class="btn btn-sm vm-open"
+    data-guide="horizon.views"
     onclick={() => (open = !open)}
     disabled={!caseId}
     aria-haspopup="menu"

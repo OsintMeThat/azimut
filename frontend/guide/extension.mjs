@@ -170,6 +170,7 @@ export async function layPopup(map, popup) {
       const left = window.innerWidth - width - 16;
       const top = 8;
       const img = document.createElement('img');
+      img.id = 'guide-popup';
       img.src = src;
       Object.assign(img.style, {
         position: 'fixed', left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`,

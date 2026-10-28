@@ -43,6 +43,7 @@
         class:on={is.on}
         disabled={is.disabled}
         aria-pressed={entry.kind === 'mode' ? Boolean(is.on) : undefined}
+        data-guide={entry.id === 'measure' ? 'map.measure-tool' : undefined}
         onclick={() => onpick(entry.id)}
         title={is.title ?? entry.hint ?? entry.label}
         aria-label={entry.label}

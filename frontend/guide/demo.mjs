@@ -45,6 +45,28 @@ const ZONE = 'America/Los_Angeles';
 /** The place the proof names: where the photo was taken from. */
 export const CAMERA_PLACE = 'Main Channel, west bank';
 
+/**
+ * The analyst's own map of the channel, filed as a layer of their own (My layers) so the
+ * guide can show it being edited. Traced by eye over the USGS imagery, as an analyst
+ * would: the bridge deck, three of the Evergreen cranes and the terminal's yard.
+ */
+const SURVEY = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Channel survey</name>
+<Folder><name>Cranes</name>
+<Placemark><name>Crane 1</name><Point><coordinates>-118.2716,33.7472,0</coordinates></Point></Placemark>
+<Placemark><name>Crane 2</name><Point><coordinates>-118.2719,33.7466,0</coordinates></Point></Placemark>
+<Placemark><name>Crane 3</name><Point><coordinates>-118.2722,33.7460,0</coordinates></Point></Placemark>
+</Folder>
+<Folder><name>Structures</name>
+<Placemark><name>Bridge deck</name><LineString><coordinates>-118.2782,33.7502 -118.2748,33.7499 -118.2694,33.7492 -118.2651,33.7488</coordinates></LineString></Placemark>
+<Placemark><name>Evergreen yard</name><Polygon><outerBoundaryIs><LinearRing><coordinates>-118.2712,33.7480 -118.2676,33.7478 -118.2662,33.7442 -118.2700,33.7418 -118.2728,33.7452 -118.2712,33.7480</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>
+</Folder></Document></kml>`;
+
+/** The stretch of channel Detect watches, between the bridge and the cruise berths. */
+const WATCHED = [
+  [-118.2785, 33.7508], [-118.2670, 33.7508], [-118.2670, 33.7405], [-118.2785, 33.7405], [-118.2785, 33.7508],
+];
+
 const KML = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Channel observations</name>
 <Folder><name>Line of sight</name>
@@ -171,9 +193,9 @@ export async function buildDemo({ call, scratch }) {
     [photoId], camera, [post]
   );
   await claim(
-    '@harbor_watch posts the photo without a caption',
-    { when: '2026-03-15T06:02:00+00:00', time_role: 'occurred', confidence: 'certain' },
-    [photoId, account], null, [post]
+    'The container yard on Terminal Island, the bridge behind it',
+    { when: '2006-11-02', time_role: 'observed', confidence: 'certain' },
+    [await lookup(files['container_yard.jpg'])], bridgePlace
   );
   await claim(
     'A ship leaves the port by the Main Channel',
@@ -258,6 +280,15 @@ export async function buildDemo({ call, scratch }) {
   kml.append('file', new Blob([KML]), 'channel-observations.kml');
   kml.append('title', 'Channel observations');
   await call('POST', at('/map-layers/upload'), kml);
+  const survey = new FormData();
+  survey.append('file', new Blob([SURVEY]), 'channel-survey.kml');
+  survey.append('title', 'Channel survey');
+  await call('POST', at('/map-layers/editable/upload'), survey);
+  await call('POST', at('/analysis/areas'), {
+    name: 'Main Channel berths',
+    colour: '#38bdf8',
+    geometry: { type: 'Polygon', coordinates: [WATCHED] },
+  });
   await call('POST', at('/compare/sessions'), {
     title: 'Main Channel, imagery against the map',
     spec: {
@@ -301,6 +332,19 @@ export async function buildDemo({ call, scratch }) {
       eye: { ...GLACIER_POINT, mode: 'ground', height: 1.7 },
       look: { heading: 64, tilt: 1, fov: 62 },
       picture: { ground: 'imagery', imagery: IMAGERY.id, lines: true, names: true },
+    },
+  });
+  // The case's 1901 photo was taken from the same point: laid over the view, it is what
+  // Overlay is for. The look is the photo's own, read off it: Half Dome's summit (64.5°
+  // from the point, +7°) a tenth of the way across and down, Nevada Fall (100.6°) at 87%
+  // across, so a lens 46° wide turned to 83° and tilted 7.4° down.
+  await call('POST', at('/horizon/views'), {
+    title: 'Glacier Point, the 1901 photo',
+    spec: {
+      eye: { ...GLACIER_POINT, mode: 'ground', height: 1.7 },
+      look: { heading: 83.2, tilt: -7.4, fov: 46 },
+      picture: { ground: 'imagery', imagery: IMAGERY.id, lines: true, names: true },
+      photo: { path: files['half_dome_1901.jpg'], kind: 'image', title: 'half_dome_1901', mix: 0.6 },
     },
   });
 

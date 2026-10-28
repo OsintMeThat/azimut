@@ -190,7 +190,7 @@
     {#if error}<p class="warn" role="alert">{error}</p>{/if}
     <p class="hint">Start from an example, build your own from rules you prove on the map, or copy a calibrated built-in to tune it.</p>
     <div class="row">
-      <button class="btn btn-primary grow" onclick={() => (mode = 'base')}><Icon name="plus" size={14} /> New analyzer</button>
+      <button class="btn btn-primary grow" data-guide="detect.library-new" onclick={() => (mode = 'base')}><Icon name="plus" size={14} /> New analyzer</button>
       <button class="btn" title="Open an analyzer file someone shared with you" disabled={busy}
         onclick={() => fileInput?.click()}><Icon name="upload" size={13} /> Import</button>
     </div>
@@ -221,7 +221,7 @@
       {/each}
     </section>
 
-    <section aria-label="Built-in analyzers">
+    <section aria-label="Built-in analyzers" data-guide="detect.library">
       <strong>Built in</strong>
       {#each analyzerGroups({ ...catalogue, custom: [] }) as group (group.label)}
         <FoldGroup label={group.label} count={group.list.length} open={!!openKinds[group.label]}
@@ -249,7 +249,7 @@
     <h3>New analyzer</h3>
     <p class="hint">What it reads is fixed from here on, so its rules and checks always fit it.</p>
 
-    <section aria-label="What it reads">
+    <section aria-label="What it reads" data-guide="detect.reads">
       <span class="ask">Satellite</span>
       <div class="cmp-seg fill" role="group" aria-label="Satellite">
         <button type="button" class:on={reads.sensor === 'sentinel2'} aria-pressed={reads.sensor === 'sentinel2'}
@@ -273,7 +273,7 @@
         : 'Finds what changed between a day before and a day after.'}</p>
     </section>
 
-    <section aria-label="Start from">
+    <section aria-label="Start from" data-guide="detect.start-from">
       <span class="ask">Start from</span>
       <button class="pick base own" onclick={() => build()}>
         <span class="swatch" aria-hidden="true"></span>

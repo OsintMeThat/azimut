@@ -320,6 +320,7 @@
     <button
       class="tb-btn"
       class:active={overflowOpen || layout === 'free' || !!guide}
+      data-guide="proof.layout"
       title="Layout, tweet crops & repack"
       onclick={() => toggle('overflow')}
       bind:this={overflowBtn}

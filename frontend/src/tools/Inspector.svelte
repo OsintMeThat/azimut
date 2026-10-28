@@ -1045,11 +1045,11 @@
       {/if}
       <div class="spacer"></div>
       {#if work.name || !pristine}
-        <button class="btn btn-ghost btn-sm" onclick={() => (clearConfirm = true)} title="Send this file's frames and edits to the Trash">
+        <button class="btn btn-ghost btn-sm" data-guide="inspect.file" onclick={() => (clearConfirm = true)} title="Send this file's frames and edits to the Trash">
           <Icon name="reset" size={14} /> Clear work
         </button>
       {/if}
-      <button class="btn btn-sm" onclick={() => (pickerOpen = true)} title="Open another image or video">
+      <button class="btn btn-sm" data-guide="inspect.file" onclick={() => (pickerOpen = true)} title="Open another image or video">
         <Icon name="folderOpen" size={14} /> Change file
       </button>
     </div>

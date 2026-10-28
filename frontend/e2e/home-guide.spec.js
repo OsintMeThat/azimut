@@ -64,7 +64,7 @@ test('the ? opens the guide over the tab it was pressed from', async ({ page }) 
   await expect(guide.locator('.frame.on')).toHaveCount(1);
 
   // a number that leads somewhere shows the screen it opens, and comes back
-  await guide.locator('.pin.leads').first().click();
+  await guide.getByRole('button', { name: /Open in…: see what it opens/ }).click();
   await expect(guide.locator('.trail')).toContainText('Open in…');
   await expect.poll(() => guide.locator('.shot img').evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
   await guide.locator('.trail button').first().click();

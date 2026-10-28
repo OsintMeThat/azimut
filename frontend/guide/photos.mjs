@@ -14,10 +14,11 @@ const HERE = join(dirname(fileURLToPath(import.meta.url)), 'photos');
 
 /** The case as filed: what each file is called, the post it came from, and the photo it is made from. */
 export const PHOTOS = [
-  { file: 'bridge_channel.jpg', source: 'https://example.org/posts/0412' },
-  { file: 'channel_departure.mp4', source: 'https://example.org/videos/2271', photo: 'channel_departure.jpg', video: true },
-  { file: 'container_yard.jpg', source: 'https://example.org/posts/0397' },
   { file: 'half_dome_1901.jpg', source: '' },
-  { file: 'wando_terminal.jpg', source: 'https://example.org/posts/0388' },
   { file: 'miami_port_aerial.jpg', source: 'https://example.org/posts/0420' },
+  { file: 'wando_terminal.jpg', source: 'https://example.org/posts/0388' },
+  { file: 'container_yard.jpg', source: 'https://example.org/posts/0397' },
+  { file: 'channel_departure.mp4', source: 'https://example.org/videos/2271', photo: 'channel_departure.jpg', video: true },
+  // filed last, so a grid of the newest first opens on it
+  { file: 'bridge_channel.jpg', source: 'https://example.org/posts/0412' },
 ].map((one) => ({ ...one, path: join(HERE, one.photo ?? one.file) }));
