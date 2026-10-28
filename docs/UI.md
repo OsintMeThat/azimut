@@ -5387,7 +5387,9 @@ slide to the next day, so a plate reopens on the day it was left on; one saved o
 "now" before this moves to the day it was last saved, with what stood on it. The days
 played are its layers' changes, every day that holds steps, and every day added to
 the play: a day between two changes says so on its tile, **Add to the play**, and
-its ⋯ takes it out again while it holds no steps. Events stay on its
+its ⋯ takes it out again while it holds no steps. Any other played day is
+**hidden from the video** from its ⋯: it stays on the bar to edit, dashed with its
+steps and faint on the cursor, and the play and every export skip it. Events stay on its
 maps, faded, unless the plate's cursor says how many days. What is added on the map
 (a label, an arrow, a zone, rings, a cone, a distance, a shape) **belongs to the day
 it is made on**: the next day starts without it. The inspector shows it from a first

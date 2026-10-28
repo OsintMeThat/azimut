@@ -65,12 +65,12 @@
   import '../lib/plateFontFaces.js';
   import { creditParts, plateCredits } from '../lib/plate/credits.js';
   import { canvasBlob, composePage, copyPage, evolutionSheet, postExport, QUALITIES, release, scaleFor, scaleForWidth, stagedPictures, videoSize } from '../lib/plate/exportPlate.js';
-  import { KIND_LABELS, focusApart, PAPERS, longDay, MAP_KINDS, MAX_MAPS, MAX_STEPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, facesOf, mapCount, inLook, addStep, pickedDays, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
+  import { KIND_LABELS, focusApart, PAPERS, longDay, MAP_KINDS, MAX_MAPS, MAX_STEPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, facesOf, mapCount, inLook, addStep, pickedDays, skippedDays, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
     duplicatedStep, fromTemplate, hasSteps, houseLayout, labelBox, listedOf, mainMap, mapsFirst, movedStep, newId, onPaper, pageSize, placeOf, settleOn, shownOn, stepsOf, SYMBOL, templateOf, textMeasurer,
     transitionsOf, unsettled, withoutStep, restacked, stepOf, bornOn } from '../lib/plate/page.js';
   import { TWEEN_FPS, changes, playedTransit, transitionInto as transitionIntoBeat, transitionPlan, tweenFrames } from '../lib/plate/tween.js';
   import { defaultSize } from '../lib/plate/words.js';
-  import { FIRST_SECONDS, beatClips, beats, boundSeconds, clipRange, daySeconds, gifPoster, isGif, plateSeconds, playDays, posterKey, posterOf, totalSeconds } from '../lib/plate/clip.js';
+  import { FIRST_SECONDS, beatClips, beats, boundSeconds, clipRange, daySeconds, gifPoster, isGif, plateSeconds, playDays, posterKey, posterOf, totalSeconds, videoDays } from '../lib/plate/clip.js';
   import { legendRows } from '../lib/plate/legend.js';
   import { numbered, pasted, placeLabels, tableRows } from '../lib/plate/arrange.js';
   import { drawOver, pictureKey } from '../lib/plate/draw.js';
@@ -621,6 +621,9 @@
   const playedDays = $derived(spec && playable ? playDays(spec, moments) : moments);
   /** Whether the play goes through the day shown. */
   const dayPlayed = $derived(!playable || playedDays.includes(dayOf(at)));
+  /** The played days the video goes through: all but those hidden from it, which the editor still shows. */
+  const videoPlayed = $derived(spec && playable ? videoDays(spec, playedDays) : playedDays);
+  const daySkipped = $derived(playable && (spec?.skipped ?? []).includes(dayOf(at)));
 
   /**
    * A plate whose layers change stands on a day of the calendar, never on a now that
@@ -693,7 +696,7 @@
   /** A step as the strip names it: its own name, else its place in the day. */
   const stepName = (index, day = at) => stepsOf(spec, day)[index]?.name || `Step ${index + 1}`;
   /** The days and steps the play goes through, from the plate's day when it has none followed over time. */
-  const sequence = $derived(spec ? beats(spec, playable ? playedDays : [at]) : []);
+  const sequence = $derived(spec ? beats(spec, playable ? videoPlayed : [at]) : []);
   /** How long a played export runs over `days`, each beat held its own seconds, an MP4's transitions included. */
   const runtime = (days, format = 'mp4') => {
     const list = beats(spec, playable ? days : [at]);
@@ -705,8 +708,8 @@
 
   // -- framing a map day by day ---------------------------------------------------------
 
-  /** The days and steps in the order they are played, as their framings are kept. */
-  const order = $derived(beatKeys(sequence));
+  /** The days and steps in the order they are played, as their framings are kept; a day hidden from the video keeps its place. */
+  const order = $derived(spec ? beatKeys(beats(spec, playable ? playedDays : [at])) : []);
   /** The day or the step shown, as its framing is kept. */
   const shownKey = $derived(beatKey(at, stepId));
   /** How a map is framed on the day or step shown. */
@@ -776,6 +779,8 @@
     if (list.length < 2) return;
     playing = true;
     let index = list.findIndex((beat) => dayOf(beat.day) === dayOf(spec.time.at) && beat.step === stepId) + 1;
+    // from a day hidden from the video, the play starts at the next day it goes through
+    if (index <= 0 && daySkipped) index = list.findIndex((beat) => dayOf(beat.day) > dayOf(spec.time.at));
     if (index <= 0 || index >= list.length) index = 0;
     const next = () => {
       if (!playing || !plate) return;
@@ -1770,7 +1775,7 @@
             <button type="button" class="speed" title="How fast the plate plays" onclick={() => (speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1)}>{speed}×</button>
             <button type="button" class="speed" class:on={loop} aria-pressed={loop} title="Start again from the beginning" onclick={() => (loop = !loop)}>Loop</button>
             {#if moments.length}
-              <div class="cursor"><LayerTimeCursor time={time} moments={playedDays} precision={tracked[0]?.track?.precision ?? 'day'}
+              <div class="cursor"><LayerTimeCursor time={time} moments={playedDays} faded={spec.skipped ?? []} precision={tracked[0]?.track?.precision ?? 'day'}
                 zone={tracked[0]?.track?.zone ?? 'UTC'} label="The plate's day"
                 onchange={(patch) => { if (playing) stop(); if ('at' in patch && patch.at !== plate.spec.time.at) plate.spec.time.step = null; Object.assign(plate.spec.time, patch); }} /></div>
             {/if}
@@ -1780,6 +1785,7 @@
               plateSeconds={plateSeconds(plate.spec)} ondayhold={holdDay}
               {dayPlayed} dayPicked={(plate.spec.days ?? []).includes(dayOf(at))}
               onplayday={playable ? (on) => (spec.days = pickedDays(spec, dayOf(at), on)) : null}
+              {daySkipped} onskipday={playable ? (on) => (spec.skipped = skippedDays(spec, dayOf(at), on)) : null}
               caseId={plate.caseId ?? caseId ?? ''} onpick={pickStep} onadd={newStep} onremove={dropStep} onchange={changeStep}
               onmove={(id, index) => (spec.steps = movedStep(spec, at, id, index))} onduplicate={duplicateStep} />
           </div>
@@ -1909,7 +1915,7 @@
 {/if}
 
 {#if exporting}
-  <PlateExportDialog moments={playedDays} {stepped} {runtime} past={pastBox} name={plate?.title ?? 'Map plate'} preview={exportPreview} transparent={!!spec?.page?.transparent}
+  <PlateExportDialog moments={videoPlayed} {stepped} {runtime} past={pastBox} name={plate?.title ?? 'Map plate'} preview={exportPreview} transparent={!!spec?.page?.transparent}
     page={spec?.page} hold={spec ? plateSeconds(spec) : 1} onhold={holdPlate}
     onexport={runExport} oncopy={copyImage} onclose={() => (exporting = false)} />
 {/if}

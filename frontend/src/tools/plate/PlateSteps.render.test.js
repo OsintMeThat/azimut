@@ -124,6 +124,32 @@ describe('the steps of a day', () => {
     expect(onplayday).toHaveBeenLastCalledWith(true);
   });
 
+  it('hides a played day from the video from its ⋯, and shows it again', () => {
+    const onskipday = vi.fn();
+    show({ current: null, onskipday });
+    document.body.querySelector('button[aria-label="Set 15 Oct 2026"]').click(); flushSync();
+    [...document.body.querySelectorAll('.fm-item')].find((node) => node.textContent.includes('Hide from the video')).click();
+    expect(onskipday).toHaveBeenLastCalledWith(true);
+    unmount(held); held = null; document.body.innerHTML = '';
+    // hidden, the day and its steps stay to edit, dashed; its time is moot, so it says Hidden
+    show({ current: null, daySkipped: true, onskipday });
+    expect(document.body.querySelector('.steps').classList.contains('skipped')).toBe(true);
+    expect(document.body.querySelector('button[aria-label="How long 15 Oct 2026 holds"]')).toBeNull();
+    expect(document.body.querySelector('.time.said').textContent).toBe('Hidden');
+    expect(tiles()).toHaveLength(3);
+    document.body.querySelector('button[aria-label="Set 15 Oct 2026"]').click(); flushSync();
+    expect(document.body.querySelector('.fields')).toBeNull();
+    [...document.body.querySelectorAll('.fm-item')].find((node) => node.textContent.includes('Show in the video')).click();
+    expect(onskipday).toHaveBeenLastCalledWith(false);
+  });
+
+  it('offers no hiding on a day added to the play without steps: it is taken out instead', () => {
+    show({ steps: [], current: null, dayPicked: true, onplayday: vi.fn(), onskipday: vi.fn() });
+    document.body.querySelector('button[aria-label="Set 15 Oct 2026"]').click(); flushSync();
+    expect(document.body.textContent).toContain('Take it out');
+    expect(document.body.textContent).not.toContain('Hide from the video');
+  });
+
   it('lets a day added to the play go again, unless it holds steps', () => {
     const onplayday = vi.fn();
     show({ steps: [], current: null, dayPicked: true, onplayday });

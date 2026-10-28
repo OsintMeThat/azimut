@@ -634,6 +634,19 @@ def test_a_plate_keeps_the_days_it_was_told_to_play(client, owner):
     assert client.post("/api/templates/map", json={"name": "Days", "data": {**data, "days": ["2026-10-12"]}}).status_code == 422
 
 
+def test_a_plate_keeps_the_days_its_video_skips(client, owner):
+    spec = plate_spec(skipped=["2026-10-13"])
+    saved = save(client, owner, spec=spec)
+    assert saved.status_code == 200, saved.text
+    assert client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]["skipped"] == ["2026-10-13"]
+    for skipped in (["yesterday"], ["2026-10-12"] * (mapplates.MAX_FRAMED_BEATS + 1)):
+        assert save(client, owner, spec=plate_spec(skipped=skipped)).status_code == 422
+    # a template keeps no day of a case
+    data = mapplates.template_of(spec)
+    assert "skipped" not in data
+    assert client.post("/api/templates/map", json={"name": "Skips", "data": {**data, "skipped": ["2026-10-13"]}}).status_code == 422
+
+
 def test_a_plate_draws_a_bounded_number_of_maps(client, owner):
     maps = [{"id": f"m{index}", "kind": "map", "box": [0, 0, 10, 10], "view": {"lat": 0, "lon": 0, "zoom": 3}} for index in range(mapplates.MAX_MAPS)]
     assert save(client, owner, spec={"elements": maps}).status_code == 200

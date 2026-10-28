@@ -7,7 +7,9 @@
    * when the video's transitions are on, duplicates it, or removes it with what stands on it.
    *
    * A day the play does not go through (no layer changes on it, no steps) says so, and a
-   * press on it adds it to the play; its ⋯ lets a day added that way go again.
+   * press on it adds it to the play; its ⋯ lets a day added that way go again. A day the
+   * play goes through can be hidden from the video from its ⋯: the editor still shows it
+   * and its steps, dashed, and the play and every export skip them.
    *
    * Every tile says how long it holds in the video, and a press on that time sets it:
    * the day its own seconds or the plate's, a step its own, never shorter than its
@@ -52,6 +54,9 @@
     dayPicked = false,
     /** `(on)`: the day shown added to the play, or let go; null where a plate plays no days. */
     onplayday = null,
+    /** Whether the video skips the day shown, and `(on)` to hide it from the video or show it again; null where a plate plays no days. */
+    daySkipped = false,
+    onskipday = null,
   } = $props();
 
   /** `{ step, index, anchor }` of the step being set, or `{ day: true, anchor }`; `at` in place of `anchor` for a right-click. */
@@ -108,7 +113,7 @@
   }
 </script>
 
-<div class="steps" bind:this={strip} role="listbox" aria-label="Steps of the day" tabindex="-1" ondragover={(event) => event.preventDefault()} ondrop={drop}>
+<div class="steps" class:skipped={daySkipped} bind:this={strip} role="listbox" aria-label="Steps of the day" tabindex="-1" ondragover={(event) => event.preventDefault()} ondrop={drop}>
   <div class="slot" role="presentation" oncontextmenu={(event) => context(event, { day: true })}>
     {#if !dayPlayed && onplayday}
       <button type="button" class="tile day idle" title="No layer changes on this day, so the play skips it. Press to add it"
@@ -118,16 +123,21 @@
         <span class="tile-add">Add to the play</span>
       </button>
     {:else}
-    <button type="button" class="tile day" class:on={!current} role="option" aria-selected={!current} title="The day itself, under its steps"
+    <button type="button" class="tile day" class:on={!current} role="option" aria-selected={!current}
+      title={daySkipped ? 'Hidden from the video, with its steps. Its ⋯ shows it again' : 'The day itself, under its steps'}
       onclick={() => onpick?.(null)}>
-      <span class="thumb"><Icon name="plate" size={14} /></span>
+      <span class="thumb"><Icon name={daySkipped ? 'eyeOff' : 'plate'} size={14} /></span>
       <span class="tile-name">{dayLabel}</span>
     </button>
+    {#if daySkipped}
+      <span class="time said">Hidden</span>
+    {:else}
     <button type="button" class="time" class:own={dayOwn} aria-label={`How long ${dayLabel} holds`}
       title={dayOwn ? 'How long this day holds in the video, its own time. Press to set it' : 'How long this day holds in the video, as every day does. Press to give it its own'}
       onclick={(event) => open({ day: true, anchor: event.currentTarget }, true)}>{timecode(daySeconds)}</button>
     {/if}
-    <button type="button" class="more" aria-label={`Set ${dayLabel}`} title={dayPlayed ? 'How long it holds' : 'Add it to the play'}
+    {/if}
+    <button type="button" class="more" aria-label={`Set ${dayLabel}`} title={!dayPlayed ? 'Add it to the play' : daySkipped ? 'Show it in the video' : 'How long it holds, or hide it'}
       onclick={(event) => open({ day: true, anchor: event.currentTarget })}><Icon name="more" size={14} stroke={2.6} /></button>
   </div>
   {#each steps as step, index (step.id)}
@@ -164,6 +174,7 @@
       <button type="button" class="fm-item" onclick={() => { menu = null; onplayday(true); }}>
         <Icon name="plus" size={14} /><span class="fm-grow">Add this day to the play</span></button>
     {:else}
+    {#if !daySkipped}
     <div class="fields">
       <label title="Seconds this day holds in the video">Seconds<input class="input" type="number" min={LEAST_SECONDS} max={MOST_SECONDS} step="0.1"
         bind:this={secondsField} value={daySeconds} onchange={(event) => ondayhold?.(event.currentTarget.value)} /></label>
@@ -173,11 +184,17 @@
           As every day ({timecode(plateSeconds)})</button>
       {/if}
     </div>
+    {/if}
     {#if dayPicked && !steps.length && onplayday}
       <div class="fm-sep"></div>
       <button type="button" class="fm-item" title="No layer changes on this day: the play skips it again"
         onclick={() => { menu = null; onplayday(false); }}>
         <Icon name="minus" size={14} /><span class="fm-grow">Take it out of the play</span></button>
+    {:else if onskipday}
+      {#if !daySkipped}<div class="fm-sep"></div>{/if}
+      <button type="button" class="fm-item" title={daySkipped ? 'The play and the exports go through it again' : 'The play and the exports skip it and its steps; it stays here to edit'}
+        onclick={() => { menu = null; onskipday(!daySkipped); }}>
+        <Icon name={daySkipped ? 'eye' : 'eyeOff'} size={14} /><span class="fm-grow">{daySkipped ? 'Show in the video' : 'Hide from the video'}</span></button>
     {/if}
     {/if}
   </FloatingMenu>
@@ -241,6 +258,10 @@
     font-size: 10px; font-variant-numeric: tabular-nums; cursor: pointer; }
   .time:hover, .time:focus-visible { background: var(--bg-3); color: var(--text-1); }
   .time.own { color: var(--accent); }
+  .time.said { cursor: default; pointer-events: none; }
+  /* a day hidden from the video, and its steps, stay to edit, dashed */
+  .skipped .tile { border-style: dashed; }
+  .skipped .tile:not(.on) { color: var(--text-3); }
   .more { position: absolute; top: 2px; right: 2px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--r-sm);
     color: var(--text-2); cursor: pointer; }
   .more:hover, .more:focus-visible { background: var(--bg-3); color: var(--text-1); }

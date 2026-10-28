@@ -503,6 +503,8 @@ class PlateSpec(Strict):
     holds: dict[Day, Seconds] = Field(default_factory=dict, max_length=MAX_FRAMED_BEATS)
     #: The days played though no layer changes on them, picked on the plate's own calendar.
     days: list[Day] = Field(default_factory=list, max_length=MAX_FRAMED_BEATS)
+    #: The days the video skips though the play would go through them; the editor still shows them.
+    skipped: list[Day] = Field(default_factory=list, max_length=MAX_FRAMED_BEATS)
     elements: list[Element] = Field(default_factory=list, max_length=MAX_ELEMENTS)
 
     @model_validator(mode="after")
@@ -551,7 +553,7 @@ class TemplateData(PlateSpec):
             raise ValueError("a template keeps no framing of a day")
         if self.holds:
             raise ValueError("a template keeps no day's own time")
-        if self.days:
+        if self.days or self.skipped:
             raise ValueError("a template keeps no days of a case")
         return self
 

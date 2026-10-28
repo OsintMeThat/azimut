@@ -87,6 +87,9 @@ export function playDays(spec, moments) {
   return [...new Set([...moments, ...stepped, ...picked])].sort();
 }
 
+/** The days of `days` the video goes through: all but those it was told to skip, which the editor still shows. */
+export const videoDays = (spec, days) => days.filter((day) => !(spec?.skipped ?? []).includes(day));
+
 /** The whole of a sequence, in seconds. */
 export const totalSeconds = (list) => list.reduce((sum, beat) => sum + beat.seconds, 0);
 

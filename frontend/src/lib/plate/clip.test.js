@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { beatClips, beats, boundSeconds, captionOf, clipRange, clipSeconds, daySeconds, isGif, leastSeconds, playDays, readTimecode, stepSeconds, timecode, totalSeconds } from './clip.js';
+import { beatClips, beats, boundSeconds, captionOf, clipRange, clipSeconds, daySeconds, isGif, leastSeconds, playDays, readTimecode, stepSeconds, timecode, totalSeconds, videoDays } from './clip.js';
 
 describe('a clip', () => {
   it('runs forward, inside its video, ten minutes at most', () => {
@@ -78,6 +78,16 @@ describe('a played plate', () => {
     expect(playDays({ steps: { now: [{ id: 'p' }], '2026-10-11': [] } }, ['2026-10-14'])).toEqual(['2026-10-14']);
     // a day the plate was told to play is played, a change of its layers or not
     expect(playDays({ days: ['2026-10-12', 'now'] }, ['2026-10-10', '2026-10-14'])).toEqual(['2026-10-10', '2026-10-12', '2026-10-14']);
+  });
+
+  it('leaves out of the video the days it was told to skip, steps and all', () => {
+    const spec = { skipped: ['2026-10-12'], steps: { '2026-10-12': [{ id: 'u' }] } };
+    const days = playDays(spec, ['2026-10-10', '2026-10-14']);
+    // the editor still goes through the day, the video does not
+    expect(days).toEqual(['2026-10-10', '2026-10-12', '2026-10-14']);
+    expect(videoDays(spec, days)).toEqual(['2026-10-10', '2026-10-14']);
+    expect(beats(spec, videoDays(spec, days)).map((beat) => beat.day)).toEqual(['2026-10-10', '2026-10-14']);
+    expect(videoDays({}, days)).toEqual(days);
   });
 });
 

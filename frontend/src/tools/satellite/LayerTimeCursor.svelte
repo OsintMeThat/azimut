@@ -33,6 +33,8 @@
     /** The clock the moments are on, named under a layer dated to the minute. */
     zone = 'UTC',
     label = 'Layer moment',
+    /** Moments drawn faint on the track: a plate's days its video skips. */
+    faded = [],
     onchange,
   } = $props();
 
@@ -55,9 +57,10 @@
     for (const item of moments) {
       const day = dayNumber(item.slice(0, 10));
       if (day === null) continue;
-      const tick = byDay.get(day) ?? { day, first: item, count: 0, on: false };
+      const tick = byDay.get(day) ?? { day, first: item, count: 0, on: false, faded: true };
       tick.count += 1;
       tick.on ||= item === at;
+      tick.faded &&= faded.includes(item);
       byDay.set(day, tick);
     }
     return [...byDay.values()];
@@ -143,8 +146,8 @@
     title="Drag to read the layer at another day. Double-click goes back to today.">
     <span class="rail"></span>
     {#each ticks as tick (tick.day)}
-      <span class="tick" class:on={tick.on} style:left="{place(tick.day)}%"
-        title={tick.count > 1 ? `${momentLabel(isoDay(tick.day))}, ${tick.count} changes` : momentLabel(tick.first)}></span>
+      <span class="tick" class:on={tick.on} class:faded={tick.faded} style:left="{place(tick.day)}%"
+        title={`${tick.count > 1 ? `${momentLabel(isoDay(tick.day))}, ${tick.count} changes` : momentLabel(tick.first)}${tick.faded ? ', hidden from the video' : ''}`}></span>
     {/each}
     <span class="handle" style:left="{place(cursorDay)}%" role="slider" tabindex="0" aria-label={label}
       aria-valuemin={first} aria-valuemax={last} aria-valuenow={cursorDay}
@@ -225,6 +228,7 @@
   .rail { position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; border-radius: 1px; background: var(--border); }
   .tick { position: absolute; top: 5px; bottom: 5px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text-3); }
   .tick.on { background: var(--accent); }
+  .tick.faded { opacity: .35; }
   .handle { position: absolute; top: 1px; bottom: 1px; width: 11px; margin-left: -5px; border-radius: 3px;
     background: var(--accent); box-shadow: 0 0 0 2px var(--bg-1); cursor: ew-resize; }
   .handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

@@ -755,6 +755,12 @@ export function pickedDays(spec, day, on) {
   return on && day !== PAGE ? [...kept, day].sort() : kept;
 }
 
+/** The days the video skips, with the day `day` among them (`on`) or played again. */
+export function skippedDays(spec, day, on) {
+  const kept = (spec?.skipped ?? []).filter((item) => item !== day);
+  return on && day !== PAGE ? [...kept, day].sort() : kept;
+}
+
 /** Whether the plate holds a step on any day. */
 export const hasSteps = (spec) => Object.values(spec?.steps ?? {}).some((list) => list.length > 0);
 

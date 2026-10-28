@@ -29,6 +29,13 @@ const button = (label) => document.body.querySelector(`[aria-label="${label}"]`)
 const text = (value) => [...document.body.querySelectorAll('button')].find((node) => node.textContent.trim() === value);
 
 describe('the moment a tracked layer is read at', () => {
+  it('draws faint the days a plate\'s video skips', () => {
+    show({ at: '2026-10-12', trail: true, since: null }, { faded: ['2026-10-12'] });
+    const ticks = [...document.body.querySelectorAll('.tick')];
+    expect(ticks.map((tick) => tick.classList.contains('faded'))).toEqual([false, true, false]);
+    expect(ticks[1].title).toContain('hidden from the video');
+  });
+
   it('reads today by default, said as its date, a tick per change, and steps back to the last change', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-25T12:00:00Z'));
