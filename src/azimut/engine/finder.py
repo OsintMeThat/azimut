@@ -124,8 +124,12 @@ DENSE_MAX = 3.0
 FINE_PER_DETAIL = 2.0
 FINE_MIN = 25.0
 FINE_MAX = 100.0
-# Points kept at each level and refined about, three by three.
-KEEP = 12
+# Points kept at each level and refined about, three by three. A truth's score peak is narrower than the grid
+# (80 m off v25's it falls from 0.72 to 0.43–0.55, its grid 226 m apart), so the point nearest it may rank about
+# 100th roughly. Measured on the owner's 30 real cases at Quick (FIND_FIX_HANDOVER, nights quick28 and keep100p3):
+# with 12, 7 of the 21 working cases found first and 11 in the top 5; with 100, 8 and 14 (rdc1 and v19 first, v25 and
+# v23 second), held out unchanged, 13% more points. v08's first place moved 600 m → 1,007 m off, its second 890 m.
+KEEP = 100
 # The best places polished on a grid this fine about them (a fraction of the finest spacing), this many either way.
 POLISH = 3
 POLISH_STEPS = 2

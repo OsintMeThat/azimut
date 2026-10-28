@@ -1199,6 +1199,36 @@ def test_a_place_read_low_roughly_but_first_in_full_is_listed_first(monkeypatch)
     assert all(terrain.distance(p["lat"], p["lon"], *spots[7]) > 1_000.0 for p in found["places"])
 
 
+def test_a_peak_narrower_than_the_grid_is_refined_to_though_its_nearest_point_ranks_low(monkeypatch):
+    # twenty broad hot spots on grid points, and the place: a peak far higher but narrow, 350 m from the grid point
+    # nearest it, which reads it lower than all twenty
+    plan = finder.Plan(area=_square(CAMERA, 6_000.0), reach=REACH, spacing=900.0, fine=100.0)
+    lat, lon = finder.grid(plan, finder.coarse_spacing(plan))
+    points = list(zip(lat.tolist(), lon.tolist()))
+    middle = min(points, key=lambda p: terrain.distance(*p, *CAMERA))
+    spots: list[tuple[float, float]] = []
+    for point in sorted(points, key=lambda p: terrain.distance(*p, *CAMERA), reverse=True):
+        if len(spots) < 20 and all(terrain.distance(*point, *other) >= 1_750.0 for other in [middle, *spots]):
+            spots.append(point)
+    assert len(spots) == 20
+    a, o = finder._from_local(*middle, np.array([350.0]), np.array([0.0]))
+    peak = (float(a[0]), float(o[0]))
+
+    def scored(a, o, step, stage, heights, trace, plan, sampler):
+        broad = max(0.7 - 0.005 * i - terrain.distance(a, o, *spot) / 3_000.0 for i, spot in enumerate(spots))
+        value = max(broad, 0.95 - terrain.distance(a, o, *peak) / 700.0, 0.0)
+        return {"lat": round(a, 6), "lon": round(o, 6), "explained": round(value, 4), "heading": 80.0, "fov": 40.0,
+                "gap": 0.0, "spacing": step, "relief": 9_000.0}
+
+    monkeypatch.setattr(finder, "_score_stage", scored)
+    found = finder.search(plan, _photo())
+    assert terrain.distance(found["places"][0]["lat"], found["places"][0]["lon"], *peak) < 100.0
+    # refined about the twelve best points a level only, the search never stands near it
+    monkeypatch.setattr(finder, "KEEP", 12)
+    found = finder.search(plan, _photo())
+    assert all(terrain.distance(p["lat"], p["lon"], *peak) > 1_000.0 for p in found["places"])
+
+
 def test_a_place_the_analysts_marks_cost_much_says_what_it_explains_without_them(monkeypatch):
     # the place explains 0.5 with its distances and Sky only, 0.9 without
     asked = []
