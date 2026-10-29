@@ -59,6 +59,7 @@ export const ENTITY_TOOL = {
   collage: 'collage',
   'compare-session': 'compare',
   'horizon-view': 'horizon',
+  'horizon-find': 'horizon',
   'map-plate': 'plate',
   'analysis-zones': 'detect',
   'analysis-area': 'detect',
@@ -204,6 +205,12 @@ export function openEntity(entity, resolved = false) {
   if (entity.type === 'horizon-view') {
     const name = specName(entity.attrs?.spec);
     if (name) uiState.openHorizonView = name;
+    uiState.tool = 'horizon';
+    return;
+  }
+  if (entity.type === 'horizon-find') {
+    const name = specName(entity.attrs?.spec);
+    if (name) uiState.openHorizonFind = name;
     uiState.tool = 'horizon';
     return;
   }

@@ -1,5 +1,6 @@
 """Find where a photo was taken: the grid, the alignments that narrow it, and the camera found again."""
 
+import sys
 from dataclasses import replace
 
 import numpy as np
@@ -1285,3 +1286,95 @@ def test_the_best_points_a_warm_start_scored_are_slid_again_in_full(monkeypatch)
     assert warm, "some points were warm-started"
     # the best of them read again in full: none of the leading points keeps its warm score
     assert all(abs(p["explained"] - true(p["lat"], p["lon"])) < 1e-6 for p in points[:5])
+
+
+# -- the machine a search runs on, and the searches a case keeps: what the audit found ---------
+
+
+def test_a_search_takes_no_more_lanes_than_a_fast_one_where_the_memory_is_not_said(monkeypatch):
+    monkeypatch.setattr(horizon_finds, "_available_memory", lambda: None)
+    monkeypatch.setattr(horizon_finds, "cores", lambda: 16)
+    monkeypatch.setattr("os.cpu_count", lambda: 32)
+    assert horizon_finds.lanes_for("fastest") == horizon_finds.LANES_MAX
+
+
+def test_windows_never_gets_more_lanes_than_it_can_wait_on(monkeypatch):
+    monkeypatch.setattr(horizon_finds, "_available_memory", lambda: 1e13)
+    monkeypatch.setattr(horizon_finds, "cores", lambda: 128)
+    monkeypatch.setattr("sys.platform", "win32")
+    assert horizon_finds.lanes_for("fastest") == horizon_finds.WINDOWS_LANES
+
+
+def test_windows_and_macos_are_asked_their_free_memory(monkeypatch):
+    monkeypatch.setattr(horizon_finds, "_windows_available", lambda: 6e9)
+    monkeypatch.setattr(horizon_finds, "_darwin_available", lambda: 5e9)
+    monkeypatch.setattr("sys.platform", "win32")
+    assert horizon_finds._available_memory() == 6e9
+    monkeypatch.setattr("sys.platform", "darwin")
+    assert horizon_finds._available_memory() == 5e9
+
+
+def test_a_vm_stat_answer_reads_as_the_memory_macos_can_give():
+    said = (
+        "Mach Virtual Memory Statistics: (page size of 16384 bytes)\n"
+        "Pages free:                               10000.\n"
+        "Pages active:                            200000.\n"
+        "Pages inactive:                           30000.\n"
+        "Pages speculative:                         2000.\n"
+    )
+    assert horizon_finds._vm_stat_bytes(said) == (10000 + 30000 + 2000) * 16384
+    assert horizon_finds._vm_stat_bytes("vm_stat: command not found") is None
+
+
+@pytest.mark.skipif(sys.platform not in ("win32", "darwin"), reason="the system's own answer, where it is asked")
+def test_this_system_says_its_free_memory():
+    free = horizon_finds._available_memory()
+    assert free is not None and free > 0
+
+
+def _kept_search(client, monkeypatch, case_name):
+    monkeypatch.setattr(workqueue, "enqueue", lambda *a, **k: None)
+    case_id = client.post("/api/cases", json={"name": case_name}).json()["id"]
+    name = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask()).json()["name"]
+    return case_id, name
+
+
+def test_a_new_search_leaves_the_name_of_one_in_the_trash_to_its_restore(client, monkeypatch):
+    case_id, name = _kept_search(client, monkeypatch, "Trash names")
+    assert client.delete(f"/api/cases/{case_id}/horizon/finds/{name}").status_code == 200
+    again = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask()).json()["name"]
+    assert again.casefold() != name.casefold()
+    [group] = client.get(f"/api/cases/{case_id}/trash").json()["groups"]
+    restored = client.post(f"/api/cases/{case_id}/trash/{group['id']}/restore")
+    assert restored.status_code == 200, restored.text
+    assert client.get(f"/api/cases/{case_id}/horizon/finds/{name}").status_code == 200
+
+
+def test_a_search_under_way_arrives_stopped_through_a_bundle(client, monkeypatch):
+    from azimut.engine import bundles
+    from azimut.workspace import Case
+
+    case_id, name = _kept_search(client, monkeypatch, "Carried search")
+    assert client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()["status"] == "queued"
+    exported = bundles.export_case(Case.open(case_id))
+    landed = bundles.import_into(Case.create(bundles.imported_name(case_id)), exported)["case_id"]
+    assert client.get(f"/api/cases/{landed}/horizon/finds/{name}").json()["status"] == "cancelled"
+    # the case it came from still runs it
+    assert client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()["status"] == "queued"
+
+
+def test_a_search_deleted_while_it_runs_is_never_written_back(client, monkeypatch):
+    from azimut.workspace import Case
+
+    case_id, name = _kept_search(client, monkeypatch, "Deleted while running")
+    case = Case.open(case_id)
+
+    def deleted_then_no_terrain(*args, **kwargs):
+        assert client.delete(f"/api/cases/{case_id}/horizon/finds/{name}").status_code == 200
+        raise terrain.TerrainUnavailable("offline")
+
+    monkeypatch.setattr(finder, "search", deleted_then_no_terrain)
+    with pytest.raises(workqueue.JobRefused):
+        horizon_finds.run(case, {"payload": {"name": name}})
+    assert horizon_finds.read(case, name) is None
+    assert not case.resolve_inside(f".horizon/finds/{name}.json").exists()

@@ -157,6 +157,14 @@ def test_every_type_in_a_full_case_declares_what_it_owns(client):
     assert all(reason for reason in artifacts.NO_FILES.values())
 
 
+def test_every_kind_that_owns_files_is_a_type_the_vocabulary_knows():
+    """A kind filed without its type is a free type: drawn in every reading of the case,
+    with no icon and nothing that opens it, which a Horizon search once was."""
+    from azimut.engine import entities
+
+    assert sorted(kind for kind in artifacts.KINDS if entities.entity_type(kind) is None) == []
+
+
 def test_a_full_case_comes_back_whole_from_its_bundle(client):
     """Every file a full case's entities own and the bundle carries lands in the case
     the bundle imports into, so a new kind cannot travel half."""

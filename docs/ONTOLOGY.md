@@ -140,7 +140,7 @@ to one clause — no full stop, no em-dash, under a hundred characters.
 | `class` | a model the case counts with, never one particular object | `equipment-type` |
 | `identifier` | a handle on a system | `account`, `email`, `phone`, `domain`, `ip`, `network` |
 | `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture` |
-| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `map-plate`, `compare-session`, `horizon-view`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run`, `bookmark` |
+| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `map-plate`, `compare-session`, `horizon-view`, `horizon-find`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run`, `bookmark` |
 | `place` | a point, never a thing | `place` |
 | `claim` | a statement about the graph, carrying its own reasoning | `claim` |
 
@@ -169,7 +169,7 @@ picture of the case is about it. The line that matters is between the first two 
 |---|---|---|---|
 | `subject` | the case is about it | `person`, `organization`, `vehicle`, `vessel`, `aircraft`, `structure`, `equipment-type`, `account`, `email`, `phone`, `domain`, `ip`, `network`, `media`, `place`, `claim` | a node |
 | `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture` | folded into the edge that carries its provenance, drawn or not (below) |
-| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `horizon-view`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run` | out of the case readings, drawn by **My work** |
+| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `horizon-view`, `horizon-find`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run` | out of the case readings, drawn by **My work** |
 | `deliverable` | what the case produced | `post`, `map-plate` | out of the case readings, drawn by **My work** |
 
 A bookmark stays drawn because it is not a leaf: *this account posted it, this
@@ -195,6 +195,7 @@ answer by omission (`tests/test_entities.py`).
 | `map-plate` | document | deliverable | ✅ | map-plate | `spec` (json), `thumb?` (webp): a page round the case's maps, its layers kept by name | yes (spec + preview) |
 | `compare-session` | document | annex | ✅ | compare | `spec` (json), `preview?`, `lat`, `lon`, `zoom`, `bearing`, `footprint?`, `geo?` | yes |
 | `horizon-view` | document | annex | ✅ | horizon | `spec` (json), `thumb?` (webp), `lat`, `lon`, `zoom`, `bearing`, `heading`, `fov`, `projection`, `footprint?`, `geo?` | yes (spec + preview) |
+| `horizon-find` | document | annex | ✅ | horizon | `spec` (json): the question (photo, trace, area, setup) and the places scored | yes |
 | `map-layer` | document | annex | ✅ | map layers | `spec` (json), `format`, `source_url?` | yes (spec + snapshot + icons) |
 | `analysis-area` | document | annex | ✅ | detect | `spec` (json): a named, coloured area routines share | yes (`.analysis/areas-<id>.json`) |
 | `analysis-zones` | document | annex | ✅ | detect | `spec` (json): an ordered group of shared area IDs; older shape sets migrate on read | yes (`.analysis/zones-<id>.json`) |

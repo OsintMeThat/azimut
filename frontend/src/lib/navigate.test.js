@@ -102,6 +102,11 @@ describe('openEntity', () => {
     expect(uiState.gotoCoords.lat).toBe(3);
     expect(uiState.gotoCoords.lon).toBe(4);
   });
+  it('opens a search the case keeps in Horizon, which shows it in Find', () => {
+    openEntity({ id: 'f1', type: 'horizon-find', label: 'Ridge', attrs: { spec: '.horizon/finds/Ridge.json' } });
+    expect(uiState.tool).toBe('horizon');
+    expect(uiState.openHorizonFind).toBe('Ridge');
+  });
   it('opens bookmarks and external captures in a new browser tab', () => {
     openEntity({ type: 'bookmark', attrs: { url: 'https://example.test/bookmark' } });
     openEntity({ type: 'capture', attrs: { source_url: 'https://maps.example.test/view' } });

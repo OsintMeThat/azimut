@@ -583,6 +583,9 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
     # An eye on the terrain, the way it looked, and the photo matched over it.
     EntityType("horizon-view", "Horizon view", DOCUMENT, "horizon", ANNEX,
                hint="where an eye stood and what it saw, often with a photo matched on it"),
+    # Where a photo was searched for over an area of the map, and the places that fit it.
+    EntityType("horizon-find", "Horizon search", DOCUMENT, "search", ANNEX,
+               hint="an area searched for where a photo was taken, and the places that fit"),
     EntityType("analysis-zones", "Area group", DOCUMENT, "polygon", ANNEX,
                hint="an ordered group of case areas used in Detect"),
     EntityType("analysis-area", "Area", DOCUMENT, "mapArea", ANNEX,

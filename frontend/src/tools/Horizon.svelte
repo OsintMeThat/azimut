@@ -446,6 +446,16 @@
     });
   });
 
+  /** A search handed over from Files or the Board: opened in Find. */
+  $effect(() => {
+    const asked = uiState.openHorizonFind;
+    if (uiState.tool !== 'horizon' || !asked || !caseState.current) return;
+    untrack(() => {
+      uiState.openHorizonFind = null;
+      openSearch(asked);
+    });
+  });
+
   // what went wrong opening or saving a view, or what a view opened without
   $effect(() => {
     const message = views.error;

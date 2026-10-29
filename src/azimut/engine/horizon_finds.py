@@ -30,6 +30,7 @@ import time
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -66,8 +67,19 @@ LANE_BYTES = 400e6
 SPARE_BYTES = 2e9
 
 
+#: Windows waits on at most this many processes at once (`ProcessPoolExecutor` refuses more).
+WINDOWS_LANES = 61
+
+
 def _available_memory() -> float | None:
-    """Memory the system can give, bytes, where it says (Linux); None elsewhere."""
+    """Memory the system can give, bytes: read on Linux, asked of Windows and macOS; None when
+    none answers."""
+    import sys
+
+    if sys.platform == "win32":
+        return _windows_available()
+    if sys.platform == "darwin":
+        return _darwin_available()
     try:
         with open("/proc/meminfo", encoding="ascii") as info:
             for line in info:
@@ -76,6 +88,52 @@ def _available_memory() -> float | None:
     except OSError:
         return None
     return None
+
+
+def _windows_available() -> float | None:
+    """The physical memory Windows says is free (`GlobalMemoryStatusEx`)."""
+    import ctypes
+    import sys
+
+    if sys.platform != "win32":
+        return None
+
+    class Status(ctypes.Structure):
+        _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [
+            (field, ctypes.c_ulonglong)
+            for field in ("total", "available", "page_total", "page_free", "virtual_total", "virtual_free", "extended")
+        ]
+
+    status = Status()
+    status.length = ctypes.sizeof(Status)
+    try:
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return None
+    except (AttributeError, OSError):
+        return None
+    return float(status.available)
+
+
+def _darwin_available() -> float | None:
+    """What macOS can give without swapping, read off `vm_stat`."""
+    import subprocess
+
+    try:
+        said = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _vm_stat_bytes(said)
+
+
+def _vm_stat_bytes(said: str) -> float | None:
+    """Free, inactive and speculative pages of a `vm_stat` answer, in bytes, or None."""
+    import re
+
+    size = re.search(r"page size of (\d+) bytes", said)
+    pages = [re.search(rf"^{key}:\s+(\d+)", said, re.M) for key in ("Pages free", "Pages inactive", "Pages speculative")]
+    if size is None or not any(pages):
+        return None
+    return float(sum(int(found.group(1)) for found in pages if found) * int(size.group(1)))
 
 
 @functools.lru_cache(maxsize=1)
@@ -108,8 +166,10 @@ def cores(listed: str = "/proc/cpuinfo") -> int:
 
 def lanes_for(speed: str | None) -> int:
     """How many processes a search scores in: one when gentle, one for each of the machine's own cores when
-    fastest, else half the threads up to `LANES_MAX`; never more than the free memory allows."""
+    fastest, else half the threads up to `LANES_MAX`; never more than the free memory allows, no more than
+    `LANES_MAX` when the system does not say it, and no more than Windows can wait on."""
     import os
+    import sys
 
     if speed == "gentle":
         return 1
@@ -117,6 +177,10 @@ def lanes_for(speed: str | None) -> int:
     free = _available_memory()
     if free is not None:
         lanes = min(lanes, int((free - SPARE_BYTES) // LANE_BYTES))
+    else:
+        lanes = min(lanes, LANES_MAX)
+    if sys.platform == "win32":
+        lanes = min(lanes, WINDOWS_LANES)
     return max(1, lanes)
 
 
@@ -209,6 +273,24 @@ def new_record(name: str, ask: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def settle_carried(folder: Path) -> int:
+    """Searches a bundle carried while they were queued, running or stopping, kept as stopped:
+    a bundle leaves the case's jobs behind, so nothing would ever run or stop them. What one
+    had found by then is kept. How many were settled."""
+    settled = 0
+    for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(record, dict) or record.get("status") not in (*ACTIVE, STOPPING):
+            continue
+        record["status"] = "cancelled"
+        write_json_atomic(path, record)
+        settled += 1
+    return settled
+
+
 def stop(record: dict[str, Any]) -> None:
     """Ask a search to stop: one running stops between two points and keeps what it found, one queued at once."""
     if record.get("status") == "running":
@@ -234,6 +316,18 @@ def _carried(record: dict[str, Any], on_disk: dict[str, Any] | None) -> dict[str
     if found:
         record["found"] = found
     return record
+
+
+def _kept(case: Case, name: str, record: dict[str, Any]) -> bool:
+    """Write a run's record over the case's copy, unless the search was deleted meanwhile;
+    whether it was written. Under the case's lock, which a delete holds too, so a write
+    can never bring a deleted search back as a file no entity owns."""
+    with case.lock:
+        on_disk = read(case, name)
+        if on_disk is None:
+            return False
+        write(case, name, _carried(record, on_disk))
+        return True
 
 
 def plan_of(ask: dict[str, Any]) -> tuple[finder.Plan, finder.Trace]:
@@ -432,16 +526,17 @@ def run(case: Case, job: dict[str, Any]) -> None:
     """
     payload = job.get("payload") or {}
     name = str(payload.get("name") or "")
-    record = read(case, name)
-    if record is not None and record.get("status") == STOPPING:
-        # asked to stop as an app restart cut it short: nothing found by then is held any more
-        record.update(status="cancelled")
-        write(case, name, record)
-    if record is None or record.get("status") not in ACTIVE:
-        raise workqueue.JobCancelled(f"search {name!r} is gone or no longer asked for")
     started = time.time()
-    record.update(status="running", error="", progress={"done": 0, "total": 0, "started": started, "left": None})
-    write(case, name, record)
+    with case.lock:
+        record = read(case, name)
+        if record is not None and record.get("status") == STOPPING:
+            # asked to stop as an app restart cut it short: nothing found by then is held any more
+            record.update(status="cancelled")
+            write(case, name, record)
+        if record is None or record.get("status") not in ACTIVE:
+            raise workqueue.JobCancelled(f"search {name!r} is gone or no longer asked for")
+        record.update(status="running", error="", progress={"done": 0, "total": 0, "started": started, "left": None})
+        write(case, name, record)
     plan, trace = plan_of(record["ask"])
     plan, trace, framed = on_frames(case, record["ask"], plan, trace)
     clock = {"last": time.monotonic()}
@@ -461,11 +556,12 @@ def run(case: Case, job: dict[str, Any]) -> None:
         workqueue.let_others_through(case, JOB)
         if time.monotonic() - clock["last"] >= WRITE_EVERY:
             clock["last"] = time.monotonic()
-            on_disk = read(case, name)
-            if on_disk is None or on_disk.get("status") in ("cancelled", STOPPING):
-                stopped["asked"] = True
-                return
-            write(case, name, _carried(record, on_disk))
+            with case.lock:
+                on_disk = read(case, name)
+                if on_disk is None or on_disk.get("status") in ("cancelled", STOPPING):
+                    stopped["asked"] = True
+                    return
+                write(case, name, _carried(record, on_disk))
 
     try:
         result = finder.search(
@@ -474,30 +570,26 @@ def run(case: Case, job: dict[str, Any]) -> None:
         )
     except finder.Cancelled as exc:
         turncache.sweep(since=started)
-        on_disk = read(case, name)
-        if on_disk is not None:
-            partial = exc.result if exc.result is not None and exc.result["points"] else None
-            if partial is not None and framed is not None:
-                partial["frames"] = framed
-            record.update(status="cancelled", result=partial)
-            write(case, name, _carried(record, on_disk))
+        partial = exc.result if exc.result is not None and exc.result["points"] else None
+        if partial is not None and framed is not None:
+            partial["frames"] = framed
+        record.update(status="cancelled", result=partial)
+        _kept(case, name, record)
         raise workqueue.JobCancelled(f"search {name!r} stopped") from exc
     except terrain.TerrainUnavailable as exc:
         record.update(status="failed", error=f"The terrain could not be loaded: {exc}")
-        write(case, name, _carried(record, read(case, name)))
+        _kept(case, name, record)
         raise workqueue.JobRefused(record["error"]) from exc
     finally:
         LIVE.pop((case.id, name), None)
     # the turns this search kept, held under their budget, its first ones last to go
     turncache.sweep(since=started)
-    on_disk = read(case, name)
-    if on_disk is None:
-        raise workqueue.JobCancelled(f"search {name!r} was deleted while it ran")
     total = record["progress"]["total"]
     if framed is not None:
         result["frames"] = framed
     record.update(status="done", result=result, progress={"done": total, "total": total, "started": started, "left": 0})
-    write(case, name, _carried(record, on_disk))
+    if not _kept(case, name, record):
+        raise workqueue.JobCancelled(f"search {name!r} was deleted while it ran")
 
 
 def check(case: Case, record: dict[str, Any]) -> list[dict[str, Any]]:

@@ -1162,6 +1162,12 @@ def import_into(
             origin_case_id=str(verified.get("origin_case_id") or ""),
             name=name,
         )
+        # The jobs stayed behind, so a search that was under way would wait forever.
+        from . import horizon_finds
+
+        horizon_finds.settle_carried(
+            layout.tool_root(staging) / layout.HORIZON_DIR / layout.HORIZON_FINDS_DIR
+        )
         if job is not None:
             _install_running_job(staged_db, job)
         layout.mark_import_scaffold(case.path)

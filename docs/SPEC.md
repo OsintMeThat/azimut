@@ -91,7 +91,7 @@ The entity/link schema has existed since v1. Full vocabulary lives in
   | class | equipment-type |
   | identifier | account, email, phone, domain, ip, network |
   | collected | media, capture |
-  | document | proof, post, note, sheet, inspect-session, collage, compare-session, horizon-view, map-layer, map-plate, analysis-* (Detect), bookmark |
+  | document | proof, post, note, sheet, inspect-session, collage, compare-session, horizon-view, horizon-find, map-layer, map-plate, analysis-* (Detect), bookmark |
   | place | place |
   | claim | claim |
 

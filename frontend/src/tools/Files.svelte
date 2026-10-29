@@ -82,7 +82,7 @@
   const TYPE_ICON = {
     media: 'image', capture: 'satellite', note: 'note', proof: 'proof',
     post: 'post', place: 'pin', 'inspect-session': 'inspect', collage: 'grid', 'compare-session': 'compare',
-    'horizon-view': 'horizon', 'map-plate': 'plate', bookmark: 'link',
+    'horizon-view': 'horizon', 'horizon-find': 'search', 'map-plate': 'plate', bookmark: 'link',
   };
   const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v']);
 
@@ -862,7 +862,7 @@
       openNotebook(entity.id);
       return;
     }
-    if (['compare-session', 'horizon-view', 'map-plate', 'analysis-area', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
+    if (['compare-session', 'horizon-view', 'horizon-find', 'map-plate', 'analysis-area', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
       openEntity(entity);
       return;
     }

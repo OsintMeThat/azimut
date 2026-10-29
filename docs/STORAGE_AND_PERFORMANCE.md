@@ -515,7 +515,8 @@ the durable payload.
 
 Import pre-flights format and database versions before creating a destination.
 A refusal of a bundle made by a newer Azimut names that version, so the analyst
-knows which one to update to.
+knows which one to update to. Jobs never travel, so a Horizon search that was under
+way lands stopped, keeping what it had found.
 The browser file picker uploads to `<workspace>/.azimut/bundles/.imports/`; rejected and
 cancelled uploads are removed immediately, completed imports remove their source,
 and abandoned uploads expire after 24 hours.

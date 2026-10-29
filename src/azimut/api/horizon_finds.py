@@ -236,8 +236,11 @@ class FindIn(GroundIn):
 
 
 def _names(case: Any) -> set[str]:
+    """The names a new search cannot take: those in use, and those waiting in the Trash,
+    whose restore would otherwise find its name taken."""
     folder = case.resolve_inside(layout.horizon_find_rel("x")).parent
-    return {path.stem.casefold() for path in folder.glob("*.json")} if folder.is_dir() else set()
+    live = {path.stem.casefold() for path in folder.glob("*.json")} if folder.is_dir() else set()
+    return live | case.trashed_stems(f"{layout.HORIZON_DIR}/{layout.HORIZON_FINDS_DIR}")
 
 
 def _asked(body: GroundIn) -> dict[str, Any]:
@@ -497,12 +500,14 @@ def check_find(case_id: str, name: str) -> dict[str, Any]:
 def delete_find(case_id: str, name: str) -> dict[str, Any]:
     """Delete a search to the Trash; one still running stops first."""
     case = get_case(case_id)
-    safe, record = _one(case, name)
-    if record.get("status") in horizon_finds.ACTIVE:
-        record["status"] = "cancelled"
-        horizon_finds.write(case, safe, record)
-    rel = layout.horizon_find_rel(safe)
-    result = delete_by_path(case, rel)
-    if not result["deleted"]:
-        artifact_engine.delete(case, {"type": horizon_finds.TYPE, "attrs": {"spec": rel}})
+    # held against the search's own writes, so one under way cannot write it back once it is gone
+    with case.lock:
+        safe, record = _one(case, name)
+        if record.get("status") in horizon_finds.ACTIVE:
+            record["status"] = "cancelled"
+            horizon_finds.write(case, safe, record)
+        rel = layout.horizon_find_rel(safe)
+        result = delete_by_path(case, rel)
+        if not result["deleted"]:
+            artifact_engine.delete(case, {"type": horizon_finds.TYPE, "attrs": {"spec": rel}})
     return result

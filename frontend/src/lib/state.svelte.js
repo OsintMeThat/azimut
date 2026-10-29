@@ -289,6 +289,7 @@ export const uiState = $state({
   openCollage: null, // collage name to reopen in the Collage tool
   openCompare: null, // compare-session name to reopen in the Compare tool
   openHorizonView: null, // saved Horizon view name to reopen in the Horizon tab
+  openHorizonFind: null, // a search the case keeps, to open in Horizon's Find
   openPlate: null, // map plate name to reopen in the Map plate tool
   openPlateTemplate: null, // map template id to edit in the Map plate tool, from Settings
   newPlate: false, // the Map asked for a plate of what it shows: the Map plate tool opens one
@@ -687,6 +688,7 @@ function clearCaseHandoffs() {
   uiState.openCollage = null;
   uiState.openCompare = null;
   uiState.openHorizonView = null;
+  uiState.openHorizonFind = null;
   uiState.openPlate = null;
   uiState.newPlate = false;
   uiState.openAnalyzer = null;
