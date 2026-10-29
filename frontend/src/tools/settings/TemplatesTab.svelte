@@ -129,7 +129,7 @@
 <section class="group" data-guide="settings.plate-templates">
   <h3>Map plate templates</h3>
   <p class="note">
-    A plate's layout, paper and colours, without a case's ground or layers. Share one as a file.
+    A plate's layout, paper and colours without a case's ground or layers, shared as a file.
   </p>
   <div class="tpl-list">
     {#each templatesState.map as t (t.id)}

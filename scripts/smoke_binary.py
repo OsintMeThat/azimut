@@ -135,6 +135,27 @@ def check_gallery_dl(binary: Path, env: dict[str, str]) -> None:
         raise RuntimeError(f"gallery-dl's extractors are missing: {unknown.stderr.strip()!r}")
 
 
+#: What the binary is started with to run a spawned pool (packaging/entry.py PROCESSES_FLAG).
+PROCESSES_FLAG = "--smoke-processes"
+
+
+def check_processes(binary: Path, env: dict[str, str]) -> None:
+    """The binary's spawned children do the work they are handed.
+
+    A search scores its points in processes that start the binary again. Without
+    `freeze_support()` first, each child would start a second app instead, so the pool
+    never answers: the two factorials it sums (5! + 6! = 840) prove it does.
+    """
+    try:
+        done = subprocess.run(
+            [str(binary), PROCESSES_FLAG], env=env, capture_output=True, text=True, timeout=180, check=False
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("the binary's processes never answered") from exc
+    if done.returncode != 0 or done.stdout.strip() != "840":
+        raise RuntimeError(f"the binary's processes did not answer: {done.stderr.strip()[-400:]!r}")
+
+
 def smoke(binary: Path) -> None:
     binary = binary.resolve()
     if not binary.is_file():
@@ -146,6 +167,7 @@ def smoke(binary: Path) -> None:
         env = os.environ.copy()
         env["AZIMUT_HOME"] = workspace
         check_gallery_dl(binary, env)
+        check_processes(binary, env)
         process = subprocess.Popen(
             [str(binary), "--no-browser", "--port", str(port)],
             env=env,

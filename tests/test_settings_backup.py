@@ -240,6 +240,23 @@ def test_a_backup_from_before_map_templates_keeps_the_ones_here(client):
     assert [t["name"] for t in kept["map"]] == ["Situation"]
 
 
+def test_a_backup_merges_its_templates_with_the_ones_made_here(client):
+    """As the icons do: one of the same id is replaced, one made only here stays."""
+    here = client.post("/api/templates/proof", json={"name": "Made here", "data": {}}).json()
+    shared = client.post("/api/templates/proof", json={"name": "Old name", "data": {}}).json()
+
+    client.post(
+        "/api/settings/import",
+        json={"templates": {"schema": 1, "proof": [
+            {"id": shared["id"], "name": "New name", "data": {}},
+            {"id": "b1", "name": "From the backup", "data": {}},
+        ]}},
+    )
+
+    names = [t["name"] for t in client.get("/api/templates").json()["proof"]]
+    assert names == [here["name"], "New name", "From the backup"]
+
+
 def test_malformed_templates_are_dropped_not_saved(client):
     res = client.post(
         "/api/settings/import",

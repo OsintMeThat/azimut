@@ -170,7 +170,7 @@
     <span class="grow"></span>
     <!-- what the map draws of the past, said on the button that sets it: a menu nobody finds sets nothing -->
     <button type="button" class="past" class:set={time?.trail !== false || !!time?.since} aria-label="What the map shows of the past"
-      title="The state before, dashed; an area's gains and losses, hatched; how long events stay"
+      title="Sets how the past shows: the state before, gains and losses, how long events stay"
       aria-expanded={menu} bind:this={menuAnchor} onclick={() => (menu = !menu)}>
       <span>{pastSaid}</span><Icon name="chevronDown" size={10} /></button>
   </div>

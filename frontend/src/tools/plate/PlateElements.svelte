@@ -185,7 +185,7 @@
         <button type="button" class="pill" title="Show it on this day and every day after" onclick={() => Object.assign(element, carryOn(element, at))}>From here</button>
       </div>
     {:else}
-      <p class="note">What you add on the map belongs to the day shown. Another day's annotations are listed here, to bring back.</p>
+      <p class="note">What you add belongs to the day shown, and other days' annotations wait here to come back.</p>
     {/each}
   {/if}
 </aside>

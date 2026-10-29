@@ -240,7 +240,7 @@
             : `Date your edits from ${momentLabel(cursor)}`}
           onclick={pickDay}><Icon name="calendar" size={12} />{#if !vertical && dated}<span>From {short}</span>{/if}</button>
         <button type="button" class="mode" aria-pressed={!dated} aria-label="No date"
-          title="What you draw or change counts on every day; what moved on a day moves from a day"
+          title="What you draw or change holds on every day"
           onclick={() => { picking = false; controller.timeMode = 'fix'; }}><Icon name="always" size={13} />{#if !vertical && !dated}<span>No date</span>{/if}</button>
       </span>
     {/if}

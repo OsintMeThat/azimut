@@ -212,7 +212,7 @@
         <label class="cut" title="This step comes in at once, without the plate's transition"><input type="checkbox" checked={menu?.step.transition === 'none'}
           onchange={(event) => onchange?.(menu?.step.id, { transition: event.currentTarget.checked ? 'none' : '' })} /> Cut straight in, no transition</label>
         {#if menu?.step.transition !== 'none'}
-          <label title="How long the video takes to come to this step; empty, as long as the plate's transitions">Transition, seconds
+          <label title="Seconds to reach this step, the plate's transition when empty">Transition, seconds
             <input class="input" type="number" min="0.2" max="3" step="0.1" placeholder={String(transitionSeconds)} value={menu?.step.transition_seconds ?? ''}
               onchange={(event) => onchange?.(menu?.step.id, { transition_seconds: transitionOf(event.currentTarget.value) })} /></label>
         {/if}
@@ -224,7 +224,7 @@
     <button type="button" class="fm-item" disabled={menu?.index === steps.length - 1} onclick={() => { const { step, index } = menu; menu = null; onmove?.(step.id, index + 2); }}>
       <Icon name="chevronRight" size={14} /><span class="fm-grow">Play it later</span></button>
     {#if onduplicate}
-      <button type="button" class="fm-item" title="A copy of the step, with what stands on it and its framing, played right after it"
+      <button type="button" class="fm-item" title="Copies this step, marks and framing included, to play right after it"
         onclick={() => { const { step } = menu; menu = null; onduplicate(step.id); }}><Icon name="copy" size={14} /><span class="fm-grow">Duplicate</span></button>
     {/if}
     <div class="fm-sep"></div>

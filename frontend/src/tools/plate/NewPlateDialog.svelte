@@ -92,7 +92,7 @@
           {/each}
         </ul>
       {:else}
-        <p class="note">No map layer in the case yet. Add › On the map draws zones, arrows and symbols on the plate itself.</p>
+        <p class="note">No map layer in the case yet: Add › On the map draws zones, arrows and symbols on the plate itself.</p>
       {/if}
 
       <h4>Paper</h4>

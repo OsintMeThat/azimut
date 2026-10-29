@@ -13,11 +13,6 @@ import { SENTINEL_ID, passCredit } from './sentinelPass.js';
 
 const strip = (text) => String(text ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
 
-/** The credits of one map: its ground, its relief, its overlays and the layers it draws from elsewhere. */
-export function mapCredits(element, sources = {}) {
-  return [...groundCredits(element, sources), ...layerCredits(element, sources.rows ?? [])];
-}
-
 /** What a map's ground, its relief and its overlays owe, which their terms ask for wherever their pixels are shown. */
 function groundCredits(element, { providers = [], relief = null, releases = [], years = [] }) {
   const parts = [];

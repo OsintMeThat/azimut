@@ -88,32 +88,31 @@ extension, and cross-platform binaries with a bundled ffmpeg.
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-## New in v0.3.2
+## New in v0.3.3
 
-No new tool this time: the tools you already have read faster, ask less and say
-more clearly what went wrong.
-
-- The browser's Back and Forward walk the tools and what you opened in them, and
-  ask before leaving unsaved work. **Ctrl+K** opens Go to, for a tool, a case or a
-  document.
-- An event is one line under the Timeline axis, with `@` mentions, and **Add
-  event** (Alt+N) opens it over any tool with that tool's view cited.
-- The Timeline draws each date as the instant, day, month or period it is, and
-  every date field reads on one Clock: the place's zone, UTC or any other.
-- The Board reads as an index of people, places and things. A subject's type can
-  be corrected, and two duplicates merged with an Undo.
-- The Graph proposes the links the case already implies, reviewed before they are
-  filed.
-- The Sheet opens on a home, with worklists of the files still to geolocate and of
-  your geolocations by point.
-- Files and the sidebar act on a right-click, and new work lands in the folder you
-  are working in.
-- FIRMS fires keep their size through a zoom, place names sit over the imagery,
-  and Compare and Detect take the whole screen.
-- The Detect analyzer builder works on the map, with checks made from pins and a
-  Test button.
-- A failure reads as one sentence saying what to do, and a second start opens
-  the Azimut already running.
+- **Horizon** draws the terrain seen from a viewpoint in 3D, with named summits
+  and buildings from open sources, lays a photo over it to match by hand, and
+  keeps the views you save. **Find**, in beta, searches an area of the map for
+  where a photo was taken.
+- **Map plates** lay a page out round the case's maps, from ten ready plates or
+  your own template, on vector, topographic, 3D or Sentinel-2 grounds. They export
+  as a PNG or a print PDF, or play their days and steps as an MP4 or a GIF.
+- **Your own map layers**: draw markers, lines and areas on any map, from a blank
+  layer, a file or a My Maps link, fed by the case's places, proofs and files.
+  Every edit is dated, so a layer reads on any day, and it downloads as KMZ, KML
+  or GeoJSON.
+- Your own icons, imported in Settings, for every layer's palette.
+- Satellite's 3D stands the imagery on relief on a globe of the app's own, with
+  your layers, places and measures, and files a tilted view as a capture.
+- **Measure** is one tool for lines and areas, range rings, view cones, a
+  shadow's height, a viewshed and the ground and line of sight under a line.
+- A reference window fades a case picture or clip over any map, in the app and
+  the extension.
+- Pictures, videos and sounds open in one full-screen viewer.
+- A newcomer is shown around, each new version opens on its What's new, and the
+  `?` guide pictures every tool.
+- When a release is out, the update notice downloads the binary for your system
+  and lists the steps to put it in place.
 - Existing cases open as they are, and older bundles still import.
 
 ## Cases on disk

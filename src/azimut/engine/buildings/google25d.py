@@ -64,10 +64,8 @@ MEDIA = f"https://storage.googleapis.com/{BUCKET}/"
 LIST_TTL_DAYS = 90
 TIMEOUT = httpx.Timeout(30.0, read=120.0)
 CHUNK = 1 << 20
-# A pixel is a building where the raster's presence reaches this; a footprint needs this many
-# such pixels (4 m², about one of the raster's own cells) before its height is read
+# A pixel is a building where the raster's presence reaches this
 PRESENCE = 0.5
-MIN_PIXELS = 16
 
 
 @dataclass(frozen=True)

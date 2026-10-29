@@ -128,7 +128,7 @@
 <section class="group" data-guide="settings.icons-library">
   <h3>Icons</h3>
   <p class="note">
-    Your own icons, offered in every layer's palette. A layer keeps a copy of each icon it wears, so removing one here changes no map.
+    Your own icons for every layer's palette, each layer keeping a copy, so removing one here changes no map.
   </p>
   <div class="drop" class:over role="region" aria-label="Drop icons here"
     ondragover={(event) => { if (!carriesOutsideFiles(event)) return; event.preventDefault(); over = true; }} ondragleave={() => (over = false)} ondrop={dropped}>

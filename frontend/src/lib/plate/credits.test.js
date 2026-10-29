@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { creditParts, mapCredits, plateCredits } from './credits.js';
+import { creditParts, plateCredits } from './credits.js';
+
+/** The credits of one map, read through the plate's own path. */
+const mapCredits = (element, sources = {}) => creditParts({ elements: [element] }, sources).map((part) => part.text);
 
 describe('a plate\'s credits', () => {
   it('owes the plain ground, its relief, the imagery and a followed layer, each once', () => {

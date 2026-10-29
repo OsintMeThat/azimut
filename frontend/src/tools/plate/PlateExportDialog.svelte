@@ -137,7 +137,7 @@
   {:else}
     {#if moments.length >= 2}
       <div class="row">
-        <span title="The days the export goes through: each change of the plate's layers, and each day with steps">Days</span>
+        <span title="Each day the plate's layers change or a step stands on">Days</span>
         <span class="days">
           <select aria-label="First day" title="The first day played" value={first} onchange={(event) => (first = event.currentTarget.value)}>
             {#each moments as moment (moment)}<option value={moment}>{momentLabel(moment)}</option>{/each}</select>

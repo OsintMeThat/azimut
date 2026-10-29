@@ -1080,7 +1080,8 @@ between in a disc and as it is (guessed at import from how many colours it
 paints) and moves or removes it; a group renames or removes as a whole.
 
 The Settings backup carries portable settings, API keys, templates, the icon
-library and the signature. It leaves absolute export paths, the workspace pointer and download
+library and the signature. Templates and icons are added to those already here,
+one of the same id replaced. It leaves absolute export paths, the workspace pointer and download
 sessions on the machine that created them, and the UI tells the analyst to keep
 the downloaded backup private.
 

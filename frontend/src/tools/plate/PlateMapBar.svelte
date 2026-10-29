@@ -92,7 +92,7 @@
 <div class="map-bar" role="toolbar" aria-label="Map" tabindex="-1" onpointerdown={(event) => event.stopPropagation()}>
   {#if isMap}
     {#if keep !== null}
-      <label class="keep" title="On, this day or step shows the map as the one before it does. Off, you frame it here on its own.">
+      <label class="keep" title="This day or step shows the map as the one before it does">
         <input type="checkbox" checked={keep} onchange={(event) => onkeep?.(event.currentTarget.checked)} /> Keep the previous framing</label>
       <span class="rule"></span>
     {/if}

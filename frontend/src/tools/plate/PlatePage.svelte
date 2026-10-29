@@ -826,7 +826,7 @@
     <button type="button" class="fm-item" onclick={() => { const hit = nameMenu; nameMenu = null; hideName(hit); }}>
       <Icon name="eyeOff" size={14} /><span class="fm-grow">Hide it on this map</span></button>
     {#if onnamelabel}
-      <button type="button" class="fm-item" title="Hidden from the ground and written as a label of the plate's, which moves, resizes and restyles"
+      <button type="button" class="fm-item" title="Hides this name on the ground and makes it a plate label you can move and restyle"
         onclick={() => { const hit = nameMenu; nameMenu = null; hideName(hit);
           onnamelabel(hit.element, hit.text, hit.at, [hit.element.box[0] + hit.point[0] / PX_PER_MM, hit.element.box[1] + hit.point[1] / PX_PER_MM]); }}>
         <Icon name="text" size={14} /><span class="fm-grow">Make it a label to move</span></button>

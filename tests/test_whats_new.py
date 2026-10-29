@@ -37,3 +37,10 @@ def test_a_release_ships_no_draft_whats_new():
         f"What's new for {__version__} is still a draft: rewrite its pages and pictures on the "
         "finished app, then drop \"draft\" from frontend/src/lib/whatsNew.json"
     )
+
+
+@pytest.mark.skipif(not os.environ.get("AZIMUT_RELEASE"), reason="only a release refuses a stale README")
+def test_a_release_ships_a_readme_saying_what_is_new_in_it():
+    """PyPI freezes the README at the tag, so a stale one stays on that version's page."""
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    assert f"## New in v{__version__}" in readme, f"README.md has no '## New in v{__version__}' section"

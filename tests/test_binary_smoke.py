@@ -202,3 +202,58 @@ def test_the_smoke_flag_is_the_one_the_app_starts_gallery_dl_with():
     from azimut.engine import gallerydl
 
     assert smoke_binary.GALLERY_DL_FLAG == gallerydl.FROZEN_FLAG
+
+
+def test_check_processes_wants_the_pool_to_answer(monkeypatch):
+    from types import SimpleNamespace
+
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0, stdout="840\n", stderr="")
+
+    monkeypatch.setattr(smoke_binary.subprocess, "run", run)
+    smoke_binary.check_processes(Path("azimut"), {})
+    assert [cmd[1] for cmd in calls] == ["--smoke-processes"]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        # the children started a second app, so nothing was summed
+        (1, "", "OSError: address already in use"),
+        # the parent ran, the pool did not
+        (0, "", ""),
+    ],
+)
+def test_check_processes_fails_a_binary_whose_children_do_not_work(monkeypatch, answer):
+    from types import SimpleNamespace
+
+    code, out, err = answer
+    monkeypatch.setattr(smoke_binary.subprocess, "run", lambda cmd, **kw: SimpleNamespace(returncode=code, stdout=out, stderr=err))
+    with pytest.raises(RuntimeError, match="processes did not answer"):
+        smoke_binary.check_processes(Path("azimut"), {})
+
+
+def test_a_pool_that_never_answers_fails_the_smoke(monkeypatch):
+    import subprocess
+
+    def run(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
+    monkeypatch.setattr(smoke_binary.subprocess, "run", run)
+    with pytest.raises(RuntimeError, match="never answered"):
+        smoke_binary.check_processes(Path("azimut"), {})
+
+
+def test_the_entry_point_runs_the_pool_the_smoke_asks_for():
+    """packaging/entry.py, run the way the binary is: the flag sums the children's answers."""
+    import subprocess
+    import sys
+
+    entry = Path(__file__).parents[1] / "packaging" / "entry.py"
+    done = subprocess.run([sys.executable, str(entry), smoke_binary.PROCESSES_FLAG],
+                          capture_output=True, text=True, timeout=180, check=False)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "840"

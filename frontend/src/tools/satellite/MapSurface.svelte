@@ -621,7 +621,7 @@
         <span
           class="date-pill"
           data-bar-obstacle
-          title="A tilted view would spend billed tiles all the way to the horizon, so past what a flat view shows the ground is Esri's, which is free"
+          title="Past what a flat view shows, the tilt draws Esri's free imagery instead of billed tiles"
         >
           Far ground: Esri
         </span>

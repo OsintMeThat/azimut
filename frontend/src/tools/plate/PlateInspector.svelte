@@ -629,7 +629,7 @@
         </div>
         <p class="note">{s2.latestBusy && !element.acquired ? 'Looking for the newest pass…' : !element.acquired ? 'No pass picked yet.'
           : `${s2.layerLabel}, the pass of ${element.acquired}${s2.date ? '' : s2.maxcc < 100 ? `, the newest under ${s2.maxcc}% cloud` : ', the newest'}.`}</p>
-        <p class="note">One pass, on the day it was taken, 10 m a pixel: where it did not reach, the map stays empty. Its tiles spend your Copernicus quota.</p>
+        <p class="note">One pass at 10 m a pixel, empty where it did not reach, its tiles spending your Copernicus quota.</p>
       {/if}
       </PlateSection>
 
@@ -788,9 +788,9 @@
       {@const drawn = drawnOn(spec, element.id).length}
       {#if !rows.length}<p class="note">The case has no map layers yet. Draw on the plate from Add, or make one here.</p>{/if}
       <div class="tools wide">
-        {#if onnewlayer}<button type="button" class="btn btn-xs" title="A new layer of the case, drawn here and opened for editing in the Map, where this map looks"
+        {#if onnewlayer}<button type="button" class="btn btn-xs" title="A new case layer, opened for editing in the Map where this map looks"
           onclick={() => onnewlayer(element)}><Icon name="plus" size={11} /> New layer here</button>{/if}
-        {#if onkeepdrawn && drawn}<button type="button" class="btn btn-xs" title="What was drawn by hand on this map becomes a layer of the case, kept for the Map and other plates"
+        {#if onkeepdrawn && drawn}<button type="button" class="btn btn-xs" title="Makes what was drawn by hand here a layer of the case"
           onclick={() => onkeepdrawn(element)}>Make a layer of the {drawn} drawn here</button>{/if}
       </div>
       <ul class="layers">
@@ -806,7 +806,7 @@
             </div>
             {#if entry}
               <div class="layer-set">
-                <label class="weight role" title="What the layer stands for on this map: one press sets its colour, fill and lines, and the legend says it">Stands for
+                <label class="weight role" title="One press gives the layer its role's colour, fill and lines, named in the legend">Stands for
                   <select aria-label={`${row.title} stands for`} value={entry.role ?? ''}
                     onchange={(event) => { const index = element.layers.indexOf(entry); element.layers[index] = withRole(entry, event.currentTarget.value, spec.theme); }}>
                     <option value="">Its own look</option>
@@ -862,7 +862,7 @@
         if (!event.currentTarget.checked && mapCount(spec.elements) >= MAX_MAPS) { event.currentTarget.checked = true; toast(TOO_MANY_MAPS, 'warn', 6000); return; }
         element.globe = event.currentTarget.checked;
       }} /> Drawn as a globe</label>
-      {#if element.globe}<p class="note">The world turned to the map's middle, its country in the accent. Drawn on the page, it is not one of the plate's eight maps.</p>
+      {#if element.globe}<p class="note">The world turned to the map's middle, its country in the accent, not counted among the plate's eight maps.</p>
       {:else}<p class="note">The inset follows its map and outlines the ground it shows.</p>{/if}
     {:else if element.kind === 'legend'}
       <div class="rows">
@@ -1146,7 +1146,7 @@
         <input type="range" aria-label="Focus strength" min="0.1" max="0.9" step="0.05" value={element.spotlight?.dim ?? 0.55}
           oninput={(event) => (element.spotlight = { ...element.spotlight, dim: Number(event.currentTarget.value) })} />
       </div>
-      <p class="note">Disputed areas touching it stand half lit, dotted round. Shown on its day or step, and faded in by the video's transitions. A flat map only.</p>
+      <p class="note">On a flat map only, disputed areas touching it half lit and dotted round, faded in by the video's transitions.</p>
     {:else if element.kind === 'video'}
       <div class="tools wide">
         <button type="button" class="btn btn-xs" title="The footage placed on the map first, then every video and GIF of the case" onclick={openVideos}><Icon name="video" size={12} /> {element.src ? 'Another video' : 'Choose a video'}</button>
