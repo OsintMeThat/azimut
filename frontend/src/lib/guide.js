@@ -494,7 +494,7 @@ export const PAGES = {
         text: 'What a detection looks for. Copy a built-in to tune it, or write your own from rules.',
         opens: {
           shot: 'detect-library',
-          lead: 'Your analyzers and the built-in ones, shared by every case.',
+          lead: 'Your analyzers and the built-in ones, shared by every case, here over Al Udeid Air Base.',
           marks: [
             {
               anchor: 'detect.library-new',
@@ -687,7 +687,16 @@ export const PAGES = {
       { anchor: 'plate.page', title: 'The page', text: 'A drag inside a map moves its ground, and its edge moves the frame.' },
       { anchor: 'plate.inspector', title: 'Inspector', text: 'Paper, fonts and colours, or the settings of the element picked.' },
       { anchor: 'plate.looks', title: 'Looks', text: 'A whole look in one press: Press, Night, Newsroom, Humanitarian, Tactical and more.' },
-      { anchor: 'plate.export', title: 'Export', text: 'A PNG, a PDF, or a video of the plate’s days.' },
+      {
+        anchor: 'plate.export',
+        title: 'Export',
+        text: 'A PNG, a PDF, or a video of the plate’s days.',
+        opens: {
+          shot: 'plate-made',
+          lead: 'A ready plate on the case’s own layer, in one of the looks, as it leaves the app.',
+          marks: [],
+        },
+      },
       {
         anchor: 'plate.home',
         title: 'Plates',
@@ -849,19 +858,20 @@ export const JOURNEYS = [
   {
     id: 'create-an-analyzer',
     title: 'Create your analyzer',
-    lead: 'From a change you want Detect to find to an analyzer proved on real scenes, offered in every case.',
+    lead: 'Aircraft on the apron of Al Udeid Air Base: from a change you want Detect to find to an analyzer proved on real scenes, offered in every case.',
     steps: [
-      { tool: 'detect', label: 'Library', shot: 'detect-library', text: 'In Detect, Analyzers opens the library. New analyzer starts one, and a built-in can be copied to tune instead.', marks: ['detect.library-new', 'detect.library'] },
-      { tool: 'detect', label: 'What it reads', shot: 'detect-analyzer-new', text: 'Here, new aircraft on an airbase apron: Sentinel-2, two dates, from a blank rule. What it reads is fixed from here on.', marks: ['detect.reads', 'detect.start-from'] },
-      { tool: 'detect', label: 'Check', shot: 'detect-check', text: 'Pick a pass before and a pass after in the calendar, slide between them, and pin where aircraft appeared and where nothing changed.', marks: ['detect.bench', 'detect.pins'] },
-      { tool: 'detect', label: 'Rules', shot: 'detect-builder', text: 'A first rule keeps a change of colour in the visible bands, and a second a drop in near infrared against the ground around it.', marks: ['detect.rules'] },
+      { tool: 'detect', label: 'Library', shot: 'detect-library', text: 'In Detect, Analyzers at the top of the panel opens the library. New analyzer starts one; a built-in can be copied to tune instead.', marks: ['detect.analyzers', 'detect.library-new'] },
+      { tool: 'detect', label: 'What it reads', shot: 'detect-analyzer-new', text: 'New aircraft on the apron: Sentinel-2, two dates, from a blank rule. What it reads is fixed from here on.', marks: ['detect.reads', 'detect.start-from'] },
+      { tool: 'detect', label: 'First rule', shot: 'detect-first-rule', text: 'Name it, and keep ground whose colour moved by at least 4.5% in the visible bands.', marks: ['detect.rules', 'detect.builder-save'] },
+      { tool: 'detect', label: 'Check', shot: 'detect-check', text: 'In Checks, New check: pick a pass before and a pass after, slide between them, and pin where aircraft appeared and where nothing changed.', marks: ['detect.bench', 'detect.pins'] },
+      { tool: 'detect', label: 'Second rule', shot: 'detect-builder', text: 'A second rule keeps a drop in near infrared against the ground around it, where an aircraft stands on the concrete.', marks: ['detect.rules'] },
       { tool: 'detect', label: 'Display', shot: 'detect-seeit', text: 'Look at the passes through another layer, here colour infrared, or press See it on a rule to draw what it reads, and set its line where aircraft stand out.', marks: ['detect.display'] },
       { tool: 'detect', label: 'Test', shot: 'detect-tested', text: 'Test reads the pinned tiles. When a pin is missed, ease the rule’s line and test again until every pin comes out right.', marks: ['detect.verdict'] },
-      { tool: 'detect', label: 'Save', shot: 'detect-tested', text: 'Save it. New detection then offers it in every case, and Share hands it to someone else as a file.', marks: ['detect.builder-save'] },
+      { tool: 'detect', label: 'Save', shot: 'detect-tested', text: 'Add to my analyzers. New detection then offers it in every case, and Share hands it to someone else as a file.', marks: ['detect.builder-save'] },
     ],
     result: {
       shot: 'detect-mine',
-      text: 'The analyzer in your library with its check, ready for a pass or a routine over the apron, or any ground.',
+      text: 'Aircraft activity in your library with its check, ready for a pass or a routine over the apron, or any ground.',
     },
   },
 ];

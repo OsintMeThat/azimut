@@ -173,6 +173,14 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     #   for. The pop-up stays quiet for that exact tag; a newer one shows again.
     "update_check_on_start": True,
     "update_dismissed_version": "",
+    # The first-run tour and the What's new a version opens with (frontend
+    # lib/onboarding.js), kept with the workspace so another browser on it
+    # doesn't start a newcomer's tour over:
+    # - tour: "" never started, the page it resumes on while it runs, "done"
+    #   once finished or skipped.
+    # - whats_new_seen: the version whose What's new was put away for good.
+    "tour": "",
+    "whats_new_seen": "",
     # Login session for gated media downloads (engine/media.py). Applied only
     # when a download hits a login wall — public media is always fetched
     # cookie-less, so this never touches the everyday case. Shapes:

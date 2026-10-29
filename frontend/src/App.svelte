@@ -12,7 +12,7 @@
     checkForUpdatesOnStart,
     toggleTheme,
     appInfo,
-    prefsReady,
+    keepOnboarding,
   } from './lib/state.svelte.js';
   import { api } from './lib/api.js';
   import { updateBadges } from './lib/staleness.js';
@@ -29,7 +29,8 @@
   import { readSolo, splitHash } from './lib/hash.js';
   import { caseShown, installBackButton, showTool } from './lib/backButton.js';
   import { landingFor } from './lib/guide.js';
-  import { openGuide } from './lib/navigate.js';
+  import { openGuide, openIssueReport } from './lib/navigate.js';
+  import { listenToGuide } from './lib/guideWindow.js';
   import { leaveFullscreen } from './lib/fullscreen.js';
   import { createToolLoader } from './lib/toolLoader.js';
   import { loadEntityTypes } from './lib/entityTypes.svelte.js';
@@ -48,8 +49,8 @@
   import MoveDialog from './components/MoveDialog.svelte';
   import CommandPalette from './components/CommandPalette.svelte';
   import GuideDialog from './components/GuideDialog.svelte';
-  import Welcome from './components/Welcome.svelte';
-  import { closeWelcome, shouldWelcome } from './lib/welcome.js';
+  import Onboarding from './components/Onboarding.svelte';
+  import { closedThisStart, onStart } from './lib/onboarding.js';
   import CaseChangeGuard from './components/CaseChangeGuard.svelte';
   import { isPaletteKey } from './lib/commandPalette.js';
   import { filedToast, workFolder } from './lib/folders.js';
@@ -110,6 +111,20 @@
   // browser's Back and Forward walk the tools, and inside them the places the
   // analyst went to (lib/backButton.js).
   onDestroy(installBackButton(TOOL_IDS));
+  // the guide in a tab of its own opens tools here, in the tab it was detached from
+  onDestroy(
+    listenToGuide({
+      tools: TOOL_IDS,
+      open: (id) => {
+        uiState.guide = null;
+        uiState.tool = id;
+      },
+      report: () => {
+        uiState.guide = null;
+        openIssueReport();
+      },
+    })
+  );
   let firstShow = true;
   $effect(() => {
     const tool = uiState.tool;
@@ -246,19 +261,30 @@
   // another Azimut holds. The backend refuses case work in both states and
   // touches neither folder, so what is left to do is explain and offer the way
   // out.
-  // A version opens with its welcome, which points at the `?` (lib/welcome.js). A map
-  // window opened on its own is part of a session already under way, so it never does.
+  // A newcomer opens on the welcome and the tour, someone who knows Azimut on what
+  // their new version brings (lib/onboarding.js), once the case list says which they
+  // are. A map window opened on its own is part of a session already under way, so it
+  // never does.
   let guideButton = $state(null);
-  let welcome = $state('');
-  if (!solo) {
-    prefsReady.then(() => {
-      if (shouldWelcome(appInfo.version)) welcome = appInfo.version;
+  function onboardOnStart() {
+    if (solo || uiState.onboarding) return;
+    const version = appInfo.version;
+    uiState.onboarding = onStart({
+      tour: prefs.tour,
+      seen: prefs.whatsNewSeen,
+      version,
+      hasCases: caseState.list.length > 0,
+      closed: closedThisStart(version),
     });
   }
-  function welcomed({ mute, guide }) {
-    closeWelcome(welcome, mute);
-    welcome = '';
+  function onboarded({ guide = false, create = false } = {}) {
+    uiState.onboarding = null;
     if (guide) openGuide(uiState.tool);
+    if (create) {
+      // the front door's own field, where a first case is named
+      uiState.tool = 'overview';
+      requestAnimationFrame(() => document.getElementById('home-case-name')?.focus());
+    }
   }
 
   let workspaceStopped = $state(null);
@@ -286,7 +312,10 @@
         toast(`Could not open this map's case: ${error?.message ?? 'case not found'}`, 'danger', 8000);
       }
     })
-    .finally(() => checkForUpdatesOnStart());
+    .finally(() => {
+      onboardOnStart();
+      checkForUpdatesOnStart();
+    });
 
   // Live nudges from our own backend (SSE, same-origin — still local-first):
   // the capture extension files screenshots while this tab just sits here, and
@@ -501,12 +530,19 @@
   <WorkspaceStopped {...workspaceStopped} />
 {/if}
 
-{#if welcome && !workspaceStopped}
-  <Welcome version={welcome} anchor={guideButton} onclose={welcomed} />
+{#if uiState.onboarding && !workspaceStopped}
+  <Onboarding
+    start={uiState.onboarding}
+    version={appInfo.version}
+    anchor={guideButton}
+    hasCases={caseState.list.length > 0}
+    onkeep={keepOnboarding}
+    onclose={onboarded}
+  />
 {/if}
 
-<!-- after the welcome, rather than over it -->
-{#if updateState.show && !welcome}
+<!-- after the welcome or the tour, rather than over it -->
+{#if updateState.show && !uiState.onboarding}
   <UpdateModal />
 {/if}
 

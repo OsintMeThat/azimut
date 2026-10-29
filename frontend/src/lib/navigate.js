@@ -357,6 +357,16 @@ export function openGuide(at) {
   uiState.guide = { at };
 }
 
+/** Take the tour again from its first page (components/Onboarding.svelte). */
+export function openTour() {
+  uiState.onboarding = { kind: 'tour', step: 0 };
+}
+
+/** Read again what this version brings. */
+export function openWhatsNew() {
+  uiState.onboarding = { kind: 'news' };
+}
+
 /**
  * Hand a picture to Reverse Search and go there.
  *

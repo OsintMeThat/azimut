@@ -6,16 +6,16 @@ vi.mock('../lib/api.js', () => ({ api: { get: vi.fn(async () => []) } }));
 
 const { uiState } = await import('../lib/state.svelte.js');
 const { default: GuideDialog } = await import('./GuideDialog.svelte');
-const { EXTENSION_SITES, EXTENSION_TABS, JOURNEYS, KEYMAP, FIXES, PAGES, SETTINGS_TABS, stepMarks } = await import('../lib/guide.js');
+const { EXTENSION_SITES, EXTENSION_TABS, JOURNEYS, KEYMAP, FIXES, PAGES, SETTINGS_TABS, landingFor, stepMarks } = await import('../lib/guide.js');
 
 let live;
 let onclose;
 
-async function open(at) {
+async function open(at, props = {}) {
   onclose = vi.fn();
   const target = document.createElement('div');
   document.body.append(target);
-  live = mount(GuideDialog, { target, props: { at, onclose } });
+  live = mount(GuideDialog, { target, props: { at, onclose, ...props } });
   flushSync();
   await Promise.resolve();
 }
@@ -38,6 +38,7 @@ afterEach(() => {
   if (live) unmount(live);
   live = null;
   document.body.innerHTML = '';
+  vi.restoreAllMocks();
 });
 
 describe('the guide over a tool', () => {
@@ -256,10 +257,91 @@ describe('the reference', () => {
   });
 });
 
+describe('the tour', () => {
+  it('is taken again from the start page, over the app', async () => {
+    uiState.onboarding = null;
+    await open('start');
+    press([...document.querySelectorAll('.side button')].find((b) => b.textContent.includes('Take the tour')));
+    expect(onclose).toHaveBeenCalled();
+    expect(uiState.onboarding).toEqual({ kind: 'tour', step: 0 });
+    uiState.onboarding = null;
+  });
+
+  it('is offered on the start page only', async () => {
+    await open('media');
+    expect([...document.querySelectorAll('.side button')].some((b) => b.textContent.includes('Take the tour'))).toBe(false);
+  });
+});
+
 describe('the way out', () => {
   it('closes from its own header', async () => {
     await open('media');
     press(document.querySelector('.head button[aria-label="Close"]'));
     expect(onclose).toHaveBeenCalled();
+  });
+
+  it('moves to a tab of its own on the step being read, and closes here', async () => {
+    const journey = JOURNEYS[0];
+    const tab = vi.spyOn(window, 'open').mockReturnValue({});
+    await open(`journey:${journey.id}`);
+    press([...document.querySelectorAll('.walk button')].find((b) => b.textContent.includes('Next')));
+    press(document.querySelector('.head button[aria-label="Open in a new tab"]'));
+    const [url, name] = tab.mock.calls[0];
+    expect(url).toContain(`#guide?page=journey%3A${journey.id}&step=1`);
+    expect(name).toBe('azimut-guide');
+    expect(onclose).toHaveBeenCalled();
+  });
+
+  it('stays open when the browser refuses the tab', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    await open('media');
+    press(document.querySelector('.head button[aria-label="Open in a new tab"]'));
+    expect(onclose).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+});
+
+describe('in a tab of its own', () => {
+  const journey = JOURNEYS[0];
+  const detached = (place) => open(undefined, { detached: true, place });
+  let opener;
+  function withOpener() {
+    opener = { closed: false, location: { origin: location.origin }, postMessage: vi.fn(), focus: vi.fn() };
+    vi.spyOn(window, 'opener', 'get').mockReturnValue(opener);
+  }
+
+  it('fills the tab on its place, with no way out but closing the tab', async () => {
+    await detached({ item: `journey:${journey.id}`, tool: null, step: 1 });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.querySelector('main.detached .guide')).not.toBeNull();
+    expect(document.querySelector('.lead').textContent).toBe(journey.steps[1].text);
+    expect(document.querySelector('.head button[aria-label="Close"]')).toBeNull();
+    expect(document.querySelector('.head button[aria-label="Open in a new tab"]')).toBeNull();
+  });
+
+  it('keeps where the reader stands in its address, for a reload', async () => {
+    await detached({ item: `journey:${journey.id}`, tool: null, step: 0 });
+    press([...document.querySelectorAll('.walk button')].find((b) => b.textContent.includes('Next')));
+    expect(location.hash).toBe(`#guide?page=journey%3A${journey.id}&step=1`);
+    press(entry('Sources'));
+    expect(location.hash).toMatch(/^#guide\?page=[^&]+&tab=/);
+  });
+
+  it('opens a tool in the tab it was detached from, and stays', async () => {
+    withOpener();
+    await detached({ ...landingFor('media'), step: 0 });
+    uiState.tool = 'settings';
+    press(document.querySelector('.go'));
+    expect(opener.postMessage).toHaveBeenCalledWith({ 'azimut:guide': { open: 'media' } }, location.origin);
+    expect(uiState.tool).toBe('settings');
+    expect(document.querySelector('main.detached')).not.toBeNull();
+  });
+
+  it('sends a report to that tab too', async () => {
+    withOpener();
+    await detached({ item: 'start', tool: null, step: 0 });
+    press(entry('When something does not work'));
+    press(document.querySelector('.report button'));
+    expect(opener.postMessage).toHaveBeenCalledWith({ 'azimut:guide': { report: true } }, location.origin);
   });
 });

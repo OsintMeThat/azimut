@@ -84,6 +84,10 @@ class DownloadCookiesIn(BaseModel):
     browser: str | None = None  # required and validated when source == "browser"
 
 
+# The tour's state: never started, the page it resumes on, or done.
+TOUR_PATTERN = r"^(|done|[1-9])$"
+
+
 class PrefsIn(BaseModel):
     """Keyed-provider and display preferences; None leaves a field untouched."""
 
@@ -123,6 +127,10 @@ class PrefsIn(BaseModel):
     # the user muted with "don't show again"
     update_check_on_start: bool | None = None
     update_dismissed_version: str | None = None
+    # the first-run tour: "" never started, the page it resumes on, or "done"
+    tour: str | None = Field(default=None, pattern=TOUR_PATTERN)
+    # the version whose What's new was put away for good
+    whats_new_seen: str | None = Field(default=None, max_length=64)
     # login source for gated media downloads (engine/media.py); None leaves it
     download_cookies: DownloadCookiesIn | None = None
     # where each kind of export lands (engine/exportdir.py); "" = the case folder
@@ -163,6 +171,8 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
         "update_check_on_start": bool(settings.get("update_check_on_start", True)),
         "update_dismissed_version": settings.get("update_dismissed_version", ""),
+        "tour": settings.get("tour", ""),
+        "whats_new_seen": settings.get("whats_new_seen", ""),
         "download_cookies": settings.get("download_cookies", {"source": "none"}),
         "export_dirs": exportdir.saved_dirs(settings),
     }
@@ -328,6 +338,10 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["update_check_on_start"] = bool(body.update_check_on_start)
     if body.update_dismissed_version is not None:
         settings["update_dismissed_version"] = body.update_dismissed_version.strip()[:64]
+    if body.tour is not None:
+        settings["tour"] = body.tour
+    if body.whats_new_seen is not None:
+        settings["whats_new_seen"] = body.whats_new_seen.strip()[:64]
     if body.export_dirs is not None:
         merged = dict(settings.get("export_dirs", {}))
         for kind, folder in body.export_dirs.items():
@@ -719,6 +733,8 @@ class ImportedSettings(BaseModel):
     ingest_token: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")
     update_check_on_start: bool = True
     update_dismissed_version: str = Field(default="", max_length=64)
+    tour: str = Field(default="", pattern=TOUR_PATTERN)
+    whats_new_seen: str = Field(default="", max_length=64)
     download_cookies: ImportedDownloadCookies = Field(default_factory=ImportedDownloadCookies)
 
     @field_validator("analyzers", mode="before")
@@ -1057,10 +1073,19 @@ def check_app_update(check: bool = False) -> dict[str, Any]:
 
     Opt-in and user-triggered like the scraper check: without ``check`` it
     reports the current version and touches no network (engine/updates.py).
+    ``install`` says how this copy updates: the program file to replace and the
+    workspace that stays put, or a pip install that has its own command.
     """
+    install = {**updates.install(), "workspace": str(config.workspace_root())}
     if not check:
-        return {"current": __version__, "latest": None, "update_available": False}
-    return updates.check(__version__)
+        return {
+            "current": __version__,
+            "latest": None,
+            "update_available": False,
+            "install": install,
+        }
+    asset = updates.asset_name() if install["kind"] == "binary" else None
+    return {**updates.check(__version__, asset=asset), "install": install}
 
 
 @router.get("/settings/diagnostics")

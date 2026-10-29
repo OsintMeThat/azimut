@@ -1,47 +1,64 @@
 <script>
   import Modal from './Modal.svelte';
-  import Icon from './Icon.svelte';
+  import UpdateButtons from './UpdateButtons.svelte';
+  import UpdateSteps from './UpdateSteps.svelte';
   import { markdownHtml } from '../lib/markdown.js';
-  import { updateState, dismissUpdate } from '../lib/state.svelte.js';
+  import { updateState, updatesState, dismissUpdate } from '../lib/state.svelte.js';
 
   let mute = $state(false);
+  // Once the download is pressed the pop-up turns into its steps; the browser
+  // never says when the file is in, so there is nothing to wait for.
+  let started = $state(false);
 
   const notes = $derived(markdownHtml(updateState.notes));
+  const update = $derived(updatesState.app);
 
   function close() {
-    dismissUpdate(mute);
+    dismissUpdate(started ? false : mute);
   }
 </script>
 
-<Modal title="{updateState.latest} is live" onclose={close} width="600px">
-  <p class="lead">A newer version of Azimut is out. Grab it to stay current.</p>
+<Modal
+  title={started ? `Update to ${updateState.latest}` : `${updateState.latest} is live`}
+  onclose={close}
+  width="600px"
+>
+  {#if started}
+    <UpdateSteps {update} />
+    <div class="actions end">
+      <button class="btn btn-sm" onclick={close}>Done</button>
+    </div>
+  {:else}
+    <p class="lead">
+      A newer version of Azimut is out.
+      {#if update?.current}You have <span class="mono">v{update.current}</span>.{/if}
+    </p>
 
-  {#if updateState.notes}
-    <!-- Release body from our own GitHub release, written in Markdown. It goes
-         through the same renderer as the Notebook, which strips unsafe HTML. -->
-    <div class="notes markdown">{@html notes}</div>
+    {#if updateState.notes}
+      <!-- Release body from our own GitHub release, written in Markdown. It goes
+           through the same renderer as the Notebook, which strips unsafe HTML. -->
+      <div class="notes markdown">{@html notes}</div>
+    {/if}
+
+    <!-- nothing to download for a pip install: its terminal steps are the way -->
+    {#if update?.install?.kind === 'package'}
+      <UpdateSteps {update} framed />
+    {/if}
+
+    <div class="actions">
+      <label class="mute">
+        <input type="checkbox" bind:checked={mute} />
+        Don't show this again
+      </label>
+      <div class="buttons">
+        <UpdateButtons {update} onstart={() => (started = true)} />
+      </div>
+    </div>
+
+    <p class="note">
+      You can always update later from Settings → System.
+    </p>
   {/if}
-
-  <div class="actions">
-    <label class="mute">
-      <input type="checkbox" bind:checked={mute} />
-      Don't show this again
-    </label>
-    <a
-      class="btn btn-sm btn-primary"
-      href={updateState.url}
-      target="_blank"
-      rel="noreferrer"
-      onclick={close}
-    >
-      <Icon name="download" size={13} /> Download {updateState.latest}
-      <Icon name="external" size={11} />
-    </a>
-  </div>
-
-  <p class="note">
-    You can always update later from Settings → System.
-  </p>
 </Modal>
 
 <style>
@@ -77,6 +94,14 @@
     justify-content: space-between;
     gap: 12px;
     margin-top: 14px;
+  }
+  .actions.end {
+    justify-content: flex-end;
+  }
+  .buttons {
+    display: flex;
+    flex-direction: row-reverse;
+    gap: 8px;
   }
   .mute {
     display: flex;

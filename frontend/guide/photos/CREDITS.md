@@ -1,4 +1,9 @@
-# Photos of the demo case
+# Credits for the guide's pictures
+
+What the pictures of the `?` guide show, and whose it is. The maps carry their
+own credit line on screen as well, as the app draws it.
+
+## Photos of the demo case
 
 The guide's pictures are taken in a demo case filed from these photos
 (`photos.mjs`). Every one is in the public domain, mostly as the work of a US
@@ -17,3 +22,19 @@ made up; the places and dates are the photos' own.
 
 A replacement keeps to the same rule: public domain or CC0, no face anyone
 could recognise, metadata stripped, and a line here.
+
+## Maps and imagery
+
+| Where it shows | What it is | Credit |
+|---|---|---|
+| Satellite, Compare, Detect, Horizon's ground, the proof's capture | USGS The National Map orthoimagery | Public domain |
+| Create your analyzer: the Al Udeid Air Base passes of 27 July and 30 September 2026 | Copernicus Sentinel-2, read through Sentinel Hub | Contains modified Copernicus Sentinel data 2026. Free and open under the Copernicus data policy |
+| The capture extension's pictures, the analyzer library's map | OpenStreetMap tiles | © OpenStreetMap contributors, ODbL |
+| Compare's map side | OpenTopoMap | Map data © OpenStreetMap contributors, SRTM; map style © OpenTopoMap (CC-BY-SA) |
+| Place and peak names, the plate's ground | OpenFreeMap | © OpenMapTiles, data © OpenStreetMap contributors |
+| Horizon's terrain | Mapterhorn elevation | © Mapterhorn, as the app credits it |
+
+The Sentinel-2 passes are not fetched when the pictures are made: they are copied
+from the tile cache of an Azimut that already read them, for the Detect tutorial
+film (`airbase.mjs`). No base map with restrictive terms (Esri, Google) is shown in
+a picture.

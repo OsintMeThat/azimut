@@ -76,6 +76,35 @@ test('the ? opens the guide over the tab it was pressed from', async ({ page }) 
   expect(page.url()).toContain('#media');
 });
 
+test('the guide moves to a tab of its own and opens tools in the one it left', async ({ page }) => {
+  await installAppFixture(page, { mediaIndex, summary });
+  await page.goto('/#inspect');
+
+  await page.locator('.topbar button[title="Guide: Inspect"]').click();
+  const guide = page.getByRole('dialog', { name: 'Guide' });
+  await guide.locator('.tabs .tab', { hasText: 'Collage' }).click();
+  const [tab] = await Promise.all([
+    page.waitForEvent('popup'),
+    guide.getByRole('button', { name: 'Open in a new tab' }).click(),
+  ]);
+  // the dialog makes way for the tab, which opens on the page being read
+  await expect(guide).toHaveCount(0);
+  await expect(tab.locator('main.detached .tabs .tab[aria-current="page"]')).toHaveText('Collage');
+  await expect.poll(() => tab.locator('.shot img').evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
+  await expect(tab).toHaveTitle('Azimut guide');
+
+  // a reload keeps the tab where it was
+  await tab.locator('.tabs .tab', { hasText: 'Inspect' }).click();
+  await tab.reload();
+  await expect(tab.locator('.tabs .tab[aria-current="page"]')).toHaveText('Inspect');
+
+  // the tool it explains opens in the tab the guide came from, and the guide stays
+  await tab.locator('.tabs .tab', { hasText: 'Collage' }).click();
+  await tab.locator('.go').click();
+  await expect.poll(() => page.url()).toContain('#collage');
+  await expect(tab.locator('main.detached')).toHaveCount(1);
+});
+
 test('a journey walks across the tools and opens the one it stops on', async ({ page }) => {
   await installAppFixture(page, { mediaIndex, summary });
   await page.goto('/#overview');
@@ -91,54 +120,4 @@ test('a journey walks across the tools and opens the one it stops on', async ({ 
   await guide.getByRole('button', { name: 'Open Satellite' }).click();
   await expect(guide).toHaveCount(0);
   expect(page.url()).toContain('#satellite');
-});
-
-test('a version opens with its welcome tied to the ?, until it is told not to', async ({ page }) => {
-  await installAppFixture(page, { mediaIndex, summary, welcome: true });
-  await page.goto('/#media');
-
-  const welcome = page.getByRole('dialog', { name: /^Azimut/ });
-  await expect(welcome.locator('.version')).toHaveText('0.2.8');
-  await welcome.evaluate((card) => Promise.all(card.getAnimations().map((a) => a.finished)));
-  // it sits in the middle, the topbar's own `?` lit through the veil
-  const view = page.viewportSize();
-  const card = await welcome.boundingBox();
-  expect(Math.abs(card.x + card.width / 2 - view.width / 2)).toBeLessThan(2);
-  expect(Math.abs(card.y + card.height / 2 - view.height / 2)).toBeLessThan(2);
-  const mark = await page.locator('.topbar button[title="Guide: Media"]').boundingBox();
-  const lit = await page.locator('.welcome .lit').boundingBox();
-  expect(Math.abs(lit.x + lit.width / 2 - (mark.x + mark.width / 2))).toBeLessThan(2);
-  // and a line runs from the card's edge to just under that button
-  const ends = await page.locator('.welcome .trail').evaluate((path) => {
-    const at = (s) => path.getPointAtLength(s);
-    return [at(0), at(path.getTotalLength())].map(({ x, y }) => ({ x, y }));
-  });
-  expect(Math.abs(ends[0].x - (card.x + card.width))).toBeLessThan(2);
-  expect(Math.abs(ends[1].x - (mark.x + mark.width / 2))).toBeLessThan(2);
-  expect(ends[1].y).toBeGreaterThan(mark.y + mark.height);
-  expect(ends[1].y).toBeLessThan(card.y);
-
-  // closed without the tick, it goes into the `?`, and a reload does not bring it
-  // back: a reload is not a start
-  await welcome.getByRole('button', { name: 'Close' }).click();
-  await expect(welcome).toHaveCount(0);
-  await page.reload();
-  await expect(page.locator('[data-guide="media.card"]').first()).toBeVisible();
-  await expect(welcome).toHaveCount(0);
-
-  // the next start shows it again; ticked, the lit `?` opens the guide on the tool
-  const next = await page.context().newPage();
-  await installAppFixture(next, { mediaIndex, summary, welcome: true });
-  await next.goto('/#media');
-  const again = next.getByRole('dialog', { name: /^Azimut/ });
-  await again.locator('.mute input').check();
-  await next.locator('.welcome .lit').click();
-  await expect(next.getByRole('dialog', { name: 'Guide' }).locator('.tabs .tab[aria-current="page"]')).toHaveText('Media');
-
-  // and the start after that keeps quiet on this version
-  const third = await page.context().newPage();
-  await installAppFixture(third, { mediaIndex, summary, welcome: true });
-  await third.goto('/#media');
-  await expect(third.locator('[data-guide="media.card"]').first()).toBeVisible();
-  await expect(third.getByRole('dialog', { name: /^Azimut/ })).toHaveCount(0);
 });

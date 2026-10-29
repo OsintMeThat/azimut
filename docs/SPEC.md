@@ -219,7 +219,8 @@ proof for publication.
 | ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence. |
 | ✅ **Capture extension** | Adds case map tools to third-party maps, hands media to publishing and reverse search sites, and supports extension updates. |
 | ✅ **Home, Guide & tasks** | Opens recent case work and named task lists from Home, with contextual guidance for each tool. |
-| ✅ **Pictured guide** | Opens over any tool from the `?`: every tool photographed and numbered, numbers that open the next screen, a geolocation walked to its published thread and an analyzer built and proved, pictures remade by `npm run guide:shots`, and a welcome at each new version pointing at the `?`. |
+| ✅ **Pictured guide** | Opens over any tool from the `?`: every tool photographed and numbered, numbers that open the next screen, a geolocation walked to its published thread and an analyzer built and proved, pictures remade by `npm run guide:shots`, and a tab of its own for a second screen. |
+| ✅ **Welcome, tour & What's new** | Welcomes a newcomer over a film of the globe diving into Yosemite, walks the four stages on lit guide pictures to their first case and the `?`, shows each new version's pages to those who know Azimut, and refuses a release whose pages are still a draft. |
 | ✅ **Inspect, Collage & Reverse Search** | Autosaves work per file, arranges extracted frames into collages and sends original or cropped pictures to reverse search. |
 | ✅ **Collage: straighten** | A line drawn along something level bends the whole collage flat as one picture, seams kept; Find then reads it as one. |
 | ✅ **Inspect player & panel** | Captures the very frame on screen, lays frames, marks, shots and sound along the bar, and keeps Capture and Save above Info, Adjust, Moments and Analyze tabs. |

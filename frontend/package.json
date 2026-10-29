@@ -16,6 +16,7 @@
     "calibrate:maps": "node calibration/record.mjs",
     "calibrate:earth": "node calibration/earth.mjs",
     "guide:shots": "node guide/shots.mjs",
+    "guide:hero": "node guide/hero.mjs",
     "check": "svelte-check --output human --threshold warning"
   },
   "devDependencies": {

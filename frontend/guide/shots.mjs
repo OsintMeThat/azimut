@@ -221,10 +221,13 @@ async function run() {
   // that already holds them: tiles only, so no Copernicus request is spent (airbase.mjs)
   const passes = copyPasses(home);
   say(passes ? `${passes} cached Sentinel-2 tile sets for the airbase` : 'no cached airbase passes: its pictures will fail');
+  // a group of its own, so stopping it stops the app `uv` started too, not uv alone
+  const own = process.platform !== 'win32';
   const backend = spawn('uv', ['run', 'azimut', '--port', String(API_PORT), '--no-browser'], {
     cwd: root,
     env: { ...process.env, AZIMUT_HOME: home },
     stdio: ['ignore', 'ignore', 'inherit'],
+    detached: own,
   });
   let vite = null;
   let browser = null;
@@ -246,9 +249,10 @@ async function run() {
         preview: { host: '127.0.0.1', port: WEB_PORT, strictPort: true, proxy: { '/api': api, '/files': api } },
       })
     );
-    const loader = await createServer(
-      mergeConfig(shared, { server: { middlewareMode: true, hmr: false }, appType: 'custom' })
-    );
+    const reading = mergeConfig(shared, { server: { middlewareMode: true, hmr: false }, appType: 'custom' });
+    // it only reads the guide's list: no file watchers, which a busy machine may be out of
+    reading.server.watch = null;
+    const loader = await createServer(reading);
     const { allShots } = await loader.ssrLoadModule('/src/lib/guide.js');
     await loader.close();
     const shots = new Map(allShots().map((one) => [one.shot, one.anchors]));
@@ -278,13 +282,14 @@ async function run() {
       colorScheme: 'dark',
       reducedMotion: 'reduce',
     });
-    // the welcome a version opens with would cover every picture
+    // the tour and this version's What's new would cover every picture: the workspace
+    // has taken the one and read the other (components/Onboarding.svelte)
     const { version } = await call('GET', '/api/health');
-    await context.addInitScript(({ caseId, version }) => {
+    await call('PUT', '/api/settings/prefs', { tour: 'done', whats_new_seen: version });
+    await context.addInitScript(({ caseId }) => {
       localStorage.setItem('azimut:lastCase', caseId);
       localStorage.setItem('azimut:theme', 'dark');
-      localStorage.setItem('azimut:welcomeMuted', version);
-    }, { caseId: demo.caseId, version });
+    }, { caseId: demo.caseId });
     const page = await context.newPage();
     page.setDefaultTimeout(20_000);
     let loads = 0;
@@ -375,7 +380,13 @@ async function run() {
     await ext?.close();
     await browser?.close();
     await vite?.close();
-    backend.kill();
+    if (own) {
+      try {
+        process.kill(-backend.pid, 'SIGTERM');
+      } catch {
+        /* already gone */
+      }
+    } else backend.kill();
     rmSync(scratch, { recursive: true, force: true });
   }
   if (failed.length) {

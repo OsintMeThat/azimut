@@ -1,0 +1,42 @@
+{
+  "0.3.3": {
+    "draft": true,
+    "pages": [
+      {
+        "film": true,
+        "title": "3D is here",
+        "text": "Press 3D on the map and the imagery stands on its relief. Tilt, turn and fly down into any valley."
+      },
+      {
+        "shot": "satellite-mylayer",
+        "anchor": "layer.tools",
+        "label": "Drawing tools",
+        "title": "Create your own map!",
+        "text": "Draw markers, lines and areas with your own icons, every change dated, then send it to My Maps or a KMZ."
+      },
+      {
+        "shot": "plate-made",
+        "title": "Maps ready to publish",
+        "text": "Start from a ready plate, set its look, and export an image, a PDF or a video of its days."
+      },
+      {
+        "shot": "horizon",
+        "anchor": "horizon.modes",
+        "label": "View · Overlay · Find",
+        "title": "Horizon",
+        "badge": "Find is in beta",
+        "text": "Stand on any point and see its skyline. Find looks for the places that see the ridges of a photo."
+      },
+      {
+        "title": "And also",
+        "items": [
+          { "icon": "ruler", "text": "Measure turns a line into range rings, a view cone or a line of sight." },
+          { "icon": "image", "text": "Reference windows fade and play clips over the map." },
+          { "icon": "layers", "text": "Collage straightens a panorama." },
+          { "icon": "maximize", "text": "Media opens in one full-screen viewer." }
+        ],
+        "help": "The guide now shows every tool in pictures, and walks a geolocation step by step."
+      }
+    ]
+  }
+}

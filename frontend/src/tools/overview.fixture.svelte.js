@@ -21,6 +21,8 @@ export const uiState = $state({ tool: 'overview', settingsTab: null });
 
 export const prefs = $state({ updateDismissedVersion: '', units: 'metric' });
 
+export const appInfo = $state({ version: '0.3.3' });
+
 export const updatesState = $state({
   app: null,
   scrapers: null,

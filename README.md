@@ -174,9 +174,12 @@ open:
 - **Linux**: mark it executable with `chmod +x azimut-linux-x86_64`.
 
 On startup, Azimut asks GitHub for a newer release and PyPI for newer
-downloaders by default, and links the download. Settings can disable that check,
-and **Settings → System → Check for updates** runs it manually. Replace the old binary with the new one. To uninstall, delete
-the binary. Either way `~/Azimut` stays put, so cases open unchanged.
+downloaders by default. When a release is out, **Download for** your system
+fetches its binary straight from the release, and Azimut then lists the steps:
+quit Azimut by closing its console window, put the new file in place of the old
+program, make it runnable as above, and open it. Settings can disable that check,
+and **Settings → System → Check for updates** runs it manually. To uninstall,
+delete the binary. Either way `~/Azimut` stays put, so cases open unchanged.
 
 The downloadable binaries bundle a static **ffmpeg** (and ffprobe), so video
 thumbnails, frame scans, video enhancement, and downloads that merge separate
@@ -312,7 +315,10 @@ cd frontend && npm run guide:shots && cd ..
 It builds the UI into a scratch folder, runs a private Azimut on a throwaway
 workspace, and needs `uv`, ffmpeg and the network (the maps are drawn from public
 USGS imagery, the extension's from OpenStreetMap's tiles). The demo case is filed from
-public-domain photos, credited in `frontend/guide/photos/CREDITS.md`. It fails when a control the guide frames is gone; fix the page in
+public-domain photos, credited with every map in `frontend/guide/photos/CREDITS.md`.
+The "Create your analyzer" pictures read two Sentinel-2 passes from the tile cache of
+an Azimut that already holds them (`~/Azimut`, or `GUIDE_CACHE_HOME`), so making them
+spends no Copernicus requests; without that cache those pictures fail and say why. It fails when a control the guide frames is gone; fix the page in
 `frontend/src/lib/guide.js` or its staging in `frontend/guide/stages.mjs`, then
 commit the pictures in `frontend/src/assets/guide/` with the release.
 

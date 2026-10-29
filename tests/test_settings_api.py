@@ -335,6 +335,18 @@ def test_put_prefs_roundtrips_update_popup_prefs(client):
     assert saved["update_dismissed_version"] == "v0.2.0"
 
 
+def test_the_tour_and_whats_new_are_kept_with_the_workspace(client):
+    fresh = client.get("/api/settings").json()
+    assert (fresh["tour"], fresh["whats_new_seen"]) == ("", "")
+    saved = client.put("/api/settings/prefs", json={"tour": "3", "whats_new_seen": " 0.3.3 "}).json()
+    assert (saved["tour"], saved["whats_new_seen"]) == ("3", "0.3.3")
+    assert client.put("/api/settings/prefs", json={"tour": "done"}).json()["tour"] == "done"
+    # a tour state is a page or done, nothing else
+    for wrong in ("0", "12", "finished", "../x"):
+        assert client.put("/api/settings/prefs", json={"tour": wrong}).status_code == 422, wrong
+    assert client.get("/api/settings").json()["tour"] == "done"
+
+
 def test_put_prefs_roundtrips_signature_handle(client):
     saved = client.put("/api/settings/prefs", json={"signature_handle": "  @example  "}).json()
     assert saved["signature_handle"] == "@example"

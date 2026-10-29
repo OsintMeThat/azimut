@@ -63,14 +63,15 @@ describe('the ? in the topbar', () => {
     expect(source).not.toContain("tools/Guide.svelte");
   });
 
-  it('is what the welcome of a new version points at, and the update notice waits behind it', () => {
+  it('is what the tour and What’s new point at, and the update notice waits behind them', () => {
     expect(markup).toContain('bind:this={guideButton}');
-    expect(markup).toContain('<Welcome version={welcome} anchor={guideButton} onclose={welcomed} />');
-    expect(markup).toContain('{#if updateState.show && !welcome}');
-    // read once the settings have said which version this is, and never in a map window
-    expect(source).toMatch(/if \(!solo\) \{\s*prefsReady\.then\(\(\) => \{\s*if \(shouldWelcome\(appInfo\.version\)\)/);
+    expect(markup).toMatch(/<Onboarding\s+start=\{uiState\.onboarding\}[\s\S]*?anchor=\{guideButton\}/);
+    expect(markup).toContain('{#if updateState.show && !uiState.onboarding}');
+    // decided once the case list says whether this is a newcomer, and never in a map window
+    expect(source).toMatch(/\.finally\(\(\) => \{\s*onboardOnStart\(\);/);
+    expect(source).toMatch(/function onboardOnStart\(\) \{\s*if \(solo \|\| uiState\.onboarding\) return;/);
     // asking for the guide from it opens it where the `?` would
-    expect(source).toMatch(/function welcomed\(\{ mute, guide \}\) \{[\s\S]*?if \(guide\) openGuide\(uiState\.tool\);/);
+    expect(source).toMatch(/function onboarded\([^)]*\) \{[\s\S]*?if \(guide\) openGuide\(uiState\.tool\);/);
   });
 });
 

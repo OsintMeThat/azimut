@@ -37,8 +37,12 @@ jobs:
       # The version-parity gate the release workflow used to skip: pyproject's
       # version stays single-sourced, and the capture extension's own version
       # moves when the extension does and only then.
+      # What's new is a draft while a release is prepared; a tag refuses one, a
+      # workflow_dispatch rehearsal does not.
       - name: Release gate + version parity
-        run: uv run --no-sync pytest tests/test_release_gate.py tests/test_updates.py -q
+        env:
+          AZIMUT_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '' }}
+        run: uv run --no-sync pytest tests/test_release_gate.py tests/test_updates.py tests/test_whats_new.py -q
 
   dist:
     name: Build wheel + sdist

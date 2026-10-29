@@ -136,6 +136,10 @@ const settings = {
   extension_version: '0.2.5', // tracks the extension, so it lags the app version
   update_check_on_start: false,
   update_dismissed_version: '',
+  // the tour taken and this version's What's new read, so neither covers a spec
+  // (e2e/onboarding.spec.js opens them on purpose)
+  tour: 'done',
+  whats_new_seen: '0.2.8',
   usage: {},
   usage_overrides: {},
   eco_zoom_fallback: true,
@@ -784,6 +788,7 @@ export async function installAppFixture(page, options = {}) {
   const fixtureDrafts = options.drafts ?? {};
   const fixtureSettings = {
     ...settings,
+    ...(options.settings ?? {}),
     export_dirs: { ...settings.export_dirs, ...(options.exportDirs ?? {}) },
   };
   // What the search bar asked for, and in which layer: a spec has to be able to
@@ -1026,14 +1031,11 @@ export async function installAppFixture(page, options = {}) {
     };
   };
 
-  await page.addInitScript(({ caseId, muted }) => {
+  await page.addInitScript(({ caseId }) => {
     if (caseId) localStorage.setItem('azimut:lastCase', caseId);
     localStorage.setItem('azimut:theme', 'dark');
-    // the welcome a version opens with (lib/welcome.js) stays out of every spec but its own
-    if (muted) localStorage.setItem('azimut:welcomeMuted', muted);
   }, {
     caseId: options.lastCase === undefined ? CASE_ID : options.lastCase,
-    muted: options.welcome ? '' : fixtureSettings.version,
   });
 
   await page.route('**/*', async (route) => {

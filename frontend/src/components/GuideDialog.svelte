@@ -9,13 +9,18 @@
    * sequence. A journey walks one goal across the tools, each step on the picture of
    * the tool it happens in, and ends on what it made. A page can come in tabs of its
    * own, as the extension's does. The pages and their pictures are `lib/guide.js`.
+   *
+   * `detached` is the same guide in a tab of its own (`lib/guideWindow.js`), opened on
+   * `place`: it fills the tab, keeps its place in the address, and what it would do to
+   * the app it asks of the tab that detached it.
    */
   import { untrack } from 'svelte';
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
   import GuideShot from './GuideShot.svelte';
-  import { uiState } from '../lib/state.svelte.js';
-  import { openIssueReport } from '../lib/navigate.js';
+  import { toast, uiState } from '../lib/state.svelte.js';
+  import { openIssueReport, openTour } from '../lib/navigate.js';
+  import { askApp, guideHash, openGuideTab } from '../lib/guideWindow.js';
   import {
     EXTENSION_SITES,
     FIXES,
@@ -33,12 +38,12 @@
     toolLabel,
   } from '../lib/guide.js';
 
-  let { at, onclose } = $props();
+  let { at, onclose, place = null, detached = false } = $props();
 
-  const landing = landingFor(untrack(() => at));
+  const landing = untrack(() => place) ?? { ...landingFor(untrack(() => at)), step: 0 };
   let itemId = $state(landing.item);
   let tool = $state(landing.tool);
-  let step = $state(0);
+  let step = $state(landing.step);
   let active = $state(null);
   /** The screens opened from a number, deepest last. Empty on the page itself. */
   let trail = $state([]);
@@ -130,14 +135,35 @@
     active = null;
   }
 
+  // a tab of its own keeps where the reader stands in its address, so a reload lands there
+  $effect(() => {
+    if (detached) history.replaceState(history.state, '', guideHash({ item: itemId, tool, step }));
+  });
+
   function openTool(id) {
+    if (detached) return askApp({ open: id });
     uiState.tool = id;
     onclose();
   }
 
+  /** The newcomer's tour, over the app this guide was opened from (components/Onboarding.svelte). */
+  function takeTour() {
+    onclose();
+    openTour();
+  }
+
   /** Settings, System: the report there carries what the app knows of the problem. */
   function reportIssue() {
+    if (detached) return askApp({ report: true });
     openIssueReport();
+    onclose();
+  }
+
+  function detach() {
+    if (!openGuideTab({ item: itemId, tool, step })) {
+      toast('The browser refused a second tab. Allow pop-ups for this page', 'warn', 8000);
+      return;
+    }
     onclose();
   }
 
@@ -188,7 +214,7 @@
   {/if}
 {/snippet}
 
-<Modal title="Guide" bare width="min(1400px, calc(100vw - 48px))" {onclose}>
+{#snippet content()}
   <div class="guide">
     <nav class="menu" aria-label="Guide pages">
       {#each MENU as group, index (index)}
@@ -213,9 +239,16 @@
           <h2>{item.label}</h2>
           {#if item.kind !== 'page' && item.lead}<p class="sub">{item.lead}</p>{/if}
         </div>
-        <button class="btn btn-ghost btn-sm" onclick={onclose} aria-label="Close" title="Close">
-          <Icon name="x" size={15} />
-        </button>
+        {#if !detached}
+          <div class="head-acts">
+            <button class="btn btn-ghost btn-sm" onclick={detach} aria-label="Open in a new tab" title="Open in a new tab, to follow on another screen">
+              <Icon name="external" size={15} />
+            </button>
+            <button class="btn btn-ghost btn-sm" onclick={onclose} aria-label="Close" title="Close">
+              <Icon name="x" size={15} />
+            </button>
+          </div>
+        {/if}
       </header>
 
       {#if item.kind === 'workspace' || item.kind === 'tabs'}
@@ -307,6 +340,13 @@
                 </button>
               </div>
             {/if}
+            <!-- the tour plays over the app, so a guide in a tab of its own leaves it out -->
+            {#if item.id === 'start' && !trail.length && !detached}
+              <button class="btn btn-primary go" onclick={takeTour}>
+                Take the tour
+                <Icon name="arrowRight" size={14} />
+              </button>
+            {/if}
             {#if view.tool}
               <button class="btn btn-primary go" onclick={() => openTool(view.tool)}>
                 Open {toolLabel(view.tool)}
@@ -397,13 +437,26 @@
       {/if}
     </section>
   </div>
-</Modal>
+{/snippet}
+
+{#if detached}
+  <main class="detached" aria-label="Guide">{@render content()}</main>
+{:else}
+  <Modal title="Guide" bare width="min(1400px, calc(100vw - 48px))" {onclose}>{@render content()}</Modal>
+{/if}
 
 <style>
   .guide {
     display: grid;
     grid-template-columns: 216px minmax(0, 1fr);
     height: min(860px, calc(100vh - 96px));
+  }
+  .detached {
+    height: 100vh;
+    background: var(--bg-1);
+  }
+  .detached .guide {
+    height: 100%;
   }
   .menu {
     display: flex;
@@ -454,6 +507,11 @@
     justify-content: space-between;
     gap: 16px;
     padding: 14px 18px 8px 22px;
+  }
+  .head-acts {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
   }
   h2 {
     font-size: var(--fs-xl);

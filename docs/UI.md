@@ -127,7 +127,10 @@ presses *Read the guide* on it, which opens the guide on its start page.
   second case to count it, and the only thing that reaches the network is the map of
   the case, fetching the imagery under its points.
 - **Two notices, both of them answers the startup checks already gave.** A newer release
-  folds its own body open on the page (the check returns it) with a download link, and
+  folds its own body open on the page (the check returns it) with the download for this
+  system and the release page, then the steps to put the new program in place
+  (`components/UpdateButtons.svelte`, `UpdateSteps.svelte`, the same in the startup
+  pop-up and Settings → System), and
   is silent when the release was muted or the check is switched off. A capture extension
   that was never installed gets one line pointing at the tab that installs it, and the
   line disappears the moment one is. Neither is dismissible state: both are conditions
@@ -149,6 +152,12 @@ presses *Read the guide* on it, which opens the guide on its start page.
   **reference**: every key by where it is pressed, Settings (a tab per section of its
   screen), and what to do when something does not work, symptom by symptom, ending on
   **Report an issue**, which opens Settings on System where the report is written.
+- **The guide can move to a tab of its own**, to follow on a second screen: the
+  button beside the cross opens it on the page being read (`#guide?page=…`,
+  `lib/guideWindow.js`, `components/GuidePage.svelte`) and closes the dialog. The tab
+  is the guide alone, keeps its place in the address through a reload, and its *Open*
+  and *Report an issue* act in the tab it was detached from, by a message between the
+  two tabs. Opened from its address alone, it opens the app in a new tab instead.
 - **A tool's page is a picture of it.** A number stands by each control it explains,
   on a panel's corner or just off a button's so it hides none of it, and a line per
   number stands beside the picture. At rest the picture carries its numbers and nothing
@@ -173,7 +182,11 @@ presses *Read the guide* on it, which opens the guide on its start page.
   anchor drawn on it. The case is true where it can be: where and when each photo was
   taken is its own, and only the accounts that posted them are made up. The
   extension's pictures come from a second browser with the extension loaded, over
-  OpenStreetMap's own tiles served at its own address (`extension.mjs`). A picture keeps the part of the window its
+  OpenStreetMap's own tiles served at its own address (`extension.mjs`). The analyzer
+  journey is the Detect film's own analyzer on Al Udeid Air Base, its two Sentinel-2
+  passes copied from a tile cache that already holds them (`airbase.mjs`), so no
+  Copernicus request is spent; every source a picture shows is credited in
+  `guide/photos/CREDITS.md`. A picture keeps the part of the window its
   frames are in, and a panel a page does not explain is folded first. A picture stays
   landscape, at most two thirds as tall as it is wide: a cut that follows a tall panel
   takes in the screen beside it, and the dialog never shows a picture taller than the
@@ -182,15 +195,33 @@ presses *Read the guide* on it, which opens the guide on its start page.
   frame points at an anchor no component carries, when a tool has no page, or when a
   picture ships that the guide no longer shows. Rerun it before a release, look at the
   pictures it changed, and commit them with the release.
-- **No tour.** Nothing points at the live screen: a tour breaks on the first layout
-  change and fails silently, where a stale picture fails a test.
-- **A version opens with its welcome** (`components/Welcome.svelte`, `lib/welcome.js`):
-  its number in a card in the middle, and the `?` lit through a veil with a dotted line
-  drawn from the card to it, since that is where the guide is. Closed, the card shrinks
-  into the `?`. It shows at every start of that version until *Don't show this
-  again* is ticked, which holds until the next version; a reload is not a start. Both
-  are kept in the browser's storage, a map window never shows it, and the update notice
-  waits behind it.
+- **No tour over the live screen.** A tour that points at the running app breaks on the
+  first layout change and fails silently, where a stale picture fails a test. The tour
+  is pictures of the guide instead, and the `?` is the one live control it lights.
+- **A newcomer is welcomed, then toured** (`components/Onboarding.svelte`,
+  `lib/onboarding.js`): a workspace with no case and no tour taken opens on a card
+  saying what Azimut is for, with *Show me around* and *I know Azimut already*, over
+  a film of the app's own globe diving from the whole Earth into Yosemite Valley
+  (`npm run guide:hero` films it frame by frame, each frame taken once its tiles are
+  all drawn, and fades it through black at both ends; a reader who asked for less
+  motion gets its still). The
+  tour is four pages, the stages in order, each a guide picture with one control lit
+  and named (`Spotlight.svelte`). Its last page lights the topbar's `?` through the
+  veil with a dotted line drawn to it, and ends on *Create my first case*, which
+  focuses the front door's name field. It is hard to leave by accident: the veil does
+  nothing, Escape asks first, and only Skip or the last page end it; its page is kept
+  as it turns, so a reload or the next start resumes there.
+- **A new version opens with What's new** in the same card: up to five pages from
+  `lib/whatsNew.json`, newest version first for someone who skipped one, with no
+  button that leaves for a tool, since that would end the reading on its first page.
+  Closed early it waits for the next start, not the next reload; Skip or Done puts it
+  away for that version. Home's footer takes the tour again and reads What's new
+  again, and the front door and the guide's *Start here* offer the tour.
+- Where the tour stands (`tour`) and the version read (`whats_new_seen`) are kept in
+  the workspace's settings, so the settings backup carries them and another browser
+  on the same workspace doesn't start over. A map window never shows either, and the
+  update notice waits behind them. An entry of `whatsNew.json` is a `draft` until its
+  release: the release workflow refuses to tag one (`tests/test_whats_new.py`).
 
 Rules:
 

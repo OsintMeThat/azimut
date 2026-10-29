@@ -7,10 +7,12 @@ shouldn't be reached."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
 import pytest
 
-from azimut import __version__
+from azimut import __version__, config
 from azimut.engine import extinstall, updates
 
 
@@ -59,6 +61,8 @@ def test_check_reports_a_newer_release(monkeypatch):
         "update_available": True,
         "url": "https://x/rel",
         "notes": "",
+        "asset": None,
+        "download_url": None,
     }
 
 
@@ -105,6 +109,88 @@ def test_check_never_raises_on_network_error(monkeypatch):
     assert "offline" in result["error"]
 
 
+# -- the binary for this machine ------------------------------------------
+
+RELEASE_ASSETS = [
+    {"name": "azimut-linux-x86_64"},
+    {"name": "azimut-windows-x86_64.exe"},
+    {"name": "azimut-macos-arm64"},
+    {"name": "azimut-0.3.4-py3-none-any.whl"},
+]
+
+
+@pytest.mark.parametrize(
+    "system,machine,expected",
+    [
+        ("linux", "x86_64", "azimut-linux-x86_64"),
+        ("windows", "AMD64", "azimut-windows-x86_64.exe"),
+        ("macos", "arm64", "azimut-macos-arm64"),
+        ("linux", "aarch64", None),  # no ARM Linux build
+        ("macos", "x86_64", None),  # no Intel Mac build
+        ("freebsd14", "amd64", None),
+    ],
+)
+def test_asset_name_matches_what_the_release_attaches(system, machine, expected):
+    assert updates.asset_name(system, machine) == expected
+
+
+def test_every_asset_is_one_the_release_workflow_builds():
+    workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/release.yml").read_text()
+    for asset in updates.ASSETS.values():
+        assert f"asset: {asset}" in workflow
+
+
+def test_check_links_straight_to_this_machines_binary(monkeypatch):
+    monkeypatch.setattr(
+        updates.httpx,
+        "get",
+        lambda *a, **k: FakeResponse({"tag_name": "v0.3.4", "assets": RELEASE_ASSETS}),
+    )
+    result = updates.check("0.3.3", asset="azimut-windows-x86_64.exe")
+    assert result["asset"] == "azimut-windows-x86_64.exe"
+    assert result["download_url"] == (
+        "https://github.com/OsintMeThat/azimut/releases/download/v0.3.4/azimut-windows-x86_64.exe"
+    )
+
+
+def test_check_offers_no_download_the_release_does_not_carry(monkeypatch):
+    # a release still uploading its binaries, or a machine with no build
+    monkeypatch.setattr(
+        updates.httpx,
+        "get",
+        lambda *a, **k: FakeResponse({"tag_name": "v0.3.4", "assets": RELEASE_ASSETS[1:]}),
+    )
+    assert updates.check("0.3.3", asset="azimut-linux-x86_64")["download_url"] is None
+    assert updates.check("0.3.3", asset=None)["download_url"] is None
+
+
+def test_check_never_links_outside_the_repository(monkeypatch):
+    # the response's own download URL is ignored; the link is built from ours
+    assets = [{"name": "azimut-linux-x86_64", "browser_download_url": "https://evil.invalid/x"}]
+    monkeypatch.setattr(
+        updates.httpx,
+        "get",
+        lambda *a, **k: FakeResponse({"tag_name": "v0.3.4/../x", "assets": assets}),
+    )
+    url = updates.check("0.3.3", asset="azimut-linux-x86_64")["download_url"]
+    assert url.startswith("https://github.com/OsintMeThat/azimut/releases/download/")
+    assert "/../" not in url and "evil" not in url
+
+
+def test_a_frozen_binary_names_the_file_to_replace(monkeypatch, tmp_path):
+    program = tmp_path / "azimut-linux-x86_64"
+    monkeypatch.setattr(updates.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(updates.sys, "executable", str(program))
+    info = updates.install()
+    assert info["kind"] == "binary"
+    assert info["program"] == str(program.resolve())
+
+
+def test_a_pip_install_has_no_file_to_replace(monkeypatch):
+    monkeypatch.delattr(updates.sys, "frozen", raising=False)
+    assert updates.install() == {"kind": "package", "system": updates.system(), "program": None}
+
+
 # -- endpoint (opt-in, local-first) ---------------------------------------
 
 
@@ -114,7 +200,10 @@ def test_update_endpoint_without_check_touches_no_network(client, monkeypatch):
 
     monkeypatch.setattr(updates.httpx, "get", boom)
     body = client.get("/api/settings/update").json()
+    install = body.pop("install")
     assert body == {"current": __version__, "latest": None, "update_available": False}
+    assert install["kind"] == "package"  # the test run is not a frozen binary
+    assert install["workspace"] == str(config.workspace_root())
 
 
 def test_update_endpoint_with_check_queries_github(client, monkeypatch):
@@ -126,6 +215,24 @@ def test_update_endpoint_with_check_queries_github(client, monkeypatch):
     body = client.get("/api/settings/update?check=true").json()
     assert body["update_available"] is True
     assert body["latest"] == "v9.9.9"
+    assert body["download_url"] is None  # a pip install updates with pipx
+
+
+def test_update_endpoint_links_a_binary_to_its_download(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(updates.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(updates.sys, "executable", str(tmp_path / "azimut.exe"))
+    monkeypatch.setattr(updates, "system", lambda: "windows")
+    monkeypatch.setattr(updates.platform, "machine", lambda: "AMD64")
+    monkeypatch.setattr(
+        updates.httpx,
+        "get",
+        lambda *a, **k: FakeResponse({"tag_name": "v0.3.4", "assets": RELEASE_ASSETS}),
+    )
+    body = client.get("/api/settings/update?check=true").json()
+    assert body["download_url"].endswith("/v0.3.4/azimut-windows-x86_64.exe")
+    assert body["install"]["kind"] == "binary"
+    assert body["install"]["system"] == "windows"
+    assert body["install"]["program"] == str((tmp_path / "azimut.exe").resolve())
 
 
 # -- bundled extension version --------------------------------------------

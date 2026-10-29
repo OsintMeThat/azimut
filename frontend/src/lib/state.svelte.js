@@ -35,6 +35,8 @@ export const prefs = $state({
   signatureHandle: '', // account handle stamped onto proofs that opt into it
   updateCheckOnStart: true, // ask GitHub for a newer release when the page loads
   updateDismissedVersion: '', // the release tag muted with "don't show again"
+  tour: '', // the first-run tour: '' never started, the page it resumes on, or 'done'
+  whatsNewSeen: '', // the version whose What's new was put away for good
 });
 
 /** The app itself, as GET /api/settings describes it: the version the welcome names. */
@@ -111,6 +113,8 @@ export function applyPrefs(s) {
   if (s.update_check_on_start !== undefined) prefs.updateCheckOnStart = s.update_check_on_start;
   if (s.update_dismissed_version !== undefined)
     prefs.updateDismissedVersion = s.update_dismissed_version;
+  if (s.tour !== undefined) prefs.tour = s.tour;
+  if (s.whats_new_seen !== undefined) prefs.whatsNewSeen = s.whats_new_seen;
   if (s.extension_version !== undefined) updatesState.extensionBundled = s.extension_version;
   if (s.version) appInfo.version = s.version;
 }
@@ -187,6 +191,21 @@ export async function dismissUpdate(mute = false) {
   }
 }
 
+/**
+ * Keep where the tour stands and which What's new was read (lib/onboarding.js):
+ * `{ tour, whats_new_seen }`, either one. Taken at once, so the next page never
+ * waits on the disk.
+ */
+export async function keepOnboarding(fields) {
+  if (fields.tour !== undefined) prefs.tour = fields.tour;
+  if (fields.whats_new_seen !== undefined) prefs.whatsNewSeen = fields.whats_new_seen;
+  try {
+    await api.put('/api/settings/prefs', fields);
+  } catch {
+    /* the tour then starts over, or What's new shows again: a nicety lost, not work */
+  }
+}
+
 export const caseState = $state({
   current: null, // { id, name, scratch, entities, links, ... }
   list: [],
@@ -248,6 +267,9 @@ export const uiState = $state({
   // The guide open over the tools, and what it opened on: a tool, a page or a
   // journey (`{ at }`, lib/guide.js `landingFor`). Null while it is closed.
   guide: null,
+  // The welcome, the tour or What's new over everything (components/Onboarding.svelte):
+  // `{ kind, step?, pages? }` as lib/onboarding.js `onStart` gives it. Null while closed.
+  onboarding: null,
   // cross-tool handoffs (the workbench glue):
   composeQueue: [], // media paths queued for the Proof Composer
   postProof: null, // proof spec handed to the Post Composer

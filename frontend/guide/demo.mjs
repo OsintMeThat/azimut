@@ -311,6 +311,25 @@ export async function buildDemo({ call, scratch }) {
       ],
     },
   });
+  // one house style of each kind, so Settings, Templates shows what it keeps
+  await call('POST', '/api/templates/proof', {
+    name: 'Harbour desk',
+    data: { bg: '#0b1220', font: 'inter', footer: 'Harbour desk · open sources' },
+  });
+  await call('POST', '/api/templates/post', {
+    name: 'Geolocation thread',
+    data: { mention: '', body: 'Geolocated: #place\n\n#coordinates\n\nSource: #source' },
+  });
+  await call('POST', '/api/templates/map', {
+    name: 'Harbour situation',
+    data: {
+      elements: [
+        { id: 'map', kind: 'map', box: [10, 20, 200, 150] },
+        { id: 'legend', kind: 'legend', box: [215, 20, 70, 60], of: 'map' },
+        { id: 'title', kind: 'text', box: [10, 6, 200, 12], text: '{case}', size: 18, weight: 700 },
+      ],
+    },
+  });
   await call('PUT', at('/search-grids/channel-sweep'), {
     title: 'Channel sweep',
     spec: {

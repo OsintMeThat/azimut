@@ -17,8 +17,10 @@
  *           extension loaded, over a map site (extension.mjs)
  */
 
+import { readFileSync } from 'node:fs';
+
 import { CAMERA, CAMERA_PLACE, CHANNEL, TERMINAL } from './demo.mjs';
-import { AIRBASE, airbaseAnalyzer } from './airbase.mjs';
+import { AIRBASE, MARKS, PASSES } from './airbase.mjs';
 import { layPopup, liftAnchors } from './extension.mjs';
 
 const TOOLS = { width: 1000, height: 700 };
@@ -34,6 +36,8 @@ const SETTINGS = { width: 1440, height: 900 };
 const ROOMY = { width: 1360, height: 800 };
 
 const CHANNEL_VIEW = `ll=${CHANNEL.lat},${CHANNEL.lon}&z=16`;
+/** Al Udeid Air Base, where the analyzer journey stands from its first picture to its last. */
+const AIRBASE_VIEW = `ll=${AIRBASE.lat},${AIRBASE.lon}&z=${AIRBASE.zoom}`;
 /** How a capture's coordinates read in a picker, as the capture of the channel is listed. */
 const CAPTURED = `${CHANNEL.lat.toFixed(6)}, ${CHANNEL.lon.toFixed(6)}`;
 
@@ -101,6 +105,57 @@ const SIGHT = {
   lon: (CAMERA.lon + TERMINAL.lon) / 2,
   zoom: 16,
 };
+
+/**
+ * A reader's own icon pack, for Settings, Icons: the app's pictograms
+ * (components/Icon.svelte) on coloured tiles, in the groups a pack's folders make.
+ */
+const PICTOGRAMS = (() => {
+  const source = readFileSync(new URL('../src/components/Icon.svelte', import.meta.url), 'utf8');
+  const path = (glyph) => new RegExp(`\\n\\s+${glyph}: '([^']+)'`).exec(source)?.[1];
+  return [
+    ['Vessel', 'ship', 'Movement', '#0e7490'],
+    ['Aircraft', 'plane', 'Movement', '#0e7490'],
+    ['Vehicle', 'car', 'Movement', '#0e7490'],
+    ['Person', 'user', 'Movement', '#0e7490'],
+    ['Building', 'building', 'Places', '#4d7c0f'],
+    ['Checkpoint', 'flag', 'Places', '#4d7c0f'],
+    ['Camera position', 'camera', 'Places', '#4d7c0f'],
+    ['Fire', 'flame', 'Events', '#b45309'],
+    ['Sighting', 'eye', 'Events', '#b45309'],
+    ['Target', 'crosshair', 'Events', '#b45309'],
+  ]
+    .map(([name, glyph, group, colour]) => ({ name, d: path(glyph), group, colour }))
+    .filter((icon) => icon.d);
+})();
+
+/** The pack filed as Settings files one: each icon drawn in the browser and sent as a PNG. */
+async function fileIcons(page) {
+  const filed = await page.evaluate(async (icons) => {
+    const form = new FormData();
+    for (const icon of icons) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = icon.colour;
+      ctx.beginPath();
+      ctx.roundRect(4, 4, 120, 120, 26);
+      ctx.fill();
+      ctx.translate(22, 22);
+      ctx.scale(84 / 24, 84 / 24);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.9;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke(new Path2D(icon.d));
+      const blob = await new Promise((done) => canvas.toBlob(done, 'image/png'));
+      form.append('files', blob, `${icon.name}.png`);
+      form.append('groups', icon.group);
+    }
+    return (await fetch('/api/icons', { method: 'POST', body: form })).ok;
+  }, PICTOGRAMS);
+  if (!filed) throw new Error('the icon pack was refused');
+}
 
 async function pickImagery(page, label) {
   const chip = page.locator('[data-guide="map.imagery"] .chip').filter({ visible: true }).first();
@@ -213,6 +268,7 @@ export const STAGES = [
     async run({ page }) {
       // the demo workspace is a throwaway folder named by the environment: shown as a
       // reader's own installation would be
+      if (section === 'Icons') await fileIcons(page);
       if (section === 'Storage') {
         await page.route('**/api/settings/workspace', async (route) => {
           const answer = await (await route.fetch()).json();
@@ -306,6 +362,11 @@ export const STAGES = [
       await seen(page, '[data-guide="inspect.tabs"]').locator('button', { hasText: 'Analyze' }).click();
       await seen(page, '[data-guide="inspect.analyze"] .runs button').click();
       await seen(page, '[data-guide="inspect.analyze"] input[type="checkbox"]').waitFor({ timeout: 60_000 });
+      // laid at half strength, so the photo reads under the patches that light up
+      await seen(page, '[data-guide="inspect.analyze"] input[type="range"]').evaluate((range) => {
+        range.value = '0.55';
+        range.dispatchEvent(new Event('input', { bubbles: true }));
+      });
     },
   },
   {
@@ -476,14 +537,26 @@ export const STAGES = [
       await seen(page, '[data-guide="detect.new"]').locator('button').first().click();
     },
   },
+  // The analyzer journey is one story at one place: aircraft on the apron of Al Udeid
+  // Air Base, the Detect film's ground, made in one sitting with the clicks an analyst
+  // makes. Every picture has the same window and the same ground, from the button that
+  // opens the library to the analyzer filed in it.
   {
     shot: 'detect-library',
-    from: 'detect',
-    window: TALL,
+    window: FILM,
     map: true,
+    crop: 'full',
     after: false,
-    focus: ['[data-guide="detect.tabs"]'],
-    async run({ page }) {
+    async run({ go, page }) {
+      // Detect opens where the map tabs last looked, a camera the window keeps, so the
+      // Satellite tab looks there first and Detect is opened from its tab; the public
+      // imagery has no aerial photographs at the airbase, so the map is OpenStreetMap
+      // until a pass is drawn on it
+      await go(`satellite?${AIRBASE_VIEW}`);
+      await page.locator('[data-map-ready="true"]').filter({ visible: true }).first().waitFor({ timeout: 30_000 });
+      await page.waitForTimeout(1500);
+      await page.locator('.tabstrip').getByRole('button', { name: 'Detect', exact: true }).click();
+      await pickImagery(page, 'OpenStreetMap').catch(() => {});
       await seen(page, '[data-guide="detect.analyzers"]').click();
       await seen(page, '[data-guide="detect.library"]').waitFor();
     },
@@ -491,82 +564,123 @@ export const STAGES = [
   {
     shot: 'detect-analyzer-new',
     from: 'detect-library',
-    window: TALL,
+    window: FILM,
     map: true,
+    crop: 'full',
     after: false,
-    focus: ['[data-guide="detect.tabs"]'],
     async run({ page }) {
       await seen(page, '[data-guide="detect.library-new"]').click();
       await page.locator('[data-guide="detect.reads"] button', { hasText: 'Two dates' }).filter({ visible: true }).first().click();
     },
   },
   {
-    shot: 'detect-builder',
+    shot: 'detect-first-rule',
     from: 'detect-analyzer-new',
+    window: FILM,
+    map: true,
+    crop: 'full',
+    after: false,
+    async run({ page }) {
+      // from a blank rule, named and set as the film's first one
+      await seen(page, '[data-guide="detect.start-from"] button.own').click();
+      await seen(page, 'input[aria-label="Analyzer name"]').fill('Aircraft activity');
+      await seen(page, 'select[aria-label="Rule 1 measures"]').selectOption('colour');
+      await page.locator('[aria-label="Rule 1 comparison"] button', { hasText: 'At least' }).filter({ visible: true }).first().click();
+      await seen(page, 'input[aria-label="Rule 1 value"]').fill('4.5');
+      await page.keyboard.press('Tab');
+      await page.evaluate(() => document.activeElement?.blur?.());
+    },
+  },
+  {
+    shot: 'detect-check',
+    from: 'detect-first-rule',
     window: FILM,
     map: true,
     crop: 'full',
     settle: 6000,
     after: false,
-    async run({ go, page, passes }) {
+    async run({ page, passes }) {
       if (!passes) {
         throw new Error('the airbase passes are not cached (airbase.mjs): reading them would spend Copernicus quota');
       }
-      // the film's analyzer, filed as the library files one, then opened from the library
-      const filed = await page.evaluate(async (recipe) => {
-        const answer = await fetch('/api/compare/analyzers', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(recipe),
-        });
-        return answer.ok;
-      }, airbaseAnalyzer());
-      if (!filed) throw new Error('the airbase analyzer was refused');
-      // The bench asks the Copernicus configuration which layers it serves before it
-      // draws a pass. The run's stand-in id has none to ask, so the question is answered
-      // as the account the passes were cached from answered it: the standard layers and
-      // its colour infrared one. The passes themselves come from the cached tiles.
+      // The run's stand-in Copernicus id can ask the catalogue nothing, so the two
+      // questions a new check asks are answered from what the cache holds: the passes
+      // over the airbase, the two the film read (the catalogue's cloud figure was not
+      // kept, so none is said), and the layers its account served, colour infrared
+      // among them. The passes themselves come from the cached tiles.
+      await page.route('**/api/satellite/sentinel/acquisitions', async (route) => {
+        const dates = [...PASSES].reverse().map((date) => ({ date, cloud: null, granules: 1, coverage: 1 }));
+        await route.fulfill({ json: { dates, truncated: false } }).catch(() => {});
+      });
       await page.route('**/api/satellite/sentinel/layers?check=true', async (route) => {
         const plain = route.request().url().replace('?check=true', '');
         const answer = await (await route.fetch({ url: plain })).json();
         const layers = [...answer.layers, { id: 'COLOR_INFRARED', label: 'Color infrared', hint: 'Near infrared (B08) shown red.' }];
         await route.fulfill({ json: { ...answer, layers, source: 'instance' } }).catch(() => {});
       });
-      await go(`detect?ll=${AIRBASE.lat},${AIRBASE.lon}&z=${AIRBASE.zoom}`);
-      await seen(page, '[data-guide="detect.analyzers"]').click();
-      await page.getByRole('button', { name: 'Edit Aircraft activity' }).filter({ visible: true }).first().click();
-      // the check on the map: both passes, read from the cache
-      await page.locator('.builder [role="tab"]', { hasText: 'Checks' }).filter({ visible: true }).first().click();
-      await page.getByRole('button', { name: 'Put the check Apron check on the map' }).filter({ visible: true }).first().click();
-      await seen(page, '[data-guide="detect.bench"]').waitFor();
-      await page.locator('.builder [role="tab"]', { hasText: 'Rules' }).filter({ visible: true }).first().click();
-      await seen(page, '[data-guide="detect.rules"]').waitFor();
+      await seen(page, '[data-guide="detect.checks"]').click();
+      await page.locator('.builder button', { hasText: 'New check' }).filter({ visible: true }).first().click();
+      const drawer = page.locator('section[aria-label="Passes of the new check"]');
+      await drawer.locator('button', { hasText: /Find passes|Look again/ }).first().click();
+      await drawer.locator(`[aria-label="Use ${PASSES[0]}"] button`, { hasText: 'Before' }).click();
+      await drawer.locator(`[aria-label="Use ${PASSES[1]}"] button`, { hasText: 'After' }).click();
+      await drawer.locator('button', { hasText: 'Place the pins' }).click();
+      await seen(page, 'input[aria-label="Name of the new check"]').fill('Apron check');
+      // the film's pins, dropped where they stand on the ground
+      for (const expect of ['found', 'empty']) {
+        // a pin button toggles, and the first comes armed once the passes are picked
+        const arm = page.locator('[aria-label="Pin to drop on the map"] button', { hasText: expect === 'found' ? 'Should be found' : 'Should stay empty' });
+        if ((await arm.getAttribute('aria-pressed')) !== 'true') await arm.click();
+        for (const mark of MARKS.filter((one) => one.expect === expect)) {
+          const [lon, lat] = mark.point;
+          const { x, y } = await onMap(page, AIRBASE, { lat, lon });
+          await page.mouse.click(x, y);
+          await page.waitForTimeout(120);
+        }
+      }
+      await page.locator('[data-guide="detect.bench"] button', { hasText: 'Finish' }).click();
+      await seen(page, '[data-guide="detect.pins"]').waitFor();
+      // put on the map again, the map frames the check's pins, as a reader opening it would
+      const put = page.getByRole('button', { name: 'Put the check Apron check on the map' }).filter({ visible: true }).first();
+      if ((await put.getAttribute('aria-pressed')) === 'true') await put.click();
+      await put.click();
+      await page.locator('[data-guide="detect.bench"] button', { hasText: 'Split' }).first().click();
     },
   },
   {
-    shot: 'detect-check',
-    from: 'detect-builder',
+    shot: 'detect-builder',
+    from: 'detect-check',
     window: FILM,
     map: true,
     crop: 'full',
     settle: 5000,
     after: false,
     async run({ page }) {
-      await seen(page, '[data-guide="detect.checks"]').click();
-      await seen(page, '[data-guide="detect.pins"]').waitFor();
-      await page.locator('[data-guide="detect.bench"] button', { hasText: 'Split' }).first().click();
+      // the film's second rule: near infrared dropping against the ground round it
+      await page.locator('.builder [role="tab"]', { hasText: 'Rules' }).filter({ visible: true }).first().click();
+      await page.locator('.builder button', { hasText: 'Add a rule' }).filter({ visible: true }).first().click();
+      await seen(page, 'select[aria-label="Rule 2 measures"]').selectOption('band');
+      await seen(page, 'select[aria-label="Rule 2 band"]').selectOption('B08');
+      await page.locator('[aria-label="Rule 2 reads"] button', { hasText: 'Change' }).filter({ visible: true }).first().click();
+      await page.locator('[aria-label="Rule 2 comparison"] button', { hasText: 'Dropped' }).filter({ visible: true }).first().click();
+      await seen(page, 'input[aria-label="Rule 2 value"]').fill('5');
+      await page.keyboard.press('Tab');
+      await page.getByRole('checkbox', { name: 'Against the ground around it' }).nth(1).check();
+      await page.evaluate(() => document.activeElement?.blur?.());
+      // the panel back up to its tabs, the second rule's sentence still in view under them
+      await seen(page, '[data-guide="detect.checks"]').evaluate((tab) => tab.scrollIntoView({ block: 'start' }));
+      await seen(page, '[data-guide="detect.rules"]').waitFor();
     },
   },
   {
     shot: 'detect-seeit',
-    from: 'detect-check',
+    from: 'detect-builder',
     window: FILM,
     map: true,
     crop: 'full',
     settle: 8000,
     after: false,
     async run({ page }) {
-      await page.locator('.builder [role="tab"]', { hasText: 'Rules' }).filter({ visible: true }).first().click();
       // both passes in colour infrared, where the second rule's band shows red
       await seen(page, '[data-guide="detect.display"] button.select').click();
       await page.getByRole('menuitemradio', { name: /Color infrared/ }).filter({ visible: true }).first().click();
@@ -607,6 +721,9 @@ export const STAGES = [
       await seen(page, '[data-guide="detect.builder-save"]').click();
       await seen(page, 'section[aria-label="My analyzers"] .entry').waitFor();
       await page.unrouteAll({ behavior: 'ignoreErrors' });
+      // the check left the map: the base map the public imagery does not cover is
+      // drawn from OpenStreetMap instead
+      await pickImagery(page, 'OpenStreetMap').catch(() => {});
     },
   },
   {
@@ -772,6 +889,37 @@ export const STAGES = [
     },
   },
   {
+    shot: 'plate-made',
+    from: 'plate-home',
+    window: { width: 1500, height: 940 },
+    // the paper alone, as it leaves the app
+    clip: '[data-guide="plate.page"] .page',
+    crop: 'full',
+    settle: 9000,
+    async run({ page }) {
+      // the Locator on the case's survey layer, in the Tactical look: the place, a closer
+      // look at the cranes, and where it lies on a globe
+      await seen(page, '[data-guide="plate.ready"] button.open:has-text("Locator")').click();
+      await seen(page, '[data-guide="plate.page"] .page').waitFor();
+      await seen(page, '[data-guide="plate.looks"] button:has-text("Tactical")').click();
+      const rows = page.locator('[data-guide="plate.list"] button.row');
+      // the closer look comes on Esri imagery, which no picture shows (photos/CREDITS.md):
+      // on the look's own ground instead
+      await rows.filter({ hasText: 'Detail' }).first().click();
+      await seen(page, '[aria-label="Ground"] button[title="Tactical, dark blue"]').click();
+      // drawn lines, so a closer look wide enough to hold the quay, its roads and its sheds
+      await seen(page, 'input[aria-label="Zoom"]').fill('16.2');
+      await page.keyboard.press('Tab');
+      // the title names the place rather than the case
+      await rows.filter({ hasText: 'Demo case' }).first().click();
+      await seen(page, 'textarea[aria-label="Text"]').fill('Main Channel, Port of Los Angeles');
+      // nothing picked as it leaves: a press round the paper drops the pick
+      await page.locator('[data-guide="plate.page"]').click({ position: { x: 16, y: 16 } });
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(1500);
+    },
+  },
+  {
     shot: 'notebook',
     window: WIDE,
     async run({ go }) {
@@ -788,6 +936,8 @@ export const STAGES = [
   {
     shot: 'board',
     window: ROOMY,
+    // the whole index, never a strip cut after its first rows
+    crop: 'full',
     async run({ go }) {
       await go('board');
     },
@@ -826,6 +976,8 @@ export const STAGES = [
     shot: 'sheet-new',
     from: 'sheet',
     window: WIDE,
+    // the sheet whole, its title too, under the menu
+    crop: 'full',
     focus: ['[data-guide="sheet.new-menu"]'],
     async run({ page }) {
       await seen(page, '[data-guide="sheet.new"]').click();
