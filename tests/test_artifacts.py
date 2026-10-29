@@ -15,7 +15,7 @@ from pathlib import Path
 
 import fullcase
 from azimut import layout
-from azimut.engine import artifacts
+from azimut.engine import artifacts, bundles
 from azimut.workspace import Case
 
 # The thumbnail cache is content-addressed, budgeted and regenerated on demand,
@@ -155,6 +155,29 @@ def test_every_type_in_a_full_case_declares_what_it_owns(client):
     undeclared = {t for t in full.entity_types if not artifacts.declares(t)}
     assert not undeclared, f"entity types that never say what they own: {sorted(undeclared)}"
     assert all(reason for reason in artifacts.NO_FILES.values())
+
+
+def test_a_full_case_comes_back_whole_from_its_bundle(client):
+    """Every file a full case's entities own and the bundle carries lands in the case
+    the bundle imports into, so a new kind cannot travel half."""
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    carried = {
+        rel
+        for entity in case.list_entities()
+        for rel in artifacts.owned(case, entity)
+        if bundles.classify_case_entry(rel) == "bundled"
+    }
+    assert {full.map_plate, full.horizon_view, full.horizon_find, full.editable_layer} <= carried
+
+    exported = bundles.export_case(case)
+    destination = Case.create(bundles.imported_name(case.id))
+    landed = Case.open(bundles.import_into(destination, exported)["case_id"])
+
+    assert sorted(rel for rel in carried if not landed.resolve_inside(rel).exists()) == []
+    assert landed.resolve_inside(full.horizon_work).is_file()
+    plate = client.get(f"/api/cases/{landed.id}/map-plates/{Path(full.map_plate).stem}")
+    assert plate.status_code == 200, plate.text
 
 
 def test_the_registry_answers_for_one_media_and_its_companions(client):

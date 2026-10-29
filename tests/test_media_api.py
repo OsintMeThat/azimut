@@ -650,6 +650,13 @@ def test_media_rename_rewrites_exact_references_everywhere(client):
             "notes": sentence,
         },
         layout.grid_rel("ref-search"): {"source": old, "notes": sentence},
+        layout.horizon_view_rel("Ref view"): {"spec": {"photo": {"path": old}}, "notes": sentence},
+        layout.horizon_work_rel(): {"photo": {"path": old}, "notes": sentence},
+        layout.horizon_find_rel("Ref find"): {"ask": {"photo": {"path": old}}, "notes": sentence},
+        layout.map_plate_rel("Ref plate"): {
+            "spec": {"elements": [{"kind": "image", "src": old}, {"kind": "video", "src": old}]},
+            "notes": sentence,
+        },
     }
     for rel, data in records.items():
         path = case.resolve_inside(rel)
@@ -688,6 +695,16 @@ def test_media_rename_rewrites_exact_references_everywhere(client):
     assert post["state"]["mediaPaths"] == [new]
     assert search["source"] == new
     assert {proof["notes"], inspect["notes"], post["notes"], search["notes"]} == {sentence}
+
+    def kept(rel):
+        return json.loads(case.resolve_inside(rel).read_text(encoding="utf-8"))
+
+    assert kept(layout.horizon_view_rel("Ref view"))["spec"]["photo"]["path"] == new
+    assert kept(layout.horizon_work_rel())["photo"]["path"] == new
+    assert kept(layout.horizon_find_rel("Ref find"))["ask"]["photo"]["path"] == new
+    plate = kept(layout.map_plate_rel("Ref plate"))
+    assert [element["src"] for element in plate["spec"]["elements"]] == [new, new]
+    assert plate["notes"] == sentence
 
 
 def test_media_rename_recovers_after_files_moved_before_database_update(client, monkeypatch):

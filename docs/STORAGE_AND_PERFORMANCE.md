@@ -19,10 +19,13 @@ exported copy stays a finished file under `exports/` or the selected Views folde
     cache/tiles/             # disposable map tile cache
     cache/terrain/           # terrain height tiles, bounded by size, not age
     cache/peaks/             # summit names from OpenFreeMap's tiles, a file a tile
+    cache/buildings/         # Horizon's buildings, by source and area
+    cache/turns/             # skylines a Find swept, bounded by size
+    cache/water/             # where water lies, read for Find's mesh step
     lock                     # held by the one Azimut using this workspace
     runtime/                 # updated scraper distributions
     scratch/                 # complete, promotable one-shot cases
-    settings/                # preferences, templates, branding and cookies
+    settings/                # preferences, templates, icons, branding and cookies
 ```
 
 Startup migrates the former `cases/`, `scratch/`, `bundles/`, `runtime/` and
@@ -149,11 +152,11 @@ and the work folder. It no longer holds the graph, so the case switcher can iden
 case without opening its database. `case.db` is the source of truth for mutable
 structured state (entities, links, folders, jobs). The files under `media/`,
 `proofs/`, `sheets/`, `.drafts/`, `.inspect/`, `.collages/`, `.compare/`, `.horizon/`, `.analysis/`,
-`.layers/` and `notes/` are the source of truth for their own content.
+`.layers/`, `.mapplates/` and `notes/` are the source of truth for their own content.
 
 App-wide preferences stay outside cases under `<workspace>/.azimut/settings/`:
-`settings.json`, `templates.json`, `signature.png` and the optional
-`cookies.txt`. Startup moves the former workspace-root or `.settings/` files
+`settings.json`, `templates.json`, `signature.png`, the icon library in `icons/` and
+the optional `cookies.txt`. Startup moves the former workspace-root or `.settings/` files
 there with independent atomic renames, so a partial move resumes. If both
 locations differ, the current hidden file wins and the legacy copy is retained
 beside it under a `.legacy` name.
@@ -499,7 +502,9 @@ Bundle format 2 carries the complete case under a `case/` member prefix:
 analyst's free zone. The prefix keeps the bundle metadata outside that free
 zone, so even analyst files called `bundle.json` or `bundle-header.json` round
 trip. A case-root name that case-insensitively collides with `azimut/` is
-refused, as are symbolic links on both export and import. There is no fixed size
+refused, as are symbolic links on both export and import. A folder in `azimut/`
+that this version has no bundle decision for is work a newer Azimut wrote there, so
+the export refuses rather than leave it out. There is no fixed size
 ceiling: exports and imports use current free space plus a safety reserve, and
 the import dialog warns when the temporary requirement reaches 10 GiB.
 
@@ -509,6 +514,8 @@ remain clear. Passwords live in a process-memory map keyed by job id, never in
 the durable payload.
 
 Import pre-flights format and database versions before creating a destination.
+A refusal of a bundle made by a newer Azimut names that version, so the analyst
+knows which one to update to.
 The browser file picker uploads to `<workspace>/.azimut/bundles/.imports/`; rejected and
 cancelled uploads are removed immediately, completed imports remove their source,
 and abandoned uploads expire after 24 hours.

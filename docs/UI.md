@@ -221,7 +221,7 @@ presses *Read the guide* on it, which opens the guide on its start page.
   the workspace's settings, so the settings backup carries them and another browser
   on the same workspace doesn't start over. A map window never shows either, and the
   update notice waits behind them. An entry of `whatsNew.json` is a `draft` until its
-  release: the release workflow refuses to tag one (`tests/test_whats_new.py`).
+  release: the release workflow fails on a tag that still carries one (`tests/test_whats_new.py`).
 
 Rules:
 
@@ -1064,7 +1064,7 @@ process, warned once and never presented as the ordinary way out.
 ## Export folders and backup
 
 Settings → Storage remembers one destination each for note PDFs, media copies,
-proof PNGs, analysis plates and sheet CSVs. **Change…** opens the shared folder browser, which lists folders
+proof PNGs, views and comparisons (map plates included) and sheet CSVs. **Change…** opens the shared folder browser, which lists folders
 only and can create one; the case's `exports/` stays the default. Media Details,
 saved proofs and Notebook use those same destinations. Files already outside a
 case are never overwritten, and concurrent exports reserve distinct numbered

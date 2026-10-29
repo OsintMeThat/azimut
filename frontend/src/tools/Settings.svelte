@@ -15,7 +15,7 @@
     extensionVersion, extensionState, pingExtensions, reloadExtension, onBridgeHello,
   } from '../lib/extBridge.js';
   import { classify, reloadLanded } from '../lib/extInstall.js';
-  import { CASE_FOLDER_LABEL, saveDestination } from '../lib/exportDest.js';
+  import { CASE_FOLDER_LABEL, KINDS as EXPORT_DIR_KINDS, saveDestination } from '../lib/exportDest.js';
   import Icon from '../components/Icon.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import ProofTemplateEditor from '../components/ProofTemplateEditor.svelte';
@@ -358,7 +358,7 @@
   // back. A file written before those sections existed is a bare settings blob,
   // so it gets wrapped into the current shape.
   let settingsFile = $state(null);
-  let exportDirs = $state({ notes: '', media: '', proofs: '', views: '' });
+  let exportDirs = $state(Object.fromEntries(EXPORT_DIR_KINDS.map((kind) => [kind, ''])));
   let exportPickerKind = $state(null);
 
   const EXPORT_KINDS = [
@@ -548,11 +548,7 @@
       workspace_root: s.workspace_root ?? '',
       extension_version: s.extension_version ?? '',
     };
-    exportDirs = {
-      notes: s.export_dirs?.notes ?? '',
-      media: s.export_dirs?.media ?? '',
-      proofs: s.export_dirs?.proofs ?? '',
-    };
+    exportDirs = Object.fromEntries(EXPORT_DIR_KINDS.map((kind) => [kind, s.export_dirs?.[kind] ?? '']));
     ingestToken = s.ingest_token ?? '';
     home = { lat: String(s.home_view.lat), lon: String(s.home_view.lon), zoom: String(s.home_view.zoom) };
     mention = s.post_mention ?? '';

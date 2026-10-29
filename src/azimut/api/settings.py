@@ -862,6 +862,11 @@ def import_settings(body: ImportIn) -> dict[str, Any]:
         restored = config.canonical_templates(body.templates, max_per_kind=MAX_TEMPLATES_PER_KIND)
         templates = sum(len(restored[kind]) for kind in config.TEMPLATE_KINDS)
         if templates:
+            # A kind the backup has no list for predates it, and keeps this machine's own.
+            here = config.load_templates()
+            for kind in config.TEMPLATE_KINDS:
+                if not isinstance(body.templates.get(kind), list):
+                    restored[kind] = here[kind]
             config.save_templates(restored)
 
     # A malformed logo is dropped rather than failing the whole restore: the keys

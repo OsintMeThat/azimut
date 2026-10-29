@@ -12,6 +12,7 @@ asks the question — every path is built from :func:`workspace_root`.
         ├── bundles/
         ├── cache/tiles/
         ├── cache/terrain/
+        ├── cache/peaks/, buildings/, turns/, water/
         ├── lock              # held by the one Azimut using this workspace
         ├── runtime/          # newer scrapers fetched at runtime
         ├── scratch/          # one-shot sessions, promotable to cases

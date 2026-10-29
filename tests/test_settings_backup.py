@@ -223,6 +223,23 @@ def test_a_bundle_with_only_templates_imports(client):
     assert [t["name"] for t in client.get("/api/templates").json()["proof"]] == ["Style"]
 
 
+def test_a_backup_from_before_map_templates_keeps_the_ones_here(client):
+    """A 0.3.2 backup has proof and post styles but no map list: restoring it must not
+    empty the map templates this machine already has."""
+    made = client.post("/api/templates/map", json={"name": "Situation", "data": {"elements": []}})
+    assert made.status_code == 200, made.text
+
+    res = client.post(
+        "/api/settings/import",
+        json={"templates": {"schema": 1, "proof": [{"id": "a1", "name": "Style", "data": {}}], "post": []}},
+    ).json()
+
+    kept = client.get("/api/templates").json()
+    assert res["templates"] == 1
+    assert [t["name"] for t in kept["proof"]] == ["Style"]
+    assert [t["name"] for t in kept["map"]] == ["Situation"]
+
+
 def test_malformed_templates_are_dropped_not_saved(client):
     res = client.post(
         "/api/settings/import",

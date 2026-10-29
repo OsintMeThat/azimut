@@ -17,8 +17,6 @@ export const PAGE_KINDS = new Set(['callout', 'zoom']);
 /** Whether a mark draws on the page rather than inside its picture. */
 export const isPageMark = (shape) => PAGE_KINDS.has(shape?.kind);
 
-/** How a callout reaches its point: a thin line ending on a dot, or a bubble's tail. */
-export const CALLOUT_TAILS = ['leader', 'bubble'];
 export const CALLOUT_FONT = 22;
 /** Where a callout placed with a click puts its label: up and to the right. */
 export const CALLOUT_OFFSET = { dx: 80, dy: -60 };

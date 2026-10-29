@@ -25,9 +25,6 @@ import { drawGrain } from './grain.js';
 import { shadeOf, shapeMask, spotlightShape } from './spotlight.js';
 import { drawnOnce } from './drawnOnce.js';
 
-/** How a legend row is drawn: a marker, a line, an area, or the past. */
-export const SWATCHES = ['point', 'line', 'area', 'trail', 'gained', 'lost', 'new'];
-
 const HALO = 'rgba(255,255,255,0.92)';
 const MAP_KINDS = ['map', 'inset'];
 

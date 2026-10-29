@@ -172,9 +172,6 @@ export function fillPaint(color, opacity) {
   return `rgba(${r}, ${g}, ${b}, ${Math.min(1, alpha)})`;
 }
 
-/** The corners a box's tag can hang from: top-left, top-right, bottom-left, bottom-right. */
-export const TAG_CORNERS = ['tl', 'tr', 'bl', 'br'];
-
 /**
  * The font size a new box tag starts at, in page pixels, read off the box's own
  * line: a heavy box gets a heavy tag. It is the tag's own size from then on.

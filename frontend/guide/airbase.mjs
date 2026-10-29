@@ -1,6 +1,6 @@
 /**
  * The analyzer the "Create your analyzer" journey is photographed on: the one the Detect
- * tutorial film builds (`.docs/demos/tutorials/detect-airbase`), new aircraft on the
+ * tutorial film builds, new aircraft on the
  * apron of Al Udeid Air Base between two Sentinel-2 passes.
  *
  * Its rules and its check are the film's, calibrated on those passes: 14 places where an

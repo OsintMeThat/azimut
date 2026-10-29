@@ -1426,6 +1426,10 @@ def _structured_record_paths(case: Case) -> list[Path]:
         tool / layout.COLLAGE_DIR,
         tool / layout.DRAFTS_DIR,
         tool / layout.SEARCH_DIR,
+        # Horizon's saved views and the bench's `.work.json`, then its searches.
+        tool / layout.HORIZON_DIR,
+        tool / layout.HORIZON_DIR / layout.HORIZON_FINDS_DIR,
+        tool / layout.MAPPLATE_DIR,
     )
     return [path for root in roots if root.is_dir() for path in sorted(root.glob("*.json"))]
 

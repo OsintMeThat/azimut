@@ -64,19 +64,6 @@ VERSION = 1
 #: What a plate is called when its title gives a file nothing to be named by.
 FALLBACK = "Map plate"
 
-#: Paper in millimetres, portrait. `screen` is a 16:9 slide, 1280 by 720 at 96 dpi, and
-#: a 9:16 story turned; `social` is the 4:5 of a feed post. `custom` takes the page's `size`.
-PAPERS: dict[str, tuple[float, float]] = {
-    "a5": (148.0, 210.0),
-    "a4": (210.0, 297.0),
-    "a3": (297.0, 420.0),
-    "letter": (215.9, 279.4),
-    "screen": (190.5, 338.67),
-    "square": (200.0, 200.0),
-    "social": (216.0, 270.0),
-}
-#: The fonts shipped with the app, so a plate reads the same on every machine.
-FONTS = ("inter", "barlow", "oxanium", "plexmono", "serif", "condensed")
 KINDS = ("map", "inset", "legend", "text", "scale", "north", "image", "label", "arrow", "credits",
          "shape", "ring", "cone", "zone", "measure", "line", "key", "table", "qr", "timeline", "signature", "brand", "video", "symbol", "focus")
 #: The kinds that read one map of the plate, named by `of`.
@@ -556,15 +543,6 @@ class TemplateData(PlateSpec):
         if self.days or self.skipped:
             raise ValueError("a template keeps no days of a case")
         return self
-
-
-def paper_mm(page: dict[str, Any]) -> tuple[float, float]:
-    """The page's width and height in millimetres, turned as it is set; a custom paper as given."""
-    if page.get("paper") == "custom" and page.get("size"):
-        width, height = page["size"]
-        return (float(width), float(height))
-    width, height = PAPERS[page.get("paper", "a4") if page.get("paper") in PAPERS else "a4"]
-    return (height, width) if page.get("orientation", "landscape") == "landscape" else (width, height)
 
 
 def as_periods(spec: dict[str, Any]) -> dict[str, Any]:

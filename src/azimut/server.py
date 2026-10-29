@@ -211,7 +211,12 @@ def install_local_guard(app: FastAPI) -> None:
             ) and origin.startswith(EXTENSION_ORIGIN_SCHEMES)
             if not ingest_extension:
                 return PlainTextResponse("cross-origin request refused", status_code=403)
-        return await call_next(request)
+        response = await call_next(request)
+        # A page elsewhere may still link to the app, but never frame it: inside its
+        # frame the app's own calls are same-origin, so a hidden one could turn the
+        # analyst's clicks into deletes.
+        response.headers.setdefault("x-frame-options", "SAMEORIGIN")
+        return response
 
 
 #: Reachable while the workspace is not: everything the stop screen and the

@@ -82,6 +82,13 @@ def test_the_apps_own_page_and_a_typed_address_are_served(client, site):
     assert client.get("/api/health", headers={"sec-fetch-site": site}).status_code == 200
 
 
+@pytest.mark.parametrize("path", ["/", "/api/health", "/api/cases"])
+def test_no_page_elsewhere_may_frame_the_app(client, path):
+    framed = {"sec-fetch-site": "cross-site", "sec-fetch-dest": "iframe"}
+    answer = client.get(path, headers=framed if path == "/" else {})
+    assert answer.headers["x-frame-options"] == "SAMEORIGIN"
+
+
 def test_a_link_from_elsewhere_still_opens_the_app_and_the_ingest_island_keeps_its_token(client):
     assert client.get("/", headers={"sec-fetch-site": "cross-site"}).status_code != 403
     # the extension's worker may be named cross-site; its pairing token is the wall

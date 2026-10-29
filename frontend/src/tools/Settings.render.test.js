@@ -52,7 +52,7 @@ function settingsBlob() {
     eco_max_zooms: {},
     free_tier: {},
     free_tiers: {},
-    export_dirs: { notes: '', media: '', proofs: '' },
+    export_dirs: { notes: '', media: '', proofs: '', views: '/home/analyst/Plates', sheets: '' },
     ingest_token: '',
     home_view: { lat: 48.85, lon: 2.29, zoom: 12 },
     post_mention: '',
@@ -171,12 +171,21 @@ describe('each section', () => {
     expect(pane().querySelector('a[href$="/releases/latest"]')).toBeNull();
   });
 
-  it('Storage manages all three export folders and the backup', () => {
+  it('Storage manages every export folder and the backup', () => {
     const text = show('storage');
     expect(text).toContain('Note PDFs');
     expect(text).toContain('Media copies');
     expect(text).toContain('Proof PNGs');
+    expect(text).toContain('Sheet CSVs');
     expect(pane().querySelector('a[href="/api/settings/export"]')).not.toBeNull();
+  });
+
+  it('Storage shows the folder saved for views, where plates go, and lets it be reset', () => {
+    show('storage');
+    const row = [...pane().querySelectorAll('.row')].find((el) => el.textContent.includes('Views and comparisons'));
+    expect(row.textContent).toContain('/home/analyst/Plates');
+    const reset = [...row.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Reset');
+    expect(reset.disabled).toBe(false);
   });
 
   it('System reports the version and what ffmpeg it found', () => {

@@ -41,7 +41,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .. import __version__, config, errors, layout
 from ..sqlite_backend import SQLITE_SCHEMA, SqliteCase
 from ..workspace import Case, CaseError, _now, _replace_with_retry, ensure_dir
-from . import workqueue
+from . import updates, workqueue
 
 BUNDLE_FORMAT = 2
 #: The format from which members are named relative to the case root rather than
@@ -140,6 +140,26 @@ _WINDOWS_FORBIDDEN = frozenset('<>:"|?*')
 
 class BundleError(CaseError):
     """A bundle is invalid, incompatible, or cannot be opened."""
+
+
+class UndeclaredState(BundleError):
+    """A member this Azimut does not know, which a newer one may have written."""
+
+
+#: The most of a bundle's `azimut_version` a refusal repeats.
+_VERSION_TEXT = re.compile(r"[0-9][0-9A-Za-z.+-]{0,39}")
+
+
+def _refusal(header: dict[str, Any], reason: str) -> BundleError:
+    """A refusal that names the newer Azimut a bundle was made with, when it says so."""
+    made_by = header.get("azimut_version")
+    if (
+        isinstance(made_by, str)
+        and _VERSION_TEXT.fullmatch(made_by)
+        and updates.is_newer(made_by, __version__)
+    ):
+        return BundleError(f"this bundle was made with Azimut {made_by}; update Azimut to import it")
+    return BundleError(reason)
 
 
 def _uploads_dir() -> Path:
@@ -438,6 +458,14 @@ def _case_files(case: Case) -> Iterator[tuple[str, Path]]:
     itself, the database after cleaning this machine's state out of it.
     """
     tool = case.tool_root
+    # A folder this version has no decision for is work a newer Azimut wrote here.
+    # Leaving it out would hand over a bundle that silently lacks it.
+    for entry in tool.iterdir():
+        if entry.is_dir() and classify_case_entry(entry.name) is None:
+            raise BundleError(
+                f"this Azimut does not know the case's '{entry.name}' folder, likely work "
+                "from a newer version; export the case from that version so it travels whole"
+            )
     written_apart = {
         path.relative_to(tool).as_posix() for path in (case.json_path, case.db_path)
     }
@@ -780,9 +808,9 @@ def _validate_header(header: Any) -> dict[str, Any]:
     version = header.get("format_version")
     db_schema = header.get("case_db_schema")
     if not isinstance(version, int) or not 1 <= version <= BUNDLE_FORMAT:
-        raise BundleError("this bundle needs a newer Azimut bundle format")
+        raise _refusal(header, "this bundle needs a newer Azimut bundle format")
     if not isinstance(db_schema, int) or not 1 <= db_schema <= SQLITE_SCHEMA:
-        raise BundleError("this bundle needs a newer Azimut case database")
+        raise _refusal(header, "this bundle needs a newer Azimut case database")
     case_name = header.get("case_name")
     if (
         not isinstance(case_name, str)
@@ -854,7 +882,7 @@ def _manifest(
     _validate_member_names(names)
     for name in names[1:-1]:
         if not _importable(name, version):
-            raise BundleError("the bundle contains undeclared case state")
+            raise UndeclaredState("the bundle contains undeclared case state")
     if any((info.external_attr >> 16) & 0o170000 == 0o120000 for info in infos):
         raise BundleError("the bundle contains a symbolic link")
     if any(info.is_dir() for info in infos):
@@ -1108,9 +1136,12 @@ def import_into(
         if header["sealed"]:
             _decrypt_to(source, decrypted, password or "")
             archive_path = decrypted
-        verified = _verify_and_extract(
-            archive_path, staging, declared=int(header["format_version"])
-        )
+        try:
+            verified = _verify_and_extract(
+                archive_path, staging, declared=int(header["format_version"])
+            )
+        except UndeclaredState as exc:
+            raise _refusal(header, str(exc)) from exc
         decrypted.unlink(missing_ok=True)
         # The staging directory is a case shell, not a case yet, so it is
         # addressed through `layout` against its own root rather than through a

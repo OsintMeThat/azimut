@@ -146,7 +146,6 @@ def test_a_plate_keeps_what_it_draws_beyond_its_maps(client, owner):
     zone = next(element for element in kept["elements"] if element["id"] == "z")
     assert zone["onward"] == "2026-10-01" and zone["until"] == "2026-10-05T14:30"
     assert kept["page"]["size"] == [300, 160]
-    assert mapplates.paper_mm(kept["page"]) == (300, 160)
 
 
 def test_a_plate_that_listed_its_days_reads_as_the_period_they_span(client, owner):
