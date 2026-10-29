@@ -111,7 +111,8 @@
     shownName = name;
     preparing = false;
   });
-  const resultFace = $derived(Boolean(search) && !preparing);
+  // a search only saved has no results to show: its setup is what it keeps
+  const resultFace = $derived(Boolean(search) && search.status !== 'saved' && !preparing);
 
   /** What a search runs with, in a line: the lens, which way it faces, how far it reads, who took the photo. */
   function toldOf({ hints = {}, lens = null, panorama = false, who = 'ground', floors = null, facing = [], stands = [], marks = null, looking = [], mirror = false, round = false, framed = null, sun = null, water = false, over = null }) {

@@ -80,6 +80,12 @@ export const PANORAMA_TALL = 110;
  */
 export const MEASURED_GIVE = 1.05;
 
+/**
+ * The span a stitch says for its strip is what joining the frames worked out, not the camera's: Find searches it
+ * this share either way, as the engine does a stitch's frames (horizon_finds.STITCHED_GIVE, where it is measured).
+ */
+export const STITCHED_GIVE = 0.2;
+
 /** The reaches the panorama keeps its skyline at, metres: the app's SKYLINE_CUTS. */
 export const REACHES = [2_000, 5_000, 10_000, 20_000, 50_000, 100_000];
 

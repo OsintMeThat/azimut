@@ -5,13 +5,14 @@
  *
  * The photo and its trace are the same in all three: View hides the photo, it
  * never removes it. The mode is in the address as `md`, View writing nothing,
- * so a reload and Back come back to it.
+ * so a reload and Back come back to it. Find carries a Beta tag: it ships
+ * while its search is still being tuned.
  */
 
 export const MODES = Object.freeze([
   { id: 'view', label: 'View', icon: 'horizon', hint: 'The terrain from the viewpoint' },
   { id: 'overlay', label: 'Overlay', icon: 'image', hint: 'Lay a photo over the view and match it' },
-  { id: 'find', label: 'Find', icon: 'search', hint: 'Search an area of the map for where a photo was taken' },
+  { id: 'find', label: 'Find', icon: 'search', tag: 'Beta', hint: 'Beta: search an area of the map for where a photo was taken' },
 ]);
 
 const known = (id) => MODES.some((one) => one.id === id);

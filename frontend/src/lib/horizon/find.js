@@ -488,6 +488,7 @@ export function searchEnding(row) {
   if (row.status === 'running' || row.status === 'queued') return 'running';
   if (row.status === 'stopping') return 'stopping';
   if (row.status === 'cancelled') return best ? `stopped, ${best}` : 'stopped';
+  if (row.status === 'saved') return 'saved, not searched';
   return row.status === 'failed' ? 'failed' : (row.status ?? '');
 }
 

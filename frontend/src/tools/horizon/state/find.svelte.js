@@ -53,7 +53,7 @@ import {
   toggleStand,
   traceSpan,
 } from '../../../lib/horizon/find.js';
-import { AUTO_REACH, MEASURED_GIVE, PANORAMA_TALL, PANORAMA_WITHIN, searchHints } from '../../../lib/horizon/hints.js';
+import { AUTO_REACH, MEASURED_GIVE, PANORAMA_TALL, PANORAMA_WITHIN, STITCHED_GIVE, searchHints } from '../../../lib/horizon/hints.js';
 import { farRange } from '../../../lib/horizon/traceMarks.js';
 import { marksSaid } from '../../../lib/horizon/traceMarks.js';
 import { COARSE_RELIEF_M, GAP_MIN_POINTS, markedPlane, traceSamples } from '../../../lib/horizon/overlay.js';
@@ -73,6 +73,9 @@ export const ROOF = { low: 3, high: 10 };
 /** A floor's height, metres: a roof `n` floors up stands n × FLOOR_M over the ground. */
 export const FLOOR_M = 3;
 
+/** The floors a roof stands at when Roof is picked, before any are said. */
+export const ROOF_FLOORS = 1;
+
 /** The eye on a roof `floors` floors up, from the roof itself to someone standing on it; the usual roof unsaid. */
 export function roofFor(floors) {
   const n = Math.round(Number(floors));
@@ -89,7 +92,7 @@ export function floorsOf(who) {
 /** Who took the photo as Find offers it, a roof or a terrace beside the modes. */
 export const TAKEN = [
   { id: 'ground', label: WHO.ground.label, title: 'Taken by someone standing on the ground' },
-  { id: 'roof', label: 'Roof', title: `From a roof or a terrace, ${ROOF.low} to ${ROOF.high} m above the ground` },
+  { id: 'roof', label: 'Roof', title: `From a roof or a terrace, ${ROOF_FLOORS} floor up until Floors says more` },
   { id: 'drone', label: WHO.drone.label, title: 'From a drone: say how high below' },
   { id: 'aircraft', label: WHO.aircraft.label, title: 'From an aircraft: say how high above the sea below' },
 ];
@@ -102,7 +105,7 @@ export function takenOf(who) {
 
 /** The setting one of `TAKEN` stands for. */
 export function whoFor(taken) {
-  if (taken === 'roof') return { mode: 'ground', ...ROOF };
+  if (taken === 'roof') return { mode: 'ground', ...roofFor(ROOF_FLOORS) };
   const one = WHO[taken] ?? WHO.ground;
   return { mode: WHO[taken] ? taken : 'ground', low: one.low, high: one.high };
 }
@@ -420,8 +423,16 @@ export function createFindState({ api, overlay, view }) {
     alignments = alignments.map((a) => (a.id === id ? { ...a, ...change } : a));
   }
 
-  /** The trace on the picture plane, as the search reads it, or null while it is too short. */
-  function planeOfTrace() {
+  /** Why the trace is not searched yet, '' when it is: too short, or its skyline all under Far land hidden. */
+  function traceProblem() {
+    if (planeOfTrace()) return '';
+    return overlay.marks?.hazy?.length && planeOfTrace({ haze: false })
+      ? 'Far land hidden covers the skyline: leave out a part you are sure of'
+      : 'Trace the skyline on the photo first';
+  }
+
+  /** The trace on the picture plane, as the search reads it, or null while its skyline is too short. */
+  function planeOfTrace({ haze = true } = {}) {
     const aspect = overlay.aspect;
     if (!(aspect > 0)) return null;
     const size = { width: PLANE_W, height: PLANE_W / aspect };
@@ -436,14 +447,20 @@ export function createFindState({ api, overlay, view }) {
     const fov = lens?.fov ?? Math.sqrt(told.within[0] * told.within[1]);
     const pieceAt = (s) => overlay.pieceAt?.({ u: s.x / size.width, v: s.y / size.height }) ?? 0;
     const bentAt = (s) => overlay.bentAt?.({ u: s.x / size.width, v: s.y / size.height }) ?? false;
-    const hazyAt = (s) => overlay.hazyAt?.({ u: s.x / size.width, v: s.y / size.height }) ?? false;
+    const hazyAt = (s) => (haze && overlay.hazyAt?.({ u: s.x / size.width, v: s.y / size.height })) ?? false;
     const plane = markedPlane(samples, { fov, ...size, projection, heading: 0, tilt: 0, roll: 0 }, marks, pieceAt, bentAt, hazyAt);
-    // a lens read off the video's pan is searched a little either way, one the file or the stitch says held exact
-    const within = lens?.measured ? [fov / MEASURED_GIVE, fov * MEASURED_GIVE] : told.within;
+    // what Far land hidden leaves of the skyline must say enough too
+    if (plane.x.length < GAP_MIN_POINTS) return null;
+    // a lens read off the video's pan is searched a little either way, a stitch's span a fifth, the file's held exact
+    const within = lens?.measured
+      ? [fov / MEASURED_GIVE, fov * MEASURED_GIVE]
+      : lens?.stitched
+        ? [fov * (1 - STITCHED_GIVE), Math.min(PANORAMA_WITHIN[1], fov * (1 + STITCHED_GIVE))]
+        : told.within;
     // a panorama of unknown width spans no more than a phone's frame up and down: wider lenses are never tried
     const lensMax = projection === 'panorama' && !lens ? PANORAMA_TALL * aspect : Infinity;
     return {
-      ...plane, fov, known: Boolean(lens) && !lens.measured, ...(within ? { within } : {}), projection,
+      ...plane, fov, known: Boolean(lens) && !lens.measured && !lens.stitched, ...(within ? { within } : {}), projection,
       ...(lensMax < PANORAMA_WITHIN[1] ? { lens_max: Math.round(lensMax * 10) / 10 } : {}),
     };
   }
@@ -922,7 +939,8 @@ export function createFindState({ api, overlay, view }) {
     /** What keeps a search from being run now, '' when nothing does. */
     get searchProblem() {
       if (!overlay.source) return 'Add the photo first';
-      if (!planeOfTrace()) return 'Trace the skyline on the photo first';
+      const traced = traceProblem();
+      if (traced) return traced;
       if (area.length < 3) return 'Draw the area on the map';
       if (previewed && previewed.total > 0 && previewed.kept === 0) return 'No point of the area stands on the ground ticked';
       if (sectors && Array.isArray(sectors.sectors) && !sectors.sectors.length) return 'The sun and the directions ticked leave no heading';
@@ -1034,6 +1052,25 @@ export function createFindState({ api, overlay, view }) {
       search = { ...row, ask, result: null };
       soFar = null;
       follow(caseId, row.name);
+      refreshList(caseId);
+      return row;
+    },
+    /**
+     * Keep the photo, its trace and the setup in the case without searching: in the search on show when it was
+     * only saved too, else as a new one.
+     */
+    async save(caseId) {
+      const ask = askNow();
+      if (!ask || !caseId) return null;
+      caseOf = caseId;
+      const body = { ...ask, run: false };
+      const kept = search?.status === 'saved' ? search.name : null;
+      const row = kept
+        ? await api.put(findPath(caseId, kept), body)
+        : await api.post(`/api/cases/${encodeURIComponent(caseId)}/horizon/finds`, body);
+      stopPoll?.();
+      search = { ...row, ask, result: null };
+      soFar = null;
       refreshList(caseId);
       return row;
     },
@@ -1176,7 +1213,8 @@ export function createFindState({ api, overlay, view }) {
     /** Why the trace cannot be tried yet, '' when it can. */
     get tryProblem() {
       if (!overlay.source) return 'Add the photo first';
-      if (!planeOfTrace()) return 'Trace the skyline on the photo first';
+      const traced = traceProblem();
+      if (traced) return traced;
       if (!caseOf) return 'Open a case first';
       return '';
     },

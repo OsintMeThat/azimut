@@ -3048,6 +3048,7 @@ click standing the frame upright.
 Horizon has three modes on one switch at the left of its header: **View**, the
 terrain from the viewpoint; **Overlay**, a photo laid over it there and matched
 by hand; **Find**, an area of the map searched for where the photo was taken.
+Find carries a **Beta** pill while its search is still being tuned.
 The photo and its trace are the same in all three, and View only hides the
 photo. The mode is in the address, so Back returns to it. A reload opens the
 tab on its map. The work no save has kept yet (the viewpoint, the photo, its
@@ -3083,9 +3084,10 @@ shows over it), **Key line** (I) to say a skyline line matters most, a peak or
 a notch known anywhere (three at most, "Key" shows over it), **May be bent** (G)
 to brush over a part of the picture that may be bent, a wide lens's edge or a
 piece stretched while laid (an orange wash; a click on a brushed part takes it
-away), **Far land hidden** (F) to brush over a part where haze or the night may
-hide land behind the skyline (a pale blue wash: the skyline there is read as a
-ridge, laid on any of the terrain's silhouettes rather than its outermost), and
+away), **Far land hidden** (F) to brush over the stretch of skyline where haze
+or the night may hide land behind it (a pale blue wash: the line under the brush
+is read as a ridge, laid on any of the terrain's silhouettes rather than its
+outermost), and
 the rubber (E).
 The **magnet** (M) says whether a
 line drawn snaps onto the photo's nearest edge; Alt does the other for one
@@ -3161,7 +3163,9 @@ distance is searched only on ground that far, which also sets how far the turn
 is read and how fine the grid is; lines given none are kept off the ground at
 the eye's feet. A collage of a pan Azimut stitched is read frame by frame, each
 frame through its own camera at the stitch's lens, held level as the collage is
-laid (the stitch's own level drifts on a few frames). Looking from a place a
+laid (the stitch's own level drifts on a few frames). The lens or span a stitch
+says is what joining the frames worked out, so Find searches it 20% either way.
+Looking from a place a
 search found lays the photo as the search read it: a collage's frames, or a cut
 collage's pieces, each where the search put it, and a selfie found mirrored
 flipped. **As searched**, lit in the band over the view, lays it flat again, as
@@ -3190,7 +3194,10 @@ photo, when each was made and how it ended; opening one replaces the setup on
 screen. Arriving in Find without a photo, the dialog that asks for one shows the
 same cards first (four, the rest behind **Show all**). **New** beside
 it lets the photo, its trace and the setup go and asks for the next photo,
-asking first when no search keeps what is on screen. The map shows the grid the
+asking first when no search keeps what is on screen. **Save** (Ctrl+S) keeps the
+photo, its trace with its marks and the setup as a search of the case without
+running it, "saved, not searched" on its card; it opens on its setup, and Save
+again writes over it. The map shows the grid the
 setup lays before the search and once the setup is changed from the search on
 show. While a search runs, the points it has scored fill the grid in as cells
 of the heatmap, coloured from the middle of the scores so far up to the best,
@@ -3256,10 +3263,10 @@ width, frames laid side by side by hand or a phone's sweep, is also read two thi
 to one and a half times as tall, and each place keeps the height that explains
 most: the trace's colours and the terrain's line read the photo at it, and Find's
 look lays the picture taller or flatter. **Taken** says who
-took it: On foot, **Roof** (from a roof or a terrace, the eye 3 to 10 m over the
-ground; **Floors** says how many floors up, 3 m each, and the eye then stands from
-that roof to 2 m over it), Drone or Aircraft, the last two with the heights they
-flew at.
+took it: On foot, **Roof** (from a roof or a terrace; **Floors** says how many
+floors up, 3 m each, one when Roof is picked, and the eye stands from that roof to
+2 m over it; Floors left empty, the eye is 3 to 10 m over the ground), Drone or
+Aircraft, the last two with the heights they flew at.
 
 An alignment is made by four clicks, the near thing and what stands behind it
 on the photo, then both on the map. What the next click is for is said in the

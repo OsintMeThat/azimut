@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AS_SEARCHED, framesLaid, LAID_CELLS, meshPoint, piecesLaid } from './laid.js';
+import { AS_SEARCHED, framesLaid, framesLook, LAID_CELLS, meshPoint, piecesLaid } from './laid.js';
 
 const ASPECT = 2;
 const LENS = 40;
@@ -46,6 +46,28 @@ describe('a photo laid as a search read it', () => {
     // found mirrored, it lies flipped
     const mirrored = framesLaid({ mesh: plainMesh(), lens: LENS }, { heading: 100, tilt: 0, roll: 0, mirrored: true }, view, ASPECT);
     expect(mirrored.place(0.2, 0.5).u).toBeCloseTo(0.8, 6);
+  });
+
+  it('lays a collage through the lens the search found, not only the stitch said', () => {
+    const view = { projection: 'camera', heading: 100, tilt: 0, roll: 0, fov: LENS };
+    // found a fifth wider than the stitch: the frames' edges stand farther out than the view's
+    const wider = framesLaid({ mesh: plainMesh(), lens: LENS }, { heading: 100, tilt: 0, roll: 0, fov: LENS * 1.2 }, view, ASPECT);
+    const edge = Math.tan(((LENS * 1.2) / 2) * (Math.PI / 180)) / tan;
+    expect(wider.place(1, 0.5).u).toBeCloseTo((1 + edge) / 2, 4);
+    expect(wider.place(0.5, 0.5).u).toBeCloseTo(0.5, 6);
+    // a place that says no lens keeps the stitch's
+    const told = framesLaid({ mesh: plainMesh(), lens: LENS }, { heading: 100, tilt: 0, roll: 0 }, view, ASPECT);
+    expect(told.place(0.9, 0.5).u).toBeCloseTo(0.9, 6);
+  });
+
+  it('looks over the pan stretched as much as the search found its frames wider', () => {
+    const framed = { lens: 30, span: 120, middle: 10 };
+    expect(framesLook(framed, { heading: 50, tilt: 2, fov: 30 })).toEqual({ projection: 'panorama', heading: 60, tilt: 2, roll: 0, fov: 120 });
+    const wider = framesLook(framed, { heading: 50, fov: 36 });
+    expect(wider.fov).toBeCloseTo(144, 9);
+    expect(wider.heading).toBeCloseTo(62, 9);
+    expect(wider.tilt).toBe(0);
+    expect(framesLook(framed, { heading: 50 }).fov).toBe(120);
   });
 
   it('lays a cut collage piece by piece, the seam where the cut is', () => {

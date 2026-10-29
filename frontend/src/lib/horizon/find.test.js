@@ -45,6 +45,8 @@ import {
   searchedReach,
   ringsOf,
   searchedWhen,
+  searchEnding,
+  searchTone,
   standsText,
   SUN_SIDES,
   sunAsked,
@@ -681,3 +683,11 @@ describe('what the trace says before a search', () => {
   });
 });
 
+describe('how a kept search ended', () => {
+  it('says a search saved without running is not searched yet, quietly', () => {
+    expect(searchEnding({ status: 'saved' })).toBe('saved, not searched');
+    expect(searchTone({ status: 'saved' })).toBe('quiet');
+    expect(searchEnding({ status: 'cancelled' })).toBe('stopped');
+    expect(searchEnding({ status: 'done', best: { explained: 0.62 } })).toBe('best explains 62%');
+  });
+});

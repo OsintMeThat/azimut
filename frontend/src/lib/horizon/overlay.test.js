@@ -933,6 +933,22 @@ describe('the marks beside the trace, as the search reads them', () => {
     expect(markedPlane(samples, FRAME, marks, null, null, () => false).ridge_x).toHaveLength(0);
     expect(markedPlane(samples, FRAME, { ...marks, hazy: [] }).x).toHaveLength(3);
   });
+
+  it('reads only the stretch of skyline the haze is brushed over, not the line under haze brushed on the sky', () => {
+    const samples = [
+      { x: 100, y: 150, stroke: 0 },
+      { x: 700, y: 140, stroke: 0 },
+    ];
+    // brushed in the empty sky over the far end, well clear of the line: nothing moves
+    const sky = { path: [{ u: 700 / FRAME.width, v: 40 / FRAME.height }], r: 0.02 };
+    const marks = { lines: [5], inner: [], pairs: [], cuts: [], far: [], sea: [], clear: [], key: [], hazy: [sky] };
+    expect(markedPlane(samples, FRAME, marks).x).toHaveLength(2);
+    // brushed over the line itself, that point goes with the ridges
+    const line = { path: [{ u: 700 / FRAME.width, v: 140 / FRAME.height }], r: 0.02 };
+    const plane = markedPlane(samples, FRAME, { ...marks, hazy: [line] });
+    expect(plane.x).toHaveLength(1);
+    expect(plane.ridge_x).toHaveLength(1);
+  });
 });
 
 describe('a collage’s pieces as the search eased them', () => {

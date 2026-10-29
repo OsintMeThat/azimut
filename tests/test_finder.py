@@ -693,6 +693,31 @@ def test_a_search_is_kept_in_the_case_runs_and_lists(client):
     assert client.get(f"/api/cases/{case_id}/horizon/finds/{name}").status_code == 404
 
 
+def test_a_search_saved_without_running_keeps_its_question_and_is_saved_again_under_its_name(client, monkeypatch):
+    queued = []
+    monkeypatch.setattr(workqueue, "enqueue", lambda *a, **k: queued.append(a))
+    case_id = client.post("/api/cases", json={"name": "Saved"}).json()["id"]
+    saved = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask(run=False))
+    assert saved.status_code == 200, saved.text
+    name = saved.json()["name"]
+    assert saved.json()["status"] == "saved" and not queued
+    record = client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()
+    assert record["status"] == "saved" and record["result"] is None and "run" not in record["ask"]
+    # saved again, the same search holds the new question
+    again = client.put(f"/api/cases/{case_id}/horizon/finds/{name}", json=_ask(run=False, spacing=250.0))
+    assert again.status_code == 200, again.text
+    assert again.json()["name"] == name and not queued
+    record = client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()
+    assert record["ask"]["spacing"] == 250.0 and record["status"] == "saved"
+    assert [row["name"] for row in client.get(f"/api/cases/{case_id}/horizon/finds").json()] == [name]
+    # a search that ran stays as it ran
+    ran = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask()).json()["name"]
+    assert len(queued) == 1
+    refused = client.put(f"/api/cases/{case_id}/horizon/finds/{ran}", json=_ask(run=False))
+    assert refused.status_code == 409
+    assert client.put(f"/api/cases/{case_id}/horizon/finds/nothing", json=_ask(run=False)).status_code == 404
+
+
 def test_a_running_search_fills_the_map_in_and_a_place_confirmed_stops_it(client, monkeypatch):
     from azimut.api.cases import get_case
 

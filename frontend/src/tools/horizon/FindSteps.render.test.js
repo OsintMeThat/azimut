@@ -250,6 +250,13 @@ describe('the steps of Find', () => {
     expect(find.tryAt).toHaveBeenCalledWith(live[2]);
   });
 
+  it('opens a search only saved on its setup, with no results to show', () => {
+    const root = steps({ find: fakeFind({ search: { name: 's', status: 'saved', progress: { done: 0, total: 0 }, result: null } }) });
+    expect(buttonNamed(root, 'Change and search again')).toBeUndefined();
+    expect(root.textContent).not.toContain('Stopped');
+    expect(root.textContent).toContain('Skyline');
+  });
+
   it('says it stops, then what it found by then, the place confirmed first', () => {
     const stopping = fakeFind({ searching: true, search: { name: 's', status: 'stopping', progress: { done: 120, total: 469 } } });
     const halted = steps({ find: stopping });
@@ -354,7 +361,8 @@ describe('the steps of Find', () => {
     expect([...taken.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['On foot', 'Roof', 'Drone', 'Aircraft']);
     expect(taken.querySelector('[aria-checked="true"]').textContent.trim()).toBe('On foot');
     buttonNamed(taken, 'Roof').click();
-    expect(find.setWho).toHaveBeenCalledWith({ mode: 'ground', low: 3, high: 10 });
+    // one floor up until Floors says more
+    expect(find.setWho).toHaveBeenCalledWith({ mode: 'ground', low: 3, high: 5 });
     // an eye raised on the ground is a roof, said so in the line and with no heights to type
     const roof = steps({ find: fakeFind({ who: { mode: 'ground', low: 3, high: 10 } }) });
     expect(roof.querySelector('[aria-labelledby="find-who"] [aria-checked="true"]').textContent.trim()).toBe('Roof');

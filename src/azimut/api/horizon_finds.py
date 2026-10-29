@@ -227,6 +227,8 @@ class FindIn(GroundIn):
     #: the computer free.
     speed: Literal["gentle", "fast", "fastest"] = "fast"
     hints: dict[str, Any] | None = None
+    #: False keeps the question in the case without starting it (`horizon_finds.SAVED`).
+    run: bool = True
 
     @model_validator(mode="after")
     def _headings_left(self) -> FindIn:
@@ -256,19 +258,38 @@ def _asked(body: GroundIn) -> dict[str, Any]:
 
 @router.post("/cases/{case_id}/horizon/finds")
 def start_find(case_id: str, body: FindIn) -> dict[str, Any]:
-    """Keep the question as a search of the case and start it on the background queue."""
+    """Keep the question as a search of the case and start it on the background queue, or only keep it."""
     case = get_case(case_id)
     title = body.title or (f"{body.photo.title} search" if body.photo and body.photo.title else FALLBACK)
     name = layout.free_stem(_names(case), layout.slugify(title, FALLBACK), FALLBACK)
     ask = _asked(body)
     ask.pop("title", None)
+    ask.pop("run", None)
     record = horizon_finds.new_record(name, ask)
+    if not body.run:
+        record["status"] = horizon_finds.SAVED
     rel = layout.horizon_find_rel(name)
     horizon_finds.write(case, name, record)
     if case.find_entity(attr="spec", value=rel) is None:
         case.add_entity(horizon_finds.TYPE, name, attrs={"spec": rel}, by="horizon")
-    workqueue.enqueue(case, horizon_finds.JOB, key=name, payload={"name": name})
+    if body.run:
+        workqueue.enqueue(case, horizon_finds.JOB, key=name, payload={"name": name})
     return {"name": name, **horizon_finds.row(name, record)}
+
+
+@router.put("/cases/{case_id}/horizon/finds/{name}")
+def save_find(case_id: str, name: str, body: FindIn) -> dict[str, Any]:
+    """Keep the question again in a search saved without running, under its name; one that ran stays as it ran."""
+    case = get_case(case_id)
+    safe, record = _one(case, name)
+    if record.get("status") != horizon_finds.SAVED:
+        raise HTTPException(status_code=409, detail="a search that ran stays as it ran: save the question as a new one")
+    ask = _asked(body)
+    ask.pop("title", None)
+    ask.pop("run", None)
+    record.update(ask=ask, updated_at=horizon_finds.now())
+    horizon_finds.write(case, safe, record)
+    return {"name": safe, **horizon_finds.row(safe, record)}
 
 
 class SectorsIn(BaseModel):

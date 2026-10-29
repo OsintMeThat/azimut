@@ -48,10 +48,18 @@ VERSION = 1
 ACTIVE = ("queued", "running")
 # Asked to stop while it runs: it stops between two points, keeping what it found.
 STOPPING = "stopping"
+# Kept to run later: the question only, its job never queued.
+SAVED = "saved"
 # A collage is read frame by frame only when at least this share of its frames were stitched: frames laid by hand are
 # tied to the stitched ones by their overlaps, and many of them chained bend the pan (v11, eleven of twelve frames laid
 # by hand, its truth against the 100 best places of its search: read frame by frame 97th, as one picture 12th).
 FRAMES_STITCHED = 0.25
+# The lens a stitch says is what joining the frames worked out, not the camera's: Find searches it this share either
+# way, the frames' lens here and a strip's span in the browser (hints.js STITCHED_GIVE). Measured on the bench's five
+# collages Azimut stitched (three read frame by frame), against the best places of three nights: the truth's rank 100
+# to 12, 41 to 2, 160 to 4, 103 to 35 and 182 to 192, and a Quick search finds two of them first where it found none.
+# A tenth either way is too little.
+STITCHED_GIVE = 0.2
 # The points each running search has scored, by case and name: `{ started, points }`.
 LIVE: dict[tuple[str, str], dict[str, Any]] = {}
 # Progress is written this often while a search runs, seconds, and the stop asked for read as often.
@@ -494,11 +502,12 @@ def on_frames(
             piece=None, ridge_piece=None,
         )
     trace = replace(
-        trace, x=reading.x, y=reading.y, half_width=reading.half_width, fov=reading.lens, known=True,
-        within=None, projection="camera", marks=marks,
+        trace, x=reading.x, y=reading.y, half_width=reading.half_width, fov=reading.lens, known=False,
+        within=(reading.lens * (1 - STITCHED_GIVE), reading.lens * (1 + STITCHED_GIVE)), projection="camera",
+        marks=marks,
     )
     if plan.alignments:
-        # where each alignment's near point stands across the virtual camera, the lens now known
+        # where each alignment's near point stands across the virtual camera
         lined = []
         for line, one in zip(plan.alignments, ask.get("alignments") or []):
             near = (one.get("photo") or {}).get("near")

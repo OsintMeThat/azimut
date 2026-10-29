@@ -49,7 +49,12 @@
     onremovesearch = () => {},
     /** Asked to start a new search: the photo, its trace and the setup let go. */
     onnew = () => {},
+    /** Asked to keep the setup in the case without searching. */
+    onsave = () => {},
   } = $props();
+
+  /** Why the setup cannot be saved now, '' when it can. */
+  const saveProblem = $derived(!caseOpen ? 'Open a case first' : find.searching ? 'The search is running' : find.searchProblem);
 
   /** The place of the results the panel and the map light together, or -1. */
   let lit = $state(-1);
@@ -156,6 +161,11 @@
   }
 
   function onKey(event) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      if (!saveProblem) onsave();
+      return;
+    }
     if (event.key !== 'Escape' || event.defaultPrevented) return;
     if (find.pending) find.cancelAlignment();
     else if (find.drawing === 'brush') find.stopBrush();
@@ -199,6 +209,16 @@
       aria-label="New search"
     >
       <Icon name="plus" size={13} /><span>New</span>
+    </button>
+    <button
+      type="button"
+      class="btn btn-sm"
+      disabled={Boolean(saveProblem)}
+      onclick={onsave}
+      title={saveProblem || 'Keep this setup in the case without searching (Ctrl+S)'}
+      aria-label="Save the search without running it"
+    >
+      <Icon name="save" size={13} /><span>Save</span>
     </button>
     <SearchesMenu searches={find.list} current={find.search?.name ?? null} ready={caseOpen} {caseId} onopen={onopensearch} onremove={onremovesearch} />
     <button

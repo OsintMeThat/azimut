@@ -100,7 +100,7 @@ export const TRACE_TOOLS = Object.freeze([
     label: "Far land hidden",
     name: "Brush where far land may be hidden",
     key: "F",
-    title: "Brush over a part where haze or the night may hide far land: its skyline is read as a ridge in front of it (F)",
+    title: "Brush over the stretch of skyline where haze or the night may hide far land: it is read as a ridge in front of it (F)",
   },
   {
     id: "erase",
@@ -282,7 +282,7 @@ export function toolHint(overlay) {
   if (overlay.keying)
     return "Click a skyline line that matters most, three at most · the same again takes it back";
   if (overlay.bending && overlay.brushKind === "hazy")
-    return "Brush over the part where far land may be hidden · a click on a brushed part takes it away";
+    return "Brush over the stretch of line where far land may be hidden · a click on a brushed part takes it away";
   if (overlay.bending)
     return "Brush over the part of the picture that may be bent · a click on a brushed part takes it away";
   if (overlay.tracing) {

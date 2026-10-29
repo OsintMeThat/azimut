@@ -1188,6 +1188,23 @@ describe('the marks beside the trace', () => {
     expect(photo.bending).toBe(false);
   });
 
+  it('reads a point as hidden where the haze is brushed over it, not under haze brushed on the sky', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.addStroke(across(0.3));
+    photo.setBending(true, 'hazy');
+    const scale = { width: 1000, height: 750 };
+    photo.beginBend({ u: 0.7, v: 0.1 }, 20, scale);
+    photo.bendAlong({ u: 0.9, v: 0.1 });
+    photo.endBend();
+    expect(photo.marks.hazy).toHaveLength(1);
+    expect(photo.marks.bent).toEqual([]);
+    expect(photo.hazyAt({ u: 0.8, v: 0.1 })).toBe(true);
+    expect(photo.hazyAt({ u: 0.8, v: 0.3 })).toBe(false);
+    expect(photo.hazyAt({ u: 0.3, v: 0.1 })).toBe(false);
+    expect(photo.bentAt({ u: 0.8, v: 0.1 })).toBe(false);
+  });
+
   it('marks a skyline line as key on a click with the Key line tool, never a ridge', async () => {
     const photo = overlay();
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });

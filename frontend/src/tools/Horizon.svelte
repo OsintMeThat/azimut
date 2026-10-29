@@ -58,7 +58,7 @@
   import { inspectorWidth, mapHeightFor } from '../lib/horizon/inspector.js';
   import { HZ } from '../lib/horizon/marks.js';
   import { pieceOf, sameCuts, skySamples } from '../lib/horizon/traceMarks.js';
-  import { framesLaid, piecesLaid } from '../lib/horizon/laid.js';
+  import { framesLaid, framesLook, piecesLaid } from '../lib/horizon/laid.js';
   import { pieceVariants, searchedPair } from '../lib/horizon/cutView.js';
   import { minuteOf, skyAt, skyTracks } from '../lib/horizon/sky.js';
   import { horizonParams, readHorizonView } from '../lib/horizon/view.js';
@@ -1345,6 +1345,17 @@
     }
   }
 
+  /** Find's setup kept in the case as a search not run yet. */
+  async function saveFromFind() {
+    try {
+      const owner = await ensureCase();
+      const row = await finder.save(owner.id);
+      if (row) toast(`Saved “${row.name}” in the case, not searched`, 'ok');
+    } catch (failure) {
+      toast(failure.message || 'The search could not be saved', 'danger');
+    }
+  }
+
   /**
    * The place of Find's search looked from, `{ search, place, confirmed, view }`: the view offers to confirm
    * it while the eye stands near it, which keeps the view and stops the search.
@@ -1418,7 +1429,7 @@
     const framed = place.frames ?? finder.search?.result?.frames;
     if (framed && Number.isFinite(place.heading)) {
       overlay.setHints({ picture: 'panorama' });
-      const look = { projection: 'panorama', heading: place.heading + (framed.middle ?? 0), tilt: place.tilt ?? 0, roll: 0, fov: framed.span };
+      const look = framesLook(framed, place);
       view.look(look);
       // each frame where the search read it, through its own camera
       overlay.layAsSearched(framed.mesh ? framesLaid(framed, place, look, overlay.aspect) : null);
@@ -2091,6 +2102,7 @@
       onpick={() => (photoDialog = true)}
       onstand={standFromFind}
       onsearch={searchFromFind}
+      onsave={saveFromFind}
       onplace={lookFromPlace}
       onfound={lookFromFound}
       caseOpen={Boolean(caseState.current)}

@@ -74,16 +74,30 @@ function shownAt(view, direction) {
 }
 
 /**
+ * The panorama the view looks through from a place found on a collage read frame by frame: the pan's span and
+ * middle as the stitch says them, stretched as much as the search found the frames wider or narrower.
+ *
+ * @param {{ lens: number, span: number, middle?: number }} framed the search's `frames`
+ * @param {{ heading: number, tilt?: number, fov?: number }} place
+ */
+export function framesLook({ lens, span, middle = 0 }, place) {
+  const wider = place.fov > 0 && lens > 0 ? place.fov / lens : 1;
+  return { projection: 'panorama', heading: place.heading + middle * wider, tilt: place.tilt ?? 0, roll: 0, fov: span * wider };
+}
+
+/**
  * A collage read frame by frame, laid where the search read it.
  *
  * @param {{ mesh: {across:number, down:number, points:([number, number]|null)[]}, lens: number }} framed the search's `frames`
- * @param {{ heading:number, tilt:number, roll:number, mirrored?: boolean }} fit the place's camera: the virtual one, through
- *   the frames' lens; `mirrored` when the place was found with the trace flipped
+ * @param {{ heading:number, tilt:number, roll:number, fov?: number, mirrored?: boolean }} fit the place's camera: the
+ *   virtual one, through the lens the search found (the stitch's when it says none); `mirrored` when the place was
+ *   found with the trace flipped
  * @param {object} view the camera the view looks through once at the place (a panorama of the collage's span)
  * @param {number} aspect the frame's width over its height
  */
 export function framesLaid({ mesh, lens }, fit, view, aspect) {
-  const through = { heading: fit.heading, tilt: fit.tilt ?? 0, roll: fit.roll ?? 0, fov: lens, projection: 'camera', width: PLANE, height: PLANE };
+  const fov = fit.fov > 0 ? fit.fov : lens;
+  const through = { heading: fit.heading, tilt: fit.tilt ?? 0, roll: fit.roll ?? 0, fov, projection: 'camera', width: PLANE, height: PLANE };
   const out = sized(view, aspect);
   return {
     kind: 'frames',

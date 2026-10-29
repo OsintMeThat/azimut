@@ -7,6 +7,13 @@ describe('Horizon’s modes', () => {
     expect(MODES.every((one) => one.label && one.icon && one.hint)).toBe(true);
   });
 
+  it('mark Find alone as Beta, in its pill and its tooltip', () => {
+    const find = MODES.find((one) => one.id === 'find');
+    expect(find.tag).toBe('Beta');
+    expect(find.hint).toMatch(/^Beta: /);
+    expect(MODES.filter((one) => one.tag).map((one) => one.id)).toEqual(['find']);
+  });
+
   it('come back from the address, View for none or one unknown', () => {
     expect(modeOf(new URLSearchParams('ll=1,2&md=find'))).toBe('find');
     expect(modeOf({ md: 'overlay' })).toBe('overlay');

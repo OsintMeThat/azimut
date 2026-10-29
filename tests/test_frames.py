@@ -158,8 +158,10 @@ def test_a_search_on_a_stitched_collage_reads_its_trace_frame_by_frame(monkeypat
     middle = mesh["points"][(mesh["down"] // 2) * (mesh["across"] + 1):][: mesh["across"] + 1]
     xs = [point[0] for point in middle if point is not None]
     assert len(xs) > mesh["across"] // 2 and all(b > a for a, b in zip(xs, xs[1:]))
-    # the lens is the frames', known; the trace keeps every point and its shape as filmed
-    assert read.known and read.within is None and read.fov == pytest.approx(frames.lens_of(model))
+    # the lens starts at the frames' and is searched a fifth either way; the trace keeps every point and its shape
+    lens = frames.lens_of(model)
+    assert not read.known and read.fov == pytest.approx(lens)
+    assert read.within == pytest.approx((lens * (1 - horizon_finds.STITCHED_GIVE), lens * (1 + horizon_finds.STITCHED_GIVE)))
     from azimut.engine import skymatch
     azimuth, elevation = skymatch.directions(read.x, read.y, fov=read.fov)
     np.testing.assert_allclose(np.diff(azimuth), np.diff(azimuths), atol=0.05)

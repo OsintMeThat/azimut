@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { brushFor, createFindState, durationText, estimateText, FLOOR_M, floorsOf, pacedSeconds, ROOF, roofFor, TAKEN, takenOf, WHO, whoFor, widenedText } from './find.svelte.js';
+import { brushFor, createFindState, durationText, estimateText, FLOOR_M, floorsOf, pacedSeconds, ROOF, ROOF_FLOORS, roofFor, TAKEN, takenOf, WHO, whoFor, widenedText } from './find.svelte.js';
 import { destination } from '../../../lib/measure.js';
+import { PANORAMA_WITHIN } from '../../../lib/horizon/hints.js';
 
 const CAMERA = { lat: 16.9988, lon: 45.0938 };
 
@@ -326,9 +327,11 @@ describe('who took it', () => {
 
   it('takes a roof or a terrace as the ground with the eye raised, and back on foot', () => {
     const { find } = finder();
+    // picked, a roof stands one floor up
     find.setWho(whoFor('roof'));
-    expect(find.who).toEqual({ mode: 'ground', low: ROOF.low, high: ROOF.high });
+    expect(find.who).toEqual({ mode: 'ground', low: FLOOR_M, high: FLOOR_M + 2 });
     expect(takenOf(find.who)).toBe('roof');
+    expect(floorsOf(find.who)).toBe(ROOF_FLOORS);
     find.setWho(whoFor('ground'));
     expect(find.who).toEqual({ mode: 'ground', low: 1.7, high: 1.7 });
     expect(takenOf(find.who)).toBe('ground');
@@ -346,7 +349,8 @@ describe('who took it', () => {
     expect(roofFor('')).toEqual(ROOF);
     expect(roofFor(null)).toEqual(ROOF);
     expect(roofFor(0)).toEqual(ROOF);
-    expect(floorsOf(whoFor('roof'))).toBeNull();
+    expect(floorsOf({ mode: 'ground', ...ROOF })).toBeNull();
+    expect(takenOf({ mode: 'ground', ...ROOF })).toBe('roof');
     expect(floorsOf(whoFor('ground'))).toBeNull();
     expect(floorsOf({ mode: 'drone', low: 12, high: 14 })).toBeNull();
   });
@@ -434,6 +438,41 @@ describe('the search', () => {
     // a drone may look that far down already
     find.setWho({ mode: 'drone' });
     expect(find.traceSays.looking).toBeNull();
+  });
+
+  it('runs no search on a skyline Far land hidden covers whole, and says so', () => {
+    const { find, overlay } = laid();
+    find.setArea(area);
+    const zone = { path: [{ u: 0, v: 0.05 }, { u: 1, v: 0.05 }], r: 0.02 };
+    Object.assign(overlay, { marks: { lines: [0], inner: [], pairs: [], cuts: [], far: [], sea: [], clear: [], key: [], bent: [], hazy: [zone] }, hazyAt: () => true });
+    expect(find.searchProblem).toBe('Far land hidden covers the skyline: leave out a part you are sure of');
+    expect(find.tryProblem).toBe('Far land hidden covers the skyline: leave out a part you are sure of');
+    // the part left out of the haze is searched again
+    overlay.hazyAt = ({ u }) => u > 0.5;
+    expect(find.searchProblem).toBe('');
+  });
+
+  it('saves the setup without searching, then saves it again in the same search', async () => {
+    const saved = { name: 'barry search', status: 'saved', progress: { done: 0, total: 0 } };
+    const { find, api } = laid({ post: vi.fn(async () => saved) });
+    api.put = vi.fn(async () => saved);
+    // with no area the setup is not whole yet
+    expect(await find.save('c1')).toBeNull();
+    find.setArea(area);
+    await find.save('c1');
+    const [url, body] = api.post.mock.calls.at(-1);
+    expect(url).toBe('/api/cases/c1/horizon/finds');
+    expect(body.run).toBe(false);
+    expect(body.trace.x.length).toBeGreaterThan(20);
+    expect(body.area).toHaveLength(4);
+    expect(find.search).toMatchObject({ name: 'barry search', status: 'saved' });
+    expect(find.searching).toBe(false);
+    // saved again, the same search holds it
+    await find.save('c1');
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(api.put.mock.calls[0][0]).toBe('/api/cases/c1/horizon/finds/barry%20search');
+    expect(api.put.mock.calls[0][1].run).toBe(false);
+    expect(api.post.mock.calls.filter(([to]) => to === '/api/cases/c1/horizon/finds')).toHaveLength(1);
   });
 
   it('says what keeps it from running, then asks the app with the trace, the area and who took it', async () => {
@@ -832,6 +871,22 @@ describe('the search', () => {
     expect(body.trace.within[0]).toBeCloseTo(40, 9);
     expect(body.trace.within[1]).toBeCloseTo(44.1, 9);
     find.closeSearch();
+  });
+
+  it('sends the span a stitch says a fifth either way, never past a full turn', async () => {
+    const { find, api } = laid({ lens: { fov: 160, stitched: true }, panorama: true });
+    find.setArea(area);
+    await find.start('c1');
+    const body = api.post.mock.calls.at(-1)[1];
+    expect(body.trace).toMatchObject({ known: false, fov: 160, projection: 'panorama' });
+    expect(body.trace.within[0]).toBeCloseTo(128, 9);
+    expect(body.trace.within[1]).toBeCloseTo(192, 9);
+    find.closeSearch();
+    const round = laid({ lens: { fov: 340, stitched: true }, panorama: true });
+    round.find.setArea(area);
+    await round.find.start('c1');
+    expect(round.api.post.mock.calls.at(-1)[1].trace.within[1]).toBe(PANORAMA_WITHIN[1]);
+    round.find.closeSearch();
   });
 
   it('sends the lens the photo says and each alignment where it stands across the photo', async () => {
