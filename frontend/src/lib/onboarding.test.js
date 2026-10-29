@@ -5,9 +5,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import WHATS_NEW from './whatsNew.json';
 import { shotOf } from './guide.js';
 import {
+  FIND_BETA,
+  FIND_GUIDE,
   TOUR,
   closeForThisStart,
   closedThisStart,
+  findBetaDue,
   newsOf,
   newsSince,
   onStart,
@@ -88,6 +91,32 @@ describe('what the app opens with', () => {
     expect(closedThisStart('0.3.4')).toBe(true);
     // a new version is a new start for it
     expect(closedThisStart('0.3.5')).toBe(false);
+  });
+});
+
+describe('Find’s beta notice', () => {
+  it('is due until read, and waits for the next start when put away without a choice', () => {
+    expect(findBetaDue({ seen: false, version: '0.3.3' })).toBe(true);
+    expect(findBetaDue({ seen: true, version: '0.3.3' })).toBe(false);
+    // never over another card
+    expect(findBetaDue({ seen: false, version: '0.3.3', busy: true })).toBe(false);
+    closeForThisStart('0.3.3', true);
+    expect(findBetaDue({ seen: false, version: '0.3.3' })).toBe(false);
+  });
+
+  it('is put away apart from the welcome and What’s new', () => {
+    closeForThisStart('0.3.3', true);
+    expect(closedThisStart('0.3.3')).toBe(false);
+    closeForThisStart('0.3.3');
+    sessionStorage.removeItem('azimut:findBetaClosed');
+    expect(findBetaDue({ seen: false, version: '0.3.3' })).toBe(true);
+  });
+
+  it('says what a beta means for a search, and leads to the guide on Find', () => {
+    expect(FIND_BETA.badge).toBe('Beta');
+    expect(FIND_BETA.text.length).toBeLessThanOrEqual(140);
+    expect(FIND_BETA.items.length).toBeGreaterThan(0);
+    expect(FIND_GUIDE).toBe('horizon.find');
   });
 });
 

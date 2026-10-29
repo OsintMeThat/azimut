@@ -31,6 +31,8 @@
     /** Horizon's modes, `{ id, label, icon, hint }`, and how another is picked. */
     modes = [],
     onmode = () => {},
+    /** Asked to say again what Find's beta means. */
+    onbeta = () => {},
     /** Asked to choose the photo. */
     onpick = () => {},
     /** Asked to stand at a place found, `{ lat, lon }`. */
@@ -52,6 +54,9 @@
     /** Asked to keep the setup in the case without searching. */
     onsave = () => {},
   } = $props();
+
+  // the switch here leaves Find's tag to the title, where it opens the beta notice
+  const plainModes = $derived(modes.map(({ tag, guide, ...mode }) => mode));
 
   /** Why the setup cannot be saved now, '' when it can. */
   const saveProblem = $derived(!caseOpen ? 'Open a case first' : find.searching ? 'The search is running' : find.searchProblem);
@@ -196,8 +201,9 @@
 
 <section class="find" aria-label="Find where it was taken">
   <header class="find-head">
-    <ViewSwitch options={modes} value="find" label="Horizon mode" onpick={onmode} />
+    <ViewSwitch options={plainModes} value="find" label="Horizon mode" onpick={onmode} />
     <h2>Find where it was taken</h2>
+    <button type="button" class="find-beta" onclick={onbeta} title="Find is in beta: what that means" data-guide="find.beta">Beta</button>
     {#if overlay.source}<span class="find-file" title={overlay.source.name}>{overlay.source.name}</span>{/if}
     <span class="find-gap"></span>
     <button
@@ -217,6 +223,7 @@
       onclick={onsave}
       title={saveProblem || 'Keep this setup in the case without searching (Ctrl+S)'}
       aria-label="Save the search without running it"
+      data-guide="find.save"
     >
       <Icon name="save" size={13} /><span>Save</span>
     </button>
@@ -247,7 +254,7 @@
   {/snippet}
 
   <div class="find-cols" bind:this={columns} style:--share={share} class:folded>
-    <section class="find-col photo" class:hidden={big === 'map'} class:big={big === 'photo'} aria-label="Photo and its skyline">
+    <section class="find-col photo" class:hidden={big === 'map'} class:big={big === 'photo'} aria-label="Photo and its skyline" data-guide="find.photo">
       <FindPhoto {overlay} {find} {onpick} />
       {@render guideIn('photo')}
       <button
@@ -273,7 +280,7 @@
         onkeydown={onSplitKey}
       ></div>
     {/if}
-    <section class="find-col map" class:hidden={big === 'photo'} class:big={big === 'map'} aria-label="Map and the area">
+    <section class="find-col map" class:hidden={big === 'photo'} class:big={big === 'map'} aria-label="Map and the area" data-guide="find.map">
       {#if home}
         <FindMap {imagery} {overlays} {layers} {find} {home} imperial={units === 'imperial'} {onstand} {onplace} {onfound} bind:lit />
       {/if}
@@ -289,7 +296,7 @@
       </button>
     </section>
     {#if !folded}
-      <aside class="find-col steps" aria-label="Steps">
+      <aside class="find-col steps" aria-label="Steps" data-guide="find.steps">
         <FindSteps
           {find}
           {overlay}
@@ -330,6 +337,23 @@
     font-weight: 600;
     color: var(--text-1);
     white-space: nowrap;
+  }
+  /* the switch's own tag, made a button */
+  .find-beta {
+    padding: 0 5px;
+    border: none;
+    border-radius: var(--r-sm);
+    background: var(--info-soft);
+    color: var(--info);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 16px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+  }
+  .find-beta:hover {
+    background: color-mix(in srgb, var(--info) 28%, transparent);
   }
   .find-file {
     min-width: 0;

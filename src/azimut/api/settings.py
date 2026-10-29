@@ -131,6 +131,8 @@ class PrefsIn(BaseModel):
     tour: str | None = Field(default=None, pattern=TOUR_PATTERN)
     # the version whose What's new was put away for good
     whats_new_seen: str | None = Field(default=None, max_length=64)
+    # Horizon Find's beta notice, read and put away
+    find_beta_seen: bool | None = None
     # login source for gated media downloads (engine/media.py); None leaves it
     download_cookies: DownloadCookiesIn | None = None
     # where each kind of export lands (engine/exportdir.py); "" = the case folder
@@ -173,6 +175,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "update_dismissed_version": settings.get("update_dismissed_version", ""),
         "tour": settings.get("tour", ""),
         "whats_new_seen": settings.get("whats_new_seen", ""),
+        "find_beta_seen": bool(settings.get("find_beta_seen", False)),
         "download_cookies": settings.get("download_cookies", {"source": "none"}),
         "export_dirs": exportdir.saved_dirs(settings),
     }
@@ -342,6 +345,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["tour"] = body.tour
     if body.whats_new_seen is not None:
         settings["whats_new_seen"] = body.whats_new_seen.strip()[:64]
+    if body.find_beta_seen is not None:
+        settings["find_beta_seen"] = bool(body.find_beta_seen)
     if body.export_dirs is not None:
         merged = dict(settings.get("export_dirs", {}))
         for kind, folder in body.export_dirs.items():
@@ -735,6 +740,7 @@ class ImportedSettings(BaseModel):
     update_dismissed_version: str = Field(default="", max_length=64)
     tour: str = Field(default="", pattern=TOUR_PATTERN)
     whats_new_seen: str = Field(default="", max_length=64)
+    find_beta_seen: bool = False
     download_cookies: ImportedDownloadCookies = Field(default_factory=ImportedDownloadCookies)
 
     @field_validator("analyzers", mode="before")

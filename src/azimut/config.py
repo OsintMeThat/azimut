@@ -180,8 +180,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # - tour: "" never started, the page it resumes on while it runs, "done"
     #   once finished or skipped.
     # - whats_new_seen: the version whose What's new was put away for good.
+    # - find_beta_seen: Horizon Find's beta notice was read, so it stays away.
     "tour": "",
     "whats_new_seen": "",
+    "find_beta_seen": False,
     # Login session for gated media downloads (engine/media.py). Applied only
     # when a download hits a login wall — public media is always fetched
     # cookie-less, so this never touches the everyday case. Shapes:

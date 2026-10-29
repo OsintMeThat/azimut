@@ -69,7 +69,7 @@
     </div>
   {/if}
 
-  <div class="row">
+  <div class="row" data-guide={find ? 'find.zoom' : undefined}>
     <span class="name" id="hz-hint-zoom">{panorama ? 'Width' : 'Zoom'}</span>
     {#if framed && find}
       <p class="said">Find reads {framed.collage} frame by frame: {framed.frames} frames, {Math.round(framed.lens)}° across each, as the stitch says.</p>

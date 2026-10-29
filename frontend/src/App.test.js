@@ -70,8 +70,8 @@ describe('the ? in the topbar', () => {
     // decided once the case list says whether this is a newcomer, and never in a map window
     expect(source).toMatch(/\.finally\(\(\) => \{\s*onboardOnStart\(\);/);
     expect(source).toMatch(/function onboardOnStart\(\) \{\s*if \(solo \|\| uiState\.onboarding\) return;/);
-    // asking for the guide from it opens it where the `?` would
-    expect(source).toMatch(/function onboarded\([^)]*\) \{[\s\S]*?if \(guide\) openGuide\(uiState\.tool\);/);
+    // asking for the guide from it opens it where the `?` would, or where the card says (Find's notice)
+    expect(source).toMatch(/function onboarded\([^)]*\) \{[\s\S]*?if \(guide\) openGuide\(guide === true \? uiState\.tool : guide\);/);
   });
 });
 

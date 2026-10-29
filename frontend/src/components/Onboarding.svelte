@@ -14,8 +14,12 @@
    * next start picks it up there. The welcome and What's new close on Escape or the
    * veil and come back at the next start; Skip, Done or a choice puts them away.
    *
-   * `onkeep(fields)` is handed `{ tour, whats_new_seen }` to keep; `onclose({ guide,
-   * create })` is told whether the reader went for the guide, or for their first case.
+   * Find's beta notice is one page of the same card, opened by Horizon the first time
+   * Find shows: Got it or the guide puts it away, Escape or the veil until the next start.
+   *
+   * `onkeep(fields)` is handed `{ tour, whats_new_seen, find_beta_seen }` to keep;
+   * `onclose({ guide, create })` is told whether the reader went for the guide (true,
+   * or where in it), or for their first case.
    */
   import { untrack } from 'svelte';
   import { fly } from 'svelte/transition';
@@ -25,7 +29,7 @@
   import { portal } from '../lib/fullscreen.js';
   import { isTopOverlay, joinOverlays } from '../lib/overlayStack.js';
   import { shotOf } from '../lib/guide.js';
-  import { TOUR, closeForThisStart, newsOf } from '../lib/onboarding.js';
+  import { FIND_BETA, FIND_GUIDE, TOUR, closeForThisStart, newsOf } from '../lib/onboarding.js';
   // filmed on the app's own globe by guide/hero.mjs: the whole Earth, then Yosemite Valley
   import film from '../assets/welcome/hero.webm';
   import filmStill from '../assets/welcome/hero.webp';
@@ -44,7 +48,7 @@
   let forward = $state(true);
   let leaving = $state(false);
 
-  const pages = $derived(mode === 'tour' ? TOUR : mode === 'news' ? news : []);
+  const pages = $derived(mode === 'tour' ? TOUR : mode === 'news' ? news : mode === 'beta' ? [FIND_BETA] : []);
   const page = $derived(pages[step] ?? null);
   const last = $derived(step === pages.length - 1);
   const shot = $derived(page?.shot ? shotOf(page.shot) : null);
@@ -150,7 +154,8 @@
 
   /** Done with it for good: the tour, and the What's new of a version already known. */
   function putAway() {
-    onkeep?.(mode === 'news' ? { whats_new_seen: version } : { tour: 'done', whats_new_seen: version });
+    if (mode === 'beta') onkeep?.({ find_beta_seen: true });
+    else onkeep?.(mode === 'news' ? { whats_new_seen: version } : { tour: 'done', whats_new_seen: version });
   }
 
   function showMeAround() {
@@ -180,7 +185,7 @@
 
   function toGuide() {
     putAway();
-    finish({ guide: true });
+    finish({ guide: mode === 'beta' ? FIND_GUIDE : true });
   }
 
   /** Escape, the veil, the browser's Back: the tour asks first, the others wait for the next start. */
@@ -189,7 +194,7 @@
       asking = true;
       return;
     }
-    closeForThisStart(version);
+    closeForThisStart(version, mode === 'beta');
     finish();
   }
 
@@ -303,7 +308,7 @@
             <p class="local"><Icon name="lock" size={12} />Your cases stay on this computer, one folder each.</p>
           {:else if page}
             <p class="where">
-              {#if mode === 'tour'}
+              {#if page.where}
                 <Icon name={page.where.icon} size={13} />{page.where.label}
               {:else}
                 <Icon name="star" size={13} />New in {page.version}
@@ -336,6 +341,10 @@
         <button class="btn btn-primary go" onclick={showMeAround}>
           Show me around <Icon name="arrowRight" size={14} />
         </button>
+      {:else if mode === 'beta'}
+        <button class="btn btn-sm" onclick={toGuide}><Icon name="help" size={14} /> Read the guide</button>
+        <span></span>
+        <button class="btn btn-primary go" onclick={skip}>Got it</button>
       {:else if asking}
         <p class="ask">Leave the tour? Home can start it again.</p>
         <span></span>

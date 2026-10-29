@@ -92,8 +92,10 @@ plain directory holding the whole investigation.
 
 - **Horizon** draws the terrain seen from a viewpoint in 3D, with named summits
   and buildings from open sources, lays a photo over it to match by hand, and
-  keeps the views you save. **Find**, in beta, searches an area of the map for
-  where a photo was taken.
+  keeps the views you save. **Find**, in beta, ranks the places of an area whose
+  relief fits the skyline traced on a photo, for you to check. Its
+  [guide](https://github.com/OsintMeThat/azimut/blob/main/docs/FIND.md) says where
+  it is strong, where it fails and how to use it well.
 - **Map plates** lay a page out round the case's maps, from ten ready plates or
   your own template, on vector, topographic, 3D or Sentinel-2 grounds. They export
   as a PNG or a print PDF, or play their days and steps as an MP4 or a GIF.
@@ -445,7 +447,7 @@ One-time setup: register the repo as a
 6. Free and open source. No paid key is ever required; bring your own for
    more basemaps.
 
-Full spec: [docs/SPEC.md](docs/SPEC.md).
+Full spec: [docs/SPEC.md](https://github.com/OsintMeThat/azimut/blob/main/docs/SPEC.md).
 
 ## License
 

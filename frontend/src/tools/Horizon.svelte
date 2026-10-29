@@ -43,7 +43,8 @@
    */
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
-  import { caseState, ensureCase, fmtCoords, prefs, prefsReady, reloadCase, toast, uiState } from '../lib/state.svelte.js';
+  import { appInfo, caseState, ensureCase, fmtCoords, prefs, prefsReady, reloadCase, toast, uiState } from '../lib/state.svelte.js';
+  import { findBetaDue } from '../lib/onboarding.js';
   import { assignFolder } from '../lib/filing.js';
   import { reloadedInto, splitHash } from '../lib/hash.js';
   import { copyText } from '../lib/clipboard.js';
@@ -271,6 +272,22 @@
     const finding = mode === 'find';
     untrack(() => (finding ? finder.show() : finder.hide()));
   });
+
+  // Find opens on its beta notice until it is read (lib/onboarding.js), once the photo
+  // is chosen and over no other card; its Beta pill opens it again.
+  let prefsIn = $state(false);
+  prefsReady.then(() => (prefsIn = true));
+  $effect(() => {
+    if (mode !== 'find' || !prefsIn || photoDialog || uiState.tool !== 'horizon') return;
+    if (findBetaDue({ seen: prefs.findBetaSeen, version: appInfo.version, busy: Boolean(uiState.onboarding) })) {
+      uiState.onboarding = { kind: 'beta' };
+    }
+  });
+  // Find's button is framed on its own in the pictured guide
+  const switchModes = MODES.map((one) => (one.id === 'find' ? { ...one, guide: 'horizon.find' } : one));
+  function showBeta() {
+    if (!uiState.onboarding) uiState.onboarding = { kind: 'beta' };
+  }
 
   /** A mode picked by the analyst: Overlay and Find ask for the photo when none is laid yet. */
   function pickMode(next) {
@@ -1667,7 +1684,7 @@
   <!-- Find covers the tab: what lies under it takes no focus and no click -->
   <div class="hz-main" inert={mode === 'find'}>
     <header class="tool-header hz-head">
-      <ViewSwitch options={MODES} value={mode} label="Horizon mode" onpick={pickMode} guide="horizon.modes" />
+      <ViewSwitch options={switchModes} value={mode} label="Horizon mode" onpick={pickMode} guide="horizon.modes" />
       {#if layout === 'looking'}
         <!-- the view's name, read as a title until it is clicked; where the eye stands is in its tooltip -->
         <div class="hz-title">
@@ -2099,6 +2116,7 @@
       units={prefs.units}
       modes={MODES}
       onmode={pickMode}
+      onbeta={showBeta}
       onpick={() => (photoDialog = true)}
       onstand={standFromFind}
       onsearch={searchFromFind}

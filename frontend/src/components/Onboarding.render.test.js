@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Onboarding from './Onboarding.svelte';
-import { TOUR, closedThisStart } from '../lib/onboarding.js';
+import { FIND_GUIDE, TOUR, closedThisStart } from '../lib/onboarding.js';
 
 let live;
 // happy-dom has no Web Animations: the pages slide in, and the card flies into the `?`
@@ -211,5 +211,34 @@ describe('What’s new', () => {
     shown = show({ kind: 'news', pages: NEWS });
     press('Skip');
     expect(shown.onkeep).toHaveBeenCalledWith({ whats_new_seen: '0.3.3' });
+  });
+});
+
+describe('Find’s beta notice', () => {
+  it('says Find is in beta, and goes for good on Got it', () => {
+    const { onkeep, onclose } = show({ kind: 'beta' });
+    expect(title()).toBe('Find is in beta');
+    expect(document.querySelector('.where .badge').textContent).toBe('Beta');
+    expect(document.querySelectorAll('.items li').length).toBeGreaterThan(0);
+    expect(button('Skip')).toBeUndefined();
+    press('Got it');
+    expect(onkeep).toHaveBeenCalledWith({ find_beta_seen: true });
+    expect(onclose).toHaveBeenCalledWith({});
+  });
+
+  it('opens the guide on Find, read for good', () => {
+    const { onkeep, onclose } = show({ kind: 'beta' });
+    press('Read the guide');
+    expect(onkeep).toHaveBeenCalledWith({ find_beta_seen: true });
+    expect(onclose).toHaveBeenCalledWith({ guide: FIND_GUIDE });
+  });
+
+  it('waits for the next start when closed with Escape, apart from What’s new', () => {
+    const { onkeep, onclose } = show({ kind: 'beta' });
+    key('Escape');
+    expect(onkeep).not.toHaveBeenCalled();
+    expect(onclose).toHaveBeenCalled();
+    expect(sessionStorage.getItem('azimut:findBetaClosed')).toBe('0.3.3');
+    expect(closedThisStart('0.3.3')).toBe(false);
   });
 });

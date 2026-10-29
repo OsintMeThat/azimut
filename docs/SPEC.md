@@ -178,15 +178,7 @@ proof for publication.
 | ✅ **Map plates** | Lays a page out round the case's maps (legend, scale, north, inset, marks, tables, credits) from ten ready plates or a template, on vector, topographic, 3D or Sentinel-2 grounds, with looks, text styles and layer roles. |
 | ✅ **Played plates** | Plays a plate by day and step, each with its annotations, framing, transitions and case videos, and exports a PNG, a print PDF, an MP4, a GIF or an evolution sheet while the analyst works on. |
 | ✅ **Horizon** | Draws the terrain seen from a viewpoint in 3D with named summits and buildings from open sources, lays a photo over it matched by hand, and saves views that reopen as they were. |
-| ✅ **Find hints & trust** | Takes several zoom words and compass directions when unsure (none ticked is any), draws the directions as a fan on Find's map, and says how far a search's best place can be trusted, why, and what the area fits by chance. |
-| ✅ **Find: lines, ground and frames** | Says how far each traced line stands, where the eye stands (sea included) shown on the grid before the search, how the camera looks and whether it is a selfie, reads a phone's zoom by the picture's shape, and reads a stitched collage frame by frame. |
-| ✅ **Find: zones, sun and speed** | Searches finer zones and leaves zones out, over areas up to 10,000 km², tries a point clicked on the map, turns where the sun stood on a day into headings, and searches large grids on several cores. |
-| ✅ **Find: sea, lens and decoys** | Traces the sea's horizon with its own pen, measures a video's lens on its pan, and checks a search's places against decoys of its trace. |
-| ✅ **Find: as searched** | Levels a collage as it is laid, lets one stretch of the trace miss, rounds near lines on coarse relief when asked, searches grids down to 20 m, and lays a photo looked from a place as the search read it. |
-| ✅ **Find: sky only** | A line marked with only sky above lies on the top of the land and rules out the places where land stands behind it, saying how far out, read past the place's own reach on Auto; a grid picked is kept for hours of search, Auto goes down to 20 m on a small area. |
-| ✅ **Find: lattice and kept skylines** | Lays the search's points in a hex lattice, a quarter fewer for the same reach, and reads the skylines an earlier search swept back from a bounded cache. |
-| ✅ **Find: scored outward** | Scores each point of the grid from the camera its neighbours found, a third faster, keeping the places a full search finds. |
-| ✅ **Find: the grid on the map** | Shows the grid before, during and after a search, paints points off or on with a brush, searches several areas at once, fills in as it runs and stops on the place confirmed, times itself on this computer, and leaves out what the photo rules out, the water's view checked in a Mesh step. |
+| ✅ **Find** (beta) | Ranks the places of an area whose relief fits a photo's traced skyline, helped by marks on the trace, the camera, the sun and alignments, says how far to trust the best one, and keeps searches in the case. |
 | ✅ **Globe 3D** | Draws Satellite's and a plate's 3D maps on the app's own globe over public relief, with the flat map's layers, places and measures, and files a tilted view as a credited capture. |
 | ✅ **Measure** | Measures lines and areas with legs, bearings and angles, uses a line as range rings, a view cone, a shadow's height or a viewshed, and reads the ground and line of sight under it, flat and on the globe. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
@@ -194,7 +186,7 @@ proof for publication.
 | ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence; analyzers and areas travel as files. |
 | ✅ **Copernicus layers & figures** | Writes composite, index and script layers offered in every map, reads one as a Detect rule, and lays several renderings of a pass out as a captioned figure. |
 | ✅ **Capture extension** | Adds case map tools to third-party maps, hands media to publishing and reverse search sites, and supports extension updates. |
-| ✅ **Home, guide & onboarding** | Opens recent work and task lists from Home, pictures every tool in the `?` guide with two walked journeys, tours a newcomer and opens each version on its What's new. |
+| ✅ **Home, guide & onboarding** | Opens recent work and task lists from Home, pictures every tool in the `?` guide with three walked journeys, tours a newcomer and opens each version on its What's new. |
 | ✅ **Inspect & Collage** | Autosaves work per file, captures the frame on screen with frames, marks and sound along the bar, arranges frames into collages straightened by a level line, and sends pictures to reverse search. |
 | ✅ **Proof annotations & publishing** | Adds markers, blurs, tags, callouts, zoom insets and view cones, free or tied across panels at one line width, verifies proof points and carries proof dates into post templates. |
 | ✅ **Dates & Timeline** | Shares date entry and clock selection, draws temporal precision explicitly and adds cited events from any tool. |
@@ -245,7 +237,7 @@ supplies, since a ridge ends the day well before the flat horizon does.
 
 | Tool | What it does |
 |------|--------------|
-| **Skyline Matching** | Traces a horizon in a photo and compares it against the DEM profile seen from candidate points, in the same azimuth and elevation frame Camera Resection and Sky Clock already use. Terrain-occluded sun times then split candidates a matching horizon leaves tied. |
+| **One sky frame** | Find's skyline, Camera Resection and Sky Clock read in one azimuth and elevation frame, so the sun and moon times the relief hides split the places a matching skyline leaves tied. |
 | **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
 | **Report Builder** | Assemble proofs/maps/timeline/entities/notes into PDF or one self-contained HTML file with its media embedded, readable offline. |
 | **Case Sync (Git)** | Push a case to a private or public Git remote, pull it back, and diff two revisions, so two analysts can work the same case. |

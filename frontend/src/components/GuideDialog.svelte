@@ -31,6 +31,7 @@
     PAGES,
     journeysThrough,
     landingFor,
+    opensFrom,
     shotOf,
     stepMarks,
     stepShot,
@@ -46,7 +47,7 @@
   let step = $state(landing.step);
   let active = $state(null);
   /** The screens opened from a number, deepest last. Empty on the page itself. */
-  let trail = $state([]);
+  let trail = $state(landing.opens ? [opensFrom(landing.tool, landing.opens)].filter(Boolean) : []);
 
   const item = $derived(MENU_ITEMS.find((entry) => entry.id === itemId) ?? MENU_ITEMS[0]);
   const journey = $derived(
@@ -86,8 +87,8 @@
   function pageView(page, title) {
     if (!page) return null;
     const last = trail.at(-1);
-    if (last) return { lead: last.lead, shot: last.shot, marks: last.marks ?? [], tips: [], tool, title };
-    return { lead: page.lead, shot: page.shot, marks: page.marks, tips: page.tips ?? [], tool, title };
+    if (last) return { lead: last.lead, shot: last.shot, marks: last.marks ?? [], tips: last.tips ?? [], more: last.more, walk: last.walk, tool, title };
+    return { lead: page.lead, shot: page.shot, marks: page.marks, tips: page.tips ?? [], more: page.more, tool, title };
   }
 
   const picture = $derived(view ? shotOf(view.shot) : null);
@@ -319,6 +320,22 @@
           </div>
           <aside class="side">
             {@render legend(view.marks)}
+            {#if view.more}
+              <!-- read on GitHub, a press away: the guide itself stays offline -->
+              <a class="more" href={view.more.href} target="_blank" rel="noreferrer">
+                <Icon name="note" size={14} />{view.more.text}<Icon name="external" size={11} />
+              </a>
+            {/if}
+            {#if view.walk}
+              {@const walked = JOURNEYS.find((one) => one.id === view.walk)}
+              <div class="journeys">
+                <p class="group">Walk it through</p>
+                <button class="journey" onclick={() => openJourney(walked.id)}>
+                  <span>{walked.title}</span>
+                  <span class="at">{walked.steps.length} steps</span>
+                </button>
+              </div>
+            {/if}
             {#if through.length && !trail.length}
               <div class="journeys">
                 <p class="group">In these journeys</p>
@@ -667,6 +684,18 @@
   .tips strong {
     color: var(--text-1);
     font-weight: 600;
+  }
+  .more {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--info);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .more:hover {
+    text-decoration: underline;
   }
   .side {
     display: flex;

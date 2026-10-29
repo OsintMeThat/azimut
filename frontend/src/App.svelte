@@ -279,7 +279,7 @@
   }
   function onboarded({ guide = false, create = false } = {}) {
     uiState.onboarding = null;
-    if (guide) openGuide(uiState.tool);
+    if (guide) openGuide(guide === true ? uiState.tool : guide);
     if (create) {
       // the front door's own field, where a first case is named
       uiState.tool = 'overview';

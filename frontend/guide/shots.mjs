@@ -282,10 +282,10 @@ async function run() {
       colorScheme: 'dark',
       reducedMotion: 'reduce',
     });
-    // the tour and this version's What's new would cover every picture: the workspace
-    // has taken the one and read the other (components/Onboarding.svelte)
+    // the tour, this version's What's new and Find's beta notice would cover every
+    // picture: the workspace has taken the one and read the others (components/Onboarding.svelte)
     const { version } = await call('GET', '/api/health');
-    await call('PUT', '/api/settings/prefs', { tour: 'done', whats_new_seen: version });
+    await call('PUT', '/api/settings/prefs', { tour: 'done', whats_new_seen: version, find_beta_seen: true });
     await context.addInitScript(({ caseId }) => {
       localStorage.setItem('azimut:lastCase', caseId);
       localStorage.setItem('azimut:theme', 'dark');

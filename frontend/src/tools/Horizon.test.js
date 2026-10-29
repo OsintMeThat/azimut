@@ -48,10 +48,14 @@ describe('the Horizon layout', () => {
 
   it('heads every mode with the one switch, Find over a tab that takes no focus meanwhile', () => {
     const header = markup.slice(markup.indexOf('<header'), markup.indexOf('</header>'));
-    expect(header.indexOf('<ViewSwitch options={MODES} value={mode}')).toBeLessThan(header.indexOf('{#if layout'));
+    expect(header.indexOf('<ViewSwitch options={switchModes} value={mode}')).toBeGreaterThan(-1);
+    expect(header.indexOf('<ViewSwitch options={switchModes} value={mode}')).toBeLessThan(header.indexOf('{#if layout'));
     expect(header).not.toContain('openFind');
     const find = readFileSync(new URL('./horizon/Find.svelte', import.meta.url), 'utf8');
-    expect(find).toContain('<ViewSwitch options={modes} value="find"');
+    // Find's own switch leaves the Beta tag to its title, where it opens the beta notice
+    expect(find).toContain('<ViewSwitch options={plainModes} value="find"');
+    expect(find).toMatch(/<button[^>]*class="find-beta"[^>]*onclick=\{onbeta\}/);
+    expect(markup).toContain('onbeta={showBeta}');
     expect(markup).toContain("<div class=\"hz-main\" inert={mode === 'find'}>");
     expect(markup).toContain("{#if mode === 'find'}");
     expect(markup).toContain('onsearch={searchFromFind}');

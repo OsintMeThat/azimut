@@ -347,6 +347,20 @@ def test_the_tour_and_whats_new_are_kept_with_the_workspace(client):
     assert client.get("/api/settings").json()["tour"] == "done"
 
 
+def test_the_find_beta_notice_is_kept_once_read(client):
+    assert client.get("/api/settings").json()["find_beta_seen"] is False
+    assert client.put("/api/settings/prefs", json={"find_beta_seen": True}).json()["find_beta_seen"] is True
+    # another preference saved leaves it read
+    client.put("/api/settings/prefs", json={"units": "imperial"})
+    assert client.get("/api/settings").json()["find_beta_seen"] is True
+    # the settings backup carries it to another machine
+    blob = client.get("/api/settings/export").json()
+    assert blob["settings"]["find_beta_seen"] is True
+    client.put("/api/settings/prefs", json={"find_beta_seen": False})
+    client.post("/api/settings/import", json=blob)
+    assert client.get("/api/settings").json()["find_beta_seen"] is True
+
+
 def test_put_prefs_roundtrips_signature_handle(client):
     saved = client.put("/api/settings/prefs", json={"signature_handle": "  @example  "}).json()
     assert saved["signature_handle"] == "@example"

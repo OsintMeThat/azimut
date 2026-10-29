@@ -1,10 +1,11 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   EXTENSION_SITES,
   EXTENSION_TABS,
+  FIND_DOC,
   FIXES,
   SETTINGS_TABS,
   JOURNEYS,
@@ -16,6 +17,7 @@ import {
   allShots,
   journeysThrough,
   landingFor,
+  opensFrom,
   pinSpots,
   shotOf,
   stepMarks,
@@ -23,6 +25,7 @@ import {
   tabLabel,
 } from './guide.js';
 import { CASE_WORKSPACE, TOOL_LABELS, WORKSPACES } from './workspaces.js';
+import { FIND_GUIDE } from './onboarding.js';
 
 const RAIL_AND_CASE = [...WORKSPACES, CASE_WORKSPACE];
 const TOOLS = RAIL_AND_CASE.flatMap((ws) => ws.tools);
@@ -48,6 +51,7 @@ function prose() {
       if (mark.opens) {
         lines.push(mark.opens.lead);
         marks(mark.opens.marks);
+        for (const tip of mark.opens.tips ?? []) lines.push(tip.title, tip.text);
       }
     }
   };
@@ -235,6 +239,18 @@ describe('journeys', () => {
     for (const shot of ['detect-library', 'detect-analyzer-new', 'detect-builder']) expect(shots).toContain(shot);
   });
 
+  it('search with Find inside Horizon, a step a mark, ending on the place laid', () => {
+    const search = JOURNEYS.find((journey) => journey.id === 'search-with-find');
+    expect(search.steps.every((step) => step.tool === 'horizon' && step.shot)).toBe(true);
+    const labels = search.steps.map((step) => step.label);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(search.steps.at(-1).marks).toEqual(['find.trust', 'find.places']);
+    expect(search.result.shot).toBe('find-look');
+    // the screen Find's notice opens on leads to it
+    expect(opensFrom('horizon', FIND_GUIDE).walk).toBe('search-with-find');
+    expect(journeysThrough('horizon')).toEqual([{ id: 'search-with-find', title: 'Search with Find', step: 1 }]);
+  });
+
   it('take a geolocation as far as the published thread', () => {
     const geolocate = JOURNEYS.find((journey) => journey.id === 'geolocate-a-photo');
     expect(geolocate.steps.at(-1)).toMatchObject({ tool: 'post', marks: ['post.first', 'post.publish'] });
@@ -331,6 +347,22 @@ describe('where the guide opens', () => {
   it('on a page asked by its id, Settings included', () => {
     expect(landingFor('settings')).toEqual({ item: 'settings', tool: 'settings' });
     expect(landingFor('journey:geolocate-a-photo')).toEqual({ item: 'journey:geolocate-a-photo', tool: null });
+  });
+
+  it('on the screen a number opens, asked by its anchor', () => {
+    expect(landingFor(FIND_GUIDE)).toEqual({ ...landingFor('horizon'), opens: 'horizon.find' });
+    const find = opensFrom('horizon', FIND_GUIDE);
+    expect(find.shot).toBe('horizon-find');
+    expect(find.from).toBe('Find, in beta');
+    expect(find.more.href).toBe(FIND_DOC);
+    // an anchor that opens nothing is no landing
+    expect(landingFor('horizon.picture')).toEqual({ item: 'start', tool: null });
+    expect(opensFrom('horizon', 'horizon.picture')).toBeNull();
+  });
+
+  it('points the full Find guide at a page the repository holds', () => {
+    const doc = FIND_DOC.replace('https://github.com/OsintMeThat/azimut/blob/main/', '../../../');
+    expect(existsSync(fileURLToPath(new URL(doc, import.meta.url)))).toBe(true);
   });
 
   it('at the start for anything else', () => {

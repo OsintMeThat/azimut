@@ -146,8 +146,9 @@ presses *Read the guide* on it, which opens the guide on its start page.
   **Start here** and the **Capture extension** (in tabs of its own: installing it, its
   popup over a map, its tools drawn over a map, and a table of where it works, Street
   View included), then **journeys** (a goal walked across
-  the tools: a photo geolocated from its import to the published thread, and an analyzer
-  of your own built in Detect, from the library to its checks and its save),
+  the tools: a photo geolocated from its import to the published thread, an analyzer
+  of your own built in Detect, from the library to its checks and its save, and a search
+  with Find on the 1901 photo of Half Dome, each mark set for a reason),
   then the **workspaces** with their tools as tabs, then the
   **reference**: every key by where it is pressed, Settings (a tab per section of its
   screen), and what to do when something does not work, symptom by symptom, ending on
@@ -173,6 +174,8 @@ presses *Read the guide* on it, which opens the guide on its start page.
   and a trail back. A journey's step shows only that step's frames, on the picture of
   the tool it happens in, or on one of its own when the moment needs it (the photo held
   over the map in a reference window). A journey ends on a **Result**: what it made.
+  A screen opened from a number can hold its tips, a link to a longer read (Find's,
+  to docs/FIND.md) and the journey that walks it.
 - **The pictures are made, not taken.** `npm run guide:shots` (`frontend/guide/`)
   builds the app into a scratch folder, starts a private Azimut on a throwaway
   workspace, files a demo case into it (public-domain photos of a real port, credited in
@@ -217,6 +220,10 @@ presses *Read the guide* on it, which opens the guide on its start page.
   Closed early it waits for the next start, not the next reload; Skip or Done puts it
   away for that version. Home's footer takes the tour again and reads What's new
   again, and the front door and the guide's *Start here* offer the tour.
+- **Find opens on its beta notice** in the same card, once the photo is chosen: what
+  a beta means for a search, *Read the guide*, which opens the `?` on Find's own
+  screen, and *Got it*. Either puts it away for good (`find_beta_seen`); Escape or
+  the veil until the next start. The **Beta** pill beside Find's title shows it again.
 - Where the tour stands (`tour`) and the version read (`whats_new_seen`) are kept in
   the workspace's settings, so the settings backup carries them and another browser
   on the same workspace doesn't start over. A map window never shows either, and the
@@ -3048,7 +3055,9 @@ click standing the frame upright.
 Horizon has three modes on one switch at the left of its header: **View**, the
 terrain from the viewpoint; **Overlay**, a photo laid over it there and matched
 by hand; **Find**, an area of the map searched for where the photo was taken.
-Find carries a **Beta** pill while its search is still being tuned.
+Find carries a **Beta** pill while its search is still being tuned, and its
+first opening shows the beta notice. docs/FIND.md is the user guide: where Find
+is strong, where it fails and how to use its tools.
 The photo and its trace are the same in all three, and View only hides the
 photo. The mode is in the address, so Back returns to it. A reload opens the
 tab on its map. The work no save has kept yet (the viewpoint, the photo, its

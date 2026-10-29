@@ -32,9 +32,9 @@ const DONE = {
 /** The mode switch on screen: the tab's header, or Find's own over it. */
 const modes = (page) => page.getByRole('group', { name: 'Horizon mode' }).last();
 
-async function openFind(page) {
+async function openFind(page, { settings } = {}) {
   await page.setViewportSize({ width: 1440, height: 900 });
-  const fixture = await installAppFixture(page);
+  const fixture = await installAppFixture(page, settings ? { settings } : {});
   const asked = [];
   await page.route('**/api/horizon/**', async (route) => {
     const url = route.request().url();
@@ -74,6 +74,28 @@ async function openFind(page) {
   await expect(find).toBeVisible();
   return { fixture, find, asked };
 }
+
+test('Find opens on its beta notice until it is read, and its Beta pill brings it back', async ({ page }) => {
+  const { fixture, find } = await openFind(page, { settings: { find_beta_seen: false } });
+  const notice = page.getByRole('dialog', { name: 'Find is in beta' });
+  await expect(notice).toBeVisible();
+  await notice.getByRole('button', { name: 'Got it' }).click();
+  await expect(notice).toBeHidden();
+  expect(fixture.settingsWrites.at(-1)).toEqual({ find_beta_seen: true });
+
+  // read: leaving Find and coming back does not show it again
+  await modes(page).getByRole('button', { name: 'View' }).click();
+  await modes(page).getByRole('button', { name: 'Find' }).click();
+  await expect(find).toBeVisible();
+  await expect(notice).toBeHidden();
+
+  // the pill by Find's title says it again, and leads to the guide on Find's own screen
+  await find.getByRole('button', { name: 'Beta' }).click();
+  await notice.getByRole('button', { name: 'Read the guide' }).click();
+  const guide = page.getByRole('dialog', { name: 'Guide' });
+  await expect(guide.getByText('Find ranks the places whose relief fits the skyline of the photo.', { exact: false })).toBeVisible();
+  await expect(guide.getByRole('link', { name: 'The full guide to Find' })).toHaveAttribute('href', /docs\/FIND\.md$/);
+});
 
 /** A stroke along the photo's ridge, drawn freely (Alt). */
 async function trace(page, find) {
@@ -523,7 +545,7 @@ test.describe('Find where it was taken', () => {
     await expect.poll(() => previews.at(-1)?.areas?.length ?? 0).toBe(1);
 
     // the brush paints while the map holds still
-    await find.getByRole('button', { name: 'Brush' }).click();
+    await find.getByRole('button', { name: 'Brush', exact: true }).click();
     await expect(find.getByText('Brush over points to turn them off.', { exact: false }).first()).toBeVisible();
     // a corner of the area stays where it was on screen: the map did not pan under the stroke
     const centre = () => find.locator('.find-corner').first().boundingBox();
@@ -542,7 +564,7 @@ test.describe('Find where it was taken', () => {
     await page.keyboard.press('Control+z');
     await expect(find.getByText('1 stroke of the brush')).toHaveCount(0);
     await page.keyboard.press('Escape');
-    await expect(find.getByRole('button', { name: 'Brush' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(find.getByRole('button', { name: 'Brush', exact: true })).toHaveAttribute('aria-pressed', 'false');
   });
 
   test('the brush turns points off and paints ground in on the map at once, before the app reads the stroke', async ({ page }) => {
@@ -568,7 +590,7 @@ test.describe('Find where it was taken', () => {
     for (const [fx, fy] of [[0.3, 0.3], [0.6, 0.3], [0.6, 0.6], [0.3, 0.6]]) await page.mouse.click(...at(fx, fy));
     await find.getByRole('button', { name: 'Done', exact: true }).first().click();
     await page.waitForTimeout(1500);
-    await find.getByRole('button', { name: 'Brush' }).click();
+    await find.getByRole('button', { name: 'Brush', exact: true }).click();
     const picture = async () => {
       // the ring under the hand is put away first, so only the points differ
       await page.mouse.move(map.x + map.width + 40, map.y + 10);

@@ -19,6 +19,9 @@
  */
 import { CASE_WORKSPACE, TOOL_LABELS, WORKSPACES } from './workspaces.js';
 
+/** The full guide to Find, in the repository: what it does well, where it fails and how to use it. */
+export const FIND_DOC = 'https://github.com/OsintMeThat/azimut/blob/main/docs/FIND.md';
+
 /**
  * @typedef {{ x: number, y: number, w: number, h: number }} Rect
  * @typedef {{ src: string, width: number, height: number, anchors: Record<string, Rect> }} Shot
@@ -587,6 +590,62 @@ export const PAGES = {
           ],
         },
       },
+      {
+        anchor: 'horizon.find',
+        title: 'Find, in beta',
+        text: 'Searches an area of the map for where a photo was taken.',
+        opens: {
+          shot: 'horizon-find',
+          lead: 'Find ranks the places whose relief fits the skyline of the photo. It proves nothing on its own, so check each place it gives.',
+          marks: [
+            {
+              anchor: 'find.photo',
+              title: 'The photo and its trace',
+              text: 'Trace the skyline, and mark only what you are sure of.',
+              opens: {
+                shot: 'find-setup',
+                lead: 'The skyline traced a stretch at a time, the ridges seen in front of farther land, and what is known of each line.',
+                marks: [
+                  { anchor: 'find.skyline', title: 'Skyline', text: 'Where the land meets the sky, one line per stretch.' },
+                  { anchor: 'find.ridge', title: 'Ridge', text: 'A ridge seen in front of farther land, on which each place found is judged too.' },
+                  { anchor: 'find.key', title: 'Key line', text: 'A line anyone would know, which weighs most. Three at most.' },
+                  { anchor: 'find.hazy', title: 'Far land hidden', text: 'Brushed where haze may hide higher land behind the line.' },
+                  { anchor: 'find.far', title: 'Distance', text: 'How far a line stands, said wide, with several bands when unsure.' },
+                ],
+              },
+            },
+            { anchor: 'find.map', title: 'The area', text: 'Draw it as small as your other clues allow, since a larger one meets more look-alikes.' },
+            {
+              anchor: 'find.steps',
+              title: 'The search',
+              text: 'Its setup and what you know of the photo, then the places it found.',
+              opens: {
+                shot: 'find-know',
+                lead: 'What you know of the photo, under Help the search. Each line ticked leaves out the places that cannot be it.',
+                marks: [
+                  { anchor: 'find.stands', title: 'Eye on', text: 'The ground the camera stood on, read off the terrain.' },
+                  { anchor: 'find.over', title: 'Eye stands', text: 'Above or below the land round it.' },
+                  { anchor: 'find.zoom', title: 'Zoom', text: 'How zoomed the photo looks, with several ticked when unsure.' },
+                  { anchor: 'find.grid', title: 'Grid', text: 'How far apart the points searched stand, under More settings.' },
+                ],
+              },
+            },
+            { anchor: 'find.trust', title: 'How far to trust it', text: 'Solid, Check it or Weak, and why.' },
+            { anchor: 'find.places', title: 'The places', text: 'Best first. Open one to lay the photo from there.' },
+            { anchor: 'find.save', title: 'Save', text: 'Keeps the setup in the case without searching.' },
+            { anchor: 'find.beta', title: 'Beta', text: 'Says again what the beta means.' },
+          ],
+          tips: [
+            { title: 'Far relief reads best', text: 'Ridges a few kilometres away or more are sharp on the 30 m terrain, while near slopes, trees and buildings are not.' },
+            { title: 'Leave out what you doubt', text: 'A wrong distance, Sky only or Far land hidden can rule the true place out, where no mark costs nothing.' },
+            { title: 'Read the first five', text: 'The true place is often second or third, so lay the photo from each one.' },
+            { title: 'Solid, Check it or Weak', text: 'How far the best place stands above what the area fits by chance.' },
+            { title: 'Rule out look-alikes', text: 'Facing, the sun or an alignment tell apart two places whose skylines look the same.' },
+          ],
+          more: { text: 'The full guide to Find', href: FIND_DOC },
+          walk: 'search-with-find',
+        },
+      },
       { anchor: 'horizon.picture', title: 'Ground', text: 'Relief, satellite or plain, with ridge lines and summit names.' },
       { anchor: 'horizon.strip', title: 'The whole turn', text: 'All the way round the eye, with the part on screen framed. Drag to turn.' },
       { anchor: 'horizon.views', title: 'Open and Save', text: 'A saved view reopens its eye, its look, its ground and its photo.' },
@@ -872,6 +931,68 @@ export const JOURNEYS = [
     result: {
       shot: 'detect-mine',
       text: 'Aircraft activity in your library with its check, ready for a pass or a routine over the apron, or any ground.',
+    },
+  },
+  {
+    id: 'search-with-find',
+    title: 'Search with Find',
+    lead: 'The 1901 photo of Half Dome: from its skyline to the point it was taken from, each mark set for a reason.',
+    steps: [
+      {
+        tool: 'horizon',
+        label: 'Skyline',
+        shot: 'find-setup',
+        text: 'In Horizon, lay the photo in Overlay and press Find. With Skyline, trace where the land meets the sky, a stretch at a time: the far ridge, the Dome, the far range, the ridge on the right.',
+        marks: ['find.skyline'],
+      },
+      {
+        tool: 'horizon',
+        label: 'Ridges',
+        shot: 'find-setup',
+        text: 'With Ridge, trace the lines seen in front of farther land: the wooded ridge, the shoulder of the Dome and Liberty Cap. Each place found is judged on them too.',
+        marks: ['find.ridge'],
+      },
+      { tool: 'horizon', label: 'Key line', shot: 'find-setup', text: 'With Key line, click the Dome: anyone would know its shape, so it weighs most.', marks: ['find.key'] },
+      {
+        tool: 'horizon',
+        label: 'Haze',
+        shot: 'find-setup',
+        text: 'Brush Far land hidden over the far range. It is pale under a milky sky, so higher land may stand behind it.',
+        marks: ['find.hazy'],
+      },
+      {
+        tool: 'horizon',
+        label: 'Distances',
+        shot: 'find-setup',
+        text: 'Say distances wide: the Dome and Liberty Cap under 10 km, the far range past it. The Dome looks close but stands 4 km off, so 1 to 3 km alone would rule the true place out.',
+        marks: ['find.far'],
+      },
+      {
+        tool: 'horizon',
+        label: 'Area',
+        shot: 'find-setup',
+        text: 'Draw the area round where the photo may have been taken, here the valley and its rims, about 10 km across.',
+        marks: ['find.map'],
+      },
+      {
+        tool: 'horizon',
+        label: 'What you know',
+        shot: 'find-know',
+        text: 'The camera looks down into a deep valley from its rim: Summit or ridge and Slope, and Above the land round. The lens is a camera’s usual one or a little longer, so ×1 and ×2–3.',
+        marks: ['find.stands', 'find.over', 'find.zoom'],
+      },
+      { tool: 'horizon', label: 'Grid', shot: 'find-know', text: 'In More settings, a point every 50 m, then Search.', marks: ['find.grid'] },
+      {
+        tool: 'horizon',
+        label: 'Places',
+        shot: 'horizon-find',
+        text: 'Read how far the best place can be trusted and why, then open it to lay the photo from there.',
+        marks: ['find.trust', 'find.places'],
+      },
+    ],
+    result: {
+      shot: 'find-look',
+      text: 'The photo laid over the terrain from the first place, by Glacier Point, where it was taken in 1901.',
     },
   },
 ];
@@ -1214,7 +1335,8 @@ export function shotOf(name) {
 
 /**
  * Where the guide opens for whatever asked: a page by its id (`start`, `settings`, a
- * `journey:` id), the tab of a tool a workspace holds, or the start.
+ * `journey:` id), the tab of a tool a workspace holds, the screen a number opens by
+ * that number's anchor (`horizon.find`), or the start.
  */
 export function landingFor(at) {
   // an entry with tabs opens on its first, as choosing it from the menu does
@@ -1222,7 +1344,16 @@ export function landingFor(at) {
   if (item) return { item: item.id, tool: item.tools[0] ?? null };
   const holder = MENU_ITEMS.find((entry) => entry.tools.includes(at));
   if (holder) return { item: holder.id, tool: at };
+  // a number that leads on, asked by its anchor: its page, on the screen it opens
+  const page = Object.keys(PAGES).find((id) => opensFrom(id, at));
+  if (page) return { ...landingFor(page), opens: at };
   return { item: MENU_ITEMS[0].id, tool: null };
+}
+
+/** The screen a number of a page opens, with the way back, as a press on it shows it; null when it opens none. */
+export function opensFrom(page, anchor) {
+  const mark = PAGES[page]?.marks.find((one) => one.anchor === anchor && one.opens);
+  return mark ? { ...mark.opens, from: mark.title } : null;
 }
 
 /** The journeys that pass through a tool, each with the step it is used at. */

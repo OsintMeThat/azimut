@@ -18,3 +18,13 @@ describe('a tag on an option of the view switch', () => {
     expect(body).not.toContain('view-tag');
   });
 });
+
+describe('an option framed by the pictured guide', () => {
+  it('carries its own anchor, apart from the switch’s', () => {
+    const framed = [options[0], { ...options[1], guide: 'horizon.find' }];
+    const { body } = render(ViewSwitch, { props: { options: framed, value: 'view', guide: 'horizon.modes', onpick: () => {} } });
+    expect(body).toContain('data-guide="horizon.modes"');
+    expect(body).toMatch(/<button[^>]*data-guide="horizon\.find"[^>]*>/);
+    expect(body.match(/data-guide=/g)).toHaveLength(2);
+  });
+});

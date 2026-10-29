@@ -1,7 +1,7 @@
 /**
  * What Azimut shows before any work (components/Onboarding.svelte): the welcome and
  * the tour a newcomer opens with, and the pages a new version shows those who already
- * know it.
+ * know it. The same card says Horizon's Find is in beta the first time it opens.
  *
  * Both are kept with the workspace (`tour` and `whats_new_seen` in settings.json), so
  * another browser on the same workspace doesn't start a newcomer's tour over, and the
@@ -51,6 +51,25 @@ export const TOUR = [
     text: 'A proof sets the photo beside the map with the matches marked, ready to publish.',
   },
 ];
+
+/**
+ * The notice Find opens with until it is read (`find_beta_seen` in settings.json):
+ * what a beta means for a search, and the way to the guide.
+ */
+export const FIND_BETA = {
+  where: { icon: 'horizon', label: 'Horizon, Find' },
+  badge: 'Beta',
+  title: 'Find is in beta',
+  text: 'It is still being tuned, and not everything works fully yet. The guide says where it is strong and how to use it well.',
+  items: [
+    { icon: 'search', text: 'It ranks the places whose relief fits your trace. It proves nothing on its own.' },
+    { icon: 'alert', text: 'It can miss: a look-alike may fit as well, and a wrong mark can rule the true place out.' },
+    { icon: 'check', text: 'Check each place it gives against imagery, roads and shadows.' },
+  ],
+};
+
+/** Where the guide opens from the notice: Find's own screen in the Horizon page. */
+export const FIND_GUIDE = 'horizon.find';
 
 /** A version's three numbers: "0.3.3", "v0.3.3" and "0.3.3.dev4" all read [0, 3, 3]. */
 export function versionParts(version) {
@@ -111,21 +130,30 @@ export function onStart({ tour, seen, version, hasCases, closed = false }, book 
 }
 
 const CLOSED = 'azimut:onboardingClosed';
+const BETA_CLOSED = 'azimut:findBetaClosed';
 
-/** Whether the welcome or What's new was put away earlier in this start. */
-export function closedThisStart(version) {
+/** Whether the welcome or What's new (or, `beta`, Find's notice) was put away earlier in this start. */
+export function closedThisStart(version, beta = false) {
   try {
-    return sessionStorage.getItem(CLOSED) === version;
+    return sessionStorage.getItem(beta ? BETA_CLOSED : CLOSED) === version;
   } catch {
     return false;
   }
 }
 
 /** Put away without a choice: back at the next start, not at the next reload. */
-export function closeForThisStart(version) {
+export function closeForThisStart(version, beta = false) {
   try {
-    sessionStorage.setItem(CLOSED, version);
+    sessionStorage.setItem(beta ? BETA_CLOSED : CLOSED, version);
   } catch {
     /* it shows again on a reload, which is all a refused storage costs */
   }
+}
+
+/**
+ * Whether Find opens on its beta notice: never read, not put away this start, and no
+ * other card up. `seen` is the setting.
+ */
+export function findBetaDue({ seen, version, busy = false }) {
+  return !seen && !busy && !closedThisStart(version, true);
 }

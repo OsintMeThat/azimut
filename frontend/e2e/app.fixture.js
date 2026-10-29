@@ -136,10 +136,11 @@ const settings = {
   extension_version: '0.2.5', // tracks the extension, so it lags the app version
   update_check_on_start: false,
   update_dismissed_version: '',
-  // the tour taken and this version's What's new read, so neither covers a spec
-  // (e2e/onboarding.spec.js opens them on purpose)
+  // the tour taken, this version's What's new and Find's beta notice read, so none
+  // covers a spec (e2e/onboarding.spec.js opens them on purpose)
   tour: 'done',
   whats_new_seen: '0.2.8',
+  find_beta_seen: true,
   usage: {},
   usage_overrides: {},
   eco_zoom_fallback: true,

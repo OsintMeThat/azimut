@@ -17,13 +17,14 @@
    *
    * An option may carry a `tag`, a short word such as *Beta* drawn as a pill after its
    * label. The pill is hidden from screen readers so the button keeps its name; the
-   * caller says the same word in the hint.
+   * caller says the same word in the hint. An option's `guide` names it for the pictured
+   * guide, as `guide` names the whole switch.
    */
   import Icon from './Icon.svelte';
 
   /**
    * @type {{
-   *   options: Array<{id: string, label: string, icon: string, hint?: string, tag?: string, disabled?: boolean}>,
+   *   options: Array<{id: string, label: string, icon: string, hint?: string, tag?: string, guide?: string, disabled?: boolean}>,
    *   value: string,
    *   label?: string,
    *   onpick: (id: string) => void,
@@ -40,6 +41,7 @@
       title={option.hint ?? `${option.label} view`}
       aria-pressed={value === option.id}
       disabled={Boolean(option.disabled) && value !== option.id}
+      data-guide={option.guide}
       onclick={() => onpick?.(option.id)}
     >
       <Icon name={option.icon} size={14} /> {option.label}

@@ -394,7 +394,7 @@
           <p class="fs-say">{UNCLEAR_HELP}</p>
         {/if}
         {#if trust && result.places?.length}
-          <div class="fs-trust {trust.level}">
+          <div class="fs-trust {trust.level}" data-guide="find.trust">
             <p class="fs-say"><span class="fs-trust-word">{TRUST[trust.level]}</span>{trust.reasons.length ? '' : ': nothing speaks against the best place'}</p>
             {#if trust.reasons.length}
               <ul class="fs-reasons">
@@ -437,7 +437,7 @@
           <p class="fs-say quiet">{boundedText(result.bounded)}</p>
         {/if}
         {@render triedPanel()}
-        <ol class="fs-places">
+        <ol class="fs-places" data-guide="find.places">
           {#each result.places as place, index (index)}
             <li>
               <button
@@ -979,7 +979,7 @@
               <p class="fs-say quiet" class:bad={sunSaid.startsWith('No heading')}>{sunSaid}</p>
             </div>
           </div>
-          <div class="fs-row fs-facing-row">
+          <div class="fs-row fs-facing-row" data-guide="find.stands">
             <span class="fs-name" id="find-stands">Eye on</span>
             <div class="fs-facing">
               <div class="fs-pills" role="group" aria-labelledby="find-stands">
@@ -998,7 +998,7 @@
               </p>
             </div>
           </div>
-          <div class="fs-row fs-facing-row">
+          <div class="fs-row fs-facing-row" data-guide="find.over">
             <span class="fs-name" id="find-over">Eye stands</span>
             <div class="fs-facing">
               <div class="fs-pills" role="group" aria-labelledby="find-over">
@@ -1057,7 +1057,7 @@
         <Icon name={more ? 'chevronDown' : 'chevronRight'} size={13} />More settings
       </button>
       {#if more}
-        <div class="fs-row">
+        <div class="fs-row" data-guide="find.grid">
           <span class="fs-name" id="find-spacing">Grid</span>
           <div class="fs-pills" role="radiogroup" aria-labelledby="find-spacing">
             {#each SPACINGS as spacing (spacing)}

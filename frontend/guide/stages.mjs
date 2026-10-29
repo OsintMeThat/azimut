@@ -41,6 +41,30 @@ const AIRBASE_VIEW = `ll=${AIRBASE.lat},${AIRBASE.lon}&z=${AIRBASE.zoom}`;
 /** How a capture's coordinates read in a picker, as the capture of the channel is listed. */
 const CAPTURED = `${CHANNEL.lat.toFixed(6)}, ${CHANNEL.lon.toFixed(6)}`;
 
+/**
+ * The 1901 photo of Half Dome from Glacier Point (photos/half_dome_1901.jpg), traced by eye
+ * in its own pixels, 1554 by 1187, as an analyst would see it: the skyline in four lines
+ * (the far ridge left of the Dome, the Dome, the far range behind it, the ridge on the
+ * right), and the ridges seen in front of farther land.
+ */
+const HALF_DOME_1901 = {
+  size: [1554, 1187],
+  skyline: {
+    farLeft: [[20, 172], [40, 162], [58, 157], [77, 160], [90, 167], [99, 175]],
+    dome: [[100, 176], [101, 160], [103, 147], [110, 120], [113, 107], [115, 103], [140, 101], [167, 101], [187, 102], [213, 105], [240, 112], [263, 120], [283, 135], [300, 148], [317, 167], [333, 187], [347, 207], [358, 227], [365, 243], [368, 250]],
+    farRange: [[380, 250], [430, 255], [475, 245], [500, 245], [545, 241], [600, 236], [630, 239], [670, 239], [705, 239], [740, 247], [770, 242], [805, 237], [845, 234], [870, 237], [905, 240], [930, 236], [955, 235], [980, 236], [1020, 222], [1040, 232], [1070, 240], [1110, 244], [1150, 246], [1180, 247]],
+    right: [[1180, 249], [1200, 247], [1240, 237], [1280, 230], [1310, 225], [1340, 210], [1360, 209], [1390, 212], [1430, 207], [1460, 202], [1490, 197], [1515, 195]],
+  },
+  ridges: {
+    wooded: [[390, 258], [410, 262], [480, 262], [530, 260], [590, 257], [640, 257], [680, 254], [705, 252], [730, 255], [760, 260], [780, 267]],
+    shoulder: [[368, 250], [380, 275], [395, 300], [410, 330], [425, 360], [432, 390]],
+    libertyCap: [[960, 452], [980, 430], [1000, 415], [1020, 405], [1040, 395], [1070, 385], [1100, 381], [1130, 380], [1160, 385], [1180, 392], [1195, 405], [1205, 420], [1215, 440], [1222, 465], [1226, 490]],
+  },
+};
+
+/** Find's area round Yosemite Valley and its rims, as fractions of its map: about 10 km across, the 1901 point off its middle. */
+const FIND_AREA = [[0.25, 0.33], [0.78, 0.31], [0.8, 0.71], [0.27, 0.73]];
+
 /** The one element of these on screen: tools stay mounted, hidden, once visited. */
 const seen = (page, selector) => page.locator(selector).filter({ visible: true }).first();
 
@@ -758,6 +782,121 @@ export const STAGES = [
       await go('horizon');
       await page.locator('.canvas-body button', { hasText: 'Open' }).filter({ visible: true }).first().click();
       await page.getByText('Glacier Point, the 1901 photo').filter({ visible: true }).first().click();
+      await seen(page, '[data-guide="horizon.overlay"]').waitFor({ timeout: 60_000 });
+    },
+  },
+  {
+    // Search with Find, as the journey walks it: the 1901 photo traced by eye, each line
+    // marked for what is known of it, and the area drawn round the valley
+    shot: 'find-setup',
+    window: TALL,
+    map: true,
+    settle: 12_000,
+    crop: 'full',
+    async run({ go, page }) {
+      await go('horizon');
+      await page.locator('.canvas-body button', { hasText: 'Open' }).filter({ visible: true }).first().click();
+      await page.getByText('Glacier Point, the 1901 photo').filter({ visible: true }).first().click();
+      await seen(page, '[data-guide="horizon.overlay"]').waitFor({ timeout: 60_000 });
+      await seen(page, '[data-guide="horizon.find"]').click();
+      const photo = seen(page, '[data-guide="find.photo"]');
+      const tool = (name) => photo.locator(`button[aria-label="${name}"]`).click();
+      // the photo lies centred in its column, as wide or as tall as the column lets it
+      const box = await photo.locator('.fp').boundingBox();
+      const [width, height] = HALF_DOME_1901.size;
+      const w = Math.min(box.width, (box.height * width) / height);
+      const h = (w * height) / width;
+      const at = ([x, y]) => [box.x + (box.width - w) / 2 + (x / width) * w, box.y + (box.height - h) / 2 + (y / height) * h];
+      const along = async (line) => {
+        const [first, ...rest] = line.map(at);
+        await page.mouse.move(...first);
+        await page.mouse.down();
+        for (const point of rest) await page.mouse.move(...point, { steps: 3 });
+        await page.mouse.up();
+      };
+      // drawn as seen, Alt keeping the magnet from moving a line onto another edge
+      await page.keyboard.down('Alt');
+      await tool('Trace skyline');
+      for (const line of Object.values(HALF_DOME_1901.skyline)) await along(line);
+      await tool('Trace a ridge');
+      for (const line of Object.values(HALF_DOME_1901.ridges)) await along(line);
+      await page.keyboard.up('Alt');
+      // the Dome is the line anyone would know; haze may hide far land behind the far range
+      await tool('Mark a key line');
+      await page.mouse.click(...at(HALF_DOME_1901.skyline.dome[8]));
+      await tool('Brush where far land may be hidden');
+      await along(HALF_DOME_1901.skyline.farRange);
+      await tool('Brush where far land may be hidden');
+      // distances said wide: the domes under 10 km, the far range past it
+      await tool('Say how far a line stands');
+      const chips = photo.locator('[aria-label="How far the line stands"] button');
+      const far = async (bands, ...lines) => {
+        for (const chip of await chips.all()) {
+          const on = (await chip.getAttribute('aria-pressed')) === 'true';
+          if (on !== bands.includes((await chip.textContent()).trim())) await chip.click();
+        }
+        for (const line of lines) await page.mouse.click(...at(line[Math.floor(line.length / 2)]));
+      };
+      await far(['< 1 km', '1–3 km', '3–10 km'], HALF_DOME_1901.skyline.dome, HALF_DOME_1901.ridges.libertyCap);
+      await far(['10–30 km', '> 30 km'], HALF_DOME_1901.skyline.farRange);
+      await tool('Say how far a line stands');
+
+      await seen(page, '[data-guide="find.steps"]').locator('button', { hasText: 'Draw the area' }).click();
+      const map = await seen(page, '[data-guide="find.map"]').boundingBox();
+      for (const [x, y] of FIND_AREA) await page.mouse.click(map.x + map.width * x, map.y + map.height * y);
+      await page.keyboard.press('Enter');
+      // a ground with the relief drawn, under a licence to show it
+      await seen(page, '[data-guide="find.map"] button[aria-label="Map layers"]').click();
+      await page.locator('#hz-find-layers button', { hasText: 'Topographic' }).click();
+      await seen(page, '[data-guide="find.map"] button[aria-label="Map layers"]').click();
+    },
+  },
+  {
+    // what is known of the photo: the eye high over a deep valley, on its rim, and a lens
+    // a camera's usual one or a little longer; a point every 50 m
+    shot: 'find-know',
+    from: 'find-setup',
+    after: false,
+    window: TALL,
+    map: true,
+    settle: 3000,
+    crop: 'full',
+    async run({ page }) {
+      const steps = seen(page, '[data-guide="find.steps"]');
+      await steps.locator('summary', { hasText: 'What you know' }).click();
+      for (const pill of ['Summit or ridge', 'Slope', 'Above the land round', '×1', '×2–3']) {
+        await steps.locator('button', { hasText: pill }).first().click();
+      }
+      await steps.locator('button', { hasText: 'More settings' }).click();
+      await steps.locator('button[role="radio"]', { hasText: /^50 m$/ }).click();
+      await seen(page, '[data-guide="find.grid"]').scrollIntoViewIfNeeded();
+    },
+  },
+  {
+    // the search itself, for real on the 50 m grid: it takes minutes
+    shot: 'horizon-find',
+    from: 'find-know',
+    after: false,
+    window: TALL,
+    map: true,
+    settle: 12_000,
+    crop: 'full',
+    async run({ page }) {
+      const steps = seen(page, '[data-guide="find.steps"]');
+      await steps.locator('button', { hasText: /^Search$/ }).click();
+      await steps.locator('button', { hasText: 'Change and search again' }).waitFor({ timeout: 120 * 60_000 });
+    },
+  },
+  {
+    // the first place opened: the photo laid over the terrain from there
+    shot: 'find-look',
+    from: 'horizon-find',
+    window: TALL,
+    map: true,
+    settle: 20_000,
+    crop: 'full',
+    async run({ page }) {
+      await seen(page, '[data-guide="find.places"] button').click();
       await seen(page, '[data-guide="horizon.overlay"]').waitFor({ timeout: 60_000 });
     },
   },

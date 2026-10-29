@@ -299,6 +299,8 @@
   const hint = $derived(asking ? '' : toolHint(overlay));
   const marked = $derived(marksSummary(overlay.marks));
   const pendingPhoto = $derived(find.pending?.photo ?? {});
+  /** The tools the pictured guide's Search with Find walks through, by the name it frames them under. */
+  const GUIDED = { sky: 'find.skyline', ridge: 'find.ridge', key: 'find.key', hazy: 'find.hazy', far: 'find.far' };
 </script>
 
 <svelte:window onkeydown={onWindowKey} onpointerdown={onWindowPointer} />
@@ -424,6 +426,7 @@
             onclick={() => pressTool(overlay, tool.id)}
             title={blocked || tool.title}
             aria-label={tool.name}
+            data-guide={GUIDED[tool.id]}
             ><Icon name={tool.icon} size={14} />{#if tool.id === 'sky'}<span>Trace</span>{/if}</button
           >
         {/each}
