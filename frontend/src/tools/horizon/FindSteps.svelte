@@ -806,7 +806,7 @@
             title={find.tryProblem || 'Click a place on the map: the trace is tried from there, in a second or two'}
             onclick={() => (find.drawing === 'try' ? find.stopTrying() : find.startTrying())}><Icon name="crosshair" size={13} />Try a point</button
           >
-          {#if search}
+          {#if search && search.status !== 'saved'}
             <button type="button" class="btn btn-sm btn-ghost" onclick={() => (preparing = false)}>Back to the result</button>
           {/if}
         </div>

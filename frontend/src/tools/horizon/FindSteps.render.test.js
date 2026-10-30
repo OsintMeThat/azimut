@@ -253,6 +253,7 @@ describe('the steps of Find', () => {
   it('opens a search only saved on its setup, with no results to show', () => {
     const root = steps({ find: fakeFind({ search: { name: 's', status: 'saved', progress: { done: 0, total: 0 }, result: null } }) });
     expect(buttonNamed(root, 'Change and search again')).toBeUndefined();
+    expect(buttonNamed(root, 'Back to the result')).toBeUndefined();
     expect(root.textContent).not.toContain('Stopped');
     expect(root.textContent).toContain('Skyline');
   });
