@@ -53,8 +53,11 @@ test('a right-click on a mark opens the composer\'s menu, not the browser\'s', a
     });
   });
 
-  // the box at the back, picked by the right-click itself
-  await page.mouse.click(mid.x - 60, mid.y, { button: 'right' });
+  // the box at the back, picked by the right-click itself: on its edge, since a box
+  // with no fill is picked by its outline, not by the picture inside it, and off the
+  // middle of that edge, where the handle of a picked box stands
+  const edge = { x: mid.x - 60 - 30, y: mid.y - 10 };
+  await page.mouse.click(edge.x, edge.y, { button: 'right' });
   const menu = page.getByRole('menu');
   await expect(menu).toBeVisible();
   expect(await browserMenuKept(page)).toBe(true);
@@ -66,7 +69,7 @@ test('a right-click on a mark opens the composer\'s menu, not the browser\'s', a
   expect(spec.shapes.map((s) => s.color)).toEqual(['#40c4ff', '#ff5252']);
 
   // and Delete from the same menu
-  await page.mouse.click(mid.x - 60, mid.y, { button: 'right' });
+  await page.mouse.click(edge.x, edge.y, { button: 'right' });
   await page.getByRole('menuitem', { name: /Delete/ }).click();
   await expect(page.locator('.shape-row')).toHaveCount(1);
   fixture.expectNoUnexpectedRequests();

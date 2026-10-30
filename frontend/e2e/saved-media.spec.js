@@ -153,7 +153,7 @@ test('puts a file in a layer from the player, a step at a time, the menu whole i
   await page.screenshot({ path: test.info().outputPath('media-layer-menu.png') });
   await add.click();
   await expect(menu).toHaveCount(0);
-  expect(asked).toEqual([{ items: [{ id: 'media-1', lat: 48.8584, lon: 2.2945 }], group: 'g1', symbol: 'badge-tank', colour: '#0072b2' }]);
+  expect(asked).toEqual([{ items: [{ id: 'media-1', lat: 48.8584, lon: 2.2945 }], group: 'g1', symbol: 'badge-tank', colour: '#0072b2', icon: '' }]);
   await expect(page.getByText('Added to Front')).toBeVisible();
 });
 
