@@ -110,6 +110,18 @@ async function trace(page, find) {
   await find.getByRole('button', { name: 'Trace skyline' }).click();
 }
 
+test('leaving Find and coming back finds its map as it stood, nothing laid again', async ({ page }) => {
+  const { find } = await openFind(page);
+  await awaitMapReady(page, 2);
+  await find.locator('canvas.maplibregl-canvas').first().evaluate((canvas) => (canvas.dataset.kept = 'yes'));
+  await modes(page).getByRole('button', { name: 'View' }).click();
+  await expect(find).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Horizon mode' })).toHaveCount(1);
+  await modes(page).getByRole('button', { name: 'Find' }).click();
+  await expect(find).toBeVisible();
+  await expect(find.locator('canvas.maplibregl-canvas').first()).toHaveAttribute('data-kept', 'yes');
+});
+
 test.describe('Find where it was taken', () => {
   test('opens over Horizon in three columns, each enlarged and given back, the tab under it out of reach', async ({ page }) => {
     const { find } = await openFind(page);

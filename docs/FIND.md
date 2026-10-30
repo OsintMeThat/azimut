@@ -152,11 +152,14 @@ These sit under **Help the search**.
 - **Solid**, **Check it** and **Weak** say how far the best place stands above what the
   area reaches by chance. Weak means look-alikes are close: treat the list as a short list.
 - **Explains 80%** says how much of the trace fits there. It is a score, not a probability.
+- **Try a point** says the skyline and the ridges apart. **Fit** in the view judges the
+  skyline alone, so it can read higher without the place being any better.
 - **Check against decoys** tries the places again with your trace mirrored and upside
   down. A real place explains its own trace far better than its decoys.
 - Look at the **first five places**, not only the first. In our tests the true place was
   often second or third.
-- Open a place to lay your photo over the terrain from there. A good match lays every peak
+- Open a place to lay your photo over the terrain from there, the view settling on your
+  trace by itself. A good match lays every peak
   and notch; a look-alike usually misses a detail somewhere. **See which lines are off**
   says by how much.
 - Check by hand around it too. Move the eye a few hundred metres, and zoom the view in or

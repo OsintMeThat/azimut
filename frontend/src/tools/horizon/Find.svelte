@@ -19,6 +19,8 @@
   import { uiState } from '../../lib/state.svelte.js';
 
   let {
+    /** On screen, or kept out of sight under Horizon's other modes: only the map stays then, and it reads nothing. */
+    onScreen = true,
     find,
     overlay,
     imagery,
@@ -69,6 +71,7 @@
   // depends on changes:
   let estimateTimer = null;
   $effect(() => {
+    if (!onScreen) return;
     void [find.area, find.areas, find.strokes, find.zones, find.settings, find.who, find.facing, find.stands, find.water, find.over, find.view, find.mirror, find.alignments.length, overlay.strokes, overlay.marks, overlay.hints, overlay.lens];
     clearTimeout(estimateTimer);
     estimateTimer = setTimeout(() => find.estimate(), 500);
@@ -77,6 +80,7 @@
 
   // how fine the heights are where the area lies, read once it is closed
   $effect(() => {
+    if (!onScreen) return;
     void [find.area, find.drawing];
     find.readDetail();
   });
@@ -84,6 +88,7 @@
   // the headings the compass and the sun leave, read again a moment after either or the area changes
   let sectorsTimer = null;
   $effect(() => {
+    if (!onScreen) return;
     void [find.area, find.drawing, find.facing, find.sun];
     clearTimeout(sectorsTimer);
     sectorsTimer = setTimeout(() => find.readSectors?.(), 500);
@@ -93,6 +98,7 @@
   // the grid and the ground under it, read again a moment after the area, who or the ground ticked change
   let previewTimer = null;
   $effect(() => {
+    if (!onScreen) return;
     void [find.area, find.areas, find.strokes, find.zones, find.drawing, find.who, find.settings, find.stands, find.water, find.over, find.alignments.length, overlay.marks];
     clearTimeout(previewTimer);
     previewTimer = setTimeout(() => find.preview?.(), 600);
@@ -157,8 +163,9 @@
   }
 
   function onKey(event) {
-    // Find stays mounted while another tool is on screen, and that tool's keys are its own
+    // Find stays mounted while another tool or mode is on screen, and its keys are its own
     if (uiState.tool !== 'horizon') return;
+    if (!onScreen) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       if (!saveProblem) onsave();
@@ -192,7 +199,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<section class="find" aria-label="Find where it was taken">
+<section class="find" class:away={!onScreen} inert={!onScreen} aria-label="Find where it was taken">
   <header class="find-head">
     <ViewSwitch options={plainModes} value="find" label="Horizon mode" onpick={onmode} />
     <h2>Find where it was taken</h2>
@@ -248,7 +255,9 @@
 
   <div class="find-cols" bind:this={columns} style:--share={share} class:folded>
     <section class="find-col photo" class:hidden={big === 'map'} class:big={big === 'photo'} aria-label="Photo and its skyline" data-guide="find.photo">
-      <FindPhoto {overlay} {find} {onpick} />
+      {#if onScreen}
+        <FindPhoto {overlay} {find} {onpick} />
+      {/if}
       {@render guideIn('photo')}
       <button
         type="button"
@@ -275,7 +284,7 @@
     {/if}
     <section class="find-col map" class:hidden={big === 'photo'} class:big={big === 'map'} aria-label="Map and the area" data-guide="find.map">
       {#if home}
-        <FindMap {imagery} {overlays} {layers} {find} {home} imperial={units === 'imperial'} {onstand} {onplace} {onfound} bind:lit />
+        <FindMap {onScreen} {imagery} {overlays} {layers} {find} {home} imperial={units === 'imperial'} {onstand} {onplace} {onfound} bind:lit />
       {/if}
       {@render guideIn('map')}
       <button
@@ -290,16 +299,18 @@
     </section>
     {#if !folded}
       <aside class="find-col steps" aria-label="Steps" data-guide="find.steps">
-        <FindSteps
-          {find}
-          {overlay}
-          {units}
-          {onstand}
-          {onsearch}
-          {onplace}
-          {onfound}
-          bind:lit
-        />
+        {#if onScreen}
+          <FindSteps
+            {find}
+            {overlay}
+            {units}
+            {onstand}
+            {onsearch}
+            {onplace}
+            {onfound}
+            bind:lit
+          />
+        {/if}
       </aside>
     {/if}
   </div>
@@ -313,6 +324,10 @@
     display: flex;
     flex-direction: column;
     background: var(--bg-0, var(--bg-1));
+  }
+  /* out of sight, never `display: none`: a map with no size would read its view anew */
+  .find.away {
+    visibility: hidden;
   }
   /* as tall and as padded as Horizon's own header, so the mode switch stays where it was */
   .find-head {

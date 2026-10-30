@@ -413,6 +413,23 @@ export function heatOf(points, best = Math.max(-1, ...points.map((p) => p.explai
   }));
 }
 
+/**
+ * What a point tried scored, in words: the skyline and the ridges apart when both were judged, a Fit in the view
+ * reading the skyline alone, else how much of the trace it explains.
+ */
+export function triedScore({ explained, sky = null, inner = null }) {
+  const share = (value) => `${Math.round(Math.max(0, value) * 100)}%`;
+  return sky != null && inner != null ? `skyline ${share(sky)}, ridges ${share(inner)}` : `explains ${share(explained)}`;
+}
+
+/**
+ * Whether the view brings a place found onto the trace once it stands there: not one the search laid itself
+ * (a collage's pieces or frames, a mirror, a strip at another height scale), which a fit would undo.
+ */
+export function settlesOnArrival(place, { framed = null, cuts = [] } = {}) {
+  return Number.isFinite(place?.heading) && !framed && !cuts.length && !place.pieces && !place.mirrored && !(place.scale && place.scale !== 1);
+}
+
 /** A search's verdict in the panel's words. */
 export const VERDICTS = {
   match: 'One place stands out',

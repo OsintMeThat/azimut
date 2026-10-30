@@ -1171,6 +1171,15 @@ function isSamePlace(camera, place) {
   return Math.abs(turnBetween(camera.heading, place.camera.heading)) < Math.max(1, camera.fov / 10);
 }
 
+/**
+ * The view a place arrived at settles on, or null when it would bring the trace no closer: `fitToTrace` from where
+ * the search left it, so never round to another heading as the whole-turn Fit may.
+ */
+export function settledOnTrace(samples, camera, skyline, { lens = true, before = null } = {}) {
+  const result = fitToTrace(samples, camera, skyline, { lens });
+  return result?.improved && closer(result.gap, before) ? result : null;
+}
+
 /** Whether a gap is closer than another by more than a twentieth, which a fit again would not be. */
 function closer(gap, before) {
   if (!gap || !before) return true;

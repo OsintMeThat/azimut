@@ -419,8 +419,8 @@ describe('a photo laid over the view, in the inspector', () => {
     const root = render(HorizonPanel, { view, overlay: photo(), places: [place(299.6, 0.47), place(147.3, 0.4)], onplace });
     const rows = [...root.querySelectorAll('[role="group"][aria-label="Places that fit"] button')];
     expect(rows.map((b) => b.textContent.replace(/\s+/g, ' ').trim())).toEqual([
-      '300° NW explains 47% of the trace',
-      '147° SE explains 40% of the trace',
+      '300° NW explains 47% of the skyline',
+      '147° SE explains 40% of the skyline',
     ]);
     expect(rows.map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
     rows[0].click();

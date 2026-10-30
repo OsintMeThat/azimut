@@ -45,6 +45,7 @@
     searchedWhen,
     TRUST,
     standsText,
+    triedScore,
     UNCLEAR_HELP,
     VERDICTS,
     WIDE_SPAN,
@@ -296,7 +297,7 @@
         <p class="fs-say bad">{find.tried.error}</p>
       {:else if find.tried?.place}
         {@const place = find.tried.place}
-        <p class="fs-say strong">Tried here, in full: explains {Math.round(Math.max(0, place.explained) * 100)}%</p>
+        <p class="fs-say strong">Tried here, in full: {triedScore(place)}</p>
         <p class="fs-say quiet">
           {place.mirrored ? 'mirrored · ' : ''}{place.heading != null ? `facing ${headingText(place.heading, place.fov ?? 60)} · ` : ''}{place.fov != null
             ? `${place.fov < 10 ? place.fov.toFixed(1) : Math.round(place.fov)}° lens · `

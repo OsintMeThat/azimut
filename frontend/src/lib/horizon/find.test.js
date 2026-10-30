@@ -56,6 +56,8 @@ import {
   withGround,
   lookingOf,
   traceSpan,
+  triedScore,
+  settlesOnArrival,
 } from './find.js';
 import { containsPoint, destination, haversine } from '../measure.js';
 import { bearingBetween } from './geometry.js';
@@ -68,6 +70,28 @@ function lined(camera, bearing, nearM, farM, { offset = 0 } = {}) {
   const far = destination(camera, bearing + offset, farM);
   return { map: { near, far }, photo: { near: { u: 0.5, v: 0.6 }, far: { u: 0.5, v: 0.4 } }, offset };
 }
+
+describe('a place looked from', () => {
+  it('says the skyline and the ridges apart once both were judged, else the one score', () => {
+    expect(triedScore({ explained: 0.63, sky: 0.749, inner: 0.508 })).toBe('skyline 75%, ridges 51%');
+    expect(triedScore({ explained: 0.71 })).toBe('explains 71%');
+    // judged on key lines or the sky alone: no ridges to set beside the skyline
+    expect(triedScore({ explained: 0.6, sky: 0.7 })).toBe('explains 60%');
+    expect(triedScore({ explained: -1, sky: -0.2, inner: 0 })).toBe('skyline 0%, ridges 0%');
+  });
+
+  it('settles on the trace on arrival unless the search laid the photo itself', () => {
+    const place = { heading: 80, tilt: -7, fov: 43 };
+    expect(settlesOnArrival(place)).toBe(true);
+    expect(settlesOnArrival({ ...place, scale: 1 })).toBe(true);
+    expect(settlesOnArrival({ lat: 1, lon: 2 })).toBe(false);
+    expect(settlesOnArrival({ ...place, pieces: [[0, 1, 0, 0]] })).toBe(false);
+    expect(settlesOnArrival({ ...place, mirrored: true })).toBe(false);
+    expect(settlesOnArrival({ ...place, scale: 1.15 })).toBe(false);
+    expect(settlesOnArrival(place, { framed: { span: 97 } })).toBe(false);
+    expect(settlesOnArrival(place, { cuts: [0.5] })).toBe(false);
+  });
+});
 
 describe('the area searched', () => {
   const square = [

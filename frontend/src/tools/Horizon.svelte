@@ -88,6 +88,7 @@
     matchRequest,
     searchedPlaces,
     searchOutcome,
+    settledOnTrace,
     skylineBetween,
     terrainLine,
     terrainMargin,
@@ -103,7 +104,7 @@
   import { createBuildingsState } from './horizon/state/buildings.svelte.js';
   import { createOverlayState } from './horizon/state/overlay.svelte.js';
   import { createFindState } from './horizon/state/find.svelte.js';
-  import { facingFrom } from '../lib/horizon/find.js';
+  import { facingFrom, settlesOnArrival, triedScore } from '../lib/horizon/find.js';
   import { createViewsState } from './horizon/state/views.svelte.js';
   import { benchSummary, createWorkState } from './horizon/state/work.svelte.js';
   import MapSurface from './satellite/MapSurface.svelte';
@@ -360,7 +361,14 @@
     const caseId = caseState.current?.id ?? null;
     untrack(() => {
       if (overlay.source?.caseId && overlay.source.caseId !== caseId) overlay.remove();
+      findKept = mode === 'find';
     });
+  });
+
+  /** Find stays mounted once opened, out of sight under the other modes: its map and its cells come back at once. Another case starts it again. */
+  let findKept = $state(false);
+  $effect(() => {
+    if (mode === 'find') findKept = true;
   });
 
   // -- saved views ------------------------------------------------------------------
@@ -1431,17 +1439,41 @@
       openView(found.view);
       return;
     }
-    lookFromPlace(found);
+    lookFromPlace(found, { settle: false });
   }
+
+  /** A place just arrived at, until its turn is read: `{ read, camera, observer }` as they stood then. */
+  let arriving = null;
+
+  /**
+   * The place arrived at brought onto the trace, once its own turn is read: from where the search left the view,
+   * never round to another heading as Fit may, and only if the hand has not moved it meanwhile. The toast takes it back.
+   */
+  function settleArrival(panorama, traced) {
+    if (!arriving || !panorama || panorama === arriving.read || !traced.length) return;
+    const { camera, observer } = arriving;
+    arriving = null;
+    if (view.camera !== camera || view.observer !== observer || overlay.locked) return;
+    const before = gap;
+    const result = settledOnTrace(traced, traceCamera, skyline, { lens: !overlay.lens, before });
+    if (result) lookAtPlace(result, `Adjusted to the trace: gap ${gapDegrees(before)}° to ${gapDegrees(result.gap)}°`);
+  }
+  $effect(() => {
+    const panorama = view.panorama;
+    const traced = samples;
+    untrack(() => settleArrival(panorama, traced));
+  });
 
   /**
    * Look from a place the search found, the view turned and the lens set as it
-   * found them. A collage the search read frame by frame is laid as the
-   * panorama it spans, its middle where the frames say it faces.
+   * found them, then brought onto the trace (`settle`). A collage the search read
+   * frame by frame is laid as the panorama it spans, its middle where the frames
+   * say it faces.
    */
-  function lookFromPlace(place) {
+  function lookFromPlace(place, { settle = true } = {}) {
     fromFind = { search: finder.search?.name ?? null, place, confirmed: Boolean(finder.search?.found && place === finder.search.found), view: null };
     mode = 'overlay';
+    const read = view.panorama;
     view.standAt(place, { mode: finder.who.mode, height: place.height ?? finder.who.low });
     const framed = place.frames ?? finder.search?.result?.frames;
     if (framed && Number.isFinite(place.heading)) {
@@ -1464,6 +1496,8 @@
       }
     }
     if (Number.isFinite(place.reach)) overlay.setReachFound(place.reach);
+    const cuts = finder.search?.ask?.photo?.marks?.cuts ?? [];
+    arriving = settle && settlesOnArrival(place, { framed, cuts }) ? { read, camera: view.camera, observer: view.observer } : null;
   }
 
   /** Open a search the case keeps in Find, with its photo and its trace. */
@@ -1813,6 +1847,7 @@
             <HorizonView
               bind:this={viewPane}
               {view}
+              paused={mode === 'find'}
               overlay={photoOn ? overlay : null}
               fit={traceKinds}
               gaps={offLines}
@@ -1856,7 +1891,7 @@
                 <Icon name="check" size={14} />
                 <span>Place confirmed{fromFind.view ? `, kept as the view ${fromFind.view}` : ''}</span>
               {:else}
-                <span>From the search{Number.isFinite(fromFind.place.explained) ? `, explains ${Math.round(Math.max(0, fromFind.place.explained) * 100)}%` : ''}. Is it the place?</span>
+                <span>From the search{Number.isFinite(fromFind.place.explained) ? `, ${triedScore(fromFind.place)}` : ''}. Is it the place?</span>
                 <button
                   type="button"
                   class="btn btn-sm btn-primary"
@@ -2083,8 +2118,9 @@
     {/if}
     <PersonalLayerPanel tool="horizon" scope={myLayers} {engine} />
   </div>
-  {#if mode === 'find'}
+  {#if findKept}
     <Find
+      onScreen={mode === 'find'}
       find={finder}
       {overlay}
       {imagery}

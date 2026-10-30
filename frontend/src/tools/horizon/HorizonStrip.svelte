@@ -139,7 +139,7 @@
     if (!hover) return '';
     if (hoverMark) {
       const { place } = hoverMark;
-      return `Fits at ${headingText(place.camera.heading, place.camera.fov)} · explains ${Math.round(Math.max(0, place.explained) * 100)}%`;
+      return `Fits at ${headingText(place.camera.heading, place.camera.fov)} · explains ${Math.round(Math.max(0, place.explained) * 100)}% of the skyline`;
     }
     return `${Math.round(hover.azimuth) % 360}° ${windOf(hover.azimuth)}${hoverNear ? ' · ground close by' : ''}`;
   });

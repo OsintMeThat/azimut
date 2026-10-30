@@ -60,6 +60,7 @@ import {
   matchRequest,
   searchedPlaces,
   searchOutcome,
+  settledOnTrace,
   tracePlane,
   pieceCameras,
   terrainLine,
@@ -313,6 +314,18 @@ describe('rubbing a trace out', () => {
 
 describe('a fit to the trace', () => {
   const samples = traceSamples(traced(TRUE), SIZE);
+
+  it('settles a place arrived at near where the search left it, and only if the trace comes closer', () => {
+    const near = { ...TRUE, heading: 98, tilt: 0.2, roll: 0, fov: 64 };
+    const settled = settledOnTrace(samples, near, skyline, { before: traceGap(samples, near, skyline) });
+    expect(settled.camera.heading).toBeCloseTo(95, 0);
+    // already on the trace, there is nothing to take back
+    expect(settledOnTrace(samples, TRUE, skyline, { before: traceGap(samples, TRUE, skyline) })).toBeNull();
+    // the true heading lies past a third of the lens: it stays this side rather than going round
+    const far = { ...TRUE, heading: 95 + 180, tilt: 0.2, roll: 0, fov: 30 };
+    const stayed = settledOnTrace(samples, far, skyline, { before: traceGap(samples, far, skyline) });
+    if (stayed) expect(Math.abs(stayed.camera.heading - far.heading)).toBeLessThan(far.fov);
+  });
 
   it('brings the view back onto the photo from a rough placing', () => {
     const rough = { ...TRUE, heading: 98, tilt: 0.2, roll: 0, fov: 64 };

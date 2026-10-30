@@ -106,6 +106,8 @@
      * beside the trace, and as a band while the details show.
      */
     terrain = [],
+    /** Find covers the view: it draws nothing and asks for no tile until it shows again. */
+    paused = false,
   } = $props();
 
   /** Where this browser remembers that the gesture lines were understood, without and with a photo. */
@@ -226,8 +228,13 @@
   }
 
   function redraw() {
-    if (scene && !frame) frame = requestAnimationFrame(draw);
+    if (scene && !frame && !paused) frame = requestAnimationFrame(draw);
   }
+
+  // tiles are asked only as a frame draws, so the loading takes up again here
+  $effect(() => {
+    if (!paused) redraw();
+  });
 
   $effect(() => {
     // read everything a frame depends on, then draw on the next one

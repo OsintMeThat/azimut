@@ -3219,8 +3219,13 @@ found. Result names the
 **Best so far**, three places apart, read roughly as a first pass reads them
 (the best are read again in full at the end). A
 click on a cell, or a press on one of them, tries the trace there in full and
-offers to look from it. Looking from it, a band over the view asks **Is it the
-place?**: **This is the place** keeps the view in the case and the place on the
+offers to look from it, saying the skyline and the ridges apart where both were
+judged (**Fit** in the view reads the skyline alone, and says so). Looking from
+it, the view settles on the trace from where the search left it, never round to
+another heading, a toast taking that back unless the search laid the photo itself
+(a collage, a mirror). Find keeps its map under the other modes, so coming back
+lays nothing again, and the 3D view under Find rests meanwhile. A band over the
+view asks **Is it the place?**: **This is the place** keeps the view in the case and the place on the
 search, which stops it, a green mark on the map and the first thing Result says
 (**Not it after all** takes it back). **Stop** keeps what the search scored by
 then: its map and its best places, said to be what it had scored, not judged.

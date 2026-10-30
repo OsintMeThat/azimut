@@ -57,7 +57,13 @@ describe('the Horizon layout', () => {
     expect(find).toMatch(/<button[^>]*class="find-beta"[^>]*onclick=\{onbeta\}/);
     expect(markup).toContain('onbeta={showBeta}');
     expect(markup).toContain("<div class=\"hz-main\" inert={mode === 'find'}>");
-    expect(markup).toContain("{#if mode === 'find'}");
+    // Find stays mounted once opened, out of sight under the other modes, and the view rests under it
+    expect(markup).toContain('{#if findKept}');
+    expect(markup).toContain("onScreen={mode === 'find'}");
+    expect(markup).toContain("paused={mode === 'find'}");
+    // a place arrived at settles on the trace; one the analyst confirmed stays as it was kept
+    expect(source).toContain('lookFromPlace(found, { settle: false })');
+    expect(source).toMatch(/settle && settlesOnArrival\(place, \{ framed, cuts \}\)/);
     expect(markup).toContain('onsearch={searchFromFind}');
     expect(markup).toContain('onplace={lookFromPlace}');
     // the tab's own keys wait while Find is on screen

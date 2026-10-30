@@ -518,6 +518,8 @@ describe('the steps of Find', () => {
     const card = tried.querySelector('[aria-label="The point tried"]');
     expect(card.textContent).toContain('Tried here, in full: explains 71%');
     expect(card.textContent).toContain('41° lens · ridges about 2.40 km out');
+    const judged = steps({ find: fakeFind({ drawing: 'try', tried: { at: place, place: { ...place, explained: 0.63, sky: 0.75, inner: 0.51 }, busy: false, error: '' } }) });
+    expect(judged.querySelector('[aria-label="The point tried"]').textContent).toContain('Tried here, in full: skyline 75%, ridges 51%');
     buttonNamed(card, 'Look from here').click();
     expect(onplace).toHaveBeenCalledWith({ ...place, frames: { span: 97 } });
     const blocked = steps({ find: fakeFind({ tryProblem: 'Open a case first' }) });

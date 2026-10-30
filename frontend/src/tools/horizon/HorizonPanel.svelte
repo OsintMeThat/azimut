@@ -474,7 +474,7 @@
             {@const at = isAtPlace(camera, place)}
             <button type="button" class="place" class:on={at} aria-pressed={at} disabled={locked} onclick={() => onplace(index)}>
               <strong class="mono">{headingText(place.camera.heading, place.camera.fov)}</strong>
-              <span>explains {Math.round(Math.max(0, place.explained) * 100)}% of the trace</span>
+              <span>explains {Math.round(Math.max(0, place.explained) * 100)}% of the skyline</span>
             </button>
           {/each}
         </div>

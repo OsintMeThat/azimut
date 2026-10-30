@@ -43,6 +43,7 @@
     ringsOf,
     RULED,
     searchedPoints,
+    triedScore,
     WATER_COLOUR,
   } from '../../lib/horizon/find.js';
   import MapSurface from '../satellite/MapSurface.svelte';
@@ -66,6 +67,8 @@
      * case's saved work to draw or null. Null leaves the menu out.
      */
     layers = null,
+    /** On screen, or kept out of sight: the cells wait, and catch up as it shows again. */
+    onScreen = true,
     /** The finder (state/find.svelte.js). */
     find,
     /** Where the map opens: `{ lat, lon, zoom }`. */
@@ -191,7 +194,7 @@
   // each laid once as it comes; before it runs, or once the setup is changed from the one it searched, the grid
   let laid = null;
   $effect(() => {
-    if (!heat) return;
+    if (!heat || !onScreen) return;
     const cells = mapCells({ search: find.search, edited: find.edited, drawing: find.drawing, previewed: find.previewed, live: find.live });
     // the cells answer a click while nothing is being drawn on the map
     const answers = !holding;
@@ -555,7 +558,7 @@
         className: 'find-tried',
         html: '<span></span>',
         size: [16, 16],
-        tip: tried.place ? `Tried here: explains ${Math.round(Math.max(0, tried.place.explained) * 100)}%` : 'Trying here…',
+        tip: tried.place ? `Tried here: ${triedScore(tried.place)}` : 'Trying here…',
         zIndex: 575,
       });
     }
@@ -786,8 +789,9 @@
 
   /** Escape closes the Layers menu before Find takes it back from an enlarged column; Ctrl+Z takes the brush's last stroke back while it paints. */
   function onWindowKey(event) {
-    // the map stays mounted while another tool is on screen, and that tool's keys are its own
+    // the map stays mounted while another tool or mode is on screen, and its keys are its own
     if (uiState.tool !== 'horizon') return;
+    if (!onScreen) return;
     if (find.drawing === 'brush' && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
       if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
       event.preventDefault();
