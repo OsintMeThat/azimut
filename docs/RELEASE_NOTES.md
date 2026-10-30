@@ -129,8 +129,8 @@ The details follow, tool by tool.
 
 ## Fixes and safety
 
-- Renaming a file updates it in Horizon views, Find searches and map plates
-  too.
+- An undo in a proof keeps the colour in hand and the zoom you drew at, and
+  mid-curve it takes the last point off.
 - A bundle made by a newer Azimut is refused with the version to install.
 - A settings backup merges its templates with yours, as it does icons.
 - Settings → Storage shows and resets the views and sheets export folders.
