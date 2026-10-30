@@ -133,6 +133,8 @@ class PrefsIn(BaseModel):
     whats_new_seen: str | None = Field(default=None, max_length=64)
     # Horizon Find's beta notice, read and put away
     find_beta_seen: bool | None = None
+    # how much the 3D views draw on this computer
+    quality_3d: Literal["full", "balanced", "light"] | None = None
     # login source for gated media downloads (engine/media.py); None leaves it
     download_cookies: DownloadCookiesIn | None = None
     # where each kind of export lands (engine/exportdir.py); "" = the case folder
@@ -145,6 +147,12 @@ def _detect_view(saved: Any) -> dict[str, Any]:
         return stored(DetectPrefs, saved).model_dump()
     except ValueError:
         return dict(config.DEFAULT_SETTINGS["detect_view"])
+
+
+def _quality_3d(settings: dict[str, Any]) -> str:
+    """How much the 3D views draw here: a level the app knows, else as they always did."""
+    level = settings.get("quality_3d")
+    return level if level in ("full", "balanced", "light") else "full"
 
 
 def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
@@ -176,6 +184,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "tour": settings.get("tour", ""),
         "whats_new_seen": settings.get("whats_new_seen", ""),
         "find_beta_seen": bool(settings.get("find_beta_seen", False)),
+        "quality_3d": _quality_3d(settings),
         "download_cookies": settings.get("download_cookies", {"source": "none"}),
         "export_dirs": exportdir.saved_dirs(settings),
     }
@@ -347,6 +356,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["whats_new_seen"] = body.whats_new_seen.strip()[:64]
     if body.find_beta_seen is not None:
         settings["find_beta_seen"] = bool(body.find_beta_seen)
+    if body.quality_3d is not None:
+        settings["quality_3d"] = body.quality_3d
     if body.export_dirs is not None:
         merged = dict(settings.get("export_dirs", {}))
         for kind, folder in body.export_dirs.items():
@@ -569,7 +580,8 @@ def export_settings() -> Response:
     local download of secrets that already live in their workspace.
 
     Deliberately absent: export destinations (absolute paths chosen on this
-    machine), the half-written Copernicus layer in the picker,
+    machine), how much the 3D views draw (this machine's graphics card), the
+    half-written Copernicus layer in the picker,
     ``cookies.txt`` (a live login session), the cases themselves
     (portable folders already), the extension folder the app owns
     (``config.extension_dir()`` — those are this build's own bundled bytes, and
@@ -582,6 +594,8 @@ def export_settings() -> Response:
     # A layer half-written in the picker is this machine's scratch work, replaced
     # by the next preview. The saved ones travel, in sentinel_layers.
     portable_settings.pop("sentinel_draft_layer", None)
+    # How much the 3D views draw answers this computer's graphics card, not the next one's.
+    portable_settings.pop("quality_3d", None)
     # A machine that never paired has no token to carry, and an empty one would
     # unpair the machine this backup is restored on.
     if not portable_settings.get("ingest_token"):

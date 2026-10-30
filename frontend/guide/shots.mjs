@@ -82,12 +82,17 @@ async function call(method, path, body) {
       body: body instanceof FormData ? body : body && JSON.stringify(body),
     });
   // The server drops a kept-alive connection after a few idle seconds (an ffmpeg encode
-  // is enough), and a request sent on it as it closes fails before reaching it. Once
-  // more on a fresh connection is safe: that request never arrived.
-  const response = await send().catch((error) => {
-    if (error?.message !== 'fetch failed') throw error;
-    return send();
-  });
+  // is enough), and a request sent on it as it closes fails before reaching it. Sent
+  // again a moment later it is safe, since that request never arrived; the pool may
+  // hand out another dying connection first, so it is tried a few times.
+  let response = null;
+  for (let attempt = 0; !response; attempt += 1) {
+    response = await send().catch(async (error) => {
+      if (error?.message !== 'fetch failed' || attempt >= 3) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return null;
+    });
+  }
   if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`);
   return response.json();
 }

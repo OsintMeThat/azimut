@@ -38,6 +38,7 @@ export const prefs = $state({
   tour: '', // the first-run tour: '' never started, the page it resumes on, or 'done'
   whatsNewSeen: '', // the version whose What's new was put away for good
   findBetaSeen: false, // Horizon Find's beta notice was read
+  quality3d: 'full', // how much the 3D views draw on this computer (lib/quality3d.js)
 });
 
 /** The app itself, as GET /api/settings describes it: the version the welcome names. */
@@ -117,6 +118,7 @@ export function applyPrefs(s) {
   if (s.tour !== undefined) prefs.tour = s.tour;
   if (s.whats_new_seen !== undefined) prefs.whatsNewSeen = s.whats_new_seen;
   if (s.find_beta_seen !== undefined) prefs.findBetaSeen = s.find_beta_seen;
+  if (s.quality_3d !== undefined) prefs.quality3d = s.quality_3d;
   if (s.extension_version !== undefined) updatesState.extensionBundled = s.extension_version;
   if (s.version) appInfo.version = s.version;
 }

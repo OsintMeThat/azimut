@@ -29,6 +29,7 @@ NOT_EXPORTED: dict[str, str] = {
     "export_dirs": "absolute export paths belong to the machine that selected them",
     "sentinel_draft_layer": "a layer half-written in the picker, replaced by the next "
     "preview; the saved ones travel in sentinel_layers",
+    "quality_3d": "how much the 3D views draw answers this computer's graphics card",
 }
 
 

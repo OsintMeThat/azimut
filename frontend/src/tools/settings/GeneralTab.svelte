@@ -1,13 +1,14 @@
 <script>
   /**
    * How every tool prints a coordinate, a distance and an area, plus where the
-   * maps open, what saving a proof does with its point, and how Reverse Search
-   * reaches an engine.
+   * maps open, how much the 3D views draw on this computer, what saving a proof
+   * does with its point, and how Reverse Search reaches an engine.
    *
    * Preferences save on change and the server answers with the canonical value,
    * so nothing here keeps a draft the rest of the app cannot see.
    */
   import { formatDistance, formatArea } from '../../lib/measure.js';
+  import { QUALITIES_3D, qualityOf } from '../../lib/quality3d.js';
 
   let {
     prefs,
@@ -113,6 +114,26 @@
       onchange={() => savePrefs({ map_sync: mapSync })}
       aria-label="Share one view across the map tabs"
     />
+  </div>
+</section>
+
+<section class="group" data-guide="settings.quality-3d">
+  <h3>3D views</h3>
+  <div class="row">
+    <div class="row-label">
+      <span title="How much the 3D globe and Horizon draw on this computer; the globe takes it the next time 3D opens">Quality</span>
+      <span class="row-hint">For a slow computer. Captures and plates stay at full quality.</span>
+    </div>
+    <div class="seg" role="group" aria-label="3D quality">
+      {#each QUALITIES_3D as q (q.id)}
+        <button
+          class="seg-btn"
+          class:on={qualityOf(prefs.quality3d) === q.id}
+          title={q.title}
+          onclick={() => savePrefs({ quality_3d: q.id })}
+        >{q.label}</button>
+      {/each}
+    </div>
   </div>
 </section>
 

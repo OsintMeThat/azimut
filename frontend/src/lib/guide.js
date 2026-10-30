@@ -139,6 +139,7 @@ export const PAGES = {
       { anchor: 'settings.units', title: 'Measurements', text: 'Metric, imperial or nautical, for the rulers and the readouts.' },
       { anchor: 'settings.home-view', title: 'Satellite home view', text: 'Where Satellite opens when the case gives it no place of its own.' },
       { anchor: 'settings.map-tabs', title: 'Map tabs', text: 'Satellite, Compare, Detect and Horizon look at the same place, or each at its own.' },
+      { anchor: 'settings.quality-3d', title: '3D views', text: 'Full, Balanced or Light: how much the 3D globe and Horizon draw on this computer. Lighter for a slow one.' },
       { anchor: 'settings.proofs', title: 'Proofs', text: 'Whether saving a proof files its point as a place without asking.' },
       { anchor: 'settings.reverse', title: 'Reverse search', text: 'Whether the extension hands the picture to the engine it opens.' },
     ],
@@ -1266,6 +1267,10 @@ export const FIXES = [
   {
     symptom: 'The app opens on "Another Azimut has this workspace"',
     fix: 'Close the other Azimut and reload, or press "Take it anyway" if it is already gone.',
+  },
+  {
+    symptom: 'The 3D globe or Horizon stutters',
+    fix: 'Restart the computer if it has run for days, and close what else is open. Then Settings, General, 3D views: Balanced or Light draws less. Captures stay at full quality.',
   },
   {
     symptom: 'The tab is closed and the app seems gone',

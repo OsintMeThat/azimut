@@ -361,6 +361,21 @@ def test_the_find_beta_notice_is_kept_once_read(client):
     assert client.get("/api/settings").json()["find_beta_seen"] is True
 
 
+def test_the_3d_quality_is_this_computers_and_stays_behind_in_the_backup(client):
+    assert client.get("/api/settings").json()["quality_3d"] == "full"
+    assert client.put("/api/settings/prefs", json={"quality_3d": "light"}).json()["quality_3d"] == "light"
+    client.put("/api/settings/prefs", json={"units": "imperial"})
+    assert client.get("/api/settings").json()["quality_3d"] == "light"
+    for wrong in ("ultra", "", "Light"):
+        assert client.put("/api/settings/prefs", json={"quality_3d": wrong}).status_code == 422, wrong
+    # another machine has its own graphics card: the backup leaves the level here, and an import keeps this one's
+    blob = client.get("/api/settings/export").json()
+    assert "quality_3d" not in blob["settings"]
+    client.put("/api/settings/prefs", json={"quality_3d": "balanced"})
+    client.post("/api/settings/import", json={**blob, "settings": {**blob["settings"], "quality_3d": "light"}})
+    assert client.get("/api/settings").json()["quality_3d"] == "balanced"
+
+
 def test_put_prefs_roundtrips_signature_handle(client):
     saved = client.put("/api/settings/prefs", json={"signature_handle": "  @example  "}).json()
     assert saved["signature_handle"] == "@example"

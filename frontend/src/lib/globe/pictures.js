@@ -54,7 +54,7 @@ export function boxWithin(t, p) {
  * @param {(provider: string) => void} [o.onMetered] a billed picture came, which the meter counts
  * @param {(provider: string, error: Error) => void} [o.onFailed] a picture of the chosen imagery was refused
  */
-export function createPictures({ fetch, upload, release, onMetered = () => {}, onFailed = () => {}, budget = 192 * 1024 * 1024 }) {
+export function createPictures({ fetch, upload, release, onMetered = () => {}, onFailed = () => {}, budget = 192 * 1024 * 1024, uploads = UPLOADS_PER_FRAME }) {
   const held = new Map();
   // the last picture held for a place, whatever its provider: shown while another provider's comes
   const lastFor = new Map();
@@ -190,7 +190,7 @@ export function createPictures({ fetch, upload, release, onMetered = () => {}, o
      */
     end() {
       let laid = 0;
-      while (arrivals.length && laid < UPLOADS_PER_FRAME) {
+      while (arrivals.length && laid < uploads) {
         const { e, bitmap } = arrivals.shift();
         if (held.get(e.key) !== e) {
           bitmap.close?.();

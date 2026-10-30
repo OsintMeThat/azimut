@@ -120,6 +120,21 @@ describe('each section', () => {
     expect(text).toContain('Satellite home view');
   });
 
+  it('General offers the 3D quality, each level saying what it is for, and keeps the one picked', async () => {
+    show('general');
+    const levels = [...pane().querySelectorAll('[aria-label="3D quality"] button')];
+    expect(levels.map((b) => b.textContent.trim())).toEqual(['Full', 'Balanced', 'Light']);
+    for (const level of levels) expect(level.title).toBeTruthy();
+    expect(levels[0].classList.contains('on')).toBe(true);
+    api.put.mockImplementation(async (path, patch) => ({ ...settingsBlob(), ...patch }));
+    api.put.mockClear();
+    levels[2].click();
+    await Promise.resolve();
+    expect(api.put).toHaveBeenCalledWith('/api/settings/prefs', { quality_3d: 'light' });
+    api.put.mockImplementation(async () => settingsBlob());
+    prefs.quality3d = 'full';
+  });
+
   it('Publishing states the mention and signature controls', () => {
     const text = show('publishing');
     expect(text).toContain('Geo Report');

@@ -10,7 +10,7 @@
  */
 
 /** Pictures laid on the GPU in one frame, at most. */
-const UPLOADS_PER_FRAME = 8;
+export const UPLOADS_PER_FRAME = 8;
 /** Tiles being painted at once, at most. */
 const IN_FLIGHT = 8;
 /** Changes remembered one by one; past this they fold into one that touches everything. */
@@ -48,7 +48,7 @@ export function overlaps(a, b) {
  * @param {(picture: object) => { texture: any, bytes: number }} o.upload
  * @param {(handle: object) => void} o.release
  */
-export function createDrapes({ compose, upload, release, budget = 128 * 1024 * 1024 }) {
+export function createDrapes({ compose, upload, release, budget = 128 * 1024 * 1024, uploads = UPLOADS_PER_FRAME }) {
   const held = new Map();
   const arrivals = [];
   const asked = [];
@@ -162,7 +162,7 @@ export function createDrapes({ compose, upload, release, budget = 128 * 1024 * 1
     /** Lay a few arrivals, send the asks, let go what is past the budget. True while arrivals wait or one was laid. */
     end() {
       let laid = 0;
-      while (arrivals.length && laid < UPLOADS_PER_FRAME) {
+      while (arrivals.length && laid < uploads) {
         const { e, picture, built } = arrivals.shift();
         if (held.get(e.key) !== e) {
           picture?.close?.();

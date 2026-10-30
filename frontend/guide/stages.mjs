@@ -34,6 +34,8 @@ const FILM = { width: 1600, height: 900 };
 const TALL = { width: 1400, height: 880 };
 /** Settings with every section of a tab on screen. */
 const SETTINGS = { width: 1440, height: 900 };
+/** General, the longest tab, with its 3D views row too: still wider than tall. */
+const GENERAL = { width: 1440, height: 1080 };
 /** Wide enough for Board's Details to open beside the rows rather than over them. */
 const ROOMY = { width: 1360, height: 800 };
 
@@ -281,7 +283,7 @@ export const STAGES = [
   },
   {
     shot: 'settings',
-    window: SETTINGS,
+    window: GENERAL,
     focus: ['[data-guide="settings.nav"]'],
     async run({ go }) {
       await go('settings');

@@ -72,8 +72,9 @@ const keyOf = (z, x, y) => `${z}/${x}/${y}`;
  * @param {(tile: object) => void} o.release a mesh let go (its GPU handle)
  * @param {number} [o.budget] meshes held at most
  * @param {number} [o.inFlight] meshes asked and not back yet, at most
+ * @param {number} [o.round] the same for the ground all round the eye (`ROUND_SHARPNESS`)
  */
-export function createTree({ request, release, budget = 700, inFlight = 48, maxZ = MAX_Z, sharpness = SHARPNESS }) {
+export function createTree({ request, release, budget = 700, inFlight = 48, maxZ = MAX_Z, sharpness = SHARPNESS, round: roundSharpness = ROUND_SHARPNESS }) {
   const nodes = new Map();
   let loading = 0;
   let frameNo = 0;
@@ -227,9 +228,10 @@ export function createTree({ request, release, budget = 700, inFlight = 48, maxZ
 
   /**
    * One frame: the tiles to draw, and the asks it leaves. `limit` caps how deep
-   * tiles are split (the imagery's own last level, a terrain-only view…).
+   * tiles are split (the imagery's own last level, a terrain-only view…), and
+   * `sharp` how sharp they are wanted, the tree's own unless said (a capture).
    */
-  function frame(camera, size, { exaggeration = 1, limit = maxZ } = {}) {
+  function frame(camera, size, { exaggeration = 1, limit = maxZ, sharp = sharpness } = {}) {
     frameNo += 1;
     const v = viewOf(camera, size, exaggeration);
     const ceiling = Math.min(limit, maxZ);
@@ -243,7 +245,7 @@ export function createTree({ request, release, budget = 700, inFlight = 48, maxZ
     };
     const splits = (n) => {
       if (n.z >= ceiling) return false;
-      return pixelsOf(n, v).pixels > sharpness;
+      return pixelsOf(n, v).pixels > sharp;
     };
     /** The children of a tile not held yet that will be split as soon as it comes, asked with it. */
     const ahead = (n, depth) => {
@@ -299,7 +301,7 @@ export function createTree({ request, release, budget = 700, inFlight = 48, maxZ
     for (const r of roots) if (r.state === 'idle') want(r, 0, false);
     // the ground all round, coarser, after everything the frame itself asks
     const round = [];
-    const roundSplits = (n) => n.z < ceiling && pixelsOf(n, v).pixels > ROUND_SHARPNESS;
+    const roundSplits = (n) => n.z < ceiling && pixelsOf(n, v).pixels > roundSharpness;
     const aroundEye = (n) => {
       n.used = frameNo;
       if (!roundSplits(n)) {

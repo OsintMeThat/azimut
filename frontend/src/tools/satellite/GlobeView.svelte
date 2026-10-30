@@ -19,6 +19,7 @@
   import { createGlobe } from '../../lib/globe/globe.js';
   import { sourceMaxZoom, sourceMinZoom } from '../../lib/map/basemap.js';
   import { api } from '../../lib/api.js';
+  import { prefs } from '../../lib/state.svelte.js';
 
   let {
     /** What the surface shows: `{ provider, id, cell }` (`imagery.displayed`). */
@@ -55,6 +56,8 @@
         }, 1000);
       },
       onFailed: (_provider, error) => ontrouble(error),
+      // this computer's level (Settings, General), taken each time the 3D opens
+      quality: prefs.quality3d,
     });
     if (!made) {
       onrefused();

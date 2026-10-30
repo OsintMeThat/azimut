@@ -59,6 +59,9 @@ The details follow, tool by tool.
 - **3D** in Satellite stands the imagery on public relief, on a globe Azimut
   draws itself. Your layers, places and measures show on it as on the flat map.
 - A tilted view files as a credited capture that reopens as it was taken.
+- On a slow computer, **Settings, General, 3D views** draws the 3D globe and
+  Horizon lighter, at Balanced or Light. Captures and plates stay at full
+  quality.
 - **Measure** is one tool for lines and areas, their legs, bearings and angles.
   A line also works as range rings, a view cone, a shadow's height or a
   viewshed.

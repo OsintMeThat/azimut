@@ -41,10 +41,11 @@ import {
   viewOf,
 } from './camera.js';
 import { EARTH, add, dot, ecef, geodetic, haversine, length, localFrame, metresPerPixel, normalize, raySphere, scale, sub, wrapLon } from './earth.js';
-import { createDrapes } from './drapes.js';
+import { createDrapes, UPLOADS_PER_FRAME as DRAPE_UPLOADS } from './drapes.js';
 import { createPictures } from './pictures.js';
 import { createRenderer, groundUniforms, toneUniforms } from './renderer.js';
 import { createTree } from './tree.js';
+import { GLOBE_QUALITY, qualityOf } from '../quality3d.js';
 
 /** Asks for what is out of view come after every ask for what is in it. */
 const ROUND_RANK = 1e12;
@@ -85,8 +86,6 @@ const FLING_FADE = 320;
 const WHEEL_EASE = 90;
 /** The highest ground there is, at real scale: no ray meets ground above it. */
 const TOP = 9000;
-/** Pixels a drawing buffer may hold per CSS pixel. */
-const DPR_MAX = 2;
 /** Lines of sight to marks traced per frame, at most, once the view has stopped. */
 const SIGHTS_PER_FRAME = 60;
 /** Below the sea, metres: a point whose line to the eye dips under this sphere is past the horizon. */
@@ -99,10 +98,12 @@ const appZoom = (view) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(view.
  * @param {object} [o]
  * @param {(provider: string) => void} [o.onMetered] billed pictures came (the meter counts them)
  * @param {(provider: string, error: Error) => void} [o.onFailed] a picture could not be read
+ * @param {string} [o.quality] how much it draws (lib/quality3d.js), read once: Full unless said
  * @returns the globe, or null when the browser has no WebGL2
  */
-export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} } = {}) {
-  const renderer = createRenderer(canvas);
+export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {}, quality = 'full' } = {}) {
+  const level = GLOBE_QUALITY[qualityOf(quality)];
+  const renderer = createRenderer(canvas, { antialias: level.antialias });
   if (!renderer) return null;
 
   let camera = cameraFor({ lat: 20, lon: 0, zoom: 2 }, { width: 800, height: 600 });
@@ -111,6 +112,8 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
   // how the ground is drawn: a plain ground where there is no picture, and the pictures' tone
   let look = { plain: groundUniforms(null), tone: toneUniforms() };
   let fallbackRelief = false;
+  // a capture under way, drawn as sharp as Full draws it
+  let capturing = false;
   let destroyed = false;
   let lost = false;
 
@@ -125,6 +128,9 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
   const tree = createTree({
     request: (tiles) => worker.postMessage({ type: 'mesh', tiles }),
     release: (n) => renderer.deleteMesh(n.mesh),
+    budget: level.meshes,
+    sharpness: level.sharpness,
+    round: level.round,
   });
   worker.onmessage = ({ data }) => {
     if (destroyed || data.type !== 'mesh') return;
@@ -159,6 +165,8 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
     release: (handle) => renderer.deleteTexture(handle),
     onMetered,
     onFailed,
+    budget: level.pictureBytes,
+    uploads: level.uploads,
   });
 
   // what the flat map lays on the ground, painted per tile by `laid` (mirror.js)
@@ -170,6 +178,8 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
     compose: (tile, signal) => (laid ? laid.compose(tile, signal) : Promise.resolve(null)).finally(schedule),
     upload: (picture) => renderer.createOverlayTexture(picture),
     release: (handle) => renderer.deleteTexture(handle),
+    budget: level.drapeBytes,
+    uploads: Math.min(DRAPE_UPLOADS, level.uploads + 2),
   });
 
   // -- the size ----------------------------------------------------------------------
@@ -177,7 +187,7 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
   let css = { width: 1, height: 1 };
   function measure() {
     css = { width: Math.max(1, canvas.clientWidth), height: Math.max(1, canvas.clientHeight) };
-    const dpr = Math.min(DPR_MAX, globalThis.devicePixelRatio || 1);
+    const dpr = Math.min(level.pixelsMax, globalThis.devicePixelRatio || 1);
     const width = Math.round(css.width * dpr);
     const height = Math.round(css.height * dpr);
     if (canvas.width !== width || canvas.height !== height) {
@@ -653,7 +663,9 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
     pictures.begin();
     drapes.begin();
     const limit = imagery ? Math.max(imagery.deepest + imagery.shift, 16) : 16;
-    const { drawn, waiting, view: seen, round } = tree.frame(camera, css, { exaggeration, limit });
+    // a capture is drawn as sharp as Full draws it, whatever this computer shows on screen
+    const sharp = capturing ? GLOBE_QUALITY.full.sharpness : level.sharpness;
+    const { drawn, waiting, view: seen, round } = tree.frame(camera, css, { exaggeration, limit, sharp });
     const tiles = [];
     for (const n of drawn) {
       const distance = n.bound ? length(sub(n.bound.mid, camera.eye)) : 0;
@@ -957,6 +969,13 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
      * every tilted capture is, so `keep` has nothing to choose.
      */
     async snapshot({ timeout = 12000, ratio = null, laid: withLaid = false, into = null } = {}) {
+      // a lighter level shows less on screen, never in what is filed: the capture is drawn as Full draws it
+      const lighter = level !== GLOBE_QUALITY.full;
+      if (lighter) {
+        capturing = true;
+        ratio ??= Math.min(GLOBE_QUALITY.full.pixelsMax, globalThis.devicePixelRatio || 1);
+        schedule();
+      }
       // drawn at `ratio` device pixels per CSS pixel for a print, as far as the GPU allows
       if (ratio) {
         const most = Math.min(8192, renderer.gl.getParameter(renderer.gl.MAX_RENDERBUFFER_SIZE) || 4096);
@@ -986,6 +1005,7 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
       ctx.drawImage(canvas, 0, 0);
       if (withLaid) laid?.paintMarks?.(ctx, canvas.width / css.width);
       draping = true;
+      capturing = false;
       if (ratio) {
         measure();
         changed();

@@ -2610,6 +2610,15 @@ their switch rests while 3D is on, and comes back with it. The globe is the only
 3D view: a browser without WebGL2, or one that loses it, has none, and the 3D
 switch greys and says why.
 
+**How much the 3D draws is this computer's.** Settings → General → 3D views offers
+Full, as the 3D always drew, then Balanced and Light for a slow graphics card or
+little memory (`lib/quality3d.js`). They split the globe's tiles later, draw fewer
+pixels on a high-density screen, lay fewer pictures a frame and hold less on the
+GPU, and Light drops edge smoothing. Horizon draws fewer pixels too, nothing else.
+The globe takes a level the next time 3D opens, Horizon at once. A capture is
+drawn as Full draws it, and plates never read the level. The settings backup
+leaves it behind, since it answers this machine's graphics card.
+
 A tilted capture is the picture the map draws, imagery on relief and nothing laid
 over it, filed with its tilt, bearing, exact zoom and, for a frame centred on
 the view, the height of its centre. Its credit line names the

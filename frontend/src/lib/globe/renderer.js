@@ -259,11 +259,12 @@ function program(gl, vs, fs) {
 
 /**
  * @param {HTMLCanvasElement} canvas
+ * @param {{ antialias?: boolean }} [o] edge smoothing, which a context keeps from its creation
  * @returns {null | ReturnType<typeof build>}
  */
-export function createRenderer(canvas) {
+export function createRenderer(canvas, { antialias = true } = {}) {
   const gl = canvas.getContext('webgl2', {
-    antialias: true,
+    antialias,
     alpha: false,
     depth: true,
     stencil: false,

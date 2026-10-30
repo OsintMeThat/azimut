@@ -184,6 +184,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "tour": "",
     "whats_new_seen": "",
     "find_beta_seen": False,
+    # How much the 3D globe and Horizon draw on this computer (frontend
+    # lib/quality3d.js): "full" as they always did, "balanced" or "light" for a
+    # slow graphics card. This machine's own, so the settings backup leaves it.
+    "quality_3d": "full",
     # Login session for gated media downloads (engine/media.py). Applied only
     # when a download hits a login wall — public media is always fetched
     # cookie-less, so this never touches the everyday case. Shapes:

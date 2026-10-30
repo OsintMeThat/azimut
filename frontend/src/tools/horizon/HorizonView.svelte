@@ -76,6 +76,8 @@
   import { RIDGE_STEPS } from './state/horizon.svelte.js';
   import { detailsShown, pressTool, putAway, toolForKey, toolHint, traceLegend } from '../../lib/horizon/traceTools.js';
   import PictureControls from './PictureControls.svelte';
+  import { prefs } from '../../lib/state.svelte.js';
+  import { HORIZON_PIXELS, qualityOf } from '../../lib/quality3d.js';
 
   let {
     /** The tab's view state (state/horizon.svelte.js). */
@@ -293,7 +295,8 @@
     const fit = () => {
       const width = box.clientWidth;
       const height = box.clientHeight;
-      const density = window.devicePixelRatio || 1;
+      // as many pixels as the screen has, unless this computer asked for fewer (Settings, General)
+      const density = Math.min(HORIZON_PIXELS[qualityOf(prefs.quality3d)], window.devicePixelRatio || 1);
       canvas.width = Math.max(1, Math.round(width * density));
       canvas.height = Math.max(1, Math.round(height * density));
       size = { width, height };
@@ -301,6 +304,7 @@
     const observer = new ResizeObserver(fit);
     observer.observe(box);
     fit();
+    refit = fit;
     if (view.placed) scene?.place(view.placed, view.placed.far);
     if (buildings) {
       scene?.setBuildingOptions(buildings.sceneOptions);
@@ -316,6 +320,16 @@
       scene?.dispose();
       scene = null;
     };
+  });
+
+  // a level chosen in Settings takes at once: the view is laid out again at its pixels
+  let refit = null;
+  $effect(() => {
+    void prefs.quality3d;
+    untrack(() => {
+      refit?.();
+      redraw();
+    });
   });
 
   /**
