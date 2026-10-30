@@ -1,7 +1,11 @@
 """Find where a photo was taken: the grid, the alignments that narrow it, and the camera found again."""
 
 import json
+import os
+import signal
+import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -685,6 +689,59 @@ def test_a_search_is_kept_in_the_case_runs_and_lists(client):
     deleted = client.delete(f"/api/cases/{case_id}/horizon/finds/{name}")
     assert deleted.status_code == 200, deleted.text
     assert client.get(f"/api/cases/{case_id}/horizon/finds/{name}").status_code == 404
+
+
+def _running(pid: int) -> bool:
+    """Whether a process stands, asked without touching it (on Windows `os.kill(pid, 0)` would send it Ctrl+C)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        if not handle:
+            return False
+        try:
+            return kernel32.WaitForSingleObject(handle, 0) == 0x102  # WAIT_TIMEOUT
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+# an app with a search's process, which prints its id and waits to be killed
+_APP_WITH_A_LANE = """
+import os, time
+from azimut.engine import finder
+pool = finder._lanes(1, None, None)
+print(pool.submit(os.getpid).result(), flush=True)
+time.sleep(300)
+"""
+
+
+def test_a_search_process_ends_with_the_app_killed_under_it():
+    """Nothing else stops it: killed mid-search, the app would leave it waiting, its memory held until a restart."""
+    app = subprocess.Popen([sys.executable, "-c", _APP_WITH_A_LANE], stdout=subprocess.PIPE, text=True)
+    lane = None
+    try:
+        assert app.stdout is not None
+        lane = int(app.stdout.readline())
+        assert _running(lane)
+        app.kill()
+        app.wait(timeout=30)
+        deadline = time.monotonic() + 60
+        while _running(lane) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        assert not _running(lane), "the search's process outlived the app"
+    finally:
+        app.kill()
+        app.wait(timeout=30)
+        if app.stdout is not None:
+            app.stdout.close()
+        if lane is not None and _running(lane):
+            os.kill(lane, signal.SIGTERM)
 
 
 def test_a_search_saved_without_running_keeps_its_question_and_is_saved_again_under_its_name(client, monkeypatch):

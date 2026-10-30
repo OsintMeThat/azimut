@@ -1501,8 +1501,27 @@ def _score_stage(
 _LANE: dict[str, Any] = {}
 
 
+def _leave_with_app() -> None:
+    """A search's process ends with the app. Killed mid-search, the app leaves nothing to stop it: it would wait for
+    work for ever, its memory held until the computer restarts."""
+    import multiprocessing
+    import os
+    import threading
+
+    app = multiprocessing.parent_process()
+    if app is None:
+        return
+
+    def watch(parent: Any) -> None:
+        parent.join()
+        os._exit(0)
+
+    threading.Thread(target=watch, args=(app,), name="lane-app-watch", daemon=True).start()
+
+
 def _lane_start(plan: Plan, trace: Trace, fetch: Any) -> None:
     """A search's process made ready: its plan, its trace and a terrain reader of its own, its tiles bounded."""
+    _leave_with_app()
     if fetch is not None:
         terrain.tile = fetch
     _LANE.update(plan=plan, trace=trace, sampler=terrain.Sampler(keep=SEARCH_TILES, plates=True))
