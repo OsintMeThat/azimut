@@ -23,11 +23,17 @@
 </p>
 
 <p align="center">
-  <img
-    src="https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif"
-    alt="A tour of Azimut's sixteen tools on one case: a clip downloaded, examined and stitched, placed on satellite imagery, compared across dates, swept by Detect, turned into a proof, a report and a note, then read on the Board, Timeline, Graph and Sheet"
-    width="800"
-  >
+  <picture>
+    <source
+      srcset="https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.avif"
+      type="image/avif"
+    >
+    <img
+      src="https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif"
+      alt="A tour of Azimut: from the globe down to the ground in 3D, Find ranking the places that fit a photo's skyline, the photo laid over the terrain, Horizon's view from Glacier Point, a map layer drawn on the imagery, a map plate in 3D and a picture faded over the map"
+      width="900"
+    >
+  </picture>
 </p>
 
 ## Install & run
