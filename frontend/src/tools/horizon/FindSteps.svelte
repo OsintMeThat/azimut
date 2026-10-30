@@ -52,7 +52,7 @@
   } from '../../lib/horizon/find.js';
   import { AUTO_REACH, cleanZoom, reachText, zoomText } from '../../lib/horizon/hints.js';
   import { headingText } from '../../lib/horizon/geometry.js';
-  import { BRUSH_SIZES, durationText, EFFORTS, estimateText, FLOOR_M, floorsOf, OVERS, roofFor, SPACINGS, SPEEDS, TAKEN, takenOf, VIEWS, WATERS, whoFor, widenedText } from './state/find.svelte.js';
+  import { BRUSH_SIZES, effortText, EFFORTS, estimateText, FLOOR_M, floorsOf, OVERS, roofFor, SPACINGS, speedText, SPEEDS, TAKEN, takenOf, VIEWS, WATERS, whoFor, widenedText } from './state/find.svelte.js';
   import { farLabel } from '../../lib/horizon/traceMarks.js';
   import { marksSummary } from '../../lib/horizon/traceTools.js';
   import { COARSE_RELIEF_M, reliefWords } from '../../lib/horizon/overlay.js';
@@ -680,13 +680,14 @@
                 <div class="fs-pills" role="group" aria-label="How thorough the search is">
                   {#each EFFORTS as one (one.id)}
                     {@const grid = withGround(find.estimated.efforts[one.id], find.previewed)}
+                    {@const effort = effortText(grid.points, withGround(find.estimated.efforts.normal, find.previewed).points)}
                     <button
                       type="button"
                       class:on={find.settings.effort === one.id}
                       aria-pressed={find.settings.effort === one.id}
                       title="{one.title}: {grid.points.toLocaleString('en-US')} points"
                       onclick={() => find.setSettings({ effort: one.id })}
-                      >{one.label} · {durationText(grid.points, find.estimated.step, find.estimated.turn, find.pace).replace('about ', '')}</button
+                      >{one.label}{effort ? ` · ${effort}` : ''}</button
                     >
                   {/each}
                 </div>
@@ -747,26 +748,22 @@
               <span class="fs-name">Speed</span>
               <div class="fs-pills" role="group" aria-label="How hard the computer works">
                 {#each SPEEDS as one (one.id)}
-                  {@const paced = find.paceFor?.(one.id) ?? null}
+                  {@const faster = speedText(sized.points, find.estimated, one.id)}
+                  {@const lanes = find.estimated.speeds?.[one.id]?.lanes}
                   <button
                     type="button"
                     class:on={(find.settings.speed ?? 'fast') === one.id}
                     aria-pressed={(find.settings.speed ?? 'fast') === one.id}
-                    title={paced ? `${one.title}: ${paced.lanes} ${paced.lanes === 1 ? 'core' : 'cores'} here` : one.title}
+                    title={lanes ? `${one.title}: ${lanes} ${lanes === 1 ? 'core' : 'cores'} here${faster ? `, about ${faster.slice(1)} times as fast as Gentle` : ''}` : one.title}
                     onclick={() => find.setSettings({ speed: one.id })}
-                    >{one.label}{paced ? ` · ${durationText(sized.points, find.estimated.step, find.estimated.turn, paced).replace('about ', '')}` : ''}</button
+                    >{one.label}{faster ? ` · ${faster}` : ''}</button
                   >
                 {/each}
               </div>
             </div>
-            <p class="fs-say">{estimateText(sized, find.pace)}</p>
+            <p class="fs-say">{estimateText(sized)} The time left shows once it runs.</p>
             {#if sightPending}
               <p class="fs-say quiet">It checks what each point sees first: about {sightTime} more.</p>
-            {/if}
-            {#if find.pacing}
-              <p class="fs-say quiet" role="status">Timing a few points on this computer…</p>
-            {:else if !find.pace}
-              <p class="fs-say quiet">A guess until a few points are timed on this computer.</p>
             {/if}
             {#each widenedText(find.estimated, units, find.settings.spacing !== 'auto') as line (line)}
               <p class="fs-say warn">{line}</p>
@@ -1066,7 +1063,7 @@
                 role="radio"
                 class:on={find.settings.spacing === spacing}
                 aria-checked={find.settings.spacing === spacing}
-                title={spacing === 'auto' ? 'As fine as about ten minutes of search allow' : `A point every ${spacing} m`}
+                title={spacing === 'auto' ? 'About 4,000 points over the area' : `A point every ${spacing} m`}
                 onclick={() => find.setSettings({ spacing })}>{spacing === 'auto' ? 'Auto' : formatDistance(spacing, units)}</button
               >
             {/each}

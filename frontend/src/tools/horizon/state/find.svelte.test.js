@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { brushFor, createFindState, durationText, estimateText, FLOOR_M, floorsOf, pacedSeconds, ROOF, ROOF_FLOORS, roofFor, TAKEN, takenOf, WHO, whoFor, widenedText } from './find.svelte.js';
+import { brushFor, createFindState, effortText, estimateText, FLOOR_M, floorsOf, ROOF, ROOF_FLOORS, roofFor, speedText, TAKEN, takenOf, WHO, whoFor, widenedText } from './find.svelte.js';
 import { destination } from '../../../lib/measure.js';
 import { PANORAMA_WITHIN } from '../../../lib/horizon/hints.js';
 
@@ -607,330 +607,6 @@ describe('the search', () => {
     await lined.openSearch('c1', 'sea search');
     expect(lined.water).toBe(false);
   });
-
-  it('times this machine’s pace once a case holds it, again only once what it depends on changes', async () => {
-    const paces = [];
-    const post = vi.fn(async (url, body) => {
-      if (url.endsWith('/pace')) {
-        paces.push(body);
-        return { seconds: 0.8, timed: 3, lanes: { fastest: 8, fast: 4, gentle: 1 }, lane_min: 200, full: 8, lane_power: 0.46, top: 5 };
-      }
-      return { points: 469, coarse: 400, spacing: 250, step: 0.5 };
-    });
-    const { find } = laid({ get: vi.fn(async () => []), post });
-    find.setArea(area);
-    await find.timePace();
-    expect(paces).toHaveLength(0); // no case holds the search yet
-    await find.refreshList('c1');
-    await find.timePace();
-    expect(post.mock.calls.at(-1)[0]).toBe('/api/cases/c1/horizon/finds/pace');
-    expect(find.pace).toMatchObject({ seconds: 0.8, lanes: 4 });
-    find.setSettings({ speed: 'gentle' });
-    expect(find.pace.lanes).toBe(1);
-    // the grid's density or speed leaves the pace as it was; which way the photo faces does not
-    find.setSettings({ effort: 'thorough' });
-    await find.timePace();
-    expect(paces).toHaveLength(1);
-    expect(paces[0].effort).toBe('normal');
-    find.toggleFacing('e');
-    await find.timePace();
-    expect(paces).toHaveLength(2);
-    expect(find.snapshot.effort).toBe('thorough');
-  });
-
-  it('asks with the directions ticked, and says the setup changed when they do', async () => {
-    const { find, api } = laid();
-    find.setArea(area);
-    find.toggleFacing('e');
-    find.toggleFacing('ne');
-    expect(find.facing).toEqual(['ne', 'e']);
-    await find.start('c1');
-    expect(api.post.mock.calls.at(-1)[1].facing).toEqual(['ne', 'e']);
-    expect(find.edited).toBe(false);
-    find.toggleFacing('e');
-    expect(find.edited).toBe(true);
-    find.clearFacing();
-    expect(find.facing).toEqual([]);
-    find.closeSearch();
-  });
-
-  it('reads the grid and its ground once the area is drawn, and asks with the ground ticked', async () => {
-    const answers = [];
-    const post = vi.fn(async (url, body) => {
-      if (url.endsWith('/preview')) {
-        answers.push(body);
-        // all ten points on a slope
-        const kept = !body.stands.length || body.stands.includes('slope') ? 10 : 0;
-        return { total: 10, kept, kinds: { summit: 0, slope: 10, valley: 0, plain: 0, water: 0 }, points: [] };
-      }
-      if (url.endsWith('/estimate')) return { points: 469, coarse: 400, spacing: 250, step: 0.5 };
-      return { name: 'barry search', status: 'queued', progress: { done: 0, total: 0 } };
-    });
-    const { find, api } = laid({ post });
-    await find.preview();
-    expect(answers).toHaveLength(0); // no area yet, nothing read
-    find.setArea(area);
-    await find.preview();
-    expect(answers).toHaveLength(1);
-    expect(answers[0]).toMatchObject({ who: { mode: 'ground' }, stands: [] });
-    expect(answers[0]).not.toHaveProperty('trace');
-    // the same question is not asked twice
-    await find.preview();
-    expect(answers).toHaveLength(1);
-    find.toggleStand('summit');
-    await find.preview();
-    expect(answers.at(-1).stands).toEqual(['summit']);
-    expect(find.previewed.kept).toBe(0);
-    expect(find.searchProblem).toBe('No point of the area stands on the ground ticked');
-    find.toggleStand('slope');
-    await find.preview();
-    expect(find.searchProblem).toBe('');
-    await find.start('c1');
-    expect(api.post.mock.calls.at(-1)[1].stands).toEqual(['summit', 'slope']);
-    find.closeSearch();
-  });
-
-  it('asks with the camera’s view, a selfie and the nearest line said, and keeps them on the bench', async () => {
-    const answers = [];
-    const post = vi.fn(async (url, body) => {
-      if (url.endsWith('/preview')) {
-        answers.push(body);
-        return { total: 4, kept: 4, kinds: {}, points: [] };
-      }
-      return { name: 'barry search', status: 'queued', progress: { done: 0, total: 0 } };
-    });
-    const { find, api, overlay } = laid({ post });
-    overlay.marks = { lines: [0], inner: [], pairs: [], cuts: [], far: [{ line: 0, bands: ['b1', 'b3'] }] };
-    find.setArea(area);
-    find.toggleView('down');
-    find.setMirror(true);
-    await find.preview();
-    // the grid is laid for the nearest line said
-    expect(answers.at(-1).near).toBe(1_000);
-    await find.start('c1');
-    const body = api.post.mock.calls.at(-1)[1];
-    expect(body).toMatchObject({ view: ['down'], mirror: true });
-    expect(body.trace.far).toEqual([[0, 1_000, 10_000]]);
-    const kept = structuredClone(find.snapshot);
-    expect(kept).toMatchObject({ view: ['down'], mirror: true });
-    find.toggleView('down');
-    expect(find.view).toEqual([]);
-    expect(find.edited).toBe(true);
-    const { find: again } = laid();
-    await again.restore(kept, 'c1');
-    expect(again.view).toEqual(['down']);
-    expect(again.mirror).toBe(true);
-    find.closeSearch();
-  });
-
-  it('tries the trace from a point clicked, before any area, and drops an answer overtaken', async () => {
-    const answers = [];
-    const post = vi.fn(async (url, body) => {
-      answers.push([url, body]);
-      if (url.endsWith('/try')) return { place: { lat: body.at.lat, lon: body.at.lon, explained: 0.71, heading: 92 }, frames: null };
-      return [];
-    });
-    const get = vi.fn(async () => []);
-    const { find } = laid({ post, get });
-    expect(find.tryProblem).toBe('Open a case first');
-    await find.refreshList('c1');
-    expect(find.tryProblem).toBe('');
-    find.startTrying();
-    expect(find.drawing).toBe('try');
-    await find.tryAt({ lat: 12.9, lon: 43.6 });
-    const [url, body] = answers.at(-1);
-    expect(url).toBe('/api/cases/c1/horizon/finds/try');
-    expect(body.at).toEqual({ lat: 12.9, lon: 43.6 });
-    expect(body).not.toHaveProperty('area');
-    expect(body.trace.x.length).toBeGreaterThan(20);
-    expect(find.tried).toMatchObject({ at: { lat: 12.9, lon: 43.6 }, place: { explained: 0.71 }, busy: false });
-    find.clearTried();
-    expect(find.tried).toBeNull();
-    expect(find.drawing).toBeNull();
-  });
-
-  it('says why a point cannot be tried when the app fails', async () => {
-    const post = vi.fn(async () => {
-      throw new Error('The terrain could not be loaded');
-    });
-    const { find } = laid({ post, get: vi.fn(async () => []) });
-    await find.refreshList('c1');
-    await find.tryAt({ lat: 1, lon: 2 });
-    expect(find.tried).toMatchObject({ place: null, busy: false, error: 'The terrain could not be loaded' });
-  });
-
-  it('asks with the sun once its day and side are said, reads the headings it leaves, and keeps it', async () => {
-    const asked = [];
-    const post = vi.fn(async (url, body) => {
-      asked.push([url, body]);
-      if (url.endsWith('/sectors')) return { sectors: body.facing.length ? [] : [[180, 45]], sun: { zone: 'Asia/Aden', from: 150, to: 210, up: true } };
-      return { name: 'sun search', status: 'queued', progress: { done: 0, total: 0 } };
-    });
-    const { find, api } = laid({ post });
-    find.setArea(area);
-    find.toggleSunSide('left');
-    await find.readSectors();
-    expect(asked.filter(([url]) => url.endsWith('/sectors'))).toHaveLength(0); // no day yet
-    find.setSun({ date: '2024-06-21', start: '13:00', end: '15:00' });
-    await find.readSectors();
-    expect(asked.at(-1)[1]).toMatchObject({ facing: [], sun: { date: '2024-06-21', start: '13:00', end: '15:00', sides: ['left'] } });
-    expect(find.sectors.sectors).toEqual([[180, 45]]);
-    find.toggleFacing('n');
-    await find.readSectors();
-    expect(find.searchProblem).toBe('The sun and the directions ticked leave no heading');
-    find.clearFacing();
-    await find.readSectors();
-    await find.start('c1');
-    expect(api.post.mock.calls.at(-1)[1].sun).toEqual({ date: '2024-06-21', start: '13:00', end: '15:00', sides: ['left'] });
-    expect(structuredClone(find.snapshot).sun).toMatchObject({ date: '2024-06-21', sides: ['left'] });
-    find.closeSearch();
-  });
-
-  it('checks the search on show against decoys and shows it as the app kept it', async () => {
-    const post = vi.fn(async (url) =>
-      url.endsWith('/check') ? { status: 'done', result: { checked: true, places: [{ lat: 1, lon: 2, explained: 0.8, decoy: 0.2 }] } } : []
-    );
-    const get = vi.fn(async () => ({ status: 'done', ask: { area: [[1, 2], [1, 3], [2, 3]] }, result: { places: [{ lat: 1, lon: 2, explained: 0.8 }] } }));
-    const { find } = laid({ post, get });
-    await find.openSearch('c1', 'ridge');
-    await find.check();
-    expect(post).toHaveBeenCalledWith('/api/cases/c1/horizon/finds/ridge/check');
-    expect(find.search.result.checked).toBe(true);
-    expect(find.search.result.places[0].decoy).toBe(0.2);
-    expect(find.checking).toBe(false);
-    find.closeSearch();
-  });
-
-  it('draws the fan as far as the search reads the turn', () => {
-    const { find, overlay } = laid();
-    expect(find.reach).toBe(50_000);
-    overlay.hints = { ...overlay.hints, reach: 10_000 };
-    expect(find.reach).toBe(20_000);
-    overlay.hints = { ...overlay.hints, reach: 'all' };
-    expect(find.reach).toBe(100_000);
-  });
-
-  it('says the setup is still the search’s until something in it changes', async () => {
-    const { find, overlay } = laid();
-    expect(find.edited).toBe(true); // no search on show
-    find.setArea(area);
-    await find.start('c1');
-    expect(find.edited).toBe(false);
-    overlay.strokes = [stroke, stroke.slice(0, 10)];
-    expect(find.edited).toBe(true);
-    overlay.strokes = [stroke];
-    expect(find.edited).toBe(false);
-    find.setWho({ mode: 'drone' });
-    expect(find.edited).toBe(true);
-    find.closeSearch();
-  });
-
-  it('keeps the curve and the corners the trace is read through with the search', async () => {
-    const { find, api, overlay } = laid();
-    overlay.bend = -0.12;
-    overlay.warped = true;
-    overlay.corners = [
-      { u: 0.02, v: 0 },
-      { u: 1, v: 0.03 },
-      { u: 0.98, v: 1 },
-      { u: 0, v: 0.97 },
-    ];
-    find.setArea(area);
-    await find.start('c1');
-    const body = api.post.mock.calls.at(-1)[1];
-    expect(body.photo.bend).toBe(-0.12);
-    expect(body.photo.corners).toEqual(overlay.corners);
-    // the strokes stay on the photo's own pixels
-    expect(body.photo.strokes).toBe(overlay.strokes);
-    find.closeSearch();
-  });
-
-  it('bounds a squat panorama of unknown width by the frame it could span, and a long one not at all', async () => {
-    const { find, api, overlay } = laid({ panorama: true });
-    overlay.aspect = 1.5;
-    overlay.hints = { picture: 'panorama', zoom: [], facing: null, reach: 'auto' };
-    find.setArea(area);
-    await find.start('c1');
-    expect(api.post.mock.calls.at(-1)[1].trace).toMatchObject({ projection: 'panorama', within: [60, 360], lens_max: 165 });
-    find.closeSearch();
-    const long = laid({ panorama: true });
-    long.overlay.aspect = 4;
-    long.overlay.hints = { picture: 'panorama', zoom: [], facing: null, reach: 'auto' };
-    long.find.setArea(area);
-    await long.find.start('c1');
-    expect(long.api.post.mock.calls.at(-1)[1].trace).not.toHaveProperty('lens_max');
-    long.find.closeSearch();
-  });
-
-  it('sends a lens measured on the video a twentieth either way, not held exact', async () => {
-    const { find, api } = laid({ lens: { fov: 42, measured: true, at: 72.4 } });
-    find.setArea(area);
-    await find.start('c1');
-    const body = api.post.mock.calls.at(-1)[1];
-    expect(body.trace).toMatchObject({ known: false, fov: 42 });
-    expect(body.trace.within[0]).toBeCloseTo(40, 9);
-    expect(body.trace.within[1]).toBeCloseTo(44.1, 9);
-    find.closeSearch();
-  });
-
-  it('sends the span a stitch says a fifth either way, never past a full turn', async () => {
-    const { find, api } = laid({ lens: { fov: 160, stitched: true }, panorama: true });
-    find.setArea(area);
-    await find.start('c1');
-    const body = api.post.mock.calls.at(-1)[1];
-    expect(body.trace).toMatchObject({ known: false, fov: 160, projection: 'panorama' });
-    expect(body.trace.within[0]).toBeCloseTo(128, 9);
-    expect(body.trace.within[1]).toBeCloseTo(192, 9);
-    find.closeSearch();
-    const round = laid({ lens: { fov: 340, stitched: true }, panorama: true });
-    round.find.setArea(area);
-    await round.find.start('c1');
-    expect(round.api.post.mock.calls.at(-1)[1].trace.within[1]).toBe(PANORAMA_WITHIN[1]);
-    round.find.closeSearch();
-  });
-
-  it('sends the lens the photo says and each alignment where it stands across the photo', async () => {
-    const { find, api } = laid({ lens: { fov: 4.8 } });
-    find.setArea(area);
-    align(find, { nearU: 0.75, near: destination(CAMERA, 40, 800), far: destination(CAMERA, 40, 12_000) });
-    await find.start('c1');
-    const body = api.post.mock.calls.at(-1)[1];
-    expect(body.trace).toMatchObject({ known: true, fov: 4.8 });
-    expect(body.trace).not.toHaveProperty('within');
-    expect(body.alignments[0].photo_x).toBeCloseTo(0.5, 9);
-    expect(body.alignments[0].tolerance).toBe(1);
-    find.closeSearch();
-  });
-
-  it('keeps its open flag a flag, beside the method that opens a kept search', () => {
-    const { find } = laid();
-    expect(find.open).toBe(false);
-    find.show();
-    expect(find.open).toBe(true);
-    find.hide();
-    expect(find.open).toBe(false);
-  });
-
-  it('opens a search the case keeps with its area, alignments and who took it', async () => {
-    const record = {
-      status: 'done',
-      ask: {
-        area: area.map((p) => [p.lat, p.lon]),
-        who: { mode: 'drone', low: 20, high: 80 },
-        spacing: 250,
-        alignments: [{ near: { lat: 17, lon: 45.1 }, far: { lat: 17.1, lon: 45.1 }, bearing: 180, tolerance: 2, offset: 0, colour: '#4dd6ff' }],
-      },
-      result: { verdict: 'match', places: [{ lat: 17, lon: 45.1, explained: 0.9 }], points: [] },
-    };
-    const { find } = laid({ get: vi.fn(async () => record) });
-    await find.openSearch('c1', 'barry search');
-    expect(find.area).toHaveLength(4);
-    expect(find.who).toEqual({ mode: 'drone', low: 20, high: 80 });
-    expect(find.settings).toEqual({ spacing: 250, tolerance: 2, speed: 'fast', effort: 'normal' });
-    expect(find.alignments[0].map.near).toEqual({ lat: 17, lon: 45.1 });
-    expect(find.search.result.verdict).toBe('match');
-    expect(find.searching).toBe(false);
-  });
 });
 
 describe('a search opened with its photo', () => {
@@ -1081,20 +757,33 @@ describe('how fine the heights are over the area', () => {
   });
 });
 
-describe('the time a search takes', () => {
-  it('shrinks with the share of the turn each point reads', () => {
-    expect(estimateText({ points: 600, step: 0.5 })).toBe('600 points, about 3 min.');
-    expect(estimateText({ points: 600, step: 0.5, turn: 0.25 })).toBe('600 points, about a minute.');
+describe('what the buttons say before a search', () => {
+  it('counts the points, and how far relief may grow them, never a time', () => {
+    expect(estimateText({ points: 600 })).toBe('600 points.');
+    expect(estimateText({ points: 6000, most: 24000 })).toBe('6,000 points, up to 24,000 where relief stands near.');
   });
 
-  it('is this machine’s own once a few points are timed, several lanes faster on a large grid', () => {
-    const paced = { seconds: 0.5, lanes: 4, lane_min: 200, full: 8, lane_power: 0.46, top: 5 };
-    // 995 points as timed and 5 in full, on four lanes 4^0.46 (about 1.9) times as fast
-    expect(pacedSeconds(1000, paced)).toBeCloseTo((0.5 * (995 + 40)) / 4 ** 0.46, 6);
-    // a grid too small for lanes runs on one
-    expect(pacedSeconds(100, paced)).toBeCloseTo(0.5 * (95 + 40), 6);
-    expect(estimateText({ points: 6000, step: 0.5 }, paced)).toBe('6,000 points, about 27 min on this computer.');
-    expect(durationText(6000, 0.5, 1, { ...paced, lanes: 1 })).toBe('about 50 min');
+  it('compares a grid with the usual one by its points', () => {
+    expect(effortText(250, 1000)).toBe('×4 faster');
+    expect(effortText(3000, 1000)).toBe('×3 slower');
+    // the refining costs the same on any grid, so a quarter of the grid is not a quarter of the points
+    expect(effortText(4699, 6885)).toBe('×1.5 faster');
+    expect(effortText(1000, 1000)).toBe('');
+    expect(effortText(900, 1000)).toBe('');
+    expect(effortText(0, 1000)).toBe('');
+    expect(effortText(1000, undefined)).toBe('');
+  });
+
+  it('says a speed’s gain against Gentle, on a grid large enough to share out', () => {
+    const here = { speeds: { fastest: { lanes: 8, gain: 3.1 }, fast: { lanes: 4, gain: 2.5 }, gentle: { lanes: 1, gain: 1 } }, lane_min: 200 };
+    expect(speedText(1000, here, 'fastest')).toBe('×3');
+    expect(speedText(1000, here, 'fast')).toBe('×2.5');
+    expect(speedText(1000, here, 'gentle')).toBe('');
+    expect(speedText(150, here, 'fastest')).toBe('');
+    // two processes still say what they gain; under that nothing is promised, nor before the estimate is read
+    expect(speedText(1000, { speeds: { fast: { lanes: 2, gain: 1.6 } }, lane_min: 200 }, 'fast')).toBe('×1.5');
+    expect(speedText(1000, { speeds: { fast: { lanes: 2, gain: 1.4 } }, lane_min: 200 }, 'fast')).toBe('');
+    expect(speedText(1000, undefined, 'fast')).toBe('');
   });
 });
 

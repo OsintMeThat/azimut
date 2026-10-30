@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from azimut.api import horizon_finds as horizon_finds_api
 from azimut.engine import finder, horizon, horizon_finds, landform, skymatch, terrain, workqueue
 from fakerelief import Peak, Relief, offset
 from skyturns import HALF, trace_on
@@ -124,13 +123,6 @@ def test_ticked_directions_are_joined_into_sectors_and_narrow_the_march():
     assert finder.facing_sectors([]) is None
     assert finder.facing_sectors(list(finder.DIRECTIONS)) is None
     assert finder.facing_sectors(["north"]) is None
-    lens = lambda **kw: finder.Trace(x=np.zeros(6), y=np.zeros(6), half_width=HALF, fov=40.0, known=True, **kw)  # noqa: E731
-    assert finder.turn_share(lens()) == 1.0
-    # one direction and a 40° lens: the sector, the photo's half width either side and a margin
-    assert finder.turn_share(lens(facing=finder.facing_sectors(["e"]))) == pytest.approx((45 + 40 + 4) / 360, abs=0.01)
-    # an unknown lens is marched as wide as the widest it may be
-    wide = finder.Trace(x=np.zeros(6), y=np.zeros(6), half_width=HALF, fov=40.0, within=(30.0, 110.0), facing=finder.facing_sectors(["e"]))
-    assert finder.turn_share(wide) == pytest.approx((45 + 110 + 4) / 360, abs=0.01)
 
 
 def test_directions_keep_the_search_to_their_sectors():
@@ -800,25 +792,26 @@ def test_the_points_held_are_sent_from_where_the_browser_is():
         assert record["status"] == after
 
 
-def test_the_pace_is_timed_on_points_of_the_grid_with_the_lanes_this_machine_runs(client, monkeypatch):
-    case_id = client.post("/api/cases", json={"name": "Pace"}).json()["id"]
-    told = client.post(f"/api/cases/{case_id}/horizon/finds/pace", json=_ask(speed="gentle"))
+def test_the_estimate_says_what_each_speed_gains_here_and_no_time(client, monkeypatch):
+    told = client.post("/api/horizon/finds/estimate", json=_ask())
     assert told.status_code == 200, told.text
-    paced = told.json()
-    assert paced["seconds"] > 0 and paced["timed"] == finder.PACE_POINTS
-    assert paced["lanes"]["gentle"] == 1 and paced["lanes"]["fast"] >= 1
-    assert paced["lanes"]["fastest"] >= paced["lanes"]["fast"] or paced["lanes"]["fastest"] == horizon_finds.cores()
-    assert paced["full"] == finder.FULL_COST and paced["lane_power"] == finder.LANE_POWER and paced["top"] == finder.FULL_PLACES
-    # other points each time: a point timed before, its turn kept, is not timed again
-    timed: list[tuple[float, float]] = []
-    real = finder._score_stage
-    monkeypatch.setattr(finder, "_score_stage", lambda a, o, *rest: timed.append((a, o)) or real(a, o, *rest))
-    plan, trace = horizon_finds.plan_of(horizon_finds_api._asked(horizon_finds_api.FindIn(**_ask())))
-    finder.pace(plan, trace)
-    first = set(timed)
-    timed.clear()
-    finder.pace(plan, trace)
-    assert len(first) == finder.PACE_POINTS + 1 and first != set(timed)
+    answer = told.json()
+    assert answer["lane_min"] == finder.LANE_MIN_POINTS
+    assert answer["speeds"]["gentle"] == {"lanes": 1, "gain": 1.0}
+    assert set(answer["speeds"]) == set(horizon_finds.SPEEDS)
+    assert "seconds" not in answer and "step" not in answer and "turn" not in answer
+    # between the ones measured, flat past the last, and never under one
+    assert [horizon_finds.gain_of(n) for n in (1, 2, 4, 6, 8, 12)] == [1.0, 1.6, 2.5, 2.8, 3.1, 3.1]
+    assert horizon_finds.gain_of(0) == 1.0
+
+
+def test_the_time_left_waits_for_the_first_seconds_then_follows_the_pace_so_far():
+    after = horizon_finds.LEFT_AFTER
+    # the terrain being read and the processes started: said then it reads twice too long
+    assert horizon_finds.time_left(after - 1, 500, 5000) is None
+    assert horizon_finds.time_left(after, 2, 5000) is None
+    assert horizon_finds.time_left(after, 500, 5000) == round(after * 9)
+    assert horizon_finds.time_left(100.0, 5000, 5000) == 0
 
 
 def test_a_search_asked_to_stop_as_the_app_closed_ends_stopped(client, monkeypatch):
@@ -988,16 +981,12 @@ def test_a_search_keeps_the_curve_and_corners_its_photo_was_read_through(client)
 
 def test_a_search_says_its_size_first_and_refuses_what_it_cannot_run(client):
     estimate = client.post("/api/horizon/finds/estimate", json=_ask()).json()
-    assert estimate["coarse"] > 0 and estimate["step"] == 0.5
+    assert estimate["coarse"] > 0
     assert estimate["most"] >= estimate["points"]
-    assert estimate["turn"] == 1.0
     # a grid as fine as 20 m may be asked, and is kept as asked
     fine = client.post("/api/horizon/finds/estimate", json=_ask(spacing=20.0))
     assert fine.status_code == 200, fine.text
     assert fine.json()["spacing"] == 20.0 and fine.json()["asked"] is None and fine.json()["zones_wider"] is None
-    # a direction ticked marches a share of the turn: the time said shrinks with it
-    east = client.post("/api/horizon/finds/estimate", json=_ask(facing=["e"])).json()
-    assert east["turn"] < 0.3 and east["points"] == estimate["points"]
     # Auto's grid says as much for each effort the analyst may pick, the quick one the fewest; a grid picked says none
     auto = client.post("/api/horizon/finds/estimate", json=_ask(spacing=None)).json()
     efforts = auto["efforts"]
@@ -1295,11 +1284,6 @@ def test_a_place_the_analysts_marks_cost_much_says_what_it_explains_without_them
     assert asked.count("full, bare") == len(found["places"])
     # scored again quietly: no point of the map is a bare one
     assert all(p["explained"] < best["bare"] - 0.1 for p in found["points"])
-    # the pace counts the places fitted again
-    monkeypatch.setattr(finder, "_score_stage", lambda *args: {"explained": 0.0})
-    assert finder.pace(plan, replace(photo, marks=marks))["top"] == finder.FULL_PLACES + finder.TOP
-    assert finder.pace(plan, photo)["top"] == finder.FULL_PLACES
-    monkeypatch.undo()
     monkeypatch.setattr(finder, "score_point", scored)
     # a trace with no judging marks is not scored twice
     fulls = asked.count("full, marked")

@@ -67,9 +67,15 @@ WRITE_EVERY = 3.0
 # How hard a search works the machine (`lanes_for`): the fastest in a process for each of its own cores, a
 # fast one in half the cores and this many processes at the most, a gentle one in one. Each process is
 # counted at this much memory, leaving the machine this much free (light on the analyst's machine).
-# Measured over 600 points of a DRC search on an 8-core laptop (16 threads): 4 processes 1.9 times as fast
-# as one, 8 2.6 times, 12 no faster than 8.
 SPEEDS = ("fastest", "fast", "gentle")
+# How many times as fast as one process a search runs in so many, measured on the guide's example at 2,725 and
+# 15,907 points: 2 processes 1.6 times, 4 from 2.4 to 2.7, 8 from 3.0 to 3.2, and 12 no faster than 8. The same
+# with the search held to 4 or 2 of the 8 cores: it is the processes that count, and no speed runs more than a
+# computer has cores.
+LANE_GAINS = ((1, 1.0), (2, 1.6), (4, 2.5), (8, 3.1))
+# The time left is said after this long, seconds: the first ones read the terrain and start the processes, and
+# said then it reads up to twice too long, where at 30 s it is within 5% (the guide's example, the terrain cold).
+LEFT_AFTER = 20.0
 LANES_MAX = 4
 LANE_BYTES = 400e6
 SPARE_BYTES = 2e9
@@ -170,6 +176,24 @@ def cores(listed: str = "/proc/cpuinfo") -> int:
     if platform.system() == "Darwin" and platform.machine() == "arm64":
         return threads
     return max(1, threads // 2)
+
+
+def time_left(spent: float, done: int, total: int) -> int | None:
+    """The seconds a search has left, from this machine's own pace so far; None until that says enough."""
+    return round(spent / done * (total - done)) if done >= 3 and spent >= LEFT_AFTER else None
+
+
+def gain_of(lanes: int) -> float:
+    """How many times as fast as one process a search runs in `lanes`, between the ones measured."""
+    for (low, at_low), (high, at_high) in zip(LANE_GAINS, LANE_GAINS[1:]):
+        if lanes <= high:
+            return round(at_low + (at_high - at_low) * (max(lanes, low) - low) / (high - low), 1)
+    return LANE_GAINS[-1][1]
+
+
+def speeds_here() -> dict[str, dict[str, Any]]:
+    """Each speed on this computer: the processes it runs in, and how many times as fast as one that is."""
+    return {speed: {"lanes": lanes, "gain": gain_of(lanes)} for speed in SPEEDS for lanes in [lanes_for(speed)]}
 
 
 def lanes_for(speed: str | None) -> int:
@@ -560,8 +584,7 @@ def run(case: Case, job: dict[str, Any]) -> None:
     def progress(done: int, total: int) -> None:
         # the time left, from this machine's own pace so far
         spent = time.time() - started
-        left = round(spent / done * (total - done)) if done >= 3 else None
-        record["progress"] = {"done": done, "total": total, "started": started, "left": left}
+        record["progress"] = {"done": done, "total": total, "started": started, "left": time_left(spent, done, total)}
         workqueue.let_others_through(case, JOB)
         if time.monotonic() - clock["last"] >= WRITE_EVERY:
             clock["last"] = time.monotonic()

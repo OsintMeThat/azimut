@@ -37,7 +37,6 @@ import {
   ALIGN_STEPS,
   ALIGN_TOLERANCE,
   alignmentBearing,
-  areaMiddle,
   areaProblem,
   cleanFacing,
   cleanStands,
@@ -149,50 +148,39 @@ const PLANE_W = 1200;
 export const POLL_MS = 2000;
 /** How often the Mesh step's check of water in sight is read while it runs, milliseconds. */
 export const SIGHT_POLL_MS = 400;
-/**
- * Seconds a point of the grid takes, about, for the estimate until this machine's pace is timed
- * (`/horizon/finds/pace`; measured on a recent laptop, turns read finer cost more). Once it runs, the
- * time left is the machine's own pace.
- */
-const SECONDS_PER_POINT = { fine: 1, coarse: 0.3 };
-/** Find's pace is timed this long after the setup last changed, milliseconds. */
-export const PACE_WAIT_MS = 2000;
 /** A search's statuses while it runs, asked to stop included: it keeps what it found once it has. */
 export const ACTIVE = ['queued', 'running', 'stopping'];
 
 /**
- * The seconds a search of `points` takes on this machine, from its pace (`/horizon/finds/pace`): each point
- * as long as the ones timed, the best places searched in full `full` times as long, in `lanes` processes
- * `lanes` to the `lane_power` times as fast once the grid holds `lane_min` points.
+ * How large a search is, before it runs (`/api/horizon/finds/estimate`): its points, and how far they
+ * may grow where relief stands near and the grid is filled in (`most`). The time is the search's own to say.
  */
-export function pacedSeconds(points, { seconds, lanes = 1, lane_min: laneMin = 200, full = 8, lane_power: power = 0.46, top = 15 }) {
-  const speedup = points >= laneMin ? Math.max(1, lanes) ** power : 1;
-  return (seconds * (Math.max(0, points - top) + top * full)) / speedup;
+export function estimateText({ points, most = points }) {
+  const size = `${points.toLocaleString('en-US')} points`;
+  return most > points ? `${size}, up to ${most.toLocaleString('en-US')} where relief stands near.` : `${size}.`;
+}
+
+/** A gain as the buttons say it, to the half: "×2.5". */
+const timesText = (times) => `×${Math.round(times * 2) / 2}`;
+
+/**
+ * How a grid compares with the usual one, read off their points: "×1.5 faster", "×3 slower", or '' when they
+ * are about the same.
+ */
+export function effortText(points, usual) {
+  if (!(points > 0 && usual > 0)) return '';
+  const ratio = usual / points;
+  if (ratio >= 1.25) return `${timesText(ratio)} faster`;
+  return ratio <= 0.8 ? `${timesText(1 / ratio)} slower` : '';
 }
 
 /**
- * The time a search should take, in words: "about 6 min". From this machine's pace once timed (`paced`),
- * else guessed: `turn` is the share of the turn each point reads.
+ * How much faster than Gentle a speed searches `points` here, as `/finds/estimate` says of this computer, to
+ * the half: "×2.5", or '' when it gains little, as on a grid too small to share out.
  */
-export function durationText(points, step, turn = 1, paced = null) {
-  const seconds = Number.isFinite(paced?.seconds)
-    ? pacedSeconds(points, paced)
-    : points * (step <= 0.2 ? SECONDS_PER_POINT.fine : SECONDS_PER_POINT.coarse) * Math.min(1, Math.max(0.05, turn));
-  if (seconds < 90) return 'about a minute';
-  if (seconds < 3600) return `about ${Math.round(seconds / 60)} min`;
-  return `about ${(seconds / 3600).toFixed(1)} h`;
-}
-
-/**
- * How large a search is, before it runs (`/api/horizon/finds/estimate`): its
- * points and time, and how far both may grow where relief stands near and the
- * grid is filled in (`most`).
- */
-export function estimateText({ points, most = points, step, turn = 1 }, paced = null) {
-  const where = Number.isFinite(paced?.seconds) ? ' on this computer' : '';
-  const size = `${points.toLocaleString('en-US')} points, ${durationText(points, step, turn, paced)}${where}`;
-  if (!(most > points)) return `${size}.`;
-  return `${size}; up to ${durationText(most, step, turn, paced).replace('about ', '')} where relief stands near.`;
+export function speedText(points, { speeds, lane_min: laneMin = 0 } = {}, speed) {
+  const gain = speeds?.[speed]?.gain ?? 1;
+  return points >= laneMin && gain >= 1.5 ? timesText(gain) : '';
 }
 
 /**
@@ -325,13 +313,8 @@ export function createFindState({ api, overlay, view }) {
   let list = $state.raw([]);
   /** How many searches were opened from the list: the map comes over what one searched each time. */
   let opened = $state(0);
-  /** How large the search would be: `{ points, coarse, spacing, step }`, or null. */
+  /** How large the search would be: `{ points, coarse, spacing, speeds }`, or null. */
   let estimated = $state.raw(null);
-  /** This machine's pace for the search as set up, as `/finds/pace` timed it, or null; whether it is being timed. */
-  let paced = $state.raw(null);
-  let pacing = $state(false);
-  let pacedFor = '';
-  let paceAgain = false;
   /** How fine the heights over the area are, metres, once read; and where they were read. */
   let detail = $state(null);
   let detailAt = '';
@@ -561,45 +544,6 @@ export function createFindState({ api, overlay, view }) {
     if (!ask) return null;
     const { area: _area, areas: _areas, strokes: _strokes, zones: _zones, spacing: _spacing, stands: _stands, title: _title, ...rest } = ask;
     return { ...rest, at: { lat: at.lat, lon: at.lon } };
-  }
-
-  /**
-   * What a search's pace depends on: the trace and what is known of it, who took it, about where (the
-   * area's middle, to a few kilometres); not the grid, its areas, what rules its points out nor how many lanes run it.
-   */
-  function paceKeyOf(ask) {
-    const { area: corners, areas: _areas, strokes: _strokes, zones: _zones, spacing: _spacing, effort: _effort, speed: _speed, title: _title, sea: _sea, water: _water, over: _over, photo, ...rest } =
-      ask;
-    const middle = areaMiddle(corners);
-    return JSON.stringify({ ...rest, photo: photo?.path ?? null, at: [middle.lat.toFixed(2), middle.lon.toFixed(2)] });
-  }
-
-  /** Time this machine's pace for the search as set up, once a case holds it and none runs; a change meanwhile is timed next. */
-  async function timePace() {
-    if (!caseOf || (search && ACTIVE.includes(search.status))) return;
-    const ask = askNow();
-    if (!ask) return;
-    const key = paceKeyOf(ask);
-    if (key === pacedFor) return;
-    if (pacing) {
-      paceAgain = true;
-      return;
-    }
-    pacedFor = key;
-    pacing = true;
-    try {
-      const answer = await api.post(`/api/cases/${encodeURIComponent(caseOf)}/horizon/finds/pace`, ask);
-      if (pacedFor === key) paced = Number.isFinite(answer?.seconds) ? answer : null;
-    } catch {
-      // the time stays guessed, and is timed again once the setup changes
-      if (pacedFor === key) pacedFor = '';
-    } finally {
-      pacing = false;
-      if (paceAgain) {
-        paceAgain = false;
-        timePace();
-      }
-    }
   }
 
   /** What a search asks the app, from the photo, its trace and what Find holds; null while it cannot be asked. */
@@ -1017,19 +961,6 @@ export function createFindState({ api, overlay, view }) {
     get estimated() {
       return estimated;
     },
-    /** This machine's pace for the search as set up, with the lanes the speed picked runs, once timed; else null. */
-    get pace() {
-      return this.paceFor(settings.speed);
-    },
-    /** This machine's pace at a speed (`SPEEDS`): its lanes on this computer, or null until timed. */
-    paceFor(speed) {
-      return paced ? { ...paced, lanes: paced.lanes?.[speed] ?? 1 } : null;
-    },
-    /** Whether the pace is being timed. */
-    get pacing() {
-      return pacing;
-    },
-    timePace,
     /** Ask the app how large the search would be, for the line under the button. */
     async estimate() {
       const ask = askNow();

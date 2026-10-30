@@ -315,26 +315,9 @@ def find_sectors(body: SectorsIn) -> dict[str, Any]:
 
 @router.post("/horizon/finds/estimate")
 def estimate_find(body: FindIn) -> dict[str, Any]:
-    """How many points a search would lay and refine, and the columns of its turns, before it runs."""
-    plan, trace = horizon_finds.plan_of(_asked(body))
-    return {**finder.estimate(plan), "step": finder.column_step(trace), "turn": round(finder.turn_share(trace), 3)}
-
-
-@router.post("/cases/{case_id}/horizon/finds/pace")
-def pace_find(case_id: str, body: FindIn) -> dict[str, Any]:
-    """How long this machine takes to rank one point of the search, timed on a few points of its grid as the
-    search would (a collage read frame by frame), with the lanes each speed would run in: what the time a
-    search takes is worked out from, before it runs."""
-    case = get_case(case_id)
-    ask = _asked(body)
-    plan, trace = horizon_finds.plan_of(ask)
-    plan, trace, _ = horizon_finds.on_frames(case, ask, plan, trace)
-    try:
-        timed = finder.pace(plan, trace)
-    except terrain.TerrainUnavailable as exc:
-        raise HTTPException(status_code=503, detail=f"The terrain could not be loaded: {exc}") from exc
-    lanes = {speed: horizon_finds.lanes_for(speed) for speed in horizon_finds.SPEEDS}
-    return {**timed, "lanes": lanes, "lane_min": finder.LANE_MIN_POINTS}
+    """How many points a search would lay and refine before it runs, and what each speed gains on this computer."""
+    plan, _ = horizon_finds.plan_of(_asked(body))
+    return {**finder.estimate(plan), "speeds": horizon_finds.speeds_here(), "lane_min": finder.LANE_MIN_POINTS}
 
 
 @router.post("/horizon/finds/preview")

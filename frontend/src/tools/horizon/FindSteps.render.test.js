@@ -45,11 +45,6 @@ function fakeFind(over = {}) {
     tried: null,
     tryProblem: '',
     live: [],
-    pace: null,
-    paceFor(speed) {
-      return this.pace ? { ...this.pace, lanes: { fastest: 8, fast: 4, gentle: 1 }[speed] ?? 1 } : null;
-    },
-    pacing: false,
     water: false,
     over: null,
     setWater: vi.fn(),
@@ -129,7 +124,7 @@ describe('the steps of Find', () => {
     const onsearch = vi.fn(async () => {});
     const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
     const root = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 469, step: 0.5 } }), onsearch });
-    expect(root.textContent).toContain('469 points, about 2 min.');
+    expect(root.textContent).toContain('469 points.');
     buttonNamed(root, 'Search').click();
     expect(onsearch).toHaveBeenCalledOnce();
   });
@@ -143,7 +138,7 @@ describe('the steps of Find', () => {
     expect(plain.textContent).toContain('A ridge seen in front of farther land, not the sky? Draw it with the Ridge pen.');
     const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
     const sized = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 1003, most: 3205, step: 0.5 } }) });
-    expect(sized.textContent).toContain('1,003 points, about 5 min; up to 16 min where relief stands near.');
+    expect(sized.textContent).toContain('1,003 points, up to 3,205 where relief stands near.');
     // a grid picked finer than the area allows is said widened; Auto widens unsaid
     const wide = { points: 6000, step: 0.5, asked: 20, spacing: 244.1, zones_wider: 1.6 };
     const picked = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', settings: { spacing: 20, tolerance: 1 }, estimated: wide }) });
@@ -182,24 +177,28 @@ describe('the steps of Find', () => {
       normal: { points: 1003, most: 3205, spacing: 250, coarse: 900 },
       thorough: { points: 3000, most: 9000, spacing: 145, coarse: 2800 },
     };
-    const pace = { seconds: 0.5, lanes: 4, lane_min: 200, full: 8, lane_power: 0.46, top: 5 };
-    const find = fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 1003, most: 3205, step: 0.5, efforts }, pace, settings: { spacing: 'auto', tolerance: 1, effort: 'normal' } });
+    const speeds = { fastest: { lanes: 8, gain: 3.1 }, fast: { lanes: 4, gain: 2.5 }, gentle: { lanes: 1, gain: 1 } };
+    const find = fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 1003, most: 3205, efforts, speeds, lane_min: 200 }, settings: { spacing: 'auto', tolerance: 1, effort: 'normal' } });
     const root = steps({ find });
     const group = root.querySelector('[aria-label="How thorough the search is"]');
-    expect([...group.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['Quick · a minute', 'Normal · 5 min', 'Thorough · 13 min']);
-    expect(root.textContent).toContain('1,003 points, about 5 min on this computer; up to 14 min where relief stands near.');
-    buttonNamed(group, 'Thorough · 13 min').click();
+    // each grid against the usual one, never a time
+    expect([...group.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['Quick · ×3.5 faster', 'Normal', 'Thorough · ×3 slower']);
+    expect(root.textContent).toContain('1,003 points, up to 3,205 where relief stands near. The time left shows once it runs.');
+    expect(root.textContent).not.toMatch(/\d+ min/);
+    buttonNamed(group, 'Thorough · ×3 slower').click();
     expect(find.setSettings).toHaveBeenCalledWith({ effort: 'thorough' });
-    // how hard the computer works, beside it: each speed with its time here, its cores said
-    const speeds = root.querySelector('[aria-label="How hard the computer works"]');
-    expect([...speeds.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['Fastest · 3 min', 'Fast · 5 min', 'Gentle · 9 min']);
-    expect(buttonNamed(speeds, 'Fastest · 3 min').title).toContain('8 cores here');
-    buttonNamed(speeds, 'Fastest · 3 min').click();
+    // how hard the computer works, beside it: each speed against Gentle, its cores said
+    const box = root.querySelector('[aria-label="How hard the computer works"]');
+    expect([...box.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['Fastest · ×3', 'Fast · ×2.5', 'Gentle']);
+    expect(buttonNamed(box, 'Fastest · ×3').title).toContain('8 cores here, about 3 times as fast as Gentle');
+    expect(buttonNamed(box, 'Gentle').title).toContain('1 core here');
+    buttonNamed(box, 'Fastest · ×3').click();
     expect(find.setSettings).toHaveBeenCalledWith({ speed: 'fastest' });
-    // being timed, or not yet: said so
-    expect(steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 1003, step: 0.5 }, pacing: true }) }).textContent).toContain('Timing a few points on this computer');
+    // a grid too small to share out gains nothing, so no speed promises anything
+    const small = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 150, speeds, lane_min: 200 } }) });
+    expect([...small.querySelector('[aria-label="How hard the computer works"]').querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['Fastest', 'Fast', 'Gentle']);
     // a grid picked has no effort to choose
-    const picked = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 1003, step: 0.5, efforts }, settings: { spacing: 250, tolerance: 1 } }) });
+    const picked = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 1003, efforts }, settings: { spacing: 250, tolerance: 1 } }) });
     expect(picked.querySelector('[aria-label="How thorough the search is"]')).toBeNull();
     expect(picked.textContent).toContain('a point every 250 m, set in More settings');
   });
@@ -415,7 +414,7 @@ describe('the steps of Find', () => {
     expect(buttonNamed(row, 'Plain').title).toBe('Flat ground: within 8 m over 400 m, or 30 m over 1.5 km');
     expect(root.textContent).toContain('Keeps 100 of 400 points (25%), 20 on water left out.');
     // three quarters of the grid left out: 300 points fewer
-    expect(root.textContent).toContain('300 points, about 2 min.');
+    expect(root.textContent).toContain('300 points.');
     expect(root.textContent).toContain('on foot · on a summit or ridge');
     buttonNamed(row, 'Valley').click();
     expect(find.toggleStand).toHaveBeenCalledWith('valley');

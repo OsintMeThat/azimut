@@ -66,8 +66,8 @@ two, and the number in the top five from one to four.
 **It says how far to trust a result.** Solid, Check it or Weak, what the area fits by
 chance, and a check against decoys of your own trace (see *Reading the results*).
 
-**It runs on your computer.** A small area takes a few minutes. The terrain tiles are
-downloaded once and kept.
+**It runs on your computer.** A small area takes a few minutes, and the search says the
+time left once it has been running a moment. The terrain tiles are downloaded once and kept.
 
 ## Where Find fails
 

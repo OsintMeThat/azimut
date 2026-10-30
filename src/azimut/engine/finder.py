@@ -149,8 +149,8 @@ SEPARATE_M = 3_000.0
 # The best place must stand this far above the area's top tenth of points to stand out: below,
 # many places fit about as well and none is named.
 STANDOUT_MIN = 0.06
-# The coarse grid's spacing when left to Auto: about this many points over the area, some ten minutes of
-# search, so a small area is searched every 50 or 20 m.
+# The coarse grid's spacing when left to Auto: about this many points over the area, so a small area is
+# searched every 50 or 20 m.
 AUTO_POINTS = 4_000
 # How thorough Auto's grid is, as the analyst picks it against the time it takes: these times AUTO_POINTS.
 EFFORTS = {"quick": 0.25, "normal": 1.0, "thorough": 3.0}
@@ -179,13 +179,6 @@ WORKERS = 2
 # A grid this large is scored by several processes, when asked; and the tiles a search's terrain reader holds.
 LANE_MIN_POINTS = 200
 SEARCH_TILES = 256
-# A search in n lanes goes n to this power times as fast (measured over 600 points of a DRC search on an
-# 8-core laptop: 4 processes 1.9 times as fast as one, 8 2.6 times; engine/horizon_finds.py SPEEDS).
-LANE_POWER = 0.46
-# A search's pace is timed on this many points of its grid, after one that reads the terrain in; a place
-# searched in full takes about this many times as long as one ranked roughly.
-PACE_POINTS = 3
-FULL_COST = 8.0
 # A sector searched about the heading an alignment gives, degrees either side at the least.
 FACING_MIN = 3.0
 # A point warm-started from its scored neighbours (C9) slides over the headings this many degrees either side of
@@ -920,34 +913,6 @@ def estimate(plan: Plan, *, efforts: bool = True) -> dict[str, Any]:
     }
 
 
-# Which points the next pace is timed on: other ones each time, so a point timed before, its turn kept, does not
-# pass for the grid's (only points a search swept already are as quick).
-_PACED = {"round": 0}
-
-
-def pace(plan: Plan, trace: Trace, sampler: terrain.Sampler | None = None) -> dict[str, Any]:
-    """How long this machine takes to rank one point of the search, seconds: timed on `PACE_POINTS` points of
-    the grid, after one that reads the terrain in, as the search ranks them. Their turns are kept
-    (engine/turncache.py), so the search does not sweep them again."""
-    sampler = sampler or terrain.Sampler(keep=SEARCH_TILES, plates=True)
-    spacing = coarse_spacing(plan)
-    lat, lon = grid(plan, spacing)
-    if not lat.size:
-        return {"seconds": None, "timed": 0}
-    _PACED["round"] += 1
-    picks = np.random.default_rng(_PACED["round"]).permutation(lat.size)[:PACE_POINTS + 1]
-    timed = picks[1:] if picks.size > 1 else picks
-    if picks.size > 1:
-        _score_stage(float(lat[picks[0]]), float(lon[picks[0]]), spacing, "rough", None, trace, plan, sampler)
-    started = time.monotonic()
-    for index in timed:
-        _score_stage(float(lat[index]), float(lon[index]), spacing, "rough", None, trace, plan, sampler)
-    seconds = (time.monotonic() - started) / timed.size
-    # the places listed are fitted once more without the judging marks, when the trace has any
-    top = FULL_PLACES + (TOP if unmarked(trace) is not trace else 0)
-    return {"seconds": round(seconds, 3), "timed": int(timed.size), "full": FULL_COST, "lane_power": LANE_POWER, "top": top}
-
-
 # -- one point -----------------------------------------------------------------
 
 
@@ -1118,12 +1083,6 @@ def marched(columns: np.ndarray, facing: tuple[skymatch.Sector, ...] | None, hal
             return np.ones(columns.size, dtype=bool)
         out |= np.abs((columns - centre + 180.0) % 360.0 - 180.0) <= reach_deg
     return out
-
-
-def turn_share(trace: Trace) -> float:
-    """The share of the turn a point marches, what the directions the analyst ticked save."""
-    columns = np.arange(0.0, 360.0, column_step(trace))
-    return float(marched(columns, trace.facing, half_span(trace)).mean())
 
 
 def _facing(trace: Trace, plan: Plan, lat: float, lon: float) -> tuple[skymatch.Sector, ...] | None:

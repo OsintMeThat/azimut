@@ -3239,20 +3239,24 @@ either side, a ring under the hand shows how far, and Ctrl+Z or **Undo** takes
 the last stroke back. An area or a zone goes up to
 10,000 km². **Try a point** tries the
 trace from a place clicked on the map, as a search scores its best places, and
-offers to look from there. The time said is this computer's: a few points are
-timed a moment after the setup settles (the search reuses them). Each choice
-says its time: Mesh's **Grid**, Auto's grid **Quick** (twice as wide),
-**Normal** or **Thorough** (about three times the points), and the Search
-step's **Speed**, a large grid searched on every core of the computer
-(**Fastest**, its own cores counted, not their threads), on up to four (**Fast**,
-the default) or on one (**Gentle**, the computer left free); on an 8-core
-laptop four cores search 1.9 times as fast as one and eight 2.6 times.
+offers to look from there. No time is said before a search, which depends on
+too much to hold on every computer: the search says the time left once it has
+run for 20 seconds, close from about 30 and short late on, when filling in the
+relief that stands near adds points. Each
+choice says what it gains instead: Mesh's **Grid**, Auto's grid **Quick** (twice
+as wide, a quarter of the points), **Normal** or **Thorough** (about three times
+the points), each against Normal, and the Search step's **Speed**, a large grid
+searched on every core of the computer (**Fastest**, its own cores counted, not
+their threads), on up to four (**Fast**, the default) or on one (**Gentle**, the
+computer left free), each against Gentle and for the cores this computer gives
+it: two processes search about 1.5 times as fast as one, four 2.5 times and
+eight 3 times.
 **Grid** under More settings lays a
-point every 20 m to 1 km, or Auto, as fine as about ten minutes of search
-allows: 20 m over a square kilometre, 50 m over a few. The points stand in a
+point every 20 m to 1 km, or Auto, about 4,000 points over the area:
+20 m over a square kilometre, 50 m over a few. The points stand in a
 hex lattice, as close to every spot as a square grid that fine with a quarter
 fewer of them. A grid picked is laid as picked, the map showing it before the
-search and the estimate saying the hours it takes, up to 100,000 points; past
+search and the estimate saying its points, up to 100,000; past
 that it is laid wider, and Find says how wide. A search run again over the same
 ground reads back the skylines it swept (kept beside the terrain, a gigabyte at
 most and less on a nearly full disk) and only matches the trace again.

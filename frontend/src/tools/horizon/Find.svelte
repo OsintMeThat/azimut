@@ -16,7 +16,6 @@
   import FindMap from './FindMap.svelte';
   import FindSteps from './FindSteps.svelte';
   import SearchesMenu from './SearchesMenu.svelte';
-  import { PACE_WAIT_MS } from './state/find.svelte.js';
   import { uiState } from '../../lib/state.svelte.js';
 
   let {
@@ -74,15 +73,6 @@
     clearTimeout(estimateTimer);
     estimateTimer = setTimeout(() => find.estimate(), 500);
     return () => clearTimeout(estimateTimer);
-  });
-
-  // this machine's pace for the search as set up, timed a moment after the setup last changed, never while a search runs
-  let paceTimer = null;
-  $effect(() => {
-    void [find.area, find.who, find.facing, find.stands, find.view, find.mirror, find.round, find.sun, find.alignments.length, find.searching, overlay.strokes, overlay.marks, overlay.hints, overlay.lens];
-    clearTimeout(paceTimer);
-    paceTimer = setTimeout(() => find.timePace?.(), PACE_WAIT_MS);
-    return () => clearTimeout(paceTimer);
   });
 
   // how fine the heights are where the area lies, read once it is closed

@@ -195,7 +195,7 @@ test.describe('Find where it was taken', () => {
     for (const [fx, fy] of [[0.35, 0.35], [0.65, 0.35], [0.65, 0.65], [0.35, 0.65]]) await page.mouse.click(...at(fx, fy));
     await find.getByRole('button', { name: 'Done', exact: true }).first().click();
     await expect(find.getByText(/km²/)).toBeVisible();
-    await expect(find.getByText('64 points, about a minute.')).toBeVisible();
+    await expect(find.getByText('64 points.', { exact: false })).toBeVisible();
 
     // an alignment, under Help the search: the near thing and the far one on the photo, then on the map
     const help = find.getByRole('region', { name: 'Help the search' });
@@ -462,7 +462,7 @@ test.describe('Find where it was taken', () => {
     await expect(find.locator('.fs-place').first()).toContainText('explains 86%');
   });
 
-  test('times the search on this computer, offers it quicker or more thorough, asks what the photo shows and checks the view', async ({ page }) => {
+  test('says how much faster each choice is, never a time, asks what the photo shows and checks the view', async ({ page }) => {
     const { find } = await openFind(page);
     await awaitMapReady(page, 2);
     const estimates = [];
@@ -470,7 +470,7 @@ test.describe('Find where it was taken', () => {
     await page.route('**/api/horizon/finds/estimate', (route) => {
       estimates.push(route.request().postDataJSON());
       const efforts = { quick: { points: 300, most: 300, spacing: 500, coarse: 250 }, normal: { points: 1000, most: 1000, spacing: 250, coarse: 900 }, thorough: { points: 3000, most: 3000, spacing: 145, coarse: 2900 } };
-      return route.fulfill({ json: { points: 1000, coarse: 900, spacing: 250, step: 0.5, turn: 1, efforts } });
+      return route.fulfill({ json: { points: 1000, coarse: 900, spacing: 250, efforts, lane_min: 200, speeds: { fastest: { lanes: 8, gain: 3.1 }, fast: { lanes: 4, gain: 2.5 }, gentle: { lanes: 1, gain: 1 } } } });
     });
     // the water in sight: unchecked until the Mesh step's check ran, then the last 24 points hidden
     let checked = false;
@@ -488,17 +488,16 @@ test.describe('Find where it was taken', () => {
       checked = true;
       return route.fulfill({ json: { id: 'c1', status: 'done', done: 48, total: 48 } });
     });
-    await page.route(`**/api/cases/${CASE_ID}/horizon/finds/pace`, (route) =>
-      route.fulfill({ json: { seconds: 0.5, timed: 3, lanes: { fastest: 8, fast: 4, gentle: 1 }, lane_min: 200, full: 8, lane_power: 0.46, top: 5 } })
-    );
     await trace(page, find);
     const map = await find.getByRole('region', { name: 'Map and the area' }).boundingBox();
     const at = (fx, fy) => [map.x + map.width * fx, map.y + map.height * fy];
     await find.getByRole('button', { name: 'Draw the area' }).click();
     for (const [fx, fy] of [[0.35, 0.35], [0.65, 0.35], [0.65, 0.65], [0.35, 0.65]]) await page.mouse.click(...at(fx, fy));
     await find.getByRole('button', { name: 'Done', exact: true }).first().click();
-    // a few points timed on this computer: the time said is its own
-    await expect(find.getByText(/points, about \d+ min on this computer/)).toBeVisible({ timeout: 10_000 });
+    // the speeds say what they gain here, and the time is left to the search itself
+    await expect(find.getByRole('group', { name: 'How hard the computer works' }).getByRole('button', { name: 'Fast · ×2.5', exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(find.getByText(/The time left shows once it runs/)).toBeVisible();
+    await expect(find.getByText(/\d+ min on this computer/)).toHaveCount(0);
     const efforts = find.getByRole('group', { name: 'How thorough the search is' });
     await efforts.getByRole('button', { name: /^Thorough/ }).click();
     await expect.poll(() => estimates.at(-1)?.effort).toBe('thorough');
