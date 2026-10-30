@@ -7,7 +7,7 @@
  * They only add steps, framings and a card's elements; the analyst moves, renames,
  * times or removes each one as any other step.
  */
-import { addStep, framedAs, mapsFirst, newId, pageSize } from './page.js';
+import { MAX_STEPS, addStep, framedAs, mapsFirst, newId, pageSize, stepsOf } from './page.js';
 import { styled } from './design.js';
 
 /** `[kind, label, icon, words]`, as the Add panel lists them, and each one's beats. */
@@ -75,11 +75,12 @@ function card(kind, step, spec) {
 /**
  * The plate with sequence `kind` added on the day `at`, after the step `after` (null:
  * the first), the main map `map` framed by each beat from where it looks now, `view`:
- * `{ steps, framing, elements, transitions, step }`, `step` the last one added.
+ * `{ steps, framing, elements, transitions, step }`, `step` the last one added; null
+ * when the day has no room for all of its steps.
  */
 export function withSequence(spec, at, kind, { map = null, view = null, after = null } = {}) {
   const sequence = SEQUENCES[kind];
-  if (!sequence) return null;
+  if (!sequence || stepsOf(spec, at).length + sequence.beats.length > MAX_STEPS) return null;
   let working = { ...spec };
   let last = after;
   const added = [];

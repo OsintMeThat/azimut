@@ -628,8 +628,11 @@ export function unsettled(spec) {
  */
 export function settleOn(spec, day) {
   const steps = { ...(spec.steps ?? {}) };
+  let past = [];
   if (PAGE in steps) {
-    steps[day] = [...(steps[day] ?? []), ...steps[PAGE]].slice(0, MAX_STEPS);
+    const both = [...(steps[day] ?? []), ...steps[PAGE]];
+    steps[day] = both.slice(0, MAX_STEPS);
+    past = both.slice(MAX_STEPS);
     delete steps[PAGE];
   }
   const held = (table) => {
@@ -642,12 +645,12 @@ export function settleOn(spec, day) {
   };
   const framing = held(spec.framing);
   if (spec.framing?.[PAGE] && spec.framing?.[day]) framing[day] = { ...spec.framing[PAGE], ...spec.framing[day] };
-  const kept = new Set(Object.values(steps).flat().map((step) => step.id));
   // made on the page, an annotation was shown only there: it is the day's alone; up to the page, it runs on
-  const elements = (spec.elements ?? []).filter((element) => !element.step || kept.has(element.step))
-    .map((element) => (element.onward === PAGE ? { ...element, onward: day, until: day }
-      : element.until === PAGE ? { ...element, until: null } : element));
-  return { time: { ...spec.time, at: spec.time?.at ?? day }, steps, holds: held(spec.holds), framing, elements };
+  const elements = (spec.elements ?? []).map((element) => (element.onward === PAGE ? { ...element, onward: day, until: day }
+    : element.until === PAGE ? { ...element, until: null } : element));
+  // the steps past what a day holds go, with all that hangs on them
+  const kept = past.reduce((plate, step) => withoutStep(plate, step.id), { steps, framing, elements });
+  return { time: { ...spec.time, at: spec.time?.at ?? day }, steps: kept.steps, holds: held(spec.holds), framing: kept.framing, elements: kept.elements };
 }
 
 // -- the steps of a day ------------------------------------------------------------------
@@ -656,6 +659,8 @@ export function settleOn(spec, day) {
 export const STEP_SECONDS = 3;
 /** At most this many steps on one day. */
 export const MAX_STEPS = 30;
+/** The words that say so, wherever a step would be one too many. */
+export const TOO_MANY_STEPS = `A day holds ${MAX_STEPS} steps at most`;
 
 /** The steps of the plate's day `at`, in order. */
 export const stepsOf = (spec, at) => spec?.steps?.[dayOf(at)] ?? [];
@@ -695,18 +700,42 @@ export function shownOn(element, at, place = null) {
 /** A new element made while the plate is on a step belongs to it, else to the day as `bornOn` says. */
 export const bornAt = (at, playable, step) => (step ? { step, carry: false, onward: null, until: null } : bornOn(at, playable));
 
-/** A new step for the day `at`, after the step `after` (null: first), and the plate's steps with it. */
+/** A new step for the day `at`, after the step `after` (null: first), and the plate's steps with it; null on a day already full. */
 export function addStep(spec, at, after = null, step = { id: newId('s'), name: '', duration: STEP_SECONDS }) {
   const day = dayOf(at);
   const list = [...stepsOf(spec, at)];
+  if (list.length >= MAX_STEPS) return null;
   const index = after ? list.findIndex((item) => item.id === after) + 1 : 0;
   list.splice(Math.max(0, index), 0, step);
-  return { steps: { ...(spec.steps ?? {}), [day]: list.slice(0, MAX_STEPS) }, step };
+  return { steps: { ...(spec.steps ?? {}), [day]: list }, step };
 }
 
 /**
- * The plate without the step `id`, and without what belongs to it. A day left
- * without steps is no longer listed.
+ * The plate's `{ framing, elements }` with the maps `ids` gone: no day or step frames
+ * them, and what reads one goes with it. The credits move to a map left rather than
+ * leave its sources unsaid, and a detail of one stands on its own.
+ */
+export function withoutMaps(spec, ids) {
+  const gone = new Set(ids);
+  const other = spec.elements.find((item) => item.kind === 'map' && !gone.has(item.id) && !gone.has(item.of));
+  const elements = [];
+  for (const item of spec.elements) {
+    if (gone.has(item.id)) continue;
+    if (!gone.has(item.of)) elements.push(item);
+    else if (item.kind === 'credits' && other) elements.push({ ...item, of: other.id });
+    else if (item.kind === 'map') elements.push({ ...item, of: null });
+  }
+  const framing = {};
+  for (const [key, maps] of Object.entries(spec.framing ?? {})) {
+    const kept = Object.entries(maps).filter(([id]) => !gone.has(id));
+    if (kept.length) framing[key] = Object.fromEntries(kept);
+  }
+  return { framing, elements };
+}
+
+/**
+ * The plate without the step `id`, and without what belongs to it, a map among it
+ * taking what `withoutMaps` says along. A day left without steps is no longer listed.
  */
 export function withoutStep(spec, id) {
   const steps = {};
@@ -715,7 +744,8 @@ export function withoutStep(spec, id) {
     if (kept.length) steps[day] = kept;
   }
   const framing = Object.fromEntries(Object.entries(spec.framing ?? {}).filter(([key]) => key !== id));
-  return { ...spec, steps, framing, elements: spec.elements.filter((element) => element.step !== id),
+  const maps = spec.elements.filter((element) => element.step === id && element.kind === 'map').map((element) => element.id);
+  return { ...spec, steps, ...withoutMaps({ framing, elements: spec.elements.filter((element) => element.step !== id) }, maps),
     time: { ...spec.time, step: spec.time?.step === id ? null : spec.time?.step ?? null } };
 }
 
@@ -723,7 +753,8 @@ export function withoutStep(spec, id) {
  * The plate with a copy of the step `id` of the day `at` played right after it: its
  * name, its seconds and how it comes in, what stands on it (each copied with an id of
  * its own, its group kept together) and how it frames the maps.
- * `{ steps, framing, elements, step }`, or null when the day holds no such step.
+ * `{ steps, framing, elements, step }`, or null when the day holds no such step, or
+ * the day or the plate no room for the copy.
  */
 export function duplicatedStep(spec, at, id) {
   const list = stepsOf(spec, at);
@@ -735,6 +766,7 @@ export function duplicatedStep(spec, at, id) {
   const regroup = (group) => (group ? (groups.get(group) ?? groups.set(group, newId('g')).get(group)) : group);
   const copies = spec.elements.filter((element) => element.step === id)
     .map((element) => ({ ...JSON.parse(JSON.stringify(element)), id: newId(element.kind), step: step.id, group: regroup(element.group) }));
+  if (mapCount([...spec.elements, ...copies]) > MAX_MAPS) return null;
   const framing = { ...(spec.framing ?? {}), ...(spec.framing?.[id] ? { [step.id]: { ...spec.framing[id] } } : {}) };
   return { steps, framing, elements: mapsFirst([...spec.elements, ...copies]), step: step.id };
 }

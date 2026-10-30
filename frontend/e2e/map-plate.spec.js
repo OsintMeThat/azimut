@@ -559,6 +559,27 @@ test('a line and a text go on the map, a step frames the map its own way, and th
   }).toEqual([true, true, false]);
 });
 
+test('a detail framed on a step and then deleted leaves no framing the server would refuse', async ({ page }) => {
+  const store = await plateFixture(page);
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  await addOnPage(page, 'Detail');
+  await addOnPage(page, 'Step');
+  await page.locator('.list').getByRole('button', { name: 'Detail', exact: true }).click();
+  await page.locator('.map-bar .keep input').uncheck();
+  const detailOf = (spec) => spec?.elements.find((element) => element.kind === 'map' && element.of);
+  const framedMaps = (spec) => Object.values(spec?.framing ?? {}).flatMap((maps) => Object.keys(maps));
+  await expect.poll(() => {
+    const spec = lastSave(store)?.spec;
+    return Boolean(detailOf(spec)) && framedMaps(spec).includes(detailOf(spec).id);
+  }).toBe(true);
+  await page.locator('.list').getByRole('button', { name: 'Detail', exact: true }).click();
+  await page.keyboard.press('Delete');
+  await expect.poll(() => detailOf(lastSave(store).spec)).toBeUndefined();
+  expect(framedMaps(lastSave(store).spec)).toEqual([]);
+});
+
 test('a detail\'s square on the main map is dragged to move what the detail shows', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');

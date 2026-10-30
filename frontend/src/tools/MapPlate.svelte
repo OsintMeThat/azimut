@@ -65,9 +65,9 @@
   import '../lib/plateFontFaces.js';
   import { creditParts, plateCredits } from '../lib/plate/credits.js';
   import { canvasBlob, composePage, copyPage, evolutionSheet, postExport, QUALITIES, release, scaleFor, scaleForWidth, stagedPictures, videoSize } from '../lib/plate/exportPlate.js';
-  import { KIND_LABELS, focusApart, PAPERS, longDay, MAP_KINDS, MAX_MAPS, MAX_STEPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, facesOf, mapCount, inLook, addStep, pickedDays, skippedDays, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
+  import { KIND_LABELS, focusApart, PAPERS, longDay, MAP_KINDS, MAX_MAPS, MAX_STEPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, TOO_MANY_STEPS, facesOf, mapCount, inLook, addStep, pickedDays, skippedDays, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
     duplicatedStep, fromTemplate, hasSteps, houseLayout, labelBox, listedOf, mainMap, mapsFirst, movedStep, newId, onPaper, pageSize, placeOf, settleOn, shownOn, stepsOf, SYMBOL, templateOf, textMeasurer,
-    transitionsOf, unsettled, withoutStep, restacked, stepOf, bornOn } from '../lib/plate/page.js';
+    transitionsOf, unsettled, withoutMaps, withoutStep, restacked, stepOf, bornOn } from '../lib/plate/page.js';
   import { TWEEN_FPS, changes, playedTransit, transitionInto as transitionIntoBeat, transitionPlan, tweenFrames } from '../lib/plate/tween.js';
   import { defaultSize } from '../lib/plate/words.js';
   import { FIRST_SECONDS, beatClips, beats, boundSeconds, clipRange, daySeconds, gifPoster, isGif, plateSeconds, playDays, posterKey, posterOf, totalSeconds, videoDays } from '../lib/plate/clip.js';
@@ -664,6 +664,7 @@
     if (playing) stop();
     const after = stepId ?? daySteps.at(-1)?.id ?? null;
     const made = addStep(spec, at, after);
+    if (!made) { toast(TOO_MANY_STEPS, 'warn'); return null; }
     spec.steps = made.steps;
     spec.time.step = made.step.id;
     selection = [];
@@ -674,7 +675,7 @@
     if (playing) stop();
     const main = mainMap(spec);
     const made = withSequence(spec, at, kind, { map: main, view: main ? views[main.id]?.view ?? main.view : null, after: stepId ?? daySteps.at(-1)?.id ?? null });
-    if (!made) return;
+    if (!made) { toast(TOO_MANY_STEPS, 'warn'); return; }
     Object.assign(spec, { steps: made.steps, framing: made.framing, elements: made.elements, transitions: made.transitions });
     spec.time.step = made.step;
     selection = [];
@@ -684,7 +685,7 @@
   function duplicateStep(id) {
     if (playing) stop();
     const made = duplicatedStep(spec, at, id);
-    if (!made) { toast(`A day holds ${MAX_STEPS} steps at most`, 'warn'); return; }
+    if (!made) { toast(daySteps.length >= MAX_STEPS ? TOO_MANY_STEPS : TOO_MANY_MAPS, 'warn', 6000); return; }
     Object.assign(spec, { steps: made.steps, framing: made.framing, elements: made.elements });
     spec.time.step = made.step;
     selection = [];
@@ -882,6 +883,7 @@
         // a video plays on a step: this one while it holds none, else a new one after it
         const free = stepId && !spec.elements.some((item) => item.kind === 'video' && item.step === stepId);
         const on = free ? stepId : newStep();
+        if (!on) return;
         element = { id, kind: 'video', box: box(width / 2 - 50, height / 2 - 28, 100, 56.2), step: on, carry: false, src: '', clip: [0, FIRST_SECONDS],
           sound: false, volume: 1, caption: true, text: '', size: 7, fit: 'contain', border: true };
         break;
@@ -977,23 +979,12 @@
     return ((Math.atan2(y, x) / rad) + 360) % 360;
   };
 
-  /**
-   * Take an element off the page, and with a map what reads it. The credits stay
-   * while a map is left: they move to it rather than leave its sources unsaid.
-   */
+  /** Take an element off the page, and with a map all that hangs on it (`withoutMaps`). The last credits stay. */
   function removeElement(element) {
     if (!spec.elements.includes(element)) return;
-    let dependants = [];
-    if (element.kind === 'map') {
-      const other = spec.elements.find((item) => item.kind === 'map' && item.id !== element.id && item.of !== element.id);
-      for (const item of spec.elements) {
-        if (item.of !== element.id) continue;
-        if (item.kind === 'credits' && other) item.of = other.id;
-        else if (item.kind === 'map') item.of = null;
-        else dependants.push(item);
-      }
-    } else if (element.kind === 'credits' && spec.elements.filter((item) => item.kind === 'credits').length < 2) return;
-    spec.elements = spec.elements.filter((item) => item.id !== element.id && !dependants.includes(item));
+    if (element.kind === 'map') Object.assign(spec, withoutMaps(spec, [element.id]));
+    else if (element.kind === 'credits' && spec.elements.filter((item) => item.kind === 'credits').length < 2) return;
+    else spec.elements = spec.elements.filter((item) => item.id !== element.id);
     selection = selection.filter((id) => spec.elements.some((item) => item.id === id));
   }
   function duplicate(element) {

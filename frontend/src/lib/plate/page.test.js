@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { facesOf, focusApart, inLook, addStep, beatKey, beatKeys, bornAt, bornOn, bringTo, carryOn, currentStep, dayBefore, DECOR_MAX_PIXELS, decorDensity, endOn, framedAs, framingOf, standsOver, TRANSITIONS, transitionsOf, fillTokens, fitPage, fromTemplate, hasSteps, houseLayout,
-  labelBox, landingIn, listedOf, longDay, mainMap, mapsFirst, movedStep, restacked, stepOf, onPaper, PAGE, PAGE_ZOOM, pageSize, periodSaid, pickedDays, placeOf, skippedDays, settleOn, shownOn, SIGNATURE, startOn, stepsOf, templateOf,
-  turnable, unsettled, withoutStep, zoomPageAt } from './page.js';
+import { facesOf, focusApart, inLook, addStep, beatKey, beatKeys, bornAt, bornOn, bringTo, carryOn, currentStep, dayBefore, DECOR_MAX_PIXELS, decorDensity, duplicatedStep, endOn, framedAs, framingOf, standsOver, TRANSITIONS, transitionsOf, fillTokens, fitPage, fromTemplate, hasSteps, houseLayout,
+  labelBox, landingIn, listedOf, longDay, mainMap, mapsFirst, MAX_MAPS, MAX_STEPS, movedStep, restacked, stepOf, onPaper, PAGE, PAGE_ZOOM, pageSize, periodSaid, pickedDays, placeOf, skippedDays, settleOn, shownOn, SIGNATURE, startOn, stepsOf, templateOf,
+  turnable, unsettled, withoutMaps, withoutStep, zoomPageAt } from './page.js';
 
 describe('a plate page', () => {
   it('turns its paper as it is set', () => {
@@ -378,6 +378,21 @@ describe('the steps of a day', () => {
     expect(withoutStep(plate(), 'n1').steps.now).toBeUndefined();
   });
 
+  it('refuses a step on a full day rather than let the last one fall off', () => {
+    const full = { steps: { '2026-10-15': Array.from({ length: MAX_STEPS }, (_, index) => ({ id: `s${index}` })) } };
+    expect(addStep(full, '2026-10-15', 's3')).toBeNull();
+  });
+
+  it('takes a map standing on a step along with it, and all that hangs on the map', () => {
+    const map = (id, more = {}) => ({ id, kind: 'map', ...more });
+    const spec = { time: {}, steps: { now: [{ id: 's1' }, { id: 's2' }] }, framing: { s2: { main: {}, onstep: {} } }, elements: [
+      map('main'), map('onstep', { step: 's1', carry: true }), { id: 'legend', kind: 'legend', of: 'onstep' }, { id: 'credits', kind: 'credits', of: 'onstep' }] };
+    const gone = withoutStep(spec, 's1');
+    expect(gone.framing).toEqual({ s2: { main: {} } });
+    expect(gone.elements.map((element) => element.id)).toEqual(['main', 'credits']);
+    expect(gone.elements[1].of).toBe('main');
+  });
+
   it('makes a new element on the step shown, else on the day', () => {
     expect(bornAt('2026-10-15', true, 's2')).toEqual({ step: 's2', carry: false, onward: null, until: null });
     expect(bornAt('2026-10-15', true, null)).toEqual(bornOn('2026-10-15', true));
@@ -495,6 +510,39 @@ describe('a map framed day by day', () => {
   it('forgets a step\'s framing with the step', () => {
     const spec = { steps: { now: [{ id: 's1' }] }, framing: { s1: { map: near }, now: { map: near } }, elements: [], time: {} };
     expect(Object.keys(withoutStep(spec, 's1').framing)).toEqual(['now']);
+  });
+
+  it('forgets a map\'s framings with the map, on every day and step', () => {
+    const spec = { framing: { s1: { map: near, detail: near }, '2026-10-01': { detail: near } }, elements: [{ id: 'map', kind: 'map' }, { id: 'detail', kind: 'map', of: 'map' }] };
+    const { framing, elements } = withoutMaps(spec, ['detail']);
+    expect(framing).toEqual({ s1: { map: near } });
+    expect(elements.map((element) => element.id)).toEqual(['map']);
+  });
+
+  it('lets what reads a map gone go with it, moves the credits to a map left and frees a detail', () => {
+    const spec = { elements: [{ id: 'map', kind: 'map' }, { id: 'other', kind: 'map' }, { id: 'detail', kind: 'map', of: 'map' },
+      { id: 'legend', kind: 'legend', of: 'map' }, { id: 'credits', kind: 'credits', of: 'map' }] };
+    const { elements } = withoutMaps(spec, ['map']);
+    expect(elements).toEqual([{ id: 'other', kind: 'map' }, { id: 'detail', kind: 'map', of: null }, { id: 'credits', kind: 'credits', of: 'other' }]);
+    // no other map to credit: the credits go too
+    expect(withoutMaps({ elements: [spec.elements[0], spec.elements[4]] }, ['map']).elements).toEqual([]);
+  });
+
+  it('copies no step that would hold one map too many', () => {
+    const maps = Array.from({ length: MAX_MAPS - 1 }, (_, index) => ({ id: `m${index}`, kind: 'map' }));
+    const spec = { steps: { now: [{ id: 's1' }] }, elements: [...maps, { id: 'onstep', kind: 'map', step: 's1' }] };
+    expect(duplicatedStep(spec, null, 's1')).toBeNull();
+    expect(duplicatedStep({ ...spec, elements: spec.elements.slice(1) }, null, 's1')).not.toBeNull();
+  });
+
+  it('settles a page past what a day holds with nothing left hanging on the steps that go', () => {
+    const steps = (length, prefix) => Array.from({ length }, (_, index) => ({ id: `${prefix}${index}` }));
+    const spec = { time: {}, steps: { now: steps(MAX_STEPS, 'p'), '2026-10-15': steps(1, 'd') }, framing: { [`p${MAX_STEPS - 1}`]: { map: near } },
+      elements: [{ id: 'map', kind: 'map' }, { id: 'lost', kind: 'text', step: `p${MAX_STEPS - 1}` }, { id: 'kept', kind: 'text', step: 'p0' }] };
+    const settled = settleOn(spec, '2026-10-15');
+    expect(settled.steps['2026-10-15']).toHaveLength(MAX_STEPS);
+    expect(settled.framing).toEqual({});
+    expect(settled.elements.map((element) => element.id)).toEqual(['map', 'kept']);
   });
 });
 

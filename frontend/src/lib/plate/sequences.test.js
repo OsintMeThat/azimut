@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SEQUENCES, SEQUENCE_ADDS, withSequence } from './sequences.js';
-import { duplicatedStep, stepsOf } from './page.js';
+import { MAX_STEPS, duplicatedStep, stepsOf } from './page.js';
 
 const map = { id: 'map', kind: 'map', box: [0, 0, 100, 80], view: { lat: 44, lon: 33, zoom: 9, bearing: 0 } };
 const spec = () => ({ page: { paper: 'a4', orientation: 'landscape' }, theme: { paper: '#ffffff', ink: '#111111', accent: '#c8102e' },
@@ -37,6 +37,13 @@ describe('the ready sequences', () => {
   it('are offered in the Add panel', () => {
     expect(SEQUENCE_ADDS.map(([kind]) => kind)).toEqual(Object.keys(SEQUENCES));
     expect(withSequence(spec(), null, 'nothing')).toBe(null);
+  });
+
+  it('are refused on a day with no room for all of their steps', () => {
+    const on = (length) => ({ ...spec(), steps: { now: Array.from({ length }, (_, index) => ({ id: `s${index}` })) } });
+    const beats = SEQUENCES['seq-reveal'].beats.length;
+    expect(withSequence(on(MAX_STEPS - beats + 1), null, 'seq-reveal', { map, view: map.view, after: 's0' })).toBe(null);
+    expect(withSequence(on(MAX_STEPS - beats), null, 'seq-reveal', { map, view: map.view, after: 's0' }).steps.now).toHaveLength(MAX_STEPS);
   });
 });
 
