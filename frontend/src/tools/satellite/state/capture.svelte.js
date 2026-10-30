@@ -47,11 +47,17 @@
  *   the pixels' own; `imageryExact` is false for a provider's estimate
  * @param {(rect: object|null) => void} deps.onRect the live marquee outline
  * @param {() => void} deps.onArm the map modes arming the marquee turns off
+ * @param {() => number} [deps.tilt] the camera's tilt over the relief, 0 when flat
+ * @param {() => number} [deps.reliefScale] how much taller the relief is drawn
+ * @param {() => string|null} [deps.farProvider] who drew the far ground of a tilted
+ *   view, when it is not the provider chosen (`lib/map/quotaGuard.js`)
  */
 import { clampSize, scaledCapture } from '../../../lib/captureSize.js';
 import { captureTab, extensionVersion } from '../../../lib/extBridge.js';
 import { frameFitsView, isRegistered, sourceRect } from '../../../lib/screenCrop.js';
 import { startRectDrag } from '../../../lib/map/gestures.js';
+import { isGround } from '../../../lib/map/basemap.js';
+import { writtenZoom } from '../../../lib/map/view.js';
 import { applyPrefs, prefs } from '../../../lib/state.svelte.js';
 
 /** Standard output sizes for the centred button, named by what they are for. */
@@ -89,6 +95,9 @@ export function createCaptureState({
   provenance,
   onRect,
   onArm,
+  tilt = () => 0,
+  reliefScale = () => 1,
+  farProvider = () => null,
 }) {
   let preset = $state('1200x675');
   let customW = $state(1200);
@@ -257,6 +266,76 @@ export function createCaptureState({
   }
 
   /**
+   * The tilted arm: a view leaning over the relief has no straight-down frame
+   * to stitch, so what is filed is the picture the map drew, cropped to the
+   * frame, with the tilt beside the bearing. It reads the map's own canvas,
+   * so nothing of our chrome can be in it and no extension is needed.
+   *
+   * Only the imagery on its relief is drawn into it, as the stitched road files
+   * only the imagery: names, borders and the analyst's layers would each need
+   * a credit of their own on the image, and the line would outgrow the frame.
+   * The zoom goes with its fraction, which over relief is part of the camera.
+   */
+  async function obliqueCapture(framedOn, rect) {
+    const box = element().getBoundingClientRect();
+    if (!frameFitsView(rect, box)) {
+      notify(
+        `The ${Math.round(rect.w)}×${Math.round(rect.h)} frame is bigger than the map view. ` +
+          'Pick a smaller size or enlarge the window',
+        'warn',
+        7000
+      );
+      return;
+    }
+    busy = true;
+    const pixels = provenance();
+    try {
+      const { canvas: drawn, complete } = await engine().snapshot({ keep: (id) => isGround(id) });
+      if (!complete) {
+        notify('The map is still loading. Capture again once it has settled', 'warn', 6000);
+        return;
+      }
+      const scale = drawn.width / box.width;
+      const crop = document.createElement('canvas');
+      crop.width = Math.round(rect.w * scale);
+      crop.height = Math.round(rect.h * scale);
+      crop
+        .getContext('2d')
+        .drawImage(drawn, rect.x * scale, rect.y * scale, crop.width, crop.height, 0, 0, crop.width, crop.height);
+      const blob = await new Promise((resolve) => crop.toBlob(resolve, 'image/png'));
+      const owner = await ensureCase();
+      const form = new FormData();
+      form.append('image', blob, 'tilted.png');
+      form.append('lat', String(framedOn.lat));
+      form.append('lon', String(framedOn.lon));
+      form.append('zoom', String(writtenZoom(engine().exactZoom?.() ?? view().zoom, true)));
+      form.append('bearing', String(bearing()));
+      form.append('pitch', String(tilt()));
+      form.append('exaggeration', String(reliefScale()));
+      form.append('provider', pixels.provider);
+      const far = farProvider();
+      if (far) form.append('far_provider', far);
+      if (engine().drewReliefFallback?.()) form.append('relief_fallback', 'true');
+      // A frame centred on the view is the camera's own: its centre's height
+      // goes with it, so the view opens again with the eye where it stood.
+      const height = engine().centreElevation?.();
+      const centred = Math.abs(rect.x + rect.w / 2 - box.width / 2) < 1 && Math.abs(rect.y + rect.h / 2 - box.height / 2) < 1;
+      if (centred && Number.isFinite(height)) form.append('elevation', String(Math.round(height)));
+      if (pixels.imageryDate) {
+        form.append('imagery_date', pixels.imageryDate);
+        form.append('imagery_exact', String(pixels.imageryExact ?? true));
+      }
+      await api.post(`/api/cases/${owner.id}/satellite/oblique`, form);
+      await reloadCase();
+      notify('Tilted view captured & filed', 'ok');
+    } catch (e) {
+      notify(`Capture failed: ${e.message}`, 'danger', 6000);
+    } finally {
+      busy = false;
+    }
+  }
+
+  /**
    * The single capture path. `framedOn` is the `{ lat, lon }` the crop is framed
    * on; `baseW`/`baseH` are its size at the current view zoom, then scaled to
    * the chosen output resolution. `rectCss` is the same frame as a rectangle in
@@ -266,6 +345,7 @@ export function createCaptureState({
   async function take(framedOn, baseW, baseH, rectCss) {
     if (busy) return;
     if (widget) return widgetCapture(framedOn, rectCss);
+    if (tilt() > 0) return obliqueCapture(framedOn, rectCss);
     busy = true;
     const facade = engine();
     const here = view();
@@ -360,10 +440,16 @@ export function createCaptureState({
     const w = Math.abs(dragged.x1 - dragged.x0);
     const h = Math.abs(dragged.y1 - dragged.y0);
     if (w < MIN_DRAG_PX || h < MIN_DRAG_PX) return; // a slipped click, not a box
-    const framedOn = engine().containerPointToLatLng({
-      x: (dragged.x0 + dragged.x1) / 2,
-      y: (dragged.y0 + dragged.y1) / 2,
-    });
+    // A tilted view shows sky, which holds no ground: a box whose middle is sky
+    // is filed on the ground under its bottom edge, the nearest it shows.
+    const middle = (dragged.x0 + dragged.x1) / 2;
+    const framedOn =
+      engine().containerPointToLatLng({ x: middle, y: (dragged.y0 + dragged.y1) / 2 }) ??
+      engine().containerPointToLatLng({ x: middle, y: Math.max(dragged.y0, dragged.y1) });
+    if (!framedOn) {
+      notify('That box shows only sky. Draw it over the ground', 'warn', 6000);
+      return;
+    }
     armed = false; // one box per arm — re-arm to draw another
     take(framedOn, Math.round(w), Math.round(h), {
       x: Math.min(dragged.x0, dragged.x1),

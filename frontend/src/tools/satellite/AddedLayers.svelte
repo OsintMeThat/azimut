@@ -38,6 +38,17 @@
   import Icon from '../../components/Icon.svelte';
   import SearchInput from '../../components/SearchInput.svelte';
   import LayerTimeStrip from './LayerTimeStrip.svelte';
+  import LayerTimeCursor from './LayerTimeCursor.svelte';
+  import { isTracked } from '../../lib/map/layerHistory.js';
+  import MarkerSymbol from './MarkerSymbol.svelte';
+  import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
+  import { caseState } from '../../lib/state.svelte.js';
+  import { iconVersion, layerIconUrl } from '../../lib/map/ownIcons.js';
+  import { ICON_HELP } from '../../lib/map/layerHelp.js';
+  import LayerIconsToLibrary from './LayerIconsToLibrary.svelte';
+  import LayerKeyButton from './LayerKeyButton.svelte';
+  import { iconLibrary } from '../../lib/iconLibrary.svelte.js';
+  import choices from '../../lib/map/layerSymbols.json';
   import {
     countLabel,
     followed,
@@ -51,6 +62,11 @@
   let {
     /** The rows as the backend returned them. */
     rows = [],
+    heading = 'Added layers',
+    headingIcon = 'compass',
+    addLabel = 'Add a layer',
+    onedit = null,
+    ondownload = null,
     /** The layer an act is running on, so its buttons can say so. */
     busy = '',
     /** The head's Refresh is going through every followed layer. */
@@ -70,13 +86,28 @@
     onreorder,
     onpick,
     onadd,
+    /** Make a separate working copy of this source. */
+    oncopy,
     /** `(layer) => index | null`, the days its features carry (`layerDates.js`). */
     dates,
     /** `(layer, period, commit)`: the time strip moved, or was let go. */
     onperiod,
+    /** `(layer) => moments`: when a tracked layer changes (`layerHistory.js`). */
+    moments = null,
+    /** `(layer, patch)`: a tracked layer's cursor, trail or gains moved. */
+    ontime = null,
   } = $props();
+  $effect(() => { if (rows.some((row) => row.editable)) layerPalette.load(caseState.current?.id); });
+  const BADGES = new Set(choices.map((choice) => choice.id));
+  /** An own icon a layer wears, drawn from the layer; an app badge draws itself. */
+  const ownLook = (row, key) => (BADGES.has(key) ? null : iconLibrary.look(key, { caseId: caseState.current?.id, layer: row.name }));
+  /** Whether a layer wears a colour or an icon the case has not named. */
+  const unnamed = (row) => Object.keys(row.colours ?? {}).some((colour) => !layerPalette.nameOf(colour))
+    || Object.keys(row.symbols ?? {}).some((key) => !layerPalette.iconNameOf(key));
 
   const live = $derived(rows.filter((row) => row.enabled).length);
+  /** The layer whose icons are being filed in the library. */
+  let iconsOf = $state(null);
   const anyFollowed = $derived(rows.some(followed));
   const names = $derived(rows.map((row) => row.name));
 
@@ -189,8 +220,8 @@
 <div class="head">
   <button type="button" class="sub-head" onclick={() => (open = !open)}>
     <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} />
-    <Icon name="compass" size={13} />
-    <span>Added layers</span>
+    <Icon name={headingIcon} size={13} />
+    <span>{heading}</span>
     <span class="count">{live}</span>
   </button>
   {#if anyFollowed}
@@ -279,6 +310,19 @@
               <Icon name="reset" size={13} />
             </button>
           {/if}
+          {#if oncopy}
+            <button type="button" class="icon-act" aria-label={`Create editable copy of ${row.title}`}
+              title="Create editable copy" onclick={() => oncopy(row)}>
+              <Icon name="copy" size={13} />
+            </button>
+          {/if}
+          {#if onedit}
+            <button type="button" class="icon-act" aria-label={`Edit ${row.title}`}
+              title="Edit this layer" onclick={() => onedit(row)}>
+              <Icon name="edit" size={13} />
+            </button>
+          {/if}
+          {#if ondownload}<button class="icon-act" aria-label={`Download ${row.title}`} title="Download layer" onclick={() => ondownload(row)}><Icon name="download" size={13} /></button>{/if}
           <button
             type="button"
             class="icon-act danger"
@@ -303,6 +347,8 @@
               rel="noreferrer"
               title="Open this map at its source"
             >{sourceLabel(row)} <Icon name="external" size={9} /></a>
+          {:else if row.editable}
+            <span>{row.origin ? `Copy of ${row.origin.source.name || row.origin.source.url}` : 'Personal layer'}</span>
           {:else}
             <span>{sourceLabel(row)}</span>
           {/if}
@@ -313,11 +359,20 @@
         <!-- Both numbers, always: what is loaded and what is drawn, never the
              one passing for the other. -->
         <p class="meta counts">{countLabel(row)}</p>
+        {#if row.icons}
+          <!-- the map's own icons, which the analyst may want in every palette; never filed unasked -->
+          <p class="meta icons-line"><span>{row.icons} {row.icons === 1 ? 'icon' : 'icons'}</span>
+            <button type="button" class="to-library" title={ICON_HELP.toLibraryHint} onclick={() => (iconsOf = row)}>{ICON_HELP.toLibrary}</button></p>
+        {/if}
 
         <!-- Only on a layer being drawn, and only once its features are in hand
              and turn out to be dated: a filter over marks nobody can see would
              be a control with nothing to show for it. -->
-        {#if row.enabled}
+        {#if row.enabled && isTracked(row) && ontime}
+          <!-- A tracked layer is read at one moment rather than filtered by a period. -->
+          <LayerTimeCursor time={row.time} moments={moments?.(row) ?? []} precision={row.track?.precision ?? 'day'}
+            zone={row.track?.zone ?? 'UTC'} label={`${row.title}: moment`} onchange={(patch) => ontime(row, patch)} />
+        {:else if row.enabled}
           {@const index = dates?.(row)}
           {#if index}
             <LayerTimeStrip
@@ -343,11 +398,12 @@
           </button>
           {#if expanded.has(row.name)}
             {@const query = (queries[row.name] ?? '').trim()}
-            <!-- Only on a layer being drawn: a match is somewhere to go, and a
-                 layer switched off has nowhere. -->
+            <!-- Searches only a layer being drawn: a match is somewhere to go, and
+                 a layer switched off has nowhere. The box stays in sight there,
+                 saying so, or it reads as gone. -->
             {@const found = row.enabled && query ? search?.(row, query) : null}
-            {#if row.enabled}
-              <div class="find">
+            <div class="find">
+              {#if row.enabled}
                 <SearchInput
                   bind:value={
                     () => queries[row.name] ?? '',
@@ -357,8 +413,11 @@
                   width="100%"
                   count={found?.ready ? grouped(found.total) : null}
                 />
-              </div>
-            {/if}
+              {:else}
+                <SearchInput value="" placeholder="Turn the layer on to find a pin" width="100%" disabled
+                  title="Searches the pins of a layer drawn on the map" />
+              {/if}
+            </div>
 
             {#if found}
               {#if !found.ready}
@@ -406,12 +465,28 @@
                       title={entry.on ? 'Hide this group' : 'Show this group'}
                       onclick={() => oncategory?.(row, entry.name)}
                     >
-                      <span class="swatch" style="--swatch: {entry.colour}"></span>
+                      {#if entry.symbol}<MarkerSymbol symbol={entry.symbol} colour={entry.colour} size={14}
+                        icon={entry.icon ? { src: layerIconUrl(caseState.current?.id, row.name, entry.icon, iconVersion(row)), mode: entry.iconMode } : null} />
+                      {:else}<span class="swatch" style="--swatch: {entry.colour}"></span>{/if}
                       <span class="cat-name">{entry.name}</span>
                       <span class="cat-count">{entry.count}</span>
                     </button>
                   </li>
                 {/each}
+                <!-- the colours and icons this case named, as many as wear each one here -->
+                {#each Object.entries(row.colours ?? {}).filter(([colour]) => layerPalette.nameOf(colour)) as [colour, count] (colour)}
+                  <li class="named"><span class="swatch" style="--swatch: {colour}"></span>
+                    <span class="cat-name">{layerPalette.nameOf(colour)}</span><span class="cat-count">{count}</span></li>
+                {/each}
+                {#each Object.entries(row.symbols ?? {}).filter(([key]) => layerPalette.iconNameOf(key)) as [key, count] (key)}
+                  <li class="named"><MarkerSymbol symbol={BADGES.has(key) ? key : 'pin'} colour="#5b6470" size={14} icon={ownLook(row, key)} />
+                    <span class="cat-name">{layerPalette.iconNameOf(key)}</span><span class="cat-count">{count}</span></li>
+                {/each}
+                <!-- what is worn here with no name yet: the key that names it, in words -->
+                {#if row.editable && unnamed(row)}
+                  <li class="key-row"><LayerKeyButton caseId={caseState.current?.id} colours={Object.keys(row.colours ?? {})} worn={Object.keys(row.symbols ?? {})}
+                    look={(key) => ownLook(row, key)} text="Name colours and icons" /></li>
+                {/if}
               </ul>
             {/if}
           {/if}
@@ -423,11 +498,26 @@
   </ul>
   <button type="button" class="add" onclick={() => onadd?.()}>
     <Icon name="plus" size={12} />
-    <span>Add a layer</span>
+    <span>{addLabel}</span>
   </button>
 {/if}
 
+{#if iconsOf}
+  <LayerIconsToLibrary caseId={caseState.current?.id} row={iconsOf} onclose={() => (iconsOf = null)} />
+{/if}
+
 <style>
+  .to-library {
+    padding: 0;
+    color: var(--text-2);
+    font-size: 10px;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .to-library:hover {
+    color: var(--text-1);
+  }
   .layers {
     --indent: 30px;
     margin: 0;
@@ -640,6 +730,8 @@
   .cat.off {
     color: var(--text-3);
   }
+  .named { display: flex; align-items: center; gap: 6px; padding: 2px 6px; color: var(--text-3); font-size: var(--fs-xs); }
+  .key-row { padding: 1px 0; }
   .swatch {
     flex: none;
     width: 9px;

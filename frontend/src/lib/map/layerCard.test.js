@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest';
-import { readBlocks, readLinks, fillText, layerCard } from './layerCard.js';
+import { readBlocks, readLinks, fillText, layerCard, featureSize, sizeLine } from './layerCard.js';
 
 describe('readBlocks', () => {
   it('reads a labelled line as its label and its value', () => {
@@ -144,5 +144,89 @@ describe("a pin's point on its card", () => {
     const element = layerCard('Paris', { copy: vi.fn() })({ name: 'District' }, null);
     expect(element.querySelector('.layer-card-where')).toBeNull();
     expect(element.querySelector('button')).toBeNull();
+  });
+});
+
+describe('what a personal feature says on its card', () => {
+  it('names its colour and its icon, states its day and state, and links its sources', () => {
+    const card = layerCard('Front', { coords: () => '' })({
+      name: 'Depot', category: 'Strikes', colour_name: 'Side A', icon_meaning: 'Drone strike', date: '2026-09-13', status: 'destroyed',
+      provenance: 'external', links: ['https://x.com/a/1', 'javascript:alert(1)'],
+    }, null);
+    expect(card.querySelector('.layer-card-group').textContent).toBe('Strikes · Side A · Drone strike');
+    expect(card.querySelector('.layer-card-facts').textContent).toBe('2026-09-13 · Destroyed · Geolocated by someone else');
+    const links = [...card.querySelectorAll('a.layer-card-link')];
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['https://x.com/a/1']);
+    expect(links[0].rel).toBe('noreferrer noopener');
+  });
+
+  it('gives a source feature its span of days and nothing it does not state', () => {
+    const card = layerCard('GC', { coords: () => '' })({ name: 'Event', date: '2026-09-01', date_end: '2026-09-03' }, null);
+    expect(card.querySelector('.layer-card-facts').textContent).toBe('2026-09-01 – 2026-09-03');
+    expect(card.querySelector('.layer-card-link')).toBeNull();
+  });
+
+  it('shows the footage and the proof one of the analyst’s markers follows, each opened from its picture', () => {
+    const open = vi.fn();
+    const pictures = (properties) => [
+      { src: properties.source_picture && `/files/c/${properties.source_picture}`, caption: 'Source', title: 'Open the footage', open: () => open('video') },
+      { src: properties.entity_picture && `/files/c/${properties.entity_picture}`, caption: 'Proof', title: 'Open the proof', open: () => open('proof') },
+    ];
+    const element = layerCard('Front', { coords: () => '', pictures })(
+      { name: 'Strike', source_picture: 'thumbs/v.webp', entity_picture: 'thumbs/p.webp' }, null);
+    const shown = [...element.querySelectorAll('.layer-card-picture')];
+    expect(shown.map((one) => [one.textContent, one.querySelector('img').getAttribute('src')])).toEqual([
+      ['Source', '/files/c/thumbs/v.webp'], ['Proof', '/files/c/thumbs/p.webp']]);
+    shown[0].click();
+    expect(open).toHaveBeenCalledWith('video');
+    // a picture the thumbnail cache let go leaves the card as it was
+    shown[0].querySelector('img').dispatchEvent(new Event('error'));
+    expect([...element.querySelectorAll('.layer-card-picture')].map((one) => one.textContent)).toEqual(['Proof']);
+    expect(layerCard('Front', { pictures })({ name: 'Own' }, null).querySelector('.layer-card-pictures')).toBeNull();
+  });
+});
+
+describe('the size of a line or an area on its card', () => {
+  // about 1.11 km a side on the equator
+  const SQUARE = [[0, 0], [0.01, 0], [0.01, 0.01], [0, 0.01], [0, 0]];
+  const HOLE = [[0.0025, 0.0025], [0.0075, 0.0025], [0.0075, 0.0075], [0.0025, 0.0075], [0.0025, 0.0025]];
+
+  it('measures a line, its parts added up', () => {
+    const one = featureSize({ type: 'LineString', coordinates: [[0, 0], [0.01, 0]] });
+    expect(one.length).toBeCloseTo(1113.2, 0);
+    expect(one.area).toBe(0);
+    const two = featureSize({ type: 'MultiLineString', coordinates: [[[0, 0], [0.01, 0]], [[0, 1], [0.01, 1]]] });
+    expect(two.length).toBeGreaterThan(2 * 1113);
+  });
+
+  it('measures an area with its hole taken out, and its perimeter on the outer ring', () => {
+    const full = featureSize({ type: 'Polygon', coordinates: [SQUARE] });
+    const holed = featureSize({ type: 'Polygon', coordinates: [SQUARE, HOLE] });
+    expect(full.area).toBeCloseTo(1.239e6, -3);
+    expect(holed.area).toBeCloseTo(full.area * 0.75, -3);
+    expect(holed.perimeter).toBeCloseTo(full.perimeter, 6);
+    expect(featureSize({ type: 'MultiPolygon', coordinates: [[SQUARE], [SQUARE]] }).area).toBeCloseTo(2 * full.area, 0);
+  });
+
+  it('has nothing to say about a point or a broken shape', () => {
+    expect(featureSize({ type: 'Point', coordinates: [0, 0] })).toBeNull();
+    expect(featureSize({ type: 'Polygon', coordinates: [[[0, 0], [1, 1]]] })).toBeNull();
+    expect(featureSize({ type: 'LineString', coordinates: [[0, 0], ['x', null]] })).toBeNull();
+    expect(featureSize(null)).toBeNull();
+    expect(sizeLine(null)).toBe('');
+  });
+
+  it("writes the size in the analyst's units", () => {
+    expect(sizeLine({ type: 'Polygon', coordinates: [SQUARE] })).toBe('Area 1.24 km² · Perimeter 4.45 km');
+    expect(sizeLine({ type: 'LineString', coordinates: [[0, 0], [0.01, 0]] }, 'imperial')).toBe('Length 3652 ft');
+  });
+
+  it('shows at the foot of the card for a line or an area, never for a pin', () => {
+    const card = layerCard('Front', { coords: () => '', units: () => 'metric' });
+    const area = card({ name: 'District' }, null, { type: 'Polygon', coordinates: [SQUARE] });
+    expect(area.querySelector('.layer-card-size').textContent).toBe('Area 1.24 km² · Perimeter 4.45 km');
+    expect(area.querySelector('.layer-card-size').nextElementSibling.className).toBe('layer-card-from');
+    const pin = card({ name: 'Gate' }, { lat: 0, lon: 0 }, { type: 'Point', coordinates: [0, 0] });
+    expect(pin.querySelector('.layer-card-size')).toBeNull();
   });
 });

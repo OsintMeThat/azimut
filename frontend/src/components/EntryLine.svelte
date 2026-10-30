@@ -78,6 +78,7 @@
   import Modal from './Modal.svelte';
   import TemporalClaimEditor from './TemporalClaimEditor.svelte';
   import { shortcut } from '../lib/keys.js';
+  import { carriesOutsideFiles } from '../lib/drag.js';
 
   let {
     caseId,
@@ -552,7 +553,7 @@
   // -- files dropped from the system ------------------------------------------
 
   function onDragOver(event) {
-    if (![...(event.dataTransfer?.types ?? [])].includes('Files')) return;
+    if (!carriesOutsideFiles(event)) return;
     event.preventDefault();
     event.stopPropagation();
     dragging = true;
@@ -563,7 +564,7 @@
   async function onDrop(event) {
     const files = [...(event.dataTransfer?.files ?? [])];
     dragging = false;
-    if (!files.length) return;
+    if (!files.length || !carriesOutsideFiles(event)) return;
     event.preventDefault();
     event.stopPropagation();
     for (const file of files) {

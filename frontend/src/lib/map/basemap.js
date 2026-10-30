@@ -17,16 +17,21 @@
  * throwaway intermediate zoom levels mid-gesture, which a billed provider paid
  * for. MapLibre overzooms what it already holds instead.
  */
+import { BORDER_LINES } from './borders.js';
 import { FIRE_MARKS } from './firePoints.js';
 import { createGoogleGlass, loadGoogleMaps } from './gmaps.js';
 import { INFRASTRUCTURE } from './infrastructure.js';
 import { tileTemplate as nightTemplate } from './nightlights.js';
 import { PLACE_NAMES } from './placeNames.js';
+import { guardedTemplate } from './quotaGuard.js';
+import { batchedTemplate } from './tileBatch.js';
 
 /** What a `{s}` template is served from when the provider names no hosts. */
 const DEFAULT_SUBDOMAINS = ['a', 'b', 'c'];
 
 const IMAGERY = 'basemap-imagery';
+/** The imagery's source id, for the turn read ahead over relief (`warmTurn.js`). */
+export const IMAGERY_SOURCE = IMAGERY;
 /** A second picture of the same ground, laid just over the first (`setAlternate`). */
 const ALTERNATE = 'basemap-alternate';
 /** Failed tiles after which trouble is reported without waiting for the settle. */
@@ -57,6 +62,7 @@ const TROUBLE_SPEAKS_UP = 4;
  * may be a function too, for the same reason as `url`. A source is a tile
  * template, or `{ url }` naming a TileJSON for a provider whose tile paths
  * change with each build.
+ *
  */
 const OVERLAYS = [
   {
@@ -116,13 +122,12 @@ const OVERLAYS = [
     maxZoom: 18,
   },
   {
-    // Country, region and district borders with their names. Esri's, under the
-    // same terms as the World Imagery the app already shows.
+    // Country, region and district borders with their names (borders.js),
+    // drawn as lines so a region reads at every zoom and on the relief.
     id: 'boundaries',
     layer: 'basemap-boundaries',
-    url: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Esri, HERE, Garmin, © OpenStreetMap contributors, and the GIS user community',
-    maxZoom: 19,
+    vector: BORDER_LINES,
+    attribution: 'OpenFreeMap © OpenMapTiles · Data © OpenStreetMap contributors',
   },
   {
     // The towns, villages and hamlets the borders leave out (placeNames.js),
@@ -153,6 +158,23 @@ const OVERLAYS = [
 
 /** The ids a surface can be asked to show, so nothing hard-codes the list. */
 export const OVERLAY_IDS = OVERLAYS.map((overlay) => overlay.id);
+
+/** The credit an overlay is owed, for a surface that prints its own (a map plate). */
+export function overlayAttribution(id) {
+  return OVERLAYS.find((overlay) => overlay.id === id)?.attribution ?? '';
+}
+
+/**
+ * Whether a style layer is the picture itself rather than something laid over
+ * it: the imagery, the second picture Blink lays on it, and the overlays named,
+ * which a reading may be made of (Difference reads VIIRS night lights).
+ */
+export function isGround(layerId, overlays = []) {
+  if (layerId === IMAGERY || layerId === ALTERNATE) return true;
+  return OVERLAYS.some(
+    (overlay) => overlays.includes(overlay.id) && (layerId === overlay.layer || layerId.startsWith(`${overlay.layer}-`))
+  );
+}
 
 /**
  * The engine layers one overlay is drawn as, lowest first. A raster overlay is
@@ -254,6 +276,14 @@ export function sourceMaxZoom(provider, cell) {
 }
 
 /**
+ * The shallowest tile this provider can render, counted the way the engine
+ * counts tiles. Shallower ground is drawn from the free basemap (the 3D view).
+ */
+export function sourceMinZoom(provider, cell) {
+  return Math.max(0, (provider.min_zoom ?? 0) - Math.log2(cell / 256));
+}
+
+/**
  * The raster source one provider is served from, at a given cell size.
  *
  * @param {object} provider as `/api/satellite/providers` describes it
@@ -261,10 +291,25 @@ export function sourceMaxZoom(provider, cell) {
  *   its layer, window and cloud ceiling in it (lib/sentinel.js)
  * @param {number} cell grid cell in CSS px (lib/usage.js `layerCell`)
  */
-export function rasterSource(provider, providerId, cell) {
+export function rasterSource(provider, providerId, cell, guardId = '') {
+  // On a map of the app's (`guardId` names it), a billed provider is asked
+  // through the guard, which sends the far ground of a tilted map to the free
+  // one (`quotaGuard.js`). A free provider the app keeps on disk is asked in
+  // batches (`tileBatch.js`): one at a time, its tiles waited for the six
+  // connections the browser keeps to the app, two to three times as long as
+  // the app took to answer. Any other tile is asked at its own address, so the
+  // browser's own cache still spares a provider the app does not keep. Direct
+  // `{s}` templates never pass through the app.
+  const proxied = !provider.url.includes('{s}');
+  const guarded = guardId && provider.meter && proxied;
+  const batched = guardId && proxied && !provider.meter && !provider.widget && provider.cacheable === true;
   return {
     type: 'raster',
-    tiles: tileUrls(tileTemplate(provider, providerId), provider.subdomains),
+    tiles: guarded
+      ? [guardedTemplate(guardId, providerId)]
+      : batched
+        ? [batchedTemplate(providerId)]
+        : tileUrls(tileTemplate(provider, providerId), provider.subdomains),
     // Bigger tiles shift the URL zoom down (512 → -1, 1024 → -2); an oversample
     // halves the cell so each tile is shown downscaled — deeper zoom on screen.
     // Google's mid-zoom mosaics are genuinely softer than its deep ones
@@ -315,7 +360,7 @@ export function imageryError(error, failed = 1, reason = '') {
  * @param {object} [hooks]
  * @param {(provider: object) => void} [hooks.onMeteredTiles] a billed layer painted
  * @param {(provider: object) => void} [hooks.onWidgetLoad] a billed map load happened
- * @param {(provider: object) => void} [hooks.onWidgetAuthFailure] Google rejected the key
+ * @param {(provider: object, reason: string) => void} [hooks.onWidgetAuthFailure] Google refused the map, and what to do
  * @param {(provider: object, error: Error) => void} [hooks.onWidgetFailed] the script never loaded
  */
 export function createBasemaps(engine, hooks = {}) {
@@ -344,6 +389,8 @@ export function createBasemaps(engine, hooks = {}) {
   let wanted = null; // the provider id last asked for, so a slow load can tell
   let metered = null; // the billed provider whose tiles we are counting
   let current = null; // the provider the zoom cap was last taken from
+  // how deep the view goes with no picture ground under it, given back when one goes
+  const ownCeiling = map.getMaxZoom?.() ?? null;
   let sharedCeiling = null; // a view zoom this map must not pass, whatever it shows
   let alternate = null; // `${providerId}@${cell}` of the second picture, when there is one
   let alternateMetered = null;
@@ -355,15 +402,21 @@ export function createBasemaps(engine, hooks = {}) {
     return map.getLayersOrder().find((id) => !OWNED.has(id));
   }
 
+  /** An overlay's lowest layer on the map, else null. */
+  function bottomOf(overlay) {
+    const bottom = overlayLayers(overlay)[0];
+    return map.getLayer(bottom) ? bottom : null;
+  }
+
   /** Whether an overlay is on the map, read off its lowest layer. */
   function isUp(overlay) {
-    return Boolean(map.getLayer(overlayLayers(overlay)[0]));
+    return bottomOf(overlay) !== null;
   }
 
   /** The lowest overlay that is up, which is what the imagery goes under. */
   function lowestOverlay() {
     const up = OVERLAYS.find(isUp);
-    return up ? overlayLayers(up)[0] : ceiling();
+    return up ? bottomOf(up) : ceiling();
   }
 
   /**
@@ -372,7 +425,7 @@ export function createBasemaps(engine, hooks = {}) {
    */
   function under(overlay) {
     const above = OVERLAYS.slice(OVERLAYS.indexOf(overlay) + 1).find(isUp);
-    return above ? overlayLayers(above)[0] : ceiling();
+    return above ? bottomOf(above) : ceiling();
   }
 
   // Tiles that failed since the imagery source last settled, by source id.
@@ -450,13 +503,17 @@ export function createBasemaps(engine, hooks = {}) {
     // A map linked to another one stops where the shallower of the two does,
     // or the deeper one would pull its partner's camera past its pixels.
     const deepest = Math.min(provider.max_zoom, sharedCeiling ?? Infinity);
-    map.setMaxZoom(deepest - 1);
+    // Only when it changes. The engine treats every call as a camera update and,
+    // over relief, may settle the camera by a hair and report a move for it; the
+    // surface re-states the basemap on every settled view, so an unchanged
+    // ceiling handed back each time turned into a loop that froze the page.
+    if (map.getMaxZoom?.() !== deepest - 1) map.setMaxZoom(deepest - 1);
   }
 
   function showTiles(provider, providerId, cell) {
     dropTiles();
     capZoom(provider);
-    map.addSource(IMAGERY, rasterSource(provider, providerId, cell));
+    map.addSource(IMAGERY, rasterSource(provider, providerId, cell, engine.mapId));
     map.addLayer({ id: IMAGERY, type: 'raster', source: IMAGERY },
       map.getLayer(ALTERNATE) ? ALTERNATE : lowestOverlay());
     live = `${providerId}@${cell}`;
@@ -469,9 +526,8 @@ export function createBasemaps(engine, hooks = {}) {
   async function showWidget(provider) {
     try {
       await loadGoogleMaps(provider.url, {
-        // Google's only key-rejection signal — it can fire minutes after a
-        // clean load, so the caller handles it as a runtime event.
-        onAuthFailure: () => onWidgetAuthFailure(provider),
+        // it can come minutes after a clean load, so the caller handles it as a runtime event
+        onRefused: (reason) => onWidgetAuthFailure(provider, reason),
       });
     } catch (error) {
       onWidgetFailed(provider, error);
@@ -492,8 +548,8 @@ export function createBasemaps(engine, hooks = {}) {
 
   function addOverlay(overlay, params) {
     if (isUp(overlay)) return;
-    for (const [id, spec] of overlaySources(overlay, params)) map.addSource(id, spec);
     const before = under(overlay);
+    for (const [id, spec] of overlaySources(overlay, params)) map.addSource(id, spec);
     if (overlay.vector) {
       for (const [name, image, options] of overlay.vector.images ?? []) {
         if (!map.hasImage(name)) map.addImage(name, image(), options);
@@ -559,6 +615,19 @@ export function createBasemaps(engine, hooks = {}) {
       showTiles(provider, providerId, cell);
     },
 
+    /**
+     * No picture ground: the imagery goes, and the view goes as deep again as it
+     * did before one capped it. A plate's map takes a plain ground this way, its
+     * engine kept.
+     */
+    hide() {
+      wanted = null;
+      glass?.hide();
+      dropTiles();
+      current = null;
+      if (ownCeiling !== null && map.getMaxZoom?.() !== ownCeiling) map.setMaxZoom(ownCeiling);
+    },
+
     retry(provider, providerId, cell) {
       if (provider && !provider.widget) showTiles(provider, providerId, cell);
     },
@@ -604,7 +673,7 @@ export function createBasemaps(engine, hooks = {}) {
       alternate = key;
       alternateMetered = null;
       if (!key) return;
-      map.addSource(ALTERNATE, rasterSource(provider, providerId, cell));
+      map.addSource(ALTERNATE, rasterSource(provider, providerId, cell, engine.mapId));
       map.addLayer({
         id: ALTERNATE,
         type: 'raster',

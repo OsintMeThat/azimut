@@ -52,7 +52,7 @@ function settingsBlob() {
     eco_max_zooms: {},
     free_tier: {},
     free_tiers: {},
-    export_dirs: { notes: '', media: '', proofs: '' },
+    export_dirs: { notes: '', media: '', proofs: '', views: '/home/analyst/Plates', sheets: '' },
     ingest_token: '',
     home_view: { lat: 48.85, lon: 2.29, zoom: 12 },
     post_mention: '',
@@ -65,7 +65,7 @@ function settingsBlob() {
 
 const { default: Settings } = await import('./Settings.svelte');
 
-const TABS = ['general', 'publishing', 'imagery', 'templates', 'extension', 'storage', 'system'];
+const TABS = ['general', 'publishing', 'imagery', 'templates', 'icons', 'extension', 'storage', 'system'];
 
 let live = null;
 
@@ -120,6 +120,21 @@ describe('each section', () => {
     expect(text).toContain('Satellite home view');
   });
 
+  it('General offers the 3D quality, each level saying what it is for, and keeps the one picked', async () => {
+    show('general');
+    const levels = [...pane().querySelectorAll('[aria-label="3D quality"] button')];
+    expect(levels.map((b) => b.textContent.trim())).toEqual(['Full', 'Balanced', 'Light']);
+    for (const level of levels) expect(level.title).toBeTruthy();
+    expect(levels[0].classList.contains('on')).toBe(true);
+    api.put.mockImplementation(async (path, patch) => ({ ...settingsBlob(), ...patch }));
+    api.put.mockClear();
+    levels[2].click();
+    await Promise.resolve();
+    expect(api.put).toHaveBeenCalledWith('/api/settings/prefs', { quality_3d: 'light' });
+    api.put.mockImplementation(async () => settingsBlob());
+    prefs.quality3d = 'full';
+  });
+
   it('Publishing states the mention and signature controls', () => {
     const text = show('publishing');
     expect(text).toContain('Geo Report');
@@ -139,6 +154,13 @@ describe('each section', () => {
     const text = show('templates');
     expect(text).toContain('No proof templates yet.');
     expect(text).toContain('No post templates yet.');
+  });
+
+  it('Icons says where icons come from and that maps keep their copies', () => {
+    const text = show('icons');
+    expect(text).toContain('Import files');
+    expect(text).toContain('Import a folder');
+    expect(text).toContain('so removing one here changes no map');
   });
 
   it('Extension offers the download and the pairing token', () => {
@@ -164,12 +186,21 @@ describe('each section', () => {
     expect(pane().querySelector('a[href$="/releases/latest"]')).toBeNull();
   });
 
-  it('Storage manages all three export folders and the backup', () => {
+  it('Storage manages every export folder and the backup', () => {
     const text = show('storage');
     expect(text).toContain('Note PDFs');
     expect(text).toContain('Media copies');
     expect(text).toContain('Proof PNGs');
+    expect(text).toContain('Sheet CSVs');
     expect(pane().querySelector('a[href="/api/settings/export"]')).not.toBeNull();
+  });
+
+  it('Storage shows the folder saved for views, where plates go, and lets it be reset', () => {
+    show('storage');
+    const row = [...pane().querySelectorAll('.row')].find((el) => el.textContent.includes('Views and comparisons'));
+    expect(row.textContent).toContain('/home/analyst/Plates');
+    const reset = [...row.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Reset');
+    expect(reset.disabled).toBe(false);
   });
 
   it('System reports the version and what ffmpeg it found', () => {

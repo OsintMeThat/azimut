@@ -11,11 +11,14 @@ asks the question — every path is built from :func:`workspace_root`.
     └── .azimut/              # app machinery, hidden from normal browsing
         ├── bundles/
         ├── cache/tiles/
+        ├── cache/terrain/
+        ├── cache/peaks/, buildings/, turns/, water/
         ├── lock              # held by the one Azimut using this workspace
         ├── runtime/          # newer scrapers fetched at runtime
         ├── scratch/          # one-shot sessions, promotable to cases
         └── settings/
             ├── cookies.txt
+            ├── icons/        # the icon library: icons.json + one PNG per icon
             ├── signature.png
             ├── settings.json
             └── templates.json
@@ -51,10 +54,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # The Copernicus layer Detect's radar methods read: one the user added to
     # their configuration with Sentinel-1 as its source. Empty until found.
     "sentinel1_layer": "",
-    "detect_view": {
-        "collapsed": False, "width": 380, "basemap": "esri-world-imagery",
-        "overlays": ["boundaries", "placenames"], "saved": True,
-    },
+    "detect_view": {"collapsed": False, "width": 380, "basemap": "esri-world-imagery"},
     # Schema version this build writes. Read back through _settings_schema() so
     # a future breaking rename is migrated rather than silently dropped.
     "schema": SETTINGS_SCHEMA,
@@ -174,6 +174,20 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     #   for. The pop-up stays quiet for that exact tag; a newer one shows again.
     "update_check_on_start": True,
     "update_dismissed_version": "",
+    # The first-run tour and the What's new a version opens with (frontend
+    # lib/onboarding.js), kept with the workspace so another browser on it
+    # doesn't start a newcomer's tour over:
+    # - tour: "" never started, the page it resumes on while it runs, "done"
+    #   once finished or skipped.
+    # - whats_new_seen: the version whose What's new was put away for good.
+    # - find_beta_seen: Horizon Find's beta notice was read, so it stays away.
+    "tour": "",
+    "whats_new_seen": "",
+    "find_beta_seen": False,
+    # How much the 3D globe and Horizon draw on this computer (frontend
+    # lib/quality3d.js): "full" as they always did, "balanced" or "light" for a
+    # slow graphics card. This machine's own, so the settings backup leaves it.
+    "quality_3d": "full",
     # Login session for gated media downloads (engine/media.py). Applied only
     # when a download hits a login wall — public media is always fetched
     # cookie-less, so this never touches the everyday case. Shapes:
@@ -412,6 +426,11 @@ def settings_dir() -> Path:
 def tile_cache_dir() -> Path:
     """Disposable map imagery cache, outside every case and backup."""
     return internal_dir() / "cache" / "tiles"
+
+
+def terrain_cache_dir() -> Path:
+    """Terrain height tiles: bounded by size rather than age (engine/terrain.py)."""
+    return internal_dir() / "cache" / "terrain"
 
 
 def settings_path() -> Path:
@@ -774,10 +793,11 @@ def update_settings(mutate: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         return settings
 
 
-# Reusable presets file (templates.json). The two families a template can be:
-# "proof" (a proof's house style) and "post" (a thread skeleton).
-TEMPLATE_KINDS = ("proof", "post")
-DEFAULT_TEMPLATES: dict[str, Any] = {"schema": 1, "proof": [], "post": []}
+# Reusable presets file (templates.json). The families a template can be:
+# "proof" (a proof's house style), "post" (a thread skeleton) and "map" (a map
+# plate's layout with its data taken out).
+TEMPLATE_KINDS = ("proof", "post", "map")
+DEFAULT_TEMPLATES: dict[str, Any] = {"schema": 1, "proof": [], "post": [], "map": []}
 _templates_lock = threading.Lock()
 
 

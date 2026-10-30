@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import gzip
+import struct
+
 import numpy as np
+import pytest
 
 from azimut.engine import mvt
 from mvtread import _fields, _packed, geometry, read, ring_area
@@ -69,3 +73,157 @@ def test_a_layer_with_nothing_in_it_is_left_out():
     assert mvt.encode([empty]) == b""
     # and a tile is layers and nothing else
     assert [number for number, _ in _fields(mvt.encode([full]))] == [3]
+
+
+# -- reading someone else's tile -------------------------------------------------
+
+
+def _peaks_tile() -> bytes:
+    roads, summits = mvt.Layer("transportation"), mvt.Layer("mountain_peak")
+    roads.rectangles(np.array([0]), np.array([0]), np.array([10]), np.array([10]), {"class": "road"})
+    summits.points(np.array([1024]), np.array([2048]), {"name": "Eiger", "ele": 3967})
+    # past the right edge, in the buffer a tile server keeps
+    summits.points(np.array([mvt.EXTENT + 20]), np.array([-20]), {"name": "Mönch"})
+    summits.rectangles(np.array([1]), np.array([1]), np.array([2]), np.array([2]), {"name": "a ridge"})
+    return mvt.encode([roads, summits])
+
+
+def test_the_points_of_one_layer_are_read_and_the_rest_stepped_over():
+    points = mvt.read_points(_peaks_tile(), "mountain_peak")
+    assert points == [
+        (0.25, 0.5, {"name": "Eiger", "ele": 3967}),
+        ((mvt.EXTENT + 20) / mvt.EXTENT, -20 / mvt.EXTENT, {"name": "Mönch"}),
+    ]
+    assert mvt.read_points(_peaks_tile(), "place") == []
+    # as a tile server stores it
+    assert mvt.read_points(gzip.compress(_peaks_tile()), "mountain_peak") == points
+
+
+def test_a_layer_s_own_extent_is_kept():
+    layer = mvt.Layer("mountain_peak")
+    layer.points(np.array([128]), np.array([384]), {"name": "Eiger"})
+    body = layer.encode()
+    extent = mvt._varint(5 << 3) + mvt._varint(mvt.EXTENT)
+    assert body.endswith(extent)
+    small = mvt._field(3, body[: -len(extent)] + mvt._varint(5 << 3) + mvt._varint(512))
+    assert mvt.read_points(small, "mountain_peak") == [(0.25, 0.75, {"name": "Eiger"})]
+
+
+def test_every_kind_of_value_a_tile_server_writes_is_read():
+    layer = mvt.Layer("kinds")
+    properties = {"count": 7, "below": -3, "ratio": 0.25, "name": "fire", "on": True}
+    layer.points(np.array([0]), np.array([0]), properties)
+    [(_x, _y, read_back)] = mvt.read_points(mvt.encode([layer]), "kinds")
+    assert read_back == properties
+    # a float and a plain int64, which this encoder never writes
+    assert mvt._read_value(memoryview(mvt._varint(2 << 3 | 5) + struct.pack("<f", 0.5))) == 0.5
+    assert mvt._read_value(memoryview(mvt._varint(4 << 3) + mvt._varint(2**64 - 2))) == -2
+
+
+def test_a_tile_cut_short_or_not_a_tile_is_refused():
+    tile = _peaks_tile()
+    with pytest.raises(ValueError):
+        mvt.read_points(tile[:-3], "mountain_peak")
+    with pytest.raises(ValueError):
+        mvt.read_points(b"\x1f\x8b not gzip at all", "mountain_peak")
+
+
+# -- reading polygons -----------------------------------------------------------
+
+SQUARE = [(0, 0), (100, 0), (100, 100), (0, 100)]  # clockwise on screen: an exterior ring
+HOLE = [(30, 30), (30, 70), (70, 70), (70, 30)]  # counter-clockwise: a hole in it
+
+
+def _zigzag(d: int) -> int:
+    return (d << 1) ^ (d >> 63)
+
+
+def _polygon_geometry(*rings: list[tuple[int, int]]) -> bytes:
+    """Rings written by hand as the specification has them: MoveTo the first point,
+    LineTo the rest, ClosePath. The cursor carries from one ring to the next."""
+    commands: list[int] = []
+    cx = cy = 0
+    for ring in rings:
+        for index, (px, py) in enumerate(ring):
+            if index == 0:
+                commands.append(mvt._command(1, 1))
+            elif index == 1:
+                commands.append(mvt._command(2, len(ring) - 1))
+            commands += [_zigzag(px - cx), _zigzag(py - cy)]
+            cx, cy = px, py
+        commands.append(mvt._command(7, 1))
+    return b"".join(mvt._varint(c) for c in commands)
+
+
+def _layer(name: str, *features: tuple[int, bytes, dict]) -> mvt.Layer:
+    layer = mvt.Layer(name)
+    layer.features.extend(features)
+    return layer
+
+
+def _fractions(points: list[tuple[int, int]]) -> list[tuple[float, float]]:
+    return [(x / mvt.EXTENT, y / mvt.EXTENT) for x, y in points]
+
+
+def test_one_square_is_one_polygon_with_its_open_ring():
+    layer = _layer("buildings", (3, _polygon_geometry(SQUARE), {"render_height": 12}))
+    assert mvt.read_polygons(mvt.encode([layer]), "buildings") == [
+        ([_fractions(SQUARE)], {"render_height": 12}),
+    ]
+
+
+def test_a_square_with_a_hole_is_one_polygon_of_two_rings():
+    layer = _layer("buildings", (3, _polygon_geometry(SQUARE, HOLE), {"render_height": 12}))
+    assert mvt.read_polygons(mvt.encode([layer]), "buildings") == [
+        ([_fractions(SQUARE), _fractions(HOLE)], {"render_height": 12}),
+    ]
+
+
+def test_two_polygons_in_one_feature_are_two_entries_with_its_properties():
+    shifted = [(x + 200, y) for x, y in SQUARE]
+    layer = _layer("buildings", (3, _polygon_geometry(SQUARE, shifted), {"render_height": 9}))
+    assert mvt.read_polygons(mvt.encode([layer]), "buildings") == [
+        ([_fractions(SQUARE)], {"render_height": 9}),
+        ([_fractions(shifted)], {"render_height": 9}),
+    ]
+
+
+def test_a_hole_before_any_exterior_and_a_zero_area_ring_are_dropped():
+    flat = [(0, 0), (50, 50), (100, 100)]
+    geometry = _polygon_geometry(HOLE, flat, SQUARE)
+    layer = _layer("buildings", (3, geometry, {}))
+    assert mvt.read_polygons(mvt.encode([layer]), "buildings") == [([_fractions(SQUARE)], {})]
+
+
+def test_other_layers_and_points_are_ignored():
+    roads = _layer("roads", (3, _polygon_geometry(SQUARE), {"class": "road"}))
+    point = mvt.points_geometry(np.array([5]), np.array([5]))
+    beside = [(x + 200, y) for x, y in SQUARE]
+    buildings = _layer("buildings", (1, point, {"name": "a point"}), (3, _polygon_geometry(beside), {"render_height": 3}))
+    tile = mvt.encode([roads, buildings])
+    assert mvt.read_polygons(tile, "buildings") == [([_fractions(beside)], {"render_height": 3})]
+    assert mvt.read_polygons(tile, "roads") == [([_fractions(SQUARE)], {"class": "road"})]
+    assert mvt.read_polygons(tile, "water") == []
+
+
+def test_a_gzipped_tile_is_opened_first():
+    layer = _layer("buildings", (3, _polygon_geometry(SQUARE), {"render_height": 12}))
+    tile = mvt.encode([layer])
+    assert mvt.read_polygons(gzip.compress(tile), "buildings") == mvt.read_polygons(tile, "buildings")
+
+
+def test_a_polygon_tile_cut_short_or_not_a_tile_is_refused():
+    layer = _layer("buildings", (3, _polygon_geometry(SQUARE, HOLE), {"render_height": 12}))
+    tile = mvt.encode([layer])
+    with pytest.raises(ValueError):
+        mvt.read_polygons(tile[:-3], "buildings")
+    with pytest.raises(ValueError):
+        mvt.read_polygons(b"\x1f\x8b not gzip at all", "buildings")
+
+
+def test_a_point_in_the_buffer_comes_out_below_zero():
+    beyond = [(-20, 0), (100, 0), (100, 100), (-20, 100)]
+    layer = _layer("buildings", (3, _polygon_geometry(beyond), {}))
+    [(rings, _props)] = mvt.read_polygons(mvt.encode([layer]), "buildings")
+    assert rings[0][0] == (-20 / mvt.EXTENT, 0.0)
+    assert rings[0][0][0] < 0

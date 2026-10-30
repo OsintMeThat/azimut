@@ -34,10 +34,97 @@ vi.mock('../../lib/api.js', () => ({ api: {
 vi.mock('../../lib/state.svelte.js', () => ({ ensureCase: async () => ({ id: 'case-a' }),
   reloadCase: async () => {}, toast: vi.fn(), uiState: {}, prefs: { units: 'metric' } }));
 const { default: Panel } = await import('./DetectPanel.svelte');
+const { api } = await import('../../lib/api.js');
 
 let live, target;
 const settle = async () => { for (let i = 0; i < 120; i++) await Promise.resolve(); flushSync(); };
-afterEach(() => { if (live) unmount(live); live = null; target?.remove(); served = run; });
+afterEach(() => {
+  if (live) unmount(live);
+  live = null; target?.remove(); served = run;
+  vi.resetAllMocks();
+  document.body.innerHTML = '';
+});
+
+const button = (name, root = target) => [...root.querySelectorAll('button')]
+  .find((node) => node.textContent.trim() === name);
+
+it('asks before keeping the remaining candidates, including from another verdict tab', async () => {
+  served = { ...run, results: [row('0-1', pass), row('0-2', pass),
+    { ...row('0-3', other), review: 'kept' }] };
+  target = document.createElement('div'); document.body.append(target);
+  live = mount(Panel, { target, props: { caseId: 'case-a', opening: `runs-${RUN}` } });
+  await settle();
+  const pinned = [...target.querySelectorAll('.chip')].find((node) => node.textContent.startsWith('Pinned'));
+  pinned.click(); await settle();
+  button('Keep all').click(); await settle();
+  let dialog = document.querySelector('[role="alertdialog"]');
+  expect(dialog.getAttribute('aria-label')).toBe('Keep all 2 remaining candidates?');
+  expect(dialog.textContent).toContain('You can dismiss them individually later.');
+  expect(api.post).not.toHaveBeenCalled();
+  // Candidate shortcuts cannot dismiss or move the selection behind the question.
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true }));
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  await settle();
+  expect(api.patch).not.toHaveBeenCalled();
+  expect(target.textContent).toContain('Kept as a pin in this case');
+  button('Cancel', dialog).click(); await settle();
+  expect(document.querySelector('[role="alertdialog"]')).toBe(null);
+  expect(api.post).not.toHaveBeenCalled();
+
+  api.post.mockImplementation(async () => {
+    served = { ...served, results: served.results.map((row) => row.review === 'new' ? { ...row, review: 'noted' } : row) };
+    return structuredClone(served);
+  });
+  button('Keep all').click(); await settle();
+  dialog = document.querySelector('[role="alertdialog"]');
+  button('Keep all', dialog).click(); await settle();
+  expect(api.post).toHaveBeenCalledExactlyOnceWith(`/api/cases/case-a/analysis/runs/${RUN}/results/keep`, {});
+  expect(document.querySelector('[role="alertdialog"]')).toBe(null);
+  expect(target.textContent).toContain('Kept 2');
+  expect(target.textContent).toContain('Pinned 1');
+  expect(button('Keep all').disabled).toBe(true);
+});
+
+it('shows kept candidates after keeping the To review queue and still allows dismiss', async () => {
+  target = document.createElement('div'); document.body.append(target);
+  live = mount(Panel, { target, props: { caseId: 'case-a', opening: `runs-${RUN}` } });
+  await settle();
+  [...target.querySelectorAll('.chip')].find((node) => node.textContent.startsWith('To review')).click();
+  await settle();
+  api.post.mockImplementation(async () => {
+    served = { ...run, results: run.results.map((row) => ({ ...row, review: 'noted' })) };
+    return structuredClone(served);
+  });
+  button('Keep all').click(); await settle();
+  button('Keep all', document.querySelector('[role="alertdialog"]')).click(); await settle();
+  expect(target.textContent).toContain('1 of 3');
+  expect(target.textContent).not.toContain('outside this filter');
+  expect(target.textContent).toContain('Kept in this detection');
+  expect(button('Dismiss').disabled).toBe(false);
+  api.patch.mockResolvedValueOnce({ ...served.results[0], review: 'dismissed' });
+  button('Dismiss').click(); await settle();
+  expect(api.patch).toHaveBeenCalledWith(`/api/cases/case-a/analysis/runs/${RUN}/results/0-1`, { review: 'dismissed' });
+  expect(target.textContent).toContain('1 of 2');
+});
+
+it('keeps the confirmation open on a failed save and permits a retry', async () => {
+  served = { ...run, results: [row('0-1', pass)], count: 1 };
+  target = document.createElement('div'); document.body.append(target);
+  live = mount(Panel, { target, props: { caseId: 'case-a', opening: `runs-${RUN}` } });
+  await settle();
+  button('Keep all').click(); await settle();
+  const dialog = document.querySelector('[role="alertdialog"]');
+  expect(dialog.getAttribute('aria-label')).toBe('Keep all 1 remaining candidate?');
+  api.post.mockRejectedValueOnce(new Error('Could not save the run'));
+  button('Keep all', dialog).click(); await settle();
+  expect(dialog.querySelector('[role="alert"]').textContent).toBe('Could not save the run');
+  expect(button('Keep all', dialog).disabled).toBe(false);
+  expect(target.textContent).toContain('To review 1');
+  api.post.mockResolvedValueOnce({ ...served, results: [{ ...served.results[0], review: 'noted' }] });
+  button('Keep all', dialog).click(); await settle();
+  expect(document.querySelector('[role="alertdialog"]')).toBe(null);
+  expect(button('Keep all').disabled).toBe(true);
+});
 
 it('shows a radar pass once, however the map writes it back', async () => {
   // what Detect does: the shown pass is read and replaced by a fresh object

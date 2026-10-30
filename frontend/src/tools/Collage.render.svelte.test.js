@@ -413,7 +413,7 @@ describe('finding and leaving a collage', () => {
     expect(collagePosts()).toHaveLength(0); // still waiting on the autosave
 
     collages = [{ name: 'Collage 1', title: 'Collage 1', pieces: 1 }];
-    button('Close').click();
+    button('Collages').click();
     await settle(20);
 
     expect(collagePosts()).toHaveLength(1);
@@ -436,7 +436,7 @@ describe('finding and leaving a collage', () => {
     const input = target.querySelector('input[aria-label="Collage name"]');
     typeInto(input, 'Harbour');
     input.dispatchEvent(new FocusEvent('blur'));
-    button('Close').click();
+    button('Collages').click();
     await settle(20);
     expect(target.querySelector('.tool-header')).not.toBeNull(); // waiting on the rename
 
@@ -458,7 +458,7 @@ describe('finding and leaving a collage', () => {
     target.querySelector('.picker .thumb').click();
     await settle(20);
 
-    button('Close').click();
+    button('Collages').click();
     await settle(20);
 
     expect(target.querySelector('.tool-header')).not.toBeNull();
@@ -476,7 +476,7 @@ describe('finding and leaving a collage', () => {
     flushSync();
     target.querySelector('.picker .thumb').click();
     await settle(20);
-    button('Close').click(); // the save runs, and fails
+    button('Collages').click(); // the save runs, and fails
     await settle(20);
     expect(target.querySelector('.status.error')).not.toBeNull();
     const before = collagePosts().length;
@@ -499,7 +499,7 @@ describe('finding and leaving a collage', () => {
     flushSync();
     target.querySelector('.picker .thumb').click();
     await settle(20);
-    button('Close').click();
+    button('Collages').click();
     await settle(20);
     toast.mockClear();
 

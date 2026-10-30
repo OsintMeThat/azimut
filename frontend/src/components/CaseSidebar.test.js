@@ -160,6 +160,17 @@ describe('tree', () => {
     expect(shell).toContain('assignFolderBatch(caseState.current.id, entities, folder)');
   });
 
+  it('files a media dragged in from the library, and says where it went', () => {
+    // the drop itself is driven in sidebar/SidebarTree.render.test.js
+    expect(shell).toContain('onfilemedia={onFileMedia}');
+    const handler = shell.slice(shell.indexOf('async function onFileMedia'), shell.indexOf('// ── scrolling while'));
+    // a file already in that folder costs no request
+    expect(handler).toContain("entities.filter((e) => (e.attrs.folder ?? '') !== folder)");
+    expect(handler).toContain('assignFolderBatch(caseState.current.id, moving, folder)');
+    expect(handler).toContain('`Filed in ${folder}`');
+    expect(handler).toContain('`Already in ${folder}`');
+  });
+
   it('multi-selects entity rows only, and drags the whole selection', () => {
     expect(tree).toContain("import { dragPayload, rangeSelected, toggleSelected } from '../../lib/rowSelect.js'");
     expect(tree).toContain('if (ev?.shiftKey)');

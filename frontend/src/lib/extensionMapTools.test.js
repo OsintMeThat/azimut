@@ -26,6 +26,7 @@ import * as app from './gridSearch.js';
 import * as appSky from './skyOverlay.js';
 import * as appMarkers from './savedMarkers.js';
 import * as appRefs from './refViewers.js';
+import * as appPlayer from './inspectPlayer.js';
 import * as appFires from './map/firms.js';
 import * as appCal from './calendar.js';
 
@@ -817,6 +818,13 @@ describe('the reference windows', () => {
   const SCREEN = { w: 1200, h: 800 };
   const PICTURE = { path: 'media/roof.jpg', filename: 'roof.jpg', title: 'The roof', kind: 'image' };
   const CLIP = { path: 'media/walk.mp4', filename: 'walk.mp4', kind: 'video' };
+  // what the extension's media answer carries for a window to unfold
+  const POSTED = {
+    ...PICTURE,
+    notes: ' North wall ',
+    taken_at: '2026-03-12T14:02:09+03:00',
+    source: { webpage_url: 'https://www.x.com/a/status/1', uploader: 'someone', upload_date: '20260313' },
+  };
 
   it('places and resizes a window exactly as the app does', () => {
     const cases = [
@@ -855,9 +863,12 @@ describe('the reference windows', () => {
 
   it('opens a window on the same state the app would', () => {
     const spawn = { x: 86, y: 86, z: 3 };
-    for (const item of [PICTURE, CLIP]) {
+    for (const item of [PICTURE, CLIP, POSTED]) {
       expect(ext.createViewer('ref-2', item, spawn)).toEqual(appRefs.createViewer('ref-2', item, spawn));
     }
+    expect(ext.createViewer('ref-2', PICTURE, { ...spawn, docked: true })).toEqual(
+      appRefs.createViewer('ref-2', PICTURE, { ...spawn, docked: true })
+    );
     // the kind decides how the window shows it: a picture is decoded and
     // painted, a clip is handed to a <video> (mapref.js)
     expect(ext.createViewer('ref-3', CLIP).kind).toBe('video');
@@ -891,6 +902,90 @@ describe('the reference windows', () => {
     expect(refs.shapes()).toEqual([]);
     refs.disarm();
     expect(refs.open).toHaveLength(1);
+  });
+
+  it('fades, docks and slows down exactly as the app does', () => {
+    for (const value of [0, 0.02, 0.33, 0.5, 0.97, 1, 4, 'x']) {
+      expect(ext.clampOpacity(value)).toBe(appRefs.clampOpacity(value));
+    }
+    for (const state of [{ opacity: 1, fadeTo: 0.5 }, { opacity: 0.4, fadeTo: 0.5 }, { opacity: 1 }]) {
+      expect(ext.flipFade(state)).toEqual(appRefs.flipFade(state));
+    }
+    for (const [w, total] of [[340, 1600], [90, 1600], [2000, 1600], [340, 300]]) {
+      expect(ext.clampDock(w, total)).toBe(appRefs.clampDock(w, total));
+    }
+    for (const rate of [1, 0.5, 0.25, 0.1, 2]) expect(ext.nextSlowRate(rate)).toBe(appRefs.nextSlowRate(rate));
+    expect(ext.MIN_OPACITY).toBe(appRefs.MIN_OPACITY);
+    expect(ext.DOCK_W).toBe(appRefs.DOCK_W);
+  });
+
+  it('reads the facts of a file exactly as the app does', () => {
+    for (const raw of ['20260313', '2026-03-12', '2026-03-12T14:02:09Z', '2026-03-12 14:02', 'last spring', '', null]) {
+      expect(ext.factDate(raw)).toBe(appRefs.factDate(raw));
+    }
+    for (const item of [POSTED, PICTURE, { source: { url: 'javascript:alert(1)' } }, { source: 'odd' }]) {
+      expect(ext.mediaFacts(item)).toEqual(appRefs.mediaFacts(item));
+      expect(ext.hasFacts(ext.mediaFacts(item))).toBe(appRefs.hasFacts(appRefs.mediaFacts(item)));
+    }
+  });
+
+  it('steps a clip frame by frame exactly as the Inspect player does', () => {
+    for (const fps of [null, 0, 24, 25, 29.97, 60]) {
+      expect(ext.frameDuration(fps)).toBe(appPlayer.frameDuration(fps));
+      for (const time of [0, 0.04, 1.234, 7.5]) {
+        expect(ext.shownFrameTime(time, fps)).toBe(appPlayer.shownFrameTime(time, fps));
+        expect(ext.shownFrameTime(time, fps, 1.2)).toBe(appPlayer.shownFrameTime(time, fps, 1.2));
+        for (const step of [-1, 1]) {
+          const seconds = step * appPlayer.frameDuration(fps);
+          expect(ext.stepTarget(time, seconds, fps, 8)).toBe(appPlayer.stepTarget(time, seconds, fps, 8));
+        }
+      }
+    }
+    for (const seconds of [0, 12.4, 62.0035, 3723.4]) {
+      expect(ext.preciseClock(seconds)).toBe(appPlayer.preciseClock(seconds));
+    }
+  });
+
+  it('keeps a frame beside its clip and docks either one', () => {
+    const refs = ext.createRefs();
+    const clip = refs.add({ ...CLIP, title: 'Walk', notes: 'Gate' });
+    const still = { width: 1920, height: 1080 }; // a decoded frame, as far as this goes
+    const frame = refs.keepFrame(clip.id, still, 12.4);
+    expect(frame).toMatchObject({ kind: 'image', still, title: 'Walk · 0:12.400', x: clip.x + 26, y: clip.y + 26 });
+    expect(frame.facts).toBe(clip.facts); // the clip's own dates and notes
+    expect(frame.z).toBeGreaterThan(clip.z);
+
+    refs.place(clip.id, 'left');
+    expect(clip.docked).toBe('left');
+    expect(refs.dockedOn('left')).toEqual([clip]);
+    // a frame kept from a docked clip joins it in the column
+    expect(refs.keepFrame(clip.id, still, 0).docked).toBe('left');
+    expect(refs.keepFrame('ref-nope', still, 0)).toBe(null);
+    refs.place(clip.id, 'tr');
+    expect(clip).toMatchObject({ docked: false, corner: 'tr' });
+    refs.place(clip.id, 'tr'); // the place it is in sets it free
+    expect(clip).toMatchObject({ docked: false, corner: false });
+
+    // the kept frames are still docked on the left, so the right column gets
+    // half of what that column leaves
+    refs.setDockWidth('right', 9000, 1600);
+    expect(refs.dockWidth('right')).toBe(630);
+  });
+
+  it('settles, pins and places a window exactly as the app does', () => {
+    const map = { w: 1000, h: 700 };
+    for (const [x, y] of [[10, 200], [990, 690], [-50, -50], [300, 200]]) {
+      expect(ext.snapWindow(x, y, 320, 260, map)).toEqual(appRefs.snapWindow(x, y, 320, 260, map));
+      expect(ext.settledCorner(x, y, 320, 260, map)).toBe(appRefs.settledCorner(x, y, 320, 260, map));
+    }
+    const panel = [{ x: 700, y: 76, w: 284, h: 300 }];
+    for (const corner of ['tl', 'tr', 'bl', 'br']) {
+      for (const [w, h] of [[320, 260], [990, 690]]) {
+        expect(ext.cornerSpot(corner, w, h, map, panel)).toEqual(appRefs.cornerSpot(corner, w, h, map, panel));
+      }
+    }
+    expect(ext.PLACES).toEqual(appRefs.PLACES);
+    expect(ext.placeOf({ docked: false, corner: 'bl' })).toEqual(appRefs.placeOf({ docked: false, corner: 'bl' }));
   });
 
   it('folds one window away without touching the others', () => {

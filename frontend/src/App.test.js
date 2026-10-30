@@ -54,6 +54,27 @@ describe('Add event, from every tool', () => {
   });
 });
 
+describe('the ? in the topbar', () => {
+  it('opens the guide over the tool it was pressed from, on every tool', () => {
+    expect(markup).toContain('onclick={() => openGuide(uiState.tool)}');
+    expect(markup).toMatch(/\{#if uiState\.guide\}\s*<GuideDialog at=\{uiState\.guide\.at\} onclose=\{\(\) => \(uiState\.guide = null\)\} \/>/);
+    // no Guide tab any more, so nothing hides the mark
+    expect(markup).not.toContain("uiState.tool !== 'guide'");
+    expect(source).not.toContain("tools/Guide.svelte");
+  });
+
+  it('is what the tour and What’s new point at, and the update notice waits behind them', () => {
+    expect(markup).toContain('bind:this={guideButton}');
+    expect(markup).toMatch(/<Onboarding\s+start=\{uiState\.onboarding\}[\s\S]*?anchor=\{guideButton\}/);
+    expect(markup).toContain('{#if updateState.show && !uiState.onboarding}');
+    // decided once the case list says whether this is a newcomer, and never in a map window
+    expect(source).toMatch(/\.finally\(\(\) => \{\s*onboardOnStart\(\);/);
+    expect(source).toMatch(/function onboardOnStart\(\) \{\s*if \(solo \|\| uiState\.onboarding\) return;/);
+    // asking for the guide from it opens it where the `?` would, or where the card says (Find's notice)
+    expect(source).toMatch(/function onboarded\([^)]*\) \{[\s\S]*?if \(guide\) openGuide\(guide === true \? uiState\.tool : guide\);/);
+  });
+});
+
 describe('the tab strip', () => {
   it('names the open tool on its tab, since Geo Proof and Geo Report carry no title of their own', () => {
     expect(markup).toContain("aria-current={uiState.tool === toolId ? 'page' : undefined}");

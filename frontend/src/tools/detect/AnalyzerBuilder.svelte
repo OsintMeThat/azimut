@@ -178,7 +178,7 @@
       <button role="tab" aria-selected={tab === 'rules'} class:on={tab === 'rules'} onclick={() => (tab = 'rules')}>
         Rules <span class="count">{recipe.rules.length}</span>
       </button>
-      <button role="tab" aria-selected={tab === 'checks'} class:on={tab === 'checks'} onclick={() => (tab = 'checks')}>
+      <button role="tab" aria-selected={tab === 'checks'} class:on={tab === 'checks'} data-guide="detect.checks" onclick={() => (tab = 'checks')}>
         Checks <span class="count" class:need={!summary.total} class:fail={summary.fail}
           class:pass={summary.total > 0 && !summary.fail && summary.pass === summary.total}>{badge}</span>
       </button>
@@ -186,15 +186,15 @@
     </div>
 
     {#if tab === 'rules'}
-      <div class="strip" class:stale={bench.stale} class:hidden={bench.locked} aria-label="The check on the map">
+      <div class="strip" class:stale={bench.stale} class:hidden={bench.locked} aria-label="The check on the map" data-guide="detect.verdict">
         <div class="said">
           <strong>{bench.check?.name ?? 'No check on the map'}</strong>
           <span aria-live="polite">{verdict}</span>
         </div>
-        <button class="btn btn-sm" class:btn-primary={!bench.tested} class:done={bench.tested} disabled={!bench.canTest}
+        <button class="btn btn-sm" class:btn-primary={!bench.tested} class:done={bench.tested} disabled={!bench.canTest} data-guide="detect.test"
           title={bench.blocked || undefined} onclick={() => bench.test()}>{bench.testLabel}</button>
       </div>
-      <section class="rules" aria-label="Rules">
+      <section class="rules" aria-label="Rules" data-guide="detect.rules">
         <div class="row match">
           <span class="hint grow">Keep what passes</span>
           <div class="cmp-seg" role="group" aria-label="How the rules combine">
@@ -272,7 +272,7 @@
 <div class="cmp-dock-foot" inert={bench.locked}>
   <div class="row">
     <button class="btn btn-sm" onclick={oncancel}>Cancel</button>
-    <button class="btn btn-primary grow" disabled={saving || !!saveProblem} onclick={save}>
+    <button class="btn btn-primary grow" disabled={saving || !!saveProblem} data-guide="detect.builder-save" onclick={save}>
       {isNew ? 'Add to my analyzers' : 'Save changes'}
     </button>
   </div>

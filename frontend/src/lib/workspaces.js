@@ -41,15 +41,15 @@ export const HOME_WORKSPACE = {
   id: 'home',
   label: 'Home',
   icon: 'compass',
-  tools: ['overview', 'guide'],
+  tools: ['overview'],
 };
 
 /** The rail, in investigation order. */
 export const WORKSPACES = [
   { id: 'collect', label: 'Sources', icon: 'download', tools: ['media', 'files', 'reverse'] },
   { id: 'examine', label: 'Examine', icon: 'inspect', tools: ['inspect', 'collage'] },
-  { id: 'map', label: 'Map', icon: 'satellite', tools: ['satellite', 'compare', 'detect', 'coordinates'] },
-  { id: 'compose', label: 'Compose', icon: 'proof', tools: ['proof', 'post', 'notebook'] },
+  { id: 'map', label: 'Map', icon: 'satellite', tools: ['satellite', 'compare', 'detect', 'horizon', 'coordinates'] },
+  { id: 'compose', label: 'Compose', icon: 'proof', tools: ['proof', 'post', 'plate', 'notebook'] },
 ];
 
 /** Every workspace, on the rail or not — what tool lookup and deep links resolve against. */
@@ -57,7 +57,6 @@ export const ALL_WORKSPACES = [HOME_WORKSPACE, CASE_WORKSPACE, ...WORKSPACES];
 
 export const TOOL_LABELS = {
   overview: 'Overview',
-  guide: 'Guide',
   board: 'Board',
   graph: 'Graph',
   timeline: 'Timeline',
@@ -70,9 +69,11 @@ export const TOOL_LABELS = {
   satellite: 'Satellite',
   compare: 'Compare',
   detect: 'Detect',
+  horizon: 'Horizon',
   coordinates: 'Coords & Sky',
   proof: 'Geo Proof',
   post: 'Geo Report',
+  plate: 'Map plate',
   notebook: 'Notebook',
   settings: 'Settings',
 };

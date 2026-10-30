@@ -15,6 +15,8 @@
     "test:e2e:headed": "playwright test --headed",
     "calibrate:maps": "node calibration/record.mjs",
     "calibrate:earth": "node calibration/earth.mjs",
+    "guide:shots": "node guide/shots.mjs",
+    "guide:hero": "node guide/hero.mjs",
     "check": "svelte-check --output human --threshold warning"
   },
   "devDependencies": {
@@ -24,15 +26,26 @@
     "svelte": "^5.0.0",
     "svelte-check": "^4.7.3",
     "typescript": "^5.9.3",
-    "vite": "^8.1.4",
+    "vite": "^8.3.5",
     "vitest": "^4.1.11"
   },
   "dependencies": {
+    "@fontsource/barlow-condensed": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/noto-sans-arabic": "^5.3.0",
     "@fontsource/oxanium": "^5.2.8",
+    "@fontsource/roboto-condensed": "^5.3.0",
+    "@fontsource/source-serif-4": "^5.3.1",
+    "@mapbox/vector-tile": "^3.0.0",
+    "@maplibre/maplibre-gl-style-spec": "^26.4.1",
     "dompurify": "^3.4.16",
+    "earcut": "^3.2.4",
     "konva": "^9.3.0",
-    "maplibre-gl": "^6.8.0",
+    "maplibre-gl": "6.8.0",
     "marked": "^17.0.6",
-    "mermaid": "^11.16.1"
+    "mermaid": "^11.16.1",
+    "pbf": "^5.1.2",
+    "polygon-clipping": "^0.15.7"
   }
 }

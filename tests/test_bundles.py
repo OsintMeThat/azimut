@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sqlite3
+import uuid
 import zipfile
 from contextlib import closing
 from io import BytesIO
@@ -165,6 +166,20 @@ def test_an_export_during_a_write_leaves_sqlites_journal_behind(bundle_case):
 
     with zipfile.ZipFile(exported) as archive:
         assert [n for n in archive.namelist() if n.endswith(bundles.DB_COMPANIONS)] == []
+
+
+def test_an_export_during_a_sidecar_write_leaves_the_write_in_flight_behind(bundle_case):
+    """A thumbnail job writes `.name.json.<hex>.tmp` and renames it into place; an export meanwhile carries
+    neither the half-written file nor a name that went while it was being read (Windows, in CI)."""
+    meta = bundle_case.subdir("media") / ".meta"
+    meta.mkdir(parents=True, exist_ok=True)
+    (meta / ".roof.png.json.e39dd95e409948a29b7a9b709d040e3e.tmp").write_text("{", encoding="utf-8")
+    exported = bundles.export_case(bundle_case)
+    with zipfile.ZipFile(exported) as archive:
+        assert [n for n in archive.namelist() if n.endswith(".tmp")] == []
+    # listed, then renamed away before it was looked at: no longer there, so nothing to carry
+    gone = meta / "renamed.json"
+    assert list(bundles._walk([gone], bundle_case.path, lambda _rel: True)) == []
 
 
 def test_a_journal_in_a_received_bundle_never_lands_beside_the_database(bundle_case):
@@ -604,6 +619,67 @@ def test_manifest_is_an_allowlist_not_a_hint(bundle_case):
     destination = Case.create("Tampered import")
     with pytest.raises(bundles.BundleError, match="undeclared|do not match"):
         bundles.import_into(destination, tampered)
+
+
+def _from_a_newer_azimut(exported: Path, made_by: str, **header_changes) -> Path:
+    """The bundle again, as a later Azimut would write it: its version in the header
+    and a folder of case state this one has never heard of."""
+    later = config.bundles_dir() / f"later-{uuid.uuid4().hex[:8]}.azimut.zip"
+    with zipfile.ZipFile(exported) as source, zipfile.ZipFile(later, "w") as target:
+        infos = source.infolist()
+        header = json.loads(source.read(infos[0]))
+        target.writestr(infos[0], json.dumps({**header, "azimut_version": made_by, **header_changes}))
+        for info in infos[1:-1]:
+            target.writestr(info, source.read(info))
+        target.writestr(
+            f"{bundles.BUNDLE_ROOT}/{layout.TOOL_DIR}/.future/work.json", b"{}"
+        )
+        target.writestr(infos[-1], source.read(infos[-1]))
+    return later
+
+
+def test_a_bundle_from_a_newer_azimut_says_which_version_to_update_to(bundle_case):
+    later = _from_a_newer_azimut(bundles.export_case(bundle_case), "9.1.0")
+
+    destination = Case.create("From the future")
+    with pytest.raises(bundles.BundleError, match=r"made with Azimut 9\.1\.0; update Azimut"):
+        bundles.import_into(destination, later)
+
+
+def test_a_newer_format_or_database_names_the_version_too(bundle_case):
+    exported = bundles.export_case(bundle_case)
+    for change in ({"format_version": bundles.BUNDLE_FORMAT + 1}, {"case_db_schema": bundles.SQLITE_SCHEMA + 1}):
+        later = _from_a_newer_azimut(exported, "9.1.0", **change)
+        with pytest.raises(bundles.BundleError, match=r"made with Azimut 9\.1\.0"):
+            bundles.inspect_bundle(later)
+
+
+@pytest.mark.parametrize("made_by", [bundles.__version__, "0.0.1", "<b>9.9</b>", "9" * 60, None])
+def test_only_a_newer_plain_version_is_repeated_in_a_refusal(bundle_case, made_by):
+    later = _from_a_newer_azimut(bundles.export_case(bundle_case), made_by)
+
+    destination = Case.create(f"Not from the future {uuid.uuid4().hex[:6]}")
+    with pytest.raises(bundles.BundleError, match="undeclared case state"):
+        bundles.import_into(destination, later)
+
+
+def test_export_refuses_a_folder_this_azimut_does_not_know(bundle_case):
+    """What a newer Azimut wrote into the case would otherwise be left out without a word."""
+    future = bundle_case.tool_root / ".future"
+    future.mkdir()
+    (future / "work.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(bundles.BundleError, match=r"'\.future' folder, likely work from a newer version"):
+        bundles.export_case(bundle_case)
+
+
+def test_a_stray_file_beside_the_case_state_does_not_block_an_export(bundle_case):
+    (bundle_case.tool_root / ".DS_Store").write_bytes(b"\0")
+
+    exported = bundles.export_case(bundle_case)
+
+    with zipfile.ZipFile(exported) as archive:
+        assert not any(name.endswith(".DS_Store") for name in archive.namelist())
 
 
 def test_manifest_sizes_are_checked_before_extraction(bundle_case):

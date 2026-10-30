@@ -11,14 +11,14 @@ import {
 } from './workspaces.js';
 
 const ALL_TOOLS = [
-  'overview', 'guide',
+  'overview',
   'board', 'graph', 'timeline', 'sheet', 'media', 'files', 'reverse', 'inspect', 'satellite', 'compare', 'detect', 'coordinates', 'proof', 'post', 'notebook',
   'settings',
 ];
 
 describe('workspaceOf', () => {
   it('maps every tool to exactly one workspace', () => {
-    for (const tool of ['overview', 'guide', 'board', 'graph', 'timeline', 'sheet', 'media', 'files', 'reverse', 'inspect', 'satellite', 'compare', 'detect', 'coordinates', 'proof', 'post', 'notebook']) {
+    for (const tool of ['overview', 'board', 'graph', 'timeline', 'sheet', 'media', 'files', 'reverse', 'inspect', 'satellite', 'compare', 'detect', 'coordinates', 'proof', 'post', 'notebook']) {
       const owners = ALL_WORKSPACES.filter((w) => w.tools.includes(tool));
       expect(owners).toHaveLength(1);
       expect(workspaceOf(tool)).toBe(owners[0]);
@@ -43,10 +43,8 @@ describe('workspaceOf', () => {
   it('keeps home off the rail too, on the mark rather than a fifth seat', () => {
     expect(WORKSPACES.map((w) => w.id)).not.toContain('home');
     expect(workspaceOf('overview')).toBe(HOME_WORKSPACE);
-    expect(workspaceOf('guide')).toBe(HOME_WORKSPACE);
-    // two tabs, so the strip draws itself: the overview for somebody who has been
-    // here, the guide for somebody who has not
-    expect(HOME_WORKSPACE.tools).toEqual(['overview', 'guide']);
+    // one tab, so no strip: the guide opens over any tool from the `?` instead
+    expect(HOME_WORKSPACE.tools).toEqual(['overview']);
   });
 
   it('groups media, files and reverse search under collect', () => {
@@ -80,7 +78,8 @@ describe('product-facing labels', () => {
     expect(TOOL_LABELS.timeline).toBe('Timeline');
     // the tab is the overview; "Home" is the workspace the mark opens
     expect(TOOL_LABELS.overview).toBe('Overview');
-    expect(TOOL_LABELS.guide).toBe('Guide');
+    // the guide opens over the tools from the `?`, so it is no tool of its own
+    expect(TOOL_LABELS.guide).toBeUndefined();
   });
 });
 
@@ -118,7 +117,6 @@ describe('toolFromHash', () => {
     expect(toolFromHash('#case/board', ALL_TOOLS)).toBe('board');
     expect(toolFromHash('#board', ALL_TOOLS)).toBe('board');
     expect(toolFromHash('#home', ALL_TOOLS)).toBe('overview');
-    expect(toolFromHash('#home/guide', ALL_TOOLS)).toBe('guide');
   });
 
   it('accepts workspace/tab form', () => {

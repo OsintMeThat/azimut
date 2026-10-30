@@ -13,6 +13,7 @@ import { shouldShowUpdate } from './appUpdate.js';
 import { extensionVersion, pingExtensions, extensionState } from './extBridge.js';
 import { classify } from './extInstall.js';
 import { loadRelationTypes } from './relations.svelte.js';
+import { layerMemory } from './map/layerMemory.js';
 
 /**
  * App-wide display preferences (Settings → General), mirrored from
@@ -23,8 +24,8 @@ export const prefs = $state({
   coordFormat: 'dd', // 'dd' | 'dms' | 'mgrs'
   units: 'metric', // 'metric' | 'imperial'
   homeView: { lat: 43, lon: 25, zoom: 3 }, // where Satellite opens
-  mapSync: true, // Satellite, Compare and Detect share one camera
-  detectView: { collapsed: false, width: 380, basemap: 'esri-world-imagery', overlays: ['boundaries', 'placenames'], saved: true },
+  mapSync: true, // Satellite, Compare, Detect and Horizon share one camera
+  detectView: { collapsed: false, width: 380, basemap: 'esri-world-imagery' },
   captureScaleNorth: false, // burn a scale bar and a north arrow into captures
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
   postTarget: 'x', // social composer a fresh post draft starts with
@@ -34,7 +35,14 @@ export const prefs = $state({
   signatureHandle: '', // account handle stamped onto proofs that opt into it
   updateCheckOnStart: true, // ask GitHub for a newer release when the page loads
   updateDismissedVersion: '', // the release tag muted with "don't show again"
+  tour: '', // the first-run tour: '' never started, the page it resumes on, or 'done'
+  whatsNewSeen: '', // the version whose What's new was put away for good
+  findBetaSeen: false, // Horizon Find's beta notice was read
+  quality3d: 'full', // how much the 3D views draw on this computer (lib/quality3d.js)
 });
+
+/** The app itself, as GET /api/settings describes it: the version the welcome names. */
+export const appInfo = $state({ version: '' });
 
 /**
  * The startup update pop-up (App.svelte). `show` is flipped on once a check
@@ -107,7 +115,12 @@ export function applyPrefs(s) {
   if (s.update_check_on_start !== undefined) prefs.updateCheckOnStart = s.update_check_on_start;
   if (s.update_dismissed_version !== undefined)
     prefs.updateDismissedVersion = s.update_dismissed_version;
+  if (s.tour !== undefined) prefs.tour = s.tour;
+  if (s.whats_new_seen !== undefined) prefs.whatsNewSeen = s.whats_new_seen;
+  if (s.find_beta_seen !== undefined) prefs.findBetaSeen = s.find_beta_seen;
+  if (s.quality_3d !== undefined) prefs.quality3d = s.quality_3d;
   if (s.extension_version !== undefined) updatesState.extensionBundled = s.extension_version;
+  if (s.version) appInfo.version = s.version;
 }
 
 /**
@@ -182,6 +195,22 @@ export async function dismissUpdate(mute = false) {
   }
 }
 
+/**
+ * Keep where the tour stands, which What's new was read and whether Find's beta
+ * notice was (lib/onboarding.js): `{ tour, whats_new_seen, find_beta_seen }`, any of
+ * them. Taken at once, so the next page never waits on the disk.
+ */
+export async function keepOnboarding(fields) {
+  if (fields.tour !== undefined) prefs.tour = fields.tour;
+  if (fields.whats_new_seen !== undefined) prefs.whatsNewSeen = fields.whats_new_seen;
+  if (fields.find_beta_seen !== undefined) prefs.findBetaSeen = fields.find_beta_seen;
+  try {
+    await api.put('/api/settings/prefs', fields);
+  } catch {
+    /* the tour then starts over, or What's new shows again: a nicety lost, not work */
+  }
+}
+
 export const caseState = $state({
   current: null, // { id, name, scratch, entities, links, ... }
   list: [],
@@ -197,7 +226,7 @@ export const caseState = $state({
  * Settings edits one, so the composers' "start from a template" menus stay
  * current without re-fetching. Each entry: { id, name, updated_at, data }.
  */
-export const templatesState = $state({ proof: [], post: [] });
+export const templatesState = $state({ proof: [], post: [], map: [] });
 
 /**
  * The Post composer's live draft, mirrored for the template editor's preview so
@@ -211,6 +240,7 @@ export async function loadTemplates() {
     const t = await api.get('/api/templates');
     templatesState.proof = Array.isArray(t.proof) ? t.proof : [];
     templatesState.post = Array.isArray(t.post) ? t.post : [];
+    templatesState.map = Array.isArray(t.map) ? t.map : [];
   } catch {
     /* templates are a convenience; an empty store is a fine fallback */
   }
@@ -239,9 +269,12 @@ export const uiState = $state({
   sidebarView: loadSidebarView(), // 'folders' | 'todo' | 'recent', remembered across reloads
   toasts: [],
   settingsTab: null, // settings section id to open when switching to Settings
-  // Guide section to land on when switching to the Guide, from the `?` in the
-  // topbar. Consumed by that tab, so scrolling away afterwards sticks.
-  guideSection: null,
+  // The guide open over the tools, and what it opened on: a tool, a page or a
+  // journey (`{ at }`, lib/guide.js `landingFor`). Null while it is closed.
+  guide: null,
+  // The welcome, the tour or What's new over everything (components/Onboarding.svelte):
+  // `{ kind, step?, pages? }` as lib/onboarding.js `onStart` gives it. Null while closed.
+  onboarding: null,
   // cross-tool handoffs (the workbench glue):
   composeQueue: [], // media paths queued for the Proof Composer
   postProof: null, // proof spec handed to the Post Composer
@@ -260,6 +293,13 @@ export const uiState = $state({
   openInspect: null, // name of a file's Inspect work, reopened on that file
   openCollage: null, // collage name to reopen in the Collage tool
   openCompare: null, // compare-session name to reopen in the Compare tool
+  openHorizonView: null, // saved Horizon view name to reopen in the Horizon tab
+  openHorizonFind: null, // a search the case keeps, to open in Horizon's Find
+  openPlate: null, // map plate name to reopen in the Map plate tool
+  openPlateTemplate: null, // map template id to edit in the Map plate tool, from Settings
+  newPlate: false, // the Map asked for a plate of what it shows: the Map plate tool opens one
+  editLayer: null, // { name, title, view }: a plate made a layer to draw in; the Map opens it for editing there
+  focusMode: false, // a tool gave its page the whole window (the plate's focus): the app's bars and rail step aside
   openAnalyzer: null, // saved Detect item stem to reopen without loading imagery
   // Entity id the Board should open Details on. The graph-only types — a person,
   // an account, a claim — have no tool of their own to be reopened in, so the
@@ -322,10 +362,10 @@ export const uiState = $state({
    */
   mapPoint: null, // { lat, lon, zoom }
   /**
-   * The window's camera, which Satellite, Compare and Detect share while
-   * `prefs.mapSync` is on (`lib/map/sharedView.js`): `{ lat, lon, zoom,
+   * The window's camera, which Satellite, Compare, Detect and Horizon share
+   * while `prefs.mapSync` is on (`lib/map/sharedView.js`): `{ lat, lon, zoom,
    * bearing, by }`, where `by` is the tab that wrote it or 'link' for the
-   * chain. Session-only. A case switch leaves it: a camera is not case state.
+   * chain. Horizon writes its eye there, turned to its heading. Session-only. A case switch leaves it: a camera is not case state.
    */
   mapView: null,
   /**
@@ -343,6 +383,28 @@ export const uiState = $state({
    * same hand-off as `gotoCoords`. Consumed once, session-only.
    */
   lookAt: null,
+  /**
+   * An eye handed to the Horizon tab from a map's right-click, Look from here:
+   * `{ lat, lon, heading? }`. Consumed once, session-only.
+   */
+  horizonAt: null,
+  /**
+   * Where the Horizon tab's eye stands and looks, once it rests: `{ lat, lon,
+   * heading, fov, projection }`. Satellite draws it as a dashed cone, the view
+   * no save has kept. Session-only, and not case state: a camera is not.
+   */
+  horizonEye: null,
+  /**
+   * A photo or a video handed to the Horizon tab to lay over its view, from
+   * Inspect: `{ path, kind, title?, time? }`. Consumed once, session-only.
+   */
+  horizonPhoto: null,
+  /**
+   * A Horizon setting asked for from the command palette, by its id
+   * (lib/horizon/panelIndex.js): the inspector opens its group and lights it.
+   * Consumed once, session-only.
+   */
+  horizonSetting: null,
   focusCapture: null, // case-relative capture path selected from another workspace
   // Satellite reference viewers: floating scratch windows holding a media image
   // over the map to eyeball against the imagery. Session-only — never captured
@@ -508,7 +570,20 @@ export async function openCase(id, { asked = false } = {}) {
  * Startup: load the case list and reopen the last-used case (if it still
  * exists on disk). Called once from App on mount.
  */
-export async function initSession(explicitCaseId = null) {
+export function initSession(explicitCaseId = null) {
+  const starting = startSession(explicitCaseId);
+  started = starting.catch(() => {});
+  return starting;
+}
+
+let started = Promise.resolve();
+
+/** Settled once startup has reopened its case: one opened before that would be replaced by it. */
+export function sessionStarted() {
+  return started;
+}
+
+async function startSession(explicitCaseId) {
   // preferences must land before the tools render, or coordinates would flash
   // in the wrong format; a settings read failure is never fatal to a session
   await loadPrefs().catch(() => {});
@@ -559,13 +634,13 @@ export async function reloadCase() {
   caseState.rev++;
 }
 
-/** Create a case and open it. Answers null when the analyst kept the open one. */
+/** Create a case and open it. Answers null when it is not the one now open: the analyst kept
+ *  theirs, or another case was chosen while it was being made. */
 export async function createCase(name) {
   if (!(await leaveCurrentCase('create'))) return null;
   const created = await api.post('/api/cases', { name });
   await refreshCaseList();
-  await openCase(created.id, { asked: true });
-  return created;
+  return (await openCase(created.id, { asked: true })) ? created : null;
 }
 
 /**
@@ -630,6 +705,10 @@ function clearCaseHandoffs() {
   uiState.openInspect = null;
   uiState.openCollage = null;
   uiState.openCompare = null;
+  uiState.openHorizonView = null;
+  uiState.openHorizonFind = null;
+  uiState.openPlate = null;
+  uiState.newPlate = false;
   uiState.openAnalyzer = null;
   uiState.drawInGraph = null;
   uiState.openBoardEntity = null;
@@ -643,6 +722,8 @@ function clearCaseHandoffs() {
   uiState.mapTimelineRange = null;
   uiState.gotoCoords = null;
   uiState.lookAt = null;
+  uiState.horizonAt = null;
+  uiState.horizonPhoto = null;
   uiState.skyAt = null;
   uiState.refViewers = [];
 }
@@ -667,6 +748,8 @@ export function closeCase() {
  */
 export async function deleteCase(id) {
   await api.del(`/api/cases/${id}`);
+  // the layers each map had on in it, kept in this browser (lib/map/layerMemory)
+  layerMemory.forget(id);
   if (caseState.current?.id === id) closeCase();
   await refreshCaseList();
 }

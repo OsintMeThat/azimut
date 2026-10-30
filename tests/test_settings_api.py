@@ -70,7 +70,7 @@ def test_keys_never_reach_a_case_folder(client, monkeypatch):
     """Principle 7: keys live in settings.json only — nothing under cases/."""
     from PIL import Image
 
-    from azimut.engine import tiles
+    from azimut.engine import tiles, workqueue
 
     monkeypatch.setattr(
         tiles, "_default_fetch", lambda c, u: Image.new("RGB", (256, 256), (9, 9, 9))
@@ -88,6 +88,8 @@ def test_keys_never_reach_a_case_folder(client, monkeypatch):
             "provider": "mapbox-satellite",
         },
     )
+    # the capture's thumbnail rewrites its sidecar, which Windows cannot open mid-rename
+    assert workqueue.wait_until_idle(timeout=60)
     case_dir = config.cases_dir() / cid
     hits = [
         p
@@ -335,6 +337,47 @@ def test_put_prefs_roundtrips_update_popup_prefs(client):
     assert saved["update_dismissed_version"] == "v0.2.0"
 
 
+def test_the_tour_and_whats_new_are_kept_with_the_workspace(client):
+    fresh = client.get("/api/settings").json()
+    assert (fresh["tour"], fresh["whats_new_seen"]) == ("", "")
+    saved = client.put("/api/settings/prefs", json={"tour": "3", "whats_new_seen": " 0.3.3 "}).json()
+    assert (saved["tour"], saved["whats_new_seen"]) == ("3", "0.3.3")
+    assert client.put("/api/settings/prefs", json={"tour": "done"}).json()["tour"] == "done"
+    # a tour state is a page or done, nothing else
+    for wrong in ("0", "12", "finished", "../x"):
+        assert client.put("/api/settings/prefs", json={"tour": wrong}).status_code == 422, wrong
+    assert client.get("/api/settings").json()["tour"] == "done"
+
+
+def test_the_find_beta_notice_is_kept_once_read(client):
+    assert client.get("/api/settings").json()["find_beta_seen"] is False
+    assert client.put("/api/settings/prefs", json={"find_beta_seen": True}).json()["find_beta_seen"] is True
+    # another preference saved leaves it read
+    client.put("/api/settings/prefs", json={"units": "imperial"})
+    assert client.get("/api/settings").json()["find_beta_seen"] is True
+    # the settings backup carries it to another machine
+    blob = client.get("/api/settings/export").json()
+    assert blob["settings"]["find_beta_seen"] is True
+    client.put("/api/settings/prefs", json={"find_beta_seen": False})
+    client.post("/api/settings/import", json=blob)
+    assert client.get("/api/settings").json()["find_beta_seen"] is True
+
+
+def test_the_3d_quality_is_this_computers_and_stays_behind_in_the_backup(client):
+    assert client.get("/api/settings").json()["quality_3d"] == "full"
+    assert client.put("/api/settings/prefs", json={"quality_3d": "light"}).json()["quality_3d"] == "light"
+    client.put("/api/settings/prefs", json={"units": "imperial"})
+    assert client.get("/api/settings").json()["quality_3d"] == "light"
+    for wrong in ("ultra", "", "Light"):
+        assert client.put("/api/settings/prefs", json={"quality_3d": wrong}).status_code == 422, wrong
+    # another machine has its own graphics card: the backup leaves the level here, and an import keeps this one's
+    blob = client.get("/api/settings/export").json()
+    assert "quality_3d" not in blob["settings"]
+    client.put("/api/settings/prefs", json={"quality_3d": "balanced"})
+    client.post("/api/settings/import", json={**blob, "settings": {**blob["settings"], "quality_3d": "light"}})
+    assert client.get("/api/settings").json()["quality_3d"] == "balanced"
+
+
 def test_put_prefs_roundtrips_signature_handle(client):
     saved = client.put("/api/settings/prefs", json={"signature_handle": "  @example  "}).json()
     assert saved["signature_handle"] == "@example"
@@ -504,7 +547,7 @@ def test_test_key_mapbox_ok_and_failure(client, monkeypatch):
     monkeypatch.setattr(httpx, "get", unauthorized)
     result = client.post("/api/settings/keys/mapbox/test").json()
     assert result["ok"] is False
-    assert result["detail"] == "the provider answered 401"
+    assert result["detail"] == "the service refused the key or the account (401)"
     # httpx puts the URL, token included, in its message: none of it may reach
     # the page, settings.json or the backup that carries provider_status.
     assert "pk.abc" not in json.dumps(client.get("/api/settings").json()["provider_status"])
@@ -557,7 +600,7 @@ def test_test_key_sentinelhub_reports_the_services_own_words(client, monkeypatch
 
     monkeypatch.setattr(httpx, "get", forbidden)
     result = client.post("/api/settings/keys/sentinelhub/test").json()
-    assert result == {"ok": False, "detail": "the provider answered 403"}
+    assert result == {"ok": False, "detail": "the service refused the key or the account (403)"}
 
 
 def test_sentinel2_tile_proxy_offsets_the_matrix_and_counts_tiles(client, monkeypatch):
@@ -589,6 +632,44 @@ def test_sentinel2_proxy_never_asks_upstream_past_the_native_ceiling(client, mon
     assert "TILEMATRIX=14" in upstream.urls[0]  # the native level, nothing deeper
     body = client.get("/api/settings").json()
     assert body["usage"]["sentinelhub"][body["month"]] == 1  # one tile, not sixteen
+
+
+def test_sentinel2_proxy_never_asks_upstream_shallower_than_it_renders(client, monkeypatch):
+    """Sentinel Hub refuses a pixel over 1500 m (400), which the 3D view's
+    coarse ground asked for. Below its floor the proxy says "no imagery" itself."""
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    upstream = _upstream(content=_png_bytes(), headers={"content-type": "image/png"})
+    _use_tile_upstream(monkeypatch, upstream)
+
+    listed = {p["id"]: p for p in client.get("/api/satellite/providers").json()}
+    assert listed["sentinel2"]["min_zoom"] == 7 and listed["esri-world-imagery"]["min_zoom"] == 0
+    # grid 5 == view z6 for a 512px provider: too coarse, never asked
+    assert client.get("/api/tiles/sentinel2/5/16/11").status_code == 404
+    assert upstream.urls == []
+    # grid 6 == view z7: the shallowest it renders
+    assert client.get("/api/tiles/sentinel2/6/33/22").status_code == 200
+    assert "TILEMATRIX=7" in upstream.urls[0]
+
+
+def test_sentinel2_proxy_waits_out_the_rate_limit(client, monkeypatch):
+    """Sentinel Hub allows 300 requests a minute, which a tilted 3D view's burst
+    can pass. Its 429 is waited out as it asks, not said as a spent allowance."""
+    from azimut.engine import tiles
+
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    answers = [httpx.Response(429, headers={"retry-after": "9"}), httpx.Response(200, content=b"JPEGDATA")]
+    asked: list[str] = []
+
+    def get(url):
+        asked.append(url)
+        return answers.pop(0)
+
+    paused: list[float] = []
+    monkeypatch.setattr(tiles.time, "sleep", paused.append)
+    _use_tile_upstream(monkeypatch, get)
+    assert client.get("/api/tiles/sentinel2/13/4151/2818").status_code == 200
+    assert len(asked) == 2
+    assert paused == [tiles.THROTTLE_PAUSE_MAX]  # never the nine seconds it asked
 
 
 def test_sentinel_layers_does_not_touch_the_network_without_check(client, monkeypatch):
@@ -951,6 +1032,12 @@ def test_display_prefs_default_and_round_trip(client):
     assert reloaded["post_target"] == "bluesky"
 
 
+def test_default_mention_holds_several_full_handles(client):
+    mention = "@geoconfirmed.org @uacontrolmap.bsky.social @ukrainedailyupdate.bsky.social"
+    saved = client.put("/api/settings/prefs", json={"post_mention": mention})
+    assert saved.json()["post_mention"] == mention
+
+
 def test_post_template_default_is_none_and_round_trips(client):
     assert client.get("/api/settings").json()["post_template"] == ""
 
@@ -1255,34 +1342,34 @@ def test_scrapers_live_in_the_workspace_not_the_install(client):
     assert config.runtime_dir().parent == config.internal_dir()
 
 
-def test_detect_prefs_drop_the_retired_labels_layer(client):
-    # A preference saved while the Labels layer existed is not refused for it.
-    saved = client.put(
-        "/api/settings/prefs",
-        json={"detect_view": {"overlays": ["labels", "boundaries", "roads"]}},
-    )
-    assert saved.status_code == 200, saved.text
-    assert saved.json()["detect_view"]["overlays"] == ["boundaries", "roads"]
-
-
-def test_detect_opens_with_the_borders_and_the_place_names(client):
-    assert client.get("/api/settings").json()["detect_view"]["overlays"] == ["boundaries", "placenames"]
-
-
-def test_detect_prefs_keep_the_place_names(client):
-    # Every layer Detect lists can be remembered, the place names included.
-    everything = ["boundaries", "placenames", "roads", "railway", "power", "seamarks", "gpstraces"]
-    saved = client.put("/api/settings/prefs", json={"detect_view": {"overlays": everything}})
-    assert saved.status_code == 200, saved.text
-    assert saved.json()["detect_view"]["overlays"] == everything
+def test_detect_layers_are_no_longer_a_setting(client):
+    # Each map keeps its layers per case in the browser. A settings file written
+    # while Detect kept them app-wide reads back without them, and the field is gone.
+    config.update_settings(lambda settings: settings.update(
+        detect_view={"collapsed": True, "overlays": ["labels", "roads"]}))
+    view = client.get("/api/settings").json()["detect_view"]
+    assert view == {"collapsed": True, "width": 380, "basemap": "esri-world-imagery"}
+    refused = client.put("/api/settings/prefs", json={"detect_view": {"overlays": ["roads"]}})
+    assert refused.status_code == 422
 
 
 def test_a_source_run_has_every_part_a_binary_can_lose(client):
     """What the release smoke test asks a binary: zones, PDF faces, the extension,
-    the scrapers' metadata."""
+    the scrapers' metadata, the buildings' decoders."""
     assert client.get("/api/settings/bundled").json() == {
-        "zones": True, "pdf_fonts": True, "extension": True, "scrapers": True,
+        "zones": True, "pdf_fonts": True, "extension": True, "scrapers": True, "buildings": True,
     }
+
+
+def test_a_build_that_cannot_decode_buildings_is_reported(monkeypatch):
+    """A frozen build missing a decoder still starts; only the self-check says so."""
+    from azimut.engine import cog, diagnostics
+
+    def broken(*_args):
+        raise ImportError("no zlib in this build")
+
+    monkeypatch.setattr(cog, "_decompress", broken)
+    assert diagnostics.bundled_parts()["buildings"] is False
 
 
 def test_a_build_without_the_scrapers_metadata_is_reported(monkeypatch):

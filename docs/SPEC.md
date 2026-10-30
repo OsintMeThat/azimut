@@ -61,9 +61,11 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   .inspect/    # each file's Inspect work: its frames and their edits
   .collages/   # collage layouts and their previews; the picture one exports is media
   .compare/    # saved Compare session specs
+  .horizon/    # saved Horizon views and their previews, searches, the work in progress
   .analysis/   # Detect areas, saved detections, runs and the frames behind their results
   .search/     # saved Grid Search state
   .layers/     # added map layers: spec + source as received + its icons; .cache/ is derived
+  .mapplates/  # map plates: a page laid out round the case's maps, and its preview
   .trash/      # recoverable artifact payloads, in numbered slots
 ```
 
@@ -89,7 +91,7 @@ The entity/link schema has existed since v1. Full vocabulary lives in
   | class | equipment-type |
   | identifier | account, email, phone, domain, ip, network |
   | collected | media, capture |
-  | document | proof, post, note, sheet, inspect-session, collage, compare-session, map-layer, analysis-* (Detect), bookmark |
+  | document | proof, post, note, sheet, inspect-session, collage, compare-session, horizon-view, horizon-find, map-layer, map-plate, analysis-* (Detect), bookmark |
   | place | place |
   | claim | claim |
 
@@ -168,22 +170,30 @@ proof for publication.
 | Tool | What it does |
 |------|--------------|
 | ✅ **Map navigation & captures** | Links map cameras, places case media and uncertainty footprints, and saves attributed captures with scale and north. |
-| ✅ **Map layers** | Stacks infrastructure overlays, FIRMS fires and VIIRS night lights, with case pins filtered by kind and folder. |
-| ✅ **Imported & followed layers** | Imports KML, KMZ, GeoJSON and GPX, follows public My Maps and GeoConfirmed, and filters their legends and dates. |
+| ✅ **Reference windows** | Fades a case picture or clip over the map, docked or pinned clear of its controls, in the app and the extension. |
+| ✅ **Map layers** | Stacks infrastructure overlays, FIRMS fires, VIIRS night lights and OpenStreetMap borders, imports KML, KMZ, GeoJSON and GPX, and follows My Maps and GeoConfirmed. |
+| ✅ **Personal layers** | Draws markers, lines and areas on any map from a blank layer, a file or a My Maps link, fed by the case's places, proofs and files, styled with the analyst's own icons, colours and a case key. |
+| ✅ **Layers over time** | Dates every edit and reads a layer on any day with what changed ringed, on its time strip and on the Timeline. |
+| ✅ **Layers everywhere** | Offers every layer in Compare, Detect and Horizon from one menu, reopens each case on its layers, and downloads a layer as KMZ, KML or GeoJSON or sends a day of it to My Maps. |
+| ✅ **Map plates** | Lays a page out round the case's maps (legend, scale, north, inset, marks, tables, credits) from ten ready plates or a template, on vector, topographic, 3D or Sentinel-2 grounds, with looks, text styles and layer roles. |
+| ✅ **Played plates** | Plays a plate by day and step, each with its annotations, framing, transitions and case videos, and exports a PNG, a print PDF, an MP4, a GIF or an evolution sheet while the analyst works on. |
+| ✅ **Horizon** | Draws the terrain seen from a viewpoint in 3D with named summits and buildings from open sources, lays a photo over it matched by hand, and saves views that reopen as they were. |
+| ✅ **Find** (beta) | Ranks the places of an area whose relief fits a photo's traced skyline, helped by marks on the trace, the camera, the sun and alignments, says how far to trust the best one, and keeps searches in the case. |
+| ✅ **Globe 3D** | Draws Satellite's and a plate's 3D maps on the app's own globe over public relief, with the flat map's layers, places and measures, and files a tilted view as a credited capture. |
+| ✅ **Measure** | Measures lines and areas with legs, bearings and angles, uses a line as range rings, a view cone, a shadow's height or a viewshed, and reads the ground and line of sight under it, flat and on the globe. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
-| ✅ **Satellite Compare** | Aligns and annotates dated imagery, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
-| ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence. |
+| ✅ **Satellite Compare** | Aligns and annotates dated imagery, echoes the pointer on the other side, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
+| ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence; analyzers and areas travel as files. |
+| ✅ **Copernicus layers & figures** | Writes composite, index and script layers offered in every map, reads one as a Detect rule, and lays several renderings of a pass out as a captioned figure. |
 | ✅ **Capture extension** | Adds case map tools to third-party maps, hands media to publishing and reverse search sites, and supports extension updates. |
-| ✅ **Home, Guide & tasks** | Opens recent case work and named task lists from Home, with contextual guidance for each tool. |
-| ✅ **Inspect, Collage & Reverse Search** | Autosaves work per file, arranges extracted frames into collages and sends original or cropped pictures to reverse search. |
-| ✅ **Proof annotations & publishing** | Adds numbered markers and blur boxes, verifies proof points and carries proof dates into previewed post templates. |
+| ✅ **Home, guide & onboarding** | Opens recent work and task lists from Home, pictures every tool in the `?` guide with three walked journeys, tours a newcomer and opens each version on its What's new. |
+| ✅ **Inspect & Collage** | Autosaves work per file, captures the frame on screen with frames, marks and sound along the bar, arranges frames into collages straightened by a level line, and sends pictures to reverse search. |
+| ✅ **Proof annotations & publishing** | Adds markers, blurs, tags, callouts, zoom insets and view cones, free or tied across panels at one line width, verifies proof points and carries proof dates into post templates. |
 | ✅ **Dates & Timeline** | Shares date entry and clock selection, draws temporal precision explicitly and adds cited events from any tool. |
 | ✅ **Subjects & case analysis** | Corrects and merges subjects, indexes their events, searches across scripts and reviews proposed account and site connections. |
 | ✅ **Geolocation worklists** | Opens recent sheets, tracks imported files awaiting a proof and indexes every proof point with its date, source and coordinates. |
-| ✅ **Files & navigation** | Files work into the active folder, offers contextual actions and filters, and retraces tools and documents with guarded Back and Forward. |
+| ✅ **Files & navigation** | Files work into the active folder, offers contextual actions and filters, opens media in one full-screen viewer, and retraces tools and documents with guarded Back and Forward. |
 | ✅ **Command palette** | Ctrl+K or ⌘K searches tools, cases and current-case documents, starts with recently added items and protects unsaved work. |
-| ✅ **Shared analyzers & areas** | Exports an analyzer of your own as a file, checks included or left behind, and an area or a group as the ground it is, names, colours and folder kept. Imports either without overwriting what is here, so the work travels without the settings backup and its keys. |
-| ✅ **Copernicus layers & figures** | Writes composite, index and script layers with a preview on the map, offers them in every map tab, reads an index or single-band layer as a Detect rule, draws a rule back as a layer and moves its line live on the last test's readings, and lays several renderings of one pass out as a captioned figure. |
 
 ---
 
@@ -197,7 +207,8 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
-| **3D map** | Pitch, public DEM terrain and extruded OSM buildings on the MapLibre map. An oblique capture records its pitch beside the bearing, so the view can be reproduced. |
+| **One-click update** (urgent, 0.3.4) | The binary installs the next release in one press: it downloads beside itself, checks an Ed25519 signature made outside GitHub, starts the new binary once, swaps by renaming, restarts and keeps the old one to fall back on. Any failure leaves the installed version untouched and links to the release page; a pip install is told its command. Rehearsed on a pre-release before 0.3.5 relies on it. |
+| **Fires on the globe** | Draws active fires on the globe within their allowance. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Capture graticule** | The rest of what a plate states about itself: a latitude/longitude grid over app and extension captures, beside the scale bar and north arrow that already ship. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
@@ -211,30 +222,11 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Sky Clock** | Marks a shadow, the sun or the moon in an image or a video frame, with the horizon and north giving the angles, then renders the year as a day × hour heatmap of the slots that fit. A visible moon also carries phase and bright-limb angle, which usually cuts a year down to a few instants. |
 | **Case KMZ** | One self-contained file per case: a pin per place, carrying the notes and proof images it is linked to, opened in Google Earth. Frozen rather than live, because only the web Earth remains and it follows no network link. |
 | **Event layers** | The rest of what dates an event from the sky: archived weather and METAR, beside the fire detections that already ship. |
-| **Shot contact sheet** | Splits a video into shots (ffmpeg scene detection) and picks frames from a clickable grid of timecodes. |
 | **OCR** | Reads signs and plates on import (tesseract, a native binary rather than a wheel), and detects script and language. |
 | **Audio Transcript** | Transcribe and translate speech offline; flag acoustic context such as bells, adhan, aircraft or language. |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
 | **Panorama** | Stitch a video window / frame set. Auto-stitch already in Collage; still to do: sample a video window directly, seam blending. |
-| **Proof annotation** | Grow the Geo Proof toolbox: dashed strokes; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
 | **Detached tool windows** | The rule the map already follows, applied to the rest: a read-and-work surface (Board, Graph, Timeline) opens as many tabs as wanted and the tab it left stays live; a document editor opens one window per document and is greyed out where it was. Cross-tool handoffs route to wherever the tool now lives. |
-
-Edit Provenance rests on three facts about Adobe renders, kept here so the tool
-can be rebuilt from the spec alone:
-
-- A Premiere or After Effects export carries an XMP `Ingredients` array: one row
-  per source asset, with its original file path, document and instance IDs,
-  `From Part` (the range taken from the source) and `To Part` (where it sits in
-  the render), counted in ticks of 254,016,000,000 per second.
-- `Pantry` blocks embed each source asset's own XMP — GPS, capture date, camera,
-  lens — and, when that asset was itself a sequence or comp, its own
-  `Ingredients`, which project into render time under an assumed linear playback.
-- `To Part` values may be elapsed render time, absolute display timecode, or the
-  coordinates of a longer sequence the export was cut from; the origin has to be
-  detected before anything is drawn.
-
-The result is one track per source file over the render's timecode, with
-GPS-tagged clips promotable to places.
 
 Toward v3: GIF maker; curated tool links; full-text case search; clipboard
 image/URL capture with provenance; EXIF/GPS import suggestions for place and
@@ -245,8 +237,7 @@ supplies, since a ridge ends the day well before the flat horizon does.
 
 | Tool | What it does |
 |------|--------------|
-| **Skyline Matching** | Traces a horizon in a photo and compares it against the DEM profile seen from candidate points, in the same azimuth and elevation frame Camera Resection and Sky Clock already use. Terrain-occluded sun times then split candidates a matching horizon leaves tied. |
-| **Map Board (MyMaps-style)** | Edits case-owned pins, notes, links and shapes, groups them into analyst-made layers, binds pins to `place` and exports the finished map as KML/KMZ/GeoJSON. |
+| **One sky frame** | Find's skyline, Camera Resection and Sky Clock read in one azimuth and elevation frame, so the sun and moon times the relief hides split the places a matching skyline leaves tied. |
 | **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
 | **Report Builder** | Assemble proofs/maps/timeline/entities/notes into PDF or one self-contained HTML file with its media embedded, readable offline. |
 | **Case Sync (Git)** | Push a case to a private or public Git remote, pull it back, and diff two revisions, so two analysts can work the same case. |
@@ -263,27 +254,12 @@ search; optional quota-aware X publishing.
 |------|--------------|
 | **Search Orchestrator** | Run username/alias/email across services, analyst selects → entities. Integrations, not clones. |
 | **OSM Query (Overpass)** | Feature search from a form, and a described pattern ("filling station, roundabout, railway within 300 m") turned into candidates on the map; clicking a point looks it up in OSM, Wikidata and geolocated Commons photos. No Overpass QL. |
-| **Viewshed / Line of Sight** | What terrain is visible from a point (public DEM tiles). |
 | **Camera Track (video SfM)** | Solves a moving camera's path from a video: frames sampled from a window, position and viewing azimuth per keyframe, and a sparse point cloud. Reports insufficient parallax instead of guessing. Bundles a native SfM binary (COLMAP/GLOMAP), CPU-capable. |
 | **Vessel and Aircraft Tracks** | Historic ADS-B and AIS tracks on the map for a date, plus a watchlist that follows chosen callsigns or MMSIs. |
-| **Map Measures** | Distance, bearing/azimuth, area, FOV cone; includes measure-on-imagery, and its bearing layer absorbs the v2 sun/moon arcs. |
+| **Map Measures** | Measure on a resected photo's imagery, and a bearing layer that absorbs the v2 sun/moon arcs. |
 | **Déjà Vu** | Perceptual-hash index flags recycled footage (local first; community index later). |
 | **Manipulation Hints** | Add JPEG quantization, noise and AI-media hints alongside Inspect's ELA. |
 | **Channel Monitor** | Watch Telegram channels, auto-archive media, queue for geolocation (rate limits, ToS care). |
-
-Camera Track rests on three facts, kept here so the tool can be scoped from the
-spec alone:
-
-- Parallax, not motion, is the requirement: a pan from a fixed point yields
-  nothing, and rolling shutter or a re-encoded low bitrate breaks matching. The
-  tool fails early and says why.
-- SfM output is scale-free. Metres come only from an injected reference: the GCP
-  camera pose from Camera Resection, or a known length. Every distance stays a
-  labelled estimate.
-- Photorealistic rendering stays external. The case exports a COLMAP-format
-  folder for a WebGPU gaussian-splatting trainer, which needs no CUDA and so runs
-  on all three shipped platforms, and reimports the result as an artifact with
-  provenance.
 
 Toward v5: real-world measurement from a resected photo or a solved camera track
 and its GCP camera pose; a gaussian-splat round trip for a solved camera track;
@@ -306,11 +282,19 @@ stops making sense.
 - **Oil slicks by radar:** dark patches on the sea near anchorages and lanes, which Sentinel-1 shows through cloud.
 - **Map files out of the case:** export pins, claims and Detect findings as KML or GeoJSON, with TimeStamp and TimeSpan so another viewer's time slider reads them.
 - **Update ffmpeg from the app:** download a static build into the workspace and prefer it at runtime, like the scraper update, if the bundled copy ever lags in a way users hit.
+- **Vector text in plate PDFs:** the PDF holds the page as one print-resolution picture; selectable text needs the plate's faces as TTF on the Python side.
+- **Place names kept whole at a plate map's edge:** the engine cuts a name the frame crosses; placing them away from the frame would need its own label pass.
+- **A Sentinel-2 pass per day of a played plate:** a plate's map holds one dated pass; following the play's days would spend the analyst's quota on every export.
 - **Place names in their own script:** the Arabic or Cyrillic name under the Latin one, for searching local sources. Needs the engine's right-to-left text plugin, bundled rather than fetched.
 - **Free band formulas in Detect:** a rule read on an expression the analyst writes. A normalised difference and a single band already work, including from a layer they wrote, so what is left is the general case — an arbitrary expression needs its own product family, a generated evalscript and thresholds calibrated on real scenes.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
 - **A fire detection to click:** the points the app already draws close in, read back under the pointer for the detection's time, satellite, confidence and power.
+- **A live public map:** a layer published as GeoJSON at a public address (a Gist) that a uMap remote-data layer reads, so one press updates a map others follow.
+- **Dated layers by side in Compare:** a GeoConfirmed or other dated layer showing on each side only what was known by that side's date.
+- **Find, narrower still:** near a road or a track (OpenFreeMap's transportation layer, a line decoder and a tile cap per area), turns kept between searches of one area, a mirrored place shown flipped in Overlay, and the lens searched for a collage laid wholly by hand.
+- **Sun and moon on the globe:** the bodies in the 3D view's sky at the hour the Sun & moon panel is on, and the relief lit from where the sun stands then.
 - **The sky over the area, not the tile:** Detect's pass list and its newest pass judged by the cloud over the drawn area (one small SCL read per pass) rather than the 110 km tile's figure.
+- **A mark of authorship on Proof and Plate exports:** a faint pattern in the pixels, drawn from a key kept on the analyst's machine, that survives a screenshot or a light retouch and that only that key can find. A signed hash beside the file would say the export is untouched.
 
 ## 8. Explicit non-goals
 
@@ -329,7 +313,10 @@ stops making sense.
   yt-dlp, gallery-dl, OpenCV) runs server-side.
 - **Frontend**: Svelte + Konva/canvas, served by the backend, opened in the
   default browser. The map is MapLibre GL behind `lib/map`'s façade, so tools
-  speak points, positions and view events and never the engine. Rail =
+  speak points, positions and view events and never the engine. Satellite's 3D
+  view is a WebGL2 globe of the app's own (`lib/globe`) answering the same
+  façade while it is on, and drawing the flat map's own layers by reading its
+  style (`lib/globe/mirror.js`); a plate's 3D map stands on the same globe. Rail =
   workspaces in pipeline order, tools are tabs inside them (see
   [UI.md](UI.md)).
 - **Settings and secrets:** in-app tabs group general preferences, publishing,
@@ -345,6 +332,8 @@ stops making sense.
   package.
 - **Dependencies:** ranges in `pyproject.toml`, exact pins in `uv.lock`; yt-dlp
   + gallery-dl unbounded on purpose; scraper self-update keeps an old binary useful.
+  gallery-dl (GPL-2.0-only) is never imported: it runs as its own process through
+  its command line (`engine/gallerydl.py`), the binary starting itself as gallery-dl.
 - **Storage:** per-case SQLite `case.db` is the authoritative graph (files for
   media/notes/proofs); deleted artifacts wait in `.trash/`, and portable case
   bundles carry a cleaned database plus declared files under a SHA-256 manifest.
@@ -354,8 +343,9 @@ stops making sense.
   [STORAGE_AND_PERFORMANCE.md](STORAGE_AND_PERFORMANCE.md).
 - **Security posture** (single-user localhost): `127.0.0.1` bind + Host/Origin
   guard (DNS rebinding), which also refuses a foreign page's `Sec-Fetch-Site` on
-  the API and the case files, since an image or a link sends no Origin on a GET;
-  0600/0700 perms, hard 100 MP Pillow limit, content-hashed
+  the API and the case files, since an image or a link sends no Origin on a GET,
+  and lets no other site frame the app, where a hidden frame would make the
+  analyst's clicks its own; 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
   names for images pasted into a proof (no client-chosen path), token-gated
   ingest island for the extension. A case file is served `nosniff`, and under a
   `sandbox` policy unless its type only displays, so an SVG or a page that arrived
@@ -386,10 +376,11 @@ stops making sense.
   and may only ask which copy is loaded; hand-offs open only the posting sites and
   image engines the app offers),
   names the install it means, and its worst outcome is an extension that
-  restarts. The map tools widen that island by five read routes and two writes,
-  each trimmed to what a panel draws — one position's points without their
-  thumbnails or link tallies, a sweep's own spec, a case's images and videos by
-  name — and the panel
+  restarts. The map tools widen that island by the read routes and two writes
+  the worker's allowlist names, each trimmed to what a panel draws — one
+  position's points without their thumbnails or link tallies, a sweep's own spec,
+  a case's images and videos by name, a reference clip's frame rate and length —
+  and the panel
   itself reaches them only through the worker's own allowlist, since a content
   script's fetch would carry the map site's origin and be refused. It is drawn
   in a closed shadow root and acts only on events the browser dispatched, so the
@@ -449,9 +440,10 @@ stops making sense.
   analyst subscribes, presses Refresh, or switches the layer on for the first
   time in a session, when it asked to be re-read then. A layer received in a
   bundle is not re-read on switch-on, since its sender set that and chose the
-  address; it waits for a Refresh pressed here. Every added layer starts
-  off when the app or the page opens again, so a layer heavy enough to take the
-  tab down does not take it down again on reload; a shape it stops answering in
+  address; it waits for a Refresh pressed here. A case reopens on the layers it
+  had on, drawn from their saved copy with no fetch, except one that stopped the
+  last session while drawing, so a layer heavy enough to take the tab down does
+  not take it down again on reload; a shape it stops answering in
   fails with a sentence
   rather than drawing nothing. A GeoConfirmed layer rides on those same three
   acts, plus one: its dialog reads the conflict list when the analyst opens it.
@@ -474,7 +466,17 @@ stops making sense.
   the Firefox copy, which Mozilla signs and the browser therefore updates itself:
   it polls the release's update manifest on its own schedule, past any switch the
   app has, and is recorded here as an accepted risk for the only permanent
-  Firefox install that exists. Remote images embedded in a
+  Firefox install that exists. Horizon's buildings reach their hosts only while
+  their switch is on: OpenFreeMap, the Géoplateforme's WFS, source.coop (the 3D
+  BAG), NRW's OGC API, NYC Open Data, Overture's catalog and tiles, figshare
+  (3D-GloBFP) and Google's public bucket (2.5D heights). A 3D-GloBFP grid,
+  Google's heights or Overture's footprints are read only after the analyst says
+  yes to their size. They are third-party binaries parsed locally (a zip, a
+  shapefile, a PMTiles archive, a GeoTIFF), an accepted risk bounded by fixed hosts and readers
+  that refuse what they do not know: zip members are written by their stem only,
+  never by their path. A plate's Sentinel-2 cloudless ground reaches EOX's tile
+  server (`tiles.maps.eox.at`) only once the analyst picks it, through the same proxy
+  as every basemap; the years it offers and their licences are answered by the app. Remote images embedded in a
   Notebook note contact their host whenever the preview opens; Notebook warns
   about that behavior and local Case media avoids it. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the preview
@@ -487,7 +489,11 @@ stops making sense.
   are opened — it must start as an SVG and carry no script, event handler,
   embedded document or reference leaving the file; and saving a proof, which posts
   the composer's rendered export and the images pasted into it, bounded as a
-  request and again as a decoded picture. Every body the browser assembles whole —
+  request and again as a decoded picture. A map plate's export is bounded as a request
+  too; a played plate's pictures come first in bounded batches, are checked by their
+  header (a PNG or a JPEG, bounded in pixels) and kept on disk as they came under a
+  random token, so ffmpeg is what decodes them; the export, a Stop or 15 idle minutes
+  lets them go. Every body the browser assembles whole —
   a table, a note, a picture — is refused by size before it is parsed, and the
   routes are not trusted to a list: `tests/test_hardening.py` walks them.
   Case imports extract only unique, non-symlink members declared

@@ -17,6 +17,41 @@ import { isSourceUrl, sourceProblem } from './statedSource.js';
 
 const IMAGE_TYPE = /^image\//i;
 
+/**
+ * On Linux the middle button pastes the primary selection, and the browser sends
+ * that as an ordinary `paste` event. The same button turns the map camera, so a
+ * surface that answers a paste outside any field would take every turn for a
+ * Ctrl+V. The press is watched on the window in the capture phase, before the map
+ * engine can stop it, and the paste that follows its release is refused.
+ *
+ * Both the pointer and the mouse events are watched: the 3D globe takes its
+ * presses as pointer events and cancels them, which keeps the browser from
+ * sending the mouse ones at all, and the flat map hears only the mouse ones.
+ */
+const MIDDLE_PASTE_MS = 600;
+let middleDown = false;
+let middleUpAt = -Infinity;
+
+function pressed(event) {
+  if (event.button === 1) middleDown = true;
+}
+
+function released(event) {
+  if (event.button !== 1) return;
+  middleDown = false;
+  middleUpAt = performance.now();
+}
+
+if (typeof window !== 'undefined') {
+  for (const type of ['pointerdown', 'mousedown']) window.addEventListener(type, pressed, true);
+  for (const type of ['pointerup', 'mouseup']) window.addEventListener(type, released, true);
+}
+
+/** Whether this paste is the middle button's, not a Ctrl+V. */
+export function middleClickPaste() {
+  return middleDown || performance.now() - middleUpAt < MIDDLE_PASTE_MS;
+}
+
 /** The API's own cap on a swallowed image (api/limits.py), said here so the
  *  refusal names the limit instead of waiting for a 413. */
 export const MAX_PASTE_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -161,7 +196,7 @@ export function pasteProblem(resolved) {
  */
 export function listenForPaste(handler) {
   const onPaste = (event) => {
-    if (ignorePasteTarget(event.target)) return;
+    if (ignorePasteTarget(event.target) || middleClickPaste()) return;
     const payload = readPaste(event.clipboardData);
     if (!payload) return;
     event.preventDefault();

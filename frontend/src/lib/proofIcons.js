@@ -22,7 +22,7 @@
 /** Side of the box every path is drawn in. */
 export const ICON_BOX = 24;
 
-/** Placed side, in screen pixels at panel scale 1 — see `iconSizeFor`. */
+/** Placed side, in page pixels: the same on every panel and overlay. */
 export const ICON_SIZE_DEFAULT = 56;
 
 export const ICON_SIZE_MIN = 12;
@@ -131,14 +131,6 @@ export function iconAnchor(name) {
 export function iconOrigin(name, size) {
   const [ax, ay] = iconAnchor(name);
   return { x: -ax * size, y: -ay * size };
-}
-
-/**
- * Placed side in natural pixels, so a symbol reads the same on a 4000px frame
- * and an 800px one. Mirrors how stroke width is normalised by `baseScale`.
- */
-export function iconSizeFor(baseScale) {
-  return ICON_SIZE_DEFAULT / (baseScale || 1);
 }
 
 /**

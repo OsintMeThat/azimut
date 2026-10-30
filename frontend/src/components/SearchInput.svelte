@@ -6,6 +6,8 @@
     placeholder = 'Search…',
     count = null,
     width = '180px',
+    disabled = false,
+    title = '',
     onclear = () => {},
   } = $props();
 
@@ -21,6 +23,8 @@
     class="search-input"
     style:width
     {placeholder}
+    {disabled}
+    title={title || undefined}
     bind:value
     aria-label={placeholder}
   />

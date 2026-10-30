@@ -4,6 +4,11 @@ import { readdirSync, readFileSync } from 'node:fs';
 const source = readFileSync(new URL('./Satellite.svelte', import.meta.url), 'utf8');
 const rail = readFileSync(new URL('./satellite/MapRail.svelte', import.meta.url), 'utf8');
 const layers = readFileSync(new URL('./satellite/MapLayers.svelte', import.meta.url), 'utf8');
+// the rows themselves, drawn the same in the Map's panel and the other maps' menu
+const layerRows = readFileSync(new URL('../components/LayerRows.svelte', import.meta.url), 'utf8');
+// a layer's settings, drawn the same under the Map's rows and in the other maps' menu
+const controls = readFileSync(new URL('../components/LayerControls.svelte', import.meta.url), 'utf8');
+const questions = readFileSync(new URL('../lib/map/eventControls.js', import.meta.url), 'utf8');
 // The sky overlay's geometry moved to `lib/skyOverlay.js`, where it is exercised
 // against real numbers (`skyOverlay.test.js`); the tool hands it to the map.
 const sky = readFileSync(new URL('../lib/skyOverlay.js', import.meta.url), 'utf8');
@@ -21,6 +26,18 @@ function satelliteSources() {
   }
   return files;
 }
+
+describe('the map rail', () => {
+  it('says which of its tools is on, every one of them', async () => {
+    // a tool armed with its icon left plain reads as nothing being on: the
+    // old Elevation profile seat was, until this was checked
+    const { railEntries } = await import('../lib/map/tools.js');
+    const block = source.slice(source.indexOf('<MapRail'), source.indexOf('onpick={pickTool}'));
+    for (const entry of railEntries()) {
+      expect(block, `${entry.id} is in the rail and never shown on`).toMatch(new RegExp(`\\b${entry.id}: \\{\\s*on:`));
+    }
+  });
+});
 
 describe('Satellite saved work', () => {
   // The indexes, the filter, the Locate pass and the row actions are the store's
@@ -52,13 +69,12 @@ describe('Satellite saved work', () => {
   });
 
   it('loads and drops every index with the case, through the store', () => {
-    // Two stores read the case now — its saved work and the layers the analyst
-    // added — and both hand back a teardown, so a response arriving after the
-    // case changed lands nowhere.
+    // Two stores read the case now: its saved work, which hands back a teardown so
+    // a response arriving after the case changed lands nowhere, and the layers the
+    // analyst added, shared by every map and read once per reload.
     expect(source).toContain('const stopSaved = savedWork.load(id);');
-    expect(source).toContain('const stopLayers = addedLayers.load(id);');
-    expect(source).toContain('stopSaved?.();');
-    expect(source).toContain('stopLayers?.();');
+    expect(source).toContain('stopSaved?.()');
+    expect(source).toContain('addedLayers.load(id, caseState.rev);');
     expect(source).toContain('savedWork.loadMode(caseState.current?.id, caseState.rev)');
   });
 
@@ -90,11 +106,12 @@ describe('Satellite saved work', () => {
     // it is a layer, listed with the other layers rather than sitting in the
     // toolbox: nothing about it changes what the pointer does
     expect(source).toContain('toggle: () => (savedOverlay = !savedOverlay)');
-    expect(layers).toContain('aria-pressed={Boolean(row.on)}');
+    expect(layers).toContain('<LayerRows {rows} />');
+    expect(layerRows).toContain('aria-pressed={Boolean(row.on)}');
     // one eye for both states: only its colour says whether the layer is on
-    expect(layers).toContain('<Icon name="eye" size={13} />');
-    expect(layers).not.toContain("'ghost'");
-    expect(layers).toMatch(/\.eye\.on \{\s*color: var\(--accent\);/);
+    expect(layerRows).toContain('<Icon name="eye" size={13} />');
+    expect(layerRows).not.toContain("'ghost'");
+    expect(layerRows).toMatch(/\.eye\.on \{\s*color: var\(--accent\);/);
     expect(rail).not.toContain('savedOverlay');
     // nothing about the overlay is written back to the case — session only
     expect(source).not.toContain('savedOverlay:');
@@ -178,8 +195,18 @@ describe('reference windows', () => {
     // a rail seat that runs rather than arms: it opens a picker and a window
     expect(source).toContain("if (id === 'reference') return refs.openPicker();");
     expect(source).toContain('on: refs.open.length > 0,');
-    expect(source).toContain('{#each refs.open as pane (pane.id)}');
+    // over the map, and in a column on either side of it
+    expect(source).toContain('{#each refs.floating as pane (pane.id)}');
+    expect(source).toContain('{#each refs.dockedOn(side) as pane (pane.id)}');
+    expect(source).toContain("{@render refColumn('left')}");
+    expect(source).toContain("{@render refColumn('right')}");
     expect(source).toContain('onpick={(item) => refs.add(item)}');
+  });
+
+  it('remeasures the map when a column opens, closes or changes width', () => {
+    expect(source).toContain('void refs.dockedOn(side).length;');
+    expect(source).toContain('void refs.dockWidth(side);');
+    expect(source).toContain('tick().then(() => engine?.resize());');
   });
 
   it('keeps the windows in the session, never in the case', () => {
@@ -326,8 +353,8 @@ describe('the capture button', () => {
     expect(source).toContain("onArm: () => closeOthers(modes, 'capture')");
     expect(source).toContain('capture: {');
     expect(source).toContain('close: () => capture.disarm(),');
-    // …and a measure sub-mode still puts the marquee away
-    expect(source).toContain('if (measure.setMode(mode)) capture.disarm()');
+    // …and the Measure tool, armed as a mode like the others, puts it away too
+    expect(source).toContain('open: () => measure.open(),');
   });
 
   it('offers a figure on Sentinel-2 only, with the layers it is made of read first', () => {
@@ -367,23 +394,24 @@ describe('what is laid over the imagery', () => {
     expect(rows).toContain('toggle: () => (railOverlay = !railOverlay)');
   });
 
-  it('lists its layers in the order Compare, Detect and the proof map use', () => {
+  it('lists its layers in the order Compare, Detect, Horizon and the proof map use', () => {
     // the plain references first, then the specialist networks, the dated
-    // events, and the case last
+    // events, and the case last: the catalogue's order, named as it names them
     const rows = source.slice(source.indexOf('const layerRows = $derived(['), source.indexOf('...(sheetPoints'));
-    const labels = [...rows.matchAll(/^ {6}label: '([^']+)'/gm)].map((match) => match[1]);
-    expect(labels).toEqual([
-      'Borders',
-      'Place names',
-      'Roads',
-      'Railways',
-      'Power lines',
-      'Sea marks',
-      'GPS traces',
-      'Active fires',
-      'Night lights',
-      'Saved work',
+    const ids = [...rows.matchAll(/^ {6}\.\.\.catalogued\('([^']+)'\)/gm)].map((match) => match[1]);
+    expect(ids).toEqual([
+      'boundaries',
+      'placenames',
+      'roads',
+      'railway',
+      'power',
+      'seamarks',
+      'gpstraces',
+      'firms',
+      'nightlights',
+      'saved',
     ]);
+    expect(rows).not.toMatch(/^ {6}label: '/m);
   });
 
   it('gives the railways no rail seat', () => {
@@ -419,10 +447,17 @@ describe('what is laid over the imagery', () => {
     // said on the row, where it can be read without hovering a greyed switch;
     // no key, a key switched off and a refused key each say their own thing
     // (`keyState`, tested in lib/map/firms.test.js)
-    expect(rows).toContain('detail: fires.keyed ? firmsSummary : firmsKey.detail');
+    expect(rows).toContain("detail: !fires.keyed ? firmsKey.detail : onGlobe ? 'flat map only' : firmsSummary");
     expect(rows).toContain('actions: fires.keyed ? null : [{ label: firmsKey.action, quiet: true, run: openImagerySettings }]');
     expect(source).toContain('const firmsKey = $derived(keyState(fires));');
     expect(source).toContain("uiState.settingsTab = 'imagery';");
+  });
+
+  it('rests the fires while the globe draws, whose view to the horizon would spend their allowance', () => {
+    const rows = source.slice(source.indexOf('const layerRows = $derived(['));
+    expect(rows).toContain('disabled: !fires.keyed || onGlobe');
+    expect(source).toContain('bind:onGlobe');
+    expect(surface).toContain("exclude: (id) => isGround(id) || id.startsWith('basemap-firms')");
   });
 
   it('asks its own backend why when a fire tile fails, once for the burst', () => {
@@ -443,18 +478,14 @@ describe('what is laid over the imagery', () => {
   it('asks for no tile until the choice is one the service can answer', () => {
     // a dated window with no date yet is the normal state of a panel someone
     // just switched, not a request
-    expect(source).toContain("fires.on && fires.keyed && firmsAskable && { id: 'firms'");
+    expect(source).toContain("fires.on && fires.keyed && firmsAskable && !onGlobe && { id: 'firms'");
     expect(source).toContain('const firmsAskable = $derived(askable(fires))');
   });
 
   it('asks its two questions in the row rather than in a card over the map', () => {
-    expect(source).toContain('controls: fires.on && fires.keyed ? firmsControls : null');
-    const layersPanel = readFileSync(
-      new URL('./satellite/MapLayers.svelte', import.meta.url),
-      'utf8'
-    );
-    expect(layersPanel).toContain('{#if row.controls?.length}');
-    expect(layersPanel).not.toContain('position: absolute');
+    expect(source).toContain('controls: fires.on && fires.keyed && !onGlobe ? firmsControls : null');
+    expect(layerRows).toContain('{#if row.controls?.length}');
+    expect(layerRows).not.toContain('position: absolute');
   });
 });
 
@@ -463,7 +494,8 @@ describe('choosing which saved work is drawn', () => {
     // the same state the Saved panel binds, so a map read here and a panel read
     // beside it cannot disagree about what the case holds
     expect(source).toContain('controls: savedOverlay && savedAnything ? savedFilters : null');
-    expect(source).toContain('pick: (id) => (savedWork.kind = id)');
+    // the kind question is the one every map's Layers menu asks (lib/geoTree.js)
+    expect(source).toContain('const rows = [kindControl(savedWork)];');
     expect(source).toContain("pick: (id) => (savedWork.folder = id === 'all' ? null : id)");
   });
 
@@ -473,15 +505,18 @@ describe('choosing which saved work is drawn', () => {
 
   it('picks folders from a list, since the analyst names them and there can be many', () => {
     expect(source).toContain('list: true');
-    expect(layers).toContain('{#if control.list}');
-    expect(layers).toContain('onchange={(event) => control.pick(event.currentTarget.value)}');
+    expect(layerRows).toContain('<LayerControls controls={row.controls} />');
+    expect(controls).toContain('{#if control.list}');
+    expect(controls).toContain('onchange={(event) => control.pick(event.currentTarget.value)}');
   });
 
   it('stacks a setting\'s options under their label rather than trailing them', () => {
     // right-aligned wrapping turned a handful of options into a staircase, one
     // per line, in a panel this narrow
-    expect(layers).not.toContain('justify-content: flex-end');
-    expect(layers).not.toContain('justify-content: space-between');
+    for (const sheet of [layerRows, controls]) {
+      expect(sheet).not.toContain('justify-content: flex-end');
+      expect(sheet).not.toContain('justify-content: space-between');
+    }
   });
 
   it('counts what is drawn rather than what the case holds', () => {
@@ -695,9 +730,22 @@ describe('a map in more than one window', () => {
     expect(source).not.toContain('navigate: true');
   });
 
-  it('writes nothing while another tool is open', () => {
-    const writer = source.slice(source.indexOf("if (uiState.tool !== 'satellite' || !mapReady) return;"));
-    expect(writer.slice(0, 400)).toContain('viewParams({');
+  it('writes nothing while another tool is open, nor while a tilted view waits for its relief', () => {
+    const guard = "if (uiState.tool !== 'satellite' || !mapReady || pendingCamera || rotating) return;";
+    expect(source).toContain(guard);
+    expect(source.slice(source.indexOf(guard)).slice(0, 400)).toContain('viewParams({');
+  });
+
+  it('writes the address once a move, not once a degree of a turn or a tilt', () => {
+    const guard = "if (uiState.tool !== 'satellite' || !mapReady || pendingCamera || rotating) return;";
+    const effect = source.slice(source.indexOf(guard)).slice(0, 600);
+    // the turn and the tilt as they stand when the view settles (`center`), never followed step by step
+    expect(effect).toContain('const [turn, lean] = untrack(() => [bearing, pitch]);');
+    expect(effect).toContain('bearing: turn,');
+    expect(effect).toContain('pitch: reliefOn ? lean : null,');
+    expect(effect).toContain('lat: center.lat,');
+    // a dragged turn says when it ends, which writes it
+    expect(source).toContain('onEnd: () => (rotating = false),');
   });
 
   it('opens a peer tab on the view it is showing, and says when refused', () => {
@@ -724,7 +772,7 @@ describe('a map in more than one window', () => {
     expect(bar).toContain('<PlaceSearch');
     // the rail starts under the search, however tall it renders
     expect(source).toContain('const railTop = $derived(12 + searchHeight + 8);');
-    expect(source).toContain('<div class="map-tools" style:top={`${railTop}px`}>');
+    expect(source).toContain('<div class="map-tools" style:top={`${railTop}px`}');
     const beside = source.slice(source.indexOf('{#snippet beside()}'), source.indexOf('{/snippet}', source.indexOf('{#snippet beside()}')));
     for (const label of ['Link the view to the other maps', 'Open in a new tab', 'Toggle fullscreen']) {
       expect(beside).toContain(`aria-label="${label}"`);
@@ -811,17 +859,17 @@ describe('one camera for the map tabs', () => {
 });
 
 describe('the key-less reference layers', () => {
-  it('fetches no tile from any of them until its switch is pressed, borders and place names apart', () => {
+  it('fetches no tile from any of them until its switch is pressed, borders apart', () => {
     // local-first: a map not showing power lines asks nobody about power lines.
-    // Borders and place names are the exception and are on from the start —
-    // they are map tiles, which is the network a map is opened to use.
+    // Borders are the exception and are on from the start: they are map tiles,
+    // which is the network a map is opened to use.
     const state = source.slice(
       source.indexOf('const refLayers = $state({'),
       source.indexOf('const night = $state(')
     );
     expect(state).toContain('boundaries: true');
-    expect(state).toContain('placenames: true');
-    expect(state.replace('boundaries: true', '').replace('placenames: true', '')).not.toContain('true');
+    expect(state).toContain('placenames: false');
+    expect(state.replace('boundaries: true', '')).not.toContain('true');
     expect(source).toContain("const night = $state({ on: false, source: 'noaa20', day: lastNight() });");
   });
 
@@ -846,9 +894,10 @@ describe('the key-less reference layers', () => {
   });
 
   it('picks one night from a calendar bounded by the sensor’s record', () => {
-    expect(source).toContain('min: firstNight(night.source)');
-    expect(source).toContain('max: lastNight()');
-    expect(layers).toContain('{#if control.day}');
+    expect(source).toContain('nightQuestions(night, (patch) => Object.assign(night, patch))');
+    expect(questions).toContain('min: firstNight(choice.source)');
+    expect(questions).toContain('max: lastNight()');
+    expect(controls).toContain('{#if control.day}');
   });
 });
 
@@ -899,12 +948,15 @@ describe('the right-click menu', () => {
   });
 
   it('offers its own subset of acts, and opens the point in Compare or Detect', () => {
-    expect(source).toContain("actionsFor(['lookup', 'place', 'measure', 'sky', 'history', 'centre'])");
+    // while a layer is edited the rail is put away, and with it the acts that arm one of its tools
+    expect(source).toContain("actionsFor(myLayers.editor ? ['lookup', 'place', 'horizon', 'history', 'centre']\n    : ['lookup', 'place', 'measure', 'sky', 'horizon', 'history', 'centre'])");
     expect(source).toContain("otherMapTools('satellite')");
     expect(source).toContain('tools={pointTools}');
     const acts = source.slice(source.indexOf('async function onPointMenu(id, value)'));
     const body = acts.slice(0, acts.indexOf('async function comparePoint'));
     expect(body).toContain("openMapAt(value, { ...point, zoom: center.zoom })");
+    // Look from here hands the eye the way up the turned map, the bearing counted the other way
+    expect(body).toContain('lookFrom({ ...point, heading: headingUp(bearing) })');
   });
 
   it('drops a lookup answer that arrives after the menu moved on', () => {
@@ -917,5 +969,33 @@ describe('Satellite offers what is open to the Add event bar', () => {
   it('publishes under its own tool id and withdraws on unmount', () => {
     expect(source).toMatch(/offerNote\(\s*'satellite',/);
     expect(source).toContain("onDestroy(() => withdrawNote('satellite'))");
+  });
+});
+
+describe('the Measure tool on the map', () => {
+  it('puts a click on what is there, unless Alt is held', () => {
+    expect(source).toContain('if (measure.on) measure.addPoint(measure.snap(at, { free: altHeld }).point);');
+    expect(source).toContain("if (e.key === 'Alt') altHeld = true;");
+    expect(source).toContain("if (e.type === 'blur' || e.key === 'Alt') altHeld = false;");
+  });
+
+  it('takes a point back on Backspace and the measure off on Delete, never while typing', () => {
+    expect(source).toContain("if (!typing && measure.on && (e.key === 'Backspace' || e.key === 'Delete')) {");
+    expect(source).toContain("(e.key === 'Backspace' && measure.undo()) || measure.removeSelected()");
+  });
+
+  it('finishes and lets go of a measure on Escape before the tool itself closes', () => {
+    const escape = source.slice(source.indexOf("if (e.key !== 'Escape') return;"));
+    expect(escape.indexOf('measure.escape()')).toBeGreaterThan(0);
+    expect(escape.indexOf('measure.escape()')).toBeLessThan(escape.indexOf('return disarm(modes)'));
+  });
+
+  it('keeps the flat map from zooming on the double click that ends a measure', () => {
+    expect(source).toContain("window.addEventListener('dblclick', swallow, true);");
+    expect(source).toContain('if (!measure.on || !mapEl) return;');
+  });
+
+  it('reads its ground in 3D, where the relief is read anyway, and on its own switch on the flat map', () => {
+    expect(source).toContain('relief: () => reliefOn,');
   });
 });

@@ -17,23 +17,46 @@
  */
 
 const PLACES = 6;
+/** Places a zoom keeps over relief, a few metres of the camera's height. */
+const RELIEF_ZOOM_PLACES = 2;
+/** The heights a camera's centre may be held at, in metres: the Dead Sea shore to Everest's top. */
+const MIN_ELEVATION = -500;
+const MAX_ELEVATION = 9000;
 
 /** Is this a real number, inside the bounds the app states everywhere else? */
 function within(value, low, high) {
   return Number.isFinite(value) && value >= low && value <= high;
 }
 
+/**
+ * The zoom a view is written down at. A flat map comes to rest on whole levels,
+ * so a whole level is the view. Over relief it does not (`engine.js`), and the
+ * fraction is part of where the camera stands: rounded away, a link or a
+ * capture would set the view up again from another height, and at a steep tilt
+ * on other ground.
+ */
+export function writtenZoom(zoom, tilted) {
+  return tilted ? Number(zoom.toFixed(RELIEF_ZOOM_PLACES)) : Math.round(zoom);
+}
+
 /** The view as query parameters, for `buildHash`. */
-export function viewParams({ lat, lon, zoom, bearing = 0, provider = '' } = {}) {
+export function viewParams({ lat, lon, zoom, bearing = 0, pitch = null, elevation = null, provider = '' } = {}) {
   const params = {};
   if (within(lat, -90, 90) && within(lon, -180, 180)) {
     params.ll = `${Number(lat.toFixed(PLACES))},${Number(lon.toFixed(PLACES))}`;
   }
-  if (within(zoom, 0, 24)) params.z = String(Math.round(zoom));
+  const tilted = within(pitch, 0, 90);
+  if (within(zoom, 0, 24)) params.z = String(writtenZoom(zoom, tilted));
   // north-up is the default everywhere, so it is not worth an address
   if (within(bearing, 0, 360) && Math.round(bearing) % 360 !== 0) {
     params.b = String(Math.round(bearing) % 360);
   }
+  // A tilt is only ever there with the relief on, so its presence, even at 0,
+  // is what brings the relief back on a reload.
+  if (tilted) params.t = String(Math.round(pitch));
+  // …and over relief, the height the camera holds its centre at, to the metre:
+  // with the zoom it says where the eye stands (`facade.js` setCamera)
+  if (tilted && within(elevation, MIN_ELEVATION, MAX_ELEVATION)) params.e = String(Math.round(elevation));
   if (provider) params.p = provider;
   return params;
 }
@@ -58,14 +81,23 @@ export function readView(params) {
     }
   }
 
+  const tilt = Number(get('t'));
+  // the globe leans to 88°, the map engine's own 3D to 85° and it holds anything past it there
+  const tilted = get('t') !== null && get('t') !== undefined && within(tilt, 0, 90);
   const zoom = Number(get('z'));
   if (get('z') !== null && get('z') !== undefined && within(zoom, 0, 24)) {
-    view.zoom = Math.round(zoom);
+    view.zoom = writtenZoom(zoom, tilted);
   }
 
   const bearing = Number(get('b'));
   if (get('b') !== null && get('b') !== undefined && within(bearing, 0, 360)) {
     view.bearing = Math.round(bearing) % 360;
+  }
+
+  if (tilted) view.pitch = Math.round(tilt);
+  const elevation = Number(get('e'));
+  if (tilted && get('e') !== null && get('e') !== undefined && within(elevation, MIN_ELEVATION, MAX_ELEVATION)) {
+    view.elevation = Math.round(elevation);
   }
 
   const provider = get('p');

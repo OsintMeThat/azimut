@@ -66,6 +66,10 @@ async function openDetect(page, withRun = false, withRoutine = false, twoRuns = 
     }
     if (suffix.endsWith('/preview')) return route.fulfill({ contentType: 'image/svg+xml',
       body: `<svg xmlns="http://www.w3.org/2000/svg" width="${suffix.includes('candidate-2') ? 80 : 600}" height="160"><rect width="100%" height="100%" fill="#30352b"/></svg>` });
+    if (suffix === `runs/${run.id}/results/keep` && method === 'POST') {
+      for (const row of run.results) if (row.review === 'new') row.review = 'noted';
+      return route.fulfill({ json: run });
+    }
     if (method === 'PATCH') {
       const found = run.results.find((row) => suffix.endsWith('/' + row.id));
       Object.assign(found, route.request().postDataJSON());
@@ -207,6 +211,73 @@ test('Results can hide markers while keeping selectable outlines and restore the
   expect(errors).toEqual([]);
 });
 
+test('Keep all confirms the remaining count, preserves other verdicts and still allows Dismiss', async ({ page }) => {
+  const { errors, run } = await openDetect(page, true, false, true);
+  run.results[1].review = 'noted';
+  run.results[2].review = 'kept';
+  const writes = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/analysis/') && request.method() !== 'GET') writes.push(request.url());
+  });
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
+  await page.getByRole('button', { name: /^North site pass/ }).click();
+  await page.getByRole('button', { name: /^To review/ }).click();
+  const footer = page.locator('.review-actions');
+  await footer.getByRole('button', { name: 'Keep all', exact: true }).click();
+  const dialog = page.getByRole('alertdialog', { name: 'Keep all 1 remaining candidate?' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('You can dismiss them individually later.');
+  await page.keyboard.press('d');
+  expect(writes).toEqual([]);
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(writes).toEqual([]);
+  await footer.getByRole('button', { name: 'Keep all', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Keep all', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Kept 2/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: /^Pinned 1/ })).toBeVisible();
+  await expect(footer.getByRole('button', { name: 'Keep all', exact: true })).toBeDisabled();
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).toContain(`/runs/${run.id}/results/keep`);
+  await footer.getByRole('button', { name: 'Dismiss', exact: true }).click();
+  await expect(page.getByRole('button', { name: /^Kept 1/ })).toBeVisible();
+  expect(run.results.map((row) => row.review)).toEqual(['noted', 'kept']);
+  // Other runs are outside the action's scope.
+  await page.locator('.dock-content > header button[aria-label="Back"]').click();
+  await page.getByRole('button', { name: /^Second site pass/ }).click();
+  await expect(page.getByRole('button', { name: /^To review 1/ })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('a result under review follows the camera moved in another map tab', async ({ page }) => {
+  const { errors } = await openDetect(page, true);
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
+  await page.getByRole('button', { name: /^North site pass/ }).click();
+  const detectMap = page.locator('.detect-tool .map');
+  const before = await restingCamera(page, detectMap);
+  const pass = await page.locator('.detect-tool .pass-chip').textContent();
+  const review = await page.locator('.review-body .position').textContent();
+  await page.locator('.tabstrip').getByRole('button', { name: 'Satellite', exact: true }).click();
+  const satelliteMap = page.locator('.tool-host:not(.hidden) .map');
+  await expect(satelliteMap).toHaveAttribute('data-map-ready', 'true');
+  const box = await satelliteMap.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 200, box.y + box.height / 2 - 90, { steps: 8 });
+  await page.mouse.up();
+  const moved = await restingCamera(page, satelliteMap);
+  expect(Math.abs(moved.lon - before.lon)).toBeGreaterThan(0.0001);
+  await page.locator('.tabstrip').getByRole('button', { name: 'Detect', exact: true }).click();
+  await expect.poll(async () => (await restingCamera(page, detectMap)).lon).toBeCloseTo(moved.lon, 4);
+  const back = await restingCamera(page, detectMap);
+  expect(back.lat).toBeCloseTo(moved.lat, 4);
+  expect(back.span / moved.span).toBeCloseTo(1, 1);
+  await expect(page.locator('.detect-tool .pass-chip')).toHaveText(pass);
+  await expect(page.locator('.review-body .position')).toHaveText(review);
+  expect(errors).toEqual([]);
+});
+
 test('clicking a Detect date opens a calendar of passes and previews the chosen day', async ({ page }) => {
   const { errors } = await openDetect(page);
   const now = new Date();
@@ -281,7 +352,7 @@ test('landing, dock rail and the When step fit the existing map workspace', asyn
   expect(ruler.y + ruler.height).toBeLessThan(zoom.y);
   expect(Math.abs(ruler.x - zoom.x)).toBeLessThan(8);
   // The closed Layers chip is as tall as the imagery chip over it.
-  const [chip, picker] = await Promise.all(['.detect-tool .map-choices > :first-child', '.detect-tool .layer-picker']
+  const [chip, picker] = await Promise.all(['.detect-tool .map-choices > :first-child', '.detect-tool .layer-menu > button']
     .map((selector) => page.locator(selector).boundingBox()));
   expect(Math.abs(picker.height - chip.height)).toBeLessThanOrEqual(1);
   const map = page.locator('.detect-tool .map');

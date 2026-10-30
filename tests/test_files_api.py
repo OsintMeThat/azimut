@@ -130,6 +130,8 @@ def test_a_case_page_or_an_unnamed_type_is_sandboxed_too(client):
         served = client.get(f"/files/{cid}/{item['path']}")
         assert served.headers["content-security-policy"].startswith("sandbox;")
         assert served.headers["x-content-type-options"] == "nosniff"
+        # and no page elsewhere may frame it, with or without the sandbox
+        assert served.headers["x-frame-options"] == "SAMEORIGIN"
 
 
 def test_pictures_are_not_sandboxed_but_never_sniffed(client):

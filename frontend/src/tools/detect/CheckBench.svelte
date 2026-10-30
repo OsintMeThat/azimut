@@ -88,7 +88,7 @@
 <svelte:window onpointerdown={onOutside} />
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="bench-root" bind:clientWidth={width} bind:this={root} onkeydown={onKey}>
-  <div class="console cmp-glass" class:narrow role="region" aria-label="Checks on the map" bind:clientHeight={deckHeight}>
+  <div class="console cmp-glass" class:narrow role="region" aria-label="Checks on the map" data-guide="detect.bench" bind:clientHeight={deckHeight}>
     {#if bench.choosingPasses}
       <section class="drawer cmp-glass" aria-label={bench.draft ? 'Passes of the new check' : 'Change the passes of the check'}>
         <header>
@@ -175,7 +175,7 @@
           title={bench.basemap ? 'Show the passes' : 'Show the basemap'} onclick={() => bench.setBasemap(!bench.basemap)}>
           <Icon name="satellite" size={15} /></button>
         {#if !bench.radar}
-          <div class="pick look-pick">
+          <div class="pick look-pick" data-guide="detect.display">
             <button class="select look" class:off={bench.basemap} aria-haspopup="menu" aria-expanded={open === 'look'}
               aria-label="Copernicus layer" title="Display layer" onclick={() => {
                 open = open === 'look' ? '' : 'look';

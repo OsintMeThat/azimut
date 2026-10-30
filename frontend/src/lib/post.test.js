@@ -279,11 +279,11 @@ describe('templateFromPost / normPostTemplate — round-trip', () => {
 
   it('caps malformed hand-edited arrays and strings', () => {
     const normalized = normPostTemplate({
-      mention: 'm'.repeat(200),
+      mention: 'm'.repeat(400),
       body: 'b'.repeat(20_000),
       extraTweets: Array.from({ length: 25 }, () => ({ text: 'x'.repeat(5_000) })),
     });
-    expect(normalized.mention).toHaveLength(120);
+    expect(normalized.mention).toHaveLength(280);
     expect(normalized.body).toHaveLength(16_000);
     expect(normalized.extraTweets).toHaveLength(20);
     expect(normalized.extraTweets[0].text).toHaveLength(4_000);

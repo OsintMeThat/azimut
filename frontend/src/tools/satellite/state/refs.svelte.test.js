@@ -132,6 +132,124 @@ describe('spawning a window', () => {
   });
 });
 
+describe('a clip', () => {
+  it('reads its frame rate when it opens, so a step is one frame', async () => {
+    api.get = vi.fn(async (url) => (url.includes('/inspect/probe') ? { fps: 25 } : []));
+    const refs = store();
+    refs.add(CLIP);
+    expect(api.get).toHaveBeenCalledWith('/api/cases/case-1/inspect/probe?path=media%2Fb.mp4');
+    await vi.waitFor(() => expect(refs.open[0].fps).toBe(25));
+  });
+
+  it('asks nothing for a picture', () => {
+    const refs = store();
+    refs.add(SHOT);
+    expect(api.get).not.toHaveBeenCalled();
+  });
+
+  it('keeps the default rate when the probe fails, without a word', async () => {
+    api.get = vi.fn(async () => {
+      throw new Error('no ffprobe');
+    });
+    const refs = store();
+    refs.add(CLIP);
+    await Promise.resolve();
+    expect(refs.open[0].fps).toBe(null);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('keeps a frame as a picture a step down from it, on top, with its facts', () => {
+    const refs = store();
+    refs.add({ ...CLIP, notes: 'Gate' });
+    const clip = refs.open[0];
+    refs.keepFrame(clip.id, 'data:image/jpeg;base64,AA', 12.4);
+
+    const frame = refs.open[1];
+    expect(frame).toMatchObject({
+      kind: 'image',
+      still: 'data:image/jpeg;base64,AA',
+      title: 'B · 0:12.400',
+      x: clip.x + 26,
+      y: clip.y + 26,
+      docked: false,
+    });
+    expect(frame.facts.notes).toBe('Gate');
+    expect(frame.z).toBeGreaterThan(clip.z);
+  });
+
+  it('keeps nothing for a window that has gone, or for no picture', () => {
+    const refs = store();
+    refs.add(CLIP);
+    refs.keepFrame('ref-nope', 'data:image/jpeg;base64,AA', 0);
+    refs.keepFrame(refs.open[0].id, null, 0);
+    expect(refs.open).toHaveLength(1);
+  });
+});
+
+describe('the dock', () => {
+  it('docks a window in the column asked and lists each where it is', () => {
+    const refs = store();
+    refs.add(SHOT);
+    refs.add(CLIP);
+    refs.add(SHOT);
+    refs.place(refs.open[1].id, 'left');
+    refs.place(refs.open[2].id, 'right');
+    expect(refs.dockedOn('left').map((pane) => pane.title)).toEqual(['B']);
+    expect(refs.dockedOn('right')).toHaveLength(1);
+    expect(refs.floating.map((pane) => pane.title)).toEqual(['A']);
+  });
+
+  it('pins a window to a corner, over the map, and moves it from a column to one', () => {
+    const refs = store();
+    refs.add(SHOT);
+    refs.place(refs.open[0].id, 'left');
+    refs.place(refs.open[0].id, 'tl');
+    expect(refs.open[0]).toMatchObject({ docked: false, corner: 'tl' });
+    expect(refs.floating).toHaveLength(1); // pinned is still over the map
+    refs.place(refs.open[0].id, 'right');
+    expect(refs.open[0]).toMatchObject({ docked: 'right', corner: false });
+  });
+
+  it('sets a window free when asked for the place it is in, or for none', () => {
+    const refs = store();
+    refs.add(SHOT);
+    refs.place(refs.open[0].id, 'br');
+    refs.place(refs.open[0].id, 'br');
+    expect(refs.open[0]).toMatchObject({ docked: false, corner: false });
+    refs.place(refs.open[0].id, 'left');
+    refs.place(refs.open[0].id, null);
+    expect(refs.open[0]).toMatchObject({ docked: false, corner: false });
+    refs.place('ref-nope', 'tl'); // a window that has gone
+  });
+
+  it('puts a frame kept from a docked clip in the column beside it', () => {
+    const refs = store();
+    refs.add(CLIP);
+    refs.place(refs.open[0].id, 'left');
+    refs.keepFrame(refs.open[0].id, 'data:image/jpeg;base64,AA', 1);
+    expect(refs.dockedOn('left')).toHaveLength(2);
+  });
+
+  it('keeps each column to what leaves the map at least half', () => {
+    const refs = store();
+    expect(refs.dockWidth('right')).toBe(340);
+    refs.setDockWidth('right', 1200, 1600);
+    expect(refs.dockWidth('right')).toBe(800);
+    refs.setDockWidth('right', 10, 1600);
+    expect(refs.dockWidth('right')).toBe(220);
+  });
+
+  it('counts the other column before widening one', () => {
+    const refs = store();
+    refs.add(SHOT);
+    refs.place(refs.open[0].id, 'left');
+    refs.setDockWidth('left', 600, 1600);
+    refs.setDockWidth('right', 5000, 1600);
+    // half of what the left column leaves, not half of the row
+    expect(refs.dockWidth('right')).toBe(500);
+  });
+});
+
 describe('focus and close', () => {
   it('renumbers the stack rather than letting z climb without bound', () => {
     const refs = store();

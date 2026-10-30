@@ -45,8 +45,13 @@ const get = vi.fn(async (path) => {
   }
   return {};
 });
+// a test that answers differently puts this back for the next one
+const getDefault = get.getMockImplementation();
 const put = vi.fn(async (path, body) => ({ name: body.path.includes('roof') ? 'Roof' : 'Convoy clip', title: 'x' }));
-const post = vi.fn(async () => ({ saved: [] }));
+// A video asks for its hover strip and waveform as it opens; with nothing cached
+// and no job to wait on, the bar is simply plainer.
+const postDefault = async (path) => (path.endsWith('/inspect/overview') ? { scan: null } : { saved: [] });
+const post = vi.fn(postDefault);
 const del = vi.fn(async () => ({ status: 'deleted', deleted: ['e_work'], trash: 'g_1' }));
 const patch = vi.fn();
 vi.mock('../lib/api.js', () => ({ api: { get, put, post, del, patch } }));
@@ -98,7 +103,10 @@ beforeEach(() => {
   works = [];
   media = MEDIA;
   get.mockClear();
+  get.mockImplementation(getDefault);
   put.mockClear();
+  post.mockReset();
+  post.mockImplementation(postDefault);
   del.mockClear();
   patch.mockReset();
   toast.mockClear();
@@ -154,7 +162,7 @@ describe('leaving a file', () => {
     button('Duplicate').click();
     flushSync();
 
-    target.querySelector('button[aria-label="Close file"]').click();
+    button('Files').click();
     await settle(10);
 
     expect(put).toHaveBeenCalledTimes(1);
@@ -231,6 +239,43 @@ describe('coming back to a file', () => {
 
     expect(target.querySelector('.file-name').value).toBe('Convoy clip');
     expect(uiState.openInspect).toBeNull();
+  });
+});
+
+describe('saving a frame from the strip', () => {
+  it('files it under its default name and last folder, while the clip stays open', async () => {
+    saved['media/clip.mp4'] = {
+      name: 'Convoy clip',
+      title: 'Convoy clip',
+      spec: { source: { path: 'media/clip.mp4', kind: 'video' }, videoAdjust: {}, videoRotation: 0, frames: [frame('fr_a', 2), frame('fr_b', 5.5)], activeFrameId: null },
+    };
+    let answer;
+    post.mockImplementation((path, body) => (
+      path.endsWith('/save-frames') ? new Promise((resolve) => { answer = resolve; }) : postDefault(path, body)
+    ));
+    await start();
+    await openFile('Convoy clip');
+    await afterQuiet();
+
+    target.querySelector('button[aria-label="Save frame"]').click();
+    await settle();
+
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/inspect/save-frames', {
+      items: [expect.objectContaining({ path: 'media/clip.mp4', time: 2, label: expect.stringContaining('Convoy clip') })],
+      folder: null,
+      notes: null,
+    });
+    const [first] = target.querySelectorAll('.strip > div.tile');
+    expect(first.querySelector('[aria-label="Saving"]')).not.toBeNull();
+    expect(target.querySelectorAll('button[aria-label="Save frame"]')).toHaveLength(1);
+    expect(target.querySelector('.strip > button.tile').classList.contains('active')).toBe(true);
+
+    media = [...MEDIA, { path: 'media/frame-a.png', kind: 'image', title: 'frame a', filename: 'frame-a.png' }];
+    answer({ saved: [{ item: { path: 'media/frame-a.png' } }] });
+    await settle();
+
+    expect(first.querySelector('.filed')).not.toBeNull();
+    expect(toast).toHaveBeenCalledWith(expect.stringMatching(/^Saved “.*Convoy clip.*” to the case$/), 'ok');
   });
 });
 
@@ -328,5 +373,230 @@ describe('renaming the file', () => {
 
     expect(toast).toHaveBeenCalledWith('“Roof” was deleted from the case', 'warn');
     expect(field()).toBeNull();
+  });
+});
+
+const press = (key, extra = {}) => {
+  document.body.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...extra }));
+  flushSync();
+};
+const tab = (name) => [...target.querySelectorAll('.ptab')].find((t) => t.textContent.trim().startsWith(name));
+/** Put the clip at `time`, the way the player hears it from the browser. */
+function playheadAt(time) {
+  const video = target.querySelector('video');
+  Object.defineProperty(video, 'currentTime', { configurable: true, get: () => time, set: () => {} });
+  video.dispatchEvent(new Event('timeupdate'));
+  flushSync();
+}
+const renders = () => fetch.mock.calls.filter(([url]) => String(url).endsWith('/render-preview')).map(([, init]) => JSON.parse(init.body));
+
+describe('the capture and the save, in reach whatever the panel shows', () => {
+  it('keeps Capture frame above the video panel\'s tabs', async () => {
+    await start();
+    await openFile('Convoy clip');
+
+    expect(target.querySelector('.pinned').textContent).toContain('Capture frame');
+    for (const name of ['Info', 'Adjust', 'Moments']) {
+      tab(name).click();
+      flushSync();
+      expect(tab(name).getAttribute('aria-selected')).toBe('true');
+      expect(target.querySelector('.pinned').textContent).toContain('Capture frame');
+    }
+  });
+
+  it('keeps Save to case above a frame\'s tabs', async () => {
+    await start();
+    await openFile('Roof');
+
+    expect(target.querySelector('.pinned').textContent).toContain('Save to case');
+    expect([...target.querySelectorAll('.ptab')].map((t) => t.textContent.trim())).toEqual(['Info', 'Adjust', 'Analyze']);
+    tab('Analyze').click();
+    flushSync();
+    expect(target.querySelector('.pinned').textContent).toContain('Save to case');
+    expect(target.textContent).toContain('Reverse image search');
+  });
+
+  it('offers to save the captured frames from the same place', async () => {
+    await start();
+    await openFile('Convoy clip');
+    press('c');
+    await settle(10);
+
+    expect(target.querySelector('.pinned').textContent).toContain('Save the frame to the case');
+  });
+});
+
+describe('capturing from the keyboard', () => {
+  it('asks the server for the frame on screen, and keeps the timestamp it names', async () => {
+    // the server's answer: 25 fps, so 0.5 s sits inside frame 12, which starts at 0.48
+    fetch.mockImplementation(async (url, init) => {
+      const { time } = JSON.parse(init.body);
+      const headers = { 'Content-Type': 'image/png', 'X-Frame-Time': (Math.floor(time * 25 + 1e-6) / 25).toFixed(6) };
+      return new Response(new Blob(['png'], { type: 'image/png' }), { headers });
+    });
+    await start();
+    await openFile('Convoy clip');
+    playheadAt(0.5);
+    press('c');
+    await settle(10);
+
+    expect(renders().at(-1)).toMatchObject({ path: 'media/clip.mp4', time: 0.5, snap: true });
+    await afterQuiet();
+    expect(put.mock.calls.at(-1)[1].spec.frames.map((f) => f.time)).toEqual([0.48]);
+  });
+
+  it('points at a frame already cut when the server names one in the strip', async () => {
+    fetch.mockImplementation(async () => new Response(new Blob(['png']), { headers: { 'X-Frame-Time': '2.000000' } }));
+    await start();
+    await openFile('Convoy clip');
+    playheadAt(2.01);
+    press('c');
+    await settle(10);
+    playheadAt(2.03);
+    press('c');
+    await settle(10);
+
+    expect(target.querySelectorAll('.strip > div.tile')).toHaveLength(1);
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining('already in the strip'), 'info', 2500);
+  });
+
+  it('shows the frame in the strip at once, and a second press on it only points at it', async () => {
+    await start();
+    await openFile('Convoy clip');
+    playheadAt(2);
+    press('c');
+    expect(target.querySelectorAll('.strip > div.tile')).toHaveLength(1);
+    press('c');
+    await settle(10);
+
+    expect(target.querySelectorAll('.strip > div.tile')).toHaveLength(1);
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining('already in the strip'), 'info', 2500);
+  });
+
+  it('leaves the keys alone while a field has the focus', async () => {
+    await start();
+    await openFile('Convoy clip');
+    const name = target.querySelector('.file-name');
+    name.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }));
+    await settle(10);
+
+    expect(target.querySelectorAll('.strip > div.tile')).toHaveLength(0);
+  });
+});
+
+describe('marking a moment', () => {
+  it('marks where the clip is, opens Moments on it, and keeps it with the work', async () => {
+    await start();
+    await openFile('Convoy clip');
+    playheadAt(3.3);
+    press('m');
+    await settle();
+
+    expect(tab('Moments').getAttribute('aria-selected')).toBe('true');
+    const label = target.querySelector('.mark-label');
+    expect(label).not.toBeNull();
+    expect(document.activeElement).toBe(label);
+    label.value = 'convoy turns left';
+    label.dispatchEvent(new Event('input', { bubbles: true }));
+    await afterQuiet();
+
+    const spec = put.mock.calls.at(-1)[1].spec;
+    expect(spec.frames).toEqual([]);
+    expect(spec.marks).toEqual([{ id: expect.any(String), time: expect.closeTo(3.28, 6), label: 'convoy turns left' }]);
+  });
+
+  it('brings a work\'s marks back with the clip', async () => {
+    saved['media/clip.mp4'] = {
+      name: 'Convoy clip',
+      title: 'Convoy clip',
+      spec: { source: { path: 'media/clip.mp4', kind: 'video' }, videoAdjust: {}, videoRotation: 0, frames: [], marks: [{ id: 'mk_1', time: 7.2, label: 'flash' }], activeFrameId: null },
+    };
+    await start();
+    await openFile('Convoy clip');
+    tab('Moments').click();
+    flushSync();
+
+    expect(tab('Moments').textContent).toContain('1');
+    expect(target.querySelector('.mark-label').value).toBe('flash');
+    expect(target.querySelector('.mark-row .stamp').textContent).toBe('0:07.200');
+    await afterQuiet();
+    expect(put).not.toHaveBeenCalled();
+  });
+});
+
+describe('what the server read off the clip', () => {
+  it('lays the sound under the bar and points the hover at the strip it drew', async () => {
+    post.mockImplementation(async (path) => (path.endsWith('/inspect/overview')
+      ? { overview: { duration: 20, tiles: { count: 20, columns: 10, rows: 2, width: 160, height: 90, interval: 1 }, waveform: [0.1, 0.4, 0.2] }, scan: null }
+      : { saved: [] }));
+    await start();
+    await openFile('Convoy clip');
+    await settle(10);
+
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/inspect/overview', { path: 'media/clip.mp4' });
+    expect(target.querySelector('.track.waved canvas.wave')).not.toBeNull();
+  });
+
+  it('shows the shots a previous scan found as soon as the clip opens', async () => {
+    post.mockImplementation(async (path) => (path.endsWith('/inspect/overview')
+      ? { job_id: 'never', scan: { frames: [{ time: 4, score: 9, rank: 0 }], shots: [{ start: 0, end: 10, best: 4, score: 9 }, { start: 10, end: 20, best: 12, score: 5 }] } }
+      : { saved: [] }));
+    get.mockImplementation(async (path) => {
+      if (path === '/api/jobs/never') return { status: 'running', progress: {} };
+      if (path === '/api/inspect/ops') return structuredClone(OPS);
+      if (path === '/api/cases/case-a/media') return structuredClone(media);
+      if (path === '/api/cases/case-a/inspect/works') return [];
+      if (path.startsWith('/api/cases/case-a/inspect/probe')) return { kind: 'video', duration: 20, fps: 25, width: 640, height: 360 };
+      if (path.startsWith('/api/cases/case-a/inspect/work?path=')) return { work: null };
+      return {};
+    });
+    await start();
+    await openFile('Convoy clip');
+    tab('Moments').click();
+    flushSync();
+
+    expect(target.textContent).toContain('2 shots');
+    expect(target.querySelectorAll('.shot-card')).toHaveLength(2);
+    expect(target.querySelectorAll('.track .shot')).toHaveLength(1);
+  });
+});
+
+describe('holding O', () => {
+  it('shows the picture without its adjustments for as long as it is held', async () => {
+    await start();
+    await openFile('Roof');
+    press('o');
+    expect(target.textContent).toContain('Without adjustments');
+    document.body.dispatchEvent(new KeyboardEvent('keyup', { key: 'o', bubbles: true }));
+    flushSync();
+    expect(target.textContent).not.toContain('Without adjustments');
+  });
+});
+
+describe('a capture still rendering', () => {
+  it('leaves the other frames alone when it was removed and turns out to be one of them', async () => {
+    saved['media/clip.mp4'] = {
+      name: 'Convoy clip',
+      title: 'Convoy clip',
+      spec: { source: { path: 'media/clip.mp4', kind: 'video' }, videoAdjust: {}, videoRotation: 0, frames: [frame('fr_a', 2)], activeFrameId: null },
+    };
+    await start();
+    await openFile('Convoy clip');
+    let answer;
+    fetch.mockImplementation((url, init) => (JSON.parse(init.body).snap
+      ? new Promise((resolve) => { answer = resolve; })
+      : Promise.resolve(new Response(new Blob(['png'])))));
+    playheadAt(2.01);
+    press('c');
+    expect(target.querySelectorAll('.strip > div.tile')).toHaveLength(2);
+    target.querySelectorAll('.strip > div.tile')[1].querySelector('button[aria-label="Remove frame"]').click();
+    flushSync();
+
+    answer(new Response(new Blob(['png']), { headers: { 'X-Frame-Time': '2.000000' } }));
+    await settle(10);
+
+    const tiles = target.querySelectorAll('.strip > div.tile');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0].querySelector('.num').textContent).toBe('0:02.0');
   });
 });

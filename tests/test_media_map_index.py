@@ -9,23 +9,14 @@ collected is listed, never what it made out of that material; and a row names th
 proofs it can open.
 """
 
-import base64
-import io
-
 from PIL import Image
 import pytest
 
 from azimut.engine import geo
-from azimut.engine import media as media_engine
 from azimut.workspace import Case
 
 import graph_read
-
-
-def _png_bytes(color=(200, 30, 30), size=(64, 48)) -> bytes:
-    buf = io.BytesIO()
-    Image.new("RGB", size, color).save(buf, "PNG")
-    return buf.getvalue()
+from mediafixture import _frame_of, _index, _points, _save_proof, _upload
 
 
 @pytest.fixture()
@@ -48,13 +39,6 @@ def _ukraine(lat, lon, timeout=8, language=None):
 
 def _new_case(client, name="Media map"):
     return client.post("/api/cases", json={"name": name}).json()["id"]
-
-
-def _upload(client, cid, name, color=(200, 30, 30)):
-    return client.post(
-        f"/api/cases/{cid}/media/upload",
-        files={"file": (name, io.BytesIO(_png_bytes(color)), "image/png")},
-    ).json()["item"]["path"]
 
 
 def _id(cid, **attrs):
@@ -82,38 +66,6 @@ def _sat(client, cid, lat, lon):
         f"/api/cases/{cid}/satellite/capture",
         json={"lat": lat, "lon": lon, "zoom": 16, "width": 256, "height": 256},
     ).json()["path"]
-
-
-def _save_proof(client, cid, title, srcs, **spec_extra):
-    spec = {"panels": [{"id": f"p{i}", "src": s} for i, s in enumerate(srcs)], **spec_extra}
-    png = base64.b64encode(_png_bytes((10, 10, 10))).decode()
-    res = client.post(
-        f"/api/cases/{cid}/proofs",
-        json={"title": title, "spec": spec, "png_base64": png},
-    )
-    assert res.status_code == 200, res.text
-
-
-def _frame_of(cid, source_path, name="frame.png"):
-    """A frame filed the way Inspect files one, derived from its video."""
-    return media_engine.import_image(
-        Case.open(cid),
-        Image.new("RGB", (32, 24), (90, 90, 90)),
-        name,
-        {"type": "inspect", "from": source_path},
-        by="inspect",
-        dedupe=False,
-    )["item"]["path"]
-
-
-def _index(client, cid):
-    res = client.get(f"/api/cases/{cid}/satellite/media")
-    assert res.status_code == 200, res.text
-    return res.json()
-
-
-def _points(rows, path):
-    return sorted((row["lat"], row["lon"]) for row in rows if row["path"] == path)
 
 
 def test_a_file_placed_by_nothing_is_not_listed(client, sat_tiles):

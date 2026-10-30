@@ -105,39 +105,47 @@ def moved(attrs: dict[str, Any], placed: dict[str, Any]) -> bool:
             or abs(float(attrs["lon"]) - placed["lon"]) > 0.01)
 
 
-def follow_rename(case: Case, old_rel: str, new_rel: str) -> None:
+def follow_rename(
+    case: Case, old_rel: str, new_rel: str, attr: str = SESSION_ATTR, key: str = "session"
+) -> None:
     """Point every image made from a renamed comparison at its new name, on its
-    entity and in its sidecar, which is what the Saved panel groups by."""
+    entity and in its sidecar, which is what the Saved panel groups by.
+
+    A saved Horizon view keeps its images the same way, under its own `attr`
+    and sidecar `key`."""
     found: list[dict[str, Any]] = []
     cursor: str | None = None
     while True:
         page = case.page_entities(limit=200, cursor=cursor, types=["media"],
-                                  attr=SESSION_ATTR, attr_value=old_rel)
+                                  attr=attr, attr_value=old_rel)
         found.extend(page["items"])
         cursor = page.get("next_cursor")
         if not cursor:
             break
     for entity in found:
-        case.update_entity(entity["id"], {"attrs": {SESSION_ATTR: new_rel}})
+        case.update_entity(entity["id"], {"attrs": {attr: new_rel}})
         path = str((entity.get("attrs") or {}).get("path") or "")
         item = media_engine.read_item(case, path) if path else None
         if item and isinstance(item.get("source"), dict):
-            media_engine.merge_item(case, path, {"source": {**item["source"], "session": new_rel}})
+            media_engine.merge_item(case, path, {"source": {**item["source"], key: new_rel}})
 
 
-def grouped(items: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+def grouped(
+    items: list[dict[str, Any]], source_type: str = "compare", key: str = "session"
+) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
     """The case's comparison images, read off one media listing: every one by its
     path (a session's preview is found there), and the kept ones by session, in
-    the order they were kept."""
+    the order they were kept. A saved Horizon view's are read with its own
+    `source_type` and sidecar `key`."""
     by_path: dict[str, dict[str, Any]] = {}
     kept: dict[str, list[dict[str, Any]]] = {}
     for item in sorted(items, key=lambda entry: (str(entry.get("added_at") or ""), entry["path"])):
         source = item.get("source") or {}
-        if source.get("type") != "compare":
+        if source.get("type") != source_type:
             continue
         by_path[item["path"]] = item
-        if source.get("kept") and source.get("session"):
-            kept.setdefault(source["session"], []).append(
+        if source.get("kept") and source.get(key):
+            kept.setdefault(source[key], []).append(
                 {"path": item["path"], "title": item.get("title") or "",
                  "thumbnail": item.get("thumbnail")})
     return by_path, kept

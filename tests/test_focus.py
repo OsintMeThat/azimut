@@ -114,7 +114,7 @@ def _video_with_a_sharp_window(path, case_dir):
 
 
 @needs_ffmpeg
-def test_scan_focus_scores_every_frame_and_suggest_finds_the_sharp_window(tmp_workspace):
+def test_scan_video_scores_every_frame_and_suggest_finds_the_sharp_window(tmp_workspace):
     from azimut.workspace import Case
 
     case = Case.create("Focus scan")
@@ -122,12 +122,12 @@ def test_scan_focus_scores_every_frame_and_suggest_finds_the_sharp_window(tmp_wo
     _video_with_a_sharp_window(video, case.path)
     rel = "media/clip.mp4"
 
-    scored = ie.scan_focus(case, rel)
+    scored = ie.scan_video(case, rel)["frames"]
     # Every frame, not a handful of bins — the whole point of the rewrite.
     assert len(scored) >= 35
     assert [s["time"] for s in scored] == sorted(s["time"] for s in scored)
 
-    picks = ie.suggest_frames(case, rel, count=3)
+    picks = ie.suggest_frames(case, rel, count=3)["frames"]
     assert picks[0]["rank"] == 0
     # The sharp burst sits at 2.0-2.2s; the best pick must land there rather than
     # wherever a fixed bin centre happened to fall.

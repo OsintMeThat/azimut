@@ -40,8 +40,19 @@
  */
 export const MAP_MODES = [
   {
+    id: 'layer',
+    label: 'Add layer markers',
+    icon: 'pin',
+    group: 'work',
+    cursor: 'tracing',
+    panel: false,
+    rail: false,
+  },
+  {
+    // Lines and areas, a line of two points used as rings, a cone, a shadow or
+    // a viewshed, and the ground under a line once the analyst asks for it.
     id: 'measure',
-    label: 'Measure tools',
+    label: 'Measure',
     icon: 'ruler',
     group: 'work',
     cursor: 'measuring',

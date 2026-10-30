@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from .. import config, errors, jobs
 from ..engine import enrich as enrich_engine
-from ..engine import exportdir
+from ..engine import exportdir, layerediting
 from ..engine import media as media_engine
 from ..engine import reveal as reveal_engine
 from ..engine import thumbnails as thumbnail_engine
@@ -440,6 +440,12 @@ def update_media_item(case_id: str, body: UpdateIn) -> dict[str, Any]:
     if body.source_url is not None:
         patch["source_url"] = stated_source(body.source_url)
     try:
-        return media_engine.update_media(case, body.path, patch)
+        answer = media_engine.update_media(case, body.path, patch)
     except (ValueError, CaseError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # what the file says reaches the layer markers following it
+    if patch.keys() & {"notes", "title", "source_url"}:
+        entity = case.find_entity(attr="path", value=body.path)
+        if entity is not None:
+            layerediting.sync_followers(case, entity["id"])
+    return answer

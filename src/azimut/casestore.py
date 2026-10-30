@@ -341,6 +341,12 @@ class CaseStore:
     def note_ids_by_titles(self, titles: set[str]) -> dict[str, list[str]]:
         return self._graph().note_ids_by_titles(titles)
 
+    def get_setting(self, key: str) -> str | None:
+        return self._graph().get_setting(key)
+
+    def set_setting(self, key: str, value: str | None) -> None:
+        self._graph().set_setting(key, value)
+
     def entity_count(self) -> int:
         """Entity total for the case switcher — one indexed count."""
         return self._graph().count_entities()

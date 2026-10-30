@@ -2806,6 +2806,22 @@ class SqliteCase:
         with self._connect() as conn:
             return _temporal_projection_status_conn(conn)
 
+    def get_setting(self, key: str) -> str | None:
+        """A small case-level setting, kept in `meta` so it travels with the case."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT value FROM meta WHERE key = ?", (f"setting:{key}",)).fetchone()
+            return None if row is None else str(row[0])
+
+    def set_setting(self, key: str, value: str | None) -> None:
+        """Write a case-level setting, or take it back out with None."""
+        def op(conn: sqlite3.Connection) -> None:
+            if value is None:
+                conn.execute("DELETE FROM meta WHERE key = ?", (f"setting:{key}",))
+            else:
+                conn.execute("INSERT INTO meta(key, value) VALUES(?, ?) "
+                             "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (f"setting:{key}", value))
+        self._write(op)
+
     def count_entities(self) -> int:
         """Entity total via one indexed count — the case switcher's per-case
         badge without materialising the graph."""

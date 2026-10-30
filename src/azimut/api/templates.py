@@ -1,4 +1,4 @@
-"""REST API for reusable presets: proof house styles and post-thread skeletons.
+"""REST API for reusable presets: proof house styles, post-thread skeletons and map layouts.
 
 Templates are app-wide (workspace-level), like the signature and API keys — a
 house style spans every case, so it never lives inside a case folder. Two
@@ -28,6 +28,7 @@ from pydantic import (
 )
 
 from .. import config
+from ..engine import mapplates
 
 router = APIRouter(prefix="/api", tags=["templates"])
 
@@ -35,6 +36,8 @@ router = APIRouter(prefix="/api", tags=["templates"])
 # low enough that a runaway client can't bloat the workspace file unbounded.
 MAX_PER_KIND = 50
 MAX_DATA_BYTES = 64 * 1024
+#: A map template may keep a logo or a paper picture inside it (`mapplates.Picture`).
+MAX_MAP_DATA_BYTES = 720 * 1024
 MAX_POST_TWEETS = 20
 
 Color = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
@@ -100,8 +103,14 @@ class ProofTemplateData(CanonicalModel):
     footerCoords: StrictBool = False
     footerColor: Color | None = None
     footerAlign: Literal["left", "right"] = "left"
+    captionColor: Color | None = None
     captionsEnabled: StrictBool = True
     panelDirection: Literal["horizontal", "vertical"] = "horizontal"
+    # The typeface every word on the proof is set in, shipped with the app so a
+    # proof reads the same on every machine. A style stored before fonts existed
+    # keeps the system's, which is what it has always looked like.
+    font: Literal["system", "inter", "barlow", "oxanium", "plexmono"] = "system"
+    fontBold: StrictBool = True
     signature: ProofSignature | None = None
     signatureText: ProofSignatureText | None = None
     palette: list[Color] = Field(
@@ -118,7 +127,7 @@ class ProofTemplateData(CanonicalModel):
         max_length=7,
     )
 
-    @field_validator("bg", "footerColor")
+    @field_validator("bg", "footerColor", "captionColor")
     @classmethod
     def normalize_color(cls, color: str | None) -> str | None:
         return color.lower() if color is not None else None
@@ -137,7 +146,7 @@ class PostExtraTweet(CanonicalModel):
 
 
 class PostTemplateData(CanonicalModel):
-    mention: str = Field(default="@GeoConfirmed", max_length=120)
+    mention: str = Field(default="@GeoConfirmed", max_length=280)
     body: str = Field(default=DEFAULT_POST_BODY, min_length=1, max_length=16_000)
     mediaEnabled: StrictBool = True
     extraTweets: list[PostExtraTweet] = Field(default_factory=list, max_length=MAX_POST_TWEETS)
@@ -193,11 +202,13 @@ def _require_kind(kind: str) -> None:
 
 
 def _canonical_data(kind: str, data: dict[str, Any]) -> dict[str, Any]:
-    model = ProofTemplateData if kind == "proof" else PostTemplateData
+    models: dict[str, type[BaseModel]] = {"proof": ProofTemplateData, "post": PostTemplateData,
+                                          "map": mapplates.TemplateData}
+    model = models[kind]
     try:
         return model.model_validate(data).model_dump(mode="json")
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors(include_input=False)) from exc
+        raise HTTPException(status_code=422, detail=exc.errors(include_input=False, include_context=False)) from exc
 
 
 def _data_size(data: dict[str, Any]) -> int:
@@ -225,10 +236,11 @@ def list_templates() -> dict[str, Any]:
 @router.post("/templates/{kind}")
 def save_template(kind: str, body: TemplateIn) -> dict[str, Any]:
     _require_kind(kind)
-    if _data_size(body.data) > MAX_DATA_BYTES:
+    bound = MAX_MAP_DATA_BYTES if kind == "map" else MAX_DATA_BYTES
+    if _data_size(body.data) > bound:
         raise HTTPException(status_code=413, detail="template data too large")
     data = _canonical_data(kind, body.data)
-    if _data_size(data) > MAX_DATA_BYTES:
+    if _data_size(data) > bound:
         raise HTTPException(status_code=413, detail="template data too large")
 
     record: dict[str, Any] = {}

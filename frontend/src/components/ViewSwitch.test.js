@@ -8,11 +8,13 @@ const media = readFileSync(new URL('../tools/MediaLibrary.svelte', import.meta.u
 describe('the control that says how a screen renders its answer', () => {
   it('keeps the markup Files and the Media Library already draw by hand', () => {
     // so those two are a drop-in migration rather than a rewrite
-    expect(source).toContain('<div class="view-switch" role="group" aria-label={label}>');
+    // the guide's anchor rides along, so a screen can let the guide frame its switch
+    expect(source).toContain('<div class="view-switch" role="group" aria-label={label} data-guide={guide}>');
     expect(source).toContain('class:active={value === option.id}');
     expect(source).toContain('aria-pressed={value === option.id}');
     for (const drawn of [files, media]) {
-      expect(drawn).toContain('<div class="view-switch" role="group" aria-label="View">');
+      // a guide anchor may ride along, as it does on the shared switch
+      expect(drawn).toMatch(/<div class="view-switch" role="group" aria-label="View"( data-guide="[a-z.]+")?>/);
       expect(drawn).toContain('aria-pressed={view === v.id}');
     }
   });

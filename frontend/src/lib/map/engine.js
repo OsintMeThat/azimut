@@ -1,9 +1,9 @@
 /**
  * Builds the map MapLibre renders, and hands back the neutral façade.
  *
- * The only file in the tools' reach that imports MapLibre — the pitch and
- * terrain of the 3D map (SPEC v3) are options on this map object, and the tools
- * above the façade never learn about either. What the map opens on, and the two
+ * The only file in the tools' reach that imports MapLibre — a plate map's lean
+ * is an option on this map object, and the tools above the façade never learn
+ * about it; the 3D view is the app's own globe (`lib/globe`). What the map opens on, and the two
  * controls it always carries, are settled here rather than at the call site: a
  * second map surface must not be able to ship without a scale bar.
  *
@@ -14,7 +14,7 @@
  */
 // `MapLibreMap` rather than the `Map` alias: shadowing the global here is
 // exactly the sort of thing that reads fine until someone needs a Map.
-import { MapLibreMap, NavigationControl, ScaleControl, setWorkerUrl } from 'maplibre-gl';
+import { addProtocol, MapLibreMap, NavigationControl, ScaleControl, setWorkerUrl } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 // The engine's worker, bundled and given a URL by our own build rather than by
 // the engine's runtime guess — see the note in `vite.config.js`. Without this
@@ -23,8 +23,55 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import './engine.css';
 import { mapFacade, engineZoom } from './facade.js';
+import { GUARD_PROTOCOL, readGuarded, tileSource } from './quotaGuard.js';
+import { BATCH_PROTOCOL, appTile, batchedTile, createTileBatcher, readBatched } from './tileBatch.js';
+import { WHEEL_ZOOM_RATE } from './wheel.js';
 
 setWorkerUrl(workerUrl);
+
+/**
+ * The maps a tile may be asked for, by the id its address carries, so the
+ * billed guard (`quotaGuard.js`) can read the view the tile is for.
+ */
+const maps = new Map();
+let mapsMade = 0;
+
+/** What the guard needs of a view: where it looks, how deep, how big, how tilted. */
+function guardView(map) {
+  const centre = map.getCenter();
+  const box = map.getContainer();
+  return {
+    lat: centre.lat,
+    lon: centre.lng,
+    zoom: map.getZoom(),
+    width: box.clientWidth,
+    height: box.clientHeight,
+    pitch: map.getPitch(),
+  };
+}
+
+/**
+ * A billed tile, from its provider or, past a flat view's reach on a tilted
+ * map, from the free one.
+ */
+addProtocol(GUARD_PROTOCOL, async (params, abort) => {
+  const asked = readGuarded(params.url);
+  if (!asked) throw new Error('not a billed tile address');
+  const map = maps.get(asked.mapId);
+  const providerId = map ? tileSource(asked, guardView(map)).provider : asked.providerId;
+  return appTile({ ...asked, providerId }, { signal: abort.signal });
+});
+
+/**
+ * A free provider's tile, asked with the others the flat maps of the page want
+ * at that moment in one request (`basemap.js` `rasterSource`).
+ */
+const batcher = createTileBatcher();
+addProtocol(BATCH_PROTOCOL, async (params, abort) => {
+  const asked = readBatched(params.url);
+  if (!asked) throw new Error('not a batched tile address');
+  return batchedTile(asked, { batcher, signal: abort.signal });
+});
 
 /**
  * The style the map opens with: nothing.
@@ -41,14 +88,15 @@ setWorkerUrl(workerUrl);
  */
 const EMPTY_STYLE = { version: 8, sources: {}, layers: [] };
 
-/**
- * One notch of the wheel is one zoom level, as it was on the map this replaced.
+/*
+ * One notch of the wheel is one zoom level, as it was on the map this replaced
+ * (`WHEEL_ZOOM_RATE`, in `wheel.js` so the wheel over relief reads it too).
  *
  * The engine's own rate asymptotes at a level per notch and only reaches about
  * 0.18 of one, which `settleOnLevel` then rounds straight back to where the
  * gesture started: the map twitched and stayed put, and the wheel did nothing
- * at all. At this rate a notch lands within a thousandth of a level, so the
- * settle has nothing left to correct that anyone could see — which matters,
+ * at all. At this rate a notch lands within a few thousandths of a level, so
+ * the settle has nothing left to correct that anyone could see — which matters,
  * because the settle zooms about the centre while the wheel zoomed about the
  * cursor, and a visible correction would slide the ground under it.
  *
@@ -57,7 +105,6 @@ const EMPTY_STYLE = { version: 8, sources: {}, layers: [] };
  * small to make a level snaps back to the one it started on — which is what the
  * old map did with them too.
  */
-const WHEEL_ZOOM_RATE = 1 / 15;
 
 /**
  * The camera comes to rest on a whole zoom level.
@@ -66,6 +113,38 @@ const WHEEL_ZOOM_RATE = 1 / 15;
  * capture and saved view records one whole number. The gesture itself stays
  * continuous — this only decides where it stops.
  */
+/** px a press may travel and still be a click: the engine's own tolerance. */
+const CLICK_TOLERANCE = 3;
+
+/**
+ * Keep the end of a drag from reaching the map as a click.
+ *
+ * The engine tells a click from a drag by where it saw the press, and forgets
+ * that press as soon as code moves the camera. Our own gestures move it that
+ * way (the ground pan over relief, the shift-drag turn), so each one ended in a
+ * click on whatever lay under the hand, and a pan over relief opened the card
+ * of the area it crossed. The press is read here, ahead of the engine, on
+ * `pointerdown` since a gesture that takes the press stops its `mousedown`.
+ *
+ * @param {HTMLElement} container the element the map fills
+ * @param {HTMLElement} canvas the engine's canvas, the only target guarded:
+ *   a click on a card or a marker is that element's own
+ * @param {AbortSignal} [signal] ends the guard with the map
+ */
+export function dropDraggedClicks(container, canvas, signal) {
+  let press = null;
+  container.addEventListener('pointerdown', (event) => {
+    press = event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
+  }, { capture: true, signal });
+  container.addEventListener('click', (event) => {
+    const from = press;
+    press = null;
+    if (!from || event.target !== canvas) return;
+    if (Math.hypot(event.clientX - from.x, event.clientY - from.y) < CLICK_TOLERANCE) return;
+    event.stopPropagation();
+  }, { capture: true, signal });
+}
+
 function settleOnLevel(map, following) {
   let settling = false;
   map.on('moveend', () => {
@@ -100,8 +179,17 @@ function settleOnLevel(map, following) {
  * @param {object} opts
  * @param {object} opts.view `{ lat, lon, zoom }` the map opens on
  * @param {boolean} [opts.imperial] scale bar in miles rather than metres
+ * @param {boolean} [opts.settle] come to rest on whole levels; a map plate
+ *   frames its ground at any zoom, and keeps it there
+ * @param {boolean} [opts.controls] the zoom buttons and the scale bar; a plate
+ *   draws its own scale, in print, and is framed by the hand
+ * @param {[number, number]} [opts.maxCanvasSize] the largest canvas, raised by a
+ *   plate drawn again at print resolution
+ * @param {boolean} [opts.fade] names and marks fade in as they are placed; a plate's
+ *   are put down at once, so a new day costs a frame or two rather than a fade's worth
  */
-export async function createMapEngine(container, { view, imperial = false } = {}) {
+export async function createMapEngine(container, { view, imperial = false, settle = true, controls = true,
+  maxCanvasSize = undefined, fade = true } = {}) {
   const map = new MapLibreMap({
     container,
     style: EMPTY_STYLE,
@@ -117,15 +205,31 @@ export async function createMapEngine(container, { view, imperial = false } = {}
     // the full credit line, as the tile providers' terms ask for it, rather
     // than the engine's ⓘ button on a narrow window
     attributionControl: { compact: false },
+    // A map turned round over relief comes back to ground it has drawn; keeping
+    // more levels of tiles is what spares it loading them all again.
+    maxTileCacheZoomLevels: 8,
+    ...(maxCanvasSize ? { maxCanvasSize } : {}),
+    ...(fade ? {} : { fadeDuration: 0 }),
   });
+  const mapId = `m${(mapsMade += 1)}`;
+  maps.set(mapId, map);
+  const gone = new AbortController();
+  map.once('remove', () => {
+    maps.delete(mapId);
+    gone.abort();
+  });
+  dropDraggedClicks(container, map.getCanvas(), gone.signal);
   // stacked below the top-left tool cluster (fullscreen/labels/measure) via a
   // CSS offset, instead of the engine's default corner margin
-  map.addControl(new NavigationControl({ showCompass: false }), 'top-left');
+  if (controls) map.addControl(new NavigationControl({ showCompass: false }), 'top-left');
+  // What a tool lays over the map steps aside from these buttons (the layer edit
+  // bar's `[data-bar-obstacle]`), without naming the engine that drew them.
+  container.querySelector?.('.maplibregl-ctrl-top-left .maplibregl-ctrl-group')?.setAttribute('data-bar-obstacle', '');
   // Judging feature sizes (buildings, roads) needs a scale reference, and it
   // reads under the coordinates rather than in the opposite corner: how far a
   // pixel goes and where you are are one instrument, and the right-hand corner
   // is where the acts sit, which used to land Capture on top of the bracket.
-  map.addControl(
+  if (controls) map.addControl(
     new ScaleControl({ unit: imperial ? 'imperial' : 'metric' }),
     'bottom-left'
   );
@@ -137,8 +241,12 @@ export async function createMapEngine(container, { view, imperial = false } = {}
   // A source cannot be added before the style is up, and `basemap.js` adds one
   // as soon as this returns.
   await map.once('load');
-  const facade = mapFacade(map, container);
-  settleOnLevel(map, facade.following);
+  const facade = mapFacade(map, container, mapId);
+  if (settle) settleOnLevel(map, facade.following);
+  // A tilted view has no one scale: the bar reads true along one line of it and
+  // wrong everywhere else, so it steps aside while the camera leans, as a map
+  // plate's tilted map has none (`engine.css`).
+  if (controls) map.on('pitch', () => container.classList.toggle('tilted', map.getPitch() >= 0.5));
   // A stable class for the tool's own cursor rules: a mode armed above the map
   // says so on the surface, whichever engine drew it.
   container.classList.add('map-surface');

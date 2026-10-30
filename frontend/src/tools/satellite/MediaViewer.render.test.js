@@ -154,3 +154,45 @@ describe('walking the stack', () => {
     expect(onclose).toHaveBeenCalled();
   });
 });
+
+describe('a file put in one of the analyst’s layers', () => {
+  const front = { name: 'front', title: 'Front', styles: [], markers: [{ key: 'm1', group: 'g', lat: 48.1, lon: 2.1 }],
+    groups: [{ id: 'g', name: 'Sightings', mode: 'uniform', symbol: 'badge-video', colour: '#d55e00' }] };
+  const strikes = { name: 'strikes', title: 'Strikes', styles: [], markers: [],
+    groups: [{ id: 's', name: 'Markers', mode: 'uniform', symbol: 'star', colour: '#009e73' }] };
+  const store = (targets) => ({ targets, entity: 'e1', busy: false, last: () => '',
+    refresh: vi.fn(), add: vi.fn(async () => true), create: vi.fn(), remove: vi.fn() });
+  const addButton = () => [...document.querySelectorAll('.acts button')].find((b) => b.textContent.trim() === 'Add to a layer');
+
+  it('opens the menu a proof’s point opens, and adds the file on the point it stands on', () => {
+    const layerItems = store([front, strikes]);
+    const onopenlayer = vi.fn();
+    open({ layerItems, onopenlayer });
+    expect(layerItems.refresh).toHaveBeenCalledWith('case-1', 'e1');
+    // where it already is, opened in its layer from here
+    expect(text()).toContain('In Front');
+    document.querySelector('.in-layer .open').click();
+    expect(onopenlayer).toHaveBeenCalledWith(expect.objectContaining({ layer: front, marker: front.markers[0] }));
+
+    addButton().click();
+    flushSync();
+    const menu = document.querySelector('[role="menu"][aria-label="Add to a layer"]');
+    // portalled out of the narrow panel, so nothing cuts it
+    expect(menu.parentElement).toBe(document.body);
+    const rows = [...menu.querySelectorAll('.targets .fm-item')];
+    expect(rows.map((row) => row.textContent.trim())).toEqual(['Front', 'Strikes']);
+    expect(rows[0].disabled).toBe(true);
+    rows[1].click();
+    flushSync();
+    expect(layerItems.add).toHaveBeenCalledWith('case-1', 'e1', { lat: 48.1, lon: 2.1 }, strikes, strikes.groups[0], null, '');
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('asks for a point a tool only suggested to be confirmed first', () => {
+    open({ index: 1, layerItems: store([strikes]) });
+    addButton().click();
+    flushSync();
+    expect(document.querySelector('[role="menu"] .fm-note').textContent).toBe('This point is only suggested. Confirm it in Media first.');
+    expect(document.querySelector('[role="menu"] .targets')).toBeNull();
+  });
+});

@@ -325,3 +325,125 @@ describe('the worklist of what was brought in', () => {
     expect(uiState.tool).toBe('sheet');
   });
 });
+
+describe('dragging a file out, and files in', () => {
+  function drag(type, data = {}, extra = {}) {
+    const store = { ...data };
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', {
+      value: {
+        get types() {
+          return Object.keys(store);
+        },
+        setData: (key, value) => (store[key] = value),
+        getData: (key) => store[key] ?? '',
+        effectAllowed: 'all',
+        files: [],
+      },
+    });
+    for (const [key, value] of Object.entries(extra)) Object.defineProperty(event, key, { value });
+    return event;
+  }
+  const card = () => target.querySelector('.media-card[data-path="media/quai.jpg"]');
+  const zone = () => target.querySelector('.tool');
+  const overlay = () => target.querySelector('.drop-overlay');
+
+  it('hands the card to a folder of the sidebar, picture and all', async () => {
+    await open();
+    expect(card().getAttribute('draggable')).toBe('true');
+    // the card is what moves, not the bare thumbnail the browser would drag
+    expect(card().querySelector('img').getAttribute('draggable')).toBe('false');
+    const start = drag('dragstart');
+    card().dispatchEvent(start);
+    flushSync();
+    expect(JSON.parse(start.dataTransfer.getData('application/x-azimut-media'))).toEqual([
+      { path: 'media/quai.jpg', title: 'quai.jpg', folder: '' },
+    ]);
+    expect(card().classList.contains('dragging')).toBe(true);
+    card().dispatchEvent(new Event('dragend', { bubbles: true }));
+    flushSync();
+    expect(card().classList.contains('dragging')).toBe(false);
+  });
+
+  it('leaves a drag that starts on a link inside the card to the link', async () => {
+    await open();
+    const start = drag('dragstart');
+    card().querySelector('a[title="Open file"]').dispatchEvent(start);
+    flushSync();
+    expect(start.dataTransfer.types).toEqual([]);
+    expect(card().classList.contains('dragging')).toBe(false);
+  });
+
+  it('raises no import overlay for a picture dragged out of the page', async () => {
+    await open();
+    const inPage = { Files: '', 'text/uri-list': 'x', 'application/x-azimut-page': '1' };
+    const over = drag('dragover', inPage);
+    zone().dispatchEvent(over);
+    flushSync();
+    expect(over.defaultPrevented).toBe(false);
+    expect(overlay()).toBeNull();
+    const drop = drag('drop', inPage);
+    zone().dispatchEvent(drop);
+    flushSync();
+    await settle();
+    expect(drop.defaultPrevented).toBe(false);
+    expect(target.textContent).not.toContain('Import 1 file');
+  });
+
+  it('raises it for a desktop file and lowers it once the file leaves', async () => {
+    await open();
+    zone().dispatchEvent(drag('dragover', { Files: '' }));
+    flushSync();
+    expect(overlay()).not.toBeNull();
+    // crossing onto the overlay itself is not leaving
+    zone().dispatchEvent(drag('dragleave', { Files: '' }, { relatedTarget: overlay() }));
+    flushSync();
+    expect(overlay()).not.toBeNull();
+    // over to the sidebar: the overlay used to stay up here
+    zone().dispatchEvent(drag('dragleave', { Files: '' }, { relatedTarget: document.body }));
+    flushSync();
+    expect(overlay()).toBeNull();
+  });
+
+  it('lowers it when the drag is called off or leaves the window', async () => {
+    await open();
+    zone().dispatchEvent(drag('dragover', { Files: '' }));
+    flushSync();
+    overlay().dispatchEvent(drag('dragleave', { Files: '' }, { relatedTarget: null }));
+    flushSync();
+    expect(overlay()).toBeNull();
+  });
+});
+
+describe('opening a file from its card', () => {
+  const thumb = (path) => target.querySelector(`.media-card[data-path="${path}"] .thumb`);
+  const viewer = () => document.querySelector('.viewer');
+
+  beforeEach(() => localStorage.clear());
+
+  it('opens a video full screen on one press, as a picture does', async () => {
+    await open();
+    await press(thumb('media/clip.mp4'));
+    expect(viewer().querySelector('video').getAttribute('src')).toContain('media/clip.mp4');
+    await key('ArrowLeft');
+    expect(viewer().querySelector('img').getAttribute('src')).toContain('media/quai.jpg');
+    await key('Escape');
+    expect(viewer()).toBeNull();
+  });
+
+  it('retries a failed thumbnail without opening the file under it', async () => {
+    await open();
+    await press(thumb('media/clip.mp4').querySelector('.thumb-retry'));
+    expect(viewer()).toBeNull();
+  });
+
+  it('opens again on the view it was left on', async () => {
+    await open();
+    await press([...target.querySelectorAll('.view-btn')].find((b) => b.textContent.includes('List')));
+    unmount(live);
+    target.remove();
+    await open();
+    const active = target.querySelector('.view-btn.active');
+    expect(active.textContent).toContain('List');
+  });
+});

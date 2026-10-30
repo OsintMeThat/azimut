@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { awaitMapReady, installAppFixture, restingCamera } from './app.fixture.js';
+import { awaitMapReady, CASE_ID, installAppFixture, restingCamera } from './app.fixture.js';
 
-async function openCompare(page, providerB = 'Esri World Imagery') {
+async function openCompare(page, providerB = 'Esri World Imagery', { routes } = {}) {
   const fixture = await installAppFixture(page);
+  // a spec's own answers, over the fixture's, before the page asks
+  await routes?.(page);
   const errors = [];
   const saved = [];
   await page.route('**/api/satellite/providers', (route) => route.fulfill({ json: [
@@ -599,6 +601,36 @@ test("Difference's settings dock on the right over map B, stay put through a rea
   expect(errors).toEqual([]);
 });
 
+test('the right-click menu stays whole and on top in Swipe and Blink', async ({ page }) => {
+  const { errors } = await openCompare(page);
+  // Every row of the menu answers for itself: nothing else is painted over it.
+  const onTop = () => page.getByRole('menu', { name: 'This point' }).evaluate((menu) =>
+    [...menu.querySelectorAll('[role="menuitem"]')].every((row) => {
+      const box = row.getBoundingClientRect();
+      return row.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+    }));
+  const stage = await page.locator('.compare-stage').boundingBox();
+
+  // Opened on A just left of the divider, the menu crosses into B's half.
+  await page.getByRole('button', { name: 'Swipe', exact: true }).click();
+  const divider = await page.getByRole('slider', { name: 'Swipe divider on imagery' }).boundingBox();
+  await page.mouse.click(divider.x - 40, stage.y + stage.height / 2, { button: 'right' });
+  await expect(page.getByRole('menu', { name: 'This point' })).toBeVisible();
+  expect(await onTop()).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: 'This point' })).toHaveCount(0);
+
+  // Opened in Blink, it holds through both pictures.
+  await page.getByRole('button', { name: 'Blink', exact: true }).click();
+  await page.mouse.click(stage.x + stage.width / 2, stage.y + stage.height / 2, { button: 'right' });
+  const shown = page.locator('.surface-shell.secondary');
+  for (const hidden of [true, false]) {
+    await expect.poll(() => shown.evaluate((shell) => shell.classList.contains('blink-hidden'))).toBe(hidden);
+    expect(await onTop()).toBe(true);
+  }
+  expect(errors).toEqual([]);
+});
+
 test('takes the whole screen with both maps, and gives it up to the tab it hands over to', async ({ page }) => {
   const { errors } = await openCompare(page);
   const held = () => page.evaluate(() => document.fullscreenElement?.classList.contains('compare-tool') ?? false);
@@ -646,5 +678,150 @@ test('takes the whole screen with both maps, and gives it up to the tab it hands
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
   await expect(page.locator('.tabstrip .tab-btn.active')).toHaveText('Satellite');
   await expect(page.locator('.tool-host:not(.hidden) .hud-coords')).toContainText('z17');
+  expect(errors).toEqual([]);
+});
+
+/**
+ * The case's own layers: one imported, one drawn in the case. Each is an area
+ * over the whole view, hatched with red lines close enough to paint most of it
+ * in a colour no fixture tile has: a faint tint alone would pass under
+ * Difference's threshold and prove nothing about what it reads.
+ */
+async function routeCaseLayers(page) {
+  const stamp = '2026-09-20T10:00:00Z';
+  const layer = (name, title, extra = {}) => ({
+    name, title, source: { kind: 'file', format: 'geojson', filename: `${name}.geojson` }, hidden: [], period: null,
+    refresh: {}, features: 1, categories: [{ name, count: 1, colour: '#e04040' }], bbox: [2.2, 48.8, 2.4, 48.9],
+    format: 'geojson', icons: 0, sha256: 'a'.repeat(64), bytes: 256, fetched_at: stamp, checked_at: stamp,
+    stale: false, created_at: stamp, updated_at: stamp, spec: `.layers/${name}/layer.json`, ...extra,
+  });
+  const properties = (name, index) => ({ name, category: name, colour: '#e04040', index });
+  const hatching = Array.from({ length: 600 }, (_, index) => {
+    const lat = 48.85 + index * 0.00003;
+    return { type: 'Feature', geometry: { type: 'LineString', coordinates: [[2.27, lat], [2.32, lat]] },
+      properties: properties(`line ${index}`, index + 1) };
+  });
+  const area = (name) => ({ type: 'FeatureCollection', features: [{ type: 'Feature',
+    geometry: { type: 'Polygon', coordinates: [[[2.2, 48.8], [2.4, 48.8], [2.4, 48.9], [2.2, 48.9], [2.2, 48.8]]] },
+    properties: properties(name, 0) }, ...hatching] });
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({ json: [layer('front', 'Front lines'), layer('mine', 'My sites', { editable: true })] })
+      : route.fallback()
+  );
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/*/data`, (route) =>
+    route.fulfill({ json: area(new URL(route.request().url()).pathname.split('/').at(-2)) })
+  );
+}
+
+/** The middle of each map, clear of its card, its buttons and its credits,
+ *  which name the layers drawn there and so change with them. */
+async function mapMiddle(page, index) {
+  const box = await page.locator('.compare-stage .map').nth(index).boundingBox();
+  return page.screenshot({
+    clip: { x: box.x + box.width * 0.3, y: box.y + box.height * 0.3, width: box.width * 0.4, height: box.height * 0.4 },
+  });
+}
+
+test('the Layers switcher moves the whole list onto A, B or both, the case’s own layers with it', async ({ page }) => {
+  const { errors } = await openCompare(page, 'Esri World Imagery', { routes: () => routeCaseLayers(page) });
+  await expect(page.locator('.compare-stage .map')).toHaveCount(2);
+  const picture = (index) => mapMiddle(page, index);
+  const bare = [await picture(0), await picture(1)];
+  const drawn = async (index) => !(await picture(index)).equals(bare[index]);
+
+  // the menu lies over A, so each picture is taken with it closed
+  const menu = page.getByRole('dialog', { name: 'Layers' });
+  const sides = menu.getByRole('group', { name: 'Which map draws the layers' });
+  const inMenu = async (act) => {
+    await page.locator('.layer-menu > button').click();
+    await act();
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+  };
+
+  await inMenu(async () => {
+    // the case's own layers sit under the Map's two headings
+    await expect(menu.getByRole('region', { name: 'My layers' }).getByRole('button', { name: 'My sites', exact: true })).toBeVisible();
+    await expect(menu.getByRole('region', { name: 'Added layers' }).getByRole('button', { name: 'Front lines', exact: true })).toBeVisible();
+    await expect(sides.getByRole('button', { name: 'AB', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await menu.getByRole('button', { name: 'Front lines', exact: true }).click();
+  });
+  await expect.poll(() => drawn(0)).toBe(true);
+  await expect.poll(() => drawn(1)).toBe(true);
+
+  // on B, the list leaves A and stays on B
+  await inMenu(async () => {
+    await sides.getByRole('button', { name: 'B', exact: true }).click();
+    await expect(menu.getByRole('button', { name: 'Front lines', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  });
+  await expect.poll(() => drawn(0)).toBe(false);
+  await expect.poll(() => drawn(1)).toBe(true);
+
+  // and on A, the other way round
+  await inMenu(() => sides.getByRole('button', { name: 'A', exact: true }).click());
+  await expect.poll(() => drawn(1)).toBe(false);
+  await expect.poll(() => drawn(0)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('Difference reads the pictures without the layers, so one may stay on A alone', async ({ page }) => {
+  // the same fixture picture on both sides: nothing to highlight but a layer
+  const { errors } = await openCompare(page, 'Esri Wayback', { routes: () => routeCaseLayers(page) });
+  const bare = await mapMiddle(page, 0);
+  const menu = page.getByRole('dialog', { name: 'Layers' });
+  await page.locator('.layer-menu > button').click();
+  await menu.getByRole('button', { name: 'Front lines', exact: true }).click();
+  await menu.getByRole('group', { name: 'Which map draws the layers' }).getByRole('button', { name: 'A', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => !(await mapMiddle(page, 0)).equals(bare)).toBe(true);
+
+  await page.getByRole('button', { name: 'Difference', exact: true }).click();
+  const legend = page.locator('.change-legend');
+  await expect(legend).toContainText('highlighted', { timeout: 20000 });
+  await expect(legend.locator('.warn')).toHaveCount(0);
+  // read with the area over A, the whole view would have lit up
+  const share = Number((await legend.locator('em').textContent()).match(/(\d+)%/)[1]);
+  expect(share).toBeLessThan(5);
+  // the highlights lie under the map's zoom buttons: made hittable for a moment,
+  // the mask still loses the point to the button
+  const zoomIn = await page.locator('.surface-shell.primary .maplibregl-ctrl-zoom-in').boundingBox();
+  const onTop = await page.evaluate(({ x, y }) => {
+    const mask = document.querySelector('.surface-shell.primary .change-map');
+    mask.style.pointerEvents = 'auto';
+    const top = document.elementFromPoint(x, y);
+    mask.style.pointerEvents = '';
+    return top?.closest('.maplibregl-ctrl-zoom-in') ? 'zoom in' : top?.className;
+  }, { x: zoomIn.x + zoomIn.width / 2, y: zoomIn.y + zoomIn.height / 2 });
+  expect(onTop).toBe('zoom in');
+  // and the area is back on A once the picture is taken
+  await page.getByRole('button', { name: 'Difference', exact: true }).click();
+  await expect(legend).toHaveCount(0);
+  await expect.poll(async () => !(await mapMiddle(page, 0)).equals(bare)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('side by side, the pointer over one map is echoed as a cross on the other', async ({ page }) => {
+  const { errors } = await openCompare(page);
+  const shellA = page.locator('.surface-shell.primary');
+  const shellB = page.locator('.surface-shell.secondary');
+  const boxA = await shellA.boundingBox();
+  const boxB = await shellB.boundingBox();
+  await page.mouse.move(boxA.x + boxA.width / 2 + 40, boxA.y + boxA.height / 2 - 30);
+  const cross = shellB.locator('.linked-cursor');
+  await expect(cross).toBeVisible();
+  // Same camera, same pane size: the same offset from B's centre.
+  const at = await cross.boundingBox();
+  expect(Math.abs(at.x + at.width / 2 - (boxB.x + boxB.width / 2 + 40))).toBeLessThan(3);
+  expect(Math.abs(at.y + at.height / 2 - (boxB.y + boxB.height / 2 - 30))).toBeLessThan(3);
+  await expect(shellA.locator('.linked-cursor')).toHaveCount(0);
+  // And the other way round.
+  await page.mouse.move(boxB.x + boxB.width / 2, boxB.y + boxB.height / 2);
+  await expect(shellA.locator('.linked-cursor')).toBeVisible();
+  await expect(cross).toHaveCount(0);
+  // Overlaid, one pointer already sits on both pictures.
+  await page.getByRole('button', { name: 'Swipe', exact: true }).click();
+  await page.mouse.move(boxA.x + 60, boxA.y + boxA.height / 2);
+  await expect(page.locator('.linked-cursor')).toHaveCount(0);
   expect(errors).toEqual([]);
 });

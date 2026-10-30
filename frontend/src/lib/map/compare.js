@@ -27,28 +27,6 @@ export const BLINK_SPEEDS = Object.freeze([
   { id: 1600, label: 'Slow' },
 ]);
 
-/** Reference layers Compare can persist, grouped the way the sheet lists them. */
-export const COMPARE_LAYERS = Object.freeze([
-  { id: 'boundaries', label: 'Borders', hint: 'Country, region and district borders', group: 'reference' },
-  { id: 'placenames', label: 'Place names', hint: 'Towns, villages and hamlets from OpenStreetMap', group: 'reference' },
-  { id: 'roads', label: 'Roads', hint: 'Road network', group: 'reference' },
-  { id: 'railway', label: 'Railways', hint: 'Tracks, sidings and stations', group: 'reference' },
-  { id: 'power', label: 'Power lines', hint: 'Lines, towers and substations', group: 'reference' },
-  { id: 'seamarks', label: 'Sea marks', hint: 'Buoys, lights, harbours and fairways', group: 'reference' },
-  { id: 'gpstraces', label: 'GPS traces', hint: 'Raw GPS tracks from OpenStreetMap', group: 'reference' },
-  { id: 'firms', label: 'Active fires', hint: 'Thermal detections from NASA FIRMS', group: 'events' },
-  { id: 'nightlights', label: 'Night lights', hint: 'The ground at night from NASA VIIRS', group: 'events' },
-  { id: 'saved', label: 'Saved work', hint: 'Places and captures in this case', group: 'case' },
-]);
-
-const LAYER_IDS = new Set(COMPARE_LAYERS.map((layer) => layer.id));
-
-/** Keep a session's layer list ordered, unique and supported. */
-export function comparisonLayers(value) {
-  const asked = new Set(Array.isArray(value) ? value.filter((id) => LAYER_IDS.has(id)) : []);
-  return COMPARE_LAYERS.map((layer) => layer.id).filter((id) => asked.has(id));
-}
-
 /** A range value that is safe to use as a percentage in CSS. */
 export function percentage(value, fallback = 50) {
   const number = Number(value);

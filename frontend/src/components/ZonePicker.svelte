@@ -97,7 +97,7 @@
   }
 </script>
 
-<div class="zone-picker" bind:this={box}>
+<div class="zone-picker" bind:this={box} data-guide="timeline.zone">
   <button
     class="trigger"
     {disabled}

@@ -31,7 +31,7 @@
   import { markerGeometry, markerSvg } from '../../lib/mapMarkers.js';
   // The reference layers, named where they are already named for a reader
   // (`lib/map/compare.js`): the same seven key-less overlays, the same words.
-  import { COMPARE_LAYERS } from '../../lib/map/compare.js';
+  import { layerInfo, LAYERS } from '../../lib/map/layerCatalog.js';
   import { api } from '../../lib/api.js';
   import { formatCoords } from '../../lib/coords.js';
   import { prefs } from '../../lib/state.svelte.js';
@@ -50,9 +50,9 @@
   } = $props();
 
   const PIN = 'point';
-  /** The roads and the place names read wrongly over a street basemap, which draws its own. */
-  const IMAGERY_ONLY = new Set(['roads', 'placenames']);
-  const REFERENCE = COMPARE_LAYERS.filter((layer) => layer.group === 'reference');
+  /** The reference layers; the roads and the place names read wrongly over a street
+   *  basemap, which draws its own (`imageryOnly`). */
+  const REFERENCE = LAYERS.filter((layer) => layer.group === 'reference');
 
   const imagery = createImageryState({ api });
   let providerId = $state(FALLBACK_PROVIDER);
@@ -63,23 +63,21 @@
   // Where the pin starts: the opening camera, read once. The dialog is opened on
   // one row and closed on it, so a later view would be a different question.
   let at = $state(untrack(() => ({ lat: view.lat, lon: view.lon })));
-  // The borders and the place names, which are what finding a spot needs.
-  let on = $state(['boundaries', 'placenames']);
+  // The borders, which are what finding a spot needs first.
+  let on = $state(['boundaries']);
   let layersOpen = $state(false);
   let surface = null;
 
   const baseIsImagery = $derived(imagery.find(providerId)?.imagery ?? true);
-  const usable = $derived(on.filter((id) => baseIsImagery || !IMAGERY_ONLY.has(id)));
+  const usable = $derived(on.filter((id) => baseIsImagery || !layerInfo(id)?.imageryOnly));
   const reading = $derived(formatCoords(at.lat, at.lon, prefs.coordFormat));
   const layerRows = $derived(
     REFERENCE.map((layer) => ({
       id: layer.id,
       label: layer.label,
-      title: IMAGERY_ONLY.has(layer.id) && !baseIsImagery
-        ? 'Only useful over satellite imagery'
-        : layer.hint,
+      title: layer.imageryOnly && !baseIsImagery ? 'Only useful over satellite imagery' : layer.title,
       on: on.includes(layer.id),
-      disabled: IMAGERY_ONLY.has(layer.id) && !baseIsImagery,
+      disabled: layer.imageryOnly && !baseIsImagery,
       toggle: () =>
         (on = on.includes(layer.id) ? on.filter((id) => id !== layer.id) : [...on, layer.id]),
     }))
@@ -109,7 +107,7 @@
         size,
         anchor,
         draggable: true,
-        zIndex: 1000,
+        zIndex: 570,
         onDrag: (moved) => (at = moved),
       },
     ]);

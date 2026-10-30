@@ -6,6 +6,9 @@
   // A video leads with the clip itself, which is where frames come from; clicking
   // a tile is what puts it in the viewer. The strip replaces the old tabs: there is
   // no stage to move through, only the file and what was taken from it.
+  //
+  // A tile's top-left corner says whether the frame is in the case. Until it is, the
+  // corner is a save press, so filing a capture never means opening it first.
   let {
     source,
     sourceThumb = null,
@@ -13,14 +16,16 @@
     selected,
     filters,
     filedIds,
+    busyIds = new Set(),
     removable = true,
     savingAll = false,
     onselect,
     onremove,
+    onsave,
     onsaveall,
   } = $props();
 
-  const unfiled = $derived(frames.filter((f) => !filedIds.has(f.id) && f.url).length);
+  const unfiled = $derived(frames.filter((f) => !filedIds.has(f.id) && !busyIds.has(f.id) && f.url).length);
 
   function stamp(t) {
     const m = Math.floor(t / 60);
@@ -31,7 +36,7 @@
   const label = (fr, i) => (fr.time != null ? `Frame ${i + 1} at ${stamp(fr.time)}` : `Frame ${i + 1}`);
 </script>
 
-<div class="strip" aria-label="Frames">
+<div class="strip" aria-label="Frames" data-guide="inspect.strip">
   {#if source.kind === 'video'}
     <button
       class="tile source"
@@ -46,6 +51,7 @@
 
   {#each frames as fr, i (fr.id)}
     {@const look = previewStyle(filters, fr.adjust)}
+    {@const filed = filedIds.has(fr.id)}
     <div class="tile" class:active={selected === fr.id}>
       <button class="pick" onclick={() => onselect(fr.id)} title={label(fr, i)} aria-label={label(fr, i)}>
         {#if fr.url}
@@ -58,10 +64,17 @@
           <span class="spinner" aria-hidden="true"></span>
         {/if}
         <span class="num">{fr.time != null ? stamp(fr.time) : i + 1}</span>
-        {#if filedIds.has(fr.id)}
-          <span class="filed" title="In the case"><Icon name="check" size={10} /></span>
+        {#if filed}
+          <span class="mark filed" title="In the case"><Icon name="check" size={10} /></span>
         {/if}
       </button>
+      {#if !filed && busyIds.has(fr.id)}
+        <span class="mark busy"><span class="spinner small" aria-label="Saving"></span></span>
+      {:else if !filed && fr.url}
+        <button class="mark save" onclick={() => onsave(fr.id)} aria-label="Save frame" title="Save to case">
+          <Icon name="save" size={11} />
+        </button>
+      {/if}
       {#if removable}
         <button class="del" onclick={() => onremove(fr.id)} aria-label="Remove frame" title="Remove frame">
           <Icon name="x" size={11} />
@@ -156,15 +169,32 @@
     font-size: 10px;
     font-family: var(--font-mono);
   }
-  .filed {
+  .mark {
     position: absolute;
-    top: 3px;
-    left: 3px;
+    top: 2px;
+    left: 2px;
     display: flex;
     padding: 2px;
+    border: 0;
+    border-radius: 3px;
+    background: rgba(10, 10, 10, 0.7);
+    color: #fff;
+  }
+  .mark.filed {
+    top: 3px;
+    left: 3px;
     border-radius: 50%;
     background: var(--ok);
-    color: #fff;
+  }
+  .mark.busy {
+    pointer-events: none;
+  }
+  .mark.save {
+    cursor: pointer;
+  }
+  .mark.save:hover,
+  .mark.save:focus-visible {
+    background: var(--accent);
   }
   .del {
     position: absolute;
@@ -189,6 +219,13 @@
     border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
+  }
+  .spinner.small {
+    width: 11px;
+    height: 11px;
+    border-width: 1.5px;
+    border-color: rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
   }
   @keyframes spin {
     to {

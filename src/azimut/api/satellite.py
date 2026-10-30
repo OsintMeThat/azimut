@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Form, HTTPException, Query, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -27,21 +27,24 @@ from .. import config, errors
 from ..engine.analysis_models import Zone
 from ..engine import (
     cities,
+    cloudless,
     firms,
     firmspoints,
     geo,
     google_tiles,
     localtime,
     media as media_engine,
+    proofimport,
     satellite as satellite_engine,
     sentinel,
     sky,
+    terrain,
     tilecache,
     tiles,
     wayback,
 )
 from ..workspace import Case, CaseError
-from . import events
+from . import events, tile_batch
 from .cases import delete_by_path, get_case
 from .limits import MAX_IMAGE_BYTES
 from .naming import slugify
@@ -112,6 +115,11 @@ class ParseIn(BaseModel):
     #: `server.BulkBodyLimit`: the middleware is for bodies too big to parse, and a
     #: position never is — what this stops is a paste into the box arriving as a document.
     text: str = Field(max_length=2000)
+
+
+class ScanIn(BaseModel):
+    #: A pasted post or note, read for the positions, links and day it states.
+    text: str = Field(max_length=20000)
 
 
 class SatelliteUpdateIn(BaseModel):
@@ -207,6 +215,7 @@ def providers() -> list[dict[str, Any]]:
             # map stops its requests there and magnifies the last native tile
             # instead of asking for one that doesn't exist.
             "max_native_zoom": p.max_native_zoom,
+            "min_zoom": p.min_zoom,
             "needs_key": p.needs_key,
             "imagery": p.imagery,
             "capturable": p.capturable,
@@ -621,6 +630,20 @@ def wayback_releases() -> dict[str, Any]:
     return {"releases": [{"release": r.number, "date": r.date} for r in listed]}
 
 
+@router.get("/satellite/cloudless/years")
+def cloudless_years() -> dict[str, Any]:
+    """The years of EOX's Sentinel-2 cloudless a plate can be drawn on, newest first.
+
+    Each comes with the credit EOX asks for and the licence it is given under, so
+    a plate prints the right one. Answered from the app: no request leaves it.
+    """
+    return {"years": [
+        {"year": year, "attribution": cloudless.attribution(year), "licence": cloudless.licence(year),
+         "free": year in cloudless.FREE_FOR_ANY_USE}
+        for year in reversed(cloudless.YEARS)
+    ]}
+
+
 @router.get("/satellite/wayback/changes")
 def wayback_changes(
     lat: float = Query(ge=-90, le=90),
@@ -710,8 +733,9 @@ def _serve_tile(
         if attempt == 1 and provider.session and upstream.status_code in (401, 403):
             google_tiles.invalidate(google_tiles.key_from_url(provider.url))
             continue
-        if upstream.status_code in tiles.TRANSIENT_STATUSES and not last:
-            time.sleep(tiles.RETRY_PAUSE)
+        pause = tiles.retry_pause(upstream)
+        if pause is not None and not last:
+            time.sleep(pause)
             continue
         break
 
@@ -762,6 +786,11 @@ def _native_grid_zoom(provider: tiles.Provider) -> int | None:
     return provider.max_native_zoom - z_shift
 
 
+def _min_grid_zoom(provider: tiles.Provider) -> int:
+    """The shallowest tile-grid level the provider can render (``min_zoom`` is a view zoom)."""
+    return max(0, provider.min_zoom - int(math.log2(provider.tile_size // tiles.TILE_SIZE)))
+
+
 @router.get("/tiles/{provider_id}/{z}/{x}/{y}")
 def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
     """Live-map tiles for every provider, proxied through the app.
@@ -777,6 +806,35 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
         provider = tiles.get_provider(provider_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return serve_tile(provider, z, x, y)
+
+
+@router.get("/tiles/batch/{provider_id}")
+def batched_tiles(
+    provider_id: str, t: str = Query(max_length=tile_batch.QUERY_MAX)
+) -> StreamingResponse:
+    """Live-map tiles of one provider, many in one answer (api/tile_batch.py).
+
+    What the 3D view asks for. Each tile is served exactly as `tile_proxy`
+    serves it, cache, meter, native ceiling and overzoom included, and carries
+    the status that route would have answered.
+    """
+    try:
+        provider = tiles.get_provider(provider_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    keys = tile_batch.tile_keys(t, provider.max_zoom)
+
+    def one(z: int, x: int, y: int) -> tile_batch.Served:
+        answer = serve_tile(provider, z, x, y)
+        return answer.status_code, bytes(answer.body)
+
+    return tile_batch.stream(keys, one)
+
+
+def serve_tile(provider: tiles.Provider, z: int, x: int, y: int) -> Response:
+    """One tile of a provider as the map's proxy serves it: disk cache, meter,
+    native ceiling and overzoom over gaps. Raises HTTPException when there is none."""
     if z < 0 or z > provider.max_zoom:
         raise HTTPException(status_code=422, detail="tile zoom out of range")
     grid_size = 1 << z
@@ -794,6 +852,8 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
     # fetch and let the climb below magnify the native tile instead — same
     # pixels, no quota. The live map already stops asking at that level, so this
     # is the guard for anything that doesn't.
+    if z < _min_grid_zoom(provider):
+        raise HTTPException(status_code=404, detail="no imagery at this location/zoom")
     native_z = _native_grid_zoom(provider)
     beyond_native = max(0, z - native_z) if native_z is not None else 0
     served = None if beyond_native else _serve_tile(provider, z, x, y)
@@ -838,6 +898,16 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
             headers={"Cache-Control": "private, max-age=3600", "X-Azimut-Overzoom": str(up)},
         )
     raise HTTPException(status_code=404, detail="no imagery at this location/zoom")
+
+
+def warmable(provider: tiles.Provider) -> bool:
+    """Whether a provider's tiles may be fetched before they are shown.
+
+    Free and cacheable only: a billed tile fetched ahead is quota spent on a
+    view that may never be looked at, and a tile that may not be cached has
+    nowhere to wait. Horizon lays such imagery over a view (api/horizon.py).
+    """
+    return provider.cacheable and not provider.meter and not provider.widget and not provider.session
 
 
 #: The three things a placard can turn out to mean, once the key-status
@@ -1242,6 +1312,16 @@ def parse_coordinates(body: ParseIn) -> dict[str, Any]:
     }
 
 
+@router.post("/geo/scan")
+def scan_text(body: ScanIn) -> dict[str, Any]:
+    """Every position, address and day a pasted text states. Reads only the text."""
+    return {
+        "points": geo.scan_coords(body.text),
+        "links": proofimport.scan_urls(body.text),
+        "date": geo.scan_day(body.text),
+    }
+
+
 @router.get("/geo/geocode")
 def geocode(q: str) -> dict[str, Any]:
     query = q.strip()
@@ -1454,6 +1534,50 @@ def _instant(value: str, field: str) -> datetime:
             status_code=422, detail=f"{field} must be an ISO 8601 instant"
         ) from exc
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+@router.get("/geo/shadow")
+def shadow_for_point(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    day: str = Query(alias="date"),
+    bearing: float = Query(ge=0, le=360),
+    length: float = Query(gt=0, le=10_000),
+    zone: str | None = None,
+) -> dict[str, Any]:
+    """When one local day's sun threw a shadow along a bearing, and how tall its caster stands.
+
+    The analyst draws a shadow on dated imagery from an object's foot to its tip.
+    Its direction gives the sun's azimuth, so the hour of the picture, and the
+    sun's height then turns the shadow's length into the object's:
+    ``length × tan(altitude)``. Exact for level ground and a picture taken
+    straight down. Pure computation, like ``/geo/sky``.
+    """
+    if zone and not localtime.known_zone(zone):
+        raise HTTPException(status_code=422, detail="zone must be an IANA zone name")
+    zone_name = zone or localtime.zone_for(lat, lon)
+    try:
+        target = calendar_date.fromisoformat(day)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD") from exc
+    start, end = localtime.day_bounds(target, zone_name)
+    moments = sky.shadow_moments(lat, lon, start, end, bearing)
+    return {
+        "lat": lat,
+        "lon": lon,
+        "date": target.isoformat(),
+        "zone": zone_name,
+        "sun_azimuth": round((bearing + 180.0) % 360.0, 1),
+        "moments": [
+            {
+                **(_dated(found["moment"], zone_name) or {}),
+                "sun_azimuth": round(found["sun_azimuth"], 1),
+                "sun_altitude": round(found["sun_altitude"], 2),
+                "height_m": round(length * math.tan(math.radians(found["sun_altitude"])), 1),
+            }
+            for found in moments
+        ],
+    }
 
 
 @router.get("/geo/zone")
@@ -1692,6 +1816,133 @@ async def capture_screenshot(
         extra_attrs={
             "coords": coords_dd, "lat": lat, "lon": lon,
             "plus_code": plus_code, "zoom": zoom, "bearing": bearing,
+            "provider": prov.id,
+        },
+        title=label,
+        dedupe=False,
+    )
+    locate_on_save(case, result["entity"]["id"], lat, lon)
+    saved_changed(case)
+    return {"path": result["item"]["path"], "title": label, **provenance}
+
+
+@router.post("/cases/{case_id}/satellite/oblique")
+async def capture_oblique(
+    case_id: str,
+    image: UploadFile,
+    lat: float = Form(ge=-90, le=90),
+    lon: float = Form(ge=-180, le=180),
+    zoom: float = Form(ge=1, le=22),
+    provider: str = Form(),
+    bearing: float = Form(default=0.0, ge=0, le=360),
+    pitch: float = Form(gt=0, le=85),
+    exaggeration: float = Form(default=1.0, ge=1, le=3),
+    imagery_date: str | None = Form(default=None),
+    imagery_exact: bool = Form(default=True),
+    far_provider: str | None = Form(default=None),
+    relief_fallback: bool = Form(default=False),
+    elevation: float | None = Form(default=None, ge=-500, le=9000),
+) -> dict[str, Any]:
+    """File the tilted view the 3D map drew as a capture.
+
+    A tilted view has no straight-down frame to stitch from tiles, so this is
+    the picture the map rendered, imagery draped over the relief, with the
+    camera that drew it: ``pitch`` beside ``bearing``, so the view can be set up
+    again. Nothing about it is a single scale, so no scale bar or north arrow is
+    drawn. Relief drawn taller than it is says so on the image itself.
+
+    ``lat``/``lon`` are the ground point at the centre of the frame, and ``zoom``
+    keeps its fraction: over relief it is part of the camera, and a whole level
+    would set the view up again from another height. ``elevation`` is the
+    height the camera held that centre at, sent for a frame centred on the
+    view: the engine seats its centre on the ground in one step, so on a steep
+    slope the eye is only where centre, zoom, tilt and this height put it.
+    ``relief_fallback`` says the map drew some of its ground from the fallback
+    relief, which is then credited beside the primary one.
+
+    ``far_provider`` names who drew the far ground when it is not ``provider``:
+    a billed basemap stops where a flat view would, and the free one carries on
+    to the horizon (frontend lib/map/quotaGuard.js). A picture made of two
+    providers credits both and records both.
+    """
+    case = get_case(case_id)
+    zoom = round(zoom, 2)
+    try:
+        prov = tiles.get_provider(provider)
+        far = tiles.get_provider(far_provider) if far_provider else None
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if prov.widget or not prov.capturable:
+        raise HTTPException(status_code=422, detail=f"{prov.label} cannot be captured from the 3D map")
+
+    import io
+
+    raw = await image.read(MAX_IMAGE_BYTES + 1)
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413, detail=f"the view must be under {MAX_IMAGE_BYTES // 1024 // 1024} MB"
+        )
+    try:
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"not a readable image: {errors.explain(exc)}") from exc
+
+    relief = terrain.MAPTERHORN
+    attribution = f"{prov.attribution} · Relief {relief.attribution}"
+    if relief_fallback:
+        attribution += f" and {terrain.AWS_TERRAIN.attribution}"
+    if far is not None and far.id != prov.id:
+        attribution += f" · Far ground {far.attribution}"
+    if exaggeration > 1:
+        # in words: the band's font has no multiplication sign
+        attribution += f" · heights exaggerated {exaggeration:g} times"
+    img = tiles.burn_attribution(img, attribution)
+
+    label = satellite_engine.coords_label(lat, lon)
+    coords_dd = satellite_engine.coords_label(lat, lon, "dd")
+    plus_code = geo.plus_code(lat, lon)
+    provenance: dict[str, Any] = {
+        "provider": prov.id,
+        "provider_label": prov.label,
+        "method": "render",  # the map's own drawing of a tilted view
+        "framed": True,
+        "lat": lat,
+        "lon": lon,
+        "zoom": zoom,
+        "bearing": bearing,
+        "pitch": pitch,
+        "elevation": round(elevation) if elevation is not None else None,
+        "relief": {
+            "source": relief.id,
+            "exaggeration": exaggeration,
+            **({"fallback": terrain.AWS_TERRAIN.id} if relief_fallback else {}),
+        },
+        "far_provider": far.id if far is not None and far.id != prov.id else None,
+        "attribution": attribution,
+        "attribution_burned": True,
+        "marks": None,
+        "plus_code": plus_code,
+        "dms": geo.to_dms(lat, lon),
+        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "imagery_date": (imagery_date or "").strip() or None,
+        "width": img.width,
+        "height": img.height,
+    }
+    if provenance["imagery_date"] and not imagery_exact:
+        provenance["imagery_exact"] = False
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    filename = f"sat_{stamp}_z{round(zoom)}_{prov.id}_tilt{round(pitch)}.png"
+    result = media_engine.import_image(
+        case,
+        img,
+        filename,
+        {"type": "satellite", **provenance},
+        by="satellite",
+        entity_type="capture",
+        extra_attrs={
+            "coords": coords_dd, "lat": lat, "lon": lon,
+            "plus_code": plus_code, "zoom": zoom, "bearing": bearing, "pitch": pitch,
             "provider": prov.id,
         },
         title=label,

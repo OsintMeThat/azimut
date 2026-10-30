@@ -89,3 +89,24 @@ function earthDistance(zoom, lat) {
   const halfFov = (EARTH_FOV * Math.PI) / 360;
   return Math.max(25, Math.round((metresPerPx * EARTH_WINDOW_PX) / (2 * Math.tan(halfFov))));
 }
+
+/**
+ * Google Earth standing where a Horizon eye stands and looking where it looks.
+ *
+ * A link is a camera (`docs/MAP_SITES.md`): `a` its height above the sea,
+ * `d` how far it stands back from that point, here none, `y` its field of view
+ * top to bottom, `h` the heading, `t` the tilt from straight down (90 is
+ * level, so the view's own tilt is added to it) and `r` the roll. Earth sizes
+ * its window as it likes, so the lens is said by its height, which is the
+ * view's vertical field (camera.js `verticalFov`).
+ */
+export function earthCameraLink({ lat, lon, altitude, heading, tilt = 0, roll = 0, vfov }) {
+  const fixed = (value, digits) => Number(Number(value).toFixed(digits));
+  const up = Math.min(180, Math.max(0, 90 + Number(tilt || 0)));
+  const across = Math.min(150, Math.max(1, Number(vfov) || 35));
+  const turn = ((Number(heading) % 360) + 360) % 360;
+  return (
+    `https://earth.google.com/web/@${fixed(lat, 6)},${fixed(lon, 6)},${fixed(altitude, 1)}a,0d,` +
+    `${fixed(across, 2)}y,${fixed(turn, 2)}h,${fixed(up, 2)}t,${fixed(roll, 2)}r`
+  );
+}

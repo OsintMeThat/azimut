@@ -14,7 +14,7 @@
   import { api } from '../../lib/api.js';
   import { toast } from '../../lib/state.svelte.js';
   import { loadRelationTypes, relationAction } from '../../lib/relations.svelte.js';
-  import { keptLabel, pairLabel, stackOrder } from '../../lib/savedMarkers.js';
+  import { keptLabel, lookLabel, pairLabel, stackOrder } from '../../lib/savedMarkers.js';
 
   let {
     items = [],
@@ -23,13 +23,14 @@
     fullscreen = false,
     onopen,
     onedit,
+    ondelete,
     ontrace,
     onentity, // a related entity was picked: leave for its own tool
     onrefresh, // a relation was settled: sync the other surfaces
   } = $props();
 
-  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare' };
-  const KIND = { place: 'Place', capture: 'Capture', screenshot: 'Screenshot', comparison: 'Comparison' };
+  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare', view: 'horizon' };
+  const KIND = { place: 'Place', capture: 'Capture', screenshot: 'Screenshot', comparison: 'Comparison', view: 'Horizon view' };
 
   const rowKey = (row) => row.key ?? row.id;
 
@@ -43,6 +44,7 @@
    *  for one field is how they drift apart. */
   function spread(row) {
     if (row.kind === 'comparison') return row.footprint ? 'framed' : null;
+    if (row.kind === 'view') return lookLabel(row) || null;
     if (row.footprint) return 'traced area';
     const m = Number(row.radius_m);
     if (!(m > 0)) return null;
@@ -207,18 +209,27 @@
             </section>
           {/if}
           <p class="acts">
-            <button type="button" class="link" onclick={() => onedit(row)}>
-              {row.kind === 'comparison' ? 'Open in Compare' : 'Edit'}
-            </button>
+            {#if row.kind === 'place' && ondelete}
+              <button type="button" class="icon-act danger" title="Delete case place" aria-label="Delete case place" onclick={() => ondelete(row)}>
+                <Icon name="trash" size={13} />
+              </button>
+            {/if}
+            {#if onedit}
+              {@const editLabel = row.kind === 'comparison' ? 'Open in Compare' : row.kind === 'view' ? 'Open in Horizon' : 'Edit'}
+              <button type="button" class="icon-act" title={editLabel} aria-label={editLabel} onclick={() => onedit(row)}>
+                <Icon name={row.kind === 'comparison' ? 'compare' : row.kind === 'view' ? 'horizon' : 'edit'} size={13} />
+              </button>
+            {/if}
             {#if row.kind === 'place' && ontrace}
               <button
                 type="button"
-                class="link"
+                class="icon-act"
+                aria-label={`${row.footprint ? 'Retrace' : 'Trace'} footprint`}
                 onclick={() => ontrace(row)}
                 title={row.footprint
                   ? 'Draw this shape again on the map'
                   : 'Draw the area this place really covers'}
-              >{row.footprint ? 'Retrace' : 'Trace'} footprint</button>
+              ><Icon name="polygon" size={13} /></button>
             {/if}
             {#if row.source_url}
               <a
@@ -418,9 +429,15 @@
   }
   .acts {
     display: flex;
-    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
     margin: 4px 0 0;
   }
+  .icon-act { display: grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-2); cursor: pointer; }
+  .icon-act:hover { color: var(--accent); background: var(--bg-3); }
+  .icon-act.danger:hover { color: var(--danger); }
+  .acts > .link { margin-left: 4px; }
   .link {
     display: inline-flex;
     align-items: center;

@@ -7,7 +7,9 @@
    * post template can be the one new posts start with (`post_template`).
    */
   import Icon from '../../components/Icon.svelte';
-  import { templatesState, prefs } from '../../lib/state.svelte.js';
+  import { templatesState, prefs, saveTemplate, toast, uiState } from '../../lib/state.svelte.js';
+  import { houseLayout, templateOf } from '../../lib/plate/page.js';
+  import { readTemplateFile, templateFile } from '../../lib/plate/templateFile.js';
 
   let { newTemplate, editTemplate, duplicateTemplate, savePrefs, deleteTpl = $bindable() } = $props();
 
@@ -16,9 +18,43 @@
   function toggleDefault(id) {
     savePrefs({ post_template: prefs.postTemplate === id ? '' : id });
   }
+
+  // Map plate templates are laid out in the plate editor itself, over the Map's ground.
+  function editMap(id) {
+    uiState.openPlateTemplate = id;
+    uiState.tool = 'plate';
+  }
+  async function newMap() {
+    try {
+      const record = await saveTemplate('map', { name: 'Map template', data: templateOf(houseLayout()) });
+      editMap(record.id);
+    } catch (error) { toast(error.message, 'danger'); }
+  }
+  async function duplicateMap(record) {
+    try { await saveTemplate('map', { name: `${record.name} copy`.slice(0, 120), data: record.data }); }
+    catch (error) { toast(error.message, 'danger'); }
+  }
+  function downloadMap(record) {
+    const url = URL.createObjectURL(templateFile(record));
+    const link = document.createElement('a');
+    link.href = url; link.download = `${record.name.replace(/[\\/<>:"|?*\u0000-\u001f]/g, '_')}.azimut-map.json`;
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  let picker = $state();
+  async function importMap(event) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+    try {
+      const { name, data } = readTemplateFile(await file.text());
+      await saveTemplate('map', { name, data });
+      toast(`“${name}” added`, 'ok');
+    } catch (error) { toast(error.message, 'danger', 5000); }
+  }
 </script>
 
-<section class="group">
+<section class="group" data-guide="settings.proof-templates">
   <h3>Geo Proof templates</h3>
   <p class="note">
     Reusable proof styles shared across cases.
@@ -50,7 +86,7 @@
   </button>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.report-templates">
   <h3>Geo Report templates</h3>
   <p class="note">
     Reusable thread structures for new Geo Reports.
@@ -88,6 +124,35 @@
   <button class="btn btn-sm" onclick={() => newTemplate('post')}>
     <Icon name="plus" size={13} /> New post template
   </button>
+</section>
+
+<section class="group" data-guide="settings.plate-templates">
+  <h3>Map plate templates</h3>
+  <p class="note">
+    A plate's layout, paper and colours without a case's ground or layers, shared as a file.
+  </p>
+  <div class="tpl-list">
+    {#each templatesState.map as t (t.id)}
+      <div class="tpl-row">
+        <span class="tpl-name">{t.name}</span>
+        <div class="tpl-actions">
+          <button class="btn btn-sm" onclick={() => editMap(t.id)}><Icon name="edit" size={13} /> Edit</button>
+          <button class="btn btn-sm" onclick={() => duplicateMap(t)}><Icon name="copy" size={13} /> Duplicate</button>
+          <button class="btn btn-sm" title="Download as a file" aria-label={`Download ${t.name}`} onclick={() => downloadMap(t)}><Icon name="download" size={13} /></button>
+          <button class="btn btn-sm" title="Delete" aria-label={`Delete ${t.name}`}
+            onclick={() => (deleteTpl = { kind: 'map', id: t.id, name: t.name })}><Icon name="trash" size={13} /></button>
+        </div>
+      </div>
+    {/each}
+    {#if !templatesState.map.length}
+      <p class="empty">No map templates yet. Keep one from a plate, or start one here.</p>
+    {/if}
+  </div>
+  <div class="tpl-actions">
+    <button class="btn btn-sm" onclick={newMap}><Icon name="plus" size={13} /> New map template</button>
+    <button class="btn btn-sm" onclick={() => picker.click()}><Icon name="upload" size={13} /> Import a file</button>
+    <input type="file" accept=".json,application/json" hidden bind:this={picker} onchange={importMap} />
+  </div>
 </section>
 
 <style>

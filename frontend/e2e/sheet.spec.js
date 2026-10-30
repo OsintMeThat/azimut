@@ -251,7 +251,7 @@ test('lands on the home and closes back to it, saving what was typed', async ({ 
   await page.locator('.home .sheet').first().click();
   await expect(page.getByRole('grid', { name: 'Sheet rows' })).toBeVisible();
   await typeInto(page, 0, 3, 'checked twice');
-  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'Sheets', exact: true }).click();
 
   await expect(page.getByRole('heading', { name: 'Recent sheets' })).toBeVisible();
   await expect.poll(() => fixture.sheetOnDisk('sheet-1').rows[0][3]).toBe('checked twice');

@@ -65,11 +65,15 @@
   import { createPagedList } from '../lib/pagedList.svelte.js';
   import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import { onBackForward, settlePlace } from '../lib/backButton.js';
+  import { anyOverlayOpen } from '../lib/overlayStack.js';
+  import { spaceTarget, viewerItem } from '../lib/fileViewer.js';
+  import { loadViewMode, saveViewMode } from '../lib/viewMode.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
+  import MediaViewer from '../components/MediaViewer.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
   import PasteDialog from '../components/PasteDialog.svelte';
   import SourceDialog from '../components/SourceDialog.svelte';
@@ -78,7 +82,7 @@
   const TYPE_ICON = {
     media: 'image', capture: 'satellite', note: 'note', proof: 'proof',
     post: 'post', place: 'pin', 'inspect-session': 'inspect', collage: 'grid', 'compare-session': 'compare',
-    bookmark: 'link',
+    'horizon-view': 'horizon', 'horizon-find': 'search', 'map-plate': 'plate', bookmark: 'link',
   };
   const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v']);
 
@@ -219,6 +223,8 @@
     const path = e.attrs?.path;
     if (e.type === 'proof' && typeof path === 'string' && /\.png$/i.test(path)) return path;
     if (e.type === 'compare-session' && typeof path === 'string' && /\.(png|gif)$/i.test(path)) return path;
+    // a saved view's preview sits beside its spec
+    if ((e.type === 'horizon-view' || e.type === 'map-plate') && typeof e.attrs?.thumb === 'string') return e.attrs.thumb;
     return pathInfo.get(path)?.thumbnail ?? null;
   };
 
@@ -435,11 +441,12 @@
     query;
     selected = [];
     anchor = null;
+    viewingId = null;
   });
 
   // What is open or alone-selected here is what the topbar's Add event seats.
   $effect(() => {
-    const id = infoEntityId ?? (selected.length === 1 ? selected[0] : null);
+    const id = viewing ?? infoEntityId ?? (selected.length === 1 ? selected[0] : null);
     offerNote('files', curEntities.find((e) => e.id === id) ?? null);
   });
   onDestroy(() => withdrawNote('files'));
@@ -451,8 +458,19 @@
   }
 
   function onFilesKeydown(event) {
+    if (viewing) return; // the viewer hears its own keys
     if (event.key === 'Escape' && ctx) {
       ctx = null;
+      return;
+    }
+    if (event.key === ' ' && uiState.tool === 'files' && !event.repeat && !renaming && !anyOverlayOpen()) {
+      const target = event.target;
+      if (target instanceof Element && target.closest('button, a, input, textarea, select, [contenteditable]')) return;
+      const id = spaceTarget(selected, anchor);
+      if (id && viewerItems.some((item) => item.key === id)) {
+        event.preventDefault();
+        viewingId = id;
+      }
       return;
     }
     if (event.key === 'F2' && uiState.tool === 'files' && selected.length === 1 && !renaming) {
@@ -836,11 +854,15 @@
     e?.type === 'capture' && Number.isFinite(Number(e.attrs?.lat)) && Number.isFinite(Number(e.attrs?.lon));
 
   function openEntityTile(entity) {
+    if (viewerItems.some((item) => item.key === entity.id)) {
+      viewingId = entity.id;
+      return;
+    }
     if (entity.type === 'note') {
       openNotebook(entity.id);
       return;
     }
-    if (['compare-session', 'analysis-area', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
+    if (['compare-session', 'horizon-view', 'horizon-find', 'map-plate', 'analysis-area', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
       openEntity(entity);
       return;
     }
@@ -1025,8 +1047,30 @@
     else infoEntityId = null;
   }
 
-  // View mode: small/large icon grids, plus a details list with columns.
-  let view = $state('small');
+  // View mode: small/large icon grids, plus a details list with columns. The
+  // choice is remembered (lib/viewMode.js).
+  let view = $state(loadViewMode('files', 'small'));
+  function setView(next) {
+    view = next;
+    saveViewMode('files', next);
+  }
+
+  // ── viewer ───────────────────────────────────────────────────────────────────
+  // A double press or Space opens a picture, video or sound full screen, and ←/→
+  // walk the ones on screen (components/MediaViewer.svelte). The selection follows,
+  // so the file last seen is the one picked once the viewer closes.
+  let viewingId = $state(null);
+  const viewerItems = $derived(
+    (showTrash ? [] : curEntities).map((e) => viewerItem(e, tileThumb(e))).filter(Boolean),
+  );
+  // A file that left the view (moved, deleted) closes the viewer rather than
+  // holding the keys for a viewer nobody sees.
+  const viewing = $derived(viewingId && viewerItems.some((item) => item.key === viewingId) ? viewingId : null);
+  function viewFile(id) {
+    viewingId = id;
+    selected = [id];
+    anchor = id;
+  }
   const dense = $derived(view === 'small');
   const VIEWS = [
     { id: 'small', label: 'Small', icon: 'grid' },
@@ -1052,14 +1096,18 @@
     return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
-  // List view must not sort only the first catalog page. Fetch the exact open
-  // folder, or every descendant folder while searching, through the bounded
-  // endpoint and merge the pages before applying the local column sort.
+  // An open folder must not show only its share of the first catalog page: a
+  // folder of six whose rows sit past the case's first 200 opened on two and a
+  // "Show more" for the whole case. Fetch the exact open folder (or Unfiled) in
+  // every view. List view also sorts a search, so it fetches every descendant
+  // folder then, or the whole case at the root; the grids search through `pl`.
   $effect(() => {
     const id = caseState.current?.id;
     const folders = caseState.current?.folders ?? [];
     caseState.rev;
-    const needsCompleteList = view === 'list' && !filtering && (Boolean(cwd) || showUnfiled || searching);
+    const needsCompleteList = !filtering && (
+      searching ? view === 'list' : Boolean(cwd) || showUnfiled
+    );
     if (!id || !needsCompleteList) {
       completeFolderRun += 1;
       completeFolderEntities = null;
@@ -1137,14 +1185,14 @@
             class:active={view === v.id}
             title={`${v.label} view`}
             aria-pressed={view === v.id}
-            onclick={() => (view = v.id)}
+            onclick={() => setView(v.id)}
           >
             <Icon name={v.icon} size={14} /> {v.label}
           </button>
         {/each}
       </div>
       <span class="bar-sep"></span>
-      <form class="new-folder" onsubmit={(e) => { e.preventDefault(); createFolder(); }}>
+      <form class="new-folder" data-guide="files.new-folder" onsubmit={(e) => { e.preventDefault(); createFolder(); }}>
         <input class="input" placeholder="New folder…" bind:value={newFolder} />
         <button class="btn" type="submit" disabled={!newFolder.trim()}>
           <Icon name="folder" size={14} /> Add
@@ -1158,7 +1206,7 @@
   {:else}
     <div class="workbench">
       <!-- left: folder tree (navigation + drop targets) -->
-      <aside class="tree-rail">
+      <aside class="tree-rail" data-guide="files.tree">
         <div
           class="trow"
           class:active={cwd === '' && !showUnfiled && !showTrash}
@@ -1237,6 +1285,7 @@
           {#if cwd && !showUnfiled && !showTrash}
             <button
               class="work-toggle"
+              data-guide="files.work"
               class:on={working === cwd}
               aria-pressed={working === cwd}
               title={working === cwd
@@ -1254,7 +1303,7 @@
         </div>
 
         {#if !showTrash && chips.length > 1}
-          <div class="filters" role="group" aria-label="Filters">
+          <div class="filters" role="group" aria-label="Filters" data-guide="files.filters">
             <button class="chip" class:active={!typeFilter} onclick={() => (typeFilter = null)}>All</button>
             {#each chips as chip (chip.type)}
               <button
@@ -1428,7 +1477,7 @@
                 <span class="lcol-added">{fmtAdded(e)}</span>
               </div>
             {/each}
-            {#if !curFolders.length && !curEntities.length && !showRootUnfiled}
+            {#if !completeFolderLoading && !curFolders.length && !curEntities.length && !showRootUnfiled}
               <div class="grid-empty">
                 <Icon name="folder" size={34} />
                 <p>
@@ -1497,9 +1546,15 @@
             {/if}
           {/if}
 
-          {#each curEntities as e (e.id)}
+          {#if completeFolderLoading}
+            <div class="list-status grid-status" role="status">Loading all files in this folder…</div>
+          {:else if completeFolderError}
+            <div class="list-status grid-status error" role="status">Could not load the complete folder. Showing loaded items.</div>
+          {/if}
+          {#each completeFolderLoading ? [] : curEntities as e (e.id)}
             <div
               class="tile entity"
+              data-guide="files.tile"
               class:selected={selected.includes(e.id)}
               data-id={e.id}
               draggable="true"
@@ -1536,7 +1591,7 @@
             </div>
           {/each}
 
-          {#if !curFolders.length && !curEntities.length && !showRootUnfiled}
+          {#if !completeFolderLoading && !curFolders.length && !curEntities.length && !showRootUnfiled}
             <div class="grid-empty">
               <Icon name="folder" size={34} />
               <p>
@@ -1563,7 +1618,7 @@
             </button>
             <span>Showing {fl.items.length} of {fl.total}</span>
           </div>
-        {:else if !showTrash && !filtering && pl.hasMore}
+        {:else if !showTrash && !filtering && pl.hasMore && completeFolderEntities === null && !completeFolderLoading}
           <div class="show-more">
             <button class="btn" onclick={() => pl.loadMore()} disabled={pl.loading}>
               {pl.loading ? 'Loading…' : 'Show more'}
@@ -1649,7 +1704,7 @@
     oncontextmenu={(e) => e.preventDefault()}
   ></div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="ctx-menu" role="menu" tabindex="-1" style="left:{ctx.x}px; top:{ctx.y}px" onpointerdown={(e) => e.stopPropagation()}>
+  <div class="ctx-menu" role="menu" tabindex="-1" data-guide="files.menu" style="left:{ctx.x}px; top:{ctx.y}px" onpointerdown={(e) => e.stopPropagation()}>
     {#if ctx.kind === 'entity'}
       <div class="ctx-head">{ctxOne ? ctxOne.label : `${ctxEntities.length} items`}</div>
       {#if ctxOne}
@@ -1844,6 +1899,14 @@
     onclose={() => (pasted = null)}
   />
 {/if}
+
+<MediaViewer
+  caseId={caseState.current?.id}
+  items={viewerItems}
+  current={viewing}
+  onmove={viewFile}
+  onclose={() => (viewingId = null)}
+/>
 
 <!-- details editor: the shared body, same as the sidebar and Media modal -->
 {#if infoEntityId}
@@ -2282,6 +2345,9 @@
   }
   .list-status.error {
     color: var(--danger);
+  }
+  .grid-status {
+    grid-column: 1 / -1;
   }
   .lrow.entity:hover,
   .lrow.folder:hover {

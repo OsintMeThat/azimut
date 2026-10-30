@@ -140,7 +140,7 @@ to one clause — no full stop, no em-dash, under a hundred characters.
 | `class` | a model the case counts with, never one particular object | `equipment-type` |
 | `identifier` | a handle on a system | `account`, `email`, `phone`, `domain`, `ip`, `network` |
 | `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture` |
-| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run`, `bookmark` |
+| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `map-plate`, `compare-session`, `horizon-view`, `horizon-find`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run`, `bookmark` |
 | `place` | a point, never a thing | `place` |
 | `claim` | a statement about the graph, carrying its own reasoning | `claim` |
 
@@ -169,8 +169,8 @@ picture of the case is about it. The line that matters is between the first two 
 |---|---|---|---|
 | `subject` | the case is about it | `person`, `organization`, `vehicle`, `vessel`, `aircraft`, `structure`, `equipment-type`, `account`, `email`, `phone`, `domain`, `ip`, `network`, `media`, `place`, `claim` | a node |
 | `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture` | folded into the edge that carries its provenance, drawn or not (below) |
-| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run` | out of the case readings, drawn by **My work** |
-| `deliverable` | what the case produced | `post` | out of the case readings, drawn by **My work** |
+| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `horizon-view`, `horizon-find`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run` | out of the case readings, drawn by **My work** |
+| `deliverable` | what the case produced | `post`, `map-plate` | out of the case readings, drawn by **My work** |
 
 A bookmark stays drawn because it is not a leaf: *this account posted it, this
 statement cites it* is a path through it, and that path is a fact about the case. A
@@ -187,12 +187,15 @@ answer by omission (`tests/test_entities.py`).
 |---|---|---|---|---|---|---|
 | `media` | collected | subject | ✅ | media-library | `path`, `sha256`, `source_url?` | yes (+ sidecar) |
 | `capture` | collected | attestation | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path`, `geo?` | yes (image) |
-| `place` | place | subject | ✅ | satellite, ingest, enrich | `aliases?`, `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, plus the precision fields below | no (a point) |
+| `place` | place | subject | ✅ | satellite, ingest, enrich, map layers | `aliases?`, `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, `layer_origin?`, plus the precision fields below | no (a point) |
 | `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | document | annex | ✅ | inspect | `spec` (json), one per file | yes |
 | `collage` | document | annex | ✅ | collage | `spec` (json) | yes |
+| `map-plate` | document | deliverable | ✅ | map-plate | `spec` (json), `thumb?` (webp): a page round the case's maps, its layers kept by name | yes (spec + preview) |
 | `compare-session` | document | annex | ✅ | compare | `spec` (json), `preview?`, `lat`, `lon`, `zoom`, `bearing`, `footprint?`, `geo?` | yes |
+| `horizon-view` | document | annex | ✅ | horizon | `spec` (json), `thumb?` (webp), `lat`, `lon`, `zoom`, `bearing`, `heading`, `fov`, `projection`, `footprint?`, `geo?` | yes (spec + preview) |
+| `horizon-find` | document | annex | ✅ | horizon | `spec` (json): the question (photo, trace, area, setup) and the places scored | yes |
 | `map-layer` | document | annex | ✅ | map layers | `spec` (json), `format`, `source_url?` | yes (spec + snapshot + icons) |
 | `analysis-area` | document | annex | ✅ | detect | `spec` (json): a named, coloured area routines share | yes (`.analysis/areas-<id>.json`) |
 | `analysis-zones` | document | annex | ✅ | detect | `spec` (json): an ordered group of shared area IDs; older shape sets migrate on read | yes (`.analysis/zones-<id>.json`) |
@@ -227,15 +230,45 @@ Three modelling calls the table alone does not show:
   minting the day a value turns up without its object.
 - **`registration` and `icao24` belong to an airframe; a callsign belongs to a
   flight**, which is a dated statement rather than an attribute.
-- **A `map-layer` is a source the case consults, not a source it quotes.** It is
-  `annex` beside `note` and `sheet` rather than `attestation`, because an
-  attestation folds into the edge carrying its provenance and a layer that nothing
-  links to would fold into nothing. Its `source` is a path *or* a URL, which is
-  what makes a dropped KMZ, a followed My Maps and a GeoConfirmed query one type
-  instead of three. Its
-  features never enter the graph: they are what somebody else claims, and the day
-  one of them becomes a `place` of this case (SPEC §6) the layer is what that
-  place cites — which is the reason it is an entity at all.
+- **A `map-layer` is a consulted source or a personal working map.** It is
+  `annex` beside `note` and `sheet`. A file or followed URL keeps its source
+  snapshot; an `editable` layer also owns a working FeatureCollection in its
+  spec. Copying a source preserves the original bytes, bundled pictograms and
+  origin. Its drawing is derived from the working collection and content hash.
+  Every working feature has a stable `key`; its optional `place_id` is a
+  presentation reference, not a graph edge. Features stay outside the graph
+  until **Save as case place** explicitly creates or reuses a `place`. A new
+  place carries `layer_origin` with the spec, feature key and copied origin.
+  Marker edits do not change that place or attach proof and media relations.
+  Deleting a layer does not delete its promoted places. Specs, snapshots and
+  icons use the existing artifact, Trash and bundle lifecycle.
+  A working spec also owns ordered `groups` with stable IDs, uniform or
+  individual styles, icon scales from 0.5 to 3 and line widths from 0.5 to 12 pixels.
+  The first group draws on top. Batch moves and style changes are atomic; the last
+  batch removal can be undone without changing case entities.
+  Group overrides do not overwrite individual styles. Editable geometry is a
+  Point, LineString, Polygon, MultiLineString or MultiPolygon (what a merge makes),
+  bounded to 4,096 coordinates. Polygon holes remain in the working collection.
+  A feature may carry `date` (a day), `status` (`damaged`, `destroyed`), `bearing`,
+  `links` (up to ten addresses) and `provenance` (`external`); none is an entity.
+  The case's named colours and icons (an app badge's id or an own icon's key) are
+  two settings in the case database, not entities.
+  Opening the editor stores a trusted `edit_checkpoint` in the owned spec.
+  **Done** ends that session; **Back** can restore its working collection, groups,
+  hidden groups, serials and removal journal. A revision guard refuses stale
+  finishes. The checkpoint travels through the existing bundle and Trash lifecycle.
+  Discarding a layer session does not delete separately promoted case places.
+- **Layer downloads strip case identities and provenance references.** KML and GeoJSON retain geometry and
+  style fields; KMZ also bundles locally drawn or already imported pictograms.
+  **Add from the case** stores an `entity_id` on a marker: a place, capture,
+  comparison, view, proof or media item. The marker then follows that entity's
+  point (the nearest, for an entity that stands in several places) and cannot be
+  moved alone until unlinked; its stored point is the last answer. Removing a
+  feature only changes that layer and journals the last twenty removals for Undo.
+  Deleting the entity keeps the marker at its last point; its stored ID becomes
+  active again on Trash restore.
+  The delete preview lists graph relations and layer memberships. Proof coordinates
+  stay in their specs, independently of any place entity.
 
 Retired: `event` (replaced by the claim node), `alias` (see above), and `panorama`
 (a collage's auto-stitch export is a derived `media`). Still coming from the roadmap,
@@ -538,13 +571,16 @@ A grade is read wherever its source appears, including on a relation row, where 
 sits on the line carrying the entity's name while the edge's own rating sits on the
 line below (§3). Nothing needs one: most bookmarks are never graded.
 
-The file-backed pointers of `proof`, `post`, `inspect-session`, `collage` and
-`compare-session` are not stable: the file's name follows the label, so renaming
+The file-backed pointers of `proof`, `post`, `inspect-session`, `collage`,
+`compare-session`, `horizon-view` and `map-plate` are not stable: the file's name follows the label, so renaming
 one in its tool rewrites its `spec`, `draft` or `path` on the same entity. A
 comparison's images follow it: its preview and every image kept from it name it in
 `compare_session`, which a rename rewrites. Each save also restates where the
 comparison stands (`engine/comparisons.py`): its frame's centre, or its view's, with
-the frame as `footprint`, which is what lists it in Saved work beside the captures. An
+the frame as `footprint`, which is what lists it in Saved work beside the captures. A
+`horizon-view` stands at its eye, facing its `heading` through its `fov`, with the
+ground it took in as `footprint` (`engine/horizon_views.py`); its preview and the
+images kept from it (`horizon_view`) follow a rename the same way. An
 `inspect-session` still named after its file is also renamed with that file. Look
 these up by id, or re-read the pointer — never cache one across a save.
 

@@ -60,7 +60,7 @@
     Captures supported map sites and powers the Google basemap Capture button.
   </p>
 
-  <div class="row">
+  <div class="row" data-guide="ext.status">
     <div class="row-label">
       <span>Status in this browser</span>
       <span class="row-hint">
@@ -168,7 +168,7 @@
   {/if}
 
   {#if extState?.path}
-    <div class="row">
+    <div class="row" data-guide="ext.folder">
       <div class="row-label">
         <span>Extension folder</span>
         <span class="row-hint mono">{extState.path}</span>
@@ -191,7 +191,7 @@
       Firefox: download the <span class="mono">.xpi</span> below, then open
       <span class="mono">about:addons</span> → the gear menu → Install Add-on From File.
     </p>
-    <div class="scraper-actions">
+    <div class="scraper-actions" data-guide="ext.firefox">
       <a class="btn btn-sm dotted" href={xpiUrl} target="_blank" rel="noreferrer">
         <Icon name="download" size={13} />
         {xpiName ?? 'Signed .xpi for Firefox'}
@@ -203,7 +203,7 @@
   {/if}
 </section>
 
-<section class="group">
+<section class="group" data-guide="ext.pairing">
   <h3>Pairing</h3>
   <p class="note">
     Paste this token into the extension options; rotating it unpairs existing extensions.

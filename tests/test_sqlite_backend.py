@@ -416,6 +416,20 @@ def test_schema_19_reads_a_stated_day_in_its_zone(tmp_path):
     assert _zones(db) == [("2024-03-12", "2024-03-11T22:00:00.000000Z", "Europe/Kyiv")]
 
 
+def test_a_case_from_0_3_0_with_a_dated_claim_opens(tmp_path):
+    """0.3.0 shipped 17, whose projection has no zone column. 17 to 18 rebuilds the
+    projection before 19 adds the column, so that rebuild must not write it into a
+    table that lacks it: 0.3.2 did, and refused every such case."""
+    db = tmp_path / "case.db"
+    store = SqliteCase.create(db, name="From 0.3.0")
+    store.add_entity("claim", "Filmed", {"when": "2024-03-12", "when_zone": "Europe/Kyiv"}, by="user")
+    schema_rewind.rewind(db, 17)
+
+    reopened = SqliteCase.open(db)
+    assert _zones(db) == [("2024-03-12", "2024-03-11T22:00:00.000000Z", "Europe/Kyiv")]
+    assert reopened.temporal_projection_status()["consistent"] is True
+
+
 def test_a_development_19_without_the_zone_column_gains_it_on_open(tmp_path):
     """A case opened by an earlier cut of the unshipped 19 is stamped 19 already, so
     no migration runs; the open itself adds the column and rebuilds the rows."""

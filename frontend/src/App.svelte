@@ -11,6 +11,8 @@
     prefs,
     checkForUpdatesOnStart,
     toggleTheme,
+    appInfo,
+    keepOnboarding,
   } from './lib/state.svelte.js';
   import { api } from './lib/api.js';
   import { updateBadges } from './lib/staleness.js';
@@ -26,8 +28,10 @@
   } from './lib/workspaces.js';
   import { readSolo, splitHash } from './lib/hash.js';
   import { caseShown, installBackButton, showTool } from './lib/backButton.js';
-  import { guideFor } from './lib/guide.js';
-  import { openGuide } from './lib/navigate.js';
+  import { landingFor } from './lib/guide.js';
+  import { openGuide, openIssueReport } from './lib/navigate.js';
+  import { listenToGuide } from './lib/guideWindow.js';
+  import { openFindExample } from './lib/findExample.js';
   import { leaveFullscreen } from './lib/fullscreen.js';
   import { createToolLoader } from './lib/toolLoader.js';
   import { loadEntityTypes } from './lib/entityTypes.svelte.js';
@@ -39,10 +43,15 @@
   import Toasts from './components/Toasts.svelte';
   import UpdateModal from './components/UpdateModal.svelte';
   import DetectActivity from './components/DetectActivity.svelte';
+  import PlateActivity from './components/PlateActivity.svelte';
+  import { plateExport } from './lib/plate/exportRun.svelte.js';
   import WorkspaceStopped from './components/WorkspaceStopped.svelte';
   import NoteBar from './components/NoteBar.svelte';
   import MoveDialog from './components/MoveDialog.svelte';
   import CommandPalette from './components/CommandPalette.svelte';
+  import GuideDialog from './components/GuideDialog.svelte';
+  import Onboarding from './components/Onboarding.svelte';
+  import { closedThisStart, onStart } from './lib/onboarding.js';
   import CaseChangeGuard from './components/CaseChangeGuard.svelte';
   import { isPaletteKey } from './lib/commandPalette.js';
   import { filedToast, workFolder } from './lib/folders.js';
@@ -57,7 +66,6 @@
   // of the working flow at all.
   const TOOLS = [
     { id: 'overview', label: TOOL_LABELS.overview, load: () => import('./tools/Overview.svelte') },
-    { id: 'guide', label: TOOL_LABELS.guide, load: () => import('./tools/Guide.svelte') },
     { id: 'board', label: TOOL_LABELS.board, load: () => import('./tools/Board.svelte') },
     { id: 'graph', label: TOOL_LABELS.graph, load: () => import('./tools/Graph.svelte') },
     { id: 'timeline', label: TOOL_LABELS.timeline, load: () => import('./tools/Timeline.svelte') },
@@ -70,9 +78,11 @@
     { id: 'satellite', label: TOOL_LABELS.satellite, load: () => import('./tools/Satellite.svelte') },
     { id: 'compare', label: TOOL_LABELS.compare, load: () => import('./tools/Compare.svelte') },
     { id: 'detect', label: TOOL_LABELS.detect, load: () => import('./tools/Detect.svelte') },
+    { id: 'horizon', label: TOOL_LABELS.horizon, load: () => import('./tools/Horizon.svelte') },
     { id: 'coordinates', label: TOOL_LABELS.coordinates, load: () => import('./tools/Coordinates.svelte') },
     { id: 'proof', label: TOOL_LABELS.proof, load: () => import('./tools/ProofComposer.svelte') },
     { id: 'post', label: TOOL_LABELS.post, load: () => import('./tools/PostComposer.svelte') },
+    { id: 'plate', label: TOOL_LABELS.plate, load: () => import('./tools/MapPlate.svelte') },
     { id: 'notebook', label: TOOL_LABELS.notebook, load: () => import('./tools/Notebook.svelte') },
   ];
   const ALL_TOOLS = [
@@ -90,7 +100,7 @@
   const toolLabel = (id) => ALL_TOOLS.find((t) => t.id === id)?.label ?? id;
   // Name the tab the `?` will answer about, so the press is not a leap into a document.
   const guideTitle = $derived(
-    guideFor(uiState.tool) ? `Guide: ${toolLabel(uiState.tool)}` : 'Read the guide'
+    landingFor(uiState.tool).tool ? `Guide: ${toolLabel(uiState.tool)}` : 'Read the guide'
   );
 
   // deep links: tool ids (#media, #proof, …) plus workspace aliases
@@ -102,6 +112,24 @@
   // browser's Back and Forward walk the tools, and inside them the places the
   // analyst went to (lib/backButton.js).
   onDestroy(installBackButton(TOOL_IDS));
+  // the guide in a tab of its own opens tools here, in the tab it was detached from
+  onDestroy(
+    listenToGuide({
+      tools: TOOL_IDS,
+      open: (id) => {
+        uiState.guide = null;
+        uiState.tool = id;
+      },
+      report: () => {
+        uiState.guide = null;
+        openIssueReport();
+      },
+      example: () => {
+        uiState.guide = null;
+        openFindExample();
+      },
+    })
+  );
   let firstShow = true;
   $effect(() => {
     const tool = uiState.tool;
@@ -122,6 +150,8 @@
    * second screen showing one map is already somewhere.
    */
   const solo = readSolo(splitHash(location.hash).params);
+  /** The app's bars put away: in a tab of its own, or while a tool's focus gives its page the whole window. */
+  const bare = $derived(solo || uiState.focusMode);
   // Map windows are numbered per window, and the one that opened the app is the
   // first: a window that was detached carries its own number in the address and
   // leaves the count alone (tools/Satellite.svelte).
@@ -236,6 +266,32 @@
   // another Azimut holds. The backend refuses case work in both states and
   // touches neither folder, so what is left to do is explain and offer the way
   // out.
+  // A newcomer opens on the welcome and the tour, someone who knows Azimut on what
+  // their new version brings (lib/onboarding.js), once the case list says which they
+  // are. A map window opened on its own is part of a session already under way, so it
+  // never does.
+  let guideButton = $state(null);
+  function onboardOnStart() {
+    if (solo || uiState.onboarding) return;
+    const version = appInfo.version;
+    uiState.onboarding = onStart({
+      tour: prefs.tour,
+      seen: prefs.whatsNewSeen,
+      version,
+      hasCases: caseState.list.length > 0,
+      closed: closedThisStart(version),
+    });
+  }
+  function onboarded({ guide = false, create = false } = {}) {
+    uiState.onboarding = null;
+    if (guide) openGuide(guide === true ? uiState.tool : guide);
+    if (create) {
+      // the front door's own field, where a first case is named
+      uiState.tool = 'overview';
+      requestAnimationFrame(() => document.getElementById('home-case-name')?.focus());
+    }
+  }
+
   let workspaceStopped = $state(null);
   readStatus()
     .then((status) => {
@@ -261,7 +317,10 @@
         toast(`Could not open this map's case: ${error?.message ?? 'case not found'}`, 'danger', 8000);
       }
     })
-    .finally(() => checkForUpdatesOnStart());
+    .finally(() => {
+      onboardOnStart();
+      checkForUpdatesOnStart();
+    });
 
   // Live nudges from our own backend (SSE, same-origin — still local-first):
   // the capture extension files screenshots while this tab just sits here, and
@@ -301,13 +360,14 @@
 </script>
 
 <div class="shell">
-  {#if !solo}
+  {#if !bare}
   <header class="topbar">
     <!-- The mark is the way home. It costs no rail seat and needs no label, which is
          the whole reason home lives here: the rail reads as a sequence of stages and
          an overview is not one of them, exactly as the case is not. -->
     <button
       class="brand"
+      data-guide="start.home"
       class:topbar-active={activeWs?.id === HOME_WORKSPACE.id}
       title="Home"
       aria-label="Home"
@@ -316,24 +376,25 @@
       <Logo size={27} />
       <span class="brand-name"><Wordmark height={13} /></span>
     </button>
-    <div class="case-group">
+    <div class="case-group" data-guide="start.case">
       <CaseSwitcher />
     </div>
     <div class="spacer"></div>
     <DetectActivity />
-    <button class="btn btn-ghost btn-sm" title="Go to (Ctrl+K / ⌘K)" aria-label="Go to"
+    <PlateActivity />
+    <button class="btn btn-ghost btn-sm" title="Go to (Ctrl+K / ⌘K)" aria-label="Go to" data-guide="start.goto"
             aria-keyshortcuts="Control+k Meta+k" onclick={() => (paletteOpen = true)}>
       <Icon name="search" size={16} />
     </button>
     <!-- The one mark that answers "what is this tab I am standing in". It sits beside
          the gear rather than in each toolbar so there is one of it, and it opens the
-         Guide on the section written about the current tool. Silent on the Guide
-         itself, which is the answer. -->
+         guide over the tool on that tool's page. -->
     <!-- The one way into Add event from every tool: quiet like the marks beside it,
          since amber is kept for the main action and the selection. -->
     {#if caseState.current && !solo}
       <button
         class="btn btn-ghost btn-sm note-btn"
+        data-guide="start.event"
         class:on={uiState.noting}
         title={noteTitle}
         aria-label="Add an event"
@@ -344,18 +405,18 @@
         <Icon name="eventAdd" size={16} />
       </button>
     {/if}
-    {#if uiState.tool !== 'guide'}
-      <button
-        class="btn btn-ghost btn-sm"
-        title={guideTitle}
-        aria-label={guideTitle}
-        onclick={() => openGuide(uiState.tool)}
-      >
-        <Icon name="help" size={16} />
-      </button>
-    {/if}
+    <button
+      class="btn btn-ghost btn-sm"
+      title={guideTitle}
+      aria-label={guideTitle}
+      bind:this={guideButton}
+      onclick={() => openGuide(uiState.tool)}
+    >
+      <Icon name="help" size={16} />
+    </button>
     <button
       class="btn btn-ghost btn-sm dotted"
+      data-guide="start.settings"
       class:topbar-active={uiState.tool === 'settings'}
       title={badges.any ? 'Settings · something to install or update' : 'Settings'}
       onclick={() => (uiState.tool = 'settings')}
@@ -376,11 +437,12 @@
   {/if}
 
   <div class="main">
-    {#if !solo}
+    {#if !bare}
     <nav class="rail">
       {#each WORKSPACES as ws (ws.id)}
         <button
           class="rail-btn"
+          data-guide="start.stages"
           class:active={activeWs?.id === ws.id}
           onclick={() => openWorkspace(ws)}
           title={ws.label}
@@ -395,6 +457,7 @@
       <span class="rail-rule" role="presentation"></span>
       <button
         class="rail-btn case-rail"
+        data-guide="start.case-rail"
         class:active={activeWs?.id === CASE_WORKSPACE.id}
         onclick={() => openWorkspace(CASE_WORKSPACE)}
         title="The case: its Timeline, Board, Graph and Sheet"
@@ -414,11 +477,12 @@
     {/if}
 
     <main class="canvas">
-      {#if !solo && activeWs && activeWs.tools.length > 1}
+      {#if !bare && activeWs && activeWs.tools.length > 1}
         <div class="tabstrip">
           {#each activeWs.tools as toolId (toolId)}
             <button
               class="tab-btn"
+              data-guide="start.tabs"
               class:active={uiState.tool === toolId}
               aria-current={uiState.tool === toolId ? 'page' : undefined}
               onclick={() => (uiState.tool = toolId)}
@@ -432,7 +496,8 @@
         {#each ALL_TOOLS as tool (tool.id)}
           {#if visited[tool.id]}
             {@const ToolComponent = toolComponents[tool.id]}
-            <div class="tool-host" class:hidden={uiState.tool !== tool.id}>
+            <!-- a plate exporting while another tool is open stays laid out, unseen: its maps draw the pictures -->
+            <div class="tool-host" class:hidden={uiState.tool !== tool.id} class:working={tool.id === 'plate' && plateExport.running}>
               {#if ToolComponent}
                 <ToolComponent />
               {:else if toolErrors[tool.id]}
@@ -449,7 +514,7 @@
       </div>
     </main>
 
-    {#if uiState.sidebarOpen && !solo}
+    {#if uiState.sidebarOpen && !bare}
       <CaseSidebar />
     {/if}
   </div>
@@ -460,6 +525,9 @@
 <NoteBar />
 <MoveDialog />
 <CommandPalette bind:open={paletteOpen} tools={ALL_TOOLS} />
+{#if uiState.guide}
+  <GuideDialog at={uiState.guide.at} onclose={() => (uiState.guide = null)} />
+{/if}
 <CaseChangeGuard />
 <Toasts />
 
@@ -467,7 +535,19 @@
   <WorkspaceStopped {...workspaceStopped} />
 {/if}
 
-{#if updateState.show}
+{#if uiState.onboarding && !workspaceStopped}
+  <Onboarding
+    start={uiState.onboarding}
+    version={appInfo.version}
+    anchor={guideButton}
+    hasCases={caseState.list.length > 0}
+    onkeep={keepOnboarding}
+    onclose={onboarded}
+  />
+{/if}
+
+<!-- after the welcome or the tour, rather than over it -->
+{#if updateState.show && !uiState.onboarding}
   <UpdateModal />
 {/if}
 
@@ -608,6 +688,14 @@
   }
   .tool-host.hidden {
     display: none;
+  }
+  .tool-host.hidden.working {
+    display: block;
+    position: fixed;
+    inset: 0;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: -1;
   }
   .tool-loading {
     width: 100%;

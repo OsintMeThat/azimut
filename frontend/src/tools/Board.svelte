@@ -112,6 +112,7 @@
     viewLayout,
     waitingOf,
   } from '../lib/boardGroups.js';
+  import { carriesOutsideFiles, leftZone } from '../lib/drag.js';
 
   const PAGE = 100;
   /** A group's page: enough to read a group at a glance, small enough that the next
@@ -1405,7 +1406,7 @@
         e.currentTarget.value = '';
       }}
     />
-    <button class="btn btn-primary" onclick={() => startCreate()} disabled={!caseState.current || snapshotReading}>
+    <button class="btn btn-primary" data-guide="board.new" onclick={() => startCreate()} disabled={!caseState.current || snapshotReading}>
       <Icon name="plus" size={14} /> New entity
     </button>
   </div>
@@ -1493,6 +1494,7 @@
          already use for the same job. What a single subject comes to is read where
          that subject is, in its own Details; this one reads several at once, ranked. -->
     <ViewSwitch
+      guide="board.totals"
       options={viewOptions}
       value={totalling ? 'totals' : 'rows'}
       onpick={(id) => (totalling = id === 'totals')}
@@ -1502,7 +1504,7 @@
   <!-- The Board's standing questions, priced, while nothing else is being asked:
        what is waiting on the analyst, one click from the rows it counts. -->
   {#if waiting.length}
-    <p class="waiting-line">
+    <p class="waiting-line" data-guide="board.waiting">
       <span class="lead-in">Waiting</span>
       {#each waiting as item (item.id)}
         <button
@@ -1539,14 +1541,15 @@
     bind:this={bodyElement}
     onkeydown={walkRows}
     ondragover={(e) => {
-      if (!caseState.current || snapshotReading) return;
+      if (!caseState.current || snapshotReading || !carriesOutsideFiles(e)) return;
       e.preventDefault();
       dragOver = true;
     }}
     ondragleave={(e) => {
-      if (e.target === e.currentTarget) dragOver = false;
+      if (leftZone(e)) dragOver = false;
     }}
     ondrop={(e) => {
+      if (!carriesOutsideFiles(e)) return;
       e.preventDefault();
       dragOver = false;
       importFiles(e.dataTransfer?.files);
@@ -1866,7 +1869,7 @@
       onpointerdown={startResize}
       onkeydown={nudgeFiche}
     ></div>
-    <aside class="fiche" style="width: {ficheShown}px" aria-label="Details">
+    <aside class="fiche" style="width: {ficheShown}px" aria-label="Details" data-guide="board.details">
       <div class="fiche-bar">
         <span class="fiche-title">{snapshotReading ? 'Snapshot details' : 'Details'}</span>
         <span class="fiche-keys">↑ ↓ next row · Esc close</span>

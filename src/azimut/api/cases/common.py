@@ -28,7 +28,7 @@ from .. import events
 
 #: Entity types that are drawn on a map, and so whose deletion is news to a
 #: surface that is not the one that asked for it (``api/events.py``).
-MAPPED_TYPES = {"place", "capture", "compare-session"}
+MAPPED_TYPES = {"place", "capture", "compare-session", "horizon-view"}
 
 
 def get_case(case_id: str) -> Case:

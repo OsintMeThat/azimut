@@ -15,10 +15,11 @@
     extensionVersion, extensionState, pingExtensions, reloadExtension, onBridgeHello,
   } from '../lib/extBridge.js';
   import { classify, reloadLanded } from '../lib/extInstall.js';
-  import { CASE_FOLDER_LABEL, saveDestination } from '../lib/exportDest.js';
+  import { CASE_FOLDER_LABEL, KINDS as EXPORT_DIR_KINDS, saveDestination } from '../lib/exportDest.js';
   import Icon from '../components/Icon.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import ProofTemplateEditor from '../components/ProofTemplateEditor.svelte';
+  import { DEFAULT_PROOF_FONT } from '../lib/proofFonts.js';
   import PostTemplateEditor from '../components/PostTemplateEditor.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import ExtensionTab from './settings/ExtensionTab.svelte';
@@ -29,6 +30,8 @@
   import StorageTab from './settings/StorageTab.svelte';
   import SystemTab from './settings/SystemTab.svelte';
   import TemplatesTab from './settings/TemplatesTab.svelte';
+  import IconsTab from './settings/IconsTab.svelte';
+  import { iconLibrary } from '../lib/iconLibrary.svelte.js';
 
   // Keep workflow choices above app maintenance in the settings rail.
   const TABS = [
@@ -36,6 +39,7 @@
     { id: 'publishing', label: 'Publishing', icon: 'edit' },
     { id: 'imagery', label: 'Imagery', icon: 'key' },
     { id: 'templates', label: 'Templates', icon: 'layers' },
+    { id: 'icons', label: 'Icons', icon: 'star' },
     { id: 'extension', label: 'Capture extension', icon: 'crop' },
     { id: 'storage', label: 'Storage', icon: 'folder' },
     { id: 'system', label: 'System', icon: 'compass' },
@@ -81,6 +85,7 @@
         'EEA billing accounts: since 8 July 2025 Google no longer serves satellite tiles to Europe (403). Use a Maps JavaScript API key instead.',
       steps: [
         'In the Google Cloud Console, enable the "Map Tiles API" on your project.',
+        'Attach a billing account to the project. Google asks for one even inside the free tier.',
         'Create an API key (Credentials) and restrict it to that API.',
         'Use an IP restriction, not a referrer one: Azimut calls Google from its own backend, not the browser.',
       ],
@@ -100,6 +105,7 @@
       browserTest: true,
       steps: [
         'In the Google Cloud Console, enable the "Maps JavaScript API" on your project.',
+        'Attach a billing account to the project. Without one, Google dims the map under "For development purposes only".',
         'Create an API key (Credentials) and restrict it to that API.',
         'Optional but recommended: restrict the key to your own referrers.',
       ],
@@ -336,7 +342,7 @@
   let updateOnStart = $state(true); // pop a notice on load when a release is out
   // whether saving a proof files its point as a place, or asks first
   let proofPlaceAuto = $state(true);
-  let mapSync = $state(true); // Satellite, Compare and Detect share one camera
+  let mapSync = $state(true); // Satellite, Compare, Detect and Horizon share one camera
   let radarLayer = $state('');
   // a card of the Imagery tab asked for from elsewhere, opened and scrolled to
   let focusCard = $state('');
@@ -352,7 +358,7 @@
   // back. A file written before those sections existed is a bare settings blob,
   // so it gets wrapped into the current shape.
   let settingsFile = $state(null);
-  let exportDirs = $state({ notes: '', media: '', proofs: '', views: '' });
+  let exportDirs = $state(Object.fromEntries(EXPORT_DIR_KINDS.map((kind) => [kind, ''])));
   let exportPickerKind = $state(null);
 
   const EXPORT_KINDS = [
@@ -384,10 +390,12 @@
         `${r.imported.length} setting${r.imported.length === 1 ? '' : 's'}`,
         r.templates ? `${r.templates} template${r.templates === 1 ? '' : 's'}` : null,
         r.signature ? 'signature' : null,
+        r.icons ? `${r.icons} icon${r.icons === 1 ? '' : 's'}` : null,
       ].filter(Boolean);
       toast(`Backup restored: ${restored.join(', ')}`, 'ok');
       await load();
       await loadTemplates();
+      if (r.icons) iconLibrary.load(true);
       sigBust += 1; // the logo changed on disk; re-fetch it past the cache
     } catch (e) {
       toast(`Could not import the backup: ${e.message}`, 'danger');
@@ -540,11 +548,7 @@
       workspace_root: s.workspace_root ?? '',
       extension_version: s.extension_version ?? '',
     };
-    exportDirs = {
-      notes: s.export_dirs?.notes ?? '',
-      media: s.export_dirs?.media ?? '',
-      proofs: s.export_dirs?.proofs ?? '',
-    };
+    exportDirs = Object.fromEntries(EXPORT_DIR_KINDS.map((kind) => [kind, s.export_dirs?.[kind] ?? '']));
     ingestToken = s.ingest_token ?? '';
     home = { lat: String(s.home_view.lat), lon: String(s.home_view.lon), zoom: String(s.home_view.zoom) };
     mention = s.post_mention ?? '';
@@ -733,7 +737,8 @@
   let deleteTpl = $state(null); // { kind, id, name } pending confirmation
 
   function freshTemplate(kind) {
-    return kind === 'proof' ? templateFromProof({}) : templateFromPost({});
+    // a new house style is set in the shipped default face, not the system's
+    return kind === 'proof' ? templateFromProof({ font: DEFAULT_PROOF_FONT }) : templateFromPost({});
   }
 
   function newTemplate(kind) {
@@ -852,7 +857,7 @@
   </div>
 
   <div class="split">
-    <nav class="rail" aria-label="Settings sections">
+    <nav class="rail" aria-label="Settings sections" data-guide="settings.nav">
       {#each TABS as t (t.id)}
         <button
           class="rail-tab dotted"
@@ -993,6 +998,10 @@
 
       {#if tab === 'templates'}
         <TemplatesTab {newTemplate} {editTemplate} {duplicateTemplate} {savePrefs} bind:deleteTpl />
+      {/if}
+
+      {#if tab === 'icons'}
+        <IconsTab />
       {/if}
     </div>
   </div>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   categoryOf, collageSignature, collageSpec, frameRecord, frameSignature, isFiled, isPristine,
-  isUntouched, missingPieces, videoSignature, workSpec,
+  isUntouched, markRecord, missingPieces, videoSignature, workSpec,
 } from './inspectWork.svelte.js';
 
 const FILTERS = [
@@ -23,6 +23,13 @@ describe('what a work save writes', () => {
     expect(record.path).toBe('media/roof.png');
   });
 
+  it('keeps a video\'s marks with their time and a trimmed label', () => {
+    expect(workSpec({ frames: [], marks: [{ id: 'mk_1', time: 4.2, label: '  convoy turns  ', focus: true }] }).marks)
+      .toEqual([{ id: 'mk_1', time: 4.2, label: 'convoy turns' }]);
+    expect(workSpec({ frames: [] }).marks).toEqual([]);
+    expect(markRecord({ id: 'mk_2', time: 1 })).toEqual({ id: 'mk_2', time: 1, label: '' });
+  });
+
   it('holds a turn to the right angles the pipeline accepts', () => {
     expect(workSpec({ videoRotation: 45, frames: [frame({ rotation: 33 })] })).toMatchObject({
       videoRotation: 0,
@@ -38,6 +45,12 @@ describe('isPristine: looking at a file files nothing', () => {
     expect(isPristine({ ...video, frames: [frame()] }, FILTERS, VIDEO_FILTERS)).toBe(false);
     expect(isPristine({ ...video, videoRotation: 90 }, FILTERS, VIDEO_FILTERS)).toBe(false);
     expect(isPristine({ ...video, videoAdjust: { brightness: 1.4 } }, FILTERS, VIDEO_FILTERS)).toBe(false);
+  });
+
+  it('counts a marked moment as work on a video', () => {
+    const video = { source: { kind: 'video' }, frames: [], marks: [], videoAdjust: { brightness: 1 }, videoRotation: 0 };
+    expect(isPristine(video, FILTERS, VIDEO_FILTERS)).toBe(true);
+    expect(isPristine({ ...video, marks: [{ id: 'mk_1', time: 3, label: '' }] }, FILTERS, VIDEO_FILTERS)).toBe(false);
   });
 
   it('holds for an image until its one frame changes or a second appears', () => {

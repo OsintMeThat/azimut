@@ -149,7 +149,7 @@ export function textBoxPad(fontSize) {
  * between the reader and the picture.
  */
 export function canFill(kind) {
-  return kind === 'rect' || kind === 'ellipse' || kind === 'icon';
+  return kind === 'rect' || kind === 'ellipse' || kind === 'icon' || kind === 'cone';
 }
 
 /**
@@ -170,4 +170,94 @@ export function fillPaint(color, opacity) {
   const digits = match[1].length === 3 ? match[1].replace(/./g, (c) => c + c) : match[1];
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(digits.slice(i, i + 2), 16));
   return `rgba(${r}, ${g}, ${b}, ${Math.min(1, alpha)})`;
+}
+
+/**
+ * The font size a new box tag starts at, in page pixels, read off the box's own
+ * line: a heavy box gets a heavy tag. It is the tag's own size from then on.
+ */
+export function tagFont(strokeWidth = 4) {
+  return Math.max(14, Math.round(strokeWidth * 4 + 4));
+}
+
+/**
+ * Where a box's tag sits, as its top-left in the box's own frame. The tag hangs
+ * outside the box from the corner it names, flush with the outer edge of the
+ * box's line, so the tag and the line read as one piece of ink. `w`, `h` are the
+ * box, `tw`, `th` the tag, `stroke` the box's line, all in one unit.
+ */
+export function tagBox(w, h, tw, th, at = 'tl', stroke = 0) {
+  const half = stroke / 2;
+  const left = at === 'tr' || at === 'br' ? w + half - tw : -half;
+  const top = at === 'bl' || at === 'br' ? h + half : -half - th;
+  return { x: left, y: top };
+}
+
+/**
+ * The tab a tag is painted on: the tag's own box, carried on across the box's
+ * line to its inner edge. Two edges meeting exactly still leave a hairline of
+ * background wherever they fall between two pixels, and the line's rounded
+ * corner leaves a notch beside the tab; the line is the tab's colour, so the
+ * overlap does not show and neither does the seam.
+ */
+export function tagPlate(w, h, tw, th, at = 'tl', stroke = 0) {
+  const { x, y } = tagBox(w, h, tw, th, at, stroke);
+  const below = at === 'bl' || at === 'br';
+  return { x, y: below ? y - stroke : y, w: tw, h: th + stroke };
+}
+
+/**
+ * The marks in a new stacking order, for Bring to front, Bring forward, Send
+ * backward and Send to back (`how`: 'front', 'forward', 'backward', 'back').
+ *
+ * The list runs back to front. A mark is only ever drawn over the marks of its
+ * own layer (`layerOf`: its picture, or the page for a callout), so a step moves
+ * it past the next mark of that layer rather than past one on another picture,
+ * which would change nothing on screen. Several picked marks move together and
+ * keep their order among themselves. The array comes back unchanged when there
+ * is nowhere to go, which is how a menu knows to grey the entry out.
+ */
+export function restacked(shapes, ids, how, layerOf = (s) => s.panel) {
+  const picked = new Set(ids);
+  if (how === 'front' || how === 'back') {
+    const moving = shapes.filter((s) => picked.has(s.id));
+    const rest = shapes.filter((s) => !picked.has(s.id));
+    const next = how === 'front' ? [...rest, ...moving] : [...moving, ...rest];
+    return next.every((s, i) => s === shapes[i]) ? shapes : next;
+  }
+  const next = [...shapes];
+  let changed = false;
+  const forward = how === 'forward';
+  // The mark nearest the way it moves goes first, so a family never jumps itself.
+  for (let n = 0; n < next.length; n++) {
+    const i = forward ? next.length - 1 - n : n;
+    const s = next[i];
+    if (!picked.has(s.id)) continue;
+    const layer = layerOf(s);
+    let j = i;
+    do j += forward ? 1 : -1;
+    while (j >= 0 && j < next.length && layerOf(next[j]) !== layer);
+    if (j < 0 || j >= next.length || picked.has(next[j].id)) continue;
+    next.splice(i, 1);
+    next.splice(j, 0, s);
+    changed = true;
+  }
+  return changed ? next : shapes;
+}
+
+/** How a line can be drawn. A mark without `dash` is drawn solid. */
+export const LINE_STYLES = ['solid', 'dash', 'dot'];
+
+/** The kinds drawn with a line, which are the ones a line style means anything to. */
+export const DASHABLE = new Set(['rect', 'ellipse', 'line', 'arrow', 'curve', 'freehand', 'zoom', 'cone']);
+
+/**
+ * A line style as Konva's dash pattern, in page pixels and in proportion to the
+ * line's width, so a heavy dashed line keeps the look of a light one. A dot is a
+ * zero-length dash drawn with round caps. Null for a solid line.
+ */
+export function dashPattern(style, width = 4) {
+  if (style === 'dash') return [width * 3, width * 2];
+  if (style === 'dot') return [0.001, width * 2];
+  return null;
 }

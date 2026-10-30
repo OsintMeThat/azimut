@@ -154,14 +154,92 @@ export function angleAt(a, vertex, b) {
   return (Math.acos(cos) * 180) / Math.PI;
 }
 
+/** Perimeter of the ring through the points, back to the first, in metres. */
+export function perimeter(points) {
+  return points.length < 3 ? pathLength(points) : pathLength([...points, points[0]]);
+}
+
+/** A point's place on the flat map, Web Mercator in metres: where the line is drawn. */
+function mercator({ lat, lon }) {
+  const clamped = Math.max(-85.05, Math.min(85.05, lat));
+  return [rad(lon) * R, Math.log(Math.tan(Math.PI / 4 + rad(clamped) / 2)) * R];
+}
+
+function unmercator([x, y]) {
+  return { lat: (2 * Math.atan(Math.exp(y / R)) - Math.PI / 2) * (180 / Math.PI), lon: (x / R) * (180 / Math.PI) };
+}
+
+/**
+ * Where two drawn segments cross, or null. Worked on the flat map, because a
+ * segment is drawn straight there: the crossing is where the two lines on screen
+ * meet, which is what an analyst triangulating two bearings reads off.
+ */
+export function crossing(a1, a2, b1, b2) {
+  const [p, q, r, s] = [a1, a2, b1, b2].map(mercator);
+  const d = (q[0] - p[0]) * (s[1] - r[1]) - (q[1] - p[1]) * (s[0] - r[0]);
+  if (!d) return null;
+  const t = ((r[0] - p[0]) * (s[1] - r[1]) - (r[1] - p[1]) * (s[0] - r[0])) / d;
+  const u = ((r[0] - p[0]) * (q[1] - p[1]) - (r[1] - p[1]) * (q[0] - p[0])) / d;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return unmercator([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]);
+}
+
+/** Halfway along a segment as it is drawn on the flat map: where its length is written. */
+export function midway(a, b) {
+  const [p, q] = [a, b].map(mercator);
+  return unmercator([(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]);
+}
+
+/** The middle of a ring as drawn on the flat map: where its area is written. */
+export function centroid(points) {
+  const flat = points.map(mercator);
+  let twice = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < flat.length; i++) {
+    const [x1, y1] = flat[i];
+    const [x2, y2] = flat[(i + 1) % flat.length];
+    const cross = x1 * y2 - x2 * y1;
+    twice += cross;
+    cx += (x1 + x2) * cross;
+    cy += (y1 + y2) * cross;
+  }
+  if (Math.abs(twice) < 1e-9) {
+    const n = flat.length || 1;
+    return unmercator([flat.reduce((t, f) => t + f[0], 0) / n, flat.reduce((t, f) => t + f[1], 0) / n]);
+  }
+  return unmercator([cx / (3 * twice), cy / (3 * twice)]);
+}
+
+/** Steps along an arc, enough that a cone's edge reads as round at any width. */
+const ARC_STEPS = 48;
+
+/**
+ * A view cone lying on the ground: from `apex`, `aperture` degrees wide about
+ * `bearing`, out to `metres`. Closed back at the apex.
+ */
+export function cone(apex, bearing, aperture, metres) {
+  const width = Math.max(0, Math.min(360, aperture));
+  const steps = Math.max(2, Math.ceil((ARC_STEPS * width) / 360) + 1);
+  const arc = [];
+  for (let i = 0; i <= steps; i++) arc.push(destination(apex, bearing - width / 2 + (width * i) / steps, metres));
+  return width >= 360 ? arc : [apex, ...arc];
+}
+
 // Measurements are computed and stored in metres; `units` only picks how they
-// read (Settings → General). International feet/miles/acres.
+// read (Settings → General, or the measure tool's own choice). International
+// feet/miles/acres, and the nautical mile for work at sea.
 const FT_PER_M = 3.28084;
 const FT_PER_MI = 5280;
 const SQFT_PER_ACRE = 43560;
 const SQMI_PER_SQM = 3.861021585e-7;
+const M_PER_NM = 1852;
 
 export function formatDistance(m, units = 'metric') {
+  if (units === 'nautical') {
+    const nm = m / M_PER_NM;
+    return `${nm.toFixed(nm < 100 ? 2 : 1)} NM`;
+  }
   if (units === 'imperial') {
     const ft = m * FT_PER_M;
     if (ft < FT_PER_MI) return `${ft < 10 ? ft.toFixed(1) : Math.round(ft)} ft`;
@@ -172,7 +250,16 @@ export function formatDistance(m, units = 'metric') {
   return `${(m / 1000).toFixed(m < 10000 ? 2 : 1)} km`;
 }
 
+/** A height above the sea: whole metres or feet, never kilometres. At sea, metres. */
+export function formatHeight(m, units = 'metric') {
+  if (!Number.isFinite(m)) return '';
+  return units === 'imperial' ? `${Math.round(m * FT_PER_M)} ft` : `${Math.round(m)} m`;
+}
+
 export function formatArea(m2, units = 'metric') {
+  if (units === 'nautical' && m2 >= M_PER_NM * M_PER_NM * 0.01) {
+    return `${(m2 / (M_PER_NM * M_PER_NM)).toFixed(2)} NM²`;
+  }
   if (units === 'imperial') {
     const sqft = m2 * FT_PER_M * FT_PER_M;
     if (sqft < SQFT_PER_ACRE) return `${Math.round(sqft)} ft²`;
@@ -185,12 +272,10 @@ export function formatArea(m2, units = 'metric') {
   return `${(m2 / 1e6).toFixed(2)} km²`;
 }
 
-// Two straight rays meeting at a vertex form a pair of supplementary angles
-// (they sum to 180°). Report both the acute and the obtuse one so the reader
-// doesn't have to work out the complement themselves (Satellite item 7).
-export function formatAngle(deg) {
-  const other = 180 - deg;
-  const acute = Math.min(deg, other);
-  const obtuse = Math.max(deg, other);
-  return `${acute.toFixed(1)}° · ${obtuse.toFixed(1)}°`;
+/** A compass bearing as it is read aloud: three digits, `047°`, or `047.3°` with a decimal. */
+export function formatBearing(deg, decimals = 0) {
+  const step = 10 ** decimals;
+  const turn = (((Math.round(deg * step) / step) % 360) + 360) % 360;
+  const [whole, part] = turn.toFixed(decimals).split('.');
+  return `${whole.padStart(3, '0')}${part ? `.${part}` : ''}°`;
 }

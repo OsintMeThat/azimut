@@ -40,6 +40,10 @@ export const ACTIONS = [
   { id: 'candidate', label: 'Add candidate here', icon: 'plus' },
   { id: 'measure', label: 'Measure from here', icon: 'ruler' },
   { id: 'sky', label: 'Sun and moon from here', icon: 'sun' },
+  { id: 'horizon', label: 'Look from here', icon: 'eye' },
+  // Horizon's own map: put the eye there, or mark the point to look for
+  { id: 'stand', label: 'Stand here', icon: 'eye' },
+  { id: 'mark', label: 'Mark here', icon: 'pin' },
   { id: 'history', label: 'Imagery history here', icon: 'clock' },
   { id: 'centre', label: 'Centre the map here', icon: 'crosshair' },
 ];

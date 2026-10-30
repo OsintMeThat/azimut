@@ -1,6 +1,6 @@
 <script>
   /**
-   * What one run found, reviewed one candidate at a time. Pinning is the only
+   * What one run found, with individual review and Keep all. Pinning is the only
    * act that creates case evidence; dismissing deletes the candidate. A
    * run still working shows how far it got and can be stopped from here.
    */
@@ -14,6 +14,7 @@
   import { isActive, plural } from '../../lib/map/detections.js';
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
+  import ConfirmDialog from '../../components/ConfirmDialog.svelte';
   import OverlayDisplay from './OverlayDisplay.svelte';
   import {
     blinkable, candidatePair, candidateSize, comparePairFor, orderCandidates, pinDefaults,
@@ -50,6 +51,7 @@
   let order = $state('strength');
   let enlarged = $state(false);
   let pin = $state(null);
+  let keepAllOpen = $state(false);
   let adding = $state(false);
   let manualArea = $state('');
 
@@ -148,7 +150,7 @@
    * on the keys: the arrows walk it, K, D and P are the three verdicts.
    */
   function shortcut(event) {
-    if (!active || !run || run.status !== 'ready' || busy || pin || enlarged || event.ctrlKey || event.metaKey || event.altKey
+    if (!active || !run || run.status !== 'ready' || busy || pin || enlarged || keepAllOpen || event.ctrlKey || event.metaKey || event.altKey
       || event.target?.closest?.('input, textarea, select, [contenteditable="true"], [role="menu"]')) return;
     const key = event.key.toLowerCase();
     // Shift and an arrow turn the map, so the queue takes the bare arrows only
@@ -192,6 +194,14 @@
   async function review(value) {
     await applyResult(await api.patch(`${base}/results/${candidateId}`, { review: value }));
     if (value === 'noted') advance();
+  }
+
+  async function keepAll() {
+    const saved = await api.post(`${base}/results/keep`, {});
+    await onaccept(saved);
+    keepAllOpen = false;
+    if (filter === 'new') pickFilter('kept');
+    await refreshRuns(caseId);
   }
 
   /**
@@ -364,8 +374,23 @@
       <button class="btn btn-sm" disabled={busy || !candidate || candidate.review === 'kept'} onclick={() => act(() => review('dismissed'))}>Dismiss</button>
       <button class="btn btn-primary" disabled={busy || !candidate || candidate.review === 'kept'} onclick={openPin}>Pin</button>
     </div>
-    <p class="hint tally" title={tally}>{tally}</p>
+    <div class="review-summary">
+      <p class="hint tally" title={tally}>{tally}</p>
+      <button class="link" disabled={busy || !counts.new}
+        title="Keep all candidates still to review in this run"
+        onclick={() => { error = ''; keepAllOpen = true; }}>Keep all</button>
+    </div>
   </footer>
+{/if}
+
+{#if keepAllOpen}
+  <ConfirmDialog title={`Keep all ${plural(counts.new, 'remaining candidate')}?`}
+    message="You can dismiss them individually later." icon="bookmark" confirmLabel="Keep all" {busy}
+    onconfirm={() => act(keepAll)} oncancel={() => { if (!busy) keepAllOpen = false; }}>
+    {#snippet children()}
+      {#if error}<p class="warn" role="alert">{error}</p>{/if}
+    {/snippet}
+  </ConfirmDialog>
 {/if}
 
 {#if enlarged && candidate}
@@ -422,11 +447,13 @@
   .verdict { display: flex; align-items: center; gap: 5px; margin: 0; font-size: var(--fs-xs); font-weight: 600; }
   .verdict.kept { color: var(--ok); }
   .verdict.noted { color: var(--accent); }
-  .review-actions { flex: 0 0 auto; grid-template-rows: 52px 32px 17px; }
+  .review-actions { flex: 0 0 auto; grid-template-rows: 52px 32px 24px; }
   .keys { margin: 2px 0 0; color: var(--text-3); font-size: 10.5px; }
   .review-status { display: grid; align-content: center; overflow: auto; }
   .verdict-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-  .tally { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .review-summary { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .review-summary .link { flex: 0 0 auto; }
+  .tally { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .preview-open { display: block; width: 100%; padding: 0; border: 1px solid var(--border); cursor: zoom-in; }
   .preview-open:hover { border-color: var(--accent); }
   .preview { display: block; width: 100%; height: 210px; object-fit: contain; background: var(--bg-0); }

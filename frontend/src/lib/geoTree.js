@@ -27,6 +27,32 @@ export const KINDS = [
   { id: 'captures', label: 'Captures' },
 ];
 
+/** The saved layer's Show question, the same wherever a map lists the layer. */
+export function kindControl(saved) {
+  return {
+    label: 'Show',
+    value: saved.kind,
+    options: KINDS.map((entry) => ({ id: entry.id, label: entry.label })),
+    pick: (id) => (saved.kind = id),
+  };
+}
+
+/**
+ * The saved layer's row in a map's Layers menu: how many marks it draws, and
+ * once it is on, which of the three positions. Either index is enough to have
+ * something to show, so a case with placed footage and no pin is not locked.
+ *
+ * @param {object} saved the tool's saved state (`tools/satellite/state/saved.svelte.js`)
+ * @param {boolean} on whether the layer is on in that map
+ * @param {object[]} [shown] what the map draws, when it holds some back
+ */
+export function savedRow(saved, on, shown = saved.shown) {
+  if (!saved.rows.length && !saved.media.length) {
+    return { disabled: true, title: 'Nothing is saved or placed in this case yet' };
+  }
+  return { detail: shown.length ? String(shown.length) : '', controls: on ? [kindControl(saved)] : null };
+}
+
 /** The kinds a list reading the saved index alone can offer, where `all` is
  *  honestly all of it — media is not in that index (`PointPicker.svelte`). */
 export const SAVED_KINDS = [
@@ -48,7 +74,7 @@ export const UNLOCATED = 'Unlocated';
 const OTHER_CONTINENT = 'Other';
 
 /** The row kinds the Captures position holds: imagery of a point, however made. */
-export const CAPTURE_KINDS = new Set(['capture', 'screenshot', 'comparison']);
+export const CAPTURE_KINDS = new Set(['capture', 'screenshot', 'comparison', 'view']);
 
 function matchesKind(row, kind) {
   if (kind === 'places') return row.kind === 'place';

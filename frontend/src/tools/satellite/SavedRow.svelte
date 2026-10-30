@@ -10,7 +10,7 @@
   import Icon from '../../components/Icon.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { roadWords } from '../../lib/mediaViewer.js';
-  import { keptLabel, pairLabel } from '../../lib/savedMarkers.js';
+  import { keptLabel, lookLabel, pairLabel } from '../../lib/savedMarkers.js';
 
   let {
     row,
@@ -32,11 +32,13 @@
     onhover = () => {},
   } = $props();
 
-  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare' };
+  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare', view: 'horizon' };
 
   const isPlace = $derived(row.kind === 'place');
   // a saved comparison: it reopens in Compare, where its title and notes live
   const isComparison = $derived(row.kind === 'comparison');
+  // a saved Horizon view: it reopens in Horizon, standing where it stood
+  const isView = $derived(row.kind === 'view');
   // a located file: pressing it plays it beside the map, and it is edited in Media
   const isMedia = $derived(row.kind === 'media');
   const glyphName = $derived(
@@ -55,6 +57,8 @@
       ? roadWords(row)
       : isComparison
         ? [pairLabel(row), keptLabel(row)].filter(Boolean).join(' · ')
+        : isView
+          ? [lookLabel(row), keptLabel(row)].filter(Boolean).join(' · ')
         : [row.zoom != null ? `z${Math.round(row.zoom)}` : null, row.provider ?? row.site, row.imagery_date]
             .filter(Boolean)
             .join(' · ')
@@ -142,10 +146,14 @@
         title={blocked ?? `Open the source page (${row.site ?? 'external map'})`}
       ><Icon name="external" size={13} /></a>
     {/if}
-    <button class="act" title={isComparison ? 'Open in Compare' : 'Edit title & note'} onclick={() => onedit(row)}>
-      <Icon name={isComparison ? 'compare' : 'note'} size={13} />
+    <button
+      class="act"
+      title={isComparison ? 'Open in Compare' : isView ? 'Open in Horizon' : 'Edit title & note'}
+      onclick={() => onedit(row)}
+    >
+      <Icon name={isComparison ? 'compare' : isView ? 'horizon' : 'note'} size={13} />
     </button>
-    {#if !isPlace}
+    {#if !isPlace && !isView}
       <button
         class="act"
         disabled={fullscreen || !row.path}

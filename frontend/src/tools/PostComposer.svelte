@@ -1227,10 +1227,10 @@
       <button class="btn btn-sm" onclick={saveDraft} disabled={saving || !postName.trim()} title="Keep this thread to reopen and edit here">
         <Icon name="save" size={14} /> {draftName ? 'Save draft' : 'Save as draft'}
       </button>
-      <button class="btn btn-ok btn-sm" onclick={openSaveReport} disabled={!hasContent || reportSaving} title="Write the finding up as a Notebook note">
+      <button class="btn btn-ok btn-sm" data-guide="post.report" onclick={openSaveReport} disabled={!hasContent || reportSaving} title="Write the finding up as a Notebook note">
         <Icon name="file" size={14} /> Save report
       </button>
-      <button class="btn btn-info btn-sm" onclick={publish} disabled={!tweet1.trim() || publishing} title={`Copy posts and open ${targetInfo.label}`}>
+      <button class="btn btn-info btn-sm" data-guide="post.publish" onclick={publish} disabled={!tweet1.trim() || publishing} title={`Copy posts and open ${targetInfo.label}`}>
         <Icon name="post" size={14} /> Publish on {targetInfo.label}
       </button>
     </div>
@@ -1239,7 +1239,7 @@
   <div class="tool-body">
     <div class="layout">
       <!-- left column: ingredients -->
-      <div class="col">
+      <div class="col" data-guide="post.ingredients">
         <div class="field">
           <span class="label">Publish target</span>
           <div class="target-tabs" aria-label="Publish target">
@@ -1431,7 +1431,7 @@
       <div class="col">
 
         <!-- Post 1: geolocation -->
-        <div class="tweet-block card">
+        <div class="tweet-block card" data-guide="post.first">
           <div class="tweet-head">
             <span class="tweet-num">1</span>
             <span class="label" style="margin:0">Geolocation post</span>
@@ -1629,7 +1629,7 @@
           </div>
         {/each}
 
-        <div class="thread-actions">
+        <div class="thread-actions" data-guide="post.more">
           {#if !mediaEnabled}
             <button class="btn btn-ghost btn-sm" onclick={() => (mediaEnabled = true)}>
               <Icon name="plus" size={13} /> Restore post 2

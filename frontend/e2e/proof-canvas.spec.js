@@ -286,6 +286,89 @@ test('draws a real Konva annotation and round-trips undo and redo', async ({ pag
   fixture.expectNoUnexpectedRequests();
 });
 
+test('an undo keeps the colour in hand and the zoom the analyst drew at', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+
+  const canvas = page.locator('.konva canvas').first();
+  const box = await canvas.boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const view = () => page.evaluate(() => {
+    const stage = window.Konva.stages[0];
+    return { k: stage.scaleX(), x: stage.x(), y: stage.y() };
+  });
+
+  await page.getByTitle('Box (r)').click();
+  await page.getByTitle('Annotation colour').click();
+  await page.getByLabel('color #40c4ff').click();
+  const fitted = await view();
+  await page.mouse.move(cx, cy);
+  await page.mouse.wheel(0, -300);
+  await expect.poll(async () => (await view()).k).toBeGreaterThan(fitted.k * 1.05);
+  const zoomed = await view();
+
+  await page.mouse.move(cx - 30, cy - 20);
+  await page.mouse.down();
+  await page.mouse.move(cx + 30, cy + 20, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.locator('.shape-row')).toHaveCount(1);
+  await page.getByTitle('Undo (Ctrl+Z)').click();
+  await expect(page.locator('.shape-row')).toHaveCount(0);
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+  expect(await view()).toEqual(zoomed);
+
+  // The box drawn again wears the colour picked before the undo, not the palette's first.
+  await page.getByTitle('Box (r)').click();
+  await page.mouse.move(cx - 30, cy - 20);
+  await page.mouse.down();
+  await page.mouse.move(cx + 30, cy + 20, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.locator('.shape-row')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(1);
+  expect(fixture.proofSaves[0].spec.shapes[0].color).toBe('#40c4ff');
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('an undo mid-curve takes the last corner off and leaves the mark before it', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+  await drawBox(page);
+  await expect(page.locator('.shape-row')).toHaveCount(1);
+
+  const canvas = page.locator('.konva canvas').first();
+  const box = await canvas.boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  // Konva calls any two clicks inside 400 ms a double-click, the box's release
+  // included, so corners come at a human's pace.
+  const pause = () => page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 450)));
+  const vertex = async (x, y) => {
+    await page.mouse.click(x, y);
+    await pause();
+  };
+  await pause();
+  // below the box, clear of its handles
+  await page.getByTitle(/^Curve/).click();
+  await vertex(cx - 40, cy + 75);
+  await vertex(cx, cy + 60);
+  await vertex(cx + 40, cy + 75);
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.shape-row')).toHaveCount(2);
+
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(1);
+  const [boxMark, curveMark] = fixture.proofSaves[0].spec.shapes;
+  expect(boxMark.kind).toBe('rect');
+  expect(curveMark.kind).toBe('curve');
+  expect(curveMark.points).toHaveLength(4);
+  fixture.expectNoUnexpectedRequests();
+});
+
 test('a picked colour becomes the default for the next drawn shape', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await openProofWithPanel(page);
@@ -446,10 +529,16 @@ test('a dropped image is pasted, and its frame survives the save', async ({ page
   await pasteScreenshot(page, { via: 'drop' });
   await expect(page.locator('.paste-row')).toHaveCount(1);
 
-  // picking a border colour is what turns a frame on, on a paste or on a panel
-  await page.locator('.paste-row input[aria-label="border color"]').fill('#40c4ff');
-  await expect(page.locator('.paste-row input[aria-label="border thickness"]')).toBeVisible();
-  await page.locator('.panel-row:not(.paste-row) input[aria-label="border color"]').fill('#69f0ae');
+  // picking a border colour is what turns a frame on, on a paste or on a panel,
+  // from the rail once the picture is picked
+  // a dropped image lands picked; pressing its row again would let it go
+  await expect(page.locator('.paste-row')).toHaveClass(/selected/);
+  await page.getByTitle('Border', { exact: true }).click();
+  await page.getByLabel('border #40c4ff').click();
+  await expect(page.getByLabel('border thickness')).toBeVisible();
+  await page.locator('.panel-row:not(.paste-row) .panel-thumb').click();
+  await page.getByTitle('Border', { exact: true }).click();
+  await page.getByLabel('border #69f0ae').click();
 
   await page.getByRole('button', { name: 'Save proof', exact: true }).click();
   await expect.poll(() => fixture.proofSaves.length).toBe(1);

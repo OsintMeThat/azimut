@@ -5,8 +5,19 @@ const get = vi.fn();
 vi.mock('./api.js', () => ({ api: { post: (...a) => post(...a), get: (...a) => get(...a) } }));
 
 const { caseState, uiState } = await import('./state.svelte.js');
-const { gotoCapture, gotoPoint, openComparison, openEntity, openGuide, openInReverseSearch, openInTimeline, openMapAt, opensInFileManager } =
-  await import('./navigate.js');
+const {
+  gotoCapture,
+  gotoPoint,
+  lookFrom,
+  openComparison,
+  openEntity,
+  openGuide,
+  openInHorizon,
+  openInReverseSearch,
+  openInTimeline,
+  openMapAt,
+  opensInFileManager,
+} = await import('./navigate.js');
 
 beforeEach(() => {
   uiState.tool = 'media';
@@ -44,17 +55,16 @@ describe('openInTimeline', () => {
 });
 
 describe('openGuide', () => {
-  it('lands on the section written about the tab the mark was pressed from', () => {
+  it('opens the guide over the tool on whatever asked, and leaves the tool alone', () => {
+    uiState.tool = 'satellite';
     openGuide('satellite');
-    expect(uiState.tool).toBe('guide');
-    expect(uiState.guideSection).toBe('map');
+    expect(uiState.guide).toEqual({ at: 'satellite' });
+    expect(uiState.tool).toBe('satellite');
   });
 
-  it('opens at the top for a tool no section covers', () => {
-    // Settings is app plumbing rather than a stage, so nothing is written about it;
-    // somebody pressing there has a general question
-    openGuide('settings');
-    expect(uiState.guideSection).toBe('start');
+  it('opens on a page by its id, as Home asks for the start', () => {
+    openGuide('start');
+    expect(uiState.guide).toEqual({ at: 'start' });
   });
 });
 
@@ -91,6 +101,11 @@ describe('openEntity', () => {
     expect(get).toHaveBeenCalledWith('/api/cases/c1/entities/old/chain');
     expect(uiState.gotoCoords.lat).toBe(3);
     expect(uiState.gotoCoords.lon).toBe(4);
+  });
+  it('opens a search the case keeps in Horizon, which shows it in Find', () => {
+    openEntity({ id: 'f1', type: 'horizon-find', label: 'Ridge', attrs: { spec: '.horizon/finds/Ridge.json' } });
+    expect(uiState.tool).toBe('horizon');
+    expect(uiState.openHorizonFind).toBe('Ridge');
   });
   it('opens bookmarks and external captures in a new browser tab', () => {
     openEntity({ type: 'bookmark', attrs: { url: 'https://example.test/bookmark' } });
@@ -251,6 +266,48 @@ describe('openMapAt', () => {
     openMapAt('detect', { lat: Number('north'), lon: 43.65 });
     expect(uiState.tool).toBe('media');
     expect(uiState.lookAt).toBeNull();
+  });
+});
+
+describe('lookFrom', () => {
+  it('stands the Horizon eye on the point, facing the way the map faced', () => {
+    lookFrom({ lat: 35.62, lon: 71.33, heading: 342 });
+    expect(uiState.tool).toBe('horizon');
+    expect(uiState.horizonAt).toEqual({ lat: 35.62, lon: 71.33, heading: 342 });
+    lookFrom({ lat: 1, lon: 2 });
+    expect(uiState.horizonAt).toEqual({ lat: 1, lon: 2 });
+  });
+
+  it('carries a profile\'s question: the eye\'s height and the point to look for', () => {
+    lookFrom({ lat: 1, lon: 2, heading: 45, eyeHeight: 10, mark: { lat: 1.1, lon: 2.1, height: 30 } });
+    expect(uiState.horizonAt).toEqual({ lat: 1, lon: 2, heading: 45, eyeHeight: 10, mark: { lat: 1.1, lon: 2.1, height: 30 } });
+  });
+
+  it('goes nowhere for a point it could not place', () => {
+    uiState.horizonAt = null;
+    lookFrom({ lat: Number('north'), lon: 2 });
+    expect(uiState.tool).toBe('media');
+    expect(uiState.horizonAt).toBeNull();
+  });
+});
+
+describe('openInHorizon', () => {
+  it('hands a photo to Horizon to lay over its view', () => {
+    expect(openInHorizon({ path: 'media/summit.jpg', kind: 'image', title: 'Summit', time: 3 })).toBe(true);
+    expect(uiState.tool).toBe('horizon');
+    expect(uiState.horizonPhoto).toEqual({ path: 'media/summit.jpg', kind: 'image', title: 'Summit' });
+  });
+
+  it('opens a video at the moment the analyst was looking at', () => {
+    openInHorizon({ path: 'media/clip.mp4', kind: 'video', time: 14.2 });
+    expect(uiState.horizonPhoto).toEqual({ path: 'media/clip.mp4', kind: 'video', time: 14.2 });
+  });
+
+  it('goes nowhere with what is not a photo or a video', () => {
+    uiState.horizonPhoto = null;
+    expect(openInHorizon({ path: 'media/plan.pdf', kind: 'file' })).toBe(false);
+    expect(uiState.tool).toBe('media');
+    expect(uiState.horizonPhoto).toBeNull();
   });
 });
 

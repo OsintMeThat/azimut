@@ -7,7 +7,6 @@
 import { caseState, toast, uiState } from './state.svelte.js';
 import { api } from './api.js';
 import { mediaKindOf } from './entityIcon.js';
-import { GUIDE, guideFor } from './guide.js';
 import { revealMediaFolder } from './reveal.js';
 import { normalizeReverseTarget } from './reverseSearch.js';
 
@@ -43,6 +42,13 @@ export function openComparison(row) {
   uiState.tool = 'compare';
 }
 
+/** A saved Horizon view, from a Saved-panel row, reopened in Horizon. */
+export function openHorizonView(row) {
+  if (!row?.view) return;
+  uiState.openHorizonView = row.view;
+  uiState.tool = 'horizon';
+}
+
 /** Tool a given entity type opens in (also gates the "Open in tool" button). */
 export const ENTITY_TOOL = {
   media: 'media',
@@ -52,6 +58,9 @@ export const ENTITY_TOOL = {
   'inspect-session': 'inspect',
   collage: 'collage',
   'compare-session': 'compare',
+  'horizon-view': 'horizon',
+  'horizon-find': 'horizon',
+  'map-plate': 'plate',
   'analysis-zones': 'detect',
   'analysis-area': 'detect',
   'analysis-follow-up': 'detect',
@@ -193,6 +202,24 @@ export function openEntity(entity, resolved = false) {
     uiState.tool = 'compare';
     return;
   }
+  if (entity.type === 'horizon-view') {
+    const name = specName(entity.attrs?.spec);
+    if (name) uiState.openHorizonView = name;
+    uiState.tool = 'horizon';
+    return;
+  }
+  if (entity.type === 'horizon-find') {
+    const name = specName(entity.attrs?.spec);
+    if (name) uiState.openHorizonFind = name;
+    uiState.tool = 'horizon';
+    return;
+  }
+  if (entity.type === 'map-plate') {
+    const name = specName(entity.attrs?.spec);
+    if (name) uiState.openPlate = name;
+    uiState.tool = 'plate';
+    return;
+  }
   if (['analysis-area', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
     uiState.openAnalyzer = specName(entity.attrs?.spec);
     uiState.tool = 'detect';
@@ -292,16 +319,59 @@ export function openMapAt(tool, { lat, lon, zoom }) {
 }
 
 /**
- * Open the Guide on whatever covers a tool.
- *
- * The press means "what is this tab", so it lands on the section written about that
- * tab. A tool no section covers — Settings, and the two home tabs themselves — opens
- * the guide at the top, which is where somebody with a general question belongs
- * anyway.
+ * Stand an eye on a point and open Horizon there (`uiState.horizonAt`): facing
+ * `heading` when the map that asked was turned, the eye `eyeHeight` metres up
+ * when a question set one, and `mark` (`{ lat, lon, height }`) marked when the
+ * question was whether that point is in sight.
  */
-export function openGuide(tool) {
-  uiState.guideSection = guideFor(tool)?.id ?? GUIDE[0].id;
-  uiState.tool = 'guide';
+export function lookFrom({ lat, lon, heading, eyeHeight, mark }) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  uiState.horizonAt = {
+    lat,
+    lon,
+    ...(Number.isFinite(heading) ? { heading } : {}),
+    ...(Number.isFinite(eyeHeight) ? { eyeHeight } : {}),
+    ...(mark && Number.isFinite(mark.lat) && Number.isFinite(mark.lon) ? { mark } : {}),
+  };
+  uiState.tool = 'horizon';
+}
+
+/**
+ * Lay a case's photo or video over the Horizon view and go there
+ * (`uiState.horizonPhoto`): a video opens paused at `time`, the frame the
+ * analyst was looking at. Returns whether the tab was changed.
+ */
+export function openInHorizon({ path, kind, title, time }) {
+  if (!path || (kind !== 'image' && kind !== 'video')) return false;
+  uiState.horizonPhoto = {
+    path,
+    kind,
+    ...(title ? { title } : {}),
+    ...(kind === 'video' && Number.isFinite(time) ? { time } : {}),
+  };
+  uiState.tool = 'horizon';
+  return true;
+}
+
+/**
+ * Open the guide over the tools, on whatever asked.
+ *
+ * From the `?` that is the tool being stood in, since the press means "what is this
+ * tab". A tool with no page of its own opens it at the start, which is where somebody
+ * with a general question belongs anyway. The tool underneath stays where it is.
+ */
+export function openGuide(at) {
+  uiState.guide = { at };
+}
+
+/** Take the tour again from its first page (components/Onboarding.svelte). */
+export function openTour() {
+  uiState.onboarding = { kind: 'tour', step: 0 };
+}
+
+/** Read again what this version brings. */
+export function openWhatsNew() {
+  uiState.onboarding = { kind: 'news' };
 }
 
 /**
@@ -345,5 +415,17 @@ export function gotoCapture(entity) {
  */
 export function openCopernicusSettings() {
   uiState.settingsTab = 'imagery:sentinelhub';
+  uiState.tool = 'settings';
+}
+
+/** Open Settings on the icon library, where the analyst's own icons are imported. */
+export function openIconSettings() {
+  uiState.settingsTab = 'icons';
+  uiState.tool = 'settings';
+}
+
+/** Open Settings on System, where an issue is reported with what the app knows. */
+export function openIssueReport() {
+  uiState.settingsTab = 'system';
   uiState.tool = 'settings';
 }

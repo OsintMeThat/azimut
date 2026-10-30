@@ -48,6 +48,11 @@ const at = (items, props = {}) =>
   }).body;
 
 describe('SavedPopup', () => {
+  it('offers case-place deletion from its bubble when the host supports it', () => {
+    expect(at([place], { ondelete: noop })).toContain('Delete case place');
+    expect(at([capture], { ondelete: noop })).not.toContain('Delete case place');
+    expect(at([place])).not.toContain('Delete case place');
+  });
   it('says what one saved item is, with its preview and both dates', () => {
     const body = at([capture]);
 
@@ -150,7 +155,12 @@ describe('SavedOverlay popup wiring', () => {
     expect(overlay).toContain("import { mount, unmount } from 'svelte'");
     expect(overlay).toContain('mount(SavedPopup');
     expect(overlay).toContain('unmount(mounted)');
-    expect(overlay).toContain('onedit: close(onedit)');
+    expect(overlay).toContain('onedit: onedit && close(onedit)');
+  });
+
+  it('offers Edit only where the map can edit, as Horizon\'s small map cannot', () => {
+    expect(at([capture])).toContain('aria-label="Edit"');
+    expect(at([capture], { onedit: undefined })).not.toContain('aria-label="Edit"');
   });
 
   it('opens a card for every mark of saved work, one item or a stack', () => {

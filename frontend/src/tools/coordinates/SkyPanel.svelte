@@ -110,7 +110,7 @@
   }
 </script>
 
-<div class="sky" class:loading>
+<div class="sky" class:loading data-guide="coords.sky">
   <div class="sky-head">
     <h3>Sun &amp; moon</h3>
     <div class="day-field">
@@ -138,7 +138,7 @@
       <span class="zone" title={sky.zone.name}>
         {sky.zone.name} · {sky.zone.abbreviation} {sky.zone.offset}
       </span>
-      <button class="btn btn-sm" onclick={showOnMap} title="Draw this day's path on the map">
+      <button class="btn btn-sm" data-guide="coords.show-map" onclick={showOnMap} title="Draw this day's path on the map">
         <Icon name="crosshair" size={14} /> Show on map
       </button>
     {/if}

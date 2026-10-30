@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { closeTopOverlay, isTopOverlay, joinOverlays } from './overlayStack.js';
+import { anyOverlayOpen, closeTopOverlay, isTopOverlay, joinOverlays } from './overlayStack.js';
 
 describe('the overlay on top', () => {
   it('is the last one opened, and the only one a key press reaches', () => {
@@ -34,5 +34,15 @@ describe('the overlay on top', () => {
     const leave = joinOverlays({});
     expect(closeTopOverlay()).toBe(true);
     leave();
+  });
+});
+
+describe('whether any overlay is open', () => {
+  it('follows the stack, whatever the page draws', () => {
+    expect(anyOverlayOpen()).toBe(false);
+    const leave = joinOverlays({});
+    expect(anyOverlayOpen()).toBe(true);
+    leave();
+    expect(anyOverlayOpen()).toBe(false);
   });
 });

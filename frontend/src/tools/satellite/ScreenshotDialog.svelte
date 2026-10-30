@@ -12,6 +12,8 @@
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
   import { shortcut } from '../../lib/keys.js';
+  import { middleClickPaste } from '../../lib/clipboardPaste.js';
+  import { carriesOutsideFiles } from '../../lib/drag.js';
 
   let {
     /** `{ lat, lon, zoom }` the map is on, which is what a pasted image is filed at. */
@@ -49,6 +51,7 @@
   }
 
   function onPaste(event) {
+    if (middleClickPaste()) return;
     const item = [...(event.clipboardData?.items ?? [])].find((entry) =>
       entry.type.startsWith('image/')
     );
@@ -112,10 +115,11 @@
       role="button"
       tabindex="0"
       ondrop={(event) => {
+        if (!carriesOutsideFiles(event)) return;
         event.preventDefault();
         take(event.dataTransfer?.files?.[0]);
       }}
-      ondragover={(event) => event.preventDefault()}
+      ondragover={(event) => carriesOutsideFiles(event) && event.preventDefault()}
     >
       {#if preview}
         <img src={preview} alt="screenshot to file" />

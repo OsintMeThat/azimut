@@ -66,6 +66,15 @@ export function askable({ source, day } = {}, now = new Date()) {
   return night >= sensor.first && night <= lastNight(now);
 }
 
+/**
+ * The choice as the tiles read it: a night that follows the picture on screen
+ * becomes the night of its day, or the last night while it carries no date.
+ */
+export function onNight({ source, day, follow = false } = {}, pictureDay = '', now = new Date()) {
+  if (!follow) return { source, day };
+  return { source, day: asDay(pictureDay) || lastNight(now) };
+}
+
 /** The question the tiles are built from. The composite has one date only. */
 export function tileParams({ source, day } = {}) {
   if (source === COMPOSITE.id) return { source };

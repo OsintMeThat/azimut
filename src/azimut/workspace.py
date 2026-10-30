@@ -1009,6 +1009,8 @@ class Case(CaseStore):
             "inspect-session": ("spec", layout.session_rel, "Inspect"),
             "collage": ("spec", layout.collage_rel, "Collage"),
             "compare-session": ("spec", layout.compare_session_rel, "Comparison"),
+            "horizon-view": ("spec", layout.horizon_view_rel, "View"),
+            "map-plate": ("spec", layout.map_plate_rel, "Map plate"),
             "post": ("draft", layout.draft_rel, "Post"),
             "sheet": ("path", layout.sheet_rel, "Sheet"),
         }
@@ -1064,6 +1066,13 @@ class Case(CaseStore):
             new_meta = layout.sheet_meta_rel(canonical)
             moves.append((self.resolve_inside(old_meta), self.resolve_inside(new_meta)))
             replacements.append((old_meta, new_meta))
+        if entity["type"] in ("horizon-view", "map-plate"):
+            # The preview the lists show is named after the work, so it follows it.
+            thumb_rel = layout.horizon_thumb_rel if entity["type"] == "horizon-view" else layout.map_plate_thumb_rel
+            old_thumb = thumb_rel(Path(current).stem)
+            new_thumb = thumb_rel(canonical)
+            moves.append((self.resolve_inside(old_thumb), self.resolve_inside(new_thumb)))
+            replacements.append((old_thumb, new_thumb))
 
         moved: list[tuple[Path, Path]] = []
         applied: list[tuple[str, str]] = []
@@ -1508,7 +1517,8 @@ def open_workspace() -> None:
     Imports are local because the modules below sit above this one; calling them
     at import time would close the circle.
     """
-    from .engine import bundles, scrapers, tilecache, workqueue
+    from .engine import bundles, scrapers, terrain, tilecache, turncache, workqueue
+    from .engine.buildings import service as buildings_service
 
     config.ensure_workspace()
     scrapers.activate()
@@ -1522,6 +1532,9 @@ def open_workspace() -> None:
             logger.warning("workspace housekeeping step failed", exc_info=True)
     # Off the startup path: a cache months of Detect sweeps filled is a long walk.
     threading.Thread(target=tilecache.sweep, name="tile-cache-sweep", daemon=True).start()
+    threading.Thread(target=terrain.sweep, name="terrain-cache-sweep", daemon=True).start()
+    threading.Thread(target=turncache.sweep, name="turn-cache-sweep", daemon=True).start()
+    threading.Thread(target=buildings_service.sweep, name="buildings-cache-sweep", daemon=True).start()
 
 
 def _one_work_per_file(case: Case) -> None:

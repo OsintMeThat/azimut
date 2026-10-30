@@ -110,6 +110,11 @@ _PROBE = 100
 
 Quad = list[list[float]]
 
+# A stitched strip's scale is believed only when its pieces agree on it: each
+# stitched piece's middle lies where its heading puts it, within this share of the
+# span they cover between them. Pieces dragged by hand after the stitch break it.
+STRIP_AGREE = 0.02
+
 
 def _cv2():
     """Import OpenCV lazily so the rest of Inspect works without it installed."""
@@ -624,6 +629,49 @@ def _solve_cameras(cv2, feats: list[Any], pairwise: list[Any]) -> list[Any]:
     return cameras
 
 
+# A pan turned less than this between its frames, degrees, says too little of its lens to trust.
+LENS_TURN_MIN = 4.0
+
+
+def lens_of_pan(images: list[Image.Image]) -> dict[str, Any]:
+    """The lens a pan was filmed with, read off its frames as the stitch solves them.
+
+    A camera turning on the spot gives frames whose overlaps fit only one focal
+    length: the rotation model (`_solve_cameras`) finds each frame's, so a zoom
+    that changed during the pan shows. Returns ``{"fovs": {index: degrees across},
+    "turn": degrees}``, `turn` how far the camera turned between the frames most
+    apart. Raises RuntimeError, said for the analyst, when the frames do not
+    overlap, do not solve, or turned too little to tell a lens.
+    """
+    import numpy as np
+
+    if len(images) < 2:
+        raise RuntimeError("Two frames of one pan at the least")
+    cv2 = _cv2()
+    arrays = [_work_array(img) for img in images]
+    feats = _detail_features(cv2, arrays)
+    pairwise, keep = _match_component(cv2, feats)
+    if len(keep) < 2:
+        raise RuntimeError("These frames do not overlap: the camera must pan, not cut")
+    if len(keep) < len(images):
+        feats = [feats[i] for i in keep]
+        pairwise, _ = _match_component(cv2, feats)
+    cameras = _solve_cameras(cv2, feats, pairwise)
+    turn = 0.0
+    for i in range(len(cameras)):
+        for j in range(i + 1, len(cameras)):
+            relative = np.asarray(cameras[j].R, dtype=np.float64) @ np.asarray(cameras[i].R, dtype=np.float64).T
+            cosine = float(np.clip((np.trace(relative) - 1) / 2, -1.0, 1.0))
+            turn = max(turn, math.degrees(math.acos(cosine)))
+    if turn < LENS_TURN_MIN:
+        raise RuntimeError("The camera hardly turned between these frames: pick a moment it pans")
+    fovs = {
+        idx: 2 * math.degrees(math.atan(arrays[idx].shape[1] / 2 / float(cameras[pos].focal)))
+        for pos, idx in enumerate(keep)
+    }
+    return {"fovs": fovs, "turn": turn}
+
+
 def _median(values: list[float]) -> float:
     ordered = sorted(values)
     mid = len(ordered) // 2
@@ -821,3 +869,64 @@ def solve_rotation_layout(
         "dropped": sorted(dropped),
         "canvas": {"width": canvas[0], "height": canvas[1]},
     }
+
+
+def _remap_of(node: dict[str, Any]) -> dict[str, Any] | None:
+    """The rotation model's warp a collage piece carries in its recipe, if any."""
+    save = node.get("save")
+    ops = save.get("ops") if isinstance(save, dict) else None
+    for op in [*(ops or []), *(node.get("frameOps") or [])]:
+        params = op.get("params") if isinstance(op, dict) and op.get("op") == "remap" else None
+        if isinstance(params, dict) and params.get("warp") in WARPS and len(params.get("r") or []) == 9:
+            return params
+    return None
+
+
+def strip_scale(nodes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Canvas pixels per degree of turn along a collage stitched on a cylinder or a sphere.
+
+    Each piece the rotation model placed keeps its camera's rotation in its remap
+    op: the third column of ``r`` is where that camera looked, in the panorama's
+    frame, and the warp lays every degree of turn as the same number of pixels all
+    along the strip. So the pieces' middles against their headings fall on one
+    line, whose slope is the strip's scale. Pieces laid by hand are counted, not
+    read. None when fewer than two pieces were stitched, when they turn less than
+    a degree between them, or when they disagree (moved by hand after the stitch).
+
+    Returns ``{"per_degree", "stitched", "by_hand", "warp"}``.
+    """
+    import numpy as np
+
+    rows: list[tuple[float, float]] = []
+    warps: set[str] = set()
+    by_hand = 0
+    for node in nodes:
+        quad = node.get("quad") if isinstance(node, dict) else None
+        if not isinstance(quad, list) or len(quad) != 4:
+            continue
+        params = _remap_of(node)
+        if params is None:
+            by_hand += 1
+            continue
+        r = [float(v) for v in params["r"]]
+        heading = math.degrees(math.atan2(r[2], r[8]))
+        middle = sum(float(x) for x, _ in quad) / 4
+        if not (math.isfinite(heading) and math.isfinite(middle)):
+            continue
+        rows.append((heading, middle))
+        warps.add(str(params["warp"]))
+    if len(rows) < 2 or len(warps) != 1:
+        return None
+    # along the strip, so a turn across north is unwrapped in the order it was laid
+    rows.sort(key=lambda row: row[1])
+    headings = np.unwrap(np.radians([h for h, _ in rows]))
+    middles = np.array([m for _, m in rows])
+    turn = math.degrees(float(headings.max() - headings.min()))
+    span = float(middles.max() - middles.min())
+    if turn < 1.0 or span <= 0:
+        return None
+    slope, offset = np.polyfit(np.degrees(headings), middles, 1)
+    off = np.abs(middles - (slope * np.degrees(headings) + offset))
+    if float(off.max()) > STRIP_AGREE * span:
+        return None
+    return {"per_degree": abs(float(slope)), "stitched": len(rows), "by_hand": by_hand, "warp": warps.pop()}

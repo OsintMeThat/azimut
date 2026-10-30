@@ -659,6 +659,23 @@ def result_of(saved: dict[str, Any], result_id: str) -> dict[str, Any]:
     return found
 
 
+@router.post("/cases/{case_id}/analysis/runs/{ident}/results/keep")
+def keep_all_results(case_id: str, ident: str) -> dict[str, Any]:
+    """Keep this run's unreviewed candidates in one write."""
+    case = get_case(case_id)
+    with engine.LOCK, case._lock:
+        saved = read(case, "runs", ident)
+        if saved.get("status") != "ready":
+            raise HTTPException(409, "results are available after the complete analysis")
+        pending = [row for row in saved["results"] if row.get("review") == "new"]
+        if pending:
+            stamp = engine.now()
+            for result in pending:
+                result.update(review="noted", reviewed_at=stamp, entity_id=None)
+            engine.persist_run(case, saved)
+        return saved
+
+
 @router.patch("/cases/{case_id}/analysis/runs/{ident}/results/{result_id}")
 def review_result(case_id: str, ident: str, result_id: str, body: Review) -> dict[str, Any]:
     case = get_case(case_id)

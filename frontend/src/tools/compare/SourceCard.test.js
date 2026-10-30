@@ -71,14 +71,14 @@ function props(over = {}) {
 const layerIcons = (body) => body.split(paths.layers).length - 1;
 
 describe('SourceCard', () => {
-  it('dates Sentinel-2 on its own chip, leaving one layers icon on the card', () => {
+  it('dates Sentinel-2 on its own chip, with no layers icon on the card', () => {
     const { body } = render(SourceCard, {
       props: props({ s2: sentinel({ date: '2025-04-11' }) }),
     });
     expect(body).toContain('2025-04-11');
-    // The card's own Layers button is the only thing wearing that icon: a second
-    // one on the date picker said nothing about which of the two held the date.
-    expect(layerIcons(body)).toBe(1);
+    // The layers are the pair's, in one menu above both maps, and the date picker
+    // wears no layers icon either: one there said nothing about which held the date.
+    expect(layerIcons(body)).toBe(0);
   });
 
   it('dates Wayback and Sentinel-2 the same way', () => {
@@ -90,7 +90,7 @@ describe('SourceCard', () => {
       }),
     });
     expect(body).toContain('2022-03-16');
-    expect(layerIcons(body)).toBe(1);
+    expect(layerIcons(body)).toBe(0);
   });
 
   it('dates a Wayback picture apart from the release that published it', () => {

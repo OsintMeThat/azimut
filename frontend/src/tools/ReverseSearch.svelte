@@ -23,6 +23,7 @@
   import { MAX_HANDOFF_BYTES, UPLOAD_PAGES } from '../lib/reverseSearch.js';
   import Modal from '../components/Modal.svelte';
   import Icon from '../components/Icon.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import SourcePicker from '../components/SourcePicker.svelte';
   import { shortcut } from '../lib/keys.js';
 
@@ -312,16 +313,14 @@
 <div class="tool">
   {#if selected}
     <div class="tool-header">
+      <BackButton label="Files" title="Back to the file list" onclick={discard} />
       <span class="file">
         <Icon name={selected.kind === 'video' ? 'video' : 'image'} size={14} />
         <span class="name" title={selected.path}>{nameOf(selected)}</span>
       </span>
       <div class="spacer"></div>
-      <button class="btn btn-sm" onclick={() => (pickerOpen = true)} title="Pick another image or video">
+      <button class="btn btn-sm" data-guide="reverse.change" onclick={() => (pickerOpen = true)} title="Pick another image or video">
         <Icon name="folderOpen" size={14} /> Change file
-      </button>
-      <button class="btn btn-ghost btn-sm" onclick={discard} title="Back to the file list" aria-label="Close file">
-        <Icon name="x" size={15} />
       </button>
     </div>
   {/if}
@@ -360,7 +359,7 @@
     <div class="tool-body">
       <div class="work">
         <div class="preview-col">
-          <div class="preview card">
+          <div class="preview card" data-guide="reverse.picture">
             {#if selected.kind === 'video'}
               <!-- svelte-ignore a11y_media_has_caption -->
               <video
@@ -383,7 +382,7 @@
         </div>
 
         <div class="controls-col">
-          <div class="adjust">
+          <div class="adjust" data-guide="reverse.adjust">
             <button
               class="adjust-toggle"
               class:on={adjustOpen}
@@ -408,7 +407,7 @@
             {/if}
           </div>
 
-          <div class="engines">
+          <div class="engines" data-guide="reverse.engines">
             {#if filled.length}
               <div class="eg-group">
                 <span class="eg-head">Opens with the {frameLabel} in it</span>

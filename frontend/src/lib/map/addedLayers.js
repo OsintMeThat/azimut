@@ -68,6 +68,9 @@ export function legend(layer) {
     count: inPeriod ? (inPeriod[category.name] ?? 0) : (category.count ?? 0),
     kinds: category.kinds ?? [],
     colour: categoryColour(category, index),
+    // a personal group drawn in one pictogram, shown as that pictogram
+    ...(category.symbol ? { symbol: category.symbol } : {}),
+    ...(category.icon ? { icon: category.icon, iconMode: category.icon_mode ?? 'image' } : {}),
     on: !hidden.has(category.name),
   }));
 }
@@ -283,6 +286,12 @@ export function searchFeatures(collection, query, options = {}) {
  */
 export function looksLikeUrl(value) {
   return /^https?:\/\/\S+$/i.test(String(value ?? '').trim());
+}
+
+/** A Google My Maps link in any of its forms, the same test the backend makes. */
+export function isMyMapsLink(value) {
+  return /^https?:\/\/(www\.)?google\.[^/]+\/maps\/d\/(u\/\d+\/)?(viewer|edit|embed|kml)?\?[^#]*\bmid=[\w-]+/i
+    .test(String(value ?? '').trim());
 }
 
 /** The formats the file picker offers, and the parser accepts. */

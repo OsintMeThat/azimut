@@ -3,12 +3,15 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   OVERLAY_IDS,
   imageryError,
+  isGround,
   rasterSource,
   readableReason,
   sourceMaxZoom,
+  sourceMinZoom,
   tileTemplate,
   tileUrls,
 } from './basemap.js';
+import { BORDER_LINES } from './borders.js';
 
 /**
  * The provider shapes are the ones `/api/satellite/providers` really answers
@@ -38,6 +41,7 @@ const SENTINEL = {
   attribution: '© Copernicus Sentinel data',
   max_zoom: 18,
   max_native_zoom: 14,
+  min_zoom: 7,
   tile_size: 512,
   meter: 'sentinelhub',
 };
@@ -150,6 +154,14 @@ describe('the deepest tile a provider is asked for', () => {
   });
 });
 
+describe('the shallowest tile a provider is asked for', () => {
+  it('is its floor, shifted down like the ceiling for a bigger cell', () => {
+    expect(sourceMinZoom(ESRI, 256)).toBe(0);
+    // Sentinel Hub renders no pixel over 1500 m: view z7, grid level 6 of its 512 px tiles
+    expect(sourceMinZoom(SENTINEL, 512)).toBe(6);
+  });
+});
+
 describe('the source one provider is served from', () => {
   it('is a raster grid of the cell size asked for, credited to the provider', () => {
     expect(rasterSource(ESRI, ESRI.id, 256)).toEqual({
@@ -170,6 +182,8 @@ describe('the source one provider is served from', () => {
 
 /** The FIRMS overlay's engine layers, lowest first (`firePoints.js`). */
 const FIRE_LAYERS = ['basemap-firms-foot-fill', 'basemap-firms-foot-ring', 'basemap-firms-foot-edge', 'basemap-firms-mark'];
+/** The borders' engine layers, lowest first (`borders.js`). */
+const BORDER_LAYERS = BORDER_LINES.layers.map((entry) => `basemap-boundaries-${entry.id}`);
 
 describe('the layers on a map', () => {
   /** A MapLibre map, as far as basemap.js reaches into it. */
@@ -293,6 +307,24 @@ describe('the layers on a map', () => {
     });
   });
 
+  it('takes the picture off for a plain ground and gives the view its own depth back', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = { ...stubMap(), getMaxZoom: () => current };
+      let current = 22;
+      map.setMaxZoom = (zoom) => { map.calls.setMaxZoom.push([zoom]); current = zoom; };
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.show({ ...ESRI, max_zoom: 17 }, ESRI.id, 256);
+      expect(map.sources.size).toBe(1);
+      basemaps.hide();
+      expect(map.sources.size).toBe(0);
+      expect(map.layers).toEqual([]);
+      expect(map.calls.setMaxZoom).toEqual([[16], [22]]);
+      // the same picture again is put back, not taken for the one still there
+      basemaps.show({ ...ESRI, max_zoom: 17 }, ESRI.id, 256);
+      expect(map.sources.size).toBe(1);
+    });
+  });
+
   it('stops a linked map at the shallower of its own and the shared ceiling', async () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();
@@ -302,6 +334,28 @@ describe('the layers on a map', () => {
       basemaps.setZoomCeiling(21);
       basemaps.setZoomCeiling(null);
       expect(map.calls.setMaxZoom).toEqual([[18], [16], [18], [18]]);
+    });
+  });
+
+  it('hands the engine a ceiling only when it changes', async () => {
+    // Over relief the engine settles the camera by a hair on every ceiling it is
+    // handed and reports a move; the surface re-states the basemap on every
+    // settled view, so an unchanged ceiling handed back each time froze the page.
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      let ceiling = 22;
+      map.getMaxZoom = () => ceiling;
+      map.setMaxZoom = (zoom) => {
+        map.calls.setMaxZoom.push([zoom]);
+        ceiling = zoom;
+      };
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.show({ ...ESRI, max_zoom: 19 }, ESRI.id, 256);
+      basemaps.show({ ...ESRI, max_zoom: 19 }, ESRI.id, 256);
+      basemaps.setZoomCeiling(null);
+      expect(map.calls.setMaxZoom).toEqual([[18]]);
+      basemaps.setZoomCeiling(17);
+      expect(map.calls.setMaxZoom).toEqual([[18], [16]]);
     });
   });
 
@@ -566,10 +620,10 @@ describe('the layers on a map', () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();
       const basemaps = createBasemaps(stubEngine(map));
-      basemaps.setOverlay('boundaries', true);
-      basemaps.setOverlay('boundaries', true);
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-boundaries']);
-      basemaps.setOverlay('boundaries', false);
+      basemaps.setOverlay('railway', true);
+      basemaps.setOverlay('railway', true);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway']);
+      basemaps.setOverlay('railway', false);
       expect(map.layers).toEqual([]);
     });
   });
@@ -623,7 +677,7 @@ describe('the layers on a map', () => {
       basemaps.setOverlay('firms', true, { sensor: 'viirs', window: '24h' });
       basemaps.setOverlay('boundaries', true);
       basemaps.setOverlay('railway', true);
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway', 'basemap-boundaries', ...FIRE_LAYERS]);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway', ...BORDER_LAYERS, ...FIRE_LAYERS]);
     });
   });
 
@@ -635,7 +689,7 @@ describe('the layers on a map', () => {
       // its own track is a label nobody can read
       basemaps.setOverlay('boundaries', true);
       basemaps.setOverlay('railway', true);
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway', 'basemap-boundaries']);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway', ...BORDER_LAYERS]);
     });
   });
 
@@ -653,7 +707,7 @@ describe('the layers on a map', () => {
       expect(map.layers.map((l) => l.id)).toEqual([
         'basemap-imagery',
         'basemap-railway',
-        'basemap-boundaries',
+        ...BORDER_LAYERS,
         'sfc-1-fill',
       ]);
     });
@@ -702,12 +756,52 @@ describe('the layers on a map', () => {
       // a dated template would break the week the build it names is removed
       expect(source).not.toHaveProperty('tiles');
       // over the borders, whose own names are the larger places
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-boundaries', 'basemap-placenames-label']);
+      expect(map.layers.map((l) => l.id)).toEqual([...BORDER_LAYERS, 'basemap-placenames-label']);
       expect(map.getLayer('basemap-placenames-label').source).toBe('basemap-placenames-openmaptiles');
 
       basemaps.setOverlay('placenames', false);
       expect(map.sources.has('basemap-placenames-openmaptiles')).toBe(false);
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-boundaries']);
+      expect(map.layers.map((l) => l.id)).toEqual(BORDER_LAYERS);
+    });
+  });
+
+  it('draws the borders as OpenFreeMap’s lines and names, under the place names', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.show(ESRI, ESRI.id, 256);
+      basemaps.setOverlay('roads', true);
+      basemaps.setOverlay('boundaries', true);
+      basemaps.setOverlay('placenames', true);
+      const ids = map.layers.map((l) => l.id);
+      const lines = ids.filter((id) => id.startsWith('basemap-boundaries-'));
+      expect(lines).toContain('basemap-boundaries-region');
+      expect(lines).toContain('basemap-boundaries-country');
+      expect(lines.at(-1)).toBe('basemap-boundaries-names');
+      // over the roads, under the place names
+      expect(ids.slice(0, 2)).toEqual(['basemap-imagery', 'basemap-roads']);
+      expect(ids.slice(2, -1).every((id) => id.startsWith('basemap-boundaries-'))).toBe(true);
+      expect(ids.at(-1)).toBe('basemap-placenames-label');
+      expect(map.sources.get('basemap-boundaries-openmaptiles')).toMatchObject({
+        type: 'vector',
+        url: 'https://tiles.openfreemap.org/planet',
+        attribution: expect.stringContaining('OpenFreeMap'),
+      });
+      basemaps.setOverlay('boundaries', false);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-imagery', 'basemap-roads', 'basemap-placenames-label']);
+      expect(map.sources.has('basemap-boundaries-openmaptiles')).toBe(false);
+    });
+  });
+
+  it('traces a failed tile of the borders’ lines back to the borders', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const onOverlayTrouble = vi.fn();
+      const basemaps = createBasemaps(stubEngine(map), { onOverlayTrouble });
+      basemaps.setOverlay('boundaries', true);
+      const onError = map.calls.on.find(([name]) => name === 'error')[1];
+      onError({ sourceId: 'basemap-boundaries-openmaptiles', error: { status: 503 } });
+      expect(onOverlayTrouble).toHaveBeenCalledWith('boundaries');
     });
   });
 
@@ -721,8 +815,8 @@ describe('the layers on a map', () => {
       const ids = map.layers.map((l) => l.id);
       // over the tracks, under the names
       expect(ids[0]).toBe('basemap-railway');
-      expect(ids.at(-1)).toBe('basemap-boundaries');
-      expect(ids.slice(1, -1).every((id) => id.startsWith('basemap-power-'))).toBe(true);
+      expect(ids.slice(-BORDER_LAYERS.length)).toEqual(BORDER_LAYERS);
+      expect(ids.slice(1, -BORDER_LAYERS.length).every((id) => id.startsWith('basemap-power-'))).toBe(true);
     });
   });
 
@@ -742,7 +836,7 @@ describe('the layers on a map', () => {
         'basemap-roads',
         'basemap-railway',
         'basemap-seamarks',
-        'basemap-boundaries',
+        ...BORDER_LAYERS,
         'basemap-placenames-label',
         ...FIRE_LAYERS,
       ]);
@@ -802,5 +896,49 @@ describe('the layers on a map', () => {
       ]);
       expect(glasses[0].destroyed).toBe(1);
     });
+  });
+});
+
+
+describe('billed tiles on a map that can tilt', () => {
+  it('asks a billed provider through the guard, and a free one at its own address', () => {
+    expect(rasterSource(SENTINEL, 'sentinel2', 512, 'm4').tiles).toEqual([
+      'azimut-billed://m4/sentinel2/{z}/{x}/{y}',
+    ]);
+    expect(rasterSource(ESRI, 'esri-world-imagery', 256, 'm4').tiles).toEqual(['/api/tiles/esri-world-imagery/{z}/{x}/{y}']);
+    // a direct {s} template is never billed and never passes through the app
+    expect(rasterSource({ ...CUSTOM_XYZ, meter: 'x' }, 'custom-1', 256, 'm4').tiles[0]).toContain('tiles.example.org');
+    // without a map to read the view from, the plain proxy address
+    expect(rasterSource(SENTINEL, 'sentinel2', 512).tiles).toEqual(['/api/tiles/sentinel2/{z}/{x}/{y}']);
+  });
+
+  it('asks a free provider the app keeps in batches, and leaves every other at its own address', () => {
+    const kept = { ...ESRI, cacheable: true };
+    expect(rasterSource(kept, 'esri-wayback~20', 256, 'm4').tiles).toEqual(['azimut-tiles://esri-wayback~20/{z}/{x}/{y}']);
+    // the browser's own cache spares a provider the app does not keep a second request
+    expect(rasterSource({ ...ESRI, cacheable: false }, 'esri-world-imagery', 256, 'm4').tiles).toEqual(['/api/tiles/esri-world-imagery/{z}/{x}/{y}']);
+    // billed tiles keep the guard, which counts each one; widgets and direct templates never pass through here
+    expect(rasterSource({ ...SENTINEL, cacheable: true }, 'sentinel2', 512, 'm4').tiles).toEqual(['azimut-billed://m4/sentinel2/{z}/{x}/{y}']);
+    expect(rasterSource({ ...kept, widget: 'google_js' }, 'g', 256, 'm4').tiles).toEqual(['/api/tiles/g/{z}/{x}/{y}']);
+    expect(rasterSource({ ...CUSTOM_XYZ, cacheable: true }, 'custom-1', 256, 'm4').tiles[0]).toContain('tiles.example.org');
+    // a source outside the app's maps keeps the plain address
+    expect(rasterSource(kept, 'esri-world-imagery', 256).tiles).toEqual(['/api/tiles/esri-world-imagery/{z}/{x}/{y}']);
+  });
+});
+
+describe('the picture itself, apart from what is laid over it', () => {
+  it('counts the imagery and the second picture Blink lays on it as the ground', () => {
+    expect(isGround('basemap-imagery')).toBe(true);
+    expect(isGround('basemap-alternate')).toBe(true);
+    expect(isGround('basemap-boundaries-country')).toBe(false);
+    expect(isGround('basemap-placenames-labels')).toBe(false);
+    // the case's marks and added layers are laid over it too
+    expect(isGround('sfc-3-fill')).toBe(false);
+  });
+
+  it('counts an overlay in when the reading is made of it, every one of its layers', () => {
+    expect(isGround('basemap-nightlights', ['nightlights'])).toBe(true);
+    expect(isGround('basemap-firms-marks', ['firms'])).toBe(true);
+    expect(isGround('basemap-firms-marks', ['nightlights'])).toBe(false);
   });
 });

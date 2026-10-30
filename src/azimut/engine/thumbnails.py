@@ -46,6 +46,9 @@ THUMB_MAX = 512
 # thumbnails are superseded by a differently-named file on next generation, and
 # the stale ones become orphans `repair` removes.
 THUMB_GEN = 1
+# The video overview (hover sprite, waveform, last focus scan) shares this cache,
+# named by the original's hash. Bump when its render changes.
+VIDEO_CACHE_GEN = 1
 # Job kind for the durable queue. One worker drains these one at a time, so
 # ffmpeg (the CPU-heavy path) never runs several instances at once.
 THUMB_KIND = "thumbnail"
@@ -69,6 +72,18 @@ def thumb_relpath(sha256: str, kind: str) -> str | None:
     if kind not in THUMBNAILED_KINDS or not sha256:
         return None
     return f"media/{THUMB_DIR}/{sha256[:24]}-g{THUMB_GEN}.jpg"
+
+
+def video_cache_names(sha256: str) -> dict[str, str]:
+    """File names (in ``.thumbs/``) of a video's overview sprite, overview JSON and
+    last focus-scan JSON. Content- and generator-addressed like the thumbnail."""
+    stem = f"{sha256[:24]}"
+    gen = f"g{VIDEO_CACHE_GEN}"
+    return {
+        "strip": f"{stem}-strip-{gen}.jpg",
+        "overview": f"{stem}-overview-{gen}.json",
+        "scan": f"{stem}-scan-{gen}.json",
+    }
 
 
 def _render(media_path: Path, out_path: Path, kind: str) -> bool:
@@ -245,6 +260,9 @@ def repair(case: "CaseType") -> int:
         for item in media_engine.list_media(case)
         if item.get("thumbnail")
     } | _proof_thumbs(case)
+    for item in media_engine.list_media(case):
+        if item.get("sha256"):
+            referenced.update(video_cache_names(item["sha256"]).values())
     removed = 0
     for path in thumbs.iterdir():
         if not path.is_file():

@@ -768,7 +768,7 @@ export function templateFromPost({ mention = '@GeoConfirmed', body = DEFAULT_TWE
 export function normPostTemplate(data = {}) {
   const source = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
   return {
-    mention: typeof source.mention === 'string' ? source.mention.slice(0, 120) : '@GeoConfirmed',
+    mention: typeof source.mention === 'string' ? source.mention.slice(0, 280) : '@GeoConfirmed',
     body: typeof source.body === 'string' && source.body.trim()
       ? source.body.slice(0, 16_000)
       : bodyFromLegacy(source),

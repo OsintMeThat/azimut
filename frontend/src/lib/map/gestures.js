@@ -6,8 +6,9 @@
  * different modes. The modes stay with the tool, which decides *whether* a
  * gesture starts; the pointer bookkeeping and everything that touches the map
  * live here, so a gesture is written once and re-aimed at the next engine once.
+ * The 3D view's own gestures are the globe's (`lib/globe/globe.js`).
  *
- * The keyboard turn lives here too, so every map answers the same keys.
+ * The keyboard turn and tilt live here too, so every map answers the same keys.
  *
  * Both starters take the `mousedown` that began the gesture, own it (no engine
  * pan, no browser middle-click autoscroll), and track the rest on the window —
@@ -130,20 +131,104 @@ export function startRotateDrag(engine, event, { onPivot, onEnd } = {}) {
 }
 
 /**
- * Start a turn if this press is one: the middle button, or Shift and the left
- * one where the tool lets Shift turn. True when it started.
+ * Start a turn if this press is one: the middle button, Shift and the left
+ * one where the tool lets Shift turn, or the second press of a double click
+ * held down where the tool lets it (for a hand with no middle button). True
+ * when it started.
+ *
+ * A double click that never moved is still the engine's zoom; one that turned
+ * the map zooms nothing (`swallowDoubleClick`).
  *
  * @param {object} engine the façade from `engine.js`
  * @param {MouseEvent} event
  * @param {object} [opts]
  * @param {boolean} [opts.shift] whether Shift-drag turns here
+ * @param {boolean} [opts.double] whether a held double click turns here
  * @param {(pivot: object) => void} [opts.onPivot]
  * @param {() => void} [opts.onEnd]
  */
-export function turnFromPress(engine, event, { shift = true, onPivot, onEnd } = {}) {
+export function turnFromPress(engine, event, { shift = true, double = false, onPivot, onEnd } = {}) {
   const shiftDrag = shift && event.button === 0 && event.shiftKey;
-  if (event.button !== 1 && !shiftDrag) return false;
+  const held = double && event.button === 0 && event.detail === 2;
+  if (event.button !== 1 && !shiftDrag && !held) return false;
+  if (held) swallowDoubleClick(event);
   startRotateDrag(engine, event, { onPivot, onEnd });
+  return true;
+}
+
+/**
+ * The double click that ends a press held and dragged, kept from the engine,
+ * which would zoom on it. One that never moved past a click goes through.
+ *
+ * The watch ends on that double click, or on the next press when none came:
+ * never on a timer, which a busy page runs after the input already queued, so
+ * a quick double click next would be swallowed too.
+ */
+export function swallowDoubleClick(event, target = window) {
+  const from = { x: event.clientX, y: event.clientY };
+  let moved = false;
+  let released = false;
+  let timer = null;
+  const watch = (e) => {
+    if (Math.hypot(e.clientX - from.x, e.clientY - from.y) >= CLICK_SLOP) moved = true;
+  };
+  const stop = () => {
+    clearTimeout(timer);
+    target.removeEventListener('mousemove', watch, true);
+    target.removeEventListener('dblclick', swallow, true);
+    target.removeEventListener('mouseup', release, true);
+    target.removeEventListener('mousedown', press, true);
+  };
+  const swallow = (e) => {
+    stop();
+    if (!moved) return;
+    e.stopPropagation();
+    e.preventDefault();
+  };
+  const release = () => {
+    released = true;
+    // a release far from the press may bring no double click at all
+    timer = setTimeout(stop, 1000);
+  };
+  const press = () => {
+    if (released) stop();
+  };
+  target.addEventListener('mousemove', watch, true);
+  target.addEventListener('dblclick', swallow, true);
+  target.addEventListener('mouseup', release, true);
+  target.addEventListener('mousedown', press, true);
+}
+
+/** Degrees a press of Page Up or Page Down tilts the 3D view. */
+export const KEY_TILT_STEP = 10;
+
+/**
+ * The tilt a key asks of the 3D view, or null when it asks none: Page Up
+ * leans toward the horizon and Page Down back toward the ground, a step at a
+ * time, as they do in Horizon. The engine holds it under its own ceiling.
+ */
+export function keyTilt(event, pitch) {
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null;
+  if (event.key === 'PageUp') return pitch + KEY_TILT_STEP;
+  if (event.key === 'PageDown') return Math.max(0, pitch - KEY_TILT_STEP);
+  return null;
+}
+
+/**
+ * Tilt the 3D view from the keyboard (`keyTilt`). True when the key was a tilt
+ * and has been spent; a key a focused
+ * control already took, or one typed into a field, is left alone.
+ *
+ * @param {object} engine the façade from `engine.js`
+ * @param {KeyboardEvent} event
+ */
+export function tiltFromKey(engine, event) {
+  if (!engine || event.defaultPrevented) return false;
+  if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return false;
+  const to = keyTilt(event, engine.camera().pitch ?? 0);
+  if (to == null) return false;
+  event.preventDefault();
+  engine.setPitch(to);
   return true;
 }
 
@@ -163,4 +248,41 @@ export function turnFromKey(engine, event) {
   event.preventDefault();
   engine.setBearing(turn.to);
   return true;
+}
+
+/**
+ * Count the analyst's hand on a map: a press or a wheel over what draws it
+ * (`onMap(target)`, the flat map's canvas or the globe's), or a key that tilts
+ * or turns it outside a field. A camera the app holds back until the view is
+ * still (the 3D switch's lean, a tilted view being opened) reads the count
+ * before and after, and stays away once the hand has moved the map meanwhile.
+ *
+ * Heard on the way down, ahead of the map that takes the press: a press a mode
+ * claimed further out (the capture marquee, on the window) never reaches here,
+ * and moves no camera.
+ *
+ * @param {HTMLElement} wrap the element holding both maps
+ * @param {(target: EventTarget) => boolean} onMap
+ * @returns {{ count: () => number, stop: () => void }}
+ */
+export function watchHand(wrap, onMap) {
+  let count = 0;
+  const touched = (event) => {
+    if (onMap(event.target)) count += 1;
+  };
+  const keyed = (event) => {
+    if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+    if (keyTilt(event, 0) != null || keyTurn(event, 0)) count += 1;
+  };
+  wrap.addEventListener('pointerdown', touched, true);
+  wrap.addEventListener('wheel', touched, { capture: true, passive: true });
+  window.addEventListener('keydown', keyed, true);
+  return {
+    count: () => count,
+    stop() {
+      wrap.removeEventListener('pointerdown', touched, true);
+      wrap.removeEventListener('wheel', touched, { capture: true });
+      window.removeEventListener('keydown', keyed, true);
+    },
+  };
 }

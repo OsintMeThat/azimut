@@ -94,6 +94,22 @@
     video: "M4 6h11a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm12 4 5-3v10l-5-3",
     grip: "M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01",
     minimize: "M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3m8 0v-3a2 2 0 0 1 2-2h3",
+    horizon: "M5 17.5 20.5 7M5 17.5h15.5M12.5 13.5l2.5-2.5 2 1.5 3.5-3.5M5 16a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z",
+    fade: "M9 6.5a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Zm6 0a5.5 5.5 0 1 1 0 11",
+    info: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-11v6m0-10h.01",
+    panelRight: "M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm11 0v16",
+    panelLeft: "M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm5 0v16",
+    external: "M14 4h6v6m0-6L10 14M9 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3",
+    play: "m8 5 11 7-11 7V5Z",
+    pause: "M8 5v14m8-14v14",
+    volume: "M5 10v4h3l4 4V6L8 10H5Zm11-2a6 6 0 0 1 0 8m2.5-10.5a9 9 0 0 1 0 13",
+    volumeOff: "M5 10v4h3l4 4V6L8 10H5m8.5.5 5 5m0-5-5 5",
+    camera: "M4 8h3l1.5-2.5h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Zm8 2.5a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5Z",
+    cornerTL: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM6.5 8h5v4h-5Z",
+    cornerTR: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM12.5 8h5v4h-5Z",
+    cornerBL: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM6.5 12h5v4h-5Z",
+    cornerBR: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM12.5 12h5v4h-5Z",
+    pushpin: "M8.4 4h7.2v4.8l3.2 4.3H5.2l3.2-4.3V4ZM12 13.1V20",
   };
 
   /** One icon as an inline SVG string, for the panel's own markup. */
@@ -106,11 +122,11 @@
   }
 
   /** Which glyph a saved row is drawn with — `SavedOverlay.svelte`'s own map. */
-  const SAVED_GLYPH = { place: "pin", capture: "satellite", screenshot: "screen", comparison: "compare" };
+  const SAVED_GLYPH = { place: "pin", capture: "satellite", screenshot: "screen", comparison: "compare", view: "horizon" };
 
   /** The kinds a stack may mix and still draw as a capture — `geoTree.js`'s
    *  `CAPTURE_KINDS`. Any other mix draws as a place (`markKind` in the app). */
-  const SAVED_CAPTURE_KINDS = ["capture", "screenshot", "comparison"];
+  const SAVED_CAPTURE_KINDS = ["capture", "screenshot", "comparison", "view"];
 
   window.AzimutMapTheme = {
     TOKENS,

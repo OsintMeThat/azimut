@@ -25,6 +25,82 @@ const TERMS_URL = 'https://www.google.com/intl/en/help/terms_maps/';
 let loadPromise = null;
 let loadedKey = null; // the key the script was loaded with — one per page life
 
+/**
+ * Google's refusals of a map, by the name it logs them under, and what to do.
+ *
+ * Only a bad key calls `gm_authFailure`. Billing switched off, the API not
+ * enabled or the quota spent are said in the console alone, while the map
+ * goes on drawing dimmed tiles under "For development purposes only".
+ */
+export const GOOGLE_REFUSALS = {
+  BillingNotEnabledMapError:
+    "Billing is off on the key's Google Cloud project. Attach a billing account to it, then test the key in Settings",
+  ApiNotActivatedMapError:
+    "The Maps JavaScript API is not enabled on the key's project. Enable it, then test the key in Settings",
+  ApiTargetBlockedMapError:
+    "The key's API restrictions leave out the Maps JavaScript API. Add it to the key in the Cloud Console",
+  OverQuotaMapError: "The project's Maps JavaScript quota is spent. Raise it in the Cloud Console or wait for the reset",
+  RefererNotAllowedMapError:
+    "The key's website restriction blocks this app. Allow http://127.0.0.1:*/* and http://localhost:*/* on it",
+  InvalidKeyMapError: 'Google does not know this key. Check it in Settings',
+  ExpiredKeyMapError: 'This key has expired. Create a new one and save it in Settings',
+  MissingKeyMapError: 'No key reached Google. Save the key in Settings',
+  DeletedApiProjectMapError: "The key's Cloud project was deleted. Create a key on a live project",
+  ProjectDeniedMapError: "Google refused the key's Cloud project. Check it in the Cloud Console",
+};
+
+/** What a bare `gm_authFailure` says, Google having named nothing. */
+const KEY_REJECTED = 'Google rejected the key. Check it in Settings';
+const ERROR_LINE = /Google Maps JavaScript API error: (\w+)/;
+/** How long a refusal waits for Google's other word on it, ms: a bad key gets both signals, in no set order. */
+const REFUSAL_SETTLE_MS = 200;
+
+/** Who hears the next refusal: the map on show, or a key test while it runs. */
+let onRefused = null;
+/** The refusal waiting out REFUSAL_SETTLE_MS, `{ reason }`, or null. */
+let refusal = null;
+let hearing = false;
+
+/** Tell the one refusal of a burst, Google's own name for it winning over the bare signal. */
+function refuse(reason, named) {
+  if (refusal) {
+    if (named) refusal.reason = reason;
+    return;
+  }
+  refusal = { reason };
+  setTimeout(() => {
+    const said = refusal.reason;
+    refusal = null;
+    onRefused?.(said);
+  }, REFUSAL_SETTLE_MS);
+}
+
+/** The refusal named in a console line Google wrote, or null. */
+export function refusalCode(args) {
+  for (const arg of args) {
+    const text = typeof arg === 'string' ? arg : arg?.message;
+    const match = typeof text === 'string' ? ERROR_LINE.exec(text) : null;
+    if (match && Object.hasOwn(GOOGLE_REFUSALS, match[1])) return match[1];
+  }
+  return null;
+}
+
+/**
+ * Read Google's console errors as they pass, since they are the only place
+ * most refusals are said. Installed before the script loads, so the script
+ * writes through it; every line still reaches the console unchanged.
+ */
+function hearGoogleErrors() {
+  if (hearing) return;
+  hearing = true;
+  const say = console.error;
+  console.error = function (...args) {
+    say.apply(this, args);
+    const code = refusalCode(args);
+    if (code) refuse(GOOGLE_REFUSALS[code], true);
+  };
+}
+
 /** The API key the Maps JS script is already bound to, if loaded. Google's
  * script can't be re-loaded with another key without a full page reload, so
  * a key change after load can only be tested by reloading the app. */
@@ -36,14 +112,15 @@ export function googleMapsLoadedKey() {
  * Load the Maps JS API from the provider's loader URL (key included — a JS
  * API key is client-side by design, referrer-restricted rather than secret).
  *
- * `onAuthFailure` fires if Google rejects the key — that can happen minutes
- * after a successful load (gm_authFailure is async), so the caller must
- * handle it as a runtime event, not a load error.
+ * `onRefused(reason)` fires when Google refuses the map, with what to do about
+ * it. That comes after a clean load, sometimes minutes after, so the caller
+ * must handle it as a runtime event, not a load error.
  */
-export function loadGoogleMaps(loaderUrl, { onAuthFailure } = {}) {
-  // gm_authFailure is Google's only key-rejection signal; keep it wired even
-  // when the script is already loaded (a Settings re-test swaps the handler)
-  window.gm_authFailure = () => onAuthFailure?.();
+export function loadGoogleMaps(loaderUrl, { onRefused: heard } = {}) {
+  hearGoogleErrors();
+  // kept wired even when the script is already loaded: a Settings re-test swaps the listener
+  onRefused = heard ?? null;
+  window.gm_authFailure = () => refuse(KEY_REJECTED, false);
   if (window.google?.maps) return Promise.resolve();
   if (loadPromise) return loadPromise;
   loadedKey = keyFromLoaderUrl(loaderUrl);
@@ -69,20 +146,24 @@ export function loadGoogleMaps(loaderUrl, { onAuthFailure } = {}) {
 /**
  * Prove a Maps JS key in the only place it can be proven: a real map in this
  * browser. Loads the script, spins up a hidden 1-tile satellite map and races
- * `tilesloaded` (key works) against `gm_authFailure` (Google rejected it) and
- * a timeout. Because Google's script binds to one key per page life, a
- * *changed* key can only be re-probed after a reload — callers should check
- * googleMapsLoadedKey() first.
+ * `tilesloaded` (key works) against a refusal (see GOOGLE_REFUSALS) and a
+ * timeout. A refused project still draws its tiles, dimmed, so the map
+ * rendering only counts once `graceMs` has passed with no refusal. Because
+ * Google's script binds to one key per page life, a *changed* key can only be
+ * re-probed after a reload — callers should check googleMapsLoadedKey() first.
  *
  * The verdict carries `billed`: the probe's own map is a real dynamic map load
  * on the user's bill, and no backend proxy can see it, so the caller must
  * report it to the usage counter or the counter drifts under Google's number.
  */
-export async function probeKey(loaderUrl, { timeoutMs = 12000 } = {}) {
+export async function probeKey(loaderUrl, { timeoutMs = 12000, graceMs = 3000 } = {}) {
   let rejected = false;
+  // the map on show hears its refusals again once the test is over
+  const before = onRefused;
   try {
-    await loadGoogleMaps(loaderUrl, { onAuthFailure: () => (rejected = true) });
+    await loadGoogleMaps(loaderUrl, { onRefused: () => (rejected = true) });
   } catch (e) {
+    onRefused = before;
     // the script never loaded, so no map was ever constructed — nothing billed
     return { ok: false, detail: e.message, billed: false };
   }
@@ -96,14 +177,16 @@ export async function probeKey(loaderUrl, { timeoutMs = 12000 } = {}) {
   document.body.appendChild(holder);
   try {
     const verdict = await new Promise((resolve) => {
+      let grace = null;
       const timer = setTimeout(
         () => resolve({ ok: false, detail: 'no response from Google (timeout)' }),
         timeoutMs
       );
-      window.gm_authFailure = () => {
+      onRefused = (reason) => {
         rejected = true;
         clearTimeout(timer);
-        resolve({ ok: false, detail: 'Google rejected the key (gm_authFailure)' });
+        clearTimeout(grace);
+        resolve({ ok: false, detail: reason });
       };
       const map = new window.google.maps.Map(holder, {
         center: { lat: 0, lng: 0 },
@@ -113,11 +196,8 @@ export async function probeKey(loaderUrl, { timeoutMs = 12000 } = {}) {
       });
       map.addListener('tilesloaded', () => {
         clearTimeout(timer);
-        resolve(
-          rejected
-            ? { ok: false, detail: 'Google rejected the key (gm_authFailure)' }
-            : { ok: true, detail: 'satellite map rendered' }
-        );
+        if (rejected) return; // its refusal is on its way
+        grace = setTimeout(() => resolve({ ok: true, detail: 'satellite map rendered' }), graceMs);
       });
     });
     // A google.maps.Map was constructed above, and Google bills one dynamic map
@@ -126,6 +206,7 @@ export async function probeKey(loaderUrl, { timeoutMs = 12000 } = {}) {
     // counts, since the map was built and we cannot prove it was not served.
     return { ...verdict, billed: !rejected };
   } finally {
+    onRefused = before;
     holder.remove();
   }
 }

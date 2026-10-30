@@ -1,14 +1,14 @@
 <script>
   /**
-   * The instrument's status line: where you are, what the armed tool is
-   * reading, and the two acts that take something away from the map.
+   * The instrument's status line: where you are, and the two acts that take
+   * something away from the map.
    *
-   * It gathers what used to be three separate boxes — a coordinate HUD floating
-   * at the top, a measure reading inside the measure panel, and a bottom bar
-   * that mixed the imagery provider (a property of the picture, now a chip on
-   * the surface itself) with Save place and Capture (acts). One rule sorts
-   * them: a number the map is telling you reads on the left, an act that files
-   * something reads on the right.
+   * It gathers what used to be separate boxes: a coordinate HUD floating at the
+   * top, and a bottom bar that mixed the imagery provider (a property of the
+   * picture, now a chip on the surface itself) with Save place and Capture
+   * (acts). One rule sorts them: where the map is reads on the left, an act
+   * that files something reads on the right. A measure reads on the map and in
+   * its own panel, never here, where it crowded the coordinates.
    *
    * There is no band across the map. Two groups sit on one line with nothing
    * painted between them, so the strip costs the map two corners rather than a
@@ -19,34 +19,26 @@
   let {
     /** Formatted coordinates, already in the analyst's own unit. */
     coords,
+    /** The ground height there, already formatted; empty while there is no relief. */
+    height = '',
     zoom,
     /** The marker is off the centre and draggable, so the coordinates are its. */
     pinned = false,
     copy,
-    /** What the armed tool is reading right now, and its prompt when it has none. */
-    reading = '',
-    hint = '',
     /** The acts: the host owns them, because it owns what they file. */
     children,
   } = $props();
 </script>
 
 <div class="status">
-  <div class="readouts card">
+  <div class="readouts card" data-guide="map.readout">
     <button class="hud-coords mono" onclick={copy} title="Copy coordinates">
       {coords}
+      {#if height}<span class="height" title="Ground height here, from the relief">{height}</span>{/if}
       <span class="z">z{zoom}</span>
       {#if pinned}<span class="pin-tag">pin</span>{/if}
       <Icon name="copy" size={12} />
     </button>
-    {#if reading || hint}
-      <span class="rule" aria-hidden="true"></span>
-      {#if reading}
-        <span class="measure-value mono">{reading}</span>
-      {:else}
-        <span class="hint">{hint}</span>
-      {/if}
-    {/if}
   </div>
   <div class="acts">
     {@render children?.()}
@@ -96,6 +88,10 @@
     color: var(--text-3);
     font-size: var(--fs-xs);
   }
+  .height {
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
   .pin-tag {
     padding: 1px 4px;
     border-radius: 3px;
@@ -106,23 +102,6 @@
     text-transform: uppercase;
     color: var(--accent-text);
     background: var(--accent);
-  }
-  .rule {
-    align-self: stretch;
-    width: 1px;
-    margin: 5px 0;
-    background: var(--border);
-  }
-  .measure-value {
-    padding: 0 13px;
-    font-size: var(--fs-sm);
-    font-weight: 700;
-    color: var(--accent);
-  }
-  .hint {
-    padding: 0 13px;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
   }
   .acts {
     display: flex;

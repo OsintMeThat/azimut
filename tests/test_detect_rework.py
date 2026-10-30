@@ -151,6 +151,64 @@ def test_previous_pass_is_per_area_and_explicit_launch_never_looks_up(client, sc
     assert [p["a"]["date"] for p in second["area_runs"]] == ["2026-05-11", "2026-05-13"]
 
 
+def test_keep_all_keeps_only_new_candidates_in_the_open_run_and_allows_dismiss(client, scenario):
+    case, body = scenario
+    saved = run(client, case, body)
+    saved["results"] += [{**deepcopy(saved["results"][0]), "id": f"0-{i}"} for i in range(2, 6)]
+    saved["count"] = len(saved["results"])
+    analyzers.persist_run(case, saved)
+    base = f"/api/cases/{case.id}/analysis/runs/{saved['id']}"
+    assert client.patch(base + "/results/0-2", json={"review": "noted"}).status_code == 200
+    assert client.post(base + "/results/0-3/promote", json={"title": "Pinned"}).status_code == 200
+    assert client.patch(base + "/results/0-4", json={"review": "dismissed"}).status_code == 200
+    before = analyzers.read(case, "runs", saved["id"])
+    other = run(client, case, body)
+    # The other run already has its entity and frames before the bulk action.
+    entities = case.list_entities()
+    files = sorted(str(path.relative_to(case.path)) for path in case.path.rglob("*") if path.is_file())
+    response = client.post(base + "/results/keep", json={})
+    assert response.status_code == 200, response.text
+    kept = response.json()
+    assert kept["count"] == before["count"] == 4
+    assert [row["review"] for row in kept["results"]] == ["noted", "noted", "kept", "noted"]
+    for row in before["results"]:
+        actual = next(item for item in kept["results"] if item["id"] == row["id"])
+        if row["review"] != "new":
+            assert actual == row
+        else:
+            assert actual["reviewed_at"] and actual["entity_id"] is None
+    assert analyzers.read(case, "runs", saved["id"]) == kept
+    assert analyzers.read(case, "runs", other["id"]) == other
+    assert case.list_entities() == entities
+    assert sorted(str(path.relative_to(case.path)) for path in case.path.rglob("*") if path.is_file()) == files
+    assert client.post(base + "/results/keep", json={}).json() == kept
+    assert client.patch(base + "/results/0-5", json={"review": "dismissed"}).status_code == 200
+    assert [row["id"] for row in client.get(base).json()["results"]] == [saved["results"][0]["id"], "0-2", "0-3"]
+
+
+@pytest.mark.parametrize("status", ["queued", "running", "failed", "cancelled", "no_new_imagery"])
+def test_keep_all_requires_a_completed_run(client, scenario, status):
+    case, body = scenario
+    saved = run(client, case, body)
+    saved["status"] = status
+    path = case.resolve_inside(analyzers.relpath("runs", saved["id"]))
+    media.write_json_atomic(path, saved)
+    before = path.read_bytes()
+    response = client.post(f"/api/cases/{case.id}/analysis/runs/{saved['id']}/results/keep", json={})
+    assert response.status_code == 409
+    assert path.read_bytes() == before
+
+
+def test_keep_all_accepts_an_empty_completed_run_and_rejects_a_missing_run(client, scenario):
+    case, body = scenario
+    saved = run(client, case, body)
+    saved.update(results=[], count=0)
+    analyzers.persist_run(case, saved)
+    base = f"/api/cases/{case.id}/analysis/runs"
+    assert client.post(base + f"/{saved['id']}/results/keep", json={}).json() == saved
+    assert client.post(base + "/000000000000/results/keep", json={}).status_code == 404
+
+
 def test_dismiss_removes_and_keep_creates_no_entity_or_media(client, scenario):
     case, body = scenario
     saved = run(client, case, body)
@@ -269,8 +327,7 @@ def test_export_snapshots_kept_candidates_with_pass_categories_and_replaces_a_pa
 
 
 def test_detect_preferences_round_trip_through_settings_backup(client):
-    choice = {"collapsed": True, "basemap": "osm", "overlays": ["roads"], "saved": False,
-              "width": 480}
+    choice = {"collapsed": True, "basemap": "osm", "width": 480}
     assert client.put("/api/settings/prefs", json={"detect_view": choice}).status_code == 200
     backup = client.get("/api/settings/export").json()
     client.put("/api/settings/prefs", json={"detect_view": {}})

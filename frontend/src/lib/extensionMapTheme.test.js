@@ -115,7 +115,8 @@ describe('the paint the tools use', () => {
     // the app writes its dash as an SVG string; the canvas wants a pair
     expect(/const AOI_STYLE = \{[\s\S]*?stroke: '(#\w+)'/.exec(grid)[1]).toBe(theme.AOI_STYLE.stroke);
     expect(/const AOI_STYLE = \{[\s\S]*?dash: '(\d+ \d+)'/.exec(grid)[1]).toBe(theme.AOI_STYLE.dash.join(' '));
-    expect(/const STROKE = \{ stroke: '(#\w+)', strokeWidth: ([\d.]+)/.exec(measure).slice(1)).toEqual([
+    // the measure in hand: its amber, and the width of its line
+    expect([/const AMBER = '(#\w+)'/.exec(measure)[1], /const LINE = \{ stroke: AMBER, strokeWidth: ([\d.]+)/.exec(measure)[1]]).toEqual([
       theme.MEASURE_STROKE.stroke,
       String(theme.MEASURE_STROKE.strokeWidth),
     ]);

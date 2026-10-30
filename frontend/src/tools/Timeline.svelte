@@ -67,6 +67,8 @@
     timelineViewState,
     holdsBackWorkingFiles,
     drawsFiles,
+    drawsLayers,
+    layerItems,
     situatedFile,
     mediaTrack,
     withWorkingFiles,
@@ -74,6 +76,8 @@
     trackTint,
   } from '../lib/timelineTracks.js';
   import { chronologyBlock, chronologyMarkdown, chronologyRows, readChronology } from '../lib/timelineCopy.js';
+  import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
+  import TimelineLayerCard from '../components/TimelineLayerCard.svelte';
   import { provenance } from '../lib/sheetExport.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseZone, clockReading, rememberClock, rememberedClock } from '../lib/caseClock.js';
@@ -689,7 +693,8 @@
     try {
       const responses = await Promise.all(targets.map(async (track) => ({
         track,
-        page: await api.get(`/api/cases/${caseId}/timeline?${trackQuery(track, { more })}`),
+        page: drawsLayers(track) ? await layersPage(caseId)
+          : await api.get(`/api/cases/${caseId}/timeline?${trackQuery(track, { more })}`),
       })));
       if (mine !== seq) return;
       const nextPages = more ? { ...trackPages } : {};
@@ -743,8 +748,8 @@
     if (!targets.length) return;
     const mine = ++overviewSeq;
     try {
-      let pages = await Promise.all(targets.map((track) =>
-        api.get(`/api/cases/${caseId}/timeline?${overviewQuery(track)}`)
+      let pages = await Promise.all(targets.map((track) => drawsLayers(track) ? layersOverview(caseId, 'year')
+        : api.get(`/api/cases/${caseId}/timeline?${overviewQuery(track)}`)
       ));
       if (mine !== overviewSeq) return;
       let page = mergeOverviewPages(pages);
@@ -753,8 +758,8 @@
       // what that reading answers.
       const finer = densityUnit(page.extent, overviewWidth);
       if (finer !== 'year') {
-        pages = await Promise.all(targets.map((track) =>
-          api.get(`/api/cases/${caseId}/timeline?${overviewQuery(track, { densityBucket: finer })}`)
+        pages = await Promise.all(targets.map((track) => drawsLayers(track) ? layersOverview(caseId, finer)
+          : api.get(`/api/cases/${caseId}/timeline?${overviewQuery(track, { densityBucket: finer })}`)
         ));
         if (mine !== overviewSeq) return;
         page = mergeOverviewPages(pages);
@@ -772,10 +777,34 @@
     if (!datedRows.length) return [];
     // Cut by the same rule the server is asked for, so a frozen reading and the live
     // one it was taken from draw the same histogram.
-    const width = { hour: 13, day: 10, month: 7, year: 4 }[densityUnit({
+    return bucketsOf(datedRows, densityUnit({
       from: datedRows.map((item) => item.earliest).sort()[0],
       to: datedRows.map((item) => item.latest ?? item.earliest).sort().at(-1),
-    }, overviewWidth)];
+    }, overviewWidth));
+  }
+
+  /**
+   * The dated markers of the analyst's layers, as one page of a My layers lane.
+   * Read off the layers on disk; nothing here is an event of the case.
+   */
+  async function layersPage(caseId) {
+    const rows = (await api.get(`/api/cases/${caseId}/map-layers`)).filter((row) => row.editable);
+    const drawings = await Promise.all(rows.map(async (row) => ({ row, collection: await addedLayers.drawing(caseId, row.name) })));
+    const found = layerItems(drawings);
+    return {
+      items: found, total: found.length, undated: 0, unplaced: 0, next_cursor: null,
+      extent: found.length ? { from: found[0].earliest, to: found.map((item) => item.latest).sort().at(-1) } : null,
+    };
+  }
+
+  /** …and its histogram, cut at the width the server was asked for beside it. */
+  async function layersOverview(caseId, unit) {
+    const page = await layersPage(caseId);
+    return { buckets: bucketsOf(page.items, unit), extent: page.extent };
+  }
+
+  function bucketsOf(datedRows, unit) {
+    const width = { hour: 13, day: 10, month: 7, year: 4 }[unit];
     const grouped = new Map();
     for (const item of datedRows) {
       const start = item.earliest.slice(0, width);
@@ -1979,7 +2008,7 @@
          rarely and checked constantly, so the reading is what stays out and the rest
          opens under it. Panning keeps its arrows: stepping through a chronology is the
          frequent move. -->
-    <div class="range" bind:this={rangeElement}>
+    <div class="range" bind:this={rangeElement} data-guide="timeline.range">
       <button class="range-step" title="Earlier" aria-label="Earlier" onclick={() => pan(-.7)} disabled={!axisWindow}>
         <Icon name="chevronLeft" size={15} />
       </button>
@@ -2042,7 +2071,7 @@
       {#if fullscreen}<button class="btn btn-sm" onclick={toggleFullscreen}>Exit full screen</button>{/if}
       <div class="more" bind:this={moreElement}>
         <button class="btn btn-sm more-btn" aria-expanded={moreMenu} aria-label="More" title="Tracks, grouping, legend, full screen" onclick={() => (moreMenu = !moreMenu)}>
-          <Icon name="more" size={15} stroke={2.6} />
+          <Icon name="sliders" size={14} /><span>View</span><Icon name="chevronDown" size={11} />
         </button>
         {#if moreMenu}
           <div class="more-menu">
@@ -2103,7 +2132,7 @@
       <!-- The entry line, under the axis. None in a snapshot, which takes no writes. -->
       {#snippet line()}
         {#if caseState.current && !snapshotReading}
-          <section class="entry-host" aria-label="Add an event">
+          <section class="entry-host" aria-label="Add an event" data-guide="timeline.entry">
             {#key `${caseState.current.id}:${lineEntity?.id ?? ''}`}
               <EntryLine
                 bind:this={entryLine}
@@ -2166,7 +2195,7 @@
         </div>
         {@render holdings()}
       {:else}
-          <section class="axis-card" aria-label="Timeline axis" bind:this={axisCardElement} style:max-height={`${axisMax}px`}>
+          <section class="axis-card" aria-label="Timeline axis" data-guide="timeline.axis" bind:this={axisCardElement} style:max-height={`${axisMax}px`}>
             <div class="axis-row">
               <!-- Which clock the ruler is in, in words. The window's two boundaries in
                    ISO sat here too, a second spelling of what the bar already says. -->
@@ -2497,7 +2526,7 @@
           {@render line()}
 
           <div class="reading-pane" bind:this={listPane}>
-            <section class="timeline-list" aria-label="Timeline list">
+            <section class="timeline-list" aria-label="Timeline list" data-guide="timeline.list">
               <header class="list-head">
                 <strong>{windowItems.length} {windowItems.length === 1 ? 'entry' : 'entries'} in this window</strong>
                 {#if cursor}<small>More below the ones loaded</small>{/if}
@@ -2581,6 +2610,9 @@
          for one line asking for a pick. -->
     {#if selected}
     <aside class="inspector">
+      {#if selected.kind === 'layer'}
+        <TimelineLayerCard item={selected} onclose={() => (selected = null)} />
+      {:else}
         <header><span class={`category-dot ${selected.category}`}></span><span>{HEADINGS[selected.category] ?? categoryName(selected)}</span><button title="Close inspector" onclick={() => (selected = null)}><Icon name="x" size={13} /></button></header>
         <div class="inspector-body">
           {#if previewEntity || previewThumb}
@@ -2754,6 +2786,7 @@
           <button class="btn btn-ghost" disabled={snapshotReading} onclick={() => (detailsId = selected.owner_id)}>Details</button>
           {#if selected.category === 'statement'}<button class="btn btn-primary" disabled={snapshotReading} onclick={() => openEditor(selected)}>Edit claim</button>{/if}
         </footer>
+      {/if}
     </aside>
     {/if}
   </div>
@@ -2908,7 +2941,7 @@
   /* What `⋯` holds, grouped the way it is asked for: a track to add, how lanes split,
      the period handed on, what the marks mean, the whole screen. */
   .more { position: relative; }
-  .more-btn { display: grid; place-items: center; width: 30px; padding: 0; }
+  .more-btn { display: inline-flex; align-items: center; gap: 4px; }
   .more-menu {
     position: absolute; z-index: 70; top: calc(100% + 5px); right: 0; width: 264px;
     max-height: min(70vh, 560px); overflow: auto; display: grid; gap: 4px; padding: 7px;

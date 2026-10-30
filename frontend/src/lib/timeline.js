@@ -657,7 +657,8 @@ function moveDateToken(raw, deltaMs) {
 }
 
 export function canDragTemporal(item) {
-  if (item?.category !== 'statement' || !item.raw) return false;
+  // a layer marker's day is edited on its layer, not on a claim it is not
+  if (item?.category !== 'statement' || !item.raw || item.kind === 'layer') return false;
   const parts = item.raw.split('/');
   const dates = parts.every((part) => DATE_TOKEN.test(part));
   const timestamps = parts.every((part) => sortableTimestamp(part));

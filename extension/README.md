@@ -147,15 +147,22 @@ On Firefox the panel may not come back after a reload on Apple, Earth or
 Copernicus, which the extension holds no host permission for. The other panels
 say so, and pressing the toolbar button on that tab puts it back.
 
-**A reference window is scratch.** Drag it by its header, resize it from the
-corner, wheel to zoom into the image, double-click the title bar to fold it away.
+**A reference window is scratch.** Drag it by its header (it settles against an
+edge or into a corner it comes near), resize it from the corner, wheel to zoom
+into the picture, double-click the title bar to fold it away. Its controls come up
+over the picture on a hover: the fade lets the site's map show and move under it,
+the details show the file's dates, source and notes, and the pin puts it in a
+column on either side (stacked, centred) or in a corner, clear of the panel. Let
+go in a corner, it stays there too. The site's map cannot be narrowed, so a
+column covers that edge of it, and a column on the panel's side runs under it.
 Nothing about it is filed, nothing comes back next visit, and the panel and its
 windows step out of the frame before a capture is taken, because a reference floating
 over a map must never end up inside the evidence.
 
 **Add reference** lists the case's images and videos, searched, filtered by kind
 and ordered by the app rather than by this tab: what crosses is one page of a case,
-never the case. A video plays in the window, with its own controls.
+never the case. A video plays in the window in a small player of its own: frame
+steps at the clip's own rate, slow motion, sound, and a frame kept as a picture.
 
 Two limits worth knowing. A reference has to be **under 512 MB**, and it crosses in
 pieces, so a long clip opens the way it does in the app's own Satellite tab: the

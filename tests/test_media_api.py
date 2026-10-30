@@ -4,6 +4,7 @@ import io
 import json
 import sys
 import threading
+from pathlib import Path
 
 import graph_read
 import pytest
@@ -649,6 +650,13 @@ def test_media_rename_rewrites_exact_references_everywhere(client):
             "notes": sentence,
         },
         layout.grid_rel("ref-search"): {"source": old, "notes": sentence},
+        layout.horizon_view_rel("Ref view"): {"spec": {"photo": {"path": old}}, "notes": sentence},
+        layout.horizon_work_rel(): {"photo": {"path": old}, "notes": sentence},
+        layout.horizon_find_rel("Ref find"): {"ask": {"photo": {"path": old}}, "notes": sentence},
+        layout.map_plate_rel("Ref plate"): {
+            "spec": {"elements": [{"kind": "image", "src": old}, {"kind": "video", "src": old}]},
+            "notes": sentence,
+        },
     }
     for rel, data in records.items():
         path = case.resolve_inside(rel)
@@ -687,6 +695,16 @@ def test_media_rename_rewrites_exact_references_everywhere(client):
     assert post["state"]["mediaPaths"] == [new]
     assert search["source"] == new
     assert {proof["notes"], inspect["notes"], post["notes"], search["notes"]} == {sentence}
+
+    def kept(rel):
+        return json.loads(case.resolve_inside(rel).read_text(encoding="utf-8"))
+
+    assert kept(layout.horizon_view_rel("Ref view"))["spec"]["photo"]["path"] == new
+    assert kept(layout.horizon_work_rel())["photo"]["path"] == new
+    assert kept(layout.horizon_find_rel("Ref find"))["ask"]["photo"]["path"] == new
+    plate = kept(layout.map_plate_rel("Ref plate"))
+    assert [element["src"] for element in plate["spec"]["elements"]] == [new, new]
+    assert plate["notes"] == sentence
 
 
 def test_media_rename_recovers_after_files_moved_before_database_update(client, monkeypatch):
@@ -1070,30 +1088,54 @@ def _install_failing_ydl(monkeypatch, message="No video could be found in this t
     monkeypatch.setitem(sys.modules, "yt_dlp.utils", utils)
 
 
-class _FakeGalleryExtractor:
-    """Mimics a gallery-dl extractor: iterating yields (message_type, url,
-    kwdict) tuples, type 3 being ``Message.Url`` (a downloadable file)."""
+def _install_fake_gallery_dl(monkeypatch, files=(), *, error=None, unsupported=False):
+    """Stand in for gallery-dl's command line, the one boundary the app talks to it across.
 
-    def __init__(self, items):
-        self._items = items
+    ``files`` are ``(url, metadata)`` pairs. A listing (``-j``) prints them as gallery-dl
+    does; a download (``--range N -D dir``) writes the N-th where the app looks for it,
+    its metadata beside it. ``error`` is ``(name, message)``, what gallery-dl raised: in
+    the listing's JSON, and in a download's log with its exit status. ``unsupported`` is
+    a bool, or a test on the address, for an address no extractor knows. Returns the
+    runs it saw as ``(kind, address, args)``.
+    """
+    from azimut.engine import gallerydl
 
-    def __iter__(self):
-        yield (2, "", {})  # Message.Directory — ignored by our code
-        for url, kw in self._items:
-            yield (3, url, kw)
+    runs = []
 
-    def request(self, url):
-        class Resp:
-            content = png_bytes()
+    def run(args):
+        address = args[-1]
+        kind = "listing" if "-j" in args else "download"
+        runs.append((kind, address, list(args)))
+        if unsupported(address) if callable(unsupported) else unsupported:
+            return gallerydl.Finished(64, "", f"[gallery-dl][error] Unsupported URL '{address}'\n")
+        if kind == "listing":
+            if error:
+                return gallerydl.Finished(
+                    0, json.dumps([[-1, {"error": error[0], "message": error[1]}]]), ""
+                )
+            listed = [[2, {}], *([3, url, kw] for url, kw in files)]
+            return gallerydl.Finished(0, json.dumps(listed, default=str), "")
+        if error:
+            name, message = error
+            said = f"{name}: {message}" if name.endswith(("Error", "Required")) else message
+            status = 16 if name in ("AuthenticationError", "AuthorizationError") else 4
+            return gallerydl.Finished(status, "", f"[twitter][error] {said}\n")
+        index = int(args[args.index("--range") + 1])
+        into = Path(args[args.index("-D") + 1])
+        if index > len(files):
+            return gallerydl.Finished(0, "", "")
+        (into / "media").write_bytes(png_bytes())
+        (into / ".meta").mkdir(exist_ok=True)
+        (into / ".meta" / "media.json").write_text(json.dumps(files[index - 1][1], default=str))
+        return gallerydl.Finished(0, "", "")
 
-        return Resp()
+    monkeypatch.setattr(gallerydl, "run", run)
+    return runs
 
 
 def test_gallery_dl_fallback_downloads_single_image(client, monkeypatch):
     """A photo-only tweet: yt-dlp raises, gallery-dl finds one image — it
     must still land in the case, with provenance naming gallery-dl."""
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
@@ -1109,16 +1151,23 @@ def test_gallery_dl_fallback_downloads_single_image(client, monkeypatch):
                 "extension": "jpg",
                 "content": "Impact on the substation\nsecond line",
                 "author": {"nick": "someone"},
+                "date": "2024-05-01 12:34:56",
             },
         )
     ]
-    monkeypatch.setattr(gdl_extractor, "find", lambda url: _FakeGalleryExtractor(items))
+    runs = _install_fake_gallery_dl(monkeypatch, items)
 
     result = media_engine.download_url(case, "https://x.com/u/status/1")
     assert result["multi"] is False
     assert result["item"]["source"]["downloader"] == "gallery-dl"
     assert result["item"]["title"] == "Impact on the substation"
     assert result["item"]["source"]["uploader"] == "someone"
+    assert result["item"]["source"]["upload_date"] == "20240501"
+    # A listing to learn there is one file, then that file.
+    assert [(kind, address) for kind, address, _ in runs] == [
+        ("listing", "https://x.com/u/status/1"),
+        ("download", "https://x.com/u/status/1"),
+    ]
 
 
 
@@ -1128,8 +1177,6 @@ def test_ytdlp_failure_does_not_print_to_the_terminal(client, monkeypatch, capsy
     reach the terminal; the extractor's own words stay at debug level."""
     import logging
 
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
@@ -1138,7 +1185,7 @@ def test_ytdlp_failure_does_not_print_to_the_terminal(client, monkeypatch, capsy
 
     _install_failing_ydl(monkeypatch)
     items = [("https://pbs.twimg.com/media/abc.jpg", {"filename": "abc", "extension": "jpg"})]
-    monkeypatch.setattr(gdl_extractor, "find", lambda url: _FakeGalleryExtractor(items))
+    _install_fake_gallery_dl(monkeypatch, items)
 
     capsys.readouterr()  # drop whatever the fixtures printed before this call
     with caplog.at_level(logging.DEBUG, logger="azimut.engine.media"):
@@ -1156,8 +1203,6 @@ def test_ytdlp_failure_does_not_print_to_the_terminal(client, monkeypatch, capsy
 def test_gallery_dl_fallback_multi_images(client, monkeypatch):
     """Two photos on the same post: reported as a picker like the yt-dlp
     path, downloads nothing until an ``index`` is picked."""
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
@@ -1169,7 +1214,7 @@ def test_gallery_dl_fallback_multi_images(client, monkeypatch):
     ]
 
     _install_failing_ydl(monkeypatch)
-    monkeypatch.setattr(gdl_extractor, "find", lambda url: _FakeGalleryExtractor(items))
+    runs = _install_fake_gallery_dl(monkeypatch, items)
 
     result = media_engine.download_url(case, "https://x.com/u/status/2")
     assert result == {
@@ -1181,17 +1226,20 @@ def test_gallery_dl_fallback_multi_images(client, monkeypatch):
         ],
     }
     assert case.list_entities() == []
+    assert [kind for kind, _, _ in runs] == ["listing"]
 
+    runs.clear()
     picked = media_engine.download_url(case, "https://x.com/u/status/2", index=2)
     assert picked["multi"] is False
     assert picked["item"]["filename"].startswith("b")
+    # A pick is one run: that file, read with its metadata, no listing first.
+    assert [kind for kind, _, _ in runs] == ["download"]
+    assert runs[0][2][runs[0][2].index("--range") + 1] == "2"
 
 
 def test_gallery_dl_fallback_no_extractor_raises(client, monkeypatch):
     """Neither yt-dlp nor gallery-dl recognizes the link — a clear error, not
     a silent no-op."""
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
@@ -1199,7 +1247,7 @@ def test_gallery_dl_fallback_no_extractor_raises(client, monkeypatch):
     case = Case.open(cid)
 
     _install_failing_ydl(monkeypatch)
-    monkeypatch.setattr(gdl_extractor, "find", lambda url: None)
+    _install_fake_gallery_dl(monkeypatch, unsupported=True)
 
     try:
         media_engine.download_url(case, "https://example.com/nope")
@@ -1221,21 +1269,14 @@ def test_a_slot_that_holds_footage_takes_photographs_too(client, monkeypatch):
     rows outright, on a road whose own tests could not see it: they stub the downloader,
     so `wants` never reaches the code that reads it.
     """
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
     cid = client.post("/api/cases", json={"name": "Photos"}).json()["id"]
     case = Case.open(cid)
     _install_failing_ydl(monkeypatch)
-    monkeypatch.setattr(
-        gdl_extractor, "find",
-        lambda url: [(3, "https://cdn.test/a.jpg", {"filename": "a", "extension": "jpg"})],
-    )
-    monkeypatch.setattr(
-        media_engine, "_register_gallery_dl_item",
-        lambda *a, **k: {"multi": False, "item": {"filename": "a.jpg"}},
+    _install_fake_gallery_dl(
+        monkeypatch, [("https://cdn.test/a.jpg", {"filename": "a", "extension": "jpg"})]
     )
 
     taken = media_engine.download_url(case, "https://x.com/u/status/7", wants="video")
@@ -1256,28 +1297,27 @@ def test_a_post_holding_only_a_clip_is_refused_a_slot_that_holds_pictures(
     refusal of its own type: a wall handler that turned it into "sign in" would be
     offering a login that could not fix what is not a permission problem.
     """
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
     cid = client.post("/api/cases", json={"name": "ClipOnly"}).json()["id"]
     case = Case.open(cid)
     _install_failing_ydl(monkeypatch)
-    monkeypatch.setattr(
-        gdl_extractor, "find",
-        lambda url: [(3, "https://cdn.test/clip.mp4", {"filename": "clip", "extension": "mp4"})],
+    runs = _install_fake_gallery_dl(
+        monkeypatch, [("https://cdn.test/clip.mp4", {"filename": "clip", "extension": "mp4"})]
     )
 
     with pytest.raises(media_engine.WrongKind, match="image"):
         media_engine.download_url(case, "https://x.com/u/status/9", wants="image")
     assert case.list_entities() == []  # nothing filed on the way out
+    assert [kind for kind, _, _ in runs] == ["listing"], "refused before any download"
+
+    # A pick made by index is refused the same way, and leaves nothing behind either.
+    with pytest.raises(media_engine.WrongKind, match="image"):
+        media_engine.download_url(case, "https://x.com/u/status/9", index=1, wants="image")
+    assert case.list_entities() == []
 
     # With room for it, the same address is an ordinary download.
-    monkeypatch.setattr(
-        media_engine, "_register_gallery_dl_item",
-        lambda *a, **k: {"multi": False, "item": {"filename": "clip.mp4"}},
-    )
     assert media_engine.download_url(case, "https://x.com/u/status/9")["item"]["filename"] == (
         "clip.mp4"
     )
@@ -1312,35 +1352,42 @@ def test_a_mastodon_status_on_any_server_reaches_the_extractor(client, monkeypat
     status, and only by shape: an account page is not a download, and a link of any
     other shape is refused exactly as before.
     """
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
     cid = client.post("/api/cases", json={"name": "Fediverse"}).json()["id"]
     case = Case.open(cid)
     _install_failing_ydl(monkeypatch)
+    # Nothing is downloaded here; the question is what was tried.
+    runs = _install_fake_gallery_dl(monkeypatch, unsupported=True)
 
-    asked: list[str] = []
+    for index in (None, 2):  # a listing and a pick ask in the same order
+        for url, tried in (
+            ("https://infosec.exchange/@user/112233445566", ["mastodon:"]),
+            ("https://mstdn.social/users/bob/statuses/998877", ["mastodon:"]),
+            ("https://infosec.exchange/@user", []),
+            ("https://example.com/nope", []),
+        ):
+            runs.clear()
+            with pytest.raises(RuntimeError, match="no extractor"):
+                media_engine.download_url(case, url, index=index)
+            asked = [address for _, address, _ in runs]
+            assert asked[0] == url  # the address as typed is always asked first
+            assert [a[: len(t)] for a, t in zip(asked[1:], tried)] == tried
+            assert len(asked) == 1 + len(tried)
 
-    def find(url):
-        asked.append(url)
-        return None  # nothing is downloaded here; the question is what was tried
-
-    monkeypatch.setattr(gdl_extractor, "find", find)
-
-    for url, tried in (
-        ("https://infosec.exchange/@user/112233445566", ["mastodon:"]),
-        ("https://mstdn.social/users/bob/statuses/998877", ["mastodon:"]),
-        ("https://infosec.exchange/@user", []),
-        ("https://example.com/nope", []),
-    ):
-        asked.clear()
-        with pytest.raises(RuntimeError, match="no extractor"):
-            media_engine.download_url(case, url)
-        assert asked[0] == url  # the address as typed is always asked first
-        assert [a[: len(t)] for a, t in zip(asked[1:], tried)] == tried
-        assert len(asked) == 1 + len(tried)
+    # A status its pattern does not name is read, and downloaded, as the one it was read as.
+    items = [("https://files.test/a.png", {"filename": "a", "extension": "png"})]
+    runs = _install_fake_gallery_dl(
+        monkeypatch, items, unsupported=lambda address: not address.startswith("mastodon:")
+    )
+    status = "https://infosec.exchange/@user/112233445566"
+    assert media_engine.download_url(case, status)["item"]["source"]["downloader"] == "gallery-dl"
+    assert [(kind, address) for kind, address, _ in runs] == [
+        ("listing", status),
+        ("listing", f"mastodon:{status}"),
+        ("download", f"mastodon:{status}"),
+    ]
 
 
 def test_telegram_embed_media_parses_photos(monkeypatch):
@@ -1411,8 +1458,6 @@ def test_telegram_embed_media_detects_video_too_large(monkeypatch):
 def test_download_reports_large_telegram_video_without_fallback(client, monkeypatch):
     """An app-only Telegram video is an actionable result, not the generic
     `no extractor recognizes this link` error from the gallery-dl fallback."""
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
@@ -1422,14 +1467,11 @@ def test_download_reports_large_telegram_video_without_fallback(client, monkeypa
 
     install_fake_ydl(monkeypatch, lambda ydl, target, download: None)
     monkeypatch.setattr(media_engine, "_telegram_embed_media", lambda target: ([], True))
-    monkeypatch.setattr(
-        gdl_extractor,
-        "find",
-        lambda target: (_ for _ in ()).throw(AssertionError("gallery-dl must not run")),
-    )
+    runs = _install_fake_gallery_dl(monkeypatch)
 
     assert media_engine.download_url(case, url) == {"telegram_only": True}
     assert case.list_entities() == []
+    assert runs == [], "gallery-dl must not run"
 
 
 def test_download_merges_telegram_video_and_photos(client, monkeypatch):
@@ -1623,8 +1665,6 @@ def test_auth_wall_returns_needs_auth(client, monkeypatch):
     the platform so the UI can offer the cookie affordance."""
     import sys
 
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
@@ -1632,7 +1672,7 @@ def test_auth_wall_returns_needs_auth(client, monkeypatch):
     case = Case.open(cid)
 
     _install_failing_ydl(monkeypatch, "ERROR: Private video. Sign in if you've been granted access")
-    monkeypatch.setattr(gdl_extractor, "find", lambda url: None)
+    _install_fake_gallery_dl(monkeypatch, unsupported=True)
 
     result = media_engine.download_url(case, "https://youtube.com/watch?v=priv")
     assert result == {"needs_auth": True, "platform": sys.platform}
@@ -1640,10 +1680,9 @@ def test_auth_wall_returns_needs_auth(client, monkeypatch):
 
 def test_gallery_auth_error_returns_needs_auth(client, monkeypatch):
     """The image path can hit the wall too: gallery-dl raising its typed
-    AuthenticationError must surface needs_auth, not crash the job."""
+    AuthenticationError must surface needs_auth, not crash the job — whether the
+    listing reports it or the download of a picked file does."""
     import sys
-
-    import gallery_dl.extractor as gdl_extractor
 
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
@@ -1651,24 +1690,19 @@ def test_gallery_auth_error_returns_needs_auth(client, monkeypatch):
     cid = client.post("/api/cases", json={"name": "GatedImg"}).json()["id"]
     case = Case.open(cid)
 
-    class AuthenticationError(Exception):
-        pass
-
-    def boom(url):
-        raise AuthenticationError("Login required")
-
     _install_failing_ydl(monkeypatch, "No video could be found")
-    monkeypatch.setattr(gdl_extractor, "find", boom)
+    # "Credentials", not a phrase the message reading knows: the name alone says wall.
+    _install_fake_gallery_dl(monkeypatch, error=("AuthenticationError", "Bad credentials"))
 
     result = media_engine.download_url(case, "https://instagram.com/p/priv")
     assert result == {"needs_auth": True, "platform": sys.platform}
+    picked = media_engine.download_url(case, "https://instagram.com/p/priv", index=2)
+    assert picked == {"needs_auth": True, "platform": sys.platform}
 
 
 def test_non_auth_failure_does_not_prompt_cookies(client, monkeypatch):
     """A dead link (no auth signal anywhere) keeps today's behavior: a plain
     error, never a cookie prompt the user can do nothing useful with."""
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
@@ -1676,7 +1710,7 @@ def test_non_auth_failure_does_not_prompt_cookies(client, monkeypatch):
     case = Case.open(cid)
 
     _install_failing_ydl(monkeypatch, "ERROR: Unable to download webpage: HTTP Error 404")
-    monkeypatch.setattr(gdl_extractor, "find", lambda url: None)
+    _install_fake_gallery_dl(monkeypatch, unsupported=True)
 
     try:
         media_engine.download_url(case, "https://example.com/nope")
@@ -1751,41 +1785,42 @@ def test_cookies_file_threads_absolute_cookiefile(client, monkeypatch):
     assert result["item"]["title"] == "Gated via file"
 
 
-def test_apply_gallery_config_asks_for_facets_and_threads_cookies(monkeypatch):
+def test_gallery_dl_is_told_facets_always_and_a_session_only_when_given(client, monkeypatch):
     """What gallery-dl is told before it reads a link.
 
     Cookies when there are any: a browser source as a [name] list, a file source as a
     path string. And Bluesky's facets always — an AT Protocol post keeps its links
     beside its words rather than in them, and the words hold an address printed with an
     ellipsis through it.
+
+    Each run is told on its own. In-process, a session once set stayed in gallery-dl's
+    config for every later read, so a cookie-less attempt was not cookie-less any more.
     """
-    import sys
-    import types
-
+    from azimut import config
     from azimut.engine import media as media_engine
+    from azimut.workspace import Case
 
-    calls = []
-    config_mod = types.ModuleType("gallery_dl.config")
-    config_mod.set = lambda path, key, value: calls.append((path, key, value))
-    gdl = types.ModuleType("gallery_dl")
-    gdl.config = config_mod
-    monkeypatch.setitem(sys.modules, "gallery_dl", gdl)
-    monkeypatch.setitem(sys.modules, "gallery_dl.config", config_mod)
+    cid = client.post("/api/cases", json={"name": "Told"}).json()["id"]
+    case = Case.open(cid)
+    _install_failing_ydl(monkeypatch)
+    runs = _install_fake_gallery_dl(
+        monkeypatch, [("https://cdn.test/a.jpg", {"filename": "a", "extension": "jpg"})]
+    )
 
-    facets = (("extractor", "bluesky"), "metadata", "facets")
+    def said(cookies):
+        runs.clear()
+        media_engine.download_url(case, "https://x.com/u/status/5", cookies=cookies)
+        args = runs[0][2]
+        assert args[args.index("-o") : args.index("-o") + 2] == [
+            "-o", "extractor.bluesky.metadata=facets"
+        ]
+        return [args[i + 1] for i, one in enumerate(args) if one == "-o"][1:]
 
-    media_engine._apply_gallery_config({"browser": "firefox"})
-    assert calls == [facets, (("extractor",), "cookies", ["firefox"])]
-
-    calls.clear()
-    media_engine._apply_gallery_config({"file": "cookies.txt"})
-    path, key, value = calls[-1]
-    assert (path, key) == (("extractor",), "cookies")
-    assert value.endswith("cookies.txt")
-
-    calls.clear()
-    media_engine._apply_gallery_config(None)
-    assert calls == [facets], "no cookies → nothing about cookies is said"
+    assert said({"browser": "firefox"}) == ['extractor.cookies=["firefox"]']
+    assert said({"file": "cookies.txt"}) == [
+        "extractor.cookies=" + json.dumps(str(config.cookies_file_path()))
+    ]
+    assert said(None) == [], "no cookies → nothing about cookies is said"
 
 
 def test_a_post_is_read_for_its_words_whatever_the_platform_calls_them(monkeypatch):
@@ -2248,8 +2283,6 @@ def test_a_slot_that_needs_a_picture_is_not_handed_the_quoted_video(client, monk
     that has nowhere to put a video. Saying so before the download is what lets the image
     extractor be tried at all, where today it is only reached when yt-dlp found nothing.
     """
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
@@ -2264,13 +2297,10 @@ def test_a_slot_that_needs_a_picture_is_not_handed_the_quoted_video(client, monk
         # the test would be reading the first download back twice.
         content_fn=lambda info: png_bytes(color=(10, 90, 200)),
     )
-    monkeypatch.setattr(
-        gdl_extractor,
-        "find",
-        lambda url: _FakeGalleryExtractor(
-            [("https://pbs.twimg.com/media/proof.jpg",
-              {"filename": "proof", "extension": "jpg", "content": "the published proof"})]
-        ),
+    _install_fake_gallery_dl(
+        monkeypatch,
+        [("https://pbs.twimg.com/media/proof.jpg",
+          {"filename": "proof", "extension": "jpg", "content": "the published proof"})],
     )
 
     # Asked for nothing in particular, the clip is a perfectly good answer.
@@ -2292,20 +2322,13 @@ def test_a_tombstone_is_read_as_a_wall_so_the_cookies_can_be_offered(client, mon
     prompt, so no cookie source was ever stored — and every later retry went out
     cookie-less too, because the only thing that sets that source is the prompt.
     """
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
-
-    class AbortExtraction(Exception):
-        pass
 
     cid = client.post("/api/cases", json={"name": "Tombstone"}).json()["id"]
     case = Case.open(cid)
     _install_failing_ydl(monkeypatch, message="No video could be found in this tweet")
-    monkeypatch.setattr(
-        gdl_extractor, "find", lambda url: (_ for _ in ()).throw(AbortExtraction("Unavailable"))
-    )
+    _install_fake_gallery_dl(monkeypatch, error=("AbortExtraction", "Unavailable"))
 
     assert media_engine.download_url(case, "https://x.com/u/status/1") == {
         "needs_auth": True,
@@ -2329,22 +2352,15 @@ def test_a_session_given_once_is_not_asked_for_again(client, monkeypatch):
     is a hundred questions with one answer. Public media still never touches the session:
     cookie-less first, then once, on a wall, with whatever the settings hold.
     """
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
     cid = client.post("/api/cases", json={"name": "Session"}).json()["id"]
     case = Case.open(cid)
     _install_failing_ydl(monkeypatch, message="No video could be found in this tweet")
-    tried: list[str] = []
-
-    def find(url):
-        tried.append(url)
-        raise RuntimeError("Unavailable")
 
     # With nothing configured, the wall stands and the prompt is what has to appear.
-    monkeypatch.setattr(gdl_extractor, "find", find)
+    tried = _install_fake_gallery_dl(monkeypatch, error=("AbortExtraction", "Unavailable"))
     assert media_engine.fetch_url(case, "https://x.com/u/status/1")["needs_auth"] is True
     assert len(tried) == 1, "no session to try, so one attempt"
 
@@ -2380,8 +2396,6 @@ def test_a_link_that_only_says_unavailable_is_retried_with_the_session(client, m
     cookie-less — and written down here and in SPEC's security posture so it is a decision
     rather than a surprise.
     """
-    import gallery_dl.extractor as gdl_extractor
-
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
@@ -2389,11 +2403,7 @@ def test_a_link_that_only_says_unavailable_is_retried_with_the_session(client, m
     case = Case.open(cid)
     _install_failing_ydl(monkeypatch, message="Unable to extract")
     sessions = []
-
-    def find(_url):
-        raise RuntimeError("Unavailable")
-
-    monkeypatch.setattr(gdl_extractor, "find", find)
+    _install_fake_gallery_dl(monkeypatch, error=("RuntimeError", "Unavailable"))
     real = media_engine.download_url
 
     def watched(case_, url, **asked):  # noqa: ANN001 — a spy over one call

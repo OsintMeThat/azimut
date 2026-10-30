@@ -100,3 +100,19 @@ describe('on a basemap with no figure to build', () => {
     ]);
   });
 });
+
+describe('over a tilted map', () => {
+  it('offers no deeper zoom and no scale or north, and says why once', () => {
+    show({ tilted: true });
+    const menu = document.body.textContent;
+    expect(menu).not.toContain('Resolution');
+    expect(menu).not.toContain('Scale bar & north arrow');
+    expect(hints()).toContain('A tilted view is filed as the map draws it on screen, without a scale bar or north arrow.');
+  });
+
+  it('keeps both on a map looking straight down', () => {
+    show({ tilted: false });
+    expect(document.body.textContent).toContain('Resolution');
+    expect(document.body.textContent).toContain('Scale bar & north arrow');
+  });
+});

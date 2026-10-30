@@ -6,11 +6,13 @@ import {
   filterSaved,
   isMode,
   keyFor,
+  kindControl,
   KINDS,
   oneEach,
   pendingLocate,
   SAVED_KINDS,
   savedFolders,
+  savedRow,
 } from './geoTree.js';
 
 const ok = (country, code, region, extra = {}) => ({
@@ -349,5 +351,31 @@ describe('showing only the folders wanted on the map', () => {
     expect(savedFolders([UA('a', 'Kyiv Oblast', { kind: 'place' })])).toEqual([
       { id: '', count: 1 },
     ]);
+  });
+});
+
+describe('the saved layer in a map’s Layers menu', () => {
+  const saved = (over = {}) => ({ kind: 'media', rows: [], media: [], shown: [], ...over });
+
+  it('asks Media, Places or Captures, Media first, and moves the map’s own position', () => {
+    const state = saved();
+    const control = kindControl(state);
+    expect(control.options.map((entry) => entry.label)).toEqual(['Media', 'Places', 'Captures']);
+    expect(control.value).toBe('media');
+    control.pick('places');
+    expect(state.kind).toBe('places');
+  });
+
+  it('counts what it draws and asks its question only once it is on', () => {
+    const state = saved({ rows: [{ id: 'p' }], shown: [] });
+    expect(savedRow(state, false)).toEqual({ detail: '', controls: null });
+    expect(savedRow(state, true).controls.map((entry) => entry.label)).toEqual(['Show']);
+    expect(savedRow(state, true, [{ id: 'a' }, { id: 'b' }]).detail).toBe('2');
+  });
+
+  it('locks the row when the case has nothing saved and nothing placed', () => {
+    expect(savedRow(saved(), true)).toEqual({ disabled: true, title: 'Nothing is saved or placed in this case yet' });
+    // placed footage and no pin is something to show
+    expect(savedRow(saved({ media: [{ id: 'm' }] }), true).disabled).toBeUndefined();
   });
 });

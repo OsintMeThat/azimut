@@ -269,7 +269,7 @@
   onkeydown={(event) => event.key === 'Escape' && (open = '')}
 />
 
-<div class="filter-bar">
+<div class="filter-bar" data-guide="case.filter">
   <div class="line">
     <div class="search-box">
       <Icon name="search" size={13} />

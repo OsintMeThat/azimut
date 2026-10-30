@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { bearingBetween } from './horizon/geometry.js';
 import {
   containsPoint,
   haversine,
@@ -7,9 +8,14 @@ import {
   angleAt,
   formatDistance,
   formatArea,
-  formatAngle,
+  formatHeight,
+  formatBearing,
   destination,
   orientedExtent,
+  perimeter,
+  crossing,
+  centroid,
+  cone,
 } from './measure.js';
 
 describe('haversine', () => {
@@ -95,10 +101,65 @@ describe('formatting', () => {
     expect(formatArea(5e6)).toBe('5.00 km²');
   });
 
-  it('reports the acute and obtuse angle pair', () => {
-    expect(formatAngle(90)).toBe('90.0° · 90.0°');
-    expect(formatAngle(65)).toBe('65.0° · 115.0°');
-    expect(formatAngle(150)).toBe('30.0° · 150.0°');
+  it('reads a bearing as three digits, wrapping a whisker short of north to north', () => {
+    expect(formatBearing(47)).toBe('047°');
+    expect(formatBearing(47.26, 1)).toBe('047.3°');
+    expect(formatBearing(359.7)).toBe('000°');
+    expect(formatBearing(359.96, 1)).toBe('000.0°');
+    expect(formatBearing(-90)).toBe('270°');
+  });
+});
+
+describe('nautical units', () => {
+  it('reads distances in nautical miles and heights in metres', () => {
+    expect(formatDistance(1852, 'nautical')).toBe('1.00 NM');
+    expect(formatDistance(463, 'nautical')).toBe('0.25 NM');
+    expect(formatDistance(1852 * 150, 'nautical')).toBe('150.0 NM');
+    expect(formatHeight(12.4, 'nautical')).toBe('12 m');
+  });
+
+  it('reads a sea area in square nautical miles, a small one as on land', () => {
+    expect(formatArea(1852 * 1852 * 3, 'nautical')).toBe('3.00 NM²');
+    expect(formatArea(500, 'nautical')).toBe('500 m²');
+  });
+});
+
+describe('the shapes a measure draws', () => {
+  const square = [
+    { lat: 0, lon: 0 },
+    { lat: 0, lon: 0.01 },
+    { lat: 0.01, lon: 0.01 },
+    { lat: 0.01, lon: 0 },
+  ];
+
+  it('goes round a ring back to its first corner for the perimeter', () => {
+    expect(perimeter(square)).toBeCloseTo(4 * haversine(square[0], square[1]), 0);
+    expect(perimeter(square.slice(0, 2))).toBeCloseTo(haversine(square[0], square[1]), 6);
+  });
+
+  it('finds where two drawn lines cross, and nothing where they miss', () => {
+    const at = crossing(square[0], square[2], square[1], square[3]);
+    expect(at.lat).toBeCloseTo(0.005, 6);
+    expect(at.lon).toBeCloseTo(0.005, 6);
+    expect(crossing(square[0], square[1], square[3], square[2])).toBe(null); // parallel
+    expect(crossing(square[0], { lat: 0.001, lon: 0.001 }, square[1], square[3])).toBe(null); // short of it
+  });
+
+  it('writes an area in its middle', () => {
+    const middle = centroid(square);
+    expect(middle.lat).toBeCloseTo(0.005, 6);
+    expect(middle.lon).toBeCloseTo(0.005, 6);
+  });
+
+  it('lays a view cone from its apex, as wide as asked, as long as asked', () => {
+    const apex = { lat: 46, lon: 7 };
+    const shape = cone(apex, 90, 60, 1000);
+    expect(shape[0]).toEqual(apex);
+    for (const point of shape.slice(1)) expect(haversine(apex, point)).toBeCloseTo(1000, 0);
+    expect(bearingBetween(apex, shape[1])).toBeCloseTo(60, 1);
+    expect(bearingBetween(apex, shape.at(-1))).toBeCloseTo(120, 1);
+    // a full turn is a ring round the apex, with no wedge back to it
+    expect(cone(apex, 0, 360, 1000)[0]).not.toEqual(apex);
   });
 });
 
@@ -222,5 +283,14 @@ describe('orientedExtent', () => {
   it('keeps a shape across the antimeridian its own size', () => {
     const { length } = orientedExtent([{ lat: 0, lon: 179.9995 }, { lat: 0, lon: -179.9995 }]);
     expect(length).toBeCloseTo(111, 0);
+  });
+});
+
+describe('formatHeight', () => {
+  it('reads a height in whole metres or feet', () => {
+    expect(formatHeight(2412.4)).toBe('2412 m');
+    expect(formatHeight(4806.5, 'imperial')).toBe('15769 ft');
+    expect(formatHeight(-28.2)).toBe('-28 m');
+    expect(formatHeight(null)).toBe('');
   });
 });

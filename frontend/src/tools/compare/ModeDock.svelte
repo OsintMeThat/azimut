@@ -13,7 +13,7 @@
   } = $props();
 </script>
 
-<div class="mode-dock cmp-glass" role="toolbar" aria-label="Comparison view">
+<div class="mode-dock cmp-glass" role="toolbar" aria-label="Comparison view" data-guide="compare.modes">
   <div class="cmp-seg" role="group" aria-label="View">
     {#each COMPARE_MODES as entry (entry.id)}
       <button

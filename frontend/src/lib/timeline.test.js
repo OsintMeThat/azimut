@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canDragTemporal,
   DAY,
   HOUR,
   WINDOW_SPANS,
@@ -774,5 +775,12 @@ describe('rows shared by the lanes', () => {
 
   it('leaves out the lanes it is not asked about', () => {
     expect(shareItemRows([null, 30], 20)).toEqual([null, 20]);
+  });
+});
+
+describe('dragging a date on the axis', () => {
+  it('moves a claim and leaves a layer marker, whose day is its layer\'s', () => {
+    expect(canDragTemporal({ category: 'statement', raw: '2026-09-13' })).toBe(true);
+    expect(canDragTemporal({ category: 'statement', raw: '2026-09-13', kind: 'layer' })).toBe(false);
   });
 });

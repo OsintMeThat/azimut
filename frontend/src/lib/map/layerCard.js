@@ -2,8 +2,8 @@
  * The card a feature of an added layer opens.
  *
  * Read-only by construction: it is built from the strings the source stated,
- * and its one control copies the feature's point. Nothing in an added layer
- * enters the case.
+ * and its controls copy the feature's point or open the case item one of the
+ * analyst's own markers follows. Nothing in an added layer enters the case.
  *
  * Three things it does beyond printing the description:
  *
@@ -23,9 +23,12 @@
  *   analyst's format, copied in one click. A right-click on the pin used to be
  *   the only way to them, and it read the ground under the pin's head rather
  *   than the point the pin names.
+ * - **A line states its length, an area its size.** Read off the geometry the
+ *   source wrote, in the analyst's units, at the foot of the card.
  */
 import { paths } from '../../components/Icon.svelte';
 import { formatCoords } from '../coords.js';
+import { formatArea, formatDistance, pathLength, polygonArea } from '../measure.js';
 import { UNNAMED } from './addedLayers.js';
 
 /** Where a URL starts, and how far it runs: to the first space or quote. */
@@ -105,6 +108,49 @@ export function fillText(element, text) {
   return element;
 }
 
+/**
+ * How long a feature's lines run and how much ground its areas cover, in metres.
+ *
+ * Multi-part geometries add up their parts, and a hole is taken out of its area.
+ * Null for a point, or for anything that has neither.
+ *
+ * @param {object | null} geometry GeoJSON
+ * @returns {{ length: number, area: number, perimeter: number } | null}
+ */
+export function featureSize(geometry) {
+  const size = { length: 0, area: 0, perimeter: 0 };
+  const points = (line) => (Array.isArray(line) ? line : [])
+    .filter((at) => Number.isFinite(at?.[0]) && Number.isFinite(at?.[1]))
+    .map(([lon, lat]) => ({ lat, lon }));
+  const polygon = (rings) => {
+    const [outer, ...holes] = (Array.isArray(rings) ? rings : []).map(points);
+    if (!outer || outer.length < 3) return;
+    size.area += Math.max(0, polygonArea(outer) - holes.reduce((sum, hole) => sum + polygonArea(hole), 0));
+    size.perimeter += pathLength(outer);
+  };
+  const walk = (shape) => {
+    switch (shape?.type) {
+      case 'LineString': size.length += pathLength(points(shape.coordinates)); break;
+      case 'MultiLineString': for (const line of shape.coordinates ?? []) size.length += pathLength(points(line)); break;
+      case 'Polygon': polygon(shape.coordinates); break;
+      case 'MultiPolygon': for (const rings of shape.coordinates ?? []) polygon(rings); break;
+      case 'GeometryCollection': for (const part of shape.geometries ?? []) walk(part); break;
+    }
+  };
+  walk(geometry);
+  return size.length > 0 || size.area > 0 ? size : null;
+}
+
+/** A feature's size as the card writes it, or '' when it has none. */
+export function sizeLine(geometry, units = 'metric') {
+  const size = featureSize(geometry);
+  if (!size) return '';
+  const parts = [];
+  if (size.area > 0) parts.push(`Area ${formatArea(size.area, units)}`, `Perimeter ${formatDistance(size.perimeter, units)}`);
+  if (size.length > 0) parts.push(`Length ${formatDistance(size.length, units)}`);
+  return parts.join(' · ');
+}
+
 /** The copy glyph, built as DOM for the same reason the text is. */
 function copyGlyph() {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -133,10 +179,12 @@ function copyGlyph() {
  *   in Settings is the one the next card uses
  * @param {(text: string) => void} [opts.copy] what pressing the coordinates
  *   does. Absent, they are text.
- * @returns {(properties: Record<string, any>, point?: { lat: number, lon: number } | null) => HTMLElement}
+ * @param {() => string} [opts.units] the analyst's units, read when the card
+ *   opens like the coordinates' format
+ * @returns {(properties: Record<string, any>, point?: { lat: number, lon: number } | null, geometry?: object | null) => HTMLElement}
  */
-export function layerCard(title, { coords = formatCoords, copy = null } = {}) {
-  return (properties = {}, point = null) => {
+export function layerCard(title, { coords = formatCoords, copy = null, pictures = null, units = () => 'metric' } = {}) {
+  return (properties = {}, point = null, geometry = null) => {
     const element = document.createElement('div');
     element.className = 'layer-card';
 
@@ -144,11 +192,50 @@ export function layerCard(title, { coords = formatCoords, copy = null } = {}) {
     heading.textContent = properties.name || UNNAMED;
     element.append(heading);
 
-    if (properties.category) {
+    // What a personal marker follows, each shown and opened from its picture: the
+    // footage first, then the proof that geolocates it. `pictures` answers a list of
+    // `{ src, caption, title, open }`.
+    const shown = (pictures?.(properties) ?? []).filter((one) => one.src);
+    if (shown.length) {
+      const row = document.createElement('div');
+      row.className = 'layer-card-pictures';
+      for (const one of shown) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'layer-card-picture';
+        button.title = one.title;
+        const image = document.createElement('img');
+        image.src = one.src;
+        image.alt = one.title;
+        image.loading = 'lazy';
+        // a thumbnail the cache let go: the card reads on without it
+        image.addEventListener('error', () => button.remove());
+        const caption = document.createElement('span');
+        caption.textContent = one.caption;
+        button.append(image, caption);
+        button.addEventListener('click', (event) => { event.stopPropagation(); one.open(); });
+        row.append(button);
+      }
+      element.append(row);
+    }
+
+    const named = [properties.category, properties.colour_name, properties.icon_meaning].filter(Boolean).join(' · ');
+    if (named) {
       const group = document.createElement('p');
       group.className = 'layer-card-group';
-      group.textContent = properties.category;
+      group.textContent = named;
       element.append(group);
+    }
+
+    // What the feature says beyond its name: its day, its state, whose point it is.
+    const day = properties.date ? (properties.date_end ? `${properties.date} – ${properties.date_end}` : properties.date) : '';
+    const facts = [day, { damaged: 'Damaged', destroyed: 'Destroyed' }[properties.status] ?? '',
+      properties.provenance === 'external' ? 'Geolocated by someone else' : ''].filter(Boolean);
+    if (facts.length) {
+      const line = document.createElement('p');
+      line.className = 'layer-card-facts';
+      line.textContent = facts.join(' · ');
+      element.append(line);
     }
 
     // A line or an area has no one point, so it states none.
@@ -192,6 +279,26 @@ export function layerCard(title, { coords = formatCoords, copy = null } = {}) {
         body.append(field);
       }
       element.append(body);
+    }
+
+    // The addresses a personal feature rests on, each opened in a tab of its own.
+    const links = (properties.links ?? []).filter((link) => /^https?:\/\//i.test(String(link)));
+    for (const link of links) {
+      const anchor = document.createElement('a');
+      anchor.className = 'layer-card-link';
+      anchor.href = link;
+      anchor.target = '_blank';
+      anchor.rel = 'noreferrer noopener';
+      anchor.textContent = link;
+      element.append(anchor);
+    }
+
+    const size = point ? '' : sizeLine(geometry, units());
+    if (size) {
+      const line = document.createElement('p');
+      line.className = 'layer-card-size';
+      line.textContent = size;
+      element.append(line);
     }
 
     const from = document.createElement('p');

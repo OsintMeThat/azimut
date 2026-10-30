@@ -1,0 +1,18 @@
+{
+  "width": 1033,
+  "height": 682,
+  "anchors": {
+    "horizon.map": {
+      "x": 693,
+      "y": 0,
+      "w": 340,
+      "h": 250
+    },
+    "horizon.viewpoint": {
+      "x": 708,
+      "y": 446,
+      "w": 311,
+      "h": 235.8
+    }
+  }
+}

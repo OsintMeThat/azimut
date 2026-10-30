@@ -16,6 +16,11 @@ from azimut.engine import inspect as inspect_engine
 from azimut.workspace import CaseError
 
 
+def _status(code: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", "https://example.org/x?key=secret")
+    return httpx.HTTPStatusError("x", request=request, response=httpx.Response(code, request=request))
+
+
 @pytest.mark.parametrize(
     ("exc", "said"),
     [
@@ -26,6 +31,10 @@ from azimut.workspace import CaseError
         (zipfile.BadZipFile("File is not a zip file"), "this file is not a readable archive"),
         (subprocess.TimeoutExpired(["ffmpeg"], 60), "it took too long and was stopped"),
         (httpx.ConnectError("[Errno -2] Name or service not known"), "the service could not be reached"),
+        (_status(403), "the service refused the key or the account (403)"),
+        (_status(429), "the service's allowance or rate limit is spent (429)"),
+        (_status(502), "the service is failing (502); try again later"),
+        (_status(404), "the service answered 404"),
     ],
 )
 def test_system_failures_become_a_clause_without_their_text(exc, said):

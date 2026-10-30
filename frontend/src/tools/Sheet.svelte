@@ -142,6 +142,7 @@
   import { SHEET_TEMPLATES, sheetTemplate, templateMeta } from '../lib/sheetTemplates.js';
   import { canBuild, columnKinds } from '../lib/sheetBuild.js';
   import Icon from '../components/Icon.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
@@ -165,6 +166,8 @@
   import SheetRowMenu from '../components/SheetRowMenu.svelte';
   import SheetRowPanel from '../components/SheetRowPanel.svelte';
   import { shortcut } from '../lib/keys.js';
+  import { middleClickPaste } from '../lib/clipboardPaste.js';
+  import { carriesOutsideFiles, leftZone } from '../lib/drag.js';
 
   const HEAD_H = 32;
   /** How long the two lines above the grid may be. Mirrors `engine/sheets.MAX_DESCRIPTION`,
@@ -1258,6 +1261,7 @@
    * the media entity so the graph knows the row rests on it.
    */
   function onDrop(event) {
+    if (!carriesOutsideFiles(event)) return;
     event.preventDefault();
     dropping = false;
     const file = event.dataTransfer?.files?.[0];
@@ -1958,7 +1962,7 @@
    * other block is a table, and lands as a rectangle from where the cursor is.
    */
   function onPaste(event) {
-    if (!mine() || !openId || inAField(event.target) || editing) return;
+    if (!mine() || !openId || inAField(event.target) || editing || middleClickPaste()) return;
     const text = event.clipboardData?.getData('text/plain') ?? '';
     if (!text.trim()) return;
     event.preventDefault();
@@ -3721,8 +3725,13 @@
 
 <div class="tool">
   <header class="tool-header">
-    <Icon name="table" size={17} />
-    <h2>Sheet</h2>
+    {#if openId}
+      <!-- back to the home, saved first: the way out every document tool has, first in its header -->
+      <BackButton label="Sheets" title="Save and go back to the sheets" onclick={goHome} />
+    {:else}
+      <Icon name="table" size={17} />
+      <h2>Sheet</h2>
+    {/if}
     {#if openId}
       <input
         class="input title-input"
@@ -3816,11 +3825,11 @@
          and a delete: on a laptop the last of them ran off the edge. They are also asked
          once per sheet, where the grid's own controls are asked all day. -->
     <div class="anchor" bind:this={newAnchor}>
-      <button class="btn btn-sm" aria-expanded={newOpen} onclick={() => (newOpen = !newOpen)}>
+      <button class="btn btn-sm" data-guide="sheet.new" aria-expanded={newOpen} onclick={() => (newOpen = !newOpen)}>
         <Icon name="plus" size={13} /> New <Icon name="chevronDown" size={12} />
       </button>
       {#if newOpen}
-        <div class="new-menu">
+        <div class="new-menu" data-guide="sheet.new-menu">
           <button class="menu-row" onclick={() => { newOpen = false; creating = { title: '' }; }}>
             <Icon name="table" size={12} /><span>Blank sheet</span>
           </button>
@@ -3902,10 +3911,6 @@
               onclick={() => (confirming = { kind: 'sheet' })}>
         <Icon name="trash" size={13} />
       </button>
-      <!-- Back to the home, saved first: the way out Collage has, under the same word. -->
-      <button class="btn btn-ghost btn-sm" onclick={goHome} title="Save and go back to the sheets">
-        <Icon name="x" size={14} /> Close
-      </button>
     {/if}
     <!-- The grid keeps its power under a right-click, which is right — and a right-click
          nobody tries is a feature nobody has. So one door says what there is. -->
@@ -3947,7 +3952,7 @@
           <Icon name="reset" size={13} /> {refreshing ? 'Refreshing' : 'Refresh'}
         </button>
       {/if}
-      <div class="search">
+      <div class="search" data-guide="sheet.search">
         <Icon name="search" size={13} />
         <!-- Written by hand rather than bound: the box echoes the keystroke and the grid
              narrows a moment later, and one binding cannot hold both clocks. -->
@@ -3998,7 +4003,7 @@
         </div>
       {/if}
       <div class="anchor" bind:this={columnsAnchor}>
-        <button class="btn btn-ghost btn-sm" class:active={columnsOpen}
+        <button class="btn btn-ghost btn-sm" class:active={columnsOpen} data-guide="sheet.columns"
                 aria-expanded={columnsOpen} onclick={() => (columnsOpen = !columnsOpen)}>
           <Icon name="layers" size={13} /> Columns
         </button>
@@ -4262,14 +4267,14 @@
 
     <div class="grid-panel">
     <div class="grid-wrap" class:dropping
-         ondragover={(event) => { event.preventDefault(); dropping = true; }}
-         ondragleave={() => (dropping = false)}
+         ondragover={(event) => { if (!carriesOutsideFiles(event)) return; event.preventDefault(); dropping = true; }}
+         ondragleave={(event) => { if (leftZone(event)) dropping = false; }}
          ondrop={onDrop}
          role="presentation">
     <!-- The grid takes the focus itself and says which cell the cursor is on, because the
          keyboard is answered on `window` and the cells are never focused: without this a
          screen reader followed none of it. -->
-    <div class="grid" class:tall={meta.tall} id="sheet-grid" role="grid" aria-label="Sheet rows"
+    <div class="grid" class:tall={meta.tall} id="sheet-grid" role="grid" aria-label="Sheet rows" data-guide="sheet.grid"
          tabindex="0"
          aria-activedescendant={cursor.row === -1
            ? undefined
@@ -4767,7 +4772,7 @@
         </span>
       {/each}
       {#if progress}
-        <span class="progress">
+        <span class="progress" data-guide="sheet.progress">
           <span class="progress-key">{meta.progress}</span>
           {#if progress.kind === 'fill'}
             <strong>{progress.filled}</strong> filled ·

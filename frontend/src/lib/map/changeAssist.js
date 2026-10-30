@@ -146,14 +146,15 @@ export function changeSettings(raw = {}) {
   };
 }
 
-function layerReading(side, skipped) {
-  return (side?.overlays ?? [])
-    .filter((id) => id !== skipped)
-    .map((id) => {
-      if (id === 'firms') return [id, side.firms];
-      if (id === 'nightlights') return [id, side.nightlights];
-      return [id];
-    });
+/**
+ * A side as a reading sees it: its picture, and its night lights when they are
+ * on, never the layers laid over it. What a reading is keyed on, so switching a
+ * layer leaves the highlights up to date.
+ */
+export function readSide(side) {
+  const { overlays = [], firms: _firms, nightlights, ...picture } = side;
+  const night = overlays.includes('nightlights');
+  return { ...picture, overlays: night ? ['nightlights'] : [], nightlights: night ? nightlights : null };
 }
 
 const refuse = (reason) => ({ ok: false, reason, methods: [], clouds: false });
@@ -162,6 +163,10 @@ const ESRI = new Set(['esri-world-imagery', 'esri-wayback']);
 
 /**
  * Whether a pixel reading of this pair is honest, and how much to trust it.
+ *
+ * The layers laid over either side play no part: Difference reads the picture
+ * alone (`snapshot`'s `keep` in `facade.js`), so a layer may stay on A and not
+ * on B. Night lights are the one overlay it reads, when they are the picture.
  *
  * @returns {{ ok: boolean, reason?: string, grade?: 'matched'|'indicative',
  *   label?: string, from?: string, to?: string, notes?: string[], methods: string[] }}
@@ -180,10 +185,10 @@ export function changeCompatibility(a, b) {
     }
     const notes = [];
     const methods = ['index'];
-    if (a.sentinel?.layer === b.sentinel?.layer && same(layerReading(a), layerReading(b))) {
+    if (a.sentinel?.layer === b.sentinel?.layer) {
       methods.unshift(...PIXEL_METHODS);
     } else {
-      notes.push('Pixel methods need the same layers on A and B.');
+      notes.push('Pixel methods need the same Sentinel-2 layer on A and B.');
     }
     if (a.sentinel?.maxcc !== b.sentinel?.maxcc) {
       notes.push('A and B use different cloud ceilings.');
@@ -215,9 +220,6 @@ export function changeCompatibility(a, b) {
     if (!sameTrack(passA.time, passB.time)) {
       return refuse('Radar compares two passes of one track. Pick passes at the same time of day.');
     }
-    if (!same(layerReading(a), layerReading(b))) {
-      return refuse('Match the reference layers on A and B before comparing pixels.');
-    }
     return {
       ok: true,
       family: 'sentinel1',
@@ -239,9 +241,6 @@ export function changeCompatibility(a, b) {
       // VIIRS nights too, and a refusal that named one road sent analysts looking
       // for a second Wayback release they did not need.
       return refuse('Both sides show the same picture. Pick another Esri release, or two dated Sentinel-2 passes.');
-    }
-    if (!same(layerReading(a), layerReading(b))) {
-      return refuse('Match the reference layers on A and B before comparing pixels.');
     }
     const mixed = a.provider !== b.provider;
     return {
@@ -277,9 +276,6 @@ export function changeCompatibility(a, b) {
     }
     if (!same(a.sentinel, b.sentinel) || a.waybackRelease !== b.waybackRelease) {
       return refuse('Match the background imagery on A and B before comparing night lights.');
-    }
-    if (!same(layerReading(a, 'nightlights'), layerReading(b, 'nightlights'))) {
-      return refuse('Match every other layer on A and B before comparing night lights.');
     }
     return {
       ok: true,

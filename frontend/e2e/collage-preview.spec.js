@@ -68,7 +68,7 @@ test('draws a warped collage into the preview it files', async ({ page }) => {
   }));
   await page.route(`**/files/${CASE_ID}/.collages/Strip.webp*`, (route) =>
     route.fulfill({ contentType: 'image/png', body: previews[0] }));
-  await page.getByRole('button', { name: 'Collages' }).click();
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
   const shown = page.locator('.row-preview img');
   await expect(shown).toBeVisible();
   await expect.poll(() => shown.evaluate((img) => img.naturalWidth)).toBe(480);
@@ -122,7 +122,7 @@ test('closes an open collage back to the list', async ({ page }) => {
   await expect(page.getByRole('textbox', { name: 'Collage name' })).toHaveValue('Strip');
   if (process.env.COLLAGE_SHOT) await page.screenshot({ path: process.env.COLLAGE_SHOT.replace('.png', '-open.png') });
 
-  await page.getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('button', { name: 'Collages', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Collages' })).toBeVisible();
   await expect(page.locator('.card')).toHaveCount(1);
 });

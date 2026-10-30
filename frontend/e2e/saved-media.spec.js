@@ -115,3 +115,45 @@ test('keeps the card for saved work, which is read rather than watched', async (
   await expect(page.locator('.saved-popup')).toBeVisible();
   await expect(panel(page).locator('.viewer')).toHaveCount(0);
 });
+
+test('puts a file in a layer from the player, a step at a time, the menu whole in the window', async ({ page }) => {
+  const layers = [
+    { name: 'front', title: 'Front', markers: [], styles: [{ symbol: 'flag', colour: '#d55e00' }], groups: [
+      { id: 'g1', name: 'Positions', mode: 'individual', colour: '#0072b2', symbol: 'pin' },
+      { id: 'g2', name: 'Sightings', mode: 'uniform', colour: '#009e73', symbol: 'badge-video' }] },
+  ];
+  const asked = [];
+  await installAppFixture(page, { mediaIndex });
+  await page.route('**/api/cases/*/layer-targets**', (route) => route.fulfill({ json: layers }));
+  await page.route('**/api/cases/*/map-layers/front/links', (route) => {
+    asked.push(route.request().postDataJSON());
+    return route.fulfill({ json: { layer: { name: 'front', title: 'Front', editable: true }, added: 1 } });
+  });
+  await page.goto('/#satellite');
+  await awaitMapReady(page);
+
+  await page.locator('.saved-mark').click();
+  // the picture laid out first, so the button stays where the menu opens from
+  await expect(panel(page).locator('.viewer img')).toBeVisible();
+  await panel(page).getByRole('button', { name: 'Add to a layer', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'Add to a layer', exact: true });
+  await menu.getByRole('button', { name: 'Front', exact: true }).click();
+  await expect(menu.locator('.fm-item')).toHaveText(['Positions', 'Sightings']);
+  await menu.getByRole('button', { name: 'Positions', exact: true }).click();
+  await menu.getByRole('button', { name: 'Point icon Tank icon', exact: true }).click();
+  const add = menu.getByRole('button', { name: 'Add to Positions', exact: true });
+  await expect(add).toBeInViewport();
+  // where the menu stands stays in sight above the icons
+  await expect(menu.locator('.step-back')).toBeInViewport();
+  const box = await menu.boundingBox(), viewport = page.viewportSize();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+  await page.screenshot({ path: test.info().outputPath('media-layer-menu.png') });
+  await add.click();
+  await expect(menu).toHaveCount(0);
+  expect(asked).toEqual([{ items: [{ id: 'media-1', lat: 48.8584, lon: 2.2945 }], group: 'g1', symbol: 'badge-tank', colour: '#0072b2', icon: '' }]);
+  await expect(page.getByText('Added to Front')).toBeVisible();
+});
+

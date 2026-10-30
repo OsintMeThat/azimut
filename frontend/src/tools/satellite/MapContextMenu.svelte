@@ -4,7 +4,9 @@
    *
    * It lives inside the map surface and is placed against it, so it travels
    * with a detached window and is hidden with the rest of the chrome during a
-   * screen grab. The list and the placement are `lib/map/contextMenu.js`; the
+   * screen grab. Compare, whose stacked maps would clip or cover it, draws it
+   * in a box of the map's size over both instead. The list and the placement
+   * are `lib/map/contextMenu.js`; the
    * acts are the tool's, reported through `onpick`.
    */
   import { onMount, tick } from 'svelte';
@@ -169,6 +171,7 @@
 
 <div
   class="ctx card"
+  data-guide="map.menu"
   role="menu"
   tabindex="-1"
   aria-label="This point"

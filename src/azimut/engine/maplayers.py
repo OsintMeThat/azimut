@@ -622,12 +622,14 @@ def _from_geojson(data: bytes, filename: str) -> tuple[list[dict[str, Any]], str
                 "properties": _properties(
                     name=_first(source, _NAME_KEYS),
                     description=_first(source, _DESCRIPTION_KEYS),
-                    category=_text(source.get("category"), MAX_NAME) if document.get("azimut_detect_layer") == 1 else category,
+                    category=_text(source.get("category"), MAX_NAME) if document.get("azimut_detect_layer") == 1 or document.get("azimut_personal_layer") == 1 else category,
                     # A change was read between two passes and spans both; a thing
                     # present on one pass is dated by that pass alone.
                     date=(source.get("pass_before") or source.get("pass_date", ""))
-                    if document.get("azimut_detect_layer") == 1 else "",
-                    date_end=source.get("pass_date", "") if document.get("azimut_detect_layer") == 1 else "",
+                    if document.get("azimut_detect_layer") == 1
+                    else source.get("date", "") if document.get("azimut_personal_layer") == 1 else "",
+                    date_end=source.get("pass_date", "") if document.get("azimut_detect_layer") == 1
+                    else source.get("date_end", "") if document.get("azimut_personal_layer") == 1 else "",
                     # simplestyle-spec, which is what every tool that writes a
                     # styled GeoJSON — geojson.io included — puts the colour in
                     colour=_hex(source.get("marker-color") or source.get("stroke")
@@ -640,7 +642,33 @@ def _from_geojson(data: bytes, filename: str) -> tuple[list[dict[str, Any]], str
                 for key in ("pass_date", "detector", "area_name", "run_id")})
             features[-1]["properties"].update({key: _text(source[key], MAX_NAME)
                 for key in ("pass_before", "pass_time") if source.get(key)})
+        if document.get("azimut_personal_layer") == 1:
+            _personal_style(features[-1]["properties"], source)
     return features, _text(document.get("name"), MAX_NAME)
+
+
+def _personal_style(properties: dict[str, Any], source: dict[str, Any]) -> None:
+    from .layerediting import SYMBOLS, apply_fields
+
+    if source.get("symbol") in SYMBOLS:
+        properties["symbol"] = source["symbol"]
+    # Kept field by field: one a later build would refuse costs that field only.
+    for field in ("status", "bearing", "provenance", "links"):
+        if source.get(field) not in (None, ""):
+            try:
+                apply_fields(properties, {field: source[field]})
+            except LayerError:
+                continue
+    # an unknown end is said only of a feature with none
+    if source.get("end_unknown") in (True, "true") and not properties.get("date_end"):
+        properties["end_unknown"] = True
+    colour = _hex(source.get("colour"))
+    if colour:
+        properties["colour"] = colour
+    for field, low, high in (("icon_scale", 0.5, 3), ("stroke_width", 0.5, 12)):
+        value = source.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and low <= value <= high:
+            properties[field] = value
 
 
 def _first(source: dict[str, Any], keys: tuple[str, ...]) -> str:
@@ -891,6 +919,26 @@ def _placemark(
             }
         )
 
+        extended = _child(element, "ExtendedData")
+        if extended is not None:
+            personal: dict[str, Any] = {}
+            for entry in extended:
+                label = str(entry.get("name", ""))
+                field = label.removeprefix("azimut_")
+                # a source's own column named "status" is the source's, not ours
+                if field == label or field not in _AZIMUT_FIELDS:
+                    continue
+                value: Any = _child_text(entry, "value")
+                if field in ("icon_scale", "stroke_width", "bearing"):
+                    try:
+                        value = float(value)
+                    except ValueError:
+                        continue
+                elif field == "links":
+                    value = [line for line in value.splitlines() if line.strip()]
+                personal[field] = value
+            _personal_style(features[-1]["properties"], personal)
+
 
 def _kml_days(element: Element) -> tuple[str, str]:
     """When a placemark says it happened: a TimeStamp, else the days a TimeSpan runs."""
@@ -901,6 +949,10 @@ def _kml_days(element: Element) -> tuple[str, str]:
     if span is not None:
         return iso_day(_child_text(span, "begin")), iso_day(_child_text(span, "end"))
     return "", ""
+
+
+#: The fields a personal layer's own download writes as `azimut_*` ExtendedData.
+_AZIMUT_FIELDS = ("symbol", "colour", "icon_scale", "stroke_width", "status", "bearing", "provenance", "links", "end_unknown")
 
 
 def _kml_extended_data(element: Element) -> str:
@@ -914,7 +966,7 @@ def _kml_extended_data(element: Element) -> str:
             continue
         label = child.get("name") or ""
         value = _child_text(child, "value")
-        if label and value:
+        if label and value and not (label.startswith("azimut_") and label[7:] in _AZIMUT_FIELDS):
             rows.append(f"{label}: {value}")
     return "\n".join(rows)
 
@@ -1558,7 +1610,7 @@ SPEC_VERSION = 1
 #: the day it was dropped in, for as long as the case lives. Bumped whenever a
 #: change here would give the same bytes a different reading; the next request
 #: for that layer reparses the snapshot already on disk.
-PARSE_VERSION = 4
+PARSE_VERSION = 5
 
 #: Where that stamp is written. A GeoJSON object may carry members it does not
 #: define, and this one is written first so the check reads the head of the file
@@ -1663,7 +1715,8 @@ def _read_spec(case: "Case", name: str) -> dict[str, Any]:
 def _write_spec(case: "Case", name: str, spec: dict[str, Any]) -> None:
     case.subdir(layout.LAYERS_DIR)
     path = case.resolve_inside(layout.layer_spec_rel(name))
-    write_text_atomic(path, json.dumps(spec, indent=2, ensure_ascii=False) + "\n")
+    # compact: an indented dump goes through Python's own encoder, seconds on a layer of thousands of corners
+    write_text_atomic(path, json.dumps(spec, ensure_ascii=False) + "\n")
 
 
 def _free_name(case: "Case", title: str) -> str:
@@ -1821,15 +1874,57 @@ def icon(case: "Case", name: str, key: str) -> bytes:
     return buffer.getvalue()
 
 
-def _write_cache(case: "Case", name: str, geojson: dict[str, Any]) -> Path:
+def icon_members(case: "Case", name: str) -> dict[str, bytes]:
+    """Every pictogram a layer holds, key → the bytes stored, unread past the bounds.
+
+    The bytes as they sit in the zip: what a palette hashes to tell which are in
+    the analyst's library already, and what a new member is written beside.
+    Serving one still goes through `icon`, which re-encodes it.
+    """
+    path = case.resolve_inside(layout.layer_icons_rel(name))
+    out: dict[str, bytes] = {}
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for entry in archive.infolist()[:MAX_ICONS]:
+                key = entry.filename.removesuffix(".png")
+                if (entry.is_dir() or not entry.filename.endswith(".png") or not _ICON_KEY.fullmatch(key)
+                        or entry.file_size > MAX_ICON_BYTES):
+                    continue
+                with archive.open(entry) as handle:
+                    data = handle.read(MAX_ICON_BYTES + 1)
+                if len(data) <= MAX_ICON_BYTES:
+                    out[key] = data
+    except FileNotFoundError:
+        return {}
+    except (OSError, KeyError, EOFError, RuntimeError, NotImplementedError,
+            zipfile.BadZipFile, zlib.error) as exc:
+        raise LayerError("this layer's icons could not be read") from exc
+    return out
+
+
+def add_icons(case: "Case", name: str, images: dict[str, bytes]) -> int:
+    """Write pictograms beside the ones a layer holds; how many it holds then."""
+    held = icon_members(case, name)
+    fresh = {key: png for key, png in images.items() if key not in held}
+    if len(held) + len(fresh) > MAX_ICONS:
+        raise LayerError(f"a layer holds at most {MAX_ICONS} icons")
+    return _write_icons(case, name, {**held, **fresh}) if fresh else len(held)
+
+
+def _write_cache(
+    case: "Case", name: str, geojson: dict[str, Any], *, content_sha256: str = ""
+) -> Path:
     path = case.resolve_inside(layout.layer_cache_rel(name))
     path.parent.mkdir(parents=True, exist_ok=True)
-    stamped = {PARSE_KEY: PARSE_VERSION, **geojson}
-    path.write_text(json.dumps(stamped, ensure_ascii=False), encoding="utf-8")
+    stamped: dict[str, Any] = {PARSE_KEY: PARSE_VERSION}
+    if content_sha256:
+        stamped["azimut_content"] = content_sha256
+    stamped.update(geojson)
+    write_text_atomic(path, json.dumps(stamped, ensure_ascii=False))
     return path
 
 
-def _cache_is_current(path: Path) -> bool:
+def _cache_is_current(path: Path, content_sha256: str = "") -> bool:
     """Whether this cached copy came from the parser running now.
 
     Read from the head of the file: these run to tens of megabytes, and the
@@ -1837,14 +1932,16 @@ def _cache_is_current(path: Path) -> bool:
     """
     try:
         with path.open("rb") as handle:
-            head = handle.read(64).decode("utf-8", "replace")
+            head = handle.read(160 if content_sha256 else 64).decode("utf-8", "replace")
     except OSError:
         return False
-    return f'"{PARSE_KEY}": {PARSE_VERSION}' in head
+    return f'"{PARSE_KEY}": {PARSE_VERSION}' in head and (
+        not content_sha256 or f'"azimut_content": "{content_sha256}"' in head
+    )
 
 
 def drawing(case: "Case", name: str) -> Path:
-    """The parsed GeoJSON to serve, rebuilt from the snapshot when it is gone.
+    """The drawing, rebuilt from the snapshot or working spec when needed.
 
     Which is the normal case after a restore from the Trash or an import: the
     cache is the one of the three files that never travels, so every caller has
@@ -1855,7 +1952,18 @@ def drawing(case: "Case", name: str) -> Path:
     """
     spec = _read_spec(case, name)
     path = case.resolve_inside(layout.layer_cache_rel(name))
-    if path.is_file() and _cache_is_current(path):
+    content_sha256 = str(spec.get("content_sha256") or "")
+    if (spec.get("source") or {}).get("kind") == "editable":
+        from . import layerediting
+
+        with case.lock:
+            spec = _read_spec(case, name)
+            content_sha256 = layerediting.render_digest(case, spec)
+            if path.is_file() and _cache_is_current(path, content_sha256):
+                return path
+            return _write_cache(case, name, layerediting.drawing(spec, case)["geojson"],
+                                content_sha256=content_sha256)
+    if path.is_file() and _cache_is_current(path, content_sha256):
         return path
     snapshot = case.resolve_inside(layout.layer_snapshot_rel(name))
     try:
@@ -2087,6 +2195,10 @@ def _update_locked(
     spec = _read_spec(case, name)
     if hidden is not None:
         live = {entry["name"] for entry in (spec.get("summary") or {}).get("categories", [])}
+        if (spec.get("source") or {}).get("kind") == "editable":
+            from . import layerediting
+
+            live.update(group["name"] for group in layerediting._groups(spec))
         spec["hidden"] = sorted({str(entry) for entry in hidden} & live)
     if period is not None:
         start, end = iso_day(period[0]), iso_day(period[1])
@@ -2106,7 +2218,7 @@ def _update_locked(
         entity = case.find_entity(attr="spec", value=layout.layer_spec_rel(name))
         if entity:
             case.update_entity(entity["id"], {"label": spec["title"]})
-    return row(name, spec)
+    return row(name, spec, case=case)
 
 
 def reorder(case: "Case", names: list[str]) -> list[dict[str, Any]]:
@@ -2141,17 +2253,25 @@ def listing(case: "Case") -> list[dict[str, Any]]:
             spec = _read_spec(case, path.stem)
         except LayerError:
             continue
-        rows.append((spec.get("position"), row(path.stem, spec)))
+        rows.append((spec.get("position"), row(path.stem, spec, case=case)))
     rows.sort(key=lambda entry: entry[1].get("created_at") or "", reverse=True)
     rows.sort(key=lambda entry: entry[0] if isinstance(entry[0], int) else -1)
     return [entry for _, entry in rows]
 
 
 def read(case: "Case", name: str) -> dict[str, Any]:
-    return row(name, _read_spec(case, name))
+    return row(name, _read_spec(case, name), case=case)
 
 
-def row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
+def _worn_symbols(spec: dict[str, Any], source: dict[str, Any]) -> dict[str, int]:
+    if source.get("kind") != "editable" or not isinstance((spec.get("document") or {}).get("features"), list):
+        return {}
+    from . import layerediting
+
+    return layerediting.worn_symbols(spec)
+
+
+def row(name: str, spec: dict[str, Any], *, case: "Case | None" = None) -> dict[str, Any]:
     """One layer as the panel reads it.
 
     Freshness is computed rather than stored: a snapshot does not become stale by
@@ -2161,9 +2281,15 @@ def row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     summary = spec.get("summary") or {}
     source = spec.get("source") or {}
     at = str(snapshot.get("checked_at") or snapshot.get("at") or "")
+    content_hash = spec.get("content_sha256") or snapshot.get("sha256") or ""
+    if case and source.get("kind") == "editable":
+        from . import layerediting
+
+        content_hash = layerediting.render_digest(case, spec)
     return {
         "name": name,
         "title": spec.get("title") or name,
+        "description": spec.get("description", ""),
         "source": source,
         "hidden": list(spec.get("hidden") or []),
         # the time filter, `{start, end}`, either bound "" when open
@@ -2171,12 +2297,16 @@ def row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         "refresh": spec.get("refresh") or {},
         "features": int(summary.get("features") or 0),
         "categories": summary.get("categories") or [],
+        # a personal layer's colours, `#hex → features`, which its legend names
+        "colours": summary.get("colours") or {},
+        # and its markers' icons, `badge or icon key → markers`, counted anew for a layer saved before they were
+        "symbols": summary["symbols"] if "symbols" in summary else _worn_symbols(spec, source),
         "bbox": summary.get("bbox"),
         "format": summary.get("format") or source.get("format") or "",
         # How many of the source's own pictograms are stored, which is also what
         # tells the map whether to ask for any: zero and it draws its own shapes.
         "icons": int(snapshot.get("icons") or 0),
-        "sha256": snapshot.get("sha256") or "",
+        "sha256": content_hash,
         "bytes": int(snapshot.get("bytes") or 0),
         "fetched_at": snapshot.get("at") or "",
         "checked_at": at,
@@ -2184,6 +2314,12 @@ def row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         "created_at": spec.get("created_at") or "",
         "updated_at": spec.get("updated_at") or "",
         "spec": layout.layer_spec_rel(name),
+        "editable": source.get("kind") == "editable",
+        "origin": spec.get("origin"),
+        # a personal layer followed over time: `{on, precision, zone, window?}`, kept when off
+        "track": spec.get("track") or None,
+        # the My Maps a personal layer is sent to, by its editor's address
+        "mymaps": spec.get("mymaps") or "",
     }
 
 

@@ -69,7 +69,7 @@
     void tick().then(() => line?.focus?.());
   });
 
-  // Over the tool's own overlays too (a file's Details, the lightbox), since that is
+  // Over the tool's own overlays too (a file's Details, the media viewer), since that is
   // where a file is watched; so it takes its turn in the Escape order like a modal.
   const self = {};
   $effect(() => (uiState.noting ? joinOverlays(self, close) : undefined));
@@ -114,7 +114,7 @@
 
 <style>
   /* Over the bottom of the screen, above the tool's own overlays (a modal is 900, the
-     lightbox 950) and under the topbar and the toasts, and wide enough for the line to
+     media viewer 950) and under the topbar and the toasts, and wide enough for the line to
      sit on one row where it can. */
   .note-bar {
     position: fixed;

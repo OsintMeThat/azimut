@@ -56,6 +56,37 @@ describe('writing the window camera', () => {
   });
 });
 
+describe('Horizon standing somewhere', () => {
+  const EYE = { lat: 46.5586, lon: 7.8353, heading: 95 };
+
+  it('has the window look from the eye, turned so it faces up, as close as the maps were', () => {
+    const { state, share } = appWindow('horizon', { mapView: { ...PLACE, by: 'satellite' } });
+    share('horizon').stood(EYE, 12);
+    // the app turns a map clockwise: facing 95° up takes a turn of 265°
+    expect(state.mapView).toEqual({ lat: EYE.lat, lon: EYE.lon, zoom: 16, bearing: 265, by: 'horizon' });
+  });
+
+  it('takes its own map\'s zoom when no map has looked anywhere yet', () => {
+    const { state, share } = appWindow('horizon');
+    share('horizon').stood(EYE, 12);
+    expect(state.mapView.zoom).toBe(12);
+  });
+
+  it('writes a look turned in place', () => {
+    const { state, share } = appWindow('horizon');
+    share('horizon').stood(EYE, 12);
+    share('horizon').stood({ ...EYE, heading: 210 }, 12);
+    expect(state.mapView.bearing).toBe(150);
+  });
+
+  it('is followed by the map tab that shows next', () => {
+    const { state, share } = appWindow('horizon');
+    share('horizon').stood(EYE, 12);
+    state.tool = 'satellite';
+    expect(share('satellite').pending(PLACE)).toEqual({ lat: EYE.lat, lon: EYE.lon, zoom: 12, bearing: 265, by: 'horizon' });
+  });
+});
+
 describe('taking the window camera', () => {
   it('moves a tab that shows to where another map left the window', () => {
     const shared = { ...PLACE, by: 'satellite' };

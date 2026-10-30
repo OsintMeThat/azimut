@@ -330,21 +330,6 @@ def _validated_spec(spec: CompareSpec) -> dict[str, Any]:
     return cleaned
 
 
-def _same_layers(a: dict[str, Any], b: dict[str, Any], *, skip: str | None = None) -> bool:
-    left = set(a["overlays"])
-    right = set(b["overlays"])
-    if skip:
-        left.discard(skip)
-        right.discard(skip)
-    if left != right:
-        return False
-    if "firms" in left and a["firms"] != b["firms"]:
-        return False
-    if "nightlights" in left and a["nightlights"] != b["nightlights"]:
-        return False
-    return True
-
-
 _ESRI_CHAIN = frozenset({"esri-world-imagery", "esri-wayback"})
 
 
@@ -353,7 +338,8 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
 
     Mirrors ``changeCompatibility`` in ``lib/map/changeAssist.js``, which also
     grades a fair pair as matched or indicative. The server only refuses; the
-    grade is explanation, and the browser shows it.
+    grade is explanation, and the browser shows it. The layers laid over either
+    side play no part: the browser reads the picture without them.
     """
     if not a["present"] or not b["present"]:
         return "Difference needs imagery A and B"
@@ -372,8 +358,6 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
             return "Choose two different Sentinel-2 passes"
         if a["sentinel"]["layer"] != b["sentinel"]["layer"]:
             return "Sentinel-2 needs the same layer on both sides"
-        if not _same_layers(a, b):
-            return "Match the reference layers on A and B"
         return None
     if a["provider"] == b["provider"] == sentinel.RADAR_ID:
         radar_a, radar_b = a.get("radar") or {}, b.get("radar") or {}
@@ -383,8 +367,6 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
             return "Choose two different Sentinel-1 passes"
         if not sentinel.same_track(radar_a.get("time", ""), radar_b.get("time", "")):
             return "Radar compares two passes of one track, at the same time of day"
-        if not _same_layers(a, b):
-            return "Match the reference layers on A and B"
         return None
     if {a["provider"], b["provider"]} <= _ESRI_CHAIN:
         same_picture = (
@@ -396,8 +378,6 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
                 "Both sides show the same picture. Pick another Esri release, "
                 "or two dated Sentinel-2 passes"
             )
-        if not _same_layers(a, b):
-            return "Match the reference layers on A and B"
         return None
     night_a = "nightlights" in a["overlays"]
     night_b = "nightlights" in b["overlays"]
@@ -416,8 +396,6 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
             return "Choose two different nights"
         if a["sentinel"] != b["sentinel"] or a["wayback_release"] != b["wayback_release"]:
             return "Match the background imagery on A and B"
-        if not _same_layers(a, b, skip="nightlights"):
-            return "Match every other layer on A and B"
         return None
     return ("Difference reads Sentinel-2, Sentinel-1 on one track, Esri imagery releases or "
             "VIIRS night-light pairs")

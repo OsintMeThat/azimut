@@ -1159,8 +1159,9 @@
    *
    * The geometry below is `lib/refViewers.js`, copied for the same reason
    * everything else here is; `extensionMapTools.test.js` runs the two over the
-   * same input. Window placement, the corner drag and the cursor-anchored image
-   * zoom are all in it.
+   * same input. Window placement, the corner drag, the cursor-anchored image
+   * zoom, the fade, the dock's width and the facts a window unfolds are all in
+   * it, and so is the clip's frame arithmetic, from `lib/inspectPlayer.js`.
    */
   const MIN_SCALE = 1; // 1 = the image fits the window; no zooming out past fit
   const MAX_SCALE = 8;
@@ -1168,6 +1169,18 @@
   const DEFAULT_H = 260;
   const MIN_W = 200;
   const MIN_H = 150;
+  /** Faded further than this, the picture is gone and the window looks empty. */
+  const MIN_OPACITY = 0.15;
+  /** Where the fade button goes the first time, before a value has been picked. */
+  const FADE_TO = 0.5;
+  /** A docked column: as wide as this to start, never narrower than its floor. */
+  const DOCK_W = 340;
+  const DOCK_MIN_W = 220;
+  /** A window dragged this close to an edge settles against it, at the margin. */
+  const SNAP_REACH = 16;
+  const SNAP_MARGIN = 8;
+  /** The speeds the slow-motion button walks through, back to normal at the end. */
+  const SLOW_RATES = [1, 0.5, 0.25, 0.1];
   /** New windows step down-right so the one underneath stays grabbable, and wrap
    *  before they walk off the screen. */
   const STAGGER = 26;
@@ -1175,7 +1188,12 @@
 
   const clamp = (value, lo, hi) => Math.min(hi, Math.max(lo, value));
 
-  /** A fresh window on one picked file ({ path, kind, title, filename }). */
+  /**
+   * A fresh window on one picked file ({ path, kind, title, filename }).
+   *
+   * `still` is a frame kept from a clip, already decoded: the window paints it
+   * instead of fetching `path`.
+   */
   function createViewer(id, media, spawn = {}) {
     return {
       id,
@@ -1191,7 +1209,133 @@
       scale: 1, // image zoom (1 = fit)
       ox: 0, // image pan offset in content px
       oy: 0,
+      opacity: 1,
+      fadeTo: FADE_TO, // the see-through value the fade button flips back to
+      docked: spawn.docked ?? false, // a column at that side of the screen
+      corner: spawn.corner ?? false, // pinned there, as the screen changes size
+      aspect: null, // the picture's width over its height, once it has loaded
+      info: false, // the facts strip under the title, folded to start
+      facts: mediaFacts(media),
+      still: media.still ?? null,
+      fps: null, // a clip's frame rate, once the app has read it
+      rate: 1,
+      muted: false,
+      at: 0, // where a clip was; the app's windows are drawn again when docked
+      playing: false,
     };
+  }
+
+  /** An opacity the slider can hold: between the floor and solid, in 5% steps. */
+  function clampOpacity(value) {
+    const v = Number(value);
+    if (!Number.isFinite(v)) return 1;
+    return clamp(Math.round(v * 20) / 20, MIN_OPACITY, 1);
+  }
+
+  /** The fade button: solid goes to the last see-through value, and back. */
+  function flipFade({ opacity, fadeTo }) {
+    if (opacity < 1) return { opacity: 1, fadeTo: opacity };
+    return { opacity: clampOpacity(fadeTo ?? FADE_TO), fadeTo: fadeTo ?? FADE_TO };
+  }
+
+  /** The dock as wide as asked, never under its floor nor past half of `total`. */
+  function clampDock(w, total) {
+    return Math.round(clamp(w, DOCK_MIN_W, Math.max(DOCK_MIN_W, total / 2)));
+  }
+
+  /** The next speed down, and normal speed again after the slowest. */
+  function nextSlowRate(rate) {
+    return SLOW_RATES[(SLOW_RATES.indexOf(rate) + 1) % SLOW_RATES.length];
+  }
+
+  const FACT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  /** A date as the file states it, never moved to another clock. */
+  function factDate(raw) {
+    if (typeof raw !== "string" || !raw.trim()) return "";
+    const value = raw.trim();
+    const compact = value.match(/^(\d{4})(\d{2})(\d{2})$/);
+    const m = compact
+      ? [value, compact[1], compact[2], compact[3]]
+      : value.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?/);
+    const month = m ? FACT_MONTHS[Number(m[2]) - 1] : null;
+    if (!month) return value;
+    const day = `${Number(m[3])} ${month} ${m[1]}`;
+    if (!m[4]) return day;
+    const zone = m[6] === "Z" ? " UTC" : m[6] ? ` UTC${m[6]}` : "";
+    return `${day}, ${m[4]}:${m[5]}${zone}`;
+  }
+
+  /** A web address worth a link: http or https, and nothing a click could run. */
+  function webUrl(raw) {
+    if (typeof raw !== "string") return null;
+    try {
+      const url = new URL(raw.trim());
+      return url.protocol === "http:" || url.protocol === "https:" ? url : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** What a window unfolds under its title: dates, where it came from, notes. */
+  function mediaFacts(item = {}) {
+    const source = item.source && typeof item.source === "object" ? item.source : {};
+    const url = webUrl(source.webpage_url || source.url);
+    const host = url ? url.hostname.replace(/^www\./, "") : "";
+    const uploader = typeof source.uploader === "string" ? source.uploader.trim() : "";
+    return {
+      captured: factDate(item.taken_at || source.captured_at),
+      published: factDate(source.upload_date),
+      source: url ? { url: url.href, label: uploader ? `${host} · ${uploader}` : host } : null,
+      notes: typeof item.notes === "string" ? item.notes.trim() : "",
+    };
+  }
+
+  /** Whether there is anything to unfold at all. */
+  function hasFacts(facts) {
+    return Boolean(facts && (facts.captured || facts.published || facts.source || facts.notes));
+  }
+
+  // --- a clip's frames, as the Inspect player counts them --------------------
+
+  const DEFAULT_FPS = 30;
+  const FRAME_NOISE = 1e-6;
+
+  function frameDuration(fps) {
+    return 1 / (fps > 0 ? fps : DEFAULT_FPS);
+  }
+
+  function frameIndex(time, fps) {
+    const t = Math.max(0, Number(time) || 0);
+    return Math.floor(t / frameDuration(fps) + FRAME_NOISE);
+  }
+
+  /** The frame on screen: the browser's own stamp when it gave one (Firefox,
+   *  paused after a seek, echoes the playback time back instead). */
+  function shownFrameTime(time, fps, presented = null) {
+    if (Number.isFinite(presented) && Math.abs(presented - time) > FRAME_NOISE) return presented;
+    return frameIndex(time, fps) * frameDuration(fps);
+  }
+
+  function clampTime(time, fps, duration = 0) {
+    const end = duration > 0 ? Math.max(0, duration - frameDuration(fps) / 4) : Infinity;
+    return Math.min(Math.max(0, Number(time) || 0), end);
+  }
+
+  /** Where a step of `seconds` from the frame at `from` lands: half a frame in. */
+  function stepTarget(from, seconds, fps, duration = 0) {
+    return clampTime(from + seconds + frameDuration(fps) / 2, fps, duration);
+  }
+
+  /** 0:12.400, or 1:02:03.400 past an hour. */
+  function preciseClock(seconds) {
+    const t = Math.max(0, Number(seconds) || 0);
+    const ms = Math.round(t * 1000);
+    const h = Math.floor(ms / 3_600_000);
+    const m = Math.floor((ms % 3_600_000) / 60_000);
+    const s = Math.floor((ms % 60_000) / 1000);
+    const rest = `${String(s).padStart(2, "0")}.${String(ms % 1000).padStart(3, "0")}`;
+    return h ? `${h}:${String(m).padStart(2, "0")}:${rest}` : `${m}:${rest}`;
   }
 
   /** One more than the top window's z — what a newly focused one gets. */
@@ -1217,6 +1361,76 @@
     return {
       x: clamp(x, 0, Math.max(0, bounds.w - w)),
       y: clamp(y, 0, Math.max(0, bounds.h - h)),
+    };
+  }
+
+  /** A drag kept on screen that settles against an edge it comes near, or a corner. */
+  function snapWindow(x, y, w, h, bounds) {
+    const c = clampWindow(x, y, w, h, bounds);
+    const settle = (at, size, span) => {
+      if (span - size < 2 * SNAP_MARGIN) return at;
+      if (at < SNAP_REACH) return SNAP_MARGIN;
+      if (span - (at + size) < SNAP_REACH) return span - size - SNAP_MARGIN;
+      return at;
+    };
+    return { x: settle(c.x, w, bounds.w), y: settle(c.y, h, bounds.h) };
+  }
+
+  /** The corner a window settled into, against two edges at once, or null. */
+  function settledCorner(x, y, w, h, bounds) {
+    const side = (at, size, span) =>
+      at === SNAP_MARGIN ? "start" : at === span - size - SNAP_MARGIN ? "end" : null;
+    const across = side(x, w, bounds.w);
+    const down = side(y, h, bounds.h);
+    if (!across || !down) return null;
+    return `${down === "start" ? "t" : "b"}${across === "start" ? "l" : "r"}`;
+  }
+
+  /** The six places a window can be put: a column on either side, then the corners. */
+  const PLACES = [
+    { id: "left", docked: "left", icon: "panelLeft", label: "Column on the left" },
+    { id: "right", docked: "right", icon: "panelRight", label: "Column on the right" },
+    { id: "tl", corner: "tl", icon: "cornerTL", label: "Top left corner" },
+    { id: "tr", corner: "tr", icon: "cornerTR", label: "Top right corner" },
+    { id: "bl", corner: "bl", icon: "cornerBL", label: "Bottom left corner" },
+    { id: "br", corner: "br", icon: "cornerBR", label: "Bottom right corner" },
+  ];
+
+  /** Where a window is now, as one of `PLACES`, or null while it floats free. */
+  function placeOf(viewer) {
+    return PLACES.find((place) => place.id === (viewer.docked || viewer.corner)) ?? null;
+  }
+
+  /**
+   * Where a window pinned to `corner` sits: as near it as it can get without
+   * covering any of `obstacles` (here, the panel), a margin clear of them and of
+   * the edges. A window too big to fit anywhere goes in the corner.
+   */
+  function cornerSpot(corner, w, h, bounds, obstacles = []) {
+    const right = corner.endsWith("r");
+    const bottom = corner.startsWith("b");
+    const m = SNAP_MARGIN;
+    const fromX = [m, ...obstacles.map((o) => (right ? bounds.w - o.x : o.x + o.w) + m)];
+    const fromY = [m, ...obstacles.map((o) => (bottom ? bounds.h - o.y : o.y + o.h) + m)];
+    const at = (dx, dy) => ({ x: right ? bounds.w - dx - w : dx, y: bottom ? bounds.h - dy - h : dy });
+    const clear = ({ x, y }) =>
+      x >= 0 &&
+      y >= 0 &&
+      x + w <= bounds.w &&
+      y + h <= bounds.h &&
+      obstacles.every((o) => x >= o.x + o.w + m || x + w <= o.x - m || y >= o.y + o.h + m || y + h <= o.y - m);
+    let best = null;
+    for (const dx of fromX) {
+      for (const dy of fromY) {
+        const spot = at(dx, dy);
+        if (clear(spot) && (!best || dx + dy < best.cost)) best = { ...spot, cost: dx + dy };
+      }
+    }
+    if (best) return { x: best.x, y: best.y };
+    const fallback = at(m, m);
+    return {
+      x: Math.max(0, Math.min(fallback.x, bounds.w - w)),
+      y: Math.max(0, Math.min(fallback.y, bounds.h - h)),
     };
   }
 
@@ -1255,6 +1469,19 @@
   function createRefs() {
     let open = [];
     let spawned = 0; // id source, so two windows on one file stay distinct
+    const dockWidths = { left: DOCK_W, right: DOCK_W };
+
+    function spawn(item, at = {}) {
+      const step = (open.length % STAGGER_WRAP) * STAGGER;
+      const viewer = createViewer(`ref-${++spawned}`, item, {
+        x: at.x ?? 60 + step,
+        y: at.y ?? 60 + step,
+        z: nextZ(open),
+        docked: at.docked,
+      });
+      open.push(viewer);
+      return viewer;
+    }
 
     return {
       id: "refs",
@@ -1271,14 +1498,49 @@
 
       /** Spawn a window on one picked file, on top of the others. */
       add(item) {
-        const step = (open.length % STAGGER_WRAP) * STAGGER;
-        const viewer = createViewer(`ref-${++spawned}`, item, {
-          x: 60 + step,
-          y: 60 + step,
-          z: nextZ(open),
-        });
-        open.push(viewer);
+        return spawn(item);
+      },
+
+      /** A clip's frame, kept as a picture in a window of its own: docked with
+       *  the clip when it is, a step down from it otherwise. */
+      keepFrame(id, still, at) {
+        const clip = open.find((window) => window.id === id);
+        if (!clip || !still) return null;
+        const viewer = spawn(
+          { path: clip.path, kind: "image", title: `${clip.title || "Reference"} · ${preciseClock(at)}`, still },
+          { x: clip.x + STAGGER, y: clip.y + STAGGER, docked: clip.docked }
+        );
+        viewer.facts = clip.facts;
         return viewer;
+      },
+
+      /** Put a window in one of `PLACES` by its id; asked for the place it is
+       *  already in, or for none, it floats free again. */
+      place(id, where) {
+        const viewer = open.find((window) => window.id === id);
+        if (!viewer) return viewer;
+        const target = PLACES.find((place) => place.id === where);
+        const free = !target || (viewer.docked || viewer.corner) === where;
+        viewer.docked = free ? false : (target.docked ?? false);
+        viewer.corner = free ? false : (target.corner ?? false);
+        return viewer;
+      },
+
+      /** The windows docked on one side, in the order they were opened. */
+      dockedOn(side) {
+        return open.filter((viewer) => viewer.docked === side);
+      },
+
+      dockWidth(side) {
+        return dockWidths[side];
+      },
+
+      /** One column's width, kept to what leaves the map at least half of the
+       *  screen once the other column has its own. */
+      setDockWidth(side, width, total) {
+        const other = side === "left" ? "right" : "left";
+        const taken = open.some((viewer) => viewer.docked === other) ? dockWidths[other] : 0;
+        dockWidths[side] = clampDock(width, total - taken);
       },
 
       /** Bring one to the front, re-numbering the rest. */
@@ -1553,5 +1815,23 @@
     clampSize,
     clampPan,
     zoomAt,
+    MIN_OPACITY,
+    DOCK_W,
+    snapWindow,
+    settledCorner,
+    PLACES,
+    placeOf,
+    cornerSpot,
+    clampOpacity,
+    flipFade,
+    clampDock,
+    nextSlowRate,
+    factDate,
+    mediaFacts,
+    hasFacts,
+    frameDuration,
+    shownFrameTime,
+    stepTarget,
+    preciseClock,
   };
 })();

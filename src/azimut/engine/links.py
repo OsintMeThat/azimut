@@ -90,7 +90,10 @@ MADE_HERE: tuple[str, ...] = ("inspect",)
 #: imagery rather than footage: the Timeline draws the files they made on a lane of
 #: their own, apart from the sources' pictures and videos and what Inspect cut from them.
 FROM_ABOVE: tuple[str, ...] = ("satellite", "screenshot", "compare")
-PRODUCED_HERE: tuple[str, ...] = (*MADE_HERE, *FROM_ABOVE)
+#: A picture of a saved Horizon view is the app's render of the terrain from the
+#: eye: produced here, so held back with the rest, but seen from the ground, not
+#: from above, so it stays off the imagery lane.
+PRODUCED_HERE: tuple[str, ...] = (*MADE_HERE, *FROM_ABOVE, "horizon")
 
 #: Exact artifact contract. These are not ordinary relations: producing tools
 #: record them, and the pair decides delete behaviour. A file path resolving to an
@@ -839,6 +842,41 @@ def resolve(case: CaseRepository, rel_paths: list[str]) -> tuple[list[str], list
         else:
             missing.append(path)
     return found, missing
+
+
+def collected_roots(case: CaseRepository, start: list[str]) -> list[dict[str, Any]]:
+    """The collected files these entities read back to, along ``derived-from``.
+
+    A frame leads to the video it was cut from, and on up to whatever nothing else
+    in the case derives from: the footage itself. Captures are walked through and
+    left out at the end, since a satellite screenshot is not the thing filmed.
+    """
+    roots: dict[str, dict[str, Any]] = {}
+    seen: set[str] = set()
+    frontier = list(start)
+    while frontier:
+        current = frontier.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        entity = case.get_entity(current)
+        if entity is None:
+            continue
+        parents = [
+            link["to"]
+            for link in case.links_of(current)
+            if link["type"] == DERIVED_FROM and link["from"] == current
+        ]
+        collected = [
+            parent
+            for parent in parents
+            if (case.get_entity(parent) or {}).get("type") in {"media", "capture"}
+        ]
+        if collected:
+            frontier.extend(collected)
+        elif entity["type"] == "media":
+            roots[current] = entity
+    return list(roots.values())
 
 
 def _validated_chain_targets(

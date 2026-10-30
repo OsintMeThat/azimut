@@ -40,7 +40,11 @@ const EVENTS = {
   // rather than in the engine and has to be placed again as the ground moves.
   'view-move': ['move'],
   rotate: ['rotate'],
+  // a tilt, which only the 3D view takes
+  pitch: ['pitch'],
   click: ['click'],
+  // the pointer over the map, for a line that follows it while it is drawn
+  'pointer-move': ['mousemove'],
   // The engine only fires it for a right-click that did not drag, and stops
   // the browser's own menu once anything listens for it.
   contextmenu: ['contextmenu'],
@@ -88,6 +92,16 @@ export function normalizeBearing(deg) {
 }
 
 /**
+ * The compass direction up the screen of a map turned by the app's `bearing`:
+ * the way an eye stood on it and looking up the map faces. The app turns the
+ * map clockwise, so it is the same turn counted the other way, and the bearing
+ * that puts a heading up is found the same way.
+ */
+export function headingUp(bearing) {
+  return normalizeBearing(-Number(bearing));
+}
+
+/**
  * The engine events one neutral name stands for.
  *
  * Throws on anything else: a typo that silently stopped delivering would read
@@ -129,12 +143,90 @@ export function framePadding(padding) {
 }
 
 /**
+ * The paint properties that make each kind of layer see-through, for a picture
+ * taken without it (`snapshot`'s `keep`). A layer with none of its own stays.
+ */
+const SEE_THROUGH = {
+  raster: ['raster-opacity'],
+  fill: ['fill-opacity'],
+  line: ['line-opacity'],
+  circle: ['circle-opacity', 'circle-stroke-opacity'],
+  symbol: ['icon-opacity', 'text-opacity'],
+  heatmap: ['heatmap-opacity'],
+  'fill-extrusion': ['fill-extrusion-opacity'],
+};
+
+/** A copy of what the map's canvas holds this instant, which only the frame just drawn has. */
+function copyOf(source, into = null) {
+  const copy = into ?? document.createElement('canvas');
+  const fresh = copy.width !== source.width || copy.height !== source.height;
+  if (fresh) {
+    copy.width = source.width;
+    copy.height = source.height;
+  }
+  const context = copy.getContext('2d');
+  if (!context) throw new Error('this browser cannot capture the map');
+  if (!fresh) context.clearRect(0, 0, copy.width, copy.height);
+  context.drawImage(source, 0, 0);
+  return copy;
+}
+
+/** The operators that read a feature, which make an expression data-driven. */
+const FEATURE_READS = new Set(['get', 'has', 'properties', 'feature-state', 'geometry-type', 'id']);
+
+/** Whether a paint value is worked out per feature, and so built into the tiles. */
+function readsFeatures(value) {
+  return Array.isArray(value) && (FEATURE_READS.has(value[0]) || value.some(readsFeatures));
+}
+
+/**
+ * The map drawn without the layers `keep` turns down, copied, then put back.
+ *
+ * Drawn and read in one task, the frame without them never reaches the screen.
+ * A layer is made see-through with no transition, both ways, so nothing fades
+ * back in once the copy is taken, and no tile is cut again. One whose opacity is
+ * read off each feature has it built into its tiles, where only hiding it takes
+ * effect at once.
+ */
+function drawnWithout(map, keep) {
+  const faded = []; // [id, property, value, transition]
+  const hidden = []; // [id, visibility]
+  for (const id of map.getLayersOrder()) {
+    if (keep(id) || map.getLayoutProperty(id, 'visibility') === 'none') continue;
+    const properties = SEE_THROUGH[map.getLayer(id)?.type] ?? [];
+    const values = properties.map((property) => map.getPaintProperty(id, property));
+    if (values.some(readsFeatures)) {
+      hidden.push([id, map.getLayoutProperty(id, 'visibility')]);
+      map.setLayoutProperty(id, 'visibility', 'none');
+      continue;
+    }
+    properties.forEach((property, index) => {
+      faded.push([id, property, values[index], map.getPaintProperty(id, `${property}-transition`)]);
+      map.setPaintProperty(id, `${property}-transition`, { duration: 0, delay: 0 });
+      map.setPaintProperty(id, property, 0);
+    });
+  }
+  try {
+    map.redraw();
+    return copyOf(map.getCanvas());
+  } finally {
+    if (faded.length || hidden.length) {
+      for (const [id, property, value] of faded) map.setPaintProperty(id, property, value);
+      for (const [id, visibility] of hidden) map.setLayoutProperty(id, 'visibility', visibility ?? 'visible');
+      map.redraw();
+      for (const [id, property, , transition] of faded) map.setPaintProperty(id, `${property}-transition`, transition);
+    }
+  }
+}
+
+/**
  * Wrap a built map in the façade.
  *
  * @param {object} map the engine's own map object
  * @param {HTMLElement} [container] the element the map was built in
+ * @param {string} [mapId] this map's name to the billed-tile guard (`quotaGuard.js`)
  */
-export function mapFacade(map, container) {
+export function mapFacade(map, container, mapId = '') {
   // Set while another map's frame is being copied onto this one (`follow`).
   let following = false;
   const settledHandlers = new Set();
@@ -168,6 +260,8 @@ export function mapFacade(map, container) {
       lon: wrapLon(centre.lng),
       zoom: viewZoom(map.getZoom()),
       bearing: normalizeBearing(-map.getBearing()),
+      // 0 on a flat map: only the 3D view tilts (`lib/globe/globe.js`)
+      pitch: Math.round(map.getPitch()),
     };
   }
 
@@ -186,11 +280,12 @@ export function mapFacade(map, container) {
     // A box with no extent at all (one point) fits at any zoom, so clamp — the
     // engine's own ceiling is the answer there, never Infinity.
     const zoom = Math.min(ceiling, Math.floor(fitted.zoom));
-    map.easeTo({
-      center: fitted.center,
-      zoom: Math.max(map.getMinZoom(), zoom),
-      duration: options.animate ? 420 : 0,
-    });
+    map.easeTo(
+      {
+        center: fitted.center,
+        zoom: Math.max(map.getMinZoom(), zoom),
+        duration: options.animate ? 420 : 0,
+      });
   }
 
   /** Frame every point handed over. False when none of them was usable. */
@@ -205,19 +300,38 @@ export function mapFacade(map, container) {
     camera,
     getZoom: () => viewZoom(map.getZoom()),
 
+    /** The app putting the camera somewhere. */
     setView: ({ lat, lon }, zoom) => map.jumpTo({ center: [lon, lat], zoom: engineZoom(zoom) }),
     /**
      * A whole camera in one jump, turn included: one move and one settle, where
      * `setView` then `setBearing` would settle once on the old heading first.
+     * A camera that names no tilt keeps the one the map has; a flat map holds
+     * any tilt it is handed at zero. The centre's height a 3D camera carries is
+     * the globe's to read (`lib/globe/globe.js`); a flat map has no use for it.
      */
-    setCamera: ({ lat, lon, zoom, bearing = 0 }) =>
-      map.jumpTo({ center: [lon, lat], zoom: engineZoom(zoom), bearing: -normalizeBearing(bearing) }),
+    setCamera: ({ lat, lon, zoom, bearing = 0, pitch }) =>
+      map.jumpTo({
+        center: [lon, lat],
+        zoom: engineZoom(zoom),
+        bearing: -normalizeBearing(bearing),
+        ...(Number.isFinite(pitch) ? { pitch } : {}),
+      }),
+    /** The centre's height: a flat map has none, the 3D view answers it (`lib/globe/globe.js`). */
+    centreElevation: () => null,
     setZoom: (zoom) => map.setZoom(engineZoom(zoom)),
+    /** The app zoom unrounded, for a gesture that eases the zoom (`gestures.js`). */
+    exactZoom: () => exactViewZoom(map.getZoom()),
     setBearing: (deg) => map.setBearing(-normalizeBearing(deg)),
+    /** Tilt from straight down, in degrees; a flat map holds it at zero. */
+    setPitch: (deg) => map.setPitch(Math.max(0, Number(deg) || 0)),
+    /** How far this map may lean, in degrees. */
+    maxPitch: () => map.getMaxPitch(),
     /** How deep this map goes right now, in app zoom: its basemap's ceiling. */
     maxZoom: () => viewZoom(map.getMaxZoom()),
     /** Never animated: a rotation pans the map once per pointer move. */
     panBy: (dx, dy) => map.panBy([dx, dy], { duration: 0 }),
+    /** Whether a drag pans the map: held while the hand paints on it instead (Find's brush). */
+    setPanning: (on) => (on ? map.dragPan.enable() : map.dragPan.disable()),
     fitBounds,
     fitPoints,
 
@@ -264,6 +378,25 @@ export function mapFacade(map, container) {
     /** The container changed size; re-read it. */
     resize: () => map.resize(),
 
+    /** Whether a press landed on the drawn map itself, not on a marker or a control over it. */
+    onSurface: (target) => Boolean(target) && target === map.getCanvas?.(),
+
+    /**
+     * Give the map the keyboard, as a press on it would, and like a press without
+     * the ring round the whole map: a browser that last saw a key (the Shift of
+     * a turn) would draw one for a focus given from script (`engine.css`). It
+     * comes back once the map has lost the keyboard and Tab brings it back.
+     */
+    focus: () => {
+      const canvas = map.getCanvas?.();
+      if (!canvas?.focus) return;
+      if (canvas.dataset) {
+        canvas.dataset.handFocus = '';
+        canvas.addEventListener?.('blur', () => delete canvas.dataset.handFocus, { once: true });
+      }
+      canvas.focus({ preventScroll: true });
+    },
+
     /**
      * The camera exactly as the engine holds it, fractional zoom included. Only
      * a second map copying this one reads it (`cameraLink.js`): anything that
@@ -271,7 +404,13 @@ export function mapFacade(map, container) {
      */
     frame() {
       const centre = map.getCenter();
-      return { lng: centre.lng, lat: centre.lat, zoom: map.getZoom(), bearing: map.getBearing() };
+      return {
+        lng: centre.lng,
+        lat: centre.lat,
+        zoom: map.getZoom(),
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
+      };
     },
 
     /**
@@ -283,7 +422,12 @@ export function mapFacade(map, container) {
     follow(next, { settled = false } = {}) {
       following = true;
       try {
-        map.jumpTo({ center: [next.lng, next.lat], zoom: next.zoom, bearing: next.bearing });
+        map.jumpTo({
+          center: [next.lng, next.lat],
+          zoom: next.zoom,
+          bearing: next.bearing,
+          ...(Number.isFinite(next.pitch) ? { pitch: next.pitch } : {}),
+        });
       } finally {
         following = false;
       }
@@ -297,14 +441,37 @@ export function mapFacade(map, container) {
     tilesLoading: () => map.isMoving() || !map.areTilesLoaded(),
 
     /**
+     * Resolves once the map is at rest with every tile in. Read after the next
+     * frame the engine draws, never at once: right after a change nothing new
+     * has been asked for yet, so "every tile is in" would hold for that moment.
+     */
+    idle: () =>
+      new Promise((resolve) => {
+        const check = () => {
+          if (map.isMoving() || !map.areTilesLoaded()) return;
+          map.off('render', check);
+          resolve();
+        };
+        map.on('render', check);
+        map.triggerRepaint();
+      }),
+
+    /**
      * The drawn pixels, once every visible tile is in.
      *
      * WebGL clears its buffer after each frame reaches the screen, so a canvas
      * read at any other moment is transparent. The copy is taken inside the
      * engine's own `render` event, which runs in the same frame as the draw.
      * `complete` is false when the wait gave up with tiles still loading.
+     *
+     * `keep`, a test on a layer's id, takes the picture with only the layers it
+     * passes: Difference reads the ground, not the borders or the case's marks
+     * laid over one side.
+     *
+     * `into`, a canvas an earlier snapshot returned, is drawn over rather than a
+     * new one made: a caller taking one at every frame of a move keeps one canvas.
      */
-    async snapshot({ timeout = 12000 } = {}) {
+    async snapshot({ timeout = 12000, keep = null, into = null } = {}) {
       const complete = await new Promise((resolve) => {
         if (!map.isMoving() && map.areTilesLoaded()) {
           resolve(true);
@@ -320,17 +487,11 @@ export function mapFacade(map, container) {
         };
         map.once('idle', idle);
       });
+      if (keep) return { canvas: drawnWithout(map, keep), complete };
       const canvas = await new Promise((resolve, reject) => {
         map.once('render', () => {
           try {
-            const source = map.getCanvas();
-            const copy = document.createElement('canvas');
-            copy.width = source.width;
-            copy.height = source.height;
-            const context = copy.getContext('2d');
-            if (!context) throw new Error('this browser cannot capture the map');
-            context.drawImage(source, 0, 0);
-            resolve(copy);
+            resolve(copyOf(map.getCanvas(), into));
           } catch (error) {
             reject(error);
           }
@@ -350,7 +511,9 @@ export function mapFacade(map, container) {
       // pressed, since a menu opens there. A shape that answers its own click
       // answers its own right-click too: a flagged grid cell is not also a menu.
       const relay =
-        name === 'click' || name === 'contextmenu'
+        name === 'pointer-move'
+          ? (event) => handler({ lat: event.lngLat.lat, lon: wrapLon(event.lngLat.lng) })
+          : name === 'click' || name === 'contextmenu'
           ? (event) => {
               if (shapeUnder(event.point)) return;
               const at = { lat: event.lngLat.lat, lon: wrapLon(event.lngLat.lng) };
@@ -392,6 +555,9 @@ export function mapFacade(map, container) {
      * and read it, so it crosses the boundary as itself.
      */
     container,
+
+    /** This map's name to the billed-tile guard, which reads its view per tile. */
+    mapId,
 
     /**
      * The engine's own map.

@@ -74,6 +74,9 @@ class BulkBodyLimit:
         ("PUT", ("notes",), "notes", "MAX_NOTE_BODY_BYTES"),
         ("PUT", ("notes", "*"), "notes", "MAX_NOTE_BODY_BYTES"),
         ("POST", ("plates",), "plates", "MAX_PLATE_BODY_BYTES"),
+        ("POST", ("map-plates", "export"), "mapplates", "MAX_EXPORT_BODY_BYTES"),
+        ("POST", ("map-plates", "export", "pictures"), "mapplates", "MAX_PICTURES_BODY_BYTES"),
+        ("POST", ("map-plates",), "mapplates", "MAX_PLATE_BODY_BYTES"),
         ("POST", ("compare", "gif"), "compare", "MAX_GIF_BODY_BYTES"),
         ("POST", ("compare", "sequence"), "compare", "MAX_SEQUENCE_BODY_BYTES"),
         ("POST", ("compare", "sessions", "*", "preview"), "compare", "MAX_GIF_BODY_BYTES"),
@@ -208,7 +211,12 @@ def install_local_guard(app: FastAPI) -> None:
             ) and origin.startswith(EXTENSION_ORIGIN_SCHEMES)
             if not ingest_extension:
                 return PlainTextResponse("cross-origin request refused", status_code=403)
-        return await call_next(request)
+        response = await call_next(request)
+        # A page elsewhere may still link to the app, but never frame it: inside its
+        # frame the app's own calls are same-origin, so a hidden one could turn the
+        # analyst's clicks into deletes.
+        response.headers.setdefault("x-frame-options", "SAMEORIGIN")
+        return response
 
 
 #: Reachable while the workspace is not: everything the stop screen and the
@@ -311,9 +319,10 @@ def create_app() -> FastAPI:
     )
 
     from .api import (
-        analysis_views, analyzers, cases, compare, drafts, events, figures, files, folders, ingest,
-        inspect, maplayers, media, notes, plates, proofimports, proofs, proposals, satellite,
-        settings, sheetproofs, sheets, templates,
+        analysis_views, analyzers, cases, compare, drafts, events, figures, files, folders, horizon,
+        horizon_buildings, horizon_finds, horizon_views, horizon_work, icons, ingest, inspect, mapplates, maplayers, media, notes, plates,
+        proofimports, proofs,
+        proposals, satellite, settings, sheetproofs, sheets, templates, terrain,
     )
     from .engine import sheets as sheet_engine
 
@@ -322,6 +331,7 @@ def create_app() -> FastAPI:
     app.include_router(analysis_views.router)
     app.include_router(notes.router)
     app.include_router(plates.router)
+    app.include_router(mapplates.router)
     app.include_router(figures.router)
     app.include_router(sheets.router)
     # The one sheet road that fetches bytes, so its own module and its own job.
@@ -333,6 +343,12 @@ def create_app() -> FastAPI:
     app.include_router(satellite.router)
     app.include_router(maplayers.router)
     app.include_router(maplayers.geoconfirmed_router)
+    app.include_router(terrain.router)
+    app.include_router(horizon.router)
+    app.include_router(horizon_buildings.router)
+    app.include_router(horizon_views.router)
+    app.include_router(horizon_finds.router)
+    app.include_router(horizon_work.router)
     app.include_router(proofs.router)
     app.include_router(proofimports.router)
     app.include_router(proposals.router)
@@ -343,6 +359,7 @@ def create_app() -> FastAPI:
     app.include_router(ingest.router)
     app.include_router(events.router)
     app.include_router(templates.router)
+    app.include_router(icons.router)
     # A sheet's CSV that the filesystem would not take. Handled once for the app rather
     # than at each of the ten routes that write one: the failure is the same wherever it
     # happens — a spreadsheet holding the file open on Windows, a read-only folder — and

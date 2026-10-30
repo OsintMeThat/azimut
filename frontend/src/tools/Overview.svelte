@@ -6,6 +6,7 @@
    */
   import { api } from '../lib/api.js';
   import {
+    appInfo,
     caseState,
     createCase,
     openCase,
@@ -22,7 +23,8 @@
   import { entityIcon, entityKindLabel } from '../lib/entityIcon.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { markdownHtml } from '../lib/markdown.js';
-  import { openEntity } from '../lib/navigate.js';
+  import { openEntity, openGuide, openTour, openWhatsNew } from '../lib/navigate.js';
+  import { newsOf } from '../lib/onboarding.js';
   import { updateBadges } from '../lib/staleness.js';
   import {
     familyBars,
@@ -35,6 +37,8 @@
   import { WORKSPACES } from '../lib/workspaces.js';
   import Icon from '../components/Icon.svelte';
   import Logo from '../components/Logo.svelte';
+  import UpdateButtons from '../components/UpdateButtons.svelte';
+  import UpdateSteps from '../components/UpdateSteps.svelte';
   import PlaceMap from './overview/PlaceMap.svelte';
   import CaseTodos from './overview/CaseTodos.svelte';
 
@@ -72,6 +76,7 @@
   let naming = $state(''); // the first case being named, on the front door
   let creating = $state(false);
   let notesOpen = $state(false); // is the release body unfolded
+  let updateStarted = $state(false); // the download was pressed: show its steps
 
   const rows = $derived(waitingRows({ summary, timeline }));
   const clear = $derived(Boolean(summary) && nothingWaiting(rows));
@@ -82,6 +87,8 @@
   const plate = $derived(mapPins(located));
   const touched = $derived(lastTouched(caseState.current, caseState.list));
   const badges = $derived(updateBadges(updatesState, prefs.updateDismissedVersion));
+  // what this version brings, read again from here once the card that showed it is closed
+  const hasNews = $derived(newsOf(appInfo.version).length > 0);
   const notes = $derived(markdownHtml(updatesState.app?.notes ?? ''));
   /** Cases other than the one open, newest first — what the front door offers when
    *  the workspace is not actually empty, only unopened. */
@@ -218,11 +225,14 @@
                    strips unsafe HTML. -->
               <div class="notes markdown">{@html notes}</div>
             {/if}
+            <!-- a pip install has nothing to download: its terminal steps show at once -->
+            {#if updateStarted || updatesState.app?.install?.kind === 'package'}
+              <div class="notice-steps"><UpdateSteps update={updatesState.app} /></div>
+            {/if}
             <div class="notice-foot">
-              <a class="btn btn-sm btn-primary" href={updatesState.app?.url} target="_blank" rel="noreferrer">
-                <Icon name="download" size={13} /> Download
-                <Icon name="external" size={11} />
-              </a>
+              {#if !updateStarted}
+                <UpdateButtons update={updatesState.app} onstart={() => (updateStarted = true)} />
+              {/if}
               <button class="btn btn-ghost btn-sm" onclick={() => openSettings('system')}>
                 Settings
               </button>
@@ -356,10 +366,14 @@
         </div>
 
         <footer class="foot">
-          <button class="aside" onclick={() => (uiState.tool = 'guide')}>
-            New here? Read the guide
+          <button class="aside" onclick={openTour}>
+            New here? Take the tour
             <Icon name="arrowRight" size={13} />
           </button>
+          <button class="aside" onclick={() => openGuide('start')}>Read the guide</button>
+          {#if hasNews}
+            <button class="aside" onclick={openWhatsNew}>What's new in {appInfo.version}</button>
+          {/if}
         </footer>
       {:else}
         <!-- The front door. A fresh install lands here, with no case to summarise and
@@ -392,7 +406,7 @@
                 id="home-case-name"
                 class="input"
                 bind:value={naming}
-                placeholder="Kharkiv strike, 12 March"
+                placeholder="Harbour photo, 3 May"
                 onkeydown={(e) => e.key === 'Enter' && create()}
               />
               <button class="btn btn-primary" disabled={!naming.trim() || creating} onclick={create}>
@@ -418,7 +432,11 @@
           {/if}
 
           <div class="door-foot">
-            <button class="btn btn-ghost btn-sm" onclick={() => (uiState.tool = 'guide')}>
+            <button class="btn btn-ghost btn-sm" onclick={openTour}>
+              <Icon name="compass" size={14} />
+              Take the tour
+            </button>
+            <button class="btn btn-ghost btn-sm" onclick={() => openGuide('start')}>
               Read the guide
               <Icon name="arrowRight" size={13} />
             </button>
@@ -532,6 +550,10 @@
   }
   .notes :global(li) {
     margin: 3px 0;
+  }
+  .notice-steps {
+    padding: 4px 14px 10px;
+    border-top: 1px solid var(--border);
   }
   .notice-foot {
     display: flex;
@@ -904,6 +926,9 @@
     color: var(--accent);
   }
   .foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
     margin-top: 36px;
     padding-top: 16px;
     border-top: 1px solid var(--border);
@@ -1024,9 +1049,9 @@
 
   .door-foot {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
     margin-top: 40px;
   }
 </style>

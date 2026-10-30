@@ -16,7 +16,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Callable, TypeVar
 from urllib.parse import urlsplit
 
 from PIL import Image
@@ -25,6 +25,7 @@ from .. import config, layout
 from ..workspace import Case, CaseError, ensure_dir, write_text_atomic
 from . import enrich as enrich_engine
 from . import ffmpeg as ffmpeg_engine
+from . import gallerydl
 from . import links as link_engine
 from . import thumbnails as thumbnail_engine
 
@@ -126,14 +127,14 @@ def _looks_like_auth_failure(message: str) -> bool:
 def _is_gallery_auth_error(exc: BaseException) -> bool:
     """Whether gallery-dl stopped on something a session would get past.
 
-    Typed first: it raises ``AuthenticationError`` / ``AuthorizationError`` from
-    ``gallery_dl.exception`` when a link plainly needs a login. Then by message,
-    because the common case is not typed at all — X aborts with a bare
+    By name first: it raises ``AuthenticationError`` / ``AuthorizationError`` when a
+    link plainly needs a login, and says so (``GalleryError.name``). Then by message,
+    because the common case is not named at all — X aborts with a bare
     ``AbortExtraction('Unavailable')`` for a tweet the guest session cannot read,
     and reading that as a plain failure is what kept the cookie prompt from ever
     appearing for the site it is most needed on.
     """
-    return type(exc).__name__ in {
+    return (getattr(exc, "name", "") or type(exc).__name__) in {
         "AuthenticationError",
         "AuthorizationError",
     } or _looks_like_auth_failure(str(exc))
@@ -179,26 +180,21 @@ def cookies_from_preference(pref: dict[str, Any] | None) -> dict[str, Any] | Non
     return None
 
 
-def _apply_gallery_config(cookies: dict[str, Any] | None) -> None:
-    """What gallery-dl needs told before it reads a link.
+def _gallery_args(cookies: dict[str, Any] | None) -> list[str]:
+    """The session gallery-dl reads a link with: a browser as a ``[name]`` list, a file
+    as a path string.
 
-    A cookie source, when there is one: a browser as a ``[name]`` list, a file as a
-    path string.
-
-    And Bluesky's facets, always. An AT Protocol post keeps its links beside its words
-    rather than in them — the words hold what is *printed*, which is an address cut off
-    at an ellipsis — and gallery-dl only carries them when asked. Without it the source
-    a post points at cannot be recovered from anything the import can see.
+    Given to each run on its own, so an attempt made without a session carries none,
+    whatever the attempt before it was given. Bluesky's facets are asked for on every
+    run by `gallerydl` itself.
     """
-    import gallery_dl.config as gdl_config
-
-    gdl_config.set(("extractor", "bluesky"), "metadata", "facets")
     if not cookies:
-        return
+        return []
     if cookies.get("browser"):
-        gdl_config.set(("extractor",), "cookies", [cookies["browser"]])
-    elif cookies.get("file"):
-        gdl_config.set(("extractor",), "cookies", str(_resolve_cookie_file(cookies["file"])))
+        return gallerydl.option("extractor.cookies", [cookies["browser"]])
+    if cookies.get("file"):
+        return gallerydl.option("extractor.cookies", str(_resolve_cookie_file(cookies["file"])))
+    return []
 
 
 def _now() -> str:
@@ -833,7 +829,15 @@ def _gallery_dl_item(file_url: str, kwdict: dict[str, Any]) -> dict[str, Any]:
     first_line = content.splitlines()[0][:120] if content else None
     filename = kwdict.get("filename") or "file"
     ext = kwdict.get("extension") or ""
+    # gallery-dl's JSON writes a date as "2024-05-01 12:34:56"; a datetime is kept
+    # for a caller that hands one over as it is.
     date = kwdict.get("date")
+    upload_date: str | None
+    if isinstance(date, datetime):
+        upload_date = date.strftime("%Y%m%d")
+    else:
+        day = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(date or ""))
+        upload_date = "".join(day.groups()) if day else None
     author = kwdict.get("author") or kwdict.get("user") or {}
     return {
         "url": file_url,
@@ -847,28 +851,49 @@ def _gallery_dl_item(file_url: str, kwdict: dict[str, Any]) -> dict[str, Any]:
         # as it prints them: a Bluesky link is shown truncated to an ellipsis, so a
         # scan of the words comes back with half an address and no way to know it.
         "links": [one for one in (kwdict.get("uris") or []) if isinstance(one, str)],
-        "upload_date": date.strftime("%Y%m%d")
-        if date is not None and hasattr(date, "strftime")
-        else None,
+        "upload_date": upload_date,
     }
 
 
 def _register_gallery_dl_item(
     case: Case,
-    extractor,
     post_url: str,
-    item: dict[str, Any],
+    index: int,
+    extra: list[str],
     *,
+    target: str | None = None,
     title: str | None = None,
     stage: Path | None = None,
+    wants: str = "",
 ) -> dict[str, Any]:
-    resp = extractor.request(item["url"])
+    """Download the address's ``index``-th file through gallery-dl and file it.
+
+    ``target`` is the address gallery-dl already read it as, when a listing came
+    first; without one the address is offered as typed, then as a Mastodon status.
+    """
+    scratch = case.subdir("media") / ".dl" / uuid.uuid4().hex[: layout.DOWNLOAD_ID_LENGTH]
+    ensure_dir(scratch)
+    try:
+
+        def fetch(at: str) -> tuple[Path, dict[str, Any]] | None:
+            return gallerydl.download(at, index, scratch, extra)
+
+        found = fetch(target) if target is not None else _gallery_read(post_url, fetch)[1]
+        if found is None:
+            raise RuntimeError("gallery-dl found no downloadable media at this link")
+        path, kwdict = found
+        item = _gallery_dl_item("", kwdict)
+        if _binding(wants) and item["kind"] != wants:
+            raise WrongKind("that file is not an image")
+        content = path.read_bytes()
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
     fname = f"{item['filename']}.{item['extension']}" if item["extension"] else item["filename"]
     return _register_downloaded_item(
         case,
         post_url,
         fname,
-        resp.content,
+        content,
         title=title,
         stage=stage,
         source_extra={
@@ -893,6 +918,23 @@ _MASTODON_STATUS = re.compile(
     r"^https?://[^/?#]+/(?:@[^/?#]+|users/[^/?#]+/statuses)/\d+/?(?:[?#].*)?$"
 )
 
+_Read = TypeVar("_Read")
+
+
+def _gallery_read(url: str, read: Callable[[str], _Read]) -> tuple[str, _Read]:
+    """``read`` the address as typed, then as a Mastodon status if nothing knew it.
+
+    Returns the address it was read as alongside the answer, so the download that
+    follows a listing goes straight to it.
+    """
+    targets = [url, f"mastodon:{url}"] if _MASTODON_STATUS.match(url) else [url]
+    for target in targets:
+        try:
+            return target, read(target)
+        except gallerydl.UnsupportedURL:
+            continue
+    raise UnknownLink(f"no extractor (yt-dlp or gallery-dl) recognizes this link: {url}")
+
 
 def _download_via_gallery_dl(
     case: Case,
@@ -916,23 +958,25 @@ def _download_via_gallery_dl(
     than with the clip. This is the *last* road, so a wrong kind is a refusal instead
     of a fallback — and it is the road a video-only post took to reach a slot that
     holds pictures, which the preview then refused two screens later.
+
+    gallery-dl runs as its own program (`engine/gallerydl.py`). With ``index`` given,
+    one run downloads that file; without, a listing comes first, as it always did, to
+    know whether there is a choice to offer.
     """
-    import gallery_dl.extractor as gdl_extractor
+    extra = _gallery_args(cookies)
+    if index is not None:
+        return _register_gallery_dl_item(
+            case, url, index or 1, extra, title=title, stage=stage, wants=wants
+        )
 
-    _apply_gallery_config(cookies)
-    extractor = gdl_extractor.find(url)
-    if extractor is None and _MASTODON_STATUS.match(url):
-        extractor = gdl_extractor.find(f"mastodon:{url}")
-    if extractor is None:
-        raise UnknownLink(f"no extractor (yt-dlp or gallery-dl) recognizes this link: {url}")
-
-    items = [_gallery_dl_item(msg[1], msg[2]) for msg in extractor if msg[0] == 3]  # Message.Url
+    target, files = _gallery_read(url, lambda at: gallerydl.listing(at, extra))
+    items = [_gallery_dl_item(file_url, kwdict) for file_url, kwdict in files]
     if not items:
         raise RuntimeError("gallery-dl found no downloadable media at this link")
     if _binding(wants) and not any(it["kind"] == wants for it in items):
         raise WrongKind("nothing at that address is an image")
 
-    if index is None and 1 < len(items) <= MAX_PICKER_ITEMS:
+    if 1 < len(items) <= MAX_PICKER_ITEMS:
         return {
             "multi": True,
             "items": [
@@ -949,10 +993,11 @@ def _download_via_gallery_dl(
             ],
         }
 
-    picked = items[(index or 1) - 1]
-    if _binding(wants) and picked["kind"] != wants:
+    if _binding(wants) and items[0]["kind"] != wants:
         raise WrongKind("that file is not an image")
-    return _register_gallery_dl_item(case, extractor, url, picked, title=title, stage=stage)
+    return _register_gallery_dl_item(
+        case, url, 1, extra, target=target, title=title, stage=stage, wants=wants
+    )
 
 
 _TELEGRAM_POST_RE = re.compile(r"^https?://(www\.)?(t|telegram)\.me/[^/]+/\d+")
@@ -1381,6 +1426,10 @@ def _structured_record_paths(case: Case) -> list[Path]:
         tool / layout.COLLAGE_DIR,
         tool / layout.DRAFTS_DIR,
         tool / layout.SEARCH_DIR,
+        # Horizon's saved views and the bench's `.work.json`, then its searches.
+        tool / layout.HORIZON_DIR,
+        tool / layout.HORIZON_DIR / layout.HORIZON_FINDS_DIR,
+        tool / layout.MAPPLATE_DIR,
     )
     return [path for root in roots if root.is_dir() for path in sorted(root.glob("*.json"))]
 

@@ -25,6 +25,7 @@
     chevronDown: 'm6 9 6 6 6-6',
     chevronUp: 'm6 15 6-6 6 6',
     panelRight: 'M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm11 0v16',
+    panelLeft: 'M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm5 0v16',
     search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4.35-4.35',
     trash: 'M4 7h16m-2 0-1 13H7L6 7m3 0V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-6 4v6m4-6v6',
     download: 'M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
@@ -37,6 +38,8 @@
     check: 'm4.5 12.5 5 5 10-11',
     note: 'M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm8 0v6h6M9 13h6m-6 4h4',
     pin: 'M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11Zm0-8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
+    star: 'm12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z',
+    flag: 'M5 21V3m0 1h13l-3 4 3 4H5',
     // A pushpin, and deliberately not the marker above it: `pin` means a point on
     // the ground, so it would read as "this is a place" on a graph where place is
     // a family. This one means "somebody put this here and it stays".
@@ -53,11 +56,17 @@
     // magnifiers on one screen doing two different things is a third thing to learn.
     filter: 'M4 5h16l-6.2 7.4V20l-3.6-2.2v-5.4L4 5Z',
     grid: 'M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z',
+    // a map plate: a sheet with its map, a title line over it and the legend beside it
+    plate: 'M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm2 3h8M6 10h9v7H6v-7Zm3 7 2.5-3 2 2M17.5 10h1m-1 3h1',
+    // a legend: a mark and its line, three times
+    list: 'M4 6h2m4 0h10M4 12h2m4 0h10M4 18h2m4 0h10',
     // A table: the frame, its header row, one column divider. Distinct from `grid`
     // above, which is four equal cells and means an AOI sweep.
     table: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm-1 4.5h18M10 9.5V19',
     video: 'M4 6h11a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm12 4 5-3v10l-5-3',
     image: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm2 12 4-4a1 1 0 0 1 1.4 0l4.6 4M9 9.5h.01',
+    // a frame taken from a video: Inspect's capture
+    camera: 'M4 8h3l1.5-2.5h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Zm8 2.5a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5Z',
     audio: 'M9 18V6l10-2v11.5M9 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Zm10-2.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
     file: 'M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm8 0v6h6',
     hash: 'M9 4 7 20M17 4l-2 16M4 9h17M3 15h17',
@@ -65,6 +74,28 @@
     // makes that are neither a line nor a word
     numbered: 'M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18ZM10.4 9.6 12.4 8.2V16M10.6 16h3.6',
     blurBox: 'M4.5 4.5h15v15h-15zM9 9h.01M15 9h.01M9 15h.01M15 15h.01M12 12h.01',
+    // a label on the page and the line down to the point it names
+    calloutLeader: 'M10 4h10v7H10V4Zm2.5 3.5h5M10 11l-5 6.5M4.5 18.5h.01',
+    calloutBubble: 'M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9l-5 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z',
+    // a detail framed small, shown big beside it
+    zoomInset: 'M3 15h5v5H3v-5Zm8-12h10v10H11V3ZM3 15l8-12M8 20l13-7',
+    // a camera's field of view, opening from where it stood
+    viewCone: 'M12 20 4.5 7M12 20l7.5-13M4.5 7q7.5-4 15 0M12 20h.01',
+    // a mark pinned down onto its picture
+    anchorPicture: 'M4 8h16v12H4V8Zm8-6v8m-2.5-2.5L12 10l2.5-2.5',
+    // how a line is drawn: whole, in dashes, in dots
+    lineSolid: 'M4 12h16',
+    lineDashed: 'M3 12h4m3.5 0h4M18 12h3',
+    lineDotted: 'M4 12h.01M8 12h.01M12 12h.01M16 12h.01M20 12h.01',
+    // a box and the tab its words hang on, from each corner
+    tagTL: 'M4 10h16v10H4V10Zm0 0V5h9v5',
+    tagTR: 'M4 10h16v10H4V10Zm16 0V5h-9v5',
+    tagBL: 'M4 4h16v10H4V4Zm0 10v5h9v-5',
+    tagBR: 'M4 4h16v10H4V4Zm16 10v5h-9v-5',
+    cornerTL: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM6.5 8h5v4h-5Z',
+    cornerTR: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM12.5 8h5v4h-5Z',
+    cornerBL: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM6.5 12h5v4h-5Z',
+    cornerBR: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM12.5 12h5v4h-5Z',
     globe: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-9 9h18M12 3c2.5 2.5 3.8 5.7 3.8 9S14.5 18.5 12 21c-2.5-2.5-3.8-5.7-3.8-9S9.5 5.5 12 3Z',
     // a page the case points at, not a hostname: `domain` keeps the globe, and the
     // two stopped being the same row at a glance
@@ -103,10 +134,14 @@
     // A ghosted collage piece: an editing state, so it must stay distinct from an alert.
     ghost: 'M12 3a8 8 0 0 0-8 8v10l4-2 4 2 4-2 4 2V11a8 8 0 0 0-8-8Zm-3 8h.01m5.99 0H15',
     info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-11v6m0-10h.01',
+    // a light bulb: what the guide calls a tip
+    bulb: 'M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5M9 18h6M10 22h4',
     clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4v5l3.5 2',
     // a month with its head rule: what a field opens when a date is built rather
     // than typed
     calendar: 'M4 6.5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13Zm4-3v4m8-4v4M4 10h16',
+    // what has no date: there on every day
+    always: 'M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 0 0 0-8c-2 0-4 1.33-6 4Z',
     play: 'm8 5 11 7-11 7V5Z',
     pause: 'M8 5v14m8-14v14',
     volume: 'M5 10v4h3l4 4V6L8 10H5Zm11-2a6 6 0 0 1 0 8m2.5-10.5a9 9 0 0 1 0 13',
@@ -115,16 +150,58 @@
     eyeOff: 'M9.9 9.9a3 3 0 1 0 4.2 4.2M10.7 5.7A9.8 9.8 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17.8 17.8 0 0 1-2.2 3M6.6 6.6C4 8.4 2.5 12 2.5 12S6 18.5 12 18.5c1.5 0 2.9-.4 4.1-1.1M3 3l18 18',
     key: 'm21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4',
     lock: 'M7 11V7a5 5 0 0 1 10 0v4M5 11h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z',
+    unlock: 'M7 11V7a5 5 0 0 1 9.6-2M5 11h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z',
+    // turning a map: an arc round to the left or the right, its head where it is going
+    rotateLeft: 'M4 4v5h5M4.6 9A8 8 0 1 1 6 16.9',
+    rotateRight: 'M20 4v5h-5m4.4 0A8 8 0 1 0 18 16.9',
+    // laying several things out on a page
+    alignLeft: 'M4 3v18M8 7h10M8 14h6',
+    alignCentreH: 'M12 3v18M6 7h12M8 14h8',
+    alignRight: 'M20 3v18M6 7h10M10 14h6',
+    alignTop: 'M3 4h18M7 8v10M14 8v6',
+    alignCentreV: 'M3 12h18M7 6v12M14 8v8',
+    alignBottom: 'M3 20h18M7 6v10M14 10v6',
+    distributeH: 'M4 3v18M20 3v18M10 8h4v8h-4z',
+    distributeV: 'M3 4h18M3 20h18M8 10h8v4H8z',
+    qr: 'M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h2v2h-2zm4 0h2v2h-2zm-4 4h2v2h-2zm4 0h2v2h-2zM6.5 6.5h1v1h-1zm10 0h1v1h-1zm-10 10h1v1h-1z',
+    // the app's own mark, two flanks of the north arrow
+    brand: 'M12 1.8 5.8 21.4 12 16.4ZM12 1.8 18.2 21.4 12 16.4Z',
+    rings: 'M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M12 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0M12 12m-9.5 0a9.5 9.5 0 1 0 19 0a9.5 9.5 0 1 0-19 0',
     shield: 'M12 21.5s7.5-3.7 7.5-9.3V5.4L12 2.5 4.5 5.4v6.8c0 5.6 7.5 9.3 7.5 9.3Z',
     chart: 'M3.5 3.5v17h17m-4-5v-6m-5 6V8m-5 8.5v-3',
+    // a ridge over its baseline: the elevation profile
+    profile: 'M3 20h18M3 16.5l4.5-6.5 3.5 4 3.5-6 6.5 9.5',
+    // an eye and the cone it looks through, a ridge across its far end: a Horizon view
+    horizon: 'M5 17.5 20.5 7M5 17.5h15.5M12.5 13.5l2.5-2.5 2 1.5 3.5-3.5M5 16a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z',
     square: 'M5 5h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z',
     circle: 'M12 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16Z',
     line: 'M5 19 19 5',
     curve: 'M4 18c4 0 4-12 8-12s4 12 8 12',
     freehand: 'M3 17c3-9 5 5 8-2s4-8 6-2 3-2 4-5',
+    // a near ridge drawn under a farther one: an inner edge of the land
+    ridge: 'M2 19l6-6 4 3 3-3 7 6M2 11l5-4 4 2 4-3 7 5',
+    // a skyline, and a tick in the open sky over it
+    skyClear: 'M2 19l6-6 4 3 3-3 7 6M8.5 7.5l2.5 2.5 5-5.5',
+    // a collage cut where its frames meet
+    scissors: 'M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12',
+    // a stroke drawn snaps onto the nearest edge
+    magnet: 'm6 15-4-4 6.75-6.77a7.79 7.79 0 0 1 11 11L13 22l-4-4 6.39-6.36a2.14 2.14 0 0 0-3-3L6 15M5 8l4 4M12 15l4 4',
+    // a rubber at a slant over the line it leaves
+    // fog over far land: lines thinning off
+    haze: 'M3 8h18M5 12h14M3 16h18M7 20h10',
+    brush: 'm9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z',
+    eraser: 'M7 21 2.7 16.7a2.4 2.4 0 0 1 0-3.4l9.6-9.6a2.4 2.4 0 0 1 3.4 0l5.6 5.6a2.4 2.4 0 0 1 0 3.4L13 21M22 21H7M5 11l9 9',
     arrow: 'M5 19 19 5m0 0h-8m8 0v8',
     text: 'M5 6V4h14v2M12 4v16m-3 0h6',
     cursor: 'm4 3 6.2 15.5 2.2-6.5 6.5-2.2L4 3Z',
+    // a loop drawn round what is to be picked, its tail trailing off the hand
+    lasso: 'M12 4c5 0 9 2.7 9 6s-4 6-9 6c-1.4 0-2.7-.2-3.9-.6M4.6 13.3C3.6 12.4 3 11.2 3 10c0-3.3 4-6 9-6M6 15.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm0 4c0 1.2-.6 2-1.6 2.5',
+    // two branches joining into one stem
+    merge: 'M6 4v3a5 5 0 0 0 5 5h2a5 5 0 0 0 5-5V4M12 12v8m-3-3 3 3 3-3',
+    // a sheet on its clipboard, what a paste lands on
+    clipboard: 'M9 3.5h6a1 1 0 0 1 1 1V6H8V4.5a1 1 0 0 1 1-1ZM8 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2M9 12h6m-6 4h4',
+    // a label tied on: what a colour is named in the case
+    tag: 'M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9-8.1 8.1-8.9-8.9ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z',
     inspect: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4.35-4.35M8 11h6m-3-3v6',
     crop: 'M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14',
     screen: 'M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm5 15h6m-3-4v4',
@@ -137,6 +214,9 @@
     centre: 'M4 8V5a1 1 0 0 1 1-1h3m8 0h3a1 1 0 0 1 1 1v3m0 8v3a1 1 0 0 1-1 1h-3m-8 0H5a1 1 0 0 1-1-1v-3m8-4.5v1m-.5-.5h1',
     // free to be moved anywhere
     move: 'M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3',
+    // an open hand, the thumb out: what a drag takes hold of. Three wide fingers
+    // rather than four, which merge into one at the band's 15 px
+    hand: 'M7.5 12.5V7a2 2 0 0 1 4 0v4M11.5 10.5V5a2 2 0 0 1 4 0v5.5M15.5 10.5V7a2 2 0 0 1 4 0v7a7 7 0 0 1-7 7h-1.3a6 6 0 0 1-4.6-2.2L3.2 14.6a1.8 1.8 0 0 1 2.7-2.3l1.6 1.8',
     sliders: 'M4 6h9m4 0h3M4 12h3m4 0h9M4 18h13m4 0h3M13 4v4m0 6v4m4-12v4',
     wand: 'M4 20 13 11M15 3l1.1 3 3 1.1-3 1.1L15 11.3l-1.1-3-3-1.1 3-1.1L15 3ZM19.5 11.5l.6 1.8 1.8.6-1.8.6-.6 1.8-.6-1.8-1.8-.6 1.8-.6.6-1.8Z',
     maximize: 'M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3',

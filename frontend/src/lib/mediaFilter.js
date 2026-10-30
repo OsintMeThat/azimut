@@ -59,11 +59,12 @@ export function isBroughtIn(item) {
  *  where the two and the reason they differ by a capture are written down. The server
  *  filters on the same set, and this is the in-memory pass a case small enough for one
  *  page takes instead. */
-const MADE_HERE = new Set(['inspect', 'satellite', 'screenshot', 'compare']);
+const MADE_HERE = new Set(['inspect', 'satellite', 'screenshot', 'compare', 'horizon']);
 
 /** Whether the app produced this file rather than the analyst gathering it: an
  *  extracted frame, an adjustment, a collage, a capture drawn out of tiles, a map
- *  the extension grabbed off the screen, a Compare render or a kept Detect finding.
+ *  the extension grabbed off the screen, a Compare render or a kept Detect finding,
+ *  a picture of a saved Horizon view.
  *
  *  Reads **how the file entered the case**, not everything true about it. Bytes
  *  imported first and later found identical to a frame keep `upload`, because that

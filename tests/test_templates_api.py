@@ -152,6 +152,15 @@ def test_post_template_tweet_count_is_bounded(client):
     assert response.status_code == 422
 
 
+def test_post_template_mention_holds_several_full_handles(client):
+    mention = "@geoconfirmed.org @uacontrolmap.bsky.social @ukrainedailyupdate.bsky.social"
+    response = client.post(
+        "/api/templates/post", json={"name": "Handles", "data": {"mention": mention}}
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["mention"] == mention
+
+
 def test_whitespace_only_names_are_rejected_on_create_and_edit(client):
     created = client.post("/api/templates/proof", json={"name": "Good", "data": {}})
     assert created.status_code == 200
@@ -201,3 +210,34 @@ def test_a_style_carries_what_the_plate_prints(client):
 
     assert saved["data"]["footerText"] is False
     assert saved["data"]["footerCoords"] is True
+
+
+def test_a_style_carries_its_typeface_and_a_style_from_before_keeps_the_system_one(client):
+    saved = client.post(
+        "/api/templates/proof",
+        json={"name": "Condensed", "data": {"font": "barlow", "fontBold": False}},
+    ).json()
+    assert saved["data"]["font"] == "barlow"
+    assert saved["data"]["fontBold"] is False
+
+    older = client.post("/api/templates/proof", json={"name": "Before fonts", "data": {"bg": "#101418"}}).json()
+    assert older["data"]["font"] == "system"
+    assert older["data"]["fontBold"] is True
+
+
+def test_a_typeface_the_app_does_not_ship_is_refused(client):
+    response = client.post("/api/templates/proof", json={"name": "Comic", "data": {"font": "comic-sans"}})
+    assert response.status_code == 422
+
+
+def test_a_proof_template_keeps_its_caption_colour(client):
+    saved = client.post(
+        "/api/templates/proof",
+        json={"name": "Amber captions", "data": {"captionColor": "#FFD740"}},
+    ).json()
+    assert saved["data"]["captionColor"] == "#ffd740"
+
+    older = client.post("/api/templates/proof", json={"name": "Auto captions", "data": {}}).json()
+    assert older["data"]["captionColor"] is None
+    refused = client.post("/api/templates/proof", json={"name": "Bad", "data": {"captionColor": "amber"}})
+    assert refused.status_code == 422

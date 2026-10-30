@@ -286,7 +286,7 @@
       <span>
         {#if naming}
           The name a capture records, and one layer of your Copernicus configuration whose
-          satellite data this reads — its own colours are replaced by yours.
+          satellite data this reads, its own colours replaced by yours.
         {:else}
           Both are what everything already filed under this layer was rendered from, so neither
           changes.

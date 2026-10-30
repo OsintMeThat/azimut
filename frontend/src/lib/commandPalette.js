@@ -1,5 +1,6 @@
 import { foldTerms, foldText } from './textFold.js';
 import { workspaceOf } from './workspaces.js';
+import { HORIZON_GROUPS, HORIZON_SETTINGS } from './horizon/panelIndex.js';
 
 export function isPaletteKey(event) {
   return Boolean(
@@ -62,4 +63,17 @@ export function paletteTools(tools, query) {
     const queryText = foldText(query.trim());
     return Number(foldText(b.label).startsWith(queryText)) - Number(foldText(a.label).startsWith(queryText));
   });
+}
+
+/**
+ * Find Horizon's settings by name or by the words they go by, once something
+ * is typed: a row opens Horizon on the setting (lib/horizon/panelIndex.js).
+ */
+export function paletteSettings(query) {
+  const terms = foldTerms(query);
+  if (!terms.length) return [];
+  return HORIZON_SETTINGS.filter((one) => {
+    const text = foldText(`${one.label} ${one.words}`);
+    return terms.every((term) => text.includes(term));
+  }).map((one) => ({ kind: 'setting', id: one.id, label: one.label, detail: HORIZON_GROUPS[one.group], icon: 'horizon' }));
 }

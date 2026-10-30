@@ -87,6 +87,7 @@ vi.mock('../lib/state.svelte.js', async () => {
     uiState: fixture.uiState,
     prefs: fixture.prefs,
     updatesState: fixture.updatesState,
+    appInfo: fixture.appInfo,
     createCase,
     openCase,
     toast,
@@ -98,7 +99,7 @@ const leaveAnalysisView = vi.fn();
 vi.mock('../lib/analysisSearch.svelte.js', () => ({ setAnalysisFilter, leaveAnalysisView }));
 
 const openEntity = vi.fn();
-vi.mock('../lib/navigate.js', () => ({ openEntity }));
+vi.mock('../lib/navigate.js', () => ({ openEntity, openGuide: vi.fn(), openTour: vi.fn(), openWhatsNew: vi.fn() }));
 
 // The registry is served by the backend and never loaded here, so the families it
 // would answer with are stated instead: without them every type falls into "other"
@@ -107,6 +108,10 @@ vi.mock('../lib/entityTypes.svelte.js', async (importOriginal) => ({
   ...(await importOriginal()),
   entityFamily: (type) => ({ place: 'place', media: 'collected', person: 'actor' })[type] ?? null,
 }));
+
+// a frame pointed at the release would make the suite fetch it
+const downloadInPlace = vi.fn();
+vi.mock('../lib/updateSteps.js', async (importOriginal) => ({ ...(await importOriginal()), downloadInPlace }));
 
 const { default: Overview } = await import('./Overview.svelte');
 const { caseState, prefs, uiState, updatesState, resetOverviewFixture } = await import(
@@ -350,6 +355,46 @@ describe('what the startup checks left on the page', () => {
     flushSync();
     expect(target.querySelector('.notes').textContent).toContain('a thing that was broken');
     expect(card.querySelector('a').getAttribute('href')).toBe('https://example.invalid/releases');
+  });
+
+  it('downloads this system’s binary, then says how to put it in place', async () => {
+    updatesState.app = {
+      update_available: true,
+      latest: 'v0.3.4',
+      url: 'https://example.invalid/releases',
+      notes: '',
+      asset: 'azimut-linux-x86_64',
+      download_url: 'https://example.invalid/download/azimut-linux-x86_64',
+      install: { kind: 'binary', system: 'linux', program: '/home/u/azimut-linux-x86_64', workspace: '/home/u/Azimut' },
+    };
+    await open();
+    const card = target.querySelector('.notice');
+    const link = card.querySelector('a[href$="/azimut-linux-x86_64"]');
+    expect(link.textContent).toContain('Download for Linux');
+    link.click();
+    // handed to a hidden frame, so the page itself never leaves
+    expect(downloadInPlace).toHaveBeenCalledWith(link.href);
+    flushSync();
+    expect(card.textContent).toContain('chmod +x /home/u/azimut-linux-x86_64');
+    expect(card.textContent).toContain('/home/u/Azimut');
+    expect(card.textContent).not.toContain('Download for Linux');
+  });
+
+  it('shows a pip install its pipx steps at once, with nothing to download', async () => {
+    updatesState.app = {
+      update_available: true,
+      latest: 'v0.3.4',
+      url: 'https://example.invalid/releases',
+      notes: '',
+      asset: null,
+      download_url: null,
+      install: { kind: 'package', system: 'linux', program: null, workspace: '/home/u/Azimut' },
+    };
+    await open();
+    const card = target.querySelector('.notice');
+    expect(card.textContent).toContain('pipx upgrade azimut');
+    expect(card.querySelector('[aria-label="Copy pipx upgrade azimut"]')).not.toBeNull();
+    expect(card.textContent).not.toContain('Download for');
   });
 
   it('never checks anything itself, so a muted release leaves no card', async () => {

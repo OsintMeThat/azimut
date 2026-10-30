@@ -291,9 +291,23 @@ def _migrate_15_to_16(conn: sqlite3.Connection) -> None:
     )
 
 
+def _rebuild_temporal_projection(conn: sqlite3.Connection) -> None:
+    """Rebuild the Time projection with the columns today's writer fills.
+
+    The rebuild writes every column the projection has now, so a table older than
+    one of them gains it first. The zone came in 19 and steps 16 to 18 rebuild
+    before that: without this, a case shipped at 15 to 17 failed its first rebuild
+    and could not be opened (0.3.2).
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(temporal_items)")}
+    if "tz" not in columns:
+        conn.execute("ALTER TABLE temporal_items ADD COLUMN tz TEXT")
+    _rebuild_temporal_projection_conn(conn)
+
+
 def _migrate_16_to_17(conn: sqlite3.Connection) -> None:
     """Rewrite temporal bounds to their fixed-width sortable representation."""
-    _rebuild_temporal_projection_conn(conn)
+    _rebuild_temporal_projection(conn)
 
 
 def _migrate_17_to_18(conn: sqlite3.Connection) -> None:
@@ -304,7 +318,7 @@ def _migrate_17_to_18(conn: sqlite3.Connection) -> None:
     an older build — the attribute survives a schema it predates — reaches the
     Timeline on the first open rather than on the next save of each proof.
     """
-    _rebuild_temporal_projection_conn(conn)
+    _rebuild_temporal_projection(conn)
 
 
 #: The two tables schema 19 adds for merges, as `sqlite_backend._SCHEMA` declares them.
@@ -338,13 +352,10 @@ def _add_temporal_zones(conn: sqlite3.Connection) -> None:
 
     A civil date stated in a zone spans that zone's days, so a dated proof's bounds
     move with the zone its point is in. Nothing stored before carried one, and those
-    rows rebuild exactly as they were; the rebuild is for the column itself. A table
-    born at 15 already has the column, so it is added only where it is missing.
+    rows rebuild exactly as they were; the rebuild is for the column itself, which
+    a table born at 15 or migrated through 17 already has.
     """
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(temporal_items)")}
-    if "tz" not in columns:
-        conn.execute("ALTER TABLE temporal_items ADD COLUMN tz TEXT")
-    _rebuild_temporal_projection_conn(conn)
+    _rebuild_temporal_projection(conn)
 
 
 def _migrate_18_to_19(conn: sqlite3.Connection) -> None:

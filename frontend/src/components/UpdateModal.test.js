@@ -31,3 +31,24 @@ describe('release notes', () => {
     expect(source).toContain('{#if updateState.notes}');
   });
 });
+
+describe('the way to the update', () => {
+  it('offers the same buttons as Home and Settings', () => {
+    expect(source).toContain('<UpdateButtons {update} onstart={() => (started = true)} />');
+  });
+
+  it('turns into the steps once the download is pressed', () => {
+    expect(source).toMatch(/\{#if started\}\s*<UpdateSteps \{update\} \/>/);
+  });
+
+  it('sets the steps of a pip install apart under the notes, where they are the way', () => {
+    expect(source).toMatch(/\{#if update\?\.install\?\.kind === 'package'\}\s*<UpdateSteps \{update\} framed \/>/);
+    // not buried in the opening sentence any more
+    expect(source).not.toContain('PIP_COMMAND');
+  });
+
+  it('never mutes a release whose download was started', () => {
+    // a download that was never put in place must be able to remind next time
+    expect(source).toContain('dismissUpdate(started ? false : mute)');
+  });
+});

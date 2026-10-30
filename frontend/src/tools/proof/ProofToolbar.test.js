@@ -216,3 +216,122 @@ describe('the symbol button', () => {
     expect(src).not.toContain("class:active={tool === 'icon' || iconOpen}");
   });
 });
+
+describe('the pointer control', () => {
+  it('stays away until a callout is drawn or a label or callout is picked', () => {
+    const { body } = render(ProofToolbar, { props: props({ tool: 'rect' }) });
+    expect(body).not.toContain('title="Pointer"');
+  });
+
+  it('offers a leader and a bubble with the tool in hand, and no plain label', () => {
+    const { body } = render(ProofToolbar, { props: props({ tool: 'callout', showTail: true, activeTail: 'bubble' }) });
+    expect(body).toContain('title="Pointer"');
+    expect(body).toContain('Leader line to the point');
+    expect(body).toContain('Speech bubble');
+    expect(body).not.toContain('No pointer: a plain label');
+  });
+
+  it('offers to take the pointer off a picked mark', () => {
+    const { body } = render(ProofToolbar, {
+      props: props({
+        tool: 'select', showTail: true, tailNone: true, activeTail: 'leader',
+        selectedShape: { kind: 'callout', fontSize: 30, color: '#ff5252' },
+      }),
+    });
+    expect(body).toContain('No pointer: a plain label');
+  });
+
+  it('sizes a picked callout by its font, like a label', () => {
+    const { body } = render(ProofToolbar, {
+      props: props({ tool: 'select', selectedShape: { kind: 'callout', color: '#ff5252' } }),
+    });
+    expect(body).toContain('title="Font size"');
+    expect(body).toContain('aria-label="font size"');
+    // a callout's default size is its own, smaller than a label's
+    expect(body).toMatch(/tb-size-val[^>]*>22</);
+  });
+});
+
+describe('what the rail shows for the pick', () => {
+  it('offers a line style to lines, and not to a label', () => {
+    const line = render(ProofToolbar, { props: props({ tool: 'select', selectedShape: { kind: 'arrow' }, showDash: true }) });
+    expect(line.body).toContain('title="Line style"');
+    const label = render(ProofToolbar, { props: props({ tool: 'select', selectedShape: { kind: 'text', fontSize: 28 } }) });
+    expect(label.body).not.toContain('title="Line style"');
+  });
+
+  it('offers a label its frame and background', () => {
+    const { body } = render(ProofToolbar, {
+      props: props({ tool: 'select', selectedShape: { kind: 'text', fontSize: 28 }, textBox: { frame: true, bg: null } }),
+    });
+    expect(body).toContain('title="Frame around the words"');
+    expect(body).toContain('aria-pressed="true"');
+    expect(body).toContain('title="Background"');
+  });
+
+  it('offers a picked panel its border, and nothing when no picture is picked', () => {
+    const picked = render(ProofToolbar, { props: props({ tool: 'select', surfaceBorder: null }) });
+    expect(picked.body).toContain('title="Border"');
+    const none = render(ProofToolbar, { props: props({ tool: 'select' }) });
+    expect(none.body).not.toContain('title="Border"');
+  });
+
+  it('names a cone\'s lens on its button, or its width when set by hand', () => {
+    const lens = render(ProofToolbar, { props: props({ tool: 'cone', showLens: true, activeLens: { lens: '2', upright: false, fov: 38.2 } }) });
+    expect(lens.body).toContain('2×');
+    expect(lens.body).toContain('Zoom 2×');
+    const own = render(ProofToolbar, { props: props({ tool: 'cone', showLens: true, activeLens: { lens: null, upright: false, fov: 52.4 } }) });
+    expect(own.body).toContain('52°');
+  });
+});
+
+describe('ProofToolbar sizes apart, and the page texts', () => {
+  it('puts each of the pick’s sizes on a slider of its own, named', () => {
+    const { body } = render(ProofToolbar, {
+      props: props({
+        tool: 'select',
+        selectedShape: { kind: 'rect', strokeWidth: 4, tag: 'AK' },
+        moreSizes: [{ id: 'tag', label: 'Tag text', value: 30, min: 8, max: 96 }],
+      }),
+    });
+    expect(body).toContain('>Line<');
+    expect(body).toContain('aria-label="stroke width"');
+    expect(body).toContain('>Tag text<');
+    expect(body).toContain('aria-label="Tag text size"');
+    expect(body).toMatch(/class="more-slider[^"]*"[\s\S]*?max="96"/);
+  });
+
+  it('names the main slider Text for words, and adds a callout’s line under it', () => {
+    const { body } = render(ProofToolbar, {
+      props: props({
+        tool: 'select',
+        selectedShape: { kind: 'callout', fontSize: 40 },
+        moreSizes: [{ id: 'line', label: 'Line', value: 4, min: 1, max: 16 }],
+      }),
+    });
+    expect(body).toContain('>Text<');
+    expect(body).toContain('aria-label="Line size"');
+  });
+
+  it('offers a picked panel’s captions their size and colour, Auto included', () => {
+    const { body } = render(ProofToolbar, {
+      props: props({
+        tool: 'select',
+        pageText: { id: 'caption', label: 'Caption', size: 24, color: null, auto: '#94a3b8' },
+      }),
+    });
+    expect(body).toContain('title="Caption text"');
+    expect(body).toContain('aria-label="Caption text size"');
+    expect(body).toContain('aria-label="Caption colour auto"');
+    expect(render(ProofToolbar, { props: props({ tool: 'select' }) }).body).not.toContain('Caption text');
+  });
+
+  it('draws each lens as the wedge it opens, and the two ways a phone is held', () => {
+    const { body } = render(ProofToolbar, {
+      props: props({ tool: 'cone', showLens: true, activeLens: { lens: '1', upright: false, fov: 69.4 } }),
+    });
+    expect(body.match(/class="lens-tile/g)).toHaveLength(5);
+    expect(body).toContain('aria-label="Landscape"');
+    expect(body).toContain('aria-label="Phone held upright"');
+  });
+});

@@ -79,6 +79,12 @@ class FullCase:
     session: str = ""  # the photo's Inspect work
     compare_session: str = ""
     compare_image: str = ""  # the session's render, a media working file
+    horizon_view: str = ""  # a saved Horizon view, matched on the photo
+    horizon_thumb: str = ""  # its preview, which travels with it
+    horizon_find: str = ""  # a search for where the photo was taken, run to its end
+    horizon_work: str = ""  # the work on Horizon's bench, kept so a reload brings it back
+    map_plate: str = ""  # a page laid out round a map of the case
+    map_plate_thumb: str = ""  # its preview, which travels with it
     analyzer_zones: str = ""
     analyzer_area: str = ""
     analyzer_followup: str = ""
@@ -94,6 +100,8 @@ class FullCase:
     place_id: str = ""
     grid: str = ""
     layer_id: str = ""
+    editable_layer_id: str = ""
+    editable_layer: str = ""
     layer: str = ""  # the spec, which is what the entity points at
     layer_snapshot: str = ""  # the bytes as received, which travel with it
     layer_icons: str = ""  # the source's own pictograms, which travel too
@@ -117,7 +125,10 @@ class FullCase:
     entity_types: set[str] = field(default_factory=set)
 
 
-def build_full_case(client, name: str = "Full case", *, subject_changes: bool = True) -> FullCase:
+def build_full_case(
+    client, name: str = "Full case", *, subject_changes: bool = True, personal_layers: bool = True,
+    horizon_find: bool = True,
+) -> FullCase:
     """Fill one case through every tool that files an artifact.
 
     Returns once the background queue is idle, so a caller can move or delete the
@@ -185,7 +196,7 @@ def build_full_case(client, name: str = "Full case", *, subject_changes: bool = 
             "spec": {"frames": [{
                 "id": "fr_1", "path": full.photo, "time": None,
                 "adjust": {"brightness": 1.2}, "crop": {"x": 0.1, "y": 0.1, "w": 0.5, "h": 0.5},
-            }]},
+            }], "marks": [{"id": "mk_1", "time": 1.5, "label": "Plate visible"}]},
         },
     )
     assert work.status_code == 200, work.text
@@ -237,6 +248,68 @@ def build_full_case(client, name: str = "Full case", *, subject_changes: bool = 
     )
     assert rendered.status_code == 200, rendered.text
     full.compare_image = rendered.json()["path"]
+
+    view = client.post(
+        f"/api/cases/{case_id}/horizon/views",
+        json={
+            "title": "North ridge",
+            "spec": {
+                "eye": {"lat": 46.5586, "lon": 7.8353, "mode": "ground", "height": 1.7},
+                "look": {"heading": 95, "tilt": 2, "fov": 60},
+                "picture": {"ground": "imagery", "imagery": "esri-world-imagery"},
+                "photo": {
+                    "path": full.photo, "kind": "image", "mix": 0.6,
+                    "strokes": [[{"u": 0.1, "v": 0.4}, {"u": 0.5, "v": 0.35}]],
+                },
+            },
+            "made": {"terrain": [{"label": "Mapterhorn", "attribution": "© Mapterhorn"}],
+                     "resolution_m": 9.6, "refraction": 0.13},
+            "footprint": [[7.8353, 46.5586], [7.95, 46.6], [7.96, 46.5]],
+        },
+    )
+    assert view.status_code == 200, view.text
+    full.horizon_view = view.json()["spec_path"]
+    view_thumb = client.put(
+        f"/api/cases/{case_id}/horizon/views/{view.json()['name']}/thumb",
+        files={"file": ("preview.png", io.BytesIO(_png((160, 80))), "image/png")},
+    )
+    assert view_thumb.status_code == 200, view_thumb.text
+    full.horizon_thumb = view_thumb.json()["thumb"]
+
+    # A search for where the photo was taken, run on flat relief drawn here: no network.
+    if horizon_find:
+        _add_horizon_find(client, case_id, full)
+
+    # The bench Horizon keeps while the analyst works: the photo laid and Find's area.
+    bench = client.put(
+        f"/api/cases/{case_id}/horizon/work",
+        json={
+            "view": view.json()["name"],
+            "photo": {"path": full.photo, "kind": "image", "strokes": [[{"u": 0.1, "v": 0.4}, {"u": 0.5, "v": 0.35}]]},
+            "find": {"area": [{"lat": 46.0, "lon": 7.0}, {"lat": 46.0, "lon": 7.01}, {"lat": 46.01, "lon": 7.01}]},
+        },
+    )
+    assert bench.status_code == 200, bench.text
+    full.horizon_work = ".horizon/.work.json"
+
+    # A map plate: one map, its legend and a title. Drawn by the browser; only the layout is kept.
+    plate = client.post(
+        f"/api/cases/{case_id}/map-plates",
+        json={"title": "Situation", "spec": {"elements": [
+            {"id": "map", "kind": "map", "box": [10, 20, 200, 150],
+             "view": {"lat": 48.85, "lon": 2.29, "zoom": 12}},
+            {"id": "legend", "kind": "legend", "box": [215, 20, 70, 60], "of": "map"},
+            {"id": "title", "kind": "text", "box": [10, 6, 200, 12], "text": "Situation", "size": 18, "weight": 700},
+        ]}},
+    )
+    assert plate.status_code == 200, plate.text
+    full.map_plate = plate.json()["spec_path"]
+    plate_thumb = client.put(
+        f"/api/cases/{case_id}/map-plates/{plate.json()['name']}/thumb",
+        files={"file": ("preview.png", io.BytesIO(_png((160, 110))), "image/png")},
+    )
+    assert plate_thumb.status_code == 200, plate_thumb.text
+    full.map_plate_thumb = plate_thumb.json()["thumb"]
 
     # -- a place, and a relation to the photo ---------------------------------
     place = client.post(
@@ -505,6 +578,56 @@ def build_full_case(client, name: str = "Full case", *, subject_changes: bool = 
         f"/api/cases/{case_id}/entities/lookup", params={"attr": "spec", "value": full.layer}
     ).json()["entity"]["id"]
 
+    # A personal layer owns its edited collection as well as the original KMZ.
+    if personal_layers:
+        personal = client.post(
+            f"/api/cases/{case_id}/map-layers/{layer_name}/editable-copy",
+            json={"title": "Working checkpoints"},
+        )
+        assert personal.status_code == 200, personal.text
+        personal_name = personal.json()["name"]
+        group = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/groups",
+                            json={"name": "Reviewed"})
+        assert group.status_code == 200, group.text
+        group_id = group.json()["group"]["id"]
+        styled = client.patch(f"/api/cases/{case_id}/map-layers/{personal_name}/groups/{group_id}",
+                              json={"colour": "#009e73", "symbol": "badge-building", "size": 1.75, "stroke": 4})
+        assert styled.status_code == 200, styled.text
+        shared = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/links",
+                             json={"items": [{"id": full.place_id, "lat": 48.8584, "lon": 2.2945}], "group": group_id})
+        assert shared.status_code == 200, shared.text
+        added = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/markers",
+                            json={"lat": 48.8, "lon": 2.3, "name": "Review point", "symbol": "star"})
+        assert added.status_code == 200, added.text
+        # A marker in the analyst's own icon: the layer takes its copy, so the case
+        # carries the picture and how it is drawn wherever it goes.
+        mark = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
+        mark.paste((200, 30, 30, 255), (8, 8, 32, 32))
+        drawn = io.BytesIO()
+        mark.save(drawn, "PNG")
+        library = client.post("/api/icons", files=[("files", ("full-case-mark.png", drawn.getvalue(), "image/png"))])
+        assert library.status_code == 200, library.text
+        icon_key = next(icon["key"] for icon in library.json()["icons"] if icon["name"] == "Full case mark")
+        worn = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/markers",
+                           json={"lat": 48.81, "lon": 2.31, "name": "Own icon", "icon": icon_key})
+        assert worn.status_code == 200, worn.text
+        ordered = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/groups/order",
+                              json={"ids": [group_id, *[g["id"] for g in styled.json()["groups"]
+                                                        if g["id"] != group_id]]})
+        assert ordered.status_code == 200, ordered.text
+        shape = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/shapes", json={
+            "geometry": {"type": "Polygon", "coordinates": [[[2.3, 48.8], [2.4, 48.8],
+                                                               [2.4, 48.9], [2.3, 48.8]]]},
+            "name": "Review area", "group": group_id,
+        })
+        assert shape.status_code == 200, shape.text
+        checkpoint = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/edit")
+        assert checkpoint.status_code == 200, checkpoint.text
+        full.editable_layer = layout.layer_spec_rel(personal_name)
+        full.editable_layer_id = client.get(
+            f"/api/cases/{case_id}/entities/lookup", params={"attr": "spec", "value": full.editable_layer}
+        ).json()["entity"]["id"]
+
     # -- the graph as the analyst arranged it ---------------------------------
     # Not an artifact and not an assertion: where a node was dragged to, in one
     # reading. Planted here so the trash and bundle gates cover it — a pin has to
@@ -602,3 +725,33 @@ def build_full_case(client, name: str = "Full case", *, subject_changes: bool = 
     ).json()["items"]
     full.entity_types = {e["type"] for e in entities}
     return full
+
+
+def _add_horizon_find(client, case_id: str, full: FullCase) -> None:
+    """A search for where the photo was taken, run to its end on flat relief drawn here: no network."""
+    from azimut.engine import terrain, workqueue
+    from fakerelief import Relief
+
+    terrain.forget_decoded()
+
+    fetch, terrain.tile = terrain.tile, Relief(peaks=(), plain=500.0, ripple=0.5)
+    try:
+        ring = [(46.0, 7.0), (46.0, 7.008), (46.006, 7.008), (46.006, 7.0)]
+        searched = client.post(
+            f"/api/cases/{case_id}/horizon/finds",
+            json={
+                "title": "North ridge search",
+                "photo": {"path": full.photo, "kind": "image", "title": "summit"},
+                "trace": {"x": [-0.8, -0.4, 0.0, 0.3, 0.6, 0.9], "y": [0.1, 0.12, 0.15, 0.11, 0.09, 0.1],
+                          "half_width": 600, "fov": 60, "known": True},
+                "area": [{"lat": lat, "lon": lon} for lat, lon in ring],
+                "reach": 5000,
+                "spacing": 500,
+            },
+        )
+        assert searched.status_code == 200, searched.text
+        workqueue.wait_until_idle(timeout=60)
+    finally:
+        terrain.tile = fetch
+        terrain.forget_decoded()
+    full.horizon_find = f".horizon/finds/{searched.json()['name']}.json"

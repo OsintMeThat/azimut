@@ -39,7 +39,7 @@ def explain(exc: BaseException) -> str:
     if isinstance(exc, httpx.TimeoutException):
         return "the service did not answer in time"
     if isinstance(exc, httpx.HTTPStatusError):
-        return f"the service answered {exc.response.status_code}"
+        return refused(exc.response.status_code)
     if isinstance(exc, httpx.HTTPError):
         return "the service could not be reached"
     if isinstance(exc, OSError):
@@ -49,6 +49,21 @@ def explain(exc: BaseException) -> str:
         return UNEXPECTED
     text = str(exc).strip()
     return text.rstrip(".") if text else UNEXPECTED
+
+
+def refused(code: int) -> str:
+    """What a service's HTTP refusal means to the analyst, in one clause.
+
+    A key or an allowance is something they can go and fix; a bare "answered
+    403" read like a bug in Azimut.
+    """
+    if code in (401, 403):
+        return f"the service refused the key or the account ({code})"
+    if code == 429:
+        return f"the service's allowance or rate limit is spent ({code})"
+    if code >= 500:
+        return f"the service is failing ({code}); try again later"
+    return f"the service answered {code}"
 
 
 def _disk(exc: OSError) -> str:

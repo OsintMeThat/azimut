@@ -5,6 +5,7 @@ import {
   hostOf,
   ignorePasteTarget,
   listenForPaste,
+  middleClickPaste,
   MAX_PASTE_IMAGE_BYTES,
   pasteImage,
   pasteProblem,
@@ -224,6 +225,38 @@ describe('the window listener', () => {
     const event = paste(clipboard({ text: 'https://example.com/x' }));
     expect(seen).toEqual([{ kind: 'url', url: 'https://example.com/x' }]);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('refuses the paste a middle click sends, and takes Ctrl+V again once it is over', () => {
+    // on Linux the middle button pastes the selection, and it is also the one that turns the map
+    const seen = [];
+    off = listenForPaste((payload) => seen.push(payload));
+    window.dispatchEvent(new MouseEvent('mousedown', { button: 1 }));
+    expect(middleClickPaste()).toBe(true);
+    window.dispatchEvent(new MouseEvent('mouseup', { button: 1 }));
+    const event = paste(clipboard({ text: 'https://example.com/x' }));
+    expect(seen).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+    const later = vi.spyOn(performance, 'now').mockReturnValue(performance.now() + 10_000);
+    expect(middleClickPaste()).toBe(false);
+    paste(clipboard({ text: 'https://example.com/x' }));
+    expect(seen).toHaveLength(1);
+    later.mockRestore();
+  });
+
+  it('refuses the middle click’s paste on the 3D globe too, whose presses send no mouse events', () => {
+    // the globe takes its presses as pointer events and cancels them, so the
+    // browser sends no mousedown: the middle button is heard on the pointer alone
+    const seen = [];
+    off = listenForPaste((payload) => seen.push(payload));
+    const later = vi.spyOn(performance, 'now').mockReturnValue(performance.now() + 20_000);
+    expect(middleClickPaste()).toBe(false);
+    window.dispatchEvent(new PointerEvent('pointerdown', { button: 1 }));
+    expect(middleClickPaste()).toBe(true);
+    window.dispatchEvent(new PointerEvent('pointerup', { button: 1 }));
+    paste(clipboard({ text: '46.5, 7.9' }));
+    expect(seen).toEqual([]);
+    later.mockRestore();
   });
 
   it('leaves a paste into a field alone', () => {

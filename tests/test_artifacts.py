@@ -15,7 +15,7 @@ from pathlib import Path
 
 import fullcase
 from azimut import layout
-from azimut.engine import artifacts
+from azimut.engine import artifacts, bundles
 from azimut.workspace import Case
 
 # The thumbnail cache is content-addressed, budgeted and regenerated on demand,
@@ -95,6 +95,8 @@ def test_deleting_everything_returns_the_case_to_its_birth_state(client):
     # Grids are not entities, so nothing deletes them for us (a gap the trash
     # work records rather than closes).
     client.delete(f"/api/cases/{full.case_id}/search-grids/north-sweep")
+    # Nor is Horizon's bench: it is the tab's work in progress, emptied by the tab itself.
+    client.delete(f"/api/cases/{full.case_id}/horizon/work")
     # Deleting is reversible now, so the bytes are still in the trash: this is
     # the second half of the gate, and where they are actually reclaimed.
     client.delete(f"/api/cases/{full.case_id}/trash")
@@ -135,6 +137,15 @@ def test_a_collage_owns_its_preview_but_not_its_exported_picture(client):
     assert artifacts.caches(case, entity) == []
 
 
+def test_a_horizon_view_owns_its_preview_but_not_the_photo_it_was_matched_on(client):
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    entity = case.find_entity(attr="spec", value=full.horizon_view)
+
+    assert set(artifacts.owned(case, entity)) == {full.horizon_view, full.horizon_thumb}
+    assert full.photo not in artifacts.owned(case, entity)
+
+
 def test_every_type_in_a_full_case_declares_what_it_owns(client):
     """A type in neither table is not a decision, it is an oversight — the next
     tool declares its files in ``KINDS`` or declares it has none in ``NO_FILES``,
@@ -144,6 +155,37 @@ def test_every_type_in_a_full_case_declares_what_it_owns(client):
     undeclared = {t for t in full.entity_types if not artifacts.declares(t)}
     assert not undeclared, f"entity types that never say what they own: {sorted(undeclared)}"
     assert all(reason for reason in artifacts.NO_FILES.values())
+
+
+def test_every_kind_that_owns_files_is_a_type_the_vocabulary_knows():
+    """A kind filed without its type is a free type: drawn in every reading of the case,
+    with no icon and nothing that opens it, which a Horizon search once was."""
+    from azimut.engine import entities
+
+    assert sorted(kind for kind in artifacts.KINDS if entities.entity_type(kind) is None) == []
+
+
+def test_a_full_case_comes_back_whole_from_its_bundle(client):
+    """Every file a full case's entities own and the bundle carries lands in the case
+    the bundle imports into, so a new kind cannot travel half."""
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    carried = {
+        rel
+        for entity in case.list_entities()
+        for rel in artifacts.owned(case, entity)
+        if bundles.classify_case_entry(rel) == "bundled"
+    }
+    assert {full.map_plate, full.horizon_view, full.horizon_find, full.editable_layer} <= carried
+
+    exported = bundles.export_case(case)
+    destination = Case.create(bundles.imported_name(case.id))
+    landed = Case.open(bundles.import_into(destination, exported)["case_id"])
+
+    assert sorted(rel for rel in carried if not landed.resolve_inside(rel).exists()) == []
+    assert landed.resolve_inside(full.horizon_work).is_file()
+    plate = client.get(f"/api/cases/{landed.id}/map-plates/{Path(full.map_plate).stem}")
+    assert plate.status_code == 200, plate.text
 
 
 def test_the_registry_answers_for_one_media_and_its_companions(client):

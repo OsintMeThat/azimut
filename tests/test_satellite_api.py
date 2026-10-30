@@ -11,7 +11,7 @@ from PIL import Image
 
 from azimut import layout
 from azimut.api import satellite as satellite_api
-from azimut.engine import geo, tiles
+from azimut.engine import geo, tilecache, tiles
 from azimut.workspace import Case
 
 
@@ -494,6 +494,108 @@ def test_screenshot_capture_files_with_burned_attribution(client):
     # nothing said it was framed, so provenance must not imply the coordinates
     # are a crop centre
     assert body["framed"] is False
+
+
+def test_a_tilted_view_is_filed_with_its_tilt_and_the_relief_it_was_drawn_on(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    r = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(w=800), "image/png")},
+        data={"lat": "46.5776", "lon": "8.0053", "zoom": "13.6274", "provider": "esri-world-imagery",
+              "bearing": "150", "pitch": "62", "exaggeration": "1", "elevation": "711.9",
+              "imagery_date": "2024-08-13", "imagery_exact": "false"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["method"], body["pitch"], body["bearing"]) == ("render", 62.0, 150.0)
+    # over relief the zoom's fraction is part of the camera, so it is kept
+    assert body["zoom"] == 13.63
+    assert body["relief"] == {"source": "mapterhorn", "exaggeration": 1.0}
+    assert "Relief © Mapterhorn" in body["attribution"]
+    assert "AWS" not in body["attribution"]
+    assert "exaggerated" not in body["attribution"]
+    # a tilted view has no one scale, so no bar or arrow is drawn on it
+    assert body["marks"] is None
+    assert body["height"] == 200 + tiles.ATTRIBUTION_BAND
+    assert (body["imagery_date"], body["imagery_exact"]) == ("2024-08-13", False)
+    listed = client.get(f"/api/cases/{cid}/satellite").json()
+    assert listed[0]["pitch"] == 62.0
+    # the saved list carries the camera, so the map can lean back to it
+    row = client.get(f"/api/cases/{cid}/satellite/index").json()[0]
+    assert (row["pitch"], row["exaggeration"], row["zoom"], row["bearing"]) == (62.0, 1.0, 13.63, 150.0)
+    # …and the height its centre was held at, which with the zoom puts the eye back
+    assert (body["elevation"], row["elevation"]) == (712, 712)
+
+
+def test_a_tilted_view_drawn_partly_from_the_fallback_relief_credits_it(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    body = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(w=1200), "image/png")},
+        data={"lat": "46.5", "lon": "8.0", "zoom": "13", "provider": "esri-world-imagery",
+              "pitch": "60", "relief_fallback": "true"},
+    ).json()
+    assert "Relief © Mapterhorn and Terrain Tiles, Mapzen and AWS Open Data" in body["attribution"]
+    assert body["relief"] == {"source": "mapterhorn", "exaggeration": 1.0, "fallback": "aws-terrain"}
+
+
+def test_a_flat_saved_row_carries_no_tilt(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    client.post(f"/api/cases/{cid}/satellite/place",
+                json={"lat": 46.5, "lon": 8.0, "zoom": 14, "title": "Flat"})
+    row = client.get(f"/api/cases/{cid}/satellite/index").json()[0]
+    assert (row["pitch"], row["exaggeration"], row["elevation"]) == (None, None, None)
+
+
+def test_a_tilted_view_with_free_far_ground_credits_both_providers(client):
+    client.put("/api/settings/keys", json={"mapbox": "pk.test"})
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    body = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(), "image/png")},
+        data={"lat": "46.5", "lon": "8.0", "zoom": "14", "provider": "mapbox-satellite",
+              "pitch": "60", "far_provider": "esri-world-imagery"},
+    )
+    assert body.status_code == 200, body.text
+    answer = body.json()
+    assert answer["far_provider"] == "esri-world-imagery"
+    assert "Far ground Esri" in answer["attribution"]
+    plain = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(), "image/png")},
+        data={"lat": "46.5", "lon": "8.0", "zoom": "14", "provider": "esri-world-imagery", "pitch": "60"},
+    ).json()
+    assert plain["far_provider"] is None
+
+
+def test_an_exaggerated_relief_says_so_on_the_capture(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    body = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(), "image/png")},
+        data={"lat": "46.5", "lon": "8.0", "zoom": "12", "provider": "esri-world-imagery",
+              "pitch": "45", "exaggeration": "2"},
+    ).json()
+    assert "heights exaggerated 2 times" in body["attribution"]
+    assert body["relief"]["exaggeration"] == 2.0
+
+
+@pytest.mark.parametrize("data, status", [
+    ({"pitch": "0"}, 422),  # a flat view goes down the stitched road
+    ({"pitch": "45", "provider": "google-js"}, 422),  # a widget is not drawn by the map
+    ({"pitch": "45", "provider": "nowhere"}, 404),
+    ({"pitch": "45", "exaggeration": "7"}, 422),
+])
+def test_a_tilted_capture_refuses_what_the_3d_map_cannot_have_drawn(client, data, status):
+    client.put("/api/settings/keys", json={"google_js": "AIza.js"})
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    form = {"lat": "46.5", "lon": "8.0", "zoom": "12", "provider": "esri-world-imagery", **data}
+    r = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(), "image/png")},
+        data=form,
+    )
+    assert r.status_code == status, r.text
 
 
 def test_screenshot_provenance_distinguishes_a_framed_crop_from_a_pasted_image(client):
@@ -1421,7 +1523,7 @@ def test_a_refused_capture_key_is_never_echoed(client, keys_refused, monkeypatch
     )
 
     assert answer.status_code == 502
-    assert MAPBOX not in answer.text and "answered 401" in answer.text
+    assert MAPBOX not in answer.text and "refused the key or the account (401)" in answer.text
 
 
 def test_an_upstream_failure_names_the_code_and_not_the_address():
@@ -1429,9 +1531,39 @@ def test_an_upstream_failure_names_the_code_and_not_the_address():
 
     request = httpx.Request("GET", f"https://services.sentinel-hub.com/ogc/wfs/{INSTANCE}?x=1")
     refused = httpx.HTTPStatusError("x", request=request, response=httpx.Response(403, request=request))
-    assert tiles.upstream_failure(refused) == "the provider answered 403"
+    assert tiles.upstream_failure(refused) == "the service refused the key or the account (403)"
     assert tiles.upstream_failure(httpx.ConnectTimeout("t", request=request)) == "the provider did not answer in time"
     assert INSTANCE not in tiles.upstream_failure(ValueError(f"bad reply from {request.url}"))
+
+
+@pytest.mark.parametrize(
+    ("code", "said"),
+    [
+        (401, "the service refused the key or the account (401)"),
+        (429, "the service's allowance or rate limit is spent (429)"),
+        (503, "the service is failing (503); try again later"),
+        (400, "the service answered 400"),
+    ],
+)
+def test_a_copernicus_refusal_says_what_it_means_and_the_service_own_words(code, said):
+    # "answered 403" alone read like a bug in Azimut: a refused key or a spent
+    # allowance is something the analyst can go and fix, so it is said that way
+    import httpx
+
+    request = httpx.Request("GET", f"https://sh.dataspace.copernicus.eu/ogc/wfs/{INSTANCE}?x=1")
+    bare = httpx.HTTPStatusError("x", request=request, response=httpx.Response(code, request=request))
+    assert tiles.upstream_failure(bare) == said
+    # Sentinel Hub's own report follows, unwrapped, with nothing it was sent
+    report = (
+        '<ows:ExceptionReport><ows:Exception><ows:ExceptionText>Monthly processing units exhausted for '
+        f'https://sh.dataspace.copernicus.eu/ogc/wms/{INSTANCE}</ows:ExceptionText></ows:Exception></ows:ExceptionReport>'
+    )
+    reported = httpx.HTTPStatusError(
+        "x", request=request, response=httpx.Response(code, content=report.encode(), request=request)
+    )
+    told = tiles.upstream_failure(reported)
+    assert told.startswith(f"{said}: Monthly processing units exhausted")
+    assert INSTANCE not in told
 
 
 # -- the tile cache expires what nobody reads again (AUD-024) ----------------------
@@ -1469,3 +1601,12 @@ def test_opening_the_workspace_sweeps_the_tile_cache(tmp_workspace, monkeypatch)
     workspace.open_workspace()
 
     assert swept.wait(5)
+
+
+def test_the_tile_cache_answers_whether_it_holds_a_tile_without_reading_it():
+    # what Horizon asks before it lays imagery over a view (api/horizon.py)
+    buffer = io.BytesIO()
+    Image.new("RGB", (256, 256), (40, 90, 40)).save(buffer, format="PNG")
+    assert not tilecache.has("esri-world-imagery", 3, 1, 1)
+    tilecache.put("esri-world-imagery", 3, 1, 1, buffer.getvalue(), "image/png")
+    assert tilecache.has("esri-world-imagery", 3, 1, 1)

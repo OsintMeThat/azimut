@@ -11,6 +11,9 @@
    * the tracker is public, so nothing leaves without being read first.
    */
   import Icon from '../../components/Icon.svelte';
+  import UpdateButtons from '../../components/UpdateButtons.svelte';
+  import UpdateSteps from '../../components/UpdateSteps.svelte';
+  import { PIP_COMMAND } from '../../lib/updateSteps.js';
 
   let {
     about,
@@ -37,11 +40,14 @@
     reportSummary = $bindable(),
   } = $props();
 
+  // The download was pressed: the steps show under the row from then on.
+  let updateStarted = $state(false);
+
   // Downloaders can be refreshed from PyPI between Azimut releases.
   const SCRAPER_LABELS = { 'yt-dlp': 'yt-dlp', 'gallery-dl': 'gallery-dl' };
 </script>
 
-<section class="group">
+<section class="group" data-guide="settings.about">
   <h3>Azimut</h3>
   <dl class="facts">
     <dt>Version</dt>
@@ -75,7 +81,7 @@
   </div>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.updates">
   <h3>Updates</h3>
   <div class="row">
     <div class="row-label">
@@ -83,9 +89,9 @@
       <span class="row-hint">
         {#if appUpdate?.update_available}
           <span class="mono">{appUpdate.latest}</span> is out. You have
-          <span class="mono">{about.version}</span>
+          <span class="mono">v{about.version}</span>
         {:else if appUpdate && !appUpdate.error}
-          you're on the latest (<span class="mono">{about.version}</span>)
+          you're on the latest (<span class="mono">v{about.version}</span>)
         {:else}
           {updateOnStart
             ? 'checks GitHub on startup and when requested'
@@ -94,12 +100,9 @@
       </span>
     </div>
     {#if appUpdate?.update_available}
-      <a class="btn btn-sm btn-primary dotted" href={appUpdate.url} target="_blank" rel="noreferrer">
-        <Icon name="download" size={13} /> Get {appUpdate.latest} <Icon name="external" size={11} />
-        {#if badges.app}
-          <span class="update-dot" aria-label="an update is waiting"></span>
-        {/if}
-      </a>
+      <div class="update-buttons">
+        <UpdateButtons update={appUpdate} dot={badges.app} onstart={() => (updateStarted = true)} />
+      </div>
     {:else}
       <button class="btn btn-sm" onclick={checkAppUpdate} disabled={checkingApp}>
         {checkingApp ? 'Checking…' : 'Check for updates'}
@@ -120,13 +123,22 @@
       aria-label="Check for updates on startup"
     />
   </div>
-  <p class="note">
-    Update with <span class="mono">pipx upgrade azimut</span>; standalone users replace
-    the downloaded binary.
-  </p>
+  <!-- a pip install has nothing to download: its terminal steps show at once -->
+  {#if appUpdate?.update_available && (updateStarted || appUpdate.install?.kind === 'package')}
+    <UpdateSteps update={appUpdate} framed />
+  {:else if appUpdate?.install?.kind === 'binary'}
+    <p class="note">An update replaces the program only; cases and settings stay in the workspace.</p>
+  {:else if appUpdate?.install?.kind === 'package'}
+    <p class="note">Update with <span class="mono">{PIP_COMMAND}</span>.</p>
+  {:else}
+    <p class="note">
+      Update with <span class="mono">{PIP_COMMAND}</span>; standalone users replace
+      the downloaded binary.
+    </p>
+  {/if}
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.issue">
   <h3>Report an issue</h3>
   <p class="note">
     Opens a new issue on the public GitHub tracker; anyone can read it.
@@ -185,7 +197,7 @@
   </p>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.downloaders">
   <h3>Downloaders</h3>
   <p class="note">
     Update these tools if a media link stops resolving.
@@ -243,6 +255,12 @@
   .sub {
     color: var(--text-3);
     font-size: var(--fs-sm);
+  }
+
+  .update-buttons {
+    display: flex;
+    flex-shrink: 0;
+    gap: 8px;
   }
 
   /* the one state worth pulling the eye: this downloader will fail on real links */

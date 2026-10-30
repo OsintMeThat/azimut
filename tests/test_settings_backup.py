@@ -29,6 +29,7 @@ NOT_EXPORTED: dict[str, str] = {
     "export_dirs": "absolute export paths belong to the machine that selected them",
     "sentinel_draft_layer": "a layer half-written in the picker, replaced by the next "
     "preview; the saved ones travel in sentinel_layers",
+    "quality_3d": "how much the 3D views draw answers this computer's graphics card",
 }
 
 
@@ -207,9 +208,9 @@ def test_an_unknown_browser_lands_on_none(client):
 
 
 def test_an_older_backup_without_the_new_sections_still_imports(client):
-    """A file written before templates and the logo travelled: settings only."""
+    """A file written before templates, the logo and the icons travelled: settings only."""
     res = client.post("/api/settings/import", json={"settings": {"units": "imperial"}}).json()
-    assert res == {"imported": ["units"], "templates": 0, "signature": False}
+    assert res == {"imported": ["units"], "templates": 0, "signature": False, "icons": 0}
     assert client.get("/api/settings").json()["units"] == "imperial"
 
 
@@ -221,6 +222,40 @@ def test_a_bundle_with_only_templates_imports(client):
     assert res["imported"] == []
     assert res["templates"] == 1
     assert [t["name"] for t in client.get("/api/templates").json()["proof"]] == ["Style"]
+
+
+def test_a_backup_from_before_map_templates_keeps_the_ones_here(client):
+    """A 0.3.2 backup has proof and post styles but no map list: restoring it must not
+    empty the map templates this machine already has."""
+    made = client.post("/api/templates/map", json={"name": "Situation", "data": {"elements": []}})
+    assert made.status_code == 200, made.text
+
+    res = client.post(
+        "/api/settings/import",
+        json={"templates": {"schema": 1, "proof": [{"id": "a1", "name": "Style", "data": {}}], "post": []}},
+    ).json()
+
+    kept = client.get("/api/templates").json()
+    assert res["templates"] == 1
+    assert [t["name"] for t in kept["proof"]] == ["Style"]
+    assert [t["name"] for t in kept["map"]] == ["Situation"]
+
+
+def test_a_backup_merges_its_templates_with_the_ones_made_here(client):
+    """As the icons do: one of the same id is replaced, one made only here stays."""
+    here = client.post("/api/templates/proof", json={"name": "Made here", "data": {}}).json()
+    shared = client.post("/api/templates/proof", json={"name": "Old name", "data": {}}).json()
+
+    client.post(
+        "/api/settings/import",
+        json={"templates": {"schema": 1, "proof": [
+            {"id": shared["id"], "name": "New name", "data": {}},
+            {"id": "b1", "name": "From the backup", "data": {}},
+        ]}},
+    )
+
+    names = [t["name"] for t in client.get("/api/templates").json()["proof"]]
+    assert names == [here["name"], "New name", "From the backup"]
 
 
 def test_malformed_templates_are_dropped_not_saved(client):
@@ -395,13 +430,15 @@ def test_a_backup_with_an_unreadable_template_id_still_restores(client):
     assert body["post_mention"] == "@kept"
 
 
-def test_a_backup_naming_the_retired_labels_layer_still_imports(client):
+def test_a_backup_naming_detect_layers_still_imports(client):
+    # Detect's layers were a setting until they moved to the browser, per case.
     res = client.post(
         "/api/settings/import",
         json={"settings": {"detect_view": {"collapsed": True, "overlays": ["labels", "roads"]}}},
     )
     assert res.status_code == 200, res.text
-    assert client.get("/api/settings").json()["detect_view"]["overlays"] == ["roads"]
+    view = client.get("/api/settings").json()["detect_view"]
+    assert view["collapsed"] is True and "overlays" not in view
 
 
 def test_a_backup_from_an_unpaired_machine_keeps_this_ones_pairing(client):

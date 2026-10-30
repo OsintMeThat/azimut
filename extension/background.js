@@ -526,6 +526,7 @@ const MAP_ROUTES = new Set([
   "/api/ingest/grid/marks",
   "/api/ingest/place",
   "/api/ingest/media",
+  "/api/ingest/probe",
   "/api/ingest/firms/sensors",
 ]);
 

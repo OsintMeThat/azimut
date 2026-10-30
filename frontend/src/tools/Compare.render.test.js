@@ -83,7 +83,7 @@ const get = vi.fn(async (path) => {
     };
   }
   if (path === '/api/settings') return { usage: {}, month: '2026-09' };
-  if (path.includes('/satellite/index')) return [];
+  if (path.includes('/satellite/index') || path.includes('/satellite/media')) return [];
   if (path.includes('/imagery-date')) return { supported: true, date: '2024-01-02' };
   if (path === '/api/satellite/wayback/releases') return { releases: structuredClone(releases) };
   if (path.startsWith('/api/satellite/wayback/changes')) return { changes: structuredClone(changes ?? releases) };
@@ -178,7 +178,9 @@ function fakeEngine(opening, container) {
 vi.mock('../lib/map/engine.js', () => ({
   createMapEngine: vi.fn(async (element, { view }) => fakeEngine(view, element)),
 }));
-vi.mock('../lib/map/basemap.js', () => ({
+vi.mock('../lib/map/basemap.js', async (importOriginal) => ({
+  // what a Difference capture keeps is the module's own word
+  isGround: (await importOriginal()).isGround,
   OVERLAY_IDS: [],
   createBasemaps: vi.fn(() => ({
     show: vi.fn(),
@@ -275,6 +277,8 @@ async function add(slot, provider = 'Esri World Imagery', { unfold = true } = {}
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // the layers a pair starts on are kept per case in the browser: each test starts clean
+  for (const key of Object.keys(localStorage)) if (key.startsWith('azimut:map-layers:')) localStorage.removeItem(key);
   engines.length = 0;
   releases = [];
   changes = null;
@@ -483,6 +487,57 @@ describe('Compare', () => {
     expect(button('Blink', target).getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('reads the picture without the layers, so they may stay on A alone', async () => {
+    releases = [{ release: 30, date: '2026-09-01' }, { release: 20, date: '2025-09-01' }];
+    await open();
+    await add('A');
+    await add('B', 'Esri Wayback');
+    const pair = engines.slice(-2);
+    for (const engine of pair) {
+      engine.tilesLoading = () => false;
+      engine.snapshot.mockImplementation(async () => ({ canvas: {}, complete: true }));
+    }
+    detectCaptures.mockImplementation(async (sources) => ({
+      counts: { gained: 1, lost: 1, changed: 0, quiet: 8 }, zones: [], zoneCount: 0,
+      share: 0.2, coverage: 1, area: 50, frame: sources.a.frame,
+      canvas: { toDataURL: () => 'data:image/png;base64,AA' },
+    }));
+    vi.useFakeTimers();
+    try {
+      const until = async (check) => {
+        for (let tries = 0; tries < 40 && !check(); tries += 1) { await vi.advanceTimersByTimeAsync(50); flushSync(); }
+        return check();
+      };
+      const read = () => target.querySelector('.difference-bar button.read');
+      button('Difference', target).click();
+      flushSync();
+      expect(await until(() => read().textContent.trim() === 'Up to date')).toBe(true);
+      // the capture keeps the imagery and leaves the borders and names out
+      const { keep } = pair[0].snapshot.mock.lastCall[0];
+      expect(keep('basemap-imagery')).toBe(true);
+      expect(keep('basemap-boundaries')).toBe(false);
+      const reads = detectCaptures.mock.calls.length;
+
+      target.querySelector('.layer-menu > button').click();
+      flushSync();
+      button('A', target.querySelector('[aria-label="Which map draws the layers"]')).click();
+      flushSync();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      flushSync();
+      await vi.advanceTimersByTimeAsync(1000);
+      flushSync();
+      // still on, still read, nothing refused and nothing to read again
+      expect(button('Difference', target).getAttribute('aria-pressed')).toBe('true');
+      expect(read().textContent.trim()).toBe('Up to date');
+      expect(target.querySelector('.change-legend em.warn')).toBeNull();
+      expect(detectCaptures.mock.calls.length).toBe(reads);
+    } finally {
+      vi.useRealTimers();
+      detectCaptures.mockReset();
+      detectCaptures.mockImplementation(async () => { throw new Error('no pixels in this double'); });
+    }
+  });
+
   it('waits out loading tiles, says when a reading is up to date, and drains one the view moved past', async () => {
     releases = [{ release: 30, date: '2026-09-01' }, { release: 20, date: '2025-09-01' }];
     await open();
@@ -671,37 +726,161 @@ describe('Compare', () => {
     expect(target.querySelector('.source-card .cmp-letter').textContent).toBe('B');
   });
 
-  it('gives each source its own layers and keeps export choices in one modal', async () => {
+  it('lays one list of layers over both maps, from a menu that leaves them in view', async () => {
     await open();
     await add('A');
     await add('B');
 
-    target.querySelector('[aria-label="Layers on imagery A"]').click();
+    // no Layers button on either side's card: one, above both maps
+    expect(target.querySelector('.source-card [aria-label^="Layers on imagery"]')).toBeNull();
+    const trigger = () => target.querySelector('.layer-menu > button');
+    trigger().click();
     flushSync();
-    const layers = document.querySelector('[role="dialog"]');
-    expect(layers.getAttribute('aria-label')).toBe('Layers · A / B');
-    expect(layers.querySelectorAll('.layer-pane')).toHaveLength(2);
-    expect(layers.querySelectorAll('.layer-row')).toHaveLength(20);
-    expect(layers.textContent).toContain('Active fires');
-    expect(layers.textContent).toContain('Night lights');
-    expect(layers.textContent).toContain('Saved work');
-    const paneA = layers.querySelector('.layer-pane');
-    paneA.querySelector('button[aria-label="Show Roads on imagery A"]').click();
+    const menu = target.querySelector('.layer-menu [role="dialog"]');
+    expect(menu.getAttribute('aria-label')).toBe('Layers');
+    // a menu, not a modal: the maps stay on screen behind it
+    expect(document.querySelector('.modal')).toBeNull();
+    // the Map's own rows, an eye each, under headings that fold
+    const eye = (label) => menu.querySelector(`button.eye[aria-label="${label}"]`);
+    expect([...menu.querySelectorAll('.sub-head > span:first-of-type')].map((entry) => entry.textContent)).toEqual([
+      'Reference', 'Events', 'Case', 'My layers', 'Added layers',
+    ]);
+    expect(menu.querySelectorAll('button.eye')).toHaveLength(10);
+    // a new pair starts on the borders, as Detect does
+    const on = () => [...menu.querySelectorAll('button.eye[aria-pressed="true"]')].map((entry) => entry.getAttribute('aria-label'));
+    expect(on()).toEqual(['Borders']);
+
+    eye('Roads').click();
     flushSync();
-    expect(target.querySelectorAll('.source-card .layers')[0].textContent).toContain('1');
-    paneA.querySelector('button[aria-label="Show Night lights on imagery A"]').click();
+    expect(eye('Roads').getAttribute('aria-pressed')).toBe('true');
+    expect(trigger().textContent).toContain('2');
+
+    // The fires follow each side's picture: World Imagery dates both to 2024-01-02,
+    // once each surface has asked (half a second after it settles).
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await settle();
+    eye('Active fires').click();
     flushSync();
-    expect(target.querySelectorAll('.source-card .layers')[0].textContent).toContain('2');
-    expect(paneA.textContent).toContain('NOAA-20');
-    expect(paneA.querySelectorAll('.day-picker')).toHaveLength(1);
-    paneA.querySelector('button[aria-label="Show Active fires on imagery A"]').click();
+    // one day for both sides, said once, and the questions under the row
+    expect(menu.textContent).toContain('VIIRS · 2024-01-02');
+    expect(button("Each side's day", menu).getAttribute('aria-pressed')).toBe('true');
+    expect(menu.querySelectorAll('.day-picker')).toHaveLength(0);
+    button('Pick days', menu).click();
     flushSync();
-    expect(paneA.textContent).toContain('VIIRS');
-    expect(paneA.textContent).toContain('24 h');
-    const dates = [...paneA.querySelectorAll('.chips button')].find((entry) => entry.textContent.trim() === 'Custom');
-    dates.click();
+    // one day per side, starting on the day each was showing
+    expect(menu.querySelectorAll('.day-picker')).toHaveLength(2);
+
+    // Escape closes it, as it closes any overlay
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     flushSync();
-    expect(paneA.querySelectorAll('.day-picker')).toHaveLength(3);
+    expect(target.querySelector('.layer-menu [role="dialog"]')).toBeNull();
+
+    saveButton().click();
+    flushSync();
+    button('Save comparison', document.querySelector('[role="dialog"]')).click();
+    await settle();
+    const saved = post.mock.calls.findLast(([path]) => path === '/api/cases/case-a/compare/sessions')[1].spec;
+    // one list, kept on each side as sessions always held it
+    expect(saved.a.overlays).toEqual(['boundaries', 'roads', 'firms']);
+    expect(saved.b.overlays).toEqual(['boundaries', 'roads', 'firms']);
+    expect(saved.a.firms).toMatchObject({ sensor: 'viirs', window: 'dates', first: '2024-01-02' });
+    expect(saved.b.firms).toMatchObject({ sensor: 'viirs', window: 'dates', first: '2024-01-02' });
+  });
+
+  it('reopens a session saved with a list on each side as one list on both, so nothing goes missing', async () => {
+    await open();
+    button('Open', target).click();
+    await settle();
+    button('Harbour change', document.querySelector('[role="dialog"]')).click();
+    await settle();
+    target.querySelector('.layer-menu > button').click();
+    flushSync();
+    const menu = target.querySelector('.layer-menu [role="dialog"]');
+    const on = [...menu.querySelectorAll('button.eye[aria-pressed="true"]')].map((entry) => entry.getAttribute('aria-label'));
+    expect(on).toEqual(['Roads', 'Railways']);
+    const sides = menu.querySelector('[aria-label="Which map draws the layers"]');
+    expect(button('AB', sides).getAttribute('aria-pressed')).toBe('true');
+    // reopening is not an edit
+    expect(target.querySelector('.badge')).toBeNull();
+  });
+
+  it('starts a new pair on the layers last switched in this case, fires left off', async () => {
+    await open();
+    await add('A');
+    await add('B');
+    target.querySelector('.layer-menu > button').click();
+    flushSync();
+    const eye = (label) => target.querySelector(`.layer-menu button.eye[aria-label="${label}"]`);
+    eye('Roads').click();
+    flushSync();
+    eye('Night lights').click();
+    flushSync();
+    expect(JSON.parse(localStorage.getItem('azimut:map-layers:case-a')).maps.compare)
+      .toEqual(['boundaries', 'roads']);
+    unmount(live);
+    live = null;
+    target.remove();
+
+    await open();
+    await add('A');
+    await add('B');
+    target.querySelector('.layer-menu > button').click();
+    flushSync();
+    const on = [...target.querySelectorAll('.layer-menu button.eye[aria-pressed="true"]')]
+      .map((entry) => entry.getAttribute('aria-label'));
+    expect(on).toEqual(['Borders', 'Roads']);
+  });
+
+  it('moves the whole list onto A, B or both from the switcher, AB by default', async () => {
+    await open();
+    await add('A');
+    await add('B');
+    target.querySelector('.layer-menu > button').click();
+    flushSync();
+    const menu = target.querySelector('.layer-menu [role="dialog"]');
+    const eye = (label) => menu.querySelector(`button.eye[aria-label="${label}"]`);
+    const on = () => [...menu.querySelectorAll('button.eye[aria-pressed="true"]')].map((entry) => entry.getAttribute('aria-label'));
+    const sides = menu.querySelector('[aria-label="Which map draws the layers"]');
+    expect([...sides.querySelectorAll('button')].map((entry) => entry.textContent.trim())).toEqual(['A', 'B', 'AB']);
+    expect(button('AB', sides).getAttribute('aria-pressed')).toBe('true');
+
+    eye('Roads').click();
+    flushSync();
+    // the switcher moves the list, it does not show another one
+    button('B', sides).click();
+    flushSync();
+    expect(on()).toEqual(['Borders', 'Roads']);
+    expect(menu.textContent).not.toContain('only');
+    const draws = async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      flushSync();
+      saveButton().click();
+      flushSync();
+      // the first save names the comparison; the next ones save it in place
+      const naming = document.querySelector('[role="dialog"]');
+      if (naming) button('Save comparison', naming).click();
+      await settle();
+      const { a, b } = post.mock.calls.findLast(([path]) => path === '/api/cases/case-a/compare/sessions')[1].spec;
+      return [a.overlays, b.overlays];
+    };
+    expect(await draws()).toEqual([[], ['boundaries', 'roads']]);
+
+    // an eye switched on B is on the list, so AB then draws it on both
+    target.querySelector('.layer-menu > button').click();
+    flushSync();
+    const reopened = target.querySelector('.layer-menu [role="dialog"]');
+    reopened.querySelector('button.eye[aria-label="Sea marks"]').click();
+    flushSync();
+    button('AB', reopened.querySelector('[aria-label="Which map draws the layers"]')).click();
+    flushSync();
+    const all = ['boundaries', 'roads', 'seamarks'];
+    expect(await draws()).toEqual([all, all]);
+  });
+
+  it('keeps export choices in one modal', async () => {
+    await open();
+    await add('A');
+    await add('B');
 
     button('Export', target).click();
     await settle();
@@ -979,8 +1158,9 @@ describe('Compare', () => {
     expect(menu.textContent).toContain('Measure from here');
     expect(menu.textContent).not.toContain('Sun and moon from here');
     expect(menu.textContent).not.toContain('Imagery history here');
-    // It belongs to the surface it opened on, and travels with it.
-    expect(target.querySelector('.surface-shell.primary [role="menu"]')).not.toBeNull();
+    // Over the whole stage, outside both maps, so B can never cover it.
+    expect(menu.closest('.surface-shell')).toBeNull();
+    expect(menu.closest('.point-menu').parentElement).toBe(target.querySelector('.compare-stage'));
 
     button('Measure from here', menu).click();
     await settle();
@@ -996,6 +1176,34 @@ describe('Compare', () => {
     const drawn = [...target.querySelectorAll('.surface-shell.primary .mark path')];
     expect(drawn.some((path) => path.getAttribute('stroke-dasharray') === '8 6')).toBe(true);
   });
+
+  it.each(['Swipe', 'Fade', 'Blink'])(
+    'keeps the right-click menu over both maps in %s, whichever it opened on',
+    async (label) => {
+      vi.useFakeTimers();
+      try {
+        await open();
+        await add('A');
+        await add('B');
+        button(label, target).click();
+        flushSync();
+        await settle();
+        for (const engine of engines) {
+          engine.handlers.contextmenu({ lat: 43.3, lon: 5.4, x: 120, y: 90 });
+          flushSync();
+          // Inside a map, it was cut at the divider, laid under B, or blinked with B.
+          const menu = target.querySelector('[role="menu"]');
+          expect(menu.closest('.surface-shell')).toBeNull();
+          expect(menu.closest('.point-menu').parentElement).toBe(target.querySelector('.compare-stage'));
+          vi.advanceTimersByTime(800);
+          flushSync();
+          expect(target.querySelector('[role="menu"]')).toBe(menu);
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
 
   it('opens the right-clicked point in Satellite or Detect, at the zoom it was read at', async () => {
     await open();
@@ -1084,9 +1292,14 @@ describe('Compare', () => {
     await open();
     await add('A');
     await add('B');
+    // Side by side, the menu is placed in B's own box, wherever B sits in the stage.
+    target.querySelector('.compare-stage').getBoundingClientRect = () => ({ left: 100, top: 50, width: 1001, height: 600 });
+    target.querySelector('.surface-shell.secondary .map').getBoundingClientRect =
+      () => ({ left: 601, top: 51, width: 499, height: 598 });
     engines[1].handlers.contextmenu({ lat: 43.3, lon: 5.4, x: 40, y: 40 });
     flushSync();
-    expect(target.querySelector('.surface-shell.secondary [role="menu"]')).not.toBeNull();
+    const box = target.querySelector('.point-menu');
+    expect([box.style.left, box.style.top]).toEqual(['501px', '1px']);
 
     button('Save place here…', target.querySelector('[role="menu"]')).click();
     await settle();

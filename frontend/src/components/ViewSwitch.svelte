@@ -14,21 +14,26 @@
    * so a disabled option keeps its place and states its reason in the tooltip instead
    * of disappearing. The state currently *on* is never disabled by a caller, or the
    * screen would show itself as unavailable.
+   *
+   * An option may carry a `tag`, a short word such as *Beta* drawn as a pill after its
+   * label. The pill is hidden from screen readers so the button keeps its name; the
+   * caller says the same word in the hint. An option's `guide` names it for the pictured
+   * guide, as `guide` names the whole switch.
    */
   import Icon from './Icon.svelte';
 
   /**
    * @type {{
-   *   options: Array<{id: string, label: string, icon: string, hint?: string, disabled?: boolean}>,
+   *   options: Array<{id: string, label: string, icon: string, hint?: string, tag?: string, guide?: string, disabled?: boolean}>,
    *   value: string,
    *   label?: string,
    *   onpick: (id: string) => void,
    * }}
    */
-  let { options = [], value, label = 'View', onpick } = $props();
+  let { options = [], value, label = 'View', onpick, guide } = $props();
 </script>
 
-<div class="view-switch" role="group" aria-label={label}>
+<div class="view-switch" role="group" aria-label={label} data-guide={guide}>
   {#each options as option (option.id)}
     <button
       class="view-btn"
@@ -36,9 +41,11 @@
       title={option.hint ?? `${option.label} view`}
       aria-pressed={value === option.id}
       disabled={Boolean(option.disabled) && value !== option.id}
+      data-guide={option.guide}
       onclick={() => onpick?.(option.id)}
     >
       <Icon name={option.icon} size={14} /> {option.label}
+      {#if option.tag}<span class="view-tag" aria-hidden="true">{option.tag}</span>{/if}
     </button>
   {/each}
 </div>
@@ -79,5 +86,16 @@
   }
   .view-btn:disabled:hover {
     color: var(--text-3);
+  }
+  .view-tag {
+    padding: 0 4px;
+    border-radius: var(--r-sm);
+    background: var(--info-soft);
+    color: var(--info);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
   }
 </style>

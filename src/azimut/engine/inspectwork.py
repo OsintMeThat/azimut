@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import re
 import shutil
 import warnings
@@ -54,6 +55,8 @@ COLLAGE_VERSION = 1
 #: these are far above anything a real one reaches and only stop a runaway client.
 MAX_SPEC_BYTES = 2_000_000
 MAX_FRAMES = 500
+MAX_MARKS = 500
+MAX_MARK_LABEL = 200
 MAX_PIECES = 200
 #: The collage list's preview: the browser draws it no wider than this, and a
 #: larger one is shrunk rather than stored.
@@ -70,6 +73,7 @@ PRODUCER = "inspect"
 _FRAME_KEYS = (
     "id", "path", "time", "adjust", "crop", "sourceOps", "rotation", "w", "h", "filed",
 )
+_MARK_KEYS = ("id", "time", "label")
 _PIECE_KEYS = ("id", "frameId", "save", "w", "h", "quad", "frameOps", "crop")
 _RIGHT_ANGLES = (-180, -90, 0, 90, 180)
 
@@ -178,6 +182,7 @@ def _work_row(rel: str, spec: dict[str, Any]) -> dict[str, Any]:
         "source": source.get("path"),
         "kind": source.get("kind"),
         "frames": len(spec.get("frames") or []),
+        "marks": len(spec.get("marks") or []),
         "updated_at": spec.get("updated_at"),
     }
 
@@ -259,6 +264,30 @@ def _clean_frames(frames: Any, subject: str) -> list[dict[str, Any]]:
     return out
 
 
+def _clean_marks(marks: Any) -> list[dict[str, Any]]:
+    """Timecoded notes on the video: an id, a moment in seconds and a short label."""
+    if marks is None:
+        return []
+    if not isinstance(marks, list):
+        raise CaseError("marks must be a list")
+    if len(marks) > MAX_MARKS:
+        raise CaseError(f"a file holds at most {MAX_MARKS} marks")
+    out = []
+    for mark in marks:
+        if not isinstance(mark, dict) or not isinstance(mark.get("id"), str):
+            raise CaseError("every mark needs an id")
+        moment = mark.get("time")
+        if isinstance(moment, bool) or not isinstance(moment, (int, float)):
+            raise CaseError("a mark needs a time in seconds")
+        if not math.isfinite(moment) or moment < 0:
+            raise CaseError("a mark time must be zero or more")
+        label = mark.get("label", "")
+        if not isinstance(label, str):
+            raise CaseError("a mark label must be text")
+        out.append({"id": mark["id"], "time": moment, "label": label.strip()[:MAX_MARK_LABEL]})
+    return sorted(out, key=lambda m: m["time"])
+
+
 def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any]:
     """Write one file's work, filing its entity the first time.
 
@@ -270,6 +299,7 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
         raise CaseError("the work must be an object")
     _check_size(spec)
     frames = _clean_frames(spec.get("frames", []), subject)
+    marks = _clean_marks(spec.get("marks"))
     rotation = spec.get("videoRotation", 0)
     if rotation not in _RIGHT_ANGLES:
         raise CaseError("video rotation must be a right angle")
@@ -300,6 +330,7 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
             "videoRotation": rotation,
             "videoFiled": spec.get("videoFiled") if isinstance(spec.get("videoFiled"), dict) else None,
             "frames": frames,
+            "marks": marks,
             "activeFrameId": active if any(f["id"] == active for f in frames) else None,
         }
         if found and previous.get("merged_from"):
@@ -431,6 +462,111 @@ def _outline(spec: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def strip_of(case: "Case", path: str) -> dict[str, Any] | None:
+    """How many degrees of turn a picture exported from a stitched collage spans.
+
+    The export is the pieces trimmed to their bounds, so its width is the
+    layout's in canvas pixels, however sharply it was drawn: the stitch's scale
+    (`stitch.strip_scale`) turns that into degrees. Only for the picture the
+    collage last exported while it is still that layout; None for any other.
+    Returns ``{"degrees", "stitched", "by_hand", "warp", "collage"}``.
+    """
+    from . import stitch
+
+    for rel, spec in _collage_specs(case):
+        exported = spec.get("exported")
+        if not isinstance(exported, dict) or exported.get("path") != path or not _export_current(case, spec):
+            continue
+        nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
+        scale = stitch.strip_scale(nodes)
+        outline = _outline(spec)
+        if scale is None or outline is None or not outline["width"] > 0:
+            return None
+        return {
+            "degrees": round(outline["width"] / scale["per_degree"], 2),
+            "stitched": scale["stitched"],
+            "by_hand": scale["by_hand"],
+            "warp": scale["warp"],
+            "collage": Path(rel).stem,
+        }
+    return None
+
+
+def _frame_size(case: "Case", path: str) -> tuple[float, float] | None:
+    """A collage piece's source picture as filmed or shot, width and height in pixels."""
+    item = media_engine.read_item(case, path)
+    if not isinstance(item, dict):
+        return None
+    meta = item.get("video_metadata")
+    if isinstance(meta, dict):
+        for index in range(8):
+            prefix = f"streams {index} · "
+            if meta.get(prefix + "codec type") not in (None, "video"):
+                continue
+            try:
+                width, height = float(meta[prefix + "width"]), float(meta[prefix + "height"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            turned = any("rotation" in key and str(meta[key]).lstrip("-") in ("90", "270") for key in meta if key.startswith(prefix))
+            return (height, width) if turned else (width, height)
+        return None
+    try:
+        with Image.open(case.resolve_inside(path)) as image:
+            return float(image.width), float(image.height)
+    except (OSError, CaseError):
+        return None
+
+
+def frames_of(case: "Case", path: str) -> tuple[Any, dict[str, Any]] | None:
+    """A picture exported from a Collage document read as its frames (engine/frames.py).
+
+    Only for the picture the collage last exported while it is still that layout, and not
+    once the analyst straightened it by hand: the stitch's rotations are what bent it, so
+    the straightened picture is read as one.
+    Returns the frames' model and what the tool says of it: `{ collage, frames,
+    stitched, lens, span, export }`, `lens` the frames' lens the stitch gives (None
+    when no frame was stitched), `span` how many degrees the picture spans read so
+    and `export` the outline the picture shows, in the collage's canvas pixels.
+    """
+    from . import frames
+
+    for rel, spec in _collage_specs(case):
+        exported = spec.get("exported")
+        if not isinstance(exported, dict) or exported.get("path") != path or not _export_current(case, spec):
+            continue
+        if spec.get("straightened") is True:
+            return None
+        nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
+        sources = {}
+        for node in nodes:
+            source = str((node.get("save") or {}).get("path") or "")
+            if source and source not in sources:
+                size = _frame_size(case, source)
+                if size is not None:
+                    sources[source] = size
+        pieces = frames.pieces_of(spec, sources)
+        if len(pieces) < 2:
+            return None
+        # the export is the pieces trimmed to their bounds: the plane's middle and width are the outline's,
+        # in canvas pixels, however sharply the picture was drawn
+        export = (
+            float(max(piece.quad[:, 0].max() for piece in pieces)),
+            float(max(piece.quad[:, 1].max() for piece in pieces)),
+        )
+        model = frames.Model(pieces)
+        lens = frames.lens_of(model)
+        span = frames.strip(model, None, export, lens)[1] if lens is not None else None
+        return model, {
+            "collage": Path(rel).stem,
+            "frames": len(pieces),
+            "stitched": sum(1 for piece in pieces if piece.stitched),
+            "lens": None if lens is None else round(lens, 2),
+            "span": None if span is None else round(span, 2),
+            "export": [export[0], export[1]],
+        }
+    return None
+
+
 def load_collage(case: "Case", name: str) -> dict[str, Any] | None:
     rel = layout.collage_rel(layout.slugify(name, "Collage"))
     spec = _read(case.resolve_inside(rel))
@@ -466,6 +602,9 @@ def _clean_collage(spec: dict[str, Any]) -> dict[str, Any]:
     }
     if isinstance(spec.get("exported"), dict):
         out["exported"] = spec["exported"]
+    # bent by hand along a level line (frontend lib/straighten.js): its stitch is what bent it
+    if spec.get("straightened") is True:
+        out["straightened"] = True
     return out
 
 
@@ -557,22 +696,29 @@ def _preview_image(raw: bytes) -> "Image.Image":
     return image
 
 
+def preview_webp(raw: bytes) -> bytes:
+    """A preview the browser drew, as the WebP a case keeps: pixels this side
+    re-encoded, whatever arrived. A saved Horizon view's preview is kept the same way."""
+    image = _preview_image(raw)
+    buf = io.BytesIO()
+    image.save(buf, "WEBP", quality=80)
+    return buf.getvalue()
+
+
 def save_collage_thumb(case: "Case", name: str, raw: bytes) -> dict[str, Any] | None:
     """File the preview of a saved collage, or None when no collage has that name.
 
     Written as WebP whatever arrived, so what sits in the case is always pixels this
     side re-encoded, and the entity points at it for the graph and the Timeline.
     """
-    image = _preview_image(raw)
-    buf = io.BytesIO()
-    image.save(buf, "WEBP", quality=80)
+    data = preview_webp(raw)
     stem = layout.slugify(name, "Collage")
     rel = layout.collage_rel(stem)
     thumb = layout.collage_thumb_rel(stem)
     with case.lock:
         if not case.resolve_inside(rel).is_file():
             return None
-        replace_atomic(case.resolve_inside(thumb), buf.getvalue())
+        replace_atomic(case.resolve_inside(thumb), data)
         entity = case.find_entity(attr="spec", value=rel)
         if entity and (entity.get("attrs") or {}).get("thumb") != thumb:
             case.update_entity(entity["id"], {"attrs": {"thumb": thumb}})
@@ -802,6 +948,16 @@ def _merge_subject(
             if isinstance(frame, dict) and frame.get("id") not in seen:
                 frames.append(frame)
                 seen.add(frame.get("id"))
+    marks: list[dict[str, Any]] = []
+    seen_marks: set[Any] = set()
+    for _r, spec in [(rel, base), *others]:
+        for mark in spec.get("marks") or []:
+            if (
+                isinstance(mark, dict) and isinstance(mark.get("id"), str)
+                and isinstance(mark.get("time"), (int, float)) and mark["id"] not in seen_marks
+            ):
+                marks.append(_pick(mark, _MARK_KEYS))
+                seen_marks.add(mark["id"])
     merged_from = list(base.get("merged_from") or [])
     for r, _spec in others:
         if names[r] not in merged_from:
@@ -818,6 +974,7 @@ def _merge_subject(
         "videoRotation": base.get("videoRotation") if base.get("videoRotation") in _RIGHT_ANGLES else 0,
         "videoFiled": base.get("videoFiled"),
         "frames": [_pick(f, _FRAME_KEYS) for f in frames],
+        "marks": sorted(marks, key=lambda m: m.get("time", 0))[:MAX_MARKS],
         "activeFrameId": base.get("activeFrameId"),
     }
     if merged_from:

@@ -320,6 +320,23 @@
     }
   }
 
+  // A file dragged in from the Media library. Its card only changes a badge,
+  // so the toast says where it went.
+  async function onFileMedia(entities, folder) {
+    const moving = entities.filter((e) => (e.attrs.folder ?? '') !== folder);
+    if (!moving.length) {
+      toast(folder ? `Already in ${folder}` : 'Already unfiled', 'ok', 1600);
+      return;
+    }
+    try {
+      await assignFolderBatch(caseState.current.id, moving, folder);
+      await reloadCase();
+      toast(folder ? `Filed in ${folder}` : 'Unfiled', 'ok', 1600);
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+
   // ── scrolling while a drag is in flight ───────────────────────────────────
   // A native drag swallows the wheel in Chromium, so the tree scrolls itself
   // when the pointer nears an edge. Firefox does deliver the wheel, and the
@@ -592,7 +609,7 @@
   });
 </script>
 
-<aside class="sidebar" class:resizing style="width: {uiState.sidebarW}px">
+<aside class="sidebar" data-guide="start.sidebar" class:resizing style="width: {uiState.sidebarW}px">
   <!-- a <button> rather than a bare div: the handle must be focusable and
        keyboard-driven (arrows resize), and the element carries that for free -->
   <button
@@ -732,6 +749,7 @@
           onfoldermenu={openFolderMenu}
           onentitymenu={openEntityMenu}
           onfile={onFileDrop}
+          onfilemedia={onFileMedia}
           onactivate={onEntityActivate}
           oninfo={openInfo}
           onunfile={askRemoveFromMyWork}

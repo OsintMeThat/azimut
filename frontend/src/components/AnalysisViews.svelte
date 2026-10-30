@@ -351,7 +351,7 @@
   }
 </script>
 
-<div class="views">
+<div class="views" data-guide="case.views">
   {#if slot.activeView}
     <span class="active" title={slot.activeView.mode === 'snapshot'
       ? `Captured ${slot.activeView.spec?.snapshot?.captured_at ?? ''}`

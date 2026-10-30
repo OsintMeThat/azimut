@@ -1,0 +1,260 @@
+import { describe, expect, it, vi } from 'vitest';
+import { buildGrid, buildMesh, createTerrain, demRange, meshSize } from './build.js';
+import { DEM_TILE, eyeFrame, latToY, lonToX, tileLat, tileLon } from './geo.js';
+
+/** Terrain tiles from a height function of global pixel coordinates; `missing(z)` tiles do not exist. */
+function terrainOf(height, missing = () => false) {
+  return vi.fn(async (keys) => {
+    const out = new Map();
+    for (const key of keys) {
+      const [z, x, y] = key.split('/').map(Number);
+      if (missing(z, x, y)) {
+        out.set(key, null);
+        continue;
+      }
+      const tile = new Float32Array(DEM_TILE * DEM_TILE);
+      for (let j = 0; j < DEM_TILE; j += 1) {
+        for (let i = 0; i < DEM_TILE; i += 1) tile[j * DEM_TILE + i] = height(z, x * DEM_TILE + i, y * DEM_TILE + j);
+      }
+      out.set(key, tile);
+    }
+    return out;
+  });
+}
+
+const flat = (metres) => terrainOf(() => metres);
+
+/** A read that refuses a whole batch naming a tile off its zoom's grid, as the app does. */
+function strictly(read) {
+  return vi.fn(async (keys) => {
+    for (const key of keys) {
+      const [z, x, y] = key.split('/').map(Number);
+      if (x < 0 || y < 0 || x >= 2 ** z || y >= 2 ** z) throw new Error(`${key} lies outside the grid`);
+    }
+    return read(keys);
+  });
+}
+
+describe('the terrain a worker holds', () => {
+  it('asks only for what it does not hold, and keeps what failed unknown to ask again', async () => {
+    const read = flat(10);
+    const terrain = createTerrain(read);
+    expect(await terrain.load(['10/1/1', '10/1/2'])).toBe(true);
+    expect(await terrain.load(['10/1/2', '10/1/3'])).toBe(true);
+    expect(read.mock.calls.map(([keys]) => keys)).toEqual([['10/1/1', '10/1/2'], ['10/1/3']]);
+    const failing = createTerrain(vi.fn().mockRejectedValueOnce(new Error('offline')).mockImplementation(flat(5)));
+    expect(await failing.load(['10/1/1'])).toBe(false);
+    expect(failing.tile('10/1/1')).toBeUndefined();
+    expect(await failing.load(['10/1/1'])).toBe(true);
+    expect(failing.tile('10/1/1')[0]).toBe(5);
+  });
+
+  it('lets the least recently used go past what it keeps, never a tile in use', async () => {
+    const terrain = createTerrain(flat(1), { keep: 2 });
+    await terrain.load(['9/0/0', '9/0/1']);
+    await terrain.load(['9/0/0']); // used again: the newest now
+    await terrain.load(['9/0/2']);
+    expect(terrain.tile('9/0/1')).toBeUndefined();
+    expect(terrain.tile('9/0/0')).toBeDefined();
+    await terrain.pinning(['9/0/0', '9/0/2'], async () => {
+      await terrain.load(['9/0/3', '9/0/4']);
+      expect(terrain.tile('9/0/0')).toBeDefined();
+      expect(terrain.tile('9/0/2')).toBeDefined();
+    });
+    expect(terrain.size).toBe(2);
+  });
+
+  it('never calls tiles it just read unreachable because others are in use', async () => {
+    const terrain = createTerrain(flat(1), { keep: 2 });
+    const busy = ['11/1/1', '11/2/1', '11/3/1'];
+    let done;
+    const building = terrain.pinning(busy, async () => {
+      await terrain.load(busy);
+      await new Promise((resolve) => (done = resolve));
+    });
+    await vi.waitFor(() => expect(terrain.size).toBe(3));
+    // over what it keeps with every tile pinned: the next read's are the only ones it could let go
+    await expect(terrain.zoomsFor([{ z: 12, x: 2130, y: 1450 }], () => 11)).resolves.toEqual([11]);
+    done();
+    await building;
+    expect(terrain.size).toBe(2);
+  });
+
+  it('reads again what came back empty when no level held anything, the sources being out of reach', async () => {
+    const read = terrainOf(() => 7, () => true);
+    const terrain = createTerrain(read);
+    const middle = { z: 12, x: 2130, y: 1450 };
+    await expect(terrain.zoomsFor([middle], () => 3)).resolves.toEqual([-1]);
+    expect(terrain.size).toBe(0);
+    const back = createTerrain(terrainOf(() => 7));
+    await expect(back.zoomsFor([middle], () => 3)).resolves.toEqual([3]);
+    // a level that is only missing somewhere stays known: the search does not read it again
+    const some = terrainOf(() => 7, (z) => z > 2);
+    const partly = createTerrain(some);
+    await expect(partly.zoomsFor([middle], () => 3)).resolves.toEqual([2]);
+    await partly.zoomsFor([middle], () => 3);
+    expect(some.mock.calls.flatMap(([keys]) => keys).filter((key) => key.startsWith('3/'))).toHaveLength(1);
+  });
+
+  it('stands on no ground and casts no shadows when no level could be read, rather than at sea level', async () => {
+    const empty = () => createTerrain(terrainOf(() => 7, () => true));
+    await expect(empty().groundAt(45.94, 7.82)).resolves.toBeNull();
+    const frame = eyeFrame({ lat: 45.94, lon: 7.82, alt: 2000 });
+    await expect(buildGrid(frame, empty(), { reach: 6000, size: 8, zoom: 3 })).resolves.toBeNull();
+  });
+
+  it('finds each tile its finest terrain, every level asked together', async () => {
+    // no terrain finer than zoom 11 east of x = 1000 at zoom 11
+    const read = terrainOf(() => 0, (z, x) => z > 11 && x >= 1000 * 2 ** (z - 11));
+    const terrain = createTerrain(read);
+    const list = [
+      { z: 14, x: 900 * 8, y: 5000 },
+      { z: 14, x: 1001 * 8, y: 5000 },
+    ];
+    expect(await terrain.zoomsFor(list, (t) => t.z - 1)).toEqual([13, 11]);
+    // a level a call: both tiles' 13, then the one left at 12, then at 11
+    expect(read).toHaveBeenCalledTimes(3);
+    expect(read.mock.calls[0][0]).toHaveLength(2);
+  });
+
+  it('reads heights between pixels, across a tile edge too', async () => {
+    const plane = (z, gx, gy) => 100 + gx * 0.5 - gy * 0.25;
+    const terrain = createTerrain(terrainOf(plane));
+    await terrain.load(['12/10/10', '12/11/10', '12/10/11']);
+    const home = [10, 10];
+    const at = (gx, gy) => terrain.heightAt(12, gx, gy, home);
+    // pixel centres sit at half pixels
+    expect(at(10 * DEM_TILE + 3.5, 10 * DEM_TILE + 7.5)).toBeCloseTo(plane(12, 10 * DEM_TILE + 3, 10 * DEM_TILE + 7), 4);
+    expect(at(10 * DEM_TILE + 3.75, 10 * DEM_TILE + 7.5)).toBeCloseTo(plane(12, 10 * DEM_TILE + 3.25, 10 * DEM_TILE + 7), 4);
+    expect(at(11 * DEM_TILE, 10 * DEM_TILE + 7.5)).toBeCloseTo(plane(12, 11 * DEM_TILE - 0.5, 10 * DEM_TILE + 7), 3);
+  });
+
+  it('reads the ground under a point from the finest terrain there', async () => {
+    const terrain = createTerrain(flat(1234.5));
+    expect(await terrain.groundAt(45.94, 7.82)).toBeCloseTo(1234.5, 6);
+    const offline = createTerrain(vi.fn().mockRejectedValue(new Error('offline')));
+    expect(await offline.groundAt(45.94, 7.82)).toBeNull();
+  });
+
+  it('names the tiles a rectangle touches, a pixel round', () => {
+    expect(demRange(10, 5, 5, 6, 6, 9)).toEqual(['9/2/2', '9/3/2', '9/2/3', '9/3/3']);
+    expect(demRange(10, 4.5, 4.5, 4.6, 4.6, 9)).toEqual(['9/2/2']);
+  });
+
+  it('names the first column beside the last across the antimeridian, and no row past the poles', () => {
+    // the last column of zoom 6, a pixel round, as a mesh tile asks it: Auckland's
+    expect(demRange(6, 63 - 1 / 64, 39.25, 64 + 1 / 64, 39.75, 5)).toEqual(['5/31/19', '5/0/19']);
+    expect(demRange(6, -1 / 64, 39.25, 0.5, 39.75, 5)).toEqual(['5/31/19', '5/0/19']);
+    expect(demRange(6, 10.25, -1 / 64, 10.75, 0.25, 5)).toEqual(['5/5/0']);
+    expect(demRange(0, 0.5, 0.5, 0.5, 0.5, 0)).toEqual(['0/0/0']);
+  });
+
+  it('reads heights across the antimeridian from the first column', async () => {
+    // the first column 300 m high, the last 100 m
+    const terrain = createTerrain(terrainOf((z, gx) => (gx < DEM_TILE ? 300 : 100)));
+    await terrain.load(['5/31/19', '5/0/19']);
+    const at = (gx) => terrain.heightAt(5, gx, 19 * DEM_TILE + 7.5, [31, 19]);
+    expect(at(32 * DEM_TILE - 0.5)).toBeCloseTo(100, 6);
+    expect(at(32 * DEM_TILE)).toBeCloseTo(200, 6);
+    expect(at(32 * DEM_TILE + 0.5)).toBeCloseTo(300, 6);
+  });
+});
+
+describe('a tile\'s mesh', () => {
+  it('is no finer than its terrain, from 4 to 64 vertices a side', () => {
+    expect(meshSize(10, 9)).toBe(64);
+    expect(meshSize(17, 14)).toBe(64);
+    expect(meshSize(18, 14)).toBe(32);
+    expect(meshSize(22, 14)).toBe(4);
+  });
+
+  it('places its vertices on the ground in the eye\'s frame, faces up on level ground, and hangs its skirts', async () => {
+    const lat = tileLat(5795.5, 14);
+    const lon = tileLon(8513.5, 14);
+    const frame = eyeFrame({ lat, lon, alt: 500 });
+    const terrain = createTerrain(flat(500));
+    const t = { z: 15, x: 8513 * 2, y: 5795 * 2 };
+    await terrain.load(demRange(t.z, t.x - 0.02, t.y - 0.02, t.x + 1.02, t.y + 1.02, 14));
+    const { data, size } = buildMesh(frame, terrain, t, 14, { skirtMin: 3, skirtScale: 3, skirtSpacing: 0 });
+    const side = size + 1;
+    expect(size).toBe(64);
+    expect(data.length).toBe((side * side + 4 * side) * 8);
+    const corner = [0, 0, 0];
+    frame.place(tileLat(t.y, t.z), tileLon(t.x, t.z), 500, corner, 0);
+    for (let k = 0; k < 3; k += 1) expect(data[k]).toBeCloseTo(corner[k], 2);
+    // level ground faces straight up, its picture spread corner to corner
+    expect(data[5]).toBeCloseTo(1, 9);
+    expect([data[6], data[7]]).toEqual([0, 0]);
+    const last = (side * side - 1) * 8;
+    expect([data[last + 6], data[last + 7]]).toEqual([1, 1]);
+    // the first skirt vertex hangs under the first corner, as deep as the least skirt on level ground
+    const skirt = side * side * 8;
+    expect(data[skirt]).toBe(data[0]);
+    expect(data[skirt + 2]).toBeCloseTo(data[2] - 3, 4);
+  });
+
+  it('hangs its skirts deeper where a coarser neighbour can open the seam', async () => {
+    const lat = tileLat(5795.5, 14);
+    const lon = tileLon(8513.5, 14);
+    const frame = eyeFrame({ lat, lon, alt: 500 });
+    // along the north edge, every other vertex stands 100 m higher than its neighbours
+    const ridged = terrainOf((z, gx, gy) => (Math.abs(gy - 5795 * DEM_TILE) < 4 && Math.floor((gx + 4) / 8) % 2 ? 600 : 500));
+    const terrain = createTerrain(ridged);
+    const t = { z: 14, x: 8513, y: 5795 };
+    await terrain.load(demRange(t.z, t.x - 0.02, t.y - 0.02, t.x + 1.02, t.y + 1.02, 14));
+    const { data, size } = buildMesh(frame, terrain, t, 14);
+    const side = size + 1;
+    const north = side * side * 8;
+    const south = (side * side + side) * 8;
+    // and a tenth of the spacing of its vertices deeper, for the coarser terrain next door
+    const spacing = (40075016.686 / 2 ** 14) * Math.cos((tileLat(t.y + 0.5, 14) * Math.PI) / 180) / size;
+    expect(data[north + 2 + 8] - data[8 + 2]).toBeCloseTo(-303 - spacing / 10, 0);
+    expect(data[south + 2] - data[size * side * 8 + 2]).toBeCloseTo(-3 - spacing / 10, 3);
+  });
+
+  it('is built on the grid\'s last column, its terrain read across the antimeridian as the app serves it', async () => {
+    const terrain = createTerrain(strictly(flat(20)));
+    // Auckland's root tile, whose skirt of terrain reaches past 180°
+    const t = { z: 6, x: 63, y: 39 };
+    const [zd] = await terrain.zoomsFor([t], (tile) => tile.z - 1);
+    expect(await terrain.load(demRange(t.z, t.x - 1 / 64, t.y - 1 / 64, t.x + 1 + 1 / 64, t.y + 1 + 1 / 64, zd))).toBe(true);
+    const { low, high } = buildMesh(eyeFrame({ lat: -36.8468, lon: 174.765, alt: 22 }), terrain, t, zd);
+    expect([low, high]).toEqual([20, 20]);
+  });
+});
+
+describe('the shadow grids', () => {
+  it('holds the ground round the eye in its frame, the curve of the Earth in it', async () => {
+    const frame = eyeFrame({ lat: 45.94, lon: 7.82, alt: 500 });
+    const terrain = createTerrain(flat(500));
+    const grid = await buildGrid(frame, terrain, { reach: 6000, size: 64, zoom: 12 });
+    expect(grid.heights).toHaveLength(64 * 64);
+    const middle = grid.heights[32 * 64 + 32];
+    const corner = grid.heights[0];
+    expect(Math.abs(middle)).toBeLessThan(0.1);
+    // a corner is 6 km × √2 away, so it lies d² / 2R under the eye
+    expect(corner).toBeCloseTo(-((6000 - 6000 / 64 / 2) ** 2 * 2) / (2 * frame.R), 0);
+    expect(grid.top).toBeCloseTo(Math.max(...grid.heights), 6);
+    const offline = createTerrain(vi.fn().mockRejectedValue(new Error('offline')));
+    expect(await buildGrid(frame, offline, { reach: 6000, size: 64, zoom: 12 })).toBeNull();
+  });
+
+  it('holds the ground across the antimeridian as it holds the eye\'s side', async () => {
+    // Taveuni, Fiji: the 180th meridian runs a kilometre east of the eye
+    const frame = eyeFrame({ lat: -16.8, lon: 179.99, alt: 500 });
+    const grid = await buildGrid(frame, createTerrain(strictly(flat(500))), { reach: 6000, size: 64, zoom: 12 });
+    expect(grid).not.toBeNull();
+    // level ground: the east corners, across the line, lie as far under the eye as the west ones
+    expect(grid.heights[63]).toBeCloseTo(grid.heights[0], 1);
+    expect(grid.heights[63 * 64 + 63]).toBeCloseTo(grid.heights[63 * 64], 1);
+  });
+
+  it('reads coarser terrain where the zoom asked has none', async () => {
+    const frame = eyeFrame({ lat: 45.94, lon: 7.82, alt: 0 });
+    const read = terrainOf((z) => z * 100, (z) => z > 9);
+    const grid = await buildGrid(frame, createTerrain(read), { reach: 30000, size: 32, zoom: 11 });
+    expect(grid.heights[16 * 32 + 16]).toBeCloseTo(900, 0);
+    expect(lonToX(7.82, 9)).toBeGreaterThan(0);
+    expect(latToY(45.94, 9)).toBeGreaterThan(0);
+  });
+});

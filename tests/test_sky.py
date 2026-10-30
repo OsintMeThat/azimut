@@ -537,3 +537,25 @@ def test_sky_does_not_touch_the_network(monkeypatch):
     start, end = localtime.day_bounds(date(2026, 7, 30), zone)
     assert sky.day_events(*PARIS, start, end)["sun"]["rise"]
     assert sky.position_at(*PARIS, start)
+
+
+# -- the hour a shadow points to -----------------------------------------------
+
+
+def test_a_shadow_names_the_minute_the_sun_threw_it():
+    zone = localtime.zone_for(*PARIS)
+    day = date(2024, 6, 21)
+    start, end = localtime.day_bounds(day, zone)
+    when = datetime(2024, 6, 21, 14, 37, 20, tzinfo=UTC)
+    sun = sky.position_at(*PARIS, when)
+    found = sky.shadow_moments(*PARIS, start, end, (sun["sun_azimuth"] + 180.0) % 360.0)
+    assert len(found) == 1
+    assert abs((found[0]["moment"] - when).total_seconds()) < 5
+    assert found[0]["sun_altitude"] == pytest.approx(sun["sun_apparent_altitude"], abs=0.01)
+
+
+def test_no_hour_throws_a_shadow_toward_the_sun_side_of_the_sky():
+    # from Paris the sun is never due north while it is up: no shadow points south
+    zone = localtime.zone_for(*PARIS)
+    start, end = localtime.day_bounds(date(2024, 6, 21), zone)
+    assert sky.shadow_moments(*PARIS, start, end, 180.0) == []

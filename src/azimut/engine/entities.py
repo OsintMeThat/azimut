@@ -574,8 +574,18 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
     # and the picture it exports is media of its own.
     EntityType("collage", "Collage", DOCUMENT, "grid", ANNEX,
                hint="frames and images laid out together, exported as one picture"),
+    # A page laid out round the case's maps, exported as a picture, a PDF or a video.
+    # It holds the case's layers by name, so it is what they are when it is opened.
+    EntityType("map-plate", "Map plate", DOCUMENT, "plate", DELIVERABLE,
+               hint="a page laid out round maps of the case, exported as an image, a PDF or a video"),
     EntityType("compare-session", "Compare session", DOCUMENT, "compare", ANNEX,
                hint="two map sources, their layers and the shared camera"),
+    # An eye on the terrain, the way it looked, and the photo matched over it.
+    EntityType("horizon-view", "Horizon view", DOCUMENT, "horizon", ANNEX,
+               hint="where an eye stood and what it saw, often with a photo matched on it"),
+    # Where a photo was searched for over an area of the map, and the places that fit it.
+    EntityType("horizon-find", "Horizon search", DOCUMENT, "search", ANNEX,
+               hint="an area searched for where a photo was taken, and the places that fit"),
     EntityType("analysis-zones", "Area group", DOCUMENT, "polygon", ANNEX,
                hint="an ordered group of case areas used in Detect"),
     EntityType("analysis-area", "Area", DOCUMENT, "mapArea", ANNEX,
@@ -586,14 +596,10 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                hint="an analyzer, its areas and a date rule, rerun on demand"),
     EntityType("analysis-run", "Analysis run", DOCUMENT, "changes", ANNEX,
                hint="candidate detections with frozen inputs and review decisions"),
-    # Somebody else's map, drawn over this one. `ANNEX` for the reason a sheet is
-    # one: it is consulted, and no path through the case runs across it. It is
-    # deliberately not an attestation — an attestation folds into the edge that
-    # carries its provenance, and a layer nothing links to would fold into
-    # nothing. Nothing in it enters the graph: a feature drawn here is the
-    # source's claim, not the case's.
+    # Source and personal maps are annexes; only explicit place promotion
+    # adopts a feature into the case graph.
     EntityType("map-layer", "Map layer", DOCUMENT, "compass", ANNEX,
-               hint="a map file or feed the analyst added, drawn but never adopted"),
+               hint="a source or personal map layer kept apart from case places"),
     # The page a claim rests on. `url` and `fetched_at` are written by whatever
     # filed it — the extension is on the page, so the server stamps the moment it
     # was seen — and are not declared here: a declared attr is a field an analyst

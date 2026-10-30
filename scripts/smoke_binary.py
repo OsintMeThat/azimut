@@ -1,7 +1,8 @@
 """Exercise a release binary as a running local application.
 
 The release workflow uses this after PyInstaller finishes. It verifies the
-server, bundled frontend and bundled ffmpeg from the artifact itself.
+server, bundled frontend, bundled ffmpeg and the binary's gallery-dl mode from
+the artifact itself.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -56,7 +58,8 @@ def check_application(base_url: str) -> None:
     # What the frozen build drops without a word when the spec forgets it: the zone
     # database (local times silently read as UTC on Windows), the PDF fonts, the
     # capture extension the Settings install button and the zip route hand out, and
-    # the scrapers' metadata (a stale workspace copy would shadow the shipped one).
+    # the scrapers' metadata (a stale workspace copy would shadow the shipped one), and
+    # the decoders Horizon reads buildings with, checked offline.
     status, _content_type, body = _request(f"{base_url}/api/settings/bundled")
     smoke: dict[str, Any] = json.loads(body)
     missing = [name for name, ok in smoke.items() if not ok]
@@ -107,6 +110,52 @@ def stop(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=10)
 
 
+#: What the binary is started with to act as gallery-dl (engine/gallerydl.py FROZEN_FLAG).
+GALLERY_DL_FLAG = "--run-gallery-dl"
+
+
+def check_gallery_dl(binary: Path, env: dict[str, str]) -> None:
+    """The binary is gallery-dl too, started again with its flag.
+
+    gallery-dl runs as a program of its own, and in the binary that program is the
+    binary itself. Its version proves the flag reaches gallery-dl's entry point, and
+    an address no extractor knows (exit 64, offline) proves its extractors were bundled.
+    """
+    asked = [str(binary), GALLERY_DL_FLAG, "--config-ignore"]
+    version = subprocess.run(
+        [*asked, "--version"], env=env, capture_output=True, text=True, timeout=120, check=False
+    )
+    if version.returncode != 0 or not re.fullmatch(r"\d+\.\d+\.\d+\S*", version.stdout.strip()):
+        raise RuntimeError(f"the binary did not run as gallery-dl: {version.stderr.strip()!r}")
+    unknown = subprocess.run(
+        [*asked, "-j", "https://example.invalid/"],
+        env=env, capture_output=True, text=True, timeout=120, check=False,
+    )
+    if unknown.returncode != 64:
+        raise RuntimeError(f"gallery-dl's extractors are missing: {unknown.stderr.strip()!r}")
+
+
+#: What the binary is started with to run a spawned pool (packaging/entry.py PROCESSES_FLAG).
+PROCESSES_FLAG = "--smoke-processes"
+
+
+def check_processes(binary: Path, env: dict[str, str]) -> None:
+    """The binary's spawned children do the work they are handed.
+
+    A search scores its points in processes that start the binary again. Without
+    `freeze_support()` first, each child would start a second app instead, so the pool
+    never answers: the two factorials it sums (5! + 6! = 840) prove it does.
+    """
+    try:
+        done = subprocess.run(
+            [str(binary), PROCESSES_FLAG], env=env, capture_output=True, text=True, timeout=180, check=False
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("the binary's processes never answered") from exc
+    if done.returncode != 0 or done.stdout.strip() != "840":
+        raise RuntimeError(f"the binary's processes did not answer: {done.stderr.strip()[-400:]!r}")
+
+
 def smoke(binary: Path) -> None:
     binary = binary.resolve()
     if not binary.is_file():
@@ -117,6 +166,8 @@ def smoke(binary: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="azimut-binary-smoke-") as workspace:
         env = os.environ.copy()
         env["AZIMUT_HOME"] = workspace
+        check_gallery_dl(binary, env)
+        check_processes(binary, env)
         process = subprocess.Popen(
             [str(binary), "--no-browser", "--port", str(port)],
             env=env,

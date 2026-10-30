@@ -486,8 +486,10 @@ describe('Proof Composer pasted images', () => {
   });
 
   it('never lets a pasted image change the size of the document', () => {
-    // docSize is measured from panels and shapes only, and a drag is clamped
-    expect(source).toContain('docSize(proof.panels, proof.shapes');
+    // docSize is measured from panels and shapes only (the free marks among
+    // them reach the page's edge), and a drag is clamped
+    expect(source).toContain('proof.panels, proof.shapes, proof.notes, textOpts()');
+    expect(source).toContain('freeExtent(proof.shapes, inkHelpers)');
     expect(source).toContain('Object.assign(paste, clampPaste(paste, width, height))');
   });
 
@@ -497,7 +499,7 @@ describe('Proof Composer pasted images', () => {
       rebuild.indexOf('for (let i = proof.pastes.length - 1')
     );
     // and each one hosts its own annotations, like a panel does
-    expect(rebuild).toContain('for (const s of proof.shapes.filter((x) => x.panel === paste.id))');
+    expect(rebuild).toContain('for (const s of proof.shapes.filter((x) => x.panel === paste.id && !isPageMark(x)))');
   });
 
   it('resizes a pasted image from its corners with the aspect locked', () => {
@@ -505,7 +507,7 @@ describe('Proof Composer pasted images', () => {
     // is still on it, not who else joined
     expect(source).toMatch(/transformer\.keepRatio\([^)]*!!pasteNode/);
     expect(source).toContain('implied < PASTE_SCALE_MIN || implied > PASTE_SCALE_MAX');
-    expect(source).toContain('|| pasteNode || sigNode');
+    expect(source).toContain('|| panelNode || pasteNode || (sigNode && !footerPicked)');
   });
 
   it('drops a pasted image with its annotations, and only one thing is selected', () => {
@@ -518,11 +520,12 @@ describe('Proof Composer pasted images', () => {
 describe('Proof Composer frames', () => {
   const layers = readFileSync(new URL('./proof/ProofLayersPanel.svelte', import.meta.url), 'utf8');
 
-  it('offers the same colour and thickness control on a panel and on a pasted image', () => {
-    expect(layers).toContain('{#snippet frameControl(item)}');
-    expect(layers.match(/\{@render frameControl\(/g)).toHaveLength(2);
-    expect(layers).toContain('aria-label="border thickness"');
-    expect(layers).toContain('setFrame(item, null)');
+  it('offers the same border control on a picked panel and a picked overlay, on the rail', () => {
+    // one place for it: the toolbar, beside the canvas, not a button in a row
+    expect(layers).not.toContain('frameControl');
+    expect(source).toContain(': selectedPanelId ? proof.panels.find((p) => p.id === selectedPanelId)');
+    expect(source).toContain(': selectedPasteId ? proof.pastes.find((p) => p.id === selectedPasteId) : null,');
+    expect(source).toContain('setSurfaceBorder={(patch) => pickedSurface && setFrame(pickedSurface, patch)}');
   });
 
   it('is decoration: a frame never reaches the legend', () => {
@@ -530,14 +533,16 @@ describe('Proof Composer frames', () => {
     expect(source).toContain('orderedFeatureColors(proof.shapes');
     expect(source).not.toContain('orderedFeatureColors([...proof.shapes');
     // …and it frames the image, not the upright box a turned image sits in
-    expect(source).toContain('if (panel.frame) group.add(frameNode(panel.frame, image))');
-    expect(source).toContain('if (paste.frame) group.add(frameNode(paste.frame, image))');
+    expect(source).toContain('if (panel.frame) group.add(frameNode(panel.frame, image, box.scale))');
+    expect(source).toContain('if (paste.frame) group.add(frameNode(paste.frame, image, box.scale))');
   });
 
   it('draws the border inset so it cannot move the layout', () => {
     const fn = source.slice(source.indexOf('function frameNode('), source.indexOf('// ---- rebuild canvas'));
     expect(fn).toContain('x: w / 2, y: w / 2');
     expect(fn).toContain('natural[0] - w');
+    // in page pixels, like any other ink: the same border on every panel
+    expect(fn).toContain('const w = frame.width / scale;');
   });
 });
 
@@ -637,8 +642,9 @@ describe('POV', () => {
 
 describe('the points a proof states', () => {
   it('keeps a single-point proof looking exactly as it did', () => {
-    // no cross, no arrow: there is nothing to remove and nothing to move
-    expect(source).toContain('{#if i > 0}');
+    // its menu offers the layers only: there is nothing to remove and nothing to move
+    expect(source).toContain('onraise={i > 0 ? () => raisePoint(i) : null}');
+    expect(source).toContain('onremove={i > 0 ? () => removePoint(i) : null}');
     expect(source).toContain('placeholder="lat, lon"');
     expect(source).toContain('placeholder="label"');
   });
@@ -668,7 +674,11 @@ describe('the points a proof states', () => {
 
   it('chooses the conclusion by order, never by POV', () => {
     expect(source).toContain('function raisePoint(i)');
-    expect(source).toContain("Make this the proof's conclusion");
+    expect(source).toContain('onraise={i > 0 ? () => raisePoint(i) : null}');
+  });
+
+  it('saves the proof before a point joins a layer, since the marker follows the proof as saved', () => {
+    expect(bodyOfFn('addPointToLayer')).toContain('if (dirty || !savedName) save({ then: go }); else go();');
   });
 
   it('caps the list where the engine caps it', () => {
@@ -864,8 +874,8 @@ describe('stamping a symbol', () => {
     expect(stamp).not.toContain("tool = 'select'");
   });
 
-  it('sizes it against the panel, so it reads the same on any resolution', () => {
-    expect(down).toContain('size: iconSizeFor(hit.box.baseScale)');
+  it('sizes it on the page, so it reads the same on any resolution', () => {
+    expect(down).toContain('size: ICON_SIZE_DEFAULT,');
   });
 
   it('gives a solid silhouette no stroke width to carry', () => {
@@ -896,7 +906,7 @@ describe('stamping a symbol', () => {
     expect(node).toContain('id: s.id, x: s.x, y: s.y');
     // and it rebinds by that same point when dropped onto another surface:
     // everything that is not a box and not a polyline answers for its origin
-    expect(bodyOfFn('rebindOnDrop')).toContain('} else if (!Array.isArray(s.points)) {');
+    expect(bodyOfFn('anchorOf')).toContain('if (!Array.isArray(s.points)) return { x: s.x, y: s.y };');
   });
 
   it('turns the fill into a badge disc behind the glyph', () => {
@@ -912,7 +922,7 @@ describe('stamping a symbol', () => {
   it('divides the scale back out of the stroke, so a big symbol is not a fat one', () => {
     const node = source.slice(source.indexOf('function makeIconNode'), source.indexOf('// ---- inline text editing'));
 
-    expect(node).toContain('strokeWidth: (s.strokeWidth ?? 4) / panelScale / k');
+    expect(node).toContain('strokeWidth: (s.strokeWidth ?? 4) / scale / k');
   });
 
   it('reaches the stamp with a key nothing else claims', () => {
@@ -1147,11 +1157,12 @@ describe('placing a label', () => {
       source.indexOf('function commitTextEdit'),
     );
 
-    expect(start).toContain('surfacesOf().find((x) => x.id === s.panel)?.box');
+    expect(start).toContain('const frame = frameOf(s.panel);');
+    expect(start).toContain('surfaceToPage({ x: s.x, y: s.y }, frame)');
     expect(start).not.toContain('getAbsolutePosition');
     // and over the words of a boxed label, not over its corner
     expect(start).toContain('textBoxPad(s.fontSize)');
-    expect(source).toContain('const pad = textBoxPad(s.fontSize);');
+    expect(source).toContain('const pad = textBoxPad(fontSize) / k;');
   });
 
   it('holds more than one line, the way Konva draws it', () => {
@@ -1350,9 +1361,10 @@ describe('Proof Composer — numbered markers and blur boxes', () => {
     // both used to fall through to the polyline branch, where reading the points
     // they have none of threw inside dragend: the drop was never written and the
     // mark sprang back to where it had been picked up
-    const body = bodyOfFn('rebindOnDrop');
-    expect(body).toContain("if (s.kind === 'rect' || s.kind === 'blur') {");
-    expect(body).toContain('} else if (!Array.isArray(s.points)) {');
+    const body = bodyOfFn('anchorOf');
+    expect(body).toContain("if (s.kind === 'rect' || s.kind === 'blur' || s.kind === 'zoom') {");
+    expect(body).toContain('if (!Array.isArray(s.points)) return { x: s.x, y: s.y };');
+    expect(bodyOfFn('landShape')).toContain('surfaceToPage(anchorOf(s), from)');
   });
 
   it('keeps a colour away from the one mark drawn in no ink', () => {
@@ -1369,7 +1381,7 @@ describe('Proof Composer — numbered markers and blur boxes', () => {
     expect(source).toContain("} else if (tool === 'blur') {");
     expect(source).toContain("if ((kind === 'rect' || kind === 'blur') && node.width() > minSize");
     // the draft is resized as a box, not as a polyline: a Rect has no points()
-    expect(source).toContain("} else if (kind === 'rect' || kind === 'blur') {");
+    expect(source).toContain("} else if (kind === 'rect' || kind === 'blur' || kind === 'zoom') {");
   });
 
   it('blurs the picture itself, through the surface the box sits on', () => {
@@ -1395,8 +1407,9 @@ describe('Proof Composer — numbered markers and blur boxes', () => {
   });
 
   it('hands each shape the surface it stands on, panel or pasted image', () => {
-    expect(source).toContain('group.add(makeShapeNode(s, box, panel));');
-    expect(source).toContain('group.add(makeShapeNode(s, box, paste));');
+    expect(source).toContain('addSurfaceShape(group, s, box, panel);');
+    expect(source).toContain('addSurfaceShape(group, s, box, paste);');
+    expect(bodyOfFn('addSurfaceShape')).toContain('const node = makeShapeNode(s, box, surface);');
   });
 
   it('keeps a line width away from the two marks that have no line', () => {

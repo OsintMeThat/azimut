@@ -54,18 +54,22 @@ DRAFTS_DIR = ".drafts"
 INSPECT_DIR = ".inspect"
 #: Collage layouts. The picture a collage exports is a media working file.
 COLLAGE_DIR = ".collages"
+#: Map plates: a page laid out round the case's maps, and its preview.
+MAPPLATE_DIR = ".mapplates"
 #: Saved Compare session specs. Their rendered image is a media working file.
 COMPARE_DIR = ".compare"
+#: Saved Horizon views, each beside the small preview its list shows.
+HORIZON_DIR = ".horizon"
+# Searches for where a photo was taken, beside the saved views they open.
+HORIZON_FINDS_DIR = "finds"
 # Saved analyzer zones, follow-ups and runs with their owned input frames.
 ANALYSIS_DIR = ".analysis"
 #: Saved Grid Search state.
 SEARCH_DIR = ".search"
-#: Map layers the analyst added themselves: a file they opened, a URL they
-#: subscribed to, or a GeoConfirmed query. Hidden because they did not author the
-#: data — the row in the Layers panel is where it is worked with.
+#: Source and personal map layers, managed through the Layers panel.
 LAYERS_DIR = ".layers"
-#: The parsed GeoJSON a layer is drawn from. Derived from the snapshot beside
-#: it, so it is dropped on delete and rebuilt on demand rather than carried.
+#: The parsed GeoJSON a layer is drawn from. Derived from the snapshot or spec
+#: beside it, dropped on delete and rebuilt on demand rather than carried.
 LAYER_CACHE_DIR = ".cache"
 #: Machinery that belongs to a visible sibling: `media/.meta/` holds sidecars,
 #: `proofs/.meta/` holds the editable specs and pasted assets.
@@ -90,9 +94,11 @@ CASE_SUBDIRS = (
     INSPECT_DIR,
     COLLAGE_DIR,
     COMPARE_DIR,
+    HORIZON_DIR,
     ANALYSIS_DIR,
     SEARCH_DIR,
     LAYERS_DIR,
+    MAPPLATE_DIR,
 )
 
 #: Deleted artifacts wait here, hidden at the case root. Outside `CASE_SUBDIRS`
@@ -504,8 +510,40 @@ def collage_thumb_rel(name: str) -> str:
     return f"{COLLAGE_DIR}/{name}.webp"
 
 
+def map_plate_rel(name: str) -> str:
+    return f"{MAPPLATE_DIR}/{name}.json"
+
+
+def map_plate_thumb_rel(name: str) -> str:
+    """The preview the saved work lists show, drawn by the browser at each save."""
+    return f"{MAPPLATE_DIR}/{name}.webp"
+
+
 def compare_session_rel(name: str) -> str:
     return f"{COMPARE_DIR}/{name}.json"
+
+
+def horizon_view_rel(name: str) -> str:
+    return f"{HORIZON_DIR}/{name}.json"
+
+
+def horizon_thumb_rel(name: str) -> str:
+    """The preview the saved work lists show, drawn by the browser at each save."""
+    return f"{HORIZON_DIR}/{name}.webp"
+
+
+def horizon_find_rel(name: str) -> str:
+    """A search for where a photo was taken: what was asked, how far it got, what it found."""
+    return f"{HORIZON_DIR}/{HORIZON_FINDS_DIR}/{name}.json"
+
+
+def horizon_work_rel() -> str:
+    """The work on Horizon's bench, kept as it is made so a reload brings it back.
+
+    One per case and never a view: the leading dot is one no view's name keeps
+    (`slugify` strips it), so the views listed beside it never read it as one.
+    """
+    return f"{HORIZON_DIR}/.work.json"
 
 
 def analysis_rel(kind: str, ident: str) -> str:
@@ -554,7 +592,7 @@ def layer_icons_rel(name: str) -> str:
 
 
 def layer_cache_rel(name: str) -> str:
-    """The parsed GeoJSON the browser consumes, rebuilt from the snapshot."""
+    """Drawing rebuilt from a source snapshot or the spec's working collection."""
     return f"{LAYERS_DIR}/{LAYER_CACHE_DIR}/{name}.geojson"
 
 
@@ -574,6 +612,7 @@ def content_dirs(root: Path) -> tuple[Path, ...]:
         # Born for the same reason: a derived cache created on first use would
         # otherwise be one path an emptied case holds and a new one does not.
         subdir(root, LAYERS_DIR) / LAYER_CACHE_DIR,
+        subdir(root, HORIZON_DIR) / HORIZON_FINDS_DIR,
     ]
     return tuple(dirs)
 

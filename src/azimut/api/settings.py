@@ -25,6 +25,7 @@ from ..engine import (
     ffmpeg,
     firms,
     google_tiles,
+    iconlibrary,
     reveal,
     scrapers,
     sentinel,
@@ -83,6 +84,10 @@ class DownloadCookiesIn(BaseModel):
     browser: str | None = None  # required and validated when source == "browser"
 
 
+# The tour's state: never started, the page it resumes on, or done.
+TOUR_PATTERN = r"^(|done|[1-9])$"
+
+
 class PrefsIn(BaseModel):
     """Keyed-provider and display preferences; None leaves a field untouched."""
 
@@ -122,6 +127,14 @@ class PrefsIn(BaseModel):
     # the user muted with "don't show again"
     update_check_on_start: bool | None = None
     update_dismissed_version: str | None = None
+    # the first-run tour: "" never started, the page it resumes on, or "done"
+    tour: str | None = Field(default=None, pattern=TOUR_PATTERN)
+    # the version whose What's new was put away for good
+    whats_new_seen: str | None = Field(default=None, max_length=64)
+    # Horizon Find's beta notice, read and put away
+    find_beta_seen: bool | None = None
+    # how much the 3D views draw on this computer
+    quality_3d: Literal["full", "balanced", "light"] | None = None
     # login source for gated media downloads (engine/media.py); None leaves it
     download_cookies: DownloadCookiesIn | None = None
     # where each kind of export lands (engine/exportdir.py); "" = the case folder
@@ -134,6 +147,12 @@ def _detect_view(saved: Any) -> dict[str, Any]:
         return stored(DetectPrefs, saved).model_dump()
     except ValueError:
         return dict(config.DEFAULT_SETTINGS["detect_view"])
+
+
+def _quality_3d(settings: dict[str, Any]) -> str:
+    """How much the 3D views draw here: a level the app knows, else as they always did."""
+    level = settings.get("quality_3d")
+    return level if level in ("full", "balanced", "light") else "full"
 
 
 def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
@@ -162,6 +181,10 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
         "update_check_on_start": bool(settings.get("update_check_on_start", True)),
         "update_dismissed_version": settings.get("update_dismissed_version", ""),
+        "tour": settings.get("tour", ""),
+        "whats_new_seen": settings.get("whats_new_seen", ""),
+        "find_beta_seen": bool(settings.get("find_beta_seen", False)),
+        "quality_3d": _quality_3d(settings),
         "download_cookies": settings.get("download_cookies", {"source": "none"}),
         "export_dirs": exportdir.saved_dirs(settings),
     }
@@ -312,7 +335,7 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
     if body.proof_place_auto is not None:
         settings["proof_place_auto"] = bool(body.proof_place_auto)
     if body.post_mention is not None:
-        settings["post_mention"] = body.post_mention.strip()[:64]
+        settings["post_mention"] = body.post_mention.strip()[:280]
     if body.post_target is not None:
         settings["post_target"] = body.post_target
     if body.post_template is not None:
@@ -327,6 +350,14 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["update_check_on_start"] = bool(body.update_check_on_start)
     if body.update_dismissed_version is not None:
         settings["update_dismissed_version"] = body.update_dismissed_version.strip()[:64]
+    if body.tour is not None:
+        settings["tour"] = body.tour
+    if body.whats_new_seen is not None:
+        settings["whats_new_seen"] = body.whats_new_seen.strip()[:64]
+    if body.find_beta_seen is not None:
+        settings["find_beta_seen"] = bool(body.find_beta_seen)
+    if body.quality_3d is not None:
+        settings["quality_3d"] = body.quality_3d
     if body.export_dirs is not None:
         merged = dict(settings.get("export_dirs", {}))
         for kind, folder in body.export_dirs.items():
@@ -544,12 +575,13 @@ def export_settings() -> Response:
     """Download everything app-wide that isn't a case, so another machine can be
     set up identically (POST /settings/import).
 
-    Three files in one: portable settings, templates.json, and the signature
-    logo base64-encoded. It carries the user's own API keys by design — it's a
+    Four things in one: portable settings, templates.json, the signature logo
+    base64-encoded, and the icon library, each icon's PNG base64-encoded. It carries the user's own API keys by design — it's a
     local download of secrets that already live in their workspace.
 
     Deliberately absent: export destinations (absolute paths chosen on this
-    machine), the half-written Copernicus layer in the picker,
+    machine), how much the 3D views draw (this machine's graphics card), the
+    half-written Copernicus layer in the picker,
     ``cookies.txt`` (a live login session), the cases themselves
     (portable folders already), the extension folder the app owns
     (``config.extension_dir()`` — those are this build's own bundled bytes, and
@@ -562,6 +594,8 @@ def export_settings() -> Response:
     # A layer half-written in the picker is this machine's scratch work, replaced
     # by the next preview. The saved ones travel, in sentinel_layers.
     portable_settings.pop("sentinel_draft_layer", None)
+    # How much the 3D views draw answers this computer's graphics card, not the next one's.
+    portable_settings.pop("quality_3d", None)
     # A machine that never paired has no token to carry, and an empty one would
     # unpair the machine this backup is restored on.
     if not portable_settings.get("ingest_token"):
@@ -570,6 +604,7 @@ def export_settings() -> Response:
         "settings": portable_settings,
         "templates": config.load_templates(),
         "signature_png": _signature_b64(),
+        "icons": iconlibrary.backup(),
     }
     payload = json.dumps(bundle, indent=2, ensure_ascii=False)
     return Response(
@@ -708,7 +743,7 @@ class ImportedSettings(BaseModel):
     map_sync: bool = True
     capture_scale_north: bool = False
     proof_place_auto: bool = True
-    post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=64)
+    post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=280)
     post_target: str = DEFAULT_POST_TARGET
     post_template: str = DEFAULT_POST_TEMPLATE
     post_prefill: bool = True
@@ -717,6 +752,9 @@ class ImportedSettings(BaseModel):
     ingest_token: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")
     update_check_on_start: bool = True
     update_dismissed_version: str = Field(default="", max_length=64)
+    tour: str = Field(default="", pattern=TOUR_PATTERN)
+    whats_new_seen: str = Field(default="", max_length=64)
+    find_beta_seen: bool = False
     download_cookies: ImportedDownloadCookies = Field(default_factory=ImportedDownloadCookies)
 
     @field_validator("analyzers", mode="before")
@@ -791,6 +829,18 @@ class ImportedSettings(BaseModel):
         return value if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value) else DEFAULT_POST_TEMPLATE
 
 
+class ImportedIcon(BaseModel):
+    """One icon of a backed-up library; the picture faces the import's own checks."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(default="Icon", max_length=iconlibrary.MAX_NAME * 2)
+    group: str = Field(default="", max_length=iconlibrary.MAX_GROUP * 2)
+    mode: Literal["disc", "image"] = "image"
+    aliases: list[Annotated[str, Field(pattern=r"^[0-9a-f]{16}$")]] = Field(default_factory=list, max_length=iconlibrary.MAX_ALIASES)
+    png_base64: str = Field(max_length=iconlibrary.MAX_BACKUP_B64)
+
+
 class ImportIn(BaseModel):
     """A previously exported backup. Only keys Azimut recognises are applied —
     anything else in the file is ignored, so a hand-edited or foreign JSON can't
@@ -806,6 +856,8 @@ class ImportIn(BaseModel):
     # megabytes-long field only to reject it is work an untrusted body shouldn't
     # get. The decoded bytes then face config.valid_signature().
     signature_png: str = Field(default="", max_length=SIGNATURE_B64_MAX_CHARS)
+    #: The icon library, each picture re-encoded as an import would be (`iconlibrary.restore`).
+    icons: list[ImportedIcon] = Field(default_factory=list, max_length=iconlibrary.MAX_ICONS)
 
 
 @router.post("/settings/import")
@@ -830,6 +882,13 @@ def import_settings(body: ImportIn) -> dict[str, Any]:
         restored = config.canonical_templates(body.templates, max_per_kind=MAX_TEMPLATES_PER_KIND)
         templates = sum(len(restored[kind]) for kind in config.TEMPLATE_KINDS)
         if templates:
+            # Merged by id, as the icons are: the backup's template replaces the one of
+            # the same id, and those made only on this machine stay.
+            here = config.load_templates()
+            for kind in config.TEMPLATE_KINDS:
+                incoming = {item["id"]: item for item in restored[kind]}
+                kept = [incoming.pop(item["id"], item) for item in here[kind]]
+                restored[kind] = kept + list(incoming.values())
             config.save_templates(restored)
 
     # A malformed logo is dropped rather than failing the whole restore: the keys
@@ -845,7 +904,8 @@ def import_settings(body: ImportIn) -> dict[str, Any]:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
             signature = True
-    return {"imported": applied, "templates": templates, "signature": signature}
+    icons = iconlibrary.restore([icon.model_dump() for icon in body.icons]) if body.icons else 0
+    return {"imported": applied, "templates": templates, "signature": signature, "icons": icons}
 
 
 @router.post("/settings/keys/{provider}/status")
@@ -1040,10 +1100,19 @@ def check_app_update(check: bool = False) -> dict[str, Any]:
 
     Opt-in and user-triggered like the scraper check: without ``check`` it
     reports the current version and touches no network (engine/updates.py).
+    ``install`` says how this copy updates: the program file to replace and the
+    workspace that stays put, or a pip install that has its own command.
     """
+    install = {**updates.install(), "workspace": str(config.workspace_root())}
     if not check:
-        return {"current": __version__, "latest": None, "update_available": False}
-    return updates.check(__version__)
+        return {
+            "current": __version__,
+            "latest": None,
+            "update_available": False,
+            "install": install,
+        }
+    asset = updates.asset_name() if install["kind"] == "binary" else None
+    return {**updates.check(__version__, asset=asset), "install": install}
 
 
 @router.get("/settings/diagnostics")

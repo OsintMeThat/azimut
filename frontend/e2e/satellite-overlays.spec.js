@@ -234,6 +234,22 @@ test('carries the coordinates on a dragged pin, and drops it on exit', async ({ 
   await expect(pin).toHaveCount(0);
 });
 
+test('asks the free imagery’s tiles many at a time, a handful of requests for a screen', async ({ page }) => {
+  // one at a time, each tile waited for one of the six connections the browser keeps to the app
+  await installAppFixture(page);
+  const asked = [];
+  page.on('request', (request) => {
+    const { pathname } = new URL(request.url());
+    if (pathname.startsWith('/api/tiles/')) asked.push(pathname);
+  });
+  await page.goto('/#satellite?ll=46.6,7.9&z=13&p=esri-world-imagery');
+  await awaitMapReady(page);
+  await expect.poll(() => asked.length).toBeGreaterThan(0);
+  await page.waitForTimeout(500);
+  expect(asked.every((path) => path === '/api/tiles/batch/esri-world-imagery')).toBe(true);
+  expect(asked.length).toBeLessThanOrEqual(8);
+});
+
 test('lays the railways over the imagery, and lifts them off again', async ({ page }) => {
   // The toggle sat on the tool while the layer never heard about it: the effect
   // that carries it down read the map first, and while the map was still being
@@ -289,45 +305,20 @@ async function settledGround(page) {
   return last;
 }
 
-test('opens with the village names written over the imagery, and lifts them at the switch', async ({ page }) => {
+test('writes the village names over the imagery at the switch, and lifts them at the next', async ({ page }) => {
   const fixture = await installAppFixture(page, { placeNames: 'Qushayhi' });
   await page.goto('/#satellite');
   await awaitMapReady(page);
-  // on from the start, like Borders: the tiles are found through the TileJSON,
-  // which names the current build
-  await expect.poll(() => fixture.placeNameTiles.some((url) => url.endsWith('.pbf'))).toBe(true);
-  expect(fixture.placeNameTiles[0]).toBe('https://tiles.openfreemap.org/planet');
-  await expect(page.getByText(/OpenFreeMap © OpenMapTiles/)).toBeVisible();
+  // off from the start, unlike Borders
+  const bare = await settledGround(page);
 
   const names = page.getByLabel('Place names', { exact: true });
   await names.click();
-  const bare = await settledGround(page);
-
-  // back on, the names are written again, and off, the ground is as it was
-  await names.click();
+  // the tiles are found through the TileJSON, which names the current build
+  await expect.poll(() => fixture.placeNameTiles.some((url) => url.endsWith('.pbf'))).toBe(true);
+  expect(fixture.placeNameTiles[0]).toBe('https://tiles.openfreemap.org/planet');
+  await expect(page.getByText(/OpenFreeMap © OpenMapTiles/)).toBeVisible();
   await expect.poll(async () => repainted(bare, await groundPicture(page))).toBe(true);
   await names.click();
   await expect.poll(async () => repainted(bare, await groundPicture(page))).toBe(false);
-});
-
-test('measures a path clicked on the map, and clears it', async ({ page }) => {
-  await installAppFixture(page);
-  await page.goto('/#satellite');
-  await awaitMapReady(page);
-  await page.getByRole('button', { name: 'Measure tools' }).click();
-  await page.getByRole('button', { name: 'Distance' }).click();
-
-  const bare = await mapPicture(page);
-  const box = await page.locator('.map').boundingBox();
-  await page.mouse.click(box.x + 160, box.y + 160);
-  await page.mouse.click(box.x + 360, box.y + 260);
-
-  // two dots and the line between them, and the reading they add up to
-  await expect(page.locator('.measure-value')).toHaveText(/\d+(\.\d+)?\s?(m|km)/);
-  const drawn = await mapPicture(page);
-  expect(repainted(bare, drawn)).toBe(true);
-
-  await page.getByRole('button', { name: 'Clear points' }).click();
-  await expect(page.locator('.measure-value')).toHaveCount(0);
-  expect(repainted(drawn, await mapPicture(page))).toBe(true);
 });

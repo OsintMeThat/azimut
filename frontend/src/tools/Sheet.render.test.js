@@ -4061,7 +4061,7 @@ describe('the home the tab lands on', () => {
     // Pressed before the autosave's own delay has run out.
     expect(put).not.toHaveBeenCalled();
 
-    button('Close').click();
+    button('Sheets').click();
     await settle();
 
     expect(target.querySelector('.home')).not.toBeNull();
@@ -4084,7 +4084,7 @@ describe('the home the tab lands on', () => {
     editor.dispatchEvent(new Event('blur', { bubbles: true }));
     flushSync();
 
-    button('Close').click();
+    button('Sheets').click();
     await settle();
 
     // Tried, failed: the grid stays, and leaving now would drop the edit, so it asks.

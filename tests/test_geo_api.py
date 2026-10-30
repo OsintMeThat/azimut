@@ -1,5 +1,7 @@
 """Forward geocoding (/api/geo/geocode): Nominatim behind a mock, never the network."""
 
+import math
+
 import pytest
 
 from azimut.api import satellite
@@ -527,3 +529,42 @@ def test_places_never_sends_a_typed_coordinate_to_the_geocoder(client, monkeypat
         body = client.get("/api/geo/places", params={"q": typed}).json()
         assert body == {"places": [], "busy": False, "throttled": False, "attribution": None}
     assert calls == []
+
+
+# -- /api/geo/shadow -------------------------------------------------------------
+
+
+def test_a_shadow_gives_the_hour_and_the_height_of_what_cast_it(client):
+    from datetime import UTC, datetime
+
+    from azimut.engine import sky
+
+    when = datetime(2024, 6, 21, 8, 0, tzinfo=UTC)
+    sun = sky.position_at(48.8584, 2.2945, when)
+    shadow = (sun["sun_azimuth"] + 180.0) % 360.0
+    answer = client.get("/api/geo/shadow", params={
+        "lat": 48.8584, "lon": 2.2945, "date": "2024-06-21", "bearing": shadow, "length": 50,
+    }).json()
+    assert answer["zone"] == "Europe/Paris"
+    [moment] = answer["moments"]
+    assert moment["utc"].startswith("2024-06-21T08:00")
+    assert moment["local"].startswith("2024-06-21T10:00")
+    altitude = sun["sun_apparent_altitude"]
+    assert moment["sun_altitude"] == pytest.approx(altitude, abs=0.01)
+    assert moment["height_m"] == pytest.approx(50 * math.tan(math.radians(altitude)), abs=0.1)
+
+
+def test_a_shadow_no_hour_could_throw_has_no_moment(client):
+    answer = client.get("/api/geo/shadow", params={
+        "lat": 48.8584, "lon": 2.2945, "date": "2024-06-21", "bearing": 180, "length": 50,
+    }).json()
+    assert answer["moments"] == []
+
+
+@pytest.mark.parametrize("params", [
+    {"date": "21/06/2024", "bearing": 10, "length": 5},
+    {"date": "2024-06-21", "bearing": 400, "length": 5},
+    {"date": "2024-06-21", "bearing": 10, "length": 0},
+])
+def test_a_shadow_refuses_what_it_cannot_read(client, params):
+    assert client.get("/api/geo/shadow", params={"lat": 48.8, "lon": 2.3, **params}).status_code == 422

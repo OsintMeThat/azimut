@@ -153,7 +153,8 @@
     <div class="s2-menu card" class:writing={open}>
       <div class="menu-row">
         <span class="menu-label">Layer</span>
-        <select class="select" bind:value={s2.layer} disabled={open}>
+        <select class="select" aria-label="Sentinel-2 layer" title="What the pass is drawn as: true colour, false colour, a band combination or a layer of yours"
+          bind:value={s2.layer} disabled={open}>
           {#each s2.layers as entry (entry.id)}
             <option value={entry.id}>{entry.label}</option>
           {/each}
@@ -220,6 +221,7 @@
               s2.setMaxcc(Number(e.currentTarget.value));
             }}
             aria-label="Maximum cloud cover"
+            title="Passes cloudier than this drop out of the calendar and the tiles"
           />
           <span class="cc-value mono">{maxccLabel(shown)}</span>
         </div>

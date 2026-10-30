@@ -1,0 +1,24 @@
+{
+  "width": 1536,
+  "height": 822,
+  "anchors": {
+    "detect.library-new": {
+      "x": 1169,
+      "y": 250.4,
+      "w": 259.3,
+      "h": 31.2
+    },
+    "detect.library": {
+      "x": 1169,
+      "y": 349.5,
+      "w": 355,
+      "h": 265.3
+    },
+    "detect.analyzers": {
+      "x": 1465,
+      "y": 7,
+      "w": 30,
+      "h": 30
+    }
+  }
+}

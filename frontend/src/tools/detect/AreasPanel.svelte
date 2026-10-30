@@ -400,7 +400,7 @@
 
 {#snippet areaRow(area, groupId)}
   {@const off = hidden.includes(area.id)}
-  <div class="area-row" role="group" aria-label={area.name} class:selected={selectedArea === area.id} class:off
+  <div class="area-row" data-guide="detect.area" role="group" aria-label={area.name} class:selected={selectedArea === area.id} class:off
     class:dragging={dragging?.kind === 'area' && dragging.id === area.id && dragging.from === groupId}
     class:landing-before={landing?.kind === 'area' && landing.id === area.id && landing.groupId === groupId && !landing.after}
     class:landing-after={landing?.kind === 'area' && landing.id === area.id && landing.groupId === groupId && landing.after}

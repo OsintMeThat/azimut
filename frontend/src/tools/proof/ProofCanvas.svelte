@@ -14,7 +14,7 @@
   } = $props();
 </script>
 
-<div class="canvas-wrap" class:drawing={tool !== 'select'}>
+<div class="canvas-wrap" class:drawing={tool !== 'select'} data-guide="proof.canvas">
   <div class="konva" bind:this={containerEl}></div>
   {#if textEdit}
     <!-- A textarea, because a label can be two lines: Konva draws the newline,
@@ -26,6 +26,10 @@
       style:top={`${textEdit.top}px`}
       style:font-size={`${textEdit.size}px`}
       style:color={textEdit.color}
+      style:font-family={textEdit.font}
+      style:font-weight={textEdit.weight}
+      style:width={textEdit.width ? `${textEdit.width}px` : null}
+      style:text-align={textEdit.align ?? null}
       bind:value={textEdit.value}
       use:focusSelect
       onblur={() => commitTextEdit(true)}

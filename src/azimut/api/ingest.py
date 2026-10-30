@@ -57,6 +57,7 @@ from ..engine import (
     firms,
     firmspoints,
     geo,
+    inspect as inspect_engine,
     mapsites,
     media as media_engine,
     satellite as satellite_engine,
@@ -559,6 +560,10 @@ def saved_points(
 #: an audio file — has nothing to show beside a map.
 REFERENCE_KINDS = ("image", "video")
 
+#: The parts of a file's origin a reference window unfolds under its title: where
+#: it was published, by whom and when, and when it was captured.
+REFERENCE_SOURCE_KEYS = ("webpage_url", "url", "uploader", "upload_date", "captured_at")
+
 
 @router.get("/media", dependencies=[Depends(require_token)])
 def reference_media(
@@ -603,11 +608,42 @@ def reference_media(
                 "title": item.get("title") or "",
                 "kind": item.get("kind") or "image",
                 "thumbnail": item.get("thumbnail") or "",
+                "notes": item.get("notes") or "",
+                "taken_at": item.get("taken_at") or "",
+                "source": _reference_source(item.get("source")),
             }
             for item in items[:limit]
         ],
         "total": total,
     }
+
+
+def _reference_source(raw: object) -> dict[str, str]:
+    """The origin a window states, and nothing else of a download's record."""
+    source = raw if isinstance(raw, dict) else {}
+    return {
+        key: source[key]
+        for key in REFERENCE_SOURCE_KEYS
+        if isinstance(source.get(key), str) and source[key]
+    }
+
+
+@router.get("/probe", dependencies=[Depends(require_token)])
+def reference_probe(case_id: str, path: str) -> dict[str, Any]:
+    """A reference clip's frame rate and length, read as Inspect reads them, so a
+    frame step in the panel's window is one frame of that clip.
+
+    Only those two numbers cross: the window has no use for the codec, the
+    rotation or the tags the app's own probe carries.
+    """
+    case = get_case(case_id)
+    try:
+        if not case.resolve_inside(path).is_file():
+            raise FileNotFoundError(f"no such file in this case: {path}")
+        info = inspect_engine.probe(case, path)
+    except (CaseError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"fps": info.get("fps"), "duration": info.get("duration")}
 
 
 def _reference_order(sort: str) -> Callable[[dict[str, Any]], tuple[str, str]]:

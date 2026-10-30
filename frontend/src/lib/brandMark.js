@@ -29,14 +29,29 @@ const WORD_BOX = { x: -7.5, y: -7.5, width: 503.3, height: 115 };
 const MARK_SIZE = 27;
 const GAP = 11;
 const WORD_HEIGHT = 13;
+/** The air the mark's 24-unit square leaves either side of its flanks. */
+const MARK_AIR = 5.8;
+/** The gap of a tight lockup, in the same units: the mark's air dropped too. */
+const TIGHT_GAP = 5;
+
+/**
+ * Where the lockup's parts sit, in units of a 27 px high mark: the corner's own
+ * layout, or a `tight` one for a signature set small beside words, where the
+ * corner's air reads as a hole between the mark and the name.
+ */
+function layout(tight) {
+  if (!tight) return { air: 0, mark: MARK_SIZE, gap: GAP };
+  const air = (MARK_AIR / 24) * MARK_SIZE;
+  return { air, mark: MARK_SIZE - 2 * air, gap: TIGHT_GAP };
+}
 
 export const INK_ON_DARK = '#e3e3e3';
 export const AMBER = '#e8a33d';
 
 /** How wide the lockup is when drawn `height` px high. */
-export function signatureWidth(height) {
-  const unit = height / MARK_SIZE;
-  return (MARK_SIZE + GAP + (WORD_HEIGHT * WORD_BOX.width) / WORD_BOX.height) * unit;
+export function signatureWidth(height, { tight = false } = {}) {
+  const { mark, gap } = layout(tight);
+  return (mark + gap + (WORD_HEIGHT * WORD_BOX.width) / WORD_BOX.height) * (height / MARK_SIZE);
 }
 
 /**
@@ -47,15 +62,16 @@ export function signatureWidth(height) {
  *
  * @returns {number} the width drawn, 0 when nothing was
  */
-export function drawSignature(ctx, right, middle, { height, ink = INK_ON_DARK, makePath } = {}) {
+export function drawSignature(ctx, right, middle, { height, ink = INK_ON_DARK, makePath, tight = false } = {}) {
   const pathOf = makePath ?? (typeof Path2D === 'function' ? (d) => new Path2D(d) : null);
   if (!pathOf || !(height > 0)) return 0;
   const unit = height / MARK_SIZE;
-  const width = signatureWidth(height);
+  const { air, mark, gap } = layout(tight);
+  const width = signatureWidth(height, { tight });
   const left = right - width;
   ctx.save();
-  // The mark: a 24-unit viewBox drawn MARK_SIZE px square.
-  ctx.translate(left, middle - height / 2);
+  // The mark: a 24-unit viewBox drawn MARK_SIZE px square, its side air hanging out when tight.
+  ctx.translate(left - air * unit, middle - height / 2);
   ctx.scale(height / 24, height / 24);
   ctx.fillStyle = ink;
   ctx.fill(pathOf(MARK.west));
@@ -65,7 +81,7 @@ export function drawSignature(ctx, right, middle, { height, ink = INK_ON_DARK, m
 
   ctx.save();
   const wordScale = (WORD_HEIGHT * unit) / WORD_BOX.height;
-  ctx.translate(left + (MARK_SIZE + GAP) * unit - WORD_BOX.x * wordScale, middle - (WORD_HEIGHT * unit) / 2 - WORD_BOX.y * wordScale);
+  ctx.translate(left + (mark + gap) * unit - WORD_BOX.x * wordScale, middle - (WORD_HEIGHT * unit) / 2 - WORD_BOX.y * wordScale);
   ctx.scale(wordScale, wordScale);
   ctx.strokeStyle = ink;
   ctx.lineWidth = 15;

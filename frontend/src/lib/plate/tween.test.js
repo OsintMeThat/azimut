@@ -1,0 +1,224 @@
+import { describe, expect, it } from 'vitest';
+import { changes, ease, flight, motion, pictureTransform, playedTransit, transitionInto, transitionPlan, TWEEN_FPS, tweenFrames } from './tween.js';
+import { project, unproject } from './geo.js';
+import { PX_PER_MM, TRANSITIONS } from './page.js';
+
+/** A canvas that records what is drawn on it and every filter set, a character measured as 5 pixels. */
+function fakeCanvas() {
+  const calls = [];
+  const ctx = new Proxy({ calls, measureText: (text) => ({ width: String(text).length * 5 }) }, {
+    get(target, key) { return key in target ? target[key] : (...args) => calls.push([key, ...args]); },
+    set(target, key, value) { if (key === 'filter') calls.push(['filter', value]); target[key] = value; return true; },
+  });
+  return { width: 0, height: 0, getContext: () => ctx, ctx };
+}
+
+const frame = { width: 400, height: 300 };
+const far = { lat: 45.8, lon: 6.8, zoom: 10, bearing: 0 };
+const near = { lat: 45.85, lon: 6.9, zoom: 13, bearing: 40 };
+
+/** The way sampled at `count` even steps, and how far the ground goes on the screen at each. */
+function sampled(a, b, count = 10) {
+  const fly = flight(a, b, frame);
+  const views = Array.from({ length: count + 1 }, (_, index) => fly(index / count));
+  return { views, speeds: views.slice(1).map((view, index) => motion(views[index], view, frame)) };
+}
+
+describe('a map flying from one beat to the next', () => {
+  it('eases in and out, and lands where the next beat frames it', () => {
+    expect(ease(0)).toBe(0);
+    expect(ease(1)).toBe(1);
+    expect(ease(0.5)).toBeCloseTo(0.5);
+    const fly = flight(far, near, frame);
+    expect(fly(0).lat).toBeCloseTo(45.8);
+    expect(fly(0).zoom).toBeCloseTo(10);
+    expect(fly(1)).toMatchObject({ lat: 45.85, lon: 6.9, zoom: 13, bearing: 40 });
+    expect(fly(0.5).bearing).toBeCloseTo(20);
+    // the shorter way round a turn
+    expect(flight({ ...far, bearing: 170 }, { ...far, bearing: -170 }, frame)(0.5).bearing).toBeCloseTo(180);
+    expect(flight(far, { ...far, pitch: 60 }, frame)(0.5).pitch).toBeCloseTo(30);
+  });
+
+  it('crosses the screen at one speed, however far it zooms', () => {
+    // from a country to a village, eight levels in: the ground never rushes at the end
+    const { speeds } = sampled({ lat: 14.84, lon: 44.46, zoom: 6 }, { lat: 16.03, lon: 45.26, zoom: 14 });
+    expect(Math.max(...speeds) / Math.min(...speeds)).toBeLessThan(1.3);
+    // a zoom on the spot keeps its centre
+    const { views } = sampled(far, { ...far, zoom: 14 });
+    expect(views.every((view) => Math.abs(view.lat - far.lat) < 1e-9 && Math.abs(view.lon - far.lon) < 1e-9)).toBe(true);
+  });
+
+  it('rises over a long way and comes down where it lands', () => {
+    const { views, speeds } = sampled(far, { ...far, lon: 9 });
+    const lowest = Math.min(...views.map((view) => view.zoom));
+    expect(lowest).toBeLessThan(8);
+    expect(views.at(-1).zoom).toBe(10);
+    expect(Math.max(...speeds) / Math.min(...speeds)).toBeLessThan(1.6);
+  });
+
+  it('carries a picture of the map to where the same ground stands in another view', () => {
+    const [a, b, c, d, e, f] = pictureTransform(far, near, frame);
+    const at = (x, y) => [a * x + c * y + e, b * x + d * y + f];
+    // a point of the ground in the first picture lands where the second view draws it
+    const ground = unproject(far, frame, [150, 100]);
+    const [x, y] = at(150, 100);
+    const [ex, ey] = project(near, frame, ground);
+    expect(x).toBeCloseTo(ex, 3);
+    expect(y).toBeCloseTo(ey, 3);
+  });
+});
+
+describe('a transition between two beats', () => {
+  it('plays at the video\'s own rate, and does only what it is set to and what the beats call for', () => {
+    expect(TWEEN_FPS).toBe(30);
+    expect(transitionPlan(TRANSITIONS, { moved: ['map'], fresh: ['z'] })).toBeNull();
+    const on = { ...TRANSITIONS, on: true };
+    expect(transitionPlan(on, {}, { cut: true })).toBeNull();
+    // a step that takes its own time to come in
+    expect(transitionPlan(on, {}, { seconds: 2 }).frames).toBe(2 * TWEEN_FPS);
+    expect(transitionPlan(on, {}, { seconds: null }).frames).toBe(Math.round(0.8 * TWEEN_FPS));
+    // nothing moves and nothing is new: only the fade
+    expect(transitionPlan(on, {})).toEqual({ move: false, blur: false, fade: true, appear: 'none', frames: 24, first: 24 });
+    // the maps move first, then what is new comes in
+    const both = transitionPlan({ ...on, appear: 'draw' }, { moved: ['map'], fresh: ['z'] });
+    expect(both).toMatchObject({ move: true, blur: true, appear: 'draw', frames: Math.round(0.8 * TWEEN_FPS) });
+    expect(both.first).toBeLessThan(both.frames);
+    expect(transitionPlan({ ...on, blur: false }, { moved: ['map'] }).blur).toBe(false);
+    expect(transitionPlan({ ...on, fade: false, move: false, appear: 'none' }, { moved: ['map'], fresh: ['z'] })).toBeNull();
+  });
+
+  it('finds the maps framed otherwise, what is new on the next beat and what leaves it', () => {
+    const spec = { elements: [{ id: 'map', kind: 'map' }, { id: 'old', kind: 'text', box: [0, 0, 1, 1] },
+      { id: 'z', kind: 'zone', step: 's1', box: [0, 0, 1, 1] }, { id: 'y', kind: 'text', step: 's0', box: [0, 0, 1, 1] }] };
+    const before = { context: { at: null, place: { steps: ['s0', 's1'], index: 0 }, views: { map: { view: far, frame } } } };
+    const after = { context: { at: null, place: { steps: ['s0', 's1'], index: 1 }, views: { map: { view: near, frame } } } };
+    expect(changes(spec, before, after)).toEqual({ moved: ['map'], fresh: ['z'], gone: ['y'] });
+  });
+
+  it('plays a transition as the video draws it: the page or the map first, then what is new', () => {
+    const fading = transitionPlan({ ...TRANSITIONS, on: true, fade: true, move: false, appear: 'none', seconds: 1 }, { moved: [], fresh: ['z'] });
+    // a fading page swaps the writing across the whole of it
+    expect(playedTransit(fading, 0)).toEqual({ coming: 0, going: 1, mode: 'fade' });
+    expect(playedTransit(fading, 0.5).coming).toBeCloseTo(0.5, 5);
+    expect(playedTransit(fading, 1)).toEqual({ coming: 1, going: 0, mode: 'fade' });
+    // a map on the move swaps it halfway, then what is new is drawn along its lines
+    const drawing = transitionPlan({ ...TRANSITIONS, on: true, fade: false, move: true, appear: 'draw', seconds: 1 }, { moved: ['map'], fresh: ['line'] });
+    const share = drawing.first / drawing.frames;
+    expect(playedTransit(drawing, share * 0.4)).toEqual({ coming: 0, going: 1, mode: 'fade' });
+    expect(playedTransit(drawing, share * 0.6)).toEqual({ coming: 0, going: 0, mode: 'fade' });
+    expect(playedTransit(drawing, share + (1 - share) / 2)).toMatchObject({ coming: 0.5, going: 0, mode: 'draw' });
+    expect(playedTransit(drawing, 1).coming).toBe(1);
+  });
+
+  it('finds how the video comes into each beat of the play: its plan and its time, none for a step that cuts in', () => {
+    const map = { id: 'map', kind: 'map', box: [0, 0, 10, 10], view: far };
+    const spec = { transitions: { on: true, fade: false, move: true, appear: 'fade', seconds: 1 }, elements: [map,
+      { id: 'n', kind: 'text', step: 's2', box: [0, 0, 1, 1] }],
+      steps: { now: [{ id: 's1' }, { id: 's2', transition_seconds: 2 }, { id: 's3', transition: 'none' }] },
+      framing: { s1: { map: near } } };
+    const list = [{ day: null, step: null }, { day: null, step: 's1' }, { day: null, step: 's2' }, { day: null, step: 's3' }];
+    const order = ['now', 's1', 's2', 's3'];
+    expect(transitionInto(spec, list, 0, order)).toBe(null);
+    // into s1 the map flies: the plate's second
+    const first = transitionInto(spec, list, 1, order);
+    expect([first.move, first.frames, first.changed.moved]).toEqual([true, TWEEN_FPS, ['map']]);
+    // into s2 the map stays, its text comes in, over the step's own two seconds
+    const second = transitionInto(spec, list, 2, order);
+    expect([second.move, second.appear, second.frames, second.changed.fresh]).toEqual([false, 'fade', 2 * TWEEN_FPS, ['n']]);
+    expect(transitionInto(spec, list, 3, order)).toBe(null);
+    expect(transitionInto({ ...spec, transitions: { on: false } }, list, 1, order)).toBe(null);
+  });
+
+  const spec = { page: { paper: 'a5', orientation: 'landscape' }, theme: { paper: '#ffffff', ink: '#000000', accent: '#c8102e', font: 'inter' },
+    elements: [{ id: 'map', kind: 'map', box: [10, 10, 100, 80] }, { id: 'inset', kind: 'inset', of: 'map', box: [120, 10, 40, 30] },
+      { id: 'z', kind: 'text', box: [0, 0, 20, 5], text: 'New', step: 's1' }] };
+  const picture = { width: 100, height: 80 };
+  const insetFrame = { width: 160, height: 120 };
+  const beat = (index, view) => ({ context: { at: null, place: { steps: ['s1'], index },
+    views: { map: { view, frame }, inset: { view: { ...view, zoom: view.zoom - 4.5, bearing: 0 }, frame: insetFrame } },
+    maps: { map: picture, inset: picture } } });
+  /** Each frame read as it comes, as the export reads it: its canvas, and what was drawn on it since it was made blank. */
+  const all = async (frames) => {
+    const out = [];
+    for await (const canvas of frames) {
+      const { calls } = canvas.ctx;
+      out.push({ canvas, calls: calls.slice(calls.findLastIndex(([name]) => name === 'reset') + 1) });
+    }
+    return out;
+  };
+  const counted = (made) => () => { const canvas = fakeCanvas(); made.push(canvas); return canvas; };
+
+  it('draws the map again at each frame of its flight, its inset following, then brings in what is new', async () => {
+    const plan = transitionPlan({ ...TRANSITIONS, on: true, appear: 'fade' }, { moved: ['map'], fresh: ['z'] });
+    const asked = { map: [], inset: [] };
+    const ended = [];
+    const sitting = (id) => ({ at: async (view) => { asked[id].push(view); return { picture, placer: null }; }, end: () => ended.push(id) });
+    const made = [];
+    const frames = await all(tweenFrames(spec, 2, beat(-1, far), beat(0, near), plan, { moved: ['map'], fresh: ['z'] },
+      { sitting, makeCanvas: () => { const canvas = fakeCanvas(); made.push(canvas); return canvas; } }));
+    expect(frames).toHaveLength(plan.frames);
+    // every frame of the way, the last landing where the next beat frames the map
+    expect(asked.map).toHaveLength(plan.first);
+    expect(asked.map.at(-1)).toMatchObject({ lat: near.lat, lon: near.lon, zoom: near.zoom });
+    expect(asked.inset.map((view) => view.zoom)).toEqual(asked.map.map((view) => view.zoom - 4.5));
+    expect(ended.sort()).toEqual(['inset', 'map']);
+    // the map moves blurred, sharp at both ends
+    const filters = made.flatMap((canvas) => canvas.ctx.calls.filter(([name]) => name === 'filter').map(([, value]) => value));
+    expect(filters.some((value) => value.startsWith('blur('))).toBe(true);
+    // what is new is written in the frames after the move
+    const last = frames.at(-1).calls;
+    expect(last.some(([name, text]) => name === 'fillText' && text === 'New')).toBe(true);
+  });
+
+  it('draws every frame on the same few canvases, blank each time, and lets them go once done', async () => {
+    const plan = transitionPlan({ ...TRANSITIONS, on: true, appear: 'fade' }, { moved: ['map'], fresh: ['z'] });
+    const sitting = () => ({ at: async () => ({ picture, placer: null }), end: () => {} });
+    const made = [];
+    const frames = await all(tweenFrames(spec, 2, beat(-1, far), beat(0, near), plan, { moved: ['map'], fresh: ['z'] },
+      { sitting, makeCanvas: counted(made) }));
+    // the frame, a picture per map, the writing of both beats and their mix, however many frames
+    expect(frames).toHaveLength(plan.frames);
+    expect(made.length).toBeLessThanOrEqual(6);
+    const [{ canvas }] = frames;
+    expect(frames.every((frame) => frame.canvas === canvas)).toBe(true);
+    // each frame after the first starts from a blank canvas, so none shows through the next
+    expect(canvas.ctx.calls.filter(([name]) => name === 'reset')).toHaveLength(plan.frames - 1);
+    // none of their pixels is kept once the transition is done
+    expect(made.every((item) => item.width === 0 && item.height === 0)).toBe(true);
+
+    // a fade keeps the two pages it mixes, and nothing more
+    const fading = [];
+    const fade = transitionPlan({ ...TRANSITIONS, on: true, move: false, appear: 'none' }, {});
+    expect(await all(tweenFrames(spec, 2, beat(-1, far), beat(-1, far), fade, {}, { makeCanvas: counted(fading) }))).toHaveLength(fade.frames);
+    expect(fading).toHaveLength(3);
+  });
+
+  it('carries the two beats\' pictures along the way when the map cannot be lent, and gives a map back when stopped', async () => {
+    const plan = transitionPlan({ ...TRANSITIONS, on: true, appear: 'none' }, { moved: ['map'] });
+    const frames = await all(tweenFrames(spec, 2, beat(-1, far), beat(0, near), plan, { moved: ['map'] }, { makeCanvas: fakeCanvas }));
+    expect(frames).toHaveLength(plan.frames);
+    const ended = [];
+    const sitting = (id) => ({ at: async () => ({ picture, placer: null }), end: () => ended.push(id) });
+    const made = [];
+    const flying = tweenFrames(spec, 2, beat(-1, far), beat(0, near), plan, { moved: ['map'] }, { sitting, makeCanvas: counted(made) });
+    await flying.next();
+    await flying.return();
+    expect(ended.sort()).toEqual(['inset', 'map']);
+    // a stopped export lets the canvases go too
+    expect(made.length > 0 && made.every((item) => item.width === 0)).toBe(true);
+  });
+
+  it('places what is written over a map in 3D through its camera as it stands at each frame', async () => {
+    const plan = transitionPlan({ ...TRANSITIONS, on: true, appear: 'none' }, { moved: ['map'] });
+    const tilted = { ...spec, elements: [...spec.elements, { id: 'a', kind: 'arrow', of: 'map', box: [0, 0, 1, 1], at: [6.8, 45.8], to: [6.9, 45.85] }] };
+    // a camera that sets the ground somewhere the flat sum never would
+    const placer = { project: ([lon, lat]) => [lon * 10, lat * 2], unproject: ([x, y]) => [x / 10, y / 2], corners: () => [] };
+    const sitting = () => ({ at: async () => ({ picture, placer }), end: () => {} });
+    const made = [];
+    await all(tweenFrames(tilted, 2, beat(-1, far), beat(0, near), plan, { moved: ['map'] },
+      { sitting, makeCanvas: () => { const canvas = fakeCanvas(); made.push(canvas); return canvas; } }));
+    const [x, y] = [20 + 68 * (2 / PX_PER_MM), 20 + 91.6 * (2 / PX_PER_MM)];
+    const starts = made.flatMap((canvas) => canvas.ctx.calls.filter(([name, px, py]) => name === 'moveTo' && Math.abs(px - x) < 1e-6 && Math.abs(py - y) < 1e-6));
+    expect(starts.length).toBeGreaterThan(0);
+  });
+});

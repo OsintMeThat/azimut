@@ -170,6 +170,74 @@ def test_unknown_frame_fields_are_not_stored(client):
     assert "url" not in frame and "secret" not in frame
 
 
+def test_marks_round_trip_sorted_and_counted(client):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    marks = [
+        {"id": "mk_b", "time": 9, "label": "  Late  ", "color": "red"},
+        {"id": "mk_a", "time": 1.5, "label": ""},
+    ]
+
+    assert _save(client, cid, photo, [], marks=marks).status_code == 200  # marks alone are a work
+
+    stored = _work(client, cid, photo)["spec"]["marks"]
+    assert stored == [
+        {"id": "mk_a", "time": 1.5, "label": ""},
+        {"id": "mk_b", "time": 9, "label": "Late"},
+    ]
+    assert next(w for w in client.get(f"/api/cases/{cid}/inspect/works").json())["marks"] == 2
+
+
+def test_a_work_without_marks_stores_none(client):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    _save(client, cid, photo, [_frame(photo)])
+    assert _work(client, cid, photo)["spec"]["marks"] == []
+
+
+@pytest.mark.parametrize("marks", [
+    "nope",
+    [{"time": 1, "label": "x"}],
+    [{"id": "m", "time": -1, "label": "x"}],
+    [{"id": "m", "time": "1", "label": "x"}],
+    [{"id": "m", "time": True, "label": "x"}],
+    [{"id": "m", "time": 1, "label": 5}],
+    ["m"],
+])
+def test_a_bad_mark_is_refused(client, marks):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    assert _save(client, cid, photo, [], marks=marks).status_code in (400, 422)
+
+
+def test_marks_are_bounded_and_labels_cut(client):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    many = [{"id": f"m{i}", "time": i, "label": ""} for i in range(inspectwork.MAX_MARKS + 1)]
+    assert _save(client, cid, photo, [], marks=many).status_code == 400
+
+    long = [{"id": "m", "time": 0, "label": "x" * 500}]
+    _save(client, cid, photo, [], marks=long)
+    assert len(_work(client, cid, photo)["spec"]["marks"][0]["label"]) == inspectwork.MAX_MARK_LABEL
+
+
+def test_restoring_a_cleared_work_unions_the_marks(client):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    _save(client, cid, photo, [], marks=[{"id": "m_old", "time": 5, "label": "old"},
+                                         {"id": "m_same", "time": 2, "label": "before"}])
+    cleared = client.delete(f"/api/cases/{cid}/inspect/work", params={"path": photo}).json()
+    _save(client, cid, photo, [], marks=[{"id": "m_new", "time": 1, "label": "new"},
+                                         {"id": "m_same", "time": 2, "label": "after"}])
+
+    client.post(f"/api/cases/{cid}/trash/{cleared['trash']}/restore")
+
+    marks = _work(client, cid, photo)["spec"]["marks"]
+    assert [(m["id"], m["label"]) for m in marks] == [
+        ("m_new", "new"), ("m_same", "after"), ("m_old", "old"),
+    ]
+
+
 def test_a_runaway_frame_count_is_refused(client):
     cid = _case(client)
     photo = _upload(client, cid, "roof.png")
@@ -352,6 +420,31 @@ def test_saving_a_collage_again_rewrites_it_in_place(client):
     loaded = client.get(f"/api/cases/{cid}/collages/Strip").json()
     assert [n["id"] for n in loaded["spec"]["nodes"]] == ["nd_1", "nd_2"]
     assert len(_of_type(cid, "collage")) == 1
+
+
+def test_a_straightened_collage_says_so_and_find_reads_its_picture_as_one(client, monkeypatch):
+    from azimut.engine import frames, inspectwork
+
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    _save_collage(client, cid, "Bent", [_piece(photo)], straightened=True)
+    _save_collage(client, cid, "Plain", [_piece(photo)], straightened="yes")
+    assert client.get(f"/api/cases/{cid}/collages/Bent").json()["spec"]["straightened"] is True
+    # only a plain true is kept
+    assert "straightened" not in client.get(f"/api/cases/{cid}/collages/Plain").json()["spec"]
+
+    # bent by hand along a level line, its stitch is what bent it: Find reads the picture, not the frames
+    def by_frames(*_args, **_kw):
+        raise AssertionError("read frame by frame")
+
+    monkeypatch.setattr(frames, "pieces_of", by_frames)
+    monkeypatch.setattr(inspectwork, "_export_current", lambda case, spec: True)
+    spec = {"exported": {"path": "media/pan.png"}, "nodes": [], "straightened": True}
+    monkeypatch.setattr(inspectwork, "_collage_specs", lambda case: [(".collages/Pan.json", spec)])
+    assert inspectwork.frames_of(None, "media/pan.png") is None
+    spec.pop("straightened")
+    with pytest.raises(AssertionError, match="frame by frame"):
+        inspectwork.frames_of(None, "media/pan.png")
 
 
 def test_renaming_a_collage_moves_its_file_and_keeps_its_entity(client):
@@ -851,3 +944,10 @@ def test_a_0_3_0_copy_leaves_with_its_file_and_never_travels(client):
 
     assert not roof_copy.exists()
     assert gate_copy.is_file(), "a file still in the case keeps its copy"
+
+
+def test_a_non_finite_mark_time_is_refused():
+    with pytest.raises(workspace.CaseError):
+        inspectwork._clean_marks([{"id": "m", "time": float("inf"), "label": ""}])
+    with pytest.raises(workspace.CaseError):
+        inspectwork._clean_marks([{"id": "m", "time": float("nan"), "label": ""}])

@@ -21,8 +21,8 @@ from typing import Any, Callable
 import httpx
 from PIL import Image, ImageDraw, ImageFont
 
-from .. import config
-from . import google_tiles, pdffonts, sentinel, wayback
+from .. import config, errors
+from . import cloudless, google_tiles, pdffonts, sentinel, wayback
 
 TILE_SIZE = 256
 SIZE_MAX = 4096  # hard cap on a capture's width/height, in px
@@ -43,6 +43,24 @@ MAX_TILE_TRIES = 3
 # retry costs nothing on the meter — only a 2xx is ever counted.
 TRANSIENT_STATUSES = frozenset({502, 503, 504})
 RETRY_PAUSE = 0.5  # before asking an overloaded service again, in seconds
+# A 429 from upstream is the provider's rate (Sentinel Hub: 300 a minute), which
+# a tilted 3D view's burst of tiles can pass: wait as it asks, at most this long,
+# and ask again. Our own quota pause is a 429 the proxy raises, never retried.
+THROTTLED = 429
+THROTTLE_PAUSE_MAX = 2.0
+
+
+def retry_pause(response: httpx.Response) -> float | None:
+    """Seconds to wait before asking for this tile again, or None for a verdict."""
+    if response.status_code in TRANSIENT_STATUSES:
+        return RETRY_PAUSE
+    if response.status_code != THROTTLED:
+        return None
+    try:
+        asked = float(response.headers.get("retry-after", RETRY_PAUSE))
+    except ValueError:
+        asked = RETRY_PAUSE
+    return min(max(asked, RETRY_PAUSE), THROTTLE_PAUSE_MAX)
 RADAR_TILE_TIMEOUT = 45.0  # Sentinel-1, rendered from the GRD per request
 
 
@@ -56,6 +74,10 @@ class Provider:
     # Deepest zoom with native pixels. The view may continue farther by upscaling
     # the last native tile without issuing higher-zoom provider requests.
     max_native_zoom: int | None = None
+    # Shallowest view zoom the provider can render at all (Sentinel Hub refuses a
+    # pixel over 1500 m). Shallower tiles answer "no imagery" without asking it,
+    # and the 3D view draws that ground from the free basemap.
+    min_zoom: int = 0
     needs_key: bool = False
     subdomains: tuple[str, ...] = field(default_factory=tuple)  # for {s} templates
     # True for satellite/aerial imagery, False for street/base maps. Drives the UI:
@@ -119,6 +141,9 @@ GOOGLE_JS_LOADER_URL = "https://maps.googleapis.com/maps/api/js?key={key}&v=week
 SENTINELHUB_WMTS_URL = sentinel.wmts_url()
 # Default eco threshold for both Sentinel layers; Settings can override it.
 SENTINEL_ECO_MAX_ZOOM = 7
+# Sentinel Hub renders no pixel over 1500 m, which a 512 px tile reaches from view
+# zoom 7 (measured: the tile grid's level 5 answers 400, level 6 answers).
+SENTINEL_MIN_ZOOM = 7
 
 BUILTIN_PROVIDERS: tuple[Provider, ...] = (
     Provider(
@@ -162,6 +187,18 @@ BUILTIN_PROVIDERS: tuple[Provider, ...] = (
         url=wayback.TILE_TEMPLATE.format(release="{release}"),
         attribution="Esri, Maxar, Earthstar Geographics, and the GIS User Community · World Imagery Wayback",
         max_zoom=wayback.MAX_ZOOM,
+    ),
+    # A year of EOX's Sentinel-2 cloudless (engine/cloudless.py): one cloud-free
+    # picture of the world assembled from many passes, so it holds no single date.
+    # Shown, never captured, and the newest year until a plate picks another.
+    Provider(
+        id=cloudless.BASE_ID,
+        label=f"Sentinel-2 cloudless, {cloudless.NEWEST} (EOX, a year's mosaic)",
+        url=cloudless.tile_url(cloudless.NEWEST),
+        attribution=cloudless.attribution(cloudless.NEWEST),
+        max_zoom=cloudless.MAX_ZOOM,
+        max_native_zoom=cloudless.MAX_NATIVE_ZOOM,
+        capturable=False,
     ),
 )
 
@@ -265,6 +302,7 @@ def all_providers() -> list[Provider]:
                 attribution="© Copernicus Sentinel data / Sentinel Hub",
                 max_zoom=18,
                 max_native_zoom=14,
+                min_zoom=SENTINEL_MIN_ZOOM,
                 imagery=True,
                 capturable=True,
                 cacheable=True,
@@ -290,6 +328,7 @@ def all_providers() -> list[Provider]:
                 attribution="© Copernicus Sentinel data / Sentinel Hub",
                 max_zoom=18,
                 max_native_zoom=14,
+                min_zoom=SENTINEL_MIN_ZOOM,
                 imagery=True,
                 capturable=True,
                 cacheable=True,
@@ -346,6 +385,8 @@ def get_provider(provider_id: str) -> Provider:
     base_id, sep, spec = provider_id.partition(sentinel.VARIANT_SEP)
     if base_id == wayback.BASE_ID:
         return _wayback_provider(spec if sep else None)
+    if base_id == cloudless.BASE_ID and sep:
+        return _cloudless_provider(spec)
     for provider in all_providers():
         if provider.id == base_id:
             if not sep:
@@ -422,6 +463,22 @@ def _wayback_provider(spec: str | None) -> Provider:
         id=wayback.variant_id(number),
         label=f"Esri Wayback · {release.date if release else f'release {number}'}",
         url=wayback.tile_url(number),
+    )
+
+
+def _cloudless_provider(spec: str) -> Provider:
+    """One year of Sentinel-2 cloudless, its credit and licence that year's."""
+    try:
+        year = cloudless.parse_variant(spec)
+    except ValueError as exc:
+        raise KeyError(str(exc)) from exc
+    base = next(p for p in BUILTIN_PROVIDERS if p.id == cloudless.BASE_ID)
+    return replace(
+        base,
+        id=cloudless.variant_id(year),
+        label=f"Sentinel-2 cloudless, {year} (EOX, a year's mosaic)",
+        url=cloudless.tile_url(year),
+        attribution=cloudless.attribution(year),
     )
 
 
@@ -543,9 +600,18 @@ def upstream_failure(exc: BaseException) -> str:
     URL holds the whole instance id, for Mapbox, Google or FIRMS the key, and a
     message lands in the page, the network log and the screenshot attached to a
     bug report. So the answer names what went wrong and nothing it was sent with.
+
+    A refusal is named for what it means to the analyst (a key, an allowance),
+    the provider's own sentence after it when it sent one: "answered 403" alone
+    read like a bug in Azimut.
     """
     if isinstance(exc, httpx.HTTPStatusError):
-        return f"the provider answered {exc.response.status_code}"
+        said = errors.refused(exc.response.status_code)
+        try:
+            reason = upstream_reason(exc.response.content)
+        except httpx.ResponseNotRead:  # a streamed answer nobody read
+            reason = ""
+        return f"{said}: {reason}" if reason else said
     if isinstance(exc, httpx.TimeoutException):
         return "the provider did not answer in time"
     if isinstance(exc, httpx.HTTPError):
@@ -591,8 +657,9 @@ def _default_fetch(client: httpx.Client, url: str) -> Image.Image | None:
             if last:
                 raise
             continue
-        if response.status_code in TRANSIENT_STATUSES and not last:
-            time.sleep(RETRY_PAUSE)
+        pause = retry_pause(response)
+        if pause is not None and not last:
+            time.sleep(pause)
             continue
         break
     if response.status_code == 404:
@@ -1004,7 +1071,42 @@ def esri_capture_date(
     }
 
 
-ATTRIBUTION_BAND = 20  # px footer appended below the imagery
+ATTRIBUTION_BAND = 20  # px footer appended below the imagery, for one line of credit
+ATTRIBUTION_LINE = 13  # px each further line adds to it
+_ATTRIBUTION_MARGIN = 6
+
+
+def _attribution_lines(text: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont, width: int) -> list[str]:
+    """The credit in as many lines as the image is too narrow for.
+
+    Cut between the credits first (` · `), so each one reads whole, and between
+    words only inside a credit that is wider than the image on its own.
+    """
+    draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    room = max(1, width - 2 * _ATTRIBUTION_MARGIN)
+
+    def fits(candidate: str) -> bool:
+        return draw.textlength(candidate, font=font) <= room
+
+    lines: list[str] = []
+    line = ""
+    for credit in text.split(" · "):
+        joined = f"{line} · {credit}" if line else credit
+        if fits(joined):
+            line = joined
+            continue
+        if line:
+            lines.append(line)
+        line = ""
+        for word in credit.split(" "):
+            candidate = f"{line} {word}" if line else word
+            if line and not fits(candidate):
+                lines.append(line)
+                line = word
+            else:
+                line = candidate
+    lines.append(line)
+    return lines
 
 
 def burn_attribution(img: Image.Image, text: str) -> Image.Image:
@@ -1014,12 +1116,22 @@ def burn_attribution(img: Image.Image, text: str) -> Image.Image:
     (Google), the capture must never exist without it — burned in, not optional.
     The band is added *below* the imagery so nothing is covered. Public: the
     screenshot-capture endpoint stamps user screenshots through the same band.
+    A credit wider than the image goes on over more lines, the band growing to
+    hold them, rather than running off its edge.
     """
-    out = Image.new("RGB", (img.width, img.height + ATTRIBUTION_BAND), (16, 18, 24))
+    font = ImageFont.load_default()
+    lines = _attribution_lines(text, font, img.width)
+    band = ATTRIBUTION_BAND + (len(lines) - 1) * ATTRIBUTION_LINE
+    out = Image.new("RGB", (img.width, img.height + band), (16, 18, 24))
     out.paste(img, (0, 0))
     draw = ImageDraw.Draw(out)
-    font = ImageFont.load_default()
-    draw.text((6, img.height + 4), text, fill=(203, 208, 218), font=font)
+    for index, line in enumerate(lines):
+        draw.text(
+            (_ATTRIBUTION_MARGIN, img.height + 4 + index * ATTRIBUTION_LINE),
+            line,
+            fill=(203, 208, 218),
+            font=font,
+        )
     return out
 
 

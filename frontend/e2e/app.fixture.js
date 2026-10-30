@@ -21,6 +21,17 @@ const TILE_PNG = Buffer.from(
   'base64'
 );
 
+/** A batch of tiles as api/tile_batch.py writes it: each one its place asked, its status, its length, itself. */
+function tileBatch(keys, tile) {
+  return Buffer.concat(keys.map((_, index) => {
+    const head = Buffer.alloc(8);
+    head.writeUInt16LE(index, 0);
+    head.writeUInt16LE(200, 2);
+    head.writeUInt32LE(tile.length, 4);
+    return Buffer.concat([head, tile]);
+  }));
+}
+
 // A reference overlay is transparent but for the lines it draws. The fixture
 // answers with nothing drawn at all, so a layer that is on never paints over
 // what a spec is looking at underneath it.
@@ -125,6 +136,11 @@ const settings = {
   extension_version: '0.2.5', // tracks the extension, so it lags the app version
   update_check_on_start: false,
   update_dismissed_version: '',
+  // the tour taken, this version's What's new and Find's beta notice read, so none
+  // covers a spec (e2e/onboarding.spec.js opens them on purpose)
+  tour: 'done',
+  whats_new_seen: '0.2.8',
+  find_beta_seen: true,
   usage: {},
   usage_overrides: {},
   eco_zoom_fallback: true,
@@ -593,6 +609,8 @@ const providers = [{
   oversample: 1,
   imagery: true,
   capturable: true,
+  // the app keeps its tiles on disk, so a flat map asks them in batches, as for the real Esri
+  cacheable: true,
 }];
 
 /**
@@ -771,6 +789,7 @@ export async function installAppFixture(page, options = {}) {
   const fixtureDrafts = options.drafts ?? {};
   const fixtureSettings = {
     ...settings,
+    ...(options.settings ?? {}),
     export_dirs: { ...settings.export_dirs, ...(options.exportDirs ?? {}) },
   };
   // What the search bar asked for, and in which layer: a spec has to be able to
@@ -789,6 +808,9 @@ export async function installAppFixture(page, options = {}) {
   // what was marked is readable from what was written.
   const fixtureGrids = new Map();
   const gridWrites = [];
+  // Horizon's bench (api/horizon_work.py), per case, for the page's life: a reload brings it back.
+  const horizonWork = new Map(Object.entries(options.horizonWork ?? {}));
+  const workWrites = [];
   const skyQueries = [];
   // Where the graph's nodes have been dragged to, held across requests so a spec
   // can reload the view and find the arrangement still there.
@@ -1010,10 +1032,12 @@ export async function installAppFixture(page, options = {}) {
     };
   };
 
-  await page.addInitScript((caseId) => {
+  await page.addInitScript(({ caseId }) => {
     if (caseId) localStorage.setItem('azimut:lastCase', caseId);
     localStorage.setItem('azimut:theme', 'dark');
-  }, options.lastCase === undefined ? CASE_ID : options.lastCase);
+  }, {
+    caseId: options.lastCase === undefined ? CASE_ID : options.lastCase,
+  });
 
   await page.route('**/*', async (route) => {
     const request = route.request();
@@ -1037,8 +1061,8 @@ export async function installAppFixture(page, options = {}) {
       return route.fulfill({ contentType: 'image/png', body: CLEAR_TILE_PNG });
     }
 
-    // The place names are OpenFreeMap's vector tiles, found through its TileJSON,
-    // and are on whenever a map opens, like Borders. A tile is empty unless the
+    // The borders and the place names are OpenFreeMap's vector tiles, found
+    // through its TileJSON, and Borders is on whenever a map opens. A tile is empty unless the
     // spec names a village (`placeNames`), so no label lands on what another
     // spec is looking at; with one, every tile holds that village.
     if (url.hostname === 'tiles.openfreemap.org') {
@@ -1065,6 +1089,10 @@ export async function installAppFixture(page, options = {}) {
     }
     if (path === `/files/${CASE_ID}/${GRAPH_THUMB}`) {
       return route.fulfill({ contentType: 'image/svg+xml', body: PANEL_SVG });
+    }
+    if (path.startsWith('/api/tiles/batch/')) {
+      const keys = (url.searchParams.get('t') ?? '').split(',').filter(Boolean);
+      return route.fulfill({ contentType: 'application/octet-stream', body: tileBatch(keys, TILE_PNG) });
     }
     if (path.startsWith('/api/tiles/')) {
       return route.fulfill({ contentType: 'image/png', body: TILE_PNG });
@@ -1540,6 +1568,15 @@ export async function installAppFixture(page, options = {}) {
       const field = url.searchParams.get('attr') ?? '';
       const value = url.searchParams.get('value') ?? '';
       const linked = url.searchParams.get('linked') ?? '';
+      const folder = url.searchParams.get('folder') ?? '';
+      const unfiled = url.searchParams.get('unfiled') === 'true';
+      const recursive = url.searchParams.get('recursive') === 'true';
+      const filedIn = (entity) => {
+        const at = entity.attrs?.folder ?? '';
+        if (unfiled) return !at;
+        if (!folder) return true;
+        return at === folder || (recursive && at.startsWith(`${folder}/`));
+      };
       const savedView = analysisViews.find(
         (view) => view.id === url.searchParams.get('view')
       );
@@ -1578,6 +1615,7 @@ export async function installAppFixture(page, options = {}) {
             .some((heldValue) => String(heldValue ?? '').toLowerCase().includes(term))) &&
           (!field || !value || String(entity.attrs?.[field] ?? '') === value) &&
           (!linked || reaches(entity.id, linked)) &&
+          filedIn(entity) &&
           (!inPeriod || inPeriod.has(entity.id))
       );
       const order = url.searchParams.get('order') ?? '';
@@ -1604,14 +1642,16 @@ export async function installAppFixture(page, options = {}) {
       catalogQueries.push(url.search);
       // `catalogPage` makes the fixture answer in pages, which is the only way to
       // reach the surface's server-search mode: a case that fits one page filters
-      // in the browser and never asks a second question.
+      // in the browser and never asks a second question. The cursor is the offset
+      // of the next page, so a surface that reads every page gets to the end.
       const page = options.catalogPage ?? 0;
-      const items = page ? ordered.slice(0, page) : ordered;
+      const from = Number(url.searchParams.get('cursor')) || 0;
+      const items = page ? ordered.slice(from, from + page) : ordered;
       const byType = {};
       for (const entity of matching) byType[entity.type] = (byType[entity.type] ?? 0) + 1;
       return json(route, {
         items,
-        next_cursor: page && matching.length > page ? 'cursor-2' : null,
+        next_cursor: page && matching.length > from + page ? String(from + page) : null,
         total: matching.length,
         ...(url.searchParams.get('counts') === 'type' ? { by_type: byType } : {}),
       });
@@ -1808,6 +1848,19 @@ export async function installAppFixture(page, options = {}) {
       }
       const held = fixtureGrids.get(name);
       return held ? json(route, held.spec) : json(route, { detail: 'not found' }, 404);
+    }
+    const workMatch = path.match(/^\/api\/cases\/([^/]+)\/horizon\/work$/);
+    if (workMatch) {
+      const owner = decodeURIComponent(workMatch[1]);
+      if (request.method() === 'PUT') {
+        const body = request.postDataJSON();
+        horizonWork.set(owner, body);
+        workWrites.push(body);
+        return json(route, { ok: true });
+      }
+      if (request.method() === 'DELETE') return json(route, { cleared: horizonWork.delete(owner) });
+      const held = horizonWork.get(owner) ?? null;
+      return json(route, { work: held, photo_here: held?.photo ? true : null });
     }
     const placementMatch = caseId && path.match(
       new RegExp(`^/api/cases/${caseId}/entities/(.+)/placement$`)
@@ -2162,12 +2215,17 @@ export async function installAppFixture(page, options = {}) {
       });
     }
 
+    // The layers a proof's point can join: the fixture case has none. A spec
+    // that needs some routes its own over this one.
+    if (/^\/api\/cases\/[^/]+\/layer-targets$/.test(path)) return json(route, []);
+
     unexpected.push(`${request.method()} ${path}`);
     return json(route, { detail: `Unhandled browser fixture request: ${path}` }, 404);
   });
 
   return {
     captures,
+    workWrites,
     kinReads,
     proposalRuns,
     placeWrites,
@@ -2233,24 +2291,41 @@ export async function showSaved(page, kind) {
  * `maps` is how many the screen puts up — two, on Compare's linked pair.
  */
 export async function awaitMapReady(page, maps = 1) {
-  // The runner's Firefox has no WebGL and cannot be given any: it asks for a
-  // native driver, a box with no GPU has none, and the software path a patched
-  // build would take is not there — `tryNativeGL()`, then `EXHAUSTED_DRIVERS`,
-  // read off its own console with the blocklist off, `webgl.allow-software` set
-  // and both halves of mesa installed. So the map is answered by Chromium there.
-  //
-  // Only there. A developer's Firefox draws the map like any other browser, and
-  // the specs run on both engines locally, which is where an engine-specific
-  // break would show first. The skip is named in the report rather than hidden,
-  // and it sits here because every spec that needs a map comes through this
-  // line — a new one is covered the day it is written.
+  needsWebGL();
+  const ready = page.locator('.map[data-map-ready="true"]');
+  await expect(ready).toHaveCount(maps);
+  await expect(ready.first()).toBeVisible();
+}
+
+/**
+ * Skip a spec that needs a map where the browser cannot draw one.
+ *
+ * The runner's Firefox has no WebGL and cannot be given any: it asks for a
+ * native driver, a box with no GPU has none, and the software path a patched
+ * build would take is not there — `tryNativeGL()`, then `EXHAUSTED_DRIVERS`,
+ * read off its own console with the blocklist off, `webgl.allow-software` set
+ * and both halves of mesa installed. So the map is answered by Chromium there.
+ *
+ * Only there. A developer's Firefox draws the map like any other browser, and
+ * the specs run on both engines locally, which is where an engine-specific
+ * break would show first. The skip is named in the report rather than hidden,
+ * and `awaitMapReady` asks it, so every spec that waits for a map comes through
+ * it; a plate's maps are not `.map`, so the plate specs that draw on one ask it
+ * themselves.
+ */
+export function needsWebGL() {
   test.skip(
     !!process.env.CI && test.info().project.name === 'firefox',
     'the runner\'s Firefox has no WebGL; Chromium answers for the map there'
   );
-  const ready = page.locator('.map[data-map-ready="true"]');
-  await expect(ready).toHaveCount(maps);
-  await expect(ready.first()).toBeVisible();
+}
+
+/**
+ * Two frames gone by: a canvas library lays the map of what a click hits with the frame it
+ * draws, so a press sent the moment after a change can meet the map from before it.
+ */
+export async function canvasSettled(page) {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
 /**

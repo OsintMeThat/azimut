@@ -39,7 +39,13 @@ def test_ops_registry_is_self_describing(client):
     brightness = next(f for f in ops["filters"] if f["id"] == "brightness")
     assert brightness["css"] == "brightness({v})"
     assert brightness["params"][0]["default"] == 1
-    assert {a["id"] for a in ops["analyses"]} >= {"histogram", "exif", "ela"}
+    assert {a["id"] for a in ops["analyses"]} == {"ela"}
+    channel = next(f for f in ops["filters"] if f["id"] == "channel")
+    assert channel["params"][0]["type"] == "choice"
+    assert [o["label"] for o in channel["params"][0]["options"]] == ["All", "Red", "Green", "Blue"]
+    assert channel["css"] is None
+    assert brightness["params"][0]["options"] == []
+    assert {"denoise", "autolevels", "clahe", "channel"} <= ids
 
 
 def test_video_rotation_filterchain_covers_every_orientation_control():
@@ -99,7 +105,7 @@ def test_focus_scan_redirects_stderr_and_terminates_a_stalled_decoder(client, mo
     monkeypatch.setattr(inspect_engine.subprocess, "Popen", FakeProcess)
 
     with pytest.raises(RuntimeError, match="timed out"):
-        inspect_engine.scan_focus(case, "media/clip.mp4")
+        inspect_engine.scan_video(case, "media/clip.mp4")
     assert stopped.is_set()
     assert seen["stderr"] is not subprocess.PIPE
 
@@ -216,27 +222,6 @@ def test_compose_requires_nodes(client):
         json={"width": 100, "height": 100, "nodes": []},
     )
     assert res.status_code == 422
-
-
-def test_analyze_histogram(client):
-    cid = client.post("/api/cases", json={"name": "Hist"}).json()["id"]
-    item = _upload(client, cid, "img.png", _png_bytes(color=(255, 0, 0), size=(20, 20)))
-    res = client.post(
-        f"/api/cases/{cid}/inspect/analyze", json={"path": item["path"], "name": "histogram"}
-    ).json()
-    assert res["kind"] == "histogram"
-    # a pure-red image piles every pixel into R=255
-    assert res["channels"]["r"][255] == 400
-
-
-def test_analyze_exif_keyvalue(client):
-    cid = client.post("/api/cases", json={"name": "Exif"}).json()["id"]
-    item = _upload(client, cid, "img.png")
-    res = client.post(
-        f"/api/cases/{cid}/inspect/analyze", json={"path": item["path"], "name": "exif"}
-    ).json()
-    assert res["kind"] == "keyvalue"
-    assert res["rows"]["Format"] == "PNG"
 
 
 def test_analyze_ela_returns_image(client):
@@ -380,6 +365,49 @@ def test_compose_transparent_background_keeps_alpha(client):
     assert img.getpixel((0, 0))[3] == 0
     # a pixel inside the placed piece is opaque
     assert img.getpixel((60, 60))[3] == 255
+
+
+def test_compose_bends_the_whole_collage_as_one_picture(client):
+    """Collage → Straighten: every column of the composite moved by its own shift, the pixels of each piece
+    bent with it, the canvas trimmed to what it holds and the box said."""
+    cid = client.post("/api/cases", json={"name": "Bend"}).json()["id"]
+    stripes = Image.new("RGB", (100, 40), (0, 0, 0))
+    for y in range(20, 40):
+        for x in range(100):
+            stripes.putpixel((x, y), (255, 255, 255))
+    buf = io.BytesIO()
+    stripes.save(buf, "PNG")
+    a = _upload(client, cid, "a.png", buf.getvalue())
+    # the line between dark and light falls 0 px at the left, 20 px at the right: a slope across one piece
+    shifts = [-20.0 * x / 99 for x in range(100)]
+    res = client.post(
+        f"/api/cases/{cid}/inspect/compose",
+        json={"width": 100, "height": 80, "background": None, "bend": shifts,
+              "nodes": [{"src": {"path": a["path"]}, "quad": [[0, 30], [100, 30], [100, 70], [0, 70]]}]},
+    ).json()
+    left, top, right, bottom = res["box"]
+    assert (left, right) == (0, 100) and top == 10 and bottom == 70
+    img = Image.open(io.BytesIO(client.get(f"/files/{cid}/{res['item']['path']}").content))
+    assert img.size == (100, 60) and img.mode == "RGBA"
+    # inside the piece, not just at its corners: the edge rises across it, column by column
+    def edge(x: int) -> int:
+        return next(y for y in range(img.height) if img.getpixel((x, y))[0] > 128)
+    assert edge(0) == 50 - top and edge(99) == 30 - top
+    assert abs(edge(50) - (50 - 20 * 50 / 99 - top)) <= 1
+    listing = client.get(f"/api/cases/{cid}/media").json()
+    assert next(m for m in listing if m["path"] == res["item"]["path"])["source"]["straightened"] is True
+
+
+def test_compose_bend_needs_a_shift_a_column_on_a_transparent_canvas(client):
+    cid = client.post("/api/cases", json={"name": "Bend2"}).json()["id"]
+    a = _upload(client, cid, "a.png", _png_bytes(size=(40, 40)))
+    node = {"src": {"path": a["path"]}, "quad": [[0, 0], [40, 0], [40, 40], [0, 40]]}
+    short = client.post(f"/api/cases/{cid}/inspect/compose",
+                        json={"width": 40, "height": 40, "background": None, "bend": [0.0] * 10, "nodes": [node]})
+    assert short.status_code == 422
+    opaque = client.post(f"/api/cases/{cid}/inspect/compose",
+                         json={"width": 40, "height": 40, "bend": [0.0] * 40, "nodes": [node]})
+    assert opaque.status_code == 422
 
 
 def test_compose_paints_through_a_remapped_piece_footprint(client):
@@ -686,12 +714,10 @@ def test_analyze_accepts_transient_ops_without_filing(client):
 
     res = client.post(
         f"/api/cases/{cid}/inspect/analyze",
-        json={"path": item["path"], "name": "histogram",
+        json={"path": item["path"], "name": "ela",
               "ops": [{"op": "invert", "params": {"on": 1}}]},
     ).json()
-    assert res["kind"] == "histogram"
-    # inverting pure red pushes the red channel to 0
-    assert res["channels"]["r"][0] == 400
+    assert res["kind"] == "image"
     # analysing a transient recipe files nothing
     assert len(client.get(f"/api/cases/{cid}/media").json()) == before
 
@@ -774,6 +800,21 @@ def test_render_preview_applies_ops_without_filing(client):
     assert res.headers["content-type"] == "image/png"
     assert Image.open(io.BytesIO(res.content)).size == (15, 20)  # cropped to half width
     assert len(client.get(f"/api/cases/{cid}/media").json()) == before  # nothing filed
+
+
+def test_render_preview_can_answer_in_jpeg(client):
+    cid = client.post("/api/cases", json={"name": "RenderJpeg"}).json()["id"]
+    item = _upload(client, cid, "img.png", _png_bytes(color=(255, 0, 0), size=(30, 20)))
+    url = f"/api/cases/{cid}/inspect/render-preview"
+
+    res = client.post(url, json={"path": item["path"], "format": "jpeg"})
+    assert res.status_code == 200 and res.headers["content-type"] == "image/jpeg"
+    img = Image.open(io.BytesIO(res.content))
+    assert img.format == "JPEG" and img.size == (30, 20) and img.mode == "RGB"
+
+    plain = client.post(url, json={"path": item["path"]})  # PNG stays the default
+    assert plain.headers["content-type"] == "image/png"
+    assert client.post(url, json={"path": item["path"], "format": "gif"}).status_code == 422
 
 
 @pytest.mark.skipif(not media_engine.ffmpeg_available(), reason="ffmpeg not installed")

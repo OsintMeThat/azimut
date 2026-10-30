@@ -7,7 +7,8 @@
 #
 # The bundled UI (azimut/static/**) and uvicorn / yt-dlp / gallery-dl submodules
 # are collected explicitly because they are loaded dynamically and PyInstaller
-# can't see them.
+# can't see them. gallery-dl is only ever run by the binary started again as
+# gallery-dl (packaging/entry.py, engine/gallerydl.py), never by the app itself.
 
 import sys
 from pathlib import Path

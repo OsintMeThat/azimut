@@ -137,6 +137,7 @@
   <div class="tool-body">
     <form
       class="go-form"
+      data-guide="coords.paste"
       onsubmit={(e) => {
         e.preventDefault();
         parse();
@@ -155,6 +156,7 @@
         type="button"
         class="btn btn-ghost"
         title="Open a place or a capture saved in this case"
+        data-guide="coords.saved"
         onclick={openPicker}>…</button
       >
     </form>
@@ -183,7 +185,7 @@
         </button>
       </div>
 
-      <div class="formats">
+      <div class="formats" data-guide="coords.formats">
         {#if point}
           {#each point.formats as f (f.id)}
             <button class="row" onclick={() => copy(f.value)} title="Copy">
@@ -202,7 +204,7 @@
         {/if}
       </div>
 
-      <div class="open-on">
+      <div class="open-on" data-guide="coords.open">
         <span class="open-label">Open on</span>
         <div class="links">
           {#each links as l (l.id)}

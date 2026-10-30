@@ -101,7 +101,7 @@
   }
 </script>
 
-<section class="group">
+<section class="group" data-guide="settings.workspace">
   <h3>Workspace folder</h3>
 
   {#if status?.environment}

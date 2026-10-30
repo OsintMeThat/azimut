@@ -8,12 +8,23 @@ describe('Files bounded loading', () => {
     expect(source).toContain('createPagedList');
     expect(source).toContain("status: 'confirmed'");
     expect(source).toContain('limit: PAGE');
-    // the complete-folder fetch is opt-in to List view, not part of case open
-    expect(source).toContain("view === 'list'");
+    // the complete-folder fetch is for an open folder (or a List search), not case open
+    expect(source).toContain("searching ? view === 'list' : Boolean(cwd) || showUnfiled");
+  });
+
+  it('opens a folder on all its files in every view, not its share of the first page', () => {
+    // A folder of six whose rows sat past the case's first 200 opened in the grid
+    // on two, under a case-wide "Show more". The grids load the folder too, wait
+    // for it before saying "empty", and drop the case-wide Show more meanwhile.
+    expect(source).not.toContain("view === 'list' && !filtering");
+    expect(source).toContain('{#each completeFolderLoading ? [] : curEntities as e (e.id)}\n            <div\n              class="tile entity"');
+    expect(source).toContain('class="list-status grid-status" role="status">Loading all files in this folder');
+    expect(source.match(/\{#if !completeFolderLoading && !curFolders\.length/g)).toHaveLength(2);
+    expect(source).toContain('pl.hasMore && completeFolderEntities === null && !completeFolderLoading}');
   });
 
   it('offers Show more with an honest filtered total', () => {
-    expect(source).toContain('{:else if !showTrash && !filtering && pl.hasMore}');
+    expect(source).toContain('{:else if !showTrash && !filtering && pl.hasMore');
     expect(source).toContain('pl.loadMore()');
     expect(source).toContain('Showing {confirmed.length} of {total}');
     expect(source).toContain('/catalog/summary');
@@ -65,11 +76,41 @@ describe('Files desktop affordances', () => {
   });
 
   it('offers three view modes: small, large, and a details list', () => {
-    expect(source).toContain("let view = $state('small')");
+    expect(source).toContain("let view = $state(loadViewMode('files', 'small'))");
     expect(source).toContain("{ id: 'small', label: 'Small'");
     expect(source).toContain("{ id: 'large', label: 'Large'");
     expect(source).toContain("{ id: 'list', label: 'List'");
     expect(source).toContain('const dense = $derived(');
+  });
+
+  it('remembers the view it was left on', () => {
+    expect(source).toContain("saveViewMode('files', next)");
+    expect(source).toContain('onclick={() => setView(v.id)}');
+    expect(source).not.toContain('onclick={() => (view = v.id)}');
+  });
+
+  it('opens a picture, video or sound full screen on a double press, and Details stays one press away', () => {
+    expect(source).toMatch(/function openEntityTile\(entity\) \{\s+if \(viewerItems\.some\(\(item\) => item\.key === entity\.id\)\) \{\s+viewingId = entity\.id;/);
+    expect(source).toContain('viewerItem(e, tileThumb(e))');
+    expect(source).toContain('onclick={(ev) => { ev.stopPropagation(); infoEntityId = e.id; }}');
+    expect(source).toContain('ctxRun((held) => (infoEntityId = held.one.id))');
+  });
+
+  it('opens the picked file on Space, out of the way of fields, buttons and dialogs', () => {
+    const at = source.indexOf("if (event.key === ' '");
+    const block = source.slice(at, source.indexOf('return;\n    }', at));
+    expect(block).toContain("uiState.tool === 'files'");
+    expect(block).toContain('!renaming');
+    expect(block).toContain('!anyOverlayOpen()');
+    expect(block).toContain("closest('button, a, input, textarea, select, [contenteditable]')");
+    expect(block).toContain('spaceTarget(selected, anchor)');
+    expect(block).toContain('event.preventDefault()');
+  });
+
+  it('leaves the keys to the viewer while it is open, and lets the selection follow it', () => {
+    expect(source).toContain('if (viewing) return; // the viewer hears its own keys');
+    expect(source).toMatch(/function viewFile\(id\) \{\s+viewingId = id;\s+selected = \[id\];\s+anchor = id;/);
+    expect(source).toContain('const id = viewing ?? infoEntityId');
   });
 
   it('renders the list view with Name/Type/Size/Added columns', () => {

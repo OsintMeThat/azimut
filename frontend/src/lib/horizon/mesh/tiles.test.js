@@ -1,0 +1,335 @@
+import { describe, expect, it, vi } from 'vitest';
+import { createTiles, marginFor, MARGIN_DEG, ROOT_Z } from './tiles.js';
+import { tileLat, tileLon } from './geo.js';
+import { bearingBetween, distanceBetween } from '../geometry.js';
+
+const EYE = { lat: 45.94, lon: 7.82 };
+const CAMERA = { heading: 0, tilt: 0, roll: 0, fov: 60, width: 240, height: 160, projection: 'camera' };
+
+/** A tree with a worker that answers on demand: meshes asked and pictures asked, by key. */
+function tree(options = {}) {
+  const meshes = [];
+  const pictures = [];
+  const released = [];
+  const attached = [];
+  const tiles = createTiles({
+    ...EYE,
+    far: 20000,
+    send: (list) => meshes.push(...list),
+    sendImages: (list) => pictures.push(...list),
+    release: (tile) => released.push(tile),
+    attach: (tile, image) => {
+      tile.texture = image;
+      attached.push([tile.key, image]);
+    },
+    ...options,
+  });
+  /** Every mesh asked so far built, with a picture when one was asked; failing keys come back empty. */
+  const build = (failing = () => false) => {
+    for (const ask of meshes.splice(0)) {
+      const tile = failing(ask) ? null : { key: ask.key, texture: ask.provider ? `${ask.provider}:${ask.key}` : null };
+      // level ground, 0 to 10 m above the sea
+      tiles.arrived(ask.key, tile, ask.provider, tile ? { low: 0, high: 10 } : null);
+    }
+  };
+  const picture = () => {
+    for (const ask of pictures.splice(0)) tiles.imaged(ask.key, ask.provider, `${ask.provider}:${ask.key}`);
+  };
+  /** Frames until nothing more is asked. */
+  const settle = (camera = CAMERA, sharp = 1.5, eye = {}) => {
+    let out;
+    for (let round = 0; round < 40; round += 1) {
+      out = tiles.frame(camera, sharp, eye);
+      if (!meshes.length && !pictures.length) break;
+      build();
+      picture();
+    }
+    return out;
+  };
+  return { tiles, meshes, pictures, released, attached, build, picture, settle };
+}
+
+describe('the tile tree', () => {
+  it('asks the roots round the eye first, and the levels under them it will need with them', () => {
+    const t = tree();
+    t.tiles.land(CAMERA);
+    const first = t.tiles.frame(CAMERA, 1.5);
+    expect(first.drawn).toEqual([]);
+    expect(t.meshes[0].z).toBe(ROOT_Z);
+    // a deep view does not wait for one level after another, four at most ahead
+    expect(t.meshes.some((ask) => ask.z > ROOT_Z)).toBe(true);
+    expect(Math.max(...t.meshes.map((ask) => ask.z))).toBeLessThanOrEqual(ROOT_Z + 4);
+    expect(first.base.meshed).toBe(0);
+    expect(first.base.total).toBeGreaterThan(t.meshes.length);
+  });
+
+  it('loads the base all round, then sharpens the lens, never drawing a hole meanwhile', () => {
+    const t = tree();
+    t.tiles.land(CAMERA);
+    t.tiles.frame(CAMERA, 1.5);
+    t.build();
+    // the roots held: drawn while their children come
+    const coarse = t.tiles.frame(CAMERA, 1.5);
+    expect(coarse.drawn.length).toBeGreaterThan(0);
+    expect(coarse.sharpening).toBeGreaterThan(0);
+    const done = t.settle();
+    expect(done.base.meshed).toBe(done.base.total);
+    expect(done.base.done).toBe(done.base.total);
+    expect(done.sharpening).toBe(0);
+    expect(Math.max(...done.drawn.map((tile) => Number(tile.key.split('/')[0])))).toBeGreaterThan(ROOT_Z + 2);
+    // turning round asks nothing more for the base, only what the lens sharpens there
+    const behind = { ...CAMERA, heading: 180 };
+    const turned = t.tiles.frame(behind, 3);
+    expect(turned.drawn.length).toBeGreaterThan(0);
+    expect(t.meshes).toEqual([]);
+  });
+
+  it('draws a tile instead of its children until every child in sight is held', () => {
+    const t = tree();
+    t.tiles.land(CAMERA);
+    t.tiles.frame(CAMERA, 1.5);
+    t.build();
+    t.tiles.frame(CAMERA, 1.5);
+    const asked = t.meshes.splice(0);
+    // all but one child come back: their parents are still the ones drawn
+    asked.slice(1).forEach((ask) => t.tiles.arrived(ask.key, { key: ask.key, texture: null }, null));
+    const parentOf = (key) => {
+      const [z, x, y] = key.split('/').map(Number);
+      return `${z - 1}/${x >> 1}/${y >> 1}`;
+    };
+    const drawn = t.tiles.frame(CAMERA, 1.5).drawn.map((tile) => tile.key);
+    expect(drawn).toContain(parentOf(asked[0].key));
+    expect(drawn).not.toContain(asked[0].key);
+  });
+
+  it('lays the base coarser where it would hold too many tiles', () => {
+    const t = tree({ baseMax: 60 });
+    t.tiles.land({ ...CAMERA, width: 2000 });
+    const out = t.settle({ ...CAMERA, width: 2000 }, 50);
+    expect(out.base.total).toBeLessThanOrEqual(60);
+  });
+
+  it('lays and sharpens the ground across the antimeridian as near as it is', () => {
+    // Taveuni, Fiji, looking east over the 180th meridian a few kilometres off
+    const t = tree({ lat: -16.8, lon: 179.95 });
+    const east = { ...CAMERA, heading: 90 };
+    t.tiles.land(east);
+    const out = t.settle(east);
+    const keys = out.drawn.map((tile) => tile.key.split('/').map(Number));
+    expect(keys.every(([z, x, y]) => x >= 0 && x < 2 ** z && y >= 0 && y < 2 ** z)).toBe(true);
+    const across = keys.filter(([z, x]) => tileLon(x, z) < 0);
+    expect(across.length).toBeGreaterThan(0);
+    expect(Math.max(...across.map(([z]) => z))).toBeGreaterThan(ROOT_Z + 2);
+  });
+
+  it('lets the tiles a turned-away lens sharpened go past its budget, never what the last frame drew', () => {
+    const base = tree();
+    base.tiles.land(CAMERA);
+    const total = base.settle().base.total;
+    const t = tree({ budget: total + 10 });
+    t.tiles.land(CAMERA);
+    const telephoto = { ...CAMERA, fov: 8 };
+    t.settle(telephoto);
+    expect(t.released).toEqual([]);
+    const away = { ...telephoto, heading: 180 };
+    const out = t.settle(away);
+    t.tiles.frame(away, 1.5);
+    expect(t.released.length).toBeGreaterThan(0);
+    const drawn = new Set(out.drawn.map((tile) => tile.key));
+    expect(t.released.some((tile) => drawn.has(tile.key))).toBe(false);
+  });
+
+  it('asks again what failed once told to try again', () => {
+    const t = tree();
+    t.tiles.land(CAMERA);
+    t.tiles.frame(CAMERA, 1.5);
+    t.build(() => true);
+    const failed = t.tiles.frame(CAMERA, 1.5);
+    expect(failed.base.gaps).toBeGreaterThan(0);
+    expect(t.meshes).toEqual([]);
+    t.tiles.retry();
+    t.tiles.frame(CAMERA, 1.5);
+    expect(t.meshes.length).toBeGreaterThan(0);
+  });
+
+  it('counts all under a tile that failed as missing, so the base always adds up, and gets it once asked again', () => {
+    const t = tree();
+    t.tiles.land(CAMERA);
+    // one tile with others under it, among the base, fails
+    let doomed = null;
+    let out;
+    for (let round = 0; round < 40; round += 1) {
+      out = t.tiles.frame(CAMERA, 1.5);
+      if (!t.meshes.length) break;
+      doomed ??= t.meshes.find((ask) => ask.z === ROOT_Z + 2)?.key ?? null;
+      t.build((ask) => ask.key === doomed);
+    }
+    expect(doomed).not.toBeNull();
+    expect(out.base.gaps).toBeGreaterThan(1);
+    expect(out.base.meshed + out.base.gaps).toBe(out.base.total);
+    t.tiles.retry();
+    const healed = t.settle();
+    expect(healed.base).toMatchObject({ gaps: 0, meshed: healed.base.total, done: healed.base.total });
+  });
+
+  it('sharpens only the ground the frame shows, not the ground under its bottom edge', () => {
+    const telephoto = { ...CAMERA, fov: 4, tilt: 0 };
+    const asked = (eye) => {
+      const t = tree();
+      t.tiles.land(CAMERA);
+      t.settle(CAMERA, 1.5, eye);
+      const before = t.tiles.held;
+      t.settle(telephoto, 1.5, eye);
+      return t.tiles.held - before;
+    };
+    // from 1000 m over level ground, a lens on the horizon sees nothing nearer than its horizon
+    const high = asked({ alt: 1000 });
+    const anywhere = asked({});
+    expect(high).toBeLessThan(anywhere / 2);
+  });
+
+  it('sharpens 3° round a wide lens and about half a narrow one round it', () => {
+    expect(marginFor(60)).toBe(MARGIN_DEG);
+    expect(marginFor(6)).toBe(MARGIN_DEG);
+    expect(marginFor(2)).toBe(1);
+    expect(marginFor(0.2)).toBe(0.25);
+  });
+
+  it('asks a narrow lens\'s own frame before the margin round it, and waits only for the frame', () => {
+    const t = tree();
+    t.tiles.land(CAMERA);
+    t.settle();
+    const telephoto = { ...CAMERA, fov: 2, width: 240, height: 160 };
+    t.tiles.frame(telephoto, 1.5);
+    // how near the frame's middle a tile comes, from its corners; one the line of sight crosses, none
+    const nearest = ({ z, x, y }) => {
+      const offs = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([u, v]) => {
+        const at = { lat: tileLat(y + v, z), lon: tileLon(x + u, z) };
+        return ((bearingBetween(EYE, at) + 540) % 360) - 180;
+      });
+      if (Math.min(...offs) < 0 && Math.max(...offs) > 0) return 0;
+      return Math.min(...offs.map(Math.abs));
+    };
+    const asked = t.meshes.map((ask) => nearest(ask));
+    // the frame is 1° either side; the margin takes it to 2°
+    const firstOutside = asked.findIndex((off) => off > 1.2);
+    const lastInside = asked.findLastIndex((off) => off < 0.8);
+    expect(firstOutside).toBeGreaterThan(-1);
+    expect(lastInside).toBeLessThan(firstOutside);
+    // what the view waits for is the frame: held, it says so
+    const done = t.settle(telephoto);
+    expect(done.sharpening).toBe(0);
+  });
+
+  it('does not sharpen ground a nearer ridge hides, nor wait for it', () => {
+    // a ridge 500 m off all round: under 2° up every ray meets it there
+    const step = 0.5;
+    const rows = 41;
+    const depth = new Float32Array(rows * 360).fill(-1);
+    for (let row = 0; row < rows; row += 1) {
+      const elevation = 10 - row * step;
+      if (elevation <= 2) for (let column = 0; column < 360; column += 1) depth[row * 360 + column] = 500;
+    }
+    const turn = {
+      observer: { ...EYE },
+      azimuth: { start: 0, step: 1, count: 360, full: true },
+      elevation: { top: 10, step, count: rows },
+      depth,
+    };
+    const telephoto = { ...CAMERA, fov: 2 };
+    // how many fine tiles the lens asks for past 3 km, where only ground behind the ridge lies
+    // (a coarse tile across the ridge still asks its children, once, to be drawn by them)
+    const farAsks = (occluder) => {
+      const t = tree();
+      t.tiles.land(CAMERA);
+      t.settle(CAMERA, 1.5, { alt: 10 });
+      if (occluder) t.tiles.setOccluder(occluder);
+      let far = 0;
+      let sharpening = 0;
+      for (let round = 0; round < 40; round += 1) {
+        sharpening = t.tiles.frame(telephoto, 1.5, { alt: 10 }).sharpening;
+        if (!t.meshes.length) break;
+        for (const { z, x, y } of t.meshes) {
+          const corners = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([u, v]) => distanceBetween(EYE, { lat: tileLat(y + v, z), lon: tileLon(x + u, z) }));
+          if (z >= 16 && Math.min(...corners) > 3000) far += 1;
+        }
+        t.build();
+      }
+      return { far, sharpening };
+    };
+    const open = farAsks(null);
+    const hidden = farAsks(turn);
+    expect(open.far).toBeGreaterThan(20);
+    expect(hidden.far).toBe(0);
+    expect(hidden.sharpening).toBe(0);
+    // a turn marched from elsewhere is no guide here
+    expect(farAsks({ ...turn, observer: { lat: EYE.lat + 0.01, lon: EYE.lon } }).far).toBe(open.far);
+  });
+
+  it('widens what may be in sight by how far the eye has walked from where the tree was laid', () => {
+    const t = tree();
+    t.tiles.land(CAMERA);
+    t.settle();
+    const narrow = { ...CAMERA, fov: 10, width: 240 };
+    const still = t.tiles.frame(narrow, 1.5).drawn.length;
+    const walked = t.tiles.frame(narrow, 1.5, { shift: 1200 }).drawn.length;
+    expect(walked).toBeGreaterThan(still);
+  });
+});
+
+describe('the pictures over the tiles', () => {
+  it('reads none while the ground is not Satellite', () => {
+    const t = tree();
+    t.tiles.land(CAMERA);
+    t.settle();
+    expect(t.pictures).toEqual([]);
+  });
+
+  it('builds each tile with the imagery asked: Sentinel-2 nearer than its reach, the free imagery beyond', () => {
+    const imagery = { provider: 'esri-world-imagery', near: { provider: 'sentinel2~x', reach: 3000 } };
+    const t = tree({ imagery });
+    t.tiles.land(CAMERA);
+    const asked = [];
+    for (let round = 0; round < 40; round += 1) {
+      t.tiles.frame(CAMERA, 1.5);
+      if (!t.meshes.length) break;
+      asked.push(...t.meshes);
+      t.build();
+    }
+    const providers = new Set(asked.map((ask) => ask.provider));
+    expect(providers).toEqual(new Set(['esri-world-imagery', 'sentinel2~x']));
+    expect(t.tiles.frame(CAMERA, 1.5).base.done).toBe(t.tiles.frame(CAMERA, 1.5).base.total);
+  });
+
+  it('asks the held tiles\' pictures again for another imagery, the ones on screen first, and keeps the old ones meanwhile', () => {
+    const t = tree();
+    t.tiles.land(CAMERA);
+    t.settle();
+    t.tiles.setImagery({ provider: 'esri-wayback~1', near: null });
+    const out = t.tiles.frame(CAMERA, 1.5);
+    expect(out.base.done).toBeLessThan(out.base.total);
+    expect(out.sharpening).toBeGreaterThan(0);
+    const onScreen = new Set(out.drawn.map((tile) => tile.key));
+    const first = t.pictures.slice(0, onScreen.size);
+    expect(first.every((ask) => onScreen.has(ask.key))).toBe(true);
+    expect(t.pictures.every((ask) => ask.provider === 'esri-wayback~1')).toBe(true);
+    t.picture();
+    const done = t.settle();
+    expect(done.base.done).toBe(done.base.total);
+    expect(done.drawn.every((tile) => tile.texture === `esri-wayback~1:${tile.key}`)).toBe(true);
+  });
+
+  it('closes a picture that comes back for imagery no longer asked', () => {
+    const t = tree();
+    t.tiles.land(CAMERA);
+    t.settle();
+    t.tiles.setImagery({ provider: 'esri-wayback~1', near: null });
+    t.tiles.frame(CAMERA, 1.5);
+    const ask = t.pictures[0];
+    t.tiles.setImagery({ provider: 'esri-world-imagery', near: null });
+    const image = { close: vi.fn() };
+    t.tiles.imaged(ask.key, ask.provider, image);
+    expect(image.close).toHaveBeenCalled();
+    expect(t.attached.find(([key]) => key === ask.key)).toBeUndefined();
+  });
+});

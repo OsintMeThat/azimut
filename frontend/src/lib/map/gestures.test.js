@@ -1,6 +1,16 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { startRectDrag, startRotateDrag, turnFromKey, turnFromPress } from './gestures.js';
+import {
+  KEY_TILT_STEP,
+  keyTilt,
+  startRectDrag,
+  startRotateDrag,
+  tiltFromKey,
+  turnFromKey,
+  swallowDoubleClick,
+  turnFromPress,
+  watchHand,
+} from './gestures.js';
 
 /** The façade, as far as the gestures reach into it. */
 function stubEngine({ bearing = 0 } = {}) {
@@ -218,6 +228,47 @@ describe('which presses turn', () => {
     release();
   });
 
+  it('takes the second press of a double click held, where the tool lets it, and never a single press', () => {
+    expect(turnFromPress(stubEngine(), { ...press(0), detail: 2 }, { double: true })).toBe(true);
+    release();
+    expect(turnFromPress(stubEngine(), { ...press(0), detail: 2 })).toBe(false);
+    expect(turnFromPress(stubEngine(), { ...press(0), detail: 1 }, { double: true })).toBe(false);
+    // a held double click is the left button's only: the middle one already turns
+    expect(turnFromPress(stubEngine(), { ...press(2), detail: 2 }, { double: true })).toBe(false);
+  });
+
+  it('keeps the engine from zooming on a double click that turned the map, never on one that stayed', () => {
+    const heard = vi.fn();
+    document.body.addEventListener('dblclick', heard);
+    const doubleClick = () => {
+      const event = new window.MouseEvent('dblclick', { bubbles: true, cancelable: true });
+      document.body.dispatchEvent(event);
+      return event;
+    };
+    swallowDoubleClick(press(0, 100, 100));
+    drag(140, 100);
+    release();
+    const turned = doubleClick();
+    expect(heard).not.toHaveBeenCalled();
+    expect(turned.defaultPrevented).toBe(true);
+    // gone with that double click, at once: a double click straight after zooms
+    doubleClick();
+    expect(heard).toHaveBeenCalledTimes(1);
+    swallowDoubleClick(press(0, 100, 100));
+    drag(102, 101);
+    release();
+    doubleClick();
+    expect(heard).toHaveBeenCalledTimes(2);
+    // a turn whose release brought no double click: the next press ends the watch
+    swallowDoubleClick(press(0, 100, 100));
+    drag(160, 100);
+    release();
+    window.dispatchEvent(new window.MouseEvent('mousedown', { clientX: 300, clientY: 300 }));
+    doubleClick();
+    expect(heard).toHaveBeenCalledTimes(3);
+    document.body.removeEventListener('dblclick', heard);
+  });
+
   it('leaves a plain left press, and Shift where the tool keeps it', () => {
     expect(turnFromPress(stubEngine(), press(0))).toBe(false);
     expect(turnFromPress(stubEngine(), { ...press(0), shiftKey: true }, { shift: false })).toBe(false);
@@ -251,5 +302,93 @@ describe('turning from the keyboard', () => {
     expect(turnFromKey(engine, keydown('ArrowLeft', { shiftKey: false }))).toBe(false);
     expect(turnFromKey(null, keydown('ArrowLeft'))).toBe(false);
     expect(engine.bearings).toEqual([]);
+  });
+});
+
+describe('tilting from the keyboard', () => {
+  const keydown = (key, init = {}) => new window.KeyboardEvent('keydown', { key, cancelable: true, ...init });
+  const tilted = (pitch) => ({ ...stubEngine(), camera: () => ({ pitch }), pitches: [], setPitch(deg) { this.pitches.push(deg); } });
+
+  it('leans toward the horizon with Page Up and back down with Page Down, never under flat', () => {
+    const engine = tilted(40);
+    const up = keydown('PageUp');
+    expect(tiltFromKey(engine, up)).toBe(true);
+    expect(up.defaultPrevented).toBe(true);
+    expect(tiltFromKey(engine, keydown('PageDown'))).toBe(true);
+    expect(engine.pitches).toEqual([40 + KEY_TILT_STEP, 40 - KEY_TILT_STEP]);
+    expect(keyTilt(keydown('PageDown'), 4)).toBe(0);
+  });
+
+  it('leaves other keys, chords, a key already taken and one typed into a field', () => {
+    const engine = tilted(30);
+    expect(tiltFromKey(engine, keydown('ArrowUp'))).toBe(false);
+    expect(tiltFromKey(engine, keydown('PageUp', { ctrlKey: true }))).toBe(false);
+    expect(tiltFromKey(engine, keydown('PageUp', { shiftKey: true }))).toBe(false);
+    const taken = keydown('PageUp');
+    taken.preventDefault();
+    expect(tiltFromKey(engine, taken)).toBe(false);
+    const select = document.createElement('select');
+    document.body.append(select);
+    const typed = keydown('PageDown');
+    select.dispatchEvent(typed);
+    expect(tiltFromKey(engine, typed)).toBe(false);
+    select.remove();
+    expect(tiltFromKey(null, keydown('PageUp'))).toBe(false);
+    expect(engine.pitches).toEqual([]);
+  });
+});
+
+describe('the hand on the map, which a camera held until the view is still yields to', () => {
+  /** Two maps in one wrap, as the 3D view stands the globe beside the flat map, and a button over them. */
+  function surface() {
+    const wrap = document.createElement('div');
+    const flat = document.createElement('canvas');
+    const globe = document.createElement('canvas');
+    const button = document.createElement('button');
+    const field = document.createElement('input');
+    wrap.append(flat, globe, button, field);
+    document.body.append(wrap);
+    const hand = watchHand(wrap, (target) => target === flat || target === globe);
+    return { wrap, flat, globe, button, field, hand };
+  }
+  const press = (target) => target.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+  const key = (target, init) => target.dispatchEvent(new window.KeyboardEvent('keydown', { bubbles: true, ...init }));
+
+  it('counts a press or a wheel over either map, never one over what stands on it', () => {
+    const { wrap, flat, globe, button, hand } = surface();
+    press(globe);
+    press(flat);
+    globe.dispatchEvent(new window.WheelEvent('wheel', { bubbles: true, deltaY: 100 }));
+    press(button);
+    expect(hand.count()).toBe(3);
+    hand.stop();
+    wrap.remove();
+  });
+
+  it('counts the keys that tilt or turn the map, outside a field', () => {
+    const { wrap, field, hand } = surface();
+    key(document.body, { key: 'PageUp' });
+    key(document.body, { key: 'PageDown' });
+    key(document.body, { key: 'ArrowLeft', shiftKey: true });
+    key(document.body, { key: 'ArrowLeft' });
+    key(document.body, { key: 'a' });
+    key(field, { key: 'PageUp' });
+    expect(hand.count()).toBe(3);
+    hand.stop();
+    wrap.remove();
+  });
+
+  it('hears a press a mode claimed further out not at all, and nothing once stopped', () => {
+    const { wrap, globe, hand } = surface();
+    const claim = (event) => event.stopPropagation();
+    window.addEventListener('pointerdown', claim, true);
+    press(globe);
+    window.removeEventListener('pointerdown', claim, true);
+    expect(hand.count()).toBe(0);
+    hand.stop();
+    press(globe);
+    key(document.body, { key: 'PageUp' });
+    expect(hand.count()).toBe(0);
+    wrap.remove();
   });
 });

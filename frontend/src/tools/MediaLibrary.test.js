@@ -256,7 +256,7 @@ describe('Media Library browse controls', () => {
   });
 
   it('offers grids plus a plain, sortable details list', () => {
-    expect(source).toContain("let view = $state('large')");
+    expect(source).toContain("let view = $state(loadViewMode('media', 'large'))");
     expect(source).toContain("{ id: 'small', label: 'Small'");
     expect(source).toContain("{ id: 'large', label: 'Large'");
     expect(source).toContain("{ id: 'list', label: 'List'");
@@ -267,7 +267,7 @@ describe('Media Library browse controls', () => {
     expect(source).toContain('const LIST_SORTS = [');
     expect(source).toContain('function setHeaderSort(next)');
     expect(source).toContain('class="media-row media-head"');
-    expect(source).toContain('class="media-row" class:focused={item.path === focusedPath}');
+    expect(source).toMatch(/class="media-row"\s+class:focused={item.path === focusedPath}/);
     expect(source).not.toContain('.list-view .media-card');
   });
 

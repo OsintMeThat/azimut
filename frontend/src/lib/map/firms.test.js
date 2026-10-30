@@ -6,6 +6,8 @@ import {
   DATED,
   lastDayOf,
   MAX_RANGE_DAYS,
+  onDay,
+  PICTURE,
   summary,
   tileParams,
   today,
@@ -143,5 +145,29 @@ describe('the note under the controls', () => {
     expect(firmsNote({ window: '7d' })).toBe('Red: the last 24 hours. Amber: before them.');
     expect(firmsNote({ window: '48h' })).toMatch(/Red/);
     expect(firmsNote({ window: '24h' })).toBe('');
+  });
+});
+
+describe('following the picture on screen', () => {
+  const choice = { sensor: 'viirs', window: PICTURE, first: '', last: '' };
+
+  it('asks for the day the picture was taken', () => {
+    expect(onDay(choice, '2024-03-12')).toEqual({ sensor: 'viirs', window: DATED, first: '2024-03-12', last: '' });
+    expect(tileParams(onDay(choice, '2024-03-12'))).toEqual({
+      sensor: 'viirs',
+      window: DATED,
+      first: '2024-03-12',
+      last: '2024-03-12',
+    });
+  });
+
+  it('falls back to the last 24 hours for a picture with no date', () => {
+    expect(onDay(choice, '')).toEqual({ sensor: 'viirs', window: '24h', first: '', last: '' });
+    expect(onDay(choice, 'not a day').window).toBe('24h');
+  });
+
+  it('leaves a picked window alone', () => {
+    const picked = { sensor: 'modis', window: '7d', first: '', last: '' };
+    expect(onDay(picked, '2024-03-12')).toBe(picked);
   });
 });

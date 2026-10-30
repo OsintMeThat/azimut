@@ -9,6 +9,9 @@ import { formatCoords as renderCoords } from './coords.js';
 import {
   normalizeSourceCrop, normalizeSurfaceAngle, surfaceImageSize,
 } from './proofSurface.js';
+import { ICON_SIZE_DEFAULT } from './proofIcons.js';
+import { isPageMark } from './pageMarks.js';
+import { proofFontId } from './proofFonts.js';
 
 export const PANEL_H = 720;
 export const PAD = 20;
@@ -236,8 +239,8 @@ function panelBox(p) {
  * z-order, front→back (the first panel is the foreground one).
  *
  * `scale` maps a panel's natural pixels → doc pixels (grows/shrinks with the
- * user scale); `baseScale` is that mapping at scale 1, used to keep stroke and
- * arrow-head sizes normalised while still letting them grow with the panel.
+ * user scale); `baseScale` is that mapping at scale 1, which proofs saved before
+ * ink moved to page pixels measured their widths against (see `withInkOnPage`).
  */
 export function layoutPanels(panels, captionSize = CAPTION_SIZE, layout = 'grid', space) {
   return layout === 'free'
@@ -848,7 +851,7 @@ export function legendRowCount(count, columns) {
  * count and every text band grows with its own font size (all editable per
  * proof via `text = { captionSize, legendSize, footerSize }`).
  */
-export function docSize(panels, shapes, notes = {}, text = {}, legendOrder = [], layout = 'grid', space) {
+export function docSize(panels, shapes, notes = {}, text = {}, legendOrder = [], layout = 'grid', space, extent = null) {
   const {
     captionSize = CAPTION_SIZE, legendSize = LEGEND_SIZE, footerSize = FOOTER_SIZE,
     footerEnabled = true, footerLines = 1,
@@ -858,14 +861,18 @@ export function docSize(panels, shapes, notes = {}, text = {}, legendOrder = [],
   const width = boxes.length
     ? Math.max(...boxes.map((b) => b.x + b.w)) + pad
     : 640;
-  const contentW = Math.max(width, 640);
+  // `extent` is how far right and down the marks free on the page reach: the
+  // page grows to hold them, and the footer stays under them.
+  const contentW = Math.max(width, 640, extent ? Math.ceil(extent.right + pad) : 0);
   const legend = legendLines(shapes, notes, legendOrder).filter((l) => l.text);
   const cols = legendColumns(contentW, legend.length, space);
   const legendRows = legendRowCount(legend.length, cols);
-  const height =
+  const footer = footerEnabled && footerLines > 0 ? footerBand(footerSize, footerLines) : 0;
+  const height = Math.max(
     panelsBottom(panels, captionSize, layout, space) +
-    (legend.length ? 10 + legendRows * legendLineHeight(legendSize) : 0) +
-    (footerEnabled && footerLines > 0 ? footerBand(footerSize, footerLines) : 0) + pad;
+      (legend.length ? 10 + legendRows * legendLineHeight(legendSize) : 0) + footer + pad,
+    extent?.bottom > 0 ? Math.ceil(extent.bottom + 8 + footer + pad) : 0,
+  );
   return { width: contentW, height, legend, cols };
 }
 
@@ -1050,7 +1057,7 @@ export function signatureOffset(sig, docW, docH, natural, x, y) {
 
 // ---- frames & pasted images --------------------------------------------------
 
-export const FRAME_WIDTH = 6; // default border thickness, in the surface's own pixels
+export const FRAME_WIDTH = 6; // default border thickness, in page pixels like any ink
 export const FRAME_WIDTH_MAX = 60;
 export const FRAME_COLOR = ANNO_COLORS[0];
 
@@ -1106,9 +1113,8 @@ export function pasteInsertScale(natural, docW, share = PASTE_SHARE) {
 /**
  * Layout boxes for pasted images, in the same shape as panel boxes so a shape
  * can bind to either. A paste sits at its own doc position, and its `scale` maps
- * natural pixels straight to doc pixels (1 = life size). `baseScale` is 1, which
- * puts stroke widths in natural pixels — so an annotation drawn on a paste grows
- * with it exactly as one drawn on a panel grows with the panel.
+ * natural pixels straight to doc pixels (1 = life size). `baseScale` is 1: an
+ * older proof's widths on a paste were in its natural pixels.
  */
 export function pasteBoxes(pastes) {
   return (pastes ?? []).map((p) => {
@@ -1142,11 +1148,113 @@ export function surfaces(proof) {
   ];
 }
 
-/** Topmost surface under a doc-space point, with the point in its own pixels. */
-export function surfaceHitTest(list, point) {
-  const hit = panelHitTest(list.map((s) => s.box), point);
-  return hit ? { ...list[hit.index], nx: hit.nx, ny: hit.ny } : null;
+/**
+ * How a surface sits on the page. The composer draws one as a group centred on
+ * its layout box, turned and scaled about the middle of the pixels it draws, and
+ * its annotations live in those pixels. `pageToSurface` and `surfaceToPage` are
+ * that transform and its inverse, so a turned panel is read where it is drawn
+ * rather than as the upright box the layout reserved for it.
+ */
+export function surfaceFrame(entry) {
+  const { item, box } = entry;
+  return {
+    box,
+    image: surfaceImageSize(item.sourceNatural ?? item.natural, item.crop),
+    rotation: normalizeSurfaceAngle(item.rotation),
+  };
 }
+
+function turned(x, y, degrees) {
+  if (!degrees) return { x, y };
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return { x: x * cos - y * sin, y: x * sin + y * cos };
+}
+
+/** A page point in a surface's own pixels. */
+export function pageToSurface(point, frame) {
+  const { box, image, rotation } = frame;
+  const v = turned(
+    (point.x - (box.x + box.w / 2)) / box.scale,
+    (point.y - (box.y + box.h / 2)) / box.scale,
+    -rotation,
+  );
+  return { x: v.x + image[0] / 2, y: v.y + image[1] / 2 };
+}
+
+/** A point in a surface's own pixels, on the page. */
+export function surfaceToPage(point, frame) {
+  const { box, image, rotation } = frame;
+  const v = turned((point.x - image[0] / 2) * box.scale, (point.y - image[1] / 2) * box.scale, rotation);
+  return { x: v.x + box.x + box.w / 2, y: v.y + box.y + box.h / 2 };
+}
+
+/** A step on the page as the same step in a surface's own pixels. */
+export function pageStepOnSurface(dx, dy, frame) {
+  const v = turned(dx / frame.box.scale, dy / frame.box.scale, -frame.rotation);
+  return { dx: v.x, dy: v.y };
+}
+
+/**
+ * Topmost surface under a page point, with the point in its own pixels. A turned
+ * surface answers over its picture only, not in the corners of the upright box
+ * the page keeps around it. The list is front→back, so the first hit wins.
+ */
+export function surfaceHitTest(list, point) {
+  for (const entry of list) {
+    const frame = surfaceFrame(entry);
+    const p = pageToSurface(point, frame);
+    if (p.x >= 0 && p.x <= frame.image[0] && p.y >= 0 && p.y <= frame.image[1]) {
+      return { ...entry, frame, nx: p.x, ny: p.y };
+    }
+  }
+  return null;
+}
+
+/** What `toSpec` writes to say its ink is measured in page pixels. */
+export const INK_UNITS = 'page';
+
+/**
+ * A proof saved before ink was measured on the page, converted so it draws the
+ * same. Its line widths grew and shrank with the panel's size, and its labels,
+ * symbols, markers and frames were measured in the picture's own pixels, so one
+ * number drew four times bigger on a small picture than on a large one. Where a
+ * mark stands and what it spans are left alone: they belong to the picture.
+ */
+export function withInkOnPage(spec) {
+  if (!spec || spec.ink === INK_UNITS) return spec;
+  const boxes = new Map(surfaces(spec).map((entry) => [entry.id, entry.box]));
+  const round = (value) => Math.round(value * 100) / 100;
+  const framed = (item) => {
+    const box = boxes.get(item.id);
+    if (!box || !(item.frame?.width > 0)) return item;
+    return { ...item, frame: { ...item.frame, width: Math.max(1, Math.round(item.frame.width * box.scale)) } };
+  };
+  const shapes = (spec.shapes ?? []).map((s) => {
+    const box = boxes.get(s.panel);
+    if (!box) return s;
+    const out = { ...s };
+    // a width drew at its value on a panel at 100%, and scaled with the panel
+    const width = STROKED_KINDS.has(s.kind) ? (s.strokeWidth ?? 4) : s.strokeWidth;
+    if (Number.isFinite(width)) out.strokeWidth = round((width * box.scale) / box.baseScale);
+    if (s.kind === 'text') out.fontSize = round((s.fontSize ?? 28) * box.scale);
+    if (s.kind === 'icon' || s.kind === 'number') {
+      out.size = round((s.size ?? ICON_SIZE_DEFAULT / box.baseScale) * box.scale);
+    }
+    return out;
+  });
+  return {
+    ...spec,
+    ink: INK_UNITS,
+    panels: (spec.panels ?? []).map(framed),
+    pastes: (spec.pastes ?? []).map(framed),
+    shapes,
+  };
+}
+
+/** Kinds drawn with a line, whose width defaulted to 4 when a spec left it out. */
+const STROKED_KINDS = new Set(['rect', 'ellipse', 'line', 'arrow', 'curve', 'freehand']);
 
 /**
  * Keep a pasted image inside the document. The document is sized by its panels
@@ -1184,6 +1292,7 @@ function frozenCoords(panels) {
 export function toSpec(proof) {
   return {
     azimut_proof: 1,
+    ink: INK_UNITS,
     title: proof.title,
     // A proof keeps the selected house-style identity as well as its copied
     // style values, so reopening it can restore the template picker.
@@ -1239,7 +1348,10 @@ export function toSpec(proof) {
     footerEnabled: proof.footerEnabled !== false, // false → no footer line at all
     footerColor: proof.footerColor ?? null, // null → auto from the background
     footerAlign: proof.footerAlign === 'right' ? 'right' : 'left',
+    captionColor: proof.captionColor ?? null, // null → auto from the background
     captionsEnabled: proof.captionsEnabled !== false, // default caption for newly added panels
+    font: proofFontId(proof.font),
+    fontBold: proof.fontBold !== false,
     bg: proof.bg ?? BG, // proof background fill; text colours follow it (textColors)
     space: normSpace(proof.space), // panel spacing {pad, gap, rowGap}
     layout: proof.layout ?? 'grid', // 'grid' (rows) | 'free' (per-panel x/y, overlap allowed)
@@ -1308,10 +1420,13 @@ export function templateFromProof(proof) {
     footerCoords: proof.footerCoords === true,
     footerColor: proof.footerColor ?? null,
     footerAlign: proof.footerAlign === 'right' ? 'right' : 'left',
+    captionColor: proof.captionColor ?? null,
     captionsEnabled: proof.captionsEnabled !== false,
     panelDirection: proof.layout !== 'free' && proof.panels?.length > 1
       ? ((proof.panels[0].row ?? 0) === (proof.panels[1].row ?? 0) ? 'horizontal' : 'vertical')
       : (proof.panelDirection === 'vertical' ? 'vertical' : 'horizontal'),
+    font: proofFontId(proof.font),
+    fontBold: proof.fontBold !== false,
     signature: proof.signature ? { ...proof.signature } : null,
     signatureText: textSignatureStyle(proof.signatureText),
     palette: normalizePreferredColors(proof.palette),
@@ -1351,8 +1466,12 @@ export function normalizeProofStyle(style = {}) {
     footerCoords: source.footerCoords === true,
     footerColor: source.footerColor == null ? null : normalizedColor(source.footerColor, null),
     footerAlign: source.footerAlign === 'right' ? 'right' : 'left',
+    captionColor: source.captionColor == null ? null : normalizedColor(source.captionColor, null),
     captionsEnabled: typeof source.captionsEnabled === 'boolean' ? source.captionsEnabled : true,
     panelDirection: source.panelDirection === 'vertical' ? 'vertical' : 'horizontal',
+    // A style or a proof from before fonts says nothing, and keeps the system's.
+    font: proofFontId(source.font),
+    fontBold: typeof source.fontBold === 'boolean' ? source.fontBold : true,
     signature: normalizedSignature(source.signature),
     signatureText: textSignatureStyle(source.signatureText),
     palette: normalizePreferredColors(source.palette),
@@ -1383,7 +1502,10 @@ export function applyProofStyle(proof, style, available = {}) {
   if ('footerCoords' in source) proof.footerCoords = normalized.footerCoords;
   if ('footerColor' in source) proof.footerColor = normalized.footerColor;
   if ('footerAlign' in source) proof.footerAlign = normalized.footerAlign;
+  if ('captionColor' in source) proof.captionColor = normalized.captionColor;
   if ('captionsEnabled' in source) proof.captionsEnabled = normalized.captionsEnabled;
+  if ('font' in source) proof.font = normalized.font;
+  if ('fontBold' in source) proof.fontBold = normalized.fontBold;
   if ('panelDirection' in source) {
     proof.panelDirection = normalized.panelDirection;
     orientFirstPanels(proof.panels ?? [], proof.panelDirection);
@@ -1410,18 +1532,18 @@ export function copyShapeSpec(shape) {
 }
 
 /**
- * Copy of a shape spec nudged by `d` doc-pixels down-right, for paste/duplicate.
- * Points-based kinds shift every vertex; box/ellipse/text
+ * Copy of a shape spec moved by (`dx`, `dy`) of its surface's pixels, for
+ * paste/duplicate. Points-based kinds shift every vertex; box/ellipse/text
  * shift their x/y. The returned spec carries no id — the caller assigns one.
  */
-export function offsetShape(shape, d) {
+export function offsetShape(shape, dx, dy = dx) {
   const s = structuredClone(shape);
   delete s.id;
   if (Array.isArray(s.points)) {
-    s.points = s.points.map((v) => v + d);
+    s.points = s.points.map((v, i) => v + (i % 2 === 0 ? dx : dy));
   } else {
-    s.x = (s.x ?? 0) + d;
-    s.y = (s.y ?? 0) + d;
+    s.x = (s.x ?? 0) + dx;
+    s.y = (s.y ?? 0) + dy;
   }
   return s;
 }
@@ -1452,11 +1574,25 @@ export function satPanelInput(s, format = 'dd') {
  * Panel input for a media image. Traces the real source link through the
  * derivation chain (a collage/frame carries no URL of its own — follow it back
  * to the downloaded original). A file uploaded from disk has no URL, so it
- * contributes no source.
+ * contributes no source. A picture of a saved Horizon view also brings the eye
+ * it was drawn from, as the point the proof states, and the terrain's credits.
  */
 export function mediaPanelInput(m, mediaList = []) {
   const byPath = new Map(mediaList.map((x) => [x.path, x]));
   const urls = resolveSourceUrls(m, byPath);
+  const source = m.source ?? {};
+  if (source.type === 'horizon' && source.lat != null && source.lon != null) {
+    // a picture of a saved Horizon view stands where its eye stood, which the analyst
+    // placed: the proof answers with that point, and the photo's own link is its source
+    return {
+      src: m.path,
+      meta: {
+        kind: 'horizon', source_url: urls[0], source_urls: urls, lat: source.lat, lon: source.lon,
+        aimed: true, attribution: source.attribution ?? '', heading: source.heading ?? null,
+      },
+      caption: { photo: 'Photo, the terrain\'s ridge lines over it', terrain: 'Terrain, simulated from the same eye' }[source.kind] ?? '',
+    };
+  }
   return {
     src: m.path,
     meta: { kind: 'media', source_url: urls[0], source_urls: urls },
@@ -1571,30 +1707,43 @@ export function proofExportOptions(width, height) {
 // ---- editor geometry & ordering (pure helpers behind the canvas gestures) ---
 
 /**
- * Remap a point from one panel's natural-pixel space into another's, via doc
- * space. `fromBox`/`toBox` are layout boxes ({x, y, scale}); used when a shape
- * is dragged off its panel onto another so it keeps its on-screen position.
+ * A mark carried from one surface onto another without changing on the page.
+ *
+ * Where it stands and what it spans are measured again in the new surface's
+ * pixels, and its turn takes the difference between the two surfaces' turns.
+ * Its ink is in page pixels already, so a line, a label or a symbol keeps its
+ * weight. `from` and `to` are `surfaceFrame`s. A turned polyline has its turn
+ * folded into the vertices, since each one is carried on its own.
  */
-export function remapPanelXY(x, y, fromBox, toBox) {
-  return {
-    x: (fromBox.x + x * fromBox.scale - toBox.x) / toBox.scale,
-    y: (fromBox.y + y * fromBox.scale - toBox.y) / toBox.scale,
-  };
-}
-
-/**
- * Topmost panel box under a doc-space point, or null. `boxes` is the layout in
- * front→back order (array order = z-order), so the first hit wins. Returns the
- * box, its index, and the point in that panel's natural pixels ({nx, ny}).
- */
-export function panelHitTest(boxes, point) {
-  for (let i = 0; i < boxes.length; i++) {
-    const b = boxes[i];
-    if (point.x >= b.x && point.x <= b.x + b.w && point.y >= b.y && point.y <= b.y + b.h) {
-      return { index: i, box: b, nx: (point.x - b.x) / b.scale, ny: (point.y - b.y) / b.scale };
+export function moveShapeToSurface(shape, from, to) {
+  const across = (x, y) => pageToSurface(surfaceToPage({ x, y }, from), to);
+  const out = { ...shape };
+  if (Array.isArray(shape.points)) {
+    const points = [];
+    for (let i = 0; i < shape.points.length; i += 2) {
+      const own = turned(shape.points[i], shape.points[i + 1], shape.rotation ?? 0);
+      const q = across(own.x, own.y);
+      points.push(q.x, q.y);
     }
+    out.points = points;
+    if ('rotation' in out) out.rotation = 0;
+    return out;
   }
-  return null;
+  const q = across(shape.x ?? 0, shape.y ?? 0);
+  out.x = q.x;
+  out.y = q.y;
+  // A callout's tip is a point and an inset's frame stays square to its picture,
+  // so neither takes a turn; their labels and enlargements stand upright anyway.
+  if (!isPageMark(shape)) {
+    const rotation = normalizeSurfaceAngle((shape.rotation ?? 0) + from.rotation - to.rotation);
+    if (rotation || 'rotation' in out) out.rotation = rotation;
+  }
+  const k = from.box.scale / to.box.scale;
+  if (Number.isFinite(shape.w)) out.w = shape.w * k;
+  if (Number.isFinite(shape.h)) out.h = shape.h * k;
+  // a view cone reaches as far on the page as it did
+  if (Number.isFinite(shape.reach)) out.reach = shape.reach * k;
+  return out;
 }
 
 /**

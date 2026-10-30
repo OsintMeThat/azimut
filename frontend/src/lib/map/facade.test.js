@@ -5,6 +5,7 @@ import {
   exactViewZoom,
   framePadding,
   mapFacade,
+  headingUp,
   normalizeBearing,
   pointsExtent,
   viewZoom,
@@ -41,6 +42,7 @@ function stubMap(overrides = {}) {
     getMinZoom: () => 0,
     getMaxZoom: () => 21,
     getBearing: () => -37,
+    getPitch: () => 0,
     getBounds: () => ({
       getNorth: () => 0,
       getSouth: () => -1,
@@ -53,6 +55,7 @@ function stubMap(overrides = {}) {
     jumpTo: (...args) => calls.jumpTo.push(args),
     setZoom: (...args) => calls.setZoom.push(args),
     setBearing: (...args) => calls.setBearing.push(args),
+    setPitch: (...args) => (calls.setPitch ??= []).push(args),
     panBy: (...args) => calls.panBy.push(args),
     easeTo: (...args) => calls.easeTo.push(args),
     cameraForBounds: (...args) => {
@@ -118,6 +121,14 @@ describe('the bearing convention', () => {
     expect(normalizeBearing('')).toBe(0);
   });
 
+  it('says which way is up a turned map, and which bearing puts a heading up', () => {
+    // the map turned 107° clockwise: up the screen faces 253°, west-south-west
+    expect(headingUp(107)).toBe(253);
+    expect(headingUp(253)).toBe(107);
+    expect(headingUp(0)).toBe(0);
+    expect(headingUp(-90)).toBe(90);
+  });
+
   it('normalises on the way in, so no call site has to', () => {
     const map = stubMap();
     mapFacade(map).setBearing(-45);
@@ -130,7 +141,7 @@ describe('the map façade keeps the engine on its own side', () => {
     // an engine keeps counting past ±180 across the date line; the capture
     // route bounds lon to ±180, so an unwrapped centre answered 422
     const map = stubMap({ getCenter: () => ({ lat: 12, lng: 190.5 }) });
-    expect(mapFacade(map).camera()).toEqual({ lat: 12, lon: -169.5, zoom: 16, bearing: 37 });
+    expect(mapFacade(map).camera()).toEqual({ lat: 12, lon: -169.5, zoom: 16, bearing: 37, pitch: 0 });
   });
 
   it('leaves a longitude that is already one alone, to the last decimal', () => {
@@ -164,6 +175,87 @@ describe('the map façade keeps the engine on its own side', () => {
     ]);
   });
 
+  it('carries a tilt only when one is named, and never below flat', () => {
+    const map = stubMap({ getPitch: () => 61.6 });
+    const facade = mapFacade(map);
+    expect(facade.camera().pitch).toBe(62);
+    facade.setCamera({ lat: 1, lon: 2, zoom: 16, bearing: 0, pitch: 45 });
+    expect(map.calls.jumpTo[0][0].pitch).toBe(45);
+    facade.setPitch(-10);
+    facade.setPitch(30);
+    expect(map.calls.setPitch).toEqual([[0], [30]]);
+  });
+
+  it('has no centre height of its own: a flat map leaves it to the 3D view', () => {
+    // the engine answers 0 m for a centre with no relief under it, which a
+    // reopened 3D view would take for the ground
+    const map = stubMap({ getCenterElevation: () => 0 });
+    const facade = mapFacade(map);
+    expect(facade.centreElevation()).toBe(null);
+    facade.setCamera({ lat: 1, lon: 2, zoom: 13.78, bearing: 0, pitch: 20, elevation: 711.9 });
+    expect(map.calls.jumpTo[0]).toEqual([{ center: [2, 1], zoom: 12.78, bearing: -0, pitch: 20 }]);
+  });
+
+  it('waits for the map to rest with its tiles in, read off a frame the engine drew', async () => {
+    let moving = true;
+    let loaded = false;
+    const frames = new Set();
+    let repaints = 0;
+    const map = stubMap({
+      isMoving: () => moving,
+      areTilesLoaded: () => loaded,
+      on: (name, handler) => name === 'render' && frames.add(handler),
+      off: (name, handler) => name === 'render' && frames.delete(handler),
+      triggerRepaint: () => (repaints += 1),
+    });
+    const draw = () => [...frames].forEach((frame) => frame());
+    let done = false;
+    mapFacade(map).idle().then(() => (done = true));
+    // a frame is asked for, so a map with nothing else to draw still answers
+    expect(repaints).toBe(1);
+    draw();
+    await Promise.resolve();
+    expect(done).toBe(false);
+    moving = false;
+    loaded = true;
+    draw();
+    await Promise.resolve();
+    expect(done).toBe(true);
+    expect(frames.size).toBe(0);
+  });
+
+  it('tells a press on the drawn map from one on a marker, and gives the map the keyboard', () => {
+    const canvas = { focus: vi.fn() };
+    const facade = mapFacade(stubMap({ getCanvas: () => canvas }));
+    expect(facade.onSurface(canvas)).toBe(true);
+    expect(facade.onSurface({ tagName: 'DIV' })).toBe(false);
+    expect(facade.onSurface(null)).toBe(false);
+    facade.focus();
+    expect(canvas.focus).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
+  it('gives the map the keyboard from a gesture without a ring round it, until it loses it', () => {
+    const lost = [];
+    const canvas = {
+      dataset: {},
+      focus: vi.fn(),
+      addEventListener: (name, handler, options) => name === 'blur' && options?.once && lost.push(handler),
+    };
+    mapFacade(stubMap({ getCanvas: () => canvas })).focus();
+    expect(canvas.focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect('handFocus' in canvas.dataset).toBe(true);
+    for (const handler of lost) handler();
+    expect('handFocus' in canvas.dataset).toBe(false);
+  });
+
+  it('hands a linked map the tilt with the rest of the frame', () => {
+    const leader = mapFacade(stubMap({ getPitch: () => 50 }));
+    const peerMap = stubMap();
+    mapFacade(peerMap).follow(leader.frame());
+    expect(peerMap.calls.jumpTo[0][0].pitch).toBe(50);
+    expect(engineEvents('pitch')).toEqual(['pitch']);
+  });
+
   it('reports the ceiling in app zoom', () => {
     expect(mapFacade(stubMap({ getMaxZoom: () => 17 })).maxZoom()).toBe(18);
   });
@@ -172,6 +264,15 @@ describe('the map façade keeps the engine on its own side', () => {
     const map = stubMap();
     mapFacade(map).panBy(3, -7);
     expect(map.calls.panBy).toEqual([[[3, -7], { duration: 0 }]]);
+  });
+
+  it('holds the drag pan while the hand paints on the map, and gives it back', () => {
+    const said = [];
+    const map = stubMap({ dragPan: { enable: () => said.push('on'), disable: () => said.push('off') } });
+    const facade = mapFacade(map);
+    facade.setPanning(false);
+    facade.setPanning(true);
+    expect(said).toEqual(['off', 'on']);
   });
 
   it('re-reads the container on request', () => {
@@ -293,7 +394,7 @@ describe('the event vocabulary', () => {
     mapFacade(map).on('view-settled', seen);
     const [, relay] = map.calls.on[0];
     relay();
-    expect(seen).toHaveBeenCalledWith({ lat: 48.8584, lon: 2.2945, zoom: 16, bearing: 37 });
+    expect(seen).toHaveBeenCalledWith({ lat: 48.8584, lon: 2.2945, zoom: 16, bearing: 37, pitch: 0 });
   });
 
   it('hands a click the point clicked, wrapped like any other', () => {
@@ -427,6 +528,23 @@ describe('capturing the drawn pixels', () => {
     }
   });
 
+  it('draws a capture over an earlier one handed back, rather than making a canvas each time', async () => {
+    const { map, copy } = capturable();
+    const cleared = [];
+    const reused = { width: 800, height: 600, drawn: null };
+    reused.getContext = () => ({ clearRect: (...area) => cleared.push(area), drawImage: (source) => (reused.drawn = source) });
+    try {
+      const shot = await mapFacade(map).snapshot({ into: reused });
+      expect(shot.canvas).toBe(reused);
+      // the picture before is wiped, so nothing of it shows through a see-through sky
+      expect(cleared).toEqual([[0, 0, 800, 600]]);
+      expect(reused.drawn).toEqual({ width: 800, height: 600 });
+      expect(copy.drawn).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('says whether a capture now would be partial', () => {
     let moving = false;
     let loaded = true;
@@ -450,6 +568,62 @@ describe('capturing the drawn pixels', () => {
       expect(shot.complete).toBe(false);
     } finally {
       vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('a picture of the ground alone', () => {
+  /** A style of four layers, which records what each draw sees. */
+  function styledMap() {
+    const paint = {
+      'basemap-imagery': {},
+      'basemap-roads': { 'raster-opacity-transition': { duration: 300 } },
+      'sfc-1-fill': { 'fill-opacity': ['to-number', ['get', 'fillOpacity']] },
+      'place-labels': {},
+    };
+    const layout = { 'place-labels': { visibility: 'none' } };
+    const types = { 'basemap-imagery': 'raster', 'basemap-roads': 'raster', 'sfc-1-fill': 'fill', 'place-labels': 'symbol' };
+    const draws = [];
+    const map = stubMap({
+      isMoving: () => false,
+      areTilesLoaded: () => true,
+      getLayersOrder: () => Object.keys(types),
+      getLayer: (id) => ({ id, type: types[id] }),
+      getPaintProperty: (id, name) => paint[id][name],
+      setPaintProperty: (id, name, value) => (paint[id][name] = value),
+      getLayoutProperty: (id, name) => layout[id]?.[name],
+      setLayoutProperty: (id, name, value) => ((layout[id] ??= {})[name] = value),
+      redraw: () => draws.push(structuredClone({ paint, layout })),
+      getCanvas: () => ({ width: 4, height: 3 }),
+    });
+    return { map, paint, layout, draws };
+  }
+
+  it('draws one frame without the layers laid over the picture, copies it, and puts them back as they were', async () => {
+    const drawn = [];
+    vi.stubGlobal('document', {
+      createElement: () => ({ getContext: () => ({ drawImage: (source) => drawn.push(source) }) }),
+    });
+    try {
+      const { map, paint, layout, draws } = styledMap();
+      const shot = await mapFacade(map).snapshot({ keep: (id) => id === 'basemap-imagery' });
+      expect(shot).toMatchObject({ complete: true, canvas: { width: 4, height: 3 } });
+      expect(drawn).toHaveLength(1);
+      const [without, back] = draws;
+      // a constant opacity goes to nothing at once; one read off each feature is
+      // built into the tiles, so that layer is hidden instead
+      expect(without.paint['basemap-roads']).toMatchObject({ 'raster-opacity': 0, 'raster-opacity-transition': { duration: 0, delay: 0 } });
+      expect(without.layout['sfc-1-fill'].visibility).toBe('none');
+      expect(without.paint['basemap-imagery']).toEqual({});
+      // the frame after it is the map as it was, drawn before any fade is given back
+      expect(back.paint['basemap-roads']['raster-opacity']).toBeUndefined();
+      expect(back.layout['sfc-1-fill'].visibility).toBe('visible');
+      expect(paint['basemap-roads']).toEqual({ 'raster-opacity': undefined, 'raster-opacity-transition': { duration: 300 } });
+      expect(paint['sfc-1-fill']['fill-opacity']).toEqual(['to-number', ['get', 'fillOpacity']]);
+      // a layer already hidden is left alone
+      expect(layout['place-labels']).toEqual({ visibility: 'none' });
+    } finally {
       vi.unstubAllGlobals();
     }
   });

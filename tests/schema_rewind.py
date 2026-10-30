@@ -122,11 +122,13 @@ def rewind(db: Path | str, version: int) -> None:
 
     18 is what 0.3.1 shipped. After it, 19 folds what the search indexes hold, adds
     the two merge tables and the zone column, so that is what a rewind to it undoes.
+    17 is what 0.2.9 and 0.3.0 shipped; 18 only re-read the projection, so it has
+    the same shape.
     """
-    if version not in (7, 8, 18):
+    if version not in (7, 8, 17, 18):
         raise ValueError(f"no rewind to schema {version}")
     with closing(sqlite3.connect(db)) as conn, conn:
-        if version == 18:
+        if version in (17, 18):
             _unfold_search_text(conn)
             for statement in _AFTER_18:
                 conn.execute(statement)

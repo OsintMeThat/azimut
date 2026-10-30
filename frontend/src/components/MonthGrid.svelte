@@ -41,6 +41,8 @@
     /** Whether the day can be taken back out, for a field that means "and no
      *  further" as much as it means a date. */
     clearable = false,
+    /** One more answer beside Today that is not a day, `{ label, title, pressed, onclick }`. */
+    also = null,
     /** Called with the chosen day, or '' when it is cleared. */
     onpick,
   } = $props();
@@ -98,6 +100,9 @@
   </div>
 
   <div class="acts">
+    {#if also}
+      <button type="button" class="act" title={also.title} aria-pressed={!!also.pressed} onclick={also.onclick}>{also.label}</button>
+    {/if}
     <button
       type="button"
       class="act"
@@ -204,6 +209,10 @@
   }
   .act:hover:not(:disabled) {
     border-color: var(--border-strong);
+    color: var(--text-1);
+  }
+  .act[aria-pressed='true'] {
+    border-color: var(--accent);
     color: var(--text-1);
   }
   .act:disabled {

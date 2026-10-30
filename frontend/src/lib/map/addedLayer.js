@@ -4,13 +4,13 @@
  * **Not DOM markers.** The case's own pins are one `div` each (`surface.js`),
  * which is right for a few hundred rich, draggable, hoverable marks and caps out
  * around a thousand or two. A layer somebody else made holds tens of thousands,
- * and none of them is interactive beyond a read-only card — so it is a source
+ * and a personal layer adds editing actions to its cards, so it is a source
  * with `circle`, `symbol`, `line` and `fill` layers, which MapLibre paints in
  * one pass and culls to the viewport for free. Nothing here filters by viewport
  * or truncates the data: the engine already does the first and the second would
  * be a map lying about what it read.
  *
- * Three things this has to do that the curated overlays do not:
+ * The drawing follows these rules:
  *
  * - **Decluttering is collision, not a cap.** At low zoom the symbols would be a
  *   solid mat, and a cap taken in file order clumps badly — a KML is ordered by
@@ -21,8 +21,8 @@
  *   URL, no sprite and no glyphs (`engine.js`), and this must not be the reason
  *   it starts. Each pictogram is drawn to a canvas here and handed to
  *   `map.addImage` as an **SDF**, which is what lets one image per shape be
- *   tinted to any colour a source asked for — the alternative is one registered
- *   image per (shape × colour) pair, which explodes on a map with twenty groups.
+ *   tinted to any colour a source asked for. Personal icons use coloured
+ *   images instead, with one image per symbol and colour shared by their points.
  * - **A source's own icons are a second symbol layer, not a second option on the
  *   first.** They arrive as real PNGs the backend composed
  *   (`engine/maplayers.py`), which means non-SDF, which means no `icon-color`
@@ -39,10 +39,17 @@ import { Popup } from 'maplibre-gl';
 import { paths } from '../../components/Icon.svelte';
 import { wrapLon } from '../coords.js';
 import { categoryColour } from './addedLayers.js';
+import { drawMarker, drawOwnMarker, isBadge, MARKER_PIXELS, ownMarkerSide } from './markerGlyphs.js';
+import { loadPicture } from './ownIcons.js';
 
-/** The pictogram per geometry kind. Three shapes is the whole vocabulary, and
- *  what every feature falls back to when the source drew no icon of its own. */
-const GLYPHS = { point: 'pin', line: 'line', area: 'polygon' };
+/** Geometry defaults and the symbols available to personal layer points. */
+const GLYPHS = { point: 'pin', line: 'line', area: 'polygon', circle: 'circle', star: 'star', flag: 'flag' };
+const BASE_KINDS = ['point', 'line', 'area'];
+
+export function markerIcon(geometry, symbol) {
+  return iconName(geometry?.type === 'Point' && ['circle', 'star', 'flag'].includes(symbol)
+    ? symbol : kindOf(geometry));
+}
 
 /** How big an icon is drawn into its own image, before the engine scales it. */
 const ICON_PIXELS = 64;
@@ -68,6 +75,8 @@ const ICON_SPREAD = 8;
 /** …and how much of that is shown. An added layer sits under the case's own
  *  marks in weight as well as in stacking order. */
 const ICON_SCALE = 0.4;
+// A pin's painted height is smaller than a disc in the same canvas.
+const PERSONAL_PIN_SCALE = 0.6;
 
 /**
  * …and the weight a source's own icon is drawn at.
@@ -81,7 +90,7 @@ const ICON_SCALE = 0.4;
  * where ours is a stroked outline: at equal size the picture reads heavier, and
  * these are somebody else's marks sitting under the case's own.
  */
-const SOURCE_ICON_SCALE = 0.28;
+export const SOURCE_ICON_SCALE = 0.28;
 
 /**
  * The white edge around every mark.
@@ -94,6 +103,8 @@ const SOURCE_ICON_SCALE = 0.28;
  * format chosen so the source's colour could tint our pictogram.
  */
 const ICON_OUTLINE = '#fff';
+/** What is new on the day a tracked layer is read on is ringed in this, on any ground. */
+export const NEW_COLOUR = '#ffd400';
 /** Enough to lift the mark off the ground under it, and no more: past about a
  *  pixel the edge starts reading as the mark and the colour as its filling. */
 const ICON_OUTLINE_WIDTH = 0.8;
@@ -120,6 +131,7 @@ const PIN_CARD_OFFSET = Math.round((ICON_PIXELS - ICON_PAD) * ICON_SCALE);
 const EDGE_CARD_OFFSET = 12;
 
 let layers = 0; // one id prefix per layer, so two of them never collide
+const owners = new WeakMap();
 
 /** The card a feature opens, dressed like every other card on this map
  *  (`lib/map/engine.css`) and closed the same two ways: its own cross, or the
@@ -141,15 +153,16 @@ export function iconName(kind) {
 }
 
 /**
- * …and the one it knows a source's own icon by.
+ * …and the one it knows a source's own icon by: the address it is read from,
+ * which names its case and layer as well as its key.
  *
- * Shared between layers too, and safely: the key is the backend's content hash
- * of what the icon *is* — its address, its colour, its scale, its anchor — so
- * two layers naming the same key are asking for the same pixels. Two My Maps
- * that both use Google's red pin register it once.
+ * Never the key alone. The backend hashes what the source says of the icon, and
+ * a KMZ says `images/icon-3.png` whatever is drawn in it, so two My Maps give one
+ * key to two pictures. Named by key, the first layer loaded drew its picture on
+ * the other's markers.
  */
-export function sourceIconName(key) {
-  return `azimut-source-${key}`;
+export function sourceIconName(url) {
+  return `azimut-source-${url}`;
 }
 
 /** One composed icon, fetched from the case folder and decoded by the engine. */
@@ -183,13 +196,145 @@ export function iconImage(kind, size = ICON_PIXELS, make = defaultCanvas) {
   context.lineJoin = 'round';
   context.lineCap = 'round';
   const path = new Path2D(paths[GLYPHS[kind] ?? 'pin']);
-  if (kind === 'point') context.fill(path);
+  if (['point', 'circle', 'star', 'flag'].includes(kind)) context.fill(path);
   context.stroke(path);
   context.setTransform(1, 0, 0, 1, 0, 0);
 
   const pixels = context.getImageData(0, 0, size, size);
   return { width: size, height: size, data: sdf(pixels.data, size, ICON_SPREAD) };
 }
+
+/** A coloured disc with its glyph, drawn locally without an icon service. */
+export function badgeImage(symbol, colour, marks = {}, make = defaultCanvas) {
+  return isBadge(symbol) ? personalMarkerImage(symbol, colour, marks, make) : null;
+}
+
+/** Plain personal markers share a bitmap layer with badges to respect group order.
+ *  `marks` are the status stroke and the external rim (`markerParts`). */
+export function personalMarkerImage(symbol, colour, marks = {}, make = defaultCanvas) {
+  const canvas = make(MARKER_PIXELS, MARKER_PIXELS), context = canvas.getContext('2d');
+  if (!context) return null;
+  drawMarker(context, symbol, colour, marks);
+  return context.getImageData(0, 0, MARKER_PIXELS, MARKER_PIXELS);
+}
+
+/**
+ * A marker wearing one of the analyst's icons (`drawOwnMarker`): in its disc, or
+ * as it is with its status stroke or external rim. `picture` is `{ image, box }`
+ * (`ownIcons.loadPicture`).
+ */
+export function ownMarkerImage(picture, colour, look = {}, make = defaultCanvas) {
+  const side = ownMarkerSide(picture?.image, look.mode);
+  const canvas = make(side, side), context = canvas?.getContext('2d');
+  if (!context || !picture?.image) return null;
+  drawOwnMarker(context, picture.image, colour, { ...look, box: picture.box });
+  return context.getImageData(0, 0, side, side);
+}
+
+/** The image a marker is registered under: one per symbol, colour and marks. */
+export function markerImageKey(symbol, colour, { status = '', external = false } = {}) {
+  return `${symbol}-${String(colour).toLowerCase().replace('#', '')}${status ? `-${status}` : ''}${external ? '-x' : ''}`;
+}
+
+/** The size of the direction mark's image, around a marker at the same scale. */
+const BEARING_PIXELS = 96;
+const BEARING_ICON = 'azimut-layer-bearing';
+
+/**
+ * A wedge just outside a badge's rim, pointing up: the map turns it to the
+ * marker's `bearing`, so it says which way a camera looked or a convoy drove.
+ */
+/**
+ * The stripes an area's gains or losses are hatched with, in its own colour:
+ * gains in close stripes one way, losses in sparser fainter ones the other, so
+ * the two read apart in print as well as on screen.
+ */
+export const HATCH_PIXELS = 12;
+export function hatchImage(colour, kind, make = defaultCanvas) {
+  const canvas = make(HATCH_PIXELS, HATCH_PIXELS);
+  const ctx = canvas?.getContext?.('2d');
+  if (!ctx) return null;
+  ctx.strokeStyle = colour;
+  ctx.globalAlpha = kind === 'gained' ? 0.85 : 0.5;
+  ctx.lineWidth = kind === 'gained' ? 2.2 : 1.4;
+  ctx.beginPath();
+  // Three strokes so the stripe runs on across the tile's corners without a seam.
+  for (const shift of [-HATCH_PIXELS, 0, HATCH_PIXELS]) {
+    if (kind === 'gained') { ctx.moveTo(shift, HATCH_PIXELS); ctx.lineTo(shift + HATCH_PIXELS, 0); }
+    else { ctx.moveTo(shift, 0); ctx.lineTo(shift + HATCH_PIXELS, HATCH_PIXELS); }
+  }
+  ctx.stroke();
+  return ctx.getImageData(0, 0, HATCH_PIXELS, HATCH_PIXELS);
+}
+
+/** The head drawn on a line's end, in its own colour, pointing up before it is turned. */
+export const ARROW_PIXELS = 26;
+export function arrowHeadImage(colour, make = defaultCanvas) {
+  const canvas = make(ARROW_PIXELS, ARROW_PIXELS);
+  const ctx = canvas?.getContext?.('2d');
+  if (!ctx) return null;
+  const middle = ARROW_PIXELS / 2;
+  ctx.beginPath();
+  ctx.moveTo(middle, 2);
+  ctx.lineTo(ARROW_PIXELS - 4, ARROW_PIXELS - 4);
+  ctx.lineTo(middle, ARROW_PIXELS - 9);
+  ctx.lineTo(4, ARROW_PIXELS - 4);
+  ctx.closePath();
+  ctx.fillStyle = colour; ctx.fill();
+  ctx.lineWidth = 1.6; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineJoin = 'round'; ctx.stroke();
+  return ctx.getImageData(0, 0, ARROW_PIXELS, ARROW_PIXELS);
+}
+
+/** How a confidence is drawn when the feature names no dash of its own: probable dashed, claimed dotted. */
+export const CONFIDENCE_DASH = { probable: 'dashed', claimed: 'dotted' };
+/** …and how strongly a point of each confidence is drawn. */
+export const CONFIDENCE_OPACITY = { probable: 0.8, claimed: 0.55 };
+
+/** The degrees from north a line leaves its last point by, read off its last two. */
+export function endBearing(line, atStart = false) {
+  const points = atStart ? [line[1], line[0]] : [line.at(-2), line.at(-1)];
+  if (!points[0] || !points[1]) return 0;
+  const [[lon1, lat1], [lon2, lat2]] = points;
+  const dx = (lon2 - lon1) * Math.cos((((lat1 + lat2) / 2) * Math.PI) / 180);
+  return ((Math.atan2(dx, lat2 - lat1) * 180) / Math.PI + 360) % 360;
+}
+
+/** The arrowheads a feature's line ends carry, as points the map turns its head image on. */
+export function arrowHeads(feature) {
+  const ends = feature?.properties?.line_arrow;
+  const geometry = feature?.geometry;
+  if (!ends || !geometry || !String(geometry.type).includes('LineString')) return [];
+  const lines = geometry.type === 'LineString' ? [geometry.coordinates] : geometry.coordinates;
+  const heads = [];
+  for (const line of lines) {
+    if (line.length < 2) continue;
+    heads.push({ at: line.at(-1), angle: endBearing(line) });
+    if (ends === 'both') heads.push({ at: line[0], angle: endBearing(line, true) });
+  }
+  return heads;
+}
+
+export function bearingImage(make = defaultCanvas) {
+  const canvas = make(BEARING_PIXELS, BEARING_PIXELS), context = canvas.getContext('2d');
+  if (!context) return null;
+  const middle = BEARING_PIXELS / 2;
+  context.clearRect(0, 0, BEARING_PIXELS, BEARING_PIXELS);
+  context.beginPath();
+  context.moveTo(middle, 3);
+  context.lineTo(middle + 9, 16);
+  context.lineTo(middle - 9, 16);
+  context.closePath();
+  context.lineJoin = 'round';
+  context.lineWidth = 3;
+  context.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+  context.stroke();
+  context.fillStyle = '#fff';
+  context.fill();
+  return context.getImageData(0, 0, BEARING_PIXELS, BEARING_PIXELS);
+}
+
+/** The app's sans-serif stack, which the engine hands to the browser to draw names. */
+const LABEL_FONT = ['ui-sans-serif', 'system-ui', 'sans-serif'];
 
 function defaultCanvas(width, height) {
   const canvas = document.createElement('canvas');
@@ -232,9 +377,9 @@ function sdf(data, size, spread = ICON_SPREAD) {
   return out;
 }
 
-/** Register the three pictograms once on a map, if they are not there already. */
-export function registerIcons(map, build = iconImage) {
-  for (const kind of Object.keys(GLYPHS)) {
+/** Register requested pictograms once per map. */
+export function registerIcons(map, build = iconImage, kinds = BASE_KINDS) {
+  for (const kind of kinds) {
     const name = iconName(kind);
     if (map.hasImage?.(name)) continue;
     const image = build(kind);
@@ -283,10 +428,24 @@ export function periodFilter(period = null) {
 }
 
 /**
+ * Whether two lists of features say the same, in the same order: each the same
+ * object, or one written the same. A layer read back holds new objects for the
+ * features it already drew.
+ */
+export function sameFeatures(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i] && JSON.stringify(a[i]) !== JSON.stringify(b[i])) return false;
+  }
+  return true;
+}
+
+/**
  * @param {object} engine the façade from `engine.js`
  * @param {object} [opts]
- * @param {(properties: object, point: { lat: number, lon: number } | null) => HTMLElement} [opts.card]
+ * @param {(properties: object, point: { lat: number, lon: number } | null, geometry: object | null) => HTMLElement} [opts.card]
  *   the read-only popup's body, handed the feature's own point when it has one
+ *   and its geometry as the source wrote it, so a line or an area can be measured
  * @param {(offset: number) => object} [opts.popup] the card itself, swappable so
  *   the click path can be read off a test without standing up the engine's own popup
  * @param {(key: string) => string} [opts.iconUrl] where this case keeps the
@@ -298,10 +457,16 @@ export function periodFilter(period = null) {
  *   feature's point when it is a pin (with its properties), on the ground under
  *   the cursor for a line or an area (with none). The features claim their
  *   clicks, so without this a right-click on one opens nothing at all.
+ * @param {boolean} [opts.page] drawn for a plate's page: every symbol drawn, where
+ *   the live map lets overlapping ones drop out far out with a dot for each, since a
+ *   page that leaves the app must not lose a point the reader cannot zoom in to find;
+ *   and its areas may be hatched, as a plate draws a claimed ground.
  */
 export function createAddedLayer(
   engine,
-  { card, popup = defaultPopup, iconUrl = null, loadIcon = defaultLoadIcon, menu = null } = {}
+  { card, popup = defaultPopup, iconUrl = null, loadIcon = defaultLoadIcon, menu = null,
+    editable = false, history = false, page = false, buildBadge = badgeImage, buildPersonal = personalMarkerImage, buildHatch = hatchImage,
+    buildOwn = ownMarkerImage, readPicture = loadPicture } = {}
 ) {
   const map = engine.impl;
   const prefix = `added-${++layers}`;
@@ -311,15 +476,83 @@ export function createAddedLayer(
   const DOT = `${prefix}-dot`;
   const MARK = `${prefix}-mark`;
   const OWN = `${prefix}-own`;
-  const PAINTED = [FILL, LINE, DOT, MARK, OWN];
+  const HIT = `${prefix}-hit`;
+  const HIT_OWN = `${prefix}-hit-own`;
+  const BEARING = `${prefix}-bearing`;
+  const LABEL = `${prefix}-label`;
+  // A personal feature's own line look, a hatched fill, and the heads on its line ends.
+  const LINE_DASH = `${prefix}-line-dash`;
+  const LINE_DOT = `${prefix}-line-dot`;
+  const FILL_HATCH = `${prefix}-fill-hatch`;
+  const ARROW = `${prefix}-arrow`;
+  const ARROW_SOURCE = `${prefix}-arrow-src`;
+  // A tracked layer's past, under what it is now (`layerHistory.js`): the
+  // state before, dashed, and an area's gains and losses, hatched.
+  const CHANGE_FILL = `${prefix}-change-fill`;
+  const CHANGE_LINE = `${prefix}-change-line`;
+  const TRAIL_LINE = `${prefix}-trail-line`;
+  const TRAIL_DOT = `${prefix}-trail-dot`;
+  // …and what is new on the day it is read on, ringed under it.
+  const NEW_LINE = `${prefix}-new-line`;
+  const NEW_RING = `${prefix}-new-ring`;
+  // A source draws no text and no direction: its names are read in the card,
+  // and a personal layer is the one whose analyst asks for either.
+  // a dash is drawn on any layer, a plate setting one for a source layer as for the analyst's own
+  const hatched = editable || page;
+  const declutter = !page;
+  const PAINTED = [FILL, ...(hatched ? [FILL_HATCH] : []), LINE, LINE_DASH, LINE_DOT, DOT,
+    ...(editable ? [BEARING] : []), MARK, OWN, ...(editable ? [LABEL, HIT, HIT_OWN] : [])];
+  // Drawn, never clicked: the past says nothing a card on the feature would not.
+  // Only a layer followed over time has a past, so only it pays for these.
+  const DECOR = editable && history ? [CHANGE_FILL, CHANGE_LINE, TRAIL_LINE, TRAIL_DOT, NEW_LINE, NEW_RING] : [];
+  const DRAWN = [...DECOR, ...PAINTED, ...(editable ? [ARROW] : [])];
+  // A merge makes multi-part lines and areas, so each kind names both forms.
+  const POINT = ['in', ['geometry-type'], ['literal', ['Point', 'MultiPoint']]];
+  const NOW = ['!', ['any', ['has', '$trail'], ['has', '$change']]];
+  const BASE = {
+    [FILL]: ['all', NOW, ['in', ['geometry-type'], ['literal', ['Polygon', 'MultiPolygon']]]],
+    [LINE]: ['all', NOW, ['!', POINT], ['!', ['has', '$dash']]],
+    [LINE_DASH]: ['all', NOW, ['!', POINT], ['==', ['get', '$dash'], 'dashed']],
+    [LINE_DOT]: ['all', NOW, ['!', POINT], ['==', ['get', '$dash'], 'dotted']],
+    [FILL_HATCH]: ['all', NOW, ['has', '$fillhatch']],
+    [ARROW]: NOW,
+    [DOT]: ['all', NOW, POINT],
+    [BEARING]: ['all', NOW, POINT, ['has', 'bearing']],
+    // The two symbol layers split the points between them on the one
+    // question of whether this feature's own icon is registered.
+    [MARK]: ['all', NOW, POINT, ['!', ['has', '$own']]],
+    [OWN]: ['all', NOW, POINT, ['has', '$own']],
+    [LABEL]: ['all', NOW, ['has', 'show_label'], ['!=', ['get', 'name'], '']],
+    [HIT]: ['all', NOW, POINT, ['!', ['has', '$own']]],
+    [HIT_OWN]: ['all', NOW, POINT, ['has', '$own']],
+    [CHANGE_FILL]: ['has', '$change'],
+    [CHANGE_LINE]: ['has', '$change'],
+    [TRAIL_LINE]: ['all', ['has', '$trail'], ['!', POINT]],
+    [TRAIL_DOT]: ['all', ['has', '$trail'], POINT],
+    [NEW_LINE]: ['all', NOW, ['has', '$new'], ['!', POINT]],
+    [NEW_RING]: ['all', NOW, ['has', '$new'], POINT],
+  };
+  const badgeIcons = new Set();
+  /** The analyst's icons a personal layer wears, `{ image, box }` by address, for its discs and marks. */
+  const pictures = new Map();
+  // Features held off the map while the editor drags their copies (`hide`).
+  let hiddenKeys = new Set();
+  let lastFilter = [[], null];
 
   let built = false;
+  // what the source was last handed (`set`): the features as given and the style they were built with
+  let sent = null;
+  // whether the arrow heads' source holds any
+  let arrowsSent = false;
   let shown = true;
   let filtered = ''; // the filter last applied, so the same one is not re-applied
   let categories = [];
   let collection = null; // what was last drawn, so a feature can be found by number
   let open = null; // the read-only card, so it can be closed by name
   let releaseClicks = null;
+  // Off while the map's own tool holds the pointer (a measure, a pin, an area
+  // being drawn): a click there is the tool's, not a card's.
+  let interactive = true;
   // Bumped by every `set` and by `destroy`, so a set whose icons were still
   // loading when the layer moved on lands nowhere.
   let generation = 0;
@@ -328,6 +561,8 @@ export function createAddedLayer(
   function build(attribution) {
     if (built) return;
     built = true;
+    sent = null;
+    arrowsSent = false;
     registerIcons(map);
     map.addSource(SOURCE, {
       type: 'geojson',
@@ -337,21 +572,60 @@ export function createAddedLayer(
       attribution,
     });
     const colour = ['to-color', ['get', '$colour']];
+    if (DECOR.length) {
+      map.addLayer({ id: CHANGE_FILL, type: 'fill', source: SOURCE, filter: BASE[CHANGE_FILL],
+        paint: { 'fill-pattern': ['get', '$hatch'] } });
+      map.addLayer({ id: CHANGE_LINE, type: 'line', source: SOURCE, filter: BASE[CHANGE_LINE],
+        layout: { 'line-join': 'round' },
+        paint: { 'line-color': colour, 'line-width': 1, 'line-opacity': ['case', ['==', ['get', '$change'], 'gained'], 0.9, 0.5],
+          'line-dasharray': [3, 2] } });
+      map.addLayer({ id: TRAIL_LINE, type: 'line', source: SOURCE, filter: BASE[TRAIL_LINE],
+        layout: { 'line-cap': 'butt', 'line-join': 'round' },
+        paint: { 'line-color': colour, 'line-width': ['coalesce', ['get', 'stroke_width'], 2], 'line-opacity': 0.55,
+          'line-dasharray': [2, 2] } });
+      map.addLayer({ id: TRAIL_DOT, type: 'circle', source: SOURCE, filter: BASE[TRAIL_DOT],
+        paint: { 'circle-radius': 5, 'circle-color': 'rgba(0, 0, 0, 0)', 'circle-stroke-color': colour,
+          'circle-stroke-width': 1.5, 'circle-stroke-opacity': 0.7 } });
+      map.addLayer({ id: NEW_LINE, type: 'line', source: SOURCE, filter: BASE[NEW_LINE],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': NEW_COLOUR, 'line-width': ['+', 6, ['coalesce', ['get', 'stroke_width'], 2]], 'line-opacity': 0.6, 'line-blur': 2 } });
+      map.addLayer({ id: NEW_RING, type: 'circle', source: SOURCE, filter: BASE[NEW_RING],
+        paint: { 'circle-radius': ['*', 15, ['coalesce', ['get', 'icon_scale'], 1]], 'circle-color': 'rgba(255, 212, 0, 0.18)',
+          'circle-stroke-color': NEW_COLOUR, 'circle-stroke-width': 2.5, 'circle-blur': 0.1 } });
+    }
     map.addLayer({
       id: FILL,
       type: 'fill',
       source: SOURCE,
-      filter: ['==', ['geometry-type'], 'Polygon'],
-      paint: { 'fill-color': colour, 'fill-opacity': 0.18 },
+      filter: BASE[FILL],
+      paint: { 'fill-color': colour, 'fill-opacity': ['case', ['has', '$fade'], 0.07, ['==', ['get', 'area_fill'], 'none'], 0,
+        ['coalesce', ['get', 'fill_opacity'], 0.18]] },
     });
+    // a personal area's hatching, or any layer's that a plate hatches
+    if (hatched) map.addLayer({ id: FILL_HATCH, type: 'fill', source: SOURCE, filter: BASE[FILL_HATCH],
+      paint: { 'fill-pattern': ['get', '$fillhatch'] } });
     map.addLayer({
       id: LINE,
       type: 'line',
       source: SOURCE,
-      filter: ['!=', ['geometry-type'], 'Point'],
+      filter: BASE[LINE],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': colour, 'line-width': 2, 'line-opacity': 0.9 },
+      paint: { 'line-color': colour, 'line-width': ['coalesce', ['get', 'stroke_width'], 2], 'line-opacity': ['case', ['has', '$fade'], 0.35, 0.9] },
     });
+    // a dash cannot be read off a feature, so each look is its own layer
+    for (const [id, dash, cap] of [[LINE_DASH, [3, 2], 'butt'], [LINE_DOT, [0.1, 2], 'round']]) {
+      map.addLayer({ id, type: 'line', source: SOURCE, filter: BASE[id], layout: { 'line-cap': cap, 'line-join': 'round' },
+        paint: { 'line-color': colour, 'line-width': ['coalesce', ['get', 'stroke_width'], 2],
+          'line-opacity': ['case', ['has', '$fade'], 0.35, 0.9], 'line-dasharray': dash } });
+    }
+    if (editable) {
+      map.addSource(ARROW_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addLayer({ id: ARROW, type: 'symbol', source: ARROW_SOURCE, filter: BASE[ARROW],
+        layout: { 'icon-image': ['get', '$arrowicon'], 'icon-rotate': ['get', '$angle'], 'icon-rotation-alignment': 'map',
+          'icon-size': ['max', 0.45, ['*', 0.22, ['coalesce', ['get', 'stroke_width'], 2]]],
+          'icon-allow-overlap': true, 'icon-ignore-placement': true },
+        paint: { 'icon-opacity': ['case', ['has', '$fade'], 0.35, 0.95] } });
+    }
     // Under the symbols, and only while they are being dropped: far out, the
     // collision below hides most of a dense layer, and a dot per feature is what
     // keeps the map honest about how much is really there. Close in, every
@@ -361,34 +635,56 @@ export function createAddedLayer(
       id: DOT,
       type: 'circle',
       source: SOURCE,
-      filter: ['==', ['geometry-type'], 'Point'],
+      filter: BASE[DOT],
       paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2.5, 14, 0],
+        'circle-radius': declutter ? ['interpolate', ['linear'], ['zoom'], 11, 2.5, 14, 0] : 0,
         'circle-color': colour,
         'circle-opacity': 0.85,
+      },
+    });
+    // Under the marker it turns around, so the badge always reads first.
+    if (editable && !map.hasImage?.(BEARING_ICON)) {
+      const wedge = bearingImage();
+      if (wedge) map.addImage(BEARING_ICON, wedge);
+    }
+    if (editable) map.addLayer({
+      id: BEARING,
+      type: 'symbol',
+      source: SOURCE,
+      filter: BASE[BEARING],
+      layout: {
+        'icon-image': BEARING_ICON,
+        'icon-size': ['*', ICON_SCALE, ['coalesce', ['get', 'icon_scale'], 1]],
+        'icon-rotate': ['get', 'bearing'],
+        'icon-rotation-alignment': 'map',
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
       },
     });
     map.addLayer({
       id: MARK,
       type: 'symbol',
       source: SOURCE,
-      filter: ['all', ['==', ['geometry-type'], 'Point'], ['!', ['has', '$own']]],
+      filter: BASE[MARK],
       layout: {
         'icon-image': ['get', '$icon'],
-        'icon-size': ICON_SCALE,
+        'icon-size': ['*', editable ? PERSONAL_PIN_SCALE : ICON_SCALE, ['coalesce', ['get', 'icon_scale'], 1]],
         'icon-anchor': 'bottom',
+        'icon-offset': [0, ICON_PAD],
         // The decluttering, and the whole of it: MapLibre hides a symbol that
         // overlaps one already placed, so the map spreads evenly and densifies
         // as it is zoomed into. A cap in file order would clump.
-        'icon-allow-overlap': false,
-        'icon-ignore-placement': false,
+        'icon-allow-overlap': editable || !declutter,
+        'icon-ignore-placement': editable || !declutter,
         // …and who wins a contested spot. File order, so the answer is at least
         // the same one twice running.
-        'symbol-sort-key': ['get', 'index'],
+        // a feature with no place in the file (one drawn by hand) comes first, never a null the engine warns of
+        'symbol-sort-key': ['coalesce', ['get', 'index'], 0],
       },
       paint: {
         'icon-color': colour,
-        'icon-opacity': 0.95,
+        // an event past its day reads faintly, as what has happened rather than what stands
+        'icon-opacity': ['case', ['has', '$fade'], 0.4, ['coalesce', ['get', '$opacity'], 0.95]],
         'icon-halo-color': ICON_OUTLINE,
         'icon-halo-width': ICON_OUTLINE_WIDTH,
         'icon-halo-blur': 0.2,
@@ -396,32 +692,62 @@ export function createAddedLayer(
         // outline room to draw sits between that edge and the pin's tip. Without
         // this the pin floats its own padding above the ground, which reads as
         // the dot underneath having come loose from it.
-        'icon-translate': [0, ICON_PAD * ICON_SCALE],
       },
     });
     // The source's own pictures, which is a separate layer rather than a second
     // `icon-image` on the one above: these are plain PNGs, the ones above are
     // SDFs, and MapLibre does not reliably render both out of one symbol layer.
-    // Everything SDF buys — the tint, the white outline — is already in these
-    // pixels, composed by the backend, so there is nothing to paint here.
+    // Personal markers also use these bitmap layers so their group order holds
+    // across plain pins and badges. Colour and outline are already in the pixels.
     map.addLayer({
       id: OWN,
       type: 'symbol',
       source: SOURCE,
-      filter: ['all', ['==', ['geometry-type'], 'Point'], ['has', '$own']],
+      filter: BASE[OWN],
       layout: {
         'icon-image': ['get', '$own'],
-        'icon-size': SOURCE_ICON_SCALE,
+        'icon-size': ['*', ['case', editable ? ['any', ['has', '$badge'], ['has', '$native']] : ['has', '$badge'], ICON_SCALE, SOURCE_ICON_SCALE], ['coalesce', ['get', 'icon_scale'], 1]],
         // The anchor is the middle because the backend padded each image until
         // the pixel the source anchors it by *was* the middle — a pin's tip
         // lands on the ground without a per-feature offset to carry.
-        'icon-anchor': 'center',
-        'icon-allow-overlap': false,
-        'icon-ignore-placement': false,
-        'symbol-sort-key': ['get', 'index'],
+        'icon-anchor': editable ? ['case', ['has', '$native'], 'bottom', 'center'] : 'center',
+        'icon-offset': editable ? ['case', ['has', '$native'], ['literal', [0, 7.7]], ['literal', [0, 0]]] : [0, 0],
+        'icon-allow-overlap': editable || !declutter,
+        'icon-ignore-placement': editable || !declutter,
+        'symbol-sort-key': ['coalesce', ['get', 'index'], 0],
       },
-      paint: { 'icon-opacity': 0.95 },
+      paint: { 'icon-opacity': ['case', ['has', '$fade'], 0.4, ['coalesce', ['get', '$opacity'], 0.95]] },
     });
+    // A group's names, written under its marks once the analyst asks for them.
+    if (editable) map.addLayer({
+      id: LABEL,
+      type: 'symbol',
+      source: SOURCE,
+      filter: BASE[LABEL],
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-font': LABEL_FONT,
+        'text-size': ['coalesce', ['get', 'label_size'], 11],
+        'text-anchor': 'top',
+        'text-offset': [0, 0.9],
+        'text-max-width': 10,
+        'text-optional': true,
+        'symbol-placement': 'point',
+      },
+      paint: { 'text-color': '#fff', 'text-halo-color': 'rgba(0, 0, 0, 0.85)', 'text-halo-width': 1.3 },
+    });
+    if (editable) {
+      // Personal points are all visible, so a circle gives them a reliable hit
+      // area even on engines that miss the symbol's painted pixels.
+      map.addLayer({ id: HIT, type: 'circle', source: SOURCE,
+        filter: BASE[HIT],
+        paint: { 'circle-radius': ['max', 12, ['*', 22, ['coalesce', ['get', 'icon_scale'], 1]]], 'circle-opacity': 0 } });
+      map.addLayer({ id: HIT_OWN, type: 'circle', source: SOURCE,
+        filter: BASE[HIT_OWN],
+        paint: { 'circle-radius': ['max', 10, ['*', ['case', ['has', '$native'], 22, 13], ['coalesce', ['get', 'icon_scale'], 1]]], 'circle-opacity': 0 } });
+    }
+    if (!owners.has(map)) owners.set(map, new Map());
+    owners.get(map).set(prefix, { layers: PAINTED, active: () => interactive && shown });
     bindHandlers();
     if (!shown) applyVisibility();
   }
@@ -446,9 +772,9 @@ export function createAddedLayer(
   /**
    * The card and the point menu, the only two things a feature answers.
    *
-   * The card is read-only by construction: it is given what the source states,
-   * and copying its point is the one thing it does. The menu is the map's own,
-   * moved onto the pin's point. Nothing in an added layer enters the case.
+   * The caller builds the card and supplies personal-layer actions. The menu
+   * is the map's own, moved onto the pin's point. Saving a case place remains
+   * an explicit action.
    */
   function bindHandlers() {
     const bind = (type, handler) => {
@@ -457,11 +783,11 @@ export function createAddedLayer(
     };
     bind('click', (event) => {
       const feature = event.features?.[0];
-      if (!feature) return;
+      if (!feature || !interactive || !ownsClick(event)) return;
       showCard(feature, event.lngLat);
     });
     bind('contextmenu', (event) => {
-      if (!menu) return;
+      if (!menu || !interactive || !ownsClick(event)) return;
       const features = event.features ?? [];
       // a pin drawn over an area is the pin that was meant
       const feature = features.find((one) => pointOf(one)) ?? features[0];
@@ -471,12 +797,22 @@ export function createAddedLayer(
       menu({ ...at, x: event.point.x, y: event.point.y }, point ? (feature.properties ?? {}) : null);
     });
     bind('mouseenter', () => {
-      map.getCanvas().style.cursor = 'pointer';
+      if (interactive) map.getCanvas().style.cursor = 'pointer';
     });
     bind('mouseleave', () => {
-      map.getCanvas().style.cursor = '';
+      if (interactive) map.getCanvas().style.cursor = '';
     });
-    releaseClicks = engine.claimClicks?.(PAINTED) ?? null;
+    if (interactive) releaseClicks = engine.claimClicks?.(PAINTED) ?? null;
+  }
+
+  function ownsClick(event) {
+    if (!map.queryRenderedFeatures || !event.point) return true;
+    const painted = [...(owners.get(map)?.values() ?? [])]
+      .filter((owner) => owner.active()).flatMap((owner) => owner.layers)
+      .filter((id) => map.getLayer(id));
+    const hits = map.queryRenderedFeatures(event.point, { layers: painted });
+    const top = hits.find((hit) => hit.geometry?.type === 'Point') ?? hits[0];
+    return !top || PAINTED.includes(top.layer?.id);
   }
 
   /**
@@ -493,9 +829,11 @@ export function createAddedLayer(
     if (!card) return;
     closeCard();
     const point = pointOf(feature);
+    // measured off the original, never the tile's copy: that one is clipped at the tile's edge
+    const geometry = featureAt(collection, feature.properties?.index)?.geometry ?? null;
     open = popup(point ? PIN_CARD_OFFSET : EDGE_CARD_OFFSET)
       .setLngLat(point ? [point.lon, point.lat] : at)
-      .setDOMContent(card(feature.properties ?? {}, point))
+      .setDOMContent(card(feature.properties ?? {}, point, geometry))
       .addTo(map);
     open.on('close', () => {
       open = null;
@@ -523,6 +861,14 @@ export function createAddedLayer(
   async function registerSourceIcons(features) {
     const arrived = new Set();
     if (!iconUrl) return arrived;
+    // a personal layer composes its own icons into discs and marks, so it keeps the pictures too
+    if (editable) {
+      const wanted = new Set(features.map((feature) => feature?.properties?.icon).filter((key) => key && !pictures.has(iconUrl(key))));
+      await Promise.all([...wanted].map(async (key) => {
+        const picture = await readPicture(iconUrl(key));
+        if (picture) pictures.set(iconUrl(key), picture);
+      }));
+    }
     const keys = new Set();
     for (const feature of features) {
       const key = feature?.properties?.icon;
@@ -530,7 +876,7 @@ export function createAddedLayer(
     }
     await Promise.all(
       [...keys].map(async (key) => {
-        const name = sourceIconName(key);
+        const name = sourceIconName(iconUrl(key));
         if (map.hasImage?.(name)) {
           arrived.add(key);
           return;
@@ -538,7 +884,7 @@ export function createAddedLayer(
         try {
           const image = await loadIcon(map, iconUrl(key));
           if (!image) return;
-          // checked again: two layers sharing an icon can both be loading it
+          // checked again: the same layer drawn twice can be loading it twice
           if (!map.hasImage?.(name)) map.addImage(name, image);
           arrived.add(key);
         } catch {
@@ -549,8 +895,38 @@ export function createAddedLayer(
     return arrived;
   }
 
+  /** What a personal feature's own look adds to its properties: its dash, its hatching, its strength. */
+  function lookOf(feature, colour) {
+    const properties = feature.properties ?? {};
+    const point = String(feature.geometry?.type).includes('Point');
+    const look = {};
+    const dash = properties.line_dash || (editable ? CONFIDENCE_DASH[properties.confidence] : '');
+    if (!point && (dash === 'dashed' || dash === 'dotted')) look.$dash = dash;
+    // hatched: a personal area asked so, or a plate hatches the layer
+    if (String(feature.geometry?.type).includes('Polygon') && properties.area_fill === 'hatch') {
+      const id = `${prefix}-fillhatch-${String(colour).replace(/[^0-9a-z]/gi, '')}`;
+      if (!map.hasImage(id)) {
+        const pixels = buildHatch(colour, 'gained');
+        if (pixels) { map.addImage(id, pixels); badgeIcons.add(id); }
+      }
+      if (map.hasImage(id)) look.$fillhatch = id;
+    }
+    if (!editable) return Object.keys(look).length ? look : null;
+    if (point && CONFIDENCE_OPACITY[properties.confidence]) look.$opacity = CONFIDENCE_OPACITY[properties.confidence];
+    return Object.keys(look).length ? look : null;
+  }
+
+  function arrowIcon(colour) {
+    const id = `${prefix}-arrowhead-${String(colour).replace(/[^0-9a-z]/gi, '')}`;
+    if (!map.hasImage(id)) {
+      const pixels = arrowHeadImage(colour);
+      if (pixels) { map.addImage(id, pixels); badgeIcons.add(id); }
+    }
+    return id;
+  }
+
   function applyVisibility() {
-    for (const layer of PAINTED) {
+    for (const layer of DRAWN) {
       if (map.getLayer(layer)) {
         map.setLayoutProperty(layer, 'visibility', shown ? 'visible' : 'none');
       }
@@ -559,10 +935,14 @@ export function createAddedLayer(
 
   return {
     /**
-     * Put a parsed collection on the map. Every feature, every time: the source
-     * is the whole layer and the engine culls what is off screen.
+     * Put a parsed collection on the map. Every feature, whenever any changed: the
+     * source is the whole layer and the engine culls what is off screen.
+     *
+     * `held`, when given, is what `hide` holds off the map from now on, changed
+     * with the data rather than before it: features the editor dragged come back
+     * where they landed, never for a frame where they were.
      */
-    async set(data, { categories: groups = [], hidden = [], period = null, attribution } = {}) {
+    async set(data, { categories: groups = [], hidden = [], period = null, attribution, held = null } = {}) {
       build(attribution);
       categories = groups;
       collection = data;
@@ -574,27 +954,113 @@ export function createAddedLayer(
       if (mine !== generation || !built) return;
 
       const colour = colourExpression(groups);
-      const features = (data?.features ?? []).map((feature) => ({
+      // The same features handed again, as a layer read back after its own save is,
+      // are not cut again: the engine would tile the whole layer anew to draw the same.
+      const style = JSON.stringify([groups, [...ready].sort().map((key) => iconUrl(key))]);
+      const unchanged = sent?.style === style && sameFeatures(sent.features, data?.features ?? []);
+      sent = { style, features: [...(data?.features ?? [])] };
+      // nothing to cut, but a frame still comes for whoever waits for the map to settle
+      if (unchanged) map.triggerRepaint?.();
+      const features = unchanged ? [] : (data?.features ?? []).map((feature) => {
+        const symbol = feature.properties?.symbol || 'pin';
+        const groupAt = Math.max(0, groups.findIndex((group) => group.name === feature.properties?.category));
+        const colour = feature.properties?.colour || categoryColour(groups[groupAt], groupAt);
+        let badge = null;
+        if (feature.properties?.$change) {
+          const kind = feature.properties.$change === 'gained' ? 'gained' : 'lost';
+          const id = `${prefix}-hatch-${kind}-${String(colour).replace(/[^0-9a-z]/gi, '')}`;
+          if (!map.hasImage(id)) {
+            const pixels = buildHatch(colour, kind);
+            if (pixels) { map.addImage(id, pixels); badgeIcons.add(id); }
+          }
+          return { ...feature, properties: { ...feature.properties, $hatch: id } };
+        }
+        const own = lookOf(feature, colour);
+        if (own) feature = { ...feature, properties: { ...feature.properties, ...own } };
+        const native = editable && !isBadge(symbol) && !ready.has(feature.properties?.icon);
+        const wearing = editable && feature.geometry?.type === 'Point' && ready.has(feature.properties?.icon)
+          ? pictures.get(iconUrl(feature.properties.icon)) : null;
+        if (wearing) {
+          // one of the analyst's icons: drawn plain when it can be, composed when a disc or a mark is asked for
+          const mode = feature.properties.icon_mode === 'disc' ? 'disc' : 'image';
+          const marks = { status: feature.properties?.status ?? '', external: feature.properties?.provenance === 'external' };
+          if (mode === 'disc' || marks.status || marks.external) {
+            const id = `${prefix}-own-${feature.properties.icon}-${mode}-${markerImageKey('', colour, marks)}`;
+            if (!map.hasImage(id)) {
+              const pixels = buildOwn(wearing, colour, { mode, ...marks });
+              if (pixels) { map.addImage(id, pixels); badgeIcons.add(id); }
+            }
+            if (map.hasImage(id)) badge = id;
+          }
+        } else if (feature.geometry?.type === 'Point' && (isBadge(symbol) || native)) {
+          const marks = { status: feature.properties?.status ?? '', external: feature.properties?.provenance === 'external' };
+          const id = `${prefix}-${markerImageKey(symbol, colour, marks)}`;
+          if (!map.hasImage(id)) {
+            const pixels = native ? buildPersonal(symbol || 'pin', colour, marks) : buildBadge(symbol, colour, marks);
+            if (pixels) { map.addImage(id, pixels); badgeIcons.add(id); }
+          }
+          if (map.hasImage(id)) badge = id;
+        }
+        return {
         ...feature,
         properties: {
           ...feature.properties,
           // Resolved into the data rather than expressed per layer, because the
           // icon has to be chosen per feature and the colour has to fall back
           // per feature when the source painted only some of them.
-          $icon: iconName(kindOf(feature.geometry)),
-          ...(ready.has(feature.properties?.icon)
-            ? { $own: sourceIconName(feature.properties.icon) }
+          $icon: markerIcon(feature.geometry, feature.properties?.symbol),
+          ...(badge ? { $own: badge, ...(native ? { $native: true } : { $badge: true }) } : ready.has(feature.properties?.icon)
+            ? { $own: sourceIconName(iconUrl(feature.properties.icon)) }
             : null),
         },
-      }));
-      map.getSource(SOURCE)?.setData({ type: 'FeatureCollection', features });
-      for (const layer of PAINTED) {
-        if (layer === OWN || !map.getLayer(layer)) continue;
-        const property = layer === MARK ? 'icon-color' : layer === FILL ? 'fill-color' : layer === DOT ? 'circle-color' : 'line-color';
+      }; });
+      const arrows = editable && !unchanged ? features.flatMap((feature) => {
+        const heads = arrowHeads(feature);
+        if (!heads.length) return [];
+        const groupAt = Math.max(0, groups.findIndex((group) => group.name === feature.properties?.category));
+        const icon = arrowIcon(feature.properties?.colour || categoryColour(groups[groupAt], groupAt));
+        return heads.map(({ at, angle }) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: at },
+          properties: { ...feature.properties, $angle: angle, $arrowicon: icon } }));
+      }) : [];
+      // a layer with no arrow heads leaves their source empty rather than emptying it again
+      if (editable && !unchanged && (arrows.length || arrowsSent)) {
+        map.getSource(ARROW_SOURCE)?.setData({ type: 'FeatureCollection', features: arrows });
+        arrowsSent = arrows.length > 0;
+      }
+      if (!unchanged) {
+        const symbols = [...new Set(features.map((feature) => feature.properties.symbol))]
+          .filter((symbol) => ['circle', 'star', 'flag'].includes(symbol));
+        registerIcons(map, iconImage, symbols);
+        map.getSource(SOURCE)?.setData({ type: 'FeatureCollection', features });
+      }
+      for (const layer of DRAWN) {
+        if ([OWN, HIT, HIT_OWN, BEARING, LABEL, CHANGE_FILL, NEW_LINE, NEW_RING, FILL_HATCH, ARROW].includes(layer) || !map.getLayer(layer)) continue;
+        const property = layer === MARK ? 'icon-color' : layer === FILL ? 'fill-color' : layer === DOT ? 'circle-color'
+          : layer === TRAIL_DOT ? 'circle-stroke-color' : 'line-color';
         map.setPaintProperty(layer, property, featureColour(colour));
       }
+      if (held) hiddenKeys = new Set(held);
       filtered = '';
       this.filter(hidden, period);
+    },
+
+    /**
+     * Once the map has drawn what `set` last handed it. The engine cuts a layer's
+     * tiles off the page's thread, so new data is on screen some frames after it
+     * was set. Bounded, since a map kept busy may not say so for a while.
+     */
+    drawn(ms = 400) {
+      if (!built || typeof map.isSourceLoaded !== 'function') return Promise.resolve();
+      const sources = [SOURCE, ...(editable ? [ARROW_SOURCE] : [])];
+      return new Promise((resolve) => {
+        let timer = null;
+        const done = () => { clearTimeout(timer); map.off('render', check); resolve(); };
+        // a frame is only drawn from tiles that were cut before it began
+        function check() { if (sources.every((id) => !map.getSource(id) || map.isSourceLoaded(id))) done(); }
+        timer = setTimeout(done, ms);
+        map.on('render', check);
+        map.triggerRepaint?.();
+      });
     },
 
     /**
@@ -607,24 +1073,17 @@ export function createAddedLayer(
      * frame and a card opened on the map would otherwise close under it.
      */
     filter(hidden = [], period = null) {
+      lastFilter = [hidden, period];
       if (!built) return;
-      const key = JSON.stringify([hidden, period?.start ?? '', period?.end ?? '']);
+      const key = JSON.stringify([hidden, period?.start ?? '', period?.end ?? '', [...hiddenKeys]]);
       if (key === filtered) return;
       filtered = key;
-      const rules = [visibilityFilter(hidden), periodFilter(period)].filter(Boolean);
+      const rules = [visibilityFilter(hidden), periodFilter(period), hiddenKeys.size
+        ? ['!', ['in', ['get', 'key'], ['literal', [...hiddenKeys]]]] : null].filter(Boolean);
       const rule = rules.length > 1 ? ['all', ...rules] : rules[0];
-      const base = {
-        [FILL]: ['==', ['geometry-type'], 'Polygon'],
-        [LINE]: ['!=', ['geometry-type'], 'Point'],
-        [DOT]: ['==', ['geometry-type'], 'Point'],
-        // The two symbol layers split the points between them on the one
-        // question of whether this feature's own icon is registered.
-        [MARK]: ['all', ['==', ['geometry-type'], 'Point'], ['!', ['has', '$own']]],
-        [OWN]: ['all', ['==', ['geometry-type'], 'Point'], ['has', '$own']],
-      };
-      for (const layer of PAINTED) {
+      for (const layer of DRAWN) {
         if (!map.getLayer(layer)) continue;
-        map.setFilter(layer, rule ? ['all', base[layer], rule] : base[layer]);
+        map.setFilter(layer, rule ? ['all', BASE[layer], rule] : BASE[layer]);
       }
       closeCard();
     },
@@ -652,9 +1111,15 @@ export function createAddedLayer(
       return true;
     },
 
+    /** The feature numbered `index` as the source wrote it, not as a tile cut it. */
+    feature(index) {
+      return featureAt(collection, index);
+    },
+
     /** The lowest of this layer's GL layers, or null while nothing is built. */
     floor() {
-      return built && map.getLayer(FILL) ? FILL : null;
+      const lowest = DRAWN[0];
+      return built && map.getLayer(lowest) ? lowest : null;
     },
 
     /**
@@ -664,9 +1129,20 @@ export function createAddedLayer(
     stackUnder(other) {
       const below = other?.floor();
       if (!built || !below) return;
-      for (const layer of PAINTED) {
+      for (const layer of DRAWN) {
         if (map.getLayer(layer)) map.moveLayer(layer, below);
       }
+    },
+
+    /**
+     * Hold these features off the map, or none: the editor draws them where the
+     * analyst is dragging them until the layer draws them where they landed.
+     */
+    hide(keys = []) {
+      const next = new Set(keys);
+      if (next.size === hiddenKeys.size && [...next].every((key) => hiddenKeys.has(key))) return;
+      hiddenKeys = next;
+      if (built) this.filter(...lastFilter);
     },
 
     /** Keep the features, take them off the map (or put them back). */
@@ -677,6 +1153,22 @@ export function createAddedLayer(
       if (!on) closeCard();
     },
 
+    /**
+     * Whether a feature answers a click. Off, its clicks reach the map's own
+     * tool underneath, as if the layer were a picture; on, a click opens its card.
+     */
+    interactive(on) {
+      if (on === interactive) return;
+      interactive = on;
+      if (!built) return;
+      if (on) releaseClicks ??= engine.claimClicks?.(PAINTED) ?? null;
+      else {
+        releaseClicks?.();
+        releaseClicks = null;
+        closeCard();
+      }
+    },
+
     /** What the legend is painting, so a caller can read it back. */
     categories() {
       return categories;
@@ -684,6 +1176,7 @@ export function createAddedLayer(
 
     destroy() {
       closeCard();
+      owners.get(map)?.delete(prefix);
       collection = null;
       generation += 1;
       releaseClicks?.();
@@ -691,11 +1184,14 @@ export function createAddedLayer(
       for (const [type, on, handler] of listeners) map.off(type, on, handler);
       listeners.length = 0;
       if (built) {
-        for (const layer of PAINTED) {
+        for (const layer of DRAWN) {
           if (map.getLayer(layer)) map.removeLayer(layer);
         }
         if (map.getSource(SOURCE)) map.removeSource(SOURCE);
+        if (map.getSource(ARROW_SOURCE)) map.removeSource(ARROW_SOURCE);
       }
+      for (const id of badgeIcons) if (map.hasImage(id)) map.removeImage?.(id);
+      badgeIcons.clear();
       built = false;
     },
   };

@@ -71,12 +71,14 @@ to fix a point on the map.*
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services, which the capture extension opens with the picture already in them. |
 | **Inspect** | Reads any photo or video closely with sharpest-frame capture, frame adjustments, editable crop and ELA hints, all kept with the file as you work. |
 | **Collage** | Lays out frames and images from any number of files on one canvas, with per-piece warp and crop and auto-stitch for panoramas. |
-| **Satellite** | Coordinates or a place name become an imagery crop over Esri, OSM, the Wayback archive, Sentinel-2 or Sentinel-1 radar, with measurement tools, stacked overlays, your own KML, GeoJSON or GPX layers, and AOI grids for area review. |
+| **Satellite** | Coordinates or a place name become an imagery crop over Esri, OSM, the Wayback archive, Sentinel-2 or Sentinel-1 radar, with measures that read bearings, range rings, view cones, heights from shadows, lines of sight and viewsheds, a 3D relief view, stacked overlays, your own KML, GeoJSON or GPX layers (followed over time if you want, so a moved front line keeps where it was), and AOI grids for area review. |
+| **Horizon** | Stand anywhere and see what the eye sees: ridges, relief or imagery out to 150 km with the curve of the Earth, summit names, the sun and moon against the ridges, and whether a point is in sight. |
 | **Compare** | Links two dated map views for side-by-side, swipe, fade or blink, with Difference highlights and ground-anchored notes that follow both maps. |
 | **Detect** | Sweeps drawn areas of Sentinel-2 and Sentinel-1 radar for vessels, fires, construction, burn scars, floods and other changes, and only a candidate you keep becomes a case pin. |
 | **Coords & Sky** | Converts coordinate formats, opens map links, and reads the sun and moon at that point on a date, computed offline. |
 | **Geo Proof** | Composes annotated case panels into a proof, from a house style or a published post, and exports `proof.png` plus a re-editable spec. |
 | **Geo Report** | Turns a proof into a prepared thread for X or Bluesky, with coordinates, attribution, character counts, media and a Markdown case note. |
+| **Map plate** | Lays a page out round the case's maps, with a legend, scale, north, inset, labels and credits, and exports it as a PNG, a print PDF, or a layer followed over time played through its days as a video. |
 | **Notebook** | Tabbed Markdown notes with local media, Mermaid diagrams, linked case evidence, broken-reference markers, and PDF export of one note or a whole selection. |
 
 Under the hood: reusable proof and thread templates, per-case SQLite with a
@@ -86,32 +88,33 @@ extension, and cross-platform binaries with a bundled ffmpeg.
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-## New in v0.3.2
+## New in v0.3.3
 
-No new tool this time: the tools you already have read faster, ask less and say
-more clearly what went wrong.
-
-- The browser's Back and Forward walk the tools and what you opened in them, and
-  ask before leaving unsaved work. **Ctrl+K** opens Go to, for a tool, a case or a
-  document.
-- An event is one line under the Timeline axis, with `@` mentions, and **Add
-  event** (Alt+N) opens it over any tool with that tool's view cited.
-- The Timeline draws each date as the instant, day, month or period it is, and
-  every date field reads on one Clock: the place's zone, UTC or any other.
-- The Board reads as an index of people, places and things. A subject's type can
-  be corrected, and two duplicates merged with an Undo.
-- The Graph proposes the links the case already implies, reviewed before they are
-  filed.
-- The Sheet opens on a home, with worklists of the files still to geolocate and of
-  your geolocations by point.
-- Files and the sidebar act on a right-click, and new work lands in the folder you
-  are working in.
-- FIRMS fires keep their size through a zoom, place names sit over the imagery,
-  and Compare and Detect take the whole screen.
-- The Detect analyzer builder works on the map, with checks made from pins and a
-  Test button.
-- A failure reads as one sentence saying what to do, and a second start opens
-  the Azimut already running.
+- **Horizon** draws the terrain seen from a viewpoint in 3D, with named summits
+  and buildings from open sources, lays a photo over it to match by hand, and
+  keeps the views you save. **Find**, in beta, ranks the places of an area whose
+  relief fits the skyline traced on a photo, for you to check. Its
+  [guide](https://github.com/OsintMeThat/azimut/blob/main/docs/FIND.md) says where
+  it is strong, where it fails and how to use it well.
+- **Map plates** lay a page out round the case's maps, from ten ready plates or
+  your own template, on vector, topographic, 3D or Sentinel-2 grounds. They export
+  as a PNG or a print PDF, or play their days and steps as an MP4 or a GIF.
+- **Your own map layers**: draw markers, lines and areas on any map, from a blank
+  layer, a file or a My Maps link, fed by the case's places, proofs and files.
+  Every edit is dated, so a layer reads on any day, and it downloads as KMZ, KML
+  or GeoJSON.
+- Your own icons, imported in Settings, for every layer's palette.
+- Satellite's 3D stands the imagery on relief on a globe of the app's own, with
+  your layers, places and measures, and files a tilted view as a capture.
+- **Measure** is one tool for lines and areas, range rings, view cones, a
+  shadow's height, a viewshed and the ground and line of sight under a line.
+- A reference window fades a case picture or clip over any map, in the app and
+  the extension.
+- Pictures, videos and sounds open in one full-screen viewer.
+- A newcomer is shown around, each new version opens on its What's new, and the
+  `?` guide pictures every tool.
+- When a release is out, the update notice downloads the binary for your system
+  and lists the steps to put it in place.
 - Existing cases open as they are, and older bundles still import.
 
 ## Cases on disk
@@ -172,9 +175,12 @@ open:
 - **Linux**: mark it executable with `chmod +x azimut-linux-x86_64`.
 
 On startup, Azimut asks GitHub for a newer release and PyPI for newer
-downloaders by default, and links the download. Settings can disable that check,
-and **Settings → System → Check for updates** runs it manually. Replace the old binary with the new one. To uninstall, delete
-the binary. Either way `~/Azimut` stays put, so cases open unchanged.
+downloaders by default. When a release is out, **Download for** your system
+fetches its binary straight from the release, and Azimut then lists the steps:
+quit Azimut by closing its console window, put the new file in place of the old
+program, make it runnable as above, and open it. Settings can disable that check,
+and **Settings → System → Check for updates** runs it manually. To uninstall,
+delete the binary. Either way `~/Azimut` stays put, so cases open unchanged.
 
 The downloadable binaries bundle a static **ffmpeg** (and ffprobe), so video
 thumbnails, frame scans, video enhancement, and downloads that merge separate
@@ -298,6 +304,25 @@ uv run --no-sync python -m build --no-isolation
 uv run --no-sync pyinstaller packaging/azimut.spec
 ```
 
+### The guide's pictures
+
+The guide the `?` opens shows each tool photographed in a demo case. Before a
+release, remake the pictures and look at what changed:
+
+```bash
+cd frontend && npm run guide:shots && cd ..
+```
+
+It builds the UI into a scratch folder, runs a private Azimut on a throwaway
+workspace, and needs `uv`, ffmpeg and the network (the maps are drawn from public
+USGS imagery, the extension's from OpenStreetMap's tiles). The demo case is filed from
+public-domain photos, credited with every map in `frontend/guide/photos/CREDITS.md`.
+The "Create your analyzer" pictures read two Sentinel-2 passes from the tile cache of
+an Azimut that already holds them (`~/Azimut`, or `GUIDE_CACHE_HOME`), so making them
+spends no Copernicus requests; without that cache those pictures fail and say why. It fails when a control the guide frames is gone; fix the page in
+`frontend/src/lib/guide.js` or its staging in `frontend/guide/stages.mjs`, then
+commit the pictures in `frontend/src/assets/guide/` with the release.
+
 ### Versions
 
 The app version lives in `src/azimut/__init__.py` alone; `pyproject.toml` reads
@@ -334,7 +359,7 @@ history keeps it.
 ```bash
 source ~/.config/azimut/amo.env   # AMO_JWT_ISSUER + AMO_JWT_SECRET, 0600 file outside the repo
 python3 scripts/sign_extension.py                    # signs, writes packaging/updates.json
-gh release upload v0.3.2 dist-xpi/azimut-capture-0.3.2.xpi
+gh release upload v0.3.3 dist-xpi/azimut-capture-0.3.3.xpi
 ```
 
 Then commit `packaging/updates.json`. That file is what
@@ -393,7 +418,8 @@ nothing else reads it.
 **yt-dlp and gallery-dl are deliberately unbounded**: they track sites that
 change, so pinning them just schedules a breakage. They can also be updated
 from inside the app (Settings → System → Downloaders), which is what keeps a
-months-old binary working.
+months-old binary working. gallery-dl is GPL-2.0-only, so Azimut never imports
+it: it runs as a separate process through its own command line.
 
 Releases are automated: push a semver tag and GitHub Actions
 ([`.github/workflows/release.yml`](.github/workflows/release.yml)) builds the
@@ -401,7 +427,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.3.2 && git push origin v0.3.2
+git tag v0.3.3 && git push origin v0.3.3
 ```
 
 One-time setup: register the repo as a
@@ -421,7 +447,7 @@ One-time setup: register the repo as a
 6. Free and open source. No paid key is ever required; bring your own for
    more basemaps.
 
-Full spec: [docs/SPEC.md](docs/SPEC.md).
+Full spec: [docs/SPEC.md](https://github.com/OsintMeThat/azimut/blob/main/docs/SPEC.md).
 
 ## License
 

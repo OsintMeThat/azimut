@@ -20,7 +20,7 @@
 
 <WorkspaceFolder onchange={(status) => (about.workspace_root = status.root)} />
 
-<section class="group">
+<section class="group" data-guide="settings.export-folders">
   <h3>Export folders</h3>
   <p class="note">Choose a folder for each export type.</p>
   {#each EXPORT_KINDS as kind (kind.id)}
@@ -43,11 +43,11 @@
   {/each}
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.backup">
   <h3>Settings backup</h3>
   <p class="note">
-    Carries settings, keys, templates and your signature; export folders and
-    download logins stay here, so keep this backup private.
+    Carries settings, keys, templates, your icons and your signature;
+    export folders and download logins stay here, so keep this backup private.
   </p>
   <div class="links">
     <a class="btn btn-sm" href="/api/settings/export" download>

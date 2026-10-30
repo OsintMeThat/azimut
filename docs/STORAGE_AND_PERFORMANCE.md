@@ -17,10 +17,15 @@ exported copy stays a finished file under `exports/` or the selected Views folde
   .azimut/                   # hidden application machinery
     bundles/                 # exported bundles and transient imports
     cache/tiles/             # disposable map tile cache
+    cache/terrain/           # terrain height tiles, bounded by size, not age
+    cache/peaks/             # summit names from OpenFreeMap's tiles, a file a tile
+    cache/buildings/         # Horizon's buildings, by source and area
+    cache/turns/             # skylines a Find swept, bounded by size
+    cache/water/             # where water lies, read for Find's mesh step
     lock                     # held by the one Azimut using this workspace
     runtime/                 # updated scraper distributions
     scratch/                 # complete, promotable one-shot cases
-    settings/                # preferences, templates, branding and cookies
+    settings/                # preferences, templates, icons, branding and cookies
 ```
 
 Startup migrates the former `cases/`, `scratch/`, `bundles/`, `runtime/` and
@@ -81,7 +86,7 @@ source that changes during the read, renames the copy into place, then
 writes the pointer — that write is the whole switch, so an interruption before
 it leaves the old folder authoritative and one after leaves the new one, both
 complete. The old folder is then renamed `<name>.old-<date>` and kept until the
-analyst drops it. The tile cache is not copied, being disposable by contract,
+analyst drops it. Nothing under `cache/` is copied, being disposable by contract,
 and a destination that already holds other files gets an `Azimut` subfolder
 rather than settling among them. Choosing a root is also where the path budget
 below is enforced: `layout.room_for_workspace_root()` refuses a root too long
@@ -112,10 +117,14 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
     .inspect/     # one Inspect work per file (.v1/ keeps 0.3.0 sessions)
     .collages/    # collage layouts and their previews; the picture is media
     .compare/     # saved Compare session specs
+    .horizon/     # saved Horizon views and their previews
+      finds/      #   searches for where a photo was taken: the question and every point scored
+      .work.json  #   the work in progress no save has kept, brought back on reload
     .analysis/    # saved areas, saved detections, runs and the frames behind their results
     .search/      # saved Grid Search state
     .layers/      # added map layers: spec, snapshot, icons
       .cache/     #   parsed GeoJSON, rebuilt from the snapshot
+    .mapplates/   # map plates: the layout round the case's maps, and its preview
     .trash/       # deleted artifacts grouped by delete action, in numbered slots
 ```
 
@@ -142,12 +151,12 @@ schema fields, plus two pieces of case metadata that own no files, the to-do lis
 and the work folder. It no longer holds the graph, so the case switcher can identify a
 case without opening its database. `case.db` is the source of truth for mutable
 structured state (entities, links, folders, jobs). The files under `media/`,
-`proofs/`, `sheets/`, `.drafts/`, `.inspect/`, `.collages/`, `.compare/`, `.analysis/`,
-`.layers/` and `notes/` are the source of truth for their own content.
+`proofs/`, `sheets/`, `.drafts/`, `.inspect/`, `.collages/`, `.compare/`, `.horizon/`, `.analysis/`,
+`.layers/`, `.mapplates/` and `notes/` are the source of truth for their own content.
 
 App-wide preferences stay outside cases under `<workspace>/.azimut/settings/`:
-`settings.json`, `templates.json`, `signature.png` and the optional
-`cookies.txt`. Startup moves the former workspace-root or `.settings/` files
+`settings.json`, `templates.json`, `signature.png`, the icon library in `icons/` and
+the optional `cookies.txt`. Startup moves the former workspace-root or `.settings/` files
 there with independent atomic renames, so a partial move resumes. If both
 locations differ, the current hidden file wins and the legacy copy is retained
 beside it under a `.legacy` name.
@@ -216,6 +225,7 @@ carry enough information to detect staleness.
 | Trash journal | `case.db` (`trash`) | One row per delete action; payload loaded only for restore |
 | Deleted artifact bytes | `.trash/<group>/` | Numbered slots paired to their origin by the journal, retained until purge |
 | Thumbnails | `media/.thumbs/` | Cache; safe to remove at any time |
+| Video overviews | `media/.thumbs/` | Inspect's hover strip, waveform and last scan; cache, safe to remove |
 | Note bodies | `notes.md`, `notes/<folder>/<title>.md` | Graph keeps only id, title, folder, path; uniqueness is per folder |
 
 ## Packaging and frozen-binary constraints
@@ -492,7 +502,9 @@ Bundle format 2 carries the complete case under a `case/` member prefix:
 analyst's free zone. The prefix keeps the bundle metadata outside that free
 zone, so even analyst files called `bundle.json` or `bundle-header.json` round
 trip. A case-root name that case-insensitively collides with `azimut/` is
-refused, as are symbolic links on both export and import. There is no fixed size
+refused, as are symbolic links on both export and import. A folder in `azimut/`
+that this version has no bundle decision for is work a newer Azimut wrote there, so
+the export refuses rather than leave it out. There is no fixed size
 ceiling: exports and imports use current free space plus a safety reserve, and
 the import dialog warns when the temporary requirement reaches 10 GiB.
 
@@ -502,6 +514,9 @@ remain clear. Passwords live in a process-memory map keyed by job id, never in
 the durable payload.
 
 Import pre-flights format and database versions before creating a destination.
+A refusal of a bundle made by a newer Azimut names that version, so the analyst
+knows which one to update to. Jobs never travel, so a Horizon search that was under
+way lands stopped, keeping what it had found.
 The browser file picker uploads to `<workspace>/.azimut/bundles/.imports/`; rejected and
 cancelled uploads are removed immediately, completed imports remove their source,
 and abandoned uploads expire after 24 hours.
@@ -656,6 +671,15 @@ unique temp file, validated, then renamed into `.thumbs/`. Readers never see a
 half-written thumbnail, and the Windows rename rules hold. Images decode through
 the process-wide Pillow pixel clamp.
 
+Inspect keeps a video's overview in the same directory under the same identity
+(`VIDEO_CACHE_GEN`): `<sha[:24]>-strip-g<gen>.jpg` holds the hover pictures, one
+per second up to 120, `-overview-g<gen>.json` their layout and the waveform, and
+`-scan-g<gen>.json` the last shot and sharpness scan. The overview is made when
+the analyst opens the video in Inspect, from one keyframe-only decode and one
+8 kHz mono audio decode reduced as it streams; the scan only when Scan is pressed.
+`repair` counts all three as referenced while the video is in the case, and the
+budget prunes them with the thumbnails.
+
 ### Inline for cheap, queued for heavy
 
 A registered image gets its thumbnail rendered inline with Pillow. Videos use the
@@ -808,6 +832,20 @@ These are interaction budgets, not release claims. Shared CI hardware varies,
 so the automated suites enforce bounded queries, result sizes, and mounted-row
 limits instead of machine-specific timings.
 
+The map keeps to work counts the same way, each one a lag that was measured and
+removed (2026-10-23):
+
+| On the map | Held to |
+|---|---|
+| A point of a layer on the 3D view | one projection a frame, whatever layers stand on it |
+| A feature a layer's filter refuses at every zoom | never weighed |
+| A dot that paints nothing (a click target) | placed for clicks, never drawn |
+| Names in view | measured all, written only once placed; placed a few times a second, not every frame |
+| The flat map under the 3D view | not drawn again while the globe moves |
+| A personal layer read back unchanged | not handed to the engine again |
+| A free provider's imagery on a flat map | asked in batches, a handful of requests a screen |
+| Turning the map | its address written once the turn ends |
+
 ## How it is verified
 
 - **Graph contract** (`tests/test_repository.py`): entity/link/folder CRUD,
@@ -843,6 +881,13 @@ limits instead of machine-specific timings.
 - **Frontend** (vitest + svelte-check + the production build): first-page paging,
   complete server search, full-result media facets, request cancellation on case
   switch, scoped metadata loading and thumbnail placeholder/failure/retry markup.
+- **Map smoothness**: the counts above, at a few thousand features and names
+  (`frontend/src/lib/globe/smoothness.test.js`, `mirror.test.js`,
+  `standing.test.js`, `glyphs.test.js`, `lib/map/addedLayer.test.js`,
+  `basemap.test.js`, `tileBatch.test.js`), and in a real browser the flat map
+  left undrawn under a turning globe, the address written once a turn and the
+  imagery asked in batches (`e2e/satellite-3d.spec.js`,
+  `e2e/satellite-overlays.spec.js`).
 
 The backend suite runs on Python 3.11 and the three release operating systems.
 

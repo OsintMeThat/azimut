@@ -1,7 +1,7 @@
 """REST API for the layers an analyst adds to a case's map.
 
-Three ways in — a file opened from the computer, a URL subscribed to, and a
-GeoConfirmed query — and one kind of thing out. Everything a layer is parsed from is read in Python
+Files, followed URLs, GeoConfirmed queries and personal working copies share
+one layer lifecycle. Everything a layer is parsed from is read in Python
 (`engine/maplayers.py`): the browser gets JSON, never XML, never a zip, and never
 the remote host's address.
 
@@ -24,18 +24,23 @@ Google for the one it pointed at.
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
+from urllib.parse import quote
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
 from .. import layout
 from ..engine import artifacts as artifact_engine
 from ..engine import geoconfirmed
+from ..engine import layerediting
+from ..engine import layerexports
+from ..engine import layerlinks
 from ..engine import maplayers as layer_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
+from . import events
 
 router = APIRouter(prefix="/api/cases", tags=["map-layers"])
 #: What GeoConfirmed offers, which belongs to no case.
@@ -100,16 +105,561 @@ class UpdateIn(BaseModel):
     title: str | None = Field(default=None, max_length=200)
 
 
+class EditableIn(BaseModel):
+    title: str = Field(default="My layer", min_length=1, max_length=200)
+    description: str = Field(default="", max_length=layer_engine.MAX_DESCRIPTION)
+
+
+class EditableLinkIn(BaseModel):
+    url: str = Field(min_length=1, max_length=4000)
+    title: str = Field(default="", max_length=200)
+    description: str = Field(default="", max_length=layer_engine.MAX_DESCRIPTION)
+
+
+class TrackIn(BaseModel):
+    """A personal layer followed over time; see `layerediting.set_track`."""
+    on: bool | None = None
+    precision: Literal["day", "time"] | None = None
+    zone: str | None = Field(default=None, max_length=64)
+    #: How many days an event stays on the map after its own, or "always".
+    window: Annotated[int, Field(ge=0, le=layerediting.MAX_WINDOW)] | Literal["always"] | None = None
+
+
+class LayerDetailsIn(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=layer_engine.MAX_DESCRIPTION)
+    track: TrackIn | None = None
+    #: The My Maps this layer is sent to, by its editor's address; "" forgets it.
+    mymaps: str | None = Field(default=None, max_length=layerediting.MAX_LINK)
+
+
+class FeatureOrderIn(BaseModel):
+    keys: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(min_length=1, max_length=100000)
+    group: str = Field(min_length=1, max_length=64)
+    before: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+#: A link a marker cites, bounded here and checked by the engine.
+Link = Annotated[str, Field(max_length=layerediting.MAX_LINK)]
+
+
+class MarkerFields(BaseModel):
+    """What a feature says beyond its name and style; see `layerediting.apply_fields`."""
+    date: str | None = Field(default=None, max_length=40)
+    status: str | None = Field(default=None, max_length=20)
+    bearing: float | None = Field(default=None, allow_inf_nan=False)
+    links: list[Link] | None = Field(default=None, max_length=layerediting.MAX_LINKS)
+    provenance: str | None = Field(default=None, max_length=20)
+    confidence: str | None = Field(default=None, max_length=20)
+    #: Whose work a copied feature is, said in the credits of a plate that draws it.
+    credit: str | None = Field(default=None, max_length=layerediting.MAX_CREDIT)
+    line_width: float | None = Field(default=None, allow_inf_nan=False)
+    line_dash: str | None = Field(default=None, max_length=10)
+    line_arrow: str | None = Field(default=None, max_length=10)
+    area_fill: str | None = Field(default=None, max_length=10)
+    fill_opacity: float | None = Field(default=None, allow_inf_nan=False)
+    marker_size: float | None = Field(default=None, allow_inf_nan=False)
+    label: str | None = Field(default=None, max_length=10)
+    label_size: float | None = Field(default=None, allow_inf_nan=False)
+
+
+#: A moment on a tracked layer's clock: `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, "" for always.
+Moment = Annotated[str, Field(max_length=16)]
+#: A pictogram a marker wears, from the analyst's library or a layer of the case
+#: (`layerediting.adopt_icon`), or "" for none.
+IconKey = Annotated[str, Field(pattern=r"^([0-9a-f]{16})?$")]
+
+
+def _layer_name(value: str | None) -> str | None:
+    """The layer a point's own icon is copied from, named the way a save names it."""
+    return layout.slugify(value, "Layer") if value else None
+
+
+class MarkerIn(MarkerFields):
+    #: On a tracked layer, the moment the new feature appears.
+    at: Moment | None = None
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
+    name: str = Field(default="", max_length=layer_engine.MAX_NAME)
+    colour: str = Field(default="#0072b2", pattern=r"^#[0-9a-fA-F]{6}$")
+    symbol: str = "pin"
+    description: str = Field(default="", max_length=layer_engine.MAX_DESCRIPTION)
+    group: str | None = Field(default=None, max_length=64)
+    icon: IconKey = ""
+    #: The layer `icon` is copied from, when a point leaves it wearing its own.
+    icon_from: str | None = Field(default=None, max_length=200)
+
+    @field_validator("symbol")
+    @classmethod
+    def _symbol(cls, value: str) -> str:
+        if value not in layerediting.SYMBOLS:
+            raise ValueError("choose an icon from the layer palette")
+        return value
+
+    @field_validator("icon_from")
+    @classmethod
+    def _source(cls, value: str | None) -> str | None:
+        return _layer_name(value)
+
+
+class MarkerUpdateIn(MarkerFields):
+    name: str | None = Field(default=None, max_length=layer_engine.MAX_NAME)
+    colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    symbol: str | None = None
+    description: str | None = Field(default=None, max_length=layer_engine.MAX_DESCRIPTION)
+    group: str | None = Field(default=None, max_length=64)
+    geometry: dict[str, Any] | None = None
+    #: Stop following the case item the marker was added from, keeping its point.
+    unlink: bool | None = None
+    #: On a tracked layer: the moment a change of shape or status is dated to…
+    at: Moment | None = None
+    #: …or the state written at it taken out of the history.
+    drop_state: bool | None = None
+    #: When the feature first shows and when it leaves the map, "" for always and still there.
+    start: Moment | None = None
+    end: Moment | None = None
+    #: Nobody knows when it left: no end, drawn as still there, said as unknown.
+    end_unknown: Literal[True] | None = None
+    #: The pictogram it wears, "" taking it off; a symbol picked takes it off too.
+    icon: IconKey | None = None
+    icon_from: str | None = Field(default=None, max_length=200)
+
+    @field_validator("symbol")
+    @classmethod
+    def _symbol(cls, value: str | None) -> str | None:
+        return MarkerIn._symbol(value) if value is not None else None
+
+    @field_validator("icon_from")
+    @classmethod
+    def _source(cls, value: str | None) -> str | None:
+        return _layer_name(value)
+
+
+class GroupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class GroupUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    mode: Literal["individual", "colour", "uniform"] | None = None
+    colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    symbol: str | None = None
+    size: float | None = Field(default=None, ge=0.5, le=3, allow_inf_nan=False)
+    stroke: float | None = Field(default=None, ge=0.5, le=12, allow_inf_nan=False)
+    #: Draw each feature's name beside it on the map.
+    labels: bool | None = None
+    #: Its features are events: on a tracked layer they fade after their day.
+    events: bool | None = None
+    #: The look its features take when they set none of their own (`layerediting.GROUP_STYLE`).
+    line_dash: str | None = Field(default=None, max_length=10)
+    line_arrow: str | None = Field(default=None, max_length=10)
+    area_fill: str | None = Field(default=None, max_length=10)
+    fill_opacity: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    #: The pictogram a group with one style draws its markers in, "" for its symbol.
+    icon: IconKey | None = None
+
+    @field_validator("symbol")
+    @classmethod
+    def _symbol(cls, value: str | None) -> str | None:
+        return MarkerUpdateIn._symbol(value)
+
+
+class PaletteEntryIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    colour: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class IconNameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    key: str = Field(min_length=1, max_length=64)
+
+
+class PaletteIn(BaseModel):
+    colours: list[PaletteEntryIn] = Field(default_factory=list, max_length=layerediting.MAX_PALETTE)
+    # left out, the icons keep their names
+    icons: list[IconNameIn] | None = Field(default=None, max_length=layerediting.MAX_ICON_NAMES)
+
+
+class LinkItemIn(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
+
+
+class LinksIn(BaseModel):
+    items: list[LinkItemIn] = Field(min_length=1, max_length=2000)
+    group: str | None = Field(default=None, max_length=64)
+    # The markers' own style, for a group whose features each have theirs.
+    symbol: str | None = None
+    colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    #: What the new markers say of what they show: damaged or destroyed, intact when absent.
+    status: Literal["damaged", "destroyed"] | None = None
+    icon: IconKey = ""
+
+    @field_validator("symbol")
+    @classmethod
+    def _symbol(cls, value: str | None) -> str | None:
+        if value is not None and value not in layerediting.SYMBOLS:
+            raise ValueError("choose an icon from the layer palette")
+        return value
+
+
+class MergeIn(BaseModel):
+    keys: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(min_length=2, max_length=2000)
+
+
+class SplitIn(BaseModel):
+    key: str = Field(min_length=1, max_length=64)
+    at: int | None = Field(default=None, ge=1, le=4096)
+
+
+class SelectionIn(BaseModel):
+    keys: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(min_length=1, max_length=100000)
+    changes: MarkerUpdateIn | None = None
+    offset: list[Annotated[float, Field(ge=-360, le=360, allow_inf_nan=False)]] | None = Field(default=None, min_length=2, max_length=2)
+    remove: bool = False
+    #: On a tracked layer, the moment a move or a status is dated to; none changes it on every day.
+    at: Moment | None = None
+
+
+class GroupBackIn(GroupUpdateIn):
+    """A group an edit took out, as the editor held it, and its place in the layer's order."""
+
+    id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=200)
+    #: Where it stood among the groups, the first being 0.
+    at: int = Field(default=0, ge=0, le=2000)
+    #: An imported group can stand outside the sliders' range; it comes back clamped.
+    size: float | None = Field(default=None, allow_inf_nan=False)
+    stroke: float | None = Field(default=None, allow_inf_nan=False)
+
+
+class RevertIn(BaseModel):
+    #: Whole features as they were, found by their key.
+    put: list[dict[str, Any]] = Field(default_factory=list, max_length=5000)
+    drop: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(default_factory=list, max_length=5000)
+    #: Groups an edit took out, put back before the features return to them.
+    groups: list[GroupBackIn] = Field(default_factory=list, max_length=50)
+    #: Groups an edit made, taken out once the features have left them.
+    drop_groups: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(default_factory=list, max_length=50)
+
+
+class GroupOrderIn(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=2000)
+
+
+class EditEndIn(BaseModel):
+    token: str = Field(min_length=32, max_length=32)
+    revision: str = Field(min_length=64, max_length=64)
+    discard: bool = False
+
+
+class ShapeIn(MarkerFields):
+    at: Moment | None = None
+    geometry: dict[str, Any]
+    name: str = Field(default="", max_length=layer_engine.MAX_NAME)
+    colour: str = Field(default="#0072b2", pattern=r"^#[0-9a-fA-F]{6}$")
+    description: str = Field(default="", max_length=layer_engine.MAX_DESCRIPTION)
+    group: str | None = Field(default=None, max_length=64)
+
+
+def _changes(body: BaseModel) -> dict[str, Any]:
+    """The fields an edit sent. A marker field sent as null clears it; the rest skip null."""
+    return {key: value for key, value in body.model_dump(exclude_unset=True).items()
+            if value is not None or key in layerediting.CLEARABLE}
+
+
 def _refused(exc: layer_engine.LayerError) -> HTTPException:
     """A source that will not draw, said in one sentence the panel can show."""
     status = 502 if isinstance(exc, layer_engine.LayerFetchError) else 422
     return HTTPException(status_code=status, detail=str(exc))
 
 
+class LayerExportIn(BaseModel):
+    icons: dict[Annotated[str, Field(max_length=100, pattern=r"^[a-z0-9-]+$")], Annotated[str, Field(max_length=200000)]] = Field(default_factory=dict, max_length=1000)
+
+    @field_validator("icons")
+    @classmethod
+    def _size(cls, value: dict[str, str]) -> dict[str, str]:
+        if sum(map(len, value.values())) > 16 * 1024 * 1024:
+            raise ValueError("export icons exceed 16 MB")
+        return value
+
+    #: A tracked layer as it stood at this moment, what a My Maps is sent.
+    at: Moment | None = None
+    #: A tracked layer's whole history, each state dated, for a time slider.
+    history: bool = False
+
+
+@router.post("/{case_id}/map-layers/{name}/export/{fmt}")
+def download_layer(case_id: str, name: str, fmt: Literal["geojson", "kml", "kmz"], body: LayerExportIn) -> Response:
+    try:
+        content, mime, title = layerexports.export(get_case(case_id), _stem(name), fmt, body.icons,
+                                                   at=body.at, history=body.history)
+        return Response(content=content, media_type=mime,
+                        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(title + '.' + fmt, safe='')}",
+                                 "Cache-Control": "no-store"})
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
 @router.get("/{case_id}/map-layers")
 def list_layers(case_id: str) -> list[dict[str, Any]]:
     """Every layer this case holds. Reads disk only — never the network."""
     return layer_engine.listing(get_case(case_id))
+
+
+@router.post("/{case_id}/map-layers/editable")
+def create_editable_layer(case_id: str, body: EditableIn) -> dict[str, Any]:
+    return layerediting.create(get_case(case_id), body.title, body.description)
+
+
+@router.post("/{case_id}/map-layers/editable/upload")
+async def import_editable_layer(
+    case_id: str, file: UploadFile, title: str = Form(default="", max_length=200),
+    description: str = Form(default="", max_length=layer_engine.MAX_DESCRIPTION),
+) -> dict[str, Any]:
+    data = await file.read(MAX_UPLOAD + 1)
+    try:
+        return layerediting.from_file(get_case(case_id), data, file.filename or "layer", title, description)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/editable/link")
+def import_editable_link(case_id: str, body: EditableLinkIn) -> dict[str, Any]:
+    """A My Maps read once into a personal layer; the link is not followed after."""
+    try:
+        return layerediting.from_my_maps(get_case(case_id), body.url, body.title, body.description)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/editable-copy")
+def copy_editable_layer(case_id: str, name: str, body: EditableIn) -> dict[str, Any]:
+    try:
+        return layerediting.copy_layer(get_case(case_id), _stem(name), body.title, body.description)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.get("/{case_id}/map-layers/{name}/edit")
+def editable_layer(case_id: str, name: str) -> dict[str, Any]:
+    try:
+        return layerediting.read(get_case(case_id), _stem(name))
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/edit")
+def begin_layer_edit(case_id: str, name: str) -> dict[str, Any]:
+    try:
+        return layerediting.begin_edit(get_case(case_id), _stem(name))
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/edit/finish")
+def finish_layer_edit(case_id: str, name: str, body: EditEndIn) -> dict[str, Any]:
+    try:
+        return layerediting.end_edit(get_case(case_id), _stem(name), body.token,
+                                     body.revision, discard=body.discard)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/groups/order")
+def reorder_layer_groups(case_id: str, name: str, body: GroupOrderIn) -> dict[str, Any]:
+    try:
+        return layerediting.reorder_groups(get_case(case_id), _stem(name), body.ids)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.patch("/{case_id}/map-layers/{name}/edit")
+def edit_layer_details(case_id: str, name: str, body: LayerDetailsIn) -> dict[str, Any]:
+    try:
+        return layerediting.update_details(get_case(case_id), _stem(name), body.model_dump(exclude_none=True))
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/features/order")
+def reorder_layer_features(case_id: str, name: str, body: FeatureOrderIn) -> dict[str, Any]:
+    try:
+        return layerediting.reorder_features(get_case(case_id), _stem(name), body.keys, body.group, body.before)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/selection")
+def edit_layer_selection(case_id: str, name: str, body: SelectionIn) -> dict[str, Any]:
+    try:
+        changes = _changes(body.changes) if body.changes else {}
+        return layerediting.edit_selection(get_case(case_id), _stem(name), body.keys,
+                                           changes=changes, offset=body.offset, remove=body.remove,
+                                           at=body.at)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/selection/{batch}/restore")
+def restore_layer_selection(case_id: str, name: str, batch: str) -> dict[str, Any]:
+    try:
+        return layerediting.restore_selection(get_case(case_id), _stem(name), batch)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/revert")
+def revert_layer_features(case_id: str, name: str, body: RevertIn) -> dict[str, Any]:
+    """Put features back as an edit found them: the layer editor's undo and redo."""
+    try:
+        return layerediting.revert(get_case(case_id), _stem(name), body.put, body.drop,
+                                   [group.model_dump(exclude_none=True) for group in body.groups], body.drop_groups)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/shapes")
+def add_layer_shape(case_id: str, name: str, body: ShapeIn) -> dict[str, Any]:
+    try:
+        return layerediting.add_shape(get_case(case_id), _stem(name), **body.model_dump())
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.get("/{case_id}/map-layers/places/{place_id}/usage")
+def layer_place_usage(case_id: str, place_id: str) -> dict[str, Any]:
+    try:
+        return layerediting.place_usage(get_case(case_id), place_id)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/groups")
+def add_layer_group(case_id: str, name: str, body: GroupIn) -> dict[str, Any]:
+    try:
+        return layerediting.add_group(get_case(case_id), _stem(name), body.name)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.patch("/{case_id}/map-layers/{name}/groups/{key}")
+def edit_layer_group(case_id: str, name: str, key: str, body: GroupUpdateIn) -> dict[str, Any]:
+    try:
+        changes = {field: value for field, value in body.model_dump(exclude_unset=True).items()
+                   if value is not None or field in layerediting.GROUP_STYLE}
+        return layerediting.update_group(get_case(case_id), _stem(name), key, changes)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.delete("/{case_id}/map-layers/{name}/groups/{key}")
+def remove_layer_group(case_id: str, name: str, key: str) -> dict[str, Any]:
+    try:
+        return layerediting.remove_group(get_case(case_id), _stem(name), key)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.get("/{case_id}/layer-palette")
+def layer_palette(case_id: str) -> dict[str, Any]:
+    case = get_case(case_id)
+    return {"colours": layerediting.palette(case), "icons": layerediting.icon_names(case)}
+
+
+@router.put("/{case_id}/layer-palette")
+def save_layer_palette(case_id: str, body: PaletteIn) -> dict[str, Any]:
+    try:
+        kept = layerediting.set_names(get_case(case_id), [entry.model_dump() for entry in body.colours],
+                                      None if body.icons is None else [entry.model_dump() for entry in body.icons])
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+    events.publish({"type": "saved", "case_id": case_id})
+    return {"colours": kept[0], "icons": kept[1]}
+
+
+@router.get("/{case_id}/layer-links")
+def linkable_items(case_id: str) -> list[dict[str, Any]]:
+    """Everything located in the case that a layer marker can follow. Reads disk only."""
+    return layerlinks.linkable(get_case(case_id))
+
+
+@router.get("/{case_id}/layer-targets")
+def layer_targets(case_id: str, entity: Annotated[str | None, Query(max_length=64)] = None) -> list[dict[str, Any]]:
+    """The layers a case item can be added to, and where it already is. Reads disk only."""
+    return layerediting.layer_targets(get_case(case_id), entity)
+
+
+@router.post("/{case_id}/map-layers/{name}/links")
+def add_layer_links(case_id: str, name: str, body: LinksIn) -> dict[str, Any]:
+    try:
+        return layerediting.add_links(get_case(case_id), _stem(name),
+                                      [item.model_dump() for item in body.items], body.group,
+                                      symbol=body.symbol, colour=body.colour, status=body.status or "",
+                                      icon=body.icon)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/merge")
+def merge_layer_features(case_id: str, name: str, body: MergeIn) -> dict[str, Any]:
+    try:
+        return layerediting.merge(get_case(case_id), _stem(name), body.keys)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/split")
+def split_layer_feature(case_id: str, name: str, body: SplitIn) -> dict[str, Any]:
+    try:
+        return layerediting.split(get_case(case_id), _stem(name), body.key, body.at)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/markers")
+def add_layer_marker(case_id: str, name: str, body: MarkerIn) -> dict[str, Any]:
+    try:
+        return layerediting.add_marker(get_case(case_id), _stem(name), **body.model_dump())
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.patch("/{case_id}/map-layers/{name}/markers/{key}")
+def edit_layer_marker(case_id: str, name: str, key: str, body: MarkerUpdateIn) -> dict[str, Any]:
+    try:
+        return layerediting.update_marker(get_case(case_id), _stem(name), key, _changes(body))
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/markers/{key}/place")
+def save_marker_place(case_id: str, name: str, key: str) -> dict[str, Any]:
+    case = get_case(case_id)
+    try:
+        result = layerediting.promote(case, _stem(name), key)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+    events.publish({"type": "saved", "case_id": case.id})
+    return result
+
+
+@router.delete("/{case_id}/map-layers/{name}/markers/{key}")
+def remove_layer_marker(case_id: str, name: str, key: str) -> dict[str, Any]:
+    try:
+        return layerediting.remove_marker(get_case(case_id), _stem(name), key)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/markers/{key}/restore")
+def restore_layer_marker(case_id: str, name: str, key: str) -> dict[str, Any]:
+    try:
+        return layerediting.restore_marker(get_case(case_id), _stem(name), key)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
 
 
 @router.post("/{case_id}/map-layers/upload")
@@ -213,7 +763,7 @@ def read_layer(case_id: str, name: str) -> dict[str, Any]:
 
 @router.get("/{case_id}/map-layers/{name}/data")
 def layer_data(case_id: str, name: str) -> FileResponse:
-    """The parsed GeoJSON the map draws, rebuilt from the snapshot if need be.
+    """The parsed drawing, rebuilt from the source snapshot or working spec.
 
     Never reused unasked: a refresh changes what this one address holds, and a
     browser left to guess a lifetime from Last-Modified goes on drawing the
@@ -230,12 +780,14 @@ def layer_data(case_id: str, name: str) -> FileResponse:
 
 
 @router.get("/{case_id}/map-layers/{name}/icons/{key}")
-def layer_icon(case_id: str, name: str, key: str) -> Response:
+def layer_icon(case_id: str, name: str, key: str, v: Annotated[str, Query(max_length=64)] = "") -> Response:
     """One of the source's own pictograms, as the PNG this app composed for it.
 
     Reads a zip in the case folder and nothing else — the address the source gave
-    was followed once, when the layer was added, and never from here. Cached hard
-    because the key is a content hash: a different icon is a different URL.
+    was followed once, when the layer was added, and never from here. The key
+    hashes what the KML says of the icon, not its pixels, so a refresh can put
+    another picture under it. Cached hard only when the address names the
+    snapshot it was read from (`v`); otherwise the browser checks again.
     """
     case = get_case(case_id)
     try:
@@ -247,8 +799,30 @@ def layer_icon(case_id: str, name: str, key: str) -> Response:
     return Response(
         content=png,
         media_type="image/png",
-        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        headers={"Cache-Control": "public, max-age=31536000, immutable" if v else "no-cache"},
     )
+
+
+@router.get("/{case_id}/map-layers/{name}/icons")
+def layer_icons(case_id: str, name: str) -> list[dict[str, Any]]:
+    """The pictograms a layer holds, most worn first. Reads disk only."""
+    try:
+        return layerediting.layer_icons(get_case(case_id), _stem(name))
+    except layer_engine.LayerError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+class IconKeysIn(BaseModel):
+    keys: list[Annotated[str, Field(pattern=r"^[0-9a-f]{1,32}$")]] = Field(min_length=1, max_length=layer_engine.MAX_ICONS)
+
+
+@router.post("/{case_id}/map-layers/{name}/icons/library")
+def layer_icons_to_library(case_id: str, name: str, body: IconKeysIn) -> dict[str, Any]:
+    """Some of a layer's pictograms filed in the analyst's library. Touches no network."""
+    try:
+        return layerediting.icons_to_library(get_case(case_id), _stem(name), body.keys)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
 
 
 class OrderIn(BaseModel):
