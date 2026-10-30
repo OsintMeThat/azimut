@@ -1466,24 +1466,13 @@
     if (Number.isFinite(place.reach)) overlay.setReachFound(place.reach);
   }
 
-  /** Open a search the case keeps in Find, with its photo and its trace when another is laid. */
+  /** Open a search the case keeps in Find, with its photo and its trace. */
   async function openSearch(name) {
     const caseId = caseState.current?.id;
     if (!caseId) return;
     try {
       mode = 'find';
-      const record = await finder.openSearch(caseId, name);
-      const photo = record.ask?.photo;
-      if (photo?.path && overlay.source?.path !== photo.path) {
-        await overlay.openCase(caseId, { path: photo.path, kind: photo.kind, title: photo.title });
-        overlay.restoreWork({
-          strokes: photo.strokes ?? [],
-          marks: photo.marks ?? null,
-          bend: photo.bend ?? 0,
-          corners: photo.corners ?? null,
-          hints: record.ask?.hints,
-        });
-      }
+      await finder.openWithPhoto(caseId, name);
     } catch (failure) {
       toast(failure.message || 'The search could not be opened', 'danger');
     }

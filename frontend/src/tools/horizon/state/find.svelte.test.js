@@ -933,6 +933,63 @@ describe('the search', () => {
   });
 });
 
+describe('a search opened with its photo', () => {
+  const stroke = [{ u: 0.1, v: 0.4 }, { u: 0.9, v: 0.5 }];
+  const askOf = (path, strokes) => ({ status: 'saved', ask: { photo: { path, kind: 'image', title: 'Barry', strokes }, hints: { picture: 'photo' } } });
+
+  function opener(record) {
+    const api = { get: vi.fn(async () => record), post: vi.fn() };
+    const overlay = {
+      isPanorama: false,
+      source: { path: 'media/barry.png' },
+      seenOf: (p) => p,
+      mix: 0.4,
+      pins: [{ time: 1 }],
+      openCase: vi.fn(async () => {}),
+      restoreWork: vi.fn(),
+    };
+    const view = { camera: { heading: 0, tilt: 0, roll: 0, fov: 60, projection: 'camera' } };
+    return { find: createFindState({ api, overlay, view }), overlay };
+  }
+
+  it('brings its own trace over the same photo, leaving what no search keeps', async () => {
+    const { find, overlay } = opener(askOf('media/barry.png', [stroke]));
+    await find.openWithPhoto('c1', 'second setup');
+    expect(overlay.openCase).not.toHaveBeenCalled();
+    expect(overlay.restoreWork).toHaveBeenCalledTimes(1);
+    expect(overlay.restoreWork.mock.calls[0][0]).toMatchObject({ strokes: [stroke], hints: { picture: 'photo' }, mix: 0.4, pins: [{ time: 1 }] });
+  });
+
+  it('opens another photo first, with its trace', async () => {
+    const { find, overlay } = opener(askOf('media/other.png', [stroke]));
+    await find.openWithPhoto('c1', 'other photo');
+    expect(overlay.openCase).toHaveBeenCalledWith('c1', { path: 'media/other.png', kind: 'image', title: 'Barry' });
+    expect(overlay.restoreWork.mock.calls[0][0].strokes).toEqual([stroke]);
+    expect(overlay.restoreWork.mock.calls[0][0]).not.toHaveProperty('mix');
+  });
+
+  it('keeps the trace being worked on when the search on show is opened again', async () => {
+    const { find, overlay } = opener(askOf('media/barry.png', [stroke]));
+    await find.openWithPhoto('c1', 'on show');
+    overlay.restoreWork.mockClear();
+    await find.openWithPhoto('c1', 'on show');
+    expect(overlay.restoreWork).not.toHaveBeenCalled();
+  });
+
+  it('leaves the trace laid alone when the search kept none', async () => {
+    const { find, overlay } = opener(askOf('media/barry.png', []));
+    await find.openWithPhoto('c1', 'no trace');
+    expect(overlay.restoreWork).not.toHaveBeenCalled();
+  });
+
+  it('asks nothing of the photo when the search has none', async () => {
+    const { find, overlay } = opener({ status: 'saved', ask: { photo: null } });
+    await find.openWithPhoto('c1', 'no photo');
+    expect(overlay.openCase).not.toHaveBeenCalled();
+    expect(overlay.restoreWork).not.toHaveBeenCalled();
+  });
+});
+
 describe('the setup kept on the bench', () => {
   const corners = [
     { lat: 16.9, lon: 45.0 },

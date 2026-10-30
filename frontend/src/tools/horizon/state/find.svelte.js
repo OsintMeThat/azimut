@@ -1154,6 +1154,30 @@ export function createFindState({ api, overlay, view }) {
       if (ACTIVE.includes(record.status)) follow(caseId, name);
       return record;
     },
+    /**
+     * Open a search the case keeps with its photo and its trace. A case can ask of one photo with several traces, so
+     * the photo being laid already does not keep the trace it holds; the search on show, opened again, does keep the
+     * one being worked on, and a search kept without a trace leaves the one laid alone.
+     */
+    async openWithPhoto(caseId, name) {
+      const again = search?.name === name;
+      const record = await this.openSearch(caseId, name);
+      const photo = record.ask?.photo;
+      if (!photo?.path) return record;
+      const laid = overlay.source?.path === photo.path;
+      if (!laid) await overlay.openCase(caseId, { path: photo.path, kind: photo.kind, title: photo.title });
+      else if (again || !photo.strokes?.length) return record;
+      overlay.restoreWork({
+        strokes: photo.strokes ?? [],
+        marks: photo.marks ?? null,
+        bend: photo.bend ?? 0,
+        corners: photo.corners ?? null,
+        hints: record.ask?.hints,
+        // what no search keeps stays as it was on a photo still laid
+        ...(laid ? { mix: overlay.mix, pins: overlay.pins } : {}),
+      });
+      return record;
+    },
     /** Delete a search the case keeps, to the Trash. */
     async remove(caseId, name) {
       await api.del(`/api/cases/${encodeURIComponent(caseId)}/horizon/finds/${encodeURIComponent(name)}`);
