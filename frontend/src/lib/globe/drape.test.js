@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DRAPE_SIZE, engineZoom, paintTile, tilePixel } from './drape.js';
+import { DRAPE_SIZE, engineZoom, LINE_MARGIN, paintTile, tilePixel, visibleRuns } from './drape.js';
 import { compileLayer } from './style.js';
 
 /** A 2D context that writes down what it was asked to paint. */
@@ -24,7 +24,7 @@ function recorder() {
       ctx.dash = dash;
     },
     stroke() {
-      calls.push({ op: 'stroke', colour: ctx.strokeStyle, width: ctx.lineWidth, dash: ctx.dash, path: [...path] });
+      calls.push({ op: 'stroke', colour: ctx.strokeStyle, width: ctx.lineWidth, dash: ctx.dash, offset: ctx.lineDashOffset ?? 0, path: [...path] });
     },
     fill() {
       calls.push({ op: 'fill', colour: ctx.fillStyle, alpha: ctx.globalAlpha, path: [...path] });
@@ -93,6 +93,50 @@ describe('a tile of the globe’s ground, painted', () => {
     paintTile(ctx, { z: 3, x: 1, y: 0 }, [{ layer: border, vector, from: { z: 2, x: 0, y: 0 } }]);
     // the parent's middle line is this tile's bottom edge
     expect(ctx.calls[0].path).toEqual([['M', -256, 256], ['L', 256, 256]]);
+  });
+
+  it('traces only what of an ancestor’s line can show on the tile, and leaves a tile it misses bare', () => {
+    const border = compileLayer({ id: 'b', type: 'line', source: 'omt', 'source-layer': 'boundary', paint: { 'line-color': '#fff', 'line-width': 2 } });
+    // a border of the z2 tile wandering across all of it, read on one of its z6 children
+    const wander = Array.from({ length: 400 }, (_, i) => ({ x: i * 10, y: 2048 + 1500 * Math.sin(i / 9) }));
+    const feature = { type: 2, properties: {}, loadGeometry: () => [wander] };
+    const vector = { layers: { boundary: { extent: 4096, length: 1, feature: () => feature } } };
+    const ctx = recorder();
+    const tile = { z: 6, x: 8, y: 8 };
+    paintTile(ctx, tile, [{ layer: border, vector, from: { z: 2, x: 0, y: 0 } }]);
+    const traced = ctx.calls.flatMap((call) => call.path);
+    expect(traced.length).toBeGreaterThan(1);
+    expect(traced.length).toBeLessThan(wander.length / 4);
+    // each segment kept comes within reach of the tile
+    const reach = LINE_MARGIN + 2;
+    for (const [, x, y] of traced) expect(Math.min(Math.abs(x - 128), Math.abs(y - 128))).toBeLessThan(DRAPE_SIZE * 16);
+    expect(traced.some(([, x, y]) => x >= -reach && x <= DRAPE_SIZE + reach && y >= -reach && y <= DRAPE_SIZE + reach)).toBe(true);
+    // a child the line never comes near paints nothing, so it has no picture to lay
+    const away = recorder();
+    expect(paintTile(away, { z: 6, x: 8, y: 0 }, [{ layer: border, vector, from: { z: 2, x: 0, y: 0 } }])).toBe(0);
+    expect(away.calls).toEqual([]);
+  });
+
+  it('keeps a segment that crosses the tile though both its ends lie far off it', () => {
+    expect(visibleRuns([[-5000, 100], [5000, 120]], 256, 10)).toEqual([{ from: 0, points: [[-5000, 100], [5000, 120]] }]);
+    expect(visibleRuns([[-5000, -100], [5000, -120]], 256, 10)).toEqual([]);
+  });
+
+  it('starts each part of a dashed line where the whole line has its dash, so dashes meet across tiles', () => {
+    const runs = visibleRuns([[-300, 50], [-100, 50], [100, 50], [400, 50], [400, 900], [100, 900], [100, 200]], 256, 10);
+    expect(runs.map((run) => run.from)).toEqual([200, 200 + 200 + 300 + 850 + 300]);
+    const ctx = recorder();
+    const features = [{ type: 'LineString', geometry: { type: 'LineString', coordinates: [[-40, 0], [-20, 0], [40, 0]] }, properties: { stroke: '#ff0000' } }];
+    paintTile(ctx, { z: 3, x: 4, y: 3 }, [{ layer: LINE, features }]);
+    const [stroke] = ctx.calls;
+    // the tile spans 45°, and the part traced starts 20° along the line: its dash is offset by that much
+    expect(stroke.path[0][1]).toBeCloseTo((-20 / 45) * DRAPE_SIZE, 1);
+    expect(stroke.offset).toBeCloseTo((20 / 45) * DRAPE_SIZE, 1);
+  });
+
+  it('drops points nearer than a quarter pixel, the ends kept', () => {
+    const points = [[10, 10], [10.05, 10], [10.1, 10], [20, 10], [20.1, 10.05]];
+    expect(visibleRuns(points, 256, 10)).toEqual([{ from: 0, points: [[10, 10], [20, 10], [20.1, 10.05]] }]);
   });
 
   it('paints nothing for a layer out of its zoom range or hidden', () => {

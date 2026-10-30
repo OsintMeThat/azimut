@@ -104,6 +104,65 @@ function fillPath(ctx, style) {
   ctx.globalAlpha = 1;
 }
 
+/** Pixels past the tile's edge a line is still traced, beside its own width, so a join or a cap reaches across whole. */
+export const LINE_MARGIN = 8;
+/** A point nearer than this to the last one kept, in pixels across and down, adds nothing a tile can show. */
+const MIN_STEP = 0.25;
+
+/**
+ * The parts of a line, in the tile's pixels, that may show on a tile `size` across: runs of the
+ * segments that come within `margin` of it, each with how far along the line it starts (`from`),
+ * so a dash keeps its place from one tile to the next. A tile read from an ancestor holds the
+ * ancestor's whole line, most of it far off this tile, and tracing it all is what slowed the 3D.
+ */
+export function visibleRuns(points, size, margin) {
+  const low = -margin;
+  const high = size + margin;
+  const runs = [];
+  let run = null;
+  let along = 0;
+  const close = () => {
+    if (run.points.at(-1) !== run.end) run.points.push(run.end);
+    delete run.end;
+    run = null;
+  };
+  for (let i = 1; i < points.length; i += 1) {
+    const [ax, ay] = points[i - 1];
+    const [bx, by] = points[i];
+    const meets = Math.max(ax, bx) >= low && Math.min(ax, bx) <= high && Math.max(ay, by) >= low && Math.min(ay, by) <= high;
+    if (meets) {
+      if (!run) {
+        run = { from: along, points: [points[i - 1]], end: null };
+        runs.push(run);
+      }
+      const last = run.points.at(-1);
+      if (Math.abs(bx - last[0]) + Math.abs(by - last[1]) >= MIN_STEP) run.points.push(points[i]);
+      run.end = points[i];
+    } else if (run) close();
+    along += Math.hypot(bx - ax, by - ay);
+  }
+  if (run) close();
+  return runs;
+}
+
+/** Stroke what of `lines` may show on the tile; false when none of it does. A dash starts each run where the whole line has it. */
+function strokeLines(ctx, lines, style, size) {
+  const runs = lines.flatMap((points) => visibleRuns(points, size, LINE_MARGIN + style.width));
+  if (!runs.length) return false;
+  if (style.dash.length) {
+    for (const run of runs) {
+      trace(ctx, [run.points], false);
+      ctx.lineDashOffset = run.from;
+      strokePath(ctx, style);
+    }
+    ctx.lineDashOffset = 0;
+  } else {
+    trace(ctx, runs.map((run) => run.points), false);
+    strokePath(ctx, style);
+  }
+  return true;
+}
+
 /** Trace lists of points (already in pixels) as one path. */
 function trace(ctx, lines, close) {
   ctx.beginPath();
@@ -150,9 +209,7 @@ function paintGeoJson(ctx, size, tile, { layer, features }, zoom, images) {
       if (!lines.length) continue;
       const style = lineStyle(layer, zoom, read);
       if (!style) continue;
-      trace(ctx, lines.map((line) => line.map(px)), false);
-      strokePath(ctx, style);
-      drawn += 1;
+      if (strokeLines(ctx, lines.map((line) => line.map(px)), style, size)) drawn += 1;
     }
   }
   return drawn;
@@ -176,10 +233,11 @@ function paintVector(ctx, size, tile, { layer, vector, from }, zoom, images) {
     const style = layer.type === 'fill' ? fillStyle(layer, zoom, read, images, ctx) : lineStyle(layer, zoom, read);
     if (!style) continue;
     const rings = feature.loadGeometry().map((ring) => ring.map((p) => [p.x * scale - ox, p.y * scale - oy]));
-    trace(ctx, rings, layer.type === 'fill');
-    if (layer.type === 'fill') fillPath(ctx, style);
-    else strokePath(ctx, style);
-    drawn += 1;
+    if (layer.type === 'fill') {
+      trace(ctx, rings, true);
+      fillPath(ctx, style);
+      drawn += 1;
+    } else if (strokeLines(ctx, rings, style, size)) drawn += 1;
   }
   return drawn;
 }
