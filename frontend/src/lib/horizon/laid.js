@@ -19,6 +19,7 @@
  * `us` and `vs` are the grid's edges.
  */
 import { rayFor, toScreen } from './camera.js';
+import { PANORAMA_WITHIN } from './hints.js';
 import { pieceCameras } from './overlay.js';
 
 /** What the view says of a photo laid as searched, by how it was laid: one line for the button that lays it flat. */
@@ -75,14 +76,15 @@ function shownAt(view, direction) {
 
 /**
  * The panorama the view looks through from a place found on a collage read frame by frame: the pan's span and
- * middle as the stitch says them, stretched as much as the search found the frames wider or narrower.
+ * middle as the stitch says them, stretched as much as the search found the frames wider or narrower, up to a whole
+ * turn, as far as the view can look.
  *
  * @param {{ lens: number, span: number, middle?: number }} framed the search's `frames`
  * @param {{ heading: number, tilt?: number, fov?: number }} place
  */
 export function framesLook({ lens, span, middle = 0 }, place) {
   const wider = place.fov > 0 && lens > 0 ? place.fov / lens : 1;
-  return { projection: 'panorama', heading: place.heading + middle * wider, tilt: place.tilt ?? 0, roll: 0, fov: span * wider };
+  return { projection: 'panorama', heading: place.heading + middle * wider, tilt: place.tilt ?? 0, roll: 0, fov: Math.min(PANORAMA_WITHIN[1], span * wider) };
 }
 
 /**

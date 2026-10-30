@@ -70,6 +70,11 @@ describe('a photo laid as a search read it', () => {
     expect(framesLook(framed, { heading: 50 }).fov).toBe(120);
   });
 
+  it('stops at a whole turn, as far as the view can look, so the frames lie where the view shows them', () => {
+    expect(framesLook({ lens: 30, span: 340 }, { heading: 50, fov: 36 }).fov).toBe(360);
+    expect(framesLook({ lens: 30, span: 340 }, { heading: 50, fov: 30 }).fov).toBe(340);
+  });
+
   it('lays a cut collage piece by piece, the seam where the cut is', () => {
     const camera = { projection: 'camera', heading: 30, tilt: 0, roll: 0, fov: LENS };
     expect(piecesLaid(camera, ASPECT, {})).toBeNull();
