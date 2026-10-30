@@ -949,8 +949,17 @@ describe('a search opened with its photo', () => {
       restoreWork: vi.fn(),
     };
     const view = { camera: { heading: 0, tilt: 0, roll: 0, fov: 60, projection: 'camera' } };
-    return { find: createFindState({ api, overlay, view }), overlay };
+    return { find: createFindState({ api, overlay, view }), overlay, api };
   }
+
+  it('reads the list again, which the case opening may have read before this search was filed', async () => {
+    const { find, api } = opener(askOf('media/barry.png', [stroke]));
+    const kept = [{ name: 'filed just now' }];
+    const record = await api.get();
+    api.get.mockImplementation(async (path) => (path.endsWith('/horizon/finds') ? kept : record));
+    await find.openWithPhoto('c1', 'filed just now');
+    await vi.waitFor(() => expect(find.list).toEqual(kept));
+  });
 
   it('brings its own trace over the same photo, leaving what no search keeps', async () => {
     const { find, overlay } = opener(askOf('media/barry.png', [stroke]));

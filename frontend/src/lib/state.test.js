@@ -477,6 +477,42 @@ describe('case request ownership', () => {
     unregister();
   });
 
+  // The example files a photo in whatever is current once this answers, so an answer
+  // for a case that lost must not read as the case being open.
+  it('does not answer with a case another choice has overtaken', async () => {
+    const opening = deferred();
+    state.caseState.current = null;
+    api.post.mockResolvedValue({ id: 'made', name: 'Made' });
+    api.get.mockImplementation((path) => {
+      if (path === '/api/cases/made') return opening.promise;
+      if (path === '/api/cases/later') return Promise.resolve({ id: 'later', name: 'Later' });
+      return Promise.resolve([]);
+    });
+
+    const creating = state.createCase('Made');
+    await vi.waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/cases/made'));
+    await state.openCase('later');
+    opening.resolve({ id: 'made', name: 'Made' });
+
+    expect(await creating).toBeNull();
+    expect(state.caseState.current.id).toBe('later');
+  });
+
+  it('says when startup has reopened its case, even one it could not', async () => {
+    const opening = deferred();
+    api.get.mockImplementation((path) => (path === '/api/cases/case-a' ? opening.promise : Promise.resolve([])));
+    let settled = false;
+
+    const starting = state.initSession('case-a');
+    state.sessionStarted().then(() => (settled = true));
+    await vi.waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/cases/case-a'));
+    expect(settled).toBe(false);
+
+    opening.reject(new Error('case not found'));
+    await expect(starting).rejects.toThrow('case not found');
+    await vi.waitFor(() => expect(settled).toBe(true));
+  });
+
   it('creates no case when the analyst keeps the open one', async () => {
     const unregister = state.registerCaseChangeGuard(async () => false);
     state.caseState.current = { id: 'case-a', name: 'Case A' };

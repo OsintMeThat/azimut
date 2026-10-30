@@ -568,7 +568,20 @@ export async function openCase(id, { asked = false } = {}) {
  * Startup: load the case list and reopen the last-used case (if it still
  * exists on disk). Called once from App on mount.
  */
-export async function initSession(explicitCaseId = null) {
+export function initSession(explicitCaseId = null) {
+  const starting = startSession(explicitCaseId);
+  started = starting.catch(() => {});
+  return starting;
+}
+
+let started = Promise.resolve();
+
+/** Settled once startup has reopened its case: one opened before that would be replaced by it. */
+export function sessionStarted() {
+  return started;
+}
+
+async function startSession(explicitCaseId) {
   // preferences must land before the tools render, or coordinates would flash
   // in the wrong format; a settings read failure is never fatal to a session
   await loadPrefs().catch(() => {});
@@ -619,13 +632,13 @@ export async function reloadCase() {
   caseState.rev++;
 }
 
-/** Create a case and open it. Answers null when the analyst kept the open one. */
+/** Create a case and open it. Answers null when it is not the one now open: the analyst kept
+ *  theirs, or another case was chosen while it was being made. */
 export async function createCase(name) {
   if (!(await leaveCurrentCase('create'))) return null;
   const created = await api.post('/api/cases', { name });
   await refreshCaseList();
-  await openCase(created.id, { asked: true });
-  return created;
+  return (await openCase(created.id, { asked: true })) ? created : null;
 }
 
 /**

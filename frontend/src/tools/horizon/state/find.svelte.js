@@ -1162,6 +1162,8 @@ export function createFindState({ api, overlay, view }) {
     async openWithPhoto(caseId, name) {
       const again = search?.name === name;
       const record = await this.openSearch(caseId, name);
+      // the list read when the case opened may have come before this search was filed
+      refreshList(caseId);
       const photo = record.ask?.photo;
       if (!photo?.path) return record;
       const laid = overlay.source?.path === photo.path;
