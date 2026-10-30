@@ -85,6 +85,20 @@ describe('the guide asking the app', () => {
     app.closed = true; // the app tab it opened, closed in turn
   });
 
+  it('opens Horizon for the example when no app tab is there, and asks once that tab has loaded', () => {
+    vi.spyOn(window, 'opener', 'get').mockReturnValue(null);
+    const app = { ...fakeTab(), addEventListener: vi.fn() };
+    const open = vi.spyOn(window, 'open').mockReturnValue(app);
+    askApp({ example: true });
+    expect(open.mock.calls[0][0].endsWith('#horizon')).toBe(true);
+    expect(app.postMessage).not.toHaveBeenCalled();
+    const [event, loaded] = app.addEventListener.mock.calls[0];
+    expect(event).toBe('load');
+    loaded();
+    expect(app.postMessage).toHaveBeenCalledWith({ 'azimut:guide': { example: true } }, location.origin);
+    app.closed = true;
+  });
+
   it('opens Settings for a report when no app tab is there to ask', () => {
     vi.spyOn(window, 'opener', 'get').mockReturnValue(null);
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
@@ -97,15 +111,17 @@ describe('the app hearing the guide', () => {
   function hear(data, origin = location.origin) {
     const open = vi.fn();
     const report = vi.fn();
-    const stop = listenToGuide({ tools: ['media', 'settings'], open, report });
+    const example = vi.fn();
+    const stop = listenToGuide({ tools: ['media', 'settings'], open, report, example });
     window.dispatchEvent(new MessageEvent('message', { data, origin }));
     stop();
-    return { open, report };
+    return { open, report, example };
   }
 
   it('opens the tool asked for, or the report', () => {
     expect(hear({ 'azimut:guide': { open: 'media' } }).open).toHaveBeenCalledWith('media');
     expect(hear({ 'azimut:guide': { report: true } }).report).toHaveBeenCalled();
+    expect(hear({ 'azimut:guide': { example: true } }).example).toHaveBeenCalled();
   });
 
   it('ignores another site, a tool it does not have and anything else', () => {
@@ -113,12 +129,14 @@ describe('the app hearing the guide', () => {
       hear({ 'azimut:guide': { open: 'media' } }, 'https://example.com'),
       hear({ 'azimut:guide': { open: 'nowhere' } }),
       hear({ 'azimut:guide': { report: 'yes' } }),
+      hear({ 'azimut:guide': { example: 'yes' } }),
       hear({ open: 'media' }),
       hear('media'),
       hear(null),
     ]) {
       expect(heard.open).not.toHaveBeenCalled();
       expect(heard.report).not.toHaveBeenCalled();
+      expect(heard.example).not.toHaveBeenCalled();
     }
   });
 

@@ -31,6 +31,7 @@
   import { landingFor } from './lib/guide.js';
   import { openGuide, openIssueReport } from './lib/navigate.js';
   import { listenToGuide } from './lib/guideWindow.js';
+  import { openFindExample } from './lib/findExample.js';
   import { leaveFullscreen } from './lib/fullscreen.js';
   import { createToolLoader } from './lib/toolLoader.js';
   import { loadEntityTypes } from './lib/entityTypes.svelte.js';
@@ -122,6 +123,10 @@
       report: () => {
         uiState.guide = null;
         openIssueReport();
+      },
+      example: () => {
+        uiState.guide = null;
+        openFindExample();
       },
     })
   );

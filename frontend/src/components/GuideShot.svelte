@@ -11,6 +11,9 @@
    * in when the picture was made, so the overlay shares the picture's own coordinates
    * and scales with it. A number whose control leads somewhere carries a chevron, and
    * pressing it shows the screen it opens.
+   *
+   * A picture with a film plays it in a loop in its place, and a reader who asked for
+   * less motion gets the picture.
    */
   import Icon from './Icon.svelte';
   import { PIN_ROOM, pinSpots } from '../lib/guide.js';
@@ -50,6 +53,7 @@
   let last = null;
   const hole = $derived.by(() => (last = lit ?? last));
   const share = (value, total) => `${(value / total) * 100}%`;
+  const calm = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 </script>
 
 <!-- never taller than the room the dialog leaves it, so a picture is seen whole without the wheel -->
@@ -59,7 +63,11 @@
   style:max-width="calc(var(--shot-room, 100vh) * {shot.width / shot.height})"
   bind:clientWidth={width}
 >
-  <img src={shot.src} alt="" draggable="false" />
+  {#if shot.film && !calm}
+    <video src={shot.film} poster={shot.src} autoplay muted loop playsinline aria-hidden="true"></video>
+  {:else}
+    <img src={shot.src} alt="" draggable="false" />
+  {/if}
   <svg viewBox="0 0 {shot.width} {shot.height}" aria-hidden="true">
     <defs>
       <mask id="{uid}-veil">
@@ -127,6 +135,7 @@
     box-shadow: var(--shadow-2);
   }
   img,
+  video,
   svg {
     position: absolute;
     inset: 0;

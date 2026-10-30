@@ -65,10 +65,12 @@ function reachable(tab) {
 let appTab = null;
 
 /**
- * Ask the app to do something from the guide's tab: `{ open: <tool> }` or `{ report: true }`.
+ * Ask the app to do something from the guide's tab: `{ open: <tool> }`, `{ report: true }`
+ * or `{ example: true }`.
  *
  * It goes to the tab that detached the guide. A guide opened from its address alone has
  * none, so the app opens in a tab of its own on what was asked, and later asks go there.
+ * An address cannot say to file the example, so that one is asked again once the tab has loaded.
  */
 export function askApp(ask) {
   const tab = reachable(window.opener) ?? reachable(appTab);
@@ -77,18 +79,21 @@ export function askApp(ask) {
     tab.focus();
     return;
   }
-  appTab = window.open(`${here()}#${ask.report ? 'settings' : ask.open}`, APP_TAB);
+  const route = ask.report ? 'settings' : ask.example ? 'horizon' : ask.open;
+  appTab = window.open(`${here()}#${route}`, APP_TAB);
+  if (ask.example) appTab?.addEventListener('load', () => appTab.postMessage({ [KEY]: ask }, location.origin));
 }
 
 /**
  * In the app: do what a guide tab asks. Only this page's own tabs are heard, and only
  * a tool the app has.
  */
-export function listenToGuide({ tools, open, report }) {
+export function listenToGuide({ tools, open, report, example }) {
   const onmessage = (event) => {
     if (event.origin !== location.origin) return;
     const ask = event.data?.[KEY];
     if (ask?.report === true) report();
+    else if (ask?.example === true) example();
     else if (tools.includes(ask?.open)) open(ask.open);
   };
   window.addEventListener('message', onmessage);

@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 vi.mock('../lib/api.js', () => ({ api: { get: vi.fn(async () => []) } }));
+vi.mock('../lib/findExample.js', () => ({ openFindExample: vi.fn() }));
 
+const { openFindExample } = await import('../lib/findExample.js');
 const { uiState } = await import('../lib/state.svelte.js');
 const { default: GuideDialog } = await import('./GuideDialog.svelte');
 const { EXTENSION_SITES, EXTENSION_TABS, JOURNEYS, KEYMAP, FIXES, PAGES, SETTINGS_TABS, landingFor, stepMarks } = await import('../lib/guide.js');
@@ -162,6 +164,46 @@ describe('a journey', () => {
     expect(document.querySelector('.shot img')).not.toBeNull();
     expect(lines()).toHaveLength(0);
     expect(next().disabled).toBe(true);
+  });
+
+  describe('Search with Find, past its last step', () => {
+    const search = JOURNEYS.find((journey) => journey.id === 'search-with-find');
+    const tryIt = () => [...document.querySelectorAll('.example button')].find((b) => b.textContent.includes('Try this search'));
+
+    async function onResult(props) {
+      await open(`journey:${search.id}`, props);
+      press(document.querySelector('.steps .step.result'));
+    }
+
+    it('plays the place found, and offers the search itself', async () => {
+      await onResult();
+      expect(document.querySelector('.shot video')).not.toBeNull();
+      openFindExample.mockClear();
+      press(tryIt());
+      expect(onclose).toHaveBeenCalled();
+      expect(openFindExample).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks the app when the guide stands in a tab of its own', async () => {
+      const app = { closed: false, location: { origin: location.origin }, postMessage: vi.fn(), focus: vi.fn() };
+      vi.spyOn(window, 'opener', 'get').mockReturnValue(app);
+      openFindExample.mockClear();
+      await onResult({ detached: true });
+      press(tryIt());
+      expect(app.postMessage).toHaveBeenCalledWith({ 'azimut:guide': { example: true } }, location.origin);
+      expect(openFindExample).not.toHaveBeenCalled();
+    });
+
+    it('leaves it off a step and off another journey', async () => {
+      await open(`journey:${search.id}`);
+      expect(tryIt()).toBeUndefined();
+      live && unmount(live);
+      document.body.innerHTML = '';
+      const other = JOURNEYS.find((journey) => journey.result && !journey.result.example);
+      await open(`journey:${other.id}`);
+      press(document.querySelector('.steps .step.result'));
+      expect(tryIt()).toBeUndefined();
+    });
   });
 
   it('names a step for what it does when every step happens in one tool', async () => {

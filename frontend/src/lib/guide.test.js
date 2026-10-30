@@ -177,7 +177,7 @@ describe('a page and its pictures', () => {
     const dir = fileURLToPath(new URL('../assets/guide/', import.meta.url));
     const wanted = new Set(shots.map((one) => one.shot));
     for (const file of readdirSync(dir).filter((name) => !name.startsWith('.'))) {
-      expect(wanted.has(file.replace(/\.(webp|json)$/, '')), `${file} is no longer shown`).toBe(true);
+      expect(wanted.has(file.replace(/\.(webp|json|webm)$/, '')), `${file} is no longer shown`).toBe(true);
     }
   });
 
@@ -246,6 +246,9 @@ describe('journeys', () => {
     expect(new Set(labels).size).toBe(labels.length);
     expect(search.steps.at(-1).marks).toEqual(['find.trust', 'find.places']);
     expect(search.result.shot).toBe('find-look');
+    // the place found plays, and the search itself is a press away
+    expect(shotOf('find-look').film).toBeTruthy();
+    expect(search.result.example).toBe(true);
     // the screen Find's notice opens on leads to it
     expect(opensFrom('horizon', FIND_GUIDE).walk).toBe('search-with-find');
     expect(journeysThrough('horizon')).toEqual([{ id: 'search-with-find', title: 'Search with Find', step: 1 }]);

@@ -21,6 +21,7 @@
   import { toast, uiState } from '../lib/state.svelte.js';
   import { openIssueReport, openTour } from '../lib/navigate.js';
   import { askApp, guideHash, openGuideTab } from '../lib/guideWindow.js';
+  import { openFindExample } from '../lib/findExample.js';
   import {
     EXTENSION_SITES,
     FIXES,
@@ -68,7 +69,7 @@
     // a page's own tabs explain the page, and open no tool
     if (item.kind === 'tabs' && PAGES[tool]) return { ...pageView(PAGES[tool], tabLabel(tool)), tool: null };
     if (journey && step === resultStep) {
-      return { lead: journey.result.text, shot: journey.result.shot, marks: [], tips: [], tool: null };
+      return { lead: journey.result.text, shot: journey.result.shot, marks: [], tips: [], tool: null, example: journey.result.example };
     }
     if (journey) {
       const current = journey.steps[step];
@@ -151,6 +152,13 @@
   function takeTour() {
     onclose();
     openTour();
+  }
+
+  /** The search this journey walked, ready to run in the app. */
+  function tryExample() {
+    if (detached) return askApp({ example: true });
+    onclose();
+    openFindExample();
   }
 
   /** Settings, System: the report there carries what the app knows of the problem. */
@@ -363,6 +371,15 @@
                 Take the tour
                 <Icon name="arrowRight" size={14} />
               </button>
+            {/if}
+            {#if view.example}
+              <div class="example">
+                <button class="btn btn-primary go" onclick={tryExample}>
+                  Try this search
+                  <Icon name="arrowRight" size={14} />
+                </button>
+                <p>Puts the photo and every line in a case of their own, ready to search.</p>
+              </div>
             {/if}
             {#if view.tool}
               <button class="btn btn-primary go" onclick={() => openTool(view.tool)}>
@@ -696,6 +713,16 @@
   }
   .more:hover {
     text-decoration: underline;
+  }
+  .example {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .example p {
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
   .side {
     display: flex;

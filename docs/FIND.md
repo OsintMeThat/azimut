@@ -43,6 +43,9 @@ next 56%. With the same photo traced roughly and no marks, on a smaller area, Fi
 put it first, but the next place came within a few points of it. The marks are what set
 the true place apart.
 
+*Try this search*, at the end of that walk, opens the same photo with every line and mark in
+a case of its own, ready for you to press Search.
+
 ## Where Find is strong
 
 **Far, distinctive skylines.** Peaks, notches and long ridges a few kilometres away or more

@@ -35,7 +35,8 @@ The details follow, tool by tool.
 - **Find** ranks the places of an area whose relief fits the skyline traced on
   a photo. The places are candidates for you to check, not an answer.
 - Find opens once on a notice about the beta. The `?` guide walks a real
-  search in **Search with Find**, and
+  search in **Search with Find**, and **Try this search** opens it in a case of
+  its own, ready to press Search.
   [docs/FIND.md](https://github.com/OsintMeThat/azimut/blob/v0.3.3/docs/FIND.md)
   says where Find is strong, where it fails and how to use it well.
 - **Prepare** runs four steps: Skyline, Area, Mesh and Search. What you know

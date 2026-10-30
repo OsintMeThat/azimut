@@ -20,6 +20,9 @@ made up; the places and dates are the photos' own.
 | `miami_port_aerial.jpg` | The container port of Miami from the air | U.S. Customs and Border Protection | [Commons](https://commons.wikimedia.org/wiki/File:Aerial_photograph_of_the_Port_of_Miami_Container_Port.jpg) |
 | `half_dome_1901.jpg` | Half Dome, Vernal and Nevada Falls from Glacier Point, Yosemite, 1901, its plate border trimmed | California Historical Society, photographer unknown | [Commons](https://commons.wikimedia.org/wiki/File:Vernal_Falls,_Nevada_Falls_and_Half_Dome_from_Glacier_Point_in_Yosemite_National_Park,_California,_1901_(CHS-1175).jpg) |
 
+`half_dome_1901.jpg` also ships in the app, which files it with its source when a
+reader presses *Try this search* (`src/lib/findExample.js`).
+
 A replacement keeps to the same rule: public domain or CC0, no face anyone
 could recognise, metadata stripped, and a line here.
 

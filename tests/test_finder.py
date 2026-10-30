@@ -1,7 +1,9 @@
 """Find where a photo was taken: the grid, the alignments that narrow it, and the camera found again."""
 
+import json
 import sys
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -716,6 +718,23 @@ def test_a_search_saved_without_running_keeps_its_question_and_is_saved_again_un
     refused = client.put(f"/api/cases/{case_id}/horizon/finds/{ran}", json=_ask(run=False))
     assert refused.status_code == 409
     assert client.put(f"/api/cases/{case_id}/horizon/finds/nothing", json=_ask(run=False)).status_code == 404
+
+
+def test_the_guide_example_is_a_search_the_app_keeps_as_it_was_asked(client, monkeypatch):
+    """What the guide's Try this search files (`frontend/src/lib/findExample.js`): a stale example is a button that fails."""
+    queued = []
+    monkeypatch.setattr(workqueue, "enqueue", lambda *a, **k: queued.append(a))
+    example = json.loads((Path(__file__).resolve().parents[1] / "frontend/src/lib/findExample.json").read_text(encoding="utf-8"))
+    assert example["photo"]["path"] == "", "the case's own copy of the photo is filled in when it is filed"
+    case_id = client.post("/api/cases", json={"name": "Find example"}).json()["id"]
+    body = {**example, "photo": {**example["photo"], "path": "half_dome_1901.jpg"}, "run": False}
+    saved = client.post(f"/api/cases/{case_id}/horizon/finds", json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["status"] == "saved" and not queued
+    ask = client.get(f"/api/cases/{case_id}/horizon/finds/{saved.json()['name']}").json()["ask"]
+    assert len(ask["photo"]["strokes"]) == 7
+    assert ask["photo"]["marks"]["key"] and ask["photo"]["marks"]["hazy"] and ask["photo"]["marks"]["far"]
+    assert ask["area"] and ask["spacing"] == 50.0
 
 
 def test_a_running_search_fills_the_map_in_and_a_place_confirmed_stops_it(client, monkeypatch):

@@ -993,6 +993,7 @@ export const JOURNEYS = [
     result: {
       shot: 'find-look',
       text: 'The photo laid over the terrain from the first place, by Glacier Point, where it was taken in 1901.',
+      example: true,
     },
   },
 ];
@@ -1324,13 +1325,19 @@ const SHOT_IMAGES = import.meta.glob('../assets/guide/*.webp', {
   import: 'default',
 });
 const SHOT_MAPS = import.meta.glob('../assets/guide/*.json', { eager: true, import: 'default' });
+const SHOT_FILMS = import.meta.glob('../assets/guide/*.webm', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+});
 
-/** A picture and the rectangles measured on it, or null when it was never made. */
+/** A picture, the film that plays in its place if it has one, and the rectangles measured on it, or null when it was never made. */
 export function shotOf(name) {
   const src = SHOT_IMAGES[`../assets/guide/${name}.webp`];
   const map = SHOT_MAPS[`../assets/guide/${name}.json`];
   if (!src || !map) return null;
-  return { src: /** @type {string} */ (src), ...map };
+  const film = SHOT_FILMS[`../assets/guide/${name}.webm`];
+  return { src: /** @type {string} */ (src), ...(film ? { film: /** @type {string} */ (film) } : {}), ...map };
 }
 
 /**

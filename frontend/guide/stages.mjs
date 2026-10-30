@@ -15,9 +15,11 @@
  *           otherwise closes for the next
  *   browser 'extension' takes the picture in the browser that has the capture
  *           extension loaded, over a map site (extension.mjs)
+ *   film    what plays in the picture's place: `play({ page, frame })` moves the page,
+ *           takes frames, and answers them in the order they run; `rate` is its bitrate
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 import { CAMERA, CAMERA_PLACE, CHANNEL, TERMINAL } from './demo.mjs';
 import { AIRBASE, MARKS, PASSES } from './airbase.mjs';
@@ -64,6 +66,15 @@ const HALF_DOME_1901 = {
 
 /** Find's area round Yosemite Valley and its rims, as fractions of its map: about 10 km across, the 1901 point off its middle. */
 const FIND_AREA = [[0.25, 0.33], [0.78, 0.31], [0.8, 0.71], [0.27, 0.73]];
+
+/** What the guide's Try this search files (lib/findExample.js): the search these pictures show, as the app asked it. */
+const FIND_EXAMPLE = new URL('../src/lib/findExample.json', import.meta.url);
+
+/** The window the place found is filmed in: the view, cut from beside its column, landscape round the photo. */
+const LOOK = { width: 1520, height: 900 };
+/** The film of the place found, in frames: on one end of the slider, then the way to the other. */
+const LOOK_HOLD = 30;
+const LOOK_SWEEP = 45;
 
 /** The one element of these on screen: tools stay mounted, hidden, once visited. */
 const seen = (page, selector) => page.locator(selector).filter({ visible: true }).first();
@@ -883,21 +894,46 @@ export const STAGES = [
     crop: 'full',
     async run({ page }) {
       const steps = seen(page, '[data-guide="find.steps"]');
+      const asked = page.waitForRequest((request) => request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/horizon/finds'));
       await steps.locator('button', { hasText: /^Search$/ }).click();
+      // the photo's path is the case's: the example files its own copy and fills it in
+      const ask = (await asked).postDataJSON();
+      writeFileSync(FIND_EXAMPLE, `${JSON.stringify({ ...ask, title: 'Half Dome 1901', photo: { ...ask.photo, path: '' } })}\n`);
       await steps.locator('button', { hasText: 'Change and search again' }).waitFor({ timeout: 120 * 60_000 });
     },
   },
   {
-    // the first place opened: the photo laid over the terrain from there
+    // the first place opened: the photo laid over the terrain from there, the view alone,
+    // and the slider walked from one end to the other and back
     shot: 'find-look',
     from: 'horizon-find',
-    window: TALL,
+    window: LOOK,
+    clip: '.hz-main',
     map: true,
     settle: 20_000,
     crop: 'full',
     async run({ page }) {
       await seen(page, '[data-guide="find.places"] button').click();
       await seen(page, '[data-guide="horizon.overlay"]').waitFor({ timeout: 60_000 });
+    },
+    film: {
+      rate: '900k',
+      async play({ page, frame }) {
+        const slider = seen(page, '[data-guide="horizon.overlay"] input[type="range"]');
+        const sweep = [];
+        for (let at = 0; at <= LOOK_SWEEP; at += 1) {
+          const t = at / LOOK_SWEEP;
+          const terrain = Math.round(100 * t * t * (3 - 2 * t));
+          await slider.evaluate((input, value) => {
+            input.value = String(value);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+          }, terrain);
+          await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+          sweep.push(await frame());
+        }
+        const hold = (path) => Array(LOOK_HOLD).fill(path);
+        return [...hold(sweep[0]), ...sweep, ...hold(sweep.at(-1)), ...[...sweep].reverse()];
+      },
     },
   },
   {

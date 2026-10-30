@@ -15,6 +15,9 @@
  * guide cites is missing: a control that moved is followed, a control that went is
  * reported instead of framed in the void.
  *
+ * A stage with a `film` also writes `<shot>.webm`, which the guide plays in the picture's
+ * place, the picture standing for it for a reader who asked for less motion.
+ *
  * The Extension tabs are taken in a second browser with the capture extension loaded
  * (extension.mjs), over OpenStreetMap's own tiles.
  *
@@ -25,8 +28,8 @@
  */
 
 import { chromium } from '@playwright/test';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { linkSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -184,6 +187,46 @@ async function photograph(page, cut) {
     return canvas.toDataURL('image/webp', 0.86);
   }, png.toString('base64'));
   return Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
+}
+
+/** The frames of a film per second, and how wide it is written: a guide picture is seen well under this. */
+const FILM_FPS = 25;
+const FILM_WIDTH = 1400;
+
+/**
+ * Play a stage's film and write it: `play` moves the page, takes each frame with
+ * `frame()`, and answers the frames in the order they run, so a held or a rewound part
+ * costs no second picture. Two passes at a set rate, so its weight in every download is
+ * known ahead.
+ */
+async function film(page, cut, { play, rate }, out, scratch) {
+  const dir = mkdtempSync(join(scratch, 'film-'));
+  let taken = 0;
+  const frame = async () => {
+    const path = join(dir, `taken-${(taken += 1)}.png`);
+    await page.screenshot({ path, clip: cut, animations: 'disabled', caret: 'hide' });
+    return path;
+  };
+  const frames = await play({ page, frame });
+  frames.forEach((path, at) => linkSync(path, join(dir, `${String(at).padStart(4, '0')}.png`)));
+  const encode = (pass, target) => {
+    const run = spawnSync(
+      'ffmpeg',
+      [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-framerate', String(FILM_FPS), '-i', join(dir, '%04d.png'),
+        '-vf', `scale=${FILM_WIDTH}:-2:flags=lanczos,format=yuv420p`,
+        '-c:v', 'libvpx-vp9', '-b:v', rate, '-pass', String(pass), '-passlogfile', join(dir, 'pass'),
+        '-row-mt', '1', '-deadline', 'good', '-cpu-used', pass === 1 ? '4' : '1', '-an',
+        ...target,
+      ],
+      { stdio: 'inherit' }
+    );
+    if (run.status !== 0) throw new Error(`ffmpeg could not write ${out}`);
+  };
+  encode(1, ['-f', 'null', process.platform === 'win32' ? 'NUL' : '/dev/null']);
+  encode(2, [out]);
+  say(`${out.split(/[\\/]/).pop()}  ${Math.round(statSync(out).size / 1024)} kB, ${(frames.length / FILM_FPS).toFixed(1)} s`);
 }
 
 /** Wait for the screen to stop changing: requests, fonts, every picture in the clip. */
@@ -350,6 +393,7 @@ async function run() {
           join(OUT, `${stage.shot}.json`),
           `${JSON.stringify({ width: Math.round(cut.width), height: Math.round(cut.height), anchors: rects }, null, 2)}\n`
         );
+        if (stage.film) await film(shooter, cut, stage.film, join(OUT, `${stage.shot}.webm`), scratch);
         made.push(stage.shot);
         say(`${stage.shot}.webp  ${Math.round(picture.length / 1024)} kB, ${Object.keys(rects).length} frames`);
       } catch (error) {
@@ -373,7 +417,7 @@ async function run() {
     if (!wanted.length && !failed.length) {
       // a hidden entry is an editor's or a system's, never a picture
       for (const file of readdirSync(OUT)) {
-        if (!file.startsWith('.') && !shots.has(file.replace(/\.(webp|json)$/, ''))) unlinkSync(join(OUT, file));
+        if (!file.startsWith('.') && !shots.has(file.replace(/\.(webp|json|webm)$/, ''))) unlinkSync(join(OUT, file));
       }
     }
   } finally {

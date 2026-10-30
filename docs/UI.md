@@ -174,6 +174,9 @@ presses *Read the guide* on it, which opens the guide on its start page.
   and a trail back. A journey's step shows only that step's frames, on the picture of
   the tool it happens in, or on one of its own when the moment needs it (the photo held
   over the map in a reference window). A journey ends on a **Result**: what it made.
+  Search with Find's plays the photo and the terrain in turn, the slider walked by
+  itself, and its *Try this search* files the same setup in a case of its own
+  (`lib/findExample.js`), ready to press Search.
   A screen opened from a number can hold its tips, a link to a longer read (Find's,
   to docs/FIND.md) and the journey that walks it.
 - **The pictures are made, not taken.** `npm run guide:shots` (`frontend/guide/`)
@@ -182,7 +185,8 @@ presses *Read the guide* on it, which opens the guide on its start page.
   `guide/photos/CREDITS.md`, the same port in public-domain USGS imagery, Horizon on a
   mountain), stages each picture with the clicks an analyst would make (`stages.mjs`)
   and writes `src/assets/guide/<shot>.webp` with the rectangle of every `data-guide`
-  anchor drawn on it. The case is true where it can be: where and when each photo was
+  anchor drawn on it, and a `<shot>.webm` for a stage that has a film; the search it runs
+  also writes what *Try this search* files (`lib/findExample.json`). The case is true where it can be: where and when each photo was
   taken is its own, and only the accounts that posted them are made up. The
   extension's pictures come from a second browser with the extension loaded, over
   OpenStreetMap's own tiles served at its own address (`extension.mjs`). The analyzer
