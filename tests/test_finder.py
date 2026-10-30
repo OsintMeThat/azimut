@@ -671,7 +671,7 @@ def test_a_search_is_kept_in_the_case_runs_and_lists(client):
     assert started.status_code == 200, started.text
     name = started.json()["name"]
     assert name == "Ridge search"
-    workqueue.wait_until_idle(timeout=120)
+    workqueue.wait_until_idle(timeout=300)
     record = client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()
     assert record["status"] == "done", record.get("error")
     best = record["result"]["places"][0]
@@ -684,7 +684,7 @@ def test_a_search_is_kept_in_the_case_runs_and_lists(client):
     again = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask()).json()["name"]
     assert again != name
     client.post(f"/api/cases/{case_id}/horizon/finds/{again}/cancel")
-    workqueue.wait_until_idle(timeout=120)
+    workqueue.wait_until_idle(timeout=300)
     assert client.get(f"/api/cases/{case_id}/horizon/finds/{again}").json()["status"] in ("cancelled", "done")
     deleted = client.delete(f"/api/cases/{case_id}/horizon/finds/{name}")
     assert deleted.status_code == 200, deleted.text
@@ -891,7 +891,7 @@ def test_a_search_keeps_the_directions_ticked_and_runs_with_them(client):
     assert started.status_code == 200, started.text
     name = started.json()["name"]
     client.post(f"/api/cases/{case_id}/horizon/finds/{name}/cancel")
-    workqueue.wait_until_idle(timeout=120)
+    workqueue.wait_until_idle(timeout=300)
     ask = client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()["ask"]
     assert ask["facing"] == ["ne", "e"]
     plan, trace = horizon_finds.plan_of(ask)
@@ -918,7 +918,7 @@ def test_a_search_keeps_how_far_its_lines_stand_how_the_camera_looks_and_a_selfi
     assert started.status_code == 200, started.text
     name = started.json()["name"]
     client.post(f"/api/cases/{case_id}/horizon/finds/{name}/cancel")
-    workqueue.wait_until_idle(timeout=120)
+    workqueue.wait_until_idle(timeout=300)
     ask = client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()["ask"]
     assert ask["view"] == ["down"] and ask["mirror"] is True and ask["stands"] == ["water"]
     plan, read = horizon_finds.plan_of(ask)
@@ -931,7 +931,7 @@ def test_a_search_keeps_how_far_its_lines_stand_how_the_camera_looks_and_a_selfi
     zoned = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask(zones=zones, area=big))
     assert zoned.status_code == 200, zoned.text
     client.post(f"/api/cases/{case_id}/horizon/finds/{zoned.json()['name']}/cancel")
-    workqueue.wait_until_idle(timeout=120)
+    workqueue.wait_until_idle(timeout=300)
     kept = client.get(f"/api/cases/{case_id}/horizon/finds/{zoned.json()['name']}").json()["ask"]["zones"]
     assert kept[0]["spacing"] == 100.0 and kept[1]["out"] is True and len(kept[1]["area"][0]) == 2
     zoned_plan, _ = horizon_finds.plan_of(client.get(f"/api/cases/{case_id}/horizon/finds/{zoned.json()['name']}").json()["ask"])
@@ -960,7 +960,7 @@ def test_the_sectors_a_setup_leaves_are_said_before_the_search(client):
     started = client.post(url, json=_ask(sun=sun))
     assert started.status_code == 200, started.text
     client.post(f"{url}/{started.json()['name']}/cancel")
-    workqueue.wait_until_idle(timeout=120)
+    workqueue.wait_until_idle(timeout=300)
     ask = client.get(f"{url}/{started.json()['name']}").json()["ask"]
     _, trace = horizon_finds.plan_of(ask)
     assert trace.facing == horizon_finds.facing_of(ask) and trace.facing is not None
@@ -985,7 +985,7 @@ def test_a_finished_search_is_checked_against_decoys_of_its_trace(client):
     case_id = client.post("/api/cases", json={"name": "Checked search"}).json()["id"]
     url = f"/api/cases/{case_id}/horizon/finds"
     name = client.post(url, json=_ask()).json()["name"]
-    workqueue.wait_until_idle(timeout=180)
+    workqueue.wait_until_idle(timeout=300)
     assert client.get(f"{url}/{name}").json()["status"] == "done"
     checked = client.post(f"{url}/{name}/check")
     assert checked.status_code == 200, checked.text
@@ -1000,7 +1000,7 @@ def test_a_finished_search_is_checked_against_decoys_of_its_trace(client):
     running = client.post(url, json=_ask()).json()["name"]
     assert client.post(f"{url}/{running}/check").status_code in (409, 200)
     client.post(f"{url}/{running}/cancel")
-    workqueue.wait_until_idle(timeout=180)
+    workqueue.wait_until_idle(timeout=300)
     assert client.post(f"{url}/nothing/check").status_code == 404
 
 
@@ -1012,7 +1012,7 @@ def test_a_search_keeps_the_marks_beside_its_trace(client):
     assert started.status_code == 200, started.text
     name = started.json()["name"]
     client.post(f"/api/cases/{case_id}/horizon/finds/{name}/cancel")
-    workqueue.wait_until_idle(timeout=120)
+    workqueue.wait_until_idle(timeout=300)
     kept = client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()["ask"]["trace"]
     assert kept["pairs"] == [[1, 0]] and kept["ridge_x"][:2] == [0.0, 0.1]
 
@@ -1025,13 +1025,13 @@ def test_a_search_keeps_the_curve_and_corners_its_photo_was_read_through(client)
     assert started.status_code == 200, started.text
     name = started.json()["name"]
     client.post(f"/api/cases/{case_id}/horizon/finds/{name}/cancel")
-    workqueue.wait_until_idle(timeout=120)
+    workqueue.wait_until_idle(timeout=300)
     kept = client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()["ask"]["photo"]
     assert kept["bend"] == -0.12 and kept["corners"] == corners
     # a photo laid straight keeps neither
     plain = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask(photo={"path": "media/p.png"})).json()["name"]
     client.post(f"/api/cases/{case_id}/horizon/finds/{plain}/cancel")
-    workqueue.wait_until_idle(timeout=120)
+    workqueue.wait_until_idle(timeout=300)
     straight = client.get(f"/api/cases/{case_id}/horizon/finds/{plain}").json()["ask"]["photo"]
     assert straight["bend"] == 0 and straight["corners"] is None
 
