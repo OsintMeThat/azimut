@@ -154,7 +154,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26,<3" },
     { name = "opencv-python-headless", specifier = ">=4.9,<5" },
     { name = "openpyxl", specifier = ">=3.1,<4" },
-    { name = "pillow", specifier = ">=10.3,<14" },
+    { name = "pillow", specifier = ">=13,<14" },
     { name = "pydantic", specifier = ">=2.7,<3" },
     { name = "pypdf", marker = "extra == 'dev'", specifier = ">=6,<7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<10" },
