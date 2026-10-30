@@ -1,7 +1,7 @@
 // A box can carry a tag: its words on a tab of its own colour, hung from one of
 // its corners, the way a published geolocation names a vehicle in its frame.
 import { test, expect } from '@playwright/test';
-import { installAppFixture, openProofWithPanel } from './app.fixture.js';
+import { installAppFixture, openProofWithPanel, canvasSettled } from './app.fixture.js';
 
 async function drag(page, from, to) {
   await page.mouse.move(from.x, from.y);
@@ -44,6 +44,7 @@ const boxMiddle = (page) => page.evaluate(() => {
 });
 
 async function dblclickBox(page) {
+  await canvasSettled(page);
   const at = await boxMiddle(page);
   await page.mouse.dblclick(at.x, at.y);
 }

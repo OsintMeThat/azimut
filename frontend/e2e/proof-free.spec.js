@@ -2,7 +2,7 @@
 // grow apart from their lines: a tag, a callout, a cone's camera, the captions
 // and the footer.
 import { test, expect } from '@playwright/test';
-import { installAppFixture, openProofWithPanel, CASE_ID, PANEL_PATH } from './app.fixture.js';
+import { installAppFixture, openProofWithPanel, CASE_ID, PANEL_PATH, canvasSettled } from './app.fixture.js';
 
 const SECOND_PATH = 'media/second.svg';
 const SECOND_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720">
@@ -63,6 +63,21 @@ const middleOf = (page, id) => page.evaluate((nodeId) => {
   const r = stage.findOne(`#${nodeId}`).getClientRect();
   return { x: c.left + r.x + r.width / 2, y: c.top + r.y + r.height / 2 };
 }, id);
+
+/**
+ * Pick a box by a click on its outline, a third of the way down its left edge: a box with no
+ * fill is picked by its outline, and once picked its whole area takes the hand.
+ */
+async function pickBox(page, id) {
+  await canvasSettled(page);
+  const at = await page.evaluate((nodeId) => {
+    const stage = window.Konva.stages.find((s) => s.container().isConnected && s.findOne(`#${nodeId}`));
+    const c = stage.container().getBoundingClientRect();
+    const r = stage.findOne(`#${nodeId}`).getClientRect();
+    return { x: c.left + r.x + 3, y: c.top + r.y + r.height / 3 };
+  }, id);
+  await page.mouse.click(at.x, at.y);
+}
 
 /**
  * A line's two ends as drawn on the page, and where the pictures its ends hold
@@ -128,7 +143,15 @@ test('a right-click pins a free mark out in a margin to the nearest picture, whi
   const fixture = await installAppFixture(page);
   await openProofWithPanel(page);
   const { picture, drawn } = await boxTakenOut(page, fixture);
-  const before = await middleOf(page, drawn.id);
+  // the page grew and the view refits: the box, still picked from its drag, is right-clicked where it settles
+  let before = await middleOf(page, drawn.id);
+  await expect.poll(async () => {
+    const now = await middleOf(page, drawn.id);
+    const still = Math.abs(now.x - before.x) < 0.5 && Math.abs(now.y - before.y) < 0.5;
+    before = now;
+    return still;
+  }).toBe(true);
+  await canvasSettled(page);
   await page.mouse.click(before.x, before.y, { button: 'right' });
   await page.getByRole('menuitem', { name: 'Pin to Panel 1' }).click();
   const [pinned] = (await save(page, fixture)).shapes;
@@ -300,6 +323,7 @@ test('a mark drawn or dropped over a zoom inset goes on the page, in front of th
   await drag(page, { x: inset.x - 15, y: inset.y - 10 }, { x: inset.x + 15, y: inset.y + 10 });
   // and the early box dropped on it
   await page.keyboard.press('v');
+  await pickBox(page, early.id);
   await drag(page, await middleOf(page, early.id), { x: inset.x + 20, y: inset.y + 20 });
   const shapes = (await save(page, fixture)).shapes;
   expect(shapes.map((s) => [s.id === early.id ? 'early' : s.kind, s.panel])).toEqual([

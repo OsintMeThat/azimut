@@ -2,7 +2,7 @@
 // shows for what is picked: a line's style, a label's box, a panel's border, a
 // view cone's lens and the proof's typeface.
 import { test, expect } from '@playwright/test';
-import { installAppFixture, openProofWithPanel } from './app.fixture.js';
+import { canvasSettled, installAppFixture, openProofWithPanel } from './app.fixture.js';
 
 async function drag(page, from, to) {
   await page.mouse.move(from.x, from.y);
@@ -57,10 +57,12 @@ test('a right-click on a mark opens the composer\'s menu, not the browser\'s', a
   // with no fill is picked by its outline, not by the picture inside it, and off the
   // middle of that edge, where the handle of a picked box stands
   const edge = { x: mid.x - 60 - 30, y: mid.y - 10 };
+  await canvasSettled(page);
   await page.mouse.click(edge.x, edge.y, { button: 'right' });
   const menu = page.getByRole('menu');
   await expect(menu).toBeVisible();
-  expect(await browserMenuKept(page)).toBe(true);
+  // the listener reads it a moment after the event, so it is waited for
+  await expect.poll(() => browserMenuKept(page)).toBe(true);
   await expect(page.locator('.shape-row.selected')).toHaveCount(1);
   await expect(menu.getByRole('menuitem', { name: /Send to back/ })).toBeDisabled();
   await menu.getByRole('menuitem', { name: /Bring to front/ }).click();
@@ -69,6 +71,7 @@ test('a right-click on a mark opens the composer\'s menu, not the browser\'s', a
   expect(spec.shapes.map((s) => s.color)).toEqual(['#40c4ff', '#ff5252']);
 
   // and Delete from the same menu
+  await canvasSettled(page);
   await page.mouse.click(edge.x, edge.y, { button: 'right' });
   await page.getByRole('menuitem', { name: /Delete/ }).click();
   await expect(page.locator('.shape-row')).toHaveCount(1);

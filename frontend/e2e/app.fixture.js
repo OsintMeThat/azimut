@@ -2321,6 +2321,14 @@ export function needsWebGL() {
 }
 
 /**
+ * Two frames gone by: a canvas library lays the map of what a click hits with the frame it
+ * draws, so a press sent the moment after a change can meet the map from before it.
+ */
+export async function canvasSettled(page) {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
+/**
  * What the map is painting, as bytes.
  *
  * A drawn shape has no element of its own — the engine paints every layer of
