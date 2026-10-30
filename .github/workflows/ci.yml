@@ -202,18 +202,25 @@ jobs:
       - run: npm run build
 
   browser:
-    name: Browser canvas interactions (${{ matrix.browser }})
+    name: Browser canvas interactions (${{ matrix.browser }} ${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # One job per browser rather than one job running both. The specs stay at a
-    # single Playwright worker on purpose — canvas startup times out when
-    # MapLibre and Konva compete for a runner's cores — so the only way to
-    # shorten this job is to stop making Firefox wait for Chromium. Each job
-    # also installs only the browser it runs.
+    # One job per browser and per shard rather than one job running both. The
+    # specs stay at a single Playwright worker on purpose — canvas startup times
+    # out when MapLibre and Konva compete for a runner's cores — so the only way
+    # to shorten a job is to give it fewer specs. At 599 tests each browser ran
+    # past the 20 minutes in one job (v0.3.3), hence the shards; Firefox skips
+    # the map specs here (`needsWebGL`), so it needs fewer. Each job installs
+    # only the browser it runs.
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium, firefox]
+        include:
+          - { browser: chromium, shard: 1/3 }
+          - { browser: chromium, shard: 2/3 }
+          - { browser: chromium, shard: 3/3 }
+          - { browser: firefox, shard: 1/2 }
+          - { browser: firefox, shard: 2/2 }
     defaults:
       run:
         working-directory: frontend
@@ -232,4 +239,4 @@ jobs:
       # build links against are there. If one ever is not, the browser fails to launch
       # and says so in a minute, which is the better failure of the two.
       - run: npx playwright install ${{ matrix.browser }}
-      - run: npm run test:e2e -- --project=${{ matrix.browser }}
+      - run: npm run test:e2e -- --project=${{ matrix.browser }} --shard=${{ matrix.shard }}

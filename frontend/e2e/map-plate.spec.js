@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { CASE_ID, installAppFixture } from './app.fixture.js';
+import { CASE_ID, installAppFixture, needsWebGL } from './app.fixture.js';
 
 /**
  * The plate routes, kept in memory over the shared fixture: what was saved, what
@@ -124,6 +124,7 @@ test('the page zooms round the wheel, moves by a drag, and Fit brings it back', 
 });
 
 test('a framed map goes as far as the hand drags it', async ({ page }) => {
+  needsWebGL();
   const store = await plateFixture(page);
   await page.goto('/#plate');
   await newPlate(page);
@@ -149,6 +150,7 @@ test('a framed map goes as far as the hand drags it', async ({ page }) => {
 });
 
 test('a drag moves a map\'s frame, never its ground, until a double click goes in, where a held double click turns it', async ({ page }) => {
+  needsWebGL();
   const store = await plateFixture(page);
   await page.goto('/#plate');
   await newPlate(page);
@@ -177,6 +179,7 @@ test('a drag moves a map\'s frame, never its ground, until a double click goes i
 });
 
 test('another ground is laid on the same map, picture or plain, never a map built again', async ({ page }) => {
+  needsWebGL();
   const store = await plateFixture(page);
   await page.goto('/#plate');
   await newPlate(page);
@@ -196,6 +199,7 @@ test('another ground is laid on the same map, picture or plain, never a map buil
 });
 
 test('a country focus is put on the map by a press on the country, an annotation of the day shown', async ({ page }) => {
+  needsWebGL();
   const store = await plateFixture(page);
   await page.goto('/#plate');
   await newPlate(page);
@@ -213,6 +217,7 @@ test('a country focus is put on the map by a press on the country, an annotation
 });
 
 test('a map in 3D goes as far as the hand drags it', async ({ page }) => {
+  needsWebGL();
   const store = await plateFixture(page);
   await page.goto('/#plate');
   await newPlate(page);
@@ -250,6 +255,7 @@ test('a map in 3D goes as far as the hand drags it', async ({ page }) => {
 });
 
 test('symbols are stamped on the map one after the other, and the next takes the marker picked', async ({ page }) => {
+  needsWebGL();
   const store = await plateFixture(page);
   await page.goto('/#plate');
   await newPlate(page);
@@ -510,6 +516,7 @@ test('the play goes through each transition for as long as the video will', asyn
 });
 
 test('a line and a text go on the map, a step frames the map its own way, and the video moves between them', async ({ page }) => {
+  needsWebGL();
   const store = await plateFixture(page);
   await page.goto('/#plate');
   await newPlate(page);
@@ -581,6 +588,7 @@ test('a detail framed on a step and then deleted leaves no framing the server wo
 });
 
 test('a detail\'s square on the main map is dragged to move what the detail shows', async ({ page }) => {
+  needsWebGL();
   const store = await plateFixture(page);
   await page.goto('/#plate');
   await newPlate(page);
@@ -663,6 +671,7 @@ test('a plate holds eight maps at most, and says why', async ({ page }) => {
 });
 
 test('the page takes the room: panels widened and put away, focus, and a tab of its own', async ({ page, context }) => {
+  needsWebGL();
   const store = await plateFixture(page);
   await page.goto('/#plate');
   await newPlate(page);
@@ -744,6 +753,7 @@ test('the page takes the room: panels widened and put away, focus, and a tab of 
 });
 
 test('a plate saved on now reopens on the day it was last saved, with what stood on now', async ({ page }) => {
+  needsWebGL();
   const store = await plateFixture(page);
   const front = { name: 'front', title: 'Front', source: { kind: 'editable' }, editable: true, hidden: [], features: 1,
     categories: [], sha256: 'f1', icons: 0, track: { on: true, precision: 'day', zone: 'UTC' } };
@@ -778,6 +788,7 @@ test('a plate saved on now reopens on the day it was last saved, with what stood
 });
 
 test('a day no layer changes on is added to the play from its tile, and let go from its ⋯', async ({ page }) => {
+  needsWebGL();
   const store = await plateFixture(page);
   const front = { name: 'front', title: 'Front', source: { kind: 'editable' }, editable: true, hidden: [], features: 1,
     categories: [], sha256: 'f1', icons: 0, track: { on: true, precision: 'day', zone: 'UTC' } };

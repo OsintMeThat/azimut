@@ -2291,24 +2291,33 @@ export async function showSaved(page, kind) {
  * `maps` is how many the screen puts up — two, on Compare's linked pair.
  */
 export async function awaitMapReady(page, maps = 1) {
-  // The runner's Firefox has no WebGL and cannot be given any: it asks for a
-  // native driver, a box with no GPU has none, and the software path a patched
-  // build would take is not there — `tryNativeGL()`, then `EXHAUSTED_DRIVERS`,
-  // read off its own console with the blocklist off, `webgl.allow-software` set
-  // and both halves of mesa installed. So the map is answered by Chromium there.
-  //
-  // Only there. A developer's Firefox draws the map like any other browser, and
-  // the specs run on both engines locally, which is where an engine-specific
-  // break would show first. The skip is named in the report rather than hidden,
-  // and it sits here because every spec that needs a map comes through this
-  // line — a new one is covered the day it is written.
+  needsWebGL();
+  const ready = page.locator('.map[data-map-ready="true"]');
+  await expect(ready).toHaveCount(maps);
+  await expect(ready.first()).toBeVisible();
+}
+
+/**
+ * Skip a spec that needs a map where the browser cannot draw one.
+ *
+ * The runner's Firefox has no WebGL and cannot be given any: it asks for a
+ * native driver, a box with no GPU has none, and the software path a patched
+ * build would take is not there — `tryNativeGL()`, then `EXHAUSTED_DRIVERS`,
+ * read off its own console with the blocklist off, `webgl.allow-software` set
+ * and both halves of mesa installed. So the map is answered by Chromium there.
+ *
+ * Only there. A developer's Firefox draws the map like any other browser, and
+ * the specs run on both engines locally, which is where an engine-specific
+ * break would show first. The skip is named in the report rather than hidden,
+ * and `awaitMapReady` asks it, so every spec that waits for a map comes through
+ * it; a plate's maps are not `.map`, so the plate specs that draw on one ask it
+ * themselves.
+ */
+export function needsWebGL() {
   test.skip(
     !!process.env.CI && test.info().project.name === 'firefox',
     'the runner\'s Firefox has no WebGL; Chromium answers for the map there'
   );
-  const ready = page.locator('.map[data-map-ready="true"]');
-  await expect(ready).toHaveCount(maps);
-  await expect(ready.first()).toBeVisible();
 }
 
 /**
