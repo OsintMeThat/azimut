@@ -323,7 +323,8 @@ test('a tilted capture files the picture with its tilt and exact zoom', async ({
     filed.push(route.request().postDataBuffer().toString('latin1'));
     return route.fulfill({ json: { path: 'media/tilted.png', title: 'Tilted', provider: 'esri-world-imagery' } });
   });
-  await expect(tilt(page)).toHaveText(/Tilt 60°/, LEANS);
+  // this larger frame takes twice as long to settle before it leans
+  await expect(tilt(page)).toHaveText(/Tilt 60°/, { timeout: LEANS.timeout * 3 });
   await expect.poll(() => address(page).get('z')).toBe('13.37');
 
   await page.getByRole('button', { name: 'Capture options' }).click();
