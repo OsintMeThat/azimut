@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { eyeFrame } from './geo.js';
-import { createScene, GRIDS, progressOf, WALK_REACH, workerCount } from './scene.js';
+import { createScene, GRIDS, progressOf, TRY_AGAIN_MS, WALK_REACH, workerCount } from './scene.js';
 
 const EYE = { lat: 45.94, lon: 7.82, mode: 'ground', height: 1.7 };
 const FAR = 150000;
@@ -204,6 +204,104 @@ describe('the scene', () => {
     s.scene.retry();
     expect(s.sent('eye')).toHaveLength(2 * s.workers.length);
     expect(s.scene.failed).toBe(false);
+  });
+
+  describe('when ground could not be read', () => {
+    /** An eye landed whose tiles all fail as they are asked. */
+    function failing() {
+      vi.useFakeTimers();
+      const s = setUp();
+      s.scene.place(EYE, FAR);
+      const id = landed(s);
+      const fail = () => {
+        s.scene.draw(CAMERA);
+        const asked = s.sent('tiles').flatMap((message) => message.tiles);
+        for (const worker of s.workers) worker.sent = worker.sent.filter((message) => message.type !== 'tiles');
+        for (const { key } of asked) s.answer({ type: 'tile', id, key, failed: true });
+        return asked.length;
+      };
+      return { s, fail };
+    }
+
+    it('asks again by itself, keeping the bar where it is, then stops waiting and says so', () => {
+      const { s, fail } = failing();
+      expect(fail()).toBeGreaterThan(0);
+      expect(s.scene.draw(CAMERA).phase).toBe('landing');
+      expect(s.scene.gaps).toBe(false);
+      for (const wait of TRY_AGAIN_MS) {
+        // nothing is asked before its wait is over
+        vi.advanceTimersByTime(wait - 1);
+        expect(fail()).toBe(0);
+        vi.advanceTimersByTime(1);
+        expect(s.scene.gaps).toBe(false);
+        expect(fail()).toBeGreaterThan(0);
+      }
+      // no try left: the view is done with what is missing, and no timer asks again
+      expect(s.scene.draw(CAMERA).phase).toBe('');
+      expect(s.scene.gaps).toBe(true);
+      vi.advanceTimersByTime(60000);
+      expect(fail()).toBe(0);
+    });
+
+    it('stops saying so when asked by hand, which gives the tries back', () => {
+      const { s, fail } = failing();
+      fail();
+      for (const wait of TRY_AGAIN_MS) {
+        vi.advanceTimersByTime(wait);
+        fail();
+      }
+      s.scene.draw(CAMERA);
+      expect(s.scene.gaps).toBe(true);
+      s.scene.retry();
+      expect(s.scene.gaps).toBe(false);
+      expect(fail()).toBeGreaterThan(0);
+      expect(vi.getTimerCount()).toBe(1);
+    });
+
+    it('forgets the tries and the wait when the eye lands somewhere else, or the view closes', () => {
+      const { s, fail } = failing();
+      fail();
+      expect(vi.getTimerCount()).toBe(1);
+      s.scene.place({ ...EYE, lat: 46.5 }, FAR);
+      expect(vi.getTimerCount()).toBe(0);
+      const id = landed(s);
+      s.scene.draw(CAMERA);
+      const asked = s.sent('tiles').filter((message) => message.id === id).flatMap((message) => message.tiles);
+      s.answer({ type: 'tile', id, key: asked[0].key, failed: true });
+      expect(vi.getTimerCount()).toBe(1);
+      s.scene.dispose();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('asks again for the shadows\' grids too', () => {
+      vi.useFakeTimers();
+      const s = setUp();
+      s.scene.place(EYE, FAR);
+      const id = landed(s);
+      s.scene.draw(CAMERA, { shaded: true });
+      expect(s.sent('grids')).toHaveLength(1);
+      s.answer({ type: 'grids', id, failed: true });
+      vi.advanceTimersByTime(TRY_AGAIN_MS[0]);
+      s.scene.draw(CAMERA, { shaded: true });
+      expect(s.sent('grids')).toHaveLength(2);
+    });
+  });
+
+  it('says when the graphics card dropped the view, and lands again once it is given back', () => {
+    const listeners = {};
+    const canvas = { addEventListener: (name, listener) => (listeners[name] = listener), removeEventListener: vi.fn() };
+    const worker = fakeWorker();
+    const onChange = vi.fn();
+    const scene = createScene(canvas, { onChange, makeWorker: () => worker, makeRenderer: () => fakeRenderer() });
+    scene.place(EYE, FAR);
+    onChange.mockClear();
+    const event = { preventDefault: vi.fn() };
+    listeners.webglcontextlost(event);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(scene.lost).toBe(true);
+    expect(onChange).toHaveBeenCalled();
+    listeners.webglcontextrestored();
+    expect(scene.lost).toBe(false);
   });
 
   it('lets everything go when the view closes', () => {

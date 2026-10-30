@@ -157,6 +157,11 @@ export function createTiles({
     ].map(([dx, dy]) => Object.assign(record(r.z + 1, 2 * r.x + dx, 2 * r.y + dy), { parent: r }))).filter(
       (c) => c.dmin <= far
     );
+  /** Whether a tile lies under one that could not be built, which is the only way to it: nothing will ask for it. */
+  function underFailed(r) {
+    for (let at = r.parent; at; at = at.parent) if (at.state === 'failed') return true;
+    return false;
+  }
   /** The lowest and highest ground a tile holds: its own once built, its nearest built ancestor's before. */
   function rangeOf(r) {
     for (let at = r; at; at = at.parent) if (at.low != null) return at;
@@ -376,14 +381,16 @@ export function createTiles({
     letGo();
     let meshed = 0;
     let done = 0;
+    // what the base will not get unless it is asked again: tiles that failed and all under them
+    let gaps = 0;
     for (const key of baseKeys) {
       const r = records.get(key);
-      if (r?.state === 'ready' || r?.state === 'failed') {
+      if (r?.state === 'ready') {
         meshed += 1;
-        if (r.state === 'failed' || pictured(r)) done += 1;
-      }
+        if (pictured(r)) done += 1;
+      } else if (r && (r.state === 'failed' || underFailed(r))) gaps += 1;
     }
-    return { drawn: drawn.map((r) => r.tile), sharpening, base: { meshed, done, total: baseKeys.size } };
+    return { drawn: drawn.map((r) => r.tile), sharpening, base: { meshed, done, gaps, total: baseKeys.size } };
   }
 
   function askMeshes(list) {

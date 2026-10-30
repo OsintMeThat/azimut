@@ -64,6 +64,45 @@ describe('the terrain a worker holds', () => {
     expect(terrain.size).toBe(2);
   });
 
+  it('never calls tiles it just read unreachable because others are in use', async () => {
+    const terrain = createTerrain(flat(1), { keep: 2 });
+    const busy = ['11/1/1', '11/2/1', '11/3/1'];
+    let done;
+    const building = terrain.pinning(busy, async () => {
+      await terrain.load(busy);
+      await new Promise((resolve) => (done = resolve));
+    });
+    await vi.waitFor(() => expect(terrain.size).toBe(3));
+    // over what it keeps with every tile pinned: the next read's are the only ones it could let go
+    await expect(terrain.zoomsFor([{ z: 12, x: 2130, y: 1450 }], () => 11)).resolves.toEqual([11]);
+    done();
+    await building;
+    expect(terrain.size).toBe(2);
+  });
+
+  it('reads again what came back empty when no level held anything, the sources being out of reach', async () => {
+    const read = terrainOf(() => 7, () => true);
+    const terrain = createTerrain(read);
+    const middle = { z: 12, x: 2130, y: 1450 };
+    await expect(terrain.zoomsFor([middle], () => 3)).resolves.toEqual([-1]);
+    expect(terrain.size).toBe(0);
+    const back = createTerrain(terrainOf(() => 7));
+    await expect(back.zoomsFor([middle], () => 3)).resolves.toEqual([3]);
+    // a level that is only missing somewhere stays known: the search does not read it again
+    const some = terrainOf(() => 7, (z) => z > 2);
+    const partly = createTerrain(some);
+    await expect(partly.zoomsFor([middle], () => 3)).resolves.toEqual([2]);
+    await partly.zoomsFor([middle], () => 3);
+    expect(some.mock.calls.flatMap(([keys]) => keys).filter((key) => key.startsWith('3/'))).toHaveLength(1);
+  });
+
+  it('stands on no ground and casts no shadows when no level could be read, rather than at sea level', async () => {
+    const empty = () => createTerrain(terrainOf(() => 7, () => true));
+    await expect(empty().groundAt(45.94, 7.82)).resolves.toBeNull();
+    const frame = eyeFrame({ lat: 45.94, lon: 7.82, alt: 2000 });
+    await expect(buildGrid(frame, empty(), { reach: 6000, size: 8, zoom: 3 })).resolves.toBeNull();
+  });
+
   it('finds each tile its finest terrain, every level asked together', async () => {
     // no terrain finer than zoom 11 east of x = 1000 at zoom 11
     const read = terrainOf(() => 0, (z, x) => z > 11 && x >= 1000 * 2 ** (z - 11));

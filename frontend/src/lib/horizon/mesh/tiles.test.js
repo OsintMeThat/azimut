@@ -145,11 +145,31 @@ describe('the tile tree', () => {
     t.tiles.frame(CAMERA, 1.5);
     t.build(() => true);
     const failed = t.tiles.frame(CAMERA, 1.5);
-    expect(failed.base.meshed).toBeGreaterThan(0); // a failure is done with, not waited for
+    expect(failed.base.gaps).toBeGreaterThan(0);
     expect(t.meshes).toEqual([]);
     t.tiles.retry();
     t.tiles.frame(CAMERA, 1.5);
     expect(t.meshes.length).toBeGreaterThan(0);
+  });
+
+  it('counts all under a tile that failed as missing, so the base always adds up, and gets it once asked again', () => {
+    const t = tree();
+    t.tiles.land(CAMERA);
+    // one tile with others under it, among the base, fails
+    let doomed = null;
+    let out;
+    for (let round = 0; round < 40; round += 1) {
+      out = t.tiles.frame(CAMERA, 1.5);
+      if (!t.meshes.length) break;
+      doomed ??= t.meshes.find((ask) => ask.z === ROOT_Z + 2)?.key ?? null;
+      t.build((ask) => ask.key === doomed);
+    }
+    expect(doomed).not.toBeNull();
+    expect(out.base.gaps).toBeGreaterThan(1);
+    expect(out.base.meshed + out.base.gaps).toBe(out.base.total);
+    t.tiles.retry();
+    const healed = t.settle();
+    expect(healed.base).toMatchObject({ gaps: 0, meshed: healed.base.total, done: healed.base.total });
   });
 
   it('sharpens only the ground the frame shows, not the ground under its bottom edge', () => {

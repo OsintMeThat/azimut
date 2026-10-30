@@ -137,6 +137,8 @@
   let progress = $state({ phase: 'landing', share: 0 });
   let landed = $state(false);
   let failed = $state(false);
+  let groundMissing = $state(false);
+  let lost = $state(false);
   let size = $state({ width: 0, height: 0 });
   let pointer = $state(null);
   /** The height the wheel just set, said beside the pointer for a moment: `{ text, x, y }`. */
@@ -227,6 +229,8 @@
     if (now.phase !== progress.phase || Math.floor(now.share * 100) !== Math.floor(progress.share * 100)) progress = now;
     landed = scene.landed;
     failed = scene.failed;
+    groundMissing = scene.gaps;
+    lost = scene.lost;
   }
 
   function redraw() {
@@ -1475,6 +1479,8 @@
 
   {#if unsupported}
     <p class="notice">{unsupported}</p>
+  {:else if lost}
+    <div class="glass loading failed hz-control" role="alert">The graphics card dropped this view. Reload the page if it stays like this.</div>
   {:else if failed && !view.error}
     <div class="glass loading failed hz-control" role="alert">
       The ground here could not be loaded
@@ -1490,6 +1496,11 @@
       {#if progress.phase === 'landing' || progress.phase === 'imagery'}
         <span class="bar"><span style:width="{Math.round(progress.share * 100)}%"></span></span>
       {/if}
+    </div>
+  {:else if view.observer && groundMissing && !view.error}
+    <div class="glass loading failed hz-control" role="alert">
+      Part of the ground could not be loaded
+      <button type="button" onclick={() => view.retry()}>Try again</button>
     </div>
   {/if}
 

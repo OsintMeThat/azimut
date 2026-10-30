@@ -88,12 +88,21 @@ const terrain = createTerrain(async (keys) => {
 // -- the eye ------------------------------------------------------------------------
 
 /** The eye the page looks from now: once the ground under it is read, `{ frame, ground }` (null when it could not be). */
-let eye = { id: 0, standing: Promise.resolve(null) };
+let eye = { id: 0, at: null, standing: Promise.resolve(null) };
 
 async function stand({ lat, lon, mode, height }) {
-  const ground = await terrain.groundAt(lat, lon);
+  const ground = await terrain.groundAt(lat, lon).catch(() => null);
   if (ground == null) return null;
   return { frame: eyeFrame({ lat, lon, alt: eyeAltitude(mode, height, ground) }), ground };
+}
+
+/** Where the eye stands, read again when this worker could not read it the last time: one read for all who wait. */
+async function standing(id) {
+  const asked = eye.standing;
+  const stood = await asked;
+  if (stood || id !== eye.id) return stood;
+  if (eye.standing === asked) eye.standing = stand(eye.at);
+  return eye.standing;
 }
 
 // -- imagery ------------------------------------------------------------------------
@@ -136,39 +145,49 @@ async function pictures(list) {
 // -- tiles --------------------------------------------------------------------------
 
 async function tiles(id, list) {
-  const frame = (await eye.standing)?.frame;
-  if (id !== eye.id) return;
-  const fail = (t) => self.postMessage({ type: 'tile', id, key: t.key, failed: true });
-  if (!frame) return list.forEach(fail);
-  const imagery = pictures(list);
-  // each tile's terrain a level coarser than itself, then every terrain tile it touches
-  const zooms = await terrain.zoomsFor(list, (t) => t.z - 1);
-  if (!zooms) {
-    await imagery.then((got) => got.forEach((image) => image?.close()));
-    return list.forEach(fail);
-  }
-  const needed = [];
-  list.forEach((t, i) => {
-    if (zooms[i] >= 0) needed.push(...demRange(t.z, t.x - 1 / 64, t.y - 1 / 64, t.x + 1 + 1 / 64, t.y + 1 + 1 / 64, zooms[i]));
-  });
-  // kept while the pictures come, however many other tiles are read meanwhile
-  await terrain.pinning(needed, async () => {
-    const [images, held] = await Promise.all([imagery, terrain.load(needed)]);
-    for (let i = 0; i < list.length; i += 1) {
-      const t = list[i];
-      const image = images.get(t.key) ?? null;
-      if (id !== eye.id || !held || zooms[i] < 0) {
-        image?.close();
-        if (id === eye.id) fail(t);
-        continue;
-      }
-      const { data, size, low, high } = buildMesh(frame, terrain, t, zooms[i]);
-      self.postMessage(
-        { type: 'tile', id, key: t.key, data, size, low, high, image, provider: t.provider ?? null },
-        image ? [data.buffer, image] : [data.buffer]
-      );
+  // the page waits for every tile it asked for: whatever goes wrong here, each one is answered
+  const waiting = new Set(list);
+  try {
+    const frame = (await standing(id))?.frame;
+    if (id !== eye.id || !frame) return;
+    const imagery = pictures(list);
+    // each tile's terrain a level coarser than itself, then every terrain tile it touches
+    const zooms = await terrain.zoomsFor(list, (t) => t.z - 1);
+    if (!zooms) {
+      await imagery.then((got) => got.forEach((image) => image?.close()));
+      return;
     }
-  });
+    const needed = [];
+    list.forEach((t, i) => {
+      if (zooms[i] >= 0) needed.push(...demRange(t.z, t.x - 1 / 64, t.y - 1 / 64, t.x + 1 + 1 / 64, t.y + 1 + 1 / 64, zooms[i]));
+    });
+    // kept while the pictures come, however many other tiles are read meanwhile
+    await terrain.pinning(needed, async () => {
+      const [images, held] = await Promise.all([imagery, terrain.load(needed)]);
+      for (let i = 0; i < list.length; i += 1) {
+        const t = list[i];
+        const image = images.get(t.key) ?? null;
+        if (id !== eye.id || !held || zooms[i] < 0) {
+          image?.close();
+          continue;
+        }
+        // one tile that cannot be built costs its neighbours nothing
+        try {
+          const { data, size, low, high } = buildMesh(frame, terrain, t, zooms[i]);
+          self.postMessage(
+            { type: 'tile', id, key: t.key, data, size, low, high, image, provider: t.provider ?? null },
+            image ? [data.buffer, image] : [data.buffer]
+          );
+          waiting.delete(t);
+        } catch (failure) {
+          image?.close();
+          self.postMessage({ type: 'error', message: String(failure?.message ?? failure) });
+        }
+      }
+    });
+  } finally {
+    if (id === eye.id) for (const t of waiting) self.postMessage({ type: 'tile', id, key: t.key, failed: true });
+  }
 }
 
 async function images(id, list) {
@@ -184,7 +203,7 @@ async function images(id, list) {
 }
 
 async function grids(id, list) {
-  const frame = (await eye.standing)?.frame;
+  const frame = (await standing(id))?.frame;
   if (id !== eye.id) return;
   const built = [];
   for (const g of list) {
@@ -202,7 +221,7 @@ async function grids(id, list) {
 const BUILDING_REACH = 0.15;
 
 async function buildings(id, chunks, { unknown = 'draw', unknownHeight } = {}) {
-  const frame = (await eye.standing)?.frame;
+  const frame = (await standing(id))?.frame;
   if (id !== eye.id || !frame) return;
   for (const { key, x, y, bytes, version } of chunks) {
     const zooms = await terrain.zoomsFor([{ z: CHUNK_Z, x, y }], () => DEM_MAX);
@@ -231,10 +250,10 @@ async function buildings(id, chunks, { unknown = 'draw', unknownHeight } = {}) {
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === 'eye') {
-      eye = { id: data.id, standing: stand(data) };
-      const standing = await eye.standing;
+      eye = { id: data.id, at: data, standing: stand(data) };
+      const stood = await eye.standing;
       if (data.id === eye.id) {
-        self.postMessage({ type: 'eye', id: data.id, ground: standing?.ground ?? null, alt: standing?.frame.alt ?? null });
+        self.postMessage({ type: 'eye', id: data.id, ground: stood?.ground ?? null, alt: stood?.frame.alt ?? null });
       }
     } else if (data.type === 'tiles') await tiles(data.id, data.tiles);
     else if (data.type === 'images') await images(data.id, data.tiles);

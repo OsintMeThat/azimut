@@ -51,6 +51,8 @@ export const KEEP_PICTURES = 160;
 const BUILDINGS_BATCH = 4;
 /** ms the shadows wait for more buildings before their grid is raised again. */
 const BURN_DELAY = 250;
+/** ms before what could not be read is asked again by itself, one wait a try: a bad moment for the network passes. */
+export const TRY_AGAIN_MS = [1000, 4000, 12000];
 
 /** Workers building tiles: one per four threads, three at most, so the page and the app keep theirs. */
 export function workerCount(threads = globalThis.navigator?.hardwareConcurrency || 4) {
@@ -100,9 +102,9 @@ export function createScene(
 
   let eyeId = 0;
   /**
-   * `{ id, lat, lon, mode, height, far, frame, ground, offset, at, underfoot, grids, laid, failed }`:
-   * where it landed (`lat`, `lon`, the frame and the `ground` there), and where it stands now
-   * (`at`, the ground `underfoot`, its `offset` in the frame).
+   * `{ id, lat, lon, mode, height, far, frame, ground, offset, at, underfoot, grids, laid, failed, tries }`:
+   * where it landed (`lat`, `lon`, the frame and the `ground` there), where it stands now
+   * (`at`, the ground `underfoot`, its `offset` in the frame), and how many of `TRY_AGAIN_MS` are spent.
    */
   let eye = null;
   let tiles = null;
@@ -113,6 +115,9 @@ export function createScene(
   let lost = false;
   let progress = { phase: 'landing', share: 0 };
   let heightAsked = 0;
+  let againTimer = 0;
+  // the last frame found ground it will not get unless someone asks again
+  let gaps = false;
 
   let interacting = false;
   let restTimer = 0;
@@ -208,8 +213,11 @@ export function createScene(
     terrainGrids = null;
     clearTimeout(burnTimer);
     burnTimer = 0;
+    clearTimeout(againTimer);
+    againTimer = 0;
+    gaps = false;
     const id = eyeId;
-    eye = { id, lat, lon, mode, height, far, frame: null, ground: 0, offset: [0, 0, 0], at: { lat, lon }, grids: 'none', laid: false, failed: false };
+    eye = { id, lat, lon, mode, height, far, frame: null, ground: 0, offset: [0, 0, 0], at: { lat, lon }, grids: 'none', laid: false, failed: false, tries: 0 };
     tiles = createTiles({
       lat,
       lon,
@@ -266,6 +274,23 @@ export function createScene(
   /** The eye as it stands now, for landing it again where it is. */
   const standing = () => ({ ...eye.at, mode: eye.mode, height: eye.height });
 
+  /** Everything that came back empty asked again: tiles, pictures, the grids. */
+  function askAgain() {
+    if (eye.grids === 'failed') eye.grids = 'none';
+    tiles?.retry();
+    onChange();
+  }
+
+  /** Something could not be read: asked again in a moment, while there are tries left. */
+  function askAgainSoon() {
+    if (againTimer || eye.tries >= TRY_AGAIN_MS.length) return;
+    againTimer = setTimeout(() => {
+      againTimer = 0;
+      eye.tries += 1;
+      askAgain();
+    }, TRY_AGAIN_MS[eye.tries]);
+  }
+
   function onMessage({ data }) {
     if (data.type === 'refused') return onRefused(data);
     if (data.type === 'error') return console.warn('Horizon worker:', data.message);
@@ -300,11 +325,14 @@ export function createScene(
         provider = reused;
       }
       tiles.arrived(data.key, tile, provider, range);
+      if (data.failed) askAgainSoon();
     } else if (data.type === 'image') {
       tiles.imaged(data.key, data.provider, data.image);
     } else if (data.type === 'grids') {
-      if (data.failed) eye.grids = 'failed';
-      else {
+      if (data.failed) {
+        eye.grids = 'failed';
+        askAgainSoon();
+      } else {
         terrainGrids = data.grids;
         sendGrids();
         eye.grids = 'ready';
@@ -324,6 +352,7 @@ export function createScene(
   function onLost(event) {
     event.preventDefault();
     lost = true;
+    onChange();
   }
   function onRestored() {
     lost = false;
@@ -473,7 +502,12 @@ export function createScene(
       const sharp = interacting ? Math.max(motion, SHARP) : SHARP;
       const walked = Math.hypot(eye.offset[0], eye.offset[1]);
       const alt = eye.frame.alt + eye.offset[2];
-      const { drawn, sharpening, base } = tiles.frame(camera, sharp, { shift: walked, alt });
+      const { drawn, sharpening, base: found } = tiles.frame(camera, sharp, { shift: walked, alt });
+      // what could not be read is waited for while it will be asked again, then the view stops waiting and says so
+      const spent = eye.tries >= TRY_AGAIN_MS.length;
+      const missing = spent ? found.gaps : 0;
+      const base = { meshed: found.meshed + missing, done: found.done + missing, total: found.total };
+      gaps = spent && (found.gaps > 0 || eye.grids === 'failed');
       // the shadows' grids: at once when a light asks, ahead once the turn is in otherwise,
       // so switching the sun on later casts them without a wait
       if (eye.grids === 'none' && (wantsShade || base.meshed === base.total)) {
@@ -520,6 +554,14 @@ export function createScene(
     get failed() {
       return Boolean(eye?.failed);
     },
+    /** Whether the graphics card dropped the view: nothing is drawn until it gives it back, when the eye lands again. */
+    get lost() {
+      return lost;
+    },
+    /** Whether part of the ground could not be read, with no try left to come: only `retry` asks for it now. */
+    get gaps() {
+      return gaps;
+    },
     /** What the last frame found still loading (`progressOf`). */
     get progress() {
       return progress;
@@ -529,13 +571,16 @@ export function createScene(
     retry() {
       if (!eye) return;
       if (eye.failed) return land(standing(), eye.far);
-      if (eye.grids === 'failed') eye.grids = 'none';
-      tiles?.retry();
-      onChange();
+      clearTimeout(againTimer);
+      againTimer = 0;
+      eye.tries = 0;
+      gaps = false;
+      askAgain();
     },
 
     dispose() {
       clearTimeout(restTimer);
+      clearTimeout(againTimer);
       canvas.removeEventListener('webglcontextlost', onLost);
       canvas.removeEventListener('webglcontextrestored', onRestored);
       for (const worker of workers) worker.terminate();

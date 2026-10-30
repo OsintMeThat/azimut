@@ -94,7 +94,9 @@ export function createTerrain(read, { keep = DEM_KEEP } = {}) {
   /**
    * The finest terrain zoom, `from` at most, holding the middle of each tile
    * (`{ z, x, y }`), every tile's levels asked together; -1 where there is none,
-   * null when the app could not be reached.
+   * null when the app could not be reached. Every level holds the Earth down to
+   * its one tile, so -1 means the app's sources were out of reach, not that the
+   * ground is missing: what came back empty is forgotten, to be read again.
    */
   async function zoomsFor(list, from) {
     const zooms = list.map((t, i) => Math.min(from(t, i), DEM_MAX));
@@ -108,14 +110,23 @@ export function createTerrain(read, { keep = DEM_KEEP } = {}) {
       list.forEach((t, i) => {
         if (!found[i] && zooms[i] >= 0) keys.push(keyAt(t, zooms[i]));
       });
-      if (!keys.length) return zooms;
-      if (!(await load(keys))) return null;
-      list.forEach((t, i) => {
-        if (found[i] || zooms[i] < 0) return;
-        if (held.get(keyAt(t, zooms[i]))) found[i] = true;
-        else zooms[i] -= 1;
+      if (!keys.length) break;
+      // pinned until looked at: a read ending elsewhere could let them go first, which is no failure of the app
+      const read = await pinning(keys, async () => {
+        if (!(await load(keys))) return false;
+        list.forEach((t, i) => {
+          if (found[i] || zooms[i] < 0) return;
+          if (held.get(keyAt(t, zooms[i]))) found[i] = true;
+          else zooms[i] -= 1;
+        });
+        return true;
       });
+      if (!read) return null;
     }
+    if (zooms.some((zoom) => zoom < 0)) {
+      for (const [key, tile] of held) if (!tile && !pinned.get(key)) held.delete(key);
+    }
+    return zooms;
   }
 
   /**
@@ -155,9 +166,8 @@ export function createTerrain(read, { keep = DEM_KEEP } = {}) {
     const X = lonToX(lon, 0);
     const Y = latToY(lat, 0);
     const zooms = await zoomsFor([{ z: 0, x: X - 0.5, y: Y - 0.5 }], () => DEM_MAX);
-    if (!zooms) return null;
+    if (!zooms || zooms[0] < 0) return null;
     const zd = zooms[0];
-    if (zd < 0) return 0;
     const keys = demRange(0, X, Y, X, Y, zd);
     return pinning(keys, async () => {
       if (!(await load(keys))) return null;
@@ -274,8 +284,8 @@ export async function buildGrid(frame, terrain, { reach, size, zoom }) {
   const X = lonToX(frame.lon, 0);
   const Y = latToY(frame.lat, 0);
   const zooms = await terrain.zoomsFor([{ z: 0, x: X - 0.5, y: Y - 0.5 }], () => zoom);
-  if (!zooms) return null;
-  const zd = Math.max(0, zooms[0]);
+  if (!zooms || zooms[0] < 0) return null;
+  const zd = zooms[0];
   const cos0 = Math.cos(frame.lat * RAD);
   // the square's corners, a little over, so the last cells read whole pixels round them
   const dLat = (reach * 1.02) / 111000 + 0.002;
