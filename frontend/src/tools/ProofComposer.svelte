@@ -509,8 +509,11 @@
     proof.panelDirection = style.panelDirection;
     proof.signature = style.signature;
     proof.signatureText = style.signatureText;
+    // The colour in hand is not part of the document, so a step back keeps it.
+    // Only a step across a template, which changes the palette, takes its first
+    // colour the way applying the template did.
+    if (proof.palette.join() !== style.palette.join()) color = style.palette[0];
     proof.palette = style.palette;
-    color = proof.palette[0];
     proof.notes = spec.notes ?? {};
     proof.legendOrder = spec.legendOrder ?? [];
     proof.templateId = typeof spec.templateId === 'string' ? spec.templateId : null;
@@ -543,12 +546,23 @@
     // restore rather than off the snapshot string, since the values above come
     // back normalised and a raw spec need not match its own normal form.
     dirty = docSnapshot() !== savedSnapshot;
-    requestAnimationFrame(fit);
+    // A page zoomed into to draw a detail stays where it was; one still fitted
+    // to the window is fitted again, in case the step changed its size.
+    if (viewFitted) requestAnimationFrame(fit);
     // outlast the capture debounce so the restore itself is not re-recorded
     setTimeout(() => (histBusy = false), 400);
   }
 
+  /** Mid-curve, a step back takes the last corner off rather than the curve and the mark before it. */
+  function stepBackPath() {
+    pathDraft.points.splice(-2);
+    if (!pathDraft.points.length) { finishPath(false); return; }
+    pathDraft.node.points([...pathDraft.points]);
+    docLayer.batchDraw();
+  }
+
   function undo() {
+    if (pathDraft) { stepBackPath(); return; }
     const json = history.undo();
     if (json != null) applySnapshot(json);
     syncHist();
@@ -573,6 +587,7 @@
   let marqueeEnded = false; // did the press that is ending draw a marquee?
   let spacePan = false; // hold-space panning (manual, so it wins over shape drags)
   let panDrag = null; // {sx, sy, ox, oy} — space/middle-drag pan in progress
+  let viewFitted = true; // the page as Fit left it, before any zoom or pan of the analyst's
   let gestureSeq = 0; // bumped by every press, so a deferred settle can tell whose
   let textEdit = $state(null); // {id, value, left, top, size} — inline text editor
 
@@ -1796,12 +1811,14 @@
       x: (containerEl.clientWidth - width * k) / 2,
       y: (containerEl.clientHeight - height * k) / 2,
     });
+    viewFitted = true;
     if (cropSurfaceId) drawCropHandles();
     stage.batchDraw();
   }
 
   function onWheel(e) {
     e.evt.preventDefault();
+    viewFitted = false;
     const old = stage.scaleX();
     const pointer = stage.getPointerPosition();
     const factor = e.evt.deltaY > 0 ? 0.9 : 1.1;
@@ -2155,6 +2172,7 @@
     }
     if (panDrag) {
       const p = stage.getPointerPosition();
+      viewFitted = false;
       stage.position({ x: panDrag.ox + p.x - panDrag.sx, y: panDrag.oy + p.y - panDrag.sy });
       stage.batchDraw();
       return;

@@ -4081,6 +4081,10 @@ for. The separators still mark the groups: history, the drawing tools, then fit 
 layout together. The controls that come and go with a selection are last, so picking a
 shape never reshuffles the buttons above them.
 
+**Undo takes back the drawing, not the hand.** The colour in hand stays, unless the step
+crosses a template's palette, and so does a zoom set to draw a detail; a page still
+fitted to the window is fitted again. Mid-curve, Ctrl+Z takes the last point off.
+
 **The rail shows what the pick can take, and nothing else.** A line, an arrow or a
 stroke offers its colour, width and **line style** (solid, dashed or dotted, in
 proportion to the width); a box adds its fill and its tag; a label its size, a
