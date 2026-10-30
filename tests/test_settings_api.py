@@ -70,7 +70,7 @@ def test_keys_never_reach_a_case_folder(client, monkeypatch):
     """Principle 7: keys live in settings.json only — nothing under cases/."""
     from PIL import Image
 
-    from azimut.engine import tiles
+    from azimut.engine import tiles, workqueue
 
     monkeypatch.setattr(
         tiles, "_default_fetch", lambda c, u: Image.new("RGB", (256, 256), (9, 9, 9))
@@ -88,6 +88,8 @@ def test_keys_never_reach_a_case_folder(client, monkeypatch):
             "provider": "mapbox-satellite",
         },
     )
+    # the capture's thumbnail rewrites its sidecar, which Windows cannot open mid-rename
+    assert workqueue.wait_until_idle(timeout=60)
     case_dir = config.cases_dir() / cid
     hits = [
         p

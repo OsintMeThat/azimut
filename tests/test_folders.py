@@ -40,8 +40,11 @@ def _file(client, cid, path, folder):
 
 
 def _sidecar(cid, path) -> dict:
-    media = Case.open(cid).resolve_inside(path)
-    return json.loads(_sidecar_path(media).read_text(encoding="utf-8"))
+    case = Case.open(cid)
+    media = case.resolve_inside(path)
+    # under the lock, as the app reads it: Windows cannot open one mid-rename
+    with case.lock:
+        return json.loads(_sidecar_path(media).read_text(encoding="utf-8"))
 
 
 def _media_folder_counts(client, cid) -> dict:
