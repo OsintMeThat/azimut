@@ -6,7 +6,7 @@ import signal
 import subprocess
 import sys
 import time
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 
 import numpy as np
@@ -1349,7 +1349,11 @@ def test_a_place_the_analysts_marks_cost_much_says_what_it_explains_without_them
     assert asked.count("full, bare") == fulls and all("bare" not in p for p in found["places"])
     # key lines are left out of the bare reading as well
     keyed = replace(marks, far=(), clear=(), key=(0,))
-    assert finder.unmarked(replace(photo, marks=keyed)).marks == replace(keyed, key=())
+    bare = finder.unmarked(replace(photo, marks=keyed)).marks
+    assert bare.key == ()
+    # the rest is the trace's own, field by field: Marks holds arrays, and on Python 3.13 a dataclass compares
+    # its fields with `==`, which an array answers element by element
+    assert all(getattr(bare, one.name) is getattr(keyed, one.name) for one in fields(keyed) if one.name != "key")
 
 
 def test_the_best_points_a_warm_start_scored_are_slid_again_in_full(monkeypatch):
