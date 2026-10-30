@@ -421,10 +421,18 @@ def _walk(
     have copied a link's *target* into the bundle under a name saying it was the
     analyst's own file — which turns "the free zone travels" into a way to read
     anything the account can reach. A bundle carries what the folder holds.
+
+    A write in flight is not content: the app writes a file beside it under a
+    dotted `.tmp` name and renames it into place (`media.SIDECAR_TMP_*`), so such
+    a name is left out, and so is a name listed a moment ago that has gone since,
+    renamed by that write. Windows showed both while a thumbnail job wrote its
+    sidecar during an export.
     """
     for entry in sorted(entries):
         rel = entry.relative_to(base).as_posix()
         if not keep(rel):
+            continue
+        if entry.name.startswith(".") and entry.name.endswith(".tmp"):
             continue
         if entry.is_symlink():
             raise BundleError(f"'{rel}' is a symbolic link; a bundle carries files, not links")
@@ -432,6 +440,8 @@ def _walk(
             yield from _walk(entry.iterdir(), base, keep)
         elif entry.is_file():
             yield rel, entry
+        elif not os.path.lexists(entry):
+            continue
         else:
             raise BundleError(f"'{rel}' is not a regular file")
 

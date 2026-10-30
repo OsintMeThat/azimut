@@ -168,6 +168,20 @@ def test_an_export_during_a_write_leaves_sqlites_journal_behind(bundle_case):
         assert [n for n in archive.namelist() if n.endswith(bundles.DB_COMPANIONS)] == []
 
 
+def test_an_export_during_a_sidecar_write_leaves_the_write_in_flight_behind(bundle_case):
+    """A thumbnail job writes `.name.json.<hex>.tmp` and renames it into place; an export meanwhile carries
+    neither the half-written file nor a name that went while it was being read (Windows, in CI)."""
+    meta = bundle_case.subdir("media") / ".meta"
+    meta.mkdir(parents=True, exist_ok=True)
+    (meta / ".roof.png.json.e39dd95e409948a29b7a9b709d040e3e.tmp").write_text("{", encoding="utf-8")
+    exported = bundles.export_case(bundle_case)
+    with zipfile.ZipFile(exported) as archive:
+        assert [n for n in archive.namelist() if n.endswith(".tmp")] == []
+    # listed, then renamed away before it was looked at: no longer there, so nothing to carry
+    gone = meta / "renamed.json"
+    assert list(bundles._walk([gone], bundle_case.path, lambda _rel: True)) == []
+
+
 def test_a_journal_in_a_received_bundle_never_lands_beside_the_database(bundle_case):
     """An Azimut before 0.3.1 could pack one; the bundle still imports, without it."""
     exported = bundles.export_case(bundle_case)
