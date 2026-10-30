@@ -286,7 +286,9 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
     const g = geodetic(next.eye);
     // a tilt past what the height allows is refused, unless the move takes some of it back
     const tilt = next.tilt <= Math.max(tiltCeiling(g.h), camera.tilt) + 1e-6;
-    return g.h - groundHeight(g.lat, g.lon) >= CLEARANCE && length(next.eye) <= FARTHEST && tilt;
+    // likewise a height past the farthest: a wide view handed in from the flat map stands there
+    const far = length(next.eye) <= Math.max(FARTHEST, length(camera.eye) + 1);
+    return g.h - groundHeight(g.lat, g.lon) >= CLEARANCE && far && tilt;
   }
 
   /** Whether the ground leaves the line from the eye of `next` to `point` open, to within a hundredth of the way. */

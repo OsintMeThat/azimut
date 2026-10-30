@@ -541,6 +541,31 @@ test('the wheel over a measure’s point on the globe zooms as over the ground',
   await expect.poll(() => Number(address(page).get('z'))).toBeGreaterThan(zoom);
 });
 
+test('a flat map zoomed far out still moves once in 3D: the wheel comes in and the view turns', async ({ page }) => {
+  await openMap(page, '#satellite?ll=26.3,37.7&z=2&p=esri-world-imagery');
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(globe(page)).toBeVisible();
+  // the globe stands where the flat map framed it, farther than the wheel may back off to
+  await expect.poll(() => address(page).get('z')).toBe('2');
+  const box = await globe(page).boundingBox();
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+
+  // backing off from there goes no farther
+  await page.mouse.wheel(0, 600);
+  await page.waitForTimeout(400);
+  expect(address(page).get('z')).toBe('2');
+
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(x + 80, y, { steps: 8 });
+  await page.mouse.up({ button: 'right' });
+  await expect.poll(() => Number(address(page).get('b') ?? 0)).not.toBe(0);
+
+  const zoom = Number(address(page).get('z'));
+  await page.mouse.wheel(0, -1200);
+  await expect.poll(() => Number(address(page).get('z'))).toBeGreaterThan(zoom + 0.5);
+});
+
 test('a press on the globe reaches the page: a menu open over it closes, and a middle press is heard', async ({ page }) => {
   await openMap(page, '#satellite?ll=46.6,7.9&z=13&p=esri-world-imagery');
   await page.getByRole('button', { name: '3D', exact: true }).click();
