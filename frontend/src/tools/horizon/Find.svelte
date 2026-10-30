@@ -17,6 +17,7 @@
   import FindSteps from './FindSteps.svelte';
   import SearchesMenu from './SearchesMenu.svelte';
   import { PACE_WAIT_MS } from './state/find.svelte.js';
+  import { uiState } from '../../lib/state.svelte.js';
 
   let {
     find,
@@ -166,6 +167,8 @@
   }
 
   function onKey(event) {
+    // Find stays mounted while another tool is on screen, and that tool's keys are its own
+    if (uiState.tool !== 'horizon') return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       if (!saveProblem) onsave();

@@ -104,6 +104,13 @@ describe('the Horizon layout', () => {
   });
 });
 
+describe('Find\'s map, mounted while another tool is on screen', () => {
+  it('leaves Ctrl+Z to that tool, a brush left on or not', () => {
+    const map = readFileSync(new URL('./horizon/FindMap.svelte', import.meta.url), 'utf8');
+    expect(map).toMatch(/function onWindowKey\(event\) \{[^}]*uiState\.tool !== 'horizon'\) return;/);
+  });
+});
+
 describe('the small map\'s layers', () => {
   it('offers every layer the other maps do, from the shared catalogue and store', () => {
     expect(source).toContain("const mapLayers = createLayerSet({");

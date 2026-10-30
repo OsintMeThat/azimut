@@ -52,7 +52,7 @@
   import SavedOverlay from '../satellite/SavedOverlay.svelte';
   import Icon from '../../components/Icon.svelte';
   import { containsPoint } from '../../lib/measure.js';
-  import { fmtCoords } from '../../lib/state.svelte.js';
+  import { fmtCoords, uiState } from '../../lib/state.svelte.js';
   import { STROKE_POINTS_MAX } from './state/find.svelte.js';
 
   let {
@@ -786,6 +786,8 @@
 
   /** Escape closes the Layers menu before Find takes it back from an enlarged column; Ctrl+Z takes the brush's last stroke back while it paints. */
   function onWindowKey(event) {
+    // the map stays mounted while another tool is on screen, and that tool's keys are its own
+    if (uiState.tool !== 'horizon') return;
     if (find.drawing === 'brush' && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
       if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
       event.preventDefault();
