@@ -398,7 +398,9 @@ stops making sense.
   outside the workspace, 0600 and holding a path; deleting the copy a move set
   aside acts on this process's own memory, never on a path from the request.
   Accepted risks recorded here: cleartext keys over
-  localhost, the hash-verified scraper updater, the release workflow's publish job
+  localhost, the hash-verified scraper updater, Intel macOS staying on cryptography 48
+  for want of later wheels (Azimut uses it for AES-GCM only, not the X.509 verifier its
+  two open advisories concern), the release workflow's publish job
   running `softprops/action-gh-release` and `pypa/gh-action-pypi-publish` on mutable
   refs while it holds the PyPI OIDC identity (the branch ref is the form PyPA
   documents; every other action in the workflows is pinned by tag or by commit),
