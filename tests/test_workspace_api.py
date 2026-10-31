@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from jobwait import WAIT
 from azimut import config
 from azimut.engine import workspacemove
 from azimut.workspace import Case
@@ -304,7 +305,7 @@ def test_case_work_is_refused_while_the_workspace_is_being_moved(
     assert queued.status_code == 200, queued.json()
     # Bounded: a move refused before it copies would spin here forever, and a
     # hung test costs a whole CI job rather than one red line.
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + WAIT
     while not reached["copying"]:
         assert time.monotonic() < deadline, "the move never reached the copy step"
         time.sleep(0.01)

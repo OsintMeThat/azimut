@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from jobwait import WAIT
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "relaunch.py"
@@ -41,13 +42,13 @@ def test_control_socket_stops_only_the_matching_launcher(tmp_path: Path):
     control.start()
 
     def close_after_request() -> None:
-        assert control.stop_requested.wait(timeout=2)
+        assert control.stop_requested.wait(timeout=WAIT)
         control.close()
 
     closer = threading.Thread(target=close_after_request)
     closer.start()
-    assert relaunch._stop_previous(state_path, timeout=2) is True
-    closer.join(timeout=2)
+    assert relaunch._stop_previous(state_path, timeout=WAIT) is True
+    closer.join(timeout=WAIT)
 
     assert not closer.is_alive()
     assert not state_path.exists()

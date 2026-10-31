@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from jobwait import WAIT
 from fullcase import FullCase, build_full_case
 
 GOLDEN = Path(__file__).parent / "fixtures" / "case-workspace-0.3.1.json"
@@ -164,6 +165,10 @@ def build_workspace_case(client) -> WorkspaceCase:
         "text": f"# Witness\n\nSaw [[entity:{full.vessel_id}|MV Aurora]] leave.\n",
     }), "filed note")
 
+    # A snapshot keeps what the case knows when it is saved, and the dated photo's
+    # capture time is read in the background: let that land first.
+    assert workqueue.wait_until_idle(timeout=WAIT)
+
     # -- saved readings: every surface, Live and Snapshot, both Timeline modes --
     def view(name: str, surface: str, mode: str, spec: dict[str, Any]) -> None:
         saved = _ok(client.post(f"{base}/analysis-views", json={
@@ -220,7 +225,7 @@ def build_workspace_case(client) -> WorkspaceCase:
     # A Timeline view saved without tracks: the server gave it its default ones.
     view("Chronology defaults", "timeline", "live", {"timeline": dict(WINDOW)})
 
-    workqueue.wait_until_idle(timeout=20)
+    assert workqueue.wait_until_idle(timeout=WAIT)
     return ws
 
 

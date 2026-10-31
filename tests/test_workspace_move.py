@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from jobwait import WAIT
 from azimut import config
 from azimut.engine import workspacelock, workspacemove
 from azimut.engine.workspacemove import MoveError
@@ -418,7 +419,7 @@ def test_a_second_move_is_refused_while_one_runs(workspace, tmp_path, monkeypatc
     workspacemove.start(str(tmp_path / "first"))
     # Bounded, like `_finish`: a move that never reaches the copy step must fail
     # this test rather than hang the run.
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + WAIT
     while not started["copying"]:
         assert time.monotonic() < deadline, "the move never reached the copy step"
         time.sleep(0.01)

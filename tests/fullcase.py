@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image
+from jobwait import WAIT
 from azimut import layout
 
 
@@ -705,7 +706,7 @@ def build_full_case(
 
     # Enrichment and thumbnails were queued along the way; let them land, or the
     # caller's first delete races a background write into the same case.
-    workqueue.wait_until_idle(timeout=20)
+    assert workqueue.wait_until_idle(timeout=WAIT)
     run_id = Path(full.analyzer_run).stem.split("-", 1)[1]
     result = client.get(f"/api/cases/{case_id}/analysis/runs/{run_id}").json()
     assert result["status"] == "ready", result
@@ -750,7 +751,7 @@ def _add_horizon_find(client, case_id: str, full: FullCase) -> None:
             },
         )
         assert searched.status_code == 200, searched.text
-        workqueue.wait_until_idle(timeout=60)
+        assert workqueue.wait_until_idle(timeout=WAIT)
     finally:
         terrain.tile = fetch
         terrain.forget_decoded()

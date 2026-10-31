@@ -2,6 +2,7 @@
 
 import threading
 
+from jobwait import WAIT
 from azimut import jobs
 
 
@@ -16,7 +17,7 @@ def test_start_evicts_old_finished_jobs_but_keeps_running_ones(monkeypatch):
 
     finished = threading.Event()
     job_id = jobs.start("t", lambda set_progress: finished.set())
-    assert finished.wait(timeout=5)
+    assert finished.wait(timeout=WAIT)
 
     # the two oldest finished jobs were dropped; running and recent ones stay
     assert "done0" not in registry and "done1" not in registry
@@ -33,7 +34,7 @@ def test_get_reports_completion(monkeypatch):
         return {"answer": 42}
 
     job_id = jobs.start("t", work)
-    assert finished.wait(timeout=5)
+    assert finished.wait(timeout=WAIT)
     for _ in range(200):  # the runner thread updates status after `finished`
         job = jobs.get(job_id)
         if job["status"] == "done":
