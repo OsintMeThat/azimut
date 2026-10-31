@@ -6,6 +6,7 @@ import sqlite3
 from contextlib import closing
 
 from azimut import layout
+from jobwait import WAIT
 from azimut.engine import workqueue
 from azimut.workspace import Case
 
@@ -21,7 +22,7 @@ def _upload(client, case_id, name="evidence.txt", content=b"evidence"):
         f"/api/cases/{case_id}/media/upload",
         files={"file": (name, io.BytesIO(content), "text/plain")},
     ).json()
-    assert workqueue.wait_until_idle(timeout=10)
+    assert workqueue.wait_until_idle(timeout=WAIT)
     return result
 
 

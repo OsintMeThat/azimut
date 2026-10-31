@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+from jobwait import WAIT
 from azimut.engine import workspacelock
 from azimut.engine.workspacelock import WorkspaceBusy
 
@@ -108,7 +109,7 @@ def test_a_second_instance_is_refused_and_names_the_holder(workspace):
             workspacelock.acquire(8478)
     finally:
         child.kill()
-        child.wait(timeout=10)
+        child.wait(timeout=WAIT)
 
     # A pid, not *this* pid: on Windows the interpreter Popen starts is not always
     # the process that ends up running the code, so `child.pid` can name a
@@ -126,7 +127,7 @@ def test_the_lock_dies_with_the_process(workspace):
     a crashed Azimut must never leave a workspace nobody can open."""
     child = _holder_process(workspace)
     child.kill()
-    child.wait(timeout=10)
+    child.wait(timeout=WAIT)
 
     _acquire_once_free(8478)  # no exception: the OS let go on its own
 
@@ -136,7 +137,7 @@ def test_the_lock_dies_with_the_process(workspace):
 def test_a_clean_exit_leaves_no_payload_to_age(workspace):
     child = _holder_process(workspace)
     child.terminate()
-    child.wait(timeout=10)
+    child.wait(timeout=WAIT)
 
     # The child's atexit-free path still releases via the OS; what matters is
     # that the next run can take it without judging a corpse.
@@ -230,7 +231,7 @@ def test_forcing_past_a_process_that_really_holds_it_still_reports_the_truth(wor
         assert _payload(workspace)["pid"] == os.getpid()
     finally:
         child.kill()
-        child.wait(timeout=10)
+        child.wait(timeout=WAIT)
 
 
 # -- holding, releasing, heartbeat ---------------------------------------------
@@ -257,7 +258,7 @@ def test_the_heartbeat_is_refreshed_while_it_is_held(workspace, monkeypatch):
     workspacelock.acquire(8477)
     first = _payload(workspace)["at"]
 
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + WAIT
     while time.monotonic() < deadline and _payload(workspace)["at"] == first:
         time.sleep(0.05)
 

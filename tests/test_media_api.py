@@ -1927,7 +1927,7 @@ def test_concurrent_sidecar_merges_do_not_drop_each_other(client, monkeypatch):
     start = threading.Barrier(2)
 
     def write(patch):
-        start.wait(timeout=5)
+        start.wait(timeout=WAIT)
         for _ in range(20):
             media_engine.merge_item(case, rel, patch)
 
@@ -1979,7 +1979,7 @@ def test_naming_an_item_survives_the_enrichment_of_the_same_sidecar(client, monk
         if data.get("dhash") and not blocked_once:
             blocked_once = True
             enrichment_started.set()
-            assert let_enrichment_finish.wait(timeout=5)
+            assert let_enrichment_finish.wait(timeout=WAIT)
         real_write(path, data)
 
     monkeypatch.setattr(media_engine, "_write_sidecar", block_enrichment_write)
@@ -1988,7 +1988,7 @@ def test_naming_an_item_survives_the_enrichment_of_the_same_sidecar(client, monk
         args=(case, rel, {"dhash": "ff00ff00ff00ff00"}),
     )
     enrich_thread.start()
-    assert enrichment_started.wait(timeout=5)
+    assert enrichment_started.wait(timeout=WAIT)
 
     renamed = {}
 
@@ -1998,8 +1998,8 @@ def test_naming_an_item_survives_the_enrichment_of_the_same_sidecar(client, monk
     name_thread = threading.Thread(target=name_it)
     name_thread.start()
     let_enrichment_finish.set()
-    enrich_thread.join(timeout=10)
-    name_thread.join(timeout=10)
+    enrich_thread.join(timeout=WAIT)
+    name_thread.join(timeout=WAIT)
     assert not enrich_thread.is_alive()
     assert not name_thread.is_alive()
 
@@ -2127,7 +2127,7 @@ def test_enrich_counts_the_jobs_the_queue_took(client):
     assert client.post(f"/api/cases/{cid}/media/enrich", json={"path": image["path"]}).json() == {
         "queued": 1
     }
-    workqueue.wait_until_idle()
+    assert workqueue.wait_until_idle(timeout=WAIT)
 
 
 # ── clipboard paste ──────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import fullcase
 from azimut import layout
+from jobwait import WAIT
 from azimut.engine import workqueue
 from azimut.workspace import Case
 
@@ -248,7 +249,7 @@ def test_a_restored_media_gets_its_thumbnail_back(client):
     assert not case.resolve_inside(thumb_rel).exists()
 
     client.post(f"/api/cases/{full.case_id}/trash/{group}/restore")
-    workqueue.wait_until_idle(timeout=20)
+    assert workqueue.wait_until_idle(timeout=WAIT)
     assert case.resolve_inside(thumb_rel).is_file()
 
 
