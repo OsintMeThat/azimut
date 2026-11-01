@@ -21,6 +21,13 @@ const CONFIG = {
   startOnLoad: false,
   securityLevel: 'strict',
   theme: 'base',
+  // Mermaid 12 turned both of these into something else by default, which would
+  // redraw every diagram already in a case. A note can still ask for them. A mindmap
+  // takes this layout too, so it reads as a tree rather than a star.
+  layout: 'dagre',
+  look: 'classic',
+  // a journey's plain labels (below) would otherwise take their box's own fill
+  themeCSS: 'text.journey-section, text.task { fill: #202124; }',
   themeVariables: {
     fontFamily: 'Inter, system-ui, sans-serif',
     fontSize: '14px',
@@ -39,10 +46,20 @@ const CONFIG = {
  * initialised globally so the preview keeps its own settings. HTML labels are a
  * `<foreignObject>` — HTML nested inside the picture — and a browser will not
  * rasterise one out of an image element, so a diagram exported that way comes
- * back with empty boxes where its text should be.
+ * back with empty boxes where its text should be. It is the root-level setting
+ * that counts: it wins over the per-diagram ones, which Mermaid has deprecated.
+ * A journey ignores it and answers to its own text placement. Chromium still draws
+ * those, Firefox leaves the boxes empty.
  */
-const PLAIN_LABELS = '%%{init: {"flowchart": {"htmlLabels": false}, '
-  + '"class": {"htmlLabels": false}, "er": {"htmlLabels": false}} }%%\n';
+const PLAIN_LABELS = '%%{init: {"htmlLabels": false, "journey": {"textPlacement": "tspan"}} }%%\n';
+
+/** A note's own config block, which Mermaid reads only at the very top of a diagram. */
+const FRONT_MATTER = /^\s*---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n/;
+
+function withPlainLabels(source) {
+  const at = FRONT_MATTER.exec(source)?.[0].length ?? 0;
+  return `${source.slice(0, at)}${PLAIN_LABELS}${source.slice(at)}`;
+}
 
 let loading = null;
 let sequence = 0;
@@ -66,7 +83,7 @@ function loadMermaid() {
 export async function renderMermaidSvg(source, { load = loadMermaid } = {}) {
   const mermaid = await load();
   const id = `azimut-mermaid-export-${(sequence += 1)}`;
-  const { svg } = await mermaid.render(id, `${PLAIN_LABELS}${source}`);
+  const { svg } = await mermaid.render(id, withPlainLabels(source));
   const element = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement;
   const [, , boxWidth, boxHeight] = (element.getAttribute('viewBox') ?? '0 0 800 600')
     .split(/[\s,]+/)

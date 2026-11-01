@@ -103,4 +103,17 @@ describe('renderMermaidSvg', () => {
     expect(render.mock.calls[0][1]).toContain('"htmlLabels": false');
     expect(render.mock.calls[0][1]).toContain('flowchart LR');
   });
+
+  it('leaves a note’s own config block first, the only place Mermaid reads it', async () => {
+    browser();
+    const render = vi.fn().mockResolvedValue({ svg: '<svg viewBox="0 0 10 10"></svg>' });
+    const block = '---\nconfig:\n  layout: elk\n---\n';
+
+    await renderMermaidSvg(`${block}flowchart LR\n  A --> B`, { load: async () => ({ render }) });
+
+    const sent = render.mock.calls[0][1];
+    expect(sent.startsWith(block)).toBe(true);
+    expect(sent.indexOf('"htmlLabels": false')).toBeGreaterThan(block.length - 1);
+    expect(sent.indexOf('"htmlLabels": false')).toBeLessThan(sent.indexOf('flowchart LR'));
+  });
 });
