@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sqlite3
+import threading
 import uuid
 import zipfile
 from contextlib import closing
@@ -17,7 +18,8 @@ import pytest
 from PIL import Image
 
 from azimut import config, layout
-from azimut.engine import bundles, entity_images, media as media_engine, workqueue
+from azimut.api import satellite
+from azimut.engine import bundles, entity_images, media as media_engine, sheets as sheet_engine, workqueue
 from azimut.workspace import Case
 
 
@@ -180,6 +182,181 @@ def test_an_export_during_a_sidecar_write_leaves_the_write_in_flight_behind(bund
     # listed, then renamed away before it was looked at: no longer there, so nothing to carry
     gone = meta / "renamed.json"
     assert list(bundles._walk([gone], bundle_case.path, lambda _rel: True)) == []
+
+
+@pytest.mark.parametrize(
+    "method, error",
+    [
+        ("lstat", FileNotFoundError),
+        ("lstat", PermissionError),
+        ("stat", FileNotFoundError),
+        ("stat", PermissionError),
+        ("open", FileNotFoundError),
+        ("open", PermissionError),
+    ],
+)
+def test_an_export_waits_out_a_rename_and_keeps_the_file(bundle_case, monkeypatch, method, error):
+    """For the instant of a rename Windows says the file is in use or not there. It is
+    neither gone nor worth failing the export over, and leaving it out would lose it."""
+    meta = bundle_case.subdir("media") / ".meta"
+    meta.mkdir(parents=True, exist_ok=True)
+    sidecar = meta / "roof.png.json"
+    sidecar.write_text('{"kept": true}', encoding="utf-8")
+
+    real = getattr(Path, method)
+    misses = [error("mid-rename"), error("mid-rename")]
+
+    def flicker(self, *args, **kwargs):
+        if self == sidecar and misses:
+            raise misses.pop()
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, method, flicker)
+    exported = bundles.export_case(bundle_case)
+    assert misses == []
+    member = f"{bundles.BUNDLE_ROOT}/{layout.TOOL_DIR}/media/.meta/roof.png.json"
+    with zipfile.ZipFile(exported) as archive:
+        assert json.loads(archive.read(member)) == {"kept": True}
+
+
+def test_an_export_keeps_a_file_one_listing_left_out(bundle_case, monkeypatch):
+    """Windows can skip a name while a write replaces that file, and nothing would say so."""
+    meta = bundle_case.subdir("media") / ".meta"
+    meta.mkdir(parents=True, exist_ok=True)
+    sidecar = meta / "roof.png.json"
+    sidecar.write_text('{"kept": true}', encoding="utf-8")
+    real = Path.iterdir
+    skipped = []
+
+    def skipping(self):
+        for entry in real(self):
+            if entry == sidecar and not skipped:
+                skipped.append(entry)
+                continue
+            yield entry
+
+    monkeypatch.setattr(Path, "iterdir", skipping)
+    exported = bundles.export_case(bundle_case)
+    assert skipped == [sidecar]
+    member = f"{bundles.BUNDLE_ROOT}/{layout.TOOL_DIR}/media/.meta/roof.png.json"
+    with zipfile.ZipFile(exported) as archive:
+        assert member in archive.namelist()
+
+
+def test_an_export_gives_up_on_a_file_something_keeps_locked(bundle_case, monkeypatch):
+    """A file nothing brings back is a real refusal, and the export says so."""
+    meta = bundle_case.subdir("media") / ".meta"
+    meta.mkdir(parents=True, exist_ok=True)
+    sidecar = meta / "roof.png.json"
+    sidecar.write_text("{}", encoding="utf-8")
+    real = Path.open
+
+    def locked(self, *args, **kwargs):
+        if self == sidecar:
+            raise PermissionError("locked")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", locked)
+    with pytest.raises(PermissionError):
+        bundles.export_case(bundle_case)
+
+
+def test_an_export_leaves_out_a_file_deleted_after_the_listing_and_still_imports(
+    bundle_case, monkeypatch
+):
+    meta = bundle_case.subdir("media") / ".meta"
+    meta.mkdir(parents=True, exist_ok=True)
+    gone = meta / "gone.json"
+    gone.write_text("{}", encoding="utf-8")
+    listed = bundles._case_files
+
+    def then_deleted(case):
+        files = list(listed(case))
+        gone.unlink()
+        return iter(files)
+
+    monkeypatch.setattr(bundles, "_case_files", then_deleted)
+    exported = bundles.export_case(bundle_case)
+    with zipfile.ZipFile(exported) as archive:
+        assert not [name for name in archive.namelist() if name.endswith("gone.json")]
+    destination = Case.create(bundles.imported_name("Source case"))
+    assert bundles.import_into(destination, exported)["case_id"]
+
+
+def test_an_export_reads_the_case_manifest_under_the_case_lock(bundle_case, monkeypatch):
+    """On Windows the file cannot be opened mid-rename, and every write of it holds this lock."""
+    held = []
+    real = Path.read_bytes
+
+    def noting(self):
+        if self == bundle_case.json_path:
+            held.append(bundle_case.lock._is_owned())
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", noting)
+    bundles.export_case(bundle_case)
+    assert held == [True]
+
+
+@pytest.mark.parametrize(
+    "write",
+    [
+        lambda path: media_engine._write_sidecar(path, {"saved": True}),
+        lambda path: sheet_engine.replace_atomic(path, b"saved"),
+        lambda path: satellite._write_grid_atomic(path, {"saved": True}),
+    ],
+    ids=["sidecar", "sheet", "grid"],
+)
+def test_a_write_waits_out_an_export_reading_the_file(tmp_path, monkeypatch, write):
+    """Windows refuses to rename over a file open for reading, and an export reads them all."""
+    real = Path.replace
+    refused = [PermissionError("in use"), PermissionError("in use")]
+
+    def in_use(self, target):
+        if refused:
+            raise refused.pop()
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "replace", in_use)
+    target = tmp_path / "photo.png"
+    target.write_bytes(b"x")
+    write(target)
+    assert refused == []
+
+
+def test_an_export_keeps_up_with_a_case_being_written(bundle_case):
+    """The real race, on whatever OS runs it: a quarter of these failed on a Windows runner."""
+    folder = bundle_case.subdir("media")
+    photos = [folder / f"photo-{index}.png" for index in range(12)]
+    sidecar = {"pad": "x" * 20_000}
+    for path in photos:
+        path.write_bytes(b"x")
+        media_engine._write_sidecar(path, sidecar)
+    expected = {f"{bundles.BUNDLE_ROOT}/{layout.TOOL_DIR}/media/.meta/{path.name}.json" for path in photos}
+    stop = threading.Event()
+    writer_errors = []
+
+    def writes():
+        passes = 0
+        while not stop.is_set():
+            passes += 1
+            try:
+                media_engine._write_sidecar(photos[passes % len(photos)], sidecar)
+                bundle_case.write_todos(bundle_case.read_todos())
+            except OSError as exc:
+                writer_errors.append(exc)
+
+    writer = threading.Thread(target=writes, daemon=True)
+    writer.start()
+    try:
+        for _ in range(6):
+            exported = bundles.export_case(bundle_case)
+            with zipfile.ZipFile(exported) as archive:
+                assert expected <= set(archive.namelist())
+    finally:
+        stop.set()
+        writer.join(timeout=20)
+    assert writer_errors == []
 
 
 def test_a_journal_in_a_received_bundle_never_lands_beside_the_database(bundle_case):

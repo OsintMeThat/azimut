@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .. import layout
-from ..workspace import CaseError, ensure_dir
+from ..workspace import CaseError, _replace_with_retry, ensure_dir
 from . import sheetroles
 
 if TYPE_CHECKING:
@@ -307,7 +307,7 @@ def replace_atomic(path: Path, data: bytes) -> None:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
+        _replace_with_retry(tmp_path, path)
     except OSError as exc:
         raise SheetUnwritable(f"could not write “{path.name}”: {exc}") from exc
     finally:

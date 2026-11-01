@@ -43,7 +43,7 @@ from ..engine import (
     tiles,
     wayback,
 )
-from ..workspace import Case, CaseError
+from ..workspace import Case, CaseError, _replace_with_retry
 from . import events, tile_batch
 from .cases import delete_by_path, get_case
 from .limits import MAX_IMAGE_BYTES
@@ -2187,7 +2187,7 @@ def _write_grid_atomic(path: Path, spec: dict[str, Any]) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
+        _replace_with_retry(tmp_path, path)
     finally:
         tmp_path.unlink(missing_ok=True)
 

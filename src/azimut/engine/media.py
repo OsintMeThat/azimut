@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 from PIL import Image
 
 from .. import USER_AGENT, config, layout
-from ..workspace import Case, CaseError, ensure_dir, write_text_atomic
+from ..workspace import Case, CaseError, _replace_with_retry, ensure_dir, write_text_atomic
 from . import enrich as enrich_engine
 from . import ffmpeg as ffmpeg_engine
 from . import gallerydl
@@ -270,7 +270,7 @@ def _write_sidecar(media_path: Path, data: dict[str, Any]) -> None:
             json.dumps(data, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        temporary.replace(sidecar)
+        _replace_with_retry(temporary, sidecar)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -699,7 +699,7 @@ def replace_rendered_bytes(
         temporary = media_path.with_name(f".{media_path.name}.{uuid.uuid4().hex}.tmp")
         try:
             temporary.write_bytes(data)
-            temporary.replace(media_path)
+            _replace_with_retry(temporary, media_path)
         finally:
             temporary.unlink(missing_ok=True)
         digest = sha256_file(media_path)

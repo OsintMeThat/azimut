@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import struct
 import tempfile
 import threading
@@ -33,7 +34,7 @@ import zipfile
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, Callable, Iterable, Iterator
+from typing import Any, BinaryIO, Callable, Iterable, Iterator, TypeVar
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -42,6 +43,11 @@ from .. import __version__, config, errors, layout
 from ..sqlite_backend import SQLITE_SCHEMA, SqliteCase
 from ..workspace import Case, CaseError, _now, _replace_with_retry, ensure_dir
 from . import updates, workqueue
+
+_T = TypeVar("_T")
+
+#: How many times a read of a case file is tried, 10 ms apart, to wait out a rename.
+_LIVE_READ_TRIES = 20
 
 BUNDLE_FORMAT = 2
 #: The format from which members are named relative to the case root rather than
@@ -408,6 +414,39 @@ def classify_case_entry(rel: str) -> str | None:
     return None
 
 
+def _live_read(read: Callable[[], _T]) -> _T | None:
+    """`read` on a file a live case may be renaming, or None once it has really gone.
+
+    An export holds no lock over its minutes of reading, so a write can land on the
+    file in hand. For the instant of a rename Windows answers PermissionError, or says
+    the file is not there, where POSIX has no such instant. A rename brings the file
+    back within the wait its own retry allows (`workspace._replace_with_retry`), so
+    only a file still absent after it is left out of the bundle.
+    """
+    for left in reversed(range(_LIVE_READ_TRIES)):
+        try:
+            return read()
+        except FileNotFoundError:
+            if not left:
+                return None
+        except PermissionError:
+            if not left:
+                raise
+        time.sleep(0.01)
+    return None
+
+
+def _listing(folder: Path) -> set[Path]:
+    """What a folder holds, read twice.
+
+    Windows can leave a name out of a listing while a write replaces that file: once in
+    about two thousand passes over a case being written, on a CI runner. A file left out
+    of a bundle is lost without a word, and two reads missing the same name is what it
+    now takes.
+    """
+    return {*folder.iterdir(), *folder.iterdir()}
+
+
 def _walk(
     entries: Iterable[Path], base: Path, keep: Callable[[str], bool]
 ) -> Iterator[tuple[str, Path]]:
@@ -424,9 +463,8 @@ def _walk(
 
     A write in flight is not content: the app writes a file beside it under a
     dotted `.tmp` name and renames it into place (`media.SIDECAR_TMP_*`), so such
-    a name is left out, and so is a name listed a moment ago that has gone since,
-    renamed by that write. Windows showed both while a thumbnail job wrote its
-    sidecar during an export.
+    a name is left out, and so is a name that has really gone since it was listed.
+    Windows showed both while a thumbnail job wrote its sidecar during an export.
     """
     for entry in sorted(entries):
         rel = entry.relative_to(base).as_posix()
@@ -434,14 +472,15 @@ def _walk(
             continue
         if entry.name.startswith(".") and entry.name.endswith(".tmp"):
             continue
-        if entry.is_symlink():
-            raise BundleError(f"'{rel}' is a symbolic link; a bundle carries files, not links")
-        if entry.is_dir():
-            yield from _walk(entry.iterdir(), base, keep)
-        elif entry.is_file():
-            yield rel, entry
-        elif not os.path.lexists(entry):
+        status = _live_read(entry.lstat)
+        if status is None:
             continue
+        if stat.S_ISLNK(status.st_mode):
+            raise BundleError(f"'{rel}' is a symbolic link; a bundle carries files, not links")
+        if stat.S_ISDIR(status.st_mode):
+            yield from _walk(_live_read(lambda: _listing(entry)) or [], base, keep)
+        elif stat.S_ISREG(status.st_mode):
+            yield rel, entry
         else:
             raise BundleError(f"'{rel}' is not a regular file")
 
@@ -479,10 +518,10 @@ def _case_files(case: Case) -> Iterator[tuple[str, Path]]:
     written_apart = {
         path.relative_to(tool).as_posix() for path in (case.json_path, case.db_path)
     }
-    for rel, path in _walk(tool.iterdir(), tool, _included):
+    for rel, path in _walk(_listing(tool), tool, _included):
         if rel not in written_apart:
             yield f"{BUNDLE_ROOT}/{layout.TOOL_DIR}/{rel}", path
-    free = case.free_entries()
+    free = {*case.free_entries(), *case.free_entries()}
     for entry in free:
         _check_free_name(entry.name)
     for rel, path in _walk(free, case.path, lambda _rel: True):
@@ -553,7 +592,10 @@ def _write_file(
 ) -> None:
     digest = hashlib.sha256()
     size = 0
-    with source.open("rb") as src, archive.open(
+    opened = _live_read(lambda: source.open("rb"))
+    if opened is None:
+        return
+    with opened as src, archive.open(
         _zip_info(name, compressed=_compress_member(name)), "w"
     ) as dst:
         while chunk := src.read(1024 * 1024):
@@ -685,7 +727,8 @@ def export_case(
 
     try:
         _clean_database(case.db_path, clean_db)
-        case_json = case.json_path.read_bytes()
+        with case.lock:
+            case_json = case.json_path.read_bytes()
         files = list(_case_files(case))
         # The two members the export writes itself, named the way every other
         # member is: where they sit in the case folder.
@@ -697,7 +740,7 @@ def export_case(
             [HEADER_NAME, manifest_member, db_member, *(rel for rel, _ in files), MANIFEST_NAME]
         )
         total_size = len(case_json) + clean_db.stat().st_size
-        total_size += sum(path.stat().st_size for _, path in files)
+        total_size += sum(status.st_size for _, path in files if (status := _live_read(path.stat)))
         _require_export_space(temp_output, total_size)
         header = {
             "format_version": BUNDLE_FORMAT,
