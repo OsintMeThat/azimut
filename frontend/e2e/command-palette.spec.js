@@ -27,7 +27,7 @@ async function start(page, options = {}, tool = 'media') {
   });
   await page.goto(`/#${tool}`);
   if (tool === 'media') {
-    await expect(page.getByPlaceholder('Paste a link (X, Telegram, YouTube…)')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByPlaceholder('Paste a link (X, Telegram, TikTok…)')).toBeVisible({ timeout: 15_000 });
   }
   return fixture;
 }
@@ -72,7 +72,7 @@ test('Ctrl+K reads only on opening and reaches a tool with the keyboard', async 
 
 test('Command+K works in a field, and Escape preserves it and returns focus', async ({ page }) => {
   const fixture = await start(page);
-  const field = page.getByPlaceholder('Paste a link (X, Telegram, YouTube…)');
+  const field = page.getByPlaceholder('Paste a link (X, Telegram, TikTok…)');
   await field.fill('https://example.test/unfinished');
   await page.keyboard.press('Meta+k');
   await expect(search(page)).toBeFocused();

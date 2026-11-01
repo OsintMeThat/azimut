@@ -72,7 +72,7 @@ to fix a point on the map.*
 | **Board** | The case as an index of people, accounts, places and things, each with how many events name it and when, filtered by values taken from the case. |
 | **Graph** | The same case drawn as clustered nodes and verb-labelled edges, exported with its question, period and legend as an SVG or PNG plate. |
 | **Sheet** | The case's CSVs in a plain grid, where typed columns, worklists and declared sheets promote into entities, places and dated statements. |
-| **Media** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram and more via yt-dlp and gallery-dl), each kept as a clean local file with metadata and a SHA-256. |
+| **Media** | Import local files or download by URL (X, Telegram, TikTok, Instagram and more via yt-dlp and gallery-dl), each kept as a clean local file with metadata and a SHA-256. |
 | **Files** | Every saved artifact in one Finder-style view of your folders, not just media: select several, drag them into a folder, search across the lot. |
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services, which the capture extension opens with the picture already in them. |
 | **Inspect** | Reads any photo or video closely with sharpest-frame capture, frame adjustments, editable crop and ELA hints, all kept with the file as you work. |
@@ -462,3 +462,8 @@ Copyright © 2026 the Azimut maintainer.
 [AGPL-3.0-only](LICENSE): free and open source; hosted or modified versions
 must share their source. Contributions are welcome under the
 [Contributor License Agreement](CLA.md); see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Azimut is an independent project, not affiliated with or endorsed by the map,
+imagery and media services it can connect to. Their names belong to their owners
+and their terms apply to how you use them. You are responsible for what you
+collect and publish.

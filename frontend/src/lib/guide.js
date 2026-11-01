@@ -215,7 +215,7 @@ export const PAGES = {
     lead: 'Every picture, video and file of the case, each with where it came from.',
     shot: 'media',
     marks: [
-      { anchor: 'media.link', title: 'Paste a link', text: 'A post on X, Telegram or YouTube comes down with its address kept as the source.' },
+      { anchor: 'media.link', title: 'Paste a link', text: 'A post on X or Telegram comes down with its address kept as the source.' },
       { anchor: 'media.import', title: 'Import', text: 'Files from your disk, or dropped anywhere on the page.' },
       { anchor: 'media.worklist', title: 'Worklist', text: 'Opens the pictures and videos still to place as a sheet, Files to geolocate.' },
       { anchor: 'media.browse', title: 'Search and filter', text: 'Search by name or source, sort, and narrow by type, folder or GPS.' },

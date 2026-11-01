@@ -14,8 +14,8 @@ test('explains when a large video must be saved from Telegram', async ({ page })
   });
 
   await page.goto('/#media');
-  await expect(page.getByPlaceholder('Paste a link (X, Telegram, YouTube…)')).toBeVisible();
-  await page.getByPlaceholder('Paste a link (X, Telegram, YouTube…)').fill(target);
+  await expect(page.getByPlaceholder('Paste a link (X, Telegram, TikTok…)')).toBeVisible();
+  await page.getByPlaceholder('Paste a link (X, Telegram, TikTok…)').fill(target);
   await page.getByRole('button', { name: 'Download', exact: true }).click();
 
   const dialog = page.getByRole('dialog', { name: 'This video needs Telegram' });

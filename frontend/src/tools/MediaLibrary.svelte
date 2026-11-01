@@ -949,7 +949,7 @@
     >
       <input
         class="input"
-        placeholder="Paste a link (X, Telegram, YouTube…)"
+        placeholder="Paste a link (X, Telegram, TikTok…)"
         bind:value={url}
       />
       <button type="submit" class="btn btn-primary" disabled={!url.trim()}>
