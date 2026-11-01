@@ -132,13 +132,12 @@ describe('gmaps module', () => {
     expect(terms.parentElement).toBe(built[0].node);
   });
 
-  it('leaves hidden what Google hides, and wraps the credit short of the logo', async () => {
+  it('leaves hidden what Google hides', async () => {
     const { createGoogleGlass } = await import('./gmaps.js');
     const { built } = stubGoogleMaps();
     const engine = stubEngine();
     createGoogleGlass(engine).show();
     const credit = engine.container.querySelector('.map-glass-credit');
-    expect(credit.style.maxWidth).toBe('615px'); // an 800 px view, less the logo's end
 
     const hiddenBox = document.createElement('div');
     hiddenBox.setAttribute('style', 'z-index: 1; display: none;');

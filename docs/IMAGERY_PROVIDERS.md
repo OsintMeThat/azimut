@@ -103,7 +103,7 @@ is moved to follow ours on each frame.
   the canvas, so they stay readable and their links can be pressed: the credit stacks
   on the map's attribution at the bottom right, the logo sits on the bottom edge past
   the scale bar. Its mark is 16 px tall, the floor of the 16 to 19 px Google asks for.
-  They arrive one by one after the first tiles, past the last event Google fires, so a
+  In a Compare swipe each map's corners stay on its own side of the line. They arrive one by one after the first tiles, past the last event Google fires, so a
   `MutationObserver` on Google's element takes them as they appear. If Google's
   markup ever stops offering the credit node, the same credit and a terms link are
   stated by us instead — the imagery is never shown bare.

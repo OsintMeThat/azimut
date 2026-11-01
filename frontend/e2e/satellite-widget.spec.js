@@ -118,6 +118,106 @@ test('keeps Google’s credit and logo in plain sight, their links within reach'
   expect(logo.x).toBeGreaterThanOrEqual(scale.x + scale.width);
 });
 
+/** Google's marks as its real map adds them: a credit too long for a narrow view, and the logo. */
+async function googleMarks(page, at = 0) {
+  await page.evaluate((index) => {
+    const map = window.__googleMaps[index];
+    const line = document.createElement('div');
+    line.className = 'gm-style-cc';
+    line.innerHTML = '<div>Imagery ©2026 Airbus, CNES / Airbus, Landsat / Copernicus, Maxar Technologies</div>';
+    const logo = document.createElement('a');
+    logo.href = 'https://maps.google.com/maps?ll=48.85,2.35&z=16';
+    logo.innerHTML = '<div style="width: 66px; height: 26px"></div>';
+    map.node.append(line, logo);
+  }, at);
+}
+
+const onTop = (page, selector) => page.evaluate((wanted) => {
+  const box = document.querySelector(wanted).getBoundingClientRect();
+  return [0.1, 0.5, 0.9].every((share) =>
+    document.elementFromPoint(box.x + box.width * share, box.y + box.height / 2)?.closest(wanted)
+  );
+}, selector);
+
+test('a narrow map keeps the credit, the logo and the capture bar clear of each other', async ({ page }) => {
+  await openWidget(page);
+  await googleMarks(page);
+  await expect(page.locator('.map-glass-logo a')).toBeVisible();
+  for (const width of [1100, 900, 800]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect.poll(async () => {
+      const credit = await page.locator('.map-glass-credit').boundingBox();
+      const bar = await page.locator('.status .acts').boundingBox();
+      return bar.y + bar.height <= credit.y;
+    }).toBe(true);
+    expect(await onTop(page, '.map-glass-credit'), `credit at ${width}`).toBe(true);
+    expect(await onTop(page, '.map-glass-logo'), `logo at ${width}`).toBe(true);
+  }
+});
+
+async function compareWidget(page, a, b) {
+  await fakeGoogleMaps(page);
+  await installAppFixture(page, { widget: true });
+  await page.route('**/api/satellite/wayback/releases', (route) => route.fulfill({ json: { releases: [] } }));
+  await page.route('**/api/cases/*/compare/sessions', (route) => route.fulfill({ json: [] }));
+  await page.goto('/#compare');
+  await expect(page.locator('.empty-slot')).toHaveCount(2);
+  for (const [letter, label] of [['A', a], ['B', b]]) {
+    await page.locator('.empty-slot').filter({ has: page.locator('.slot-letter', { hasText: letter }) }).click();
+    await page.locator('.provider-card').filter({ hasText: label }).click();
+  }
+  await awaitMapReady(page, 2);
+  await expect(page.locator('.map-glass')).toBeAttached();
+  await googleMarks(page);
+  await expect(page.locator('.map-glass-logo a')).toBeVisible();
+  await page.getByRole('button', { name: 'Swipe', exact: true }).click();
+  const box = await page.locator('.swipe-line').boundingBox();
+  return box.x + box.width / 2;
+}
+
+const GOOGLE = 'Google Satellite (Maps JS)';
+
+test('a swipe leaves Google on the left with its credit, left of the line', async ({ page }) => {
+  const line = await compareWidget(page, GOOGLE, 'Esri World Imagery');
+  await expect.poll(async () => {
+    const credit = await page.locator('.map-glass-credit').boundingBox();
+    return credit.x + credit.width <= line;
+  }).toBe(true);
+  expect(await onTop(page, '.map-glass-credit')).toBe(true);
+  expect(await onTop(page, '.map-glass-logo')).toBe(true);
+});
+
+test('a swipe leaves Google on the right with its logo, right of the line', async ({ page }) => {
+  const line = await compareWidget(page, 'Esri World Imagery', GOOGLE);
+  await expect.poll(async () => (await page.locator('.map-glass-logo').boundingBox()).x >= line).toBe(true);
+  expect(await onTop(page, '.map-glass-credit')).toBe(true);
+  expect(await onTop(page, '.map-glass-logo')).toBe(true);
+});
+
+test('Detect counts a map load and hears a refusal, as any tool offering Google does', async ({ page }) => {
+  await fakeGoogleMaps(page);
+  const fixture = await installAppFixture(page, { widget: true });
+  const verdicts = [];
+  await page.route('**/api/settings/keys/google_js/status', (route) => {
+    verdicts.push(route.request().postDataJSON());
+    return route.fulfill({ json: { ok: false } });
+  });
+  await page.route('**/api/compare/analyzers', (route) => route.fulfill({ json: {
+    builtins: [], custom: [], methods: [], grid: [13, 512], max_tiles: 4096, max_results: 2000,
+  } }));
+  await page.route('**/api/cases/*/analysis/**', (route) => route.fulfill({ json: [] }));
+  await page.goto('/#detect');
+  await awaitMapReady(page);
+  await pickProvider(page, GOOGLE);
+  await expect(page.locator('.map-glass')).toBeAttached();
+  await expect.poll(() => fixture.widgetLoads).toEqual(['google_js']);
+
+  await page.evaluate(() => window.gm_authFailure());
+  await expect(page.locator('.toast')).toContainText('Google basemap turned off');
+  await expect(page.locator('.map-glass')).toHaveAttribute('hidden', '');
+  expect(verdicts).toEqual([expect.objectContaining({ ok: false })]);
+});
+
 test('is built once and counted once, however often it is shown', async ({ page }) => {
   // every google.maps.Map instantiation is a billed dynamic map load
   const fixture = await openWidget(page);

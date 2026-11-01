@@ -31,6 +31,7 @@
   import { watchHand } from '../../lib/map/gestures.js';
   import { toast } from '../../lib/state.svelte.js';
   import { createBasemaps, imageryError, isGround, OVERLAY_IDS } from '../../lib/map/basemap.js';
+  import { FALLBACK_PROVIDER } from './state/imagery.svelte.js';
   import { DEFAULT_LAYER, DEFAULT_MAXCC, SENTINEL_ID } from '../../lib/sentinel.js';
   import { RADAR_ID, orbitMark } from '../../lib/radar.js';
   import { pictureDate } from '../../lib/map/pictureDate.js';
@@ -111,11 +112,6 @@
     oncontextmenu = () => {},
     /** Metered tiles went out. The proxy counted them; the tally is just stale. */
     onusage = () => {},
-    /** A widget basemap was built, which is one billed map load. Nothing but
-     *  this page saw it happen, so it has to be counted here or not at all. */
-    onwidgetload = () => {},
-    onwidgetauthfailure = () => {},
-    onwidgetfailed = () => {},
     /** A tile of an overlay failed, by overlay id, for the tool that offers it. */
     onoverlaytrouble = () => {},
     onimageryfallback = null,
@@ -134,6 +130,7 @@
   let basemaps = null;
   let tileFailure = $state(null);
   let failureProvider = '';
+  let creditsHeight = $state(0);
   // Acquisition date of the imagery under the crosshair — Esri only.
   let imageryDate = $state(null); // { supported, date, source } | null
   let dateRequest = 0;
@@ -237,10 +234,20 @@
     engine.setBearing(bearing);
     basemaps = createBasemaps(flat, {
       onMeteredTiles: onusage,
-      // one billed map load, counted where it happens (the proxy can't see it)
-      onWidgetLoad: (provider) => onwidgetload(provider.meter),
-      onWidgetAuthFailure: onwidgetauthfailure,
-      onWidgetFailed: onwidgetfailed,
+      // One billed map load. Nothing but this page saw it happen, so it is counted
+      // here, for every tool that offers the basemap, or not at all.
+      onWidgetLoad: (provider) => imagery.countLoad(provider.meter),
+      // Google refused the map, its tiles dimmed under a watermark: the verdict
+      // benches the basemap, so say why and go back to free imagery.
+      onWidgetAuthFailure: (provider, reason) => {
+        toast(`Google basemap turned off. ${reason}`, 'danger', 12000);
+        providerId = FALLBACK_PROVIDER;
+        imagery.refuseKey(provider.meter, reason).catch(() => {});
+      },
+      onWidgetFailed: (provider, error) => {
+        toast(`Google Maps failed to load: ${error.message}`, 'danger', 6000);
+        providerId = FALLBACK_PROVIDER;
+      },
       onOverlayTrouble: (id) => onoverlaytrouble(id),
       // One report per settle: tiles that came through clear the panel the
       // ones before them raised, so it never outlives the trouble it named.
@@ -270,8 +277,13 @@
     const offPitch = engine.on('pitch', (tilted) => (pitch = tilted.pitch));
     const offClick = engine.on('click', (at) => onclick(at));
     const offMenu = engine.on('contextmenu', (at) => oncontextmenu(at));
+    // How tall the credits have wrapped, for what a tool lays just above them.
+    const corner = mapEl.querySelector('[data-map-credits]');
+    const creditsWatch = new ResizeObserver(() => (creditsHeight = corner.offsetHeight));
+    if (corner) creditsWatch.observe(corner);
     ready = true;
     return () => {
+      creditsWatch.disconnect();
       offSettled();
       offRotate();
       offPitch();
@@ -496,6 +508,7 @@
   class:tracing={armed === 'tracing'}
   class:grabbing
   style:--map-controls-top={`${controlsTop}px`}
+  style:--map-credits={`${creditsHeight}px`}
 >
   <div class="map" class:under-globe={globeOn && globeVisible} bind:this={mapEl}></div>
 

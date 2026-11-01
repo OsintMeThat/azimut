@@ -119,6 +119,26 @@ describe('a billed map load nobody else can see', () => {
     expect(api.get).toHaveBeenCalledWith('/api/settings');
   });
 
+  it('files a refused key, then re-reads the catalogue that no longer offers it', async () => {
+    const imagery = await loaded();
+    api.get.mockClear();
+
+    await imagery.refuseKey('google_js', 'Billing is off');
+    expect(api.post).toHaveBeenCalledWith('/api/settings/keys/google_js/status', { ok: false, detail: 'Billing is off' });
+    expect(api.get).toHaveBeenCalledWith('/api/satellite/providers');
+  });
+
+  it('still re-reads the catalogue when the verdict could not be filed', async () => {
+    api.post = vi.fn(async () => {
+      throw new Error('offline');
+    });
+    const imagery = await loaded();
+    api.get.mockClear();
+
+    await expect(imagery.refuseKey('google_js', 'Billing is off')).resolves.not.toThrow();
+    expect(api.get).toHaveBeenCalledWith('/api/satellite/providers');
+  });
+
   it('shows the load in the readout it just re-read', async () => {
     const imagery = await loaded();
     expect(imagery.pill(MAPBOX)).toContain('0');

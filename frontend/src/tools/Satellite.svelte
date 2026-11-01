@@ -1665,22 +1665,6 @@
     setBearing(row.bearing);
   }
 
-  // Google refused the map, its tiles dimmed under a watermark. Persist the
-  // verdict (which benches the basemap), say why, and let the provider refetch
-  // fall the map back to Esri.
-  async function onWidgetAuthFailure(provider, reason) {
-    try {
-      await api.post(`/api/settings/keys/${provider.meter}/status`, { ok: false, detail: reason });
-    } catch { /* the toast still tells the user */ }
-    toast(`Google basemap turned off. ${reason}`, 'danger', 12000);
-    await imagery.loadProviders();
-  }
-
-  function onWidgetFailed(provider, error) {
-    toast(`Google Maps failed to load: ${error.message}`, 'danger', 6000);
-    providerId = FALLBACK_PROVIDER;
-  }
-
   // a basemap disabled in Settings can leave a stale selection — fall back
   $effect(() => {
     if (imagery.providers.length && !currentProvider) providerId = FALLBACK_PROVIDER;
@@ -2568,9 +2552,6 @@
         onclick={onMapClick}
         oncontextmenu={onMapContextMenu}
         onusage={() => imagery.refreshUsage()}
-        onwidgetload={(meter) => imagery.countLoad(meter)}
-        onwidgetauthfailure={onWidgetAuthFailure}
-        onwidgetfailed={onWidgetFailed}
         onoverlaytrouble={(id) => id === 'firms' && fireTrouble()}
         onviewsettled={(camera) => share.settled(camera, engine?.maxZoom())}
       >

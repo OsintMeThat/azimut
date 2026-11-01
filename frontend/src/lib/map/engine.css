@@ -61,6 +61,16 @@
   z-index: 580;
 }
 
+/* A tool that shows only part of a map keeps the bottom corners on that part with
+   these, set on the map or above it, the way it fades the picture below. */
+.maplibregl-ctrl-bottom-left {
+  left: var(--map-scale-left, 0);
+}
+.maplibregl-ctrl-bottom-right {
+  left: var(--map-credits-left, auto);
+  right: var(--map-credits-right, 0);
+}
+
 /* A tool fades a map's picture with `--map-fade`, set on the map or above it.
    The picture fades and its control corners do not: faded whole, the map would
    be a stacking context again and shut its buttons under what a tool lays
@@ -293,6 +303,10 @@
 }
 .map-glass-logo:empty {
   display: none;
+}
+/* The corner across from the logo wraps short of where it ends, clear space included. */
+.map-surface:has(.map-glass-logo) .maplibregl-ctrl-bottom-right {
+  left: var(--map-credits-left, min(185px, calc(100% - 120px)));
 }
 
 /* What a shape says about itself under the cursor: the reading on a sky ray,

@@ -914,21 +914,6 @@
     engine.setView(item, item.zoom ?? Math.max(engine.getZoom(), 13));
   }
 
-  async function onWidgetAuthFailure(provider, reason) {
-    try {
-      await api.post(`/api/settings/keys/${provider.meter}/status`, { ok: false, detail: reason });
-    } catch {
-      /* the toast still gives the result */
-    }
-    toast(`Google basemap turned off. ${reason}`, 'danger', 12000);
-    await loadProviders();
-  }
-
-  function onWidgetFailed(which, provider, error) {
-    toast(`Google Maps failed to load: ${error.message}`, 'danger', 6000);
-    side(which).providerId = FALLBACK_PROVIDER;
-  }
-
   function setMode(next) {
     mode = next;
     blinkPaused = false;
@@ -2660,9 +2645,6 @@
           {grabbing}
           overlays={surfaceOverlays(a)}
           onusage={() => imagery.refreshUsage()}
-          onwidgetload={(meter) => imagery.countLoad(meter)}
-          onwidgetauthfailure={onWidgetAuthFailure}
-          onwidgetfailed={(provider, error) => onWidgetFailed('a', provider, error)}
           onoverlaytrouble={(id) => id === 'firms' && fireKey.trouble()}
           onviewsettled={(next) => onSurfaceSettled('a', next)}
           onbearingchange={(next) => onSurfaceBearing('a', next)}
@@ -2764,9 +2746,6 @@
           {grabbing}
           overlays={surfaceOverlays(b)}
           onusage={() => imagery.refreshUsage()}
-          onwidgetload={(meter) => imagery.countLoad(meter)}
-          onwidgetauthfailure={onWidgetAuthFailure}
-          onwidgetfailed={(provider, error) => onWidgetFailed('b', provider, error)}
           onoverlaytrouble={(id) => id === 'firms' && fireKey.trouble()}
           onviewsettled={(next) => onSurfaceSettled('b', next)}
           onbearingchange={(next) => onSurfaceBearing('b', next)}
@@ -3359,6 +3338,17 @@
   .compare-stage.overlay .primary { z-index: 1; }
   .compare-stage.overlay .secondary { z-index: 2; }
   .compare-stage.swipe .secondary { clip-path: inset(0 0 0 var(--divider)); }
+  /* A swipe shows each map on its own side of the line, so what credits a map stays
+     on that side: A's right corner ends at the line and B's left corner starts at it.
+     Near an edge each still has room to wrap, and runs off the map rather than taller. */
+  .compare-stage.swipe:not(.capturing) .primary {
+    --map-credits-left: min(185px, calc(var(--divider) - 120px));
+    --map-credits-right: calc(100% - var(--divider));
+  }
+  .compare-stage.swipe:not(.capturing) .secondary {
+    --map-scale-left: var(--divider);
+    --map-credits-left: min(calc(var(--divider) + 185px), calc(100% - 120px));
+  }
   /* Blend the pixels, not the provider/date controls that explain them, nor
      the zoom buttons: faded, the map would become a stacking context again and
      shut its buttons under the highlights (see MapSurface's `.map-wrap`). */

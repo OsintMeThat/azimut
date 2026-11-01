@@ -225,6 +225,7 @@ export async function createMapEngine(container, { view, imperial = false, settl
   // What a tool lays over the map steps aside from these buttons (the layer edit
   // bar's `[data-bar-obstacle]`), without naming the engine that drew them.
   container.querySelector?.('.maplibregl-ctrl-top-left .maplibregl-ctrl-group')?.setAttribute('data-bar-obstacle', '');
+  container.querySelector?.('.maplibregl-ctrl-bottom-right')?.setAttribute('data-map-credits', '');
   // Judging feature sizes (buildings, roads) needs a scale reference, and it
   // reads under the coordinates rather than in the opposite corner: how far a
   // pixel goes and where you are are one instrument, and the right-hand corner

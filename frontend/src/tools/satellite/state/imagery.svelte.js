@@ -109,6 +109,19 @@ export function createImageryState({ api }) {
     },
 
     /**
+     * A provider refused its key. Persist the verdict, which benches the basemap
+     * until the key is tested again, then re-read the catalogue without it.
+     */
+    async refuseKey(meter, reason) {
+      try {
+        await api.post(`/api/settings/keys/${meter}/status`, { ok: false, detail: reason });
+      } catch {
+        /* the catalogue re-reads below, and the surface has said why */
+      }
+      return this.loadProviders();
+    },
+
+    /**
      * When the imagery under a point was taken, as far as the provider will
      * say. Esri answers; every other basemap reports `supported: false` and the
      * surface shows no date rather than guessing one.

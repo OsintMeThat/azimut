@@ -49,8 +49,9 @@
   .status {
     position: absolute;
     /* clear of the engine's own bottom line: the scale bracket under the
-       coordinates on one side, the tile credits on the other */
-    bottom: 34px;
+       coordinates on one side, the tile credits on the other, however many lines
+       they have wrapped to (MapSurface measures them) */
+    bottom: max(34px, calc(var(--map-credits, 0px) + 6px));
     left: 12px;
     right: 12px;
     z-index: 600;

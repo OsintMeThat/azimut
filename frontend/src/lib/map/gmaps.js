@@ -241,10 +241,6 @@ function statedCredit(attribution) {
 /** Google's logo inside its own map: the link that opens this area in Google Maps. */
 const GOOGLE_LOGO = 'a[href*="maps.google."]';
 
-/** Where the logo ends with its clear space (engine.css): the credit wraps short of it. */
-const LOGO_END = 185;
-const CREDIT_MIN = 120;
-
 /** A node of ours held in one of the map's control corners. */
 function cornerControl(node) {
   return { onAdd: () => node, onRemove: () => node.remove() };
@@ -345,7 +341,6 @@ export function createGoogleGlass(engine, { maxZoom = 21, attribution = 'Map dat
     turn.style.height = `${side}px`;
     turn.style.left = `${Math.round((width - side) / 2)}px`;
     turn.style.top = `${Math.round((height - side) / 2)}px`;
-    credit.style.maxWidth = `${Math.max(width - LOGO_END, CREDIT_MIN)}px`;
     window.google?.maps?.event?.trigger(google, 'resize');
   }
 
