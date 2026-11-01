@@ -1,4 +1,15 @@
 {
+  "0.3.4": {
+    "draft": true,
+    "pages": [
+      {
+        "title": "And also",
+        "items": [
+          { "icon": "image", "text": "The Google basemap keeps its credit and logo in plain sight." }
+        ]
+      }
+    ]
+  },
   "0.3.3": {
     "pages": [
       {

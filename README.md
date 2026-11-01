@@ -433,7 +433,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.3.3 && git push origin v0.3.3
+git tag v0.3.4 && git push origin v0.3.4
 ```
 
 One-time setup: register the repo as a

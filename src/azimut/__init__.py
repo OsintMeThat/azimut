@@ -17,7 +17,7 @@ from PIL import Image as _Image
 # The capture extension is versioned separately, on purpose — it carries the
 # release that last changed it (tests/test_updates.py). Don't move the two
 # together.
-__version__ = "0.3.3"
+__version__ = "0.3.4"
 
 #: How the app names itself to the services it calls, so whoever runs one can see
 #: which program is asking, which release, and where to reach the project.
