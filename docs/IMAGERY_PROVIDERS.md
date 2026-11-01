@@ -97,11 +97,15 @@ is moved to follow ours on each frame.
   which covers every bearing at once — a rotated W×H rectangle always fits
   inside the circle of its own diagonal. Extra tile renders inside one map load
   are free; the billing is per `google.maps.Map`.
-- **The credit line is moved upright.** Google renders it inside that oversized,
-  turned element, where a bearing would rotate it off screen. It is re-homed
-  into a fixed holder at the bottom right, which is the one part of the layer
-  that does take the pointer, so the terms link stays clickable. If Google's
-  markup ever stops offering that node, the same credit and a terms link are
+- **The credit line and the logo are moved upright.** Google renders them inside
+  that oversized, turned element, where the logo is off screen and a bearing would
+  rotate the credit off too. Both are re-homed into the map's control corners, above
+  the canvas, so they stay readable and their links can be pressed: the credit stacks
+  on the map's attribution at the bottom right, the logo sits on the bottom edge past
+  the scale bar. Its mark is 16 px tall, the floor of the 16 to 19 px Google asks for.
+  They arrive one by one after the first tiles, past the last event Google fires, so a
+  `MutationObserver` on Google's element takes them as they appear. If Google's
+  markup ever stops offering the credit node, the same credit and a terms link are
   stated by us instead — the imagery is never shown bare.
 - **Cloned tiles remain off-limits.** Reading them through canvas, html2canvas or
   their URLs is programmatic extraction forbidden by Google's terms. The

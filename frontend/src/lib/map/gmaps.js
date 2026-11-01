@@ -238,6 +238,18 @@ function statedCredit(attribution) {
   return holder;
 }
 
+/** Google's logo inside its own map: the link that opens this area in Google Maps. */
+const GOOGLE_LOGO = 'a[href*="maps.google."]';
+
+/** Where the logo ends with its clear space (engine.css): the credit wraps short of it. */
+const LOGO_END = 185;
+const CREDIT_MIN = 120;
+
+/** A node of ours held in one of the map's control corners. */
+function cornerControl(node) {
+  return { onAdd: () => node, onRemove: () => node.remove() };
+}
+
 /**
  * Google's satellite map, under the engine's transparent canvas.
  *
@@ -267,8 +279,16 @@ export function createGoogleGlass(engine, { maxZoom = 21, attribution = 'Map dat
   const credit = document.createElement('div');
   credit.className = 'map-glass-credit';
   credit.replaceChildren(statedCredit(attribution));
+  const logo = document.createElement('div');
+  logo.className = 'map-glass-logo';
+  // The glass lies under the canvas, where a link cannot be pressed and the map's
+  // own attribution would cover the credit. The map's corners stack above both.
+  const corners = [
+    [cornerControl(credit), 'bottom-right'],
+    [cornerControl(logo), 'bottom-left'],
+  ];
   turn.append(surface);
-  glass.append(turn, credit);
+  glass.append(turn);
   engine.container.append(glass);
 
   const centre = map.getCenter();
@@ -291,18 +311,30 @@ export function createGoogleGlass(engine, { maxZoom = 21, attribution = 'Map dat
   });
 
   /**
-   * Google's own credit line, kept upright and clickable.
+   * Google's own credit line and logo, kept upright and clickable.
    *
-   * It renders inside the map div, which is oversized and turned, so at any
-   * bearing it would be rotated and pushed off screen. Moving the node into an
-   * upright holder is the same trick the plugin used before this did.
+   * They render inside the map div, which is oversized and turned, so the logo
+   * sits off screen and the credit leaves it at any bearing. Moving the nodes
+   * into upright holders is the same trick the plugin used before this did, and
+   * Google goes on updating them there. They arrive one by one after the first
+   * tiles, past the last event Google fires, so what it adds is watched instead.
    */
-  function homeCredit() {
-    const own = surface.querySelectorAll('.gm-style-cc');
-    if (!own.length) return;
-    credit.replaceChildren(...own);
+  let credited = false;
+  function homeMarks() {
+    // Google keeps some of them hidden (its keyboard help, its scale), and so do we.
+    const own = [...surface.querySelectorAll('.gm-style-cc')].filter(
+      (node) => !node.closest('[style*="display: none"]')
+    );
+    if (own.length) {
+      if (!credited) credit.replaceChildren();
+      credit.append(...own);
+      credited = true;
+    }
+    const mark = surface.querySelector(GOOGLE_LOGO);
+    if (mark) logo.replaceChildren(mark);
   }
-  window.google.maps.event.addListenerOnce(google, 'tilesloaded', homeCredit);
+  const arrivals = new MutationObserver(homeMarks);
+  arrivals.observe(surface, { childList: true, subtree: true });
 
   /** Cover the container at every bearing, centred on it. */
   function fit() {
@@ -313,6 +345,7 @@ export function createGoogleGlass(engine, { maxZoom = 21, attribution = 'Map dat
     turn.style.height = `${side}px`;
     turn.style.left = `${Math.round((width - side) / 2)}px`;
     turn.style.top = `${Math.round((height - side) / 2)}px`;
+    credit.style.maxWidth = `${Math.max(width - LOGO_END, CREDIT_MIN)}px`;
     window.google?.maps?.event?.trigger(google, 'resize');
   }
 
@@ -340,6 +373,7 @@ export function createGoogleGlass(engine, { maxZoom = 21, attribution = 'Map dat
     if (!shown) return;
     shown = false;
     glass.hidden = true;
+    for (const [control] of corners) map.removeControl(control);
     map.off('move', follow);
     map.off('resize', onResize);
   }
@@ -349,6 +383,7 @@ export function createGoogleGlass(engine, { maxZoom = 21, attribution = 'Map dat
       if (shown) return;
       shown = true;
       glass.hidden = false;
+      for (const [control, corner] of corners) map.addControl(control, corner);
       map.on('move', follow);
       map.on('resize', onResize);
       onResize();
@@ -358,6 +393,7 @@ export function createGoogleGlass(engine, { maxZoom = 21, attribution = 'Map dat
 
     destroy() {
       hide();
+      arrivals.disconnect();
       glass.remove();
     },
   };

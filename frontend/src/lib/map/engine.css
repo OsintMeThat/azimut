@@ -227,9 +227,8 @@
 /* The Google widget basemap (lib/map/gmaps.js) renders in its own map, under
    the engine's canvas. A negative z-index is what puts it there: inside the
    stacking context above, it paints over the container's background and under
-   everything in flow, the canvas included. It never takes the pointer — our map
-   owns every gesture — but the credit line does, so Google's terms link stays
-   clickable. */
+   everything in flow, the canvas included. It never takes the pointer: our map
+   owns every gesture. */
 .map-glass {
   position: absolute;
   inset: 0;
@@ -245,11 +244,15 @@
   width: 100%;
   height: 100%;
 }
+/* Google's credit and logo live in the map's corners, above the canvas, where
+   they stay readable and their links can be pressed. The credit stacks on the
+   map's own attribution. */
 .map-glass-credit {
-  position: absolute;
-  right: 0;
-  bottom: 0;
+  float: right;
+  clear: both;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
   padding: 1px 5px;
   background: rgba(24, 24, 24, 0.85);
@@ -259,6 +262,37 @@
 }
 .map-glass-credit a {
   color: var(--text-2);
+}
+/* Google's own line brings its own light background and dark text. Its map would
+   shorten it on a narrow view, but that map is far wider than the view, so here it
+   wraps instead. */
+.map-glass-credit:has(.gm-style-cc) {
+  gap: 0;
+  padding: 0;
+  background: none;
+}
+.map-glass-credit .gm-style-cc {
+  height: auto !important;
+}
+.map-glass-credit .gm-style-cc div {
+  white-space: normal !important;
+}
+/* Google draws the logo in a 66 × 26 box with a mark 20 px tall, and asks for a
+   mark 16 to 19 px tall with 5 px clear under it. This is the floor of that range.
+   The left offset clears the scale bar at its widest (100 px, from a 10 px margin);
+   the readouts card leaves no room above it. */
+.map-glass-logo {
+  position: absolute;
+  left: 120px;
+  bottom: 5px;
+  width: 66px;
+  height: 26px;
+  transform: scale(0.8);
+  transform-origin: left bottom;
+  pointer-events: auto;
+}
+.map-glass-logo:empty {
+  display: none;
 }
 
 /* What a shape says about itself under the cursor: the reading on a sky ray,

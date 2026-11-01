@@ -649,7 +649,6 @@ export async function fakeGoogleMaps(page) {
     window.google = {
       maps: {
         event: {
-          addListenerOnce: (map, name, handler) => map.__once.push([name, handler]),
           trigger: (map, name) => map.__triggered.push(name),
         },
         Map: class {
@@ -657,7 +656,6 @@ export async function fakeGoogleMaps(page) {
             this.node = node;
             this.options = options;
             this.cameras = [];
-            this.__once = [];
             this.__triggered = [];
             node.style.background = 'rgb(255, 0, 255)';
             window.__googleMaps.push(this);

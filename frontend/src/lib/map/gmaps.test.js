@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 
 /**
  * Stand in for the Maps JS API: a google.maps.Map that either renders
@@ -8,11 +8,9 @@ import { describe, it, expect, afterEach } from 'vitest';
  */
 function stubGoogleMaps({ reject = false, logs = null } = {}) {
   const built = [];
-  const once = [];
   window.google = {
     maps: {
       event: {
-        addListenerOnce: (map, name, handler) => once.push([map, name, handler]),
         trigger: (map, name) => (map.triggered = name),
       },
       Map: class {
@@ -38,7 +36,7 @@ function stubGoogleMaps({ reject = false, logs = null } = {}) {
       },
     },
   };
-  return { built, once };
+  return { built };
 }
 
 /** The façade and its map, as far as the glass reaches into them. */
@@ -56,6 +54,8 @@ function stubEngine({ zoom = 15, bearing = 0 } = {}) {
       getBearing: () => bearing,
       on: (name, handler) => (handlers[name] = handler),
       off: (name) => delete handlers[name],
+      addControl: (control) => container.append(control.onAdd()),
+      removeControl: (control) => control.onRemove(),
     },
   };
 }
@@ -90,9 +90,9 @@ describe('gmaps module', () => {
 
   it('states Google’s credit before any imagery is up, and lets Google’s own take over', async () => {
     const { createGoogleGlass } = await import('./gmaps.js');
-    const { built, once } = stubGoogleMaps();
+    const { built } = stubGoogleMaps();
     const engine = stubEngine();
-    createGoogleGlass(engine, { attribution: 'Map data © Google' });
+    createGoogleGlass(engine, { attribution: 'Map data © Google' }).show();
 
     const credit = engine.container.querySelector('.map-glass-credit');
     expect(credit.textContent).toContain('Map data © Google');
@@ -104,19 +104,84 @@ describe('gmaps module', () => {
     own.className = 'gm-style-cc';
     own.textContent = 'Map data ©2026 Google';
     built[0].node.append(own);
-    const [, name, homeCredit] = once[0];
-    expect(name).toBe('tilesloaded');
-    homeCredit();
-    expect([...credit.children]).toEqual([own]);
+    await vi.waitFor(() => expect([...credit.children]).toEqual([own]));
+
+    // the rest of the line comes later, and joins it rather than replacing it
+    const terms = document.createElement('div');
+    terms.className = 'gm-style-cc';
+    built[0].node.append(terms);
+    await vi.waitFor(() => expect([...credit.children]).toEqual([own, terms]));
+  });
+
+  it('brings Google’s logo upright once it appears, and only the logo', async () => {
+    // Google draws it after the first tiles, in the corner of a square far wider
+    // than the view, where nobody would ever see it
+    const { createGoogleGlass } = await import('./gmaps.js');
+    const { built } = stubGoogleMaps();
+    const engine = stubEngine();
+    createGoogleGlass(engine).show();
+    const logo = engine.container.querySelector('.map-glass-logo');
+    expect(logo.children).toHaveLength(0);
+
+    const own = document.createElement('a');
+    own.href = 'https://maps.google.com/maps?ll=48.85,2.35&z=12';
+    const terms = document.createElement('a');
+    terms.href = 'https://www.google.com/intl/en-US_US/help/terms_maps.html';
+    built[0].node.append(terms, own);
+    await vi.waitFor(() => expect([...logo.children]).toEqual([own]));
+    expect(terms.parentElement).toBe(built[0].node);
+  });
+
+  it('leaves hidden what Google hides, and wraps the credit short of the logo', async () => {
+    const { createGoogleGlass } = await import('./gmaps.js');
+    const { built } = stubGoogleMaps();
+    const engine = stubEngine();
+    createGoogleGlass(engine).show();
+    const credit = engine.container.querySelector('.map-glass-credit');
+    expect(credit.style.maxWidth).toBe('615px'); // an 800 px view, less the logo's end
+
+    const hiddenBox = document.createElement('div');
+    hiddenBox.setAttribute('style', 'z-index: 1; display: none;');
+    const help = document.createElement('div');
+    help.className = 'gm-style-cc';
+    help.textContent = 'Keyboard shortcuts';
+    hiddenBox.append(help);
+    const line = document.createElement('div');
+    line.className = 'gm-style-cc';
+    line.textContent = 'Imagery ©2026';
+    built[0].node.append(hiddenBox, line);
+
+    await vi.waitFor(() => expect([...credit.children]).toEqual([line]));
+    expect(help.parentElement).toBe(hiddenBox);
+  });
+
+  it('holds the credit and the logo in the map’s corners, over the canvas', async () => {
+    // under the canvas no link can be pressed, and the map's own attribution
+    // covers the credit
+    const { createGoogleGlass } = await import('./gmaps.js');
+    stubGoogleMaps();
+    const engine = stubEngine();
+    const glass = createGoogleGlass(engine);
+    expect(engine.container.querySelector('.map-glass-credit')).toBeNull();
+
+    glass.show();
+    expect(engine.container.querySelector('.map-glass-credit')).not.toBeNull();
+    expect(engine.container.querySelector('.map-glass-logo')).not.toBeNull();
+    expect(engine.container.querySelector('.map-glass .map-glass-credit')).toBeNull();
+
+    glass.hide();
+    expect(engine.container.querySelector('.map-glass-credit')).toBeNull();
+    expect(engine.container.querySelector('.map-glass-logo')).toBeNull();
   });
 
   it('keeps the stated credit when Google offers no line to move', async () => {
     // never Google's imagery with no credit at all
     const { createGoogleGlass } = await import('./gmaps.js');
-    const { once } = stubGoogleMaps();
+    const { built } = stubGoogleMaps();
     const engine = stubEngine();
-    createGoogleGlass(engine, { attribution: 'Map data © Google' });
-    once[0][2]();
+    createGoogleGlass(engine, { attribution: 'Map data © Google' }).show();
+    built[0].node.append(document.createElement('div'));
+    await new Promise((settled) => setTimeout(settled));
     expect(engine.container.querySelector('.map-glass-credit').textContent).toContain(
       'Map data © Google'
     );

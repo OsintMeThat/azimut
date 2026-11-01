@@ -93,6 +93,31 @@ test('never takes the pointer, so every gesture is still ours', async ({ page })
   await expect(page.locator('.map-glass-credit a')).toHaveAttribute('href', /terms_maps/);
 });
 
+test('keeps Google’s credit and logo in plain sight, their links within reach', async ({ page }) => {
+  await openWidget(page);
+  await page.evaluate(() => {
+    const map = window.__googleMaps[0];
+    const logo = document.createElement('a');
+    logo.href = 'https://maps.google.com/maps?ll=48.85,2.35&z=16';
+    logo.innerHTML = '<div style="width: 66px; height: 26px"></div>';
+    map.node.append(logo);
+  });
+  await expect(page.locator('.map-glass-logo a')).toBeVisible();
+
+  // nothing lies over either of them: not the canvas, not the map's attribution
+  const topmost = (selector) => page.evaluate((wanted) => {
+    const box = document.querySelector(wanted).getBoundingClientRect();
+    return Boolean(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.closest(wanted));
+  }, selector);
+  expect(await topmost('.map-glass-credit a')).toBe(true);
+  expect(await topmost('.map-glass-logo a')).toBe(true);
+
+  const logo = await page.locator('.map-glass-logo').boundingBox();
+  expect(logo.height).toBeCloseTo(26 * 0.8, 0); // a mark at the floor of Google's 16 to 19 px
+  const scale = await page.locator('.maplibregl-ctrl-scale').boundingBox();
+  expect(logo.x).toBeGreaterThanOrEqual(scale.x + scale.width);
+});
+
 test('is built once and counted once, however often it is shown', async ({ page }) => {
   // every google.maps.Map instantiation is a billed dynamic map load
   const fixture = await openWidget(page);
