@@ -776,7 +776,9 @@ def frame(case: Case, run: dict[str, Any], source: Source, x: int, y: int,
             url = sentinel.wmts_url(asked, source.date, source.date, sentinel.DEFAULT_MAXCC,
                                     script=script)
             url = url.replace("{key}", instance)
-            with httpx.stream("GET", tiles.tile_url(url, z, x, y, 1), timeout=30) as response:
+            with httpx.stream(
+                "GET", tiles.tile_url(url, z, x, y, 1), timeout=30, headers={"User-Agent": tiles.USER_AGENT}
+            ) as response:
                 if response.status_code == 404:
                     raise ValueError("imagery is missing at the requested resolution or date")
                 response.raise_for_status()

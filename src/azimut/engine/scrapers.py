@@ -48,7 +48,7 @@ from typing import Any
 
 import httpx
 
-from .. import config, errors
+from .. import USER_AGENT, config, errors
 from . import dirswap
 
 # distribution name on PyPI -> module name it imports as
@@ -217,7 +217,9 @@ def needs_restart(dist: str) -> bool:
 
 def _pypi_wheel(dist: str) -> tuple[str, str, str]:
     """(version, url, sha256) of the current pure-Python wheel on PyPI."""
-    response = httpx.get(PYPI_JSON.format(dist=dist), timeout=30, follow_redirects=True)
+    response = httpx.get(
+        PYPI_JSON.format(dist=dist), timeout=30, follow_redirects=True, headers={"User-Agent": USER_AGENT}
+    )
     response.raise_for_status()
     payload = response.json()
     version = payload["info"]["version"]
@@ -248,7 +250,9 @@ def _safe_members(archive: zipfile.ZipFile) -> list[str]:
 
 
 def _download_wheel(url: str, expected_sha256: str) -> bytes:
-    with httpx.stream("GET", url, timeout=DOWNLOAD_TIMEOUT, follow_redirects=True) as response:
+    with httpx.stream(
+        "GET", url, timeout=DOWNLOAD_TIMEOUT, follow_redirects=True, headers={"User-Agent": USER_AGENT}
+    ) as response:
         response.raise_for_status()
         buffer = BytesIO()
         for chunk in response.iter_bytes():

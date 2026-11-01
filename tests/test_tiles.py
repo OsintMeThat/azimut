@@ -1,5 +1,6 @@
 """Tile math and crop stitching (offline: injected fake tile fetcher)."""
 
+import ast
 import dataclasses
 import io
 import math
@@ -23,6 +24,16 @@ def test_every_request_names_the_app_its_release_and_where_to_reach_it():
         text = path.read_text(encoding="utf-8")
         assert "Mozilla/" not in text, path
         assert "Azimut/0." not in text, path
+        # and none goes out under the HTTP library's default name
+        for node in ast.walk(ast.parse(text)):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in {"httpx", "requests"}
+                and node.func.attr in {"get", "post", "stream", "Client"}
+            ):
+                assert "headers" in {keyword.arg for keyword in node.keywords}, f"{path}:{node.lineno}"
 
 
 def test_the_esri_basemaps_carry_esris_current_credit():
