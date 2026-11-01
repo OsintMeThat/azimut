@@ -338,8 +338,8 @@ def served(monkeypatch):
     calls: list[dict] = []
     state = {"export": export_kmz(), "conflict": CONFLICT}
 
-    def download(address, *, body=None, limit=maplayers.MAX_FETCH_BYTES, user_agent=""):
-        calls.append({"address": address, "body": body, "user_agent": user_agent})
+    def download(address, *, body=None, limit=maplayers.MAX_FETCH_BYTES):
+        calls.append({"address": address, "body": body})
         if address.endswith("/api/Conflict"):
             return json.dumps(CONFLICTS).encode(), "Conflict"
         if "/api/Conflict/" in address:
@@ -370,7 +370,6 @@ def test_the_conflict_list_is_public_ordered_and_checked(client, served):
 
     assert [entry["conflict"] for entry in listed] == ["Ukraine", "Iran"]
     assert listed[0]["start"] == "2013-01-01"
-    assert served["calls"][0]["user_agent"].startswith("Azimut/")
 
 
 def test_adding_a_conflict_files_a_followed_layer_in_its_own_icons(client, case_id, served):

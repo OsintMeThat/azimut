@@ -2381,7 +2381,6 @@ def download(
     *,
     body: dict[str, Any] | None = None,
     limit: int = MAX_FETCH_BYTES,
-    user_agent: str = USER_AGENT,
 ) -> tuple[bytes, str]:
     """One bounded request: a GET, or a POST of `body` as JSON.
 
@@ -2395,7 +2394,7 @@ def download(
             json=body,
             timeout=FETCH_TIMEOUT,
             follow_redirects=True,
-            headers={"User-Agent": user_agent},
+            headers={"User-Agent": USER_AGENT},
         ) as response:
             response.raise_for_status()
             declared = response.headers.get("content-length")

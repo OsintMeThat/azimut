@@ -32,8 +32,9 @@ from urllib.parse import quote
 import httpx
 from PIL import Image, UnidentifiedImageError
 
+from .. import USER_AGENT
+
 BASE = "https://sh.dataspace.copernicus.eu/ogc"
-USER_AGENT = "Azimut/0.1 (+local OSINT workbench; single-user)"
 
 # Sentinel-2 L2A in Sentinel Hub's WFS type vocabulary (DSS1 = L1C, DSS3 = S1).
 # The basemap renders L2A, so date discovery must ask about L2A: L1C passes the

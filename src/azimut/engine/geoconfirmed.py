@@ -39,7 +39,6 @@ from math import isfinite
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from .. import __version__
 from . import maplayers
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -47,10 +46,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 SITE = "https://geoconfirmed.org"
 API = f"{SITE}/api"
-
-#: GeoConfirmed asks integrations to say who they are and how to reach them, so
-#: this is not the tile proxy's generic one.
-USER_AGENT = f"Azimut/{__version__} (+https://github.com/OsintMeThat/azimut)"
 
 #: What the conflict list and a conflict's factions may weigh. Both are a few
 #: kilobytes; the bound is for a server that sends something else.
@@ -138,7 +133,7 @@ def conflict(short: str) -> dict[str, Any]:
 
 def _json(address: str) -> Any:
     """A JSON answer, or None for an empty one."""
-    data, _ = maplayers.download(address, limit=MAX_JSON_BYTES, user_agent=USER_AGENT)
+    data, _ = maplayers.download(address, limit=MAX_JSON_BYTES)
     if not data.strip():
         return None
     try:
@@ -331,9 +326,7 @@ def read_again(source: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
     """
     detail = conflict(str(source.get("conflict") or ""))
     body = request(source.get("window") or {}, source.get("area"))
-    data, filename = maplayers.download(
-        f"{API}/Map/export/{quote(detail['conflict'])}", body=body, user_agent=USER_AGENT
-    )
+    data, filename = maplayers.download(f"{API}/Map/export/{quote(detail['conflict'])}", body=body)
     return data, {
         **source,
         "label": detail["name"],

@@ -21,7 +21,7 @@ from typing import Any, Callable
 import httpx
 from PIL import Image, ImageDraw, ImageFont
 
-from .. import config, errors
+from .. import USER_AGENT, config, errors
 from . import cloudless, google_tiles, pdffonts, sentinel, wayback
 
 TILE_SIZE = 256
@@ -31,7 +31,6 @@ SIZE_MAX = 4096  # hard cap on a capture's width/height, in px
 # SIZE_MAX×SIZE_MAX crop still gets rejected (as 2048×2048 did before) while
 # realistic preset/resolution combinations stay comfortably under it.
 MAX_TILES_PER_CROP = (SIZE_MAX // TILE_SIZE) ** 2
-USER_AGENT = "Azimut/0.1 (+local OSINT workbench; single-user)"
 
 # How long one tile may take, and how many times it may be asked for. Both the
 # live proxy and the capture stitcher work to these, so a provider that is slow
@@ -150,7 +149,7 @@ BUILTIN_PROVIDERS: tuple[Provider, ...] = (
         id="esri-world-imagery",
         label="Esri World Imagery",
         url="https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attribution="Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+        attribution="Esri, Vantor, Earthstar Geographics, and the GIS User Community",
         max_zoom=19,
     ),
     Provider(
@@ -185,7 +184,7 @@ BUILTIN_PROVIDERS: tuple[Provider, ...] = (
         id=wayback.BASE_ID,
         label="Esri Wayback (imagery archive)",
         url=wayback.TILE_TEMPLATE.format(release="{release}"),
-        attribution="Esri, Maxar, Earthstar Geographics, and the GIS User Community · World Imagery Wayback",
+        attribution="Esri, Vantor, Earthstar Geographics, and the GIS User Community · World Imagery Wayback",
         max_zoom=wayback.MAX_ZOOM,
     ),
     # A year of EOX's Sentinel-2 cloudless (engine/cloudless.py): one cloud-free

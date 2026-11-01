@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 from PIL import Image
 
-from .. import config, layout
+from .. import USER_AGENT, config, layout
 from ..workspace import Case, CaseError, ensure_dir, write_text_atomic
 from . import enrich as enrich_engine
 from . import ffmpeg as ffmpeg_engine
@@ -1020,7 +1020,7 @@ def _telegram_embed_media(url: str) -> tuple[list[dict[str, Any]], bool]:
 
     try:
         embed_url = url.split("?")[0] + "?embed=1&single"
-        resp = requests.get(embed_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        resp = requests.get(embed_url, headers={"User-Agent": USER_AGENT}, timeout=15)
         resp.raise_for_status()
         html = resp.text
     except Exception:
@@ -1049,7 +1049,7 @@ def _register_telegram_photo(
 ) -> dict[str, Any]:
     import requests
 
-    resp = requests.get(photo["url"], headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+    resp = requests.get(photo["url"], headers={"User-Agent": USER_AGENT}, timeout=30)
     resp.raise_for_status()
     ext = (
         mimetypes.guess_extension((resp.headers.get("content-type") or "").split(";")[0]) or ".jpg"

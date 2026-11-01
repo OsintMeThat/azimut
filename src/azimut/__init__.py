@@ -19,6 +19,10 @@ from PIL import Image as _Image
 # together.
 __version__ = "0.3.3"
 
+#: How the app names itself to the services it calls, so whoever runs one can see
+#: which program is asking, which release, and where to reach the project.
+USER_AGENT = f"Azimut/{__version__} (+https://github.com/OsintMeThat/azimut)"
+
 # Cap the pixels Pillow will decode from a file, process-wide. A tiny,
 # highly-compressed image can otherwise expand to gigabytes in memory and take
 # the process down (a local denial of service). 100 MP sits far above any

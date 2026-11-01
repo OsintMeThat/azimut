@@ -40,6 +40,8 @@ import httpx
 import numpy as np
 from PIL import Image
 
+from .. import USER_AGENT
+
 BASE_ID = "esri-wayback"
 VARIANT_SEP = "~"
 
@@ -48,7 +50,6 @@ _SERVICE = "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Image
 # {release} is filled per variant; {z}/{y}/{x} stay for tiles.tile_url.
 TILE_TEMPLATE = _SERVICE + "/WMTS/1.0.0/default028mm/MapServer/tile/{release}/{{z}}/{{y}}/{{x}}"
 TILEMAP_URL = _SERVICE + "/MapServer/tilemap/{release}/{z}/{row}/{col}"
-USER_AGENT = "Azimut/0.1 (+local OSINT workbench; single-user)"
 
 # The list names a metadata service per release. It is fetched from a bucket
 # and then asked questions server-side, so only the one host Esri uses, in the

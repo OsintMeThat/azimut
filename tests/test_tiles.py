@@ -3,13 +3,34 @@
 import dataclasses
 import io
 import math
+from pathlib import Path
 
 import httpx
 import pytest
 from PIL import Image
 
+import azimut
 from azimut import config
-from azimut.engine import geo, tiles
+from azimut.engine import geo, maplayers, media, sentinel, tiles, wayback
+
+
+def test_every_request_names_the_app_its_release_and_where_to_reach_it():
+    assert azimut.USER_AGENT == f"Azimut/{azimut.__version__} (+https://github.com/OsintMeThat/azimut)"
+    for module in (tiles, sentinel, wayback, maplayers, media):
+        assert module.USER_AGENT == azimut.USER_AGENT
+    # no request of ours borrows a browser's name, or keeps an old release's
+    for path in Path(azimut.__file__).parent.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "Mozilla/" not in text, path
+        assert "Azimut/0." not in text, path
+
+
+def test_the_esri_basemaps_carry_esris_current_credit():
+    providers = {provider.id: provider for provider in tiles.BUILTIN_PROVIDERS}
+    for ident in ("esri-world-imagery", wayback.BASE_ID):
+        assert providers[ident].attribution.startswith(
+            "Esri, Vantor, Earthstar Geographics, and the GIS User Community"
+        )
 
 
 def test_project_roundtrip():
