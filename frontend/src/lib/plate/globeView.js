@@ -55,6 +55,17 @@ export function globeGround(basemap, { plain = {}, shaded = false, intensity = 1
 /** Eased in and out, as a camera flight starts and lands. */
 export const eased = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
+/**
+ * The ground's height a flight's camera stands on part of the way `t`: the height
+ * `from.elevation` it held at `from.t`, eased to the landing's `landing` by the end,
+ * so the camera lands at its own height rather than jumping to it once still. Until
+ * the landing's height is known (`landing` not a number), it holds the one it has.
+ */
+export function flightElevation(from, landing, t) {
+  if (!Number.isFinite(landing) || from.t >= 1) return from.elevation;
+  return from.elevation + ((landing - from.elevation) * (eased(t) - eased(from.t))) / (1 - eased(from.t));
+}
+
 /** A view part of the way `t` (0 to 1) from `a` to `b`, turning the short way round. */
 export function between(a, b, t) {
   const lerp = (x, y) => x + (y - x) * t;

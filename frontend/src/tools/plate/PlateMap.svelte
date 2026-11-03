@@ -33,7 +33,7 @@
   import { IMAGERY_SOURCE, createBasemaps, isGround, sourceMaxZoom } from '../../lib/map/basemap.js';
   import { createGlobe } from '../../lib/globe/globe.js';
   import { createMirror } from '../../lib/globe/mirror.js';
-  import { between, eased, globeCamera, globeGround, plateView } from '../../lib/plate/globeView.js';
+  import { between, eased, flightElevation, globeCamera, globeGround, plateView } from '../../lib/plate/globeView.js';
   import { createAddedLayer } from '../../lib/map/addedLayer.js';
   import { iconVersion, layerIconUrl } from '../../lib/map/ownIcons.js';
   import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
@@ -512,16 +512,27 @@
   }
   function flyGlobe(target, ms) {
     stopFlight();
+    const drawn = globe;
     const from = cameraOf();
-    // the ground's height under the way is the start's until the landing reads its own,
-    // so a flight asks the app for no height at every frame
-    const elevation = globe?.centreElevation();
+    // the ground's height under the way goes from the start's to the landing's, read once, so
+    // a flight asks the app for no height at every frame and lands without a jump once still
+    let held = { t: 0, elevation: drawn?.centreElevation() };
+    let landing = null;
+    let t = 0;
+    if (Number.isFinite(held.elevation)) {
+      drawn.heightAt(target.lat, target.lon).then((height) => {
+        if (t >= 1 || !Number.isFinite(height)) return;
+        held = { t, elevation: flightElevation(held, landing, t) };
+        landing = height;
+      }).catch(() => { /* the start's height holds, and the landing reads its own */ });
+    }
     const started = performance.now();
     const step = (now) => {
-      if (!globe) return;
-      const t = Math.min(1, (now - started) / ms);
+      if (globe !== drawn) return;
+      t = Math.min(1, (now - started) / ms);
       const at = globeCamera(between(from, target, eased(t)));
-      globe.setCamera(t < 1 && Number.isFinite(elevation) ? { ...at, elevation } : at);
+      const elevation = flightElevation(held, landing, t);
+      drawn.setCamera(Number.isFinite(elevation) && (t < 1 || landing != null) ? { ...at, elevation } : at);
       flight = t < 1 ? requestAnimationFrame(step) : 0;
     };
     flight = requestAnimationFrame(step);

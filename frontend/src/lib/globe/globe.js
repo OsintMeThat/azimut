@@ -887,6 +887,8 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {},
     getZoom: () => appZoom(centre().view),
     exactZoom: () => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, centre().view.zoom)),
     centreElevation: () => (centre().onGround ? centre().view.elevation : null),
+    /** The ground's height at a point as a camera placed there would stand on it: off a tile held, else asked of the app. */
+    heightAt: async (lat, lon) => groundKnown(lat, lon) ?? (await heightOf(lat, lon)) * exaggeration,
     setCamera: (wanted) => place(wanted),
     setView: ({ lat, lon }, zoom) => {
       const now = pending?.wanted ?? centre().view;

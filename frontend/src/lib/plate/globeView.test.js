@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { between, eased, globeCamera, globeGround, PAGE_GROUND, plateView } from './globeView.js';
+import { between, eased, flightElevation, globeCamera, globeGround, PAGE_GROUND, plateView } from './globeView.js';
 import { PALETTES, TINTS } from './plainBasemap.js';
 
 describe('a plate’s view on the globe', () => {
@@ -66,5 +66,19 @@ describe('a camera flight between two views', () => {
     expect(Math.abs(half.bearing)).toBe(180);
     expect(half.pitch).toBe(30);
     expect(between(a, b, 1).lon).toBe(190);
+  });
+
+  it('carries the camera from the ground under the start to the landing\'s, never jumping there at the end', () => {
+    const start = { t: 0, elevation: 800 };
+    expect(flightElevation(start, 1100, 0)).toBe(800);
+    expect(flightElevation(start, 1100, 0.5)).toBe(950);
+    expect(flightElevation(start, 1100, 1)).toBe(1100);
+    // the landing's height not known yet: the start's is held
+    expect(flightElevation(start, null, 0.7)).toBe(800);
+    // known half way, it goes on from where the camera stands then, without a step
+    const late = { t: 0.5, elevation: 800 };
+    expect(flightElevation(late, 1100, 0.5)).toBe(800);
+    expect(flightElevation(late, 1100, 0.75)).toBeGreaterThan(800);
+    expect(flightElevation(late, 1100, 1)).toBe(1100);
   });
 });
