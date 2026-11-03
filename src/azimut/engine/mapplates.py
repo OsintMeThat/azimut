@@ -268,6 +268,9 @@ class Time(Strict):
 
 LegendKey = Annotated[str, Field(max_length=330)]
 
+#: The longest a transition into a beat runs, in seconds.
+MAX_TRANSITION_SECONDS = 3
+
 
 class Step(Strict):
     """A step of a day, played after it: held its own seconds, or as long as its longest clip."""
@@ -278,14 +281,14 @@ class Step(Strict):
     #: How the video comes to it: as the plate's transitions say, or cut straight in.
     transition: Literal["", "none"] = ""
     #: How long the transition into it lasts; none, as long as the plate's transitions say.
-    transition_seconds: FiniteFloat | None = Field(default=None, ge=0.2, le=3)
+    transition_seconds: FiniteFloat | None = Field(default=None, ge=0.2, le=MAX_TRANSITION_SECONDS)
 
 
 class Transitions(Strict):
     """How a played plate's video goes from one beat to the next, when they are on."""
 
     on: bool = False
-    seconds: FiniteFloat = Field(default=0.8, ge=0.2, le=3)
+    seconds: FiniteFloat = Field(default=0.8, ge=0.2, le=MAX_TRANSITION_SECONDS)
     #: The page fades into the next one.
     fade: bool = True
     #: A map framed otherwise on the next beat moves there, blurred as it goes when `blur` says so.
@@ -609,10 +612,12 @@ MAX_FRAMES = 120
 MAX_FRAME_BYTES = 8_000_000
 MAX_FRAME_PIXELS = 4096 * 4096
 MAX_VIDEO_EDGE = 3840
-#: A transition's frames, drawn by the browser, play at this rate: at most this many of them, each this large.
+#: A transition's frames, drawn by the browser, play at this rate: enough of them for the longest transition
+#: into every beat but the first, so a plate never loses one, each this large and all of them this large at most.
 TWEEN_FPS = 30
-MAX_TWEENS = 480
+MAX_TWEENS = (MAX_FRAMES - 1) * MAX_TRANSITION_SECONDS * TWEEN_FPS
 MAX_TWEEN_BYTES = 2_000_000
+MAX_TWEENS_TOTAL_BYTES = 2_000_000_000
 #: The body of the largest export, enforced before it is read (`server.BulkBodyLimit`): a page,
 #: or a played plate's sequence, its pictures sent before it.
 MAX_EXPORT_BODY_BYTES = MAX_PAGE_BYTES + 2_000_000

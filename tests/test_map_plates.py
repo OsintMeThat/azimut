@@ -7,6 +7,7 @@ import zipfile
 
 import pytest
 from PIL import Image
+from pydantic import ValidationError
 
 from azimut import layout
 from azimut.engine import ffmpeg, mapplates
@@ -581,6 +582,32 @@ def test_a_transition_plays_its_frames_before_its_beat_holds(tmp_path):
     assert beats[1].tween == (0, 16)
     with pytest.raises(mapplates.ExportError):
         mapplates.read_beats(json.dumps([{"seconds": 1}, {"seconds": 1, "tween": [8, 16]}]), 2, 0, 16)
+
+
+def test_a_video_keeps_the_longest_transition_into_every_beat(client, owner, monkeypatch, tmp_path):
+    import tempfile
+
+    from azimut.api import mapplates as api_plates
+
+    # the longest a plate lets a transition run, into each of the most beats a video holds, all fit
+    longest = round(mapplates.MAX_TRANSITION_SECONDS * mapplates.TWEEN_FPS)
+    assert mapplates.MAX_TWEENS >= (mapplates.MAX_FRAMES - 1) * longest
+    with pytest.raises(ValidationError):
+        mapplates.Transitions(seconds=mapplates.MAX_TRANSITION_SECONDS + 0.1)
+    with pytest.raises(ValidationError):
+        mapplates.Step(id="s1", transition_seconds=mapplates.MAX_TRANSITION_SECONDS + 0.1)
+    beats = [{"seconds": 1}] + [{"seconds": 1, "tween": [index * longest, longest]} for index in range(mapplates.MAX_FRAMES - 1)]
+    read = mapplates.read_beats(json.dumps(beats), mapplates.MAX_FRAMES, 0, (mapplates.MAX_FRAMES - 1) * longest)
+    assert read[-1].tween == ((mapplates.MAX_FRAMES - 2) * longest, longest)
+    # what holds them on disk is their size in all, and past it the export says how to make it fit
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    frame = png(fmt="JPEG")
+    monkeypatch.setattr(mapplates, "MAX_TWEENS_TOTAL_BYTES", len(frame) * 2)
+    staged = stage(client, owner, "tweens", [frame] * 2).json()["staged"]
+    answer = stage(client, owner, "tweens", [frame], staged)
+    assert answer.status_code == 422
+    assert "smaller size, or with shorter transitions" in answer.json()["detail"]
+    assert staged not in api_plates._staged
 
 
 def test_only_a_video_plays_transitions(client, owner):

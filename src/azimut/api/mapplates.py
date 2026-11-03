@@ -255,6 +255,9 @@ SERIES = {
     "overs": (mapplates.MAX_FRAMES, mapplates.MAX_FRAME_BYTES),
     "tweens": (mapplates.MAX_TWEENS, mapplates.MAX_TWEEN_BYTES),
 }
+#: The transitions' frames are as many as a plate can ask for, so they are held to a size on disk in all.
+TWEENS_TOO_LARGE = ("the video's transitions run to more pictures than one export keeps: "
+                    "export it at a smaller size, or with shorter transitions")
 
 
 @dataclass
@@ -266,6 +269,8 @@ class Staged:
     kept: mapplates.Kept = field(default_factory=mapplates.Kept)
     #: The first picture's, which every other is held to.
     size: tuple[int, int] | None = None
+    #: The bytes of the transitions' frames kept so far.
+    tween_bytes: int = 0
     touched: float = field(default_factory=time.monotonic)
     #: One batch at a time, so a series keeps its order and the export waits for the last.
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -356,6 +361,10 @@ async def stage_pictures(
             for upload in pictures:
                 raw = await upload.read(max_bytes + 1)
                 await upload.close()
+                if series == "tweens":
+                    stage.tween_bytes += len(raw)
+                    if stage.tween_bytes > mapplates.MAX_TWEENS_TOTAL_BYTES:
+                        raise mapplates.ExportError(TWEENS_TOO_LARGE)
                 # a series ffmpeg reads by one pattern keeps the format of its first picture; each
                 # picture over the clips is read on its own and keeps its own, see-through
                 suffix = kept[0].suffix if kept and series != "overs" else None

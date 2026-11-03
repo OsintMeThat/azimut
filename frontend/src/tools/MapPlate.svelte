@@ -1448,8 +1448,6 @@
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   /** Maps an export drew before all their tiles were in, so the file is not called whole when it is not. */
   let tilesMissing = 0;
-  /** At most this many frames of transitions in one video (`engine/mapplates.MAX_TWEENS`). */
-  const MAX_TWEENS = 480;
 
   /**
    * The page drawn at `scale` canvas pixels a millimetre, on the day `day` and its
@@ -1579,7 +1577,8 @@
               const changed = changes(spec, before, drawn);
               const into = beat.step ? stepsOf(spec, beat.day).find((item) => item.id === beat.step) : null;
               const plan = transitionPlan(moves, changed, { cut: into?.transition === 'none', seconds: into?.transition_seconds ?? null });
-              if (plan && pictures.count('tweens') + plan.frames <= MAX_TWEENS) {
+              // every transition goes in: the server keeps as many as a plate's beats can ask for (`engine/mapplates.MAX_TWEENS`)
+              if (plan) {
                 const start = pictures.count('tweens');
                 // a map on the move is drawn again by its own engine at each frame of the way
                 const sitting = (id) => handles.get(id)?.sitting?.(scale / PX_PER_MM) ?? null;

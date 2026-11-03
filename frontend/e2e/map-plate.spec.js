@@ -515,6 +515,33 @@ test('the play goes through each transition for as long as the video will', asyn
   expect(held).toBeLessThan(4500);
 });
 
+test('the video plays every transition the plate sets, however many', async ({ page }) => {
+  test.setTimeout(180_000);
+  const store = { plates: new Map(), saves: [], exports: [], pictures: [], templates: [] };
+  // seven steps, each coming in over three seconds: 21 seconds of transitions, past the 16 a video once kept
+  const steps = Array.from({ length: 7 }, (_, index) => ({ id: `s${index + 1}`, name: `Step ${index + 1}`, duration: 0.5, transition_seconds: 3 }));
+  const spec = { page: { paper: 'a4', orientation: 'landscape' }, theme: { paper: '#ffffff', ink: '#111111', accent: '#c8102e', font: 'inter' },
+    time: { at: null, trail: true, since: null, window: null },
+    transitions: { on: true, fade: true, move: false, blur: false, appear: 'none', seconds: 0.8 },
+    steps: { now: steps },
+    elements: [{ id: 'title', kind: 'text', box: [10, 6, 200, 14], text: 'Played', size: 22, weight: 700 },
+      ...steps.map((step, index) => ({ id: `t${index}`, kind: 'text', box: [20, 40 + index * 12, 80, 10], text: step.name, step: step.id }))] };
+  store.plates.set('Many', { title: 'Many', spec });
+  await plateFixture(page, store);
+  await page.goto('/#plate');
+  await page.locator('.tile:not(.template) .open', { hasText: 'Many' }).click();
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.locator('input[value="mp4"]').check();
+  await dialog.getByRole('group', { name: 'Video size' }).getByRole('button').first().click();
+  await dialog.getByRole('button', { name: 'Export', exact: true }).click();
+  await expect.poll(() => store.exports.length, { timeout: 150_000 }).toBe(1);
+  const beats = JSON.parse(store.exports[0].match(/name="beats"\r\n\r\n(.*?)\r\n--/s)[1]);
+  // the day, then each step on its own transition, ninety frames long, none left out
+  expect(beats.map((beat) => beat.tween?.[1] ?? 0)).toEqual([0, 90, 90, 90, 90, 90, 90, 90]);
+  expect(beats.at(-1).tween[0]).toBe(540);
+});
+
 test('a line and a text go on the map, a step frames the map its own way, and the video moves between them', async ({ page }) => {
   needsWebGL();
   const store = await plateFixture(page);
