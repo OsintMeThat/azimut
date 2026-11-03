@@ -26,6 +26,7 @@
    * - A step's videos stand under the writing, on their first frame, and run while
    *   the plate plays that step.
    */
+  import { untrack } from 'svelte';
   import PlateMap from './PlateMap.svelte';
   import PlateMapBar from './PlateMapBar.svelte';
   import PlateVideo from './PlateVideo.svelte';
@@ -79,6 +80,8 @@
     onkeep = null,
     /** The day or step shown, as its framing is kept (`page.beatKey`). */
     beat = '',
+    /** `(map)`: what stands beside a point of the map and moves with it when it is framed again here (`page.followsFraming`). */
+    follows = () => () => true,
     /** Milliseconds a map takes to reach the next framing while the plate plays. */
     glide = 0,
     /** Pixels kept clear over the page when it fits, for a bar floating there. */
@@ -133,7 +136,8 @@
   /**
    * A map moved: the plate keeps its view, and what stands beside it by hand (a
    * label's words, a picture pointing at the ground) moves with the point it names,
-   * so a reframed map never leaves its labels behind.
+   * so a reframed map never leaves its labels behind. What another day or step shows,
+   * framed otherwise, stays where it is (`follows`).
    */
   /**
    * The plate and the day or step the last report came from: an undo, a new paper, or
@@ -154,8 +158,9 @@
       ...((view.pitch ?? 0) > 0.05 ? { pitch: round(view.pitch, 1) } : {}) };
     if (!sameView(kept, framed.view)) onmapview(element, kept);
     if (!same || !before || sameView(before.view, view)) return;
+    const moves = follows(element);
     for (const item of spec.elements) {
-      if (item.of !== element.id || !item.at || !['label', 'image', 'video'].includes(item.kind)) continue;
+      if (item.of !== element.id || !item.at || !['label', 'image', 'video'].includes(item.kind) || !moves(item)) continue;
       const [ox, oy] = flatProject(before.view, before.frame, item.at);
       const [nx, ny] = flatProject(view, frame, item.at);
       if (!Number.isFinite(nx) || !Number.isFinite(ny)) continue;
@@ -163,6 +168,15 @@
     }
   }
   const round = (value, digits) => Math.round(value * 10 ** digits) / 10 ** digits;
+  // a day or step framed as the one before moves no map, so no report says it came: the next move there is the hand's
+  $effect(() => {
+    const shownBeat = beat;
+    untrack(() => {
+      for (const map of maps) {
+        if (map.kind === 'map' && views[map.id] && sameView(views[map.id].view, framingFor(map).view)) reportedFor.set(map.id, { spec, beat: shownBeat });
+      }
+    });
+  });
 
   // The faces the page writes in, asked for by name, since a canvas never asks: the page
   // is drawn again once they are in, and again when any face arrives later (an Arabic name).

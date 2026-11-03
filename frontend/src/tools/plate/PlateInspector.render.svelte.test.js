@@ -107,6 +107,15 @@ describe('what belongs to a step', () => {
     // a video stays upright: the clip is laid in its box as it is
     expect(document.body.querySelector('input[aria-label="Rotation"]')).toBeNull();
   });
+
+  it('says a video went off the page, and brings it back by a press', () => {
+    const video = onStep({ kind: 'video', step: 's1', src: 'media/strike.mp4', clip: [0, 10], box: [-420, 260, 80, 45] });
+    const back = [...document.body.querySelectorAll('.warn button')].find((button) => button.textContent === 'Bring it back');
+    expect(back.closest('.warn').textContent).toContain('Off the page.');
+    press(back);
+    expect(video.box).toEqual([0, 165, 80, 45]);
+    expect(document.body.textContent).not.toContain('Off the page.');
+  });
 });
 
 describe('a symbol on the map', () => {

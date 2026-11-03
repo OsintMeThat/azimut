@@ -421,6 +421,24 @@ export function onPaper(spec, page) {
 
 const round = (value) => Math.round(value * 10) / 10;
 
+/** Millimetres of a box left on the paper, across and down, under which the hand can no longer take it. */
+const GRIP_MM = 3;
+
+/** Whether an element held by its box stands off the paper `size`, or so nearly that the hand cannot take it again. */
+export function offPaper(element, size) {
+  if (!Array.isArray(element?.box) || (ON_THE_GROUND.includes(element.kind) && !BOXED_ON_THE_GROUND.includes(element.kind))) return false;
+  const [x, y, w, h] = element.box;
+  const across = Math.min(x + w, size.width) - Math.max(x, 0);
+  const down = Math.min(y + h, size.height) - Math.max(y, 0);
+  return across < Math.min(GRIP_MM, w) || down < Math.min(GRIP_MM, h);
+}
+
+/** The box brought back whole onto the paper `size`, by its top left corner when it is the larger. */
+export function backOnPaper(box, size) {
+  const [x, y, w, h] = box;
+  return [round(Math.max(0, Math.min(x, size.width - w))), round(Math.max(0, Math.min(y, size.height - h))), w, h];
+}
+
 /**
  * A plate's layout with its data taken out, as a template keeps it
  * (`engine/mapplates.template_of`): no ground, no layers, no case pictures, no days.
@@ -831,6 +849,38 @@ export function framedAs(spec, key, id, view) {
 
 /** The keys of the beats a play goes through, in order (`clip.beats`). */
 export const beatKeys = (list) => list.map((beat) => beatKey(beat.day, beat.step));
+
+/**
+ * What stands beside a point of the map `map` and moves with it when the hand frames
+ * the map again on the beat `shown` (`{ day, step }`), among the beats `list` a play
+ * goes through: `(element) => boolean`. An element moves when that framing moves the
+ * map on a beat showing it and on none other showing it, since its one box serves every
+ * beat: a framing of one step never throws off what another step shows.
+ */
+export function followsFraming(spec, map, list, shown) {
+  // the beat each one takes its framing from, as `framingOf` reads it, null for the map's own view
+  const from = new Map();
+  let last = null;
+  for (const beat of list) {
+    const key = beatKey(beat.day, beat.step);
+    if (spec?.framing?.[key]?.[map.id]) last = key;
+    from.set(key, last);
+  }
+  const key = beatKey(shown.day, shown.step);
+  const all = from.has(key) ? list : [...list, shown];
+  if (!from.has(key)) from.set(key, spec?.framing?.[key]?.[map.id] ? key : null);
+  const moving = from.get(key);
+  const places = all.map((beat) => [beat, placeOf(spec, beat.day, beat.step), from.get(beatKey(beat.day, beat.step))]);
+  return (element) => {
+    let moved = false;
+    for (const [beat, place, source] of places) {
+      if (!shownOn(element, beat.day, place)) continue;
+      if (source !== moving) return false;
+      moved = true;
+    }
+    return moved;
+  };
+}
 
 // -- how the video goes from one beat to the next ------------------------------------------
 

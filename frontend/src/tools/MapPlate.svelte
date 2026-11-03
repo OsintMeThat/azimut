@@ -65,7 +65,7 @@
   import '../lib/plateFontFaces.js';
   import { creditParts, plateCredits } from '../lib/plate/credits.js';
   import { canvasBlob, composePage, copyPage, evolutionSheet, postExport, QUALITIES, release, scaleFor, scaleForWidth, stagedPictures, videoSize } from '../lib/plate/exportPlate.js';
-  import { KIND_LABELS, focusApart, PAPERS, longDay, MAP_KINDS, MAX_MAPS, MAX_STEPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, TOO_MANY_STEPS, facesOf, mapCount, inLook, addStep, pickedDays, skippedDays, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
+  import { KIND_LABELS, focusApart, PAPERS, longDay, MAP_KINDS, MAX_MAPS, MAX_STEPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, TOO_MANY_STEPS, facesOf, mapCount, inLook, addStep, pickedDays, skippedDays, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf, followsFraming,
     duplicatedStep, fromTemplate, hasSteps, houseLayout, labelBox, listedOf, mainMap, mapsFirst, movedStep, newId, onPaper, pageSize, placeOf, settleOn, shownOn, stepsOf, SYMBOL, templateOf, textMeasurer,
     transitionsOf, unsettled, withoutMaps, withoutStep, restacked, stepOf, bornOn } from '../lib/plate/page.js';
   import { TWEEN_FPS, changes, playedTransit, transitionInto as transitionIntoBeat, transitionPlan, tweenFrames } from '../lib/plate/tween.js';
@@ -710,11 +710,14 @@
   // -- framing a map day by day ---------------------------------------------------------
 
   /** The days and steps in the order they are played, as their framings are kept; a day hidden from the video keeps its place. */
-  const order = $derived(spec ? beatKeys(beats(spec, playable ? playedDays : [at])) : []);
+  const framedBeats = $derived(spec ? beats(spec, playable ? playedDays : [at]) : []);
+  const order = $derived(beatKeys(framedBeats));
   /** The day or the step shown, as its framing is kept. */
   const shownKey = $derived(beatKey(at, stepId));
   /** How a map is framed on the day or step shown. */
   const framingFor = (map) => framingOf(spec, map, order, shownKey);
+  /** What moves with a map framed again by the hand on the day or step shown. */
+  const followsMap = (map) => followsFraming(spec, map, framedBeats, { day: at, step: stepId });
   /** The map framed by the hand on the day or step shown: its own framing there, or the map's view on the first. */
   function mapView(map, view) {
     const framed = framingFor(map);
@@ -1728,7 +1731,7 @@
         {#key opened}
           <PlatePage spec={plate.spec} bind:selection bind:framing {placing} onplace={placed} caseId={plate.caseId ?? caseId ?? ''} {rows} {providers} {relief}
             {time} stepPlace={place} {playing} {speed} bind:views {decor} bind:overflow {grounds} ghosts={ghosts && playable}
-            {framingFor} onmapview={mapView} onkeep={keepFraming} beat={shownKey} {written} onnamelabel={nameToLabel}
+            {framingFor} onmapview={mapView} onkeep={keepFraming} beat={shownKey} follows={followsMap} {written} onnamelabel={nameToLabel}
             {glide} oncontext={(id, point) => (id ? elementMenu(id, point) : pageMenu(point))}
             onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} />
         {/key}

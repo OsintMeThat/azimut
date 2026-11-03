@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { facesOf, focusApart, inLook, addStep, beatKey, beatKeys, bornAt, bornOn, bringTo, carryOn, currentStep, dayBefore, DECOR_MAX_PIXELS, decorDensity, duplicatedStep, endOn, framedAs, framingOf, standsOver, TRANSITIONS, transitionsOf, fillTokens, fitPage, fromTemplate, hasSteps, houseLayout,
+import { facesOf, focusApart, inLook, addStep, backOnPaper, beatKey, beatKeys, bornAt, bornOn, bringTo, carryOn, currentStep, dayBefore, DECOR_MAX_PIXELS, decorDensity, duplicatedStep, endOn, followsFraming, framedAs, framingOf, offPaper, standsOver, TRANSITIONS, transitionsOf, fillTokens, fitPage, fromTemplate, hasSteps, houseLayout,
   labelBox, landingIn, listedOf, longDay, mainMap, mapsFirst, MAX_MAPS, MAX_STEPS, movedStep, restacked, stepOf, onPaper, PAGE, PAGE_ZOOM, pageSize, periodSaid, pickedDays, placeOf, skippedDays, settleOn, shownOn, SIGNATURE, startOn, stepsOf, templateOf,
   turnable, unsettled, withoutMaps, withoutStep, zoomPageAt } from './page.js';
 
@@ -51,6 +51,21 @@ describe('a plate page', () => {
     expect(north[2] / north[3]).toBeCloseTo(8 / 12, 1);
     const map = moved.elements.find((element) => element.id === 'big').box;
     expect(map[2] / 100).toBeCloseTo(210 / 297, 1);
+  });
+
+  it('says when an element went off the paper, and brings it back whole', () => {
+    const a4 = { width: 297, height: 210 };
+    expect(offPaper({ kind: 'video', box: [20, 30, 80, 45] }, a4)).toBe(false);
+    // a box hanging off an edge, still taken by the hand, is left as it is
+    expect(offPaper({ kind: 'image', box: [280, 30, 80, 45] }, a4)).toBe(false);
+    expect(offPaper({ kind: 'video', box: [295, 30, 80, 45] }, a4)).toBe(true);
+    expect(offPaper({ kind: 'video', box: [-400, -90, 80, 45] }, a4)).toBe(true);
+    expect(offPaper({ kind: 'label', box: [20, 300, 30, 8] }, a4)).toBe(true);
+    // what stands on the ground is placed by its points, never by a box
+    expect(offPaper({ kind: 'arrow', box: [900, 900, 0, 0] }, a4)).toBe(false);
+    expect(backOnPaper([295.04, -12, 80, 45], a4)).toEqual([217, 0, 80, 45]);
+    expect(backOnPaper([-400, 500, 80, 45], a4)).toEqual([0, 165, 80, 45]);
+    expect(backOnPaper([40, 20, 400, 45], a4)).toEqual([0, 20, 400, 45]);
   });
 
   it('reads a paper typed in and says which papers turn', () => {
@@ -505,6 +520,29 @@ describe('a map framed day by day', () => {
     expect(beatKey(null, null)).toBe('now');
     expect(beatKey('2026-10-01', 's1')).toBe('s1');
     expect(beatKeys([{ day: '2026-10-01', step: null }, { day: '2026-10-01', step: 's1' }])).toEqual(['2026-10-01', 's1']);
+  });
+
+  it('moves only what the beats a new framing moves show, so a step framed apart never throws off another step', () => {
+    const day = '2026-10-01';
+    const steps = { [day]: [{ id: 's1' }, { id: 's2' }, { id: 's3' }] };
+    const list = [{ day, step: null }, { day, step: 's1' }, { day, step: 's2' }, { day, step: 's3' }];
+    const onS1 = { kind: 'video', step: 's1' };
+    const onS2 = { kind: 'video', step: 's2' };
+    const onS3 = { kind: 'label', step: 's3' };
+    const fromS1 = { kind: 'label', step: 's1', carry: true };
+    const wholeDay = { kind: 'label', onward: day, until: day };
+    // s2 frames the map its own way, s3 keeps it
+    const spec = { steps, framing: framedAs({}, 's2', 'map', near) };
+    const onSecond = followsFraming(spec, map, list, { day, step: 's2' });
+    expect([onS1, onS2, onS3, fromS1, wholeDay].map(onSecond)).toEqual([false, true, true, false, false]);
+    // the day frames the map for itself and for s1, which keeps its framing
+    const onDay = followsFraming(spec, map, list, { day, step: null });
+    expect([onS1, onS2, onS3, fromS1, wholeDay].map(onDay)).toEqual([true, false, false, false, false]);
+    // with no step framed apart, the day's framing moves everything shown that day
+    const alone = followsFraming({ steps, framing: {} }, map, list, { day, step: null });
+    expect([onS1, onS2, fromS1, wholeDay].map(alone)).toEqual([true, true, true, true]);
+    // what no beat shows, another day's, stays put
+    expect(alone({ kind: 'label', onward: '2026-10-05', until: '2026-10-05' })).toBe(false);
   });
 
   it('forgets a step\'s framing with the step', () => {

@@ -587,6 +587,33 @@ test('a detail framed on a step and then deleted leaves no framing the server wo
   expect(framedMaps(lastSave(store).spec)).toEqual([]);
 });
 
+test('a step framed on its own moves its own videos with the map, and leaves the other steps\' where they stood', async ({ page }) => {
+  needsWebGL();
+  const store = { plates: new Map(), saves: [], exports: [], pictures: [], templates: [] };
+  const clip = (id, step) => ({ id, kind: 'video', step, src: 'media/strike.mp4', clip: [0, 3], box: [150, 90, 60, 34], of: 'map', at: [36.5, 49.4] });
+  const spec = { page: { paper: 'a4', orientation: 'landscape' }, theme: { paper: '#ffffff', ink: '#111111', accent: '#c8102e', font: 'inter' },
+    time: { at: null, trail: true, since: null, window: null },
+    steps: { now: [{ id: 's1', name: 'One', duration: 3 }, { id: 's2', name: 'Two', duration: 3 }] },
+    elements: [{ id: 'map', kind: 'map', box: [10, 24, 277, 176], view: { lat: 48.5, lon: 31.5, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [], layers: [], grid: 'none' },
+      clip('first', 's1'), clip('second', 's2')] };
+  store.plates.set('Framed', { title: 'Framed', spec });
+  await plateFixture(page, store);
+  await page.route('**/files/**', (route) => route.fulfill({ status: 404, body: '' }));
+  await page.goto('/#plate');
+  await page.locator('.tile:not(.template) .open', { hasText: 'Framed' }).click();
+  await expect(page.locator('.plate-map')).toHaveCount(1);
+  // on the second step, the map let go of the framing before it and zoomed by the hand
+  await page.locator('.steps .tile', { hasText: 'Two' }).click();
+  await page.locator('.list').getByRole('button', { name: 'Map', exact: true }).click();
+  await page.locator('.map-bar .keep input').uncheck();
+  await page.getByRole('button', { name: 'Zoom the map in' }).click();
+  const boxOf = (saved, id) => saved?.spec.elements.find((element) => element.id === id)?.box;
+  await expect.poll(() => lastSave(store)?.spec.framing?.s2?.map?.zoom).toBeCloseTo(5.5, 2);
+  // the step's own video follows its point, the first step's stays where it was put
+  await expect.poll(() => boxOf(lastSave(store), 'second')?.[0]).toBeGreaterThan(155);
+  expect(boxOf(lastSave(store), 'first')).toEqual([150, 90, 60, 34]);
+});
+
 test('a detail\'s square on the main map is dragged to move what the detail shows', async ({ page }) => {
   needsWebGL();
   const store = await plateFixture(page);

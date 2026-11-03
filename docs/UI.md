@@ -5441,7 +5441,8 @@ spacing and line height, aligned across and down, turned, and faded. A box its w
 or rows run past (a text, a label, the legend, the table, the numbered list, the
 credits) carries a **!** at its corner on the page and says so in the inspector,
 whose **Fit the box** grows it to what it holds; the export names it before the file
-goes out. Every setting of the inspector says what it does when the pointer rests on it. They fill in `{date}` (the plate's day, else the day its layers
+goes out. An element gone off the page is picked from the list, and its inspector's
+**Bring it back** puts it whole on the page. Every setting of the inspector says what it does when the pointer rests on it. They fill in `{date}` (the plate's day, else the day its layers
 last changed), `{today}`, `{updated}`, `{case}`, `{title}`, `{scale}`, `{imagery}`,
 `{handle}`, `{coords}` and `{mgrs}` (the main map's middle), `{from}` and `{to}` (the
 first and last day a played plate shows), and `{count}`, `{count:destroyed}`,
@@ -5516,7 +5517,9 @@ card** covers the page with its paper and its words, sized to the page.
 as the one before it does, the map bar's **Keep the previous framing** ticked and the
 map holding still. Unticked, the map is framed there on its own, and the steps after it
 follow until one frames it too. A label keeps its place on the page; on a day framed
-otherwise, its leader reaches to its point.
+otherwise, its leader reaches to its point. Framing a map by the hand takes along the
+labels, pictures and videos pointing at it only when no other day or step showing them
+frames it differently.
 
 **Video** puts a video on a step: on the one shown while it holds none, else on a new
 step after it. **Choose a video** lists the footage placed on the map first, set

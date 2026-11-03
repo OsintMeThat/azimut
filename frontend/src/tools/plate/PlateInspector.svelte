@@ -20,7 +20,7 @@
   import { isTracked, momentLabel } from '../../lib/map/layerHistory.js';
   import { prefs, toast } from '../../lib/state.svelte.js';
   import { FONTS, KIND_LABELS, MAX_MAPS, PAGE, PAPERS, PLATE_OVERLAYS, SIGNATURE, THEMES, TOKENS, TOKEN_SAID, TOO_MANY_MAPS, bornOn, bringTo, dayOf, endOn, labelBox,
-    mainMap, mapCount, pageSize, shownOn, startOn, textMeasurer, transitionsOf, turnable } from '../../lib/plate/page.js';
+    backOnPaper, mainMap, mapCount, offPaper, pageSize, shownOn, startOn, textMeasurer, transitionsOf, turnable } from '../../lib/plate/page.js';
   import { FIRST_SECONDS, captionOf, clipRange, isGif, readTimecode, timecode } from '../../lib/plate/clip.js';
   import { GRATICULE_STEPS } from '../../lib/plate/geo.js';
   import { align, distribute, fittedHeight, sameSize } from '../../lib/plate/arrange.js';
@@ -507,6 +507,9 @@
         disabled={element.kind === 'credits' && credited < 2} onclick={() => onremove(element)}><Icon name="trash" size={13} /></button>
     </header>
     <input class="element-name" aria-label="Element name" placeholder="Name it in the list" maxlength="80" bind:value={element.name} />
+    {#if offPaper(element, pageSize(spec.page))}
+      <p class="warn">Off the page. <button type="button" class="text-act" onclick={() => (element.box = backOnPaper(element.box, pageSize(spec.page)))}>Bring it back</button></p>
+    {/if}
 
     {#if element.step}
       <div class="days">
