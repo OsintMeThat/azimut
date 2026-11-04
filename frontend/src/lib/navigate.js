@@ -283,9 +283,9 @@ export function openEntity(entity, resolved = false) {
   }
 }
 
-/** Open the case-wide note (null) or one filed note in the shared Notebook. */
-export function openNotebook(noteId = null) {
-  uiState.openNotebook = { noteId };
+/** Open the case-wide note (null) or one filed note in the shared Notebook, at a line if given. */
+export function openNotebook(noteId = null, { line } = {}) {
+  uiState.openNotebook = Number.isInteger(line) ? { noteId, line } : { noteId };
   uiState.tool = 'notebook';
 }
 

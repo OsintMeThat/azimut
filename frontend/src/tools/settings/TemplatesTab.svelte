@@ -3,7 +3,7 @@
    * Reusable proof styles and report structures, shared across cases.
    *
    * Content-free presets: a template carries house style, never a case's
-   * material. Editing or duplicating one opens the parent's editor modal. One
+   * material. Plate and note templates are edited in their own tools. Editing or duplicating one opens the parent's editor modal. One
    * post template can be the one new posts start with (`post_template`).
    */
   import Icon from '../../components/Icon.svelte';
@@ -40,6 +40,21 @@
     link.href = url; link.download = `${record.name.replace(/[\\/<>:"|?*\u0000-\u001f]/g, '_')}.azimut-map.json`;
     document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  // Note templates are written in the Notebook itself, in the note editor.
+  function editNote(id) {
+    uiState.openNoteTemplate = id;
+    uiState.tool = 'notebook';
+  }
+  async function newNoteTemplate() {
+    try {
+      const record = await saveTemplate('note', { name: 'Note template', data: { body: '', folder: '' } });
+      editNote(record.id);
+    } catch (error) { toast(error.message, 'danger'); }
+  }
+  async function duplicateNote(record) {
+    try { await saveTemplate('note', { name: `${record.name} copy`.slice(0, 120), data: record.data }); }
+    catch (error) { toast(error.message, 'danger'); }
   }
   let picker = $state();
   async function importMap(event) {
@@ -124,6 +139,30 @@
   <button class="btn btn-sm" onclick={() => newTemplate('post')}>
     <Icon name="plus" size={13} /> New post template
   </button>
+</section>
+
+<section class="group" data-guide="settings.note-templates">
+  <h3>Note templates</h3>
+  <p class="note">
+    A note to start others from, shared across cases. {'{today}'} and {'{now}'} are written in when a note starts.
+  </p>
+  <div class="tpl-list">
+    {#each templatesState.note as t (t.id)}
+      <div class="tpl-row">
+        <span class="tpl-name">{t.name}</span>
+        <div class="tpl-actions">
+          <button class="btn btn-sm" onclick={() => editNote(t.id)}><Icon name="edit" size={13} /> Edit</button>
+          <button class="btn btn-sm" onclick={() => duplicateNote(t)}><Icon name="copy" size={13} /> Duplicate</button>
+          <button class="btn btn-sm" title="Delete" aria-label={`Delete ${t.name}`}
+            onclick={() => (deleteTpl = { kind: 'note', id: t.id, name: t.name })}><Icon name="trash" size={13} /></button>
+        </div>
+      </div>
+    {/each}
+    {#if !templatesState.note.length}
+      <p class="empty">No note templates yet. Keep one from a note, or start one here.</p>
+    {/if}
+  </div>
+  <button class="btn btn-sm" onclick={newNoteTemplate}><Icon name="plus" size={13} /> New note template</button>
 </section>
 
 <section class="group" data-guide="settings.plate-templates">

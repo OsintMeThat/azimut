@@ -78,14 +78,17 @@ const KML = `<?xml version="1.0" encoding="UTF-8"?>
 <Placemark><name>Vincent Thomas Bridge</name><Point><coordinates>${BRIDGE.lon},${BRIDGE.lat},0</coordinates></Point></Placemark>
 </Folder></Document></kml>`;
 
-const NOTES = `# Ship under a green bridge
+/** The running notes, citing what the demo case holds by id. */
+const notes = ({ account, vessel, bridge }) => `# Ship under a green bridge
 
-A photo posted without a caption: a container ship passing under a green suspension
-bridge, a terminal with green cranes beyond it. Where was it taken, and when?
+A photo posted by [[entity:${account}|@harbor_watch]] without a caption: a container ship passing under
+a green suspension bridge, a terminal with green cranes beyond it. Where was it taken, and when?
 
 - A suspension bridge over a working channel, mountains behind it.
-- The ship is the YM Success, and the terminal's ship and cranes read EVERGREEN.
+- The ship is the [[entity:${vessel}|YM Success]], and the terminal's ship and cranes read EVERGREEN.
 - A cruise gangway stands on the near bank, below the camera.
+
+> [!confirmed] The bridge is the [[entity:${bridge}|Vincent Thomas Bridge]], at ${BRIDGE.lat.toFixed(4)}, ${BRIDGE.lon.toFixed(4)}.
 
 \`\`\`mermaid
 flowchart LR
@@ -96,7 +99,8 @@ flowchart LR
   E --> F[Geolocated]
 \`\`\`
 
-Next: date the departure clip, and archive the post.
+- [ ] Date the departure clip
+- [ ] Archive the post
 `;
 
 /**
@@ -210,7 +214,7 @@ export async function buildDemo({ call, scratch }) {
     folder: 'Sources',
     content: '# What the post says\n\nNo caption and no place. The account posts port photos from several countries.\n',
   });
-  await call('PUT', at('/notes'), { text: NOTES });
+  await call('PUT', at('/notes'), { text: notes({ account, vessel, bridge }) });
   const sheet = await call('POST', at('/sheets'), { title: 'Files to geolocate' });
   await call('PUT', at(`/sheets/${sheet.id}`), {
     columns: ['id', 'File', 'Status', 'Coordinates', 'Notes'],

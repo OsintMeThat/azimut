@@ -182,12 +182,13 @@ describe('with a case open', () => {
     ]);
   });
 
-  it('reads the case with five dashboard requests and its checklists', async () => {
+  it('reads the case with five dashboard requests, its checklists and the tasks in its notes', async () => {
     await open();
     const asked = get.mock.calls.map(([url]) => url);
     const paths = asked.filter((url) => url.startsWith('/api/cases/'));
-    expect(paths).toHaveLength(6);
+    expect(paths).toHaveLength(7);
     expect(paths).toContain('/api/cases/case-a/todos');
+    expect(paths).toContain('/api/cases/case-a/notes/tasks');
     // every one of them capped, counting, or the located-media index the map panel
     // opens its own first position on — never a whole-graph read
     expect(paths.filter((url) => url.includes('limit=')).length).toBe(3);

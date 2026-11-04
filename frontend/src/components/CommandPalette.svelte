@@ -5,7 +5,7 @@
   import { buildCatalogQuery } from '../lib/catalog.js';
   import { entityLabel, entityTypes } from '../lib/entityTypes.svelte.js';
   import { entityIcon, entityKindLabel } from '../lib/entityIcon.js';
-  import { openEntity } from '../lib/navigate.js';
+  import { openEntity, openNotebook } from '../lib/navigate.js';
   import { matchRuns, paletteSettings, paletteTools } from '../lib/commandPalette.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
@@ -13,6 +13,7 @@
   let { open = $bindable(false), tools = [] } = $props();
   let query = $state('');
   let documents = $state([]);
+  let noteHits = $state([]);
   let documentCase = $state(null);
   let cases = $state([]);
   let selected = $state(0);
@@ -35,12 +36,18 @@
     detail: [entityKindLabel(entity, entityLabel(entity.type)), entity.attrs?.folder].filter(Boolean).join(' · '),
     icon: entityIcon(entity), entity,
   })));
+  // words found inside a note: the note, and the line they are on
+  const noteRows = $derived(noteHits.map((hit) => ({
+    kind: 'note-line', id: `${hit.id}:${hit.line}`, noteId: hit.id, line: hit.line, label: hit.title,
+    detail: hit.snippet, icon: 'note',
+  })));
   const caseRows = $derived(cases.map((item) => ({
     kind: 'case', id: item.id, label: item.name ?? item.id,
     detail: [item.scratch ? 'Scratch' : 'Case', item.id === caseState.current?.id ? 'Current' : ''].filter(Boolean).join(' · '), icon: 'folder',
   })));
   const groups = $derived(loadedQuery
-    ? [{ label: 'Tools', rows: toolRows }, { label: 'Horizon settings', rows: settingRows }, { label: 'Documents', rows: documentRows }, { label: 'Cases', rows: caseRows }]
+    ? [{ label: 'Tools', rows: toolRows }, { label: 'Horizon settings', rows: settingRows }, { label: 'Documents', rows: documentRows },
+      { label: 'In notes', rows: noteRows }, { label: 'Cases', rows: caseRows }]
     : [{ label: 'Recently added', rows: documentRows }, { label: 'Tools', rows: toolRows }, { label: 'Cases', rows: caseRows }]);
   const rows = $derived(groups.flatMap((group) => group.rows));
 
@@ -49,6 +56,7 @@
       query = '';
       loadedQuery = '';
       documents = [];
+      noteHits = [];
       cases = [];
       total = 0;
       selected = 0;
@@ -80,9 +88,16 @@
           types, query: text, limit: text ? 20 : 8, order: text ? 'relevance' : '-created',
         }), { signal: controller.signal }));
       }
-      const [caseResult, documentResult] = await Promise.allSettled(requests);
+      const noteRequest = caseId && text
+        ? api.get(`/api/cases/${caseId}/notes/search?${new URLSearchParams({ q: text, limit: '6' })}`, { signal: controller.signal })
+        : Promise.resolve({ items: [] });
+      const settled = await Promise.allSettled([...requests, noteRequest]);
+      const [caseResult] = settled;
+      const documentResult = requests.length > 1 ? settled[1] : undefined;
+      const noteResult = settled[settled.length - 1];
       if (controller.signal.aborted || !open || caseId !== caseState.current?.id || text !== query.trim()) return;
       const active = untrack(() => rows[selected]);
+      noteHits = noteResult.status === 'fulfilled' ? noteResult.value.items ?? [] : [];
       if (caseResult.status === 'fulfilled') cases = caseResult.value;
       else { cases = []; errors.push('Could not load cases.'); }
       if (documentResult?.status === 'fulfilled') {
@@ -124,6 +139,7 @@
       if (row.kind === 'tool') { close(); uiState.tool = row.id; }
       else if (row.kind === 'setting') { close(); uiState.horizonSetting = row.id; uiState.tool = 'horizon'; }
       else if (row.kind === 'document') { close(); await openEntity(row.entity); }
+      else if (row.kind === 'note-line') { close(); openNotebook(row.noteId === 'case' ? null : row.noteId, { line: row.line }); }
       else {
         if (row.id !== caseState.current?.id) await openCase(row.id);
         if (caseState.current?.id === row.id) { close(); uiState.tool = 'overview'; }

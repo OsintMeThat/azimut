@@ -67,6 +67,11 @@ beforeEach(async () => {
       return { items, total: items.length };
     }
     if (url.pathname === '/api/cases/case-b') return CASES[1];
+    if (url.pathname.endsWith('/notes/search')) {
+      return url.searchParams.get('q') === 'mast'
+        ? { items: [{ id: 'note-a', title: 'Harbour observations', folder: 'Harbour', line: 4, snippet: 'The mast is red.' }], total: 1 }
+        : { items: [], total: 0 };
+    }
     throw new Error(`Unexpected request: ${path}`);
   });
   await loadEntityTypes();
@@ -86,6 +91,20 @@ afterEach(() => {
   target?.remove();
   document.body.innerHTML = '';
   vi.useRealTimers();
+});
+
+describe('Go to, inside the notes', () => {
+  it('finds words a note holds and opens it on their line', async () => {
+    await show();
+    await search('mast');
+    expect(document.querySelector('[aria-label="In notes"]')).not.toBeNull();
+    const row = options().find((node) => node.textContent.includes('The mast is red.'));
+    expect(row).toBeDefined();
+    row.click();
+    await settle();
+    expect(uiState.openNotebook).toEqual({ noteId: 'note-a', line: 4 });
+    expect(uiState.tool).toBe('notebook');
+  });
 });
 
 describe('Go to', () => {

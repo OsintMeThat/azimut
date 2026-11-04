@@ -55,6 +55,8 @@
   import EntityImages from './EntityImages.svelte';
   import EntityTime from './EntityTime.svelte';
   import EntitySummary from './EntitySummary.svelte';
+  import NoteCitations from './NoteCitations.svelte';
+  import { citeInNote } from '../lib/notes/noteDock.svelte.js';
 
   let {
     entityId,
@@ -871,6 +873,7 @@
 
     {#if tab === 'connections'}
       <div class="case-layout">
+        <NoteCitations caseId={caseState.current.id} entityId={entity.id} onopened={() => onclose?.()} />
         {#if canRelate || canMention || claimRelations.length || hasRelations || lineageCount || placedPoints.length}
           <section class="connections">
             <div class="card-head connections-head"><h3>Connections</h3></div>
@@ -1140,6 +1143,15 @@
       {#if entity.type === 'capture' && entity.attrs?.lat != null}
         <button class="btn btn-ghost btn-sm" onclick={() => { gotoCapture(entity); onclose?.(); }}>
           <Icon name="crosshair" size={13} /> Go to coords
+        </button>
+      {/if}
+      {#if entity.type !== 'note'}
+        <button
+          class="btn btn-ghost btn-sm"
+          title="Put it in the note being written, at its cursor"
+          onclick={() => { citeInNote(entity, { tool: uiState.tool }); toast('Cited in the note', 'ok', 1600); }}
+        >
+          <Icon name="at" size={13} /> Cite in note
         </button>
       {/if}
       <!-- Offered wherever an entity is read, which is the point: the panel opens off

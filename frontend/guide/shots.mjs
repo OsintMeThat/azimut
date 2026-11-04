@@ -56,7 +56,7 @@ const MARGIN = 28;
 /** The tallest a picture may be against its width, so the guide shows it whole. */
 const LANDSCAPE = 0.66;
 /** Anchors that frame a group of controls rather than the first one found. */
-const UNION = new Set(['start.stages', 'start.tabs', 'notebook.insert', 'compare.session', 'proof.save', 'proof.meta', 'inspect.file', 'horizon.views']);
+const UNION = new Set(['start.stages', 'start.tabs', 'compare.session', 'proof.save', 'proof.meta', 'inspect.file', 'horizon.views']);
 
 const say = (line) => process.stdout.write(`  ${line}\n`);
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));

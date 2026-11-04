@@ -56,6 +56,7 @@
   import { isPaletteKey } from './lib/commandPalette.js';
   import { filedToast, workFolder } from './lib/folders.js';
   import { isNoteKey } from './lib/noteHere.svelte.js';
+  import { noteDock, setDockOpen } from './lib/notes/noteDock.svelte.js';
   import { readStatus, stoppedBecause } from './lib/workspace.js';
   import { analysisSearch, leaveAnalysisView } from './lib/analysisSearch.svelte.js';
 
@@ -389,6 +390,20 @@
     <!-- The one mark that answers "what is this tab I am standing in". It sits beside
          the gear rather than in each toolbar so there is one of it, and it opens the
          guide over the tool on that tool's page. -->
+    <!-- A note kept beside every tool, written while the Map or a video is looked at. -->
+    {#if caseState.current && !solo}
+      <button
+        class="btn btn-ghost btn-sm note-btn"
+        data-guide="start.note"
+        class:on={noteDock.open}
+        title={noteDock.open ? 'Close the note beside the tools' : 'A note beside the tools, open as you switch them'}
+        aria-label="Note beside the tools"
+        aria-pressed={noteDock.open}
+        onclick={() => setDockOpen(!noteDock.open)}
+      >
+        <Icon name="note" size={16} />
+      </button>
+    {/if}
     <!-- The one way into Add event from every tool: quiet like the marks beside it,
          since amber is kept for the main action and the selection. -->
     {#if caseState.current && !solo}
@@ -514,6 +529,13 @@
       </div>
     </main>
 
+    <!-- loaded on first open: the note editor is the heavier half of the Notebook -->
+    {#if noteDock.open && caseState.current && !bare}
+      {#await import('./components/NoteDock.svelte') then { default: NoteDock }}
+        <NoteDock />
+      {/await}
+    {/if}
+
     {#if uiState.sidebarOpen && !bare}
       <CaseSidebar />
     {/if}
@@ -599,7 +621,7 @@
     color: var(--text-1);
     background: var(--bg-2);
   }
-  /* Add event sits with the other icon marks; amber only while its bar is open. */
+  /* Add event and the note beside the tools sit with the other icon marks; amber only while open. */
   .note-btn.on {
     color: var(--accent);
     background: var(--accent-soft);

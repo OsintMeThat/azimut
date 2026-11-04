@@ -1099,8 +1099,20 @@ export const STAGES = [
   {
     shot: 'notebook',
     window: WIDE,
-    async run({ go }) {
+    async run({ go, page }) {
       await go('notebook');
+      await seen(page, '[data-guide="notebook.cards"]').waitFor();
+    },
+  },
+  {
+    shot: 'notebook-note',
+    from: 'notebook',
+    window: WIDE,
+    async run({ page }) {
+      await seen(page, '[data-guide="notebook.case"] button.open').click();
+      await seen(page, '.cm-editor .cm-chip').waitFor();
+      // the diagram is drawn by Mermaid, a moment after the page
+      await seen(page, '.cm-block-diagram svg').waitFor();
     },
   },
   {

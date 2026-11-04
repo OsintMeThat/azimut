@@ -85,7 +85,7 @@ to fix a point on the map.*
 | **Geo Proof** | Composes annotated case panels into a proof, from a house style or a published post, and exports `proof.png` plus a re-editable spec. |
 | **Geo Report** | Turns a proof into a prepared thread for X or Bluesky, with coordinates, attribution, character counts, media and a Markdown case note. |
 | **Map plate** | Lays a page out round the case's maps, with a legend, scale, north, inset, labels and credits, and exports it as a PNG, a print PDF, or a layer followed over time played through its days as a video. |
-| **Notebook** | Tabbed Markdown notes with local media, Mermaid diagrams, linked case evidence, broken-reference markers, and PDF export of one note or a whole selection. |
+| **Notebook** | Notes written in place, citing the case with @ and adding blocks with /, callouts and tasks, kept beside any tool or in a tab of their own, found by their words, started from templates, and exported to PDF. |
 
 Under the hood: reusable proof and thread templates, per-case SQLite with a
 bounded catalog, a durable one-worker thumbnail queue, the map-capture browser

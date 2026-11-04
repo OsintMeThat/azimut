@@ -2027,6 +2027,20 @@ export async function installAppFixture(page, options = {}) {
       return draft ? json(route, draft) : json(route, { detail: 'Draft not found' }, 404);
     }
     if (path === `/api/cases/${CASE_ID}/notes`) return json(route, { text: '' });
+    // the Notebook's home and the reads beside it: the catalog's notes, nothing to do, nothing found
+    if (path === `/api/cases/${CASE_ID}/notes/index`) {
+      const card = (id, title, folder = '') => ({
+        id, title, folder, updated_at: '2026-10-01T10:00:00Z', excerpt: '', words: 0,
+        tasks: { open: 0, done: 0 }, mentions: 0, pictures: 0,
+      });
+      return json(route, {
+        items: [card('case', 'Case notes'), ...fixtureCatalog.filter((entity) => entity.type === 'note')
+          .map((entity) => card(entity.id, entity.label, entity.attrs?.folder ?? ''))],
+      });
+    }
+    if (path === `/api/cases/${CASE_ID}/notes/tasks`) return json(route, { items: [] });
+    if (path === `/api/cases/${CASE_ID}/notes/search`) return json(route, { items: [], total: 0 });
+    if (path.startsWith(`/api/cases/${CASE_ID}/notes/citations/`)) return json(route, { items: [] });
     if (path === `/api/cases/${CASE_ID}/entities/lookup`) {
       return json(route, { entity: fixtureLookupEntities[url.searchParams.get('value')] ?? null });
     }

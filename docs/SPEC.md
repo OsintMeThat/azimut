@@ -194,6 +194,7 @@ proof for publication.
 | ✅ **Geolocation worklists** | Opens recent sheets, tracks imported files awaiting a proof and indexes every proof point with its date, source and coordinates. |
 | ✅ **Files & navigation** | Files work into the active folder, offers contextual actions and filters, opens media in one full-screen viewer, and retraces tools and documents with guarded Back and Forward. |
 | ✅ **Command palette** | Ctrl+K or ⌘K searches tools, cases and current-case documents, starts with recently added items and protects unsaved work. |
+| ✅ **Notebook, written in place** | Opens on note cards with a search through their words, writes a note as it reads with @ citations, / blocks, callouts and tasks, keeps it beside every tool or in a tab of its own, starts notes from ready ones or templates, and lists each note in Details of what it cites. |
 
 ---
 
@@ -277,6 +278,7 @@ stops making sense.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and the Collage tool.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
+- **Notes, next:** live blocks drawn in a note (a saved map view, a stretch of the Timeline, a Sheet range), a selection sent to the Post composer, a preview on hovering a chip.
 - **More on the home page:** the case's own notes beside the tiles, and panels the analyst arranges rather than a fixed grid. Each has to earn its place there rather than beside Board, Graph and Timeline, which already read the case.
 - **Radar damage from a stack of passes:** the pixel-wise t-test (PWTT) over a year of passes before and weeks after, which two passes cannot match.
 - **Oil slicks by radar:** dark patches on the sea near anchorages and lanes, which Sentinel-1 shows through cloud.
@@ -479,9 +481,11 @@ stops making sense.
   never by their path. A plate's Sentinel-2 cloudless ground reaches EOX's tile
   server (`tiles.maps.eox.at`) only once the analyst picks it, through the same proxy
   as every basemap; the years it offers and their licences are answered by the app. Remote images embedded in a
-  Notebook note contact their host whenever the preview opens; Notebook warns
-  about that behavior and local Case media avoids it. Notebook diagrams are the
-  one markup DOMPurify does not clear: Mermaid draws its SVG into the preview
+  Notebook note contact their host whenever the note opens; Notebook warns
+  about that behavior and local Case media avoids it. A link pasted into a note
+  is filed as a bookmark only on a press, titled from its own address: nothing
+  is fetched. Notebook diagrams are the
+  one markup DOMPurify does not clear: Mermaid draws its SVG into the note
   after sanitizing, under its own `strict` level, which escapes labels and drops
   click handlers. Three routes take a picture drawn in the browser back: the note
   PDF export, whose request, diagrams and decoded total are bounded before

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installAppFixture } from './app.fixture.js';
+import { CASE_ID, installAppFixture } from './app.fixture.js';
 
 const DIAGRAM = [
   '```mermaid',
@@ -9,39 +9,44 @@ const DIAGRAM = [
   '```',
 ].join('\n');
 
-test('draws a mermaid fence in the notebook preview, offline', async ({ page }) => {
-  const fixture = await installAppFixture(page);
-
+/** The case notes, served holding `text`, opened from the Notebook's home. */
+async function openCaseNotes(page, text) {
+  await page.route(`**/api/cases/${CASE_ID}/notes`, (route) =>
+    route.request().method() === 'GET' ? route.fulfill({ json: { text } }) : route.fulfill({ json: { status: 'saved' } })
+  );
   await page.goto('/#notebook');
-  const writer = page.locator('.writer textarea');
-  await expect(writer).toBeVisible();
+  await page.locator('[data-guide="notebook.case"] button.open').click();
+  await expect(page.locator('.cm-editor')).toBeVisible();
+}
 
-  const preview = page.locator('.markdown');
-  await writer.fill('# Field notes\n\nNo diagram yet.');
-  await expect(preview.locator('.mermaid-diagram')).toHaveCount(0);
+test('draws a mermaid fence in the note, offline', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await openCaseNotes(page, `# Field notes\n\n${DIAGRAM}\n\nAfter.`);
 
-  await writer.fill(`# Field notes\n\n${DIAGRAM}`);
-  const diagram = preview.locator('.mermaid-diagram svg');
+  const diagram = page.locator('.cm-block-diagram svg');
   await expect(diagram).toBeVisible();
   await expect(diagram.getByText('Confirmed')).toBeVisible();
-  await expect(preview.locator('.mermaid-error')).toHaveCount(0);
-
-  await writer.fill('```mermaid\nflowchart LR\n  A -->\n```');
-  await expect(preview.locator('.mermaid-diagram.mermaid-failed')).toBeVisible();
+  await expect(page.locator('.cm-block-failed')).toHaveCount(0);
+  // the cursor in the fence brings its source back to edit
+  await page.locator('.cm-block-diagram').click();
+  await expect(page.locator('.cm-block-diagram')).toHaveCount(0);
+  await expect(page.locator('.cm-content')).toContainText('flowchart LR');
 
   fixture.expectNoUnexpectedRequests();
 });
 
+test('says a diagram it cannot draw failed, and keeps its source', async ({ page }) => {
+  await installAppFixture(page);
+  await openCaseNotes(page, '```mermaid\nflowchart LR\n  A -->\n```\n\nAfter.');
+  await expect(page.locator('.cm-block-failed')).toContainText('Diagram not drawn');
+});
+
 test('keeps a diagram as it was drawn before Mermaid 12, with its labels as written', async ({ page }) => {
   await installAppFixture(page);
-  await page.goto('/#notebook');
-  const writer = page.locator('.writer textarea');
-  await expect(writer).toBeVisible();
   const asked = [];
   page.on('request', (request) => /\/elk|layout-elk/i.test(request.url()) && asked.push(request.url()));
-
-  await writer.fill(DIAGRAM);
-  const label = page.locator('.mermaid-diagram svg .label').filter({ hasText: 'Confirmed' }).first();
+  await openCaseNotes(page, `${DIAGRAM}\n\nAfter.`);
+  const label = page.locator('.cm-block-diagram svg .label').filter({ hasText: 'Confirmed' }).first();
   await expect(label).toBeVisible();
   // the app's own .label would shout it in small capitals, and size its box for that
   await expect(label).toHaveCSS('text-transform', 'none');
@@ -53,7 +58,7 @@ test('draws what a PDF places as plain text, in every diagram that could hold HT
   // A browser will not always draw HTML out of an image: Firefox leaves the boxes empty.
   await installAppFixture(page);
   await page.goto('/#notebook');
-  await expect(page.locator('.writer textarea')).toBeVisible();
+  await expect(page.locator('[data-guide="notebook.case"]')).toBeVisible();
 
   const drawn = await page.evaluate(async (sources) => {
     const { renderMermaidSvg } = await import('/src/lib/mermaid.js');
@@ -87,7 +92,7 @@ test('draws what a PDF places as plain text, in every diagram that could hold HT
 test('writes a journey’s plain labels in a colour its boxes do not share', async ({ page }) => {
   await installAppFixture(page);
   await page.goto('/#notebook');
-  await expect(page.locator('.writer textarea')).toBeVisible();
+  await expect(page.locator('[data-guide="notebook.case"]')).toBeVisible();
 
   const fills = await page.evaluate(async () => {
     const { renderMermaidSvg } = await import('/src/lib/mermaid.js');

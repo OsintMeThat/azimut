@@ -900,6 +900,12 @@ leaves a gap rather than voiding the layout, and the picture it exports is a
   edge to the `post` draft it was composed in — that one is declared by
   `POST /notes` at creation, and no wording could restate it. A note typed by hand
   keeps no chain.
+- **A note states its mentions from its own body too.** `[[entity:<id>]]` is a
+  pointer, so the same save restates the note's `mentions` edges, its own only
+  (`own_only`, `by="note"`): a mention stated by hand in Details is a separate claim
+  the text cannot take back. A case opened for the first time by a version that does
+  this restates every older note once (`engine/notelinks.py`), edges only, the files
+  untouched.
 
 Free-typed labels remain valid in stored data. The registry defines what the UI
 understands and what the API will mint, not what a case may hold.

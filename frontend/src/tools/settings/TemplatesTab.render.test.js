@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import TemplatesTab from './TemplatesTab.svelte';
-import { prefs, templatesState } from '../../lib/state.svelte.js';
+import { prefs, templatesState, uiState } from '../../lib/state.svelte.js';
 
 const PROOF = { id: 'pf_1', name: 'House proof', data: { legend: true } };
 const CLASSIC = { id: 'po_1', name: 'Classic', data: { body: '#place' } };
@@ -45,7 +45,27 @@ afterEach(() => {
   app = null;
   templatesState.proof = [];
   templatesState.post = [];
+  templatesState.note = [];
   prefs.postTemplate = '';
+});
+
+describe('Note templates', () => {
+  it('opens one in the Notebook to edit it, with a copy and a delete beside', () => {
+    templatesState.note = [{ id: 'nt_1', name: 'Write-up', data: { body: '## Claim', folder: '' } }];
+    open();
+    const row = rowOf('Write-up');
+    expect(button(row, 'Duplicate')).toBeTruthy();
+    expect(row.querySelector('button[aria-label="Delete Write-up"]')).not.toBeNull();
+    button(row, 'Edit').click();
+    expect(uiState.openNoteTemplate).toBe('nt_1');
+    expect(uiState.tool).toBe('notebook');
+    uiState.openNoteTemplate = null;
+  });
+
+  it('says how to make one when there is none', () => {
+    open();
+    expect(target.textContent).toContain('No note templates yet. Keep one from a note, or start one here.');
+  });
 });
 
 const rows = () => [...target.querySelectorAll('.tpl-row')];

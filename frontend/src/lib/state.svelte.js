@@ -226,7 +226,7 @@ export const caseState = $state({
  * Settings edits one, so the composers' "start from a template" menus stay
  * current without re-fetching. Each entry: { id, name, updated_at, data }.
  */
-export const templatesState = $state({ proof: [], post: [], map: [] });
+export const templatesState = $state({ proof: [], post: [], map: [], note: [] });
 
 /**
  * The Post composer's live draft, mirrored for the template editor's preview so
@@ -241,6 +241,7 @@ export async function loadTemplates() {
     templatesState.proof = Array.isArray(t.proof) ? t.proof : [];
     templatesState.post = Array.isArray(t.post) ? t.post : [];
     templatesState.map = Array.isArray(t.map) ? t.map : [];
+    templatesState.note = Array.isArray(t.note) ? t.note : [];
   } catch {
     /* templates are a convenience; an empty store is a fine fallback */
   }
@@ -280,7 +281,8 @@ export const uiState = $state({
   postProof: null, // proof spec handed to the Post Composer
   openProof: null, // proof name to load in the Proof Composer
   openDraft: null, // draft name to load in the Post Composer
-  openNotebook: null, // { noteId: string|null }; null noteId opens case notes.md
+  openNotebook: null, // { noteId: string|null, line? }; null noteId opens case notes.md, `home` the Notebook's home
+  openNoteTemplate: null, // note template id to edit in the Notebook, from Settings
   inspectPath: null, // media path to open in the Inspect tool
   /**
    * A picture handed to Reverse Search from wherever it is being looked at, in the

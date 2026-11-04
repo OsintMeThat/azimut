@@ -242,34 +242,37 @@ test('Back between drafts asks before leaving an edited post', async ({ page }) 
   fixture.expectNoUnexpectedRequests();
 });
 
-test('Back retraces the notes opened in the Notebook', async ({ page }) => {
+test('Back retraces the notes opened in the Notebook, and its home', async ({ page }) => {
   const note = (id, label) => ({
     id, type: 'note', label, attrs: { path: `notes/${id}.md` },
     provenance: { by: 'user', at: '2026-10-01T10:00:00Z', status: 'confirmed' },
   });
   const fixture = await installAppFixture(page, { catalog: [note('n-convoy', 'Convoy'), note('n-depot', 'Depot')] });
-  await page.route(`**/api/cases/${CASE_ID}/notes/*`, (route) => {
+  await page.route(`**/api/cases/${CASE_ID}/notes/n-*`, (route) => {
     const id = new URL(route.request().url()).pathname.split('/').pop();
     return route.fulfill({ json: { text: `# ${id}\n` } });
   });
   await page.goto('/#notebook');
-  const pick = async (label) => {
-    await page.locator('.menu-toggle').click();
-    await page.locator('.menu-note', { hasText: label }).click();
+  const name = page.locator('input[aria-label="Note name"]');
+  const home = page.locator('[data-guide="notebook.case"]');
+  const open = async (label) => {
+    await page.locator(`button[title="Open ${label}"]`).click();
+    await expect(name).toHaveValue(label);
   };
-  const active = page.locator('.tabs .tab.active');
 
-  await pick('Convoy');
-  await expect(active).toContainText('Convoy');
-  await pick('Depot');
-  await expect(active).toContainText('Depot');
+  await open('Convoy');
+  await page.locator('[data-guide="notebook.home"]').click();
+  await expect(home).toBeVisible();
+  await open('Depot');
 
   await page.goBack();
-  await expect(active).toContainText('Convoy');
+  await expect(home).toBeVisible();
   await page.goBack();
-  await expect(active).toContainText('Case Notes');
+  await expect(name).toHaveValue('Convoy');
+  await page.goBack();
+  await expect(home).toBeVisible();
   await page.goForward();
-  await expect(active).toContainText('Convoy');
+  await expect(name).toHaveValue('Convoy');
   fixture.expectNoUnexpectedRequests();
 });
 
@@ -285,17 +288,17 @@ test('a note opened from Files is one step, and Back lands in the folder it came
   await page.route(`**/api/cases/${CASE_ID}`, (route) =>
     route.fulfill({ json: { id: CASE_ID, name: 'Browser Test', scratch: false, folders: ['Sources'] } })
   );
-  await page.route(`**/api/cases/${CASE_ID}/notes/*`, (route) => route.fulfill({ json: { text: '# Convoy\n' } }));
+  await page.route(`**/api/cases/${CASE_ID}/notes/n-convoy`, (route) => route.fulfill({ json: { text: '# Convoy\n' } }));
   // The Notebook already open once, so the note arrives in a tool that is there.
   await page.goto('/#notebook');
-  await expect(page.locator('.tabs .tab.active')).toContainText('Case Notes');
+  await expect(page.locator('[data-guide="notebook.case"]')).toBeVisible();
   await page.locator('.rail').getByRole('button', { name: 'Sources' }).click();
   await tab(page, 'Files').click();
   const grid = page.locator('.grid-pane');
   await grid.locator('.tile.folder', { hasText: 'Sources' }).dblclick();
   await grid.locator('.tile', { hasText: 'Convoy' }).dblclick();
   await expect(tab(page, 'Notebook')).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator('.tabs .tab.active')).toContainText('Convoy');
+  await expect(page.locator('input[aria-label="Note name"]')).toHaveValue('Convoy');
 
   await page.goBack();
   await expect(tab(page, 'Files')).toHaveAttribute('aria-current', 'page');

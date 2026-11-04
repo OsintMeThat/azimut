@@ -70,6 +70,9 @@ presses *Read the guide* on it, which opens the guide on its start page.
   column, beside the start actions in an empty case, and stacks on narrow screens. Enter adds a task; click its
   text to edit it, check it off, or delete it. The list menu renames or deletes
   a list, with confirmation for a populated list. Changes save automatically.
+  Under the lists, **In the notes** gathers the open `- [ ]` of the case's notes,
+  note by note, read once the lists are there; ticking one writes the note, and its
+  text opens the note on that line.
   Lists are case metadata in `case.json`, included in case bundles; they are not
   graph entities and own no artifact files. Task and list deletions are permanent,
   outside Trash. Concurrent edits from another browser tab require reloading the
@@ -238,7 +241,8 @@ Rules:
 
 - **Go to** opens from the topbar or `Ctrl+K` (`⌘K` on macOS). It starts with
   recently added documents, then searches tools, Horizon's settings, workspace
-  cases and documents in the current case. A Horizon setting opens Horizon with
+  cases, documents in the current case and the words inside its notes, each found
+  note opening on its line. A Horizon setting opens Horizon with
   its inspector out, its group unfolded and its row lit a moment. Arrow keys select a result, Enter opens it and Escape
   returns focus. Changing case through `openCase` asks before discarding unsaved
   work; document handoffs retain their existing save and confirmation paths.
@@ -5577,23 +5581,70 @@ as a file.
 
 ## Notebook
 
-The Notebook places a GitHub-flavored Markdown editor beside its preview. The
-resizable split is stored locally, and Preview-only hides the editor. A note
-with a remote inline image warns that its host is contacted on every open;
-adding the image to the Case keeps it local. A ```mermaid fence is drawn as a
-diagram, always light so it prints, and keeps its source with a note when the
-syntax fails. Markdown help covers supported syntax, diagrams, image layout and
-aligned text. The toolbar exports the open note, or a checked selection, as one
-server-rendered PDF per note without a print dialog. Local images and
-browser-rendered Mermaid diagrams travel with it; remote images are omitted.
-Homonymous notes keep stable suffixes even when exported separately, and the
-shared destination defaults to the case's `exports/` folder.
+**The home.** The Notebook opens on the case's notes as cards, the way Map plate
+opens on its plates. **Case notes**, the case's own page (`notes.md`), comes first
+and is always there. Each filed note's card says its folder, its first words, when
+it changed, its word count, the tasks left and how many records it cites; a folder
+row filters the cards and *Recent* or *Name* orders them. **Find words in the
+notes** looks inside every note on the server and lists each note with the line it
+is first found on; a press opens the note at that line. **Start from** offers ready
+notes (Blank, Geolocation, Investigation log, Source profile, Daily summary) and
+**Your templates**: a press makes the note at once, named after it and numbered when
+the name is taken, with its title selected to retype. **New note** asks a title, a
+folder and what to start from. A card's ⋯ opens it, keeps it beside the tools, opens
+it in its own tab, exports it, or deletes it.
 
-Case Notes stays pinned while filed notes open in session tabs. Paste, drop or
-pick case media to insert it; the reference menu links case entities. Deleted
-references remain as broken markers. External captures and bookmarks open their
-source page. Internal captures restore their Satellite view and provider. A saved
-Geo Report exposes an `OPEN` action for its new note.
+**A note, written in place.** One page, no preview beside it: the note is drawn as
+it reads while it is typed (CodeMirror 6, `lib/notes/liveMarkdown.js`). A heading is
+set large, emphasis and links are styled, bullets are dots, `- [ ]` is a box to tick,
+and the marks come back on the line being edited. A case reference is a chip that
+opens what it names; a picture, a table, a diagram, an aligned block and an HTML
+block are drawn whole and give their source back when pressed. A callout opens a
+quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]` or `[!warning]`, in
+its colour, in the PDF too. Decimal coordinates get a ⌖ that shows them on the map.
+**@** and a few letters offer the case's records and write a chip; **/** offers
+headings, a dated log entry, tasks, lists, the callouts, a case item, a case picture,
+an image from a file, a table, a diagram, code, a divider and today's date. The bar
+above holds the same as buttons. Ctrl+B and Ctrl+I set bold and italic, Enter on an
+empty item leaves the list. Pasting or dropping an image adds it to the case's media;
+a library file dragged in lands as its picture. A link pasted alone is offered as a
+bookmark of the case, titled from its address, nothing fetched. A note with a remote
+image says its host is contacted on every open.
+
+The file stays the Markdown it was: what the old split-pane Notebook wrote opens as it
+was written and is never rewritten for being opened. The header names the note (the
+name is the filename), files it in a folder, says whether it is saved, and holds
+**Beside the tools**, **Open in its own tab**, **PDF**, and a ⋯ with *Keep as
+template*, *Export several as PDF* and *Delete* (*Clear the case notes* for the case's
+page). PDF export writes one server-rendered PDF per note without a print dialog,
+local images and browser-drawn diagrams with it, remote images left out, homonyms
+under stable suffixes, into the shared notes destination (the case's `exports/` by
+default).
+
+**One copy, one tab.** The Notebook, the note beside the tools and the To-do share one
+copy of each open note (`lib/notes/noteDoc.svelte.js`), written 700 ms after typing
+stops and at once before an export or a tick. A note opened in a second browser tab
+is taken there: the first tab writes what it has and turns read-only with *Edit here*
+to take it back.
+
+**Beside the tools.** The note button in the top bar opens a note on the right that
+stays as tools change, resizable at its edge (`components/NoteDock.svelte`). Its bar
+picks the note, **@** cites what the tool on screen shows (the thing it offers to Add
+event), and it opens the note in the Notebook or its own tab. Whether it is open is
+kept for the browser, which note per case.
+
+**The note in the case.** A save restates the records a note cites as `mentions`
+edges (`engine/notelinks.py`), so the note shows in their Details and the Graph; a
+mention stated by hand in Details stays. Notes written before that get theirs once,
+the first time the case is opened, without their file being touched. Details lists
+**Cited in notes** with each sentence, which opens the note on it, and **Cite in
+note** puts the record into the note being written. A note's open tasks show under
+the To-do lists, ticked there without opening it. Go to (`Ctrl+K`) finds words inside
+notes.
+
+**Templates.** *Keep as template* saves a note's text and folder; Settings → Templates
+lists note templates, and Edit opens one in the Notebook with *Done* back to Settings.
+`{today}` and `{now}` are written in when a note starts from one.
 
 ## Visual language (UI)
 

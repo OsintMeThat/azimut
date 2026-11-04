@@ -3,6 +3,7 @@
   import { loadTodos, saveTodos, todos } from '../../lib/todos.svelte.js';
   import Icon from '../../components/Icon.svelte';
   import ConfirmDialog from '../../components/ConfirmDialog.svelte';
+  import NoteTasks from './NoteTasks.svelte';
 
   // `compact` is the sidebar's: no heading of its own (the view switch names it)
   // and a list that runs the panel's height rather than a dashboard cell's.
@@ -160,6 +161,8 @@
   {:else if busy}
     <p class="quiet">Loading lists…</p>
   {/if}
+  <!-- the notes' own tasks, read once the lists are there: one bounded read more, never first -->
+  {#if data}<NoteTasks {caseId} {compact} ready={!busy} />{/if}
 </section>
 
 {#if deleting}

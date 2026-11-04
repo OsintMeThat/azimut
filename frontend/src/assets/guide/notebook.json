@@ -1,36 +1,36 @@
 {
-  "width": 1036,
+  "width": 972,
   "height": 642,
   "anchors": {
-    "notebook.notes": {
-      "x": 10,
-      "y": 0,
-      "w": 87.4,
-      "h": 41
+    "notebook.new": {
+      "x": 818.2,
+      "y": 28,
+      "w": 108,
+      "h": 31.2
     },
-    "notebook.insert": {
-      "x": 400,
-      "y": 56,
-      "w": 64,
-      "h": 22
+    "notebook.search": {
+      "x": 46.2,
+      "y": 117.7,
+      "w": 880,
+      "h": 29.3
     },
-    "notebook.write": {
-      "x": 0,
-      "y": 42,
-      "w": 514,
-      "h": 599.8
+    "notebook.case": {
+      "x": 46.2,
+      "y": 190,
+      "w": 880,
+      "h": 112
     },
-    "notebook.preview": {
-      "x": 522,
-      "y": 42,
-      "w": 514,
-      "h": 599.8
+    "notebook.cards": {
+      "x": 46.2,
+      "y": 380.2,
+      "w": 880,
+      "h": 152.8
     },
-    "notebook.pdf": {
-      "x": 959,
-      "y": 56,
-      "w": 32,
-      "h": 22
+    "notebook.ready": {
+      "x": 46.2,
+      "y": 576,
+      "w": 880,
+      "h": 65.8
     }
   }
 }
