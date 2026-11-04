@@ -366,7 +366,7 @@ def bundled_parts() -> dict[str, bool]:
         subsetter = True
     except ImportError:
         subsetter = False
-    faces = all((pdffonts.FONT_DIR / name).is_file() for name in pdffonts.CORE_FACES.values())
+    faces = all((pdffonts.FONT_DIR / name).is_file() for name in pdffonts.named_files())
     try:
         versions = all(importlib.metadata.version(dist) for dist in scrapers.SCRAPERS)
     except importlib.metadata.PackageNotFoundError:

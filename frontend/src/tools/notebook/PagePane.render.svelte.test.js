@@ -46,6 +46,7 @@ afterEach(() => {
   if (app) unmount(app);
   target?.remove();
   app = null;
+  answer.warnings = [];
 });
 
 async function pane(props) {
@@ -60,6 +61,8 @@ async function pane(props) {
 }
 
 const sheet = (index) => target.querySelectorAll('.sheet')[index];
+
+const TEXT = ['Intro', '', '[[media:m2|Pier]]{width=50% align=center caption="Old"}', '', 'x', '', '[[media:m1|Roof]]{width=100%}'].join('\n');
 
 describe('the pictures on the pages', () => {
   it('are drawn over the page they landed on, the size they have marked', async () => {
@@ -97,10 +100,83 @@ describe('the pictures on the pages', () => {
     expect(onjump).toHaveBeenCalledWith(6);
   });
 
+  it('take a caption written in place, under the picture, from what the line says', async () => {
+    const onresize = vi.fn();
+    await pane({ onresize, text: TEXT });
+    const [first] = sheet(0).querySelectorAll('.picture');
+    [...first.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Caption').click();
+    flushSync();
+    const field = sheet(0).querySelector('.caption-here input');
+    expect(field.value).toBe('Old');
+    expect(document.activeElement).toBe(field);
+    // under the picture, at least half the page wide
+    expect(sheet(0).querySelector('.caption-here').style.width).toBe('50.000%');
+    field.value = 'Smoke over the port';
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    flushSync();
+    expect(onresize).toHaveBeenCalledWith(answer.pictures[1], { caption: 'Smoke over the port' });
+    expect(sheet(0).querySelector('.caption-here')).toBeNull();
+  });
+
+  it('leave the caption as it was on Escape', async () => {
+    const onresize = vi.fn();
+    await pane({ onresize, text: TEXT });
+    [...sheet(1).querySelectorAll('.picture button')].find((button) => button.textContent.trim() === 'Caption').click();
+    flushSync();
+    const field = sheet(1).querySelector('.caption-here input');
+    expect(field.value).toBe('');
+    field.value = 'Typed';
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSync();
+    expect(onresize).not.toHaveBeenCalled();
+    expect(sheet(1).querySelector('.caption-here')).toBeNull();
+  });
+
+  it('keep a small picture\'s bar on the side of the page it is on', async () => {
+    await pane({ onresize: vi.fn() });
+    expect(sheet(0).querySelector('.picture-bar').classList.contains('from-left')).toBe(true);
+    expect(sheet(1).querySelector('.picture-bar').classList.contains('from-left')).toBe(false);
+  });
+
   it('offer no sizes where the note cannot be changed', async () => {
     await pane({});
     expect(target.querySelector('.picture-bar')).toBeNull();
     expect(target.querySelector('.gap')).toBeNull();
     expect(target.querySelectorAll('.picture')).toHaveLength(2);
+  });
+});
+
+describe('what the page warns about', () => {
+  it('is listed under the bar, and a warning with a line takes the note there', async () => {
+    answer.warnings = [{ text: 'Section "Method" is empty.', line: 14 }, { text: 'A picture is missing', line: null }];
+    const onjump = vi.fn();
+    await pane({ onjump });
+    const list = target.querySelector('ul[aria-label="Warnings"]');
+    expect([...list.querySelectorAll('li')].map((row) => row.textContent.trim())).toEqual(['Section "Method" is empty.', 'A picture is missing']);
+    const rows = list.querySelectorAll('li');
+    expect(rows[1].querySelector('button')).toBeNull();
+    rows[0].querySelector('button').click();
+    expect(onjump).toHaveBeenCalledWith(14);
+    expect(target.querySelector('.pane-bar').textContent).toContain('2 warnings');
+  });
+
+  it('folds away from the bar, and comes back', async () => {
+    answer.warnings = [{ text: 'A picture is missing', line: null }];
+    await pane({});
+    const toggle = target.querySelector('.pane-bar button.warned');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    toggle.click();
+    flushSync();
+    expect(target.querySelector('ul[aria-label="Warnings"]')).toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    toggle.click();
+    flushSync();
+    expect(target.querySelector('ul[aria-label="Warnings"]')).not.toBeNull();
+  });
+
+  it('says nothing when there is nothing to warn about', async () => {
+    await pane({});
+    expect(target.querySelector('.warned')).toBeNull();
+    expect(target.querySelector('ul[aria-label="Warnings"]')).toBeNull();
   });
 });

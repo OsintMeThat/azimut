@@ -66,6 +66,25 @@ describe('markdownHtml', () => {
     expect(html).toContain('class="markdown-image align-right"');
     expect(html).toContain('style="width: 320px"');
   });
+
+  it('shows a picture\'s caption under it, as the PDF prints it', () => {
+    const entities = [{ id: 'e_image', label: 'Map', type: 'media', attrs: { path: 'media/map.png', kind: 'image' } }];
+    const html = markdownHtml('[[media:e_image|Map]]{width=50% align=center caption="Smoke over the <port>"}', { caseId: 'case-1', entities });
+    expect(html).toContain('style="width: 50%"');
+    expect(html).toContain('<span class="markdown-caption align-center">Smoke over the &lt;port&gt;</span>');
+    // the words of a caption are not a size
+    const worded = markdownHtml('[[media:e_image|Map]]{caption="width=10% of the quay"}', { caseId: 'case-1', entities });
+    expect(worded).not.toContain('width: 10%');
+    expect(worded).toContain('width=10% of the quay</span>');
+  });
+
+  it('shows an image\'s title as its caption, unless a caption is written', () => {
+    expect(markdownHtml('![Map](/map.png "Pier at dawn")')).toContain('<span class="markdown-caption align-left">Pier at dawn</span>');
+    const both = markdownHtml('![Map](/map.png "Pier at dawn"){caption="The pier"}');
+    expect(both).toContain('>The pier</span>');
+    expect(both).not.toContain('>Pier at dawn</span>');
+    expect(markdownHtml('![Map](/map.png){width=50%}')).not.toContain('markdown-caption');
+  });
 });
 
 describe('mermaid fences', () => {

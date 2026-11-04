@@ -5679,17 +5679,38 @@ Every style takes A4 or Letter, an accent (the style's own, a recent colour or a
 pasted hex), a TLP marking (FIRST TLP 2.0 colours, top right and in the footer of
 every page), a cover page (subtitle, a picture from the case's media, a day), a
 contents page and numbered headings and figures. PDF bookmarks follow the headings.
+Its **Text** part sets the typeface, each card drawn in its face: the style's own
+(serif for Plain, Report and Journal, sans for Brief), Noto Serif, Noto Sans,
+Literata (a book face for long write-ups) or IBM Plex Sans (a clean face for briefs),
+and the size, Smaller, Normal or Larger, which headings, tables and captions follow.
+A letter a face lacks prints in the Noto face of its script. Templates carry both.
+
+The PDF keeps what a reader needs to check the work. A chip naming a record with a
+web address (a bookmark's page, an account's profile, a file's source; an archived
+copy only when there is nothing else) is a link, links in tables stay links, and
+decimal coordinates open OpenStreetMap at that point. Photo metadata (EXIF, GPS,
+XMP, IPTC) is never put in the PDF: a JPEG goes in without those blocks and a photo
+turned by its EXIF is drawn upright.
 
 **Write | Page** opens the note's pages beside it: the real PDF the server would write
 (`POST /notes/preview`, nothing written to disk), drawn with pdf.js loaded only
 there, redrawn 900 ms after typing stops with the old pages kept until the new ones
 are ready. Diagrams missing from it are drawn in the browser and asked for once
 more. Pressing a page scrolls the note to where it starts. The choice is kept for the
-browser.
+browser. What the PDF warns about is listed under the pane's bar, its count folding
+the list: an empty section, a missing picture, a script no face covers. One that names
+a line goes there when pressed. A template's pages give no such warnings, since a
+template is guidance by design.
 
 **Pictures and pages.** Hovering a picture, in the note or on its page in the Page
-pane, offers **S**, **M**, **L** and **Full** and left, centre or right, written on its
-line as `{width=… align=…}`. Each size keeps the picture within a third, a half or
+pane, offers **S**, **M**, **L** and **Full**, left, centre or right, and **Caption**,
+written on its line as `{width=… align=… caption="…"}`. Each bar is one Tab stop,
+walked with the arrows. *Caption* opens a one-line field where the caption prints:
+Enter or leaving it writes it, Escape leaves it as it was, and the note shows it under
+the picture. A caption beats an image's title; with numbered figures it reads
+*Figure N.* and the caption. Under it a grey credit says where the picture comes
+from: *Source:* and the site, *Imagery:* with the provider and the day, or *Watch:*
+for a video, each a link. Each size keeps the picture within a third, a half or
 three quarters of the page across and down, so a phone screenshot is not a page tall.
 A picture with no width written shrinks by up to a quarter rather than leave the rest
 of its page blank; one that still goes to the next page leaves its room marked on the
@@ -5697,9 +5718,10 @@ Page pane with *Fit the picture here*, which writes the width that keeps it ther
 width written by hand is never changed. **/** → *Page break* writes
 `<!-- pagebreak -->`, a dashed rule in the note: the PDF starts a new page there,
 unless the page is still empty, and every other reader sees an HTML comment. No HTML
-comment prints. A video prints as its thumbnail with a play mark and a *Watch* link
-to its source, or as a line with that link when it has no thumbnail. A diagram prints
-at its size on screen.
+comment prints. A video prints as its thumbnail with a play mark and its *Watch*
+credit, or as a line with that link when it has no thumbnail. A diagram prints at its
+size on screen. A caption is never parted from its picture, and a heading never stays
+alone at the foot of a page.
 
 **Chapters and guidance.** **/** → *Include a note* writes `[[include:<id>]]` on its
 own line, drawn as a chapter block with its number, title and first words, *Open* and

@@ -25,6 +25,10 @@ than text that is missing.
 The faces go in as fpdf2 *fallbacks* rather than being switched by hand, which
 is what keeps a right-to-left phrase whole: fpdf2 picks a face per character and
 still hands the run to HarfBuzz in one piece.
+
+A note's look may set its text in another face (`FONTS`). Those faces are loaded
+only for the document that asks, after the ones every document loads, so a note
+that never picked one embeds and draws exactly what it always did.
 """
 
 from __future__ import annotations
@@ -43,9 +47,11 @@ SERIF = "azimut-serif"
 SANS = "azimut-sans"
 MONO = "azimut-mono"
 
-#: (family, style) → file. Sans has no italic and mono no bold on purpose: each
-#: face is another half megabyte in all three binaries, and the ones left out
-#: only ever serve emphasis inside a heading or a code span.
+BOOK = "azimut-book"
+MODERN = "azimut-modern"
+
+#: (family, style) → file, loaded for every document. Mono has no bold on purpose:
+#: the one place it would serve is emphasis inside a code span.
 CORE_FACES: dict[tuple[str, str], str] = {
     (SERIF, ""): "NotoSerif-Regular.ttf",
     (SERIF, "B"): "NotoSerif-Bold.ttf",
@@ -55,6 +61,60 @@ CORE_FACES: dict[tuple[str, str], str] = {
     (SANS, "B"): "NotoSans-Bold.ttf",
     (MONO, ""): "NotoSansMono-Regular.ttf",
 }
+
+#: The sans italics, loaded only for a document whose body text is sans. Where the
+#: sans only sets headings, an italic word in one borrows the serif's italic, as it
+#: always has, and the half megabyte each costs stays out of the document.
+SANS_ITALICS: dict[tuple[str, str], str] = {
+    (SANS, "I"): "NotoSans-Italic.ttf",
+    (SANS, "BI"): "NotoSans-BoldItalic.ttf",
+}
+
+
+@dataclass(frozen=True)
+class Font:
+    """A face a note's text can be set in, as the look names it."""
+
+    key: str
+    #: The family's own name, which the Look control shows.
+    label: str
+    #: "serif" or "sans": what the face is, and which Noto face draws what it lacks.
+    kind: str
+    #: The families the body and the headings are set in.
+    body: str
+    headings: str
+    #: The faces this choice loads beyond the ones every document has.
+    faces: tuple[tuple[str, str, str], ...] = ()
+
+    @property
+    def regular(self) -> str:
+        """The file the Look control draws its sample from."""
+        own = {(family, style): name for family, style, name in self.faces}
+        return own.get((self.body, ""), CORE_FACES.get((self.body, ""), ""))
+
+
+#: The choices, in the order the Look control lists them. Literata was drawn for
+#: reading at length (it is Google's e-book face) and IBM Plex Sans for technical
+#: documents: both are SIL OFL, both cover Latin, Greek and Cyrillic, and both
+#: ship four static faces fpdf2 subsets like the Noto ones (licences beside them).
+FONTS: tuple[Font, ...] = (
+    Font("serif", "Noto Serif", "serif", SERIF, SANS),
+    Font("sans", "Noto Sans", "sans", SANS, SANS,
+         tuple((family, style, name) for (family, style), name in SANS_ITALICS.items())),
+    Font("book", "Literata", "serif", BOOK, BOOK, (
+        (BOOK, "", "Literata-Regular.ttf"),
+        (BOOK, "B", "Literata-Bold.ttf"),
+        (BOOK, "I", "Literata-Italic.ttf"),
+        (BOOK, "BI", "Literata-BoldItalic.ttf"),
+    )),
+    Font("modern", "IBM Plex Sans", "sans", MODERN, MODERN, (
+        (MODERN, "", "IBMPlexSans-Regular.ttf"),
+        (MODERN, "B", "IBMPlexSans-Bold.ttf"),
+        (MODERN, "I", "IBMPlexSans-Italic.ttf"),
+        (MODERN, "BI", "IBMPlexSans-BoldItalic.ttf"),
+    )),
+)
+FONTS_BY_KEY: dict[str, Font] = {font.key: font for font in FONTS}
 
 
 @dataclass(frozen=True)
@@ -147,6 +207,18 @@ SYMBOL_FAMILY = "azimut-symbols"
 SYMBOL_FILE = "DejaVuSans.ttf"
 
 
+def named_files() -> set[str]:
+    """Every face file a document can load: what the wheel and the three binaries
+    must carry, and what the release smoke test asks the frozen build for."""
+    return {
+        *CORE_FACES.values(),
+        *SANS_ITALICS.values(),
+        *(name for font in FONTS for _, _, name in font.faces),
+        *(script.file for script in SCRIPTS),
+        SYMBOL_FILE,
+    }
+
+
 class FontError(Exception):
     """A face the export cannot do without is missing or unreadable."""
 
@@ -169,12 +241,14 @@ def scripts_in(text: str) -> list[Script]:
     return [script for script in SCRIPTS if any(script.holds(code) for code in codes)]
 
 
-def install(pdf: "FPDF", text: str) -> None:
-    """Load the faces this document needs and turn shaping on.
+def install(pdf: "FPDF", text: str, *, body: str = SERIF, font: str = "") -> set[tuple[str, str]]:
+    """Load the faces this document needs and turn shaping on; returns them as
+    (family, style), so the caller knows which emphasis it can set.
 
     The script faces go in as fallbacks: fpdf2 then picks one per character, so
     a Burmese word inside an English sentence keeps its own face and its own
-    shaping without the caller cutting the line into runs.
+    shaping without the caller cutting the line into runs. ``body`` is the family
+    the style sets its text in and ``font`` the look's choice of face, if any.
     """
     for (family, style), filename in CORE_FACES.items():
         _add(pdf, family, style, filename)
@@ -184,9 +258,22 @@ def install(pdf: "FPDF", text: str) -> None:
         family = f"azimut-{Path(script.file).stem.lower()}"
         _add(pdf, family, "", script.file)
         fallbacks.append(family)
+    loaded = set(CORE_FACES)
+    chosen = FONTS_BY_KEY.get(font)
+    extra = {(family, style): name for family, style, name in chosen.faces} if chosen else {}
+    if (chosen.body if chosen else body) == SANS:
+        extra = {**SANS_ITALICS, **extra}
+    # After every face a plain document loads, so those keep their place in the file.
+    for (family, style), filename in extra.items():
+        _add(pdf, family, style, filename)
+    loaded.update(extra)
+    # A chosen face lacks a letter the Noto faces have (a rarer Latin accent, say):
+    # the Noto face of its own kind draws it before any script face is asked.
+    nearest = [] if chosen is None or chosen.body in (SERIF, SANS) else [SERIF if chosen.kind == "serif" else SANS]
     # Symbols last: a script face is the better answer whenever it has the glyph.
-    pdf.set_fallback_fonts([*fallbacks[1:], SYMBOL_FAMILY], exact_match=False)
+    pdf.set_fallback_fonts([*nearest, *fallbacks[1:], SYMBOL_FAMILY], exact_match=False)
     pdf.set_text_shaping(True)
+    return loaded
 
 
 def uncovered(pdf: "FPDF", text: str) -> set[str]:

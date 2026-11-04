@@ -195,6 +195,14 @@ def test_pdf_font_licenses_are_complete_and_packaged():
     assert len(apache.splitlines()) >= 190
     for name in ("OFL.txt", "BITSTREAM-VERA.txt", "README.md"):
         assert (fonts / name).is_file()
+    # The faces a look can pick each ship with their own OFL text: its copyright
+    # line, and the reserved name a modified copy could not use (the files are
+    # upstream's, unmodified).
+    for name, owner in (("Literata-OFL.txt", "The Literata Project Authors"),
+                        ("IBMPlexSans-OFL.txt", 'Reserved Font Name "Plex"')):
+        text = (fonts / name).read_text(encoding="utf-8")
+        assert owner in text and "SIL Open Font License, Version 1.1" in text
+        assert "TERMINATION" in text
 
     spec = (root / "packaging" / "azimut.spec").read_text(encoding="utf-8")
     assert 'collect_data_files("azimut")' in spec
@@ -285,6 +293,8 @@ def test_release_tooling_is_bounded_and_built_from_the_lock():
         "azimut/assets/fonts/APACHE-2.0.txt",
         "azimut/assets/fonts/OFL.txt",
         "azimut/assets/fonts/BITSTREAM-VERA.txt",
+        "azimut/assets/fonts/Literata-OFL.txt",
+        "azimut/assets/fonts/IBMPlexSans-OFL.txt",
     ):
         assert font_asset in workflow
     # A guard job runs before anything builds: it checks the pushed tag equals

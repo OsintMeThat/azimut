@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { CompletionContext } from '@codemirror/autocomplete';
 import {
   insertInclude, leaveEmptyItem, mentionSource, noteExtensions, removeInclude, resizePicture, setNoteCase, slashSource,
@@ -185,7 +185,7 @@ describe('a picture’s size in the PDF', () => {
   it('is offered over the picture, and a press writes it on the line', () => {
     withPicture('[[media:m1|Roof]]\n\nAfter');
     const bar = view.dom.querySelector('[data-size-bar]');
-    expect([...bar.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['S', 'M', 'L', 'Full', '', '', '']);
+    expect([...bar.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['S', 'M', 'L', 'Full', '', '', '', 'Caption']);
     bar.querySelector('[data-share="0.5"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     expect(view.state.doc.line(1).text).toBe('[[media:m1|Roof]]{width=50%}');
     view.dom.querySelector('[data-align="center"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
@@ -205,6 +205,26 @@ describe('a picture’s size in the PDF', () => {
     expect(resizePicture(view, 2, 'media:gone', { width: '33%' })).toBe(false);
   });
 
+  it('is changed from the keyboard, Enter on a button giving a click', () => {
+    withPicture('[[media:m1|Roof]]\n\nAfter');
+    view.dom.querySelector('[data-share="0.75"]').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+    expect(view.state.doc.line(1).text).toBe('[[media:m1|Roof]]{width=75%}');
+    // a mouse click was handled on its press already
+    view.dom.querySelector('[data-share="0.5"]').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    expect(view.state.doc.line(1).text).toBe('[[media:m1|Roof]]{width=75%}');
+  });
+
+  it('comes once a note read while it was locked can be written', () => {
+    const editable = new Compartment();
+    editor('[[media:m1|Roof]]\n\nAfter', { readOnly: true, editable });
+    view.dispatch({
+      effects: setNoteCase.of({ caseId: 'c1', entities: [{ id: 'm1', type: 'media', label: 'Roof', attrs: { path: 'media/roof.png' } }], notes: [] }),
+    });
+    expect(view.dom.querySelector('[data-size-bar]')).toBeNull();
+    view.dispatch({ effects: editable.reconfigure([EditorState.readOnly.of(false), EditorView.editable.of(true)]) });
+    expect(view.dom.querySelector('[data-size-bar]')).not.toBeNull();
+  });
+
   it('is not offered in a note that cannot be changed', () => {
     editor('[[media:m1|Roof]]\n\nAfter', { readOnly: true });
     view.dispatch({
@@ -212,5 +232,62 @@ describe('a picture’s size in the PDF', () => {
     });
     expect(view.dom.querySelector('[data-size-bar]')).toBeNull();
     expect(resizePicture(view, 0, 'media:m1', { width: '50%' })).toBe(false);
+  });
+});
+
+describe('a picture’s caption', () => {
+  function withPicture(doc) {
+    editor(doc);
+    view.dispatch({
+      effects: setNoteCase.of({
+        caseId: 'c1',
+        entities: [{ id: 'm1', type: 'media', label: 'Roof', attrs: { path: 'media/roof.png', kind: 'image' } }],
+        notes: [],
+      }),
+      selection: { anchor: doc.length },
+    });
+  }
+  // cancelable as a real press is, so the editor leaves it to the picture
+  const press = (selector) => view.dom.querySelector(selector).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+  const key = (field, name) => field.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true }));
+
+  it('is drawn under the picture, as the PDF prints it', () => {
+    withPicture('[[media:m1|Roof]]{width=50% align=center caption="Smoke over the port"}\n\nAfter');
+    const caption = view.dom.querySelector('.cm-block-picture .markdown-caption');
+    expect(caption.textContent).toBe('Smoke over the port');
+    expect(caption.className).toContain('align-center');
+  });
+
+  it('is written in a field in place, Enter writing it on the line', () => {
+    withPicture('[[media:m1|Roof]]{width=50%}\n\nAfter');
+    press('[data-caption]');
+    const field = view.dom.querySelector('.cm-block-picture .picture-caption-field');
+    expect(document.activeElement).toBe(field);
+    expect(field.value).toBe('');
+    field.value = 'Smoke over the port';
+    key(field, 'Enter');
+    expect(view.state.doc.line(1).text).toBe('[[media:m1|Roof]]{width=50% caption="Smoke over the port"}');
+    expect(view.dom.querySelector('.picture-caption-field')).toBeNull();
+    expect(view.dom.querySelector('.markdown-caption').textContent).toBe('Smoke over the port');
+  });
+
+  it('is left as it was on Escape, and the note keeps its text', () => {
+    withPicture('[[media:m1|Roof]]{caption="Old"}\n\nAfter');
+    press('[data-caption]');
+    const field = view.dom.querySelector('.picture-caption-field');
+    expect(field.value).toBe('Old');
+    field.value = 'New';
+    key(field, 'Escape');
+    expect(view.state.doc.line(1).text).toBe('[[media:m1|Roof]]{caption="Old"}');
+    expect(view.dom.querySelector('.picture-caption-field')).toBeNull();
+  });
+
+  it('is taken off when the field is emptied', () => {
+    withPicture('[[media:m1|Roof]]{width=50% caption="Old"}\n\nAfter');
+    press('[data-caption]');
+    const field = view.dom.querySelector('.picture-caption-field');
+    field.value = '  ';
+    key(field, 'Enter');
+    expect(view.state.doc.line(1).text).toBe('[[media:m1|Roof]]{width=50%}');
   });
 });

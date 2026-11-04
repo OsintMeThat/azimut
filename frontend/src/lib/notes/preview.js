@@ -55,9 +55,24 @@ export async function fetchPreview({ caseId = '', note = 'case', title = '', tex
     data,
     pages: headerList(headers, 'X-Note-Pages').map((line) => Math.max(0, Number(line) || 0)),
     diagrams: headerList(headers, 'X-Note-Diagrams').filter((item) => item && typeof item.key === 'string'),
-    warnings: headerList(headers, 'X-Note-Warnings').map(String),
+    warnings: noteWarnings(headers),
     pictures: headerList(headers, 'X-Note-Pictures').filter(placedPicture),
   };
+}
+
+/**
+ * What the page warns about, each with the 0-based line it is about, or null.
+ * `X-Note-Warning-Lines` runs beside `X-Note-Warnings`; when the two do not pair
+ * up, no warning is given a line rather than the wrong one.
+ */
+export function noteWarnings(headers) {
+  const texts = headerList(headers, 'X-Note-Warnings').map(String);
+  const lines = headerList(headers, 'X-Note-Warning-Lines');
+  const paired = lines.length === texts.length;
+  return texts.map((text, index) => {
+    const line = paired ? lines[index] : null;
+    return { text, line: Number.isInteger(line) && line >= 0 ? line : null };
+  });
 }
 
 const fraction = (value) => Number.isFinite(value) && value >= 0 && value <= 1;

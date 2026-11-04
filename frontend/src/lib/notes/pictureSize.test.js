@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment happy-dom
+import { describe, expect, it, vi } from 'vitest';
 import {
-  PAGE_TALL, PICTURE_SIZES, pictureLine, picturesIn, readAttrs, sameRef, sizeWidth, sizedLine, writeAttrs,
+  CAPTION_MAX, PAGE_TALL, PICTURE_SIZES, captionField, cleanCaption, pictureAt, pictureLine, picturesIn, readAttrs, rovingToolbar,
+  sameRef, sizeWidth, sizedLine, writeAttrs,
 } from './pictureSize.js';
 
 describe('a picture line', () => {
@@ -9,7 +11,7 @@ describe('a picture line', () => {
     const [media, image] = picturesIn(line);
     expect(media).toMatchObject({ ref: 'media:m1', width: '50%', align: 'center' });
     expect(line.slice(media.attrFrom, media.to)).toBe('{width=50% align=center}');
-    expect(image).toMatchObject({ ref: '/files/c1/a.png', width: '200px', align: '' });
+    expect(image).toMatchObject({ ref: '/files/c1/a.png', width: '200px', align: '', title: 'Title', caption: '' });
   });
 
   it('knows where braces would go on a picture that has none', () => {
@@ -19,10 +21,126 @@ describe('a picture line', () => {
   });
 
   it('reads and writes the braces, leaving out the default place', () => {
-    expect(readAttrs('align=right  width=75%')).toEqual({ width: '75%', align: 'right' });
+    expect(readAttrs('align=right  width=75%')).toEqual({ width: '75%', align: 'right', caption: '', rest: '' });
     expect(writeAttrs({ width: '50%', align: 'left' })).toBe('{width=50%}');
     expect(writeAttrs({ width: '', align: 'center' })).toBe('{align=center}');
     expect(writeAttrs({})).toBe('');
+  });
+});
+
+describe('a caption', () => {
+  it('is read from the braces, and its words are never taken for a size', () => {
+    expect(readAttrs('width=50% caption="Smoke over the port" align=center')).toEqual({
+      width: '50%', align: 'center', caption: 'Smoke over the port', rest: '',
+    });
+    expect(readAttrs('caption="width=90% of the quay" width=33%')).toMatchObject({ width: '33%', caption: 'width=90% of the quay' });
+    const [picture] = picturesIn('[[media:m1|Roof]]{width=50% align=center caption="Smoke over the port"}');
+    expect(picture).toMatchObject({ ref: 'media:m1', width: '50%', align: 'center', caption: 'Smoke over the port' });
+  });
+
+  it('is written after the size and place, as one clean line', () => {
+    expect(writeAttrs({ width: '50%', align: 'center', caption: 'Smoke over the port' }))
+      .toBe('{width=50% align=center caption="Smoke over the port"}');
+    expect(writeAttrs({ caption: '  Quote "this" {and}\nthat  ' })).toBe('{caption="Quote this {and that"}');
+    expect(writeAttrs({ caption: '   ' })).toBe('');
+    expect(cleanCaption('x'.repeat(400))).toHaveLength(CAPTION_MAX);
+  });
+
+  it('is changed, kept or taken off without touching the rest of the line', () => {
+    const line = 'Seen [[media:m1|Roof]]{width=50% align=center} today';
+    const captioned = sizedLine(line, 'media:m1', { caption: 'Smoke over the port' });
+    expect(captioned).toBe('Seen [[media:m1|Roof]]{width=50% align=center caption="Smoke over the port"} today');
+    expect(sizedLine(captioned, 'media:m1', { width: '33%' }))
+      .toBe('Seen [[media:m1|Roof]]{width=33% align=center caption="Smoke over the port"} today');
+    expect(sizedLine(captioned, 'media:m1', { caption: '' })).toBe(line);
+    expect(sizedLine('![Shot](/a.png "Title")', '/a.png', { caption: 'Pier' })).toBe('![Shot](/a.png "Title"){caption="Pier"}');
+  });
+
+  it('keeps a key it does not know, as written', () => {
+    const line = '[[media:m1|Roof]]{width=50% frame=thin}';
+    expect(picturesIn(line)[0].rest).toBe('frame=thin');
+    expect(sizedLine(line, 'media:m1', { caption: 'Roof' })).toBe('[[media:m1|Roof]]{width=50% caption="Roof" frame=thin}');
+  });
+
+  it('is found on the line the server gave, or the nearest holding the picture', () => {
+    const lines = ['Intro', '[[media:m1|A]]{caption="North"}', 'x', '[[media:m2|B]]'];
+    expect(pictureAt(lines, 0, 'media:m1')).toMatchObject({ caption: 'North' });
+    expect(pictureAt(lines, 3, 'media:zz')).toBeNull();
+  });
+});
+
+describe('the caption field', () => {
+  function field(options = {}) {
+    const write = vi.fn();
+    const done = vi.fn();
+    const input = captionField({ caption: 'Old', write, done, ...options });
+    document.body.append(input);
+    input.focus();
+    return { input, write, done };
+  }
+  const key = (input, name) => input.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true }));
+
+  it('writes on Enter, once, and gives the keyboard back', () => {
+    const { input, write, done } = field();
+    input.value = '  Smoke  over the "port" ';
+    key(input, 'Enter');
+    input.dispatchEvent(new Event('blur'));
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledWith('Smoke over the port');
+    expect(done).toHaveBeenCalledWith('keyboard');
+    input.remove();
+  });
+
+  it('leaves the caption as it was on Escape', () => {
+    const { input, write, done } = field();
+    input.value = 'Changed';
+    key(input, 'Escape');
+    expect(write).not.toHaveBeenCalled();
+    expect(done).toHaveBeenCalledWith('keyboard');
+    input.remove();
+  });
+
+  it('writes what was typed when it is left, and nothing when nothing changed', () => {
+    const first = field();
+    first.input.value = 'New';
+    first.input.dispatchEvent(new Event('blur'));
+    expect(first.write).toHaveBeenCalledWith('New');
+    expect(first.done).toHaveBeenCalledWith('blur');
+    const second = field();
+    second.input.dispatchEvent(new Event('blur'));
+    expect(second.write).not.toHaveBeenCalled();
+    first.input.remove();
+    second.input.remove();
+  });
+
+  it('offers an image\'s title as what prints when it is left empty', () => {
+    const { input } = field({ caption: '', title: 'Pier at dawn' });
+    expect(input.placeholder).toBe('Pier at dawn');
+    expect(input.maxLength).toBe(CAPTION_MAX);
+    expect(input.getAttribute('aria-label')).toBe('Caption');
+    input.remove();
+  });
+});
+
+describe('a picture bar from the keyboard', () => {
+  it('is one Tab stop, on the button last used, walked with the arrows', () => {
+    const bar = document.createElement('div');
+    bar.innerHTML = '<button>S</button><button>M</button><button>L</button><button>Caption</button>';
+    document.body.append(bar);
+    const undo = rovingToolbar(bar);
+    const [small, medium, , caption] = bar.querySelectorAll('button');
+    expect([...bar.querySelectorAll('button')].map((button) => button.tabIndex)).toEqual([0, -1, -1, -1]);
+    small.focus();
+    small.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(document.activeElement).toBe(medium);
+    expect(medium.tabIndex).toBe(0);
+    expect(small.tabIndex).toBe(-1);
+    medium.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(document.activeElement).toBe(caption);
+    caption.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(document.activeElement).toBe(small);
+    undo();
+    bar.remove();
   });
 });
 

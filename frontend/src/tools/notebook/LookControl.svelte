@@ -1,14 +1,21 @@
 <script>
   /**
-   * How a note prints, set from the editor's header: its style, page size,
-   * accent, marking, cover, contents and numbering. Each change is handed up at
-   * once (`onchange`), which saves it beside the note and draws the Page pane
-   * again. A template's look keeps no picture and no day of a case.
+   * How a note prints, set from the editor's header: its style, typeface and
+   * text size, page size, accent, marking, cover, contents and numbering. Each
+   * change is handed up at once (`onchange`), which saves it beside the note and
+   * draws the Page pane again. A template's look keeps no picture and no day of a
+   * case.
    *
-   * The hover texts live in `lib/notes/lookHelp.js`.
+   * Each typeface is shown in its own face, loaded from the server when the panel
+   * first opens (`lib/notes/noteFonts.js`). The hover texts live in
+   * `lib/notes/lookHelp.js`.
    */
+  import { tick, untrack } from 'svelte';
   import { LOOK_HELP } from '../../lib/notes/lookHelp.js';
-  import { PAGES, STYLES, SUBTITLE_MAX, TLPS, normaliseLook, styleLabel } from '../../lib/notes/look.js';
+  import {
+    FONTS, PAGES, SIZES, STYLES, SUBTITLE_MAX, TLPS, lookFont, normaliseLook, styleLabel,
+  } from '../../lib/notes/look.js';
+  import { faceFamily, loadNoteFont, noteFonts } from '../../lib/notes/noteFonts.js';
   import { recentColours } from '../../lib/recentColours.svelte.js';
   import { foldText } from '../../lib/textFold.js';
   import Icon from '../../components/Icon.svelte';
@@ -21,6 +28,10 @@
   let subtitle = $state('');
   let picking = $state(false);
   let pictureQuery = $state('');
+  let panel = $state(null);
+  let fonts = $state(FONTS);
+  /** The faces drawn so far, by key. */
+  let faces = $state({});
   let subtitleTimer;
 
   const whole = $derived(normaliseLook(look));
@@ -33,6 +44,30 @@
     .slice(0, 60));
   const coverPicture = $derived(entities.find((entity) => entity.id === whole.cover.image) ?? null);
   const swatches = $derived(recentColours.list.slice(0, 6));
+  const ownFont = $derived(lookFont({ style: whole.style }));
+  /** The CSS family a card is drawn in: its face once it is here, the interface's until then. */
+  const drawnIn = (key) => (faces[key] ? `"${faceFamily(key)}", var(--font-sans)` : null);
+
+  // the faces are asked for the first time the panel opens, and kept for the tab
+  $effect(() => {
+    if (!anchor) return;
+    let live = true;
+    untrack(() => {
+      noteFonts().then((list) => { if (live) fonts = list; });
+      for (const font of FONTS) {
+        if (!font.id || faces[font.id]) continue;
+        loadNoteFont(font.id).then((ok) => { if (ok && live) faces = { ...faces, [font.id]: true }; });
+      }
+    });
+    return () => { live = false; };
+  });
+
+  /** Open the panel with the style picked in focus, so the keyboard carries on inside it. */
+  async function open(button) {
+    anchor = button;
+    await tick();
+    (panel?.querySelector('[role="radio"][aria-checked="true"]') ?? panel?.querySelector('button'))?.focus({ preventScroll: true });
+  }
 
   function set(change) {
     const next = normaliseLook({ ...whole, ...change, cover: { ...whole.cover, ...(change.cover ?? {}) } });
@@ -69,13 +104,13 @@
 
 <button type="button" class="btn btn-ghost btn-sm look-open" class:on={anchor} {disabled} aria-haspopup="dialog" aria-expanded={Boolean(anchor)}
   title={LOOK_HELP.open} data-guide="notebook.look"
-  onclick={(event) => (anchor ? close() : (anchor = event.currentTarget))}>
+  onclick={(event) => (anchor ? close() : open(event.currentTarget))}>
   <Icon name="brush" size={14} /> Look<span class="current">{styleLabel(whole.style)}</span>
 </button>
 
 {#if anchor}
   <FloatingMenu {anchor} align="end" width={330} role="dialog" label="Look" onclose={close}>
-    <div class="look">
+    <div class="look" bind:this={panel}>
       <div class="part" title={LOOK_HELP.style}>
         <span class="key">Style</span>
         <div class="styles" role="radiogroup" aria-label="Style">
@@ -83,6 +118,28 @@
             <button type="button" class="style-card" class:on={whole.style === style.id} role="radio" aria-checked={whole.style === style.id}
               title={`${style.label}: ${style.note}`} onclick={() => set({ style: style.id })}>
               <span class="style-name">{style.label}</span><span class="style-note">{style.note}</span>
+            </button>
+          {/each}
+        </div>
+      </div>
+
+      <div class="part">
+        <div class="part-head">
+          <span class="key" title={LOOK_HELP.font}>Text</span>
+          <div class="seg" role="radiogroup" aria-label="Text size">
+            {#each SIZES as size (size.id)}
+              <button type="button" class:on={whole.size === size.id} role="radio" aria-checked={whole.size === size.id}
+                title={LOOK_HELP.size} onclick={() => set({ size: size.id })}>{size.label}</button>
+            {/each}
+          </div>
+        </div>
+        <div class="fonts" role="radiogroup" aria-label="Typeface">
+          {#each fonts as font (font.id)}
+            {@const face = font.id || ownFont}
+            <button type="button" class="font-card" class:on={whole.font === font.id} role="radio" aria-checked={whole.font === font.id}
+              title={font.id ? `${font.label}: ${font.note}` : LOOK_HELP.fontOwn} onclick={() => set({ font: font.id })}>
+              <span class="font-ag" style:font-family={drawnIn(face)}>Ag</span>
+              <span class="font-name" style:font-family={font.id ? drawnIn(face) : null}>{font.label}</span>
             </button>
           {/each}
         </div>
@@ -192,6 +249,20 @@
   .look { display: flex; flex-direction: column; gap: 10px; padding: 6px 6px 8px; font-size: var(--fs-sm); }
   .part { display: flex; flex-direction: column; gap: 6px; }
   .row { display: flex; align-items: center; gap: 10px; }
+  .part-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .fonts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+  .font-card {
+    display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; padding: 6px 3px 5px;
+    border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-2); color: var(--text-1); cursor: pointer; font: inherit;
+  }
+  .font-card:hover { border-color: var(--border-strong); }
+  .font-card.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .font-ag { font-size: 19px; line-height: 1.1; }
+  .font-name {
+    max-width: 100%; color: var(--text-2); font-size: 10px; line-height: 1.2; text-align: center; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .font-card.on .font-name { color: var(--text-1); }
   .key { color: var(--text-3); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; min-width: 52px; }
   .styles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .style-card {

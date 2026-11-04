@@ -193,6 +193,13 @@ def _imagery(raw: object, exact: object) -> object:
     return raw
 
 
+def capture_imagery(source: dict[str, Any]) -> str | None:
+    """A capture's own imagery date (`imagery_date`, `imagery_exact` in its sidecar's
+    source) as the Time panel reads it, for the notes PDF to print the same."""
+    raw = _imagery(source.get("imagery_date"), source.get("imagery_exact"))
+    return raw if isinstance(raw, str) and raw else None
+
+
 def imagery_reading(source: dict[str, Any], key: str) -> str | None:
     """One picture's date (`imagery_a`, `imagery_b`) as the Time panel reads it."""
     raw = _imagery(source.get(key), source.get(f"{key}_exact"))

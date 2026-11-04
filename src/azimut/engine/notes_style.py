@@ -20,7 +20,10 @@ The other three are built on the same body and differ where a reader notices:
 
 Colour belongs to the style until the analyst picks an accent; every tint is
 mixed from that one colour so a chosen accent re-colours the whole document
-coherently. Only the faces already shipped are used (`pdffonts`).
+coherently. The faces belong to the style too, until the look picks one of the
+shipped ones (`pdffonts.FONTS`), and so does the text size, until the look asks
+for it a step smaller or larger: then the body, the headings and the spaces
+between them all move together, and the page furniture stays as it is.
 """
 
 from __future__ import annotations
@@ -97,6 +100,12 @@ class Theme:
     #: A wash of the accent, for boxes and table stripes.
     tint: RGB = (250, 248, 245)
     body_family: str = pdffonts.SERIF
+    #: Headings, titles, captions, table heads and the page furniture.
+    heading_family: str = pdffonts.SANS
+    #: The quiet italic lines: a subtitle, an aside.
+    aside_family: str = pdffonts.SERIF
+    #: How far the look moved the text size from the style's (1 is the style's own).
+    scale: float = 1.0
     body_size: float = 10.0
     leading: float = 5.4
     gap: float = 3.4
@@ -218,6 +227,10 @@ JOURNAL = Theme(
 
 THEMES = {"plain": PLAIN, "report": REPORT, "brief": BRIEF, "journal": JOURNAL}
 
+#: A step smaller or larger than the style's text: enough to be seen across a page,
+#: not so much that the style's proportions stop holding.
+SIZES = {"small": 0.9, "large": 1.12}
+
 
 def theme_for(look: NoteLook) -> Theme:
     """The style's theme, sized to the page and re-coloured by the accent.
@@ -239,6 +252,20 @@ def theme_for(look: NoteLook) -> Theme:
         )
     if not theme.plain:
         theme = replace(theme, tint=mix(theme.accent, WHITE, 0.92))
+    font = pdffonts.FONTS_BY_KEY.get(look.font)
+    if font is not None:
+        theme = replace(theme, body_family=font.body, heading_family=font.headings, aside_family=font.body)
+    scale = SIZES.get(look.size)
+    if scale is not None:
+        theme = replace(
+            theme,
+            scale=scale,
+            body_size=round(theme.body_size * scale, 2),
+            leading=round(theme.leading * scale, 2),
+            gap=round(theme.gap * scale, 2),
+            headings={tag: (round(size * scale, 2), round(space * scale, 2))
+                      for tag, (size, space) in theme.headings.items()},
+        )
     return theme
 
 
@@ -416,7 +443,7 @@ class NotePage(FPDF):
                 theme.margin_side, self.get_y(), theme.page_width - theme.margin_side, self.get_y()
             )
             self.ln(1.5)
-            self.set_font(pdffonts.SANS, size=7.5)
+            self.set_font(self.theme.heading_family, size=7.5)
             self.set_text_color(*theme.muted)
             width = theme.frame / 2
             label = self.look.tlp and TLP_LABELS[self.look.tlp][0]
@@ -459,17 +486,17 @@ class NotePage(FPDF):
         mark = self.tlp_width()
         base = theme.margin_top - 9.0
         with self.local_context():
-            self.set_font(pdffonts.SANS, "B", 7.2)
+            self.set_font(self.theme.heading_family, "B", 7.2)
             self.set_text_color(*theme.accent)
             kicker = KICKERS[theme.style]
             self.set_char_spacing(0.6)
             self.set_xy(left, base)
             self.cell(self.get_string_width(kicker) + 4, 5, kicker)
             self.set_char_spacing(0)
-            self.set_font(pdffonts.SANS, "", 7.5)
+            self.set_font(self.theme.heading_family, "", 7.5)
             self.set_text_color(*theme.muted)
             room = right - self.get_x() - (mark + 4 if mark else 0)
-            self.cell(room, 5, _fit_line(self, self.note_title, room))
+            self.cell(room, 5, fit_line(self, self.note_title, room))
             self.set_draw_color(*theme.rule)
             self.set_line_width(0.2)
             self.line(left, base + 6.6, right, base + 6.6)
@@ -485,13 +512,13 @@ class NotePage(FPDF):
             self.set_draw_color(*theme.rule)
             self.set_line_width(0.2)
             self.line(left, top, right, top)
-            self.set_font(pdffonts.SANS, "", 7.5)
+            self.set_font(self.theme.heading_family, "", 7.5)
             self.set_text_color(*theme.muted)
             self.set_xy(left, top + 1.8)
             stamp = long_date(self.day)
             self.cell((right - left) / 2, 4.5, stamp)
             page = f"Page {self.page_no()} / {{nb}}"
-            self.set_font(pdffonts.SANS, "B", 7.5)
+            self.set_font(self.theme.heading_family, "B", 7.5)
             self.set_text_color(*theme.ink)
             width = (right - left) / 2 - (mark + 3 if mark else 0)
             self.cell(width, 4.5, page, align=Align.R)
@@ -507,9 +534,9 @@ class NotePage(FPDF):
         width = right - left
         mark = self.tlp_width()
         with self.local_context():
-            self.set_font(pdffonts.SANS, "B", 18)
+            self.set_font(self.theme.heading_family, "B", 18)
             lines = self.multi_cell(width - (mark + 4 if mark else 0), 8.0, self.note_title,
-                                    dry_run=True, output="LINES")
+                                    align=Align.L, dry_run=True, output="LINES")
             assert isinstance(lines, list)
             subtitle = look.cover.subtitle
             height = 18.0 + 8.0 * len(lines) + (6.0 if subtitle else 0.0) + 6.0
@@ -518,24 +545,24 @@ class NotePage(FPDF):
             self.set_fill_color(*theme.accent)
             self.rect(0, height, self.w, 1.6, style="F")
             self.set_xy(left, 9.0)
-            self.set_font(pdffonts.SANS, "B", 7.5)
+            self.set_font(self.theme.heading_family, "B", 7.5)
             self.set_char_spacing(1.0)
             self.set_text_color(*mix(theme.accent, WHITE, 0.55))
             self.cell(self.get_string_width("BRIEF") + 5, 5, "BRIEF")
             self.set_char_spacing(0)
-            self.set_font(pdffonts.SANS, "", 8)
+            self.set_font(self.theme.heading_family, "", 8)
             self.set_text_color(*mix(ground, WHITE, 0.7))
             self.cell(80, 5, long_date(self.day))
             self.set_xy(left, 16.0)
-            self.set_font(pdffonts.SANS, "B", 18)
+            self.set_font(self.theme.heading_family, "B", 18)
             self.set_text_color(*WHITE)
-            self.multi_cell(width - (mark + 4 if mark else 0), 8.0, self.note_title,
+            self.multi_cell(width - (mark + 4 if mark else 0), 8.0, self.note_title, align=Align.L,
                             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             if subtitle:
                 self.set_x(left)
-                self.set_font(pdffonts.SANS, "", 9.5)
+                self.set_font(self.theme.heading_family, "", 9.5)
                 self.set_text_color(*mix(ground, WHITE, 0.78))
-                self.cell(width, 6.0, _fit_line(self, subtitle, width))
+                self.cell(width, 6.0, fit_line(self, subtitle, width))
         if mark:
             self.tlp_mark(right, 8.4)
         self.band_bottom = height + 1.6 + 6.0
@@ -587,14 +614,14 @@ class NotePage(FPDF):
             else:
                 self._contours(ground, field_height)
                 if placeholder:
-                    self.set_font(pdffonts.SANS, "", 9)
+                    self.set_font(self.theme.heading_family, "", 9)
                     self.set_text_color(*mix(ground, WHITE, 0.6))
                     self.set_xy(0, field_height / 2 - 3)
                     self.cell(width, 6, placeholder, align=Align.C)
             self.set_fill_color(*theme.accent)
             self.rect(0, field_height, width, 2.4, style="F")
             self.set_xy(left, 8.0)
-            self.set_font(pdffonts.SANS, "B", 8)
+            self.set_font(self.theme.heading_family, "B", 8)
             self.set_char_spacing(1.4)
             self.set_text_color(*WHITE)
             kicker = KICKERS[theme.style]
@@ -606,18 +633,18 @@ class NotePage(FPDF):
             self.set_fill_color(*theme.accent)
             self.rect(left, y, 16.0, 1.3, style="F")
             self.set_xy(left, y + 6.0)
-            self.set_font(pdffonts.SANS, "B", 28)
+            self.set_font(self.theme.heading_family, "B", 28)
             self.set_text_color(*theme.ink)
-            self.multi_cell(frame, 11.5, self.note_title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.multi_cell(frame, 11.5, self.note_title, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             if look.cover.subtitle:
                 self.ln(2.5)
                 self.set_x(left)
-                self.set_font(pdffonts.SERIF, "I", 13.5)
+                self.set_font(self.theme.aside_family, "I", 13.5)
                 self.set_text_color(*theme.muted)
-                self.multi_cell(frame, 6.6, look.cover.subtitle, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.multi_cell(frame, 6.6, look.cover.subtitle, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             self.ln(7)
             self.set_x(left)
-            self.set_font(pdffonts.SANS, "B", 10)
+            self.set_font(self.theme.heading_family, "B", 10)
             self.set_text_color(*theme.accent_dark)
             self.cell(frame, 5, long_date(self.day))
 
@@ -628,7 +655,7 @@ class NotePage(FPDF):
                 self.set_line_width(0.2)
                 self.line(left, foot, width - left, foot)
                 self.set_xy(left, foot + 4.5)
-                self.set_font(pdffonts.SANS, "", 8)
+                self.set_font(self.theme.heading_family, "", 8)
                 self.set_text_color(*theme.muted)
                 self.multi_cell(frame - self.tlp_width() - 6, 4.2, TLP_MEANINGS[look.tlp], align=Align.L)
         if label is not None:
@@ -661,7 +688,7 @@ class NotePage(FPDF):
         top = max(self.get_y(), self.t_margin)
         self.set_xy(left, top)
         if top > self.t_margin + 1:
-            self.set_font(pdffonts.SANS, "B", 8)
+            self.set_font(self.theme.heading_family, "B", 8)
             self.set_text_color(*theme.accent)
             self.set_char_spacing(1.0)
             self.cell(0, 5, "CONTENTS", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
@@ -671,7 +698,7 @@ class NotePage(FPDF):
             self.set_fill_color(*theme.accent)
             self.rect(left, self.get_y(), 16.0, 1.2, style="F")
             self.ln(5)
-            self.set_font(pdffonts.SANS, "B", 20)
+            self.set_font(self.theme.heading_family, "B", 20)
             self.set_text_color(*theme.ink)
             self.cell(0, 10, "Contents", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             self.ln(5)
@@ -682,7 +709,7 @@ class NotePage(FPDF):
             height = 7.4 if level == 0 else 6.0
             if self.get_y() + height > self.h - self.b_margin - 6:
                 if self.page >= last_page:
-                    self.set_font(pdffonts.SERIF, "I", 9)
+                    self.set_font(self.theme.aside_family, "I", 9)
                     self.set_text_color(*theme.muted)
                     more = len(entries) - position
                     self.cell(0, 6, f"{more} more in the document's bookmarks.")
@@ -693,14 +720,14 @@ class NotePage(FPDF):
             page = section.page_number
             indent = 0.0 if level == 0 else 7.0
             if level == 0:
-                self.set_font(pdffonts.SANS, "B", 10.5)
+                self.set_font(self.theme.heading_family, "B", 10.5)
                 self.set_text_color(*theme.ink)
             else:
                 self.set_font(theme.body_family, "", 9.8)
                 self.set_text_color(*mix(theme.ink, WHITE, 0.15))
             number = str(page)
             room = right - left - indent - 14
-            label = _fit_line(self, name, room)
+            label = fit_line(self, name, room)
             link = self.add_link(page=page)
             y = self.get_y()
             self.set_xy(left + indent, y)
@@ -712,7 +739,7 @@ class NotePage(FPDF):
                 self.set_dash_pattern(dash=0.3, gap=1.2)
                 self.line(start, y + height * 0.72, right - 9, y + height * 0.72)
             self.set_xy(right - 9, y)
-            self.set_font(pdffonts.SANS, "B" if level == 0 else "", 9.5)
+            self.set_font(self.theme.heading_family, "B" if level == 0 else "", 9.5)
             self.set_text_color(*(theme.accent if level == 0 else theme.muted))
             self.cell(9, height, number, align=Align.R, link=link)
             self.set_xy(left, y + height + (1.4 if level == 0 else 0.4))
@@ -723,7 +750,7 @@ class NotePage(FPDF):
 KICKERS = {"plain": "AZIMUT NOTES", "report": "REPORT", "brief": "BRIEF", "journal": "LOG"}
 
 
-def _fit_line(pdf: FPDF, text: str, width: float) -> str:
+def fit_line(pdf: FPDF, text: str, width: float) -> str:
     """One line of ``text`` that fits ``width``, cut with an ellipsis if it must be."""
     if pdf.get_string_width(text) <= width:
         return text

@@ -166,7 +166,7 @@ def test_a_video_prints_its_still_and_where_to_watch_it(tmp_path):
     out = notes_pdf.render(video_case(tmp_path), title="T", text="[[media:v1|Clip]]\n")
     text = pdf_text(out.pdf)
     assert "Video not included" not in text
-    assert "Video: Clip" in text and "Watch: https://example.org/watch?v=1" in text
+    assert "Video: Clip" in text and "Watch: example.org" in text
     assert "https://example.org/watch?v=1" in link_targets(out.pdf)
     assert [picture.ref for picture in out.pictures] == ["media:v1"]
 
@@ -188,7 +188,7 @@ def test_a_numbered_video_counts_as_a_figure(tmp_path):
     out = notes_pdf.render(
         video_case(tmp_path), title="T", text="[[media:v1|Clip]]\n", look=report(numbered=True)
     )
-    assert "Figure 1  Video: Clip" in pdf_text(out.pdf)
+    assert "Figure 1. Video: Clip" in pdf_text(out.pdf)
 
 
 # -- the preview route --------------------------------------------------------

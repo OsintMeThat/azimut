@@ -75,10 +75,10 @@ def test_case_syntax_becomes_markdown_the_parser_understands():
 
 def test_image_attributes_survive_the_round_trip():
     rewritten = notes_pdf._case_references('![alt](/files/demo/media/a.png "Cap"){width=70%}')
-    source, width, align = notes_pdf._image_options(
+    source, width, align, caption = notes_pdf._image_options(
         rewritten[rewritten.index("(") + 1 : rewritten.index(' "Cap")')]
     )
-    assert (source, width, align) == ("/files/demo/media/a.png", "70%", "left")
+    assert (source, width, align, caption) == ("/files/demo/media/a.png", "70%", "left", "")
 
 
 def test_only_bounded_widths_are_honoured():
@@ -242,11 +242,9 @@ def test_every_face_the_code_names_is_actually_shipped():
     A missing fallback degrades quietly at runtime — the script it covered turns
     into replacement characters — so the mismatch has to fail here instead.
     """
-    named = {
-        *pdffonts.CORE_FACES.values(),
-        *(script.file for script in pdffonts.SCRIPTS),
-        pdffonts.SYMBOL_FILE,
-    }
+    named = pdffonts.named_files()
+    assert {*pdffonts.CORE_FACES.values(), pdffonts.SYMBOL_FILE, "Literata-BoldItalic.ttf",
+            "IBMPlexSans-Italic.ttf", "NotoSans-Italic.ttf"} <= named
     missing = sorted(name for name in named if not (pdffonts.FONT_DIR / name).is_file())
     assert missing == []
     # And nothing ships that no code path can reach.

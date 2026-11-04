@@ -37,6 +37,11 @@ Two things a server cannot do on its own:
   PNG falls back to its own source in a code box rather than vanishing.
 - **Remote images.** They stay out, as they did in the print export: opening a
   note must not make the machine fetch anything (spec — local-first).
+
+**Sources stay sources.** A PDF is read away from the case, so what the case knows
+about where something came from is printed rather than kept behind the app: a
+reference to a record with a web address links to it, a picture says under its
+caption where it came from, and decimal coordinates link to the map.
 """
 
 from __future__ import annotations
@@ -50,20 +55,22 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterable
-from urllib.parse import parse_qs, unquote, urlsplit
+from typing import TYPE_CHECKING, Any, Callable, Iterable, NamedTuple
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from fpdf import FPDF
 from fpdf.enums import Align, XPos, YPos
+from fpdf.image_parsing import preload_image
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from PIL import Image as PILImage
-from PIL import UnidentifiedImageError
+from PIL import ImageOps, UnidentifiedImageError
 
-from . import notes_style, pdffonts, thumbnails
+from . import entities, notes_style, pdffonts, thumbnails, timeline
 from .notelook import DEFAULT as DEFAULT_LOOK
 from .notelook import NoteLook
 from .notes_style import PLAIN, WHITE, NotePage, Theme, mix
+from .proposals import URL_ATTRS
 from .notetext import (
     CALLOUT,
     ENTITY_REF,
@@ -125,6 +132,18 @@ IMAGE_ATTRS = re.compile(r"!\[([^\]]*)\]\((\S+?)(?:\s+[\"']([^\"']*)[\"'])?\)\s*
 ALIGNMENT_BLOCK = re.compile(r"^:::[ \t]*(left|center|right)[ \t]*\n(.*?)^:::[ \t]*$", re.S | re.M)
 ATTR_PARAM = "__azimut_attrs"
 ATTR_VALUES = re.compile(r"\b(width|align)\s*=\s*([\w.%+-]+)")
+#: `caption="Smoke over the port"` in a picture's braces. Taken out before the
+#: width and alignment are read, so a caption that says `width=50%` sets none.
+CAPTION_ATTR = re.compile(r'\bcaption\s*=\s*"([^"}\n]*)"')
+MAX_CAPTION = 300
+#: Decimal coordinates in prose, `33.5138, 36.2765`, as the Notebook finds them
+#: (`findCoordinates` in `lib/notes/syntax.js`): three decimals at least, so a
+#: version number or a score is not taken for a place.
+COORDINATES = re.compile(r"(?<![\w.])(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})(?!\w|\.\d)", re.ASCII)
+#: Where a coordinate pair links to: the point on OpenStreetMap, which needs no account.
+MAP_LINK = "https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=17/{lat}/{lon}"
+#: How many empty sections a document names one by one before it counts the rest.
+MAX_EMPTY_SECTIONS = 10
 WIDTH_PERCENT = re.compile(r"^(?:[1-9]\d?(?:\.\d+)?|100(?:\.0+)?)%$")
 WIDTH_PIXELS = re.compile(r"^(?:[2-9]\d|[1-9]\d{2}|1[0-5]\d{2}|1600)px$")
 #: A Log entry's heading, as the Notebook's `/` menu writes it (`lib/notes/syntax.js`,
@@ -150,6 +169,18 @@ CALLOUTS: dict[str, tuple[str, tuple[int, int, int]]] = {
 #: template's preview never reads a case file.
 CASE_PICTURE = "Picture from the case"
 CASE_CHAPTER = "A note included here prints as a chapter."
+#: What prints where a picture of the case is gone or unreadable.
+MEDIA_UNAVAILABLE = "Media unavailable"
+
+#: A styled caption's face size and leading, in points and millimetres, before the
+#: look's text size; and the narrowest it is set, so a small picture's caption
+#: is not a column of single words.
+CAPTION_SIZE = 7.8
+CAPTION_LEADING = 3.8
+CAPTION_MIN_WIDTH = 90.0
+#: The credit line under it, a step quieter.
+CREDIT_SIZE = 7.2
+CREDIT_LEADING = 3.6
 
 #: Finds the note a chapter prints: its title and Markdown, or None when it is gone.
 Resolve = Callable[[str], "tuple[str, str] | None"]
@@ -178,6 +209,8 @@ class Rendered:
     #: One line per thing the page could not show — a remote image left out, a
     #: script no font covers. Shown by the caller; never a reason to fail.
     warnings: list[str] = field(default_factory=list)
+    #: For each warning, the line of the note it is about (0-based), or None.
+    warning_lines: list[int | None] = field(default_factory=list)
     #: For each page, the line of the note it starts at (best effort). A page
     #: inside a chapter starts at the chapter's include line.
     pages: list[int] = field(default_factory=list)
@@ -227,6 +260,26 @@ class PagePicture:
         return out
 
 
+@dataclass(frozen=True)
+class _Credit:
+    """The small line under a picture saying where it came from: what kind of
+    source (`Source`, `Imagery`, `Watch`), the place, and the address it links to
+    ("" for none)."""
+
+    kind: str
+    value: str
+    link: str = ""
+
+
+@dataclass
+class _Picture:
+    """A picture of the case, its size in pixels, and where it came from."""
+
+    path: Path
+    natural: tuple[int, int]
+    credit: _Credit | None = None
+
+
 @dataclass
 class _Poster:
     """A video in a note: the still its thumbnail holds, when there is one, and
@@ -235,6 +288,20 @@ class _Poster:
     path: Path | None
     natural: tuple[int, int]
     url: str
+
+    @property
+    def credit(self) -> _Credit | None:
+        return _Credit("Watch", _host(self.url), self.url) if self.url else None
+
+
+class ImageOptions(NamedTuple):
+    """What a picture's braces say: its source with the braces taken out, its
+    width and alignment as written, and its caption."""
+
+    source: str
+    width: str
+    align: str
+    caption: str
 
 
 @dataclass
@@ -289,8 +356,10 @@ def render(
     """Lay one note out as a PDF.
 
     ``case`` is None for a template's preview: references to a case then draw as
-    neutral placeholders and no case file is read. ``resolve`` finds the notes a
-    chapter line includes; without it they print as a placeholder too.
+    neutral placeholders and no case file is read, and an empty section is not
+    worth a warning, since a template is headings waiting for words. ``resolve``
+    finds the notes a chapter line includes; without it they print as a
+    placeholder too.
     ``created`` pins the document's creation date, which is otherwise now.
     """
     look = look or DEFAULT_LOOK
@@ -301,8 +370,8 @@ def render(
     if created is not None:
         document.set_creation_date(created)
     words = "\n".join([title, look.cover.subtitle, *(piece.text for piece in pieces)])
-    pdffonts.install(document, words)
-    builder = _Builder(document, case, diagrams or {}, look=look)
+    faces = pdffonts.install(document, words, body=theme.body_family, font=look.font)
+    builder = _Builder(document, case, diagrams or {}, look=look, faces=faces)
     try:
         builder.build(title, pieces)
         output = bytes(document.output())
@@ -314,6 +383,7 @@ def render(
     return Rendered(
         pdf=output,
         warnings=builder.warnings,
+        warning_lines=builder.warning_lines,
         pages=builder.pages,
         diagrams=list(builder.missing.items()),
         pictures=builder.pictures,
@@ -436,10 +506,9 @@ def _attributed_url(href: str, attributes: str) -> str:
 
 
 def _quote(value: str) -> str:
-    """Percent-encode the way the preview's `encodeURIComponent` does."""
-    return "".join(
-        char if char.isalnum() or char in "-_.~" else f"%{ord(char):02X}" for char in value
-    )
+    """Percent-encode the way the preview's `encodeURIComponent` does: as UTF-8, so
+    a caption's dash or accent reads back as itself."""
+    return quote(value, safe="-_.~")
 
 
 def _sized_image(match: re.Match[str]) -> str:
@@ -463,19 +532,22 @@ def _case_references(text: str) -> str:
     return MEDIA_REF.sub(_media_image, source)
 
 
-def _image_options(href: str) -> tuple[str, str, str]:
-    """Split an annotated image URL back into source, width and alignment."""
+def _image_options(href: str) -> ImageOptions:
+    """Split an annotated image URL back into source, width, alignment and caption."""
     parts = urlsplit(href)
     query = parse_qs(parts.query, keep_blank_values=True)
-    attributes = unquote(query.pop(ATTR_PARAM, [""])[0])
+    # decoded once, by the query parser: a caption's own `%` stays what it was
+    attributes = query.pop(ATTR_PARAM, [""])[0]
     rebuilt = "&".join(f"{key}={value}" for key, values in query.items() for value in values)
     source = parts._replace(query=rebuilt).geturl()
-    values = dict(ATTR_VALUES.findall(attributes))
+    written = CAPTION_ATTR.search(attributes)
+    caption = " ".join(written.group(1).split())[:MAX_CAPTION] if written else ""
+    values = dict(ATTR_VALUES.findall(CAPTION_ATTR.sub(" ", attributes)))
     width = values.get("width", "")
     if not (WIDTH_PERCENT.match(width) or WIDTH_PIXELS.match(width)):
         width = ""
     align = values.get("align", "left")
-    return source, width, align if align in ALIGNMENTS else "left"
+    return ImageOptions(source, width, align if align in ALIGNMENTS else "left", caption)
 
 
 def _parser() -> MarkdownIt:
@@ -511,6 +583,12 @@ class _DecodedImages:
     over would leave nothing kept at all; only pictures the current document has
     not used make room. What is kept is the stream fpdf2 would have produced, so
     a document made from it is the same to the byte.
+
+    A JPEG is the one picture fpdf2 copies into the PDF as it is, and a camera's
+    file carries where it was taken (EXIF GPS), what edited it (XMP) and who took
+    it (IPTC). A note shared as a PDF must not carry those, so a JPEG goes in
+    without them (`_clean_jpeg`), and what is kept here is that clean stream. The
+    other formats are decoded to pixels by fpdf2, which leaves their text behind.
     """
 
     MAX_ENTRIES = 40
@@ -559,6 +637,14 @@ class _DecodedImages:
                 if profile is not None:
                     fresh["iccp_i"] = cache.icc_profiles.setdefault(profile, len(cache.icc_profiles))
                 cache.images[name] = fresh
+        if name not in cache.images:
+            clean = _clean_jpeg_file(path)
+            if clean is not None:
+                # fpdf2 reads it under its own name; file it under the path, so the
+                # call below and every later use of this picture find it there
+                raster, _, info = preload_image(cache, BytesIO(clean))
+                cache.images[name] = cache.images.pop(raster)
+                info["usages"] = 0
         pdf.image(path, **options)
         if key is not None:
             self._keep(key, pdf, name, render)
@@ -646,13 +732,19 @@ class _Builder:
         diagrams: dict[str, bytes],
         *,
         look: NoteLook | None = None,
+        faces: set[tuple[str, str]] | None = None,
     ) -> None:
         self.pdf = pdf
         self.case = case
         self.diagrams = diagrams
         self.look = look or DEFAULT_LOOK
         self.theme: Theme = getattr(pdf, "theme", PLAIN)
+        #: The (family, style) pairs this document loaded, so emphasis it lacks borrows.
+        self.faces = faces if faces is not None else set(pdffonts.CORE_FACES)
         self.warnings: list[str] = []
+        self.warning_lines: list[int | None] = []
+        #: The line of the first remote image left out, which its warning points at.
+        self._remote_line: int | None = None
         self.images = 0
         self.pictures: list[PagePicture] = []
         self._page_lines: dict[int, int] = {}
@@ -660,7 +752,11 @@ class _Builder:
         #: How deep inside nested lists the walk currently is.
         self._depth = 0
         self._remote = 0
-        self._file_prefix = f"/files/{case.id}/" if case is not None else "\0"
+        # The Notebook writes the case's name the way a browser does (`lib/fileUrl.js`),
+        # so a case called "Port strike" is `/files/Port%20strike/…` in its notes.
+        self._file_prefixes = (
+            tuple(dict.fromkeys((f"/files/{_quote(case.id)}/", f"/files/{case.id}/"))) if case is not None else ()
+        )
         # the paragraph defaults, which a promoted verdict enlarges for a moment
         self._size = self.theme.body_size
         self._leading = self.theme.leading
@@ -697,6 +793,8 @@ class _Builder:
         theme, look, pdf = self.theme, self.look, self.pdf
         blocks = {id(piece): self._alignment_blocks(piece.text) for piece in pieces if piece.kind == "text"}
         self._prescan(pieces, blocks)
+        if self.case is not None:
+            self._empty_sections(pieces, blocks)
         if look.cover.on:
             unseen = self.case is None and bool(look.cover.image)
             pdf.cover(image=self._cover_image(), placeholder=CASE_PICTURE if unseen else "")
@@ -809,6 +907,67 @@ class _Builder:
         except ValueError:
             pass
 
+    def _empty_sections(self, pieces: list[Piece], blocks: dict[int, list[_Block]]) -> None:
+        """Warn about each heading with nothing under it before the next heading of
+        its rank: a report sent with "Method" and no method is the slip to catch.
+
+        A heading that only holds deeper headings is not named, since those are,
+        and a journal's dated entry is an entry rather than a heading waiting for
+        words. Guidance and comments print nothing, so a section holding only
+        those is empty too.
+        """
+        # open headings, outermost first: (level, name, line, has a deeper heading)
+        open_: list[list[Any]] = []
+        empty: list[tuple[str, int]] = []
+
+        def heading(level: int, name: str, line: int) -> None:
+            while open_ and open_[-1][0] >= level:
+                closed = open_.pop()
+                if not closed[3]:
+                    empty.append((closed[1], closed[2]))
+            for outer in open_:
+                outer[3] = True
+            open_.append([level, name, line, False])
+
+        def content() -> None:
+            open_.clear()
+
+        for piece in pieces:
+            if piece.kind == "chapter":
+                # the heading above an include holds that chapter
+                content()
+                heading(piece.depth, " ".join(piece.text.split()), piece.line)
+                continue
+            if piece.kind != "text":
+                content()
+                continue
+            for block in blocks[id(piece)]:
+                base = piece.line + (0 if piece.fixed else block.line)
+                for index in range(block.start, len(block.tokens)):
+                    token = block.tokens[index]
+                    if token.level != 0 or token.type.endswith("_close") or token.type == "inline":
+                        continue
+                    if token.type == "heading_open":
+                        name = " ".join(_inline_text(block.tokens[index + 1]).split())
+                        if self.theme.style == "journal" and token.tag == "h3" and LOG_STAMP.match(name):
+                            content()
+                            continue
+                        line = piece.line if piece.fixed else base + (token.map[0] if token.map else 0)
+                        heading(_level(token.tag, piece.shift), name, line)
+                    elif _prints(block.tokens, index):
+                        content()
+        heading(0, "", 0)
+        for name, line in empty[:MAX_EMPTY_SECTIONS]:
+            self._warn(f'Section "{_cut_text(name, 80)}" is empty.', line)
+        rest = len(empty) - MAX_EMPTY_SECTIONS
+        if rest > 0:
+            self._warn(f"{rest} more section{'s are' if rest > 1 else ' is'} empty.")
+
+    def _warn(self, message: str, line: int | None = None) -> None:
+        """Say what the page could not show, and the note's line it is about."""
+        self.warnings.append(message)
+        self.warning_lines.append(line)
+
     # -- the first page -----------------------------------------------------
 
     def _title_block(self, title: str) -> None:
@@ -827,11 +986,11 @@ class _Builder:
     def _plain_title(self, title: str) -> None:
         pdf = self.pdf
         theme = self.theme
-        pdf.set_font(pdffonts.SANS, "B", 7.5)
+        pdf.set_font(theme.heading_family, "B", 7.5)
         pdf.set_text_color(*theme.accent_dark)
         pdf.cell(0, 4, "AZIMUT NOTES", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(1.5)
-        pdf.set_font(pdffonts.SANS, "B", 22)
+        pdf.set_font(theme.heading_family, "B", 22)
         pdf.set_text_color(24, 24, 24)
         pdf.multi_cell(theme.frame, 9, title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
@@ -847,20 +1006,20 @@ class _Builder:
         pdf.set_fill_color(*theme.accent)
         pdf.rect(left, pdf.get_y(), 16.0, 1.2, style="F")
         pdf.ln(4.5)
-        pdf.set_font(pdffonts.SANS, "B", 7.8)
+        pdf.set_font(theme.heading_family, "B", 7.8)
         pdf.set_text_color(*theme.accent)
         pdf.set_char_spacing(1.0)
         pdf.cell(0, 4.5, notes_style.long_date(pdf.day).upper(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_char_spacing(0)
         pdf.ln(2)
-        pdf.set_font(pdffonts.SANS, "B", 24)
+        pdf.set_font(theme.heading_family, "B", 24)
         pdf.set_text_color(*theme.ink)
-        pdf.multi_cell(pdf.epw, 10, title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.multi_cell(pdf.epw, 10, title, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         if look.cover.subtitle:
             pdf.ln(1.5)
-            pdf.set_font(pdffonts.SERIF, "I", 12.5)
+            pdf.set_font(theme.aside_family, "I", 12.5)
             pdf.set_text_color(*theme.muted)
-            pdf.multi_cell(pdf.epw, 6.2, look.cover.subtitle, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.multi_cell(pdf.epw, 6.2, look.cover.subtitle, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(5)
         pdf.set_draw_color(*theme.rule)
         pdf.set_line_width(0.3)
@@ -871,21 +1030,21 @@ class _Builder:
         pdf, theme, look = self.pdf, self.theme, self.look
         left = pdf.l_margin
         pdf.ln(2)
-        pdf.set_font(pdffonts.SANS, "B", 7.8)
+        pdf.set_font(theme.heading_family, "B", 7.8)
         pdf.set_text_color(*theme.accent)
         pdf.set_char_spacing(1.0)
         span = self._log_span()
         pdf.cell(0, 4.5, span.upper(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_char_spacing(0)
         pdf.ln(1.5)
-        pdf.set_font(pdffonts.SANS, "B", 21)
+        pdf.set_font(theme.heading_family, "B", 21)
         pdf.set_text_color(*theme.ink)
-        pdf.multi_cell(pdf.epw, 9, title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.multi_cell(pdf.epw, 9, title, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         if look.cover.subtitle:
             pdf.ln(1)
-            pdf.set_font(pdffonts.SERIF, "I", 11.5)
+            pdf.set_font(theme.aside_family, "I", 11.5)
             pdf.set_text_color(*theme.muted)
-            pdf.multi_cell(pdf.epw, 5.8, look.cover.subtitle, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.multi_cell(pdf.epw, 5.8, look.cover.subtitle, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3.5)
         pdf.set_draw_color(*theme.accent)
         pdf.set_line_width(0.6)
@@ -911,10 +1070,10 @@ class _Builder:
         entity = self.case.get_entity(image_id)
         attrs = (entity or {}).get("attrs") or {}
         if not entity or not attrs.get("path"):
-            self.warnings.append("The cover picture is no longer in the case; the cover was drawn without it.")
+            self._warn("The cover picture is no longer in the case; the cover was drawn without it.")
             return None
         if attrs.get("kind") == "video":
-            self.warnings.append("A video cannot be a cover picture; the cover was drawn without it.")
+            self._warn("A video cannot be a cover picture; the cover was drawn without it.")
             return None
         try:
             path = self.case.resolve_inside(str(attrs["path"]))
@@ -922,21 +1081,22 @@ class _Builder:
             path = None
         natural = _measure(path) if path is not None else None
         if path is None or natural is None:
-            self.warnings.append("The cover picture could not be read; the cover was drawn without it.")
+            self._warn("The cover picture could not be read; the cover was drawn without it.")
             return None
         self.images += 1
         return path, natural
 
     def collect_warnings(self, text: str) -> None:
         if self._remote:
-            self.warnings.append(
+            self._warn(
                 f"{self._remote} remote image{'s' if self._remote > 1 else ''} left out: "
-                "the export never fetches from the network."
+                "the export never fetches from the network.",
+                self._remote_line,
             )
         missing = pdffonts.uncovered(self.pdf, text)
         if missing:
             scripts = sorted({pdffonts.script_of(char) for char in missing})
-            self.warnings.append(
+            self._warn(
                 f"No font on this machine covers {', '.join(scripts)}; "
                 "those characters were left out."
             )
@@ -1034,10 +1194,10 @@ class _Builder:
                 align=align,
                 size=size,
                 leading=size * 0.46,
-                family=pdffonts.SANS,
+                family=theme.heading_family,
                 bold=True,
                 color=theme.muted if tag == "h6" else theme.ink,
-                bottom=1.8,
+                bottom=1.8 * theme.scale,
             )
             return
         self._styled_heading(runs, level, number, tokens, after, align)
@@ -1059,7 +1219,7 @@ class _Builder:
         brief = theme.style == "brief"
         caps = brief and rank <= 2
         if caps:
-            size = 9.4
+            size = 9.4 * theme.scale
             space = theme.headings["h2"][1] + 0.6
         if pdf.get_y() > pdf.t_margin + 2:
             pdf.ln(space)
@@ -1079,7 +1239,7 @@ class _Builder:
             align=align,
             size=size,
             leading=size * 0.48,
-            family=pdffonts.SANS,
+            family=theme.heading_family,
             bold=True,
             color=colour,
             bottom=0.0,
@@ -1135,7 +1295,7 @@ class _Builder:
             pdf.set_fill_color(*theme.accent)
             pdf.rect(pdf.l_margin, pdf.get_y(), 14.0, 1.4, style="F")
             pdf.ln(4.5)
-            pdf.set_font(pdffonts.SANS, "B", 8.2)
+            pdf.set_font(theme.heading_family, "B", 8.2)
             pdf.set_text_color(*theme.accent)
             pdf.set_char_spacing(1.2)
             self._chapters += 1
@@ -1143,9 +1303,9 @@ class _Builder:
             pdf.cell(0, 5, kicker, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_char_spacing(0)
             pdf.ln(1.5)
-            pdf.set_font(pdffonts.SANS, "B", 22)
+            pdf.set_font(theme.heading_family, "B", 22)
             pdf.set_text_color(*theme.ink)
-            pdf.multi_cell(pdf.epw, 9.5, piece.text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.multi_cell(pdf.epw, 9.5, piece.text, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(3)
             pdf.set_draw_color(*theme.rule)
             pdf.set_line_width(0.3)
@@ -1154,20 +1314,31 @@ class _Builder:
         else:
             self._heading(runs, piece.depth, [], 0, Align.L)
 
-    def _next_height(self, tokens: list[Token], index: int) -> float:
-        """How tall the block after a heading is, for pictures; two lines else.
-
-        Only pictures are measured, because they are the blocks tall enough to
-        leave a heading behind on its own.
-        """
+    def _next_height(self, tokens: list[Token], index: int, depth: int = 0) -> float:
+        """How tall the block after a heading is, at least, for the heading to be
+        kept with it: a picture with its caption, a table's first two rows, a boxed
+        callout's opening, or the heading under it and what that one keeps; two
+        lines else."""
+        theme = self.theme
         if index >= len(tokens):
-            return self.theme.leading * 2
+            return theme.leading * 2
         token = tokens[index]
+        if token.type == "heading_open" and depth < 2:
+            return self._heading_room(_level(token.tag, self._shift)) + self._next_height(tokens, index + 3, depth + 1)
         picture: tuple[int, int] | None = None
-        width_attr = ""
+        credit: _Credit | None = None
+        options = ImageOptions("", "", "left", "")
+        words = ""
         if token.type == "fence" and MERMAID_INFO.match(token.info or ""):
             png = self.diagrams.get(diagram_key(token.content))
             picture = _diagram_size(png) if png else None
+            options = ImageOptions("", "", "center", "")
+        elif token.type == "table_open":
+            # the header row and the first row under it, which fpdf2 keeps together
+            line, pad = (5.0, 1.6) if theme.plain else (4.6, 1.7)
+            return 2 * (line * theme.scale + 2 * pad) + (0 if theme.plain else 0.8)
+        elif token.type == "blockquote_open" and not theme.plain:
+            return max(theme.leading * 2, 15.0)  # a boxed callout opens on a page with room for it
         elif token.type == "paragraph_open" and index + 1 < len(tokens):
             children = [
                 child
@@ -1175,28 +1346,47 @@ class _Builder:
                 if child.type != "softbreak"
             ]
             if len(children) == 1 and children[0].type == "image":
-                resolved = self._peek_image(children[0])
-                if resolved is not None:
-                    picture = resolved
-                    _, width_attr, _ = _image_options(_attr(children[0], "src"))
+                peeked = self._peek_image(children[0])
+                if peeked is not None:
+                    picture, credit = peeked
+                    options = _image_options(_attr(children[0], "src"))
+                    words = options.caption or _attr(children[0], "title")
         if picture is None:
-            return self.theme.leading * 2
-        height = _fit(picture, width_attr, self._frame(), self.theme.room)[1]
+            return theme.leading * 2
+        width, height = _fit(picture, options.width, self._frame(), theme.room)
+        label = "Figure 00" if self.look.numbered else ""
+        below = self._below((label, words), credit, ALIGNMENTS[options.align], width)
+        if not theme.plain:
+            below += 0.6  # the breath a styled picture takes above itself
         # what a picture free to shrink needs at least, with a little to spare
-        return height if width_attr else height * (1 - MAX_SHRINK + 0.05)
+        return (height if options.width else height * (1 - MAX_SHRINK + 0.05)) + below
 
-    def _peek_image(self, token: Token) -> tuple[int, int] | None:
-        """An image's pixel size without counting it against the note's budget."""
-        images, remote = self.images, self._remote
+    def _heading_room(self, level: int) -> float:
+        """How far down the page a one-line heading at ``level`` takes the walk:
+        the space above it, its line, and the space or rule under it."""
+        theme = self.theme
+        if theme.plain:
+            size, space = theme.headings.get(f"h{level}", theme.headings["h6"])
+            return space + size * 0.46 + 1.8 * theme.scale
+        rank = max(1, min(6, level - self._base + 1))
+        size, space = theme.headings.get(f"h{rank}", theme.headings["h6"])
+        if theme.style == "brief" and rank <= 2:
+            return theme.headings["h2"][1] + 0.6 + 9.4 * theme.scale * 0.48 + 3.8
+        after = 5.4 if rank == 1 and theme.style == "report" else 1.8 if rank <= 2 else 1.2
+        return space + size * 0.48 + after
+
+    def _peek_image(self, token: Token) -> "tuple[tuple[int, int], _Credit | None] | None":
+        """An image's pixel size and credit, without counting it against the note's budget."""
+        images, remote, remote_line = self.images, self._remote, self._remote_line
         try:
             resolved = self._resolve_image(token)
         finally:
-            self.images, self._remote = images, remote
+            self.images, self._remote, self._remote_line = images, remote, remote_line
         if isinstance(resolved, str):
             return None
         if isinstance(resolved, _Poster):
-            return resolved.natural if resolved.path is not None else None
-        return resolved[1]
+            return (resolved.natural, resolved.credit) if resolved.path is not None else None
+        return resolved.natural, resolved.credit
 
     def _on_paragraph_open(self, tokens: list[Token], index: int, align: Align) -> int:
         inline = tokens[index + 1]
@@ -1242,7 +1432,7 @@ class _Builder:
         callout = _take_callout(tokens, index)
         with self._indent(5.0):
             if callout:
-                pdf.set_font(pdffonts.SANS, "B", 8.0)
+                pdf.set_font(self.theme.heading_family, "B", 8.0 * self.theme.scale)
                 pdf.set_text_color(*callout[1])
                 pdf.cell(text=callout[0].upper(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 pdf.ln(0.8)
@@ -1272,12 +1462,13 @@ class _Builder:
             box = pdf.open_box(bar=mix(colour, WHITE, 0.35), bar_width=0.9)
         sizes = (self._size, self._leading, self._family)
         if big:
-            self._size, self._leading, self._family = 11.6, 5.9, pdffonts.SANS
+            self._size, self._leading = 11.6 * theme.scale, 5.9 * theme.scale
+            self._family = theme.heading_family
         top_page = pdf.page
         with self._inset(pad + box.bar_width + (1.0 if callout else 2.0), pad if callout else 0.0):
             pdf.ln(pad - 0.6 if callout else 0.6)
             if callout:
-                pdf.set_font(pdffonts.SANS, "B", 13.0 if big else 7.6)
+                pdf.set_font(theme.heading_family, "B", (13.0 if big else 7.6) * theme.scale)
                 pdf.set_text_color(*mix(colour, (0, 0, 0), 0.18))
                 pdf.set_char_spacing(1.4 if big else 0.9)
                 pdf.cell(text=callout[0].upper(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
@@ -1368,7 +1559,7 @@ class _Builder:
         pdf.set_x(pdf.get_x() + BULLET_WIDTH)
 
     def _on_table_open(self, tokens: list[Token], index: int, align: Align) -> int:
-        rows: list[list[str]] = []
+        rows: list[list[list[Run]]] = []
         header_rows = 0
         in_head = False
         index += 1
@@ -1379,11 +1570,11 @@ class _Builder:
             elif token.type == "thead_close":
                 in_head = False
             elif token.type == "tr_open":
-                cells: list[str] = []
+                cells: list[list[Run]] = []
                 index += 1
                 while index < len(tokens) and tokens[index].type != "tr_close":
                     if tokens[index].type in ("th_open", "td_open"):
-                        cells.append(_plain(self._inline(tokens[index + 1])))
+                        cells.append(self._inline(tokens[index + 1]))
                         index += 3
                         continue
                     index += 1
@@ -1440,7 +1631,7 @@ class _Builder:
                 f"{notes_style.WEEKDAYS[when.weekday()]} {notes_style.long_date(when)}" if when else key
             ).upper()
             y = pdf.get_y()
-            pdf.set_font(pdffonts.SANS, "B", 7.4)
+            pdf.set_font(theme.heading_family, "B", 7.4)
             pdf.set_text_color(*theme.accent)
             pdf.set_char_spacing(0.8)
             pdf.set_xy(left, y)
@@ -1467,7 +1658,7 @@ class _Builder:
         y = top
         for text, emphasis, size, colour, height in lines:
             pdf.set_xy(left, y)
-            pdf.set_font(pdffonts.SANS, emphasis, size)
+            pdf.set_font(theme.heading_family, emphasis, size)
             pdf.set_text_color(*colour)
             pdf.cell(gutter - 6, height, text, align=Align.R)
             y += height
@@ -1482,7 +1673,7 @@ class _Builder:
         self._entry = _Entry(indent, box, y, pdf.page)
         if title:
             self._runs(title, size=self._size + 0.6, leading=self._leading + 0.2,
-                       family=pdffonts.SANS, bold=True, color=theme.ink, bottom=1.2)
+                       family=theme.heading_family, bold=True, color=theme.ink, bottom=1.2)
 
     def _end_entry(self) -> None:
         entry = self._entry
@@ -1538,32 +1729,57 @@ class _Builder:
                     colour = theme.accent_dark
                 elif entity == 2 or (link and not entity):
                     colour = theme.muted if entity else theme.accent_dark
-                runs.append(
-                    Run(
-                        text=text,
-                        bold=bool(bold) or entity == 1,
-                        italic=bool(italic) or entity == 2,
-                        mono=kind == "code_inline",
-                        color=colour,
-                        link="" if entity else link,
-                    )
+                run = Run(
+                    text=text,
+                    bold=bool(bold) or entity == 1,
+                    italic=bool(italic) or entity == 2,
+                    mono=kind == "code_inline",
+                    color=colour,
+                    link="" if entity else link,
                 )
+                if kind == "text" and not link and not entity:
+                    runs.extend(self._coordinates(run))
+                else:
+                    runs.append(run)
         return [run for run in runs if run.text]
+
+    def _coordinates(self, run: Run) -> list[Run]:
+        """A run with each decimal coordinate pair in it linked to the map."""
+        pieces: list[Run] = []
+        at = 0
+        for match in COORDINATES.finditer(run.text):
+            lat, lon = match.group(1), match.group(2)
+            if abs(float(lat)) > 90 or abs(float(lon)) > 180:
+                continue
+            pieces.append(Run(run.text[at : match.start()], run.bold, run.italic, run.mono, run.color))
+            pieces.append(Run(match.group(0), run.bold, run.italic, run.mono, self.theme.accent_dark,
+                              MAP_LINK.format(lat=lat, lon=lon)))
+            at = match.end()
+        if not pieces:
+            return [run]
+        pieces.append(Run(run.text[at:], run.bold, run.italic, run.mono, run.color))
+        return pieces
 
     def _link_style(self, token: Token) -> tuple[str, int]:
         """How a link is drawn, which depends on where it points.
 
         A PDF is read away from the app, so a reference to another entity cannot
-        link anywhere. It stays visible as a reference, and turns quiet and
-        italic once the entity it named has been deleted from the case. Without
-        a case (a template's preview) every reference reads as a live one.
+        link into it. A record with a web address of its own (a bookmark's page,
+        an account's profile, the page a file came from) links there and reads as
+        a link; any other stays visible as a reference, and turns quiet and italic
+        once the entity it named has been deleted from the case. Without a case (a
+        template's preview) every reference reads as a live one.
         """
         href = _attr(token, "href")
         entity = re.match(r"^azimut://entity/([A-Za-z0-9_-]+)$", href)
         if entity:
             if self.case is None:
                 return "", 1
-            return "", 1 if self.case.get_entity(entity.group(1)) is not None else 2
+            record = self.case.get_entity(entity.group(1))
+            if record is None:
+                return "", 2
+            address = _web_address(record)
+            return (address, 0) if address else ("", 1)
         return href, 0
 
     def _inline_image(self, token: Token) -> Run:
@@ -1577,6 +1793,18 @@ class _Builder:
         label = resolved if isinstance(resolved, str) else (token.content or "Image")
         link = resolved.url if isinstance(resolved, _Poster) else ""
         return Run(text=f"[{label}]", italic=True, color=self.theme.muted, link=link)
+
+    def _face(self, family: str, bold: bool, italic: bool) -> tuple[str, str]:
+        """The face a run is set in. The mono face ships in one weight, and the sans
+        has its italics only where it sets the body: elsewhere emphasis inside a sans
+        line borrows the serif's italic rather than failing the whole document, which
+        is what an italic word in a heading did."""
+        if family == pdffonts.MONO:
+            return family, ""
+        style = ("B" if bold else "") + ("I" if italic else "")
+        if italic and (family, style) not in self.faces:
+            family = pdffonts.SERIF
+        return family, style
 
     # -- drawing ------------------------------------------------------------
 
@@ -1635,7 +1863,7 @@ class _Builder:
         # it measures against is inside the one the page declares.
         right = self.theme.page_width - pdf.r_margin - 2 * pdf.c_margin
         for run in runs:
-            run_family, emphasis = _face(
+            run_family, emphasis = self._face(
                 pdffonts.MONO if run.mono else family, run.bold or bold, run.italic
             )
             pdf.set_font(run_family, emphasis, size * (0.92 if run.mono else 1.0))
@@ -1653,7 +1881,7 @@ class _Builder:
         """A quiet, boxed line: what the page could not show, said in place."""
         pdf = self.pdf
         theme = self.theme
-        pdf.set_font(pdffonts.SERIF, "I", 9)
+        pdf.set_font(theme.aside_family, "I", 9 * theme.scale)
         pdf.set_text_color(*theme.muted)
         pdf.set_fill_color(*theme.note_bg)
         pdf.set_draw_color(*theme.rule)
@@ -1669,7 +1897,8 @@ class _Builder:
             width = pdf.epw - 2.5
             bar = pdf.l_margin + 0.6
         pdf.multi_cell(
-            width, 5.2, message, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT, link=link or None
+            width, 5.2 * theme.scale, message, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT,
+            link=link or None,
         )
         pdf.line(bar, top, bar, pdf.get_y())
         pdf.ln(theme.gap)
@@ -1678,8 +1907,8 @@ class _Builder:
         """Preformatted text in a tinted box, indentation and all."""
         pdf = self.pdf
         theme = self.theme
-        size = 8.5 if theme.style != "brief" else 8.0
-        leading = 4.3 if theme.style != "brief" else 4.0
+        size = (8.5 if theme.style != "brief" else 8.0) * theme.scale
+        leading = (4.3 if theme.style != "brief" else 4.0) * theme.scale
         pdf.set_font(pdffonts.MONO, size=size)
         lines = [
             part
@@ -1716,36 +1945,54 @@ class _Builder:
         pdf.set_line_width(0.2)
         pdf.rect(left, top, width, bottom - top, style="D")
 
-    def _table(self, rows: list[list[str]], header_rows: int) -> None:
+    def _table(self, rows: list[list[list[Run]]], header_rows: int) -> None:
+        """A table, its header row repeated on each page it runs onto.
+
+        A cell is one text in one face, so its runs' styling goes; its link stays.
+        A cell holding a link (or a reference with an address, or coordinates) links
+        to it as a whole, the first one if it holds several, and reads as a link.
+        """
         pdf = self.pdf
         theme = self.theme
         columns = min(max(len(row) for row in rows), MAX_TABLE_COLUMNS)
-        squared = [(row + [""] * columns)[:columns] for row in rows]
+        squared = [(row + [[]] * columns)[:columns] for row in rows]
+        texts = [[_plain(cell) for cell in line] for line in squared]
         from fpdf.fonts import FontFace
 
+        def fill(table: Any) -> None:
+            for number, line in enumerate(squared):
+                row = table.row()
+                for cell, text in zip(line, texts[number]):
+                    link = next((run.link for run in cell if run.link), "")
+                    if not link:
+                        row.cell(text)
+                    elif number < header_rows:
+                        row.cell(text, link=link)
+                    else:
+                        row.cell(text, link=link, style=FontFace(color=theme.accent_dark))
+
+        scale = theme.scale
         if theme.plain:
-            pdf.set_font(pdffonts.SERIF, size=9)
+            pdf.set_font(theme.body_family, size=9 * scale)
             pdf.set_text_color(*INK)
             pdf.set_draw_color(*theme.rule)
             pdf.set_line_width(0.2)
             with pdf.table(
-                col_widths=_column_widths(squared, columns),
-                line_height=5.0,
+                col_widths=_column_widths(texts, columns),
+                line_height=5.0 * scale,
                 text_align=Align.L,
                 padding=(1.6, 2.2),
                 headings_style=FontFace(
-                    family=pdffonts.SANS, emphasis="B", size_pt=9, fill_color=theme.table_head_bg
+                    family=theme.heading_family, emphasis="B", size_pt=9 * scale,
+                    fill_color=theme.table_head_bg,
                 ),
                 first_row_as_headings=bool(header_rows),
                 repeat_headings=1,
             ) as table:
-                for line in squared:
-                    row = table.row()
-                    for cell in line:
-                        row.cell(cell)
+                fill(table)
             pdf.ln(theme.gap)
             return
-        size = 8.6 if theme.style == "brief" else 8.8
+        size = (8.6 if theme.style == "brief" else 8.8) * scale
         pdf.ln(0.8)
         # fpdf2 paints the rows between stripes in the current fill: make that paper
         pdf.set_fill_color(*WHITE)
@@ -1754,24 +2001,21 @@ class _Builder:
         pdf.set_draw_color(*theme.rule)
         pdf.set_line_width(0.2)
         with pdf.table(
-            col_widths=_column_widths(squared, columns),
-            line_height=4.6,
+            col_widths=_column_widths(texts, columns),
+            line_height=4.6 * scale,
             text_align=Align.L,
             padding=(1.7, 2.4),
             borders_layout="HORIZONTAL_LINES",
             cell_fill_color=theme.tint,
             cell_fill_mode="EVEN_ROWS",
             headings_style=FontFace(
-                family=pdffonts.SANS, emphasis="B", size_pt=size - 0.4,
+                family=theme.heading_family, emphasis="B", size_pt=size - 0.4,
                 color=WHITE, fill_color=theme.table_head_bg,
             ),
             first_row_as_headings=bool(header_rows),
             repeat_headings=1,
         ) as table:
-            for line in squared:
-                row = table.row()
-                for cell in line:
-                    row.cell(cell)
+            fill(table)
         pdf.ln(theme.gap + 0.8)
 
     def _standalone_image(self, inline: Token, align: Align) -> bool:
@@ -1781,37 +2025,42 @@ class _Builder:
             return False
         token = children[0]
         resolved = self._resolve_image(token)
-        source, width_attr, image_align = _image_options(_attr(token, "src"))
-        figure = (_picture_ref(source), width_attr, image_align)
-        title = _attr(token, "title")
+        options = _image_options(_attr(token, "src"))
+        figure = (_picture_ref(options.source), options.width, options.align)
+        place = ALIGNMENTS[options.align]
+        # a caption written in the braces says more than a title, which is older
+        title = options.caption or _attr(token, "title")
         if isinstance(resolved, _Poster):
             if resolved.path is None:
                 message = "Video not included in PDF."
                 self._aside(f"{message} Watch it at {resolved.url}", link=resolved.url)
                 return True
             caption = self._caption(title or f"Video: {token.content or 'untitled'}", token.content)
-            self._place(resolved.path, resolved.natural, width_attr, ALIGNMENTS[image_align], caption,
-                        figure=figure, video=resolved.url)
+            self._place(resolved.path, resolved.natural, options.width, place, caption,
+                        figure=figure, video=True, credit=resolved.credit)
             return True
         caption = self._caption(title, token.content)
         if resolved == CASE_PICTURE and self.case is None:
-            self._placeholder(width_attr, ALIGNMENTS[image_align], caption, figure=figure)
+            self._placeholder(options.width, place, caption, figure=figure)
             return True
         if isinstance(resolved, str):
+            if resolved == MEDIA_UNAVAILABLE:
+                name = _cut_text(" ".join((token.content or "").split()) or "Untitled", 80)
+                self._warn(f'Picture "{name}" could not be printed: it is missing from the case.', self._line)
             self._aside(resolved)
             return True
-        path, natural = resolved
-        self._place(path, natural, width_attr, ALIGNMENTS[image_align], caption, figure=figure)
+        self._place(resolved.path, resolved.natural, options.width, place, caption,
+                    figure=figure, credit=resolved.credit)
         return True
 
-    def _caption(self, title: str, alt: str) -> str:
-        """What prints under a picture: its title, as always; with numbered
-        figures, `Figure 3` and the title or, failing one, the alt text."""
+    def _caption(self, title: str, alt: str) -> tuple[str, str]:
+        """What prints under a picture, as (label, words): its caption, as always;
+        with numbered figures, `Figure 3` and the caption or, failing one, the alt
+        text."""
         if not self.look.numbered:
-            return title
+            return "", title
         self._figures += 1
-        words = title or alt
-        return f"Figure {self._figures}" + (f". {words}" if words else "")
+        return f"Figure {self._figures}", title or alt
 
     def _place(
         self,
@@ -1819,56 +2068,167 @@ class _Builder:
         natural: tuple[int, int],
         width_attr: str,
         align: Align,
-        caption: str,
+        caption: tuple[str, str],
         *,
         figure: tuple[str, str, str] | None = None,
-        video: str | None = None,
+        video: bool = False,
+        credit: _Credit | None = None,
     ) -> None:
-        """Draw a picture as a block. ``figure`` (what it shows, its width and
-        alignment as written) has the Page pane told where it landed; ``video``
-        marks a video's still, with the address it is watched at ("" for none)."""
+        """Draw a picture as a block, its caption and credit kept on its page.
+
+        ``figure`` (what it shows, its width and alignment as written) has the Page
+        pane told where it landed; ``video`` marks a video's still. The caption is
+        measured rather than guessed, so a picture never goes to the foot of a page
+        that only has room for it and not for the words under it.
+        """
         pdf = self.pdf
         theme = self.theme
         width, height = _fit(natural, width_attr, self._frame(), theme.room)
-        below = (5 if caption else 0) if theme.plain else (7 if caption else 1)
         if not theme.plain:
             pdf.ln(0.6)
+        below = self._below(caption, credit, align, width)
         gap = None
         if pdf.will_page_break(height + below):
             room = pdf.page_break_trigger - pdf.get_y() - below - 0.5
-            if not width_attr and height * (1 - MAX_SHRINK) <= room:
-                width, height = width * room / height, room
+            shrunk = width * room / height, room
+            if (
+                not width_attr
+                and height * (1 - MAX_SHRINK) <= room
+                and not pdf.will_page_break(shrunk[1] + self._below(caption, credit, align, shrunk[0]))
+            ):
+                width, height = shrunk
             else:
                 gap = self._gap(natural, below)
                 pdf.add_page()
         self._picture(source, w=width, h=height, x=align)
         left = self._left(align, width)
         top = pdf.get_y() - height
-        if video is not None:
+        if video:
             self._play_mark(left, top, width, height)
         if figure is not None:
             self._record(figure, (left, top, width, height), gap)
-        url = video or ""
         if theme.plain:
-            if caption:
+            text = _caption_text(*caption)
+            if text:
                 pdf.ln(1)
-                pdf.set_font(pdffonts.SANS, size=8)
+                pdf.set_font(theme.heading_family, size=8 * theme.scale)
                 pdf.set_text_color(*theme.muted)
                 pdf.multi_cell(
-                    pdf.epw, 4, caption, align=align, new_x=XPos.LMARGIN, new_y=YPos.NEXT
+                    pdf.epw, 4 * theme.scale, text, align=align, new_x=XPos.LMARGIN, new_y=YPos.NEXT
                 )
-            if url:
-                self._watch_line(url, align)
+            if credit is not None:
+                self._credit_line(credit, align, pdf.l_margin, pdf.epw)
             pdf.ln(theme.gap)
             return
         pdf.set_draw_color(*theme.rule)
         pdf.set_line_width(0.2)
         pdf.rect(left, top, width, height, style="D")
-        if caption:
-            self._figure_caption(caption, align, left, width)
-        if url:
-            self._watch_line(url, align)
+        box_left, box_width = self._caption_box(align, left, width)
+        if caption[0] or caption[1]:
+            self._figure_caption(caption, align, box_left, box_width)
+        if credit is not None:
+            self._credit_line(credit, align, box_left, box_width)
         pdf.ln(theme.gap + 0.6)
+
+    def _below(self, caption: tuple[str, str], credit: _Credit | None, align: Align, width: float) -> float:
+        """How tall the caption and credit under a picture this wide will be."""
+        pdf, theme = self.pdf, self.theme
+        scale = theme.scale
+        height = 0.0 if theme.plain else 1.0
+        if theme.plain:
+            text = _caption_text(*caption)
+            if text:
+                pdf.set_font(theme.heading_family, size=8 * scale)
+                lines = pdf.multi_cell(pdf.epw, 4 * scale, text, align=align, dry_run=True, output="LINES")
+                assert isinstance(lines, list)
+                height += 1 + 4 * scale * max(1, len(lines))
+        elif caption[0] or caption[1]:
+            box = self._caption_box(align, self._left(align, width), width)[1]
+            height += 1.6 + CAPTION_LEADING * scale * len(self._caption_lines(caption, box))
+        if credit is not None:
+            height += 0.6 + CREDIT_LEADING * scale
+        return height
+
+    def _caption_box(self, align: Align, left: float, width: float) -> tuple[float, float]:
+        """The stretch a styled caption is set in: under the picture, as wide as it
+        or a readable measure if it is narrow, and never past the margins."""
+        pdf = self.pdf
+        box = min(pdf.epw, max(width, CAPTION_MIN_WIDTH))
+        if align is Align.C:
+            x = left + (width - box) / 2
+        elif align is Align.R:
+            x = left + width - box
+        else:
+            x = left
+        return max(pdf.l_margin, min(x, pdf.w - pdf.r_margin - box)), box
+
+    def _caption_lines(self, caption: tuple[str, str], box: float) -> list[str]:
+        """The caption's words cut into lines for its box, the first one shortened
+        by the `Figure 3.` label in front of it."""
+        pdf, theme = self.pdf, self.theme
+        label, words = caption
+        size = CAPTION_SIZE * theme.scale
+        lead = 0.0
+        if label:
+            pdf.set_font(theme.heading_family, "B", size)
+            lead = pdf.get_string_width(f"{label}. " if words else label)
+        pdf.set_font(theme.heading_family, "", size)
+        return _wrap_words(pdf, words, box, box - lead)
+
+    def _figure_caption(self, caption: tuple[str, str], align: Align, box_left: float, box_width: float) -> None:
+        """`Figure 3.` in the accent, the words after it in grey, under the picture."""
+        pdf, theme = self.pdf, self.theme
+        label, words = caption
+        size = CAPTION_SIZE * theme.scale
+        leading = CAPTION_LEADING * theme.scale
+        lines = self._caption_lines(caption, box_width)
+        lead = f"{label}. " if label and words else label
+        pdf.set_font(theme.heading_family, "B", size)
+        lead_width = pdf.get_string_width(lead) if lead else 0.0
+        pdf.ln(1.6)
+        for number, line in enumerate(lines):
+            y = pdf.get_y()
+            front = lead_width if number == 0 else 0.0
+            pdf.set_font(theme.heading_family, "", size)
+            total = front + pdf.get_string_width(line)
+            x = _aligned(align, box_left, box_width, total)
+            if number == 0 and lead:
+                pdf.set_font(theme.heading_family, "B", size)
+                pdf.set_text_color(*theme.accent)
+                self._text_at(x, y, lead, leading)
+                x += lead_width
+                pdf.set_font(theme.heading_family, "", size)
+            if line:
+                pdf.set_text_color(*theme.muted)
+                self._text_at(x, y, line, leading)
+            pdf.set_xy(pdf.l_margin, y + leading)
+
+    def _credit_line(self, credit: _Credit, align: Align, box_left: float, box_width: float) -> None:
+        """Where a picture came from, in one small line: what kind of source in grey,
+        then the place, linked when it is on the web. Cut rather than wrapped."""
+        pdf, theme = self.pdf, self.theme
+        size = CREDIT_SIZE * theme.scale
+        leading = CREDIT_LEADING * theme.scale
+        pdf.ln(0.6)
+        y = pdf.get_y()
+        head = f"{credit.kind}: "
+        pdf.set_font(theme.heading_family, "", size)
+        head_width = pdf.get_string_width(head)
+        value = notes_style.fit_line(pdf, credit.value, max(10.0, box_width - head_width))
+        total = head_width + pdf.get_string_width(value)
+        x = _aligned(align, box_left, box_width, total)
+        pdf.set_text_color(*theme.muted)
+        self._text_at(x, y, head, leading)
+        pdf.set_text_color(*(theme.accent_dark if credit.link else theme.muted))
+        self._text_at(x + head_width, y, value, leading, link=credit.link)
+        pdf.set_xy(pdf.l_margin, y + leading)
+
+    def _text_at(self, x: float, y: float, text: str, height: float, *, link: str = "") -> None:
+        """One run of text starting exactly at ``x``: a cell keeps a margin inside
+        its left edge, so the cell is moved out by it."""
+        pdf = self.pdf
+        pdf.set_xy(x - pdf.c_margin, y)
+        pdf.cell(pdf.get_string_width(text) + 2 * pdf.c_margin, height, text, link=link or "")
 
     def _left(self, align: Align, width: float) -> float:
         """Where fpdf2 puts a picture of this width aligned this way."""
@@ -1939,62 +2299,25 @@ class _Builder:
             style="F",
         )
 
-    def _watch_line(self, url: str, align: Align) -> None:
-        """Where a video printed as a still can be watched, as a link."""
-        pdf, theme = self.pdf, self.theme
-        shown = url if len(url) <= 90 else f"{url[:89]}…"
-        pdf.ln(0.6)
-        pdf.set_font(pdffonts.SANS, "", 7.6)
-        pdf.set_text_color(*theme.muted)
-        pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(
-            pdf.epw, 3.8, f"Watch: {shown}", align=align, link=url,
-            new_x=XPos.LMARGIN, new_y=YPos.NEXT,
-        )
-
     def _picture(self, source: Path | BytesIO, **options: Any) -> None:
         if isinstance(source, Path):
             DECODED.place(self.pdf, source, self._render, **options)
         else:
             self.pdf.image(source, **options)
 
-    def _figure_caption(self, caption: str, align: Align, left: float, width: float) -> None:
-        """`Figure 3.` in the accent, the words after it in grey, under the picture."""
-        pdf, theme = self.pdf, self.theme
-        pdf.ln(1.6)
-        label, _, words = caption.partition(". ") if caption.startswith("Figure ") else ("", "", caption)
-        if not label and caption.startswith("Figure "):
-            label, words = caption, ""
-        size = 7.8
-        pdf.set_font(pdffonts.SANS, "B", size)
-        lead = f"{label}  " if label else ""
-        lead_width = pdf.get_string_width(lead)
-        pdf.set_font(pdffonts.SANS, "", size)
-        total = lead_width + pdf.get_string_width(words)
-        room = max(width, 60.0) if align is not Align.L else pdf.epw
-        if total > room or align is Align.L:
-            pdf.set_x(left if align is not Align.L else pdf.l_margin)
-        else:
-            offset = (width - total) / 2 if align is Align.C else width - total
-            pdf.set_x(left + offset)
-        if lead:
-            pdf.set_font(pdffonts.SANS, "B", size)
-            pdf.set_text_color(*theme.accent)
-            pdf.write(3.8, lead)
-        pdf.set_font(pdffonts.SANS, "", size)
-        pdf.set_text_color(*theme.muted)
-        if words:
-            pdf.write(3.8, words)
-        pdf.ln(3.8)
-
     def _placeholder(
-        self, width_attr: str, align: Align, caption: str, *, figure: tuple[str, str, str] | None = None
+        self,
+        width_attr: str,
+        align: Align,
+        caption: tuple[str, str],
+        *,
+        figure: tuple[str, str, str] | None = None,
     ) -> None:
         """Where a template's picture will go: a grey field, named."""
         pdf, theme = self.pdf, self.theme
         width = _fit((1600, 900), width_attr or "100%", self._frame(), theme.room)[0]
         height = min(width * 0.5, 62.0)
-        if pdf.will_page_break(height + (7 if caption else 1)):
+        if pdf.will_page_break(height + self._below(caption, None, align, width)):
             pdf.add_page()
         left = self._left(align, width)
         top = pdf.get_y()
@@ -2004,19 +2327,21 @@ class _Builder:
         pdf.set_draw_color(*theme.rule)
         pdf.set_line_width(0.2)
         pdf.rect(left, top, width, height, style="DF")
-        pdf.set_font(pdffonts.SANS, "", 8.5)
+        pdf.set_font(theme.heading_family, "", 8.5)
         pdf.set_text_color(*theme.muted)
         pdf.set_xy(left, top + height / 2 - 2.5)
         pdf.cell(width, 5, CASE_PICTURE, align=Align.C)
         pdf.set_xy(pdf.l_margin, top + height)
-        if caption:
+        text = _caption_text(*caption)
+        if text:
             if theme.plain:
                 pdf.ln(1)
-                pdf.set_font(pdffonts.SANS, size=8)
+                pdf.set_font(theme.heading_family, size=8 * theme.scale)
                 pdf.set_text_color(*theme.muted)
-                pdf.multi_cell(pdf.epw, 4, caption, align=align, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.multi_cell(pdf.epw, 4 * theme.scale, text, align=align,
+                               new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             else:
-                self._figure_caption(caption, align, left, width)
+                self._figure_caption(caption, align, *self._caption_box(align, left, width))
         pdf.ln(theme.gap)
 
     def _diagram(self, source: str) -> None:
@@ -2034,9 +2359,7 @@ class _Builder:
     def _poster(self, attrs: dict[str, Any]) -> "_Poster | str":
         """A video prints as its thumbnail with a play sign, and where it can be
         watched. With neither, the line it always printed."""
-        url = str(attrs.get("source_url") or "").strip()
-        if urlsplit(url).scheme not in ("http", "https"):
-            url = ""
+        url = _web(str(attrs.get("source_url") or ""))
         still = thumbnails.thumb_relpath(str(attrs.get("sha256") or ""), "video")
         if still and self.case is not None and self.images < MAX_IMAGES:
             try:
@@ -2051,27 +2374,30 @@ class _Builder:
             return _Poster(None, (0, 0), url)
         return "Video not included in PDF."
 
-    def _resolve_image(self, token: Token) -> "tuple[Path, tuple[int, int]] | _Poster | str":
+    def _resolve_image(self, token: Token) -> "_Picture | _Poster | str":
         """The file behind an image, or the line to print instead of it."""
-        source, _, _ = _image_options(_attr(token, "src"))
+        source = _image_options(_attr(token, "src")).source
         parts = urlsplit(source)
         if parts.scheme in ("http", "https"):
             self._remote += 1
+            if self._remote_line is None:
+                self._remote_line = self._line
             return "External image not included in PDF."
         if self.case is None:
             if (parts.scheme == "azimut" and parts.netloc == "media") or source.startswith("/files/"):
                 return CASE_PICTURE
             return "Image not included in PDF."
+        record: dict[str, Any] | None = None
         if parts.scheme == "azimut" and parts.netloc == "media":
-            entity = self.case.get_entity(unquote(parts.path.lstrip("/")))
-            attrs = (entity or {}).get("attrs") or {}
-            if not entity or not attrs.get("path"):
-                return "Media unavailable"
+            record = self.case.get_entity(unquote(parts.path.lstrip("/")))
+            attrs = (record or {}).get("attrs") or {}
+            if not record or not attrs.get("path"):
+                return MEDIA_UNAVAILABLE
             if attrs.get("kind") == "video":
                 return self._poster(attrs)
             relative = str(attrs["path"])
-        elif source.startswith(self._file_prefix):
-            relative = unquote(source[len(self._file_prefix) :])
+        elif (prefix := next((one for one in self._file_prefixes if source.startswith(one)), "")):
+            relative = unquote(source[len(prefix) :])
         else:
             return "Image not included in PDF."
         if self.images >= MAX_IMAGES:
@@ -2079,12 +2405,43 @@ class _Builder:
         try:
             path = self.case.resolve_inside(relative)
         except Exception:
-            return "Media unavailable"
+            return MEDIA_UNAVAILABLE
         natural = _measure(path)
         if natural is None:
-            return "Media unavailable"
+            return MEDIA_UNAVAILABLE
         self.images += 1
-        return path, natural
+        return _Picture(path, natural, self._credit_of(record, relative))
+
+    def _credit_of(self, record: dict[str, Any] | None, relative: str) -> _Credit | None:
+        """Where a picture of the case came from, as the case recorded it: the page
+        it was taken from, or the imagery it was captured from and its date. Read
+        from the case's own index; nothing is fetched."""
+        item: dict[str, Any] = {}
+        lookup = getattr(self.case, "media_items_by_paths", None)
+        if lookup is not None:
+            try:
+                found = lookup([relative])
+            except Exception:
+                found = []
+            item = found[0] if found and isinstance(found[0], dict) else {}
+        if record is None and item.get("entity_id") and self.case is not None:
+            record = self.case.get_entity(str(item["entity_id"]))
+        attrs = (record or {}).get("attrs") or {}
+        recorded = item.get("source")
+        source: dict[str, Any] = recorded if isinstance(recorded, dict) else {}
+        address = _web(str(attrs.get("source_url") or source.get("url") or ""))
+        if address:
+            return _Credit("Source", _host(address), address)
+        if source.get("type") != "satellite" and (record or {}).get("type") != "capture":
+            return None
+        provider = " ".join(str(source.get("provider_label") or attrs.get("provider") or "").split())
+        when = _imagery_day(timeline.capture_imagery(source))
+        shown = ", ".join(part for part in (provider, when) if part)
+        # the provider's own credit line goes last, where a cut costs the least
+        credit = " ".join(str(source.get("attribution") or "").split())
+        if credit and credit != provider:
+            shown = f"{shown} · {credit}" if shown else credit
+        return _Credit("Imagery", shown) if shown else None
 
 
 class _Indent:
@@ -2117,17 +2474,6 @@ class _Inset(_Indent):
     def __exit__(self, *rest: Any) -> None:
         self.pdf.set_right_margin(self.pdf.r_margin - self.right)
         super().__exit__(*rest)
-
-
-def _face(family: str, bold: bool, italic: bool) -> tuple[str, str]:
-    """The face a run is set in. The mono face ships in one weight, and the sans
-    has no italic: emphasis inside a sans line borrows the serif's italic rather
-    than failing the whole document, which is what an italic word in a heading did."""
-    if family == pdffonts.MONO:
-        return family, ""
-    if family == pdffonts.SANS and italic:
-        family = pdffonts.SERIF
-    return family, ("B" if bold else "") + ("I" if italic else "")
 
 
 def _level(tag: str, shift: int) -> int:
@@ -2225,6 +2571,135 @@ def _plain(runs: Iterable[Run]) -> str:
     return "".join(run.text for run in runs)
 
 
+def _caption_text(label: str, words: str) -> str:
+    """A caption as one line of text: `Figure 3. Smoke over the port`."""
+    return f"{label}. {words}" if label and words else label or words
+
+
+def _aligned(align: Align, left: float, width: float, total: float) -> float:
+    """Where a line ``total`` wide starts inside a stretch, aligned this way."""
+    if align is Align.C:
+        return left + max(0.0, width - total) / 2
+    if align is Align.R:
+        return left + max(0.0, width - total)
+    return left
+
+
+def _wrap_words(pdf: FPDF, text: str, width: float, first: float) -> list[str]:
+    """``text`` cut into lines no wider than ``width`` in the current font, the
+    first no wider than ``first``. A word wider than a whole line (an address) is
+    cut where it has to be rather than run past the margin."""
+    lines: list[str] = []
+    line = ""
+    room = first
+    for word in text.split():
+        candidate = f"{line} {word}" if line else word
+        if pdf.get_string_width(candidate) <= room:
+            line = candidate
+            continue
+        if line:
+            lines.append(line)
+            room = width
+        while pdf.get_string_width(word) > room:
+            cut = max(1, next((n for n in range(len(word), 0, -1)
+                               if pdf.get_string_width(word[:n]) <= room), 1))
+            lines.append(word[:cut])
+            word = word[cut:]
+            room = width
+        line = word
+    lines.append(line)
+    return lines
+
+
+def _imagery_day(reading: str | None) -> str:
+    """An imagery date as the Time panel reads it (`2024-03-12`, `2024-03-12~`
+    when the provider only estimates it) said in words: `about 12 March 2024`."""
+    text = " ".join((reading or "").split())[:40]
+    about = text.endswith("~")
+    text = text.rstrip("~")
+    if not text:
+        return ""
+    try:
+        text = notes_style.long_date(date.fromisoformat(text)) if len(text) == 10 else text
+    except ValueError:
+        pass
+    return f"about {text}" if about else text
+
+
+def _inline_text(token: Token) -> str:
+    """An inline token's words, read without drawing (or counting) its pictures."""
+    return "".join(
+        child.content
+        for child in token.children or []
+        if child.type in ("text", "code_inline") or (child.type == "html_inline" and not child.content.startswith("<!--"))
+    )
+
+
+def _prints(tokens: list[Token], index: int) -> bool:
+    """Whether the block opening at ``index`` puts anything on the page: a rule, a
+    page break or a comment does not, and neither does a paragraph of guidance."""
+    token = tokens[index]
+    if token.type == "paragraph_open":
+        inline = tokens[index + 1] if index + 1 < len(tokens) else None
+        if inline is None:
+            return False
+        return bool(_inline_text(inline).strip()) or any(
+            child.type == "image" for child in inline.children or []
+        )
+    if token.type == "html_block":
+        text = token.content.strip()
+        return bool(text) and not PAGE_BREAK.match(text) and not COMMENT.match(text)
+    return token.type not in ("hr", "heading_open")
+
+
+def _cut_text(text: str, limit: int) -> str:
+    return text if len(text) <= limit else f"{text[: limit - 1].rstrip()}…"
+
+
+def _web(value: str) -> str:
+    """``value`` when it is a web address a reader can open, else ""."""
+    try:
+        parts = urlsplit(value.strip())
+        host = parts.hostname
+    except ValueError:
+        return ""
+    return value.strip() if parts.scheme in ("http", "https") and host else ""
+
+
+def _host(url: str) -> str:
+    """`example.org` for an address, as a credit line names where a picture came from."""
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def _web_address(record: dict[str, Any] | None) -> str:
+    """The address a record stands for on the web, or "" when it has none.
+
+    The record's own address first, where the case keeps it for that type (a
+    bookmark's page, a file's source, `proposals.URL_ATTRS`), then an account's
+    profile, and an archived copy last: a reader wants the page itself and only
+    falls back on the snapshot. Each one is checked here, since the addresses a
+    tool writes are not declared fields and never passed `entities._check_url`.
+    """
+    attrs = (record or {}).get("attrs") or {}
+    kind = str((record or {}).get("type") or "")
+    declared = entities.entity_type(kind)
+    keys = [
+        *([URL_ATTRS[kind]] if kind in URL_ATTRS else []),
+        "url",
+        "source_url",
+        *(attr.key for attr in (declared.attrs if declared else ()) if attr.kind == "url"),
+    ]
+    for key in keys:
+        address = _web(str(attrs.get(key) or ""))
+        if address:
+            return address
+    return ""
+
+
 def _hard_wrap(line: str, pdf: FPDF, width: float) -> list[str]:
     """Break a code line too wide for the page.
 
@@ -2241,16 +2716,107 @@ def _hard_wrap(line: str, pdf: FPDF, width: float) -> list[str]:
 
 
 def _measure(source: Path | BytesIO) -> tuple[int, int] | None:
+    """A picture's size in pixels, the way it is seen: a JPEG a phone took on its
+    side and marked so in its EXIF is as wide as it is drawn upright."""
     try:
         with PILImage.open(source) as image:
             if image.width * image.height > MAX_IMAGE_PIXELS:
                 return None
+            if image.format == "JPEG" and _orientation(image) in TURNED:
+                return image.height, image.width
             return image.width, image.height
     except (OSError, UnidentifiedImageError, PILImage.DecompressionBombError):
         return None
     finally:
         if isinstance(source, BytesIO):
             source.seek(0)
+
+
+#: EXIF orientations that swap a picture's width and height once it is upright.
+TURNED = (5, 6, 7, 8)
+#: The JPEG segments that say more than the picture: EXIF (with its GPS) and XMP
+#: in APP1, IPTC in APP13, free text in COM. ICC colour (APP2) and the Adobe
+#: segment a CMYK file needs (APP14) stay.
+PRIVATE_SEGMENTS = frozenset({0xE1, 0xED, 0xFE})
+
+
+def _orientation(image: PILImage.Image) -> int:
+    try:
+        value = image.getexif().get(0x0112, 1)
+    except Exception:  # a broken EXIF block says nothing about the pixels
+        return 1
+    return value if isinstance(value, int) else 1
+
+
+def _strip_jpeg(data: bytes) -> bytes | None:
+    """The JPEG with its metadata segments taken out and its image data byte for
+    byte, or None when its markers do not walk cleanly."""
+    if data[:2] != b"\xff\xd8":
+        return None
+    out = bytearray(data[:2])
+    position = 2
+    while position + 4 <= len(data):
+        if data[position] != 0xFF:
+            return None
+        marker = data[position + 1]
+        if marker == 0xFF:  # a fill byte before the marker
+            position += 1
+            continue
+        if marker == 0x01 or 0xD0 <= marker <= 0xD7:
+            out += data[position : position + 2]
+            position += 2
+            continue
+        length = int.from_bytes(data[position + 2 : position + 4], "big")
+        if length < 2 or position + 2 + length > len(data):
+            return None
+        if marker == 0xDA:  # the scan: compressed pixels from here to the end
+            out += data[position:]
+            return bytes(out)
+        if marker not in PRIVATE_SEGMENTS:
+            out += data[position : position + 2 + length]
+        position += 2 + length
+    return None
+
+
+def _clean_jpeg(data: bytes) -> bytes | None:
+    """A JPEG as it may go into a shared PDF, or None when ``data`` is no JPEG.
+
+    Taken apart rather than decoded, so the picture is the same to the bit. One
+    turned by its EXIF orientation is drawn upright first, as every viewer shows
+    it, since the PDF has no other way to know; that one is encoded again. So is
+    one whose segments cannot be walked: losing a little quality beats leaking
+    what the file knew.
+    """
+    if data[:2] != b"\xff\xd8":
+        return None
+    try:
+        with PILImage.open(BytesIO(data)) as image:
+            turned = _orientation(image) not in (1, 0)
+            stripped = None if turned else _strip_jpeg(data)
+            if stripped is not None:
+                return stripped
+            profile = image.info.get("icc_profile")
+            upright = ImageOps.exif_transpose(image)
+            if upright.mode not in ("RGB", "L", "CMYK"):
+                upright = upright.convert("RGB")
+            # Pillow writes back a comment and XMP it read unless told otherwise
+            upright.info = {}
+            buffer = BytesIO()
+            upright.save(buffer, "JPEG", quality=92, **({"icc_profile": profile} if profile else {}))
+            return buffer.getvalue()
+    except (OSError, UnidentifiedImageError, PILImage.DecompressionBombError):
+        return _strip_jpeg(data)
+
+
+def _clean_jpeg_file(path: Path) -> bytes | None:
+    """`_clean_jpeg` for a file, read only when it starts like a JPEG."""
+    try:
+        with path.open("rb") as handle:
+            if handle.read(2) != b"\xff\xd8":
+                return None
+            return _clean_jpeg(b"\xff\xd8" + handle.read())
+    except OSError:
+        return None
 
 
 def _diagram_size(png: bytes) -> tuple[int, int] | None:

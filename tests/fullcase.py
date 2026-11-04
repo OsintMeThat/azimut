@@ -440,7 +440,8 @@ def build_full_case(
     # how both print: a look on the note's entity, and the case notes' in the case settings
     look = client.put(
         f"/api/cases/{case_id}/notes/{full.note_id}/look",
-        json={"style": "report", "tlp": "amber", "toc": True, "cover": {"on": True, "subtitle": "Witness"}},
+        json={"style": "report", "tlp": "amber", "toc": True, "cover": {"on": True, "subtitle": "Witness"},
+              "font": "book", "size": "large"},
     )
     assert look.status_code == 200, look.text
     case_look = client.put(f"/api/cases/{case_id}/notes/case/look", json={"style": "journal"})

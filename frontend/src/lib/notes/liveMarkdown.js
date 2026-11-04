@@ -27,7 +27,9 @@ import { renderMermaidSvg } from '../mermaid.js';
 import { CALLOUT_LINE, calloutOf } from './callouts.js';
 import { paths as iconPaths } from '../../components/Icon.svelte';
 import { HINT_LINE, INCLUDE_LINE, PAGE_BREAK_LINE, includeLine } from './look.js';
-import { PICTURE_ALIGNS, PICTURE_SIZES, pictureLine, picturesIn, sizeWidth, sizedLine } from './pictureSize.js';
+import {
+  CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, captionField, pictureLine, picturesIn, rovingToolbar, sizeWidth, sizedLine,
+} from './pictureSize.js';
 import {
   findCoordinates, findReferences, mentionMatches, slashInsert, slashMatches,
 } from './syntax.js';
@@ -366,7 +368,7 @@ function pictureRatio(box) {
   return image?.naturalWidth ? image.naturalHeight / image.naturalWidth : 0;
 }
 
-/** The size and place buttons over a picture: what the PDF prints it at. */
+/** The size and place buttons over a picture, and its caption: what the PDF prints it at. */
 function sizeBar(box, source) {
   const [picture] = picturesIn(source);
   const bar = document.createElement('div');
@@ -404,21 +406,57 @@ function sizeBar(box, source) {
     button.append(iconSvg(icon));
     bar.append(button);
   }
+  const caption = document.createElement('button');
+  caption.type = 'button';
+  caption.className = 'cm-size-caption';
+  caption.dataset.caption = 'true';
+  caption.textContent = 'Caption';
+  caption.title = CAPTION_HELP.button;
+  bar.append(caption);
+  rovingToolbar(bar);
   return bar;
+}
+
+/** Open the caption field under the picture drawn in `box`, in place of the caption shown there. */
+function openCaption(view, box) {
+  if (box.querySelector('.picture-caption-field')) return;
+  const line = view.state.doc.lineAt(view.posAtDOM(box));
+  const [picture] = picturesIn(line.text);
+  if (!picture) return;
+  box.classList.add('cm-captioning');
+  const field = captionField({
+    caption: picture.caption,
+    title: picture.title,
+    write: (caption) => {
+      const now = view.state.doc.lineAt(view.posAtDOM(box));
+      resizePicture(view, now.number - 1, picture.ref, { caption });
+    },
+    done: (by) => {
+      box.classList.remove('cm-captioning');
+      field.remove();
+      // Enter and Escape hand the keyboard back to the note; a press elsewhere keeps its own focus
+      if (by === 'keyboard') view.focus();
+    },
+  });
+  box.append(field);
+  field.focus();
+  field.select();
 }
 
 /** A drawn block (a picture, a table, a diagram): pressing it puts the cursor back in its source. */
 class BlockWidget extends WidgetType {
-  constructor(kind, source, info) {
+  /** `writable`: whether the note can be changed, which is when a picture offers its bar. */
+  constructor(kind, source, info, writable = false) {
     super();
     this.kind = kind;
     this.source = source;
     this.info = info;
+    this.writable = writable;
   }
 
   eq(other) {
     return other.kind === this.kind && other.source === this.source && other.info.caseId === this.info.caseId
-      && other.info.entities === this.info.entities;
+      && other.info.entities === this.info.entities && other.writable === this.writable;
   }
 
   toDOM(view) {
@@ -428,32 +466,53 @@ class BlockWidget extends WidgetType {
     box.title = 'Click to edit';
     if (this.kind === 'diagram') drawDiagram(box, this.source);
     else box.innerHTML = markdownHtml(this.source, this.info);
-    if (this.kind === 'picture' && !view.state.readOnly) box.append(sizeBar(box, this.source));
-    box.addEventListener('mousedown', (event) => {
-      if (event.button !== 0 || event.target.closest('a, video, [data-entity-id]')) return;
-      event.preventDefault();
-      const pick = event.target.closest('[data-share], [data-align]');
-      if (pick) {
-        const line = view.state.doc.lineAt(view.posAtDOM(box));
-        const [picture] = picturesIn(line.text);
-        if (picture) {
-          const change = pick.dataset.share
-            ? { width: sizeWidth(Number(pick.dataset.share), pictureRatio(box)) }
-            : { align: pick.dataset.align };
-          resizePicture(view, line.number - 1, picture.ref, change);
-        }
+    if (this.kind === 'picture' && this.writable) box.append(sizeBar(box, this.source));
+    /** A button of the picture bar, pressed: a size, a place, or the caption field. */
+    const press = (target) => {
+      if (target.closest('[data-caption]')) {
+        openCaption(view, box);
         return;
       }
-      if (event.target.closest('[data-size-bar]')) return;
+      const pick = target.closest('[data-share], [data-align]');
+      if (!pick) return;
+      const line = view.state.doc.lineAt(view.posAtDOM(box));
+      const [picture] = picturesIn(line.text);
+      if (!picture) return;
+      const change = pick.dataset.share
+        ? { width: sizeWidth(Number(pick.dataset.share), pictureRatio(box)) }
+        : { align: pick.dataset.align };
+      resizePicture(view, line.number - 1, picture.ref, change);
+    };
+    box.addEventListener('mousedown', (event) => {
+      if (event.button !== 0 || event.target.closest('a, video, [data-entity-id], .picture-caption-field')) return;
+      event.preventDefault();
+      if (event.target.closest('[data-size-bar]')) {
+        press(event.target);
+        return;
+      }
       const at = view.posAtDOM(box);
       view.dispatch({ selection: { anchor: at } });
       view.focus();
+    });
+    // the mouse acts on the press, before focus moves; the keyboard's Enter and Space give a click
+    box.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-size-bar] button');
+      if (event.detail !== 0 || !button) return;
+      const from = view.state.doc.lineAt(view.posAtDOM(box)).from;
+      const same = button.dataset.share ? `[data-share="${button.dataset.share}"]`
+        : button.dataset.align ? `[data-align="${button.dataset.align}"]` : '[data-caption]';
+      press(button);
+      // the picture was drawn again with its new size: the keyboard stays on the button it pressed
+      if (box.isConnected) return;
+      const again = [...view.contentDOM.querySelectorAll('.cm-block-picture')].find((node) => view.posAtDOM(node) === from);
+      again?.querySelector(`[data-size-bar] ${same}`)?.focus({ preventScroll: true });
     });
     return box;
   }
 
   ignoreEvent(event) {
-    return event.type !== 'mousedown';
+    // the caption field is the browser's: the editor leaves its keys and presses alone
+    return event.type !== 'mousedown' || Boolean(event.target?.closest?.('.picture-caption-field'));
   }
 
   get estimatedHeight() {
@@ -574,7 +633,7 @@ export function noteDecorations(state) {
     const first = state.doc.lineAt(from);
     const last = state.doc.lineAt(to);
     covered.push([first.from, last.to]);
-    ranges.push(Decoration.replace({ widget: new BlockWidget(kind, state.doc.sliceString(first.from, last.to), info), block: true })
+    ranges.push(Decoration.replace({ widget: new BlockWidget(kind, state.doc.sliceString(first.from, last.to), info, !state.readOnly), block: true })
       .range(first.from, last.to));
   };
 
@@ -763,7 +822,7 @@ export function noteDecorations(state) {
     const pictureLine = !editing && PICTURE_LINE.test(line.text) && line.text.includes('[[media:');
     if (pictureLine) {
       covered.push([line.from, line.to]);
-      ranges.push(Decoration.replace({ widget: new BlockWidget('picture', line.text, info), block: true }).range(line.from, line.to));
+      ranges.push(Decoration.replace({ widget: new BlockWidget('picture', line.text, info, !state.readOnly), block: true }).range(line.from, line.to));
       continue;
     }
     const refs = findReferences(line.text, line.from).filter((ref) => !inCode(ref.from));
@@ -794,7 +853,9 @@ const drawn = StateField.define({
   create: (state) => noteDecorations(state),
   update(value, transaction) {
     const refocused = transaction.effects.some((effect) => effect.is(setFocused) || effect.is(setNoteCase));
-    if (transaction.docChanged || transaction.selection || refocused) return noteDecorations(transaction.state);
+    // a note read while it was locked gets its pictures' bars once it can be written
+    const unlocked = transaction.startState.readOnly !== transaction.state.readOnly;
+    if (transaction.docChanged || transaction.selection || refocused || unlocked) return noteDecorations(transaction.state);
     return value;
   },
   provide: (field) => [
@@ -894,7 +955,7 @@ export function insertAtCursor(view, text, { block = false } = {}) {
 }
 
 /**
- * Give the picture `ref` a new size or place (`{ width }`, `{ align }`), on the
+ * Give the picture `ref` a new size, place or caption (`{ width }`, `{ align }`, `{ caption }`), on the
  * line (0-based) the server placed it from or the nearest one holding it. False
  * when the note no longer holds it, or already says that.
  */
@@ -1157,12 +1218,13 @@ const look = EditorView.theme({
   '.cm-pagebreak:hover': { color: 'var(--text-2)' },
   '.cm-pagebreak-line': { color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: '0.9em' },
   '.cm-block-picture': { position: 'relative' },
+  // hidden until the picture is hovered, yet there for Tab, which shows it
   '.cm-size-bar': {
-    position: 'absolute', top: '10px', right: 'calc(var(--note-gutter, 32px) + 4px)', display: 'none', gap: '2px', padding: '3px',
+    position: 'absolute', top: '10px', right: 'calc(var(--note-gutter, 32px) + 4px)', display: 'flex', gap: '2px', padding: '3px',
     background: 'var(--bg-1)', border: '1px solid var(--border-strong)', borderRadius: '6px', boxShadow: 'var(--shadow-2)',
-    fontFamily: 'var(--font-sans)', fontSize: '11px', lineHeight: '1',
+    fontFamily: 'var(--font-sans)', fontSize: '11px', lineHeight: '1', opacity: '0', pointerEvents: 'none',
   },
-  '.cm-block-picture:hover .cm-size-bar, .cm-size-bar:focus-within': { display: 'flex' },
+  '.cm-block-picture:hover .cm-size-bar, .cm-size-bar:focus-within': { opacity: '1', pointerEvents: 'auto' },
   '.cm-size-bar button': {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '30px', height: '22px', padding: '0 6px',
     border: 'none', borderRadius: '4px', background: 'transparent', color: 'var(--text-2)', cursor: 'pointer', font: 'inherit',
@@ -1171,6 +1233,19 @@ const look = EditorView.theme({
   '.cm-size-bar button.cm-size-align:first-of-type': { marginLeft: '4px' },
   '.cm-size-bar button:hover': { background: 'var(--bg-3, var(--bg-2))', color: 'var(--text-1)' },
   '.cm-size-bar button[aria-pressed="true"]': { background: 'var(--accent-soft, var(--bg-2))', color: 'var(--accent)' },
+  '.cm-size-bar button.cm-size-caption': { marginLeft: '4px', padding: '0 8px' },
+  '.cm-size-bar button:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
+  '.cm-block .markdown-caption': {
+    display: 'block', marginTop: '6px', color: 'var(--text-2)', fontFamily: 'var(--font-sans)', fontSize: '0.84em', lineHeight: '1.4',
+  },
+  '.cm-block .markdown-caption.align-center': { textAlign: 'center' },
+  '.cm-block .markdown-caption.align-right': { textAlign: 'right' },
+  '.cm-captioning .markdown-caption': { display: 'none' },
+  '.picture-caption-field': {
+    display: 'block', boxSizing: 'border-box', width: '100%', marginTop: '6px', padding: '4px 8px', border: '1px solid var(--accent)',
+    borderRadius: '4px', background: 'var(--bg-1)', color: 'var(--text-1)', font: 'inherit', fontFamily: 'var(--font-sans)',
+    fontSize: '0.84em', outline: 'none', cursor: 'text',
+  },
   '.cm-tooltip.cm-tooltip-autocomplete': {
     background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '6px', boxShadow: 'var(--shadow-2)', overflow: 'hidden',
   },

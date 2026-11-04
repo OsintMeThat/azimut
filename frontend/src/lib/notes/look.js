@@ -1,7 +1,7 @@
 /**
- * How a note prints: its look (a style, a page size, an accent, a TLP marking,
- * a cover, a table of contents, numbered headings), and the two lines a report
- * is made of, chapters and guidance.
+ * How a note prints: its look (a style, a typeface and a text size, a page size,
+ * an accent, a TLP marking, a cover, a table of contents, numbered headings), and
+ * the two lines a report is made of, chapters and guidance.
  *
  * A look is kept beside the note, never in its Markdown (`notes/{id}/look`), so
  * a note without one prints exactly as before. The server checks every look it
@@ -11,6 +11,8 @@ import { api } from '../api.js';
 
 export const DEFAULT_LOOK = Object.freeze({
   style: 'plain',
+  font: '',
+  size: '',
   page: 'a4',
   accent: '',
   tlp: '',
@@ -19,11 +21,31 @@ export const DEFAULT_LOOK = Object.freeze({
   numbered: false,
 });
 
+/** Each style, and the typeface it sets its text in when none is picked (`engine/notes_style.py`). */
 export const STYLES = [
-  { id: 'plain', label: 'Plain', note: 'The note as it reads' },
-  { id: 'report', label: 'Report', note: 'Cover, contents, numbered parts' },
-  { id: 'brief', label: 'Brief', note: 'Verdict first, one or two pages' },
-  { id: 'journal', label: 'Journal', note: 'Dated entries, times in the margin' },
+  { id: 'plain', label: 'Plain', note: 'The note as it reads', font: 'serif' },
+  { id: 'report', label: 'Report', note: 'Cover, contents, numbered parts', font: 'serif' },
+  { id: 'brief', label: 'Brief', note: 'Verdict first, one or two pages', font: 'sans' },
+  { id: 'journal', label: 'Journal', note: 'Dated entries, times in the margin', font: 'serif' },
+];
+
+/**
+ * The typefaces a note can print in, "" being the style's own. The labels are
+ * stand-ins until the server names each family (`GET /api/notes/fonts`).
+ */
+export const FONTS = [
+  { id: '', label: "Style's own" },
+  { id: 'serif', label: 'Noto Serif', note: 'Serif text, sans headings' },
+  { id: 'sans', label: 'Noto Sans', note: 'Sans throughout' },
+  { id: 'book', label: 'Literata', note: 'A book serif for long write-ups' },
+  { id: 'modern', label: 'IBM Plex Sans', note: 'A clean sans for short briefs' },
+];
+
+/** The text size, against the style's own: headings, tables and captions follow. */
+export const SIZES = [
+  { id: 'small', label: 'Smaller' },
+  { id: '', label: 'Normal' },
+  { id: 'large', label: 'Larger' },
 ];
 
 export const PAGES = [
@@ -55,6 +77,8 @@ export function normaliseLook(look) {
   const date = String(cover.date ?? '');
   return {
     style: pick(given.style, STYLES, DEFAULT_LOOK.style),
+    font: pick(given.font ?? '', FONTS, ''),
+    size: pick(given.size ?? '', SIZES, ''),
     page: pick(given.page, PAGES, DEFAULT_LOOK.page),
     accent: HEX.test(accent) ? accent : '',
     tlp: pick(given.tlp ?? '', TLPS, ''),
@@ -87,6 +111,12 @@ export function isPlainLook(look) {
 
 export function styleLabel(style) {
   return STYLES.find((item) => item.id === style)?.label ?? 'Plain';
+}
+
+/** The typeface a look prints its text in: the one picked, or its style's own. */
+export function lookFont(look) {
+  const whole = normaliseLook(look);
+  return whole.font || STYLES.find((item) => item.id === whole.style)?.font || 'serif';
 }
 
 /** A note of the home that reads as a report: a style of its own, or chapters. */

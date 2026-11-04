@@ -43,8 +43,10 @@
     const key = (event) => {
       if (event.key !== 'Escape') return;
       event.preventDefault(); event.stopImmediatePropagation();
+      // held before closing: the opener forgets its anchor as it closes the menu
+      const opener = anchor;
       onclose?.();
-      anchor?.focus?.();
+      opener?.focus?.();
     };
     // The panel under an opener scrolls: the menu goes with the opener.
     const scroll = (event) => { if (!node.contains(event.target)) reposition(); };

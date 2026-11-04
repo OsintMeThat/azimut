@@ -4,7 +4,7 @@ const { postBytes } = vi.hoisted(() => ({ postBytes: vi.fn() }));
 vi.mock('../api.js', () => ({ api: { postBytes } }));
 vi.mock('../notesExport.js', () => ({ drawDiagrams: vi.fn() }));
 
-const { createPreview, fetchPreview, forgetDiagrams, headerList, pageLine } = await import('./preview.js');
+const { createPreview, fetchPreview, forgetDiagrams, headerList, noteWarnings, pageLine } = await import('./preview.js');
 
 const page = (overrides = {}) => ({ data: new ArrayBuffer(4), pages: [0], diagrams: [], warnings: [], ...overrides });
 
@@ -30,7 +30,25 @@ describe('asking the server for a page', () => {
       { note: 'n1', title: 'Lead', text: '# Lead', look: { style: 'report' }, diagrams: {} }, { signal: undefined });
     expect(answer.pages).toEqual([0, 14, 40]);
     expect(answer.diagrams).toEqual([{ key: 'ab12', source: 'flowchart LR' }]);
-    expect(answer.warnings).toEqual(['A picture is missing']);
+    expect(answer.warnings).toEqual([{ text: 'A picture is missing', line: null }]);
+  });
+
+  it('gives each warning the line the server says it is about', () => {
+    const headers = new Headers({
+      'X-Note-Warnings': '["Section \\"Method\\" is empty.", "A picture is missing"]',
+      'X-Note-Warning-Lines': '[12, null]',
+    });
+    expect(noteWarnings(headers)).toEqual([
+      { text: 'Section "Method" is empty.', line: 12 },
+      { text: 'A picture is missing', line: null },
+    ]);
+  });
+
+  it('gives no warning a line when the two lists do not pair up', () => {
+    const headers = new Headers({ 'X-Note-Warnings': '["One", "Two"]', 'X-Note-Warning-Lines': '[3]' });
+    expect(noteWarnings(headers)).toEqual([{ text: 'One', line: null }, { text: 'Two', line: null }]);
+    const odd = new Headers({ 'X-Note-Warnings': '["One"]', 'X-Note-Warning-Lines': '[-1]' });
+    expect(noteWarnings(odd)).toEqual([{ text: 'One', line: null }]);
   });
 
   it('posts a template to the route that needs no case, without a note', async () => {

@@ -40,8 +40,8 @@ if sys.platform == "linux":
     )
 
 # Grabs the package's data files from the installed wheel: azimut/static/**
-# (index.html, assets, favicon) and azimut/assets/fonts/** — the 15 MB of Noto,
-# Droid and DejaVu faces the notes PDF draws with (engine/pdffonts.py). The
+# (index.html, assets, favicon) and azimut/assets/fonts/** — the 18 MB of Noto,
+# Droid, DejaVu, Literata and Plex faces the notes PDF draws with (engine/pdffonts.py). The
 # fonts have to be in the bundle, not on the machine: a PDF embeds the glyphs it
 # uses, so an export made on Windows and one made on Linux must find the same
 # faces or they are different documents.

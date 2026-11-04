@@ -2,6 +2,7 @@ import DOMPurify from 'dompurify';
 import { marked, Renderer } from 'marked';
 
 import { fileRelPath, fileUrl } from './fileUrl.js';
+import { readAttrs } from './notes/pictureSize.js';
 
 const ENTITY_REF = /\[\[entity:([A-Za-z0-9_-]+)\|([^\]]+)\]\]/g;
 const MEDIA_REF = /\[\[media:([A-Za-z0-9_-]+)\|([^\]]+)\]\](?:\{([^}\n]+)\})?/g;
@@ -85,18 +86,23 @@ function imageOptions(href) {
   const source = url.origin === 'https://notebook.invalid'
     ? `${url.pathname}${url.search}${url.hash}`
     : url.toString();
-  const values = Object.fromEntries([...attributes.matchAll(/\b(width|align)\s*=\s*([\w.%+-]+)/g)]
-    .map(([, key, value]) => [key, value]));
+  const values = readAttrs(attributes);
   const width = /^(?:[1-9]\d?(?:\.\d+)?|100(?:\.0+)?)%$/.test(values.width ?? '')
     || /^(?:[2-9]\d|[1-9]\d{2}|1[0-5]\d{2}|1600)px$/.test(values.width ?? '')
     ? values.width : '';
   const align = ['left', 'center', 'right'].includes(values.align) ? values.align : 'left';
-  return { href: source, width, align };
+  return { href: source, width, align, caption: values.caption };
 }
 
 function imageMarkup({ href, alt, title, width, align }) {
   const attrs = `${title ? ` title="${title}"` : ''}${width ? ` style="width: ${width}"` : ''}`;
   return { attrs, className: `markdown-image align-${align}` };
+}
+
+/** The line the PDF prints under a picture: its caption, else its title. */
+function captionMarkup({ caption, align }, title) {
+  const words = caption || title;
+  return words ? `<span class="markdown-caption align-${align}">${escapeHtml(words)}</span>` : '';
 }
 
 function renderer({ entities, caseId, redirects }) {
@@ -154,11 +160,11 @@ function renderer({ entities, caseId, redirects }) {
       const url = fileUrl(caseId, entity.attrs.path);
       const markup = imageMarkup({ href: url, alt: entity.label, title: token.title, ...options });
       return entity.attrs.kind === 'video'
-        ? `<video controls src="${url}" class="${markup.className}"${markup.attrs}>${token.text}</video>`
-        : `<img src="${url}" alt="${entity.label}" class="${markup.className}"${markup.attrs}>`;
+        ? `<video controls src="${url}" class="${markup.className}"${markup.attrs}>${token.text}</video>${captionMarkup(options, token.title)}`
+        : `<img src="${url}" alt="${entity.label}" class="${markup.className}"${markup.attrs}>${captionMarkup(options, token.title)}`;
     }
     const markup = imageMarkup({ href: options.href, alt: token.text, title: token.title, ...options });
-    return `<img src="${options.href}" alt="${token.text}" class="${markup.className}"${markup.attrs}>`;
+    return `<img src="${options.href}" alt="${token.text}" class="${markup.className}"${markup.attrs}>${captionMarkup(options, token.title)}`;
   };
   return value;
 }

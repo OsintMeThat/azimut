@@ -142,7 +142,7 @@
   const api_ = {
     insert: (text, options) => insert(text, options),
     jump: (line) => view && jumpToLine(view, line),
-    /** Size or place a picture from the Page pane: its line there, what it shows, `{ width }` or `{ align }`. */
+    /** Size, place or caption a picture from the Page pane: its line there, what it shows, `{ width }`, `{ align }` or `{ caption }`. */
     resize: (line, ref, changes) => Boolean(view && !readOnly && resizePicture(view, line, ref, changes)),
     focus: () => view?.focus(),
   };

@@ -4,8 +4,11 @@
  * `lookHelp.test.js` holds every key to a sentence and to a control showing it.
  */
 export const LOOK_HELP = {
-  open: 'How this note prints: style, page, marking, cover',
+  open: 'How this note prints: style, text, page, marking, cover',
   style: 'The layout the PDF is set in',
+  font: 'The typeface and size of the text',
+  fontOwn: 'Use the typeface the style comes with',
+  size: 'The size of the text, headings and tables',
   page: 'The paper size of the PDF',
   accent: 'The colour of headings, rules and callout edges',
   accentOwn: 'Use the colour the style comes with',

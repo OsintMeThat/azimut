@@ -12,7 +12,9 @@ which is ``plain``: the document every note printed as before looks existed.
 
 Nothing here bumps the case schema. An older Azimut opening a case that holds
 looks sees one more attr and one more setting it never reads, and prints every
-note plain.
+note plain. The face and the text size came later (`font`, `size`) and are
+written only once they are set, so a look that never used them reads the same
+to a reader that predates them.
 """
 
 from __future__ import annotations
@@ -21,7 +23,16 @@ import json
 from datetime import date
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    StrictBool,
+    ValidationError,
+    field_validator,
+    model_serializer,
+)
 
 if TYPE_CHECKING:
     from ..workspace import Case
@@ -36,6 +47,13 @@ ATTR = "look"
 Style = Literal["plain", "report", "brief", "journal"]
 Page = Literal["a4", "letter"]
 Tlp = Literal["", "clear", "green", "amber", "amber-strict", "red"]
+#: The faces a note's text is set in (`engine/pdffonts.py`, `FONTS`); "" keeps the style's own.
+Font = Literal["", "serif", "sans", "book", "modern"]
+#: The text a step smaller or larger than the style's; "" keeps the style's own.
+Size = Literal["", "small", "large"]
+#: Keys a look writes only once they leave their default, so a look that never used
+#: them is stored, served and bundled exactly as an older Azimut wrote it.
+LATE_KEYS = ("font", "size")
 
 #: FIRST TLP 2.0: the label as written, and its colour. Every label is set on
 #: black, in capitals, with no spaces, right-justified in the header and footer of
@@ -90,6 +108,18 @@ class NoteLook(BaseModel):
     cover: NoteCover = Field(default_factory=NoteCover)
     toc: StrictBool = False
     numbered: StrictBool = False
+    font: Font = ""
+    size: Size = ""
+
+    @model_serializer(mode="wrap")
+    def _late_keys_only_when_set(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        # An older reader refuses a key it does not know in a template's look; one
+        # that was never changed is not worth hiding the template from it for.
+        data = dict(handler(self))
+        for key in LATE_KEYS:
+            if data.get(key) == "":
+                data.pop(key, None)
+        return data
 
     @field_validator("accent")
     @classmethod
@@ -126,9 +156,10 @@ def parse(value: Any) -> NoteLook | None:
     """A stored look as a model, or None when it is absent or unreadable.
 
     Lenient where the routes are strict: a look written by a later Azimut may
-    carry a key this one does not know, and the note should still print with
-    everything it does know rather than fall back to plain. Only a look that
-    stays invalid once those keys are dropped reads as none at all.
+    carry a key this one does not know, or a value it does not (a face added
+    since), and the note should still print with everything it does know rather
+    than fall back to plain. Such a key or value is dropped, back to its default,
+    and the rest is kept; a look with nothing readable left reads as none at all.
     """
     if value is None:
         return None
@@ -147,10 +178,25 @@ def parse(value: Any) -> NoteLook | None:
     cover = known.get("cover")
     if isinstance(cover, dict):
         known["cover"] = {key: cover[key] for key in NoteCover.model_fields if key in cover}
-    try:
-        return NoteLook.model_validate(known)
-    except ValidationError:
-        return None
+    # One unreadable value at a time goes back to its default; a field nested in
+    # the cover goes alone, and the rest of the cover stays.
+    for _ in range(len(NoteLook.model_fields) + len(NoteCover.model_fields) + 1):
+        try:
+            return NoteLook.model_validate(known)
+        except ValidationError as exc:
+            dropped = False
+            for error in exc.errors():
+                where = error.get("loc") or ()
+                inner = known.get("cover")
+                if len(where) >= 2 and where[0] == "cover" and isinstance(inner, dict) and where[1] in inner:
+                    inner.pop(where[1])
+                    dropped = True
+                elif where and where[0] in known:
+                    known.pop(str(where[0]))
+                    dropped = True
+            if not dropped or not known:
+                return None
+    return None
 
 
 def stored(case: "Case", note_id: str, *, entity: dict[str, Any] | None = None) -> NoteLook | None:

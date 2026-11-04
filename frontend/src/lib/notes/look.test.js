@@ -4,7 +4,7 @@ const { get, put } = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
 vi.mock('../api.js', () => ({ api: { get, put } }));
 
 const {
-  DEFAULT_LOOK, HINT_LINE, INCLUDE_LINE, hintLine, includeLine, isPlainLook, isReport, normaliseLook,
+  DEFAULT_LOOK, FONTS, HINT_LINE, INCLUDE_LINE, SIZES, hintLine, includeLine, isPlainLook, isReport, lookFont, normaliseLook,
   readLook, reportBody, reportLook, templateLook, writeLook,
 } = await import('./look.js');
 
@@ -29,9 +29,26 @@ describe('a look', () => {
     });
   });
 
+  it('keeps a typeface and a text size it knows, and the style\'s own for anything else', () => {
+    expect(normaliseLook({ font: 'book', size: 'large' })).toMatchObject({ font: 'book', size: 'large' });
+    expect(normaliseLook({ font: 'comic', size: 'huge' })).toMatchObject({ font: '', size: '' });
+    expect(normaliseLook({})).toMatchObject({ font: '', size: '' });
+    expect(isPlainLook({ font: '', size: '' })).toBe(true);
+    expect(isPlainLook({ size: 'small' })).toBe(false);
+    expect(FONTS.map((font) => font.id)).toEqual(['', 'serif', 'sans', 'book', 'modern']);
+    expect(SIZES.map((size) => size.label)).toEqual(['Smaller', 'Normal', 'Larger']);
+  });
+
+  it('says which typeface a look prints in, its style\'s when none is picked', () => {
+    expect(lookFont(null)).toBe('serif');
+    expect(lookFont({ style: 'brief' })).toBe('sans');
+    expect(lookFont({ style: 'brief', font: 'book' })).toBe('book');
+  });
+
   it('keeps no picture and no day in a template', () => {
-    const look = templateLook({ style: 'report', cover: { on: true, subtitle: 'Draft', image: 'm1', date: '2026-11-04' } });
+    const look = templateLook({ style: 'report', font: 'modern', size: 'small', cover: { on: true, subtitle: 'Draft', image: 'm1', date: '2026-11-04' } });
     expect(look.cover).toEqual({ on: true, subtitle: 'Draft', image: '', date: '' });
+    expect(look).toMatchObject({ font: 'modern', size: 'small' });
   });
 
   it('starts a report with a cover and its contents', () => {

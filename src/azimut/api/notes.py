@@ -16,7 +16,9 @@ never overwrites, because the files there are theirs.
 
 Each note prints in its own look (`engine/notelook.py`), kept beside the note and
 set through `/notes/{id}/look`. The page pane asks `/notes/preview` for the PDF of
-the text being typed: the same renderer, the same bounds, nothing written.
+the text being typed: the same renderer, the same bounds, nothing written. The
+faces a look can pick are listed, and their regular weights served for the Look
+control's samples, under `/api/notes/fonts`, outside any case.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from pathlib import Path
 from typing import Any, Iterator, NamedTuple
 
 from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .. import errors, layout
@@ -45,6 +48,8 @@ from ..workspace import Case, CaseError
 from .cases import get_case
 
 router = APIRouter(prefix="/api/cases", tags=["notes"])
+#: What every case's notes share: the faces a look can set a note in.
+fonts_router = APIRouter(prefix="/api/notes", tags=["notes"])
 
 #: The case's own scratchpad, which is a note without an entity behind it.
 CASE_NOTE = notelook.CASE_NOTE
@@ -460,8 +465,34 @@ def preview_response(
             "X-Note-Warnings": _ascii_json(
                 [warning[:MAX_WARNING_CHARS] for warning in rendered.warnings[:MAX_HEADER_WARNINGS]]
             ),
+            # beside the list rather than in it, so a reader of the list alone keeps working
+            "X-Note-Warning-Lines": _ascii_json(rendered.warning_lines[:MAX_HEADER_WARNINGS]),
             "X-Note-Pictures": _pictures_header(rendered.pictures),
         },
+    )
+
+
+@fonts_router.get("/fonts")
+def note_fonts() -> dict[str, Any]:
+    """The faces a note's look can set its text in, in the order the Look lists them."""
+    return {"fonts": [{"key": font.key, "label": font.label, "kind": font.kind} for font in pdffonts.FONTS]}
+
+
+@fonts_router.get("/fonts/{name}")
+def note_font_file(name: str) -> FileResponse:
+    """One choice's regular face, for the Look control to draw its sample in.
+
+    Named by key from the fixed list, never by path, so nothing the browser sends
+    can reach another file.
+    """
+    key, dot, extension = name.rpartition(".")
+    font = pdffonts.FONTS_BY_KEY.get(key) if dot and extension == "ttf" else None
+    if font is None:
+        raise HTTPException(status_code=404, detail="no such font")
+    return FileResponse(
+        pdffonts.FONT_DIR / font.regular,
+        media_type="font/ttf",
+        headers={"Cache-Control": "public, max-age=86400"},
     )
 
 

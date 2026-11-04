@@ -1,8 +1,23 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
-import LookControl from './LookControl.svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import { normaliseLook } from '../../lib/notes/look.js';
+
+// the server names the families; their faces load as the panel opens, Inter's file is missing
+const { loads } = vi.hoisted(() => ({ loads: [] }));
+vi.mock('../../lib/notes/noteFonts.js', () => ({
+  faceFamily: (key) => `azimut-note-${key}`,
+  noteFonts: async () => [
+    { id: '', label: "Style's own" },
+    { id: 'serif', label: 'Noto Serif', note: 'Serif text, sans headings' },
+    { id: 'sans', label: 'Noto Sans', note: 'Sans throughout' },
+    { id: 'book', label: 'Source Serif 4', note: 'A book serif for long write-ups' },
+    { id: 'modern', label: 'Inter', note: 'A clean sans for short briefs' },
+  ],
+  loadNoteFont: async (key) => { loads.push(key); return key !== 'modern'; },
+}));
+
+const { default: LookControl } = await import('./LookControl.svelte');
 
 /**
  * The Look panel, mounted: each setting hands the whole look up at once, which the
@@ -22,6 +37,7 @@ let changes;
 
 beforeEach(() => {
   changes = [];
+  loads.length = 0;
   props.look = normaliseLook(null);
   props.template = false;
   // the Notebook takes what is handed up as the look shown
@@ -122,6 +138,45 @@ describe('the Look panel', () => {
     pressed("Style's own").click();
     flushSync();
     expect(changes.at(-1).accent).toBe('');
+  });
+
+  it('shows each typeface in its own face, the style\'s own first, and hands the one picked up', async () => {
+    openPanel();
+    for (let round = 0; round < 4; round += 1) await tick();
+    flushSync();
+    const cards = [...panel().querySelectorAll('.font-card')];
+    expect(cards.map((card) => card.querySelector('.font-name').textContent)).toEqual(["Style's own", 'Noto Serif', 'Noto Sans', 'Source Serif 4', 'Inter']);
+    expect(loads.sort()).toEqual(['book', 'modern', 'sans', 'serif']);
+    // drawn in its face once loaded; one that failed keeps the interface's font
+    expect(cards[3].querySelector('.font-ag').style.fontFamily).toContain('azimut-note-book');
+    expect(cards[4].querySelector('.font-ag').style.fontFamily).toBe('');
+    // the style's own is shown in the face Plain sets its text in
+    expect(cards[0].querySelector('.font-ag').style.fontFamily).toContain('azimut-note-serif');
+    expect(cards[0].getAttribute('aria-checked')).toBe('true');
+    cards[3].click();
+    flushSync();
+    expect(changes.at(-1)).toMatchObject({ font: 'book', size: '' });
+    expect(panel().querySelector('.font-card.on .font-name').textContent).toBe('Source Serif 4');
+  });
+
+  it('sets the text smaller or larger, and back to normal', () => {
+    openPanel();
+    const sizes = panel().querySelector('[aria-label="Text size"]');
+    expect([...sizes.querySelectorAll('button')].map((button) => button.textContent.trim())).toEqual(['Smaller', 'Normal', 'Larger']);
+    pressed('Larger').click();
+    flushSync();
+    expect(changes.at(-1).size).toBe('large');
+    pressed('Normal').click();
+    flushSync();
+    expect(changes.at(-1).size).toBe('');
+  });
+
+  it('opens with the style picked in focus, so the keyboard goes on inside the panel', async () => {
+    props.look = normaliseLook({ style: 'journal' });
+    openPanel();
+    await tick();
+    await tick();
+    expect(document.activeElement?.textContent).toContain('Journal');
   });
 
   it('offers a template no picture and no day', () => {

@@ -196,7 +196,7 @@ proof for publication.
 | ✅ **Files & navigation** | Files work into the active folder, offers contextual actions and filters, opens media in one full-screen viewer, and retraces tools and documents with guarded Back and Forward. |
 | ✅ **Command palette** | Ctrl+K or ⌘K searches tools, cases and current-case documents, starts with recently added items and protects unsaved work. |
 | ✅ **Notebook, written in place** | Opens on note cards with a search through their words, writes a note as it reads with @ citations, / blocks, callouts and tasks, keeps it beside every tool or in a tab of its own, starts notes from ready ones or templates, and lists each note in Details of what it cites. |
-| ✅ **Notebook reports** | Prints a note as Plain, Report, Brief or Journal with a cover, contents and TLP marking on A4 or Letter, shows its pages beside it while it is written, sizes pictures where they print, breaks pages, gathers notes as chapters, and starts from nine ready templates or Settings' own. |
+| ✅ **Notebook reports** | Prints a note as Plain, Report, Brief or Journal in a choice of typefaces, with a cover, contents and TLP marking on A4 or Letter, captions, credits and live source links, shows its pages beside it while it is written, sizes pictures where they print, breaks pages, gathers notes as chapters, and starts from nine ready templates or Settings' own. |
 
 ---
 
@@ -282,6 +282,8 @@ stops making sense.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
 - **Notes, next:** a selection sent to the Post composer, a preview on hovering a chip.
 - **Report, next:** a signature block at the end of a report, and an optional Azimut mark on its cover or footer.
+- **A report from a period:** every geolocation of a period written into a note through a per-item layout (card, table, one per page).
+- **Interactive map plate:** a map of a period's located videos, each point playing its clip, made without drawing it by hand.
 - **More on the home page:** the case's own notes beside the tiles, and panels the analyst arranges rather than a fixed grid. Each has to earn its place there rather than beside Board, Graph and Timeline, which already read the case.
 - **Radar damage from a stack of passes:** the pixel-wise t-test (PWTT) over a year of passes before and weeks after, which two passes cannot match.
 - **Oil slicks by radar:** dark patches on the sea near anchorages and lanes, which Sentinel-1 shows through cloud.
@@ -492,7 +494,10 @@ stops making sense.
   after sanitizing, under its own `strict` level, which escapes labels and drops
   click handlers. A note's page preview renders the same PDF in memory, one at a
   time and bounded like an export, and writes nothing; a template's preview has no
-  case and reads no case file. Decoded note pictures are kept between renders in a
+  case and reads no case file. The typefaces a note can print in are served
+  read-only from a fixed list (`/api/notes/fonts`), with no path taken from the
+  request. A JPEG goes into a note's PDF without its EXIF, GPS, XMP and IPTC
+  blocks. Decoded note pictures are kept between renders in a
   cache capped at 40 entries and 64 MB. Three routes take a picture drawn in the
   browser back: the note PDF export, whose request, diagrams and decoded total are
   bounded before

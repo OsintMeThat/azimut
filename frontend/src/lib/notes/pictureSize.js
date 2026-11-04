@@ -1,11 +1,13 @@
 /**
- * A picture's size and place on the page, as its line writes them:
- * `[[media:id|Label]]{width=50% align=center}` or `![Alt](address){width=…}`.
+ * A picture's size, place and caption on the page, as its line writes them:
+ * `[[media:id|Label]]{width=50% align=center caption="Smoke over the port"}` or
+ * `![Alt](address){width=…}`.
  *
- * The editor's size bar and the Page pane change a picture through here, so the
+ * The editor's picture bar and the Page pane change a picture through here, so the
  * line they write is the one the PDF reads (`engine/notes_pdf.py`). A picture is
  * known by what it shows (`media:<id>`, or the address an image is read from),
- * the name the server gives each one it places (`X-Note-Pictures`).
+ * the name the server gives each one it places (`X-Note-Pictures`). A key in the
+ * braces that is none of these is kept as it was written.
  */
 
 /**
@@ -35,31 +37,55 @@ export function sizeWidth(share, ratio = 0) {
 }
 
 const MEDIA = /\[\[media:([A-Za-z0-9_-]+)\|[^\]\n]+\]\](?:\{([^}\n]*)\})?/g;
-const IMAGE = /!\[[^\]\n]*\]\((\S+?)(?:\s+["'][^"'\n]*["'])?\)(?:\{([^}\n]*)\})?/g;
+const IMAGE = /!\[[^\]\n]*\]\((\S+?)(?:\s+["']([^"'\n]*)["'])?\)(?:\{([^}\n]*)\})?/g;
 const ATTR = /\b(width|align)\s*=\s*([\w.%+-]+)/g;
+/** Read first and taken out, so the words of a caption are never read as a size. */
+const CAPTION = /\bcaption\s*=\s*"([^"}\n]*)"/;
 
-/** `width=…` and `align=…` out of the braces after a picture. */
-export function readAttrs(attrs) {
-  const values = {};
-  for (const match of String(attrs ?? '').matchAll(ATTR)) values[match[1]] = match[2];
-  return { width: values.width ?? '', align: values.align ?? '' };
+/** The longest caption written: one line under the picture. */
+export const CAPTION_MAX = 300;
+
+/** A caption as it can be written in the braces: one line, no `"` and no `}`, at most `CAPTION_MAX`. */
+export function cleanCaption(text) {
+  return String(text ?? '').replace(/["}]/g, '').replace(/\s+/g, ' ').trim().slice(0, CAPTION_MAX).trim();
 }
 
-/** The braces for a size and a place: left, the default, is not written. */
-export function writeAttrs({ width = '', align = '' } = {}) {
+/** `width=…`, `align=…` and `caption="…"` out of the braces after a picture, and what else they hold. */
+export function readAttrs(attrs) {
+  let rest = String(attrs ?? '');
+  const caption = CAPTION.exec(rest);
+  if (caption) rest = `${rest.slice(0, caption.index)} ${rest.slice(caption.index + caption[0].length)}`;
+  const values = {};
+  for (const match of rest.matchAll(ATTR)) values[match[1]] = match[2];
+  return {
+    width: values.width ?? '',
+    align: values.align ?? '',
+    caption: caption ? caption[1].trim() : '',
+    rest: rest.replace(ATTR, ' ').replace(/\s+/g, ' ').trim(),
+  };
+}
+
+/** The braces for a size, a place and a caption: left, the default, is not written. */
+export function writeAttrs({ width = '', align = '', caption = '', rest = '' } = {}) {
   const parts = [];
   if (width) parts.push(`width=${width}`);
   if (align && align !== 'left') parts.push(`align=${align}`);
+  const words = cleanCaption(caption);
+  if (words) parts.push(`caption="${words}"`);
+  if (rest) parts.push(rest);
   return parts.length ? `{${parts.join(' ')}}` : '';
 }
 
-/** Every picture on a line, in order: what it shows, where it ends, and its size and place. */
+/**
+ * Every picture on a line, in order: what it shows, where it ends, its size,
+ * place and caption, and an image's title (which prints when it has no caption).
+ */
 export function picturesIn(text) {
   const line = String(text ?? '');
   const found = [];
   for (const [pattern, media] of [[MEDIA, true], [IMAGE, false]]) {
     for (const match of line.matchAll(pattern)) {
-      const attrs = match[2];
+      const attrs = media ? match[2] : match[3];
       const to = match.index + match[0].length;
       found.push({
         ref: media ? `media:${match[1]}` : match[1],
@@ -67,6 +93,7 @@ export function picturesIn(text) {
         // where the braces start, or would
         attrFrom: attrs === undefined ? to : to - attrs.length - 2,
         to,
+        title: media ? '' : match[2] ?? '',
         ...readAttrs(attrs),
       });
     }
@@ -87,12 +114,18 @@ export function sameRef(a, b) {
   return a === b || decoded(String(a)) === decoded(String(b));
 }
 
-/** The line with picture `ref` given `changes` ({ width, align }), or null when the line does not hold it. */
+/** The line with picture `ref` given `changes` ({ width }, { align }, { caption }), or null when the line does not hold it. */
 export function sizedLine(text, ref, changes) {
   const picture = picturesIn(text).find((item) => sameRef(item.ref, ref));
   if (!picture) return null;
-  const next = { width: picture.width, align: picture.align, ...changes };
+  const next = { width: picture.width, align: picture.align, caption: picture.caption, rest: picture.rest, ...changes };
   return `${text.slice(0, picture.attrFrom)}${writeAttrs(next)}${text.slice(picture.to)}`;
+}
+
+/** The picture `ref` on the line (0-based) holding it nearest to `line`, or null. */
+export function pictureAt(lines, line, ref) {
+  const at = pictureLine(lines, line, ref);
+  return at < 0 ? null : picturesIn(lines[at]).find((item) => sameRef(item.ref, ref)) ?? null;
 }
 
 /** The line (0-based) holding picture `ref` nearest to `line`, or -1: the server's line is a best effort. */
@@ -104,4 +137,79 @@ export function pictureLine(lines, line, ref) {
     if (best < 0 || Math.abs(index - line) < Math.abs(best - line)) best = index;
   }
   return best;
+}
+
+// -- the caption field ---------------------------------------------------------
+
+/** What the picture bars say, in the note and on the Page pane alike. */
+export const CAPTION_HELP = {
+  button: 'Caption: a line printed under the picture',
+  field: 'Enter writes it, Escape leaves it as it was',
+  placeholder: 'A line under the picture',
+};
+
+/**
+ * The one-line field a caption is written in, where it prints under the picture.
+ * Enter writes it (`write(words)`), as does leaving it; Escape leaves it as it was.
+ * `done(by)` is called once either way, `by` being `keyboard` or `blur`.
+ */
+export function captionField({ caption = '', title = '', write, done }) {
+  const field = document.createElement('input');
+  field.type = 'text';
+  field.className = 'picture-caption-field';
+  field.value = caption;
+  field.maxLength = CAPTION_MAX;
+  field.placeholder = title || CAPTION_HELP.placeholder;
+  field.title = CAPTION_HELP.field;
+  field.setAttribute('aria-label', 'Caption');
+  let over = false;
+  const finish = (keep, by) => {
+    if (over) return;
+    over = true;
+    if (keep && cleanCaption(field.value) !== cleanCaption(caption)) write(cleanCaption(field.value));
+    done(by);
+  };
+  field.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      finish(event.key === 'Enter', 'keyboard');
+    }
+  });
+  field.addEventListener('blur', () => finish(true, 'blur'));
+  return field;
+}
+
+/**
+ * A picture bar walked with the keyboard as a toolbar: Tab enters it once, on the
+ * button last used, and leaves it; the arrows, Home and End move along it. So a
+ * note with many pictures is not dozens of Tab presses long. Returns its undoing.
+ */
+export function rovingToolbar(bar) {
+  const buttons = () => [...bar.querySelectorAll('button')];
+  const settle = (current) => {
+    for (const button of buttons()) button.tabIndex = button === current ? 0 : -1;
+  };
+  settle(buttons()[0]);
+  const keydown = (event) => {
+    const list = buttons();
+    const at = list.indexOf(event.target.closest?.('button'));
+    if (at < 0) return;
+    const next = { ArrowRight: list[(at + 1) % list.length], ArrowLeft: list[(at - 1 + list.length) % list.length], Home: list[0], End: list.at(-1) }[event.key];
+    if (!next) return;
+    event.preventDefault();
+    event.stopPropagation();
+    settle(next);
+    next.focus();
+  };
+  const focusin = (event) => {
+    const button = event.target.closest?.('button');
+    if (button && bar.contains(button)) settle(button);
+  };
+  bar.addEventListener('keydown', keydown);
+  bar.addEventListener('focusin', focusin);
+  return () => {
+    bar.removeEventListener('keydown', keydown);
+    bar.removeEventListener('focusin', focusin);
+  };
 }

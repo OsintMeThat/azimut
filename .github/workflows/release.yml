@@ -74,8 +74,13 @@ jobs:
           assert static, "wheel is missing azimut/static/** — did the frontend build run?"
           required = {
               "azimut/assets/fonts/NotoSerif-Regular.ttf",
+              "azimut/assets/fonts/NotoSans-Italic.ttf",
+              "azimut/assets/fonts/Literata-Regular.ttf",
+              "azimut/assets/fonts/IBMPlexSans-Regular.ttf",
               "azimut/assets/fonts/APACHE-2.0.txt",
               "azimut/assets/fonts/OFL.txt",
+              "azimut/assets/fonts/Literata-OFL.txt",
+              "azimut/assets/fonts/IBMPlexSans-OFL.txt",
               "azimut/assets/fonts/BITSTREAM-VERA.txt",
               "azimut/assets/fonts/README.md",
           }

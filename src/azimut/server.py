@@ -342,6 +342,7 @@ def create_app() -> FastAPI:
     app.include_router(cases.workspace_router)
     app.include_router(analysis_views.router)
     app.include_router(notes.router)
+    app.include_router(notes.fonts_router)
     app.include_router(plates.router)
     app.include_router(mapplates.router)
     app.include_router(figures.router)
