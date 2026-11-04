@@ -190,8 +190,11 @@ NOTES: dict[str, tuple[str, str]] = {
 
 #: The fingerprint of each note above, taken from the engine before looks existed
 #: (the PDFs were also byte-identical then, with the creation date pinned).
+#: One deliberate change since: "everything" no longer prints its HTML comment,
+#: which every other Markdown reader hides and which could carry a private
+#: remark into a shared PDF. Nothing else on its pages moved.
 GOLDEN: dict[str, str] = {
-    "everything": "fe82bb16033805829703bba70d3418e2cea943459635677dcd15770277c290ab",
+    "everything": "be182d20d8a234eb5387a18c6665fb7efcc823e631370499bdf1db8517b814df",
     "pictures": "4761ad1b81a16fa4587478bbb35cf073aede7c4c9abb5d435ac2669cf8ef878c",
     "diagram": "a9d3c0d75d5b35847ba113821079551d98758666f65bcd877962a249bb0fc307",
     "scripts": "90b7ddb4b5b86c93dd54fba2e2e84698e24e6f7534d3da3d86980b0698cdf1b0",

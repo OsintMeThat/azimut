@@ -24,12 +24,12 @@ const note = (id, label, folder = '') => ({
 const LINES = Array.from({ length: 30 }, (_, index) => `Line ${index + 1}`).join('\n');
 
 /** The Notebook's routes, answered from what the spec holds and written down as they are asked. */
-async function notebook(page, { templates = [] } = {}) {
-  const catalog = [note('n1', 'Lead'), note('n2', 'Shadows', 'Leads'), note('n3', 'Mast')];
+async function notebook(page, { templates = [], extra = [], texts = {}, pictures = null } = {}) {
+  const catalog = [note('n1', 'Lead'), note('n2', 'Shadows', 'Leads'), note('n3', 'Mast'), ...extra];
   await installAppFixture(page, { catalog });
   const state = {
     catalog,
-    texts: { case: '', n1: LINES, n2: 'Shadow notes.', n3: 'Mast notes.' },
+    texts: { case: '', n1: LINES, n2: 'Shadow notes.', n3: 'Mast notes.', ...texts },
     looks: {},
     previews: [],
     written: [],
@@ -45,7 +45,8 @@ async function notebook(page, { templates = [] } = {}) {
       includes: (text.match(/^\[\[include:[\w-]+\]\]$/gm) ?? []).length,
     };
   };
-  const pdf = (route, text) => pdfAnswer(route, pagesOf(text));
+  // where the stand-in server says the pictures landed, when a spec says so
+  const pdf = (route, text) => pdfAnswer(route, pagesOf(text), pictures ? { 'X-Note-Pictures': JSON.stringify(pictures(text)) } : {});
 
   await page.route(`**/api/cases/${CASE_ID}/catalog/entities**`, (route) =>
     route.fulfill({ json: { items: state.catalog, next_cursor: null, total: state.catalog.length } }));
@@ -65,7 +66,8 @@ async function notebook(page, { templates = [] } = {}) {
       return route.fulfill({ json: { text: state.texts.case } });
     }
     if (path === '/index') {
-      return route.fulfill({ json: { items: [row('case', 'Case notes'), ...state.catalog.map((item) => row(item.id, item.label, item.attrs.folder))] } });
+      const notes = state.catalog.filter((item) => item.type === 'note');
+      return route.fulfill({ json: { items: [row('case', 'Case notes'), ...notes.map((item) => row(item.id, item.label, item.attrs.folder))] } });
     }
     if (path === '/preview') {
       const body = request.postDataJSON();
@@ -266,4 +268,49 @@ test('a note from a ready template shows its guidance in grey, and typing on a l
   await page.keyboard.type('Two vehicles crossed the bridge');
   await expect(hint).toHaveCount(0);
   await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('## What\n\nTwo vehicles crossed the bridge\n\n## Where');
+});
+
+test('a picture is sized on the page, and one pushed to the next page is fitted back', async ({ page }) => {
+  const roof = {
+    id: 'm1', type: 'media', label: 'Roof', attrs: { path: 'media/roof.png', kind: 'image' }, provenance: { by: 'user', at, status: 'confirmed' },
+  };
+  const text = 'Intro\n\n[[media:m1|Roof]]{width=100%}\n\nAfter';
+  // written at full width it goes to page 2 and leaves room on page 1; any narrower, it stays
+  const pictures = (body) => (body.includes('{width=100%}')
+    ? [{ line: 2, ref: 'media:m1', page: 1, box: [0.1, 0.08, 0.8, 0.6], width: '100%', align: 'left', gap: [0, 0.3, 0.9, 0.1, 0.9], fit: 62 }]
+    : [{ line: 2, ref: 'media:m1', page: 0, box: [0.1, 0.3, 0.5, 0.4], width: '62%', align: 'left' }]);
+  const state = await notebook(page, { extra: [note('n4', 'Pictures'), roof], texts: { n4: text }, pictures });
+  await page.goto('/#notebook');
+  await page.locator('button[title="Open Pictures"]').click();
+  await page.locator('[data-guide="notebook.view"]').getByRole('button', { name: 'Page' }).click();
+
+  const gap = page.locator('.page-pane .sheet').first().locator('.gap');
+  await expect(gap).toBeVisible();
+  await gap.getByRole('button', { name: 'Fit the picture here' }).click();
+  await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('[[media:m1|Roof]]{width=62%}');
+  await expect(page.locator('.page-pane .gap')).toHaveCount(0);
+
+  // the same sizes over the picture in the page and in the note
+  const placed = page.locator('.page-pane .picture').first();
+  await placed.hover();
+  await placed.getByRole('button', { name: 'Centre' }).click();
+  await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('[[media:m1|Roof]]{width=62% align=center}');
+  const block = page.locator('.cm-block-picture');
+  await block.hover();
+  await block.locator('[data-size-bar]').getByRole('button', { name: 'S', exact: true }).click();
+  // the picture cannot be read here, so it is sized as a wide one: a third across
+  await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('[[media:m1|Roof]]{width=33% align=center}');
+});
+
+test('/ Page break writes the line the PDF starts a new page at, drawn as a rule', async ({ page }) => {
+  const state = await notebook(page);
+  await openLead(page);
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/page');
+  await page.locator('.cm-tooltip-autocomplete').getByText('Page break').click();
+  await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('Line 30\n<!-- pagebreak -->\n');
+  await page.keyboard.type('After the break.');
+  await expect(page.locator('.cm-pagebreak')).toHaveText('Page break');
 });

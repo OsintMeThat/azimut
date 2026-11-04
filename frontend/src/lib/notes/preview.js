@@ -56,7 +56,23 @@ export async function fetchPreview({ caseId = '', note = 'case', title = '', tex
     pages: headerList(headers, 'X-Note-Pages').map((line) => Math.max(0, Number(line) || 0)),
     diagrams: headerList(headers, 'X-Note-Diagrams').filter((item) => item && typeof item.key === 'string'),
     warnings: headerList(headers, 'X-Note-Warnings').map(String),
+    pictures: headerList(headers, 'X-Note-Pictures').filter(placedPicture),
   };
+}
+
+const fraction = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
+
+/**
+ * A picture as the server placed it: its line, what it shows, its page and box as
+ * fractions of the page, and when it was pushed to the next page, the gap it left
+ * there (`[page, top, bottom, left, right]`) with the width that keeps it.
+ */
+export function placedPicture(item) {
+  return Boolean(item) && typeof item.ref === 'string' && item.ref !== ''
+    && Number.isInteger(item.line) && Number.isInteger(item.page)
+    && Array.isArray(item.box) && item.box.length === 4 && item.box.every(fraction)
+    && (item.gap === undefined || (Array.isArray(item.gap) && item.gap.length === 5
+      && Number.isInteger(item.gap[0]) && item.gap.slice(1).every(fraction)));
 }
 
 /** The 0-based source line a page starts at, by its index. */
@@ -66,7 +82,7 @@ export function pageLine(pages, index) {
 
 /**
  * The preview of one pane. `ask(request)` waits for typing to stop, `now(request)`
- * does not; each cancels the one before. `onresult({ data, pages, warnings })`
+ * does not; each cancels the one before. `onresult({ data, pages, warnings, pictures })`
  * is called with the latest page only, `onerror(message)` when it failed, and
  * `onbusy(flag)` while one is being drawn.
  */

@@ -5,12 +5,13 @@
    *
    * A new PDF is drawn behind the one shown: its pages near the view are drawn
    * first, then the two are swapped at once, so the pages never blink while a
-   * note is typed. A press on a page hands its index up.
+   * note is typed. A press on a page hands its index up. `overlay(index, size)`
+   * draws over a page, in a box the page's size (`size` in PDF points).
    */
   import { onDestroy, tick, untrack } from 'svelte';
   import { drawPage, openPdf, releaseCanvas } from '../lib/notes/pdfjs.js';
 
-  let { data = null, onpage = null, onerror = () => {}, onpages = () => {}, label = 'Pages' } = $props();
+  let { data = null, onpage = null, onerror = () => {}, onpages = () => {}, label = 'Pages', overlay = null } = $props();
 
   const MARGIN = 800;
   const PAD = 18;
@@ -92,7 +93,7 @@
     const old = shown.canvases.get(index);
     if (old && old !== canvas) releaseCanvas(old);
     shown.canvases.set(index, canvas);
-    slot.replaceChildren(canvas);
+    (slot.querySelector(':scope > .ink') ?? slot).replaceChildren(canvas);
   }
 
   /** A page near the view is drawn, once per document and width. */
@@ -204,11 +205,13 @@
 
 <div class="pages" bind:this={scroller} role="group" aria-label={label} style:--page-pad={`${PAD}px`}>
   {#each sizes as size, index (index)}
-    <button type="button" class="sheet" data-page={index} use:slot={index}
-      style:width={`${width}px`} style:height={`${Math.round(width * (size.h / size.w))}px`}
-      title={onpage ? `Page ${index + 1}: go to it in the note` : `Page ${index + 1}`}
-      aria-label={`Page ${index + 1} of ${sizes.length}`}
-      onclick={() => onpage?.(index)}></button>
+    <div class="sheet" data-page={index} use:slot={index}
+      style:width={`${width}px`} style:height={`${Math.round(width * (size.h / size.w))}px`}>
+      <div class="ink"></div>
+      <button type="button" class="hit" title={onpage ? `Page ${index + 1}: go to it in the note` : `Page ${index + 1}`}
+        aria-label={`Page ${index + 1} of ${sizes.length}`} onclick={() => onpage?.(index)}></button>
+      {#if overlay}{@render overlay(index, size)}{/if}
+    </div>
   {/each}
 </div>
 
@@ -218,9 +221,12 @@
     padding: var(--page-pad) var(--page-pad) 40px; background: var(--bg-0, var(--bg-2));
   }
   .sheet {
-    flex: none; position: relative; display: block; padding: 0; border: none; border-radius: 2px; background: #fff;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, .35), 0 0 0 1px rgba(0, 0, 0, .12); cursor: pointer; overflow: hidden;
+    flex: none; position: relative; display: block; border-radius: 2px; background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .35), 0 0 0 1px rgba(0, 0, 0, .12); overflow: hidden;
   }
-  .sheet:hover { box-shadow: 0 1px 3px rgba(0, 0, 0, .35), 0 0 0 2px var(--accent); }
+  .sheet:has(> .hit:hover) { box-shadow: 0 1px 3px rgba(0, 0, 0, .35), 0 0 0 2px var(--accent); }
+  .ink, .hit { position: absolute; inset: 0; }
+  .hit { padding: 0; border: none; background: transparent; cursor: pointer; }
+  .hit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .sheet :global(canvas) { display: block; position: absolute; inset: 0; }
 </style>

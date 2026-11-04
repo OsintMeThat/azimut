@@ -203,3 +203,17 @@ describe('a note the old Notebook wrote', () => {
     expect(at(state, 40).doc.toString()).toBe(OLD_NOTE);
   });
 });
+
+describe('a page break', () => {
+  it('is drawn as a rule, and as its text while the cursor is on it', () => {
+    const state = noteState('Before\n\n<!-- pagebreak -->\n\nAfter', { caseInfo: CASE });
+    expect(drawn(state)).toContain('pagebreak 8-26');
+    expect(drawn(at(state, 10))).toContain('line cm-pagebreak-line @8');
+    expect(drawn(at(state, 10)).some((item) => item.startsWith('pagebreak'))).toBe(false);
+  });
+
+  it('is only an example inside code', () => {
+    const state = noteState('```\n<!-- pagebreak -->\n```', { caseInfo: CASE });
+    expect(drawn(state).some((item) => item.startsWith('pagebreak'))).toBe(false);
+  });
+});

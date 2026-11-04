@@ -42,6 +42,7 @@ Two things a server cannot do on its own:
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import threading
 from collections import OrderedDict
@@ -59,11 +60,19 @@ from markdown_it.token import Token
 from PIL import Image as PILImage
 from PIL import UnidentifiedImageError
 
-from . import notes_style, pdffonts
+from . import notes_style, pdffonts, thumbnails
 from .notelook import DEFAULT as DEFAULT_LOOK
 from .notelook import NoteLook
 from .notes_style import PLAIN, WHITE, NotePage, Theme, mix
-from .notetext import CALLOUT, ENTITY_REF, FENCE, INCLUDE, INLINE_HINT, MEDIA_REF, without_hints
+from .notetext import (
+    CALLOUT,
+    ENTITY_REF,
+    FENCE,
+    INCLUDE,
+    MEDIA_REF,
+    PAGE_BREAK,
+    without_hints,
+)
 
 if TYPE_CHECKING:
     from ..workspace import Case
@@ -97,6 +106,19 @@ MAX_INCLUDE_DEPTH = 2
 MAX_CHAPTERS = 100
 #: Numbered sections go three levels deep (1, 1.1, 1.1.1); deeper ones are not.
 NUMBERED_LEVELS = 3
+#: The pictures one preview says where they stand, for the Page pane to size them.
+MAX_PAGE_PICTURES = 300
+#: Narrower than this, a picture kept on the page it left is too small to read,
+#: so the gap it leaves offers nothing.
+MIN_FIT_PERCENT = 15
+#: A picture with no width written shrinks by up to this much to stay on the page
+#: it starts on, rather than leave the rest of that page blank. A width the
+#: analyst wrote is never changed.
+MAX_SHRINK = 0.25
+#: The browser draws a diagram at twice its size on screen, for a sharp print.
+DIAGRAM_PIXEL_SCALE = 2
+#: An HTML comment: hidden by every Markdown reader, and so by the PDF too.
+COMMENT = re.compile(r"\A(?:\s*<!--.*?-->)+\s*\Z", re.S)
 
 MERMAID_INFO = re.compile(r"^\s*mermaid\b")
 IMAGE_ATTRS = re.compile(r"!\[([^\]]*)\]\((\S+?)(?:\s+[\"']([^\"']*)[\"'])?\)\s*\{([^}\n]+)\}")
@@ -162,6 +184,57 @@ class Rendered:
     #: The Mermaid fences drawn as source because no picture came with them, as
     #: (key, source), for the caller to draw and send back.
     diagrams: list[tuple[str, str]] = field(default_factory=list)
+    #: Where each picture of the note itself landed, for the Page pane.
+    pictures: list["PagePicture"] = field(default_factory=list)
+
+
+@dataclass
+class PagePicture:
+    """A picture on a page, so the Page pane can size it where it stands.
+
+    Positions are fractions of the page, so the pane needs no unit. A picture
+    too tall for the room left goes to the next page and leaves a gap: ``gap``
+    is then the page it left (0-based) with that stretch's top, bottom, left and
+    right, and ``fit`` the width, in percent, that would have kept it there.
+    """
+
+    #: The note's line holding it (0-based), and what it shows: `media:<id>` or
+    #: the address written in `![…](…)`.
+    line: int
+    ref: str
+    page: int
+    box: tuple[float, float, float, float]
+    width: str = ""
+    align: str = "left"
+    gap: tuple[int, float, float, float, float] | None = None
+    fit: int = 0
+
+    def as_json(self) -> dict[str, Any]:
+        def short(value: float) -> float:
+            return round(value, 4)
+
+        out: dict[str, Any] = {
+            "line": self.line,
+            "ref": self.ref,
+            "page": self.page,
+            "box": [short(value) for value in self.box],
+            "width": self.width,
+            "align": self.align,
+        }
+        if self.gap is not None:
+            out["gap"] = [self.gap[0], *(short(value) for value in self.gap[1:])]
+            out["fit"] = self.fit
+        return out
+
+
+@dataclass
+class _Poster:
+    """A video in a note: the still its thumbnail holds, when there is one, and
+    the address it can be watched at, when its source is on the web."""
+
+    path: Path | None
+    natural: tuple[int, int]
+    url: str
 
 
 @dataclass
@@ -243,6 +316,7 @@ def render(
         warnings=builder.warnings,
         pages=builder.pages,
         diagrams=list(builder.missing.items()),
+        pictures=builder.pictures,
     )
 
 
@@ -580,6 +654,7 @@ class _Builder:
         self.theme: Theme = getattr(pdf, "theme", PLAIN)
         self.warnings: list[str] = []
         self.images = 0
+        self.pictures: list[PagePicture] = []
         self._page_lines: dict[int, int] = {}
         self.missing: dict[str, str] = {}
         #: How deep inside nested lists the walk currently is.
@@ -1092,7 +1167,7 @@ class _Builder:
         width_attr = ""
         if token.type == "fence" and MERMAID_INFO.match(token.info or ""):
             png = self.diagrams.get(diagram_key(token.content))
-            picture = _measure(BytesIO(png)) if png else None
+            picture = _diagram_size(png) if png else None
         elif token.type == "paragraph_open" and index + 1 < len(tokens):
             children = [
                 child
@@ -1106,7 +1181,9 @@ class _Builder:
                     _, width_attr, _ = _image_options(_attr(children[0], "src"))
         if picture is None:
             return self.theme.leading * 2
-        return _fit(picture, width_attr, self._frame(), self.theme.room)[1]
+        height = _fit(picture, width_attr, self._frame(), self.theme.room)[1]
+        # what a picture free to shrink needs at least, with a little to spare
+        return height if width_attr else height * (1 - MAX_SHRINK + 0.05)
 
     def _peek_image(self, token: Token) -> tuple[int, int] | None:
         """An image's pixel size without counting it against the note's budget."""
@@ -1115,7 +1192,11 @@ class _Builder:
             resolved = self._resolve_image(token)
         finally:
             self.images, self._remote = images, remote
-        return None if isinstance(resolved, str) else resolved[1]
+        if isinstance(resolved, str):
+            return None
+        if isinstance(resolved, _Poster):
+            return resolved.natural if resolved.path is not None else None
+        return resolved[1]
 
     def _on_paragraph_open(self, tokens: list[Token], index: int, align: Align) -> int:
         inline = tokens[index + 1]
@@ -1318,9 +1399,19 @@ class _Builder:
         # The preview sanitizes raw HTML away; here it is shown as what it is,
         # so a note holding a stray tag neither executes nor disappears.
         text = tokens[index].content.strip()
-        if text:
+        if PAGE_BREAK.match(text):
+            self._page_break()
+        elif text and not COMMENT.match(text):
             self._aside(text)
         return index + 1
+
+    def _page_break(self) -> None:
+        """`<!-- pagebreak -->`: what follows starts a page, unless the page it is
+        on holds nothing yet, which would only print a blank one."""
+        self._end_entry()
+        pdf = self.pdf
+        if pdf.get_y() > pdf.body_top + 0.5:
+            pdf.add_page()
 
     # -- the journal ----------------------------------------------------------
 
@@ -1436,8 +1527,8 @@ class _Builder:
                 link, entity = "", 0
             elif kind == "image":
                 runs.append(self._inline_image(child))
-            elif kind == "html_inline" and INLINE_HINT.fullmatch(child.content):
-                continue  # a template's guidance, never printed
+            elif kind == "html_inline" and child.content.startswith("<!--"):
+                continue  # a comment, or a template's guidance: never printed
             elif kind in ("text", "html_inline", "code_inline", "softbreak", "hardbreak"):
                 text = {"softbreak": " ", "hardbreak": "\n"}.get(kind, child.content)
                 if not text:
@@ -1484,7 +1575,8 @@ class _Builder:
         """
         resolved = self._resolve_image(token)
         label = resolved if isinstance(resolved, str) else (token.content or "Image")
-        return Run(text=f"[{label}]", italic=True, color=self.theme.muted)
+        link = resolved.url if isinstance(resolved, _Poster) else ""
+        return Run(text=f"[{label}]", italic=True, color=self.theme.muted, link=link)
 
     # -- drawing ------------------------------------------------------------
 
@@ -1557,7 +1649,7 @@ class _Builder:
             pdf.write(leading, text, link=run.link or "")
         pdf.ln(leading + bottom)
 
-    def _aside(self, message: str) -> None:
+    def _aside(self, message: str, *, link: str = "") -> None:
         """A quiet, boxed line: what the page could not show, said in place."""
         pdf = self.pdf
         theme = self.theme
@@ -1576,7 +1668,9 @@ class _Builder:
             pdf.set_x(pdf.l_margin + 2.5)
             width = pdf.epw - 2.5
             bar = pdf.l_margin + 0.6
-        pdf.multi_cell(width, 5.2, message, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.multi_cell(
+            width, 5.2, message, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT, link=link or None
+        )
         pdf.line(bar, top, bar, pdf.get_y())
         pdf.ln(theme.gap)
 
@@ -1687,16 +1781,27 @@ class _Builder:
             return False
         token = children[0]
         resolved = self._resolve_image(token)
-        _, width_attr, image_align = _image_options(_attr(token, "src"))
-        caption = self._caption(_attr(token, "title"), token.content)
+        source, width_attr, image_align = _image_options(_attr(token, "src"))
+        figure = (_picture_ref(source), width_attr, image_align)
+        title = _attr(token, "title")
+        if isinstance(resolved, _Poster):
+            if resolved.path is None:
+                message = "Video not included in PDF."
+                self._aside(f"{message} Watch it at {resolved.url}", link=resolved.url)
+                return True
+            caption = self._caption(title or f"Video: {token.content or 'untitled'}", token.content)
+            self._place(resolved.path, resolved.natural, width_attr, ALIGNMENTS[image_align], caption,
+                        figure=figure, video=resolved.url)
+            return True
+        caption = self._caption(title, token.content)
         if resolved == CASE_PICTURE and self.case is None:
-            self._placeholder(width_attr, ALIGNMENTS[image_align], caption)
+            self._placeholder(width_attr, ALIGNMENTS[image_align], caption, figure=figure)
             return True
         if isinstance(resolved, str):
             self._aside(resolved)
             return True
         path, natural = resolved
-        self._place(path, natural, width_attr, ALIGNMENTS[image_align], caption)
+        self._place(path, natural, width_attr, ALIGNMENTS[image_align], caption, figure=figure)
         return True
 
     def _caption(self, title: str, alt: str) -> str:
@@ -1715,14 +1820,36 @@ class _Builder:
         width_attr: str,
         align: Align,
         caption: str,
+        *,
+        figure: tuple[str, str, str] | None = None,
+        video: str | None = None,
     ) -> None:
+        """Draw a picture as a block. ``figure`` (what it shows, its width and
+        alignment as written) has the Page pane told where it landed; ``video``
+        marks a video's still, with the address it is watched at ("" for none)."""
         pdf = self.pdf
         theme = self.theme
         width, height = _fit(natural, width_attr, self._frame(), theme.room)
-        if theme.plain:
-            if pdf.will_page_break(height + (5 if caption else 0)):
+        below = (5 if caption else 0) if theme.plain else (7 if caption else 1)
+        if not theme.plain:
+            pdf.ln(0.6)
+        gap = None
+        if pdf.will_page_break(height + below):
+            room = pdf.page_break_trigger - pdf.get_y() - below - 0.5
+            if not width_attr and height * (1 - MAX_SHRINK) <= room:
+                width, height = width * room / height, room
+            else:
+                gap = self._gap(natural, below)
                 pdf.add_page()
-            self._picture(source, w=width, h=height, x=align)
+        self._picture(source, w=width, h=height, x=align)
+        left = self._left(align, width)
+        top = pdf.get_y() - height
+        if video is not None:
+            self._play_mark(left, top, width, height)
+        if figure is not None:
+            self._record(figure, (left, top, width, height), gap)
+        url = video or ""
+        if theme.plain:
             if caption:
                 pdf.ln(1)
                 pdf.set_font(pdffonts.SANS, size=8)
@@ -1730,21 +1857,100 @@ class _Builder:
                 pdf.multi_cell(
                     pdf.epw, 4, caption, align=align, new_x=XPos.LMARGIN, new_y=YPos.NEXT
                 )
+            if url:
+                self._watch_line(url, align)
             pdf.ln(theme.gap)
             return
-        pdf.ln(0.6)
-        if pdf.will_page_break(height + (7 if caption else 1)):
-            pdf.add_page()
-        self._picture(source, w=width, h=height, x=align)
-        left = {Align.L: pdf.l_margin, Align.C: pdf.l_margin + (pdf.epw - width) / 2,
-                Align.R: pdf.w - pdf.r_margin - width}[align]
-        top = pdf.get_y() - height
         pdf.set_draw_color(*theme.rule)
         pdf.set_line_width(0.2)
         pdf.rect(left, top, width, height, style="D")
         if caption:
             self._figure_caption(caption, align, left, width)
+        if url:
+            self._watch_line(url, align)
         pdf.ln(theme.gap + 0.6)
+
+    def _left(self, align: Align, width: float) -> float:
+        """Where fpdf2 puts a picture of this width aligned this way."""
+        pdf = self.pdf
+        if align is Align.C:
+            return (pdf.w - width) / 2
+        if align is Align.R:
+            return pdf.w - pdf.r_margin - width
+        return pdf.l_margin
+
+    def _gap(
+        self, natural: tuple[int, int], below: float
+    ) -> tuple[int, float, float, int, float, float]:
+        """The stretch a picture leaves empty when it goes to the next page (page,
+        top, bottom, then left and right), and the width in percent of the frame
+        that would have kept it there."""
+        pdf = self.pdf
+        top, bottom = pdf.get_y(), pdf.page_break_trigger
+        wide, high = natural
+        room = bottom - top - below - 0.5
+        fit = 0
+        if wide and high and room > 0:
+            fit = min(99, math.floor(room * wide / high / self._frame() * 100))
+        kept = fit if fit >= MIN_FIT_PERCENT else 0
+        return pdf.page - 1, top, bottom, kept, pdf.l_margin, pdf.w - pdf.r_margin
+
+    def _record(
+        self,
+        figure: tuple[str, str, str],
+        placed: tuple[float, float, float, float],
+        gap: tuple[int, float, float, int, float, float] | None,
+    ) -> None:
+        """Say where a picture of the note itself landed. One inside a chapter is
+        written in another note, so its line here is not the one to edit."""
+        if self._fixed or len(self.pictures) >= MAX_PAGE_PICTURES:
+            return
+        pdf = self.pdf
+        ref, width_attr, align_name = figure
+        left, top, width, height = placed
+        fit = gap[3] if gap is not None else 0
+        self.pictures.append(
+            PagePicture(
+                line=self._line,
+                ref=ref,
+                page=pdf.page - 1,
+                box=(left / pdf.w, top / pdf.h, width / pdf.w, height / pdf.h),
+                width=width_attr,
+                align=align_name,
+                gap=(gap[0], gap[1] / pdf.h, gap[2] / pdf.h, gap[4] / pdf.w, gap[5] / pdf.w)
+                if gap is not None and fit
+                else None,
+                fit=fit,
+            )
+        )
+
+    def _play_mark(self, left: float, top: float, width: float, height: float) -> None:
+        """A play sign over a video's still, so the page says it is a video."""
+        pdf = self.pdf
+        radius = max(3.0, min(9.0, min(width, height) * 0.12))
+        x, y = left + width / 2, top + height / 2
+        with pdf.local_context(fill_opacity=0.55):
+            pdf.set_fill_color(0, 0, 0)
+            pdf.circle(x, y, radius, style="F")
+        pdf.set_fill_color(255, 255, 255)
+        side = radius * 0.9
+        pdf.polygon(
+            [(x - side * 0.4, y - side * 0.55), (x - side * 0.4, y + side * 0.55), (x + side * 0.6, y)],
+            style="F",
+        )
+
+    def _watch_line(self, url: str, align: Align) -> None:
+        """Where a video printed as a still can be watched, as a link."""
+        pdf, theme = self.pdf, self.theme
+        shown = url if len(url) <= 90 else f"{url[:89]}…"
+        pdf.ln(0.6)
+        pdf.set_font(pdffonts.SANS, "", 7.6)
+        pdf.set_text_color(*theme.muted)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(
+            pdf.epw, 3.8, f"Watch: {shown}", align=align, link=url,
+            new_x=XPos.LMARGIN, new_y=YPos.NEXT,
+        )
 
     def _picture(self, source: Path | BytesIO, **options: Any) -> None:
         if isinstance(source, Path):
@@ -1781,16 +1987,19 @@ class _Builder:
             pdf.write(3.8, words)
         pdf.ln(3.8)
 
-    def _placeholder(self, width_attr: str, align: Align, caption: str) -> None:
+    def _placeholder(
+        self, width_attr: str, align: Align, caption: str, *, figure: tuple[str, str, str] | None = None
+    ) -> None:
         """Where a template's picture will go: a grey field, named."""
         pdf, theme = self.pdf, self.theme
         width = _fit((1600, 900), width_attr or "100%", self._frame(), theme.room)[0]
         height = min(width * 0.5, 62.0)
         if pdf.will_page_break(height + (7 if caption else 1)):
             pdf.add_page()
-        left = {Align.L: pdf.l_margin, Align.C: pdf.l_margin + (pdf.epw - width) / 2,
-                Align.R: pdf.w - pdf.r_margin - width}[align]
+        left = self._left(align, width)
         top = pdf.get_y()
+        if figure is not None:
+            self._record(figure, (left, top, width, height), None)
         pdf.set_fill_color(*mix(theme.rule, WHITE, 0.55))
         pdf.set_draw_color(*theme.rule)
         pdf.set_line_width(0.2)
@@ -1814,7 +2023,7 @@ class _Builder:
         """The PNG the browser drew for this fence, or the fence's own source."""
         key = diagram_key(source)
         png = self.diagrams.get(key)
-        natural = _measure(BytesIO(png)) if png else None
+        natural = _diagram_size(png) if png else None
         if png is None or natural is None:
             self.missing.setdefault(key, source)
             self._aside("Diagram not drawn.")
@@ -1822,7 +2031,27 @@ class _Builder:
             return
         self._place(BytesIO(png), natural, "", Align.C, self._caption("", ""))
 
-    def _resolve_image(self, token: Token) -> tuple[Path, tuple[int, int]] | str:
+    def _poster(self, attrs: dict[str, Any]) -> "_Poster | str":
+        """A video prints as its thumbnail with a play sign, and where it can be
+        watched. With neither, the line it always printed."""
+        url = str(attrs.get("source_url") or "").strip()
+        if urlsplit(url).scheme not in ("http", "https"):
+            url = ""
+        still = thumbnails.thumb_relpath(str(attrs.get("sha256") or ""), "video")
+        if still and self.case is not None and self.images < MAX_IMAGES:
+            try:
+                path = self.case.resolve_inside(still)
+            except Exception:
+                path = None
+            natural = _measure(path) if path is not None and path.is_file() else None
+            if path is not None and natural is not None:
+                self.images += 1
+                return _Poster(path, natural, url)
+        if url:
+            return _Poster(None, (0, 0), url)
+        return "Video not included in PDF."
+
+    def _resolve_image(self, token: Token) -> "tuple[Path, tuple[int, int]] | _Poster | str":
         """The file behind an image, or the line to print instead of it."""
         source, _, _ = _image_options(_attr(token, "src"))
         parts = urlsplit(source)
@@ -1839,7 +2068,7 @@ class _Builder:
             if not entity or not attrs.get("path"):
                 return "Media unavailable"
             if attrs.get("kind") == "video":
-                return "Video not included in PDF."
+                return self._poster(attrs)
             relative = str(attrs["path"])
         elif source.startswith(self._file_prefix):
             relative = unquote(source[len(self._file_prefix) :])
@@ -2022,6 +2251,23 @@ def _measure(source: Path | BytesIO) -> tuple[int, int] | None:
     finally:
         if isinstance(source, BytesIO):
             source.seek(0)
+
+
+def _diagram_size(png: bytes) -> tuple[int, int] | None:
+    """A diagram's size on screen: the browser drew it at twice that."""
+    natural = _measure(BytesIO(png))
+    if natural is None:
+        return None
+    return max(1, natural[0] // DIAGRAM_PIXEL_SCALE), max(1, natural[1] // DIAGRAM_PIXEL_SCALE)
+
+
+def _picture_ref(source: str) -> str:
+    """What a picture shows, as the Page pane finds its line again: `media:<id>`
+    for a case media, else the address as written."""
+    parts = urlsplit(source)
+    if parts.scheme == "azimut" and parts.netloc == "media":
+        return f"media:{unquote(parts.path.lstrip('/'))}"
+    return source
 
 
 def _fit(

@@ -42,6 +42,17 @@ describe('asking the server for a page', () => {
     expect(answer.pages).toEqual([]);
   });
 
+  it('reads where each picture landed, and drops one it cannot place', async () => {
+    const pushed = { line: 9, ref: 'media:m1', page: 1, box: [0.1, 0.1, 0.8, 0.5], width: '100%', align: 'left', gap: [0, 0.6, 0.9, 0.1, 0.9], fit: 48 };
+    const placed = { line: 2, ref: '/files/c1/a.png', page: 0, box: [0.1, 0.2, 0.3, 0.2], width: '', align: 'center' };
+    const broken = [{ line: 1, ref: '', page: 0, box: [0, 0, 1, 1] }, { line: 1, ref: 'x', page: 0, box: [0, 0, 2, 1] },
+      { line: 1, ref: 'x', page: 0, box: [0, 0, 1, 1], gap: [0, 0.5] }];
+    const headers = new Headers({ 'X-Note-Pictures': JSON.stringify([pushed, ...broken, placed]) });
+    postBytes.mockResolvedValue({ data: new ArrayBuffer(8), headers });
+    const answer = await fetchPreview({ caseId: 'c1', note: 'n1', text: 'x' });
+    expect(answer.pictures).toEqual([pushed, placed]);
+  });
+
   it('reads a header that is missing or broken as an empty list', () => {
     expect(headerList(new Headers({ 'X-Note-Pages': 'not json' }), 'X-Note-Pages')).toEqual([]);
     expect(headerList(new Headers({ 'X-Note-Pages': '{"a":1}' }), 'X-Note-Pages')).toEqual([]);

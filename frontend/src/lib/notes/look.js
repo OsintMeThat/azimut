@@ -109,13 +109,17 @@ export async function writeLook(caseId, noteId, look) {
   return normaliseLook(answer?.look);
 }
 
-// -- the two lines a report is made of ------------------------------------------
+// -- the lines a report is made of ----------------------------------------------
 
 /** `[[include:<id>]]` alone on its line: the note it names, printed as a chapter. */
 export const INCLUDE_LINE = /^\[\[include:([A-Za-z0-9_-]+)\]\][ \t]*$/;
 
 /** `<!--? … -->` alone on its line: guidance a template leaves, never printed. */
 export const HINT_LINE = /^[ \t]*<!--\?[ \t]*(.*?)[ \t]*-->[ \t]*$/;
+
+/** `<!-- pagebreak -->` alone on its line: the PDF starts a new page there, and nothing else shows it. */
+export const PAGE_BREAK_LINE = /^[ \t]*<!--[ \t]*page[ \t-]?break[ \t]*-->[ \t]*$/i;
+export const PAGE_BREAK = '<!-- pagebreak -->';
 
 export function includeLine(noteId) {
   return `[[include:${noteId}]]`;

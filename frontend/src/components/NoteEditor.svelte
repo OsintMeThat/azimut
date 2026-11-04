@@ -26,7 +26,7 @@
   import { differing, editNote, takeBack } from '../lib/notes/noteDoc.svelte.js';
   import { offerWriter } from '../lib/notes/noteDock.svelte.js';
   import {
-    insertAtCursor, insertInclude, jumpToLine, noteExtensions, setLinePrefix, setNoteCase, toggleWrap,
+    insertAtCursor, insertInclude, jumpToLine, noteExtensions, resizePicture, setLinePrefix, setNoteCase, toggleWrap,
   } from '../lib/notes/liveMarkdown.js';
   import { startCompletion } from '@codemirror/autocomplete';
   import Icon from './Icon.svelte';
@@ -142,6 +142,8 @@
   const api_ = {
     insert: (text, options) => insert(text, options),
     jump: (line) => view && jumpToLine(view, line),
+    /** Size or place a picture from the Page pane: its line there, what it shows, `{ width }` or `{ align }`. */
+    resize: (line, ref, changes) => Boolean(view && !readOnly && resizePicture(view, line, ref, changes)),
     focus: () => view?.focus(),
   };
 

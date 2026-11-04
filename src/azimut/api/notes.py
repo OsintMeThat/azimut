@@ -81,6 +81,8 @@ MAX_PREVIEW_BODY_BYTES = MAX_PDF_BODY_BYTES
 #: What the preview's headers may carry. A header is not a body, and a page map or a
 #: list of warnings that outgrew this would be cut rather than refused.
 MAX_PAGE_MAP = 2000
+#: The pictures header's budget, in bytes: well under what a browser accepts.
+MAX_PICTURES_HEADER = 48_000
 MAX_HEADER_WARNINGS = 20
 MAX_WARNING_CHARS = 300
 MAX_DIAGRAM_HEADER_BYTES = 48 * 1024
@@ -458,12 +460,28 @@ def preview_response(
             "X-Note-Warnings": _ascii_json(
                 [warning[:MAX_WARNING_CHARS] for warning in rendered.warnings[:MAX_HEADER_WARNINGS]]
             ),
+            "X-Note-Pictures": _pictures_header(rendered.pictures),
         },
     )
 
 
 def _ascii_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+
+
+def _pictures_header(pictures: list[pdf_engine.PagePicture]) -> str:
+    """Where the note's pictures landed, as many as the header holds: a long
+    address is what a picture is found by again, so one past the cap is dropped
+    rather than cut."""
+    items: list[str] = []
+    room = MAX_PICTURES_HEADER
+    for picture in pictures:
+        item = _ascii_json(picture.as_json())
+        if len(item) + 1 > room:
+            break
+        room -= len(item) + 1
+        items.append(item)
+    return f"[{','.join(items)}]"
 
 
 def _diagram_header(pending: list[tuple[str, str]]) -> str:

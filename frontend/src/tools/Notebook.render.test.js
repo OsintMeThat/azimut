@@ -303,7 +303,7 @@ describe('a note, and how it prints', () => {
     expect(body).toMatchObject({ note: 'n1', title: 'Old lead', text: OLD_TEXT });
     expect(target.querySelectorAll('.sheet')).toHaveLength(2);
     // a press on page 2 goes to the line it starts at
-    target.querySelectorAll('.sheet')[1].click();
+    target.querySelectorAll('.sheet .hit')[1].click();
     const { EditorView } = await import('@codemirror/view');
     const view = EditorView.findFromDOM(target.querySelector('.cm-editor'));
     expect(view.state.doc.lineAt(view.state.selection.main.head).number).toBe(7);

@@ -25,7 +25,9 @@ import { tags } from '@lezer/highlight';
 import { entityReference, markdownHtml } from '../markdown.js';
 import { renderMermaidSvg } from '../mermaid.js';
 import { CALLOUT_LINE, calloutOf } from './callouts.js';
-import { HINT_LINE, INCLUDE_LINE, includeLine } from './look.js';
+import { paths as iconPaths } from '../../components/Icon.svelte';
+import { HINT_LINE, INCLUDE_LINE, PAGE_BREAK_LINE, includeLine } from './look.js';
+import { PICTURE_ALIGNS, PICTURE_SIZES, pictureLine, picturesIn, sizeWidth, sizedLine } from './pictureSize.js';
 import {
   findCoordinates, findReferences, mentionMatches, slashInsert, slashMatches,
 } from './syntax.js';
@@ -308,6 +310,103 @@ function includeButton(text, className, title) {
   return button;
 }
 
+/** Where the PDF starts a new page: a dashed rule, named. Pressing it opens its line. */
+class PageBreakWidget extends WidgetType {
+  eq() {
+    return true;
+  }
+
+  toDOM(view) {
+    const box = document.createElement('div');
+    box.className = 'cm-pagebreak';
+    box.dataset.pagebreak = 'true';
+    box.title = 'The PDF starts a new page here. Click to edit the line';
+    const label = document.createElement('span');
+    label.textContent = 'Page break';
+    box.append(label);
+    box.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      view.dispatch({ selection: { anchor: view.posAtDOM(box) } });
+      view.focus();
+    });
+    return box;
+  }
+
+  ignoreEvent(event) {
+    return event.type !== 'mousedown';
+  }
+
+  get estimatedHeight() {
+    return 30;
+  }
+}
+
+const ALIGN_LABELS = { left: ['alignLeft', 'Left'], center: ['alignCentreH', 'Centre'], right: ['alignRight', 'Right'] };
+
+function iconSvg(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '13');
+  svg.setAttribute('height', '13');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.9');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', iconPaths[name]);
+  svg.append(path);
+  return svg;
+}
+
+/** How much taller than wide the picture drawn in `box` is, or 0 before it has loaded. */
+function pictureRatio(box) {
+  const image = box.querySelector('img');
+  return image?.naturalWidth ? image.naturalHeight / image.naturalWidth : 0;
+}
+
+/** The size and place buttons over a picture: what the PDF prints it at. */
+function sizeBar(box, source) {
+  const [picture] = picturesIn(source);
+  const bar = document.createElement('div');
+  bar.className = 'cm-size-bar';
+  bar.dataset.sizeBar = 'true';
+  bar.setAttribute('role', 'toolbar');
+  bar.setAttribute('aria-label', 'Size in the PDF');
+  if (!picture) return bar;
+  const sizes = PICTURE_SIZES.map((size) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = size.label;
+    button.dataset.share = String(size.share);
+    button.title = size.title;
+    bar.append(button);
+    return button;
+  });
+  // which size it is now can only be told once the picture says how tall it is
+  const mark = () => {
+    const ratio = pictureRatio(box);
+    for (const button of sizes) button.setAttribute('aria-pressed', String(picture.width === sizeWidth(Number(button.dataset.share), ratio)));
+  };
+  mark();
+  box.querySelector('img')?.addEventListener('load', mark, { once: true });
+  const current = picture.align || 'left';
+  for (const align of PICTURE_ALIGNS) {
+    const [icon, label] = ALIGN_LABELS[align];
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'cm-size-align';
+    button.dataset.align = align;
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    button.setAttribute('aria-pressed', String(current === align));
+    button.append(iconSvg(icon));
+    bar.append(button);
+  }
+  return bar;
+}
+
 /** A drawn block (a picture, a table, a diagram): pressing it puts the cursor back in its source. */
 class BlockWidget extends WidgetType {
   constructor(kind, source, info) {
@@ -329,9 +428,23 @@ class BlockWidget extends WidgetType {
     box.title = 'Click to edit';
     if (this.kind === 'diagram') drawDiagram(box, this.source);
     else box.innerHTML = markdownHtml(this.source, this.info);
+    if (this.kind === 'picture' && !view.state.readOnly) box.append(sizeBar(box, this.source));
     box.addEventListener('mousedown', (event) => {
       if (event.button !== 0 || event.target.closest('a, video, [data-entity-id]')) return;
       event.preventDefault();
+      const pick = event.target.closest('[data-share], [data-align]');
+      if (pick) {
+        const line = view.state.doc.lineAt(view.posAtDOM(box));
+        const [picture] = picturesIn(line.text);
+        if (picture) {
+          const change = pick.dataset.share
+            ? { width: sizeWidth(Number(pick.dataset.share), pictureRatio(box)) }
+            : { align: pick.dataset.align };
+          resizePicture(view, line.number - 1, picture.ref, change);
+        }
+        return;
+      }
+      if (event.target.closest('[data-size-bar]')) return;
       const at = view.posAtDOM(box);
       view.dispatch({ selection: { anchor: at } });
       view.focus();
@@ -412,6 +525,12 @@ const PICTURE_LINE = /^\s*(?:!\[[^\]]*\]\([^)]*\)(?:\{[^}\n]*\})?|\[\[media:[A-Z
 function hintOn(state, from, to) {
   const line = state.doc.lineAt(from);
   return to <= line.to && HINT_LINE.test(line.text);
+}
+
+/** Whether the comment `from`–`to` is a page break (`<!-- pagebreak -->`) alone on its line. */
+function pageBreakOn(state, from, to) {
+  const line = state.doc.lineAt(from);
+  return to <= line.to && PAGE_BREAK_LINE.test(line.text);
 }
 
 /** What a chapter line shows: the note as the home lists it, its record else, null when gone. */
@@ -515,6 +634,12 @@ export function noteDecorations(state) {
         // a template's guidance is edited as text; a note's stays drawn, and typing replaces it
         if (template && editing) ranges.push(lineClass('cm-hint-line').range(line.from));
         else ranges.push(Decoration.replace({ widget: new HintWidget(HINT_LINE.exec(line.text)[1], template) }).range(line.from, line.to));
+        return false;
+      }
+      if (name === 'CommentBlock' && pageBreakOn(state, from, to)) {
+        const line = state.doc.lineAt(from);
+        if (editing) ranges.push(lineClass('cm-pagebreak-line').range(line.from));
+        else ranges.push(Decoration.replace({ widget: new PageBreakWidget(), block: true }).range(line.from, line.to));
         return false;
       }
       if (name === 'HTMLBlock' || name === 'CommentBlock') {
@@ -768,6 +893,25 @@ export function insertAtCursor(view, text, { block = false } = {}) {
   view.focus();
 }
 
+/**
+ * Give the picture `ref` a new size or place (`{ width }`, `{ align }`), on the
+ * line (0-based) the server placed it from or the nearest one holding it. False
+ * when the note no longer holds it, or already says that.
+ */
+export function resizePicture(view, line, ref, changes) {
+  if (view.state.readOnly) return false;
+  const { doc } = view.state;
+  const lines = [];
+  for (let number = 1; number <= doc.lines; number += 1) lines.push(doc.line(number).text);
+  const at = pictureLine(lines, Number(line) || 0, ref);
+  if (at < 0) return false;
+  const target = doc.line(at + 1);
+  const text = sizedLine(target.text, ref, changes);
+  if (text === null || text === target.text) return false;
+  view.dispatch({ changes: { from: target.from, to: target.to, insert: text }, userEvent: 'input' });
+  return true;
+}
+
 /** Put the cursor at the start of a line (0-based), and bring it into view. */
 export function jumpToLine(view, line) {
   const number = Math.min(view.state.doc.lines, Math.max(1, Number(line) + 1));
@@ -1005,6 +1149,28 @@ const look = EditorView.theme({
   '.cm-include-excerpt': {
     color: 'var(--text-2)', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical', overflow: 'hidden',
   },
+  '.cm-pagebreak': {
+    display: 'flex', alignItems: 'center', gap: '10px', margin: '10px var(--note-gutter, 32px)', cursor: 'text',
+    color: 'var(--text-3)', fontFamily: 'var(--font-sans)', fontSize: '0.72em', letterSpacing: '0.06em', textTransform: 'uppercase',
+  },
+  '.cm-pagebreak::before, .cm-pagebreak::after': { content: '""', flex: '1', borderTop: '1px dashed var(--border-strong)' },
+  '.cm-pagebreak:hover': { color: 'var(--text-2)' },
+  '.cm-pagebreak-line': { color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: '0.9em' },
+  '.cm-block-picture': { position: 'relative' },
+  '.cm-size-bar': {
+    position: 'absolute', top: '10px', right: 'calc(var(--note-gutter, 32px) + 4px)', display: 'none', gap: '2px', padding: '3px',
+    background: 'var(--bg-1)', border: '1px solid var(--border-strong)', borderRadius: '6px', boxShadow: 'var(--shadow-2)',
+    fontFamily: 'var(--font-sans)', fontSize: '11px', lineHeight: '1',
+  },
+  '.cm-block-picture:hover .cm-size-bar, .cm-size-bar:focus-within': { display: 'flex' },
+  '.cm-size-bar button': {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '30px', height: '22px', padding: '0 6px',
+    border: 'none', borderRadius: '4px', background: 'transparent', color: 'var(--text-2)', cursor: 'pointer', font: 'inherit',
+  },
+  '.cm-size-bar button.cm-size-align': { minWidth: '24px', padding: '0' },
+  '.cm-size-bar button.cm-size-align:first-of-type': { marginLeft: '4px' },
+  '.cm-size-bar button:hover': { background: 'var(--bg-3, var(--bg-2))', color: 'var(--text-1)' },
+  '.cm-size-bar button[aria-pressed="true"]': { background: 'var(--accent-soft, var(--bg-2))', color: 'var(--accent)' },
   '.cm-tooltip.cm-tooltip-autocomplete': {
     background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '6px', boxShadow: 'var(--shadow-2)', overflow: 'hidden',
   },

@@ -10,7 +10,7 @@ import { fileUrl } from '../fileUrl.js';
 import { entityReference, mediaReference } from '../markdown.js';
 import { foldText } from '../textFold.js';
 import { CALLOUTS, calloutMarkdown } from './callouts.js';
-import { hintLine } from './look.js';
+import { PAGE_BREAK, hintLine } from './look.js';
 
 /** `[[entity:id|label]]` and `[[media:id|label]]{width=… align=…}`. */
 export const REFERENCE = /\[\[(entity|media):([A-Za-z0-9_-]+)\|([^\]\n]+)\]\](?:\{([^}\n]+)\})?/g;
@@ -132,6 +132,7 @@ export const SLASH_COMMANDS = [
   { id: 'diagram', label: 'Diagram', icon: 'network', words: 'mermaid flowchart chart', block: DIAGRAM },
   { id: 'code', label: 'Code', icon: 'hash', words: 'code block monospace', block: '```\n\n```' },
   { id: 'divider', label: 'Divider', icon: 'minus', words: 'rule line separator hr', block: '---' },
+  { id: 'pagebreak', label: 'Page break', icon: 'file', words: 'new page pdf break', block: PAGE_BREAK, hint: 'PDF only' },
   { id: 'date', label: 'Today’s date', icon: 'calendar', words: 'day today', today: true },
 ];
 

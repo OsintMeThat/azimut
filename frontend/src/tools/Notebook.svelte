@@ -573,7 +573,8 @@
           {/key}
         </div>
         {#if pageMode}
-          <PagePane title={template.name} text={filledBody(templateDoc.text)} look={template.look} onjump={(line) => editor?.jump(line)} />
+          <PagePane title={template.name} text={filledBody(templateDoc.text)} look={template.look} onjump={(line) => editor?.jump(line)}
+            onresize={(picture, changes) => editor?.resize(picture.line, picture.ref, changes)} />
         {/if}
       </div>
     {:else if opened && doc}
@@ -616,7 +617,7 @@
         </div>
         {#if pageMode && look && doc.loaded}
           <PagePane {caseId} note={opened.noteId ?? CASE_NOTES} title={noteEntity?.label ?? 'Case notes'} text={doc.text} {look}
-            onjump={(line) => editor?.jump(line)} />
+            onjump={(line) => editor?.jump(line)} onresize={(picture, changes) => editor?.resize(picture.line, picture.ref, changes)} />
         {/if}
       </div>
     {:else}

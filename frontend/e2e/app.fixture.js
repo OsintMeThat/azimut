@@ -700,11 +700,11 @@ export function pdfOf(count = 1) {
 }
 
 /** A note's PDF as the preview routes answer it: the bytes, and where each page starts. */
-export function pdfAnswer(route, pages = [0]) {
+export function pdfAnswer(route, pages = [0], headers = {}) {
   return route.fulfill({
     status: 200,
     contentType: 'application/pdf',
-    headers: { 'X-Note-Pages': JSON.stringify(pages), 'X-Note-Diagrams': '[]', 'X-Note-Warnings': '[]' },
+    headers: { 'X-Note-Pages': JSON.stringify(pages), 'X-Note-Diagrams': '[]', 'X-Note-Warnings': '[]', ...headers },
     body: pdfOf(pages.length),
   });
 }

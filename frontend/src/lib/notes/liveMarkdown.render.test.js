@@ -4,7 +4,7 @@ import { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import { CompletionContext } from '@codemirror/autocomplete';
 import {
-  insertInclude, leaveEmptyItem, mentionSource, noteExtensions, removeInclude, setNoteCase, slashSource,
+  insertInclude, leaveEmptyItem, mentionSource, noteExtensions, removeInclude, resizePicture, setNoteCase, slashSource,
 } from './liveMarkdown.js';
 
 let view;
@@ -154,5 +154,63 @@ describe('Enter on an empty item', () => {
     expect(view.state.doc.toString()).toBe('- [ ] Archive\n');
     editor('- [ ] Archive');
     expect(leaveEmptyItem(view)).toBe(false);
+  });
+});
+
+describe('a page break', () => {
+  it('/ writes one on a line of its own, drawn as a named rule', () => {
+    editor('Before /page');
+    accept(slashSource({}), 'Page break');
+    expect(view.state.doc.toString()).toBe('Before \n\n<!-- pagebreak -->\n');
+    view.dispatch({ selection: { anchor: 0 } });
+    const rule = view.dom.querySelector('[data-pagebreak]');
+    expect(rule.textContent).toBe('Page break');
+  });
+
+});
+
+describe('a picture’s size in the PDF', () => {
+  function withPicture(doc) {
+    editor(doc);
+    view.dispatch({
+      effects: setNoteCase.of({
+        caseId: 'c1',
+        entities: [{ id: 'm1', type: 'media', label: 'Roof', attrs: { path: 'media/roof.png', kind: 'image' } }],
+        notes: [],
+      }),
+      selection: { anchor: doc.length },
+    });
+  }
+
+  it('is offered over the picture, and a press writes it on the line', () => {
+    withPicture('[[media:m1|Roof]]\n\nAfter');
+    const bar = view.dom.querySelector('[data-size-bar]');
+    expect([...bar.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['S', 'M', 'L', 'Full', '', '', '']);
+    bar.querySelector('[data-share="0.5"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    expect(view.state.doc.line(1).text).toBe('[[media:m1|Roof]]{width=50%}');
+    view.dom.querySelector('[data-align="center"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    expect(view.state.doc.line(1).text).toBe('[[media:m1|Roof]]{width=50% align=center}');
+  });
+
+  it('marks the size the picture has', () => {
+    withPicture('[[media:m1|Roof]]{width=75% align=right}\n\nAfter');
+    const pressed = [...view.dom.querySelectorAll('[data-size-bar] [aria-pressed="true"]')];
+    expect(pressed.map((button) => button.textContent || button.dataset.align)).toEqual(['L', 'right']);
+  });
+
+  it('is changed from the Page pane by the line the server gave, or the nearest holding it', () => {
+    withPicture('Intro\n\n[[media:m1|Roof]]\n\nAfter');
+    expect(resizePicture(view, 3, 'media:m1', { width: '33%' })).toBe(true);
+    expect(view.state.doc.line(3).text).toBe('[[media:m1|Roof]]{width=33%}');
+    expect(resizePicture(view, 2, 'media:gone', { width: '33%' })).toBe(false);
+  });
+
+  it('is not offered in a note that cannot be changed', () => {
+    editor('[[media:m1|Roof]]\n\nAfter', { readOnly: true });
+    view.dispatch({
+      effects: setNoteCase.of({ caseId: 'c1', entities: [{ id: 'm1', type: 'media', label: 'Roof', attrs: { path: 'media/roof.png' } }], notes: [] }),
+    });
+    expect(view.dom.querySelector('[data-size-bar]')).toBeNull();
+    expect(resizePicture(view, 0, 'media:m1', { width: '50%' })).toBe(false);
   });
 });

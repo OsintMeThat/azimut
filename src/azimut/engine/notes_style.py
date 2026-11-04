@@ -314,6 +314,9 @@ class NotePage(FPDF):
         #: Told each time a page begins, so the caller can say which line of the
         #: note it starts at.
         self.on_page: Callable[[], None] | None = None
+        #: Where the body of the current page starts, under its header: a page
+        #: break asked for on a page still at this point would leave it blank.
+        self.body_top = 0.0
         #: How a picture is placed; the walk swaps in one that reuses decodings.
         self.place_picture: Callable[..., object] = self.image
         #: Pages drawn edge to edge by their own code: the cover.
@@ -381,6 +384,7 @@ class NotePage(FPDF):
             return
         if self.on_page is not None:
             self.on_page()
+        self.body_top = self.get_y()
         if self.page in self.bare_pages:
             return
         if self.page == self.band_page:
@@ -390,6 +394,7 @@ class NotePage(FPDF):
         elif self.look.tlp:
             self.tlp_mark(self.w - self.theme.margin_side, 6.0)
         self.set_xy(self.l_margin, max(self.t_margin, self.band_bottom if self.page == self.band_page else 0))
+        self.body_top = self.get_y()
         # A box still open from the page before carries on at the top of this one.
         for box in self.boxes:
             box.top = self.get_y() - 1.6

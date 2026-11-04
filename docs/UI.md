@@ -5647,7 +5647,7 @@ quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]` or `[!warning]`
 its colour, in the PDF too. Decimal coordinates get a ⌖ that shows them on the map.
 **@** and a few letters offer the case's records and write a chip; **/** offers
 headings, a dated log entry, tasks, lists, the callouts, a case item, a case picture,
-an image from a file, a table, a diagram, code, a divider and today's date. The bar
+an image from a file, a table, a diagram, code, a divider, a page break and today's date. The bar
 above holds the same as buttons. Ctrl+B and Ctrl+I set bold and italic, Enter on an
 empty item leaves the list. Pasting or dropping an image adds it to the case's media;
 a library file dragged in lands as its picture. A link pasted alone is offered as a
@@ -5667,8 +5667,7 @@ homonyms under stable suffixes, into the shared notes destination (the case's
 **How it prints.** **Look** sets the note's style, kept beside the note (the note
 record's `look`, `notes.case_look` for the case notes) and never in its Markdown:
 
-- **Plain**, with nothing else set, is the document the Notebook always printed,
-  unchanged to the byte.
+- **Plain**, with nothing else set, is the document the Notebook always printed.
 - **Report** has a running header, *Page X / Y*, numbered sections in the accent,
   boxed callouts, striped tables and framed figures.
 - **Brief** sets a dark band with the title and puts the first verdict
@@ -5687,6 +5686,20 @@ there, redrawn 900 ms after typing stops with the old pages kept until the new o
 are ready. Diagrams missing from it are drawn in the browser and asked for once
 more. Pressing a page scrolls the note to where it starts. The choice is kept for the
 browser.
+
+**Pictures and pages.** Hovering a picture, in the note or on its page in the Page
+pane, offers **S**, **M**, **L** and **Full** and left, centre or right, written on its
+line as `{width=… align=…}`. Each size keeps the picture within a third, a half or
+three quarters of the page across and down, so a phone screenshot is not a page tall.
+A picture with no width written shrinks by up to a quarter rather than leave the rest
+of its page blank; one that still goes to the next page leaves its room marked on the
+Page pane with *Fit the picture here*, which writes the width that keeps it there. A
+width written by hand is never changed. **/** → *Page break* writes
+`<!-- pagebreak -->`, a dashed rule in the note: the PDF starts a new page there,
+unless the page is still empty, and every other reader sees an HTML comment. No HTML
+comment prints. A video prints as its thumbnail with a play mark and a *Watch* link
+to its source, or as a line with that link when it has no thumbnail. A diagram prints
+at its size on screen.
 
 **Chapters and guidance.** **/** → *Include a note* writes `[[include:<id>]]` on its
 own line, drawn as a chapter block with its number, title and first words, *Open* and

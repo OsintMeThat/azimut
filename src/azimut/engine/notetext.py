@@ -23,10 +23,15 @@ ENTITY_REF = re.compile(r"\[\[entity:([A-Za-z0-9_-]+)\|([^\]]+)\]\]")
 HINT = re.compile(r"^[ \t]*<!--\?(?:(?!-->).)*-->[ \t\r]*$")
 #: The same guidance written inside a line, which nothing prints or counts either.
 INLINE_HINT = re.compile(r"<!--\?.*?-->")
+#: Any HTML comment on a line: hidden by the editor and the PDF, so not read out either.
+COMMENT = re.compile(r"<!--.*?-->")
 #: A chapter: a line that is only `[[include:<note id>]]`, the note printed in
 #: its place (`engine/notes_pdf.py`). `case` names the case notes. Any other
 #: renderer shows the line as text.
 INCLUDE = re.compile(r"^\[\[include:([A-Za-z0-9_-]+)\]\][ \t\r]*$")
+#: A page break: a line that is only `<!-- pagebreak -->`. The PDF starts a new
+#: page there; every other renderer reads an HTML comment, which shows nothing.
+PAGE_BREAK = re.compile(r"^[ \t]*<!--[ \t]*page[ \t-]?break[ \t]*-->[ \t\r]*$", re.I)
 MEDIA_REF = re.compile(r"\[\[media:([A-Za-z0-9_-]+)\|([^\]]+)\]\](?:\{([^}\n]+)\})?")
 
 #: A list item that is a task: `- [ ] text`, `* [x] text`, `1. [ ] text`.
@@ -70,14 +75,15 @@ def mentioned_ids(text: str) -> list[str]:
 
 def _prose_lines(text: str) -> list[tuple[int, str]]:
     """Each line outside a fenced block, with its index. A diagram is not prose,
-    and neither is a template's guidance nor the line that includes a chapter."""
+    and neither is a template's guidance, the line that includes a chapter nor a
+    page break."""
     lines: list[tuple[int, str]] = []
     fenced = False
     for index, line in enumerate((text or "").splitlines()):
         if FENCE.match(line):
             fenced = not fenced
             continue
-        if not fenced and not HINT.match(line) and not INCLUDE.match(line):
+        if not fenced and not HINT.match(line) and not INCLUDE.match(line) and not PAGE_BREAK.match(line):
             lines.append((index, line))
     return lines
 
@@ -118,7 +124,7 @@ def without_hints(text: str) -> str:
 
 def plain_line(line: str) -> str:
     """One Markdown line as a reader would say it: references by name, no marks."""
-    line = INLINE_HINT.sub("", line)
+    line = COMMENT.sub("", line)
     line = MEDIA_REF.sub(lambda match: match.group(2), line)
     line = ENTITY_REF.sub(lambda match: match.group(2), line)
     line = IMAGE.sub(lambda match: match.group(1), line)

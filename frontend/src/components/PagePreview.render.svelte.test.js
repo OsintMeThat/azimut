@@ -128,7 +128,7 @@ describe('the pages of a PDF', () => {
   it('hands up the page pressed', async () => {
     props.data = bytes('a:3');
     await settle();
-    target.querySelectorAll('.sheet')[2].click();
+    target.querySelectorAll('.sheet .hit')[2].click();
     expect(props.onpage).toHaveBeenCalledWith(2);
   });
 
