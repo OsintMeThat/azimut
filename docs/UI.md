@@ -2300,8 +2300,9 @@ off behaves as above. On, the layer's row and its editor read it at one moment
 on a cursor: a tick per day that holds a change, steps to the one before and the next, **Today**,
 and a calendar, which offers no day after today: a state is what was seen. The
 cursor is always on a day of the calendar, today on the layer's clock until it is
-moved, never on a "now" that would slide to the next day. The axis
-writes its first and last change under it. Every map reads the same cursor, which
+moved, never on a "now" that would slide to the next day. Dragged, it catches the
+change nearest the pointer. The axis writes the days its ends stand on under it, the
+first change and today, with their years when it runs over more than one. Every map reads the same cursor, which
 is never stored, so a layer opens on today, and opening the editor puts it back on
 today wherever an earlier press left it and holds that moment while it is open: an
 edit made just before midnight stays on its day, and on a layer dated to the minute
@@ -5412,6 +5413,16 @@ for** gives it a role's look in one press, on the page's colours: **Held** (a fu
 tint of the accent), **Claimed** (hatched, dashed), **Contested** (amber, hatched,
 dotted), **Front line**, **Events** (larger marks) or **Context** (grey and thin); the
 legend then names its areas and lines by the role, its points keeping their words.
+One feature can be left out of one map: a right-click on it, or a click on it in the
+framed map, offers to hide it on this map, and the layer's row lists those hidden under
+**Hidden here**, a press bringing one back. A dated layer has a **From** day: what began
+before it is left out of the map, whatever came of it since, and the days it changed on
+leave the plate's bar with it. The legend, `{count}`, the labels tied to a feature and
+the tables leave out the same; the layer itself keeps them.
+A right-click on a marker that shows a file of the case (one added from a file, or from
+a proof resting on footage) also offers that file, and only there: **Add video** plays
+it on a step, **Add linked picture** sets a still on the page, each pointing at the
+marker and the video saying its source.
 A plate draws every point of a layer at every zoom, where the Map lets the ones that
 overlap drop out far out: a page leaving the app must not lose one. And
 **Label its named features**, and **Label its named features**, which places
@@ -5493,8 +5504,8 @@ played are its layers' changes, every day that holds steps, and every day added 
 the play: a day between two changes says so on its tile, **Add to the play**, and
 its ⋯ takes it out again while it holds no steps. Any other played day is
 **hidden from the video** from its ⋯: it stays on the bar to edit, dashed with its
-steps and faint on the cursor, and the play and every export skip it. Events stay on its
-maps, faded, unless the plate's cursor says how many days. What is added on the map
+steps and faint among the notches, and the play and every export skip it. Events stay on its
+maps, faded, unless the plate's past menu says how many days. What is added on the map
 (a label, an arrow, a zone, rings, a cone, a distance, a shape) **belongs to the day
 it is made on**: the next day starts without it. The inspector shows it from a first
 day to a last, each picked on a calendar of any day, or left open to the start or
@@ -5503,9 +5514,24 @@ to the end; both open is every day, and an end moved past the other pulls it alo
 one to reach this day or carries it from this day on, and draws them faintly when
 asked. So a video shows each day's annotations, and only those.
 
+**The days sit on the bar as a row of notches**, one per day played, evenly apart
+whatever the calendar leaves between them, with dots under a notch for its steps. The
+track keeps its width whatever the day holds, and a drag lands only on a day the plate
+plays. Past what it can show apart, it holds a window of days around the day shown,
+moved a window at a time, and a thin line under it spans every day: a press or a drag
+there goes anywhere, and **Page Up** and **Page Down** jump a window. On layers dated to the minute, the plate plays **day by day**, each day shown as
+it ended, until **Hours** beside the date plays each moment on its own: a day's
+moments sit together, the hour is picked beside the date, and past what the track can
+show apart it keeps a notch a day. Back to days, each hour's steps follow their day's
+own in order, and they return to their hours with **Hours**.
+
 **A day can hold steps**, played after it one by one. **Step**, in Add or at the end
 of the bar under the page, adds the first; from then on the bar shows the day itself
 and each step, beside the plate's days, and its **+** adds a step after the one shown.
+The day's tile and **+** stay put while the steps scroll between them, under the wheel
+too; past what fits, the tiles shrink to their number and time, an arrow each side
+says how many are out of sight, and a count says which one is shown. On a narrow
+window the steps take a line of their own.
 **Every tile says how long it holds in the video, and a press on that time sets
 it**: the day its own seconds or, left alone, every day's (one second until set in
 the export), a step its own, never shorter than its longest clip, the clip staying on

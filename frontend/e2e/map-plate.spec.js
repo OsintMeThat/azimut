@@ -874,6 +874,98 @@ test('a day no layer changes on is added to the play from its tile, and let go f
   await expect(idle).toHaveCount(1);
 });
 
+test('a feature is hidden on one map from its right-click or a click in the framed map, and a layer starts on a day', async ({ page }) => {
+  needsWebGL();
+  const store = await plateFixture(page);
+  const front = { name: 'front', title: 'Front', source: { kind: 'editable' }, editable: true, hidden: [], features: 4,
+    categories: [], sha256: 'f1', icons: 0, track: { on: true, precision: 'day', zone: 'UTC' } };
+  const point = (lon, lat = 48.86) => ({ type: 'Point', coordinates: [lon, lat] });
+  const feature = (key, name, at, geometry, index, more = []) => ({ type: 'Feature', geometry, properties: { key, name, index, category: 'Posts',
+    states: [{ at, geometry }, ...more.map((day) => ({ at: day, geometry, status: 'damaged' }))] } });
+  // a map 200 mm wide at zoom 14 puts 0.005° of longitude about 117 of its pixels apart
+  const features = [feature('post', 'Post', '2026-10-03', point(2.315), 0, ['2026-10-09']), feature('gate', 'Gate', '2026-10-07', point(2.32), 1),
+    feature('depot', 'Depot', '2026-10-08', point(2.325), 2), feature('wall', 'Wall', '2026-10-10', point(2.32, 48.865), 3)];
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [front] }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/front/data**`, (route) => route.fulfill({ json: { type: 'FeatureCollection', features } }));
+  store.plates.set('Front', { title: 'Front', updated_at: '2026-10-12T12:00:00Z', spec: {
+    page: { paper: 'a4', orientation: 'landscape' },
+    theme: { paper: '#ffffff', ink: '#15181e', accent: '#c8102e', font: 'inter', preset: '' },
+    time: { at: '2026-10-12', step: null, trail: true, since: null, window: null, hold: 1 },
+    elements: [{ id: 'map', kind: 'map', box: [10, 20, 200, 150], view: { lat: 48.86, lon: 2.32, zoom: 14, bearing: 0 }, basemap: 'plain',
+      overlays: [], layers: [{ name: 'front', hidden: [], stroke: 1, icons: 1 }], grid: 'none' }] } });
+  await page.goto('/#plate');
+  await page.locator('.tile:not(.template) .open', { hasText: 'Front' }).click();
+  const ticks = page.locator('.timebar .tick');
+  await expect(ticks).toHaveCount(5);
+  const map = page.locator('.plate-map');
+  const box = await map.boundingBox();
+  const scale = await map.evaluate((node) => node.getBoundingClientRect().width / node.offsetWidth);
+  const middle = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const hidden = () => lastSave(store)?.spec.elements[0].layers[0].hidden_features ?? [];
+
+  // a right-click on a feature offers to hide it on this map, once the layer is drawn
+  const hide = page.getByRole('menuitem', { name: 'Hide Gate on this map' });
+  await expect(async () => {
+    await page.keyboard.press('Escape');
+    await page.mouse.click(middle.x, middle.y, { button: 'right' });
+    await expect(hide).toBeVisible({ timeout: 1000 });
+  }).toPass();
+  await hide.click();
+  await expect.poll(hidden).toEqual(['gate']);
+  await expect(ticks).toHaveCount(4);
+
+  // in the framed map, a click on a feature offers the same
+  await page.mouse.dblclick(middle.x, box.y + box.height * 0.85);
+  await expect(page.locator('.plate-map.live')).toHaveCount(1);
+  await page.mouse.click(middle.x + 117 * scale, middle.y);
+  const offer = page.locator('.float-menu', { hasText: 'Depot' });
+  await offer.getByRole('button', { name: 'Hide it on this map' }).click();
+  await expect.poll(hidden).toEqual(['gate', 'depot']);
+  await expect(ticks).toHaveCount(3);
+  await page.keyboard.press('Escape');
+
+  // the map's layers list them, and start the layer on a day: what began before it goes, its days with it
+  await expect(page.locator('.hidden-here .chip')).toHaveText(['Gate', 'Depot']);
+  await page.getByRole('button', { name: 'Front first day' }).click();
+  await page.locator('button[title="2026-10-05"]').click();
+  await expect.poll(() => lastSave(store)?.spec.elements[0].layers[0].start).toBe('2026-10-05');
+  await expect(ticks).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Front first day' })).toContainText('5 Oct 2026');
+  // a press on a name shows it again
+  await page.locator('.hidden-here .chip', { hasText: 'Gate' }).click();
+  await expect.poll(hidden).toEqual(['depot']);
+  await expect(ticks).toHaveCount(2);
+});
+
+test('a feature is hidden the same way on a map in 3D, where the globe draws it', async ({ page }) => {
+  needsWebGL();
+  const store = await plateFixture(page);
+  const front = { name: 'front', title: 'Front', source: { kind: 'editable' }, editable: true, hidden: [], features: 1,
+    categories: [], sha256: 'f1', icons: 0, track: { on: true, precision: 'day', zone: 'UTC' } };
+  const gate = { type: 'Point', coordinates: [2.32, 48.86] };
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [front] }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/front/data**`, (route) => route.fulfill({ json: { type: 'FeatureCollection',
+    features: [{ type: 'Feature', geometry: gate, properties: { key: 'gate', name: 'Gate', index: 0, category: 'Posts', states: [{ at: '2026-10-07', geometry: gate }] } }] } }));
+  store.plates.set('Front', { title: 'Front', updated_at: '2026-10-12T12:00:00Z', spec: {
+    page: { paper: 'a4', orientation: 'landscape' },
+    theme: { paper: '#ffffff', ink: '#15181e', accent: '#c8102e', font: 'inter', preset: '' },
+    time: { at: '2026-10-12', step: null, trail: true, since: null, window: null, hold: 1 },
+    elements: [{ id: 'map', kind: 'map', box: [10, 20, 200, 150], view: { lat: 48.86, lon: 2.32, zoom: 14, bearing: 0, pitch: 0 }, basemap: 'plain',
+      terrain: 1, overlays: [], layers: [{ name: 'front', hidden: [], stroke: 1, icons: 1 }], grid: 'none' }] } });
+  await page.goto('/#plate');
+  await page.locator('.tile:not(.template) .open', { hasText: 'Front' }).click();
+  await expect(page.locator('.plate-map canvas.globe')).toHaveCount(1);
+  const box = await page.locator('.plate-map').boundingBox();
+  const hide = page.getByRole('menuitem', { name: 'Hide Gate on this map' });
+  await expect(async () => {
+    await page.keyboard.press('Escape');
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
+    await expect(hide).toBeVisible({ timeout: 1000 });
+  }).toPass();
+  await hide.click();
+  await expect.poll(() => lastSave(store)?.spec.elements[0].layers[0].hidden_features).toEqual(['gate']);
+});
+
 test('a ready plate opens at once from the list, and New plate lays one out for the paper and look picked', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
@@ -898,4 +990,180 @@ test('a ready plate opens at once from the list, and New plate lays one out for 
   expect(spec.page).toMatchObject({ paper: 'screen', orientation: 'portrait' });
   expect(spec.theme.preset).toBe('tactical');
   expect(spec.elements.find((element) => element.kind === 'image').text).toBe('The footage, a still');
+});
+
+/** A plate on the layer `front`, its features `features`, the layer dated `precision`, its spec, time and map `extra`. */
+async function trackedPlate(page, features, extra = {}, precision = 'day') {
+  needsWebGL();
+  const store = await plateFixture(page);
+  const front = { name: 'front', title: 'Front', source: { kind: 'editable' }, editable: true, hidden: [], features: features.length,
+    categories: [], sha256: 'f1', icons: 0, track: { on: true, precision, zone: 'UTC' } };
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [front] }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/front/data**`, (route) => route.fulfill({ json: { type: 'FeatureCollection', features } }));
+  store.plates.set('Front', { title: 'Front', updated_at: '2026-10-12T12:00:00Z', spec: {
+    page: { paper: 'a4', orientation: 'landscape' },
+    theme: { paper: '#ffffff', ink: '#15181e', accent: '#c8102e', font: 'inter', preset: '' },
+    time: { at: '2026-10-03', step: null, trail: true, since: null, window: null, hold: 1, ...extra.time },
+    ...extra.spec,
+    elements: [{ id: 'map', kind: 'map', box: [10, 20, 200, 150], view: { lat: 48.86, lon: 2.3, zoom: 12, bearing: 0 }, basemap: 'plain',
+      overlays: [], layers: [{ name: 'front', hidden: [], stroke: 1, icons: 1 }], grid: 'none', ...extra.map }] } });
+  await page.goto('/#plate');
+  await page.locator('.tile:not(.template) .open', { hasText: 'Front' }).click();
+  return store;
+}
+
+const moved = (states) => ({ type: 'Feature', geometry: states[0].geometry, properties: { key: 'post', name: 'Post', category: 'Posts', states } });
+const spot = (lon) => ({ type: 'Point', coordinates: [lon, 48.86] });
+
+test('the days stay where they are whatever a day holds, and the wheel runs through its steps', async ({ page }) => {
+  const steps = Array.from({ length: 14 }, (_, index) => ({ id: `s${index}`, name: `Beat ${index + 1}`, duration: 1 }));
+  await trackedPlate(page, [moved([{ at: '2026-10-03', geometry: spot(2.30) }, { at: '2026-10-09', geometry: spot(2.31) }])],
+    { spec: { steps: { '2026-10-09': steps } } });
+  const track = page.locator('.timebar .track');
+  const bar = page.locator('.timebar');
+  await expect(page.locator('.timebar .moment')).toHaveText('3 Oct 2026');
+  const empty = { track: await track.boundingBox(), bar: await bar.boundingBox() };
+  await page.getByRole('button', { name: 'Next day' }).click();
+  await expect(page.locator('.timebar .moment')).toHaveText('9 Oct 2026');
+  await expect(page.locator('.steps .lane [role="option"]')).toHaveCount(14);
+  // fourteen steps move neither the days' track nor the height of the bar
+  const full = { track: await track.boundingBox(), bar: await bar.boundingBox() };
+  expect([full.track.x, full.track.width, full.bar.height]).toEqual([empty.track.x, empty.track.width, empty.bar.height]);
+
+  // a drag from the first day to the last lands there and stays there
+  const ticks = page.locator('.timebar .tick');
+  const first = await ticks.first().boundingBox();
+  const last = await ticks.last().boundingBox();
+  await page.mouse.move(first.x + 1, first.y + first.height / 2);
+  await page.mouse.down();
+  for (let x = first.x; x <= last.x + 1; x += 6) await page.mouse.move(x, first.y + first.height / 2);
+  await expect(page.locator('.timebar .moment')).toHaveText('9 Oct 2026');
+  await page.mouse.move(first.x + 1, first.y + first.height / 2, { steps: 8 });
+  await expect(page.locator('.timebar .moment')).toHaveText('3 Oct 2026');
+  await page.mouse.up();
+
+  // the wheel turns the steps sideways
+  await page.getByRole('button', { name: 'Next day' }).click();
+  const lane = page.locator('.steps .lane');
+  await lane.hover();
+  await page.mouse.wheel(0, 400);
+  await expect.poll(() => lane.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
+  await expect(page.getByRole('button', { name: /more steps before/ })).toBeEnabled();
+
+  // the calendar opens over the page, and the bar keeps its height
+  await page.locator('.timebar .moment').click();
+  await expect(page.getByRole('dialog', { name: 'Day the plate shows' })).toBeVisible();
+  expect((await bar.boundingBox()).height).toBe(empty.bar.height);
+});
+
+test('a plate on layers dated to the minute plays day by day until it is asked to play hour by hour', async ({ page }) => {
+  const store = await trackedPlate(page, [moved([{ at: '2026-10-09T09:00', geometry: spot(2.30) }, { at: '2026-10-09T15:00', geometry: spot(2.31) },
+    { at: '2026-10-10T08:00', geometry: spot(2.32) }])], { time: { at: '2026-10-09' } }, 'time');
+  const ticks = page.locator('.timebar .tick');
+  const hours = page.locator('.timebar .switch');
+  await expect(ticks).toHaveCount(2);
+  await expect(hours).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: 'Moment of the day' })).toHaveCount(0);
+
+  // hour by hour, a notch a moment, and the plate stands on the last one of its day
+  await hours.click();
+  await expect(ticks).toHaveCount(3);
+  await expect(page.getByRole('button', { name: 'Moment of the day' })).toHaveText('15:00');
+  await expect.poll(() => lastSave(store)?.spec.time).toMatchObject({ hours: true, at: '2026-10-09T15:00' });
+
+  // a step made on the hour waits under its day when the plate goes back to days, keeping its hour
+  await page.getByRole('button', { name: 'Add a step' }).click();
+  await expect.poll(() => Object.keys(lastSave(store)?.spec.steps ?? {})).toEqual(['2026-10-09T15:00']);
+  await hours.click();
+  await expect(ticks).toHaveCount(2);
+  await expect.poll(() => lastSave(store)?.spec.steps['2026-10-09']?.map((step) => step.hour)).toEqual(['15:00']);
+  expect(lastSave(store).spec.time).toMatchObject({ hours: false, at: '2026-10-09' });
+  await expect(page.locator('.steps .lane [role="option"]')).toHaveCount(1);
+});
+
+test('a feature that shows a file of the case offers it on a right-click, and only such a feature', async ({ page }) => {
+  const feature = (key, lon, index, more = {}) => {
+    const geometry = spot(lon);
+    return { type: 'Feature', geometry, properties: { key, name: key, category: 'Posts', index, states: [{ at: '2026-10-03', geometry }], ...more } };
+  };
+  // a map 200 mm wide at zoom 12 puts 0.02° of longitude about 117 of its pixels apart
+  const store = await trackedPlate(page, [feature('Strike', 2.3, 0, { media_path: 'media/strike.mp4', media_kind: 'video' }),
+    feature('Roof', 2.32, 1, { media_path: 'media/roof.jpg', media_kind: 'image' }), feature('Gate', 2.28, 2)]);
+  await page.route(`**/api/cases/${CASE_ID}/media/item**`, (route) => route.fulfill({ json: { title: 'strike', source: { uploader: '@poster', webpage_url: 'https://x.com/p/1' } } }));
+  const map = page.locator('.plate-map');
+  const box = await map.boundingBox();
+  const scale = await map.evaluate((node) => node.getBoundingClientRect().width / node.offsetWidth);
+  const at = (pixels) => ({ x: box.x + box.width / 2 + pixels * scale, y: box.y + box.height / 2 });
+  const menuOn = async (point, item) => {
+    await expect(async () => {
+      await page.keyboard.press('Escape');
+      await page.mouse.click(point.x, point.y, { button: 'right' });
+      await expect(page.getByRole('menuitem', { name: item })).toBeVisible({ timeout: 1000 });
+    }).toPass();
+  };
+
+  // footage plays on a step, pointing at its place, saying its source
+  await menuOn(at(0), 'Add video');
+  await expect(page.getByRole('menuitem', { name: 'Add linked picture' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Add video' }).click();
+  await expect.poll(() => lastSave(store)?.spec.elements.find((element) => element.kind === 'video')?.text).toBe('@poster · x.com');
+  const video = lastSave(store).spec.elements.find((element) => element.kind === 'video');
+  expect(video).toMatchObject({ src: 'media/strike.mp4', at: [2.3, 48.86], of: 'map', leader: 'straight' });
+  expect(Object.values(lastSave(store).spec.steps).flat().map((step) => step.id)).toEqual([video.step]);
+
+  // a still is set on the page, pointing at its place; the day itself shows the map clear of the step's video
+  await page.locator('.steps .tile.day').click();
+  await menuOn(at(117), 'Add linked picture');
+  await expect(page.getByRole('menuitem', { name: 'Add video' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Add linked picture' }).click();
+  await expect.poll(() => lastSave(store)?.spec.elements.find((element) => element.kind === 'image')).toMatchObject(
+    { src: 'media/roof.jpg', at: [2.32, 48.86], of: 'map', leader: 'straight' });
+
+  // a feature that shows no file offers neither
+  await menuOn(at(-117), 'Hide Gate on this map');
+  await expect(page.getByRole('menuitem', { name: 'Add video' })).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: 'Add linked picture' })).toHaveCount(0);
+});
+
+test('a feature that shows footage offers it on a map in 3D too, where the globe draws it', async ({ page }) => {
+  const geometry = spot(2.3);
+  const store = await trackedPlate(page, [{ type: 'Feature', geometry, properties: { key: 'strike', name: 'Strike', category: 'Posts', index: 0,
+    states: [{ at: '2026-10-03', geometry }], media_path: 'media/strike.mp4', media_kind: 'video' } }],
+  { map: { terrain: 1, view: { lat: 48.86, lon: 2.3, zoom: 12, bearing: 0, pitch: 0 } } });
+  await expect(page.locator('.plate-map canvas.globe')).toHaveCount(1);
+  const box = await page.locator('.plate-map').boundingBox();
+  const offer = page.getByRole('menuitem', { name: 'Add video' });
+  await expect(async () => {
+    await page.keyboard.press('Escape');
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
+    await expect(offer).toBeVisible({ timeout: 1000 });
+  }).toPass();
+  await offer.click();
+  await expect.poll(() => lastSave(store)?.spec.elements.find((element) => element.kind === 'video')).toMatchObject(
+    { src: 'media/strike.mp4', at: [2.3, 48.86], of: 'map', leader: 'straight' });
+});
+
+test('a plate playing hundreds of days shows a window of them, and goes anywhere from the line under it', async ({ page }) => {
+  const states = Array.from({ length: 400 }, (_, index) => ({ at: new Date(Date.UTC(2025, 0, 1 + index)).toISOString().slice(0, 10),
+    geometry: spot(2.3 + (index % 2) * 0.001) }));
+  await trackedPlate(page, [moved(states)], { time: { at: '2025-07-20' } });
+  const ticks = page.locator('.timebar .tick');
+  const moment = page.locator('.timebar .moment');
+  await expect(moment).toHaveText('20 Jul 2025');
+  await expect(page.locator('.timebar .overview')).toBeVisible();
+  const shown = await ticks.count();
+  expect(shown).toBeGreaterThan(10);
+  expect(shown).toBeLessThan(60);
+  await expect(page.locator('.timebar .tick.on')).toHaveCount(1);
+
+  // a quarter along the line of all the days, about the hundredth
+  const line = await page.locator('.timebar .overview').boundingBox();
+  await page.mouse.click(line.x + line.width / 4, line.y + line.height / 2);
+  await expect(moment).toHaveText(/^(9|10|11|12|13) Apr 2025$/);
+  await expect(page.locator('.timebar .tick.on')).toHaveCount(1);
+  // the track then goes day by day
+  const before = await moment.textContent();
+  await page.getByRole('button', { name: 'Next day' }).click();
+  await expect(moment).not.toHaveText(before);
+  await expect(ticks).toHaveCount(shown);
 });

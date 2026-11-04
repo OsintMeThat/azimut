@@ -13,8 +13,11 @@
  *   (`order`), and rows can be written by hand (`extra`).
  * - **A played plate keeps one legend**: given several days (`days`), it lists what
  *   any of them draws, so the legend does not jump from one frame to the next.
+ * - **What the map leaves out, it leaves out of the legend**: a feature hidden on it,
+ *   or one that began before the day it starts the layer on (`kept.js`).
  */
 import { inFrame } from './geo.js';
+import { keptOf } from './kept.js';
 import { roleLabel } from './roles.js';
 
 const KIND_WORDS = { point: 'marks', line: 'lines', area: 'areas' };
@@ -58,7 +61,7 @@ export function legendRows(map, context) {
       const key = `${row.name}/role/${kind}`;
       if (!looks.has(key) && (!geometry || drawn(geometry))) looks.set(key, { key, label: role, kind, colour, symbol: '', status: '', fill: entry.fill || '', group: row.title });
     };
-    const features = collection?.(row.name);
+    const features = keptOf(collection?.(row.name), entry);
     if (!features) {
       // not read yet: the groups stand in for the looks
       row.categories?.forEach((group, index) => {

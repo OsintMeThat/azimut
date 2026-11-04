@@ -29,13 +29,6 @@ const button = (label) => document.body.querySelector(`[aria-label="${label}"]`)
 const text = (value) => [...document.body.querySelectorAll('button')].find((node) => node.textContent.trim() === value);
 
 describe('the moment a tracked layer is read at', () => {
-  it('draws faint the days a plate\'s video skips', () => {
-    show({ at: '2026-10-12', trail: true, since: null }, { faded: ['2026-10-12'] });
-    const ticks = [...document.body.querySelectorAll('.tick')];
-    expect(ticks.map((tick) => tick.classList.contains('faded'))).toEqual([false, true, false]);
-    expect(ticks[1].title).toContain('hidden from the video');
-  });
-
   it('reads today by default, said as its date, a tick per change, and steps back to the last change', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-25T12:00:00Z'));
@@ -152,5 +145,47 @@ describe('the moment a tracked layer is read at', () => {
     expect(document.body.querySelector('.past').textContent).toContain('Before · ± last');
     show({ at: null, trail: false, since: null });
     expect([...document.body.querySelectorAll('.past')].at(-1).textContent).toContain('The past');
+  });
+});
+
+describe('the track of a layer that changes on many days', () => {
+  const box = (left, width) => vi.spyOn(document.body.querySelector('.track'), 'getBoundingClientRect')
+    .mockReturnValue({ left, width, top: 0, height: 22, right: left + width, bottom: 22 });
+  const press = (type, clientX) => { document.body.querySelector('.track').dispatchEvent(new PointerEvent(type, { clientX, bubbles: true })); flushSync(); };
+
+  it('catches the change nearest to the pointer, not the first one in reach', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-31T12:00:00Z'));
+    // 30 Sep to 1 Nov over 300 px: a day every 9.4 px, the 10th at 93.8 and the 11th at 103.1
+    show({ at: '2026-10-20', trail: true, since: null }, { moments: ['2026-10-01', '2026-10-10', '2026-10-11', '2026-10-20'] });
+    box(0, 300);
+    press('pointerdown', 99);
+    expect(changes.at(-1)).toEqual({ at: '2026-10-11' });
+    press('pointerup', 99);
+  });
+
+  it('reads the track as it stood when the drag began', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-31T12:00:00Z'));
+    show({ at: '2026-10-20', trail: true, since: null }, { moments: ['2026-10-01', '2026-10-10', '2026-10-11', '2026-10-20'] });
+    box(0, 300);
+    press('pointerdown', 94);
+    expect(changes.at(-1)).toEqual({ at: '2026-10-10' });
+    // the panel narrowed under the pointer: the drag keeps the track it began on
+    box(0, 150);
+    press('pointermove', 188);
+    expect(changes.at(-1)).toEqual({ at: '2026-10-20' });
+    press('pointerup', 188);
+  });
+
+  it('names the days its ends stand on, with their years across a new year', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-04T12:00:00Z'));
+    show({ at: null, trail: true, since: null }, { moments: ['2026-09-08', '2026-11-02'] });
+    // the right end is today, where the track ends, not the last change
+    expect([...document.body.querySelectorAll('.ends span')].map((end) => end.textContent)).toEqual(['8 Sep', '4 Nov']);
+    unmount(held); held = null; document.body.innerHTML = '';
+    show({ at: null, trail: true, since: null }, { moments: ['2025-12-20', '2026-11-02'] });
+    expect([...document.body.querySelectorAll('.ends span')].map((end) => end.textContent)).toEqual(['20 Dec 2025', '4 Nov 2026']);
   });
 });

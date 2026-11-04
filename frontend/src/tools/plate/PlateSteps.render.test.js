@@ -168,3 +168,99 @@ describe('the steps of a day', () => {
     expect(document.body.querySelector('.fields input[type="number"]').value).toBe('2');
   });
 });
+
+describe('a day with many steps', () => {
+  const many = (count) => Array.from({ length: count }, (_, index) => ({ id: `s${index + 1}`, name: `Beat ${index + 1}`, duration: 3 }));
+  afterEach(() => vi.restoreAllMocks());
+
+  it('keeps the day and + out of the scroll, and shows no strip of steps on a day without any', () => {
+    show();
+    const strip = document.body.querySelector('.steps');
+    expect([...strip.children].map((node) => node.className.split(' ')[0])).toEqual(['slot', 'lane', 'add']);
+    expect(document.body.querySelectorAll('.lane [role="option"]')).toHaveLength(2);
+    unmount(held); held = null; document.body.innerHTML = '';
+    show({ steps: [], current: null });
+    expect(document.body.querySelector('.lane')).toBeNull();
+  });
+
+  it('turns the wheel into a sideways scroll when the steps run longer than the strip', () => {
+    show({ steps: many(12) });
+    const lane = document.body.querySelector('.lane');
+    Object.defineProperty(lane, 'scrollWidth', { value: 1200, configurable: true });
+    Object.defineProperty(lane, 'clientWidth', { value: 300, configurable: true });
+    const down = new WheelEvent('wheel', { deltaY: 120, cancelable: true });
+    lane.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+    expect(lane.scrollLeft).toBe(120);
+    // a sideways wheel or a touchpad scrolls it as it is
+    const sideways = new WheelEvent('wheel', { deltaX: 80, deltaY: 10, cancelable: true });
+    lane.dispatchEvent(sideways);
+    expect(sideways.defaultPrevented).toBe(false);
+    // a strip that holds every step leaves the wheel alone
+    Object.defineProperty(lane, 'scrollWidth', { value: 300, configurable: true });
+    const still = new WheelEvent('wheel', { deltaY: 120, cancelable: true });
+    lane.dispatchEvent(still);
+    expect(still.defaultPrevented).toBe(false);
+  });
+
+  it('shrinks the tiles to their number and time past what the strip holds, and says which one is shown', () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600);
+    show({ steps: many(8), current: 's2', elements: [{ id: 'v', kind: 'video', step: 's1', src: 'media/strike.mp4', clip: [0, 2], box: [0, 0, 10, 10] }] });
+    expect(document.body.querySelector('.steps').classList.contains('compact')).toBe(true);
+    expect(document.body.querySelector('.tally').textContent).toBe('2 / 8');
+    // a step's name moves to its tooltip; a clip's thumbnail carries the number
+    expect(tiles()[2].title).toContain('Beat 2');
+    expect(tiles()[1].querySelector('.badge').textContent).toBe('1');
+    unmount(held); held = null; document.body.innerHTML = '';
+    show({ steps: many(8), current: null });
+    expect(document.body.querySelector('.tally').textContent).toBe('8 steps');
+    unmount(held); held = null; document.body.innerHTML = '';
+    show({ steps: many(2) });
+    expect(document.body.querySelector('.steps').classList.contains('compact')).toBe(false);
+    expect(document.body.querySelector('.tally')).toBeNull();
+  });
+
+  it('says how many steps are out of sight on each side, and scrolls to them', () => {
+    show({ steps: many(8), current: null });
+    const lane = document.body.querySelector('.lane');
+    expect(document.body.querySelector('.edge')).toBeNull();
+    [...lane.children].forEach((slot, index) => {
+      Object.defineProperty(slot, 'offsetLeft', { value: index * 101, configurable: true });
+      Object.defineProperty(slot, 'offsetWidth', { value: 96, configurable: true });
+    });
+    Object.defineProperty(lane, 'clientWidth', { value: 300, configurable: true });
+    Object.defineProperty(lane, 'scrollWidth', { value: 803, configurable: true });
+    lane.scrollBy = vi.fn();
+    lane.scrollLeft = 202;
+    lane.dispatchEvent(new Event('scroll'));
+    flushSync();
+    const before = document.body.querySelector('[aria-label="2 more steps before"]');
+    const after = document.body.querySelector('[aria-label="3 more steps after"]');
+    expect([before.textContent, after.textContent]).toEqual(['2', '3']);
+    after.click();
+    expect(lane.scrollBy).toHaveBeenLastCalledWith({ left: 240, behavior: 'smooth' });
+    before.click();
+    expect(lane.scrollBy).toHaveBeenLastCalledWith({ left: -240, behavior: 'smooth' });
+    // at the start, the arrow before stays where it is, with nothing left to show
+    lane.scrollLeft = 0;
+    lane.dispatchEvent(new Event('scroll'));
+    flushSync();
+    expect(document.body.querySelector('[aria-label="No step before"]').disabled).toBe(true);
+    expect(document.body.querySelector('[aria-label="5 more steps after"]')).not.toBeNull();
+  });
+
+  it('goes from the day to its steps and back with the arrow keys', () => {
+    const calls = show();
+    const arrow = (tile, key) => tile.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    arrow(tiles()[1], 'ArrowRight');
+    expect(calls.onpick).toHaveBeenLastCalledWith('s2');
+    arrow(tiles()[1], 'ArrowLeft');
+    expect(calls.onpick).toHaveBeenLastCalledWith(null);
+    // a key in a field is the field's
+    calls.onpick.mockClear();
+    const field = document.createElement('input');
+    tiles()[1].append(field);
+    arrow(field, 'ArrowRight');
+    expect(calls.onpick).not.toHaveBeenCalled();
+  });
+});

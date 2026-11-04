@@ -213,6 +213,51 @@ describe('hover help on every setting', () => {
     expect(map.layers[0]).toMatchObject({ role: '', colour: null, fill: '', dash: '' });
   });
 
+  it('starts a dated layer on a day of the map, and puts the plate on it when it stood before', async () => {
+    const spec = $state(houseLayout());
+    spec.time = { ...spec.time, at: '2026-10-05' };
+    const map = spec.elements.find((element) => element.kind === 'map');
+    map.layers = [{ name: 'front', hidden: [], stroke: 1, icons: 1 }, { name: 'roads', hidden: [], stroke: 1, icons: 1 }];
+    const rows = [{ name: 'front', title: 'Front', categories: [] }, { name: 'roads', title: 'Roads', categories: [] }];
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows, at: '2026-10-05', moments: ['2026-10-03'],
+      datedLayer: (name) => name === 'front' } });
+    flushSync(); await settle();
+    // an undated layer has no first day to set
+    expect(end('Roads first day')).toBeNull();
+    expect(end('Front first day').textContent).toContain('All its days');
+    press(end('Front first day'));
+    press([...document.body.querySelectorAll('button.btn')].find((button) => button.textContent === 'This day'));
+    expect(map.layers[0].start).toBe('2026-10-05');
+    expect(spec.time.at).toBe('2026-10-05');
+    press(end('Front first day'));
+    press(document.body.querySelector('button[title="2026-10-12"]'));
+    expect(map.layers[0].start).toBe('2026-10-12');
+    expect([spec.time.at, spec.time.step]).toEqual(['2026-10-12', null]);
+    expect(bare()).toEqual([]);
+    press(end('Front first day'));
+    await settle();
+    expect(bare()).toEqual([]);
+    press([...document.body.querySelectorAll('button.btn')].find((button) => button.textContent === 'All its days'));
+    expect(map.layers[0].start).toBeNull();
+    expect(end('Front first day').textContent).toContain('All its days');
+  });
+
+  it('lists the features hidden on the map by name, each shown again by a press', () => {
+    const spec = $state(houseLayout());
+    const map = spec.elements.find((element) => element.kind === 'map');
+    map.layers = [{ name: 'front', hidden: [], stroke: 1, icons: 1, hidden_features: ['post', '~Gate@2.30000,48.86000'] }];
+    const rows = [{ name: 'front', title: 'Front', categories: [] }];
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows,
+      featureName: (layer, id) => (layer === 'front' && id === 'post' ? 'Post' : '') } });
+    flushSync();
+    const chips = () => [...document.body.querySelectorAll('.hidden-here .chip')];
+    expect(chips().map((chip) => chip.textContent)).toEqual(['Post', 'No name']);
+    press(chips()[0]);
+    expect(map.layers[0].hidden_features).toEqual(['~Gate@2.30000,48.86000']);
+    press(chips()[0]);
+    expect(document.body.querySelector('.hidden-here')).toBeNull();
+  });
+
   it('sets a country focus: the rest darkened or faded, how far, and its days like any annotation', async () => {
     const focus = show({ kind: 'focus', element: { of: 'map', name: 'Ukraine', spotlight: { country: 'Ukraine', dim: 0.55, mode: 'dark' } } });
     [...document.body.querySelectorAll('[aria-label="The rest of the world"] button')].find((node) => node.textContent === 'Faded').click(); flushSync();

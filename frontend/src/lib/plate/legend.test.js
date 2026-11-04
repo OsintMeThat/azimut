@@ -24,6 +24,19 @@ describe('a plate legend', () => {
     expect(labels).toEqual(['Home', 'Drone', 'Home, destroyed', 'Front line']);
   });
 
+  it('leaves out what the map leaves out: a feature hidden on it, or one begun before its first day', () => {
+    const dated = { front: { features: [
+      point(0, 0, { key: 'home', category: 'Sites', symbol: 'badge-home', colour: '#0072b2', date: '2026-10-02' }),
+      point(0.01, 0.01, { key: 'drone', category: 'Sites', symbol: 'badge-drone', colour: '#0072b2', date: '2026-10-08' }),
+      point(0.02, 0.01, { name: 'Tank', category: 'Sites', symbol: 'badge-tank', colour: '#0072b2' }),
+    ] } };
+    const shown = (entry) => legendRows({ id: 'map', layers: [{ name: 'front', hidden: [], ...entry }] },
+      context({ collection: (name) => dated[name] })).map((row) => row.label);
+    expect(shown({})).toEqual(['Home', 'Drone', 'Tank']);
+    expect(shown({ hidden_features: ['drone', '~Tank@0.02000,0.01000'] })).toEqual(['Home']);
+    expect(shown({ start: '2026-10-05' })).toEqual(['Drone', 'Tank']);
+  });
+
   it('says a layer\'s role of its areas and lines, once, and keeps its points\' own words', () => {
     const claimed = { id: 'map', layers: [{ name: 'front', hidden: [], role: 'claimed', colour: '#c8102e', fill: 'hatch' }] };
     const listed = legendRows(claimed, context());

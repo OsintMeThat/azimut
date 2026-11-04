@@ -470,6 +470,9 @@ def render_digest(case: Case, spec: dict[str, Any], content: str | None = None) 
     links = layerlinks.digest_part(case, spec["document"]["features"])
     # a layer with no icon looks keeps the fingerprint it had, so its cache is not rebuilt for nothing
     looks = json.dumps([links, palette(case)]) + (json.dumps(spec[ICON_META], sort_keys=True) if spec.get(ICON_META) else "")
+    # nor does one with no linked marker when a marker shows more of its item
+    if links:
+        looks += f"|shown{layerlinks.SHOWN_VERSION}"
     # likewise a case that names no icons
     if meanings := icon_names(case):
         looks += json.dumps(meanings)

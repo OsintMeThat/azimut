@@ -319,6 +319,8 @@ def test_a_file_placed_in_its_details_joins_a_layer_with_its_notes_and_address_b
     drawn = client.get(f"{url_of(owner, row)}/data").json()["features"][0]
     assert drawn["geometry"]["coordinates"] == [2.351, 48.851]
     assert drawn["properties"]["entity_picture"]
+    # a plate sets the file itself beside the marker, as its kind says
+    assert (drawn["properties"]["media_path"], drawn["properties"]["media_kind"]) == (path, "image")
 
 
 def _footage(client, owner, url="https://example.org/clip/7", notes=""):
@@ -364,6 +366,35 @@ def test_a_proof_and_its_footage_are_one_marker_from_either_side(client, owner):
     # the card shows the footage first, then the proof
     drawn = client.get(f"{url_of(owner, row)}/data").json()["features"][0]["properties"]
     assert (drawn["source_id"], bool(drawn["source_picture"]), bool(drawn["entity_picture"])) == (video["id"], True, True)
+    # the footage is the file a plate sets beside the marker
+    assert (drawn["media_path"], drawn["media_kind"]) == (path, "image")
+
+
+def test_a_linked_layer_drawn_before_its_markers_showed_their_file_is_drawn_again(client, owner, monkeypatch):
+    from azimut.engine import layerediting, layerlinks, maplayers
+
+    path, _video = _footage(client, owner)
+    proof = _save_proof(client, owner, path, when="2025-04-14")
+    linked = create(client, owner)
+    assert client.post(f"{url_of(owner, linked)}/links", json={
+        "items": [{"id": proof["id"], "lat": 15.688073, "lon": 44.901113}]}).status_code == 200
+    plain = create(client, owner, title="Plain map")
+    marker(client, owner, plain)
+    shown = layerlinks._shown
+    # drawn and kept by a version whose markers showed no file
+    with monkeypatch.context() as older:
+        older.setattr(layerlinks, "SHOWN_VERSION", layerlinks.SHOWN_VERSION - 1)
+        older.setattr(layerlinks, "_shown", lambda case, entity: {
+            key: value for key, value in shown(case, entity).items() if not key.startswith("media_")})
+        kept = client.get(f"{url_of(owner, linked)}/data").json()["features"][0]["properties"]
+        case = Case.open(owner)
+        plain_digest = layerediting.render_digest(case, maplayers._read_spec(case, plain["name"]))
+    assert "media_path" not in kept
+    # this version draws it again rather than hand back the kept drawing
+    drawn = client.get(f"{url_of(owner, linked)}/data").json()["features"][0]["properties"]
+    assert (drawn["media_path"], drawn["media_kind"]) == (path, "image")
+    # a layer with no linked marker keeps its drawing
+    assert layerediting.render_digest(case, maplayers._read_spec(case, plain["name"])) == plain_digest
 
 
 def test_saving_the_proof_writes_its_description_and_day_into_the_marker_but_keeps_a_hand_written_note(client, owner):

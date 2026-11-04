@@ -10,7 +10,9 @@
    *
    * A tracked layer is drawn as it stood on the plate's day, with its trail and its
    * gains and losses when the plate asks (`layerHistory.asOf`). A plate draws a
-   * layer's groups less the ones it hides, at its own weight, size, colour and dash.
+   * layer's groups less the ones it hides, less the features hidden on the map one by
+   * one and those begun before the day it starts the layer on (`kept.js`), at its own
+   * weight, size, colour and dash.
    * The ground is the quiet plain one (its colours, roads, names and their language
    * the plate's own), or imagery shown faded, greyed or tinted as the plate says,
    * a Wayback release among them. A topographic ground traces its contour lines for
@@ -50,6 +52,9 @@
   import { SENTINEL_ID, passId } from '../../lib/plate/sentinelPass.js';
   import { turnFromPress } from '../../lib/map/gestures.js';
   import { fillProperties } from '../../lib/plate/roles.js';
+  import { featureId, keptOf } from '../../lib/plate/kept.js';
+  import { byDay } from '../../lib/plate/hours.js';
+  import { linkedMedia } from '../../lib/plate/clip.js';
   import TurnGuide from '../../components/TurnGuide.svelte';
   import { layerCell } from '../../lib/usage.js';
   import { uiState } from '../../lib/state.svelte.js';
@@ -58,7 +63,7 @@
     element,
     /** The view the map is drawn at: its own, or an inset's, worked out from the main map. */
     view,
-    /** The plate's time: `{ at, trail, since }`. */
+    /** The plate's time: `{ at, trail, since, window, hours }`; a plate played day by day reads each day as it ended. */
     time,
     caseId = '',
     /** The case's layer rows, by name. */
@@ -75,10 +80,15 @@
     glide = 0,
     /** `(view, frame)` as the map moves, and once it is up. */
     onview = null,
-    /** `(handle)` once the map is drawn: `{ snapshot(ratio), sitting(ratio) }`; a snapshot is `{ canvas, complete }`. */
+    /**
+     * `(handle)` once the map is drawn: `{ snapshot(ratio), sitting(ratio), featureAt(client) }`; a snapshot is
+     * `{ canvas, complete }`.
+     */
     onready = null,
     /** `({ text, at, point, client })`: a name of the ground clicked while the map is framed, `point` in the map's pixels. */
     onname = null,
+    /** `({ layer, id, name, client })`: a feature of a layer clicked while the map is framed. */
+    onfeature = null,
   } = $props();
 
   const width = $derived(element.box[2] * PX_PER_MM);
@@ -263,7 +273,7 @@
     applyGestures(untrack(() => interactive));
     report();
     ready = true;
-    onready?.({ snapshot, sitting });
+    onready?.({ snapshot, sitting, featureAt });
     return () => {
       ready = false;
       stopGlobe?.();
@@ -344,10 +354,40 @@
 
   /** The grabbed point a turn goes round, in the map's own pixels, while the hand turns it. */
   let turning = $state(null);
-  /** A click on one of the ground's names while the map is framed: the page offers to take it off or make it a label. */
+  /**
+   * The feature of one of the plate's layers drawn at a point of the map (its own pixels),
+   * the top layer's first, as `{ layer, id, name, geometry, media }`, `media` the file it
+   * shows (`clip.linkedMedia`), or null. In 3D the globe answers the
+   * flat map's hit test from what it drew (`mirror.js`), so the same question holds there.
+   */
+  function featureUnder(point) {
+    if (!engine) return null;
+    for (const entry of untrack(() => element.layers) ?? []) {
+      const feature = drawn.get(entry.name)?.layer.featureUnder(point);
+      const id = feature ? featureId(feature) : '';
+      if (id) return { layer: entry.name, id, name: String(feature.properties?.name ?? '').trim(), geometry: feature.geometry, media: linkedMedia(feature.properties) };
+    }
+    return null;
+  }
+  /** The feature under a point of the screen, for the page's right-click. */
+  function featureAt(client) {
+    if (!container) return null;
+    const box = container.getBoundingClientRect();
+    const scale = handScale();
+    return featureUnder({ x: (client.x - box.left) / scale, y: (client.y - box.top) / scale });
+  }
+
+  /**
+   * A click while the map is framed: on a feature of a layer, the page offers to hide it
+   * on this map; on one of the ground's names, to take it off or make it a label.
+   */
   function nameClicked(event) {
     const map = engine?.impl;
-    if (!map || !untrack(() => interactive) || globe || !onname) return;
+    if (!map || !untrack(() => interactive)) return;
+    const client = { x: event.originalEvent.clientX, y: event.originalEvent.clientY };
+    const feature = onfeature ? featureUnder(event.point) : null;
+    if (feature) { onfeature({ ...feature, client }); return; }
+    if (globe || !onname) return;
     const layers = NAME_LAYER_IDS.filter((id) => map.getLayer(id));
     const [hit] = layers.length ? map.queryRenderedFeatures(event.point, { layers }) : [];
     const text = hit ? nameOf(hit.properties, untrack(() => element.plain?.lang) ?? 'latin') : '';
@@ -355,7 +395,7 @@
     // a town's own point, a river's where it was clicked
     const [lon, lat] = hit.geometry?.type === 'Point' ? hit.geometry.coordinates : [event.lngLat.lng, event.lngLat.lat];
     const point = map.project([lon, lat]);
-    onname({ text, at: [lon, lat], point: [point.x, point.y], client: { x: event.originalEvent.clientX, y: event.originalEvent.clientY } });
+    onname({ text, at: [lon, lat], point: [point.x, point.y], client });
   }
 
   /** How many screen pixels one of the map's pixels takes: the page is drawn scaled, the map's own pixels are not. */
@@ -626,7 +666,7 @@
   }
 
   /** How the layers are read: the day and how much of its past, never the step, which changes none of it. */
-  const reading = $derived(JSON.stringify([time?.at ?? null, time?.trail !== false, time?.since ?? null, time?.window ?? null]));
+  const reading = $derived(JSON.stringify([time?.at ?? null, time?.trail !== false, time?.since ?? null, time?.window ?? null, time?.hours === true]));
   /** The layers being handed to the engine, which a snapshot waits for. */
   let layersDrawn = Promise.resolve();
   let catchUp = null;
@@ -636,17 +676,17 @@
   $effect(() => {
     const wanted = element.kind === 'map' ? element.layers ?? [] : [];
     void JSON.stringify(wanted);
-    const [at, trail, since, days] = JSON.parse(reading);
+    const [at, trail, since, days, hours] = JSON.parse(reading);
     const available = rows;
     const resting = away;
     if (!ready || !engine) return;
     clearTimeout(catchUp);
-    const draw = () => untrack(() => drawLayers(wanted, available, { at, trail, since, window: days }));
+    const draw = () => untrack(() => drawLayers(wanted, available, { at, trail, since, window: days }, hours));
     if (resting) catchUp = setTimeout(draw, 400);
     else draw();
   });
 
-  function drawLayers(wanted, available, read) {
+  function drawLayers(wanted, available, read, hours) {
     if (!engine) return;
     const names = new Set(wanted.map((entry) => entry.name));
     for (const [name, held] of drawn) if (!names.has(name)) { held.layer.destroy(); drawn.delete(name); }
@@ -672,7 +712,8 @@
       work.push(addedLayers.drawing(caseId, row.name).then((collection) => {
         if (drawn.get(entry.name) !== record) return;
         // a day where nothing of the layer moved reads the same, and the engine is spared cutting it again
-        const data = tracked ? asOf(collection, read.at, read) : collection;
+        const kept = keptOf(hours ? collection : byDay(collection), entry);
+        const data = tracked ? asOf(kept, read.at, read) : kept;
         if (record.data === data && record.look === look) return;
         record.data = data;
         record.look = look;

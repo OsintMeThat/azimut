@@ -1116,6 +1116,19 @@ export function createAddedLayer(
       return featureAt(collection, index);
     },
 
+    /**
+     * The feature drawn within a few pixels of `point` (the map's own pixels), as it
+     * was handed over, or null: a mark before a line or an area under it.
+     */
+    featureUnder({ x, y }, reach = 6) {
+      if (!built || !map.queryRenderedFeatures) return null;
+      const layers = PAINTED.filter((id) => map.getLayer(id));
+      if (!layers.length) return null;
+      const hits = map.queryRenderedFeatures([[x - reach, y - reach], [x + reach, y + reach]], { layers });
+      const top = hits.find((hit) => hit.geometry?.type === 'Point') ?? hits[0];
+      return top ? featureAt(collection, top.properties?.index) : null;
+    },
+
     /** The lowest of this layer's GL layers, or null while nothing is built. */
     floor() {
       const lowest = DRAWN[0];

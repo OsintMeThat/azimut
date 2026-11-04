@@ -32,6 +32,7 @@
   import PlateVideo from './PlateVideo.svelte';
   import { drawPage } from '../../lib/plate/draw.js';
   import { GRAIN_MM, grainStrength, grainUrl } from '../../lib/plate/grain.js';
+  import { withHidden } from '../../lib/plate/kept.js';
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import { BOXED_ON_THE_GROUND, ON_THE_GROUND, decorDensity, facesOf, fitPage, insetView, PX_PER_MM, pageSize, shownOn, standsOver, zoomPageAt } from '../../lib/plate/page.js';
@@ -395,6 +396,8 @@
     const hidden = element.plain?.hidden_names ?? [];
     element.plain = { ...(element.plain ?? {}), hidden_names: hidden.includes(text) ? hidden : [...hidden, text] };
   }
+  /** A feature of a layer clicked in a framed map, while its menu is open: `{ element, layer, id, name, client }`. */
+  let featureMenu = $state(null);
 
   /** Says, a moment, why the map did not move: the day or step shown holds the framing before it. */
   let held = $state('');
@@ -696,6 +699,7 @@
         interactive={framing === element.id} away={!shownOn(element, at, stepPlace)} glide={playing ? glide : 0}
         onview={(view, frame, placer) => reported(element, view, frame, placer)}
         onname={(hit) => (nameMenu = { element, ...hit })}
+        onfeature={(hit) => (featureMenu = { element, ...hit })}
         onready={(handle) => onmap?.(element.id, handle)} />
     {/each}
     {#each spec.elements.filter((item) => item.kind === 'video' && !item.hidden && shownOn(item, at, stepPlace)) as element (element.id)}
@@ -845,6 +849,13 @@
           onnamelabel(hit.element, hit.text, hit.at, [hit.element.box[0] + hit.point[0] / PX_PER_MM, hit.element.box[1] + hit.point[1] / PX_PER_MM]); }}>
         <Icon name="text" size={14} /><span class="fm-grow">Make it a label to move</span></button>
     {/if}
+  </FloatingMenu>
+{:else if featureMenu}
+  <FloatingMenu at={featureMenu.client} width={240} label="Feature of a layer" onclose={() => (featureMenu = null)}>
+    <div class="fm-head">{featureMenu.name || 'A feature without a name'}</div>
+    <button type="button" class="fm-item" title="Only this map leaves it out, the layer keeps it"
+      onclick={() => { const { element, layer, id } = featureMenu; featureMenu = null; element.layers = withHidden(element.layers, layer, id, true); }}>
+      <Icon name="eyeOff" size={14} /><span class="fm-grow">Hide it on this map</span></button>
   </FloatingMenu>
 {/if}
 

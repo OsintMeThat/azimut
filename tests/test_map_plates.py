@@ -47,7 +47,7 @@ def test_a_plate_is_kept_as_its_layout_and_listed(client, owner):
     assert loaded["spec"]["elements"][0]["view"]["zoom"] == 12.4
     page = loaded["spec"]["page"]
     assert (page["paper"], page["orientation"], page["transparent"], page["background"]["kind"]) == ("a4", "landscape", False, "solid")
-    assert loaded["spec"]["time"] == {"at": None, "step": None, "trail": True, "since": None, "window": None, "hold": 1.0}
+    assert loaded["spec"]["time"] == {"at": None, "step": None, "trail": True, "since": None, "window": None, "hold": 1.0, "hours": None}
     listed = client.get(f"/api/cases/{owner}/map-plates").json()
     assert [(row["name"], row["maps"], row["thumb"]) for row in listed] == [("Situation", 1, None)]
     entity = Case.open(owner).find_entity(attr="spec", value=".mapplates/Situation.json")
@@ -673,6 +673,23 @@ def test_a_plate_keeps_the_days_its_video_skips(client, owner):
     assert client.post("/api/templates/map", json={"name": "Skips", "data": {**data, "skipped": ["2026-10-13"]}}).status_code == 422
 
 
+def test_a_plate_keeps_whether_it_plays_hour_by_hour_and_the_hour_of_a_folded_step(client, owner):
+    # day by day, a step made on an hour waits under its day, keeping that hour
+    spec = plate_spec(time={"hours": False}, steps={"2026-10-15": [{"id": "s1"}, {"id": "s2", "hour": "08:30"}]})
+    saved = save(client, owner, spec=spec)
+    assert saved.status_code == 200, saved.text
+    loaded = client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]
+    assert loaded["time"]["hours"] is False
+    assert [step["hour"] for step in loaded["steps"]["2026-10-15"]] == [None, "08:30"]
+    # a plate saved before the choice says nothing, and reads as its work says
+    assert save(client, owner, title="Before", spec=plate_spec()).status_code == 200
+    assert client.get(f"/api/cases/{owner}/map-plates/Before").json()["spec"]["time"]["hours"] is None
+    for hour in ("8:30", "24:00", "08:60", "08:30:00"):
+        assert save(client, owner, spec=plate_spec(steps={"2026-10-15": [{"id": "s1", "hour": hour}]})).status_code == 422
+    # a template plays nothing of a case: it keeps no such choice
+    assert mapplates.template_of(spec)["time"] == {}
+
+
 def test_a_plate_draws_a_bounded_number_of_maps(client, owner):
     maps = [{"id": f"m{index}", "kind": "map", "box": [0, 0, 10, 10], "view": {"lat": 0, "lon": 0, "zoom": 3}} for index in range(mapplates.MAX_MAPS)]
     assert save(client, owner, spec={"elements": maps}).status_code == 200
@@ -910,6 +927,20 @@ def test_a_map_s_layer_keeps_what_it_stands_for_and_its_fill():
     entry = mapplates.FrameLayer.model_validate({"name": "front", "role": "claimed", "fill": "hatch", "colour": "#c8102e", "dash": "dashed"})
     assert (entry.role, entry.fill) == ("claimed", "hatch")
     for bad in ({"role": "enemy"}, {"fill": "dots"}):
+        with pytest.raises(ValueError):
+            mapplates.FrameLayer.model_validate({"name": "front", **bad})
+
+
+def test_a_map_s_layer_keeps_the_features_hidden_on_it_and_the_day_it_starts_on(client, owner):
+    entry = {"name": "front", "hidden": [], "hidden_features": ["4f2a", "~Strike@2.35000,48.86000"], "start": "2026-10-05"}
+    spec = plate_spec()
+    spec["elements"][0]["layers"] = [entry]
+    assert save(client, owner, "Hidden", spec).status_code == 200
+    kept = client.get(f"/api/cases/{owner}/map-plates/Hidden").json()["spec"]["elements"][0]["layers"][0]
+    assert (kept["hidden_features"], kept["start"]) == (entry["hidden_features"], "2026-10-05")
+    assert mapplates.FrameLayer.model_validate({"name": "front"}).start is None
+    for bad in ({"start": "5 Oct"}, {"start": "2026-10-05T12:00"}, {"hidden_features": [""]}, {"hidden_features": ["x" * 201]},
+                {"hidden_features": ["k"] * 501}):
         with pytest.raises(ValueError):
             mapplates.FrameLayer.model_validate({"name": "front", **bad})
 

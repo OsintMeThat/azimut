@@ -26,6 +26,9 @@ from typing import Any
 from ..workspace import Case, CaseError
 from . import links, maplayers, satellite
 
+#: What a drawn marker shows of its item (`_shown`). A drawing is kept until its layer or
+#: its links change, so a new thing shown bumps this to draw the linked layers once again.
+SHOWN_VERSION = 2
 #: The kinds a marker can be added from, and so follow.
 LINKABLE_TYPES = ("place", "capture", "compare-session", "horizon-view", "proof", "media")
 #: How far apart two points can be and still be one place, in metres.
@@ -280,13 +283,21 @@ def picture(case: Case, entity: dict[str, Any]) -> str:
     return ""
 
 
+def _media(entity: dict[str, Any]) -> dict[str, str]:
+    """A file's path and kind (`video`, `image`…), so a plate can set it beside its marker."""
+    attrs = entity.get("attrs") or {}
+    return {"media_path": str(attrs.get("path") or ""), "media_kind": str(attrs.get("kind") or "")}
+
+
 def _shown(case: Case, entity: dict[str, Any]) -> dict[str, str]:
-    """What a drawn marker shows of its item: its picture, and a proof's footage first."""
+    """What a drawn marker shows of its item: its picture, a proof's footage first, and the file itself."""
     found = {"entity_picture": picture(case, entity)}
+    if entity.get("type") == "media":
+        found.update(_media(entity))
     if entity.get("type") == "proof":
         for media in source_media(case, entity["id"]):
             found.update(source_id=media["id"], source_label=str(media.get("label") or ""),
-                         source_picture=picture(case, media))
+                         source_picture=picture(case, media), **_media(media))
             break
     return {key: value for key, value in found.items() if value}
 

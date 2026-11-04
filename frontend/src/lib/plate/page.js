@@ -588,6 +588,8 @@ export function dayBefore(a, b) {
 
 /** Whether the last day `until` is over by `day`: a day without its time lasts until it ends. */
 const over = (until, day) => dayBefore(until, day === PAGE ? day : day.slice(0, until.length));
+/** Whether `day` comes before the first day `onward`: a day without its time holds every hour of it. */
+const early = (day, onward) => dayBefore(day, day === PAGE ? onward : onward.slice(0, day.length));
 
 /** Whether an element belongs to some days rather than to every day. */
 export const dated = (element) => !!(element.onward || element.until);
@@ -610,7 +612,7 @@ export function endOn(element, day) {
 export function bringTo(element, at) {
   if (shownOn(element, at)) return element;
   const day = dayOf(at);
-  return element.onward && dayBefore(day, element.onward) ? startOn(element, day) : endOn(element, day);
+  return element.onward && early(day, element.onward) ? startOn(element, day) : endOn(element, day);
 }
 
 /** The element shown on `at` and every day after it. */
@@ -711,7 +713,7 @@ export function shownOn(element, at, place = null) {
     return element.carry ? place.index >= index : place.index === index;
   }
   const day = dayOf(at);
-  if (element.onward && dayBefore(day, element.onward)) return false;
+  if (element.onward && early(day, element.onward)) return false;
   return !element.until || !over(element.until, day);
 }
 

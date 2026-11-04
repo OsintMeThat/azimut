@@ -36,6 +36,7 @@
   import { TEXT_STYLES, styled } from '../../lib/plate/design.js';
   import { drawnOn } from '../../lib/plate/toLayer.js';
   import { ROLE_LIST, withRole } from '../../lib/plate/roles.js';
+  import { withHidden } from '../../lib/plate/kept.js';
   import { countryNames } from '../../lib/plate/spotlight.js';
   import { WAYBACK_ID } from '../../lib/wayback.js';
   import { shrinkPicture } from '../../lib/plate/picture.js';
@@ -97,6 +98,10 @@
     onkeep = null,
     /** The plate plays: through days followed over time, or through steps. */
     plays = false,
+    /** `(layer, id)`: what a feature hidden on a map is called, '' when nothing says. */
+    featureName = () => '',
+    /** `(name)`: whether a layer has dated features, so a map can start it on a day. */
+    datedLayer = () => false,
   } = $props();
 
   const picked = $derived(spec.elements.filter((item) => selection.includes(item.id)));
@@ -220,6 +225,18 @@
   }
   function toggleGroup(entry, group) {
     entry.hidden = entry.hidden.includes(group) ? entry.hidden.filter((item) => item !== group) : [...entry.hidden, group];
+  }
+  /** The layer whose first day has its calendar open, by name. */
+  let starting = $state('');
+  $effect(() => { void element?.id; starting = ''; });
+  /**
+   * The first day the map draws a layer from, or none for all of it. A plate on a day
+   * before it is put on it, since the days before no longer play.
+   */
+  function startLayer(entry, day) {
+    entry.start = day || null;
+    starting = '';
+    if (day && at && dayOf(at) < day) Object.assign(spec.time, { at: day, step: null });
   }
   async function openPictures(event) {
     pickAnchor = event.currentTarget;
@@ -821,6 +838,30 @@
                       onclick={() => toggleGroup(entry, group.name)}>{group.name}</button>
                   {/each}
                 </div>
+                {#if datedLayer(row.name) || entry.start}
+                  <div class="weight">From
+                    <button type="button" class="end" class:open={starting === row.name} aria-expanded={starting === row.name} aria-label={`${row.title} first day`}
+                      title="What began before this day is left out of this map" onclick={() => (starting = starting === row.name ? '' : row.name)}>
+                      <Icon name="calendar" size={12} />{entry.start ? momentLabel(entry.start) : 'All its days'}</button>
+                  </div>
+                  {#if starting === row.name}
+                    <div class="tools wide">
+                      {#if at}<button type="button" class="btn btn-xs" title={`${momentLabel(at)}, the plate's day`} onclick={() => startLayer(entry, dayOf(at))}>This day</button>{/if}
+                      {#if entry.start}<button type="button" class="btn btn-xs" title="Draws all of it again" onclick={() => startLayer(entry, '')}>All its days</button>{/if}
+                    </div>
+                    <MonthGrid value={(entry.start || dayOf(at) || lastDay).slice(0, 10)} max={lastDay} label={`${row.title} first day`} onpick={(day) => startLayer(entry, day)} />
+                  {/if}
+                {/if}
+                {#if entry.hidden_features?.length}
+                  <div class="weight hidden-here">Hidden here
+                    <span class="groups">
+                      {#each entry.hidden_features as id (id)}
+                        <button type="button" class="chip off" title="Press to show it again on this map"
+                          onclick={() => { element.layers = withHidden(element.layers, row.name, id, false); }}>{featureName(row.name, id) || 'No name'}</button>
+                      {/each}
+                    </span>
+                  </div>
+                {/if}
                 <label class="weight" title={PLATE_HELP['Lines on this plate']}>Lines <input type="range" min="0.5" max="3" step="0.25" bind:value={entry.stroke} /> <span>{entry.stroke}×</span></label>
                 <label class="weight" title={PLATE_HELP['Marks on this plate']}>Marks <input type="range" min="0.5" max="3" step="0.25" value={entry.icons ?? 1} oninput={(event) => (entry.icons = Number(event.currentTarget.value))} /> <span>{entry.icons ?? 1}×</span></label>
                 <div class="weight">Here in {#if !entry.colour}<span class="quiet">its own colours</span>{/if}</div>
@@ -1409,6 +1450,9 @@
   .chip.off { background: none; color: var(--text-3); text-decoration: line-through; }
   .weight { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 10.5px; }
   .weight.role select { flex: 1; min-width: 0; }
+  .weight .end { flex: 1; }
+  .hidden-here { align-items: flex-start; }
+  .hidden-here .groups { flex: 1; min-width: 0; }
   .weight input[type='range'] { flex: 1; }
   .quiet { color: var(--text-3); }
   .frame { width: 100%; justify-content: center; margin-bottom: 4px; }

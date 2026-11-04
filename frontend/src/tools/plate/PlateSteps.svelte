@@ -14,6 +14,12 @@
    * Every tile says how long it holds in the video, and a press on that time sets it:
    * the day its own seconds or the plate's, a step its own, never shorter than its
    * longest clip (held longer, the clip stays on its last frame).
+   *
+   * The day's tile and **+** stay put while the steps scroll between them, under the
+   * wheel too, the one shown kept in the middle. When they no longer fit, the tiles
+   * shrink to their number and time, an arrow each side says how many are out of
+   * sight, and a count says which one is shown. The strip is as tall whatever the day
+   * holds, and the arrows stay put while it scrolls.
    */
   import { tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
@@ -26,8 +32,9 @@
     steps = [],
     /** The step shown, or null for the day itself. */
     current = null,
-    /** The day as the first tile names it. */
+    /** The day as the first tile names it, and as the plate keeps it: the strip starts again on another. */
     dayLabel = 'The day',
+    day = '',
     /** How long the day holds, whether that is its own time, and the plate's for every day without one. */
     daySeconds = 1,
     dayOwn = false,
@@ -64,13 +71,90 @@
   let dragged = $state('');
   let target = $state(-1);
   let strip = $state(null);
+  let lane = $state(null);
   let secondsField = $state(null);
+  let width = $state(0);
+  let before = $state(0);
+  let after = $state(0);
+  let overflowing = $state(false);
 
-  // the step shown stays in sight when the strip runs longer than the bar
+  /** A tile's width and the gap after it, the add button's and the count's, in pixels. */
+  const TILE = 145;
+  const ROOM = TILE + 39 + 56;
+  /** Past what the strip holds whole, the tiles shrink to their number and time. */
+  const compact = $derived(width > 0 && steps.length * TILE > width - ROOM);
+  const shownIndex = $derived(steps.findIndex((step) => step.id === current));
+
+  /** How many steps stand more than half out of sight, each side. */
+  function measure() {
+    if (!lane) return;
+    const left = lane.scrollLeft;
+    const right = left + lane.clientWidth;
+    const out = [0, 0];
+    for (const slot of lane.children) {
+      const middle = slot.offsetLeft + slot.offsetWidth / 2;
+      if (middle < left) out[0] += 1;
+      else if (middle > right) out[1] += 1;
+    }
+    [before, after] = out;
+    overflowing = lane.scrollWidth > lane.clientWidth + 1;
+  }
+
+  // the step shown stands in the middle of the strip; another day starts it from its first step
+  let dayShown = '';
   $effect(() => {
-    void current; void steps.length;
-    strip?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    void steps.length; void compact;
+    const shown = day || dayLabel;
+    const id = current;
+    if (!lane) return;
+    const moved = shown !== dayShown;
+    dayShown = shown;
+    const tile = id ? lane.querySelector('[aria-selected="true"]')?.closest('.slot') : null;
+    if (tile) {
+      const left = Math.max(0, tile.offsetLeft - (lane.clientWidth - tile.offsetWidth) / 2);
+      lane.scrollTo?.({ left, behavior: moved ? 'auto' : 'smooth' });
+    } else if (moved) {
+      lane.scrollLeft = 0;
+    }
+    measure();
   });
+
+  $effect(() => {
+    if (!lane || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(lane);
+    return () => observer.disconnect();
+  });
+
+  /** The wheel turns the strip sideways when it runs longer than the bar; a sideways wheel scrolls it as it is. */
+  function wheel(node) {
+    const turn = (event) => {
+      if (node.scrollWidth <= node.clientWidth || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+      event.preventDefault();
+      node.scrollLeft += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? node.clientWidth : 1);
+    };
+    node.addEventListener('wheel', turn, { passive: false });
+    return () => node.removeEventListener('wheel', turn);
+  }
+
+  /** The strip moved by most of its width, toward the steps out of sight on one side. */
+  function page(direction) {
+    lane?.scrollBy?.({ left: direction * Math.max(TILE, lane.clientWidth * 0.8), behavior: 'smooth' });
+  }
+
+  /** The arrow keys go from the day to its steps and back, the tile shown taking the keys. */
+  async function arrows(event) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    if (!(event.target instanceof HTMLElement) || event.target.closest('input, textarea, select')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const order = [null, ...steps.map((step) => step.id)];
+    const index = Math.min(order.length - 1, Math.max(0, order.indexOf(current) + (event.key === 'ArrowLeft' ? -1 : 1)));
+    if (order[index] === current) return;
+    onpick?.(order[index]);
+    await tick();
+    strip?.querySelector('[aria-selected="true"]')?.focus();
+  }
 
   const name = (step, index) => step.name || `Step ${index + 1}`;
   const firstClip = (step) => clipsOf(elements, step)[0] ?? null;
@@ -113,7 +197,8 @@
   }
 </script>
 
-<div class="steps" class:skipped={daySkipped} bind:this={strip} role="listbox" aria-label="Steps of the day" tabindex="-1" ondragover={(event) => event.preventDefault()} ondrop={drop}>
+<div class="steps" class:skipped={daySkipped} class:compact bind:this={strip} bind:clientWidth={width} role="listbox" aria-label="Steps of the day" tabindex="-1"
+  ondragover={(event) => event.preventDefault()} ondrop={drop} onkeydown={arrows}>
   <div class="slot" role="presentation" oncontextmenu={(event) => context(event, { day: true })}>
     {#if !dayPlayed && onplayday}
       <button type="button" class="tile day idle" title="No layer changes on this day, so the play skips it. Press to add it"
@@ -140,12 +225,18 @@
     <button type="button" class="more" aria-label={`Set ${dayLabel}`} title={!dayPlayed ? 'Add it to the play' : daySkipped ? 'Show it in the video' : 'How long it holds, or hide it'}
       onclick={(event) => open({ day: true, anchor: event.currentTarget })}><Icon name="more" size={14} stroke={2.6} /></button>
   </div>
+  {#if steps.length}
+  {#if overflowing}
+    <button type="button" class="edge" disabled={!before} aria-label={before ? `${before} more ${before === 1 ? 'step' : 'steps'} before` : 'No step before'}
+      title="Scroll to the steps before" onclick={() => page(-1)}><Icon name="chevronLeft" size={12} />{before || ''}</button>
+  {/if}
+  <div class="lane" role="presentation" bind:this={lane} onscroll={measure} {@attach wheel}>
   {#each steps as step, index (step.id)}
     {@const clip = firstClip(step)}
     <div class="slot" class:drop-before={target === index} class:drop-after={target === steps.length && index === steps.length - 1}
       role="presentation" ondragover={(event) => dragOver(event, index)} oncontextmenu={(event) => context(event, { step, index })}>
       <button type="button" class="tile" class:on={current === step.id} role="option" aria-selected={current === step.id}
-        draggable="true" title="Press to show it, drag to play it elsewhere"
+        draggable="true" title={compact ? `${name(step, index)}. Press to show it, drag to play it elsewhere` : 'Press to show it, drag to play it elsewhere'}
         ondragstart={(event) => { dragged = step.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', step.id); }}
         ondragend={() => { dragged = ''; target = -1; }}
         onclick={() => onpick?.(step.id)}>
@@ -153,6 +244,7 @@
           {#if clip}
             <video src={`${fileUrl(caseId, clip.src)}#t=${clipRange(clip)[0]}`} preload="metadata" muted playsinline aria-hidden="true"></video>
             <span class="play"><Icon name="play" size={9} /></span>
+            {#if compact}<span class="badge">{index + 1}</span>{/if}
           {:else}<span class="number">{index + 1}</span>{/if}
         </span>
         <span class="tile-name">{name(step, index)}</span>
@@ -164,8 +256,17 @@
         onclick={(event) => open({ step, index, anchor: event.currentTarget })}><Icon name="more" size={14} stroke={2.6} /></button>
     </div>
   {/each}
+  </div>
+  {#if overflowing}
+    <button type="button" class="edge" disabled={!after} aria-label={after ? `${after} more ${after === 1 ? 'step' : 'steps'} after` : 'No step after'}
+      title="Scroll to the steps after" onclick={() => page(1)}>{after || ''}<Icon name="chevronRight" size={12} /></button>
+  {/if}
+  {/if}
   <button type="button" class="add" aria-label="Add a step" title={current ? 'Add a step after this one' : 'Add a step to this day, played after it'} onclick={() => onadd?.()}>
     <Icon name="plus" size={14} /></button>
+  {#if compact}
+    <span class="tally" title="The step shown, of the day's steps">{shownIndex >= 0 ? `${shownIndex + 1} / ${steps.length}` : `${steps.length} steps`}</span>
+  {/if}
 </div>
 
 {#if menu?.day}
@@ -234,11 +335,19 @@
 {/if}
 
 <style>
-  .steps { display: flex; align-items: stretch; gap: 5px; min-width: 0; padding: 2px 0; overflow-x: auto; scrollbar-width: thin; }
+  .steps { display: flex; align-items: stretch; gap: 5px; min-width: 0; padding: 2px 0; }
+  /* the steps scroll between the day and +, with no scrollbar, so the strip is as tall on every day */
+  .lane { position: relative; display: flex; flex: 0 1 auto; align-items: stretch; gap: 5px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .lane::-webkit-scrollbar { display: none; }
+  .edge { display: flex; flex: none; align-items: center; justify-content: center; gap: 1px; width: 30px; border-radius: var(--r-sm); color: var(--text-1);
+    font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; }
+  .edge:hover:not(:disabled) { background: var(--bg-3); color: var(--accent); }
+  .edge:disabled { color: var(--text-3); opacity: .5; cursor: default; }
+  .tally { align-self: center; flex: none; min-width: 44px; color: var(--text-3); font-size: 10.5px; font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
   .slot { position: relative; display: flex; border-radius: var(--r-sm); }
   .slot.drop-before { box-shadow: -3px 0 var(--accent); }
   .slot.drop-after { box-shadow: 3px 0 var(--accent); }
-  .tile { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto 14px; align-items: center; gap: 0 6px; width: 140px; flex: none;
+  .tile { display: grid; grid-template-columns: auto 1fr; grid-template-rows: minmax(14px, auto) 14px; align-items: center; gap: 0 6px; width: 140px; flex: none;
     padding: 4px 22px 4px 6px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2); color: var(--text-2);
     font-size: 11px; text-align: left; cursor: pointer; }
   .tile:hover { border-color: var(--accent); color: var(--text-1); }
@@ -252,6 +361,11 @@
   .play { position: absolute; right: 2px; bottom: 2px; display: grid; place-items: center; width: 13px; height: 13px; border-radius: 50%;
     background: rgba(0, 0, 0, .65); color: #fff; }
   .number { font-weight: 700; font-size: 12px; }
+  .badge { position: absolute; left: 2px; top: 1px; padding: 0 3px; border-radius: 2px; background: rgba(0, 0, 0, .65); color: #fff; font-size: 9px; font-weight: 700; }
+  /* past what the strip holds whole: a step's number and time, its name on hover and over the page */
+  .compact .lane .tile { width: 96px; }
+  .compact .lane .tile-name { display: none; }
+  .compact .lane .more { top: 1px; width: 16px; height: 16px; }
   .tile-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
   /* the time sits in the tile's second row, a button of its own */
   .time { position: absolute; left: 53px; bottom: 4px; height: 15px; padding: 0 4px; border-radius: 3px; color: var(--text-3);

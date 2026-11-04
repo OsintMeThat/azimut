@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { beatClips, beats, boundSeconds, captionOf, clipRange, clipSeconds, daySeconds, isGif, leastSeconds, playDays, readTimecode, stepSeconds, timecode, totalSeconds, videoDays } from './clip.js';
+import { beatClips, beats, boundSeconds, captionOf, clipRange, clipSeconds, daySeconds, isGif, leastSeconds, linkedMedia, playDays, readTimecode, stepSeconds, timecode, totalSeconds, videoDays } from './clip.js';
 
 describe('a clip', () => {
   it('runs forward, inside its video, ten minutes at most', () => {
@@ -97,5 +97,17 @@ describe('a GIF on a step', () => {
     expect(isGif('media/LOOP.GIF')).toBe(true);
     expect(isGif('media/strike.mp4')).toBe(false);
     expect(isGif(null)).toBe(false);
+  });
+});
+
+describe('the file a layer\'s feature shows', () => {
+  it('is footage or a GIF to play, a still to set, or nothing', () => {
+    expect(linkedMedia({ media_path: 'media/strike.mp4', media_kind: 'video' })).toEqual({ path: 'media/strike.mp4', as: 'video' });
+    expect(linkedMedia({ media_path: 'media/loop.gif', media_kind: 'image' })).toEqual({ path: 'media/loop.gif', as: 'video' });
+    expect(linkedMedia({ media_path: 'media/roof.jpg', media_kind: 'image' })).toEqual({ path: 'media/roof.jpg', as: 'picture' });
+    // a document, a feature that follows a place, a plain feature: nothing to set
+    expect(linkedMedia({ media_path: 'media/report.pdf', media_kind: 'document' })).toBeNull();
+    expect(linkedMedia({ entity_id: 'place-1', entity_picture: 'thumbs/p.jpg' })).toBeNull();
+    expect(linkedMedia(undefined)).toBeNull();
   });
 });

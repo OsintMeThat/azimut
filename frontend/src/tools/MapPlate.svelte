@@ -48,7 +48,7 @@
   import PlateAdd from './plate/PlateAdd.svelte';
   import PlateContextMenu from './plate/PlateContextMenu.svelte';
   import PanelEdge from '../components/PanelEdge.svelte';
-  import LayerTimeCursor from './satellite/LayerTimeCursor.svelte';
+  import PlateDays from './plate/PlateDays.svelte';
   import { api } from '../lib/api.js';
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { caseState, deleteTemplate, prefs, saveTemplate, toast, uiState } from '../lib/state.svelte.js';
@@ -70,7 +70,7 @@
     transitionsOf, unsettled, withoutMaps, withoutStep, restacked, stepOf, bornOn } from '../lib/plate/page.js';
   import { TWEEN_FPS, changes, playedTransit, transitionInto as transitionIntoBeat, transitionPlan, tweenFrames } from '../lib/plate/tween.js';
   import { defaultSize } from '../lib/plate/words.js';
-  import { FIRST_SECONDS, beatClips, beats, boundSeconds, clipRange, daySeconds, gifPoster, isGif, plateSeconds, playDays, posterKey, posterOf, totalSeconds, videoDays } from '../lib/plate/clip.js';
+  import { FIRST_SECONDS, beatClips, beats, boundSeconds, captionOf, clipRange, daySeconds, gifPoster, isGif, plateSeconds, playDays, posterKey, posterOf, totalSeconds, videoDays } from '../lib/plate/clip.js';
   import { legendRows } from '../lib/plate/legend.js';
   import { numbered, pasted, placeLabels, tableRows } from '../lib/plate/arrange.js';
   import { drawOver, pictureKey } from '../lib/plate/draw.js';
@@ -85,6 +85,8 @@
   import { FORMATS, GALLERY, formatPage, readyTemplate, relaid } from '../lib/plate/gallery.js';
   import { annotationsLayer } from '../lib/plate/toLayer.js';
   import { countFeatures } from '../lib/plate/counts.js';
+  import { hiddenName, isDated, keptMoments, keptOf, withHidden } from '../lib/plate/kept.js';
+  import { byDay, byHour, dayPart, daysPlayed, hasHours, momentsAs, timed, withHours } from '../lib/plate/hours.js';
   import { SEQUENCES, withSequence } from '../lib/plate/sequences.js';
   import { formatCoords, formatMGRS } from '../lib/coords.js';
   import NewPlateDialog from './plate/NewPlateDialog.svelte';
@@ -94,6 +96,7 @@
   import { buildHash, readSolo, splitHash } from '../lib/hash.js';
   import { settlePlace } from '../lib/backButton.js';
   import { followFullscreen } from '../lib/fullscreen.js';
+  import { overlayHoldsKeys } from '../lib/overlayStack.js';
 
   const caseId = $derived(caseState.current?.id ?? null);
   $effect(() => addedLayers.load(caseId, caseState.rev));
@@ -152,6 +155,9 @@
   let floating = $state({ list: false, inspector: false });
   /** The play bar's height, which the panels floating in focus stop above. */
   let barHeight = $state(0);
+  let barWidth = $state(0);
+  /** Under this width, the play bar sets the day's steps under the days rather than beside them. */
+  const NARROW_BAR = 920;
   /** What focus hands the screen to. */
   let toolEl = $state(null);
   const handles = new Map();
@@ -613,12 +619,22 @@
   /** The plate's tracked layers, on any of its maps. */
   const tracked = $derived(rows.filter((row) => isTracked(row) && elements.some((element) => element.kind === 'map'
     && element.layers?.some((entry) => entry.name === row.name))));
-  const moments = $derived([...new Set(tracked.flatMap((row) => addedLayers.moments(row.name)))].sort());
+  /** Each map's entry of a tracked layer: what one leaves out moves no day of the plate's. */
+  const trackedEntries = $derived(elements.filter((element) => element.kind === 'map')
+    .flatMap((map) => (map.layers ?? []).filter((entry) => tracked.some((row) => row.name === entry.name))));
+  const layerMoments = $derived([...new Set(trackedEntries.flatMap((entry) => keptMoments(addedLayers.collection(entry.name), entry)))].sort());
+  /** Whether the plate's layers are dated to the minute, so it may play hour by hour, and whether it does (`hours.js`). */
+  const canHours = $derived(hasHours(layerMoments));
+  const hourly = $derived(canHours && byHour(spec));
+  /** The moments the plate's layers change at, as it plays them: each day once, unless it plays hour by hour. */
+  const moments = $derived(momentsAs(layerMoments, hourly));
+  /** A layer as the plate reads it: each day as it ended, unless it plays hour by hour. */
+  const layerRead = (collection) => (hourly ? collection : byDay(collection));
   const playable = $derived(moments.length > 0 && !plate?.template);
-  const time = $derived(exportTime ?? (playBeat ? { ...(spec?.time ?? {}), at: playBeat.day } : spec?.time) ?? { at: null, trail: true, since: null, window: null });
+  const time = $derived({ ...(exportTime ?? (playBeat ? { ...(spec?.time ?? {}), at: playBeat.day } : spec?.time) ?? { at: null, trail: true, since: null, window: null }), hours: hourly });
   const at = $derived(time.at ?? null);
   /** The days a played plate goes through: each change of its layers, each day that holds steps, each day added to it. */
-  const playedDays = $derived(spec && playable ? playDays(spec, moments) : moments);
+  const playedDays = $derived(spec && playable ? daysPlayed(spec, moments, hourly) : moments);
   /** Whether the play goes through the day shown. */
   const dayPlayed = $derived(!playable || playedDays.includes(dayOf(at)));
   /** The played days the video goes through: all but those hidden from it, which the editor still shows. */
@@ -635,11 +651,40 @@
     if (!plate || !playable || plate.template || !unsettled(plate.spec)) return;
     untrack(() => {
       const saved = new Date(plate.savedAt ?? Date.now());
-      const day = momentNow(tracked[0]?.track, Number.isFinite(saved.getTime()) ? saved : new Date());
+      const day = momentNow(hourly ? tracked[0]?.track : { ...tracked[0]?.track, precision: 'day' }, Number.isFinite(saved.getTime()) ? saved : new Date());
       Object.assign(plate.spec, settleOn(plate.spec, day));
       remember();
     });
   });
+  // played day by day, a plate left on an hour stands on its day
+  $effect(() => {
+    if (!plate || !playable || hourly || !timed(plate.spec.time?.at)) return;
+    untrack(() => {
+      plate.spec.time.at = dayPart(plate.spec.time.at);
+      remember();
+    });
+  });
+
+  /** How many steps each day holds, for the days' track. */
+  const stepCounts = $derived(Object.fromEntries(Object.entries(spec?.steps ?? {}).map(([day, list]) => [day, list.length])));
+  /** The plate shown on another day, or moment, from its day itself. */
+  function pickDay(key) {
+    if (playing) stop();
+    if (key !== plate.spec.time.at) plate.spec.time.step = null;
+    plate.spec.time.at = key;
+  }
+  /** What the maps show of the past. */
+  function setPast(patch) {
+    if (playing) stop();
+    Object.assign(plate.spec.time, patch);
+  }
+  /** The plate played hour by hour, or day by day, the steps of each hour following it (`hours.withHours`). */
+  function setHours(on) {
+    if (playing) stop();
+    const made = withHours(spec, on, playDays(spec, layerMoments));
+    if (made.full) { toast(`${momentLabel(made.full)} would hold more than ${MAX_STEPS} steps day by day`, 'warn', 6000); return; }
+    Object.assign(spec, made);
+  }
 
   // -- the steps of the day ------------------------------------------------------------
 
@@ -1058,7 +1103,7 @@
     const live = views[map.id];
     if (!live) return;
     let collection;
-    try { collection = await addedLayers.drawing(caseId, row.name); } catch { return; }
+    try { collection = keptOf(layerRead(await addedLayers.drawing(caseId, row.name)), map.layers?.find((entry) => entry.name === row.name)); } catch { return; }
     const labelled = new Set(spec.elements.filter((item) => item.ref?.layer === row.name).map((item) => item.ref.key));
     const day = at ?? '￿';
     const found = [];
@@ -1118,8 +1163,39 @@
     if (!selection.includes(id)) selection = [id];
     pressedOnPage = true;
     const chosen = spec.elements.filter((item) => selection.includes(item.id));
-    contextMenu = chosen.length > 1 ? { at, title: `${chosen.length} picked`, items: manyItems(chosen) }
-      : { at, title: element.name || KIND_LABELS[element.kind] || 'Element', items: oneItems(element) };
+    contextMenu = chosen.length > 1 ? { at, title: `${chosen.length} picked`, items: [...featureItems(element, at), ...manyItems(chosen)] }
+      : { at, title: element.name || KIND_LABELS[element.kind] || 'Element', items: [...featureItems(element, at), ...oneItems(element)] };
+  }
+  /** On a map, over a feature of one of its layers: hide that feature on this map, and set the file it shows beside it. */
+  function featureItems(element, at) {
+    const hit = element.kind === 'map' ? handles.get(element.id)?.featureAt?.(at) : null;
+    if (!hit) return [];
+    return [...mediaItems(element, hit), { label: hit.name ? `Hide ${hit.name} on this map` : 'Hide this feature on this map', icon: 'eyeOff',
+      title: 'Only this map leaves it out, the layer keeps it', run: () => { element.layers = withHidden(element.layers, hit.layer, hit.id, true); } }, 'sep'];
+  }
+  /**
+   * Over a feature that shows a file of the case, and only then: its video played on a
+   * step, or its picture set on the page, each pointing at the feature.
+   */
+  function mediaItems(map, hit) {
+    const point = anchor(hit.geometry);
+    if (!hit.media || !point || plate.template) return [];
+    const at = point.map((value) => Math.round(value * 1e6) / 1e6);
+    return hit.media.as === 'video'
+      ? [{ label: 'Add video', icon: 'video', title: 'Plays it on a step, pointing at this place', run: () => linked('video', map, hit.media.path, at) }]
+      : [{ label: 'Add linked picture', icon: 'image', title: 'Sets it on the page, pointing at this place', run: () => linked('image', map, hit.media.path, at) }];
+  }
+  /** A video or a picture added as Add makes it, showing `path` and pointing at `point` on `map`; a video says its source. */
+  function linked(kind, map, path, point) {
+    const before = new Set(spec.elements.map((item) => item.id));
+    add(kind);
+    const element = spec.elements.find((item) => !before.has(item.id) && item.kind === kind);
+    if (!element) return;
+    Object.assign(element, { src: path, at: point, of: map.id, leader: 'straight', ...(kind === 'image' ? { data: null } : {}) });
+    if (kind !== 'video') return;
+    api.get(`/api/cases/${plate.caseId ?? caseId}/media/item?path=${encodeURIComponent(path)}`)
+      .then((item) => { if (element.src === path && !element.text) element.text = captionOf(item); })
+      .catch(() => { /* the line stays empty, to be written by hand */ });
   }
   function oneItems(element) {
     const owed = element.kind === 'credits' && spec.elements.filter((item) => item.kind === 'credits').length < 2;
@@ -1218,7 +1294,8 @@
       if (event.shiftKey) redo(); else undo();
       return;
     }
-    if (typing || document.querySelector('[role="dialog"], .float-menu')) return;
+    // a reference window left open in Satellite is no reason: only an overlay over the plate
+    if (typing || overlayHoldsKeys() || document.querySelector('.float-menu')) return;
     if (event.key === 'Escape') {
       if (placing) { placing = null; return; }
       if (!framing && selection.length) { selection = []; return; }
@@ -1265,7 +1342,7 @@
       if (!map) continue;
       const live = views[map.id];
       out[element.id] = legendRows({ ...map, offmap: element.offmap, off: element.off, order: element.order, names: element.names, extra: element.extra }, {
-        rows, collection: (name) => addedLayers.collection(name), view: live?.view, frame: live?.frame, place: live?.project,
+        rows, collection: (name) => layerRead(addedLayers.collection(name)), view: live?.view, frame: live?.frame, place: live?.project,
         days: legendDays ?? [at],
         standing: (row, feature, day) => (isTracked(row) && hasHistory(feature) ? stateAt(feature, day ?? '￿') : feature),
         past: (row, collection, day) => (isTracked(row) ? asOf(collection, day, { trail: time.trail !== false, since: time.since ?? null, window: time.window ?? null }).features : []),
@@ -1282,9 +1359,12 @@
     if (!caseId || !names.length) return;
     untrack(() => { for (const name of names) if (!addedLayers.collection(name)) addedLayers.drawing(caseId, name).catch(() => {}); });
   });
-  /** The features a set of a map's layers holds, for its tables and its credits. */
-  function featuresOf(names) {
-    return names.flatMap((name) => addedLayers.collection(name)?.features ?? []);
+  /** What a feature hidden on a map is called, and whether a layer is dated at all, for the map's inspector. */
+  const featureName = (layer, id) => hiddenName(addedLayers.collection(layer), id);
+  const datedLayer = (name) => isDated(addedLayers.collection(name));
+  /** The features a set of a map's layers holds, for its tables and its credits, less what `map` leaves out of them. */
+  function featuresOf(names, map = null) {
+    return names.flatMap((name) => keptOf(layerRead(addedLayers.collection(name)), map?.layers?.find((entry) => entry.name === name))?.features ?? []);
   }
   /** What the plate's maps draw from, for its credits. */
   const creditSources = $derived.by(() => {
@@ -1302,15 +1382,17 @@
     const main = mainMap(spec);
     return Object.fromEntries(elements.filter((element) => element.kind === 'table').map((element) => {
       const names = element.layer ? [element.layer] : (main?.layers ?? []).map((entry) => entry.name);
-      return [element.id, tableRows(element, featuresOf(names), at)];
+      return [element.id, tableRows(element, featuresOf(names, main), at)];
     }));
   });
-  /** A label's feature is on the map on the plate's day: a label tied to it follows it. */
+  /** A label's feature is on the map on the plate's day, and that map keeps it: a label tied to it follows it. */
   function refShown(element) {
     if (!element.ref) return true;
-    const collection = addedLayers.collection(element.ref.layer);
+    const collection = layerRead(addedLayers.collection(element.ref.layer));
     if (!collection) return true;
-    const feature = collection.features?.find((item) => item.properties?.key === element.ref.key);
+    const map = elements.find((item) => item.id === element.of);
+    const kept = keptOf(collection, map?.layers?.find((entry) => entry.name === element.ref.layer));
+    const feature = kept.features?.find((item) => item.properties?.key === element.ref.key);
     if (!feature) return false;
     const row = rows.find((item) => item.name === element.ref.layer);
     return !(row && isTracked(row) && hasHistory(feature)) || !!stateAt(feature, at ?? '￿');
@@ -1322,7 +1404,7 @@
     if (!main) return [];
     const out = [];
     for (const entry of main.layers ?? []) {
-      for (const feature of addedLayers.collection(entry.name)?.features ?? []) {
+      for (const feature of keptOf(addedLayers.collection(entry.name), entry)?.features ?? []) {
         const said = feature.properties ?? {};
         const path = said.entity_picture || said.source_picture;
         const point = anchor(feature.geometry);
@@ -1356,7 +1438,7 @@
     const place = live.project ? (point) => live.project(point) : null;
     return (main.layers ?? []).flatMap((entry) => {
       const row = rows.find((item) => item.name === entry.name);
-      return (addedLayers.collection(entry.name)?.features ?? [])
+      return (keptOf(layerRead(addedLayers.collection(entry.name)), entry)?.features ?? [])
         .map((feature) => (row && isTracked(row) ? stateAt(feature, at ?? '￿') : feature))
         .filter((feature) => feature && !(entry.hidden ?? []).includes(feature.properties?.category) && inFrame(feature.geometry, live.view, live.frame, 0, place));
     });
@@ -1762,18 +1844,20 @@
         {/if}
         {#if barShown}
           <!-- the plate's days and the day's steps on one bar; a plate that plays nothing has none, Add holds its first step -->
-          <div class="timebar" bind:clientHeight={barHeight}>
-            <button type="button" class="play" aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : moments.length ? 'Play the days and their steps' : 'Play the steps'}
-              disabled={sequence.length < 2} onclick={play}><Icon name={playing ? 'pause' : 'play'} size={14} /></button>
-            <button type="button" class="speed" title="How fast the plate plays" onclick={() => (speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1)}>{speed}×</button>
-            <button type="button" class="speed" class:on={loop} aria-pressed={loop} title="Start again from the beginning" onclick={() => (loop = !loop)}>Loop</button>
+          <!-- fixed columns: what the day holds never moves the days' track; a narrow bar gives the steps a line of their own -->
+          <div class="timebar" class:days={moments.length} class:narrow={barWidth > 0 && barWidth < NARROW_BAR} bind:clientHeight={barHeight} bind:clientWidth={barWidth}>
+            <div class="controls">
+              <button type="button" class="play" aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : moments.length ? 'Play the days and their steps' : 'Play the steps'}
+                disabled={sequence.length < 2} onclick={play}><Icon name={playing ? 'pause' : 'play'} size={14} /></button>
+              <button type="button" class="speed" title="How fast the plate plays" onclick={() => (speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1)}>{speed}×</button>
+              <button type="button" class="speed" class:on={loop} aria-pressed={loop} title="Start again from the beginning" onclick={() => (loop = !loop)}>Loop</button>
+            </div>
             {#if moments.length}
-              <div class="cursor"><LayerTimeCursor time={time} moments={playedDays} faded={spec.skipped ?? []} precision={tracked[0]?.track?.precision ?? 'day'}
-                zone={tracked[0]?.track?.zone ?? 'UTC'} label="The plate's day"
-                onchange={(patch) => { if (playing) stop(); if ('at' in patch && patch.at !== plate.spec.time.at) plate.spec.time.step = null; Object.assign(plate.spec.time, patch); }} /></div>
+              <PlateDays keys={playedDays} {at} {time} faded={spec.skipped ?? []} steps={stepCounts} hours={hourly} {canHours}
+                zone={tracked[0]?.track?.zone ?? 'UTC'} onpick={pickDay} onchange={setPast} onhours={setHours} />
             {/if}
             <!-- the day itself and its steps, each tile saying how long it holds in the video -->
-            <PlateSteps steps={daySteps} current={stepId} dayLabel={at ? momentLabel(at) : 'The page'} elements={plate.spec.elements}
+            <PlateSteps steps={daySteps} current={stepId} day={dayOf(at)} dayLabel={!at ? 'The page' : timed(at) ? at.slice(11) : momentLabel(at)} elements={plate.spec.elements}
               transitions={transitionsOf(plate.spec).on} transitionSeconds={transitionsOf(plate.spec).seconds} daySeconds={daySeconds(plate.spec, at)} dayOwn={!!plate.spec.holds?.[dayOf(at)]}
               plateSeconds={plateSeconds(plate.spec)} ondayhold={holdDay}
               {dayPlayed} dayPicked={(plate.spec.days ?? []).includes(dayOf(at))}
@@ -1789,7 +1873,7 @@
         <div class="dock right" style:width="{layout.inspectorW}px" data-guide="plate.inspector">
           <PanelEdge bind:width={layout.inspectorW} helpers={inspectorWidth} side="left" label="Resize the inspector" />
           <PlateInspector bind:spec={plate.spec} {selection} caseId={plate.caseId ?? caseId ?? ''} {rows} {grounds} {releases} {years} {legend} {creditList} {framing} {at} moments={playable ? moments : []}
-            {place} step={stepIndex >= 0 ? { id: stepId, name: stepName(stepIndex) } : null}
+            {place} step={stepIndex >= 0 ? { id: stepId, name: stepName(stepIndex) } : null} {featureName} {datedLayer}
             {overflow} {featurePictures} onpaper={paper} ontheme={applyTheme} onremove={removeElement} onduplicate={duplicate} onorder={restackBy} canorder={(element, by) => stepOf(listed, element.id, by) !== null} ongroup={group} onwayback={readReleases} onnewlayer={newLayerHere} onkeepdrawn={keepDrawn}
             {framingFor} onmapview={mapView} onkeep={keepFraming} plays={!plate.template && sequence.length > 1}
             onsymbol={(style) => (lastSymbol = { ...lastSymbol, ...style })}
@@ -1990,11 +2074,12 @@
   .fb-rule { width: 1px; height: 18px; margin: 0 3px; background: var(--border); }
   .on-step { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 7; margin: 0; padding: 3px 12px; border-radius: 999px;
     background: var(--accent); color: var(--accent-text); font-size: 11px; font-weight: 600; pointer-events: none; white-space: nowrap; }
-  .timebar { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-top: 1px solid var(--border); background: var(--bg-1); }
-  .cursor { flex: 1 1 320px; min-width: 220px; max-width: 720px; }
-  .timebar > :global(.steps) { flex: 0 1 auto; }
-  .cursor + :global(.steps) { padding-left: 10px; border-left: 1px solid var(--border); }
-  .cursor :global(.cursor) { padding-left: 0; }
+  .timebar { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 6px 14px; border-top: 1px solid var(--border); background: var(--bg-1); }
+  .timebar.days { grid-template-columns: auto minmax(280px, 34%) minmax(0, 1fr); }
+  .controls { display: flex; align-items: center; gap: 8px; }
+  .timebar.days > :global(.steps) { padding-left: 12px; border-left: 1px solid var(--border); }
+  .timebar.days.narrow { grid-template-columns: auto minmax(0, 1fr); row-gap: 4px; }
+  .timebar.days.narrow > :global(.steps) { grid-column: 1 / -1; padding: 6px 0 0; border-left: 0; border-top: 1px solid var(--border); }
   .play { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--accent-text); cursor: pointer; }
   .play:disabled { opacity: .4; cursor: default; }
   .speed { min-width: 34px; height: 26px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }

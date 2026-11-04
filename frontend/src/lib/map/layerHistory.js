@@ -428,6 +428,16 @@ export function spanOf(feature) {
     changes: states.slice(1).filter((state) => !state.gone).length, unknown: !last.gone && !!properties.end_unknown };
 }
 
+/**
+ * The first and last day of an axis, as its ends name them: `12 Oct` and `2 Nov`, with
+ * their years when the span runs over more than one, never with a time of day.
+ */
+export function spanEnds(first, last) {
+  const [from, to] = [String(first ?? '').slice(0, 10), String(last ?? '').slice(0, 10)];
+  const year = from.slice(0, 4) === to.slice(0, 4) ? Number(from.slice(0, 4)) : Number.NaN;
+  return [shortMoment(from, year), shortMoment(to, year)];
+}
+
 /** `12 Oct`, with the year when it is not `year`, and the time on a moment that has one. */
 export function shortMoment(at, year = new Date().getFullYear()) {
   const match = MOMENT.exec(String(at ?? ''));

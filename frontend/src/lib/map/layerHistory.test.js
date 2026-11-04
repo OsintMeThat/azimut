@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   asOf, changedBy, changes, changesOn, foldRows, inForce, isTracked, lifeline, lifeRows, moment, momentLabel, momentNow, moments,
-  previousState, seenAt, shortMoment, spanLabel, spanOf, stateAt, stepMoment,
+  previousState, seenAt, shortMoment, spanEnds, spanLabel, spanOf, stateAt, stepMoment,
 } from './layerHistory.js';
 
 const square = (x, size = 1) => ({ type: 'Polygon', coordinates: [[[x, 0], [x + size, 0], [x + size, size], [x, size], [x, 0]]] });
@@ -338,5 +338,13 @@ describe('a long history', () => {
       .toEqual([day(0), day(1), day(2), day(3), '+4', day(8)]);
     expect(foldRows(many(9)).map((row) => (row.fold ? `+${row.fold}` : row.at)))
       .toEqual([day(0), '+6', day(7), day(8)]);
+  });
+});
+
+describe('the ends of an axis of days', () => {
+  it('name their days without the year they share, with it when they span more than one, never with a time', () => {
+    expect(spanEnds('2026-09-08', '2026-11-04')).toEqual(['8 Sep', '4 Nov']);
+    expect(spanEnds('2025-12-30', '2026-01-02')).toEqual(['30 Dec 2025', '2 Jan 2026']);
+    expect(spanEnds('2026-09-08T09:15', '2026-11-04T00:30')).toEqual(['8 Sep', '4 Nov']);
   });
 });

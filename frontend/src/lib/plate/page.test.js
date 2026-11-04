@@ -157,6 +157,16 @@ describe('the days an annotation is shown on', () => {
     expect(shownOn(minute, '2026-10-15T10:00')).toBe(true);
   });
 
+  it('shows what was made on an hour all through its day, on a plate played day by day', () => {
+    const minute = { onward: '2026-10-15T09:00', until: '2026-10-15T12:00' };
+    expect(shownOn(minute, '2026-10-15')).toBe(true);
+    expect(shownOn(minute, '2026-10-14')).toBe(false);
+    expect(shownOn(minute, '2026-10-16')).toBe(false);
+    expect(shownOn({ onward: '2026-10-15T09:00' }, '2026-10-20')).toBe(true);
+    // stretched to the day, it is left as it was
+    expect(bringTo(minute, '2026-10-15')).toBe(minute);
+  });
+
   it('is born on the day it is made on a played plate, every day on another', () => {
     expect(bornOn('2026-10-01', true)).toEqual({ onward: '2026-10-01', until: '2026-10-01' });
     expect(bornOn(null, true)).toEqual({ onward: PAGE, until: null });

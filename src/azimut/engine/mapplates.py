@@ -25,6 +25,11 @@ of it the clip runs, and the step lasts as long as its longest clip.
 **Every day and step holds its own seconds in the video**: a day its own (`holds`)
 or the plate's (`time.hold`), a step its own, never shorter than its longest clip.
 
+**A plate plays day by day unless it is told to play hour by hour** (`time.hours`),
+when its layers are dated to the minute. Day by day, a day shows its layers as the
+day ends, and the steps of its hours are played after its own, each keeping its
+hour (`Step.hour`) to go back to it.
+
 **A day or a step can frame a map its own way** (`framing`, by the day or the
 step's id, then the map's id). One that does not keeps the framing of the one
 played before it, and the first keeps the map's own view.
@@ -92,6 +97,8 @@ Mm = Annotated[FiniteFloat, Field(ge=-MAX_EDGE_MM, le=MAX_EDGE_MM)]
 Size = Annotated[FiniteFloat, Field(gt=0, le=MAX_EDGE_MM)]
 Name = Annotated[str, Field(min_length=1, max_length=120)]
 Ident = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,40}$")]
+#: A time of day, hours and minutes.
+Clock = Annotated[str, Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
 #: A moment on a tracked layer's clock (`engine/layerediting.instant`).
 Moment = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$")]
 #: The day an annotation is shown on: a moment, or "now", the page of a plate with no day,
@@ -160,6 +167,10 @@ class FrameLayer(Strict):
     name: Annotated[str, Field(min_length=1, max_length=120)]
     #: Its groups this plate leaves out, by name.
     hidden: list[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=200)
+    #: Its features this map leaves out one by one: a feature's key, or a source's name and point (`lib/plate/kept.js`).
+    hidden_features: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list, max_length=500)
+    #: The first day this map draws the layer from: what began before it is left out.
+    start: Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None = None
     #: Lines drawn this many times their layer's weight.
     stroke: FiniteFloat = Field(default=1.0, ge=0.25, le=4)
     #: Marks drawn this many times their layer's size.
@@ -264,6 +275,8 @@ class Time(Strict):
     window: int | None = Field(default=None, ge=0, le=365)
     #: How long a day holds in the video, in seconds, unless it holds its own (`PlateSpec.holds`).
     hold: FiniteFloat = Field(default=1.0, ge=0.2, le=120)
+    #: Whether the plate plays hour by hour; none, as it keeps its work (by hour when it keeps some under an hour).
+    hours: bool | None = None
 
 
 LegendKey = Annotated[str, Field(max_length=330)]
@@ -282,6 +295,8 @@ class Step(Strict):
     transition: Literal["", "none"] = ""
     #: How long the transition into it lasts; none, as long as the plate's transitions say.
     transition_seconds: FiniteFloat | None = Field(default=None, ge=0.2, le=MAX_TRANSITION_SECONDS)
+    #: The hour it was made on, while a plate played day by day keeps it under its day.
+    hour: Clock | None = None
 
 
 class Transitions(Strict):

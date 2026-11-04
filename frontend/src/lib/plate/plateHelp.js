@@ -204,6 +204,7 @@ const PATTERNS = [
   [/ colour on this plate$/, 'This layer\'s colour on this plate only; None keeps its own'],
   [/ lines on this plate$/, 'This layer\'s lines on this plate: its own, dashed or dotted'],
   [/ areas on this plate$/, 'This layer\'s areas on this plate: its own fill, a full tint, hatched, or the outline alone'],
+  [/ first day calendar$/, 'The day this map starts the layer on'],
   [/^Name of /, 'What the legend calls this row; empty, its own name'],
 ];
 

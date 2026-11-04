@@ -141,6 +141,19 @@ export const posterKey = (element) => `video:${element.src}@${clipRange(element)
 /** Whether a clip's file is a GIF: it plays as a video does, looping for as long as its clip runs. */
 export const isGif = (src) => /\.gif$/i.test(String(src ?? ''));
 
+/**
+ * The file of the case a layer's feature shows (`layerlinks._shown` on the backend), as
+ * `{ path, as }`: `as` is 'video' for footage or a GIF, which a plate plays on a step,
+ * 'picture' for a still. Null for a feature that shows no file.
+ */
+export function linkedMedia(properties) {
+  const path = String(properties?.media_path ?? '');
+  if (!path) return null;
+  if (properties.media_kind === 'video' || isGif(path)) return { path, as: 'video' };
+  if (properties.media_kind === 'image') return { path, as: 'picture' };
+  return null;
+}
+
 /** The first picture of a GIF, as a canvas; null when the browser cannot read it. */
 export function gifPoster(url) {
   return new Promise((resolve) => {

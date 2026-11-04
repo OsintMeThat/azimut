@@ -5,7 +5,10 @@
       {
         "title": "And also",
         "items": [
-          { "icon": "image", "text": "The Google basemap keeps its credit and logo in plain sight." }
+          { "icon": "image", "text": "The Google basemap keeps its credit and logo in plain sight." },
+          { "icon": "eyeOff", "text": "A plate's map hides one feature, or everything a layer held before a day you pick." },
+          { "icon": "clock", "text": "A plate's bar stays still on busy days, scrolls its steps with the wheel, and plays hour by hour when you ask." },
+          { "icon": "video", "text": "Right-click a plate's marker that shows a video or a photo to set it on the page, pointing at its place." }
         ]
       }
     ]
