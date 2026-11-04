@@ -785,14 +785,19 @@ test('the page takes the room: panels widened and put away, focus, and a tab of 
   await expect(page.locator('.topbar')).toBeVisible();
   await expect(page.getByLabel('Plate name', { exact: true })).toBeVisible();
 
-  // a tab of its own: the plate alone there, this tab back on the list
+  // a tab of its own: the plate alone there, this tab back on the list. The new tab has
+  // none of this page's routes until its own are put in, so nothing of it may reach a real
+  // server, and its address is read as this tab writes it, before the app there settles it.
+  await context.route('**/api/**', (route) => route.abort());
   const opening = context.waitForEvent('page');
   await page.getByRole('button', { name: 'Open in its own tab' }).click();
   const second = await opening;
-  await second.waitForURL(/#plate\?/);
-  expect(new URL(second.url()).hash).toMatch(/plate=.+solo=1/);
+  let address = '';
+  await second.waitForURL((url) => /plate=.+solo=1/.test(url.hash) && Boolean(address = url.toString()));
+  // loaded again, its routes in place, on the very address this tab gave it
   await plateFixture(second, store);
-  await second.reload();
+  await second.goto('about:blank');
+  await second.goto(address);
   await expect(second.locator('.plate-map')).toHaveCount(2);
   await expect(second.locator('nav.rail')).toHaveCount(0);
   await expect(second.locator('.topbar')).toHaveCount(0);

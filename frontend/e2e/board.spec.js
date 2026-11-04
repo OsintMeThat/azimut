@@ -110,9 +110,9 @@ test('opens from the rail, under the four stages', async ({ page }) => {
   await installAppFixture(page, { catalog });
   await page.goto('/#media');
 
-  // the four stages, then the case a rule apart, then the theme
+  // the four stages, then the case a rule apart, then Support and the theme at the foot
   const rail = page.getByRole('navigation').first();
-  await expect(rail.getByRole('button')).toHaveText(['Sources', 'Examine', 'Map', 'Compose', 'Case', /Dark|Light/]);
+  await expect(rail.getByRole('button')).toHaveText(['Sources', 'Examine', 'Map', 'Compose', 'Case', 'Support', /Dark|Light/]);
 
   await rail.getByRole('button', { name: 'Case' }).click();
   await expect(rail.getByRole('button', { name: 'Case' })).toHaveClass(/active/);
