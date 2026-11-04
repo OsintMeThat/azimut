@@ -339,9 +339,9 @@ def test_release_binary_runs_the_application_smoke_test():
         assert f"ffmpeg_target: {target}" in workflow
 
 
-def test_the_node_floor_for_the_frontend_build_is_the_one_vite_declares():
-    """vite and rolldown refuse to start below their range, so the README and the
-    frontend's own `engines` state that range rather than a rounder number."""
+def test_the_node_floor_for_the_frontend_build_is_the_one_its_tools_declare():
+    """Mermaid sets the floor and vite and rolldown refuse to start below theirs, so the
+    README and the frontend's own `engines` state that range rather than a rounder number."""
     import json
 
     root = Path(__file__).resolve().parent.parent
@@ -349,10 +349,12 @@ def test_the_node_floor_for_the_frontend_build_is_the_one_vite_declares():
     package = json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))
     lock = json.loads((root / "frontend" / "package-lock.json").read_text(encoding="utf-8"))
 
-    vite = lock["packages"]["node_modules/vite"]["engines"]["node"]
-    assert vite == "^20.19.0 || >=22.12.0"
-    assert package["engines"]["node"] == vite
-    assert "Node.js 20.19+ or 22.12+" in readme
+    mermaid = lock["packages"]["node_modules/mermaid"]["engines"]["node"]
+    assert mermaid == ">=22.12.0"
+    assert lock["packages"]["node_modules/vite"]["engines"]["node"] == "^20.19.0 || >=22.12.0"
+    assert package["engines"]["node"] == mermaid
+    assert lock["packages"][""]["engines"]["node"] == mermaid
+    assert "Node.js 22.12+" in readme
 
 
 def test_intel_macos_package_support_floor_matches_the_lock():
