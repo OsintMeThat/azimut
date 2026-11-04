@@ -47,6 +47,15 @@ export function anyOverlayOpen() {
 }
 
 /**
+ * True while an overlay holds the keyboard, so a map or page shortcut waits: one on the
+ * stack, or a confirmation or modal that does not join it. A window beside the work (a
+ * reference, a layers panel) is no reason, nor a dialog left in a tool kept out of sight.
+ */
+export function overlayHoldsKeys() {
+  return stack.length > 0 || !!document.querySelector('[role="alertdialog"], [aria-modal="true"]');
+}
+
+/**
  * Close the overlay on top, as Escape would. Answers whether one was open: one that
  * cannot be closed this way still holds the screen, and is left as it is.
  */

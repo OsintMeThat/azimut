@@ -408,6 +408,27 @@ test('marker dragging and editable line and area vertices save geometry without 
   expect(fixture.promotions).toBe(0);
 });
 
+test('Enter saves a drawn line while a reference window floats over the map', async ({ page }) => {
+  const fixture = await personalFixture(page);
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  // a shot to trace from, open beside the drawing: a window, not a modal, so Enter is still the map's
+  await page.getByRole('button', { name: 'Add reference' }).click();
+  await page.getByRole('dialog', { name: 'Add reference' }).locator('.ref-pick').first().click();
+  const pane = page.locator('.ref-viewer');
+  await pane.getByRole('button', { name: 'Place' }).click();
+  await pane.getByRole('button', { name: 'Column on the left' }).click();
+  await expect(page.locator('.ref-viewer.docked')).toHaveCount(1);
+  const panel = await createPersonalLayer(page, 'Traced');
+  const map = await page.locator('.map-wrap .map').boundingBox();
+  const click = (x, y) => page.mouse.click(map.x + map.width * x, map.y + map.height * y);
+  await tools(page).getByRole('button', { name: 'Draw line', exact: true }).click();
+  // a look at the shot between two corners, as one traces from it
+  await click(.30, .40); await page.locator('.ref-viewer.docked .rv-body').click(); await click(.42, .55);
+  await page.keyboard.press('Enter');
+  await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
+  expect(fixture.collections.get(fixture.rows.find((row) => row.editable).name)[0].geometry.type).toBe('LineString');
+});
+
 for (const tool of ['detect', 'compare', 'horizon']) {
   test(`personal markers and shapes can be created and reopened from ${tool}`, async ({ page }) => {
     const fixture = await personalFixture(page);
@@ -429,7 +450,7 @@ for (const tool of ['detect', 'compare', 'horizon']) {
     await tools(page).getByRole('button', { name: 'Draw line', exact: true }).click();
     await page.mouse.click(map.x + map.width * .35, map.y + map.height * .4);
     await page.mouse.click(map.x + map.width * .50, map.y + map.height * .6);
-    await tools(page).getByRole('button', { name: 'Save geometry', exact: true }).click();
+    await page.keyboard.press('Enter');
     await expect(panel.getByText('2 features', { exact: true })).toBeVisible();
     await panel.getByRole('button', { name: 'Done', exact: true }).click();
     await layers.click(); await page.getByRole('button', { name: `Edit ${tool} map`, exact: true }).click();

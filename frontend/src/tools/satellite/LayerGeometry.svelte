@@ -19,6 +19,7 @@
   import { isBadge } from '../../lib/map/markerGlyphs.js';
   import { SOURCE_ICON_SCALE } from '../../lib/map/addedLayer.js';
   import { middleClickPaste } from '../../lib/clipboardPaste.js';
+  import { overlayHoldsKeys } from '../../lib/overlayStack.js';
   import { sketchReading } from '../../lib/map/sketchMeasure.js';
   import { prefs } from '../../lib/state.svelte.js';
   import { layerIconUrl, readyPicture } from '../../lib/map/ownIcons.js';
@@ -321,15 +322,16 @@
   $effect(() => {
     if (!active || !controller.editor) return;
     const key = (event) => {
-      // Enter saves a shape being drawn even from the layer's search field or with the style palette open:
-      // neither has anything of its own to do with it, and a shape left unsaved is work lost
+      // Enter saves a shape being drawn even from the layer's search field, with the style palette open or
+      // a reference window beside the map: none has anything of its own to do with it, and a shape left
+      // unsaved is work lost
       const finishing = event.key === 'Enter' && !event.repeat && controller.sketch && controller.complete
         && !event.target?.closest?.('textarea, select, [contenteditable="true"], [role="alertdialog"], [role="dialog"]')
         && (!event.target?.closest?.('input') || event.target.closest('.find'))
-        && !document.querySelector('[role="alertdialog"], [role="dialog"]');
+        && !overlayHoldsKeys();
       if (finishing) { event.preventDefault(); event.stopImmediatePropagation(); controller.saveGeometry(); return; }
       if (event.defaultPrevented || event.repeat || event.target?.closest?.('input, textarea, select, .float-menu, [role="alertdialog"], [role="dialog"], [contenteditable="true"]')
-        || document.querySelector('[role="alertdialog"], [role="dialog"], .float-menu')) return;
+        || overlayHoldsKeys() || document.querySelector('.float-menu')) return;
       const ctrl = event.ctrlKey || event.metaKey;
       const undoKey = ctrl && !event.shiftKey && event.key.toLowerCase() === 'z';
       const redoKey = ctrl && ((event.shiftKey && event.key.toLowerCase() === 'z') || event.key.toLowerCase() === 'y');
@@ -355,7 +357,7 @@
   $effect(() => {
     if (!editing) return;
     const paste = (event) => {
-      if (event.target?.closest?.('input, textarea, [contenteditable="true"]') || middleClickPaste() || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      if (event.target?.closest?.('input, textarea, [contenteditable="true"]') || middleClickPaste() || overlayHoldsKeys()) return;
       const text = event.clipboardData?.getData('text/plain') ?? '';
       if (!text.trim()) return;
       event.preventDefault();

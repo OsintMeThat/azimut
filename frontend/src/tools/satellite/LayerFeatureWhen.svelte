@@ -86,6 +86,8 @@
   const timed = $derived(controller.editor?.track?.precision === 'time');
   /** The moment each calendar stands on: what its day picked replaces. */
   const bound = (which) => ({ start: span.start, end: span.unknown ? '' : span.end, change: cursor }[which] ?? '');
+  /** What a calendar opens on: its own day, else the month of the day the layer is shown at. */
+  const opensOn = (at) => String(at ?? '').slice(0, 10) || String(cursor ?? '').slice(0, 7);
   const clockOf = (at) => (String(at ?? '').includes('T') ? String(at).slice(11, 16) : '');
   /** The time the open calendar's day is given, `HH:MM` or ''. */
   let clock = $state('');
@@ -189,7 +191,7 @@
     {/if}
     <div class="fm-sep"></div>
     {#if timed}<LayerClock value={clock} {zone} label="Time it first shows" onchange={retime} />{/if}
-    <MonthGrid value={(span.start ?? '').slice(0, 10)} max={startMax} label="First day" onpick={(iso) => { if (iso) start(withClock(iso)); }} />
+    <MonthGrid value={opensOn(span.start)} max={startMax} label="First day" onpick={(iso) => { if (iso) start(withClock(iso)); }} />
   </FloatingMenu>
 {:else if open === 'end'}
   <FloatingMenu anchor={anchors.end} width={248} label="When it leaves the map" onclose={() => (open = '')}>
@@ -203,7 +205,7 @@
     {/if}
     <div class="fm-sep"></div>
     {#if timed}<LayerClock value={clock} {zone} label="Time it leaves" onchange={retime} />{/if}
-    <MonthGrid value={(span.end ?? '').slice(0, 10)} min={endMin} max={today} label="Day it leaves" onpick={(iso) => { if (iso) end(withClock(iso)); }}
+    <MonthGrid value={opensOn(span.end)} min={endMin} max={today} label="Day it leaves" onpick={(iso) => { if (iso) end(withClock(iso)); }}
       also={{ label: 'Unknown', title: 'Nobody knows when it left: drawn as still there', pressed: span.unknown, onclick: unknown }} />
     <p class="fm-note">{many ? `Gone from that day on, for all ${list.length}.` : 'Gone from that day on.'}</p>
   </FloatingMenu>

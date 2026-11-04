@@ -1,5 +1,6 @@
+// @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { anyOverlayOpen, closeTopOverlay, isTopOverlay, joinOverlays } from './overlayStack.js';
+import { anyOverlayOpen, closeTopOverlay, isTopOverlay, joinOverlays, overlayHoldsKeys } from './overlayStack.js';
 
 describe('the overlay on top', () => {
   it('is the last one opened, and the only one a key press reaches', () => {
@@ -44,5 +45,33 @@ describe('whether any overlay is open', () => {
     expect(anyOverlayOpen()).toBe(true);
     leave();
     expect(anyOverlayOpen()).toBe(false);
+  });
+});
+
+describe('whether an overlay holds the keys', () => {
+  const add = (attrs) => {
+    const node = document.createElement('div');
+    for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, value);
+    document.body.append(node);
+    return node;
+  };
+
+  it('is not a window beside the work, nor a dialog left in a hidden tool', () => {
+    const reference = add({ role: 'dialog', 'aria-label': 'panel.svg' });
+    const hidden = add({ role: 'dialog', style: 'display: none' });
+    expect(overlayHoldsKeys()).toBe(false);
+    reference.remove(); hidden.remove();
+  });
+
+  it('is an overlay on the stack, a modal, or a confirmation', () => {
+    const leave = joinOverlays({});
+    expect(overlayHoldsKeys()).toBe(true);
+    leave();
+    for (const attrs of [{ role: 'dialog', 'aria-modal': 'true' }, { role: 'alertdialog' }]) {
+      const node = add(attrs);
+      expect(overlayHoldsKeys()).toBe(true);
+      node.remove();
+    }
+    expect(overlayHoldsKeys()).toBe(false);
   });
 });

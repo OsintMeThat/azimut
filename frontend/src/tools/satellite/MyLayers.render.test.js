@@ -620,6 +620,18 @@ describe('a feature with a history', () => {
     expect(changeOn).toHaveBeenCalledWith('2026-10-08T10:00');
   });
 
+  it('opens a calendar with no day yet on the month the layer is shown at, marking nothing', () => {
+    // on today's month, an analyst reading an old layer would page back through years
+    const undated = { ...front, properties: { key: 'f', name: 'Front line' } };
+    show(MyLayers, { controller: picked(undated, { editor: TRACKED, cursor: '2023-03-15', timeMode: 'new' }) });
+    for (const label of ['When it first shows', 'When it leaves the map']) {
+      document.querySelector(`[aria-label="${label}"]`).click(); flushSync();
+      expect(document.querySelector('.float-menu button.day[title="2023-03-20"]'), label).not.toBeNull();
+      expect(document.querySelector('.float-menu button.day.on'), label).toBeNull();
+      document.querySelector(`[aria-label="${label}"]`).click(); flushSync();
+    }
+  });
+
   it('offers no time on a layer dated by the day', () => {
     show(MyLayers, { controller: picked(front, { editor: TRACKED, cursor: '2026-10-15', timeMode: 'new' }) });
     document.querySelector('[aria-label="When it first shows"]').click(); flushSync();
