@@ -16,7 +16,8 @@
   import { filterEntities, isFiltering, typeChips } from '../lib/sidebarSearch.js';
   import { assignFolder as fileEntity, assignFolderBatch, renameEntity } from '../lib/filing.js';
   import { createNote } from '../lib/notes.js';
-  import { openEntity, openInTimeline, openNotebook } from '../lib/navigate.js';
+  import { openEntity, openInTimeline, openNotebook, openNotebookHome } from '../lib/navigate.js';
+  import { dockNote, noteDock, openInDock } from '../lib/notes/noteDock.svelte.js';
   import {
     ancestorsOf,
     leafOf,
@@ -31,6 +32,7 @@
   import Modal from './Modal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import FolderSelect from './FolderSelect.svelte';
+  import NotePicker from './NotePicker.svelte';
   import SidebarHeader from './sidebar/SidebarHeader.svelte';
   import SidebarTree from './sidebar/SidebarTree.svelte';
   import SidebarResults from './sidebar/SidebarResults.svelte';
@@ -376,6 +378,7 @@
 
   // ── confirmation dialog (replaces browser confirm()) ──────────────────────
   let confirmState = $state(null); // { title, message, detail, confirmLabel, tone, icon, action }
+  let notesMenu = $state(null); // the Notes button, while its list of notes is open
   let confirmBusy = $state(false);
 
   async function runConfirm() {
@@ -638,7 +641,8 @@
       total={summary?.total ?? 0}
       resultCount={filtering ? resultRows.length : null}
       {view}
-      onnotes={() => openNotebook()}
+      notesOpen={Boolean(notesMenu)}
+      onnotes={(anchor) => (notesMenu = notesMenu ? null : anchor)}
       onselecttype={(t) => (typeFilter = t)}
       onview={setView}
     />
@@ -861,6 +865,17 @@
       </button>
     </div>
   </Modal>
+{/if}
+
+<!-- Notes: a press pins a note to the side, ⤢ opens it in the Notebook -->
+{#if notesMenu && caseState.current}
+  {@const caseId = caseState.current.id}
+  <NotePicker {caseId} anchor={notesMenu} intro="Pick a note to keep on the side as you work."
+    current={noteDock.open ? dockNote(caseId) : undefined}
+    onpick={(id) => { notesMenu = null; openInDock(caseId, id); }}
+    onnotebook={(id) => { notesMenu = null; openNotebook(id); }}
+    onhome={() => { notesMenu = null; openNotebookHome(); }}
+    onclose={() => (notesMenu = null)} />
 {/if}
 
 <!-- Confirmation dialog (move to Unfiled / remove folder) -->

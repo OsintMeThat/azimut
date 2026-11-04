@@ -310,3 +310,20 @@ describe('right-click', () => {
     expect(shell).toContain('uiState.moving = [m.entity]');
   });
 });
+
+describe('Notes in the sidebar', () => {
+  it('opens the list of notes under the button, which says so', () => {
+    expect(header).toContain('aria-haspopup="menu"');
+    expect(header).toContain('aria-expanded={notesOpen} onclick={(event) => onnotes(event.currentTarget)}');
+    expect(shell).toContain('onnotes={(anchor) => (notesMenu = notesMenu ? null : anchor)}');
+  });
+
+  it('pins the note pressed to the side, and opens the Notebook only from ⤢ or its last row', () => {
+    const picker = shell.slice(shell.indexOf('<NotePicker'), shell.indexOf('onclose={() => (notesMenu = null)} />'));
+    expect(picker).toContain('onpick={(id) => { notesMenu = null; openInDock(caseId, id); }}');
+    expect(picker).toContain('onnotebook={(id) => { notesMenu = null; openNotebook(id); }}');
+    expect(picker).toContain('onhome={() => { notesMenu = null; openNotebookHome(); }}');
+    // the note showing on the side is the one marked
+    expect(picker).toContain('current={noteDock.open ? dockNote(caseId) : undefined}');
+  });
+});

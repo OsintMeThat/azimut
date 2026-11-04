@@ -65,6 +65,20 @@ export function paletteTools(tools, query) {
   });
 }
 
+/** What the palette does rather than opens, by the words each goes by. */
+const ACTIONS = [
+  { id: 'note-side', label: 'Note on the side', detail: 'Notebook', icon: 'panelRight', words: 'note side pin panel dock write beside', needsCase: true },
+];
+
+/** The actions on offer: every one while nothing is typed, the ones the words find after. */
+export function paletteActions(query, { caseOpen = false } = {}) {
+  const terms = foldTerms(query);
+  return ACTIONS
+    .filter((one) => caseOpen || !one.needsCase)
+    .filter((one) => terms.every((term) => foldText(`${one.label} ${one.words}`).includes(term)))
+    .map(({ id, label, detail, icon }) => ({ kind: 'action', id, label, detail, icon }));
+}
+
 /**
  * Find Horizon's settings by name or by the words they go by, once something
  * is typed: a row opens Horizon on the setting (lib/horizon/panelIndex.js).

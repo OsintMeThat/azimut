@@ -8,6 +8,7 @@ vi.mock('../lib/api.js', () => ({ api: { get } }));
 const { caseState, uiState, registerCaseChangeGuard } = await import('../lib/state.svelte.js');
 const { loadEntityTypes } = await import('../lib/entityTypes.svelte.js');
 const { holdsUnsaved } = await import('../lib/backButton.js');
+const { noteDock, setDockOpen } = await import('../lib/notes/noteDock.svelte.js');
 const { default: CommandPalette } = await import('./CommandPalette.svelte');
 const { default: CaseChangeGuard } = await import('./CaseChangeGuard.svelte');
 
@@ -104,6 +105,19 @@ describe('Go to, inside the notes', () => {
     await settle();
     expect(uiState.openNotebook).toEqual({ noteId: 'note-a', line: 4 });
     expect(uiState.tool).toBe('notebook');
+  });
+});
+
+describe('Go to, the note on the side', () => {
+  it('opens the note on the side, found by what it does', async () => {
+    setDockOpen(false);
+    await show();
+    await search('pin');
+    option('Note on the side').click();
+    await settle();
+    expect(noteDock.open).toBe(true);
+    expect(uiState.tool).toBe('media');
+    setDockOpen(false);
   });
 });
 

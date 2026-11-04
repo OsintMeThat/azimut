@@ -6,7 +6,8 @@
   import { entityLabel, entityTypes } from '../lib/entityTypes.svelte.js';
   import { entityIcon, entityKindLabel } from '../lib/entityIcon.js';
   import { openEntity, openNotebook } from '../lib/navigate.js';
-  import { matchRuns, paletteSettings, paletteTools } from '../lib/commandPalette.js';
+  import { matchRuns, paletteActions, paletteSettings, paletteTools } from '../lib/commandPalette.js';
+  import { setDockOpen } from '../lib/notes/noteDock.svelte.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
 
@@ -29,7 +30,7 @@
   const documentTypes = $derived(entityTypes()
     .filter((entry) => ['document', 'collected'].includes(entry.family))
     .map((entry) => entry.type));
-  const toolRows = $derived(paletteTools(tools, loadedQuery));
+  const toolRows = $derived([...paletteTools(tools, loadedQuery), ...paletteActions(loadedQuery, { caseOpen: Boolean(caseState.current) })]);
   const settingRows = $derived(paletteSettings(loadedQuery));
   const documentRows = $derived(documents.map((entity) => ({
     kind: 'document', id: entity.id, label: entity.label, caseId: documentCase,
@@ -137,6 +138,7 @@
     if (row.kind === 'document' && row.caseId !== caseState.current?.id) return;
     try {
       if (row.kind === 'tool') { close(); uiState.tool = row.id; }
+      else if (row.kind === 'action') { close(); if (row.id === 'note-side') setDockOpen(true); }
       else if (row.kind === 'setting') { close(); uiState.horizonSetting = row.id; uiState.tool = 'horizon'; }
       else if (row.kind === 'document') { close(); await openEntity(row.entity); }
       else if (row.kind === 'note-line') { close(); openNotebook(row.noteId === 'case' ? null : row.noteId, { line: row.line }); }

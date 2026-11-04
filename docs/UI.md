@@ -249,7 +249,7 @@ Rules:
 - **Go to** opens from the topbar or `Ctrl+K` (`⌘K` on macOS). It starts with
   recently added documents, then searches tools, Horizon's settings, workspace
   cases, documents in the current case and the words inside its notes, each found
-  note opening on its line. A Horizon setting opens Horizon with
+  note opening on its line, and *Note on the side* opens the note on the side. A Horizon setting opens Horizon with
   its inspector out, its group unfolded and its row lit a moment. Arrow keys select a result, Enter opens it and Escape
   returns focus. Changing case through `openCase` asks before discarding unsaved
   work; document handoffs retain their existing save and confirmation paths.
@@ -952,8 +952,10 @@ window. Double-click resets the persisted width.
 The sidebar defaults to collapsed in Map and open elsewhere. Open state is
 remembered per workspace for the current session. Reloading restores the defaults.
 
-- **Header** — the case name (its id is a tooltip), a **Notes** button opening
-  `notes.md` in the Notebook, and three views: **Folders**, **To-do** and
+- **Header** — the case name (its id is a tooltip), a **Notes** button listing the
+  case's notes (Case notes first, then the last written; a press pins one to the
+  side, ⤢ opens it in the Notebook, the last row opens the Notebook's home), and
+  three views: **Folders**, **To-do** and
   **Recent**. The choice is remembered across reloads. Folders adds a search field
   and one filter chip per entity type present, counted from the catalog summary.
   The chips wrap; past the fifth they fold behind `+N`, and the active one always
@@ -5657,7 +5659,7 @@ image says its host is contacted on every open.
 The file stays the Markdown it was: what the old split-pane Notebook wrote opens as it
 was written and is never rewritten for being opened. The header names the note (the
 name is the filename), files it in a folder, says whether it is saved, and holds
-**Look**, **Write | Page**, **Beside the tools**, **Open in its own tab**, **PDF**, and
+**Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **PDF**, and
 a ⋯ with *Keep as template* and *Delete* (*Clear the case notes* for the case's page).
 PDF export writes one server-rendered PDF per note without a print dialog, in the
 note's look, local images and browser-drawn diagrams with it, remote images left out,
@@ -5732,17 +5734,21 @@ counts as a `mentions` edge. A line `<!--? … -->` is guidance: drawn as grey w
 replaced by what is typed on it, never printed nor counted, and an HTML comment to
 any other Markdown reader.
 
-**One copy, one tab.** The Notebook, the note beside the tools and the To-do share one
+**One copy, one tab.** The Notebook, the note on the side and the To-do share one
 copy of each open note (`lib/notes/noteDoc.svelte.js`), written 700 ms after typing
 stops and at once before an export or a tick. A note opened in a second browser tab
 is taken there: the first tab writes what it has and turns read-only with *Edit here*
 to take it back.
 
-**Beside the tools.** The note button in the top bar opens a note on the right that
-stays as tools change, resizable at its edge (`components/NoteDock.svelte`). Its bar
-picks the note, **@** cites what the tool on screen shows (the thing it offers to Add
-event), and it opens the note in the Notebook or its own tab. Whether it is open is
-kept for the browser, which note per case.
+**On the side.** A note pinned to the side stays on the right as tools change,
+resizable at its edge (`components/NoteDock.svelte`). Notes in the sidebar pins one,
+as do **Pin to the side** in the Notebook and *Note on the side* in Go to; the note
+button in the top bar shows and hides it. The first time it opens it says it stays
+and that Notes in the sidebar brings it back, once per browser. Its bar picks the
+note from the same list as the sidebar's (`components/NotePicker.svelte`), **@**
+cites what the tool on screen shows (the thing it offers to Add event), and it opens
+the note in the Notebook or its own tab. Whether it is open is kept for the browser,
+which note per case.
 
 **The note in the case.** A save restates the records a note cites as `mentions`
 edges (`engine/notelinks.py`), so the note shows in their Details and the Graph; a

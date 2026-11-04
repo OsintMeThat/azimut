@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPaletteKey, matchRuns, paletteSettings, paletteTools } from './commandPalette.js';
+import { isPaletteKey, matchRuns, paletteActions, paletteSettings, paletteTools } from './commandPalette.js';
 
 describe('the palette shortcut', () => {
   it('opens with Control or Command, including from a text field', () => {
@@ -68,3 +68,17 @@ describe('Horizon settings search', () => {
   });
 });
 
+describe('what the palette does', () => {
+  it('offers the note on the side while a case is open, by the words it goes by', () => {
+    expect(paletteActions('', { caseOpen: true })).toEqual([
+      { kind: 'action', id: 'note-side', label: 'Note on the side', detail: 'Notebook', icon: 'panelRight' },
+    ]);
+    expect(paletteActions('pin', { caseOpen: true }).map((row) => row.id)).toEqual(['note-side']);
+    expect(paletteActions('SIDE note', { caseOpen: true }).map((row) => row.id)).toEqual(['note-side']);
+    expect(paletteActions('satellite', { caseOpen: true })).toEqual([]);
+  });
+
+  it('offers nothing a case is needed for when none is open', () => {
+    expect(paletteActions('note')).toEqual([]);
+  });
+});

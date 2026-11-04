@@ -207,7 +207,9 @@
     requestedCase = id;
     untrack(() => {
       if (caseChanged && doc && doc.caseId !== id) home({ navigate: false });
-      if (!request || request.home) return;
+      if (!request) return;
+      // the home asked for from elsewhere (Notes in the sidebar) while a note is open
+      if (request.home) { if (opened) home({ navigate: !caseChanged }); return; }
       const wanted = request.noteId ?? null;
       if (!opened || opened.noteId !== wanted || Number.isInteger(request.line)) show(wanted, { line: request.line ?? null, navigate: !caseChanged });
     });
@@ -257,7 +259,7 @@
 
   function beside(noteId = opened?.noteId ?? null) {
     openInDock(caseId, noteId);
-    toast('Kept beside the tools', 'info', 2600);
+    toast('Pinned to the side', 'info', 2600);
   }
 
   // -- how it prints --------------------------------------------------------------
@@ -419,6 +421,20 @@
     } catch (error) {
       toast(error.message, 'danger');
     }
+  }
+
+  // -- the note menu ---------------------------------------------------------------
+
+  /** The note a menu is for: the card it was opened from, or the note open. */
+  function menuRow(open) {
+    return open?.row ?? (opened ? { id: opened.noteId ?? CASE_NOTES, title: noteEntity?.label ?? 'Case notes' } : null);
+  }
+
+  /** Close the menu and act on its note, read first: once the menu is closed it no longer says which. */
+  function fromMenu(action) {
+    const row = menuRow(menu);
+    menu = null;
+    if (row) action(row);
   }
 
   // -- deleting --------------------------------------------------------------------
@@ -597,8 +613,8 @@
         <div class="spacer"></div>
         <LookControl {look} onchange={changeLook} entities={graphEntities} disabled={!look} />
         {@render modes()}
-        <button class="btn btn-ghost btn-sm" title="Keep it beside the tools, open as you work on the Map or a video" aria-label="Beside the tools"
-          data-guide="notebook.dock" onclick={() => beside()}><Icon name="panelRight" size={15} /><span class="wide-only">Beside the tools</span></button>
+        <button class="btn btn-ghost btn-sm" title="Stays open on the right as you switch tools" aria-label="Pin to the side"
+          data-guide="notebook.dock" onclick={() => beside()}><Icon name="panelRight" size={15} /><span class="wide-only">Pin to the side</span></button>
         {#if !solo}
           <button class="btn btn-ghost btn-sm" title="Open in its own tab, for another screen" aria-label="Open in its own tab"
             data-guide="notebook.tab" onclick={() => detach()}><Icon name="external" size={15} /></button>
@@ -635,15 +651,15 @@
   {/snippet}
 
   {#if menu}
-    {@const row = menu.row ?? (opened ? { id: opened.noteId ?? CASE_NOTES, title: noteEntity?.label ?? 'Case notes' } : null)}
+    {@const row = menuRow(menu)}
     <FloatingMenu anchor={menu.anchor} align="end" width={230} label="Note actions" onclose={() => (menu = null)}>
       {#if menu.row}
-        <button type="button" class="fm-item" onclick={() => { menu = null; show(row.id); }}><Icon name="edit" size={14} /><span class="fm-grow">Open</span></button>
-        <button type="button" class="fm-item" onclick={() => { menu = null; beside(row.id === CASE_NOTES ? null : row.id); }}>
-          <Icon name="panelRight" size={14} /><span class="fm-grow">Beside the tools</span></button>
-        <button type="button" class="fm-item" onclick={() => { menu = null; detach(row.id === CASE_NOTES ? null : row.id); }}>
+        <button type="button" class="fm-item" onclick={() => fromMenu((note) => show(note.id))}><Icon name="edit" size={14} /><span class="fm-grow">Open</span></button>
+        <button type="button" class="fm-item" onclick={() => fromMenu((note) => beside(note.id === CASE_NOTES ? null : note.id))}>
+          <Icon name="panelRight" size={14} /><span class="fm-grow">Pin to the side</span></button>
+        <button type="button" class="fm-item" onclick={() => fromMenu((note) => detach(note.id === CASE_NOTES ? null : note.id))}>
           <Icon name="external" size={14} /><span class="fm-grow">In its own tab</span></button>
-        <button type="button" class="fm-item" onclick={() => { menu = null; exportSome([row.id]); }}>
+        <button type="button" class="fm-item" onclick={() => fromMenu((note) => exportSome([note.id]))}>
           <Icon name="download" size={14} /><span class="fm-grow">Export as PDF</span></button>
       {:else}
         <button type="button" class="fm-item" onclick={() => { menu = null; naming = { value: noteEntity?.label ?? 'Case notes' }; }}
@@ -651,7 +667,7 @@
       {/if}
       {#if row}
         <div class="fm-sep"></div>
-        <button type="button" class="fm-item danger" onclick={() => { menu = null; askRemove(row); }}>
+        <button type="button" class="fm-item danger" onclick={() => fromMenu(askRemove)}>
           <Icon name={row.id === CASE_NOTES ? 'reset' : 'trash'} size={14} />
           <span class="fm-grow">{row.id === CASE_NOTES ? 'Clear the case notes' : 'Delete'}</span></button>
       {/if}

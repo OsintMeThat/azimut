@@ -58,6 +58,22 @@ export function setDockNote(caseId, noteId) {
   noteDock.noteFor = { caseId, noteId: noteId ?? null };
 }
 
+const TOLD_KEY = 'azimut:noteDock:told';
+
+/**
+ * Whether this is the panel's first opening in this browser, which it says what
+ * it is for on. Asking counts as the opening: the line is shown once.
+ */
+export function firstOpening(storage = globalThis.localStorage) {
+  try {
+    if (storage?.getItem(TOLD_KEY)) return false;
+    storage?.setItem(TOLD_KEY, '1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Open the panel on a note, from the Notebook or a menu. */
 export function openInDock(caseId, noteId) {
   setDockNote(caseId, noteId);

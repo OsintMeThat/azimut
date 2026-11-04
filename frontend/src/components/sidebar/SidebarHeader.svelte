@@ -13,6 +13,7 @@
     total = 0,
     resultCount = null,
     view = 'folders',
+    notesOpen = false,
     onnotes = () => {},
     onselecttype = () => {},
     onview = () => {},
@@ -43,9 +44,11 @@
 <div class="head">
   <div class="identity">
     <h3 title={caseId}>{caseName}</h3>
-    <button class="btn btn-ghost btn-sm" title="Open case notes" onclick={onnotes}>
+    <button class="btn btn-ghost btn-sm" title="Pick a note to keep on the side, or open the Notebook" aria-haspopup="menu"
+      aria-expanded={notesOpen} onclick={(event) => onnotes(event.currentTarget)}>
       <Icon name="note" size={13} />
       <span>Notes</span>
+      <Icon name="chevronDown" size={11} />
     </button>
   </div>
 

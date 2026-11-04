@@ -4,7 +4,7 @@
    * each, a search through their words, and the templates a new one starts from,
    * each shown by its first page as it prints.
    *
-   * One press opens a note, and its ⋯ puts it beside the tools or in a tab of
+   * One press opens a note, and its ⋯ pins it to the side or puts it in a tab of
    * its own. Ticking cards picks them, Shift for a run of them, Select all for a
    * whole folder; the bar at the foot exports the picked notes or makes a report
    * that includes them as chapters, in the order they were picked.

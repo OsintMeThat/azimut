@@ -392,14 +392,14 @@
     <!-- The one mark that answers "what is this tab I am standing in". It sits beside
          the gear rather than in each toolbar so there is one of it, and it opens the
          guide over the tool on that tool's page. -->
-    <!-- A note kept beside every tool, written while the Map or a video is looked at. -->
+    <!-- A note on the side of every tool, written while the Map or a video is looked at. -->
     {#if caseState.current && !solo}
       <button
         class="btn btn-ghost btn-sm note-btn"
         data-guide="start.note"
         class:on={noteDock.open}
-        title={noteDock.open ? 'Close the note beside the tools' : 'A note beside the tools, open as you switch them'}
-        aria-label="Note beside the tools"
+        title={noteDock.open ? 'Hide the note on the side' : 'A note on the side, open as you switch tools'}
+        aria-label="Note on the side"
         aria-pressed={noteDock.open}
         onclick={() => setDockOpen(!noteDock.open)}
       >
@@ -634,7 +634,7 @@
     color: var(--text-1);
     background: var(--bg-2);
   }
-  /* Add event and the note beside the tools sit with the other icon marks; amber only while open. */
+  /* Add event and the note on the side sit with the other icon marks; amber only while open. */
   .note-btn.on {
     color: var(--accent);
     background: var(--accent-soft);

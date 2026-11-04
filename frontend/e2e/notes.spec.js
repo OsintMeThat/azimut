@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test';
 import { CASE_ID, installAppFixture } from './app.fixture.js';
 
 /**
- * The Notebook as it is written in: @ cites, / inserts, a note goes beside the tools
- * and into a tab of its own, and what is typed reaches the note's route.
+ * The Notebook as it is written in: @ cites, / inserts, a note is pinned to the side
+ * or put in a tab of its own, and what is typed reaches the note's route.
  */
 
 const at = '2026-10-01T10:00:00Z';
@@ -71,7 +71,7 @@ test('/ turns a line into a task, a heading or a callout', async ({ page }) => {
   await expect(page.locator('[data-guide="notebook.case"]')).toBeVisible();
 });
 
-test('a note kept beside the tools stays open on another tool, and is the same note', async ({ page }) => {
+test('a note pinned to the side stays open on another tool, and is the same note', async ({ page }) => {
   const { written } = await withNote(page);
   await openLead(page);
   await page.locator('[data-guide="notebook.dock"]').click();
@@ -88,6 +88,32 @@ test('a note kept beside the tools stays open on another tool, and is the same n
   await expect(dock).toHaveCount(0);
   await page.locator('[data-guide="start.note"]').click();
   await expect(dock.locator('.cm-content')).toContainText('Typed beside.');
+});
+
+test('Notes in the sidebar pins a note to the side, which says once what it is for', async ({ page }) => {
+  const { written } = await withNote(page);
+  await page.goto('/#files');
+  const notes = page.locator('.identity').getByRole('button', { name: 'Notes' });
+  await notes.click();
+  const list = page.getByRole('menu', { name: 'Notes' });
+  await expect(list).toContainText('Pick a note to keep on the side as you work.');
+  await list.getByRole('button', { name: 'Lead', exact: true }).click();
+  const dock = page.locator('[data-guide="notes.dock"]');
+  await expect(dock.locator('.which')).toContainText('Lead');
+  await expect(dock.locator('.told')).toContainText('Notes in the sidebar brings it back.');
+  await dock.locator('.cm-content').click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(' Pinned.');
+  await expect.poll(() => written.at(-1) ?? '').toBe('First line. Pinned.');
+  // the note on the side is the one marked, and ⤢ opens it in the Notebook
+  await notes.click();
+  await expect(list.locator('[aria-current="true"]')).toContainText('Lead');
+  await list.getByRole('button', { name: 'Open Lead in the Notebook' }).click();
+  await expect(page.locator('input[aria-label="Note name"]')).toHaveValue('Lead');
+  // once said, never again
+  await page.reload();
+  await expect(page.locator('[data-guide="notes.dock"] .which')).toBeVisible();
+  await expect(page.locator('[data-guide="notes.dock"] .told')).toHaveCount(0);
 });
 
 test('a note opens in a tab of its own, without the app around it', async ({ page, context }) => {

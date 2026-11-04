@@ -12,14 +12,13 @@
   import { buildHash } from '../lib/hash.js';
   import { noteEntityFor } from '../lib/noteHere.svelte.js';
   import { openEntity, openNotebook } from '../lib/navigate.js';
-  import { foldText } from '../lib/textFold.js';
   import { citation } from '../lib/notes/syntax.js';
   import { CASE_NOTES, flush, openNote, releaseNote } from '../lib/notes/noteDoc.svelte.js';
-  import { dockNote, dockWidth, noteDock, setDockNote, setDockOpen, takePending } from '../lib/notes/noteDock.svelte.js';
+  import { dockNote, dockWidth, firstOpening, noteDock, setDockNote, setDockOpen, takePending } from '../lib/notes/noteDock.svelte.js';
   import Icon from './Icon.svelte';
   import NoteEditor from './NoteEditor.svelte';
   import PanelEdge from './PanelEdge.svelte';
-  import FloatingMenu from './FloatingMenu.svelte';
+  import NotePicker from './NotePicker.svelte';
 
   const caseId = $derived(caseState.current?.id ?? '');
   let noteId = $state(null);
@@ -27,7 +26,8 @@
   let editor = $state(null);
   let entities = $state([]);
   let picking = $state(null);
-  let pickQuery = $state('');
+  // the first time it opens, the panel says what it is for and how it comes back
+  let told = $state(firstOpening());
 
   $effect(() => {
     const id = caseId;
@@ -68,15 +68,11 @@
     queueMicrotask(() => editor?.insert(text));
   });
 
-  const notes = $derived(entities.filter((entity) => entity.type === 'note')
-    .filter((entity) => foldText(`${entity.label} ${entity.attrs?.folder ?? ''}`).includes(foldText(pickQuery.trim())))
-    .sort((a, b) => a.label.localeCompare(b.label)));
   const title = $derived(noteId ? entities.find((entity) => entity.id === noteId)?.label ?? 'Note' : 'Case notes');
   const here = $derived(noteEntityFor(uiState.tool));
 
   function pick(id) {
     picking = null;
-    pickQuery = '';
     setDockNote(caseId, id);
   }
 
@@ -103,7 +99,7 @@
 </script>
 
 {#if caseId && doc}
-  <aside class="note-dock" style:width="{noteDock.width}px" aria-label="Note beside the tools" data-guide="notes.dock">
+  <aside class="note-dock" style:width="{noteDock.width}px" aria-label="Note on the side" data-guide="notes.dock">
     <PanelEdge bind:width={noteDock.width} helpers={dockWidth} side="left" label="Resize the note" />
     <header class="dock-bar">
       <button type="button" class="which" title="Pick the note shown here" aria-haspopup="menu"
@@ -123,6 +119,10 @@
       <button type="button" class="btn btn-ghost btn-sm" title="Close the note" aria-label="Close the note" onclick={() => setDockOpen(false)}>
         <Icon name="x" size={14} /></button>
     </header>
+    {#if told}
+      <p class="told">It stays open as you switch tools. Notes in the sidebar brings it back.
+        <button type="button" class="btn btn-ghost btn-sm" aria-label="Got it" title="Got it" onclick={() => (told = false)}><Icon name="x" size={12} /></button></p>
+    {/if}
     {#key doc}
       <NoteEditor {doc} {caseId} {entities} compact where="dock" onopen={openEntity} onready={(handle) => (editor = handle)}
         placeholder="Write as you look. Type @ to cite, / for more." />
@@ -130,18 +130,7 @@
   </aside>
 
   {#if picking}
-    <FloatingMenu anchor={picking} width={260} label="Notes" onclose={() => (picking = null)}>
-      {#if notes.length > 6 || pickQuery}
-        <div class="find"><input class="input" bind:value={pickQuery} placeholder="Find a note…" aria-label="Find a note" /></div>
-      {/if}
-      <button type="button" class="fm-item" class:on={!noteId} onclick={() => pick(null)}><Icon name="note" size={14} /><span class="fm-grow">Case notes</span></button>
-      {#each notes as note (note.id)}
-        <button type="button" class="fm-item" class:on={note.id === noteId} onclick={() => pick(note.id)}>
-          <Icon name="note" size={14} /><span class="fm-grow">{note.label}</span>
-          {#if note.attrs?.folder}<small>{note.attrs.folder}</small>{/if}
-        </button>
-      {/each}
-    </FloatingMenu>
+    <NotePicker {caseId} anchor={picking} current={noteId} onpick={pick} onclose={() => (picking = null)} />
   {/if}
 {/if}
 
@@ -161,7 +150,9 @@
   .said.error { color: var(--danger); }
   .spacer { flex: 1; }
   .note-dock > :global(.note-editor) { flex: 1; }
-  .find { padding: 4px 6px 6px; }
-  .fm-item.on { color: var(--accent); }
-  small { color: var(--text-3); font-size: var(--fs-xs); }
+  .told {
+    display: flex; align-items: center; gap: 6px; margin: 0; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--border);
+    background: var(--bg-2); color: var(--text-2); font-size: var(--fs-xs); line-height: 1.4;
+  }
+  .told .btn { flex: none; margin-left: auto; }
 </style>

@@ -71,7 +71,7 @@ export const PAGES = {
     tips: [
       { title: 'Install the capture extension first', text: 'It files what you see on other map sites into the case, and the Capture extension page sets it up.' },
       { title: 'You do not need a case to start', text: 'The first tool that saves something opens a scratch session, and Keep as case names it later.' },
-      { title: 'A note beside the tools', text: 'The note button in the top bar opens a note on the right that stays as you switch tools.' },
+      { title: 'A note on the side', text: 'Notes in the sidebar pins a note on the right that stays as you switch tools.' },
       { title: 'The folder is half yours', text: 'Azimut owns the azimut/ directory inside a case and leaves the rest of the folder alone.' },
       { title: 'The network waits for you', text: 'Only an action that needs it reaches out, plus a check of GitHub and PyPI for new versions at start, which Settings turns off.' },
     ],
@@ -797,7 +797,7 @@ export const PAGES = {
             { anchor: 'notebook.toolbar', title: 'Formatting', text: 'Headings, lists, tasks and callouts, or the same from /.' },
             { anchor: 'notebook.cite', title: 'Cite', text: '@ and a few letters put in a place, a person or a file as a chip.' },
             { anchor: 'notebook.write', title: 'The page', text: 'Saved as you type. A chip opens what it names, ⌖ shows coordinates on the map.' },
-            { anchor: 'notebook.dock', title: 'Beside the tools', text: 'The note stays open on the right as you work on the Map or a video.' },
+            { anchor: 'notebook.dock', title: 'Pin to the side', text: 'The note stays open on the right as you work on the Map or a video.' },
             { anchor: 'notebook.pdf', title: 'PDF', text: 'Exports this note as Look sets it out. Page shows it beside the note as you type.' },
           ],
         },

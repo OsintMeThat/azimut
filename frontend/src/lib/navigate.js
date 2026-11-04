@@ -283,6 +283,12 @@ export function openEntity(entity, resolved = false) {
   }
 }
 
+/** Open the Notebook on its home of cards, whatever note it had open. */
+export function openNotebookHome() {
+  uiState.openNotebook = { home: true };
+  uiState.tool = 'notebook';
+}
+
 /** Open the case-wide note (null) or one filed note in the shared Notebook, at a line if given. */
 export function openNotebook(noteId = null, { line } = {}) {
   uiState.openNotebook = Number.isInteger(line) ? { noteId, line } : { noteId };

@@ -8,8 +8,8 @@ import { flushSync, mount, unmount } from 'svelte';
  * Notebook must open as it was and never be written for being opened.
  */
 
-const { get, post, put, postBytes } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), postBytes: vi.fn() }));
-vi.mock('../lib/api.js', () => ({ api: { get, post, put, postBytes, del: vi.fn(), patch: vi.fn() } }));
+const { get, post, put, postBytes, del } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), postBytes: vi.fn(), del: vi.fn() }));
+vi.mock('../lib/api.js', () => ({ api: { get, post, put, postBytes, del, patch: vi.fn() } }));
 vi.mock('../lib/catalog.js', () => ({ fetchAllEntities: vi.fn(async () => ENTITIES) }));
 // the PDF is drawn by PDF.js in a browser; here a document of two A4 pages stands for it
 vi.mock('../lib/notes/pdfjs.js', () => ({
@@ -50,6 +50,8 @@ const MORE = {
 
 const { caseState, uiState, templatesState } = await import('../lib/state.svelte.js');
 const { resetOpenNotes } = await import('../lib/notes/noteDoc.svelte.js');
+const { dockNote, noteDock, setDockOpen } = await import('../lib/notes/noteDock.svelte.js');
+const { openNotebookHome } = await import('../lib/navigate.js');
 const { default: Notebook } = await import('./Notebook.svelte');
 
 let component;
@@ -205,6 +207,18 @@ describe('the home', () => {
   });
 });
 
+describe('the home asked for from elsewhere', () => {
+  it('leaves the note open for the home of cards', async () => {
+    target.querySelector('button[title="Open Old lead"]').click();
+    await settle();
+    expect(target.querySelector('.cm-editor')).not.toBeNull();
+    openNotebookHome();
+    await settle();
+    expect(target.querySelector('.cm-editor')).toBeNull();
+    expect(target.querySelector('button[title="Open Old lead"]')).not.toBeNull();
+  });
+});
+
 describe('picking notes on the home', () => {
   const box = (title) => target.querySelector(`input[aria-label="Pick ${title}"]`);
   const shiftClick = (node) => node.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
@@ -273,6 +287,66 @@ describe('picking notes on the home', () => {
     expect(address).toBe('/api/cases/case-a/notes/n2/look');
     expect(look).toMatchObject({ style: 'report', toc: true, cover: { on: true } });
     expect(localStorage.getItem('azimut:notebook-page')).toBe('1');
+  });
+});
+
+describe('a note\'s menu', () => {
+  // the menu closes as its item is pressed: the item still has to know its note
+  const cardMenu = (title) => {
+    target.querySelector(`button[aria-label="Actions for ${title}"]`).click();
+    flushSync();
+  };
+  const confirmDelete = async () => {
+    [...document.querySelectorAll('[role="alertdialog"] button')].find((b) => b.textContent.trim() === 'Delete').click();
+    await settle();
+  };
+
+  it('deletes a report from its card, once asked', async () => {
+    del.mockResolvedValue({ status: 'deleted', deleted: ['r1'], trash: 't1' });
+    await withMore();
+    cardMenu('Weekly');
+    anyButton('Delete').click();
+    await settle();
+    expect(everything()).toContain('Are you sure you want to delete “Weekly”?');
+    await confirmDelete();
+    expect(del).toHaveBeenCalledWith('/api/cases/case-a/entities/r1');
+  });
+
+  it('opens and exports the note of the card it came from', async () => {
+    await withMore();
+    cardMenu('Shadows');
+    anyButton('Export as PDF').click();
+    await settle();
+    expect(everything()).toContain('Export note as PDF');
+    anyButton('Cancel').click();
+    flushSync();
+    cardMenu('Old lead');
+    anyButton('Open').click();
+    await settle();
+    expect(target.querySelector('.cm-editor')).not.toBeNull();
+  });
+
+  it('pins the note of the card it came from to the side', async () => {
+    await withMore();
+    cardMenu('Shadows');
+    anyButton('Pin to the side').click();
+    flushSync();
+    expect(noteDock.open).toBe(true);
+    expect(dockNote('case-a')).toBe('n3');
+    setDockOpen(false);
+  });
+
+  it('deletes the note open, from its own menu', async () => {
+    del.mockResolvedValue({ status: 'deleted', deleted: ['n1'], trash: 't1' });
+    target.querySelector('button[title="Open Old lead"]').click();
+    await settle();
+    target.querySelector('button[aria-label="More"]').click();
+    flushSync();
+    anyButton('Delete').click();
+    await settle();
+    await confirmDelete();
+    expect(del).toHaveBeenCalledWith('/api/cases/case-a/entities/n1');
+    expect(target.querySelector('.cm-editor')).toBeNull();
   });
 });
 
