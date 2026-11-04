@@ -201,7 +201,7 @@ answer by omission (`tests/test_entities.py`).
 | `analysis-zones` | document | annex | ✅ | detect | `spec` (json): an ordered group of shared area IDs; older shape sets migrate on read | yes (`.analysis/zones-<id>.json`) |
 | `analysis-follow-up` | document | annex | ✅ | detect | `spec` (json): an analyzer, its areas and a date rule | yes (`.analysis/followups-<id>.json`) |
 | `analysis-run` | document | annex | ✅ | detect | `spec` (json): candidates, frozen inputs and review decisions | yes (`.analysis/runs-<id>.json` + `.assets/` previews) |
-| `note` | document | annex | ✅ | notebook | `path`, `folder?` | yes (Markdown) |
+| `note` | document | annex | ✅ | notebook | `path`, `folder?`, `look?` (json): how it prints; the case notes keep theirs in the setting `notes.case_look` | yes (Markdown) |
 | `sheet` | document | annex | ✅ | sheet | `path` (csv) | yes (CSV + sidecar) |
 | `bookmark` | document | attestation | ✅ | capture extension | `url`, `fetched_at?`, `archive_url?`, `reliability?` | no (a URL) |
 | `person` | actor | subject | ✅ | analyst | `aliases`, `role`, `nationality` | no |
@@ -899,13 +899,19 @@ leaves a gap rather than voiding the layout, and the picture it exports is a
   can name are reconciled (`links.EMBEDDED_TYPES`), which is what keeps a report's
   edge to the `post` draft it was composed in — that one is declared by
   `POST /notes` at creation, and no wording could restate it. A note typed by hand
-  keeps no chain.
+  keeps no chain. The picture on a note's cover (`attrs.look.cover.image`) is shown
+  the same way, so it joins the same restatement, from a look saved or a text saved.
 - **A note states its mentions from its own body too.** `[[entity:<id>]]` is a
   pointer, so the same save restates the note's `mentions` edges, its own only
   (`own_only`, `by="note"`): a mention stated by hand in Details is a separate claim
   the text cannot take back. A case opened for the first time by a version that does
   this restates every older note once (`engine/notelinks.py`), edges only, the files
   untouched.
+- **A chapter is a mention, not a derivation.** `[[include:<note id>]]` prints that
+  note in the including one's PDF, read as it stands at print time: nothing of it is
+  copied, and a deleted chapter prints as a line saying it is gone. So it is a
+  pointer, restated with the `[[entity:…]]` mentions; the case notes (`case`) have no
+  entity and draw no edge.
 
 Free-typed labels remain valid in stored data. The registry defines what the UI
 understands and what the API will mint, not what a case may hold.

@@ -197,7 +197,7 @@ The binaries carry the bundled build's license notice and texts, readable from
 
 ### From source
 
-Requires Python 3.11+ and Node.js 22.12+ for the frontend build.
+Requires Python 3.11+ and Node.js 22.13+ for the frontend build.
 
 macOS and Linux:
 

@@ -670,6 +670,45 @@ export async function fakeGoogleMaps(page) {
   });
 }
 
+/**
+ * A PDF of `count` A4 pages, each saying its number, written by hand: what the
+ * Notebook's Page pane and its template pictures are answered with, so PDF.js
+ * draws real pages in the browser without a server behind it.
+ */
+export function pdfOf(count = 1) {
+  const objects = ['', '', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+  const add = (body) => objects.push(body);
+  const kids = [];
+  for (let index = 0; index < count; index += 1) {
+    const text = `BT /F1 36 Tf 72 720 Td (Page ${index + 1}) Tj ET`;
+    const content = add(`<< /Length ${text.length} >>\nstream\n${text}\nendstream`);
+    kids.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${content} 0 R >>`));
+  }
+  objects[0] = '<< /Type /Catalog /Pages 2 0 R >>';
+  objects[1] = `<< /Type /Pages /Kids [${kids.map((kid) => `${kid} 0 R`).join(' ')}] /Count ${count} >>`;
+  let out = '%PDF-1.4\n';
+  const offsets = [];
+  objects.forEach((body, index) => {
+    offsets.push(out.length);
+    out += `${index + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  out += offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('');
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
+
+/** A note's PDF as the preview routes answer it: the bytes, and where each page starts. */
+export function pdfAnswer(route, pages = [0]) {
+  return route.fulfill({
+    status: 200,
+    contentType: 'application/pdf',
+    headers: { 'X-Note-Pages': JSON.stringify(pages), 'X-Note-Diagrams': '[]', 'X-Note-Warnings': '[]' },
+    body: pdfOf(pages.length),
+  });
+}
+
 function json(route, body, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
@@ -1157,6 +1196,8 @@ export async function installAppFixture(page, options = {}) {
     if (path === '/api/settings/workspace') return json(route, workspaceStatus);
     if (path === '/api/workspace/folders') return json(route, workspaceFolders);
     if (path === '/api/templates') return json(route, { proof: [], post: [] });
+    // the Notebook's gallery draws each template's first page, from no case
+    if (path === '/api/templates/note/preview' && request.method() === 'POST') return pdfAnswer(route);
     if (path === '/api/cases/relation-types') return json(route, relationTypes);
     if (path === '/api/cases/confidence-levels') return json(route, confidenceLevels);
     if (path === '/api/cases/entity-types') return json(route, entityTypes.map((entry) => ({
@@ -2031,13 +2072,18 @@ export async function installAppFixture(page, options = {}) {
     if (path === `/api/cases/${CASE_ID}/notes/index`) {
       const card = (id, title, folder = '') => ({
         id, title, folder, updated_at: '2026-10-01T10:00:00Z', excerpt: '', words: 0,
-        tasks: { open: 0, done: 0 }, mentions: 0, pictures: 0,
+        tasks: { open: 0, done: 0 }, mentions: 0, pictures: 0, look: null, includes: 0,
       });
       return json(route, {
         items: [card('case', 'Case notes'), ...fixtureCatalog.filter((entity) => entity.type === 'note')
           .map((entity) => card(entity.id, entity.label, entity.attrs?.folder ?? ''))],
       });
     }
+    // how a note prints, kept beside it: the plain look until a spec says otherwise
+    if (/^\/api\/cases\/[^/]+\/notes\/[\w-]+\/look$/.test(path)) {
+      return json(route, { look: request.method() === 'PUT' ? request.postDataJSON() : {} });
+    }
+    if (path === `/api/cases/${CASE_ID}/notes/preview` && request.method() === 'POST') return pdfAnswer(route);
     if (path === `/api/cases/${CASE_ID}/notes/tasks`) return json(route, { items: [] });
     if (path === `/api/cases/${CASE_ID}/notes/search`) return json(route, { items: [], total: 0 });
     if (path.startsWith(`/api/cases/${CASE_ID}/notes/citations/`)) return json(route, { items: [] });

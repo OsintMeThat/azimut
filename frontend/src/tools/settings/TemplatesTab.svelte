@@ -7,9 +7,14 @@
    * post template can be the one new posts start with (`post_template`).
    */
   import Icon from '../../components/Icon.svelte';
+  import FloatingMenu from '../../components/FloatingMenu.svelte';
+  import PageThumb from '../notebook/PageThumb.svelte';
   import { templatesState, prefs, saveTemplate, toast, uiState } from '../../lib/state.svelte.js';
   import { houseLayout, templateOf } from '../../lib/plate/page.js';
   import { readTemplateFile, templateFile } from '../../lib/plate/templateFile.js';
+  import { styleLabel, templateLook } from '../../lib/notes/look.js';
+  import { READY_NOTES } from '../../lib/notes/ready.js';
+  import { noteTemplateFile, noteTemplateFileName, readNoteTemplateFile } from '../../lib/notes/templateFile.js';
 
   let { newTemplate, editTemplate, duplicateTemplate, savePrefs, deleteTpl = $bindable() } = $props();
 
@@ -34,27 +39,52 @@
     try { await saveTemplate('map', { name: `${record.name} copy`.slice(0, 120), data: record.data }); }
     catch (error) { toast(error.message, 'danger'); }
   }
-  function downloadMap(record) {
-    const url = URL.createObjectURL(templateFile(record));
+  function download(blob, name) {
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.href = url; link.download = `${record.name.replace(/[\\/<>:"|?*\u0000-\u001f]/g, '_')}.azimut-map.json`;
+    link.href = url; link.download = name;
     document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  // Note templates are written in the Notebook itself, in the note editor.
+  function downloadMap(record) {
+    download(templateFile(record), `${record.name.replace(/[\\/<>:"|?*\u0000-\u001f]/g, '_')}.azimut-map.json`);
+  }
+  // Notebook templates are written in the Notebook itself, with its Look and its Page pane.
   function editNote(id) {
     uiState.openNoteTemplate = id;
     uiState.tool = 'notebook';
   }
-  async function newNoteTemplate() {
+  async function addNote(name, data) {
     try {
-      const record = await saveTemplate('note', { name: 'Note template', data: { body: '', folder: '' } });
-      editNote(record.id);
-    } catch (error) { toast(error.message, 'danger'); }
+      const record = await saveTemplate('note', { name, data: { body: data.body ?? '', folder: data.folder ?? '', look: templateLook(data.look) } });
+      return record;
+    } catch (error) { toast(error.message, 'danger', 5000); return null; }
+  }
+  async function newNoteTemplate() {
+    const record = await addNote('Note template', { body: '' });
+    if (record) editNote(record.id);
+  }
+  async function fromReady(ready) {
+    readyAnchor = null;
+    const record = await addNote(ready.name, ready);
+    if (record) editNote(record.id);
   }
   async function duplicateNote(record) {
-    try { await saveTemplate('note', { name: `${record.name} copy`.slice(0, 120), data: record.data }); }
-    catch (error) { toast(error.message, 'danger'); }
+    await addNote(`${record.name} copy`.slice(0, 120), record.data ?? {});
+  }
+  function downloadNote(record) {
+    download(noteTemplateFile(record), noteTemplateFileName(record.name));
+  }
+  let notePicker = $state();
+  let readyAnchor = $state(null);
+  async function importNote(event) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+    try {
+      const { name, data } = readNoteTemplateFile(await file.text());
+      if (await addNote(name, data)) toast(`“${name}” added`, 'ok');
+    } catch (error) { toast(error.message, 'danger', 5000); }
   }
   let picker = $state();
   async function importMap(event) {
@@ -142,28 +172,52 @@
 </section>
 
 <section class="group" data-guide="settings.note-templates">
-  <h3>Note templates</h3>
+  <h3>Notebook templates</h3>
   <p class="note">
-    A note to start others from, shared across cases. {'{today}'} and {'{now}'} are written in when a note starts.
+    A note to start others from, with how it prints, shared across cases. {'{today}'} and {'{now}'} are written in when a note starts.
   </p>
   <div class="tpl-list">
     {#each templatesState.note as t (t.id)}
-      <div class="tpl-row">
-        <span class="tpl-name">{t.name}</span>
+      <div class="tpl-row note-row">
+        <PageThumb name={t.name} body={t.data?.body ?? ''} look={t.data?.look ?? null} width={38} />
+        <span class="tpl-label stacked">
+          <span class="tpl-name">{t.name}</span>
+          <span class="tpl-said">{styleLabel(t.data?.look?.style ?? 'plain')}</span>
+        </span>
         <div class="tpl-actions">
-          <button class="btn btn-sm" onclick={() => editNote(t.id)}><Icon name="edit" size={13} /> Edit</button>
+          <button class="btn btn-sm" title="Write it in the Notebook, with its look and its pages" onclick={() => editNote(t.id)}>
+            <Icon name="edit" size={13} /> Edit</button>
           <button class="btn btn-sm" onclick={() => duplicateNote(t)}><Icon name="copy" size={13} /> Duplicate</button>
+          <button class="btn btn-sm" title="Download as a file" aria-label={`Download ${t.name}`} onclick={() => downloadNote(t)}>
+            <Icon name="download" size={13} /></button>
           <button class="btn btn-sm" title="Delete" aria-label={`Delete ${t.name}`}
             onclick={() => (deleteTpl = { kind: 'note', id: t.id, name: t.name })}><Icon name="trash" size={13} /></button>
         </div>
       </div>
     {/each}
     {#if !templatesState.note.length}
-      <p class="empty">No note templates yet. Keep one from a note, or start one here.</p>
+      <p class="empty">No Notebook templates yet. Keep one from a note, start one from a ready one, or import a file.</p>
     {/if}
   </div>
-  <button class="btn btn-sm" onclick={newNoteTemplate}><Icon name="plus" size={13} /> New note template</button>
+  <div class="tpl-actions">
+    <button class="btn btn-sm" onclick={newNoteTemplate}><Icon name="plus" size={13} /> New template</button>
+    <button class="btn btn-sm" aria-haspopup="menu" title="Start from one of the Notebook's ready templates"
+      onclick={(event) => (readyAnchor = readyAnchor ? null : event.currentTarget)}><Icon name="note" size={13} /> From a ready one</button>
+    <button class="btn btn-sm" title="Add a template from an .azimut-note.json file" onclick={() => notePicker.click()}>
+      <Icon name="upload" size={13} /> Import a file</button>
+    <input type="file" accept=".json,application/json" hidden bind:this={notePicker} onchange={importNote} />
+  </div>
 </section>
+
+{#if readyAnchor}
+  <FloatingMenu anchor={readyAnchor} width={280} label="Ready templates" onclose={() => (readyAnchor = null)}>
+    {#each READY_NOTES.filter((ready) => ready.id !== 'blank') as ready (ready.id)}
+      <button type="button" class="fm-item ready-item" onclick={() => fromReady(ready)}>
+        <span class="fm-grow">{ready.name}</span><small>{styleLabel(ready.look?.style ?? 'plain')}</small>
+      </button>
+    {/each}
+  </FloatingMenu>
+{/if}
 
 <section class="group" data-guide="settings.plate-templates">
   <h3>Map plate templates</h3>
@@ -220,6 +274,28 @@
     align-items: center;
     gap: 8px;
     min-width: 0;
+  }
+
+  .tpl-label.stacked {
+    flex: 1;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+  }
+
+  .tpl-said {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+
+  .note-row {
+    justify-content: flex-start;
+    padding: 6px 10px 6px 8px;
+  }
+
+  .ready-item small {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
 
   .tpl-name {

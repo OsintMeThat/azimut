@@ -79,3 +79,27 @@ describe('a request that reaches no server', () => {
     await expect(api.get('/api/cases')).rejects.toBe(aborted);
   });
 });
+
+describe('a body that is not JSON', () => {
+  it('hands back the bytes and the headers, and sends the request as JSON', async () => {
+    const bytes = new Uint8Array([37, 80, 68, 70]).buffer;
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => bytes,
+      headers: new Headers({ 'X-Note-Pages': '[0]' }),
+    });
+    vi.stubGlobal('fetch', fetch);
+    const answer = await api.postBytes('/api/templates/note/preview', { text: 'x' });
+    expect(answer.data).toBe(bytes);
+    expect(answer.headers.get('X-Note-Pages')).toBe('[0]');
+    const [, init] = fetch.mock.calls[0];
+    expect(init.body).toBe('{"text":"x"}');
+    expect('bytes' in init).toBe(false);
+  });
+
+  it('says why a refusal was one, as any request does', async () => {
+    answers(422, { detail: 'look.style: unknown style' });
+    await expect(api.postBytes('/api/templates/note/preview', {})).rejects.toThrow('look.style: unknown style');
+  });
+});

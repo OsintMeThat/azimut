@@ -437,6 +437,14 @@ def build_full_case(
     full.note_id = note.json()["id"]
     full.note = note.json()["attrs"]["path"]
     client.put(f"/api/cases/{case_id}/notes", json={"text": "# Full case\n\nRunning notes.\n"})
+    # how both print: a look on the note's entity, and the case notes' in the case settings
+    look = client.put(
+        f"/api/cases/{case_id}/notes/{full.note_id}/look",
+        json={"style": "report", "tlp": "amber", "toc": True, "cover": {"on": True, "subtitle": "Witness"}},
+    )
+    assert look.status_code == 200, look.text
+    case_look = client.put(f"/api/cases/{case_id}/notes/case/look", json={"style": "journal"})
+    assert case_look.status_code == 200, case_look.text
 
     # -- a sheet: a CSV in the case, and the sidecar that paints it ------------
     sheet = client.post(f"/api/cases/{case_id}/sheets", json={"title": "Candidates"})

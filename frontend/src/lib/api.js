@@ -38,6 +38,7 @@ class ApiError extends Error {
 }
 
 async function request(method, path, body, opts = {}) {
+  const { bytes = false, ...fetchOptions } = opts;
   const init = { method, headers: {} };
   if (body instanceof FormData) {
     init.body = body;
@@ -47,7 +48,7 @@ async function request(method, path, body, opts = {}) {
   }
   let res;
   try {
-    res = await fetch(path, { ...init, ...opts });
+    res = await fetch(path, { ...init, ...fetchOptions });
   } catch (error) {
     // A cancelled request is the caller's own doing and says nothing to anyone.
     if (error?.name === 'AbortError') throw error;
@@ -65,6 +66,7 @@ async function request(method, path, body, opts = {}) {
     }
     throw new ApiError(res.status, detail);
   }
+  if (bytes) return { data: await res.arrayBuffer(), headers: res.headers };
   if (res.status === 204) return null;
   return res.json();
 }
@@ -75,6 +77,8 @@ export const api = {
   get: (path, opts) => request('GET', path, undefined, opts),
   // `keepalive` lets a save sent while the tab closes outlive the page.
   post: (path, body, opts) => request('POST', path, body, opts),
+  // a body that is not JSON (a PDF drawn for a preview): its bytes and the headers beside them
+  postBytes: (path, body, opts) => request('POST', path, body, { ...opts, bytes: true }),
   put: (path, body, opts) => request('PUT', path, body, opts),
   patch: (path, body) => request('PATCH', path, body),
   del: (path) => request('DELETE', path),

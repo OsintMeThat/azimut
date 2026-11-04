@@ -6,6 +6,10 @@
    *
    * `where` names the editor to `lib/notes/noteDock.svelte.js`, so "Cite in note"
    * from Details lands at this cursor while it is the one being written in.
+   *
+   * A note can include another as a chapter (`/` Include a note); `notes` are the
+   * case's notes as the home lists them, which a chapter is drawn from. A
+   * `template` is written with guidance lines of its own and no chapters.
    */
   import { onDestroy, onMount, untrack } from 'svelte';
   import { Compartment, EditorState } from '@codemirror/state';
@@ -22,11 +26,13 @@
   import { differing, editNote, takeBack } from '../lib/notes/noteDoc.svelte.js';
   import { offerWriter } from '../lib/notes/noteDock.svelte.js';
   import {
-    insertAtCursor, jumpToLine, noteExtensions, setLinePrefix, setNoteCase, toggleWrap,
+    insertAtCursor, insertInclude, jumpToLine, noteExtensions, setLinePrefix, setNoteCase, toggleWrap,
   } from '../lib/notes/liveMarkdown.js';
   import { startCompletion } from '@codemirror/autocomplete';
   import Icon from './Icon.svelte';
   import FloatingMenu from './FloatingMenu.svelte';
+  import Modal from './Modal.svelte';
+  import SearchInput from './SearchInput.svelte';
 
   let {
     doc,
@@ -40,6 +46,11 @@
     onready = () => {},
     /** Who keeps the text, when it is not a note (a template being edited from Settings). */
     onchange = null,
+    /** The case's notes, as `notes/index` lists them: what a chapter shows and what Include offers. */
+    notes = [],
+    /** Open a note by its id (`case` for the case notes), from a chapter's Open. */
+    onnote = null,
+    template = false,
   } = $props();
 
   let host = $state(null);
@@ -50,6 +61,9 @@
   let pictureQuery = $state('');
   let picker = $state(null);
   let uploading = $state(false);
+  let including = $state(false);
+  let includeQuery = $state('');
+  let fetchedNotes = $state(null);
 
   const readOnly = $derived(Boolean(doc?.elsewhere) || !doc?.loaded || Boolean(doc?.error));
   const remote = $derived(doc?.loaded ? remoteImageUrls(doc.text) : []);
@@ -59,12 +73,26 @@
     .sort((a, b) => a.label.localeCompare(b.label))
     .slice(0, 80));
 
+  // what Include offers: every note of the case but this one
+  const ownId = $derived(doc?.noteId ?? 'case');
+  const includable = $derived((notes.length ? notes : fetchedNotes ?? [])
+    .filter((row) => row.id !== ownId)
+    .filter((row) => foldText(`${row.title} ${row.folder ?? ''}`).includes(foldText(includeQuery.trim()))));
+
   const handlers = {
     change: (text) => {
       if (onchange) onchange(text);
       else if (doc) editNote(doc, text);
     },
     open: (entity) => onopen(entity),
+    note: (id) => {
+      if (onnote) onnote(id);
+      else {
+        const entity = entities.find((item) => item.id === id);
+        if (entity) onopen(entity);
+      }
+    },
+    include: () => openIncludes(),
     point: (lat, lon) => gotoPoint(lat, lon),
     picture: () => { pictureOpen = true; },
     upload: () => picker?.click(),
@@ -78,10 +106,10 @@
       parent: host,
       state: EditorState.create({
         doc: doc?.text ?? '',
-        extensions: noteExtensions({ handlers, placeholder, readOnly, editable }),
+        extensions: noteExtensions({ handlers, placeholder, readOnly, editable, template }),
       }),
     });
-    view.dispatch({ effects: setNoteCase.of({ caseId, entities, redirects }) });
+    view.dispatch({ effects: setNoteCase.of({ caseId, entities, redirects, notes }) });
     onready(api_);
   });
   onDestroy(() => view?.destroy());
@@ -98,7 +126,7 @@
     });
   });
   $effect(() => {
-    const info = { caseId, entities, redirects };
+    const info = { caseId, entities, redirects, notes };
     if (view) view.dispatch({ effects: setNoteCase.of(info) });
   });
   $effect(() => {
@@ -144,6 +172,22 @@
   function callout(kind) {
     calloutAnchor = null;
     prefix(`${calloutMarkdown(kind)}`);
+  }
+
+  /** The note picker. The Notebook hands its list over; the panel beside the tools asks for one. */
+  function openIncludes() {
+    includeQuery = '';
+    including = true;
+    if (!notes.length && caseId) {
+      api.get(`/api/cases/${caseId}/notes/index`)
+        .then((result) => { fetchedNotes = result.items ?? []; })
+        .catch((error) => toast(`Could not list the notes: ${error.message}`, 'warn'));
+    }
+  }
+
+  function pickInclude(row) {
+    including = false;
+    if (view && !readOnly) insertInclude(view, row.id);
   }
 
   function pickPicture(entity) {
@@ -266,6 +310,22 @@
   <div class="page" bind:this={host} data-guide="notebook.write"></div>
 </div>
 
+{#if including}
+  <Modal title="Include a note" onclose={() => { including = false; view?.focus(); }} width="520px" align="top">
+    <p class="include-said">It prints as a chapter, in this note's look.</p>
+    <SearchInput bind:value={includeQuery} placeholder="Find a note…" width="100%" />
+    <div class="include-list">
+      {#each includable as row (row.id)}
+        <button type="button" class="include-row" onclick={() => pickInclude(row)}>
+          <span class="include-name"><Icon name="note" size={13} /> {row.title}{#if row.folder}<small>{row.folder}</small>{/if}</span>
+          {#if row.excerpt}<span class="include-excerpt">{row.excerpt}</span>{/if}
+        </button>
+      {/each}
+      {#if !includable.length}<p class="none">{fetchedNotes === null && !notes.length ? 'Reading the notes…' : 'No other note to include.'}</p>{/if}
+    </div>
+  </Modal>
+{/if}
+
 {#if calloutAnchor}
   <FloatingMenu anchor={calloutAnchor} width={230} label="Callouts" onclose={() => (calloutAnchor = null)}>
     {#each CALLOUTS as item (item.kind)}
@@ -319,5 +379,15 @@
   .page :global(.cm-editor) { height: 100%; }
   .compact .page { --note-pad: 14px 0 30vh; --note-gutter: 14px; --note-size: 14px; --note-width: none; }
   .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  .include-said { margin: 0 0 10px; color: var(--text-3); font-size: var(--fs-xs); }
+  .include-list { display: flex; flex-direction: column; gap: 2px; max-height: 340px; overflow: auto; margin-top: 8px; }
+  .include-row {
+    display: flex; flex-direction: column; gap: 2px; padding: 7px 8px; border: none; border-radius: var(--r-sm); background: none;
+    color: var(--text-1); text-align: left; cursor: pointer; font: inherit; font-size: var(--fs-sm);
+  }
+  .include-row:hover, .include-row:focus-visible { background: var(--bg-3); }
+  .include-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+  .include-name small { font-weight: 400; margin-left: 4px; }
+  .include-excerpt { color: var(--text-2); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   small { color: var(--text-3); font-size: var(--fs-xs); }
 </style>

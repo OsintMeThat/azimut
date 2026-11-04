@@ -8,6 +8,11 @@
    * to another screen, and come back without two copies writing over each other.
    * A note template from Settings is edited here too, as a plate template is in
    * the Map plate.
+   *
+   * A note prints in a look of its own (`lib/notes/look.js`), set from the header
+   * and kept beside it, never in its Markdown; the Page pane shows the PDF it
+   * makes as the note is typed. The home picks several notes at once, to export
+   * them or to make a report that includes them as chapters.
    */
   import { onDestroy, untrack } from 'svelte';
   import { api } from '../lib/api.js';
@@ -19,12 +24,15 @@
     caseState, uiState, toast, reloadCase, templatesState, saveTemplate, loadTemplates,
   } from '../lib/state.svelte.js';
   import { createNote, deleteNote, resetCaseNotes } from '../lib/notes.js';
+  import {
+    isPlainLook, normaliseLook, readLook, reportBody, reportLook, templateLook, writeLook,
+  } from '../lib/notes/look.js';
+  import { LOOK_HELP } from '../lib/notes/lookHelp.js';
   import { exportNotes, revealExports } from '../lib/notesExport.js';
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
   import { assignFolder, renameEntity } from '../lib/filing.js';
   import { openEntity } from '../lib/navigate.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
-  import { matchesTerms } from '../lib/folderBrowse.js';
   import { CASE_NOTES, flush, noteReady, openNote, releaseNote, retrySave } from '../lib/notes/noteDoc.svelte.js';
   import { openInDock } from '../lib/notes/noteDock.svelte.js';
   import { READY_NOTES, filledBody, freeTitle } from '../lib/notes/ready.js';
@@ -32,7 +40,8 @@
   import BackButton from '../components/BackButton.svelte';
   import NoteEditor from '../components/NoteEditor.svelte';
   import NotesHome from './notebook/NotesHome.svelte';
-  import SearchInput from '../components/SearchInput.svelte';
+  import LookControl from './notebook/LookControl.svelte';
+  import PagePane from './notebook/PagePane.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import FloatingMenu from '../components/FloatingMenu.svelte';
@@ -40,7 +49,7 @@
   import FolderSelect from '../components/FolderSelect.svelte';
   import NoCase from '../components/NoCase.svelte';
 
-  const NOTE_SEARCH_MIN = 6;
+  const PAGE_KEY = 'azimut:notebook-page';
 
   /** The note on screen: `{ noteId }`, null for the case notes; or null for the home. */
   let opened = $state(null);
@@ -59,13 +68,17 @@
   let noteActionBusy = $state(false);
   let naming = $state(null); // keep as template: { value }
   let exportOpen = $state(false);
-  let singleExportOpen = $state(false);
-  let singleExportId = $state(CASE_NOTES);
+  let exportIds = $state([]);
   let exportBusy = $state(false);
-  let exportQuery = $state('');
-  let exportSelection = $state(new Set());
   let exportDir = $state('');
   let exportPicker = $state(false);
+  // the notes picked on the home, in the order they were picked
+  let selected = $state([]);
+  // the PDF beside the note, as the analyst last left it
+  let pageMode = $state(readPageMode());
+  // how the open note prints, null while it is read
+  let look = $state(null);
+  let lookWrites = 0;
   // a template from Settings, edited in place of a note
   let template = $state(null);
   let templateDoc = $state(null);
@@ -110,11 +123,6 @@
 
   const noteEntities = $derived(graphEntities.filter((entity) => entity.type === 'note'));
   const noteEntity = $derived(opened?.noteId ? noteEntities.find((entity) => entity.id === opened.noteId) ?? null : null);
-  const exportChoices = $derived([
-    { id: CASE_NOTES, label: 'Case notes', folder: '' },
-    ...noteEntities.map((entity) => ({ id: entity.id, label: entity.label, folder: entity.attrs?.folder ?? '' }))
-      .sort((a, b) => a.label.localeCompare(b.label)),
-  ].filter((choice) => matchesTerms(`${choice.label} ${choice.folder}`, exportQuery)));
 
   // the filed note open here is what the topbar's Add event seats; the case notes offer nothing
   $effect(() => { offerNote('notebook', noteEntity); });
@@ -135,9 +143,11 @@
       rowsLoading = false;
     }
   }
+  // read again on the home and on each note opened, which shows the others as chapters
   $effect(() => {
     caseState.rev;
-    if (caseId && !opened) untrack(refreshRows);
+    void opened;
+    if (caseId) untrack(refreshRows);
   });
 
   // -- one note ------------------------------------------------------------------
@@ -250,6 +260,43 @@
     toast('Kept beside the tools', 'info', 2600);
   }
 
+  // -- how it prints --------------------------------------------------------------
+
+  function readPageMode() {
+    try { return localStorage.getItem(PAGE_KEY) === '1'; } catch { return false; }
+  }
+
+  function setPageMode(on) {
+    pageMode = on;
+    try { localStorage.setItem(PAGE_KEY, on ? '1' : '0'); } catch { /* this browser keeps nothing */ }
+  }
+
+  $effect(() => {
+    const id = caseId;
+    const key = opened ? opened.noteId ?? CASE_NOTES : '';
+    look = null;
+    if (!id || !key) return;
+    let live = true;
+    readLook(id, key === CASE_NOTES ? null : key)
+      .then((value) => { if (live) look = value; })
+      .catch(() => { if (live) look = normaliseLook(null); });
+    return () => { live = false; };
+  });
+
+  /** A look picked in the header: shown at once, kept beside the note. */
+  async function changeLook(next) {
+    const id = caseId;
+    const key = opened?.noteId ?? null;
+    const mine = ++lookWrites;
+    look = next;
+    try {
+      const saved = await writeLook(id, key, next);
+      if (mine === lookWrites && id === caseId && (opened?.noteId ?? null) === key) look = saved;
+    } catch (error) {
+      toast(`Look not saved: ${error.message}`, 'danger');
+    }
+  }
+
   // -- naming and filing ---------------------------------------------------------
 
   async function commitTitle() {
@@ -290,14 +337,16 @@
   }
 
   const starts = $derived([
-    ...READY_NOTES.map((ready) => ({ id: ready.id, name: ready.name, body: ready.body, folder: '' })),
+    ...READY_NOTES.map((ready) => ({ id: ready.id, name: ready.name, body: ready.body, folder: '', look: ready.look })),
     ...templatesState.note.map((record) => ({
-      id: `t:${record.id}`, name: record.name, body: record.data?.body ?? '', folder: record.data?.folder ?? '',
+      id: `t:${record.id}`, name: record.name, body: record.data?.body ?? '', folder: record.data?.folder ?? '', look: record.data?.look ?? null,
     })),
   ]);
 
-  async function make({ title, folder = '', body = '' }) {
+  async function make({ title, folder = '', body = '', look: start = null }) {
     const note = await createNote(caseId, { title, folder, content: filledBody(body) });
+    // the look the template prints in goes with the note; a failure leaves the note plain
+    if (!isPlainLook(start)) await writeLook(caseId, note.id, templateLook(start)).catch((error) => toast(`Look not saved: ${error.message}`, 'warn'));
     await reloadCase();
     show(note.id);
     return note;
@@ -313,7 +362,7 @@
     const start = starts.find((item) => item.id === noteModal.start);
     noteModalSaving = true;
     try {
-      await make({ title, folder: noteModal.folder || start?.folder || '', body: start?.body ?? '' });
+      await make({ title, folder: noteModal.folder || start?.folder || '', body: start?.body ?? '', look: start?.look ?? null });
       noteModal = null;
     } catch (error) {
       toast(error.message, 'danger');
@@ -323,9 +372,28 @@
   }
 
   /** A ready note or a template, started at once under a free name that is selected to retype. */
-  async function startFrom({ name, body, folder }) {
+  async function startFrom({ name, body, folder, look: start = null }) {
     try {
-      const note = await make({ title: freeTitle(name, noteEntities.map((entity) => entity.label)), folder, body });
+      const note = await make({ title: freeTitle(name, noteEntities.map((entity) => entity.label)), folder, body, look: start });
+      retitle = note.id;
+    } catch (error) {
+      toast(error.message, 'danger');
+    }
+  }
+
+  /** A report of the notes picked on the home: one chapter each, in the order picked, opened beside its pages. */
+  async function makeReport(ids) {
+    if (!caseId || !ids.length) return;
+    try {
+      if (doc) await flush(doc);
+      const note = await createNote(caseId, {
+        title: freeTitle('Report', noteEntities.map((entity) => entity.label)), folder: '', content: reportBody(ids),
+      });
+      await writeLook(caseId, note.id, reportLook()).catch((error) => toast(`Look not saved: ${error.message}`, 'warn'));
+      selected = [];
+      setPageMode(true);
+      await reloadCase();
+      show(note.id);
       retitle = note.id;
     } catch (error) {
       toast(error.message, 'danger');
@@ -345,7 +413,7 @@
     const name = naming?.value.trim();
     if (!name || !doc) return;
     try {
-      await saveTemplate('note', { name, data: { body: doc.text, folder: noteEntity?.attrs?.folder ?? '' } });
+      await saveTemplate('note', { name, data: { body: doc.text, folder: noteEntity?.attrs?.folder ?? '', look: templateLook(look) } });
       naming = null;
       toast(`“${name}” kept as a note template`, 'ok', 2600);
     } catch (error) {
@@ -401,7 +469,7 @@
       if (doc) await flush(doc);
       const result = await exportNotes(id, noteIds);
       exportOpen = false;
-      singleExportOpen = false;
+      selected = [];
       const count = result.written.length;
       toast(`${count} PDF${count > 1 ? 's' : ''} written to ${destinationLabel(result.path)}`, 'ok', 5200, {
         label: 'Show',
@@ -419,28 +487,11 @@
     readDestinations().then((dirs) => (exportDir = dirs.notes)).catch(() => {});
   }
 
-  function exportOne(noteId) {
-    singleExportId = noteId ?? CASE_NOTES;
-    singleExportOpen = true;
-    readExportDestination();
-  }
-
-  function exportSeveral() {
-    exportSelection = new Set([opened ? opened.noteId ?? CASE_NOTES : CASE_NOTES]);
-    exportQuery = '';
+  /** One note, or the notes picked on the home, each to a PDF of its own. */
+  function exportSome(noteIds) {
+    exportIds = noteIds.map((id) => id ?? CASE_NOTES);
     exportOpen = true;
     readExportDestination();
-  }
-
-  function toggleExportNote(id) {
-    const next = new Set(exportSelection);
-    if (!next.delete(id)) next.add(id);
-    exportSelection = next;
-  }
-
-  function toggleExportAll() {
-    const all = exportChoices.map((choice) => choice.id);
-    exportSelection = new Set(exportSelection.size === all.length ? [] : all);
   }
 
   // -- a template from Settings ------------------------------------------------------
@@ -454,7 +505,7 @@
       uiState.openNoteTemplate = null;
       if (!record) { toast('That template is no longer there', 'warn'); return; }
       if (doc) home({ navigate: false });
-      template = { id: record.id, name: record.name, folder: record.data?.folder ?? '' };
+      template = { id: record.id, name: record.name, folder: record.data?.folder ?? '', look: templateLook(record.data?.look) };
       templateDoc = { text: record.data?.body ?? '', loaded: true, revision: 1, elsewhere: false, error: '' };
     });
   });
@@ -471,10 +522,16 @@
     if (!template || !templateDoc) return;
     const name = template.name.trim() || 'Note template';
     try {
-      await saveTemplate('note', { id: template.id, name, data: { body: templateDoc.text, folder: template.folder } });
+      await saveTemplate('note', { id: template.id, name, data: { body: templateDoc.text, folder: template.folder, look: templateLook(template.look) } });
     } catch (error) {
       toast(`Template not saved: ${error.message}`, 'danger');
     }
+  }
+
+  function changeTemplateLook(next) {
+    if (!template) return;
+    template.look = templateLook(next);
+    void saveTemplateNow();
   }
 
   async function leaveTemplate({ quiet = false } = {}) {
@@ -503,13 +560,21 @@
           onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
         <span class="hint">{'{today}'} and {'{now}'} are written in when a note starts from it.</span>
         <div class="spacer"></div>
+        <LookControl look={template.look} template onchange={changeTemplateLook} />
+        {@render modes()}
         <button class="btn btn-primary btn-sm" onclick={() => leaveTemplate()}><Icon name="check" size={14} /> Done</button>
       </header>
-      <div class="body">
-        {#key template.id}
-          <NoteEditor doc={templateDoc} {caseId} entities={graphEntities} onchange={templateChanged} onopen={openEntity}
-            placeholder="What a note made from this template starts with." />
-        {/key}
+      <div class="body" class:split={pageMode}>
+        <div class="writing">
+          {#key template.id}
+            <NoteEditor doc={templateDoc} {caseId} entities={graphEntities} onchange={templateChanged} onopen={openEntity} template
+              onready={(handle) => (editor = handle)}
+              placeholder="What a note made from this template starts with. Type / and pick Guidance for grey words that say what goes where." />
+          {/key}
+        </div>
+        {#if pageMode}
+          <PagePane title={template.name} text={filledBody(templateDoc.text)} look={template.look} onjump={(line) => editor?.jump(line)} />
+        {/if}
       </div>
     {:else if opened && doc}
       <header class="tool-header">
@@ -529,29 +594,44 @@
           {:else if doc.loaded}{#if saveSaid === 'Saved'}<Icon name="check" size={12} />{/if} {saveSaid}{/if}
         </span>
         <div class="spacer"></div>
+        <LookControl {look} onchange={changeLook} entities={graphEntities} disabled={!look} />
+        {@render modes()}
         <button class="btn btn-ghost btn-sm" title="Keep it beside the tools, open as you work on the Map or a video" aria-label="Beside the tools"
-          data-guide="notebook.dock" onclick={() => beside()}><Icon name="panelRight" size={15} /> Beside the tools</button>
+          data-guide="notebook.dock" onclick={() => beside()}><Icon name="panelRight" size={15} /><span class="wide-only">Beside the tools</span></button>
         {#if !solo}
           <button class="btn btn-ghost btn-sm" title="Open in its own tab, for another screen" aria-label="Open in its own tab"
             data-guide="notebook.tab" onclick={() => detach()}><Icon name="external" size={15} /></button>
         {/if}
-        <button class="btn btn-sm" title="Export this note as PDF" data-guide="notebook.pdf" onclick={() => exportOne(opened.noteId)}>
+        <button class="btn btn-sm" title="Export this note as PDF" data-guide="notebook.pdf" onclick={() => exportSome([opened.noteId])}>
           <Icon name="download" size={14} /> PDF</button>
         <button class="btn btn-ghost btn-sm" aria-label="More" title="More" onclick={(event) => (menu = { anchor: event.currentTarget })}>
           <Icon name="more" size={15} /></button>
       </header>
-      <div class="body">
-        {#key doc}
-          <NoteEditor {doc} {caseId} entities={graphEntities} redirects={referenceRedirects} where="notebook"
-            onopen={openEntity} onready={(handle) => (editor = handle)} />
-        {/key}
+      <div class="body" class:split={pageMode}>
+        <div class="writing">
+          {#key doc}
+            <NoteEditor {doc} {caseId} entities={graphEntities} redirects={referenceRedirects} where="notebook" notes={rows}
+              onopen={openEntity} onnote={(id) => show(id)} onready={(handle) => (editor = handle)} />
+          {/key}
+        </div>
+        {#if pageMode && look && doc.loaded}
+          <PagePane {caseId} note={opened.noteId ?? CASE_NOTES} title={noteEntity?.label ?? 'Case notes'} text={doc.text} {look}
+            onjump={(line) => editor?.jump(line)} />
+        {/if}
       </div>
     {:else}
-      <NotesHome {caseId} {rows} loading={rowsLoading} templates={templatesState.note}
+      <NotesHome {caseId} {rows} loading={rowsLoading} templates={templatesState.note} bind:selected
         onopen={(id, options) => show(id, options)} onnew={newNote} onstart={startFrom}
-        onmenu={(row, anchor) => (menu = { row, anchor })} />
+        onmenu={(row, anchor) => (menu = { row, anchor })} onexport={exportSome} onreport={makeReport} />
     {/if}
   </section>
+
+  {#snippet modes()}
+    <div class="modes" role="group" aria-label="View" data-guide="notebook.view">
+      <button type="button" class:on={!pageMode} aria-pressed={!pageMode} title={LOOK_HELP.write} onclick={() => setPageMode(false)}>Write</button>
+      <button type="button" class:on={pageMode} aria-pressed={pageMode} title={LOOK_HELP.page_pane} onclick={() => setPageMode(true)}>Page</button>
+    </div>
+  {/snippet}
 
   {#if menu}
     {@const row = menu.row ?? (opened ? { id: opened.noteId ?? CASE_NOTES, title: noteEntity?.label ?? 'Case notes' } : null)}
@@ -562,14 +642,12 @@
           <Icon name="panelRight" size={14} /><span class="fm-grow">Beside the tools</span></button>
         <button type="button" class="fm-item" onclick={() => { menu = null; detach(row.id === CASE_NOTES ? null : row.id); }}>
           <Icon name="external" size={14} /><span class="fm-grow">In its own tab</span></button>
-        <button type="button" class="fm-item" onclick={() => { menu = null; exportOne(row.id === CASE_NOTES ? null : row.id); }}>
+        <button type="button" class="fm-item" onclick={() => { menu = null; exportSome([row.id]); }}>
           <Icon name="download" size={14} /><span class="fm-grow">Export as PDF</span></button>
       {:else}
         <button type="button" class="fm-item" onclick={() => { menu = null; naming = { value: noteEntity?.label ?? 'Case notes' }; }}
           title="Keep this note as it is, to start others from"><Icon name="save" size={14} /><span class="fm-grow">Keep as template</span></button>
       {/if}
-      <button type="button" class="fm-item" onclick={() => { menu = null; exportSeveral(); }}>
-        <Icon name="layers" size={14} /><span class="fm-grow">Export several as PDF</span></button>
       {#if row}
         <div class="fm-sep"></div>
         <button type="button" class="fm-item danger" onclick={() => { menu = null; askRemove(row); }}>
@@ -614,51 +692,23 @@
     </Modal>
   {/if}
 
-  {#if singleExportOpen}
-    <Modal title="Export note as PDF" onclose={() => (singleExportOpen = false)} width="560px">
+  {#if exportOpen}
+    {@const several = exportIds.length > 1}
+    <Modal title={several ? 'Export notes as PDF' : 'Export note as PDF'} onclose={() => (exportOpen = false)} width="560px">
       <div class="export-dest">
         <span class="dest-label">Destination</span>
         <span class="dest-path mono" title={exportDir || "The case's own exports folder"}>{exportDir || "the case's exports folder"}</span>
         <button class="btn btn-ghost btn-sm" onclick={() => (exportPicker = true)}>Change</button>
       </div>
       <p class="export-note">
-        One PDF will be written.
+        {several ? `${exportIds.length} PDFs will be written, one per note.` : 'One PDF will be written.'}
         {#if exportDir}Files already there are kept.{:else}An existing file with the same name is replaced.{/if}
       </p>
       <div class="modal-row">
         <div style="flex:1"></div>
-        <button class="btn" onclick={() => (singleExportOpen = false)}>Cancel</button>
-        <button class="btn btn-primary" disabled={exportBusy} onclick={() => runExport([singleExportId])}>{exportBusy ? 'Exporting…' : 'Export PDF'}</button>
-      </div>
-    </Modal>
-  {/if}
-
-  {#if exportOpen}
-    <Modal title="Export notes as PDF" onclose={() => (exportOpen = false)} width="560px">
-      {#if exportChoices.length > NOTE_SEARCH_MIN}<SearchInput bind:value={exportQuery} placeholder="Find a note…" />{/if}
-      <div class="export-list">
-        {#each exportChoices as choice (choice.id)}
-          <label class="export-row">
-            <input type="checkbox" checked={exportSelection.has(choice.id)} onchange={() => toggleExportNote(choice.id)} />
-            <span class="export-name">{choice.label}</span>
-            {#if choice.folder}<small>{choice.folder}</small>{/if}
-          </label>
-        {/each}
-        {#if !exportChoices.length}<p class="export-empty">No matching notes.</p>{/if}
-      </div>
-      <div class="export-dest">
-        <span class="dest-label">Destination</span>
-        <span class="dest-path mono" title={exportDir || "The case's own exports folder"}>{exportDir || "the case's exports folder"}</span>
-        <button class="btn btn-ghost btn-sm" onclick={() => (exportPicker = true)}>Change</button>
-      </div>
-      <p class="export-note">One PDF per note. {#if exportDir}Files already there are kept.{:else}Existing files are replaced.{/if}</p>
-      <div class="modal-row">
-        <button class="btn btn-ghost btn-sm" onclick={toggleExportAll}>{exportSelection.size === exportChoices.length ? 'Clear' : 'Select all'}</button>
-        <div style="flex:1"></div>
         <button class="btn" onclick={() => (exportOpen = false)}>Cancel</button>
-        <button class="btn btn-primary" disabled={exportBusy || !exportSelection.size} onclick={() => runExport([...exportSelection])}>
-          {exportBusy ? 'Exporting…' : `Export ${exportSelection.size || ''}`}
-        </button>
+        <button class="btn btn-primary" disabled={exportBusy} onclick={() => runExport(exportIds)}>
+          {exportBusy ? 'Exporting…' : several ? `Export ${exportIds.length} PDFs` : 'Export PDF'}</button>
       </div>
     </Modal>
   {/if}
@@ -684,7 +734,7 @@
 {/if}
 
 <style>
-  .notebook { position: relative; height: 100%; display: flex; flex-direction: column; min-height: 0; }
+  .notebook { position: relative; height: 100%; display: flex; flex-direction: column; min-height: 0; container: notebook / inline-size; }
   .tool-header { flex-wrap: nowrap; }
   .title-input { flex: 0 1 320px; min-width: 120px; font-weight: 600; }
   .case-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text-1); }
@@ -695,12 +745,20 @@
   .status.error { color: var(--danger); }
   .spacer { flex: 1; }
   .body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .body > :global(.note-editor) { flex: 1; }
+  .body.split { flex-direction: row; }
+  .writing { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .writing > :global(.note-editor) { flex: 1; }
+  .body.split > :global(.page-pane) { flex: 0 0 clamp(300px, 46%, 820px); }
+  .modes { display: inline-flex; flex: none; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+  .modes button {
+    padding: 3px 10px; border: none; border-left: 1px solid var(--border); background: var(--bg-1); color: var(--text-2);
+    font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  }
+  .modes button:first-child { border-left: none; }
+  .modes button:hover:not(.on) { background: var(--bg-3); color: var(--text-1); }
+  .modes button.on { background: var(--bg-3); color: var(--text-1); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+  @container notebook (max-width: 1180px) { .wide-only { display: none; } }
   .fm-item.danger { color: var(--danger); }
-  .export-list { display: flex; flex-direction: column; max-height: 280px; overflow: auto; margin: 8px 0; }
-  .export-row { display: flex; align-items: center; gap: 8px; padding: 5px 4px; font-size: var(--fs-sm); }
-  .export-row small, .export-empty { color: var(--text-3); font-size: var(--fs-xs); }
-  .export-name { flex: 1; }
   .export-dest { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: var(--fs-sm); }
   .dest-label { color: var(--text-3); }
   .dest-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

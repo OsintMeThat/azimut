@@ -340,8 +340,9 @@ def test_release_binary_runs_the_application_smoke_test():
 
 
 def test_the_node_floor_for_the_frontend_build_is_the_one_its_tools_declare():
-    """Mermaid sets the floor and vite and rolldown refuse to start below theirs, so the
-    README and the frontend's own `engines` state that range rather than a rounder number."""
+    """pdf.js sets the floor, above Mermaid's and the one vite and rolldown refuse to start
+    below, so the README and the frontend's own `engines` state that range rather than a
+    rounder number."""
     import json
 
     root = Path(__file__).resolve().parent.parent
@@ -349,12 +350,12 @@ def test_the_node_floor_for_the_frontend_build_is_the_one_its_tools_declare():
     package = json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))
     lock = json.loads((root / "frontend" / "package-lock.json").read_text(encoding="utf-8"))
 
-    mermaid = lock["packages"]["node_modules/mermaid"]["engines"]["node"]
-    assert mermaid == ">=22.12.0"
+    assert lock["packages"]["node_modules/pdfjs-dist"]["engines"]["node"] == ">=22.13.0 || >=24"
+    assert lock["packages"]["node_modules/mermaid"]["engines"]["node"] == ">=22.12.0"
     assert lock["packages"]["node_modules/vite"]["engines"]["node"] == "^20.19.0 || >=22.12.0"
-    assert package["engines"]["node"] == mermaid
-    assert lock["packages"][""]["engines"]["node"] == mermaid
-    assert "Node.js 22.12+" in readme
+    assert package["engines"]["node"] == ">=22.13.0"
+    assert lock["packages"][""]["engines"]["node"] == ">=22.13.0"
+    assert "Node.js 22.13+" in readme
 
 
 def test_intel_macos_package_support_floor_matches_the_lock():

@@ -196,6 +196,7 @@ proof for publication.
 | ✅ **Files & navigation** | Files work into the active folder, offers contextual actions and filters, opens media in one full-screen viewer, and retraces tools and documents with guarded Back and Forward. |
 | ✅ **Command palette** | Ctrl+K or ⌘K searches tools, cases and current-case documents, starts with recently added items and protects unsaved work. |
 | ✅ **Notebook, written in place** | Opens on note cards with a search through their words, writes a note as it reads with @ citations, / blocks, callouts and tasks, keeps it beside every tool or in a tab of its own, starts notes from ready ones or templates, and lists each note in Details of what it cites. |
+| ✅ **Notebook reports** | Prints a note as Plain, Report, Brief or Journal with a cover, contents and TLP marking on A4 or Letter, shows its pages beside it while it is written, gathers notes as chapters, and starts from nine ready templates or Settings' own. |
 
 ---
 
@@ -241,7 +242,7 @@ supplies, since a ridge ends the day well before the flat horizon does.
 |------|--------------|
 | **One sky frame** | Find's skyline, Camera Resection and Sky Clock read in one azimuth and elevation frame, so the sun and moon times the relief hides split the places a matching skyline leaves tied. |
 | **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
-| **Report Builder** | Assemble proofs/maps/timeline/entities/notes into PDF or one self-contained HTML file with its media embedded, readable offline. |
+| **Report Builder** | Draws the case into a report note: proofs, map views, a Timeline stretch and Sheet ranges as figures, a sources and imagery credits annex, internal and public editions, one self-contained HTML file readable offline, and a web article as a WordPress draft or a copy for Substack or Medium. |
 | **Case Sync (Git)** | Push a case to a private or public Git remote, pull it back, and diff two revisions, so two analysts can work the same case. |
 
 Toward v4: archive-on-download and a Wayback CDX snapshot timeline with diff; web-page save
@@ -279,7 +280,7 @@ stops making sense.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and the Collage tool.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
-- **Notes, next:** live blocks drawn in a note (a saved map view, a stretch of the Timeline, a Sheet range), a selection sent to the Post composer, a preview on hovering a chip.
+- **Notes, next:** a selection sent to the Post composer, a preview on hovering a chip.
 - **More on the home page:** the case's own notes beside the tiles, and panels the analyst arranges rather than a fixed grid. Each has to earn its place there rather than beside Board, Graph and Timeline, which already read the case.
 - **Radar damage from a stack of passes:** the pixel-wise t-test (PWTT) over a year of passes before and weeks after, which two passes cannot match.
 - **Oil slicks by radar:** dark patches on the sea near anchorages and lanes, which Sentinel-1 shows through cloud.
@@ -488,8 +489,12 @@ stops making sense.
   is fetched. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the note
   after sanitizing, under its own `strict` level, which escapes labels and drops
-  click handlers. Three routes take a picture drawn in the browser back: the note
-  PDF export, whose request, diagrams and decoded total are bounded before
+  click handlers. A note's page preview renders the same PDF in memory, one at a
+  time and bounded like an export, and writes nothing; a template's preview has no
+  case and reads no case file. Decoded note pictures are kept between renders in a
+  cache capped at 40 entries and 64 MB. Three routes take a picture drawn in the
+  browser back: the note PDF export, whose request, diagrams and decoded total are
+  bounded before
   rendering, every diagram read as an image and the note's own text re-read from
   disk rather than trusted from the request; the analysis plate, bounded the
   same way and inspected before it is written, since a plate lands where documents

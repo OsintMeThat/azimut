@@ -8,8 +8,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import TemplatesTab from './TemplatesTab.svelte';
-import { prefs, templatesState, uiState } from '../../lib/state.svelte.js';
+
+const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
+vi.mock('../../lib/api.js', () => ({ api: { get, post, put: vi.fn(), del: vi.fn() } }));
+vi.mock('../../lib/notes/thumbs.js', () => ({ templateThumb: vi.fn(async () => 'data:image/png;base64,AAAA') }));
+
+const { default: TemplatesTab } = await import('./TemplatesTab.svelte');
+const { prefs, templatesState, uiState } = await import('../../lib/state.svelte.js');
+const { noteTemplateFile } = await import('../../lib/notes/templateFile.js');
 
 const PROOF = { id: 'pf_1', name: 'House proof', data: { legend: true } };
 const CLASSIC = { id: 'po_1', name: 'Classic', data: { body: '#place' } };
@@ -49,12 +55,33 @@ afterEach(() => {
   prefs.postTemplate = '';
 });
 
-describe('Note templates', () => {
-  it('opens one in the Notebook to edit it, with a copy and a delete beside', () => {
-    templatesState.note = [{ id: 'nt_1', name: 'Write-up', data: { body: '## Claim', folder: '' } }];
+describe('Notebook templates', () => {
+  const WRITE_UP = { id: 'nt_1', name: 'Write-up', data: { body: '## Claim', folder: '', look: { style: 'brief' } } };
+  const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); flushSync(); };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // saving a template answers with it, and the list is read again
+    post.mockImplementation(async (_url, body) => ({ id: 'nt_new', name: body.name, data: body.data }));
+    get.mockImplementation(async () => ({ proof: templatesState.proof, post: templatesState.post, map: [], note: templatesState.note }));
+  });
+
+  it('shows each one by its first page, its name and its style', () => {
+    templatesState.note = [WRITE_UP, { id: 'nt_2', name: 'Old', data: { body: '' } }];
+    open();
+    const section = target.querySelector('[data-guide="settings.note-templates"]');
+    expect(section.querySelector('h3').textContent).toBe('Notebook templates');
+    expect(rowOf('Write-up').textContent).toContain('Brief');
+    expect(rowOf('Old').textContent).toContain('Plain');
+    expect(rowOf('Write-up').querySelector('.thumb')).not.toBeNull();
+  });
+
+  it('opens one in the Notebook to edit it, with a copy, a file and a delete beside', () => {
+    templatesState.note = [WRITE_UP];
     open();
     const row = rowOf('Write-up');
     expect(button(row, 'Duplicate')).toBeTruthy();
+    expect(row.querySelector('button[aria-label="Download Write-up"]')).not.toBeNull();
     expect(row.querySelector('button[aria-label="Delete Write-up"]')).not.toBeNull();
     button(row, 'Edit').click();
     expect(uiState.openNoteTemplate).toBe('nt_1');
@@ -62,13 +89,77 @@ describe('Note templates', () => {
     uiState.openNoteTemplate = null;
   });
 
+  it('copies one with its look', async () => {
+    templatesState.note = [WRITE_UP];
+    open();
+    button(rowOf('Write-up'), 'Duplicate').click();
+    await settle();
+    const [url, body] = post.mock.calls[0];
+    expect(url).toBe('/api/templates/note');
+    expect(body.name).toBe('Write-up copy');
+    expect(body.data).toMatchObject({ body: '## Claim', look: { style: 'brief' } });
+  });
+
+  it('saves one as a file, and takes a file back', async () => {
+    templatesState.note = [WRITE_UP];
+    open();
+    let saved = null;
+    const createObjectURL = vi.fn((blob) => { saved = blob; return 'blob:x'; });
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
+    const clicks = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () { clicks.push(this.download); });
+    rowOf('Write-up').querySelector('button[aria-label="Download Write-up"]').click();
+    expect(clicks).toEqual(['Write-up.azimut-note.json']);
+    click.mockRestore();
+    const text = await saved.text();
+    expect(JSON.parse(text)).toMatchObject({ azimut_note_template: 1, name: 'Write-up', data: { look: { style: 'brief' } } });
+
+    const input = target.querySelector('[data-guide="settings.note-templates"] input[type="file"]');
+    const file = new File([await noteTemplateFile({ name: 'From a colleague', data: WRITE_UP.data }).text()], 't.azimut-note.json');
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(post).toHaveBeenCalled());
+    const [, body] = post.mock.calls.at(-1);
+    expect(body.name).toBe('From a colleague');
+    expect(body.data).toMatchObject({ body: '## Claim', look: { style: 'brief', cover: { image: '' } } });
+  });
+
+  it('refuses a file that is not one, and says so', async () => {
+    open();
+    const input = target.querySelector('[data-guide="settings.note-templates"] input[type="file"]');
+    Object.defineProperty(input, 'files', { value: [new File(['{"azimut_map_template":1,"data":{}}'], 'map.json')], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(uiState.toasts.map((item) => item.message)).toContain('That file is not a Notebook template'));
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('starts one from a ready template and opens it in the Notebook', async () => {
+    open();
+    sectionButton(target.querySelector('[data-guide="settings.note-templates"]'), 'From a ready one').click();
+    flushSync();
+    const item = [...document.querySelectorAll('.ready-item')].find((node) => node.textContent.includes('Daily SITREP'));
+    expect([...document.querySelectorAll('.ready-item')].some((node) => node.textContent.includes('Blank'))).toBe(false);
+    item.click();
+    await settle();
+    const [, body] = post.mock.calls[0];
+    expect(body.name).toBe('Daily SITREP');
+    expect(body.data.body).toContain('## {today}');
+    expect(body.data.look.style).toBe('brief');
+    expect(uiState.openNoteTemplate).toBe('nt_new');
+    uiState.openNoteTemplate = null;
+  });
+
   it('says how to make one when there is none', () => {
     open();
-    expect(target.textContent).toContain('No note templates yet. Keep one from a note, or start one here.');
+    expect(target.textContent).toContain('No Notebook templates yet. Keep one from a note, start one from a ready one, or import a file.');
   });
 });
 
 const rows = () => [...target.querySelectorAll('.tpl-row')];
+// a section's own buttons, wherever they sit in it
+function sectionButton(section, text) {
+  return [...section.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
+}
 const rowOf = (name) => rows().find((row) => row.querySelector('.tpl-name').textContent === name);
 const button = (row, text) =>
   [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === text);

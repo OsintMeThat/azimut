@@ -61,11 +61,20 @@ describe('what @ and / offer', () => {
   });
 
   it('ranks the commands by their name, then by the words they go by', () => {
-    expect(slashMatches('')).toBe(SLASH_COMMANDS);
+    expect(slashMatches('').map((command) => command.id)).toEqual(
+      SLASH_COMMANDS.filter((command) => command.id !== 'hint').map((command) => command.id));
     expect(slashMatches('ta')[0].id).toBe('table');
     expect(slashMatches('todo')[0].id).toBe('task');
     expect(slashMatches('journal')[0].id).toBe('entry');
     expect(slashMatches('zzz')).toEqual([]);
+  });
+
+  it('offers a chapter in a note, and guidance in a template', () => {
+    expect(slashMatches('include')[0].id).toBe('include');
+    expect(slashMatches('chapter')[0].id).toBe('include');
+    expect(slashMatches('guid').map((command) => command.id)).not.toContain('hint');
+    expect(slashMatches('guid', { template: true })[0].id).toBe('hint');
+    expect(slashMatches('', { template: true }).map((command) => command.id)).not.toContain('include');
   });
 
   it('writes a line command at the start of its line, a block on lines of its own', () => {
@@ -78,6 +87,11 @@ describe('what @ and / offer', () => {
     const table = slashInsert(command('table'));
     expect(table.text.slice(table.cursor)).toBe(' |  |\n');
     expect(slashInsert(command('cite'))).toBeNull();
+    expect(slashInsert(command('include'))).toBeNull();
+    const hint = slashInsert(command('hint'));
+    expect(hint.text).toBe('<!--?  -->\n');
+    expect(hint.text.slice(0, hint.cursor)).toBe('<!--? ');
+    expect(slashInsert(command('hint'), { before: 'text ' }).text).toBe('\n\n<!--?  -->\n');
   });
 
   it('dates a log entry on the analyst’s own clock', () => {
@@ -95,7 +109,7 @@ describe('notes made from others', () => {
 
   it('fills in the day and the time a template names', () => {
     expect(filledBody('## {today}\n### {now}', NOW)).toMatch(/^## 2026-11-04\n### 2026-11-04 09:05 \(UTC/);
-    expect(READY_NOTES.map((ready) => ready.id)).toEqual(['blank', 'geolocation', 'log', 'source', 'day']);
+    expect(filledBody(READY_NOTES.find((ready) => ready.id === 'log').body, NOW)).toMatch(/### 2026-11-04 09:05 \(UTC/);
   });
 
   it('numbers a name already taken', () => {

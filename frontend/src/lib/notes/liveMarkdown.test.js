@@ -89,6 +89,68 @@ describe('the note page', () => {
   });
 });
 
+describe('guidance and chapters', () => {
+  const NOTES = [{ id: 'n2', title: 'Shadows', excerpt: 'Measured at noon.' }];
+
+  it('draws a line of guidance as grey words, kept drawn on the line being written in a note', () => {
+    const text = '## Claim\n\n<!--? Who said it, and where -->\n\nBody';
+    const state = noteState(text, { caseInfo: CASE });
+    const from = text.indexOf('<!--?');
+    const to = from + '<!--? Who said it, and where -->'.length;
+    expect(drawn(state)).toContain(`hint ${from}-${to}`);
+    expect(drawn(at(state, from + 3))).toContain(`hint ${from}-${to}`);
+    let said = '';
+    noteDecorations(state).between(from, to, (_a, _b, value) => { said = value.spec.widget?.text ?? said; });
+    expect(said).toBe('Who said it, and where');
+  });
+
+  it('gives a template its guidance back as text on the line being written', () => {
+    const text = '<!--? Who said it -->\n\nBody';
+    const state = noteState(text, { caseInfo: CASE, template: true });
+    expect(drawn(state)).toEqual(['hint 0-21']);
+    expect(drawn(at(state, 4))).toEqual(['line cm-hint-line @0']);
+  });
+
+  it('leaves an old comment, guidance inside code, and a hint inside a sentence as they were', () => {
+    const state = noteState('<!-- an old comment -->\n\n```\n<!--? in code -->\n```\n\nText <!--? not a line --> here', { caseInfo: CASE });
+    const words = drawn(state);
+    expect(words.some((word) => word.startsWith('hint'))).toBe(false);
+    const kinds = [];
+    noteDecorations(state).between(0, state.doc.length, (_from, _to, value) => {
+      if (value.spec.widget?.kind) kinds.push(value.spec.widget.kind);
+    });
+    expect(kinds).toEqual(['html']);
+  });
+
+  it('draws a chapter line as the note it includes, numbered in order, and its source while edited', () => {
+    const text = 'Intro\n\n[[include:n2]]\n\n[[include:gone]]\n\n[[include:case]]\n';
+    const state = noteState(text, { caseInfo: { ...CASE, notes: NOTES } });
+    const chapters = [];
+    noteDecorations(state).between(0, state.doc.length, (from, to, value) => {
+      const widget = value.spec.widget;
+      if (widget?.constructor.name === 'IncludeWidget') chapters.push([from, to, widget.number, widget.note?.title ?? null]);
+    });
+    expect(chapters).toEqual([[7, 21, 1, 'Shadows'], [23, 39, 2, null], [41, 57, 3, 'Case notes']]);
+    expect(drawn(at(state, 9))).toContain('mark cm-ref-source 7-21');
+  });
+
+  it('keeps a chapter line inside a sentence or a quote as text', () => {
+    const state = noteState('See [[include:n2]] here\n\n> [[include:n2]]', { caseInfo: { ...CASE, notes: NOTES } });
+    expect(drawn(state).some((word) => word.startsWith('include'))).toBe(false);
+  });
+
+  it('reads a chapter line by line, as the PDF does, words around it or not, and never inside code', () => {
+    const text = 'Words\n[[include:n2]]\nMore\n\n```\n[[include:n2]]\n```';
+    const state = noteState(text, { caseInfo: { ...CASE, notes: NOTES } });
+    expect(drawn(state).filter((word) => word.startsWith('include'))).toEqual(['include 6-20']);
+  });
+
+  it('reads guidance indented as the PDF does', () => {
+    const state = noteState('  <!--? Who said it -->', { caseInfo: CASE });
+    expect(drawn(state)).toEqual(['hint 0-23']);
+  });
+});
+
 /** A note as the old split-pane Notebook wrote it, every syntax its help taught. */
 const OLD_NOTE = [
   'Field notes',

@@ -10,7 +10,9 @@
  * Built on CodeMirror 6. Everything the page draws is worked out from the editor
  * state alone (`noteDecorations`), so it is tested without a browser.
  */
-import { EditorState, StateEffect, StateField, Compartment, EditorSelection, Prec } from '@codemirror/state';
+import {
+  EditorState, StateEffect, StateField, Compartment, EditorSelection, Facet, Prec, Transaction,
+} from '@codemirror/state';
 import {
   Decoration, EditorView, WidgetType, keymap, placeholder as placeholderText, drawSelection, dropCursor,
 } from '@codemirror/view';
@@ -23,17 +25,22 @@ import { tags } from '@lezer/highlight';
 import { entityReference, markdownHtml } from '../markdown.js';
 import { renderMermaidSvg } from '../mermaid.js';
 import { CALLOUT_LINE, calloutOf } from './callouts.js';
+import { HINT_LINE, INCLUDE_LINE, includeLine } from './look.js';
 import {
   findCoordinates, findReferences, mentionMatches, slashInsert, slashMatches,
 } from './syntax.js';
 
 // -- what the case says about the references ----------------------------------
 
-/** The case the note belongs to and its records, which the chips and pictures are drawn from. */
+/**
+ * The case the note belongs to and its records, which the chips and pictures are
+ * drawn from, and its notes as the home lists them (`notes/index` rows), which a
+ * chapter is drawn from.
+ */
 export const setNoteCase = StateEffect.define();
 
 export const noteCase = StateField.define({
-  create: () => ({ caseId: '', entities: [], byId: new Map(), redirects: {} }),
+  create: () => ({ caseId: '', entities: [], byId: new Map(), redirects: {}, notes: new Map() }),
   update(value, transaction) {
     for (const effect of transaction.effects) {
       if (effect.is(setNoteCase)) {
@@ -43,12 +50,20 @@ export const noteCase = StateField.define({
           entities,
           byId: new Map(entities.map((entity) => [entity.id, entity])),
           redirects: effect.value.redirects ?? {},
+          notes: new Map((effect.value.notes ?? []).map((row) => [row.id, row])),
         };
       }
     }
     return value;
   },
 });
+
+/**
+ * Whether the editor writes a template rather than a note. A template's guidance
+ * is its own text, edited like any line; in a note it is a prompt that typing
+ * replaces.
+ */
+export const templateMode = Facet.define({ combine: (values) => values.some(Boolean) });
 
 /** Whether the editor has focus, which is when the line being edited shows its marks. */
 const setFocused = StateEffect.define();
@@ -202,6 +217,97 @@ class RuleWidget extends WidgetType {
   }
 }
 
+/** Guidance a template left: grey words in place, never printed. */
+class HintWidget extends WidgetType {
+  constructor(text, template) {
+    super();
+    this.text = text;
+    this.template = template;
+  }
+
+  eq(other) {
+    return other.text === this.text && other.template === this.template;
+  }
+
+  toDOM() {
+    const hint = document.createElement('span');
+    hint.className = 'cm-hint';
+    hint.dataset.hint = 'true';
+    hint.textContent = this.text || 'Guidance';
+    hint.title = this.template ? 'Guidance: shown in grey, never printed' : 'Guidance from the template: type over it';
+    return hint;
+  }
+
+  ignoreEvent() {
+    return false;
+  }
+}
+
+/** The note a report includes as a chapter: its number, name and first words. */
+class IncludeWidget extends WidgetType {
+  constructor(id, number, note) {
+    super();
+    this.id = id;
+    this.number = number;
+    this.note = note;
+  }
+
+  eq(other) {
+    return other.id === this.id && other.number === this.number && other.note?.title === this.note?.title
+      && other.note?.excerpt === this.note?.excerpt;
+  }
+
+  toDOM() {
+    const box = document.createElement('div');
+    box.className = `cm-include${this.note ? '' : ' cm-include-missing'}`;
+    box.dataset.include = this.id;
+    box.title = 'Click to edit the line';
+    const head = document.createElement('div');
+    head.className = 'cm-include-head';
+    const number = document.createElement('span');
+    number.className = 'cm-include-number';
+    number.textContent = `Chapter ${this.number}`;
+    const actions = document.createElement('span');
+    actions.className = 'cm-include-actions';
+    if (this.note) actions.append(includeButton('Open', 'cm-include-open', `Open ${this.note.title}`));
+    actions.append(includeButton('Remove', 'cm-include-remove', 'Take this chapter out of the report'));
+    head.append(number, actions);
+    const title = document.createElement('div');
+    title.className = 'cm-include-title';
+    title.textContent = this.note?.title ?? 'A note no longer in the case';
+    box.append(head, title);
+    if (this.note) {
+      const excerpt = document.createElement('div');
+      excerpt.className = 'cm-include-excerpt';
+      excerpt.textContent = this.note.excerpt || 'Nothing written yet.';
+      box.append(excerpt);
+    } else {
+      const said = document.createElement('div');
+      said.className = 'cm-include-excerpt';
+      said.textContent = 'The PDF prints a short line in its place.';
+      box.append(said);
+    }
+    return box;
+  }
+
+  ignoreEvent(event) {
+    return event.type !== 'mousedown';
+  }
+
+  get estimatedHeight() {
+    return 92;
+  }
+}
+
+function includeButton(text, className, title) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  button.textContent = text;
+  button.title = title;
+  return button;
+}
+
 /** A drawn block (a picture, a table, a diagram): pressing it puts the cursor back in its source. */
 class BlockWidget extends WidgetType {
   constructor(kind, source, info) {
@@ -302,6 +408,34 @@ function touches(lines, state, from, to) {
 /** A line holding nothing but one picture: `![…](…){…}` or `[[media:…]]{…}`. */
 const PICTURE_LINE = /^\s*(?:!\[[^\]]*\]\([^)]*\)(?:\{[^}\n]*\})?|\[\[media:[A-Za-z0-9_-]+\|[^\]\n]+\]\](?:\{[^}\n]*\})?)\s*$/;
 
+/** Whether the comment `from`–`to` is one line of guidance (`<!--? … -->`). */
+function hintOn(state, from, to) {
+  const line = state.doc.lineAt(from);
+  return to <= line.to && HINT_LINE.test(line.text);
+}
+
+/** What a chapter line shows: the note as the home lists it, its record else, null when gone. */
+function includedNote(info, id) {
+  const row = info.notes.get(id);
+  if (row) return { title: row.title, excerpt: row.excerpt ?? '' };
+  if (id === 'case') return { title: 'Case notes', excerpt: '' };
+  const entity = resolve(info, id);
+  return entity?.type === 'note' ? { title: entity.label, excerpt: '' } : null;
+}
+
+/** The guidance line at `pos`, outside code, or null. */
+export function hintLineAt(state, pos) {
+  const line = state.doc.lineAt(pos);
+  if (!HINT_LINE.test(line.text)) return null;
+  const tree = ensureSyntaxTree(state, line.to, 50) ?? syntaxTree(state);
+  const start = line.from + /^[ \t]*/.exec(line.text)[0].length;
+  for (let node = tree.resolveInner(start, 1); node; node = node.parent) {
+    if (node.name === 'CommentBlock') return line;
+    if (node.name === 'FencedCode' || node.name === 'CodeBlock') return null;
+  }
+  return null;
+}
+
 /**
  * Everything the page draws for this state, as one set. Exported so the drawing is
  * tested on a state with no view.
@@ -314,6 +448,8 @@ export function noteDecorations(state) {
   const covered = []; // [from, to] of blocks drawn whole; nothing else goes inside them
   const inside = (pos) => covered.some(([from, to]) => pos >= from && pos <= to);
   const code = []; // [from, to] of code, where references and coordinates stay text
+  const template = state.facet(templateMode);
+  let chapters = 0;
 
   const block = (kind, from, to) => {
     const first = state.doc.lineAt(from);
@@ -372,6 +508,13 @@ export function noteDecorations(state) {
         for (let line = state.doc.lineAt(from).number; line <= state.doc.lineAt(to).number; line += 1) {
           ranges.push(lineClass('cm-table-line').range(state.doc.line(line).from));
         }
+        return false;
+      }
+      if (name === 'CommentBlock' && hintOn(state, from, to)) {
+        const line = state.doc.lineAt(from);
+        // a template's guidance is edited as text; a note's stays drawn, and typing replaces it
+        if (template && editing) ranges.push(lineClass('cm-hint-line').range(line.from));
+        else ranges.push(Decoration.replace({ widget: new HintWidget(HINT_LINE.exec(line.text)[1], template) }).range(line.from, line.to));
         return false;
       }
       if (name === 'HTMLBlock' || name === 'CommentBlock') {
@@ -472,13 +615,26 @@ export function noteDecorations(state) {
     },
   });
 
-  // References and coordinates are not Markdown: found line by line, outside code.
+  // References, coordinates and chapters are not Markdown: found line by line, outside code.
   const inCode = (pos) => code.some(([from, to]) => pos >= from && pos < to);
   const chips = [];
+  const chapterLines = [];
   for (let number = 1; number <= state.doc.lines; number += 1) {
     const line = state.doc.line(number);
     if (inside(line.from) || !line.text) continue;
     const editing = lines.has(number);
+    const include = !inCode(line.from) && INCLUDE_LINE.exec(line.text);
+    if (include) {
+      // a chapter is its line, as the PDF reads it: whatever is around it
+      chapters += 1;
+      chapterLines.push(line);
+      if (editing) ranges.push(Decoration.mark({ class: 'cm-ref-source' }).range(line.from, line.to));
+      else {
+        ranges.push(Decoration.replace({ widget: new IncludeWidget(include[1], chapters, includedNote(info, include[1])), block: true })
+          .range(line.from, line.to));
+      }
+      continue;
+    }
     const pictureLine = !editing && PICTURE_LINE.test(line.text) && line.text.includes('[[media:');
     if (pictureLine) {
       covered.push([line.from, line.to]);
@@ -500,10 +656,11 @@ export function noteDecorations(state) {
       ranges.push(Decoration.widget({ widget: new CoordinatesWidget(point.lat, point.lon), side: 1 }).range(point.to));
     }
   }
-  // a chip stands for its whole reference: a mark the parser found inside its label is not drawn
-  const kept = chips.length
-    ? ranges.filter((range) => !chips.some((chip) => range.from >= chip.from && range.to <= chip.to
-      && !(range.from === chip.from && range.to === chip.to)))
+  // a chip stands for its whole reference, and a chapter for its line: a mark the parser found inside is not drawn
+  const whole = [...chips, ...chapterLines];
+  const kept = whole.length
+    ? ranges.filter((range) => !whole.some((item) => range.from >= item.from && range.to <= item.to
+      && !(range.from === item.from && range.to === item.to)))
     : ranges;
   return Decoration.set(kept, true);
 }
@@ -515,7 +672,34 @@ const drawn = StateField.define({
     if (transaction.docChanged || transaction.selection || refocused) return noteDecorations(transaction.state);
     return value;
   },
-  provide: (field) => EditorView.decorations.from(field),
+  provide: (field) => [
+    EditorView.decorations.from(field),
+    // in a note, a line of guidance is one piece: the cursor steps over it and a delete takes it whole
+    EditorView.atomicRanges.of((view) => (view.state.facet(templateMode)
+      ? Decoration.none
+      : view.state.field(field).update({ filter: (_from, _to, value) => value.spec.widget instanceof HintWidget }))),
+  ],
+});
+
+/**
+ * In a note, what is typed on a line of guidance takes its place: the grey words
+ * are a prompt, not text to write after. Enter still opens a line beside it.
+ */
+export const typeOverHints = EditorState.transactionFilter.of((transaction) => {
+  if (!transaction.docChanged || !transaction.isUserEvent('input') || transaction.startState.facet(templateMode)) return transaction;
+  const inserts = [];
+  transaction.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => inserts.push({ fromA, toA, text: inserted.toString() }));
+  if (inserts.length !== 1) return transaction;
+  const [{ fromA, toA, text }] = inserts;
+  if (fromA !== toA || /^\n*$/.test(text)) return transaction;
+  const line = hintLineAt(transaction.startState, fromA);
+  if (!line) return transaction;
+  return {
+    changes: { from: line.from, to: line.to, insert: text },
+    selection: { anchor: line.from + text.length },
+    scrollIntoView: true,
+    annotations: Transaction.userEvent.of(transaction.annotation(Transaction.userEvent) ?? 'input.type'),
+  };
 });
 
 // -- writing ------------------------------------------------------------------
@@ -593,6 +777,43 @@ export function jumpToLine(view, line) {
 }
 
 /**
+ * Put a chapter line where the cursor is, as a paragraph of its own: on the empty
+ * line it is typed on, or after the line holding words.
+ */
+export function insertInclude(view, noteId) {
+  const { state } = view;
+  const line = state.doc.lineAt(state.selection.main.head);
+  const next = line.number < state.doc.lines ? state.doc.line(line.number + 1).text : null;
+  const previous = line.number > 1 ? state.doc.line(line.number - 1).text : '';
+  const words = Boolean(line.text.trim());
+  const from = words ? line.to : line.from;
+  const lead = words ? '\n\n' : previous.trim() ? '\n' : '';
+  // a blank line after it, and the cursor on the line past the chapter
+  const blankAfter = next !== null && !next.trim();
+  const insert = `${lead}${includeLine(noteId)}${blankAfter ? '' : '\n'}`;
+  view.dispatch({
+    changes: { from, to: line.to, insert },
+    selection: { anchor: from + insert.length + (blankAfter ? 1 : 0) },
+    scrollIntoView: true,
+    userEvent: 'input',
+  });
+  view.focus();
+}
+
+/** Take the chapter line at `pos` out, and the blank line it leaves doubled. */
+export function removeInclude(view, pos) {
+  const { state } = view;
+  const line = state.doc.lineAt(pos);
+  if (!INCLUDE_LINE.test(line.text)) return false;
+  let to = line.number < state.doc.lines ? state.doc.line(line.number + 1).from : line.to;
+  const after = line.number < state.doc.lines ? state.doc.line(line.number + 1) : null;
+  const before = line.number > 1 ? state.doc.line(line.number - 1) : null;
+  if (after && !after.text.trim() && (!before || !before.text.trim())) to = after.number < state.doc.lines ? state.doc.line(after.number + 1).from : after.to;
+  view.dispatch({ changes: { from: line.from, to }, selection: { anchor: line.from }, userEvent: 'delete' });
+  return true;
+}
+
+/**
  * Enter on a list item with nothing in it leaves the list, a task as well as a bullet:
  * Markdown's own Enter counts `[ ]` as the item's text and would start another one.
  */
@@ -641,7 +862,7 @@ export function mentionSource(context) {
   };
 }
 
-export function slashSource(handlers) {
+export function slashSource(handlers, { template = false } = {}) {
   return (context) => {
     const typed = context.matchBefore(/(?:^|\s)\/[\w-]{0,20}$/);
     if (!typed) return null;
@@ -654,7 +875,7 @@ export function slashSource(handlers) {
     return {
       from,
       filter: false,
-      options: slashMatches(query).map((command) => ({
+      options: slashMatches(query, { template }).map((command) => ({
         label: command.label,
         detail: command.hint ?? '',
         type: command.action ? 'action' : 'block',
@@ -757,6 +978,33 @@ const look = EditorView.theme({
   '.cm-block-diagram': { background: '#fff', borderRadius: '4px', padding: '10px', margin: '4px var(--note-gutter, 32px)', overflowX: 'auto', color: '#202124' },
   '.cm-block-diagram svg': { maxWidth: '100%', height: 'auto', display: 'block', margin: '0 auto' },
   '.cm-block-failed': { color: 'var(--danger)', background: 'var(--danger-soft)', fontSize: '0.9em' },
+  '.cm-hint': {
+    display: 'inline-block', maxWidth: '100%', boxSizing: 'border-box', verticalAlign: 'top', color: 'var(--text-3)', fontStyle: 'italic',
+    borderLeft: '2px solid var(--border-strong)', paddingLeft: '8px', cursor: 'text',
+  },
+  '.cm-hint-line': { color: 'var(--text-3)', fontStyle: 'italic' },
+  '.cm-include': {
+    margin: '6px var(--note-gutter, 32px)', padding: '8px 12px 10px', border: '1px solid var(--border)', borderLeft: '3px solid var(--accent)',
+    borderRadius: '6px', background: 'var(--bg-2)', cursor: 'text', fontSize: '0.93em', lineHeight: '1.45',
+  },
+  '.cm-include:hover': { borderColor: 'var(--border-strong)', borderLeftColor: 'var(--accent)' },
+  '.cm-include-missing': { borderLeftColor: 'var(--text-3)' },
+  '.cm-include-head': { display: 'flex', alignItems: 'center', gap: '8px' },
+  '.cm-include-number': {
+    flex: '1', color: 'var(--accent)', fontSize: '0.72em', fontWeight: '700', letterSpacing: '0.06em', textTransform: 'uppercase',
+  },
+  '.cm-include-missing .cm-include-number': { color: 'var(--text-3)' },
+  '.cm-include-actions': { display: 'inline-flex', gap: '4px' },
+  '.cm-include-actions button': {
+    border: '1px solid var(--border)', background: 'var(--bg-1)', color: 'var(--text-2)', borderRadius: '4px', padding: '1px 8px',
+    font: 'inherit', fontSize: '0.8em', cursor: 'pointer',
+  },
+  '.cm-include-actions button:hover': { color: 'var(--text-1)', borderColor: 'var(--accent)' },
+  '.cm-include-title': { fontWeight: '650', color: 'var(--text-1)', marginTop: '2px' },
+  '.cm-include-missing .cm-include-title': { color: 'var(--text-3)', textDecoration: 'line-through' },
+  '.cm-include-excerpt': {
+    color: 'var(--text-2)', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical', overflow: 'hidden',
+  },
   '.cm-tooltip.cm-tooltip-autocomplete': {
     background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '6px', boxShadow: 'var(--shadow-2)', overflow: 'hidden',
   },
@@ -772,21 +1020,24 @@ const look = EditorView.theme({
 
 /**
  * The extensions a note editor is made of. `handlers` are the editor's outside:
- * `open(entity)`, `point(lat, lon)`, `picture()`, `upload()`, `image(file)`,
- * `url(url, from, to)`, `media(paths, at)` and `change(text)`.
+ * `open(entity)`, `note(id)`, `point(lat, lon)`, `picture()`, `upload()`,
+ * `include()`, `image(file)`, `url(url, from, to)`, `media(paths, at)` and
+ * `change(text)`. `template` writes a template rather than a note.
  */
-export function noteExtensions({ handlers = {}, placeholder = '', readOnly = false, editable } = {}) {
+export function noteExtensions({ handlers = {}, placeholder = '', readOnly = false, editable, template = false } = {}) {
   return [
     noteCase,
     focused,
+    templateMode.of(template),
     drawn,
+    typeOverHints,
     history(),
     drawSelection(),
     dropCursor(),
     EditorView.lineWrapping,
     markdown({ base: markdownLanguage, addKeymap: true }),
     syntaxHighlighting(highlight),
-    autocompletion({ override: [mentionSource, slashSource(handlers)], icons: false, activateOnTyping: true, closeOnBlur: true }),
+    autocompletion({ override: [mentionSource, slashSource(handlers, { template })], icons: false, activateOnTyping: true, closeOnBlur: true }),
     // above Markdown's own Enter, which continues a list: an open menu takes Enter first
     Prec.highest(keymap.of([{ key: 'Tab', run: acceptCompletion }, ...completionKeymap, { key: 'Enter', run: leaveEmptyItem }])),
     keymap.of([
@@ -827,6 +1078,25 @@ export function noteExtensions({ handlers = {}, placeholder = '', readOnly = fal
         if (box && event.button === 0) {
           event.preventDefault();
           if (!view.state.readOnly) tickTask(view, Number(box.dataset.taskAt));
+          return true;
+        }
+        const chapter = event.target.closest?.('[data-include]');
+        if (chapter && event.button === 0) {
+          event.preventDefault();
+          const at = view.posAtDOM(chapter);
+          if (event.target.closest('.cm-include-open')) {
+            const id = chapter.dataset.include;
+            if (handlers.note) handlers.note(id);
+            else {
+              const entity = resolve(view.state.field(noteCase), id);
+              if (entity) handlers.open?.(entity);
+            }
+          } else if (event.target.closest('.cm-include-remove')) {
+            if (!view.state.readOnly) removeInclude(view, at);
+          } else {
+            view.dispatch({ selection: { anchor: at } });
+            view.focus();
+          }
           return true;
         }
         return false;

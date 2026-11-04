@@ -5620,16 +5620,26 @@ and is always there. Each filed note's card says its folder, its first words, wh
 it changed, its word count, the tasks left and how many records it cites; a folder
 row filters the cards and *Recent* or *Name* orders them. **Find words in the
 notes** looks inside every note on the server and lists each note with the line it
-is first found on; a press opens the note at that line. **Start from** offers ready
-notes (Blank, Geolocation, Investigation log, Source profile, Daily summary) and
-**Your templates**: a press makes the note at once, named after it and numbered when
-the name is taken, with its title selected to retype. **New note** asks a title, a
-folder and what to start from. A card's ⋯ opens it, keeps it beside the tools, opens
-it in its own tab, exports it, or deletes it.
+is first found on; a press opens the note at that line. **Reports** come first: the
+notes that print in a look other than Plain or hold chapters, each card saying its
+style and its chapter count. **Start from** shows every template by its first page,
+drawn from the real PDF when the tile comes into view and kept for the session:
+ready ones (Blank, Geolocation report, Chronolocation, Media verification, Incident
+brief (5W), Source profile, Daily SITREP, Fact-check, Investigation log) and **Your
+templates**. A press makes the note at once in the template's look, named after it
+and numbered when the name is taken, with its title selected to retype. **New note**
+asks a title, a folder and what to start from. A card's ⋯ opens it, keeps it beside
+the tools, opens it in its own tab, exports it, or deletes it.
 
-**A note, written in place.** One page, no preview beside it: the note is drawn as
-it reads while it is typed (CodeMirror 6, `lib/notes/liveMarkdown.js`). A heading is
-set large, emphasis and links are styled, bullets are dots, `- [ ]` is a box to tick,
+**Several at once.** *Select* puts a box on every card; Shift-click picks a run,
+*Select all* the folder shown, Escape leaves. A bar at the foot says how many are
+picked and offers **Export as PDF** (one PDF per note, into the notes destination)
+and **Make a report**, which writes a new note holding one chapter per picked note in
+the order they were picked, in the Report look with a cover and a contents page, and
+opens it beside its pages.
+
+**A note, written in place.** The note is drawn as it reads while it is typed
+(CodeMirror 6, `lib/notes/liveMarkdown.js`). A heading is set large, emphasis and links are styled, bullets are dots, `- [ ]` is a box to tick,
 and the marks come back on the line being edited. A case reference is a chip that
 opens what it names; a picture, a table, a diagram, an aligned block and an HTML
 block are drawn whole and give their source back when pressed. A callout opens a
@@ -5647,12 +5657,45 @@ image says its host is contacted on every open.
 The file stays the Markdown it was: what the old split-pane Notebook wrote opens as it
 was written and is never rewritten for being opened. The header names the note (the
 name is the filename), files it in a folder, says whether it is saved, and holds
-**Beside the tools**, **Open in its own tab**, **PDF**, and a ⋯ with *Keep as
-template*, *Export several as PDF* and *Delete* (*Clear the case notes* for the case's
-page). PDF export writes one server-rendered PDF per note without a print dialog,
-local images and browser-drawn diagrams with it, remote images left out, homonyms
-under stable suffixes, into the shared notes destination (the case's `exports/` by
-default).
+**Look**, **Write | Page**, **Beside the tools**, **Open in its own tab**, **PDF**, and
+a ⋯ with *Keep as template* and *Delete* (*Clear the case notes* for the case's page).
+PDF export writes one server-rendered PDF per note without a print dialog, in the
+note's look, local images and browser-drawn diagrams with it, remote images left out,
+homonyms under stable suffixes, into the shared notes destination (the case's
+`exports/` by default).
+
+**How it prints.** **Look** sets the note's style, kept beside the note (the note
+record's `look`, `notes.case_look` for the case notes) and never in its Markdown:
+
+- **Plain**, with nothing else set, is the document the Notebook always printed,
+  unchanged to the byte.
+- **Report** has a running header, *Page X / Y*, numbered sections in the accent,
+  boxed callouts, striped tables and framed figures.
+- **Brief** sets a dark band with the title and puts the first verdict
+  (`[!confirmed]` or `[!unverified]`) in a large box under it, to fit a page or two.
+- **Journal** opens each day with its date and sets each `### YYYY-MM-DD HH:MM`
+  entry's time in a left gutter on a timeline.
+
+Every style takes A4 or Letter, an accent (the style's own, a recent colour or a
+pasted hex), a TLP marking (FIRST TLP 2.0 colours, top right and in the footer of
+every page), a cover page (subtitle, a picture from the case's media, a day), a
+contents page and numbered headings and figures. PDF bookmarks follow the headings.
+
+**Write | Page** opens the note's pages beside it: the real PDF the server would write
+(`POST /notes/preview`, nothing written to disk), drawn with pdf.js loaded only
+there, redrawn 900 ms after typing stops with the old pages kept until the new ones
+are ready. Diagrams missing from it are drawn in the browser and asked for once
+more. Pressing a page scrolls the note to where it starts. The choice is kept for the
+browser.
+
+**Chapters and guidance.** **/** → *Include a note* writes `[[include:<id>]]` on its
+own line, drawn as a chapter block with its number, title and first words, *Open* and
+*Remove*. In the PDF the included note becomes a chapter under its title, its own
+headings one level down, a new page for each in Report; chapters go two levels deep,
+and a loop or a note no longer in the case prints a short aside instead. A chapter
+counts as a `mentions` edge. A line `<!--? … -->` is guidance: drawn as grey words,
+replaced by what is typed on it, never printed nor counted, and an HTML comment to
+any other Markdown reader.
 
 **One copy, one tab.** The Notebook, the note beside the tools and the To-do share one
 copy of each open note (`lib/notes/noteDoc.svelte.js`), written 700 ms after typing
@@ -5675,9 +5718,14 @@ note** puts the record into the note being written. A note's open tasks show und
 the To-do lists, ticked there without opening it. Go to (`Ctrl+K`) finds words inside
 notes.
 
-**Templates.** *Keep as template* saves a note's text and folder; Settings → Templates
-lists note templates, and Edit opens one in the Notebook with *Done* back to Settings.
-`{today}` and `{now}` are written in when a note starts from one.
+**Templates.** *Keep as template* saves a note's text, folder and look, without its
+cover picture or day. Settings → Templates → **Notebook templates** shows each by its
+first page with its style: *Edit* opens it in the Notebook with **Look** and **Page**
+(drawn without a case: a case picture or record prints as a placeholder) and *Done*
+back to Settings; *Duplicate*, a download as `<name>.azimut-note.json` and *Delete*
+sit beside it; *New template*, *From a ready one* and *Import a file* sit below. In a
+template, **/** offers *Guidance* rather than *Include a note*. `{today}` and `{now}`
+are written in when a note starts from one.
 
 ## Visual language (UI)
 

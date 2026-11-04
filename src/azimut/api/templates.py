@@ -15,20 +15,24 @@ import secrets
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     FiniteFloat,
     StrictBool,
+    SerializerFunctionWrapHandler,
     ValidationError,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
 from .. import config
-from ..engine import mapplates
+from ..engine import mapplates, notelook
+from .notes import MAX_PREVIEW_BODY_BYTES as MAX_PREVIEW_BODY_BYTES
+from .notes import PreviewIn, preview_response
 
 router = APIRouter(prefix="/api", tags=["templates"])
 
@@ -181,10 +185,21 @@ class PostTemplateData(CanonicalModel):
 
 
 class NoteTemplateData(CanonicalModel):
-    """A note to start others from: its Markdown, and the folder new notes are filed in."""
+    """A note to start others from: its Markdown, the folder new notes are filed in,
+    and how they print. A template written before looks existed has none, and the
+    notes made from it print plain, as they always did."""
 
     body: str = Field(default="", max_length=60_000)
     folder: str = Field(default="", max_length=120)
+    look: notelook.TemplateLook | None = None
+
+    @model_serializer(mode="wrap")
+    def _no_look_stays_unwritten(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        # a template saved without a look reads back exactly as one written before looks
+        data = dict(handler(self))
+        if data.get("look") is None:
+            data.pop("look", None)
+        return data
 
 
 class TemplateIn(BaseModel):
@@ -238,6 +253,20 @@ def list_templates() -> dict[str, Any]:
             valid.append({**item, "data": canonical})
         templates[kind] = valid
     return templates
+
+
+@router.post("/templates/note/preview")
+def preview_note_template(body: PreviewIn) -> Response:
+    """A note template laid out as the PDF a note made from it would be, with no case.
+
+    Its references to a case draw as neutral placeholders and its include lines as
+    a line saying a chapter goes there; nothing under any case folder is read.
+    """
+    look = body.look if body.look is not None else notelook.NoteLook()
+    return preview_response(
+        None, title=body.title.strip() or "Untitled", text=body.text, look=look,
+        diagrams=body.diagrams,
+    )
 
 
 @router.post("/templates/{kind}")

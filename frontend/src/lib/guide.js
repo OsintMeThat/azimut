@@ -789,7 +789,7 @@ export const PAGES = {
       {
         anchor: 'notebook.cards',
         title: 'One card per note',
-        text: 'Its first words, what is left to do and what it cites. ⋯ puts it beside the tools or in a tab of its own.',
+        text: 'Its first words, what is left to do and what it cites. Tick cards to export them or make a report of them.',
         opens: {
           shot: 'notebook-note',
           lead: 'Headings, chips and pictures drawn as you type; the marks come back on the line you edit.',
@@ -798,11 +798,11 @@ export const PAGES = {
             { anchor: 'notebook.cite', title: 'Cite', text: '@ and a few letters put in a place, a person or a file as a chip.' },
             { anchor: 'notebook.write', title: 'The page', text: 'Saved as you type. A chip opens what it names, ⌖ shows coordinates on the map.' },
             { anchor: 'notebook.dock', title: 'Beside the tools', text: 'The note stays open on the right as you work on the Map or a video.' },
-            { anchor: 'notebook.pdf', title: 'PDF', text: 'Exports this note. ⋯ exports several, or keeps this one as a template.' },
+            { anchor: 'notebook.pdf', title: 'PDF', text: 'Exports this note as Look sets it out. Page shows it beside the note as you type.' },
           ],
         },
       },
-      { anchor: 'notebook.ready', title: 'Start from', text: 'A geolocation write-up, a log, a source profile, or your own templates.' },
+      { anchor: 'notebook.ready', title: 'Start from', text: 'A geolocation report, a brief, a fact-check, a log or your own templates, each shown by its first page.' },
     ],
     tips: [
       { title: 'Cited in Details', text: 'A place a note cites lists the note and the sentence in its Details, and in the Graph.' },
@@ -810,6 +810,7 @@ export const PAGES = {
       { title: 'Callouts', text: '/confirmed, /unverified, /lead: a coloured block, in the PDF too.' },
       { title: 'Cite in note', text: 'Details puts anything it shows into the note being written.' },
       { title: 'Diagrams', text: 'A mermaid code block becomes a diagram, in the note and in the PDF.' },
+      { title: 'Reports', text: 'A report includes other notes as chapters: tick them on the home, or type / and pick Include a note.' },
       { title: 'Remote images say so', text: 'An image from the web contacts its host each time the note opens, and the note warns you.' },
     ],
   },

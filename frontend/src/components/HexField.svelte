@@ -7,7 +7,7 @@
    */
   import { parseColour } from '../lib/colourCode.js';
 
-  let { value = '', label = 'Colour code', disabled = false, onpick } = $props();
+  let { value = '', label = 'Colour code', disabled = false, placeholder = '', onpick } = $props();
   let text = $state('');
   let wrong = $state(false);
   $effect(() => { text = String(value ?? '').toLowerCase(); wrong = false; });
@@ -34,7 +34,7 @@
   }
 </script>
 
-<input type="text" class="hex" aria-label={label} aria-invalid={wrong} spellcheck="false" autocomplete="off" maxlength="40" {disabled}
+<input type="text" class="hex" aria-label={label} aria-invalid={wrong} spellcheck="false" autocomplete="off" maxlength="40" {disabled} {placeholder}
   title="Type or paste a colour code, such as #d55e00 or rgb(213, 94, 0)" value={text}
   oninput={(event) => { text = event.currentTarget.value; wrong = false; }}
   onpaste={paste} onkeydown={key} onblur={() => take(text)} onfocus={(event) => event.currentTarget.select()} />

@@ -13,6 +13,10 @@ analyst chose for notes — the case's own `exports/` until they pick another on
 Inside the case, a re-export overwrites: that folder is meant to be refreshed in
 one click, not to accumulate `note (2).pdf`. In a folder of the analyst's own it
 never overwrites, because the files there are theirs.
+
+Each note prints in its own look (`engine/notelook.py`), kept beside the note and
+set through `/notes/{id}/look`. The page pane asks `/notes/preview` for the PDF of
+the text being typed: the same renderer, the same bounds, nothing written.
 """
 
 from __future__ import annotations
@@ -20,16 +24,19 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import json
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, NamedTuple
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from .. import errors, layout
 from ..engine import exportdir
 from ..engine import links as link_engine
+from ..engine import notelook
 from ..engine import notes_pdf as pdf_engine
 from ..engine import notelinks, notetext
 from ..engine import pdffonts
@@ -40,7 +47,7 @@ from .cases import get_case
 router = APIRouter(prefix="/api/cases", tags=["notes"])
 
 #: The case's own scratchpad, which is a note without an entity behind it.
-CASE_NOTE = "case"
+CASE_NOTE = notelook.CASE_NOTE
 #: Where the PDFs land, until the case can point somewhere of its own.
 EXPORTS_DIR = "exports"
 
@@ -68,6 +75,21 @@ MAX_READ_NOTES = 2000
 MAX_READ_BYTES = 512 * 1024
 MAX_SEARCH_RESULTS = 50
 
+#: A preview carries one unsaved note and the diagrams drawn for it: the note as a
+#: save bounds it, the pictures as an export does. Read by `server.BulkBodyLimit`.
+MAX_PREVIEW_BODY_BYTES = MAX_PDF_BODY_BYTES
+#: What the preview's headers may carry. A header is not a body, and a page map or a
+#: list of warnings that outgrew this would be cut rather than refused.
+MAX_PAGE_MAP = 2000
+MAX_HEADER_WARNINGS = 20
+MAX_WARNING_CHARS = 300
+MAX_DIAGRAM_HEADER_BYTES = 48 * 1024
+#: One preview at a time in the process: the page pane asks again after every pause in
+#: typing, and two layouts of one long report at once would only make both late. A
+#: request that cannot have the turn in this long is told to try again.
+PREVIEW_WAIT_SECONDS = 30.0
+_preview_turn = threading.Lock()
+
 
 class Notes(BaseModel):
     text: str
@@ -93,6 +115,23 @@ class TaskTick(BaseModel):
 
 class NoteSelection(BaseModel):
     notes: list[str] = Field(min_length=1, max_length=MAX_NOTES)
+
+
+class PreviewIn(BaseModel):
+    """A note as the editor holds it right now, unsaved, and the look to print it in.
+
+    ``text`` is bounded by bytes in the route (the same bound a save has) and the
+    whole body by `server.BulkBodyLimit`, before it is parsed.
+    """
+
+    title: str = Field(default="", max_length=300)
+    text: str = Field(default="", max_length=MAX_NOTE_BODY_BYTES)
+    look: notelook.NoteLook | None = None
+    diagrams: dict[str, str] = Field(default_factory=dict)
+
+
+class NotePreviewIn(PreviewIn):
+    note: str = Field(default=CASE_NOTE, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class ExportIn(NoteSelection):
@@ -139,9 +178,17 @@ def create_note(case_id: str, body: NoteIn) -> dict[str, Any]:
     return note
 
 
-def _notes_on_disk(case: Case) -> Iterator[tuple[str, str, str, Path]]:
-    """Case notes, then every filed note: id, title, folder and file, bounded."""
-    yield CASE_NOTE, "Case notes", "", case.notes_path
+class _Listed(NamedTuple):
+    id: str
+    title: str
+    folder: str
+    file: Path
+    look: notelook.NoteLook | None
+
+
+def _notes_on_disk(case: Case) -> Iterator[_Listed]:
+    """Case notes, then every filed note: id, title, folder, file and look, bounded."""
+    yield _Listed(CASE_NOTE, "Case notes", "", case.notes_path, notelook.stored(case, CASE_NOTE))
     cursor: str | None = None
     read = 0
     while read < MAX_READ_NOTES:
@@ -156,7 +203,8 @@ def _notes_on_disk(case: Case) -> Iterator[tuple[str, str, str, Path]]:
                 continue
             read += 1
             folder = str((entity.get("attrs") or {}).get("folder") or "")
-            yield str(entity["id"]), str(entity.get("label") or "Note"), folder, file
+            look = notelook.stored(case, str(entity["id"]), entity=entity)
+            yield _Listed(str(entity["id"]), str(entity.get("label") or "Note"), folder, file, look)
             if read >= MAX_READ_NOTES:
                 return
         cursor = page.get("next_cursor")
@@ -191,7 +239,7 @@ def notes_index(case_id: str) -> dict[str, Any]:
     """
     case = get_case(case_id)
     items: list[dict[str, Any]] = []
-    for note_id, title, folder, file in _notes_on_disk(case):
+    for note_id, title, folder, file, look in _notes_on_disk(case):
         text = _read_head(file)
         tasks = notetext.tasks(text)
         items.append({
@@ -204,6 +252,9 @@ def notes_index(case_id: str) -> dict[str, Any]:
             "tasks": {"open": sum(not task.done for task in tasks), "done": sum(task.done for task in tasks)},
             "mentions": len(notetext.mentioned_ids(text)),
             "pictures": len(pdf_engine.embedded_entity_ids(text)),
+            # how it prints, null for the plain default, and how many chapters it pulls in
+            "look": look.model_dump(mode="json") if look is not None else None,
+            "includes": len(notetext.included_ids(text)),
         })
     return {"items": items}
 
@@ -217,7 +268,7 @@ def search_notes(case_id: str, q: str = "", limit: int = 20) -> dict[str, Any]:
     bound = max(1, min(limit, MAX_SEARCH_RESULTS))
     items: list[dict[str, Any]] = []
     total = 0
-    for note_id, title, folder, file in _notes_on_disk(case):
+    for note_id, title, folder, file, _ in _notes_on_disk(case):
         text = _read_head(file)
         hit = notetext.find(f"{title}\n{text}", q)
         if hit is None:
@@ -236,7 +287,7 @@ def note_citations(case_id: str, entity_id: str) -> dict[str, Any]:
     """The notes that name ``entity_id``, with the lines they name it in."""
     case = get_case(case_id)
     items: list[dict[str, Any]] = []
-    for note_id, title, folder, file in _notes_on_disk(case):
+    for note_id, title, folder, file, _ in _notes_on_disk(case):
         if note_id == entity_id:
             continue
         lines = notetext.citations(_read_head(file), entity_id)
@@ -251,7 +302,7 @@ def note_tasks(case_id: str) -> dict[str, Any]:
     """The tasks still open in the case's notes, note by note."""
     case = get_case(case_id)
     items: list[dict[str, Any]] = []
-    for note_id, title, folder, file in _notes_on_disk(case):
+    for note_id, title, folder, file, _ in _notes_on_disk(case):
         tasks = notetext.tasks(_read_head(file))
         open_tasks = [task for task in tasks if not task.done]
         if open_tasks:
@@ -304,13 +355,165 @@ def write_note(case_id: str, note_id: str, body: Notes) -> dict[str, str]:
     return {"status": "saved"}
 
 
+@router.get("/{case_id}/notes/{note_id}/look")
+def read_look(case_id: str, note_id: str) -> dict[str, Any]:
+    """How a note prints, every key filled in (the default when it has none)."""
+    case = get_case(case_id)
+    _require_note(case, note_id)
+    return {"look": notelook.effective(case, note_id).model_dump(mode="json")}
+
+
+@router.put("/{case_id}/notes/{note_id}/look")
+def write_look(case_id: str, note_id: str, body: notelook.NoteLook) -> dict[str, Any]:
+    """Keep how a note prints. Writes the entity's attrs or the case settings, never
+    the Markdown, and restates what the note shows: a cover picture is a picture the
+    note shows, as one in its text is."""
+    case = get_case(case_id)
+    _require_note(case, note_id)
+    if body.cover.image:
+        picture = case.get_entity(body.cover.image) or {}
+        kind = (picture.get("attrs") or {}).get("kind")
+        if picture.get("type") not in link_engine.EMBEDDED_TYPES or kind in ("video", "audio"):
+            raise HTTPException(status_code=422, detail="the cover picture must be a picture in this case")
+    notelook.save(case, note_id, body)
+    if note_id != CASE_NOTE:
+        link_engine.sync_embedded(
+            case,
+            note_id,
+            pdf_engine.embedded_entity_ids(_note_source(case, note_id)[1]) + notelook.cover_image_ids(body),
+            by="note",
+        )
+    return {"look": body.model_dump(mode="json")}
+
+
+def _require_note(case: Case, note_id: str) -> None:
+    if note_id == CASE_NOTE:
+        return
+    entity = case.get_entity(note_id)
+    if entity is None or entity.get("type") != "note":
+        raise HTTPException(status_code=404, detail=f"note '{note_id}' not found")
+
+
+@router.post("/{case_id}/notes/preview")
+def preview_note(case_id: str, body: NotePreviewIn) -> Response:
+    """The PDF a note would export as, from the text in the editor, written nowhere.
+
+    The page pane draws these bytes. The look in the body wins over the stored one,
+    so a look being tried prints before it is kept; included notes print as saved.
+    """
+    case = get_case(case_id)
+    _require_note(case, body.note)
+    title = body.title.strip() or _note_title(case, body.note)
+    look = body.look if body.look is not None else notelook.effective(case, body.note)
+    return preview_response(
+        case,
+        title=title,
+        text=body.text,
+        look=look,
+        diagrams=body.diagrams,
+        note_id=body.note,
+        resolve=_resolver(case),
+    )
+
+
+def preview_response(
+    case: Case | None,
+    *,
+    title: str,
+    text: str,
+    look: notelook.NoteLook,
+    diagrams: dict[str, str],
+    note_id: str = "",
+    resolve: pdf_engine.Resolve | None = None,
+) -> Response:
+    """Render a preview under the one-at-a-time turn and answer it as PDF bytes.
+
+    Shared with the template preview (`api/templates.py`), which passes no case.
+    The headers say what the page pane needs beside the pages: where each page
+    starts in the text, which diagrams still need drawing, and what was left out.
+    """
+    if len(text.encode("utf-8")) > MAX_NOTE_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="the note is too large to preview")
+    decoded = _decode_diagrams(diagrams)
+    if not _preview_turn.acquire(timeout=PREVIEW_WAIT_SECONDS):
+        raise HTTPException(status_code=503, detail="another preview is still being laid out")
+    try:
+        rendered = pdf_engine.render(
+            case, title=title or "Untitled", text=text, diagrams=decoded, look=look,
+            note_id=note_id, resolve=resolve,
+        )
+    except pdffonts.FontError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except pdf_engine.NotesPdfError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        _preview_turn.release()
+    return Response(
+        content=rendered.pdf,
+        media_type="application/pdf",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Note-Pages": _ascii_json(rendered.pages[:MAX_PAGE_MAP]),
+            "X-Note-Diagrams": _diagram_header(rendered.diagrams),
+            "X-Note-Warnings": _ascii_json(
+                [warning[:MAX_WARNING_CHARS] for warning in rendered.warnings[:MAX_HEADER_WARNINGS]]
+            ),
+        },
+    )
+
+
+def _ascii_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+
+
+def _diagram_header(pending: list[tuple[str, str]]) -> str:
+    """The fences still to draw, as many as the header holds: the browser draws
+    those, asks again, and is handed the rest then."""
+    kept: list[dict[str, str]] = []
+    size = 2
+    for key, source in pending[:MAX_DIAGRAMS]:
+        item = {"key": key, "source": source}
+        cost = len(_ascii_json(item)) + 1
+        if size + cost > MAX_DIAGRAM_HEADER_BYTES:
+            break
+        kept.append(item)
+        size += cost
+    return _ascii_json(kept)
+
+
+def _note_title(case: Case, note_id: str) -> str:
+    if note_id == CASE_NOTE:
+        return "Case notes"
+    entity = case.get_entity(note_id)
+    return str((entity or {}).get("label") or "Note")
+
+
+def _resolver(case: Case) -> pdf_engine.Resolve:
+    """How a chapter finds the note it prints: as saved, the case notes included."""
+
+    def resolve(note_id: str) -> tuple[str, str] | None:
+        if note_id == CASE_NOTE:
+            return "Case notes", case.read_notes()
+        entity = case.get_entity(note_id)
+        if entity is None or entity.get("type") != "note":
+            return None
+        try:
+            return str(entity.get("label") or "Note"), case.read_note(note_id)
+        except CaseError:
+            return None
+
+    return resolve
+
+
 def _restate(case: Case, note_id: str, text: str) -> None:
     """What a note's body says it shows and points at, as edges.
 
-    ``[[media:…]]`` is the note showing a file, a derivation; ``[[entity:…]]`` is a
-    pointer at a record, a mention (`engine/notelinks.py`).
+    ``[[media:…]]`` is the note showing a file, a derivation, and so is the picture on
+    its cover; ``[[entity:…]]`` and ``[[include:…]]`` are pointers, mentions
+    (`engine/notelinks.py`).
     """
-    link_engine.sync_embedded(case, note_id, pdf_engine.embedded_entity_ids(text), by="note")
+    shown = pdf_engine.embedded_entity_ids(text) + notelook.cover_image_ids(notelook.stored(case, note_id))
+    link_engine.sync_embedded(case, note_id, shown, by="note")
     _sync_mentions(case, note_id, text)
 
 
@@ -374,9 +577,10 @@ def export_diagrams(case_id: str, body: NoteSelection) -> dict[str, Any]:
     """
     case = get_case(case_id)
     fences: dict[str, str] = {}
+    resolve = _resolver(case)
     for note_id in dict.fromkeys(body.notes):
         _, text = _note_source(case, note_id)
-        for source in pdf_engine.mermaid_sources(text):
+        for source in pdf_engine.mermaid_sources(text, resolve=resolve, note_id=note_id):
             fences.setdefault(pdf_engine.diagram_key(source), source)
     pending = list(fences.items())[:MAX_DIAGRAMS]
     return {"diagrams": [{"key": key, "source": source} for key, source in pending]}
@@ -401,9 +605,13 @@ def export_pdf(case_id: str, body: ExportIn) -> dict[str, Any]:
 
     written: list[dict[str, str]] = []
     warnings: list[str] = []
+    resolve = _resolver(case)
     for note_id, title, text in selected:
         try:
-            rendered = pdf_engine.render(case, title=title, text=text, diagrams=diagrams)
+            rendered = pdf_engine.render(
+                case, title=title, text=text, diagrams=diagrams,
+                look=notelook.stored(case, note_id), note_id=note_id, resolve=resolve,
+            )
         except pdffonts.FontError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         except pdf_engine.NotesPdfError as exc:

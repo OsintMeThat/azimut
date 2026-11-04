@@ -1,7 +1,9 @@
 """What a note's body points at, kept as ``mentions`` edges.
 
 ``[[entity:…]]`` in a note is a pointer at a record, a mention (ONTOLOGY §3).
-Every save restates them (`api/notes.py`), which is what puts the note in that
+So is ``[[include:…]]``: the note prints another note as a chapter, read live
+at print time, so it refers to it rather than being made from it. Every save
+restates them (`api/notes.py`), which is what puts the note in that
 record's Details and beside it in the Graph. The mentions are the body's own
 (``own_only``): one stated by hand in Details is a separate claim the text
 cannot take back.
@@ -36,7 +38,8 @@ def sync_mentions(case: "Case", note_id: str, text: str) -> None:
     if holder is None:
         return
     wanted: list[str] = []
-    for entity_id in notetext.mentioned_ids(text):
+    named = notetext.mentioned_ids(text) + notetext.included_ids(text)
+    for entity_id in dict.fromkeys(named):
         try:
             link_engine.check_relation_target(case, holder, entity_id, link_engine.MENTIONS)
         except CaseError:
@@ -56,7 +59,7 @@ def restate_once(case: "Case") -> int:
         for entity in page["items"]:
             try:
                 text = case.read_note(str(entity["id"]))
-                if "[[entity:" in text:
+                if "[[entity:" in text or "[[include:" in text:
                     sync_mentions(case, str(entity["id"]), text)
             except CaseError:
                 continue

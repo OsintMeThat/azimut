@@ -17,6 +17,16 @@ import unicodedata
 from dataclasses import dataclass
 
 ENTITY_REF = re.compile(r"\[\[entity:([A-Za-z0-9_-]+)\|([^\]]+)\]\]")
+#: A template's guidance: a line that is only `<!--? … -->`. Shown by the editor
+#: as grey text in place and replaced by what the analyst types; never printed,
+#: counted, searched or excerpted. Any other renderer reads an HTML comment.
+HINT = re.compile(r"^[ \t]*<!--\?(?:(?!-->).)*-->[ \t\r]*$")
+#: The same guidance written inside a line, which nothing prints or counts either.
+INLINE_HINT = re.compile(r"<!--\?.*?-->")
+#: A chapter: a line that is only `[[include:<note id>]]`, the note printed in
+#: its place (`engine/notes_pdf.py`). `case` names the case notes. Any other
+#: renderer shows the line as text.
+INCLUDE = re.compile(r"^\[\[include:([A-Za-z0-9_-]+)\]\][ \t\r]*$")
 MEDIA_REF = re.compile(r"\[\[media:([A-Za-z0-9_-]+)\|([^\]]+)\]\](?:\{([^}\n]+)\})?")
 
 #: A list item that is a task: `- [ ] text`, `* [x] text`, `1. [ ] text`.
@@ -59,20 +69,56 @@ def mentioned_ids(text: str) -> list[str]:
 
 
 def _prose_lines(text: str) -> list[tuple[int, str]]:
-    """Each line outside a fenced block, with its index. A diagram is not prose."""
+    """Each line outside a fenced block, with its index. A diagram is not prose,
+    and neither is a template's guidance nor the line that includes a chapter."""
     lines: list[tuple[int, str]] = []
     fenced = False
     for index, line in enumerate((text or "").splitlines()):
         if FENCE.match(line):
             fenced = not fenced
             continue
-        if not fenced:
+        if not fenced and not HINT.match(line) and not INCLUDE.match(line):
             lines.append((index, line))
     return lines
 
 
+def included_ids(text: str) -> list[str]:
+    """The notes a note prints as chapters, in order, each line counted.
+
+    Outside fences only: an include written inside a code block is an example of
+    the syntax, not a chapter.
+    """
+    found: list[str] = []
+    fenced = False
+    for line in (text or "").splitlines():
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        match = None if fenced else INCLUDE.match(line)
+        if match:
+            found.append(match.group(1))
+    return found
+
+
+def without_hints(text: str) -> str:
+    """The note with each guidance line emptied, outside fences, lines kept in place.
+
+    Emptied rather than removed, so a line number read from what is left is still
+    a line number in the note.
+    """
+    rows = (text or "").split("\n")
+    fenced = False
+    for index, line in enumerate(rows):
+        if FENCE.match(line):
+            fenced = not fenced
+        elif not fenced and HINT.match(line):
+            rows[index] = ""
+    return "\n".join(rows)
+
+
 def plain_line(line: str) -> str:
     """One Markdown line as a reader would say it: references by name, no marks."""
+    line = INLINE_HINT.sub("", line)
     line = MEDIA_REF.sub(lambda match: match.group(2), line)
     line = ENTITY_REF.sub(lambda match: match.group(2), line)
     line = IMAGE.sub(lambda match: match.group(1), line)

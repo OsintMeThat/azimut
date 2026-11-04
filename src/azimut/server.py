@@ -68,6 +68,7 @@ class BulkBodyLimit:
     ANY = "..."
     ROUTES: tuple[tuple[str, tuple[str, ...], str, str], ...] = (
         ("POST", ("notes", "pdf"), "notes", "MAX_PDF_BODY_BYTES"),
+        ("POST", ("notes", "preview"), "notes", "MAX_PREVIEW_BODY_BYTES"),
         # The note itself, on the three roads that write one. Declared after `notes/pdf`
         # so the export keeps its own, larger number.
         ("POST", ("notes",), "notes", "MAX_NOTE_BODY_BYTES"),
@@ -94,6 +95,12 @@ class BulkBodyLimit:
         ("PUT", ("sheets", "*", ANY), "sheets", "MAX_SHEET_BODY_BYTES"),
     )
 
+    #: The same, for the few app-wide routes outside a case: the tail is what follows
+    #: `/api/`. A template's preview carries a whole note and its diagrams.
+    APP_ROUTES: tuple[tuple[str, tuple[str, ...], str, str], ...] = (
+        ("POST", ("templates", "note", "preview"), "templates", "MAX_PREVIEW_BODY_BYTES"),
+    )
+
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
@@ -109,10 +116,15 @@ class BulkBodyLimit:
     def _limit(cls, scope: Scope) -> int | None:
         method = str(scope.get("method", ""))
         parts = str(scope.get("path", "")).strip("/").split("/")
-        if len(parts) < 4 or parts[0] != "api" or parts[1] != "cases":
+        if len(parts) < 2 or parts[0] != "api":
             return None
-        tail = tuple(parts[3:])
-        for want_method, route, module_name, attribute in cls.ROUTES:
+        if parts[1] == "cases":
+            if len(parts) < 4:
+                return None
+            tail, routes = tuple(parts[3:]), cls.ROUTES
+        else:
+            tail, routes = tuple(parts[1:]), cls.APP_ROUTES
+        for want_method, route, module_name, attribute in routes:
             if method != want_method or not cls._matches(tail, route):
                 continue
             # Imported lazily so each route owns its limit and a test can lower it
