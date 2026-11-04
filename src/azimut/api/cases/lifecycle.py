@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ... import workspace
+from ...engine import notelinks
 from ...engine import reveal as reveal_engine
 from ...workspace import Case, CaseError
 from .common import get_case
@@ -103,6 +104,8 @@ def create_scratch() -> dict[str, Any]:
 @router.get("/{case_id}")
 def read_case(case_id: str) -> dict[str, Any]:
     case = get_case(case_id)
+    # notes written before a save restated their citations get them now, once
+    notelinks.restate_once(case)
     return {"id": case.id, "scratch": case.is_scratch, **case.overview()}
 
 @router.post("/{case_id}/promote")

@@ -1783,7 +1783,7 @@
    "inspect-session": 1,
    "media": 20,
    "network": 1,
-   "note": 2,
+   "note": 3,
    "organization": 3,
    "person": 4,
    "place": 10,
@@ -1791,7 +1791,7 @@
    "proof": 4,
    "sheet": 3,
    "structure": 4,
-   "vessel": 6
+   "vessel": 7
   },
   "total": 48,
   "unlinked": 11

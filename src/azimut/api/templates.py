@@ -180,6 +180,13 @@ class PostTemplateData(CanonicalModel):
         return body if body.strip() else DEFAULT_POST_BODY
 
 
+class NoteTemplateData(CanonicalModel):
+    """A note to start others from: its Markdown, and the folder new notes are filed in."""
+
+    body: str = Field(default="", max_length=60_000)
+    folder: str = Field(default="", max_length=120)
+
+
 class TemplateIn(BaseModel):
     # None → create a new preset; an existing id → update it in place
     id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
@@ -203,7 +210,7 @@ def _require_kind(kind: str) -> None:
 
 def _canonical_data(kind: str, data: dict[str, Any]) -> dict[str, Any]:
     models: dict[str, type[BaseModel]] = {"proof": ProofTemplateData, "post": PostTemplateData,
-                                          "map": mapplates.TemplateData}
+                                          "map": mapplates.TemplateData, "note": NoteTemplateData}
     model = models[kind]
     try:
         return model.model_validate(data).model_dump(mode="json")

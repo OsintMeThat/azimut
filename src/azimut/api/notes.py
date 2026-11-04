@@ -20,7 +20,9 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
-from typing import Any
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterator
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -29,6 +31,7 @@ from .. import errors, layout
 from ..engine import exportdir
 from ..engine import links as link_engine
 from ..engine import notes_pdf as pdf_engine
+from ..engine import notelinks, notetext
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
 from ..workspace import Case, CaseError
@@ -58,6 +61,13 @@ MAX_PDF_BODY_BYTES = 24_000_000
 #: the body is text and nothing else.
 MAX_NOTE_BODY_BYTES = 8 * 1024 * 1024
 
+#: How many notes the home, the search, the citations and the tasks read at most,
+#: and how much of each. A case's notes are typed by a person, so these are far
+#: past any real case and still a bound on one request.
+MAX_READ_NOTES = 2000
+MAX_READ_BYTES = 512 * 1024
+MAX_SEARCH_RESULTS = 50
+
 
 class Notes(BaseModel):
     text: str
@@ -73,6 +83,12 @@ class NoteIn(BaseModel):
     #: is traversable from either end and deleting a source scars the note instead of
     #: leaving a dead image link nothing accounts for.
     sources: list[str] = Field(default_factory=list, max_length=200)
+
+
+class TaskTick(BaseModel):
+    line: int = Field(ge=0, le=1_000_000)
+    text: str = Field(max_length=4000)
+    done: bool
 
 
 class NoteSelection(BaseModel):
@@ -116,7 +132,149 @@ def create_note(case_id: str, body: NoteIn) -> dict[str, Any]:
     note = case.create_note(body.title.strip(), body.folder.strip(), body.content)
     if body.sources:
         link_engine.sync(case, note["id"], link_engine.DERIVED_FROM, body.sources, by="note")
+    # a note started from a template may already point at records; what it shows is
+    # left to `sources` here, which a report states in full
+    if body.content:
+        _sync_mentions(case, note["id"], body.content)
     return note
+
+
+def _notes_on_disk(case: Case) -> Iterator[tuple[str, str, str, Path]]:
+    """Case notes, then every filed note: id, title, folder and file, bounded."""
+    yield CASE_NOTE, "Case notes", "", case.notes_path
+    cursor: str | None = None
+    read = 0
+    while read < MAX_READ_NOTES:
+        page = case.page_entities(types=["note"], limit=500, cursor=cursor)
+        for entity in page["items"]:
+            path = (entity.get("attrs") or {}).get("path")
+            if not isinstance(path, str):
+                continue
+            try:
+                file = case.resolve_inside(path)
+            except CaseError:
+                continue
+            read += 1
+            folder = str((entity.get("attrs") or {}).get("folder") or "")
+            yield str(entity["id"]), str(entity.get("label") or "Note"), folder, file
+            if read >= MAX_READ_NOTES:
+                return
+        cursor = page.get("next_cursor")
+        if not cursor:
+            return
+
+
+def _read_head(file: Path) -> str:
+    """A note's text, up to the bound one listing reads of it."""
+    try:
+        with file.open("rb") as handle:
+            return handle.read(MAX_READ_BYTES).decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _modified(file: Path) -> str | None:
+    try:
+        stamp = file.stat().st_mtime
+    except OSError:
+        return None
+    return datetime.fromtimestamp(stamp, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@router.get("/{case_id}/notes/index")
+def notes_index(case_id: str) -> dict[str, Any]:
+    """Every note as its card on the Notebook's home says it.
+
+    Case notes come first and are always there, written or not. Each row carries
+    what the card shows: the first words, how many words, the tasks left, what it
+    cites, and when its file last changed.
+    """
+    case = get_case(case_id)
+    items: list[dict[str, Any]] = []
+    for note_id, title, folder, file in _notes_on_disk(case):
+        text = _read_head(file)
+        tasks = notetext.tasks(text)
+        items.append({
+            "id": note_id,
+            "title": title,
+            "folder": folder,
+            "updated_at": _modified(file),
+            "excerpt": notetext.excerpt(text, title),
+            "words": notetext.word_count(text),
+            "tasks": {"open": sum(not task.done for task in tasks), "done": sum(task.done for task in tasks)},
+            "mentions": len(notetext.mentioned_ids(text)),
+            "pictures": len(pdf_engine.embedded_entity_ids(text)),
+        })
+    return {"items": items}
+
+
+@router.get("/{case_id}/notes/search")
+def search_notes(case_id: str, q: str = "", limit: int = 20) -> dict[str, Any]:
+    """The notes holding every word of ``q``, each with the line it is first found on."""
+    case = get_case(case_id)
+    if not q.strip() or len(q) > 200:
+        return {"items": [], "total": 0}
+    bound = max(1, min(limit, MAX_SEARCH_RESULTS))
+    items: list[dict[str, Any]] = []
+    total = 0
+    for note_id, title, folder, file in _notes_on_disk(case):
+        text = _read_head(file)
+        hit = notetext.find(f"{title}\n{text}", q)
+        if hit is None:
+            continue
+        total += 1
+        if len(items) < bound:
+            # the title was read as line 0, so the note's own lines are one further down
+            line, snippet = hit
+            items.append({"id": note_id, "title": title, "folder": folder,
+                          "line": max(0, line - 1), "snippet": snippet})
+    return {"items": items, "total": total}
+
+
+@router.get("/{case_id}/notes/citations/{entity_id}")
+def note_citations(case_id: str, entity_id: str) -> dict[str, Any]:
+    """The notes that name ``entity_id``, with the lines they name it in."""
+    case = get_case(case_id)
+    items: list[dict[str, Any]] = []
+    for note_id, title, folder, file in _notes_on_disk(case):
+        if note_id == entity_id:
+            continue
+        lines = notetext.citations(_read_head(file), entity_id)
+        if lines:
+            items.append({"id": note_id, "title": title, "folder": folder,
+                          "lines": [{"line": line, "text": said} for line, said in lines[:5]]})
+    return {"items": items}
+
+
+@router.get("/{case_id}/notes/tasks")
+def note_tasks(case_id: str) -> dict[str, Any]:
+    """The tasks still open in the case's notes, note by note."""
+    case = get_case(case_id)
+    items: list[dict[str, Any]] = []
+    for note_id, title, folder, file in _notes_on_disk(case):
+        tasks = notetext.tasks(_read_head(file))
+        open_tasks = [task for task in tasks if not task.done]
+        if open_tasks:
+            items.append({"id": note_id, "title": title, "folder": folder,
+                          "done": len(tasks) - len(open_tasks),
+                          "tasks": [{"line": task.line, "text": task.text} for task in open_tasks[:50]]})
+    return {"items": items}
+
+
+@router.post("/{case_id}/notes/{note_id}/task")
+def tick_task(case_id: str, note_id: str, body: TaskTick) -> dict[str, str]:
+    """Tick or untick one task of a note, from outside the editor."""
+    case = get_case(case_id)
+    _, text = _note_source(case, note_id)
+    try:
+        changed = notetext.set_task(text, body.line, body.done, body.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if note_id == CASE_NOTE:
+        case.write_notes(changed)
+    else:
+        case.write_note(note_id, changed)
+    return {"text": changed}
 
 
 @router.get("/{case_id}/notes/{note_id}")
@@ -142,10 +300,22 @@ def write_note(case_id: str, note_id: str, body: Notes) -> dict[str, str]:
         case.write_note(note_id, body.text)
     except CaseError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    link_engine.sync_embedded(
-        case, note_id, pdf_engine.embedded_entity_ids(body.text), by="note"
-    )
+    _restate(case, note_id, body.text)
     return {"status": "saved"}
+
+
+def _restate(case: Case, note_id: str, text: str) -> None:
+    """What a note's body says it shows and points at, as edges.
+
+    ``[[media:…]]`` is the note showing a file, a derivation; ``[[entity:…]]`` is a
+    pointer at a record, a mention (`engine/notelinks.py`).
+    """
+    link_engine.sync_embedded(case, note_id, pdf_engine.embedded_entity_ids(text), by="note")
+    _sync_mentions(case, note_id, text)
+
+
+def _sync_mentions(case: Case, note_id: str, text: str) -> None:
+    notelinks.sync_mentions(case, note_id, text)
 
 
 def _decode_diagrams(encoded: dict[str, str]) -> dict[str, bytes]:

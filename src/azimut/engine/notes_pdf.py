@@ -47,6 +47,7 @@ from PIL import Image as PILImage
 from PIL import UnidentifiedImageError
 
 from . import pdffonts
+from .notetext import CALLOUT, ENTITY_REF, MEDIA_REF
 
 if TYPE_CHECKING:
     from ..workspace import Case
@@ -91,8 +92,6 @@ MAX_TABLE_COLUMNS = 12
 BULLET_WIDTH = 5.5
 
 MERMAID_INFO = re.compile(r"^\s*mermaid\b")
-ENTITY_REF = re.compile(r"\[\[entity:([A-Za-z0-9_-]+)\|([^\]]+)\]\]")
-MEDIA_REF = re.compile(r"\[\[media:([A-Za-z0-9_-]+)\|([^\]]+)\]\](?:\{([^}\n]+)\})?")
 IMAGE_ATTRS = re.compile(r"!\[([^\]]*)\]\((\S+?)(?:\s+[\"']([^\"']*)[\"'])?\)\s*\{([^}\n]+)\}")
 ALIGNMENT_BLOCK = re.compile(r"^:::[ \t]*(left|center|right)[ \t]*\n(.*?)^:::[ \t]*$", re.S | re.M)
 ATTR_PARAM = "__azimut_attrs"
@@ -101,6 +100,15 @@ WIDTH_PERCENT = re.compile(r"^(?:[1-9]\d?(?:\.\d+)?|100(?:\.0+)?)%$")
 WIDTH_PIXELS = re.compile(r"^(?:[2-9]\d|[1-9]\d{2}|1[0-5]\d{2}|1600)px$")
 
 ALIGNMENTS = {"left": Align.L, "center": Align.C, "right": Align.R}
+
+#: The callouts a quote can open with, as `> [!confirmed]`, their label and colour.
+CALLOUTS: dict[str, tuple[str, tuple[int, int, int]]] = {
+    "confirmed": ("Confirmed", (46, 125, 50)),
+    "unverified": ("Unverified", (189, 122, 37)),
+    "lead": ("Lead", (30, 100, 170)),
+    "note": ("Note", (119, 119, 119)),
+    "warning": ("Warning", (178, 52, 40)),
+}
 
 
 def embedded_entity_ids(text: str) -> list[str]:
@@ -487,12 +495,18 @@ class _Builder:
         pdf = self.pdf
         top = pdf.get_y()
         page = pdf.page
+        callout = _take_callout(tokens, index)
         with self._indent(5.0):
+            if callout:
+                pdf.set_font(pdffonts.SANS, "B", 8.0)
+                pdf.set_text_color(*callout[1])
+                pdf.cell(text=callout[0].upper(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.ln(0.8)
             _, index = self._walk(tokens, index + 1, align, stop="blockquote_close")
         # Only bar the part on this page: a quote that split has a second half
         # whose top is nowhere near where it started.
         if pdf.page == page:
-            pdf.set_draw_color(*ACCENT)
+            pdf.set_draw_color(*(callout[1] if callout else ACCENT))
             pdf.set_line_width(0.7)
             pdf.line(MARGIN_SIDE + 0.4, top, MARGIN_SIDE + 0.4, pdf.get_y() - GAP)
         return index
@@ -874,6 +888,29 @@ class _Indent:
     def __exit__(self, *_: Any) -> None:
         self.pdf.set_left_margin(self.pdf.l_margin - self.amount)
         self.pdf.set_x(self.pdf.l_margin)
+
+
+def _take_callout(tokens: list[Token], index: int) -> tuple[str, tuple[int, int, int]] | None:
+    """A quote opening with `[!kind]`: its label and colour, the marker taken out of its text.
+
+    The Notebook draws the same five kinds (`lib/notes/callouts.js`). An unknown kind
+    stays a plain quote with its marker written, as GitHub leaves it.
+    """
+    if index + 2 >= len(tokens) or tokens[index + 1].type != "paragraph_open":
+        return None
+    inline = tokens[index + 2]
+    match = CALLOUT.match(f">{inline.content}")
+    kind = CALLOUTS.get(match.group(2).lower()) if match else None
+    if match is None or kind is None:
+        return None
+    marker = match.group(0)[1:]
+    inline.content = inline.content[len(marker):]
+    children = inline.children or []
+    if children and children[0].type == "text" and children[0].content.startswith(marker.rstrip()):
+        children[0].content = children[0].content[len(marker.rstrip()):].lstrip()
+        if not children[0].content and len(children) > 1 and children[1].type == "softbreak":
+            del children[:2]
+    return kind
 
 
 def _skip_repeated_title(tokens: list[Token], title: str) -> int:
