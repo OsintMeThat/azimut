@@ -50,6 +50,7 @@
   import MoveDialog from './components/MoveDialog.svelte';
   import CommandPalette from './components/CommandPalette.svelte';
   import GuideDialog from './components/GuideDialog.svelte';
+  import SupportDialog from './components/SupportDialog.svelte';
   import Onboarding from './components/Onboarding.svelte';
   import { closedThisStart, onStart } from './lib/onboarding.js';
   import CaseChangeGuard from './components/CaseChangeGuard.svelte';
@@ -242,6 +243,7 @@
   }
 
   let paletteOpen = $state(false);
+  let supportOpen = $state(false);
 
   // Tools mount lazily on first visit, then stay mounted (hidden via CSS) so
   // unsaved editor state — a half-composed proof, a collage in progress —
@@ -481,7 +483,15 @@
         <span>{CASE_WORKSPACE.label}</span>
       </button>
       <button
-        class="rail-btn theme-toggle"
+        class="rail-btn support-rail"
+        onclick={() => (supportOpen = true)}
+        title="Support & feedback"
+      >
+        <Icon name="heart" size={19} />
+        <span>Support</span>
+      </button>
+      <button
+        class="rail-btn"
         onclick={toggleTheme}
         title={uiState.theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
       >
@@ -549,6 +559,9 @@
 <CommandPalette bind:open={paletteOpen} tools={ALL_TOOLS} />
 {#if uiState.guide}
   <GuideDialog at={uiState.guide.at} onclose={() => (uiState.guide = null)} />
+{/if}
+{#if supportOpen}
+  <SupportDialog onclose={() => (supportOpen = false)} />
 {/if}
 <CaseChangeGuard />
 <Toasts />
@@ -639,6 +652,9 @@
     padding: 4px 0;
     border-right: 1px solid var(--border);
     background: var(--bg-1);
+    /* a window shorter than its entries still reaches the last of them */
+    overflow-y: auto;
+    scrollbar-width: none;
   }
   /* flat, full-bleed segments — active state is the edge bar, not a card */
   .rail-btn {
@@ -668,7 +684,7 @@
     background: var(--border-strong);
   }
   /* pinned to the foot of the rail, away from the workspace switches */
-  .theme-toggle {
+  .support-rail {
     margin-top: auto;
   }
   .canvas {

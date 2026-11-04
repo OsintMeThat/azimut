@@ -34,6 +34,23 @@ function show(start, { anchor = null, hasCases = false } = {}) {
 }
 
 const button = (name) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === name);
+
+describe('the tip line', () => {
+  it('waits for the last page of What’s new', () => {
+    show({ kind: 'news', pages: NEWS });
+    expect(document.querySelector('.tip')).toBeNull();
+    button('Next').click();
+    flushSync();
+    const tip = document.querySelector('.tip a');
+    expect(tip.getAttribute('target')).toBe('_blank');
+    expect(tip.getAttribute('rel')).toBe('noreferrer');
+  });
+
+  it('stays out of the tour a newcomer takes', () => {
+    show({ kind: 'tour', step: 3 });
+    expect(document.querySelector('.tip')).toBeNull();
+  });
+});
 const press = (name) => {
   button(name).click();
   flushSync();

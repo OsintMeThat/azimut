@@ -108,6 +108,7 @@
     // Add event: a point on the Timeline's own line, with the plus above it
     eventAdd: 'M3 18h6.5m5 0H21M12 15.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5ZM12 3.5v7M8.5 7h7',
     external: 'M14 4h6v6m0-6L10 14M9 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3',
+    heart: 'M12 20.5S3.5 15.6 3.5 9.4A4.4 4.4 0 0 1 12 7.8a4.4 4.4 0 0 1 8.5 1.6c0 6.2-8.5 11.1-8.5 11.1Z',
     grip: 'M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01',
     // One column of `grip`'s dots: the settings of the thing beside it, rather than
     // a handle to drag it. A chevron here read as "sort", which is the button next to

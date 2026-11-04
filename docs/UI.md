@@ -26,6 +26,13 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | **Map** | Satellite, Compare, Detect, Coords & Sky | Event layers, Ground Imagery, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
 
+**Support sits at the foot of the rail, above the theme switch, and is not a workspace.**
+It opens one small dialog: a tip on Ko-fi, a form to vote or suggest an idea, and a
+problem report that leads to Settings → System. A block stays hidden until its link
+exists in `lib/support.js`, and a release refuses a stand-in link. The tip also has a
+quiet link in Home's footer and one line on the last page of What's new. Nothing reaches
+the network before a press, and there is no setting, reminder, counter or donor feature.
+
 **Case sits on the rail, under the four stages and a rule apart from them.** The
 stages read in the order an investigation runs, and the case is not one of them: it
 is what every stage files into. Kept in the topbar beside the case switcher, it was a

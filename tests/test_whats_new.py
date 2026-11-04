@@ -39,6 +39,16 @@ def test_a_release_ships_no_draft_whats_new():
     )
 
 
+@pytest.mark.skipif(not os.environ.get("AZIMUT_RELEASE"), reason="only a release refuses a stand-in link")
+def test_a_release_ships_no_stand_in_support_link():
+    """A stand-in leads nowhere: fine while the button is being made, not in anyone's hands."""
+    support = WHATS_NEW.with_name("support.js").read_text(encoding="utf-8")
+    links = [line for line in support.splitlines() if line.startswith("export const")]
+    assert links and not [line for line in links if ".invalid" in line], (
+        "frontend/src/lib/support.js still holds a stand-in link: set the real one, or leave it empty"
+    )
+
+
 @pytest.mark.skipif(not os.environ.get("AZIMUT_RELEASE"), reason="only a release refuses a stale README")
 def test_a_release_ships_a_readme_saying_what_is_new_in_it():
     """PyPI freezes the README at the tag, so a stale one stays on that version's page."""

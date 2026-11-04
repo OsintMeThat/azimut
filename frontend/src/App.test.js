@@ -7,15 +7,17 @@ const source = readFileSync(new URL('./App.svelte', import.meta.url), 'utf8');
 const markup = source.slice(source.indexOf('</script>'));
 
 describe('the case on the rail', () => {
-  it('sits under the four stages, a rule between them, with the theme at the foot', () => {
+  it('sits under the four stages, a rule between them, with Support and the theme at the foot', () => {
     const stages = markup.indexOf('{/each}', markup.indexOf('{#each WORKSPACES as ws (ws.id)}'));
     const rule = markup.indexOf('<span class="rail-rule"');
     const caseButton = markup.indexOf('onclick={() => openWorkspace(CASE_WORKSPACE)}');
-    const theme = markup.indexOf('class="rail-btn theme-toggle"');
+    const support = markup.indexOf('class="rail-btn support-rail"');
+    const theme = markup.indexOf('onclick={toggleTheme}');
     expect(stages).toBeGreaterThan(-1);
     expect(rule).toBeGreaterThan(stages);
     expect(caseButton).toBeGreaterThan(rule);
-    expect(theme).toBeGreaterThan(caseButton);
+    expect(support).toBeGreaterThan(caseButton);
+    expect(theme).toBeGreaterThan(support);
     expect(markup).toContain('title="The case: its Timeline, Board, Graph and Sheet"');
   });
 

@@ -22,6 +22,7 @@
   import { entityFamily, entityLabel, familyTitle } from '../lib/entityTypes.svelte.js';
   import { entityIcon, entityKindLabel } from '../lib/entityIcon.js';
   import { fileUrl } from '../lib/fileUrl.js';
+  import { KOFI_URL } from '../lib/support.js';
   import { markdownHtml } from '../lib/markdown.js';
   import { openEntity, openGuide, openTour, openWhatsNew } from '../lib/navigate.js';
   import { newsOf } from '../lib/onboarding.js';
@@ -373,6 +374,9 @@
           <button class="aside" onclick={() => openGuide('start')}>Read the guide</button>
           {#if hasNews}
             <button class="aside" onclick={openWhatsNew}>What's new in {appInfo.version}</button>
+          {/if}
+          {#if KOFI_URL}
+            <a class="aside" href={KOFI_URL} target="_blank" rel="noreferrer">Support Azimut on Ko-fi</a>
           {/if}
         </footer>
       {:else}

@@ -29,6 +29,7 @@
   import { portal } from '../lib/fullscreen.js';
   import { isTopOverlay, joinOverlays } from '../lib/overlayStack.js';
   import { shotOf } from '../lib/guide.js';
+  import { KOFI_URL } from '../lib/support.js';
   import { FIND_BETA, FIND_GUIDE, TOUR, closeForThisStart, newsOf } from '../lib/onboarding.js';
   // filmed on the app's own globe by guide/hero.mjs: the whole Earth, then Yosemite Valley
   import film from '../assets/welcome/hero.webm';
@@ -329,6 +330,11 @@
                 {/if}
               </p>
             {/if}
+            {#if mode === 'news' && last && KOFI_URL}
+              <p class="tip">
+                <a href={KOFI_URL} target="_blank" rel="noreferrer">Azimut is free. A tip on Ko-fi helps keep it going.</a>
+              </p>
+            {/if}
           {/if}
         </div>
       {/key}
@@ -619,6 +625,18 @@
     margin-top: 14px;
     font-size: var(--fs-sm);
     color: var(--text-3);
+  }
+  .tip {
+    margin: 12px 0 0;
+    font-size: var(--fs-xs);
+  }
+  .tip a {
+    color: var(--text-3);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .tip a:hover {
+    color: var(--accent);
   }
   .help {
     display: flex;
