@@ -82,11 +82,23 @@ def test_the_apps_own_page_and_a_typed_address_are_served(client, site):
     assert client.get("/api/health", headers={"sec-fetch-site": site}).status_code == 200
 
 
+#: The only parents the app's page may have: itself and a browser extension's page.
+NOT_THE_WEB = {"'self'", "chrome-extension:", "moz-extension:", "safari-web-extension:"}
+
+
 @pytest.mark.parametrize("path", ["/", "/api/health", "/api/cases"])
 def test_no_page_elsewhere_may_frame_the_app(client, path):
+    """Whether the frontend is built on this machine or not: `/` is then the app's page,
+    which only the app and an extension may frame, else a plain answer kept SAMEORIGIN."""
     framed = {"sec-fetch-site": "cross-site", "sec-fetch-dest": "iframe"}
     answer = client.get(path, headers=framed if path == "/" else {})
-    assert answer.headers["x-frame-options"] == "SAMEORIGIN"
+    policy = answer.headers.get("content-security-policy", "")
+    if "frame-ancestors" in policy:
+        sources = policy.split("frame-ancestors", 1)[1].split(";", 1)[0].split()
+        assert sources and set(sources) <= NOT_THE_WEB
+        assert "x-frame-options" not in answer.headers
+    else:
+        assert answer.headers["x-frame-options"] == "SAMEORIGIN"
 
 
 @pytest.fixture()
