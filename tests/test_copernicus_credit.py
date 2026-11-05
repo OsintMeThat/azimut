@@ -121,3 +121,8 @@ def test_reading_twice_changes_nothing_more():
 
 def test_a_missing_credit_reads_as_none():
     assert normalise_attribution(None, "2026-05-12") == ""  # type: ignore[arg-type]
+
+
+def test_a_pair_s_credit_is_dated_by_both_of_its_days():
+    assert normalise_attribution("© Copernicus Sentinel data / Sentinel Hub", "2025-12-30", "2026-01-04") == (
+        f"{NOTICE} 2025-2026")

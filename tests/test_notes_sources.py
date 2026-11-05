@@ -117,6 +117,24 @@ def test_imagery_says_whose_and_of_which_day(sourced):
     assert horizon.noun == "Terrain view" and horizon.seen == "eye at 14.79801, 42.95402, facing 245°"
 
 
+def test_an_older_sentinel_capture_is_credited_with_the_copernicus_notice_and_its_year(client):
+    """A capture filed before the Copernicus wording was fixed keeps its old words on
+    disk; a note reads them as the notice the licence asks for, dated by the imagery."""
+    from PIL import Image
+
+    from azimut.engine import media as media_engine
+
+    case = Case.open(make_case(client))
+    filed = media_engine.import_image(case, Image.new("RGB", (64, 48), (90, 120, 90)), "Port.png", {
+        "type": "satellite", "provider": "sentinel2", "provider_label": "Sentinel-2",
+        "attribution": "© Copernicus Sentinel data / Sentinel Hub", "imagery_date": "2025-04-11",
+        "fetched_at": "2026-03-14T10:00:00Z",
+    }, title="Port", dedupe=False, entity_type="capture")
+    credit = notesources.Reader(case).entity(filed["entity"]["id"]).credit()
+    assert credit == notesources.Credit(
+        "Imagery", "Sentinel-2, 11 April 2025 · Contains modified Copernicus Sentinel data 2025")
+
+
 def test_a_file_the_case_knows_nothing_about_has_no_source_and_is_still_evidence(sourced):
     _, case, made = sourced
     paste = notesources.Reader(case).entity(made["paste"]["id"])

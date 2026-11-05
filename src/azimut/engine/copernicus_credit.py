@@ -104,8 +104,9 @@ def service(*days: str | None) -> str:
     return _dated(SERVICE, days)
 
 
-def normalise_attribution(text: str, imagery_day: str | None) -> str:
-    """A stored credit as it must read where it is shown, for imagery of ``imagery_day``.
+def normalise_attribution(text: str, *imagery_days: str | None) -> str:
+    """A stored credit as it must read where it is shown, for imagery of these days
+    (one for a capture, two for a pair, none known).
 
     The notice written without a year gets the year when the day is known, and the
     app's older wordings become the notice. The relief's short credit takes the
@@ -114,6 +115,6 @@ def normalise_attribution(text: str, imagery_day: str | None) -> str:
     """
     if not isinstance(text, str) or not text:
         return ""
-    notice = sentinel(imagery_day)
+    notice = sentinel(*imagery_days)
     text = _LEGACY.sub(notice, _UNDATED.sub(notice, text))
     return _BARE_RELIEF.sub(RELIEF_PUBLISHED, text)

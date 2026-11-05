@@ -42,7 +42,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Iterable, Iterator
 from urllib.parse import urlsplit
 
-from . import entities, links, notes_style, timeline
+from . import copernicus_credit, entities, links, notes_style, timeline
 from .proposals import URL_ATTRS
 
 if TYPE_CHECKING:
@@ -344,7 +344,11 @@ class Reader:
         sha = str(attrs.get("sha256") or item.get("sha256") or "").lower()
 
         readings = self._readings(sidecar, attrs) if imagery else ()
-        attribution = _line(sidecar.get("attribution")) if imagery or route == HORIZON else ""
+        # Older captures keep the app's former Copernicus wording on disk: read as the notice,
+        # dated by the imagery they show (`engine/copernicus_credit.py`).
+        attribution = copernicus_credit.normalise_attribution(
+            _line(sidecar.get("attribution")), *(reading.day.rstrip("~") for reading in readings)
+        ) if imagery or route == HORIZON else ""
         if kind == "account":
             noun, what = "Account", ACCOUNT
         elif kind == "bookmark":
