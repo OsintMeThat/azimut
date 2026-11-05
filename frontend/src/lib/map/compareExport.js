@@ -26,6 +26,7 @@ import {
 } from './groundFrame.js';
 import { CHANGE_PALETTES } from './changeAssist.js';
 import { fileDate } from './pictureDate.js';
+import { creditLines } from '../creditLines.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const INK = '#f3f4f6';
@@ -85,6 +86,40 @@ export function signFooter(ctx, right, middle, scale) {
 
 /** How much of a footer row the signature takes, gap included. */
 export const signatureRoom = (scale) => signatureWidth(15 * scale) + 18 * scale;
+
+/** The credits' type size and how far apart their lines sit, at scale 1. */
+const CREDIT_SIZE = 10;
+export const CREDIT_LINE = 13;
+
+/**
+ * An export's credits as its footer prints them: in the footer's font, cut into
+ * lines no wider than the room the footer leaves them (`lib/creditLines.js`), never
+ * squeezed. Past three lines the type steps down one size, so a long list still
+ * reads in a few. Measured before the picture is sized, since the footer grows by
+ * every line past the first (`creditsGrowth`).
+ *
+ * @returns {{ lines: string[], size: number }}
+ */
+export function footerCredits(ctx, text, width, scale, signed = false) {
+  const room = Math.max(1, width - 32 * scale - (signed ? signatureRoom(scale) : 0));
+  const cut = (size) => {
+    ctx.font = `${Math.round(size * scale)}px ${FONT}`;
+    return creditLines(text, room, (line) => ctx.measureText(line).width);
+  };
+  const lines = cut(CREDIT_SIZE);
+  return lines.length > 3 ? { lines: cut(CREDIT_SIZE - 1), size: CREDIT_SIZE - 1 } : { lines, size: CREDIT_SIZE };
+}
+
+/** How much taller a footer grows for credits on more than one line. */
+export const creditsGrowth = (credits, scale) => (credits.lines.length - 1) * CREDIT_LINE * scale;
+
+/** Write the credits from `left`, the last line on `baseline` and the others above it. */
+export function writeCredits(ctx, credits, left, baseline, scale) {
+  ctx.fillStyle = MUTED;
+  ctx.font = `${Math.round(credits.size * scale)}px ${FONT}`;
+  const last = credits.lines.length - 1;
+  credits.lines.forEach((line, index) => ctx.fillText(line, left, baseline - (last - index) * CREDIT_LINE * scale));
+}
 
 /**
  * What an exported comparison is called: its title, then the dates of its two
@@ -288,10 +323,13 @@ export function composeComparison({
   const mapHeight = Math.max(a.canvas.height, b.canvas.height);
   const header = Math.round((title ? 64 : 48) * s);
   const legend = change ? Math.round(30 * s) : 0;
-  const footer = Math.round(26 * s) + legend;
-  const output = canvasOf(mapWidth, header + mapHeight + footer, makeCanvas);
+  // sized once the credits are cut into the lines the footer will hold
+  const output = canvasOf(mapWidth, 1, makeCanvas);
   const ctx = output.getContext('2d');
   if (!ctx) throw new Error('this browser cannot compose the comparison');
+  const credits = footerCredits(ctx, `A: ${attributionA || labelA}   |   B: ${attributionB || labelB}`, mapWidth, s, signed);
+  const footer = Math.round(26 * s) + legend + creditsGrowth(credits, s);
+  output.height = Math.max(1, Math.round(header + mapHeight + footer));
 
   ctx.fillStyle = BAND;
   ctx.fillRect(0, 0, output.width, output.height);
@@ -460,16 +498,9 @@ export function composeComparison({
     }
   }
 
-  ctx.fillStyle = MUTED;
-  ctx.font = `${Math.round(10 * s)}px ${FONT}`;
-  const credits = `A: ${attributionA || labelA}   |   B: ${attributionB || labelB}`;
-  // The signature closes the credits row, off the imagery and clear of the scale bar.
-  const signature = signed && signFooter(ctx, mapWidth - 14 * s, output.height - 13 * s, s)
-    ? signatureRoom(s)
-    : 0;
-  ctx.fillStyle = MUTED;
-  ctx.font = `${Math.round(10 * s)}px ${FONT}`;
-  ctx.fillText(credits, left, output.height - 9 * s, Math.max(0, mapWidth - 32 * s - signature));
+  // The signature closes the credits' last row, off the imagery and clear of the scale bar.
+  if (signed) signFooter(ctx, mapWidth - 14 * s, output.height - 13 * s, s);
+  writeCredits(ctx, credits, left, output.height - 9 * s, s);
   return output;
 }
 

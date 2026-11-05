@@ -28,13 +28,14 @@ treatment the widget screenshot endpoint applies.
 from __future__ import annotations
 
 import io
+import re
 import secrets
 import warnings
 import zipfile
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi import (
     APIRouter,
@@ -53,6 +54,7 @@ from pydantic import BaseModel
 
 from .. import __version__, config, errors
 from ..engine import (
+    copernicus_credit,
     extinstall,
     firms,
     firmspoints,
@@ -98,8 +100,29 @@ ATTRIBUTIONS = {
     "apple-maps": "© Apple Maps",
     "zoom-earth": "© Zoom Earth",
     "satellites-pro": "© Satellites.pro",
-    "copernicus-browser": "© Copernicus Sentinel data",
 }
+# Copernicus Browser's collections by their datasetId: S1_…, S2_…, S3…, S5_… are
+# Sentinel data, COPERNICUS_CLMS_… the Land service's products.
+_SENTINEL_DATASET = re.compile(r"S[1-5]")
+_SERVICE_DATASET = "COPERNICUS_CLMS_"
+
+
+def screenshot_credit(site: str, url: str, imagery_date: str | None) -> str:
+    """The credit burned under a screenshot of ``url``.
+
+    Copernicus asks for its notice with the data's year, so a Copernicus Browser
+    shot is credited by the collection it shows, Sentinel when the address names
+    none. Any other collection there (Landsat, the DEM, contributing missions) is
+    credited to the site, whose own credits ride in the pixels.
+    """
+    if site == "copernicus-browser":
+        dataset = (parse_qs(urlsplit(url).query).get("datasetId") or [""])[0]
+        if not dataset or _SENTINEL_DATASET.match(dataset):
+            return copernicus_credit.sentinel(imagery_date)
+        if dataset.startswith(_SERVICE_DATASET):
+            return copernicus_credit.service(imagery_date)
+        return "Copernicus Browser"
+    return ATTRIBUTIONS.get(site, f"© {urlsplit(url).netloc.lower()}")
 
 
 def require_token(x_azimut_token: str = Header(default="")) -> None:
@@ -303,7 +326,7 @@ async def ingest_screenshot(
         if scale_north
         else None
     )
-    attribution = ATTRIBUTIONS.get(site, f"© {urlsplit(url).netloc.lower()}")
+    attribution = screenshot_credit(site, url, parsed["imagery_date"])
     img = tiles.burn_attribution(img, attribution)
 
     case = get_case(case_id) if case_id else Case.create("Scratch session", scratch=True)

@@ -61,7 +61,13 @@ def test_the_footer_says_when_where_and_from_what():
     line = figures.footer_line("2026-10-04", "26.383333, 56.438333")
     assert "Date: 2026-10-04" in line
     assert "Coordinates: 26.383333, 56.438333" in line
-    assert "Copernicus Sentinel-2 L2A" in line
+    assert "Source: Sentinel-2 L2A" in line
+    # and closes on the notice Copernicus asks for, with the pass's year
+    assert line.endswith("Contains modified Copernicus Sentinel data 2026")
+
+
+def test_an_undated_footer_credits_copernicus_without_a_year():
+    assert figures.footer_line("", "1, 2").endswith("Contains modified Copernicus Sentinel data")
 
 
 def test_the_footer_states_only_what_it_knows():
@@ -116,6 +122,8 @@ def test_a_figure_files_every_panel_as_a_dated_capture(client, monkeypatch):
         assert capture["zoom"] == 14
     layers = sorted(capture["provider"] for capture in captures)
     assert layers[0].startswith("sentinel2~SWIR~2026-10-04~2026-10-04")
+    # each panel is credited as Copernicus asks, with its pass's year
+    assert {capture["attribution"] for capture in captures} == {"Contains modified Copernicus Sentinel data 2026"}
     assert layers[1].startswith("sentinel2~TRUE_COLOR~2026-10-04~2026-10-04")
 
 
@@ -132,6 +140,7 @@ def test_the_figure_opens_as_a_composition_with_its_credit_line_written(client, 
     assert spec["panels"][0]["row"] == 0 and spec["panels"][1]["row"] == 0
     assert "Date: 2026-10-04" in spec["footer"]
     assert "26.383333, 56.438333" in spec["footer"]
+    assert "Contains modified Copernicus Sentinel data 2026" in spec["footer"]
     # the point rides on each panel, so the composer can offer the coordinates
     assert spec["panels"][0]["meta"]["lat"] == 26.383333
     # and nothing is drawn on it yet

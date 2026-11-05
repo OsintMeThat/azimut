@@ -120,6 +120,30 @@ def test_capture_records_both_dates(client, monkeypatch):
     assert listed["imagery_date"] == "2021-06-01"
 
 
+def test_an_older_copernicus_credit_is_read_in_today_s_words_and_kept_on_disk(client, monkeypatch):
+    """Captures filed before the credit was fixed keep their words in the sidecar,
+    which is never rewritten; the list the tools read says the notice, with the
+    year of the capture's imagery."""
+    from azimut import config
+
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    config.save_settings({**config.load_settings(), "tile_providers": [{
+        "id": "old-s2", "label": "Old Sentinel-2", "url": "https://tiles.example.test/{z}/{x}/{y}.png",
+        "attribution": "© Copernicus Sentinel data / Sentinel Hub",
+    }]})
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    cap = client.post(
+        f"/api/cases/{cid}/satellite/capture",
+        json={"lat": 48.8584, "lon": 2.2945, "zoom": 14, "width": 512, "height": 512,
+              "provider": "old-s2", "imagery_date": "2023-08-08"},
+    ).json()
+    listed = client.get(f"/api/cases/{cid}/satellite").json()[0]
+    assert listed["attribution"] == "Contains modified Copernicus Sentinel data 2023"
+    media = client.get(f"/api/cases/{cid}/media").json()
+    stored = next(m for m in media if m["path"] == cap["path"])["source"]
+    assert stored["attribution"] == "© Copernicus Sentinel data / Sentinel Hub"
+
+
 def test_an_estimated_imagery_date_is_marked_approximate_on_the_axis(client, monkeypatch):
     """Esri's date is an estimate. The capture keeps the date it shows on its face,
     and the Time panel places it with a `~` rather than as a known day."""
@@ -511,12 +535,17 @@ def test_a_tilted_view_is_filed_with_its_tilt_and_the_relief_it_was_drawn_on(cli
     # over relief the zoom's fraction is part of the camera, so it is kept
     assert body["zoom"] == 13.63
     assert body["relief"] == {"source": "mapterhorn", "exaggeration": 1.0}
-    assert "Relief © Mapterhorn" in body["attribution"]
+    # the relief's credit, and the notice the Copernicus DEM's licence asks of a picture drawn from it
+    assert "Relief © Mapterhorn, produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014" in body["attribution"]
+    assert body["attribution"].endswith("by the European Union and ESA; all rights reserved")
     assert "AWS" not in body["attribution"]
     assert "exaggerated" not in body["attribution"]
     # a tilted view has no one scale, so no bar or arrow is drawn on it
     assert body["marks"] is None
-    assert body["height"] == 200 + tiles.ATTRIBUTION_BAND
+    # the band holds every line of the credit, none squeezed
+    lines = tiles.attribution_lines(body["attribution"], tiles.ImageFont.load_default(), 800)
+    assert len(lines) > 1
+    assert body["height"] == 200 + tiles.ATTRIBUTION_BAND + (len(lines) - 1) * tiles.ATTRIBUTION_LINE
     assert (body["imagery_date"], body["imagery_exact"]) == ("2024-08-13", False)
     listed = client.get(f"/api/cases/{cid}/satellite").json()
     assert listed[0]["pitch"] == 62.0
@@ -535,7 +564,10 @@ def test_a_tilted_view_drawn_partly_from_the_fallback_relief_credits_it(client):
         data={"lat": "46.5", "lon": "8.0", "zoom": "13", "provider": "esri-world-imagery",
               "pitch": "60", "relief_fallback": "true"},
     ).json()
-    assert "Relief © Mapterhorn and Terrain Tiles, Mapzen and AWS Open Data" in body["attribution"]
+    assert "Relief © Mapterhorn, produced using Copernicus WorldDEM-30" in body["attribution"]
+    # the fallback's licence page lists every source it requires, the EU-DEM among them
+    assert " · Terrain Tiles, Mapzen and AWS Open Data: ArcticDEM terrain data" in body["attribution"]
+    assert "European Union - EU-DEM layers" in body["attribution"]
     assert body["relief"] == {"source": "mapterhorn", "exaggeration": 1.0, "fallback": "aws-terrain"}
 
 

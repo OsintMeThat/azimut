@@ -18,8 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .. import config
 from ..engine import analyzers as engine
 from ..engine import (
-    analysis_dating, analysis_examples, analysis_export, analysis_geometry, analyzershare, areashare, detect_rules,
-    links, media, sentinel, workqueue,
+    analysis_dating, analysis_examples, analysis_export, analysis_geometry, analyzershare, areashare,
+    copernicus_credit, detect_rules, links, media, sentinel, tiles, workqueue,
 )
 from ..engine.analysis_models import (
     BUILTINS, GROUPS, MAX_AROUND, MAX_BANDS, MAX_CHECKS, MAX_MARKS, MAX_RULES, METHODS, RELIABILITY, Area, AreaDates,
@@ -764,6 +764,8 @@ PREVIEW_EDGE = 320
 PREVIEW_MARGIN = 20
 #: The two lines under the pictures: the point, then whose imagery it is.
 PREVIEW_FOOT = 40
+#: What each further line takes, when the credit is wider than the pictures.
+PREVIEW_FOOT_LINE = 16
 # The most of the sweep one preview shows, in source pixels. A burn scar can be
 # kilometres across; past this the crop is centred on the candidate.
 PREVIEW_SPAN = 1024
@@ -805,13 +807,13 @@ def preview_captions(saved: dict[str, Any], result: dict[str, Any],
     A pinned crop is evidence and outlives the run that made it, so it carries
     when each image was taken and where. A pair is lettered the way the maps
     are; a single image names its own pass. The foot is the point, then whose
-    imagery it is.
+    imagery it is: Copernicus asks for its credit with the year of the passes shown.
     """
     labels = ([f"{letter} · {source_label(source)}" for letter, source in zip("AB", sources)]
               if len(sources) > 1 else [source_label(sources[-1])])
     lon, lat = result["coordinates"]
-    attribution = ("Esri World Imagery Wayback" if saved["input"]["b"].get("provider") == "esri-wayback"
-                   else "Copernicus Sentinel data / Sentinel Hub")
+    attribution = (tiles.WAYBACK_ATTRIBUTION if saved["input"]["b"].get("provider") == "esri-wayback"
+                   else copernicus_credit.sentinel(*(str(source.get("date") or "") for source in sources)))
     return labels, [f"{lat:.5f}, {lon:.5f}", attribution]
 
 
@@ -878,8 +880,12 @@ def preview_bytes(case: Any, saved: dict[str, Any], result: dict[str, Any], *, a
     labels, foot = preview_captions(saved, result, sources)
     panels = [max(crop.width, math.ceil(font.getlength(label)) + 8) for label, crop in zip(labels, crops)]
     body = max(crop.height for crop in crops)
-    width = max(sum(panels) + gap * (len(crops) - 1), max(math.ceil(small.getlength(line)) for line in foot) + 8)
-    preview = Image.new("RGB", (width, band + body + PREVIEW_FOOT), (20, 24, 32))
+    # the point sets the narrowest the picture may be; a credit wider than it goes
+    # on over more lines, the foot growing to hold them
+    width = max(sum(panels) + gap * (len(crops) - 1), math.ceil(small.getlength(foot[0])) + 8)
+    foot = [foot[0], *(line for credit in foot[1:] for line in tiles.attribution_lines(credit, small, width))]
+    preview = Image.new("RGB", (width, band + body + PREVIEW_FOOT + (len(foot) - 2) * PREVIEW_FOOT_LINE),
+                        (20, 24, 32))
     drawing = ImageDraw.Draw(preview)
     offset = 0
     for label, crop, panel in zip(labels, crops, panels):
@@ -887,7 +893,8 @@ def preview_bytes(case: Any, saved: dict[str, Any], result: dict[str, Any], *, a
         drawing.text((offset + 4, 4), label, fill="white", font=font)
         offset += panel + gap
     for row, line in enumerate(foot):
-        drawing.text((4, band + body + 5 + row * 16), line, fill="white" if row == 0 else "#c8ced6", font=small)
+        drawing.text((4, band + body + 5 + row * PREVIEW_FOOT_LINE), line, fill="white" if row == 0 else "#c8ced6",
+                     font=small)
     output = io.BytesIO()
     preview.save(output, "PNG")
     return output.getvalue()

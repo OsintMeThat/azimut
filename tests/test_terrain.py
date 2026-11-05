@@ -375,6 +375,23 @@ def test_the_api_names_the_tiles_and_who_to_credit(client):
     assert body["sources"][0]["attribution"] == "© Mapterhorn"
 
 
+def test_a_picture_of_the_relief_carries_what_its_licences_ask(client):
+    """A map's corner keeps the short credit; a picture filed or exported carries
+    the Copernicus DEM's notice word for word, and the fallback's required list."""
+    mapterhorn, aws = client.get("/api/terrain/sources").json()["sources"]
+    assert mapterhorn["published"] == (
+        "© Mapterhorn, produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and "
+        "Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved"
+    )
+    assert aws["attribution"] == "Terrain Tiles, Mapzen and AWS Open Data"
+    assert aws["published"].startswith("Terrain Tiles, Mapzen and AWS Open Data: ArcticDEM terrain data")
+    # the EU-DEM line, Copernicus Land data, as the licence page words it
+    assert ("Europe terrain data produced using Copernicus data and information funded by the European Union - "
+            "EU-DEM layers") in aws["published"]
+    assert aws["published"].endswith("courtesy of the U.S. Geological Survey.")
+    assert len(terrain.MAPZEN_REQUIRED) == 11
+
+
 def test_the_tile_route_serves_the_sea_as_a_flat_tile(client, monkeypatch):
     _network(monkeypatch, lambda request: httpx.Response(404, text="Not found"))
     response = client.get("/api/terrain/tiles/12/100/2000")
@@ -417,6 +434,7 @@ def test_the_elevation_route_reads_one_point(client, monkeypatch):
     assert answer["resolution_m"] == pytest.approx(
         terrain.metres_per_pixel(46.5776, terrain.MAX_ZOOM), abs=0.1)
     assert answer["credits"][0]["label"] == "Mapterhorn"
+    assert answer["credits"][0]["published"] == terrain.MAPTERHORN.published
 
 
 def test_the_elevation_route_refuses_off_the_map(client):

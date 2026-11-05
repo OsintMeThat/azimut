@@ -7,7 +7,7 @@
 
 import { drawAnnotations } from './compareAnnotations.js';
 import {
-  EXPORT_STYLE, captureProjection, drawScaleAndNorth, drawTag, signFooter, signatureRoom,
+  EXPORT_STYLE, captureProjection, creditsGrowth, drawScaleAndNorth, drawTag, footerCredits, signFooter, writeCredits,
 } from './compareExport.js';
 import { compassAngle } from './groundFrame.js';
 import { MAX_PICTURE_TILES, pictureTiles, samePixels, sheetColumns } from './evolution.js';
@@ -204,11 +204,10 @@ function header(ctx, { title, line, right, width, scale }) {
   }
 }
 
-function credits(ctx, text, y, width, scale, signed) {
-  const room = signed && signFooter(ctx, width - 14 * scale, y - 4 * scale, scale) ? signatureRoom(scale) : 0;
-  ctx.fillStyle = MUTED;
-  ctx.font = `${Math.round(10 * scale)}px ${FONT}`;
-  ctx.fillText(text, 16 * scale, y, Math.max(0, width - 32 * scale - room));
+/** The footer's credits, the signature closing their last line. */
+function credits(ctx, cut, y, width, scale, signed) {
+  if (signed) signFooter(ctx, width - 14 * scale, y - 4 * scale, scale);
+  writeCredits(ctx, cut, 16 * scale, y, scale);
 }
 
 const whereLine = (frame) => {
@@ -235,11 +234,13 @@ export function composeEvolutionFrame({
   const s = clamp(width / 1000, 1, 2);
   const pixelScale = width / picture.frame.width;
   const top = Math.round((title ? 64 : 48) * s);
-  const footer = Math.round(46 * s);
   const bottom = top + picture.canvas.height;
-  const output = canvasOf(width, bottom + footer, makeCanvas);
+  // sized once the credits are cut into the lines the footer will hold
+  const output = canvasOf(width, 1, makeCanvas);
   const ctx = output.getContext('2d');
   if (!ctx) throw new Error('this browser cannot compose the evolution');
+  const cut = footerCredits(ctx, attribution || label, width, s, signed);
+  output.height = Math.max(1, Math.round(bottom + 46 * s + creditsGrowth(cut, s)));
   ctx.fillStyle = BAND;
   ctx.fillRect(0, 0, output.width, output.height);
   ctx.drawImage(picture.canvas, 0, top);
@@ -271,7 +272,7 @@ export function composeEvolutionFrame({
     ctx.fillStyle = ACCENT;
     ctx.fillRect(from + lit * (to - from) - 2 * s, y - 7 * s, 4 * s, 14 * s);
   }
-  credits(ctx, attribution || label, output.height - 9 * s, width, s, signed);
+  credits(ctx, cut, output.height - 9 * s, width, s, signed);
   return output;
 }
 
@@ -296,11 +297,12 @@ export function composeEvolutionSheet({
   const width = columns * cellWidth + (columns + 1) * gap;
   const s = clamp(width / 1400, 1, 2);
   const top = Math.round((title ? 64 : 48) * s);
-  const footer = Math.round(26 * s);
-  const height = top + rows * cellHeight + (rows + 1) * gap + footer;
-  const output = canvasOf(width, height, makeCanvas);
+  // sized once the credits are cut into the lines the footer will hold
+  const output = canvasOf(width, 1, makeCanvas);
   const ctx = output.getContext('2d');
   if (!ctx) throw new Error('this browser cannot compose the evolution');
+  const cut = footerCredits(ctx, attribution || label, width, s, signed);
+  output.height = Math.max(1, Math.round(top + rows * cellHeight + (rows + 1) * gap + 26 * s + creditsGrowth(cut, s)));
   ctx.fillStyle = BAND;
   ctx.fillRect(0, 0, output.width, output.height);
   const tagScale = clamp(cellWidth / 420, 0.8, 1.6);
@@ -325,6 +327,6 @@ export function composeEvolutionSheet({
     width,
     scale: s,
   });
-  credits(ctx, attribution || label, output.height - 9 * s, width, s, signed);
+  credits(ctx, cut, output.height - 9 * s, width, s, signed);
   return output;
 }

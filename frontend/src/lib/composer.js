@@ -12,6 +12,7 @@ import {
 import { ICON_SIZE_DEFAULT } from './proofIcons.js';
 import { isPageMark } from './pageMarks.js';
 import { proofFontId } from './proofFonts.js';
+import { normaliseAttribution } from './copernicusCredit.js';
 
 export const PANEL_H = 720;
 export const PAD = 20;
@@ -432,9 +433,29 @@ export function notesFromShapes(shapes) {
   return notes;
 }
 
-/** Unique attribution strings from panel metadata. */
+/**
+ * The credits a proof owes the pictures it shows, each said once, then the app.
+ *
+ * A published proof must credit its imagery: each panel's credit as its capture
+ * or picture kept it, read in today's words for the day it shows
+ * (`normaliseAttribution`: the Copernicus notice dated, the relief's licence in
+ * full), so an older proof prints the right credits when it is exported again.
+ */
 export function attributionLine(panels) {
-  return 'Composed with Azimut';
+  const parts = [];
+  for (const panel of panels ?? []) {
+    const credit = normaliseAttribution(panel?.meta?.attribution, panel?.meta?.imagery_date);
+    for (const part of credit.split(/\s+·\s+/)) {
+      const text = part.trim();
+      if (text && !parts.includes(text)) parts.push(text);
+    }
+  }
+  return [...parts, 'Composed with Azimut'].join(' · ');
+}
+
+/** The proof's credit line: the analyst's own words, else the credits its panels owe. */
+export function creditLine(proof) {
+  return proof?.footer?.trim() || attributionLine(proof?.panels ?? []);
 }
 
 // ---- coordinates + source (auto-derived from panels, user-overridable) ------
@@ -790,16 +811,16 @@ export function coordsPostLines(lines) {
 /** Every line the plate's footer prints: the coordinates when asked, then the
  *  credit line unless it was turned off. One source for the height and for the
  *  drawing, so a proof that grew a line cannot be measured as if it had not.
+ *  `cut` splits the credit line into the lines the page's width holds
+ *  (`lib/creditLines.js`), so a long one goes on below rather than being cut short.
  *
  *  Empty is a valid answer — a footer switched on with nothing to print takes no
  *  band at all, rather than an empty strip under the panels. */
-export function footerLines(proof, format = 'dd') {
+export function footerLines(proof, format = 'dd', cut = (text) => [text]) {
   const printed = proof?.footerCoords === true
     ? coordsPlateLines(proofCoordsLines(proof, format))
     : [];
-  const credit = proof?.footerText === false
-    ? []
-    : [proof?.footer?.trim() || attributionLine(proof?.panels ?? [])];
+  const credit = proof?.footerText === false ? [] : cut(creditLine(proof));
   return [...printed, ...credit];
 }
 

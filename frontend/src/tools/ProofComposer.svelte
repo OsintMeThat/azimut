@@ -44,12 +44,13 @@
   discardDraft,
 } from './proof/canvasLifecycle.js';
   import { closeStrandedGesture } from '../lib/konvaGesture.js';
+  import { creditLines } from '../lib/creditLines.js';
   import {
     ANNO_COLORS, PAD, GAP, ROW_GAP, PANEL_H, TWEET_GUIDES,
     CAPTION_SIZE, LEGEND_SIZE, FOOTER_SIZE,
     BG, TEXT_MAIN, normSpace, textColors,
     layoutPanels, panelsBottom, panelScale, freeNormalizeDelta, legendLineHeight, footerBand,
-    attributionLine, docSize, offsetShape, autoLayoutRows,
+    attributionLine, creditLine, docSize, offsetShape, autoLayoutRows,
     autoCoords, formatCoords, autoSourceUrls, proofSource, statedSources, openableSource,
     specPoints, statePanelPoint, pointProposed, uncheckedPoints, footerLines, coordsPostLines, proofCoordsLines, MAX_POINTS,
     normalizeMaterial, resolveSourceUrls,
@@ -871,13 +872,45 @@
   });
 
   // Text-size options threaded into every layout/size computation.
-  const textOpts = () => ({
+  const textSizes = () => ({
     captionSize: proof.captionSize,
     legendSize: proof.legendSize,
     footerSize: proof.footerSize,
     footerEnabled: proof.footerEnabled !== false,
-    footerLines: footerLines(proof, prefs.coordFormat).length,
   });
+  const textOpts = () => ({ ...textSizes(), footerLines: printedFooter().length });
+
+  /** The footer's lines as the page prints them, its credit line cut to the page's width. */
+  function printedFooter() {
+    return proof.footerEnabled !== false ? footerLines(proof, prefs.coordFormat, cutCredit) : [];
+  }
+
+  // The last credit line cut, kept: the page is measured far more often than its credits change.
+  let creditCut = { key: '', lines: [] };
+  /**
+   * The credit line in the lines the page's width holds, in the footer's own type:
+   * a long list of credits goes on below rather than being cut short (lib/creditLines.js).
+   * The width is the page's without its footer, which never widens it.
+   */
+  function cutCredit(text) {
+    const { width } = docSize(
+      proof.panels, proof.shapes, proof.notes, { ...textSizes(), footerEnabled: false }, proof.legendOrder,
+      proof.layout, proof.space, freeExtent(proof.shapes, inkHelpers),
+    );
+    const room = width - normSpace(proof.space).pad * 2;
+    const fontSize = proof.footerSize ?? FOOTER_SIZE;
+    const key = `${fontSize}|${proofFace()}|${room}|${text}`;
+    if (creditCut.key !== key) {
+      const probe = new Konva.Text({ text: ' ', fontSize, fontFamily: proofFace() });
+      const lines = creditLines(text, room, (line) => {
+        probe.text(line);
+        return probe.width();
+      });
+      probe.destroy();
+      creditCut = { key, lines };
+    }
+    return creditCut.lines;
+  }
 
   // Layout boxes + document measure for the active layout mode. Pasted images
   // are deliberately absent from the measure: the panels alone size the
@@ -2692,7 +2725,7 @@
         fontFamily: proofFace(), ellipsis: true, wrap: 'none', listening: false,
       }));
     });
-    const printed = proof.footerEnabled !== false ? footerLines(proof, prefs.coordFormat) : [];
+    const printed = printedFooter();
     if (proof.panels.length && printed.length) {
       const footerSize = proof.footerSize ?? 13;
       // The coordinates the proof prints sit above its credit line, each on the
@@ -4766,13 +4799,13 @@
     startLineEdit(node, { field: 'caption', id: panel.id, value: panel.caption ?? '' });
   }
 
-  /** Write the footer's credit line where it is printed: the band's last line. */
+  /** Write the footer's credit line where it is printed: the band's last line, holding the whole line. */
   function startFooterEdit() {
     const lines = docLayer?.findOne('#proof-footer')?.getChildren();
     if (!lines?.length || proof.footerText === false) return;
     const node = lines[lines.length - 1];
     selectSig('footer');
-    startLineEdit(node, { field: 'footer', id: null, value: node.text() });
+    startLineEdit(node, { field: 'footer', id: null, value: creditLine(proof) });
   }
 
   function commitTextEdit(keep = true) {
@@ -4785,7 +4818,7 @@
       if (keep && textEdit.field === 'caption' && panel && (panel.caption ?? '') !== value) {
         panel.caption = value;
         dirty = true;
-      } else if (keep && textEdit.field === 'footer' && value !== footerLines(proof, prefs.coordFormat).at(-1)) {
+      } else if (keep && textEdit.field === 'footer' && value !== creditLine(proof)) {
         proof.footer = value;
         dirty = true;
       }

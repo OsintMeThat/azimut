@@ -14,7 +14,7 @@
  * A blink is the same chrome twice, the photo then the terrain, which the app
  * turns into a GIF (api/compare.py, `/compare/gif`).
  */
-import { EXPORT_STYLE, drawTag, signFooter, signatureRoom } from '../map/compareExport.js';
+import { EXPORT_STYLE, creditsGrowth, drawTag, footerCredits, signFooter, writeCredits } from '../map/compareExport.js';
 import { HZ } from './marks.js';
 import { windOf } from './geometry.js';
 import { skylineAt } from './panorama.js';
@@ -295,13 +295,25 @@ function drawHeader(ctx, { title, standing }, width, s) {
   ctx.textBaseline = 'alphabetic';
 }
 
-function drawFooter(ctx, credits, width, height, s, signed) {
+/**
+ * A picture `width` wide and `height` tall over its footer, whose credits are cut
+ * into lines first: the footer grows by every line past one, never squeezing them.
+ */
+function sized(width, height, credits, s, signed, makeCanvas) {
+  const output = canvasOf(width, 1, makeCanvas);
+  const ctx = output.getContext('2d');
+  if (!ctx) throw new Error('this browser cannot compose the picture');
+  const cut = footerCredits(ctx, credits || '', width, s, signed);
+  const footer = FOOTER * s + creditsGrowth(cut, s);
+  output.height = Math.max(1, Math.round(height + footer));
+  return { output, ctx, cut, footer };
+}
+
+function drawFooter(ctx, cut, footer, width, height, s, signed) {
   ctx.fillStyle = BAND;
-  ctx.fillRect(0, height - FOOTER * s, width, FOOTER * s);
-  const signature = signed && signFooter(ctx, width - 14 * s, height - 13 * s, s) ? signatureRoom(s) : 0;
-  ctx.fillStyle = MUTED;
-  ctx.font = `${Math.round(10 * s)}px ${FONT}`;
-  ctx.fillText(credits || '', 16 * s, height - 9 * s, Math.max(0, width - 32 * s - signature));
+  ctx.fillRect(0, height - footer, width, footer);
+  if (signed) signFooter(ctx, width - 14 * s, height - 13 * s, s);
+  writeCredits(ctx, cut, 16 * s, height - 9 * s, s);
 }
 
 /** Where a cut collage's pieces meet, white dashes on a dark edge, as the view draws its cuts. */
@@ -342,13 +354,10 @@ export function composeView({ picture, layers = {}, scale, title = '', standing 
   if (!picture?.width) throw new Error('the view must be drawn before it can be exported');
   const s = scale;
   const width = picture.width;
-  const height = (HEADER + RULER + FOOTER) * s + picture.height;
-  const output = canvasOf(width, height, makeCanvas);
-  const ctx = output.getContext('2d');
-  if (!ctx) throw new Error('this browser cannot compose the picture');
+  const { output, ctx, cut, footer } = sized(width, (HEADER + RULER) * s + picture.height, credits, s, signed, makeCanvas);
   drawHeader(ctx, { title, standing }, width, s);
   drawPanel(ctx, picture, layers, 0, HEADER * s, s, { tag, daylight, trace });
-  drawFooter(ctx, credits, output.width, output.height, s, signed);
+  drawFooter(ctx, cut, footer, output.width, output.height, s, signed);
   return output;
 }
 
@@ -373,10 +382,8 @@ export function composePair({ photo, terrain, layers = {}, scale, layout = 'row'
   const panelHeight = photo.height + RULER * s;
   const row = layout === 'row';
   const width = row ? photo.width * 2 + gap : photo.width;
-  const height = HEADER * s + (row ? panelHeight : panelHeight * 2 + gap) + FOOTER * s;
-  const output = canvasOf(width, height, makeCanvas);
-  const ctx = output.getContext('2d');
-  if (!ctx) throw new Error('this browser cannot compose the picture');
+  const { output, ctx, cut, footer } = sized(width, HEADER * s + (row ? panelHeight : panelHeight * 2 + gap), credits, s, signed,
+    makeCanvas);
   ctx.fillStyle = BAND;
   ctx.fillRect(0, 0, output.width, output.height);
   drawHeader(ctx, { title, standing }, width, s);
@@ -384,7 +391,7 @@ export function composePair({ photo, terrain, layers = {}, scale, layout = 'row'
   drawPanel(ctx, photo, layers, 0, top, s, { tag: photoTag(reshaped), daylight, trace, seams });
   if (row) drawPanel(ctx, terrain, layers, photo.width + gap, top, s, { tag: terrainTag, daylight, trace, seams });
   else drawPanel(ctx, terrain, layers, 0, top + panelHeight + gap, s, { tag: terrainTag, daylight, trace, seams });
-  drawFooter(ctx, credits, output.width, output.height, s, signed);
+  drawFooter(ctx, cut, footer, output.width, output.height, s, signed);
   return output;
 }
 

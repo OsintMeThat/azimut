@@ -47,7 +47,7 @@ async function openDetect(page, withRun = false, withRoutine = false, twoRuns = 
     { id: 'esri-world-imagery', label: 'Esri World Imagery', url: 'https://tiles.invalid/{z}/{x}/{y}.png',
       imagery: true, max_zoom: 19, tile_size: 256, attribution: 'Browser fixture' },
     { id: 'sentinel2', label: 'Copernicus Sentinel-2', url: 'https://tiles.invalid/{z}/{x}/{y}.png',
-      imagery: true, max_zoom: 19, tile_size: 256, attribution: 'Copernicus Sentinel data' },
+      imagery: true, max_zoom: 19, tile_size: 256, attribution: 'Contains modified Copernicus Sentinel data' },
   ] }));
   await page.route('**/api/satellite/sentinel/**', (route) => {
     calls.push(route.request().url()); return route.fulfill({ json: { dates: [] } });

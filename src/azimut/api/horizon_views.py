@@ -356,6 +356,11 @@ class ViewSpec(BaseModel):
     buildings: Buildings | None = None
 
 
+#: The longest credit line a picture of a view carries: the relief's licences run long,
+#: the terrain fallback's list of national surveys longest of all (engine/terrain.py).
+PICTURE_CREDIT_MAX = 2000
+
+
 class Credit(BaseModel):
     label: str = Field(default="", max_length=200)
     attribution: str = Field(default="", max_length=300)
@@ -626,7 +631,7 @@ async def keep_image(
     image: UploadFile = File(),
     kind: Literal["view", "turn", "row", "column", "photo", "terrain"] = Form(),
     filename: str = Form(min_length=1, max_length=120),
-    attribution: str = Form(default="", max_length=500),
+    attribution: str = Form(default="", max_length=PICTURE_CREDIT_MAX),
 ) -> dict[str, Any]:
     """Keep one picture of a saved view in the case, as an image nothing replaces.
 
@@ -689,7 +694,7 @@ async def capture_view(
     area: bool = Form(default=False),
     view: str = Form(default="", max_length=200),
     photo: str = Form(default="", max_length=1024),
-    attribution: str = Form(default="", max_length=500),
+    attribution: str = Form(default="", max_length=PICTURE_CREDIT_MAX),
 ) -> dict[str, Any]:
     """File the view as it shows, or an area of it, as a capture nothing replaces.
 

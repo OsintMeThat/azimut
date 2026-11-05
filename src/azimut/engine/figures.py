@@ -22,6 +22,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from . import copernicus_credit
+
 #: Panels per row, and the ceiling. Two across is what the figures this was
 #: built for use, and a figure nobody can read the captions of is not a figure:
 #: past eight panels it is a contact sheet.
@@ -39,8 +41,7 @@ MAX_PANELS = 8
 MAX_PER_ROW = 4
 
 #: What every panel is drawn from, said once under the figure.
-CREDIT = "Copernicus Sentinel-2 L2A"
-RADAR_CREDIT = "Copernicus Sentinel-1 GRD"
+SOURCE = "Sentinel-2 L2A"
 
 
 def caption_for(label: str, at: int, total: int, numbered: bool = True) -> str:
@@ -51,19 +52,20 @@ def caption_for(label: str, at: int, total: int, numbered: bool = True) -> str:
     return f"{at + 1}. {text}" if text else f"{at + 1}."
 
 
-def footer_line(day: str, coords: str, credit: str = CREDIT) -> str:
-    """The one line under the figure: when, where, and from what.
+def footer_line(day: str, coords: str, source: str = SOURCE) -> str:
+    """The one line under the figure: when, where, from what, and its credit.
 
     Each part only when it is known. An undated figure says nothing about a date
     rather than printing an empty field — the same rule the date pill follows.
+    The source closes on the credit Copernicus asks for, with the day's year.
     """
     parts = []
     if day:
         parts.append(f"Date: {day}")
     if coords:
         parts.append(f"Coordinates: {coords}")
-    if credit:
-        parts.append(f"Source: {credit}")
+    if source:
+        parts += [f"Source: {source}", copernicus_credit.sentinel(day)]
     return "  ·  ".join(parts)
 
 

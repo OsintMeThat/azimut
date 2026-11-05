@@ -204,6 +204,25 @@ describe('composing', () => {
     expect(traced(canvas, 2)).toHaveLength(0);
   });
 
+  it('wraps a long credit onto more lines and grows the footer, never squeezing it', () => {
+    const notice = '© Mapterhorn, produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and '
+      + 'Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved';
+    const credits = `${notice} · OpenFreeMap © OpenMapTiles · Data © OpenStreetMap contributors`;
+    const canvas = composeView({ picture: picture('view', 1000, 600), layers: LAYERS, scale: 1, credits, signed: false, makeCanvas: fakeCanvas });
+    // the footer's lines start at its margin, under the ruler
+    const written = canvas.context.calls.filter(([name, , x, y]) => name === 'fillText' && x === 16 && y > 48 + 600 + 24);
+    expect(written.length).toBeGreaterThan(1);
+    // every word is printed, each line within the room, none given a squeezing width
+    expect(written.map(([, text]) => text).join(' ').replace(/ · /g, ' ')).toBe(credits.replace(/ · /g, ' '));
+    for (const [, text, , , maxWidth] of written) {
+      expect(text.length * 6).toBeLessThanOrEqual(1000 - 32);
+      expect(maxWidth).toBeUndefined();
+    }
+    // the last line sits where one line would, the others above it
+    expect(written.at(-1)[3]).toBe(canvas.height - 9);
+    expect(canvas.height).toBe(600 + 48 + 24 + 26 + (written.length - 1) * 13);
+  });
+
   it('draws the skyline traced on the photo when asked, its dark edge then its yellow', () => {
     const canvas = composeView({ picture: picture('view'), layers: LAYERS, scale: 1, trace: true, signed: false, makeCanvas: fakeCanvas });
     expect(traced(canvas, 1)).toHaveLength(2);

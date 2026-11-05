@@ -308,6 +308,20 @@ def test_get_provider_resolves_a_sentinel_variant(monkeypatch, tmp_path):
     assert "SWIR" in p.label and "2026-05-01" in p.label
 
 
+def test_a_sentinel_map_is_credited_as_copernicus_asks_with_the_year_it_shows(monkeypatch, tmp_path):
+    """The legal notice's words for adapted Sentinel data, the year being the
+    data's: a pass names its year, a window across New Year both, and the plain
+    basemap, which has no date, none."""
+    notice = "Contains modified Copernicus Sentinel data"
+    plain = _sentinel(monkeypatch, tmp_path)
+    assert plain.attribution == notice
+    assert tiles.get_provider("sentinel2~SWIR~2026-05-01~2026-05-31").attribution == f"{notice} 2026"
+    assert tiles.get_provider("sentinel2~TRUE_COLOR~2025-12-20~2026-01-10").attribution == f"{notice} 2025-2026"
+    assert tiles.get_provider("sentinel2~FALSE_COLOR").attribution == notice
+    # Sentinel Hub is the renderer, not the data's owner, and the CDSE terms ask for no mention
+    assert "Sentinel Hub" not in plain.attribution and "©" not in plain.attribution
+
+
 def test_get_provider_variant_without_a_window_keeps_the_default_time(monkeypatch, tmp_path):
     _sentinel(monkeypatch, tmp_path)
     p = tiles.get_provider("sentinel2~FALSE_COLOR")
@@ -931,6 +945,17 @@ def test_radar_is_given_longer_than_the_shared_ceiling(monkeypatch, tmp_path):
     assert tiles.get_provider("sentinel1~2026-10-06~151800").timeout == tiles.RADAR_TILE_TIMEOUT
 
 
+def test_a_radar_pass_is_credited_with_its_year(monkeypatch, tmp_path):
+    monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
+    config.save_settings(
+        {**config.DEFAULT_SETTINGS, "api_keys": {"sentinelhub": "inst-uuid"}, "sentinel1_layer": "RADAR"}
+    )
+    notice = "Contains modified Copernicus Sentinel data"
+    assert tiles.get_provider("sentinel1").attribution == notice
+    assert tiles.get_provider("sentinel1~2024-10-06~151800").attribution == f"{notice} 2024"
+    assert tiles.get_provider("sentinel1~2024-10-06").attribution == f"{notice} 2024"
+
+
 # -- what a provider says when it refuses -------------------------------------
 
 
@@ -990,7 +1015,7 @@ def test_a_credit_wider_than_the_image_goes_on_over_more_lines():
     assert wide.size == (900, 100 + tiles.ATTRIBUTION_BAND)
     # cut between the credits first, so each one reads whole
     font = tiles.ImageFont.load_default()
-    assert tiles._attribution_lines(text, font, 400) == [
+    assert tiles.attribution_lines(text, font, 400) == [
         "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
         "Relief © Mapterhorn",
     ]

@@ -757,11 +757,18 @@ describe('the points a proof states', () => {
   });
 
   it('measures the footer at the number of lines it will print', () => {
-    expect(source).toContain('footerLines: footerLines(proof, prefs.coordFormat).length');
-    expect(source).toContain(
-      "const printed = proof.footerEnabled !== false ? footerLines(proof, prefs.coordFormat) : [];"
-    );
+    // one source for the height and the drawing, the credit line cut to the page's width
+    expect(source).toContain('const textOpts = () => ({ ...textSizes(), footerLines: printedFooter().length });');
+    expect(source).toContain('footerLines(proof, prefs.coordFormat, cutCredit)');
+    expect(source).toContain('const printed = printedFooter();');
     expect(source).toContain('if (proof.panels.length && printed.length) {');
+  });
+
+  it('cuts the credit line in the footer\'s own type, never shortening it', () => {
+    expect(source).toContain('const lines = creditLines(text, room, (line) => {');
+    expect(source).toContain('new Konva.Text({ text: \' \', fontSize, fontFamily: proofFace() })');
+    // the editor opens on the whole credit line, not on the last of its cut lines
+    expect(source).toContain("startLineEdit(node, { field: 'footer', id: null, value: creditLine(proof) });");
   });
 });
 

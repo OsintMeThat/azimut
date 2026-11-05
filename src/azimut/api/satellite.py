@@ -1888,9 +1888,10 @@ async def capture_oblique(
         raise HTTPException(status_code=422, detail=f"not a readable image: {errors.explain(exc)}") from exc
 
     relief = terrain.MAPTERHORN
-    attribution = f"{prov.attribution} · Relief {relief.attribution}"
+    # a picture drawn from the heights carries what their licences ask of one
+    attribution = f"{prov.attribution} · Relief {relief.published}"
     if relief_fallback:
-        attribution += f" and {terrain.AWS_TERRAIN.attribution}"
+        attribution += f" · {terrain.AWS_TERRAIN.published}"
     if far is not None and far.id != prov.id:
         attribution += f" · Far ground {far.attribution}"
     if exaggeration > 1:

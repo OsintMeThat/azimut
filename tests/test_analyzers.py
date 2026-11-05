@@ -249,8 +249,14 @@ def test_a_candidate_picture_says_when_and_where_it_was_taken(client, scenario):
     labels, foot = analyzers_api.preview_captions(saved, row, sources)
     lon, lat = row["coordinates"]
     assert labels == [f"A · {saved['input']['a']['date']}", f"B · {saved['input']['b']['date']}"]
-    assert foot == [f"{lat:.5f}, {lon:.5f}", "Copernicus Sentinel data / Sentinel Hub"]
+    # Copernicus's own notice for adapted data, with the year of the passes shown
+    years = sorted({saved["input"][side]["date"][:4] for side in ("a", "b")})
+    assert foot == [f"{lat:.5f}, {lon:.5f}", f"Contains modified Copernicus Sentinel data {'-'.join(years)}"]
     assert analyzers_api.preview_captions(saved, row, sources[-1:])[0] == [saved["input"]["b"]["date"]]
+    # one pass is credited with its own year
+    assert analyzers_api.preview_captions(saved, row, sources[-1:])[1][1] == (
+        f"Contains modified Copernicus Sentinel data {saved['input']['b']['date'][:4]}"
+    )
     endpoint = f"/api/cases/{case.id}/analysis/runs/{saved['id']}/results/{row['id']}"
     pinned = client.post(endpoint + "/promote", json={"title": "Checked"}).json()
     with Image.open(case.resolve_inside(pinned["image"])) as image:
@@ -275,6 +281,29 @@ def test_a_narrow_candidate_picture_still_has_room_for_its_label(client, scenari
         crop = 2 + 2 * 20
         zoom = round(320 / (40 + 2 * 20))
         assert preview.width > 2 * crop * zoom + 8
+
+
+def test_a_wayback_picture_is_credited_as_esri_asks_and_a_long_credit_wraps(client, scenario):
+    """An older run read on Wayback is credited with the line its tile layer carries.
+    A credit wider than the picture goes on over more lines; the picture is not
+    widened for it, nor the credit squeezed."""
+    from azimut.engine import tiles
+
+    case, body = scenario
+    saved = run(client, case, body)
+    row = saved["results"][0]
+    sources = [saved["frames"][key]["source"] for key in row["parts"][0]["frames"]]
+    saved["input"]["b"] = {**saved["input"]["b"], "provider": "esri-wayback"}
+    assert analyzers_api.preview_captions(saved, row, sources)[1][1] == tiles.WAYBACK_ATTRIBUTION
+    row["parts"][0]["box"] = [0, 0, 2, 40]  # a narrow candidate, so a narrow picture
+    with Image.open(io.BytesIO(analyzers_api.preview_bytes(case, saved, row))) as preview:
+        small = analyzers_api.ImageFont.load_default(size=12)
+        lines = tiles.attribution_lines(tiles.WAYBACK_ATTRIBUTION, small, preview.width)
+        assert len(lines) > 1
+        assert preview.width < small.getlength(tiles.WAYBACK_ATTRIBUTION)
+        body_height = (40 + 2 * 20) * round(320 / (40 + 2 * 20))
+        assert preview.height == (24 + body_height + analyzers_api.PREVIEW_FOOT
+                                  + (len(lines) - 1) * analyzers_api.PREVIEW_FOOT_LINE)
 
 
 def test_a_candidate_across_a_tile_edge_is_one_candidate_with_one_picture(client, scenario):

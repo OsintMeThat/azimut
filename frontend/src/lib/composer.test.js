@@ -26,7 +26,7 @@ import {
   specPoints, statePoints, statePanelPoint, MAX_POINTS,
   captureAimed, pointProposed, uncheckedPoints,
   proofCoordsLines, coordsPlateLines, coordsPostLines,
-  footerLines, footerBand,
+  footerLines, footerBand, attributionLine, creditLine,
 } from './composer.js';
 
 // natural is [width, height]; PANEL_H drives the per-row scale.
@@ -2238,6 +2238,48 @@ describe('the coordinates a plate prints', () => {
       '64.1466, -21.9426',
       '64.1481, -21.9401',
       'caméra — 64.1502, -21.9350',
+    ]);
+  });
+});
+
+
+describe('the credits a proof prints', () => {
+  const DEM = 'produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 '
+    + 'provided under COPERNICUS by the European Union and ESA; all rights reserved';
+  const panels = [
+    { meta: { kind: 'satellite', attribution: '© Copernicus Sentinel data / Sentinel Hub', imagery_date: '2024-07-01' } },
+    { meta: { kind: 'satellite', attribution: 'Esri, Vantor, Earthstar Geographics, and the GIS User Community' } },
+    { meta: { kind: 'satellite', attribution: 'Esri, Vantor, Earthstar Geographics, and the GIS User Community' } },
+    { meta: { kind: 'horizon', attribution: '© Mapterhorn · OpenFreeMap © OpenMapTiles' } },
+    { meta: { kind: 'satellite', attribution: 'Map data ©2026 Google' } },
+    { meta: { kind: 'media', source_url: 'https://x.com/a/1' } },
+  ];
+
+  it('names every panel\'s imagery once, in today\'s words, then the app', () => {
+    expect(attributionLine(panels)).toBe([
+      'Contains modified Copernicus Sentinel data 2024',
+      'Esri, Vantor, Earthstar Geographics, and the GIS User Community',
+      `© Mapterhorn, ${DEM}`,
+      'OpenFreeMap © OpenMapTiles',
+      'Map data ©2026 Google',
+      'Composed with Azimut',
+    ].join(' · '));
+    expect(attributionLine([])).toBe('Composed with Azimut');
+  });
+
+  it('keeps the analyst\'s own credit line over the panels\'', () => {
+    expect(creditLine({ panels, footer: '  Imagery © Esri  ' })).toBe('Imagery © Esri');
+    expect(creditLine({ panels })).toBe(attributionLine(panels));
+  });
+
+  it('prints the credit line over as many lines as the page cuts it into, after the coordinates', () => {
+    const cut = (text) => text.split(' · ');
+    const proof = { panels: panels.slice(0, 2), points: [{ coords: '1, 2' }], footerCoords: true };
+    expect(footerLines(proof, 'dd', cut)).toEqual([
+      '1, 2',
+      'Contains modified Copernicus Sentinel data 2024',
+      'Esri, Vantor, Earthstar Geographics, and the GIS User Community',
+      'Composed with Azimut',
     ]);
   });
 });

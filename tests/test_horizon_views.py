@@ -313,6 +313,26 @@ def test_a_kept_picture_stands_under_its_view_and_follows_a_rename(client):
     assert _row(client, cid, "Eiger from the west")["kept"][0]["path"] == path
 
 
+def test_a_kept_picture_carries_its_relief_s_licences_in_full(client):
+    """A picture drawn partly from the fallback relief owes its whole list of
+    sources, which runs past the length a credit used to be held to."""
+    from azimut.engine import terrain
+
+    cid = _case(client, "Long credits")
+    _save(client, cid, "North ridge")
+    credit = f"{terrain.MAPTERHORN.published} · {terrain.AWS_TERRAIN.published}"
+    assert len(credit) > 500
+    kept = client.post(
+        f"/api/cases/{cid}/horizon/views/North ridge/images",
+        files={"image": ("view.png", io.BytesIO(_png(size=(320, 200))), "image/png")},
+        data={"kind": "terrain", "filename": "North ridge terrain", "attribution": credit},
+    )
+    assert kept.status_code == 200, kept.text
+    item = client.get(f"/api/cases/{cid}/media/item", params={"path": kept.json()["path"]}).json()
+    source = item.get("source") or item.get("item", {}).get("source")
+    assert source["attribution"] == credit
+
+
 def test_a_kept_picture_carries_the_credits_and_is_held_back_as_a_working_file(client):
     cid = _case(client, "Kept credits")
     _save(client, cid, "North ridge")

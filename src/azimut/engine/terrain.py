@@ -41,7 +41,7 @@ import numpy as np
 from PIL import Image
 
 from .. import config
-from . import tiles
+from . import copernicus_credit, tiles
 
 TILE = 512
 _SHIFT = 9  # log2(TILE)
@@ -83,16 +83,43 @@ class Source:
     id: str
     label: str
     url: str  # template with {z} {x} {y}
-    attribution: str
+    attribution: str  # the short credit a map's corner keeps, its link beside it
     link: str
+    # What a picture filed or exported from these heights carries: the credit and
+    # what its sources' licences ask of a published picture, word for word.
+    published: str
 
+
+#: What the AWS Terrain Tiles' licence page (tilezen/joerd docs/attribution.md, which
+#: the AWS Open Data registry names as the licence) lists as "Required attribution",
+#: each source word for word.
+MAPZEN_REQUIRED = (
+    "ArcticDEM terrain data DEM(s) were created from DigitalGlobe, Inc., imagery and funded under National "
+    "Science Foundation awards 1043681, 1559691, and 1542736",
+    "Australia terrain data © Commonwealth of Australia (Geoscience Australia) 2017",
+    "Austria terrain data © offene Daten Österreichs – Digitales Geländemodell (DGM) Österreich",
+    "Canada terrain data contains information licensed under the Open Government Licence – Canada",
+    "Europe terrain data produced using Copernicus data and information funded by the European Union - "
+    "EU-DEM layers",
+    "Global ETOPO1 terrain data U.S. National Oceanic and Atmospheric Administration",
+    "Mexico terrain data source: INEGI, Continental relief, 2016",
+    "New Zealand terrain data Copyright 2011 Crown copyright (c) Land Information New Zealand and the New "
+    "Zealand Government (All rights reserved)",
+    "Norway terrain data © Kartverket",
+    "United Kingdom terrain data © Environment Agency copyright and/or database right 2015. All rights "
+    "reserved",
+    "United States 3DEP (formerly NED) and global GMTED2010 and SRTM terrain data courtesy of the U.S. "
+    "Geological Survey.",
+)
 
 MAPTERHORN = Source(
     id="mapterhorn",
     label="Mapterhorn",
     url="https://tiles.mapterhorn.com/{z}/{x}/{y}.webp",
-    attribution="© Mapterhorn",
+    attribution=copernicus_credit.RELIEF,
     link="https://mapterhorn.com/attribution",
+    # its planet is Copernicus GLO-30, whose licence asks this of adapted data
+    published=copernicus_credit.RELIEF_PUBLISHED,
 )
 AWS_TERRAIN = Source(
     id="aws-terrain",
@@ -100,9 +127,16 @@ AWS_TERRAIN = Source(
     url="https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
     attribution="Terrain Tiles, Mapzen and AWS Open Data",
     link="https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
+    published="Terrain Tiles, Mapzen and AWS Open Data: " + "; ".join(MAPZEN_REQUIRED),
 )
 SOURCES = (MAPTERHORN, AWS_TERRAIN)
 _BY_ID = {source.id: source for source in SOURCES}
+
+
+def credit(source: Source) -> dict[str, str]:
+    """A source's credits as the frontend reads them: short on a map, ``published`` on a picture."""
+    return {"id": source.id, "label": source.label, "attribution": source.attribution, "link": source.link,
+            "published": source.published}
 
 # (content, media type, source id) of a tile that exists.
 Fetched = tuple[bytes, str, str]
@@ -918,11 +952,8 @@ class Sampler:
         return out
 
     def credits(self) -> list[dict[str, str]]:
-        """Who to credit for the heights this sampler read."""
-        return [
-            {"label": s.label, "attribution": s.attribution, "link": s.link}
-            for s in SOURCES if s.id in self.sources
-        ]
+        """Who to credit for the heights this sampler read, on screen and on a picture."""
+        return [credit(s) for s in SOURCES if s.id in self.sources]
 
     def resolution(self, lat: float) -> float | None:
         """Ground size of the finest heights that answered, in metres: a survey's pixel where a level

@@ -31,8 +31,8 @@
 | **Mapbox Satellite** | yes | access token in URL | yes | yes¹ | `© Mapbox © OpenStreetMap` (+ Maxar) |
 | **Google Satellite** | yes | **session token** | yes (flattened+attributed only) | **NO** | dynamic copyright from viewport endpoint |
 | **Google Satellite (Maps JS)** | yes | key in script URL⁴ | screen crops only (user-initiated grab, attribution burned) | n/a (widget) | `Map data © Google` + the widget's own credits |
-| **Sentinel-2 (Sentinel Hub)** | yes | instance ID in URL³ | yes | yes | `© Copernicus Sentinel data {year}` |
-| **Sentinel-1 radar (Sentinel Hub)** | yes, plus a radar layer | instance ID in URL³ | yes | yes | `© Copernicus Sentinel data {year}` |
+| **Sentinel-2 (Sentinel Hub)** | yes | instance ID in URL³ | yes | yes | `Contains modified Copernicus Sentinel data {year}` (§ Copernicus credit) |
+| **Sentinel-1 radar (Sentinel Hub)** | yes, plus a radar layer | instance ID in URL³ | yes | yes | `Contains modified Copernicus Sentinel data {year}` (§ Copernicus credit) |
 
 ¹ Display + static-image capture with attribution is permitted; plan-level
 caching/redistribution limits vary, so the cache stays modest (30-day TTL) and
@@ -48,7 +48,8 @@ zooms with a constant "max zoom layer = 17" placard. It is registered in
 so it is never requested. Verified 2026-07.
 
 ³ Open data under the Copernicus free, full and open licence. It requires
-attribution, so no capture or cache restriction. The constraint is quota, not law.
+attribution (§ Copernicus credit), so no capture or cache restriction. The constraint
+is quota, not law.
 The instance ID is the **whole credential**: OGC needs no OAuth token on top of it
 (verified 2026-07: a wrong id answers `400 Invalid instance id`, never a 401). It
 is still the user's quota identity, so it lives in `api_keys` like any other key.
@@ -56,6 +57,65 @@ is still the user's quota identity, so it lives in `api_keys` like any other key
 ⁴ A Maps JS key is client-side **by design** (referrer-restricted, not secret), so
 shipping it to the browser in the loader URL is intended. Every
 other key is a tile key, and stays server-side behind the proxy.
+
+## Copernicus credit
+
+The wording lives once a side: `engine/copernicus_credit.py` and
+`frontend/src/lib/copernicusCredit.js`.
+
+| Data | Credit written | Where it is composed |
+|------|----------------|----------------------|
+| Sentinel-2 and Sentinel-1 the app renders: maps, captures, figures, Detect's evidence, Compare and evolution exports, plates, Horizon's near ground, the globe | `Contains modified Copernicus Sentinel data {year}` | a provider variant (`engine/tiles.py`), `datedCredit(attribution, id)` on the front |
+| A Copernicus Browser screenshot of a Sentinel collection (`S1_…`, `S2_…`, `S3…`, `S5_…`) or of none named | the same, its year from the address's `toTime` | `api/ingest.py screenshot_credit` |
+| A Copernicus Browser screenshot of a Land service product (`COPERNICUS_CLMS_…`) | `Contains modified Copernicus Service information {year}` | the same |
+| A Copernicus Browser screenshot of anything else (Landsat, the DEM, contributing missions) | `Copernicus Browser`, its own credits riding in the pixels | the same |
+| Sentinel-2 cloudless (EOX) | EOX's sentence, which already holds the notice | `engine/cloudless.py` |
+| Terrain heights (Mapterhorn, built on Copernicus GLO-30 and national surveys) | on a map's corner `© Mapterhorn`, as Mapterhorn's own examples write it, its attribution page linked; on a picture drawn from the relief and exported or filed (Horizon's pictures, a tilted capture, a plate with relief) `© Mapterhorn, produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved` | `engine/terrain.py` (`published`), `copernicus_credit.DEM` |
+| Terrain fallback (AWS Terrain Tiles, Mapzen) | on a picture, the Required attribution its licence page lists, every source word for word, the EU-DEM line among them | `terrain.MAPZEN_REQUIRED` |
+
+- **Always the modified form.** Every Sentinel picture here is rendered from its
+  bands by a script, reprojected and compressed, so "Copernicus Sentinel data
+  [Year]" (unmodified) is never written. The notice carries no "©".
+- **The year is the data's.** A pass names its year, a window across New Year both
+  (`2025-2026`), an evolution sheet the span of its pictures. A map with no window
+  (the declared fallback) has no date and says no year rather than a wrong one. The
+  provider list sends the notice undated; the id a map draws names its window and
+  dates it.
+- **No "Sentinel Hub".** The tiles come from the Copernicus Data Space Ecosystem's own
+  Sentinel Hub (`sh.dataspace.copernicus.eu`), whose terms send Sentinel data to the
+  legal notice. "Processed by Sentinel Hub" is what Sentinel Hub's commercial service
+  (sentinel-hub.com) asks of its own customers.
+- **Long credits wrap.** A footer drawn on a picture (Compare, evolution, Horizon,
+  a proof) breaks its credits onto more lines and grows to hold them
+  (`lib/creditLines.js`); it never squeezes them narrower.
+- **A proof credits its imagery.** Its footer lists the credits of the panels it
+  shows, each read as the notice where it is Copernicus, then *Composed with Azimut*,
+  unless the analyst wrote their own.
+- **Older pictures keep their words.** Captures filed with "© Copernicus Sentinel data
+  / Sentinel Hub" and its variants keep them on disk.
+  `normalise_attribution(text, imagery_day)` reads them as the notice, dated when the
+  day is known, wherever they are listed; every other credit is left as it was.
+
+Sources, read 2026-11-05:
+
+- European Commission, [Legal notice on the use of Copernicus Sentinel Data and
+  Service Information](https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice):
+  "'Copernicus Sentinel data [Year]' for Sentinel data" and, "where the Copernicus
+  Sentinel Data and Service Information have been adapted or modified", "'Contains
+  modified Copernicus Sentinel data [Year]' for Sentinel data; and/or 'Contains
+  modified Copernicus Service information [Year]' for Copernicus Service Information".
+- [CDSE FAQ](https://documentation.dataspace.copernicus.eu/FAQ.html), citation format:
+  "If the image in processed in the Copernicus Browser kindly use the phrase
+  'Contains modified Copernicus Sentinel data [YEAR] for Sentinel data processed in
+  Copernicus Browser'", then the legal notice's two forms.
+- [Sentinel Hub Terms of Use](https://www.sentinel-hub.com/tou/), for its own
+  Services: "Contains modified Copernicus Sentinel data [Year] processed by Sentinel
+  Hub".
+- Licence for COP-DEM-GLO-30-F, Article 6(b): adapted data carries "produced using
+  Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH
+  2014-2018 provided under COPERNICUS by the European Union and ESA; all rights
+  reserved". [Mapterhorn's source list](https://mapterhorn.com/attribution) names
+  GLO-30 with that producer line.
 
 ## Google in the EEA since 2025-07-08
 
@@ -141,7 +201,7 @@ One MV3 extension (Chrome/Edge + Firefox), two flows:
 | Sites | localhost only | Google Maps/Earth, Bing, Yandex, OSM, Apple Maps, Zoom Earth, Satellites.pro and Copernicus Browser; endpoint also refuses non-map sites |
 | Metadata | app view (`framed:true`) | parsed only from the URL: coordinates, zoom, bearing, place name and any encoded imagery date; correctable in the popup; may be empty |
 | Filing | same-origin, no pairing | token-gated `POST /api/ingest/screenshot`, CORS limited to extension origins; `/api/events` refreshes open app tabs |
-| Attribution | burned by the app | burned server-side per site (`api/ingest.py ATTRIBUTIONS`), source URL + site + timestamp always in provenance |
+| Attribution | burned by the app | burned server-side per site (`api/ingest.py screenshot_credit`; Copernicus Browser by the collection its address names, § Copernicus credit), source URL + site + timestamp always in provenance |
 
 The extension only screenshots and sends the URL. Every URL format rule lives in
 `engine/mapsites.py`; the popup prefill is
@@ -338,8 +398,8 @@ composition that can be arrowed rather than a picture to accept or redo.
 
 One day for every panel, by design: a figure is one acquisition seen several ways.
 Panels of different dates would compare two things at once, which is Compare's job.
-Up to 8 panels, 1–4 per row, each layer once. The footer states the day, the point
-and `Copernicus Sentinel-2 L2A`.
+Up to 8 panels, 1–4 per row, each layer once. The footer states the day, the point,
+`Sentinel-2 L2A` and the Copernicus credit with the day's year.
 
 ### Dates come from WFS, and cost one request
 

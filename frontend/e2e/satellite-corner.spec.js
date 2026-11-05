@@ -12,7 +12,7 @@ const SENTINEL = [
   { id: 'esri-world-imagery', label: 'Esri World Imagery', url: 'https://tiles.invalid/{z}/{x}/{y}.png',
     imagery: true, max_zoom: 19, tile_size: 256, attribution: 'Browser fixture' },
   { id: 'sentinel2', label: 'Sentinel-2 (Copernicus)', url: 'https://tiles.invalid/{z}/{x}/{y}.png',
-    meter: 'sentinelhub', imagery: true, max_zoom: 19, tile_size: 256, attribution: 'Copernicus Sentinel data' },
+    meter: 'sentinelhub', imagery: true, max_zoom: 19, tile_size: 256, attribution: 'Contains modified Copernicus Sentinel data' },
 ];
 
 /** Whether `top` is what the eye sees at a point it shares with `under`. */

@@ -24,7 +24,7 @@ from typing import Any
 
 from ..repository import EntityStatus
 from ..workspace import Case, CaseError
-from . import comparisons, continents, horizon_views
+from . import comparisons, continents, copernicus_credit, horizon_views
 from . import coords as coords_engine
 from . import countries
 from . import geo as geo_engine
@@ -464,6 +464,11 @@ def _captures_of(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         source = item.get("source") or {}
         merged = {**source, **item}  # media fields (title/notes/path) win
+        if isinstance(merged.get("attribution"), str):
+            # an older capture's Copernicus credit, read in today's words
+            merged["attribution"] = copernicus_credit.normalise_attribution(
+                merged["attribution"], merged.get("imagery_date")
+            )
         lat, lon = merged.get("lat"), merged.get("lon")
         if not merged.get("title") and lat is not None and lon is not None:
             merged["title"] = coords_label(lat, lon)

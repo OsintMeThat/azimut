@@ -6,8 +6,10 @@ import {
   comparisonFilename,
   pictureDateFields,
   composeComparison,
+  footerCredits,
   gifColours,
   scaleBarLength,
+  signatureRoom,
 } from './compareExport.js';
 
 const FRAME = { lng: 2.3, lat: 48.8, zoom: 16, bearing: 0, width: 500, height: 300 };
@@ -83,6 +85,26 @@ describe('comparison export', () => {
       [BASE.a.canvas, 0, 48],
       [BASE.b.canvas, 500, 48],
     ]);
+  });
+
+  it('wraps long credits onto more lines under the pictures, never squeezing them', () => {
+    const attributionA = 'Esri, Vantor, Earthstar Geographics, and the GIS User Community · World Imagery Wayback';
+    const attributionB = 'Contains modified Copernicus Sentinel data 2026';
+    const out = composeComparison({ ...BASE, mode: 'overlay', attributionA, attributionB });
+    // the footer's lines start at its margin, under the pictures
+    const lines = out.context.calls.filter(([name, , x, y]) => name === 'fillText' && x === 16 && y > 48 + 300);
+    expect(lines.length).toBeGreaterThan(1);
+    // cut between credits, each whole, each line within the room and drawn at its own width
+    expect(lines.map(([, text]) => text)).toEqual([
+      'A: Esri, Vantor, Earthstar Geographics, and the GIS User Community',
+      'World Imagery Wayback   |   B: Contains modified Copernicus Sentinel data 2026',
+    ]);
+    for (const [, text, , , maxWidth] of lines) {
+      expect(text.length * 6).toBeLessThanOrEqual(500 - 32);
+      expect(maxWidth).toBeUndefined();
+    }
+    expect(out.height).toBe(48 + 300 + 26 + (lines.length - 1) * 13);
+    expect(lines.at(-1)[3]).toBe(out.height - 9);
   });
 
   it('gives a titled export a taller header', () => {
@@ -300,8 +322,16 @@ describe('signing an export', () => {
     const signed = composeComparison({ ...BASE, mode: 'side', signed: true });
     expect(paths).toHaveLength(9);
     const credits = (out) => out.context.calls.filter(([name, text]) => name === 'fillText' && String(text).startsWith('A: '));
-    expect(credits(signed)[0][4]).toBeLessThan(credits(plain)[0][4]);
+    // short credits sit on the one line either way, clear of the lockup
+    expect(credits(signed)).toHaveLength(1);
+    expect(credits(signed)[0][1].length * 6).toBeLessThanOrEqual(signed.width - 32 - signatureRoom(1));
     expect([signed.width, signed.height]).toEqual([plain.width, plain.height]);
+    // the lockup's room is taken from the credits' lines, so a long credit wraps sooner signed
+    const ctx = fakeCanvas().getContext('2d');
+    const long = 'A: Esri, Vantor, Earthstar Geographics, and the GIS User Community · World Imagery Wayback   |   '
+      + 'B: Contains modified Copernicus Sentinel data 2026';
+    expect(footerCredits(ctx, long, 920, 1, false).lines).toEqual([long]);
+    expect(footerCredits(ctx, long, 920, 1, true).lines).toHaveLength(2);
   });
 
   it('leaves the picture whole where the browser cannot trace the lockup', () => {

@@ -10,8 +10,15 @@ import { attribution as layerCredit } from '../map/addedLayers.js';
 import { PLAIN_ATTRIBUTION, readsHeights } from './plainBasemap.js';
 import { CLOUDLESS_ID, cloudlessYear } from './cloudless.js';
 import { SENTINEL_ID, passCredit } from './sentinelPass.js';
+import { normaliseAttribution } from '../copernicusCredit.js';
 
 const strip = (text) => String(text ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+
+/** The relief's credit as a printed page owes it: with what its licences ask of a picture (`/api/terrain/sources`). */
+const reliefCredit = (relief) => {
+  const source = relief?.sources?.[0];
+  return normaliseAttribution(source?.published || source?.attribution);
+};
 
 /** What a map's ground, its relief and its overlays owe, which their terms ask for wherever their pixels are shown. */
 function groundCredits(element, { providers = [], relief = null, releases = [], years = [] }) {
@@ -21,13 +28,14 @@ function groundCredits(element, { providers = [], relief = null, releases = [], 
   const heights = relief && (readsHeights(ground, element.overlays ?? []) || (element.terrain ?? 0) > 0);
   if (ground.startsWith('plain')) {
     parts.push(PLAIN_ATTRIBUTION);
-    if (heights) parts.push(relief.sources?.[0]?.attribution ?? '');
+    if (heights) parts.push(reliefCredit(relief));
   } else if (ground === CLOUDLESS_ID) {
     // the credit and licence of the year the map shows, word for word as EOX asks
     parts.push(cloudlessYear(element, years)?.attribution ?? providers.find((entry) => entry.id === ground)?.attribution ?? '');
-    if (heights) parts.push(relief.sources?.[0]?.attribution ?? '');
+    if (heights) parts.push(reliefCredit(relief));
   } else {
-    const said = providers.find((entry) => entry.id === ground)?.attribution ?? '';
+    // a Sentinel-2 map's credit carries the year of its pass
+    const said = normaliseAttribution(providers.find((entry) => entry.id === ground)?.attribution, element.acquired);
     // a Wayback map names the release it shows, the date a reader can check, in place of the bare name
     const release = releases.find((entry) => entry.release === element.release) ?? (ground === 'esri-wayback' ? releases[0] : null);
     const dated = ground === 'esri-wayback' && release?.date ? `World Imagery Wayback, release of ${release.date}` : '';
@@ -35,7 +43,7 @@ function groundCredits(element, { providers = [], relief = null, releases = [], 
     if (dated) parts.push(dated);
     // a Sentinel-2 map names the day of its one pass
     if (ground === SENTINEL_ID) parts.push(passCredit(element));
-    if (heights) parts.push(relief.sources?.[0]?.attribution ?? '');
+    if (heights) parts.push(reliefCredit(relief));
   }
   for (const id of element.overlays ?? []) if (id !== 'relief') parts.push(overlayAttribution(id));
   return parts.map(strip).filter(Boolean);

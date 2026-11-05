@@ -50,10 +50,7 @@ def sources() -> dict[str, Any]:
         "tile_size": terrain.TILE,
         "max_zoom": terrain.PLANET_ZOOM,
         "encoding": "terrarium",
-        "sources": [
-            {"id": s.id, "label": s.label, "attribution": s.attribution, "link": s.link}
-            for s in terrain.SOURCES
-        ],
+        "sources": [terrain.credit(s) for s in terrain.SOURCES],
     }
 
 

@@ -17,6 +17,7 @@
  * throwaway intermediate zoom levels mid-gesture, which a billed provider paid
  * for. MapLibre overzooms what it already holds instead.
  */
+import { normaliseAttribution } from '../copernicusCredit.js';
 import { BORDER_LINES } from './borders.js';
 import { FIRE_MARKS } from './firePoints.js';
 import { createGoogleGlass, loadGoogleMaps } from './gmaps.js';
@@ -317,7 +318,8 @@ export function rasterSource(provider, providerId, cell, guardId = '') {
     tileSize: cell,
     minzoom: 0,
     maxzoom: sourceMaxZoom(provider, cell),
-    attribution: provider.attribution,
+    // a Sentinel pass is credited with its year, which only the id names
+    attribution: normaliseAttribution(provider.attribution, providerId),
   };
 }
 

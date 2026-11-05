@@ -38,7 +38,7 @@ const CUSTOM_XYZ = {
 const SENTINEL = {
   id: 'sentinel2',
   url: 'https://sh.dataspace.copernicus.eu/ogc/wmts/{key}?...',
-  attribution: '© Copernicus Sentinel data',
+  attribution: 'Contains modified Copernicus Sentinel data',
   max_zoom: 18,
   max_native_zoom: 14,
   min_zoom: 7,
@@ -172,6 +172,12 @@ describe('the source one provider is served from', () => {
       maxzoom: 19,
       attribution: 'Imagery © Esri',
     });
+  });
+
+  it('credits a Sentinel pass with the year its id names', () => {
+    expect(rasterSource(SENTINEL, 'sentinel2~TRUE_COLOR~2025-12-20~2026-01-10', 512).attribution)
+      .toBe('Contains modified Copernicus Sentinel data 2025-2026');
+    expect(rasterSource(SENTINEL, 'sentinel2', 512).attribution).toBe('Contains modified Copernicus Sentinel data');
   });
 
   it('never asks below zero, whatever the cell does to the numbering', () => {

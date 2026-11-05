@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { creditParts, plateCredits } from './credits.js';
 
+/** What a page drawn from the relief owes it: Mapterhorn, and the Copernicus DEM licence's notice. */
+const RELIEF_CREDIT = '© Mapterhorn, produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and '
+  + 'Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved';
+
 /** The credits of one map, read through the plate's own path. */
 const mapCredits = (element, sources = {}) => creditParts({ elements: [element] }, sources).map((part) => part.text);
 
@@ -17,15 +21,15 @@ describe('a plate\'s credits', () => {
     expect(mapCredits(spec.elements[1], { providers })).toEqual(['Esri, Maxar']);
     const said = plateCredits(spec, { providers, rows, relief });
     expect(said.split(' · ')).toEqual(['© OpenMapTiles © OpenStreetMap contributors · OpenFreeMap'.split(' · ')[0],
-      'OpenFreeMap', '© Mapterhorn', 'GeoConfirmed — geoconfirmed.org', 'Esri, Maxar']);
+      'OpenFreeMap', RELIEF_CREDIT, 'GeoConfirmed — geoconfirmed.org', 'Esri, Maxar']);
   });
 
   it('owes the heights to a topographic ground and to a map drawn in 3D, shaded or not', () => {
     const relief = { sources: [{ attribution: '© Mapterhorn' }] };
     const providers = [{ id: 'esri-world-imagery', attribution: 'Esri' }];
-    expect(mapCredits({ kind: 'map', basemap: 'plain-topo', overlays: [] }, { relief })).toContain('© Mapterhorn');
-    expect(mapCredits({ kind: 'map', basemap: 'esri-world-imagery', overlays: [], terrain: 1.5 }, { providers, relief })).toEqual(['Esri', '© Mapterhorn']);
-    expect(mapCredits({ kind: 'map', basemap: 'plain', overlays: [] }, { relief })).not.toContain('© Mapterhorn');
+    expect(mapCredits({ kind: 'map', basemap: 'plain-topo', overlays: [] }, { relief })).toContain(RELIEF_CREDIT);
+    expect(mapCredits({ kind: 'map', basemap: 'esri-world-imagery', overlays: [], terrain: 1.5 }, { providers, relief })).toEqual(['Esri', RELIEF_CREDIT]);
+    expect(mapCredits({ kind: 'map', basemap: 'plain', overlays: [] }, { relief })).not.toContain(RELIEF_CREDIT);
   });
 
   it('names a Wayback map by its dated release, once', () => {
@@ -40,9 +44,9 @@ describe('a plate\'s credits', () => {
   it('owes the heights to a ground that shades its own relief, and to the relief asked over imagery', () => {
     const relief = { sources: [{ attribution: '© Mapterhorn' }] };
     const providers = [{ id: 'esri-world-imagery', attribution: 'Esri' }];
-    expect(mapCredits({ kind: 'map', basemap: 'plain-news', overlays: [] }, { relief })).toContain('© Mapterhorn');
-    expect(mapCredits({ kind: 'map', basemap: 'esri-world-imagery', overlays: ['relief'] }, { providers, relief })).toEqual(['Esri', '© Mapterhorn']);
-    expect(mapCredits({ kind: 'map', basemap: 'plain-grey', overlays: [] }, { relief })).not.toContain('© Mapterhorn');
+    expect(mapCredits({ kind: 'map', basemap: 'plain-news', overlays: [] }, { relief })).toContain(RELIEF_CREDIT);
+    expect(mapCredits({ kind: 'map', basemap: 'esri-world-imagery', overlays: ['relief'] }, { providers, relief })).toEqual(['Esri', RELIEF_CREDIT]);
+    expect(mapCredits({ kind: 'map', basemap: 'plain-grey', overlays: [] }, { relief })).not.toContain(RELIEF_CREDIT);
   });
 
   it('credits a Sentinel-2 cloudless map with its own year\'s words and licence', () => {
@@ -74,10 +78,21 @@ describe('a plate\'s credits', () => {
     expect(plateCredits(spec, sources, ['GeoConfirmed — geoconfirmed.org', 'Esri'])).toBe('Esri · Photo: a reporter');
   });
 
-  it('names a Sentinel-2 map by the day of its one pass', () => {
-    const providers = [{ id: 'sentinel2', attribution: '© Copernicus Sentinel data / Sentinel Hub' }];
+  it('prints what the relief\'s licences ask of a page drawn from it', () => {
+    const fallback = 'Terrain Tiles, Mapzen and AWS Open Data: Europe terrain data produced using Copernicus data';
+    const relief = { sources: [{ attribution: 'Terrain Tiles, Mapzen and AWS Open Data', published: fallback }] };
+    expect(mapCredits({ kind: 'map', basemap: 'plain-topo', overlays: [] }, { relief })).toContain(fallback);
+    // an answer that lists only the short credit still owes the notice
+    expect(mapCredits({ kind: 'map', basemap: 'plain-topo', overlays: [] }, { relief: { sources: [{ attribution: '© Mapterhorn' }] } }))
+      .toContain(RELIEF_CREDIT);
+  });
+
+  it('names a Sentinel-2 map by the day of its one pass, credited with its year', () => {
+    // the backend lists the basemap with the notice and no year: a map dates it
+    const providers = [{ id: 'sentinel2', attribution: 'Contains modified Copernicus Sentinel data' }];
     expect(mapCredits({ kind: 'map', basemap: 'sentinel2', acquired: '2026-05-12', overlays: [] }, { providers }))
-      .toEqual(['© Copernicus Sentinel data / Sentinel Hub', 'Sentinel-2 pass of 2026-05-12']);
-    expect(mapCredits({ kind: 'map', basemap: 'sentinel2', overlays: [] }, { providers })).toEqual(['© Copernicus Sentinel data / Sentinel Hub']);
+      .toEqual(['Contains modified Copernicus Sentinel data 2026', 'Sentinel-2 pass of 2026-05-12']);
+    expect(mapCredits({ kind: 'map', basemap: 'sentinel2', overlays: [] }, { providers }))
+      .toEqual(['Contains modified Copernicus Sentinel data']);
   });
 });

@@ -199,7 +199,7 @@
           <label class="chk"><input type="checkbox" checked={data.footerText !== false}
             onchange={(e) => (data.footerText = e.target.checked)} /> Show text</label>
           {#if data.footerText !== false}
-            <input type="text" placeholder="Composed with Azimut" maxlength="200"
+            <input type="text" placeholder="Imagery credits · Composed with Azimut" maxlength="200"
               bind:value={data.footer} />
           {/if}
           <div class="color-row">

@@ -48,6 +48,7 @@
   import { assignFolder } from '../lib/filing.js';
   import { reloadedInto, splitHash } from '../lib/hash.js';
   import { copyText } from '../lib/clipboard.js';
+  import { normaliseAttribution } from '../lib/copernicusCredit.js';
   import { holdsUnsaved, onBackForward, settlePlace } from '../lib/backButton.js';
   import { openMapAt } from '../lib/navigate.js';
   import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
@@ -540,7 +541,7 @@
         scale: drawn.scale,
         title,
         standing: standingText({ observer: view.observer, camera: drawn.camera, sky: { on: view.skyOn, date: view.skyDate, time: view.skyTime }, kind }),
-        credits,
+        credits: pictureCredits,
         daylight: view.ground !== 'plain' || Boolean(photoOn && overlay.source),
         trace,
         signed,
@@ -590,7 +591,7 @@
     form.append('image', blob, 'view.png');
     form.append('kind', kind);
     form.append('filename', filename);
-    if (credits) form.append('attribution', credits);
+    if (pictureCredits) form.append('attribution', pictureCredits);
     const answer = await api.post(`/api/cases/${encodeURIComponent(caseId)}/horizon/views/${encodeURIComponent(views.current.name)}/images`, form);
     reloadCase();
     return answer.path;
@@ -626,7 +627,7 @@
         scale: drawn.scale,
         title,
         standing: standingText({ observer: view.observer, camera: faced, sky: { on: view.skyOn, date: view.skyDate, time: view.skyTime } }),
-        credits,
+        credits: pictureCredits,
         daylight: view.ground !== 'plain' || Boolean(photoOn && overlay.source),
         tag: reshapedShown() ? photoTag(true) : '',
       });
@@ -641,7 +642,7 @@
       if (views.current) form.append('view', views.current.name);
       const photo = photoOn ? overlay.source : null;
       if (photo?.path && photo.caseId === owner.id) form.append('photo', photo.path);
-      if (credits) form.append('attribution', credits);
+      if (pictureCredits) form.append('attribution', pictureCredits);
       await api.post(`/api/cases/${encodeURIComponent(owner.id)}/horizon/captures`, form);
       reloadCase();
       toast(box ? 'Area of the view captured & filed' : 'View captured & filed', 'ok');
@@ -1101,18 +1102,27 @@
 
   // -- reading out -------------------------------------------------------------------
 
-  const credits = $derived.by(() => {
-    const names = (view.panorama?.credits ?? []).map((credit) => credit.attribution);
+  /**
+   * What the view owes its sources: the short credits a screen shows, or, when
+   * `published`, what a picture exported or filed from it carries, the relief's
+   * licences in full.
+   */
+  function creditsOf(published) {
+    const names = (view.panorama?.credits ?? []).map((credit) => (published && credit.published) || credit.attribution);
     if (view.imagery) {
       // a dated release is credited as its archive is
       const provider = imagery.find(view.imagery.provider) ?? imagery.find(view.imagery.provider.split('~')[0]);
-      if (view.imagery.near) names.push(imagery.find('sentinel2')?.attribution);
+      // Sentinel-2 near the eye is credited with its pass's year
+      if (view.imagery.near) names.push(normaliseAttribution(imagery.find('sentinel2')?.attribution, view.imagery.near.provider));
       names.push(provider?.attribution);
     }
     if (view.peaksOn && view.peaks.length) names.push(...view.peaksCredits.map((credit) => credit.attribution));
     const resolution = view.panorama?.resolution ? `${view.panorama.resolution} m relief` : '';
-    return [...names, resolution].filter(Boolean).join(' · ');
-  });
+    const line = [...names, resolution].filter(Boolean).join(' · ');
+    return published ? normaliseAttribution(line) : line;
+  }
+  const credits = $derived(creditsOf(false));
+  const pictureCredits = $derived(creditsOf(true));
   const aspect = $derived((photoOn && overlay.aspect) || (frame.width && frame.height ? frame.width / frame.height : 4 / 3));
   /** The frame in the photo's shape while one is laid, letterboxed in the room there is. */
   const boxed = $derived(photoOn && overlay.source && overlay.aspect ? fitFrame(overlay.aspect, slot) : null);

@@ -215,6 +215,33 @@ def test_capture_carries_provider_label_source_link_and_imagery_date(client):
     assert listed[0]["provider_label"] == "Copernicus Browser"
     assert listed[0]["imagery_date"] == "2024-07-01"
     assert listed[0]["source_url"].startswith("https://browser.dataspace.copernicus.eu/")
+    # Copernicus asks for its own notice for data processed in its Browser, with the year
+    assert body["attribution"] == "Contains modified Copernicus Sentinel data 2024"
+
+
+def test_a_copernicus_browser_shot_is_credited_by_the_collection_it_shows():
+    """Sentinel data takes the Sentinel notice, the Land service's products the
+    service-information one; Landsat or the DEM there are credited to the site,
+    whose own credits ride in the pixels, never as Sentinel data."""
+    from azimut.api.ingest import screenshot_credit
+
+    base = "https://browser.dataspace.copernicus.eu/?zoom=12&lat=45.19&lng=11.77&datasetId="
+    site = "copernicus-browser"
+    notice = "Contains modified Copernicus Sentinel data 2024"
+    for dataset in ("S2_L2A_CDAS", "S1_CDAS_IW_VVVH", "S3OLCI_CDAS", "S5_NO2_CDAS"):
+        assert screenshot_credit(site, base + dataset, "2024-07-01") == notice, dataset
+    # no collection named is the Browser's default, Sentinel-2
+    assert screenshot_credit(site, base[: -len("&datasetId=")], "2024-07-01") == notice
+    # and no date known says no year
+    assert screenshot_credit(site, base + "S2_L2A_CDAS", None) == "Contains modified Copernicus Sentinel data"
+    assert screenshot_credit(site, base + "COPERNICUS_CLMS_NDVI_300M_10DAILY_V3", "2025-08-01") == (
+        "Contains modified Copernicus Service information 2025"
+    )
+    for dataset in ("CDAS_L8_L9_LOTL1", "DEM_COPERNICUS_30_CDAS", "CCM_VHR_IMAGE_2021"):
+        assert screenshot_credit(site, base + dataset, "2024-07-01") == "Copernicus Browser", dataset
+    # every other site keeps its own credit
+    assert screenshot_credit("zoom-earth", "https://zoom.earth/", "2024-07-01") == "© Zoom Earth"
+    assert screenshot_credit("unknown", "https://Maps.Example.org/x", None) == "© maps.example.org"
 
 
 def test_malformed_url_and_unknown_case_are_refused(client):

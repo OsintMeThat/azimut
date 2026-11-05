@@ -151,6 +151,27 @@ describe('composing', () => {
     expect(ticks).toHaveLength(3);
   });
 
+  it('wraps a long credit onto more lines and grows the footer by them', () => {
+    const attribution = 'Esri, Vantor, Earthstar Geographics, and the GIS User Community · World Imagery Wayback · '
+      + 'Contains modified Copernicus Sentinel data 2019-2026 · produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014';
+    const narrow = () => {
+      const canvas = fakeCanvas();
+      canvas.width = 400;
+      canvas.height = 300;
+      return { canvas, frame: { ...FRAME, width: 400, height: 300 } };
+    };
+    const out = composeEvolutionFrame({
+      picture: narrow(), label: 'Esri Wayback', date: '2021-05-02', current: 0, positions: [0, 1], attribution,
+      makeCanvas: () => fakeCanvas(),
+    });
+    const lines = out.calls.filter(([name, text]) => name === 'fillText' && attribution.includes(text));
+    expect(lines.length).toBeGreaterThan(1);
+    expect(out.height).toBe(48 + 300 + 46 + (lines.length - 1) * 13);
+    const sheet = composeEvolutionSheet({ cells: [{ picture: narrow(), date: '2021' }], label: 'Esri Wayback', attribution,
+      makeCanvas: () => fakeCanvas() });
+    expect(sheet.calls.filter(([name, text]) => name === 'fillText' && attribution.includes(text)).length).toBeGreaterThan(1);
+  });
+
   it('only draws the marks set on both sides', () => {
     const mark = (id, side) => ({ id, side, kind: 'rect', colour: '#ef4444', points: [[2.349, 48.849], [2.351, 48.851]] });
     const out = composeEvolutionFrame({

@@ -18,6 +18,7 @@
   import { onMount } from 'svelte';
   import { createGlobe } from '../../lib/globe/globe.js';
   import { sourceMaxZoom, sourceMinZoom } from '../../lib/map/basemap.js';
+  import { normaliseAttribution } from '../../lib/copernicusCredit.js';
   import { api } from '../../lib/api.js';
   import { prefs } from '../../lib/state.svelte.js';
 
@@ -104,7 +105,7 @@
   });
 
   const credits = $derived(
-    [shown?.provider?.attribution, terrainCredit ? `relief: ${terrainCredit}` : '']
+    [normaliseAttribution(shown?.provider?.attribution, shown?.id), terrainCredit ? `relief: ${terrainCredit}` : '']
       .filter(Boolean)
       .join(' · ')
   );

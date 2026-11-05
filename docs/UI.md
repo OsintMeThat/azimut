@@ -2672,9 +2672,10 @@ capture's provenance.
 Capture and Select area, since it is a third thing to take off this map rather
 than a setting for the other two: the same ground on the day already chosen,
 through the layers you pick, each panel captioned and filed as its own capture.
-It opens in Geo Proof with its credit line written — the day, the point and
-Copernicus Sentinel-2 L2A — ready to annotate. Up to eight panels, one to four
-per row, each layer once, at the capture size the menu is set to. The chip is
+It opens in Geo Proof with its credit line written — the day, the point,
+Sentinel-2 L2A and the credit Copernicus asks for, with the year — ready to
+annotate. Up to eight panels, one to four per row, each layer once, at the capture
+size the menu is set to. The chip is
 never greyed: what a figure still needs is said in the dialog, where it can be
 read and acted on — an undated map has nothing to build from and says so instead
 of the panels, and a configuration with fewer than two layers says where another
@@ -3942,8 +3943,8 @@ after-only image and Point/Area geometry. Single-image methods default to after-
 and Point; change methods default to paired images and Area. Pinning creates a
 place and a PNG in Files, and links them: the picture shows the place. The picture says on its face when and where: each image
 carries its letter and its date (a radar pass its UTC time), and the foot holds the
-point's coordinates and the imagery's attribution, so the file still reads after
-the run is gone. The same dates reach the case's time. The PNG carries them on its
+point's coordinates and the imagery's credit with the year of its passes, so the
+file still reads after the run is gone. The same dates reach the case's time. The PNG carries them on its
 Time tab, and a claim at the place, citing the picture, says what the sweep read: a
 change `occurred` between the two passes, a thing on one pass was `observed` on it.
 The place itself carries no date, and the claim no confidence. Undo sends those
@@ -4145,7 +4146,9 @@ sides, ringed dark to hold up over bright imagery, with the same round turn knob
 
 **Captions and the footer are written in place.** A double-click on a panel's
 caption or on the footer's credit line opens the editor over the words, one line
-each; a footer emptied goes back to the line the panels give. A press on a caption
+each; a footer emptied goes back to the line the panels give: the imagery credits
+of the panels it shows, each once, then *Composed with Azimut*, wrapped onto more
+lines when long. A press on a caption
 picks its panel, and a press on the footer picks it, framed with nothing to pull:
 the rail then sets the size and colour of the captions, which share both so a row
 reads as one line, or of the footer. **Auto** is the colour the background gives.

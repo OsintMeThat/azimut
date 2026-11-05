@@ -22,7 +22,7 @@ import httpx
 from PIL import Image, ImageDraw, ImageFont
 
 from .. import USER_AGENT, config, errors
-from . import cloudless, google_tiles, pdffonts, sentinel, wayback
+from . import cloudless, copernicus_credit, google_tiles, pdffonts, sentinel, wayback
 
 TILE_SIZE = 256
 SIZE_MAX = 4096  # hard cap on a capture's width/height, in px
@@ -144,6 +144,9 @@ SENTINEL_ECO_MAX_ZOOM = 7
 # zoom 7 (measured: the tile grid's level 5 answers 400, level 6 answers).
 SENTINEL_MIN_ZOOM = 7
 
+#: Esri's credit for World Imagery Wayback: the tile layer's, and every picture made from it.
+WAYBACK_ATTRIBUTION = "Esri, Vantor, Earthstar Geographics, and the GIS User Community · World Imagery Wayback"
+
 BUILTIN_PROVIDERS: tuple[Provider, ...] = (
     Provider(
         id="esri-world-imagery",
@@ -184,7 +187,7 @@ BUILTIN_PROVIDERS: tuple[Provider, ...] = (
         id=wayback.BASE_ID,
         label="Esri Wayback (imagery archive)",
         url=wayback.TILE_TEMPLATE.format(release="{release}"),
-        attribution="Esri, Vantor, Earthstar Geographics, and the GIS User Community · World Imagery Wayback",
+        attribution=WAYBACK_ATTRIBUTION,
         max_zoom=wayback.MAX_ZOOM,
     ),
     # A year of EOX's Sentinel-2 cloudless (engine/cloudless.py): one cloud-free
@@ -298,7 +301,8 @@ def all_providers() -> list[Provider]:
                 id="sentinel2",
                 label="Sentinel-2 (Copernicus)",
                 url=SENTINELHUB_WMTS_URL.replace("{key}", sentinelhub_key),
-                attribution="© Copernicus Sentinel data / Sentinel Hub",
+                # no year: a variant names its window, and its credit names that year
+                attribution=copernicus_credit.SENTINEL,
                 max_zoom=18,
                 max_native_zoom=14,
                 min_zoom=SENTINEL_MIN_ZOOM,
@@ -324,7 +328,7 @@ def all_providers() -> list[Provider]:
                 id=sentinel.RADAR_ID,
                 label="Sentinel-1 radar (Copernicus)",
                 url=sentinel.radar_wmts_url(radar_layer).replace("{key}", sentinelhub_key),
-                attribution="© Copernicus Sentinel data / Sentinel Hub",
+                attribution=copernicus_credit.SENTINEL,
                 max_zoom=18,
                 max_native_zoom=14,
                 min_zoom=SENTINEL_MIN_ZOOM,
@@ -412,6 +416,7 @@ def get_provider(provider_id: str) -> Provider:
                 url=sentinel.wmts_url(asked, start, end, maxcc, script=script).replace(
                     "{key}", _sentinel_key_from(provider.url)
                 ),
+                attribution=copernicus_credit.sentinel(start, end),
             )
     raise KeyError(f"unknown tile provider '{provider_id}'")
 
@@ -432,6 +437,7 @@ def _radar_provider(provider: Provider, provider_id: str, spec: str) -> Provider
         url=sentinel.radar_wmts_url(layer.group(1), day, time).replace(
             "{key}", _sentinel_key_from(provider.url)
         ),
+        attribution=copernicus_credit.sentinel(day),
     )
 
 
@@ -1075,7 +1081,7 @@ ATTRIBUTION_LINE = 13  # px each further line adds to it
 _ATTRIBUTION_MARGIN = 6
 
 
-def _attribution_lines(text: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont, width: int) -> list[str]:
+def attribution_lines(text: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont, width: int) -> list[str]:
     """The credit in as many lines as the image is too narrow for.
 
     Cut between the credits first (` · `), so each one reads whole, and between
@@ -1119,7 +1125,7 @@ def burn_attribution(img: Image.Image, text: str) -> Image.Image:
     hold them, rather than running off its edge.
     """
     font = ImageFont.load_default()
-    lines = _attribution_lines(text, font, img.width)
+    lines = attribution_lines(text, font, img.width)
     band = ATTRIBUTION_BAND + (len(lines) - 1) * ATTRIBUTION_LINE
     out = Image.new("RGB", (img.width, img.height + band), (16, 18, 24))
     out.paste(img, (0, 0))

@@ -118,6 +118,7 @@
   import { touchesNothing } from '../lib/deleteImpact.js';
   import { assignFolder } from '../lib/filing.js';
   import { SENTINEL_ID, variantId } from '../lib/sentinel.js';
+  import { normaliseAttribution } from '../lib/copernicusCredit.js';
   import { WAYBACK_ID, releaseYearBefore, waybackId } from '../lib/wayback.js';
   import { RADAR_ID, radarId } from '../lib/radar.js';
   import { offerNote, pairOffers, withdrawNote } from '../lib/noteHere.svelte.js';
@@ -2055,8 +2056,8 @@
       annotations,
       labelA: dated(labelA, provenanceA.imageryDate),
       labelB: dated(labelB, provenanceB.imageryDate),
-      attributionA: shownA.provider?.attribution,
-      attributionB: shownB.provider?.attribution,
+      attributionA: normaliseAttribution(shownA.provider?.attribution, shownA.id),
+      attributionB: normaliseAttribution(shownB.provider?.attribution, shownB.id),
       view,
       signed: renderSigned,
       // A framed export comes out upright at the bearing its frame was drawn at.
@@ -2323,7 +2324,8 @@
     const common = {
       title: sessionName,
       label,
-      attribution: provider?.attribution,
+      // the years of every picture, so each frame of an animation is the same height
+      attribution: normaliseAttribution(provider?.attribution, pictures.map((entry) => entry.date)),
       annotations,
       units: prefs.units,
       signed: signExport,
