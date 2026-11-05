@@ -4,7 +4,8 @@ import { CASE_ID, PANEL_PATH, installAppFixture } from './app.fixture.js';
 /**
  * The note in the extension's side panel, framed by a stand-in for the extension's
  * page: the panel says which note it holds, and a quote, a cite and a capture sent
- * from the page land in the note, each with the toast and its Undo.
+ * from the page land in the note, each with the toast and its Undo. Page shows the
+ * note's PDF in place of its text, and the bar switches the case in place.
  *
  * A browser test cannot be an extension, so the stand-in is a page of the app's own
  * origin and says so in the frame's address (`testParent=1`). Only a test run honours
@@ -26,11 +27,14 @@ const host = (src) => `<!doctype html><meta charset="utf-8"><body style="margin:
   addEventListener('message', (event) => { if (event.source === frames[0]) window.told.push(event.data); });
 </script>`;
 
-async function framedNote(page, { testParent = true } = {}) {
+const SECOND = { id: 'dock-fire', name: 'Dock fire', scratch: false, entities: [], links: [], folders: [] };
+
+async function framedNote(page, { testParent = true, cases = undefined } = {}) {
   const fixture = await installAppFixture(page, {
     newEntityId: 'b_new',
     catalog: [CAPTURE],
     chains: { e_cap: { entity: CAPTURE, sources: [], lost: [], dependents: [], relations: [] } },
+    ...(cases ? { cases } : {}),
   });
   const written = [];
   let text = '';
@@ -54,6 +58,9 @@ async function framedNote(page, { testParent = true } = {}) {
   return { fixture, written, looked, frame: page.frameLocator('iframe') };
 }
 
+/** How the note in the frame is shown: `Write` or `Page`. */
+const shown = (frame) => frame.locator('.panel-bar .modes button[aria-pressed="true"]');
+
 const told = (page) => page.evaluate(() => window.told);
 const send = (page, message) => page.evaluate((data) => frames[0].postMessage(data, location.origin), message);
 const put = (id, fields) => ({ azimut: 'note-put', v: 1, id, ...fields });
@@ -61,10 +68,10 @@ const put = (id, fields) => ({ azimut: 'note-put', v: 1, id, ...fields });
 test('a quote, a cite and a capture sent from the extension\'s page land in the panel\'s note, each with Undo', async ({ page }) => {
   const { fixture, written, looked, frame } = await framedNote(page);
 
-  // the case and a picker, and nothing else
+  // the case, the note and Write | Page, and nothing else
   await expect(frame.locator('.panel-bar .case')).toHaveText('Browser Test');
   await expect(frame.locator('.panel-bar button.which')).toContainText('Case notes');
-  await expect(frame.locator('.panel-bar button')).toHaveCount(1);
+  await expect(frame.locator('.panel-bar button')).toHaveText(['Browser Test', 'Case notes', 'Write', 'Page']);
   await expect.poll(() => told(page)).toContainEqual({
     azimut: 'note-panel', v: 1, state: 'ready', caseId: CASE_ID, noteId: 'case', title: 'Case notes',
   });
@@ -111,4 +118,68 @@ test('a page of the app\'s own origin that is not the test\'s stand-in gets no a
   expect((await told(page)).filter((message) => message.azimut === 'note-put-done')).toEqual([]);
   expect(written.join('')).not.toContain('[[entity:');
   expect(fixture.entityWrites).toEqual([]);
+});
+
+test('Page shows the panel\'s note as its PDF in place of the text, kept for the panel, and what is sent brings the text back', async ({ page }) => {
+  const { fixture, written, frame } = await framedNote(page);
+  await expect.poll(() => told(page)).toContainEqual(expect.objectContaining({ azimut: 'note-panel', state: 'ready' }));
+  await frame.locator('.cm-content').click();
+  await frame.locator('.cm-content').pressSequentially('Berths 10 to 14 closed.');
+  await expect.poll(() => written.at(-1) ?? '').toBe('Berths 10 to 14 closed.');
+
+  const previews = [];
+  page.on('request', (request) => { if (request.url().endsWith('/notes/preview')) previews.push(request.postDataJSON()); });
+  await frame.getByRole('button', { name: 'Page' }).click();
+  await expect(shown(frame)).toHaveText('Page');
+  // the server's PDF, drawn by PDF.js across the panel, the text hidden under it
+  const sheet = frame.locator('.page-pane .sheet');
+  await expect(sheet).toHaveCount(1);
+  await expect(sheet.locator('canvas')).toHaveCount(1);
+  expect((await sheet.boundingBox()).width).toBeGreaterThan(300);
+  await expect(frame.locator('.cm-content')).toBeHidden();
+  expect(previews.at(-1)).toMatchObject({ note: 'case', title: 'Case notes', text: 'Berths 10 to 14 closed.' });
+
+  // kept for the panel: it opens on the pages again
+  await page.reload();
+  await expect(frame.locator('.page-pane .sheet canvas')).toHaveCount(1);
+  await expect(shown(frame)).toHaveText('Page');
+
+  // a page pressed goes back to the text, at the line it starts at
+  await frame.locator('.page-pane .sheet .hit').click();
+  await expect(frame.locator('.page-pane')).toHaveCount(0);
+  await expect(shown(frame)).toHaveText('Write');
+  await expect(frame.locator('.cm-content')).toBeFocused();
+
+  // a quote sent while the pages show brings the text back, and lands in it
+  await frame.getByRole('button', { name: 'Page' }).click();
+  await expect(frame.locator('.page-pane .sheet canvas')).toHaveCount(1);
+  await send(page, put('put-p', { action: 'quote', url: PAGE, title: 'Strike | Example News', text: 'The port reopened.' }));
+  await expect.poll(() => told(page)).toContainEqual({ azimut: 'note-put-done', v: 1, id: 'put-p', ok: true });
+  await expect(frame.locator('.page-pane')).toHaveCount(0);
+  await expect(shown(frame)).toHaveText('Write');
+  await expect(frame.locator('.cm-content')).toContainText('The port reopened.');
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('the panel switches to another case in place, from its bar', async ({ page }) => {
+  const { frame } = await framedNote(page, {
+    cases: [{ id: CASE_ID, name: 'Browser Test', scratch: false, entities: [], links: [], folders: [] }, SECOND],
+  });
+  await page.route(`**/api/cases/${SECOND.id}/notes`, (route) => route.fulfill({ json: { text: 'Smoke over the depot.' } }));
+  await expect.poll(() => told(page)).toContainEqual(expect.objectContaining({ state: 'ready', caseId: CASE_ID }));
+
+  await frame.locator('.panel-bar button.case').click();
+  const menu = frame.getByRole('menu', { name: 'Cases' });
+  await expect(menu.getByRole('menuitem')).toHaveText(['Browser Test', 'Dock fire']);
+  await expect(menu.locator('[aria-current="true"]')).toHaveText('Browser Test');
+  await menu.getByRole('menuitem', { name: 'Dock fire' }).click();
+
+  await expect(frame.locator('.panel-bar .case')).toHaveText('Dock fire');
+  await expect(frame.locator('.cm-content')).toContainText('Smoke over the depot.');
+  await expect.poll(() => told(page)).toContainEqual({
+    azimut: 'note-panel', v: 1, state: 'ready', caseId: SECOND.id, noteId: 'case', title: 'Case notes',
+  });
+  const address = await frame.locator(':root').evaluate(() => location.hash);
+  expect(address).toContain(`case=${SECOND.id}`);
+  expect(address).toContain('note=case');
 });

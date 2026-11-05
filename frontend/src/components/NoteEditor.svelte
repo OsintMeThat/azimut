@@ -60,6 +60,8 @@
     template = false,
     /** Whether the app's tools are around the note, to open what it cites in. */
     tools = true,
+    /** Called just before text from outside lands (a put, a citation, text that waited), so a surface showing its pages shows the text. */
+    onarrive = () => {},
   } = $props();
 
   let host = $state(null);
@@ -155,12 +157,12 @@
   });
   $effect(() => {
     if (!where || !doc) return;
-    return offerWriter(where, (text) => insert(text));
+    return offerWriter(where, (text) => arrive(text));
   });
 
   /** What the Notebook and the panel drive this editor with. */
   const api_ = {
-    insert: (text, options) => insert(text, options),
+    insert: (text, options) => arrive(text, options),
     jump: (line) => view && jumpToLine(view, line),
     /** Size, place or caption a picture from the Page pane: its line there, what it shows, `{ width }`, `{ align }` or `{ caption }`. */
     resize: (line, ref, changes) => Boolean(view && !readOnly && resizePicture(view, line, ref, changes)),
@@ -177,6 +179,8 @@
     /** Put `text` where `spot` now is, light it, and answer what landed for Undo. */
     place: (spot, text, options) => {
       if (!view || readOnly) return null;
+      onarrive();
+      if (!view) return null;
       const held = heldRange(view, spot);
       releaseRange(view, spot);
       return held ? placeText(view, held.from, text, options) : null;
@@ -188,6 +192,13 @@
     },
     takeBack: (landed) => Boolean(view && takeBackRange(view, landed)),
   };
+
+  /** Text from outside the editor, at its cursor: the surface shows the text first. */
+  function arrive(text, options) {
+    if (!view || readOnly) return;
+    onarrive();
+    insert(text, options);
+  }
 
   function insert(text, { block } = {}) {
     if (!view || readOnly) return;

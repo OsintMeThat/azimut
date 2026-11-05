@@ -7,9 +7,10 @@
  * restart lives in storage.session.
  *
  * Every capture is one captureVisibleTab behind one explicit user action
- * (repo legal rails): the popup's buttons, or the Azimut app's own Capture
- * button relayed by bridge.js. Nothing here is schedulable or repeatable
- * without a fresh user gesture.
+ * (repo legal rails): the popup's buttons, the notes panel's Capture (which
+ * first tries one it throws away, to learn whether the browser allows it), or
+ * the Azimut app's own Capture button relayed by bridge.js. Nothing here is
+ * schedulable or repeatable without a fresh user gesture.
  */
 
 const api = typeof browser !== "undefined" ? browser : chrome;
@@ -139,6 +140,16 @@ async function ingest(blob, meta) {
     api.storage.local.set({ lastCaseId: body.case_id || meta.caseId });
   }
   return body;
+}
+
+/**
+ * Draw the area selection (`overlay.js`) on a tab. What to file the rectangle as
+ * waits in storage.session, since whoever asked (the popup closes at once) may be
+ * gone by the time the drag ends in "area-selected".
+ */
+async function armAreaSelect(tabId, meta) {
+  await api.storage.session.set({ [`pending:${tabId}`]: meta });
+  await api.scripting.executeScript({ target: { tabId }, files: ["overlay.js"] });
 }
 
 // --- post hand-off: fill a composer the app prepared ----------------------------
@@ -1150,21 +1161,25 @@ api.tabs.onRemoved?.addListener(async (tabId) => {
 //
 // The panel (`notes.html`) holds the app's own note in a frame. Three things can be
 // put in it from any page: a citation of the page, the words selected on it, and a
-// capture of a map. This side reads the page and files the capture; the panel hands
-// the facts to the note, and the app writes them in.
+// capture of an area of a map. This side reads the page, draws the selection and
+// files the capture; the panel hands the facts to the note, and the app writes
+// them in.
 //
 // The right-click items are the road that always works: a click on one is what
 // opens the tab to the extension, in both browsers. They exist only while a panel
 // holds a note, which the panel says over its port; a panel that closes takes its
-// port, and the items, with it.
+// port, and the items, with it. Whatever the browser refuses reaches the panel as
+// what to do instead (`AzimutNotes.plain`), never in the browser's own words.
+//
+// The worker speaks to a panel over its port: "put" (facts for the note),
+// "selecting" (an area selection is drawn on a tab), "working" (a line to show),
+// "idle" (the selection was cancelled) and "trouble" (why something did not work).
 
 const NOTES_PORT = "notes-panel";
 const NOTE_MENU = { cite: "azimut-note-cite", quote: "azimut-note-quote", capture: "azimut-note-capture" };
 const NOTE_ACTIONS = Object.fromEntries(Object.entries(NOTE_MENU).map(([action, id]) => [id, action]));
 const NOTE_CONTEXTS = ["page", "frame", "selection", "link", "image", "video", "audio"];
 const WEB_PAGES = ["http://*/*", "https://*/*"];
-/** What a panel button says on a tab the browser keeps from the extension. */
-const NOTE_NO_GRANT = "Right-click the page to cite, quote or capture it.";
 
 /** Every open panel, by its port: `{ windowId, ready, caseId, at }`. */
 const notePanels = new Map();
@@ -1262,18 +1277,18 @@ function tellPanel(port, message) {
   }
 }
 
-/** The words selected in the frame that was right-clicked, line breaks kept. */
+/**
+ * The words selected in the frame that was right-clicked, line breaks kept.
+ *
+ * Throws where the browser keeps the frame from the extension: a frame from
+ * another site, which the click opened nothing to, or a page no click opened.
+ */
 async function selectionIn(tabId, frameId) {
-  try {
-    const [hit] = await api.scripting.executeScript({
-      target: { tabId, frameIds: [Number.isInteger(frameId) ? frameId : 0] },
-      func: () => String(globalThis.getSelection?.() ?? ""),
-    });
-    return typeof hit?.result === "string" ? hit.result.slice(0, AzimutNotes.LIMITS.text + 1000) : "";
-  } catch {
-    // a frame from another site, which the click opened nothing to
-    return "";
-  }
+  const [hit] = await api.scripting.executeScript({
+    target: { tabId, frameIds: [Number.isInteger(frameId) ? frameId : 0] },
+    func: () => String(globalThis.getSelection?.() ?? ""),
+  });
+  return typeof hit?.result === "string" ? hit.result.slice(0, AzimutNotes.LIMITS.text + 1000) : "";
 }
 
 /** The tab's viewport in CSS pixels, or null where the page refuses the question. */
@@ -1290,25 +1305,53 @@ async function viewportOf(tabId) {
   }
 }
 
+/** How long Chrome's limit of two captures a second is waited out, once. */
+const CAPTURE_QUOTA_MS = 1000;
+
 /**
- * Capture the map in front into the panel's case, and say which picture it is.
+ * A capture, tried once more a second later when Chrome's limit of two a second
+ * refused it. A press on Capture tries one before the drag, so a quick second
+ * press would otherwise meet the limit.
+ */
+async function inQuota(grab) {
+  try {
+    return await grab();
+  } catch (e) {
+    if (!/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/.test(String(e?.message))) throw e;
+    await new Promise((resolve) => setTimeout(resolve, CAPTURE_QUOTA_MS));
+    return grab();
+  }
+}
+
+/**
+ * Draw the popup's own area selection for a capture into the note.
  *
  * Captures are for maps only, as everywhere in Azimut, so the app is asked first
- * and anything else is refused before a pixel is taken. The shot is the whole
- * tab, filed the way the popup files one, with the scale bar and north arrow the
- * popup's tick last asked for.
+ * and anything else is refused before a pixel is taken. Then the user drags a
+ * rectangle over the map, and only that rectangle is filed into the panel's case,
+ * the way the popup files one ("area-selected", `finishNoteCapture`), with the
+ * scale bar and north arrow the popup's tick last asked for. Escape files nothing.
+ *
+ * A right-click is what opens the page to the extension. A press in the panel is
+ * not, and on the sites the extension holds anyway (Google, Bing and Yandex maps
+ * among them) the page reads as open while the browser still refuses the capture.
+ * So a press tries one first, a frame thrown away at once, and a refusal says to
+ * right-click instead of drawing a selection that would come to nothing.
  */
-async function captureForNote(tab, caseId) {
+async function armNoteCapture(tab, caseId, { menu = false } = {}) {
   if (!caseId) throw new Error("Open a note in the notes panel first.");
   const view = await viewportOf(tab.id);
   const parsed = await mapApi({ path: "/api/ingest/parse", query: { url: tab.url, height: view?.h } });
   if (!parsed?.site) throw new Error("Captures are for map sites. Cite this page instead.");
-  const dataUrl = await withoutPanel(tab.id, () => captureActiveTab(tab.windowId));
-  const { blob, scale } = view
-    ? await cropDataUrl(dataUrl, { x: 0, y: 0, w: view.w, h: view.h }, view.w)
-    : { blob: await (await fetch(dataUrl)).blob(), scale: 1 };
+  if (!menu) {
+    try {
+      await inQuota(() => api.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 1 }));
+    } catch (e) {
+      throw new Error(AzimutNotes.plain(e, "capture"));
+    }
+  }
   const { captureMarks } = await api.storage.local.get({ captureMarks: false });
-  const body = await ingest(blob, {
+  const meta = {
     url: tab.url,
     caseId,
     lat: parsed.lat,
@@ -1316,13 +1359,56 @@ async function captureForNote(tab, caseId) {
     zoom: parsed.zoom,
     bearing: parsed.bearing,
     marks: Boolean(captureMarks),
-    deviceScale: scale,
-  });
-  return body.entity_id;
+    note: { title: tab.title || "" },
+  };
+  try {
+    await armAreaSelect(tab.id, meta);
+  } catch (e) {
+    await api.storage.session.remove(`pending:${tab.id}`);
+    throw new Error(AzimutNotes.plain(e, "capture"));
+  }
+}
+
+/**
+ * The end of a selection drawn for the note: file the rectangle, put it in.
+ *
+ * The picture goes to the panel a right-click on that tab would put into, and is
+ * filed into the case that panel shows now, so its note can hold it. A cancelled
+ * drag files nothing and only clears the panel's line.
+ */
+async function finishNoteCapture(msg, tab, meta) {
+  const found = notePanelFor(tab.windowId);
+  if (msg.type === "area-cancelled") {
+    if (found) tellPanel(found[0], { type: "idle" });
+    return { ok: true };
+  }
+  if (!found) {
+    notify("Azimut notes", "Open a note in the notes panel first.");
+    return { ok: false, error: "no note open" };
+  }
+  const [port, panel] = found;
+  tellPanel(port, { type: "working", text: "Capturing…" });
+  try {
+    const dataUrl = await withoutPanel(tab.id, () => inQuota(() => captureActiveTab(tab.windowId)));
+    const { blob, scale } = await cropDataUrl(dataUrl, msg.rect, msg.viewportW);
+    const { note, ...filed } = meta;
+    const body = await ingest(blob, { ...filed, caseId: panel.caseId || meta.caseId, deviceScale: scale });
+    tellPanel(port, {
+      type: "put",
+      put: { action: "picture", url: meta.url, title: note.title, entityId: body.entity_id },
+    });
+    return { ok: true };
+  } catch (e) {
+    const error = AzimutNotes.plain(e, "capture");
+    tellPanel(port, { type: "trouble", error });
+    return { ok: false, error };
+  }
 }
 
 /**
  * The facts one action puts in the note, read off the page; an Error says why not.
+ * A capture has none yet: it draws the selection and answers null, and the
+ * picture follows the drag.
  *
  * `hints` is what a right-click hands over: the page's address and the selection
  * as the browser saw them, and which frame was clicked. A panel button has none,
@@ -1330,17 +1416,27 @@ async function captureForNote(tab, caseId) {
  */
 async function noteFacts(action, tab, hints, caseId) {
   const url = tab?.url || hints.pageUrl || "";
-  if (!url) throw new Error(NOTE_NO_GRANT);
+  if (!url) throw new Error(AzimutNotes.INSTEAD.any);
   if (!AzimutNotes.isWeb(url)) throw new Error("Open a web page to cite it.");
   if (await isPairedApp(url)) throw new Error("This is Azimut itself, not a source.");
   const title = tab?.title || "";
   if (action === "cite") return { action, url, title };
   if (action === "quote") {
-    const text = (await selectionIn(tab.id, hints.frameId)) || hints.selection || "";
+    let text = "";
+    try {
+      text = await selectionIn(tab.id, hints.frameId);
+    } catch (e) {
+      // the browser's own copy of a right-clicked selection loses its line breaks, but it is the words
+      if (!hints.selection) throw new Error(AzimutNotes.plain(e, "quote"));
+    }
+    text = text || hints.selection || "";
     if (!text.trim()) throw new Error("Select the words to quote first.");
     return { action, url, title, text };
   }
-  if (action === "capture") return { action: "picture", url, title, entityId: await captureForNote(tab, caseId) };
+  if (action === "capture") {
+    await armNoteCapture(tab, caseId, hints);
+    return null;
+  }
   throw new Error(`no such note action: ${action}`);
 }
 
@@ -1359,17 +1455,16 @@ async function onNoteMenu(info, tab) {
     return;
   }
   const [port, panel] = found;
-  if (action === "capture") tellPanel(port, { type: "working", text: "Capturing…" });
   try {
     const put = await noteFacts(
       action,
       tab,
-      { pageUrl: info.pageUrl, frameId: info.frameId, selection: info.selectionText },
+      { menu: true, pageUrl: info.pageUrl, frameId: info.frameId, selection: info.selectionText },
       panel.caseId
     );
-    tellPanel(port, { type: "put", put });
+    tellPanel(port, put ? { type: "put", put } : { type: "selecting", tabId: tab.id });
   } catch (e) {
-    tellPanel(port, { type: "trouble", error: e.message });
+    tellPanel(port, { type: "trouble", error: AzimutNotes.plain(e, action) });
   }
 }
 
@@ -1438,8 +1533,7 @@ async function handle(msg, sender) {
   // so the meta waits in storage.session for the overlay's rect.
   if (msg.type === "start-area-select") {
     try {
-      await api.storage.session.set({ [`pending:${msg.tabId}`]: msg.meta });
-      await api.scripting.executeScript({ target: { tabId: msg.tabId }, files: ["overlay.js"] });
+      await armAreaSelect(msg.tabId, msg.meta);
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e.message };
@@ -1451,6 +1545,7 @@ async function handle(msg, sender) {
     const key = `pending:${sender.tab.id}`;
     const meta = (await api.storage.session.get(key))[key];
     await api.storage.session.remove(key);
+    if (meta?.note) return finishNoteCapture(msg, sender.tab, meta);
     if (msg.type === "area-cancelled" || !meta) return { ok: true };
     try {
       const dataUrl = await withoutPanel(sender.tab.id, () => captureActiveTab(sender.tab.windowId));
@@ -1535,9 +1630,10 @@ async function handle(msg, sender) {
     if (!Number.isInteger(msg.windowId)) return { ok: false, error: "no window to read" };
     try {
       const [tab] = await api.tabs.query({ active: true, windowId: msg.windowId });
-      return { ok: true, put: await noteFacts(msg.action, tab, {}, String(msg.caseId || "")) };
+      const put = await noteFacts(msg.action, tab, {}, String(msg.caseId || ""));
+      return put ? { ok: true, put } : { ok: true, selecting: tab.id };
     } catch (e) {
-      return { ok: false, error: e.message };
+      return { ok: false, error: AzimutNotes.plain(e, msg.action) };
     }
   }
 

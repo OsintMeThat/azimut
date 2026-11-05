@@ -1,29 +1,36 @@
 <script>
   /**
    * The note in the extension's side panel (`lib/notes/panel.js`): the app's own note,
-   * framed beside any site. Its bar names the case and picks the note, and holds
-   * nothing else. What the extension sends from a page (the page cited, a passage
-   * quoted, a capture) is put in through the seam every tool uses (`putInNote`), so
-   * it lands with the same light, toast and Undo.
+   * framed beside any site. Its bar picks the case and the note, and shows the note
+   * or, in its place, the PDF it prints to (Write | Page, `NotePages`). What the
+   * extension sends from a page (the page cited, a passage quoted, a capture) is put
+   * in through the seam every tool uses (`putInNote`), so it lands with the same
+   * light, toast and Undo; while the pages show, the text comes back first.
    *
-   * Mounted in place of the app (`main.js`): a panel has no rail, no tools and no
-   * case to switch to. The extension names the case, else the one last open in the
-   * app; and the note, else the one pinned to the side in the app, else Case notes.
+   * Mounted in place of the app (`main.js`): a panel has no rail and no tools. The
+   * extension names the case, else the one last open in the app; and the note, else
+   * the one pinned to the side in the app, else Case notes. Another case picked in
+   * the bar shows the note pinned for it the same way.
    */
-  import { onDestroy, onMount, untrack } from 'svelte';
+  import { flushSync, onDestroy, onMount, untrack } from 'svelte';
   import { fetchAllEntities } from '../lib/catalog.js';
-  import { caseState, initSession, toast } from '../lib/state.svelte.js';
+  import { caseState, initSession, openCase, toast } from '../lib/state.svelte.js';
   import { loadEntityTypes } from '../lib/entityTypes.svelte.js';
   import { buildHash, splitHash } from '../lib/hash.js';
-  import { CASE_NOTES, openNote, releaseNote } from '../lib/notes/noteDoc.svelte.js';
+  import { CASE_NOTES, flush, openNote, releaseNote } from '../lib/notes/noteDoc.svelte.js';
   import { dockNote } from '../lib/notes/noteDock.svelte.js';
+  import { keepPageView, readPageView } from '../lib/notes/pageView.js';
   import { pinNote, pinnedNote, putInNote } from '../lib/notes/putInNote.svelte.js';
   import { receivePuts, tellPanel } from '../lib/notes/panel.js';
   import { panelOffer } from '../lib/notes/panelPuts.js';
+  import CasePicker from './CasePicker.svelte';
   import Icon from './Icon.svelte';
   import NoteEditor from './NoteEditor.svelte';
+  import NotePages from './NotePages.svelte';
   import NotePicker from './NotePicker.svelte';
+  import NoteSaved from './NoteSaved.svelte';
   import Toasts from './Toasts.svelte';
+  import ViewModes from '../tools/notebook/ViewModes.svelte';
 
   const asked = splitHash(location.hash).params;
 
@@ -33,6 +40,9 @@
   let editor = $state(null);
   let entities = $state([]);
   let picking = $state(null);
+  let casing = $state(null);
+  // the note's pages in place of its text, as last left in this browser
+  let page = $state(readPageView('panel'));
 
   const caseId = $derived(caseState.current?.id ?? '');
   const title = $derived(noteId ? entities.find((entity) => entity.id === noteId)?.label ?? 'Note' : 'Case notes');
@@ -54,13 +64,16 @@
     return () => { live = false; };
   });
 
-  // the note asked for in the address, once its case is open
+  // The note asked for in the address, once its case is open. It names a note of the
+  // case the panel opened on: another case picked since shows the note pinned for it.
+  let askedNote = asked.get('note') ?? '';
   $effect(() => {
     const id = caseId;
     untrack(() => {
       if (!id) { if (doc) show('', null); return; }
       if (doc?.caseId === id) return;
-      const note = asked.get('note');
+      const note = askedNote;
+      askedNote = '';
       show(id, note === CASE_NOTES ? null : note || dockNote(id));
     });
   });
@@ -86,6 +99,40 @@
   function pick(id) {
     picking = null;
     if (caseId) show(caseId, id && id !== CASE_NOTES ? id : null);
+  }
+
+  /** Another case, in place: the note shown is written first, then the case opened shows its own. */
+  async function pickCase(id) {
+    casing = null;
+    if (!id || id === caseId) return;
+    const leaving = doc;
+    try {
+      if (leaving) await flush(leaving);
+      if (leaving?.saveError) {
+        toast(`The note is not saved, so this case stays open: ${leaving.saveError}`, 'danger', 8000);
+        return;
+      }
+      await openCase(id);
+    } catch (error) {
+      toast(`Could not open this case: ${error?.message ?? 'case not found'}`, 'danger', 8000);
+    }
+  }
+
+  function setPage(on) {
+    page = on;
+    keepPageView('panel', on);
+  }
+
+  /** Back to the text, drawn before what lands in it or is gone to there. */
+  function toWrite() {
+    if (!page) return;
+    setPage(false);
+    flushSync();
+  }
+
+  function jump(line) {
+    toWrite();
+    editor?.jump(line);
   }
 
   // this note is the one a put from the extension writes to
@@ -160,25 +207,30 @@
     const address = [entity?.attrs?.url, entity?.attrs?.source_url].find((value) => typeof value === 'string' && /^https?:\/\//i.test(value));
     if (address) window.open(address, '_blank', 'noopener');
   }
-
-  const saveSaid = $derived(!doc?.loaded ? '' : doc.saveError ? 'Not saved' : doc.saving || !doc.saved ? 'Saving…' : 'Saved');
 </script>
 
 <div class="note-panel">
   {#if caseId && doc}
     <header class="panel-bar">
-      <span class="case" title={caseState.current?.name}>{caseState.current?.name}</span>
+      <button type="button" class="case" title="Pick the case shown here" aria-haspopup="menu"
+        onclick={(event) => { picking = null; casing = casing ? null : event.currentTarget; }}>
+        <span>{caseState.current?.name}</span><Icon name="chevronDown" size={11} />
+      </button>
       <span class="slash" aria-hidden="true">/</span>
       <button type="button" class="which" title="Pick the note shown here" aria-haspopup="menu"
-        onclick={(event) => (picking = picking ? null : event.currentTarget)}>
+        onclick={(event) => { casing = null; picking = picking ? null : event.currentTarget; }}>
         <span>{title}</span><Icon name="chevronDown" size={12} />
       </button>
-      <span class="said" class:error={doc.saveError}>{saveSaid}</span>
+      <span class="spacer"></span>
+      <NoteSaved {doc} />
+      <ViewModes {page} inPlace onchange={setPage} />
     </header>
-    {#key doc}
-      <NoteEditor {doc} {caseId} {entities} compact tools={false} onopen={openSource} onnote={pick}
-        onready={(handle) => (editor = handle)} placeholder="Write as you read. Type @ to cite, / for more." />
-    {/key}
+    <NotePages {page} {caseId} {noteId} {title} {doc} {entities} onjump={jump}>
+      {#key doc}
+        <NoteEditor {doc} {caseId} {entities} compact tools={false} onopen={openSource} onnote={pick}
+          onready={(handle) => (editor = handle)} onarrive={toWrite} placeholder="Write as you read. Type @ to cite, / for more." />
+      {/key}
+    </NotePages>
   {:else if started}
     <p class="none"><Icon name="note" size={28} />
       <span>Open a case in Azimut, or pick one in the extension's popup, then open Notes again.</span></p>
@@ -189,28 +241,29 @@
   <NotePicker {caseId} anchor={picking} current={noteId} onpick={pick} onclose={() => (picking = null)} />
 {/if}
 
+{#if casing}
+  <CasePicker anchor={casing} current={caseId} onpick={pickCase} onclose={() => (casing = null)} />
+{/if}
+
 <Toasts />
 
 <style>
-  .note-panel { height: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); }
+  .note-panel { height: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); container-type: inline-size; }
   .panel-bar {
     display: flex; align-items: center; gap: 4px; min-height: 38px; padding: 4px 10px; border-bottom: 1px solid var(--border);
   }
-  .case {
-    flex: 0 1 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    color: var(--text-3); font-size: var(--fs-sm);
+  .case, .which {
+    display: inline-flex; align-items: center; min-width: 0; padding: 4px 6px; border: none; border-radius: var(--r-sm);
+    background: none; font: inherit; font-size: var(--fs-sm); cursor: pointer;
   }
+  .case { flex: 0 1 auto; max-width: 40%; gap: 3px; color: var(--text-3); }
+  .which { gap: 6px; color: var(--text-1); font-weight: 600; }
+  .case span, .which span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .case :global(svg), .which :global(svg) { flex: none; }
+  .case:hover, .which:hover { background: var(--bg-3); }
+  .case:hover { color: var(--text-1); }
   .slash { flex: none; color: var(--text-3); }
-  .which {
-    display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 6px; border: none; border-radius: var(--r-sm);
-    background: none; color: var(--text-1); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
-  }
-  .which span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .which :global(svg) { flex: none; }
-  .which:hover { background: var(--bg-3); }
-  .said { flex: none; margin-left: auto; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
-  .said.error { color: var(--danger); }
-  .note-panel > :global(.note-editor) { flex: 1; }
+  .spacer { flex: 1; }
   .none {
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 100%; margin: 0;
     padding: 0 28px; color: var(--text-3); text-align: center; line-height: 1.5;

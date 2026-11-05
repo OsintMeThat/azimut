@@ -32,7 +32,7 @@
   import {
     isPlainLook, normaliseLook, readLook, reportBody, reportLook, templateLook, writeLook,
   } from '../lib/notes/look.js';
-  import { LOOK_HELP } from '../lib/notes/lookHelp.js';
+  import { keepPageView, readPageView } from '../lib/notes/pageView.js';
   import { exportNotes, revealExports } from '../lib/notesExport.js';
   import { checkNotes } from '../lib/notes/warnings.js';
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
@@ -48,14 +48,13 @@
   import NotesHome from './notebook/NotesHome.svelte';
   import LookControl from './notebook/LookControl.svelte';
   import PagePane from './notebook/PagePane.svelte';
+  import ViewModes from './notebook/ViewModes.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import FloatingMenu from '../components/FloatingMenu.svelte';
   import Modal from '../components/Modal.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
   import NoCase from '../components/NoCase.svelte';
-
-  const PAGE_KEY = 'azimut:notebook-page';
 
   /** The note on screen: `{ noteId }`, null for the case notes; or null for the home. */
   let opened = $state(null);
@@ -84,7 +83,7 @@
   // the notes picked on the home, in the order they were picked
   let selected = $state([]);
   // the PDF beside the note, as the analyst last left it
-  let pageMode = $state(readPageMode());
+  let pageMode = $state(readPageView('notebook'));
   // how the open note prints, null while it is read
   let look = $state(null);
   let lookWrites = 0;
@@ -273,13 +272,9 @@
 
   // -- how it prints --------------------------------------------------------------
 
-  function readPageMode() {
-    try { return localStorage.getItem(PAGE_KEY) === '1'; } catch { return false; }
-  }
-
   function setPageMode(on) {
     pageMode = on;
-    try { localStorage.setItem(PAGE_KEY, on ? '1' : '0'); } catch { /* this browser keeps nothing */ }
+    keepPageView('notebook', on);
   }
 
   $effect(() => {
@@ -624,7 +619,7 @@
         <span class="hint">{'{today}'} and {'{now}'} are written in when a note starts from it.</span>
         <div class="spacer"></div>
         <LookControl look={template.look} template onchange={changeTemplateLook} />
-        {@render modes()}
+        <ViewModes page={pageMode} guide="notebook.view" onchange={setPageMode} />
         <button class="btn btn-primary btn-sm" onclick={() => leaveTemplate()}><Icon name="check" size={14} /> Done</button>
       </header>
       <div class="body" class:split={pageMode}>
@@ -659,7 +654,7 @@
         </span>
         <div class="spacer"></div>
         <LookControl {look} onchange={changeLook} entities={graphEntities} disabled={!look} />
-        {@render modes()}
+        <ViewModes page={pageMode} guide="notebook.view" onchange={setPageMode} />
         <button class="btn btn-ghost btn-sm" title="Stays open on the right as you switch tools" aria-label="Pin to the side"
           data-guide="notebook.dock" onclick={() => beside()}><Icon name="panelRight" size={15} /><span class="wide-only">Pin to the side</span></button>
         {#if !solo}
@@ -689,13 +684,6 @@
         onmenu={(row, anchor) => (menu = { row, anchor })} onexport={exportSome} onreport={makeReport} />
     {/if}
   </section>
-
-  {#snippet modes()}
-    <div class="modes" role="group" aria-label="View" data-guide="notebook.view">
-      <button type="button" class:on={!pageMode} aria-pressed={!pageMode} title={LOOK_HELP.write} onclick={() => setPageMode(false)}>Write</button>
-      <button type="button" class:on={pageMode} aria-pressed={pageMode} title={LOOK_HELP.page_pane} onclick={() => setPageMode(true)}>Page</button>
-    </div>
-  {/snippet}
 
   {#if menu}
     {@const row = menuRow(menu)}
@@ -838,14 +826,6 @@
   .writing { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .writing > :global(.note-editor) { flex: 1; }
   .body.split > :global(.page-pane) { flex: 0 0 clamp(300px, 46%, 820px); }
-  .modes { display: inline-flex; flex: none; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
-  .modes button {
-    padding: 3px 10px; border: none; border-left: 1px solid var(--border); background: var(--bg-1); color: var(--text-2);
-    font: inherit; font-size: var(--fs-xs); cursor: pointer;
-  }
-  .modes button:first-child { border-left: none; }
-  .modes button:hover:not(.on) { background: var(--bg-3); color: var(--text-1); }
-  .modes button.on { background: var(--bg-3); color: var(--text-1); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
   @container notebook (max-width: 1180px) { .wide-only { display: none; } }
   .fm-item.danger { color: var(--danger); }
   .export-dest { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: var(--fs-sm); }

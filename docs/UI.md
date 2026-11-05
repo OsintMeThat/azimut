@@ -5794,7 +5794,13 @@ is taken there: the first tab writes what it has and turns read-only with *Edit 
 to take it back.
 
 **On the side.** A note pinned to the side stays on the right as tools change,
-resizable at its edge (`components/NoteDock.svelte`). Notes in the sidebar pins one,
+resizable at its edge (`components/NoteDock.svelte`). Its bar has the same **Write |
+Page** as the Notebook, but Page shows the PDF in place of the note, which keeps its
+place underneath; pressing a page or a warning goes back to Write at that line, and
+anything put or cited in the note goes back to Write first. Those pages offer no
+picture size marks, the surface being too narrow for their bar. The choice is kept per
+surface for the browser. In a narrow note the save state is a mark with its words on
+hover, Add is its "+" alone, and under 340 px only *Not saved* shows. Notes in the sidebar pins one,
 as do **Pin to the side** in the Notebook and *Note on the side* in Go to; the note
 button in the top bar shows and hides it. The first time it opens it says it stays
 and that Notes in the sidebar brings it back, once per browser. Its bar picks the
@@ -5837,8 +5843,13 @@ candidate. Pictures filed before this build carry no such way back and show none
 **Notes in the extension.** The extension's popup has **Notes panel**, which opens the
 browser's side panel (Chrome) or sidebar (Firefox) on the app's own note, framed:
 `#notebook?case=…&note=…&solo=1&panel=1` (`components/NotePanel.svelte`), one copy of
-the note with the app's. Its bar is the case name, the note title with the picker
-(Case notes and the case's notes) and the save state; the editor is the compact one,
+the note with the app's. Its bar picks the case (the workspace's cases and scratch
+sessions, the open one marked), then the note with its picker (Case notes and the
+case's notes), then the save state and **Write | Page**, as the note on the side has
+them. Picking a case writes the note shown, then switches in place to the note pinned
+to the side for that case, else Case notes; the address keeps the new case and note,
+and the extension follows: its popup, Capture and right-click items go to that case,
+and a case picked in the popup reopens the panel on it. The editor is the compact one,
 with no *Open in…* nor ⌖, and a chip opens the record's address in a new tab. With no
 `case` the app's last case opens, with no `note` the note pinned to the side or Case
 notes, and a pick is kept in the address. With no case it says *Open a case in Azimut,
@@ -5860,9 +5871,14 @@ note through the same Put as every tool, with its light, toast and Undo:
   passage itself, a text fragment that opens the page scrolled to them and lit
   (`lib/notes/textFragment.js`), then the page's chip. A written link to a cited
   record's page, a passage link included, is that record in the Sources list.
-- **Capture** works on map sites, as the popup's capture does: the visible tab is filed
-  into the panel's case and put in with its caption field open; elsewhere it says
-  *Captures are for map sites. Cite this page instead.*
+- **Capture** works on map sites and always draws the popup's area selection (*Drag over
+  the map to capture it. Esc cancels.*): only the rectangle dragged is filed into the
+  panel's case and put in with its caption field open, and Esc, on the page or in the
+  panel, puts nothing. Elsewhere it says *Captures are for map sites. Cite this page
+  instead.* A browser lets an extension capture a tab only after a gesture on it, so on
+  a map never right-clicked (nor its popup opened there) a press says *Right-click the
+  map to capture it.*, learnt from one capture taken on the press and thrown away; no
+  browser message is ever shown as it is.
 
 The items are gone when the panel closes or holds no note. On Azimut's own page they
 say *This is Azimut itself, not a source.*

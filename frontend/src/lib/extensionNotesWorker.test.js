@@ -8,7 +8,9 @@
 //
 // What is worth pinning: the items exist only while a panel holds a note; a
 // click reaches the note through the panel, never anywhere else; captures stay
-// maps only; and only the panel page may ask the worker to read a tab.
+// maps only, and file only the area the user drags; only the panel page may ask
+// the worker to read a tab; and a browser's refusal reaches the panel as what to
+// do instead, never in the browser's own words.
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +24,10 @@ const worker = readFileSync(join(ext, 'background.js'), 'utf8');
 const PANEL = { url: 'chrome-extension://id/notes.html' };
 const ARTICLE = { id: 5, windowId: 1, url: 'https://example.com/story', title: 'A story' };
 const MAP = { id: 6, windowId: 1, url: 'https://www.google.com/maps/@48.85,2.29,17z', title: 'Google Maps' };
+
+/** Chrome's words for a capture without a click on the page, and for a script on a page it keeps. */
+const NO_CAPTURE = "Either the '<all_urls>' or 'activeTab' permission is required.";
+const NO_SCRIPT = 'Cannot access contents of the page. Extension manifest must request permission to access the respective host.';
 
 const settle = async () => {
   for (let i = 0; i < 6; i += 1) await new Promise((r) => setTimeout(r, 0));
@@ -37,8 +43,10 @@ function event() {
 }
 
 /** A worker with stubs, and handles on what it did. */
-function load({ front = ARTICLE, answers = {}, selection = '', stored = {} } = {}) {
+function load({ front = ARTICLE, answers = {}, selection = '', stored = {}, inject = null, capture = null } = {}) {
   const items = new Map();
+  const session = new Map();
+  const drawn = [];
   const on = {
     connect: event(),
     message: event(),
@@ -58,11 +66,27 @@ function load({ front = ARTICLE, answers = {}, selection = '', stored = {} } = {
         })),
         set: vi.fn(),
       },
-      session: { get: vi.fn(async () => ({})), set: vi.fn(), remove: vi.fn() },
+      session: {
+        get: vi.fn(async (keys) => {
+          if (typeof keys === 'string') return session.has(keys) ? { [keys]: session.get(keys) } : {};
+          const out = { ...(keys || {}) };
+          for (const key of Object.keys(out)) if (session.has(key)) out[key] = session.get(key);
+          return out;
+        }),
+        set: vi.fn(async (values) => {
+          for (const [key, value] of Object.entries(values)) session.set(key, value);
+        }),
+        remove: vi.fn(async (key) => {
+          session.delete(key);
+        }),
+      },
     },
     tabs: {
       query: vi.fn(async () => (front ? [front] : [])),
-      captureVisibleTab: vi.fn(async () => 'data:image/png;base64,AA'),
+      captureVisibleTab: vi.fn(async () => {
+        if (capture) throw capture;
+        return 'data:image/png;base64,AA';
+      }),
       sendMessage: vi.fn(async () => ({ ok: true })),
       onActivated: on.activated,
       onUpdated: on.updated,
@@ -70,7 +94,11 @@ function load({ front = ARTICLE, answers = {}, selection = '', stored = {} } = {
     },
     windows: { onFocusChanged: on.focus },
     scripting: {
-      executeScript: vi.fn(async ({ func }) => {
+      executeScript: vi.fn(async ({ func, files }) => {
+        if (files) {
+          if (inject) throw inject;
+          return [{ result: undefined }];
+        }
         const said = String(func);
         if (said.includes('getSelection')) {
           if (selection instanceof Error) throw selection;
@@ -113,8 +141,11 @@ function load({ front = ARTICLE, answers = {}, selection = '', stored = {} } = {
     throw new Error(`unexpected fetch ${address}`);
   });
   const OffscreenCanvasStub = class {
+    constructor(w, h) {
+      this.size = [w, h];
+    }
     getContext() {
-      return { drawImage: () => {} };
+      return { drawImage: (...args) => drawn.push({ size: this.size, from: args.slice(1, 5) }) };
     }
     convertToBlob({ type }) {
       return Promise.resolve(new Blob(['png'], { type }));
@@ -129,7 +160,7 @@ function load({ front = ARTICLE, answers = {}, selection = '', stored = {} } = {
     `${helpers}\n${worker}\n;return { handle };`
   );
   const internals = factory(chrome, undefined, fetchImpl, async () => ({ width: 2000, height: 1200 }), OffscreenCanvasStub);
-  return { chrome, items, on, fetchImpl, ...internals };
+  return { chrome, items, on, fetchImpl, session, drawn, ...internals };
 }
 
 /** A port as the panel page opens it. */
@@ -151,6 +182,25 @@ const ready = (port, extra = {}) =>
   port.onMessage.fire({ type: 'state', windowId: 1, ready: true, caseId: 'case-1', ...extra });
 
 const json = (body) => () => ({ ok: true, status: 200, text: async () => JSON.stringify(body), json: async () => body });
+
+/** A worker whose front tab is a map the app knows. */
+const mapRun = ({ screenshot = { entity_id: 'cap_42', case_id: 'case-1', title: '48.85, 2.29' }, ...rest } = {}) =>
+  load({
+    front: MAP,
+    answers: {
+      '/api/ingest/parse': json({ site: 'google-maps', lat: 48.85, lon: 2.29, zoom: 17, bearing: null }),
+      '/api/ingest/screenshot': json(screenshot),
+      'data:image': () => ({ blob: async () => new Blob(['frame']) }),
+    },
+    ...rest,
+  });
+
+/** Whether the area selection was drawn on a tab. */
+const drawsSelection = (run) =>
+  run.chrome.scripting.executeScript.mock.calls.some(([call]) => call.files?.includes('overlay.js'));
+
+/** The capture filed with the app, as `[url, init]`, or undefined. */
+const filed = (run) => run.fetchImpl.mock.calls.find(([url]) => String(url).includes('/api/ingest/screenshot'));
 
 describe('the right-click items', () => {
   it('stay down while no panel holds a note, and clear what an earlier worker left', async () => {
@@ -303,50 +353,113 @@ describe('a right-click', () => {
       error: 'Captures are for map sites. Cite this page instead.',
     });
     expect(run.chrome.tabs.captureVisibleTab).not.toHaveBeenCalled();
+    expect(drawsSelection(run)).toBe(false);
   });
 
-  it("captures a map into the panel's case and puts that picture in", async () => {
-    const run = load({
-      front: MAP,
-      answers: {
-        '/api/ingest/parse': json({ site: 'google-maps', lat: 48.85, lon: 2.29, zoom: 17, bearing: null }),
-        '/api/ingest/screenshot': json({ entity_id: 'cap_42', case_id: 'case-1', title: '48.85, 2.29' }),
-        'data:image': () => ({ blob: async () => new Blob(['frame']) }),
-      },
-    });
+  it('draws the area selection on a map, and takes nothing before the drag', async () => {
+    const run = mapRun();
     const port = connect(run.on);
     ready(port);
     run.on.clicked.fire({ menuItemId: 'azimut-note-capture', pageUrl: MAP.url }, MAP);
     await settle();
+
+    // the popup's own overlay, with what to file waiting for the drag
+    expect(drawsSelection(run)).toBe(true);
+    expect(run.session.get('pending:6')).toMatchObject({
+      url: MAP.url,
+      caseId: 'case-1',
+      lat: 48.85,
+      lon: 2.29,
+      zoom: 17,
+      note: { title: 'Google Maps' },
+    });
+    expect(port.sent.at(-1)).toEqual({ type: 'selecting', tabId: 6 });
+    // the right-click opened the page: no capture is tried before the drag
+    expect(run.chrome.tabs.captureVisibleTab).not.toHaveBeenCalled();
+    expect(filed(run)).toBeUndefined();
+  });
+
+  it("files only the dragged rectangle into the panel's case, and puts that picture in", async () => {
+    const run = mapRun();
+    const port = connect(run.on);
+    ready(port);
+    run.on.clicked.fire({ menuItemId: 'azimut-note-capture', pageUrl: MAP.url }, MAP);
     await settle();
 
-    expect(port.sent[0]).toEqual({ type: 'working', text: 'Capturing…' });
+    const done = await run.handle(
+      { type: 'area-selected', rect: { x: 100, y: 50, w: 300, h: 200 }, viewportW: 1000 },
+      { tab: MAP }
+    );
+    expect(done).toEqual({ ok: true });
+    expect(run.chrome.tabs.captureVisibleTab).toHaveBeenCalledTimes(1);
+    // the frame is 2000 px for a 1000 px viewport: the rectangle, at twice the size
+    expect(run.drawn).toEqual([{ size: [600, 400], from: [200, 100, 600, 400] }]);
+
+    expect(port.sent).toContainEqual({ type: 'working', text: 'Capturing…' });
     expect(port.sent.at(-1)).toEqual({
       type: 'put',
       put: { action: 'picture', url: MAP.url, title: 'Google Maps', entityId: 'cap_42' },
     });
-    const [, init] = run.fetchImpl.mock.calls.find(([url]) => String(url).includes('/api/ingest/screenshot'));
+    const [, init] = filed(run);
     // filed into the note's case, not the popup's last one or a fresh scratch
     expect(init.body.get('case_id')).toBe('case-1');
     expect(init.body.get('url')).toBe(MAP.url);
+    expect(init.body.get('lat')).toBe('48.85');
     expect(init.headers['X-Azimut-Token']).toBe('tok-123');
+    expect(run.session.has('pending:6')).toBe(false);
   });
 
-  it('says why when the app files a capture without naming it', async () => {
-    // an app older than this extension: the capture is filed, the note cannot hold it
-    const run = load({
-      front: MAP,
-      answers: {
-        '/api/ingest/parse': json({ site: 'google-maps', lat: 1, lon: 2, zoom: 3 }),
-        '/api/ingest/screenshot': json({ case_id: 'case-1', title: 't' }),
-        'data:image': () => ({ blob: async () => new Blob(['frame']) }),
-      },
-    });
+  it('files nothing and puts nothing when the selection is cancelled', async () => {
+    const run = mapRun();
     const port = connect(run.on);
     ready(port);
     run.on.clicked.fire({ menuItemId: 'azimut-note-capture', pageUrl: MAP.url }, MAP);
     await settle();
+
+    expect(await run.handle({ type: 'area-cancelled' }, { tab: MAP })).toEqual({ ok: true });
+    expect(port.sent.at(-1)).toEqual({ type: 'idle' });
+    expect(port.sent.some((m) => m.type === 'put')).toBe(false);
+    expect(run.chrome.tabs.captureVisibleTab).not.toHaveBeenCalled();
+    expect(filed(run)).toBeUndefined();
+    expect(run.session.has('pending:6')).toBe(false);
+  });
+
+  it('says what to do when the browser refuses the capture at the end of the drag', async () => {
+    const run = mapRun({ capture: new Error(NO_CAPTURE) });
+    const port = connect(run.on);
+    ready(port);
+    run.on.clicked.fire({ menuItemId: 'azimut-note-capture', pageUrl: MAP.url }, MAP);
     await settle();
+    await run.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
+    expect(port.sent.at(-1)).toEqual({ type: 'trouble', error: 'Right-click the map to capture it.' });
+    expect(filed(run)).toBeUndefined();
+  });
+
+  it("leaves the popup's own capture as it was", async () => {
+    const run = mapRun();
+    const port = connect(run.on);
+    ready(port);
+    const meta = { url: MAP.url, caseId: 'case-9', title: 'Here', lat: 1, lon: 2, zoom: 3, bearing: null, marks: false };
+    expect(await run.handle({ type: 'start-area-select', tabId: 6, meta }, {})).toEqual({ ok: true });
+    expect(run.session.get('pending:6')).toEqual(meta);
+
+    await run.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
+    expect(filed(run)[1].body.get('case_id')).toBe('case-9');
+    expect(run.chrome.notifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Capture filed into Azimut' })
+    );
+    // the note hears nothing of a capture it did not ask for
+    expect(port.sent).toEqual([]);
+  });
+
+  it('says why when the app files a capture without naming it', async () => {
+    // an app older than this extension: the capture is filed, the note cannot hold it
+    const run = mapRun({ screenshot: { case_id: 'case-1', title: 't' } });
+    const port = connect(run.on);
+    ready(port);
+    run.on.clicked.fire({ menuItemId: 'azimut-note-capture', pageUrl: MAP.url }, MAP);
+    await settle();
+    await run.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
     // the worker hands the facts over; the panel's builder is what refuses an empty id
     expect(port.sent.at(-1).put.entityId).toBeUndefined();
   });
@@ -383,6 +496,60 @@ describe('a panel button', () => {
     const { handle } = load({ front: { id: 5, windowId: 1 } });
     const answer = await handle({ type: 'notes-facts', action: 'cite', windowId: 1 }, PANEL);
     expect(answer).toEqual({ ok: false, error: 'Right-click the page to cite, quote or capture it.' });
+  });
+
+  it('draws the area selection on a map the browser lets it capture', async () => {
+    const run = mapRun();
+    const answer = await run.handle({ type: 'notes-facts', action: 'capture', windowId: 1, caseId: 'case-1' }, PANEL);
+    expect(answer).toEqual({ ok: true, selecting: 6 });
+    expect(drawsSelection(run)).toBe(true);
+    // one frame tried and thrown away, since a press in the panel opens no page
+    expect(run.chrome.tabs.captureVisibleTab).toHaveBeenCalledTimes(1);
+    expect(filed(run)).toBeUndefined();
+  });
+
+  it('says to right-click a map the browser will not let it capture, and draws nothing', async () => {
+    // Google Maps, held for the reverse-image engines: its address reads, a capture is refused
+    const run = mapRun({ capture: new Error(NO_CAPTURE) });
+    const answer = await run.handle({ type: 'notes-facts', action: 'capture', windowId: 1, caseId: 'case-1' }, PANEL);
+    expect(answer).toEqual({ ok: false, error: 'Right-click the map to capture it.' });
+    expect(drawsSelection(run)).toBe(false);
+    expect(run.session.has('pending:6')).toBe(false);
+  });
+
+  it("waits out Chrome's two captures a second rather than refuse a quick second press", async () => {
+    const run = mapRun();
+    run.chrome.tabs.captureVisibleTab.mockImplementationOnce(async () => {
+      throw new Error('This request exceeds the MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND quota.');
+    });
+    vi.useFakeTimers();
+    try {
+      const answer = run.handle({ type: 'notes-facts', action: 'capture', windowId: 1, caseId: 'case-1' }, PANEL);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await answer).toEqual({ ok: true, selecting: 6 });
+      expect(run.chrome.tabs.captureVisibleTab).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says the same in Firefox's words", async () => {
+    const run = mapRun({ capture: new Error('Missing activeTab permission') });
+    const answer = await run.handle({ type: 'notes-facts', action: 'capture', windowId: 1, caseId: 'case-1' }, PANEL);
+    expect(answer.error).toBe('Right-click the map to capture it.');
+  });
+
+  it('says to right-click when the page refuses the selection, and leaves nothing waiting', async () => {
+    const run = mapRun({ inject: new Error(NO_SCRIPT) });
+    const answer = await run.handle({ type: 'notes-facts', action: 'capture', windowId: 1, caseId: 'case-1' }, PANEL);
+    expect(answer).toEqual({ ok: false, error: 'Right-click the map to capture it.' });
+    expect(run.session.has('pending:6')).toBe(false);
+  });
+
+  it('says to right-click the selection when the page will not hand it over', async () => {
+    const { handle } = load({ selection: new Error('Missing host permission for the tab') });
+    const answer = await handle({ type: 'notes-facts', action: 'quote', windowId: 1 }, PANEL);
+    expect(answer).toEqual({ ok: false, error: 'Right-click the selection to quote it.' });
   });
 
   it('answers no one but the panel page', async () => {

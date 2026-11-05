@@ -14,7 +14,16 @@
  * no tab to the extension, so the buttons work on a page the extension already
  * holds: one it was right-clicked on or opened on, and the posting sites it
  * holds anyway. On any other page the bar says to right-click it instead, and
- * the right-click items (`background.js`) work everywhere.
+ * the right-click items (`background.js`) work everywhere. Whatever the browser
+ * still refuses is shown as what to do instead, never in its own words.
+ *
+ * Capture draws the popup's area selection on the page; the picture comes back
+ * over the port once the rectangle is dragged, and Escape, here or on the page,
+ * puts nothing.
+ *
+ * The case is the extension's `lastCaseId`, both ways: a case chosen in the popup
+ * opens its note here, and a case chosen in the note is stored for the popup,
+ * Capture and the right-click items.
  */
 
 const api = typeof browser !== "undefined" ? browser : chrome;
@@ -35,14 +44,23 @@ const STATUS_MS = 8000;
 
 const state = {
   windowId: null,
+  backendUrl: "",
   origin: null,
   url: null,
   heard: false,
   ready: false,
   caseId: "",
+  /** The extension's `lastCaseId`, as last read or written. */
+  lastCaseId: "",
+  /** The case the frame shows, or was last asked to show. */
+  frameCase: "",
   /** "web" a page the actions can take, "unknown" one the browser keeps from us, "other" the rest. */
   page: "unknown",
   busy: false,
+  /** Whether the frame was ever pointed at the app. */
+  framed: false,
+  /** The tab an area selection for the note is drawn on, or null. */
+  selecting: null,
 };
 
 const pending = new Map();
@@ -117,12 +135,19 @@ function connect() {
   }
   port.onMessage.addListener((msg) => {
     if (msg?.type === "put") {
+      state.selecting = null;
       readTab();
       put(msg.put);
+    } else if (msg?.type === "selecting") {
+      selecting(msg.tabId);
+    } else if (msg?.type === "idle") {
+      state.selecting = null;
+      say("");
     } else if (msg?.type === "working") {
       say(String(msg.text || ""), "info");
     } else if (msg?.type === "trouble") {
-      say(String(msg.error || "That did not work."));
+      state.selecting = null;
+      say(N.plain(msg.error) || "That did not work.");
     }
   });
   port.onDisconnect.addListener(() => {
@@ -168,12 +193,37 @@ function put(facts) {
   });
 }
 
+/** An area selection is drawn on a tab: say how to finish it, and keep Escape for it. */
+function selecting(tabId) {
+  state.selecting = Number.isInteger(tabId) ? tabId : null;
+  say("Drag over the map to capture it. Esc cancels.", "info");
+}
+
+/**
+ * Escape in the panel takes the selection down. A press on Capture leaves the
+ * keyboard here, so the page's own Escape would not hear it.
+ */
+function cancelSelecting(event) {
+  if (event.key !== "Escape" || state.selecting === null) return;
+  const tabId = state.selecting;
+  const gone = () => {
+    // the tab moved on and took the selection with it
+    state.selecting = null;
+    say("");
+  };
+  try {
+    Promise.resolve(api.tabs.sendMessage(tabId, { type: "area-cancel" })).catch(gone);
+  } catch {
+    gone();
+  }
+}
+
 /** One of the bar's buttons: the worker reads the page, this page hands it over. */
 async function act(action) {
   if (state.busy || !state.ready) return;
   state.busy = true;
   paint();
-  say(action === "capture" ? "Capturing…" : "", "info");
+  say("");
   try {
     let answer;
     try {
@@ -183,11 +233,15 @@ async function act(action) {
         windowId: state.windowId,
         caseId: state.caseId,
       });
-    } catch (e) {
-      answer = { ok: false, error: e.message };
+    } catch {
+      answer = { ok: false, error: "The extension did not answer. Try again." };
     }
     if (!answer?.ok) {
-      say(answer?.error || "The extension did not answer.");
+      say(N.plain(answer?.error, action) || "The extension did not answer. Try again.");
+      return;
+    }
+    if (answer.selecting !== undefined) {
+      selecting(answer.selecting);
       return;
     }
     await put(answer.put);
@@ -211,8 +265,34 @@ function onFrame(event) {
   $("down").hidden = true;
   state.ready = said.ready;
   state.caseId = said.ready ? said.caseId : "";
+  if (state.caseId) keepCase(state.caseId);
   paint();
   tell();
+}
+
+/**
+ * The case the note shows becomes the extension's case, for the popup, Capture
+ * and the right-click items. The frame shows it already, so the change this
+ * write fires is no reason to load it again.
+ */
+function keepCase(caseId) {
+  state.frameCase = caseId;
+  if (caseId === state.lastCaseId) return;
+  state.lastCaseId = caseId;
+  Promise.resolve(api.storage.local.set({ lastCaseId: caseId })).catch(() => {});
+}
+
+/**
+ * The extension's case changed elsewhere (the popup's picker, a capture filed
+ * from the popup): open that case's note. The app saves what was typed in the
+ * note it leaves as the frame unloads.
+ */
+function followCase(caseId) {
+  state.lastCaseId = caseId;
+  if (!caseId || caseId === state.frameCase) return;
+  state.frameCase = caseId;
+  state.url = N.panelUrl(state.backendUrl, { caseId });
+  load();
 }
 
 /** Open the note, and say so plainly when nothing answers. */
@@ -227,11 +307,31 @@ function load() {
     down("The Azimut address in the extension options is not a web address.");
     return;
   }
-  $("note").src = state.url;
+  openFrame(state.url);
   clearTimeout(loadTimer);
   loadTimer = setTimeout(() => {
     if (!state.heard) down(`No note from Azimut at ${state.origin}. Is the app running and up to date?`);
   }, LOAD_MS);
+}
+
+/**
+ * Point the note's frame at an address.
+ *
+ * Each address the panel opens differs from the last in its hash alone, which a
+ * browser takes as a move within the page it has: nothing loads, and the note
+ * left behind is never told to save. So after the first, each is a fresh frame;
+ * the old one unloads, and the app saves what was typed in it as it goes.
+ */
+function openFrame(url) {
+  const frame = $("note");
+  if (!state.framed) {
+    state.framed = true;
+    frame.src = url;
+    return;
+  }
+  const fresh = frame.cloneNode(false);
+  fresh.src = url;
+  frame.replaceWith(fresh);
 }
 
 function down(text) {
@@ -242,9 +342,11 @@ function down(text) {
 
 async function init() {
   const stored = await api.storage.local.get({ backendUrl: "http://127.0.0.1:8477", lastCaseId: "" });
-  const backendUrl = String(stored.backendUrl).replace(/\/+$/, "");
-  state.origin = N.appOrigin(backendUrl);
-  state.url = N.panelUrl(backendUrl, { caseId: stored.lastCaseId });
+  state.backendUrl = String(stored.backendUrl).replace(/\/+$/, "");
+  state.lastCaseId = String(stored.lastCaseId || "");
+  state.frameCase = state.lastCaseId;
+  state.origin = N.appOrigin(state.backendUrl);
+  state.url = N.panelUrl(state.backendUrl, { caseId: state.lastCaseId });
   state.windowId = (await api.windows.getCurrent()).id;
 
   for (const action of ["cite", "quote", "capture"]) $(action).addEventListener("click", () => act(action));
@@ -261,14 +363,22 @@ async function init() {
     if (tab?.active && tab.windowId === state.windowId) readTab();
   });
   document.documentElement.addEventListener("pointerenter", () => readTab());
+  document.documentElement.addEventListener("keydown", cancelSelecting);
 
   // A new address in the options is a different app: open the note from there.
+  // A case chosen elsewhere opens that case's note.
   api.storage.onChanged?.addListener((changes, area) => {
-    if (area !== "local" || !changes.backendUrl) return;
-    const next = String(changes.backendUrl.newValue || "").replace(/\/+$/, "");
-    state.origin = N.appOrigin(next);
-    state.url = N.panelUrl(next, {});
-    load();
+    if (area !== "local") return;
+    if (changes.backendUrl) {
+      state.backendUrl = String(changes.backendUrl.newValue || "").replace(/\/+$/, "");
+      state.origin = N.appOrigin(state.backendUrl);
+      state.url = N.panelUrl(state.backendUrl, {});
+      state.frameCase = "";
+      if (changes.lastCaseId) state.lastCaseId = String(changes.lastCaseId.newValue || "");
+      load();
+    } else if (changes.lastCaseId) {
+      followCase(String(changes.lastCaseId.newValue || ""));
+    }
   });
 
   connect();

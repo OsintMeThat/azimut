@@ -24,7 +24,7 @@ It supports seven flows:
   downloading the page.
 - Beside any page, a panel holds a note of the case. A right-click cites the
   page or the post, quotes the words selected on it with a link back to them, or
-  puts a capture of a map into the note.
+  puts a capture of an area of a map into the note.
 - On Azimut's Google basemap, the in-app Capture button requests the current
   tab image without a screen-share prompt.
 - When Geo Report publishes, it can open X or Bluesky with the thread already
@@ -294,8 +294,10 @@ View → Sidebar.
 
 The panel is Azimut's own note, the one the app shows, not a copy. What you type
 there is in the case at once, and the bar at its top picks the note: Case notes,
-or one of the case's own. The case is the one the extension last filed into, else
-the one Azimut has open.
+or one of the case's own. The case is the extension's case: the one last picked in
+the popup or filed into, else the one Azimut has open. Picking a case in the popup
+opens its note in the panel, and a case picked in the panel is the one the popup
+and the right-click items file into next.
 
 While a note is open, three items join the right-click menu on every web page:
 
@@ -303,7 +305,7 @@ While a note is open, three items join the right-click menu on every web page:
 |---|---|
 | Cite this page | A chip for the case's item at that address, or a bookmark filed for it. Nothing is downloaded. It reads **Cite this post** on a post on X, Bluesky, Telegram, Instagram, TikTok, Facebook or Reddit. |
 | Quote the selection | The words as they are, linked to the passage itself, then the page's chip. The link opens the page scrolled to the words and highlights them (Chrome, and Firefox 131 or later). |
-| Capture into the note | A capture of the map in front, filed into the case the way the popup files one, then put in as a picture. |
+| Capture into the note | The popup's area selection, drawn over the map: the rectangle you drag is filed into the case the way the popup files one, then put in as a picture. Esc, on the page or in the panel, puts nothing. |
 
 The same three are buttons at the top of the panel. The note's toast says what
 went in, and its Undo takes it out again.
@@ -316,7 +318,11 @@ Two limits, and both are rules rather than bugs:
   buttons work on a page you have right-clicked or opened the popup on, until it
   moves to another site, and always on X and Bluesky, which the extension already
   holds. On any other page the panel says "Right-click the page to cite, quote or
-  capture it", and the right-click items work everywhere.
+  capture it", and the right-click items work everywhere. A capture asks more: the
+  extension reads Google, Bing and Yandex for Reverse Search, but may capture
+  their maps only once pointed at the tab. There Capture says "Right-click the map
+  to capture it" before any selection is drawn, and works from the bar once you
+  have right-clicked the tab or opened the popup on it.
 - **Captures are for maps**, as everywhere in Azimut. On another page, Capture into
   the note says "Captures are for map sites. Cite this page instead."
 

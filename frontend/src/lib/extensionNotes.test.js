@@ -12,8 +12,10 @@
  *
  * What is worth pinning: the panel only ever posts to the paired app's exact
  * origin, and only listens to its own frame from there; what it sends is what
- * the app accepts (the app drops anything else without a word); and the actions
- * show only while the note says it is open.
+ * the app accepts (the app drops anything else without a word); the actions
+ * show only while the note says it is open; a browser's refusal is never shown
+ * in its own words; and the panel's case and the extension's `lastCaseId` follow
+ * each other without loading the note in a loop.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -26,6 +28,7 @@ const helpers = readFileSync(join(ext, 'notesmsg.js'), 'utf8');
 const panelSource = readFileSync(join(ext, 'notes.js'), 'utf8');
 const panelHtml = readFileSync(join(ext, 'notes.html'), 'utf8');
 const popupSource = readFileSync(join(ext, 'popup.js'), 'utf8');
+const overlaySource = readFileSync(join(ext, 'overlay.js'), 'utf8');
 const popupHtml = readFileSync(join(ext, 'popup.html'), 'utf8');
 
 const N = new Function(`${helpers}\nreturn AzimutNotes;`)();
@@ -50,19 +53,39 @@ function event() {
 /** Open the panel page against a front tab. */
 async function openPanel({ front = ARTICLE, stored = { lastCaseId: 'case-1' }, sendMessage } = {}) {
   document.body.innerHTML = bodyOf(panelHtml).replace(/<iframe[^>]*><\/iframe>/, '<div id="note"></div>');
-  const frameWindow = { postMessage: vi.fn() };
-  const frame = $('note');
-  Object.defineProperty(frame, 'contentWindow', { value: frameWindow });
+  // Each frame the panel opens is a stand-in with a window of its own; a fresh one
+  // comes from cloning the last, as the panel does to load the note again.
+  const frames = [];
+  const dress = (el) => {
+    Object.defineProperty(el, 'contentWindow', { value: { postMessage: vi.fn() } });
+    el.cloneNode = () => {
+      const next = document.createElement('div');
+      next.id = 'note';
+      return dress(next);
+    };
+    frames.push(el);
+    return el;
+  };
+  const frame = dress($('note'));
+  const frameWindow = frame.contentWindow;
 
   const ports = [];
   const handlers = {};
   const chrome = {
     storage: {
-      local: { get: vi.fn(async (defaults) => ({ ...defaults, backendUrl: `${APP}/`, ...stored })) },
+      local: {
+        get: vi.fn(async (defaults) => ({ ...defaults, backendUrl: `${APP}/`, ...stored })),
+        set: vi.fn(async () => {}),
+      },
       onChanged: event(),
     },
     windows: { getCurrent: vi.fn(async () => ({ id: 1 })) },
-    tabs: { query: vi.fn(async () => (front ? [front] : [])), onActivated: event(), onUpdated: event() },
+    tabs: {
+      query: vi.fn(async () => (front ? [front] : [])),
+      onActivated: event(),
+      onUpdated: event(),
+      sendMessage: vi.fn(async () => ({ ok: true })),
+    },
     runtime: {
       connect: vi.fn(() => {
         const port = { sent: [], onMessage: event(), onDisconnect: event() };
@@ -86,10 +109,17 @@ async function openPanel({ front = ARTICLE, stored = { lastCaseId: 'case-1' }, s
   new Function('chrome', 'browser', 'window', 'document', `${helpers}\n${panelSource}`)(chrome, undefined, win, doc);
   await settle();
 
-  /** A message as the note's frame posts it. */
-  const fromNote = (data, { origin = APP, source = frameWindow } = {}) => handlers.message({ data, origin, source });
+  /** A message as the note's frame posts it: the frame the panel holds now, unless said otherwise. */
+  const fromNote = (data, { origin = APP, source = $('note').contentWindow } = {}) =>
+    handlers.message({ data, origin, source });
   const port = () => ports.at(-1);
-  return { chrome, frame, frameWindow, fromNote, ports, port, handlers };
+  /** A change to the extension's stored settings, as the browser reports it. */
+  const stored_ = (changes) =>
+    chrome.storage.onChanged.fire(
+      Object.fromEntries(Object.entries(changes).map(([key, newValue]) => [key, { newValue }])),
+      'local'
+    );
+  return { chrome, frame, frames, frameWindow, fromNote, ports, port, handlers, storedChange: stored_ };
 }
 
 const open = (extra = {}) => ({ azimut: 'note-panel', v: 1, state: 'ready', caseId: 'case-1', noteId: 'n1', title: 'Leads', ...extra });
@@ -179,6 +209,27 @@ describe('notesmsg: what crosses to the note', () => {
     expect(refused({ action: 'picture', url: ARTICLE.url, entityId: '../x' })).toMatch(/gave no picture/);
     expect(refused({ action: 'cite', url: ARTICLE.url }, 'bad id!')).toMatch(/not a message id/);
     expect(refused({ action: 'erase', url: ARTICLE.url })).toMatch(/no such note action/);
+  });
+
+  it("never shows a browser's refusal in the browser's words", () => {
+    const chrome = "Either the '<all_urls>' or 'activeTab' permission is required.";
+    const script = 'Cannot access contents of the page. Extension manifest must request permission to access the respective host.';
+    expect(N.plain(new Error(chrome), 'capture')).toBe('Right-click the map to capture it.');
+    expect(N.plain('Missing activeTab permission', 'capture')).toBe('Right-click the map to capture it.');
+    expect(N.plain(script, 'quote')).toBe('Right-click the selection to quote it.');
+    expect(N.plain('Missing host permission for the tab', 'quote')).toBe('Right-click the selection to quote it.');
+    expect(N.plain('The extensions gallery cannot be scripted.', 'cite')).toBe(
+      'Right-click the page to cite, quote or capture it.'
+    );
+    expect(N.plain(script)).toBe('Right-click the page to cite, quote or capture it.');
+    expect(N.plain('This request exceeds the MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND quota.', 'capture')).toBe(
+      'Wait a second, then capture again.'
+    );
+    // a sentence already written to be read passes as it is
+    expect(N.plain(new Error('Captures are for map sites. Cite this page instead.'), 'capture')).toBe(
+      'Captures are for map sites. Cite this page instead.'
+    );
+    expect(N.plain('Azimut refused the capture (500): no space left on device', 'capture')).toMatch(/^Azimut refused/);
   });
 
   it("hears only the panel's own frame, from the app's origin", () => {
@@ -289,10 +340,100 @@ describe('the notes panel', () => {
     const { fromNote, frameWindow } = await openPanel({ sendMessage });
     fromNote(open());
     $('capture').click();
-    expect($('status').textContent).toBe('Capturing…');
     await settle();
     expect($('status').textContent).toBe('Captures are for map sites. Cite this page instead.');
     expect(frameWindow.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("shows what to do instead of a refusal in the browser's words", async () => {
+    const raw = "Either the '<all_urls>' or 'activeTab' permission is required.";
+    const sendMessage = vi.fn(async () => ({ ok: false, error: raw }));
+    const { fromNote, port } = await openPanel({ sendMessage });
+    fromNote(open());
+    $('capture').click();
+    await settle();
+    expect($('status').textContent).toBe('Right-click the map to capture it.');
+
+    port().onMessage.fire({ type: 'trouble', error: 'Missing host permission for the tab' });
+    expect($('status').textContent).toBe('Right-click the page to cite, quote or capture it.');
+  });
+
+  it('says the extension did not answer rather than what the browser said', async () => {
+    const sendMessage = vi.fn(async () => {
+      throw new Error('Could not establish connection. Receiving end does not exist.');
+    });
+    const { fromNote } = await openPanel({ sendMessage });
+    fromNote(open());
+    $('cite').click();
+    await settle();
+    expect($('status').textContent).toBe('The extension did not answer. Try again.');
+  });
+
+  it('draws the area selection on Capture, and puts the picture in once it is dragged', async () => {
+    const sendMessage = vi.fn(async () => ({ ok: true, selecting: 6 }));
+    const { fromNote, frameWindow, port } = await openPanel({ sendMessage });
+    fromNote(open());
+    $('capture').click();
+    await settle();
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'notes-facts', action: 'capture', windowId: 1, caseId: 'case-1' });
+    expect($('status').textContent).toBe('Drag over the map to capture it. Esc cancels.');
+    // nothing goes to the note before the drag
+    expect(frameWindow.postMessage).not.toHaveBeenCalled();
+
+    port().onMessage.fire({ type: 'working', text: 'Capturing…' });
+    expect($('status').textContent).toBe('Capturing…');
+    port().onMessage.fire({
+      type: 'put',
+      put: { action: 'picture', url: 'https://www.google.com/maps/@1,2,3z', title: 'Google Maps', entityId: 'cap_42' },
+    });
+    await settle();
+    const [message, target] = frameWindow.postMessage.mock.calls[0];
+    expect(target).toBe(APP);
+    expect(message).toMatchObject({ action: 'picture', entityId: 'cap_42' });
+  });
+
+  it('takes the selection down on Escape in the panel, and puts nothing', async () => {
+    const sendMessage = vi.fn(async () => ({ ok: true, selecting: 6 }));
+    const { chrome, fromNote, frameWindow, port, handlers } = await openPanel({ sendMessage });
+    fromNote(open());
+    $('capture').click();
+    await settle();
+
+    handlers.keydown({ key: 'a' });
+    expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+    handlers.keydown({ key: 'Escape' });
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(6, { type: 'area-cancel' });
+    // the overlay cancels, and the worker says so
+    port().onMessage.fire({ type: 'idle' });
+    expect($('status').hidden).toBe(true);
+    expect(frameWindow.postMessage).not.toHaveBeenCalled();
+
+    // with nothing drawn, Escape asks nothing of any tab
+    handlers.keydown({ key: 'Escape' });
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears its line when the tab took the selection away with it', async () => {
+    const sendMessage = vi.fn(async () => ({ ok: true, selecting: 6 }));
+    const { chrome, fromNote, handlers } = await openPanel({ sendMessage });
+    chrome.tabs.sendMessage.mockImplementation(async () => {
+      throw new Error('Could not establish connection. Receiving end does not exist.');
+    });
+    fromNote(open());
+    $('capture').click();
+    await settle();
+    handlers.keydown({ key: 'Escape' });
+    await settle();
+    expect($('status').hidden).toBe(true);
+  });
+
+  it('shows the selection a right-click drew, and lets Escape here take it down', async () => {
+    const { chrome, fromNote, port, handlers } = await openPanel();
+    fromNote(open());
+    port().onMessage.fire({ type: 'selecting', tabId: 9 });
+    expect($('status').textContent).toBe('Drag over the map to capture it. Esc cancels.');
+    handlers.keydown({ key: 'Escape' });
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(9, { type: 'area-cancel' });
   });
 
   it('says so when the note does not answer', async () => {
@@ -319,6 +460,84 @@ describe('the notes panel', () => {
     fromNote(open());
     port().onMessage.fire({ type: 'trouble', error: 'Select the words to quote first.' });
     expect($('status').textContent).toBe('Select the words to quote first.');
+  });
+
+  it("opens the case's note in a fresh frame when a case is picked elsewhere", async () => {
+    const { frame, frames, fromNote, storedChange } = await openPanel();
+    fromNote(open());
+    storedChange({ lastCaseId: 'case-2' });
+    // no note named: the app opens that case's own
+    expect($('note').src).toBe(`${APP}/#notebook?case=case-2&solo=1&panel=1`);
+    // a new frame, not a new hash on the old one, which would load nothing and
+    // never tell the note left behind to save
+    expect(frames).toHaveLength(2);
+    expect($('note')).not.toBe(frame);
+    expect(frame.isConnected).toBe(false);
+    expect($('actions').hidden).toBe(true);
+
+    // a late word from the frame it left is not the new note's
+    fromNote({ azimut: 'note-panel', v: 1, state: 'ready', caseId: 'case-1' }, { source: frame.contentWindow });
+    expect($('actions').hidden).toBe(true);
+    fromNote(open({ caseId: 'case-2' }));
+    expect($('actions').hidden).toBe(false);
+  });
+
+  it('loads nothing again for the case it already shows', async () => {
+    const { frames, fromNote, storedChange } = await openPanel();
+    fromNote(open());
+    storedChange({ lastCaseId: 'case-1' });
+    storedChange({ lastCaseId: '' });
+    expect(frames).toHaveLength(1);
+    expect($('note').src).toContain('case=case-1');
+  });
+
+  it('stores a case picked in the note, without loading the note again', async () => {
+    const { chrome, frames, fromNote, storedChange } = await openPanel();
+    fromNote(open());
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
+
+    fromNote(open({ caseId: 'case-3', noteId: 'case' }));
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({ lastCaseId: 'case-3' });
+    // the write comes back as a change: the frame shows that case already
+    storedChange({ lastCaseId: 'case-3' });
+    expect(frames).toHaveLength(1);
+    // and saying it again stores nothing more
+    fromNote(open({ caseId: 'case-3', noteId: 'n2' }));
+    expect(chrome.storage.local.set).toHaveBeenCalledTimes(1);
+  });
+
+  it('stores the case the app opened when the extension had none', async () => {
+    const { chrome, frames, fromNote, storedChange } = await openPanel({ stored: {} });
+    fromNote(open({ caseId: 'case-7' }));
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({ lastCaseId: 'case-7' });
+    storedChange({ lastCaseId: 'case-7' });
+    expect(frames).toHaveLength(1);
+    // a note that closes stores nothing
+    fromNote({ azimut: 'note-panel', v: 1, state: 'none' });
+    expect(chrome.storage.local.set).toHaveBeenCalledTimes(1);
+  });
+
+  it('follows the popup, then the note, then the popup again', async () => {
+    const { chrome, frames, fromNote, storedChange } = await openPanel();
+    fromNote(open());
+    storedChange({ lastCaseId: 'case-2' });
+    expect($('note').src).toContain('case=case-2');
+    fromNote(open({ caseId: 'case-2' }));
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
+
+    fromNote(open({ caseId: 'case-4' }));
+    storedChange({ lastCaseId: 'case-4' });
+    expect(frames).toHaveLength(2);
+
+    storedChange({ lastCaseId: 'case-1' });
+    expect($('note').src).toContain('case=case-1');
+    expect(frames).toHaveLength(3);
+  });
+
+  it('opens the note of a new address with no case', async () => {
+    const { storedChange } = await openPanel();
+    storedChange({ backendUrl: 'http://127.0.0.1:18998/' });
+    expect($('note').src).toBe('http://127.0.0.1:18998/#notebook?solo=1&panel=1');
   });
 
   it('says the app is not there when the frame stays silent', async () => {
@@ -401,5 +620,46 @@ describe('the popup opens the panel', () => {
     $('open-notes').click();
     await settle();
     expect($('status').textContent).toMatch(/Could not open the notes panel/);
+  });
+});
+
+describe('the area selection a capture into the note draws', () => {
+  /** The popup's own overlay (extension/overlay.js), on a page of its own. */
+  function drawOverlay() {
+    document.body.innerHTML = '';
+    const win = {
+      __azimutOverlayActive: false,
+      innerWidth: 1000,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    const listeners = [];
+    const chrome = {
+      runtime: {
+        sendMessage: vi.fn(),
+        onMessage: {
+          addListener: vi.fn((fn) => listeners.push(fn)),
+          removeListener: vi.fn((fn) => listeners.splice(listeners.indexOf(fn), 1)),
+        },
+      },
+    };
+    const frame = (fn) => fn();
+    new Function('window', 'chrome', 'browser', 'requestAnimationFrame', overlaySource)(win, chrome, undefined, frame);
+    return { chrome, listeners, win };
+  }
+
+  it("is taken down by the panel's Escape, and says it was cancelled", () => {
+    const { chrome, listeners, win } = drawOverlay();
+    expect(listeners).toHaveLength(1);
+    const answer = vi.fn();
+    listeners[0]({ type: 'something else' }, {}, answer);
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+
+    listeners[0]({ type: 'area-cancel' }, {}, answer);
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'area-cancelled' });
+    expect(answer).toHaveBeenCalledWith({ ok: true });
+    // gone from the page, and deaf from now on
+    expect(listeners).toHaveLength(0);
+    expect(win.__azimutOverlayActive).toBe(false);
   });
 });

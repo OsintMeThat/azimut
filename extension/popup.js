@@ -121,6 +121,12 @@ async function loadCases(select, stored) {
   options.push(new Option("New scratch session", ""));
   select.replaceChildren(...options);
   select.value = cases.some((c) => c.id === stored.lastCaseId) ? stored.lastCaseId : options[0].value;
+  // The case picked is the extension's case at once: the notes panel opens its
+  // note, and the next capture or right-click files there. A new scratch session
+  // is no case until something is filed into it.
+  select.addEventListener("change", () => {
+    if (select.value) api.storage.local.set({ lastCaseId: select.value });
+  });
   return true;
 }
 

@@ -22,4 +22,5 @@ export const LOOK_HELP = {
   sources: 'A numbered list of every source the note cites, on the last pages',
   write: 'The note alone',
   page_pane: 'The PDF beside the note, drawn as you type',
+  page_in_place: 'The PDF of the note, in place of its text',
 };

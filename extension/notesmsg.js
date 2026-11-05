@@ -176,6 +176,40 @@ const AzimutNotes = (() => {
     return message;
   }
 
+  // What each browser says when it keeps a page from the extension: Chrome's
+  // "Either the '<all_urls>' or 'activeTab' permission is required." and "Cannot
+  // access contents of the page…", Firefox's "Missing activeTab permission" and
+  // "Missing host permission for the tab", and the pages no extension may script.
+  const REFUSED = /activeTab|<all_urls>|Cannot access|must request permission|cannot be scripted|Missing host permission/i;
+  // Chrome allows two captures a second.
+  const TOO_FAST = /MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/;
+
+  /**
+   * What to do instead, when the browser keeps a page from the extension.
+   *
+   * A right-click item is what opens a page to the extension, so each says which
+   * right-click does the same thing.
+   */
+  const INSTEAD = {
+    capture: "Right-click the map to capture it.",
+    quote: "Right-click the selection to quote it.",
+    any: "Right-click the page to cite, quote or capture it.",
+  };
+
+  /**
+   * The sentence the panel shows for an error, never the browser's own words.
+   *
+   * A refusal becomes what to do instead, for the action that was refused. Any
+   * other sentence is passed on as it is: the extension's and the app's are
+   * already written to be read.
+   */
+  function plain(error, action = "") {
+    const said = String(error?.message ?? error ?? "").trim();
+    if (REFUSED.test(said)) return INSTEAD[action] || INSTEAD.any;
+    if (TOO_FAST.test(said)) return "Wait a second, then capture again.";
+    return said;
+  }
+
   /**
    * What the note's frame said, or null for anything that is not it.
    *
@@ -197,5 +231,5 @@ const AzimutNotes = (() => {
     return null;
   }
 
-  return { LIMITS, isWeb, appOrigin, isApp, panelUrl, citeLabel, citeButton, buildPut, readFrame };
+  return { LIMITS, INSTEAD, isWeb, appOrigin, isApp, panelUrl, citeLabel, citeButton, buildPut, plain, readFrame };
 })();

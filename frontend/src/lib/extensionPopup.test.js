@@ -264,3 +264,45 @@ describe('a place the app would refuse', () => {
     expect($('status').textContent).toBe('Could not save: String should have at most 300 characters');
   });
 });
+
+describe('the case picked', () => {
+  /**
+   * The notes panel, Capture into the note and the right-click items all work in
+   * the extension's `lastCaseId`. A case chosen here is that case at once, so the
+   * panel opens its note without waiting for something to be filed.
+   */
+  const cases = ok([
+    { id: 'c1', name: 'Case one' },
+    { id: 'c2', name: 'Case two' },
+  ]);
+  const pick = (id, value) => {
+    $(id).value = value;
+    $(id).dispatchEvent(new Event('change'));
+  };
+  const stored = () =>
+    globalThis.chrome.storage.local.set.mock.calls.map(([items]) => items).filter((items) => 'lastCaseId' in items);
+
+  it('is stored the moment it is chosen on a map', async () => {
+    await runPopup({
+      tabUrl: 'https://www.google.fr/maps/@48.85,2.29,17z',
+      stored: { lastCaseId: 'c1' },
+      answers: { '/parse': ok({ site: 'google-maps', label: 'Google Maps', lat: 48.85, lon: 2.29, zoom: 17 }), '/cases': cases },
+    });
+    expect($('case').value).toBe('c1');
+    expect(stored()).toEqual([]);
+    pick('case', 'c2');
+    expect(stored()).toEqual([{ lastCaseId: 'c2' }]);
+  });
+
+  it('is stored the moment it is chosen for a bookmark', async () => {
+    await runPopup({ tabUrl: 'https://example.com/story', answers: { '/parse': ok({ site: null }), '/cases': cases } });
+    pick('bm-case', 'c2');
+    expect(stored()).toEqual([{ lastCaseId: 'c2' }]);
+  });
+
+  it('leaves the case alone for a scratch session not filed yet', async () => {
+    await runPopup({ tabUrl: 'https://example.com/story', answers: { '/parse': ok({ site: null }), '/cases': cases } });
+    pick('bm-case', '');
+    expect(stored()).toEqual([]);
+  });
+});

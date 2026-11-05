@@ -4,7 +4,8 @@
  *
  * The overlay dims the page while the user drags, so it removes itself and
  * waits two frames BEFORE asking the background to capture — otherwise its
- * own dimming would be burned into the capture. Esc cancels.
+ * own dimming would be burned into the capture. Esc cancels, on the page or in
+ * the notes panel, whose Capture button leaves the keyboard in the panel.
  */
 
 (() => {
@@ -34,6 +35,7 @@
   function teardown() {
     host.remove();
     window.removeEventListener("keydown", onKey, true);
+    api.runtime.onMessage.removeListener(onCancel);
     window.__azimutOverlayActive = false;
   }
 
@@ -59,6 +61,14 @@
     }
   }
   window.addEventListener("keydown", onKey, true);
+
+  // Only the extension's own pages can send this; a web page cannot reach it.
+  function onCancel(msg, sender, sendResponse) {
+    if (msg?.type !== "area-cancel") return;
+    finish(null);
+    sendResponse({ ok: true });
+  }
+  api.runtime.onMessage.addListener(onCancel);
 
   host.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;

@@ -9,8 +9,12 @@
    *
    * While it is open it is the pinned note (`lib/notes/putInNote.svelte.js`), the
    * one every tool's `Put in “…”` names and writes to.
+   *
+   * Write | Page shows the note or, in its place, the PDF it prints to
+   * (`NotePages`). What lands in the note while the pages show (a put, a citation)
+   * brings the text back first, so it is seen landing.
    */
-  import { onDestroy, untrack } from 'svelte';
+  import { flushSync, onDestroy, untrack } from 'svelte';
   import { fetchAllEntities } from '../lib/catalog.js';
   import { caseState, uiState, toast } from '../lib/state.svelte.js';
   import { buildHash } from '../lib/hash.js';
@@ -20,8 +24,12 @@
   import { citation } from '../lib/notes/syntax.js';
   import { CASE_NOTES, flush, openNote, releaseNote } from '../lib/notes/noteDoc.svelte.js';
   import { dockNote, dockWidth, firstOpening, noteDock, setDockNote, setDockOpen, takePending } from '../lib/notes/noteDock.svelte.js';
+  import { keepPageView, readPageView } from '../lib/notes/pageView.js';
   import Icon from './Icon.svelte';
   import NoteEditor from './NoteEditor.svelte';
+  import NotePages from './NotePages.svelte';
+  import NoteSaved from './NoteSaved.svelte';
+  import ViewModes from '../tools/notebook/ViewModes.svelte';
   import PanelEdge from './PanelEdge.svelte';
   import NotePicker from './NotePicker.svelte';
   import FloatingMenu from './FloatingMenu.svelte';
@@ -38,6 +46,25 @@
   let sourcing = $state(null);
   // the first time it opens, the panel says what it is for and how it comes back
   let told = $state(firstOpening());
+  // the note's pages in place of its text, as last left in this browser
+  let page = $state(readPageView('dock'));
+
+  function setPage(on) {
+    page = on;
+    keepPageView('dock', on);
+  }
+
+  /** Back to the text, drawn before what lands in it or is gone to there. */
+  function toWrite() {
+    if (!page) return;
+    setPage(false);
+    flushSync();
+  }
+
+  function jump(line) {
+    toWrite();
+    editor?.jump(line);
+  }
 
   $effect(() => {
     const id = caseId;
@@ -132,8 +159,6 @@
     tab.location.href = `${location.pathname}${location.search}${buildHash('notebook', { case: caseId, note: noteId ?? CASE_NOTES, solo: '1' })}`;
     setDockOpen(false);
   }
-
-  const saveSaid = $derived(!doc?.loaded ? '' : doc.saveError ? 'Not saved' : doc.saving || !doc.saved ? 'Saving…' : 'Saved');
 </script>
 
 {#if caseId && doc}
@@ -144,10 +169,11 @@
         onclick={(event) => (picking = picking ? null : event.currentTarget)}>
         <Icon name="note" size={14} /><span>{title}</span><Icon name="chevronDown" size={12} />
       </button>
-      <span class="said" class:error={doc.saveError}>{saveSaid}</span>
+      <NoteSaved {doc} />
       <div class="spacer"></div>
+      <ViewModes {page} inPlace onchange={setPage} />
       <button type="button" class="btn btn-ghost btn-sm add" title="Put what is on screen in this note, or cite a source" aria-haspopup="menu"
-        aria-expanded={Boolean(adding)} data-guide="notes.add" onclick={(event) => openAdding(event.currentTarget)}>
+        aria-label="Add" aria-expanded={Boolean(adding)} data-guide="notes.add" onclick={(event) => openAdding(event.currentTarget)}>
         <Icon name="plus" size={14} /><span>Add</span></button>
       <button type="button" class="btn btn-ghost btn-sm" title="Open in the Notebook" aria-label="Open in the Notebook" onclick={inNotebook}>
         <Icon name="maximize" size={14} /></button>
@@ -160,10 +186,12 @@
       <p class="told">It stays open as you switch tools. Notes in the sidebar brings it back.
         <button type="button" class="btn btn-ghost btn-sm" aria-label="Got it" title="Got it" onclick={() => (told = false)}><Icon name="x" size={12} /></button></p>
     {/if}
-    {#key doc}
-      <NoteEditor {doc} {caseId} {entities} compact where="dock" onopen={openEntity} onready={(handle) => (editor = handle)}
-        placeholder="Write as you look. Type @ to cite, / for more." />
-    {/key}
+    <NotePages {page} {caseId} {noteId} {title} {doc} {entities} onjump={jump}>
+      {#key doc}
+        <NoteEditor {doc} {caseId} {entities} compact where="dock" onopen={openEntity} onready={(handle) => (editor = handle)}
+          onarrive={toWrite} placeholder="Write as you look. Type @ to cite, / for more." />
+      {/key}
+    </NotePages>
   </aside>
 
   {#if picking}
@@ -195,7 +223,7 @@
 <style>
   .note-dock {
     position: relative; flex: none; display: flex; flex-direction: column; min-height: 0;
-    border-left: 1px solid var(--border); background: var(--bg-1);
+    border-left: 1px solid var(--border); background: var(--bg-1); container: note-dock / inline-size;
   }
   .dock-bar { display: flex; align-items: center; gap: 4px; padding: 4px 6px 4px 10px; border-bottom: 1px solid var(--border); min-height: 38px; }
   .which {
@@ -203,12 +231,13 @@
     font-weight: 600; font-size: var(--fs-sm); cursor: pointer; padding: 4px 6px; border-radius: var(--r-sm); min-width: 0;
   }
   .which span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; }
+  .which :global(svg) { flex: none; }
   .which:hover { background: var(--bg-3); }
-  .said { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
-  .said.error { color: var(--danger); }
   .spacer { flex: 1; }
   .add { display: inline-flex; align-items: center; gap: 4px; }
-  .note-dock > :global(.note-editor) { flex: 1; }
+  /* narrow: the note's name keeps its room */
+  @container note-dock (max-width: 400px) { .add span, .which > :global(svg:first-child) { display: none; } }
+  @container note-dock (max-width: 340px) { .dock-bar { gap: 2px; padding-left: 6px; } }
   .told {
     display: flex; align-items: center; gap: 6px; margin: 0; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--border);
     background: var(--bg-2); color: var(--text-2); font-size: var(--fs-xs); line-height: 1.4;
