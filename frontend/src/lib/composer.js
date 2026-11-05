@@ -433,15 +433,19 @@ export function notesFromShapes(shapes) {
   return notes;
 }
 
+/** What a proof's footer says when the analyst wrote nothing. */
+export const FOOTER_LINE = 'Composed with Azimut';
+
 /**
- * The credits a proof owes the pictures it shows, each said once, then the app.
+ * The credits a proof's pictures ask for, each said once, joined with ` · `, or ''.
  *
- * A published proof must credit its imagery: each panel's credit as its capture
- * or picture kept it, read in today's words for the day it shows
- * (`normaliseAttribution`: the Copernicus notice dated, the relief's licence in
- * full), so an older proof prints the right credits when it is exported again.
+ * Each panel's credit as its capture or picture kept it, read in today's words for
+ * the day it shows (`normaliseAttribution`: the Copernicus notice dated, the
+ * relief's licence in full), so an older proof reads the right credits again. Every
+ * panel already carries its own on its face; these are kept with the saved proof
+ * (`api/proofs.save_proof` mirrors this rule) and printed only when asked.
  */
-export function attributionLine(panels) {
+export function imageryCredits(panels) {
   const parts = [];
   for (const panel of panels ?? []) {
     const credit = normaliseAttribution(panel?.meta?.attribution, panel?.meta?.imagery_date);
@@ -450,12 +454,28 @@ export function attributionLine(panels) {
       if (text && !parts.includes(text)) parts.push(text);
     }
   }
-  return [...parts, 'Composed with Azimut'].join(' · ');
+  return parts.join(' · ');
 }
 
-/** The proof's credit line: the analyst's own words, else the credits its panels owe. */
+/** The panels' credits, then the app: what a post made from the proof credits. */
+export function attributionLine(panels) {
+  return [imageryCredits(panels), FOOTER_LINE].filter(Boolean).join(' · ');
+}
+
+/** The footer's own line, as the analyst edits it: their words, else the default. */
+export function footerLine(proof) {
+  return proof?.footer?.trim() || FOOTER_LINE;
+}
+
+/**
+ * The proof's credit line as printed: the footer's line, and the panels' imagery
+ * credits after it when "Imagery credits" is ticked (`footerCredits`; a proof
+ * saved before the switch reads as off).
+ */
 export function creditLine(proof) {
-  return proof?.footer?.trim() || attributionLine(proof?.panels ?? []);
+  const line = footerLine(proof);
+  const credits = proof?.footerCredits === true ? imageryCredits(proof?.panels ?? []) : '';
+  return credits ? `${line} · ${credits}` : line;
 }
 
 // ---- coordinates + source (auto-derived from panels, user-overridable) ------
@@ -1345,6 +1365,9 @@ export function toSpec(proof) {
     // the footer lines that change the picture's height.
     footerCoords: proof.footerCoords === true,
     footerText: proof.footerText !== false,
+    // Whether the panels' imagery credits follow the credit line. Off unless asked:
+    // every panel already carries its own, and the saved proof keeps them.
+    footerCredits: proof.footerCredits === true,
     // The addresses the proof states, empty → traced from the panels instead. Named
     // for the plural like the multi-parent key of a media's own origin (`sources`,
     // beside `from`), because it draws the same distinction: one of them, or several.

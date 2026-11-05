@@ -18,6 +18,8 @@ import hashlib
 import json
 import re
 import shutil
+import struct
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from .. import config
 from ..engine import artifacts as artifact_engine
+from ..engine import copernicus_credit
 from ..engine import exportdir, layerediting
 from ..engine import links as link_engine
 from ..engine import localtime
@@ -167,6 +170,58 @@ def _stated_description(spec: dict[str, Any]) -> str:
     """The sentence the proof carries, which is the entity's own notes."""
     raw = spec.get("description")
     return raw.strip()[:_STATED_TEXT_MAX] if isinstance(raw, str) else ""
+
+
+#: The longest credit kept on a proof: a hundred panels' providers, said once each.
+_CREDITS_MAX = 2000
+
+
+def imagery_credits(spec: dict[str, Any]) -> str:
+    """The credits a proof's pictures ask for, each said once, joined with `` · ``.
+
+    Mirrors ``imageryCredits`` in ``lib/composer.js``: each panel's credit as its
+    capture or picture kept it, read in today's words for the day it shows. The
+    footer prints them only when asked (``footerCredits``); the proof keeps them
+    either way, on its record and in its PNG.
+    """
+    parts: list[str] = []
+    for panel in spec.get("panels") or []:
+        meta = panel.get("meta") if isinstance(panel, dict) else None
+        if not isinstance(meta, dict):
+            continue
+        day = meta.get("imagery_date")
+        credit = copernicus_credit.normalise_attribution(
+            meta.get("attribution") or "", day if isinstance(day, str) else None
+        )
+        for part in re.split(r"\s+·\s+", credit):
+            text = part.strip()
+            if text and text not in parts:
+                parts.append(text)
+    return " · ".join(parts)[:_CREDITS_MAX]
+
+
+#: The PNG text keyword the credits are written under. ``Copyright`` is one of the
+#: keywords the PNG specification predefines (a "Copyright notice"), so image
+#: viewers and exiftool show it by name; ``Credit`` is an IPTC field PNG does not
+#: define, and few readers would surface it.
+PNG_CREDIT_KEY = b"Copyright"
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def with_credits(png: bytes, credits: str) -> bytes:
+    """The PNG with ``credits`` in a UTF-8 text chunk, right after its header.
+
+    The pixels are not decoded again: one ``iTXt`` chunk is spliced in after
+    ``IHDR``, which every reader accepts there. Anything that is not a PNG, or no
+    credits, comes back as it was.
+    """
+    if not credits or not png.startswith(_PNG_SIGNATURE) or png[12:16] != b"IHDR":
+        return png
+    header_end = 8 + 4 + 4 + struct.unpack(">I", png[8:12])[0] + 4
+    # keyword, then no compression, no language and no translated keyword
+    body = PNG_CREDIT_KEY + b"\x00\x00\x00\x00\x00" + credits.encode("utf-8")
+    chunk = struct.pack(">I", len(body)) + b"iTXt" + body + struct.pack(">I", zlib.crc32(b"iTXt" + body))
+    return png[:header_end] + chunk + png[header_end:]
 
 
 def _proof_thumb(case: Case, name: str, data: bytes | None = None) -> str | None:
@@ -420,6 +475,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     # A zone only means something beside the date it reads.
     when_zone = zone if when else None
     description = _stated_description(body.spec)
+    credits = imagery_credits(body.spec)
     # The export too, and for a stronger reason — the rename below deletes the
     # old PNG and moves the assets folder, so a payload refused after that point
     # would leave the proof under its old name with both of them gone.
@@ -434,6 +490,8 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
                 status_code=413,
                 detail=f"the export must be under {MAX_EXPORT_BYTES // 1024 // 1024} MB",
             )
+        # the credits travel inside the file, wherever it is copied to
+        png_bytes = with_credits(png_bytes, credits)
 
     if recased and old:
         # One file under both names on Windows and macOS: each is renamed in place,
@@ -518,6 +576,9 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
             attrs["when_zone"] = when_zone
         if existing["attrs"].get("notes", "") != description:
             attrs["notes"] = description
+        # kept for the record, printed only when the footer is asked to
+        if existing["attrs"].get("imagery_credits", "") != credits:
+            attrs["imagery_credits"] = credits
         if attrs:
             patch["attrs"] = attrs
         case.update_entity(existing["id"], patch)
@@ -533,6 +594,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
                 **({"when": when} if when else {}),
                 **({"when_zone": when_zone} if when_zone else {}),
                 **({"notes": description} if description else {}),
+                **({"imagery_credits": credits} if credits else {}),
             },
             by="proof-composer",
         )["id"]

@@ -75,7 +75,9 @@
     trackPresets,
     trackTint,
   } from '../lib/timelineTracks.js';
-  import { chronologyBlock, chronologyMarkdown, chronologyRows, readChronology } from '../lib/timelineCopy.js';
+  import { chronologyBlock, chronologyMarkdown, chronologyNoteTable, chronologyRows, readChronology } from '../lib/timelineCopy.js';
+  import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import PutInNote from '../components/PutInNote.svelte';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
   import TimelineLayerCard from '../components/TimelineLayerCard.svelte';
   import { provenance } from '../lib/sheetExport.js';
@@ -1903,6 +1905,46 @@
       : [...trackSpecs, mediaTrack(trackSpecs, { collectedOnly: false })];
   }
 
+  /** Every entry of the window, read whole. A frozen reading is what it froze and asks nothing of the case. */
+  async function readWindow(caseId) {
+    return snapshotReading
+      ? { items: windowItems, truncated: false }
+      : readChronology((url) => api.get(url), { caseId, tracks: trackSpecs, from, to, entityId: entityFilter?.id });
+  }
+
+  /** The lines quoted above a copied table: the case, the view, the tracks, the window and when. */
+  function windowSaid() {
+    return provenance({
+      caseName: caseState.current?.name ?? '',
+      sheet: timelineViews.activeView?.name || 'Timeline',
+      filter: [trackSpecs.map((track) => track.label).join(', '), windowWords(from, to, zone), zoneWord]
+        .filter(Boolean).join(' · '),
+      at: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * The window as a table in the pinned note: the same table Copy writes, its subjects,
+   * places and sources cited so a source is numbered in the PDF, cut at a size a
+   * report reads, with a line saying so.
+   */
+  const windowOffer = {
+    id: 'table',
+    label: 'This window',
+    hint: 'The window’s entries as a table, sources cited',
+    icon: 'table',
+    put: async () => {
+      const caseId = caseState.current?.id;
+      if (!caseId) throw new Error('No case is open');
+      const read = await readWindow(caseId);
+      const rows = chronologyRows(read.items);
+      if (!rows.length) throw new Error('No dated entry in this window');
+      return { text: chronologyNoteTable(rows, windowSaid(), { truncated: read.truncated }) };
+    },
+  };
+  offerPuts('timeline', () => (windowItems.length ? [windowOffer] : []));
+  $effect(() => () => withdrawNote('timeline'));
+
   /**
    * The window's chronology on the clipboard, as a table for a report or a block for a
    * spreadsheet. A frozen reading copies what it froze and asks nothing of the case.
@@ -1913,21 +1955,9 @@
     if (!caseId || copying) return;
     copying = true;
     try {
-      const read = snapshotReading
-        ? { items: windowItems, truncated: false }
-        : await readChronology((url) => api.get(url), {
-          caseId, tracks: trackSpecs, from, to, entityId: entityFilter?.id,
-        });
+      const read = await readWindow(caseId);
       const rows = chronologyRows(read.items);
-      const text = kind === 'markdown'
-        ? chronologyMarkdown(rows, provenance({
-          caseName: caseState.current?.name ?? '',
-          sheet: timelineViews.activeView?.name || 'Timeline',
-          filter: [trackSpecs.map((track) => track.label).join(', '), windowWords(from, to, zone), zoneWord]
-            .filter(Boolean).join(' · '),
-          at: new Date().toISOString(),
-        }))
-        : chronologyBlock(rows);
+      const text = kind === 'markdown' ? chronologyMarkdown(rows, windowSaid()) : chronologyBlock(rows);
       await navigator.clipboard.writeText(text);
       const count = `${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`;
       toast(read.truncated ? `The first ${count} copied` : `${count} copied`, 'ok', 1800);
@@ -2538,6 +2568,7 @@
                     <div class="copy-options" role="menu">
                       <button role="menuitem" onclick={() => copyChronology('markdown')}>As a Markdown table</button>
                       <button role="menuitem" onclick={() => copyChronology('block')}>For a spreadsheet</button>
+                      <PutInNote offer={windowOffer} class="put-row" icon={false} onput={() => (copyMenu = false)} />
                     </div>
                   {/if}
                 </div>
@@ -3147,6 +3178,8 @@
   .copy-options { position: absolute; z-index: 40; top: calc(100% + 4px); right: 0; display: grid; min-width: 170px; padding: 4px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-1); box-shadow: var(--shadow-2); }
   .copy-options button { padding: 6px 8px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); font-size: var(--fs-xs); text-align: left; cursor: pointer; }
   .copy-options button:hover { background: var(--bg-3); color: var(--text-1); }
+  .copy-options :global(.put-row) { margin-top: 3px; padding: 7px 8px 6px; border: 0; border-top: 1px solid var(--border); border-radius: 0 0 var(--r-sm) var(--r-sm); background: none; color: var(--text-2); font-size: var(--fs-xs); text-align: left; cursor: pointer; }
+  .copy-options :global(.put-row:hover) { background: var(--bg-3); color: var(--text-1); }
   .list-grid { display: grid; padding-bottom: 5px; }
   /* The columns are the ones the window fills (`listTemplate`), set on the grid. */
   .list-row { display: grid; grid-template-columns: var(--list-columns, 150px minmax(200px, 3fr) minmax(70px, 1.1fr) minmax(60px, .9fr) minmax(70px, 1.1fr) minmax(90px, auto)); align-items: center; gap: 10px; padding: 6px 12px; }

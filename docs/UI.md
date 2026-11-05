@@ -4146,9 +4146,12 @@ sides, ringed dark to hold up over bright imagery, with the same round turn knob
 
 **Captions and the footer are written in place.** A double-click on a panel's
 caption or on the footer's credit line opens the editor over the words, one line
-each; a footer emptied goes back to the line the panels give: the imagery credits
-of the panels it shows, each once, then *Composed with Azimut*, wrapped onto more
-lines when long. A press on a caption
+each; a footer emptied goes back to *Composed with Azimut*, and a long line wraps.
+The imagery credits of the panels it shows (each panel's capture already carries its
+own on its face) are kept with the proof rather than printed under it: in its Details,
+in the exported PNG's metadata, in what it hands Geo Report, and under it in a note.
+**Imagery credits**, off by default, adds them after the footer's line, for a crop
+that cut a capture's own credit band. A press on a caption
 picks its panel, and a press on the footer picks it, framed with nothing to pull:
 the rail then sets the size and colour of the captions, which share both so a row
 reads as one line, or of the footer. **Auto** is the colour the background gives.
@@ -5751,8 +5754,12 @@ template is guidance by design.
 
 **Pictures and pages.** Hovering a picture, in the note or on its page in the Page
 pane, offers **S**, **M**, **L** and **Full**, left, centre or right, and **Caption**,
-written on its line as `{width=… align=… caption="…"}`. Each bar is one Tab stop,
-walked with the arrows. *Caption* opens a one-line field where the caption prints:
+written on its line as `{width=… align=… caption="…"}`. The bar also offers *Open in
+<Tool>* when a tool can reopen the state the picture was taken from, and *Source…* for
+a picture brought in by hand with no address (a link stated, never fetched); neither
+prints, and the bar wraps onto two rows in a narrow note. Go to from a warning lands on
+the picture with its bar in reach. The picture picker lists proofs beside pictures.
+Each bar is one Tab stop, walked with the arrows. *Caption* opens a one-line field where the caption prints:
 Enter or leaving it writes it, Escape leaves it as it was, and the note shows it under
 the picture. A caption beats an image's title; with numbered figures it reads
 *Figure N.* and the caption. Under it a grey credit says where the picture comes
@@ -5790,10 +5797,48 @@ resizable at its edge (`components/NoteDock.svelte`). Notes in the sidebar pins 
 as do **Pin to the side** in the Notebook and *Note on the side* in Go to; the note
 button in the top bar shows and hides it. The first time it opens it says it stays
 and that Notes in the sidebar brings it back, once per browser. Its bar picks the
-note from the same list as the sidebar's (`components/NotePicker.svelte`), **@**
-cites what the tool on screen shows (the thing it offers to Add event), and it opens
+note from the same list as the sidebar's (`components/NotePicker.svelte`) and opens
 the note in the Notebook or its own tab. Whether it is open is kept for the browser,
 which note per case.
+
+**Putting things in the note.** **Add** (+) in the bar puts what the tool on screen
+shows in the note, always in this order: *Cite “…”* when the tool shows a record, the
+tool's own offers (at most four), then *A source…*. While a note is on the side, the
+tools' own menus add *Put in “<note>”* beside their Copy, Export or capture; with no
+note on the side, no tool changes. A put is one press, never a dialog: it lands at the
+cursor, or at the end if the note was not written in this visit, on lines of its own;
+the note scrolls to it and lights it, a picture opens its caption, and the toast offers
+Undo, which also sends what was filed only for it to the Trash. A picture is filed in
+the case like any capture, and the same state put twice is filed once. Tables stop at
+200 rows with a line naming the cut, and their records are chips, so their sources get
+their number (`lib/notes/putInNote.svelte.js`, offers from `lib/noteHere.svelte.js`,
+openers in `tools/**/*.opener.js`).
+
+What each tool puts, and where its *Put in “<note>”* sits:
+
+| Tool | What lands | Where |
+|---|---|---|
+| Map | *This view*: the centred view filed as a capture, once per identical view (provider, imagery day, centre, zoom, bearing, size). *This point*: decimal degrees at 5 places, or the open place's chip and its coordinates. *This measure*: its own text and assumption, and the day a shadow was read for | capture menu, right-click *Put this point in “…”*, Add |
+| Compare | *This pair*, side by side with both days in its credit, kept once per identical pair; an unsaved comparison is saved as *<place>, <day A> to <day B>* | Export panel |
+| Detect | *This pin*: a pinned candidate's evidence picture, captioned with what was measured, its area and its days; a candidate not pinned offers nothing | the pinned verdict |
+| Inspect | *This frame*, labelled *Frame at 00:12.480*, saved first when it is not | under Save to case |
+| Collage | *This collage*, saved first when it is not | under Save to case |
+| Geo Proof | *This proof*, saved first when it is not: the picture at full width, captioned with the proof's own sentence and date, then one line per point (name, point of view or shown) | export menu |
+| Timeline | *This window* as a table | Copy, Add |
+| Sheet | *This view* as a table, its provenance header kept | Export, Add |
+| Media | *Quote the post*: the words as posted, the account and day, then the media's chip | Open in…, Add |
+
+*Open in <Tool>* on a picture's bar reopens what it came from: the map at that view
+and basemap (not a tilted capture's pitch nor a dated pick), the comparison as it is
+now, the video at the frame's instant, the collage, the proof, the run at that
+candidate. Pictures filed before this build carry no such way back and show none.
+
+**A source…** takes a pasted or typed link. It is looked up in the case first, nothing
+fetched (`GET /sources/lookup`): what the case holds is cited. Otherwise *Bookmark*,
+named from the address (*Post by @h on X*, *Telegram, channel #n*…,
+`engine/urltitles.py`), or *Download*, the only press that reaches the network. A link
+pasted alone in a note is looked up the same way: *Cite it* when the case has it, else
+*Bookmark it* with a name read from the address.
 
 **The note in the case.** A save restates the records a note cites as `mentions`
 edges (`engine/notelinks.py`), so the note shows in their Details and the Graph; a

@@ -1,5 +1,5 @@
 /**
- * What the tool on screen is looking at, for the Add event bar.
+ * What the tool on screen is looking at, for the Add event bar and the pinned note.
  *
  * The bar opens over whichever tool the analyst is in, and an event noted from a
  * video should already cite that video. So each tool that has a current thing says
@@ -27,10 +27,40 @@ export function offerNote(tool, entity, { dates = [] } = {}) {
   noteHere.datesByTool[tool] = typeof dates === 'function' ? dates : dates.filter((offer) => offer?.value);
 }
 
-/** A tool going away takes its selection back. */
+/** A tool going away takes its selection back, and what it offered the note. */
 export function withdrawNote(tool) {
   delete noteHere.byTool[tool];
   delete noteHere.datesByTool[tool];
+  puts.delete(tool);
+}
+
+// What each tool can put in the pinned note, as a function read when asked. Kept out
+// of `noteHere`: nothing redraws when a tool's offers change, they are read on a press.
+const puts = new Map();
+
+/**
+ * What the tool on screen can put in the pinned note, read when the note's "+" opens
+ * or a tool's menu draws its row. `offers` is a function answering a list (or the
+ * list itself) of `{ id, label, hint, icon, picture?, busy?, put({ signal }) }`, where
+ * `put` files what it must and answers `{ text, filed?, inline? }`
+ * (`lib/notes/putInNote.svelte.js`). Only what applies to what is on screen is listed.
+ */
+export function offerPuts(tool, offers) {
+  if (!tool) return;
+  if (!offers) puts.delete(tool);
+  else puts.set(tool, typeof offers === 'function' ? offers : () => offers);
+}
+
+/** What this tool offers the pinned note now, each usable as it is. */
+export function putsFor(tool) {
+  const read = puts.get(tool);
+  let list = [];
+  try {
+    list = read?.() ?? [];
+  } catch {
+    list = [];
+  }
+  return (Array.isArray(list) ? list : []).filter((offer) => offer?.id && offer.label && typeof offer.put === 'function');
 }
 
 /** The thing the bar seats for this tool, or null. */

@@ -26,7 +26,7 @@ import {
   specPoints, statePoints, statePanelPoint, MAX_POINTS,
   captureAimed, pointProposed, uncheckedPoints,
   proofCoordsLines, coordsPlateLines, coordsPostLines,
-  footerLines, footerBand, attributionLine, creditLine,
+  footerLines, footerBand, attributionLine, creditLine, footerLine, imageryCredits, toSpec, FOOTER_LINE,
 } from './composer.js';
 
 // natural is [width, height]; PANEL_H drives the per-row scale.
@@ -2243,7 +2243,7 @@ describe('the coordinates a plate prints', () => {
 });
 
 
-describe('the credits a proof prints', () => {
+describe('the credits a proof keeps, and prints when asked', () => {
   const DEM = 'produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 '
     + 'provided under COPERNICUS by the European Union and ESA; all rights reserved';
   const panels = [
@@ -2254,33 +2254,61 @@ describe('the credits a proof prints', () => {
     { meta: { kind: 'satellite', attribution: 'Map data ©2026 Google' } },
     { meta: { kind: 'media', source_url: 'https://x.com/a/1' } },
   ];
+  const CREDITS = [
+    'Contains modified Copernicus Sentinel data 2024',
+    'Esri, Vantor, Earthstar Geographics, and the GIS User Community',
+    `© Mapterhorn, ${DEM}`,
+    'OpenFreeMap © OpenMapTiles',
+    'Map data ©2026 Google',
+  ].join(' · ');
 
-  it('names every panel\'s imagery once, in today\'s words, then the app', () => {
-    expect(attributionLine(panels)).toBe([
-      'Contains modified Copernicus Sentinel data 2024',
-      'Esri, Vantor, Earthstar Geographics, and the GIS User Community',
-      `© Mapterhorn, ${DEM}`,
-      'OpenFreeMap © OpenMapTiles',
-      'Map data ©2026 Google',
-      'Composed with Azimut',
-    ].join(' · '));
+  it('names every panel\'s imagery once, in today\'s words, without the app', () => {
+    expect(imageryCredits(panels)).toBe(CREDITS);
+    expect(imageryCredits([])).toBe('');
+  });
+
+  it('credits a post with the panels\' imagery, then the app', () => {
+    expect(attributionLine(panels)).toBe(`${CREDITS} · Composed with Azimut`);
     expect(attributionLine([])).toBe('Composed with Azimut');
   });
 
-  it('keeps the analyst\'s own credit line over the panels\'', () => {
+  it('prints the clean default line when the switch is off, as a proof saved before it reads', () => {
+    expect(FOOTER_LINE).toBe('Composed with Azimut');
+    expect(creditLine({ panels })).toBe('Composed with Azimut');
+    expect(creditLine({ panels, footerCredits: false })).toBe('Composed with Azimut');
+    expect(footerLine({ panels })).toBe('Composed with Azimut');
+  });
+
+  it('appends the panels\' credits after the line when the switch is on', () => {
+    expect(creditLine({ panels, footerCredits: true })).toBe(`Composed with Azimut · ${CREDITS}`);
+    // nothing to add, nothing added
+    expect(creditLine({ panels: [], footerCredits: true })).toBe('Composed with Azimut');
+  });
+
+  it('keeps the analyst\'s own line first, the credits after it when asked', () => {
     expect(creditLine({ panels, footer: '  Imagery © Esri  ' })).toBe('Imagery © Esri');
-    expect(creditLine({ panels })).toBe(attributionLine(panels));
+    expect(creditLine({ panels, footer: 'Analysis: A. Team', footerCredits: true }))
+      .toBe(`Analysis: A. Team · ${CREDITS}`);
+    // the line is what the analyst edits, never the credits after it
+    expect(footerLine({ panels, footer: 'Analysis: A. Team', footerCredits: true })).toBe('Analysis: A. Team');
+  });
+
+  it('saves the switch with the proof, off unless ticked', () => {
+    const base = { title: 'P', panels: [], points: [], shapes: [] };
+    expect(toSpec(base).footerCredits).toBe(false);
+    expect(toSpec({ ...base, footerCredits: true }).footerCredits).toBe(true);
   });
 
   it('prints the credit line over as many lines as the page cuts it into, after the coordinates', () => {
     const cut = (text) => text.split(' · ');
-    const proof = { panels: panels.slice(0, 2), points: [{ coords: '1, 2' }], footerCoords: true };
+    const proof = { panels: panels.slice(0, 2), points: [{ coords: '1, 2' }], footerCoords: true, footerCredits: true };
     expect(footerLines(proof, 'dd', cut)).toEqual([
       '1, 2',
+      'Composed with Azimut',
       'Contains modified Copernicus Sentinel data 2024',
       'Esri, Vantor, Earthstar Geographics, and the GIS User Community',
-      'Composed with Azimut',
     ]);
+    expect(footerLines({ ...proof, footerCredits: false }, 'dd', cut)).toEqual(['1, 2', 'Composed with Azimut']);
   });
 });
 

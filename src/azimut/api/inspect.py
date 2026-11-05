@@ -82,6 +82,8 @@ class ComposeIn(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
     # Collage → Straighten: each column's downward shift, pixels, bending the whole composite as one picture
     bend: list[float] | None = Field(default=None, max_length=8192)
+    # The saved collage this is the export of, recorded on the picture
+    collage: str | None = Field(default=None, max_length=200)
 
 
 class StitchIn(BaseModel):
@@ -254,7 +256,7 @@ def compose(case_id: str, body: ComposeIn) -> dict[str, Any]:
         return inspect_engine.compose_perspective(
             case, width=body.width, height=body.height, nodes=nodes,
             background=body.background, label=body.label, folder=body.folder,
-            notes=body.notes, bend=body.bend,
+            notes=body.notes, bend=body.bend, collage=body.collage,
         )
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -44,6 +44,13 @@ describe('what a note says', () => {
       .toBe('[[entity:v1|clip.mp4]]');
     expect(citation({ id: 'p1', type: 'place', label: 'Quay [north]', attrs: {} })).toBe('[[entity:p1|Quay north]]');
   });
+
+  it('shows a saved proof as its picture, and names one with no picture yet', () => {
+    expect(citation({ id: 'pr1', type: 'proof', label: 'Port strike', attrs: { path: 'proofs/port-strike.png', spec: 'proofs/.meta/port-strike.json' } }))
+      .toBe('[[media:pr1|Port strike]]');
+    expect(citation({ id: 'pr2', type: 'proof', label: 'Draft', attrs: { spec: 'proofs/.meta/draft.json' } }))
+      .toBe('[[entity:pr2|Draft]]');
+  });
 });
 
 describe('what @ and / offer', () => {

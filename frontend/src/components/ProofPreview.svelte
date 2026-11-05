@@ -16,7 +16,7 @@
   import {
     layoutPanels, docSize, footerBand,
     signatureBox, signatureOffset, signaturePairPositions, anchoredPos, anchoredOffset,
-    normalizeProofStyle, textColors, attributionLine, loadImage,
+    normalizeProofStyle, textColors, footerLine, loadImage,
     BG, CAPTION_SIZE, FOOTER_SIZE, SIG_SCALE, SIG_TEXT_SIZE,
   } from '../lib/composer.js';
   import { closeStrandedGesture } from '../lib/konvaGesture.js';
@@ -111,7 +111,7 @@
       const fs = text.footerSize;
       layer.add(new Konva.Text({
         x: space.pad, y: height - space.pad - footerBand(fs) + Math.round((footerBand(fs) - fs) / 2),
-        width: width - space.pad * 2, text: safeStyle.footer?.trim() || attributionLine(pnls),
+        width: width - space.pad * 2, text: footerLine(safeStyle),
         align: safeStyle.footerAlign === 'right' ? 'right' : 'left',
         fontSize: fs, fill: safeStyle.footerColor || tc.faint,
         fontFamily: fontStack(safeStyle.font), ellipsis: true, wrap: 'none', listening: false,

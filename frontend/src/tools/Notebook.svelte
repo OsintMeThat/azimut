@@ -679,7 +679,7 @@
           {/key}
         </div>
         {#if pageMode && look && doc.loaded}
-          <PagePane {caseId} note={opened.noteId ?? CASE_NOTES} title={noteEntity?.label ?? 'Case notes'} text={doc.text} {look}
+          <PagePane {caseId} note={opened.noteId ?? CASE_NOTES} title={noteEntity?.label ?? 'Case notes'} text={doc.text} {look} entities={graphEntities}
             onjump={(line) => editor?.jump(line)} onresize={(picture, changes) => editor?.resize(picture.line, picture.ref, changes)} />
         {/if}
       </div>

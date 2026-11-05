@@ -1,6 +1,8 @@
 <script>
   import { onDestroy, onMount, untrack } from 'svelte';
-  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { offerNote, offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import PutInNote from '../components/PutInNote.svelte';
+  import { proofOffer } from './proof/proofNote.js';
   import { holdsUnsaved, onBackForward, settlePlace } from '../lib/backButton.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import Konva from 'konva';
@@ -50,7 +52,7 @@
     CAPTION_SIZE, LEGEND_SIZE, FOOTER_SIZE,
     BG, TEXT_MAIN, normSpace, textColors,
     layoutPanels, panelsBottom, panelScale, freeNormalizeDelta, legendLineHeight, footerBand,
-    attributionLine, creditLine, docSize, offsetShape, autoLayoutRows,
+    attributionLine, creditLine, footerLine, imageryCredits, docSize, offsetShape, autoLayoutRows,
     autoCoords, formatCoords, autoSourceUrls, proofSource, statedSources, openableSource,
     specPoints, statePanelPoint, pointProposed, uncheckedPoints, footerLines, coordsPostLines, proofCoordsLines, MAX_POINTS,
     normalizeMaterial, resolveSourceUrls,
@@ -178,6 +180,7 @@
     material: [],
     footerCoords: false, // whether the plate prints the proof's points
     footerText: true, // whether the plate prints its credit line
+    footerCredits: false, // whether the panels' imagery credits follow that line
     captionSize: CAPTION_SIZE, legendSize: LEGEND_SIZE, footerSize: FOOTER_SIZE, footer: '',
     footerEnabled: true, // false → no footer line at all
     footerColor: null, // null → auto from the background
@@ -302,6 +305,55 @@
     offerNote('proof', proofEntities.find((e) => e.attrs?.[specAttr('proof')] === spec) ?? null);
   });
   onDestroy(() => withdrawNote('proof'));
+
+  // ---- into the note pinned beside -------------------------------------------
+  // "This proof" is the proof as saved: an unsaved one goes through the same save
+  // a press of Save proof runs, its point check and name question included, and
+  // the put waits for it. A save that does not land puts nothing in.
+  let saveWaiters = [];
+  $effect(() => {
+    if (saving || checking || overwritePrompt) return;
+    const waiting = saveWaiters;
+    saveWaiters = [];
+    for (const settle of waiting) settle();
+  });
+
+  function savedForNote({ signal } = {}) {
+    return new Promise((resolve, reject) => {
+      const settle = () => {
+        if (signal?.aborted) reject(new DOMException('Stopped', 'AbortError'));
+        else if (dirty || !savedName) reject(new Error('The proof was not saved, so nothing went in'));
+        else statedForNote().then(resolve, reject);
+      };
+      if (!dirty && savedName) return settle();
+      if (!proofHasContent) return reject(new Error('The proof is empty'));
+      saveWaiters.push(settle);
+      void save();
+      // A save refused before it began leaves nothing to wait for.
+      if (!saving && !checking && !overwritePrompt) {
+        saveWaiters = saveWaiters.filter((one) => one !== settle);
+        settle();
+      }
+    });
+  }
+
+  /** The saved proof's record, and what it states, as the note puts them. */
+  async function statedForNote() {
+    const entity = await lookupEntity(caseState.current?.id, specAttr('proof'), specPath('proof', savedName));
+    if (!entity?.attrs?.path) throw new Error('The proof has no picture yet. Save it again');
+    const stated = specPoints(proof);
+    return {
+      entity,
+      description: entity.attrs.notes ?? proof.description,
+      when: entity.attrs.when ?? '',
+      whenZone: entity.attrs.when_zone ?? null,
+      lines: stated.length ? stated : proofCoordsLines(proof, 'dd'),
+    };
+  }
+
+  const noteOffer = proofOffer({ saved: savedForNote, unsaved: () => dirty || !savedName });
+  offerPuts('proof', () => (proofHasContent ? [noteOffer] : []));
+
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev;
@@ -488,6 +540,7 @@
     proof.points = editablePoints(spec);
     proof.footerCoords = spec.footerCoords === true;
     proof.footerText = spec.footerText !== false;
+    proof.footerCredits = spec.footerCredits === true;
     proof.sources = statedSources(spec.sources ?? spec.source ?? null);
     proof.when = typeof spec.when === 'string' ? spec.when : '';
     proof.whenZone = typeof spec.whenZone === 'string' && spec.whenZone ? spec.whenZone : null;
@@ -849,7 +902,7 @@
       proof.footerAlign, proof.captionColor,
       // the plate prints these when asked, and printing them changes its height:
       // both have to reach the rebuild, or the picture lags a line behind
-      proof.footerCoords, proof.footerText, proof.points,
+      proof.footerCoords, proof.footerText, proof.footerCredits, proof.points,
       proof.bg, proof.space,
       proof.layout,
       proof.panelDirection,
@@ -983,6 +1036,7 @@
     proof.footerEnabled = true;
     proof.footerCoords = false;
     proof.footerText = true;
+    proof.footerCredits = false;
     proof.footerColor = null;
     proof.captionColor = null;
     proof.footerAlign = 'left';
@@ -4805,7 +4859,7 @@
     if (!lines?.length || proof.footerText === false) return;
     const node = lines[lines.length - 1];
     selectSig('footer');
-    startLineEdit(node, { field: 'footer', id: null, value: creditLine(proof) });
+    startLineEdit(node, { field: 'footer', id: null, value: footerLine(proof) });
   }
 
   function commitTextEdit(keep = true) {
@@ -4818,7 +4872,7 @@
       if (keep && textEdit.field === 'caption' && panel && (panel.caption ?? '') !== value) {
         panel.caption = value;
         dirty = true;
-      } else if (keep && textEdit.field === 'footer' && value !== creditLine(proof)) {
+      } else if (keep && textEdit.field === 'footer' && value !== footerLine(proof)) {
         proof.footer = value;
         dirty = true;
       }
@@ -5497,7 +5551,8 @@
           // every point, one per line: the post cites the first and carries the rest
           coordsText: coordsPostLines(proofCoordsLines(proof, prefs.coordFormat)).join('\n'),
           source: displayedSource,
-          attribution: attributionLine(proof.panels),
+          // the credits when the footer prints them, then the app, as the plate says it
+          attribution: proof.footerCredits === true ? attributionLine(proof.panels) : footerLine(proof),
           png: result.png,
         };
         uiState.tool = 'post';
@@ -5603,6 +5658,7 @@
     proof.points = editablePoints(spec);
     proof.footerCoords = spec.footerCoords === true;
     proof.footerText = spec.footerText !== false;
+    proof.footerCredits = spec.footerCredits === true;
     proof.sources = statedSources(spec.sources ?? spec.source ?? null);
     // Both are completed off the entity on the way out of the API, so a date or a
     // sentence edited from Details opens here as the case's answer rather than as
@@ -6168,6 +6224,9 @@
             <Icon name="folderOpen" size={14} />
             <span>Show export folder</span>
           </button>
+          {#if proofHasContent}
+            <PutInNote offer={noteOffer} class="export-option put" onput={() => (exportMenuOpen = false)} />
+          {/if}
           <div class="export-destination" title={exportDir || "The case's exports folder"}>
             Destination: {destinationLabel(exportDir)}
           </div>
@@ -6714,12 +6773,20 @@
                 <span>Show text</span>
               </label>
               {#if proof.footerText !== false}
+                <label class="sig-check" title="Adds the panels' imagery credits after the credit line">
+                  <input
+                    type="checkbox"
+                    checked={proof.footerCredits === true}
+                    onchange={(e) => { proof.footerCredits = e.currentTarget.checked; dirty = true; }}
+                  />
+                  <span>Imagery credits</span>
+                </label>
                 <label class="adv-label" for="footer-text">Footer text</label>
                 <textarea
                   id="footer-text"
                   class="input footer-input"
                   rows="2"
-                  placeholder={attributionLine(proof.panels)}
+                  placeholder={footerLine({})}
                   bind:value={proof.footer}
                   oninput={() => (dirty = true)}
                 ></textarea>
@@ -6732,7 +6799,7 @@
                   <option value="right">Right</option>
                 </select>
               </div>
-              <div class="adv-hint">Leave empty to keep the automatic imagery / source attribution.</div>
+              <div class="adv-hint">Leave empty for “Composed with Azimut”.</div>
             {:else}
               <div class="adv-hint">The band under the panels is gone. Drop all margins for panels-only output.</div>
             {/if}
@@ -7204,6 +7271,21 @@
   }
   .export-option:disabled {
     color: var(--text-3);
+  }
+  /* The note's row is drawn by PutInNote, outside this component's scope. */
+  .export-menu :global(.export-option.put) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 9px;
+    border-radius: var(--r-sm);
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    text-align: left;
+  }
+  .export-menu :global(.export-option.put:hover) {
+    background: var(--bg-2);
   }
   .export-destination {
     margin-top: 4px;

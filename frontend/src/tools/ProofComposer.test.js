@@ -753,7 +753,22 @@ describe('the points a proof states', () => {
     // rebuild that does not read them leaves the export a line behind
     const rebuild = source.slice(source.indexOf('Rebuild only when published document'));
     expect(rebuild.slice(0, rebuild.indexOf('requestRebuild')))
-      .toContain('proof.footerCoords, proof.footerText, proof.points,');
+      .toContain('proof.footerCoords, proof.footerText, proof.footerCredits, proof.points,');
+  });
+
+  it('prints the panels\' imagery credits only when "Imagery credits" is ticked', () => {
+    // the switch sits with the footer's other options, off for a fresh proof and
+    // for a proof saved before it existed
+    expect(source).toContain('footerCredits: false, // whether the panels\' imagery credits follow that line');
+    expect(source).toContain('proof.footerCredits = spec.footerCredits === true;');
+    expect(source).toContain('<span>Imagery credits</span>');
+    expect(source).toContain('title="Adds the panels\' imagery credits after the credit line"');
+  });
+
+  it('hands Geo Report the footer as the switch prints it', () => {
+    expect(source).toContain(
+      'attribution: proof.footerCredits === true ? attributionLine(proof.panels) : footerLine(proof),'
+    );
   });
 
   it('measures the footer at the number of lines it will print', () => {
@@ -767,8 +782,9 @@ describe('the points a proof states', () => {
   it('cuts the credit line in the footer\'s own type, never shortening it', () => {
     expect(source).toContain('const lines = creditLines(text, room, (line) => {');
     expect(source).toContain('new Konva.Text({ text: \' \', fontSize, fontFamily: proofFace() })');
-    // the editor opens on the whole credit line, not on the last of its cut lines
-    expect(source).toContain("startLineEdit(node, { field: 'footer', id: null, value: creditLine(proof) });");
+    // the editor opens on the footer's own line, never on the credits printed after it
+    expect(source).toContain("startLineEdit(node, { field: 'footer', id: null, value: footerLine(proof) });");
+    expect(source).toContain("value !== footerLine(proof)");
   });
 });
 

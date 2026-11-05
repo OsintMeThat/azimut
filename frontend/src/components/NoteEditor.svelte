@@ -19,6 +19,9 @@
   import { foldText } from '../lib/textFold.js';
   import { mediaReference, entityReference, remoteImageUrls } from '../lib/markdown.js';
   import { createBookmark } from '../lib/bookmarks.js';
+  import { openerFor } from '../lib/notes/openers.js';
+  import '../lib/notes/openersLoaded.js';
+  import { canStateSourceOf, lookupSource, stateSourceOf } from '../lib/notes/sources.js';
   import { gotoPoint } from '../lib/navigate.js';
   import { droppedMedia, carriesMedia } from '../lib/drag.js';
   import { CALLOUTS, calloutMarkdown } from '../lib/notes/callouts.js';
@@ -26,7 +29,8 @@
   import { differing, editNote, takeBack } from '../lib/notes/noteDoc.svelte.js';
   import { offerWriter } from '../lib/notes/noteDock.svelte.js';
   import {
-    insertAtCursor, insertInclude, jumpToLine, noteExtensions, resizePicture, setLinePrefix, setNoteCase, toggleWrap,
+    captionAt, heldRange, holdRange, insertAtCursor, insertInclude, jumpToLine, noteExtensions, placeText, releaseRange,
+    resizePicture, setLinePrefix, setNoteCase, takeBackRange, toggleWrap,
   } from '../lib/notes/liveMarkdown.js';
   import { startCompletion } from '@codemirror/autocomplete';
   import Icon from './Icon.svelte';
@@ -65,10 +69,14 @@
   let includeQuery = $state('');
   let fetchedNotes = $state(null);
 
+  /** Whether this editor was written in since it opened: a put lands at its cursor then, at the end else. */
+  let wrote = false;
   const readOnly = $derived(Boolean(doc?.elsewhere) || !doc?.loaded || Boolean(doc?.error));
   const remote = $derived(doc?.loaded ? remoteImageUrls(doc.text) : []);
+  /** What the picture picker lists: the case's pictures, and its proofs, which print as one. */
+  const PICTURE_TYPES = new Set(['media', 'capture', 'proof']);
   const pictures = $derived(entities
-    .filter((entity) => (entity.type === 'media' || entity.type === 'capture') && entity.attrs?.path)
+    .filter((entity) => PICTURE_TYPES.has(entity.type) && entity.attrs?.path)
     .filter((entity) => foldText(`${entity.label} ${entity.attrs?.folder ?? ''}`).includes(foldText(pictureQuery.trim())))
     .sort((a, b) => a.label.localeCompare(b.label))
     .slice(0, 80));
@@ -99,6 +107,9 @@
     image: (file) => upload(file),
     url: (url, from, to) => offerBookmark(url, from, to),
     media: (event, at) => dropMedia(event, at),
+    opener: (entity) => (template ? null : openerFor(entity)),
+    sourceable: (entity) => (template || !caseId ? false : canStateSourceOf(caseId, entity)),
+    stateSource: (entity, url) => stateSourceOf(caseId, entity, url),
   };
 
   onMount(() => {
@@ -110,9 +121,13 @@
       }),
     });
     view.dispatch({ effects: setNoteCase.of({ caseId, entities, redirects, notes }) });
+    view.contentDOM.addEventListener('focus', () => { wrote = true; });
     onready(api_);
   });
-  onDestroy(() => view?.destroy());
+  onDestroy(() => {
+    view?.destroy();
+    view = null;
+  });
 
   // The text changed outside this editor: read from disk, ticked from the To-do, appended,
   // or typed in the other editor showing the same note. Only the stretch that differs is
@@ -145,6 +160,28 @@
     /** Size, place or caption a picture from the Page pane: its line there, what it shows, `{ width }`, `{ align }` or `{ caption }`. */
     resize: (line, ref, changes) => Boolean(view && !readOnly && resizePicture(view, line, ref, changes)),
     focus: () => view?.focus(),
+    // -- what a tool puts in the note (`lib/notes/putInNote.svelte.js`) --
+    /** Whether the editor is still on screen. */
+    alive: () => Boolean(view),
+    /** Hold where a put lands: the cursor when the note was written in this visit, its end else. Null when it cannot be written. */
+    spot: () => {
+      if (!view || readOnly) return null;
+      return holdRange(view, wrote ? view.state.selection.main.head : view.state.doc.length);
+    },
+    release: (spot) => view && releaseRange(view, spot),
+    /** Put `text` where `spot` now is, light it, and answer what landed for Undo. */
+    place: (spot, text, options) => {
+      if (!view || readOnly) return null;
+      const held = heldRange(view, spot);
+      releaseRange(view, spot);
+      return held ? placeText(view, held.from, text, options) : null;
+    },
+    /** Open the caption of the picture that just landed. */
+    caption: (landed, options) => {
+      const held = view && landed ? heldRange(view, landed.id) : null;
+      return held ? captionAt(view, held.from + (landed.text.length - landed.text.replace(/^\n+/, '').length), options) : Promise.resolve(false);
+    },
+    takeBack: (landed) => Boolean(view && takeBackRange(view, landed)),
   };
 
   function insert(text, { block } = {}) {
@@ -221,22 +258,39 @@
     if (file) upload(file);
   }
 
-  /** A pasted link, offered as a bookmark of the case; its address is the title, nothing is fetched. */
-  function offerBookmark(url, from, to) {
-    let title = url;
+  /**
+   * A pasted link, looked up in the case: an item already filed for it is offered to
+   * cite in its place, else a bookmark named from the address. Nothing is fetched.
+   */
+  async function offerBookmark(url, from, to) {
+    let answer = null;
     try {
-      const parsed = new URL(url);
-      title = `${parsed.hostname.replace(/^www\./, '')}${parsed.pathname === '/' ? '' : parsed.pathname}`.slice(0, 120);
-    } catch { /* the address itself */ }
+      answer = await lookupSource(caseId, url);
+    } catch { /* named from its address below, as before the case could be asked */ }
+    const swap = (entity) => {
+      if (view && view.state.sliceDoc(from, to) === url) {
+        view.dispatch({ changes: { from, to, insert: entityReference(entity) } });
+      } else insert(entityReference(entity));
+    };
+    const [found] = answer?.found ?? [];
+    if (found) {
+      toast(`Already in the case as “${found.label}”`, 'info', 6000, { label: 'Cite it', onClick: () => swap(found) });
+      return;
+    }
+    let title = answer?.title || url;
+    if (!answer) {
+      try {
+        const parsed = new URL(url);
+        title = `${parsed.hostname.replace(/^www\./, '')}${parsed.pathname === '/' ? '' : parsed.pathname}`.slice(0, 120);
+      } catch { /* the address itself */ }
+    }
     toast('Link pasted', 'info', 6000, {
-      label: 'File as bookmark',
+      label: 'Bookmark it',
       onClick: async () => {
         try {
           const entity = await createBookmark(caseId, { title, url });
           await reloadCase();
-          if (view && view.state.sliceDoc(from, to) === url) {
-            view.dispatch({ changes: { from, to, insert: entityReference(entity) } });
-          } else insert(entityReference(entity));
+          swap(entity);
           toast(`Bookmark “${title}” filed`, 'ok', 2200);
         } catch (error) {
           toast(error.message, 'danger');

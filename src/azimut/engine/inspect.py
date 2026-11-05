@@ -1199,7 +1199,10 @@ def save_frame(
         **({"time": round(time_s, 3)} if time_s is not None else {}),
         **({"ops": ops} if ops else {}),
     )
-    result = media_engine.import_image(case, image, name, source, by="inspect")
+    # A video's frame names the file and the instant it was cut at on its record,
+    # where a note's picture bar reads them to open Inspect there again.
+    cut = {"frame_of": rel_path, "frame_time": round(time_s, 3)} if time_s is not None else None
+    result = media_engine.import_image(case, image, name, source, by="inspect", extra_attrs=cut)
     _apply_meta(case, result, label=label, folder=folder, notes=notes)
     return result
 
@@ -1326,6 +1329,7 @@ def compose_perspective(
     folder: str | None = None,
     notes: str | None = None,
     bend: Sequence[float] | None = None,
+    collage: str | None = None,
 ) -> dict[str, Any]:
     """Composite frames and case images, each warped into a 4-point quad, onto a canvas.
 
@@ -1356,7 +1360,9 @@ def compose_perspective(
     extra = {"straightened": True} if bend is not None else {}
     source = _derivation("", None, op="collage", sources=sources, perspective=True, **extra)
     name = f"{_name_stem(label, 'collage')}.png"
-    result = media_engine.import_image(case, canvas, name, source, by="inspect")
+    # The saved collage it was exported from, so its picture can open it again.
+    made_by = {"collage": collage} if collage else None
+    result = media_engine.import_image(case, canvas, name, source, by="inspect", extra_attrs=made_by)
     _apply_meta(case, result, label=label, folder=folder, notes=notes)
     if box is not None:
         result["box"] = list(box)

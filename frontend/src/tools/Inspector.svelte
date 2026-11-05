@@ -18,7 +18,11 @@
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { deletedToast } from '../lib/trash.js';
   import { openInHorizon, openInReverseSearch } from '../lib/navigate.js';
-  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { offerNote, offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { lookupEntity } from '../lib/catalog.js';
+  import PutInNote from '../components/PutInNote.svelte';
+  import { frameOffer } from './inspect/frameNote.js';
+  import { takeSeek } from './inspect/handoff.js';
   import Icon from '../components/Icon.svelte';
   import BackButton from '../components/BackButton.svelte';
   import Modal from '../components/Modal.svelte';
@@ -429,7 +433,13 @@
     if (uiState.tool === 'inspect' && uiState.inspectPath && mediaList.length) {
       const target = mediaList.find((m) => m.path === uiState.inspectPath);
       uiState.inspectPath = null;
-      if (target) open(target);
+      // a frame in a note opens its video at the instant it was cut (frame.opener.js)
+      if (target) {
+        open(target).then(() => {
+          const time = takeSeek(target.path);
+          if (time != null && work.source?.path === target.path) shared.seekTo = time;
+        });
+      }
     }
   });
 
@@ -993,6 +1003,34 @@
     }
   }
 
+  // -- into the note pinned beside ------------------------------------------------------
+  // "This frame" cites the frame as a case file: already saved and unchanged, it is
+  // cited as it is; otherwise Save to case files it first, with the default name and
+  // the last folder, as the strip's one-press save does.
+  async function fileForNote(frame) {
+    if (filedIds.has(frame.id)) {
+      const entity = await lookupEntity(work.caseId, 'path', frame.filed.path);
+      if (entity) return { entity, fresh: false };
+    }
+    if (!frame.url) throw new Error('The frame is still rendering');
+    if (savingFrames.has(frame.id)) throw new Error('The frame is being saved. Try again in a moment');
+    markSaving([frame], true);
+    try {
+      const [saved] = await saveFrames([frame], { folder: lastFolder(), note: null, names: [frameNames.get(frame.id)] });
+      // A frame that matched media already in the case was not filed for the note.
+      return { entity: saved?.entity ?? null, fresh: !saved?.duplicate };
+    } finally {
+      markSaving([frame], false);
+    }
+  }
+
+  const noteFrame = frameOffer({
+    frame: () => activeFrame,
+    name: (frame) => frameNames.get(frame.id),
+    file: fileForNote,
+  });
+  offerPuts('inspect', () => (activeFrame ? [noteFrame] : []));
+
   // -- clearing -------------------------------------------------------------------------
   async function clearWork() {
     clearConfirm = false;
@@ -1172,7 +1210,9 @@
                   blocked={activeFrame.url ? '' : 'The frame is still rendering.'}
                   bind:folder={saveFolder}
                   onsave={(opts) => saveFrame(activeFrame, opts)}
-                />
+                >
+                  <PutInNote offer={noteFrame} class="btn btn-sm" role="button" />
+                </SaveToCase>
               {/key}
             {/if}
           </div>

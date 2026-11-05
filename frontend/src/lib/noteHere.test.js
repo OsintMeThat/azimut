@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { changeInterval, formatTemporalValue } from './timeline.js';
 import {
-  isNoteKey, noteDatesFor, noteEntityFor, noteHere, offerNote, pairOffers, placeOf, withdrawNote,
+  isNoteKey, noteDatesFor, noteEntityFor, noteHere, offerNote, offerPuts, pairOffers, placeOf, putsFor, withdrawNote,
 } from './noteHere.svelte.js';
 
 const relation = (place, { type = 'located-at', status = 'confirmed', direction = 'out' } = {}) => ({
@@ -31,6 +31,34 @@ describe('what a tool offers the Add event bar', () => {
     offerNote('media', { id: 'm1', type: 'media' });
     withdrawNote('media');
     expect(noteEntityFor('media')).toBeNull();
+  });
+});
+
+describe('what a tool can put in the pinned note', () => {
+  const view = { id: 'view', label: 'This view', hint: 'The map as it is', icon: 'image', picture: true, put: async () => ({ text: 'x' }) };
+
+  it('is read when asked, from the tool that offered it', () => {
+    let reads = 0;
+    offerPuts('satellite', () => { reads += 1; return [view]; });
+    expect(reads).toBe(0);
+    expect(putsFor('satellite')).toEqual([view]);
+    expect(reads).toBe(1);
+    expect(putsFor('compare')).toEqual([]);
+  });
+
+  it('keeps only offers that can be put', () => {
+    offerPuts('sheet', [view, { id: 'half', label: 'No put' }, null, { label: 'No id', put: async () => ({}) }]);
+    expect(putsFor('sheet').map((offer) => offer.id)).toEqual(['view']);
+  });
+
+  it('goes with the tool, and a failing reader offers nothing', () => {
+    offerPuts('timeline', [view]);
+    withdrawNote('timeline');
+    expect(putsFor('timeline')).toEqual([]);
+    offerPuts('timeline', () => { throw new Error('not ready'); });
+    expect(putsFor('timeline')).toEqual([]);
+    offerPuts('timeline', null);
+    expect(putsFor('timeline')).toEqual([]);
   });
 });
 

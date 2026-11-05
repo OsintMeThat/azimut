@@ -2,6 +2,7 @@
   import Icon from '../../components/Icon.svelte';
   import { SIZE_MIN, SIZE_MAX, clampSize } from '../../lib/captureSize.js';
   import { extensionVersion } from '../../lib/extBridge.js';
+  import PutInNote from '../../components/PutInNote.svelte';
 
   let {
     menuEl = $bindable(),
@@ -32,6 +33,8 @@
     /** The map leans over relief: the capture is the picture it draws, at
      *  screen size, with no deeper zoom to take and no one scale to mark. */
     tilted = false,
+    /** The view as an offer to the note pinned beside (`mapNote.viewOffer`); its row shows only while one is. */
+    noteOffer = null,
   } = $props();
 </script>
 
@@ -192,6 +195,9 @@
           </label>
           <div class="menu-hint last">Drawn into the capture, in your units.</div>
         {/if}
+        {#if noteOffer && !blocked}
+          <PutInNote offer={noteOffer} class="btn btn-sm put-row" role="button" onput={() => (menuOpen = false)} />
+        {/if}
       </div>
     {/if}
   </div>
@@ -248,6 +254,7 @@
     z-index: 700;
   }
   .menu-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+  .size-menu :global(.put-row) { margin-top: 6px; justify-content: center; }
   .menu-label { font-size: var(--fs-xs); color: var(--text-3); font-weight: 600; }
   .chips { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
   .chip {

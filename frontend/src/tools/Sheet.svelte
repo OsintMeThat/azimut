@@ -117,7 +117,11 @@
   import { appendRows } from '../lib/sheetAppend.js';
   import { linkRows, looksLikeLinks, parseBlock, pasteBlock, toBlock } from '../lib/sheetClipboard.js';
   import { describeDiff, diffTables, sameTable } from '../lib/sheetDiff.js';
-  import { exportCsv, provenance, revealSheetExports, toMarkdown, viewTable } from '../lib/sheetExport.js';
+  import {
+    exportCsv, provenance, revealSheetExports, toMarkdown, viewNoteTable, viewTable,
+  } from '../lib/sheetExport.js';
+  import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import PutInNote from '../components/PutInNote.svelte';
   import { cellsEntry, createSheetHistory, snapshotEntry } from '../lib/sheetHistory.js';
   import { checkLinks, chunk, readVerdicts, urlsInColumn } from '../lib/sheetLinks.js';
   import {
@@ -2993,20 +2997,41 @@
    * timestamp are twelve rows nobody can check a week later, and `12 of 468` read without
    * seeing that a filter was on is a sample presented as a set.
    */
+  /** The lines quoted above a copied table: the sheet, how many rows of how many, the filter, the sort and when. */
+  function viewSaid() {
+    return provenance({
+      caseName: caseState.current?.name ?? '',
+      sheet: title,
+      filter: chips.map((chip) => chip.label).join(' · '),
+      sort: meta.sort ? `${meta.sort.column}${meta.sort.desc ? ', descending' : ''}` : '',
+      shown: shown.length,
+      total: table.rows.length,
+      at: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * The rows on screen as a table in the pinned note: the table Copy writes, with a cell
+   * linked to a case record cited, so it is numbered in the PDF, and cut at a size a
+   * report reads, with a line saying so.
+   */
+  const viewOffer = {
+    id: 'table',
+    label: 'This view',
+    hint: 'The rows on screen as a table, linked cells cited',
+    icon: 'table',
+    put: async () => {
+      if (!openId || !shown.length) throw new Error('No row on screen');
+      const linkOf = (index, column) => linkAt(meta, rowKey(table.columns, table.rows[index]), column.name);
+      return { text: viewNoteTable(table, drawn, shown, { linkOf, said: viewSaid() }) };
+    },
+  };
+  offerPuts('sheet', () => (openId && shown.length ? [viewOffer] : []));
+  $effect(() => () => withdrawNote('sheet'));
+
   async function copyMarkdown() {
     exportOpen = false;
-    const text = toMarkdown(
-      viewTable(table, drawn, shown),
-      provenance({
-        caseName: caseState.current?.name ?? '',
-        sheet: title,
-        filter: chips.map((chip) => chip.label).join(' · '),
-        sort: meta.sort ? `${meta.sort.column}${meta.sort.desc ? ', descending' : ''}` : '',
-        shown: shown.length,
-        total: table.rows.length,
-        at: new Date().toISOString(),
-      }),
-    );
+    const text = toMarkdown(viewTable(table, drawn, shown), viewSaid());
     try {
       await navigator.clipboard.writeText(text);
       toast(`${shown.length} ${shown.length === 1 ? 'row' : 'rows'} copied as a table`);
@@ -3888,6 +3913,7 @@
             <button class="menu-row" onclick={copyMarkdown}>
               <Icon name="copy" size={12} /><span>Copy as a Markdown table</span>
             </button>
+            <PutInNote offer={viewOffer} class="menu-row" onput={() => (exportOpen = false)} />
             <div class="menu-rule"></div>
             <!-- Where it lands, named and changeable **here** — the same offer the plates
                  and the note PDFs make. Sending the analyst to Settings to file a table
@@ -5319,13 +5345,13 @@
     padding: 5px; border: 1px solid var(--border-strong); border-radius: var(--r-sm);
     background: var(--bg-1); box-shadow: 0 12px 30px #0005;
   }
-  .export-menu .menu-row {
+  .export-menu :global(.menu-row) {
     display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 7px;
     border-radius: var(--r-sm); color: var(--text-2); text-align: left; font-size: var(--fs-sm);
   }
-  .export-menu .menu-row:hover:not(:disabled) { background: var(--bg-2); color: var(--text-1); }
-  .export-menu .menu-row:disabled { color: var(--text-3); }
-  .export-menu .menu-row span {
+  .export-menu :global(.menu-row:hover:not(:disabled)) { background: var(--bg-2); color: var(--text-1); }
+  .export-menu :global(.menu-row:disabled) { color: var(--text-3); }
+  .export-menu :global(.menu-row span) {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .export-menu .menu-note {

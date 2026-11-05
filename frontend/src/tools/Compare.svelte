@@ -121,7 +121,9 @@
   import { normaliseAttribution } from '../lib/copernicusCredit.js';
   import { WAYBACK_ID, releaseYearBefore, waybackId } from '../lib/wayback.js';
   import { RADAR_ID, radarId } from '../lib/radar.js';
-  import { offerNote, pairOffers, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { offerNote, offerPuts, pairOffers, withdrawNote } from '../lib/noteHere.svelte.js';
+  import PutInNote from '../components/PutInNote.svelte';
+  import { nearestPlace, pairName, pairOffer } from './compare/pairNote.js';
   import { holdsUnsaved } from '../lib/backButton.js';
   import { changeInterval, formatTemporalValue } from '../lib/timeline.js';
   import Icon from '../components/Icon.svelte';
@@ -1022,30 +1024,42 @@
     else saveDialog = true;
   }
 
+  /**
+   * Write the comparison and its preview under `title`. Answers `{ gone }` when the
+   * case changed meanwhile, else the preview's failure, which leaves the save made.
+   * `unique` takes the next free name rather than refusing a taken one.
+   */
+  async function storeSession(owner, title, { unique = false } = {}) {
+    const savedSpec = sessionSpec();
+    const result = await api.post(`/api/cases/${owner.id}/compare/sessions`, {
+      rename_from: openedSession?.name ?? null,
+      title,
+      spec: savedSpec,
+      ...(unique ? { unique: true } : {}),
+    });
+    if (caseState.current?.id !== owner.id) return { gone: true, previewError: null };
+    sessionName = result.title;
+    openedSession = { name: result.name, title: result.title };
+    pristineSignature = pairSignature(savedSpec, result.title);
+    savedSignature = JSON.stringify([result.title, savedSpec]);
+    saveDialog = false;
+    let previewError = null;
+    try {
+      await saveWorkingPreview(owner.id, result.name);
+    } catch (error) {
+      previewError = error;
+    }
+    return { gone: false, previewError };
+  }
+
   async function performSessionSave() {
     const title = sessionName.trim();
     if (!title || sessionBusy || !both) return;
     sessionBusy = true;
     try {
       const owner = await ensureCase();
-      const savedSpec = sessionSpec();
-      const result = await api.post(`/api/cases/${owner.id}/compare/sessions`, {
-        rename_from: openedSession?.name ?? null,
-        title,
-        spec: savedSpec,
-      });
-      if (caseState.current?.id !== owner.id) return;
-      sessionName = result.title;
-      openedSession = { name: result.name, title: result.title };
-      pristineSignature = pairSignature(savedSpec, result.title);
-      savedSignature = JSON.stringify([result.title, savedSpec]);
-      saveDialog = false;
-      let previewError = null;
-      try {
-        await saveWorkingPreview(owner.id, result.name);
-      } catch (error) {
-        previewError = error;
-      }
+      const { gone, previewError } = await storeSession(owner, title);
+      if (gone) return;
       await reloadCase();
       if (previewError) {
         toast(`Comparison saved, but its preview could not update: ${previewError.message}`, 'warn', 7000);
@@ -2187,6 +2201,62 @@
     }
   }
 
+  // -- into the note pinned beside -----------------------------------------------
+  // "This pair" keeps the two pictures side by side in the case, under the
+  // comparison, whatever reading is on screen. A comparison not saved yet is saved
+  // first, named after the case's place there (else its point) and its two dates.
+  // The same pair kept before is cited again rather than kept twice.
+  async function keepForNote({ signal } = {}) {
+    if (!both || !a.ready || !b.ready) throw new Error('Both pictures have to be on screen');
+    if (outputBusy || sessionBusy) throw new Error('Compare is busy. Try again in a moment');
+    outputBusy = 'note';
+    try {
+      const owner = await ensureCase();
+      const dates = pictureDates();
+      if (!openedSession) {
+        sessionBusy = true;
+        try {
+          let place = '';
+          try {
+            place = nearestPlace(await api.get(`/api/cases/${owner.id}/satellite/index`), view.lat, view.lon);
+          } catch {
+            // named by its point instead
+          }
+          const typed = sessionName.trim();
+          const title = typed && typed !== 'Comparison'
+            ? typed
+            : pairName({ place, lat: view.lat, lon: view.lon, a: dates.a, b: dates.b });
+          const { gone } = await storeSession(owner, title, { unique: true });
+          if (gone) throw new Error('The case changed before the pair was kept');
+        } finally {
+          sessionBusy = false;
+        }
+      }
+      if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
+      const sources = await exportSources();
+      const blob = await canvasBlob(compose(sources, { renderMode: 'side', renderChangeMap: null }));
+      const form = new FormData();
+      form.append('image_a', blob, 'comparison.png');
+      form.append('format', 'png');
+      form.append('filename', exportName());
+      // what the image shows: the pair side by side, without the difference
+      form.append('spec', JSON.stringify({ ...sessionSpec(), mode: 'side', difference: false }));
+      for (const [field, value] of pictureDateFields(dates)) form.append(field, value);
+      form.append('reuse', 'true');
+      const kept = await api.post(
+        `/api/cases/${owner.id}/compare/sessions/${encodeURIComponent(openedSession.name)}/images`,
+        form,
+      );
+      await reloadCase();
+      return { entity: { id: kept.entity }, label: openedSession.title, fresh: !kept.reused };
+    } finally {
+      outputBusy = '';
+    }
+  }
+
+  const notePair = pairOffer({ keep: keepForNote, unsaved: () => !openedSession });
+  offerPuts('compare', () => (both && a.ready && b.ready ? [notePair] : []));
+
   async function exportPng() {
     if (outputBusy) return;
     outputBusy = 'png';
@@ -3033,6 +3103,10 @@
           <p class="panel-note"><Icon name="info" size={13} /> Google pixels are captured through the Azimut Capture extension.</p>
         {/if}
 
+        {#if !evolutionKind}
+          <PutInNote offer={notePair} class="btn put-row" role="button" onput={() => (rightPanel = null)} />
+        {/if}
+
         <div class="panel-actions">
           <button class="btn" disabled={!!outputBusy} onclick={copyComparison}>
             <Icon name="copy" size={13} /> {outputBusy === 'copy' ? 'Copying…' : 'Copy current PNG'}
@@ -3582,6 +3656,8 @@
   .panel-note { display: flex; gap: 7px; align-items: flex-start; }
   .panel-actions { display: flex; gap: 8px; }
   .panel-actions .btn { flex: 1; justify-content: center; }
+  /* The note's row, drawn by PutInNote outside this component's scope. */
+  .export-dialog :global(.put-row) { justify-content: center; }
   .folder-open { display: flex; align-items: center; gap: 7px; color: var(--text-3); font-size: var(--fs-xs); }
   .folder-open:hover:not(:disabled) { color: var(--text-1); }
   .save-form { display: grid; gap: 13px; }

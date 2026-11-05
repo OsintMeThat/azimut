@@ -17,6 +17,7 @@
   import { clone, zoneRing } from '../../lib/map/analyzers.js';
   import { passBefore } from '../../lib/map/detectWhen.js';
   import { candidatePair } from '../../lib/map/detectReview.js';
+  import { takeCandidate } from './handoff.js';
   import { recipeCapability } from '../../lib/map/analyzerRules.js';
   import { containsPoint } from '../../lib/measure.js';
   import { detectionsWithRuns, isActive, plural } from '../../lib/map/detections.js';
@@ -370,6 +371,8 @@
   }
 
   async function openRun(id, resultId = null) {
+    // a pinned candidate's picture in a note asked for this one (pin.opener.js)
+    resultId = takeCandidate(id) ?? resultId;
     manual = null;
     const epoch = generation;
     const run = await api.get(`${base()}/runs/${id}`);

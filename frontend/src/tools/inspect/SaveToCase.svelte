@@ -11,6 +11,7 @@
   //
   // `filedPath` is the media the last save produced, while the output still reads
   // as it did then. An edit since clears it, and the button offers the save again.
+  // `children` sits under the button: the row that puts the output in a pinned note.
   let {
     defaultName,
     filedPath = null,
@@ -19,6 +20,7 @@
     hint = '',
     folder = $bindable(''),
     onsave,
+    children = null,
   } = $props();
 
   // The field holds real text from the start. It follows the default until the
@@ -73,6 +75,7 @@
     <Icon name="save" size={14} />
     {busy ? 'Saving…' : filedPath ? 'Saved' : 'Save to case'}
   </button>
+  {#if !blocked}{@render children?.()}{/if}
   {#if blocked}
     <p class="hint warn">{blocked}</p>
   {:else if hint}
@@ -118,5 +121,11 @@
   }
   .warn {
     color: var(--warn);
+  }
+  /* The note's row, drawn by PutInNote outside this component's scope, lines up
+     with the save above it. */
+  .save :global([data-put]) {
+    width: 100%;
+    justify-content: center;
   }
 </style>

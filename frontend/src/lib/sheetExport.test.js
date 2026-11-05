@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const post = vi.fn(async () => ({ file: 'Candidates.csv', path: '/cases/harbour/exports' }));
 vi.mock('./api.js', () => ({ api: { post } }));
 
-const { exportCsv, provenance, revealSheetExports, toMarkdown, viewTable } = await import(
+const { chipsCell, cutLine, exportCsv, provenance, revealSheetExports, tableChip, toMarkdown, viewNoteTable, viewTable } = await import(
   './sheetExport.js'
 );
 
@@ -121,5 +121,41 @@ describe('where a copied table came from', () => {
     );
     // And a table copied without them is the table it always was.
     expect(toMarkdown(view)).toBe('| Subject |\n| --- |\n| Quai sud |\n');
+  });
+});
+
+describe('a table put in a note', () => {
+  it('writes a cited record as it is, its name kept out of the table’s way', () => {
+    expect(tableChip('e1', 'Pier | 4 [old]')).toBe('[[entity:e1|Pier 4 old]]');
+    expect(tableChip('e1', '')).toBe('[[entity:e1|e1]]');
+    expect(toMarkdown({ columns: ['Site', 'Note'], rows: [[{ markdown: tableChip('e1', 'Pier') }, 'a | b']] }))
+      .toBe('| Site | Note |\n| --- | --- |\n| [[entity:e1|Pier]] | a \\| b |\n');
+  });
+
+  it('cites the records a cell names, and keeps a name with no record as words', () => {
+    expect(chipsCell([{ id: 'a', label: 'One' }, { label: 'Two | x' }, null]).markdown).toBe('[[entity:a|One]], Two x');
+  });
+
+  it('names a cut, and nothing when there was none', () => {
+    expect(cutLine({ kept: 200, total: 1240, noun: 'rows', narrow: 'Filter the sheet for the rest.' }))
+      .toBe('Only the first 200 of 1,240 rows. Filter the sheet for the rest.');
+    expect(cutLine({ kept: 12, total: 12 })).toBe('');
+  });
+
+  it('puts the rows on screen, a linked cell cited, cut at the note’s size', () => {
+    const table = { rows: [['Quai sud', 'To check'], ['Pont | nord', 'Seen'], ['Rue basse', 'Ruled out']] };
+    const drawn = [{ name: 'Subject', index: 0 }, { name: 'Status', index: 1 }];
+    const linkOf = (index, column) => (index === 1 && column.name === 'Subject' ? 'pl1' : null);
+    const text = viewNoteTable(table, drawn, [1, 0, 2], { linkOf, said: ['Harbour · Sites — 3 of 9 rows'], limit: 2 });
+    expect(text.split('\n')).toEqual([
+      '> Harbour · Sites — 3 of 9 rows',
+      '> Only the first 2 of 3 rows. Filter the sheet for the rest.',
+      '',
+      '| Subject | Status |',
+      '| --- | --- |',
+      '| [[entity:pl1|Pont nord]] | Seen |',
+      '| Quai sud | To check |',
+      '',
+    ]);
   });
 });

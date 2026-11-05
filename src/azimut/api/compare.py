@@ -44,7 +44,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .. import config, errors, layout
 from ..engine import artifacts as artifact_engine
-from ..engine import comparisons, exportdir, sentinel, tiles
+from ..engine import comparisons, exportdir, sentinel, snapshots, tiles
 from ..engine import links as link_engine
 from ..engine.analysis_models import RETIRED_OVERLAYS
 from ..engine import media as media_engine
@@ -291,6 +291,9 @@ class CompareSpec(BaseModel):
 class SessionIn(BaseModel):
     rename_from: str | None = None
     overwrite: bool = False
+    #: A name made up for the analyst (a pair put in a note) takes the next free
+    #: one rather than being refused: nobody chose it, so nobody is asked.
+    unique: bool = False
     title: str = Field(min_length=1, max_length=200)
     spec: CompareSpec
 
@@ -499,7 +502,10 @@ def _save_session(
             )
     elif body.rename_from is None:
         if holders(folder, name, source=name if body.overwrite else None):
-            raise HTTPException(status_code=409, detail="a comparison already uses that name")
+            if not body.unique:
+                raise HTTPException(status_code=409, detail="a comparison already uses that name")
+            taken = {p.stem.casefold() for p in folder.glob("*.json")} | trashed
+            name = layout.free_stem(taken, name, "Comparison")
         if name.casefold() in trashed:
             taken = {p.stem.casefold() for p in folder.glob("*.json")} | trashed
             name = layout.free_stem(taken, name, "Comparison")
@@ -719,6 +725,7 @@ async def keep_image(
     imagery_b: str = Form(default="", pattern=_PICTURE_DATE),
     imagery_a_exact: bool = Form(default=True),
     imagery_b_exact: bool = Form(default=True),
+    reuse: bool = Form(default=False),
 ) -> dict[str, Any]:
     """Keep one export in the case, as an image nothing replaces.
 
@@ -738,6 +745,16 @@ async def keep_image(
         raise HTTPException(status_code=422, detail="that is not a comparison this image could show") from exc
 
     a = await _read_png(image_a, "A")
+    # The reading drawn, its two dates and the picture's size: the same key is the
+    # same image, which a pair put in a note twice cites rather than keeps twice.
+    state_key = snapshots.view_key(
+        "compare", session=spec_rel, reading=reading, format=format_,
+        interval=None if format_ == "png" else interval, keep=None if format_ == "png" else keep,
+        imagery=[imagery_a, imagery_a_exact, imagery_b, imagery_b_exact], size=[a.width, a.height],
+    )
+    if reuse and (filed_before := snapshots.filed_view(case, state_key)) is not None:
+        attrs_before = filed_before.get("attrs") or {}
+        return {"path": attrs_before.get("path"), "entity": filed_before["id"], "reused": True}
     if format_ == "png":
         out = io.BytesIO()
         a.save(out, "PNG", optimize=True)
@@ -763,6 +780,7 @@ async def keep_image(
         "frame": reading.get("frame"),
         "rendered_at": _now(),
         "attribution_burned": True,
+        snapshots.VIEW_KEY: state_key,
     }
     for key, value, exact in (("imagery_a", imagery_a, imagery_a_exact),
                               ("imagery_b", imagery_b, imagery_b_exact)):
@@ -770,7 +788,8 @@ async def keep_image(
             source[key] = value
             if not exact:
                 source[f"{key}_exact"] = False
-    attrs = {"lat": placed["lat"], "lon": placed["lon"], comparisons.SESSION_ATTR: spec_rel}
+    attrs = {"lat": placed["lat"], "lon": placed["lon"], comparisons.SESSION_ATTR: spec_rel,
+             snapshots.VIEW_KEY: state_key}
     try:
         filed = media_engine.import_rendered_bytes(
             case, data, filename, suffix, source, by="compare", extra_attrs=attrs

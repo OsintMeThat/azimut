@@ -71,11 +71,14 @@ export function provenance({ caseName, sheet, filter, sort, shown, total, at } =
 export function toMarkdown(view, said = []) {
   const columns = view?.columns ?? [];
   if (!columns.length) return '';
+  // a cell given as `{ markdown }` is written as it is: case references, whose own `|` is theirs
   const cell = (value) =>
-    String(value ?? '')
-      .replace(/\|/g, '\\|')
-      .replace(/\n+/g, '<br>')
-      .trim();
+    value && typeof value === 'object' && 'markdown' in value
+      ? String(value.markdown ?? '').replace(/\s*\n+\s*/g, ' ').trim()
+      : String(value ?? '')
+        .replace(/\|/g, '\\|')
+        .replace(/\n+/g, '<br>')
+        .trim();
   const lines = [
     ...(said.length ? [...said.map((line) => `> ${line}`), ''] : []),
     `| ${columns.map(cell).join(' | ')} |`,
@@ -100,3 +103,51 @@ export async function exportCsv(caseId, sheetId, view) {
  *  a file written somewhere the analyst cannot see is a file they will export twice. */
 export const revealSheetExports = (caseId) =>
   api.post(`/api/cases/${caseId}/sheets/csv/reveal`);
+
+// -- a table put in a note -------------------------------------------------------
+
+/**
+ * The most rows a table put in a note holds. A report reads a few hundred rows at
+ * most; five thousand is a dump, and the line that names the cut sends the analyst
+ * back to narrow what is shown instead.
+ */
+export const NOTE_ROWS = 200;
+
+/** A case record as a note cites it inside a table cell: `[[entity:id|name]]`, its name kept out of the table's way. */
+export function tableChip(id, label) {
+  const name = String(label ?? '').replace(/[[\]|]/g, ' ').replace(/\s+/g, ' ').trim() || String(id);
+  return `[[entity:${id}|${name}]]`;
+}
+
+/** The records a cell points at, as chips in one cell; a name with no record stays words. */
+export function chipsCell(refs = []) {
+  const parts = (refs ?? []).filter(Boolean).map((ref) => (ref.id ? tableChip(ref.id, ref.label) : String(ref.label ?? '').replace(/[|\s]+/g, ' ').trim()));
+  return { markdown: parts.filter(Boolean).join(', ') };
+}
+
+/**
+ * The line that names a cut, quoted with the table's other provenance: `Only the first
+ * 200 of 1,240 entries. Narrow the window for the rest.` Empty when nothing was cut.
+ * `more` says the count is a floor, when reading stopped at a ceiling first.
+ */
+export function cutLine({ kept, total, noun = 'rows', narrow = 'Narrow what is shown for the rest.', more = false }) {
+  if (!(total > kept)) return '';
+  const count = `${Number(total).toLocaleString('en-US')}${more ? '+' : ''}`;
+  return `Only the first ${kept} of ${count} ${noun}. ${narrow}`;
+}
+
+/**
+ * The rows on screen as a table for a note: `toMarkdown`'s table with a cell linked to
+ * a case record (`linkOf(index, column)` answers its id) cited, cut at `limit` rows
+ * with a line saying so after the provenance `said`.
+ */
+export function viewNoteTable(table, drawn, shown, { linkOf = () => null, said = [], limit = NOTE_ROWS } = {}) {
+  const kept = (shown ?? []).slice(0, limit);
+  const rows = kept.map((index) => (drawn ?? []).map((column) => {
+    const value = table?.rows?.[index]?.[column.index] ?? '';
+    const linked = linkOf(index, column);
+    return linked ? { markdown: tableChip(linked, value) } : value;
+  }));
+  const cut = cutLine({ kept: kept.length, total: (shown ?? []).length, noun: 'rows', narrow: 'Filter the sheet for the rest.' });
+  return toMarkdown({ columns: (drawn ?? []).map((column) => column.name), rows }, cut ? [...said, cut] : said);
+}

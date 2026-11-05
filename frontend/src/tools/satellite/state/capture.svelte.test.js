@@ -251,6 +251,63 @@ describe('when a capture is imperfect', () => {
   });
 });
 
+describe('the view put in a note', () => {
+  const ENTITY = { id: 'e_cap', type: 'capture', label: '48.850000, 2.350000', attrs: { path: 'media/sat.png' } };
+
+  it('files the centred frame through the tile road, asking for the same view to be reused', async () => {
+    api.post = vi.fn(async () => ({ path: 'media/sat.png', entity: ENTITY }));
+    const capture = store();
+    const [w, h] = capture.size;
+    const answer = await capture.takeForNote();
+    expect(api.post.mock.calls[0][0]).toBe('/api/cases/case-1/satellite/capture');
+    expect(api.post.mock.calls[0][1]).toMatchObject({ reuse: true, imagery_date: '2024-05-01', provider: 'esri-world-imagery' });
+    expect(answer).toEqual({ entity: ENTITY, fresh: true, width: w, height: h });
+    expect(reloadCase).toHaveBeenCalled();
+    // the note says it went in; the capture says nothing of its own
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('cites a view already filed in that state without re-reading the case', async () => {
+    api.post = vi.fn(async () => ({ path: 'media/sat.png', entity: ENTITY, reused: true }));
+    const answer = await store().takeForNote();
+    expect(answer.fresh).toBe(false);
+    expect(reloadCase).not.toHaveBeenCalled();
+  });
+
+  it('still says when tiles were missing, since that is in the picture', async () => {
+    api.post = vi.fn(async () => ({ path: 'media/sat.png', entity: ENTITY, tiles_missing: 2 }));
+    await store().takeForNote();
+    expect(notify.mock.calls[0][0]).toContain('2 missing tile');
+  });
+
+  it('refuses with a sentence on a view-only basemap, and for Google without the extension', async () => {
+    basemap = VIEW_ONLY;
+    await expect(store().takeForNote()).rejects.toThrow('for viewing only');
+    basemap = WIDGET;
+    extension = null;
+    const capture = store();
+    await expect(capture.takeForNote()).rejects.toThrow('Azimut Capture extension');
+    expect(capture.extGate).toBe(true);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it('refuses while another capture runs, and is free again after a failure', async () => {
+    let release;
+    api.post = vi.fn(() => new Promise((resolve) => (release = () => resolve({ entity: ENTITY }))));
+    const capture = store();
+    const first = capture.takeForNote();
+    await vi.waitFor(() => expect(capture.busy).toBe(true));
+    await expect(capture.takeForNote()).rejects.toThrow('already running');
+    release();
+    await first;
+    api.post = vi.fn(async () => {
+      throw new Error('offline');
+    });
+    await expect(capture.takeForNote()).rejects.toThrow('offline');
+    expect(capture.busy).toBe(false);
+  });
+});
+
 describe('the marquee', () => {
   it('arming it turns off whatever else owns the left button', () => {
     const capture = store();

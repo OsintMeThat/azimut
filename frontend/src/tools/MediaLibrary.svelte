@@ -3,7 +3,9 @@
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { lookupEntity } from '../lib/catalog.js';
-  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { offerNote, offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { quoteOffer } from '../lib/notes/sources.js';
+  import PutInNote from '../components/PutInNote.svelte';
   import { buildMediaQuery } from '../lib/mediaQuery.js';
   import { createPagedList } from '../lib/pagedList.svelte.js';
   import { pollWhile } from '../lib/poll.js';
@@ -329,6 +331,13 @@
         ? { id, label: row.title ?? row.filename, type: 'media', attrs: { path: row.path, kind: row.kind } }
         : null,
     );
+  });
+  /** A downloaded file's post, quoted in the pinned note: its words as posted, who posted them and when. */
+  const quoteOf = (row, id = row?.entity_id) => (row && id ? quoteOffer(row, { id, label: row.title ?? row.filename }) : null);
+  offerPuts('media', () => {
+    const row = viewedItem?.entity_id ? viewedItem : infoEntityId && infoItem ? infoItem : null;
+    const quote = quoteOf(row, row === infoItem ? infoEntityId : row?.entity_id);
+    return quote ? [quote] : [];
   });
   onDestroy(() => withdrawNote('media'));
   // Where a media copy lands, app-wide and remembered. Empty = the case folder.
@@ -1486,6 +1495,9 @@
         <span>{TOOL_LABELS[option.id]}</span>
       </button>
     {/each}
+    {#if quoteOf(openIn.item)}
+      <PutInNote offer={quoteOf(openIn.item)} class="upkeep-option put-row" say="Quote the post" onput={() => (openIn = null)} />
+    {/if}
   </div>
 {/if}
 
@@ -1776,6 +1788,23 @@
   }
   .upkeep-option:disabled {
     color: var(--text-3);
+  }
+  /* the Put in row is drawn by its own component, so it is reached as a global class */
+  .open-in-menu :global(.put-row) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin-top: 3px;
+    padding: 8px 9px 7px;
+    border-top: 1px solid var(--border);
+    border-radius: 0 0 var(--r-sm) var(--r-sm);
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    text-align: left;
+  }
+  .open-in-menu :global(.put-row:hover) {
+    background: var(--bg-2);
   }
 
   /* folder filter bar */

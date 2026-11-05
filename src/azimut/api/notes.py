@@ -20,6 +20,10 @@ the text being typed: the same renderer, the same bounds, nothing written. The
 faces a look can pick are listed, and their regular weights served for the Look
 control's samples, under `/api/notes/fonts`, outside any case.
 
+A note cites a web source through `/sources/lookup`: the address is read for a name
+and looked for among what the case already filed for it (`engine/urltitles.py`), so
+a link pasted twice cites one item. Nothing is fetched.
+
 Before an export, `/notes/pdf/check` lays the chosen notes out in memory and says,
 note by note, what the PDF would get wrong (a picture no longer in the case, one
 with no source, a task left open, a link a reader cannot open): the warnings the
@@ -50,6 +54,7 @@ from ..engine import notes_pdf as pdf_engine
 from ..engine import notelinks, notetext
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
+from ..engine import urltitles
 from ..workspace import Case, CaseError
 from .cases import get_case
 
@@ -308,6 +313,29 @@ def note_citations(case_id: str, entity_id: str) -> dict[str, Any]:
             items.append({"id": note_id, "title": title, "folder": folder,
                           "lines": [{"line": line, "text": said} for line, said in lines[:5]]})
     return {"items": items}
+
+
+@router.get("/{case_id}/sources/lookup")
+def source_lookup(case_id: str, url: str) -> dict[str, Any]:
+    """What a web address is called, and the case items already filed for it.
+
+    Read off the address and the case alone: nothing is fetched, so a link pasted
+    offline is named and found the same way.
+    """
+    address = url.strip()
+    if len(address) > 2000 or not urltitles.url_key(address):
+        raise HTTPException(status_code=422, detail="the source must be an http(s) address")
+    case = get_case(case_id)
+    found = urltitles.find_by_url(case, address)
+    return {
+        "url": address,
+        "title": urltitles.title_of(address),
+        "found": [
+            {"id": entity["id"], "type": entity["type"], "label": entity.get("label") or "",
+             "attrs": entity.get("attrs") or {}}
+            for entity in found
+        ],
+    }
 
 
 @router.get("/{case_id}/notes/tasks")

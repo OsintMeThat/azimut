@@ -180,6 +180,71 @@ export function captionField({ caption = '', title = '', write, done }) {
   return field;
 }
 
+/** What a picture's Source… says, in the note and on the Page pane alike. */
+export const SOURCE_HELP = {
+  button: 'Where it comes from: a link you state, nothing is fetched',
+  field: 'Enter states it, Escape leaves it',
+  placeholder: 'https://… where this picture comes from',
+};
+
+/**
+ * The one-line field a picture's source is stated in: an address only the analyst
+ * knows, as Details states one. Enter writes it (`write(url)`, a promise refused
+ * with what is wrong), Escape or leaving the field drops it. `done(by)` is called once.
+ */
+export function sourceField({ write, done }) {
+  const field = document.createElement('input');
+  field.type = 'url';
+  field.className = 'picture-source-field';
+  field.maxLength = 2000;
+  field.placeholder = SOURCE_HELP.placeholder;
+  field.title = SOURCE_HELP.field;
+  field.setAttribute('aria-label', 'Source');
+  let over = false;
+  let writing = false;
+  const finish = (by) => {
+    if (over) return;
+    over = true;
+    done(by);
+  };
+  const refuse = (message) => {
+    field.setAttribute('aria-invalid', 'true');
+    field.title = message;
+  };
+  field.addEventListener('input', () => {
+    field.removeAttribute('aria-invalid');
+    field.title = SOURCE_HELP.field;
+  });
+  field.addEventListener('keydown', async (event) => {
+    if (event.key !== 'Enter' && event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === 'Escape') {
+      finish('keyboard');
+      return;
+    }
+    const url = field.value.trim();
+    if (!url || writing) return;
+    if (!/^https?:\/\/\S+$/i.test(url)) {
+      refuse('The source must be an http(s) address');
+      return;
+    }
+    writing = true;
+    try {
+      await write(url);
+      finish('keyboard');
+    } catch (error) {
+      refuse(error?.message || 'The source was not kept');
+    } finally {
+      writing = false;
+    }
+  });
+  field.addEventListener('blur', () => {
+    if (!writing) finish('blur');
+  });
+  return field;
+}
+
 /**
  * A picture bar walked with the keyboard as a toolbar: Tab enters it once, on the
  * button last used, and leaves it; the arrows, Home and End move along it. So a

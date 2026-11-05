@@ -11,6 +11,7 @@ import { entityReference, mediaReference } from '../markdown.js';
 import { foldText } from '../textFold.js';
 import { CALLOUTS, calloutMarkdown } from './callouts.js';
 import { PAGE_BREAK, hintLine } from './look.js';
+import { writeAttrs } from './pictureSize.js';
 
 /** `[[entity:id|label]]` and `[[media:id|label]]{width=… align=…}`. */
 export const REFERENCE = /\[\[(entity|media):([A-Za-z0-9_-]+)\|([^\]\n]+)\]\](?:\{([^}\n]+)\})?/g;
@@ -62,12 +63,34 @@ export function pastedUrl(text) {
   }
 }
 
+/** The records whose file is a picture a note can show: a proof's is its PNG. */
+const PICTURE_TYPES = new Set(['media', 'capture', 'proof']);
+
 /** The reference a record is cited by: a picture shows, anything else is named. */
 export function citation(entity) {
   if (!entity?.id) return '';
-  const shows = (entity.type === 'media' || entity.type === 'capture') && entity.attrs?.path
+  const shows = PICTURE_TYPES.has(entity.type) && entity.attrs?.path
     && (entity.attrs?.kind ?? 'image') !== 'video';
   return shows ? mediaReference(entity) : entityReference(entity);
+}
+
+/**
+ * A picture a tool puts in a note: its reference, under the label given (the
+ * record's own name else), with a width and a caption when they are known. The
+ * caption is a measured fact or the analyst's own sentence, never the tool's.
+ */
+export function picturePut(entity, { label = '', width = '', caption = '' } = {}) {
+  if (!entity?.id) return '';
+  const named = String(label || entity.label || '').trim() || 'Picture';
+  return `${mediaReference({ id: entity.id, label: named })}${writeAttrs({ width, caption })}`;
+}
+
+/** A point as a note writes it: decimal degrees to five places, about a metre, which the note makes a chip. */
+export function pointText(lat, lon) {
+  const y = Number(lat);
+  const x = Number(lon);
+  if (!Number.isFinite(y) || !Number.isFinite(x) || Math.abs(y) > 90 || Math.abs(x) > 180) return '';
+  return `${y.toFixed(5)}, ${x.toFixed(5)}`;
 }
 
 /** An image just added to the case, as the note shows it: its media when it has one, its file else. */

@@ -133,7 +133,8 @@ describe('one block, not loose inputs', () => {
   it('shows old read-only fields only when a stored value exists', () => {
     expect(source).toContain('if (field.editable === false)');
     expect(source).toContain('<div class="legacy-value">');
-    expect(source).toContain('<small>Older field</small>');
+    // a value the app keeps says where it comes from; a legacy one that it is older
+    expect(source).toContain("<small>{field.aside || 'Older field'}</small>");
   });
 
   it('lays fields out as a responsive grid instead of a long loose list', () => {

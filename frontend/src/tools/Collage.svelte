@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from 'svelte';
   import { api, detailLine } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
@@ -10,6 +11,11 @@
   } from '../lib/inspectWork.svelte.js';
   import { exportBend } from '../lib/straighten.js';
   import { nextName } from '../lib/naming.js';
+  import { lookupEntity } from '../lib/catalog.js';
+  import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import PutInNote from '../components/PutInNote.svelte';
+  import { collageOffer } from './inspect/frameNote.js';
+  import { workFolder } from '../lib/folders.js';
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { createHistory } from '../lib/history.js';
   import { deletedToast } from '../lib/trash.js';
@@ -620,23 +626,31 @@
   }
 
   // -- export and delete ------------------------------------------------------------
-  async function exportCollage({ name, folder, note }) {
-    exporting = true;
+  /** The picture filed in the case: `{ duplicate, entity, item }` as the server answers. */
+  async function composeCollage({ name, folder, note }) {
     exportFolder = folder ?? '';
     const signatureNow = collageSignature(doc);
+    // Always a transparent PNG of just the pieces, trimmed to their bounds and at
+    // the sharpest piece's own resolution, however small it sits on the canvas.
+    const f = exportFrame(doc.nodes);
+    const nodes = doc.nodes.map((n) => ({
+      src: n.save, quad: n.quad.map(([x, y]) => [(x - f.minX) * f.scale, (y - f.minY) * f.scale]),
+    }));
+    const res = await api.post(`/api/cases/${doc.caseId}/inspect/compose`, {
+      width: f.width, height: f.height, background: null, nodes, folder, label: name, notes: note,
+      // the saved collage this is the export of, so its picture opens it again
+      ...(doc.name ? { collage: doc.name } : {}),
+    });
+    if (res?.item?.path) doc.exported = { path: res.item.path, signature: signatureNow };
+    await reloadCase();
+    await refresh();
+    return res;
+  }
+
+  async function exportCollage({ name, folder, note }) {
+    exporting = true;
     try {
-      // Always a transparent PNG of just the pieces, trimmed to their bounds and at
-      // the sharpest piece's own resolution, however small it sits on the canvas.
-      const f = exportFrame(doc.nodes);
-      const nodes = doc.nodes.map((n) => ({
-        src: n.save, quad: n.quad.map(([x, y]) => [(x - f.minX) * f.scale, (y - f.minY) * f.scale]),
-      }));
-      const res = await api.post(`/api/cases/${doc.caseId}/inspect/compose`, {
-        width: f.width, height: f.height, background: null, nodes, folder, label: name, notes: note,
-      });
-      if (res?.item?.path) doc.exported = { path: res.item.path, signature: signatureNow };
-      await reloadCase();
-      await refresh();
+      const res = await composeCollage({ name, folder, note });
       const dupe = res?.duplicate ? '. It matched media already in the case, which was renamed' : '';
       toast(`Saved “${name}” to the case${dupe}`, 'ok');
     } catch (e) {
@@ -645,6 +659,30 @@
       exporting = false;
     }
   }
+
+  // -- into the note pinned beside ----------------------------------------------------
+  // "This collage" cites the saved picture while the collage still reads as it did;
+  // otherwise it is saved first under its own name and the last folder.
+  async function fileForNote() {
+    if (exportedPath) {
+      const entity = await lookupEntity(doc.caseId, 'path', exportedPath);
+      if (entity) return { entity, fresh: false };
+    }
+    if (!doc.nodes.length) throw new Error('Add a piece first');
+    if (lost) throw new Error('A piece lost its file. Remove it first');
+    if (exporting) throw new Error('The collage is being saved. Try again in a moment');
+    exporting = true;
+    try {
+      const res = await composeCollage({ name: doc.title, folder: exportFolder || (workFolder() ? '' : null), note: null });
+      return { entity: res?.entity ?? null, fresh: !res?.duplicate };
+    } finally {
+      exporting = false;
+    }
+  }
+
+  const noteCollage = collageOffer({ title: () => doc.title, file: fileForNote });
+  offerPuts('collage', () => (doc.open && doc.nodes.length && !lost ? [noteCollage] : []));
+  onDestroy(() => withdrawNote('collage'));
 
   // Straighten: the whole collage drawn as one picture and bent along the level line, every column of its
   // pixels moved by what the line is off there (lib/straighten.js). The bent picture is a new file in the case;
@@ -850,7 +888,9 @@
             hint={outputHint}
             bind:folder={exportFolder}
             onsave={exportCollage}
-          />
+          >
+            <PutInNote offer={noteCollage} class="btn btn-sm" role="button" />
+          </SaveToCase>
         </div>
       </aside>
     </div>

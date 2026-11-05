@@ -82,7 +82,7 @@
         {#if field.editable === false}
           <div class="legacy-value">
             <span>{values[field.key]}</span>
-            <small>Older field</small>
+            <small>{field.aside || 'Older field'}</small>
           </div>
         {:else if field.kind === 'number'}
           {#if field.rungs?.length}

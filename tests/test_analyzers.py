@@ -138,6 +138,9 @@ def test_local_run_keeps_frames_and_review_without_network(client, scenario):
     assert client.post(endpoint + "/promote", json={"title": "Again"}).json()["entity"]["id"] == promoted["entity"]["id"]
     # The picture shows the place it pins, as an edge its connections read, and once.
     picture = case.find_entity(attr="path", value=promoted["image"])
+    # the picture names its run and candidate, which a note's picture bar opens Detect on
+    assert (picture["attrs"]["analysis_run"], picture["attrs"]["candidate_id"]) == (saved["id"], row["id"])
+    assert len(saved["id"]) == 12 and all(c in "0123456789abcdef" for c in saved["id"])
     shows = [link for link in case.links_of(picture["id"]) if link["type"] == "depicts"]
     assert [(link["from"], link["to"], link["provenance"]["by"]) for link in shows] == [
         (picture["id"], promoted["entity"]["id"], "compare")]

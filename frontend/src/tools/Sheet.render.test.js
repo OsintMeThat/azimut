@@ -42,6 +42,8 @@ vi.mock('../lib/state.svelte.js', async () => {
 vi.mock('../components/EntityDetails.svelte', async () => await import('../components/Modal.svelte'));
 
 const { caseState } = await import('../components/views.fixture.svelte.js');
+const { putsFor } = await import('../lib/noteHere.svelte.js');
+const { pinNote } = await import('../lib/notes/putInNote.svelte.js');
 const { default: Sheet } = await import('./Sheet.svelte');
 
 let live = null;
@@ -2801,6 +2803,33 @@ describe('the sheet itself', () => {
     // there: a sentence about a folder is a folder the analyst then goes hunting for.
     expect(toast.mock.calls.at(-1)[0]).toContain('exports');
     expect(toast.mock.calls.at(-1)[3].label).toBe('Show');
+  });
+
+  it('puts the rows on screen in the pinned note as a table, from the Export menu', async () => {
+    await open();
+    await typeSearch('quai');
+    button('Export').click();
+    await settle();
+    // no note pinned: the menu is as it always was
+    expect(button('Put in')).toBeUndefined();
+    button('Export').click();
+    await settle();
+
+    const unpin = pinNote({ caseId: 'case-a', noteId: 'n1', title: 'Port strike', editor: {} });
+    try {
+      button('Export').click();
+      await settle();
+      expect(button('Put in “Port strike”')).not.toBeUndefined();
+      const [offer] = putsFor('sheet');
+      expect(offer).toMatchObject({ id: 'table', label: 'This view' });
+      const { text } = await offer.put({});
+      expect(text).toContain('| id | Subject | Status |');
+      expect(text).toContain('| r1 | Quai sud | ruled out |');
+      expect(text).not.toContain('Pont nord');
+      expect(text).toContain('Candidates — 1 of 3 rows');
+    } finally {
+      unpin();
+    }
   });
 
   it('leaves out a hidden column, because the export is what is on screen', async () => {

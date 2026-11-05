@@ -20,6 +20,10 @@
     blinkable, candidatePair, candidateSize, comparePairFor, orderCandidates, pinDefaults,
   } from '../../lib/map/detectReview.js';
   import { formatArea, formatDistance } from '../../lib/measure.js';
+  import { lookupEntity } from '../../lib/catalog.js';
+  import { offerPuts, withdrawNote } from '../../lib/noteHere.svelte.js';
+  import PutInNote from '../../components/PutInNote.svelte';
+  import { pinCaption, pinOffer } from './pinNote.js';
 
   let {
     caseId,
@@ -236,6 +240,35 @@
     toast('The pin went to Trash', 'ok');
   }
 
+  // -- into the note pinned beside ---------------------------------------------
+  // Only a pinned candidate: its evidence picture is the case's, captioned with
+  // what the run measured. A candidate still in the queue offers nothing.
+  const pinned = $derived(candidate?.review === 'kept' && candidate?.entity_id ? candidate : null);
+
+  async function pinEvidence() {
+    const row = pinned;
+    if (!row) throw new Error('Pin the candidate first');
+    const chain = await api.get(`/api/cases/${caseId}/entities/${encodeURIComponent(row.entity_id)}/chain`);
+    const place = chain?.entity;
+    const path = place?.attrs?.evidence;
+    const entity = path ? await lookupEntity(caseId, 'path', path) : null;
+    return { entity, label: place?.label || row.title || row.phenomenon };
+  }
+
+  const notePin = pinOffer({
+    evidence: pinEvidence,
+    caption: () => pinCaption({
+      reading: readingOf(run.input.recipe, methods, pinned?.measure),
+      strength: STRENGTHS[pinned?.strength] ?? '',
+      area: pinned?.area,
+      units: prefs.units,
+      ...candidatePair(pinned, run),
+      single: !!recipeCapability(run.input.recipe, methods).single,
+    }),
+  });
+  offerPuts('detect', () => (pinned ? [notePin] : []));
+  onDestroy(() => withdrawNote('detect'));
+
   async function cancel() {
     onaccept(await api.post(`${base}/cancel`, {}));
     await refreshRuns(caseId);
@@ -359,6 +392,7 @@
     <div class="review-status">
       {#if candidate?.review === 'kept'}
         <p class="verdict kept"><Icon name="check" size={13} /> Kept as a pin in this case</p>
+        <PutInNote offer={notePin} class="btn btn-sm" role="button" />
         <button class="link" disabled={busy} onclick={() => act(undoKeep)}>Undo and send the pin to Trash</button>
       {:else if candidate?.review === 'noted'}
         <p class="verdict noted"><Icon name="bookmark" size={13} /> Kept in this detection</p>

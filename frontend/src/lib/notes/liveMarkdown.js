@@ -28,7 +28,8 @@ import { CALLOUT_LINE, calloutOf } from './callouts.js';
 import { paths as iconPaths } from '../../components/Icon.svelte';
 import { HINT_LINE, INCLUDE_LINE, PAGE_BREAK_LINE, includeLine } from './look.js';
 import {
-  CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, captionField, pictureLine, picturesIn, rovingToolbar, sizeWidth, sizedLine,
+  CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, SOURCE_HELP, captionField, pictureLine, picturesIn, rovingToolbar, sizeWidth,
+  sizedLine, sourceField,
 } from './pictureSize.js';
 import {
   findCoordinates, findReferences, mentionMatches, slashInsert, slashMatches,
@@ -68,6 +69,13 @@ export const noteCase = StateField.define({
  * replaces.
  */
 export const templateMode = Facet.define({ combine: (values) => values.some(Boolean) });
+
+/**
+ * The editor's outside, for what the page draws: a picture's bar asks it which tool
+ * reopens the picture (`opener(entity)`), whether its source is the analyst's to state
+ * (`sourceable(entity)`, a promise) and to state it (`stateSource(entity, url)`).
+ */
+const noteHandlers = Facet.define({ combine: (values) => values[0] ?? {} });
 
 /** Whether the editor has focus, which is when the line being edited shows its marks. */
 const setFocused = StateEffect.define();
@@ -368,14 +376,24 @@ function pictureRatio(box) {
   return image?.naturalWidth ? image.naturalHeight / image.naturalWidth : 0;
 }
 
-/** The size and place buttons over a picture, and its caption: what the PDF prints it at. */
-function sizeBar(box, source) {
+/** The case record a picture line shows, or null for an image read from an address. */
+function pictureEntity(info, picture) {
+  const id = /^media:([A-Za-z0-9_-]+)$/.exec(picture?.ref ?? '')?.[1];
+  return id ? resolve(info, id) : null;
+}
+
+/**
+ * The size and place buttons over a picture, and its caption: what the PDF prints it
+ * at. Then the way back to the tool it was made in, and a source to state when only
+ * the analyst knows it. Neither of those two is ever printed.
+ */
+function sizeBar(box, source, info, handlers = {}) {
   const [picture] = picturesIn(source);
   const bar = document.createElement('div');
   bar.className = 'cm-size-bar';
   bar.dataset.sizeBar = 'true';
   bar.setAttribute('role', 'toolbar');
-  bar.setAttribute('aria-label', 'Size in the PDF');
+  bar.setAttribute('aria-label', 'Picture');
   if (!picture) return bar;
   const sizes = PICTURE_SIZES.map((size) => {
     const button = document.createElement('button');
@@ -413,12 +431,59 @@ function sizeBar(box, source) {
   caption.textContent = 'Caption';
   caption.title = CAPTION_HELP.button;
   bar.append(caption);
+  const entity = pictureEntity(info, picture);
+  const opener = entity ? handlers.opener?.(entity) : null;
+  if (opener) {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'cm-size-open';
+    open.dataset.open = 'true';
+    open.textContent = opener.label;
+    open.title = `${opener.label}, where this picture was made`;
+    bar.append(open);
+  }
   rovingToolbar(bar);
+  // whether the analyst may state a source is read off the file, so it is asked once the bar is drawn
+  if (entity && !entity.attrs?.source_url && handlers.sourceable) {
+    Promise.resolve(handlers.sourceable(entity)).then((yes) => {
+      if (!yes || !box.isConnected || bar.querySelector('[data-source]')) return;
+      const said = document.createElement('button');
+      said.type = 'button';
+      said.className = 'cm-size-source';
+      said.dataset.source = 'true';
+      said.textContent = 'Source…';
+      said.title = SOURCE_HELP.button;
+      said.tabIndex = -1;
+      bar.insertBefore(said, bar.querySelector('[data-open]'));
+    }).catch(() => {});
+  }
   return bar;
 }
 
-/** Open the caption field under the picture drawn in `box`, in place of the caption shown there. */
-function openCaption(view, box) {
+/** Open the field a picture's source is stated in, under the picture drawn in `box`. */
+function openSource(view, box, entity) {
+  if (box.querySelector('.picture-source-field')) return;
+  const handlers = view.state.facet(noteHandlers);
+  if (!handlers.stateSource) return;
+  box.classList.add('cm-captioning');
+  const field = sourceField({
+    write: (url) => handlers.stateSource(entity, url),
+    done: (by) => {
+      box.classList.remove('cm-captioning');
+      field.remove();
+      if (by === 'keyboard') view.focus();
+    },
+  });
+  box.append(field);
+  field.focus();
+}
+
+/**
+ * Open the caption field under the picture drawn in `box`, in place of the caption
+ * shown there. `returnTo` is where Enter and Escape give the keyboard back, the
+ * note itself when it is not given.
+ */
+function openCaption(view, box, returnTo = null) {
   if (box.querySelector('.picture-caption-field')) return;
   const line = view.state.doc.lineAt(view.posAtDOM(box));
   const [picture] = picturesIn(line.text);
@@ -435,11 +500,13 @@ function openCaption(view, box) {
       box.classList.remove('cm-captioning');
       field.remove();
       // Enter and Escape hand the keyboard back to the note; a press elsewhere keeps its own focus
-      if (by === 'keyboard') view.focus();
+      if (by !== 'keyboard') return;
+      if (returnTo?.isConnected) returnTo.focus({ preventScroll: true });
+      else view.focus();
     },
   });
   box.append(field);
-  field.focus();
+  field.focus({ preventScroll: true });
   field.select();
 }
 
@@ -466,11 +533,20 @@ class BlockWidget extends WidgetType {
     box.title = 'Click to edit';
     if (this.kind === 'diagram') drawDiagram(box, this.source);
     else box.innerHTML = markdownHtml(this.source, this.info);
-    if (this.kind === 'picture' && this.writable) box.append(sizeBar(box, this.source));
-    /** A button of the picture bar, pressed: a size, a place, or the caption field. */
+    const handlers = view.state.facet(noteHandlers);
+    if (this.kind === 'picture' && this.writable) box.append(sizeBar(box, this.source, this.info, handlers));
+    /** A button of the picture bar, pressed: a size, a place, the caption field, its tool or its source. */
     const press = (target) => {
       if (target.closest('[data-caption]')) {
         openCaption(view, box);
+        return;
+      }
+      if (target.closest('[data-open], [data-source]')) {
+        const [shown] = picturesIn(view.state.doc.lineAt(view.posAtDOM(box)).text);
+        const entity = pictureEntity(view.state.field(noteCase), shown);
+        if (!entity) return;
+        if (target.closest('[data-source]')) openSource(view, box, entity);
+        else handlers.opener?.(entity)?.open();
         return;
       }
       const pick = target.closest('[data-share], [data-align]');
@@ -484,7 +560,7 @@ class BlockWidget extends WidgetType {
       resizePicture(view, line.number - 1, picture.ref, change);
     };
     box.addEventListener('mousedown', (event) => {
-      if (event.button !== 0 || event.target.closest('a, video, [data-entity-id], .picture-caption-field')) return;
+      if (event.button !== 0 || event.target.closest('a, video, [data-entity-id], .picture-caption-field, .picture-source-field')) return;
       event.preventDefault();
       if (event.target.closest('[data-size-bar]')) {
         press(event.target);
@@ -499,6 +575,10 @@ class BlockWidget extends WidgetType {
       const button = event.target.closest('[data-size-bar] button');
       if (event.detail !== 0 || !button) return;
       const from = view.state.doc.lineAt(view.posAtDOM(box)).from;
+      if (button.dataset.open || button.dataset.source) {
+        press(button);
+        return;
+      }
       const same = button.dataset.share ? `[data-share="${button.dataset.share}"]`
         : button.dataset.align ? `[data-align="${button.dataset.align}"]` : '[data-caption]';
       press(button);
@@ -511,8 +591,8 @@ class BlockWidget extends WidgetType {
   }
 
   ignoreEvent(event) {
-    // the caption field is the browser's: the editor leaves its keys and presses alone
-    return event.type !== 'mousedown' || Boolean(event.target?.closest?.('.picture-caption-field'));
+    // the caption and source fields are the browser's: the editor leaves their keys and presses alone
+    return event.type !== 'mousedown' || Boolean(event.target?.closest?.('.picture-caption-field, .picture-source-field'));
   }
 
   get estimatedHeight() {
@@ -973,12 +1053,218 @@ export function resizePicture(view, line, ref, changes) {
   return true;
 }
 
-/** Put the cursor at the start of a line (0-based), and bring it into view. */
+/**
+ * Put the cursor at the start of a line (0-based), and bring it into view. A line
+ * holding a picture is brought into view and lit rather than opened, so the picture
+ * stays drawn with its bar, which is where a picture is sized, captioned and sourced.
+ */
 export function jumpToLine(view, line) {
   const number = Math.min(view.state.doc.lines, Math.max(1, Number(line) + 1));
-  const at = view.state.doc.line(number).from;
-  view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at, { y: 'center' }) });
+  const target = view.state.doc.line(number);
+  if (PICTURE_LINE.test(target.text)) {
+    lightLines(view, target.from, target.to);
+    return;
+  }
+  view.dispatch({ selection: { anchor: target.from }, effects: EditorView.scrollIntoView(target.from, { y: 'center' }) });
   view.focus();
+}
+
+// -- what a tool puts in the note ----------------------------------------------
+
+/**
+ * Places in the note held while something is being made for them: a position a put
+ * will land at, or the stretch it landed as. Each follows the typing around it, so a
+ * picture that takes a while still lands where it was asked for, and Undo finds it.
+ */
+const holdSpot = StateEffect.define();
+const dropSpot = StateEffect.define();
+let spotSeq = 0;
+
+const spots = StateField.define({
+  create: () => new Map(),
+  update(value, transaction) {
+    let next = value;
+    if (transaction.docChanged && value.size) {
+      next = new Map();
+      for (const [id, spot] of value) {
+        // what is typed at a held position goes before it, as at the start of a stretch; at its end, after it
+        const from = transaction.changes.mapPos(spot.from, 1);
+        next.set(id, { from, to: spot.to === spot.from ? from : Math.max(from, transaction.changes.mapPos(spot.to, -1)) });
+      }
+    }
+    for (const effect of transaction.effects) {
+      if (effect.is(holdSpot)) {
+        if (next === value) next = new Map(value);
+        next.set(effect.value.id, { from: effect.value.from, to: effect.value.to });
+      } else if (effect.is(dropSpot) && next.has(effect.value)) {
+        if (next === value) next = new Map(value);
+        next.delete(effect.value);
+      }
+    }
+    return next;
+  },
+});
+
+/** Hold `from`–`to` (a position when they are one) as the note changes; answers its id. */
+export function holdRange(view, from, to = from) {
+  spotSeq += 1;
+  view.dispatch({ effects: holdSpot.of({ id: spotSeq, from, to }) });
+  return spotSeq;
+}
+
+/** Where a held place is now, `{ from, to }`, or null once let go. */
+export function heldRange(view, id) {
+  return view.state.field(spots, false)?.get(id) ?? null;
+}
+
+export function releaseRange(view, id) {
+  if (view.state.field(spots, false)?.has(id)) view.dispatch({ effects: dropSpot.of(id) });
+}
+
+/** A picture line's braces, which the bar and the caption field change, read as one. */
+function unsized(text) {
+  return String(text ?? '').replace(/(\]\]|\))\{[^}\n]*\}/g, '$1');
+}
+
+/**
+ * The text that puts `text` at `pos` on lines of its own: a blank line from words
+ * before it and after it, so a table or a picture is read as one. `inline` puts it
+ * in the line at `pos` instead, with a space either side, as a citation is written.
+ * Answers `{ insert, start, end }`, the text and where `text` sits in it.
+ */
+export function blockAt(state, pos, text, { inline = false } = {}) {
+  const at = Math.max(0, Math.min(pos, state.doc.length));
+  if (inline) {
+    const before = state.sliceDoc(at - 1, at);
+    const after = state.sliceDoc(at, at + 1);
+    const lead = before && !/\s/.test(before) ? ' ' : '';
+    const trail = !after || !/\s/.test(after) ? ' ' : '';
+    return { insert: `${lead}${text}${trail}`, start: lead.length, end: lead.length + text.length };
+  }
+  const line = state.doc.lineAt(at);
+  const head = line.text.slice(0, at - line.from);
+  const tail = line.text.slice(at - line.from);
+  const previous = line.number > 1 ? state.doc.line(line.number - 1).text : '';
+  const next = line.number < state.doc.lines ? state.doc.line(line.number + 1).text : null;
+  // words before it on this line take a blank line; an empty line under words, one more break
+  const lead = head.trim() ? '\n\n' : !head && previous.trim() ? '\n' : '';
+  // the line's own break follows it unless it is the last: words after it take a blank line
+  const trail = tail.trim() ? '\n\n' : next === null ? '\n' : next.trim() ? '\n' : '';
+  const insert = `${lead}${text}${trail}`;
+  return { insert, start: lead.length, end: lead.length + text.length };
+}
+
+/**
+ * Put `text` at `pos` (a held place's position when it is the id of one), as
+ * `blockAt` writes it. Answers the id of the stretch it now holds in the note, which
+ * `takeBackRange` reads. The note's own cursor moves past it only when it was there.
+ */
+export function placeText(view, pos, text, options = {}) {
+  if (view.state.readOnly) return null;
+  const { insert, start, end } = blockAt(view.state, pos, text, options);
+  const from = Math.max(0, Math.min(pos, view.state.doc.length));
+  const head = view.state.selection.main.head;
+  view.dispatch({
+    changes: { from, insert },
+    ...(head === from ? { selection: { anchor: from + insert.length } } : {}),
+    userEvent: 'input',
+  });
+  const id = holdRange(view, from, from + insert.length);
+  lightLines(view, from + start, from + end);
+  return { id, text: insert };
+}
+
+/**
+ * Take back what `placeText` put in, if the note still holds it as it was: a
+ * picture's size and caption may have been set since, nothing else. False when it
+ * changed, or is no longer there.
+ */
+export function takeBackRange(view, landed) {
+  const held = landed ? heldRange(view, landed.id) : null;
+  if (!held || view.state.readOnly) return false;
+  const now = view.state.sliceDoc(held.from, held.to);
+  if (unsized(now) !== unsized(landed.text)) return false;
+  view.dispatch({ changes: { from: held.from, to: held.to }, effects: dropSpot.of(landed.id), userEvent: 'delete' });
+  return true;
+}
+
+/** Light the lines `from`–`to` for a moment and bring them into view: where a put landed. */
+const lightOn = StateEffect.define();
+const lightOff = StateEffect.define();
+const landedLine = Decoration.line({ class: 'cm-landed' });
+
+const landed = StateField.define({
+  create: () => Decoration.none,
+  update(value, transaction) {
+    let next = value.map(transaction.changes);
+    for (const effect of transaction.effects) {
+      if (effect.is(lightOff)) next = Decoration.none;
+      if (effect.is(lightOn)) {
+        const { from, to } = effect.value;
+        const lines = [];
+        const doc = transaction.state.doc;
+        for (let number = doc.lineAt(from).number; number <= doc.lineAt(Math.max(from, to)).number; number += 1) {
+          lines.push(landedLine.range(doc.line(number).from));
+        }
+        next = Decoration.set(lines);
+      }
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+/** How long the lines a put landed as stay lit. */
+export const LIGHT_MS = 1800;
+
+export function lightLines(view, from, to = from) {
+  const at = Math.max(0, Math.min(from, view.state.doc.length));
+  const end = Math.max(at, Math.min(to, view.state.doc.length));
+  view.dispatch({ effects: [lightOn.of({ from: at, to: end }), EditorView.scrollIntoView(at, { y: 'center' })] });
+  // a picture or a table is drawn in place of its lines, so it is lit itself
+  const first = view.state.doc.lineAt(at).number;
+  const last = view.state.doc.lineAt(end).number;
+  const markBlocks = () => {
+    for (const node of view.contentDOM.querySelectorAll('.cm-block')) {
+      let number = 0;
+      try { number = view.state.doc.lineAt(view.posAtDOM(node)).number; } catch { continue; }
+      if (number >= first && number <= last) node.classList.add('cm-block-landed');
+    }
+  };
+  markBlocks();
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(markBlocks);
+  clearTimeout(view.lightTimer);
+  view.lightTimer = setTimeout(() => {
+    if (!view.dom.isConnected) return;
+    view.dispatch({ effects: lightOff.of(null) });
+    for (const node of view.contentDOM.querySelectorAll('.cm-block-landed')) node.classList.remove('cm-block-landed');
+  }, LIGHT_MS);
+}
+
+/**
+ * Open the caption field of the picture on the line at `pos`, once the page has
+ * drawn it. `returnTo` gets the keyboard back after Enter or Escape. Answers whether
+ * it opened, after a few frames at most.
+ */
+export function captionAt(view, pos, { returnTo = null, frames = 6 } = {}) {
+  return new Promise((done) => {
+    const tryOpen = (left) => {
+      const line = view.state.doc.lineAt(Math.min(pos, view.state.doc.length));
+      const box = [...view.contentDOM.querySelectorAll('.cm-block-picture')]
+        .find((node) => { try { return view.state.doc.lineAt(view.posAtDOM(node)).number === line.number; } catch { return false; } });
+      if (box) {
+        openCaption(view, box, returnTo);
+        done(true);
+        return;
+      }
+      if (left <= 0) {
+        done(false);
+        return;
+      }
+      requestAnimationFrame(() => tryOpen(left - 1));
+    };
+    tryOpen(frames);
+  });
 }
 
 /**
@@ -1219,8 +1505,10 @@ const look = EditorView.theme({
   '.cm-pagebreak-line': { color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: '0.9em' },
   '.cm-block-picture': { position: 'relative' },
   // hidden until the picture is hovered, yet there for Tab, which shows it
+  // in a narrow note it wraps onto a second row rather than run off the page
   '.cm-size-bar': {
     position: 'absolute', top: '10px', right: 'calc(var(--note-gutter, 32px) + 4px)', display: 'flex', gap: '2px', padding: '3px',
+    flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 'calc(100% - 2 * var(--note-gutter, 32px) - 8px)', boxSizing: 'border-box',
     background: 'var(--bg-1)', border: '1px solid var(--border-strong)', borderRadius: '6px', boxShadow: 'var(--shadow-2)',
     fontFamily: 'var(--font-sans)', fontSize: '11px', lineHeight: '1', opacity: '0', pointerEvents: 'none',
   },
@@ -1228,12 +1516,17 @@ const look = EditorView.theme({
   '.cm-size-bar button': {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '30px', height: '22px', padding: '0 6px',
     border: 'none', borderRadius: '4px', background: 'transparent', color: 'var(--text-2)', cursor: 'pointer', font: 'inherit',
+    whiteSpace: 'nowrap',
   },
   '.cm-size-bar button.cm-size-align': { minWidth: '24px', padding: '0' },
   '.cm-size-bar button.cm-size-align:first-of-type': { marginLeft: '4px' },
   '.cm-size-bar button:hover': { background: 'var(--bg-3, var(--bg-2))', color: 'var(--text-1)' },
   '.cm-size-bar button[aria-pressed="true"]': { background: 'var(--accent-soft, var(--bg-2))', color: 'var(--accent)' },
   '.cm-size-bar button.cm-size-caption': { marginLeft: '4px', padding: '0 8px' },
+  '.cm-size-bar button.cm-size-source, .cm-size-bar button.cm-size-open': { padding: '0 8px', whiteSpace: 'nowrap' },
+  '.cm-size-bar button.cm-size-open': { color: 'var(--accent)' },
+  '.cm-landed': { background: 'color-mix(in srgb, var(--accent) 16%, transparent)', transition: 'background-color 0.6s ease-out' },
+  '.cm-block.cm-block-landed': { background: 'color-mix(in srgb, var(--accent) 16%, transparent)', borderRadius: '4px', boxShadow: '0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent)' },
   '.cm-size-bar button:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
   '.cm-block .markdown-caption': {
     display: 'block', marginTop: '6px', color: 'var(--text-2)', fontFamily: 'var(--font-sans)', fontSize: '0.84em', lineHeight: '1.4',
@@ -1246,6 +1539,12 @@ const look = EditorView.theme({
     borderRadius: '4px', background: 'var(--bg-1)', color: 'var(--text-1)', font: 'inherit', fontFamily: 'var(--font-sans)',
     fontSize: '0.84em', outline: 'none', cursor: 'text',
   },
+  '.picture-source-field': {
+    display: 'block', boxSizing: 'border-box', width: '100%', marginTop: '6px', padding: '4px 8px', border: '1px solid var(--accent)',
+    borderRadius: '4px', background: 'var(--bg-1)', color: 'var(--text-1)', font: 'inherit', fontFamily: 'var(--font-sans)',
+    fontSize: '0.84em', outline: 'none', cursor: 'text',
+  },
+  '.picture-source-field[aria-invalid="true"]': { borderColor: 'var(--danger)' },
   '.cm-tooltip.cm-tooltip-autocomplete': {
     background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '6px', boxShadow: 'var(--shadow-2)', overflow: 'hidden',
   },
@@ -1270,6 +1569,9 @@ export function noteExtensions({ handlers = {}, placeholder = '', readOnly = fal
     noteCase,
     focused,
     templateMode.of(template),
+    noteHandlers.of(handlers),
+    spots,
+    landed,
     drawn,
     typeOverHints,
     history(),

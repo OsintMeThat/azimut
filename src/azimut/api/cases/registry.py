@@ -150,6 +150,8 @@ def entity_types() -> list[dict[str, Any]]:
                     "hint": attr.hint,
                     "kind": attr.kind,
                     "editable": attr.editable,
+                    # Where a read-only value comes from; empty for a legacy field.
+                    "aside": attr.aside,
                     # Heads this field and the ones after it that share it; empty
                     # means the field stands on its own label. On the field rather
                     # than on the type because a Claim separates what it states,

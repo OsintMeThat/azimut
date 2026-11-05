@@ -4,6 +4,7 @@ import {
   COPY_LIMIT,
   chronologyBlock,
   chronologyMarkdown,
+  chronologyNoteTable,
   chronologyRows,
   readChronology,
 } from './timelineCopy.js';
@@ -17,6 +18,37 @@ const entry = (id, earliest, extra = {}) => ({
   latest: earliest,
   category: 'statement',
   ...extra,
+});
+
+describe('the window put in a note', () => {
+  it('cites the subjects, places and sources, so a source is numbered in the PDF', () => {
+    const rows = chronologyRows([entry('a', '2026-08-11T14:05:00Z', {
+      raw: '2026-08-11',
+      label: 'Convoy | crossed',
+      subject_entities: [{ id: 'v', label: 'MV Aurora' }, { id: 'o', label: 'North|wind [2]' }],
+      place_entities: [{ id: 'p', label: 'East bridge' }],
+      source_entities: [{ id: 's', label: 'VID_0312' }],
+      confidence: 'probable',
+    })]);
+    const text = chronologyNoteTable(rows, ['Harbour · Timeline']);
+    expect(text.split('\n')).toEqual([
+      '> Harbour · Timeline',
+      '',
+      '| Date | Statement | Subjects | Places | Sources | Confidence |',
+      '| --- | --- | --- | --- | --- | --- |',
+      '| 11 Aug 2026 | Convoy \\| crossed | [[entity:v|MV Aurora]], [[entity:o|North wind 2]] | [[entity:p|East bridge]] | [[entity:s|VID_0312]] | probable |',
+      '',
+    ]);
+  });
+
+  it('stops at a size a report reads, and says how many the window held', () => {
+    const many = Array.from({ length: 205 }, (_, at) => entry(`e${String(at).padStart(3, '0')}`, `2026-08-01T00:${String(at % 60).padStart(2, '0')}:00Z`));
+    const text = chronologyNoteTable(chronologyRows(many), ['Harbour · Timeline'], { limit: 200 });
+    expect(text).toContain('> Only the first 200 of 205 entries. Narrow the window for the rest.');
+    expect(text.split('\n').filter((line) => line.startsWith('| ') && !line.startsWith('| Date') && !line.startsWith('| ---'))).toHaveLength(200);
+    expect(chronologyNoteTable(chronologyRows(many), [], { limit: 200, truncated: true })).toContain('of 205+ entries');
+    expect(chronologyNoteTable(chronologyRows(many.slice(0, 3)), [])).not.toContain('Only the first');
+  });
 });
 
 describe('copying the chronology', () => {

@@ -374,9 +374,16 @@ describe('one reading, the axis over the list', () => {
   it('copies the whole window, not the page, as Markdown or a spreadsheet block', () => {
     expect(source).toContain("copyChronology('markdown')");
     expect(source).toContain("copyChronology('block')");
-    expect(source).toContain('await readChronology((url) => api.get(url)');
+    expect(source).toContain(': readChronology((url) => api.get(url)');
+    expect(source).toContain('const read = await readWindow(caseId);');
     // a frozen reading copies what it froze and asks nothing of the case
     expect(source).toContain('? { items: windowItems, truncated: false }');
+  });
+
+  it('puts the same window in the pinned note, from the Copy menu and the note’s Add', () => {
+    expect(source).toContain("offerPuts('timeline', () => (windowItems.length ? [windowOffer] : []));");
+    expect(source).toContain('chronologyNoteTable(rows, windowSaid(), { truncated: read.truncated })');
+    expect(source).toContain('<PutInNote offer={windowOffer} class="put-row" icon={false} onput={() => (copyMenu = false)} />');
   });
 
   it('draws the Media lane as the files its events date, and opens the event when one is picked', () => {

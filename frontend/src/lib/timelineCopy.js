@@ -11,7 +11,7 @@
  * without the axis's spread sampling, up to the ceiling a snapshot already holds.
  */
 
-import { toMarkdown } from './sheetExport.js';
+import { NOTE_ROWS, chipsCell, cutLine, toMarkdown } from './sheetExport.js';
 import { toBlock } from './sheetClipboard.js';
 import { formatTemporalValue } from './timeline.js';
 import { timelineTrackQuery } from './timelineTracks.js';
@@ -49,6 +49,12 @@ export function chronologyRows(items = []) {
       sources: names(item.source_entities),
       confidence: item.confidence ?? '',
       status: item.status ?? '',
+      // the records themselves, for a table that cites them
+      refs: {
+        subjects: item.subject_entities ?? [],
+        places: item.place_entities ?? [],
+        sources: item.source_entities ?? [],
+      },
     }));
 }
 
@@ -71,6 +77,23 @@ export function chronologyMarkdown(rows, said = []) {
       row.reading, row.statement, row.subjects, row.places, row.sources, row.confidence,
     ]),
   }, said);
+}
+
+/**
+ * The same table, for a note: the subjects, places and sources it names are cited, so
+ * a source gets its number in the PDF's list of sources, and the table stops at
+ * `NOTE_ROWS` with a line saying how many the window held. `truncated` says the read
+ * itself stopped at its ceiling, so the count is a floor.
+ */
+export function chronologyNoteTable(rows, said = [], { limit = NOTE_ROWS, truncated = false } = {}) {
+  const kept = rows.slice(0, limit);
+  const cut = cutLine({ kept: kept.length, total: rows.length, noun: 'entries', narrow: 'Narrow the window for the rest.', more: truncated });
+  return toMarkdown({
+    columns: ['Date', 'Statement', 'Subjects', 'Places', 'Sources', 'Confidence'],
+    rows: kept.map((row) => [
+      row.reading, row.statement, chipsCell(row.refs?.subjects), chipsCell(row.refs?.places), chipsCell(row.refs?.sources), row.confidence,
+    ]),
+  }, cut ? [...said, cut] : said);
 }
 
 /**

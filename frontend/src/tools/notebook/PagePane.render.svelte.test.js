@@ -38,6 +38,13 @@ vi.mock('../../lib/notes/preview.js', () => ({
   }),
 }));
 
+const { canStateSourceOf, stateSourceOf } = vi.hoisted(() => ({
+  canStateSourceOf: vi.fn(async (_case, entity) => entity.id === 'm2'),
+  stateSourceOf: vi.fn(async () => {}),
+}));
+vi.mock('../../lib/notes/sources.js', () => ({ canStateSourceOf, stateSourceOf }));
+
+const { registerOpener, resetOpeners } = await import('../../lib/notes/openers.js');
 const { default: PagePane } = await import('./PagePane.svelte');
 
 let target;
@@ -47,6 +54,8 @@ afterEach(() => {
   target?.remove();
   app = null;
   answer.warnings = [];
+  resetOpeners();
+  vi.clearAllMocks();
 });
 
 async function pane(props) {
@@ -143,6 +152,41 @@ describe('the pictures on the pages', () => {
     expect(target.querySelector('.picture-bar')).toBeNull();
     expect(target.querySelector('.gap')).toBeNull();
     expect(target.querySelectorAll('.picture')).toHaveLength(2);
+  });
+});
+
+describe('the way back, and a source', () => {
+  const ENTITIES = [
+    { id: 'm1', type: 'capture', label: 'Roof', attrs: { path: 'media/roof.png' } },
+    { id: 'm2', type: 'media', label: 'Pier', attrs: { path: 'media/pier.png', kind: 'image' } },
+  ];
+  const buttons = (index) => [...sheet(index).querySelectorAll('.picture-bar button')].map((button) => button.textContent.trim());
+
+  it('offer the tool a picture was made in, beside its sizes', async () => {
+    const open = vi.fn();
+    registerOpener('satellite', { accepts: (entity) => entity.type === 'capture', open, label: 'Open in Map' });
+    await pane({ onresize: vi.fn(), entities: ENTITIES });
+    expect(buttons(1).at(-1)).toBe('Open in Map');
+    expect(buttons(0)).not.toContain('Open in Map');
+    [...sheet(1).querySelectorAll('.picture-bar button')].at(-1).click();
+    expect(open).toHaveBeenCalledWith(ENTITIES[0]);
+  });
+
+  it('offer Source… for a picture brought in by hand, and state it under the picture', async () => {
+    await pane({ onresize: vi.fn(), entities: ENTITIES, text: TEXT });
+    expect(buttons(0)).toContain('Source…');
+    expect(buttons(1)).not.toContain('Source…');
+    [...sheet(0).querySelectorAll('.picture-bar button')].find((button) => button.textContent.trim() === 'Source…').click();
+    flushSync();
+    const field = sheet(0).querySelector('.caption-here input[type="url"]');
+    expect(document.activeElement).toBe(field);
+    field.value = 'https://t.me/port/4';
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    expect(stateSourceOf).toHaveBeenCalledWith('c1', ENTITIES[1], 'https://t.me/port/4');
+    expect(sheet(0).querySelector('.caption-here')).toBeNull();
   });
 });
 

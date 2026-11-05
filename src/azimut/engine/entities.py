@@ -293,6 +293,9 @@ class Attr:
     #: Legacy fields remain readable without staying writable. A write may retain
     #: the exact stored value, but creation and edits cannot introduce a new one.
     editable: bool = True
+    #: The word shown beside a read-only value: where it comes from. Empty reads
+    #: as a legacy field ("Older field").
+    aside: str = ""
 
 
 @dataclass(frozen=True)
@@ -553,6 +556,12 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                    # it is what makes a stated day that place's day on the Timeline.
                    Attr("when_zone", "Time zone", kind="timezone",
                         hint="the zone the date was stated in"),
+                   # Every panel carries its own credit on its face, so the footer
+                   # prints them only when asked; the proof keeps them here, written
+                   # by each save (`api/proofs.save_proof`), never typed.
+                   Attr("imagery_credits", "Imagery credits", editable=False,
+                        aside="From the panels",
+                        hint="the credits the panels' imagery asks for"),
                )),
     EntityType("post", "Post", DOCUMENT, "post", DELIVERABLE,
                hint="a prepared thread or report, saved rather than published"),

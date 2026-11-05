@@ -944,7 +944,10 @@ def promote(case_id: str, ident: str, result_id: str, body: Promotion) -> dict[s
         filed = media.import_rendered_bytes(case, preview_bytes(case, saved, result, after_only=after_only),
                                             body.title, ".png",
                                             {**source, **analysis_dating.pictured(passes, one_pass=after_only)},
-                                            by="compare")
+                                            by="compare",
+                                            # the run and the candidate on the picture's record, where
+                                            # a note's picture bar reads them to open Detect on them
+                                            extra_attrs={"analysis_run": ident, "candidate_id": result_id})
         lon, lat = result["coordinates"]
         if as_area:
             lon, lat = analysis_geometry.interior(geometry, (lon, lat))

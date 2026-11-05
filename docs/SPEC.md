@@ -199,6 +199,7 @@ proof for publication.
 | ✅ **Notebook, written in place** | Opens on note cards with a search through their words, writes a note as it reads with @ citations, / blocks, callouts and tasks, keeps it beside every tool or in a tab of its own, starts notes from ready ones or templates, and lists each note in Details of what it cites. |
 | ✅ **Notebook reports** | Prints a note as Plain, Report, Brief or Journal in a choice of typefaces, with a cover, contents and TLP marking on A4 or Letter, captions, credits and live source links, shows its pages beside it while it is written, sizes pictures where they print, breaks pages, gathers notes as chapters, and starts from nine ready templates or Settings' own. |
 | ✅ **Report sources and check** | Credits every picture from what the case recorded, made-from pictures included, ends a report with a numbered list of its sources (addresses, archive, dates, SHA-256) linked from the text, and lists what a PDF would warn about before it is written. |
+| ✅ **Tools into the note** | While a note is pinned to the side, Add and the tools' own menus put what they show in it in one press: a map view, point or measure, a Compare pair, a pinned Detect candidate, an Inspect frame, a collage, a proof with its points, a Timeline or Sheet table, a quoted post, or a source looked up in the case first; each picture filed once, credited, undoable, and reopened where it came from. |
 
 ---
 
@@ -244,7 +245,7 @@ supplies, since a ridge ends the day well before the flat horizon does.
 |------|--------------|
 | **One sky frame** | Find's skyline, Camera Resection and Sky Clock read in one azimuth and elevation frame, so the sun and moon times the relief hides split the places a matching skyline leaves tied. |
 | **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
-| **Report Builder** | Draws the case into a report note: proofs, map views, a Timeline stretch and Sheet ranges as figures, internal and public editions, one self-contained HTML file readable offline, and a web article as a WordPress draft or a copy for Substack or Medium. |
+| **Report Builder** | Takes a report further: internal and public editions, one self-contained HTML file readable offline, and a web article as a WordPress draft or a copy for Substack or Medium. |
 | **Case Sync (Git)** | Push a case to a private or public Git remote, pull it back, and diff two revisions, so two analysts can work the same case. |
 
 Toward v4: archive-on-download and a Wayback CDX snapshot timeline with diff; web-page save
@@ -283,6 +284,8 @@ stops making sense.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
 - **Notes, next:** a selection sent to the Post composer, a preview on hovering a chip.
+- **Notes in the extension:** a folding panel holding the pinned note, citing the page or post open, quoting highlighted words with a link to that passage, and putting a capture in.
+- **Tools into the note, next:** a Map plate page and evolution sheets filed as figures, public verify links in the Sources list, Horizon's pair and viewpoint, Detect's kept table, Inspect's moments, Timeline and Graph snapshots, an extension capture's toast, a reverse-search log line.
 - **Report, next:** a signature block at the end of a report, and an optional Azimut mark on its cover or footer.
 - **A report from a period:** every geolocation of a period written into a note through a per-item layout (card, table, one per page).
 - **Interactive map plate:** a map of a period's located videos, each point playing its clip, made without drawing it by hand.

@@ -61,6 +61,7 @@ vi.mock('../lib/state.svelte.js', async () => {
 });
 vi.mock('../components/EntityDetails.svelte', async () => await import('../components/Modal.svelte'));
 
+const { pinNote } = await import('../lib/notes/putInNote.svelte.js');
 const { default: MediaLibrary } = await import('./MediaLibrary.svelte');
 
 let live = null;
@@ -219,6 +220,37 @@ describe('open in… from a row', () => {
       time: null,
     });
     expect(document.querySelector('.open-in-menu')).toBeNull();
+  });
+
+  it('quotes a downloaded post in the pinned note, and only one whose words were kept', async () => {
+    page = {
+      ...page,
+      items: [
+        { ...ITEMS[0], entity_id: 'e_quai', source: { type: 'upload' } },
+        {
+          ...ITEMS[1],
+          entity_id: 'e_clip',
+          title: 'clip',
+          source: { type: 'download', url: 'https://t.me/portnews/412', description: 'Smoke over the port', upload_date: '20260312' },
+        },
+      ],
+    };
+    await open();
+    await press(doorOf('media/clip.mp4'));
+    // no note pinned: the door holds the tools and nothing else
+    expect(choices()).toEqual(['Inspect', 'Reverse Search']);
+    await press(document.querySelector('.open-in-backdrop'));
+
+    const unpin = pinNote({ caseId: 'case-a', noteId: 'n1', title: 'Port strike', editor: {} });
+    try {
+      await press(doorOf('media/clip.mp4'));
+      expect(choices()).toEqual(['Inspect', 'Reverse Search', 'Quote the post in “Port strike”']);
+      await press(document.querySelector('.open-in-backdrop'));
+      await press(doorOf('media/quai.jpg'));
+      expect(choices()).toEqual(['Inspect', 'Reverse Search', 'Geo Proof']);
+    } finally {
+      unpin();
+    }
   });
 
   it('still reaches Inspect and Geo Proof', async () => {

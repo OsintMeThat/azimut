@@ -11,6 +11,7 @@
    */
   import { onMount, tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
+  import PutInNote from '../../components/PutInNote.svelte';
   import {
     ACTIONS,
     copyRows,
@@ -40,6 +41,9 @@
     compareSources = [],
     /** The other map tabs the point opens in (`otherMapTools`), first under Open in…. */
     tools = [],
+    /** The point as an offer to the note pinned beside (`mapNote.pointOffer`);
+     *  its row shows only while one is. */
+    notePoint = null,
     /** `(id, value)`: `copy` with the text, `compare` with a source id, `goto`
      *  with a tool id, or an action id from `ACTIONS`. */
     onpick,
@@ -203,6 +207,9 @@
       <Icon name="copy" size={12} />
     </button>
   {/each}
+  {#if notePoint}
+    <PutInNote offer={notePoint} class="item put" named onput={onclose} />
+  {/if}
 
   <div class="rule" role="separator"></div>
 
@@ -338,6 +345,31 @@
   .item.open {
     background: var(--bg-3);
     color: var(--text-1);
+  }
+  /* The note's row is drawn by PutInNote, outside this component's scope. */
+  .ctx :global(.item.put) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 5px 8px;
+    border-radius: var(--radius-1);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .ctx :global(.item.put > .fm-grow) {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ctx :global(.item.put:hover),
+  .ctx :global(.item.put:focus-visible) {
+    background: var(--bg-3);
+    color: var(--text-1);
+    outline: none;
   }
   .item {
     display: flex;

@@ -14,6 +14,10 @@
    * keeps it there. Both hand `onresize(picture, { width } | { align } | { caption })`
    * up, which rewrites its line.
    *
+   * A picture's bar also offers the way back to the tool it was made in, and Source…
+   * for a picture brought in by hand with no address yet (`lib/notes/sources.js`);
+   * neither is ever printed. `entities` are the case's records the pictures are.
+   *
    * What the server warns about is listed under the bar, a part no longer in the
    * case marked apart from the rest; a warning that names its line takes the note
    * there when pressed.
@@ -21,12 +25,15 @@
   import { onDestroy, untrack } from 'svelte';
   import { createPreview, pageLine } from '../../lib/notes/preview.js';
   import {
-    CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, captionField, pictureAt, rovingToolbar, sizeWidth,
+    CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, SOURCE_HELP, captionField, pictureAt, rovingToolbar, sizeWidth, sourceField,
   } from '../../lib/notes/pictureSize.js';
+  import { openerFor } from '../../lib/notes/openers.js';
+  import '../../lib/notes/openersLoaded.js';
+  import { canStateSourceOf, stateSourceOf } from '../../lib/notes/sources.js';
   import Icon from '../../components/Icon.svelte';
   import PagePreview from '../../components/PagePreview.svelte';
 
-  let { caseId = '', note = 'case', title = '', text = '', look = null, onjump = () => {}, onresize = null } = $props();
+  let { caseId = '', note = 'case', title = '', text = '', look = null, entities = [], onjump = () => {}, onresize = null } = $props();
 
   let data = $state(null);
   let pages = $state([]);
@@ -38,6 +45,46 @@
   let warningsFolded = $state(false);
   /** The picture whose caption is being written (`captionKey`), or null. */
   let captioning = $state(null);
+  /** The picture whose source is being stated (`captionKey`), or null. */
+  let stating = $state(null);
+  /** Whether each picture's source is the analyst's to state, by record and address. */
+  let sourceable = $state({});
+
+  const byId = $derived(new Map(entities.map((entity) => [entity.id, entity])));
+  /** The case record a printed picture shows, or null for an image read from an address. */
+  function entityOf(picture) {
+    const id = /^media:([A-Za-z0-9_-]+)$/.exec(picture?.ref ?? '')?.[1];
+    return id ? byId.get(id) ?? null : null;
+  }
+  const sourceKey = (entity) => `${entity.id}:${entity.attrs?.source_url ?? ''}`;
+
+  $effect(() => {
+    const shown = pictures.map(entityOf).filter(Boolean);
+    const id = caseId;
+    untrack(() => {
+      for (const entity of shown) {
+        const key = sourceKey(entity);
+        if (key in sourceable) continue;
+        sourceable[key] = false;
+        Promise.resolve(canStateSourceOf(id, entity)).then((yes) => { if (yes) sourceable[key] = true; });
+      }
+    });
+  });
+
+  /** The source field, under picture `picture`. */
+  function sourceHere(node, picture) {
+    const entity = entityOf(picture);
+    const field = sourceField({
+      write: (url) => stateSourceOf(caseId, entity, url),
+      done: (by) => {
+        if (by === 'keyboard') node.previousElementSibling?.querySelector('button.source')?.focus({ preventScroll: true });
+        stating = null;
+      },
+    });
+    node.append(field);
+    field.focus({ preventScroll: true });
+    return { destroy: () => field.remove() };
+  }
 
   const preview = createPreview({
     onresult: (answer) => {
@@ -149,6 +196,8 @@
     {/if}
     {#if picture.page === index}
       {@const ratio = ratioOf(picture, size)}
+      {@const entity = entityOf(picture)}
+      {@const opener = entity ? openerFor(entity) : null}
       <div class="picture" style:left={percent(picture.box[0])} style:top={percent(picture.box[1])}
         style:width={percent(picture.box[2])} style:height={percent(picture.box[3])}>
         <button type="button" class="picture-hit" title="Go to this picture in the note" aria-label="Go to this picture in the note"
@@ -170,13 +219,24 @@
             <!-- a press while the field is open leaves it open, rather than writing it and opening it again -->
             <button type="button" class="caption" title={CAPTION_HELP.button} aria-expanded={captioning === captionKey(picture)}
               onmousedown={(event) => { if (captioning === captionKey(picture)) event.preventDefault(); }}
-              onclick={() => (captioning = captionKey(picture))}>Caption</button>
+              onclick={() => { stating = null; captioning = captionKey(picture); }}>Caption</button>
+            {#if entity && sourceable[sourceKey(entity)]}
+              <button type="button" class="source" title={SOURCE_HELP.button} aria-expanded={stating === captionKey(picture)}
+                onclick={() => { captioning = null; stating = captionKey(picture); }}>Source…</button>
+            {/if}
+            {#if opener}
+              <button type="button" class="open" title={`${opener.label}, where this picture was made`} onclick={() => opener.open()}>{opener.label}</button>
+            {/if}
           </div>
         {/if}
       </div>
       {#if captioning === captionKey(picture) && onresize}
         {@const place = captionPlace(picture.box)}
         <div class="caption-here" style:left={place.left} style:width={place.width} style:top={place.top} use:captionHere={picture}></div>
+      {/if}
+      {#if stating === captionKey(picture) && entity}
+        {@const place = captionPlace(picture.box)}
+        <div class="caption-here" style:left={place.left} style:width={place.width} style:top={place.top} use:sourceHere={picture}></div>
       {/if}
     {/if}
   {/each}
@@ -229,10 +289,12 @@
   .picture-bar.from-left { right: auto; left: 6px; }
   .picture-bar button.align { min-width: 24px; padding: 0; }
   .picture-bar button.align:first-of-type { margin-left: 4px; }
-  .picture-bar button.caption { margin-left: 4px; padding: 0 8px; }
+  .picture-bar button.caption, .picture-bar button.source { margin-left: 4px; padding: 0 8px; }
+  .picture-bar button.open { margin-left: 4px; padding: 0 8px; white-space: nowrap; border-left: 1px solid var(--border); border-radius: 0 4px 4px 0; }
   .picture-bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .caption-here { position: absolute; margin-top: 4px; }
-  .caption-here :global(.picture-caption-field) {
+  .caption-here :global(.picture-source-field[aria-invalid='true']) { border-color: var(--danger); }
+  .caption-here :global(.picture-caption-field), .caption-here :global(.picture-source-field) {
     display: block; box-sizing: border-box; width: 100%; height: 26px; padding: 3px 8px; border: 1px solid var(--accent); border-radius: 4px;
     background: var(--bg-1); color: var(--text-1); font: inherit; font-size: var(--fs-xs); box-shadow: var(--shadow-2); outline: none;
   }

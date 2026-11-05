@@ -195,10 +195,21 @@ export function createCaptureState({
     return canvas;
   }
 
+  /** A frame larger than the map on screen has no pixels to come from. */
+  function tooBig(rect) {
+    const error = new Error(
+      `The ${Math.round(rect.w)}×${Math.round(rect.h)} frame is bigger than the map view. ` +
+        'Pick a smaller size or enlarge the window'
+    );
+    error.warn = true;
+    return error;
+  }
+
   /** File a screenshot blob as a capture. `framed` records whether the
    *  coordinates are the centre of a registered crop or just the map view at
-   *  filing time — the backend keeps that distinction in provenance. */
-  async function fileScreenshot(blob, framedOn, framed) {
+   *  filing time — the backend keeps that distinction in provenance. `quiet`
+   *  leaves the saying to whoever asked (a view put in a note). */
+  async function fileScreenshot(blob, framedOn, framed, { quiet = false } = {}) {
     const here = view();
     const owner = await ensureCase();
     const form = new FormData();
@@ -212,31 +223,21 @@ export function createCaptureState({
     form.append('scale_north', String(prefs.captureScaleNorth));
     const result = await api.post(`/api/cases/${owner.id}/satellite/screenshot`, form);
     await reloadCase();
-    notify(
-      framed
-        ? 'Screen crop captured & filed (attribution burned in)'
-        : 'Screenshot filed as a capture (attribution burned in)',
-      'ok'
-    );
+    if (!quiet) {
+      notify(
+        framed
+          ? 'Screen crop captured & filed (attribution burned in)'
+          : 'Screenshot filed as a capture (attribution burned in)',
+        'ok'
+      );
+    }
     return result;
   }
 
-  /** The widget arm: grab the tab, crop it to the frame, file it. */
-  async function widgetCapture(framedOn, rect) {
-    if (!extensionVersion()) {
-      extGate = true;
-      return;
-    }
-    if (!frameFitsView(rect, element().getBoundingClientRect())) {
-      notify(
-        `The ${Math.round(rect.w)}×${Math.round(rect.h)} frame is bigger than the map view. ` +
-          'Pick a smaller size or enlarge the window',
-        'warn',
-        7000
-      );
-      return;
-    }
-    busy = true;
+  /** The widget road's work: the tab grabbed with our chrome out of it, cropped
+   *  to the frame and filed. Throws what stopped it. */
+  async function grabAndFile(framedOn, rect, { quiet = false } = {}) {
+    if (!frameFitsView(rect, element().getBoundingClientRect())) throw tooBig(rect);
     hiding = true;
     try {
       // let the hidden chrome actually leave the composited frame
@@ -245,9 +246,25 @@ export function createCaptureState({
       const img = await tabFrame();
       const canvas = await cropFrame(img, rect, Math.round(rect.w), Math.round(rect.h));
       const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
-      await fileScreenshot(blob, framedOn, true);
+      return await fileScreenshot(blob, framedOn, true, { quiet });
+    } finally {
+      hiding = false;
+    }
+  }
+
+  /** The widget arm: grab the tab, crop it to the frame, file it. */
+  async function widgetCapture(framedOn, rect) {
+    if (!extensionVersion()) {
+      extGate = true;
+      return;
+    }
+    busy = true;
+    try {
+      await grabAndFile(framedOn, rect);
     } catch (e) {
-      if (e.needsActivation) {
+      if (e.warn) {
+        notify(e.message, 'warn', 7000);
+      } else if (e.needsActivation) {
         // one-time per tab: the browser only lets the extension screenshot a tab
         // it has been invoked on (activeTab) — not an error, a step
         notify(
@@ -260,7 +277,6 @@ export function createCaptureState({
         notify(`Capture failed: ${e.message}`, 'danger', 7000);
       }
     } finally {
-      hiding = false;
       busy = false;
     }
   }
@@ -277,62 +293,66 @@ export function createCaptureState({
    * The zoom goes with its fraction, which over relief is part of the camera.
    */
   async function obliqueCapture(framedOn, rect) {
-    const box = element().getBoundingClientRect();
-    if (!frameFitsView(rect, box)) {
-      notify(
-        `The ${Math.round(rect.w)}×${Math.round(rect.h)} frame is bigger than the map view. ` +
-          'Pick a smaller size or enlarge the window',
-        'warn',
-        7000
-      );
-      return;
-    }
     busy = true;
-    const pixels = provenance();
     try {
-      const { canvas: drawn, complete } = await engine().snapshot({ keep: (id) => isGround(id) });
-      if (!complete) {
-        notify('The map is still loading. Capture again once it has settled', 'warn', 6000);
-        return;
-      }
-      const scale = drawn.width / box.width;
-      const crop = document.createElement('canvas');
-      crop.width = Math.round(rect.w * scale);
-      crop.height = Math.round(rect.h * scale);
-      crop
-        .getContext('2d')
-        .drawImage(drawn, rect.x * scale, rect.y * scale, crop.width, crop.height, 0, 0, crop.width, crop.height);
-      const blob = await new Promise((resolve) => crop.toBlob(resolve, 'image/png'));
-      const owner = await ensureCase();
-      const form = new FormData();
-      form.append('image', blob, 'tilted.png');
-      form.append('lat', String(framedOn.lat));
-      form.append('lon', String(framedOn.lon));
-      form.append('zoom', String(writtenZoom(engine().exactZoom?.() ?? view().zoom, true)));
-      form.append('bearing', String(bearing()));
-      form.append('pitch', String(tilt()));
-      form.append('exaggeration', String(reliefScale()));
-      form.append('provider', pixels.provider);
-      const far = farProvider();
-      if (far) form.append('far_provider', far);
-      if (engine().drewReliefFallback?.()) form.append('relief_fallback', 'true');
-      // A frame centred on the view is the camera's own: its centre's height
-      // goes with it, so the view opens again with the eye where it stood.
-      const height = engine().centreElevation?.();
-      const centred = Math.abs(rect.x + rect.w / 2 - box.width / 2) < 1 && Math.abs(rect.y + rect.h / 2 - box.height / 2) < 1;
-      if (centred && Number.isFinite(height)) form.append('elevation', String(Math.round(height)));
-      if (pixels.imageryDate) {
-        form.append('imagery_date', pixels.imageryDate);
-        form.append('imagery_exact', String(pixels.imageryExact ?? true));
-      }
-      await api.post(`/api/cases/${owner.id}/satellite/oblique`, form);
-      await reloadCase();
+      await renderAndFile(framedOn, rect);
       notify('Tilted view captured & filed', 'ok');
     } catch (e) {
-      notify(`Capture failed: ${e.message}`, 'danger', 6000);
+      if (e.warn) notify(e.message, 'warn', e.loading ? 6000 : 7000);
+      else notify(`Capture failed: ${e.message}`, 'danger', 6000);
     } finally {
       busy = false;
     }
+  }
+
+  /** The tilted road's work: the map's own drawing cropped to the frame and
+   *  filed. `reuse` cites a view already filed in this very state. Throws what
+   *  stopped it. */
+  async function renderAndFile(framedOn, rect, { reuse = false } = {}) {
+    const box = element().getBoundingClientRect();
+    if (!frameFitsView(rect, box)) throw tooBig(rect);
+    const pixels = provenance();
+    const { canvas: drawn, complete } = await engine().snapshot({ keep: (id) => isGround(id) });
+    if (!complete) {
+      const error = new Error('The map is still loading. Capture again once it has settled');
+      error.warn = true;
+      error.loading = true;
+      throw error;
+    }
+    const scale = drawn.width / box.width;
+    const crop = document.createElement('canvas');
+    crop.width = Math.round(rect.w * scale);
+    crop.height = Math.round(rect.h * scale);
+    crop
+      .getContext('2d')
+      .drawImage(drawn, rect.x * scale, rect.y * scale, crop.width, crop.height, 0, 0, crop.width, crop.height);
+    const blob = await new Promise((resolve) => crop.toBlob(resolve, 'image/png'));
+    const owner = await ensureCase();
+    const form = new FormData();
+    form.append('image', blob, 'tilted.png');
+    form.append('lat', String(framedOn.lat));
+    form.append('lon', String(framedOn.lon));
+    form.append('zoom', String(writtenZoom(engine().exactZoom?.() ?? view().zoom, true)));
+    form.append('bearing', String(bearing()));
+    form.append('pitch', String(tilt()));
+    form.append('exaggeration', String(reliefScale()));
+    form.append('provider', pixels.provider);
+    const far = farProvider();
+    if (far) form.append('far_provider', far);
+    if (engine().drewReliefFallback?.()) form.append('relief_fallback', 'true');
+    // A frame centred on the view is the camera's own: its centre's height
+    // goes with it, so the view opens again with the eye where it stood.
+    const height = engine().centreElevation?.();
+    const centred = Math.abs(rect.x + rect.w / 2 - box.width / 2) < 1 && Math.abs(rect.y + rect.h / 2 - box.height / 2) < 1;
+    if (centred && Number.isFinite(height)) form.append('elevation', String(Math.round(height)));
+    if (pixels.imageryDate) {
+      form.append('imagery_date', pixels.imageryDate);
+      form.append('imagery_exact', String(pixels.imageryExact ?? true));
+    }
+    if (reuse) form.append('reuse', 'true');
+    const result = await api.post(`/api/cases/${owner.id}/satellite/oblique`, form);
+    if (!result?.reused) await reloadCase();
+    return result;
   }
 
   /**
@@ -347,6 +367,33 @@ export function createCaptureState({
     if (widget) return widgetCapture(framedOn, rectCss);
     if (tilt() > 0) return obliqueCapture(framedOn, rectCss);
     busy = true;
+    try {
+      const result = await stitchAndFile(framedOn, baseW, baseH);
+      notify(...stitchedWords(result));
+    } catch (e) {
+      notify(`Capture failed: ${e.message}`, 'danger', 6000);
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** What a stitched capture says once filed: a hole or an upscaled tile is
+   *  provenance, so it is said rather than smoothed over. */
+  function stitchedWords(result) {
+    return [
+      result.tiles_missing
+        ? `Captured with ${result.tiles_missing} missing tile(s). No imagery was available there`
+        : result.tiles_upscaled
+          ? `Captured. ${result.tiles_upscaled} tile(s) were upscaled from a lower zoom and recorded in provenance`
+          : 'Satellite crop captured & filed',
+      result.tiles_missing || result.tiles_upscaled ? 'warn' : 'ok',
+    ];
+  }
+
+  /** The tile road's work: the frame stitched at the chosen resolution and
+   *  filed. `reuse` cites a capture already filed in this very state. Throws
+   *  what stopped it. */
+  async function stitchAndFile(framedOn, baseW, baseH, { reuse = false } = {}) {
     const facade = engine();
     const here = view();
     const { zoom, width, height, mult } = scaledCapture(
@@ -373,39 +420,67 @@ export function createCaptureState({
     }
     // The pixels' own provenance, asked of the surface that drew them.
     const pixels = provenance();
+    const owner = await ensureCase();
+    const result = await api.post(`/api/cases/${owner.id}/satellite/capture`, {
+      lat: framedOn.lat,
+      lon: framedOn.lon,
+      zoom,
+      width,
+      height,
+      provider: pixels.provider,
+      bearing: bearing(),
+      marker_style: pin.style,
+      marker_x: markerX,
+      marker_y: markerY,
+      marker_lat: markerLat,
+      marker_lon: markerLon,
+      // the second date on a capture: when the imagery itself was acquired. A
+      // pinned Sentinel-2 window is that date outright; every other provider's
+      // is Esri's best-effort estimate, or nothing.
+      imagery_date: pixels.imageryDate,
+      imagery_exact: pixels.imageryExact ?? true,
+      scale_north: prefs.captureScaleNorth,
+      ...(reuse ? { reuse: true } : {}),
+    });
+    if (!result?.reused) await reloadCase();
+    return result;
+  }
+
+  /**
+   * The map as it stands, filed for a note: the centred frame at the chosen
+   * size, through whichever road this basemap takes, and nothing said here. A
+   * view already filed in this very state is cited again rather than filed
+   * twice. Answers `{ entity, fresh, width, height }`; throws a sentence when
+   * no picture can be had.
+   */
+  async function takeForNote() {
+    if (busy) throw new Error('A capture is already running. Try again in a moment');
+    if (blocked) throw new Error('This basemap is for viewing only. Switch to imagery to put it in a note');
+    if (widget && !extensionVersion()) {
+      extGate = true;
+      throw new Error('Google views are captured through the Azimut Capture extension');
+    }
+    const [w, h] = size;
+    const box = element().getBoundingClientRect();
+    const framedOn = engine().camera();
+    const rect = { x: (box.width - w) / 2, y: (box.height - h) / 2, w, h };
+    busy = true;
     try {
-      const owner = await ensureCase();
-      const result = await api.post(`/api/cases/${owner.id}/satellite/capture`, {
-        lat: framedOn.lat,
-        lon: framedOn.lon,
-        zoom,
-        width,
-        height,
-        provider: pixels.provider,
-        bearing: bearing(),
-        marker_style: pin.style,
-        marker_x: markerX,
-        marker_y: markerY,
-        marker_lat: markerLat,
-        marker_lon: markerLon,
-        // the second date on a capture: when the imagery itself was acquired. A
-        // pinned Sentinel-2 window is that date outright; every other provider's
-        // is Esri's best-effort estimate, or nothing.
-        imagery_date: pixels.imageryDate,
-        imagery_exact: pixels.imageryExact ?? true,
-        scale_north: prefs.captureScaleNorth,
-      });
-      await reloadCase();
-      notify(
-        result.tiles_missing
-          ? `Captured with ${result.tiles_missing} missing tile(s). No imagery was available there`
-          : result.tiles_upscaled
-            ? `Captured. ${result.tiles_upscaled} tile(s) were upscaled from a lower zoom and recorded in provenance`
-            : 'Satellite crop captured & filed',
-        result.tiles_missing || result.tiles_upscaled ? 'warn' : 'ok'
-      );
+      let result;
+      if (widget) result = await grabAndFile(framedOn, rect, { quiet: true });
+      else if (tilt() > 0) result = await renderAndFile(framedOn, rect, { reuse: true });
+      else {
+        result = await stitchAndFile(framedOn, w, h, { reuse: true });
+        const [words, kind] = stitchedWords(result);
+        if (kind === 'warn') notify(words, 'warn', 6000);
+      }
+      if (!result?.entity?.id) throw new Error('The capture was filed, but could not be found');
+      return { entity: result.entity, fresh: !result.reused, width: w, height: h };
     } catch (e) {
-      notify(`Capture failed: ${e.message}`, 'danger', 6000);
+      if (e.needsActivation) {
+        throw new Error('One-time step: click the Azimut Capture icon in the toolbar (or press Alt+Shift+A), then try again');
+      }
+      throw e;
     } finally {
       busy = false;
     }
@@ -561,6 +636,8 @@ export function createCaptureState({
     },
 
     toggleSelect,
+
+    takeForNote,
 
     /** Put the marquee away because another map mode took the left button.
      *  Unlike `toggleSelect`, this claims nothing back: the mode arming is the

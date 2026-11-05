@@ -11,7 +11,9 @@ const { get, put } = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
 vi.mock('../lib/api.js', () => ({ api: { get, put, post: vi.fn(async () => ({ redirects: {} })), del: vi.fn(), patch: vi.fn() } }));
 vi.mock('../lib/catalog.js', () => ({ fetchAllEntities: vi.fn(async () => [{ id: 'n1', type: 'note', label: 'Old lead', attrs: {} }]) }));
 
-const { caseState } = await import('../lib/state.svelte.js');
+const { caseState, uiState } = await import('../lib/state.svelte.js');
+const { offerNote, offerPuts, withdrawNote } = await import('../lib/noteHere.svelte.js');
+const { pinnedNote } = await import('../lib/notes/putInNote.svelte.js');
 const { resetOpenNotes } = await import('../lib/notes/noteDoc.svelte.js');
 const { dockNote, setDockNote } = await import('../lib/notes/noteDock.svelte.js');
 const { default: NoteDock } = await import('./NoteDock.svelte');
@@ -51,6 +53,9 @@ afterEach(() => {
   resetOpenNotes();
   setDockNote('case-a', null);
   caseState.current = null;
+  withdrawNote('satellite');
+  uiState.tool = 'overview';
+  uiState.toasts.splice(0);
   vi.clearAllMocks();
 });
 
@@ -78,5 +83,77 @@ describe('the note on the side', () => {
     expect(dockNote('case-a')).toBe('n1');
     expect(document.querySelector('.float-menu')).toBeNull();
     expect(target.querySelector('button.which').textContent).toContain('Old lead');
+  });
+});
+
+describe('the note’s Add menu', () => {
+  const rows = () => [...document.querySelectorAll('.float-menu [role="menuitem"], .float-menu [role="separator"]')]
+    .map((row) => (row.getAttribute('role') === 'separator' ? '—' : row.textContent.trim()));
+  const offer = (id, label, text = `${label} text`) => ({ id, label, hint: label, icon: 'image', put: vi.fn(async () => ({ text })) });
+
+  it('pins the note it shows, for every tool’s Put in', async () => {
+    await dock();
+    expect(pinnedNote()).toEqual({ caseId: 'case-a', noteId: null, title: 'Case notes' });
+    unmount(app);
+    app = null;
+    expect(pinnedNote()).toBeNull();
+  });
+
+  it('offers only a source when the tool on screen has nothing', async () => {
+    uiState.tool = 'overview';
+    await dock();
+    target.querySelector('button.add').click();
+    await settle();
+    expect(rows()).toEqual(['A source…']);
+  });
+
+  it('lists what the tool shows in one order: cite it, its offers, then a source', async () => {
+    uiState.tool = 'satellite';
+    offerNote('satellite', { id: 'p1', type: 'place', label: 'Water tower', attrs: {} });
+    offerPuts('satellite', () => [offer('view', 'This view'), offer('point', 'This point'), offer('a', 'A'), offer('b', 'B'), offer('c', 'C')]);
+    await dock();
+    target.querySelector('button.add').click();
+    await settle();
+    expect(rows()).toEqual(['Cite “Water tower”', 'This view', 'This point', 'A', 'B', '—', 'A source…']);
+  });
+
+  it('puts an offer at the end of a note not written in yet, and Undo takes it back', async () => {
+    uiState.tool = 'satellite';
+    const point = offer('point', 'This point', '48.12345, 37.12345');
+    offerPuts('satellite', () => [point]);
+    await dock();
+    target.querySelector('button.add').click();
+    await settle();
+    [...document.querySelectorAll('.float-menu [role="menuitem"]')].find((row) => row.textContent.includes('This point')).click();
+    await settle();
+    expect(point.put).toHaveBeenCalledOnce();
+    expect(document.querySelector('.float-menu')).toBeNull();
+    const page = () => target.querySelector('.cm-content').textContent;
+    expect(page()).toContain('Seen at the quay.48.12345, 37.12345');
+    const said = uiState.toasts.at(-1);
+    expect(said.message).toBe('Put in “Case notes”');
+    await said.action.onClick();
+    await settle();
+    expect(page()).not.toContain('48.12345');
+  });
+
+  it('cites what the tool shows', async () => {
+    uiState.tool = 'satellite';
+    offerNote('satellite', { id: 'p1', type: 'place', label: 'Water tower', attrs: {} });
+    await dock();
+    target.querySelector('button.add').click();
+    await settle();
+    document.querySelector('.float-menu [role="menuitem"]').click();
+    await settle();
+    expect(target.querySelector('.cm-content').textContent).toContain('Water tower');
+  });
+
+  it('opens A source… in place of the menu', async () => {
+    await dock();
+    target.querySelector('button.add').click();
+    await settle();
+    [...document.querySelectorAll('.float-menu [role="menuitem"]')].at(-1).click();
+    await settle();
+    expect(document.querySelector('.float-menu[aria-label="A source"] input[type="url"]')).not.toBeNull();
   });
 });

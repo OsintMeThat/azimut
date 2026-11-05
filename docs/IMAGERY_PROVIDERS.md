@@ -88,9 +88,12 @@ The wording lives once a side: `engine/copernicus_credit.py` and
 - **Long credits wrap.** A footer drawn on a picture (Compare, evolution, Horizon,
   a proof) breaks its credits onto more lines and grows to hold them
   (`lib/creditLines.js`); it never squeezes them narrower.
-- **A proof credits its imagery.** Its footer lists the credits of the panels it
-  shows, each read as the notice where it is Copernicus, then *Composed with Azimut*,
-  unless the analyst wrote their own.
+- **A proof keeps its imagery's credits.** Each panel's capture carries its credit on
+  its face; the proof's footer stays *Composed with Azimut* unless the analyst writes
+  their own. The panels' credits, read as the notice where they are Copernicus, are
+  kept with the proof (its Details, the PNG's metadata, Geo Report, a note's credit
+  line and Sources). A crop that cuts a capture's credit band leaves the proof without
+  a visible credit: the footer's **Imagery credits** box adds them after its line.
 - **Older pictures keep their words.** Captures filed with "© Copernicus Sentinel data
   / Sentinel Hub" and its variants keep them on disk.
   `normalise_attribution(text, imagery_day)` reads them as the notice, dated when the

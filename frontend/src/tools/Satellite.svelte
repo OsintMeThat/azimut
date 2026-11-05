@@ -46,7 +46,8 @@
   import { saveRelation } from '../lib/relations.svelte.js';
   import { lookFrom, openComparison, openEntity, openHorizonView, openMapAt } from '../lib/navigate.js';
   import { headingUp } from '../lib/map/facade.js';
-  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { offerNote, offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { measureOffer, pointOffer, viewOffer } from './satellite/mapNote.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { extensionVersion, mapLinkRelay, onActivated } from '../lib/extBridge.js';
   import { SENTINEL_ID } from '../lib/sentinel.js';
@@ -2398,6 +2399,45 @@
   });
   onDestroy(() => withdrawNote('satellite'));
 
+  // -- into the note pinned beside ----------------------------------------------
+  // The view (filed as a capture, once for the same view), the point, and the
+  // measure in hand. The saved place open here names the view and leads the point.
+  function seatedPlace() {
+    if (placeModal?.id) return { id: placeModal.id, label: placeModal.title, type: 'place', lat: placeModal.lat, lon: placeModal.lon };
+    if (!detailsEntityId) return null;
+    const row = savedWork.rows.find((item) => item.id === detailsEntityId);
+    return row ? { id: row.id, label: detailsTitle || row.title, type: 'place', lat: row.lat, lon: row.lon } : null;
+  }
+
+  /** The measure selected, as `mapNote.measureNoteText` reads it, or null. */
+  function measureForNote() {
+    const m = measure.drawing ? null : measure.selected;
+    if (!m || m.points.length < 2) return null;
+    return {
+      text: measure.text(m.id),
+      use: m.closed ? '' : m.use,
+      ground: !m.closed && measure.groundOn,
+      shadowDate: m.use === 'shadow' ? measure.shadowDate(m.id) : '',
+    };
+  }
+
+  const noteView = viewOffer({ take: () => capture.takeForNote(), label: () => seatedPlace()?.label ?? '' });
+  const notePoint = pointOffer({
+    point: () => ({ place: seatedPlace(), lat: displayCoords.lat, lon: displayCoords.lon }),
+  });
+  const noteMeasure = measureOffer({ measure: measureForNote });
+  offerPuts('satellite', () => [
+    ...(capture.blocked ? [] : [noteView]),
+    notePoint,
+    ...(measureForNote() ? [noteMeasure] : []),
+  ]);
+
+  // The point right-clicked, held as it was: the menu closes before the put runs.
+  const clickedPoint = $derived.by(() => {
+    const at = pointMenu;
+    return at ? pointOffer({ point: () => ({ lat: at.lat, lon: at.lon }) }) : null;
+  });
+
   function openPlaceDetails() {
     detailsDirty = false; // a fresh panel, whatever the last one was left holding
     detailsEntityId = placeModal?.id ?? null;
@@ -2928,6 +2968,7 @@
           openExtensionGate={() => (capture.extGate = true)}
           openFigure={isSentinel ? openFigure : null}
           openPlate={caseState.current ? () => { uiState.newPlate = true; uiState.tool = 'plate'; } : null}
+          noteOffer={noteView}
         />
         {/if}
       </MapStatusBar>
@@ -2962,6 +3003,7 @@
           tools={pointTools}
           lookup={pointMenu.lookup}
           {compareSources}
+          notePoint={clickedPoint}
           onpick={onPointMenu}
           onclose={closePointMenu}
         />

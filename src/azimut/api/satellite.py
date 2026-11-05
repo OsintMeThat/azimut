@@ -38,6 +38,7 @@ from ..engine import (
     satellite as satellite_engine,
     sentinel,
     sky,
+    snapshots,
     terrain,
     tilecache,
     tiles,
@@ -98,6 +99,9 @@ class CaptureIn(BaseModel):
     marker_lon: float | None = Field(default=None, ge=-180, le=180)
     # burn a scale bar and a north arrow into the crop (capture menu)
     scale_north: bool = False
+    # cite a capture already filed in this very state rather than file it again
+    # (a view put in a note); a plain capture always files a new one
+    reuse: bool = False
 
 
 class PlaceIn(BaseModel):
@@ -1645,6 +1649,16 @@ def daylight_for_window(
     }
 
 
+def _reused(entity: dict[str, Any]) -> dict[str, Any]:
+    """A capture already filed in the state asked for, answered as a fresh one is."""
+    return {
+        "path": (entity.get("attrs") or {}).get("path"),
+        "title": entity.get("label"),
+        "entity": entity,
+        "reused": True,
+    }
+
+
 @router.post("/cases/{case_id}/satellite/capture")
 def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
     case = get_case(case_id)
@@ -1652,6 +1666,21 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
         provider = tiles.get_provider(body.provider)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    # Everything that decides the pixels: the same key is the same picture.
+    key = snapshots.view_key(
+        "satellite",
+        provider=provider.id,
+        imagery_date=(body.imagery_date or "").strip() or None,
+        imagery_exact=body.imagery_exact,
+        lat=body.lat, lon=body.lon, zoom=body.zoom, bearing=body.bearing,
+        width=body.width, height=body.height,
+        marker=[body.marker_style, body.marker_x, body.marker_y],
+        marker_lat=body.marker_lat, marker_lon=body.marker_lon,
+        scale_north=[body.scale_north, units_preference() if body.scale_north else None],
+    )
+    if body.reuse and (filed := snapshots.filed_view(case, key)) is not None:
+        return _reused(filed)
 
     try:
         image, provenance = tiles.fetch_crop(
@@ -1678,6 +1707,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
     provenance["imagery_date"] = (body.imagery_date or "").strip() or None
     if provenance["imagery_date"] and not body.imagery_exact:
         provenance["imagery_exact"] = False
+    provenance[snapshots.VIEW_KEY] = key
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     filename = f"sat_{stamp}_z{provenance['zoom']}_{provider.id}.png"
@@ -1696,7 +1726,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
         extra_attrs={
             "coords": coords_dd, "lat": marker_lat, "lon": marker_lon,
             "plus_code": plus_code, "zoom": provenance["zoom"], "bearing": body.bearing,
-            "provider": provenance["provider"],
+            "provider": provenance["provider"], snapshots.VIEW_KEY: key,
         },
         title=label,
         dedupe=False,  # a capture is 1:1 with its entity — never collapse re-captures
@@ -1704,7 +1734,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
     locate_on_save(case, result["entity"]["id"], marker_lat, marker_lon)
     saved_changed(case)
 
-    return {"path": result["item"]["path"], "title": label, **provenance}
+    return {"path": result["item"]["path"], "title": label, "entity": result["entity"], **provenance}
 
 
 @router.post("/cases/{case_id}/satellite/screenshot")
@@ -1823,7 +1853,7 @@ async def capture_screenshot(
     )
     locate_on_save(case, result["entity"]["id"], lat, lon)
     saved_changed(case)
-    return {"path": result["item"]["path"], "title": label, **provenance}
+    return {"path": result["item"]["path"], "title": label, "entity": result["entity"], **provenance}
 
 
 @router.post("/cases/{case_id}/satellite/oblique")
@@ -1842,6 +1872,7 @@ async def capture_oblique(
     far_provider: str | None = Form(default=None),
     relief_fallback: bool = Form(default=False),
     elevation: float | None = Form(default=None, ge=-500, le=9000),
+    reuse: bool = Form(default=False),
 ) -> dict[str, Any]:
     """File the tilted view the 3D map drew as a capture.
 
@@ -1887,6 +1918,19 @@ async def capture_oblique(
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"not a readable image: {errors.explain(exc)}") from exc
 
+    # The camera and the ground it drew: the same key is the same picture.
+    key = snapshots.view_key(
+        "oblique",
+        provider=prov.id, far_provider=far.id if far is not None else None,
+        imagery_date=(imagery_date or "").strip() or None, imagery_exact=imagery_exact,
+        lat=lat, lon=lon, zoom=zoom, bearing=bearing, pitch=pitch,
+        exaggeration=exaggeration, relief_fallback=relief_fallback,
+        elevation=round(elevation) if elevation is not None else None,
+        width=img.width, height=img.height,
+    )
+    if reuse and (filed := snapshots.filed_view(case, key)) is not None:
+        return _reused(filed)
+
     relief = terrain.MAPTERHORN
     # a picture drawn from the heights carries what their licences ask of one
     attribution = f"{prov.attribution} · Relief {relief.published}"
@@ -1928,6 +1972,7 @@ async def capture_oblique(
         "imagery_date": (imagery_date or "").strip() or None,
         "width": img.width,
         "height": img.height,
+        snapshots.VIEW_KEY: key,
     }
     if provenance["imagery_date"] and not imagery_exact:
         provenance["imagery_exact"] = False
@@ -1944,14 +1989,14 @@ async def capture_oblique(
         extra_attrs={
             "coords": coords_dd, "lat": lat, "lon": lon,
             "plus_code": plus_code, "zoom": zoom, "bearing": bearing, "pitch": pitch,
-            "provider": prov.id,
+            "provider": prov.id, snapshots.VIEW_KEY: key,
         },
         title=label,
         dedupe=False,
     )
     locate_on_save(case, result["entity"]["id"], lat, lon)
     saved_changed(case)
-    return {"path": result["item"]["path"], "title": label, **provenance}
+    return {"path": result["item"]["path"], "title": label, "entity": result["entity"], **provenance}
 
 
 @router.post("/cases/{case_id}/satellite/place")
