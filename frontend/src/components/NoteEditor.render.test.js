@@ -15,6 +15,7 @@ vi.mock('../lib/state.svelte.js', async (actual) => ({ ...(await actual()), relo
 const { uiState } = await import('../lib/state.svelte.js');
 const { openNote, resetOpenNotes, noteReady } = await import('../lib/notes/noteDoc.svelte.js');
 const { default: NoteEditor } = await import('./NoteEditor.svelte');
+const { registerOpener } = await import('../lib/notes/openers.js');
 
 const ENTITIES = [
   { id: 'm1', type: 'media', label: 'Roof shot', attrs: { path: 'media/roof.png', kind: 'image' } },
@@ -137,5 +138,39 @@ describe('a pasted link', () => {
     expect(post).toHaveBeenCalledWith('/api/cases/c1/entities', {
       type: 'bookmark', label: 'Telegram, port #4', attrs: { url: 'https://t.me/port/4', notes: '', folder: '' },
     });
+  });
+});
+
+describe('without the app\'s tools around it', () => {
+
+  async function shown(props = {}) {
+    get.mockImplementation(async () => ({ text: '[[media:m1|Roof shot]]\n\nSeen at 14.79800, 42.95400.' }));
+    // whether the picture's source may be stated: read off the media index
+    post.mockResolvedValue([]);
+    const doc = openNote('c1', 'n1');
+    await noteReady(doc);
+    target = document.createElement('div');
+    document.body.append(target);
+    app = mount(NoteEditor, { target, props: { doc, caseId: 'c1', entities: ENTITIES, ...props } });
+    await settle();
+  }
+
+  it('offers no Open in… on a picture and no way to the map on coordinates, as the extension\'s panel has none', async () => {
+    const undo = registerOpener('collage', { accepts: (entity) => entity.id === 'm1', open: vi.fn(), label: 'Open in Collage' });
+    try {
+      await shown();
+      expect(target.querySelector('.cm-coords-go')).not.toBeNull();
+      expect(target.querySelector('.cm-size-bar [data-open]')?.textContent).toBe('Open in Collage');
+      unmount(app);
+      target.remove();
+      resetOpenNotes();
+      await shown({ tools: false });
+      expect(target.querySelector('.cm-coords')).not.toBeNull();
+      expect(target.querySelector('.cm-coords-go')).toBeNull();
+      expect(target.querySelector('.cm-size-bar')).not.toBeNull();
+      expect(target.querySelector('.cm-size-bar [data-open]')).toBeNull();
+    } finally {
+      undo();
+    }
   });
 });

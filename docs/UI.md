@@ -5833,6 +5833,39 @@ and basemap (not a tilted capture's pitch nor a dated pick), the comparison as i
 now, the video at the frame's instant, the collage, the proof, the run at that
 candidate. Pictures filed before this build carry no such way back and show none.
 
+**Notes in the extension.** The extension's popup has **Notes panel**, which opens the
+browser's side panel (Chrome) or sidebar (Firefox) on the app's own note, framed:
+`#notebook?case=…&note=…&solo=1&panel=1` (`components/NotePanel.svelte`), one copy of
+the note with the app's. Its bar is the case name, the note title with the picker
+(Case notes and the case's notes) and the save state; the editor is the compact one,
+with no *Open in…* nor ⌖, and a chip opens the record's address in a new tab. With no
+`case` the app's last case opens, with no `note` the note pinned to the side or Case
+notes, and a pick is kept in the address. With no case it says *Open a case in Azimut,
+or pick one in the extension's popup, then open Notes again.*
+
+While the panel holds a note, a right-click on any page offers **Cite this page**
+(**Cite this post** on X, Bluesky or Telegram), **Quote the selection** and **Capture
+into the note**, and the panel's bar has the same three buttons where the browser lets
+the extension read the tab (after one right-click on that page or the popup opened on
+it, and always on X and Bluesky); elsewhere it says *Right-click the page to cite,
+quote or capture it.* The extension sends only facts (the address, the title, the
+words, a filed capture's id) to the frame (`postMessage`, `note-put`), which writes the
+note through the same Put as every tool, with its light, toast and Undo:
+
+- **Cite** puts the page's chip: the case's own item for that address, else a bookmark
+  filed and named from the address or the page's title, nothing fetched.
+- **Quote** puts `> [“the words”](address#:~:text=…) [[entity:…|Title]]`: the words
+  verbatim (spaces collapsed, past 1,000 characters cut with `[…]`) linking to the
+  passage itself, a text fragment that opens the page scrolled to them and lit
+  (`lib/notes/textFragment.js`), then the page's chip. A written link to a cited
+  record's page, a passage link included, is that record in the Sources list.
+- **Capture** works on map sites, as the popup's capture does: the visible tab is filed
+  into the panel's case and put in with its caption field open; elsewhere it says
+  *Captures are for map sites. Cite this page instead.*
+
+The items are gone when the panel closes or holds no note. On Azimut's own page they
+say *This is Azimut itself, not a source.*
+
 **A source…** takes a pasted or typed link. It is looked up in the case first, nothing
 fetched (`GET /sources/lookup`): what the case holds is cited. Otherwise *Bookmark*,
 named from the address (*Post by @h on X*, *Telegram, channel #n*…,

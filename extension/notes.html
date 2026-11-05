@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Azimut notes</title>
+  <link rel="stylesheet" href="ui.css" />
+</head>
+<body class="notes">
+  <div id="bar" class="bar" hidden>
+    <!-- shown only while the frame below holds a note, on a page the extension may read -->
+    <div id="actions" class="actions" hidden>
+      <button id="cite" title="Cite this page in the note">Cite page</button>
+      <button id="quote" title="Quote the words selected on the page">Quote</button>
+      <button id="capture" title="Capture this map into the note">Capture</button>
+    </div>
+    <p id="hint" class="muted" hidden>Right-click the page to cite, quote or capture it.</p>
+    <p id="status" class="status" hidden></p>
+  </div>
+  <section id="down" class="down" hidden>
+    <p id="down-text"></p>
+    <button id="retry">Try again</button>
+  </section>
+  <iframe id="note" title="Note" allow="clipboard-write"></iframe>
+  <script src="notesmsg.js"></script>
+  <script src="notes.js"></script>
+</body>
+</html>

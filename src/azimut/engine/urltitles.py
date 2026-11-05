@@ -105,9 +105,11 @@ def _cut(words: str) -> str:
     return words if len(words) <= _MAX_TITLE else f"{words[:_MAX_TITLE - 1].rstrip()}…"
 
 
-def title_of(url: Any) -> str:
+def title_of(url: Any, page_title: Any = "") -> str:
     """A name for the page at ``url``, read off its address: *Post by @h on X*,
-    *Telegram, channel #42*, else its host and path. "" when it is not a web address."""
+    *Telegram, channel #42*, else the title the page gave itself when the browser
+    passed it on (``page_title``), else its host and path. "" when it is not a web
+    address."""
     parts = _web(url)
     if parts is None:
         return ""
@@ -174,6 +176,8 @@ def title_of(url: Any) -> str:
             said = f"r/{segs[1]} on Reddit"
     if said:
         return _cut(said)
+    if isinstance(page_title, str) and page_title.strip():
+        return _cut(page_title)
     path = parts.path if parts.path not in ("", "/") else ""
     return _cut(f"{host}{path.rstrip('/')}")
 

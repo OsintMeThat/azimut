@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Azimut Capture",
-  "version": "0.3.3",
-  "description": "File into Azimut: screenshot the map you are looking at (coordinates from the URL), save any other page as a bookmark, fill a social composer with a thread the app prepared, or open a reverse-image engine with a picture from the case.",
-  "permissions": ["activeTab", "scripting", "storage", "notifications"],
+  "version": "0.3.4",
+  "description": "File into Azimut: screenshot the map you are looking at (coordinates from the URL), save any other page as a bookmark, cite or quote a page into a case note from a side panel, fill a social composer with a thread the app prepared, or open a reverse-image engine with a picture from the case.",
+  "permissions": ["activeTab", "scripting", "storage", "notifications", "contextMenus", "sidePanel"],
   "host_permissions": [
     "http://127.0.0.1/*",
     "http://localhost/*",
@@ -18,7 +18,7 @@
   ],
   "background": {
     "service_worker": "background.js",
-    "scripts": ["background.js"]
+    "scripts": ["notesmsg.js", "background.js"]
   },
   "action": {
     "default_popup": "popup.html",
@@ -35,6 +35,18 @@
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
+  },
+  "side_panel": {
+    "default_path": "notes.html"
+  },
+  "sidebar_action": {
+    "default_panel": "notes.html",
+    "default_title": "Azimut notes",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    },
+    "open_at_install": false
   },
   "options_ui": {
     "page": "options.html",

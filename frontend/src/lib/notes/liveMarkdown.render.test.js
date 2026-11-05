@@ -271,6 +271,34 @@ describe('a picture’s caption', () => {
     expect(view.dom.querySelector('.markdown-caption').textContent).toBe('Smoke over the port');
   });
 
+  it('stays open, and the picture stays drawn, when the case is read again unchanged', () => {
+    // a tool that files a picture reloads the case: the same records come back as a new list
+    withPicture('[[media:m1|Roof]]{width=50%}\n\nAfter');
+    const drawn = view.dom.querySelector('.cm-block-picture');
+    press('[data-caption]');
+    const field = view.dom.querySelector('.picture-caption-field');
+    field.value = 'Half typed';
+    view.dispatch({ effects: setNoteCase.of({
+      caseId: 'c1',
+      entities: [{ id: 'm1', type: 'media', label: 'Roof', attrs: { path: 'media/roof.png', kind: 'image' } }],
+      notes: [],
+    }) });
+    expect(view.dom.querySelector('.cm-block-picture')).toBe(drawn);
+    expect(view.dom.querySelector('.picture-caption-field')).toBe(field);
+    expect(field.value).toBe('Half typed');
+  });
+
+  it('is drawn again when the record it shows changed', () => {
+    withPicture('[[media:m1|Roof]]{width=50%}\n\nAfter');
+    const drawn = view.dom.querySelector('.cm-block-picture');
+    view.dispatch({ effects: setNoteCase.of({
+      caseId: 'c1',
+      entities: [{ id: 'm1', type: 'media', label: 'Roof', attrs: { path: 'media/roof-renamed.png', kind: 'image' } }],
+      notes: [],
+    }) });
+    expect(view.dom.querySelector('.cm-block-picture')).not.toBe(drawn);
+  });
+
   it('is left as it was on Escape, and the note keeps its text', () => {
     withPicture('[[media:m1|Roof]]{caption="Old"}\n\nAfter');
     press('[data-caption]');

@@ -45,6 +45,11 @@ FOREIGN_SITES = frozenset({"cross-site", "same-site"})
 #: the ingest island answers only to its pairing token.
 FENCED_PREFIXES = ("/api/", "/files/")
 UNFENCED_PREFIXES = ("/api/ingest/",)
+#: Who may frame the app's page: itself, and a browser extension's own page, which
+#: is how the extension's notes panel shows a note beside any site. A web page may
+#: not, since inside its frame the app's own calls are same-origin and a hidden one
+#: could turn the analyst's clicks into deletes.
+FRAME_ANCESTORS = "frame-ancestors 'self' chrome-extension: moz-extension: safari-web-extension:"
 
 
 class BulkBodyLimit:
@@ -224,10 +229,16 @@ def install_local_guard(app: FastAPI) -> None:
             if not ingest_extension:
                 return PlainTextResponse("cross-origin request refused", status_code=403)
         response = await call_next(request)
-        # A page elsewhere may still link to the app, but never frame it: inside its
-        # frame the app's own calls are same-origin, so a hidden one could turn the
-        # analyst's clicks into deletes.
-        response.headers.setdefault("x-frame-options", "SAMEORIGIN")
+        # A page elsewhere may still link to the app, but never frame it. The app's
+        # page says who may (`FRAME_ANCESTORS`), which supersedes X-Frame-Options, so
+        # it carries that alone: two rules would leave each browser to pick one.
+        # Everything else, a case file that brings its own policy included, keeps
+        # SAMEORIGIN.
+        html = response.headers.get("content-type", "").startswith("text/html")
+        if html and "content-security-policy" not in response.headers:
+            response.headers["content-security-policy"] = FRAME_ANCESTORS
+        else:
+            response.headers.setdefault("x-frame-options", "SAMEORIGIN")
         return response
 
 

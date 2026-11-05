@@ -42,7 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -316,20 +316,24 @@ def note_citations(case_id: str, entity_id: str) -> dict[str, Any]:
 
 
 @router.get("/{case_id}/sources/lookup")
-def source_lookup(case_id: str, url: str) -> dict[str, Any]:
+def source_lookup(
+    case_id: str, url: str, title: str = Query(default="", max_length=300)
+) -> dict[str, Any]:
     """What a web address is called, and the case items already filed for it.
 
     Read off the address and the case alone: nothing is fetched, so a link pasted
-    offline is named and found the same way.
+    offline is named and found the same way. ``title`` is the one the page gave
+    itself, when the browser that showed it passed it on (the extension's notes
+    panel); it names the page only when the address says nothing better.
     """
     address = url.strip()
-    if len(address) > 2000 or not urltitles.url_key(address):
+    if len(address) > 2048 or not urltitles.url_key(address):
         raise HTTPException(status_code=422, detail="the source must be an http(s) address")
     case = get_case(case_id)
     found = urltitles.find_by_url(case, address)
     return {
         "url": address,
-        "title": urltitles.title_of(address),
+        "title": urltitles.title_of(address, title),
         "found": [
             {"id": entity["id"], "type": entity["type"], "label": entity.get("label") or "",
              "attrs": entity.get("attrs") or {}}

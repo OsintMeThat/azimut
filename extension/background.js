@@ -14,6 +14,10 @@
 
 const api = typeof browser !== "undefined" ? browser : chrome;
 
+// The notes panel's helpers (`notesmsg.js`). Firefox's event page has them already,
+// listed before this file in the manifest; Chrome's worker loads them here.
+if (typeof AzimutNotes === "undefined" && typeof importScripts === "function") importScripts("notesmsg.js");
+
 const APP_ORIGINS = ["http://127.0.0.1", "http://localhost"];
 const isAppUrl = (url) => APP_ORIGINS.some((o) => url === o || url?.startsWith(o + ":") || url?.startsWith(o + "/"));
 
@@ -1142,6 +1146,272 @@ api.tabs.onRemoved?.addListener(async (tabId) => {
   rememberLinks();
 });
 
+// --- the notes panel -----------------------------------------------------------
+//
+// The panel (`notes.html`) holds the app's own note in a frame. Three things can be
+// put in it from any page: a citation of the page, the words selected on it, and a
+// capture of a map. This side reads the page and files the capture; the panel hands
+// the facts to the note, and the app writes them in.
+//
+// The right-click items are the road that always works: a click on one is what
+// opens the tab to the extension, in both browsers. They exist only while a panel
+// holds a note, which the panel says over its port; a panel that closes takes its
+// port, and the items, with it.
+
+const NOTES_PORT = "notes-panel";
+const NOTE_MENU = { cite: "azimut-note-cite", quote: "azimut-note-quote", capture: "azimut-note-capture" };
+const NOTE_ACTIONS = Object.fromEntries(Object.entries(NOTE_MENU).map(([action, id]) => [id, action]));
+const NOTE_CONTEXTS = ["page", "frame", "selection", "link", "image", "video", "audio"];
+const WEB_PAGES = ["http://*/*", "https://*/*"];
+/** What a panel button says on a tab the browser keeps from the extension. */
+const NOTE_NO_GRANT = "Right-click the page to cite, quote or capture it.";
+
+/** Every open panel, by its port: `{ windowId, ready, caseId, at }`. */
+const notePanels = new Map();
+const noteMenus = () => api.contextMenus ?? api.menus;
+/** Whether the items are up: null until this worker has set them either way. */
+let notesShown = null;
+let notesCiteTitle = "";
+let notesQueue = Promise.resolve();
+
+/** Whether a page is the extension's own panel, the only one these routes answer. */
+const fromNotesPanel = (sender) =>
+  !sender?.tab && String(sender?.url || "").startsWith(api.runtime.getURL("notes.html"));
+
+/**
+ * One call on the menus API, as a promise, whatever the browser.
+ *
+ * Firefox's `browser.*` answers with promises and refuses a callback it was not
+ * asked for; Chrome's `chrome.*` takes a callback everywhere, and reports through
+ * `lastError` what would otherwise be logged as unchecked.
+ */
+function menuCall(method, ...args) {
+  const menus = noteMenus();
+  if (!menus?.[method]) return Promise.resolve();
+  if (typeof browser !== "undefined") return Promise.resolve(menus[method](...args)).catch(() => {});
+  return new Promise((resolve) => {
+    menus[method](...args, () => {
+      void api.runtime.lastError;
+      resolve();
+    });
+  });
+}
+
+/** The address of the tab in front, when the browser lets the extension see it. */
+async function frontUrl() {
+  try {
+    const [tab] = await api.tabs.query({ active: true, lastFocusedWindow: true });
+    return tab?.url || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Put the items up or take them down, and name the citation for the page in front.
+ *
+ * Calls are queued: two panels speaking at once would otherwise create the same
+ * item twice. The label reads "Cite this post" wherever the front tab's address
+ * can be read and is a post; elsewhere it reads "Cite this page".
+ */
+function syncNoteMenus() {
+  notesQueue = notesQueue.then(drawNoteMenus, drawNoteMenus);
+  return notesQueue;
+}
+
+async function drawNoteMenus() {
+  if (!noteMenus()) return;
+  const show = [...notePanels.values()].some((panel) => panel.ready);
+  if (!show) {
+    if (notesShown !== false) await menuCall("removeAll");
+    notesShown = false;
+    return;
+  }
+  const title = AzimutNotes.citeLabel(await frontUrl());
+  if (notesShown) {
+    if (title !== notesCiteTitle) await menuCall("update", NOTE_MENU.cite, { title });
+    notesCiteTitle = title;
+    return;
+  }
+  await menuCall("removeAll");
+  const items = [
+    { id: NOTE_MENU.cite, title, contexts: NOTE_CONTEXTS },
+    { id: NOTE_MENU.quote, title: "Quote the selection", contexts: ["selection"] },
+    { id: NOTE_MENU.capture, title: "Capture into the note", contexts: NOTE_CONTEXTS },
+  ];
+  for (const item of items) await menuCall("create", { ...item, documentUrlPatterns: WEB_PAGES });
+  notesShown = true;
+  notesCiteTitle = title;
+}
+
+/**
+ * The panel a right-click puts into: the one in that window, else the one that
+ * spoke last. A note on a second screen, beside the window being read, is the
+ * usual way to work.
+ */
+function notePanelFor(windowId) {
+  const ready = [...notePanels.entries()].filter(([, panel]) => panel.ready);
+  return ready.find(([, panel]) => panel.windowId === windowId) ?? ready.sort((a, b) => b[1].at - a[1].at)[0] ?? null;
+}
+
+function tellPanel(port, message) {
+  try {
+    port.postMessage(message);
+  } catch {
+    // the panel closed while this was in hand
+  }
+}
+
+/** The words selected in the frame that was right-clicked, line breaks kept. */
+async function selectionIn(tabId, frameId) {
+  try {
+    const [hit] = await api.scripting.executeScript({
+      target: { tabId, frameIds: [Number.isInteger(frameId) ? frameId : 0] },
+      func: () => String(globalThis.getSelection?.() ?? ""),
+    });
+    return typeof hit?.result === "string" ? hit.result.slice(0, AzimutNotes.LIMITS.text + 1000) : "";
+  } catch {
+    // a frame from another site, which the click opened nothing to
+    return "";
+  }
+}
+
+/** The tab's viewport in CSS pixels, or null where the page refuses the question. */
+async function viewportOf(tabId) {
+  try {
+    const [hit] = await api.scripting.executeScript({
+      target: { tabId },
+      func: () => ({ w: window.innerWidth, h: window.innerHeight }),
+    });
+    const { w, h } = hit?.result ?? {};
+    return w > 0 && h > 0 ? { w, h } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Capture the map in front into the panel's case, and say which picture it is.
+ *
+ * Captures are for maps only, as everywhere in Azimut, so the app is asked first
+ * and anything else is refused before a pixel is taken. The shot is the whole
+ * tab, filed the way the popup files one, with the scale bar and north arrow the
+ * popup's tick last asked for.
+ */
+async function captureForNote(tab, caseId) {
+  if (!caseId) throw new Error("Open a note in the notes panel first.");
+  const view = await viewportOf(tab.id);
+  const parsed = await mapApi({ path: "/api/ingest/parse", query: { url: tab.url, height: view?.h } });
+  if (!parsed?.site) throw new Error("Captures are for map sites. Cite this page instead.");
+  const dataUrl = await withoutPanel(tab.id, () => captureActiveTab(tab.windowId));
+  const { blob, scale } = view
+    ? await cropDataUrl(dataUrl, { x: 0, y: 0, w: view.w, h: view.h }, view.w)
+    : { blob: await (await fetch(dataUrl)).blob(), scale: 1 };
+  const { captureMarks } = await api.storage.local.get({ captureMarks: false });
+  const body = await ingest(blob, {
+    url: tab.url,
+    caseId,
+    lat: parsed.lat,
+    lon: parsed.lon,
+    zoom: parsed.zoom,
+    bearing: parsed.bearing,
+    marks: Boolean(captureMarks),
+    deviceScale: scale,
+  });
+  return body.entity_id;
+}
+
+/**
+ * The facts one action puts in the note, read off the page; an Error says why not.
+ *
+ * `hints` is what a right-click hands over: the page's address and the selection
+ * as the browser saw them, and which frame was clicked. A panel button has none,
+ * and an address the browser leaves out means the tab was never opened to us.
+ */
+async function noteFacts(action, tab, hints, caseId) {
+  const url = tab?.url || hints.pageUrl || "";
+  if (!url) throw new Error(NOTE_NO_GRANT);
+  if (!AzimutNotes.isWeb(url)) throw new Error("Open a web page to cite it.");
+  if (await isPairedApp(url)) throw new Error("This is Azimut itself, not a source.");
+  const title = tab?.title || "";
+  if (action === "cite") return { action, url, title };
+  if (action === "quote") {
+    const text = (await selectionIn(tab.id, hints.frameId)) || hints.selection || "";
+    if (!text.trim()) throw new Error("Select the words to quote first.");
+    return { action, url, title, text };
+  }
+  if (action === "capture") return { action: "picture", url, title, entityId: await captureForNote(tab, caseId) };
+  throw new Error(`no such note action: ${action}`);
+}
+
+async function onNoteMenu(info, tab) {
+  const action = NOTE_ACTIONS[info?.menuItemId];
+  if (!action) return;
+  const found = notePanelFor(tab?.windowId);
+  // No tab is a click inside the panel itself: the items show over the note too,
+  // since a browser matches them by the frame's address and has no "except".
+  if (found && !tab) {
+    tellPanel(found[0], { type: "trouble", error: "This is Azimut itself, not a source." });
+    return;
+  }
+  if (!found) {
+    notify("Azimut notes", "Open a note in the notes panel first.");
+    return;
+  }
+  const [port, panel] = found;
+  if (action === "capture") tellPanel(port, { type: "working", text: "Capturing…" });
+  try {
+    const put = await noteFacts(
+      action,
+      tab,
+      { pageUrl: info.pageUrl, frameId: info.frameId, selection: info.selectionText },
+      panel.caseId
+    );
+    tellPanel(port, { type: "put", put });
+  } catch (e) {
+    tellPanel(port, { type: "trouble", error: e.message });
+  }
+}
+
+function openNotesPanel(port) {
+  if (!fromNotesPanel(port.sender)) {
+    port.disconnect();
+    return;
+  }
+  const panel = { windowId: null, ready: false, caseId: "", at: 0 };
+  notePanels.set(port, panel);
+  port.onMessage.addListener((msg) => {
+    // "watch" carries nothing: speaking at all is what keeps this worker up
+    if (msg?.type !== "state") return;
+    panel.windowId = Number.isInteger(msg.windowId) ? msg.windowId : null;
+    panel.ready = msg.ready === true;
+    panel.caseId = typeof msg.caseId === "string" ? msg.caseId : "";
+    panel.at = Date.now();
+    syncNoteMenus();
+  });
+  port.onDisconnect.addListener(() => {
+    notePanels.delete(port);
+    syncNoteMenus();
+  });
+}
+
+api.runtime.onConnect.addListener((port) => {
+  if (port.name === NOTES_PORT) openNotesPanel(port);
+});
+noteMenus()?.onClicked?.addListener((info, tab) => {
+  onNoteMenu(info, tab);
+});
+// The citation's label follows the tab in front, but only while a panel is open.
+api.tabs.onActivated?.addListener(() => {
+  if (notePanels.size) syncNoteMenus();
+});
+api.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (notePanels.size && tab?.active && (info?.url || info?.status === "complete")) syncNoteMenus();
+});
+api.windows?.onFocusChanged?.addListener(() => {
+  if (notePanels.size) syncNoteMenus();
+});
+
 // --- message routes ------------------------------------------------------------
 
 async function handle(msg, sender) {
@@ -1258,6 +1528,19 @@ async function handle(msg, sender) {
     }
   }
 
+  // A button in the notes panel: read the window's front tab for one action. Only
+  // the panel may ask, since a capture is filed from here.
+  if (msg.type === "notes-facts") {
+    if (!fromNotesPanel(sender)) return { ok: false, error: "only the notes panel may ask" };
+    if (!Number.isInteger(msg.windowId)) return { ok: false, error: "no window to read" };
+    try {
+      const [tab] = await api.tabs.query({ active: true, windowId: msg.windowId });
+      return { ok: true, put: await noteFacts(msg.action, tab, {}, String(msg.caseId || "")) };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
   // Settings asking what this copy is: the version the browser parsed, the folder
   // stamp this code was loaded from, and whether the asking tab is the address this
   // copy is paired with. Identification only, so any loopback page may ask: an app
@@ -1310,3 +1593,5 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 // Worker start — including the one right after ext-reload, which is the point.
 reattachBridge();
+// Items a previous worker left up belong to panels that will say so again.
+syncNoteMenus();

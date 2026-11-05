@@ -522,8 +522,22 @@ class BlockWidget extends WidgetType {
   }
 
   eq(other) {
-    return other.kind === this.kind && other.source === this.source && other.info.caseId === this.info.caseId
-      && other.info.entities === this.info.entities && other.writable === this.writable;
+    if (other.kind !== this.kind || other.source !== this.source || other.info.caseId !== this.info.caseId
+      || other.writable !== this.writable) return false;
+    // A tool that files something reads the case again: the same records come back as a
+    // new list. The block is drawn again only when what it shows changed, so a picture
+    // keeps its open caption field and does not blink.
+    return other.info.entities === this.info.entities || other.caseKey() === this.caseKey();
+  }
+
+  /** What the block draws from the case: the records and notes its source names, as they read now. */
+  caseKey() {
+    this.key ??= JSON.stringify([...this.source.matchAll(/\[\[(?:media|entity|include):([A-Za-z0-9_-]+)/g)].map(([, id]) => {
+      const entity = resolve(this.info, id);
+      const note = this.info.notes?.get?.(id);
+      return [id, entity ? [entity.id, entity.type, entity.label, entity.attrs] : null, note ? [note.title, note.excerpt] : null];
+    }));
+    return this.key;
   }
 
   toDOM(view) {
@@ -881,6 +895,8 @@ export function noteDecorations(state) {
 
   // References, coordinates and chapters are not Markdown: found line by line, outside code.
   const inCode = (pos) => code.some(([from, to]) => pos >= from && pos < to);
+  // an editor with no map around it says so with a null `point` (the extension's panel)
+  const mapless = state.facet(noteHandlers).point === null;
   const chips = [];
   const chapterLines = [];
   for (let number = 1; number <= state.doc.lines; number += 1) {
@@ -917,7 +933,7 @@ export function noteDecorations(state) {
     for (const point of findCoordinates(line.text, line.from)) {
       if (inCode(point.from) || refs.some((ref) => point.from < ref.to && point.to > ref.from)) continue;
       ranges.push(Decoration.mark({ class: 'cm-coords' }).range(point.from, point.to));
-      ranges.push(Decoration.widget({ widget: new CoordinatesWidget(point.lat, point.lon), side: 1 }).range(point.to));
+      if (!mapless) ranges.push(Decoration.widget({ widget: new CoordinatesWidget(point.lat, point.lon), side: 1 }).range(point.to));
     }
   }
   // a chip stands for its whole reference, and a chapter for its line: a mark the parser found inside is not drawn

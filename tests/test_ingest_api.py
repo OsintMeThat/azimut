@@ -107,6 +107,16 @@ def test_screenshot_files_as_a_capture_with_provenance(client):
     assert listed[0]["method"] == "screenshot"
 
 
+def test_a_screenshot_names_the_record_it_filed_so_a_note_can_show_it(client):
+    """The extension's Capture into the note puts this very record in the note."""
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Ingest"}).json()["id"]
+    body = _post(client, token=token, case_id=cid).json()
+    record = client.get(f"/api/cases/{cid}/entities/{body['entity_id']}/chain").json()["entity"]
+    assert record["type"] == "capture"
+    assert record["attrs"]["path"] == body["path"]
+
+
 def test_screenshot_over_100_mp_is_rejected_before_decode(client):
     token = _token(client)
     response = _post(client, token=token, image=_png_header(10_001, 10_000))

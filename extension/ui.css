@@ -82,10 +82,33 @@ button:disabled { opacity: 0.55; cursor: default; }
 
 footer {
   display: flex;
-  gap: 6px;
+  gap: 14px;
   margin-top: 12px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
   font-size: 11px;
 }
 footer a { color: var(--accent); text-decoration: none; }
+/* The notes panel: a bar of three actions over the app's own note, which fills
+   the rest. The panel is as narrow as the browser makes it, so the labels are short. */
+body.notes {
+  height: 100vh;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.notes [hidden] { display: none !important; }
+.notes .bar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.notes .bar p { margin: 0; }
+.notes .actions { margin: 0; gap: 6px; }
+.notes .actions button { flex: 1; min-width: 0; padding: 4px 6px; white-space: nowrap; }
+.notes .down { padding: 12px; }
+.notes iframe { flex: 1; width: 100%; border: 0; background: var(--bg); }

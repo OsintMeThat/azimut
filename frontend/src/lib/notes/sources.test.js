@@ -22,6 +22,12 @@ describe('a link looked up in the case', () => {
     expect(get).toHaveBeenCalledWith('/api/cases/c1/sources/lookup?url=https%3A%2F%2Fx.com%2Fa%2Fstatus%2F1%3Fs%3D20');
   });
 
+  it('passes on the title a page gave itself, which names it when its address says nothing better', async () => {
+    const get = vi.fn(async () => ({ url: 'u', title: 't', found: [] }));
+    await lookupSource('c1', 'https://example.org/a', { get, title: 'Strike & port' });
+    expect(get).toHaveBeenCalledWith('/api/cases/c1/sources/lookup?url=https%3A%2F%2Fexample.org%2Fa&title=Strike+%26+port');
+  });
+
   it('is only read when it is an address', () => {
     expect(sourceAddress('  https://t.me/port/4 ')).toBe('https://t.me/port/4');
     expect(sourceAddress('t.me/port/4')).toBeNull();

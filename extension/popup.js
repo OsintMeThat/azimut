@@ -85,6 +85,17 @@ async function mapHeight(tabId) {
   }
 }
 
+/** Firefox's sidebar, or Chrome's side panel for this window. */
+function openNotes(windowId) {
+  try {
+    if (api.sidebarAction?.open) return Promise.resolve(api.sidebarAction.open());
+    if (api.sidePanel?.open) return Promise.resolve(api.sidePanel.open({ windowId }));
+  } catch (e) {
+    return Promise.reject(e);
+  }
+  return Promise.reject(new Error("this browser has no side panel for extensions"));
+}
+
 async function loadCases(select, stored) {
   const { backendUrl, token } = stored;
   let cases;
@@ -132,6 +143,18 @@ async function init() {
   stored.backendUrl = stored.backendUrl.replace(/\/+$/, "");
 
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+
+  // The notes panel opens from here in either browser. The call is made inside the
+  // click with nothing awaited before it, because both browsers open a side panel
+  // only on a user's gesture.
+  $("open-notes").addEventListener("click", (e) => {
+    e.preventDefault();
+    openNotes(tab?.windowId).then(
+      () => window.close(),
+      (err) => status(`Could not open the notes panel: ${err?.message || err}`, "error")
+    );
+  });
+
   if (!tab?.url) {
     $("state-nomap").hidden = false;
     return;

@@ -89,6 +89,29 @@ def test_no_page_elsewhere_may_frame_the_app(client, path):
     assert answer.headers["x-frame-options"] == "SAMEORIGIN"
 
 
+@pytest.fixture()
+def built_page(monkeypatch, tmp_path):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text('<div id="app"></div>', encoding="utf-8")
+    monkeypatch.setattr("azimut.server.STATIC_DIR", tmp_path)
+
+
+@pytest.mark.parametrize("route", ["/", "/notebook", "/index.html"])
+def test_only_the_app_itself_and_an_extension_s_page_may_frame_the_app_s_page(built_page, client, route):
+    """The extension's notes panel holds the app's note in a frame; a web page may not."""
+    framed = {"sec-fetch-site": "cross-site", "sec-fetch-dest": "iframe"}
+    page = client.get(route, headers=framed)
+    assert page.status_code == 200
+    assert page.headers["content-type"].startswith("text/html")
+    assert page.headers["content-security-policy"] == (
+        "frame-ancestors 'self' chrome-extension: moz-extension: safari-web-extension:")
+    # one rule: X-Frame-Options would forbid the extension what frame-ancestors allows
+    assert "x-frame-options" not in page.headers
+    # the API is never framed
+    assert client.get("/api/health").headers["x-frame-options"] == "SAMEORIGIN"
+    assert "content-security-policy" not in client.get("/api/health").headers
+
+
 def test_a_link_from_elsewhere_still_opens_the_app_and_the_ingest_island_keeps_its_token(client):
     assert client.get("/", headers={"sec-fetch-site": "cross-site"}).status_code != 403
     # the extension's worker may be named cross-site; its pairing token is the wall

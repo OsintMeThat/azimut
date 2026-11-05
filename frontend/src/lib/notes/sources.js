@@ -21,9 +21,13 @@ import { pastedUrl } from './syntax.js';
 /** How often a download is asked how it is going. */
 export const DOWNLOAD_POLL_MS = 700;
 
-/** What the case says of a web address: `{ url, title, found: [entity] }`. */
-export function lookupSource(caseId, url, { get = api.get } = {}) {
-  return get(`/api/cases/${caseId}/sources/lookup?${new URLSearchParams({ url })}`);
+/**
+ * What the case says of a web address: `{ url, title, found: [entity] }`. `title` is
+ * the one the page gave itself, when a browser passed it on: it names the page when
+ * the address says nothing better.
+ */
+export function lookupSource(caseId, url, { get = api.get, title = '' } = {}) {
+  return get(`/api/cases/${caseId}/sources/lookup?${new URLSearchParams(title ? { url, title } : { url })}`);
 }
 
 /** An address typed or pasted, as one the lookup reads, or null. */
@@ -138,7 +142,7 @@ function postDay(value) {
  * Markdown. An underscore is left: inside a word, as handles and tags have it, it is
  * never read as a mark.
  */
-function asPosted(text) {
+export function asPosted(text) {
   return String(text)
     .replace(/[\\`*[\]<]/g, (mark) => `\\${mark}`)
     .replace(/^(\s*)([#>+|-])/gm, '$1\\$2');

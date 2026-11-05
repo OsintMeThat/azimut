@@ -39,6 +39,28 @@ def test_a_source_is_named_from_its_address(url, title):
     assert urltitles.title_of(url) == title
 
 
+def test_the_page_s_own_title_names_it_only_when_the_address_says_nothing_better():
+    assert urltitles.title_of("https://example.org/news/strike", "Strike on the port | Example") == (
+        "Strike on the port | Example")
+    assert urltitles.title_of("https://x.com/port_watch/status/1890", "Port Watch on X: smoke") == (
+        "Post by @port_watch on X")
+    assert urltitles.title_of("https://example.org/news/strike", "   ") == "example.org/news/strike"
+    assert len(urltitles.title_of("https://example.org/a", "word " * 100)) == 120
+    assert urltitles.title_of("ftp://host/x", "A title") == ""
+
+
+def test_the_lookup_names_a_page_from_the_title_the_browser_passed_on(client):
+    cid = client.post("/api/cases", json={"name": "Titled"}).json()["id"]
+    url = "https://example.org/news/strike"
+    asked = client.get(f"/api/cases/{cid}/sources/lookup", params={"url": url, "title": "Strike on the port"})
+    assert asked.json()["title"] == "Strike on the port"
+    too_long = client.get(f"/api/cases/{cid}/sources/lookup", params={"url": url, "title": "a" * 301})
+    assert too_long.status_code == 422
+    # the longest address the notes panel sends is read
+    long_url = "https://example.org/" + "a" * (2048 - len("https://example.org/"))
+    assert client.get(f"/api/cases/{cid}/sources/lookup", params={"url": long_url}).status_code == 200
+
+
 def test_a_long_address_is_cut_with_a_mark():
     title = urltitles.title_of("https://example.org/" + "a" * 300)
     assert len(title) == 120
@@ -111,7 +133,7 @@ def test_the_lookup_names_a_page_the_case_does_not_hold(client):
     assert body == {"url": "https://t.me/portnews/412", "title": "Telegram, portnews #412", "found": []}
 
 
-@pytest.mark.parametrize("bad", ["port strike", "ftp://host/x", "https://example.org/" + "a" * 2000])
+@pytest.mark.parametrize("bad", ["port strike", "ftp://host/x", "https://example.org/" + "a" * 2100])
 def test_the_lookup_refuses_what_is_not_a_web_address(client, bad):
     cid = client.post("/api/cases", json={"name": "Refused"}).json()["id"]
     assert client.get(f"/api/cases/{cid}/sources/lookup", params={"url": bad}).status_code == 422

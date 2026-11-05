@@ -27,8 +27,11 @@ linked to the post, and a collage of three posts says the first and `+2`.
 
 **One source, one key.** Two citations of the same item are one source: an item of
 the case is keyed by its entity id (or its path, for a file the graph does not
-hold) and a written link by its address. A written link to the address of an item
-the document also cites is that item.
+hold) and a written link by its address. A written link to the page of an item the
+document also cites is that item: the same address, or the same page as the case's
+source lookup reads it (`urltitles.url_key`), which drops the `#fragment`. So a
+quote linked to the passage it was taken from (`#:~:text=…`) beside the chip of the
+page it is on is one source, not two.
 """
 
 from __future__ import annotations
@@ -42,7 +45,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Iterable, Iterator
 from urllib.parse import urlsplit
 
-from . import copernicus_credit, entities, links, notes_style, timeline
+from . import copernicus_credit, entities, links, notes_style, timeline, urltitles
 from .proposals import URL_ATTRS
 
 if TYPE_CHECKING:
@@ -548,22 +551,35 @@ class Annex:
         self._numbers: dict[str, int] = {}
         self._left_out: set[str] = set()
         cited = list(cited)
-        #: Who owns an address, so a written link to it is that item.
-        self._owners: dict[str, str] = {}
+        #: Who owns an address, and the page it is, so a written link to it is that item.
+        self._owners: dict[str, Source] = {}
+        self._pages: dict[str, Source] = {}
         for source in cited:
             for one in source.lineage():
                 if one.address and (one.entity_id or one.path):
-                    self._owners.setdefault(one.address, one.key)
+                    self._owners.setdefault(one.address, one)
+                    page = urltitles.url_key(one.address)
+                    if page:
+                        self._pages.setdefault(page, one)
         for source in cited:
             self._add(source)
 
-    def _key(self, source: Source) -> str:
+    def _owner(self, source: Source) -> Source:
+        """The item a citation is of: itself, or for a written link the item whose page it is."""
         if source.entity_id or source.path:
-            return source.key
-        return self._owners.get(source.address, source.key)
+            return source
+        owner = self._owners.get(source.address)
+        if owner is None and self._pages:
+            owner = self._pages.get(urltitles.url_key(source.address))
+        return owner or source
 
-    def _add(self, source: Source) -> int:
-        key = self._key(source)
+    def _key(self, source: Source) -> str:
+        return self._owner(source).key
+
+    def _add(self, cited: Source) -> int:
+        # a link written before the item whose page it is lists that item, not the link
+        source = self._owner(cited)
+        key = source.key
         if key in self._numbers:
             return self._numbers[key]
         if key in self._left_out:

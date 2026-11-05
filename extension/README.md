@@ -8,7 +8,7 @@ The extension sends the screenshot and page URL. Azimut parses supported sites,
 coordinates, place names and imagery dates, so URL-format fixes ship with the
 app.
 
-It supports six flows:
+It supports seven flows:
 
 - On a supported map site, the popup can capture a selected area or save its
   coordinates as a place. A capture can carry a scale bar and a north arrow,
@@ -22,6 +22,9 @@ It supports six flows:
   showing.
 - On another page, it can save the URL and title as a bookmark without
   downloading the page.
+- Beside any page, a panel holds a note of the case. A right-click cites the
+  page or the post, quotes the words selected on it with a link back to them, or
+  puts a capture of a map into the note.
 - On Azimut's Google basemap, the in-app Capture button requests the current
   tab image without a screen-share prompt.
 - When Geo Report publishes, it can open X or Bluesky with the thread already
@@ -282,6 +285,46 @@ keep their width and some of them do not, and no address bar says which. The las
 four window shapes are kept per site, so going back to one you have already
 measured places the drawing again without asking.
 
+## Notes panel
+
+**Notes panel**, at the foot of the popup, opens a note of the case beside the
+page: Chrome's side panel, Firefox's sidebar. The browser's own close button folds
+it away, and it opens on the same note next time. In Firefox it is also under
+View → Sidebar.
+
+The panel is Azimut's own note, the one the app shows, not a copy. What you type
+there is in the case at once, and the bar at its top picks the note: Case notes,
+or one of the case's own. The case is the one the extension last filed into, else
+the one Azimut has open.
+
+While a note is open, three items join the right-click menu on every web page:
+
+| Item | What lands in the note |
+|---|---|
+| Cite this page | A chip for the case's item at that address, or a bookmark filed for it. Nothing is downloaded. It reads **Cite this post** on a post on X, Bluesky, Telegram, Instagram, TikTok, Facebook or Reddit. |
+| Quote the selection | The words as they are, linked to the passage itself, then the page's chip. The link opens the page scrolled to the words and highlights them (Chrome, and Firefox 131 or later). |
+| Capture into the note | A capture of the map in front, filed into the case the way the popup files one, then put in as a picture. |
+
+The same three are buttons at the top of the panel. The note's toast says what
+went in, and its Undo takes it out again.
+
+Two limits, and both are rules rather than bugs:
+
+- **The buttons work on a page the extension may read.** A browser opens a tab to
+  an extension only when you point the extension at it: a right-click item, the
+  toolbar button or its shortcut. A press in a side panel is none of those. So the
+  buttons work on a page you have right-clicked or opened the popup on, until it
+  moves to another site, and always on X and Bluesky, which the extension already
+  holds. On any other page the panel says "Right-click the page to cite, quote or
+  capture it", and the right-click items work everywhere.
+- **Captures are for maps**, as everywhere in Azimut. On another page, Capture into
+  the note says "Captures are for map sites. Cite this page instead."
+
+The extension reads only the page you pointed it at, and hands its address, title
+and selected words to the local app. The app names the source from the address
+alone and fetches nothing. Citing and quoting need no pairing, since the panel is
+the app's own page; a capture does, like every capture.
+
 ## Pair (external sites only)
 
 1. Azimut → **Settings → Capture extension** → copy the pairing token.
@@ -340,6 +383,8 @@ image is on your clipboard either way.
 | `scripting` | Shows the area-selection overlay, draws the map tools panel, fills a composer you allowed, and hands an image to an engine you opened. |
 | `storage` | Stores the local app URL, pairing token and last-used case. |
 | `notifications` | Reports an area capture after the popup closes. |
+| `contextMenus` | Adds Cite, Quote and Capture to the right-click menu while a note is open in the panel. Firefox reads it as `menus`. |
+| `sidePanel` | Shows the notes panel in Chrome. Firefox has its own key for it, `sidebar_action`, and each browser ignores the other's with a warning. |
 | `http://127.0.0.1/*`, `http://localhost/*` | Connects to the local Azimut app. |
 | `https://x.com/*`, `https://twitter.com/*`, `https://bsky.app/*` | Types a prepared thread into the composer, when Azimut asks. Never reads those pages, never posts. |
 | `https://lens.google.com/*`, `https://www.google.com/*`, `https://yandex.com/*`, `https://www.bing.com/*`, `https://tineye.com/*` | Gives a prepared image to the engine's uploader, when Azimut asks. Never reads those pages. `www.google.com` is there because Lens redirects to it. |

@@ -200,6 +200,7 @@ proof for publication.
 | ✅ **Notebook reports** | Prints a note as Plain, Report, Brief or Journal in a choice of typefaces, with a cover, contents and TLP marking on A4 or Letter, captions, credits and live source links, shows its pages beside it while it is written, sizes pictures where they print, breaks pages, gathers notes as chapters, and starts from nine ready templates or Settings' own. |
 | ✅ **Report sources and check** | Credits every picture from what the case recorded, made-from pictures included, ends a report with a numbered list of its sources (addresses, archive, dates, SHA-256) linked from the text, and lists what a PDF would warn about before it is written. |
 | ✅ **Tools into the note** | While a note is pinned to the side, Add and the tools' own menus put what they show in it in one press: a map view, point or measure, a Compare pair, a pinned Detect candidate, an Inspect frame, a collage, a proof with its points, a Timeline or Sheet table, a quoted post, or a source looked up in the case first; each picture filed once, credited, undoable, and reopened where it came from. |
+| ✅ **Notes in the extension** | A folding panel in the extension holds the note, and a right-click on any page cites it (or the post), quotes the selected words with a link to that passage, or puts a map capture in. |
 
 ---
 
@@ -284,7 +285,7 @@ stops making sense.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
 - **Notes, next:** a selection sent to the Post composer, a preview on hovering a chip.
-- **Notes in the extension:** a folding panel holding the pinned note, citing the page or post open, quoting highlighted words with a link to that passage, and putting a capture in.
+- **Notes in the extension, next:** an optional all-sites permission asked once, so the panel's own buttons work on a page never right-clicked.
 - **Tools into the note, next:** a Map plate page and evolution sheets filed as figures, public verify links in the Sources list, Horizon's pair and viewpoint, Detect's kept table, Inspect's moments, Timeline and Graph snapshots, an extension capture's toast, a reverse-search log line.
 - **Report, next:** a signature block at the end of a report, and an optional Azimut mark on its cover or footer.
 - **A report from a period:** every geolocation of a period written into a note through a per-item layout (card, table, one per page).
@@ -357,7 +358,18 @@ stops making sense.
   guard (DNS rebinding), which also refuses a foreign page's `Sec-Fetch-Site` on
   the API and the case files, since an image or a link sends no Origin on a GET,
   and lets no other site frame the app, where a hidden frame would make the
-  analyst's clicks its own; 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
+  analyst's clicks its own: the app's page sends `frame-ancestors 'self'
+  chrome-extension: moz-extension: safari-web-extension:` so the extension's notes
+  panel can hold it, and every other response keeps `X-Frame-Options: SAMEORIGIN`.
+  Accepted risk: any installed extension can frame that page (the server cannot name
+  ours, Firefox's id differs per install) and send it `note-put` facts, which add a
+  citation, a quote or a capture to the open note, each undoable, never a delete nor
+  a fetch; the frame tells its parent the case and note it shows. A paired extension
+  could already do more through the API with its token. The panel posts only to the
+  paired app's exact origin, listens only to its own frame, adds no host and no
+  `tabs` permission, and the worker's `notes-facts` route answers only the panel
+  page. The browser test's same-origin allowance is compiled out of builds, and a
+  test proves it; 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
   names for images pasted into a proof (no client-chosen path), token-gated
   ingest island for the extension. A case file is served `nosniff`, and under a
   `sandbox` policy unless its type only displays, so an SVG or a page that arrived

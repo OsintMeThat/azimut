@@ -216,6 +216,39 @@ def test_one_original_cited_twice_is_one_entry(sourced):
     assert "[3]" not in annex and "from [1]" in annex
 
 
+def test_a_quote_linked_to_its_passage_is_the_page_it_cites(sourced):
+    """The extension's notes panel quotes a page as the passage's own link (a text
+    fragment) beside the chip of the page's record: one source, not two."""
+    _, case, made = sourced
+    passage = f"{NOTICE_URL}#:~:text=closed%20berths%2010,to%2014"
+    text = (f"> [\u201cBerths 10 to 14 are closed\u201d]({passage}) "
+            f"[[entity:{made['notice']['id']}|Port authority notice]]\n\n"
+            f"Then [the same notice]({NOTICE_URL.replace('https://', 'http://')}#top) and [another page](https://example.org/b).\n")
+    out = notes_pdf.render(case, title="T", text=text, look=look(style="report"))
+    body, annex = pdf_text(out.pdf).split("\nSources\n")
+    assert squash(body).count("[1]") == 3 and "another page[2]" in body
+    assert squash(annex).count("[1]Portauthoritynotice") == 1 and "[3]" not in annex
+    # the quote still opens the passage itself
+    assert passage in link_targets(out.pdf)
+
+
+def test_a_written_link_to_a_cited_record_s_page_counts_as_that_record():
+    record = notesources.Source(key="entity:b1", label="Article", kind="page", address="https://example.org/a", entity_id="b1")
+    reader = notesources.Reader(None)
+    links = [reader.link(address) for address in (
+        "https://example.org/a#:~:text=the%20words",  # a passage of it
+        "https://example.org/a#section-2:~:text=more",  # a passage under its own anchor
+        "https://www.example.org/a/#top",  # the same page as the lookup reads it
+        "https://example.org/b#:~:text=the%20words",  # another page
+    )]
+    annex = notesources.Annex([record, *links])
+    assert [annex.number(one) for one in links] == [1, 1, 1, 2]
+    assert len(annex.entries) == 2
+    # with nothing cited for the page, a link to it is its own entry
+    alone = notesources.Annex(links[:1])
+    assert alone.entries[0].source.key == "url:https://example.org/a#:~:text=the%20words"
+
+
 def test_each_style_lists_its_sources_and_plain_only_when_asked(sourced):
     _, case, made = sourced
     text = f"[[media:{made['frame']['id']}|Frame]]\n"

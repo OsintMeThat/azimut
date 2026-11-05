@@ -408,6 +408,7 @@ async def ingest_screenshot(
     )
     return {
         "path": result["item"]["path"],
+        "entity_id": result["entity"]["id"],
         "case_id": case.id,
         "title": label,
         **provenance,

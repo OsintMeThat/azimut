@@ -10,6 +10,9 @@
    * A note can include another as a chapter (`/` Include a note); `notes` are the
    * case's notes as the home lists them, which a chapter is drawn from. A
    * `template` is written with guidance lines of its own and no chapters.
+   *
+   * Without `tools` around it (the note in the extension's panel), a picture offers
+   * no Open in… and a coordinate no way to the map, since there is none to open.
    */
   import { onDestroy, onMount, untrack } from 'svelte';
   import { Compartment, EditorState } from '@codemirror/state';
@@ -55,6 +58,8 @@
     /** Open a note by its id (`case` for the case notes), from a chapter's Open. */
     onnote = null,
     template = false,
+    /** Whether the app's tools are around the note, to open what it cites in. */
+    tools = true,
   } = $props();
 
   let host = $state(null);
@@ -101,13 +106,13 @@
       }
     },
     include: () => openIncludes(),
-    point: (lat, lon) => gotoPoint(lat, lon),
+    get point() { return tools ? gotoPoint : null; },
     picture: () => { pictureOpen = true; },
     upload: () => picker?.click(),
     image: (file) => upload(file),
     url: (url, from, to) => offerBookmark(url, from, to),
     media: (event, at) => dropMedia(event, at),
-    opener: (entity) => (template ? null : openerFor(entity)),
+    opener: (entity) => (template || !tools ? null : openerFor(entity)),
     sourceable: (entity) => (template || !caseId ? false : canStateSourceOf(caseId, entity)),
     stateSource: (entity, url) => stateSourceOf(caseId, entity, url),
   };
