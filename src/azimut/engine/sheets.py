@@ -1269,6 +1269,41 @@ def _without_entities(meta: dict[str, Any], gone: set[str]) -> dict[str, Any] | 
     return out if hit else None
 
 
+def sidecar(case: "Case", entity: dict[str, Any]) -> Path:
+    """Where a sheet keeps its links, vocabularies and attached files."""
+    return _paths(case, entity)[1]
+
+
+def pointers(meta: Any) -> dict[str, int]:
+    """Every entity a sidecar points at, with how many times: what `_without_entities` clears.
+
+    Read by `engine/uses.py`, which asks the same question from the other end: not
+    "clear what points at these" but "what does this sheet point at".
+    """
+    found: dict[str, int] = {}
+    if not isinstance(meta, dict):
+        return found
+
+    def add(value: Any) -> None:
+        if isinstance(value, str) and value:
+            found[value] = found.get(value, 0) + 1
+
+    for key in ("links", "values"):
+        held = meta.get(key)
+        if isinstance(held, dict):
+            for cells in held.values():
+                if isinstance(cells, dict):
+                    for value in cells.values():
+                        add(value)
+    attachments = meta.get("attachments")
+    if isinstance(attachments, dict):
+        for held in attachments.values():
+            if isinstance(held, list):
+                for value in held:
+                    add(value)
+    return found
+
+
 def duplicate(
     case: "Case", entity_id: str, title: str | None = None, *, with_rows: bool = True
 ) -> dict[str, Any]:

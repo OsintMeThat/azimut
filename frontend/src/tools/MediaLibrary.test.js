@@ -321,7 +321,7 @@ describe('Media Library browse controls', () => {
 
   it('offers a right-side reset button for all browse filters', () => {
     expect(source).toContain('function resetFilters()');
-    expect(source).toContain("query = '';\n    catFilter = null;\n    folderFilter = null;\n    gpsOnly = false;\n    collectedOnly = true;\n    sort = 'newest';\n    sortDirection = 'desc';");
+    expect(source).toContain("query = '';\n    catFilter = null;\n    folderFilter = null;\n    gpsOnly = false;\n    collectedOnly = true;\n    unusedOnly = false;\n    sort = 'newest';\n    sortDirection = 'desc';");
     expect(source).toContain('class="btn btn-ghost btn-sm reset-filters"');
     expect(source).toContain('Reset filters');
     expect(source).toContain('<Icon name="reset" size={13} /> Reset filters');

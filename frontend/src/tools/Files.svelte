@@ -700,7 +700,7 @@
   }
 
   // ── delete (irreversible; spells out what it touches) ─────────────────────
-  let confirmState = $state(null); // { title, message, detail, consequences, confirmLabel, tone, icon, action }
+  let confirmState = $state(null); // { title, message, detail, impact, confirmLabel, tone, icon, action }
   let confirmBusy = $state(false);
 
   async function runConfirm() {
@@ -763,7 +763,7 @@
     // The dialog and the route are the trash's, shared with every other surface
     // that deletes several things at once, so one gesture keeps one wording.
     confirmState = {
-      ...(await entityDeletePrompt(caseState.current.id, ents)),
+      ...(entityDeletePrompt(caseState.current.id, ents)),
       action: async () => {
         const caseId = caseState.current.id;
         const result = await deleteEntities(caseId, ents.map((e) => e.id));
@@ -1834,7 +1834,7 @@
     title={confirmState.title}
     message={confirmState.message}
     detail={confirmState.detail}
-    consequences={confirmState.consequences}
+    impact={confirmState.impact}
     restorable={confirmState.restorable}
     confirmLabel={confirmState.confirmLabel}
     tone={confirmState.tone}

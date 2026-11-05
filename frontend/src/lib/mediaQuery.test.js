@@ -51,3 +51,15 @@ describe('buildMediaQuery — what the case collected', () => {
     expect(buildMediaQuery('c1', { collectedOnly: false })).toBe('/api/cases/c1/media/page');
   });
 });
+
+describe('buildMediaQuery — what nothing uses', () => {
+  it('asks the server, which alone reads the records outside the graph', () => {
+    expect(buildMediaQuery('c1', { unused: true, collectedOnly: true })).toBe(
+      '/api/cases/c1/media/page?collected_only=true&unused=true'
+    );
+  });
+
+  it('says nothing when it is off', () => {
+    expect(buildMediaQuery('c1', { unused: false })).toBe('/api/cases/c1/media/page');
+  });
+});

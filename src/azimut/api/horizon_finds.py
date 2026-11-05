@@ -500,6 +500,11 @@ def check_find(case_id: str, name: str) -> dict[str, Any]:
     return {"name": safe, **record}
 
 
+def find_spec(name: str) -> str:
+    """The record a search's name stands for, as its delete and its preview read it."""
+    return layout.horizon_find_rel(layout.slugify(name, FALLBACK))
+
+
 @router.delete("/cases/{case_id}/horizon/finds/{name}")
 def delete_find(case_id: str, name: str) -> dict[str, Any]:
     """Delete a search to the Trash; one still running stops first."""
@@ -510,7 +515,7 @@ def delete_find(case_id: str, name: str) -> dict[str, Any]:
         if record.get("status") in horizon_finds.ACTIVE:
             record["status"] = "cancelled"
             horizon_finds.write(case, safe, record)
-        rel = layout.horizon_find_rel(safe)
+        rel = find_spec(name)  # the same file `_one` read: one slug of one name
         result = delete_by_path(case, rel)
         if not result["deleted"]:
             artifact_engine.delete(case, {"type": horizon_finds.TYPE, "attrs": {"spec": rel}})

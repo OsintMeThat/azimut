@@ -848,7 +848,7 @@
     const going = chosen;
     const caseId = caseState.current.id;
     confirmState = {
-      ...(await entityDeletePrompt(caseId, going)),
+      ...(entityDeletePrompt(caseId, going)),
       action: async () => {
         const result = await deleteEntities(caseId, going.map((entity) => entity.id));
         await reloadCase();
@@ -1969,7 +1969,7 @@
     title={confirmState.title}
     message={confirmState.message}
     detail={confirmState.detail}
-    consequences={confirmState.consequences}
+    impact={confirmState.impact}
     restorable={confirmState.restorable}
     confirmLabel={confirmState.confirmLabel}
     tone={confirmState.tone}

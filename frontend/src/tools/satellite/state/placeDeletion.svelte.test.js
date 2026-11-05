@@ -8,7 +8,7 @@ const usage = { place: { id: 'p1', label: 'Gate' }, related: [{ id: 'proof', lab
 const store = () => createPlaceDeletionState({ api, caseId: () => owner, notify, reloadCase, ondeleted, refresh });
 beforeEach(() => {
   owner = 'c1';
-  api = { get: vi.fn(async (path) => path.endsWith('/usage') ? usage : { cascade: [], tombstone: [] }),
+  api = { get: vi.fn(async () => usage),
     del: vi.fn(async () => ({ deleted: ['p1'], trash: 'trash-1' })) };
   notify = vi.fn(); reloadCase = vi.fn(); ondeleted = vi.fn(); refresh = vi.fn();
 });
@@ -19,7 +19,7 @@ describe('place deletion', () => {
     expect(api.get).not.toHaveBeenCalled();
     await state.open('p1');
     expect(state.target.usage).toEqual(usage);
-    expect(api.get).toHaveBeenCalledWith('/api/cases/c1/entities/p1/dependents');
+    expect(api.get).toHaveBeenCalledWith('/api/cases/c1/map-layers/places/p1/usage');
     expect(api.del).not.toHaveBeenCalled();
     await state.confirm();
     expect(api.del).toHaveBeenCalledWith('/api/cases/c1/entities/p1');

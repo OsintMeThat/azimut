@@ -109,6 +109,28 @@ _PRODUCED_HERE_SQL = (
     + ")"
 )
 
+def _quoted(types: tuple[str, ...]) -> str:
+    return ", ".join(f"'{type_}'" for type_ in types)
+
+
+#: Media rows nothing leans on, as far as the graph and the entity photos say: the half
+#: of `engine/uses.py` a query can ask. The other half, the records outside the graph,
+#: arrives as the `temp.used_refs` table the caller fills. The rule and why each part
+#: is there is written down in that module; `_graph_leans` is its reading of one link.
+_UNUSED_SQL = (
+    # incoming: anything of the chain, or a confirmed statement or pointer
+    "NOT EXISTS (SELECT 1 FROM links l WHERE l.to_id = media_items.entity_id AND ("
+    f"l.type IN ({_quoted(link_engine.CHAIN_TYPES)}) OR (l.prov_status = 'confirmed'"
+    f" AND l.type <> '{link_engine.SAME_IMAGE_AS}')))"
+    # outgoing: a confirmed statement; its own sources and pointers do not count
+    " AND NOT EXISTS (SELECT 1 FROM links l WHERE l.from_id = media_items.entity_id"
+    " AND l.prov_status = 'confirmed' AND l.type NOT IN ("
+    f"{_quoted((*link_engine.CHAIN_TYPES, *link_engine.POINTER_TYPES, link_engine.SAME_IMAGE_AS))}))"
+    " AND NOT EXISTS (SELECT 1 FROM entity_images i WHERE i.media_id = media_items.entity_id)"
+    " AND NOT EXISTS (SELECT 1 FROM temp.used_refs u"
+    " WHERE u.ref = media_items.path OR u.ref = media_items.entity_id)"
+)
+
 #: The same question asked of a timeline row ``t``: whether its owner is such a file.
 _PRODUCED_HERE_ROW_SQL = (
     "EXISTS (SELECT 1 FROM media_items produced"

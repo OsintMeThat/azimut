@@ -213,15 +213,24 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
     }
   }
 
+  /** A place, a comparison or a view goes by its entity; a capture by its file. */
+  const BY_ENTITY = new Set(['place', 'comparison', 'view']);
+
+  /** What `remove` deletes, named for the dialog that asks first (`lib/deleteImpact.js`). */
+  function target(row) {
+    return BY_ENTITY.has(row?.kind) ? { ids: [row.id] } : { paths: [row?.path] };
+  }
+
   /** Drop a saved item: a capture loses its image file, a place, a comparison or
    *  a view its entity. Their images stay in Media, as they do from their tools. */
   async function remove(caseId, row) {
-    return row.kind === 'place' || row.kind === 'comparison' || row.kind === 'view'
+    return BY_ENTITY.has(row.kind)
       ? api.del(`/api/cases/${caseId}/entities/${row.id}`)
       : api.del(`/api/cases/${caseId}/satellite?path=${encodeURIComponent(row.path)}`);
   }
 
   return {
+    target,
     get rows() {
       return rows;
     },

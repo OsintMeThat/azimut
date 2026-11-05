@@ -882,6 +882,7 @@
       title="Delete this collage?"
       message={`“${deleting.title}” goes to the Trash.`}
       detail="A picture already saved from it stays in Media."
+      impact={{ caseId: caseState.current?.id, named: [{ tool: 'collage', name: deleting.name }] }}
       confirmLabel="Delete"
       tone="danger"
       icon="trash"

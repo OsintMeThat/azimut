@@ -447,3 +447,49 @@ describe('opening a file from its card', () => {
     expect(active.textContent).toContain('List');
   });
 });
+
+describe('the Unused switch', () => {
+  const unusedButton = () =>
+    [...target.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith('Unused'));
+
+  it('is offered only once the case holds a file nothing uses', async () => {
+    await open();
+    expect(unusedButton()).toBeUndefined();
+  });
+
+  it('counts those files and asks the server for them alone', async () => {
+    page = { ...page, facets: { unused_count: 1 } };
+    await open();
+    expect(unusedButton().textContent.trim()).toBe('Unused (1)');
+    expect(unusedButton().getAttribute('aria-pressed')).toBe('false');
+
+    page = { ...page, items: [ITEMS[1]], total: 1 };
+    await press(unusedButton());
+
+    expect(get.mock.calls.at(-1)[0]).toContain('unused=true');
+    expect(unusedButton().getAttribute('aria-pressed')).toBe('true');
+    expect(target.textContent).toContain('clip.mp4');
+    expect(target.textContent).not.toContain('quai.jpg');
+  });
+
+  it('asks the server for every file again when the filters are reset', async () => {
+    page = { ...page, facets: { unused_count: 1 } };
+    await open();
+    await press(unusedButton());
+    get.mockClear();
+
+    await press(target.querySelector('.reset-filters'));
+
+    expect(get).toHaveBeenCalled();
+    expect(get.mock.calls.at(-1)[0]).not.toContain('unused=true');
+  });
+
+  it('asks the delete what else it touches before it is confirmed', async () => {
+    await open();
+    await press(target.querySelector('.del'));
+
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/delete-impact', {
+      ids: [], paths: [expect.stringMatching(/^media\//)], named: [],
+    });
+  });
+});

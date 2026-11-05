@@ -18,7 +18,7 @@ browsing; it is not a second copy of the media bytes.
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Collection, Literal, Protocol, runtime_checkable
 
 #: Confidence on an entity or link: an analyst's `confirmed` vs a tool's
 #: `suggested` (SPEC §4). Defined here so it is owned by the storage contract;
@@ -451,6 +451,8 @@ class CaseRepository(Protocol):
         folder: str | None = None,
         gps: bool = False,
         collected_only: bool = False,
+        unused: bool = False,
+        used_refs: Collection[str] | None = None,
         sort: str = "newest",
         direction: str | None = None,
         limit: int = 200,
@@ -463,6 +465,9 @@ class CaseRepository(Protocol):
         (``links.MADE_HERE``) and scopes the facet counts with it, so no chooser
         offers rows the switch is hiding. ``facets.made_here_count`` says how many
         that is, on either setting.
+        ``used_refs`` is what the records outside the graph lean on
+        (``engine/uses.used_refs``). Given, ``facets.unused_count`` says how many
+        files nothing uses, and ``unused`` keeps only those and scopes the counts.
         """
         ...
 

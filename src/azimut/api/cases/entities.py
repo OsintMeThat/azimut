@@ -23,7 +23,6 @@ from .. import events
 from .common import (
     MAPPED_TYPES,
     _check_attrs,
-    _summary,
     delete_entities_deep,
     delete_entity_deep,
     get_case,
@@ -148,23 +147,6 @@ def update_entity(case_id: str, entity_id: str, body: EntityPatch) -> dict[str, 
             return entity
         except CaseError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-@router.get("/{case_id}/entities/{entity_id}/dependents")
-def entity_dependents(case_id: str, entity_id: str) -> dict[str, Any]:
-    """What deleting this entity would take with it, and what it would scar.
-
-    Feeds the confirm dialog so a delete states its consequences before it is
-    irreversible (ONTOLOGY §3).
-    """
-    case = get_case(case_id)
-    try:
-        plan = link_engine.plan_delete(case, entity_id)
-    except CaseError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {
-        "cascade": [_summary(e) for e in plan["cascade"]],
-        "tombstone": [_summary(e) for e in plan["tombstone"]],
-    }
 
 @router.get("/{case_id}/entities/{entity_id}/chain")
 def entity_chain(case_id: str, entity_id: str) -> dict[str, Any]:

@@ -781,11 +781,16 @@ async def keep_image(
     return {"path": filed["item"]["path"], "entity": filed["entity"]["id"]}
 
 
+def session_spec(name: str) -> str:
+    """The record a comparison's name stands for, as its delete and its preview read it."""
+    return layout.compare_session_rel(slugify(name, "Comparison"))
+
+
 @router.delete("/cases/{case_id}/compare/sessions/{name}")
 def delete_session(case_id: str, name: str) -> dict[str, Any]:
     """Delete the editable session. Its rendered image stays in Media."""
     case = get_case(case_id)
-    rel = layout.compare_session_rel(slugify(name, "Comparison"))
+    rel = session_spec(name)
     try:
         case.resolve_inside(rel)
     except CaseError as exc:

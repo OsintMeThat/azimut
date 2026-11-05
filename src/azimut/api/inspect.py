@@ -415,11 +415,16 @@ async def save_collage_thumb(case_id: str, name: str, file: UploadFile) -> dict[
     return saved
 
 
+def collage_spec(name: str) -> str:
+    """The record a collage's name stands for, as its delete and its preview read it."""
+    return layout.collage_rel(slugify(name, "Collage"))
+
+
 @router.delete("/cases/{case_id}/collages/{name}")
 def delete_collage(case_id: str, name: str) -> dict[str, Any]:
     """Delete the layout. A picture already exported from it stays in Media."""
     case = get_case(case_id)
-    rel = layout.collage_rel(slugify(name, "Collage"))
+    rel = collage_spec(name)
     try:
         case.resolve_inside(rel)
     except CaseError as exc:

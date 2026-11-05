@@ -50,11 +50,17 @@ const get = vi.fn(async (url) => {
     return { items: ROWS, total: ROWS.length, next_cursor: null };
   }
   if (url.includes('/catalog/attributes')) return { attrs: [] };
-  if (url.includes('/dependents')) return { cascade: [], tombstone: [] };
   if (url.includes('/analysis-views')) return { views: [] };
   return {};
 });
-const post = vi.fn(async () => ({ status: 'deleted', deleted: ['e1', 'e4'], trash: 'trash-1' }));
+const NOTHING_TOUCHED = { cascade: [], tombstone: [], touched: [], counts: { cascade: 0, tombstone: 0, touched: 0 } };
+const post = vi.fn(async (url) =>
+  url.includes('/delete-impact')
+    ? NOTHING_TOUCHED
+    : { status: 'deleted', deleted: ['e1', 'e4'], trash: 'trash-1' }
+);
+/** The posts that change the case: the dialog's own preview is only a read. */
+const writes = () => post.mock.calls.filter(([url]) => !url.includes('/delete-impact'));
 const del = vi.fn(async () => ({ status: 'deleted', deleted: ['e1'], trash: 'trash-2' }));
 vi.mock('../lib/api.js', () => ({
   api: { get, post, del, patch: vi.fn(), put: vi.fn() },
@@ -244,8 +250,12 @@ describe('deleting what is ticked', () => {
 
     expect(dialog().textContent).toContain('Delete 2 items?');
     expect(dialog().textContent).toContain('restore it from Trash');
-    // nothing has gone yet: the dialog is the whole point
-    expect(post).not.toHaveBeenCalled();
+    // nothing has gone yet: the dialog is the whole point, and it asked what the act touches
+    expect(writes()).toEqual([]);
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/delete-impact', {
+      ids: ['e1', 'e4'], paths: [], named: [],
+    });
+    expect(dialog().textContent).toContain('Nothing else in the case uses them.');
   });
 
   it('sends the selection as one act, so one Undo takes it back', async () => {
@@ -273,12 +283,14 @@ describe('deleting what is ticked', () => {
     await tick(1);
     await press('Delete', target);
 
-    expect(get).toHaveBeenCalledWith('/api/cases/case-a/entities/e2/dependents');
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/delete-impact', {
+      ids: ['e2'], paths: [], named: [],
+    });
     expect(dialog().textContent).toContain('Clip');
 
     await press('Delete everywhere');
     expect(del).toHaveBeenCalledWith('/api/cases/case-a/entities/e2');
-    expect(post).not.toHaveBeenCalled();
+    expect(writes()).toEqual([]);
   });
 
   it('Cancel leaves the case and the ticks alone', async () => {
@@ -287,7 +299,7 @@ describe('deleting what is ticked', () => {
     await press('Delete', target);
     await press('Cancel');
 
-    expect(post).not.toHaveBeenCalled();
+    expect(writes()).toEqual([]);
     expect(del).not.toHaveBeenCalled();
     expect(bar().textContent).toContain('1 selected');
   });

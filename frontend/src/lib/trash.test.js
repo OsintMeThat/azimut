@@ -104,8 +104,8 @@ describe('deleting a selection', () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 
-  it('counts the selection in the dialog, and promises the way back', async () => {
-    const prompt = await entityDeletePrompt('case-1', rows, { get: vi.fn() });
+  it('counts the selection in the dialog, and promises the way back', () => {
+    const prompt = entityDeletePrompt('case-1', rows);
 
     expect(prompt.title).toBe('Delete 2 items?');
     expect(prompt.confirmLabel).toBe('Delete all');
@@ -114,39 +114,23 @@ describe('deleting a selection', () => {
     expect(prompt.detail).toBe('Moves the items and their files to the case trash.');
   });
 
-  it('says only what a selection of pure graph rows really touches', async () => {
-    const prompt = await entityDeletePrompt('case-1', [rows[0], { id: 'e3', type: 'person' }], {
-      get: vi.fn(),
-    });
+  it('says only what a selection of pure graph rows really touches', () => {
+    const prompt = entityDeletePrompt('case-1', [rows[0], { id: 'e3', type: 'person' }]);
 
     expect(prompt.detail).toBe('Moves the items to the case trash.');
   });
 
-  it('names the row when there is one, and previews what goes with it', async () => {
-    const get = vi.fn(async () => ({ cascade: [{ label: 'Inspect work' }], tombstone: [] }));
-    const prompt = await entityDeletePrompt('case-1', [rows[1]], { get });
+  it('names the row when there is one, and has the dialog preview what it touches', () => {
+    const prompt = entityDeletePrompt('case-1', [rows[1]]);
 
-    expect(get).toHaveBeenCalledWith('/api/cases/case-1/entities/e2/dependents');
     expect(prompt.title).toBe('Delete everywhere?');
     expect(prompt.message).toContain('Clip');
-    expect(prompt.consequences.cascade).toHaveLength(1);
+    expect(prompt.impact).toEqual({ caseId: 'case-1', ids: ['e2'] });
   });
 
-  it('asks for no preview per row of a selection, and still asks the dialog', async () => {
-    const get = vi.fn();
-    const prompt = await entityDeletePrompt('case-1', rows, { get });
+  it('previews a whole selection as one act', () => {
+    const prompt = entityDeletePrompt('case-1', rows);
 
-    expect(get).not.toHaveBeenCalled();
-    expect(prompt.consequences).toBeNull();
-  });
-
-  it('opens on the dialog even when the preview fails: the plan is the backend’s', async () => {
-    const get = vi.fn(async () => {
-      throw new Error('offline');
-    });
-    const prompt = await entityDeletePrompt('case-1', [rows[0]], { get });
-
-    expect(prompt.consequences).toBeNull();
-    expect(prompt.confirmLabel).toBe('Delete everywhere');
+    expect(prompt.impact).toEqual({ caseId: 'case-1', ids: rows.map((row) => row.id) });
   });
 });

@@ -39,6 +39,7 @@
   import BackButton from '../components/BackButton.svelte';
   import NoCase from '../components/NoCase.svelte';
   import Modal from '../components/Modal.svelte';
+  import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import FloatingMenu from '../components/FloatingMenu.svelte';
   import PlatePage from './plate/PlatePage.svelte';
   import PlateElements from './plate/PlateElements.svelte';
@@ -53,6 +54,8 @@
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { caseState, deleteTemplate, prefs, saveTemplate, toast, uiState } from '../lib/state.svelte.js';
   import { fileUrl } from '../lib/fileUrl.js';
+  import { touchesNothing } from '../lib/deleteImpact.js';
+  import { RESTORABLE } from '../lib/trash.js';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
   import { categoryColour } from '../lib/map/addedLayers.js';
   import { NEW_COLOUR, badgeImage, personalMarkerImage } from '../lib/map/addedLayer.js';
@@ -434,6 +437,22 @@
     const name = plate?.name ?? null;
     untrack(() => tabs.hold(owner, name));
   });
+
+  // A plate goes to the Trash in one press, as it always has, unless something else in
+  // the case leans on it: then the dialog says what before anything goes.
+  let removing = $state(null); // { row, target } while that dialog is up
+  let asking = null; // the plate whose preview is on its way: a second press waits for it
+  async function askRemove(row) {
+    if (asking) return;
+    asking = row.name;
+    try {
+      const target = { caseId, named: [{ tool: 'plate', name: row.name }] };
+      if (await touchesNothing(target)) await remove(row);
+      else removing = { row, target };
+    } finally {
+      asking = null;
+    }
+  }
 
   async function remove(row) {
     try {
@@ -1973,8 +1992,21 @@
     <div class="fm-sep"></div>
     <button type="button" class="fm-item" onclick={() => { const row = menu.row; menu = null; renaming = { kind: 'plate', row, value: row.title }; }}><Icon name="text" size={14} /><span class="fm-grow">Rename…</span></button>
     <div class="fm-sep"></div>
-    <button type="button" class="fm-item danger" onclick={() => { const row = menu.row; menu = null; remove(row); }}><Icon name="trash" size={14} /><span class="fm-grow">Move to the Trash</span></button>
+    <button type="button" class="fm-item danger" onclick={() => { const row = menu.row; menu = null; askRemove(row); }}><Icon name="trash" size={14} /><span class="fm-grow">Move to the Trash</span></button>
   </FloatingMenu>
+{/if}
+
+{#if removing}
+  <ConfirmDialog
+    title="Delete this plate?"
+    message={`“${removing.row.title}” goes to the Trash.`}
+    impact={removing.target}
+    restorable={RESTORABLE}
+    confirmLabel="Delete"
+    icon="trash"
+    onconfirm={() => { const row = removing.row; removing = null; remove(row); }}
+    oncancel={() => (removing = null)}
+  />
 {/if}
 
 {#if creating}

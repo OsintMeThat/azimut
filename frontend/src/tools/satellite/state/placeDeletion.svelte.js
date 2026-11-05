@@ -14,11 +14,10 @@ export function createPlaceDeletionState({ api, caseId, notify, reloadCase, onde
     loading = true;
     target = null;
     try {
-      const [usage, consequences] = await Promise.all([
-        api.get(`/api/cases/${owner}/map-layers/places/${id}/usage`),
-        api.get(`/api/cases/${owner}/entities/${id}/dependents`),
-      ]);
-      if (caseId() === owner && stamp === sequence) target = { owner, id, usage, consequences };
+      // What else the delete touches is the dialog's own question (`impact`); this
+      // reads what only a place has to say: the layers that keep its point.
+      const usage = await api.get(`/api/cases/${owner}/map-layers/places/${id}/usage`);
+      if (caseId() === owner && stamp === sequence) target = { owner, id, usage };
     } catch (error) {
       if (caseId() === owner && stamp === sequence) notify(error.message, 'danger');
     } finally {

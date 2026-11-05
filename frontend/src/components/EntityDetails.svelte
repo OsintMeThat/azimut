@@ -581,26 +581,18 @@
   let confirmState = $state(null);
   let confirmBusy = $state(false);
 
-  async function askDeleteEverywhere() {
+  function askDeleteEverywhere() {
     const e = entity;
     if (!e) return;
-    // The authoritative plan is the backend's; the preview reads its dependents
-    // endpoint rather than mirroring the whole graph client-side.
-    let consequences = { cascade: [], tombstone: [] };
-    try {
-      consequences = await api.get(
-        `/api/cases/${caseState.current.id}/entities/${e.id}/dependents`
-      );
-    } catch {
-      /* no preview — the delete still enforces the plan server-side */
-    }
+    // The authoritative plan is the backend's; the dialog asks it what the delete
+    // touches rather than mirroring the whole graph client-side.
     confirmState = {
       title: 'Delete everywhere?',
       message: `“${e.label}” will be removed from the case and its tool.`,
       detail: FILE_BACKED.has(e.type)
         ? 'Moves the item and its files to the case trash.'
         : 'Moves the item to the case trash.',
-      consequences,
+      impact: { caseId: caseState.current.id, ids: [e.id] },
       restorable: RESTORABLE,
       action: async () => {
         const caseId = caseState.current.id;
@@ -1224,7 +1216,7 @@
     title={confirmState.title}
     message={confirmState.message}
     detail={confirmState.detail}
-    consequences={confirmState.consequences}
+    impact={confirmState.impact}
     restorable={confirmState.restorable}
     confirmLabel="Delete everywhere"
     tone="default"

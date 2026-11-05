@@ -540,36 +540,44 @@ def test_a_tool_delete_still_drops_an_unfiled_artifact(client):
     assert case["id"] == cid
 
 
-# ── the dependents preview that feeds the dialog ───────────────────────────
+# ── the preview of a delete that feeds the dialog ─────────────────────────
 
 
-def test_dependents_endpoint_reports_the_plan(client):
+def _impact(client, cid, **body):
+    return client.post(f"/api/cases/{cid}/delete-impact", json=body)
+
+
+def test_delete_impact_reports_the_plan(client):
     cid = _new_case(client, "Preview")
     a = _upload(client, cid, "a.png")["item"]["path"]
     _save_session(client, cid, "S", a)
     _save_proof(client, cid, "P", [a])
 
     subject = _entity(client, cid, path=a)
-    plan = client.get(f"/api/cases/{cid}/entities/{subject['id']}/dependents").json()
+    plan = _impact(client, cid, ids=[subject["id"]]).json()
 
     assert [e["label"] for e in plan["cascade"]] == ["S"]
     assert [e["label"] for e in plan["tombstone"]] == ["P"]
+    assert plan["counts"] == {"blocking": 0, "cascade": 1, "tombstone": 1, "touched": 0}
+    # asked by path, it is the same answer
+    assert _impact(client, cid, paths=[a]).json() == plan
     # and it changed nothing
     assert _entity(client, cid, path=a) is not None
 
 
-def test_dependents_endpoint_is_empty_for_a_lone_entity(client):
+def test_delete_impact_is_empty_for_a_lone_entity(client):
     cid = _new_case(client, "Lonely")
     a = _upload(client, cid, "a.png")["item"]["path"]
-    plan = client.get(
-        f"/api/cases/{cid}/entities/{_entity(client, cid, path=a)['id']}/dependents"
-    ).json()
-    assert plan == {"cascade": [], "tombstone": []}
+    plan = _impact(client, cid, ids=[_entity(client, cid, path=a)["id"]]).json()
+    assert plan == {
+        "blocking": [], "cascade": [], "tombstone": [], "touched": [],
+        "counts": {"blocking": 0, "cascade": 0, "tombstone": 0, "touched": 0},
+    }
 
 
-def test_dependents_endpoint_404s_on_an_unknown_entity(client):
+def test_delete_impact_404s_on_an_unknown_entity(client):
     cid = _new_case(client, "Ghost")
-    assert client.get(f"/api/cases/{cid}/entities/e_nope/dependents").status_code == 404
+    assert _impact(client, cid, ids=["e_nope"]).status_code == 404
 
 
 # ── the derivation chain the Details panel reads ───────────────────────────

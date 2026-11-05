@@ -114,7 +114,8 @@
   import { savedRow } from '../lib/geoTree.js';
   import { isGround } from '../lib/map/basemap.js';
   import { isRegistered, sourceRect } from '../lib/screenCrop.js';
-  import { deletedToast } from '../lib/trash.js';
+  import { deletedToast, RESTORABLE } from '../lib/trash.js';
+  import { touchesNothing } from '../lib/deleteImpact.js';
   import { assignFolder } from '../lib/filing.js';
   import { SENTINEL_ID, variantId } from '../lib/sentinel.js';
   import { WAYBACK_ID, releaseYearBefore, waybackId } from '../lib/wayback.js';
@@ -1244,6 +1245,22 @@
       return;
     }
     void openSession(name);
+  }
+
+  // One press sends a comparison to the Trash, unless something else in the case
+  // leans on it: then the dialog says what first.
+  let deletingSession = $state(null); // { name, title, target } while that dialog is up
+  let askingSession = null; // the comparison whose preview is on its way: a second press waits for it
+  async function askDeleteSession(saved) {
+    if (!caseState.current || sessionBusy || askingSession) return;
+    askingSession = saved.name;
+    try {
+      const target = { caseId: caseState.current.id, named: [{ tool: 'comparison', name: saved.name }] };
+      if (await touchesNothing(target)) await deleteSession(saved.name);
+      else deletingSession = { name: saved.name, title: saved.title, target };
+    } finally {
+      askingSession = null;
+    }
   }
 
   async function deleteSession(name) {
@@ -3128,12 +3145,26 @@
               <span>{imagery.find(saved.provider_a)?.label ?? saved.provider_a} / {imagery.find(saved.provider_b)?.label ?? saved.provider_b}</span>
               <small>{COMPARE_MODES.find((entry) => entry.id === saved.mode)?.label ?? saved.mode}{saved.updated_at ? ` · ${saved.updated_at.replace('T', ' ').replace('Z', '')}` : ''}</small>
             </button>
-            <button class="btn btn-ghost btn-xs" onclick={() => deleteSession(saved.name)} aria-label={`Delete ${saved.title}`} title={`Delete ${saved.title}`}><Icon name="trash" size={14} /></button>
+            <button class="btn btn-ghost btn-xs" onclick={() => askDeleteSession(saved)} aria-label={`Delete ${saved.title}`} title={`Delete ${saved.title}`}><Icon name="trash" size={14} /></button>
           </div>
         {/each}
       </div>
     {/if}
   </Modal>
+{/if}
+
+{#if deletingSession}
+  <ConfirmDialog
+    title="Delete this comparison?"
+    message={`“${deletingSession.title}” goes to the Trash.`}
+    detail="Its images stay in Media."
+    impact={deletingSession.target}
+    restorable={RESTORABLE}
+    confirmLabel="Delete"
+    icon="trash"
+    onconfirm={() => { const { name } = deletingSession; deletingSession = null; void deleteSession(name); }}
+    oncancel={() => (deletingSession = null)}
+  />
 {/if}
 
 {#if discardTarget}

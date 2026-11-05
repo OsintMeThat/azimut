@@ -3175,6 +3175,7 @@
     title="Remove this layer?"
     message={`“${removingLayer.title}” will be taken off the map and out of the case.`}
     detail="Moves the layer and the copy it was drawn from to the case trash."
+    impact={{ caseId: caseState.current?.id, paths: [removingLayer.spec] }}
     restorable={RESTORABLE}
     confirmLabel="Remove"
     tone="default"
@@ -3204,6 +3205,7 @@
     title={DELETE_WORDS[deleteTarget.kind]?.title ?? 'Delete this capture?'}
     message={`“${deleteTarget.title || coordsLabel(deleteTarget)}” will be removed from the case.`}
     detail={DELETE_WORDS[deleteTarget.kind]?.detail ?? 'Moves the capture and its image to the case trash.'}
+    impact={{ caseId: caseState.current?.id, ...savedWork.target(deleteTarget) }}
     restorable={RESTORABLE}
     confirmLabel="Delete"
     tone="default"

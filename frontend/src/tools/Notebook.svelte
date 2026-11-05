@@ -740,6 +740,7 @@
       message={noteAction.kind === 'delete' ? `Are you sure you want to delete “${noteAction.label}”?` : 'Are you sure you want to clear the case notes?'}
       detail={noteAction.kind === 'delete' ? 'Moves the note and its contents to the case trash.' : 'The page stays, empty.'}
       restorable={noteAction.kind === 'delete' ? RESTORABLE : ''}
+      impact={noteAction.kind === 'delete' ? { caseId, ids: [noteAction.noteId] } : null}
       confirmLabel={noteAction.kind === 'delete' ? 'Delete' : 'Clear'}
       tone="default"
       icon={noteAction.kind === 'delete' ? 'trash' : 'reset'}

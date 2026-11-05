@@ -19,7 +19,7 @@ writes, folders, the trash journal, the durable job queue.
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Collection
 
 from .repository import EntityStatus
 
@@ -204,6 +204,8 @@ class CaseStore:
         folder: str | None = None,
         gps: bool = False,
         collected_only: bool = False,
+        unused: bool = False,
+        used_refs: Collection[str] | None = None,
         sort: str = "newest",
         direction: str | None = None,
         limit: int = 200,
@@ -216,6 +218,8 @@ class CaseStore:
             folder=folder,
             gps=gps,
             collected_only=collected_only,
+            unused=unused,
+            used_refs=used_refs,
             sort=sort,
             direction=direction,
             limit=limit,

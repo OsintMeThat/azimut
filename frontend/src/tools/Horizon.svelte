@@ -133,6 +133,8 @@
   import ExportMenu from './horizon/ExportMenu.svelte';
   import CaptureMenu from './horizon/CaptureMenu.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import { touchesNothing } from '../lib/deleteImpact.js';
+  import { RESTORABLE } from '../lib/trash.js';
   import Icon from '../components/Icon.svelte';
   import BackButton from '../components/BackButton.svelte';
   import ViewSwitch from '../components/ViewSwitch.svelte';
@@ -1532,6 +1534,23 @@
     photoDialog = true;
   }
 
+  // One press sends a search to the Trash, unless something else in the case leans
+  // on it: then the dialog says what first.
+  let removingSearch = $state(null); // { name, target } while that dialog is up
+  let askingSearch = null; // the search whose preview is on its way: a second press waits for it
+  async function askRemoveSearch(name) {
+    const caseId = caseState.current?.id;
+    if (!caseId || askingSearch) return;
+    askingSearch = name;
+    try {
+      const target = { caseId, named: [{ tool: 'find', name }] };
+      if (await touchesNothing(target)) await removeSearch(name);
+      else removingSearch = { name, target };
+    } finally {
+      askingSearch = null;
+    }
+  }
+
   async function removeSearch(name) {
     const caseId = caseState.current?.id;
     if (!caseId) return;
@@ -2151,7 +2170,7 @@
       caseOpen={Boolean(caseState.current)}
       caseId={caseState.current?.id ?? null}
       onopensearch={openSearch}
-      onremovesearch={removeSearch}
+      onremovesearch={askRemoveSearch}
       onnew={newSearch}
     />
   {/if}
@@ -2169,6 +2188,19 @@
       photoDialog = false;
       openSearch(name);
     }}
+  />
+{/if}
+
+{#if removingSearch}
+  <ConfirmDialog
+    title="Delete this search?"
+    message={`“${removingSearch.name}” goes to the Trash.`}
+    impact={removingSearch.target}
+    restorable={RESTORABLE}
+    confirmLabel="Delete"
+    icon="trash"
+    onconfirm={() => { const { name } = removingSearch; removingSearch = null; void removeSearch(name); }}
+    oncancel={() => (removingSearch = null)}
   />
 {/if}
 

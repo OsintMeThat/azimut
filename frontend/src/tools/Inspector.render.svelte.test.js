@@ -291,7 +291,13 @@ describe('clearing a work', () => {
 
     button('Clear work').click();
     flushSync();
+    // the dialog asks what the clear touches, and holds its button until the answer is in
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/delete-impact', {
+      ids: [], paths: [], named: [{ tool: 'inspect', name: 'media/clip.mp4' }],
+    });
+    await settle(5);
     const confirm = [...document.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Clear work').pop();
+    expect(confirm.disabled).toBe(false);
     delete saved['media/clip.mp4'];
     const rev = workState.rev;
     confirm.click();

@@ -113,20 +113,15 @@ describe('tone', () => {
 });
 
 describe('consequences', () => {
-  it('shows what can come back apart from what goes with it and what is scarred', () => {
+  it('shows what can come back as reassurance, not as a warning', () => {
+    // What goes with a delete and what it scars is asked of the server and drawn by
+    // `DeleteImpact` (its own render test); the way back is the dialog's own line.
     open(ConfirmDialog, {
       title: 'Delete',
       message: 'x',
-      consequences: { cascade: [{ label: 'Clip work' }], tombstone: [{ label: 'Harbour proof' }] },
       restorable: 'Restore it from the trash',
       oncancel: () => {},
     });
-    const blocks = [...document.querySelectorAll('.conseq')];
-
-    expect(blocks).toHaveLength(3);
-    expect(blocks[0].classList.contains('danger')).toBe(true);
-    expect(blocks[0].textContent).toContain('Clip work');
-    expect(blocks[1].textContent).toContain('Harbour proof');
     const restorable = document.querySelector('.conseq.restorable');
     expect(restorable.textContent.trim()).toBe('Restore it from the trash');
     expect(restorable.classList.contains('danger')).toBe(false);

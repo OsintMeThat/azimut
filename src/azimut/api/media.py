@@ -17,6 +17,7 @@ from ..engine import exportdir, layerediting
 from ..engine import media as media_engine
 from ..engine import reveal as reveal_engine
 from ..engine import thumbnails as thumbnail_engine
+from ..engine import uses as uses_engine
 from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
 from .limits import MAX_IMAGE_BYTES
@@ -129,6 +130,7 @@ def page_media(
     folder: str | None = None,
     gps: bool = False,
     collected_only: bool = False,
+    unused: bool = False,
     sort: str = "newest",
     direction: str | None = None,
     limit: int = 200,
@@ -142,6 +144,8 @@ def page_media(
     ``collected_only=true`` drops what the case made out of its own material — an
     extracted frame, a collage — and scopes the counts with it; the number it hides
     comes back as ``facets.made_here_count``.
+    ``unused=true`` keeps only the files nothing in the case uses (`engine/uses.py`),
+    the ones a delete would warn about nothing; ``facets.unused_count`` is their number.
     ``facets`` counts the whole filtered set so category/folder/GPS controls stay
     accurate. The unbounded ``GET .../media`` stays for consumers that need the
     full index (pickers, satellite crops, derivation)."""
@@ -155,6 +159,8 @@ def page_media(
         folder=folder,
         gps=gps,
         collected_only=collected_only,
+        unused=unused,
+        used_refs=uses_engine.used_refs(case),
         sort=sort,
         direction=direction,
         limit=limit,

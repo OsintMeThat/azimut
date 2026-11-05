@@ -143,6 +143,12 @@ CONTRADICTS = "contradicts"
 #: fold that walked it would collapse an argument into a citation.
 CLAIM_CONNECTION_TYPES = (ABOUT, AT, CITES)
 
+#: Pointers a record holds at another: a document's mention, a claim's subject,
+#: place or source. They belong to the record holding them, so deleting it takes
+#: them along the way a proof takes its panels, while deleting what they point at
+#: leaves that record pointing at nothing (`engine/uses.py`).
+POINTER_TYPES = (MENTIONS, *CLAIM_CONNECTION_TYPES)
+
 #: How sure the analyst is that an edge holds, as one closed ordinal (ONTOLOGY §3).
 #: No 0-100 slider: a number invites false precision, nobody calibrates it, and the
 #: standing criticism of vague estimative language is that it lets a report commit to
@@ -1203,37 +1209,58 @@ def plan_delete(case: CaseRepository, entity_id: str) -> dict[str, list[dict[str
     ``tombstone`` lists the artifacts that survive with a scar, computed over
     everything about to go, not just the entity that was asked for.
     """
-    data = case.snapshot()
-    by_id = {e["id"]: e for e in data["entities"]}
-    if entity_id not in by_id:
-        raise CaseError(f"entity '{entity_id}' not found")
+    return plan_delete_many(case, [entity_id])
 
-    doomed = [entity_id]
-    frontier = [entity_id]
+
+def plan_delete_many(
+    case: CaseRepository, entity_ids: list[str], data: dict[str, Any] | None = None
+) -> dict[str, list[dict[str, Any]]]:
+    """``plan_delete`` over one act that deletes several entities at once.
+
+    The cascade leaves out the targets themselves, and the tombstones leave out
+    everything going, so a proof deleted with its source is not listed as scarred.
+    ``data`` is a ``snapshot()`` the caller already holds, so a reader that needs
+    the graph again does not load it twice.
+    """
+    data = data if data is not None else case.snapshot()
+    by_id = {e["id"]: e for e in data["entities"]}
+    targets = list(dict.fromkeys(entity_ids))
+    for entity_id in targets:
+        if entity_id not in by_id:
+            raise CaseError(f"entity '{entity_id}' not found")
+
+    # Indexed once rather than walked per node: a selection of hundreds of rows over a
+    # graph of tens of thousands of edges is one pass, not one pass per row.
+    holders: dict[str, list[str]] = {}
+    for link in data["links"]:
+        if link["type"] in CASCADE_TYPES and link["from"] in by_id:
+            holders.setdefault(link["to"], []).append(link["from"])
+
+    doomed = list(targets)
+    going = set(targets)
+    frontier = list(targets)
     while frontier:
         current = frontier.pop()
-        for link in data["links"]:
-            if (
-                link["to"] == current
-                and link["type"] in CASCADE_TYPES
-                and link["from"] not in doomed
-                and link["from"] in by_id
-            ):
-                doomed.append(link["from"])
-                frontier.append(link["from"])
+        for holder in holders.get(current, []):
+            if holder not in going:
+                going.add(holder)
+                doomed.append(holder)
+                frontier.append(holder)
 
     scarred: list[str] = []
+    marked: set[str] = set()
     for link in data["links"]:
         if (
-            link["to"] in doomed
+            link["to"] in going
             and link["type"] in TOMBSTONE_TYPES
-            and link["from"] not in doomed
-            and link["from"] not in scarred
+            and link["from"] not in going
+            and link["from"] not in marked
             and link["from"] in by_id
         ):
+            marked.add(link["from"])
             scarred.append(link["from"])
 
     return {
-        "cascade": [by_id[i] for i in doomed[1:]],
+        "cascade": [by_id[i] for i in doomed[len(targets):]],
         "tombstone": [by_id[i] for i in scarred],
     }

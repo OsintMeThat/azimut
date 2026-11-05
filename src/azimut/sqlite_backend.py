@@ -27,7 +27,7 @@ import threading
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Collection, Iterator, TypeVar
 
 from .engine import links as link_engine
 from .engine import timeline as timeline_engine
@@ -62,6 +62,7 @@ from .store.rows import (
     _PRODUCED_HERE_ROW_SQL,
     _MEDIA_CATEGORIES,
     _MEDIA_CATEGORY_SQL,
+    _UNUSED_SQL,
     _entity_search_text,
     _folder_of,
     _normalise_media_item,
@@ -2262,6 +2263,8 @@ class SqliteCase:
         folder: str | None = None,
         gps: bool = False,
         collected_only: bool = False,
+        unused: bool = False,
+        used_refs: Collection[str] | None = None,
         sort: str = "newest",
         direction: str | None = None,
         limit: int = 200,
@@ -2291,6 +2294,16 @@ class SqliteCase:
         scope_where = list(base_where)
         if collected_only:
             base_where.append(f"NOT {_PRODUCED_HERE_SQL}")
+
+        # "Only what nothing uses" scopes the answer the same way, inside whatever
+        # the switch above left, and `unused_count` is its number on either setting.
+        # It needs the records outside the graph (`engine/uses.used_refs`); a caller
+        # that has none to give gets neither the filter nor the count.
+        counts_unused = used_refs is not None
+        unused_scope = list(base_where)
+        if unused and counts_unused:
+            base_where.append(_UNUSED_SQL)
+            scope_where.append(_UNUSED_SQL)
 
         # Category and GPS are two independent refinements of that base. Each
         # one's own facet count leaves itself out and applies the other, so a
@@ -2322,6 +2335,15 @@ class SqliteCase:
 
         selected_clause = clause(selected_where)
         with self._connect() as conn:
+            if counts_unused:
+                # Per connection, so it is gone with it; emptied first, since a batch
+                # lends the same connection to every read it holds.
+                conn.execute("CREATE TEMP TABLE IF NOT EXISTS used_refs (ref TEXT PRIMARY KEY)")
+                conn.execute("DELETE FROM temp.used_refs")
+                conn.executemany(
+                    "INSERT OR IGNORE INTO temp.used_refs (ref) VALUES (?)",
+                    ((ref,) for ref in used_refs or ()),
+                )
             total = int(
                 conn.execute(
                     f"SELECT COUNT(*) FROM media_items{selected_clause}",
@@ -2381,19 +2403,34 @@ class SqliteCase:
                     base_params,
                 ).fetchone()[0]
             )
+            # What nothing uses, under the same narrowing: the number the switch shows.
+            unused_count = (
+                int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM media_items"
+                        f"{clause([*unused_scope, *([category_sql] if category_sql else []), *(['has_gps = 1'] if gps else []), _UNUSED_SQL])}",
+                        base_params,
+                    ).fetchone()[0]
+                )
+                if counts_unused
+                else None
+            )
 
         next_offset = offset + len(rows)
+        facets: dict[str, Any] = {
+            "kind_counts": kind_counts,
+            "folder_counts": folder_counts,
+            "category_counts": category_counts,
+            "gps_count": gps_count,
+            "made_here_count": made_here_count,
+        }
+        if unused_count is not None:
+            facets["unused_count"] = unused_count
         return {
             "items": [self._media_item(row) for row in rows],
             "next_cursor": str(next_offset) if next_offset < total else None,
             "total": total,
-            "facets": {
-                "kind_counts": kind_counts,
-                "folder_counts": folder_counts,
-                "category_counts": category_counts,
-                "gps_count": gps_count,
-                "made_here_count": made_here_count,
-            },
+            "facets": facets,
         }
 
     # -- temporal projection ---------------------------------------------

@@ -22,6 +22,7 @@
   import { closeOnOutsidePointer } from '../../lib/dismiss.js';
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
+  import DeleteImpact from '../../components/DeleteImpact.svelte';
 
   let { caseId, areas = [], groups = [], routines = [], selectedArea = null, hidden = $bindable([]),
     zones = $bindable([]), drawing = $bindable('select'),
@@ -42,6 +43,7 @@
   let creatingGroup = $state(false);
   let newGroupName = $state('');
   let removingGroup = $state(null);
+  let removingReach = $state(false); // the delete waits while its preview is asked
   let editingGroup = $state(null);
   let dragging = $state(null);
   let landing = $state(null);
@@ -556,7 +558,8 @@
       <ul>{#each users as routine (routine.id)}<li>{routine.title}</li>{/each}</ul>
     {:else}
       <p>The area moves to Trash. Existing runs keep their own copy.</p>
-      <button class="btn btn-danger" disabled={busy} onclick={() => act(async () => {
+      <DeleteImpact target={{ caseId, named: [{ tool: 'areas', name: removing.id }] }} bind:reaching={removingReach} />
+      <button class="btn btn-danger" disabled={busy || removingReach} onclick={() => act(async () => {
         await api.del(`/api/cases/${caseId}/analysis/areas/${removing.id}`); removing = null;
       })}>Move to Trash</button>
     {/if}
@@ -567,7 +570,8 @@
 {#if removingGroup}
   <Modal title={`Delete ${removingGroup.title}?`} onclose={() => (removingGroup = null)}>
     <p>The areas stay in this case.</p>
-    <button class="btn btn-danger" disabled={busy} onclick={() => act(async () => {
+    <DeleteImpact target={{ caseId, named: [{ tool: 'zones', name: removingGroup.id }] }} bind:reaching={removingReach} />
+    <button class="btn btn-danger" disabled={busy || removingReach} onclick={() => act(async () => {
       await api.del(`/api/cases/${caseId}/analysis/zones/${removingGroup.id}`); removingGroup = null;
     })}>Move group to Trash</button>
   </Modal>

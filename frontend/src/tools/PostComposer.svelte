@@ -1698,6 +1698,7 @@
     title="Delete this draft?"
     message={`“${deleteEntry.title}” will be removed from the case.`}
     detail="Moves the saved draft to the case trash."
+    impact={{ caseId: caseState.current?.id, named: [{ tool: 'draft', name: deleteEntry.name }] }}
     restorable={RESTORABLE}
     confirmLabel="Delete"
     tone="default"

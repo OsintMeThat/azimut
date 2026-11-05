@@ -147,14 +147,6 @@ def delete_entities_deep(case: Case, entity_ids: list[str]) -> dict[str, Any]:
 def delete_entity_deep(case: Case, entity_id: str) -> dict[str, Any]:
     return delete_entities_deep(case, [entity_id])
 
-def _summary(entity: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": entity["id"],
-        "type": entity.get("type"),
-        "label": entity.get("label"),
-        "path": link_engine.artifact_path(entity),
-    }
-
 def delete_by_path(case: Case, rel_path: str) -> dict[str, Any]:
     """Chokepoint entry for a tool that knows its artifact by path, not by id.
 
@@ -162,14 +154,19 @@ def delete_by_path(case: Case, rel_path: str) -> dict[str, Any]:
     never filed, so there is no graph to honour and the caller drops the files
     itself.
     """
-    entity = (
+    entity = entity_at(case, rel_path)
+    if entity is None:
+        return {"status": "deleted", "deleted": [], "tombstoned": []}
+    return delete_entity_deep(case, entity["id"])
+
+
+def entity_at(case: Case, rel_path: str) -> dict[str, Any] | None:
+    """The entity filed for an artifact path, whichever attr its type keeps it under."""
+    return (
         case.find_entity(attr="path", value=rel_path)
         or case.find_entity(attr="spec", value=rel_path)
         or case.find_entity(attr="draft", value=rel_path)
     )
-    if entity is None:
-        return {"status": "deleted", "deleted": [], "tombstoned": []}
-    return delete_entity_deep(case, entity["id"])
 
 def _check_attrs(
     type_: str,

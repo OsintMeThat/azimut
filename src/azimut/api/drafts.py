@@ -229,11 +229,16 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
     return {"name": name, "title": name, "draft": rel}
 
 
+def draft_spec(name: str) -> str:
+    """The record a draft's name stands for, as its delete and its preview read it."""
+    return layout.draft_rel(slugify(name, "draft"))
+
+
 @router.delete("/cases/{case_id}/drafts/{name}")
 def delete_draft(case_id: str, name: str) -> dict[str, Any]:
     case = get_case(case_id)
     # Named the way the save named it — see `api/satellite.delete_search_grid`.
-    rel = layout.draft_rel(slugify(name, "draft"))
+    rel = draft_spec(name)
     try:
         case.resolve_inside(rel)
     except CaseError as exc:

@@ -1843,6 +1843,12 @@ export async function installAppFixture(page, options = {}) {
         size_bytes: trashGroups.reduce((total, group) => total + group.size_bytes, 0),
       });
     }
+    // What a delete touches: nothing, in a fixture case, unless a spec says otherwise.
+    if (caseId && path === `/api/cases/${caseId}/delete-impact` && request.method() === 'POST') {
+      return json(route, {
+        cascade: [], tombstone: [], touched: [], counts: { cascade: 0, tombstone: 0, touched: 0 },
+      });
+    }
     const trashMatch = caseId && path.match(new RegExp(`^/api/cases/${caseId}/trash/([^/]+)(/restore)?$`));
     if (trashMatch) {
       const groupId = trashMatch[1];

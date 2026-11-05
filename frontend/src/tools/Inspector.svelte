@@ -1267,6 +1267,7 @@
       title="Clear the work on this file?"
       message="Its frames and edits go to the Trash."
       detail="Media already saved to the case stays where it is."
+      impact={work.name ? { caseId: work.caseId, named: [{ tool: 'inspect', name: work.source?.path }] } : null}
       confirmLabel="Clear work"
       tone="danger"
       icon="reset"

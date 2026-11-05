@@ -6934,6 +6934,7 @@
       ? `This proof no longer points at “${orphanOffer[0].label}”.`
       : `This proof no longer points at ${orphanOffer.length} saved places.`}
     detail="Nothing else in the case points there."
+    impact={{ caseId: caseState.current?.id, ids: orphanOffer.map((place) => place.id) }}
     restorable={RESTORABLE}
     confirmLabel="Delete"
     tone="default"
@@ -6949,6 +6950,7 @@
     title="Delete this proof?"
     message={`“${deleteEntry.title}” will be removed from the case.`}
     detail="Moves the PNG and editable proof to the case trash."
+    impact={{ caseId: caseState.current?.id, paths: [deleteEntry.spec_path] }}
     restorable={RESTORABLE}
     confirmLabel="Delete"
     tone="default"

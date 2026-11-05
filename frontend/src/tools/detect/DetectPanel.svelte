@@ -27,6 +27,9 @@
   import DetectWizard from './DetectWizard.svelte';
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
+  import ConfirmDialog from '../../components/ConfirmDialog.svelte';
+  import { touchesNothing } from '../../lib/deleteImpact.js';
+  import { RESTORABLE } from '../../lib/trash.js';
   import AreaDates from './AreaDates.svelte';
   import AreasPanel from './AreasPanel.svelte';
 
@@ -586,6 +589,15 @@
     await refreshRuns(caseId);
   }
 
+  // A routine or a pass goes to the Trash in one press, unless something else in the
+  // case leans on it: then the dialog says what first.
+  let removing = $state(null); // { kind, row, target } while that dialog is up
+  async function askRemoveItem(kind, row) {
+    const target = { caseId, named: [{ tool: kind, name: row.id }] };
+    if (await touchesNothing(target)) await removeItem(kind, row);
+    else removing = { kind, row, target };
+  }
+
   async function removeItem(kind, row) {
     await api.del(`${base()}/${kind}/${row.id}`);
     if (kind === 'runs') {
@@ -768,7 +780,7 @@
           onopenrun={(run) => act(() => openRun(run.id))}
           oncolour={(group, colour) => act(() => changeRoutineColour(group, colour))}
           onruncolour={(run, colour) => act(() => changeRunColour(run, colour))}
-          ondelete={(kind, row) => act(() => removeItem(kind, row))}
+          ondelete={(kind, row) => act(() => askRemoveItem(kind, row))}
           {onframe} onexport={(kind, id) => act(() => exportLayer(kind, id))}
           onhover={(id) => {
             const hovered = lists.followups.find((row) => row.id === id);
@@ -785,7 +797,7 @@
             onexport={() => act(() => exportLayer('followups', detection.id))}
             oncancel={(run) => act(() => cancelRun(run))}
             onedit={() => act(() => editDetection(detection.id))}
-            ondelete={() => act(() => removeItem('followups', detection))}
+            ondelete={() => act(() => askRemoveItem('followups', detection))}
             onopenrun={(run) => act(() => openRun(run.id))}
             onopenfinding={(row) => act(async () => {
               onfocus(row.coordinates);
@@ -821,6 +833,20 @@
   {/if}
   </div>
 </aside>
+
+{#if removing}
+  <ConfirmDialog
+    title={removing.kind === 'runs' ? 'Delete this pass?' : 'Delete this routine?'}
+    message={`“${removing.row.title ?? removing.row.name ?? ''}” goes to the Trash.`}
+    impact={removing.target}
+    restorable={RESTORABLE}
+    confirmLabel="Delete"
+    icon="trash"
+    busy={busy}
+    onconfirm={() => { const { kind, row } = removing; removing = null; void act(() => removeItem(kind, row)); }}
+    oncancel={() => (removing = null)}
+  />
+{/if}
 
 {#if repeatRequest}
   <Modal title="Already run between these dates" width="560px" onclose={nextRepeat}>

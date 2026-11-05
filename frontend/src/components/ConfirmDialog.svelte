@@ -2,6 +2,7 @@
   import Icon from './Icon.svelte';
   import { portal } from '../lib/fullscreen.js';
   import { isTopOverlay, joinOverlays } from '../lib/overlayStack.js';
+  import DeleteImpact from './DeleteImpact.svelte';
 
   // A small, styled confirmation dialog — replaces the browser confirm() popup.
   // Tone drives the accent so an irreversible action reads differently from one
@@ -10,15 +11,18 @@
   //   tone: 'default' → reversible (delete an artifact, unfile, remove a folder)
   // Deleting an artifact left this tone when the trash arrived: it still drops
   // files, but the case holds them until someone empties it.
-  // `consequences` spells out what else a delete touches, so the click is never
-  // a guess: what goes with it, what stays behind scarred, and what can be
-  // brought back.
-  //   { cascade: [{ label }], tombstone: [{ label }] }
+  // `impact` names what a delete will take, and the dialog asks the server what
+  // else that touches (`lib/deleteImpact.js`), so the click is never a guess: what
+  // goes with it, what stays behind scarred, what loses its link to it.
+  //   { caseId, ids?: [id], paths?: [path], named?: [{ tool, name }] }
+  // The confirm button waits for the answer, and stays off when the answer says the
+  // delete would be refused; a failed one leaves it free, since the delete enforces
+  // its plan server-side whatever this said.
   let {
     title,
     message,
     detail = '',
-    consequences = null,
+    impact = null,
     restorable = '',
     confirmLabel = 'Confirm',
     cancelLabel = 'Cancel',
@@ -54,6 +58,9 @@
   function onkeydown(e) {
     if (e.key === 'Escape' && isTopOverlay(self)) oncancel?.();
   }
+
+  let reaching = $state(false);
+  let blocked = $state(false);
 
   // Enter held down on the button that opened this dialog keeps firing keydown, and the
   // repeats land on whatever now holds the focus — answering the dialog with the very
@@ -91,32 +98,7 @@
     {#if detail}
       <p class="detail" class:danger={tone === 'danger'}>{detail}</p>
     {/if}
-    {#if consequences?.cascade?.length}
-      <div class="conseq danger">
-        <div class="conseq-h">
-          <Icon name="trash" size={12} />
-          <span>Deleted with it because they cannot stand alone</span>
-        </div>
-        <ul>
-          {#each consequences.cascade as item (item.id ?? item.label)}
-            <li>{item.label}</li>
-          {/each}
-        </ul>
-      </div>
-    {/if}
-    {#if consequences?.tombstone?.length}
-      <div class="conseq">
-        <div class="conseq-h">
-          <Icon name="check" size={12} />
-          <span>Kept with a record of its missing source</span>
-        </div>
-        <ul>
-          {#each consequences.tombstone as item (item.id ?? item.label)}
-            <li>{item.label}</li>
-          {/each}
-        </ul>
-      </div>
-    {/if}
+    <DeleteImpact target={impact} bind:reaching bind:blocked />
     {#if restorable}
       <div class="conseq restorable">
         <div class="conseq-h">
@@ -133,7 +115,7 @@
       <button
         class="btn {tone === 'danger' ? 'btn-danger' : 'btn-primary'}"
         onclick={onconfirm}
-        disabled={busy}
+        disabled={busy || reaching || blocked}
       >
         {busy ? 'Working…' : confirmLabel}
       </button>
@@ -216,9 +198,6 @@
     border-radius: var(--r-sm);
     font-size: var(--fs-xs);
   }
-  .conseq.danger {
-    background: color-mix(in srgb, var(--danger, #e5484d) 9%, transparent);
-  }
   /* what can be brought back reads as reassurance, not as a warning */
   .conseq.restorable .conseq-h { color: var(--text-2); }
   .conseq-h {
@@ -227,22 +206,6 @@
     gap: 6px;
     color: var(--text-3);
     line-height: 1.35;
-  }
-  .conseq.danger .conseq-h {
-    color: color-mix(in srgb, var(--danger, #e5484d) 85%, var(--text-2));
-  }
-  .conseq ul {
-    margin: 5px 0 0;
-    padding-left: 24px;
-    color: var(--text-2);
-    max-height: 96px;
-    overflow-y: auto;
-  }
-  .conseq li {
-    line-height: 1.5;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .extra {
     margin-top: 12px;

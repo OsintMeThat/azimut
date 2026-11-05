@@ -56,6 +56,7 @@
           folder: folderFilter,
           gps: gpsOnly,
           collectedOnly,
+          unused: unusedOnly,
           sort,
           direction: sortDirection,
           limit: PAGE,
@@ -131,6 +132,14 @@
     pl.facets?.made_here_count ?? items.filter(isMadeHere).length
   );
 
+  // --- what nothing in the case uses (independent of type and folder) ---
+  // The clean-up question: which frames, imports and captures no proof, note, plate
+  // or relation leans on. Answered by the server, which alone reads the records
+  // outside the graph (`engine/uses.py`), and by the same rule the delete dialog
+  // reads, so a file shown here is one whose delete warns about nothing.
+  let unusedOnly = $state(false);
+  const unusedCount = $derived(pl.facets?.unused_count ?? 0);
+
   // --- free-text search + sort ---
   // Newest first, which is what the library is opened for: the files that just came in are
   // the ones being worked on, and A–Z put them wherever their filename happened to fall.
@@ -147,7 +156,8 @@
     { id: 'added', label: 'Added' },
   ];
   const browseFiltersActive = $derived(
-    query.length > 0 || catFilter !== null || folderFilter !== null || gpsOnly || !collectedOnly
+    query.length > 0 || catFilter !== null || folderFilter !== null || gpsOnly || !collectedOnly ||
+      unusedOnly
   );
   const filtersActive = $derived(
     browseFiltersActive || sort !== 'newest' || sortDirection !== 'desc'
@@ -242,6 +252,13 @@
     if (caseState.current) pl.reload();
   }
 
+  function toggleUnusedOnly() {
+    unusedOnly = !unusedOnly;
+    // Always refetch, like the switch above: whether a file is used is not
+    // something the rows in memory know.
+    if (caseState.current) pl.reload();
+  }
+
   /** The stated position, spelled out. Lives in the tooltip rather than in the
    *  row: a filename is what the analyst reads a list by. */
   function pointLabel(item) {
@@ -258,15 +275,20 @@
   }
 
   function resetFilters() {
+    // The rows in memory are the unused ones while that switch is on, and no
+    // pass in the browser can bring the rest back: only a fetch can.
+    const refetch = unusedOnly;
     query = '';
     catFilter = null;
     folderFilter = null;
     gpsOnly = false;
     collectedOnly = true;
+    unusedOnly = false;
     sort = 'newest';
     sortDirection = 'desc';
     headerSort = 'added';
-    reloadIfServerBacked();
+    if (refetch && caseState.current) pl.reload();
+    else reloadIfServerBacked();
   }
 
   // The current card layout is the large view. Small is a denser grid and List
@@ -393,6 +415,11 @@
     if (!uiState.focusMedia) return;
     catFilter = null;
     folderFilter = null;
+    // The file asked for may well be used, and only a fetch brings the rest back.
+    if (unusedOnly) {
+      unusedOnly = false;
+      if (caseState.current) pl.reload();
+    }
     focusedPath = uiState.focusMedia;
     uiState.focusMedia = null;
     clearTimeout(focusTimer);
@@ -1091,6 +1118,23 @@
         </button>
       {/if}
 
+      <!-- Offered once the case holds a file nothing uses, and kept while it is on, so
+           it can always be turned back off. -->
+      {#if unusedCount || unusedOnly}
+        <button
+          class="btn btn-sm gps-filter"
+          class:on={unusedOnly}
+          type="button"
+          aria-pressed={unusedOnly}
+          title={unusedOnly
+            ? 'Show every file again'
+            : `Show only the ${unusedCount} file${unusedCount === 1 ? '' : 's'} no proof, note, plate or link uses`}
+          onclick={toggleUnusedOnly}
+        >
+          <Icon name="unlink" size={13} /> Unused ({unusedCount})
+        </button>
+      {/if}
+
       <!-- user-defined folders (independent facet) -->
       {#if folders.length}
         <span class="bar-sep"></span>
@@ -1621,6 +1665,7 @@
     title="Delete this media?"
     message={`“${deleteTarget.title ?? deleteTarget.filename}” and its entity will be removed from the case.`}
     detail="Moves the media and its file to the case trash."
+    impact={{ caseId: caseState.current?.id, paths: [deleteTarget.path] }}
     restorable={RESTORABLE}
     confirmLabel="Delete"
     tone="default"

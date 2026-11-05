@@ -884,7 +884,13 @@ leaves a gap rather than voiding the layout, and the picture it exports is a
 - `attrs.lost_sources[]` stores `{label, type, path, sha256, source_url, at}`.
   Tombstones are keyed by path and never stacked.
 - Every UI deletion uses the same dependency-aware service. The confirmation
-  lists cascading deletions and surviving outputs before the action.
+  lists cascading deletions, surviving outputs, and every record left losing a link
+  (`engine/uses.py`): a confirmed relation at either end (`same-image-as` aside), a
+  pointer held at the target (`links.POINTER_TYPES`; one the target holds goes with
+  it), and what names it outside the graph: a plate, a collage, a Horizon view, the
+  bench or a search, a layer marker, a sheet, an entity photo. A Detect routine
+  watching an area is listed apart, as what refuses the delete. The Media Library's
+  Unused filter is the same rule read from the other end.
 - Losing a secondary source leaves a placeholder. Only losing the subject can
   invalidate a dependent session.
 - Relations are not chain types. Deleting either endpoint removes the edge but

@@ -501,8 +501,11 @@ async function personalFixture(page, { imported = false, shared = false, count =
   await page.route(`**/api/cases/${CASE_ID}/layer-links`, (route) => route.fulfill({ json: savedIndex()
     .map(({ id, kind, title, lat, lon }) => ({ id, kind, title, lat, lon })) }));
   await page.route(`**/api/cases/${CASE_ID}/layer-palette`, (route) => route.fulfill({ json: { colours: [] } }));
-  await page.route(`**/api/cases/${CASE_ID}/entities/${casePlace.id}/dependents`,
-    (route) => route.fulfill({ json: { cascade: [], tombstone: [] } }));
+  await page.route(`**/api/cases/${CASE_ID}/delete-impact`, (route) => route.fulfill({ json: {
+    cascade: [], tombstone: [], touched: [
+      { id: 'proof-1', type: 'proof', label: 'Gate proof', how: ['mentions'] },
+      { id: 'clip-1', type: 'media', label: 'Gate footage', how: ['was recorded at'] }],
+    counts: { cascade: 0, tombstone: 0, touched: 2 } } }));
   await page.route(`**/api/cases/${CASE_ID}/entities/${casePlace.id}`, (route) => {
     if (route.request().method() !== 'DELETE') return route.fallback();
     placeAlive = false; deleted += 1;

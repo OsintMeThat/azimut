@@ -44,20 +44,12 @@ export const FILE_BACKED = new Set([
  *
  * One dialog for one gesture wherever the click came from, so the board's ticked
  * rows and the organizer's selected tiles cannot drift into two promises about
- * the same act. A single target previews the plan the backend will enforce over
- * the dependents endpoint; a selection does not, since that is one request per
- * row for a list nobody would read.
+ * the same act. The dialog asks what the whole act touches in one request
+ * (`impact`, read by `ConfirmDialog`), a selection included: it is the same plan
+ * the backend enforces over all of it at once.
  */
-export async function entityDeletePrompt(caseId, entities, { get = api.get } = {}) {
+export function entityDeletePrompt(caseId, entities) {
   const many = entities.length > 1;
-  let consequences = null;
-  if (!many && entities.length) {
-    try {
-      consequences = await get(`/api/cases/${caseId}/entities/${entities[0].id}/dependents`);
-    } catch {
-      /* no preview — the delete still enforces the plan server-side */
-    }
-  }
   const files = entities.some((entity) => FILE_BACKED.has(entity.type));
   return {
     title: many ? `Delete ${entities.length} items?` : 'Delete everywhere?',
@@ -67,7 +59,7 @@ export async function entityDeletePrompt(caseId, entities, { get = api.get } = {
     detail: files
       ? `Moves ${many ? 'the items and their files' : 'the item and its files'} to the case trash.`
       : `Moves ${many ? 'the items' : 'the item'} to the case trash.`,
-    consequences,
+    impact: { caseId, ids: entities.map((entity) => entity.id) },
     restorable: RESTORABLE,
     confirmLabel: many ? 'Delete all' : 'Delete everywhere',
     tone: 'default',

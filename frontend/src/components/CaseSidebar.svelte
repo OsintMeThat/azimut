@@ -884,7 +884,6 @@
     title={confirmState.title}
     message={confirmState.message}
     detail={confirmState.detail}
-    consequences={confirmState.consequences}
     restorable={confirmState.restorable ?? ''}
     confirmLabel={confirmState.confirmLabel}
     tone={confirmState.tone}

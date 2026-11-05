@@ -1029,6 +1029,17 @@ remembered per workspace for the current session. Reloading restores the default
   Trash and shows an **Undo** toast. The confirmation uses the neutral tone and
   states what can be restored. Red is for what nothing holds afterwards: deleting a
   case, purging a trash group, emptying Trash, and deleting an entity's private photo.
+  **Every delete says what it touches before it runs.** The dialog asks the server
+  (`POST /delete-impact`, `engine/uses.py`) and leads with *Linked to N other items in
+  the case* or *Nothing else in the case uses it*, then lists what goes with it, what
+  stays with a record of its missing source, and what stays but loses its link to it,
+  each line saying how (*shows it*, *was recorded here*, *1 marker follows it*). The
+  confirm button waits for that answer, at most ten seconds, and stays off when
+  something must let go first (*Take it out of these first*: a Detect routine watching
+  an area); a check that fails says it *could not check*. A selection is previewed as one act, so a proof
+  deleted with its source is not listed as scarred. Saved work that went to the Trash
+  in one press (a plate, a comparison, a Horizon search, a Detect routine or pass)
+  still does when nothing leans on it, and asks first when something does.
 
 ## Case switcher
 
@@ -1620,7 +1631,14 @@ many those are rather than leaving them unannounced; the counts and the paging a
 computed with it so the facets never disagree with the list, and toggling it refetches
 because the loaded page is already the collected subset. It reads how the file
 **entered the case**, which is not everything true about it: one imported and later
-found identical to an extracted frame stays on the side it came in by. A case holding
+found identical to an extracted frame stays on the side it came in by. **Unused (N)**
+is the clean-up axis: the files no proof, post, note, plate, collage, Horizon view or
+search, layer marker, sheet, entity photo or confirmed relation leans on. It reads
+the same rule as the delete dialog, so a file it shows is one whose delete warns
+about nothing. Only direct uses count, so a video stays used while its frames exist
+and comes up once they are gone; Inspect work counts, a `same-image-as` duplicate and
+a suggested link do not. It works inside the working-files switch, so the unused
+frames show once that switch puts them back, and it refetches like it. A case holding
 nothing but working files says so instead of offering to import. **Worklist**, beside
 Import, opens the pictures and videos brought in as the Sheet *Files to geolocate*, built
 on the first press and the same one after (Sheet section). Thumbnail polling follows all pending case jobs, including

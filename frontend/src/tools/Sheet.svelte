@@ -5125,6 +5125,7 @@
   <ConfirmDialog
     title="Delete this sheet"
     message="The CSV and everything the grid remembers about it go to the trash."
+    impact={{ caseId, ids: [openId] }}
     confirmLabel="Delete"
     onconfirm={remove}
     oncancel={() => (confirming = null)} />

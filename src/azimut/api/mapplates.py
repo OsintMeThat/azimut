@@ -416,11 +416,16 @@ async def _played(case: Case, stage: Staged, format: str, interval: int, beats: 
     return await run_in_threadpool(mapplates.sequence_mp4, stage.root, sequence, files, kept)
 
 
+def plate_spec(name: str) -> str:
+    """The record a plate's name stands for, as its delete and its preview read it."""
+    return layout.map_plate_rel(slugify(name, mapplates.FALLBACK))
+
+
 @router.delete("/cases/{case_id}/map-plates/{name}")
 def delete_plate(case_id: str, name: str) -> dict[str, Any]:
     """Send the plate and its preview to the Trash. What it exported stays where it went."""
     case = get_case(case_id)
-    rel = layout.map_plate_rel(slugify(name, mapplates.FALLBACK))
+    rel = plate_spec(name)
     result = delete_by_path(case, rel)
     if not result["deleted"]:
         artifact_engine.delete(case, {"type": mapplates.TYPE, "attrs": {"spec": rel}})
