@@ -1,0 +1,10 @@
+{
+  "about": "When an edge to a place is the analyst's, read by tests/test_note_from_case.py (satellite.road_status) and frontend/src/lib/noteHere.test.js (placeOf) so the server and the note bar agree.",
+  "cases": [
+    [null, null, true, "an edge and a place filed before statuses existed"],
+    ["confirmed", "confirmed", true, "both the analyst's"],
+    ["suggested", "confirmed", false, "a relation a tool proposed"],
+    ["confirmed", "suggested", false, "a point a tool proposed"],
+    ["suggested", "suggested", false, "a GPS reading nobody reviewed"]
+  ]
+}

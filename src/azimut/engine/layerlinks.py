@@ -60,8 +60,7 @@ def entity_points(case: Case, entity: dict[str, Any]) -> list[tuple[float, float
     elif kind == "media":
         # where the map's Media position draws the file, a place stated in its
         # Details included; a point only a tool proposed is not the analyst's yet
-        points = [spot for spot in satellite.media_spots(case, entity["id"])
-                  if any(road["status"] != "suggested" for road in spot["roads"])]
+        points = satellite.confirmed_spots(case, entity["id"])
     else:
         placed = satellite.placements(case, entity["id"]) or {}
         points = placed.get("points") or []

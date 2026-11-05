@@ -399,7 +399,7 @@
 {/if}
 
 {#if calloutAnchor}
-  <FloatingMenu anchor={calloutAnchor} width={230} label="Callouts" onclose={() => (calloutAnchor = null)}>
+  <FloatingMenu anchor={calloutAnchor} width={300} label="Callouts" onclose={() => (calloutAnchor = null)}>
     {#each CALLOUTS as item (item.kind)}
       <button type="button" class="fm-item" onclick={() => callout(item.kind)}>
         <span class="swatch" style:background={item.colour}></span><span class="fm-grow">{item.label}</span><small>{item.hint}</small>

@@ -23,4 +23,6 @@ export const LOOK_HELP = {
   write: 'The note alone',
   page_pane: 'The PDF beside the note, drawn as you type',
   page_in_place: 'The PDF of the note, in place of its text',
+  internal: 'The note whole, its internal passages in marked boxes',
+  public: 'The note without its internal passages, for readers outside the team',
 };

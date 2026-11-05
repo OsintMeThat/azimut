@@ -29,11 +29,12 @@ const answer = {
     { line: 2, ref: 'media:m2', page: 0, box: [0.1, 0.2, 0.4, 0.2], width: '50%', align: 'center' },
   ],
 };
+const { asked } = vi.hoisted(() => ({ asked: [] }));
 vi.mock('../../lib/notes/preview.js', () => ({
   pageLine: (pages, index) => pages[index] ?? 0,
   createPreview: ({ onresult }) => ({
-    ask: () => onresult(answer),
-    now: async () => onresult(answer),
+    ask: (request) => { asked.push(request); onresult(answer); },
+    now: async (request) => { asked.push(request); onresult(answer); },
     stop: () => {},
   }),
 }));
@@ -45,6 +46,7 @@ const { canStateSourceOf, stateSourceOf } = vi.hoisted(() => ({
 vi.mock('../../lib/notes/sources.js', () => ({ canStateSourceOf, stateSourceOf }));
 
 const { registerOpener, resetOpeners } = await import('../../lib/notes/openers.js');
+const { editionOf, reloadEditions } = await import('../../lib/notes/editions.svelte.js');
 const { default: PagePane } = await import('./PagePane.svelte');
 
 let target;
@@ -54,6 +56,10 @@ afterEach(() => {
   target?.remove();
   app = null;
   answer.warnings = [];
+  answer.internal = 0;
+  asked.length = 0;
+  localStorage.clear();
+  reloadEditions();
   resetOpeners();
   vi.clearAllMocks();
 });
@@ -232,5 +238,47 @@ describe('what the page warns about', () => {
     await pane({});
     expect(target.querySelector('.warned')).toBeNull();
     expect(target.querySelector('ul[aria-label="Warnings"]')).toBeNull();
+  });
+});
+
+describe('the editions', () => {
+  const settle = async () => {
+    for (let round = 0; round < 4; round += 1) {
+      await tick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    flushSync();
+  };
+  const switchOf = () => target.querySelector('.pane-bar [role="group"][aria-label="Edition"]');
+
+  it('are offered only when the note holds an internal passage', async () => {
+    await pane({});
+    expect(switchOf()).toBeNull();
+    expect(asked.at(-1).edition).toBe('internal');
+  });
+
+  it('draw the edition picked at once, and keep it for the note', async () => {
+    answer.internal = 2;
+    await pane({});
+    const [internal, publicOne] = switchOf().querySelectorAll('button');
+    expect(internal.getAttribute('aria-pressed')).toBe('true');
+    expect(publicOne.title).toBe('The note without its internal passages, for readers outside the team');
+    const before = asked.length;
+    publicOne.click();
+    await settle();
+    expect(asked.length).toBe(before + 1);
+    expect(asked.at(-1)).toMatchObject({ caseId: 'c1', note: 'n1', edition: 'public' });
+    expect(switchOf().querySelector('[aria-pressed="true"]').textContent).toBe('Public');
+    expect(editionOf('c1', 'n1')).toBe('public');
+    expect(editionOf('c1', 'n2')).toBe('internal');
+  });
+
+  it('are kept for the visit only in a template, which no note holds', async () => {
+    answer.internal = 1;
+    await pane({ caseId: '', note: 'case' });
+    switchOf().querySelectorAll('button')[1].click();
+    await settle();
+    expect(asked.at(-1).edition).toBe('public');
+    expect(localStorage.getItem('azimut:note-editions')).toBeNull();
   });
 });

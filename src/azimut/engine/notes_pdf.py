@@ -51,6 +51,15 @@ carries a small `[n]` linked to its entry after every citation.
 Page pane and the export's check can say what is wrong and where: a picture or a
 record no longer in the case, a picture without a source, a task left open, a link
 a reader cannot open, a section left empty.
+
+**Two editions.** A quote opening `> [!internal]` is a passage for the team only.
+The internal edition prints it as a marked box. The public edition is laid out from
+the note with every such passage blanked out first (`strip_internal`), chapters
+included, so nothing that exists only because of one can reach the page: not its
+words, not a heading of it in the contents, not a source only it cites, not a `[n]`.
+A passage counts as internal when either reader of the note says so, the editor
+(the quote's first line) or this parser (its first paragraph); the public edition
+drops what either sees, and refuses to print if one were still there.
 """
 
 from __future__ import annotations
@@ -177,7 +186,19 @@ CALLOUTS: dict[str, tuple[str, tuple[int, int, int]]] = {
     "lead": ("Lead", (30, 100, 170)),
     "note": ("Note", (119, 119, 119)),
     "warning": ("Warning", (178, 52, 40)),
+    "internal": ("Internal", (111, 87, 160)),
 }
+
+#: The callout that keeps a passage out of the public edition, and the two editions.
+INTERNAL = "internal"
+PUBLIC = "public"
+EDITIONS = (INTERNAL, PUBLIC)
+#: A quote whose first line opens `[!internal]`, as the Notebook's editor reads it
+#: (`CALLOUT_LINE` in `lib/notes/callouts.js`): ASCII letters, any case.
+EDITOR_INTERNAL = re.compile(r"^\s*>\s*\[!internal\]", re.I | re.A)
+#: Whether a stretch of text could hold an internal passage at all. Wider than
+#: either reader, so a passage it misses is one neither reader would see.
+MAYBE_INTERNAL = re.compile(r"\[!internal\]", re.I)
 
 #: What a document without a case shows where a case would show its own: a
 #: template's preview never reads a case file.
@@ -210,14 +231,16 @@ ADDRESS_BREAKS = "/?&=#-_.~:+,;"
 #: What a warning is about, for the Page pane and the check before export: a
 #: picture, video, chapter or record no longer in the case; a picture with no
 #: source while the sources are listed; tasks left open in a styled document; a
-#: link a reader cannot open; a section left empty; anything else.
+#: link a reader cannot open; a section left empty; anything else. The check before
+#: export adds one that is no fault: the internal passages a public edition leaves out.
 MISSING = "missing"
 UNSOURCED = "unsourced"
 OPEN_TASK = "open-task"
 LOCAL_LINK = "local-link"
 EMPTY_SECTION = "empty-section"
 OTHER = "other"
-WARNING_KINDS = (MISSING, UNSOURCED, OPEN_TASK, LOCAL_LINK, EMPTY_SECTION, OTHER)
+LEFT_OUT = "internal"
+WARNING_KINDS = (MISSING, UNSOURCED, OPEN_TASK, LOCAL_LINK, EMPTY_SECTION, OTHER, LEFT_OUT)
 #: How many links a reader cannot open are named one by one before the rest are counted.
 MAX_LOCAL_LINKS = 10
 #: What the aside says where an included note is gone: the warning is read off it.
@@ -273,6 +296,11 @@ class Rendered:
     diagrams: list[tuple[str, str]] = field(default_factory=list)
     #: Where each picture of the note itself landed, for the Page pane.
     pictures: list["PagePicture"] = field(default_factory=list)
+    #: The internal passages in the note and its chapters: printed in the internal
+    #: edition, left out of the public one.
+    internal: int = 0
+    #: The SHA-256 of the source this edition printed (`printed_source`).
+    text_sha256: str = ""
 
 
 @dataclass
@@ -383,15 +411,18 @@ def diagram_key(source: str) -> str:
     return hashlib.sha256(source.strip().encode("utf-8")).hexdigest()[:16]
 
 
-def mermaid_sources(text: str, *, resolve: Resolve | None = None, note_id: str = "") -> list[str]:
+def mermaid_sources(
+    text: str, *, resolve: Resolve | None = None, note_id: str = "", public: bool = False
+) -> list[str]:
     """Every Mermaid fence in a note and the chapters it prints, in document order.
 
     The caller draws these; it is here rather than in the frontend so one parser
-    decides what counts as a diagram.
+    decides what counts as a diagram. The public edition asks for none of an
+    internal passage's.
     """
     return [
         token.content
-        for piece in expand("", text, resolve=resolve, note_id=note_id)
+        for piece in expand("", text, resolve=resolve, note_id=note_id, public=public)
         if piece.kind == "text"
         for token in _parser().parse(_case_references(piece.text))
         if token.type == "fence" and MERMAID_INFO.match(token.info or "")
@@ -408,6 +439,7 @@ def render(
     note_id: str = "",
     resolve: Resolve | None = None,
     created: datetime | None = None,
+    public: bool = False,
 ) -> Rendered:
     """Lay one note out as a PDF.
 
@@ -417,12 +449,18 @@ def render(
     finds the notes a chapter line includes; without it they print as a
     placeholder too.
     ``created`` pins the document's creation date, which is otherwise now.
+    ``public`` lays out the public edition: every internal passage left out.
     """
     look = look or DEFAULT_LOOK
     theme = notes_style.theme_for(look)
     day = date.fromisoformat(look.cover.date) if look.cover.date else (created or datetime.now()).date()
-    pieces = expand(title, text, resolve=resolve, note_id=note_id)
+    passages = [0]
+    pieces = expand(title, text, resolve=resolve, note_id=note_id, public=public, counter=passages)
     blocks = {id(piece): _alignment_blocks(piece.text) for piece in pieces if piece.kind == "text"}
+    if public and any(_holds_internal(block.tokens) for parsed in blocks.values() for block in parsed):
+        # cannot happen, since the text was stripped as this parser reads it; if it
+        # ever did, no page is better than a page with the passage on it
+        raise NotesPdfError("an internal passage could not be left out, so the public edition was not made")
     # what the document cites is read before a page is laid out: the sources list
     # numbers every citation before the first is drawn, and its words need their fonts
     cited = _Cited(case, look=look, styled=not theme.plain)
@@ -449,6 +487,8 @@ def render(
         pages=builder.pages,
         diagrams=list(builder.missing.items()),
         pictures=builder.pictures,
+        internal=passages[0],
+        text_sha256=hashlib.sha256(printed_source(pieces).encode("utf-8")).hexdigest(),
     )
 
 
@@ -482,16 +522,29 @@ def expand(
     *,
     resolve: Resolve | None,
     note_id: str = "",
+    public: bool = False,
+    counter: list[int] | None = None,
 ) -> list[Piece]:
     """The note cut at its include lines, each chapter's note spliced in.
 
-    Guidance lines are emptied first (lines kept, so line numbers still hold).
+    Guidance lines are emptied first (lines kept, so line numbers still hold), and
+    for the public edition every internal passage too, in the note and in each
+    chapter, before the include lines are read: a chapter written inside one is
+    left out with it. ``counter[0]`` is raised by the internal passages found.
     """
     pieces: list[Piece] = []
     budget = [MAX_CHAPTERS]
     _expand_into(pieces, title, without_hints(text), resolve=resolve,
-                 chain=(note_id,) if note_id else (), depth=0, at=None, budget=budget, source=0)
+                 chain=(note_id,) if note_id else (), depth=0, at=None, budget=budget, source=0,
+                 public=public, counter=counter if counter is not None else [0])
     return pieces
+
+
+def printed_source(pieces: list[Piece]) -> str:
+    """What a document printed, as text: each stretch of note, chapter title and
+    aside in document order, one after the other. Guidance is blank in it, and in
+    the public edition so is every internal passage, so each edition has its own."""
+    return "\n".join(piece.text for piece in pieces)
 
 
 def _expand_into(
@@ -505,7 +558,14 @@ def _expand_into(
     at: int | None,
     budget: list[int],
     source: int,
+    public: bool = False,
+    counter: list[int] | None = None,
 ) -> None:
+    counter = counter if counter is not None else [0]
+    stripped, passages = strip_internal(text)
+    counter[0] += passages
+    if public:
+        text = stripped
     lines = text.split("\n")
     start = 0
     fenced = False
@@ -514,6 +574,10 @@ def _expand_into(
     def flush(end: int) -> None:
         nonlocal opens
         segment = "\n".join(lines[start:end])
+        if public:
+            # cut from its chapters, a stretch can parse apart from the whole note
+            segment, more = strip_internal(segment)
+            counter[0] += more
         if segment.strip() or opens is not None:
             pieces.append(Piece("text", segment, depth, start if at is None else at,
                                 at is not None, opens, source))
@@ -555,8 +619,82 @@ def _expand_into(
         number = MAX_CHAPTERS - budget[0]
         pieces.append(Piece("chapter", chapter_title, depth + 1, where, True, None, number))
         _expand_into(pieces, chapter_title, without_hints(chapter_text), resolve=resolve,
-                     chain=(*chain, target), depth=depth + 1, at=where, budget=budget, source=number)
+                     chain=(*chain, target), depth=depth + 1, at=where, budget=budget, source=number,
+                     public=public, counter=counter)
     flush(len(lines))
+
+
+# -- the internal passages -----------------------------------------------------
+
+
+def strip_internal(text: str) -> tuple[str, int]:
+    """``text`` with every internal passage blanked, lines kept, and how many there were.
+
+    A passage is the quote's whole extent as Markdown reads it, lazy lines and all.
+    Blanking can only take text away, but it can split a list or quote around a
+    passage, and what is left is read again until no passage remains, so the text
+    returned holds none for either reader.
+    """
+    if not MAYBE_INTERNAL.search(text):
+        return text, 0
+    lines = text.split("\n")
+    found = 0
+    while True:
+        spans = _merged(_internal_spans("\n".join(lines)))
+        if not spans:
+            return "\n".join(lines), found
+        found += len(spans)
+        before = list(lines)
+        for first, end in spans:
+            lines[first:end] = [""] * (end - first)
+        if lines == before:
+            # nothing left to blank; `render` refuses a public page that still holds one
+            return "\n".join(lines), found
+
+
+def internal_passages(text: str) -> int:
+    """How many internal passages a stretch of note holds, as `strip_internal` counts them."""
+    return strip_internal(text)[1]
+
+
+def _internal_spans(text: str) -> list[tuple[int, int]]:
+    """The lines (first, end) of each internal quote, as the whole note parses and as
+    the renderer parses it around its `::: center` blocks."""
+    lines = text.split("\n")
+    spans = _quote_spans(_parse(text), 0, lines)
+    for block in _alignment_blocks(text):
+        spans.extend(_quote_spans(block.tokens, block.line, lines))
+    return spans
+
+
+def _quote_spans(tokens: list[Token], offset: int, lines: list[str]) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    for index, token in enumerate(tokens):
+        if token.type != "blockquote_open" or not token.map:
+            continue
+        first, end = offset + token.map[0], offset + token.map[1]
+        editor = 0 <= first < len(lines) and EDITOR_INTERNAL.match(lines[first]) is not None
+        if editor or _callout_kind(tokens, index) == INTERNAL:
+            spans.append((first, max(end, first + 1)))
+    return spans
+
+
+def _merged(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Overlapping or nested spans as one: a passage inside a passage is one passage."""
+    merged: list[tuple[int, int]] = []
+    for first, end in sorted(spans):
+        if merged and first < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((first, end))
+    return merged
+
+
+def _holds_internal(tokens: list[Token]) -> bool:
+    return any(
+        token.type == "blockquote_open" and _callout_kind(tokens, index) == INTERNAL
+        for index, token in enumerate(tokens)
+    )
 
 
 # -- source rewrites, mirroring lib/markdown.js ------------------------------
@@ -1127,6 +1265,10 @@ class _Builder:
         self._chapters = 0
         self._contents_entries = 0
         self._opening = (0, 0.0)
+        #: The chapter the stretch being drawn runs into, and the page a heading
+        #: leading into a chapter that opens a page of its own was set on.
+        self._lead: Piece | None = None
+        self._led_page: int | None = None
         pdf.on_page = self._page_begins
         self._render = DECODED.begin()
         pdf.place_picture = lambda source, **options: self._picture(source, **options)
@@ -1154,7 +1296,7 @@ class _Builder:
         #: Where the body begins: a first chapter here needs no page of its own.
         self._opening = (pdf.page, pdf.get_y())
         drawn = False
-        for piece in pieces:
+        for position, piece in enumerate(pieces):
             if piece.kind == "chapter":
                 self._end_entry()
                 self._chapter(piece)
@@ -1168,9 +1310,15 @@ class _Builder:
                 continue
             self._shift = piece.shift
             self._fixed = piece.fixed
-            for block in blocks[id(piece)]:
+            following = pieces[position + 1] if position + 1 < len(pieces) else None
+            parsed = blocks[id(piece)]
+            # a heading closing the stretch before a chapter is kept with that chapter
+            last = max((index for index, block in enumerate(parsed) if block.tokens), default=-1)
+            for index, block in enumerate(parsed):
                 self._block_line = piece.line + (0 if piece.fixed else block.line)
+                self._lead = following if index == last and following is not None and following.kind == "chapter" else None
                 drawn = self._walk(block.tokens, block.start, block.align, stop=None)[0] or drawn
+            self._lead = None
             self._end_entry()
         if not drawn:
             self._aside("This note is empty.")
@@ -1628,19 +1776,31 @@ class _Builder:
         numbered: bool = True,
     ) -> None:
         """A heading at ``level`` (1 to 6, after a chapter's shift), numbered and
-        bookmarked when the look asks, kept with what follows it."""
+        bookmarked when the look asks, kept with what follows it.
+
+        A heading with nothing under it before a chapter is that chapter's lead-in:
+        it keeps room for the chapter's title, or, where a chapter opens a page of
+        its own, opens that page itself and the chapter follows it there."""
         theme = self.theme
         tag = f"h{level}"
         size, space = theme.headings.get(tag, theme.headings["h6"])
         pdf = self.pdf
         number = self._number(level) if numbered else ""
+        chapter = self._lead if self._lead is not None and _nothing_after(tokens, after) else None
+        room = self._next_height(tokens, after)
+        if chapter is not None and self._opens_page(chapter):
+            if pdf.get_y() > pdf.t_margin + 4 and (pdf.page, pdf.get_y()) != self._opening:
+                pdf.add_page()
+            self._led_page = pdf.page
+        elif chapter is not None:
+            room = self._keeps(chapter.depth)
         if theme.plain:
             if pdf.get_y() > theme.margin_top + 2:
                 pdf.ln(space)
             # A heading alone at the foot of a page belongs with what follows it, so
             # what follows is measured rather than assumed: two lines of text is one
             # thing to reserve, a full-width capture is another.
-            if pdf.will_page_break(size * 0.7 + self._next_height(tokens, after)):
+            if pdf.will_page_break(size * 0.7 + room):
                 pdf.add_page()
             self._bookmark(runs, level, number)
             if number:
@@ -1656,15 +1816,16 @@ class _Builder:
                 bottom=1.8 * theme.scale,
             )
             return
-        self._styled_heading(runs, level, number, tokens, after, align)
+        self._styled_heading(runs, level, number, room, align)
+        if chapter is not None and self._led_page is not None:
+            self._led_page = pdf.page
 
     def _styled_heading(
         self,
         runs: list[Run],
         level: int,
         number: str,
-        tokens: list[Token],
-        after: int,
+        room: float,
         align: Align,
     ) -> None:
         theme, pdf = self.theme, self.pdf
@@ -1679,7 +1840,7 @@ class _Builder:
             space = theme.headings["h2"][1] + 0.6
         if pdf.get_y() > pdf.t_margin + 2:
             pdf.ln(space)
-        if pdf.will_page_break(size * 0.7 + 4 + self._next_height(tokens, after)):
+        if pdf.will_page_break(size * 0.7 + 4 + room):
             pdf.add_page()
         self._bookmark(runs, level, number)
         colour = theme.ink
@@ -1742,8 +1903,10 @@ class _Builder:
         self._line = piece.line
         pdf, theme = self.pdf, self.theme
         runs = [Run(piece.text)]
-        if theme.style == "report" and piece.depth == 1:
-            if pdf.get_y() > pdf.t_margin + 4 and (pdf.page, pdf.get_y()) != self._opening:
+        led, self._led_page = self._led_page, None
+        if self._opens_page(piece):
+            # a heading leading into the chapter opened its page already
+            if pdf.get_y() > pdf.t_margin + 4 and (pdf.page, pdf.get_y()) != self._opening and led != pdf.page:
                 pdf.add_page()
             number = self._number(piece.depth)
             self._bookmark(runs, piece.depth, number)
@@ -1770,6 +1933,23 @@ class _Builder:
         else:
             self._heading(runs, piece.depth, [], 0, Align.L)
 
+    def _keeps(self, level: int) -> float:
+        """What a heading at ``level`` asks of the page before it draws itself, as its
+        own check reckons it: the space above it, its line, and two lines under it."""
+        theme = self.theme
+        if theme.plain:
+            size, space = theme.headings.get(f"h{level}", theme.headings["h6"])
+            return space + size * 0.7 + theme.leading * 2
+        rank = max(1, min(6, level - self._base + 1))
+        size, space = theme.headings.get(f"h{rank}", theme.headings["h6"])
+        if theme.style == "brief" and rank <= 2:
+            size, space = 9.4 * theme.scale, theme.headings["h2"][1] + 0.6
+        return space + size * 0.7 + 4 + theme.leading * 2
+
+    def _opens_page(self, piece: Piece) -> bool:
+        """Whether a chapter starts on a page of its own: a report's, at the first level."""
+        return self.theme.style == "report" and piece.depth == 1
+
     def _next_height(self, tokens: list[Token], index: int, depth: int = 0) -> float:
         """How tall the block after a heading is, at least, for the heading to be
         kept with it: a picture with its caption, a table's first two rows, a boxed
@@ -1793,7 +1973,7 @@ class _Builder:
             # the header row and the first row under it, which fpdf2 keeps together
             line, pad = (5.0, 1.6) if theme.plain else (4.6, 1.7)
             return 2 * (line * theme.scale + 2 * pad) + (0 if theme.plain else 0.8)
-        elif token.type == "blockquote_open" and not theme.plain:
+        elif token.type == "blockquote_open" and (not theme.plain or _callout_kind(tokens, index) == INTERNAL):
             return max(theme.leading * 2, 15.0)  # a boxed callout opens on a page with room for it
         elif token.type == "paragraph_open" and index + 1 < len(tokens):
             children = [
@@ -1880,7 +2060,8 @@ class _Builder:
         return index + 1
 
     def _on_blockquote_open(self, tokens: list[Token], index: int, align: Align) -> int:
-        if not self.theme.plain:
+        # an internal passage is boxed in every style, so it stands out wherever it prints
+        if not self.theme.plain or _callout_kind(tokens, index) == INTERNAL:
             return self._boxed_quote(tokens, index, align)
         pdf = self.pdf
         top = pdf.get_y()
@@ -3024,6 +3205,15 @@ def _cut_runs(runs: list[Run], start: int) -> list[Run]:
     return [run for run in kept if run.text.strip()]
 
 
+def _nothing_after(tokens: list[Token], index: int) -> bool:
+    """Whether nothing that prints follows ``index`` in a stretch: its end, or only
+    comments, which print nothing."""
+    return all(
+        token.type == "html_block" and COMMENT.match(token.content.strip()) is not None
+        for token in tokens[index:]
+    )
+
+
 def _callout_kind(tokens: list[Token], index: int) -> str:
     """The kind a quote opens with, `confirmed` for `> [!confirmed]`, read without
     touching the tokens."""
@@ -3047,7 +3237,7 @@ def _past(tokens: list[Token], index: int) -> int:
 def _take_callout(tokens: list[Token], index: int) -> tuple[str, tuple[int, int, int]] | None:
     """A quote opening with `[!kind]`: its label and colour, the marker taken out of its text.
 
-    The Notebook draws the same five kinds (`lib/notes/callouts.js`). An unknown kind
+    The Notebook draws the same six kinds (`lib/notes/callouts.js`). An unknown kind
     stays a plain quote with its marker written, as GitHub leaves it.
     """
     if index + 2 >= len(tokens) or tokens[index + 1].type != "paragraph_open":

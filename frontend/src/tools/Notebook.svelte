@@ -17,7 +17,10 @@
    * The export dialog opens at once and asks the server what the PDFs would warn
    * about (`lib/notes/warnings.js`). What it finds is listed before anything is
    * written, each with a way to the line it is about; a check that fails says
-   * nothing and never holds the export back.
+   * nothing and never holds the export back. When a note picked holds an internal
+   * passage, the dialog asks which edition to write, Internal or Public, the choice
+   * kept per note (`lib/notes/editions.svelte.js`). Every export is a new file, and
+   * a note's ⋯ lists its editions, each with Show and Check.
    */
   import { onDestroy, untrack } from 'svelte';
   import { api } from '../lib/api.js';
@@ -34,7 +37,8 @@
   } from '../lib/notes/look.js';
   import { keepPageView, readPageView } from '../lib/notes/pageView.js';
   import { exportNotes, revealExports } from '../lib/notesExport.js';
-  import { checkNotes } from '../lib/notes/warnings.js';
+  import { checkNotes, isLeftOut } from '../lib/notes/warnings.js';
+  import { editionOfAll, keepEdition, PUBLIC } from '../lib/notes/editions.svelte.js';
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
   import { assignFolder, renameEntity } from '../lib/filing.js';
   import { openEntity } from '../lib/navigate.js';
@@ -49,6 +53,8 @@
   import LookControl from './notebook/LookControl.svelte';
   import PagePane from './notebook/PagePane.svelte';
   import ViewModes from './notebook/ViewModes.svelte';
+  import EditionSwitch from './notebook/EditionSwitch.svelte';
+  import EditionsDialog from './notebook/EditionsDialog.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import FloatingMenu from '../components/FloatingMenu.svelte';
@@ -77,8 +83,12 @@
   let exportBusy = $state(false);
   let exportDir = $state('');
   let exportPicker = $state(false);
-  // what the export would warn about: null, { checking: true }, or { found: [...] } by note
+  // what the export would warn about: null, { checking: true }, or { found: [...], internal } by note
   let exportCheck = $state(null);
+  // the edition the export writes, internal or public
+  let exportEdition = $state('internal');
+  // the note whose editions are listed: { noteId, title }
+  let editionsOf = $state(null);
   let checkController = null;
   // the notes picked on the home, in the order they were picked
   let selected = $state([]);
@@ -485,15 +495,18 @@
     const id = caseId;
     // pressed before the check answered: the export does not wait for it
     if (exportCheck?.checking) stopCheck();
+    // read before the dialog closes, which forgets what the check found
+    const edition = exportEdition;
+    const said = exportCheck?.internal ? `${edition} ` : '';
     exportBusy = true;
     try {
       // the PDF is drawn from the file, so what is still waiting is written first
       if (doc) await flush(doc);
-      const result = await exportNotes(id, noteIds);
+      const result = await exportNotes(id, noteIds, { edition });
       closeExport();
       selected = [];
       const count = result.written.length;
-      toast(`${count} PDF${count > 1 ? 's' : ''} written to ${destinationLabel(result.path)}`, 'ok', 5200, {
+      toast(`${count} ${said}PDF${count > 1 ? 's' : ''} written to ${destinationLabel(result.path)}`, 'ok', 5200, {
         label: 'Show',
         onClick: () => revealExports(id).catch((error) => toast(error.message, 'warn')),
       });
@@ -512,22 +525,32 @@
   /** One note, or the notes picked on the home, each to a PDF of its own. */
   function exportSome(noteIds) {
     exportIds = noteIds.map((id) => id ?? CASE_NOTES);
+    exportEdition = editionOfAll(caseId, exportIds);
     exportOpen = true;
     readExportDestination();
     void checkExport(exportIds);
   }
 
+  /** The edition picked in the dialog: kept for each note, and the check asked again. */
+  function chooseEdition(edition) {
+    exportEdition = edition;
+    keepEdition(caseId, exportIds, edition);
+    void checkExport(exportIds);
+  }
+
   /** Ask what the PDFs would warn about, from the notes as saved; a failure finds nothing. */
   async function checkExport(noteIds) {
+    // the switch stays while the edition it shows is checked again: read before the stop forgets it
+    const internal = exportCheck?.internal ?? 0;
     stopCheck();
     const id = caseId;
     const mine = new AbortController();
     checkController = mine;
-    exportCheck = { checking: true };
+    exportCheck = { checking: true, internal };
     try {
       if (doc) await flush(doc);
-      const found = await checkNotes(id, noteIds, { signal: mine.signal });
-      if (checkController === mine) exportCheck = { found };
+      const answer = await checkNotes(id, noteIds, { signal: mine.signal, edition: exportEdition });
+      if (checkController === mine) exportCheck = answer;
     } catch {
       if (checkController === mine) exportCheck = null;
     } finally {
@@ -701,6 +724,11 @@
           title="Keep this note as it is, to start others from"><Icon name="save" size={14} /><span class="fm-grow">Keep as template</span></button>
       {/if}
       {#if row}
+        <button type="button" class="fm-item" title="Every PDF of this note, with Show and Check"
+          onclick={() => fromMenu((note) => (editionsOf = { noteId: note.id, title: note.title }))}>
+          <Icon name="file" size={14} /><span class="fm-grow">Editions</span></button>
+      {/if}
+      {#if row}
         <div class="fm-sep"></div>
         <button type="button" class="fm-item danger" onclick={() => fromMenu(askRemove)}>
           <Icon name={row.id === CASE_NOTES ? 'reset' : 'trash'} size={14} />
@@ -746,16 +774,30 @@
 
   {#if exportOpen}
     {@const several = exportIds.length > 1}
-    {@const found = exportCheck?.found ?? []}
+    {@const checked = exportCheck?.found ?? []}
+    {@const leftOut = checked.flatMap((item) => item.warnings.filter(isLeftOut).map((warning) => ({ ...warning, title: item.title })))}
+    {@const found = checked.map((item) => ({ ...item, warnings: item.warnings.filter((warning) => !isLeftOut(warning)) }))
+      .filter((item) => item.warnings.length)}
     <Modal title={several ? 'Export notes as PDF' : 'Export note as PDF'} onclose={closeExport} width="560px">
       <div class="export-dest">
         <span class="dest-label">Destination</span>
         <span class="dest-path mono" title={exportDir || "The case's own exports folder"}>{exportDir || "the case's exports folder"}</span>
         <button class="btn btn-ghost btn-sm" onclick={() => (exportPicker = true)}>Change</button>
       </div>
+      {#if exportCheck?.internal}
+        <div class="export-edition">
+          <span class="dest-label">Edition</span>
+          <EditionSwitch value={exportEdition} onchange={chooseEdition} />
+          <span class="edition-said" role="status">
+            {#if exportEdition !== PUBLIC}Internal passages print in marked boxes.
+            {:else if exportCheck?.checking}&nbsp;
+            {:else}{#each leftOut as item, index (index)}<span>{several ? `${item.title}: ` : ''}{item.text}</span>{/each}{/if}
+          </span>
+        </div>
+      {/if}
       <p class="export-note">
         {several ? `${exportIds.length} PDFs will be written, one per note.` : 'One PDF will be written.'}
-        {#if exportDir}Files already there are kept.{:else}An existing file with the same name is replaced.{/if}
+        Earlier exports are kept.
       </p>
       {#if exportCheck?.checking}
         <p class="checking" role="status">Checking…</p>
@@ -787,6 +829,10 @@
           {exportBusy ? 'Exporting…' : found.length ? 'Export anyway' : several ? `Export ${exportIds.length} PDFs` : 'Export PDF'}</button>
       </div>
     </Modal>
+  {/if}
+
+  {#if editionsOf}
+    <EditionsDialog {caseId} noteId={editionsOf.noteId} title={editionsOf.title} onclose={() => (editionsOf = null)} />
   {/if}
 
   {#if exportPicker}
@@ -832,6 +878,8 @@
   .dest-label { color: var(--text-3); }
   .dest-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .export-note { color: var(--text-3); font-size: var(--fs-xs); margin: 6px 0 0; }
+  .export-edition { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: var(--fs-sm); }
+  .edition-said { flex: 1; min-width: 0; display: flex; flex-direction: column; color: var(--text-3); font-size: var(--fs-xs); }
   .checking { color: var(--text-3); font-size: var(--fs-xs); margin: 10px 0 0; }
   .before {
     margin-top: 12px; border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border)); border-radius: var(--r-md);

@@ -3,6 +3,7 @@
 import base64
 import re
 import socket
+from datetime import datetime, timezone
 from io import BytesIO
 
 import pytest
@@ -300,7 +301,18 @@ def make_case(client, name="Notes case"):
     return client.post("/api/cases", json={"name": name}).json()["id"]
 
 
-def test_exporting_writes_one_pdf_per_note(client, tmp_path):
+#: The day the export routes' clock is pinned to, and how it ends a file's name.
+DAY = "2026-03-12"
+PDF = f" - {DAY}.pdf"
+
+
+@pytest.fixture
+def pinned(monkeypatch):
+    """The export's clock, at a fixed day: a file is named after it."""
+    monkeypatch.setattr(notes_api, "_now", lambda: datetime(2026, 3, 12, 9, 30, tzinfo=timezone.utc))
+
+
+def test_exporting_writes_one_pdf_per_note(client, tmp_path, pinned):
     cid = make_case(client)
     client.put(f"/api/cases/{cid}/notes", json={"text": "The case scratchpad.\n"})
     first = client.post(
@@ -316,22 +328,24 @@ def test_exporting_writes_one_pdf_per_note(client, tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert [row["file"] for row in body["written"]] == [
-        "Case notes.pdf",
-        "Rooftop.pdf",
-        "Mast.pdf",
+        f"Case notes{PDF}",
+        f"Rooftop{PDF}",
+        f"Mast{PDF}",
     ]
+    # with no internal passage there is one edition, shareable as it stands
+    assert {row["edition"] for row in body["written"]} == {"public"}
     assert body["warnings"] == []
 
     exports = exports_of(cid)
     assert sorted(p.name for p in exports.glob("*.pdf")) == [
-        "Case notes.pdf",
-        "Mast.pdf",
-        "Rooftop.pdf",
+        f"Case notes{PDF}",
+        f"Mast{PDF}",
+        f"Rooftop{PDF}",
     ]
-    assert "Body." in pdf_text((exports / "Rooftop.pdf").read_bytes())
+    assert "Body." in pdf_text((exports / f"Rooftop{PDF}").read_bytes())
 
 
-def test_a_re_export_overwrites_rather_than_accumulating(client):
+def test_a_re_export_keeps_the_earlier_pdf(client, pinned):
     cid = make_case(client)
     note = client.post(
         f"/api/cases/{cid}/notes", json={"title": "Rooftop", "content": "First.\n"}
@@ -339,14 +353,21 @@ def test_a_re_export_overwrites_rather_than_accumulating(client):
     client.post(f"/api/cases/{cid}/notes/pdf", json={"notes": [note["id"]]})
     client.put(f"/api/cases/{cid}/notes/{note['id']}", json={"text": "Second, longer body.\n"})
     again = client.post(f"/api/cases/{cid}/notes/pdf", json={"notes": [note["id"]]})
+    third = client.post(f"/api/cases/{cid}/notes/pdf", json={"notes": [note["id"]]})
 
     exports = exports_of(cid)
-    assert [p.name for p in exports.glob("*.pdf")] == ["Rooftop.pdf"]
-    assert again.json()["written"][0]["file"] == "Rooftop.pdf"
-    assert "Second, longer body." in pdf_text((exports / "Rooftop.pdf").read_bytes())
+    assert sorted(p.name for p in exports.glob("*.pdf")) == [
+        f"Rooftop - {DAY} (2).pdf",
+        f"Rooftop - {DAY} (3).pdf",
+        f"Rooftop{PDF}",
+    ]
+    assert again.json()["written"][0]["file"] == f"Rooftop - {DAY} (2).pdf"
+    assert third.json()["written"][0]["file"] == f"Rooftop - {DAY} (3).pdf"
+    assert "First." in pdf_text((exports / f"Rooftop{PDF}").read_bytes())
+    assert "Second, longer body." in pdf_text((exports / f"Rooftop - {DAY} (2).pdf").read_bytes())
 
 
-def test_two_notes_with_one_title_keep_two_files(client):
+def test_two_notes_with_one_title_keep_two_files(client, pinned):
     cid = make_case(client)
     first = client.post(
         f"/api/cases/{cid}/notes", json={"title": "Summary", "folder": "video-1", "content": "A"}
@@ -359,15 +380,18 @@ def test_two_notes_with_one_title_keep_two_files(client):
     ).json()["written"]
     by_note = {row["note"]: row["file"] for row in written}
     assert len(set(by_note.values())) == 2
-    assert all(re.search(r" \[[0-9a-f]{16}\]\.pdf$", name) for name in by_note.values())
+    marked = re.compile(r"^Summary (\[[0-9a-f]{16}\]) - 2026-03-12(?: \(\d\))?\.pdf$")
+    assert all(marked.match(name) for name in by_note.values())
 
+    # alone, the note keeps the marker it has among its homonyms
     first_alone = client.post(
         f"/api/cases/{cid}/notes/pdf", json={"notes": [first["id"]]}
     ).json()["written"][0]
-    assert first_alone["file"] == by_note[first["id"]]
+    assert first_alone["file"] == by_note[first["id"]].replace(".pdf", " (2).pdf")
+    assert marked.match(first_alone["file"]).group(1) == marked.match(by_note[first["id"]]).group(1)
 
 
-def test_long_homonymous_titles_keep_their_stable_suffix(client):
+def test_long_homonymous_titles_keep_their_stable_suffix(client, pinned):
     cid = make_case(client)
     first = client.post(
         f"/api/cases/{cid}/notes", json={"title": "First", "folder": "a", "content": "A"}
@@ -386,8 +410,9 @@ def test_long_homonymous_titles_keep_their_stable_suffix(client):
 
     names = [row["file"] for row in written]
     assert len(set(names)) == 2
-    assert all(len(name) <= layout.MAX_MEDIA_NAME for name in names)
-    assert all(re.search(r" \[[0-9a-f]{16}\]\.pdf$", name) for name in names)
+    # room is kept for the number a later export that day adds
+    assert all(len(name) <= layout.MAX_MEDIA_NAME - len(notes_api.COUNTER_ROOM * " ") for name in names)
+    assert all(re.search(rf" \[[0-9a-f]{{16}}\]{re.escape(PDF)}$", name) for name in names)
 
 
 def test_an_explicit_note_path_still_canonicalises_its_label(client):
@@ -406,7 +431,7 @@ def test_an_explicit_note_path_still_canonicalises_its_label(client):
     assert len(updated["label"]) == layout.MAX_SLUG
 
 
-def test_a_diagram_travels_with_the_request(client):
+def test_a_diagram_travels_with_the_request(client, pinned):
     cid = make_case(client)
     text = "```mermaid\ngraph TD; A-->B;\n```\n"
     note = client.post(
@@ -419,7 +444,7 @@ def test_a_diagram_travels_with_the_request(client):
     }
     assert client.post(f"/api/cases/{cid}/notes/pdf", json=payload).status_code == 200
 
-    assert "Diagram not drawn." not in pdf_text((exports_of(cid) / "Diagram.pdf").read_bytes())
+    assert "Diagram not drawn." not in pdf_text((exports_of(cid) / f"Diagram{PDF}").read_bytes())
 
 
 def test_the_browser_is_told_which_diagrams_to_draw(client):

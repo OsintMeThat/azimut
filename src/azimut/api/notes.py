@@ -5,14 +5,18 @@ export, which is the reason this left `api/cases.py`: turning a note into a
 document is a surface of its own — a payload to bound, a renderer to drive and
 files to write into the case's export folder.
 
-An export writes one PDF per note, named after the note, into the folder the
-analyst chose for notes — the case's own `exports/` until they pick another one
-(`engine/exportdir.py`). Names follow the same rule as an imported media's
-(`layout.visible_filename`).
-
-Inside the case, a re-export overwrites: that folder is meant to be refreshed in
-one click, not to accumulate `note (2).pdf`. In a folder of the analyst's own it
-never overwrites, because the files there are theirs.
+An export writes one PDF per note into the folder the analyst chose for notes, the
+case's own `exports/` until they pick another one (`engine/exportdir.py`), in one of
+two editions: internal, the note whole, or public, without its `> [!internal]`
+passages (`engine/notes_pdf.py`). A note with no such passage has one edition,
+shareable as it stands, recorded as public. A PDF is never replaced. Each is named
+`<title> - <edition> - <day>.pdf`, or `<title> - <day>.pdf` when there was no
+edition to choose, a second one that day `… (2).pdf`, and the note
+keeps a record of it among its editions (the `editions` attr, the case setting
+`notes.case_editions` for the case notes): when, which edition, where, how many
+pages, and the SHA-256 of the file and of the text it printed. `/notes/{id}/editions`
+lists them; Check hashes a file again to say whether it is still the one written.
+The files stay where they were written and are not case state.
 
 Each note prints in its own look (`engine/notelook.py`), kept beside the note and
 set through `/notes/{id}/look`. The page pane asks `/notes/preview` for the PDF of
@@ -28,7 +32,8 @@ Before an export, `/notes/pdf/check` lays the chosen notes out in memory and say
 note by note, what the PDF would get wrong (a picture no longer in the case, one
 with no source, a task left open, a link a reader cannot open): the warnings the
 page pane lists, with the line each is about and its kind. It writes nothing and
-never stands in the way: the export goes on whatever it finds.
+never stands in the way: the export goes on whatever it finds. For the public
+edition it also says how many internal passages are left out.
 """
 
 from __future__ import annotations
@@ -37,10 +42,12 @@ import base64
 import binascii
 import hashlib
 import json
+import re
+import stat
 import threading
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, NamedTuple
+from typing import Any, Iterator, Literal, NamedTuple
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse
@@ -51,7 +58,7 @@ from ..engine import exportdir
 from ..engine import links as link_engine
 from ..engine import notelook
 from ..engine import notes_pdf as pdf_engine
-from ..engine import notelinks, notetext
+from ..engine import notefromcase, notelinks, notetext
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
 from ..engine import urltitles
@@ -108,6 +115,21 @@ MAX_DIAGRAM_HEADER_BYTES = 48 * 1024
 PREVIEW_WAIT_SECONDS = 30.0
 _preview_turn = threading.Lock()
 
+#: Which edition a PDF is: the note whole, or without its internal passages.
+Edition = Literal["internal", "public"]
+#: How many editions a note keeps a record of, newest first. The files stay on disk.
+MAX_EDITIONS = 50
+#: Where the case notes, which have no entity, keep their record of editions.
+CASE_EDITIONS = "notes.case_editions"
+EDITIONS_ATTR = "editions"
+#: The room an export's name keeps for the ` (2)` a later one the same day takes.
+COUNTER_ROOM = len(" (999)")
+#: A record is read back from the case and may have come in a bundle: each part checked.
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+#: One edition record written at a time, so two exports of one note keep both.
+_editions_turn = threading.Lock()
+
 
 class Notes(BaseModel):
     text: str
@@ -135,6 +157,12 @@ class NoteSelection(BaseModel):
     notes: list[str] = Field(min_length=1, max_length=MAX_NOTES)
 
 
+class EditionSelection(NoteSelection):
+    """Notes, and the edition they are laid out in: internal unless said."""
+
+    edition: Edition = "internal"
+
+
 class PreviewIn(BaseModel):
     """A note as the editor holds it right now, unsaved, and the look to print it in.
 
@@ -146,14 +174,15 @@ class PreviewIn(BaseModel):
     text: str = Field(default="", max_length=MAX_NOTE_BODY_BYTES)
     look: notelook.NoteLook | None = None
     diagrams: dict[str, str] = Field(default_factory=dict)
+    edition: Edition = "internal"
 
 
 class NotePreviewIn(PreviewIn):
     note: str = Field(default=CASE_NOTE, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
-class ExportIn(NoteSelection):
-    """Which notes to export, and the diagrams the browser drew for them.
+class ExportIn(EditionSelection):
+    """Which notes to export, in which edition, and the diagrams the browser drew for them.
 
     Mermaid needs a browser, so the caller asks which fences a selection holds
     (`/notes/pdf/diagrams`), draws them, and posts each one back as a PNG under
@@ -373,6 +402,40 @@ def tick_task(case_id: str, note_id: str, body: TaskTick) -> dict[str, str]:
     return {"text": changed}
 
 
+# -- from the case ------------------------------------------------------------------
+#
+# Declared before `/notes/{note_id}`, which would otherwise take `from-case` for a note.
+
+
+def _day(value: str, name: str) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{name} must be a day, YYYY-MM-DD") from exc
+
+
+@router.get("/{case_id}/notes/from-case")
+def notes_from_case(
+    case_id: str,
+    start: str = Query(default="", alias="from", max_length=10),
+    end: str = Query(default="", alias="to", max_length=10),
+    by: str = notefromcase.SHOWN,
+    zone: str = Query(default="UTC", max_length=64),
+) -> dict[str, Any]:
+    """The geolocations of a period, for the note *From the case* writes
+    (`engine/notefromcase.py`): the first 200 by date, how many the period holds, and
+    how many this reading cannot date. Read only; nothing is fetched."""
+    first, last = _day(start, "from"), _day(end, "to")
+    case = get_case(case_id)
+    try:
+        found = notefromcase.period(case, start=first, end=last, by=by, zone=zone)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"from": start, "to": end, "by": by, "zone": zone, **found}
+
+
 @router.get("/{case_id}/notes/{note_id}")
 def read_note(case_id: str, note_id: str) -> dict[str, str]:
     try:
@@ -445,6 +508,8 @@ def preview_note(case_id: str, body: NotePreviewIn) -> Response:
 
     The page pane draws these bytes. The look in the body wins over the stored one,
     so a look being tried prints before it is kept; included notes print as saved.
+    The edition asked for is the one drawn, so the public pages are seen before
+    they are written.
     """
     case = get_case(case_id)
     _require_note(case, body.note)
@@ -458,6 +523,7 @@ def preview_note(case_id: str, body: NotePreviewIn) -> Response:
         diagrams=body.diagrams,
         note_id=body.note,
         resolve=_resolver(case),
+        edition=body.edition,
     )
 
 
@@ -470,12 +536,14 @@ def preview_response(
     diagrams: dict[str, str],
     note_id: str = "",
     resolve: pdf_engine.Resolve | None = None,
+    edition: Edition = "internal",
 ) -> Response:
     """Render a preview under the one-at-a-time turn and answer it as PDF bytes.
 
     Shared with the template preview (`api/templates.py`), which passes no case.
     The headers say what the page pane needs beside the pages: where each page
-    starts in the text, which diagrams still need drawing, and what was left out.
+    starts in the text, which diagrams still need drawing, what was left out, and
+    how many internal passages the note holds, for the pane to offer both editions.
     """
     if len(text.encode("utf-8")) > MAX_NOTE_BODY_BYTES:
         raise HTTPException(status_code=413, detail="the note is too large to preview")
@@ -485,7 +553,7 @@ def preview_response(
     try:
         rendered = pdf_engine.render(
             case, title=title or "Untitled", text=text, diagrams=decoded, look=look,
-            note_id=note_id, resolve=resolve,
+            note_id=note_id, resolve=resolve, public=edition == pdf_engine.PUBLIC,
         )
     except pdffonts.FontError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -507,6 +575,7 @@ def preview_response(
             "X-Note-Warning-Lines": _ascii_json(rendered.warning_lines[:MAX_HEADER_WARNINGS]),
             "X-Note-Warning-Kinds": _ascii_json(rendered.warning_kinds[:MAX_HEADER_WARNINGS]),
             "X-Note-Pictures": _pictures_header(rendered.pictures),
+            "X-Note-Internal": str(rendered.internal),
         },
     )
 
@@ -643,73 +712,92 @@ def _note_source(case: Case, note_id: str) -> tuple[str, str]:
     return str(entity.get("label") or "Note"), case.read_note(note_id)
 
 
-def _pdf_filename(title: str, note_id: str, peers: dict[str, list[str]]) -> str:
-    """A stable flat filename, keeping a homonym marker after truncation."""
-    if len(peers.get(title.casefold(), [])) < 2:
-        return layout.visible_filename(title, ".pdf")
-    token = hashlib.sha256(note_id.encode("utf-8")).hexdigest()[:16]
-    marker = f" [{token}]"
-    stem_limit = max(1, layout.MAX_MEDIA_NAME - len(".pdf") - len(marker))
+def _pdf_filename(title: str, note_id: str, peers: dict[str, list[str]], edition: str, day: date) -> str:
+    """`<title> - <edition> - <day>.pdf`, or `<title> - <day>.pdf` with no edition
+    named (a note with one edition only), flat, a homonym's stable marker after its
+    title, and room left for the ` (2)` a second one that day takes."""
+    tail = f" - {edition} - {day.isoformat()}.pdf" if edition else f" - {day.isoformat()}.pdf"
+    marker = ""
+    if len(peers.get(title.casefold(), [])) >= 2:
+        marker = f" [{hashlib.sha256(note_id.encode('utf-8')).hexdigest()[:16]}]"
+    stem_limit = max(1, layout.MAX_MEDIA_NAME - len(tail) - len(marker) - COUNTER_ROOM)
     stem = layout.slugify(title, "Note", limit=stem_limit)
-    return f"{stem}{marker}.pdf"
+    return f"{stem}{marker}{tail}"
+
+
+def _now() -> datetime:
+    """This machine's clock, in its own zone: an export is named after its local day."""
+    return datetime.now().astimezone()
 
 
 @router.post("/{case_id}/notes/pdf/diagrams")
-def export_diagrams(case_id: str, body: NoteSelection) -> dict[str, Any]:
+def export_diagrams(case_id: str, body: EditionSelection) -> dict[str, Any]:
     """The Mermaid fences a selection holds, for the browser to draw.
 
     The browser could look for them itself, but then two parsers would decide
     what counts as a diagram and they would drift. This way the notes are read
     once, on the side that renders them, and the answer is deduplicated: the
-    same diagram in four notes is drawn once.
+    same diagram in four notes is drawn once. The public edition asks for none an
+    internal passage holds.
     """
     case = get_case(case_id)
     fences: dict[str, str] = {}
     resolve = _resolver(case)
+    public = body.edition == pdf_engine.PUBLIC
     for note_id in dict.fromkeys(body.notes):
         _, text = _note_source(case, note_id)
-        for source in pdf_engine.mermaid_sources(text, resolve=resolve, note_id=note_id):
+        for source in pdf_engine.mermaid_sources(text, resolve=resolve, note_id=note_id, public=public):
             fences.setdefault(pdf_engine.diagram_key(source), source)
     pending = list(fences.items())[:MAX_DIAGRAMS]
     return {"diagrams": [{"key": key, "source": source} for key, source in pending]}
 
 
 @router.post("/{case_id}/notes/pdf/check")
-def check_pdf(case_id: str, body: NoteSelection) -> dict[str, Any]:
+def check_pdf(case_id: str, body: EditionSelection) -> dict[str, Any]:
     """What each requested note's PDF would get wrong, before it is exported.
 
-    Every note is laid out in its own look, in memory, with no diagram drawn (a
-    fence prints as its source, which changes no warning), and nothing is written.
-    Each one answers in the order asked, with an empty list when all is well; one
-    that cannot be laid out answers the reason as its one warning.
+    Every note is laid out in its own look and in the edition asked for, in memory,
+    with no diagram drawn (a fence prints as its source, which changes no warning),
+    and nothing is written. Each one answers in the order asked, with an empty list
+    when all is well; one that cannot be laid out answers the reason as its one
+    warning. ``internal`` counts its internal passages, chapters included, which is
+    what the dialog offers the two editions on; the public edition says, as a warning
+    of its own kind, how many it leaves out.
     """
     case = get_case(case_id)
     resolve = _resolver(case)
+    public = body.edition == pdf_engine.PUBLIC
     answered: list[dict[str, Any]] = []
     for note_id in dict.fromkeys(body.notes):
         title, text = _note_source(case, note_id)
         warnings: list[dict[str, Any]]
+        internal = 0
         try:
             rendered = pdf_engine.render(
                 case, title=title, text=text, look=notelook.stored(case, note_id), note_id=note_id,
-                resolve=resolve,
+                resolve=resolve, public=public,
             )
         except pdffonts.FontError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         except pdf_engine.NotesPdfError as exc:
             warnings = [{"text": str(exc)[:MAX_WARNING_CHARS], "line": None, "kind": pdf_engine.OTHER}]
         else:
+            internal = rendered.internal
             warnings = [
                 {"text": said[:MAX_WARNING_CHARS], "line": line, "kind": kind}
                 for said, line, kind in zip(rendered.warnings, rendered.warning_lines, rendered.warning_kinds)
             ]
-        answered.append({"note": note_id, "title": title, "warnings": warnings})
+            if public and internal:
+                said = f"{internal} internal passage{'s' if internal > 1 else ''} left out."
+                warnings.append({"text": said, "line": None, "kind": pdf_engine.LEFT_OUT})
+        answered.append({"note": note_id, "title": title, "warnings": warnings, "internal": internal})
     return {"notes": answered}
 
 
 @router.post("/{case_id}/notes/pdf")
 def export_pdf(case_id: str, body: ExportIn) -> dict[str, Any]:
-    """Write one PDF per requested note into the notes export folder."""
+    """Write one PDF per requested note into the notes export folder, in the edition
+    asked for, each a new file the note keeps a record of."""
     case = get_case(case_id)
     diagrams = _decode_diagrams(body.diagrams)
     try:
@@ -727,11 +815,12 @@ def export_pdf(case_id: str, body: ExportIn) -> dict[str, Any]:
     written: list[dict[str, str]] = []
     warnings: list[str] = []
     resolve = _resolver(case)
+    public = body.edition == pdf_engine.PUBLIC
     for note_id, title, text in selected:
         try:
             rendered = pdf_engine.render(
                 case, title=title, text=text, diagrams=diagrams,
-                look=notelook.stored(case, note_id), note_id=note_id, resolve=resolve,
+                look=notelook.stored(case, note_id), note_id=note_id, resolve=resolve, public=public,
             )
         except pdffonts.FontError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -739,16 +828,26 @@ def export_pdf(case_id: str, body: ExportIn) -> dict[str, Any]:
             # One unlayoutable note must not lose the rest of the batch.
             warnings.append(f"{title}: {exc}")
             continue
-        filename = _pdf_filename(title, note_id, peers)
+        now = _now()
+        # a note with no internal passage has one edition, shareable as it stands:
+        # its name says no edition, and it is recorded as public
+        edition = body.edition if rendered.internal else pdf_engine.PUBLIC
+        filename = _pdf_filename(title, note_id, peers, body.edition if rendered.internal else "", now.date())
         try:
-            if in_case:
-                path = destination / filename
-                path.write_bytes(rendered.pdf)
-            else:
-                path = exportdir.write_out(rendered.pdf, destination, filename)
+            # never over an earlier one: a second export that day is numbered
+            path = exportdir.write_out(rendered.pdf, destination, filename)
         except (OSError, exportdir.ExportDirError) as exc:
             raise HTTPException(status_code=409, detail=f"could not write the PDF: {errors.explain(exc)}") from exc
-        written.append({"note": note_id, "title": title, "file": path.name})
+        _record_edition(case, note_id, {
+            "at": now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "edition": edition,
+            "file": path.name,
+            "folder": EXPORTS_DIR if in_case else str(destination),
+            "pages": len(rendered.pages),
+            "pdf_sha256": hashlib.sha256(rendered.pdf).hexdigest(),
+            "text_sha256": rendered.text_sha256,
+        })
+        written.append({"note": note_id, "title": title, "file": path.name, "edition": edition})
         warnings.extend(f"{title}: {warning}" for warning in rendered.warnings)
 
     if not written:
@@ -780,3 +879,135 @@ def reveal_exports(case_id: str) -> dict[str, str]:
     except reveal_engine.RevealError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"path": str(destination)}
+
+
+# -- editions ---------------------------------------------------------------------
+
+
+class EditionRef(BaseModel):
+    """One edition of a note, named by when it was written, its file's name and the
+    folder its record gives: matched against the record, never read as a path."""
+
+    at: str = Field(max_length=32)
+    file: str = Field(max_length=300)
+    folder: str = Field(default="", max_length=4096)
+
+
+def _read_editions(case: Case, note_id: str) -> list[dict[str, Any]]:
+    """The editions a note keeps a record of, newest first, each checked part by part.
+
+    The record is case data and can arrive in a bundle, so a part that is not what
+    an export writes drops its record rather than reach a path or a hash.
+    """
+    raw: Any
+    if note_id == CASE_NOTE:
+        try:
+            raw = json.loads(case.get_setting(CASE_EDITIONS) or "[]")
+        except ValueError:
+            raw = []
+    else:
+        raw = ((case.get_entity(note_id) or {}).get("attrs") or {}).get(EDITIONS_ATTR)
+    if not isinstance(raw, list):
+        return []
+    kept = [_edition_record(item) for item in raw[:MAX_EDITIONS]]
+    return [item for item in kept if item is not None]
+
+
+def _edition_record(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    at, edition, file, folder = item.get("at"), item.get("edition"), item.get("file"), item.get("folder")
+    pages, pdf_sha, text_sha = item.get("pages"), item.get("pdf_sha256"), item.get("text_sha256")
+    if not (isinstance(at, str) and STAMP.match(at) and edition in pdf_engine.EDITIONS):
+        return None
+    if not (isinstance(file, str) and layout.names_one_child(file) and isinstance(folder, str) and folder):
+        return None
+    if not (isinstance(pages, int) and not isinstance(pages, bool) and pages >= 0):
+        return None
+    if not (isinstance(pdf_sha, str) and SHA256.match(pdf_sha) and isinstance(text_sha, str) and SHA256.match(text_sha)):
+        return None
+    return {"at": at, "edition": edition, "file": file, "folder": folder, "pages": pages,
+            "pdf_sha256": pdf_sha, "text_sha256": text_sha}
+
+
+def _record_edition(case: Case, note_id: str, record: dict[str, Any]) -> None:
+    """Put one edition first in the note's record, the oldest past the cap let go."""
+    with _editions_turn:
+        kept = [record, *_read_editions(case, note_id)][:MAX_EDITIONS]
+        if note_id == CASE_NOTE:
+            case.set_setting(CASE_EDITIONS, json.dumps(kept, sort_keys=True))
+        else:
+            case.update_entity(note_id, {"attrs": {EDITIONS_ATTR: kept}})
+
+
+def _edition(case: Case, note_id: str, ref: EditionRef) -> dict[str, Any]:
+    _require_note(case, note_id)
+    for record in _read_editions(case, note_id):
+        if record["at"] == ref.at and record["file"] == ref.file and ref.folder in ("", record["folder"]):
+            return record
+    raise HTTPException(status_code=404, detail="that edition is not in the note's record")
+
+
+def _edition_path(case: Case, record: dict[str, Any]) -> Path | None:
+    """Where an edition was written: the case's own exports, or the absolute folder
+    the analyst had chosen. None for a folder this machine cannot name."""
+    folder = record["folder"]
+    if folder == EXPORTS_DIR:
+        return layout.subdir(case.path, EXPORTS_DIR) / record["file"]
+    where = Path(folder)
+    return where / record["file"] if where.is_absolute() else None
+
+
+def _file_sha256(path: Path) -> str | None:
+    """A regular file's SHA-256, read in chunks; None when there is no such file."""
+    try:
+        if not stat.S_ISREG(path.stat().st_mode):
+            return None
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail=f"could not read the file: {errors.explain(exc)}") from exc
+    return digest.hexdigest()
+
+
+@router.get("/{case_id}/notes/{note_id}/editions")
+def note_editions(case_id: str, note_id: str) -> dict[str, Any]:
+    """The PDFs a note was exported as, newest first: day, edition, file, pages, hashes."""
+    case = get_case(case_id)
+    _require_note(case, note_id)
+    return {"editions": _read_editions(case, note_id)}
+
+
+@router.post("/{case_id}/notes/{note_id}/editions/check")
+def check_edition(case_id: str, note_id: str, body: EditionRef) -> dict[str, str]:
+    """Whether an edition's file is still the one written: ``unchanged``, ``changed``
+    or ``missing``. Hashes the file again; nothing is fetched or written."""
+    case = get_case(case_id)
+    record = _edition(case, note_id, body)
+    path = _edition_path(case, record)
+    found = _file_sha256(path) if path is not None else None
+    if found is None:
+        return {"state": "missing"}
+    return {"state": "unchanged" if found == record["pdf_sha256"] else "changed"}
+
+
+@router.post("/{case_id}/notes/{note_id}/editions/reveal")
+def reveal_edition(case_id: str, note_id: str, body: EditionRef) -> dict[str, str]:
+    """Open the folder an edition was written to, in the system file manager.
+
+    The folder is read from the note's record, never from the request.
+    """
+    case = get_case(case_id)
+    record = _edition(case, note_id, body)
+    path = _edition_path(case, record)
+    if path is None:
+        raise HTTPException(status_code=409, detail="that folder is not on this machine")
+    try:
+        reveal_engine.reveal(path.parent, workspace_only=False)
+    except reveal_engine.RevealError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"path": str(path.parent)}

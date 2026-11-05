@@ -331,3 +331,22 @@ def test_a_break_right_under_a_paragraph_still_breaks(tmp_path):
     out = notes_pdf.render(None, title="T", text="Line 30\n<!-- pagebreak -->\nAfter\n")
     printed = pages(out.pdf)
     assert len(printed) == 2 and "After" in printed[1]
+
+
+@pytest.mark.parametrize("style", ["plain", "report", "brief", "journal"])
+def test_a_heading_right_above_a_chapter_goes_with_it(style):
+    """A heading never stays alone at the foot of a page, the one leading into a
+    chapter included under it either. Where a chapter opens a page of its own (a
+    report's), the heading opens that page and the chapter follows it there;
+    elsewhere it keeps room for the chapter's title. Each length of body below
+    lands the heading somewhere else on the page, its foot among them."""
+    chapters = {"c1": ("Witness", "The witness filmed from the quay.\n")}
+    look = NoteLook.model_validate({"style": style})
+    for paragraphs in range(18, 30):
+        body = "\n\n".join(f"Paragraph {n} of the body, long enough to take a line." for n in range(paragraphs))
+        out = notes_pdf.render(None, title="R", text=f"{body}\n\n## Field notes\n\n[[include:c1]]\n",
+                               look=look, resolve=chapters.get)
+        printed = ["".join(page.split()).casefold() for page in pages(out.pdf)]
+        heading = [index for index, page in enumerate(printed) if "fieldnotes" in page]
+        chapter = [index for index, page in enumerate(printed) if "filmedfromthequay" in page]
+        assert heading == chapter, (paragraphs, heading, chapter)

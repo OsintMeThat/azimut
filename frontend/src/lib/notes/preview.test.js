@@ -4,7 +4,7 @@ const { postBytes } = vi.hoisted(() => ({ postBytes: vi.fn() }));
 vi.mock('../api.js', () => ({ api: { postBytes } }));
 vi.mock('../notesExport.js', () => ({ drawDiagrams: vi.fn() }));
 
-const { createPreview, fetchPreview, forgetDiagrams, headerList, noteWarnings, pageLine } = await import('./preview.js');
+const { createPreview, fetchPreview, forgetDiagrams, headerList, internalHeader, noteWarnings, pageLine } = await import('./preview.js');
 
 const page = (overrides = {}) => ({ data: new ArrayBuffer(4), pages: [0], diagrams: [], warnings: [], ...overrides });
 
@@ -27,7 +27,7 @@ describe('asking the server for a page', () => {
     postBytes.mockResolvedValue({ data: new ArrayBuffer(8), headers });
     const answer = await fetchPreview({ caseId: 'c1', note: 'n1', title: 'Lead', text: '# Lead', look: { style: 'report' } });
     expect(postBytes).toHaveBeenCalledWith('/api/cases/c1/notes/preview',
-      { note: 'n1', title: 'Lead', text: '# Lead', look: { style: 'report' }, diagrams: {} }, { signal: undefined });
+      { note: 'n1', title: 'Lead', text: '# Lead', look: { style: 'report' }, diagrams: {}, edition: 'internal' }, { signal: undefined });
     expect(answer.pages).toEqual([0, 14, 40]);
     expect(answer.diagrams).toEqual([{ key: 'ab12', source: 'flowchart LR' }]);
     expect(answer.warnings).toEqual([{ text: 'A picture is missing', line: null, kind: 'other' }]);
@@ -60,6 +60,16 @@ describe('asking the server for a page', () => {
     expect(noteWarnings(headers)).toEqual([{ text: 'One', line: null, kind: 'other' }, { text: 'Two', line: null, kind: 'other' }]);
     const odd = new Headers({ 'X-Note-Warnings': '["One"]', 'X-Note-Warning-Lines': '[-1]', 'X-Note-Warning-Kinds': 'not json' });
     expect(noteWarnings(odd)).toEqual([{ text: 'One', line: null, kind: 'other' }]);
+  });
+
+  it('asks for the edition picked, and reads how many internal passages the note holds', async () => {
+    postBytes.mockResolvedValue({ data: new ArrayBuffer(8), headers: new Headers({ 'X-Note-Internal': '3' }) });
+    const answer = await fetchPreview({ caseId: 'c1', note: 'n1', text: 'x', edition: 'public' });
+    expect(postBytes.mock.calls[0][1].edition).toBe('public');
+    expect(answer.internal).toBe(3);
+    expect(internalHeader(new Headers())).toBe(0);
+    expect(internalHeader(new Headers({ 'X-Note-Internal': 'many' }))).toBe(0);
+    expect(internalHeader(new Headers({ 'X-Note-Internal': '-2' }))).toBe(0);
   });
 
   it('posts a template to the route that needs no case, without a note', async () => {

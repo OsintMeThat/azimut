@@ -1131,14 +1131,7 @@ def media_spots(
         point = _point(attrs.get("lat"), attrs.get("lon"))
         if point is None:
             continue
-        proposed = "suggested" in (
-            (link.get("provenance") or {}).get("status"),
-            (place.get("provenance") or {}).get("status"),
-        )
-        _stand(spots, point, {
-            "type": link["type"],
-            "status": "suggested" if proposed else "confirmed",
-        })
+        _stand(spots, point, {"type": link["type"], "status": road_status(link, place)})
     # A file with no chain edge derives from nothing and nothing derives from
     # it, so the walk could only come back empty: the edges are already read
     # here, and asking anyway is two queries per file on a whole library.
@@ -1156,6 +1149,38 @@ def media_spots(
             "status": "confirmed",
         })
     return list(spots.values())
+
+
+def road_status(link: dict[str, Any], place: dict[str, Any]) -> str:
+    """Whether an edge to a place is the analyst's: ``"suggested"`` while a tool only
+    proposed the edge or the place, ``"confirmed"`` otherwise. The Notebook's
+    ``placeOf`` reads an edge the same way (`lib/noteHere.svelte.js`)."""
+    proposed = "suggested" in (
+        (link.get("provenance") or {}).get("status"),
+        (place.get("provenance") or {}).get("status"),
+    )
+    return "suggested" if proposed else "confirmed"
+
+
+def is_confirmed(spot: dict[str, Any]) -> bool:
+    """A point stands confirmed once one road to it is the analyst's: a file placed
+    only by what a tool proposed is a proposal."""
+    return any(road.get("status") != "suggested" for road in spot.get("roads", []))
+
+
+def confirmed_spots(
+    case: Case,
+    entity_id: str,
+    *,
+    incident: list[dict[str, Any]] | None = None,
+    places: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """The points :func:`media_spots` puts one entity on that are the analyst's."""
+    return [
+        spot
+        for spot in media_spots(case, entity_id, incident=incident, places=places)
+        if is_confirmed(spot)
+    ]
 
 
 def _proof_name(entity: dict[str, Any]) -> str:
@@ -1221,9 +1246,7 @@ def _media_row(
         "fetched_at": _utc_stamp(item.get("added_at")),
         # a file placed only by what a tool proposed reads as a proposal; one road
         # the analyst stands behind is enough to make the point theirs
-        "status": "suggested"
-        if all(road["status"] == "suggested" for road in spot["roads"])
-        else "confirmed",
+        "status": "confirmed" if is_confirmed(spot) else "suggested",
         "roads": spot["roads"],
         "linked_proofs": linked_proofs,
     }

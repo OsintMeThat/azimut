@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { changeInterval, formatTemporalValue } from './timeline.js';
 import {
   isNoteKey, noteDatesFor, noteEntityFor, noteHere, offerNote, offerPuts, pairOffers, placeOf, putsFor, withdrawNote,
@@ -130,5 +133,20 @@ describe('the dates a place offers', () => {
     expect(calls).toBe(1);
     withdrawNote('compare');
     expect(noteDatesFor('compare')).toEqual([]);
+  });
+});
+
+describe('a confirmed place, as the server reads one', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const { cases } = JSON.parse(readFileSync(join(here, '../../../tests/fixtures/place_edges.json'), 'utf8'));
+
+  // `satellite.road_status` reads the same fixture (tests/test_note_from_case.py)
+  it.each(cases)('an edge %s to a place %s is confirmed: %s (%s)', (link, place, confirmed) => {
+    const chain = { relations: [{
+      direction: 'out',
+      link: { type: 'located-at', ...(link ? { provenance: { status: link } } : {}) },
+      entity: { id: 'pl1', type: 'place', label: 'Quay', ...(place ? { provenance: { status: place } } : {}) },
+    }] };
+    expect(placeOf(chain) !== null).toBe(confirmed);
   });
 });

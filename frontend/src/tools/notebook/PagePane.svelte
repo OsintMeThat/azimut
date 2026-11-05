@@ -21,6 +21,10 @@
    * What the server warns about is listed under the bar, a part no longer in the
    * case marked apart from the rest; a warning that names its line takes the note
    * there when pressed.
+   *
+   * A note holding an internal passage, itself or in a chapter, gets Internal |
+   * Public in the bar, the same choice the export dialog keeps for it, so the
+   * public pages are seen before they are written. A template keeps it for the visit.
    */
   import { onDestroy, untrack } from 'svelte';
   import { createPreview, pageLine } from '../../lib/notes/preview.js';
@@ -30,8 +34,10 @@
   import { openerFor } from '../../lib/notes/openers.js';
   import '../../lib/notes/openersLoaded.js';
   import { canStateSourceOf, stateSourceOf } from '../../lib/notes/sources.js';
+  import { INTERNAL, editionOf, keepEdition } from '../../lib/notes/editions.svelte.js';
   import Icon from '../../components/Icon.svelte';
   import PagePreview from '../../components/PagePreview.svelte';
+  import EditionSwitch from './EditionSwitch.svelte';
 
   let { caseId = '', note = 'case', title = '', text = '', look = null, entities = [], onjump = () => {}, onresize = null } = $props();
 
@@ -40,6 +46,15 @@
   let count = $state(0);
   let warnings = $state([]);
   let pictures = $state([]);
+  /** How many internal passages the note holds, chapters included. */
+  let internal = $state(0);
+  /** A template's edition, which no note keeps. */
+  let templateEdition = $state(INTERNAL);
+  const edition = $derived(caseId ? editionOf(caseId, note) : templateEdition);
+  function setEdition(value) {
+    if (caseId) keepEdition(caseId, [note], value);
+    else templateEdition = value;
+  }
   let error = $state('');
   let busy = $state(false);
   let warningsFolded = $state(false);
@@ -92,6 +107,7 @@
       pages = answer.pages;
       warnings = answer.warnings ?? [];
       pictures = answer.pictures ?? [];
+      internal = answer.internal ?? 0;
       error = '';
     },
     onerror: (message) => { error = message; },
@@ -139,8 +155,8 @@
   let lastText = null;
   let lastRest = null;
   $effect(() => {
-    const request = { caseId, note, title, text, look };
-    const rest = JSON.stringify([caseId, note, title, look]);
+    const request = { caseId, note, title, text, look, edition };
+    const rest = JSON.stringify([caseId, note, title, look, edition]);
     untrack(() => {
       const typed = lastText !== null && rest === lastRest && text !== lastText;
       lastText = text;
@@ -157,6 +173,7 @@
       {#if count}{count} page{count === 1 ? '' : 's'}{:else if busy}Drawing the pages…{:else}&nbsp;{/if}
     </span>
     {#if busy && count}<span class="busy" title="Drawing the pages again">Updating…</span>{/if}
+    {#if internal}<EditionSwitch tight value={edition} onchange={setEdition} />{/if}
     {#if warnings.length}
       <button type="button" class="warned" aria-expanded={!warningsFolded} aria-controls="page-warnings"
         title={warningsFolded ? 'Show what the PDF warns about' : 'Hide the warnings'} onclick={() => (warningsFolded = !warningsFolded)}>

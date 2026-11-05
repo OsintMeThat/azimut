@@ -265,7 +265,7 @@ def preview_note_template(body: PreviewIn) -> Response:
     look = body.look if body.look is not None else notelook.NoteLook()
     return preview_response(
         None, title=body.title.strip() or "Untitled", text=body.text, look=look,
-        diagrams=body.diagrams,
+        diagrams=body.diagrams, edition=body.edition,
     )
 
 

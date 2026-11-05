@@ -142,7 +142,7 @@ export const SLASH_COMMANDS = [
   { id: 'bullet', label: 'Bulleted list', icon: 'list', words: 'list bullet', line: '- ' },
   { id: 'numbered', label: 'Numbered list', icon: 'numbered', words: 'list ordered number', line: '1. ' },
   ...CALLOUTS.map((callout) => ({
-    id: `callout-${callout.kind}`, label: callout.label, icon: 'quote', words: `callout box ${callout.hint}`,
+    id: `callout-${callout.kind}`, label: callout.label, icon: 'quote', words: `callout box ${callout.words ?? ''} ${callout.hint}`,
     line: `${calloutMarkdown(callout.kind)}`, colour: callout.colour, hint: callout.hint,
   })),
   { id: 'quote', label: 'Quote', icon: 'quote', words: 'blockquote cite', line: '> ' },

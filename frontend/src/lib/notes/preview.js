@@ -46,10 +46,11 @@ export function headerList(headers, name) {
 /**
  * Ask the server for the PDF of `text`. With a `caseId`, as note `note` of that
  * case; without one, as a template, its pictures and chips drawn as stand-ins.
+ * `edition` is `internal` or `public`, the second without the internal passages.
  */
-export async function fetchPreview({ caseId = '', note = 'case', title = '', text = '', look, diagrams = {} }, signal) {
+export async function fetchPreview({ caseId = '', note = 'case', title = '', text = '', look, diagrams = {}, edition = 'internal' }, signal) {
   const url = caseId ? `/api/cases/${caseId}/notes/preview` : '/api/templates/note/preview';
-  const body = { title, text, look, diagrams };
+  const body = { title, text, look, diagrams, edition };
   if (caseId) body.note = note || 'case';
   const { data, headers } = await api.postBytes(url, body, { signal });
   return {
@@ -58,7 +59,14 @@ export async function fetchPreview({ caseId = '', note = 'case', title = '', tex
     diagrams: headerList(headers, 'X-Note-Diagrams').filter((item) => item && typeof item.key === 'string'),
     warnings: noteWarnings(headers),
     pictures: headerList(headers, 'X-Note-Pictures').filter(placedPicture),
+    internal: internalHeader(headers),
   };
+}
+
+/** How many internal passages the note holds, chapters included, as `X-Note-Internal` says. */
+export function internalHeader(headers) {
+  const count = Number(headers?.get?.('X-Note-Internal') ?? 0);
+  return Number.isInteger(count) && count > 0 ? count : 0;
 }
 
 /**

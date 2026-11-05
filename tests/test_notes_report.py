@@ -14,6 +14,7 @@ import json
 import os
 import re
 import threading
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
@@ -694,7 +695,8 @@ def test_an_include_is_a_mention_of_the_note_it_prints(client):
 # -- export --------------------------------------------------------------------
 
 
-def test_the_export_prints_each_note_in_its_own_look_with_its_chapters(client):
+def test_the_export_prints_each_note_in_its_own_look_with_its_chapters(client, monkeypatch):
+    monkeypatch.setattr(notes_api, "_now", lambda: datetime(2026, 3, 12, 9, 30, tzinfo=timezone.utc))
     cid = make_case(client)
     chapter = make_note(client, cid, title="Chapter", content="Chapter words.\n\n```mermaid\ngraph TD; Q-->R;\n```\n")
     report = make_note(client, cid, title="Report", content=f"Intro.\n\n[[include:{chapter['id']}]]\n")
@@ -710,10 +712,10 @@ def test_the_export_prints_each_note_in_its_own_look_with_its_chapters(client):
         f"/api/cases/{cid}/notes/pdf", json={"notes": [report["id"], plain["id"]]}
     ).json()["written"]
     exports = layout.subdir(Case.open(cid).path, "exports")
-    assert [row["file"] for row in written] == ["Report.pdf", "Plain.pdf"]
-    report_pdf = squash("\n".join(pdf_pages((exports / "Report.pdf").read_bytes())))
+    assert [row["file"] for row in written] == ["Report - 2026-03-12.pdf", "Plain - 2026-03-12.pdf"]
+    report_pdf = squash("\n".join(pdf_pages((exports / "Report - 2026-03-12.pdf").read_bytes())))
     assert "TLP:GREEN" in report_pdf and "Chapterwords." in report_pdf and "CHAPTER1" in report_pdf
-    plain_pdf = "\n".join(pdf_pages((exports / "Plain.pdf").read_bytes()))
+    plain_pdf = "\n".join(pdf_pages((exports / "Plain - 2026-03-12.pdf").read_bytes()))
     assert "TLP" not in plain_pdf and "AZIMUT NOTES" in plain_pdf
 
 

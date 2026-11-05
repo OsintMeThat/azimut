@@ -5654,8 +5654,24 @@ ready ones (Blank, Geolocation report, Chronolocation, Media verification, Incid
 brief (5W), Source profile, Daily SITREP, Fact-check, Investigation log) and **Your
 templates**. A press makes the note at once in the template's look, named after it
 and numbered when the name is taken, with its title selected to retype. **New note**
-asks a title, a folder and what to start from. A card's ⋯ opens it, keeps it beside
-the tools, opens it in its own tab, exports it, or deletes it.
+asks a title, a folder and what to start from. A card's ⋯ opens it, pins it to the
+side, opens it in its own tab, exports it, lists its editions, or deletes it.
+
+**From the case**, beside Blank, writes a note of every geolocation of a period
+(`GET /notes/from-case`, nothing fetched). Its dialog asks only the **Period** (days on
+the case's clock, the zone shown, opening on every day the geolocations cover),
+**Dated by** (*What they show*: the day a proof states, else the camera, post or
+imagery day; or *When they were geolocated*: the day the place was stated) and the
+**Layout** (*A figure each* or *A table*), and says the count live, with how many have
+no day to read them by. **Create** makes a Report with its sources listed and opens
+it: Summary, Findings, Ruled out and Limits, with guidance lines. A figure each gives
+the picture (a proof at three quarters of the page), *Where* (the place's chip and
+its coordinates), *When* (saying which day it is) and *Source*; a table gives one row
+each. What counts: every proof, and every picture or video the Media position shows at
+a confirmed point (`engine/satellite.py` `confirmed_spots`, the frontend's `placeOf`
+reading edges the same way); a suggested point does not, what the case made itself
+(captures, frames) does not, and a file a proof was made from is shown by its proof. A
+note holds at most 200, with a line naming the cut.
 
 **Several at once.** *Select* puts a box on every card; Shift-click picks a run,
 *Select all* the folder shown, Escape leaves. A bar at the foot says how many are
@@ -5684,7 +5700,7 @@ The file stays the Markdown it was: what the old split-pane Notebook wrote opens
 was written and is never rewritten for being opened. The header names the note (the
 name is the filename), files it in a folder, says whether it is saved, and holds
 **Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **PDF**, and
-a ⋯ with *Keep as template* and *Delete* (*Clear the case notes* for the case's page).
+a ⋯ with *Editions*, *Keep as template* and *Delete* (*Clear the case notes* for the case's page).
 PDF export writes one server-rendered PDF per note without a print dialog, in the
 note's look, local images and browser-drawn diagrams with it, remote images left out,
 homonyms under stable suffixes, into the shared notes destination (the case's
@@ -5693,6 +5709,26 @@ homonyms under stable suffixes, into the shared notes destination (the case's
 what it finds is listed under *Before you export*, by note when several are exported,
 each with *Go to* when it names a line, and the button reads *Export anyway*. A check
 that fails says nothing and never holds the export back.
+
+**Editions.** A passage written as `> [!internal]` (*Internal* in **/** and the callout
+menu) is for the team: drawn in its own colour, printed in a marked box in the internal
+edition, and left out whole of the public one, its words, a contents entry, a source
+cited only there, a credit, a `[n]` and a chapter written inside it, the numbering
+staying continuous. Where the editor and the PDF parser could read a quote's end
+differently, the public edition drops whatever either counts as the passage, and a
+public PDF that would still hold one is refused. Search, excerpts and the To-do read
+it as any text; other Markdown readers show a blockquote. When a picked note or one of
+its chapters holds a passage, the export dialog offers **Internal | Public**,
+remembered per note in this browser and Internal the first time; Public says how many
+passages it leaves out, and the Page pane has the same switch. Each export is a new
+file, never a replacement: a note with no internal passage has one edition, named
+`<title> - <day>.pdf` and listed as Public; a note with one is named `<title> -
+<internal|public> - <day>.pdf`; then `(2)` and so on that day. **⋯ › Editions**
+lists every PDF a note was exported to, with its day, edition, pages and file (its
+SHA-256 on hover): *Show* opens its folder, and *Check* says *Unchanged since it was
+written*, *This file is not the one Azimut wrote* or *File missing*. The record (day,
+edition, file, folder, pages, the PDF's SHA-256 and the printed text's) is kept on the
+note, fifty at most, and travels in a bundle.
 
 **How it prints.** **Look** sets the note's style, kept beside the note (the note
 record's `look`, `notes.case_look` for the case notes) and never in its Markdown:
@@ -5781,7 +5817,8 @@ alone at the foot of a page.
 **Chapters and guidance.** **/** → *Include a note* writes `[[include:<id>]]` on its
 own line, drawn as a chapter block with its number, title and first words, *Open* and
 *Remove*. In the PDF the included note becomes a chapter under its title, its own
-headings one level down, a new page for each in Report; chapters go two levels deep,
+headings one level down, a new page for each in Report (a heading right above an
+included note goes with that chapter, and in Report opens its page); chapters go two levels deep,
 and a loop or a note no longer in the case prints a short aside instead. A chapter
 counts as a `mentions` edge. A line `<!--? … -->` is guidance: drawn as grey words,
 replaced by what is typed on it, never printed nor counted, and an HTML comment to

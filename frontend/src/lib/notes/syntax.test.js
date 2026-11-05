@@ -124,10 +124,12 @@ describe('notes made from others', () => {
     expect(freeTitle('Geolocation', ['geolocation', 'Geolocation 2'])).toBe('Geolocation 3');
   });
 
-  it('reads and writes the five callouts, and no other', () => {
+  it('reads and writes the six callouts, and no other', () => {
     expect(calloutOf('> [!Confirmed] yes')?.kind).toBe('confirmed');
+    expect(calloutOf('> [!INTERNAL] who told us')?.kind).toBe('internal');
     expect(calloutOf('> [!odd] no')).toBeNull();
     expect(calloutOf('plain')).toBeNull();
     expect(calloutMarkdown('lead', 'Ask')).toBe('> [!lead] Ask');
+    expect(calloutMarkdown('internal')).toBe('> [!internal] ');
   });
 });

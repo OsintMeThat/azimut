@@ -30,6 +30,7 @@
   --danger-soft: rgba(217, 112, 112, 0.12);
   --info: #6f9fd8;
   --info-soft: rgba(111, 159, 216, 0.12);
+  --internal: #a892cc;        /* a note's internal passages, left out of the public edition */
 
   /* annotation palette — high-contrast on both photo & satellite */
   --anno-1: #ff5252;
@@ -125,6 +126,7 @@
   --danger-soft: rgba(192, 57, 43, 0.12);
   --info: #3b73b8;
   --info-soft: rgba(59, 115, 184, 0.12);
+  --internal: #6f57a0;
 
   /* sky series, stepped for a white surface rather than flipped from the dark set */
   --sky-sun: #cc9526;

@@ -213,6 +213,8 @@ class CalloutLabelWidget extends WidgetType {
     const label = document.createElement('span');
     label.className = 'cm-callout-label';
     label.textContent = this.callout.label;
+    // the one kind that changes what prints says so on hover
+    if (this.callout.kind === 'internal') label.title = this.callout.hint;
     return label;
   }
 }

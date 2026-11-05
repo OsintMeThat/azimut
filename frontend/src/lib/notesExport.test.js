@@ -17,12 +17,13 @@ describe('exporting notes as PDF', () => {
     const result = await exportNotes('case-1', ['case', 'n1'], { draw, toPng });
 
     expect(post).toHaveBeenNthCalledWith(1, '/api/cases/case-1/notes/pdf/diagrams', {
-      notes: ['case', 'n1'],
+      notes: ['case', 'n1'], edition: 'internal',
     });
     expect(draw).toHaveBeenCalledWith('graph TD; A-->B;');
     expect(post).toHaveBeenNthCalledWith(2, '/api/cases/case-1/notes/pdf', {
       notes: ['case', 'n1'],
       diagrams: { abc123: 'AAAA' },
+      edition: 'internal',
     });
     expect(result.written).toHaveLength(1);
   });
@@ -35,12 +36,15 @@ describe('exporting notes as PDF', () => {
     ));
     const draw = vi.fn();
 
-    await exportNotes('case-1', ['case'], { draw });
+    await exportNotes('case-1', ['case'], { draw, edition: 'public' });
 
     expect(draw).not.toHaveBeenCalled();
+    // the edition asked for goes to both: the public one draws no diagram of a passage it leaves out
+    expect(post).toHaveBeenNthCalledWith(1, '/api/cases/case-1/notes/pdf/diagrams', { notes: ['case'], edition: 'public' });
     expect(post).toHaveBeenLastCalledWith('/api/cases/case-1/notes/pdf', {
       notes: ['case'],
       diagrams: {},
+      edition: 'public',
     });
   });
 

@@ -8,6 +8,9 @@
    * its own. Ticking cards picks them, Shift for a run of them, Select all for a
    * whole folder; the bar at the foot exports the picked notes or makes a report
    * that includes them as chapters, in the order they were picked.
+   *
+   * Beside the ready templates, *From the case* writes a note of every geolocation
+   * of a period (`FromCaseDialog.svelte`).
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api.js';
@@ -17,6 +20,8 @@
   import Icon from '../../components/Icon.svelte';
   import SearchInput from '../../components/SearchInput.svelte';
   import PageThumb from './PageThumb.svelte';
+  import FromCaseDialog from './FromCaseDialog.svelte';
+  import { FROM_CASE_LOOK, FROM_CASE_SAMPLE } from '../../lib/notes/fromCase.js';
 
   let {
     caseId,
@@ -38,6 +43,7 @@
   let found = $state(null); // { items, total } for the words typed, or null
   let searching = $state(false);
   let armed = $state(false); // Select pressed with nothing picked yet
+  let fromCase = $state(false); // the From the case dialog is open
   let anchorId = null; // where a Shift-press run starts
 
   const caseNotes = $derived(rows.find((row) => row.id === 'case') ?? null);
@@ -256,8 +262,21 @@
         {#each READY_NOTES as ready (ready.id)}
           {@render tile({ name: ready.name, start: ready.id === 'blank' ? 'Note' : ready.name, note: ready.note,
             body: ready.body, folder: '', look: ready.look })}
+          {#if ready.id === 'blank'}
+            <button type="button" class="tile" title="A note of every geolocation of a period" data-guide="notebook.from-case"
+              onclick={() => (fromCase = true)}>
+              <span class="stage"><PageThumb name="Geolocations, 1–14 March 2026" body={FROM_CASE_SAMPLE} look={FROM_CASE_LOOK} width={118} /></span>
+              <span class="tile-name">From the case</span>
+              <span class="tile-said">A period's geolocations</span>
+            </button>
+          {/if}
         {/each}
       </div>
+    {/if}
+
+    {#if fromCase}
+      <FromCaseDialog {caseId} taken={filed.map((row) => row.title)} onclose={() => (fromCase = false)}
+        oncreate={(start) => onstart(start)} />
     {/if}
 
     {#if selecting}

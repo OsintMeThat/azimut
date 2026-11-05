@@ -65,6 +65,27 @@ describe('what @ and / write', () => {
     accept(slashSource({}), 'Confirmed');
     expect(view.state.doc.toString()).toBe('> [!confirmed] ');
   });
+
+  it('/ offers Internal, found by what it is for too', () => {
+    editor('/private');
+    accept(slashSource({}), 'Internal');
+    expect(view.state.doc.toString()).toBe('> [!internal] ');
+  });
+});
+
+describe('an internal passage', () => {
+  it('is drawn as an Internal callout in its own colour, that says on hover what it does', () => {
+    editor('Public words.\n\n> [!internal] Who told us.\n> And how.\n\nAfter.');
+    const lines = [...view.dom.querySelectorAll('.cm-callout-internal')];
+    expect(lines).toHaveLength(2);
+    expect(lines[0].style.getPropertyValue('--callout')).toBe('var(--internal)');
+    const label = view.dom.querySelector('.cm-callout-internal .cm-callout-label');
+    expect(label.textContent).toBe('Internal');
+    expect(label.title).toBe('Left out of the public edition');
+    // the other callouts keep no hover of their own
+    editor('> [!lead] Ask the port.\n');
+    expect(view.dom.querySelector('.cm-callout-label').title).toBe('');
+  });
 });
 
 describe('a chapter', () => {

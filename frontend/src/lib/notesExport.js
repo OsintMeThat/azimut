@@ -83,18 +83,19 @@ export async function drawDiagrams(pending, { draw = renderMermaidSvg, toPng = r
 }
 
 /**
- * Write one PDF per note into the case's exports folder.
+ * Write one PDF per note into the notes export folder, each a new file.
  *
  * `noteIds` holds note entity ids, and `case` for the case's own scratchpad.
- * Nothing unsaved travels: the backend reads each note from disk, which is why
- * the caller flushes a pending edit before calling this.
+ * `edition` is `internal`, the note whole, or `public`, without its internal
+ * passages. Nothing unsaved travels: the backend reads each note from disk, which
+ * is why the caller flushes a pending edit before calling this.
  */
-export async function exportNotes(caseId, noteIds, options = {}) {
+export async function exportNotes(caseId, noteIds, { edition = 'internal', ...options } = {}) {
   const { diagrams: pending } = await api.post(`/api/cases/${caseId}/notes/pdf/diagrams`, {
-    notes: noteIds,
+    notes: noteIds, edition,
   });
   const diagrams = pending.length ? await drawDiagrams(pending, options) : {};
-  return api.post(`/api/cases/${caseId}/notes/pdf`, { notes: noteIds, diagrams });
+  return api.post(`/api/cases/${caseId}/notes/pdf`, { notes: noteIds, diagrams, edition });
 }
 
 export function revealExports(caseId) {

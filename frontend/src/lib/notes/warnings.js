@@ -5,12 +5,19 @@
  *
  * Each warning has its words, the 0-based line of the note it is about or null,
  * and a kind. The server renders the notes in memory for the check and writes
- * nothing (`POST notes/pdf/check`).
+ * nothing (`POST notes/pdf/check`), in the edition asked for. The check also counts
+ * each note's internal passages, and for the public edition says how many it leaves
+ * out, as a warning of the kind `internal` that is no fault (`isLeftOut`).
  */
 import { api } from '../api.js';
 
 /** What a warning is about (`engine/notes_pdf.py`); anything else reads as `other`. */
-export const WARNING_KINDS = ['missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'other'];
+export const WARNING_KINDS = ['missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'other', 'internal'];
+
+/** The internal passages a public edition leaves out: said, but nothing to fix. */
+export function isLeftOut(warning) {
+  return warning?.kind === 'internal';
+}
 
 export function warningKind(value) {
   return WARNING_KINDS.includes(value) ? value : 'other';
@@ -42,7 +49,18 @@ export function readCheck(answer) {
     .filter((item) => item.warnings.length);
 }
 
-/** Ask what the PDFs of these notes would warn about, from the notes as saved. */
-export async function checkNotes(caseId, noteIds, { signal } = {}) {
-  return readCheck(await api.post(`/api/cases/${caseId}/notes/pdf/check`, { notes: noteIds }, { signal }));
+/** How many internal passages the checked notes hold between them, chapters included. */
+export function internalCount(answer) {
+  const notes = Array.isArray(answer?.notes) ? answer.notes : [];
+  return notes.reduce((sum, item) => sum + (Number.isInteger(item?.internal) && item.internal > 0 ? item.internal : 0), 0);
+}
+
+/**
+ * Ask what the PDFs of these notes would warn about, from the notes as saved, in
+ * `edition`: `{ found, internal }`, the notes with something to say and the
+ * internal passages they hold.
+ */
+export async function checkNotes(caseId, noteIds, { signal, edition = 'internal' } = {}) {
+  const answer = await api.post(`/api/cases/${caseId}/notes/pdf/check`, { notes: noteIds, edition }, { signal });
+  return { found: readCheck(answer), internal: internalCount(answer) };
 }

@@ -531,7 +531,9 @@ def test_every_warning_has_a_kind(tmp_path):
         ('Section "Empty" is empty.', 0, "empty-section"),
         ("1 remote image left out: the export never fetches from the network.", 4, "other"),
     ]
-    assert set(notes_pdf.WARNING_KINDS) == {"missing", "unsourced", "open-task", "local-link", "empty-section", "other"}
+    assert set(notes_pdf.WARNING_KINDS) == {
+        "missing", "unsourced", "open-task", "local-link", "empty-section", "other", "internal",
+    }
 
 
 def test_a_template_is_warned_about_nothing_of_a_case():
@@ -565,12 +567,12 @@ def test_the_check_answers_each_note_in_order_and_writes_nothing(client):
                            json={"notes": [report["id"], clean["id"], "case", report["id"]]})
     assert response.status_code == 200, response.text
     assert response.json() == {"notes": [
-        {"note": report["id"], "title": "Rooftop", "warnings": [
+        {"note": report["id"], "title": "Rooftop", "internal": 0, "warnings": [
             {"text": 'Section "Method" is empty.', "line": 0, "kind": "empty-section"},
             {"text": "1 task is still open.", "line": 4, "kind": "open-task"},
         ]},
-        {"note": clean["id"], "title": "Clean", "warnings": []},
-        {"note": "case", "title": "Case notes", "warnings": [
+        {"note": clean["id"], "title": "Clean", "internal": 0, "warnings": []},
+        {"note": "case", "title": "Case notes", "internal": 0, "warnings": [
             {"text": 'The link "http://localhost/x" will not open for a reader.', "line": 0, "kind": "local-link"},
         ]},
     ]}
@@ -600,9 +602,9 @@ def test_a_note_that_cannot_be_laid_out_answers_why(client, monkeypatch):
     monkeypatch.setattr(notes_pdf, "render", render)
     response = client.post(f"/api/cases/{cid}/notes/pdf/check", json={"notes": [broken["id"], fine["id"]]})
     assert response.json()["notes"] == [
-        {"note": broken["id"], "title": "Broken",
+        {"note": broken["id"], "title": "Broken", "internal": 0,
          "warnings": [{"text": "the note could not be laid out: no room", "line": None, "kind": "other"}]},
-        {"note": fine["id"], "title": "Fine", "warnings": []},
+        {"note": fine["id"], "title": "Fine", "internal": 0, "warnings": []},
     ]
 
 

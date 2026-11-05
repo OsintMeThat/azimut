@@ -52,6 +52,7 @@ const { caseState, uiState, templatesState } = await import('../lib/state.svelte
 const { resetOpenNotes } = await import('../lib/notes/noteDoc.svelte.js');
 const { dockNote, noteDock, setDockOpen } = await import('../lib/notes/noteDock.svelte.js');
 const { openNotebookHome } = await import('../lib/navigate.js');
+const { editionOf, reloadEditions } = await import('../lib/notes/editions.svelte.js');
 const { default: Notebook } = await import('./Notebook.svelte');
 
 let component;
@@ -83,6 +84,7 @@ vi.stubGlobal('IntersectionObserver', SeenAtOnce);
 
 beforeEach(async () => {
   localStorage.clear();
+  reloadEditions();
   index = INDEX;
   get.mockImplementation(async (url) => {
     if (url.endsWith('/notes/index')) return index;
@@ -137,7 +139,9 @@ describe('the home', () => {
       'Source profile', 'Daily SITREP', 'Fact-check', 'Investigation log']) {
       expect(text()).toContain(name);
     }
-    expect(target.querySelectorAll('[data-guide="notebook.ready"] img')).toHaveLength(9);
+    // the nine ready notes, and From the case beside them
+    expect(target.querySelectorAll('[data-guide="notebook.ready"] img')).toHaveLength(10);
+    expect(target.querySelector('[data-guide="notebook.from-case"]').textContent).toContain('From the case');
   });
 
   it('opens a note, draws it, and goes back to the cards', async () => {
@@ -192,6 +196,26 @@ describe('the home', () => {
     await settle();
     expect(post.mock.calls.find(([address]) => address.endsWith('/notes'))[1].title).toBe('Note');
     expect(put.mock.calls.some(([address]) => address.endsWith('/look'))).toBe(false);
+  });
+
+  it('makes a note of the geolocations of a period, From the case, and opens it as a report', async () => {
+    const reading = get.getMockImplementation();
+    get.mockImplementation(async (url) => (url.includes('/notes/from-case')
+      ? { items: [{ id: 'pr1', type: 'proof', label: 'Strike', picture: true, sources: [], points: [],
+        shown: { kind: 'taken', raw: '2026-03-12', tz: null, day: '2026-03-12', last: '2026-03-12' }, day: '2026-03-12' }],
+      total: 1, undated: 0, first: '2026-03-12', last: '2026-03-12', limit: 200 }
+      : reading(url)));
+    target.querySelector('[data-guide="notebook.from-case"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await settle();
+    expect(everything()).toContain('1 geolocation.');
+    anyButton('Create').click();
+    await settle();
+    const body = post.mock.calls.find(([address]) => address.endsWith('/notes'))[1];
+    expect(body.title).toBe('Geolocations, 12 March 2026');
+    expect(body.content).toContain('### Strike\n\n[[media:pr1|Strike]]{width=75%}');
+    const look = put.mock.calls.find(([address]) => address.endsWith('/look'));
+    expect(look[1]).toMatchObject({ style: 'report', sources: 'on' });
   });
 
   it('shows the reports first: a note with a style of its own, or chapters', async () => {
@@ -336,6 +360,55 @@ describe('a note\'s menu', () => {
     setDockOpen(false);
   });
 
+  it('lists the editions of a note, and checks or shows one', async () => {
+    const EDITIONS = [
+      { at: '2026-03-12T09:30:00Z', edition: 'public', file: 'Old lead - public - 2026-03-12.pdf', folder: 'exports', pages: 3,
+        pdf_sha256: 'a'.repeat(64), text_sha256: 'b'.repeat(64) },
+      { at: '2026-03-11T08:00:00Z', edition: 'internal', file: 'Old lead - internal - 2026-03-11.pdf', folder: 'exports', pages: 1,
+        pdf_sha256: 'c'.repeat(64), text_sha256: 'd'.repeat(64) },
+    ];
+    const fallbackGet = get.getMockImplementation();
+    get.mockImplementation(async (url) => (url.endsWith('/notes/n1/editions') ? { editions: EDITIONS } : fallbackGet(url)));
+    const fallbackPost = post.getMockImplementation();
+    post.mockImplementation(async (url, body) => {
+      if (url.endsWith('/editions/check')) return { state: body.file.includes('public') ? 'unchanged' : 'changed' };
+      if (url.endsWith('/editions/reveal')) return { path: '/x' };
+      return fallbackPost(url, body);
+    });
+    cardMenu('Old lead');
+    anyButton('Editions').click();
+    await settle();
+    const dialog = document.querySelector('[role="dialog"][aria-label="Editions"]');
+    const rows = [...dialog.querySelectorAll('li')];
+    expect(rows.map((row) => row.textContent.replace(/\s+/g, ' ').trim())).toEqual([
+      expect.stringMatching(/^12 Mar 2026, \d\d:\d\d Public 3 pages Old lead - public - 2026-03-12\.pdf Show Check$/),
+      expect.stringMatching(/^11 Mar 2026, \d\d:\d\d Internal 1 page Old lead - internal - 2026-03-11\.pdf Show Check$/),
+    ]);
+    expect(get).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/editions');
+    const press = (row, words) => [...row.querySelectorAll('button')].find((button) => button.textContent.trim() === words).click();
+    press(rows[0], 'Check');
+    press(rows[1], 'Check');
+    await settle();
+    expect(rows[0].textContent).toContain('Unchanged since it was written');
+    expect(rows[1].textContent).toContain('This file is not the one Azimut wrote');
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/editions/check', { at: EDITIONS[1].at, file: EDITIONS[1].file, folder: 'exports' });
+    press(rows[1], 'Show');
+    await settle();
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/editions/reveal', { at: EDITIONS[1].at, file: EDITIONS[1].file, folder: 'exports' });
+  });
+
+  it('says a note has no edition yet, from the menu of the note open', async () => {
+    const fallbackGet = get.getMockImplementation();
+    get.mockImplementation(async (url) => (url.endsWith('/editions') ? { editions: [] } : fallbackGet(url)));
+    target.querySelector('button[title="Open Old lead"]').click();
+    await settle();
+    target.querySelector('button[aria-label="More"]').click();
+    flushSync();
+    anyButton('Editions').click();
+    await settle();
+    expect(everything()).toContain('No PDF yet. Each export is listed here.');
+  });
+
   it('deletes the note open, from its own menu', async () => {
     del.mockResolvedValue({ status: 'deleted', deleted: ['n1'], trash: 't1' });
     target.querySelector('button[title="Open Old lead"]').click();
@@ -411,7 +484,7 @@ describe('the check before export', () => {
     post.mockImplementation(async (url, body) => {
       if (!url.endsWith('/notes/pdf/check')) return fallback(url, body);
       if (hold) await hold.promise;
-      return reply(body.notes);
+      return reply(body.notes, body.edition);
     });
   }
   function holding() {
@@ -436,7 +509,7 @@ describe('the check before export', () => {
     await exportFromNote();
     const [url, body] = post.mock.calls.find(([address]) => address.endsWith('/notes/pdf/check'));
     expect(url).toBe('/api/cases/case-a/notes/pdf/check');
-    expect(body).toEqual({ notes: ['n1'] });
+    expect(body).toEqual({ notes: ['n1'], edition: 'internal' });
     expect(dialog().querySelector('[role="status"]').textContent).toBe('Checking…');
     expect(primary().disabled).toBe(false);
     expect(primary().textContent.trim()).toBe('Export PDF');
@@ -539,6 +612,48 @@ describe('the check before export', () => {
     const { EditorView } = await import('@codemirror/view');
     const view = EditorView.findFromDOM(target.querySelector('.cm-editor'));
     expect(view.state.doc.toString()).toBe('Log of the day');
+  });
+
+  it('offers no edition to pick when no note holds an internal passage', async () => {
+    answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [], internal: 0 })) }));
+    await exportFromNote();
+    expect(dialog().querySelector('[role="group"][aria-label="Edition"]')).toBeNull();
+    expect(dialogText()).toContain('Earlier exports are kept.');
+    primary().click();
+    await settle();
+    expect(exported()[0][1]).toMatchObject({ notes: ['n1'], edition: 'internal' });
+  });
+
+  it('asks Internal or Public when a note holds an internal passage, Internal the first time, and keeps the choice for the note', async () => {
+    const LEFT = { text: '2 internal passages left out.', line: null, kind: 'internal' };
+    answerCheck((notes, edition) => ({
+      notes: notes.map((note) => ({ note, title: 'Old lead', internal: 2, warnings: edition === 'public' ? [LEFT] : [] })),
+    }));
+    await exportFromNote();
+    const group = dialog().querySelector('[role="group"][aria-label="Edition"]');
+    const [internal, publicOne] = group.querySelectorAll('button');
+    expect(internal.getAttribute('aria-pressed')).toBe('true');
+    expect(internal.title).toBe('The note whole, its internal passages in marked boxes');
+    expect(dialogText()).toContain('Internal passages print in marked boxes.');
+    publicOne.click();
+    await settle();
+    // asked again for the public edition, which says what it leaves out, as no warning
+    const checks = post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check'));
+    expect(checks.at(-1)[1]).toEqual({ notes: ['n1'], edition: 'public' });
+    expect(dialog().querySelector('[role="group"][aria-label="Edition"] [aria-pressed="true"]').textContent).toBe('Public');
+    expect(dialogText()).toContain('2 internal passages left out.');
+    expect(dialogText()).not.toContain('Before you export');
+    expect(primary().textContent.trim()).toBe('Export PDF');
+    expect(editionOf('case-a', 'n1')).toBe('public');
+    primary().click();
+    await settle();
+    expect(post.mock.calls.find(([url]) => url.endsWith('/notes/pdf/diagrams'))[1]).toEqual({ notes: ['n1'], edition: 'public' });
+    expect(exported()[0][1]).toMatchObject({ notes: ['n1'], edition: 'public' });
+    // the next export of the note starts on Public
+    target.querySelector('[data-guide="notebook.pdf"]').click();
+    await settle();
+    expect(post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check')).at(-1)[1].edition).toBe('public');
+    expect(dialog().querySelector('[role="group"][aria-label="Edition"] [aria-pressed="true"]').textContent).toBe('Public');
   });
 
   it('forgets a check answered after the dialog was closed', async () => {

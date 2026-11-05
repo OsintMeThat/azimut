@@ -201,6 +201,8 @@ proof for publication.
 | ✅ **Report sources and check** | Credits every picture from what the case recorded, made-from pictures included, ends a report with a numbered list of its sources (addresses, archive, dates, SHA-256) linked from the text, and lists what a PDF would warn about before it is written. |
 | ✅ **Tools into the note** | While a note is pinned to the side, Add and the tools' own menus put what they show in it in one press: a map view, point or measure, a Compare pair, a pinned Detect candidate, an Inspect frame, a collage, a proof with its points, a Timeline or Sheet table, a quoted post, or a source looked up in the case first; each picture filed once, credited, undoable, and reopened where it came from. |
 | ✅ **Notes in the extension** | A folding panel in the extension holds the note, and a right-click on any page cites it (or the post), quotes the selected words with a link to that passage, or puts a map capture in. |
+| ✅ **Report editions** | Marks passages internal, prints a report as an internal or a public edition that never carries one, and keeps every PDF it wrote with its fingerprint, listed and checked from the note. |
+| ✅ **From the case** | Writes a note of a period's geolocations from the Notebook home, a figure each or a table, dated by what they show or when they were geolocated. |
 
 ---
 
@@ -246,7 +248,7 @@ supplies, since a ridge ends the day well before the flat horizon does.
 |------|--------------|
 | **One sky frame** | Find's skyline, Camera Resection and Sky Clock read in one azimuth and elevation frame, so the sun and moon times the relief hides split the places a matching skyline leaves tied. |
 | **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
-| **Report Builder** | Takes a report further: internal and public editions, one self-contained HTML file readable offline, and a web article as a WordPress draft or a copy for Substack or Medium. |
+| **Report Builder** | Takes a report off the PDF: one self-contained HTML file readable offline (a before/after swipe, playable clips, zoomable pictures, a citation's source on hover, verify links, the edition's hash); an interactive map of a period's geolocations, each point opening its clip, day, source and proof, exported as a folder a static host such as GitHub Pages serves as it is, so it can be dropped into an article; a thread made from a selection and handed to the Post composer; and a web article as a WordPress draft, a copy for Substack or Medium, or a package for any site. Never published by itself, never with an internal passage. |
 | **Case Sync (Git)** | Push a case to a private or public Git remote, pull it back, and diff two revisions, so two analysts can work the same case. |
 
 Toward v4: archive-on-download and a Wayback CDX snapshot timeline with diff; web-page save
@@ -284,7 +286,8 @@ stops making sense.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and the Collage tool.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
-- **Notes, next:** a selection sent to the Post composer, a preview on hovering a chip.
+- **Notes, next:** a preview on hovering a chip.
+- **Map plate, next:** Make a post from a plate: a video over a chosen period for one layer, from a template, handed to the Post composer.
 - **Notes in the extension, next:** an optional all-sites permission asked once, so the panel's own buttons work on a page never right-clicked.
 - **Tools into the note, next:** a Map plate page and evolution sheets filed as figures, public verify links in the Sources list, Horizon's pair and viewpoint, Detect's kept table, Inspect's moments, Timeline and Graph snapshots, an extension capture's toast, a reverse-search log line.
 - **Report, next:** a signature block at the end of a report, and an optional Azimut mark on its cover or footer.
@@ -369,7 +372,10 @@ stops making sense.
   paired app's exact origin, listens only to its own frame, adds no host and no
   `tabs` permission, and the worker's `notes-facts` route answers only the panel
   page. The browser test's same-origin allowance is compiled out of builds, and a
-  test proves it; 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
+  test proves it. An edition record is case data and can arrive in a bundle: *Show*
+  opens only an existing folder it names, *Check* hashes only the regular file it names
+  (never a device or a pipe) and tells only the local user whether it matches, nothing
+  is fetched and the browser never sends a path; 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
   names for images pasted into a proof (no client-chosen path), token-gated
   ingest island for the extension. A case file is served `nosniff`, and under a
   `sandbox` policy unless its type only displays, so an SVG or a page that arrived
