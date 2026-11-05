@@ -204,9 +204,15 @@ NOTES: dict[str, tuple[str, str]] = {
 #: credits its terrain, and an extension capture names its imagery and day where
 #: it said only the page's host. A link to an anchor in the note, which made the
 #: whole PDF fail, now prints as its words.
+#:
+#: One more, asked by the owner: a picture with no width written stays within half
+#: the page down (`notes_pdf.UNSIZED_SHARE`), so "pictures"' tall unsized picture is
+#: half a page rather than a whole one, and its closing paragraph comes up onto the
+#: same page (four pages became three). Nothing else on its pages moved, checked by
+#: drawing both engines' pages side by side.
 GOLDEN: dict[str, str] = {
     "everything": "be182d20d8a234eb5387a18c6665fb7efcc823e631370499bdf1db8517b814df",
-    "pictures": "4761ad1b81a16fa4587478bbb35cf073aede7c4c9abb5d435ac2669cf8ef878c",
+    "pictures": "38cc6b1916f4fb155126d93764d9db3b4f355213945bb5c298555889fee08f33",
     "diagram": "a9d3c0d75d5b35847ba113821079551d98758666f65bcd877962a249bb0fc307",
     "scripts": "90b7ddb4b5b86c93dd54fba2e2e84698e24e6f7534d3da3d86980b0698cdf1b0",
     "long": "b660d41e2adab570958604feea044f53f455f319f8366895ab2e10cf185da194",

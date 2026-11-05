@@ -5766,8 +5766,9 @@ the picture. A caption beats an image's title; with numbered figures it reads
 from: *Source:* and the site, *Imagery:* with the provider and the day, or *Watch:*
 for a video, each a link. Each size keeps the picture within a third, a half or
 three quarters of the page across and down, so a phone screenshot is not a page tall.
-A picture with no width written shrinks by up to a quarter rather than leave the rest
-of its page blank; one that still goes to the next page leaves its room marked on the
+A picture with no width written stays within half the page down, so a phone
+screenshot is half a page rather than a whole one (a diagram keeps the whole page), and
+shrinks by up to a quarter more rather than leave the rest of its page blank; one that still goes to the next page leaves its room marked on the
 Page pane with *Fit the picture here*, which writes the width that keeps it there. A
 width written by hand is never changed. **/** → *Page break* writes
 `<!-- pagebreak -->`, a dashed rule in the note: the PDF starts a new page there,

@@ -255,7 +255,8 @@ def test_a_diagram_prints_at_its_size_on_screen(tmp_path, monkeypatch):
 
 
 def test_a_picture_with_no_width_shrinks_a_little_rather_than_leave_a_page_blank(tmp_path):
-    png(tmp_path, "media/tall.png", size=(800, 1000))
+    # wide, so the half-page bound on a picture with no width does not decide it first
+    png(tmp_path, "media/tall.png", size=(1600, 1000))
     case = FakeCase(
         tmp_path,
         {"m1": {"id": "m1", "label": "Tower", "type": "media", "attrs": {"path": "media/tall.png", "kind": "image"}}},
@@ -272,6 +273,44 @@ def test_a_picture_with_no_width_shrinks_a_little_rather_than_leave_a_page_blank
             assert kept.box[3] >= moved.box[3] * (1 - notes_pdf.MAX_SHRINK) - 0.001
             return
     pytest.fail("no amount of text before the picture made it shrink rather than move")
+
+
+def phone_case(tmp_path):
+    png(tmp_path, "media/phone.png", size=(1080, 2340))
+    return FakeCase(
+        tmp_path,
+        {"m1": {"id": "m1", "label": "Post", "type": "media", "attrs": {"path": "media/phone.png", "kind": "image"}}},
+    )
+
+
+@pytest.mark.parametrize("style", ["plain", "report"])
+def test_a_picture_with_no_width_stays_within_half_the_page(tmp_path, style):
+    """A phone screenshot left unsized prints half a page tall, not a page; written at
+    full width it still takes the whole page, the analyst's choice."""
+    case = phone_case(tmp_path)
+    look = NoteLook.model_validate({"style": style})
+    [free] = notes_pdf.render(case, title="T", text="[[media:m1|Post]]\n", look=look).pictures
+    [full] = notes_pdf.render(case, title="T", text="[[media:m1|Post]]{width=100%}\n", look=look).pictures
+    assert free.box[3] == pytest.approx(full.box[3] * notes_pdf.UNSIZED_SHARE, rel=0.01)
+    assert free.page == 0
+
+
+def test_a_tall_diagram_keeps_the_whole_page(tmp_path, monkeypatch):
+    text = "```mermaid\ngraph TD; A-->B; B-->C; C-->D;\n```\n"
+    key = notes_pdf.diagram_key(notes_pdf.mermaid_sources(text)[0])
+    image = BytesIO()
+    Image.new("RGB", (400, 2400), "white").save(image, format="PNG")
+    heights = []
+    placed = notes_pdf._Builder._picture
+
+    def watch(self, source, **options):
+        heights.append(options["h"])
+        return placed(self, source, **options)
+
+    monkeypatch.setattr(notes_pdf._Builder, "_picture", watch)
+    notes_pdf.render(None, title="T", text=text, diagrams={key: image.getvalue()})
+    [height] = heights
+    assert height > notes_pdf.PLAIN.room * notes_pdf.UNSIZED_SHARE * 1.5
 
 
 def test_a_width_the_analyst_wrote_is_never_shrunk(tmp_path):

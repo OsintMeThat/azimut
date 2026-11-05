@@ -132,6 +132,10 @@ MIN_FIT_PERCENT = 15
 #: it starts on, rather than leave the rest of that page blank. A width the
 #: analyst wrote is never changed.
 MAX_SHRINK = 0.25
+#: A picture with no width written stays within this share of the page down, so a
+#: phone screenshot is not a page tall. A diagram keeps the whole page, and a width
+#: the analyst wrote is theirs.
+UNSIZED_SHARE = 0.5
 #: The browser draws a diagram at twice its size on screen, for a sharp print.
 DIAGRAM_PIXEL_SCALE = 2
 #: An HTML comment: hidden by every Markdown reader, and so by the PDF too.
@@ -2584,6 +2588,7 @@ class _Builder:
         video: bool = False,
         credit: _Credit | None = None,
         number: int = 0,
+        unsized: float = UNSIZED_SHARE,
     ) -> None:
         """Draw a picture as a block, its caption and credit kept on its page.
 
@@ -2595,7 +2600,7 @@ class _Builder:
         """
         pdf = self.pdf
         theme = self.theme
-        width, height = _fit(natural, width_attr, self._frame(), theme.room)
+        width, height = _fit(natural, width_attr, self._frame(), theme.room, unsized)
         if not theme.plain:
             pdf.ln(0.6)
         below = self._below(caption, credit, align, width)
@@ -2874,7 +2879,7 @@ class _Builder:
             self._aside("Diagram not drawn.")
             self._code_box(source)
             return
-        self._place(BytesIO(png), natural, "", Align.C, self._caption("", ""))
+        self._place(BytesIO(png), natural, "", Align.C, self._caption("", ""), unsized=1.0)
 
     def _poster(self, attrs: dict[str, Any], source: Source | None) -> "_Poster | str":
         """A video prints as its thumbnail with a play sign, and where it can be
@@ -3323,8 +3328,10 @@ def _fit(
     width_attr: str,
     available: float,
     room: float = PLAIN.room,
+    unsized: float = UNSIZED_SHARE,
 ) -> tuple[float, float]:
-    """Size an image the way the preview does, then keep it inside the page."""
+    """Size an image the way the preview does, then keep it inside the page: the whole
+    page for a width written, ``unsized`` of it down for a picture with none."""
     pixels_wide, pixels_high = natural
     ratio = pixels_high / pixels_wide if pixels_wide else 1.0
     if width_attr.endswith("%"):
@@ -3337,9 +3344,10 @@ def _fit(
     height = width * ratio
     # A tall image left at full width runs off the bottom of the page, and fpdf2
     # will not split a picture. Scale it down instead of losing it.
-    if height > room:
-        width *= room / height
-        height = room
+    limit = room if width_attr else room * unsized
+    if height > limit:
+        width *= limit / height
+        height = limit
     return width, height
 
 
