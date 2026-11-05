@@ -33,6 +33,13 @@ export const prefs = $state({
   postPrefill: true, // let the capture extension fill that composer on Publish
   reversePrefill: true, // let it hand the image to the engine on Reverse Search
   signatureHandle: '', // account handle stamped onto proofs that opt into it
+  // who signs a report: what a note's {name}, {role} and {organisation} print
+  reportName: '',
+  reportRole: '',
+  reportOrganisation: '',
+  logoSet: false, // the logo of Settings › Publishing is on disk (azimut:my-logo)
+  signatureSet: false, // the handwritten signature picture is on disk (azimut:my-signature)
+  picturesRev: 0, // bumped when either picture changes, so what shows them asks again
   updateCheckOnStart: true, // ask GitHub for a newer release when the page loads
   updateDismissedVersion: '', // the release tag muted with "don't show again"
   tour: '', // the first-run tour: '' never started, the page it resumes on, or 'done'
@@ -112,6 +119,11 @@ export function applyPrefs(s) {
   if (s.post_prefill !== undefined) prefs.postPrefill = s.post_prefill;
   if (s.reverse_prefill !== undefined) prefs.reversePrefill = s.reverse_prefill;
   if (s.signature_handle !== undefined) prefs.signatureHandle = s.signature_handle; // '' = none
+  if (s.report_name !== undefined) prefs.reportName = s.report_name;
+  if (s.report_role !== undefined) prefs.reportRole = s.report_role;
+  if (s.report_organisation !== undefined) prefs.reportOrganisation = s.report_organisation;
+  if (s.signature !== undefined) prefs.logoSet = Boolean(s.signature);
+  if (s.report_signature !== undefined) prefs.signatureSet = Boolean(s.report_signature);
   if (s.update_check_on_start !== undefined) prefs.updateCheckOnStart = s.update_check_on_start;
   if (s.update_dismissed_version !== undefined)
     prefs.updateDismissedVersion = s.update_dismissed_version;

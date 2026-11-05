@@ -33,7 +33,7 @@
   } from '../lib/state.svelte.js';
   import { createNote, deleteNote, resetCaseNotes } from '../lib/notes.js';
   import {
-    isPlainLook, normaliseLook, readLook, reportBody, reportLook, templateLook, writeLook,
+    coverChoice, isPlainLook, normaliseLook, ownCover, readLook, reportBody, reportLook, templateLook, writeLook,
   } from '../lib/notes/look.js';
   import { keepPageView, readPageView } from '../lib/notes/pageView.js';
   import { exportNotes, revealExports } from '../lib/notesExport.js';
@@ -298,6 +298,20 @@
       .catch(() => { if (live) look = normaliseLook(null); });
     return () => { live = false; };
   });
+
+  /**
+   * A look picked in the header. Turned to Your own page, a note with no cover gets
+   * one at its top, so what page 1 prints is there to write.
+   */
+  function pickLook(next) {
+    if (coverChoice(next) === 'own' && coverChoice(look) !== 'own') editor?.cover();
+    void changeLook(next);
+  }
+
+  /** `/` › Cover page wrote the page: the look prints it alone on page 1. */
+  function coverWritten() {
+    if (look && coverChoice(look) !== 'own') void changeLook(ownCover(look));
+  }
 
   /** A look picked in the header: shown at once, kept beside the note. */
   async function changeLook(next) {
@@ -611,6 +625,7 @@
 
   function changeTemplateLook(next) {
     if (!template) return;
+    if (coverChoice(next) === 'own' && coverChoice(template.look) !== 'own') editor?.cover();
     template.look = templateLook(next);
     void saveTemplateNow();
   }
@@ -639,7 +654,7 @@
         <span class="kind">Template</span>
         <input class="input title-input" bind:value={template.name} onblur={saveTemplateNow} maxlength="120" aria-label="Template name"
           onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
-        <span class="hint">{'{today}'} and {'{now}'} are written in when a note starts from it.</span>
+        <span class="hint">{'{today}'} and {'{now}'} are written in when a note starts from it; {'{title}'}, {'{date}'} and the signature's words when it prints.</span>
         <div class="spacer"></div>
         <LookControl look={template.look} template onchange={changeTemplateLook} />
         <ViewModes page={pageMode} guide="notebook.view" onchange={setPageMode} />
@@ -649,7 +664,7 @@
         <div class="writing">
           {#key template.id}
             <NoteEditor doc={templateDoc} {caseId} entities={graphEntities} onchange={templateChanged} onopen={openEntity} template
-              onready={(handle) => (editor = handle)}
+              onready={(handle) => (editor = handle)} oncover={() => template && changeTemplateLook(ownCover(template.look))}
               placeholder="What a note made from this template starts with. Type / and pick Guidance for grey words that say what goes where." />
           {/key}
         </div>
@@ -676,7 +691,7 @@
           {:else if doc.loaded}{#if saveSaid === 'Saved'}<Icon name="check" size={12} />{/if} {saveSaid}{/if}
         </span>
         <div class="spacer"></div>
-        <LookControl {look} onchange={changeLook} entities={graphEntities} disabled={!look} />
+        <LookControl {look} onchange={pickLook} entities={graphEntities} disabled={!look} />
         <ViewModes page={pageMode} guide="notebook.view" onchange={setPageMode} />
         <button class="btn btn-ghost btn-sm" title="Stays open on the right as you switch tools" aria-label="Pin to the side"
           data-guide="notebook.dock" onclick={() => beside()}><Icon name="panelRight" size={15} /><span class="wide-only">Pin to the side</span></button>
@@ -693,7 +708,7 @@
         <div class="writing">
           {#key doc}
             <NoteEditor {doc} {caseId} entities={graphEntities} redirects={referenceRedirects} where="notebook" notes={rows}
-              onopen={openEntity} onnote={(id) => show(id)} onready={(handle) => (editor = handle)} />
+              onopen={openEntity} onnote={(id) => show(id)} onready={(handle) => (editor = handle)} oncover={coverWritten} />
           {/key}
         </div>
         {#if pageMode && look && doc.loaded}

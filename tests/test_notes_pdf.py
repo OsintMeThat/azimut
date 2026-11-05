@@ -76,10 +76,12 @@ def test_case_syntax_becomes_markdown_the_parser_understands():
 
 def test_image_attributes_survive_the_round_trip():
     rewritten = notes_pdf._case_references('![alt](/files/demo/media/a.png "Cap"){width=70%}')
-    source, width, align, caption = notes_pdf._image_options(
+    source, width, align, caption, aligned = notes_pdf._image_options(
         rewritten[rewritten.index("(") + 1 : rewritten.index(' "Cap")')]
     )
-    assert (source, width, align, caption) == ("/files/demo/media/a.png", "70%", "left", "")
+    # no alignment written: "left" for the Page pane, and free to follow its block
+    assert (source, width, align, caption, aligned) == ("/files/demo/media/a.png", "70%", "left", "", False)
+    assert notes_pdf._image_options("/a.png?__azimut_attrs=align%3Dleft").aligned is True
 
 
 def test_only_bounded_widths_are_honoured():

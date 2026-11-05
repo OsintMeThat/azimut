@@ -150,11 +150,11 @@ export const PAGES = {
     ],
   },
   'settings-publishing': {
-    lead: 'What a new thread starts with, and how your work is signed.',
+    lead: 'What a new thread starts with, and how your reports and proofs are signed.',
     shot: 'settings-publishing',
     marks: [
       { anchor: 'settings.report-defaults', title: 'Geo Report', text: 'The mention and the site a new thread starts with, and whether the extension may fill the composer.' },
-      { anchor: 'settings.signature', title: 'Signature', text: 'Your handle and your logo, for the proofs and plates that carry them.' },
+      { anchor: 'settings.signature', title: 'In reports', text: 'Your logo, name, role and signature, which a note prints where it says so.' },
     ],
     tips: [{ title: 'Posting stays yours', text: 'Even with the extension, the composer is filled and Post is left to you.' }],
   },
@@ -195,7 +195,7 @@ export const PAGES = {
     marks: [
       { anchor: 'settings.workspace', title: 'Workspace folder', text: 'Where every case is kept. Pick another folder and Azimut moves them there.' },
       { anchor: 'settings.export-folders', title: 'Export folders', text: 'Where each kind of export is written, the case’s exports folder until you choose.' },
-      { anchor: 'settings.backup', title: 'Settings backup', text: 'Settings, keys, templates, icons and signature in one file. It holds your keys, so keep it private.' },
+      { anchor: 'settings.backup', title: 'Settings backup', text: 'Settings, keys, templates, icons, your logo and signature in one file. It holds your keys, so keep it private.' },
     ],
     tips: [{ title: 'Moving to another computer', text: 'Import backup on the new one, and the cases follow with the workspace folder.' }],
   },

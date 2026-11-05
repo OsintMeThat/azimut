@@ -203,6 +203,7 @@ proof for publication.
 | ✅ **Notes in the extension** | A folding panel in the extension holds the note, and a right-click on any page cites it (or the post), quotes the selected words with a link to that passage, or puts a map capture in. |
 | ✅ **Report editions** | Marks passages internal, prints a report as an internal or a public edition that never carries one, and keeps every PDF it wrote with its fingerprint, listed and checked from the note. |
 | ✅ **From the case** | Writes a note of a period's geolocations from the Notebook home, a figure each or a table, dated by what they show or when they were geolocated. |
+| ✅ **Report covers and signature** | Writes a first page of one's own above a cover line, fills the title, day, name, role and organisation when the PDF is made, prints the Azimut logo, the analyst's logo and a handwritten signature, and starts a template from anything. |
 
 ---
 
@@ -290,7 +291,8 @@ stops making sense.
 - **Map plate, next:** Make a post from a plate: a video over a chosen period for one layer, from a template, handed to the Post composer.
 - **Notes in the extension, next:** an optional all-sites permission asked once, so the panel's own buttons work on a page never right-clicked.
 - **Tools into the note, next:** a Map plate page and evolution sheets filed as figures, public verify links in the Sources list, Horizon's pair and viewpoint, Detect's kept table, Inspect's moments, Timeline and Graph snapshots, an extension capture's toast, a reverse-search log line.
-- **Report, next:** a signature block at the end of a report, and an optional Azimut mark on its cover or footer.
+- **Report, next:** an optional Azimut mark in the footer.
+- **Signed PDFs:** sign the finished file (PAdES, an incremental CMS update, e.g. pyHanko once its wheels are checked on the three OSes) with an X.509 key the analyst holds, kept 0600; a self-signed key proves only that the file is unchanged since it was signed, while a reader-trusted identity needs a CA certificate and a timestamp server, a network call.
 - **A report from a period:** every geolocation of a period written into a note through a per-item layout (card, table, one per page).
 - **Interactive map plate:** a map of a period's located videos, each point playing its clip, made without drawing it by hand.
 - **More on the home page:** the case's own notes beside the tiles, and panels the analyst arranges rather than a fixed grid. Each has to earn its place there rather than beside Board, Graph and Timeline, which already read the case.

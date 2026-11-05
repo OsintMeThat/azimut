@@ -88,6 +88,17 @@ describe('the pictures on the pages', () => {
     expect(pressed).toEqual(['M', 'Centre']);
   });
 
+  it('press the place a picture takes from its centred block when its line writes none', async () => {
+    // the server says left for a place unwritten; the line and its block say centre
+    const text = ['::: center', '[[media:m2|Pier]]{width=50%}', ':::', 'x', '', '', '[[media:m1|Roof]]{width=100% align=right}'].join('\n');
+    answer.pictures[1].align = 'left';
+    await pane({ text, onresize: vi.fn() });
+    const pressedOf = (node) => [...node.querySelectorAll('button.align[aria-pressed="true"]')].map((button) => button.title);
+    expect(pressedOf(sheet(0).querySelector('.picture'))).toEqual(['Centre']);
+    expect(pressedOf(sheet(1).querySelector('.picture'))).toEqual(['Right']);
+    answer.pictures[1].align = 'center';
+  });
+
   it('hand up a new size, held inside the page for a tall picture', async () => {
     const onresize = vi.fn();
     await pane({ onresize });

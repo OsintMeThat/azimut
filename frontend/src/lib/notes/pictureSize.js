@@ -65,11 +65,15 @@ export function readAttrs(attrs) {
   };
 }
 
-/** The braces for a size, a place and a caption: left, the default, is not written. */
-export function writeAttrs({ width = '', align = '', caption = '', rest = '' } = {}) {
+/**
+ * The braces for a size, a place and a caption. The place a picture takes anyway
+ * is not written: left, or the place of the `::: center` / `::: right` block it
+ * stands in (`fallback`), where left is then written.
+ */
+export function writeAttrs({ width = '', align = '', caption = '', rest = '' } = {}, { fallback = 'left' } = {}) {
   const parts = [];
   if (width) parts.push(`width=${width}`);
-  if (align && align !== 'left') parts.push(`align=${align}`);
+  if (align && align !== (fallback || 'left')) parts.push(`align=${align}`);
   const words = cleanCaption(caption);
   if (words) parts.push(`caption="${words}"`);
   if (rest) parts.push(rest);
@@ -115,11 +119,29 @@ export function sameRef(a, b) {
 }
 
 /** The line with picture `ref` given `changes` ({ width }, { align }, { caption }), or null when the line does not hold it. */
-export function sizedLine(text, ref, changes) {
+export function sizedLine(text, ref, changes, { blockAlign = '' } = {}) {
   const picture = picturesIn(text).find((item) => sameRef(item.ref, ref));
   if (!picture) return null;
-  const next = { width: picture.width, align: picture.align, caption: picture.caption, rest: picture.rest, ...changes };
-  return `${text.slice(0, picture.attrFrom)}${writeAttrs(next)}${text.slice(picture.to)}`;
+  const next = { width: picture.width, align: picture.align || blockAlign, caption: picture.caption, rest: picture.rest, ...changes };
+  return `${text.slice(0, picture.attrFrom)}${writeAttrs(next, { fallback: blockAlign })}${text.slice(picture.to)}`;
+}
+
+/**
+ * The place of the `::: center` or `::: right` block line `index` (0-based) stands
+ * in, '' outside one: what a picture there takes when its line writes none.
+ */
+export function blockAlignAt(lines, index) {
+  for (let at = index - 1; at >= 0; at -= 1) {
+    if (/^:::[ \t]*$/.test(lines[at])) return '';
+    const open = /^:::[ \t]*(left|center|right)[ \t]*$/.exec(lines[at]);
+    if (!open) continue;
+    for (let end = index + 1; end < lines.length; end += 1) {
+      if (/^:::[ \t]*$/.test(lines[end])) return open[1] === 'left' ? '' : open[1];
+      if (/^:::[ \t]*(left|center|right)[ \t]*$/.test(lines[end])) return '';
+    }
+    return '';
+  }
+  return '';
 }
 
 /** The picture `ref` on the line (0-based) holding it nearest to `line`, or null. */

@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   CAPTION_MAX, PAGE_TALL, PICTURE_SIZES, captionField, cleanCaption, pictureAt, pictureLine, picturesIn, readAttrs, rovingToolbar,
-  sameRef, sizeWidth, sizedLine, writeAttrs,
+  blockAlignAt, sameRef, sizeWidth, sizedLine, writeAttrs,
 } from './pictureSize.js';
 
 describe('a picture line', () => {
@@ -153,6 +153,22 @@ describe('sizing a picture', () => {
     const line = '[[media:m1|Roof]]{width=50% align=center}';
     expect(sizedLine(line, 'media:m1', { width: '75%' })).toBe('[[media:m1|Roof]]{width=75% align=center}');
     expect(sizedLine(line, 'media:m1', { align: 'left' })).toBe('[[media:m1|Roof]]{width=50%}');
+  });
+
+  it('takes the place of the block it stands in, and writes only a place that differs from it', () => {
+    const lines = ['Intro', '::: center', '![Logo](azimut:my-logo){width=25%}', ':::', '![Map](/m.png)', '::: right', 'x', ':::'];
+    expect(blockAlignAt(lines, 2)).toBe('center');
+    expect(blockAlignAt(lines, 4)).toBe('');
+    expect(blockAlignAt(lines, 6)).toBe('right');
+    expect(blockAlignAt(['::: left', 'x', ':::'], 1)).toBe('');
+    // an open block never closed is no block
+    expect(blockAlignAt(['::: center', 'x'], 1)).toBe('');
+    const centred = { blockAlign: 'center' };
+    expect(sizedLine(lines[2], 'azimut:my-logo', { width: '50%' }, centred)).toBe('![Logo](azimut:my-logo){width=50%}');
+    expect(sizedLine(lines[2], 'azimut:my-logo', { align: 'left' }, centred)).toBe('![Logo](azimut:my-logo){width=25% align=left}');
+    expect(sizedLine('![Logo](azimut:my-logo){width=25% align=left}', 'azimut:my-logo', { align: 'center' }, centred))
+      .toBe('![Logo](azimut:my-logo){width=25%}');
+    expect(writeAttrs({ align: 'right' }, { fallback: 'right' })).toBe('');
   });
 
   it('changes only the picture it names on a line holding two', () => {

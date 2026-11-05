@@ -135,10 +135,40 @@ describe('each section', () => {
     prefs.quality3d = 'full';
   });
 
-  it('Publishing states the mention and signature controls', () => {
+  it('Publishing states the mention, who a report is from, and the proofs\' handle', () => {
     const text = show('publishing');
     expect(text).toContain('Geo Report');
-    expect(text).toContain('Signature');
+    expect([...pane().querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Geo Report', 'In reports', 'On proofs']);
+    for (const words of ['Logo', 'Name', 'Role', 'Organisation', 'Signature', 'Your account handle']) expect(text).toContain(words);
+    // each field says what it takes, in the tool
+    expect(text).toContain('at most 80 characters');
+    expect(text).toContain('up to 1 MB');
+  });
+
+  it('Publishing keeps who signs a report, one line each, and the signature picture beside the logo', async () => {
+    show('publishing');
+    api.put.mockImplementation(async (path, patch) => ({ ...settingsBlob(), ...patch }));
+    api.put.mockClear();
+    const field = (label) => [...pane().querySelectorAll('label.row')].find((row) => row.textContent.includes(label)).querySelector('input');
+    expect(field('Name').maxLength).toBe(80);
+    field('Name').value = '  A.   Analyst ';
+    field('Name').dispatchEvent(new Event('change', { bubbles: true }));
+    await Promise.resolve();
+    expect(api.put).toHaveBeenCalledWith('/api/settings/prefs', { report_name: 'A. Analyst' });
+    await vi.waitFor(() => expect(prefs.reportName).toBe('A. Analyst'));
+
+    api.post.mockClear();
+    const signature = [...pane().querySelectorAll('.row')].find((row) => row.querySelector('.row-label')?.textContent.trim().startsWith('Signature'));
+    const input = signature.querySelector('input[type="file"]');
+    Object.defineProperty(input, 'files', { value: [new File(['png'], 'hand.png', { type: 'image/png' })], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(prefs.signatureSet).toBe(true));
+    expect(api.post.mock.calls[0][0]).toBe('/api/settings/report-signature');
+    flushSync();
+    expect(signature.querySelector('img').getAttribute('src')).toMatch(/^\/api\/notes\/pictures\/my-signature\?v=\d+$/);
+    api.put.mockImplementation(async () => settingsBlob());
+    prefs.reportName = '';
+    prefs.signatureSet = false;
   });
 
   it('Imagery draws one card per key, basemap or layer', () => {

@@ -217,3 +217,34 @@ describe('a page break', () => {
     expect(drawn(state).some((item) => item.startsWith('pagebreak'))).toBe(false);
   });
 });
+
+describe('the end of the cover page', () => {
+  const COVER = '::: center\n# {title}\n:::\n<!-- cover -->\n\nBody';
+
+  it('is drawn as a named rule, and as its text while the cursor is on it', () => {
+    const state = noteState(COVER, { caseInfo: CASE });
+    const rule = COVER.indexOf('<!-- cover -->');
+    expect(drawn(state)).toContain(`coverrule ${rule}-${rule + 14}`);
+    expect(drawn(at(state, rule + 3))).toContain(`line cm-pagebreak-line @${rule}`);
+    expect(drawn(at(state, rule + 3)).some((item) => item.startsWith('coverrule'))).toBe(false);
+  });
+
+  it('is only an example inside code', () => {
+    const state = noteState('```\n<!-- cover -->\n```', { caseInfo: CASE });
+    expect(drawn(state).some((item) => item.startsWith('coverrule'))).toBe(false);
+  });
+});
+
+describe('the words the PDF fills in', () => {
+  it('are drawn as words of their own, and as their text on the line being edited', () => {
+    const text = 'Signed by {name}, {organisation}';
+    const state = noteState(text, { caseInfo: CASE });
+    expect(drawn(state)).toEqual(['placeholder 10-16', 'placeholder 18-32']);
+    expect(drawn(at(state, 2))).toEqual(['mark cm-placeholder-source 10-16', 'mark cm-placeholder-source 18-32']);
+  });
+
+  it('stay as written in code and in guidance', () => {
+    expect(drawn(noteState('`{name}`', { caseInfo: CASE })).some((item) => item.startsWith('placeholder'))).toBe(false);
+    expect(drawn(noteState('<!--? Sign as {name} -->', { caseInfo: CASE }))).toEqual(['hint 0-24']);
+  });
+});

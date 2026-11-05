@@ -44,7 +44,8 @@ if sys.platform == "linux":
 # Droid, DejaVu, Literata and Plex faces the notes PDF draws with (engine/pdffonts.py). The
 # fonts have to be in the bundle, not on the machine: a PDF embeds the glyphs it
 # uses, so an export made on Windows and one made on Linux must find the same
-# faces or they are different documents.
+# faces or they are different documents. azimut/assets/brand/azimut.svg, the mark a
+# note prints as `azimut:logo`, rides along the same way.
 datas = collect_data_files("azimut")
 
 # The scrapers' .dist-info, which collect_submodules leaves behind. It is how

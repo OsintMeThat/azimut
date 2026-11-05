@@ -7,7 +7,8 @@
    * notes last written, a field to find one once there are many. `current` marks
    * the note already showing (null for Case notes, undefined for none);
    * `onnotebook` adds a button on each row that opens it in the Notebook, and
-   * `onhome` a last row to the Notebook's home.
+   * `onhome` a last row to the Notebook's home. `onpick` hears the id, then the
+   * row's title and folder.
    */
   import { api } from '../lib/api.js';
   import { foldText } from '../lib/textFold.js';
@@ -67,7 +68,7 @@
 
 {#snippet row(id, title, folder, icon)}
   <div class="pick-row">
-    <button type="button" class="fm-item" class:on={isOn(id)} aria-current={isOn(id) ? 'true' : undefined} onclick={() => onpick(id)}>
+    <button type="button" class="fm-item" class:on={isOn(id)} aria-current={isOn(id) ? 'true' : undefined} onclick={() => onpick(id, { title, folder })}>
       <Icon name={icon} size={14} /><span class="fm-grow">{title}</span>
       {#if folder}<small>{folder}</small>{/if}
     </button>

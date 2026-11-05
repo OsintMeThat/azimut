@@ -532,7 +532,7 @@ def test_every_warning_has_a_kind(tmp_path):
         ("1 remote image left out: the export never fetches from the network.", 4, "other"),
     ]
     assert set(notes_pdf.WARNING_KINDS) == {
-        "missing", "unsourced", "open-task", "local-link", "empty-section", "other", "internal",
+        "missing", "unsourced", "open-task", "local-link", "empty-section", "other", "internal", "setting",
     }
 
 

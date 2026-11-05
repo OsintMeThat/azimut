@@ -59,7 +59,7 @@ describe('the notes to pick from', () => {
     await picker([row('n1', 'Old lead', '2026-09-01T10:00:00Z')], { onpick });
     press('Old lead');
     press('Case notes');
-    expect(onpick.mock.calls).toEqual([['n1'], [null]]);
+    expect(onpick.mock.calls).toEqual([['n1', { title: 'Old lead', folder: '' }], [null, { title: 'Case notes', folder: '' }]]);
   });
 
   it('marks the note already showing, and none when nothing is', async () => {

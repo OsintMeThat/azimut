@@ -181,6 +181,17 @@ describe('applyPrefs', () => {
     expect(prefs.signatureHandle).toBe('@example');
   });
 
+  it('knows who signs a report, and whether the logo and the signature are set', async () => {
+    const { applyPrefs, prefs } = await freshState();
+    expect([prefs.reportName, prefs.logoSet, prefs.signatureSet]).toEqual(['', false, false]);
+    applyPrefs({ report_name: 'A. Analyst', report_role: 'Analyst', report_organisation: 'Desk', signature: true, report_signature: true });
+    expect([prefs.reportName, prefs.reportRole, prefs.reportOrganisation]).toEqual(['A. Analyst', 'Analyst', 'Desk']);
+    expect([prefs.logoSet, prefs.signatureSet]).toEqual([true, true]);
+    // PUT /api/settings/prefs answers without the two pictures: they stay as they were
+    applyPrefs({ report_role: '' });
+    expect([prefs.reportRole, prefs.logoSet, prefs.signatureSet]).toEqual(['', true, true]);
+  });
+
   it('shares one camera across the map tabs until Settings says otherwise', async () => {
     const { applyPrefs, prefs } = await freshState();
     expect(prefs.mapSync).toBe(true);

@@ -14,7 +14,7 @@ vi.mock('../../lib/api.js', () => ({ api: { get, post, put: vi.fn(), del: vi.fn(
 vi.mock('../../lib/notes/thumbs.js', () => ({ templateThumb: vi.fn(async () => 'data:image/png;base64,AAAA') }));
 
 const { default: TemplatesTab } = await import('./TemplatesTab.svelte');
-const { prefs, templatesState, uiState } = await import('../../lib/state.svelte.js');
+const { caseState, prefs, templatesState, uiState } = await import('../../lib/state.svelte.js');
 const { noteTemplateFile } = await import('../../lib/notes/templateFile.js');
 
 const PROOF = { id: 'pf_1', name: 'House proof', data: { legend: true } };
@@ -47,6 +47,8 @@ beforeEach(() => {
 
 afterEach(() => {
   if (app) unmount(app);
+  document.querySelectorAll('.float-menu').forEach((node) => node.remove());
+  caseState.current = null;
   target?.remove();
   app = null;
   templatesState.proof = [];
@@ -133,9 +135,93 @@ describe('Notebook templates', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  const menu = () => document.querySelector('.float-menu[aria-label="New template"]');
+  const entry = (text) => [...menu().querySelectorAll('.fm-item')].find((node) => node.textContent.trim() === text);
+  const openMenu = () => {
+    target.querySelector('[data-new-template]').click();
+    flushSync();
+  };
+
+  it('starts one from one menu: blank, a ready one, one of yours, or a note of the case open', () => {
+    caseState.current = { id: 'c1', name: 'Case' };
+    templatesState.note = [WRITE_UP];
+    open();
+    expect(sectionButton(target.querySelector('[data-guide="settings.note-templates"]'), 'From a ready one')).toBeUndefined();
+    openMenu();
+    expect([...menu().querySelectorAll('.fm-item')].map((node) => node.textContent.trim()))
+      .toEqual(['Blank', 'From a ready one', 'From one of yours', 'From a note of this case']);
+    caseState.current = null;
+    flushSync();
+    // no case open, no note to start from
+    expect(entry('From a note of this case')).toBeUndefined();
+    document.querySelectorAll('.float-menu').forEach((node) => node.remove());
+  });
+
+  it('has none of yours to copy before one is kept', () => {
+    open();
+    openMenu();
+    expect(entry('From one of yours').disabled).toBe(true);
+  });
+
+  it('starts a blank one and opens it in the Notebook', async () => {
+    open();
+    openMenu();
+    entry('Blank').click();
+    await settle();
+    const [, body] = post.mock.calls[0];
+    expect(body).toMatchObject({ name: 'Note template', data: { body: '', folder: '' } });
+    expect(uiState.openNoteTemplate).toBe('nt_new');
+    expect(menu()).toBeNull();
+    uiState.openNoteTemplate = null;
+  });
+
+  it('copies one of yours, look and all, and opens the copy', async () => {
+    templatesState.note = [WRITE_UP];
+    open();
+    openMenu();
+    entry('From one of yours').click();
+    flushSync();
+    [...menu().querySelectorAll('.ready-item')].find((node) => node.textContent.includes('Write-up')).click();
+    await settle();
+    const [, body] = post.mock.calls[0];
+    expect(body.name).toBe('Write-up copy');
+    expect(body.data).toMatchObject({ body: '## Claim', look: { style: 'brief' } });
+    expect(uiState.openNoteTemplate).toBe('nt_new');
+    uiState.openNoteTemplate = null;
+  });
+
+  it('starts one from a note of the case: its text, folder and look, never its cover picture or day', async () => {
+    caseState.current = { id: 'c1', name: 'Case' };
+    get.mockImplementation(async (url) => {
+      if (url === '/api/cases/c1/notes/index') return { items: [{ id: 'case', title: 'Case notes' }, { id: 'n1', title: 'Port strike', folder: 'Leads', updated_at: 'x' }] };
+      if (url === '/api/cases/c1/notes/n1') return { text: '# Port strike\n\nWhat we saw.' };
+      if (url === '/api/cases/c1/notes/n1/look') return { look: { style: 'report', cover: { on: true, mode: 'own', image: 'm1', date: '2026-11-04' } } };
+      return { proof: [], post: [], map: [], note: [] };
+    });
+    open();
+    openMenu();
+    entry('From a note of this case').click();
+    flushSync();
+    await settle();
+    const picker = document.querySelector('.float-menu[aria-label="Notes"]');
+    expect(picker.textContent).toContain('Its text, folder and look start the template');
+    [...picker.querySelectorAll('.fm-item')].find((node) => node.textContent.includes('Port strike')).click();
+    await settle();
+    await vi.waitFor(() => expect(post).toHaveBeenCalled());
+    const [, body] = post.mock.calls[0];
+    expect(body.name).toBe('Port strike');
+    expect(body.data.body).toBe('# Port strike\n\nWhat we saw.');
+    expect(body.data.folder).toBe('Leads');
+    expect(body.data.look).toMatchObject({ style: 'report', cover: { on: true, mode: 'own', image: '', date: '' } });
+    expect(uiState.openNoteTemplate).toBe('nt_new');
+    uiState.openNoteTemplate = null;
+    caseState.current = null;
+  });
+
   it('starts one from a ready template and opens it in the Notebook', async () => {
     open();
-    sectionButton(target.querySelector('[data-guide="settings.note-templates"]'), 'From a ready one').click();
+    openMenu();
+    entry('From a ready one').click();
     flushSync();
     const item = [...document.querySelectorAll('.ready-item')].find((node) => node.textContent.includes('Daily SITREP'));
     expect([...document.querySelectorAll('.ready-item')].some((node) => node.textContent.includes('Blank'))).toBe(false);

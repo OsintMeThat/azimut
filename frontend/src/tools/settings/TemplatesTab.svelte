@@ -5,14 +5,21 @@
    * Content-free presets: a template carries house style, never a case's
    * material. Plate and note templates are edited in their own tools. Editing or duplicating one opens the parent's editor modal. One
    * post template can be the one new posts start with (`post_template`).
+   *
+   * A Notebook template starts from anything, under one New template menu: blank,
+   * a ready one, one of the analyst's own (a copy), or a note of the open case,
+   * which keeps what Keep as template keeps. Each opens in the Notebook, as Edit does.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import PageThumb from '../notebook/PageThumb.svelte';
-  import { templatesState, prefs, saveTemplate, toast, uiState } from '../../lib/state.svelte.js';
+  import NotePicker from '../../components/NotePicker.svelte';
+  import { api } from '../../lib/api.js';
+  import { caseState, templatesState, prefs, saveTemplate, toast, uiState } from '../../lib/state.svelte.js';
   import { houseLayout, templateOf } from '../../lib/plate/page.js';
   import { readTemplateFile, templateFile } from '../../lib/plate/templateFile.js';
-  import { styleLabel, templateLook } from '../../lib/notes/look.js';
+  import { readLook, styleLabel, templateLook } from '../../lib/notes/look.js';
+  import { CASE_NOTES, noteEndpoint, openCopy } from '../../lib/notes/noteDoc.svelte.js';
   import { READY_NOTES } from '../../lib/notes/ready.js';
   import { noteTemplateFile, noteTemplateFileName, readNoteTemplateFile } from '../../lib/notes/templateFile.js';
 
@@ -60,14 +67,41 @@
       return record;
     } catch (error) { toast(error.message, 'danger', 5000); return null; }
   }
-  async function newNoteTemplate() {
-    const record = await addNote('Note template', { body: '' });
+  /** Make a template and open it in the Notebook, as Edit does. */
+  async function startNote(name, data) {
+    closeNew();
+    const record = await addNote(name, data);
     if (record) editNote(record.id);
   }
-  async function fromReady(ready) {
-    readyAnchor = null;
-    const record = await addNote(ready.name, ready);
-    if (record) editNote(record.id);
+  // the New template menu: its first level, or the list one of its rows opens
+  let newAnchor = $state(null);
+  let newStep = $state('');
+  // the open case's notes, picked through the note picker
+  let notesAnchor = $state(null);
+  function closeNew() {
+    newAnchor = null;
+    newStep = '';
+  }
+  function toggleNew(button) {
+    if (newAnchor) closeNew();
+    else newAnchor = button;
+  }
+  function fromNotes() {
+    // read before the menu closes, which forgets where it hung
+    const anchor = newAnchor;
+    closeNew();
+    notesAnchor = anchor;
+  }
+  /** A note of the open case as a template: its text, folder and look, without a cover picture or day. */
+  async function fromNote(caseId, noteId, row) {
+    notesAnchor = null;
+    try {
+      const open = openCopy(caseId, noteId);
+      const body = open?.loaded ? open.text : (await api.get(noteEndpoint(caseId, noteId)))?.text ?? '';
+      const look = await readLook(caseId, noteId === CASE_NOTES ? null : noteId);
+      const name = String(row?.title || (noteId === CASE_NOTES ? 'Case notes' : 'Note template')).slice(0, 120);
+      await startNote(name, { body, folder: row?.folder ?? '', look });
+    } catch (error) { toast(`The note could not be read: ${error.message}`, 'danger', 5000); }
   }
   async function duplicateNote(record) {
     await addNote(`${record.name} copy`.slice(0, 120), record.data ?? {});
@@ -76,7 +110,6 @@
     download(noteTemplateFile(record), noteTemplateFileName(record.name));
   }
   let notePicker = $state();
-  let readyAnchor = $state(null);
   async function importNote(event) {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = '';
@@ -174,7 +207,7 @@
 <section class="group" data-guide="settings.note-templates">
   <h3>Notebook templates</h3>
   <p class="note">
-    A note to start others from, with how it prints, shared across cases. {'{today}'} and {'{now}'} are written in when a note starts.
+    A note to start others from, with how it prints, shared across cases. {'{today}'} and {'{now}'} are written in when a note starts; {'{title}'}, {'{date}'}, {'{name}'}, {'{role}'} and {'{organisation}'} when it prints.
   </p>
   <div class="tpl-list">
     {#each templatesState.note as t (t.id)}
@@ -200,23 +233,52 @@
     {/if}
   </div>
   <div class="tpl-actions">
-    <button class="btn btn-sm" onclick={newNoteTemplate}><Icon name="plus" size={13} /> New template</button>
-    <button class="btn btn-sm" aria-haspopup="menu" title="Start from one of the Notebook's ready templates"
-      onclick={(event) => (readyAnchor = readyAnchor ? null : event.currentTarget)}><Icon name="note" size={13} /> From a ready one</button>
+    <button class="btn btn-sm" aria-haspopup="menu" aria-expanded={Boolean(newAnchor)} data-new-template
+      title="Start a template blank, from a ready one, from one of yours or from a note"
+      onclick={(event) => toggleNew(event.currentTarget)}><Icon name="plus" size={13} /> New template <Icon name="chevronDown" size={12} /></button>
     <button class="btn btn-sm" title="Add a template from an .azimut-note.json file" onclick={() => notePicker.click()}>
       <Icon name="upload" size={13} /> Import a file</button>
     <input type="file" accept=".json,application/json" hidden bind:this={notePicker} onchange={importNote} />
   </div>
 </section>
 
-{#if readyAnchor}
-  <FloatingMenu anchor={readyAnchor} width={280} label="Ready templates" onclose={() => (readyAnchor = null)}>
-    {#each READY_NOTES.filter((ready) => ready.id !== 'blank') as ready (ready.id)}
-      <button type="button" class="fm-item ready-item" onclick={() => fromReady(ready)}>
-        <span class="fm-grow">{ready.name}</span><small>{styleLabel(ready.look?.style ?? 'plain')}</small>
-      </button>
-    {/each}
+{#if newAnchor}
+  <FloatingMenu anchor={newAnchor} width={280} label="New template" onclose={closeNew}>
+    {#if newStep === 'ready'}
+      <button type="button" class="fm-item back" onclick={() => (newStep = '')}><Icon name="chevronLeft" size={13} /><span class="fm-grow">From a ready one</span></button>
+      <div class="fm-sep"></div>
+      {#each READY_NOTES.filter((ready) => ready.id !== 'blank') as ready (ready.id)}
+        <button type="button" class="fm-item ready-item" onclick={() => startNote(ready.name, ready)}>
+          <span class="fm-grow">{ready.name}</span><small>{styleLabel(ready.look?.style ?? 'plain')}</small>
+        </button>
+      {/each}
+    {:else if newStep === 'yours'}
+      <button type="button" class="fm-item back" onclick={() => (newStep = '')}><Icon name="chevronLeft" size={13} /><span class="fm-grow">From one of yours</span></button>
+      <div class="fm-sep"></div>
+      {#each templatesState.note as record (record.id)}
+        <button type="button" class="fm-item ready-item" onclick={() => startNote(`${record.name} copy`.slice(0, 120), record.data ?? {})}>
+          <span class="fm-grow">{record.name}</span><small>{styleLabel(record.data?.look?.style ?? 'plain')}</small>
+        </button>
+      {/each}
+    {:else}
+      <button type="button" class="fm-item" onclick={() => startNote('Note template', { body: '' })}>
+        <Icon name="file" size={14} /><span class="fm-grow">Blank</span></button>
+      <button type="button" class="fm-item" onclick={() => (newStep = 'ready')}>
+        <Icon name="note" size={14} /><span class="fm-grow">From a ready one</span><Icon name="chevronRight" size={13} /></button>
+      <button type="button" class="fm-item" disabled={!templatesState.note.length} title={templatesState.note.length ? '' : 'None kept yet'}
+        onclick={() => (newStep = 'yours')}><Icon name="copy" size={14} /><span class="fm-grow">From one of yours</span><Icon name="chevronRight" size={13} /></button>
+      {#if caseState.current}
+        <button type="button" class="fm-item" onclick={fromNotes}>
+          <Icon name="layers" size={14} /><span class="fm-grow">From a note of this case</span><Icon name="chevronRight" size={13} /></button>
+      {/if}
+    {/if}
   </FloatingMenu>
+{/if}
+
+{#if notesAnchor && caseState.current}
+  {@const caseId = caseState.current.id}
+  <NotePicker {caseId} anchor={notesAnchor} intro="Its text, folder and look start the template. Its cover picture and day stay with the case."
+    onpick={(id, row) => fromNote(caseId, id ?? CASE_NOTES, row)} onclose={() => (notesAnchor = null)} />
 {/if}
 
 <section class="group" data-guide="settings.plate-templates">
@@ -296,6 +358,10 @@
   .ready-item small {
     color: var(--text-3);
     font-size: var(--fs-xs);
+  }
+
+  .back {
+    color: var(--text-2);
   }
 
   .tpl-name {

@@ -25,6 +25,14 @@ a cover, a table of contents, numbered sections and figures and a TLP label as
 options (`engine/notelook.py`). A note with no look prints as `plain`, which is
 the document this module always made, line for line.
 
+**A first page of one's own.** A look whose cover is the note's own (`cover.mode`
+"own") prints the lines above the note's first `<!-- cover -->` alone as page 1,
+with no running header, footer or page number but its TLP label, centred down the
+page unless the look starts it at the top; the note starts on page 2. Whatever the
+look, each `{title}`, `{date}`, `{name}`, `{role}` and `{organisation}` is filled
+as the note prints, and `azimut:logo`, `azimut:my-logo` and `azimut:my-signature`
+draw the app's logo and the analyst's own two pictures (`engine/notefill.py`).
+
 **Chapters.** A line `[[include:<note id>]]` prints that note in its place: its
 title becomes a chapter heading and its own headings move one level down. Two
 levels deep at most; a loop or a note that is gone prints a short aside rather
@@ -85,7 +93,7 @@ from markdown_it.token import Token
 from PIL import Image as PILImage
 from PIL import ImageOps, UnidentifiedImageError
 
-from . import notes_style, notesources, pdffonts, thumbnails
+from . import notefill, notes_style, notesources, pdffonts, thumbnails
 from .notelook import DEFAULT as DEFAULT_LOOK
 from .notelook import NoteLook
 from .notes_style import PLAIN, WHITE, NotePage, Theme, mix
@@ -178,6 +186,8 @@ LOG_STAMP = re.compile(
 )
 
 ALIGNMENTS = {"left": Align.L, "center": Align.C, "right": Align.R}
+#: An aligned paragraph's words, each with the spaces after it, and its hard breaks.
+ALIGNED_WORD = re.compile(r"\n|[^\S\n]*\S+[^\S\n]*|[^\S\n]+")
 
 #: The callouts a quote can open with, as `> [!confirmed]`, their label and colour.
 CALLOUTS: dict[str, tuple[str, tuple[int, int, int]]] = {
@@ -206,6 +216,13 @@ CASE_PICTURE = "Picture from the case"
 CASE_CHAPTER = "A note included here prints as a chapter."
 #: What prints where a picture of the case is gone or unreadable.
 MEDIA_UNAVAILABLE = "Media unavailable"
+#: What one of the three pictures every note can show resolves to while it is not
+#: set: nothing on the page (`engine/notefill.py`); the check says so instead.
+PICTURE_NOT_SET = "\x00not set"
+
+#: The own cover page's headings, set as a cover sets a title rather than as the
+#: body's sections: (points, leading in millimetres). Deeper ones keep the style's.
+COVER_HEADINGS = {"h1": (28.0, 11.5), "h2": (18.0, 8.0), "h3": (13.5, 6.4)}
 
 #: A styled caption's face size and leading, in points and millimetres, before the
 #: look's text size; and the narrowest it is set, so a small picture's caption
@@ -240,7 +257,9 @@ LOCAL_LINK = "local-link"
 EMPTY_SECTION = "empty-section"
 OTHER = "other"
 LEFT_OUT = "internal"
-WARNING_KINDS = (MISSING, UNSOURCED, OPEN_TASK, LOCAL_LINK, EMPTY_SECTION, OTHER, LEFT_OUT)
+#: Something Settings › Publishing holds and nobody set: the logo, the signature, the name.
+SETTING = "setting"
+WARNING_KINDS = (MISSING, UNSOURCED, OPEN_TASK, LOCAL_LINK, EMPTY_SECTION, OTHER, LEFT_OUT, SETTING)
 #: How many links a reader cannot open are named one by one before the rest are counted.
 MAX_LOCAL_LINKS = 10
 #: What the aside says where an included note is gone: the warning is read off it.
@@ -354,6 +373,8 @@ class _Picture:
     natural: tuple[int, int]
     credit: _Credit | None = None
     source: Source | None = None
+    #: One of the three pictures every note can show: no frame, no figure number.
+    built_in: bool = False
 
 
 @dataclass
@@ -374,12 +395,14 @@ class _Poster:
 
 class ImageOptions(NamedTuple):
     """What a picture's braces say: its source with the braces taken out, its
-    width and alignment as written, and its caption."""
+    width and alignment as written, and its caption. ``aligned`` is whether an
+    alignment was written at all: one that was not follows the block it is in."""
 
     source: str
     width: str
     align: str
     caption: str
+    aligned: bool = False
 
 
 @dataclass
@@ -440,6 +463,7 @@ def render(
     resolve: Resolve | None = None,
     created: datetime | None = None,
     public: bool = False,
+    identity: notefill.Identity | None = None,
 ) -> Rendered:
     """Lay one note out as a PDF.
 
@@ -450,29 +474,49 @@ def render(
     placeholder too.
     ``created`` pins the document's creation date, which is otherwise now.
     ``public`` lays out the public edition: every internal passage left out.
+    ``identity`` is who signs (the placeholders and the analyst's two pictures),
+    read from Settings when not given.
     """
     look = look or DEFAULT_LOOK
     theme = notes_style.theme_for(look)
     day = date.fromisoformat(look.cover.date) if look.cover.date else (created or datetime.now()).date()
+    identity = identity if identity is not None else notefill.Identity.from_settings()
+    values = identity.values(day)
+    #: Each placeholder left empty, with the first line it stands on.
+    empty: dict[str, int] = {}
     passages = [0]
-    pieces = expand(title, text, resolve=resolve, note_id=note_id, public=public, counter=passages)
+    cut = notefill.split_cover(text) if look.cover.own else None
+    pieces = expand(title, cut.body if cut is not None else text, resolve=resolve, note_id=note_id,
+                    public=public, counter=passages, values=values, empty=empty)
+    cover: Piece | None = None
+    if cut is not None:
+        cover = _cover_piece(title, cut.text, public=public, counter=passages, values=values, empty=empty)
+        if not notefill.prints_anything(cover.text):
+            cover = None
     blocks = {id(piece): _alignment_blocks(piece.text) for piece in pieces if piece.kind == "text"}
+    shown = [cover, *pieces] if cover is not None else pieces
+    if cover is not None:
+        blocks[id(cover)] = _alignment_blocks(cover.text)
     if public and any(_holds_internal(block.tokens) for parsed in blocks.values() for block in parsed):
         # cannot happen, since the text was stripped as this parser reads it; if it
         # ever did, no page is better than a page with the passage on it
         raise NotesPdfError("an internal passage could not be left out, so the public edition was not made")
     # what the document cites is read before a page is laid out: the sources list
     # numbers every citation before the first is drawn, and its words need their fonts
-    cited = _Cited(case, look=look, styled=not theme.plain)
-    cited.collect(pieces, blocks)
+    cited = _Cited(case, look=look, styled=not theme.plain, identity=identity)
+    cited.collect(shown, blocks)
+    if look.cover.own and cover is None:
+        cited.warn(notefill.EMPTY_COVER, cut.line if cut is not None else None, OTHER)
+    if "name" in empty:
+        cited.warn(notefill.NO_NAME, empty["name"], SETTING)
     document = NotePage(title=title, theme=theme, look=look, day=day)
     if created is not None:
         document.set_creation_date(created)
-    words = "\n".join([title, look.cover.subtitle, *(piece.text for piece in pieces), *cited.words()])
+    words = "\n".join([title, look.cover.subtitle, *(piece.text for piece in shown), *cited.words()])
     faces = pdffonts.install(document, words, body=theme.body_family, font=look.font)
     builder = _Builder(document, case, diagrams or {}, look=look, faces=faces, cited=cited)
     try:
-        builder.build(title, pieces, blocks)
+        builder.build(title, pieces, blocks, cover=(cover, cut.line) if cover is not None and cut is not None else None)
         output = bytes(document.output())
     except pdffonts.FontError:
         raise
@@ -488,8 +532,25 @@ def render(
         diagrams=list(builder.missing.items()),
         pictures=builder.pictures,
         internal=passages[0],
-        text_sha256=hashlib.sha256(printed_source(pieces).encode("utf-8")).hexdigest(),
+        text_sha256=hashlib.sha256(printed_source(shown).encode("utf-8")).hexdigest(),
     )
+
+
+def _cover_piece(
+    title: str, text: str, *, public: bool, counter: list[int], values: dict[str, str], empty: dict[str, int]
+) -> Piece:
+    """The lines above a note's cover line as the page prints them: guidance out,
+    internal passages counted (and out of the public edition), placeholders filled."""
+    text = notefill.cover_text(without_hints(text))
+    stripped, passages = strip_internal(text)
+    counter[0] += passages
+    if public:
+        text = stripped
+
+    def heard(key: str, line: int) -> None:
+        empty.setdefault(key, line)
+
+    return Piece("text", notefill.fill(text, {**values, "title": title}, heard), 0, 0)
 
 
 # -- chapters ----------------------------------------------------------------
@@ -524,6 +585,8 @@ def expand(
     note_id: str = "",
     public: bool = False,
     counter: list[int] | None = None,
+    values: dict[str, str] | None = None,
+    empty: dict[str, int] | None = None,
 ) -> list[Piece]:
     """The note cut at its include lines, each chapter's note spliced in.
 
@@ -531,12 +594,14 @@ def expand(
     for the public edition every internal passage too, in the note and in each
     chapter, before the include lines are read: a chapter written inside one is
     left out with it. ``counter[0]`` is raised by the internal passages found.
+    With ``values``, each note's placeholders are filled (`notefill.fill`), its
+    `{title}` its own, and ``empty`` learns each one left empty and its first line.
     """
     pieces: list[Piece] = []
     budget = [MAX_CHAPTERS]
     _expand_into(pieces, title, without_hints(text), resolve=resolve,
                  chain=(note_id,) if note_id else (), depth=0, at=None, budget=budget, source=0,
-                 public=public, counter=counter if counter is not None else [0])
+                 public=public, counter=counter if counter is not None else [0], values=values, empty=empty)
     return pieces
 
 
@@ -560,12 +625,22 @@ def _expand_into(
     source: int,
     public: bool = False,
     counter: list[int] | None = None,
+    values: dict[str, str] | None = None,
+    empty: dict[str, int] | None = None,
 ) -> None:
     counter = counter if counter is not None else [0]
     stripped, passages = strip_internal(text)
     counter[0] += passages
     if public:
         text = stripped
+    if values is not None:
+        said = empty if empty is not None else {}
+
+        def heard(key: str, line: int) -> None:
+            # a chapter's lines are another note's: it is said at its include line
+            said.setdefault(key, line if at is None else at)
+
+        text = notefill.fill(text, {**values, "title": title}, heard)
     lines = text.split("\n")
     start = 0
     fenced = False
@@ -620,7 +695,7 @@ def _expand_into(
         pieces.append(Piece("chapter", chapter_title, depth + 1, where, True, None, number))
         _expand_into(pieces, chapter_title, without_hints(chapter_text), resolve=resolve,
                      chain=(*chain, target), depth=depth + 1, at=where, budget=budget, source=number,
-                     public=public, counter=counter)
+                     public=public, counter=counter, values=values, empty=empty)
     flush(len(lines))
 
 
@@ -747,7 +822,8 @@ def _image_options(href: str) -> ImageOptions:
     if not (WIDTH_PERCENT.match(width) or WIDTH_PIXELS.match(width)):
         width = ""
     align = values.get("align", "left")
-    return ImageOptions(source, width, align if align in ALIGNMENTS else "left", caption)
+    chosen = align in ALIGNMENTS and "align" in values
+    return ImageOptions(source, width, align if align in ALIGNMENTS else "left", caption, chosen)
 
 
 def _parser() -> MarkdownIt:
@@ -1006,12 +1082,22 @@ class _Cited:
     which item a citation is, so the numbers and the list cannot disagree.
 
     Without a case (a template's preview) nothing of a case is read and nothing is
-    warned about; a web link is still a source.
+    warned about; a web link is still a source. The three pictures every note can
+    show are never sources, and one that Settings does not hold is said either way.
     """
 
-    def __init__(self, case: "Case | None", *, look: NoteLook, styled: bool = False) -> None:
+    def __init__(
+        self,
+        case: "Case | None",
+        *,
+        look: NoteLook,
+        styled: bool = False,
+        identity: notefill.Identity | None = None,
+    ) -> None:
         self.case = case
         self.look = look
+        #: Who signs, and where their pictures are: read once for the whole document.
+        self.identity = identity if identity is not None else notefill.Identity()
         self.reader = notesources.Reader(case)
         self.on = look.sources_on
         self.styled = styled
@@ -1077,7 +1163,7 @@ class _Cited:
     def collect(self, pieces: list[Piece], blocks: dict[int, list["_Block"]]) -> None:
         """Read every citation in document order, chapters included, then number them."""
         cover = self.look.cover
-        if cover.on and cover.image and self.case is not None:
+        if cover.on and not cover.own and cover.image and self.case is not None:
             shown = self.reader.entity(cover.image)
             if shown is not None and shown.path and shown.noun != "Video":
                 self._cited.append(shown)
@@ -1145,7 +1231,13 @@ class _Cited:
             self._cited.append(source)
 
     def _image(self, token: Token, line: int) -> None:
-        source = self.image_source(_attr(token, "src"))
+        src = _attr(token, "src")
+        name = notefill.picture_name(_image_options(src).source)
+        if name is not None:
+            if self.identity.picture(name) is None:
+                self._once(f"picture:{name}", notefill.NOT_SET[name], line, SETTING)
+            return
+        source = self.image_source(src)
         if source is None:
             return
         self._cited.append(source)
@@ -1181,6 +1273,10 @@ class _Cited:
 
     def _warn(self, message: str, line: int | None, kind: str) -> None:
         self.warnings.append((message, line, kind))
+
+    def warn(self, message: str, line: int | None, kind: str) -> None:
+        """Say one more thing the check before export should, from outside the pass."""
+        self._warn(message, line, kind)
 
     def _once(self, key: str, message: str, line: int | None, kind: str) -> None:
         if key not in self._warned:
@@ -1269,13 +1365,26 @@ class _Builder:
         #: leading into a chapter that opens a page of its own was set on.
         self._lead: Piece | None = None
         self._led_page: int | None = None
+        #: Whether a cover carries the title (the style's, or the note's own once drawn),
+        #: and whether the walk is drawing the note's own cover right now.
+        self._covered = self.look.cover.on and not self.look.cover.own
+        self._on_cover = False
         pdf.on_page = self._page_begins
         self._render = DECODED.begin()
         pdf.place_picture = lambda source, **options: self._picture(source, **options)
 
     # -- entry point --------------------------------------------------------
 
-    def build(self, title: str, pieces: list[Piece], blocks: dict[int, list[_Block]] | None = None) -> None:
+    def build(
+        self,
+        title: str,
+        pieces: list[Piece],
+        blocks: dict[int, list[_Block]] | None = None,
+        *,
+        cover: tuple[Piece, int] | None = None,
+    ) -> None:
+        """Draw the document. ``cover`` is the note's own first page, when its look
+        asks for one and its text has one, with the line that ends it."""
         theme, look, pdf = self.theme, self.look, self.pdf
         if blocks is None:
             blocks = {id(piece): _alignment_blocks(piece.text) for piece in pieces if piece.kind == "text"}
@@ -1284,7 +1393,11 @@ class _Builder:
             self._empty_sections(pieces, blocks)
         for message, line, kind in self.cited.warnings:
             self._warn(message, line, kind)
-        if look.cover.on:
+        if look.cover.own:
+            if cover is not None:
+                piece, end = cover
+                self._own_cover(piece, blocks.get(id(piece)) or _alignment_blocks(piece.text), end)
+        elif look.cover.on:
             unseen = self.case is None and bool(look.cover.image)
             pdf.cover(image=self._cover_image(), placeholder=CASE_PICTURE if unseen else "")
         if theme.style == "brief":
@@ -1326,6 +1439,72 @@ class _Builder:
 
     def _page_begins(self) -> None:
         self._page_lines[self.pdf.page] = self._line
+
+    # -- the note's own cover ----------------------------------------------------
+
+    def _own_cover(self, piece: Piece, parsed: list[_Block], end: int) -> None:
+        """The lines above the note's cover line, alone on the first page: no running
+        header, footer or page number, the TLP label still on it, and the whole
+        centred down the page unless the look starts it at the top.
+
+        Drawn from the top, then moved down as one: the page's drawing from where
+        the cover began is shifted in the PDF itself, and its links and pictures with
+        it, so nothing is laid out twice. A cover too long for one page runs on, as
+        bare, and is not moved.
+        """
+        pdf, theme = self.pdf, self.theme
+        self._line = piece.line
+        pdf.covering = True
+        pdf.add_page()
+        page = pdf.page
+        contents = pdf.pages[page].contents
+        assert isinstance(contents, bytearray)
+        start = len(contents)
+        links = len(pdf.pages[page].annots or [])
+        pictures = len(self.pictures)
+        self._on_cover = True
+        self._shift, self._fixed = 0, False
+        try:
+            for block in parsed:
+                self._block_line = piece.line + block.line
+                self._walk(block.tokens, block.start, block.align, stop=None)
+            self._end_entry()
+        finally:
+            self._on_cover = False
+            pdf.covering = False
+        self._covered = True
+        # the body's first page starts at the line after the cover's
+        self._line = end + 1
+        if pdf.page != page:
+            self._warn("Your own cover page runs over one page.", end, OTHER)
+            return
+        if self.look.cover.top:
+            return
+        used = max(0.0, pdf.get_y() - pdf.t_margin - theme.gap)
+        drop = (pdf.h - pdf.b_margin - pdf.t_margin - used) / 2
+        if drop < 0.1:
+            return
+        offset = drop * pdf.k
+        contents[start:start] = f"1 0 0 1 0 {-offset:.2f} cm\n".encode("ascii")
+        contents.extend(f"1 0 0 1 0 {offset:.2f} cm\n".encode("ascii"))
+        for annotation in list(pdf.pages[page].annots or [])[links:]:
+            x1, y1, x2, y2 = (float(value) for value in str(annotation.rect).strip("[]").split())
+            annotation.rect = f"[{x1:.2f} {y1 - offset:.2f} {x2:.2f} {y2 - offset:.2f}]"
+        for picture in self.pictures[pictures:]:
+            if picture.page == page - 1:
+                left, top, width, height = picture.box
+                picture.box = (left, top + drop / pdf.h, width, height)
+
+    def _cover_heading(self, runs: list[Run], tag: str, align: Align) -> None:
+        """A heading on the note's own cover: set large, as a cover sets a title, and
+        never numbered, bookmarked or listed in the contents."""
+        pdf, theme = self.pdf, self.theme
+        size, leading = COVER_HEADINGS.get(tag, (theme.headings.get(tag, theme.headings["h6"])[0], 0.0))
+        leading = leading or size * 0.48
+        if pdf.get_y() > pdf.t_margin + 0.5:
+            pdf.ln(leading * 0.4)
+        self._runs(runs, align=align, size=size, leading=leading, family=theme.heading_family, bold=True,
+                   color=theme.ink, bottom=leading * 0.35)
 
     # -- the sources list ------------------------------------------------------
 
@@ -1594,7 +1773,7 @@ class _Builder:
 
     def _title_block(self, title: str) -> None:
         style = self.theme.style
-        if self.look.cover.on and style != "brief":
+        if self._covered and style != "brief":
             return  # the cover carries the title
         if style == "plain":
             self._plain_title(title)
@@ -1755,6 +1934,9 @@ class _Builder:
         tag = tokens[index].tag
         level = _level(tag, self._shift)
         runs = self._inline(tokens[index + 1])
+        if self._on_cover:
+            self._cover_heading(runs, tag, align)
+            return index + 3
         if self.theme.style == "journal" and tag == "h3":
             stamp = LOG_STAMP.match(_plain(runs))
             if stamp is not None:
@@ -2461,6 +2643,8 @@ class _Builder:
         so it is drawn as its own block instead (`_standalone_image`).
         """
         resolved = self._resolve_image(token)
+        if resolved == PICTURE_NOT_SET:
+            return []
         label = resolved if isinstance(resolved, str) else (token.content or "Image")
         link = resolved.url if isinstance(resolved, _Poster) else ""
         named = Run(text=f"[{label}]", italic=True, color=self.theme.muted, link=link)
@@ -2523,26 +2707,14 @@ class _Builder:
         bottom = self.theme.gap if bottom is None else bottom
         pdf = self.pdf
         if align is not Align.L:
-            # An aligned paragraph needs the whole line before it can be placed,
-            # so it is drawn as one string and gives up its inline styling.
-            pdf.set_font(family, "B" if bold else "", size)
-            pdf.set_text_color(*color)
-            pdf.multi_cell(
-                pdf.epw, leading, _plain(runs), align=align, new_x=XPos.LMARGIN, new_y=YPos.NEXT
-            )
+            self._aligned_runs(list(runs), align, size=size, leading=leading, family=family, bold=bold, color=color)
             pdf.ln(bottom)
             return
         # `write` keeps a cell margin on each side before it breaks, so the edge
         # it measures against is inside the one the page declares.
         right = self.theme.page_width - pdf.r_margin - 2 * pdf.c_margin
         for run in runs:
-            run_family, emphasis = self._face(
-                pdffonts.MONO if run.mono else family, run.bold or bold, run.italic
-            )
-            pdf.set_font(run_family, emphasis, size * (0.92 if run.mono else 1.0))
-            pdf.set_text_color(*(run.color if run.color != INK else color))
-            if run.raised:
-                pdf.char_vpos = "SUP"
+            self._run_face(run, family=family, bold=bold, size=size, color=color)
             text = run.text
             body = text.lstrip(" ")
             word = body.split(" ", 1)[0] if body else ""
@@ -2553,6 +2725,93 @@ class _Builder:
             if run.raised:
                 pdf.char_vpos = "LINE"
         pdf.ln(leading + bottom)
+
+    def _run_face(self, run: Run, *, family: str, bold: bool, size: float, color: tuple[int, int, int]) -> None:
+        """Set the face, size, colour and height a run is drawn in."""
+        pdf = self.pdf
+        run_family, emphasis = self._face(pdffonts.MONO if run.mono else family, run.bold or bold, run.italic)
+        pdf.set_font(run_family, emphasis, size * (0.92 if run.mono else 1.0))
+        pdf.set_text_color(*(run.color if run.color != INK else color))
+        if run.raised:
+            pdf.char_vpos = "SUP"
+
+    def _aligned_runs(
+        self,
+        runs: list[Run],
+        align: Align,
+        *,
+        size: float,
+        leading: float,
+        family: str,
+        bold: bool,
+        color: tuple[int, int, int],
+    ) -> None:
+        """A paragraph centred or set to the right, its styling kept.
+
+        Placed line by line: the runs are cut into lines here, each line measured
+        whole and started where its alignment puts it, then each run on it drawn at
+        its own place in its own face, link and `[n]` included, as a paragraph at the
+        left is. A run stays whole on its line, so a right-to-left phrase in it
+        lands the way it was shaped. A hard break starts a line.
+        """
+        pdf = self.pdf
+        room = pdf.epw - 2 * pdf.c_margin
+        lines: list[list[tuple[Run, str]]] = [[]]
+        used = 0.0
+
+        def width(run: Run, text: str) -> float:
+            self._run_face(run, family=family, bold=bold, size=size, color=color)
+            measured = pdf.get_string_width(text)
+            pdf.char_vpos = "LINE"
+            return measured
+
+        for run in runs:
+            for word in ALIGNED_WORD.findall(run.text):
+                if word == "\n":
+                    lines.append([])
+                    used = 0.0
+                    continue
+                if not lines[-1]:
+                    word = word.lstrip()
+                if not word:
+                    continue
+                if lines[-1] and used + width(run, word.rstrip()) > room:
+                    lines.append([])
+                    used = 0.0
+                    word = word.lstrip()
+                    if not word:
+                        continue
+                while len(word) > 1 and width(run, word.rstrip()) > room:
+                    # a word wider than the whole line (an address) is cut where it must be
+                    cut = next((n for n in range(len(word) - 1, 0, -1) if width(run, word[:n]) <= room), 1)
+                    lines[-1].append((run, word[:cut]))
+                    lines.append([])
+                    used = 0.0
+                    word = word[cut:]
+                lines[-1].append((run, word))
+                used += width(run, word)
+        for line in lines:
+            # a run's words on one line are drawn as one string
+            pieces: list[tuple[Run, str]] = []
+            for run, word in line:
+                if pieces and pieces[-1][0] is run:
+                    pieces[-1] = (run, pieces[-1][1] + word)
+                else:
+                    pieces.append((run, word))
+            if pieces:
+                pieces[-1] = (pieces[-1][0], pieces[-1][1].rstrip())
+            widths = [width(run, text) for run, text in pieces]
+            if pdf.will_page_break(leading):
+                pdf.add_page()
+            y = pdf.get_y()
+            x = pdf.l_margin + pdf.c_margin + _aligned(align, 0.0, room, sum(widths))
+            for (run, text), measured in zip(pieces, widths):
+                if text:
+                    self._run_face(run, family=family, bold=bold, size=size, color=color)
+                    self._text_at(x, y, text, leading, link=self._run_link(run))
+                    pdf.char_vpos = "LINE"
+                x += measured
+            pdf.set_xy(pdf.l_margin, y + leading)
 
     def _run_link(self, run: Run) -> str | int:
         """Where a run links: its address, else its entry in the sources list."""
@@ -2718,11 +2977,20 @@ class _Builder:
             return False
         token = children[0]
         resolved = self._resolve_image(token)
+        if resolved == PICTURE_NOT_SET:
+            return True  # a picture Settings does not hold prints nothing; the check says so
         options = _image_options(_attr(token, "src"))
         figure = (_picture_ref(options.source), options.width, options.align)
-        place = ALIGNMENTS[options.align]
+        # an alignment written on the picture wins; else it stands as its block does
+        place = ALIGNMENTS[options.align] if options.aligned else align
         # a caption written in the braces says more than a title, which is older
         title = options.caption or _attr(token, "title")
+        if isinstance(resolved, _Picture) and resolved.built_in:
+            # who made the document, not a figure of it: no number, no frame, and a
+            # caption only when one is written
+            self._place(resolved.path, resolved.natural, options.width, place, ("", title),
+                        figure=figure, framed=False)
+            return True
         number = 0 if isinstance(resolved, str) else self.cited.number(resolved.source)
         if isinstance(resolved, _Poster):
             if resolved.path is None:
@@ -2770,6 +3038,7 @@ class _Builder:
         credit: _Credit | None = None,
         number: int = 0,
         unsized: float = UNSIZED_SHARE,
+        framed: bool = True,
     ) -> None:
         """Draw a picture as a block, its caption and credit kept on its page.
 
@@ -2777,7 +3046,8 @@ class _Builder:
         pane told where it landed; ``video`` marks a video's still. The caption is
         measured rather than guessed, so a picture never goes to the foot of a page
         that only has room for it and not for the words under it. ``number`` is its
-        entry in the sources list, said after the credit.
+        entry in the sources list, said after the credit. ``framed`` draws a styled
+        look's hairline round it, which a logo or a signature does without.
         """
         pdf = self.pdf
         theme = self.theme
@@ -2818,9 +3088,10 @@ class _Builder:
                 self._credit_line(credit, align, pdf.l_margin, pdf.epw, number)
             pdf.ln(theme.gap)
             return
-        pdf.set_draw_color(*theme.rule)
-        pdf.set_line_width(0.2)
-        pdf.rect(left, top, width, height, style="D")
+        if framed:
+            pdf.set_draw_color(*theme.rule)
+            pdf.set_line_width(0.2)
+            pdf.rect(left, top, width, height, style="D")
         box_left, box_width = self._caption_box(align, left, width)
         if caption[0] or caption[1]:
             self._figure_caption(caption, align, box_left, box_width)
@@ -3085,6 +3356,9 @@ class _Builder:
         """The file behind an image, or the line to print instead of it."""
         src = _attr(token, "src")
         source = _image_options(src).source
+        built_in = notefill.picture_name(source)
+        if built_in is not None:
+            return self._built_in(built_in)
         parts = urlsplit(source)
         if parts.scheme in ("http", "https"):
             self._remote += 1
@@ -3120,6 +3394,21 @@ class _Builder:
         # where it came from, as the one reading of sources says it (`notesources`)
         shown = self.cited.image_source(src)
         return _Picture(path, natural, shown.credit() if shown is not None else None, shown)
+
+
+    def _built_in(self, name: str) -> "_Picture | str":
+        """One of the three pictures every note can show, from Settings or the app:
+        nothing while it is not set, or not readable."""
+        path = self.cited.identity.picture(name)
+        if path is None:
+            return PICTURE_NOT_SET
+        natural = notefill.AZIMUT_LOGO_SIZE if name == notefill.LOGO else _measure(path)
+        if natural is None:
+            return PICTURE_NOT_SET
+        if self.images >= MAX_IMAGES:
+            return "Image not included in PDF: this note holds too many."
+        self.images += 1
+        return _Picture(path, natural, built_in=True)
 
 
 class _Indent:

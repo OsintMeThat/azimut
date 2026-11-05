@@ -1115,7 +1115,7 @@ between in a disc and as it is (guessed at import from how many colours it
 paints) and moves or removes it; a group renames or removes as a whole.
 
 The Settings backup carries portable settings, API keys, templates, the icon
-library and the signature. Templates and icons are added to those already here,
+library, the logo and the report signature with its name, role and organisation. Templates and icons are added to those already here,
 one of the same id replaced. It leaves absolute export paths, the workspace pointer and download
 sessions on the machine that created them, and the UI tells the analyst to keep
 the downloaded backup private.
@@ -5743,8 +5743,28 @@ record's `look`, `notes.case_look` for the case notes) and never in its Markdown
 
 Every style takes A4 or Letter, an accent (the style's own, a recent colour or a
 pasted hex), a TLP marking (FIRST TLP 2.0 colours, top right and in the footer of
-every page), a cover page (subtitle, a picture from the case's media, a day), a
-contents page and numbered headings and figures. PDF bookmarks follow the headings.
+every page), a cover page, a contents page and numbered headings and figures. PDF
+bookmarks follow the headings. **Cover** is *Off*, *The style's* (a subtitle, a picture
+from the case's media, a day) or **Your own page**: what the note holds above a line
+`<!-- cover -->` (drawn in the editor as *End of the cover page*) prints alone on page 1,
+with no running header, footer or page number, the TLP label kept, centred down the
+page unless *Centred down the page* is off, its headings set larger and kept out of the
+contents; the note then starts on page 2. Choosing it writes a skeleton at the top when
+the note has no such line, as **/** › *Cover page* does. With nothing above the line the
+check says so, and a cover longer than a page warns. **/** › *Signature* writes a block
+of the analyst's signature picture, `{name}`, `{role}, {organisation}` and `{date}`, and
+*Your logo* the analyst's logo. Five words are filled when the PDF is made, anywhere
+outside code: `{title}`, `{date}` (the cover's day, else the day the PDF is made),
+`{name}`, `{role}` and `{organisation}` (Settings › Publishing); an empty one goes with
+the punctuation joining it, and a line left with nothing is dropped. The editor draws
+them as grey words until set. Three pictures need no case file: `azimut:logo` (the
+app's mark), `azimut:my-logo` and `azimut:my-signature` (set in Settings ›
+Publishing); they print without frame or figure number, are no sources, and one not
+set prints nothing while the check says *No logo set in Settings › Publishing.* (or
+*signature*, or *No name set… for the signature.*). The picture picker offers them
+above the case's pictures. A paragraph in a `::: center`, `::: right` or `::: left`
+block keeps its bold, italics, code, links, chips and `[n]`, and a picture there with
+no `align=` takes its block's place.
 Its **Text** part sets the typeface, each card drawn in its face: the style's own
 (serif for Plain, Report and Journal, sans for Brief), Noto Serif, Noto Sans,
 Literata (a book face for long write-ups) or IBM Plex Sans (a clean face for briefs),
@@ -5941,9 +5961,20 @@ cover picture or day. Settings → Templates → **Notebook templates** shows ea
 first page with its style: *Edit* opens it in the Notebook with **Look** and **Page**
 (drawn without a case: a case picture or record prints as a placeholder) and *Done*
 back to Settings; *Duplicate*, a download as `<name>.azimut-note.json` and *Delete*
-sit beside it; *New template*, *From a ready one* and *Import a file* sit below. In a
-template, **/** offers *Guidance* rather than *Include a note*. `{today}` and `{now}`
-are written in when a note starts from one.
+sit beside it; below sit **New template ▾** (*Blank*, *From a ready one* ›, *From one of
+yours* ›, *From a note of this case* ›, each opening the new template in the Notebook)
+and *Import a file*. In a template, **/** offers *Guidance* rather than *Include a
+note*. `{today}` and `{now}` are written in when a note starts from one; the five print
+words are filled when it prints. The ready Geolocation report opens on its own cover
+page with the Azimut logo on a line of its own and ends with a signature block, both
+removable.
+
+**A report's author.** Settings › Publishing groups *Geo Report*, **In reports** and
+*On proofs* (the account handle). *In reports* holds the **Logo** (the picture the proof
+composer and the Map plate already use), **Name**, **Role** and **Organisation** (one
+line each, 80 characters at most) and the **Signature**, a PNG of a handwritten
+signature up to 1 MB, a transparent one recommended; each field says what it takes and
+where it prints. The settings backup carries them all.
 
 ## Visual language (UI)
 

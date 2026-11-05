@@ -155,7 +155,7 @@ structured state (entities, links, folders, jobs). The files under `media/`,
 `.layers/`, `.mapplates/` and `notes/` are the source of truth for their own content.
 
 App-wide preferences stay outside cases under `<workspace>/.azimut/settings/`:
-`settings.json`, `templates.json`, `signature.png`, the icon library in `icons/` and
+`settings.json`, `templates.json`, `signature.png` (the logo), `report-signature.png`, the icon library in `icons/` and
 the optional `cookies.txt`. Startup moves the former workspace-root or `.settings/` files
 there with independent atomic renames, so a partial move resumes. If both
 locations differ, the current hidden file wins and the legacy copy is retained

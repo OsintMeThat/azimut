@@ -1,12 +1,19 @@
 <script>
   /**
-   * What a new Geo Report starts from, and the logo signed proofs carry.
+   * What a new Geo Report starts from, who a report is from, and the handle
+   * signed proofs carry.
    *
-   * The logo lives beside settings.json and reaches a case only inside an
-   * exported proof PNG; `sigBust` re-fetches the preview past the cache after a
-   * replacement.
+   * The logo and the signature picture live beside settings.json and reach a
+   * case only inside what is exported (a proof PNG, a plate, a note's PDF);
+   * `sigBust` re-fetches the logo past the cache after a replacement. In reports,
+   * a note prints your name, role and organisation where it says `{name}`,
+   * `{role}` and `{organisation}` (`lib/notes/reportParts.js`), as its Signature
+   * block does. The hover texts live in `lib/publishingHelp.js`.
    */
   import { POST_TARGETS } from '../../lib/post.js';
+  import { api } from '../../lib/api.js';
+  import { prefs, toast } from '../../lib/state.svelte.js';
+  import { PUBLISHING_HELP as HELP, REPORT_FIELD_MAX, SIGNATURE_MAX_MB } from '../../lib/publishingHelp.js';
 
   let {
     signature,
@@ -20,12 +27,47 @@
     signatureHandle = $bindable(),
     sigInput = $bindable(),
   } = $props();
+
+  let handInput = $state(null);
+
+  /** A line of who signs, saved once the field is left. */
+  function saveLine(key, value) {
+    const line = value.replace(/\s+/g, ' ').trim();
+    savePrefs({ [key]: line });
+  }
+
+  async function uploadHand(event) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = ''; // the same file can be picked again
+    if (!file) return;
+    const body = new FormData();
+    body.append('file', file);
+    try {
+      await api.post('/api/settings/report-signature', body);
+      prefs.signatureSet = true;
+      prefs.picturesRev += 1;
+      toast('Signature saved', 'ok');
+    } catch (error) {
+      toast(`Could not save the signature: ${error.message}`, 'danger');
+    }
+  }
+
+  async function removeHand() {
+    try {
+      await api.del('/api/settings/report-signature');
+      prefs.signatureSet = false;
+      prefs.picturesRev += 1;
+      toast('Signature removed', 'ok');
+    } catch (error) {
+      toast(`Could not remove the signature: ${error.message}`, 'danger');
+    }
+  }
 </script>
 
 <section class="group" data-guide="settings.report-defaults">
   <h3>Geo Report</h3>
   <div class="row">
-    <div class="row-label">
+    <div class="row-label" title={HELP.mention}>
       <span>Default mention</span>
       <span class="row-hint">Pre-filled on a new draft. Leave empty for none.</span>
     </div>
@@ -35,10 +77,11 @@
       onchange={() => savePrefs({ post_mention: mention })}
       placeholder="@GeoConfirmed"
       spellcheck="false"
+      title={HELP.mention}
     />
   </div>
   <div class="row">
-    <div class="row-label">
+    <div class="row-label" title={HELP.platform}>
       <span>Preferred platform</span>
       <span class="row-hint">Used for new Geo Report drafts.</span>
     </div>
@@ -47,6 +90,7 @@
         <button
           class="seg-btn"
           class:on={postTarget === option.id}
+          title={HELP.platform}
           onclick={() => {
             postTarget = option.id;
             savePrefs({ post_target: option.id });
@@ -56,7 +100,7 @@
     </div>
   </div>
   <div class="row">
-    <div class="row-label">
+    <div class="row-label" title={HELP.prefill}>
       <span>Let the extension fill the composer</span>
       <span class="row-hint">
         Publish types the thread and attaches the proof with the capture extension,
@@ -68,14 +112,96 @@
       bind:checked={postPrefill}
       onchange={() => savePrefs({ post_prefill: postPrefill })}
       aria-label="Let the extension fill the composer"
+      title={HELP.prefill}
     />
   </div>
 </section>
 
 <section class="group" data-guide="settings.signature">
-  <h3>Signature</h3>
+  <h3>In reports</h3>
+  <p class="note">
+    A note prints these where it says so: type / in a note and pick Signature, or Your logo.
+    Each is optional, and a line left empty is left out.
+  </p>
   <div class="row">
-    <div class="row-label">
+    <div class="row-label" title={HELP.logo}>
+      <span>Logo</span>
+      <span class="row-hint">Transparent PNG, up to 2 MB. Signed proofs and Map plates carry it too.</span>
+    </div>
+    <div class="sig-side">
+      {#if signature}
+        <img class="sig-preview" src={`/api/settings/signature.png?v=${sigBust}`} alt="Your logo" />
+      {/if}
+      <div class="sig-buttons">
+        <button class="btn btn-sm" title={HELP.logo} onclick={() => sigInput?.click()}>
+          {signature ? 'Replace…' : 'Choose PNG…'}
+        </button>
+        {#if signature}
+          <button class="btn btn-danger btn-sm" title={HELP.logoRemove} onclick={removeSignature}>Remove</button>
+        {/if}
+      </div>
+    </div>
+    <input
+      bind:this={sigInput}
+      class="sig-file"
+      type="file"
+      accept="image/png"
+      title={HELP.logo}
+      onchange={uploadSignature}
+    />
+  </div>
+  <label class="row" title={HELP.name}>
+    <span class="row-label">
+      <span>Name</span>
+      <span class="row-hint">As it should read under a report, at most {REPORT_FIELD_MAX} characters.</span>
+    </span>
+    <input class="input who" value={prefs.reportName} maxlength={REPORT_FIELD_MAX} placeholder="A. Analyst" title={HELP.name}
+      onchange={(event) => saveLine('report_name', event.currentTarget.value)} />
+  </label>
+  <label class="row" title={HELP.role}>
+    <span class="row-label">
+      <span>Role</span>
+      <span class="row-hint">Your job title, such as Analyst or Editor.</span>
+    </span>
+    <input class="input who" value={prefs.reportRole} maxlength={REPORT_FIELD_MAX} placeholder="Analyst" title={HELP.role}
+      onchange={(event) => saveLine('report_role', event.currentTarget.value)} />
+  </label>
+  <label class="row" title={HELP.organisation}>
+    <span class="row-label">
+      <span>Organisation</span>
+      <span class="row-hint">Your team, desk or newsroom.</span>
+    </span>
+    <input class="input who" value={prefs.reportOrganisation} maxlength={REPORT_FIELD_MAX} placeholder="Open Source Desk" title={HELP.organisation}
+      onchange={(event) => saveLine('report_organisation', event.currentTarget.value)} />
+  </label>
+  <div class="row">
+    <div class="row-label" title={HELP.signature}>
+      <span>Signature</span>
+      <span class="row-hint">
+        Sign in dark ink on white paper, photograph it and crop it close. PNG, transparent is best, up to {SIGNATURE_MAX_MB} MB.
+      </span>
+    </div>
+    <div class="sig-side">
+      {#if prefs.signatureSet}
+        <img class="sig-preview" src={`/api/notes/pictures/my-signature?v=${prefs.picturesRev}`} alt="Your signature" />
+      {/if}
+      <div class="sig-buttons">
+        <button class="btn btn-sm" title={HELP.signature} onclick={() => handInput?.click()}>
+          {prefs.signatureSet ? 'Replace…' : 'Choose PNG…'}
+        </button>
+        {#if prefs.signatureSet}
+          <button class="btn btn-danger btn-sm" title={HELP.signatureRemove} onclick={removeHand}>Remove</button>
+        {/if}
+      </div>
+    </div>
+    <input bind:this={handInput} class="sig-file" type="file" accept="image/png" title={HELP.signature} onchange={uploadHand} />
+  </div>
+</section>
+
+<section class="group" data-guide="settings.proof-handle">
+  <h3>On proofs</h3>
+  <div class="row">
+    <div class="row-label" title={HELP.handle}>
       <span>Your account handle</span>
       <span class="row-hint">Shown on proofs that enable “Add account handle”.</span>
     </div>
@@ -86,34 +212,7 @@
       placeholder="@my_handle"
       maxlength="64"
       spellcheck="false"
-    />
-  </div>
-  <div class="row">
-    <div class="row-label">
-      <span>Your logo</span>
-      <span class="row-hint">
-        Transparent PNG, up to 2 MB, used only on signed proofs.
-      </span>
-    </div>
-    <div class="sig-side">
-      {#if signature}
-        <img class="sig-preview" src={`/api/settings/signature.png?v=${sigBust}`} alt="Your signature" />
-      {/if}
-      <div class="sig-buttons">
-        <button class="btn btn-sm" onclick={() => sigInput?.click()}>
-          {signature ? 'Replace…' : 'Choose PNG…'}
-        </button>
-        {#if signature}
-          <button class="btn btn-danger btn-sm" onclick={removeSignature}>Remove</button>
-        {/if}
-      </div>
-    </div>
-    <input
-      bind:this={sigInput}
-      class="sig-file"
-      type="file"
-      accept="image/png"
-      onchange={uploadSignature}
+      title={HELP.handle}
     />
   </div>
 </section>
@@ -126,16 +225,16 @@
   }
 
   .sig-preview {
-    /* Checkerboard preview for transparent logos. */
+    /* A light checkerboard: transparent pictures show as they print on white, dark ink included. */
     max-width: 88px;
     max-height: 44px;
     padding: 4px;
     border: 1px solid var(--border);
     border-radius: var(--r-sm);
-    background-color: var(--bg-2);
+    background-color: #fff;
     background-image:
-      linear-gradient(45deg, var(--bg-3) 25%, transparent 25% 75%, var(--bg-3) 75%),
-      linear-gradient(45deg, var(--bg-3) 25%, transparent 25% 75%, var(--bg-3) 75%);
+      linear-gradient(45deg, #ececec 25%, transparent 25% 75%, #ececec 75%),
+      linear-gradient(45deg, #ececec 25%, transparent 25% 75%, #ececec 75%);
     background-size: 10px 10px;
     background-position: 0 0, 5px 5px;
   }
@@ -152,5 +251,14 @@
   .mention {
     width: 200px;
     flex-shrink: 0;
+  }
+
+  .who {
+    width: 220px;
+    flex-shrink: 0;
+  }
+
+  label.row {
+    cursor: default;
   }
 </style>

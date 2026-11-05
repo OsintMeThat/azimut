@@ -13,12 +13,17 @@
    *
    * Without `tools` around it (the note in the extension's panel), a picture offers
    * no Open in… and a coordinate no way to the map, since there is none to open.
+   *
+   * `/` › Cover page writes the first page at the top and turns Look › Cover to
+   * Your own page: through `oncover` where a Look is shown, else here, beside the
+   * note. The picture picker offers the app's logo, the analyst's and their
+   * signature beside the case's pictures (`lib/notes/reportParts.js`).
    */
   import { onDestroy, onMount, untrack } from 'svelte';
   import { Compartment, EditorState } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
   import { api } from '../lib/api.js';
-  import { toast, reloadCase } from '../lib/state.svelte.js';
+  import { toast, reloadCase, prefs } from '../lib/state.svelte.js';
   import { foldText } from '../lib/textFold.js';
   import { mediaReference, entityReference, remoteImageUrls } from '../lib/markdown.js';
   import { createBookmark } from '../lib/bookmarks.js';
@@ -29,10 +34,12 @@
   import { droppedMedia, carriesMedia } from '../lib/drag.js';
   import { CALLOUTS, calloutMarkdown } from '../lib/notes/callouts.js';
   import { uploadedImage } from '../lib/notes/syntax.js';
+  import { BUILT_IN_PICTURES, builtInLine } from '../lib/notes/reportParts.js';
+  import { ownCover, readLook, writeLook } from '../lib/notes/look.js';
   import { differing, editNote, takeBack } from '../lib/notes/noteDoc.svelte.js';
   import { offerWriter } from '../lib/notes/noteDock.svelte.js';
   import {
-    captionAt, heldRange, holdRange, insertAtCursor, insertInclude, jumpToLine, noteExtensions, placeText, releaseRange,
+    captionAt, heldRange, holdRange, insertAtCursor, insertCover, insertInclude, jumpToLine, noteExtensions, placeText, releaseRange,
     resizePicture, setLinePrefix, setNoteCase, takeBackRange, toggleWrap,
   } from '../lib/notes/liveMarkdown.js';
   import { startCompletion } from '@codemirror/autocomplete';
@@ -62,6 +69,8 @@
     tools = true,
     /** Called just before text from outside lands (a put, a citation, text that waited), so a surface showing its pages shows the text. */
     onarrive = () => {},
+    /** Turn Look › Cover to Your own page, once `/` › Cover page wrote one; null to have the editor write the look itself. */
+    oncover = null,
   } = $props();
 
   let host = $state(null);
@@ -87,6 +96,16 @@
     .filter((entity) => foldText(`${entity.label} ${entity.attrs?.folder ?? ''}`).includes(foldText(pictureQuery.trim())))
     .sort((a, b) => a.label.localeCompare(b.label))
     .slice(0, 80));
+  /** Who signs, as Settings › Publishing keeps it: what `{name}` shows, and whether the logo and the signature are set. */
+  const identity = $derived({
+    name: prefs.reportName, role: prefs.reportRole, organisation: prefs.reportOrganisation,
+    logo: prefs.logoSet, signature: prefs.signatureSet, rev: prefs.picturesRev,
+  });
+  const BUILT_IN_ICONS = { logo: 'brand', 'my-logo': 'image', 'my-signature': 'edit' };
+  /** The three pictures of the app's, beside the case's, found by the same words. */
+  const builtIns = $derived(BUILT_IN_PICTURES
+    .filter((picture) => foldText(picture.label).includes(foldText(pictureQuery.trim())))
+    .map((picture) => ({ ...picture, missing: Boolean(picture.setting) && !identity[picture.setting] })));
 
   // what Include offers: every note of the case but this one
   const ownId = $derived(doc?.noteId ?? 'case');
@@ -110,6 +129,7 @@
     include: () => openIncludes(),
     get point() { return tools ? gotoPoint : null; },
     picture: () => { pictureOpen = true; },
+    cover: () => writeCover(),
     upload: () => picker?.click(),
     image: (file) => upload(file),
     url: (url, from, to) => offerBookmark(url, from, to),
@@ -127,7 +147,7 @@
         extensions: noteExtensions({ handlers, placeholder, readOnly, editable, template }),
       }),
     });
-    view.dispatch({ effects: setNoteCase.of({ caseId, entities, redirects, notes }) });
+    view.dispatch({ effects: setNoteCase.of({ caseId, entities, redirects, notes, identity }) });
     view.contentDOM.addEventListener('focus', () => { wrote = true; });
     onready(api_);
   });
@@ -148,7 +168,7 @@
     });
   });
   $effect(() => {
-    const info = { caseId, entities, redirects, notes };
+    const info = { caseId, entities, redirects, notes, identity };
     if (view) view.dispatch({ effects: setNoteCase.of(info) });
   });
   $effect(() => {
@@ -191,7 +211,23 @@
       return held ? captionAt(view, held.from + (landed.text.length - landed.text.replace(/^\n+/, '').length), options) : Promise.resolve(false);
     },
     takeBack: (landed) => Boolean(view && takeBackRange(view, landed)),
+    /** Write the cover page at the top, unless there is one: Look › Cover was turned to Your own page. */
+    cover: () => Boolean(view && !readOnly && insertCover(view, { focus: false })),
   };
+
+  /** `/` › Cover page: the page at the top, and the look that prints it alone on page 1. */
+  async function writeCover() {
+    if (!view || readOnly) return;
+    insertCover(view);
+    if (oncover) { oncover(); return; }
+    if (!caseId || !doc || template) return;
+    try {
+      const noteId = doc.noteId ?? null;
+      await writeLook(caseId, noteId, ownCover(await readLook(caseId, noteId)));
+    } catch (error) {
+      toast(`Look not saved: ${error.message}`, 'warn');
+    }
+  }
 
   /** Text from outside the editor, at its cursor: the surface shows the text first. */
   function arrive(text, options) {
@@ -243,6 +279,12 @@
   function pickInclude(row) {
     including = false;
     if (view && !readOnly) insertInclude(view, row.id);
+  }
+
+  function pickBuiltIn(picture) {
+    pictureOpen = false;
+    pictureQuery = '';
+    insert(builtInLine(picture.id), { block: true });
   }
 
   function pickPicture(entity) {
@@ -351,13 +393,21 @@
         <input class="input" bind:value={pictureQuery} placeholder="Find a picture…" autofocus
           onkeydown={(event) => { if (event.key === 'Escape') pictureOpen = false; }} />
         <div class="picture-list">
+          {#each builtIns as picture (picture.id)}
+            <button type="button" class="picture-row built-in" title={picture.missing ? picture.unset : 'From this computer, never a case file'}
+              onclick={() => pickBuiltIn(picture)}>
+              <Icon name={BUILT_IN_ICONS[picture.id]} size={13} /><span>{picture.label}</span>
+              {#if picture.missing}<small>Not set</small>{/if}
+            </button>
+          {/each}
+          {#if builtIns.length && pictures.length}<div class="picture-sep" role="presentation"></div>{/if}
           {#each pictures as entity (entity.id)}
             <button type="button" class="picture-row" onclick={() => pickPicture(entity)}>
               <Icon name={entity.attrs?.kind === 'video' ? 'video' : 'image'} size={13} /><span>{entity.label}</span>
               {#if entity.attrs?.folder}<small>{entity.attrs.folder}</small>{/if}
             </button>
           {/each}
-          {#if !pictures.length}<p class="none">No matching picture.</p>{/if}
+          {#if !pictures.length && !builtIns.length}<p class="none">No matching picture.</p>{/if}
         </div>
         <button type="button" class="btn btn-ghost btn-sm" onclick={() => { pictureOpen = false; picker?.click(); }}>
           <Icon name="upload" size={13} /> From a file</button>
@@ -441,6 +491,13 @@
   .picture-row:hover { background: var(--bg-3); }
   .picture-row span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .picture-row small, .none { color: var(--text-3); font-size: var(--fs-xs); }
+  .picture-sep { height: 1px; margin: 4px 2px; background: var(--border); flex: none; }
+  /* the app's logo prints dark on the white page: on the dark theme the editor draws it light */
+  :global(:root:not([data-theme='light']) .cm-block img.builtin-logo) { filter: invert(1) hue-rotate(180deg); }
+  /* the analyst's logo and signature are of any colour, dark ink most often: drawn on the paper they print on */
+  :global(:root:not([data-theme='light']) .cm-block img:is(.builtin-my-logo, .builtin-my-signature)) {
+    background: #fff; padding: 6px; border-radius: 4px; box-sizing: border-box;
+  }
   .banner {
     display: flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: var(--fs-sm); color: var(--text-2);
     background: var(--info-soft); border-bottom: 1px solid var(--border);

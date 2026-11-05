@@ -3,6 +3,7 @@ import { marked, Renderer } from 'marked';
 
 import { fileRelPath, fileUrl } from './fileUrl.js';
 import { readAttrs } from './notes/pictureSize.js';
+import { BUILT_IN_ADDRESS, builtInPicture, builtInSrc } from './notes/reportParts.js';
 
 const ENTITY_REF = /\[\[entity:([A-Za-z0-9_-]+)\|([^\]]+)\]\]/g;
 const MEDIA_REF = /\[\[media:([A-Za-z0-9_-]+)\|([^\]]+)\]\](?:\{([^}\n]+)\})?/g;
@@ -90,12 +91,16 @@ function imageOptions(href) {
   const width = /^(?:[1-9]\d?(?:\.\d+)?|100(?:\.0+)?)%$/.test(values.width ?? '')
     || /^(?:[2-9]\d|[1-9]\d{2}|1[0-5]\d{2}|1600)px$/.test(values.width ?? '')
     ? values.width : '';
-  const align = ['left', 'center', 'right'].includes(values.align) ? values.align : 'left';
-  return { href: source, width, align, caption: values.caption };
+  const written = ['left', 'center', 'right'].includes(values.align);
+  return { href: source, width, align: written ? values.align : 'left', written, caption: values.caption };
 }
 
-function imageMarkup({ href, alt, title, width, align }) {
-  const attrs = `${title ? ` title="${title}"` : ''}${width ? ` style="width: ${width}"` : ''}`;
+/**
+ * A picture's markup. One whose line writes no place takes its block's (`::: center`
+ * centres it, as the PDF does), which `data-unaligned` lets the page draw.
+ */
+function imageMarkup({ href, alt, title, width, align, written = true }) {
+  const attrs = `${title ? ` title="${title}"` : ''}${width ? ` style="width: ${width}"` : ''}${written ? '' : ' data-unaligned="true"'}`;
   return { attrs, className: `markdown-image align-${align}` };
 }
 
@@ -105,7 +110,7 @@ function captionMarkup({ caption, align }, title) {
   return words ? `<span class="markdown-caption align-${align}">${escapeHtml(words)}</span>` : '';
 }
 
-function renderer({ entities, caseId, redirects }) {
+function renderer({ entities, caseId, redirects, identity }) {
   const byId = new Map(entities.map((entity) => [entity.id, entity]));
   const mediaByPath = new Map(entities
     .filter((entity) => (entity.type === 'media' || entity.type === 'capture') && entity.attrs?.path)
@@ -148,6 +153,14 @@ function renderer({ entities, caseId, redirects }) {
 
   value.image = (token) => {
     const options = imageOptions(token.href);
+    // the app's logo, the analyst's and their signature: read from this computer, or said missing
+    const builtIn = BUILT_IN_ADDRESS.exec(options.href)?.[1];
+    if (builtIn) {
+      const src = builtInSrc(builtIn, identity);
+      if (!src) return `<span class="builtin-unset align-${options.align}">${escapeHtml(builtInPicture(builtIn).unset)}</span>`;
+      const markup = imageMarkup({ href: src, alt: token.text, title: token.title, ...options });
+      return `<img src="${src}" alt="${escapeHtml(token.text)}" class="${markup.className} builtin-${builtIn}"${markup.attrs}>${captionMarkup(options, token.title)}`;
+    }
     const path = fileRelPath(options.href, caseId);
     if (path && !mediaByPath.has(path)) return broken('Media unavailable', token.text);
     // Rebuilt rather than reused, so a case file whose name needs encoding
@@ -184,11 +197,11 @@ function renderAlignmentBlocks(source, options) {
 }
 
 /** Render GitHub-flavored Markdown, then remove unsafe HTML before previewing it. */
-export function markdownHtml(text = '', { entities = [], caseId = '', redirects = {} } = {}) {
+export function markdownHtml(text = '', { entities = [], caseId = '', redirects = {}, identity } = {}) {
   const options = {
     gfm: true,
     breaks: false,
-    renderer: renderer({ entities, caseId, redirects }),
+    renderer: renderer({ entities, caseId, redirects, identity }),
   };
   const rendered = renderAlignmentBlocks(sourceWithCaseReferences(text), options);
   return sanitize(rendered);

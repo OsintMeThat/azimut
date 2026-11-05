@@ -10,6 +10,7 @@ import base64
 import binascii
 import json
 import re
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import httpx
@@ -39,6 +40,10 @@ from ..engine.analysis_models import DetectPrefs, Recipe, stored
 # A backup carries the signature logo as base64: 4 characters per 3 bytes, plus
 # slack for padding and any line breaks a hand-edited file picked up.
 SIGNATURE_B64_MAX_CHARS = 4 * (config.SIGNATURE_MAX_BYTES // 3 + 1) + 1024
+# The handwritten signature reports print, under the same rule and its own cap.
+REPORT_SIGNATURE_B64_MAX_CHARS = 4 * (config.REPORT_SIGNATURE_MAX_BYTES // 3 + 1) + 1024
+#: Who signs a report: the name, the role and the organisation, one line each.
+REPORT_TEXT_MAX = 80
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
@@ -55,6 +60,12 @@ DEFAULT_POST_MENTION = config.DEFAULT_SETTINGS["post_mention"]
 DEFAULT_POST_TARGET = config.DEFAULT_SETTINGS["post_target"]
 DEFAULT_POST_TEMPLATE = config.DEFAULT_SETTINGS["post_template"]
 DEFAULT_SIGNATURE_HANDLE = config.DEFAULT_SETTINGS["signature_handle"]
+REPORT_KEYS = ("report_name", "report_role", "report_organisation")
+
+
+def _one_line(value: Any) -> Any:
+    """Who signs, on one line: runs of spaces and line breaks become one space."""
+    return " ".join(value.split()) if isinstance(value, str) else value
 
 
 class KeysIn(BaseModel):
@@ -123,6 +134,10 @@ class PrefsIn(BaseModel):
     post_prefill: bool | None = None  # let the extension fill that composer
     reverse_prefill: bool | None = None  # let it open an engine with the image
     signature_handle: str | None = None  # account handle stamped on opted-in proofs
+    # who signs a report: filled into a note's {name}, {role} and {organisation}
+    report_name: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
+    report_role: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
+    report_organisation: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
     # app self-update pop-up (engine/updates.py) — check on load, and the tag
     # the user muted with "don't show again"
     update_check_on_start: bool | None = None
@@ -140,6 +155,11 @@ class PrefsIn(BaseModel):
     # where each kind of export lands (engine/exportdir.py); "" = the case folder
     export_dirs: dict[str, str] | None = None
 
+    @field_validator(*REPORT_KEYS, mode="before")
+    @classmethod
+    def report_one_line(cls, value: Any) -> Any:
+        return _one_line(value)
+
 
 def _detect_view(saved: Any) -> dict[str, Any]:
     """Detect's saved view in the shape the prefs PUT takes back."""
@@ -147,6 +167,12 @@ def _detect_view(saved: Any) -> dict[str, Any]:
         return stored(DetectPrefs, saved).model_dump()
     except ValueError:
         return dict(config.DEFAULT_SETTINGS["detect_view"])
+
+
+def _report_text(settings: dict[str, Any], key: str) -> str:
+    """One of who signs, as the prefs PUT takes it back: a line, bounded."""
+    value = settings.get(key)
+    return " ".join(value.split())[:REPORT_TEXT_MAX] if isinstance(value, str) else ""
 
 
 def _quality_3d(settings: dict[str, Any]) -> str:
@@ -179,6 +205,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "post_prefill": bool(settings.get("post_prefill", True)),
         "reverse_prefill": bool(settings.get("reverse_prefill", True)),
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
+        **{key: _report_text(settings, key) for key in REPORT_KEYS},
         "update_check_on_start": bool(settings.get("update_check_on_start", True)),
         "update_dismissed_version": settings.get("update_dismissed_version", ""),
         "tour": settings.get("tour", ""),
@@ -206,6 +233,8 @@ def get_settings() -> dict[str, Any]:
         # whether a logo is on disk — the proof composer's signature control is
         # dead until one is, so it needs to know without fetching the pixels
         "signature": config.signature_path().is_file(),
+        # whether a handwritten signature is on disk, for Settings and the note picker
+        "report_signature": config.report_signature_path().is_file(),
         # whether an exported cookies.txt is on disk — Settings shows the file
         # fallback as present without ever serving the session back out
         "cookies_file": config.cookies_file_path().is_file(),
@@ -346,6 +375,10 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["reverse_prefill"] = bool(body.reverse_prefill)
     if body.signature_handle is not None:
         settings["signature_handle"] = body.signature_handle.strip()[:64]
+    for key in REPORT_KEYS:
+        value = getattr(body, key)
+        if value is not None:
+            settings[key] = value
     if body.update_check_on_start is not None:
         settings["update_check_on_start"] = bool(body.update_check_on_start)
     if body.update_dismissed_version is not None:
@@ -551,8 +584,9 @@ def mint_ingest_token() -> dict[str, Any]:
     return {"ingest_token": config.ingest_token()}
 
 
-def _signature_b64() -> str:
-    """The signature logo as base64, or ``""`` when there is no usable one.
+def _signature_b64(path: Path | None = None, limit: int = config.SIGNATURE_MAX_BYTES) -> str:
+    """The signature logo (or the handwritten signature) as base64, or ``""`` when
+    there is no usable one.
 
     Size is read from the directory entry before the bytes are: the upload route
     bounds what Settings accepts, but a file dropped into the workspace by hand
@@ -560,14 +594,28 @@ def _signature_b64() -> str:
     The same ``valid_signature`` check the upload and the restore apply decides
     whether it travels.
     """
-    path = config.signature_path()
+    path = path if path is not None else config.signature_path()
     try:
-        if not path.is_file() or path.stat().st_size > config.SIGNATURE_MAX_BYTES:
+        if not path.is_file() or path.stat().st_size > limit:
             return ""
         data = path.read_bytes()
     except OSError:
         return ""
-    return base64.b64encode(data).decode("ascii") if config.valid_signature(data) else ""
+    return base64.b64encode(data).decode("ascii") if config.valid_signature(data, limit) else ""
+
+
+def _restore_picture(encoded: str, path: Path, limit: int) -> bool:
+    """A picture from a backup put back, or left out when it does not pass the gate."""
+    if not encoded:
+        return False
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        return False
+    if not config.valid_signature(data, limit):
+        return False
+    config.write_private(path, data)
+    return True
 
 
 @router.get("/settings/export")
@@ -575,9 +623,10 @@ def export_settings() -> Response:
     """Download everything app-wide that isn't a case, so another machine can be
     set up identically (POST /settings/import).
 
-    Four things in one: portable settings, templates.json, the signature logo
-    base64-encoded, and the icon library, each icon's PNG base64-encoded. It carries the user's own API keys by design — it's a
-    local download of secrets that already live in their workspace.
+    Five things in one: portable settings, templates.json, the signature logo and
+    the handwritten signature reports print, each base64-encoded, and the icon
+    library, each icon's PNG base64-encoded. It carries the user's own API keys by
+    design — it's a local download of secrets that already live in their workspace.
 
     Deliberately absent: export destinations (absolute paths chosen on this
     machine), how much the 3D views draw (this machine's graphics card), the
@@ -604,6 +653,7 @@ def export_settings() -> Response:
         "settings": portable_settings,
         "templates": config.load_templates(),
         "signature_png": _signature_b64(),
+        "report_signature_png": _signature_b64(config.report_signature_path(), config.REPORT_SIGNATURE_MAX_BYTES),
         "icons": iconlibrary.backup(),
     }
     payload = json.dumps(bundle, indent=2, ensure_ascii=False)
@@ -749,6 +799,9 @@ class ImportedSettings(BaseModel):
     post_prefill: bool = True
     reverse_prefill: bool = True
     signature_handle: str = Field(default=DEFAULT_SIGNATURE_HANDLE, max_length=64)
+    report_name: str = Field(default="", max_length=REPORT_TEXT_MAX)
+    report_role: str = Field(default="", max_length=REPORT_TEXT_MAX)
+    report_organisation: str = Field(default="", max_length=REPORT_TEXT_MAX)
     ingest_token: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")
     update_check_on_start: bool = True
     update_dismissed_version: str = Field(default="", max_length=64)
@@ -809,6 +862,11 @@ class ImportedSettings(BaseModel):
     def strip_short_text(cls, value: str) -> str:
         return value.strip()
 
+    @field_validator(*REPORT_KEYS, mode="before")
+    @classmethod
+    def report_one_line(cls, value: Any) -> Any:
+        return _one_line(value)
+
     @field_validator("post_target")
     @classmethod
     def known_target(cls, value: str) -> str:
@@ -856,6 +914,8 @@ class ImportIn(BaseModel):
     # megabytes-long field only to reject it is work an untrusted body shouldn't
     # get. The decoded bytes then face config.valid_signature().
     signature_png: str = Field(default="", max_length=SIGNATURE_B64_MAX_CHARS)
+    #: The handwritten signature reports print, bounded and gated the same way.
+    report_signature_png: str = Field(default="", max_length=REPORT_SIGNATURE_B64_MAX_CHARS)
     #: The icon library, each picture re-encoded as an import would be (`iconlibrary.restore`).
     icons: list[ImportedIcon] = Field(default_factory=list, max_length=iconlibrary.MAX_ICONS)
 
@@ -891,21 +951,16 @@ def import_settings(body: ImportIn) -> dict[str, Any]:
                 restored[kind] = kept + list(incoming.values())
             config.save_templates(restored)
 
-    # A malformed logo is dropped rather than failing the whole restore: the keys
-    # and presets are the valuable part, and the user can re-upload a PNG.
-    signature = False
-    if body.signature_png:
-        try:
-            data = base64.b64decode(body.signature_png, validate=True)
-        except (ValueError, binascii.Error):
-            data = b""
-        if config.valid_signature(data):
-            path = config.signature_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
-            signature = True
+    # A malformed logo or signature is dropped rather than failing the whole
+    # restore: the keys and presets are the valuable part, and the user can
+    # re-upload a PNG.
+    signature = _restore_picture(body.signature_png, config.signature_path(), config.SIGNATURE_MAX_BYTES)
+    report_signature = _restore_picture(
+        body.report_signature_png, config.report_signature_path(), config.REPORT_SIGNATURE_MAX_BYTES
+    )
     icons = iconlibrary.restore([icon.model_dump() for icon in body.icons]) if body.icons else 0
-    return {"imported": applied, "templates": templates, "signature": signature, "icons": icons}
+    return {"imported": applied, "templates": templates, "signature": signature,
+            "report_signature": report_signature, "icons": icons}
 
 
 @router.post("/settings/keys/{provider}/status")
@@ -1029,9 +1084,7 @@ async def put_signature(file: UploadFile) -> dict[str, Any]:
     # sniff the bytes rather than trust the filename or the browser's content-type
     if not config.valid_signature(data):
         raise HTTPException(status_code=422, detail="signature must be a PNG image")
-    path = config.signature_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
+    config.write_private(config.signature_path(), data)
     return {"signature": True}
 
 
@@ -1039,6 +1092,28 @@ async def put_signature(file: UploadFile) -> dict[str, Any]:
 def delete_signature() -> dict[str, Any]:
     config.signature_path().unlink(missing_ok=True)
     return {"signature": False}
+
+
+# ---- the handwritten signature a report prints (azimut:my-signature) ----------
+
+
+@router.post("/settings/report-signature")
+async def put_report_signature(file: UploadFile) -> dict[str, Any]:
+    """Replace the handwritten signature reports print. PNG only, and small."""
+    limit = config.REPORT_SIGNATURE_MAX_BYTES
+    data = await file.read(limit + 1)
+    if len(data) > limit:
+        raise HTTPException(status_code=413, detail=f"signature must be under {limit // 1024 // 1024} MB")
+    if not config.valid_signature(data, limit):
+        raise HTTPException(status_code=422, detail="signature must be a PNG image")
+    config.write_private(config.report_signature_path(), data)
+    return {"report_signature": True}
+
+
+@router.delete("/settings/report-signature")
+def delete_report_signature() -> dict[str, Any]:
+    config.report_signature_path().unlink(missing_ok=True)
+    return {"report_signature": False}
 
 
 # ---- cookies.txt: the fallback login source where reading the browser can't --

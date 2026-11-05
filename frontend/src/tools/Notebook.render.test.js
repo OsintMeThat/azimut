@@ -472,6 +472,27 @@ describe('a note, and how it prints', () => {
     expect(put.mock.calls.some(([url]) => url.endsWith('/notes/n1'))).toBe(false);
     expect(target.querySelector('[data-guide="notebook.look"]').textContent).toContain('Journal');
   });
+
+  it('writes a first page at the top once Look › Cover is Your own page, and never a second', async () => {
+    await openOldLead();
+    target.querySelector('[data-guide="notebook.look"]').click();
+    flushSync();
+    [...document.querySelectorAll('[aria-label="Cover page"] button')].find((button) => button.textContent === 'Your own page').click();
+    await settle();
+    const [, look] = put.mock.calls.find(([url]) => url.endsWith('/look'));
+    expect(look.cover).toMatchObject({ on: true, mode: 'own' });
+    const { EditorView } = await import('@codemirror/view');
+    const view = EditorView.findFromDOM(target.querySelector('.cm-editor'));
+    const text = view.state.doc.toString();
+    expect(text.startsWith('::: center\n![Azimut](azimut:logo){width=25% align=center}')).toBe(true);
+    expect(text.endsWith(OLD_TEXT)).toBe(true);
+    // back to the style's and on to the own page again: the page written stays, alone
+    [...document.querySelectorAll('[aria-label="Cover page"] button')].find((button) => button.textContent === "The style's").click();
+    await settle();
+    [...document.querySelectorAll('[aria-label="Cover page"] button')].find((button) => button.textContent === 'Your own page').click();
+    await settle();
+    expect(view.state.doc.toString().match(/<!-- cover -->/g)).toHaveLength(1);
+  });
 });
 
 describe('the check before export', () => {
@@ -701,5 +722,20 @@ describe('a template from Settings', () => {
     expect(address).toBe('/api/templates/note');
     expect(saved).toMatchObject({ id: 't1', name: 'House write-up', data: { body: '## Claim\n\n<!--? Who said it -->\n', look: { style: 'report' } } });
     expect(put).not.toHaveBeenCalled();
+  });
+
+  it('gets its own first page from the Look, written at its top and kept with it', async () => {
+    await openTemplate();
+    target.querySelector('[data-guide="notebook.look"]').click();
+    flushSync();
+    [...document.querySelectorAll('[aria-label="Cover page"] button')].find((button) => button.textContent === 'Your own page').click();
+    await settle();
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await settle();
+    const saved = post.mock.calls.filter(([where]) => where === '/api/templates/note').at(-1)[1];
+    expect(saved.data.look.cover).toMatchObject({ on: true, mode: 'own', top: false });
+    expect(saved.data.body.startsWith('::: center\n')).toBe(true);
+    expect(saved.data.body).toContain('<!-- cover -->\n\n## Claim');
+    expect(target.querySelector('[data-cover-rule]')?.textContent).toBe('End of the cover page');
   });
 });

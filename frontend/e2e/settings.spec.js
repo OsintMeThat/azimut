@@ -23,7 +23,8 @@ test('keeps app settings in focused sections', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Coordinates' })).toBeVisible();
   await rail.getByRole('button', { name: 'Publishing' }).click();
   await expect(page.getByRole('heading', { name: 'Geo Report' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Signature' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'In reports' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'On proofs' })).toBeVisible();
 
   await rail.getByRole('button', { name: 'Storage' }).click();
   await expect(page.getByRole('heading', { name: 'Export folders' })).toBeVisible();

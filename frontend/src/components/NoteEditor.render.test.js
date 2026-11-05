@@ -12,7 +12,7 @@ vi.mock('../lib/api.js', () => ({ api: { get, post, put, del: vi.fn(), patch: vi
 const { reloadCase } = vi.hoisted(() => ({ reloadCase: vi.fn(async () => {}) }));
 vi.mock('../lib/state.svelte.js', async (actual) => ({ ...(await actual()), reloadCase }));
 
-const { uiState } = await import('../lib/state.svelte.js');
+const { prefs, uiState } = await import('../lib/state.svelte.js');
 const { openNote, resetOpenNotes, noteReady } = await import('../lib/notes/noteDoc.svelte.js');
 const { default: NoteEditor } = await import('./NoteEditor.svelte');
 const { registerOpener } = await import('../lib/notes/openers.js');
@@ -95,12 +95,70 @@ describe('the picture picker', () => {
     await editor();
     target.querySelector('button[aria-label="Put in a case picture"]').click();
     flushSync();
-    const rows = [...target.querySelectorAll('.picture-row span')].map((row) => row.textContent);
+    const rows = [...target.querySelectorAll('.picture-row:not(.built-in) span')].map((row) => row.textContent);
     expect(rows).toEqual(['Depot proof', 'Roof shot']);
-    target.querySelector('.picture-row').click();
+    target.querySelector('.picture-row:not(.built-in)').click();
     flushSync();
     expect(handle).not.toBeNull();
     expect(target.querySelector('.cm-block-picture img').getAttribute('alt')).toBe('Depot proof');
+  });
+
+  it('offers the Azimut logo, your logo and your signature first, each said missing until Settings has it', async () => {
+    prefs.logoSet = true;
+    prefs.signatureSet = false;
+    const doc = await editor('');
+    target.querySelector('button[aria-label="Put in a case picture"]').click();
+    flushSync();
+    const own = [...target.querySelectorAll('.picture-row.built-in')];
+    expect(own.map((row) => row.querySelector('span').textContent)).toEqual(['Azimut logo', 'Your logo', 'Your signature']);
+    expect(own.map((row) => Boolean(row.querySelector('small')))).toEqual([false, false, true]);
+    expect(own[2].title).toBe('No signature set in Settings › Publishing');
+    own[1].click();
+    flushSync();
+    expect(doc.text).toBe('![Logo](azimut:my-logo){width=25%}\n');
+    expect(target.querySelector('.cm-block-picture img').getAttribute('src')).toMatch(/^\/api\/notes\/pictures\/my-logo\?v=/);
+    prefs.logoSet = false;
+  });
+});
+
+describe('/ › Cover page', () => {
+  async function pickCover(props = {}) {
+    const doc = await editor('Findings.');
+    get.mockImplementation(async (url) => (url.endsWith('/look') ? { look: { style: 'report', cover: { on: true, subtitle: 'Kept' } } } : { text: 'Findings.' }));
+    if (Object.keys(props).length) {
+      unmount(app);
+      app = mount(NoteEditor, { target, props: { doc, caseId: 'c1', entities: ENTITIES, onready: (api) => (handle = api), ...props } });
+      await settle();
+    }
+    const { EditorView } = await import('@codemirror/view');
+    const { startCompletion, acceptCompletion } = await import('@codemirror/autocomplete');
+    const cm = EditorView.findFromDOM(target.querySelector('.cm-editor'));
+    cm.dispatch({ changes: { from: cm.state.doc.length, insert: '\n\n/cover' }, selection: { anchor: cm.state.doc.length + 8 } });
+    startCompletion(cm);
+    await vi.waitFor(() => expect(target.querySelector('.cm-tooltip-autocomplete li[aria-selected]')?.textContent).toContain('Cover page'));
+    // a list just opened takes no Enter for a moment (`interactionDelay`)
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(acceptCompletion(cm)).toBe(true);
+    await settle();
+    return doc;
+  }
+
+  it('writes the page at the top and, with no Look beside the note, turns its look to Your own page itself', async () => {
+    put.mockImplementation(async (url, body) => (url.endsWith('/look') ? { look: body } : { status: 'saved' }));
+    const doc = await pickCover();
+    expect(doc.text.startsWith('::: center\n![Azimut](azimut:logo)')).toBe(true);
+    expect(doc.text).toContain('<!-- cover -->\n\nFindings.');
+    await vi.waitFor(() => expect(put.mock.calls.some(([url]) => url === '/api/cases/c1/notes/n1/look')).toBe(true));
+    const [, look] = put.mock.calls.find(([url]) => url === '/api/cases/c1/notes/n1/look');
+    expect(look.cover).toMatchObject({ on: true, mode: 'own', subtitle: 'Kept' });
+  });
+
+  it('hands the look to the Notebook when it shows one', async () => {
+    const oncover = vi.fn();
+    const doc = await pickCover({ oncover });
+    expect(oncover).toHaveBeenCalledTimes(1);
+    expect(doc.text).toContain('<!-- cover -->');
+    expect(put.mock.calls.some(([url]) => url.endsWith('/look'))).toBe(false);
   });
 });
 

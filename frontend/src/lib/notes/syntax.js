@@ -12,6 +12,7 @@ import { foldText } from '../textFold.js';
 import { CALLOUTS, calloutMarkdown } from './callouts.js';
 import { PAGE_BREAK, hintLine } from './look.js';
 import { writeAttrs } from './pictureSize.js';
+import { SIGNATURE_BLOCK, builtInLine } from './reportParts.js';
 
 /** `[[entity:id|label]]` and `[[media:id|label]]{width=… align=…}`. */
 export const REFERENCE = /\[\[(entity|media):([A-Za-z0-9_-]+)\|([^\]\n]+)\]\](?:\{([^}\n]+)\})?/g;
@@ -156,6 +157,9 @@ export const SLASH_COMMANDS = [
   { id: 'code', label: 'Code', icon: 'hash', words: 'code block monospace', block: '```\n\n```' },
   { id: 'divider', label: 'Divider', icon: 'minus', words: 'rule line separator hr', block: '---' },
   { id: 'pagebreak', label: 'Page break', icon: 'file', words: 'new page pdf break', block: PAGE_BREAK, hint: 'PDF only' },
+  { id: 'cover', label: 'Cover page', icon: 'file', words: 'first page front title report', action: 'cover', hint: 'Page 1, as you write it' },
+  { id: 'signature', label: 'Signature', icon: 'edit', words: 'sign name role organisation author', block: SIGNATURE_BLOCK, hint: 'From Settings › Publishing' },
+  { id: 'my-logo', label: 'Your logo', icon: 'image', words: 'logo brand organisation picture', block: builtInLine('my-logo'), hint: 'From Settings › Publishing' },
   { id: 'date', label: 'Today’s date', icon: 'calendar', words: 'day today', today: true },
 ];
 

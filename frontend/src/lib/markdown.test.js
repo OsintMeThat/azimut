@@ -49,6 +49,10 @@ describe('markdownHtml', () => {
     const invalid = markdownHtml('![Map](/map.png){width=99999px align=diagonal}');
     expect(invalid).toContain('class="markdown-image align-left"');
     expect(invalid).not.toContain('width:');
+    // a place written is kept; none written takes the block's, as the PDF does
+    expect(invalid).toContain('data-unaligned="true"');
+    expect(html).not.toContain('data-unaligned');
+    expect(markdownHtml('![Map](/map.png){align=left}')).not.toContain('data-unaligned');
   });
 
   it('applies alignment blocks to rendered Markdown content', () => {
@@ -84,6 +88,22 @@ describe('markdownHtml', () => {
     expect(both).toContain('>The pier</span>');
     expect(both).not.toContain('>Pier at dawn</span>');
     expect(markdownHtml('![Map](/map.png){width=50%}')).not.toContain('markdown-caption');
+  });
+
+  it('draws the app\'s logo, the analyst\'s and their signature from this computer, or says one is not set', () => {
+    const azimut = markdownHtml('![Azimut](azimut:logo){width=25% align=center}');
+    expect(azimut).toContain('src="/api/notes/pictures/logo"');
+    expect(azimut).toContain('class="markdown-image align-center builtin-logo"');
+    expect(azimut).toContain('style="width: 25%"');
+    // neither of the analyst's two is asked for until Settings says it is there
+    expect(markdownHtml('![Logo](azimut:my-logo){width=25%}')).toContain('No logo set in Settings › Publishing');
+    expect(markdownHtml('![Logo](azimut:my-logo)')).not.toContain('<img');
+    const identity = { name: '', role: '', organisation: '', logo: true, signature: true, rev: 3 };
+    expect(markdownHtml('![Logo](azimut:my-logo){width=25%}', { identity })).toContain('src="/api/notes/pictures/my-logo?v=3"');
+    expect(markdownHtml('![Signature](azimut:my-signature)', { identity })).toContain('src="/api/notes/pictures/my-signature?v=3"');
+    expect(markdownHtml('![Signature](azimut:my-signature)')).toContain('No signature set in Settings › Publishing');
+    // anything else under the scheme is no picture of the app's
+    expect(markdownHtml('![X](azimut:other)')).not.toContain('/api/notes/pictures');
   });
 });
 

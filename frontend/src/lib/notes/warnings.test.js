@@ -9,7 +9,7 @@ afterEach(() => vi.clearAllMocks());
 
 describe('a warning', () => {
   it('keeps the kinds the server gives, and reads anything else as other', () => {
-    expect(WARNING_KINDS).toEqual(['missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'other', 'internal']);
+    expect(WARNING_KINDS).toEqual(['missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal']);
     for (const kind of WARNING_KINDS) expect(warningKind(kind)).toBe(kind);
     expect(warningKind('shiny')).toBe('other');
     expect(warningKind(undefined)).toBe('other');

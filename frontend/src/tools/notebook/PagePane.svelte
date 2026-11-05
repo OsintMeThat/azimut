@@ -29,7 +29,8 @@
   import { onDestroy, untrack } from 'svelte';
   import { createPreview, pageLine } from '../../lib/notes/preview.js';
   import {
-    CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, SOURCE_HELP, captionField, pictureAt, rovingToolbar, sizeWidth, sourceField,
+    CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, SOURCE_HELP, blockAlignAt, captionField, pictureAt, pictureLine, rovingToolbar, sizeWidth,
+    sourceField,
   } from '../../lib/notes/pictureSize.js';
   import { openerFor } from '../../lib/notes/openers.js';
   import '../../lib/notes/openersLoaded.js';
@@ -121,6 +122,18 @@
   const ratioOf = (picture, size) => (picture.box[2] && size.w ? (picture.box[3] * size.h) / (picture.box[2] * size.w) : 0);
 
   const captionKey = (picture) => `${picture.line}:${picture.ref}`;
+
+  /**
+   * Where a picture prints, read off its line: the place written there, else the
+   * place of the `::: center` or `::: right` block it stands in, else left. The
+   * server's own word is kept for a picture the text no longer holds.
+   */
+  function placeOf(picture) {
+    const lines = text.split('\n');
+    const at = pictureLine(lines, picture.line, picture.ref);
+    if (at < 0) return picture.align || 'left';
+    return pictureAt(lines, at, picture.ref)?.align || blockAlignAt(lines, at) || 'left';
+  }
 
   /** The caption field, under picture `picture` where its caption prints, holding what its line says now. */
   function captionHere(node, picture) {
@@ -229,7 +242,7 @@
             {/each}
             {#each PICTURE_ALIGNS as align (align)}
               <button type="button" class="align" title={ALIGN_ICONS[align][1]} aria-label={ALIGN_ICONS[align][1]}
-                aria-pressed={(picture.align || 'left') === align} onclick={() => onresize(picture, { align })}>
+                aria-pressed={placeOf(picture) === align} onclick={() => onresize(picture, { align })}>
                 <Icon name={ALIGN_ICONS[align][0]} size={13} />
               </button>
             {/each}

@@ -5,7 +5,7 @@ const { get, put } = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
 vi.mock('../api.js', () => ({ api: { get, put } }));
 
 const {
-  DEFAULT_LOOK, FONTS, HINT_LINE, INCLUDE_LINE, SIZES, SOURCES_OFF_STYLES, STYLES, hintLine, includeLine, isPlainLook, isReport, lookFont,
+  COVERS, DEFAULT_LOOK, FONTS, HINT_LINE, coverChoice, coverFor, ownCover, INCLUDE_LINE, SIZES, SOURCES_OFF_STYLES, STYLES, hintLine, includeLine, isPlainLook, isReport, lookFont,
   normaliseLook, readLook, reportBody, reportLook, sourcesOn, templateLook, writeLook,
 } = await import('./look.js');
 
@@ -23,7 +23,7 @@ describe('a look', () => {
     const look = normaliseLook({ style: 'brief', accent: '#A0B1C2', cover: { on: 1, subtitle: 'x'.repeat(300) }, extra: true });
     expect(look.style).toBe('brief');
     expect(look.accent).toBe('#a0b1c2');
-    expect(look.cover).toEqual({ on: true, subtitle: 'x'.repeat(200), image: '', date: '' });
+    expect(look.cover).toEqual({ on: true, mode: '', top: false, subtitle: 'x'.repeat(200), image: '', date: '' });
     expect('extra' in look).toBe(false);
     expect(normaliseLook({ style: 'poster', page: 'a3', tlp: 'blue', accent: 'red' })).toMatchObject({
       style: 'plain', page: 'a4', tlp: '', accent: '',
@@ -78,8 +78,26 @@ describe('a look', () => {
 
   it('keeps no picture and no day in a template', () => {
     const look = templateLook({ style: 'report', font: 'modern', size: 'small', cover: { on: true, subtitle: 'Draft', image: 'm1', date: '2026-11-04' } });
-    expect(look.cover).toEqual({ on: true, subtitle: 'Draft', image: '', date: '' });
+    expect(look.cover).toEqual({ on: true, mode: '', top: false, subtitle: 'Draft', image: '', date: '' });
     expect(look).toMatchObject({ font: 'modern', size: 'small' });
+  });
+
+  it('prints no cover, the style\'s, or the analyst\'s own page, set to the top or centred', () => {
+    expect(COVERS.map((cover) => cover.label)).toEqual(['Off', "The style's", 'Your own page']);
+    expect(coverChoice(null)).toBe('off');
+    expect(coverChoice({ cover: { on: true } })).toBe('style');
+    expect(coverChoice({ cover: { on: true, mode: 'own' } })).toBe('own');
+    // a mode alone is no cover: Off stays off
+    expect(coverChoice({ cover: { mode: 'own' } })).toBe('off');
+    expect(normaliseLook({ cover: { on: true, mode: 'poster', top: 1 } }).cover).toMatchObject({ mode: '', top: true });
+    expect(isPlainLook({ cover: { mode: '', top: false } })).toBe(true);
+    const own = ownCover({ style: 'report', cover: { subtitle: 'Kept', date: '2026-11-05' } });
+    expect(own.cover).toMatchObject({ on: true, mode: 'own', subtitle: 'Kept', date: '2026-11-05' });
+    expect(coverFor('style')).toEqual({ on: true, mode: '' });
+    expect(coverFor('off')).toEqual({ on: false, mode: '' });
+    // a template keeps its own page and where it sits, with no day of a case
+    expect(templateLook({ cover: { on: true, mode: 'own', top: true, date: '2026-11-05' } }).cover)
+      .toMatchObject({ on: true, mode: 'own', top: true, date: '' });
   });
 
   it('starts a report with a cover and its contents', () => {

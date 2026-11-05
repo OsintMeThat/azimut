@@ -46,7 +46,7 @@
 <section class="group" data-guide="settings.backup">
   <h3>Settings backup</h3>
   <p class="note">
-    Carries settings, keys, templates, your icons and your signature;
+    Carries settings, keys, templates, your icons, your logo and your signature;
     export folders and download logins stay here, so keep this backup private.
   </p>
   <div class="links">

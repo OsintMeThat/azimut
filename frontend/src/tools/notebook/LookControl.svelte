@@ -14,7 +14,7 @@
   import { tick, untrack } from 'svelte';
   import { LOOK_HELP } from '../../lib/notes/lookHelp.js';
   import {
-    FONTS, PAGES, SIZES, STYLES, SUBTITLE_MAX, TLPS, lookFont, normaliseLook, sourcesOn, styleLabel,
+    COVERS, FONTS, PAGES, SIZES, STYLES, SUBTITLE_MAX, TLPS, coverChoice, coverFor, lookFont, normaliseLook, sourcesOn, styleLabel,
   } from '../../lib/notes/look.js';
   import { faceFamily, loadNoteFont, noteFonts } from '../../lib/notes/noteFonts.js';
   import { recentColours } from '../../lib/recentColours.svelte.js';
@@ -36,6 +36,8 @@
   let subtitleTimer;
 
   const whole = $derived(normaliseLook(look));
+  const coverIs = $derived(coverChoice(whole));
+  const COVER_HELP = { off: LOOK_HELP.coverOff, style: LOOK_HELP.coverStyle, own: LOOK_HELP.coverOwn };
   $effect(() => { subtitle = whole.cover.subtitle; });
 
   const pictures = $derived(entities
@@ -184,11 +186,16 @@
 
       <div class="sep"></div>
 
-      <label class="check" title={LOOK_HELP.cover}>
-        <input type="checkbox" checked={whole.cover.on} title={LOOK_HELP.cover} onchange={(event) => set({ cover: { on: event.currentTarget.checked } })} />
-        Cover page
-      </label>
-      {#if whole.cover.on}
+      <div class="row">
+        <span class="key" title={LOOK_HELP.cover}>Cover</span>
+        <div class="seg" role="radiogroup" aria-label="Cover page">
+          {#each COVERS as cover (cover.id)}
+            <button type="button" class:on={coverIs === cover.id} role="radio" aria-checked={coverIs === cover.id}
+              title={COVER_HELP[cover.id]} onclick={() => set({ cover: coverFor(cover.id) })}>{cover.label}</button>
+          {/each}
+        </div>
+      </div>
+      {#if coverIs === 'style'}
         <div class="cover">
           <label class="field" title={LOOK_HELP.subtitle}>
             <span>Subtitle</span>
@@ -223,12 +230,19 @@
                 </div>
               {/if}
             </div>
-            <label class="field" title={LOOK_HELP.date}>
-              <span>Day</span>
-              <input class="input" type="date" value={whole.cover.date} title={LOOK_HELP.date}
-                onchange={(event) => set({ cover: { date: event.currentTarget.value } })} />
-            </label>
+            {@render day()}
           {/if}
+        </div>
+      {:else if coverIs === 'own'}
+        <div class="cover">
+          <p class="said">{LOOK_HELP.coverOwn}.</p>
+          <label class="switch" title={LOOK_HELP.centred}>
+            <input type="checkbox" role="switch" checked={!whole.cover.top} title={LOOK_HELP.centred}
+              onchange={(event) => set({ cover: { top: !event.currentTarget.checked } })} />
+            <span class="track" aria-hidden="true"><span class="knob"></span></span>
+            Centred down the page
+          </label>
+          {#if !template}{@render day()}{/if}
         </div>
       {/if}
       <label class="check" title={LOOK_HELP.toc}>
@@ -251,6 +265,14 @@
     </div>
   </FloatingMenu>
 {/if}
+
+{#snippet day()}
+  <label class="field" title={LOOK_HELP.date}>
+    <span>Day</span>
+    <input class="input" type="date" value={whole.cover.date} title={LOOK_HELP.date}
+      onchange={(event) => set({ cover: { date: event.currentTarget.value } })} />
+  </label>
+{/snippet}
 
 <style>
   .look-open { gap: 5px; }
@@ -327,7 +349,8 @@
   .switch input:checked + .track { background: var(--accent); box-shadow: none; }
   .switch input:checked + .track .knob { transform: translateX(11px); background: var(--accent-text); }
   .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .cover { display: flex; flex-direction: column; gap: 7px; margin: -2px 0 2px 22px; }
+  .cover { display: flex; flex-direction: column; gap: 7px; margin: -2px 0 2px 62px; }
+  .said { margin: 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.4; }
   .field { display: flex; flex-direction: column; gap: 3px; color: var(--text-3); font-size: var(--fs-xs); }
   .field .input { font-size: var(--fs-sm); }
   .picked { display: flex; align-items: center; gap: 4px; min-width: 0; }

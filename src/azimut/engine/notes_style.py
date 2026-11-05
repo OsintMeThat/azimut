@@ -65,6 +65,8 @@ TLP_MEANINGS: dict[str, str] = {
 }
 #: FIRST asks for the label in 12-point type or larger, for readers with low vision.
 TLP_SIZE = 12.0
+#: How far a TLP label on a note's own cover page sits from the top and the bottom edge.
+COVER_TLP_EDGE = 7.4
 
 #: The callouts a brief may lift to the top of its first page: the ones that say
 #: how far a finding stands, as opposed to a lead to follow or an aside.
@@ -348,6 +350,10 @@ class NotePage(FPDF):
         self.place_picture: Callable[..., object] = self.image
         #: Pages drawn edge to edge by their own code: the cover.
         self.bare_pages: set[int] = set()
+        #: The note's own cover pages, bare but for the TLP label, and whether the
+        #: walk is drawing one now (a page it runs onto is one too).
+        self.own_pages: set[int] = set()
+        self.covering = False
         #: The brief's first page, whose header is its band.
         self.band_page = 0
         self.band_bottom = 0.0
@@ -412,7 +418,16 @@ class NotePage(FPDF):
         if self.on_page is not None:
             self.on_page()
         self.body_top = self.get_y()
+        if self.covering:
+            self.bare_pages.add(self.page)
+            self.own_pages.add(self.page)
         if self.page in self.bare_pages:
+            if self.page in self.own_pages:
+                # a classification belongs on every page, a cover of one's own included
+                self.tlp_mark(self.w - self.theme.margin_side, COVER_TLP_EDGE)
+                for box in self.boxes:
+                    box.top = self.get_y() - 1.6
+                    box.offset = len(self._contents())
             return
         if self.page == self.band_page:
             self._band()
@@ -433,6 +448,8 @@ class NotePage(FPDF):
         if self.boxes:
             self._paint(list(self.boxes), self.h - self.b_margin)
         if self.page in self.bare_pages:
+            if self.page in self.own_pages:
+                self.tlp_mark(self.w - self.theme.margin_side, self.h - COVER_TLP_EDGE - 6.2)
             return
         theme = self.theme
         if theme.plain:

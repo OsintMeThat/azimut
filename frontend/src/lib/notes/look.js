@@ -17,7 +17,7 @@ export const DEFAULT_LOOK = Object.freeze({
   page: 'a4',
   accent: '',
   tlp: '',
-  cover: Object.freeze({ on: false, subtitle: '', image: '', date: '' }),
+  cover: Object.freeze({ on: false, mode: '', top: false, subtitle: '', image: '', date: '' }),
   toc: false,
   numbered: false,
   sources: '',
@@ -77,6 +77,38 @@ export const SOURCES_OFF_STYLES = ['plain'];
 
 export const SUBTITLE_MAX = 200;
 
+/**
+ * The cover: none, the style's own (title, subtitle, picture, day), or the
+ * analyst's own page, what sits above the `<!-- cover -->` line
+ * (`lib/notes/reportParts.js`). `mode` and `top` are written only once set, as
+ * the late keys are, so an older Azimut still reads a look that never used them.
+ */
+export const COVERS = [
+  { id: 'off', label: 'Off' },
+  { id: 'style', label: "The style's" },
+  { id: 'own', label: 'Your own page' },
+];
+const COVER_MODES = [{ id: '' }, { id: 'own' }];
+
+/** Which of the three covers a look prints. */
+export function coverChoice(look) {
+  const { cover } = normaliseLook(look);
+  return !cover.on ? 'off' : cover.mode === 'own' ? 'own' : 'style';
+}
+
+/** The cover part of a look for one of the three choices, the rest kept. */
+export function coverFor(choice) {
+  if (choice === 'own') return { on: true, mode: 'own' };
+  if (choice === 'style') return { on: true, mode: '' };
+  return { on: false, mode: '' };
+}
+
+/** A look with the analyst's own first page. */
+export function ownCover(look) {
+  const whole = normaliseLook(look);
+  return normaliseLook({ ...whole, cover: { ...whole.cover, ...coverFor('own') } });
+}
+
 const pick = (value, choices, fallback) => (choices.some((choice) => choice.id === value) ? value : fallback);
 const HEX = /^#[0-9a-f]{6}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -96,6 +128,8 @@ export function normaliseLook(look) {
     tlp: pick(given.tlp ?? '', TLPS, ''),
     cover: {
       on: Boolean(cover.on),
+      mode: pick(cover.mode ?? '', COVER_MODES, ''),
+      top: Boolean(cover.top),
       subtitle: String(cover.subtitle ?? '').slice(0, SUBTITLE_MAX),
       image: String(cover.image ?? ''),
       date: DAY.test(date) ? date : '',

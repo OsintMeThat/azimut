@@ -210,8 +210,15 @@ NOTES: dict[str, tuple[str, str]] = {
 #: half a page rather than a whole one, and its closing paragraph comes up onto the
 #: same page (four pages became three). Nothing else on its pages moved, checked by
 #: drawing both engines' pages side by side.
+#:
+#: One more, with the report signature and the own cover page, which set their lines
+#: in `::: right` and `::: center` blocks: a paragraph in an aligned block keeps its
+#: styling, links, chips and `[n]` (`_aligned_runs`), where it used to print as one
+#: plain string. In "everything" the centred line's **bold inside** is now bold, at
+#: the same place; "Right aligned." and every other line, and every other note, are
+#: unchanged, checked against the previous engine's pages drawn at 60 and 150 dpi.
 GOLDEN: dict[str, str] = {
-    "everything": "be182d20d8a234eb5387a18c6665fb7efcc823e631370499bdf1db8517b814df",
+    "everything": "ec8b993d2bf254585eca3e608da045aaf1e2cd9d050b8644057ac1bace6386a2",
     "pictures": "38cc6b1916f4fb155126d93764d9db3b4f355213945bb5c298555889fee08f33",
     "diagram": "a9d3c0d75d5b35847ba113821079551d98758666f65bcd877962a249bb0fc307",
     "scripts": "90b7ddb4b5b86c93dd54fba2e2e84698e24e6f7534d3da3d86980b0698cdf1b0",

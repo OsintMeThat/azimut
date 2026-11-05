@@ -22,7 +22,9 @@ Each note prints in its own look (`engine/notelook.py`), kept beside the note an
 set through `/notes/{id}/look`. The page pane asks `/notes/preview` for the PDF of
 the text being typed: the same renderer, the same bounds, nothing written. The
 faces a look can pick are listed, and their regular weights served for the Look
-control's samples, under `/api/notes/fonts`, outside any case.
+control's samples, under `/api/notes/fonts`, outside any case. So are the three
+pictures every note can show (`engine/notefill.py`), under `/api/notes/pictures`,
+for the editor to draw: the Azimut logo, the analyst's logo and their signature.
 
 A note cites a web source through `/sources/lookup`: the address is read for a name
 and looked for among what the case already filed for it (`engine/urltitles.py`), so
@@ -58,7 +60,7 @@ from ..engine import exportdir
 from ..engine import links as link_engine
 from ..engine import notelook
 from ..engine import notes_pdf as pdf_engine
-from ..engine import notefromcase, notelinks, notetext
+from ..engine import notefill, notefromcase, notelinks, notetext
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
 from ..engine import urltitles
@@ -602,6 +604,22 @@ def note_font_file(name: str) -> FileResponse:
         media_type="font/ttf",
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+@fonts_router.get("/pictures/{name}")
+def note_picture(name: str) -> FileResponse:
+    """One of the three pictures a note can show, for the editor: ``logo`` (the
+    app's), ``my-logo`` and ``my-signature`` (the analyst's, from Settings).
+
+    Named from a fixed list, never by path. Not set answers 404. ``no-cache``: the
+    analyst replaces their pictures, and a picture kept by the browser would show
+    the old one under the new name.
+    """
+    path = notefill.picture_file(name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="no such picture")
+    media = "image/svg+xml" if name == notefill.LOGO else "image/png"
+    return FileResponse(path, media_type=media, headers={"Cache-Control": "no-cache"})
 
 
 def _ascii_json(value: Any) -> str:

@@ -101,6 +101,21 @@ describe('what @ and / offer', () => {
     expect(slashInsert(command('hint'), { before: 'text ' }).text).toBe('\n\n<!--?  -->\n');
   });
 
+  it('offers a cover page, a signature and the analyst\'s logo, in a note and in a template', () => {
+    for (const template of [false, true]) {
+      expect(slashMatches('cover', { template })[0].id).toBe('cover');
+      expect(slashMatches('sign', { template })[0].id).toBe('signature');
+      expect(slashMatches('logo', { template })[0].id).toBe('my-logo');
+    }
+    const command = (id) => SLASH_COMMANDS.find((item) => item.id === id);
+    // the cover is written at the top and sets the look, which the editor does itself
+    expect(slashInsert(command('cover'))).toBeNull();
+    expect(slashInsert(command('my-logo')).text).toBe('![Logo](azimut:my-logo){width=25%}\n');
+    const signature = slashInsert(command('signature'), { before: 'Done. ' });
+    expect(signature.text).toBe(
+      '\n\n::: right\n![Signature](azimut:my-signature){width=30% align=right}\n\n**{name}**\\\n{role}, {organisation}\\\n{date}\n:::\n');
+  });
+
   it('dates a log entry on the analyst’s own clock', () => {
     expect(logStamp(NOW)).toMatch(/^2026-11-04 09:05 \(UTC/);
     expect(today(NOW)).toBe('2026-11-04');

@@ -28,7 +28,10 @@ import { CALLOUT_LINE, calloutOf } from './callouts.js';
 import { paths as iconPaths } from '../../components/Icon.svelte';
 import { HINT_LINE, INCLUDE_LINE, PAGE_BREAK_LINE, includeLine } from './look.js';
 import {
-  CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, SOURCE_HELP, captionField, pictureLine, picturesIn, rovingToolbar, sizeWidth,
+  COVER_LINE, NO_IDENTITY, PLACEHOLDERS, coverChange, findPlaceholders, placeholderValue,
+} from './reportParts.js';
+import {
+  CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, SOURCE_HELP, blockAlignAt, captionField, pictureLine, picturesIn, rovingToolbar, sizeWidth,
   sizedLine, sourceField,
 } from './pictureSize.js';
 import {
@@ -40,12 +43,14 @@ import {
 /**
  * The case the note belongs to and its records, which the chips and pictures are
  * drawn from, and its notes as the home lists them (`notes/index` rows), which a
- * chapter is drawn from.
+ * chapter is drawn from. `identity` is who signs, as Settings › Publishing keeps
+ * it (`lib/notes/reportParts.js`): what `{name}` shows, and whether the logo and
+ * the signature are set.
  */
 export const setNoteCase = StateEffect.define();
 
 export const noteCase = StateField.define({
-  create: () => ({ caseId: '', entities: [], byId: new Map(), redirects: {}, notes: new Map() }),
+  create: () => ({ caseId: '', entities: [], byId: new Map(), redirects: {}, notes: new Map(), identity: NO_IDENTITY }),
   update(value, transaction) {
     for (const effect of transaction.effects) {
       if (effect.is(setNoteCase)) {
@@ -56,6 +61,7 @@ export const noteCase = StateField.define({
           byId: new Map(entities.map((entity) => [entity.id, entity])),
           redirects: effect.value.redirects ?? {},
           notes: new Map((effect.value.notes ?? []).map((row) => [row.id, row])),
+          identity: effect.value.identity ?? NO_IDENTITY,
         };
       }
     }
@@ -354,6 +360,133 @@ class PageBreakWidget extends WidgetType {
   }
 }
 
+/** Where the analyst's own first page ends: a rule, named. Pressing it opens its line. */
+class CoverRuleWidget extends WidgetType {
+  eq() {
+    return true;
+  }
+
+  toDOM(view) {
+    const box = document.createElement('div');
+    box.className = 'cm-pagebreak cm-cover-rule';
+    box.dataset.coverRule = 'true';
+    box.title = 'Above this line is page 1 when Look › Cover is Your own page. Click to edit the line';
+    const label = document.createElement('span');
+    label.textContent = 'End of the cover page';
+    box.append(label);
+    box.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      view.dispatch({ selection: { anchor: view.posAtDOM(box) } });
+      view.focus();
+    });
+    return box;
+  }
+
+  ignoreEvent(event) {
+    return event.type !== 'mousedown';
+  }
+
+  get estimatedHeight() {
+    return 30;
+  }
+}
+
+/** A word the PDF fills in: what Settings holds for it, or its name in grey. */
+function placeholderNode(id, identity) {
+  const item = PLACEHOLDERS.find((one) => one.id === id);
+  const value = placeholderValue(id, identity);
+  const node = document.createElement('span');
+  node.className = value ? 'cm-placeholder cm-placeholder-set' : 'cm-placeholder';
+  node.dataset.placeholder = id;
+  node.textContent = value || item.word;
+  node.title = value ? item.said : item.setting ? `${item.said}, not set yet` : item.said;
+  return node;
+}
+
+class PlaceholderWidget extends WidgetType {
+  constructor(id, identity) {
+    super();
+    this.id = id;
+    this.value = placeholderValue(id, identity);
+    this.identity = identity;
+  }
+
+  eq(other) {
+    return other.id === this.id && other.value === this.value;
+  }
+
+  toDOM() {
+    return placeholderNode(this.id, this.identity);
+  }
+
+  ignoreEvent() {
+    return false;
+  }
+}
+
+/**
+ * The words a drawn block holds that the PDF fills in, drawn as the editor draws
+ * them on a line of their own. Text in code stays as written.
+ */
+function drawPlaceholders(box, identity) {
+  const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+  const found = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node.parentElement?.closest('code, pre')) continue;
+    if (findPlaceholders(node.data).length) found.push(node);
+  }
+  for (const node of found) {
+    const parts = document.createDocumentFragment();
+    let at = 0;
+    for (const word of findPlaceholders(node.data)) {
+      if (word.from > at) parts.append(node.data.slice(at, word.from));
+      parts.append(placeholderNode(word.id, identity));
+      at = word.to;
+    }
+    if (at < node.data.length) parts.append(node.data.slice(at));
+    node.replaceWith(parts);
+  }
+}
+
+/** A block's source with each guidance line kept as a marker the sanitiser leaves alone. */
+const HINT_MARK = 'AZIMUTGUIDANCE';
+
+function hintsMarked(source) {
+  const hints = [];
+  const text = source.split('\n').map((line) => {
+    const hint = HINT_LINE.exec(line);
+    if (!hint) return line;
+    hints.push(hint[1]);
+    return `${HINT_MARK}${hints.length - 1}`;
+  }).join('\n');
+  return { text, hints };
+}
+
+/** Guidance inside a drawn block, put back as the grey words the editor draws it as. */
+function drawHints(box, hints) {
+  if (!hints.length) return;
+  const mark = new RegExp(`${HINT_MARK}(\\d+)`, 'g');
+  const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+  const found = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.data.includes(HINT_MARK)) found.push(node);
+  for (const node of found) {
+    const parts = document.createDocumentFragment();
+    let at = 0;
+    for (const match of node.data.matchAll(mark)) {
+      if (match.index > at) parts.append(node.data.slice(at, match.index));
+      const hint = document.createElement('span');
+      hint.className = 'cm-hint';
+      hint.dataset.hint = 'true';
+      hint.textContent = hints[Number(match[1])] || 'Guidance';
+      parts.append(hint);
+      at = match.index + match[0].length;
+    }
+    if (at < node.data.length) parts.append(node.data.slice(at));
+    node.replaceWith(parts);
+  }
+}
+
 const ALIGN_LABELS = { left: ['alignLeft', 'Left'], center: ['alignCentreH', 'Centre'], right: ['alignRight', 'Right'] };
 
 function iconSvg(name) {
@@ -389,7 +522,7 @@ function pictureEntity(info, picture) {
  * at. Then the way back to the tool it was made in, and a source to state when only
  * the analyst knows it. Neither of those two is ever printed.
  */
-function sizeBar(box, source, info, handlers = {}) {
+function sizeBar(box, source, info, handlers = {}, blockAlign = '') {
   const [picture] = picturesIn(source);
   const bar = document.createElement('div');
   bar.className = 'cm-size-bar';
@@ -413,7 +546,8 @@ function sizeBar(box, source, info, handlers = {}) {
   };
   mark();
   box.querySelector('img')?.addEventListener('load', mark, { once: true });
-  const current = picture.align || 'left';
+  // a picture whose line writes no place takes its block's, as the PDF prints it
+  const current = picture.align || blockAlign || 'left';
   for (const align of PICTURE_ALIGNS) {
     const [icon, label] = ALIGN_LABELS[align];
     const button = document.createElement('button');
@@ -514,18 +648,22 @@ function openCaption(view, box, returnTo = null) {
 
 /** A drawn block (a picture, a table, a diagram): pressing it puts the cursor back in its source. */
 class BlockWidget extends WidgetType {
-  /** `writable`: whether the note can be changed, which is when a picture offers its bar. */
-  constructor(kind, source, info, writable = false) {
+  /**
+   * `writable`: whether the note can be changed, which is when a picture offers its bar.
+   * `align`: the place of the `::: center` or `::: right` block a picture stands in.
+   */
+  constructor(kind, source, info, writable = false, align = '') {
     super();
     this.kind = kind;
     this.source = source;
     this.info = info;
     this.writable = writable;
+    this.align = align;
   }
 
   eq(other) {
     if (other.kind !== this.kind || other.source !== this.source || other.info.caseId !== this.info.caseId
-      || other.writable !== this.writable) return false;
+      || other.writable !== this.writable || other.align !== this.align || !sameIdentity(other.info.identity, this.info.identity)) return false;
     // A tool that files something reads the case again: the same records come back as a
     // new list. The block is drawn again only when what it shows changed, so a picture
     // keeps its open caption field and does not blink.
@@ -544,13 +682,18 @@ class BlockWidget extends WidgetType {
 
   toDOM(view) {
     const box = document.createElement('div');
-    box.className = `cm-block cm-block-${this.kind}`;
+    box.className = `cm-block cm-block-${this.kind}${this.align ? ` cm-in-align-${this.align}` : ''}`;
     box.dataset.block = this.kind;
     box.title = 'Click to edit';
     if (this.kind === 'diagram') drawDiagram(box, this.source);
-    else box.innerHTML = markdownHtml(this.source, this.info);
+    else {
+      const { text, hints } = hintsMarked(this.source);
+      box.innerHTML = markdownHtml(text, this.info);
+      drawHints(box, hints);
+      drawPlaceholders(box, this.info.identity);
+    }
     const handlers = view.state.facet(noteHandlers);
-    if (this.kind === 'picture' && this.writable) box.append(sizeBar(box, this.source, this.info, handlers));
+    if (this.kind === 'picture' && this.writable) box.append(sizeBar(box, this.source, this.info, handlers, this.align));
     /** A button of the picture bar, pressed: a size, a place, the caption field, its tool or its source. */
     const press = (target) => {
       if (target.closest('[data-caption]')) {
@@ -614,6 +757,11 @@ class BlockWidget extends WidgetType {
   get estimatedHeight() {
     return this.kind === 'diagram' ? 220 : 160;
   }
+}
+
+/** Whether two identities draw the same: a block holding `{name}` or a logo is drawn again when they differ. */
+function sameIdentity(a = NO_IDENTITY, b = NO_IDENTITY) {
+  return Object.keys(NO_IDENTITY).every((key) => a?.[key] === b?.[key]);
 }
 
 const diagrams = new Map();
@@ -688,6 +836,12 @@ function pageBreakOn(state, from, to) {
   return to <= line.to && PAGE_BREAK_LINE.test(line.text);
 }
 
+/** Whether the comment `from`–`to` is the end of the cover page (`<!-- cover -->`) alone on its line. */
+function coverRuleOn(state, from, to) {
+  const line = state.doc.lineAt(from);
+  return to <= line.to && COVER_LINE.test(line.text);
+}
+
 /** What a chapter line shows: the note as the home lists it, its record else, null when gone. */
 function includedNote(info, id) {
   const row = info.notes.get(id);
@@ -725,11 +879,14 @@ export function noteDecorations(state) {
   const template = state.facet(templateMode);
   let chapters = 0;
 
+  // the place of the aligned block each line stands in, by line number, for a picture there
+  const blockAligns = new Map();
   const block = (kind, from, to) => {
     const first = state.doc.lineAt(from);
     const last = state.doc.lineAt(to);
     covered.push([first.from, last.to]);
-    ranges.push(Decoration.replace({ widget: new BlockWidget(kind, state.doc.sliceString(first.from, last.to), info, !state.readOnly), block: true })
+    const align = kind === 'picture' ? blockAligns.get(first.number) ?? '' : '';
+    ranges.push(Decoration.replace({ widget: new BlockWidget(kind, state.doc.sliceString(first.from, last.to), info, !state.readOnly, align), block: true })
       .range(first.from, last.to));
   };
 
@@ -742,6 +899,7 @@ export function noteDecorations(state) {
     if (end > state.doc.lines) break;
     const from = state.doc.line(number).from;
     const to = state.doc.line(end).to;
+    if (open[1] !== 'left') for (let inner = number + 1; inner < end; inner += 1) blockAligns.set(inner, open[1]);
     if (touches(lines, state, from, to)) {
       ranges.push(lineClass('cm-fence-line').range(from));
       ranges.push(lineClass('cm-fence-line').range(state.doc.line(end).from));
@@ -752,7 +910,8 @@ export function noteDecorations(state) {
   tree?.iterate({
     enter(node) {
       const { name, from, to } = node;
-      if (inside(from)) return false;
+      // the document itself starts where a block drawn whole may: only what is in it is skipped
+      if (name !== 'Document' && inside(from)) return false;
       const editing = touches(lines, state, from, to);
       if (name === 'FencedCode') {
         code.push([from, to]);
@@ -795,6 +954,12 @@ export function noteDecorations(state) {
         const line = state.doc.lineAt(from);
         if (editing) ranges.push(lineClass('cm-pagebreak-line').range(line.from));
         else ranges.push(Decoration.replace({ widget: new PageBreakWidget(), block: true }).range(line.from, line.to));
+        return false;
+      }
+      if (name === 'CommentBlock' && coverRuleOn(state, from, to)) {
+        const line = state.doc.lineAt(from);
+        if (editing) ranges.push(lineClass('cm-pagebreak-line').range(line.from));
+        else ranges.push(Decoration.replace({ widget: new CoverRuleWidget(), block: true }).range(line.from, line.to));
         return false;
       }
       if (name === 'HTMLBlock' || name === 'CommentBlock') {
@@ -920,7 +1085,8 @@ export function noteDecorations(state) {
     const pictureLine = !editing && PICTURE_LINE.test(line.text) && line.text.includes('[[media:');
     if (pictureLine) {
       covered.push([line.from, line.to]);
-      ranges.push(Decoration.replace({ widget: new BlockWidget('picture', line.text, info, !state.readOnly), block: true }).range(line.from, line.to));
+      ranges.push(Decoration.replace({ widget: new BlockWidget('picture', line.text, info, !state.readOnly, blockAligns.get(number) ?? ''), block: true })
+        .range(line.from, line.to));
       continue;
     }
     const refs = findReferences(line.text, line.from).filter((ref) => !inCode(ref.from));
@@ -936,6 +1102,13 @@ export function noteDecorations(state) {
       if (inCode(point.from) || refs.some((ref) => point.from < ref.to && point.to > ref.from)) continue;
       ranges.push(Decoration.mark({ class: 'cm-coords' }).range(point.from, point.to));
       if (!mapless) ranges.push(Decoration.widget({ widget: new CoordinatesWidget(point.lat, point.lon), side: 1 }).range(point.to));
+    }
+    // the words the PDF fills in: grey on the line being written, drawn as they print elsewhere
+    const placeholders = HINT_LINE.test(line.text) ? [] : findPlaceholders(line.text, line.from);
+    for (const word of placeholders) {
+      if (inCode(word.from) || refs.some((ref) => word.from < ref.to && word.to > ref.from)) continue;
+      if (editing) ranges.push(Decoration.mark({ class: 'cm-placeholder-source' }).range(word.from, word.to));
+      else ranges.push(Decoration.replace({ widget: new PlaceholderWidget(word.id, info.identity) }).range(word.from, word.to));
     }
   }
   // a chip stands for its whole reference, and a chapter for its line: a mark the parser found inside is not drawn
@@ -1065,7 +1238,7 @@ export function resizePicture(view, line, ref, changes) {
   const at = pictureLine(lines, Number(line) || 0, ref);
   if (at < 0) return false;
   const target = doc.line(at + 1);
-  const text = sizedLine(target.text, ref, changes);
+  const text = sizedLine(target.text, ref, changes, { blockAlign: blockAlignAt(lines, at) });
   if (text === null || text === target.text) return false;
   view.dispatch({ changes: { from: target.from, to: target.to, insert: text }, userEvent: 'input' });
   return true;
@@ -1286,6 +1459,31 @@ export function captionAt(view, pos, { returnTo = null, frames = 6 } = {}) {
 }
 
 /**
+ * Write the cover page at the top of the note, unless it has one, and put the
+ * cursor on its first line to write. Answers whether it wrote one. Without
+ * `focus` (Look › Cover was changed) the keyboard stays where it is.
+ */
+export function insertCover(view, { focus = true } = {}) {
+  if (view.state.readOnly) return false;
+  const change = coverChange(view.state.doc.toString());
+  if (!change) {
+    if (!focus) return false;
+    view.dispatch({ selection: { anchor: 0 }, scrollIntoView: true });
+    view.focus();
+    return false;
+  }
+  const changes = { from: change.from, to: change.to, insert: change.insert };
+  if (!focus) {
+    view.dispatch({ changes, userEvent: 'input' });
+    return true;
+  }
+  // drawn as focused at once, so the page opens around the cursor rather than over it
+  view.dispatch({ changes, selection: { anchor: change.cursor }, effects: setFocused.of(true), scrollIntoView: true, userEvent: 'input' });
+  view.focus();
+  return true;
+}
+
+/**
  * Put a chapter line where the cursor is, as a paragraph of its own: on the empty
  * line it is typed on, or after the line holding words.
  */
@@ -1451,6 +1649,7 @@ const look = EditorView.theme({
   '.cm-setext-rule': { color: 'var(--text-3)', fontSize: '0.7em' },
   '.cm-block .markdown-align.align-center': { textAlign: 'center' },
   '.cm-block .markdown-align.align-right': { textAlign: 'right' },
+  '.cm-block .markdown-align h1, .cm-block .markdown-align h2, .cm-block .markdown-align h3': { margin: '0.3em 0', fontWeight: '650' },
   '.cm-block p': { margin: '0.2em 0' },
   '.cm-link': { color: 'var(--info)' },
   '.cm-quote': { borderLeft: '2px solid var(--border-strong)', color: 'var(--text-2)', marginLeft: 'var(--note-gutter, 32px)', paddingLeft: '12px !important' },
@@ -1481,6 +1680,11 @@ const look = EditorView.theme({
   '.cm-block img, .cm-block video': { maxWidth: '100%', borderRadius: '4px', display: 'block' },
   '.cm-block img.align-center, .cm-block video.align-center': { marginLeft: 'auto', marginRight: 'auto' },
   '.cm-block img.align-right, .cm-block video.align-right': { marginLeft: 'auto' },
+  // a picture whose line writes no place takes its block's, as the PDF prints it
+  '.cm-block .markdown-align.align-center [data-unaligned], .cm-in-align-center [data-unaligned]': { marginLeft: 'auto', marginRight: 'auto' },
+  '.cm-block .markdown-align.align-right [data-unaligned], .cm-in-align-right [data-unaligned]': { marginLeft: 'auto' },
+  '.cm-in-align-center [data-unaligned] + .markdown-caption': { textAlign: 'center' },
+  '.cm-in-align-right [data-unaligned] + .markdown-caption': { textAlign: 'right' },
   '.cm-block table': { borderCollapse: 'collapse', fontSize: '0.92em' },
   '.cm-block th, .cm-block td': { border: '1px solid var(--border-strong)', padding: '4px 10px', textAlign: 'left' },
   '.cm-block th': { background: 'var(--bg-2)' },
@@ -1521,6 +1725,18 @@ const look = EditorView.theme({
   '.cm-pagebreak::before, .cm-pagebreak::after': { content: '""', flex: '1', borderTop: '1px dashed var(--border-strong)' },
   '.cm-pagebreak:hover': { color: 'var(--text-2)' },
   '.cm-pagebreak-line': { color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: '0.9em' },
+  '.cm-cover-rule': { color: 'var(--accent)', margin: '14px var(--note-gutter, 32px)' },
+  '.cm-cover-rule::before, .cm-cover-rule::after': { borderTop: '1px solid color-mix(in srgb, var(--accent) 55%, transparent)' },
+  '.cm-placeholder': {
+    color: 'var(--text-3)', fontStyle: 'italic', background: 'var(--bg-2)', borderRadius: '3px', padding: '0 4px',
+    boxShadow: 'inset 0 0 0 1px var(--border)',
+  },
+  '.cm-placeholder-set': { color: 'inherit', fontStyle: 'normal', background: 'none', boxShadow: 'none', padding: '0', borderBottom: '1px dotted var(--text-3)' },
+  '.cm-placeholder-source': { color: 'var(--text-3)' },
+  '.cm-block .builtin-unset': {
+    display: 'inline-block', padding: '10px 14px', border: '1px dashed var(--border-strong)', borderRadius: '4px', color: 'var(--text-3)',
+    fontFamily: 'var(--font-sans)', fontSize: '0.84em',
+  },
   '.cm-block-picture': { position: 'relative' },
   // hidden until the picture is hovered, yet there for Tab, which shows it
   // in a narrow note it wraps onto a second row rather than run off the page

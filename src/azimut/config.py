@@ -19,7 +19,8 @@ asks the question — every path is built from :func:`workspace_root`.
         └── settings/
             ├── cookies.txt
             ├── icons/        # the icon library: icons.json + one PNG per icon
-            ├── signature.png
+            ├── report-signature.png  # the handwritten signature reports print
+            ├── signature.png # the analyst's logo
             ├── settings.json
             └── templates.json
 
@@ -160,6 +161,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # The handle stamped onto proofs when a proof/template enables it. Empty
     # means no account-handle slot can render.
     "signature_handle": "",
+    # Who signs a report: filled into a note's {name}, {role} and {organisation}
+    # when it prints (engine/notefill.py). One line each; empty prints nothing.
+    "report_name": "",
+    "report_role": "",
+    "report_organisation": "",
     # Pairing token for the capture browser extension (api/ingest.py). Minted
     # lazily on first use, shown once in Settings, pasted into the extension.
     # Empty means "not minted yet" — never a valid credential.
@@ -449,6 +455,16 @@ def signature_path() -> Path:
     return settings_dir() / "signature.png"
 
 
+def report_signature_path() -> Path:
+    """A picture of the analyst's handwritten signature, which a report prints
+    where its text writes ``![Signature](azimut:my-signature)``.
+
+    Under the logo's rule: app-wide, beside settings.json, never copied into a case,
+    and carried by a settings backup to the analyst's own second machine.
+    """
+    return settings_dir() / "report-signature.png"
+
+
 def templates_path() -> Path:
     """Reusable proof-style and post-thread presets, app-wide.
 
@@ -477,17 +493,36 @@ def cookies_file_path() -> Path:
 # Refuse anything larger as a signature: a logo is a small badge on a composite,
 # and the file is read into memory to be validated and served.
 SIGNATURE_MAX_BYTES = 2 * 1024 * 1024
+# A handwritten signature is a line of ink: a megabyte is far past a scan of one.
+REPORT_SIGNATURE_MAX_BYTES = 1024 * 1024
 # PNG only — the format's alpha channel is what lets a logo sit over imagery.
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
-def valid_signature(data: bytes) -> bool:
+def valid_signature(data: bytes, limit: int = SIGNATURE_MAX_BYTES) -> bool:
     """Small enough, and actually a PNG — sniffed from the bytes, never a name.
 
-    One gate for both ways a logo arrives: the Settings upload and a restored
-    settings backup.
+    One gate for both ways a logo or a handwritten signature arrives: the
+    Settings upload and a restored settings backup, each under its own cap.
     """
-    return 0 < len(data) <= SIGNATURE_MAX_BYTES and data.startswith(PNG_MAGIC)
+    return 0 < len(data) <= limit and data.startswith(PNG_MAGIC)
+
+
+def write_private(path: Path, data: bytes) -> None:
+    """Write one of the analyst's own files beside settings.json, owner-only, whole
+    or not at all."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _restrict(path.parent, 0o700)
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp_path = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        _restrict(tmp_path, 0o600)
+        _replace(tmp_path, path)
+        _restrict(path, 0o600)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def ensure_workspace() -> None:

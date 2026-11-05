@@ -65,7 +65,7 @@ describe('the Look panel', () => {
     expect(target.textContent).toContain('Plain');
     openPanel();
     expect(panel().getAttribute('role')).toBe('dialog');
-    for (const words of ['Style', 'Page', 'Accent', 'Marking', 'Cover page', 'Contents page', 'Numbered headings']) {
+    for (const words of ['Style', 'Page', 'Accent', 'Marking', 'Cover', 'Contents page', 'Numbered headings']) {
       expect(panel().textContent).toContain(words);
     }
   });
@@ -86,7 +86,7 @@ describe('the Look panel', () => {
 
   it('turns the cover, the contents and the numbers on', () => {
     openPanel();
-    box('Cover page').click();
+    pressed("The style's").click();
     flushSync();
     box('Contents page').click();
     flushSync();
@@ -213,6 +213,44 @@ describe('the Look panel', () => {
     sources.click();
     flushSync();
     expect(changes.at(-1)).toMatchObject({ style: 'brief', sources: 'off' });
+  });
+
+  it('offers three covers: none, the style\'s with its fields, or the analyst\'s own page', () => {
+    openPanel();
+    const covers = panel().querySelector('[aria-label="Cover page"]');
+    expect([...covers.querySelectorAll('button')].map((button) => button.textContent.trim())).toEqual(['Off', "The style's", 'Your own page']);
+    expect(pressed('Off').getAttribute('aria-checked')).toBe('true');
+    expect(panel().textContent).not.toContain('Subtitle');
+    pressed("The style's").click();
+    flushSync();
+    expect(changes.at(-1).cover).toMatchObject({ on: true, mode: '' });
+    expect(panel().textContent).toContain('Subtitle');
+    pressed('Your own page').click();
+    flushSync();
+    expect(changes.at(-1).cover).toMatchObject({ on: true, mode: 'own', top: false });
+    // the style's fields give way to where the page sits, and the day {date} prints
+    expect(panel().textContent).not.toContain('Subtitle');
+    expect(panel().textContent).not.toContain('Picture');
+    expect(panel().textContent).toContain('above the End of the cover page line');
+    expect(panel().querySelector('input[type="date"]')).not.toBeNull();
+    const centred = [...panel().querySelectorAll('input[role="switch"]')].find((input) => input.closest('label').textContent.includes('Centred down the page'));
+    expect(centred.checked).toBe(true);
+    centred.click();
+    flushSync();
+    expect(changes.at(-1).cover).toMatchObject({ mode: 'own', top: true });
+    expect(centred.checked).toBe(false);
+    pressed('Off').click();
+    flushSync();
+    expect(changes.at(-1).cover).toMatchObject({ on: false, mode: '' });
+  });
+
+  it('offers a template its own page, with no day', () => {
+    props.template = true;
+    props.look = normaliseLook({ cover: { on: true, mode: 'own' } });
+    openPanel();
+    expect(pressed('Your own page').getAttribute('aria-checked')).toBe('true');
+    expect(panel().textContent).toContain('Centred down the page');
+    expect(panel().querySelector('input[type="date"]')).toBeNull();
   });
 
   it('offers a template no picture and no day', () => {

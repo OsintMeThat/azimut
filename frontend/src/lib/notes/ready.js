@@ -8,14 +8,20 @@
  * callout to change once the work is done, and the look it prints in. They hold
  * no case material: no place, no person, no date but the two words filled in.
  *
+ * A report printed with a cover writes its own first page (`lib/notes/reportParts.js`):
+ * the app's logo on a line of its own, which deleting removes, then the title and
+ * the day the PDF fills in. It ends on the signature block, as removable.
+ *
  * Templates the analyst keeps live in Settings (`templates.json`, kind `note`) and
- * use the same two words: `{today}` and `{now}`.
+ * use the same two words: `{today}` and `{now}`. The words the PDF fills in
+ * (`{title}`, `{date}`, `{name}`…) are left as they are.
  */
 import { logStamp, today } from './syntax.js';
+import { COVER_SKELETON, SIGNATURE_BLOCK } from './reportParts.js';
 
 const lines = (...rows) => `${rows.join('\n')}\n`;
 
-const REPORT = { style: 'report', cover: { on: true }, numbered: true };
+const REPORT = { style: 'report', cover: { on: true, mode: 'own' }, numbered: true };
 // Without a cover, page 1 shows the sections, so the three reports read apart in the gallery.
 const REPORT_OPEN = { style: 'report', numbered: true };
 const SOURCES_HINT = '<!--? Every link with its archived copy, and each imagery date, with the day you looked. -->';
@@ -34,6 +40,8 @@ export const READY_NOTES = [
     note: 'Where it was taken, feature by feature',
     look: REPORT,
     body: lines(
+      COVER_SKELETON,
+      '',
       '> [!unverified] Location not established yet.',
       '',
       '<!--? Once placed, make this [!confirmed] and give the coordinates, how precise they are and how sure you are. -->',
@@ -90,6 +98,8 @@ export const READY_NOTES = [
       '- ',
       '',
       SOURCES_HINT,
+      '',
+      SIGNATURE_BLOCK,
     ),
   },
   {

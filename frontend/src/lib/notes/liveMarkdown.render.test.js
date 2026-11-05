@@ -4,8 +4,9 @@ import { EditorView } from '@codemirror/view';
 import { Compartment, EditorState } from '@codemirror/state';
 import { CompletionContext } from '@codemirror/autocomplete';
 import {
-  insertInclude, leaveEmptyItem, mentionSource, noteExtensions, removeInclude, resizePicture, setNoteCase, slashSource,
+  focusedState, insertCover, insertInclude, leaveEmptyItem, mentionSource, noteExtensions, removeInclude, resizePicture, setNoteCase, slashSource,
 } from './liveMarkdown.js';
+import { COVER_SKELETON, NO_IDENTITY } from './reportParts.js';
 
 let view;
 afterEach(() => { view?.destroy(); view = null; });
@@ -188,6 +189,67 @@ describe('a page break', () => {
     expect(rule.textContent).toBe('Page break');
   });
 
+});
+
+describe('a first page of one\'s own', () => {
+  it('/ writes the cover at the very top, puts the cursor on its first line to write, and asks for the look', () => {
+    let asked = 0;
+    editor('\nFindings first.\n\n/cov');
+    accept(slashSource({ cover: () => { asked += 1; insertCover(view); } }), 'Cover page');
+    expect(asked).toBe(1);
+    expect(view.state.doc.toString()).toBe(`${COVER_SKELETON}\n\nFindings first.\n\n`);
+    const line = view.state.doc.lineAt(view.state.selection.main.head);
+    expect(line.text).toBe('<!--? A line under the title: what this report is -->');
+    // a second one is never written
+    expect(insertCover(view, { focus: false })).toBe(false);
+    expect(view.state.doc.toString().split('<!-- cover -->')).toHaveLength(2);
+  });
+
+  it('is drawn as the page will read: the logo, the title and the day as words, the guidance in grey, then a named rule', () => {
+    editor(`${COVER_SKELETON}\n\nBody`);
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    const page = view.dom.querySelector('.cm-block-aligned');
+    expect(page.querySelector('img').getAttribute('src')).toBe('/api/notes/pictures/logo');
+    expect(page.querySelector('img').classList.contains('builtin-logo')).toBe(true);
+    expect([...page.querySelectorAll('[data-placeholder]')].map((node) => node.textContent)).toEqual(['Title', 'Date']);
+    expect(page.querySelector('.cm-hint').textContent).toBe('A line under the title: what this report is');
+    expect(page.textContent).not.toContain('AZIMUT');
+    expect(view.dom.querySelector('[data-cover-rule]').textContent).toBe('End of the cover page');
+  });
+
+  it('signs with the analyst\'s words once Settings has them, and their grey names until then', () => {
+    editor('::: right\n![Signature](azimut:my-signature){width=30% align=right}\n\n**{name}**\\\n{role}, {organisation}\\\n{date}\n:::\n\nEnd');
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    const block = () => view.dom.querySelector('.cm-block-aligned');
+    expect([...block().querySelectorAll('[data-placeholder]')].map((node) => node.textContent)).toEqual(['Name', 'Role', 'Organisation', 'Date']);
+    expect(block().textContent).toContain('No signature set in Settings › Publishing');
+    expect(block().querySelectorAll('br')).toHaveLength(2);
+    view.dispatch({
+      effects: setNoteCase.of({ caseId: 'c1', entities: [], identity: { ...NO_IDENTITY, name: 'A. Analyst', signature: true, rev: 4 } }),
+    });
+    const name = block().querySelector('[data-placeholder="name"]');
+    expect(name.textContent).toBe('A. Analyst');
+    expect(name.classList.contains('cm-placeholder-set')).toBe(true);
+    expect(block().querySelector('[data-placeholder="role"]').textContent).toBe('Role');
+    expect(block().querySelector('img').getAttribute('src')).toBe('/api/notes/pictures/my-signature?v=4');
+  });
+});
+
+describe('a picture in a centred block', () => {
+  it('is drawn and pressed at the block\'s place when its line writes none, and Left is written as left', () => {
+    editor('::: center\n![Azimut](azimut:logo){width=25%}\n\nWords\n:::\n\nEnd');
+    // the block is open while its words are edited: the picture is a block of its own with its bar
+    view.setState(focusedState(view.state.update({ selection: { anchor: view.state.doc.toString().indexOf('Words') } }).state));
+    const picture = view.dom.querySelector('.cm-block-picture');
+    expect(picture.classList.contains('cm-in-align-center')).toBe(true);
+    expect(picture.querySelector('img').hasAttribute('data-unaligned')).toBe(true);
+    const pressed = [...picture.querySelectorAll('.cm-size-align[aria-pressed="true"]')].map((button) => button.title);
+    expect(pressed).toEqual(['Centre']);
+    expect(resizePicture(view, 1, 'azimut:logo', { align: 'left' })).toBe(true);
+    expect(view.state.doc.line(2).text).toBe('![Azimut](azimut:logo){width=25% align=left}');
+    expect(resizePicture(view, 1, 'azimut:logo', { align: 'center' })).toBe(true);
+    expect(view.state.doc.line(2).text).toBe('![Azimut](azimut:logo){width=25%}');
+  });
 });
 
 describe('a picture’s size in the PDF', () => {

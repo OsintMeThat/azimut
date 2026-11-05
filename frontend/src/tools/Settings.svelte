@@ -389,7 +389,8 @@
       const restored = [
         `${r.imported.length} setting${r.imported.length === 1 ? '' : 's'}`,
         r.templates ? `${r.templates} template${r.templates === 1 ? '' : 's'}` : null,
-        r.signature ? 'signature' : null,
+        r.signature ? 'logo' : null,
+        r.report_signature ? 'signature' : null,
         r.icons ? `${r.icons} icon${r.icons === 1 ? '' : 's'}` : null,
       ].filter(Boolean);
       toast(`Backup restored: ${restored.join(', ')}`, 'ok');
@@ -397,6 +398,7 @@
       await loadTemplates();
       if (r.icons) iconLibrary.load(true);
       sigBust += 1; // the logo changed on disk; re-fetch it past the cache
+      prefs.picturesRev += 1; // and what notes show of it and of the signature
     } catch (e) {
       toast(`Could not import the backup: ${e.message}`, 'danger');
     } finally {
@@ -586,10 +588,12 @@
     try {
       await api.post('/api/settings/signature', body);
       signature = true;
+      prefs.logoSet = true;
       sigBust++;
-      toast('Signature saved', 'ok');
+      prefs.picturesRev += 1;
+      toast('Logo saved', 'ok');
     } catch (e) {
-      toast(`Could not save the signature: ${e.message}`, 'danger');
+      toast(`Could not save the logo: ${e.message}`, 'danger');
     }
     if (sigInput) sigInput.value = ''; // let the same file be picked again
   }
@@ -598,9 +602,11 @@
     try {
       await api.del('/api/settings/signature');
       signature = false;
-      toast('Signature removed', 'ok');
+      prefs.logoSet = false;
+      prefs.picturesRev += 1;
+      toast('Logo removed', 'ok');
     } catch (e) {
-      toast(`Could not remove the signature: ${e.message}`, 'danger');
+      toast(`Could not remove the logo: ${e.message}`, 'danger');
     }
   }
 

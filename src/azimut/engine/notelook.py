@@ -14,7 +14,9 @@ Nothing here bumps the case schema. An older Azimut opening a case that holds
 looks sees one more attr and one more setting it never reads, and prints every
 note plain. The face, the text size and the sources list came later (`font`,
 `size`, `sources`) and are written only once they are set, so a look that never
-used them reads the same to a reader that predates them.
+used them reads the same to a reader that predates them. So did the cover's own
+page and where it stands on it (`cover.mode`, `cover.top`): a reader that drops
+them prints the style's cover, and the lines meant for the own page as text.
 """
 
 from __future__ import annotations
@@ -56,6 +58,11 @@ Sources = Literal["", "on", "off"]
 #: Keys a look writes only once they leave their default, so a look that never used
 #: them is stored, served and bundled exactly as an older Azimut wrote it.
 LATE_KEYS = ("font", "size", "sources")
+#: The cover's keys under the same rule: a cover of the style's own, centred, writes neither.
+COVER_LATE_KEYS = ("mode", "top")
+#: What the cover is: "" the style's (title, subtitle, picture, day), or "own", the
+#: lines above `<!-- cover -->` as a page of their own (`engine/notefill.py`).
+CoverMode = Literal["", "own"]
 #: The styles that print no sources list unless the look asks for one: plain is the
 #: document notes always printed as. Read by the frontend's mirror of this rule.
 SOURCES_OFF_STYLES: tuple[str, ...] = ("plain",)
@@ -73,7 +80,8 @@ TLP_LABELS: dict[str, tuple[str, tuple[int, int, int]]] = {
 
 
 class NoteCover(BaseModel):
-    """The cover page: on or off, and what it says beside the title."""
+    """The cover page: on or off, the style's or the note's own, and what it says
+    beside the title."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -83,6 +91,23 @@ class NoteCover(BaseModel):
     image: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
     #: ``YYYY-MM-DD``, or "" to print the day the PDF is made.
     date: str = Field(default="", pattern=r"^(\d{4}-\d{2}-\d{2})?$")
+    #: "" the style's cover, "own" the note's own page; counts only while ``on``.
+    mode: CoverMode = ""
+    #: The own page starts at the top rather than centred down the page.
+    top: StrictBool = False
+
+    @model_serializer(mode="wrap")
+    def _late_keys_only_when_set(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = dict(handler(self))
+        for key in COVER_LATE_KEYS:
+            if not data.get(key):
+                data.pop(key, None)
+        return data
+
+    @property
+    def own(self) -> bool:
+        """Whether the note prints its own first page."""
+        return self.on and self.mode == "own"
 
     @field_validator("subtitle")
     @classmethod

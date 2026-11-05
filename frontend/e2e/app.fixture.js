@@ -671,16 +671,17 @@ export async function fakeGoogleMaps(page) {
 }
 
 /**
- * A PDF of `count` A4 pages, each saying its number, written by hand: what the
+ * A PDF of `count` A4 pages, each saying its number or its label, written by hand: what the
  * Notebook's Page pane and its template pictures are answered with, so PDF.js
  * draws real pages in the browser without a server behind it.
  */
-export function pdfOf(count = 1) {
+export function pdfOf(count = 1, labels = []) {
   const objects = ['', '', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
   const add = (body) => objects.push(body);
   const kids = [];
   for (let index = 0; index < count; index += 1) {
-    const text = `BT /F1 36 Tf 72 720 Td (Page ${index + 1}) Tj ET`;
+    const words = String(labels[index] ?? `Page ${index + 1}`).replace(/[()\\]/g, '');
+    const text = `BT /F1 36 Tf 72 720 Td (${words}) Tj ET`;
     const content = add(`<< /Length ${text.length} >>\nstream\n${text}\nendstream`);
     kids.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${content} 0 R >>`));
   }
@@ -699,13 +700,13 @@ export function pdfOf(count = 1) {
   return Buffer.from(out, 'latin1');
 }
 
-/** A note's PDF as the preview routes answer it: the bytes, and where each page starts. */
-export function pdfAnswer(route, pages = [0], headers = {}) {
+/** A note's PDF as the preview routes answer it: the bytes, where each page starts, and what each page says. */
+export function pdfAnswer(route, pages = [0], headers = {}, labels = []) {
   return route.fulfill({
     status: 200,
     contentType: 'application/pdf',
     headers: { 'X-Note-Pages': JSON.stringify(pages), 'X-Note-Diagrams': '[]', 'X-Note-Warnings': '[]', ...headers },
-    body: pdfOf(pages.length),
+    body: pdfOf(pages.length, labels),
   });
 }
 
