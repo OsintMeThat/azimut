@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 const { get, put } = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
 vi.mock('../api.js', () => ({ api: { get, put } }));
 
 const {
-  DEFAULT_LOOK, FONTS, HINT_LINE, INCLUDE_LINE, SIZES, hintLine, includeLine, isPlainLook, isReport, lookFont, normaliseLook,
-  readLook, reportBody, reportLook, templateLook, writeLook,
+  DEFAULT_LOOK, FONTS, HINT_LINE, INCLUDE_LINE, SIZES, SOURCES_OFF_STYLES, STYLES, hintLine, includeLine, isPlainLook, isReport, lookFont,
+  normaliseLook, readLook, reportBody, reportLook, sourcesOn, templateLook, writeLook,
 } = await import('./look.js');
 
 afterEach(() => vi.clearAllMocks());
@@ -43,6 +44,36 @@ describe('a look', () => {
     expect(lookFont(null)).toBe('serif');
     expect(lookFont({ style: 'brief' })).toBe('sans');
     expect(lookFont({ style: 'brief', font: 'book' })).toBe('book');
+  });
+
+  it('keeps the list of sources as set, and the style\'s own for anything else', () => {
+    expect(normaliseLook({ sources: 'on' }).sources).toBe('on');
+    expect(normaliseLook({ sources: 'off' }).sources).toBe('off');
+    expect(normaliseLook({ sources: 'yes' }).sources).toBe('');
+    expect(normaliseLook({ sources: true }).sources).toBe('');
+    expect(isPlainLook({ sources: '' })).toBe(true);
+    expect(isPlainLook({ sources: 'on' })).toBe(false);
+    expect(templateLook({ style: 'report', sources: 'off' }).sources).toBe('off');
+  });
+
+  it('lists the sources at the end for every style but Plain, unless set', () => {
+    expect(sourcesOn(null)).toBe(false);
+    expect(sourcesOn({ style: 'plain' })).toBe(false);
+    expect(sourcesOn({ style: 'plain', sources: 'on' })).toBe(true);
+    for (const style of ['report', 'brief', 'journal']) {
+      expect(sourcesOn({ style }), style).toBe(true);
+      expect(sourcesOn({ style, sources: 'off' }), style).toBe(false);
+    }
+  });
+
+  it('follows the rule the server prints by', () => {
+    // read off the server's own source, so a style changing sides on one end fails here
+    const python = readFileSync(new URL('../../../../src/azimut/engine/notelook.py', import.meta.url), 'utf8');
+    const tuple = /^SOURCES_OFF_STYLES[^=]*= \(([^)]*)\)/m.exec(python)?.[1];
+    expect(tuple, 'SOURCES_OFF_STYLES in engine/notelook.py').toBeDefined();
+    const off = [...tuple.matchAll(/"([a-z-]+)"/g)].map((match) => match[1]);
+    expect(SOURCES_OFF_STYLES).toEqual(off);
+    for (const { id } of STYLES) expect(sourcesOn({ style: id }), id).toBe(!off.includes(id));
   });
 
   it('keeps no picture and no day in a template', () => {

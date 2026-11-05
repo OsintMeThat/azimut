@@ -193,6 +193,17 @@ NOTES: dict[str, tuple[str, str]] = {
 #: One deliberate change since: "everything" no longer prints its HTML comment,
 #: which every other Markdown reader hides and which could carry a private
 #: remark into a shared PDF. Nothing else on its pages moved.
+#:
+#: The sources pass (`engine/notesources.py`, the list of sources being off for
+#: plain) left these digests as they were, text and links alike when checked
+#: against the engine before it. Its deliberate change to plain documents is
+#: elsewhere, in credits the case could always have given and never printed: a
+#: picture made in the case (an Inspect frame, a collage, a proof, a video made
+#: from another) now credits what it was made from (`Source: x.com`, `+1` for
+#: more), Compare and Detect pictures say both imagery days, a Horizon picture
+#: credits its terrain, and an extension capture names its imagery and day where
+#: it said only the page's host. A link to an anchor in the note, which made the
+#: whole PDF fail, now prints as its words.
 GOLDEN: dict[str, str] = {
     "everything": "be182d20d8a234eb5387a18c6665fb7efcc823e631370499bdf1db8517b814df",
     "pictures": "4761ad1b81a16fa4587478bbb35cf073aede7c4c9abb5d435ac2669cf8ef878c",

@@ -12,9 +12,9 @@ which is ``plain``: the document every note printed as before looks existed.
 
 Nothing here bumps the case schema. An older Azimut opening a case that holds
 looks sees one more attr and one more setting it never reads, and prints every
-note plain. The face and the text size came later (`font`, `size`) and are
-written only once they are set, so a look that never used them reads the same
-to a reader that predates them.
+note plain. The face, the text size and the sources list came later (`font`,
+`size`, `sources`) and are written only once they are set, so a look that never
+used them reads the same to a reader that predates them.
 """
 
 from __future__ import annotations
@@ -51,9 +51,14 @@ Tlp = Literal["", "clear", "green", "amber", "amber-strict", "red"]
 Font = Literal["", "serif", "sans", "book", "modern"]
 #: The text a step smaller or larger than the style's; "" keeps the style's own.
 Size = Literal["", "small", "large"]
+#: The numbered list of sources at the end: "" keeps the style's own, else on or off.
+Sources = Literal["", "on", "off"]
 #: Keys a look writes only once they leave their default, so a look that never used
 #: them is stored, served and bundled exactly as an older Azimut wrote it.
-LATE_KEYS = ("font", "size")
+LATE_KEYS = ("font", "size", "sources")
+#: The styles that print no sources list unless the look asks for one: plain is the
+#: document notes always printed as. Read by the frontend's mirror of this rule.
+SOURCES_OFF_STYLES: tuple[str, ...] = ("plain",)
 
 #: FIRST TLP 2.0: the label as written, and its colour. Every label is set on
 #: black, in capitals, with no spaces, right-justified in the header and footer of
@@ -110,6 +115,7 @@ class NoteLook(BaseModel):
     numbered: StrictBool = False
     font: Font = ""
     size: Size = ""
+    sources: Sources = ""
 
     @model_serializer(mode="wrap")
     def _late_keys_only_when_set(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
@@ -129,6 +135,14 @@ class NoteLook(BaseModel):
     @property
     def is_default(self) -> bool:
         return self == DEFAULT
+
+    @property
+    def sources_on(self) -> bool:
+        """Whether the note ends with its sources list: as the look says, else as
+        its style does."""
+        if self.sources:
+            return self.sources == "on"
+        return self.style not in SOURCES_OFF_STYLES
 
     def accent_rgb(self) -> tuple[int, int, int] | None:
         if not self.accent:

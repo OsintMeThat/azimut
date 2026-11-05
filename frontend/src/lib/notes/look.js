@@ -1,7 +1,8 @@
 /**
  * How a note prints: its look (a style, a typeface and a text size, a page size,
- * an accent, a TLP marking, a cover, a table of contents, numbered headings), and
- * the two lines a report is made of, chapters and guidance.
+ * an accent, a TLP marking, a cover, a table of contents, numbered headings, a
+ * list of sources at the end), and the two lines a report is made of, chapters
+ * and guidance.
  *
  * A look is kept beside the note, never in its Markdown (`notes/{id}/look`), so
  * a note without one prints exactly as before. The server checks every look it
@@ -19,6 +20,7 @@ export const DEFAULT_LOOK = Object.freeze({
   cover: Object.freeze({ on: false, subtitle: '', image: '', date: '' }),
   toc: false,
   numbered: false,
+  sources: '',
 });
 
 /** Each style, and the typeface it sets its text in when none is picked (`engine/notes_style.py`). */
@@ -63,6 +65,16 @@ export const TLPS = [
   { id: 'red', label: 'RED', colour: '#ff2b2b' },
 ];
 
+/** The list of sources at the end: "" follows the style, on for every style but Plain. */
+export const SOURCES = [
+  { id: '', label: "Style's own" },
+  { id: 'on', label: 'On' },
+  { id: 'off', label: 'Off' },
+];
+
+/** The styles that print no list of sources unless it is turned on (`engine/notelook.py`). */
+export const SOURCES_OFF_STYLES = ['plain'];
+
 export const SUBTITLE_MAX = 200;
 
 const pick = (value, choices, fallback) => (choices.some((choice) => choice.id === value) ? value : fallback);
@@ -90,6 +102,7 @@ export function normaliseLook(look) {
     },
     toc: Boolean(given.toc),
     numbered: Boolean(given.numbered),
+    sources: pick(given.sources ?? '', SOURCES, ''),
   };
 }
 
@@ -111,6 +124,12 @@ export function isPlainLook(look) {
 
 export function styleLabel(style) {
   return STYLES.find((item) => item.id === style)?.label ?? 'Plain';
+}
+
+/** Whether a look ends on the list of sources: as it was set, or as its style has it. */
+export function sourcesOn(look) {
+  const whole = normaliseLook(look);
+  return whole.sources ? whole.sources === 'on' : !SOURCES_OFF_STYLES.includes(whole.style);
 }
 
 /** The typeface a look prints its text in: the one picked, or its style's own. */

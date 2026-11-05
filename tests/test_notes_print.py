@@ -279,10 +279,15 @@ def test_a_picture_the_case_knows_nothing_about_has_no_credit(tmp_path):
 
 def test_a_credit_is_one_line_cut_rather_than_wrapped(tmp_path):
     host = "a-very-long-host-name-that-never-ends-" * 4 + "example.org"
-    out = notes_pdf.render(picture_case(tmp_path, source_url=f"https://{host}/x"), title="T",
-                           text="[[media:m1|Frame]]{width=20%}\n", look=look(style="report"))
+    case = picture_case(tmp_path, source_url=f"https://{host}/x")
+    out = notes_pdf.render(case, title="T", text="[[media:m1|Frame]]{width=20%}\n",
+                           look=look(style="report", sources="off"))
     [credit] = [line for line in pdf_text(out.pdf).splitlines() if line.startswith("Source:")]
     assert credit.endswith("…")
+    # with the sources listed, its number is kept whole after the cut
+    listed = notes_pdf.render(case, title="T", text="[[media:m1|Frame]]{width=20%}\n", look=look(style="report"))
+    [credit] = [line for line in pdf_text(listed.pdf).splitlines() if line.startswith("Source:")]
+    assert credit.endswith("… [1]")
 
 
 # -- sources stay clickable --------------------------------------------------------
@@ -402,10 +407,10 @@ def test_many_empty_sections_are_counted_past_the_first_ten(tmp_path):
 def test_a_missing_picture_is_a_warning_pointing_at_its_line(tmp_path):
     case = FakeCase(tmp_path, {"gone": {"id": "gone", "type": "media", "label": "Gone", "attrs": {}}})
     out = notes_pdf.render(case, title="T", text="Intro.\n\n[[media:gone|Roof at dawn]]\n\n![x](https://e.org/x.png)\n")
-    assert dict(zip(out.warnings, out.warning_lines)) == {
-        'Picture "Roof at dawn" could not be printed: it is missing from the case.': 2,
-        "1 remote image left out: the export never fetches from the network.": 4,
-    }
+    assert list(zip(out.warnings, out.warning_lines, out.warning_kinds)) == [
+        ('Picture "Roof at dawn" is no longer in the case.', 2, "missing"),
+        ("1 remote image left out: the export never fetches from the network.", 4, "other"),
+    ]
 
 
 def test_the_preview_sends_each_warning_s_line_beside_it(client):

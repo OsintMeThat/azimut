@@ -160,6 +160,16 @@ describe('what the page warns about', () => {
     expect(target.querySelector('.pane-bar').textContent).toContain('2 warnings');
   });
 
+  it('marks a part no longer in the case apart from what is only advice', async () => {
+    answer.warnings = [
+      { text: 'Picture "Roof" is no longer in the case.', line: 3, kind: 'missing' },
+      { text: 'Picture "Quay" has no source.', line: 5, kind: 'unsourced' },
+    ];
+    await pane({});
+    const marks = [...target.querySelectorAll('ul[aria-label="Warnings"] .warning')].map((row) => row.dataset.kind);
+    expect(marks).toEqual(['missing', 'unsourced']);
+  });
+
   it('folds away from the bar, and comes back', async () => {
     answer.warnings = [{ text: 'A picture is missing', line: null }];
     await pane({});

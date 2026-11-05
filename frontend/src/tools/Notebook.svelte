@@ -13,6 +13,11 @@
    * and kept beside it, never in its Markdown; the Page pane shows the PDF it
    * makes as the note is typed. The home picks several notes at once, to export
    * them or to make a report that includes them as chapters.
+   *
+   * The export dialog opens at once and asks the server what the PDFs would warn
+   * about (`lib/notes/warnings.js`). What it finds is listed before anything is
+   * written, each with a way to the line it is about; a check that fails says
+   * nothing and never holds the export back.
    */
   import { onDestroy, untrack } from 'svelte';
   import { api } from '../lib/api.js';
@@ -29,6 +34,7 @@
   } from '../lib/notes/look.js';
   import { LOOK_HELP } from '../lib/notes/lookHelp.js';
   import { exportNotes, revealExports } from '../lib/notesExport.js';
+  import { checkNotes } from '../lib/notes/warnings.js';
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
   import { assignFolder, renameEntity } from '../lib/filing.js';
   import { openEntity } from '../lib/navigate.js';
@@ -72,6 +78,9 @@
   let exportBusy = $state(false);
   let exportDir = $state('');
   let exportPicker = $state(false);
+  // what the export would warn about: null, { checking: true }, or { found: [...] } by note
+  let exportCheck = $state(null);
+  let checkController = null;
   // the notes picked on the home, in the order they were picked
   let selected = $state([]);
   // the PDF beside the note, as the analyst last left it
@@ -479,12 +488,14 @@
   async function runExport(noteIds) {
     if (!caseId || exportBusy) return;
     const id = caseId;
+    // pressed before the check answered: the export does not wait for it
+    if (exportCheck?.checking) stopCheck();
     exportBusy = true;
     try {
       // the PDF is drawn from the file, so what is still waiting is written first
       if (doc) await flush(doc);
       const result = await exportNotes(id, noteIds);
-      exportOpen = false;
+      closeExport();
       selected = [];
       const count = result.written.length;
       toast(`${count} PDF${count > 1 ? 's' : ''} written to ${destinationLabel(result.path)}`, 'ok', 5200, {
@@ -508,6 +519,42 @@
     exportIds = noteIds.map((id) => id ?? CASE_NOTES);
     exportOpen = true;
     readExportDestination();
+    void checkExport(exportIds);
+  }
+
+  /** Ask what the PDFs would warn about, from the notes as saved; a failure finds nothing. */
+  async function checkExport(noteIds) {
+    stopCheck();
+    const id = caseId;
+    const mine = new AbortController();
+    checkController = mine;
+    exportCheck = { checking: true };
+    try {
+      if (doc) await flush(doc);
+      const found = await checkNotes(id, noteIds, { signal: mine.signal });
+      if (checkController === mine) exportCheck = { found };
+    } catch {
+      if (checkController === mine) exportCheck = null;
+    } finally {
+      if (checkController === mine) checkController = null;
+    }
+  }
+
+  function stopCheck() {
+    checkController?.abort();
+    checkController = null;
+    exportCheck = null;
+  }
+
+  function closeExport() {
+    stopCheck();
+    exportOpen = false;
+  }
+
+  /** Leave the export for the line a warning is about, in its note. */
+  function goToWarning(noteId, line) {
+    closeExport();
+    show(noteId, { line });
   }
 
   // -- a template from Settings ------------------------------------------------------
@@ -711,7 +758,8 @@
 
   {#if exportOpen}
     {@const several = exportIds.length > 1}
-    <Modal title={several ? 'Export notes as PDF' : 'Export note as PDF'} onclose={() => (exportOpen = false)} width="560px">
+    {@const found = exportCheck?.found ?? []}
+    <Modal title={several ? 'Export notes as PDF' : 'Export note as PDF'} onclose={closeExport} width="560px">
       <div class="export-dest">
         <span class="dest-label">Destination</span>
         <span class="dest-path mono" title={exportDir || "The case's own exports folder"}>{exportDir || "the case's exports folder"}</span>
@@ -721,11 +769,34 @@
         {several ? `${exportIds.length} PDFs will be written, one per note.` : 'One PDF will be written.'}
         {#if exportDir}Files already there are kept.{:else}An existing file with the same name is replaced.{/if}
       </p>
+      {#if exportCheck?.checking}
+        <p class="checking" role="status">Checking…</p>
+      {:else if found.length}
+        <section class="before" aria-labelledby="export-before">
+          <h4 id="export-before" class="before-head"><Icon name="alert" size={13} /> Before you export</h4>
+          <div class="before-notes">
+            {#each found as item, at (item.note)}
+              {#if several}<h5 class="before-note">{item.title}</h5>{/if}
+              <ul class="before-list" aria-label={several ? item.title : 'Warnings'}>
+                {#each item.warnings as warning, index (index)}
+                  <li class="before-item" data-kind={warning.kind}>
+                    <span class="before-words" id={`export-warning-${at}-${index}`}>{warning.text}</span>
+                    {#if Number.isInteger(warning.line)}
+                      <button type="button" class="btn btn-ghost btn-xs" title="Open the note at this line"
+                        aria-describedby={`export-warning-${at}-${index}`} onclick={() => goToWarning(item.note, warning.line)}>Go to</button>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            {/each}
+          </div>
+        </section>
+      {/if}
       <div class="modal-row">
         <div style="flex:1"></div>
-        <button class="btn" onclick={() => (exportOpen = false)}>Cancel</button>
+        <button class="btn" onclick={closeExport}>Cancel</button>
         <button class="btn btn-primary" disabled={exportBusy} onclick={() => runExport(exportIds)}>
-          {exportBusy ? 'Exporting…' : several ? `Export ${exportIds.length} PDFs` : 'Export PDF'}</button>
+          {exportBusy ? 'Exporting…' : found.length ? 'Export anyway' : several ? `Export ${exportIds.length} PDFs` : 'Export PDF'}</button>
       </div>
     </Modal>
   {/if}
@@ -781,6 +852,22 @@
   .dest-label { color: var(--text-3); }
   .dest-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .export-note { color: var(--text-3); font-size: var(--fs-xs); margin: 6px 0 0; }
+  .checking { color: var(--text-3); font-size: var(--fs-xs); margin: 10px 0 0; }
+  .before {
+    margin-top: 12px; border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border)); border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--warn) 7%, var(--bg-1)); font-size: var(--fs-sm);
+  }
+  .before-head {
+    display: flex; align-items: center; gap: 6px; margin: 0; padding: 7px 10px 5px; color: var(--warn); font-size: var(--fs-sm); font-weight: 600;
+  }
+  .before-notes { max-height: 260px; overflow: auto; padding: 0 0 5px; }
+  .before-note { margin: 6px 10px 1px; color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; }
+  .before-list { list-style: none; margin: 0; padding: 0; }
+  .before-item { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 1px 6px 1px 10px; color: var(--text-1); }
+  .before-item::before { content: ''; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--warn); }
+  .before-item[data-kind='missing']::before { background: var(--danger); }
+  .before-words { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .before-item .btn { flex: none; }
   .modal-label { display: block; color: var(--text-2); font-size: var(--fs-sm); margin-bottom: 4px; }
   .modal-row { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
   .mono { font-family: var(--font-mono); }

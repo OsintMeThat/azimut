@@ -30,7 +30,7 @@ describe('asking the server for a page', () => {
       { note: 'n1', title: 'Lead', text: '# Lead', look: { style: 'report' }, diagrams: {} }, { signal: undefined });
     expect(answer.pages).toEqual([0, 14, 40]);
     expect(answer.diagrams).toEqual([{ key: 'ab12', source: 'flowchart LR' }]);
-    expect(answer.warnings).toEqual([{ text: 'A picture is missing', line: null }]);
+    expect(answer.warnings).toEqual([{ text: 'A picture is missing', line: null, kind: 'other' }]);
   });
 
   it('gives each warning the line the server says it is about', () => {
@@ -39,16 +39,27 @@ describe('asking the server for a page', () => {
       'X-Note-Warning-Lines': '[12, null]',
     });
     expect(noteWarnings(headers)).toEqual([
-      { text: 'Section "Method" is empty.', line: 12 },
-      { text: 'A picture is missing', line: null },
+      { text: 'Section "Method" is empty.', line: 12, kind: 'other' },
+      { text: 'A picture is missing', line: null, kind: 'other' },
     ]);
   });
 
-  it('gives no warning a line when the two lists do not pair up', () => {
-    const headers = new Headers({ 'X-Note-Warnings': '["One", "Two"]', 'X-Note-Warning-Lines': '[3]' });
-    expect(noteWarnings(headers)).toEqual([{ text: 'One', line: null }, { text: 'Two', line: null }]);
-    const odd = new Headers({ 'X-Note-Warnings': '["One"]', 'X-Note-Warning-Lines': '[-1]' });
-    expect(noteWarnings(odd)).toEqual([{ text: 'One', line: null }]);
+  it('gives each warning its kind, and `other` for one it does not know', () => {
+    const headers = new Headers({
+      'X-Note-Warnings': '["Picture \\"Roof\\" is no longer in the case.", "Picture \\"Roof\\" has no source.", "3 tasks are still open.", "Odd"]',
+      'X-Note-Warning-Lines': '[4, 4, 9, null]',
+      'X-Note-Warning-Kinds': '["missing", "unsourced", "open-task", "shiny"]',
+    });
+    expect(noteWarnings(headers).map(({ kind, line }) => [kind, line])).toEqual([
+      ['missing', 4], ['unsourced', 4], ['open-task', 9], ['other', null],
+    ]);
+  });
+
+  it('gives no warning a line, or a kind, when the lists do not pair up', () => {
+    const headers = new Headers({ 'X-Note-Warnings': '["One", "Two"]', 'X-Note-Warning-Lines': '[3]', 'X-Note-Warning-Kinds': '["missing"]' });
+    expect(noteWarnings(headers)).toEqual([{ text: 'One', line: null, kind: 'other' }, { text: 'Two', line: null, kind: 'other' }]);
+    const odd = new Headers({ 'X-Note-Warnings': '["One"]', 'X-Note-Warning-Lines': '[-1]', 'X-Note-Warning-Kinds': 'not json' });
+    expect(noteWarnings(odd)).toEqual([{ text: 'One', line: null, kind: 'other' }]);
   });
 
   it('posts a template to the route that needs no case, without a note', async () => {

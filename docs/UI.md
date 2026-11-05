@@ -5682,7 +5682,11 @@ a ⋯ with *Keep as template* and *Delete* (*Clear the case notes* for the case'
 PDF export writes one server-rendered PDF per note without a print dialog, in the
 note's look, local images and browser-drawn diagrams with it, remote images left out,
 homonyms under stable suffixes, into the shared notes destination (the case's
-`exports/` by default).
+`exports/` by default). The export dialog first asks what the PDFs would warn about
+(`POST /notes/pdf/check`, rendered in memory, nothing written) and says *Checking…*;
+what it finds is listed under *Before you export*, by note when several are exported,
+each with *Go to* when it names a line, and the button reads *Export anyway*. A check
+that fails says nothing and never holds the export back.
 
 **How it prints.** **Look** sets the note's style, kept beside the note (the note
 record's `look`, `notes.case_look` for the case notes) and never in its Markdown:
@@ -5704,6 +5708,8 @@ Its **Text** part sets the typeface, each card drawn in its face: the style's ow
 Literata (a book face for long write-ups) or IBM Plex Sans (a clean face for briefs),
 and the size, Smaller, Normal or Larger, which headings, tables and captions follow.
 A letter a face lacks prints in the Noto face of its script. Templates carry both.
+Its **Sources** row, *List sources at the end*, is on for Report, Brief and Journal and
+off for Plain until set; templates carry it too.
 
 The PDF keeps what a reader needs to check the work. A chip naming a record with a
 web address (a bookmark's page, an account's profile, a file's source; an archived
@@ -5712,14 +5718,32 @@ decimal coordinates open OpenStreetMap at that point. Photo metadata (EXIF, GPS,
 XMP, IPTC) is never put in the PDF: a JPEG goes in without those blocks and a photo
 turned by its EXIF is drawn upright.
 
+**Sources.** Where an item comes from is read in one place (`engine/notesources.py`)
+from what the case recorded, nothing fetched: the credit under a picture, a chip's
+link and the list of sources all come from it. A picture made in the case (an Inspect
+frame, a collage, a proof, a Compare or Detect picture) credits what it was made from,
+following its `derived-from` chain, with *+N* when it has several origins. With the
+list on, the PDF ends with **Sources**, in the contents and the bookmarks and on a page
+of its own in Report: every picture and video it shows (a file is evidence even with no
+address: its name, the day it was filed, its SHA-256), every cited record that has an
+address, an archive or an author, and every web link written in the text, each once in
+order of first citation. An entry says what the item is, its kind and site, who posted
+it, the day of its content and the day it was collected, its address and archived copy
+in full, its SHA-256 and *from [k]* for what it was made from. A chip, a credit and a
+written link carry a small `[n]` that jumps to their entry. A place, a person or an
+event with no address is not a source; generated links (coordinates) are not listed;
+a note citing nothing prints no list.
+
 **Write | Page** opens the note's pages beside it: the real PDF the server would write
 (`POST /notes/preview`, nothing written to disk), drawn with pdf.js loaded only
 there, redrawn 900 ms after typing stops with the old pages kept until the new ones
 are ready. Diagrams missing from it are drawn in the browser and asked for once
 more. Pressing a page scrolls the note to where it starts. The choice is kept for the
 browser. What the PDF warns about is listed under the pane's bar, its count folding
-the list: an empty section, a missing picture, a script no face covers. One that names
-a line goes there when pressed. A template's pages give no such warnings, since a
+the list: an empty section; a picture, video, chapter or record no longer in the case
+(marked red); a picture with no source while sources are listed; tasks still open,
+outside Plain; a link a reader cannot open (`file:`, localhost, a private address); a
+script no face covers. One that names a line goes there when pressed. A template's pages give no such warnings, since a
 template is guidance by design.
 
 **Pictures and pages.** Hovering a picture, in the note or on its page in the Page

@@ -14,8 +14,9 @@
    * keeps it there. Both hand `onresize(picture, { width } | { align } | { caption })`
    * up, which rewrites its line.
    *
-   * What the server warns about is listed under the bar; a warning that names its
-   * line takes the note there when pressed.
+   * What the server warns about is listed under the bar, a part no longer in the
+   * case marked apart from the rest; a warning that names its line takes the note
+   * there when pressed.
    */
   import { onDestroy, untrack } from 'svelte';
   import { createPreview, pageLine } from '../../lib/notes/preview.js';
@@ -122,11 +123,11 @@
       {#each warnings as warning, index (index)}
         <li>
           {#if Number.isInteger(warning.line)}
-            <button type="button" class="warning go" title="Go to it in the note" onclick={() => onjump(warning.line)}>
+            <button type="button" class="warning go" data-kind={warning.kind} title="Go to it in the note" onclick={() => onjump(warning.line)}>
               <span class="warning-words">{warning.text}</span><Icon name="arrowRight" size={12} />
             </button>
           {:else}
-            <span class="warning"><span class="warning-words">{warning.text}</span></span>
+            <span class="warning" data-kind={warning.kind}><span class="warning-words">{warning.text}</span></span>
           {/if}
         </li>
       {/each}
@@ -205,6 +206,7 @@
     font: inherit; text-align: left;
   }
   .warning::before { content: ''; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--warn); }
+  .warning[data-kind='missing']::before { background: var(--danger); }
   .warning.go { cursor: pointer; }
   .warning.go :global(svg) { flex: none; color: var(--text-3); }
   .warning.go:hover, .warning.go:focus-visible { background: color-mix(in srgb, var(--warn) 14%, transparent); }

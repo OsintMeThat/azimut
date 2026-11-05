@@ -10,6 +10,7 @@
  */
 import { api } from '../api.js';
 import { drawDiagrams } from '../notesExport.js';
+import { warningKind } from './warnings.js';
 
 export const PREVIEW_DELAY = 900;
 const KEPT_DIAGRAMS = 30;
@@ -61,17 +62,20 @@ export async function fetchPreview({ caseId = '', note = 'case', title = '', tex
 }
 
 /**
- * What the page warns about, each with the 0-based line it is about, or null.
- * `X-Note-Warning-Lines` runs beside `X-Note-Warnings`; when the two do not pair
- * up, no warning is given a line rather than the wrong one.
+ * What the page warns about, each with the 0-based line it is about, or null, and
+ * its kind (`lib/notes/warnings.js`). `X-Note-Warning-Lines` and
+ * `X-Note-Warning-Kinds` run beside `X-Note-Warnings`; a list that does not pair
+ * up gives no warning a line, or a kind, rather than the wrong one.
  */
 export function noteWarnings(headers) {
   const texts = headerList(headers, 'X-Note-Warnings').map(String);
   const lines = headerList(headers, 'X-Note-Warning-Lines');
+  const kinds = headerList(headers, 'X-Note-Warning-Kinds');
   const paired = lines.length === texts.length;
+  const kinded = kinds.length === texts.length;
   return texts.map((text, index) => {
     const line = paired ? lines[index] : null;
-    return { text, line: Number.isInteger(line) && line >= 0 ? line : null };
+    return { text, line: Number.isInteger(line) && line >= 0 ? line : null, kind: warningKind(kinded ? kinds[index] : null) };
   });
 }
 

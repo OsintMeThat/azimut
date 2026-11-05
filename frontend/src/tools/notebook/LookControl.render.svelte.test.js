@@ -179,6 +179,42 @@ describe('the Look panel', () => {
     expect(document.activeElement?.textContent).toContain('Journal');
   });
 
+  it('shows the list of sources as the style has it until it is set, then writes on or off', () => {
+    const sources = () => panel().querySelector('input[role="switch"]');
+    openPanel();
+    expect(sources().closest('.row').textContent).toContain('Sources');
+    expect(sources().closest('label').textContent).toContain('List sources at the end');
+    // Plain prints none of its own, a report lists them
+    expect(sources().checked).toBe(false);
+    props.look = normaliseLook({ style: 'report' });
+    flushSync();
+    expect(sources().checked).toBe(true);
+    expect(changes).toHaveLength(0);
+    sources().click();
+    flushSync();
+    expect(changes.at(-1)).toMatchObject({ style: 'report', sources: 'off' });
+    expect(sources().checked).toBe(false);
+    sources().click();
+    flushSync();
+    expect(changes.at(-1).sources).toBe('on');
+    // once set, it stays as set whatever the style
+    [...panel().querySelectorAll('.style-card')].find((card) => card.textContent.includes('Plain')).click();
+    flushSync();
+    expect(changes.at(-1)).toMatchObject({ style: 'plain', sources: 'on' });
+    expect(sources().checked).toBe(true);
+  });
+
+  it('offers a template the list of sources too', () => {
+    props.template = true;
+    props.look = normaliseLook({ style: 'brief' });
+    openPanel();
+    const sources = panel().querySelector('input[role="switch"]');
+    expect(sources.checked).toBe(true);
+    sources.click();
+    flushSync();
+    expect(changes.at(-1)).toMatchObject({ style: 'brief', sources: 'off' });
+  });
+
   it('offers a template no picture and no day', () => {
     props.template = true;
     props.look = normaliseLook({ cover: { on: true } });

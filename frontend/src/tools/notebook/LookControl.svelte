@@ -1,7 +1,8 @@
 <script>
   /**
    * How a note prints, set from the editor's header: its style, typeface and
-   * text size, page size, accent, marking, cover, contents and numbering. Each
+   * text size, page size, accent, marking, cover, contents, numbering and the
+   * list of sources at the end, shown as the style has it until it is set. Each
    * change is handed up at once (`onchange`), which saves it beside the note and
    * draws the Page pane again. A template's look keeps no picture and no day of a
    * case.
@@ -13,7 +14,7 @@
   import { tick, untrack } from 'svelte';
   import { LOOK_HELP } from '../../lib/notes/lookHelp.js';
   import {
-    FONTS, PAGES, SIZES, STYLES, SUBTITLE_MAX, TLPS, lookFont, normaliseLook, styleLabel,
+    FONTS, PAGES, SIZES, STYLES, SUBTITLE_MAX, TLPS, lookFont, normaliseLook, sourcesOn, styleLabel,
   } from '../../lib/notes/look.js';
   import { faceFamily, loadNoteFont, noteFonts } from '../../lib/notes/noteFonts.js';
   import { recentColours } from '../../lib/recentColours.svelte.js';
@@ -238,6 +239,15 @@
         <input type="checkbox" checked={whole.numbered} title={LOOK_HELP.numbered} onchange={(event) => set({ numbered: event.currentTarget.checked })} />
         Numbered headings
       </label>
+      <div class="row">
+        <span class="key" title={LOOK_HELP.sources}>Sources</span>
+        <label class="switch" title={LOOK_HELP.sources}>
+          <input type="checkbox" role="switch" checked={sourcesOn(whole)} title={LOOK_HELP.sources}
+            onchange={(event) => set({ sources: event.currentTarget.checked ? 'on' : 'off' })} />
+          <span class="track" aria-hidden="true"><span class="knob"></span></span>
+          List sources at the end
+        </label>
+      </div>
     </div>
   </FloatingMenu>
 {/if}
@@ -303,6 +313,20 @@
   .sep { height: 1px; background: var(--border); margin: 2px 0; }
   .check { display: flex; align-items: center; gap: 8px; color: var(--text-1); cursor: pointer; }
   .check input { accent-color: var(--accent); margin: 0; }
+  .switch { position: relative; display: flex; align-items: center; gap: 8px; color: var(--text-1); cursor: pointer; }
+  /* the box lies over the track, unseen, so the track is what is pressed */
+  .switch input { position: absolute; left: 0; width: 26px; height: 15px; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
+  .track {
+    position: relative; flex: none; width: 26px; height: 15px; border-radius: 999px; background: var(--bg-3);
+    box-shadow: inset 0 0 0 1px var(--border-strong); transition: background .15s;
+  }
+  .knob {
+    position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--text-3);
+    transition: transform .15s var(--ease);
+  }
+  .switch input:checked + .track { background: var(--accent); box-shadow: none; }
+  .switch input:checked + .track .knob { transform: translateX(11px); background: var(--accent-text); }
+  .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
   .cover { display: flex; flex-direction: column; gap: 7px; margin: -2px 0 2px 22px; }
   .field { display: flex; flex-direction: column; gap: 3px; color: var(--text-3); font-size: var(--fs-xs); }
   .field .input { font-size: var(--fs-sm); }

@@ -41,17 +41,27 @@ Two things a server cannot do on its own:
 **Sources stay sources.** A PDF is read away from the case, so what the case knows
 about where something came from is printed rather than kept behind the app: a
 reference to a record with a web address links to it, a picture says under its
-caption where it came from, and decimal coordinates link to the map.
+caption where it came from, and decimal coordinates link to the map. All of it is
+read through `engine/notesources.py`, the one place that says where an item comes
+from. A look with its sources list on (`sources`, on by default in every style but
+plain) ends with a numbered **Sources** section, each source once, and the body
+carries a small `[n]` linked to its entry after every citation.
+
+**The check before export.** Every warning has a kind (`WARNING_KINDS`), so the
+Page pane and the export's check can say what is wrong and where: a picture or a
+record no longer in the case, a picture without a source, a task left open, a link
+a reader cannot open, a section left empty.
 """
 
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import math
 import re
 import threading
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
@@ -66,11 +76,11 @@ from markdown_it.token import Token
 from PIL import Image as PILImage
 from PIL import ImageOps, UnidentifiedImageError
 
-from . import entities, notes_style, pdffonts, thumbnails, timeline
+from . import notes_style, notesources, pdffonts, thumbnails
 from .notelook import DEFAULT as DEFAULT_LOOK
 from .notelook import NoteLook
 from .notes_style import PLAIN, WHITE, NotePage, Theme, mix
-from .proposals import URL_ATTRS
+from .notesources import Annex, Entry, Source
 from .notetext import (
     CALLOUT,
     ENTITY_REF,
@@ -182,6 +192,44 @@ CAPTION_MIN_WIDTH = 90.0
 CREDIT_SIZE = 7.2
 CREDIT_LEADING = 3.6
 
+#: The list of sources at the end, its entries' type sizes and leadings (points and
+#: millimetres, before the look's text size), and the room its numbers hang in.
+SOURCES_HEADING = "Sources"
+ENTRY_SIZE = 8.2
+ENTRY_LEADING = 4.1
+ENTRY_SMALL = 7.4
+ENTRY_SMALL_LEADING = 3.6
+ENTRY_GAP = 2.2
+#: What a long address may be broken after, so a wrapped one still reads as one.
+ADDRESS_BREAKS = "/?&=#-_.~:+,;"
+
+#: What a warning is about, for the Page pane and the check before export: a
+#: picture, video, chapter or record no longer in the case; a picture with no
+#: source while the sources are listed; tasks left open in a styled document; a
+#: link a reader cannot open; a section left empty; anything else.
+MISSING = "missing"
+UNSOURCED = "unsourced"
+OPEN_TASK = "open-task"
+LOCAL_LINK = "local-link"
+EMPTY_SECTION = "empty-section"
+OTHER = "other"
+WARNING_KINDS = (MISSING, UNSOURCED, OPEN_TASK, LOCAL_LINK, EMPTY_SECTION, OTHER)
+#: How many links a reader cannot open are named one by one before the rest are counted.
+MAX_LOCAL_LINKS = 10
+#: What the aside says where an included note is gone: the warning is read off it.
+CHAPTER_GONE = "The note included here is no longer in the case."
+
+#: An address written as it is in prose (`https://…`), which the preview links as
+#: GitHub's Markdown does. Its closing punctuation is not part of it (`_bare_urls`).
+BARE_URL = re.compile(r"https?://[^\s<>\"'`]+", re.I)
+#: A `file:` address, written bare or as a link's target, which the parser leaves as text.
+FILE_URL = re.compile(r"(?<![\w/])file:[^\s<>\"'`)\]]+", re.I)
+#: A reference to a record, as the case syntax becomes a link.
+ENTITY_HREF = re.compile(r"^azimut://entity/([A-Za-z0-9_-]+)$")
+#: Hosts a reader somewhere else cannot reach.
+LOCAL_NAMES = ("localhost", "localhost.localdomain")
+LOCAL_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home.arpa")
+
 #: Finds the note a chapter prints: its title and Markdown, or None when it is gone.
 Resolve = Callable[[str], "tuple[str, str] | None"]
 
@@ -211,6 +259,8 @@ class Rendered:
     warnings: list[str] = field(default_factory=list)
     #: For each warning, the line of the note it is about (0-based), or None.
     warning_lines: list[int | None] = field(default_factory=list)
+    #: For each warning, what it is about: one of `WARNING_KINDS`.
+    warning_kinds: list[str] = field(default_factory=list)
     #: For each page, the line of the note it starts at (best effort). A page
     #: inside a chapter starts at the chapter's include line.
     pages: list[int] = field(default_factory=list)
@@ -260,15 +310,8 @@ class PagePicture:
         return out
 
 
-@dataclass(frozen=True)
-class _Credit:
-    """The small line under a picture saying where it came from: what kind of
-    source (`Source`, `Imagery`, `Watch`), the place, and the address it links to
-    ("" for none)."""
-
-    kind: str
-    value: str
-    link: str = ""
+#: The credit line under a picture, as the one reading of sources words it.
+_Credit = notesources.Credit
 
 
 @dataclass
@@ -278,16 +321,19 @@ class _Picture:
     path: Path
     natural: tuple[int, int]
     credit: _Credit | None = None
+    source: Source | None = None
 
 
 @dataclass
 class _Poster:
     """A video in a note: the still its thumbnail holds, when there is one, and
-    the address it can be watched at, when its source is on the web."""
+    the address it can be watched at, when it or what it was made from is on the
+    web."""
 
     path: Path | None
     natural: tuple[int, int]
     url: str
+    source: Source | None = None
 
     @property
     def credit(self) -> _Credit | None:
@@ -306,7 +352,11 @@ class ImageOptions(NamedTuple):
 
 @dataclass
 class Run:
-    """A stretch of text drawn in one face, colour and link."""
+    """A stretch of text drawn in one face, colour and link.
+
+    ``entry`` links it to that entry of the sources list instead of the web, and
+    ``raised`` sets it small and high: the `[3]` after a citation.
+    """
 
     text: str
     bold: bool = False
@@ -314,6 +364,8 @@ class Run:
     mono: bool = False
     color: tuple[int, int, int] = INK
     link: str = ""
+    entry: int = 0
+    raised: bool = False
 
 
 def diagram_key(source: str) -> str:
@@ -366,14 +418,19 @@ def render(
     theme = notes_style.theme_for(look)
     day = date.fromisoformat(look.cover.date) if look.cover.date else (created or datetime.now()).date()
     pieces = expand(title, text, resolve=resolve, note_id=note_id)
+    blocks = {id(piece): _alignment_blocks(piece.text) for piece in pieces if piece.kind == "text"}
+    # what the document cites is read before a page is laid out: the sources list
+    # numbers every citation before the first is drawn, and its words need their fonts
+    cited = _Cited(case, look=look, styled=not theme.plain)
+    cited.collect(pieces, blocks)
     document = NotePage(title=title, theme=theme, look=look, day=day)
     if created is not None:
         document.set_creation_date(created)
-    words = "\n".join([title, look.cover.subtitle, *(piece.text for piece in pieces)])
+    words = "\n".join([title, look.cover.subtitle, *(piece.text for piece in pieces), *cited.words()])
     faces = pdffonts.install(document, words, body=theme.body_family, font=look.font)
-    builder = _Builder(document, case, diagrams or {}, look=look, faces=faces)
+    builder = _Builder(document, case, diagrams or {}, look=look, faces=faces, cited=cited)
     try:
-        builder.build(title, pieces)
+        builder.build(title, pieces, blocks)
         output = bytes(document.output())
     except pdffonts.FontError:
         raise
@@ -384,6 +441,7 @@ def render(
         pdf=output,
         warnings=builder.warnings,
         warning_lines=builder.warning_lines,
+        warning_kinds=builder.warning_kinds,
         pages=builder.pages,
         diagrams=list(builder.missing.items()),
         pictures=builder.pictures,
@@ -486,7 +544,7 @@ def _expand_into(
             continue
         found = resolve(target)
         if found is None:
-            pieces.append(Piece("aside", "The note included here is no longer in the case.", depth, where, True))
+            pieces.append(Piece("aside", CHAPTER_GONE, depth, where, True))
             continue
         chapter_title, chapter_text = found
         budget[0] -= 1
@@ -553,6 +611,82 @@ def _image_options(href: str) -> ImageOptions:
 def _parser() -> MarkdownIt:
     """CommonMark plus the two GFM rules the preview enables (marked's `gfm`)."""
     return MarkdownIt("commonmark").enable(["table", "strikethrough"])
+
+
+def _parse(source: str) -> list[Token]:
+    return _parser().parse(_case_references(source)) if source.strip() else []
+
+
+def _alignment_blocks(text: str) -> list["_Block"]:
+    """Parse a stretch of note, honouring the `::: center` blocks around parts of it.
+
+    Each block is parsed on its own so its alignment can be pushed into everything
+    it produced, which is how the preview reads it too.
+    """
+    blocks: list[_Block] = []
+    position = 0
+    for match in ALIGNMENT_BLOCK.finditer(text):
+        blocks.append(_Block(Align.L, _parse(text[position : match.start()]), text.count("\n", 0, position)))
+        blocks.append(_Block(ALIGNMENTS[match.group(1)], _parse(match.group(2)),
+                             text.count("\n", 0, match.start(2))))
+        position = match.end()
+    blocks.append(_Block(Align.L, _parse(text[position:]), text.count("\n", 0, position)))
+    return blocks
+
+
+def _file_prefixes(case: "Case | None") -> tuple[str, ...]:
+    """How the Notebook writes a case file's address: as a browser does
+    (`lib/fileUrl.js`), so a case called "Port strike" is `/files/Port%20strike/…`."""
+    if case is None:
+        return ()
+    return tuple(dict.fromkeys((f"/files/{_quote(case.id)}/", f"/files/{case.id}/")))
+
+
+def _bare_urls(text: str) -> list[tuple[int, int, str]]:
+    """The web addresses written bare in a stretch of prose, as (start, end, address),
+    each without the punctuation that closes its sentence or its bracket."""
+    found: list[tuple[int, int, str]] = []
+    for match in BARE_URL.finditer(text):
+        address = match.group(0)
+        while address:
+            if address[-1] in ".,:;!?*_~'\"":
+                address = address[:-1]
+            elif address[-1] == ")" and address.count("(") < address.count(")"):
+                address = address[:-1]
+            else:
+                break
+        if notesources.web(address):
+            found.append((match.start(), match.start() + len(address), address))
+    return found
+
+
+def _local(href: str, prefixes: tuple[str, ...]) -> bool:
+    """Whether a written link points somewhere a reader of the PDF cannot open: this
+    machine, a private network, or a path that is no case file. A case file is a
+    citation of that file, and a mail or phone link opens anywhere."""
+    href = href.strip()
+    if not href or any(href.startswith(prefix) for prefix in prefixes):
+        return False
+    try:
+        parts = urlsplit(href)
+        name = (parts.hostname or "").lower().rstrip(".")
+    except ValueError:
+        return True
+    scheme = parts.scheme.lower()
+    if scheme in ("http", "https"):
+        if not name:
+            return True
+        if name in LOCAL_NAMES or name.endswith(LOCAL_SUFFIXES) or "." not in name and ":" not in name:
+            return True
+        try:
+            address = ipaddress.ip_address(name.strip("[]"))
+        except ValueError:
+            return False
+        return not address.is_global
+    if scheme == "file":
+        return True
+    # a relative path or an anchor in the note: nothing a reader holds
+    return not scheme and not href.startswith("//")
 
 
 def _attr(token: Token, name: str) -> str:
@@ -718,6 +852,210 @@ class _Entry:
     page: int
 
 
+class _Cited:
+    """What a document cites, read once before it is drawn.
+
+    The sources list numbers every citation before the first one is drawn, and its
+    words need their fonts before the first page is laid out. The checks before
+    export read the same pass, each with the note's line it is about: a record or an
+    included note no longer in the case, a picture nothing says the source of (while
+    the sources are listed), a link a reader cannot open, and the tasks a styled
+    document still has open. The walk asks this pass, never a reading of its own,
+    which item a citation is, so the numbers and the list cannot disagree.
+
+    Without a case (a template's preview) nothing of a case is read and nothing is
+    warned about; a web link is still a source.
+    """
+
+    def __init__(self, case: "Case | None", *, look: NoteLook, styled: bool = False) -> None:
+        self.case = case
+        self.look = look
+        self.reader = notesources.Reader(case)
+        self.on = look.sources_on
+        self.styled = styled
+        self.annex: Annex | None = None
+        #: (message, line, kind), in the order they were found.
+        self.warnings: list[tuple[str, int | None, str]] = []
+        self._prefixes = _file_prefixes(case)
+        self._cited: list[Source] = []
+        self._warned: set[str] = set()
+        self._local: dict[str, int | None] = {}
+        self._tasks: list[int] = []
+        self._images: dict[str, Source | None] = {}
+
+    # -- what a citation is, for the pass and the walk alike -------------------
+
+    def number(self, source: Source | None) -> int:
+        """The entry a citation of ``source`` links to, or 0 with no list or no entry."""
+        return self.annex.number(source) if self.annex is not None else 0
+
+    def link_source(self, href: str, words: str = "") -> Source | None:
+        """What a written link cites: a record that says where it comes from, a web
+        page a reader can open, or a file of the case; None for anything else."""
+        entity = ENTITY_HREF.match(href)
+        if entity:
+            source = self.reader.entity(entity.group(1)) if self.case is not None else None
+            return source if source is not None and source.citable else None
+        if notesources.web(href):
+            return None if _local(href, ()) else self.reader.link(href, words)
+        relative = self._case_file(href)
+        return self.reader.file(relative) if relative and self._exists(relative) else None
+
+    def image_source(self, src: str) -> Source | None:
+        """The item of the case a picture shows, or None when it shows none (or one
+        no longer there, which the walk says where the picture was)."""
+        if src in self._images:
+            return self._images[src]
+        found: Source | None = None
+        written = _image_options(src).source
+        parts = urlsplit(written)
+        if self.case is not None and parts.scheme == "azimut" and parts.netloc == "media":
+            found = self.reader.entity(unquote(parts.path.lstrip("/")))
+            found = found if found is not None and found.path else None
+        elif self.case is not None:
+            relative = self._case_file(written)
+            found = self.reader.file(relative) if relative and self._exists(relative) else None
+        self._images[src] = found
+        return found
+
+    def _case_file(self, href: str) -> str:
+        prefix = next((one for one in self._prefixes if href.startswith(one)), "")
+        return unquote(href[len(prefix):]) if prefix else ""
+
+    def _exists(self, relative: str) -> bool:
+        if self.case is None:
+            return False
+        try:
+            return bool(self.case.resolve_inside(relative).is_file())
+        except Exception:
+            return False
+
+    # -- the pass ---------------------------------------------------------------
+
+    def collect(self, pieces: list[Piece], blocks: dict[int, list["_Block"]]) -> None:
+        """Read every citation in document order, chapters included, then number them."""
+        cover = self.look.cover
+        if cover.on and cover.image and self.case is not None:
+            shown = self.reader.entity(cover.image)
+            if shown is not None and shown.path and shown.noun != "Video":
+                self._cited.append(shown)
+        for piece in pieces:
+            if piece.kind == "aside" and piece.text == CHAPTER_GONE and self.case is not None:
+                self._warn("An included note is no longer in the case.", piece.line, MISSING)
+            if piece.kind != "text":
+                continue
+            for position, block in enumerate(blocks[id(piece)]):
+                tokens = block.tokens
+                start = _skip_repeated_title(tokens, piece.opens) if position == 0 and piece.opens is not None else 0
+                base = piece.line + (0 if piece.fixed else block.line)
+                line = base
+                for index in range(start, len(tokens)):
+                    token = tokens[index]
+                    if token.map and not piece.fixed:
+                        line = base + token.map[0]
+                    if token.type == "list_item_open" and self.styled and _task_state(tokens, index) is False:
+                        self._tasks.append(line)
+                    elif token.type == "inline":
+                        self._inline(token, line, piece.fixed)
+        self._finish()
+
+    def _inline(self, token: Token, line: int, fixed: bool) -> None:
+        at = line
+        href: str | None = None
+        words: list[str] = []
+        opened = at
+        for child in token.children or []:
+            kind = child.type
+            if kind in ("softbreak", "hardbreak"):
+                at += 0 if fixed else 1
+                words.append(" ")
+            elif kind == "link_open":
+                href, words, opened = _attr(child, "href"), [], at
+            elif kind == "link_close":
+                if href is not None:
+                    self._link(href, "".join(words), opened)
+                href = None
+            elif kind == "image":
+                self._image(child, at)
+            elif kind in ("text", "code_inline") and href is not None:
+                words.append(child.content)
+            elif kind == "text":
+                self._prose(child.content, at)
+
+    def _link(self, href: str, words: str, line: int) -> None:
+        entity = ENTITY_HREF.match(href)
+        if entity:
+            if self.case is None:
+                return
+            source = self.reader.entity(entity.group(1))
+            if source is None:
+                name = _cut_text(" ".join(words.split()) or entity.group(1), 80)
+                self._once(f"record:{entity.group(1)}", f'The record "{name}" is no longer in the case.',
+                           line, MISSING)
+            elif source.citable:
+                self._cited.append(source)
+            return
+        if _local(href, self._prefixes):
+            self._local.setdefault(href, line)
+            return
+        source = self.link_source(href, words)
+        if source is not None:
+            self._cited.append(source)
+
+    def _image(self, token: Token, line: int) -> None:
+        source = self.image_source(_attr(token, "src"))
+        if source is None:
+            return
+        self._cited.append(source)
+        if self.on and self.case is not None and not source.sourced:
+            name = _cut_text(" ".join((token.content or source.label).split()) or "Untitled", 80)
+            noun = "Video" if source.noun == "Video" else "Picture"
+            self._once(f"unsourced:{source.key}", f'{noun} "{name}" has no source.', line, UNSOURCED)
+
+    def _prose(self, text: str, line: int) -> None:
+        for _, _, address in _bare_urls(text):
+            if _local(address, ()):
+                self._local.setdefault(address, line)
+            else:
+                self._cited.append(self.reader.link(address))
+        for match in FILE_URL.finditer(text):
+            self._local.setdefault(match.group(0), line)
+
+    def _finish(self) -> None:
+        if self.case is not None:
+            if self._tasks:
+                count = len(self._tasks)
+                self._warn(f"{count} task{'s are' if count > 1 else ' is'} still open.", self._tasks[0], OPEN_TASK)
+            for href, line in list(self._local.items())[:MAX_LOCAL_LINKS]:
+                self._warn(f'The link "{_cut_text(href, 80)}" will not open for a reader.', line, LOCAL_LINK)
+            rest = len(self._local) - MAX_LOCAL_LINKS
+            if rest > 0:
+                self._warn(f"{rest} more link{'s' if rest > 1 else ''} will not open for a reader.", None, LOCAL_LINK)
+        if self.on:
+            self.annex = Annex(self._cited)
+            if self.annex.left_out:
+                self._warn(f"The sources list stops at {self.annex.limit}; "
+                           f"{self.annex.left_out} more are not listed.", None, OTHER)
+
+    def _warn(self, message: str, line: int | None, kind: str) -> None:
+        self.warnings.append((message, line, kind))
+
+    def _once(self, key: str, message: str, line: int | None, kind: str) -> None:
+        if key not in self._warned:
+            self._warned.add(key)
+            self._warn(message, line, kind)
+
+    def words(self) -> list[str]:
+        """What the sources list prints, for the fonts to cover."""
+        if self.annex is None:
+            return []
+        said: list[str] = []
+        for entry in self.annex.entries:
+            source = entry.source
+            said.extend((source.label, *notesources.details(source), source.address, source.archive))
+        return said
+
+
 class _Builder:
     """Walks the parsed note and draws it.
 
@@ -733,16 +1071,22 @@ class _Builder:
         *,
         look: NoteLook | None = None,
         faces: set[tuple[str, str]] | None = None,
+        cited: _Cited | None = None,
     ) -> None:
         self.pdf = pdf
         self.case = case
         self.diagrams = diagrams
         self.look = look or DEFAULT_LOOK
         self.theme: Theme = getattr(pdf, "theme", PLAIN)
+        #: What the document cites and how each item reads as a source.
+        self.cited = cited if cited is not None else _Cited(case, look=self.look, styled=not self.theme.plain)
+        #: The internal link to each entry of the sources list, made when first used.
+        self._entry_links: dict[int, int] = {}
         #: The (family, style) pairs this document loaded, so emphasis it lacks borrows.
         self.faces = faces if faces is not None else set(pdffonts.CORE_FACES)
         self.warnings: list[str] = []
         self.warning_lines: list[int | None] = []
+        self.warning_kinds: list[str] = []
         #: The line of the first remote image left out, which its warning points at.
         self._remote_line: int | None = None
         self.images = 0
@@ -752,11 +1096,7 @@ class _Builder:
         #: How deep inside nested lists the walk currently is.
         self._depth = 0
         self._remote = 0
-        # The Notebook writes the case's name the way a browser does (`lib/fileUrl.js`),
-        # so a case called "Port strike" is `/files/Port%20strike/…` in its notes.
-        self._file_prefixes = (
-            tuple(dict.fromkeys((f"/files/{_quote(case.id)}/", f"/files/{case.id}/"))) if case is not None else ()
-        )
+        self._file_prefixes = _file_prefixes(case)
         # the paragraph defaults, which a promoted verdict enlarges for a moment
         self._size = self.theme.body_size
         self._leading = self.theme.leading
@@ -789,12 +1129,15 @@ class _Builder:
 
     # -- entry point --------------------------------------------------------
 
-    def build(self, title: str, pieces: list[Piece]) -> None:
+    def build(self, title: str, pieces: list[Piece], blocks: dict[int, list[_Block]] | None = None) -> None:
         theme, look, pdf = self.theme, self.look, self.pdf
-        blocks = {id(piece): self._alignment_blocks(piece.text) for piece in pieces if piece.kind == "text"}
+        if blocks is None:
+            blocks = {id(piece): _alignment_blocks(piece.text) for piece in pieces if piece.kind == "text"}
         self._prescan(pieces, blocks)
         if self.case is not None:
             self._empty_sections(pieces, blocks)
+        for message, line, kind in self.cited.warnings:
+            self._warn(message, line, kind)
         if look.cover.on:
             unseen = self.case is None and bool(look.cover.image)
             pdf.cover(image=self._cover_image(), placeholder=CASE_PICTURE if unseen else "")
@@ -827,9 +1170,132 @@ class _Builder:
             self._end_entry()
         if not drawn:
             self._aside("This note is empty.")
+        self._sources()
 
     def _page_begins(self) -> None:
         self._page_lines[self.pdf.page] = self._line
+
+    # -- the sources list ------------------------------------------------------
+
+    def _listed(self) -> bool:
+        annex = self.cited.annex
+        return annex is not None and bool(annex.entries)
+
+    def _sources(self) -> None:
+        """The numbered sources at the end: an unnumbered top heading, in the
+        contents and the bookmarks when those are on, then one entry per source.
+        A report starts it on a page of its own. Nothing at all when the note
+        cites nothing."""
+        annex = self.cited.annex
+        if annex is None or not annex.entries:
+            return
+        self._end_entry()
+        pdf = self.pdf
+        self._shift = 0
+        if self.theme.style == "report" and pdf.get_y() > pdf.body_top + 0.5:
+            pdf.add_page()
+        self._heading([Run(SOURCES_HEADING)], self._base, [], 0, Align.L, numbered=False)
+        pdf.set_font(self.theme.heading_family, "B", ENTRY_SIZE * self.theme.scale)
+        hang = max(7.0, pdf.get_string_width(f"[{len(annex.entries)}]") + 2.4)
+        for entry in annex.entries:
+            self._source_entry(entry, hang)
+
+    def _source_entry(self, entry: Entry, hang: float) -> None:
+        """One source: its number in the margin it hangs from, what it is, and under
+        it each address in full, wrapped where it has to be and never cut, since a
+        reader may have to type it, then the file's fingerprint."""
+        pdf, theme = self.pdf, self.theme
+        source = entry.source
+        scale = theme.scale
+        size, leading = ENTRY_SIZE * scale, ENTRY_LEADING * scale
+        small, small_leading = ENTRY_SMALL * scale, ENTRY_SMALL_LEADING * scale
+        head = self._entry_head(entry)
+        addresses = [("", one) for one in (source.address,) if one]
+        if source.archive and source.archive != source.address:
+            addresses.append(("Archive: ", source.archive))
+        width = pdf.epw - hang - 2 * pdf.c_margin
+        # measured first, so an entry that fits on a page is never split over two
+        pdf.set_font(theme.heading_family, "", size)
+        height = leading * len(_wrap_words(pdf, _plain(head), width, width))
+        pdf.set_font(theme.heading_family, "", small)
+        for prefix, address in addresses:
+            first = width - pdf.get_string_width(prefix)
+            height += small_leading * len(_wrap_address(pdf, address, first, width))
+        if source.sha256:
+            height += small_leading
+        if pdf.will_page_break(min(height, pdf.page_break_trigger - pdf.t_margin - 1)):
+            pdf.add_page()
+        top = pdf.get_y()
+        pdf.set_link(self._entry_link(entry.number), y=top, page=pdf.page)
+        pdf.set_font(theme.heading_family, "B", size)
+        pdf.set_text_color(*theme.accent)
+        # set where the text of the page starts, a cell's margin in from its edge
+        self._text_at(pdf.l_margin + pdf.c_margin, top, f"[{entry.number}]", leading)
+        pdf.set_xy(pdf.l_margin, top)
+        with self._indent(hang):
+            self._runs(head, size=size, leading=leading, family=theme.heading_family, bottom=0.2)
+            for prefix, address in addresses:
+                self._address(prefix, address, small, small_leading)
+            if source.sha256:
+                self._fingerprint(source.sha256, small, small_leading)
+        pdf.ln(ENTRY_GAP * scale)
+
+    def _entry_head(self, entry: Entry) -> list[Run]:
+        """`Strike on the port · Video · x.com · by Port Watch · posted 12 March 2026`,
+        then `from [1]` linked to the entries it was made from."""
+        theme = self.theme
+        source = entry.source
+        said = notesources.details(source)
+        runs = [Run(source.label or source.host or "Untitled", bold=True, color=theme.ink)]
+        if said:
+            runs.append(Run(" · " + " · ".join(said), color=theme.muted))
+        if entry.origins:
+            runs.append(Run(" · from ", color=theme.muted))
+            for position, number in enumerate(entry.origins):
+                if position:
+                    runs.append(Run(", ", color=theme.muted))
+                runs.append(Run(f"[{number}]", color=theme.accent, entry=number))
+        return runs
+
+    def _address(self, prefix: str, address: str, size: float, leading: float) -> None:
+        """An address in full, linked on every line it wraps over."""
+        pdf, theme = self.pdf, self.theme
+        pdf.set_font(theme.heading_family, "", size)
+        lead = pdf.get_string_width(prefix) if prefix else 0.0
+        width = pdf.epw - 2 * pdf.c_margin
+        for number, line in enumerate(_wrap_address(pdf, address, width - lead, width)):
+            if pdf.will_page_break(leading):
+                pdf.add_page()
+            y = pdf.get_y()
+            x = pdf.l_margin + pdf.c_margin
+            if number == 0 and prefix:
+                pdf.set_text_color(*theme.muted)
+                self._text_at(x, y, prefix, leading)
+                x += lead
+            pdf.set_text_color(*theme.accent_dark)
+            self._text_at(x, y, line, leading, link=address)
+            pdf.set_xy(pdf.l_margin, y + leading)
+
+    def _fingerprint(self, sha256: str, size: float, leading: float) -> None:
+        """`SHA-256` and the file's whole fingerprint, in the mono face."""
+        pdf, theme = self.pdf, self.theme
+        if pdf.will_page_break(leading):
+            pdf.add_page()
+        y = pdf.get_y()
+        pdf.set_font(theme.heading_family, "", size)
+        pdf.set_text_color(*theme.muted)
+        label = "SHA-256 "
+        self._text_at(pdf.l_margin + pdf.c_margin, y, label, leading)
+        x = pdf.l_margin + pdf.c_margin + pdf.get_string_width(label)
+        pdf.set_font(pdffonts.MONO, "", size * 0.92)
+        width = pdf.l_margin + pdf.epw - pdf.c_margin - x
+        for line in _wrap_address(pdf, sha256, width, width):
+            if pdf.will_page_break(leading):
+                pdf.add_page()
+                y = pdf.get_y()
+            self._text_at(x, y, line, leading)
+            y += leading
+        pdf.set_xy(pdf.l_margin, y)
 
     @property
     def pages(self) -> list[int]:
@@ -896,6 +1362,8 @@ class _Builder:
                         self._promoted_in = block.tokens
         self._base = min(levels) if levels else 1
         self._contents_entries = sum(1 for level in levels if level - self._base <= 1)
+        if self._listed():
+            self._contents_entries += 1  # the sources list's own heading
 
     def _count_entry(self, heading: str) -> None:
         stamp = LOG_STAMP.match(heading)
@@ -958,15 +1426,17 @@ class _Builder:
                         content()
         heading(0, "", 0)
         for name, line in empty[:MAX_EMPTY_SECTIONS]:
-            self._warn(f'Section "{_cut_text(name, 80)}" is empty.', line)
+            self._warn(f'Section "{_cut_text(name, 80)}" is empty.', line, EMPTY_SECTION)
         rest = len(empty) - MAX_EMPTY_SECTIONS
         if rest > 0:
-            self._warn(f"{rest} more section{'s are' if rest > 1 else ' is'} empty.")
+            self._warn(f"{rest} more section{'s are' if rest > 1 else ' is'} empty.", None, EMPTY_SECTION)
 
-    def _warn(self, message: str, line: int | None = None) -> None:
-        """Say what the page could not show, and the note's line it is about."""
+    def _warn(self, message: str, line: int | None = None, kind: str = OTHER) -> None:
+        """Say what the page could not show, the note's line it is about, and what
+        kind of thing it is."""
         self.warnings.append(message)
         self.warning_lines.append(line)
+        self.warning_kinds.append(kind)
 
     # -- the first page -----------------------------------------------------
 
@@ -1070,7 +1540,7 @@ class _Builder:
         entity = self.case.get_entity(image_id)
         attrs = (entity or {}).get("attrs") or {}
         if not entity or not attrs.get("path"):
-            self._warn("The cover picture is no longer in the case; the cover was drawn without it.")
+            self._warn("The cover picture is no longer in the case; the cover was drawn without it.", None, MISSING)
             return None
         if attrs.get("kind") == "video":
             self._warn("A video cannot be a cover picture; the cover was drawn without it.")
@@ -1100,26 +1570,6 @@ class _Builder:
                 f"No font on this machine covers {', '.join(scripts)}; "
                 "those characters were left out."
             )
-
-    def _alignment_blocks(self, text: str) -> list[_Block]:
-        """Parse the note, honouring the `::: center` blocks around parts of it.
-
-        Each block is parsed on its own so its alignment can be pushed into
-        everything it produced, which is how the preview reads it too.
-        """
-        blocks: list[_Block] = []
-        position = 0
-        for match in ALIGNMENT_BLOCK.finditer(text):
-            blocks.append(_Block(Align.L, self._parse(text[position : match.start()]),
-                                 text.count("\n", 0, position)))
-            blocks.append(_Block(ALIGNMENTS[match.group(1)], self._parse(match.group(2)),
-                                 text.count("\n", 0, match.start(2))))
-            position = match.end()
-        blocks.append(_Block(Align.L, self._parse(text[position:]), text.count("\n", 0, position)))
-        return blocks
-
-    def _parse(self, source: str) -> list[Token]:
-        return _parser().parse(_case_references(source)) if source.strip() else []
 
     # -- the token walk -----------------------------------------------------
 
@@ -1170,6 +1620,8 @@ class _Builder:
         tokens: list[Token],
         after: int,
         align: Align,
+        *,
+        numbered: bool = True,
     ) -> None:
         """A heading at ``level`` (1 to 6, after a chapter's shift), numbered and
         bookmarked when the look asks, kept with what follows it."""
@@ -1177,7 +1629,7 @@ class _Builder:
         tag = f"h{level}"
         size, space = theme.headings.get(tag, theme.headings["h6"])
         pdf = self.pdf
-        number = self._number(level)
+        number = self._number(level) if numbered else ""
         if theme.plain:
             if pdf.get_y() > theme.margin_top + 2:
                 pdf.ln(space)
@@ -1274,7 +1726,7 @@ class _Builder:
     def _bookmark(self, runs: list[Run], level: int, number: str) -> None:
         if not self._outlined:
             return
-        name = " ".join(_plain(runs).split())
+        name = " ".join(_plain(run for run in runs if not run.raised).split())
         if not name:
             return
         if number:
@@ -1702,6 +2154,7 @@ class _Builder:
         bold = italic = 0
         link = ""
         entity = 0
+        cite = 0
         for child in token.children or []:
             kind = child.type
             if kind == "strong_open":
@@ -1714,10 +2167,14 @@ class _Builder:
                 italic = max(0, italic - 1)
             elif kind == "link_open":
                 link, entity = self._link_style(child)
+                if self.cited.annex is not None:
+                    cite = self.cited.number(self.cited.link_source(_attr(child, "href")))
             elif kind == "link_close":
-                link, entity = "", 0
+                if cite:
+                    runs.append(self._citation(cite))
+                link, entity, cite = "", 0, 0
             elif kind == "image":
-                runs.append(self._inline_image(child))
+                runs.extend(self._inline_image(child))
             elif kind == "html_inline" and child.content.startswith("<!--"):
                 continue  # a comment, or a template's guidance: never printed
             elif kind in ("text", "html_inline", "code_inline", "softbreak", "hardbreak"):
@@ -1738,10 +2195,34 @@ class _Builder:
                     link="" if entity else link,
                 )
                 if kind == "text" and not link and not entity:
-                    runs.extend(self._coordinates(run))
+                    runs.extend(self._prose(run))
                 else:
                     runs.append(run)
         return [run for run in runs if run.text]
+
+    def _citation(self, number: int) -> Run:
+        """The small `[3]` after a citation, linked to its entry in the sources list."""
+        return Run(f"[{number}]", color=self.theme.accent, entry=number, raised=True)
+
+    def _prose(self, run: Run) -> list[Run]:
+        """A run of prose: each address written bare in it followed by its number
+        when the sources are listed, and each coordinate pair linked to the map."""
+        if self.cited.annex is None:
+            return self._coordinates(run)
+        pieces: list[Run] = []
+        at = 0
+        for start, end, address in _bare_urls(run.text):
+            number = self.cited.number(self.cited.link_source(address))
+            if not number:
+                continue
+            pieces.extend(self._coordinates(replace(run, text=run.text[at:start])))
+            pieces.append(replace(run, text=run.text[start:end]))
+            pieces.append(self._citation(number))
+            at = end
+        if not pieces:
+            return self._coordinates(run)
+        pieces.extend(self._coordinates(replace(run, text=run.text[at:])))
+        return pieces
 
     def _coordinates(self, run: Run) -> list[Run]:
         """A run with each decimal coordinate pair in it linked to the map."""
@@ -1771,19 +2252,24 @@ class _Builder:
         template's preview) every reference reads as a live one.
         """
         href = _attr(token, "href")
-        entity = re.match(r"^azimut://entity/([A-Za-z0-9_-]+)$", href)
+        entity = ENTITY_HREF.match(href)
         if entity:
             if self.case is None:
                 return "", 1
-            record = self.case.get_entity(entity.group(1))
-            if record is None:
+            source = self.cited.reader.entity(entity.group(1))
+            if source is None:
                 return "", 2
-            address = _web_address(record)
+            address = source.link
             return (address, 0) if address else ("", 1)
+        if href.startswith("#"):
+            # an anchor in the note has no place in the PDF, and fpdf2 refuses the
+            # whole document over a destination nobody set: it prints as its words
+            return "", 0
         return href, 0
 
-    def _inline_image(self, token: Token) -> Run:
-        """An image inside a run of text: named, not drawn.
+    def _inline_image(self, token: Token) -> list[Run]:
+        """An image inside a run of text: named, not drawn, and numbered when the
+        sources are listed.
 
         fpdf2 places a picture at a point on the page, not in the middle of a
         wrapping line, and a note that inlines a capture means it to be seen —
@@ -1792,7 +2278,9 @@ class _Builder:
         resolved = self._resolve_image(token)
         label = resolved if isinstance(resolved, str) else (token.content or "Image")
         link = resolved.url if isinstance(resolved, _Poster) else ""
-        return Run(text=f"[{label}]", italic=True, color=self.theme.muted, link=link)
+        named = Run(text=f"[{label}]", italic=True, color=self.theme.muted, link=link)
+        number = 0 if isinstance(resolved, str) else self.cited.number(resolved.source)
+        return [named, self._citation(number)] if number else [named]
 
     def _face(self, family: str, bold: bool, italic: bool) -> tuple[str, str]:
         """The face a run is set in. The mono face ships in one weight, and the sans
@@ -1868,14 +2356,32 @@ class _Builder:
             )
             pdf.set_font(run_family, emphasis, size * (0.92 if run.mono else 1.0))
             pdf.set_text_color(*(run.color if run.color != INK else color))
+            if run.raised:
+                pdf.char_vpos = "SUP"
             text = run.text
             body = text.lstrip(" ")
             word = body.split(" ", 1)[0] if body else ""
             if word and pdf.get_x() + pdf.get_string_width(text[: len(text) - len(body)] + word) > right:
                 pdf.ln(leading)
                 text = body
-            pdf.write(leading, text, link=run.link or "")
+            pdf.write(leading, text, link=self._run_link(run))
+            if run.raised:
+                pdf.char_vpos = "LINE"
         pdf.ln(leading + bottom)
+
+    def _run_link(self, run: Run) -> str | int:
+        """Where a run links: its address, else its entry in the sources list."""
+        if run.link:
+            return run.link
+        return self._entry_link(run.entry) if run.entry else ""
+
+    def _entry_link(self, number: int) -> int:
+        """The internal link to an entry of the sources list, placed when it is drawn."""
+        link = self._entry_links.get(number)
+        if link is None:
+            link = self.pdf.add_link()
+            self._entry_links[number] = link
+        return link
 
     def _aside(self, message: str, *, link: str = "") -> None:
         """A quiet, boxed line: what the page could not show, said in place."""
@@ -1963,7 +2469,9 @@ class _Builder:
             for number, line in enumerate(squared):
                 row = table.row()
                 for cell, text in zip(line, texts[number]):
-                    link = next((run.link for run in cell if run.link), "")
+                    entry = next((run.entry for run in cell if run.entry), 0)
+                    link: str | int = next((run.link for run in cell if run.link), "")
+                    link = link or (self._entry_link(entry) if entry else "")
                     if not link:
                         row.cell(text)
                     elif number < header_rows:
@@ -2030,14 +2538,16 @@ class _Builder:
         place = ALIGNMENTS[options.align]
         # a caption written in the braces says more than a title, which is older
         title = options.caption or _attr(token, "title")
+        number = 0 if isinstance(resolved, str) else self.cited.number(resolved.source)
         if isinstance(resolved, _Poster):
             if resolved.path is None:
                 message = "Video not included in PDF."
-                self._aside(f"{message} Watch it at {resolved.url}", link=resolved.url)
+                cited = f" [{number}]" if number else ""
+                self._aside(f"{message} Watch it at {resolved.url}{cited}", link=resolved.url)
                 return True
             caption = self._caption(title or f"Video: {token.content or 'untitled'}", token.content)
             self._place(resolved.path, resolved.natural, options.width, place, caption,
-                        figure=figure, video=True, credit=resolved.credit)
+                        figure=figure, video=True, credit=resolved.credit, number=number)
             return True
         caption = self._caption(title, token.content)
         if resolved == CASE_PICTURE and self.case is None:
@@ -2046,11 +2556,11 @@ class _Builder:
         if isinstance(resolved, str):
             if resolved == MEDIA_UNAVAILABLE:
                 name = _cut_text(" ".join((token.content or "").split()) or "Untitled", 80)
-                self._warn(f'Picture "{name}" could not be printed: it is missing from the case.', self._line)
+                self._warn(f'Picture "{name}" is no longer in the case.', self._line, MISSING)
             self._aside(resolved)
             return True
         self._place(resolved.path, resolved.natural, options.width, place, caption,
-                    figure=figure, credit=resolved.credit)
+                    figure=figure, credit=resolved.credit, number=number)
         return True
 
     def _caption(self, title: str, alt: str) -> tuple[str, str]:
@@ -2073,13 +2583,15 @@ class _Builder:
         figure: tuple[str, str, str] | None = None,
         video: bool = False,
         credit: _Credit | None = None,
+        number: int = 0,
     ) -> None:
         """Draw a picture as a block, its caption and credit kept on its page.
 
         ``figure`` (what it shows, its width and alignment as written) has the Page
         pane told where it landed; ``video`` marks a video's still. The caption is
         measured rather than guessed, so a picture never goes to the foot of a page
-        that only has room for it and not for the words under it.
+        that only has room for it and not for the words under it. ``number`` is its
+        entry in the sources list, said after the credit.
         """
         pdf = self.pdf
         theme = self.theme
@@ -2117,7 +2629,7 @@ class _Builder:
                     pdf.epw, 4 * theme.scale, text, align=align, new_x=XPos.LMARGIN, new_y=YPos.NEXT
                 )
             if credit is not None:
-                self._credit_line(credit, align, pdf.l_margin, pdf.epw)
+                self._credit_line(credit, align, pdf.l_margin, pdf.epw, number)
             pdf.ln(theme.gap)
             return
         pdf.set_draw_color(*theme.rule)
@@ -2127,7 +2639,7 @@ class _Builder:
         if caption[0] or caption[1]:
             self._figure_caption(caption, align, box_left, box_width)
         if credit is not None:
-            self._credit_line(credit, align, box_left, box_width)
+            self._credit_line(credit, align, box_left, box_width, number)
         pdf.ln(theme.gap + 0.6)
 
     def _below(self, caption: tuple[str, str], credit: _Credit | None, align: Align, width: float) -> float:
@@ -2203,27 +2715,35 @@ class _Builder:
                 self._text_at(x, y, line, leading)
             pdf.set_xy(pdf.l_margin, y + leading)
 
-    def _credit_line(self, credit: _Credit, align: Align, box_left: float, box_width: float) -> None:
+    def _credit_line(
+        self, credit: _Credit, align: Align, box_left: float, box_width: float, number: int = 0
+    ) -> None:
         """Where a picture came from, in one small line: what kind of source in grey,
-        then the place, linked when it is on the web. Cut rather than wrapped."""
+        then the place, linked when it is on the web, then its number in the sources
+        list. Cut rather than wrapped."""
         pdf, theme = self.pdf, self.theme
         size = CREDIT_SIZE * theme.scale
         leading = CREDIT_LEADING * theme.scale
         pdf.ln(0.6)
         y = pdf.get_y()
         head = f"{credit.kind}: "
+        tail = f" [{number}]" if number else ""
         pdf.set_font(theme.heading_family, "", size)
         head_width = pdf.get_string_width(head)
-        value = notes_style.fit_line(pdf, credit.value, max(10.0, box_width - head_width))
-        total = head_width + pdf.get_string_width(value)
+        tail_width = pdf.get_string_width(tail) if tail else 0.0
+        value = notes_style.fit_line(pdf, credit.value, max(10.0, box_width - head_width - tail_width))
+        total = head_width + pdf.get_string_width(value) + tail_width
         x = _aligned(align, box_left, box_width, total)
         pdf.set_text_color(*theme.muted)
         self._text_at(x, y, head, leading)
         pdf.set_text_color(*(theme.accent_dark if credit.link else theme.muted))
         self._text_at(x + head_width, y, value, leading, link=credit.link)
+        if tail:
+            pdf.set_text_color(*theme.accent)
+            self._text_at(x + total - tail_width, y, tail, leading, link=self._entry_link(number))
         pdf.set_xy(pdf.l_margin, y + leading)
 
-    def _text_at(self, x: float, y: float, text: str, height: float, *, link: str = "") -> None:
+    def _text_at(self, x: float, y: float, text: str, height: float, *, link: str | int = "") -> None:
         """One run of text starting exactly at ``x``: a cell keeps a margin inside
         its left edge, so the cell is moved out by it."""
         pdf = self.pdf
@@ -2356,10 +2876,11 @@ class _Builder:
             return
         self._place(BytesIO(png), natural, "", Align.C, self._caption("", ""))
 
-    def _poster(self, attrs: dict[str, Any]) -> "_Poster | str":
+    def _poster(self, attrs: dict[str, Any], source: Source | None) -> "_Poster | str":
         """A video prints as its thumbnail with a play sign, and where it can be
-        watched. With neither, the line it always printed."""
-        url = _web(str(attrs.get("source_url") or ""))
+        watched: its own page, or the one of the video it was made from. With
+        neither, the line it always printed."""
+        url = source.traced_address if source is not None else _web(str(attrs.get("source_url") or ""))
         still = thumbnails.thumb_relpath(str(attrs.get("sha256") or ""), "video")
         if still and self.case is not None and self.images < MAX_IMAGES:
             try:
@@ -2369,14 +2890,15 @@ class _Builder:
             natural = _measure(path) if path is not None and path.is_file() else None
             if path is not None and natural is not None:
                 self.images += 1
-                return _Poster(path, natural, url)
+                return _Poster(path, natural, url, source)
         if url:
-            return _Poster(None, (0, 0), url)
+            return _Poster(None, (0, 0), url, source)
         return "Video not included in PDF."
 
     def _resolve_image(self, token: Token) -> "_Picture | _Poster | str":
         """The file behind an image, or the line to print instead of it."""
-        source = _image_options(_attr(token, "src")).source
+        src = _attr(token, "src")
+        source = _image_options(src).source
         parts = urlsplit(source)
         if parts.scheme in ("http", "https"):
             self._remote += 1
@@ -2387,14 +2909,13 @@ class _Builder:
             if (parts.scheme == "azimut" and parts.netloc == "media") or source.startswith("/files/"):
                 return CASE_PICTURE
             return "Image not included in PDF."
-        record: dict[str, Any] | None = None
         if parts.scheme == "azimut" and parts.netloc == "media":
             record = self.case.get_entity(unquote(parts.path.lstrip("/")))
             attrs = (record or {}).get("attrs") or {}
             if not record or not attrs.get("path"):
                 return MEDIA_UNAVAILABLE
             if attrs.get("kind") == "video":
-                return self._poster(attrs)
+                return self._poster(attrs, self.cited.image_source(src))
             relative = str(attrs["path"])
         elif (prefix := next((one for one in self._file_prefixes if source.startswith(one)), "")):
             relative = unquote(source[len(prefix) :])
@@ -2410,38 +2931,9 @@ class _Builder:
         if natural is None:
             return MEDIA_UNAVAILABLE
         self.images += 1
-        return _Picture(path, natural, self._credit_of(record, relative))
-
-    def _credit_of(self, record: dict[str, Any] | None, relative: str) -> _Credit | None:
-        """Where a picture of the case came from, as the case recorded it: the page
-        it was taken from, or the imagery it was captured from and its date. Read
-        from the case's own index; nothing is fetched."""
-        item: dict[str, Any] = {}
-        lookup = getattr(self.case, "media_items_by_paths", None)
-        if lookup is not None:
-            try:
-                found = lookup([relative])
-            except Exception:
-                found = []
-            item = found[0] if found and isinstance(found[0], dict) else {}
-        if record is None and item.get("entity_id") and self.case is not None:
-            record = self.case.get_entity(str(item["entity_id"]))
-        attrs = (record or {}).get("attrs") or {}
-        recorded = item.get("source")
-        source: dict[str, Any] = recorded if isinstance(recorded, dict) else {}
-        address = _web(str(attrs.get("source_url") or source.get("url") or ""))
-        if address:
-            return _Credit("Source", _host(address), address)
-        if source.get("type") != "satellite" and (record or {}).get("type") != "capture":
-            return None
-        provider = " ".join(str(source.get("provider_label") or attrs.get("provider") or "").split())
-        when = _imagery_day(timeline.capture_imagery(source))
-        shown = ", ".join(part for part in (provider, when) if part)
-        # the provider's own credit line goes last, where a cut costs the least
-        credit = " ".join(str(source.get("attribution") or "").split())
-        if credit and credit != provider:
-            shown = f"{shown} · {credit}" if shown else credit
-        return _Credit("Imagery", shown) if shown else None
+        # where it came from, as the one reading of sources says it (`notesources`)
+        shown = self.cited.image_source(src)
+        return _Picture(path, natural, shown.credit() if shown is not None else None, shown)
 
 
 class _Indent:
@@ -2481,21 +2973,37 @@ def _level(tag: str, shift: int) -> int:
     return max(1, min(6, int(tag[1]) + shift))
 
 
-def _take_task(tokens: list[Token], index: int) -> bool | None:
-    """A list item that opens with `[ ]` or `[x]`: whether it is done, the marker
-    taken out of its text. None for an ordinary item."""
+TASK_MARK = re.compile(r"^\[([ xX])\]\s+")
+
+
+def _task_state(tokens: list[Token], index: int) -> bool | None:
+    """Whether the list item at ``index`` is a done task, an open one (False), or
+    no task at all (None), read without touching it."""
     if index + 2 >= len(tokens) or tokens[index + 1].type != "paragraph_open":
         return None
     inline = tokens[index + 2]
-    match = re.match(r"^\[([ xX])\]\s+", inline.content)
+    match = TASK_MARK.match(inline.content)
     children = inline.children or []
     if match is None or not children or children[0].type != "text":
         return None
     if not children[0].content.startswith(match.group(0)):
         return None
+    return match.group(1) != " "
+
+
+def _take_task(tokens: list[Token], index: int) -> bool | None:
+    """A list item that opens with `[ ]` or `[x]`: whether it is done, the marker
+    taken out of its text. None for an ordinary item."""
+    state = _task_state(tokens, index)
+    if state is None:
+        return None
+    inline = tokens[index + 2]
+    match = TASK_MARK.match(inline.content)
+    assert match is not None
+    children = inline.children or []
     inline.content = inline.content[match.end():]
     children[0].content = children[0].content[match.end():]
-    return match.group(1) != " "
+    return state
 
 
 def _cut_runs(runs: list[Run], start: int) -> list[Run]:
@@ -2506,8 +3014,7 @@ def _cut_runs(runs: list[Run], start: int) -> list[Run]:
         end = seen + len(run.text)
         if end > start:
             cut = max(0, start - seen)
-            kept.append(Run(run.text[cut:], bold=run.bold, italic=run.italic, mono=run.mono,
-                            color=run.color, link=run.link))
+            kept.append(replace(run, text=run.text[cut:]))
         seen = end
     return [run for run in kept if run.text.strip()]
 
@@ -2611,21 +3118,6 @@ def _wrap_words(pdf: FPDF, text: str, width: float, first: float) -> list[str]:
     return lines
 
 
-def _imagery_day(reading: str | None) -> str:
-    """An imagery date as the Time panel reads it (`2024-03-12`, `2024-03-12~`
-    when the provider only estimates it) said in words: `about 12 March 2024`."""
-    text = " ".join((reading or "").split())[:40]
-    about = text.endswith("~")
-    text = text.rstrip("~")
-    if not text:
-        return ""
-    try:
-        text = notes_style.long_date(date.fromisoformat(text)) if len(text) == 10 else text
-    except ValueError:
-        pass
-    return f"about {text}" if about else text
-
-
 def _inline_text(token: Token) -> str:
     """An inline token's words, read without drawing (or counting) its pictures."""
     return "".join(
@@ -2656,48 +3148,38 @@ def _cut_text(text: str, limit: int) -> str:
     return text if len(text) <= limit else f"{text[: limit - 1].rstrip()}…"
 
 
-def _web(value: str) -> str:
-    """``value`` when it is a web address a reader can open, else ""."""
-    try:
-        parts = urlsplit(value.strip())
-        host = parts.hostname
-    except ValueError:
-        return ""
-    return value.strip() if parts.scheme in ("http", "https") and host else ""
+#: Where an address is checked and named: the one reading of sources does both.
+_web = notesources.web
+_host = notesources.host
 
 
-def _host(url: str) -> str:
-    """`example.org` for an address, as a credit line names where a picture came from."""
-    try:
-        host = (urlsplit(url).hostname or "").lower()
-    except ValueError:
-        return ""
-    return host[4:] if host.startswith("www.") else host
-
-
-def _web_address(record: dict[str, Any] | None) -> str:
-    """The address a record stands for on the web, or "" when it has none.
-
-    The record's own address first, where the case keeps it for that type (a
-    bookmark's page, a file's source, `proposals.URL_ATTRS`), then an account's
-    profile, and an archived copy last: a reader wants the page itself and only
-    falls back on the snapshot. Each one is checked here, since the addresses a
-    tool writes are not declared fields and never passed `entities._check_url`.
-    """
-    attrs = (record or {}).get("attrs") or {}
-    kind = str((record or {}).get("type") or "")
-    declared = entities.entity_type(kind)
-    keys = [
-        *([URL_ATTRS[kind]] if kind in URL_ATTRS else []),
-        "url",
-        "source_url",
-        *(attr.key for attr in (declared.attrs if declared else ()) if attr.kind == "url"),
-    ]
-    for key in keys:
-        address = _web(str(attrs.get(key) or ""))
-        if address:
-            return address
-    return ""
+def _wrap_address(pdf: FPDF, text: str, first: float, width: float) -> list[str]:
+    """An address cut into lines no wider than ``width`` in the current font, the
+    first no wider than ``first``, every character kept. Each cut falls after a
+    `/`, `?`, `&` or the like when one is near the end of the line, so a wrapped
+    address still reads as one."""
+    lines: list[str] = []
+    rest = text
+    room = first
+    while rest:
+        if pdf.get_string_width(rest) <= room:
+            lines.append(rest)
+            break
+        low, high = 1, len(rest)
+        while low < high:  # the longest start of it that fits
+            middle = (low + high + 1) // 2
+            if pdf.get_string_width(rest[:middle]) <= room:
+                low = middle
+            else:
+                high = middle - 1
+        cut = max(1, low)
+        soft = max((at + 1 for at in range(cut) if rest[at] in ADDRESS_BREAKS), default=0)
+        if soft > cut * 0.6:
+            cut = soft
+        lines.append(rest[:cut])
+        rest = rest[cut:]
+        room = width
+    return lines or [""]
 
 
 def _hard_wrap(line: str, pdf: FPDF, width: float) -> list[str]:

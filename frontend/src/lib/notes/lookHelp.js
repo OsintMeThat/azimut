@@ -19,6 +19,7 @@ export const LOOK_HELP = {
   date: 'The day on the cover, the export day when left empty',
   toc: 'A page listing the headings, after the cover',
   numbered: 'Number the headings and the figures',
+  sources: 'A numbered list of every source the note cites, on the last pages',
   write: 'The note alone',
   page_pane: 'The PDF beside the note, drawn as you type',
 };

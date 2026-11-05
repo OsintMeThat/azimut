@@ -200,6 +200,13 @@ def capture_imagery(source: dict[str, Any]) -> str | None:
     return raw if isinstance(raw, str) and raw else None
 
 
+def media_published(source: dict[str, Any]) -> str | None:
+    """The day a downloaded file was posted (`upload_date` in its sidecar's source),
+    as the Time panel reads it, for the notes PDF to print the same."""
+    raw = _media_date(source.get("upload_date"))
+    return raw if isinstance(raw, str) and raw else None
+
+
 def imagery_reading(source: dict[str, Any], key: str) -> str | None:
     """One picture's date (`imagery_a`, `imagery_b`) as the Time panel reads it."""
     raw = _imagery(source.get(key), source.get(f"{key}_exact"))

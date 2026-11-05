@@ -33,7 +33,7 @@ const FONT_LIST = [
 ];
 const FONT_DIR = new URL('../../src/azimut/assets/fonts/', import.meta.url);
 
-async function notebook(page, { templates = [], extra = [], texts = {}, pictures = null, warnings = null } = {}) {
+async function notebook(page, { templates = [], extra = [], texts = {}, pictures = null, warnings = null, checks = null } = {}) {
   const catalog = [note('n1', 'Lead'), note('n2', 'Shadows', 'Leads'), note('n3', 'Mast'), ...extra];
   await installAppFixture(page, { catalog });
   const state = {
@@ -43,6 +43,7 @@ async function notebook(page, { templates = [], extra = [], texts = {}, pictures
     previews: [],
     written: [],
     exported: [],
+    checked: [],
     templates,
     savedTemplates: [],
   };
@@ -104,6 +105,13 @@ async function notebook(page, { templates = [], extra = [], texts = {}, pictures
       return pdf(route, body.text);
     }
     if (path === '/pdf/diagrams') return route.fulfill({ json: { diagrams: [] } });
+    // what the export would warn about: nothing, unless a spec says so by note
+    if (path === '/pdf/check') {
+      const { notes } = request.postDataJSON();
+      state.checked.push(notes);
+      const title = (id) => (id === 'case' ? 'Case notes' : state.catalog.find((item) => item.id === id)?.label ?? id);
+      return route.fulfill({ json: { notes: notes.map((id) => ({ note: id, title: title(id), warnings: checks?.(id) ?? [] })) } });
+    }
     if (path === '/pdf') {
       const { notes } = request.postDataJSON();
       state.exported.push(notes);
@@ -439,6 +447,73 @@ test('the Page pane lists what the PDF warns about, and a warning with a line ta
   // folded away from the bar
   await page.locator('.page-pane .warned').click();
   await expect(list).toHaveCount(0);
+});
+
+test('the export says what the PDF would warn about first, Go to takes the note to the line, and Export anyway writes it', async ({ page }) => {
+  const checks = (id) => ({
+    n1: [
+      { text: 'Picture "Roof" has no source.', line: 20, kind: 'unsourced' },
+      { text: 'Picture "Quay" is no longer in the case.', line: null, kind: 'missing' },
+    ],
+    n3: [{ text: '2 tasks are still open.', line: 0, kind: 'open-task' }],
+  })[id] ?? [];
+  const state = await notebook(page, { checks });
+  await openLead(page);
+  await page.locator('[data-guide="notebook.pdf"]').click();
+  const dialog = page.getByRole('dialog', { name: 'Export note as PDF' });
+  const before = dialog.getByRole('region', { name: 'Before you export' });
+  await expect(before.getByRole('listitem')).toHaveText([/Roof" has no source\.\s*Go to/, 'Picture "Quay" is no longer in the case.']);
+  expect(state.checked).toEqual([['n1']]);
+  await expect(dialog.getByRole('button', { name: 'Export anyway' })).toBeVisible();
+  // the keyboard reaches Go to past the destination, and lands in the note at the line
+  const go = before.getByRole('button', { name: 'Go to' });
+  for (let press = 0; press < 4; press += 1) {
+    await page.keyboard.press('Tab');
+    if (await go.evaluate((node) => node === document.activeElement)) break;
+  }
+  await expect(go).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toHaveCount(0);
+  await page.keyboard.type('X');
+  await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('\nXLine 21\n');
+  expect(state.exported).toEqual([]);
+
+  // asked again on the next export, and written once told to go on
+  await page.locator('[data-guide="notebook.pdf"]').click();
+  await expect(dialog.getByRole('region', { name: 'Before you export' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Export anyway' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(state.exported).toEqual([['n1']]);
+
+  // several notes: what each would warn about under its title, the clear ones left out
+  await page.locator('[data-guide="notebook.home"]').click();
+  await page.locator('input[aria-label="Pick Lead"]').check();
+  await page.locator('input[aria-label="Pick Shadows"]').check();
+  await page.locator('input[aria-label="Pick Mast"]').check();
+  await page.locator('[data-guide="notebook.selection"]').getByRole('button', { name: 'Export as PDF' }).click();
+  const several = page.getByRole('dialog', { name: 'Export notes as PDF' });
+  await expect(several.getByRole('list')).toHaveCount(2);
+  await expect(several.getByRole('list', { name: 'Lead' }).getByRole('listitem')).toHaveCount(2);
+  await expect(several.getByRole('list', { name: 'Mast' }).getByRole('listitem')).toHaveText([/2 tasks are still open\.\s*Go to/]);
+  await expect(several.getByRole('list', { name: 'Shadows' })).toHaveCount(0);
+  await several.getByRole('list', { name: 'Mast' }).getByRole('button', { name: 'Go to' }).click();
+  await expect(several).toHaveCount(0);
+  await expect(page.locator('input[aria-label="Note name"]')).toHaveValue('Mast');
+});
+
+test('a check that fails never holds the export back', async ({ page }) => {
+  const state = await notebook(page);
+  await page.route(`**/api/cases/${CASE_ID}/notes/pdf/check`, (route) => route.fulfill({ status: 500, json: { detail: 'Boom' } }));
+  await openLead(page);
+  const failed = page.waitForResponse((response) => response.url().endsWith('/notes/pdf/check'));
+  await page.locator('[data-guide="notebook.pdf"]').click();
+  expect((await failed).status()).toBe(500);
+  const dialog = page.getByRole('dialog', { name: 'Export note as PDF' });
+  await expect(dialog.getByRole('status')).toHaveCount(0);
+  await expect(dialog).not.toContainText('Before you export');
+  await dialog.getByRole('button', { name: 'Export PDF' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(state.exported).toEqual([['n1']]);
 });
 
 test('a picture bar in the note is one Tab away, walked with the arrows, and keeps the keyboard after a press', async ({ page }) => {

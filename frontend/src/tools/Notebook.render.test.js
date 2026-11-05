@@ -401,6 +401,162 @@ describe('a note, and how it prints', () => {
   });
 });
 
+describe('the check before export', () => {
+  const ROOF = { text: 'Picture "Roof" has no source.', line: 7, kind: 'unsourced' };
+  const TASKS = { text: '1 task is still open.', line: 7, kind: 'open-task' };
+  const GONE = { text: 'Picture "Quay" is no longer in the case.', line: null, kind: 'missing' };
+  /** The check answers `reply(notes)`, or waits for `hold.release()` when a hold is given. */
+  function answerCheck(reply, hold = null) {
+    const fallback = post.getMockImplementation();
+    post.mockImplementation(async (url, body) => {
+      if (!url.endsWith('/notes/pdf/check')) return fallback(url, body);
+      if (hold) await hold.promise;
+      return reply(body.notes);
+    });
+  }
+  function holding() {
+    const hold = {};
+    hold.promise = new Promise((resolve) => { hold.release = resolve; });
+    return hold;
+  }
+  const dialog = () => document.querySelector('[role="dialog"]');
+  const dialogText = () => dialog()?.textContent.replace(/\s+/g, ' ') ?? '';
+  const primary = () => dialog().querySelector('.btn-primary');
+  const exported = () => post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf'));
+  const exportFromNote = async () => {
+    target.querySelector('button[title="Open Old lead"]').click();
+    await settle();
+    target.querySelector('[data-guide="notebook.pdf"]').click();
+    await settle();
+  };
+
+  it('asks while the dialog is open, says it is checking, and lets the export go meanwhile', async () => {
+    const hold = holding();
+    answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [ROOF] })) }), hold);
+    await exportFromNote();
+    const [url, body] = post.mock.calls.find(([address]) => address.endsWith('/notes/pdf/check'));
+    expect(url).toBe('/api/cases/case-a/notes/pdf/check');
+    expect(body).toEqual({ notes: ['n1'] });
+    expect(dialog().querySelector('[role="status"]').textContent).toBe('Checking…');
+    expect(primary().disabled).toBe(false);
+    expect(primary().textContent.trim()).toBe('Export PDF');
+    primary().click();
+    await settle();
+    expect(exported()).toHaveLength(1);
+    expect(dialog()).toBeNull();
+    // the answer landing late opens nothing
+    hold.release();
+    await settle();
+    expect(dialog()).toBeNull();
+    expect(everything()).not.toContain('Before you export');
+  });
+
+  it('shows nothing more when all is clear', async () => {
+    answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [] })) }));
+    await exportFromNote();
+    expect(dialogText()).not.toContain('Checking…');
+    expect(dialogText()).not.toContain('Before you export');
+    expect(primary().textContent.trim()).toBe('Export PDF');
+  });
+
+  it('lists what it found before anything is written, and the export goes on anyway when asked', async () => {
+    answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [ROOF, GONE] })) }));
+    await exportFromNote();
+    expect(dialogText()).toContain('Before you export');
+    const rows = [...dialog().querySelectorAll('.before-item')];
+    expect(rows.map((row) => row.querySelector('.before-words').textContent)).toEqual([ROOF.text, GONE.text]);
+    // one note: no title over its list
+    expect(dialog().querySelector('.before-note')).toBeNull();
+    expect(rows[0].querySelector('button').textContent).toBe('Go to');
+    expect(rows[1].querySelector('button')).toBeNull();
+    expect(rows.map((row) => row.dataset.kind)).toEqual(['unsourced', 'missing']);
+    expect(exported()).toHaveLength(0);
+    expect(primary().textContent.trim()).toBe('Export anyway');
+    primary().click();
+    await settle();
+    expect(exported()[0][1].notes).toEqual(['n1']);
+    expect(dialog()).toBeNull();
+  });
+
+  it('goes to the line a warning is about, closing the dialog, with the keyboard in the note', async () => {
+    answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [ROOF] })) }));
+    await withMore();
+    target.querySelector('button[aria-label="Actions for Old lead"]').click();
+    flushSync();
+    anyButton('Export as PDF').click();
+    await settle();
+    const go = dialog().querySelector('.before-item button');
+    expect(document.getElementById(go.getAttribute('aria-describedby')).textContent).toBe(ROOF.text);
+    go.click();
+    await settle();
+    await settle();
+    expect(dialog()).toBeNull();
+    const { EditorView } = await import('@codemirror/view');
+    const view = EditorView.findFromDOM(target.querySelector('.cm-editor'));
+    expect(view.state.doc.lineAt(view.state.selection.main.head).number).toBe(8);
+    expect(target.querySelector('.cm-editor').contains(document.activeElement)).toBe(true);
+    expect(exported()).toHaveLength(0);
+  });
+
+  it('never holds the export back when the check fails', async () => {
+    answerCheck(() => { throw new Error('Server error'); });
+    await exportFromNote();
+    expect(dialogText()).not.toContain('Checking…');
+    expect(dialogText()).not.toContain('Before you export');
+    expect(primary().textContent.trim()).toBe('Export PDF');
+    primary().click();
+    await settle();
+    expect(exported()).toHaveLength(1);
+  });
+
+  it('groups what it found by note when several are exported, and goes to the right one', async () => {
+    answerCheck((notes) => ({
+      notes: notes.map((note) => ({
+        note, title: note === 'case' ? 'Case notes' : 'Old lead', warnings: note === 'n4' ? [] : note === 'case' ? [TASKS] : [ROOF, GONE],
+      })),
+    }));
+    await withMore();
+    target.querySelector('input[aria-label="Pick Old lead"]').click();
+    target.querySelector('input[aria-label="Pick Mast"]').click();
+    target.querySelector('input[aria-label="Pick Case notes"]').click();
+    flushSync();
+    buttonNamed('Export as PDF').click();
+    await settle();
+    const [, body] = post.mock.calls.find(([address]) => address.endsWith('/notes/pdf/check'));
+    expect(body.notes).toEqual(['n1', 'n4', 'case']);
+    // the notes with nothing to say are left out
+    expect([...dialog().querySelectorAll('.before-note')].map((title) => title.textContent)).toEqual(['Old lead', 'Case notes']);
+    const lists = [...dialog().querySelectorAll('.before-list')];
+    expect(lists.map((list) => list.getAttribute('aria-label'))).toEqual(['Old lead', 'Case notes']);
+    expect(lists[0].querySelectorAll('li')).toHaveLength(2);
+    expect(primary().textContent.trim()).toBe('Export anyway');
+    lists[1].querySelector('button').click();
+    await settle();
+    await settle();
+    expect(dialog()).toBeNull();
+    expect(text()).toContain('Case notes');
+    expect(target.querySelector('input[aria-label="Note name"]')).toBeNull();
+    const { EditorView } = await import('@codemirror/view');
+    const view = EditorView.findFromDOM(target.querySelector('.cm-editor'));
+    expect(view.state.doc.toString()).toBe('Log of the day');
+  });
+
+  it('forgets a check answered after the dialog was closed', async () => {
+    const hold = holding();
+    answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [ROOF] })) }), hold);
+    await exportFromNote();
+    anyButton('Cancel').click();
+    await settle();
+    hold.release();
+    await settle();
+    target.querySelector('[data-guide="notebook.pdf"]').click();
+    await settle();
+    // asked again, and shown once answered
+    expect(post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check'))).toHaveLength(2);
+    expect(dialogText()).toContain('Before you export');
+  });
+});
+
 describe('a template from Settings', () => {
   async function openTemplate() {
     templatesState.note = [{ id: 't1', name: 'House write-up', data: { body: '## Claim\n\n<!--? Who said it -->\n', folder: '', look: { style: 'brief' } } }];

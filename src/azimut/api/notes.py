@@ -19,6 +19,12 @@ set through `/notes/{id}/look`. The page pane asks `/notes/preview` for the PDF 
 the text being typed: the same renderer, the same bounds, nothing written. The
 faces a look can pick are listed, and their regular weights served for the Look
 control's samples, under `/api/notes/fonts`, outside any case.
+
+Before an export, `/notes/pdf/check` lays the chosen notes out in memory and says,
+note by note, what the PDF would get wrong (a picture no longer in the case, one
+with no source, a task left open, a link a reader cannot open): the warnings the
+page pane lists, with the line each is about and its kind. It writes nothing and
+never stands in the way: the export goes on whatever it finds.
 """
 
 from __future__ import annotations
@@ -467,6 +473,7 @@ def preview_response(
             ),
             # beside the list rather than in it, so a reader of the list alone keeps working
             "X-Note-Warning-Lines": _ascii_json(rendered.warning_lines[:MAX_HEADER_WARNINGS]),
+            "X-Note-Warning-Kinds": _ascii_json(rendered.warning_kinds[:MAX_HEADER_WARNINGS]),
             "X-Note-Pictures": _pictures_header(rendered.pictures),
         },
     )
@@ -633,6 +640,39 @@ def export_diagrams(case_id: str, body: NoteSelection) -> dict[str, Any]:
             fences.setdefault(pdf_engine.diagram_key(source), source)
     pending = list(fences.items())[:MAX_DIAGRAMS]
     return {"diagrams": [{"key": key, "source": source} for key, source in pending]}
+
+
+@router.post("/{case_id}/notes/pdf/check")
+def check_pdf(case_id: str, body: NoteSelection) -> dict[str, Any]:
+    """What each requested note's PDF would get wrong, before it is exported.
+
+    Every note is laid out in its own look, in memory, with no diagram drawn (a
+    fence prints as its source, which changes no warning), and nothing is written.
+    Each one answers in the order asked, with an empty list when all is well; one
+    that cannot be laid out answers the reason as its one warning.
+    """
+    case = get_case(case_id)
+    resolve = _resolver(case)
+    answered: list[dict[str, Any]] = []
+    for note_id in dict.fromkeys(body.notes):
+        title, text = _note_source(case, note_id)
+        warnings: list[dict[str, Any]]
+        try:
+            rendered = pdf_engine.render(
+                case, title=title, text=text, look=notelook.stored(case, note_id), note_id=note_id,
+                resolve=resolve,
+            )
+        except pdffonts.FontError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except pdf_engine.NotesPdfError as exc:
+            warnings = [{"text": str(exc)[:MAX_WARNING_CHARS], "line": None, "kind": pdf_engine.OTHER}]
+        else:
+            warnings = [
+                {"text": said[:MAX_WARNING_CHARS], "line": line, "kind": kind}
+                for said, line, kind in zip(rendered.warnings, rendered.warning_lines, rendered.warning_kinds)
+            ]
+        answered.append({"note": note_id, "title": title, "warnings": warnings})
+    return {"notes": answered}
 
 
 @router.post("/{case_id}/notes/pdf")

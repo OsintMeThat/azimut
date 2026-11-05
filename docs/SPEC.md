@@ -198,6 +198,7 @@ proof for publication.
 | ✅ **Command palette** | Ctrl+K or ⌘K searches tools, cases and current-case documents, starts with recently added items and protects unsaved work. |
 | ✅ **Notebook, written in place** | Opens on note cards with a search through their words, writes a note as it reads with @ citations, / blocks, callouts and tasks, keeps it beside every tool or in a tab of its own, starts notes from ready ones or templates, and lists each note in Details of what it cites. |
 | ✅ **Notebook reports** | Prints a note as Plain, Report, Brief or Journal in a choice of typefaces, with a cover, contents and TLP marking on A4 or Letter, captions, credits and live source links, shows its pages beside it while it is written, sizes pictures where they print, breaks pages, gathers notes as chapters, and starts from nine ready templates or Settings' own. |
+| ✅ **Report sources and check** | Credits every picture from what the case recorded, made-from pictures included, ends a report with a numbered list of its sources (addresses, archive, dates, SHA-256) linked from the text, and lists what a PDF would warn about before it is written. |
 
 ---
 
@@ -243,7 +244,7 @@ supplies, since a ridge ends the day well before the flat horizon does.
 |------|--------------|
 | **One sky frame** | Find's skyline, Camera Resection and Sky Clock read in one azimuth and elevation frame, so the sun and moon times the relief hides split the places a matching skyline leaves tied. |
 | **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
-| **Report Builder** | Draws the case into a report note: proofs, map views, a Timeline stretch and Sheet ranges as figures, a sources and imagery credits annex, internal and public editions, one self-contained HTML file readable offline, and a web article as a WordPress draft or a copy for Substack or Medium. |
+| **Report Builder** | Draws the case into a report note: proofs, map views, a Timeline stretch and Sheet ranges as figures, internal and public editions, one self-contained HTML file readable offline, and a web article as a WordPress draft or a copy for Substack or Medium. |
 | **Case Sync (Git)** | Push a case to a private or public Git remote, pull it back, and diff two revisions, so two analysts can work the same case. |
 
 Toward v4: archive-on-download and a Wayback CDX snapshot timeline with diff; web-page save
