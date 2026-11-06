@@ -23,9 +23,35 @@ describe('a frame in a scene', () => {
 
   it('holds an instant when it is the frame showing it', () => {
     expect(frameInMoment(3.2, m(3.2), FRAME)).toBe(true);
-    expect(frameInMoment(3.18, m(3.2), FRAME)).toBe(true);
+    // the frame's own timestamp, a hair either side of the one the player counted
+    expect(frameInMoment(3.1998, m(3.2), FRAME)).toBe(true);
+    expect(frameInMoment(3.2002, m(3.2), FRAME)).toBe(true);
     expect(frameInMoment(3.16, m(3.2), FRAME)).toBe(false);
     expect(frameInMoment(3.24, m(3.2), FRAME)).toBe(false);
+  });
+
+  it('is decided by the frame, not the float, on a real clip at 23.976 fps', () => {
+    // S kept the start as the player counts it; the frame captured there carries its
+    // pts, 0.24 ms earlier. All three frames of the passage are in it, and the one
+    // before is not.
+    const frame = 1 / 23.976;
+    const start = 238.44678011344678;
+    const passage = m(start, start + 3 * frame);
+    const pts = [238.446542, 238.446542 + frame, 238.446542 + 2 * frame];
+    expect(pts.map((t) => frameInMoment(t, passage, frame))).toEqual([true, true, true]);
+    expect(frameInMoment(238.446542 - frame, passage, frame)).toBe(false);
+    expect(frameInMoment(238.446542 + 3 * frame, passage, frame)).toBe(false);
+    expect(frameInMoment(238.446542, m(start), frame)).toBe(true);
+    expect(frameInMoment(238.446542 + frame, m(start), frame)).toBe(false);
+    const strip = pts.map((t, i) => ({ id: `f${i}`, time: t, url: `blob:${i}` }));
+    expect(framesOfScene(draft('sc', start, start + 3 * frame), strip, frame)).toHaveLength(3);
+    expect(frameScenes(strip, sceneList([], [draft('sc', start, start + 3 * frame)]), frame).size).toBe(3);
+  });
+
+  it('reads a frame as a thirtieth of a second while the clip\'s rate is unknown', () => {
+    expect(frameInMoment(1.01, m(1), undefined)).toBe(true);
+    expect(frameInMoment(1.02, m(1), undefined)).toBe(false);
+    expect(frameInMoment(1.02, m(1), 0)).toBe(false);
   });
 
   it('belongs to every scene that holds it, a proof about the whole video by its own frames', () => {

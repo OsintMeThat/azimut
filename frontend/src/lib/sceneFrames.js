@@ -8,19 +8,25 @@
  * Make the proof offers the scene's frames, all ticked. A draft about the whole
  * video marks no frame, since it would mark them all, but it offers every one.
  */
+import { DEFAULT_FPS } from './inspectPlayer.js';
 import { isStretch, sceneMoments, sceneStart, sceneTitle } from './scenes.js';
 
-// Far below a frame's length, far above a double's noise on a timestamp.
-const NOISE = 1e-4;
+/** A frame's length in seconds: the clip's, else a thirtieth while its rate is unknown. */
+const frameLength = (frame) => (frame > 0 ? frame : 1 / DEFAULT_FPS);
 
 /**
- * Whether the frame cut at `time`, `frame` seconds long, falls in a moment: from a
- * passage's start up to its end, or on the instant, which is the frame showing it.
+ * Whether the frame cut at `time`, `frame` seconds long, falls in a moment. Decided by
+ * the frame, never by the float: the time a frame keeps is read off the file, the
+ * time S keeps is counted by the player, and the two part by a hair (238.446542
+ * against 238.44678 at 23.976 fps). So each boundary gives half a frame. A frame is
+ * in a passage when most of it is, its middle between the start and the end, and it
+ * shows an instant when it starts within half a frame of it.
  */
 export function frameInMoment(time, moment, frame) {
   if (!Number.isFinite(time) || !Number.isFinite(moment?.start)) return false;
-  if (isStretch(moment)) return time >= moment.start - NOISE && time < moment.end - NOISE;
-  return time <= moment.start + NOISE && moment.start < time + frame - NOISE;
+  const half = frameLength(frame) / 2;
+  if (isStretch(moment)) return time + half >= moment.start && time + half < moment.end;
+  return time - half <= moment.start && moment.start < time + half;
 }
 
 /** The scenes the frame cut at `time` belongs to, in the order they are listed. */

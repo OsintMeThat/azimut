@@ -829,3 +829,138 @@ def test_the_date_follows_the_star_from_the_first_save_on(client, tmp_path):
     assert json.loads(_spec(cid, "Depot").read_text(encoding="utf-8"))["scene"] == {
         "video": first, "moments": [], "draft": "s1",
     }
+
+
+# -- a proof sent to the Trash gives its scene back ----------------------------------------
+
+
+def _drafts(client, cid, video):
+    return [s for s in _scenes(client, cid, video)["scenes"] if s["kind"] == "draft"]
+
+
+@needs_ffmpeg
+def test_a_deleted_proof_gives_each_moment_back_to_geolocate_and_takes_them_on_restore(client, tmp_path):
+    """A timecode is knowledge about the video: it does not leave with the proof."""
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _proof(client, cid, "Proof 32", _cut(client, cid, video, 1.0), scene={"video": video, "moments": [
+        {"start": 0.5, "end": 1.5}, {"start": 3.0},
+    ]})
+    # the video was never opened in Inspect: the work is filed for the scenes
+
+    deleted = client.delete(f"/api/cases/{cid}/proofs/Proof 32")
+    assert deleted.status_code == 200, deleted.text
+
+    given = _drafts(client, cid, video)
+    assert [(d["start"], d["end"], d["label"]) for d in given] == [(0.5, 1.5, "Proof 32"), (3.0, None, "Proof 32")]
+    ids = [d["id"] for d in given]
+    assert [s["id"] for s in _work(client, cid, video)["spec"]["scenes"]] == ids
+
+    restored = client.post(f"/api/cases/{cid}/trash/{deleted.json()['trash']}/restore")
+    assert restored.status_code == 200, restored.text
+    listed = _scenes(client, cid, video)
+    assert [s["kind"] for s in listed["scenes"]] == ["proof"]
+    assert listed["taken"] == sorted(ids)
+    assert json.loads(_spec(cid, "Proof 32").read_text(encoding="utf-8"))["scene"]["gave"] == ids
+    # hidden, never deleted: the work still holds them
+    assert [s["id"] for s in _work(client, cid, video)["spec"]["scenes"]] == ids
+
+    # a second delete gives nothing twice
+    deleted = client.delete(f"/api/cases/{cid}/proofs/Proof 32")
+    assert [d["id"] for d in _drafts(client, cid, video)] == ids
+    assert len(_work(client, cid, video)["spec"]["scenes"]) == 2
+
+
+@needs_ffmpeg
+def test_a_deleted_proof_about_the_whole_video_gives_one_scene_back(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    # an older proof, traced off its frame and stating no time
+    _proof(client, cid, "Proof 30", _cut(client, cid, video, 2.0))
+    _save_work(client, cid, video, scenes=[{"id": "s1", "start": 0.2, "end": None, "label": "Mast?"}])
+
+    deleted = client.delete(f"/api/cases/{cid}/proofs/Proof 30")
+
+    drafts = _drafts(client, cid, video)
+    assert [(d["start"], d["end"], d["label"]) for d in drafts] == [(None, None, "Proof 30"), (0.2, None, "Mast?")]
+    client.post(f"/api/cases/{cid}/trash/{deleted.json()['trash']}/restore")
+    assert [s.get("id") or s.get("proof") for s in _scenes(client, cid, video)["scenes"]] == ["s1", "Proof 30"]
+    # restored, the proof states the video it is about, still the whole of it
+    [scene] = [s for s in _scenes(client, cid, video)["scenes"] if s["kind"] == "proof"]
+    assert (scene["moments"], scene["at"]) == ([], [pytest.approx(2.0, abs=0.11)])
+
+
+@needs_ffmpeg
+def test_a_proof_made_from_a_scene_gives_that_scene_back_and_no_other(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save_work(client, cid, video, scenes=[{"id": "s2", "start": 2.0, "end": 3.5, "label": "Bridge?"}])
+    _proof(client, cid, "Bridge", _cut(client, cid, video, 2.5))
+    client.put(f"/api/cases/{cid}/proofs/Bridge/scene", json={"moments": [{"start": 2.1, "end": 3.4}], "draft": "s2"})
+    before = _spec(cid, "Bridge").read_bytes()
+
+    deleted = client.delete(f"/api/cases/{cid}/proofs/Bridge")
+
+    assert [(d["id"], d["start"], d["end"]) for d in _drafts(client, cid, video)] == [("s2", 2.0, 3.5)]
+    client.post(f"/api/cases/{cid}/trash/{deleted.json()['trash']}/restore")
+    assert _drafts(client, cid, video) == []
+    # nothing was written on the proof on its way out
+    assert _spec(cid, "Bridge").read_bytes() == before
+
+
+@needs_ffmpeg
+def test_a_scene_already_there_at_the_same_time_is_not_given_twice(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save_work(client, cid, video, scenes=[{"id": "s1", "start": 0.5, "end": 1.5, "label": "Depot?"}])
+    _proof(client, cid, "Depot", _cut(client, cid, video, 1.0), scene={"video": video, "moments": [
+        {"start": 0.5, "end": 1.5}, {"start": 2.0, "end": 3.0},
+    ]})
+
+    client.delete(f"/api/cases/{cid}/proofs/Depot")
+
+    assert [(d["start"], d["end"], d["label"]) for d in _drafts(client, cid, video)] == [
+        (0.5, 1.5, "Depot?"), (2.0, 3.0, "Depot"),
+    ]
+
+
+def test_a_proof_on_no_video_gives_nothing_back(client):
+    cid = _case(client)
+    _proof(client, cid, "Photo only", _upload_png(client, cid))
+    assert client.delete(f"/api/cases/{cid}/proofs/Photo only").status_code == 200
+    assert client.get(f"/api/cases/{cid}/inspect/works").json() == []
+
+
+@needs_ffmpeg
+def test_a_proof_leaving_with_its_video_gives_nothing_back(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _proof(client, cid, "Roundabout", _cut(client, cid, video, 1.0))
+    case = Case.open(cid)
+    ids = [
+        case.find_entity(attr="spec", value=layout.proof_spec_rel("Roundabout"))["id"],
+        case.find_entity(attr="path", value=video)["id"],
+    ]
+    res = client.post(f"/api/cases/{cid}/entities/delete", json={"ids": ids})
+    assert res.status_code == 200, res.text
+    assert client.get(f"/api/cases/{cid}/inspect/works").json() == []
+
+
+@needs_ffmpeg
+def test_a_given_back_scene_stays_named_on_the_proof_through_its_time_and_its_saves(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _proof(client, cid, "Depot", _cut(client, cid, video, 1.0), scene={"video": video, "moments": [{"start": 0.5}]})
+    deleted = client.delete(f"/api/cases/{cid}/proofs/Depot")
+    client.post(f"/api/cases/{cid}/trash/{deleted.json()['trash']}/restore")
+    gave = json.loads(_spec(cid, "Depot").read_text(encoding="utf-8"))["scene"]["gave"]
+
+    # its time taken back, then the composer saving it: the scenes it gave stay its own
+    assert _state(client, cid, "Depot").status_code == 200
+    opened = client.get(f"/api/cases/{cid}/proofs/Depot").json()
+    client.post(f"/api/cases/{cid}/proofs", json={"rename_from": "Depot", "title": "Depot",
+                                                   "spec": {k: v for k, v in opened.items() if k != "scene"}})
+    assert json.loads(_spec(cid, "Depot").read_text(encoding="utf-8"))["scene"] == {
+        "video": video, "moments": [], "draft": None, "gave": gave,
+    }
+    assert _drafts(client, cid, video) == []

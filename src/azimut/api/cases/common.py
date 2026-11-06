@@ -19,6 +19,7 @@ from fastapi import HTTPException
 
 from ...engine import entities as entity_engine
 from ...engine import links as link_engine
+from ...engine import scenes as scene_engine
 from ...engine import sheets as sheet_engine
 from ...engine import timeline as timeline_engine
 from ...engine import trash as trash_engine
@@ -102,6 +103,13 @@ def delete_entities_deep(case: Case, entity_ids: list[str]) -> dict[str, Any]:
                 if path and path not in existing:
                     scars.append({"entity": survivor_id, "path": path})
                     existing.add(path)
+
+        # A proof resting on a video gives its scene back to that video's Inspect work
+        # before its file moves: a timecode is knowledge about the video, and the Trash
+        # must not take it with the proof (`scenes.give_back`).
+        for entity in going:
+            if entity.get("type") == "proof":
+                scene_engine.give_back(case, entity, set(going_by_id))
 
         group = trash_engine.send(case, going, scars)
         try:

@@ -25,9 +25,11 @@ rename, so it is read first and the recorded path is only the fallback.
 **A scene still to prove lives in the video's Inspect work**, one instant, one
 stretch or the whole video, until a proof cites it (``scene.draft``). From then on the proof's own
 moments are the ones shown and the draft is left out, so a scene is never said
-twice, and a proof never writes into an Inspect work. The draft stays in the work
-all the same, hidden only while a proof in the case cites it: the proof sent to the
-Trash gives it back at its own time, and the proof restored takes it up again.
+twice, and a proof never writes into an Inspect work, but for one moment: as it
+leaves for the Trash. The draft stays in the work all the same, hidden only while a
+proof in the case cites it: the proof sent to the Trash gives it back at its own time,
+and the proof restored takes it up again. A proof that came from no draft gives its
+scene back as new ones (`give_back`), so no timecode leaves with a proof.
 """
 
 from __future__ import annotations
@@ -60,6 +62,8 @@ END_SLACK = 1.0
 MAX_MOMENTS = 20
 #: The longest Inspect scene id a proof keeps (`lib/inspect.js` `uid` is about 20).
 MAX_DRAFT_ID = 64
+#: The most scenes a proof gives back: one per moment, or one for the whole video.
+MAX_GIVEN = MAX_MOMENTS
 
 
 class UnknownProof(LookupError):
@@ -101,7 +105,9 @@ def _moment_order(moment: dict[str, Any]) -> tuple[float, float]:
 
 def read_scene(scene: Any) -> dict[str, Any] | None:
     """A stated scene in its one shape, ``{video, moments, draft}``, or None when it
-    names no video.
+    names no video. ``gave`` joins it when the proof once gave its scene back to the
+    video's work (`give_back`), and only then, so a proof that never did keeps the
+    bytes it had.
 
     A moment that does not read as one, an end with no start or an end before the
     start, is left out rather than guessed at. The shape before moments, one
@@ -117,11 +123,24 @@ def read_scene(scene: Any) -> dict[str, Any] | None:
         held = [{"start": scene.get("start"), "end": scene.get("end")}]
     moments = [m for m in (_moment(value) for value in held[:MAX_MOMENTS]) if m is not None]
     draft = scene.get("draft")
-    return {
+    held_gave = scene.get("gave")
+    gave = [g for g in held_gave if isinstance(g, str) and g] if isinstance(held_gave, list) else []
+    read: dict[str, Any] = {
         "video": video,
         "moments": sorted(moments, key=_moment_order),
         "draft": draft if isinstance(draft, str) and draft else None,
     }
+    if gave:
+        read["gave"] = list(dict.fromkeys(gave))[:MAX_GIVEN]
+    return read
+
+
+def cited_drafts(stated: dict[str, Any] | None) -> set[str]:
+    """The Inspect scenes a stated scene keeps hidden: the draft it took up and the
+    ones it gave back when it last went to the Trash."""
+    if not stated:
+        return set()
+    return ({stated["draft"]} if stated["draft"] else set()) | set(stated.get("gave") or [])
 
 
 def stated_scene(spec: dict[str, Any]) -> dict[str, Any] | None:
@@ -316,11 +335,10 @@ def video_scenes(case: Case, video: str) -> dict[str, Any]:
         for src in dict.fromkeys(_panel_sources(spec)):
             if src in origins and origins[src][0] == video:
                 used.setdefault(src, []).append({"proof": name, "title": spec.get("title") or name})
+        taken |= cited_drafts(stated_scene(spec))
         scene = proof_scene(spec, origins)
         if scene is None:
             continue
-        if scene["draft"]:
-            taken.add(scene["draft"])
         if scene["video"] == video:
             scenes.append(_proof_row(case, name, spec, scene))
 
@@ -490,10 +508,61 @@ def state_proof_scene(
         if wanted_draft is not None and held not in (None, wanted_draft):
             raise CaseError("this proof already takes up another scene")
         draft_id = wanted_draft or held
-        if not stated_moments and draft_id is None and target == traced:
+        gave = (stated or {}).get("gave")
+        if not stated_moments and draft_id is None and not gave and target == traced:
             spec.pop("scene", None)
         else:
-            spec["scene"] = {"video": target, "moments": stated_moments, "draft": draft_id}
+            spec["scene"] = {
+                "video": target, "moments": stated_moments, "draft": draft_id, **({"gave": gave} if gave else {}),
+            }
         media_engine.write_json_atomic(path, spec)
     # It names a video either way: the one stated, else the one its frames were cut from.
     return {"proof": name, **(proof_scene(spec, origins) or {})}
+
+
+def give_back(case: Case, proof: dict[str, Any], leaving: set[str]) -> list[str]:
+    """Give a proof's scene back to its video's Inspect work as the proof goes to the
+    Trash, and answer with the ids of the scenes added.
+
+    A timecode is knowledge about the video, not only the proof's, so it must not leave
+    with it: one scene to geolocate per moment the proof states, since such a scene
+    holds one, or one about the whole video when it states none, each named with the
+    proof's title. A proof that took a scene up, or already gave one back, adds nothing:
+    that scene is still in a work, and shows again on its own once no proof in the case
+    cites it. Nor does a proof on no video, or one whose video leaves with it.
+
+    The ids added are written on the proof (``scene.gave``) before its file moves to
+    the Trash. Restored, it cites them again, which hides them as a taken draft is
+    hidden; nothing is ever deleted from the work, so whatever the analyst did to them
+    meanwhile is kept, and a second delete gives nothing twice.
+    """
+    rel = (proof.get("attrs") or {}).get("spec")
+    if not isinstance(rel, str) or not rel:
+        return []
+    path = case.resolve_inside(rel)
+    with case.lock:
+        try:
+            spec = _read_proof(path)
+        except (UnknownProof, CaseError):
+            return []
+        video, moments = star_video(case, spec)
+        holder = case.find_entity(attr="path", value=video) if video else None
+        if video is None or holder is None or holder["id"] in leaving:
+            return []
+        stated = stated_scene(spec)
+        cited = cited_drafts(stated)
+        if cited & inspectwork.scene_ids(case):
+            return []
+        title = str(spec.get("title") or proof.get("label") or "")
+        wanted = [{"start": m["start"], "end": m["end"]} for m in moments] or [{"start": None, "end": None}]
+        added = inspectwork.add_scenes(case, video, [{**m, "label": title} for m in wanted])
+        if not added:
+            return []
+        spec["scene"] = {
+            "video": video,
+            "moments": moments,
+            "draft": stated["draft"] if stated else None,
+            "gave": added,
+        }
+        media_engine.write_json_atomic(path, spec)
+        return added

@@ -12,10 +12,11 @@
   import { captureMoment, frameDuration, preciseClock, seekInto, shownFrameTime } from '../lib/inspectPlayer.js';
   import { INSPECT_HELP } from '../lib/inspectHelp.js';
   import {
-    isStretch, momentKey, newScene, sameMoments, sceneList, sceneMarks, scenePassage, sceneStart, sceneTime,
+    editClock, isStretch, momentKey, newScene, sameMoments, sceneList, sceneMarks, scenePassage, sceneStart, sceneTime,
     sceneTitle, sceneToEnd, snapToFrame, stretchFromShot, timeWords,
   } from '../lib/scenes.js';
-  import { frameScenes, frameToCapture, frameUses, framesOfScene, proofHandoff } from '../lib/sceneFrames.js';
+  import { frameScenes, frameToCapture, frameUses, framesOfScene, proofHandoff, scenesAt } from '../lib/sceneFrames.js';
+  import { createSceneOffer } from '../lib/sceneOffer.js';
   import { SceneEdit } from '../lib/sceneEdit.svelte.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import {
@@ -175,6 +176,7 @@
     if (uiState.tool !== 'inspect') {
       autosave.flush();
       videoEl?.pause();
+      sceneOffer.withdraw();
     }
   });
   $effect(() => () => autosave.flush());
@@ -282,6 +284,7 @@
     takenScenes = [];
     usedFrames = {};
     proofChooser = null;
+    sceneOffer.reset();
     sceneEdit.close();
     scenesOpen = false;
     clipHistory.reset(clipSnapshot());
@@ -624,7 +627,30 @@
 
   function captureNow() {
     if (!isVideo) return;
-    capture(captureMoment(shared.currentTime, shared.frameTime));
+    captureFrame(captureMoment(shared.currentTime, shared.frameTime));
+  }
+
+  // A capture the analyst asked for (C, Capture frame, a shot's or a pick's capture):
+  // a new frame in no scene of the clip offers to start one there, since the Scenes
+  // button is easy to miss (`lib/sceneOffer.js`). The frame Make the proof captures
+  // for its scene is in it, and is not asked about.
+  const sceneOffer = createSceneOffer();
+  onDestroy(() => sceneOffer.withdraw());
+
+  async function captureFrame(time) {
+    const before = new Set(work.frames.map((f) => f.id));
+    const frame = await capture(time);
+    if (frame && !before.has(frame.id)) offerScene(frame);
+  }
+
+  function offerScene(frame) {
+    if (!isVideo || frame.time == null || scenesAt(frame.time, scenes, frameDur).length) return;
+    const run = openRun;
+    const at = frame.time;
+    sceneOffer.offer(`Frame captured at ${editClock(at)}`, 'Add a scene here', () => {
+      if (run !== openRun || scenesAt(at, scenes, frameDur).length) return;
+      keepScene({ start: at }, (scene) => `Scene kept at ${sceneTime(scene)}`);
+    });
   }
 
   function select(id) {
@@ -903,9 +929,25 @@
       listedScenes = res.scenes ?? [];
       takenScenes = res.taken ?? [];
       usedFrames = res.used ?? {};
+      adoptGivenBack(listedScenes);
     } catch {
       // the list is a reading: without it the drafts still show, and a reopen asks again
     }
+  }
+
+  /**
+   * A proof sent to the Trash gives its scene back to this work on the server
+   * (`engine/scenes.give_back`). A draft the server lists that this tab never held,
+   * neither now nor at its last save, is one of those: it joins the work here, or the
+   * next save would write it out again.
+   */
+  function adoptGivenBack(listed) {
+    const saved = savedSignature ? JSON.parse(savedSignature).scenes ?? [] : [];
+    const known = new Set([...work.scenes, ...saved].map((sc) => sc.id));
+    const given = listed.filter((sc) => sc.kind === 'draft' && !known.has(sc.id));
+    if (!given.length) return;
+    work.scenes = [...work.scenes, ...given.map(({ id, start, end, label }) => ({ id, start, end, label }))];
+    clipHistory.reset(clipSnapshot());
   }
 
   // Coming back to Inspect reads the list again: a proof saved meanwhile joins it.
@@ -940,6 +982,7 @@
     if (!stretch) return null;
     const scene = newScene(stretch);
     work.scenes.push(scene);
+    sceneOffer.quiet();
     clipChanged(message(scene));
     return scene;
   }
@@ -1676,7 +1719,7 @@
                 onaddmark={addMark}
                 onremovemark={removeMark}
                 onseek={seekFrame}
-                oncapture={capture}
+                oncapture={captureFrame}
                 {scan}
                 {scanning}
                 progress={scanProgress}

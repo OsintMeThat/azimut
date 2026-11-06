@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any
 from PIL import Image
 
 from .. import layout
-from ..workspace import CaseError
+from ..workspace import CaseError, _new_id
 from . import links as link_engine
 from . import media as media_engine
 from .sheets import replace_atomic
@@ -407,6 +407,52 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
             filed = case.add_entity(WORK_TYPE, title, attrs={"spec": rel}, by=PRODUCER)
         link_engine.sync(case, filed["id"], link_engine.DEPENDS_ON, [subject], by=PRODUCER)
     return {"name": Path(rel).stem, "title": title}
+
+
+def scene_ids(case: "Case") -> set[str]:
+    """The id of every scene still to prove, in every file's work."""
+    return {
+        scene["id"]
+        for _rel, spec in _work_specs(case)
+        for scene in spec.get("scenes") or []
+        if isinstance(scene, dict) and isinstance(scene.get("id"), str)
+    }
+
+
+def _same_time(a: Any, b: Any) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    return abs(float(a) - float(b)) < 1e-6
+
+
+def add_scenes(case: "Case", subject: str, scenes: list[dict[str, Any]]) -> list[str]:
+    """Add scenes to prove to a file's work, filing the work if it has none yet, and
+    answer with the ids of those added.
+
+    A scene already there at the same time is not added twice, and the work keeps no
+    more than it ever holds: past the limit the rest are left out. Each scene is
+    ``{start, end, label}``, given an id here.
+    """
+    with case.lock:
+        found = _settle(case, subject)
+        spec = dict(found[1]) if found else {"frames": []}
+        held = [s for s in spec.get("scenes") or [] if isinstance(s, dict)]
+        taken = {s.get("id") for s in held}
+        added: list[str] = []
+        for scene in scenes:
+            if len(held) >= MAX_SCENES:
+                break
+            if any(_same_time(s.get("start"), scene["start"]) and _same_time(s.get("end"), scene["end"]) for s in held):
+                continue
+            scene_id = _new_id("sc")
+            while scene_id in taken:
+                scene_id = _new_id("sc")
+            taken.add(scene_id)
+            held.append({"id": scene_id, "start": scene["start"], "end": scene["end"], "label": scene["label"]})
+            added.append(scene_id)
+        if added:
+            save_work(case, subject, {**spec, "scenes": held})
+        return added
 
 
 def follow_file_rename(case: "Case", subject: str, old_labels: list[str], label: str) -> None:

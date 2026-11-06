@@ -58,10 +58,11 @@ vi.mock('../lib/api.js', () => ({ api: { get, put, post, del, patch } }));
 
 // Reactive, so a change made elsewhere in the case can reach the open file.
 const caseState = $state({ current: { id: 'case-a', folders: [] }, rev: 0 });
-const uiState = { tool: 'inspect', inspectPath: null, openInspect: null, focusMedia: null };
+const uiState = { tool: 'inspect', inspectPath: null, openInspect: null, focusMedia: null, toasts: [] };
 const toast = vi.fn();
+const dismissToast = vi.fn();
 const reloadCase = vi.fn(async () => {});
-vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast, reloadCase }));
+vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast, dismissToast, reloadCase }));
 vi.mock('../lib/navigate.js', () => ({ openInReverseSearch: vi.fn() }));
 const deletedToast = vi.fn();
 vi.mock('../lib/trash.js', () => ({ deletedToast }));
@@ -727,6 +728,41 @@ describe('the scenes of the clip, in the strip and in a proof', () => {
     expect(bands()).toEqual(['5%']);
   });
 
+  it('takes in the scenes a proof gave back on its way to the Trash, once each', async () => {
+    const draftRow = (id, start, end, label) => ({ kind: 'draft', id, start, end, label });
+    keep([], [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
+    scenesRead([draftRow('sc_1', 1, 4, 'bridge?')]);
+    await start();
+    await openFile('Convoy clip');
+    await settle(10);
+
+    // a proof deleted elsewhere: its two moments come back as scenes to geolocate
+    scenesRead([draftRow('sc_1', 1, 4, 'bridge?'), draftRow('sc_back1', 6, 8, 'Depot'), draftRow('sc_back2', 12, null, 'Depot')]);
+    caseState.rev += 1;
+    await settle(10);
+    await afterQuiet();
+    expect(put.mock.calls.at(-1)[1].spec.scenes.map((sc) => [sc.id, sc.start, sc.end, sc.label])).toEqual([
+      ['sc_1', 1, 4, 'bridge?'], ['sc_back1', 6, 8, 'Depot'], ['sc_back2', 12, null, 'Depot'],
+    ]);
+    caseState.rev += 1;
+    await settle(10);
+    await afterQuiet();
+    expect(put.mock.calls.at(-1)[1].spec.scenes).toHaveLength(3);
+
+    // one taken back here before its removal was saved is not taken in again
+    playheadAt(15);
+    press('s');
+    await afterQuiet();
+    const kept = put.mock.calls.at(-1)[1].spec.scenes;
+    expect(kept).toHaveLength(4);
+    press('z', { ctrlKey: true });
+    scenesRead(kept.map((sc) => draftRow(sc.id, sc.start, sc.end, sc.label)));
+    caseState.rev += 1;
+    await settle(10);
+    await afterQuiet();
+    expect(put.mock.calls.at(-1)[1].spec.scenes.map((sc) => sc.id)).toEqual(['sc_1', 'sc_back1', 'sc_back2']);
+  });
+
   it('offers the scene\'s frames ticked, saves those not in the case, and hands the proof over', async () => {
     keep([frame('fr_a', 2), frame('fr_b', 5.5), frame('fr_c', 3.5)], [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
     post.mockImplementation(async (path, body) => (path.endsWith('/save-frames')
@@ -809,5 +845,112 @@ describe('the scenes of the clip, in the strip and in a proof', () => {
     expect(uiState.tool).toBe('inspect');
     expect(uiState.proofScene).toBeUndefined();
     expect(dialog()).not.toBeNull();
+  });
+});
+
+describe('a frame captured in no scene', () => {
+  let seq = 0;
+  const offers = () => uiState.toasts.filter((t) => t.action?.label === 'Add a scene here');
+  const keep = (scenes) => {
+    saved['media/clip.mp4'] = {
+      name: 'Convoy clip',
+      title: 'Convoy clip',
+      spec: { source: { path: 'media/clip.mp4', kind: 'video' }, videoAdjust: {}, videoRotation: 0, frames: [], scenes, activeFrameId: null },
+    };
+  };
+  async function captureAt(time) {
+    playheadAt(time);
+    press('c');
+    await settle(10);
+  }
+
+  beforeEach(() => {
+    uiState.toasts = [];
+    // the toasts as the app keeps them, so one can be rewritten in place
+    toast.mockImplementation((message, kind, timeout, action) => {
+      uiState.toasts.push({ id: ++seq, message, kind, action });
+      return seq;
+    });
+    dismissToast.mockImplementation((id) => {
+      const index = uiState.toasts.findIndex((t) => t.id === id);
+      if (index !== -1) uiState.toasts.splice(index, 1);
+    });
+    // the server names the frame at 25 fps, and the picture loads
+    fetch.mockImplementation(async (url, init) => {
+      const { time } = JSON.parse(init.body);
+      const headers = { 'X-Frame-Time': (Math.floor(time * 25 + 1e-6) / 25).toFixed(6) };
+      return new Response(new Blob(['png'], { type: 'image/png' }), { headers });
+    });
+    vi.stubGlobal('Image', class {
+      set src(_url) {
+        Object.assign(this, { naturalWidth: 640, naturalHeight: 360 });
+        queueMicrotask(() => this.onload?.());
+      }
+    });
+  });
+
+  afterEach(() => {
+    toast.mockReset();
+    dismissToast.mockReset();
+  });
+
+  it('offers to add a scene there, which keeps an instant the way S does', async () => {
+    await start();
+    await openFile('Convoy clip');
+    await captureAt(2.01);
+
+    const [offer] = offers();
+    expect(offer.message).toBe('Frame captured at 0:02');
+    offer.action.onClick();
+    flushSync();
+
+    expect(toast).toHaveBeenCalledWith('Scene kept at 0:02', 'info', 6000, expect.objectContaining({ label: 'Undo' }));
+    await afterQuiet();
+    expect(put.mock.calls.at(-1)[1].spec.scenes).toEqual([{ id: expect.any(String), start: 2, end: null, label: '' }]);
+    expect(target.querySelectorAll('.strip > div.tile .scene-dot')).toHaveLength(1);
+  });
+
+  it('asks nothing of a frame already in a scene', async () => {
+    keep([{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
+    await start();
+    await openFile('Convoy clip');
+    await captureAt(2.51);
+
+    expect(target.querySelectorAll('.strip > div.tile')).toHaveLength(1);
+    expect(offers()).toEqual([]);
+  });
+
+  it('keeps one offer through quick captures, pointing at the latest', async () => {
+    await start();
+    await openFile('Convoy clip');
+    await captureAt(6.01);
+    await captureAt(8.01);
+
+    expect(target.querySelectorAll('.strip > div.tile')).toHaveLength(2);
+    const all = offers();
+    expect(all.map((t) => t.message)).toEqual(['Frame captured at 0:08']);
+    all[0].action.onClick();
+    await afterQuiet();
+    expect(put.mock.calls.at(-1)[1].spec.scenes.map((sc) => sc.start)).toEqual([8]);
+  });
+
+  it('keeps quiet once a scene is kept with S', async () => {
+    await start();
+    await openFile('Convoy clip');
+    await captureAt(6.01);
+    expect(offers()).toHaveLength(1);
+    playheadAt(10);
+    press('s');
+    expect(offers()).toEqual([]);
+    await captureAt(12.01);
+    expect(offers()).toEqual([]);
+  });
+
+  it('offers nothing on an image', async () => {
+    await start();
+    await openFile('Roof');
+    press('c');
+    await settle(10);
+    expect(offers()).toEqual([]);
   });
 });

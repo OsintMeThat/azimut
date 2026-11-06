@@ -234,6 +234,22 @@ test('marks a captured frame with the colour of each scene it falls in, by its t
   await expect(tiles.nth(2).getByTestId('scene-dots')).toHaveAttribute('title', 'In a scene to geolocate');
 });
 
+test('offers a scene on a frame captured in none, and keeps an instant there in one press', async ({ page }) => {
+  const { saves } = await openSteps(page);
+
+  await seekTo(page, 0.5);
+  await page.keyboard.press('c');
+  const add = page.getByRole('button', { name: 'Add a scene here' });
+  await expect(add).toBeVisible();
+  await expect(page.locator('.toast', { has: add })).toContainText('Frame captured at 0:00.48');
+  await add.click();
+  await expect.poll(() => saves.at(-1)?.spec?.scenes).toEqual([
+    { id: expect.any(String), start: expect.closeTo(0.48, 3), end: null, label: '' },
+  ]);
+  await expect(page.locator('.strip > div.tile .scene-dot')).toHaveCount(1);
+  await expect(add).toHaveCount(0);
+});
+
 /** The scenes drawer's row for the scene at `index`, and its time opened. */
 async function openTime(page, index = 0) {
   const drawer = page.getByRole('complementary', { name: 'Scenes' });
