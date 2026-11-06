@@ -92,7 +92,7 @@ EXTENSION_ORIGIN_SCHEMES = ("chrome-extension://", "moz-extension://", "safari-w
 # source site's own on-screen credits ride along inside the pixels; this band
 # restates the operator so a cropped capture can never shed it.
 ATTRIBUTIONS = {
-    "google-maps": "Map data © Google",
+    "google-maps": "Map data ©{year} Google",
     "google-earth": "Google Earth",
     "bing-maps": "© Microsoft — Bing Maps",
     "yandex-maps": "© Yandex Maps",
@@ -107,13 +107,44 @@ _SENTINEL_DATASET = re.compile(r"S[1-5]")
 _SERVICE_DATASET = "COPERNICUS_CLMS_"
 
 
-def screenshot_credit(site: str, url: str, imagery_date: str | None) -> str:
+#: Who runs each map site, named first when the page's own credit leaves it out
+#: (Google's French strip reads "Données cartographiques ©2026", no name).
+OPERATORS = {
+    "google-maps": "Google",
+    "google-earth": "Google",
+    "bing-maps": "Microsoft",
+    "yandex-maps": "Yandex",
+    "apple-maps": "Apple",
+}
+#: The most of the page's own credit kept, in characters.
+SCREEN_CREDIT_MAX = 400
+
+
+def _screen_credit(text: str) -> str:
+    """The page's own credit line, one line of printable text, each part said once:
+    Google lists a provider again for every set of tiles in view."""
+    line = " ".join("".join(ch for ch in text if ch.isprintable()).split())[:SCREEN_CREDIT_MAX]
+    parts: list[str] = []
+    for chunk in line.split(" · "):
+        for part in (piece.strip() for piece in chunk.split(", ")):
+            if part and part not in parts:
+                parts.append(part)
+    return ", ".join(parts)
+
+
+def screenshot_credit(site: str, url: str, imagery_date: str | None, screen: str = "", year: int | None = None) -> str:
     """The credit burned under a screenshot of ``url``.
 
     Copernicus asks for its notice with the data's year, so a Copernicus Browser
     shot is credited by the collection it shows, Sentinel when the address names
     none. Any other collection there (Landsat, the DEM, contributing missions) is
-    credited to the site, whose own credits ride in the pixels.
+    credited to the site.
+
+    ``screen`` is the map's own credit line, read off the page when the capture was
+    taken: the providers of the imagery in view (Airbus, CNES, Maxar…), which the
+    licences ask to be named with the picture and which a selection rarely holds.
+    It is printed as the page words it, the site's operator named first when it
+    leaves it out. Without it the site's own line goes, Google's with the year.
     """
     if site == "copernicus-browser":
         dataset = (parse_qs(urlsplit(url).query).get("datasetId") or [""])[0]
@@ -122,7 +153,12 @@ def screenshot_credit(site: str, url: str, imagery_date: str | None) -> str:
         if dataset.startswith(_SERVICE_DATASET):
             return copernicus_credit.service(imagery_date)
         return "Copernicus Browser"
-    return ATTRIBUTIONS.get(site, f"© {urlsplit(url).netloc.lower()}")
+    shown = _screen_credit(screen)
+    if shown:
+        operator = OPERATORS.get(site)
+        return f"{operator} · {shown}" if operator and operator.lower() not in shown.lower() else shown
+    said = ATTRIBUTIONS.get(site, f"© {urlsplit(url).netloc.lower()}")
+    return said.replace("{year}", str(year or datetime.now(timezone.utc).year))
 
 
 def require_token(x_azimut_token: str = Header(default="")) -> None:
@@ -261,6 +297,8 @@ async def ingest_screenshot(
     device_scale: float = Form(default=1.0, gt=0, le=8),
     # which extension build took the shot — provenance, nothing else keys on it
     extension: str = Form(default="", max_length=32),
+    # the map's own credit line, read off the page (`overlay.js`)
+    screen_credit: str = Form(default="", max_length=SCREEN_CREDIT_MAX),
 ) -> dict[str, Any]:
     """File one user-initiated screenshot of an external map as a capture.
 
@@ -326,7 +364,7 @@ async def ingest_screenshot(
         if scale_north
         else None
     )
-    attribution = screenshot_credit(site, url, parsed["imagery_date"])
+    attribution = screenshot_credit(site, url, parsed["imagery_date"], screen_credit)
     img = tiles.burn_attribution(img, attribution)
 
     case = get_case(case_id) if case_id else Case.create("Scratch session", scratch=True)

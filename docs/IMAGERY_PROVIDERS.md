@@ -184,7 +184,7 @@ What the screen-pixel route still forces, whatever supplies the frame:
 |---|---|
 | The tab frame covers the whole viewport, including Azimut chrome | `.map-wrap.grabbing` hides the HUD, controls and child reference windows through `:global`. The marker stays because tile captures burn one into their output too. |
 | Browser zoom or resize can make a frame belong to the wrong surface | Validate every frame with `lib/screenCrop.js isRegistered` and the viewport aspect; refuse mismatches. |
-| `captureVisibleTab` needs `activeTab` or `<all_urls>`; host permission is insufficient | One extension click grants `activeTab` for the SPA tab's life. The app explains this once. Never request `<all_urls>`. |
+| `captureVisibleTab` needs `activeTab` or `<all_urls>`; host permission is insufficient | One extension click grants `activeTab` for the SPA tab's life. The app explains this once. `<all_urls>` is only ever the optional permission the notes panel's Add asks for at run time (SPEC §9), never a required one. |
 
 **Provenance:** `framed:true` means lat/lon is the registered crop centre.
 `framed:false` means lat/lon records only the map view used while filing a pasted
@@ -200,11 +200,11 @@ One MV3 extension (Chrome/Edge + Firefox), two flows:
 
 | | Azimut's Maps JS basemap | External map sites |
 |---|---|---|
-| Trigger | the app's own Capture button (bridge content script relays) | toolbar click / `Alt+Shift+A` → popup → drag an area |
+| Trigger | the app's own Capture button (bridge content script relays) | toolbar click / `Alt+Shift+A` → popup → drag an area; or into the note: the panel's Add, a right-click or `Alt+Shift+S` |
 | Sites | localhost only | Google Maps/Earth, Bing, Yandex, OSM, Apple Maps, Zoom Earth, Satellites.pro and Copernicus Browser; endpoint also refuses non-map sites |
 | Metadata | app view (`framed:true`) | parsed only from the URL: coordinates, zoom, bearing, place name and any encoded imagery date; correctable in the popup; may be empty |
 | Filing | same-origin, no pairing | token-gated `POST /api/ingest/screenshot`, CORS limited to extension origins; `/api/events` refreshes open app tabs |
-| Attribution | burned by the app | burned server-side per site (`api/ingest.py screenshot_credit`; Copernicus Browser by the collection its address names, § Copernicus credit), source URL + site + timestamp always in provenance |
+| Attribution | burned by the app | burned server-side per site (`api/ingest.py screenshot_credit`; Copernicus Browser by the collection its address names, § Copernicus credit), source URL + site + timestamp always in provenance. A selection rarely holds the map's own credit strip, and Google's guidelines want the imagery providers it names (Airbus, CNES, Maxar…) with the picture, never cropped out: the overlay reads the strip's `©` texts at the foot of the window and sends them (`screen_credit`), which is burned as the page words it, each part once, the operator named first when it leaves it out (`Google · Images ©2026 Airbus, CNES / Airbus, Maxar Technologies, Données cartographiques ©2026`). Without it the site's own line goes, Google's with the year (`Map data ©2026 Google`). |
 
 The extension only screenshots and sends the URL. Every URL format rule lives in
 `engine/mapsites.py`; the popup prefill is

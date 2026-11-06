@@ -39,14 +39,37 @@
     window.__azimutOverlayActive = false;
   }
 
+  /**
+   * The map's own credit line as the page shows it: the short texts with a © near
+   * the foot of the window, where every map site keeps them. A selection rarely
+   * holds that strip, and the providers it names (Airbus, Maxar…) must still go
+   * under the picture, so they are read here and sent with the rectangle.
+   */
+  function screenCredit() {
+    const foot = window.innerHeight - 120;
+    const seen = new Set();
+    const parts = [];
+    const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node && parts.length < 8; node = walker.nextNode()) {
+      const text = String(node.nodeValue || "").replace(/\s+/g, " ").trim();
+      if (!text.includes("\u00a9") || text.length > 200 || seen.has(text)) continue;
+      const box = node.parentElement?.getBoundingClientRect?.();
+      if (!box || !box.width || box.bottom < foot || box.top > window.innerHeight) continue;
+      seen.add(text);
+      parts.push(text);
+    }
+    return parts.join(" \u00b7 ").slice(0, 400);
+  }
+
   function finish(rect) {
+    const credit = rect ? screenCredit() : "";
     teardown();
     // let the dimming actually leave the composited page before the grab
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         api.runtime.sendMessage(
           rect
-            ? { type: "area-selected", rect, viewportW: window.innerWidth }
+            ? { type: "area-selected", rect, viewportW: window.innerWidth, credit }
             : { type: "area-cancelled" }
         );
       })

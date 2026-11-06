@@ -8,6 +8,7 @@ of those walls.
 """
 
 import io
+from datetime import datetime, timezone
 import os
 import struct
 import zlib
@@ -96,7 +97,7 @@ def test_screenshot_files_as_a_capture_with_provenance(client):
     assert body["site"] == "google-maps"
     assert body["imagery_mode"] is None
     assert body["source_url"].startswith("https://www.google.com/maps/")
-    assert body["attribution"] == "Map data © Google"
+    assert body["attribution"] == f"Map data ©{datetime.now(timezone.utc).year} Google"
     assert body["attribution_burned"] is True
     # the footer band grew the image — attribution is pixels, not metadata
     assert body["height"] == 200 + tiles.ATTRIBUTION_BAND
@@ -105,6 +106,40 @@ def test_screenshot_files_as_a_capture_with_provenance(client):
     assert len(listed) == 1
     assert listed[0]["lat"] == 48.8584
     assert listed[0]["method"] == "screenshot"
+
+
+def test_a_screenshot_is_credited_as_the_map_credits_itself(client):
+    """A selection rarely holds the map's own credit strip, and the providers it
+    names must still go with the picture: the extension reads it off the page."""
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Credits"}).json()["id"]
+    shown = ("Images ©2026 Airbus, Images ©2026 Airbus, CNES / Airbus, Maxar Technologies, "
+             "Données cartographiques ©2026")
+    body = _post(client, token=token, case_id=cid, screen_credit=shown).json()
+    assert body["attribution"] == (
+        "Google · Images ©2026 Airbus, CNES / Airbus, Maxar Technologies, Données cartographiques ©2026"
+    )
+    assert body["attribution_burned"] is True
+    # a credit longer than the field allows is refused, not cut silently
+    assert _post(client, token=token, case_id=cid, screen_credit="©" * 401).status_code == 422
+
+
+def test_the_page_s_credit_names_its_operator_once_and_keeps_its_words():
+    from azimut.api.ingest import screenshot_credit
+
+    google = "https://www.google.com/maps/@48.8,2.29,17z"
+    assert screenshot_credit("google-maps", google, None, "Imagery ©2026 Maxar Technologies, Map data ©2026 Google") == (
+        "Imagery ©2026 Maxar Technologies, Map data ©2026 Google"
+    )
+    bing = "https://www.bing.com/maps?cp=48.8~2.29&lvl=17&style=h"
+    assert screenshot_credit("bing-maps", bing, None, "© 2026 Microsoft Corporation · © 2026 Maxar ©CNES (2026)") == (
+        "© 2026 Microsoft Corporation, © 2026 Maxar ©CNES (2026)"
+    )
+    # control characters and runs of spaces go; a site with no operator listed keeps the page's words
+    assert screenshot_credit("zoom-earth", "https://zoom.earth/maps/satellite/", None, "©\x00 2026\n  Zoom   Earth") == "© 2026 Zoom Earth"
+    # with no credit read, the site's own line, Google's with the year
+    assert screenshot_credit("google-maps", google, None, "", year=2025) == "Map data ©2025 Google"
+    assert screenshot_credit("bing-maps", bing, None, "   ") == "© Microsoft — Bing Maps"
 
 
 def test_a_screenshot_names_the_record_it_filed_so_a_note_can_show_it(client):

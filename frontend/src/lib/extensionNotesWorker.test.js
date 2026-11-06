@@ -419,7 +419,7 @@ describe('a right-click', () => {
     await settle();
 
     const done = await run.handle(
-      { type: 'area-selected', rect: { x: 100, y: 50, w: 300, h: 200 }, viewportW: 1000 },
+      { type: 'area-selected', rect: { x: 100, y: 50, w: 300, h: 200 }, viewportW: 1000, credit: 'Images ©2026 Maxar Technologies' },
       { tab: MAP }
     );
     expect(done).toEqual({ ok: true });
@@ -437,6 +437,8 @@ describe('a right-click', () => {
     expect(init.body.get('case_id')).toBe('case-1');
     expect(init.body.get('url')).toBe(MAP.url);
     expect(init.body.get('lat')).toBe('48.85');
+    // the map's own credit line, read off the page with the rectangle
+    expect(init.body.get('screen_credit')).toBe('Images ©2026 Maxar Technologies');
     expect(init.headers['X-Azimut-Token']).toBe('tok-123');
     expect(run.session.has('pending:6')).toBe(false);
   });

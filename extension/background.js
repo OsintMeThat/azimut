@@ -121,6 +121,10 @@ async function ingest(blob, meta) {
   }
   form.append("captured_at", new Date().toISOString());
   form.append("extension", api.runtime.getManifest().version);
+  // the map's own credit line, read off the page: the selection rarely holds it
+  if (typeof meta.screenCredit === "string" && meta.screenCredit.trim()) {
+    form.append("screen_credit", meta.screenCredit.trim().slice(0, 400));
+  }
   let r;
   try {
     r = await fetch(`${backendUrl}/api/ingest/screenshot`, {
@@ -1392,7 +1396,7 @@ async function finishNoteCapture(msg, tab, meta) {
     const dataUrl = await withoutPanel(tab.id, () => inQuota(() => captureActiveTab(tab.windowId)));
     const { blob, scale } = await cropDataUrl(dataUrl, msg.rect, msg.viewportW);
     const { note, ...filed } = meta;
-    const body = await ingest(blob, { ...filed, caseId: panel.caseId || meta.caseId, deviceScale: scale });
+    const body = await ingest(blob, { ...filed, caseId: panel.caseId || meta.caseId, deviceScale: scale, screenCredit: msg.credit });
     tellPanel(port, {
       type: "put",
       put: { action: "picture", url: meta.url, title: note.title, entityId: body.entity_id },
@@ -1594,7 +1598,7 @@ async function handle(msg, sender) {
     try {
       const dataUrl = await withoutPanel(sender.tab.id, () => captureActiveTab(sender.tab.windowId));
       const { blob, scale } = await cropDataUrl(dataUrl, msg.rect, msg.viewportW);
-      const body = await ingest(blob, { ...meta, deviceScale: scale });
+      const body = await ingest(blob, { ...meta, deviceScale: scale, screenCredit: msg.credit });
       notify("Capture filed into Azimut", body.title);
       return { ok: true };
     } catch (e) {

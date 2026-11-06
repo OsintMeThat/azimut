@@ -715,10 +715,16 @@ describe('the popup opens the panel', () => {
 describe('the area selection a capture into the note draws', () => {
   /** The popup's own overlay (extension/overlay.js), on a page of its own. */
   function drawOverlay() {
-    document.body.innerHTML = '';
+    return drawOverlayOn(() => { document.body.innerHTML = ''; });
+  }
+
+  /** The same, over a page `dress` lays out first. */
+  function drawOverlayOn(dress) {
+    dress();
     const win = {
       __azimutOverlayActive: false,
       innerWidth: 1000,
+      innerHeight: 900,
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
     };
@@ -736,6 +742,32 @@ describe('the area selection a capture into the note draws', () => {
     new Function('window', 'chrome', 'browser', 'requestAnimationFrame', overlaySource)(win, chrome, undefined, frame);
     return { chrome, listeners, win };
   }
+
+  it("sends the map's own credit line with the rectangle: the providers the strip at the foot names", () => {
+    document.body.innerHTML = '';
+    const place = (text, top) => {
+      const el = document.createElement('span');
+      el.textContent = text;
+      el.getBoundingClientRect = () => ({ width: 120, top, bottom: top + 14 });
+      document.body.append(el);
+    };
+    const { chrome } = drawOverlayOn(() => {
+      place('Images ©2026 Airbus, Maxar Technologies', 878);
+      place('Map data ©2026', 878);
+      place('Images ©2026 Airbus, Maxar Technologies', 878); // said twice on the page, sent once
+      place('© a caption up in the page, not a credit', 300);
+      place('No sign here', 880);
+    });
+    const host = document.documentElement.lastElementChild;
+    host.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 100, clientY: 100, bubbles: true }));
+    host.dispatchEvent(new MouseEvent('mouseup', { button: 0, clientX: 400, clientY: 300, bubbles: true }));
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'area-selected',
+      rect: { x: 100, y: 100, w: 300, h: 200 },
+      viewportW: 1000,
+      credit: 'Images ©2026 Airbus, Maxar Technologies · Map data ©2026',
+    });
+  });
 
   it("is taken down by the panel's Escape, and says it was cancelled", () => {
     const { chrome, listeners, win } = drawOverlay();
