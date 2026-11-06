@@ -265,8 +265,15 @@
               <button class="btn btn-ghost btn-xs make" onclick={() => onmakeproof?.(sc)} title={INSPECT_HELP.sceneMakeProof} aria-label="Make the proof">
                 <Icon name="proof" size={12} /> <span class="make-words">Make the proof</span>
               </button>
-              <button class="btn btn-xs locate" onclick={() => ongeolocate?.(sc)} title={INSPECT_HELP.sceneGeolocate}>
-                <Icon name="crosshair" size={12} /> Geolocate
+              <!-- a switch: pressed again on the scene in hand, it stops -->
+              <button
+                class="btn btn-xs locate"
+                class:on={sc.geolocating}
+                aria-pressed={!!sc.geolocating}
+                onclick={() => ongeolocate?.(sc)}
+                title={sc.geolocating ? INSPECT_HELP.sceneStopGeolocating : INSPECT_HELP.sceneGeolocate}
+              >
+                <Icon name="crosshair" size={12} /> {sc.geolocating ? 'Stop' : 'Geolocate'}
               </button>
             </div>
           {/if}
@@ -593,6 +600,9 @@
   }
   .locate:hover :global(svg) {
     color: var(--accent-text);
+  }
+  .locate.on {
+    border-color: var(--accent);
   }
   .drop {
     flex-shrink: 0;

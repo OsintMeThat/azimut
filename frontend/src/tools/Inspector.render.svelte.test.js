@@ -960,6 +960,25 @@ describe('geolocating a scene', () => {
     expect(rows.sc_2.geolocating).toBeUndefined();
   });
 
+  it('stops the scene in hand when its Geolocate is pressed again, staying in Inspect', async () => {
+    keep([], [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
+    listed = [draftRow('sc_1', 1, 4, 'bridge?', { state: 'progress', captures: ['media/cap.png'] })];
+    held = 'sc_1';
+    await start();
+    await openFile('Convoy clip');
+    await settle(10);
+    openScenes();
+    const before = sceneReads();
+    del.mockClear();
+    put.mockClear();
+    button('Geolocate sc_1').click();
+    await settle(10);
+    expect(del).toHaveBeenCalledWith('/api/cases/case-a/geolocating');
+    expect(put.mock.calls.some(([path]) => path === '/api/cases/case-a/geolocating')).toBe(false);
+    expect(uiState.tool).not.toBe('satellite');
+    expect(sceneReads()).toBeGreaterThan(before);
+  });
+
   it('abandons a scene with its word, reads the list again, and takes it back from the toast', async () => {
     keep([], [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
     toast.mockImplementation(() => 1);

@@ -169,6 +169,13 @@ describe('the scenes drawer', () => {
     expect(state(list[0]).textContent).toContain('Geolocating · 1 capture');
     expect(state(list[0]).getAttribute('title')).toBe('Being geolocated: every capture filed now is gathered for it');
     expect(list[0].classList.contains('active')).toBe(true);
+    // its Geolocate is pressed: pressed again, it stops
+    const stop = list[0].querySelector('.locate');
+    expect(stop.textContent.trim()).toBe('Stop');
+    expect(stop.getAttribute('aria-pressed')).toBe('true');
+    expect(stop.getAttribute('title')).toBe('Stop geolocating it; its captures stay');
+    expect(list[2].querySelector('.locate').textContent.trim()).toBe('Geolocate');
+    expect(list[2].querySelector('.locate').getAttribute('aria-pressed')).toBe('false');
     expect(state(list[2]).textContent).toContain('In progress · 2 captures');
     expect(list[2].classList.contains('active')).toBe(false);
     // a proof states nothing of the kind

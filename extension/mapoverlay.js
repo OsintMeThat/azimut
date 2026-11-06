@@ -2427,7 +2427,10 @@
             .map((part) => `<span>${part}</span>`)
             .join(" · ")}</span>
         </span>
-        ${button("geo-go", "", "Geolocate", false, ` data-video="${esc(scene.video)}" data-draft="${esc(scene.id)}" title="Find it on this map, its video beside it"${busy ? " disabled" : ""}`)}
+        ${isGeo(scene)
+          // a switch: pressed again on the scene in hand, it stops, as in the app
+          ? button("geo-stop", "", "Stop", true, ` aria-pressed="true" title="Stop geolocating it; its captures stay"${busy ? " disabled" : ""}`)
+          : button("geo-go", "", "Geolocate", false, ` aria-pressed="false" data-video="${esc(scene.video)}" data-draft="${esc(scene.id)}" title="Find it on this map, its video beside it"${busy ? " disabled" : ""}`)}
       </div>`;
     const list = open
       ? `<div class="geo-list">

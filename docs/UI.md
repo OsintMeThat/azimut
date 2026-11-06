@@ -94,7 +94,8 @@ presses *Read the guide* on it, which opens the guide on its start page.
   Each row gives its label or its time, a mark in the colour Inspect gives the scene
   (a band for a passage, a pin for an instant), and its state: To geolocate, In progress
   with its captures, or Geolocating for the one in hand. **Geolocate** goes to the map
-  with its video; the name opens it in Inspect; ✕ abandons it with a word, which may
+  with its video, and on the scene in hand it reads **Stop** and stops it, the captures
+  kept; the name opens it in Inspect; ✕ abandons it with a word, which may
   stay empty. Three rows show and the rest are counted; the abandoned fold below, each
   with its word and **Restore**. The group is absent while the case has no scene to
   prove, and read again on the server's word while it is shown, never once it is not.
@@ -1841,7 +1842,9 @@ progress* with its count once captures were filed for it on the map, or *Geoloca
 while it is the one being looked for, its row ringed. **Geolocate** is its main act, in
 the accent, after End here and Make the proof: the work is written, the scene is held on
 the server as the one being geolocated (`PUT /cases/{id}/geolocating`), and Satellite
-opens with its video as a reference window. **Abandon** asks for a word in the row,
+opens with its video as a reference window. Pressed again on the scene in hand it
+reads **Stop** and stops it, its captures kept, as in the To-do and the extension's
+panel. **Abandon** asks for a word in the row,
 which may stay empty; Enter gives the scene up, Escape keeps it, and the toast offers
 Undo. An abandoned scene leaves the list for **Abandoned (n)**, folded at the foot of the
 drawer, greyed with its word and **Restore**. It keeps its colour and its frames: the bar

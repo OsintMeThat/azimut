@@ -230,6 +230,23 @@ describe('geolocating a scene from over this map', () => {
     expect(panel.panes()).toHaveLength(1);
   });
 
+  it('stops from the list too: the scene in hand’s Geolocate reads Stop, pressed', async () => {
+    await geolocateBridge();
+    // the app now answers with the scene it holds, as it does once geolocating starts
+    panel.app['/api/ingest/scenes'] = { ...structuredClone(QUEUE), geolocating: BRIDGE };
+    panel.press('geo-fold');
+    await settle();
+    const live = panel.$('.geo-list .geo-row.live button[data-act="geo-stop"]');
+    expect(live.textContent).toBe('Stop');
+    expect(live.getAttribute('aria-pressed')).toBe('true');
+    expect(panel.$('.geo-list [data-act="geo-go"][data-draft="sc_2"]')).toBe(null);
+    panel.app['/api/ingest/scenes'] = structuredClone(QUEUE);
+    live.click();
+    await settle();
+    expect(panel.calls('/api/ingest/geolocating').at(-1).body).toEqual({ case_id: CASE });
+    expect(panel.$('.geo-list [data-act="geo-go"][data-draft="sc_2"]').getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('brings the video back from the pill, in the window already holding it', async () => {
     await geolocateBridge();
     panel.tools.refs.fold(panel.tools.refs.open[0].id);

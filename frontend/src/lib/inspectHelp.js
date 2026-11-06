@@ -68,6 +68,7 @@ export const INSPECT_HELP = {
   sceneProof: 'Open the proof of this scene in Geo Proof',
   sceneMakeProof: 'Make the proof of this scene in Geo Proof, from its frames and captures',
   sceneGeolocate: 'Find it on the map, the video open beside it',
+  sceneStopGeolocating: 'Stop geolocating it; its captures stay',
   sceneToGeolocate: 'Nothing captured for it on the map yet',
   sceneInProgress: 'Captures were filed for it on the map, nothing is proved yet',
   sceneGeolocating: 'Being geolocated: every capture filed now is gathered for it',

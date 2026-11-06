@@ -152,6 +152,24 @@ it('marks the scene being geolocated', async () => {
   expect(rows()[0].classList.contains('live')).toBe(false);
 });
 
+it('stops the scene in hand when its button is pressed again, the tool left where it is', async () => {
+  const live = row('p', 238, 252, 'bridge?', { state: 'progress', captures: ['media/c1.png'] });
+  answerWith({ files: [{ video: VIDEO, title: 'Market walk', scenes: [live] }], geolocating: live });
+  del.mockResolvedValue({ ended: true });
+  await open();
+  const button = byLabel('Stop geolocating bridge?');
+  expect(button.textContent.trim()).toBe('Stop');
+  expect(button.getAttribute('aria-pressed')).toBe('true');
+  const tool = uiState.tool;
+  button.click();
+  await settle();
+  expect(del).toHaveBeenCalledWith('/api/cases/c1/geolocating');
+  expect(put).not.toHaveBeenCalled();
+  expect(uiState.tool).toBe(tool);
+  expect(rows()[0].classList.contains('live')).toBe(false);
+  expect(byLabel('Geolocate bridge?').getAttribute('aria-pressed')).toBe('false');
+});
+
 it('geolocates a scene: the server holds it, and Satellite opens with its video', async () => {
   const scene = row('p', 238, 252, 'bridge?');
   answerWith({ files: [{ video: VIDEO, title: 'Market walk', scenes: [scene] }], geolocating: null });

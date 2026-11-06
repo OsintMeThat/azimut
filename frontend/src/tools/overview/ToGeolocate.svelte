@@ -40,7 +40,7 @@
    */
   import { onDestroy, tick, untrack } from 'svelte';
   import {
-    abandonScene, geolocateScene, geolocating, holdSceneQueue, restoreScene, sceneQueue,
+    abandonScene, geolocateScene, geolocating, holdSceneQueue, restoreScene, sceneQueue, stopGeolocating,
   } from '../../lib/geolocating.svelte.js';
   import { sceneTime } from '../../lib/scenes.js';
   import {
@@ -126,7 +126,8 @@
     }
   }
 
-  const go = (scene) => act(() => geolocateScene(caseId, scene));
+  // Geolocate is a switch: pressed again on the scene in hand, it stops, the captures kept.
+  const go = (scene) => act(() => (isLive(scene) ? stopGeolocating(caseId) : geolocateScene(caseId, scene)));
 
   function openInInspect(scene) {
     uiState.inspectScene = { video: scene.video, draft: scene.id };
@@ -185,9 +186,10 @@
                   aria-expanded={leaving === keyOf(scene)} disabled={busy} onclick={() => (leaving === keyOf(scene) ? stayed() : askWhy(scene))}>
                   <Icon name="x" size={13} />
                 </button>
-                <button type="button" class="btn btn-xs go" disabled={busy} aria-label={`Geolocate ${nameOf(scene)}`}
-                  title={isLive(scene) ? 'Back to the map with its video' : 'Find it on the map, its video beside it'} onclick={() => go(scene)}>
-                  Geolocate
+                <button type="button" class="btn btn-xs go" class:on={isLive(scene)} disabled={busy} aria-pressed={isLive(scene)}
+                  aria-label={isLive(scene) ? `Stop geolocating ${nameOf(scene)}` : `Geolocate ${nameOf(scene)}`}
+                  title={isLive(scene) ? 'Stop geolocating it; its captures stay' : 'Find it on the map, its video beside it'} onclick={() => go(scene)}>
+                  {isLive(scene) ? 'Stop' : 'Geolocate'}
                 </button>
               </li>
               {#if leaving === keyOf(scene)}
@@ -296,6 +298,7 @@
 
   .go { flex: none; }
   .scene:hover .go, .scene:focus-within .go, .live .go { border-color: var(--accent); }
+  .go.on { background: var(--accent-soft); color: var(--accent); }
   .why-btn { flex: none; padding: 3px 4px; color: var(--text-3); opacity: 0; }
   .scene:hover .why-btn, .scene:focus-within .why-btn, .why-btn[aria-expanded='true'] { opacity: 1; }
   .why-btn:hover { color: var(--text-1); }

@@ -15,7 +15,9 @@
     editClock, isAbandoned, isStretch, liveScenes, momentKey, newScene, sameMoments, sceneList, sceneMarks, scenePassage,
     sceneStart, sceneTime, sceneTitle, sceneToEnd, snapToFrame, stretchFromShot, timeWords,
   } from '../lib/scenes.js';
-  import { abandonScene, geolocateScene, geolocating, restoreScene, sceneEdit as sceneGiven } from '../lib/geolocating.svelte.js';
+  import {
+    abandonScene, geolocateScene, geolocating, restoreScene, sceneEdit as sceneGiven, stopGeolocating,
+  } from '../lib/geolocating.svelte.js';
   import { onEvent } from '../lib/events.js';
   import { frameScenes, frameToCapture, frameUses, framesOfScene, proofHandoff, scenesAt } from '../lib/sceneFrames.js';
   import { createSceneOffer } from '../lib/sceneOffer.js';
@@ -1122,6 +1124,12 @@
     sceneBusy = true;
     const run = openRun;
     try {
+      // pressed again on the scene in hand, Geolocate stops it, the captures kept
+      if (scene.geolocating) {
+        await stopGeolocating(work.caseId);
+        if (run === openRun) loadScenes(run);
+        return;
+      }
       await heldWork();
       if (run !== openRun) return;
       await geolocateScene(work.caseId, { video: work.source.path, id: scene.id });
