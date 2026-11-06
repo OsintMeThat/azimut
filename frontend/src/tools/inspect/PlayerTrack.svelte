@@ -8,9 +8,9 @@
   import { snapToFrame } from '../../lib/scenes.js';
 
   // The bar under the video: where the clip is, and what is known about it. The
-  // scenes kept on it, a coloured band over a passage and a pin at an instant, the
-  // frames cut from it, the marks set on it, the shots and the sharpest frames a
-  // scan found, the loop, and the sound behind it all. Hovering shows the picture
+  // scenes kept on it, a coloured band over a passage and a pin at an instant, greyed
+  // and hollow once abandoned, the frames cut from it, the marks set on it, the shots
+  // and the sharpest frames a scan found, the loop, and the sound behind it all. Hovering shows the picture
   // at that point from the strip the server drew; a press near a marker lands on
   // it rather than a few pixels beside it.
   //
@@ -300,13 +300,14 @@
         <span
           class="scene"
           class:held={s.key === editing?.key}
+          class:abandoned={s.abandoned}
           data-testid="scene-band"
           style:left={at(s.start)}
           style:width={across(s.start, s.end)}
           style:--scene={s.color}
         ></span>
       {:else}
-        <span class="scene-pin" data-testid="scene-pin" style:left={at(s.start)} style:--scene={s.color}></span>
+        <span class="scene-pin" class:abandoned={s.abandoned} data-testid="scene-pin" style:left={at(s.start)} style:--scene={s.color}></span>
       {/if}
     {/each}
     <span class="played" style:width={pct(Math.min(1, Math.max(0, windowFraction(time, view))))}></span>
@@ -477,6 +478,27 @@
     height: 3px;
     border-radius: 1px;
     background: var(--scene);
+  }
+  /* An abandoned scene keeps its place on the bar, greyed and hollow: an outlined
+     band, a pin with an open foot. */
+  .scene.abandoned {
+    background: none;
+    border: 1px dashed var(--text-3);
+    border-bottom-width: 1px;
+    opacity: 0.8;
+  }
+  .scene-pin.abandoned {
+    width: 0;
+    margin-left: 0;
+    border-left: 1px dashed var(--text-3);
+    background: none;
+  }
+  .scene-pin.abandoned::after {
+    left: -4px;
+    width: 8px;
+    height: 4px;
+    background: none;
+    box-shadow: inset 0 0 0 1px var(--text-3);
   }
   /* The scene whose time is open stands out from the rest. */
   .scene.held {

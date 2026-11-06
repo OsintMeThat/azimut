@@ -113,6 +113,18 @@ describe('pressing the bar', () => {
     expect(target.querySelector('[data-testid="scene-pin"]').style.left).toBe('70%');
   });
 
+  it('greys an abandoned scene where it was, hollow, its band and its pin alike', () => {
+    open({
+      scenes: [
+        { key: 'sc_1', start: 2, end: 5, color: 'red', label: 'Bridge · abandoned', abandoned: true },
+        { key: 'sc_2', start: 7, end: null, color: 'red', label: 'Market · abandoned', abandoned: true },
+        { key: 'sc_3', start: 8, end: null, color: 'red', label: 'Square' },
+      ],
+    });
+    expect(target.querySelector('[data-testid="scene-band"]').classList.contains('abandoned')).toBe(true);
+    expect([...target.querySelectorAll('[data-testid="scene-pin"]')].map((p) => p.classList.contains('abandoned'))).toEqual([true, false]);
+  });
+
   it('keeps a portrait clip\'s hover picture small, and inside the bar by its own half width', () => {
     const tiles = { count: 10, columns: 10, rows: 1, width: 160, height: 284, interval: 1 };
     const track = open({ tiles, stripUrl: '/strip' });

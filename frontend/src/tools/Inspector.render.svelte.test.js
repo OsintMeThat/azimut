@@ -66,20 +66,32 @@ vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast, dismissToa
 vi.mock('../lib/navigate.js', () => ({ openInReverseSearch: vi.fn() }));
 const deletedToast = vi.fn();
 vi.mock('../lib/trash.js', () => ({ deletedToast }));
-// The scenes drawer as far as Inspect needs it here: a row's Make the proof, which
-// hands the tool the scene to prove (the drawer's own rows are driven in its tests).
+// The scenes drawer as far as Inspect needs it here: a row's Make the proof, Geolocate,
+// Abandon and Restore, each handing the tool its scene (the drawer's own rows are
+// driven in its tests). What it was last handed is kept, to read the rows' state.
+let drawerHeld = null;
 vi.mock('./inspect/ScenePanel.svelte', () => ({
   default: function ScenePanelStub(anchor, props) {
+    drawerHeld = props;
+    const acts = [
+      ['Prove', (scene) => props.onmakeproof?.(scene)],
+      ['Geolocate', (scene) => props.ongeolocate?.(scene)],
+      ['Abandon', (scene) => props.onabandon?.(scene, 'no landmark')],
+      ['Restore', (scene) => props.onrestore?.(scene)],
+    ];
     for (const scene of props.scenes.filter((sc) => sc.kind === 'draft')) {
-      const press = document.createElement('button');
-      press.textContent = `Prove ${scene.id}`;
-      press.onclick = () => props.onmakeproof?.(scene);
-      anchor.before(press);
+      for (const [word, act] of acts) {
+        const press = document.createElement('button');
+        press.textContent = `${word} ${scene.id}`;
+        press.onclick = () => act(scene);
+        anchor.before(press);
+      }
     }
   },
 }));
 
 const { default: Inspector } = await import('./Inspector.svelte');
+const { geolocating } = await import('../lib/geolocating.svelte.js');
 const { workState } = await import('../lib/inspectWork.svelte.js');
 
 let live;
@@ -845,6 +857,171 @@ describe('the scenes of the clip, in the strip and in a proof', () => {
     expect(uiState.tool).toBe('inspect');
     expect(uiState.proofScene).toBeUndefined();
     expect(dialog()).not.toBeNull();
+  });
+});
+
+describe('geolocating a scene', () => {
+  const draftRow = (id, start, end, label, extra = {}) => ({
+    kind: 'draft', video: 'media/clip.mp4', id, start, end, label, state: 'todo', captures: [], abandoned: null, ...extra,
+  });
+  const keep = (frames, scenes) => {
+    saved['media/clip.mp4'] = {
+      name: 'Convoy clip',
+      title: 'Convoy clip',
+      spec: { source: { path: 'media/clip.mp4', kind: 'video' }, videoAdjust: {}, videoRotation: 0, frames, scenes, activeFrameId: null },
+    };
+  };
+  let listed = [];
+  let held = null;
+  const openScenes = () => {
+    [...target.querySelectorAll('button')].find((b) => b.getAttribute('aria-expanded') !== null && b.textContent.includes('Scenes')).click();
+    flushSync();
+  };
+  const reopenScenes = () => {
+    openScenes();
+    openScenes();
+  };
+  const sceneReads = () => get.mock.calls.filter(([path]) => path.startsWith('/api/cases/case-a/scenes?')).length;
+
+  beforeEach(() => {
+    listed = [draftRow('sc_1', 1, 4, 'bridge?')];
+    held = null;
+    drawerHeld = null;
+    // the app's copy of the scene being geolocated, unread
+    Object.assign(geolocating, { caseId: null, scene: null, error: '' });
+    uiState.tool = 'inspect';
+    uiState.geolocateRef = null;
+    delete uiState.proofScene;
+    delete uiState.inspectScene;
+    get.mockImplementation(async (path) => (path.startsWith('/api/cases/case-a/scenes?')
+      ? { video: 'media/clip.mp4', video_id: 'e_clip', scenes: structuredClone(listed), used: {}, geolocating: held }
+      : getDefault(path)));
+    put.mockImplementation(async (path, body) => {
+      if (path === '/api/cases/case-a/geolocating') {
+        held = body.draft;
+        return { geolocating: { ...listed.find((sc) => sc.id === body.draft) ?? draftRow(body.draft, 6, null, ''), since: 't' } };
+      }
+      const abandon = /\/scenes\/([^/]+)\/abandon$/.exec(path);
+      if (abandon) {
+        const row = listed.find((sc) => sc.id === abandon[1]);
+        Object.assign(row, { state: 'abandoned', abandoned: { reason: body.reason, at: 't' } });
+        return { scene: structuredClone(row) };
+      }
+      return { name: 'Convoy clip', title: 'x' };
+    });
+    del.mockImplementation(async (path) => {
+      const restore = /\/scenes\/([^/]+)\/abandon\?/.exec(path);
+      if (restore) {
+        const row = listed.find((sc) => sc.id === restore[1]);
+        Object.assign(row, { state: 'todo', abandoned: null });
+        return { scene: structuredClone(row) };
+      }
+      return { status: 'deleted', deleted: ['e_work'], trash: 'g_1' };
+    });
+  });
+
+  afterEach(() => {
+    put.mockImplementation(async (path, body) => ({ name: body.path.includes('roof') ? 'Roof' : 'Convoy clip', title: 'x' }));
+    del.mockImplementation(async () => ({ status: 'deleted', deleted: ['e_work'], trash: 'g_1' }));
+  });
+
+  it('writes the work first, then holds the scene on the server and goes to the map with its video', async () => {
+    keep([], [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
+    await start();
+    await openFile('Convoy clip');
+    await settle(10);
+    // a scene kept a moment ago, its save still pending
+    playheadAt(6);
+    press('s');
+    openScenes();
+    const fresh = drawerHeld.scenes.find((sc) => sc.kind === 'draft' && sc.id !== 'sc_1');
+    button(`Geolocate ${fresh.id}`).click();
+    await settle(10);
+
+    const paths = put.mock.calls.map(([path]) => path);
+    expect(paths.indexOf('/api/cases/case-a/inspect/work')).toBeGreaterThanOrEqual(0);
+    expect(paths.indexOf('/api/cases/case-a/inspect/work')).toBeLessThan(paths.indexOf('/api/cases/case-a/geolocating'));
+    expect(put.mock.calls.find(([path]) => path === '/api/cases/case-a/geolocating')[1]).toEqual({ video: 'media/clip.mp4', draft: fresh.id });
+    expect(uiState.geolocateRef).toMatchObject({ video: 'media/clip.mp4', draft: fresh.id });
+    expect(uiState.tool).toBe('satellite');
+  });
+
+  it('marks the scene the server says is being geolocated, with what it gathered', async () => {
+    keep([], [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }, { id: 'sc_2', start: 8, end: null, label: '' }]);
+    listed = [draftRow('sc_1', 1, 4, 'bridge?', { state: 'progress', captures: ['media/cap.png'] }), draftRow('sc_2', 8, null, '')];
+    held = 'sc_1';
+    await start();
+    await openFile('Convoy clip');
+    await settle(10);
+    openScenes();
+    const rows = Object.fromEntries(drawerHeld.scenes.map((sc) => [sc.id, sc]));
+    expect(rows.sc_1).toMatchObject({ state: 'progress', captures: ['media/cap.png'], geolocating: true });
+    expect(rows.sc_2).toMatchObject({ state: 'todo', captures: [] });
+    expect(rows.sc_2.geolocating).toBeUndefined();
+  });
+
+  it('abandons a scene with its word, reads the list again, and takes it back from the toast', async () => {
+    keep([], [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
+    toast.mockImplementation(() => 1);
+    await start();
+    await openFile('Convoy clip');
+    await settle(10);
+    openScenes();
+    const before = sceneReads();
+    button('Abandon sc_1').click();
+    await settle(10);
+
+    expect(put).toHaveBeenCalledWith('/api/cases/case-a/scenes/sc_1/abandon', { video: 'media/clip.mp4', reason: 'no landmark' });
+    expect(sceneReads()).toBeGreaterThan(before);
+    reopenScenes();
+    expect(drawerHeld.scenes.find((sc) => sc.id === 'sc_1')).toMatchObject({ state: 'abandoned', abandoned: { reason: 'no landmark' } });
+    // greyed on the bar, still where it was
+    expect(target.querySelector('[data-testid="scene-band"]').classList.contains('abandoned')).toBe(true);
+
+    const [message, , , action] = toast.mock.calls.find(([text]) => text === 'Scene abandoned');
+    expect(message).toBe('Scene abandoned');
+    action.onClick();
+    await settle(10);
+    expect(del).toHaveBeenCalledWith('/api/cases/case-a/scenes/sc_1/abandon?video=media%2Fclip.mp4');
+    reopenScenes();
+    expect(drawerHeld.scenes.find((sc) => sc.id === 'sc_1')).toMatchObject({ state: 'todo', abandoned: null });
+    toast.mockReset();
+  });
+
+  it('opens a scene sent from elsewhere on its row, and with proof, its Make the proof holding its captures', async () => {
+    media = [...MEDIA, { path: 'media/cap.png', kind: 'image', title: 'Bridge from above', filename: 'cap.png', thumbnail: 'thumbs/cap.jpg', source: { type: 'satellite' } }];
+    keep([frame('fr_a', 2), frame('fr_b', 9)], [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
+    listed = [draftRow('sc_1', 1, 4, 'bridge?', { state: 'progress', captures: ['media/cap.png'] })];
+    post.mockImplementation(async (path, body) => (path.endsWith('/save-frames')
+      ? { saved: body.items.map((item) => ({ item: { path: `media/saved-${item.time}.png` } })) }
+      : postDefault(path, body)));
+    uiState.inspectScene = { video: 'media/clip.mp4', draft: 'sc_1', proof: true };
+    await start();
+    await settle(10);
+    await settle(10);
+
+    expect(uiState.inspectScene).toBeNull();
+    expect(drawerHeld?.focus).toEqual({ key: 'sc_1', n: 1 });
+    const dialog = document.querySelector('[role="dialog"][aria-label="Make the proof"]');
+    expect(dialog).not.toBeNull();
+    expect([...dialog.querySelectorAll('input[type="checkbox"]')].map((b) => [b.getAttribute('aria-label'), b.checked]))
+      .toEqual([['Frame at 0:02', true], ['Capture Bridge from above', true]]);
+    expect(dialog.querySelector('[aria-label="Captures of the scene"] img').getAttribute('src')).toContain('thumbs/cap.jpg');
+    [...dialog.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Make the proof').click();
+    await settle(10);
+    // the frames first, then the captures
+    expect(uiState.proofScene.panels).toEqual(['media/saved-2.png', 'media/cap.png']);
+    expect(uiState.tool).toBe('proof');
+  });
+
+  it('says so when the scene sent is no longer in its video', async () => {
+    keep([], [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
+    uiState.inspectScene = { video: 'media/clip.mp4', draft: 'sc_gone' };
+    await start();
+    await settle(10);
+    await settle(10);
+    expect(toast).toHaveBeenCalledWith('That scene is no longer in this video', 'warn');
+    expect(target.querySelector('video')).not.toBeNull();
   });
 });
 

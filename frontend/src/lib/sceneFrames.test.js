@@ -76,6 +76,21 @@ describe('a frame in a scene', () => {
   });
 });
 
+describe('a frame in an abandoned scene', () => {
+  const row = (id, extra) => ({ kind: 'draft', id, start: 4, end: 6, label: '', captures: [], abandoned: null, ...extra });
+
+  it('still belongs to it, so no scene is offered there, and its dot is greyed', () => {
+    const listed = [row('sc_a', { abandoned: { reason: 'no landmark', at: 't' } }), row('sc_b', { start: 5, end: null, abandoned: { reason: '', at: 't' } })];
+    const scenes = sceneList(listed, [draft('sc_a', 4, 6, 'bridge?'), draft('sc_b', 5)]);
+    expect(scenesAt(5, scenes, FRAME).map((s) => s.key)).toEqual(['sc_a', 'sc_b']);
+    const dots = frameScenes([frame('in', 5)], scenes, FRAME);
+    expect(dots.get('in')).toEqual([
+      { key: 'sc_a', color: scenes[0].color, title: 'bridge? (abandoned)', abandoned: true },
+      { key: 'sc_b', color: scenes[1].color, title: 'an abandoned scene', abandoned: true },
+    ]);
+  });
+});
+
 describe('a frame a proof lays out', () => {
   it('says which proofs, each once', () => {
     expect(usedIn([{ proof: 'p29', title: 'Proof 29' }])).toBe('Used in Proof 29');
@@ -147,5 +162,10 @@ describe('what Geo Proof is handed', () => {
     });
     expect(proofHandoff(draft('sc_2', 3.2), 'media/clip.mp4', []).moments).toEqual([{ start: 3.2, end: null }]);
     expect(proofHandoff(draft('sc_3', null), 'media/clip.mp4', []).moments).toEqual([]);
+  });
+
+  it('keeps the panels in the order given: the frames, then the captures', () => {
+    const panels = ['media/frame-1.png', 'media/frame-2.png', 'media/capture.png'];
+    expect(proofHandoff(draft('sc_1', 10, 20), 'media/clip.mp4', panels).panels).toEqual(panels);
   });
 });

@@ -50,14 +50,15 @@ export async function startGeolocating(caseId, video, draft) {
 
 /**
  * Geolocate a scene and go to the map, its video open as a reference window with the
- * scene marked on its bar (`uiState.geolocateRef`, which Satellite takes up). The one
+ * scene marked on its bar in its colour (`uiState.geolocateRef`, which Satellite takes
+ * up; `order` is its place among its video's scenes, `lib/scenes.sceneColorAt`). The one
  * entry point of every Geolocate press: Inspect's drawer, the To-do, the pill.
  * `scene` is a queue row or a drawer's draft: `{video, id}` at least.
  */
 export async function geolocateScene(caseId, scene) {
   const held = await startGeolocating(caseId, scene.video, scene.id);
   uiState.geolocateRef = {
-    video: held.video, draft: held.id, start: held.start, end: held.end, label: held.label,
+    video: held.video, draft: held.id, start: held.start, end: held.end, label: held.label, order: held.order,
   };
   uiState.tool = 'satellite';
   return held;

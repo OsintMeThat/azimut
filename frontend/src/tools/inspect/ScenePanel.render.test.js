@@ -74,6 +74,13 @@ describe('the scenes button', () => {
     expect(render(SceneButton, { scenes: [] }).querySelector('.count')).toBeNull();
     expect(render(SceneButton, { scenes: [] }).querySelector('.scenes-btn').getAttribute('aria-label')).toBe('Scenes');
   });
+
+  it('leaves the abandoned out of its count and its tint', () => {
+    const scenes = SCENES().map((sc) => (sc.kind === 'draft' ? { ...sc, abandoned: { reason: '', at: 't' } } : sc));
+    const root = render(SceneButton, { scenes });
+    expect(root.querySelector('.count').textContent).toBe('3');
+    expect(root.querySelector('.count').classList.contains('todo')).toBe(false);
+  });
 });
 
 describe('the scenes drawer', () => {
@@ -123,7 +130,7 @@ describe('the scenes drawer', () => {
     const onmakeproof = vi.fn();
     const list = rows(render(ScenePanel, { scenes: SCENES(), onmakeproof }));
     const make = list[2].querySelector('[aria-label="Make the proof"]');
-    expect(make.getAttribute('title')).toBe('Make the proof of this scene in Geo Proof, from its frames');
+    expect(make.getAttribute('title')).toBe('Make the proof of this scene in Geo Proof, from its frames and captures');
     // said in words, under the scene's name beside End here, where the label keeps its room
     expect(make.textContent.trim()).toBe('Make the proof');
     expect(make.parentElement.classList.contains('acts')).toBe(true);
@@ -136,12 +143,130 @@ describe('the scenes drawer', () => {
     expect(list[3].querySelector('[aria-label="Make the proof"]')).toBeNull();
   });
 
+  it('offers Geolocate as a scene\'s main act, in words, after Make the proof', () => {
+    const ongeolocate = vi.fn();
+    const list = rows(render(ScenePanel, { scenes: SCENES(), ongeolocate }));
+    const go = button(list[2], 'Geolocate');
+    expect(go.classList.contains('locate')).toBe(true);
+    expect(go.getAttribute('title')).toBe('Find it on the map, the video open beside it');
+    // the last of its acts, Make the proof just before it
+    const acts = [...list[2].querySelectorAll('.acts button')].map((b) => b.textContent.trim());
+    expect(acts).toEqual(['End here', 'Make the proof', 'Geolocate']);
+    go.click();
+    expect(ongeolocate).toHaveBeenCalledWith(expect.objectContaining({ kind: 'draft', id: 'sc_1' }));
+    // a proved scene has nothing left to geolocate
+    expect(button(list[3], 'Geolocate')).toBeUndefined();
+  });
+
+  it('says where each scene to prove stands, and marks the one being geolocated', () => {
+    const scenes = SCENES().map((sc) => {
+      if (sc.id === 'sc_1') return { ...sc, state: 'progress', captures: ['a.png', 'b.png'] };
+      if (sc.id === 'sc_all') return { ...sc, state: 'progress', captures: ['c.png'], geolocating: true };
+      return sc;
+    });
+    const list = rows(render(ScenePanel, { scenes }));
+    const state = (row) => row.querySelector('[data-testid="scene-state"]');
+    expect(state(list[0]).textContent).toContain('Geolocating · 1 capture');
+    expect(state(list[0]).getAttribute('title')).toBe('Being geolocated: every capture filed now is gathered for it');
+    expect(list[0].classList.contains('active')).toBe(true);
+    expect(state(list[2]).textContent).toContain('In progress · 2 captures');
+    expect(list[2].classList.contains('active')).toBe(false);
+    // a proof states nothing of the kind
+    expect(state(list[1])).toBeNull();
+
+    const fresh = rows(render(ScenePanel, { scenes: SCENES() }));
+    expect(state(fresh[2]).textContent).toContain('To geolocate');
+    expect(state(fresh[2]).getAttribute('title')).toBe('Nothing captured for it on the map yet');
+  });
+
   it('opens a proved scene\'s proof, and offers nothing to remove it', () => {
     const onopenproof = vi.fn();
     const list = rows(render(ScenePanel, { scenes: SCENES(), onopenproof }));
     list[3].querySelector('.proof').click();
     expect(onopenproof).toHaveBeenCalledWith(expect.objectContaining({ proof: 'Depot' }));
     expect(list[3].querySelector('[aria-label="Remove scene"]')).toBeNull();
+  });
+});
+
+describe('giving up on a scene', () => {
+  const abandoned = (scenes, id, reason) => scenes.map((sc) => (sc.id === id
+    ? { ...sc, state: 'abandoned', abandoned: { reason, at: '2026-11-06T10:00:00+00:00' } }
+    : sc));
+
+  it('asks for a word in the row, Enter abandoning it with what was typed, even nothing', () => {
+    const onabandon = vi.fn();
+    const root = render(ScenePanel, { scenes: SCENES(), onabandon });
+    button(rows(root)[2], 'Abandon').click();
+    flushSync();
+    const word = field(root, 'Why it is abandoned');
+    expect(document.activeElement).toBe(word);
+    // the row's acts make way for the word while it is asked
+    expect(button(rows(root)[2], 'Geolocate')).toBeUndefined();
+    type(word, '  no landmark in view ');
+    key(word, 'Enter');
+    flushSync();
+    expect(onabandon).toHaveBeenCalledWith(expect.objectContaining({ id: 'sc_1' }), 'no landmark in view');
+    expect(field(root, 'Why it is abandoned')).toBeNull();
+
+    button(rows(root)[2], 'Abandon').click();
+    flushSync();
+    button(rows(root)[2], 'Abandon').click();
+    expect(onabandon).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'sc_1' }), '');
+  });
+
+  it('keeps it on Escape or Cancel', () => {
+    const onabandon = vi.fn();
+    const root = render(ScenePanel, { scenes: SCENES(), onabandon });
+    button(rows(root)[2], 'Abandon').click();
+    flushSync();
+    key(field(root, 'Why it is abandoned'), 'Escape');
+    flushSync();
+    expect(field(root, 'Why it is abandoned')).toBeNull();
+    button(rows(root)[2], 'Abandon').click();
+    flushSync();
+    button(rows(root)[2], 'Cancel').click();
+    flushSync();
+    expect(field(root, 'Why it is abandoned')).toBeNull();
+    expect(onabandon).not.toHaveBeenCalled();
+  });
+
+  it('folds the abandoned at the foot of the drawer, greyed with their word, and restores one', () => {
+    const onrestore = vi.fn();
+    const ongo = vi.fn();
+    const root = render(ScenePanel, { scenes: abandoned(SCENES(), 'sc_1', 'bridge out of shot'), onrestore, ongo });
+    // the main list goes on without it
+    expect(rows(root).map((r) => r.querySelector('.time').textContent.trim())).toEqual([
+      'Whole video', 'Whole video', '2:10–2:38', '3:20–3:35 +2',
+    ]);
+    const head = button(root, 'Abandoned (1)');
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(root.querySelector('[data-testid="scene-row-abandoned"]')).toBeNull();
+    head.click();
+    flushSync();
+    const given = root.querySelector('[data-testid="scene-row-abandoned"]');
+    expect(given.textContent).toContain('bridge out of shot');
+    expect(given.textContent).toContain('No label');
+    // only looked at: its time goes there, and nothing else is offered but Restore
+    given.querySelector('.time').click();
+    expect(ongo).toHaveBeenCalledWith(expect.objectContaining({ id: 'sc_1' }));
+    expect(button(given, 'Geolocate')).toBeUndefined();
+    button(given, 'Restore').click();
+    expect(onrestore).toHaveBeenCalledWith(expect.objectContaining({ id: 'sc_1' }));
+  });
+
+  it('brings a scene asked for into view, unfolding its group when it was abandoned', async () => {
+    const root = render(ScenePanel, { scenes: abandoned(SCENES(), 'sc_1', ''), focus: { key: 'sc_1', n: 1 } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    expect(button(root, 'Abandoned (1)').getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('[data-testid="scene-row-abandoned"]').classList.contains('lit')).toBe(true);
+  });
+
+  it('opens on the word about S when nothing is left but the abandoned, never on it', () => {
+    const one = sceneList([], [{ id: 'sc_1', start: 60, end: null, label: '' }]);
+    const root = render(ScenePanel, { scenes: abandoned(one, 'sc_1', '') });
+    expect(root.textContent).not.toContain('Press S where something happens');
+    expect(button(root, 'Abandoned (1)')).toBeDefined();
   });
 });
 

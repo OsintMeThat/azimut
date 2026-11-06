@@ -302,7 +302,8 @@ export const uiState = $state({
   openNotebook: null, // { noteId: string|null, line? }; null noteId opens case notes.md, `home` the Notebook's home
   openNoteTemplate: null, // note template id to edit in the Notebook, from Settings
   inspectPath: null, // media path to open in the Inspect tool
-  // A scene to open in Inspect: { video, draft }, its video opened on it, the drawer on its row.
+  // A scene to open in Inspect: { video, draft, proof? }, its video opened on it, the
+  // drawer on its row; `proof: true` opens its Make the proof as well (the pill's).
   inspectScene: null,
   /**
    * A picture handed to Reverse Search from wherever it is being looked at, in the

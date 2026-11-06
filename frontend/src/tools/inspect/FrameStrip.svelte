@@ -11,9 +11,9 @@
   // A tile's top-left corner says whether the frame is in the case. Until it is, the
   // corner is a save press, so filing a capture never means opening it first.
   //
-  // A frame inside a scene carries a dot in its colour, one per scene, and one a
-  // proof lays out says so on hover (`lib/sceneFrames.js`). A clip with no scene
-  // shows the strip it always did.
+  // A frame inside a scene carries a dot in its colour, one per scene, a grey ring for
+  // an abandoned one, and one a proof lays out says so on hover (`lib/sceneFrames.js`).
+  // A clip with no scene shows the strip it always did.
   let {
     source,
     sourceThumb = null,
@@ -78,7 +78,7 @@
         <span class="num">{fr.time != null ? stamp(fr.time) : i + 1}</span>
         {#if held.length}
           <span class="scene-dots" title={inScenes(held)} data-testid="scene-dots">
-            {#each held.slice(0, DOTS_SHOWN) as sc (sc.key)}<span class="scene-dot" style:background={sc.color}></span>{/each}
+            {#each held.slice(0, DOTS_SHOWN) as sc (sc.key)}<span class="scene-dot" class:abandoned={sc.abandoned} style:background={sc.abandoned ? null : sc.color}></span>{/each}
           </span>
         {/if}
         {#if filed}
@@ -198,6 +198,11 @@
     height: 7px;
     border-radius: 50%;
     box-shadow: 0 0 0 1.5px rgba(10, 10, 10, 0.65);
+  }
+  /* an abandoned scene's dot: a grey ring, the scene's frames still its own */
+  .scene-dot.abandoned {
+    background: rgba(10, 10, 10, 0.5);
+    box-shadow: inset 0 0 0 1.5px #a8a8a8, 0 0 0 1px rgba(10, 10, 10, 0.65);
   }
   .mark {
     position: absolute;

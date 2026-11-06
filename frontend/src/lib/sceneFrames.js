@@ -9,7 +9,7 @@
  * video marks no frame, since it would mark them all, but it offers every one.
  */
 import { DEFAULT_FPS } from './inspectPlayer.js';
-import { isStretch, sceneMoments, sceneStart, sceneTitle } from './scenes.js';
+import { isAbandoned, isStretch, sceneMoments, sceneStart, sceneTitle } from './scenes.js';
 
 /** A frame's length in seconds: the clip's, else a thirtieth while its rate is unknown. */
 const frameLength = (frame) => (frame > 0 ? frame : 1 / DEFAULT_FPS);
@@ -42,15 +42,26 @@ export function scenesAt(time, scenes, frame) {
 const listed = (words) => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : words[0] ?? '');
 
 /** What a scene is called beside a frame: its title, or what it is when it has none. */
-const sceneName = (scene) => (scene.kind === 'draft' && !scene.label ? 'a scene to geolocate' : sceneTitle(scene));
+function sceneName(scene) {
+  if (isAbandoned(scene)) return scene.label ? `${scene.label} (abandoned)` : 'an abandoned scene';
+  return scene.kind === 'draft' && !scene.label ? 'a scene to geolocate' : sceneTitle(scene);
+}
 
-/** By frame id, the scenes each frame cut from the clip falls in, `{ key, color, title }`. */
+/**
+ * By frame id, the scenes each frame cut from the clip falls in, `{ key, color,
+ * title }`. An abandoned scene still holds its frames, so none of them is offered a
+ * scene of its own, and its dot is greyed (`abandoned`).
+ */
 export function frameScenes(frames, scenes, frame) {
   const out = new Map();
   for (const f of frames ?? []) {
     if (f.time == null) continue;
     const held = scenesAt(f.time, scenes, frame);
-    if (held.length) out.set(f.id, held.map((s) => ({ key: s.key, color: s.color, title: sceneName(s) })));
+    if (held.length) {
+      out.set(f.id, held.map((s) => ({
+        key: s.key, color: s.color, title: sceneName(s), ...(isAbandoned(s) ? { abandoned: true } : {}),
+      })));
+    }
   }
   return out;
 }
@@ -109,8 +120,9 @@ export function frameToCapture(scene, { scan = null, now = 0, frame }) {
 
 /**
  * What Geo Proof is handed to open a proof of a scene (`uiState.proofScene`): the
- * video, the scene's moments, the draft it takes up, the saved frames in clip order
- * and the draft's label.
+ * video, the scene's moments, the draft it takes up, its panels and the draft's
+ * label. The panels are the saved frames in clip order, then the captures the scene
+ * gathered on the map, in the order they came.
  */
 export function proofHandoff(scene, video, panels) {
   return {

@@ -1,29 +1,32 @@
 <script>
   import Icon from '../../components/Icon.svelte';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
+  import { liveScenes } from '../../lib/scenes.js';
 
   // The player's own way to the scenes: it says how many the clip holds, tinted
   // while some are still to prove, and opens or closes their drawer beside the video
-  // (`ScenePanel`). It adds no height to the workspace, and on a narrow player it
+  // (`ScenePanel`). An abandoned scene is not counted, as it waits folded at the foot
+  // of the drawer. It adds no height to the workspace, and on a narrow player it
   // keeps its pin and its count, the word going first.
   let { scenes = [], open = false, onclick } = $props();
 
-  const toProve = $derived(scenes.filter((s) => s.kind === 'draft').length);
+  const counted = $derived(liveScenes(scenes));
+  const toProve = $derived(counted.filter((s) => s.kind === 'draft').length);
 </script>
 
 <button
   class="scenes-btn"
-  class:has={scenes.length > 0}
+  class:has={counted.length > 0}
   class:open
   onclick={() => onclick?.()}
   aria-expanded={open}
-  aria-label={scenes.length ? `Scenes ${scenes.length}` : 'Scenes'}
+  aria-label={counted.length ? `Scenes ${counted.length}` : 'Scenes'}
   title={INSPECT_HELP.scenes}
   data-guide="inspect.scenes"
 >
   <Icon name="pin" size={13} />
   <span class="word">Scenes</span>
-  {#if scenes.length}<span class="count" class:todo={toProve > 0}>{scenes.length}</span>{/if}
+  {#if counted.length}<span class="count" class:todo={toProve > 0}>{counted.length}</span>{/if}
 </button>
 
 <style>

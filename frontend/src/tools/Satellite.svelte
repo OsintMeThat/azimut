@@ -634,6 +634,14 @@
     viewers: () => uiState.refViewers,
     setViewers: (windows) => (uiState.refViewers = windows),
   });
+  // A scene being geolocated (Inspect's Geolocate, the To-do, the pill): its video
+  // in a reference window, the scene marked on its bar (`lib/geolocating.svelte.js`).
+  $effect(() => {
+    if (uiState.tool !== 'satellite' || !uiState.geolocateRef || !caseState.current) return;
+    const ref = uiState.geolocateRef;
+    uiState.geolocateRef = null;
+    untrack(() => refs.openScene(ref));
+  });
   // A docked reference narrows the map beside it, so the engine remeasures
   // whenever a column opens, closes or changes width.
   $effect(() => {

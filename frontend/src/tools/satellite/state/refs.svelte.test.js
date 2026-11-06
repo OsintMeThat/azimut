@@ -298,3 +298,79 @@ describe('what the windows are', () => {
     expect(refs.open).toBe(session);
   });
 });
+
+describe('a scene being geolocated', () => {
+  const ITEM = { path: 'media/convoy.mp4', kind: 'video', title: 'Convoy clip', notes: 'Shot from the overpass' };
+  // the second scene of its video in clip order
+  const REF = { video: 'media/convoy.mp4', draft: 'sc_1', start: 238, end: 252, label: 'bridge?', order: 1 };
+
+  beforeEach(() => {
+    api.get = vi.fn(async (path) => {
+      if (path.startsWith('/api/cases/case-1/media/item?')) return ITEM;
+      if (path.startsWith('/api/cases/case-1/inspect/probe?')) return { fps: 25 };
+      throw new Error(`unexpected ${path}`);
+    });
+  });
+
+  it('opens its video with the file\'s own title and facts, paused where the scene starts, marked in its colour', async () => {
+    const refs = store();
+    await refs.openScene(REF);
+    expect(refs.open).toHaveLength(1);
+    const pane = refs.open[0];
+    expect(pane).toMatchObject({ path: 'media/convoy.mp4', kind: 'video', title: 'Convoy clip', cue: 238, playing: false });
+    expect(pane.facts.notes).toBe('Shot from the overpass');
+    expect(pane.scene).toMatchObject({ draft: 'sc_1', start: 238, end: 252, label: 'bridge?' });
+    // the second colour on Inspect's bar, with no read of the video's scenes for it
+    expect(pane.scene.color).toBe('var(--anno-1)');
+    expect(api.get).toHaveBeenCalledWith('/api/cases/case-1/media/item?path=media%2Fconvoy.mp4');
+    expect(api.get).not.toHaveBeenCalledWith(expect.stringContaining('/scenes?'));
+  });
+
+  it('takes a window already open on that clip, unfolded and on top, rather than a second', async () => {
+    const refs = store();
+    refs.add(SHOT);
+    refs.add(CLIP);
+    refs.add(SHOT);
+    const clip = refs.open[1];
+    clip.collapsed = true;
+    await refs.openScene({ ...REF, video: CLIP.path });
+    expect(refs.open).toHaveLength(3);
+    expect(clip).toMatchObject({ collapsed: false, cue: 238 });
+    expect(clip.scene.draft).toBe('sc_1');
+    expect(clip.z).toBe(3);
+    expect(api.get).not.toHaveBeenCalledWith(expect.stringContaining('/media/item'));
+  });
+
+  it('marks nothing for the whole video and leaves the clip where it is', async () => {
+    const refs = store();
+    refs.add(CLIP);
+    await refs.openScene({ video: CLIP.path, draft: 'sc_all', start: null, end: null, label: 'which town?' });
+    expect(refs.open[0].cue ?? null).toBeNull();
+    expect(refs.open[0].scene).toMatchObject({ start: null, end: null, label: 'which town?' });
+  });
+
+  it('keeps an instant an instant', async () => {
+    const refs = store();
+    await refs.openScene({ ...REF, end: null });
+    expect(refs.open[0].scene).toMatchObject({ start: 238, end: null });
+  });
+
+  it('is named after its file when the file cannot be read', async () => {
+    api.get = vi.fn(async (path) => {
+      if (path.startsWith('/api/cases/case-1/inspect/probe?')) return { fps: 25 };
+      throw new Error('offline');
+    });
+    const refs = store();
+    await refs.openScene(REF);
+    expect(refs.open[0].title).toBe('convoy.mp4');
+    expect(refs.open[0].scene.color).toBe('var(--anno-1)');
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('opens nothing without a case', async () => {
+    caseId = undefined;
+    const refs = store();
+    await refs.openScene(REF);
+    expect(refs.open).toHaveLength(0);
+  });
+});

@@ -12,9 +12,11 @@
   import { captureMoment, frameDuration, preciseClock, seekInto, shownFrameTime } from '../lib/inspectPlayer.js';
   import { INSPECT_HELP } from '../lib/inspectHelp.js';
   import {
-    editClock, isStretch, momentKey, newScene, sameMoments, sceneList, sceneMarks, scenePassage, sceneStart, sceneTime,
-    sceneTitle, sceneToEnd, snapToFrame, stretchFromShot, timeWords,
+    editClock, isAbandoned, isStretch, liveScenes, momentKey, newScene, sameMoments, sceneList, sceneMarks, scenePassage,
+    sceneStart, sceneTime, sceneTitle, sceneToEnd, snapToFrame, stretchFromShot, timeWords,
   } from '../lib/scenes.js';
+  import { abandonScene, geolocateScene, geolocating, restoreScene } from '../lib/geolocating.svelte.js';
+  import { onEvent } from '../lib/events.js';
   import { frameScenes, frameToCapture, frameUses, framesOfScene, proofHandoff, scenesAt } from '../lib/sceneFrames.js';
   import { createSceneOffer } from '../lib/sceneOffer.js';
   import { SceneEdit } from '../lib/sceneEdit.svelte.js';
@@ -282,6 +284,9 @@
     savedSignature = null;
     listedScenes = [];
     takenScenes = [];
+    listedGeolocating = null;
+    sceneFocus = null;
+    framesRendered = null;
     usedFrames = {};
     proofChooser = null;
     sceneOffer.reset();
@@ -428,8 +433,14 @@
     work.activeFrameId = work.frames.some((f) => f.id === spec.activeFrameId)
       ? spec.activeFrameId
       : isVideo ? null : work.frames[0].id;
-    renderFrames(run);
+    framesRendered = renderFrames(run).finally(() => {
+      if (run === openRun) framesRendered = null;
+    });
   }
+
+  // The previews of a reopened work while they are drawn, else null: a scene's proof
+  // offers its frames by their pictures, so it waits for them.
+  let framesRendered = null;
 
   /** Previews for a reopened work, a few at a time so the strip fills in as they land. */
   async function renderFrames(run) {
@@ -478,6 +489,16 @@
           if (time != null && work.source?.path === target.path) shared.seekTo = time;
         });
       }
+    }
+  });
+
+  // A scene sent from elsewhere (the pill, the To-do): its video opened on it, the
+  // drawer on its row, and with `proof` its Make the proof.
+  $effect(() => {
+    if (uiState.tool === 'inspect' && uiState.inspectScene && mediaList.length) {
+      const wanted = uiState.inspectScene;
+      uiState.inspectScene = null;
+      untrack(() => openScene(wanted));
     }
   });
 
@@ -894,7 +915,25 @@
   // hidden while that proof is in the case, so deleting the proof gives it back.
   let listedScenes = $state([]);
   let takenScenes = $state([]);
-  const scenes = $derived(sceneList(listedScenes, work.scenes, takenScenes));
+  // The draft of this clip being geolocated, as the server read it with the list. The
+  // app's own copy (`lib/geolocating.svelte.js`) is fresher once it has read the case:
+  // the extension and other tabs move it, and it carries the captures gathered since.
+  let listedGeolocating = $state(null);
+  const heldHere = $derived(
+    geolocating.caseId && geolocating.caseId === work.caseId
+      ? geolocating.scene?.video === work.source?.path ? geolocating.scene : null
+      : undefined,
+  );
+  const geolocatingId = $derived(heldHere === undefined ? listedGeolocating : heldHere?.id ?? null);
+  const scenes = $derived(
+    sceneList(listedScenes, work.scenes, takenScenes).map((sc) => {
+      if (sc.kind !== 'draft' || sc.id !== geolocatingId) return sc;
+      const fresh = heldHere?.id === sc.id ? heldHere : null;
+      return fresh ? { ...sc, geolocating: true, captures: fresh.captures ?? sc.captures, state: fresh.state ?? sc.state } : { ...sc, geolocating: true };
+    }),
+  );
+  // The row the drawer brings into view and lights, `{ key, n }`.
+  let sceneFocus = $state(null);
   // The proofs laying out each saved frame of the clip, by the frame's path.
   let usedFrames = $state({});
   // What the strip marks on a frame: the scenes it falls in, and the proofs using it.
@@ -936,6 +975,7 @@
       if (run !== openRun) return;
       listedScenes = res.scenes ?? [];
       takenScenes = res.taken ?? [];
+      listedGeolocating = res.geolocating ?? null;
       usedFrames = res.used ?? {};
       adoptGivenBack(listedScenes);
     } catch {
@@ -962,6 +1002,15 @@
   $effect(() => {
     if (uiState.tool === 'inspect' && isVideo && !opening) untrack(() => loadScenes(openRun));
   });
+
+  // A scene of this clip gathered a capture, from the map or the extension, or its
+  // geolocating started or ended: its row says so without waiting for a return here.
+  onDestroy(
+    onEvent('geolocating', (event) => {
+      if (event.case_id !== work.caseId || event.video !== work.source?.path) return;
+      if (uiState.tool === 'inspect' && isVideo && !opening) loadScenes(openRun);
+    }),
+  );
 
   /** Record the clip as it now stands, and say how to take this step back. */
   function clipChanged(message) {
@@ -1038,6 +1087,117 @@
     if (index === -1) return;
     work.scenes.splice(index, 1);
     clipChanged('Scene removed');
+  }
+
+  /** Go to where a scene starts, for one that is only looked at. */
+  function goToScene(scene) {
+    const start = sceneStart(scene);
+    if (start != null) seekFrame(start);
+  }
+
+  // -- geolocating a scene ----------------------------------------------------------
+  // Geolocate is a scene's main act: the server holds it as the one being geolocated,
+  // so every capture filed meanwhile is gathered for it, and Satellite opens with the
+  // video as a reference window, the scene marked on its bar (`lib/geolocating`). The
+  // work is written first, since the server can only geolocate a scene it holds.
+  // Abandon and Restore are the server's too, and the list is read again after each.
+  let sceneBusy = $state(false);
+
+  async function heldWork() {
+    await autosave.flush();
+    if (autosave.unsaved) throw new Error('The work is not saved yet. Retry, then try again');
+  }
+
+  async function geolocate(scene) {
+    if (scene?.kind !== 'draft' || !isVideo || sceneBusy) return;
+    sceneBusy = true;
+    const run = openRun;
+    try {
+      await heldWork();
+      if (run !== openRun) return;
+      await geolocateScene(work.caseId, { video: work.source.path, id: scene.id });
+    } catch (e) {
+      if (run === openRun) toast(e.message, 'danger');
+    } finally {
+      sceneBusy = false;
+    }
+  }
+
+  /** A row of the server's list put in place of the one it had, so the drawer moves at once. */
+  function heardRow(row) {
+    if (!row?.id) return;
+    const at = listedScenes.findIndex((sc) => sc.kind === 'draft' && sc.id === row.id);
+    listedScenes = at === -1 ? [...listedScenes, row] : listedScenes.map((sc, i) => (i === at ? row : sc));
+  }
+
+  async function abandon(scene, reason = '') {
+    if (scene?.kind !== 'draft' || !isVideo || sceneBusy) return;
+    sceneBusy = true;
+    const run = openRun;
+    const caseId = work.caseId;
+    const video = work.source.path;
+    try {
+      await heldWork();
+      if (run !== openRun) return;
+      heardRow(await abandonScene(caseId, video, scene.id, reason));
+    } catch (e) {
+      if (run === openRun) toast(e.message, 'danger');
+      return;
+    } finally {
+      sceneBusy = false;
+    }
+    if (run !== openRun) return;
+    loadScenes(run);
+    toast('Scene abandoned', 'info', 6000, {
+      label: 'Undo',
+      onClick: () => {
+        if (run === openRun) bringBack(scene);
+      },
+    });
+  }
+
+  async function bringBack(scene) {
+    if (scene?.kind !== 'draft' || !isVideo) return;
+    const run = openRun;
+    try {
+      heardRow(await restoreScene(work.caseId, work.source.path, scene.id));
+    } catch (e) {
+      if (run === openRun) toast(e.message, 'danger');
+      return;
+    }
+    if (run !== openRun) return;
+    sceneFocus = { key: scene.key ?? scene.id, n: (sceneFocus?.n ?? 0) + 1 };
+    loadScenes(run);
+  }
+
+  /**
+   * Open a scene asked for from elsewhere (`uiState.inspectScene`): its video, the
+   * video itself on screen at the scene's start, the drawer open on its row, and
+   * with `proof` its Make the proof.
+   */
+  async function openScene({ video, draft, proof = false }) {
+    const target = mediaList.find((m) => m.path === video);
+    if (!target) {
+      toast('That video is no longer in the case', 'warn');
+      return;
+    }
+    if (work.source?.path !== video) {
+      await open(target);
+      if (work.source?.path !== video) return;
+    }
+    const run = openRun;
+    await loadScenes(run);
+    if (run !== openRun) return;
+    if (selected !== 'video') select('video');
+    scenesOpen = true;
+    const scene = scenes.find((sc) => sc.kind === 'draft' && sc.id === draft);
+    if (!scene) {
+      toast('That scene is no longer in this video', 'warn');
+      return;
+    }
+    goToScene(scene);
+    sceneFocus = { key: scene.key, n: (sceneFocus?.n ?? 0) + 1 };
+    if (proof && !isAbandoned(scene)) makeProof(scene);
   }
 
   function openSceneProof(scene) {
@@ -1168,23 +1328,39 @@
   // a scan found in it, else the one it starts on. Frames not in the case are saved
   // on the way, with their default names and the last folder, then Geo Proof opens a
   // proof of the scene on them (`uiState.proofScene`).
-  let proofChooser = $state(null); // { scene, ids, capture }
+  let proofChooser = $state(null); // { scene, ids, capture, captures }
   let makingProof = $state(false);
   const chooserFrames = $derived(
     proofChooser ? proofChooser.ids.map((id) => work.frames.find((f) => f.id === id)).filter(Boolean) : [],
   );
 
-  function makeProof(scene) {
-    if (scene?.kind !== 'draft' || !isVideo || makingProof) return;
+  /** A capture the scene gathered, as the chooser shows it: its thumbnail and name. */
+  function gathered(path) {
+    const item = mediaList.find((m) => m.path === path);
+    return {
+      path,
+      url: fileUrl(work.caseId, item?.thumbnail || path),
+      title: item?.title || item?.filename || path.split('/').pop(),
+    };
+  }
+
+  async function makeProof(scene) {
+    if (scene?.kind !== 'draft' || !isVideo || makingProof || isAbandoned(scene)) return;
+    if (framesRendered) {
+      const run = openRun;
+      await framesRendered;
+      if (run !== openRun || makingProof) return;
+    }
     const frames = framesOfScene(scene, work.frames, frameDur);
     proofChooser = {
       scene,
       ids: frames.map((f) => f.id),
       capture: frames.length ? null : frameToCapture(scene, { scan, now: shownTime(), frame: frameDur }),
+      captures: (scene.captures ?? []).map(gathered),
     };
   }
 
-  async function confirmProof(ids) {
+  async function confirmProof(ids, capturePaths = []) {
     const chooser = proofChooser;
     if (!chooser || makingProof) return;
     const run = openRun;
@@ -1211,7 +1387,8 @@
       const panels = frames.map((f) => f.filed?.path);
       if (!panels.every(Boolean)) throw new Error('A frame could not be saved to the case');
       proofChooser = null;
-      uiState.proofScene = proofHandoff(chooser.scene, work.source.path, panels);
+      // the frames first, in clip order, then the captures, in the order they came
+      uiState.proofScene = proofHandoff(chooser.scene, work.source.path, [...panels, ...capturePaths]);
       uiState.tool = 'proof';
     } catch (e) {
       if (run === openRun) toast(e.message, 'danger');
@@ -1578,8 +1755,13 @@
                   <ScenePanel
                     {scenes}
                     edit={sceneEdit}
+                    focus={sceneFocus}
                     onadd={addSceneHere}
                     onplay={playScene}
+                    ongo={goToScene}
+                    ongeolocate={geolocate}
+                    onabandon={abandon}
+                    onrestore={bringBack}
                     onlabel={labelScene}
                     onend={endSceneHere}
                     onremove={removeScene}
@@ -1658,7 +1840,7 @@
               <button class="btn btn-sm scene-here" data-guide="inspect.scene" onclick={addSceneHere} title={INSPECT_HELP.sceneHere}>
                 <Icon name="pin" size={13} />
                 <span>Scene here</span>
-                {#if scenes.length}<span class="scene-count">{scenes.length} in this video</span>{/if}
+                {#if liveScenes(scenes).length}<span class="scene-count">{liveScenes(scenes).length} in this video</span>{/if}
                 <kbd>S</kbd>
               </button>
               {#if unfiledCount}
@@ -1777,6 +1959,7 @@
       {filters}
       {filedIds}
       capture={proofChooser.capture}
+      captures={proofChooser.captures}
       busy={makingProof}
       onconfirm={confirmProof}
       oncancel={() => (proofChooser = null)}
