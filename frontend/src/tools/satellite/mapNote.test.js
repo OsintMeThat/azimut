@@ -5,12 +5,16 @@ describe('the map view put in a note', () => {
   it('is a capture at half the page, named after the place open, and filed once', async () => {
     const take = vi.fn().mockResolvedValue({ entity: { id: 'e_cap', label: '15.369400, 44.191000' }, fresh: true, width: 1200, height: 675 });
     const offer = viewOffer({ take, label: () => 'Water tower' });
-    expect(offer).toMatchObject({ id: 'view', label: 'This view', picture: true });
+    expect(offer).toMatchObject({ id: 'view', label: 'An area of the map', picture: true });
     expect(await offer.put({})).toEqual({ text: '[[media:e_cap|Water tower]]{width=50%}', filed: ['e_cap'] });
     // the same view again is the capture already filed, which Undo leaves
     take.mockResolvedValue({ entity: { id: 'e_cap', label: '15.369400, 44.191000' }, fresh: false, width: 1200, height: 675 });
     const again = await viewOffer({ take }).put({});
     expect(again).toEqual({ text: '[[media:e_cap|15.369400, 44.191000]]{width=50%}', filed: [] });
+    // the area waits for the box dragged: Cancel reaches the wait through the put's signal
+    const signal = new AbortController().signal;
+    await viewOffer({ take }).put({ signal });
+    expect(take).toHaveBeenLastCalledWith({ signal });
   });
 
   it('keeps a tall frame within half the page height', () => {

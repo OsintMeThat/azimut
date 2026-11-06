@@ -5964,7 +5964,7 @@ What each tool puts, and where its *Put in “<note>”* sits:
 
 | Tool | What lands | Where |
 |---|---|---|
-| Map | *This view*: the centred view filed as a capture, once per identical view (provider, imagery day, centre, zoom, bearing, size). *This point*: decimal degrees at 5 places, or the open place's chip and its coordinates. *This measure*: its own text and assumption, and the day a shadow was read for | capture menu, right-click *Put this point in “…”*, Add |
+| Map | *An area of the map*: the capture marquee is armed and the box dragged is filed as a capture (Esc or Cancel calls it off), once per identical view (provider, imagery day, centre, zoom, bearing, size). *This point*: decimal degrees at 5 places, or the open place's chip and its coordinates. *This measure*: its own text and assumption, and the day a shadow was read for | capture menu, right-click *Put this point in “…”*, Add |
 | Compare | *This pair*, side by side with both days in its credit, kept once per identical pair; an unsaved comparison is saved as *<place>, <day A> to <day B>* | Export panel |
 | Detect | *This pin*: a pinned candidate's evidence picture, captioned with what was measured, its area and its days; a candidate not pinned offers nothing | the pinned verdict |
 | Inspect | *This frame*, labelled *Frame at 00:12.480*, saved first when it is not | under Save to case |

@@ -31,6 +31,17 @@ let rects;
 let armedOff;
 let extension;
 
+// The marquee's drag, stood in for: a test draws the box it wants with `drawBox`.
+let dragDone = null;
+vi.mock('../../../lib/map/gestures.js', () => ({
+  startRectDrag: (_facade, _event, { onDone }) => { dragDone = onDone; },
+}));
+/** Drag a box from (x0, y0) to (x1, y1) on the armed marquee. */
+function drawBox(capture, x0, y0, x1, y1) {
+  capture.startSelect({ button: 0 });
+  dragDone?.({ x0, y0, x1, y1 });
+}
+
 vi.mock('../../../lib/extBridge.js', () => ({
   extensionVersion: () => extension,
   captureTab: () => Promise.reject(new Error('no extension here')),
@@ -251,17 +262,22 @@ describe('when a capture is imperfect', () => {
   });
 });
 
-describe('the view put in a note', () => {
+describe('the area put in a note', () => {
   const ENTITY = { id: 'e_cap', type: 'capture', label: '48.850000, 2.350000', attrs: { path: 'media/sat.png' } };
 
-  it('files the centred frame through the tile road, asking for the same view to be reused', async () => {
+  it('arms the marquee and files the box dragged through the tile road, asking for the same view to be reused', async () => {
     api.post = vi.fn(async () => ({ path: 'media/sat.png', entity: ENTITY }));
     const capture = store();
-    const [w, h] = capture.size;
-    const answer = await capture.takeForNote();
+    const asked = capture.takeForNote();
+    expect(capture.armed).toBe(true);
+    expect(armedOff).toBe(1); // another map mode stood down for it
+    expect(api.post).not.toHaveBeenCalled(); // nothing is taken before the box is drawn
+    drawBox(capture, 100, 100, 500, 400);
+    const answer = await asked;
     expect(api.post.mock.calls[0][0]).toBe('/api/cases/case-1/satellite/capture');
     expect(api.post.mock.calls[0][1]).toMatchObject({ reuse: true, imagery_date: '2024-05-01', provider: 'esri-world-imagery' });
-    expect(answer).toEqual({ entity: ENTITY, fresh: true, width: w, height: h });
+    expect(answer).toEqual({ entity: ENTITY, fresh: true, width: 400, height: 300 });
+    expect(capture.armed).toBe(false);
     expect(reloadCase).toHaveBeenCalled();
     // the note says it went in; the capture says nothing of its own
     expect(notify).not.toHaveBeenCalled();
@@ -269,15 +285,39 @@ describe('the view put in a note', () => {
 
   it('cites a view already filed in that state without re-reading the case', async () => {
     api.post = vi.fn(async () => ({ path: 'media/sat.png', entity: ENTITY, reused: true }));
-    const answer = await store().takeForNote();
-    expect(answer.fresh).toBe(false);
+    const capture = store();
+    const asked = capture.takeForNote();
+    drawBox(capture, 0, 0, 300, 200);
+    expect((await asked).fresh).toBe(false);
     expect(reloadCase).not.toHaveBeenCalled();
   });
 
   it('still says when tiles were missing, since that is in the picture', async () => {
     api.post = vi.fn(async () => ({ path: 'media/sat.png', entity: ENTITY, tiles_missing: 2 }));
-    await store().takeForNote();
+    const capture = store();
+    const asked = capture.takeForNote();
+    drawBox(capture, 0, 0, 300, 200);
+    await asked;
     expect(notify.mock.calls[0][0]).toContain('2 missing tile');
+  });
+
+  it('is called off without a word by Escape, another mode or Cancel, and files nothing', async () => {
+    const capture = store();
+    const escaped = capture.takeForNote();
+    capture.disarm(); // Escape, or another map mode taking the left button
+    await expect(escaped).rejects.toMatchObject({ name: 'AbortError' });
+    const controller = new AbortController();
+    const cancelled = capture.takeForNote({ signal: controller.signal });
+    controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
+    expect(capture.armed).toBe(false);
+    // a slipped click is no box: the wait goes on
+    const waiting = capture.takeForNote();
+    drawBox(capture, 10, 10, 12, 12);
+    expect(capture.armed).toBe(true);
+    capture.toggleSelect();
+    await expect(waiting).rejects.toMatchObject({ name: 'AbortError' });
+    expect(api.post).not.toHaveBeenCalled();
   });
 
   it('refuses with a sentence on a view-only basemap, and for Google without the extension', async () => {
@@ -288,6 +328,7 @@ describe('the view put in a note', () => {
     const capture = store();
     await expect(capture.takeForNote()).rejects.toThrow('Azimut Capture extension');
     expect(capture.extGate).toBe(true);
+    expect(capture.armed).toBe(false);
     expect(api.post).not.toHaveBeenCalled();
   });
 
@@ -296,6 +337,7 @@ describe('the view put in a note', () => {
     api.post = vi.fn(() => new Promise((resolve) => (release = () => resolve({ entity: ENTITY }))));
     const capture = store();
     const first = capture.takeForNote();
+    drawBox(capture, 0, 0, 300, 200);
     await vi.waitFor(() => expect(capture.busy).toBe(true));
     await expect(capture.takeForNote()).rejects.toThrow('already running');
     release();
@@ -303,7 +345,9 @@ describe('the view put in a note', () => {
     api.post = vi.fn(async () => {
       throw new Error('offline');
     });
-    await expect(capture.takeForNote()).rejects.toThrow('offline');
+    const failing = capture.takeForNote();
+    drawBox(capture, 0, 0, 300, 200);
+    await expect(failing).rejects.toThrow('offline');
     expect(capture.busy).toBe(false);
   });
 });

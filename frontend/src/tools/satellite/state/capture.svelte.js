@@ -446,36 +446,68 @@ export function createCaptureState({
     return result;
   }
 
+  /** A note waiting for the area the analyst drags: `{ resolve, reject }`, or null. */
+  let forNote = null;
+
+  /** The note's wait ends without an area: Escape, another map mode, or Cancel. */
+  function dropNote(reason) {
+    const pending = forNote;
+    forNote = null;
+    pending?.reject(reason);
+  }
+
   /**
-   * The map as it stands, filed for a note: the centred frame at the chosen
-   * size, through whichever road this basemap takes, and nothing said here. A
-   * view already filed in this very state is cited again rather than filed
-   * twice. Answers `{ entity, fresh, width, height }`; throws a sentence when
-   * no picture can be had.
+   * An area of the map for a note: the marquee is armed, and the box the analyst
+   * drags is filed through whichever road this basemap takes, as the Capture
+   * button's box is. A view already filed in this very state is cited again
+   * rather than filed twice. Resolves `{ entity, fresh, width, height }` once the
+   * box is drawn; rejects with a sentence when no picture can be had, and with an
+   * AbortError when the wait is called off (Escape, Cancel, another mode).
    */
-  async function takeForNote() {
-    if (busy) throw new Error('A capture is already running. Try again in a moment');
-    if (blocked) throw new Error('This basemap is for viewing only. Switch to imagery to put it in a note');
+  function takeForNote({ signal } = {}) {
+    if (busy) return Promise.reject(new Error('A capture is already running. Try again in a moment'));
+    if (blocked) return Promise.reject(new Error('This basemap is for viewing only. Switch to imagery to put it in a note'));
     if (widget && !extensionVersion()) {
       extGate = true;
-      throw new Error('Google views are captured through the Azimut Capture extension');
+      return Promise.reject(new Error('Google views are captured through the Azimut Capture extension'));
     }
-    const [w, h] = size;
-    const box = element().getBoundingClientRect();
-    const framedOn = engine().camera();
-    const rect = { x: (box.width - w) / 2, y: (box.height - h) / 2, w, h };
+    dropNote(called('Another area was asked for'));
+    return new Promise((resolve, reject) => {
+      const mine = { resolve, reject };
+      forNote = mine;
+      menuOpen = false;
+      if (!armed) {
+        armed = true;
+        onArm();
+      }
+      signal?.addEventListener('abort', () => {
+        if (forNote !== mine) return;
+        forNote = null;
+        armed = false;
+        onRect(null);
+        reject(called('No area was drawn'));
+      }, { once: true });
+    });
+  }
+
+  function called(words) {
+    return Object.assign(new Error(words), { name: 'AbortError' });
+  }
+
+  /** The box drawn for a note, filed: `{ entity, fresh, width, height }`. */
+  async function fileForNote(framedOn, rect) {
     busy = true;
     try {
       let result;
       if (widget) result = await grabAndFile(framedOn, rect, { quiet: true });
       else if (tilt() > 0) result = await renderAndFile(framedOn, rect, { reuse: true });
       else {
-        result = await stitchAndFile(framedOn, w, h, { reuse: true });
+        result = await stitchAndFile(framedOn, Math.round(rect.w), Math.round(rect.h), { reuse: true });
         const [words, kind] = stitchedWords(result);
         if (kind === 'warn') notify(words, 'warn', 6000);
       }
       if (!result?.entity?.id) throw new Error('The capture was filed, but could not be found');
-      return { entity: result.entity, fresh: !result.reused, width: w, height: h };
+      return { entity: result.entity, fresh: !result.reused, width: Math.round(rect.w), height: Math.round(rect.h) };
     } catch (e) {
       if (e.needsActivation) {
         throw new Error('One-time step: click the Azimut Capture icon in the toolbar (or press Alt+Shift+A), then try again');
@@ -505,6 +537,7 @@ export function createCaptureState({
       onArm();
     } else {
       onRect(null);
+      dropNote(called('No area was drawn'));
     }
     return armed;
   }
@@ -526,12 +559,15 @@ export function createCaptureState({
       return;
     }
     armed = false; // one box per arm — re-arm to draw another
-    take(framedOn, Math.round(w), Math.round(h), {
-      x: Math.min(dragged.x0, dragged.x1),
-      y: Math.min(dragged.y0, dragged.y1),
-      w,
-      h,
-    });
+    const rect = { x: Math.min(dragged.x0, dragged.x1), y: Math.min(dragged.y0, dragged.y1), w, h };
+    if (forNote) {
+      // the box a note asked for goes to the note, not to a capture of its own
+      const pending = forNote;
+      forNote = null;
+      fileForNote(framedOn, rect).then(pending.resolve, pending.reject);
+      return;
+    }
+    take(framedOn, Math.round(w), Math.round(h), rect);
   }
 
   return {
@@ -643,6 +679,7 @@ export function createCaptureState({
      *  Unlike `toggleSelect`, this claims nothing back: the mode arming is the
      *  one saying what else it turns off. */
     disarm() {
+      dropNote(called('No area was drawn'));
       if (!armed) return;
       armed = false;
       onRect(null);

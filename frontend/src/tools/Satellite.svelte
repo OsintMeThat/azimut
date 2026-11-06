@@ -2421,7 +2421,7 @@
     };
   }
 
-  const noteView = viewOffer({ take: () => capture.takeForNote(), label: () => seatedPlace()?.label ?? '' });
+  const noteView = viewOffer({ take: (options) => capture.takeForNote(options), label: () => seatedPlace()?.label ?? '' });
   const notePoint = pointOffer({
     point: () => ({ place: seatedPlace(), lat: displayCoords.lat, lon: displayCoords.lon }),
   });

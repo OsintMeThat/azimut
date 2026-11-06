@@ -24,14 +24,14 @@ export function viewWidth(width, height) {
 export function viewOffer({ take, label = () => '' }) {
   return {
     id: 'view',
-    label: 'This view',
-    hint: 'Captured and filed in the case, once for the same view',
+    label: 'An area of the map',
+    hint: 'Drag over the map: the area is filed in the case, once for the same view',
     icon: 'camera',
     picture: true,
-    busy: 'Capturing the view…',
-    put: async () => {
+    busy: 'Drag over the map for the area to put in. Esc cancels',
+    put: async ({ signal } = {}) => {
       const named = label();
-      const { entity, fresh, width, height } = await take();
+      const { entity, fresh, width, height } = await take({ signal });
       if (!entity?.id) throw new Error('The view could not be captured');
       return { text: picturePut(entity, { label: named, width: viewWidth(width, height) }), filed: fresh ? [entity.id] : [] };
     },
