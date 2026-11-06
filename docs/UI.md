@@ -5977,7 +5977,7 @@ What each tool puts, and where its *Put in “<note>”* sits:
 | Media | *Quote the post*: the words as posted, the account and day, then the media's chip | Open in…, Add |
 | Map plate | *This page*: the page on screen drawn at 300 dpi (at most 36 Mpx, a large paper coarser rather than refused), filed once per plate, day, step and size, its credits on its face; refused while tiles are still loading. *The days side by side*: the plate's sheet, 2 to 12 days | the export dialog (PNG, Sheet), Add |
 | Compare | *This evolution sheet*: 2 to 40 pictures, the comparison saved first, each day credited (Wayback days as estimates); fetched on that press | Export panel with Sheet ticked |
-| Horizon | *An area of the photo above the terrain*: a box dragged over the view as it shows, loupe kept (Esc or Cancel calls it off), the view saved first, filed once per view, area and size; *The viewpoint*: eye, height, looking bearing and field of view, relief source. Never a Find score or rank | Export menu, Add |
+| Horizon | Offered whenever an eye stands: a box dragged over the view as it shows, loupe kept (Esc or Cancel calls it off), the view saved first, filed once per view, area, kind and size. *An area of the photo above the terrain* while a photo is laid, else *An area of the view* with its names, ruler and credits. Never a Find score or rank | Export menu, Add |
 | Detect | *The kept table*: kept and noted candidates only, under a quoted header (run and areas, analyzer, passes, threshold, cloud mask, *N kept of M candidates, P pinned*), 200 rows at most | beside Export as layer, Add |
 | Timeline, Graph | *This reading* as a picture of its plate, filed with the snapshot that freezes it (or the one open) | the *Export this reading* dialog, Add |
 

@@ -45,7 +45,7 @@
   import { api } from '../lib/api.js';
   import { appInfo, caseState, ensureCase, fmtCoords, prefs, prefsReady, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
-  import { NOTE_AREA_HINT, areaKey, pairOffer, viewpointOffer } from './horizon/horizonNote.js';
+  import { NOTE_AREA_HINT, areaKey, areaOffer } from './horizon/horizonNote.js';
   import { findBetaDue } from '../lib/onboarding.js';
   import { assignFolder } from '../lib/filing.js';
   import { reloadedInto, splitHash } from '../lib/hash.js';
@@ -606,31 +606,36 @@
   }
 
   // -- into the note pinned beside -----------------------------------------------------
-  // An area of the photo above the terrain it was matched on, dragged over the view and kept
-  // under the view (saved first when it is not), and the viewpoint as text. Find's score and
-  // ranking go nowhere.
+  // An area dragged over the view, kept under the view (saved first when it is not): the
+  // photo above the terrain it was matched on when a photo is laid, else the view alone with
+  // its names, ruler and credits. Find's score and ranking go nowhere.
 
-  /** Why a pair cannot be drawn now, or ''. */
-  function pairBlocked() {
-    if (exportBusy || captureBusy || !viewPane || !view.observer) return 'Horizon is busy. Try again in a moment';
-    if (!(photoOn && overlay.source)) return 'Lay a photo over the view first';
-    return '';
+  /** Whether a photo is laid over the view, which makes an area a pair. */
+  const photoLaid = () => Boolean(photoOn && overlay.source);
+
+  /** Why an area cannot be drawn now, or ''. */
+  function areaBlocked() {
+    return exportBusy || captureBusy || !viewPane || !view.observer ? 'Horizon is busy. Try again in a moment' : '';
   }
 
   /**
-   * Keep the pair in the case under the saved view for a note: an area dragged over the
-   * view, the photo and the terrain of it one above the other, the ridge lines on both.
-   * Escape or the put's Cancel call it off. A pair kept in this very state (the view as
-   * saved, the same area and size) is cited again rather than kept twice.
+   * Keep an area of the view in the case under the saved view for a note: a box dragged over
+   * the view as it shows, the loupe kept, then the photo and the terrain of it one above the
+   * other with the ridge lines on both, or the view alone when no photo is laid. Escape or the
+   * put's Cancel call it off. An area kept in this very state (the view as saved, the same
+   * area, kind and size) is cited again rather than kept twice.
    */
-  async function keepPairForNote({ signal } = {}) {
-    const before = pairBlocked();
+  async function keepAreaForNote({ signal } = {}) {
+    const before = areaBlocked();
     if (before) throw new Error(before);
     const area = await viewPane.chooseArea({ hint: NOTE_AREA_HINT, signal });
     if (!area) throw Object.assign(new Error('No area was drawn'), { name: 'AbortError' });
     // the view may have moved on while the area was drawn
-    const after = pairBlocked();
+    const after = areaBlocked();
     if (after) throw new Error(after);
+    // the photo laid once the area is drawn is what the picture shows
+    const pair = photoLaid();
+    const kind = pair ? 'column' : 'view';
     exportBusy = 'note';
     try {
       const owner = await ensureCase();
@@ -638,30 +643,29 @@
         if (!(await views.save(viewTitle))) throw new Error(views.error || 'The view could not be saved');
       }
       if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
-      const drawn = await drawPair({ area });
+      const drawn = pair ? await drawPair({ area }) : await viewPane.exportPicture({ kind: 'screen', area });
       if (!drawn) throw new Error('The view has not finished landing');
       // the words say what the area faces, not what the whole view does
       const faced = drawn.lens ? { ...drawn.camera, heading: drawn.lens.heading, fov: drawn.lens.fov } : drawn.camera;
-      const parts = exportParts('column', { ...drawn, camera: faced });
+      const parts = exportParts(kind, { ...drawn, camera: faced });
       const form = new FormData();
-      form.append('image', await canvasBlob(exportPicture('column', drawn, parts)), 'view.png');
-      form.append('kind', 'column');
+      form.append('image', await canvasBlob(exportPicture(kind, drawn, parts)), 'view.png');
+      form.append('kind', kind);
       form.append('filename', parts.filename);
       form.append('area', areaKey(area, drawn.lens ?? faced));
       if (pictureCredits) form.append('attribution', pictureCredits);
       form.append('reuse', 'true');
       const kept = await api.post(`/api/cases/${encodeURIComponent(owner.id)}/horizon/views/${encodeURIComponent(views.current.name)}/images`, form, signal ? { signal } : undefined);
       await reloadCase();
-      return { entity: { id: kept.entity }, label: `${views.current.title}, photo above terrain`, fresh: !kept.reused };
+      const label = `${views.current.title}, ${pair ? 'photo above terrain' : 'area of the view'}`;
+      return { entity: { id: kept.entity }, label, fresh: !kept.reused };
     } finally {
       exportBusy = '';
     }
   }
 
-  const notePair = pairOffer({ keep: keepPairForNote, unsaved: () => !views.current || unsaved });
-  const noteViewpoint = viewpointOffer({ read: () => ({ observer: view.observer, camera: shownLens, panorama: view.panorama }) });
-  const pairReady = $derived(Boolean(view.observer && photoOn && overlay.source));
-  offerPuts('horizon', () => (view.observer ? [...(pairReady ? [notePair] : []), noteViewpoint] : []));
+  const noteArea = areaOffer({ keep: keepAreaForNote, photo: photoLaid, unsaved: () => !views.current || unsaved });
+  offerPuts('horizon', () => (view.observer ? [noteArea] : []));
   onDestroy(() => withdrawNote('horizon'));
 
   /** A picture of the saved view kept in the case, listed under it. */
@@ -1905,7 +1909,7 @@
           busy={exportBusy}
           earth={earthLink}
           onexport={exportView}
-          notes={[...(pairReady ? [notePair] : []), noteViewpoint]}
+          notes={view.observer ? [noteArea] : []}
           onproof={sendToProof}
         />
         <button

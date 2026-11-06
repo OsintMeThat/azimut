@@ -365,11 +365,11 @@ def test_two_areas_of_one_view_put_in_a_note_are_two_pictures_and_the_same_area_
     photo = _photo(client, cid)
     _save(client, cid, "North ridge", _spec(photo))
 
-    def put(area):
+    def put(area, kind="column"):
         return client.post(
             f"/api/cases/{cid}/horizon/views/North ridge/images",
             files={"image": ("view.png", io.BytesIO(_png(size=(320, 200))), "image/png")},
-            data={"kind": "column", "filename": "North ridge photo above terrain", "reuse": "true", "area": area},
+            data={"kind": kind, "filename": "North ridge photo above terrain", "reuse": "true", "area": area},
         )
 
     left = '{"x":0,"y":0,"width":160,"height":100,"heading":80,"tilt":0,"fov":20}'
@@ -382,6 +382,10 @@ def test_two_areas_of_one_view_put_in_a_note_are_two_pictures_and_the_same_area_
     # the same area put again is cited
     again = put(left)
     assert again.json()["reused"] is True and again.json()["entity"] == first.json()["entity"]
+    # the same area of the view alone, no photo laid, is another picture
+    alone = put(left, kind="view")
+    assert alone.status_code == 200 and alone.json().get("reused") is None
+    assert alone.json()["entity"] != first.json()["entity"]
     # an area key is short: a long one is refused at the edge
     assert put("x" * 201).status_code == 422
 

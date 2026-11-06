@@ -292,6 +292,7 @@ stops making sense.
 - **Map plate, next:** Make a post from a plate: a video over a chosen period for one layer, from a template, handed to the Post composer.
 - **Tools into the note, next:** public verify links in the Sources list, Inspect's scenes as a table, an extension capture's toast.
 - **Report, next:** an optional Azimut mark in the footer.
+- **Report as a scrolled story:** the HTML report's chapters as steps beside a fixed picture or map that moves to each view, proof or day as the reader scrolls, with filed captures where a licence keeps live tiles out and no motion for a reader who turned it off.
 - **Signed PDFs:** sign the finished file (PAdES, an incremental CMS update, e.g. pyHanko once its wheels are checked on the three OSes) with an X.509 key the analyst holds, kept 0600; a self-signed key proves only that the file is unchanged since it was signed, while a reader-trusted identity needs a CA certificate and a timestamp server, a network call.
 - **A report from a period:** every geolocation of a period written into a note through a per-item layout (card, table, one per page).
 - **Interactive map plate:** a map of a period's located videos, each point playing its clip, made without drawing it by hand.

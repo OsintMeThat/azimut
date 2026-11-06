@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-/** Export, in the Horizon header, offers the pinned note the photo above the terrain and the viewpoint. */
+/** Export, in the Horizon header, offers the pinned note an area of the view. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
@@ -13,13 +13,12 @@ let app;
 let host;
 let unpin = () => {};
 
-const pair = { id: 'pair', label: 'The photo above the terrain', hint: 'Both', put: async () => ({ text: 'x' }) };
-const viewpoint = { id: 'viewpoint', label: 'This viewpoint', hint: 'The eye', put: async () => ({ text: 'y' }) };
+const area = { id: 'area', label: 'An area of the view', hint: 'Drag over the view', put: async () => ({ text: 'x' }) };
 
 function show(props = {}) {
   host = document.createElement('div');
   document.body.append(host);
-  app = mount(ExportMenu, { target: host, props: { onexport: vi.fn(), onproof: vi.fn(), notes: [pair, viewpoint], ...props } });
+  app = mount(ExportMenu, { target: host, props: { onexport: vi.fn(), onproof: vi.fn(), notes: [area], ...props } });
   flushSync();
   host.querySelector('.em-open').click();
   flushSync();
@@ -45,20 +44,17 @@ describe('putting a Horizon view in the note', () => {
     flushSync();
     show();
     const rows = [...host.querySelectorAll('[data-put]')];
-    expect(rows.map((row) => row.textContent.trim())).toEqual([
-      'Put the photo above the terrain in “Ridge above the town”',
-      'Put this viewpoint in “Ridge above the town”',
-    ]);
-    rows[1].click();
+    expect(rows.map((row) => row.textContent.trim())).toEqual(['Put an area of the view in “Ridge above the town”']);
+    rows[0].click();
     flushSync();
-    expect(putInNote).toHaveBeenCalledWith(viewpoint);
+    expect(putInNote).toHaveBeenCalledWith(area);
     expect(host.querySelector('.em-menu')).toBeNull();
   });
 
-  it('offers only the viewpoint when no photo is laid', () => {
+  it('offers nothing while no eye stands', () => {
     unpin = pinNote({ caseId: 'c1', noteId: 'n1', title: 'Ridge', editor: {} });
     flushSync();
-    show({ notes: [viewpoint] });
-    expect([...host.querySelectorAll('[data-put]')].map((row) => row.dataset.put)).toEqual(['viewpoint']);
+    show({ notes: [] });
+    expect(host.querySelectorAll('[data-put]')).toHaveLength(0);
   });
 });
