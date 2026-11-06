@@ -536,7 +536,7 @@ describe('a note, and how it prints', () => {
     const { EditorView } = await import('@codemirror/view');
     const view = EditorView.findFromDOM(target.querySelector('.cm-editor'));
     const text = view.state.doc.toString();
-    expect(text.startsWith('::: center\n![Azimut](azimut:logo){width=25% align=center}')).toBe(true);
+    expect(text.startsWith('::: top-right\n![Azimut](azimut:logo){width=25% align=right}\n:::')).toBe(true);
     expect(text.endsWith(OLD_TEXT)).toBe(true);
     // back to the style's and on to the own page again: the page written stays, alone
     [...document.querySelectorAll('[aria-label="Cover page"] button')].find((button) => button.textContent === "The style's").click();
@@ -757,6 +757,8 @@ describe('a template from Settings', () => {
     await openTemplate();
     expect(target.querySelector('input[aria-label="Template name"]').value).toBe('House write-up');
     expect(target.querySelector('[data-guide="notebook.look"]').textContent).toContain('Brief');
+    // the header says how to pin something to a corner of the cover
+    expect(target.querySelector('.tool-header .hint').textContent).toContain('A ::: top-right block in the cover pins it to a corner.');
     // guidance is drawn as grey words in the template too
     expect(target.querySelector('.cm-hint')?.textContent).toBe('Who said it');
     buttonNamed('Page').click();
@@ -786,7 +788,7 @@ describe('a template from Settings', () => {
     await settle();
     const saved = post.mock.calls.filter(([where]) => where === '/api/templates/note').at(-1)[1];
     expect(saved.data.look.cover).toMatchObject({ on: true, mode: 'own', top: false });
-    expect(saved.data.body.startsWith('::: center\n')).toBe(true);
+    expect(saved.data.body.startsWith('::: top-right\n')).toBe(true);
     expect(saved.data.body).toContain('<!-- cover -->\n\n## Claim');
     expect(target.querySelector('[data-cover-rule]')?.textContent).toBe('End of the cover page');
   });

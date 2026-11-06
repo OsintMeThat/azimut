@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   appended, citation, findCoordinates, uploadedImage, findReferences, logStamp, mentionMatches, pastedUrl, slashInsert,
-  slashMatches, SLASH_COMMANDS, today,
+  slashMatches, SLASH_COMMANDS, today, wrapInBlock,
 } from './syntax.js';
 import { READY_NOTES, filledBody, freeTitle } from './ready.js';
 import { calloutOf, calloutMarkdown } from './callouts.js';
@@ -69,7 +69,7 @@ describe('what @ and / offer', () => {
 
   it('ranks the commands by their name, then by the words they go by', () => {
     expect(slashMatches('').map((command) => command.id)).toEqual(
-      SLASH_COMMANDS.filter((command) => command.id !== 'hint').map((command) => command.id));
+      SLASH_COMMANDS.filter((command) => command.id !== 'hint' && !command.group).map((command) => command.id));
     expect(slashMatches('ta')[0].id).toBe('table');
     expect(slashMatches('todo')[0].id).toBe('task');
     expect(slashMatches('journal')[0].id).toBe('entry');
@@ -114,6 +114,35 @@ describe('what @ and / offer', () => {
     const signature = slashInsert(command('signature'), { before: 'Done. ' });
     expect(signature.text).toBe(
       '\n\n::: right\n![Signature](azimut:my-signature){width=30% align=right}\n\n**{name}**\\\n{role}, {organisation}\\\n{date}\n:::\n');
+  });
+
+  it('keeps every alignment under one entry, and finds them together once \'align\' is typed', () => {
+    for (const template of [false, true]) {
+      // the bare list holds the one entry, never its choices
+      const bare = slashMatches('', { template }).map((command) => command.id);
+      expect(bare).toContain('align');
+      expect(bare.filter((id) => id.startsWith('align-'))).toEqual([]);
+      // typed, the choices come up, the group's own entry stands aside
+      const found = slashMatches('align', { template }).map((command) => command.label);
+      expect(found).toEqual(['Align centre', 'Align right', 'Corner: top left', 'Corner: top right', 'Corner: bottom left', 'Corner: bottom right']);
+    }
+    expect(slashMatches('corner').map((command) => command.wrap)).toEqual(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+    expect(slashMatches('centre')[0].wrap).toBe('center');
+    expect(slashMatches('right')[0].wrap).toBe('right');
+    const command = (id) => SLASH_COMMANDS.find((item) => item.id === id);
+    // the entry names its group and writes nothing itself
+    expect(command('align').menu).toBe('align');
+    expect(slashInsert(command('align'))).toBeNull();
+    // each choice wraps the line in the block of its name
+    expect(slashInsert(command('align-top-right'), { before: 'Logo' })).toEqual({ text: '::: top-right\nLogo\n:::', cursor: 18 });
+    expect(slashInsert(command('align-center'))).toEqual({ text: '::: center\n\n:::', cursor: 11 });
+    // a corner says what it does only on a cover, in the words of its menu line
+    expect(command('align-bottom-left').hint).toBe('Pinned on the cover, else aligned');
+  });
+
+  it('wraps words in a block named for where they sit, the cursor at their end', () => {
+    expect(wrapInBlock('right', '  Signed.  ')).toEqual({ text: '::: right\nSigned.\n:::', cursor: 17 });
+    expect(wrapInBlock('bottom-left', '')).toEqual({ text: '::: bottom-left\n\n:::', cursor: 16 });
   });
 
   it('dates a log entry on the analyst’s own clock', () => {

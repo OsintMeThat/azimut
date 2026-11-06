@@ -205,12 +205,13 @@ describe('a first page of one\'s own', () => {
     expect(view.state.doc.toString().split('<!-- cover -->')).toHaveLength(2);
   });
 
-  it('is drawn as the page will read: the logo, the title and the day as words, the guidance in grey, then a named rule', () => {
+  it('is drawn as the page will read: the logo pinned to a corner, the title and the day as words, the guidance in grey, then a named rule', () => {
     editor(`${COVER_SKELETON}\n\nBody`);
     view.dispatch({ selection: { anchor: view.state.doc.length } });
-    const page = view.dom.querySelector('.cm-block-aligned');
-    expect(page.querySelector('img').getAttribute('src')).toBe('/api/notes/pictures/logo');
-    expect(page.querySelector('img').classList.contains('builtin-logo')).toBe(true);
+    const [corner, page] = view.dom.querySelectorAll('.cm-block-aligned');
+    expect(corner.querySelector('.cm-corner-tag').textContent).toBe('Top right corner');
+    expect(corner.querySelector('img').getAttribute('src')).toBe('/api/notes/pictures/logo');
+    expect(corner.querySelector('img').classList.contains('builtin-logo')).toBe(true);
     expect([...page.querySelectorAll('[data-placeholder]')].map((node) => node.textContent)).toEqual(['Title', 'Date']);
     expect(page.querySelector('.cm-hint').textContent).toBe('A line under the title: what this report is');
     expect(page.textContent).not.toContain('AZIMUT');
@@ -232,6 +233,65 @@ describe('a first page of one\'s own', () => {
     expect(name.classList.contains('cm-placeholder-set')).toBe(true);
     expect(block().querySelector('[data-placeholder="role"]').textContent).toBe('Role');
     expect(block().querySelector('img').getAttribute('src')).toBe('/api/notes/pictures/my-signature?v=4');
+  });
+});
+
+describe('the alignments', () => {
+  /** What the menu offers once `/align` is typed, as the editor lists it. */
+  const labels = () => slashSource({})(new CompletionContext(view.state, view.state.selection.main.head, false)).options.map((option) => option.label);
+
+  it('/ offers one Alignment, which types its name so its six choices come up together', () => {
+    editor('Intro\n/');
+    expect(labels()).toContain('Alignment');
+    expect(labels().filter((label) => /^(Align |Corner)/.test(label))).toEqual([]);
+    accept(slashSource({}), 'Alignment');
+    expect(view.state.doc.toString()).toBe('Intro\n/align');
+    expect(labels()).toEqual(['Align centre', 'Align right', 'Corner: top left', 'Corner: top right', 'Corner: bottom left', 'Corner: bottom right']);
+  });
+
+  it('wraps the line it is typed on, on either side of the slash', () => {
+    editor('Intro\nSigned by the desk /align');
+    accept(slashSource({}), 'Align right');
+    expect(view.state.doc.toString()).toBe('Intro\n::: right\nSigned by the desk\n:::');
+    expect(view.state.selection.main.head).toBe('Intro\n::: right\nSigned by the desk'.length);
+    // an empty line gives an empty block, the cursor inside it
+    editor('Intro\n/corner');
+    accept(slashSource({}), 'Corner: top right');
+    expect(view.state.doc.toString()).toBe('Intro\n::: top-right\n\n:::');
+    expect(view.state.selection.main.head).toBe('Intro\n::: top-right\n'.length);
+    // words after the cursor go in the block too
+    editor('Mark here');
+    view.dispatch({ changes: { from: 0, insert: '/align ' }, selection: { anchor: 6 } });
+    accept(slashSource({}), 'Align centre');
+    expect(view.state.doc.toString()).toBe('::: center\nMark here\n:::');
+  });
+});
+
+describe('a corner of the cover', () => {
+  const COVER = '::: top-right\n![Azimut](azimut:logo){width=15%}\n:::\n\n::: center\n# {title}\n:::\n<!-- cover -->\n\n::: bottom-left\nBody\n:::\n';
+
+  it('is drawn on its side and names the corner it is pinned to, in the cover only', () => {
+    editor(COVER);
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    const blocks = [...view.dom.querySelectorAll('.cm-block-aligned')];
+    expect(blocks).toHaveLength(3);
+    const tag = blocks[0].querySelector('.cm-corner-tag');
+    expect(tag.textContent).toBe('Top right corner');
+    expect(tag.classList.contains('cm-corner-right')).toBe(true);
+    expect(tag.title).toContain('page 1');
+    // the title block is not a corner; the one under the cover rule is just aligned
+    expect(blocks[1].querySelector('.cm-corner-tag')).toBeNull();
+    expect(blocks[2].querySelector('.cm-corner-tag')).toBeNull();
+  });
+
+  it('says nothing of a corner while the note has no cover, and gives a picture in it the side', () => {
+    editor('::: bottom-right\nStamp\n:::\n\nEnd');
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    expect(view.dom.querySelector('.cm-block-aligned .cm-corner-tag')).toBeNull();
+    editor('::: top-right\n![Azimut](azimut:logo){width=25%}\n\nWords\n:::\n\nEnd');
+    view.setState(focusedState(view.state.update({ selection: { anchor: view.state.doc.toString().indexOf('Words') } }).state));
+    const picture = view.dom.querySelector('.cm-block-picture');
+    expect(picture.classList.contains('cm-in-align-right')).toBe(true);
   });
 });
 

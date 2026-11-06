@@ -10,11 +10,16 @@
    * Each typeface is shown in its own face, loaded from the server when the panel
    * first opens (`lib/notes/noteFonts.js`). The hover texts live in
    * `lib/notes/lookHelp.js`.
+   *
+   * The last section, folded, is the page's header and footer: three one-line slots
+   * each, which wait for a pause or the field's end like the subtitle does, or a
+   * logo in place of words. A band left empty shows what the style prints there.
    */
   import { tick, untrack } from 'svelte';
   import { LOOK_HELP } from '../../lib/notes/lookHelp.js';
   import {
-    COVERS, FONTS, PAGES, SIZES, STYLES, SUBTITLE_MAX, TLPS, coverChoice, coverFor, lookFont, normaliseLook, sourcesOn, styleLabel,
+    BANDS, BAND_MAX, COVERS, FONTS, PAGES, SIZES, SLOTS, SLOT_LOGOS, STYLES, SUBTITLE_MAX, TLPS, bandStyleOwn, coverChoice, coverFor, lookFont, normaliseLook,
+    slotText, sourcesOn, styleLabel,
   } from '../../lib/notes/look.js';
   import { faceFamily, loadNoteFont, noteFonts } from '../../lib/notes/noteFonts.js';
   import { recentColours } from '../../lib/recentColours.svelte.js';
@@ -34,11 +39,32 @@
   /** The faces drawn so far, by key. */
   let faces = $state({});
   let subtitleTimer;
+  let bandsOpen = $state(false);
+  /** What each slot's field holds, which the look keeps once typing pauses. */
+  let drafts = $state({ header: { left: '', center: '', right: '' }, footer: { left: '', center: '', right: '' } });
+  /** The slot whose logo choices are open, as `band.slot`. */
+  let logoFor = $state('');
+  const slotTimers = {};
 
   const whole = $derived(normaliseLook(look));
   const coverIs = $derived(coverChoice(whole));
   const COVER_HELP = { off: LOOK_HELP.coverOff, style: LOOK_HELP.coverStyle, own: LOOK_HELP.coverOwn };
   $effect(() => { subtitle = whole.cover.subtitle; });
+  // a field takes what the look keeps, except while it only differs by the spaces the look trims
+  $effect(() => {
+    const kept = whole;
+    untrack(() => {
+      for (const band of BANDS) {
+        for (const slot of SLOTS) {
+          const saved = kept[band.id]?.[slot.id] ?? '';
+          if (slotText(drafts[band.id][slot.id]) !== saved) drafts[band.id][slot.id] = saved;
+        }
+      }
+    });
+  });
+  const bandsSet = $derived(BANDS.some((band) => whole[band.id]));
+  /** What the style prints in a band the look leaves empty: shown in grey while it is. */
+  const styleOwn = $derived(bandStyleOwn(whole.style));
 
   const pictures = $derived(entities
     .filter((entity) => (entity.type === 'media' || entity.type === 'capture') && entity.attrs?.path && entity.attrs?.kind !== 'video')
@@ -92,6 +118,24 @@
     set({ cover: { subtitle } });
   }
 
+  /** A band written from its three fields: what is kept stays whole even if a field is still being typed in. */
+  function writeBand(band) {
+    clearTimeout(slotTimers[`${band}.left`]);
+    clearTimeout(slotTimers[`${band}.center`]);
+    clearTimeout(slotTimers[`${band}.right`]);
+    set({ [band]: { ...drafts[band] } });
+  }
+  function typedSlot(band, slot, value) {
+    drafts[band][slot] = value;
+    clearTimeout(slotTimers[`${band}.${slot}`]);
+    slotTimers[`${band}.${slot}`] = setTimeout(() => writeBand(band), 500);
+  }
+  function putLogo(band, slot, id) {
+    logoFor = '';
+    drafts[band][slot] = id;
+    writeBand(band);
+  }
+
   function pickPicture(entity) {
     picking = false;
     pictureQuery = '';
@@ -100,6 +144,8 @@
 
   function close() {
     commitSubtitle();
+    for (const band of BANDS) writeBand(band.id);
+    logoFor = '';
     anchor = null;
     picking = false;
   }
@@ -262,6 +308,60 @@
           List sources at the end
         </label>
       </div>
+
+      <div class="sep"></div>
+
+      <div class="part">
+        <button type="button" class="fold" aria-expanded={bandsOpen} title={LOOK_HELP.bands} onclick={() => (bandsOpen = !bandsOpen)}>
+          <Icon name={bandsOpen ? 'chevronDown' : 'chevronRight'} size={12} />
+          <span class="key">Header and footer</span>
+          {#if bandsSet}<span class="current">On</span>{/if}
+        </button>
+        {#if bandsOpen}
+          {#each BANDS as band (band.id)}
+            {@const own = whole[band.id] ? null : styleOwn[band.id]}
+            <div class="band" role="group" aria-label={band.label}>
+              <span class="key">{band.label}</span>
+              <div class="slots">
+                {#each SLOTS as slot (slot.id)}
+                  {@const place = `${band.id}.${slot.id}`}
+                  {@const logo = SLOT_LOGOS.find((item) => item.id === slotText(drafts[band.id][slot.id]))}
+                  <div class="slot">
+                    <div class="slot-head">
+                      <span class="slot-name">{slot.label}</span>
+                      {#if !logo}
+                        <button type="button" class="slot-logo" class:on={logoFor === place} aria-expanded={logoFor === place}
+                          title={LOOK_HELP.slotLogo} aria-label={`${band.label} ${slot.label.toLowerCase()}: a logo`}
+                          onclick={() => (logoFor = logoFor === place ? '' : place)}><Icon name="image" size={12} /></button>
+                      {/if}
+                    </div>
+                    {#if logo}
+                      <span class="slot-chip">
+                        <span>{logo.label}</span>
+                        <button type="button" class="chip-x" title={LOOK_HELP.slotLogoClear} aria-label={`Take the logo out of the ${band.label.toLowerCase()} ${slot.label.toLowerCase()}`}
+                          onclick={() => putLogo(band.id, slot.id, '')}><Icon name="x" size={10} /></button>
+                      </span>
+                    {:else}
+                      <input class="input" value={drafts[band.id][slot.id]} maxlength={BAND_MAX} placeholder={own?.[slot.id] ?? ''}
+                        aria-label={`${band.label} ${slot.label.toLowerCase()}`} title={LOOK_HELP.slot}
+                        oninput={(event) => typedSlot(band.id, slot.id, event.currentTarget.value)} onblur={() => writeBand(band.id)}
+                        onkeydown={(event) => { if (event.key === 'Enter') writeBand(band.id); }} />
+                    {/if}
+                    {#if logoFor === place}
+                      <div class="logo-pick">
+                        {#each SLOT_LOGOS as item (item.id)}
+                          <button type="button" class="picture-row" title={LOOK_HELP.slotLogo} onclick={() => putLogo(band.id, slot.id, item.id)}>{item.label}</button>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/each}
+          <p class="said">{LOOK_HELP.bandWords}</p>
+        {/if}
+      </div>
     </div>
   </FloatingMenu>
 {/if}
@@ -365,4 +465,26 @@
   .picture-row:hover, .picture-row.on { background: var(--bg-3); }
   .picture-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .none { margin: 4px 6px; color: var(--text-3); font-size: var(--fs-xs); }
+  .fold {
+    display: flex; align-items: center; gap: 6px; padding: 0; border: none; background: none; color: var(--text-2); font: inherit; cursor: pointer;
+  }
+  .fold:hover { color: var(--text-1); }
+  .fold .key { min-width: 0; cursor: inherit; }
+  .fold .current { margin-left: 0; }
+  .band { display: flex; flex-direction: column; gap: 4px; }
+  .slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .slot { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .slot-head { display: flex; align-items: center; justify-content: space-between; min-height: 16px; color: var(--text-3); font-size: 11px; }
+  .slot .input { min-width: 0; font-size: var(--fs-xs); padding: 3px 6px; }
+  .slot-logo, .chip-x {
+    display: inline-flex; align-items: center; justify-content: center; padding: 1px 3px; border: none; border-radius: var(--r-sm);
+    background: none; color: var(--text-3); cursor: pointer;
+  }
+  .slot-logo:hover, .slot-logo.on, .chip-x:hover { color: var(--text-1); background: var(--bg-3); }
+  .slot-chip {
+    display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; padding: 3px 4px 3px 8px;
+    border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-3); color: var(--text-1); font-size: var(--fs-xs);
+  }
+  .slot-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .logo-pick { display: flex; flex-direction: column; }
 </style>

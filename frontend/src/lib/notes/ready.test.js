@@ -62,7 +62,9 @@ describe('the ready templates', () => {
       expect(ready.body.endsWith(`${SIGNATURE_BLOCK}\n`), ready.id).toBe(true);
       // retirable: the logo is one line, and the page and the signature stand without it
       const rows = ready.body.split('\n');
-      expect(rows.filter((row) => row.includes('azimut:logo'))).toEqual(['![Azimut](azimut:logo){width=25% align=center}']);
+      expect(rows.filter((row) => row.includes('azimut:logo'))).toEqual(['![Azimut](azimut:logo){width=25% align=right}']);
+      // the mark sits alone in the top right corner of page 1, which the title stands apart from
+      expect(rows.slice(0, 3)).toEqual(['::: top-right', '![Azimut](azimut:logo){width=25% align=right}', ':::']);
       const without = rows.filter((row) => !row.includes('azimut:logo')).join('\n');
       expect(hasCover(without)).toBe(true);
       expect(without.split('\n').slice(0, coverLineIndex(without)).join('\n')).toContain('# {title}');

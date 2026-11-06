@@ -79,11 +79,13 @@ export function placeholderValue(id, identity = NO_IDENTITY) {
   return setting ? String(identity?.[setting] ?? '').trim() : '';
 }
 
-/** The page 1 `/` › Cover page writes, at the very top. */
+/** The page 1 `/` › Cover page writes, at the very top: the mark in a corner, then the title and the day. */
 export const COVER_SKELETON = [
-  '::: center',
-  builtInLine('logo', 'center'),
+  '::: top-right',
+  builtInLine('logo', 'right'),
+  ':::',
   '',
+  '::: center',
   '# {title}',
   '',
   '<!--? A line under the title: what this report is -->',

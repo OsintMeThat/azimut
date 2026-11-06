@@ -7,6 +7,10 @@
  * A look is kept beside the note, never in its Markdown (`notes/{id}/look`), so
  * a note without one prints exactly as before. The server checks every look it
  * is given; what is here only fills the defaults and reads what it answers.
+ *
+ * `header` and `footer` are the late keys: a band of three one-line slots that
+ * replaces the style's own running header or footer, written only once a slot is
+ * filled, so a look that never used them reads and writes as it always did.
  */
 import { api } from '../api.js';
 
@@ -78,6 +82,37 @@ export const SOURCES_OFF_STYLES = ['plain'];
 export const SUBTITLE_MAX = 200;
 
 /**
+ * The two running bands of a page and their three slots. A slot is a line of
+ * words (`{title}`, `{date}`, `{page}`, `{pages}`, `{name}`, `{role}`,
+ * `{organisation}` are filled in when the PDF is made) or one of the two logos.
+ */
+export const BANDS = [
+  { id: 'header', label: 'Header' },
+  { id: 'footer', label: 'Footer' },
+];
+export const SLOTS = [
+  { id: 'left', label: 'Left' },
+  { id: 'center', label: 'Centre' },
+  { id: 'right', label: 'Right' },
+];
+export const BAND_MAX = 120;
+
+/** A slot that holds a logo instead of words: the analyst's own, or the app's. */
+export const SLOT_LOGOS = [
+  { id: 'azimut:my-logo', label: 'Your logo' },
+  { id: 'azimut:logo', label: 'Azimut logo' },
+];
+
+/** The words a style prints in each band when the look leaves it empty (`engine/notes_style.py`). */
+export function bandStyleOwn(style) {
+  const none = { left: '', center: '', right: '' };
+  return {
+    header: none,
+    footer: style === 'plain' ? { ...none, left: '{title}', right: '{page}' } : { ...none, left: '{date}', right: 'Page {page} / {pages}' },
+  };
+}
+
+/**
  * The cover: none, the style's own (title, subtitle, picture, day), or the
  * analyst's own page, what sits above the `<!-- cover -->` line
  * (`lib/notes/reportParts.js`). `mode` and `top` are written only once set, as
@@ -109,6 +144,18 @@ export function ownCover(look) {
   return normaliseLook({ ...whole, cover: { ...whole.cover, ...coverFor('own') } });
 }
 
+/** A slot as kept: one line, trimmed, at most `BAND_MAX` characters. */
+export function slotText(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, BAND_MAX).trimEnd();
+}
+
+/** A band as kept: its three slots, or null when all are empty. */
+function bandOf(value) {
+  const given = value && typeof value === 'object' ? value : {};
+  const band = { left: slotText(given.left), center: slotText(given.center), right: slotText(given.right) };
+  return band.left || band.center || band.right ? band : null;
+}
+
 const pick = (value, choices, fallback) => (choices.some((choice) => choice.id === value) ? value : fallback);
 const HEX = /^#[0-9a-f]{6}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -119,6 +166,8 @@ export function normaliseLook(look) {
   const cover = given.cover && typeof given.cover === 'object' ? given.cover : {};
   const accent = String(given.accent ?? '').toLowerCase();
   const date = String(cover.date ?? '');
+  const header = bandOf(given.header);
+  const footer = bandOf(given.footer);
   return {
     style: pick(given.style, STYLES, DEFAULT_LOOK.style),
     font: pick(given.font ?? '', FONTS, ''),
@@ -137,6 +186,8 @@ export function normaliseLook(look) {
     toc: Boolean(given.toc),
     numbered: Boolean(given.numbered),
     sources: pick(given.sources ?? '', SOURCES, ''),
+    ...(header && { header }),
+    ...(footer && { footer }),
   };
 }
 

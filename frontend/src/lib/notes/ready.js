@@ -9,8 +9,8 @@
  * no case material: no place, no person, no date but the two words filled in.
  *
  * A report printed with a cover writes its own first page (`lib/notes/reportParts.js`):
- * the app's logo on a line of its own, which deleting removes, then the title and
- * the day the PDF fills in. It ends on the signature block, as removable.
+ * the app's logo on a line of its own, pinned to the top right corner and removed
+ * by deleting it, then the title and the day the PDF fills in. It ends on the signature block, as removable.
  *
  * Templates the analyst keeps live in Settings (`templates.json`, kind `note`) and
  * use the same two words: `{today}` and `{now}`. The words the PDF fills in

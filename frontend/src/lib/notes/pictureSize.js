@@ -25,6 +25,19 @@ export const PICTURE_SIZES = [
 ];
 export const PICTURE_ALIGNS = ['left', 'center', 'right'];
 
+/**
+ * What a `:::` block can be called. The first three set its text on the line; a
+ * corner does so too (to its side), and on the note's own cover pins it to that
+ * corner of page 1 (`engine/notes_pdf.py`).
+ */
+export const CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+export const BLOCK_OPEN = /^:::[ \t]*(left|center|right|top-left|top-right|bottom-left|bottom-right)[ \t]*$/;
+
+/** The side of the line a `:::` block sets its text on: a corner gives its horizontal side. */
+export function blockSide(name) {
+  return name.endsWith('left') ? 'left' : name.endsWith('right') ? 'right' : 'center';
+}
+
 /** The text of an A4 or Letter page, height over width: near enough to size a picture. */
 export const PAGE_TALL = 1.42;
 
@@ -130,16 +143,18 @@ export function sizedLine(text, ref, changes, { blockAlign = '' } = {}) {
 
 /**
  * The place of the `::: center` or `::: right` block line `index` (0-based) stands
- * in, '' outside one: what a picture there takes when its line writes none.
+ * in (a corner block counts as its side), '' outside one or in a left one: what a
+ * picture there takes when its line writes none.
  */
 export function blockAlignAt(lines, index) {
   for (let at = index - 1; at >= 0; at -= 1) {
     if (/^:::[ \t]*$/.test(lines[at])) return '';
-    const open = /^:::[ \t]*(left|center|right)[ \t]*$/.exec(lines[at]);
+    const open = BLOCK_OPEN.exec(lines[at]);
     if (!open) continue;
+    const side = blockSide(open[1]);
     for (let end = index + 1; end < lines.length; end += 1) {
-      if (/^:::[ \t]*$/.test(lines[end])) return open[1] === 'left' ? '' : open[1];
-      if (/^:::[ \t]*(left|center|right)[ \t]*$/.test(lines[end])) return '';
+      if (/^:::[ \t]*$/.test(lines[end])) return side === 'left' ? '' : side;
+      if (BLOCK_OPEN.test(lines[end])) return '';
     }
     return '';
   }

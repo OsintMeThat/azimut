@@ -28,11 +28,11 @@ import { CALLOUT_LINE, calloutOf } from './callouts.js';
 import { paths as iconPaths } from '../../components/Icon.svelte';
 import { HINT_LINE, INCLUDE_LINE, PAGE_BREAK_LINE, includeLine } from './look.js';
 import {
-  COVER_LINE, NO_IDENTITY, PLACEHOLDERS, coverChange, findPlaceholders, placeholderValue,
+  COVER_LINE, NO_IDENTITY, PLACEHOLDERS, coverChange, coverLineIndex, findPlaceholders, placeholderValue,
 } from './reportParts.js';
 import {
-  CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, pictureLine, picturesIn, rovingToolbar, sizeWidth,
-  sizedLine, sourceField,
+  BLOCK_OPEN, CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, blockSide, captionField, pictureLine, picturesIn,
+  rovingToolbar, sizeWidth, sizedLine, sourceField,
 } from './pictureSize.js';
 import {
   findCoordinates, findReferences, mentionMatches, slashInsert, slashMatches,
@@ -679,24 +679,36 @@ function openCaption(view, box, returnTo = null) {
   field.select();
 }
 
+/** The small label a corner block of the cover wears, so the analyst sees it is pinned to the page. */
+function cornerTag(name) {
+  const tag = document.createElement('div');
+  tag.className = `cm-corner-tag cm-corner-${blockSide(name ?? '')}`;
+  tag.textContent = `${(name ?? '').replace('-', ' ').replace(/^./, (letter) => letter.toUpperCase())} corner`;
+  tag.title = 'Pinned to this corner of page 1 when Look › Cover is Your own page';
+  return tag;
+}
+
 /** A drawn block (a picture, a table, a diagram): pressing it puts the cursor back in its source. */
 class BlockWidget extends WidgetType {
   /**
    * `writable`: whether the note can be changed, which is when a picture offers its bar.
    * `align`: the place of the `::: center` or `::: right` block a picture stands in.
+   * `pinned`: whether this aligned block is a corner of the cover, which it says.
    */
-  constructor(kind, source, info, writable = false, align = '') {
+  constructor(kind, source, info, writable = false, align = '', pinned = false) {
     super();
     this.kind = kind;
     this.source = source;
     this.info = info;
     this.writable = writable;
     this.align = align;
+    this.pinned = pinned;
   }
 
   eq(other) {
     if (other.kind !== this.kind || other.source !== this.source || other.info.caseId !== this.info.caseId
-      || other.writable !== this.writable || other.align !== this.align || !sameIdentity(other.info.identity, this.info.identity)) return false;
+      || other.writable !== this.writable || other.align !== this.align || other.pinned !== this.pinned
+      || !sameIdentity(other.info.identity, this.info.identity)) return false;
     // A tool that files something reads the case again: the same records come back as a
     // new list. The block is drawn again only when what it shows changed, so a picture
     // keeps its open caption field and does not blink.
@@ -724,6 +736,7 @@ class BlockWidget extends WidgetType {
       box.innerHTML = markdownHtml(text, this.info);
       drawHints(box, hints);
       drawPlaceholders(box, this.info.identity);
+      if (this.pinned) box.prepend(cornerTag(BLOCK_OPEN.exec(this.source.split('\n', 1)[0])?.[1]));
     }
     const handlers = view.state.facet(noteHandlers);
     if (this.kind === 'picture' && this.writable) box.append(sizeBar(box, this.source, this.info, handlers, this.align));
@@ -915,29 +928,36 @@ export function noteDecorations(state) {
 
   // the place of the aligned block each line stands in, by line number, for a picture there
   const blockAligns = new Map();
-  const block = (kind, from, to) => {
+  const block = (kind, from, to, pinned = false) => {
     const first = state.doc.lineAt(from);
     const last = state.doc.lineAt(to);
     covered.push([first.from, last.to]);
     const align = kind === 'picture' ? blockAligns.get(first.number) ?? '' : '';
-    ranges.push(Decoration.replace({ widget: new BlockWidget(kind, state.doc.sliceString(first.from, last.to), info, !state.readOnly, align), block: true })
+    ranges.push(Decoration.replace({ widget: new BlockWidget(kind, state.doc.sliceString(first.from, last.to), info, !state.readOnly, align, pinned), block: true })
       .range(first.from, last.to));
   };
 
-  // `::: center` … `:::`, the old Notebook's aligned text: drawn as it reads unless it is being edited
+  // `::: center` … `:::`, the old Notebook's aligned text: drawn as it reads unless it is being edited.
+  // A corner (`::: top-right`) reads as its side, and says so when it is in the note's own cover.
+  let coverEnd; // the 1-based line of the cover rule, 0 without one: found when a corner asks
   for (let number = 1; number <= state.doc.lines; number += 1) {
-    const open = /^:::[ \t]*(left|center|right)[ \t]*$/.exec(state.doc.line(number).text);
+    const open = BLOCK_OPEN.exec(state.doc.line(number).text);
     if (!open) continue;
     let end = number + 1;
     while (end <= state.doc.lines && !/^:::[ \t]*$/.test(state.doc.line(end).text)) end += 1;
     if (end > state.doc.lines) break;
     const from = state.doc.line(number).from;
     const to = state.doc.line(end).to;
-    if (open[1] !== 'left') for (let inner = number + 1; inner < end; inner += 1) blockAligns.set(inner, open[1]);
+    const side = blockSide(open[1]);
+    if (side !== 'left') for (let inner = number + 1; inner < end; inner += 1) blockAligns.set(inner, side);
     if (touches(lines, state, from, to)) {
       ranges.push(lineClass('cm-fence-line').range(from));
       ranges.push(lineClass('cm-fence-line').range(state.doc.line(end).from));
-    } else block('aligned', from, to);
+    } else {
+      const corner = open[1] !== side;
+      if (corner) coverEnd ??= coverLineIndex(state.doc.toString()) + 1;
+      block('aligned', from, to, corner && end < coverEnd);
+    }
     number = end;
   }
 
@@ -1631,6 +1651,19 @@ export function slashSource(handlers, { template = false } = {}) {
             handlers[command.action]?.();
             return;
           }
+          if (command.menu) {
+            // a group: type its name, and its commands come up together
+            const typed = `/${command.menu}`;
+            view.dispatch({ changes: { from: start, to: end, insert: typed }, selection: { anchor: start + typed.length } });
+            startCompletion(view);
+            return;
+          }
+          if (command.wrap) {
+            // the whole line goes in the block, what was typed before the / and what follows the cursor
+            const made = slashInsert(command, { before: `${before}${view.state.sliceDoc(end, line.to)}` });
+            view.dispatch({ changes: { from: line.from, to: line.to, insert: made.text }, selection: { anchor: line.from + made.cursor }, userEvent: 'input.complete' });
+            return;
+          }
           const made = slashInsert(command, { before });
           if (command.line) {
             // a line command restyles the line it is typed on
@@ -1683,6 +1716,10 @@ const look = EditorView.theme({
   '.cm-setext-rule': { color: 'var(--text-3)', fontSize: '0.7em' },
   '.cm-block .markdown-align.align-center': { textAlign: 'center' },
   '.cm-block .markdown-align.align-right': { textAlign: 'right' },
+  '.cm-corner-tag': {
+    color: 'var(--text-3)', fontSize: '0.7em', fontWeight: '650', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '2px',
+  },
+  '.cm-corner-right': { textAlign: 'right' },
   '.cm-block .markdown-align h1, .cm-block .markdown-align h2, .cm-block .markdown-align h3': { margin: '0.3em 0', fontWeight: '650' },
   '.cm-block p': { margin: '0.2em 0' },
   '.cm-link': { color: 'var(--info)' },

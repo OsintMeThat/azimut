@@ -651,7 +651,7 @@
         <span class="kind">Template</span>
         <input class="input title-input" bind:value={template.name} onblur={saveTemplateNow} maxlength="120" aria-label="Template name"
           onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
-        <span class="hint">{'{today}'} and {'{now}'} are written in when a note starts from it; {'{title}'}, {'{date}'} and the signature's words when it prints.</span>
+        <span class="hint">{'{today}'} and {'{now}'} are written in when a note starts from it; {'{title}'}, {'{date}'} and the signature's words when it prints. A ::: top-right block in the cover pins it to a corner.</span>
         <div class="spacer"></div>
         <LookControl look={template.look} template onchange={changeTemplateLook} />
         <ViewModes page={pageMode} guide="notebook.view" onchange={setPageMode} />

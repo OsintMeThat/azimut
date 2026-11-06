@@ -69,13 +69,15 @@ test('a template from a ready one opens with its own first page, drawn in the ed
 
   // saved with the analyst's own page, then opened in the Notebook as Edit does
   await expect.poll(() => state.saved[0]?.data?.look?.cover).toMatchObject({ on: true, mode: 'own' });
-  expect(state.saved[0].data.body.startsWith('::: center\n![Azimut](azimut:logo){width=25% align=center}\n')).toBe(true);
+  expect(state.saved[0].data.body.startsWith('::: top-right\n![Azimut](azimut:logo){width=25% align=right}\n:::\n')).toBe(true);
   await expect(page.locator('input[aria-label="Template name"]')).toHaveValue('Geolocation report');
 
   // the editor draws the page as it will read
-  const cover = page.locator('.cm-block-aligned').first();
-  await expect(cover.locator('img.builtin-logo')).toHaveAttribute('src', '/api/notes/pictures/logo');
-  await expect.poll(() => cover.locator('img.builtin-logo').evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
+  const corner = page.locator('.cm-block-aligned').first();
+  await expect(corner.locator('.cm-corner-tag')).toHaveText('Top right corner');
+  await expect(corner.locator('img.builtin-logo')).toHaveAttribute('src', '/api/notes/pictures/logo');
+  await expect.poll(() => corner.locator('img.builtin-logo').evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
+  const cover = page.locator('.cm-block-aligned').nth(1);
   await expect(cover.locator('[data-placeholder]')).toHaveText(['Title', 'Date']);
   await expect(cover.locator('.cm-hint')).toHaveText('A line under the title: what this report is');
   await expect(page.locator('[data-cover-rule]')).toHaveText('End of the cover page');
@@ -89,7 +91,7 @@ test('a template from a ready one opens with its own first page, drawn in the ed
   // and the Page pane's first page is the cover
   await page.getByRole('button', { name: 'Page', exact: true }).click();
   await expect.poll(() => state.previews.at(-1)?.look?.cover?.mode).toBe('own');
-  expect(state.previews.at(-1).text.split('\n').indexOf('<!-- cover -->')).toBe(9);
+  expect(state.previews.at(-1).text.split('\n').indexOf('<!-- cover -->')).toBe(11);
   const sheets = page.locator('.page-pane .sheet');
   await expect(sheets).toHaveCount(2);
   await expect.poll(() => sheets.first().locator('canvas').evaluate((canvas) => canvas.width)).toBeGreaterThan(0);

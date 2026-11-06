@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   CAPTION_MAX, PAGE_TALL, PICTURE_SIZES, POSTED_HELP, captionField, cleanCaption, pictureAt, pictureLine, picturesIn, readAttrs, rovingToolbar,
-  blockAlignAt, sameRef, sizeWidth, sizedLine, writeAttrs, sourceField,
+  BLOCK_OPEN, CORNERS, blockAlignAt, blockSide, sameRef, sizeWidth, sizedLine, writeAttrs, sourceField,
 } from './pictureSize.js';
 
 describe('a picture line', () => {
@@ -169,6 +169,17 @@ describe('sizing a picture', () => {
     expect(sizedLine('![Logo](azimut:my-logo){width=25% align=left}', 'azimut:my-logo', { align: 'center' }, centred))
       .toBe('![Logo](azimut:my-logo){width=25%}');
     expect(writeAttrs({ align: 'right' }, { fallback: 'right' })).toBe('');
+  });
+
+  it('takes a corner block for the side it sits on', () => {
+    expect(CORNERS).toEqual(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+    for (const name of ['left', 'center', 'right', ...CORNERS]) expect(BLOCK_OPEN.test(`::: ${name}`), name).toBe(true);
+    expect(BLOCK_OPEN.test('::: middle')).toBe(false);
+    expect(BLOCK_OPEN.test('::: top')).toBe(false);
+    expect(['top-left', 'bottom-left', 'top-right', 'bottom-right', 'center'].map(blockSide)).toEqual(['left', 'left', 'right', 'right', 'center']);
+    const lines = ['::: top-right', '![Logo](azimut:logo){width=25%}', ':::', '::: bottom-left', '![Map](/m.png)', ':::'];
+    expect(blockAlignAt(lines, 1)).toBe('right');
+    expect(blockAlignAt(lines, 4)).toBe('');
   });
 
   it('changes only the picture it names on a line holding two', () => {

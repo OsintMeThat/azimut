@@ -23,11 +23,13 @@ describe('the first page of one\'s own', () => {
     expect(hasCover('```\n<!-- cover -->\n```\n<!-- cover -->')).toBe(true);
   });
 
-  it('is written at the very top as the logo, the title, a guidance line and the day', () => {
+  it('is written at the very top as the logo in a corner, the title, a guidance line and the day', () => {
     expect(COVER_SKELETON.split('\n')).toEqual([
-      '::: center',
-      '![Azimut](azimut:logo){width=25% align=center}',
+      '::: top-right',
+      '![Azimut](azimut:logo){width=25% align=right}',
+      ':::',
       '',
+      '::: center',
       '# {title}',
       '',
       '<!--? A line under the title: what this report is -->',
@@ -36,7 +38,7 @@ describe('the first page of one\'s own', () => {
       ':::',
       '<!-- cover -->',
     ]);
-    expect(HINT_LINE.test(COVER_SKELETON.split('\n')[5])).toBe(true);
+    expect(HINT_LINE.test(COVER_SKELETON.split('\n')[7])).toBe(true);
     const change = coverChange('\n\nFirst words');
     // over the blank lines the note starts with, the cursor on the guidance
     expect(change).toMatchObject({ from: 0, to: 2, insert: `${COVER_SKELETON}\n\n` });

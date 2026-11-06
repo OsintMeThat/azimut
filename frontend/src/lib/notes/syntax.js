@@ -11,7 +11,7 @@ import { entityReference, mediaReference } from '../markdown.js';
 import { foldText } from '../textFold.js';
 import { CALLOUTS, calloutMarkdown } from './callouts.js';
 import { PAGE_BREAK, hintLine } from './look.js';
-import { writeAttrs } from './pictureSize.js';
+import { CORNERS, writeAttrs } from './pictureSize.js';
 import { SIGNATURE_BLOCK, builtInLine } from './reportParts.js';
 
 /** `[[entity:id|label]]` and `[[media:id|label]]{width=… align=…}`. */
@@ -129,10 +129,23 @@ export function logStamp(now = new Date()) {
 const TABLE = '| Source | Status |\n| --- | --- |\n|  |  |';
 const DIAGRAM = '```mermaid\nflowchart LR\n  A[Tip] --> B[Check]\n  B --> C[Confirmed]\n```';
 
+/** The `:::` blocks `/` › Alignment offers: where a line sits, or a corner of the cover. */
+const ALIGNMENTS = [
+  { id: 'center', label: 'Align centre', icon: 'alignCentreH', words: 'centre center middle', hint: 'The line, centred' },
+  { id: 'right', label: 'Align right', icon: 'alignRight', words: 'right', hint: 'The line, at the right' },
+  ...CORNERS.map((corner) => ({
+    id: corner, label: `Corner: ${corner.replace('-', ' ')}`, icon: corner.endsWith('left') ? 'alignLeft' : 'alignRight',
+    words: `corner pin cover logo ${corner.replace('-', ' ')}`, hint: 'Pinned on the cover, else aligned',
+  })),
+];
+
 /**
  * What `/` inserts. A `line` command replaces the start of the line it is typed
- * on (a heading, a list); a `block` one goes on lines of its own; an `action`
- * opens something (the record picker, a file) rather than writing text.
+ * on (a heading, a list); a `block` one goes on lines of its own; a `wrap` one
+ * puts the line in a `:::` block; an `action` opens something (the record
+ * picker, a file) rather than writing text. A `menu` command is a group: it
+ * stands in the bare list and, picked, types its name so the commands of its `group`
+ * (offered only once something is typed) come up together.
  */
 export const SLASH_COMMANDS = [
   { id: 'h1', label: 'Heading 1', icon: 'text', words: 'title h1', line: '# ' },
@@ -160,6 +173,8 @@ export const SLASH_COMMANDS = [
   { id: 'cover', label: 'Cover page', icon: 'file', words: 'first page front title report', action: 'cover', hint: 'Page 1, as you write it' },
   { id: 'signature', label: 'Signature', icon: 'edit', words: 'sign name role organisation author', block: SIGNATURE_BLOCK, hint: 'From Settings › Publishing' },
   { id: 'my-logo', label: 'Your logo', icon: 'image', words: 'logo brand organisation picture', block: builtInLine('my-logo'), hint: 'From Settings › Publishing' },
+  { id: 'align', label: 'Alignment', icon: 'alignCentreH', words: 'align', menu: 'align', hint: 'Centre, right, a cover corner' },
+  ...ALIGNMENTS.map(({ id, ...rest }) => ({ id: `align-${id}`, ...rest, words: `align alignment ${rest.words}`, wrap: id, group: 'align' })),
   { id: 'date', label: 'Today’s date', icon: 'calendar', words: 'day today', today: true },
 ];
 
@@ -171,9 +186,10 @@ export const SLASH_COMMANDS = [
 export function slashMatches(query, { template = false } = {}) {
   const wanted = foldText(String(query ?? '').trim());
   const offered = SLASH_COMMANDS.filter((command) => (template ? !command.notes : !command.template));
-  if (!wanted) return offered;
+  if (!wanted) return offered.filter((command) => !command.group);
   const scored = [];
   for (const command of offered) {
+    if (command.menu) continue;
     const label = foldText(command.label);
     const words = foldText(`${command.label} ${command.words}`);
     const rank = label.startsWith(wanted) ? 0 : words.split(/\s+/).some((word) => word.startsWith(wanted)) ? 1
@@ -195,7 +211,8 @@ export function today(now = new Date()) {
  * `null` for an action, which the editor carries out itself.
  */
 export function slashInsert(command, { before = '', now = new Date() } = {}) {
-  if (command.action) return null;
+  if (command.action || command.menu) return null;
+  if (command.wrap) return wrapInBlock(command.wrap, before);
   const alone = !before.trim();
   if (command.line) {
     const text = alone ? command.line : `\n${command.line}`;
@@ -219,6 +236,17 @@ export function slashInsert(command, { before = '', now = new Date() } = {}) {
   // inside the fence of a code block, and on the first empty cell of a table
   const inner = command.id === 'code' ? lead.length + 4 : command.id === 'table' ? text.length - 6 : text.length;
   return { text, cursor: inner };
+}
+
+/**
+ * `words` set in a `::: name` block, and where the cursor lands: at the end of the
+ * words, or on the empty line inside when there are none. The text replaces the
+ * whole line it was typed on.
+ */
+export function wrapInBlock(name, words = '') {
+  const inner = String(words).trim();
+  const open = `::: ${name}\n`;
+  return { text: `${open}${inner}\n:::`, cursor: open.length + inner.length };
 }
 
 /** A note's Markdown with a block added at its end, a blank line between. */

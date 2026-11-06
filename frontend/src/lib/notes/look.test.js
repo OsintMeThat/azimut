@@ -5,8 +5,8 @@ const { get, put } = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
 vi.mock('../api.js', () => ({ api: { get, put } }));
 
 const {
-  COVERS, DEFAULT_LOOK, FONTS, HINT_LINE, coverChoice, coverFor, ownCover, INCLUDE_LINE, SIZES, SOURCES_OFF_STYLES, STYLES, hintLine, includeLine, isPlainLook, isReport, lookFont,
-  normaliseLook, readLook, reportBody, reportLook, sourcesOn, templateLook, writeLook,
+  BANDS, BAND_MAX, COVERS, DEFAULT_LOOK, FONTS, HINT_LINE, coverChoice, coverFor, ownCover, INCLUDE_LINE, SIZES, SOURCES_OFF_STYLES, STYLES, hintLine, includeLine, isPlainLook, isReport, lookFont,
+  bandStyleOwn, normaliseLook, readLook, slotText, reportBody, reportLook, sourcesOn, templateLook, writeLook,
 } = await import('./look.js');
 
 afterEach(() => vi.clearAllMocks());
@@ -98,6 +98,45 @@ describe('a look', () => {
     // a template keeps its own page and where it sits, with no day of a case
     expect(templateLook({ cover: { on: true, mode: 'own', top: true, date: '2026-11-05' } }).cover)
       .toMatchObject({ on: true, mode: 'own', top: true, date: '' });
+  });
+
+  it('keeps a header and a footer as three one-line slots, and writes none that is empty', () => {
+    expect(BANDS.map((band) => band.id)).toEqual(['header', 'footer']);
+    // absent until a slot holds something, so the stored look is as an older reader wrote it
+    expect('header' in normaliseLook(null)).toBe(false);
+    expect(normaliseLook({ header: {}, footer: { left: '', center: '   ', right: '\n' } })).toEqual(normaliseLook(null));
+    expect(JSON.stringify(normaliseLook({ footer: null }))).toBe(JSON.stringify(normaliseLook(null)));
+    expect(isPlainLook({ header: { left: '', center: '', right: '' } })).toBe(true);
+    const look = normaliseLook({ header: { center: '  Draft \n report ' }, footer: { left: '{date}', right: 'azimut:logo', extra: 'x' } });
+    expect(look.header).toEqual({ left: '', center: 'Draft report', right: '' });
+    expect(look.footer).toEqual({ left: '{date}', center: '', right: 'azimut:logo' });
+    expect(isPlainLook(look)).toBe(false);
+    // not an object, not a band
+    expect('header' in normaliseLook({ header: 'Draft', footer: ['x'] })).toBe(false);
+  });
+
+  it('cuts a slot at 120 characters, and at the last word it kept', () => {
+    expect(BAND_MAX).toBe(120);
+    expect(slotText('x'.repeat(300))).toBe('x'.repeat(120));
+    expect(slotText(`${'a'.repeat(119)} b`)).toBe('a'.repeat(119));
+    expect(slotText(undefined)).toBe('');
+    expect(normaliseLook({ footer: { right: 'y'.repeat(200) } }).footer.right).toHaveLength(120);
+  });
+
+  it('says what each style prints in a band it leaves empty', () => {
+    expect(bandStyleOwn('plain')).toEqual({
+      header: { left: '', center: '', right: '' }, footer: { left: '{title}', center: '', right: '{page}' },
+    });
+    for (const style of ['report', 'brief', 'journal']) {
+      expect(bandStyleOwn(style).footer, style).toEqual({ left: '{date}', center: '', right: 'Page {page} / {pages}' });
+      expect(bandStyleOwn(style).header, style).toEqual({ left: '', center: '', right: '' });
+    }
+  });
+
+  it('carries its bands into a template, which holds no case content', () => {
+    const look = templateLook({ style: 'report', header: { left: 'Internal' }, footer: { right: 'azimut:my-logo' } });
+    expect(look.header.left).toBe('Internal');
+    expect(look.footer.right).toBe('azimut:my-logo');
   });
 
   it('starts a report with a cover and its contents', () => {

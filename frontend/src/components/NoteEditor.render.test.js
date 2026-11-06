@@ -146,7 +146,7 @@ describe('/ › Cover page', () => {
   it('writes the page at the top and, with no Look beside the note, turns its look to Your own page itself', async () => {
     put.mockImplementation(async (url, body) => (url.endsWith('/look') ? { look: body } : { status: 'saved' }));
     const doc = await pickCover();
-    expect(doc.text.startsWith('::: center\n![Azimut](azimut:logo)')).toBe(true);
+    expect(doc.text.startsWith('::: top-right\n![Azimut](azimut:logo)')).toBe(true);
     expect(doc.text).toContain('<!-- cover -->\n\nFindings.');
     await vi.waitFor(() => expect(put.mock.calls.some(([url]) => url === '/api/cases/c1/notes/n1/look')).toBe(true));
     const [, look] = put.mock.calls.find(([url]) => url === '/api/cases/c1/notes/n1/look');

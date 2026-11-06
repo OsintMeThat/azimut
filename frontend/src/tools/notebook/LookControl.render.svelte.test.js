@@ -253,6 +253,143 @@ describe('the Look panel', () => {
     expect(panel().querySelector('input[type="date"]')).toBeNull();
   });
 
+  describe('the header and the footer', () => {
+    const fold = () => [...panel().querySelectorAll('button')].find((button) => button.textContent.includes('Header and footer'));
+    const field = (name) => panel().querySelector(`input[aria-label="${name}"]`);
+    const typeIn = (name, text) => {
+      const input = field(name);
+      input.value = text;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    it('is folded after the other settings, and opens on two rows of three one-line fields', () => {
+      openPanel();
+      expect(fold().getAttribute('aria-expanded')).toBe('false');
+      expect(field('Footer left')).toBeNull();
+      // the last section of the panel
+      expect(panel().querySelector('.look').lastElementChild.contains(fold())).toBe(true);
+      fold().click();
+      flushSync();
+      expect(fold().getAttribute('aria-expanded')).toBe('true');
+      const rows = [...panel().querySelectorAll('.band')].map((band) => [band.querySelector('.key').textContent, [...band.querySelectorAll('input')].map((input) => input.getAttribute('aria-label'))]);
+      expect(rows).toEqual([
+        ['Header', ['Header left', 'Header centre', 'Header right']],
+        ['Footer', ['Footer left', 'Footer centre', 'Footer right']],
+      ]);
+      expect(field('Footer left').maxLength).toBe(120);
+      expect(panel().textContent).toContain('{title} {date} {page} {pages} {name} {role} {organisation}');
+      expect(changes).toHaveLength(0);
+    });
+
+    it('says what the style prints in an empty band, and no more once the band is filled', () => {
+      openPanel();
+      fold().click();
+      flushSync();
+      // Plain: the note's name and the page number, no header
+      expect(['Header left', 'Header centre', 'Header right'].map((name) => field(name).placeholder)).toEqual(['', '', '']);
+      expect(['Footer left', 'Footer centre', 'Footer right'].map((name) => field(name).placeholder)).toEqual(['{title}', '', '{page}']);
+      props.look = normaliseLook({ style: 'report' });
+      flushSync();
+      expect(['Footer left', 'Footer centre', 'Footer right'].map((name) => field(name).placeholder)).toEqual(['{date}', '', 'Page {page} / {pages}']);
+      // a band that holds a word replaces the style's, so its other slots say nothing
+      props.look = normaliseLook({ style: 'report', footer: { center: 'Draft' } });
+      flushSync();
+      expect(['Footer left', 'Footer right'].map((name) => field(name).placeholder)).toEqual(['', '']);
+      expect(field('Footer centre').value).toBe('Draft');
+    });
+
+    it('writes a slot once typing pauses, or when the field is left, and drops an emptied band', () => {
+      vi.useFakeTimers();
+      openPanel();
+      fold().click();
+      flushSync();
+      typeIn('Footer left', 'Case {title}   ');
+      expect(changes).toHaveLength(0);
+      vi.advanceTimersByTime(500);
+      expect(changes.at(-1).footer).toEqual({ left: 'Case {title}', center: '', right: '' });
+      expect('header' in changes.at(-1)).toBe(false);
+      // the field is left as typed, the trailing space is the look's to trim
+      expect(field('Footer left').value).toBe('Case {title}   ');
+      typeIn('Header right', 'Page {page}');
+      field('Header right').dispatchEvent(new Event('blur'));
+      expect(changes.at(-1).header).toEqual({ left: '', center: '', right: 'Page {page}' });
+      expect(changes.at(-1).footer.left).toBe('Case {title}');
+      typeIn('Header right', '');
+      field('Header right').dispatchEvent(new Event('blur'));
+      expect('header' in changes.at(-1)).toBe(false);
+    });
+
+    it('keeps a space typed after a word while the look comes back trimmed', () => {
+      vi.useFakeTimers();
+      openPanel();
+      fold().click();
+      flushSync();
+      typeIn('Footer right', 'Page ');
+      vi.advanceTimersByTime(500);
+      flushSync();
+      expect(changes.at(-1).footer.right).toBe('Page');
+      expect(field('Footer right').value).toBe('Page ');
+    });
+
+    it('puts a logo in a slot instead of words, and shows it as a chip that takes it out', () => {
+      openPanel();
+      fold().click();
+      flushSync();
+      panel().querySelector('button[aria-label="Header left: a logo"]').click();
+      flushSync();
+      const choices = [...panel().querySelectorAll('.logo-pick button')].map((button) => button.textContent.trim());
+      expect(choices).toEqual(['Your logo', 'Azimut logo']);
+      [...panel().querySelectorAll('.logo-pick button')][0].click();
+      flushSync();
+      expect(changes.at(-1).header).toEqual({ left: 'azimut:my-logo', center: '', right: '' });
+      // a chip, not the address
+      expect(field('Header left')).toBeNull();
+      expect(panel().querySelector('.slot-chip').textContent.trim()).toBe('Your logo');
+      expect(panel().textContent).not.toContain('azimut:my-logo');
+      panel().querySelector('button[aria-label="Header right: a logo"]').click();
+      flushSync();
+      [...panel().querySelectorAll('.logo-pick button')][1].click();
+      flushSync();
+      expect(changes.at(-1).header).toEqual({ left: 'azimut:my-logo', center: '', right: 'azimut:logo' });
+      expect([...panel().querySelectorAll('.slot-chip')].map((chip) => chip.textContent.trim())).toEqual(['Your logo', 'Azimut logo']);
+      panel().querySelector('.slot-chip button').click();
+      flushSync();
+      expect(changes.at(-1).header).toEqual({ left: '', center: '', right: 'azimut:logo' });
+      expect(field('Header left').value).toBe('');
+    });
+
+    it('shows a band already set as On on its folded line, and the words in its fields once open', () => {
+      props.look = normaliseLook({ header: { left: 'Internal' }, footer: { right: 'azimut:logo' } });
+      openPanel();
+      expect(fold().textContent).toContain('On');
+      fold().click();
+      flushSync();
+      expect(field('Header left').value).toBe('Internal');
+      expect(panel().querySelector('.slot-chip').textContent.trim()).toBe('Azimut logo');
+    });
+
+    it('is offered to a template as it is to a note', () => {
+      props.template = true;
+      openPanel();
+      fold().click();
+      flushSync();
+      typeIn('Header centre', 'Draft report');
+      field('Header centre').dispatchEvent(new Event('blur'));
+      expect(changes.at(-1).header).toEqual({ left: '', center: 'Draft report', right: '' });
+    });
+
+    it('writes what is typed when the panel is closed before the pause is over', () => {
+      vi.useFakeTimers();
+      openPanel();
+      fold().click();
+      flushSync();
+      typeIn('Footer centre', 'Seen');
+      target.querySelector('[data-guide="notebook.look"]').click();
+      flushSync();
+      expect(changes.at(-1).footer.center).toBe('Seen');
+    });
+  });
+
   it('offers a template no picture and no day', () => {
     props.template = true;
     props.look = normaliseLook({ cover: { on: true } });

@@ -61,6 +61,18 @@ describe('markdownHtml', () => {
     expect(html).toContain('<strong>Centred text</strong>');
   });
 
+  it('sets a block named for a corner of the cover on its side', () => {
+    for (const [name, side] of [['top-left', 'left'], ['bottom-left', 'left'], ['top-right', 'right'], ['bottom-right', 'right']]) {
+      const html = markdownHtml(`::: ${name}\n**Mark**\n:::`);
+      expect(html, name).toContain(`<div class="markdown-align align-${side}">`);
+      expect(html, name).toContain('<strong>Mark</strong>');
+    }
+    // a picture in it takes the side's place when its line writes none
+    expect(markdownHtml('::: top-right\n![Logo](/logo.png)\n:::')).toContain('align-right');
+    // anything else after the colons is text
+    expect(markdownHtml('::: top\nHello\n:::')).not.toContain('markdown-align');
+  });
+
   it('applies image options to case media', () => {
     const html = markdownHtml('[[media:e_image|Map]]{width=320px align=right}', {
       caseId: 'case-1',

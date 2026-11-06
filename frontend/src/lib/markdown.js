@@ -2,13 +2,14 @@ import DOMPurify from 'dompurify';
 import { marked, Renderer } from 'marked';
 
 import { fileRelPath, fileUrl } from './fileUrl.js';
-import { readAttrs } from './notes/pictureSize.js';
+import { blockSide, readAttrs } from './notes/pictureSize.js';
 import { BUILT_IN_ADDRESS, builtInPicture, builtInSrc } from './notes/reportParts.js';
 
 const ENTITY_REF = /\[\[entity:([A-Za-z0-9_-]+)\|([^\]]+)\]\]/g;
 const MEDIA_REF = /\[\[media:([A-Za-z0-9_-]+)\|([^\]]+)\]\](?:\{([^}\n]+)\})?/g;
 const IMAGE_ATTRS = /!\[([^\]]*)\]\((\S+?)(?:\s+["']([^"']*)["'])?\)\s*\{([^}\n]+)\}/g;
-const ALIGNMENT_BLOCK = /^:::\s*(left|center|right)\s*\n([\s\S]*?)^:::\s*$/gm;
+// a corner of the cover reads as its side here: only the PDF pins it to the page
+const ALIGNMENT_BLOCK = /^:::\s*(left|center|right|top-left|top-right|bottom-left|bottom-right)\s*\n([\s\S]*?)^:::\s*$/gm;
 const ATTR_PARAM = '__azimut_attrs';
 /** Wrapper a ```mermaid fence renders to, and the hook lib/mermaid.js draws into. */
 export const MERMAID_CLASS = 'mermaid-diagram';
@@ -186,7 +187,7 @@ function renderAlignmentBlocks(source, options) {
   const blocks = [];
   const main = source.replace(ALIGNMENT_BLOCK, (_match, align, contents) => {
     const token = `AZIMUT_ALIGNMENT_BLOCK_${blocks.length}`;
-    blocks.push({ token, align, contents });
+    blocks.push({ token, align: blockSide(align), contents });
     return token;
   });
   const rendered = marked.parse(main, options);

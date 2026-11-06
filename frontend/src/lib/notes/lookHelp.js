@@ -4,7 +4,7 @@
  * `lookHelp.test.js` holds every key to a sentence and to a control showing it.
  */
 export const LOOK_HELP = {
-  open: 'How this note prints: style, text, page, marking, cover',
+  open: 'How this note prints: style, text, page, marking, cover, header and footer',
   style: 'The layout the PDF is set in',
   font: 'The typeface and size of the text',
   fontOwn: 'Use the typeface the style comes with',
@@ -24,6 +24,11 @@ export const LOOK_HELP = {
   toc: 'A page listing the headings, after the cover',
   numbered: 'Number the headings and the figures',
   sources: 'A numbered list of every source the note cites, on the last pages',
+  bands: 'Fill a header or a footer to replace the style\'s own',
+  slot: 'One line for this place on the page',
+  slotLogo: 'Put a logo here in place of words',
+  slotLogoClear: 'Take the logo out of this place',
+  bandWords: 'Filled in when the PDF is made: {title} {date} {page} {pages} {name} {role} {organisation}',
   write: 'The note alone',
   page_pane: 'The PDF beside the note, drawn as you type',
   page_in_place: 'The PDF of the note, in place of its text',
