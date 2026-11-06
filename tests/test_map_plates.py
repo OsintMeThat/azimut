@@ -1060,3 +1060,15 @@ def test_a_figure_follows_its_plate_to_a_new_name_and_names_what_it_shows_in_the
     assert source.noun == "Map plate" and source.arrival == "made"
     assert source.credit() == notesources.Credit("Map", "Esri, Maxar")
     assert "Esri, Maxar" in notesources.details(source)
+
+
+def test_the_pixels_a_figure_is_drawn_at_stay_under_what_the_server_takes():
+    """`plateNote.js` holds a page filed for a note under this bound, so a large paper is
+    drawn a little coarser rather than refused: its number has to stay under the engine's."""
+    import re
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1].joinpath("frontend/src/tools/plate/plateNote.js").read_text(encoding="utf-8")
+    found = re.search(r"MAX_FIGURE_PIXELS = ([\d_]+);", source)
+    assert found, "plateNote.js no longer names MAX_FIGURE_PIXELS"
+    assert int(found.group(1).replace("_", "")) <= mapplates.MAX_PAGE_PIXELS

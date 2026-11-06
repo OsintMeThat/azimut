@@ -86,6 +86,9 @@ class FullCase:
     horizon_work: str = ""  # the work on Horizon's bench, kept so a reload brings it back
     map_plate: str = ""  # a page laid out round a map of the case
     map_plate_thumb: str = ""  # its preview, which travels with it
+    map_plate_figure: str = ""  # a page of it filed in the case for a note: media that names its plate
+    reading_figure: str = ""  # a Timeline reading filed as a picture, naming the snapshot that froze it
+    reading_snapshot_id: str = ""  # that snapshot, stored with the case
     analyzer_zones: str = ""
     analyzer_area: str = ""
     analyzer_followup: str = ""
@@ -311,6 +314,27 @@ def build_full_case(
     )
     assert plate_thumb.status_code == 200, plate_thumb.text
     full.map_plate_thumb = plate_thumb.json()["thumb"]
+    plate_figure = client.post(
+        f"/api/cases/{case_id}/map-plates/{plate.json()['name']}/figure",
+        files={"frame": ("page.png", _png((120, 90), (230, 230, 230)), "image/png")},
+        data={"filename": "Situation, 2 Mar 2026", "day": "2026-03-02", "attribution": "Esri, Maxar"},
+    )
+    assert plate_figure.status_code == 200, plate_figure.text
+    full.map_plate_figure = plate_figure.json()["path"]
+
+    # a Timeline reading filed as a picture: media that names the snapshot which froze it
+    reading = client.post(
+        f"/api/cases/{case_id}/analysis-views/figure",
+        json={
+            "name": "Chronology, 1 to 2 Aug 2026", "surface": "timeline", "filename": "Chronology 1 to 2 Aug 2026",
+            "png": base64.b64encode(_png((160, 100), (250, 250, 250))).decode("ascii"),
+            "spec": {"timeline": {"from": "2026-08-01", "to": "2026-08-02",
+                                  "tracks": [{"id": "events", "label": "Events", "categories": ["statement"]}]}},
+        },
+    )
+    assert reading.status_code == 200, reading.text
+    full.reading_figure = reading.json()["path"]
+    full.reading_snapshot_id = reading.json()["view"]
 
     # -- a place, and a relation to the photo ---------------------------------
     place = client.post(

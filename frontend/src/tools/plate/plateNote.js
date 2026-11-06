@@ -14,6 +14,18 @@ import { sizeWidth } from '../../lib/notes/pictureSize.js';
 /** The most days one sheet holds: past it the cells are too small to read in a report. */
 export const SHEET_DAYS = 12;
 
+/**
+ * The most pixels a page filed for a note holds: the server's bound on a page
+ * (`engine/mapplates.MAX_PAGE_PIXELS`) less a margin, so a large paper is drawn a little
+ * coarser than 300 dpi rather than refused.
+ */
+export const MAX_FIGURE_PIXELS = 36_000_000;
+
+/** Canvas pixels a millimetre for a page of `widthMm` by `heightMm`: `wanted`, held under what a figure may hold. */
+export function figureScale(widthMm, heightMm, wanted) {
+  return Math.min(wanted, Math.sqrt(MAX_FIGURE_PIXELS / (widthMm * heightMm)));
+}
+
 /** A day as a file name carries it: `2 Mar 2026 10h00`, with no colon. */
 const dayWords = (day) => momentLabel(day).replace(' · ', ' ').replace(':', 'h');
 

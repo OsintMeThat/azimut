@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SHEET_DAYS, faceCredits, figureName, pageOffer, sheetOffer, sheetRefusal } from './plateNote.js';
+import { MAX_FIGURE_PIXELS, SHEET_DAYS, faceCredits, figureName, figureScale, pageOffer, sheetOffer, sheetRefusal } from './plateNote.js';
 
 describe('a Map plate put in a note', () => {
   it('is named after the plate, then the day and the step it shows', () => {
@@ -21,6 +21,16 @@ describe('a Map plate put in a note', () => {
     expect(sheetRefusal(1)).toMatch(/two days or more/);
     expect(sheetRefusal(SHEET_DAYS)).toBe('');
     expect(sheetRefusal(SHEET_DAYS + 1)).toBe(`A sheet holds ${SHEET_DAYS} days at most and this plate plays ${SHEET_DAYS + 1}. Skip some days first`);
+  });
+
+  it('is drawn at print resolution, a large paper a little coarser rather than refused', () => {
+    const dpi300 = 300 / 25.4;
+    // A4 landscape holds 8.7 million pixels at 300 dpi: as asked
+    expect(figureScale(297, 210, dpi300)).toBe(dpi300);
+    // A0 would be 140 million: held under what the server takes
+    const a0 = figureScale(1189, 841, dpi300);
+    expect(a0).toBeLessThan(dpi300);
+    expect(Math.round(1189 * a0 * 841 * a0)).toBeLessThanOrEqual(MAX_FIGURE_PIXELS);
   });
 
   it('files the page once and sizes it to the page of the note by its shape', async () => {

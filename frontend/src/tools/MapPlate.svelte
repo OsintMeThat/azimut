@@ -54,7 +54,7 @@
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { caseState, deleteTemplate, prefs, reloadCase, saveTemplate, toast, uiState } from '../lib/state.svelte.js';
   import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
-  import { faceCredits, figureName, pageOffer, sheetOffer, sheetRefusal } from './plate/plateNote.js';
+  import { faceCredits, figureName, figureScale, pageOffer, sheetOffer, sheetRefusal } from './plate/plateNote.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { touchesNothing } from '../lib/deleteImpact.js';
   import { RESTORABLE } from '../lib/trash.js';
@@ -1803,7 +1803,8 @@
         blob = await drawSheet(picked, check);
       } else {
         exportSays('Drawing the page…');
-        canvas = await render(scaleFor(spec, QUALITIES.print.dpi), undefined);
+        const { width: widthMm, height: heightMm } = pageSize(spec.page);
+        canvas = await render(figureScale(widthMm, heightMm, scaleFor(spec, QUALITIES.print.dpi)), undefined);
         check();
         size = [canvas.width, canvas.height];
         exportSays('Writing…');
