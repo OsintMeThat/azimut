@@ -188,7 +188,7 @@ answer by omission (`tests/test_entities.py`).
 | `media` | collected | subject | ✅ | media-library | `path`, `sha256`, `source_url?` | yes (+ sidecar) |
 | `capture` | collected | attestation | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path`, `geo?` | yes (image) |
 | `place` | place | subject | ✅ | satellite, ingest, enrich, map layers | `aliases?`, `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, `layer_origin?`, plus the precision fields below | no (a point) |
-| `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png), `imagery_credits` (read-only, written by each save) | yes |
+| `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png), `imagery_credits` (read-only, written by each save), `posted_url` (where the analyst published it; a report links the proof there) | yes |
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | document | annex | ✅ | inspect | `spec` (json), one per file | yes |
 | `collage` | document | annex | ✅ | collage | `spec` (json) | yes |

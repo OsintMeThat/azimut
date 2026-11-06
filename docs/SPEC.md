@@ -523,7 +523,8 @@ stops making sense.
   read-only from a fixed list (`/api/notes/fonts`), with no path taken from the
   request. A JPEG goes into a note's PDF without its EXIF, GPS, XMP and IPTC
   blocks. Decoded note pictures are kept between renders in a
-  cache capped at 40 entries and 64 MB. Three routes take a picture drawn in the
+  cache capped at 40 entries and 64 MB, and the preview's lighter copies (re-encoded,
+  so with no metadata either) in one capped at 400 entries and 96 MB. Three routes take a picture drawn in the
   browser back: the note PDF export, whose request, diagrams and decoded total are
   bounded before
   rendering, every diagram read as an image and the note's own text re-read from

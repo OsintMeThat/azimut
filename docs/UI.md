@@ -5654,20 +5654,25 @@ ready ones (Blank, Geolocation report, Chronolocation, Media verification, Incid
 brief (5W), Source profile, Daily SITREP, Fact-check, Investigation log) and **Your
 templates**. A press makes the note at once in the template's look, named after it
 and numbered when the name is taken, with its title selected to retype. **New note**
-asks a title, a folder and what to start from. A card's ⋯ opens it, pins it to the
+opens one dialog (`NewNoteDialog.svelte`): what to start from as tiles drawn by their
+first page (Blank, From the case, the ready notes, your templates; one Tab stop, the
+arrows pick), an optional title whose placeholder is the name the note gets, and a
+folder. A card's ⋯ opens it, pins it to the
 side, opens it in its own tab, exports it, lists its editions, or deletes it.
 
 **From the case**, beside Blank, writes a note of every geolocation of a period
-(`GET /notes/from-case`, nothing fetched). Its dialog asks only the **Period** (days on
+(`GET /notes/from-case`, nothing fetched). Its tile opens New note on it, whose
+questions show under the tiles: only the **Period** (days on
 the case's clock, the zone shown, opening on every day the geolocations cover),
 **Dated by** (*What they show*: the day a proof states, else the camera, post or
 imagery day; or *When they were geolocated*: the day the place was stated) and the
 **Layout** (*A figure each* or *A table*), and says the count live, with how many have
 no day to read them by. **Create** makes a Report with its sources listed and opens
 it: Summary, Findings, Ruled out and Limits, with guidance lines. A figure each gives
-the picture (a proof at three quarters of the page), *Where* (the place's chip and
-its coordinates), *When* (saying which day it is) and *Source*; a table gives one row
-each. What counts: every proof, and every picture or video the Media position shows at
+the picture (a proof at three quarters of the page), *Description* (the item's own,
+from its Details, the line written even when empty to fill in), *Where* (the place's
+chip and its coordinates), *When* (saying which day it is) and *Source*; a table gives
+one row each, its description in a column. What counts: every proof, and every picture or video the Media position shows at
 a confirmed point (`engine/satellite.py` `confirmed_spots`, the frontend's `placeOf`
 reading edges the same way); a suggested point does not, what the case made itself
 (captures, frames) does not, and a file a proof was made from is shown by its proof. A
@@ -5799,7 +5804,11 @@ a note citing nothing prints no list.
 **Write | Page** opens the note's pages beside it: the real PDF the server would write
 (`POST /notes/preview`, nothing written to disk), drawn with pdf.js loaded only
 there, redrawn 900 ms after typing stops with the old pages kept until the new ones
-are ready. Diagrams missing from it are drawn in the browser and asked for once
+are ready. One preview is asked at a time and only the newest typed meanwhile follows
+it; a note whose pages took long waits as long after typing, up to 4 s. Its pictures
+are the same pages with fewer pixels: at most 800 or 1600 across by the room they
+take, JPEG unless they show through, kept in memory (400 pictures, 96 MB); the check
+before an export reads them so too, the PDF written keeps every pixel. Diagrams missing from it are drawn in the browser and asked for once
 more. Pressing a page scrolls the note to where it starts. The choice is kept for the
 browser. What the PDF warns about is listed under the pane's bar, its count folding
 the list: an empty section; a picture, video, chapter or record no longer in the case
@@ -5809,10 +5818,14 @@ script no face covers. One that names a line goes there when pressed. A template
 template is guidance by design.
 
 **Pictures and pages.** Hovering a picture, in the note or on its page in the Page
-pane, offers **S**, **M**, **L** and **Full**, left, centre or right, and **Caption**,
+pane, offers **XXS**, **XS**, **S**, **M**, **L** and **Full**, left, centre or right, and **Caption**,
 written on its line as `{width=… align=… caption="…"}`. The bar also offers *Open in
 <Tool>* when a tool can reopen the state the picture was taken from, and *Source…* for
-a picture brought in by hand with no address (a link stated, never fetched); neither
+a picture brought in by hand with no address (a link stated, never fetched). On the
+Page pane a proof also offers *Posted…*: where it was published, on X or elsewhere,
+kept on the proof (`posted_url`, a field of its Details too, an emptied field taking it
+off). The PDF then links the picture to the post and adds *Posted:* and the address
+under its credit, and lists it under the proof in the sources. None of the bar
 prints, and the bar wraps onto two rows in a narrow note. Go to from a warning lands on
 the picture with its bar in reach. The picture picker lists proofs beside pictures.
 Each bar is one Tab stop, walked with the arrows. *Caption* opens a one-line field where the caption prints:
@@ -5820,8 +5833,8 @@ Enter or leaving it writes it, Escape leaves it as it was, and the note shows it
 the picture. A caption beats an image's title; with numbered figures it reads
 *Figure N.* and the caption. Under it a grey credit says where the picture comes
 from: *Source:* and the site, *Imagery:* with the provider and the day, or *Watch:*
-for a video, each a link. Each size keeps the picture within a third, a half or
-three quarters of the page across and down, so a phone screenshot is not a page tall.
+for a video, each a link. Each size keeps the picture within a tenth, a fifth, a
+third, a half or three quarters of the page across and down, so a phone screenshot is not a page tall.
 A picture with no width written stays within half the page down, so a phone
 screenshot is half a page rather than a whole one (a diagram keeps the whole page), and
 shrinks by up to a quarter more rather than leave the rest of its page blank; one that still goes to the next page leaves its room marked on the
