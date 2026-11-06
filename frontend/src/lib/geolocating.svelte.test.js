@@ -17,7 +17,7 @@ vi.mock('./state.svelte.js', () => ({ uiState: { tool: 'inspect', geolocateRef: 
 const { dispatch } = await import('./events.js');
 const { uiState } = await import('./state.svelte.js');
 const {
-  abandonScene, geolocateScene, geolocating, readGeolocating, readSceneQueue, restoreScene, sceneQueue, startGeolocating, stopGeolocating,
+  abandonScene, geolocateScene, geolocating, holdSceneQueue, readGeolocating, readSceneQueue, restoreScene, sceneQueue, startGeolocating, stopGeolocating,
 } = await import('./geolocating.svelte.js');
 
 const SCENE = { video: 'media/clip.mp4', id: 's1', label: 'Bridge', state: 'todo', captures: [] };
@@ -94,6 +94,7 @@ describe('the queue', () => {
     answers.set('GET /api/cases/c1/scenes/queue', { files: [], geolocating: null });
     await readSceneQueue('c1');
     calls.length = 0;
+    const release = holdSceneQueue();
     vi.useFakeTimers();
     try {
       dispatch({ type: 'scenes', case_id: 'c1', video: 'media/clip.mp4' });
@@ -103,8 +104,28 @@ describe('the queue', () => {
       await vi.advanceTimersByTimeAsync(400);
     } finally {
       vi.useRealTimers();
+      release();
     }
     expect(calls).toEqual([{ method: 'GET', path: '/api/cases/c1/scenes/queue', body: undefined }]);
+  });
+
+  it('is left alone once no surface shows it, the scene being geolocated read alone', async () => {
+    answers.set('GET /api/cases/c1/scenes/queue', { files: [], geolocating: null });
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: SCENE });
+    await readSceneQueue('c1');
+    const release = holdSceneQueue();
+    release();
+    release(); // a second release counts for nothing
+    calls.length = 0;
+    vi.useFakeTimers();
+    try {
+      dispatch({ type: 'scenes', case_id: 'c1', video: 'media/clip.mp4' });
+      dispatch({ type: 'geolocating', case_id: 'c1', video: 'media/clip.mp4', draft: 's1' });
+      await vi.advanceTimersByTimeAsync(400);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(calls.map((c) => c.path)).toEqual(['/api/cases/c1/geolocating']);
   });
 
   it('brings an abandoned scene back by its video', async () => {

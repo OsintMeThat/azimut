@@ -114,13 +114,31 @@ function refreshQueue(caseId) {
   return sceneQueue.caseId === caseId && sceneQueue.files ? readSceneQueue(caseId) : null;
 }
 
+// The queue is read again only while a surface shows it (the To-do's group): once
+// none does, a nudge reads the scene being geolocated alone, so an Inspect autosave
+// does not walk every worked video for a list nobody is looking at.
+let queueHolders = 0;
+const queueHeld = () => queueHolders > 0;
+
+/** A surface showing the queue: it is kept in step until the release this returns. */
+export function holdSceneQueue() {
+  queueHolders += 1;
+  let held = true;
+  return () => {
+    if (!held) return;
+    held = false;
+    queueHolders -= 1;
+    if (!queueHolders) clearTimeout(requeuing);
+  };
+}
+
 // A file's scenes saved or a proof's time stated (`scenes`), or something deleted or
 // restored (`saved`), which can give a scene back or take one up: a queue held for the
 // case is read again, once for a burst.
 const REQUEUE_MS = 300;
 let requeuing = null;
 function requeue(caseId) {
-  if (caseId !== sceneQueue.caseId || !sceneQueue.files) return;
+  if (!queueHeld() || caseId !== sceneQueue.caseId || !sceneQueue.files) return;
   clearTimeout(requeuing);
   requeuing = setTimeout(() => {
     requeuing = null;
@@ -133,6 +151,6 @@ onEvent('saved', (event) => requeue(event.case_id));
 // Started, ended, or a capture attached, from this tab, another, or the extension.
 onEvent('geolocating', (event) => {
   if (event.case_id !== geolocating.caseId && event.case_id !== sceneQueue.caseId) return;
-  if (event.case_id === sceneQueue.caseId && sceneQueue.files) readSceneQueue(event.case_id);
+  if (queueHeld() && event.case_id === sceneQueue.caseId && sceneQueue.files) readSceneQueue(event.case_id);
   else readGeolocating(event.case_id);
 });

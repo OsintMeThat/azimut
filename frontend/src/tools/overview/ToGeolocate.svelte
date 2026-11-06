@@ -39,7 +39,9 @@
    * name opens it in Inspect; Abandon asks for a word, which may stay empty.
    */
   import { onDestroy, tick, untrack } from 'svelte';
-  import { abandonScene, geolocateScene, geolocating, restoreScene, sceneQueue } from '../../lib/geolocating.svelte.js';
+  import {
+    abandonScene, geolocateScene, geolocating, holdSceneQueue, restoreScene, sceneQueue,
+  } from '../../lib/geolocating.svelte.js';
   import { sceneTime } from '../../lib/scenes.js';
   import {
     abandonedScenes, firstScenes, openScenes, queueColor, queueMark, queueName, queueState, sceneCount,
@@ -81,6 +83,8 @@
   // kept in Inspect, a proof's time stated, a deletion or a restore anywhere arrive
   // as nudges, which the shared module answers (`scenes`, `saved`, `geolocating`).
   onDestroy(hold());
+  // kept in step by the module's nudges while it is shown, and only then
+  onDestroy(holdSceneQueue());
   $effect(() => {
     const id = caseId;
     void caseState.rev;
