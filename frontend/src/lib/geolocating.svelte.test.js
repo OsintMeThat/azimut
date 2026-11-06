@@ -17,7 +17,7 @@ vi.mock('./state.svelte.js', () => ({ uiState: { tool: 'inspect', geolocateRef: 
 const { dispatch } = await import('./events.js');
 const { uiState } = await import('./state.svelte.js');
 const {
-  abandonScene, geolocateScene, geolocating, holdSceneQueue, readGeolocating, readSceneQueue, restoreScene, sceneQueue, startGeolocating, stopGeolocating,
+  abandonScene, geolocateScene, geolocating, holdSceneQueue, sceneEdit, readGeolocating, readSceneQueue, restoreScene, sceneQueue, startGeolocating, stopGeolocating,
 } = await import('./geolocating.svelte.js');
 
 const SCENE = { video: 'media/clip.mp4', id: 's1', label: 'Bridge', state: 'todo', captures: [] };
@@ -131,7 +131,10 @@ describe('the queue', () => {
 
   it('brings an abandoned scene back by its video', async () => {
     answers.set('DELETE /api/cases/c1/scenes/s1/abandon', { scene: SCENE });
+    const before = sceneEdit.n;
     await restoreScene('c1', 'media/clip.mp4', 's1');
     expect(calls[0].path).toBe('/api/cases/c1/scenes/s1/abandon?video=media%2Fclip.mp4');
+    // Inspect, showing that video beside the To-do, reads its list again
+    expect(sceneEdit).toMatchObject({ caseId: 'c1', video: 'media/clip.mp4', n: before + 1 });
   });
 });

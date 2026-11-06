@@ -15,7 +15,7 @@
     editClock, isAbandoned, isStretch, liveScenes, momentKey, newScene, sameMoments, sceneList, sceneMarks, scenePassage,
     sceneStart, sceneTime, sceneTitle, sceneToEnd, snapToFrame, stretchFromShot, timeWords,
   } from '../lib/scenes.js';
-  import { abandonScene, geolocateScene, geolocating, restoreScene } from '../lib/geolocating.svelte.js';
+  import { abandonScene, geolocateScene, geolocating, restoreScene, sceneEdit as sceneGiven } from '../lib/geolocating.svelte.js';
   import { onEvent } from '../lib/events.js';
   import { frameScenes, frameToCapture, frameUses, framesOfScene, proofHandoff, scenesAt } from '../lib/sceneFrames.js';
   import { createSceneOffer } from '../lib/sceneOffer.js';
@@ -1001,6 +1001,15 @@
   // Coming back to Inspect reads the list again: a proof saved meanwhile joins it.
   $effect(() => {
     if (uiState.tool === 'inspect' && isVideo && !opening) untrack(() => loadScenes(openRun));
+  });
+
+  // A scene of this clip given up or taken up again from the To-do beside it.
+  $effect(() => {
+    void sceneGiven.n;
+    untrack(() => {
+      if (sceneGiven.caseId !== work.caseId || sceneGiven.video !== work.source?.path) return;
+      if (uiState.tool === 'inspect' && isVideo && !opening) loadScenes(openRun);
+    });
   });
 
   // A scene of this clip gathered a capture, from the map or the extension, or its

@@ -94,10 +94,24 @@ export async function readSceneQueue(caseId) {
   }
 }
 
+/**
+ * The last scene given up or taken up again from this tab, `{caseId, video, n}`: Inspect
+ * reads its list again when the video it shows is that one, abandoned from the To-do
+ * beside it. Another tab or the extension hear the server's `scenes` nudge instead.
+ */
+export const sceneEdit = $state({ caseId: null, video: null, n: 0 });
+
+function edited(caseId, video) {
+  sceneEdit.caseId = caseId;
+  sceneEdit.video = video;
+  sceneEdit.n += 1;
+}
+
 /** Give up on a scene, with a word if there is one. Answers with its row. */
 export async function abandonScene(caseId, video, draft, reason = '') {
   const { scene } = await api.put(`${base(caseId)}/scenes/${encodeURIComponent(draft)}/abandon`, { video, reason });
   if (geolocating.caseId === caseId && geolocating.scene?.id === draft) hold(caseId, null);
+  edited(caseId, video);
   await refreshQueue(caseId);
   return scene;
 }
@@ -106,6 +120,7 @@ export async function abandonScene(caseId, video, draft, reason = '') {
 export async function restoreScene(caseId, video, draft) {
   const query = new URLSearchParams({ video });
   const { scene } = await api.del(`${base(caseId)}/scenes/${encodeURIComponent(draft)}/abandon?${query}`);
+  edited(caseId, video);
   await refreshQueue(caseId);
   return scene;
 }
