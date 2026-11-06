@@ -415,6 +415,11 @@ def test_every_record_naming_a_file_is_read_as_a_use_or_says_why_not(client):
         for key, value in _strings(data):
             if value not in paths and value not in ids:
                 continue
+            if rel == "case.json" and key.startswith("link_pass."):
+                # The link pass's cursor: the entities it has already read, a file among
+                # them only when that file was filed in the second the pass last read.
+                # Bookkeeping, never a use, and present or not by the clock.
+                continue
             folder = rel.rsplit("/", 1)[0]
             if (folder, key) in NOT_A_USE:
                 listed.add((folder, key))
