@@ -1,7 +1,7 @@
 /**
- * What Horizon puts in a pinned note: the photo above the terrain it was matched on,
- * one picture filed in the case under the saved view, and the viewpoint as text, the
- * conclusion of a skyline match. Find's score and ranking are never put anywhere: Find
+ * What Horizon puts in a pinned note: an area of the photo above the terrain it was
+ * matched on, dragged over the view and filed once in the case under the saved view,
+ * and the viewpoint as text, the conclusion of a skyline match. Find's score and ranking are never put anywhere: Find
  * leads to a view, and the proof is the matched pair after a person checked it.
  */
 import { windOf } from '../../lib/horizon/geometry.js';
@@ -59,22 +59,42 @@ export function viewpointOffer({ read }) {
   };
 }
 
+/** What the view's hint says while an area is dragged for a note. */
+export const NOTE_AREA_HINT = 'Drag a box over the view to put it in the note · Esc to cancel';
+
+/** A number kept to two places, so the same area read twice gives the same key. */
+const settled = (value) => (Number.isFinite(Number(value)) ? Math.round(Number(value) * 100) / 100 : null);
+
 /**
- * The photo above the terrain it was matched on, offered to a pinned note. `keep()` saves
- * the view when it is not saved, draws the pair and files it under the view (or finds it
- * filed in this very state), answering `{ entity, label, fresh }`; `unsaved()` says whether
- * the view will be saved first.
+ * What tells one area of a view from another for the server's once-per-state rule: the
+ * box dragged (CSS pixels) and where it faced, the loupe included. Two areas of the same
+ * size elsewhere on the screen are two pictures.
+ */
+export function areaKey(area, lens = {}) {
+  return JSON.stringify({
+    x: Math.round(area.x), y: Math.round(area.y), width: Math.round(area.width), height: Math.round(area.height),
+    heading: settled(lens?.heading), tilt: settled(lens?.tilt), fov: settled(lens?.fov),
+  });
+}
+
+/**
+ * An area of the photo above the terrain it was matched on, offered to a pinned note.
+ * `keep({ signal })` has the area dragged, saves the view when it is not saved, draws the
+ * pair and files it under the view (or finds it filed in this very state), answering
+ * `{ entity, label, fresh }`; `unsaved()` says whether the view will be saved first.
  */
 export function pairOffer({ keep, unsaved = () => false }) {
   return {
     id: 'pair',
-    label: 'The photo above the terrain',
+    label: 'An area of the photo above the terrain',
     get hint() {
-      return unsaved() ? 'Saves the view, then files both pictures one above the other' : 'Both pictures one above the other, the ridge lines on both';
+      return unsaved()
+        ? 'Drag over the view: the view is saved, then both pictures of the area filed one above the other'
+        : 'Drag over the view: both pictures of the area one above the other, the ridge lines on both';
     },
     icon: 'horizon',
     picture: true,
-    busy: 'Drawing the photo and the terrain…',
+    busy: 'Drag over the view for the area to put in. Esc cancels',
     put: async ({ signal } = {}) => {
       const { entity, label, fresh } = await keep({ signal });
       if (!entity?.id) throw new Error('The pair could not be kept in the case');

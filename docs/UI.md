@@ -5967,7 +5967,7 @@ What each tool puts, and where its *Put in “<note>”* sits:
 | Tool | What lands | Where |
 |---|---|---|
 | Map | *An area of the map*: the capture marquee is armed and the box dragged is filed as a capture (Esc or Cancel calls it off), once per identical view (provider, imagery day, centre, zoom, bearing, size). *This point*: decimal degrees at 5 places, or the open place's chip and its coordinates. *This measure*: its own text and assumption, and the day a shadow was read for | capture menu, right-click *Put this point in “…”*, Add |
-| Compare | *This pair*, side by side with both days in its credit, kept once per identical pair; an unsaved comparison is saved as *<place>, <day A> to <day B>* | Export panel |
+| Compare | *An area of the pair*: the frame tool is armed for the note alone (Esc, a click or Cancel calls it off) and both pictures of the box drawn land side by side, both days in its credit, kept once per identical pair and frame; the export's own frame is left as it was. An unsaved comparison is saved as *<place>, <day A> to <day B>* | Export panel |
 | Detect | *This pin*: a pinned candidate's evidence picture, captioned with what was measured, its area and its days; a candidate not pinned offers nothing | the pinned verdict |
 | Inspect | *This frame*, labelled *Frame at 00:12.480*, saved first when it is not | under Save to case |
 | Collage | *This collage*, saved first when it is not | under Save to case |
@@ -5977,7 +5977,7 @@ What each tool puts, and where its *Put in “<note>”* sits:
 | Media | *Quote the post*: the words as posted, the account and day, then the media's chip | Open in…, Add |
 | Map plate | *This page*: the page on screen drawn at 300 dpi (at most 36 Mpx, a large paper coarser rather than refused), filed once per plate, day, step and size, its credits on its face; refused while tiles are still loading. *The days side by side*: the plate's sheet, 2 to 12 days | the export dialog (PNG, Sheet), Add |
 | Compare | *This evolution sheet*: 2 to 40 pictures, the comparison saved first, each day credited (Wayback days as estimates); fetched on that press | Export panel with Sheet ticked |
-| Horizon | *The photo above the terrain*, the view saved first, filed once per view and size; *The viewpoint*: eye, height, looking bearing and field of view, relief source. Never a Find score or rank | Export menu, Add |
+| Horizon | *An area of the photo above the terrain*: a box dragged over the view as it shows, loupe kept (Esc or Cancel calls it off), the view saved first, filed once per view, area and size; *The viewpoint*: eye, height, looking bearing and field of view, relief source. Never a Find score or rank | Export menu, Add |
 | Detect | *The kept table*: kept and noted candidates only, under a quoted header (run and areas, analyzer, passes, threshold, cloud mask, *N kept of M candidates, P pinned*), 200 rows at most | beside Export as layer, Add |
 | Timeline, Graph | *This reading* as a picture of its plate, filed with the snapshot that freezes it (or the one open) | the *Export this reading* dialog, Add |
 

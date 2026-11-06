@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { pairOffer, reliefSources, viewpointOffer, viewpointText } from './horizonNote.js';
+import { areaKey, pairOffer, reliefSources, viewpointOffer, viewpointText } from './horizonNote.js';
 
 const observer = { lat: 46.5586, lon: 7.8353, mode: 'ground', height: 1.7 };
 const camera = { heading: 107.4, fov: 60.64, projection: 'camera' };
@@ -40,16 +40,35 @@ describe('the viewpoint of a Horizon view put in a note', () => {
   });
 });
 
-describe('the photo above the terrain put in a note', () => {
-  it('files both pictures once, at the page width', async () => {
+describe('an area of the photo above the terrain put in a note', () => {
+  it('files both pictures of the area once, at the page width', async () => {
     const keep = vi.fn().mockResolvedValue({ entity: { id: 'e_pair' }, label: 'Ridge, photo above terrain', fresh: true });
     const offer = pairOffer({ keep, unsaved: () => true });
-    expect(offer).toMatchObject({ id: 'pair', label: 'The photo above the terrain', picture: true });
-    expect(offer.hint).toBe('Saves the view, then files both pictures one above the other');
-    expect(await offer.put({})).toEqual({ text: '[[media:e_pair|Ridge, photo above terrain]]{width=100%}', filed: ['e_pair'] });
+    expect(offer).toMatchObject({ id: 'pair', label: 'An area of the photo above the terrain', picture: true });
+    expect(offer.busy).toMatch(/^Drag over the view/);
+    expect(offer.hint).toBe('Drag over the view: the view is saved, then both pictures of the area filed one above the other');
+    // the put's signal reaches the area being dragged, so Cancel calls it off
+    const signal = new AbortController().signal;
+    expect(await offer.put({ signal })).toEqual({ text: '[[media:e_pair|Ridge, photo above terrain]]{width=100%}', filed: ['e_pair'] });
+    expect(keep).toHaveBeenCalledWith({ signal });
     keep.mockResolvedValue({ entity: { id: 'e_pair' }, label: 'R', fresh: false });
     expect((await offer.put({})).filed).toEqual([]);
-    expect(pairOffer({ keep, unsaved: () => false }).hint).toBe('Both pictures one above the other, the ridge lines on both');
+    expect(pairOffer({ keep, unsaved: () => false }).hint)
+      .toBe('Drag over the view: both pictures of the area one above the other, the ridge lines on both');
+  });
+
+  it('tells two areas apart by their box and where they face, not by their size alone', () => {
+    const box = { x: 10.4, y: 20, width: 300, height: 200 };
+    const lens = { heading: 87.123, tilt: 1.5, fov: 30.004 };
+    const key = areaKey(box, lens);
+    expect(JSON.parse(key)).toEqual({ x: 10, y: 20, width: 300, height: 200, heading: 87.12, tilt: 1.5, fov: 30 });
+    // the same area read again is the same key
+    expect(areaKey({ ...box }, { ...lens, heading: 87.1201 })).toBe(key);
+    // the same size elsewhere, or under a loupe facing elsewhere, is another picture
+    expect(areaKey({ ...box, x: 400 }, lens)).not.toBe(key);
+    expect(areaKey(box, { ...lens, heading: 120 })).not.toBe(key);
+    // a camera without a tilt still keys
+    expect(JSON.parse(areaKey(box, { heading: 5, fov: 60 })).tilt).toBeNull();
   });
 
   it('refuses with a sentence when nothing was kept', async () => {

@@ -77,6 +77,9 @@ MAX_BENT_POINTS = 2_000
 MAX_LINE_ID = 100_000
 #: The ground a view took in: a ring of points round the eye, a few per degree of lens.
 MAX_FOOTPRINT = 2_000
+#: What tells one area of a view put in a note from another: a box and where it faced, a
+#: short line of JSON the server only weighs as part of the picture's key, never reads.
+AREA_KEY_MAX = 200
 #: A kept picture: the photo and the terrain side by side at twice a wide screen,
 #: or the whole turn, is a few megabytes and well under this many pixels.
 MAX_KEPT_BYTES = 30_000_000
@@ -633,6 +636,7 @@ async def keep_image(
     filename: str = Form(min_length=1, max_length=120),
     attribution: str = Form(default="", max_length=PICTURE_CREDIT_MAX),
     reuse: bool = Form(default=False),
+    area: str = Form(default="", max_length=AREA_KEY_MAX),
 ) -> dict[str, Any]:
     """Keep one picture of a saved view in the case, as an image nothing replaces.
 
@@ -655,9 +659,13 @@ async def keep_image(
     look = spec.get("look") or {}
     state_key = ""
     if reuse:
-        # a picture put in a note twice, from the same view as saved, of the same kind and size, is one picture
+        # a picture put in a note twice, from the same view as saved, of the same kind, area and
+        # size, is one picture; `area` is what the client says tells one area from another
         with Image.open(io.BytesIO(data)) as drawn:
-            state_key = snapshots.view_key("horizon", view=spec_rel, spec=spec, shows=kind, size=list(drawn.size))
+            state_key = snapshots.view_key(
+                "horizon", view=spec_rel, spec=spec, shows=kind, size=list(drawn.size),
+                **({"area": area} if area else {}),
+            )
         if (filed := snapshots.filed_view(case, state_key)) is not None:
             return {"path": (filed.get("attrs") or {}).get("path"), "entity": filed["id"], "reused": True}
     source: dict[str, Any] = {

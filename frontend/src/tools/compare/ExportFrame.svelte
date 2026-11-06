@@ -13,7 +13,7 @@
   import { formatDistance } from '../../lib/measure.js';
 
   let { engine, frame = null, drawing = false, readonly = false, units = 'metric', bearing = 0,
-    onframe = () => {}, oncancel = () => {} } = $props();
+    hint = 'Drag over the area to export. Escape to cancel.', onframe = () => {}, oncancel = () => {} } = $props();
 
   let root = $state();
   let revision = $state(0);
@@ -138,7 +138,7 @@
       </span>
     {/if}
   {:else if drawing}
-    <div class="frame-hint">Drag over the area to export. Escape to cancel.</div>
+    <div class="frame-hint">{hint}</div>
   {/if}
 </div>
 

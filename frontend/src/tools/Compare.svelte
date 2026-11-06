@@ -124,7 +124,8 @@
   import { RADAR_ID, radarId } from '../lib/radar.js';
   import { offerNote, offerPuts, pairOffers, withdrawNote } from '../lib/noteHere.svelte.js';
   import PutInNote from '../components/PutInNote.svelte';
-  import { nearestPlace, pairName, pairOffer, sheetOffer } from './compare/pairNote.js';
+  import { NOTE_FRAME_HINT, nearestPlace, pairName, pairOffer, sheetOffer } from './compare/pairNote.js';
+  import { createNoteFrame } from './compare/noteFrame.svelte.js';
   import { holdsUnsaved } from '../lib/backButton.js';
   import { changeInterval, formatTemporalValue } from '../lib/timeline.js';
   import Icon from '../components/Icon.svelte';
@@ -1320,6 +1321,7 @@
     annotationTool = 'select';
     resetAnnotationHistory();
     exportFrame = null;
+    noteFrame.drop();
     framing = false;
     blinkPausedBeforeFraming = null;
     sessionName = 'Comparison';
@@ -2037,19 +2039,31 @@
     }
   }
 
-  function finishFraming() {
+  function endFraming() {
     framing = false;
     if (blinkPausedBeforeFraming !== null) {
       blinkPaused = blinkPausedBeforeFraming;
       blinkPausedBeforeFraming = null;
     }
-    rightPanel = 'export';
+  }
+
+  /** The frame tool put away: back to the export panel, or a note's area called off. */
+  function finishFraming() {
+    endFraming();
+    if (noteFrame.waiting) noteFrame.drop();
+    else rightPanel = 'export';
   }
 
   function setExportFrame(next) {
+    if (noteFrame.take(next)) return;
     exportFrame = next;
     finishFraming();
   }
+
+  // An area of the pair for a note: the frame tool armed for that put alone. The frame
+  // drawn is cut from both pictures and never left behind as the export's own.
+  const noteFrame = createNoteFrame({ arm: startFraming, disarm: endFraming });
+  onDestroy(() => noteFrame.drop());
 
   function compose(
     sources,
@@ -2203,10 +2217,11 @@
   }
 
   // -- into the note pinned beside -----------------------------------------------
-  // "This pair" keeps the two pictures side by side in the case, under the
-  // comparison, whatever reading is on screen. A comparison not saved yet is saved
-  // first, named after the case's place there (else its point) and its two dates.
-  // The same pair kept before is cited again rather than kept twice.
+  // "An area of the pair" arms the frame tool, then keeps the two pictures of the area
+  // drawn side by side in the case, under the comparison, whatever reading is on screen.
+  // A comparison not saved yet is saved first, named after the case's place there (else
+  // its point) and its two dates. The same pair kept before is cited again rather than
+  // kept twice.
   /** A comparison not saved yet is saved, named after the case's place there (else its point) and its two days. */
   async function saveForNote(owner, dates) {
     if (openedSession) return;
@@ -2229,23 +2244,34 @@
     }
   }
 
+  /** Whether a pair can be drawn now, else why not. */
+  function pairBlocked() {
+    if (!both || !a.ready || !b.ready) return 'Both pictures have to be on screen';
+    if (outputBusy || sessionBusy) return 'Compare is busy. Try again in a moment';
+    return '';
+  }
+
   async function keepForNote({ signal } = {}) {
-    if (!both || !a.ready || !b.ready) throw new Error('Both pictures have to be on screen');
-    if (outputBusy || sessionBusy) throw new Error('Compare is busy. Try again in a moment');
+    const before = pairBlocked();
+    if (before) throw new Error(before);
+    const frame = await noteFrame.ask({ signal });
+    // the pictures may have moved on while the area was drawn
+    const after = pairBlocked();
+    if (after) throw new Error(after);
     outputBusy = 'note';
     try {
       const owner = await ensureCase();
       const dates = pictureDates();
       await saveForNote(owner, dates);
       if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
-      const sources = await exportSources();
+      const sources = cropSources(await sourceCanvases(), frame);
       const blob = await canvasBlob(compose(sources, { renderMode: 'side', renderChangeMap: null }));
       const form = new FormData();
       form.append('image_a', blob, 'comparison.png');
       form.append('format', 'png');
       form.append('filename', exportName());
-      // what the image shows: the pair side by side, without the difference
-      form.append('spec', JSON.stringify({ ...sessionSpec(), mode: 'side', difference: false }));
+      // what the image shows: the area drawn, the pair side by side, without the difference
+      form.append('spec', JSON.stringify({ ...sessionSpec(), frame, mode: 'side', difference: false }));
       for (const [field, value] of pictureDateFields(dates)) form.append(field, value);
       form.append('reuse', 'true');
       const kept = await api.post(
@@ -2855,8 +2881,8 @@
         <!-- Side by side has two coordinate spaces, so A owns the editable
              frame and B shows the matching ground read-only. -->
         {#if both && !grabbing && mode === 'side' && (framing || exportFrame)}
-          <ExportFrame engine={a.engine} frame={exportFrame} drawing={framing} units={prefs.units} {bearing}
-            onframe={setExportFrame} oncancel={finishFraming} />
+          <ExportFrame engine={a.engine} frame={noteFrame.waiting ? null : exportFrame} drawing={framing} units={prefs.units} {bearing}
+            hint={noteFrame.waiting ? NOTE_FRAME_HINT : undefined} onframe={setExportFrame} oncancel={finishFraming} />
         {/if}
         {#if both && !grabbing}
           <AnnotationCanvas bind:this={canvasA} {annotations} engine={a.engine} letter="a" units={prefs.units}
@@ -3027,8 +3053,8 @@
     <!-- Fade, Swipe and Blink stack both maps in one coordinate space. Their frame therefore sits above the
          complete stage, where neither B nor the swipe clip can block it. -->
     {#if both && !grabbing && mode !== 'side' && (framing || exportFrame)}
-      <ExportFrame engine={a.engine} frame={exportFrame} drawing={framing} units={prefs.units} {bearing}
-        onframe={setExportFrame} oncancel={finishFraming} />
+      <ExportFrame engine={a.engine} frame={noteFrame.waiting ? null : exportFrame} drawing={framing} units={prefs.units} {bearing}
+        hint={noteFrame.waiting ? NOTE_FRAME_HINT : undefined} onframe={setExportFrame} oncancel={finishFraming} />
     {/if}
 
     {#if copernicus}

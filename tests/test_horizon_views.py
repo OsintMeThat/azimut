@@ -360,6 +360,32 @@ def test_the_same_pair_put_in_a_note_twice_is_one_picture_and_another_view_state
     assert plain.json().get("reused") is None
 
 
+def test_two_areas_of_one_view_put_in_a_note_are_two_pictures_and_the_same_area_is_one(client):
+    cid = _case(client, "Areas in a note")
+    photo = _photo(client, cid)
+    _save(client, cid, "North ridge", _spec(photo))
+
+    def put(area):
+        return client.post(
+            f"/api/cases/{cid}/horizon/views/North ridge/images",
+            files={"image": ("view.png", io.BytesIO(_png(size=(320, 200))), "image/png")},
+            data={"kind": "column", "filename": "North ridge photo above terrain", "reuse": "true", "area": area},
+        )
+
+    left = '{"x":0,"y":0,"width":160,"height":100,"heading":80,"tilt":0,"fov":20}'
+    right = '{"x":160,"y":0,"width":160,"height":100,"heading":100,"tilt":0,"fov":20}'
+    first = put(left)
+    assert first.status_code == 200, first.text
+    # the same size of picture from another area of the view is another picture
+    other = put(right)
+    assert other.json().get("reused") is None and other.json()["entity"] != first.json()["entity"]
+    # the same area put again is cited
+    again = put(left)
+    assert again.json()["reused"] is True and again.json()["entity"] == first.json()["entity"]
+    # an area key is short: a long one is refused at the edge
+    assert put("x" * 201).status_code == 422
+
+
 def test_a_kept_picture_carries_the_credits_and_is_held_back_as_a_working_file(client):
     cid = _case(client, "Kept credits")
     _save(client, cid, "North ridge")

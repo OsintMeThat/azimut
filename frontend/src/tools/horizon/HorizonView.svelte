@@ -404,19 +404,31 @@
 
   // -- an area of the view to capture ------------------------------------------------
 
-  /** The area being chosen: what answers once it is (`{ answer }`), and the box drawn so far, in CSS pixels. */
+  /**
+   * The area being chosen: what answers once it is and what the hint says (`{ answer, hint }`),
+   * and the box drawn so far, in CSS pixels.
+   */
   let choosing = $state(null);
   let chosen = $state(null);
 
+  /** What the hint says while an area is chosen, unless the asker says otherwise. */
+  const CHOOSE_HINT = 'Drag a box over the view to capture it · Esc to cancel';
+
   /**
    * Ask for an area of the view: a box dragged over it, answered as
-   * `{ x, y, width, height }` in CSS pixels, or null when Escape gives up.
+   * `{ x, y, width, height }` in CSS pixels, or null when Escape gives up or
+   * `signal` aborts. `hint` says what the area is for.
    */
-  export function chooseArea() {
+  export function chooseArea({ hint = CHOOSE_HINT, signal } = {}) {
     choosing?.answer(null);
+    if (signal?.aborted) return Promise.resolve(null);
     return new Promise((answer) => {
       chosen = null;
-      choosing = { answer };
+      choosing = { answer, hint };
+      // the asker gave up: the box goes, unless another asker took it since
+      signal?.addEventListener('abort', () => {
+        if (choosing?.answer === answer) endChoosing(null);
+      }, { once: true });
       box?.focus({ preventScroll: true });
     });
   }
@@ -1780,7 +1792,7 @@
       </ul>
     {/if}
     {#if shown && choosing}
-      <p class="glass hint">Drag a box over the view to capture it · Esc to cancel</p>
+      <p class="glass hint">{choosing.hint}</p>
     {:else if shown && warping}
       <p class="glass hint">Pull a corner to slant the photo, an edge to stretch it · Drag inside it to move it · Esc when done</p>
     {:else if shown && (tracing || picking)}

@@ -45,7 +45,7 @@
   import { api } from '../lib/api.js';
   import { appInfo, caseState, ensureCase, fmtCoords, prefs, prefsReady, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
-  import { pairOffer, viewpointOffer } from './horizon/horizonNote.js';
+  import { NOTE_AREA_HINT, areaKey, pairOffer, viewpointOffer } from './horizon/horizonNote.js';
   import { findBetaDue } from '../lib/onboarding.js';
   import { assignFolder } from '../lib/filing.js';
   import { reloadedInto, splitHash } from '../lib/hash.js';
@@ -606,17 +606,31 @@
   }
 
   // -- into the note pinned beside -----------------------------------------------------
-  // The photo above the terrain it was matched on, kept under the view (saved first when it
-  // is not), and the viewpoint as text. Find's score and ranking go nowhere.
+  // An area of the photo above the terrain it was matched on, dragged over the view and kept
+  // under the view (saved first when it is not), and the viewpoint as text. Find's score and
+  // ranking go nowhere.
+
+  /** Why a pair cannot be drawn now, or ''. */
+  function pairBlocked() {
+    if (exportBusy || captureBusy || !viewPane || !view.observer) return 'Horizon is busy. Try again in a moment';
+    if (!(photoOn && overlay.source)) return 'Lay a photo over the view first';
+    return '';
+  }
 
   /**
-   * Keep the pair in the case under the saved view for a note: the photo and the terrain
-   * one above the other, the ridge lines on both. A pair kept in this very state (the view
-   * as saved, the same size) is cited again rather than kept twice.
+   * Keep the pair in the case under the saved view for a note: an area dragged over the
+   * view, the photo and the terrain of it one above the other, the ridge lines on both.
+   * Escape or the put's Cancel call it off. A pair kept in this very state (the view as
+   * saved, the same area and size) is cited again rather than kept twice.
    */
   async function keepPairForNote({ signal } = {}) {
-    if (exportBusy || captureBusy || !viewPane || !view.observer) throw new Error('Horizon is busy. Try again in a moment');
-    if (!(photoOn && overlay.source)) throw new Error('Lay a photo over the view first');
+    const before = pairBlocked();
+    if (before) throw new Error(before);
+    const area = await viewPane.chooseArea({ hint: NOTE_AREA_HINT, signal });
+    if (!area) throw Object.assign(new Error('No area was drawn'), { name: 'AbortError' });
+    // the view may have moved on while the area was drawn
+    const after = pairBlocked();
+    if (after) throw new Error(after);
     exportBusy = 'note';
     try {
       const owner = await ensureCase();
@@ -624,13 +638,16 @@
         if (!(await views.save(viewTitle))) throw new Error(views.error || 'The view could not be saved');
       }
       if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
-      const drawn = await drawPair({});
+      const drawn = await drawPair({ area });
       if (!drawn) throw new Error('The view has not finished landing');
-      const parts = exportParts('column', drawn);
+      // the words say what the area faces, not what the whole view does
+      const faced = drawn.lens ? { ...drawn.camera, heading: drawn.lens.heading, fov: drawn.lens.fov } : drawn.camera;
+      const parts = exportParts('column', { ...drawn, camera: faced });
       const form = new FormData();
       form.append('image', await canvasBlob(exportPicture('column', drawn, parts)), 'view.png');
       form.append('kind', 'column');
       form.append('filename', parts.filename);
+      form.append('area', areaKey(area, drawn.lens ?? faced));
       if (pictureCredits) form.append('attribution', pictureCredits);
       form.append('reuse', 'true');
       const kept = await api.post(`/api/cases/${encodeURIComponent(owner.id)}/horizon/views/${encodeURIComponent(views.current.name)}/images`, form, signal ? { signal } : undefined);
@@ -1261,13 +1278,15 @@
    * `exportPicture`). With `cut`, a collage whose pieces the search eased is
    * also drawn as the search read it (lib/horizon/cutView.js): each piece of
    * the terrain through its own camera, laid between the seams, with the names
-   * and ticks each piece's camera placed, answered as `searched`.
+   * and ticks each piece's camera placed, answered as `searched`. With `area`,
+   * a box of the screen as it shows (CSS pixels) is cut from both.
    */
-  async function drawPair({ cut = false, note = '' } = {}) {
+  async function drawPair({ cut = false, note = '', area = null } = {}) {
     const count = overlay.marks.cuts.length + 1;
     const eased = cut && pieces?.length && count > 1 ? pieces : null;
     const variants = [{ photo: 1 }, { photo: 0 }, ...(eased ? pieceVariants(count, eased) : [])];
-    const drawn = await viewPane.exportPicture({ kind: 'view', variants, note });
+    // an area was dragged over the screen as it shows, the loupe kept
+    const drawn = await viewPane.exportPicture({ kind: area ? 'screen' : 'view', variants, note, area });
     if (!drawn || !eased) return drawn;
     return searchedPair(drawn, { count, pieces: eased, pieceAt: overlay.pieceAt });
   }

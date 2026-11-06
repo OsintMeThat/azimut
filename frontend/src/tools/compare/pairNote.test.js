@@ -19,12 +19,19 @@ describe('a Compare pair put in a note', () => {
       .toBe('15.3694, 44.1910, undated to 2026-09-02');
   });
 
-  it('keeps both pictures side by side at the page width, kept once', async () => {
+  it('keeps both pictures of the area drawn side by side at the page width, kept once', async () => {
     const keep = vi.fn().mockResolvedValue({ entity: { id: 'e_pair' }, label: 'Water tower, 2024 to 2026', fresh: true });
-    const offer = pairOffer({ keep, unsaved: () => true });
-    expect(offer).toMatchObject({ id: 'pair', label: 'This pair', picture: true });
-    expect(offer.hint).toBe('Saves the comparison, then keeps both pictures side by side');
-    expect(await offer.put({})).toEqual({ text: '[[media:e_pair|Water tower, 2024 to 2026]]{width=100%}', filed: ['e_pair'] });
+    let saved = false;
+    const offer = pairOffer({ keep, unsaved: () => !saved });
+    expect(offer).toMatchObject({ id: 'pair', label: 'An area of the pair', picture: true });
+    expect(offer.busy).toMatch(/^Drag over the map/);
+    expect(offer.hint).toBe('Drag over the map: the comparison is saved, then both pictures of the area kept side by side');
+    saved = true;
+    expect(offer.hint).toBe('Drag over the map: both pictures of the area side by side, each dated');
+    // the put's signal reaches the area being drawn, so Cancel calls the drawing off
+    const signal = new AbortController().signal;
+    expect(await offer.put({ signal })).toEqual({ text: '[[media:e_pair|Water tower, 2024 to 2026]]{width=100%}', filed: ['e_pair'] });
+    expect(keep).toHaveBeenCalledWith({ signal });
     // the same pair kept before is cited, and Undo leaves it
     keep.mockResolvedValue({ entity: { id: 'e_pair' }, label: 'P', fresh: false });
     expect((await offer.put({})).filed).toEqual([]);
