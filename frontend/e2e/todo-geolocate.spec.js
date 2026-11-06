@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { CASE_ID, installAppFixture } from './app.fixture.js';
+import { STEPS_DURATION, STEPS_FPS, STEPS_WEBM, serveRange } from './video.fixture.js';
 
 // The To-do's "To geolocate" group: the scenes kept in Inspect that no proof takes
 // up yet, over the analyst's own lists, in the sidebar and on the Overview.
@@ -41,6 +42,11 @@ async function caseWithScenes(page, scenes = [row('sc_1', null, null), BRIDGE, r
     }
     return route.fulfill({ json: { scene } });
   });
+  // Geolocate opens the scene's video over the map: its facts and its bytes
+  await page.route(`**/api/cases/${CASE_ID}/inspect/probe*`, (route) => route.fulfill({
+    json: { kind: 'video', duration: STEPS_DURATION, fps: STEPS_FPS, width: 32, height: 32 },
+  }));
+  await page.route(`**/files/${CASE_ID}/${VIDEO}`, (route) => serveRange(route, STEPS_WEBM, 'video/webm'));
   return { fixture, state, writes };
 }
 
@@ -66,6 +72,9 @@ test('the sidebar’s To-do lists the scenes to geolocate over the lists, and ge
   await group.getByRole('button', { name: 'Geolocate bridge?' }).click();
   await expect(page).toHaveURL(/#satellite/);
   expect(writes).toEqual([{ geolocate: { video: VIDEO, draft: 'sc_2' } }]);
+  // its video over the map, the scene named on it
+  await expect(page.locator('.ref-viewer')).toHaveCount(1);
+  await expect(page.locator('.ref-viewer').getByRole('img', { name: /Scene · bridge\?/ })).toBeVisible();
   // the map tools open with the sidebar folded; brought back, it marks the scene
   await page.getByTitle('Toggle case sidebar').click();
   await expect(group.locator('li.scene.live')).toContainText('Geolocating · 2 captures');
