@@ -80,6 +80,15 @@ presses *Read the guide* on it, which opens the guide on its start page.
   Under the lists, **In the notes** gathers the open `- [ ]` of the case's notes,
   note by note, read once the lists are there; ticking one writes the note, and its
   text opens the note on that line.
+  Over the lists, **To geolocate** gathers the scenes kept in Inspect that no proof
+  takes up yet, by file, the file worked on last first (`GET /cases/{id}/scenes/queue`).
+  Each row gives its label or its time, a mark in the colour Inspect gives the scene
+  (a band for a passage, a pin for an instant), and its state: To geolocate, In progress
+  with its captures, or Geolocating for the one in hand. **Geolocate** goes to the map
+  with its video; the name opens it in Inspect; ✕ abandons it with a word, which may
+  stay empty. Three rows show and the rest are counted; the abandoned fold below, each
+  with its word and **Restore**. The group is absent while the case has no scene to
+  prove, and read again on the server's word while it is shown, never once it is not.
   Lists are case metadata in `case.json`, included in case bundles; they are not
   graph entities and own no artifact files. Task and list deletions are permanent,
   outside Trash. Concurrent edits from another browser tab require reloading the
@@ -962,7 +971,8 @@ remembered per workspace for the current session. Reloading restores the default
   shows.
 - **Views** — the sidebar sits beside whatever tool is open, so it carries what is
   worth having there rather than a second Files. **To-do** is the case's lists from
-  Home, one copy shared by both, so a task ticked on the map is ticked on Home.
+  Home, one copy shared by both, so a task ticked on the map is ticked on Home. Its
+  **To geolocate** group is the same one, so a scene can be picked up from any tool.
   **Recent** is the last forty items filed, newest first, read only while it is
   open.
 - **Body** — one rule: no filter shows the tree, a query or a chip shows a flat
@@ -3492,6 +3502,13 @@ drawn or a cell swept from the extension's panel over another map lands here
 without a reload, and the same the other way round. A sweep worked from both
 keeps both hands' marks: what is written is the cells that were marked, never the
 grid around them. A grid discarded elsewhere closes here and says so.
+
+**The extension's panel lists the scenes to geolocate** under its case picker, folded
+to one line and absent when there are none (`GET /api/ingest/scenes`). Geolocate there
+(`POST /api/ingest/geolocating`) holds the scene's video over the other site's map,
+paused on the scene and marked on its bar in its colour, and a pill names it, counts
+its captures and stops it. While it lasts, every capture filed in the case is attached
+to it, the popup's included, and the capture's report says *Attached to “bridge?”*.
 
 ## Detect
 
