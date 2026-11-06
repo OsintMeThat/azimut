@@ -29,6 +29,8 @@ import * as appRefs from './refViewers.js';
 import * as appPlayer from './inspectPlayer.js';
 import * as appFires from './map/firms.js';
 import * as appCal from './calendar.js';
+import * as appScenes from './scenes.js';
+import * as appQueue from './sceneQueue.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const load = (name) => readFileSync(join(here, `../../../extension/${name}`), 'utf8');
@@ -1174,5 +1176,77 @@ describe('the calendar, on both sides of the boundary', () => {
         );
       }
     }
+  });
+});
+
+describe('the scenes to geolocate, on both sides of the boundary', () => {
+  const row = (id, start, end, label = '', extra = {}) => ({
+    kind: 'draft', video: 'media/a.mp4', id, start, end, label, state: 'todo', captures: [], abandoned: null, ...extra,
+  });
+  const ROWS = [
+    row('w', null, null),
+    row('i', 3, null, 'Water tower'),
+    row('z', 0, null),
+    row('p', 238.96, 252.2, 'bridge?', { state: 'progress', captures: ['media/c1.png', 'media/c2.png'] }),
+    row('e', 61, 61),
+    row('h', 3725, 3790, 'جسر'),
+    row('q', 12, null, '', { state: 'progress', captures: ['media/c.png'] }),
+    row('a', 40, 45, 'Gone', { state: 'abandoned', abandoned: { reason: 'no', at: 'x' } }),
+  ];
+
+  it('writes a time as the app writes it', () => {
+    for (const t of [0, 0.4, 59.96, 61, 3599.9, 3725, -2, Number.NaN]) {
+      expect(ext.sceneClock(t), String(t)).toBe(appScenes.shortClock(t));
+    }
+    for (const scene of ROWS) expect(ext.sceneTime(scene), scene.id).toBe(appScenes.sceneTime(scene));
+    expect(ext.WHOLE_VIDEO).toBe(appScenes.WHOLE_VIDEO);
+  });
+
+  it('names a row and says its state as the To-do does', () => {
+    for (const scene of ROWS) {
+      expect(ext.sceneName(scene), scene.id).toBe(appQueue.queueName(scene));
+      for (const live of [false, true]) expect(ext.sceneState(scene, live), scene.id).toBe(appQueue.queueState(scene, live));
+    }
+  });
+
+  it('offers the same open scenes, file by file', () => {
+    const files = [
+      { video: 'media/a.mp4', title: 'A', scenes: ROWS },
+      { video: 'media/b.mp4', title: 'B', scenes: [ROWS.at(-1)] },
+    ];
+    expect(ext.openScenes(files)).toEqual(appQueue.openScenes(files));
+    expect(ext.openScenes(null)).toEqual([]);
+  });
+
+  it('marks a passage as a band, an instant as a pin, the whole video not at all', () => {
+    expect(ext.sceneMark(row('p', 238, 252, 'bridge?'))).toEqual({
+      id: 'p', name: 'bridge?', time: '3:58–4:12', start: 238, end: 252, color: '#40c4ff',
+    });
+    expect(ext.sceneMark(row('i', 3, null))).toMatchObject({ start: 3, end: null, name: '0:03' });
+    expect(ext.sceneMark(row('e', 61, 61))).toMatchObject({ start: 61, end: null });
+    expect(ext.sceneMark(row('w', null, null))).toMatchObject({ start: null, end: null, name: 'Whole video' });
+  });
+
+  it('colours a scene by its place among its video’s scenes, as Inspect does', () => {
+    expect(ext.sceneMark({ ...row('p', 238, 252), order: 1 }).color).toBe('#ff5252');
+    expect(ext.sceneMark({ ...row('p', 238, 252), order: 7 }).color).toBe('#ff5252');
+    expect(ext.sceneColor({ id: 'x' })).toBe('#40c4ff');
+  });
+
+  it('holds a scene in one window, and brings that one up when asked again', () => {
+    const refs = ext.createRefs();
+    refs.add({ path: 'media/other.jpg', kind: 'image', title: 'Other' });
+    const scene = row('p', 238, 252, 'bridge?');
+    const held = refs.holdScene(scene, 'Market walk');
+    expect(held).toMatchObject({ path: 'media/a.mp4', kind: 'video', title: 'bridge? · Market walk' });
+    expect(held.scene).toMatchObject({ id: 'p', start: 238, end: 252 });
+    refs.focus(refs.open[0].id);
+    held.collapsed = true;
+    expect(refs.holdScene(scene, 'Market walk')).toBe(held);
+    expect(refs.open).toHaveLength(2);
+    expect(held.collapsed).toBe(false);
+    expect(held.z).toBe(Math.max(...refs.open.map((v) => v.z)));
+    // another scene of the same video is a window of its own
+    expect(refs.holdScene(row('i', 3, null), 'Market walk')).not.toBe(held);
   });
 });

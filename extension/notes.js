@@ -229,8 +229,13 @@ function connect() {
     if (msg?.type === "put") {
       state.selecting = null;
       const notice = typeof msg.notice === "string" ? msg.notice.slice(0, 200) : "";
+      // the scene being geolocated, which the app attached the capture to
+      const attached = typeof msg.attached === "string" ? msg.attached.slice(0, 160) : "";
       // a word about what was just filed (Street View's rules), once it is in the note
-      put(msg.put).then((ok) => { if (ok && notice) say(notice, "warn"); });
+      put(msg.put).then((ok) => {
+        if (ok && notice) say([notice, attached].filter(Boolean).join(" "), "warn");
+        else if (ok && attached) say(attached, "ok");
+      });
     } else if (msg?.type === "selecting") {
       selecting(msg.tabId);
     } else if (msg?.type === "idle") {

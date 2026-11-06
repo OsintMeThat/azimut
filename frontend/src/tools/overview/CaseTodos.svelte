@@ -4,6 +4,7 @@
   import Icon from '../../components/Icon.svelte';
   import ConfirmDialog from '../../components/ConfirmDialog.svelte';
   import NoteTasks from './NoteTasks.svelte';
+  import ToGeolocate from './ToGeolocate.svelte';
 
   // `compact` is the sidebar's: no heading of its own (the view switch names it)
   // and a list that runs the panel's height rather than a dashboard cell's.
@@ -110,6 +111,8 @@
   {:else}
     <header><h2 class="label">To-do</h2><span aria-live="polite">{busy && data ? 'Saving…' : ''}</span></header>
   {/if}
+  <!-- the scenes still to geolocate, over the lists: absent when there are none -->
+  <ToGeolocate {caseId} />
   {#if error}
     <p role="alert">{error} <button class="btn btn-sm" onclick={load} disabled={busy}>Reload lists</button></p>
   {/if}

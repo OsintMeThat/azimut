@@ -27,6 +27,7 @@
     text3: "#6c6c6c",
     accent: "#e8a33d",
     accentHover: "#f4b558",
+    accentSoft: "rgba(232, 163, 61, 0.14)",
     accentText: "#141414",
     ok: "#66b578",
     warn: "#d9a53f",
@@ -35,6 +36,10 @@
     skySun: "#bd8721",
     skyMoon: "#4a93cc",
   };
+
+  /** The scene colours, in the order `lib/scenes.js` gives them along a clip: a
+   *  scene wears the one at its place among its video's scenes (`order`). */
+  const SCENE_COLORS = ["#40c4ff", "#ff5252", "#69f0ae", "#ff9e40", "#e040fb", "#ffd740"];
 
   /**
    * Status → cell paint, from `state/grid.svelte.js`.
@@ -130,6 +135,7 @@
 
   window.AzimutMapTheme = {
     TOKENS,
+    SCENE_COLORS,
     CELL_STYLE,
     AOI_STYLE,
     DRAFT_STYLE,

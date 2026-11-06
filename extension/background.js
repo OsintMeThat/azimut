@@ -100,6 +100,29 @@ async function cropDataUrl(dataUrl, rect, viewportW) {
   return { blob: await canvas.convertToBlob({ type: "image/png" }), scale };
 }
 
+/**
+ * What a filed capture says about the scene the case is geolocating, if any.
+ *
+ * While a scene is being geolocated the app attaches every capture filed in the
+ * case to it, and its answer names the scene (`api/ingest.py`). Said where the
+ * capture is reported, so a capture never lands somewhere the analyst was not told.
+ */
+function attachedTo(body) {
+  const scene = body?.scene;
+  if (!scene || typeof scene !== "object") return "";
+  const label = typeof scene.label === "string" ? scene.label.trim().slice(0, 120) : "";
+  return label ? `Attached to “${label}”.` : "Attached to the scene being geolocated.";
+}
+
+/** One capture's report: its title, then whatever the app had to say about it. */
+function filedLine(body) {
+  const notice = typeof body?.notice === "string" && body.notice ? body.notice : "";
+  const head = notice ? `${body.title}. ${notice}` : body?.title ?? "";
+  const attached = attachedTo(body);
+  if (!attached) return head;
+  return head ? `${head}${/[.!?…]$/.test(head) ? "" : "."} ${attached}` : attached;
+}
+
 /** File one screenshot with the backend (POST /api/ingest/screenshot). */
 async function ingest(blob, meta) {
   const { backendUrl, token } = await settings();
@@ -547,6 +570,10 @@ const MAP_ROUTES = new Set([
   "/api/ingest/media",
   "/api/ingest/probe",
   "/api/ingest/firms/sensors",
+  // the scenes to geolocate, and saying which one this map is for (POST for both
+  // starting and stopping: the extension's origins are allowed GET and POST only)
+  "/api/ingest/scenes",
+  "/api/ingest/geolocating",
 ]);
 
 // …and the ones that answer with bytes. Separate because the relay above parses
@@ -1401,6 +1428,7 @@ async function finishNoteCapture(msg, tab, meta) {
       type: "put",
       put: { action: "picture", url: meta.url, title: note.title, entityId: body.entity_id },
       ...(typeof body.notice === "string" && body.notice ? { notice: body.notice } : {}),
+      ...(attachedTo(body) ? { attached: attachedTo(body) } : {}),
     });
     return { ok: true };
   } catch (e) {
@@ -1600,7 +1628,7 @@ async function handle(msg, sender) {
       const dataUrl = await withoutPanel(sender.tab.id, () => captureActiveTab(sender.tab.windowId));
       const { blob, scale } = await cropDataUrl(dataUrl, msg.rect, msg.viewportW);
       const body = await ingest(blob, { ...meta, deviceScale: scale, screenCredit: msg.credit });
-      notify("Capture filed into Azimut", typeof body.notice === "string" && body.notice ? `${body.title}. ${body.notice}` : body.title);
+      notify("Capture filed into Azimut", filedLine(body));
       return { ok: true };
     } catch (e) {
       notify("Azimut capture failed", e.message);

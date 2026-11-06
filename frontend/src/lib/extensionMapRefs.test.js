@@ -149,6 +149,72 @@ describe('opening an image over the map', () => {
   });
 });
 
+describe('a video held for the scene being geolocated', () => {
+  const SCENE = { video: 'media/walk.mp4', id: 'sc_1', start: 4, end: 6, label: 'bridge?', state: 'todo', captures: [] };
+  const pane = () => panes()[0];
+
+  /** The clip saying how long it is, as a browser does once it has read its head. */
+  function loaded(video, duration = 10) {
+    Object.defineProperty(video, 'duration', { value: duration, configurable: true });
+    video.dispatchEvent(new window.Event('loadedmetadata'));
+  }
+
+  it('marks a passage as a band in the scene’s colour, and opens paused on its start', async () => {
+    refs.holdScene(SCENE, 'The walk');
+    layer.sync();
+    await settle();
+    expect(pane().querySelector('.rw-title').textContent).toBe('bridge? · The walk');
+    expect(pane().style.getPropertyValue('--scene')).toBe('#40c4ff');
+    const band = pane().querySelector('.rw-scene');
+    expect(band.hidden).toBe(true); // nowhere to put it until the clip has a length
+    const video = pane().querySelector('video');
+    video.play = vi.fn(() => Promise.resolve());
+    loaded(video);
+    expect(video.currentTime).toBe(4);
+    expect(video.play).not.toHaveBeenCalled();
+    expect(band.hidden).toBe(false);
+    expect(band.classList.contains('at')).toBe(false);
+    expect(band.style.left).toBe('calc(5px + (100% - 10px) * 0.4)');
+    expect(band.style.width).toBe('calc((100% - 10px) * 0.2)');
+    const rest = pane().querySelector('.rw-rest');
+    expect([rest.style.left, rest.style.width]).toEqual(['40%', '20%']);
+  });
+
+  it('pins an instant, and plays from wherever the analyst takes it', async () => {
+    refs.holdScene({ ...SCENE, end: null }, 'The walk');
+    layer.sync();
+    await settle();
+    const video = pane().querySelector('video');
+    loaded(video, 8);
+    const pin = pane().querySelector('.rw-scene');
+    expect(pin.classList.contains('at')).toBe(true);
+    expect(pin.style.left).toBe('calc(5px + (100% - 10px) * 0.5)');
+    video.currentTime = 1;
+    video.dispatchEvent(new window.Event('loadedmetadata')); // read again: it stays where it was put
+    expect(video.currentTime).toBe(1);
+  });
+
+  it('marks nothing for the whole video, and starts it at the beginning', async () => {
+    refs.holdScene({ ...SCENE, start: null, end: null, label: '' }, 'The walk');
+    layer.sync();
+    await settle();
+    expect(pane().querySelector('.rw-title').textContent).toBe('Whole video · The walk');
+    expect(pane().querySelector('.rw-scene')).toBe(null);
+    expect(pane().querySelector('.rw-rest')).toBe(null);
+    const video = pane().querySelector('video');
+    loaded(video);
+    expect(video.currentTime).toBe(0);
+  });
+
+  it('leaves a clip picked by hand unmarked', async () => {
+    refs.add(CLIP);
+    layer.sync();
+    await settle();
+    expect(pane().querySelector('.rw-scene')).toBe(null);
+    expect(pane().querySelector('.rw-dot')).toBe(null);
+  });
+});
+
 describe('opening a video over the map', () => {
   const pane = () => panes()[0];
 

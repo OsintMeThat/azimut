@@ -277,6 +277,35 @@ describe('the map tools panel’s own scripts', () => {
   });
 });
 
+describe('handle: map-api (the panel asking the app)', () => {
+  const answered = (body) => vi.fn(async () => ({ ok: true, status: 200, text: async () => JSON.stringify(body) }));
+
+  it('reads the scenes to geolocate and says which one this map is for', async () => {
+    const fetchImpl = answered({ geolocating: null });
+    const { handle } = load({ fetchImpl });
+    expect(await handle({ type: 'map-api', path: '/api/ingest/scenes', query: { case_id: 'c1' } }, {})).toEqual({
+      ok: true,
+      data: { geolocating: null },
+    });
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://127.0.0.1:8477/api/ingest/scenes?case_id=c1');
+    const body = { case_id: 'c1', video: 'media/a.mp4', draft: 'sc_1' };
+    await handle({ type: 'map-api', method: 'POST', path: '/api/ingest/geolocating', body }, {});
+    const [url, init] = fetchImpl.mock.calls[1];
+    expect(String(url)).toBe('http://127.0.0.1:8477/api/ingest/geolocating');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({ 'X-Azimut-Token': 'tok-123', 'Content-Type': 'application/json' });
+    expect(JSON.parse(init.body)).toEqual(body);
+  });
+
+  it('refuses a route the map tools were never given', async () => {
+    const fetchImpl = answered({});
+    const { handle } = load({ fetchImpl });
+    const answer = await handle({ type: 'map-api', method: 'POST', path: '/api/ingest/screenshot' }, {});
+    expect(answer).toEqual({ ok: false, error: 'the map tools may not call /api/ingest/screenshot' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
 describe('handle: map-file (a picture or a video for a reference window)', () => {
   const png = () => ({
     type: 'image/png',

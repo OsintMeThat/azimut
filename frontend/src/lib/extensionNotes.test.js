@@ -553,6 +553,23 @@ describe('the notes panel', () => {
     expect($('status').hidden).toBe(true);
   });
 
+  it('says which scene the capture was attached to once it is in the note', async () => {
+    const { fromNote, frameWindow, port } = await openPanel();
+    fromNote(open());
+    vi.useFakeTimers();
+    port().onMessage.fire({
+      type: 'put',
+      put: { action: 'picture', url: 'https://www.google.com/maps/@1,2,3z', title: 'Map', entityId: 'cap_8' },
+      attached: 'Attached to “bridge?”.',
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const [message] = frameWindow.postMessage.mock.calls[0];
+    fromNote({ azimut: 'note-put-done', v: 1, id: message.id, ok: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect($('status').textContent).toBe('Attached to “bridge?”.');
+    expect($('status').className).toBe('status ok');
+  });
+
   it("puts a right-click's facts in the same way", async () => {
     const { fromNote, frameWindow, port } = await openPanel();
     fromNote(open());

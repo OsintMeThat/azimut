@@ -19,6 +19,7 @@ import { CAPTURE_KINDS } from './geoTree.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (rel) => readFileSync(join(here, rel), 'utf8');
+const scenesSource = read('./scenes.js');
 
 let theme;
 
@@ -47,6 +48,7 @@ describe('the palette', () => {
       ['text2', 'text-2'],
       ['text3', 'text-3'],
       ['accent', 'accent'],
+      ['accentSoft', 'accent-soft'],
       ['accentText', 'accent-text'],
       ['danger', 'danger'],
       ['warn', 'warn'],
@@ -55,6 +57,13 @@ describe('the palette', () => {
     ]) {
       expect(theme.TOKENS[key], name).toBe(token(name));
     }
+  });
+});
+
+describe('the scene colours', () => {
+  it('are the app’s, in the order Inspect gives them along a clip', () => {
+    const order = /const COLORS = \[([^\]]+)\]/.exec(scenesSource)[1].match(/--anno-\d/g).map((v) => v.slice(2));
+    expect(theme.SCENE_COLORS).toEqual(order.map((name) => token(name)));
   });
 });
 

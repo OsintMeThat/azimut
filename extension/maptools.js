@@ -1553,6 +1553,21 @@
         open = open.filter((viewer) => viewer.id !== id);
       },
 
+      /** The window a scene being geolocated is held in: its video, the scene marked
+       *  on its bar. The one already open on that scene comes up instead. */
+      holdScene(scene, title) {
+        const held = open.find((viewer) => viewer.path === scene.video && viewer.scene?.id === scene.id);
+        if (held) {
+          held.collapsed = false;
+          const z = restack(open, held.id);
+          for (const viewer of open) viewer.z = z.get(viewer.id);
+          return held;
+        }
+        const viewer = spawn({ path: scene.video, kind: "video", title: `${sceneName(scene)} · ${title || "Video"}` });
+        viewer.scene = sceneMark(scene);
+        return viewer;
+      },
+
       /** Every window down — what changing case does, since the files were the
        *  other case's. */
       clear() {
@@ -1577,6 +1592,66 @@
         return open.length === 1 ? "1 reference open" : `${open.length} references open`;
       },
     };
+  }
+
+  // --- the scenes to geolocate ------------------------------------------------
+  //
+  // `lib/scenes.js` a second time, only as much as the panel's list needs: a scene's
+  // time in the app's own words, and what its state says. A scene is one the analyst
+  // kept in Inspect and no proof takes up yet (`engine/geolocate.py`); the app's To-do
+  // lists the same ones. `extensionMapTools.test.js` runs both over the same rows.
+
+  /** What a scene with no time of its own says instead of a timecode. */
+  const WHOLE_VIDEO = "Whole video";
+  /** The colour a scene is marked in, as Inspect marks it: by its place among its
+   *  video's scenes, proofs included (`order`, `engine/geolocate.py`). */
+  const sceneColor = (scene) => {
+    const at = Number.isInteger(scene?.order) && scene.order >= 0 ? scene.order : 0;
+    return THEME.SCENE_COLORS[at % THEME.SCENE_COLORS.length];
+  };
+
+  /** A time in the clip as a scene shows it: whole seconds, with the hours of a long video. */
+  function sceneClock(time) {
+    const total = Math.max(0, Math.floor(Number(time) || 0));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const sec = String(total % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+  }
+
+  /** `3:58–4:12` for a passage, `0:03` for an instant, Whole video for none. */
+  function sceneTime(scene) {
+    if (!Number.isFinite(scene?.start)) return WHOLE_VIDEO;
+    const { start, end } = scene;
+    return Number.isFinite(end) && end > start ? `${sceneClock(start)}–${sceneClock(end)}` : sceneClock(start);
+  }
+
+  /** What a row calls a scene: the analyst's label, else its time. */
+  const sceneName = (scene) => scene?.label || sceneTime(scene);
+
+  const captureWords = (n) => (n === 1 ? "1 capture" : `${n} captures`);
+
+  /** A scene's state as its row says it; `live` is the one being geolocated. */
+  function sceneState(scene, live = false) {
+    const n = scene?.captures?.length ?? 0;
+    if (live) return n ? `Geolocating · ${captureWords(n)}` : "Geolocating";
+    if (scene?.state === "progress" && n) return `In progress · ${captureWords(n)}`;
+    return "To geolocate";
+  }
+
+  /** The queue as the panel lists it: each file with the scenes still open in it. */
+  function openScenes(files) {
+    return (files ?? [])
+      .map((file) => ({ ...file, scenes: (file.scenes ?? []).filter((scene) => scene.state !== "abandoned") }))
+      .filter((file) => file.scenes.length);
+  }
+
+  /** Where a scene is drawn on its video's bar: a band for a passage, a pin for an
+   *  instant, nothing for the whole video. */
+  function sceneMark(scene) {
+    const start = Number.isFinite(scene?.start) ? scene.start : null;
+    const end = start != null && Number.isFinite(scene.end) && scene.end > start ? scene.end : null;
+    return { id: scene.id, name: sceneName(scene), time: sceneTime(scene), start, end, color: sceneColor(scene) };
   }
 
   // --- the calendar ----------------------------------------------------------
@@ -1833,5 +1908,13 @@
     shownFrameTime,
     stepTarget,
     preciseClock,
+    WHOLE_VIDEO,
+    sceneClock,
+    sceneTime,
+    sceneName,
+    sceneState,
+    openScenes,
+    sceneMark,
+    sceneColor,
   };
 })();

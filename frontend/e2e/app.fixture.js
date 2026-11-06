@@ -2283,6 +2283,9 @@ export async function installAppFixture(page, options = {}) {
     // The layers a proof's point can join: the fixture case has none. A spec
     // that needs some routes its own over this one.
     if (/^\/api\/cases\/[^/]+\/layer-targets$/.test(path)) return json(route, []);
+    // The scenes still to geolocate, which the To-do lists over its own: none, unless a
+    // spec routes its own queue over this one.
+    if (/^\/api\/cases\/[^/]+\/scenes\/queue$/.test(path)) return json(route, { files: [], geolocating: null });
 
     unexpected.push(`${request.method()} ${path}`);
     return json(route, { detail: `Unhandled browser fixture request: ${path}` }, 404);

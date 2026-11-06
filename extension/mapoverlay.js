@@ -173,7 +173,14 @@
     // Following the other maps' camera (`linking` below). `asked` is the view
     // this map was last sent to, kept to say how close it came.
     link: { on: false, peers: 0, asked: null },
+    // The case's scenes to geolocate (`scenes` below): the queue as the app last
+    // said it, the one being geolocated, and whether the list is unfolded.
+    scenes: freshScenes(),
   };
+
+  function freshScenes() {
+    return { files: null, geo: null, open: false, busy: false };
+  }
 
   const tools = {
     measure: T.createMeasure(),
@@ -1308,6 +1315,7 @@
       if (wanted) state.caseId = wanted.id;
       render();
       loadPins();
+      loadScenes();
     } catch (e) {
       state.note = e.message;
       render();
@@ -1538,6 +1546,90 @@
   // uses. A port that dies takes nothing with it: the grid poll above is what
   // covers the gap, and the port is opened again a moment later.
 
+  // --- the scenes to geolocate ---------------------------------------------
+  //
+  // The case's queue, as the app's To-do lists it (`GET /api/ingest/scenes`,
+  // `engine/geolocate.py`): the scenes kept in Inspect that no proof takes up yet.
+  // Geolocate tells the app which one this map is for. While it lasts the app
+  // attaches every capture filed in the case to it, the popup's included, so this
+  // panel never has to say where a capture goes. Its video is held over the map,
+  // the scene marked on its bar.
+  //
+  // Read when the case is picked, when the list is unfolded, when the tab comes
+  // back, when the app says the scene being geolocated changed, and when it says a
+  // file's scenes may have moved (`scenes`) or something was deleted or restored
+  // (`saved`), which can give a scene back or take one up. An app from before scenes
+  // answers nothing here, and the panel stays as it was.
+
+  /** A burst of nudges is read once. */
+  const REQUEUE_MS = 300;
+  let requeuing = null;
+  function requeueScenes() {
+    clearTimeout(requeuing);
+    requeuing = setTimeout(() => {
+      requeuing = null;
+      loadScenes();
+    }, REQUEUE_MS);
+  }
+
+  async function loadScenes() {
+    const caseId = state.caseId;
+    if (!caseId) return;
+    let answer;
+    try {
+      answer = await call("GET", "/api/ingest/scenes", { query: { case_id: caseId } });
+    } catch {
+      return; // not answering, or an app with no scenes: nothing is offered
+    }
+    if (caseId !== state.caseId) return;
+    state.scenes.files = answer?.files ?? [];
+    state.scenes.geo = answer?.geolocating ?? null;
+    render();
+  }
+
+  /** The file a scene is in, as the queue names it. */
+  function sceneFile(video) {
+    const file = (state.scenes.files ?? []).find((one) => one.video === video);
+    return file?.title || String(video ?? "").split("/").pop();
+  }
+
+  async function geolocate(video, draft) {
+    const caseId = state.caseId;
+    if (!caseId || state.scenes.busy) return;
+    state.scenes.busy = true;
+    render();
+    try {
+      const answer = await call("POST", "/api/ingest/geolocating", { body: { case_id: caseId, video, draft } });
+      if (caseId !== state.caseId) return;
+      state.scenes.geo = answer?.geolocating ?? null;
+      state.scenes.open = false;
+      if (state.scenes.geo) showScene(state.scenes.geo);
+    } catch (e) {
+      state.note = e.message;
+      loadScenes(); // what refused it may have moved the queue too
+    } finally {
+      state.scenes.busy = false;
+      render();
+    }
+  }
+
+  async function stopGeolocating() {
+    const caseId = state.caseId;
+    try {
+      await call("POST", "/api/ingest/geolocating", { body: { case_id: caseId } });
+      if (caseId === state.caseId) state.scenes.geo = null;
+    } catch (e) {
+      state.note = e.message;
+    }
+    render();
+  }
+
+  /** The scene's video over the map: the window already holding it, else a new one. */
+  function showScene(scene) {
+    tools.refs.holdScene(scene, sceneFile(scene.video));
+    refLayer.sync();
+  }
+
   let sync = null; // the port to the worker, while it is up
   let syncRetry = 0;
   let watch = 0;
@@ -1552,8 +1644,18 @@
    */
   function applyEvent(event) {
     if (!event || event.case_id !== state.caseId) return;
+    // started, ended or a capture attached, from here, the app or another map
+    if (event.type === "geolocating") {
+      loadScenes();
+      return;
+    }
+    if (event.type === "scenes") {
+      requeueScenes();
+      return;
+    }
     if (SAVED_EVENTS.has(event.type)) {
       loadPins();
+      if (event.type === "saved") requeueScenes();
       return;
     }
     if (event.type === "grid-removed") {
@@ -1801,7 +1903,10 @@
    * as doing.
    */
   function onShown() {
-    if (!document.hidden) takeWaitingView();
+    if (document.hidden) return;
+    takeWaitingView();
+    // a scene kept in Inspect meanwhile says nothing on its own
+    if (state.scenes.files) loadScenes();
   }
 
   /** A follow the site took without reloading has landed: nothing is on its way
@@ -1958,6 +2063,75 @@
     }
     .ref-row .ref-name:hover:not([disabled]) { color: ${t.text1}; background: ${t.bg2}; }
     .hint { font-size: 11px; color: ${t.text3}; }
+    /* The scenes to geolocate: the To-do's group, at the panel's size. The pill is
+       the scene being geolocated, the one amber thing here while it lasts. */
+    .geo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; }
+    .geo-pill {
+      display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 2px 2px 9px;
+      border: 1px solid ${t.accent}; border-radius: 999px; background: ${t.accentSoft};
+    }
+    .geo-dot {
+      flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: ${t.accent}; box-shadow: 0 0 0 3px ${t.accentSoft};
+    }
+    header .geo-dot { margin-left: 6px; vertical-align: 1px; }
+    .geo-what {
+      flex: 1 1 0; min-width: 0; justify-content: flex-start; padding: 3px 0;
+      background: none; border: 0; color: ${t.text1}; font-size: 11.5px;
+    }
+    .geo-what > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .geo-what:hover:not([disabled]) { background: none; color: ${t.accent}; }
+    .geo-count {
+      flex: none; display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; color: ${t.text2}; font-variant-numeric: tabular-nums;
+    }
+    .geo-pill .icon { width: 24px; padding: 3px 0; border-radius: 999px; }
+    .geo-fold {
+      justify-content: flex-start; gap: 6px; padding: 4px 6px;
+      background: none; border-color: transparent; color: ${t.text2};
+      font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    }
+    .geo-fold .n { color: ${t.text1}; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+    .geo-fold[aria-expanded="true"] { color: ${t.text1}; }
+    .geo-list {
+      display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px;
+      max-height: 216px; overflow: auto; margin-top: -2px; padding-bottom: 6px;
+      border-bottom: 1px solid ${t.border};
+    }
+    .geo-file {
+      display: flex; align-items: center; gap: 5px; min-width: 0; padding: 5px 6px 2px;
+      font-size: 10.5px; color: ${t.text3};
+    }
+    .geo-file svg { flex: none; }
+    .geo-file span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .geo-row {
+      display: flex; align-items: center; gap: 7px; min-width: 0; padding: 3px 3px 3px 6px;
+      border-left: 2px solid transparent; border-radius: 0 7px 7px 0;
+    }
+    .geo-row:hover { background: ${t.bg2}; }
+    .geo-row.live { border-left-color: ${t.accent}; background: ${t.accentSoft}; }
+    .geo-pip {
+      flex: none; width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%;
+      border: 1.5px solid ${t.text3};
+    }
+    .geo-row.progress .geo-pip {
+      border-color: ${t.accent}; background: radial-gradient(circle, ${t.accent} 0 1.5px, transparent 2px);
+    }
+    .geo-row.live .geo-pip { border-color: ${t.accent}; background: ${t.accent}; }
+    .geo-text { flex: 1 1 0; min-width: 0; display: grid; }
+    .geo-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: ${t.text1}; }
+    /* in whole pieces, so a long state wraps between them rather than losing its count */
+    .geo-meta { font-size: 10.5px; line-height: 1.35; color: ${t.text3}; font-variant-numeric: tabular-nums; }
+    .geo-meta > span { white-space: nowrap; }
+    /* a band for a passage, a pin for an instant, as the window's bar draws them */
+    .geo-mark {
+      display: inline-block; width: 11px; height: 5px; margin: -2px 5px 0 0;
+      border-radius: 2px; vertical-align: middle;
+    }
+    .geo-mark.at { width: 3px; height: 10px; }
+    .geo-row.live .geo-meta { color: ${t.accent}; }
+    .geo-row button { flex: none; padding: 3px 8px; font-size: 11px; }
+    .geo-row:hover button:not([disabled]), .geo-row.live button { border-color: ${t.accent}; }
   `;
   root.appendChild(style);
 
@@ -2215,11 +2389,73 @@
     return parts.join(" · ");
   }
 
+  /**
+   * The scene being geolocated, as a pill, and the case's scenes still to geolocate,
+   * folded to one line until asked for. Nothing at all for a case with none, so the
+   * panel is the one it was before scenes.
+   */
+  function scenesBlock() {
+    if (!state.caseId) return "";
+    const { geo, open, busy } = state.scenes;
+    const files = T.openScenes(state.scenes.files);
+    const total = files.reduce((n, file) => n + file.scenes.length, 0);
+    if (!geo && !total) return "";
+    const isGeo = (scene) => !!geo && geo.video === scene.video && geo.id === scene.id;
+    const pill = geo
+      ? `<div class="geo-pill">
+          <span class="geo-dot"></span>
+          ${button("geo-show", "", `Geolocating · ${T.sceneTime(geo)}${geo.label ? ` · ${geo.label}` : ""}`, false, ` class="geo-what" title="Show its video over the map"`)}
+          <span class="geo-count" title="Captures attached to it">${icon("camera", 12)}${geo.captures?.length ?? 0}</span>
+          ${button("geo-stop", "x", "", false, ` class="icon" title="Stop geolocating"`)}
+        </div>`
+      : "";
+    // the scene as its video's bar draws it, in the colour Inspect gives it, beside its time
+    const mark = (scene) => {
+      const { start, end, color } = T.sceneMark(scene);
+      if (start == null) return "";
+      return `<span class="geo-mark${end == null ? " at" : ""}" style="background: ${esc(color)}"></span>`;
+    };
+    const row = (scene) => `
+      <div class="geo-row${isGeo(scene) ? " live" : ""}${scene.state === "progress" ? " progress" : ""}">
+        <span class="geo-pip"></span>
+        <span class="geo-text">
+          <span class="geo-name" dir="auto" title="${esc(T.sceneName(scene))}">${scene.label ? "" : mark(scene)}${esc(T.sceneName(scene))}</span>
+          <span class="geo-meta">${[
+            ...(scene.label ? [`${mark(scene)}${esc(T.sceneTime(scene))}`] : []),
+            ...T.sceneState(scene, isGeo(scene)).split(" · ").map(esc),
+          ]
+            .map((part) => `<span>${part}</span>`)
+            .join(" · ")}</span>
+        </span>
+        ${button("geo-go", "", "Geolocate", false, ` data-video="${esc(scene.video)}" data-draft="${esc(scene.id)}" title="Find it on this map, its video beside it"${busy ? " disabled" : ""}`)}
+      </div>`;
+    const list = open
+      ? `<div class="geo-list">
+          ${files
+            .map((file) => `
+              <div class="geo-file" title="${esc(file.title)}">${icon("video", 11)}<span dir="auto">${esc(file.title)}</span></div>
+              ${file.scenes.map(row).join("")}`)
+            .join("")}
+        </div>`
+      : "";
+    const fold = total
+      ? `<button data-act="geo-fold" class="geo-fold" aria-expanded="${open}">${icon(open ? "chevronUp" : "chevronDown", 13)}<span>To geolocate</span><span class="n">${total}</span></button>`
+      : "";
+    return `<div class="geo" data-guide="ext.scenes">${pill}${fold}${list}</div>`;
+  }
+
+  /** A folded panel still says a scene is being geolocated. */
+  function foldedGeo() {
+    const geo = state.scenes.geo;
+    if (!state.collapsed || !geo) return "";
+    return ` <span class="geo-dot" title="Geolocating ${esc(T.sceneName(geo))}"></span>`;
+  }
+
   function render() {
     const seen = verdict();
     panel.innerHTML = `
       <header>
-        <span class="name">Azimut${betaBadge()}</span>
+        <span class="name">Azimut${betaBadge()}${foldedGeo()}</span>
         ${button("link", "link", "", state.link.on, ` class="icon" title="${linkTitle()}"${state.link.on || state.link.peers ? "" : " disabled"}`)}
         ${button("collapse", state.collapsed ? "chevronDown" : "chevronUp", "", false, ' class="icon" title="Fold"')}
         ${button("close", "x", "", false, ' class="icon" title="Close"')}
@@ -2231,6 +2467,7 @@
         <select data-act="case">
           ${state.cases.map((c) => `<option value="${esc(c.id)}"${c.id === state.caseId ? " selected" : ""}>${esc(c.name)}</option>`).join("")}
         </select>
+        ${scenesBlock()}
         <div class="tabs">
           ${ORDER.map((id) => tab(id)).join("")}
         </div>
@@ -2400,6 +2637,18 @@
       return render();
     }
 
+    if (act === "geo-fold") {
+      state.scenes.open = !state.scenes.open;
+      if (state.scenes.open) loadScenes();
+      return render();
+    }
+    if (act === "geo-go") return geolocate(target.dataset.video, target.dataset.draft);
+    if (act === "geo-show") {
+      if (state.scenes.geo) showScene(state.scenes.geo);
+      return render();
+    }
+    if (act === "geo-stop") return stopGeolocating();
+
     if (act === "ref-add") {
       refLayer.openPicker();
       return render();
@@ -2468,6 +2717,9 @@
       refLayer.closePicker();
       tools.refs.clear();
       refLayer.sync();
+      // the scene being geolocated is the other case's, and so is its queue
+      state.scenes = freshScenes();
+      loadScenes();
       state.grids = await loadGrids();
       await loadPins();
       syncArmed();

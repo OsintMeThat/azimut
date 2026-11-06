@@ -199,8 +199,25 @@
       .rw-range { width: 0; opacity: 0; transition: width .15s, opacity .15s; }
       .rw-fade:hover .rw-range, .rw-fade:focus-within .rw-range, .rw-fade.on .rw-range { width: 52px; opacity: 1; }
       ${slider("rw-scrub")}
-      .rw-scrub { flex: 1; min-width: 60px; margin: 0 4px; }
+      .rw-track { position: relative; flex: 1; min-width: 60px; margin: 0 4px; display: flex; align-items: center; }
+      .rw-scrub { position: relative; z-index: 1; flex: 1; min-width: 0; margin: 0; }
       .rw-scrub:disabled { opacity: .5; cursor: default; }
+      /* The scene being geolocated, under the track in its own colour: a band over
+         its passage, a pin at its instant. The thumb's middle runs 5 px in from
+         either end, and the mark is laid on that same span. At rest, a line at the
+         window's foot says where it is. */
+      .rw-scene {
+        position: absolute; top: 50%; height: 9px; min-width: 6px; transform: translateY(-50%);
+        border-radius: 3px; background: var(--scene); opacity: .6; pointer-events: none;
+      }
+      .rw-scene.at { width: 3px; height: 14px; margin-left: -1.5px; border-radius: 2px; opacity: 1; }
+      .rw-rest {
+        position: absolute; bottom: 0; height: 2px; min-width: 3px; background: var(--scene);
+        pointer-events: none; transition: opacity .14s;
+      }
+      .rw-rest.at { width: 3px; height: 6px; margin-left: -1.5px; }
+      .rw:hover .rw-rest, .rw.see-through .rw-rest { opacity: 0; }
+      .rw-dot { flex: none; width: 7px; height: 7px; margin-right: 2px; border-radius: 50%; background: var(--scene); }
       .rw-time {
         flex: none; min-width: 58px; padding: 0 2px 0 6px; text-align: right;
         font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: ${t.text2};
@@ -284,12 +301,15 @@
     <button class="icon" data-rw="in" title="Zoom in">${icon("plus", 13)}</button>`;
 
   /** The slim player under a clip: its own controls, since the native ones
-   *  would zoom with it. */
-  const clipBar = () => `
+   *  would zoom with it. A clip held for a scene marks it on the bar. */
+  const clipBar = (scene) => `
     <div class="rw-row">
       <button class="icon" data-rw="play" title="Play">${icon("play", 13)}</button>
-      <input class="rw-scrub" data-rw-input="seek" type="range" min="0" max="1" step="any"
-        value="0" aria-label="Position" style="--fill: 0%" disabled>
+      <span class="rw-track">
+        ${scene?.start != null ? `<span class="rw-scene${scene.end == null ? " at" : ""}" hidden></span>` : ""}
+        <input class="rw-scrub" data-rw-input="seek" type="range" min="0" max="1" step="any"
+          value="0" aria-label="Position" style="--fill: 0%" disabled>
+      </span>
       <span class="rw-time" title="Time of the frame on screen">0:00.000</span>
     </div>
     <div class="rw-row">
@@ -361,13 +381,16 @@
     function mount(viewer) {
       const moving = viewer.kind === "video";
       const facts = T.hasFacts(viewer.facts) ? viewer.facts : null;
+      const scene = moving ? viewer.scene : null;
       const el = document.createElement("div");
       el.className = "rw";
       el.dataset.guide = "ext.ref";
       el.tabIndex = 0;
+      if (scene) el.style.setProperty("--scene", scene.color);
       el.innerHTML = `
         <header>
           <span class="rw-grip">${icon("grip", 13)}</span>
+          ${scene ? '<span class="rw-dot"></span>' : ""}
           <span class="rw-title" title="${esc(viewer.title)}">${esc(viewer.title || "Reference")}</span>
           <span class="rw-places" role="group" aria-label="Places" style="display: none">
             ${T.PLACES.map(
@@ -386,8 +409,9 @@
             ${moving ? "" : "<canvas></canvas>"}
             <div class="rw-wait">Loading…</div>
           </div>
+          ${scene?.start != null ? `<div class="rw-rest${scene.end == null ? " at" : ""}" hidden></div>` : ""}
           ${moving ? '<div class="rw-line"></div>' : ""}
-          <div class="rw-foot${moving ? " clip" : ""}">${moving ? clipBar() : imageBar()}</div>
+          <div class="rw-foot${moving ? " clip" : ""}">${moving ? clipBar(scene) : imageBar()}</div>
         </div>
         <div class="rw-resize" title="Resize"></div>`;
       root.appendChild(el);
@@ -415,6 +439,10 @@
         zoom: q(".rw-zoom"),
         fade: q(".rw-fade"),
         range: q(".rw-range"),
+        sceneBar: q(".rw-scene"),
+        sceneRest: q(".rw-rest"),
+        sceneOn: 0, // the duration the scene's mark was laid out for
+        cued: false, // whether the clip was taken to the scene's start
       };
       wire(pane);
 
@@ -488,6 +516,8 @@
       video.muted = pane.viewer.muted;
       video.addEventListener("loadeddata", () => pane.wait.remove());
       video.addEventListener("loadedmetadata", () => measured(pane, video.videoWidth, video.videoHeight));
+      // a clip held for a scene opens paused on the scene's first frame, and plays from there as any clip
+      video.addEventListener("loadedmetadata", () => cue(pane));
       video.addEventListener("error", () =>
         refuse(pane, "this site will not play a video. Open it in Azimut")
       );
@@ -548,6 +578,35 @@
       scrub.style.setProperty("--fill", fill);
       pane.el.querySelector(".rw-line").style.width = fill;
       pane.el.querySelector(".rw-time").textContent = T.preciseClock(shown);
+      markScene(pane, duration);
+    }
+
+    /** Lay the scene's mark on the bar, once the clip says how long it is. */
+    function markScene(pane, duration) {
+      const scene = pane.viewer.scene;
+      if (!scene || scene.start == null || !duration || pane.sceneOn === duration) return;
+      pane.sceneOn = duration;
+      const from = Math.min(1, scene.start / duration);
+      const span = scene.end == null ? null : Math.max(0, Math.min(scene.end, duration) - scene.start) / duration;
+      if (pane.sceneBar) {
+        pane.sceneBar.hidden = false;
+        pane.sceneBar.style.left = `calc(5px + (100% - 10px) * ${from})`;
+        if (span != null) pane.sceneBar.style.width = `calc((100% - 10px) * ${span})`;
+      }
+      if (pane.sceneRest) {
+        pane.sceneRest.hidden = false;
+        pane.sceneRest.style.left = `${from * 100}%`;
+        if (span != null) pane.sceneRest.style.width = `${span * 100}%`;
+      }
+    }
+
+    /** Take a clip held for a scene to the scene's start, once, and leave it paused. */
+    function cue(pane) {
+      const start = pane.viewer.scene?.start;
+      if (pane.cued || !pane.video || !(start > 0)) return;
+      pane.cued = true;
+      const duration = Number.isFinite(pane.video.duration) ? pane.video.duration : 0;
+      seek(pane, duration ? Math.min(start, duration) : start);
     }
 
     function seek(pane, to) {

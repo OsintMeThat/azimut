@@ -486,6 +486,43 @@ describe('a right-click', () => {
     expect(port.sent).toEqual([]);
   });
 
+  it('says which scene the popup’s capture was attached to', async () => {
+    const run = mapRun({ screenshot: { entity_id: 'cap_42', case_id: 'case-9', title: 'Google Maps', scene: { video: 'media/a.mp4', id: 'sc_1', label: 'bridge?' } } });
+    const meta = { url: MAP.url, caseId: 'case-9', title: 'Here', lat: 1, lon: 2, zoom: 3, bearing: null, marks: false };
+    await run.handle({ type: 'start-area-select', tabId: 6, meta }, {});
+    await run.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
+    expect(run.chrome.notifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Capture filed into Azimut', message: 'Google Maps. Attached to “bridge?”.' })
+    );
+  });
+
+  it('keeps the popup’s report as it was with no scene, and adds the scene after a notice', async () => {
+    const plain = mapRun({ screenshot: { entity_id: 'cap_42', case_id: 'case-9', title: 'Google Maps' } });
+    const meta = { url: MAP.url, caseId: 'case-9', title: 'Here', lat: 1, lon: 2, zoom: 3, bearing: null, marks: false };
+    await plain.handle({ type: 'start-area-select', tabId: 6, meta }, {});
+    await plain.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
+    expect(plain.chrome.notifications.create.mock.calls.at(-1)[0].message).toBe('Google Maps');
+
+    const noted = mapRun({
+      screenshot: { entity_id: 'cap_42', case_id: 'case-9', title: 'Street View', notice: 'Credit Google', scene: { video: 'v', id: 'sc_1', label: '' } },
+    });
+    await noted.handle({ type: 'start-area-select', tabId: 6, meta }, {});
+    await noted.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
+    expect(noted.chrome.notifications.create.mock.calls.at(-1)[0].message).toBe(
+      'Street View. Credit Google. Attached to the scene being geolocated.'
+    );
+  });
+
+  it('tells the note which scene its capture was attached to', async () => {
+    const run = mapRun({ screenshot: { entity_id: 'cap_42', case_id: 'case-1', title: 't', scene: { video: 'v', id: 'sc_1', label: 'bridge?' } } });
+    const port = connect(run.on);
+    ready(port);
+    run.on.clicked.fire({ menuItemId: 'azimut-note-capture', pageUrl: MAP.url }, MAP);
+    await settle();
+    await run.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
+    expect(port.sent.at(-1)).toMatchObject({ type: 'put', attached: 'Attached to “bridge?”.' });
+  });
+
   it('says why when the app files a capture without naming it', async () => {
     // an app older than this extension: the capture is filed, the note cannot hold it
     const run = mapRun({ screenshot: { case_id: 'case-1', title: 't' } });

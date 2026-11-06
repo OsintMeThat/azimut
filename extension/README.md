@@ -19,7 +19,7 @@ It supports seven flows:
 - On a 2D map, it can draw Azimut's own tools over the site: measure, media
   pins, sun and moon, a search grid, the case's own images and videos held over
   the map, and NASA FIRMS fire detections laid over whatever that map is
-  showing.
+  showing. The same panel lists the case's scenes still to geolocate.
 - On another page, it can save the URL and title as a bookmark without
   downloading the page.
 - Beside any page, a panel holds a note of the case. Its Add (+), a right-click
@@ -119,6 +119,19 @@ being a map. What you told a tool stays in it: a measured path, a planted point,
 an open sweep all come back when you pick it up again. Reference windows and the
 fire layer are the exceptions: the windows are not on the map, and the fires are
 ground rather than drawing, so both stay while you measure over them.
+
+**Scenes to geolocate.** A case whose videos hold scenes kept in Inspect, and not
+yet taken up by a proof, shows a "To geolocate" line under the case picker, with
+their count. Unfolded, it lists them by file as the app's To-do does: the time,
+the label, and whether captures were gathered for it. **Geolocate** tells the app
+which scene this map is for and holds the scene's video over the map, paused on
+the scene, which is marked on the bar in the colour Inspect gives it: a band for
+a passage, a pin for an instant. A pill then names the scene and counts its
+captures; its ✕ stops.
+While it lasts, the app attaches every capture filed in the case to that scene,
+the popup's included, and the capture's report says "Attached to" it. A scene
+started from the app shows the same pill here, and pressing the pill brings its
+video up. A case with no scene to geolocate shows nothing new.
 
 **Link the view** with the chain button in the panel's header. It puts this map on
 one camera with the other linked maps: other panels on other sites, and the app's
@@ -340,7 +353,8 @@ the app's own page; a capture does, like every capture.
 
 The token allows this extension to file captures through the local Azimut
 server, to read back the media and proofs a thread attaches, and, for the map
-tools, the points, search grids, images and videos of the case you pick. Rotate it in
+tools, the points, search grids, images, videos and scenes to geolocate of the
+case you pick. Rotate it in
 Settings to revoke existing pairings.
 
 ## Fill the composer
