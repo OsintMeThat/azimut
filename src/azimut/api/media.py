@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from .. import config, errors, jobs
 from ..engine import enrich as enrich_engine
-from ..engine import exportdir, layerediting
+from ..engine import copernicus_credit, exportdir, layerediting, tiles, timeline
 from ..engine import media as media_engine
 from ..engine import reveal as reveal_engine
 from ..engine import thumbnails as thumbnail_engine
@@ -387,7 +387,7 @@ def cancel_job(job_id: str) -> dict[str, bool]:
 
 
 @router.post("/cases/{case_id}/media/export")
-def export_media_item(case_id: str, body: ExportIn) -> dict[str, str]:
+def export_media_item(case_id: str, body: ExportIn) -> dict[str, Any]:
     """Copy one media file out of the case, into the media export folder.
 
     A copy, never a move: the case keeps the original, hashes and all. The name
@@ -401,12 +401,55 @@ def export_media_item(case_id: str, body: ExportIn) -> dict[str, str]:
     if item is None:
         raise HTTPException(status_code=404, detail="media not found")
     source = case.resolve_inside(item["path"])
+    credit = export_credit(item)
     try:
         folder = exportdir.destination("media", case.path)
-        written = exportdir.copy_out(source, folder, source.name)
+        if credit:
+            written = exportdir.write_out(credited_png(source, credit), folder, f"{source.stem}.png")
+        else:
+            written = exportdir.copy_out(source, folder, source.name)
     except exportdir.ExportDirError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"file": written.name, "folder": str(folder), "path": str(written)}
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise HTTPException(status_code=422, detail=f"could not read that picture: {exc}") from exc
+    return {"file": written.name, "folder": str(folder), "path": str(written), "credited": bool(credit)}
+
+
+#: The pictures a credit can be drawn under.
+_CREDITED_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+
+
+def export_credit(item: dict[str, Any]) -> str:
+    """The credit a picture leaving the case must carry where its pixels do not hold
+    it already: a map capture's, dated by its imagery as every figure prints it.
+    "" for a file with none (a photo, a download) or one burned in at capture."""
+    path = str(item.get("path") or "")
+    raw = item.get("source")
+    sidecar: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    said = sidecar.get("attribution")
+    if not isinstance(said, str) or not said.strip() or sidecar.get("attribution_burned") is True:
+        return ""
+    if not any(path.lower().endswith(suffix) for suffix in _CREDITED_SUFFIXES):
+        return ""
+    day = timeline.capture_imagery(sidecar)
+    return copernicus_credit.normalise_attribution(" ".join(said.split()), *([day] if day else []))
+
+
+def credited_png(source: Any, credit: str) -> bytes:
+    """The picture with its credit in a band under it, never over the map, and the
+    same words in the PNG's Copyright field. The case's own file is not touched."""
+    from PIL import PngImagePlugin
+
+    with Image.open(source) as image:
+        image.load()
+        picture = image.convert("RGB")
+    banded = tiles.burn_attribution(picture, credit)
+    info = PngImagePlugin.PngInfo()
+    info.add_text("Copyright", credit)
+    info.add_text("Software", "Azimut")
+    out = io.BytesIO()
+    banded.save(out, "PNG", pnginfo=info, optimize=False)
+    return out.getvalue()
 
 
 @router.post("/cases/{case_id}/media/export/reveal")

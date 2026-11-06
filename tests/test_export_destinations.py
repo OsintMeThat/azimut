@@ -2,6 +2,7 @@
 
 import base64
 import io
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -257,3 +258,58 @@ def test_reveal_routes_resolve_saved_folders_without_accepting_a_path(client, tm
     assert client.post(f"/api/cases/{case_id}/media/export/reveal").status_code == 200
     assert client.post(f"/api/cases/{case_id}/proofs/export/reveal").status_code == 200
     assert opened == [chosen.resolve(), chosen.resolve()]
+
+
+def _credit_sidecar(case_id: str, path: str, **source) -> None:
+    """Give an uploaded picture a map capture's sidecar source, as a capture writes it."""
+    import json
+
+    from azimut.engine import media as media_engine
+
+    sidecar = media_engine._sidecar_path(Case.open(case_id).resolve_inside(path))
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    data["source"] = {**(data.get("source") or {}), **source}
+    sidecar.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_a_capture_leaves_the_case_with_its_credit_under_it_and_in_its_copyright(client):
+    """A map capture's credit lives beside the file in the case; a copy taken out of
+    the case carries it in a band under the picture and in the PNG's Copyright, so
+    it never circulates without it. The case's own file is not touched."""
+    from azimut.engine import tiles
+
+    case_id = _case(client, "Credited export")
+    item = _upload(client, case_id)
+    credit = "Esri, Vantor, Earthstar Geographics, and the GIS User Community"
+    _credit_sidecar(case_id, item["path"], type="satellite", attribution=credit, attribution_burned=False)
+
+    answer = client.post(f"/api/cases/{case_id}/media/export", json={"path": item["path"]}).json()
+    assert answer["credited"] is True
+    with Image.open(answer["path"]) as exported:
+        assert exported.size == (24, 16 + tiles.ATTRIBUTION_BAND + tiles.ATTRIBUTION_LINE * (
+            len(tiles.attribution_lines(credit, tiles.ImageFont.load_default(), 24)) - 1))
+        assert exported.text["Copyright"] == credit
+    assert Case.open(case_id).resolve_inside(item["path"]).read_bytes() == _png_bytes()
+
+
+def test_a_copernicus_capture_is_credited_with_its_year_on_the_way_out(client):
+    case_id = _case(client, "Sentinel export")
+    item = _upload(client, case_id)
+    _credit_sidecar(case_id, item["path"], type="satellite", attribution="© Copernicus Sentinel data / Sentinel Hub",
+                    imagery_date="2025-08-14")
+    answer = client.post(f"/api/cases/{case_id}/media/export", json={"path": item["path"]}).json()
+    with Image.open(answer["path"]) as exported:
+        assert exported.text["Copyright"] == "Contains modified Copernicus Sentinel data 2025"
+
+
+def test_a_picture_with_no_credit_or_one_burned_in_leaves_as_it_is(client):
+    case_id = _case(client, "Plain export")
+    photo = _upload(client, case_id, "photo.png")
+    plain = client.post(f"/api/cases/{case_id}/media/export", json={"path": photo["path"]}).json()
+    assert plain["credited"] is False
+    assert Path(plain["path"]).read_bytes() == _png_bytes()
+    google = _upload(client, case_id, "google.png")
+    _credit_sidecar(case_id, google["path"], type="satellite", attribution="Map data ©2026 Google", attribution_burned=True)
+    burned = client.post(f"/api/cases/{case_id}/media/export", json={"path": google["path"]}).json()
+    assert burned["credited"] is False
+    assert Path(burned["path"]).read_bytes() == _png_bytes()
