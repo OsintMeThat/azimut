@@ -137,9 +137,28 @@ def test_the_page_s_credit_names_its_operator_once_and_keeps_its_words():
     )
     # control characters and runs of spaces go; a site with no operator listed keeps the page's words
     assert screenshot_credit("zoom-earth", "https://zoom.earth/maps/satellite/", None, "©\x00 2026\n  Zoom   Earth") == "© 2026 Zoom Earth"
-    # with no credit read, the site's own line, Google's with the year
+    # with no credit read, the site's own line, with the year where the provider writes one
     assert screenshot_credit("google-maps", google, None, "", year=2025) == "Map data ©2025 Google"
-    assert screenshot_credit("bing-maps", bing, None, "   ") == "© Microsoft — Bing Maps"
+    assert screenshot_credit("bing-maps", bing, None, "   ", year=2025) == "Bing Maps · © 2025 Microsoft Corporation"
+    earth = "https://earth.google.com/web/@48.8,2.29,100a,500d,35y,0h,0t,0r"
+    assert screenshot_credit("google-earth", earth, None, "", year=2025) == "Google Earth · ©2025 Google"
+
+
+def test_the_sites_whose_strip_says_less_keep_a_line_of_their_own():
+    """OpenStreetMap's print rule wants the copyright page's address with the credit;
+    Apple's web map keeps its providers behind a link, so its own wording goes."""
+    from azimut.api.ingest import screenshot_credit
+
+    osm = "https://www.openstreetmap.org/#map=17/48.8/2.29"
+    # what a page reader gets off OSM's strip is no better than the line itself
+    assert screenshot_credit("openstreetmap", osm, None, "© OpenStreetMap contributors ♥ Make a Donation") == (
+        "© OpenStreetMap contributors, openstreetmap.org/copyright"
+    )
+    apple = "https://maps.apple.com/?ll=48.8,2.29&z=17&map=satellite"
+    assert screenshot_credit("apple-maps", apple, None, "Legal") == (
+        "Apple Maps · Data from TomTom, © OpenStreetMap and other data providers"
+    )
+
 
 
 def test_a_screenshot_names_the_record_it_filed_so_a_note_can_show_it(client):

@@ -769,6 +769,18 @@ describe('the area selection a capture into the note draws', () => {
     });
   });
 
+  it('reads the line a lone © stands in, its name being a link beside it', () => {
+    const { chrome } = drawOverlayOn(() => {
+      document.body.innerHTML = '<div id="strip">© <a href="/copyright">OpenStreetMap contributors</a></div>';
+      const strip = document.getElementById('strip');
+      strip.getBoundingClientRect = () => ({ width: 300, top: 880, bottom: 894 });
+    });
+    const host = document.documentElement.lastElementChild;
+    host.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 10, clientY: 10, bubbles: true }));
+    host.dispatchEvent(new MouseEvent('mouseup', { button: 0, clientX: 200, clientY: 200, bubbles: true }));
+    expect(chrome.runtime.sendMessage.mock.calls[0][0].credit).toBe('© OpenStreetMap contributors');
+  });
+
   it("is taken down by the panel's Escape, and says it was cancelled", () => {
     const { chrome, listeners, win } = drawOverlay();
     expect(listeners).toHaveLength(1);

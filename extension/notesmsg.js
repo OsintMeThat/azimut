@@ -257,6 +257,7 @@ const AzimutNotes = (() => {
   }
 
   return {
-    LIMITS, INSTEAD, isWeb, appOrigin, isApp, panelUrl, isPostUrl, citeLabel, citeButton, buildPut, buildTab, plain, readFrame,
+    LIMITS, INSTEAD, isWeb, appOrigin, isApp, panelUrl, isPostUrl, citeLabel, citeButton, buildPut, buildTab, plain,
+    readFrame,
   };
 })();

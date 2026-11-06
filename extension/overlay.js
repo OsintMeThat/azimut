@@ -50,11 +50,17 @@
     const seen = new Set();
     const parts = [];
     const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+    const words = (value) => String(value || "").replace(/\s+/g, " ").trim();
     for (let node = walker.nextNode(); node && parts.length < 8; node = walker.nextNode()) {
-      const text = String(node.nodeValue || "").replace(/\s+/g, " ").trim();
-      if (!text.includes("\u00a9") || text.length > 200 || seen.has(text)) continue;
+      const own = words(node.nodeValue);
+      if (!own.includes("\u00a9") || own.length > 200) continue;
       const box = node.parentElement?.getBoundingClientRect?.();
       if (!box || !box.width || box.bottom < foot || box.top > window.innerHeight) continue;
+      // a © alone is the start of a line whose name is a link beside it ("© OpenStreetMap
+      // contributors"): the line it stands in is read, when that line is short
+      const line = /\p{L}/u.test(own.replace("\u00a9", "")) ? own : words(node.parentElement?.textContent);
+      const text = line.length <= 200 ? line : own;
+      if (seen.has(text)) continue;
       seen.add(text);
       parts.push(text);
     }

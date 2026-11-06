@@ -93,14 +93,20 @@ EXTENSION_ORIGIN_SCHEMES = ("chrome-extension://", "moz-extension://", "safari-w
 # restates the operator so a cropped capture can never shed it.
 ATTRIBUTIONS = {
     "google-maps": "Map data ©{year} Google",
-    "google-earth": "Google Earth",
-    "bing-maps": "© Microsoft — Bing Maps",
-    "yandex-maps": "© Yandex Maps",
-    "openstreetmap": "© OpenStreetMap contributors",
-    "apple-maps": "© Apple Maps",
+    "google-earth": "Google Earth · ©{year} Google",
+    "bing-maps": "Bing Maps · © {year} Microsoft Corporation",
+    "yandex-maps": "© Yandex",
+    # OSM's print rule: the copyright page's address goes with the credit
+    "openstreetmap": "© OpenStreetMap contributors, openstreetmap.org/copyright",
+    # Apple's own wording on its legal page; its web map keeps the providers behind a link
+    "apple-maps": "Apple Maps · Data from TomTom, © OpenStreetMap and other data providers",
     "zoom-earth": "© Zoom Earth",
     "satellites-pro": "© Satellites.pro",
 }
+#: The sites whose own credit strip is read off the page and burned as it words it:
+#: theirs lists the imagery providers in view. OpenStreetMap's strip says no more
+#: than the line above, Apple's names its providers only behind a link.
+READS_STRIP = frozenset({"google-maps", "google-earth", "bing-maps", "yandex-maps", "zoom-earth", "satellites-pro"})
 # Copernicus Browser's collections by their datasetId: S1_…, S2_…, S3…, S5_… are
 # Sentinel data, COPERNICUS_CLMS_… the Land service's products.
 _SENTINEL_DATASET = re.compile(r"S[1-5]")
@@ -153,7 +159,7 @@ def screenshot_credit(site: str, url: str, imagery_date: str | None, screen: str
         if dataset.startswith(_SERVICE_DATASET):
             return copernicus_credit.service(imagery_date)
         return "Copernicus Browser"
-    shown = _screen_credit(screen)
+    shown = _screen_credit(screen) if site in READS_STRIP else ""
     if shown:
         operator = OPERATORS.get(site)
         return f"{operator} · {shown}" if operator and operator.lower() not in shown.lower() else shown
