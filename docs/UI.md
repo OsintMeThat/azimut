@@ -5932,11 +5932,18 @@ What each tool puts, and where its *Put in “<note>”* sits:
 | Timeline | *This window* as a table | Copy, Add |
 | Sheet | *This view* as a table, its provenance header kept | Export, Add |
 | Media | *Quote the post*: the words as posted, the account and day, then the media's chip | Open in…, Add |
+| Map plate | *This page*: the page on screen drawn at 300 dpi (at most 36 Mpx, a large paper coarser rather than refused), filed once per plate, day, step and size, its credits on its face; refused while tiles are still loading. *The days side by side*: the plate's sheet, 2 to 12 days | the export dialog (PNG, Sheet), Add |
+| Compare | *This evolution sheet*: 2 to 40 pictures, the comparison saved first, each day credited (Wayback days as estimates); fetched on that press | Export panel with Sheet ticked |
+| Horizon | *The photo above the terrain*, the view saved first, filed once per view and size; *The viewpoint*: eye, height, looking bearing and field of view, relief source. Never a Find score or rank | Export menu, Add |
+| Detect | *The kept table*: kept and noted candidates only, under a quoted header (run and areas, analyzer, passes, threshold, cloud mask, *N kept of M candidates, P pinned*), 200 rows at most | beside Export as layer, Add |
+| Timeline, Graph | *This reading* as a picture of its plate, filed with the snapshot that freezes it (or the one open) | the *Export this reading* dialog, Add |
+| Reverse Search | *Log this search*: `Reverse search, <day time UTC>: <what> on <the engines pressed>. Result: `, the cursor left after it | under the engines |
 
 *Open in <Tool>* on a picture's bar reopens what it came from: the map at that view
 and basemap (not a tilted capture's pitch nor a dated pick), the comparison as it is
 now, the video at the frame's instant, the collage, the proof, the run at that
-candidate. Pictures filed before this build carry no such way back and show none.
+candidate, the plate at that day and step, the Horizon view, the Timeline or Graph
+snapshot. Pictures filed before this build carry no such way back and show none.
 
 **Notes in the extension.** The extension's popup has **Notes panel**, which opens the
 browser's side panel (Chrome) or sidebar (Firefox) on the app's own note, framed:
