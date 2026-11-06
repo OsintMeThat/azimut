@@ -916,7 +916,9 @@
       const result = await api.post(`/api/cases/${caseState.current.id}/media/export`, {
         path: item.path,
       });
-      toast(`${result.file} copied to ${destinationLabel(result.folder)}`, 'ok', 5200, {
+      // a map capture leaves with its credit under it, which the case's own file keeps beside it
+      const how = result.credited ? ' with its credit' : '';
+      toast(`${result.file} copied${how} to ${destinationLabel(result.folder)}`, 'ok', 5200, {
         label: 'Show',
         onClick: () =>
           api
