@@ -673,6 +673,11 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     # The markers showing this proof in the analyst's layers say what it says now:
     # its description, day and sources, and the footage behind it is the same marker.
     layerediting.sync_followers(case, entity_id)
+    # A picture marked to geolocate is proved once a proof lays it out: its geolocating
+    # ends, and the queue may have lost a row.
+    if geolocate.settle(case):
+        say_geolocating(case)
+    events.publish({"type": "scenes", "case_id": case.id, "video": None})
     return {
         # The proof's entity, so the composer can ask what it shares with the case.
         "id": entity_id,

@@ -324,9 +324,10 @@ def _captured(case: Case, paths: Any) -> list[str]:
     return [p for p in wanted if p in present]
 
 
-def draft_row(case: Case, video: str, draft: dict[str, Any]) -> dict[str, Any]:
+def draft_row(case: Case, video: str, draft: dict[str, Any], file_kind: str = "video") -> dict[str, Any]:
     """A scene still to prove as Inspect and the queue read it: its time, its label, its
-    state, the captures it gathered that are still in the case, and why it was left."""
+    state, the captures it gathered that are still in the case, and why it was left.
+    ``file_kind`` is the file's (`video` or `image`): an image is only ever marked whole."""
     captures = _captured(case, draft.get("captures"))
     abandoned = draft.get("abandoned") if isinstance(draft.get("abandoned"), dict) else None
     start = _seconds(draft.get("start"))
@@ -341,7 +342,27 @@ def draft_row(case: Case, video: str, draft: dict[str, Any]) -> dict[str, Any]:
         "state": ABANDONED if abandoned else PROGRESS if captures else TODO,
         "captures": captures,
         "abandoned": abandoned,
+        "file_kind": file_kind,
     }
+
+
+def laid_out_by(specs: list[tuple[str, dict[str, Any]]], path: str) -> list[tuple[str, dict[str, Any]]]:
+    """The proofs laying a file out as a panel: what proves an image marked to geolocate."""
+    return [(name, spec) for name, spec in specs if path in _panel_sources(spec)]
+
+
+def _image_scenes(case: Case, image: str, entity: dict[str, Any], specs: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
+    """A picture's scenes: what the analyst marked to geolocate in it, the whole of it as
+    the app marks it, all proved by any proof that lays the picture out, which then
+    lists in their place. A picture has no time to order them by."""
+    laid = laid_out_by(specs, image)
+    scenes = [_proof_row(case, name, spec, {"video": image, "moments": [], "at": []}) for name, spec in laid]
+    work = inspectwork.find_work(case, image)
+    drafts = [d for d in ((work or {}).get("spec") or {}).get("scenes") or [] if isinstance(d, dict) and isinstance(d.get("id"), str)]
+    hidden = sorted(d["id"] for d in drafts) if laid else []
+    if not laid:
+        scenes += [draft_row(case, image, d, "image") for d in drafts]
+    return {"video": image, "video_id": entity["id"], "scenes": scenes, "used": {}, "taken": hidden}
 
 
 def read_proofs(case: Case) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, tuple[str, float]]]:
@@ -355,7 +376,8 @@ def video_scenes(
     video: str,
     proofs: tuple[list[tuple[str, dict[str, Any]]], dict[str, tuple[str, float]]] | None = None,
 ) -> dict[str, Any]:
-    """The scenes of one video, in the order they come in the clip.
+    """The scenes of one video, in the order they come in the clip, or of one picture
+    (`_image_scenes`): its whole, marked to geolocate, and the proofs laying it out.
 
     Proofs first resolve to the video they rest on; the drafts still waiting in the
     video's Inspect work join them, minus any a proof in the case has taken up, even
@@ -369,10 +391,13 @@ def video_scenes(
     if entity is None or entity.get("type") != "media":
         raise CaseError("that file is not in the case")
     items = case.media_items_by_paths([video])
-    if not items or items[0].get("kind") != "video":
-        raise CaseError("only a video has scenes")
-
+    kind = items[0].get("kind") if items else None
+    if kind not in ("video", "image"):
+        raise CaseError("only a video or a picture has scenes")
     specs, origins = proofs if proofs is not None else read_proofs(case)
+    if kind == "image":
+        return _image_scenes(case, video, entity, specs)
+
     scenes: list[dict[str, Any]] = []
     taken: set[str] = set()
     used: dict[str, list[dict[str, str]]] = {}

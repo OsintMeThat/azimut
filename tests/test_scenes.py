@@ -263,12 +263,12 @@ def test_scenes_come_in_the_order_of_the_clip(client, tmp_path):
     assert [s.get("proof") or s.get("id") for s in scenes] == ["s_all", "Early", "s_mid", "s_flash", "Late"]
     assert scenes[0] == {
         "kind": "draft", "video": video, "id": "s_all", "start": None, "end": None, "label": "Which city?",
-        "state": "todo", "captures": [], "abandoned": None,
+        "state": "todo", "captures": [], "abandoned": None, "file_kind": "video",
     }
     draft = scenes[2]
     assert draft == {
         "kind": "draft", "video": video, "id": "s_mid", "start": 1.8, "end": 2.4, "label": "Bridge?",
-        "state": "todo", "captures": [], "abandoned": None,
+        "state": "todo", "captures": [], "abandoned": None, "file_kind": "video",
     }
 
 
@@ -350,10 +350,11 @@ def test_a_renamed_video_keeps_its_scenes(client, tmp_path):
 
 
 @needs_ffmpeg
-def test_only_a_video_in_the_case_has_scenes(client, tmp_path):
+def test_only_a_file_in_the_case_has_scenes_and_a_picture_none_until_marked(client, tmp_path):
     cid = _case(client)
     photo = _upload_png(client, cid)
-    assert client.get(f"/api/cases/{cid}/scenes", params={"video": photo}).status_code == 400
+    # a picture answers with what was marked in it, nothing yet (`test_geolocate.py`)
+    assert client.get(f"/api/cases/{cid}/scenes", params={"video": photo}).json()["scenes"] == []
     assert client.get(
         f"/api/cases/{cid}/scenes", params={"video": "media/nothing.mp4"}
     ).status_code == 400
@@ -659,7 +660,7 @@ def test_a_draft_comes_back_with_its_proof_in_the_trash_and_goes_with_it_restore
     assert deleted.status_code == 200, deleted.text
     assert _scenes(client, cid, video)["scenes"] == [
         {"kind": "draft", "video": video, "id": "s2", "start": 2.0, "end": 3.5, "label": "Bridge?",
-         "state": "todo", "captures": [], "abandoned": None},
+         "state": "todo", "captures": [], "abandoned": None, "file_kind": "video"},
     ]
 
     restored = client.post(f"/api/cases/{cid}/trash/{deleted.json()['trash']}/restore")

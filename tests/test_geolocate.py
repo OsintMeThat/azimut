@@ -356,3 +356,60 @@ def test_deleting_a_capture_a_scene_gathered_says_so(client):
     case = Case.open(cid)
     hows = [lean.how for _holder, lean in uses_engine._records(case) if lean.target == shot["path"]]
     assert hows == ["gathers it for a scene to geolocate"]
+
+
+# -- a picture marked to geolocate --------------------------------------------------
+
+
+def _mark(client, cid, path, label=""):
+    return client.post(f"/api/cases/{cid}/scenes/mark", json={"path": path, "label": label})
+
+
+def test_a_picture_is_marked_whole_once_and_queued_as_a_picture(client):
+    cid = _case(client)
+    photo = _upload(client, cid)
+    res = _mark(client, cid, photo, "  Market  ")
+    assert res.status_code == 200, res.text
+    scene = res.json()["scene"]
+    assert (scene["start"], scene["end"], scene["label"], scene["file_kind"]) == (None, None, "Market", "image")
+    # marked again, it is the same scene
+    assert _mark(client, cid, photo).json()["scene"]["id"] == scene["id"]
+    [file] = _queue(client, cid)["files"]
+    assert file["kind"] == "image" and [s["id"] for s in file["scenes"]] == [scene["id"]]
+    # Inspect's own read of it
+    listed = client.get(f"/api/cases/{cid}/scenes", params={"video": photo}).json()
+    assert [s["kind"] for s in listed["scenes"]] == ["draft"]
+
+
+def test_a_picture_is_proved_by_a_proof_laying_it_out_which_ends_its_geolocating(client):
+    cid = _case(client)
+    photo = _upload(client, cid)
+    scene = _mark(client, cid, photo).json()["scene"]
+    assert _geolocate(client, cid, photo, scene["id"]).status_code == 200
+    shot = _capture(client, cid)
+    assert shot["scene"]["id"] == scene["id"]
+
+    made = client.post(f"/api/cases/{cid}/proofs", json={"title": "Market", "spec": {"panels": [
+        {"id": "p0", "src": photo}, {"id": "p1", "src": shot["path"]},
+    ]}})
+    assert made.status_code == 200, made.text
+    assert client.get(f"/api/cases/{cid}/geolocating").json() == {"geolocating": None}
+    assert _queue(client, cid)["files"] == []
+    listed = client.get(f"/api/cases/{cid}/scenes", params={"video": photo}).json()
+    assert [(s["kind"], s.get("proof")) for s in listed["scenes"]] == [("proof", made.json()["name"])]
+    assert listed["taken"] == [scene["id"]]
+    assert _geolocate(client, cid, photo, scene["id"]).status_code == 400
+
+
+def test_neither_a_capture_nor_a_frame_cut_from_a_video_is_marked(client, tmp_path):
+    cid = _case(client)
+    shot = _capture(client, cid)
+    assert _mark(client, cid, shot["path"]).status_code == 400
+    if media_engine.ffmpeg_available():
+        video = _video(client, cid, tmp_path)
+        cut = client.post(f"/api/cases/{cid}/inspect/save-frames", json={"items": [{"path": video, "time": 1.0}]})
+        frame = cut.json()["saved"][0]["item"]["path"]
+        assert _mark(client, cid, frame).status_code == 400
+        # a whole video can be marked from outside Inspect too
+        whole = _mark(client, cid, video)
+        assert whole.status_code == 200 and whole.json()["scene"]["file_kind"] == "video"

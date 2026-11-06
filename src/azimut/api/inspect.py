@@ -387,6 +387,24 @@ def attach_capture(case: Any, path: str) -> dict[str, Any] | None:
     return scene
 
 
+class MarkIn(BaseModel):
+    path: str = Field(min_length=1, max_length=1024)
+    label: str = Field(default="", max_length=inspectwork.MAX_SCENE_LABEL)
+
+
+@router.post("/cases/{case_id}/scenes/mark")
+def mark_to_geolocate(case_id: str, body: MarkIn) -> dict[str, Any]:
+    """Mark a whole picture or video to geolocate, from the Media Library or Inspect:
+    its scene about the whole file, or the one already there."""
+    case = get_case(case_id)
+    try:
+        scene = geolocate.mark(case, body.path, body.label)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    events.publish({"type": "scenes", "case_id": case.id, "video": body.path})
+    return {"scene": scene}
+
+
 @router.get("/cases/{case_id}/scenes/queue")
 def scene_queue(case_id: str) -> dict[str, Any]:
     """Every scene still to prove in the case, by file, and the one being geolocated."""

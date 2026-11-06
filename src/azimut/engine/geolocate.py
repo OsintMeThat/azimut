@@ -55,6 +55,17 @@ def _taken(specs: list[tuple[str, dict[str, Any]]]) -> set[str]:
     return taken
 
 
+def _kinds(case: Case, paths: list[str]) -> dict[str, str]:
+    """Each file's kind, `video` or `image`, as the media index holds it."""
+    return {item["path"]: str(item.get("kind") or "") for item in case.media_items_by_paths(paths) if item.get("path")}
+
+
+def _proved(specs: list[tuple[str, dict[str, Any]]], taken: set[str], path: str, draft_id: str, kind: str) -> bool:
+    """A scene of a video is proved once a proof cites it; a picture marked to
+    geolocate, once a proof lays it out."""
+    return draft_id in taken or (kind == "image" and bool(scenes_engine.laid_out_by(specs, path)))
+
+
 def _orders(case: Case, videos: list[str], proofs: Any = None) -> dict[tuple[str, str], int]:
     """Each draft's place among its video's scenes, proofs included, in clip order:
     what Inspect colours a scene by (`lib/scenes.js`, sceneList), so the queue, the
@@ -105,11 +116,21 @@ def current(case: Case) -> dict[str, Any] | None:
         return None
     draft = _draft(case, held["video"], held["draft"]) if _in_case(case, held["video"]) else None
     proofs = scenes_engine.read_proofs(case)
-    if draft is None or draft.get("abandoned") or draft["id"] in _taken(proofs[0]):
+    kind = _kinds(case, [held["video"]]).get(held["video"], "video")
+    if draft is None or draft.get("abandoned") or _proved(proofs[0], _taken(proofs[0]), held["video"], draft["id"], kind):
         stop(case, held["draft"])
         return None
-    row = _placed(scene_row(case, held["video"], draft), _orders(case, [held["video"]], proofs))
+    row = _placed(scene_row(case, held["video"], draft, kind), _orders(case, [held["video"]], proofs))
     return {**row, "since": held["since"]}
+
+
+def settle(case: Case) -> bool:
+    """Read the scene being geolocated again after something that may have proved it,
+    a proof laying its picture out: True when that ended it."""
+    with _lock:
+        if case.id not in _active:
+            return False
+    return current(case) is None
 
 
 def start(case: Case, video: str, draft_id: str) -> dict[str, Any]:
@@ -120,14 +141,15 @@ def start(case: Case, video: str, draft_id: str) -> dict[str, Any]:
     if draft is None:
         raise CaseError("that scene is no longer in its file's work")
     proofs = scenes_engine.read_proofs(case)
-    if draft_id in _taken(proofs[0]):
+    kind = _kinds(case, [video]).get(video, "video")
+    if _proved(proofs[0], _taken(proofs[0]), video, draft_id, kind):
         raise CaseError("a proof already geolocates that scene")
     if draft.get("abandoned"):
         raise CaseError("that scene was abandoned: bring it back first")
     since = _now()
     with _lock:
         _active[case.id] = {"video": video, "draft": draft_id, "since": since}
-    return {**_placed(scene_row(case, video, draft), _orders(case, [video], proofs)), "since": since}
+    return {**_placed(scene_row(case, video, draft, kind), _orders(case, [video], proofs)), "since": since}
 
 
 def stop(case: Case, draft_id: str | None = None) -> bool:
@@ -177,13 +199,46 @@ def abandon(case: Case, video: str, draft_id: str, reason: Any = "") -> dict[str
 
     scene = inspectwork.update_scene(case, video, draft_id, leave)
     stop(case, draft_id)
-    return scene_row(case, video, scene)
+    return scene_row(case, video, scene, _kinds(case, [video]).get(video, "video"))
 
 
 def restore(case: Case, video: str, draft_id: str) -> dict[str, Any]:
     """Take an abandoned scene up again."""
     scene = inspectwork.update_scene(case, video, draft_id, lambda one: one.pop("abandoned", None))
-    return scene_row(case, video, scene)
+    return scene_row(case, video, scene, _kinds(case, [video]).get(video, "video"))
+
+
+# -- marking a whole file -------------------------------------------------------------
+
+
+def mark(case: Case, path: str, label: Any = "") -> dict[str, Any]:
+    """Mark a whole picture or video to geolocate, from outside Inspect: a scene about
+    the whole file, or the one already there. A frame Inspect cut from a video belongs
+    to that video's scenes, and a capture is an answer, not a question: neither is marked."""
+    if label is not None and not isinstance(label, str):
+        raise CaseError("a scene label must be text")
+    entity = case.find_entity(attr="path", value=path)
+    if entity is None or entity.get("type") != "media":
+        raise CaseError("only a file of the case's media is marked to geolocate")
+    kind = _kinds(case, [path]).get(path)
+    if kind not in ("image", "video"):
+        raise CaseError("only a picture or a video is marked to geolocate")
+    if kind == "image" and path in scenes_engine.frame_origins(case, [path]):
+        raise CaseError("a frame cut from a video belongs to its video's scenes")
+    word = (label or "").strip()[: inspectwork.MAX_SCENE_LABEL]
+    inspectwork.add_scenes(case, path, [{"start": None, "end": None, "label": word}])
+    whole = next(iter(_whole_drafts(case, path)), None)
+    if whole is None:
+        raise CaseError("that file holds as many scenes as it can")
+    return scene_row(case, path, whole, kind)
+
+
+def _whole_drafts(case: Case, path: str) -> list[dict[str, Any]]:
+    work = inspectwork.find_work(case, path)
+    return [
+        s for s in ((work or {}).get("spec") or {}).get("scenes") or []
+        if isinstance(s, dict) and isinstance(s.get("id"), str) and s.get("start") is None and s.get("end") is None
+    ]
 
 
 # -- the queue ------------------------------------------------------------------------
@@ -196,15 +251,21 @@ def queue(case: Case) -> dict[str, Any]:
     proofs = scenes_engine.read_proofs(case)
     taken = _taken(proofs[0])
     works = [(subject, drafts) for subject, _touched, drafts in inspectwork.scene_works(case)]
-    places = _orders(case, [subject for subject, _drafts in works], proofs)
+    kinds = _kinds(case, [subject for subject, _drafts in works])
+    places = _orders(case, [subject for subject, _drafts in works if kinds.get(subject) == "video"], proofs)
     files = []
     for subject, drafts in works:
         entity = _in_case(case, subject)
+        kind = kinds.get(subject, "video")
         if entity is None:
             continue
-        rows = [_placed(scene_row(case, subject, d), places) for d in drafts if d["id"] not in taken]
+        rows = [
+            _placed(scene_row(case, subject, d, kind), places)
+            for d in drafts
+            if not _proved(proofs[0], taken, subject, d["id"], kind)
+        ]
         if not rows:
             continue
         rows.sort(key=lambda r: (-math.inf, -math.inf) if r["start"] is None else (r["start"], r["end"] or r["start"]))
-        files.append({"video": subject, "title": str(entity.get("label") or subject), "scenes": rows})
+        files.append({"video": subject, "title": str(entity.get("label") or subject), "kind": kind, "scenes": rows})
     return {"files": files, "geolocating": current(case)}
