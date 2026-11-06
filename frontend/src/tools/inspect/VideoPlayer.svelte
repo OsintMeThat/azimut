@@ -1,7 +1,7 @@
 <script>
   import {
     SPEEDS, faster as fasterRate, frameDuration, frameIndex, loopIsSet, loopRestart, preciseClock,
-    seekInto, setLoopEnd, shownFrameTime, slower as slowerRate, speedLabel, stepTarget,
+    seekInto, setLoopEnd, shownFrameTime, slower as slowerRate, speedLabel, stepTarget, zoomLabel,
   } from '../../lib/inspectPlayer.js';
   import { ViewTransform } from '../../lib/viewTransform.svelte.js';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
@@ -12,7 +12,8 @@
 
   // The clip, read closely: zoomed, panned and turned like a frame
   // (`lib/viewTransform.svelte.js`), stepped a frame at a time, slowed, looped,
-  // with what is known about it laid along the bar (`PlayerTrack`).
+  // with what is known about it laid along the bar (`PlayerTrack`), whose time the
+  // wheel zooms; the zoom shows on the controls row, and a press there undoes it.
   //
   // `shared` is the bridge with the panel. The player writes `currentTime` and
   // `frameTime`, the timestamp of the frame on screen, which is what a capture
@@ -58,6 +59,10 @@
   let mediaDuration = $state(0);
   let speedAnchor = $state(null);
   let speedOpen = $state(false);
+  let track = $state();
+  // The stretch of the clip the bar is zoomed to, null for the whole of it. Never
+  // kept: the next file, or the next visit, starts on the whole clip.
+  let barZoom = $state(null);
   const view = new ViewTransform();
 
   const totalDuration = $derived(duration || mediaDuration || 0);
@@ -173,6 +178,8 @@
   }
   export const slower = () => (rate = slowerRate(rate));
   export const faster = () => (rate = fasterRate(rate));
+  /** Zoom the bar's time about the playhead: + and - on the keyboard. */
+  export const zoomBar = (steps) => track?.zoomBy(steps);
 
   function seekBar(time, exact) {
     seek(exact ? seekInto(time, fps, totalDuration) : time);
@@ -262,6 +269,8 @@
 
   <div class="player-bar" data-guide="inspect.player">
     <PlayerTrack
+      bind:this={track}
+      bind:zoom={barZoom}
       duration={totalDuration}
       time={shown}
       {frames}
@@ -312,6 +321,15 @@
       </span>
       {@render tools?.()}
       <span class="spacer"></span>
+      {#if barZoom}
+        {@const label = zoomLabel(barZoom, totalDuration)}
+        <button
+          class="player-btn wide on bar-zoom"
+          onclick={() => (barZoom = null)}
+          aria-label={`Bar zoomed ${label}, show the whole clip`}
+          title={INSPECT_HELP.barZoom}
+        ><Icon name="search" size={13} />{label}</button>
+      {/if}
       <span class="player-btn keys" title={INSPECT_HELP.keys}><Icon name="keyboard" size={16} /></span>
       <button class="player-btn" onclick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'} title={INSPECT_HELP.mute}>
         <Icon name={muted ? 'volumeOff' : 'volume'} size={16} />
@@ -459,6 +477,9 @@
   .player-btn.ab {
     width: 24px;
     flex-basis: 24px;
+  }
+  .player-btn.bar-zoom {
+    gap: 3px;
   }
   .player-btn.keys {
     color: var(--text-3);

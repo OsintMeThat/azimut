@@ -1,5 +1,9 @@
 <script>
-  import { barFraction, frameDuration, preciseClock, tileAt, tileScale, tileStyle, waveformBars } from '../../lib/inspectPlayer.js';
+  import { untrack } from 'svelte';
+  import {
+    clampWindow, followWindow, frameDuration, frameGrid, isWholeWindow, narrowestSpan, panWindow, preciseClock,
+    tileAt, tileScale, tileStyle, waveformBars, waveformColumns, wheelFactor, windowFraction, windowTime, zoomWindow,
+  } from '../../lib/inspectPlayer.js';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
   import { snapToFrame } from '../../lib/scenes.js';
 
@@ -18,6 +22,14 @@
   // marker it passes close to, never crosses the other end, and shows the frame it
   // stands on; `onedit(which, time)` hands the time up. A press anywhere else still
   // moves through the clip.
+  //
+  // The wheel zooms the bar's time about the pointer, from the whole clip down to
+  // frames drawn `FRAME_PX` wide, and Shift+wheel or a sideways scroll slides it.
+  // Everything above is drawn, pressed and dragged in that window, and a thin line
+  // along the top shows where it sits in the clip. `zoom` is the window, null for the
+  // whole clip; the player shows the zoom and puts the whole clip back. When the
+  // playhead runs off the window, the window follows it a page at a time, except
+  // just after the wheel moved it.
   let {
     duration = 0,
     time = 0,
@@ -32,11 +44,16 @@
     waveform = null,
     editing = null,
     fps = null,
+    zoom = $bindable(null),
     onseek,
     onedit,
   } = $props();
 
   const SNAP_PX = 6;
+  // How long after the wheel moved the window the playhead leaves it alone.
+  const FOLLOW_AFTER_MS = 1500;
+  // A line's worth of wheel, in pixels, as the map reads it.
+  const LINE_PX = 40;
   // The hover picture's bounds: a 16:9 tile at its own 160 × 90, a portrait one
   // shrunk to the same height rather than covering the video it previews.
   const PEEK = { w: 160, h: 96 };
@@ -52,7 +69,12 @@
   let nearGrip = $state(false);
 
   const bars = $derived(waveformBars(waveform));
-  const at = (t) => `${barFraction(t, duration) * 100}%`;
+  // What the bar shows: the whole clip, or the stretch the wheel zoomed to.
+  const view = $derived(clampWindow(zoom, duration, narrowestSpan(duration, fps, width)));
+  const pct = (f) => `${f * 100}%`;
+  const at = (t) => pct(windowFraction(t, view));
+  const across = (from, to) => pct(windowFraction(to, view) - windowFraction(from, view));
+  const grid = $derived(zoom ? frameGrid(view, fps, width) : null);
 
   // Everything a press may land on, nearest first when two are close.
   const targets = $derived([
@@ -78,7 +100,8 @@
     return () => observer.disconnect();
   });
 
-  // The sound, mirrored about the middle, one bar per pixel column or so.
+  // The sound, mirrored about the middle, one bar per pixel column or so, stretched
+  // with the window.
   $effect(() => {
     if (!canvas || !width || !bars.length) return;
     const ctx = canvas.getContext?.('2d');
@@ -90,20 +113,35 @@
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, h);
     ctx.fillStyle = getComputedStyle(canvas).color;
-    const step = width / bars.length;
     const mid = h / 2;
-    for (let i = 0; i < bars.length; i += 1) {
-      const half = Math.max(0.5, bars[i] * (mid - 1));
-      ctx.fillRect(i * step, mid - half, Math.max(1, step - 0.5), half * 2);
+    for (const c of waveformColumns(bars, duration, view, width)) {
+      const half = Math.max(0.5, c.level * (mid - 1));
+      ctx.fillRect(c.x, mid - half, Math.max(1, c.w - 0.5), half * 2);
     }
   });
+
+  // The playhead kept in sight: wherever it goes, a step, a seek or the clip playing
+  // on, the window pages after it. Not for a moment after the wheel, which would
+  // take the window from the hand moving it.
+  let wheeledAt = -Infinity;
+  $effect(() => {
+    const t = time;
+    untrack(() => {
+      if (!zoom || grab || performance.now() - wheeledAt < FOLLOW_AFTER_MS) return;
+      const next = followWindow(view, t, duration);
+      if (next !== view) zoom = next;
+    });
+  });
+
+  /** Where a time is drawn on a bar `w` pixels wide. */
+  const xOf = (t, w) => windowFraction(t, view) * w;
 
   /** The marker within reach of `x` on a bar `w` pixels wide, if any. */
   function snapAt(x, w, among = targets) {
     if (!w || !(duration > 0)) return null;
     let best = null;
     for (const t of among) {
-      const d = Math.abs((t.time / duration) * w - x);
+      const d = Math.abs(xOf(t.time, w) - x);
       if (d <= SNAP_PX && (!best || d < best.d)) best = { ...t, d };
     }
     return best;
@@ -115,8 +153,43 @@
     const w = rect.width;
     const x = Math.min(Math.max(0, clientX - rect.left), w);
     const snap = snapAt(x, w);
-    if (snap) return { x: (snap.time / duration) * w, time: snap.time, label: snap.label, exact: true };
-    return { x, time: w ? (x / w) * duration : 0, label: '', exact: false };
+    if (snap) return { x: xOf(snap.time, w), time: snap.time, label: snap.label, exact: true };
+    return { x, time: w ? windowTime(x / w, view) : 0, label: '', exact: false };
+  }
+
+  /**
+   * Zoom the bar's time about the pointer, or slide it with Shift or a sideways
+   * scroll. The page never scrolls under the bar.
+   */
+  function onwheel(e) {
+    e.preventDefault();
+    const rect = track.getBoundingClientRect();
+    if (!(duration > 0) || !rect.width) return;
+    const unit = e.deltaMode === 1 ? LINE_PX : e.deltaMode === 2 ? rect.width : 1;
+    const dx = e.deltaX * unit;
+    const dy = e.deltaY * unit;
+    const sideways = Math.abs(dx) > Math.abs(dy) * 0.35;
+    let next;
+    if (e.shiftKey || sideways) {
+      next = panWindow(view, ((sideways ? dx : dy) / rect.width) * view.span, duration);
+    } else {
+      const f = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+      next = zoomWindow(view, wheelFactor(dy), windowTime(f, view), f, duration, narrowestSpan(duration, fps, rect.width));
+    }
+    wheeledAt = performance.now();
+    zoom = isWholeWindow(next, duration) ? null : next;
+    // the moment under the pointer, read on the new scale
+    if (!grab) hover = point(e.clientX);
+  }
+
+  /** Zoom the bar's time about the playhead by `steps`: in for more than 0, out for less. */
+  export function zoomBy(steps) {
+    const w = track?.getBoundingClientRect().width;
+    if (!(duration > 0) || !w) return;
+    const inside = windowFraction(time, view);
+    const f = inside >= 0 && inside <= 1 ? inside : 0.5;
+    const next = zoomWindow(view, wheelFactor(-100 * steps), time, f, duration, narrowestSpan(duration, fps, w));
+    zoom = isWholeWindow(next, duration) ? null : next;
   }
 
   /** The handle within reach of `clientX`: the nearer end, or the one the press is past. */
@@ -124,7 +197,7 @@
     if (!editing || !Number.isFinite(editing.start) || !(duration > 0)) return null;
     const rect = track.getBoundingClientRect();
     const x = clientX - rect.left;
-    const px = (t) => (t / duration) * rect.width;
+    const px = (t) => xOf(t, rect.width);
     const toStart = Math.abs(px(editing.start) - x);
     const toEnd = Number.isFinite(editing.end) ? Math.abs(px(editing.end) - x) : Infinity;
     if (Math.min(toStart, toEnd) > GRIP_PX) return null;
@@ -144,11 +217,11 @@
     const w = rect.width;
     const x = Math.min(Math.max(0, clientX - rect.left), w);
     const snap = snapAt(x, w, gripTargets);
-    let time = snap ? snap.time : snapToFrame(w ? (x / w) * duration : 0, fps);
+    let time = snap ? snap.time : snapToFrame(w ? windowTime(x / w, view) : 0, fps);
     const frame = frameDuration(fps);
     if (grab === 'end') time = Math.min(Math.max(time, editing.start + frame), duration);
     else time = Math.max(0, Math.min(time, Number.isFinite(editing.end) ? editing.end - frame : duration - frame));
-    hover = { x: (time / duration) * w, time, label: snap ? `${gripLabel(grab)} · ${snap.label}` : gripLabel(grab), exact: true };
+    hover = { x: xOf(time, w), time, label: snap ? `${gripLabel(grab)} · ${snap.label}` : gripLabel(grab), exact: true };
     onedit?.(grab, time);
     showGrip(grab, time);
   }
@@ -210,57 +283,69 @@
   {onpointerdown}
   {onpointermove}
   {onpointerup}
+  {onwheel}
   onpointercancel={onpointerup}
   onpointerleave={() => {
     if (!grab) hover = null;
     nearGrip = false;
   }}
 >
-  {#if bars.length}<canvas class="wave" bind:this={canvas} aria-hidden="true"></canvas>{:else}<span class="rail"></span>{/if}
-  {#each scenes as s (s.key)}
-    {#if s.end != null}
+  <div class="lane" class:zoomed={zoom != null}>
+    {#if bars.length}<canvas class="wave" bind:this={canvas} aria-hidden="true"></canvas>{:else}<span class="rail"></span>{/if}
+    {#if grid}
+      <span class="frame-grid" data-testid="frame-grid" style:background-size={`${grid.size}px 100%`} style:background-position-x={`${grid.offset}px`}></span>
+    {/if}
+    {#each scenes as s (s.key)}
+      {#if s.end != null}
+        <span
+          class="scene"
+          class:held={s.key === editing?.key}
+          data-testid="scene-band"
+          style:left={at(s.start)}
+          style:width={across(s.start, s.end)}
+          style:--scene={s.color}
+        ></span>
+      {:else}
+        <span class="scene-pin" data-testid="scene-pin" style:left={at(s.start)} style:--scene={s.color}></span>
+      {/if}
+    {/each}
+    <span class="played" style:width={pct(Math.min(1, Math.max(0, windowFraction(time, view))))}></span>
+    {#if loop.a != null}
       <span
-        class="scene"
-        class:held={s.key === editing?.key}
-        data-testid="scene-band"
-        style:left={at(s.start)}
-        style:width={`${(barFraction(s.end, duration) - barFraction(s.start, duration)) * 100}%`}
-        style:--scene={s.color}
+        class="loop"
+        class:open={loop.b == null}
+        style:left={at(loop.a)}
+        style:width={loop.b != null ? across(loop.a, loop.b) : '0'}
       ></span>
-    {:else}
-      <span class="scene-pin" data-testid="scene-pin" style:left={at(s.start)} style:--scene={s.color}></span>
     {/if}
-  {/each}
-  <span class="played" style:width={at(time)}></span>
-  {#if loop.a != null}
-    <span
-      class="loop"
-      class:open={loop.b == null}
-      style:left={at(loop.a)}
-      style:width={loop.b != null ? `${(barFraction(loop.b, duration) - barFraction(loop.a, duration)) * 100}%` : '0'}
-    ></span>
-  {/if}
-  {#each shots as s, i (i)}
-    {#if i > 0}<span class="shot" style:left={at(s.start)}></span>{/if}
-  {/each}
-  {#each picks as p (p.time)}
-    <span class="pick" style:left={at(p.time)}></span>
-  {/each}
-  {#each marks as m (m.id)}
-    <span class="mark" style:left={at(m.time)}></span>
-  {/each}
-  {#each frames as f (f.id)}
-    <span class="frame" style:left={at(f.time)}></span>
-  {/each}
-  <span class="head" style:left={at(time)}></span>
-  {#if editing && Number.isFinite(editing.start)}
-    <span class="grip" class:on={grab === 'start'} data-testid="scene-grip-start" style:left={at(editing.start)} style:--scene={editing.color}></span>
-    {#if Number.isFinite(editing.end)}
-      <span class="grip" class:on={grab === 'end'} data-testid="scene-grip-end" style:left={at(editing.end)} style:--scene={editing.color}></span>
+    {#each shots as s, i (i)}
+      {#if i > 0}<span class="shot" style:left={at(s.start)}></span>{/if}
+    {/each}
+    {#each picks as p (p.time)}
+      <span class="pick" style:left={at(p.time)}></span>
+    {/each}
+    {#each marks as m (m.id)}
+      <span class="mark" style:left={at(m.time)}></span>
+    {/each}
+    {#each frames as f (f.id)}
+      <span class="frame" style:left={at(f.time)}></span>
+    {/each}
+    <span class="head" style:left={at(time)}></span>
+    {#if zoom && duration > 0}
+      <span class="overview" data-testid="bar-overview" aria-hidden="true">
+        <span class="overview-window" style:left={pct(view.start / duration)} style:width={pct(view.span / duration)}></span>
+        <span class="overview-head" style:left={pct(Math.min(1, Math.max(0, time / duration)))}></span>
+      </span>
     {/if}
-  {/if}
+    {#if editing && Number.isFinite(editing.start)}
+      <span class="grip" class:on={grab === 'start'} data-testid="scene-grip-start" style:left={at(editing.start)} style:--scene={editing.color}></span>
+      {#if Number.isFinite(editing.end)}
+        <span class="grip" class:on={grab === 'end'} data-testid="scene-grip-end" style:left={at(editing.end)} style:--scene={editing.color}></span>
+      {/if}
+    {/if}
+    {#if hover}<span class="hair" style:left={`${hover.x}px`}></span>{/if}
+  </div>
   {#if hover}
-    <span class="hair" style:left={`${hover.x}px`}></span>
     <div class="peek" style:left={`${hoverLeft}px`}>
       {#if tile}<span class="thumb" style={tileStyle(tile, tiles, stripUrl, PEEK)}></span>{/if}
       <span class="peek-time mono">{preciseClock(hover.time)}{hover.label ? ` · ${hover.label}` : ''}</span>
@@ -281,6 +366,49 @@
   .track.waved {
     height: 30px;
     background: var(--bg-0);
+  }
+  .lane {
+    position: absolute;
+    inset: 0;
+  }
+  /* Zoomed, what lies outside the window is cut at the bar's ends; the handles and
+     the playhead still stand proud of it above and below. */
+  .lane.zoomed {
+    clip-path: inset(-6px 0);
+  }
+  /* The lines between frames, once a frame is drawn wide enough to tell apart. */
+  .frame-grid {
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(to right, color-mix(in srgb, var(--text-3) 45%, transparent) 1px, transparent 1px);
+    background-repeat: repeat-x;
+    pointer-events: none;
+  }
+  /* Where the window sits in the clip, along the bar's top edge. */
+  .overview {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 2px;
+    background: color-mix(in srgb, var(--text-3) 35%, transparent);
+    pointer-events: none;
+    z-index: 1;
+  }
+  .overview-window {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    min-width: 3px;
+    background: var(--text-1);
+  }
+  .overview-head {
+    position: absolute;
+    top: -1px;
+    bottom: -1px;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--accent);
   }
   .wave {
     position: absolute;

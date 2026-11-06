@@ -1231,6 +1231,8 @@ export const KEYMAP = [
       { combo: ', / .', does: 'the same step, on the keys mpv uses' },
       { combo: 'Space or K', does: 'plays and pauses' },
       { combo: 'J / L', does: 'slows the video down or speeds it up' },
+      { combo: 'Wheel on the bar', does: 'zooms the bar\'s time about the pointer, down to single frames; Shift+wheel slides it' },
+      { combo: '+ / -', does: 'zooms the bar\'s time in and out about the playhead' },
       { combo: 'C', does: 'captures the frame on screen' },
       { combo: 'S', does: 'keeps a scene to geolocate at the frame on screen' },
       { combo: 'Shift+S', does: 'ends the last scene at the frame on screen' },

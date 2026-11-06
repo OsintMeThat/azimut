@@ -16,9 +16,10 @@ export const INSPECT_HELP = {
   mute: 'Sound on or off',
   fullscreen: 'Full screen',
   captureIcon: 'Capture this frame (C)',
-  bar: 'Click or drag to move through the clip',
+  bar: 'Click or drag to move through the clip, the wheel zooms in on its time',
   barScene: 'Drag a handle to move the scene, or click to move through the clip',
-  keys: 'Space play · ←/→ frame · Shift+←/→ second · J/L speed · C capture · S scene · M mark · hold O for the original',
+  barZoom: 'The bar zoomed by the wheel or + and -, click for the whole clip',
+  keys: 'Space play · ←/→ frame · Shift+←/→ second · J/L speed · C capture · S scene · M mark · +/- bar zoom · hold O unadjusted',
 
   // the panel
   capture: 'Keep the frame on screen with this video (C)',

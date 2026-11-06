@@ -1738,11 +1738,16 @@ video carries the frames already cut, the marks, the shot changes and the sharpe
 frames a scan found, and an A–B loop; a press near a marker lands on it, and
 hovering shows the picture at that point, no taller than a 16:9 one so a portrait
 clip's stays clear of the video. The sound runs along the bar as a
-waveform. The hover pictures and the waveform come on their own when a video opens,
-from one keyframe-only decode and one audio decode kept in the case's thumbnail
-cache. The video zooms, pans and turns like a frame, a click plays it, and the speed
-goes from 0.1× to 4×. Holding **O** shows the picture without its adjustments, on a
-video and on a frame.
+waveform. The wheel over the bar zooms its time about the pointer, down to frames
+24 px wide with a line between each, and Shift+wheel slides it; + and - zoom about
+the playhead. Everything on the bar follows, a thin line along its top shows where
+the window sits, the controls row reads the zoom (×4) and a press on it brings the
+whole clip back. The window pages after the playhead when it runs off, and every
+file opens on the whole clip. The hover pictures and the waveform come on their
+own when a video opens, from one keyframe-only decode and one audio decode kept in
+the case's thumbnail cache. The video zooms, pans and turns like a frame, a click
+plays it, and the speed goes from 0.1× to 4×. Holding **O** shows the picture
+without its adjustments, on a video and on a frame.
 
 **The one press every visit needs stays on top of the panel.** Above the tabs sit
 **Capture frame** on the video, with the time it will cut and **Save N frames** once

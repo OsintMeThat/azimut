@@ -567,6 +567,47 @@ describe('what the server read off the clip', () => {
   });
 });
 
+describe('zooming the bar\'s time', () => {
+  /** The bar laid out 1000 px wide: 20 s at 25 fps zooms down to 1000 / 24 frames. */
+  const measureBar = () => {
+    target.querySelector('.track').getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 30, right: 1000, bottom: 30 });
+  };
+  const reading = () => target.querySelector('button.bar-zoom');
+
+  it('zooms with + and -, reads the zoom on the controls row, and a press there shows the whole clip', async () => {
+    await start();
+    await openFile('Convoy clip');
+    measureBar();
+    expect(reading()).toBeNull();
+    press('+');
+    expect(reading().textContent.trim()).toBe('×1.5');
+    press('=');
+    expect(reading().textContent.trim()).toBe('×2.2');
+    press('-');
+    expect(reading().textContent.trim()).toBe('×1.5');
+    press('-');
+    expect(reading()).toBeNull();
+
+    press('+');
+    reading().click();
+    flushSync();
+    expect(reading()).toBeNull();
+  });
+
+  it('opens the next file on the whole clip', async () => {
+    await start();
+    await openFile('Convoy clip');
+    measureBar();
+    press('+');
+    expect(reading()).not.toBeNull();
+    button('Files').click();
+    await settle(10);
+    await openFile('Convoy clip');
+    expect(target.querySelector('.track')).not.toBeNull();
+    expect(reading()).toBeNull();
+  });
+});
+
 describe('holding O', () => {
   it('shows the picture without its adjustments for as long as it is held', async () => {
     await start();

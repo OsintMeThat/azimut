@@ -276,6 +276,56 @@ test('changes a scene\'s time in its row: a passage made of an instant, its end 
   await expect.poll(async () => (await page.locator('.video-canvas').boundingBox()).width).toBeGreaterThan(canvas.width + 200);
 });
 
+/** The stretch of the clip the zoomed bar shows, as the line along its top draws it. */
+async function barWindow(page) {
+  const [left, width] = await page.locator('.overview-window').evaluate((el) => [parseFloat(el.style.left), parseFloat(el.style.width)]);
+  return { start: (left / 100) * 1.2, span: (width / 100) * 1.2 };
+}
+
+test('zooms the bar\'s time with the wheel, drags a handle onto a frame there, and shows the whole clip again', async ({ page }) => {
+  // A narrow window: the clip's thirty frames are drawn narrower than the bar's
+  // deepest zoom draws them, so there is room to zoom.
+  await page.setViewportSize({ width: 1100, height: 820 });
+  const { saves } = await openSteps(page);
+  await seekTo(page, 0.5);
+  await page.keyboard.press('s');
+  await expect.poll(() => saves.at(-1)?.spec?.scenes?.length).toBe(1);
+  await openTime(page);
+  await page.getByRole('radio', { name: 'Passage' }).click();
+  const end = page.getByRole('textbox', { name: 'Scene end' });
+  await expect(end).toHaveValue('0:01.2');
+
+  // the wheel over the bar's end zooms in about it, as deep as it goes
+  const bar = await page.locator('.track').boundingBox();
+  await page.mouse.move(bar.x + bar.width - 1, bar.y + bar.height / 2);
+  for (let i = 0; i < 6; i += 1) await page.mouse.wheel(0, -100);
+  const zoom = page.getByRole('button', { name: /^Bar zoomed ×\d/ });
+  await expect(zoom).toHaveText(/^×\d/);
+  await expect(page.getByTestId('bar-overview')).toHaveCount(1);
+  const win = await barWindow(page);
+  expect(win.span).toBeLessThan(1.2 * 0.8);
+  expect(win.start + win.span).toBeCloseTo(1.2, 2);
+  // the page under the bar never scrolled
+  expect(await page.evaluate(() => document.scrollingElement.scrollTop)).toBe(0);
+
+  // the end's handle, dragged back to a frame in the middle of the window
+  const frame = Math.round((win.start + win.span / 2) * 25);
+  const x = bar.x + ((frame / 25 - win.start) / win.span) * bar.width;
+  await page.mouse.move(bar.x + bar.width - 1, bar.y + bar.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(x, bar.y + bar.height / 2, { steps: 6 });
+  await page.mouse.up();
+  expect(seconds(await end.inputValue())).toBeCloseTo(frame / 25, 6);
+  await expect.poll(() => frameOnScreen(page)).toBe(frame - 1);
+
+  // a press on the zoom puts the whole clip back, the handle where its time says
+  await zoom.click();
+  await expect(zoom).toHaveCount(0);
+  await expect(page.getByTestId('bar-overview')).toHaveCount(0);
+  const grip = await page.getByTestId('scene-grip-end').boundingBox();
+  expect(grip.x + grip.width / 2).toBeCloseTo(bar.x + (bar.width * frame) / 25 / 1.2, 0);
+});
+
 test('takes a scene\'s start and end from the frame on screen with S and Shift+S, or as typed', async ({ page }) => {
   const { saves } = await openSteps(page);
   await seekTo(page, 0.5);

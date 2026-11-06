@@ -42,6 +42,9 @@ describe('Inspect video player', () => {
     }
     expect(body).toContain('>1×</button>');
     expect(body).toContain('aria-label="Loop"');
+    // the bar opens on the whole clip, with no zoom to read or undo
+    expect(body).not.toContain('Bar zoomed');
+    expect(body).not.toContain('bar-overview');
   });
 
   it('lays the frames, marks and shots along the bar', () => {

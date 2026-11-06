@@ -1,6 +1,7 @@
 /**
  * The Inspect player's arithmetic: which frame is on screen, where a step lands,
- * how fast the clip plays, what loops, and where on the bar a moment sits.
+ * how fast the clip plays, what loops, and where on the bar, zoomed or not, a
+ * moment sits.
  *
  * A browser shows the frame whose interval holds the current time, while ffmpeg
  * cuts the first frame at or after the time it is handed
@@ -125,12 +126,6 @@ export function loopRestart(time, loop) {
 
 // -- the bar --------------------------------------------------------------------
 
-/** How far along the bar a time sits, 0 to 1. */
-export function barFraction(time, duration) {
-  if (!(duration > 0)) return 0;
-  return Math.min(1, Math.max(0, time / duration));
-}
-
 /**
  * The hover picture for a time: which tile of the strip the server drew
  * (`engine/inspect.video_overview`), as its column and row.
@@ -168,6 +163,106 @@ export function tileStyle(tile, tiles, url, most = null) {
   ].join(';');
 }
 
+// -- the bar's time scale -------------------------------------------------------------
+// The bar shows a window of the clip, `{ start, span }` in seconds: the whole of it
+// until the wheel zooms in about the pointer, down to frames drawn `FRAME_PX` wide.
+
+/** How wide a frame is drawn at the bar's deepest zoom, in pixels. */
+export const FRAME_PX = 24;
+
+/** How far one wheel event zooms: a mouse notch about one and a half times. */
+const WHEEL_RATE = 0.004;
+const WHEEL_MOST = 120;
+
+/** Where a playhead that left the window stands in the next one: a tenth in. */
+const LEAD = 0.1;
+
+/** The whole clip, the bar unzoomed. */
+export function wholeWindow(duration) {
+  return { start: 0, span: duration > 0 ? duration : 0 };
+}
+
+/**
+ * The narrowest window a bar `width` pixels wide shows: frames `FRAME_PX` wide, never
+ * more than the clip. 0, which bounds nothing, while the width is unknown.
+ */
+export function narrowestSpan(duration, fps, width) {
+  if (!(duration > 0) || !(width > 0)) return 0;
+  return Math.min(duration, (width / FRAME_PX) * frameDuration(fps));
+}
+
+/** A window held inside the clip and no narrower than `least`, or the whole clip for none. */
+export function clampWindow(win, duration, least = 0) {
+  if (!win || !(duration > 0) || !(win.span > 0)) return wholeWindow(duration);
+  const span = Math.min(duration, Math.max(least, win.span));
+  return { start: Math.min(Math.max(0, Number(win.start) || 0), duration - span), span };
+}
+
+/** Whether a window shows the whole clip. */
+export function isWholeWindow(win, duration) {
+  return !win || !(duration > 0) || win.span >= duration - NOISE;
+}
+
+/** Where a time sits along the window: 0 at its start, 1 at its end, beyond either outside it. */
+export function windowFraction(time, win) {
+  return win?.span > 0 ? (time - win.start) / win.span : 0;
+}
+
+/** The time at a fraction of the window. */
+export function windowTime(fraction, win) {
+  return win.start + fraction * win.span;
+}
+
+/**
+ * The window `factor` times as long, `time` kept at `fraction` of it: the moment under
+ * the pointer stays under the pointer.
+ */
+export function zoomWindow(win, factor, time, fraction, duration, least = 0) {
+  const span = Math.min(duration, Math.max(least, win.span * factor));
+  return clampWindow({ start: time - fraction * span, span }, duration, least);
+}
+
+/** The window slid by `seconds`, held inside the clip. */
+export function panWindow(win, seconds, duration) {
+  return clampWindow({ start: win.start + seconds, span: win.span }, duration);
+}
+
+/** How much one wheel event stretches the window: under 1 rolled away from the hand, which zooms in. */
+export function wheelFactor(delta) {
+  return Math.exp(Math.min(WHEEL_MOST, Math.max(-WHEEL_MOST, delta)) * WHEEL_RATE);
+}
+
+/**
+ * The window that keeps the playhead in sight: the same while it is inside, else the
+ * next page, with the playhead a tenth in.
+ */
+export function followWindow(win, time, duration) {
+  if (!(win?.span > 0) || (time >= win.start - NOISE && time <= win.start + win.span + NOISE)) return win;
+  return clampWindow({ start: time - win.span * LEAD, span: win.span }, duration);
+}
+
+/** Frames drawn narrower than this get no line between them. */
+const GRID_PX = 6;
+
+/**
+ * The lines between frames once a window shows them wide enough to tell apart: how
+ * far apart they are drawn and where the first one falls, at or before the bar's edge.
+ */
+export function frameGrid(win, fps, width) {
+  if (!(win?.span > 0) || !(width > 0)) return null;
+  const frame = frameDuration(fps);
+  const size = (frame / win.span) * width;
+  if (size < GRID_PX) return null;
+  const into = win.start - frameIndex(win.start, fps) * frame;
+  return { size, offset: -(into / win.span) * width };
+}
+
+/** The zoom as the player reads it: ×1.5, ×4, ×24. */
+export function zoomLabel(win, duration) {
+  const k = win?.span > 0 && duration > 0 ? duration / win.span : 1;
+  return `×${k < 10 ? Math.round(k * 10) / 10 : Math.round(k)}`;
+}
+
 /**
  * The waveform scaled to its own loudest moment, so a quiet clip still shows its
  * shape. Silence stays flat.
@@ -176,6 +271,21 @@ export function waveformBars(peaks) {
   if (!Array.isArray(peaks) || !peaks.length) return [];
   const top = Math.max(...peaks);
   return top > 0 ? peaks.map((p) => p / top) : peaks.map(() => 0);
+}
+
+/**
+ * The waveform's bars inside the window, as columns of a bar `width` pixels wide:
+ * where each starts, how wide it is drawn, and how loud.
+ */
+export function waveformColumns(bars, duration, win, width) {
+  if (!bars?.length || !(duration > 0) || !(width > 0) || !(win?.span > 0)) return [];
+  const each = duration / bars.length;
+  const w = (each / win.span) * width;
+  const first = Math.max(0, Math.floor(win.start / each));
+  const last = Math.min(bars.length - 1, Math.ceil((win.start + win.span) / each) - 1);
+  const columns = [];
+  for (let i = first; i <= last; i += 1) columns.push({ x: windowFraction(i * each, win) * width, w, level: bars[i] });
+  return columns;
 }
 
 // -- the histogram ------------------------------------------------------------------

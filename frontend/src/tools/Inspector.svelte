@@ -713,8 +713,9 @@
   }
 
   // Keys on the open file. On the video: Space or K plays, ←/→ step one frame
-  // (Shift a second, with mpv's , and . as aliases), J and L slow and speed it, C
-  // captures, M marks. Holding O shows the picture without its adjustments.
+  // (Shift a second, with mpv's , and . as aliases), J and L slow and speed it, + and
+  // - zoom the bar's time, C captures, M marks. Holding O shows the picture without
+  // its adjustments.
   function onWindowKeydown(e) {
     if (uiState.tool !== 'inspect' || !work.source || pickerOpen || clearConfirm) return;
     const t = e.target;
@@ -755,6 +756,10 @@
       k: () => player.togglePlay(),
       j: () => player.slower(),
       l: () => player.faster(),
+      // the bar's time, zoomed about the playhead; = is + without Shift on many layouts
+      '+': () => player.zoomBar(1),
+      '=': () => player.zoomBar(1),
+      '-': () => player.zoomBar(-1),
       c: () => !e.repeat && captureNow(),
       m: () => !e.repeat && addMark(),
       // While a scene's time is open, S and Shift+S move the start and end of the
