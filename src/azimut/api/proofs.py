@@ -40,6 +40,7 @@ from ..engine import scenes as scene_engine
 from ..engine import temporal
 from ..engine import thumbnails as thumbnail_engine
 from ..workspace import Case, CaseError, ensure_dir
+from . import events
 from .cases import delete_by_path, get_case
 from .cases.common import delete_entity_deep
 from .inspect import say_geolocating
@@ -989,9 +990,10 @@ def state_proof_scene(case_id: str, name: str, body: SceneIn) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     # The date the proof states is about its moments: they moved, so it follows.
     _restate_dated_moments(case, name)
-    # A scene a proof takes up is proved: its geolocating is over.
+    # A scene a proof takes up is proved: its geolocating is over, and it leaves the queue.
     if scene.get("draft") and geolocate.stop(case, scene["draft"]):
         say_geolocating(case)
+    events.publish({"type": "scenes", "case_id": case.id, "video": scene.get("video")})
     return scene
 
 

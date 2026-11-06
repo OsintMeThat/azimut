@@ -344,7 +344,17 @@ def draft_row(case: Case, video: str, draft: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def video_scenes(case: Case, video: str) -> dict[str, Any]:
+def read_proofs(case: Case) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, tuple[str, float]]]:
+    """Every proof's spec and where its frames were cut, read once for several videos."""
+    specs = proof_specs(case)
+    return specs, frame_origins(case, [src for _name, spec in specs for src in _panel_sources(spec)])
+
+
+def video_scenes(
+    case: Case,
+    video: str,
+    proofs: tuple[list[tuple[str, dict[str, Any]]], dict[str, tuple[str, float]]] | None = None,
+) -> dict[str, Any]:
     """The scenes of one video, in the order they come in the clip.
 
     Proofs first resolve to the video they rest on; the drafts still waiting in the
@@ -362,8 +372,7 @@ def video_scenes(case: Case, video: str) -> dict[str, Any]:
     if not items or items[0].get("kind") != "video":
         raise CaseError("only a video has scenes")
 
-    specs = proof_specs(case)
-    origins = frame_origins(case, [src for _name, spec in specs for src in _panel_sources(spec)])
+    specs, origins = proofs if proofs is not None else read_proofs(case)
     scenes: list[dict[str, Any]] = []
     taken: set[str] = set()
     used: dict[str, list[dict[str, str]]] = {}

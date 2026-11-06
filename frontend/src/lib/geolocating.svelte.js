@@ -114,6 +114,22 @@ function refreshQueue(caseId) {
   return sceneQueue.caseId === caseId && sceneQueue.files ? readSceneQueue(caseId) : null;
 }
 
+// A file's scenes saved or a proof's time stated (`scenes`), or something deleted or
+// restored (`saved`), which can give a scene back or take one up: a queue held for the
+// case is read again, once for a burst.
+const REQUEUE_MS = 300;
+let requeuing = null;
+function requeue(caseId) {
+  if (caseId !== sceneQueue.caseId || !sceneQueue.files) return;
+  clearTimeout(requeuing);
+  requeuing = setTimeout(() => {
+    requeuing = null;
+    readSceneQueue(caseId);
+  }, REQUEUE_MS);
+}
+onEvent('scenes', (event) => requeue(event.case_id));
+onEvent('saved', (event) => requeue(event.case_id));
+
 // Started, ended, or a capture attached, from this tab, another, or the extension.
 onEvent('geolocating', (event) => {
   if (event.case_id !== geolocating.caseId && event.case_id !== sceneQueue.caseId) return;

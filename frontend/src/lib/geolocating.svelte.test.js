@@ -90,6 +90,23 @@ describe('the queue', () => {
     expect(calls.at(-1)).toMatchObject({ method: 'GET', path: '/api/cases/c1/scenes/queue' });
   });
 
+  it('is read again, once, after a burst of scenes or saved nudges about its case', async () => {
+    answers.set('GET /api/cases/c1/scenes/queue', { files: [], geolocating: null });
+    await readSceneQueue('c1');
+    calls.length = 0;
+    vi.useFakeTimers();
+    try {
+      dispatch({ type: 'scenes', case_id: 'c1', video: 'media/clip.mp4' });
+      dispatch({ type: 'saved', case_id: 'c1' });
+      dispatch({ type: 'scenes', case_id: 'c2', video: 'media/other.mp4' });
+      expect(calls).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(400);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(calls).toEqual([{ method: 'GET', path: '/api/cases/c1/scenes/queue', body: undefined }]);
+  });
+
   it('brings an abandoned scene back by its video', async () => {
     answers.set('DELETE /api/cases/c1/scenes/s1/abandon', { scene: SCENE });
     await restoreScene('c1', 'media/clip.mp4', 's1');

@@ -246,6 +246,9 @@ def test_a_proof_taking_the_scene_up_proves_it_and_ends_the_geolocating(client, 
     draft = next(s for s in scenes["scenes"] if s["kind"] == "draft")
     assert draft["state"] == "progress" and draft["captures"] == [shot["path"]]
     assert scenes["geolocating"] == "s1"
+    # its place in the clip, which Inspect colours it by, travels with the queue and the pill
+    assert _queue(client, cid)["files"][0]["scenes"][0]["order"] == 0
+    assert client.get(f"/api/cases/{cid}/geolocating").json()["geolocating"]["order"] == 0
 
     # the proof the pill makes: the scene's frame beside the capture
     cut = client.post(f"/api/cases/{cid}/inspect/save-frames", json={"items": [{"path": video, "time": 1.5}]})
@@ -261,6 +264,36 @@ def test_a_proof_taking_the_scene_up_proves_it_and_ends_the_geolocating(client, 
     assert client.get(f"/api/cases/{cid}/geolocating").json() == {"geolocating": None}
     assert _queue(client, cid)["files"] == []
     assert client.get(f"/api/cases/{cid}/scenes", params={"video": video}).json()["geolocating"] is None
+
+
+@needs_ffmpeg
+def test_a_scene_s_order_is_its_place_among_the_video_s_scenes_proofs_included(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    frame = client.post(f"/api/cases/{cid}/inspect/save-frames", json={"items": [{"path": video, "time": 0.5}]})
+    early = client.post(f"/api/cases/{cid}/proofs", json={"title": "Early", "spec": {"panels": [
+        {"id": "p0", "src": frame.json()["saved"][0]["item"]["path"]},
+    ]}})
+    assert early.status_code == 200, early.text
+    _save_work(client, cid, video, [
+        {"id": "late", "start": 3, "end": None, "label": "Late"},
+        {"id": "mid", "start": 1, "end": 2, "label": "Mid"},
+    ])
+    rows = {s["id"]: s["order"] for s in _queue(client, cid)["files"][0]["scenes"]}
+    # the proof at 0:00.5 comes first, then the passage at 0:01, then the instant at 0:03
+    assert rows == {"mid": 1, "late": 2}
+    assert _geolocate(client, cid, video, "late").json()["geolocating"]["order"] == 2
+
+
+def test_saving_a_file_s_work_says_its_scenes_may_have_moved(client, monkeypatch):
+    from azimut.api import events
+
+    heard = []
+    monkeypatch.setattr(events, "publish", heard.append)
+    cid = _case(client)
+    photo = _upload(client, cid)
+    _save_work(client, cid, photo, SCENES)
+    assert {"type": "scenes", "case_id": cid, "video": photo} in heard
 
 
 # -- the extension -------------------------------------------------------------------

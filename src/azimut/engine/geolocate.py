@@ -47,12 +47,34 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _taken(case: Case) -> set[str]:
+def _taken(specs: list[tuple[str, dict[str, Any]]]) -> set[str]:
     """The drafts a proof in the case takes up: those are Proved, and no longer here."""
     taken: set[str] = set()
-    for _name, spec in scenes_engine.proof_specs(case):
+    for _name, spec in specs:
         taken |= scenes_engine.cited_drafts(scenes_engine.stated_scene(spec))
     return taken
+
+
+def _orders(case: Case, videos: list[str], proofs: Any = None) -> dict[tuple[str, str], int]:
+    """Each draft's place among its video's scenes, proofs included, in clip order:
+    what Inspect colours a scene by (`lib/scenes.js`, sceneList), so the queue, the
+    pill and the reference window draw it in the same colour. A file that is not a
+    video has no bar, and its scenes no place."""
+    proofs = proofs if proofs is not None else scenes_engine.read_proofs(case)
+    places: dict[tuple[str, str], int] = {}
+    for video in videos:
+        try:
+            listed = scenes_engine.video_scenes(case, video, proofs)["scenes"]
+        except CaseError:
+            continue
+        for at, scene in enumerate(listed):
+            if scene.get("kind") == "draft":
+                places[(video, scene["id"])] = at
+    return places
+
+
+def _placed(row: dict[str, Any], places: dict[tuple[str, str], int]) -> dict[str, Any]:
+    return {**row, "order": places.get((row["video"], row["id"]), 0)}
 
 
 def _draft(case: Case, video: str, draft_id: str) -> dict[str, Any] | None:
@@ -82,10 +104,12 @@ def current(case: Case) -> dict[str, Any] | None:
     if not held:
         return None
     draft = _draft(case, held["video"], held["draft"]) if _in_case(case, held["video"]) else None
-    if draft is None or draft.get("abandoned") or draft["id"] in _taken(case):
+    proofs = scenes_engine.read_proofs(case)
+    if draft is None or draft.get("abandoned") or draft["id"] in _taken(proofs[0]):
         stop(case, held["draft"])
         return None
-    return {**scene_row(case, held["video"], draft), "since": held["since"]}
+    row = _placed(scene_row(case, held["video"], draft), _orders(case, [held["video"]], proofs))
+    return {**row, "since": held["since"]}
 
 
 def start(case: Case, video: str, draft_id: str) -> dict[str, Any]:
@@ -95,14 +119,15 @@ def start(case: Case, video: str, draft_id: str) -> dict[str, Any]:
     draft = _draft(case, video, draft_id)
     if draft is None:
         raise CaseError("that scene is no longer in its file's work")
-    if draft_id in _taken(case):
+    proofs = scenes_engine.read_proofs(case)
+    if draft_id in _taken(proofs[0]):
         raise CaseError("a proof already geolocates that scene")
     if draft.get("abandoned"):
         raise CaseError("that scene was abandoned: bring it back first")
     since = _now()
     with _lock:
         _active[case.id] = {"video": video, "draft": draft_id, "since": since}
-    return {**scene_row(case, video, draft), "since": since}
+    return {**_placed(scene_row(case, video, draft), _orders(case, [video], proofs)), "since": since}
 
 
 def stop(case: Case, draft_id: str | None = None) -> bool:
@@ -168,13 +193,16 @@ def queue(case: Case) -> dict[str, Any]:
     """Every scene still to prove in the case, grouped by its file, the file most
     recently worked on first and each file's scenes in clip order, the whole video
     first. Those a proof took up are Proved and left out; the abandoned stay, marked."""
-    taken = _taken(case)
+    proofs = scenes_engine.read_proofs(case)
+    taken = _taken(proofs[0])
+    works = [(subject, drafts) for subject, _touched, drafts in inspectwork.scene_works(case)]
+    places = _orders(case, [subject for subject, _drafts in works], proofs)
     files = []
-    for subject, _touched, drafts in inspectwork.scene_works(case):
+    for subject, drafts in works:
         entity = _in_case(case, subject)
         if entity is None:
             continue
-        rows = [scene_row(case, subject, d) for d in drafts if d["id"] not in taken]
+        rows = [_placed(scene_row(case, subject, d), places) for d in drafts if d["id"] not in taken]
         if not rows:
             continue
         rows.sort(key=lambda r: (-math.inf, -math.inf) if r["start"] is None else (r["start"], r["end"] or r["start"]))

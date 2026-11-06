@@ -458,9 +458,12 @@ def load_work(case_id: str, name: str) -> dict[str, Any]:
 def save_work(case_id: str, body: WorkIn) -> dict[str, Any]:
     case = get_case(case_id)
     try:
-        return inspectwork.save_work(case, body.path, body.spec)
+        saved = inspectwork.save_work(case, body.path, body.spec)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # its scenes may have moved: the To-do and the extension's queue read them again
+    events.publish({"type": "scenes", "case_id": case.id, "video": body.path})
+    return saved
 
 
 @router.delete("/cases/{case_id}/inspect/work")
