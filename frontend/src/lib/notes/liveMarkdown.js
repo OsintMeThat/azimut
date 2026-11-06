@@ -1196,8 +1196,15 @@ function stepAlong(down) {
       target = past(state, picked, down);
     } else {
       try { target = view.moveVertically(range, down).head; } catch { return false; }
-      if (target === range.head || settle(state, target) === target) return false;
-      target = settle(state, target);
+      if (target === range.head) return false;
+      // a browser's vertical move goes over a drawn block whole: the first one crossed is picked
+      const line = state.doc.lineAt(range.head);
+      const crossed = blocksIn(state, Math.min(range.head, target), Math.max(range.head, target))
+        .filter((block) => (down ? block.from > line.to : block.to < line.from))
+        .sort((a, b) => (down ? a.from - b.from : b.from - a.from))[0];
+      if (crossed) target = crossed.from;
+      else if (settle(state, target) === target) return false;
+      else target = settle(state, target);
     }
     view.dispatch({ selection: { anchor: target }, scrollIntoView: true, userEvent: 'select' });
     return true;
@@ -1208,13 +1215,9 @@ function stepAlong(down) {
  * Typing at a drawn block starts a line after it and types there: the block's own
  * line is never typed into, so a picture keeps its line whole.
  */
-const typeNextToBlock = EditorView.inputHandler.of((view, from, to, text) => {
+/** Type `text` on a paragraph of its own after `block`, a blank line either side. */
+function typeAfter(view, block, text) {
   const { state } = view;
-  const range = state.selection.main;
-  if (state.readOnly || from !== to || !text || !range.empty || range.head !== from) return false;
-  const block = blocksIn(state, from).find((item) => item.from === from || item.to === from);
-  if (!block) return false;
-  if (!text.trim()) return true;
   const last = state.doc.lineAt(block.to);
   const following = last.number < state.doc.lines ? state.doc.line(last.number + 1) : null;
   const insert = `\n\n${text}${following?.text.trim() ? '\n' : ''}`;
@@ -1224,7 +1227,34 @@ const typeNextToBlock = EditorView.inputHandler.of((view, from, to, text) => {
     scrollIntoView: true,
     userEvent: 'input.type',
   });
+}
+
+const typeNextToBlock = EditorView.inputHandler.of((view, from, to, text) => {
+  const { state } = view;
+  const range = state.selection.main;
+  if (state.readOnly || from !== to || !text || !range.empty || range.head !== from) return false;
+  const block = blocksIn(state, from).find((item) => item.from === from || item.to === from);
+  if (!block) return false;
+  if (!text.trim()) return true;
+  typeAfter(view, block, text);
   return true;
+});
+
+/**
+ * A key typed while a block is picked, read before the browser types it: the caret
+ * the browser keeps is not at the block (it cannot stand inside a drawn one), so
+ * the text it would type lands on the line after, glued to the block's own.
+ */
+const typeOnPicked = EditorView.domEventHandlers({
+  keydown(event, view) {
+    if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.key.length !== 1) return false;
+    if (view.state.readOnly || !view.state.field(focused, false)) return false;
+    const block = pickedBlock(view.state);
+    if (!block) return false;
+    event.preventDefault();
+    if (event.key.trim()) typeAfter(view, block, event.key);
+    return true;
+  },
 });
 
 const blockKeys = Prec.high(keymap.of([
@@ -1622,7 +1652,7 @@ const pickedClass = EditorView.editorAttributes.compute(['selection', focused, o
   state.field(focused, false) && pickedBlock(state) ? { class: 'cm-block-picking' } : {}
 ));
 
-const drawnMode = [openBlock, drawn, typeOverHints, typeNextToBlock, pickedClass, blockKeys];
+const drawnMode = [openBlock, drawn, typeOverHints, typeNextToBlock, Prec.high(typeOnPicked), pickedClass, blockKeys];
 const rawMode = [rawField, syntaxHighlighting(rawHighlight)];
 
 /** `drawn` or `markdown`: how the page is shown now. */

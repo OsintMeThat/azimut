@@ -5688,8 +5688,15 @@ opens it beside its pages.
 **A note, written in place.** The note is drawn as it reads while it is typed
 (CodeMirror 6, `lib/notes/liveMarkdown.js`). A heading is set large, emphasis and links are styled, bullets are dots, `- [ ]` is a box to tick,
 and the marks come back on the line being edited. A case reference is a chip that
-opens what it names; a picture, a table, a diagram, an aligned block and an HTML
-block are drawn whole and give their source back when pressed. A callout opens a
+opens what it names; a picture, a table, a diagram, an aligned block, an HTML block,
+a chapter and the page-break and cover lines are drawn whole and stay drawn. A press
+picks one (an accent outline, a picture's bar kept up); a double press, Enter or its
+`</>` opens its source, which closes again once the cursor leaves it, and Escape closes
+it at once. While one is picked, Backspace or Delete takes it out (Undo brings it back),
+a key typed starts a paragraph of its own after it, and the arrow keys step over it
+whole, picking it on the way. The toolbar's last pair switches between **Drawn** and
+**Markdown**, the raw text with no drawing (Ctrl+Shift+M), one choice for the browser,
+every open editor following it. A callout opens a
 quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]` or `[!warning]`, in
 its colour, in the PDF too. Decimal coordinates get a ⌖ that shows them on the map.
 **@** and a few letters offer the case's records and write a chip; **/** offers

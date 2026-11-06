@@ -227,6 +227,20 @@ describe('a press on a block', () => {
 });
 
 describe('the keyboard at a picked block', () => {
+  it('types a key pressed on a picked picture on a paragraph of its own, before the browser types it', () => {
+    writing(PICTURE, FROM);
+    const event = key('H');
+    expect(event.defaultPrevented).toBe(true);
+    expect(text()).toBe('Intro\n\n[[media:m1|Roof]]\n\nH\n\nEnd');
+    expect(head()).toBe(TO + 3);
+    // a space does nothing, and a key with a modifier is left to the shortcuts
+    writing(PICTURE, FROM);
+    expect(key(' ').defaultPrevented).toBe(true);
+    expect(text()).toBe(PICTURE);
+    key('k', { altKey: true });
+    expect(text()).toBe(PICTURE);
+  });
+
   it('opens it on Enter, the cursor at the start of its source, and leaves Enter to Markdown elsewhere', () => {
     writing(PICTURE, FROM);
     const event = key('Enter');
@@ -474,6 +488,21 @@ describe('the arrow keys over a block', () => {
     view.moveVertically = vi.fn(() => { throw new Error('not laid out'); });
     expect(() => key('ArrowDown')).not.toThrow();
     expect(text()).toBe('Words\n\nMore\n\nEnd');
+  });
+
+  it('pick the block a browser\'s vertical move goes over whole, up and down', () => {
+    const doc = 'Words\n\n[[media:m1|Roof]]\n\nEnd';
+    const picture = doc.indexOf('[[media');
+    // a real layout jumps the drawn block: from the blank line above to the one below
+    writing(doc, 6);
+    view.moveVertically = vi.fn(() => EditorSelection.cursor(picture + '[[media:m1|Roof]]'.length + 1));
+    key('ArrowDown');
+    expect(head()).toBe(picture);
+    expect(view.dom.querySelector('.cm-block-picture.cm-picked')).not.toBeNull();
+    writing(doc, doc.length - 4);
+    view.moveVertically = vi.fn(() => EditorSelection.cursor(6));
+    key('ArrowUp');
+    expect(head()).toBe(picture);
   });
 
   it('are stepped into and out of a picture, a table and a diagram alike', () => {
