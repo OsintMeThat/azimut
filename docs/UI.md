@@ -5980,7 +5980,6 @@ What each tool puts, and where its *Put in “<note>”* sits:
 | Horizon | *The photo above the terrain*, the view saved first, filed once per view and size; *The viewpoint*: eye, height, looking bearing and field of view, relief source. Never a Find score or rank | Export menu, Add |
 | Detect | *The kept table*: kept and noted candidates only, under a quoted header (run and areas, analyzer, passes, threshold, cloud mask, *N kept of M candidates, P pinned*), 200 rows at most | beside Export as layer, Add |
 | Timeline, Graph | *This reading* as a picture of its plate, filed with the snapshot that freezes it (or the one open) | the *Export this reading* dialog, Add |
-| Reverse Search | *Log this search*: `Reverse search, <day time UTC>: <what> on <the engines pressed>. Result: `, the cursor left after it | under the engines |
 
 *Open in <Tool>* on a picture's bar reopens what it came from: the map at that view
 and basemap (not a tilted capture's pitch nor a dated pick), the comparison as it is

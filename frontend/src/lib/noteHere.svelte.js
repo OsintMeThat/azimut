@@ -42,8 +42,7 @@ const puts = new Map();
  * What the tool on screen can put in the pinned note, read when the note's "+" opens
  * or a tool's menu draws its row. `offers` is a function answering a list (or the
  * list itself) of `{ id, label, hint, icon, picture?, busy?, put({ signal }) }`, where
- * `put` files what it must and answers `{ text, filed?, inline?, caret? }`, `caret`
- * leaving the cursor after the text for the analyst to go on writing
+ * `put` files what it must and answers `{ text, filed?, inline? }`
  * (`lib/notes/putInNote.svelte.js`). Only what applies to what is on screen is listed.
  */
 export function offerPuts(tool, offers) {

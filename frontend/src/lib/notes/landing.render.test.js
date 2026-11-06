@@ -82,19 +82,6 @@ describe('a put landing in the note', () => {
     expect(view.state.selection.main.head).toBe(2);
   });
 
-  it('leaves the cursor right after the text when it is to be typed on from, wherever the note’s cursor was', () => {
-    editor('One\n\nTwo');
-    view.dispatch({ selection: { anchor: 0 } });
-    const landed = placeText(view, view.state.doc.length, 'Reverse search: Quai. Result: ', { caret: true });
-    expect(text()).toBe('One\n\nTwo\n\nReverse search: Quai. Result: \n');
-    // after the space the line ends on, before the break that follows it
-    expect(view.state.selection.main.head).toBe(text().indexOf('Result: ') + 'Result: '.length);
-    view.dispatch({ changes: { from: view.state.selection.main.head, insert: 'nothing found' } });
-    expect(text()).toContain('Result: nothing found\n');
-    // once the analyst has typed in it, Undo leaves it alone
-    expect(takeBackRange(view, landed)).toBe(false);
-  });
-
   it('is taken back whole, as long as it is unchanged', () => {
     editor('Words');
     const landed = placeText(view, 5, '> quoted\n\n| A |\n| --- |');
