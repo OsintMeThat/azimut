@@ -106,9 +106,14 @@ class SceneIn(BaseModel):
     """When in its video a proof happens: its moments, each ``{start, end}`` with
     ``end`` null for an instant. None puts it back at the frames it was built on.
     Read by `scenes._stated_moments`, which refuses what is not a time rather than
-    letting Pydantic turn ``true`` into 1."""
+    letting Pydantic turn ``true`` into 1.
+
+    ``video`` moves the ★ to another video a panel was cut from, and ``draft`` names
+    the Inspect scene the proof takes up. Left out, each stays as it is."""
 
     moments: Any
+    video: Any = None
+    draft: Any = None
 
 
 def _now() -> str:
@@ -693,7 +698,7 @@ _STATED_BY = "proof"
 #: What the statement holds when nothing but this save has touched it. A Claim that
 #: has grown reasoning, a quote or a confidence is the analyst's own work by then,
 #: and clearing a date in the composer must not delete it.
-_OURS = {"when", "when_zone", "time_role", _STATED_BY}
+_OURS = {"when", "when_zone", "time_role", "span", _STATED_BY}
 
 
 def _source_material(case: Case, spec: dict[str, Any]) -> list[dict[str, Any]]:
@@ -708,6 +713,25 @@ def _source_material(case: Case, spec: dict[str, Any]) -> list[dict[str, Any]]:
     paths = [p.get("src") for p in spec.get("panels", []) if p.get("src")]
     found, _missing = link_engine.resolve(case, paths + _material_paths(spec))
     return link_engine.collected_roots(case, found)
+
+
+def _dated_material(
+    case: Case, spec: dict[str, Any]
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """What a proof's date is about, and the moments of it, if the proof states any.
+
+    A proof about a video (its ★, `scenes.star_video`) dates that video alone. An
+    old clip often confirms a new fact, so another video among the panels, a photo or
+    a second angle never takes the date. The span says where in the video: the
+    moments the proof states, and none for the whole of it. A proof that rests on no
+    video dates everything it rests on, as it always has.
+    """
+    video, moments = scene_engine.star_video(case, spec)
+    if video is None:
+        return _source_material(case, spec), None
+    found, _missing = link_engine.resolve(case, [video])
+    span = {"path": video, "moments": moments} if moments else None
+    return link_engine.collected_roots(case, found), span
 
 
 def _dating_label(name: str) -> str:
@@ -735,14 +759,16 @@ def _date_the_material(
     reports. Both readings then sit side by side on that file's Time panel, the
     statement above the file's own dates.
 
-    One statement per proof, about every source at once. A proof states one date, and
-    one statement about three files says exactly that, where three statements would
-    read as three findings and would have to be kept in step by hand.
+    One statement per proof. A proof about a video states its date for that video
+    alone, over the moments it shows the place in (``span``); one that rests on no
+    video states it about every source at once. A proof states one date, and one
+    statement about three files says exactly that, where three statements would read
+    as three findings and would have to be kept in step by hand.
     """
     standing = case.find_entity(attr=_STATED_BY, value=old_rel or rel)
     if standing is not None and standing.get("type") != "claim":
         standing = None
-    sources = _source_material(case, spec) if when else []
+    sources, span = _dated_material(case, spec) if when else ([], None)
     if not sources:
         # The date is gone, or nothing collected is left under the proof. The
         # statement goes with it — unless it has grown past what this save wrote,
@@ -771,12 +797,51 @@ def _date_the_material(
             # What the file shows, as read by whoever composed the proof. The same
             # role the Timeline's own "this media was captured" correction uses.
             "time_role": "observed",
+            # where in the video, when the proof says
+            **({"span": span} if span else {}),
             _STATED_BY: rel,
         },
         connectors={"about": [e["id"] for e in sources], "at": [], "cites": [proof_id]},
         by="proof-composer",
     )
     return [str(e.get("label") or "") for e in sources]
+
+
+def _restate_dated_moments(case: Case, name: str) -> None:
+    """Carry a proof's new moments, or its new ★ video, onto the date it states.
+
+    The scene route writes the time and nothing else, so only what the time decides
+    moves: the span and the video the statement is about. Its date, its words and
+    whatever the analyst added stay as they are, and a proof that states no date yet
+    gets none here: its next save states it.
+    """
+    rel = layout.proof_spec_rel(name)
+    standing = case.find_entity(attr=_STATED_BY, value=rel)
+    proof = case.find_entity(attr="spec", value=rel)
+    if standing is None or standing.get("type") != "claim" or proof is None:
+        return
+    sources, span = _dated_material(case, read_spec(case, proof))
+    if not sources:
+        return
+    attrs = dict(standing.get("attrs") or {})
+    attrs.pop("span", None)
+    if span:
+        attrs["span"] = span
+    about = [e["id"] for e in sources]
+    held = [
+        link["to"]
+        for link in case.links_of(standing["id"])
+        if link["type"] == "about" and link["from"] == standing["id"]
+    ]
+    if attrs == (standing.get("attrs") or {}) and sorted(held) == sorted(about):
+        return
+    case.save_temporal_claim(
+        entity_id=standing["id"],
+        label=standing["label"],
+        attrs=attrs,
+        connectors={"about": about},
+        by="proof-composer",
+    )
 
 
 def _material_paths(spec: dict[str, Any]) -> list[str]:
@@ -906,20 +971,24 @@ def save_proof_place(case_id: str, name: str) -> list[dict[str, Any]]:
 
 @router.put("/cases/{case_id}/proofs/{name}/scene")
 def state_proof_scene(case_id: str, name: str, body: SceneIn) -> dict[str, Any]:
-    """Say when in its video a proof happens. Writes the proof's scene and nothing else."""
+    """Say when in its video a proof happens. Writes the proof's scene, and the moments
+    the date it states is about (`_restate_dated_moments`)."""
     case = get_case(case_id)
     try:
         case.resolve_inside(layout.proof_spec_rel(name))
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     try:
-        return scene_engine.state_proof_scene(case, name, body.moments)
+        scene = scene_engine.state_proof_scene(case, name, body.moments, body.video, body.draft)
     except scene_engine.UnknownProof as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except scene_engine.BadTime as exc:
+    except scene_engine.BadScene as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except CaseError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # The date the proof states is about its moments: they moved, so it follows.
+    _restate_dated_moments(case, name)
+    return scene
 
 
 def read_spec(case: Case, proof: dict[str, Any]) -> dict[str, Any]:

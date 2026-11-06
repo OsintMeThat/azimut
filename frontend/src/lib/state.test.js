@@ -405,6 +405,7 @@ describe('case request ownership', () => {
       composeQueue: ['media/a.jpg'],
       postProof: { title: 'x' },
       openProof: 'proof-a',
+      proofScene: { video: 'media/a.mp4', moments: [], draft: 'sc_1', panels: ['media/a.png'], label: '' },
       openDraft: 'draft-a',
       openNotebook: { noteId: 'note-a' },
       inspectPath: 'media/a.jpg',

@@ -1,5 +1,6 @@
 <script>
   import { previewStyle, cropImgStyle, styleText } from '../../lib/inspect.js';
+  import { inScenes } from '../../lib/sceneFrames.js';
   import Icon from '../../components/Icon.svelte';
 
   // What has been cut from the open file, left to right in the order it was cut.
@@ -9,6 +10,10 @@
   //
   // A tile's top-left corner says whether the frame is in the case. Until it is, the
   // corner is a save press, so filing a capture never means opening it first.
+  //
+  // A frame inside a scene carries a dot in its colour, one per scene, and one a
+  // proof lays out says so on hover (`lib/sceneFrames.js`). A clip with no scene
+  // shows the strip it always did.
   let {
     source,
     sourceThumb = null,
@@ -19,6 +24,8 @@
     busyIds = new Set(),
     removable = true,
     savingAll = false,
+    dots = new Map(),
+    uses = new Map(),
     onselect,
     onremove,
     onsave,
@@ -34,6 +41,10 @@
   }
 
   const label = (fr, i) => (fr.time != null ? `Frame ${i + 1} at ${stamp(fr.time)}` : `Frame ${i + 1}`);
+  const hover = (fr, i) => [label(fr, i), uses.get(fr.id)].filter(Boolean).join('\n');
+
+  /** The dots a tile draws: three at most, the scenes past them named on hover. */
+  const DOTS_SHOWN = 3;
 </script>
 
 <div class="strip" aria-label="Frames" data-guide="inspect.strip">
@@ -52,8 +63,9 @@
   {#each frames as fr, i (fr.id)}
     {@const look = previewStyle(filters, fr.adjust)}
     {@const filed = filedIds.has(fr.id)}
+    {@const held = dots.get(fr.id) ?? []}
     <div class="tile" class:active={selected === fr.id}>
-      <button class="pick" onclick={() => onselect(fr.id)} title={label(fr, i)} aria-label={label(fr, i)}>
+      <button class="pick" onclick={() => onselect(fr.id)} title={hover(fr, i)} aria-label={label(fr, i)}>
         {#if fr.url}
           <span class="crop">
             <img src={fr.url} alt="" style={styleText(cropImgStyle(fr.crop))} style:filter={look.filter} />
@@ -64,6 +76,11 @@
           <span class="spinner" aria-hidden="true"></span>
         {/if}
         <span class="num">{fr.time != null ? stamp(fr.time) : i + 1}</span>
+        {#if held.length}
+          <span class="scene-dots" title={inScenes(held)} data-testid="scene-dots">
+            {#each held.slice(0, DOTS_SHOWN) as sc (sc.key)}<span class="scene-dot" style:background={sc.color}></span>{/each}
+          </span>
+        {/if}
         {#if filed}
           <span class="mark filed" title="In the case"><Icon name="check" size={10} /></span>
         {/if}
@@ -168,6 +185,19 @@
     color: #fff;
     font-size: 10px;
     font-family: var(--font-mono);
+  }
+  .scene-dots {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    display: flex;
+    gap: 2px;
+  }
+  .scene-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1.5px rgba(10, 10, 10, 0.65);
   }
   .mark {
     position: absolute;

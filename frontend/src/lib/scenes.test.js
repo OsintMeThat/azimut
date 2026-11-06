@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   WHOLE_VIDEO, defaultEnd, editClock, isStretch, isWholeVideo, momentKey, momentsClash, newScene, parseClock,
   sameMoments, sameTime, sceneList, shortClock, sceneMarks, scenePassage, sceneStart, sceneTime, sceneTitle,
-  sceneToEnd, snapToFrame, sortMoments, spanLabel, stretchFromShot, takenDrafts, timeProblem, timeWords,
+  sceneToEnd, shortMoments, snapToFrame, sortMoments, spanLabel, stretchFromShot, timeProblem, timeWords,
 } from './scenes.js';
 
 const proof = (name, extra = {}) => ({
@@ -38,6 +38,12 @@ describe('a scene\'s time', () => {
     expect(sceneStart(proof('P', { moments: [m(5, 8), m(40)], at: [2] }))).toBe(5);
     expect(sceneStart(proof('P'))).toBeNull();
     expect(sceneStart(draft('a', null))).toBeNull();
+  });
+
+  it('shows moments the way a row does, wherever they are shown', () => {
+    expect(shortMoments([m(130, 158)])).toBe('2:10–2:38');
+    expect(shortMoments([m(30, 45), m(100), m(190, 200)])).toBe('0:30–0:45 +2');
+    expect(shortMoments([])).toBe(WHOLE_VIDEO);
   });
 
   it('shows each moment, and counts them past two', () => {
@@ -85,10 +91,13 @@ describe('sceneList', () => {
     expect(list.map((s) => s.key)).toEqual(['sc_all', 'proof:Early', 'sc_1']);
   });
 
-  it('leaves out a draft a proof has taken up, and says which', () => {
+  it('leaves out a draft a proof has taken up, and shows it again once the proof is gone', () => {
     const listed = [proof('Bridge', { moments: [m(21, 24)], stated: true, draft: 'sc_1' })];
-    expect(sceneList(listed, [draft('sc_1', 20, 25), draft('sc_2', 50)]).map((s) => s.key)).toEqual(['proof:Bridge', 'sc_2']);
-    expect(takenDrafts(listed)).toEqual(new Set(['sc_1']));
+    const drafts = [draft('sc_1', 20, 25), draft('sc_2', 50)];
+    expect(sceneList(listed, drafts).map((s) => s.key)).toEqual(['proof:Bridge', 'sc_2']);
+    expect(sceneList([], drafts).map((s) => [s.key, s.start, s.end])).toEqual([['sc_1', 20, 25], ['sc_2', 50, null]]);
+    // taken up by a proof about another video now, which the server names
+    expect(sceneList([], drafts, ['sc_2']).map((s) => s.key)).toEqual(['sc_1']);
   });
 
   it('takes the drafts from the open work, not the server', () => {

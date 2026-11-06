@@ -57,12 +57,14 @@ from .store import folders as folder_store
 from .store import merges as merge_store
 from .store.migrations import _SQLITE_MIGRATIONS
 from .store.rows import (
+    _CLAIM_ATTRS_ROW_SQL,
     _FROM_ABOVE_FILE_SQL,
     _PRODUCED_HERE_SQL,
     _PRODUCED_HERE_ROW_SQL,
     _MEDIA_CATEGORIES,
     _MEDIA_CATEGORY_SQL,
     _UNUSED_SQL,
+    _claim_span,
     _entity_search_text,
     _folder_of,
     _normalise_media_item,
@@ -2588,7 +2590,10 @@ class SqliteCase:
         row: sqlite3.Row, connectors: dict[str, dict[str, list[dict[str, str]]]]
     ) -> dict[str, Any]:
         joined = connectors.get(row["owner_id"], {})
+        span = _claim_span(row["claim_attrs"])
         return {
+            # where in a video a dated proof's Claim is about (`api/proofs.py`)
+            **({"span": span} if span else {}),
             "id": row["id"],
             "owner_id": row["owner_id"],
             "authority": row["authority"],
@@ -2724,6 +2729,7 @@ class SqliteCase:
                     f" ROW_NUMBER() OVER (ORDER BY {group_sql}, {stamp_sql}, t.id) - 1 AS rn"
                     f" FROM temporal_items t{clause})"
                     " SELECT t.*, e.label, e.type AS owner_type,"
+                    f" {_CLAIM_ATTRS_ROW_SQL} AS claim_attrs,"
                     f" {_PRODUCED_HERE_ROW_SQL} AS produced_here FROM ranked"
                     " JOIN temporal_items t ON t.id = ranked.ranked_id"
                     " JOIN entities e ON e.id = t.owner_id"
@@ -2733,6 +2739,7 @@ class SqliteCase:
             else:
                 rows = conn.execute(
                     "SELECT t.*, e.label, e.type AS owner_type,"
+                    f" {_CLAIM_ATTRS_ROW_SQL} AS claim_attrs,"
                     f" {_PRODUCED_HERE_ROW_SQL} AS produced_here FROM temporal_items t"
                     " JOIN entities e ON e.id = t.owner_id"
                     f"{clause} ORDER BY {group_sql}, {stamp_sql}, t.id LIMIT ?",

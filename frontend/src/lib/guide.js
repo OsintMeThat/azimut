@@ -304,7 +304,7 @@ export const PAGES = {
       {
         anchor: 'inspect.strip',
         title: 'The strip',
-        text: 'The video first, then the frames cut from it. A frame can be adjusted, cropped or analysed.',
+        text: 'The video first, then the frames cut from it, dotted in the colour of the scene they fall in. A frame can be adjusted, cropped or analysed.',
         opens: {
           shot: 'inspect-analyze',
           lead: 'Analyze reads a frame or a picture, and the searches that start from it.',

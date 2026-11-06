@@ -137,6 +137,27 @@ _PRODUCED_HERE_ROW_SQL = (
     f" WHERE produced.entity_id = t.owner_id AND {_PRODUCED_HERE_SQL})"
 )
 
+#: A timeline row's owner's attributes when it is a Claim, read for its ``span``
+#: (`_claim_span`), and nothing for every other row.
+_CLAIM_ATTRS_ROW_SQL = "CASE WHEN e.type = 'claim' THEN e.attrs_json END"
+
+
+def _claim_span(attrs_json: str | None) -> dict[str, Any] | None:
+    """Where in a video a Claim's date holds: ``{path, moments}``, or None.
+
+    A dated proof states it on the Claim about its video (`api/proofs.py`), and the
+    file's Time panel prints the moments beside the date.
+    """
+    if not attrs_json or '"span"' not in attrs_json:
+        return None
+    try:
+        span = json.loads(attrs_json).get("span")
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(span, dict) or not isinstance(span.get("moments"), list):
+        return None
+    return span
+
 #: Whether the entity ``file`` pictures the ground from above (`FROM_ABOVE`): a
 #: capture, or a file one of those routes made. The Timeline's two file lanes split on it.
 _FROM_ABOVE_FILE_SQL = (

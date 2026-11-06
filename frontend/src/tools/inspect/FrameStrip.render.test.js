@@ -130,3 +130,32 @@ describe('saving a frame from its tile', () => {
     expect(saves()).toHaveLength(0);
   });
 });
+
+describe('the scenes a frame falls in', () => {
+  const dot = (key, color, title) => ({ key, color, title });
+
+  it('draws a dot per scene in its colour, three at most, named on hover', () => {
+    show({
+      frames: [frame('a', 1), frame('b', 2)],
+      dots: new Map([['a', [dot('sc_1', 'red', 'Bridge?'), dot('proof:p', 'blue', 'Proof 29'), dot('sc_2', 'green', 'x'), dot('sc_3', 'gold', 'y')]]]),
+    });
+
+    const [first, second] = target.querySelectorAll('.strip > div.tile');
+    const dots = first.querySelectorAll('.scene-dot');
+    expect([...dots].map((d) => d.style.background)).toEqual(['red', 'blue', 'green']);
+    expect(first.querySelector('[data-testid="scene-dots"]').title).toBe('In Bridge?, Proof 29, x and y');
+    // a frame in no scene is the tile it always was
+    expect(second.querySelector('.scene-dots')).toBeNull();
+  });
+
+  it('says on hover which proofs lay a frame out, and keeps its name for a screen reader', () => {
+    show({ frames: [frame('a', 12.4), frame('b', 75)], uses: new Map([['a', 'Used in Proof 29']]) });
+
+    const [first, second] = target.querySelectorAll('.pick');
+    expect(first.title).toBe('Frame 1 at 0:12.4\nUsed in Proof 29');
+    expect(first.getAttribute('aria-label')).toBe('Frame 1 at 0:12.4');
+    expect(second.title).toBe('Frame 2 at 1:15.0');
+    // no badge of its own: the strip stays as light as it was
+    expect(target.querySelectorAll('.mark')).toHaveLength(2);
+  });
+});

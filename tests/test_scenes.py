@@ -11,6 +11,7 @@ import io
 import json
 import subprocess
 
+import graph_read
 import pytest
 from PIL import Image
 
@@ -547,4 +548,284 @@ def test_a_video_a_proof_states_its_scene_in_is_used_by_it(client, tmp_path):
     impact = client.post(f"/api/cases/{cid}/delete-impact", json={"paths": [other]}).json()
     assert {row["label"]: row["how"] for row in impact["touched"]} == {
         "Roundabout": ["geolocates a scene of it"],
+    }
+
+
+# -- the frames a proof lays out --------------------------------------------------------
+
+
+@needs_ffmpeg
+def test_the_scenes_name_each_frame_a_proof_lays_out(client, tmp_path):
+    """Inspect says on a frame which proofs use it, whichever video each is about."""
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    other = _video(client, cid, tmp_path, "other.mp4", pattern="testsrc2")
+    early, late, spare = (_cut(client, cid, video, t) for t in (0.5, 2.5, 3.5))
+    _proof(client, cid, "Roundabout", early, late)
+    # about the other clip, with a frame of this one to confirm the place
+    _proof(client, cid, "Bridge", _cut(client, cid, other, 1.0), late)
+
+    used = _scenes(client, cid, video)["used"]
+
+    assert used == {
+        early: [{"proof": "Roundabout", "title": "Roundabout"}],
+        late: [{"proof": "Bridge", "title": "Bridge"}, {"proof": "Roundabout", "title": "Roundabout"}],
+    }
+    assert spare not in used
+    assert list(_scenes(client, cid, other)["used"]) == [next(iter(
+        p["src"] for p in json.loads(_spec(cid, "Bridge").read_text(encoding="utf-8"))["panels"]
+    ))]
+
+
+# -- the video and the draft a proof's scene names ----------------------------------------
+
+
+@needs_ffmpeg
+def test_the_star_moves_to_another_video_a_panel_was_cut_from(client, tmp_path):
+    cid = _case(client)
+    first = _video(client, cid, tmp_path, "first.mp4")
+    second = _video(client, cid, tmp_path, "second.mp4", pattern="testsrc2")
+    third = _video(client, cid, tmp_path, "third.mp4", pattern="smptebars")
+    _proof(client, cid, "Depot", _cut(client, cid, first, 1.0), _cut(client, cid, second, 2.0))
+    before = _spec(cid, "Depot").read_bytes()
+
+    res = client.put(f"/api/cases/{cid}/proofs/Depot/scene", json={"moments": [{"start": 0.5, "end": 1.5}], "video": second})
+    assert res.status_code == 200, res.text
+    assert (res.json()["video"], res.json()["at"]) == (second, [pytest.approx(2.0, abs=0.11)])
+    assert [s["proof"] for s in _scenes(client, cid, second)["scenes"]] == ["Depot"]
+    assert _scenes(client, cid, first)["scenes"] == []
+
+    # a clip the proof has nothing from, a photo, a file not in the case, or not a path
+    photo = _upload_png(client, cid)
+    for video in (third, photo, "media/nothing.mp4", "", 7):
+        res = client.put(f"/api/cases/{cid}/proofs/Depot/scene", json={"moments": [], "video": video})
+        assert res.status_code == 422, (video, res.text)
+    assert json.loads(_spec(cid, "Depot").read_text(encoding="utf-8"))["scene"]["video"] == second
+
+    # back on the clip its first frame names, with no time: the proof it was, byte for byte
+    assert client.put(f"/api/cases/{cid}/proofs/Depot/scene", json={"moments": [], "video": first}).status_code == 200
+    assert _spec(cid, "Depot").read_bytes() == before
+
+
+@needs_ffmpeg
+def test_a_proof_takes_up_one_draft_once(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save_work(client, cid, video, scenes=[
+        {"id": "s1", "start": 0.2, "end": 1.0, "label": "Roundabout?"},
+        {"id": "s2", "start": 2.0, "end": 3.5, "label": "Bridge?"},
+    ])
+    _proof(client, cid, "Bridge", _cut(client, cid, video, 2.5))
+
+    def put(**body):
+        return client.put(f"/api/cases/{cid}/proofs/Bridge/scene", json={"moments": [{"start": 2.0, "end": 3.5}], **body})
+
+    res = put(draft="s2", video=video)
+    assert res.status_code == 200, res.text
+    assert res.json()["draft"] == "s2"
+    assert [(s["kind"], s.get("id") or s.get("proof")) for s in _scenes(client, cid, video)["scenes"]] == [
+        ("draft", "s1"), ("proof", "Bridge"),
+    ]
+    # said again it changes nothing, and left out it stays
+    assert put(draft="s2").status_code == 200
+    assert put().json()["draft"] == "s2"
+    # another one is refused: the proof already took a scene up
+    assert put(draft="s1").status_code == 409
+    for bad in (7, "", "x" * 65, ["s1"]):
+        assert put(draft=bad).status_code == 422, bad
+    assert json.loads(_spec(cid, "Bridge").read_text(encoding="utf-8"))["scene"]["draft"] == "s2"
+
+
+@needs_ffmpeg
+def test_a_draft_comes_back_with_its_proof_in_the_trash_and_goes_with_it_restored(client, tmp_path):
+    """Deleting a proof gives its scene back to geolocate, at its own time."""
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    drafts = [{"id": "s2", "start": 2.0, "end": 3.5, "label": "Bridge?"}]
+    _save_work(client, cid, video, scenes=drafts)
+    _proof(client, cid, "Bridge", _cut(client, cid, video, 2.5))
+    client.put(f"/api/cases/{cid}/proofs/Bridge/scene", json={"moments": [{"start": 2.1, "end": 3.4}], "draft": "s2"})
+    # Inspect saving the work again keeps the draft it holds: hidden, not gone
+    _save_work(client, cid, video, scenes=drafts)
+    assert [s["kind"] for s in _scenes(client, cid, video)["scenes"]] == ["proof"]
+
+    deleted = client.delete(f"/api/cases/{cid}/proofs/Bridge")
+    assert deleted.status_code == 200, deleted.text
+    assert _scenes(client, cid, video)["scenes"] == [
+        {"kind": "draft", "id": "s2", "start": 2.0, "end": 3.5, "label": "Bridge?"},
+    ]
+
+    restored = client.post(f"/api/cases/{cid}/trash/{deleted.json()['trash']}/restore")
+    assert restored.status_code == 200, restored.text
+    [scene] = _scenes(client, cid, video)["scenes"]
+    assert (scene["kind"], scene["proof"], scene["moments"]) == ("proof", "Bridge", [{"start": 2.1, "end": 3.4}])
+    assert [s["id"] for s in _work(client, cid, video)["spec"]["scenes"]] == ["s2"]
+
+
+@needs_ffmpeg
+def test_a_draft_stays_hidden_while_its_proof_is_about_another_video(client, tmp_path):
+    cid = _case(client)
+    first = _video(client, cid, tmp_path, "first.mp4")
+    second = _video(client, cid, tmp_path, "second.mp4", pattern="testsrc2")
+    _save_work(client, cid, first, scenes=[{"id": "s1", "start": 0.5, "end": 1.5, "label": "Depot?"}])
+    _proof(client, cid, "Depot", _cut(client, cid, first, 1.0), _cut(client, cid, second, 2.0))
+    put = client.put(f"/api/cases/{cid}/proofs/Depot/scene", json={"moments": [], "video": second, "draft": "s1"})
+    assert put.status_code == 200, put.text
+
+    listed = _scenes(client, cid, first)
+    # the proof is about the second clip now; the scene it took up stays taken all the same
+    assert (listed["scenes"], listed["taken"]) == ([], ["s1"])
+    assert _scenes(client, cid, second)["taken"] == []
+
+    client.delete(f"/api/cases/{cid}/proofs/Depot")
+    listed = _scenes(client, cid, first)
+    assert ([s["id"] for s in listed["scenes"]], listed["taken"]) == (["s1"], [])
+
+
+# -- the date a proof states, about its video alone ---------------------------------------
+
+
+def _date_claim(cid, name):
+    return next(
+        e for e in graph_read.entities(cid)
+        if e["type"] == "claim" and e["attrs"].get("proof") == layout.proof_spec_rel(name)
+    )
+
+
+def _about(cid, claim_id):
+    labels = {e["id"]: e["attrs"].get("path") for e in graph_read.entities(cid)}
+    return sorted(labels[lk["to"]] for lk in graph_read.links(cid, "about") if lk["from"] == claim_id)
+
+
+@needs_ffmpeg
+def test_a_dated_proof_dates_its_video_and_never_the_one_that_confirms_it(client, tmp_path):
+    cid = _case(client)
+    first = _video(client, cid, tmp_path, "first.mp4")
+    second = _video(client, cid, tmp_path, "second.mp4", pattern="testsrc2")
+    photo = _upload_png(client, cid)
+    saved = _proof(
+        client, cid, "Depot", _cut(client, cid, first, 1.0), _cut(client, cid, second, 2.0), photo, when="2024-03-11",
+    )
+
+    claim = _date_claim(cid, "Depot")
+    assert _about(cid, claim["id"]) == [first]
+    assert saved["dated"] == [graph_read.entity(cid, path=first)["label"]]
+    # traced off its frames, the proof is about the whole video: no span
+    assert "span" not in claim["attrs"]
+
+
+@needs_ffmpeg
+def test_the_date_holds_for_the_moments_the_proof_states(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _proof(client, cid, "Roundabout", _cut(client, cid, video, 1.5), when="2024-03-11")
+    claim_id = _date_claim(cid, "Roundabout")["id"]
+
+    # the moments stated after the save reach the date at once
+    assert _state(client, cid, "Roundabout", (0.5, 1.8), 3.0).status_code == 200
+    claim = _date_claim(cid, "Roundabout")
+    assert claim["id"] == claim_id
+    assert claim["attrs"]["span"] == {"path": video, "moments": [{"start": 0.5, "end": 1.8}, {"start": 3.0, "end": None}]}
+    assert claim["attrs"]["when"] == "2024-03-11"
+    assert _about(cid, claim_id) == [video]
+
+    # the Time panel of the video reads them beside the date
+    entity = graph_read.entity(cid, path=video)
+    page = client.get(f"/api/cases/{cid}/timeline", params={"entity": entity["id"], "category": "statement"}).json()
+    [row] = [item for item in page["items"] if item["kind"] == "claim"]
+    assert row["span"]["moments"] == [{"start": 0.5, "end": 1.8}, {"start": 3.0, "end": None}]
+
+    # a save restates them as they are, and the whole video takes the span off
+    opened = client.get(f"/api/cases/{cid}/proofs/Roundabout").json()
+    client.post(f"/api/cases/{cid}/proofs", json={"rename_from": "Roundabout", "title": "Roundabout", "spec": opened})
+    assert _date_claim(cid, "Roundabout")["attrs"]["span"]["moments"][0] == {"start": 0.5, "end": 1.8}
+    assert _state(client, cid, "Roundabout").status_code == 200
+    assert "span" not in _date_claim(cid, "Roundabout")["attrs"]
+    page = client.get(f"/api/cases/{cid}/timeline", params={"entity": entity["id"], "category": "statement"}).json()
+    assert all("span" not in item for item in page["items"])
+
+
+@needs_ffmpeg
+def test_moving_the_star_moves_the_date_and_leaves_the_analysts_words(client, tmp_path):
+    cid = _case(client)
+    first = _video(client, cid, tmp_path, "first.mp4")
+    second = _video(client, cid, tmp_path, "second.mp4", pattern="testsrc2")
+    _proof(client, cid, "Depot", _cut(client, cid, first, 1.0), _cut(client, cid, second, 2.0), when="2024-03-11")
+    claim = _date_claim(cid, "Depot")
+    # the analyst rewords it and grows it a confidence: the statement is theirs now
+    Case.open(cid).update_entity(
+        claim["id"], {"label": "Filmed the day of the strike", "attrs": {"confidence": "probable"}},
+    )
+
+    res = client.put(
+        f"/api/cases/{cid}/proofs/Depot/scene", json={"moments": [{"start": 1.0, "end": 2.0}], "video": second},
+    )
+    assert res.status_code == 200, res.text
+
+    claim = _date_claim(cid, "Depot")
+    assert _about(cid, claim["id"]) == [second]
+    assert claim["attrs"]["span"] == {"path": second, "moments": [{"start": 1.0, "end": 2.0}]}
+    assert (claim["label"], claim["attrs"]["confidence"], claim["attrs"]["when"]) == (
+        "Filmed the day of the strike", "probable", "2024-03-11",
+    )
+
+
+@needs_ffmpeg
+def test_an_undated_proof_gets_no_date_from_its_moments(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _proof(client, cid, "Roundabout", _cut(client, cid, video, 1.5))
+    assert _state(client, cid, "Roundabout", (0.5, 1.8)).status_code == 200
+    assert [e for e in graph_read.entities(cid) if e["type"] == "claim"] == []
+
+
+@needs_ffmpeg
+def test_a_date_restated_by_hand_keeps_its_moments(client, tmp_path):
+    """The analyst correcting the date in the Time panel corrects the date, not the moments."""
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _proof(client, cid, "Roundabout", _cut(client, cid, video, 1.5), when="2024-03-11")
+    _state(client, cid, "Roundabout", (0.5, 1.8))
+    claim_id = _date_claim(cid, "Roundabout")["id"]
+
+    res = client.patch(f"/api/cases/{cid}/timeline/claims/{claim_id}", json={"when": "2024-03-12"})
+    assert res.status_code == 200, res.text
+
+    claim = _date_claim(cid, "Roundabout")
+    assert (claim["attrs"]["when"], claim["attrs"]["span"]["moments"]) == ("2024-03-12", [{"start": 0.5, "end": 1.8}])
+    # and a later change of moments leaves that date alone
+    assert _state(client, cid, "Roundabout", (0.5, 2.2)).status_code == 200
+    claim = _date_claim(cid, "Roundabout")
+    assert (claim["attrs"]["when"], claim["attrs"]["span"]["moments"]) == ("2024-03-12", [{"start": 0.5, "end": 2.2}])
+
+
+@needs_ffmpeg
+def test_the_date_follows_the_star_from_the_first_save_on(client, tmp_path):
+    """Geo Proof's way: a first save dates the video its panels name, then the scene it
+    was made from arrives through the scene route, and later the analyst picks another ★."""
+    cid = _case(client)
+    first = _video(client, cid, tmp_path, "first.mp4")
+    second = _video(client, cid, tmp_path, "second.mp4", pattern="testsrc2")
+    _save_work(client, cid, second, scenes=[{"id": "s1", "start": 0.5, "end": 1.5, "label": "Depot?"}])
+    _proof(client, cid, "Depot", _cut(client, cid, first, 1.0), _cut(client, cid, second, 1.0), when="2024-03-11")
+    claim_id = _date_claim(cid, "Depot")["id"]
+    assert _about(cid, claim_id) == [first]
+
+    res = client.put(
+        f"/api/cases/{cid}/proofs/Depot/scene",
+        json={"moments": [{"start": 0.5, "end": 1.5}], "video": second, "draft": "s1"},
+    )
+    assert res.status_code == 200, res.text
+    claim = _date_claim(cid, "Depot")
+    assert (claim["id"], _about(cid, claim_id)) == (claim_id, [second])
+    assert claim["attrs"]["span"] == {"path": second, "moments": [{"start": 0.5, "end": 1.5}]}
+
+    # another ★, about the whole of it: the date moves there, with no span
+    res = client.put(f"/api/cases/{cid}/proofs/Depot/scene", json={"video": first, "moments": []})
+    assert res.status_code == 200, res.text
+    claim = _date_claim(cid, "Depot")
+    assert _about(cid, claim_id) == [first]
+    assert "span" not in claim["attrs"]
+    assert json.loads(_spec(cid, "Depot").read_text(encoding="utf-8"))["scene"] == {
+        "video": first, "moments": [], "draft": "s1",
     }

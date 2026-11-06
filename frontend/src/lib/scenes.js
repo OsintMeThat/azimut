@@ -97,13 +97,15 @@ function order(scene) {
  * by its place in the clip.
  *
  * The drafts come from the open work rather than the server, so a scene kept a
- * moment ago shows before the save lands.
+ * moment ago shows before the save lands. A draft a proof took up stays in the work,
+ * hidden here, as is one the server names `taken` (a proof about another video now):
+ * the proof deleted, it is back at its own time.
  */
-export function sceneList(listed, drafts) {
+export function sceneList(listed, drafts, taken = []) {
   const proofs = (listed ?? []).filter((s) => s.kind === 'proof');
-  const taken = new Set(proofs.map((s) => s.draft).filter(Boolean));
+  const hidden = new Set([...proofs.map((s) => s.draft).filter(Boolean), ...taken]);
   const open = (drafts ?? [])
-    .filter((d) => !taken.has(d.id))
+    .filter((d) => !hidden.has(d.id))
     .map((d) => ({ kind: 'draft', id: d.id, start: d.start ?? null, end: d.end ?? null, label: d.label ?? '' }));
   return [...proofs, ...open]
     .map((scene) => ({ scene, at: order(scene) }))
@@ -113,11 +115,6 @@ export function sceneList(listed, drafts) {
       key: scene.kind === 'proof' ? `proof:${scene.proof}` : scene.id,
       color: COLORS[i % COLORS.length],
     }));
-}
-
-/** The draft ids a proof has taken up, which the work no longer needs to keep. */
-export function takenDrafts(listed) {
-  return new Set((listed ?? []).filter((s) => s.kind === 'proof' && s.draft).map((s) => s.draft));
 }
 
 /** What the bar calls a scene's moment `index`, so one moment of many is told apart. */
@@ -159,14 +156,16 @@ export function momentsTime(moments) {
 }
 
 /**
- * A scene's time as its row shows it: each moment, the rest counted past two
- * (`0:30–0:45 +2`), and Whole video when it states none.
+ * Moments as a row shows them: each one, the rest counted past two
+ * (`0:30–0:45 +2`), and Whole video for none.
  */
-export function sceneTime(scene) {
-  const moments = sceneMoments(scene);
-  if (moments.length > MOMENTS_SHOWN) return `${momentTime(moments[0])} +${moments.length - 1}`;
+export function shortMoments(moments) {
+  if (moments?.length > MOMENTS_SHOWN) return `${momentTime(moments[0])} +${moments.length - 1}`;
   return momentsTime(moments);
 }
+
+/** A scene's time as its row shows it (`shortMoments`). */
+export const sceneTime = (scene) => shortMoments(sceneMoments(scene));
 
 /** The draft to end at `time`: the latest one started before it, else none. */
 export function sceneToEnd(scenes, time) {

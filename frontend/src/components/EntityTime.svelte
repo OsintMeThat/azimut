@@ -2,6 +2,7 @@
   /** Entity-scoped temporal history. Mounted only while the Time tab is open. */
   import { api } from '../lib/api.js';
   import { changeInterval, formatTemporalValue, temporalKindLabel } from '../lib/timeline.js';
+  import { momentsTime, shortMoments } from '../lib/scenes.js';
   import { reloadCase, toast } from '../lib/state.svelte.js';
   import { openInTimeline } from '../lib/navigate.js';
   import Icon from './Icon.svelte';
@@ -105,8 +106,15 @@
     onclose?.();
   }
 
+  /** A date stated for moments of a video (a dated proof's, `span`) leads with them: `2:10–2:38 · 24 Oct 2025`. */
   function timeLabel(item) {
-    return formatTemporalValue(item.raw ?? '', item.tz, item.time_role).label;
+    const date = formatTemporalValue(item.raw ?? '', item.tz, item.time_role).label;
+    return item.span?.moments?.length ? `${shortMoments(item.span.moments)} · ${date}` : date;
+  }
+
+  function timeTitle(item) {
+    if (!item.raw) return undefined;
+    return item.span?.moments?.length ? `${momentsTime(item.span.moments)} · ${item.raw}` : item.raw;
   }
 </script>
 
@@ -118,7 +126,7 @@
         <strong>{item.label}</strong>
         <small>{temporalKindLabel(item.kind)}{#if item.time_role} · {item.time_role}{/if}{#if item.confidence} · {item.confidence}{/if}</small>
       </span>
-      <span class="time-value" class:undated={!item.raw} title={item.raw || undefined}>{timeLabel(item)}</span>
+      <span class="time-value" class:undated={!item.raw} title={timeTitle(item)}>{timeLabel(item)}</span>
     </button>
     {#if editable}
       <button class="time-row-action" aria-label={`Edit ${item.label}`} title="Edit claim" onclick={() => (editor = item)}><Icon name="edit" size={12} /></button>

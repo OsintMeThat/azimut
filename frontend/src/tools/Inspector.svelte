@@ -13,8 +13,9 @@
   import { INSPECT_HELP } from '../lib/inspectHelp.js';
   import {
     isStretch, momentKey, newScene, sameMoments, sceneList, sceneMarks, scenePassage, sceneStart, sceneTime,
-    sceneTitle, sceneToEnd, snapToFrame, stretchFromShot, takenDrafts, timeWords,
+    sceneTitle, sceneToEnd, snapToFrame, stretchFromShot, timeWords,
   } from '../lib/scenes.js';
+  import { frameScenes, frameToCapture, frameUses, framesOfScene, proofHandoff } from '../lib/sceneFrames.js';
   import { SceneEdit } from '../lib/sceneEdit.svelte.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import {
@@ -43,6 +44,7 @@
   import MomentsPanel from './inspect/MomentsPanel.svelte';
   import SceneButton from './inspect/SceneButton.svelte';
   import ScenePanel from './inspect/ScenePanel.svelte';
+  import ProofFrames from './inspect/ProofFrames.svelte';
   import SaveToCase from './inspect/SaveToCase.svelte';
   import VideoAdjust from './inspect/VideoAdjust.svelte';
   import VideoPlayer from './inspect/VideoPlayer.svelte';
@@ -227,7 +229,10 @@
       });
       if (id) refresh(id);
     } else if (id) {
-      refresh(id).then(recheckOpenFile);
+      // a proof deleted or restored meanwhile hides or gives back the scene it took up
+      refresh(id).then(recheckOpenFile).then(() => {
+        if (uiState.tool === 'inspect' && isVideo && !opening) loadScenes(openRun);
+      });
     }
   });
 
@@ -274,6 +279,9 @@
     work.activeFrameId = null;
     savedSignature = null;
     listedScenes = [];
+    takenScenes = [];
+    usedFrames = {};
+    proofChooser = null;
     sceneEdit.close();
     scenesOpen = false;
     clipHistory.reset(clipSnapshot());
@@ -559,7 +567,8 @@
    * Cut the frame a player shows at `time`. The server names it by its own
    * timestamp, which is the time the frame keeps (`snap`). It joins the strip at
    * once and its picture follows, so captures can be taken as fast as the key is
-   * pressed. Taking the frame a second time only points at it.
+   * pressed. Taking the frame a second time only points at it. Answers with the
+   * frame in the strip, or nothing when none could be cut.
    */
   async function capture(time) {
     const sourceOps = rotationOps(videoRotation);
@@ -568,7 +577,7 @@
     const twin = twinOf(time);
     if (twin) {
       already(twin);
-      return;
+      return twin;
     }
     // Two round trips, long enough on a slow video to switch file in between. The
     // frame is evidence, so a late one is dropped rather than put in another file.
@@ -591,7 +600,7 @@
           const index = work.frames.indexOf(placed);
           if (index !== -1) work.frames.splice(index, 1);
           already(twin);
-          return;
+          return twin;
         }
         placed.time = named;
       }
@@ -601,6 +610,7 @@
       const dim = await imageSize(url);
       if (run !== openRun) return;
       Object.assign(placed, { w: dim.w, h: dim.h });
+      return placed;
     } catch (e) {
       if (run !== openRun) return;
       const index = work.frames.indexOf(placed);
@@ -717,7 +727,7 @@
   // - zoom the bar's time, C captures, M marks. Holding O shows the picture without
   // its adjustments.
   function onWindowKeydown(e) {
-    if (uiState.tool !== 'inspect' || !work.source || pickerOpen || clearConfirm) return;
+    if (uiState.tool !== 'inspect' || !work.source || pickerOpen || clearConfirm || proofChooser) return;
     const t = e.target;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable) return;
     if (t.closest?.('[role="dialog"], [role="alertdialog"]')) return;
@@ -846,10 +856,16 @@
   // -- scenes -------------------------------------------------------------------------
   // Where in the clip each geolocation happens (`lib/scenes.js`): an instant, or a
   // passage once it has an end. The proofs resting on the clip come from the server;
-  // the drafts are this work's own. A draft a proof has taken up is dropped from the
-  // work, which the next save writes down.
+  // the drafts are this work's own. A draft a proof has taken up stays in the work,
+  // hidden while that proof is in the case, so deleting the proof gives it back.
   let listedScenes = $state([]);
-  const scenes = $derived(sceneList(listedScenes, work.scenes));
+  let takenScenes = $state([]);
+  const scenes = $derived(sceneList(listedScenes, work.scenes, takenScenes));
+  // The proofs laying out each saved frame of the clip, by the frame's path.
+  let usedFrames = $state({});
+  // What the strip marks on a frame: the scenes it falls in, and the proofs using it.
+  const frameDots = $derived(isVideo ? frameScenes(work.frames, scenes, frameDur) : new Map());
+  const frameUsed = $derived(isVideo ? frameUses(work.frames, usedFrames) : new Map());
 
   // The scene whose time is open (`lib/sceneEdit.svelte.js`). The bar draws it as
   // its fields read, with handles, before anything is kept.
@@ -885,11 +901,8 @@
       const res = await api.get(`/api/cases/${work.caseId}/scenes?video=${encodeURIComponent(path)}`);
       if (run !== openRun) return;
       listedScenes = res.scenes ?? [];
-      const taken = takenDrafts(listedScenes);
-      if (work.scenes.some((sc) => taken.has(sc.id))) {
-        work.scenes = work.scenes.filter((sc) => !taken.has(sc.id));
-        clipHistory.reset(clipSnapshot());
-      }
+      takenScenes = res.taken ?? [];
+      usedFrames = res.used ?? {};
     } catch {
       // the list is a reading: without it the drafts still show, and a reopen asks again
     }
@@ -1096,6 +1109,64 @@
       },
     } : null);
     loadScenes(run);
+  }
+
+  // -- a scene's proof ------------------------------------------------------------------
+  // Make the proof, on a scene to geolocate: its frames, all ticked, to start the
+  // proof from (`lib/sceneFrames.js`). A scene holding none captures one, the sharpest
+  // a scan found in it, else the one it starts on. Frames not in the case are saved
+  // on the way, with their default names and the last folder, then Geo Proof opens a
+  // proof of the scene on them (`uiState.proofScene`).
+  let proofChooser = $state(null); // { scene, ids, capture }
+  let makingProof = $state(false);
+  const chooserFrames = $derived(
+    proofChooser ? proofChooser.ids.map((id) => work.frames.find((f) => f.id === id)).filter(Boolean) : [],
+  );
+
+  function makeProof(scene) {
+    if (scene?.kind !== 'draft' || !isVideo || makingProof) return;
+    const frames = framesOfScene(scene, work.frames, frameDur);
+    proofChooser = {
+      scene,
+      ids: frames.map((f) => f.id),
+      capture: frames.length ? null : frameToCapture(scene, { scan, now: shownTime(), frame: frameDur }),
+    };
+  }
+
+  async function confirmProof(ids) {
+    const chooser = proofChooser;
+    if (!chooser || makingProof) return;
+    const run = openRun;
+    makingProof = true;
+    try {
+      let frames = work.frames.filter((f) => ids.includes(f.id)).sort((a, b) => a.time - b.time);
+      if (chooser.capture) {
+        const cut = await capture(chooser.capture.time);
+        if (!cut || run !== openRun) return;
+        frames = [cut];
+      }
+      if (!frames.length) return;
+      if (frames.some((f) => savingFrames.has(f.id))) throw new Error('A frame is being saved. Try again in a moment');
+      const unsaved = frames.filter((f) => !filedIds.has(f.id));
+      if (unsaved.length) {
+        markSaving(unsaved, true);
+        try {
+          await saveFrames(unsaved, { folder: lastFolder(), note: null, names: unsaved.map((f) => frameNames.get(f.id)) });
+        } finally {
+          markSaving(unsaved, false);
+        }
+      }
+      if (run !== openRun) return;
+      const panels = frames.map((f) => f.filed?.path);
+      if (!panels.every(Boolean)) throw new Error('A frame could not be saved to the case');
+      proofChooser = null;
+      uiState.proofScene = proofHandoff(chooser.scene, work.source.path, panels);
+      uiState.tool = 'proof';
+    } catch (e) {
+      if (run === openRun) toast(e.message, 'danger');
+    } finally {
+      makingProof = false;
+    }
   }
 
   // -- marks --------------------------------------------------------------------------
@@ -1462,6 +1533,7 @@
                     onend={endSceneHere}
                     onremove={removeScene}
                     onopenproof={openSceneProof}
+                    onmakeproof={makeProof}
                     onedit={editSceneTime}
                     onhere={sceneHere}
                     onkind={sceneKind}
@@ -1513,6 +1585,8 @@
             onremove={removeFrame}
             onsave={quickSaveFrame}
             onsaveall={saveAllFrames}
+            dots={frameDots}
+            uses={frameUsed}
           />
         {/if}
       </div>
@@ -1643,6 +1717,19 @@
     <Modal title="Open a file" width="720px" onclose={() => (pickerOpen = false)}>
       <SourcePicker media={inspectable} {works} caseId={caseState.current.id} current={work.source?.path} onpick={open} />
     </Modal>
+  {/if}
+
+  {#if proofChooser}
+    <ProofFrames
+      scene={proofChooser.scene}
+      frames={chooserFrames}
+      {filters}
+      {filedIds}
+      capture={proofChooser.capture}
+      busy={makingProof}
+      onconfirm={confirmProof}
+      oncancel={() => (proofChooser = null)}
+    />
   {/if}
 
   {#if clearConfirm}

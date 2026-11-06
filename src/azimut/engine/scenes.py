@@ -25,7 +25,9 @@ rename, so it is read first and the recorded path is only the fallback.
 **A scene still to prove lives in the video's Inspect work**, one instant, one
 stretch or the whole video, until a proof cites it (``scene.draft``). From then on the proof's own
 moments are the ones shown and the draft is left out, so a scene is never said
-twice, and a proof never writes into an Inspect work.
+twice, and a proof never writes into an Inspect work. The draft stays in the work
+all the same, hidden only while a proof in the case cites it: the proof sent to the
+Trash gives it back at its own time, and the proof restored takes it up again.
 """
 
 from __future__ import annotations
@@ -56,13 +58,19 @@ LOOKUP_BATCH = 500
 END_SLACK = 1.0
 #: The most moments one proof states in its video.
 MAX_MOMENTS = 20
+#: The longest Inspect scene id a proof keeps (`lib/inspect.js` `uid` is about 20).
+MAX_DRAFT_ID = 64
 
 
 class UnknownProof(LookupError):
     """No proof by that name in the case."""
 
 
-class BadTime(ValueError):
+class BadScene(ValueError):
+    """A scene a proof cannot state: a video it was not cut from, or a draft id that is not one."""
+
+
+class BadTime(BadScene):
     """A time that cannot be a scene's: not a number, negative, or out of order."""
 
 
@@ -173,6 +181,23 @@ def traced_video(spec: dict[str, Any], origins: dict[str, tuple[str, float]]) ->
     return next((origins[src][0] for src in _panel_sources(spec) if src in origins), None)
 
 
+def star_video(case: Case, spec: dict[str, Any]) -> tuple[str | None, list[dict[str, Any]]]:
+    """The video a proof is about (★) and the moments it states in it.
+
+    The one the proof states while the case holds it, with its moments, else the one
+    its first frame was cut from, about the whole of it. ``(None, [])`` for a proof
+    that rests on no video of the case. Any other video among the panels only
+    confirms the place, so this is the one a dated proof dates.
+    """
+    stated = stated_scene(spec)
+    if stated and _case_video(case, stated["video"]):
+        return stated["video"], stated["moments"]
+    traced = traced_video(spec, frame_origins(case, _panel_sources(spec)))
+    if traced and _case_video(case, traced):
+        return traced, []
+    return None, []
+
+
 def proof_scene(
     spec: dict[str, Any], origins: dict[str, tuple[str, float]]
 ) -> dict[str, Any] | None:
@@ -268,7 +293,12 @@ def video_scenes(case: Case, video: str) -> dict[str, Any]:
     """The scenes of one video, in the order they come in the clip.
 
     Proofs first resolve to the video they rest on; the drafts still waiting in the
-    video's Inspect work join them, minus any a proof has taken up.
+    video's Inspect work join them, minus any a proof in the case has taken up, even
+    one whose ★ has since moved to another video. ``taken`` names those, so Inspect
+    hides them in the work it holds too.
+
+    ``used`` names, for each frame of this video a proof lays out, the proofs that
+    do, whichever video each of them is about: Inspect says so on the frame.
     """
     entity = case.find_entity(attr="path", value=video)
     if entity is None or entity.get("type") != "media":
@@ -281,17 +311,24 @@ def video_scenes(case: Case, video: str) -> dict[str, Any]:
     origins = frame_origins(case, [src for _name, spec in specs for src in _panel_sources(spec)])
     scenes: list[dict[str, Any]] = []
     taken: set[str] = set()
+    used: dict[str, list[dict[str, str]]] = {}
     for name, spec in specs:
+        for src in dict.fromkeys(_panel_sources(spec)):
+            if src in origins and origins[src][0] == video:
+                used.setdefault(src, []).append({"proof": name, "title": spec.get("title") or name})
         scene = proof_scene(spec, origins)
-        if scene is None or scene["video"] != video:
+        if scene is None:
             continue
         if scene["draft"]:
             taken.add(scene["draft"])
-        scenes.append(_proof_row(case, name, spec, scene))
+        if scene["video"] == video:
+            scenes.append(_proof_row(case, name, spec, scene))
 
     work = inspectwork.find_work(case, video)
-    for draft in ((work or {}).get("spec") or {}).get("scenes") or []:
-        if not isinstance(draft, dict) or draft.get("id") in taken:
+    drafts = [d for d in ((work or {}).get("spec") or {}).get("scenes") or [] if isinstance(d, dict)]
+    hidden = sorted(taken & {d.get("id") for d in drafts if isinstance(d.get("id"), str)})
+    for draft in drafts:
+        if draft.get("id") in taken:
             continue
         start, end = _seconds(draft.get("start")), _seconds(draft.get("end"))
         whole = draft.get("start") is None and draft.get("end") is None
@@ -307,7 +344,7 @@ def video_scenes(case: Case, video: str) -> dict[str, Any]:
             }
         )
     scenes.sort(key=_order)
-    return {"video": video, "video_id": entity["id"], "scenes": scenes}
+    return {"video": video, "video_id": entity["id"], "scenes": scenes, "used": used, "taken": hidden}
 
 
 def _case_video(case: Case, path: str) -> bool:
@@ -378,49 +415,85 @@ def _read_proof(path: Path) -> dict[str, Any]:
 
 
 def _scene_video(
-    case: Case, spec: dict[str, Any]
+    case: Case, spec: dict[str, Any], wanted: str | None = None
 ) -> tuple[str, str | None, dict[str, tuple[str, float]]]:
-    """The video a proof's time is in: the one it states while the case holds it, else
-    the one its frames were cut from. With the traced one, and the frames' origins."""
+    """The video a proof's time is in: the one asked for, else the one it states while
+    the case holds it, else the one its frames were cut from. With the traced one, and
+    the frames' origins.
+
+    A video asked for is one of the case that a panel was cut from, or the one the
+    proof already states: the ★ moves between the videos the proof shows, never to a
+    clip it has nothing from.
+    """
     origins = frame_origins(case, _panel_sources(spec))
     traced = traced_video(spec, origins)
     stated = stated_scene(spec)
+    if wanted is not None:
+        cut_from = {origin for origin, _time in origins.values()}
+        if not _case_video(case, wanted) or (wanted not in cut_from and wanted != (stated or {}).get("video")):
+            raise BadScene("that video is not one this proof's frames were cut from")
+        return wanted, traced, origins
     video = stated["video"] if stated and _case_video(case, stated["video"]) else traced
     if video is None:
         raise CaseError("this proof rests on no video in the case")
     return video, traced, origins
 
 
-def state_proof_scene(case: Case, name: str, moments: Any) -> dict[str, Any]:
+def _wanted_video(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise BadScene("a video is named by its path in the case")
+    return value
+
+
+def _wanted_draft(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or len(value) > MAX_DRAFT_ID:
+        raise BadScene("a scene to geolocate is named by its id")
+    return value
+
+
+def state_proof_scene(
+    case: Case, name: str, moments: Any, video: Any = None, draft: Any = None
+) -> dict[str, Any]:
     """Say when in its video a proof happens, and answer with its scene as now read.
 
     ``moments`` are the instants and passages the place shows in; none takes the time
     back, so the proof sits at the frames it was built on again. Only
     ``spec["scene"]`` is written: the video it names, the moments, and the draft it
-    came from, kept as it was. The video is the one the proof states, else the one
-    its frames were cut from. A proof that ends up stating nothing its frames do not
-    say keeps no scene at all, exactly the proof it was before.
+    came from. The video is the one asked for, else the one the proof states, else
+    the one its frames were cut from. ``draft`` is the Inspect scene the proof takes
+    up, given once: a proof that already took up another one refuses it. A proof that
+    ends up stating nothing its frames do not say keeps no scene at all, exactly the
+    proof it was before.
     """
     stated_moments = _stated_moments(moments)
+    wanted = _wanted_video(video)
+    wanted_draft = _wanted_draft(draft)
 
     path = case.resolve_inside(layout.proof_spec_rel(name))
     # The clip is measured before the case is locked: ffprobe has the time it needs,
     # and nothing else waits on it.
     latest = max((m["end"] or m["start"] or 0.0 for m in stated_moments), default=None)
     if latest is not None:
-        length = _clip_length(case, _scene_video(case, _read_proof(path))[0])
+        length = _clip_length(case, _scene_video(case, _read_proof(path), wanted)[0])
         if length and latest > length + END_SLACK:
             raise BadTime("that time is past the end of the video")
 
     with case.lock:
         spec = _read_proof(path)
-        video, traced, origins = _scene_video(case, spec)
+        target, traced, origins = _scene_video(case, spec, wanted)
         stated = stated_scene(spec)
-        draft = stated["draft"] if stated else None
-        if not stated_moments and draft is None and video == traced:
+        held = stated["draft"] if stated else None
+        if wanted_draft is not None and held not in (None, wanted_draft):
+            raise CaseError("this proof already takes up another scene")
+        draft_id = wanted_draft or held
+        if not stated_moments and draft_id is None and target == traced:
             spec.pop("scene", None)
         else:
-            spec["scene"] = {"video": video, "moments": stated_moments, "draft": draft}
+            spec["scene"] = {"video": target, "moments": stated_moments, "draft": draft_id}
         media_engine.write_json_atomic(path, spec)
     # It names a video either way: the one stated, else the one its frames were cut from.
     return {"proof": name, **(proof_scene(spec, origins) or {})}

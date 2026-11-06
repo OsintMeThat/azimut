@@ -76,6 +76,11 @@ export const INSPECT_HELP = {
   captureHere: 'Capture this frame',
   seekHere: 'Go here',
 
+  // make the proof
+  proofFramesAll: 'Tick or untick every frame',
+  proofFramesMake: 'Save the ticked frames and open a proof of the scene on them',
+  proofFrameUnsaved: 'Not in the case yet, saved on the way',
+
   // analyze
   ela: 'Resave the frame as JPEG and show where it changes most',
   elaOpacity: 'How strongly the error levels cover the frame',

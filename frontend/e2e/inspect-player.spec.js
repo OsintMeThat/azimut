@@ -202,6 +202,38 @@ test('keeps a scene at the frame on screen, ends it a moment later, beside the p
   await expect.poll(() => saves.at(-1)?.spec?.scenes?.[0]?.label).toBe('bridge?');
 });
 
+test('marks a captured frame with the colour of each scene it falls in, by its time alone', async ({ page }) => {
+  const depot = {
+    kind: 'proof', proof: 'Depot', proof_id: 'e_depot', title: 'Depot', moments: [], at: [0.2],
+    stated: false, draft: null, points: [], png: null, thumb: null, when: null, when_zone: null, description: null,
+  };
+  const { saves } = await openSteps(page, { scenes: [depot] });
+  const tiles = page.locator('.strip > div.tile');
+
+  // a frame on the proof's own frame is in its scene; a capture makes no scene
+  await seekTo(page, 0.2);
+  await page.keyboard.press('c');
+  await expect(tiles).toHaveCount(1);
+  await expect(tiles.nth(0).locator('.scene-dot')).toHaveCount(1);
+  await expect(tiles.nth(0).getByTestId('scene-dots')).toHaveAttribute('title', 'In Depot');
+  await expect(page.getByRole('button', { name: /^Scenes/ })).toContainText('1');
+
+  await seekTo(page, 0.5);
+  await page.keyboard.press('s');
+  await page.keyboard.press('c');
+  await seekTo(page, 0.8);
+  await page.keyboard.press('c');
+  await expect(tiles).toHaveCount(3);
+  // the frame at the instant is in it, the one after is not, until the scene ends past it
+  await expect(tiles.nth(1).locator('.scene-dot')).toHaveCount(1);
+  await expect(tiles.nth(2).locator('.scene-dot')).toHaveCount(0);
+  await seekTo(page, 0.9);
+  await page.keyboard.press('Shift+S');
+  await expect.poll(() => saves.at(-1)?.spec?.scenes?.[0]?.end).toBeCloseTo(0.92, 1);
+  await expect(tiles.nth(2).locator('.scene-dot')).toHaveCount(1);
+  await expect(tiles.nth(2).getByTestId('scene-dots')).toHaveAttribute('title', 'In a scene to geolocate');
+});
+
 /** The scenes drawer's row for the scene at `index`, and its time opened. */
 async function openTime(page, index = 0) {
   const drawer = page.getByRole('complementary', { name: 'Scenes' });

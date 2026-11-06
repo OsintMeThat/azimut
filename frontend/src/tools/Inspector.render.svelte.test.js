@@ -65,6 +65,18 @@ vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast, reloadCase
 vi.mock('../lib/navigate.js', () => ({ openInReverseSearch: vi.fn() }));
 const deletedToast = vi.fn();
 vi.mock('../lib/trash.js', () => ({ deletedToast }));
+// The scenes drawer as far as Inspect needs it here: a row's Make the proof, which
+// hands the tool the scene to prove (the drawer's own rows are driven in its tests).
+vi.mock('./inspect/ScenePanel.svelte', () => ({
+  default: function ScenePanelStub(anchor, props) {
+    for (const scene of props.scenes.filter((sc) => sc.kind === 'draft')) {
+      const press = document.createElement('button');
+      press.textContent = `Prove ${scene.id}`;
+      press.onclick = () => props.onmakeproof?.(scene);
+      anchor.before(press);
+    }
+  },
+}));
 
 const { default: Inspector } = await import('./Inspector.svelte');
 const { workState } = await import('../lib/inspectWork.svelte.js');
@@ -645,5 +657,157 @@ describe('a capture still rendering', () => {
     const tiles = target.querySelectorAll('.strip > div.tile');
     expect(tiles).toHaveLength(1);
     expect(tiles[0].querySelector('.num').textContent).toBe('0:02.0');
+  });
+});
+
+describe('the scenes of the clip, in the strip and in a proof', () => {
+  const scenesRead = (scenes, used = {}) => {
+    get.mockImplementation(async (path) => (path.startsWith('/api/cases/case-a/scenes?')
+      ? { video: 'media/clip.mp4', video_id: 'e_clip', scenes: structuredClone(scenes), used: structuredClone(used) }
+      : getDefault(path)));
+  };
+  const keep = (frames, scenes) => {
+    saved['media/clip.mp4'] = {
+      name: 'Convoy clip',
+      title: 'Convoy clip',
+      spec: { source: { path: 'media/clip.mp4', kind: 'video' }, videoAdjust: {}, videoRotation: 0, frames, scenes, activeFrameId: null },
+    };
+  };
+  const tiles = () => [...target.querySelectorAll('.strip > div.tile')];
+  const openScenes = () => {
+    [...target.querySelectorAll('button')].find((b) => b.getAttribute('aria-expanded') !== null && b.textContent.includes('Scenes')).click();
+    flushSync();
+  };
+  const dialog = () => document.querySelector('[role="dialog"][aria-label="Make the proof"]');
+
+  beforeEach(() => {
+    uiState.tool = 'inspect';
+    delete uiState.proofScene;
+  });
+
+  it('dots a frame in each scene it falls in, and says which proof lays it out', async () => {
+    keep(
+      [{ ...frame('fr_a', 2), filed: { path: 'media/frame-a.png', signature: 'x' } }, frame('fr_b', 5.5)],
+      [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }],
+    );
+    scenesRead([], { 'media/frame-a.png': [{ proof: 'p29', title: 'Proof 29' }] });
+    await start();
+    await openFile('Convoy clip');
+    await settle(10);
+
+    const [inside, outside] = tiles();
+    expect(inside.querySelectorAll('.scene-dot')).toHaveLength(1);
+    expect(inside.querySelector('.scene-dots').title).toBe('In bridge?');
+    expect(inside.querySelector('.pick').title).toContain('Used in Proof 29');
+    expect(outside.querySelector('.scene-dots')).toBeNull();
+    expect(outside.querySelector('.pick').title).not.toContain('Used in');
+  });
+
+  it('keeps a draft a proof took up in the work, hidden, so deleting the proof gives it back', async () => {
+    keep([], [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }, { id: 'sc_2', start: 8, end: null, label: '' }]);
+    scenesRead([{ kind: 'proof', proof: 'Bridge', title: 'Bridge', moments: [{ start: 2, end: 3 }], at: [], stated: true, draft: 'sc_1' }]);
+    await start();
+    await openFile('Convoy clip');
+    await settle(10);
+    openScenes();
+
+    // one to prove: the proof's draft is not offered again
+    expect([...target.querySelectorAll('button')].map((b) => b.textContent).filter((t) => t.startsWith('Prove'))).toEqual(['Prove sc_2']);
+    press('m');
+    await afterQuiet();
+    expect(put.mock.calls.at(-1)[1].spec.scenes.map((sc) => sc.id)).toEqual(['sc_1', 'sc_2']);
+
+    const bands = () => [...target.querySelectorAll('[data-testid="scene-band"]')].map((b) => b.style.left);
+    expect(bands()).toEqual(['10%']);
+
+    // the proof sent to the Trash elsewhere: the scene is back on the bar, at its own time
+    scenesRead([]);
+    caseState.rev += 1;
+    await settle(10);
+    expect(bands()).toEqual(['5%']);
+  });
+
+  it('offers the scene\'s frames ticked, saves those not in the case, and hands the proof over', async () => {
+    keep([frame('fr_a', 2), frame('fr_b', 5.5), frame('fr_c', 3.5)], [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
+    post.mockImplementation(async (path, body) => (path.endsWith('/save-frames')
+      ? { saved: body.items.map((item, i) => ({ item: { path: `media/saved-${item.time}-${i}.png` } })) }
+      : postDefault(path, body)));
+    await start();
+    await openFile('Convoy clip');
+    await settle(10);
+    openScenes();
+    button('Prove sc_1').click();
+    flushSync();
+
+    expect(dialog()).not.toBeNull();
+    expect([...dialog().querySelectorAll('input[type="checkbox"]')].map((b) => [b.getAttribute('aria-label'), b.checked]))
+      .toEqual([['Frame at 0:02', true], ['Frame at 0:03.5', true]]);
+    [...dialog().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Make the proof').click();
+    await settle(10);
+
+    const filing = post.mock.calls.find(([path]) => path.endsWith('/save-frames'))[1];
+    expect(filing.items.map((item) => item.time)).toEqual([2, 3.5]);
+    expect(uiState.proofScene).toEqual({
+      video: 'media/clip.mp4',
+      moments: [{ start: 1, end: 4 }],
+      draft: 'sc_1',
+      panels: ['media/saved-2-0.png', 'media/saved-3.5-1.png'],
+      label: 'bridge?',
+    });
+    expect(uiState.tool).toBe('proof');
+    expect(dialog()).toBeNull();
+  });
+
+  it('captures the sharpest frame a scan found when the scene holds none', async () => {
+    keep([frame('fr_b', 9)], [{ id: 'sc_1', start: 1, end: 4, label: '' }]);
+    post.mockImplementation(async (path, body) => {
+      if (path.endsWith('/inspect/overview')) return { scan: { frames: [{ time: 2.4, score: 9, rank: 0 }, { time: 9, score: 12, rank: 1 }], shots: [] } };
+      if (path.endsWith('/save-frames')) return { saved: [{ item: { path: 'media/sharp.png' } }] };
+      return {};
+    });
+    fetch.mockImplementation(async () => new Response(new Blob(['png']), { headers: { 'X-Frame-Time': '2.400000' } }));
+    // the capture is a frame once its picture has loaded and been measured
+    vi.stubGlobal('Image', class {
+      set src(_url) {
+        Object.assign(this, { naturalWidth: 640, naturalHeight: 360 });
+        queueMicrotask(() => this.onload?.());
+      }
+    });
+    await start();
+    await openFile('Convoy clip');
+    await settle(10);
+    openScenes();
+    button('Prove sc_1').click();
+    flushSync();
+
+    expect(dialog().textContent).toContain('Captures and saves the sharpest frame of the scene, at 0:02.');
+    [...dialog().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Make the proof').click();
+    await settle(10);
+
+    expect(renders().at(-1)).toMatchObject({ path: 'media/clip.mp4', time: 2.4, snap: true });
+    expect(post.mock.calls.find(([path]) => path.endsWith('/save-frames'))[1].items.map((item) => item.time)).toEqual([2.4]);
+    expect(uiState.proofScene).toMatchObject({ draft: 'sc_1', label: '', panels: ['media/sharp.png'] });
+    expect(tiles()).toHaveLength(2);
+  });
+
+  it('stays in Inspect when a frame cannot be saved, and says why', async () => {
+    keep([frame('fr_a', 2)], [{ id: 'sc_1', start: 1, end: 4, label: '' }]);
+    post.mockImplementation(async (path, body) => {
+      if (path.endsWith('/save-frames')) throw new Error('disk full');
+      return postDefault(path, body);
+    });
+    await start();
+    await openFile('Convoy clip');
+    await settle(10);
+    openScenes();
+    button('Prove sc_1').click();
+    flushSync();
+    [...dialog().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Make the proof').click();
+    await settle(10);
+
+    expect(toast).toHaveBeenCalledWith('disk full', 'danger');
+    expect(uiState.tool).toBe('inspect');
+    expect(uiState.proofScene).toBeUndefined();
+    expect(dialog()).not.toBeNull();
   });
 });
