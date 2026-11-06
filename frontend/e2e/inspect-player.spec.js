@@ -234,14 +234,16 @@ test('marks a captured frame with the colour of each scene it falls in, by its t
   await expect(tiles.nth(2).getByTestId('scene-dots')).toHaveAttribute('title', 'In a scene to geolocate');
 });
 
-test('offers a scene on a frame captured in none, and keeps an instant there in one press', async ({ page }) => {
+test('offers a scene on a frame captured in none, the whole video or this moment, and keeps an instant there in one press', async ({ page }) => {
   const { saves } = await openSteps(page);
 
   await seekTo(page, 0.5);
   await page.keyboard.press('c');
-  const add = page.getByRole('button', { name: 'Add a scene here' });
+  const add = page.getByRole('button', { name: 'This moment' });
   await expect(add).toBeVisible();
-  await expect(page.locator('.toast', { has: add })).toContainText('Frame captured at 0:00.48');
+  const offer = page.locator('.toast', { has: add });
+  await expect(offer).toContainText('Frame captured at 0:00.48 · Add a scene');
+  await expect(offer.getByRole('button', { name: 'Whole video' })).toBeVisible();
   await add.click();
   await expect.poll(() => saves.at(-1)?.spec?.scenes).toEqual([
     { id: expect.any(String), start: expect.closeTo(0.48, 3), end: null, label: '' },

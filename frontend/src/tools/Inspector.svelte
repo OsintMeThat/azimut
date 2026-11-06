@@ -643,14 +643,22 @@
     if (frame && !before.has(frame.id)) offerScene(frame);
   }
 
+  // The analyst picks what the scene is: the whole video, the commonest answer for a
+  // clip filmed in one place, or the moment just captured. Once a scene to geolocate
+  // already says the whole video, the clip is one place and nothing more is asked.
   function offerScene(frame) {
     if (!isVideo || frame.time == null || scenesAt(frame.time, scenes, frameDur).length) return;
+    if (work.scenes.some((sc) => sc.start == null)) return;
     const run = openRun;
     const at = frame.time;
-    sceneOffer.offer(`Frame captured at ${editClock(at)}`, 'Add a scene here', () => {
+    const keep = (stretch, said) => () => {
       if (run !== openRun || scenesAt(at, scenes, frameDur).length) return;
-      keepScene({ start: at }, (scene) => `Scene kept at ${sceneTime(scene)}`);
-    });
+      keepScene(stretch, said);
+    };
+    sceneOffer.offer(`Frame captured at ${editClock(at)} · Add a scene`, [
+      { label: 'Whole video', pick: keep({ start: null, end: null }, () => 'Scene kept for the whole video') },
+      { label: 'This moment', pick: keep({ start: at }, (scene) => `Scene kept at ${sceneTime(scene)}`) },
+    ]);
   }
 
   function select(id) {

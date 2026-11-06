@@ -24,6 +24,21 @@ describe('Toasts', () => {
   });
 });
 
+describe('Toasts with a choice', () => {
+  it('renders each action of a list as its own button', () => {
+    uiState.toasts = [{
+      id: 1,
+      message: 'Frame captured at 0:02 · Add a scene',
+      kind: 'info',
+      action: [{ label: 'Whole video', onClick: vi.fn() }, { label: 'This moment', onClick: vi.fn() }],
+    }];
+    const { body } = render(Toasts);
+    expect(body).toContain('>Whole video</button>');
+    expect(body).toContain('>This moment</button>');
+    expect(body.match(/toast-action/g)).toHaveLength(2);
+  });
+});
+
 describe('Toasts and a screen reader', () => {
   it('announces toasts politely and a failure at once', () => {
     uiState.toasts = [

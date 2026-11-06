@@ -1,10 +1,11 @@
 /**
- * "Add a scene here", offered on a frame captured in no scene of its clip: the
- * Scenes button is easy to miss when Azimut is new, and the capture is the moment
- * a place is being looked at.
+ * "Add a scene", offered on a frame captured in no scene of its clip: the Scenes
+ * button is easy to miss when Azimut is new, and the capture is the moment a place
+ * is being looked at. The toast holds the choices, each its own button: the whole
+ * video, or this moment.
  *
  * One toast at most. A capture while it is up rewrites it in place and points its
- * action at that frame, so quick captures never stack. It goes by on its own, and it
+ * choices at that frame, so quick captures never stack. It goes by on its own, and it
  * keeps quiet a while after it went by unused or after a scene was kept, whichever
  * way. Gone by unused three times on one file, it stops offering for that file.
  */
@@ -45,13 +46,13 @@ export function createSceneOffer({
 
   return {
     /**
-     * Offer `label` beside `message`, `pick` run when it is pressed. Answers whether
-     * it is up.
+     * Offer `choices` beside `message`, each `{ label, pick }` a button whose `pick`
+     * runs when it is pressed. Answers whether it is up.
      */
-    offer(message, label, pick) {
+    offer(message, choices) {
       const up = held();
       if (!up && (unused >= OFFER_UNUSED || now() < quietUntil)) return false;
-      const action = {
+      const action = choices.map(({ label, pick }) => ({
         label,
         onClick: () => {
           clearTimeout(timer);
@@ -60,7 +61,7 @@ export function createSceneOffer({
           quietUntil = now() + OFFER_QUIET;
           pick();
         },
-      };
+      }));
       if (up) Object.assign(up, { message, action });
       else id = show(message, 'info', 0, action);
       clearTimeout(timer);

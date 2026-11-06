@@ -5,9 +5,12 @@
 
   const icons = { info: 'compass', ok: 'check', danger: 'alert', warn: 'alert' };
 
-  function activate(t) {
+  // A toast carries one action or a short list of them, each a button.
+  const actionsOf = (t) => (Array.isArray(t.action) ? t.action : t.action ? [t.action] : []);
+
+  function activate(t, action) {
     try {
-      t.action?.onClick?.();
+      action?.onClick?.();
     } finally {
       const index = uiState.toasts.findIndex((item) => item.id === t.id);
       if (index !== -1) uiState.toasts.splice(index, 1);
@@ -22,11 +25,11 @@
     <div class="toast {t.kind}" role={t.kind === 'danger' ? 'alert' : undefined}>
       <Icon name={icons[t.kind] ?? 'compass'} size={15} />
       <span>{t.message}</span>
-      {#if t.action}
-        <button class="toast-action" type="button" onclick={() => activate(t)}>
-          {t.action.label}
+      {#each actionsOf(t) as action, i (i)}
+        <button class="toast-action" type="button" onclick={() => activate(t, action)}>
+          {action.label}
         </button>
-      {/if}
+      {/each}
     </div>
   {/each}
 </div>

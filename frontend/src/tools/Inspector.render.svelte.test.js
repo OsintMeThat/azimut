@@ -850,7 +850,8 @@ describe('the scenes of the clip, in the strip and in a proof', () => {
 
 describe('a frame captured in no scene', () => {
   let seq = 0;
-  const offers = () => uiState.toasts.filter((t) => t.action?.label === 'Add a scene here');
+  const offers = () => uiState.toasts.filter((t) => Array.isArray(t.action) && t.action.some((a) => a.label === 'This moment'));
+  const choice = (t, label) => t.action.find((a) => a.label === label);
   const keep = (scenes) => {
     saved['media/clip.mp4'] = {
       name: 'Convoy clip',
@@ -900,14 +901,31 @@ describe('a frame captured in no scene', () => {
     await captureAt(2.01);
 
     const [offer] = offers();
-    expect(offer.message).toBe('Frame captured at 0:02');
-    offer.action.onClick();
+    expect(offer.message).toBe('Frame captured at 0:02 · Add a scene');
+    expect(offer.action.map((a) => a.label)).toEqual(['Whole video', 'This moment']);
+    choice(offer, 'This moment').onClick();
     flushSync();
 
     expect(toast).toHaveBeenCalledWith('Scene kept at 0:02', 'info', 6000, expect.objectContaining({ label: 'Undo' }));
     await afterQuiet();
     expect(put.mock.calls.at(-1)[1].spec.scenes).toEqual([{ id: expect.any(String), start: 2, end: null, label: '' }]);
     expect(target.querySelectorAll('.strip > div.tile .scene-dot')).toHaveLength(1);
+  });
+
+  it('keeps a scene about the whole video, and asks nothing more of that clip', async () => {
+    await start();
+    await openFile('Convoy clip');
+    await captureAt(2.01);
+
+    choice(offers()[0], 'Whole video').onClick();
+    flushSync();
+    expect(toast).toHaveBeenCalledWith('Scene kept for the whole video', 'info', 6000, expect.objectContaining({ label: 'Undo' }));
+    await afterQuiet();
+    expect(put.mock.calls.at(-1)[1].spec.scenes).toEqual([{ id: expect.any(String), start: null, end: null, label: '' }]);
+
+    uiState.toasts = [];
+    await captureAt(6.01);
+    expect(offers()).toEqual([]);
   });
 
   it('asks nothing of a frame already in a scene', async () => {
@@ -928,8 +946,8 @@ describe('a frame captured in no scene', () => {
 
     expect(target.querySelectorAll('.strip > div.tile')).toHaveLength(2);
     const all = offers();
-    expect(all.map((t) => t.message)).toEqual(['Frame captured at 0:08']);
-    all[0].action.onClick();
+    expect(all.map((t) => t.message)).toEqual(['Frame captured at 0:08 · Add a scene']);
+    choice(all[0], 'This moment').onClick();
     await afterQuiet();
     expect(put.mock.calls.at(-1)[1].spec.scenes.map((sc) => sc.start)).toEqual([8]);
   });
