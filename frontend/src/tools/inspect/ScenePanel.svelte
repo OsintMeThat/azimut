@@ -1,9 +1,11 @@
 <script>
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import SceneTimeEditor from '../../components/SceneTimeEditor.svelte';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
-  import { SCENE_LABEL_MAX, isWholeVideo, scenePassage, sceneTime, sceneTitle } from '../../lib/scenes.js';
+  import {
+    PROGRESS, SCENE_LABEL_MAX, isAbandoned, isWholeVideo, scenePassage, sceneTime, sceneTitle,
+  } from '../../lib/scenes.js';
 
   // The scenes of the clip, in a drawer docked beside the video: it narrows the
   // picture rather than covering it, and leaves the whole bar under both. It lists
@@ -15,19 +17,31 @@
   // instant or a passage, typed, taken from the frame on screen, or dragged on the
   // bar (`components/SceneTimeEditor`, which Geo Proof opens too). A proof may hold
   // several moments, a draft one. A press on the player hands the keys back to it,
-  // so S and the arrows act on the frame, not on a field. A scene still to prove is
-  // made into one from its row, where Make the proof is said in words under its
-  // name: Geo Proof opens on it.
+  // so S and the arrows act on the frame, not on a field.
+  //
+  // A scene still to prove says where it stands under its name: To geolocate, In
+  // progress once captures were filed for it on the map, or Geolocating while it is
+  // the one being looked for (`engine/geolocate.py`). Geolocate is its main act, in
+  // the accent, and Make the proof stays beside it: Geo Proof opens on its frames
+  // and captures. Abandon asks for a word, which may stay empty, and the scene leaves
+  // the list for the folded Abandoned group at the foot of the drawer, greyed, its
+  // word shown, and Restore there brings it back as it was.
   let {
     scenes = [],
     edit = null,
+    // `{ key, n }`: the row to bring into view and light a moment, `n` counting asks
+    focus = null,
     onadd,
     onplay,
+    ongo,
     onlabel,
     onend,
     onremove,
     onopenproof,
     onmakeproof,
+    ongeolocate,
+    onabandon,
+    onrestore,
     onedit,
     onhere,
     onkind,
@@ -42,6 +56,73 @@
   let node = $state(null);
 
   const editing = $derived(edit?.scene ? scenes.find((s) => s.key === edit.key) ?? null : null);
+  const listed = $derived(scenes.filter((s) => !isAbandoned(s)));
+  const given = $derived(scenes.filter(isAbandoned));
+
+  // The Abandoned group, folded each time the drawer opens, never remembered.
+  let showGiven = $state(false);
+  // The row asking for the word it is abandoned with, and the word so far.
+  let leaving = $state(null);
+  let reason = $state('');
+  let lit = $state(null);
+
+  function askReason(sc) {
+    leaving = sc.key;
+    reason = '';
+  }
+
+  function giveUp(sc) {
+    const word = reason.trim();
+    leaving = null;
+    onabandon?.(sc, word);
+  }
+
+  function reasonKey(e, sc) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      giveUp(sc);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      leaving = null;
+    }
+  }
+
+  // A field that opens is where the typing goes.
+  const focused = (input) => {
+    input.focus();
+  };
+
+  // A scene asked for from elsewhere (the pill, the To-do) is brought into view and
+  // lit a moment, its group unfolded when it was abandoned.
+  $effect(() => {
+    const wanted = focus;
+    if (!wanted?.key || !node) return;
+    const held = scenes.find((s) => s.key === wanted.key);
+    if (!held) return;
+    if (isAbandoned(held)) showGiven = true;
+    let timer = null;
+    tick().then(() => {
+      const row = [...node.querySelectorAll('[data-scene-key]')].find((el) => el.dataset.sceneKey === wanted.key);
+      row?.scrollIntoView?.({ block: 'nearest' });
+      lit = wanted.key;
+      timer = setTimeout(() => (lit = null), 1600);
+    });
+    return () => clearTimeout(timer);
+  });
+
+  /** Where a scene still to prove stands, in a few words. */
+  function standing(sc) {
+    const count = sc.captures?.length ?? 0;
+    const captures = count === 1 ? '1 capture' : `${count} captures`;
+    if (sc.geolocating) return count ? `Geolocating · ${captures}` : 'Geolocating';
+    return sc.state === PROGRESS ? `In progress · ${captures}` : 'To geolocate';
+  }
+
+  function standingTip(sc) {
+    if (sc.geolocating) return INSPECT_HELP.sceneGeolocating;
+    return sc.state === PROGRESS ? INSPECT_HELP.sceneInProgress : INSPECT_HELP.sceneToGeolocate;
+  }
 
   $effect(() => {
     if (!node) return;
@@ -88,15 +169,23 @@
       <Icon name="x" size={13} />
     </button>
   </div>
-  {#if !scenes.length}
+  {#if !listed.length && !given.length}
     <p class="note">Press S where something happens to geolocate. End here turns it into a passage.</p>
   {/if}
   <div class="list">
-    {#each scenes as sc (sc.key)}
+    {#each listed as sc (sc.key)}
       {@const loop = scenePassage(sc)}
       {@const inHand = editing?.key === sc.key}
       {@const whole = isWholeVideo(sc)}
-      <div class="scene-row" class:open={inHand} style:--scene={sc.color} data-testid="scene-row">
+      <div
+        class="scene-row"
+        class:open={inHand}
+        class:active={sc.geolocating}
+        class:lit={lit === sc.key}
+        style:--scene={sc.color}
+        data-testid="scene-row"
+        data-scene-key={sc.key}
+      >
         <span class="swatch" aria-hidden="true"></span>
         <div class="line">
           {#if loop}
@@ -137,17 +226,50 @@
             </button>
           {/if}
         </div>
-        <!-- What a scene still to prove can become, under its time: a passage, then a proof.
-             The editor's own End takes the place of these while its time is open. -->
+        <!-- Where a scene still to prove stands, then what it can become: its place found
+             on the map, then a proof. The editor's own End takes the place of these
+             while its time is open, and the word it is abandoned with while asked. -->
         {#if sc.kind !== 'proof' && !inHand}
-          <div class="acts">
-            {#if !whole}
-              <button class="btn btn-ghost btn-xs" onclick={() => onend?.(sc.id)} title={INSPECT_HELP.sceneEnd}>End here</button>
-            {/if}
-            <button class="btn btn-ghost btn-xs make" onclick={() => onmakeproof?.(sc)} title={INSPECT_HELP.sceneMakeProof} aria-label="Make the proof">
-              <Icon name="proof" size={12} /> Make the proof
-            </button>
-          </div>
+          {#if leaving === sc.key}
+            <div class="leave" role="group" aria-label="Abandon the scene">
+              <input
+                class="input why-field"
+                dir="auto"
+                bind:value={reason}
+                maxlength={200}
+                placeholder="Why, if you like"
+                aria-label="Why it is abandoned"
+                title={INSPECT_HELP.sceneAbandonWord}
+                onkeydown={(e) => reasonKey(e, sc)}
+                use:focused
+              />
+              <button class="btn btn-xs" onclick={() => giveUp(sc)} title={INSPECT_HELP.sceneAbandonConfirm}>Abandon</button>
+              <button class="btn btn-ghost btn-xs" onclick={() => (leaving = null)}>Cancel</button>
+            </div>
+          {:else}
+            <div class="standing" class:going={sc.geolocating} class:found={sc.state === PROGRESS} title={standingTip(sc)} data-testid="scene-state">
+              {#if sc.geolocating}
+                <Icon name="crosshair" size={11} />
+              {:else if sc.state === PROGRESS}
+                <Icon name="camera" size={11} />
+              {:else}
+                <span class="ring" aria-hidden="true"></span>
+              {/if}
+              <span class="words">{standing(sc)}</span>
+              <button class="quiet" onclick={() => askReason(sc)} title={INSPECT_HELP.sceneAbandon}>Abandon</button>
+            </div>
+            <div class="acts">
+              {#if !whole}
+                <button class="btn btn-ghost btn-xs" onclick={() => onend?.(sc.id)} title={INSPECT_HELP.sceneEnd}>End here</button>
+              {/if}
+              <button class="btn btn-ghost btn-xs make" onclick={() => onmakeproof?.(sc)} title={INSPECT_HELP.sceneMakeProof} aria-label="Make the proof">
+                <Icon name="proof" size={12} /> <span class="make-words">Make the proof</span>
+              </button>
+              <button class="btn btn-xs locate" onclick={() => ongeolocate?.(sc)} title={INSPECT_HELP.sceneGeolocate}>
+                <Icon name="crosshair" size={12} /> Geolocate
+              </button>
+            </div>
+          {/if}
         {/if}
         {#if inHand}
           <div class="in-row">
@@ -166,6 +288,38 @@
         {/if}
       </div>
     {/each}
+
+    <!-- Given up on, kept where it was in the clip: folded at the foot of the drawer. -->
+    {#if given.length}
+      <div class="given" class:shown={showGiven}>
+        <button class="given-head" onclick={() => (showGiven = !showGiven)} aria-expanded={showGiven} title={INSPECT_HELP.scenesAbandoned}>
+          <Icon name={showGiven ? 'chevronDown' : 'chevronRight'} size={12} />
+          Abandoned ({given.length})
+        </button>
+        {#if showGiven}
+          {#each given as sc (sc.key)}
+            <div class="scene-row abandoned" class:lit={lit === sc.key} data-testid="scene-row-abandoned" data-scene-key={sc.key}>
+              <span class="swatch" aria-hidden="true"></span>
+              <div class="line">
+                <span class="go" aria-hidden="true"></span>
+                <button
+                  class="time mono"
+                  class:whole={isWholeVideo(sc)}
+                  onclick={() => ongo?.(sc)}
+                  title={INSPECT_HELP.sceneGo}
+                  aria-label={`Go to the scene, ${sceneTime(sc)}`}
+                >{sceneTime(sc)}</button>
+                <span class="title gone-title" class:unnamed={!sc.label} dir="auto">{sc.label || 'No label'}</span>
+                <button class="btn btn-ghost btn-xs" onclick={() => onrestore?.(sc)} title={INSPECT_HELP.sceneRestore}>Restore</button>
+              </div>
+              {#if sc.abandoned?.reason}
+                <p class="why" dir="auto">{sc.abandoned.reason}</p>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      </div>
+    {/if}
   </div>
 </aside>
 
@@ -177,6 +331,7 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    container-type: inline-size;
     border-left: 1px solid var(--border);
     background: var(--bg-1);
     color: var(--text-1);
@@ -350,7 +505,67 @@
     font-size: var(--fs-xs);
     color: var(--ok);
   }
-  /* the step a scene to prove is waiting for, its mark in the accent */
+  /* The scene being geolocated, ringed in the accent; one asked for, lit a moment. */
+  .scene-row.active {
+    padding: 3px 4px 4px 8px;
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+  .scene-row.lit {
+    animation: lit 1.6s var(--ease);
+  }
+  @keyframes lit {
+    0%, 35% { background: color-mix(in srgb, var(--scene, var(--accent)) 22%, transparent); }
+    100% { background: transparent; }
+  }
+  /* Where a scene still to prove stands, small and under its name. */
+  .standing {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 18px;
+    padding-left: 22px;
+    color: var(--text-3);
+    font-size: 10.5px;
+  }
+  .standing.found {
+    color: var(--text-2);
+  }
+  .standing.going {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .standing :global(svg) {
+    flex-shrink: 0;
+  }
+  .words {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ring {
+    flex-shrink: 0;
+    width: 9px;
+    height: 9px;
+    border: 1.5px solid currentColor;
+    border-radius: 50%;
+    opacity: 0.8;
+  }
+  .quiet {
+    flex-shrink: 0;
+    margin-left: auto;
+    padding: 1px 5px;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-size: 10.5px;
+    font-weight: 400;
+  }
+  .quiet:hover {
+    color: var(--text-1);
+    background: var(--bg-2);
+  }
+  /* the step a scene to prove may jump to, its mark in the accent */
   .make {
     margin-left: auto;
   }
@@ -360,8 +575,103 @@
   .make:hover {
     color: var(--accent);
   }
+  /* Its main act: the accent, kept soft so a list of them stays calm. */
+  .locate {
+    flex-shrink: 0;
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: var(--accent-soft);
+    color: var(--text-1);
+    font-weight: 600;
+  }
+  .locate :global(svg) {
+    color: var(--accent);
+  }
+  .locate:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+  .locate:hover :global(svg) {
+    color: var(--accent-text);
+  }
   .drop {
     flex-shrink: 0;
+  }
+  /* The word it is abandoned with, asked in its row. */
+  .leave {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-left: 22px;
+  }
+  .why-field {
+    flex: 1;
+    min-width: 0;
+    padding: 2px 6px;
+    font-size: var(--fs-xs);
+  }
+  /* The abandoned, folded at the foot of the list. */
+  .given {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 2px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+  }
+  .given-head {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px 2px 2px;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .given-head:hover {
+    color: var(--text-1);
+    background: var(--bg-2);
+  }
+  .scene-row.abandoned .swatch {
+    background: none;
+    box-shadow: inset 0 0 0 1px var(--text-3);
+  }
+  .scene-row.abandoned .time {
+    color: var(--text-3);
+  }
+  .gone-title {
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    padding: 0 4px;
+  }
+  .gone-title.unnamed {
+    color: var(--text-3);
+    font-style: italic;
+  }
+  .why {
+    margin: 0 0 2px;
+    padding-left: 22px;
+    color: var(--text-3);
+    font-size: 11px;
+    font-style: italic;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  /* a narrow drawer keeps Make the proof's mark and drops its words */
+  @container (max-width: 300px) {
+    .make-words {
+      display: none;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scene-row.lit {
+      animation: none;
+      box-shadow: inset 0 0 0 1px var(--scene, var(--accent));
+    }
   }
   /* The scene's time, opened in its own row, under its line. */
   .in-row {

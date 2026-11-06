@@ -54,9 +54,10 @@ describe('the scene being geolocated', () => {
 
 describe('Geolocate', () => {
   it('starts on the server, then hands the scene to Satellite and goes there', async () => {
-    answers.set('PUT /api/cases/c1/geolocating', { geolocating: { ...SCENE, start: 4, end: 9 } });
+    answers.set('PUT /api/cases/c1/geolocating', { geolocating: { ...SCENE, start: 4, end: 9, order: 2 } });
     await geolocateScene('c1', { video: 'media/clip.mp4', id: 's1' });
-    expect(uiState.geolocateRef).toEqual({ video: 'media/clip.mp4', draft: 's1', start: 4, end: 9, label: 'Bridge' });
+    // its place among the video's scenes, which colours its mark on the reference window
+    expect(uiState.geolocateRef).toEqual({ video: 'media/clip.mp4', draft: 's1', start: 4, end: 9, label: 'Bridge', order: 2 });
     expect(uiState.tool).toBe('satellite');
   });
 

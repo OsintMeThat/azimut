@@ -2042,6 +2042,9 @@ export async function installAppFixture(page, options = {}) {
     if (path === '/api/inspect/ops') return json(route, { filters: [], analyses: [] });
     if (path === `/api/cases/${CASE_ID}/inspect/works`) return json(route, options.inspectWorks ?? []);
     if (path === `/api/cases/${CASE_ID}/collages`) return json(route, options.collages ?? []);
+    // The scene the case is geolocating, which the pill over the tools reads when a
+    // case opens: none, unless a spec routes its own over this one.
+    if (/^\/api\/cases\/[^/]+\/geolocating$/.test(path) && request.method() === 'GET') return json(route, { geolocating: null });
     // One media file with everything its sidecar holds. The browse index leaves
     // enrichment's metadata dumps out, so the Details panel reads a file at a time.
     if (path === `/api/cases/${CASE_ID}/media/item`) {

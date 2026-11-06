@@ -43,6 +43,7 @@
   import Toasts from './components/Toasts.svelte';
   import UpdateModal from './components/UpdateModal.svelte';
   import DetectActivity from './components/DetectActivity.svelte';
+  import GeolocatingPill from './components/GeolocatingPill.svelte';
   import PlateActivity from './components/PlateActivity.svelte';
   import { plateExport } from './lib/plate/exportRun.svelte.js';
   import WorkspaceStopped from './components/WorkspaceStopped.svelte';
@@ -382,6 +383,8 @@
     <div class="case-group" data-guide="start.case">
       <CaseSwitcher />
     </div>
+    <!-- the scene the case is geolocating, beside the case it belongs to -->
+    <GeolocatingPill />
     <div class="spacer"></div>
     <DetectActivity />
     <PlateActivity />

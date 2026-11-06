@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ABANDONED, PROGRESS, TODO, isAbandoned, liveScenes, sceneColorAt,
   WHOLE_VIDEO, defaultEnd, editClock, isStretch, isWholeVideo, momentKey, momentsClash, newScene, parseClock,
   sameMoments, sameTime, sceneList, shortClock, sceneMarks, scenePassage, sceneStart, sceneTime, sceneTitle,
   sceneToEnd, shortMoments, snapToFrame, sortMoments, spanLabel, stretchFromShot, timeProblem, timeWords,
@@ -86,6 +87,14 @@ describe('sceneList', () => {
     expect(new Set(list.map((s) => s.color)).size).toBe(4);
   });
 
+  it('colours a scene by its place, as anywhere outside Inspect reads it from its order', () => {
+    const list = sceneList([proof('Early', { at: [0.5] })], [draft('a', 2), draft('b', 3), draft('c', 4), draft('d', 5), draft('e', 6), draft('f', 7)]);
+    expect(list.map((s) => s.color)).toEqual(list.map((_s, i) => sceneColorAt(i)));
+    // the palette comes round again after six
+    expect(sceneColorAt(6)).toBe(sceneColorAt(0));
+    expect(sceneColorAt(undefined)).toBe(sceneColorAt(0));
+  });
+
   it('puts a draft about the whole video first', () => {
     const list = sceneList([proof('Early', { at: [0.5] })], [draft('sc_1', 2), draft('sc_all', null, null, 'which town?')]);
     expect(list.map((s) => s.key)).toEqual(['sc_all', 'proof:Early', 'sc_1']);
@@ -102,6 +111,28 @@ describe('sceneList', () => {
 
   it('takes the drafts from the open work, not the server', () => {
     expect(sceneList([{ kind: 'draft', id: 'gone', start: 1, end: 2 }], [])).toEqual([]);
+  });
+
+  it('reads what the server alone keeps on a draft off its row: the captures gathered, and why it was left', () => {
+    const row = (id, extra) => ({ kind: 'draft', id, start: 1, end: null, label: 'stale', ...extra });
+    const list = sceneList(
+      [
+        row('sc_1', { captures: ['media/cap-1.png', 'media/cap-2.png'], abandoned: null }),
+        row('sc_2', { captures: [], abandoned: { reason: 'no landmark', at: '2026-11-06T10:00:00+00:00' } }),
+      ],
+      [draft('sc_1', 10, 12, 'bridge?'), draft('sc_2', 20), draft('sc_3', 30)],
+    );
+    expect(list.map((s) => [s.id, s.label, s.state, s.captures.length])).toEqual([
+      ['sc_1', 'bridge?', PROGRESS, 2],
+      ['sc_2', '', ABANDONED, 0],
+      // not saved yet, so not on the server: to geolocate
+      ['sc_3', '', TODO, 0],
+    ]);
+    expect(list[1].abandoned.reason).toBe('no landmark');
+    expect(list.map(isAbandoned)).toEqual([false, true, false]);
+    expect(liveScenes(list).map((s) => s.id)).toEqual(['sc_1', 'sc_3']);
+    // the abandoned keep their place in the colours, so giving one up recolours nothing
+    expect(new Set(list.map((s) => s.color)).size).toBe(3);
   });
 
   it('keeps a proof with no time at all last', () => {
@@ -132,6 +163,17 @@ describe('what the bar draws', () => {
     expect(momentKey(list.find((s) => s.key === 'sc_1'), 0)).toBe('sc_1');
   });
 
+  it('draws an abandoned scene too, flagged so the bar greys it, and names it so on hover', () => {
+    const list = sceneList(
+      [{ kind: 'draft', id: 'sc_1', start: 10, end: 12, label: 'bridge?', captures: [], abandoned: { reason: '', at: 't' } }],
+      [draft('sc_1', 10, 12, 'bridge?'), draft('sc_2', 15)],
+    );
+    expect(sceneMarks(list).map((k) => [k.key, k.abandoned ?? false, k.label])).toEqual([
+      ['sc_1', true, 'bridge? · abandoned'],
+      ['sc_2', false, 'To geolocate'],
+    ]);
+  });
+
   it('names a proof by its title and a draft by its label', () => {
     expect(sceneTitle(proof('Bridge', { title: 'Road bridge' }))).toBe('Road bridge');
     expect(sceneTitle({ kind: 'draft', label: 'bridge?' })).toBe('bridge?');
@@ -148,6 +190,14 @@ describe('sceneToEnd', () => {
     expect(sceneToEnd(list, 30).id).toBe('b');
     expect(sceneToEnd(list, 50).id).toBe('b'); // a proved scene is its proof's, never ended here
     expect(sceneToEnd(list, 2)).toBeNull(); // nor one about the whole video
+  });
+
+  it('never ends an abandoned scene', () => {
+    const list = sceneList(
+      [{ kind: 'draft', id: 'b', start: 20, end: null, label: '', captures: [], abandoned: { reason: '', at: 't' } }],
+      [draft('a', 5), draft('b', 20)],
+    );
+    expect(sceneToEnd(list, 30).id).toBe('a');
   });
 });
 

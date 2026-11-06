@@ -24,6 +24,14 @@
  *   size. The columns' widths are the session's, like everything else here.
  * - **A clip's frame rate is read when it opens**, so a frame step is one frame.
  *   Without it the window steps at the Inspect player's default rate.
+ * - **A scene being geolocated opens its video here** (`openScene`, from
+ *   `uiState.geolocateRef`): a window of that video already open is the one used,
+ *   else a new one, paused where the scene starts, its stretch marked on the bar in
+ *   the colour it has on Inspect's (by its `order`, `lib/scenes.sceneColorAt`).
+ *   Nothing loops: the analyst plays and steps as they like. The window carries it
+ *   as `scene` (`{ draft, start, end, label, color }`) and the time to show as `cue`,
+ *   both the app's own: the extension's windows are made the same way and hold
+ *   neither.
  *
  * The window's own geometry — placement, clamping, cursor-anchored zoom — is
  * `lib/refViewers.js`, and the pointer handling is `RefViewer.svelte`. This
@@ -38,6 +46,7 @@
  */
 import { clampDock, createViewer, DOCK_W, nextZ, PLACES, restack } from '../../../lib/refViewers.js';
 import { preciseClock } from '../../../lib/inspectPlayer.js';
+import { sceneColorAt } from '../../../lib/scenes.js';
 
 /** New windows step down-right so the one underneath stays grabbable, and wrap
  *  before they walk off the map. */
@@ -68,6 +77,17 @@ export function createRefsState({ api, notify, caseId, viewers, setViewers }) {
       })
     );
     return open[open.length - 1];
+  }
+
+  /** The window a scene's video is shown in: one already open on that clip. */
+  const clipWindow = (video) =>
+    viewers().find((window) => window.kind === 'video' && !window.still && window.path === video) ?? null;
+
+  /** Bring one to the front, renumbering the rest so the values stay small. */
+  function focus(id) {
+    const open = viewers();
+    const z = restack(open, id);
+    for (const window of open) window.z = z.get(window.id);
   }
 
   /** The clip's own frame rate, from the same probe Inspect reads. A probe that
@@ -181,10 +201,49 @@ export function createRefsState({ api, notify, caseId, viewers, setViewers }) {
     },
 
     /** Bring one to the front, renumbering the rest so the values stay small. */
-    focus(id) {
-      const open = viewers();
-      const z = restack(open, id);
-      for (const window of open) window.z = z.get(window.id);
+    focus,
+
+    /**
+     * The video of a scene being geolocated (`uiState.geolocateRef`), its stretch
+     * marked on the window's bar and the clip paused where the scene starts. A window
+     * already open on the clip takes it, unfolded and brought to the front; else one
+     * opens with the file's own title and facts. A scene about the whole video marks
+     * nothing and leaves the clip where it is.
+     */
+    async openScene({ video, draft, start = null, end = null, label = '', order = 0 }) {
+      const id = caseId();
+      if (!id || !video) return;
+      const at = Number.isFinite(start) ? start : null;
+      const scene = {
+        draft, start: at, end: at != null && Number.isFinite(end) && end > at ? end : null, label: label ?? '',
+        color: sceneColorAt(order),
+      };
+      const reuse = (pane) => {
+        pane.scene = scene;
+        pane.collapsed = false;
+        if (at != null) pane.cue = at;
+        focus(pane.id);
+      };
+      const open = clipWindow(video);
+      if (open) reuse(open);
+      else {
+        let item = { path: video, kind: 'video', title: video.split('/').pop() };
+        try {
+          item = { ...(await api.get(`/api/cases/${id}/media/item?path=${encodeURIComponent(video)}`)), path: video, kind: 'video' };
+        } catch {
+          // named after its file
+        }
+        if (caseId() !== id) return;
+        // a second press while the file was read finds the window the first opened
+        const opened = clipWindow(video);
+        if (opened) reuse(opened);
+        else {
+          const pane = spawn(item);
+          pane.scene = scene;
+          pane.cue = at;
+          readRate(pane);
+        }
+      }
     },
 
     close(id) {

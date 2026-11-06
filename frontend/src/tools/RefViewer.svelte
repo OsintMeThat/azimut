@@ -15,6 +15,7 @@
   import Icon from '../components/Icon.svelte';
   import RefVideoBar from './satellite/RefVideoBar.svelte';
   import { fileUrl } from '../lib/fileUrl.js';
+  import { momentTime } from '../lib/scenes.js';
   import { chromeBoxes } from '../lib/mapChrome.js';
   import {
     snapWindow,
@@ -41,6 +42,7 @@
   let video = $state();
   let bar = $state();
   let progress = $state('0%'); // a clip's hairline, at rest
+  let sceneMark = $state(null); // the scene being geolocated in the clip, marked at rest too
   let placing = $state(false); // the header showing the six places
   // The map's size and its controls, read while the window is pinned: where the
   // corner is, and what the window keeps clear of in it.
@@ -281,6 +283,13 @@
   const src = $derived(viewer.still ?? (caseId ? fileUrl(caseId, viewer.path) : null));
   const transform = $derived(`translate(${viewer.ox}px, ${viewer.oy}px) scale(${viewer.scale})`);
   const place = $derived(placeOf(viewer));
+  // A scene geolocated in the clip, named in its header beside the file's title.
+  const sceneTitle = $derived.by(() => {
+    const held = viewer.scene;
+    if (!held) return '';
+    const time = Number.isFinite(held.start) ? momentTime({ start: held.start, end: held.end }) : 'Whole video';
+    return ['Scene', held.label, time].filter(Boolean).join(' · ');
+  });
 </script>
 
 {#snippet fade()}
@@ -363,6 +372,15 @@
         {/each}
       </div>
     {:else}
+      {#if isVideo && viewer.scene}
+        <span
+          class="rv-scene-dot"
+          style:--scene={viewer.scene.color ?? 'var(--accent)'}
+          title={sceneTitle}
+          aria-label={sceneTitle}
+          role="img"
+        ></span>
+      {/if}
       <span class="rv-title" title={viewer.title}>{viewer.title || 'Reference'}</span>
     {/if}
     {#if facts && !placing}
@@ -455,11 +473,22 @@
       </div>
 
       {#if isVideo}
+        {#if sceneMark}
+          <div class="rv-scene-line" aria-hidden="true">
+            <span
+              class:pin={sceneMark.width == null}
+              style:left={sceneMark.left}
+              style:width={sceneMark.width}
+              style:--scene={sceneMark.color}
+            ></span>
+          </div>
+        {/if}
         <div class="rv-line" style:width={progress}></div>
         <div class="rv-bar clip">
           <RefVideoBar
             bind:this={bar}
             bind:progress
+            bind:sceneMark
             {video}
             {viewer}
             {fade}
@@ -708,6 +737,42 @@
   .ref-viewer:hover .rv-line,
   .ref-viewer.see-through .rv-line {
     opacity: 0;
+  }
+  /* At rest the scene keeps its mark along the bottom edge, under the hairline. */
+  .rv-scene-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 4px;
+    pointer-events: none;
+    transition: opacity 0.14s;
+  }
+  .rv-scene-line span {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    min-width: 3px;
+    background: var(--scene);
+    opacity: 0.85;
+  }
+  .rv-scene-line span.pin {
+    width: 2px;
+    min-width: 0;
+    margin-left: -1px;
+    opacity: 1;
+  }
+  .ref-viewer:hover .rv-scene-line,
+  .ref-viewer.see-through .rv-scene-line {
+    opacity: 0;
+  }
+  .rv-scene-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--scene);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--scene) 30%, transparent);
   }
   .rv-gap {
     flex: 1;

@@ -19,6 +19,13 @@ import { DEFAULT_FPS } from './inspectPlayer.js';
 /** Scene colours, cycled in clip order, from the annotation palette. */
 const COLORS = ['var(--anno-2)', 'var(--anno-1)', 'var(--anno-4)', 'var(--anno-6)', 'var(--anno-5)', 'var(--anno-3)'];
 
+/**
+ * The colour of the scene at `order` among its video's scenes, proofs included: the
+ * one Inspect's bar draws it in. The server gives a scene to prove its `order`
+ * (`engine/geolocate.py`), so the pill and the reference window match the bar.
+ */
+export const sceneColorAt = (order) => COLORS[(Number.isInteger(order) && order >= 0 ? order : 0) % COLORS.length];
+
 export const SCENE_LABEL_MAX = 200;
 /** The most moments one proof states, as the server holds them (`engine/scenes.MAX_MOMENTS`). */
 export const MAX_MOMENTS = 20;
@@ -91,6 +98,17 @@ function order(scene) {
   return [start, end];
 }
 
+/** The states of a scene still to prove, as the server reads them (`engine/geolocate.py`). */
+export const TODO = 'todo';
+export const PROGRESS = 'progress';
+export const ABANDONED = 'abandoned';
+
+/** Whether a scene still to prove was given up on. It stays, greyed, and can come back. */
+export const isAbandoned = (scene) => scene?.kind === 'draft' && Boolean(scene.abandoned);
+
+/** The scenes the drawer lists first and the Scenes button counts: all but the abandoned. */
+export const liveScenes = (scenes) => (scenes ?? []).filter((s) => !isAbandoned(s));
+
 /**
  * The list the player shows: the proofs the server read back, and the drafts as
  * this tab holds them, minus any a proof has taken up. Each one gets its colour
@@ -99,21 +117,32 @@ function order(scene) {
  * The drafts come from the open work rather than the server, so a scene kept a
  * moment ago shows before the save lands. A draft a proof took up stays in the work,
  * hidden here, as is one the server names `taken` (a proof about another video now):
- * the proof deleted, it is back at its own time.
+ * the proof deleted, it is back at its own time. What only the server writes on a
+ * draft, the captures it gathered and the word it was abandoned with, comes from its
+ * row there; a draft not saved yet has neither.
  */
 export function sceneList(listed, drafts, taken = []) {
   const proofs = (listed ?? []).filter((s) => s.kind === 'proof');
+  const rows = new Map((listed ?? []).filter((s) => s.kind === 'draft').map((s) => [s.id, s]));
   const hidden = new Set([...proofs.map((s) => s.draft).filter(Boolean), ...taken]);
   const open = (drafts ?? [])
     .filter((d) => !hidden.has(d.id))
-    .map((d) => ({ kind: 'draft', id: d.id, start: d.start ?? null, end: d.end ?? null, label: d.label ?? '' }));
+    .map((d) => {
+      const row = rows.get(d.id);
+      const captures = Array.isArray(row?.captures) ? row.captures : [];
+      const abandoned = row?.abandoned ?? null;
+      return {
+        kind: 'draft', id: d.id, start: d.start ?? null, end: d.end ?? null, label: d.label ?? '',
+        state: abandoned ? ABANDONED : captures.length ? PROGRESS : TODO, captures, abandoned,
+      };
+    });
   return [...proofs, ...open]
     .map((scene) => ({ scene, at: order(scene) }))
     .sort((x, y) => x.at[0] - y.at[0] || x.at[1] - y.at[1])
     .map(({ scene }, i) => ({
       ...scene,
       key: scene.kind === 'proof' ? `proof:${scene.proof}` : scene.id,
-      color: COLORS[i % COLORS.length],
+      color: sceneColorAt(i),
     }));
 }
 
@@ -131,8 +160,13 @@ export function sceneMarks(scenes) {
   for (const s of scenes ?? []) {
     const label = sceneTitle(s);
     const moments = sceneMoments(s);
+    // an abandoned scene still holds its stretch of the clip, drawn greyed and hollow
+    const abandoned = isAbandoned(s);
     moments.forEach((m, i) =>
-      marks.push({ key: momentKey(s, i), start: m.start, end: isStretch(m) ? m.end : null, color: s.color, label }),
+      marks.push({
+        key: momentKey(s, i), start: m.start, end: isStretch(m) ? m.end : null, color: s.color,
+        label: abandoned ? `${label} · abandoned` : label, ...(abandoned ? { abandoned } : {}),
+      }),
     );
     if (!moments.length && s.kind === 'proof') {
       (s.at ?? []).forEach((t, i) => marks.push({ key: `${s.key}@${i}`, start: t, end: null, color: s.color, label }));
@@ -167,9 +201,9 @@ export function shortMoments(moments) {
 /** A scene's time as its row shows it (`shortMoments`). */
 export const sceneTime = (scene) => shortMoments(sceneMoments(scene));
 
-/** The draft to end at `time`: the latest one started before it, else none. */
+/** The draft to end at `time`: the latest one started before it and not abandoned, else none. */
 export function sceneToEnd(scenes, time) {
-  const before = (scenes ?? []).filter((s) => s.kind === 'draft' && Number.isFinite(s.start) && s.start < time);
+  const before = liveScenes(scenes).filter((s) => s.kind === 'draft' && Number.isFinite(s.start) && s.start < time);
   return before.length ? before.reduce((a, b) => (b.start > a.start ? b : a)) : null;
 }
 

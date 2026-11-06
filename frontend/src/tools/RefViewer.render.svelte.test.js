@@ -274,3 +274,73 @@ describe('a clip', () => {
     expect(viewer.playing).toBe(false);
   });
 });
+
+describe('a clip holding a scene being geolocated', () => {
+  /** A clip a hundred seconds long, with what it says about itself read. */
+  function scened(scene, extra = {}) {
+    const opened = open(CLIP);
+    opened.viewer.fps = 25;
+    Object.assign(opened.viewer, { scene, ...extra });
+    flushSync();
+    const video = opened.root.querySelector('video');
+    video.pause = vi.fn();
+    video.play = vi.fn(() => Promise.resolve());
+    Object.defineProperty(video, 'duration', { configurable: true, value: 100 });
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 1 });
+    video.dispatchEvent(new window.Event('loadedmetadata'));
+    video.dispatchEvent(new window.Event('durationchange'));
+    flushSync();
+    return { ...opened, video };
+  }
+  const BRIDGE = { draft: 'sc_1', start: 40, end: 55, label: 'bridge?', color: 'var(--anno-4)' };
+
+  it('marks the scene on the bar in its colour, and along the bottom at rest', () => {
+    const { root } = scened(BRIDGE);
+    const band = root.querySelector('[data-testid="ref-scene"]');
+    const pct = (value) => parseFloat(value);
+    expect(pct(band.style.left)).toBeCloseTo(40, 6);
+    expect(pct(band.style.width)).toBeCloseTo(15, 6);
+    expect(band.style.getPropertyValue('--scene')).toBe('var(--anno-4)');
+    expect(band.classList.contains('pin')).toBe(false);
+    const rest = root.querySelector('.rv-scene-line span');
+    expect(pct(rest.style.left)).toBeCloseTo(40, 6);
+    expect(pct(rest.style.width)).toBeCloseTo(15, 6);
+  });
+
+  it('names the scene in its header beside the file', () => {
+    const { root } = scened(BRIDGE);
+    expect(root.querySelector('.rv-scene-dot').getAttribute('aria-label')).toBe('Scene · bridge? · 0:40–0:55');
+    expect(root.querySelector('.rv-title').textContent).toBe('Walk');
+  });
+
+  it('pins an instant, and marks nothing for the whole video', () => {
+    const { root } = scened({ ...BRIDGE, end: null });
+    expect(root.querySelector('[data-testid="ref-scene"]').classList.contains('pin')).toBe(true);
+    unmount(app);
+    app = null;
+    document.body.innerHTML = '';
+    const whole = scened({ ...BRIDGE, start: null, end: null });
+    expect(whole.root.querySelector('[data-testid="ref-scene"]')).toBe(null);
+    expect(whole.root.querySelector('button[aria-label="Back to the scene"]')).toBe(null);
+    expect(whole.root.querySelector('.rv-scene-dot').getAttribute('aria-label')).toBe('Scene · bridge? · Whole video');
+  });
+
+  it('shows the frame it was handed, paused, once', () => {
+    const { viewer, video } = scened(BRIDGE, { cue: 40 });
+    expect(video.pause).toHaveBeenCalled();
+    // half a frame into it, as Inspect seeks
+    expect(video.currentTime).toBeCloseTo(40.02, 6);
+    expect(viewer.cue).toBe(null);
+    expect(video.play).not.toHaveBeenCalled();
+  });
+
+  it('goes back to the start of the scene in one press, and plays on past it', () => {
+    const { video, button } = scened(BRIDGE);
+    video.currentTime = 70;
+    press(button('Back to the scene'));
+    expect(video.currentTime).toBeCloseTo(40.02, 6);
+    expect(button('Back to the scene').getAttribute('title')).toBe('Back to the start of the scene, bridge? · 0:40–0:55');
+    press(button('Play'));
+    expect(video.play).toHaveBeenCalled();
+  });
+});
