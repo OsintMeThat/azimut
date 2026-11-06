@@ -15,12 +15,16 @@
   // (brightness, contrast, …) preview live and are baked into the exported
   // image via a same-origin canvas — nothing leaves the machine until an
   // engine tab is opened by the analyst.
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, prefs, uiState, toast } from '../lib/state.svelte.js';
   import { extensionVersion, handOffReverse } from '../lib/extBridge.js';
   import { MAX_HANDOFF_BYTES, UPLOAD_PAGES } from '../lib/reverseSearch.js';
+  import { lookupEntity } from '../lib/catalog.js';
+  import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { searchOffer } from '../lib/notes/reverseLog.js';
+  import PutInNote from '../components/PutInNote.svelte';
   import Modal from '../components/Modal.svelte';
   import Icon from '../components/Icon.svelte';
   import BackButton from '../components/BackButton.svelte';
@@ -105,10 +109,14 @@
     if (id) refresh(id);
   });
 
+  /** The engines pressed for the picture on screen: what a logged search says it was made on. */
+  let pressed = $state([]);
+
   /** Put a picture in front of the engines, dropping the address of the one before. */
   function show(item) {
     if (selected?.src) URL.revokeObjectURL(selected.src);
     selected = item.blob ? { ...item, src: URL.createObjectURL(item.blob) } : item;
+    pressed = [];
     resetAdjust();
   }
 
@@ -139,6 +147,7 @@
   function discard() {
     if (selected?.src) URL.revokeObjectURL(selected.src);
     selected = null;
+    pressed = [];
     resetAdjust();
     adjustOpen = false;
   }
@@ -275,6 +284,7 @@
 
   /** The engine buttons' one handler. */
   function pressEngine(event, engine) {
+    if (!pressed.includes(engine.id)) pressed = [...pressed, engine.id];
     if (!filled.includes(engine)) {
       if (engine.paste) copySelection();
       else saveSelection();
@@ -283,6 +293,21 @@
     event.preventDefault();
     fillEngine(engine);
   }
+
+  // -- into the note pinned beside ------------------------------------------------------
+  // The search logged as one line, with the cursor left after "Result:": a search that found
+  // nothing is a result too. The moment of a video is the one the playhead is on.
+  const noteSearch = searchOffer({
+    read: async () => {
+      if (!selected) return null;
+      const caseId = caseState.current?.id;
+      const entity = selected.path && caseId ? await lookupEntity(caseId, 'path', selected.path).catch(() => null) : null;
+      const playing = selected.kind === 'video' ? (videoEl?.videoWidth ? videoEl.currentTime : selected.time) : null;
+      return { entity, label: nameOf(selected), time: playing ?? null, pressed };
+    },
+  });
+  offerPuts('reverse', () => (selected ? [noteSearch] : []));
+  onDestroy(() => withdrawNote('reverse'));
 
   function openInInspect() {
     uiState.inspectPath = selected.path;
@@ -463,6 +488,8 @@
               </div>
             {/if}
           </div>
+
+          <PutInNote offer={noteSearch} class="btn btn-sm log-search" role="button" say="Log this search" />
 
           {#if selected.kind === 'video'}
             <button class="btn btn-ghost btn-sm inspect-link" onclick={openInInspect}>
@@ -647,6 +674,10 @@
     min-width: 120px;
   }
   .inspect-link {
+    align-self: flex-start;
+  }
+  /* The note's row is drawn by PutInNote, outside this component's scope. */
+  .controls-col :global(.log-search) {
     align-self: flex-start;
   }
 

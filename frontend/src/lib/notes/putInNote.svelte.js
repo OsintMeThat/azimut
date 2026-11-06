@@ -142,7 +142,9 @@ export async function putInNote(offer, { busyAfter = BUSY_AFTER } = {}) {
     if (busy !== null) dismissToast(busy);
   }
 
-  const text = String(result?.text ?? '').replace(/^\n+|\s+$/g, '');
+  const trimmed = String(result?.text ?? '').replace(/^\n+|\s+$/g, '');
+  // a put the analyst goes on typing in keeps the space they type after
+  const text = trimmed && result?.caret ? `${trimmed} ` : trimmed;
   const filed = [...new Set((result?.filed ?? []).filter(Boolean))];
   if (controller.signal.aborted || !text) {
     if (spot !== null) editor?.release?.(spot);
@@ -158,10 +160,12 @@ export async function putInNote(offer, { busyAfter = BUSY_AFTER } = {}) {
   let written = text;
   try {
     if (live) {
-      landed = editor.place(spot, text, { inline: Boolean(result.inline) });
+      landed = editor.place(spot, text, { inline: Boolean(result.inline), caret: Boolean(result.caret) });
       if (!landed) throw new Error('This note cannot be written here now');
       written = landed.text;
       if (offer.picture && !result.inline) void editor.caption?.(landed, { returnTo });
+      // the cursor stands after it: the note takes the keys so the next word is the analyst's
+      else if (result.caret) editor.focus?.();
     } else {
       if (spot !== null) editor?.release?.(spot);
       written = await appendToPinned(caseId, noteId, text);

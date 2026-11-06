@@ -1871,16 +1871,19 @@ export function blockAt(state, pos, text, { inline = false } = {}) {
 /**
  * Put `text` at `pos` (a held place's position when it is the id of one), as
  * `blockAt` writes it. Answers the id of the stretch it now holds in the note, which
- * `takeBackRange` reads. The note's own cursor moves past it only when it was there.
+ * `takeBackRange` reads. The note's own cursor moves past it only when it was there; with
+ * `caret` it stands right after the text, for the analyst to go on writing.
  */
 export function placeText(view, pos, text, options = {}) {
   if (view.state.readOnly) return null;
   const { insert, start, end } = blockAt(view.state, pos, text, options);
   const from = Math.max(0, Math.min(pos, view.state.doc.length));
   const head = view.state.selection.main.head;
+  // the cursor moves past it only when it was there, or right after the text when it is to be typed on from
+  const anchor = options.caret ? from + end : head === from ? from + insert.length : null;
   view.dispatch({
     changes: { from, insert },
-    ...(head === from ? { selection: { anchor: from + insert.length } } : {}),
+    ...(anchor === null ? {} : { selection: { anchor } }),
     userEvent: 'input',
   });
   const id = holdRange(view, from, from + insert.length);

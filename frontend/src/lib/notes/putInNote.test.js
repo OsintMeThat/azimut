@@ -97,6 +97,28 @@ describe('a put', () => {
     expect(lastToast().action.label).toBe('Undo');
   });
 
+  it('leaves the cursor after a put to be typed on from: the space, and the note takes the keys', async () => {
+    const editor = fakeEditor();
+    editor.focus = vi.fn();
+    const placed = [];
+    const place = editor.place;
+    editor.place = (id, text, options) => { placed.push([text, options]); return place(id, text); };
+    pin(editor);
+    const landed = await putInNote(offer({ text: 'Reverse search, 4 Nov 2026 21:40 UTC: Quai on Lens. Result:', caret: true }));
+    expect(landed.text).toBe('Reverse search, 4 Nov 2026 21:40 UTC: Quai on Lens. Result: ');
+    expect(placed).toEqual([['Reverse search, 4 Nov 2026 21:40 UTC: Quai on Lens. Result: ', { inline: false, caret: true }]]);
+    expect(editor.focus).toHaveBeenCalledOnce();
+    expect(editor.caption).not.toHaveBeenCalled();
+  });
+
+  it('does not take the keys for a put nobody goes on typing in', async () => {
+    const editor = fakeEditor();
+    editor.focus = vi.fn();
+    pin(editor);
+    await putInNote(offer({ text: '48.12345, 37.12345' }));
+    expect(editor.focus).not.toHaveBeenCalled();
+  });
+
   it('opens no caption for words', async () => {
     const editor = fakeEditor();
     pin(editor);
