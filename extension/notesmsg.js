@@ -187,7 +187,7 @@ const AzimutNotes = (() => {
    */
   function buildTab(facts = {}) {
     const access = ACCESS.has(facts.access) ? facts.access : "closed";
-    const message = { azimut: "note-tab", v: 1, access, url: "", title: "", selection: "", post: false };
+    const message = { azimut: "note-tab", v: 1, access, url: "", title: "", selection: "", post: false, map: false };
     if (access !== "open") return message;
     const url = String(facts.url || "");
     if (!isWeb(url) || url.length > LIMITS.url) return { ...message, access: "none" };
@@ -195,6 +195,7 @@ const AzimutNotes = (() => {
     message.title = cutTitle(facts.title);
     message.selection = cut(String(facts.selection ?? "").replace(/\r\n?/g, "\n").trim(), LIMITS.text);
     message.post = isPostUrl(url);
+    message.map = facts.map === true;
     return message;
   }
 

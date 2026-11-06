@@ -171,23 +171,25 @@ describe('the receiver', () => {
 });
 
 const tab = (fields = {}) => ({
-  azimut: 'note-tab', v: 1, access: 'open', url: 'https://example.org/news/strike', title: 'Strike | Example News', selection: 'Berths 10 to 14', post: false, ...fields,
+  azimut: 'note-tab', v: 1, access: 'open', url: 'https://example.org/news/strike', title: 'Strike | Example News', selection: 'Berths 10 to 14', post: false, map: false, ...fields,
 });
 
 describe('the tab in front', () => {
   it('is read with its fields cleaned: the address in full, the title on one line, the words as selected', () => {
     expect(readTab(tab({ title: '  Strike \n  news  ', url: 'https://example.org' }))).toEqual({
-      access: 'open', url: 'https://example.org/', title: 'Strike news', selection: 'Berths 10 to 14', post: false,
+      access: 'open', url: 'https://example.org/', title: 'Strike news', selection: 'Berths 10 to 14', post: false, map: false,
     });
     expect(readTab(tab({ selection: 'Berths 10\nto 14' })).selection).toBe('Berths 10\nto 14');
     expect(readTab(tab({ selection: '   \n ' })).selection).toBe('');
     expect(readTab(tab({ selection: '' })).selection).toBe('');
     expect(readTab(tab({ post: true })).post).toBe(true);
+    expect(readTab(tab({ map: true })).map).toBe(true);
+    expect(readTab(tab({ map: 'yes' }))).toBeNull();
     expect(TAB_ACCESS).toEqual(['open', 'closed', 'none']);
   });
 
   it('holds nothing of a tab it may not read, whatever it was sent', () => {
-    const blank = { url: '', title: '', selection: '', post: false };
+    const blank = { url: '', title: '', selection: '', post: false, map: false };
     expect(readTab(tab({ access: 'closed', url: '', title: '', selection: '' }))).toEqual({ access: 'closed', ...blank });
     expect(readTab(tab({ access: 'closed' }))).toEqual({ access: 'closed', ...blank });
     expect(readTab(tab({ access: 'none', post: true }))).toEqual({ access: 'none', ...blank });
@@ -264,9 +266,9 @@ describe('the tab receiver', () => {
     const handle = vi.fn();
     stop = receiveTab(handle, { win });
     send(tab({ title: '  Strike  ' }));
-    expect(handle).toHaveBeenCalledWith({ access: 'open', url: 'https://example.org/news/strike', title: 'Strike', selection: 'Berths 10 to 14', post: false });
+    expect(handle).toHaveBeenCalledWith({ access: 'open', url: 'https://example.org/news/strike', title: 'Strike', selection: 'Berths 10 to 14', post: false, map: false });
     send(tab({ access: 'closed' }));
-    expect(handle).toHaveBeenLastCalledWith({ access: 'closed', url: '', title: '', selection: '', post: false });
+    expect(handle).toHaveBeenLastCalledWith({ access: 'closed', url: '', title: '', selection: '', post: false, map: false });
     expect(parent.postMessage).not.toHaveBeenCalled();
   });
 

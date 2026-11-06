@@ -298,7 +298,7 @@ describe('the notes panel', () => {
     const [message, target] = frameWindow.postMessage.mock.calls.at(-1);
     expect(target).toBe(APP);
     expect(message).toEqual({
-      azimut: 'note-tab', v: 1, access: 'open', url: ARTICLE.url, title: 'A story', selection: 'the words\non two lines', post: false,
+      azimut: 'note-tab', v: 1, access: 'open', url: ARTICLE.url, title: 'A story', selection: 'the words\non two lines', post: false, map: false,
     });
   });
 
@@ -307,7 +307,7 @@ describe('the notes panel', () => {
     fromNote(open());
     fromNote(ASK);
     await settle();
-    expect(toldTab(frameWindow)).toEqual({ azimut: 'note-tab', v: 1, access: 'closed', url: '', title: '', selection: '', post: false });
+    expect(toldTab(frameWindow)).toEqual({ azimut: 'note-tab', v: 1, access: 'closed', url: '', title: '', selection: '', post: false, map: false });
     expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
   });
 
@@ -319,6 +319,16 @@ describe('the notes panel', () => {
       await settle();
       expect(toldTab(frameWindow)).toMatchObject({ access: 'none', url: '' });
     }
+  });
+
+  it('says a map is a map, as the worker asks the app', async () => {
+    const sendMessage = vi.fn(async (msg) => (msg.type === 'notes-map' ? { map: true } : { ok: true }));
+    const { fromNote, frameWindow } = await openPanel({ sendMessage });
+    fromNote(open());
+    fromNote(ASK);
+    await settle();
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'notes-map', url: ARTICLE.url });
+    expect(toldTab(frameWindow)).toMatchObject({ access: 'open', map: true });
   });
 
   it('names a post a post', async () => {

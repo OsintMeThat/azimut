@@ -130,7 +130,18 @@ async function tabFacts() {
   const tab = await frontTab();
   const url = tab?.url || "";
   if (!N.isWeb(url) || N.isApp(url, state.origin)) return { access: "none" };
-  return { access: "open", url, title: tab.title || "", selection: await selectionOf(tab.id) };
+  const [selection, map] = await Promise.all([selectionOf(tab.id), isMap(url)]);
+  return { access: "open", url, title: tab.title || "", selection, map };
+}
+
+/** Whether the app knows `url` for a map it can capture, as the worker asks it. */
+async function isMap(url) {
+  try {
+    const answer = await api.runtime.sendMessage({ type: "notes-map", url });
+    return answer?.map === true;
+  } catch {
+    return false;
+  }
 }
 
 /** Answer the note's Add with what the tab in front holds now. */

@@ -5943,8 +5943,8 @@ browser's side panel (Chrome) or sidebar (Firefox) on the app's own note, framed
 `#notebook?case=…&note=…&solo=1&panel=1` (`components/NotePanel.svelte`), one copy of
 the note with the app's. Its bar picks the case (the workspace's cases and scratch
 sessions, the open one marked), then the note with its picker (Case notes and the
-case's notes), then the save state and **Write | Page**, as the note on the side has
-them. Picking a case writes the note shown, then switches in place to the note pinned
+case's notes), then the save state, **Look** (the Notebook's own, its panel as wide as
+the space allows), **Write | Page** and **Add (+)**. Picking a case writes the note shown, then switches in place to the note pinned
 to the side for that case, else Case notes; the address keeps the new case and note,
 and the extension follows: its popup, Capture and right-click items go to that case,
 and a case picked in the popup reopens the panel on it. The editor is the compact one,
@@ -5958,7 +5958,10 @@ While the panel holds a note, a right-click on any page offers **Cite this page*
 into the note**, and **Alt+Shift+S** captures the map in front. The note's **Add (+)**
 offers the same three first, under *From this tab*: it asks the panel (`note-tab-ask`)
 and the panel answers what the tab in front holds (`note-tab`: open, closed or none,
-its address, title and selected words); a pick goes back as `note-tab-run`. A press in
+its address, title, selected words, whether it is a post, and whether it is a map, which
+the extension asks of the app's map sites with its pairing); a pick goes back as
+`note-tab-run`. The menu says *Reading the tab…* until then, *Allow Azimut on this
+tab…* for a closed tab and *Nothing to add from this tab* for none, then *A source…*. A press in
 a side panel opens no tab to an extension, so the first pick asks the browser for every
 site (an optional permission, SPEC §9); where the browser will not ask from inside the
 note (Firefox), *Allow* shows on a line above it. Refused, the panel says *Right-click

@@ -34,7 +34,7 @@ export const TAB_ACTIONS = ['capture', 'cite', 'quote', 'allow'];
 export const LIMITS = { url: 2048, title: 300, text: 5000, selection: 5000 };
 
 const KEYS = new Set(['azimut', 'v', 'id', 'action', 'url', 'title', 'text', 'entityId']);
-const TAB_KEYS = ['azimut', 'v', 'access', 'url', 'title', 'selection', 'post'];
+const TAB_KEYS = ['azimut', 'v', 'access', 'url', 'title', 'selection', 'post', 'map'];
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** Whether this page is the note in the extension's panel: asked for so, and framed. */
@@ -103,10 +103,10 @@ export function readTab(data) {
   if (typeof data.url !== 'string' || data.url.length > LIMITS.url) return null;
   if (typeof data.title !== 'string' || data.title.length > LIMITS.title) return null;
   if (typeof data.selection !== 'string' || data.selection.length > LIMITS.selection) return null;
-  if (typeof data.post !== 'boolean') return null;
+  if (typeof data.post !== 'boolean' || typeof data.map !== 'boolean') return null;
   const url = data.url === '' ? '' : webAddress(data.url);
   if (url === null) return null;
-  if (data.access !== 'open') return { access: data.access, url: '', title: '', selection: '', post: false };
+  if (data.access !== 'open') return { access: data.access, url: '', title: '', selection: '', post: false, map: false };
   if (!url) return null;
   return {
     access: 'open',
@@ -114,6 +114,7 @@ export function readTab(data) {
     title: data.title.replace(/\s+/g, ' ').trim(),
     selection: data.selection.trim() ? data.selection : '',
     post: data.post,
+    map: data.map,
   };
 }
 

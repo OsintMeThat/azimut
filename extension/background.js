@@ -1561,6 +1561,18 @@ async function handle(msg, sender) {
     }
   }
 
+  // The notes panel: whether the page in front is a map the app can capture, for its
+  // Add to offer "This map". Asked of the app's own list, with the pairing.
+  if (msg.type === "notes-map") {
+    if (!fromNotesPanel(sender)) return { map: false };
+    try {
+      const parsed = await mapApi({ path: "/api/ingest/parse", query: { url: String(msg.url || "") } });
+      return { map: Boolean(parsed?.site) };
+    } catch {
+      return { map: false };
+    }
+  }
+
   // Popup: arm an area selection on the page. The popup closes right after,
   // so the meta waits in storage.session for the overlay's rect.
   if (msg.type === "start-area-select") {

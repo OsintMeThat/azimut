@@ -29,7 +29,7 @@
   import { coverChoice, normaliseLook, ownCover, readLook, writeLook } from '../lib/notes/look.js';
   import { askTab, receivePuts, receiveTab, runTab, tellPanel } from '../lib/notes/panel.js';
   import { panelOffer } from '../lib/notes/panelPuts.js';
-  import { mapSiteOf, quotePreview, tabHost } from '../lib/notes/panelTab.js';
+  import { quotePreview, tabHost } from '../lib/notes/panelTab.js';
   import AddSource from './AddSource.svelte';
   import CasePicker from './CasePicker.svelte';
   import FloatingMenu from './FloatingMenu.svelte';
@@ -64,7 +64,6 @@
   let adding = $state(null);
   let sourcing = $state(null);
   let tab = $state(null);
-  let mapOf = $state({ url: '', site: null });
   let waiting;
 
   const caseId = $derived(caseState.current?.id ?? '');
@@ -238,15 +237,8 @@
     };
   });
 
-  // whether the page in front is a map the extension can capture: the app knows the sites
-  $effect(() => {
-    const url = tab?.access === 'open' ? tab.url : '';
-    if (!url) return;
-    let live = true;
-    mapSiteOf(url).then((site) => { if (live) mapOf = { url, site }; });
-    return () => { live = false; };
-  });
-  const isMap = $derived(tab?.access === 'open' && mapOf.url === tab.url && Boolean(mapOf.site));
+  // whether the page in front is a map the extension can capture: the extension asks the app's own map sites
+  const isMap = $derived(tab?.access === 'open' && tab.map === true);
   const host = $derived(tab?.access === 'open' ? tabHost(tab.url) : '');
 
   /** Open the Add menu, and ask what the tab in front is. No answer in time leaves the first part offering to allow it. */

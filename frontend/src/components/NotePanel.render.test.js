@@ -53,7 +53,6 @@ const { pinnedNote } = await import('../lib/notes/putInNote.svelte.js');
 const { openNote, releaseNote, resetOpenNotes } = await import('../lib/notes/noteDoc.svelte.js');
 const { setDockNote } = await import('../lib/notes/noteDock.svelte.js');
 const { releaseCanvas } = await import('../lib/notes/pdfjs.js');
-const { forgetMaps } = await import('../lib/notes/panelTab.js');
 const { default: NotePanel } = await import('./NotePanel.svelte');
 
 const EXT = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
@@ -94,7 +93,6 @@ const CASES = [
 
 beforeEach(() => {
   localStorage.clear();
-  forgetMaps();
   opened.id = 'case-a';
   written = '';
   pdf.destroy = vi.fn();
@@ -559,15 +557,13 @@ describe('Add in the panel\'s bar', () => {
   const labels = () => items().map((item) => item.querySelector('.fm-grow')?.firstChild?.textContent.trim());
   const item = (label) => items().find((one) => one.querySelector('.fm-grow')?.firstChild?.textContent.trim() === label);
   const URL = 'https://www.example.org/news/strike';
-  const tab = (fields = {}) => ({ azimut: 'note-tab', v: 1, access: 'open', url: URL, title: 'Strike | Example News', selection: 'Berths 10 to 14 were closed.', post: false, ...fields });
+  const tab = (fields = {}) => ({ azimut: 'note-tab', v: 1, access: 'open', url: URL, title: 'Strike | Example News', selection: 'Berths 10 to 14 were closed.', post: false, map: false, ...fields });
   const asks = () => told().filter((message) => message.azimut === 'note-tab-ask');
   const runs = () => told().filter((message) => message.azimut === 'note-tab-run');
 
-  /** The map check answers per address; the pairing token is the app's own. */
-  function mapAnswers(sites = {}) {
+  /** The case's answers, with no map check of the app's own: the extension says whether the page is a map. */
+  function mapAnswers() {
     get.mockImplementation(async (url) => {
-      if (url === '/api/settings') return { ingest_token: 'pairing-token' };
-      if (url.startsWith('/api/ingest/parse')) return { site: sites[decodeURIComponent(url.split('url=')[1])] ?? null };
       if (url.endsWith('/notes/index')) return { items: [{ id: 'case', title: 'Case notes', folder: '', updated_at: '' }] };
       if (url.includes('/sources/lookup')) return { url: PAGE, title: 'Strike on the port', found: [] };
       if (url === '/api/cases/case-a') return { id: 'case-a', name: 'Harbour strike', folders: [] };
@@ -669,62 +665,31 @@ describe('Add in the panel\'s bar', () => {
     expect(menu()).not.toBeNull();
   });
 
-  it('adds This map only when the app says the page is a map, asked with the token, once a page', async () => {
-    mapAnswers({ [URL]: 'google-maps' });
-    await panel();
-    addButton().click();
-    send(tab());
-    await settle();
-    await vi.waitFor(() => expect(labels()).toContain('This map'));
-    expect(labels()).toEqual(['This map', 'This page', 'The passage selected', 'A source…']);
-    expect(item('This map').querySelector('small').textContent).toBe('Draw the area to capture');
-    const parse = get.mock.calls.filter(([url]) => url.startsWith('/api/ingest/parse'));
-    expect(parse).toHaveLength(1);
-    expect(parse[0]).toEqual([`/api/ingest/parse?url=${encodeURIComponent(URL)}`, { headers: { 'X-Azimut-Token': 'pairing-token' } }]);
-    // opened again on the same page: no second question
-    addButton().click();
-    await settle();
-    addButton().click();
-    await settle();
-    send(tab());
-    await settle();
-    await vi.waitFor(() => expect(labels()).toContain('This map'));
-    expect(get.mock.calls.filter(([url]) => url.startsWith('/api/ingest/parse'))).toHaveLength(1);
-  });
-
-  it('leaves This map out when the page is no map, or the question could not be put', async () => {
+  it('adds This map only when the extension says the page is a map, and asks the app nothing of it', async () => {
     mapAnswers();
     await panel();
     addButton().click();
+    send(tab({ map: true }));
+    await settle();
+    expect(labels()).toEqual(['This map', 'This page', 'The passage selected', 'A source…']);
+    expect(item('This map').querySelector('small').textContent).toBe('Draw the area to capture');
+    expect(get.mock.calls.some(([url]) => url.startsWith('/api/ingest') || url === '/api/settings')).toBe(false);
+    // a page that is no map has no such item
+    addButton().click();
+    await settle();
+    addButton().click();
     send(tab());
-    await settle();
-    await settle();
-    expect(labels()).toEqual(['This page', 'The passage selected', 'A source…']);
-    expect(get.mock.calls.some(([url]) => url.startsWith('/api/ingest/parse'))).toBe(true);
-    // an address the app cannot ask about
-    addButton().click();
-    await settle();
-    forgetMaps();
-    get.mockImplementation(async (url) => {
-      if (url === '/api/settings') throw new Error('Azimut is not running');
-      if (url.endsWith('/look')) return { look: {} };
-      return { text: written };
-    });
-    addButton().click();
-    send(tab({ url: 'https://maps.example.org/@1,2' }));
-    await settle();
     await settle();
     expect(labels()).toEqual(['This page', 'The passage selected', 'A source…']);
   });
 
   it('asks the extension for what is pressed, and closes', async () => {
-    mapAnswers({ [URL]: 'google-maps' });
+    mapAnswers();
     await panel();
     for (const [label, action] of [['This map', 'capture'], ['This page', 'cite'], ['The passage selected', 'quote']]) {
       addButton().click();
-      send(tab());
+      send(tab({ map: true }));
       await settle();
-      await vi.waitFor(() => expect(labels()).toContain('This map'));
       item(label).click();
       await settle();
       expect(runs().at(-1)).toEqual({ azimut: 'note-tab-run', v: 1, action, to: '*' });
@@ -745,7 +710,6 @@ describe('Add in the panel\'s bar', () => {
     expect(labels()).toEqual(['Allow Azimut on this tab…', 'A source…']);
     expect(item('Allow Azimut on this tab…').querySelector('small').textContent).toBe('Asked once: Azimut reads a page only when you add from it');
     expect(menu().textContent).not.toContain('This page');
-    expect(get.mock.calls.some(([url]) => url.startsWith('/api/ingest/parse'))).toBe(false);
     item('Allow Azimut on this tab…').click();
     await settle();
     expect(runs()).toEqual([{ azimut: 'note-tab-run', v: 1, action: 'allow', to: '*' }]);
