@@ -4,8 +4,8 @@
  * and the elements, where composing happens, sat under the fields filled once.
  *
  * Which tab a proof opens on is the composer's (`ProofComposer`): a new one on Layout,
- * since it starts by adding panels; one made from a scene of Inspect on Scene, its
- * player running; any other keeps the tab in use, for the session only.
+ * since it starts by adding panels; one made from a scene of Inspect on Proof, its
+ * facts still to fill; any other keeps the tab in use, for the session only.
  */
 import { parseLooseDate } from '../../lib/looseDate.js';
 

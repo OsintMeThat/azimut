@@ -1834,8 +1834,8 @@ passage, on its instant, or every one for the whole video, all ticked. A scene h
 none says which frame it captures instead: the sharpest one a scan found in it, else
 the one it starts on, else the one on screen. The ticked frames not in the case yet are
 saved on the way, under their default names in the last folder, and Geo Proof opens a
-new proof of the scene on them, named after its label, its player already running;
-unsaved work in the open proof is asked about first.
+new proof of the scene on them, named after its label, on its Proof tab, the facts
+being what is left to do; unsaved work in the open proof is asked about first.
 
 **Save to case is the one step that files media.** Each output carries its own block
 under the controls that shape it: a name that holds real text from the start, a
@@ -4065,8 +4065,8 @@ date, the facts filled once), **Scene** (only for a proof built on a video), **L
 (the house style, then **Text**, with the font, bold, Caption new panels, the caption
 and legend sizes and Scene time on the picture, **Footer**, and **Signature**, with
 **Logo** and the account handle). A new proof opens on Layout, since it starts with
-panels; one made with Inspect's Make the proof opens on Scene, its player running; any
-other opens on the tab in use, Proof at first, which lasts the session and is never
+panels; one made with Inspect's Make the proof opens on Proof, its facts still to fill;
+any other opens on the tab in use, Proof at first, which lasts the session and is never
 saved. A ▶ pressed on the canvas shows Scene. Each tab scrolls on its own and keeps its
 place, and the arrows, Home and End walk the tabs without reaching the canvas behind.
 **The Proof tab carries its fields' `!`** on its label, *Still needs coordinates and a

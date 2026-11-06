@@ -1503,12 +1503,12 @@ describe('Proof Composer side column', () => {
     }
   });
 
-  it('opens a new proof on Layout and one made from a scene on Scene, and keeps the tab on any other', () => {
+  it('opens a new proof on Layout and one made from a scene on Proof, and keeps the tab on any other', () => {
     expect(bodyOfFn('createNewProof')).toContain("pickSideTab('layout');");
     expect(bodyOfFn('addPanel')).toContain("if (!proofStarted) pickSideTab('layout');");
     const made = bodyOfFn('makeSceneProof');
-    expect(made.indexOf("pickSideTab('scene');")).toBeGreaterThan(made.indexOf('resetDoc();'));
-    expect(made).toContain('scene.show(made.scene.video, { play: true });');
+    expect(made.indexOf("pickSideTab('proof');")).toBeGreaterThan(made.indexOf('resetDoc();'));
+    expect(made).not.toContain("pickSideTab('scene');");
     expect(bodyOfFn('openProof')).not.toContain('pickSideTab');
     expect(bodyOfFn('resetDoc')).not.toContain('pickSideTab');
     // the session remembers the tab, never the disk
@@ -1579,14 +1579,16 @@ describe('Proof Composer scene', () => {
     expect(add).toContain('await addPanelsFromPaths([path]);');
   });
 
-  it('makes the proof of a scene of Inspect: asks first, a new proof of its frames, its player running', () => {
+  it('makes the proof of a scene of Inspect: asks first, a new proof of its frames, its player ready', () => {
     expect(source).toContain('if (uiState.tool === \'proof\' && uiState.proofScene && caseState.current) {');
     expect(source).toContain('uiState.proofScene = null;');
     const make = bodyOfFn('makeSceneProof');
     expect(make).toContain('if (!made || !(await mayLeave())) return;');
     expect(make.indexOf('resetDoc();')).toBeLessThan(make.indexOf('await addPanelsFromPaths(made.panels);'));
     expect(make).toContain('scene.hold(made.scene);');
-    expect(make).toContain('scene.show(made.scene.video, { play: true });');
+    // ready where the scene starts, playing only once its tab is shown
+    expect(make).toContain('scene.show(made.scene.video);');
+    expect(make).not.toContain('play: true');
     // the label names the proof; the description is the analyst's sentence, left to write
     expect(make).toContain('if (made.title) proof.title = made.title;');
     expect(make).not.toContain('description');

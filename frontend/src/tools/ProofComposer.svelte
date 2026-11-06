@@ -432,8 +432,8 @@
   let headerW = $state(0);
 
   // ---- the side column's tabs (proof/sideTabs.js) ----------------------------------
-  // A new proof opens on Layout and one made from a scene on Scene; opening another
-  // keeps the tab in use. The tool stays mounted for the session, so this is that
+  // A new proof opens on Layout and one made from a scene on Proof, its facts still to
+  // fill; opening another keeps the tab in use. The tool stays mounted for the session, so this is that
   // memory, and nothing writes it to disk.
   let sideTab = $state('proof');
   const sideTabList = $derived(sideTabs(scene.videos.length > 0));
@@ -480,14 +480,15 @@
 
   /**
    * Make the proof of a scene kept in Inspect: a new proof of its frames, in order,
-   * named after it, its time held for the first save, and its player running.
+   * named after it, its time held for the first save. It opens on the Proof tab, the
+   * facts being what is left to do, its player ready on the Scene tab where it starts.
    */
   async function makeSceneProof(handoff) {
     const made = readHandoff(handoff);
     if (!made || !(await mayLeave())) return;
     resetDoc();
     proofStarted = true;
-    pickSideTab('scene');
+    pickSideTab('proof');
     settlePlace('proof', place(), { navigate: true });
     if (made.title) proof.title = made.title;
     scene.hold(made.scene);
@@ -496,7 +497,7 @@
     await addPanelsFromPaths(made.panels);
     dirty = true;
     anchorHistory();
-    scene.show(made.scene.video, { play: true });
+    scene.show(made.scene.video);
     requestAnimationFrame(fit);
   }
 

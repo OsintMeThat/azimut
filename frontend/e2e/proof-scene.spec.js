@@ -96,7 +96,7 @@ const videoState = (page) => page.getByTestId('scene-player').locator('video').e
   paused: v.paused, muted: v.muted, time: v.currentTime,
 }));
 
-test('makes the proof of a scene of Inspect, its player running, its time written after the first save', async ({ page }) => {
+test('makes the proof of a scene of Inspect on its Proof tab, its player ready, its time written after the first save', async ({ page }) => {
   const { fixture, scenePuts } = await openCase(page);
 
   // What Inspect's Make the proof hands over (Inspector.svelte), set the way it sets it.
@@ -113,14 +113,19 @@ test('makes the proof of a scene of Inspect, its player running, its time writte
 
   await expect(page.locator('.panel-row')).toHaveCount(2);
   await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue('Road bridge');
-  // it opens on its Scene tab
-  await expect(sideTab(page, 'Scene')).toHaveAttribute('aria-selected', 'true');
+  // it opens on its Proof tab, the facts being what is left to do
+  await expect(sideTab(page, 'Proof')).toHaveAttribute('aria-selected', 'true');
   // the description is the analyst's sentence, left for them to write
   await expect(page.locator('.desc-input')).toHaveValue('');
+  // its player waits on the Scene tab, paused where the scene starts
+  expect((await videoState(page)).paused).toBe(true);
+  await showProofTab(page, 'Scene');
   const block = sceneBlock(page);
   await expect(block.getByTestId('scene-video')).toHaveText(/★\s*steps\.webm\s*·\s*0:00–0:01/);
-  // the scene plays, muted, on a loop through its moment
+  await expect.poll(async () => (await videoState(page)).time).toBeGreaterThanOrEqual(0.19);
+  // played, it runs muted, on a loop through its moment
   await expect(block.getByTestId('scene-player')).toBeInViewport();
+  await block.getByRole('button', { name: 'Loop the scene' }).click();
   await expect.poll(async () => (await videoState(page)).paused).toBe(false);
   const playing = await videoState(page);
   expect(playing.muted).toBe(true);
