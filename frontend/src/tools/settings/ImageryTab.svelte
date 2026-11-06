@@ -17,6 +17,7 @@
   import RadarLayer from './RadarLayer.svelte';
   import CustomLayers from './CustomLayers.svelte';
   import CopernicusLayersHelp from '../../components/CopernicusLayersHelp.svelte';
+  import { FREE_IMAGERY } from '../../lib/imageryTerms.js';
   import { SENTINEL_ECO_MAX_ZOOM } from '../../lib/usage.js';
   import {
     monthCount,
@@ -293,6 +294,20 @@
       <Icon name="reset" size={13} /> Refresh
     </button>
   </div>
+</section>
+
+<section class="group" data-guide="settings.free-imagery">
+  <h3>Free imagery</h3>
+  <p class="intro">No key needed. What each lets a picture of it be used for:</p>
+  <ul class="terms">
+    {#each FREE_IMAGERY as source (source.id)}
+      <li>
+        <span class="terms-name">{source.name}</span> <span class="terms-note">{source.note}</span>
+        <span class="terms-reuse">{source.reuse}
+          <a href={source.link} target="_blank" rel="noopener noreferrer" title="The provider's own terms">Terms</a></span>
+      </li>
+    {/each}
+  </ul>
 </section>
 
 <section class="group" data-guide="settings.eco">
@@ -604,6 +619,12 @@
     margin: 2px 0;
   }
 
+  .terms { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .terms li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; font-size: var(--fs-sm); }
+  .terms-name { color: var(--text-1); font-weight: 600; }
+  .terms-note { color: var(--text-3); }
+  .terms-reuse { flex-basis: 100%; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.45; }
+  .terms-reuse a { margin-left: 4px; }
   /* every small numeric box in this tab: eco thresholds, free allowances */
   .num {
     width: 92px;
