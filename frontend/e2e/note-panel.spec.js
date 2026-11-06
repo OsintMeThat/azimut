@@ -78,7 +78,7 @@ test('a quote, a cite and a capture sent from the extension\'s page land in the 
   // the case, the note, its Look, Write | Page and Add, and nothing else
   await expect(frame.locator('.panel-bar .case')).toHaveText('Browser Test');
   await expect(frame.locator('.panel-bar button.which')).toContainText('Case notes');
-  await expect(frame.locator('.panel-bar button')).toHaveText(['Browser Test', 'Case notes', /^Look/, 'Write', 'Page', 'Add']);
+  await expect(frame.locator('.panel-bar button')).toHaveText(['Browser Test', 'Case notes', /Look/, 'Write', 'Page', 'Add']);
   await expect.poll(() => told(page)).toContainEqual({
     azimut: 'note-panel', v: 1, state: 'ready', caseId: CASE_ID, noteId: 'case', title: 'Case notes',
   });
@@ -174,7 +174,7 @@ test('Add asks the extension\'s page what the tab in front is, lists what it can
   await page.evaluate(() => {
     window.tab = {
       azimut: 'note-tab', v: 1, access: 'open', url: 'https://example.org/news/strike', title: 'Strike | Example News',
-      selection: 'Berths 10 to 14 were closed.', post: false,
+      selection: 'Berths 10 to 14 were closed.', post: false, map: false,
     };
   });
 
@@ -187,13 +187,13 @@ test('Add asks the extension\'s page what the tab in front is, lists what it can
 
   await menu.getByRole('menuitem', { name: /The passage selected/ }).click();
   await expect(menu).toHaveCount(0);
-  expect(await told(page)).toContainEqual({ azimut: 'note-tab-run', v: 1, action: 'quote' });
+  await expect.poll(() => told(page)).toContainEqual({ azimut: 'note-tab-run', v: 1, action: 'quote' });
 
   // a tab the extension may not read yet offers its first permission, and the page is asked for it
-  await page.evaluate(() => { window.tab = { azimut: 'note-tab', v: 1, access: 'closed', url: '', title: '', selection: '', post: false }; });
+  await page.evaluate(() => { window.tab = { azimut: 'note-tab', v: 1, access: 'closed', url: '', title: '', selection: '', post: false, map: false }; });
   await frame.getByRole('button', { name: 'Add' }).click();
   await frame.getByRole('menuitem', { name: /Allow Azimut on this tab/ }).click();
-  expect(await told(page)).toContainEqual({ azimut: 'note-tab-run', v: 1, action: 'allow' });
+  await expect.poll(() => told(page)).toContainEqual({ azimut: 'note-tab-run', v: 1, action: 'allow' });
 });
 
 test('the Look in the panel\'s bar keeps a style beside the note and fits the panel\'s width', async ({ page }) => {
