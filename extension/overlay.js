@@ -53,7 +53,9 @@
     const words = (value) => String(value || "").replace(/\s+/g, " ").trim();
     for (let node = walker.nextNode(); node && parts.length < 8; node = walker.nextNode()) {
       const own = words(node.nodeValue);
-      if (!own.includes("\u00a9") || own.length > 200) continue;
+      // Google Earth names its providers without a ©: "Image Landsat / Copernicus", "Data SIO, NOAA…"
+      const credit = own.includes("\u00a9") || /^(Image|Images|Imagery|Imagerie|Data|Donn\u00e9es)\b/u.test(own);
+      if (!credit || own.length > 200) continue;
       const box = node.parentElement?.getBoundingClientRect?.();
       if (!box || !box.width || box.bottom < foot || box.top > window.innerHeight) continue;
       // a © alone is the start of a line whose name is a link beside it ("© OpenStreetMap

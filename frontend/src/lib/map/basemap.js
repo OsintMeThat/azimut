@@ -73,7 +73,8 @@ const OVERLAYS = [
     id: 'nightlights',
     layer: 'basemap-nightlights',
     url: nightTemplate,
-    attribution: 'Night lights: NASA EOSDIS GIBS, VIIRS',
+    // GIBS's own acknowledgement: part of NASA's ESDIS
+    attribution: 'Night lights: NASA GIBS (ESDIS), VIIRS',
     maxZoom: 8,
     // The native product is coarse, but it remains useful as a translucent
     // context layer while reading a street or site at a deeper map zoom.
@@ -119,7 +120,8 @@ const OVERLAYS = [
     id: 'seamarks',
     layer: 'basemap-seamarks',
     url: 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
-    attribution: '© OpenSeaMap contributors',
+    // OpenSeaMap draws over OpenStreetMap data, which its licence asks to be named
+    attribution: '© OpenSeaMap contributors · © OpenStreetMap contributors',
     maxZoom: 18,
   },
   {

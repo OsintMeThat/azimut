@@ -34,9 +34,11 @@ describe('the credit Copernicus data carries', () => {
   it('writes the DEM licence word for word after the relief, once', () => {
     expect(DEM_NOTICE).toBe(DEM);
     expect(normaliseAttribution('© Copernicus Sentinel data / Sentinel Hub · Relief © Mapterhorn', '2023-08-08'))
-      .toBe(`${NOTICE} 2023 · Relief © Mapterhorn, ${DEM}`);
-    const published = `© Mapterhorn, ${DEM} · 30 m relief`;
-    expect(normaliseAttribution(published)).toBe(published);
+      .toBe(`${NOTICE} 2023 · Relief © Mapterhorn (mapterhorn.com/attribution), ${DEM}`);
+    // written before Mapterhorn's page was named, or after: left as it is
+    for (const published of [`© Mapterhorn, ${DEM} · 30 m relief`, `© Mapterhorn (mapterhorn.com/attribution), ${DEM} · 30 m relief`]) {
+      expect(normaliseAttribution(published)).toBe(published);
+    }
   });
 
   it('leaves every other credit exactly as it was', () => {

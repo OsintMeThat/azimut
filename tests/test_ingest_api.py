@@ -168,6 +168,8 @@ def test_yandex_is_filed_with_its_own_rule_said_once_and_bing_with_none(client):
     assert yandex["site"] == "yandex-maps"
     assert yandex["notice"] == SITE_NOTICES["yandex-maps"]
     assert yandex["attribution"] == "© Yandex"
+    earth = _post(client, token=token, url="https://earth.google.com/web/@48.8584,2.2945,100a,500d,35y,0h,0t,0r").json()
+    assert earth["notice"] == SITE_NOTICES["google-earth"]
     bing = _post(client, token=token, url="https://www.bing.com/maps?cp=48.8584~2.2945&lvl=17&style=h",
                  screen_credit="© 2026 Microsoft Corporation · © 2026 Maxar ©CNES (2026) Distribution Airbus DS").json()
     assert "notice" not in bing
@@ -331,8 +333,14 @@ def test_a_copernicus_browser_shot_is_credited_by_the_collection_it_shows():
     assert screenshot_credit(site, base + "COPERNICUS_CLMS_NDVI_300M_10DAILY_V3", "2025-08-01") == (
         "Contains modified Copernicus Service information 2025"
     )
-    for dataset in ("CDAS_L8_L9_LOTL1", "DEM_COPERNICUS_30_CDAS", "CCM_VHR_IMAGE_2021"):
-        assert screenshot_credit(site, base + dataset, "2024-07-01") == "Copernicus Browser", dataset
+    # the Copernicus DEM with its licence's notice, Landsat with the USGS's courtesy, the rest to the site
+    from azimut.engine import copernicus_credit
+
+    assert screenshot_credit(site, base + "DEM_COPERNICUS_30_CDAS", None) == (
+        f"Copernicus Browser · {copernicus_credit.DEM}")
+    assert screenshot_credit(site, base + "CDAS_L8_L9_LOTL1", "2024-07-01") == (
+        "Copernicus Browser · Landsat image courtesy of the U.S. Geological Survey")
+    assert screenshot_credit(site, base + "CCM_VHR_IMAGE_2021", "2024-07-01") == "Copernicus Browser"
     # every other site keeps its own credit
     assert screenshot_credit("zoom-earth", "https://zoom.earth/", "2024-07-01") == "© Zoom Earth"
     assert screenshot_credit("unknown", "https://Maps.Example.org/x", None) == "© maps.example.org"

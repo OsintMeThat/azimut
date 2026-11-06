@@ -68,6 +68,9 @@ PROVIDERS: dict[str, Any] = {
     "globfp": globfp, "google": google25d,
 }
 LABELS = {name: (p.LABEL, p.LICENCE, p.LINK) for name, p in PROVIDERS.items()}
+#: The credit a source asks for where it names one, short and for print; the others
+#: are credited by their name, licence and years (`lib/horizon/buildings.js`).
+CREDITS = {name: (getattr(p, "CREDIT", ""), getattr(p, "PUBLISHED", "")) for name, p in PROVIDERS.items()}
 # Sources whose data comes in big files downloaded once, each only after the analyst says yes
 PACKED = ("globfp",)
 # Google's heights and Overture's footprints are heavy tiles, read once the analyst said yes,
@@ -549,6 +552,7 @@ def status(lat: float, lon: float, radius: float, asked: list[str] | None = None
         "footprints": by_source,
         "sources": [
             {"id": s, "label": LABELS[s][0], "licence": LABELS[s][1], "link": LABELS[s][2],
+             "credit": CREDITS[s][0], "published": CREDITS[s][1],
              "oldest": min(dates.get(s, [""])), "newest": max(dates.get(s, [""]))}
             for s in used if s in LABELS
         ],

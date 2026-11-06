@@ -159,7 +159,8 @@ BUILTIN_PROVIDERS: tuple[Provider, ...] = (
         id="osm",
         label="OpenStreetMap (street context)",
         url="https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        attribution="© OpenStreetMap contributors",
+        # OSMF's guidelines: a printed or PDF picture carries the copyright page's address
+        attribution="© OpenStreetMap contributors, openstreetmap.org/copyright",
         max_zoom=19,
         imagery=False,
     ),
@@ -229,7 +230,8 @@ def all_providers() -> list[Provider]:
                 id="mapbox-satellite",
                 label="Mapbox Satellite",
                 url=MAPBOX_SATELLITE_URL.replace("{key}", mapbox_key),
-                attribution="© Mapbox © OpenStreetMap",
+                # Mapbox's attribution rules: a satellite style also credits © Maxar
+                attribution="© Mapbox © OpenStreetMap © Maxar",
                 max_zoom=22,
                 imagery=True,
                 capturable=True,
@@ -247,8 +249,9 @@ def all_providers() -> list[Provider]:
                 label="Google Satellite",
                 url=GOOGLE_SATELLITE_URL.replace("{key}", google_key),
                 # fallback only — captures resolve the real per-viewport
-                # copyright line at fetch time (engine/google_tiles.py)
-                attribution="Google",
+                # copyright line at fetch time (engine/google_tiles.py). Google
+                # alone is no attribution by Google's rules: its line, dated.
+                attribution=f"Map data ©{datetime.now(timezone.utc).year} Google",
                 max_zoom=22,
                 imagery=True,
                 capturable=True,

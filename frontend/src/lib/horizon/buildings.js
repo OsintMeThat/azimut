@@ -221,7 +221,11 @@ export function credits(status) {
   return (status?.sources ?? []).map((s) => {
     const years = [s.oldest, s.newest].map((d) => (d ? d.slice(0, 4) : '')).filter(Boolean);
     const span = years.length === 2 && years[0] !== years[1] ? `${years[0]}–${years[1]}` : (years[0] ?? '');
-    return { id: s.id, text: [s.label, s.licence, span].filter(Boolean).join(', '), link: s.link };
+    const text = [s.label, s.licence, span].filter(Boolean).join(', ');
+    // a source that names the credit it asks for is credited so, short on screen and long in print
+    const credit = typeof s.credit === 'string' && s.credit ? s.credit : text;
+    const published = typeof s.published === 'string' && s.published ? s.published : credit;
+    return { id: s.id, text, credit, published, link: s.link };
   });
 }
 

@@ -47,6 +47,9 @@ SOURCE = "globfp"
 LABEL = "3D-GloBFP"
 LICENCE = "CC BY 4.0"
 LINK = "https://doi.org/10.5194/essd-16-5357-2024"
+#: CC BY asks for the creators: the dataset's paper, by its first author.
+CREDIT = "3D-GloBFP (Che et al., 2024), CC BY 4.0"
+PUBLISHED = "3D-GloBFP (Che et al., 2024, doi.org/10.5194/essd-16-5357-2024), CC BY 4.0"
 DATE = "2020"
 DOI = "10.5281/zenodo.15487037"
 # Bumped when the folder layout or the index changes, so an old folder is read

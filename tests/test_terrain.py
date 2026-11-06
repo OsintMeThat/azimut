@@ -380,7 +380,8 @@ def test_a_picture_of_the_relief_carries_what_its_licences_ask(client):
     the Copernicus DEM's notice word for word, and the fallback's required list."""
     mapterhorn, aws = client.get("/api/terrain/sources").json()["sources"]
     assert mapterhorn["published"] == (
-        "© Mapterhorn, produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and "
+        "© Mapterhorn (mapterhorn.com/attribution), produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 "
+        "and © Airbus Defence and "
         "Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved"
     )
     assert aws["attribution"] == "Terrain Tiles, Mapzen and AWS Open Data"

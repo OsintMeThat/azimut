@@ -31,7 +31,10 @@ from .osm import clip_rings, to_lonlat
 
 SOURCE = "overture"
 LABEL = "Overture Maps"
-LICENCE = "ODbL, CDLA Permissive 2.0"
+#: Overture's buildings theme is ODbL; CDLA Permissive 2.0 is its Places theme's.
+LICENCE = "ODbL"
+CREDIT = "© Overture Maps Foundation, © OpenStreetMap contributors"
+PUBLISHED = "© Overture Maps Foundation, © OpenStreetMap contributors, openstreetmap.org/copyright"
 LINK = "https://docs.overturemaps.org/attribution/"
 
 CATALOG = "https://stac.overturemaps.org/catalog.json"

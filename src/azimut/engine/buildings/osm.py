@@ -26,6 +26,8 @@ SOURCE = "osm"
 LABEL = "OpenStreetMap (OpenFreeMap)"
 LICENCE = "ODbL"
 LINK = "https://www.openstreetmap.org/copyright"
+CREDIT = "© OpenStreetMap contributors"
+PUBLISHED = "© OpenStreetMap contributors, openstreetmap.org/copyright"
 LAYER = "building"
 # OpenMapTiles' fill for a building with no height and no levels tag
 NO_HEIGHT = 5

@@ -3117,7 +3117,9 @@ The inspector under the small map is grouped by what is asked of the view.
 **Viewpoint** holds where the eye stands and how high, then the camera: its
 width, the frame, tilt and roll. **What the view shows** holds summit names,
 ridge lines, buildings (marked Beta), the sun and moon, the haze and the
-nearest ground drawn. In Overlay, the **Photo** group says everything about
+nearest ground drawn. The view's credit line and every picture of it name the
+building sources drawn as each asks: 3D BAG's makers, Overture and OpenStreetMap
+under ODbL with the copyright page's address in print, 3D-GloBFP's paper. In Overlay, the **Photo** group says everything about
 the photo: its file (another one, or none), what the file says, the lens's
 curve, the trace (undo, clear), what you know about it for Fit, and the places
 Fit found when none stood out. The band over the view keeps what is done on

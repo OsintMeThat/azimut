@@ -111,6 +111,11 @@ READS_STRIP = frozenset({"google-maps", "google-earth", "bing-maps", "yandex-map
 # Sentinel data, COPERNICUS_CLMS_… the Land service's products.
 _SENTINEL_DATASET = re.compile(r"S[1-5]")
 _SERVICE_DATASET = "COPERNICUS_CLMS_"
+# The Copernicus DEM (DEM_COPERNICUS_30_CDAS…), and the Landsat collections (…_L8_L9_…, LOTL…).
+_DEM_DATASET = "DEM_COPERNICUS"
+_LANDSAT_DATASET = re.compile(r"L[89]|LOTL|LANDSAT|_LT|_LE", re.I)
+#: The courtesy the U.S. Geological Survey asks of a Landsat picture.
+LANDSAT_CREDIT = "Landsat image courtesy of the U.S. Geological Survey"
 
 
 #: Who runs each map site, named first when the page's own credit leaves it out
@@ -130,6 +135,8 @@ STREET_VIEW_NOTICE = "Google's rules don't allow Street View screenshots in prin
 #: screenshot of them may be used. Bing's print rights allow screenshots, so says nothing.
 SITE_NOTICES = {
     "yandex-maps": "Yandex's rules don't allow its map screenshots in published work.",
+    # Google's geo guidelines: Earth images only for non-commercial use, never promotional
+    "google-earth": "Google's rules allow Google Earth images for non-commercial use only.",
 }
 #: The most of the page's own credit kept, in characters.
 SCREEN_CREDIT_MAX = 400
@@ -170,6 +177,11 @@ def screenshot_credit(
             return copernicus_credit.sentinel(imagery_date)
         if dataset.startswith(_SERVICE_DATASET):
             return copernicus_credit.service(imagery_date)
+        if dataset.startswith(_DEM_DATASET):
+            # the Copernicus DEM's licence asks its notice of a picture adapted from it
+            return f"Copernicus Browser · {copernicus_credit.DEM}"
+        if _LANDSAT_DATASET.search(dataset):
+            return f"Copernicus Browser · {LANDSAT_CREDIT}"
         return "Copernicus Browser"
     stated = year or datetime.now(timezone.utc).year
     if street:

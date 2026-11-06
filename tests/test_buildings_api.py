@@ -74,3 +74,21 @@ def test_the_building_under_a_point_or_a_plain_not_found(client, stubbed):
 
 def test_the_cache_can_be_cleared(client, stubbed):
     assert client.delete("/api/horizon/buildings/cache").json() == {"freed": 1234}
+
+
+def test_each_building_source_is_credited_as_its_licence_asks():
+    """3D BAG names its makers, Overture's buildings are ODbL with OpenStreetMap
+    named, and a print credit of OpenStreetMap data carries its copyright page."""
+    from azimut.engine.buildings import service
+
+    credit, published = service.CREDITS["nl3dbag"]
+    assert credit == "© 3DBAG by tudelft3d and 3DGI"
+    assert published == "3DBAG by 3D geoinformation research group (TU Delft) and 3DGI, 3dbag.nl"
+    assert service.LABELS["overture"][1] == "ODbL"
+    for source in ("overture", "osm"):
+        credit, published = service.CREDITS[source]
+        assert "© OpenStreetMap contributors" in credit
+        assert published.endswith("openstreetmap.org/copyright")
+    # a source that names its credit names both forms
+    for source, (credit, published) in service.CREDITS.items():
+        assert bool(credit) == bool(published), source

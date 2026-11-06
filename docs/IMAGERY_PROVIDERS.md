@@ -28,7 +28,7 @@
 | OpenStreetMap | no | — | yes | yes | static string |
 | OpenTopoMap | no | — | yes | yes | static string (CC-BY-SA² ) |
 | Sentinel-2 cloudless (EOX) | no | — | **no** (a year's mosaic, no single date) | yes | EOX's words for the year shown, with its licence |
-| **Mapbox Satellite** | yes | access token in URL | yes | yes¹ | `© Mapbox © OpenStreetMap` (+ Maxar) |
+| **Mapbox Satellite** | yes | access token in URL | yes | yes¹ | `© Mapbox © OpenStreetMap © Maxar` (Mapbox's attribution rules for a satellite style) |
 | **Google Satellite** | yes | **session token** | yes (flattened+attributed only) | **NO** | dynamic copyright from viewport endpoint |
 | **Google Satellite (Maps JS)** | yes | key in script URL⁴ | screen crops only (user-initiated grab, attribution burned) | n/a (widget) | `Map data © Google` + the widget's own credits |
 | **Sentinel-2 (Sentinel Hub)** | yes | instance ID in URL³ | yes | yes | `Contains modified Copernicus Sentinel data {year}` (§ Copernicus credit) |
@@ -68,9 +68,11 @@ The wording lives once a side: `engine/copernicus_credit.py` and
 | Sentinel-2 and Sentinel-1 the app renders: maps, captures, figures, Detect's evidence, Compare and evolution exports, plates, Horizon's near ground, the globe | `Contains modified Copernicus Sentinel data {year}` | a provider variant (`engine/tiles.py`), `datedCredit(attribution, id)` on the front |
 | A Copernicus Browser screenshot of a Sentinel collection (`S1_…`, `S2_…`, `S3…`, `S5_…`) or of none named | the same, its year from the address's `toTime` | `api/ingest.py screenshot_credit` |
 | A Copernicus Browser screenshot of a Land service product (`COPERNICUS_CLMS_…`) | `Contains modified Copernicus Service information {year}` | the same |
-| A Copernicus Browser screenshot of anything else (Landsat, the DEM, contributing missions) | `Copernicus Browser`, its own credits riding in the pixels | the same |
+| A Copernicus Browser screenshot of the Copernicus DEM (`DEM_COPERNICUS…`) | `Copernicus Browser · ` and the DEM licence's notice | the same |
+| A Copernicus Browser screenshot of Landsat | `Copernicus Browser · Landsat image courtesy of the U.S. Geological Survey`, as the USGS asks | the same |
+| A Copernicus Browser screenshot of anything else (contributing missions) | `Copernicus Browser`, its own credits riding in the pixels | the same |
 | Sentinel-2 cloudless (EOX) | EOX's sentence, which already holds the notice | `engine/cloudless.py` |
-| Terrain heights (Mapterhorn, built on Copernicus GLO-30 and national surveys) | on a map's corner `© Mapterhorn`, as Mapterhorn's own examples write it, its attribution page linked; on a picture drawn from the relief and exported or filed (Horizon's pictures, a tilted capture, a plate with relief) `© Mapterhorn, produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved` | `engine/terrain.py` (`published`), `copernicus_credit.DEM` |
+| Terrain heights (Mapterhorn, built on Copernicus GLO-30 and national surveys) | on a map's corner `© Mapterhorn`, as Mapterhorn's own examples write it, its attribution page linked; on a picture drawn from the relief and exported or filed (Horizon's pictures, a tilted capture, a plate with relief) `© Mapterhorn (mapterhorn.com/attribution), produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved` | `engine/terrain.py` (`published`), `copernicus_credit.DEM` |
 | Terrain fallback (AWS Terrain Tiles, Mapzen) | on a picture, the Required attribution its licence page lists, every source word for word, the EU-DEM line among them | `terrain.MAPZEN_REQUIRED` |
 
 - **Always the modified form.** Every Sentinel picture here is rendered from its
@@ -770,10 +772,10 @@ Checked 2026-09-13.
 | Roads | Esri `Reference/World_Transportation` | Esri terms, as World Imagery | imagery only |
 | Railways | OpenRailwayMap `standard` | © OSM contributors, style © OpenRailwayMap | |
 | Power lines | Open Infrastructure Map vector tiles (`/map/power`, `/telecoms`, `/petroleum`) | data ODbL, analysis CC-BY 4.0, credit and link required | no published tile usage policy, so the style is ours, requests only follow the view, and nothing is prefetched |
-| Sea marks | OpenSeaMap `seamark` | © OpenSeaMap contributors (CC-BY-SA) | |
+| Sea marks | OpenSeaMap `seamark` | © OpenSeaMap contributors (CC-BY-SA), drawn over OSM data, so credited `© OpenSeaMap contributors · © OpenStreetMap contributors` | |
 | GPS traces | `gps.tile.openstreetmap.org/lines` | OSMF tile policy | |
 | Active fires | NASA FIRMS, keyed, through the app | see above | |
-| Night lights | NASA GIBS WMTS, `VIIRS_NOAA20_DayNightBand_At_Sensor_Radiance` (from 2024-03-25), `VIIRS_SNPP_…` (from 2020-11-18, with gaps), `VIIRS_Black_Marble` 2016 | public domain | Level 8 (750 m); opaque, drawn lowest at 85% |
+| Night lights | NASA GIBS WMTS, `VIIRS_NOAA20_DayNightBand_At_Sensor_Radiance` (from 2024-03-25), `VIIRS_SNPP_…` (from 2020-11-18, with gaps), `VIIRS_Black_Marble` 2016 | public domain, credited `Night lights: NASA GIBS (ESDIS), VIIRS` as GIBS's acknowledgement words it | Level 8 (750 m); opaque, drawn lowest at 85% |
 
 ## Relief, summit names and the turn read ahead
 

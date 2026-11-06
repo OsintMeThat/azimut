@@ -96,6 +96,20 @@ describe('what the Layers row says about the area', () => {
       ],
     }));
     expect(lines.map((l) => l.text)).toEqual(['BD TOPO® (IGN), Licence Ouverte 2.0, 2010–2026', '3D-GloBFP, CC BY 4.0, 2020']);
+    // with no credit of their own, the same words on the view and in print
+    expect(lines.map((l) => [l.credit, l.published])).toEqual(lines.map((l) => [l.text, l.text]));
+  });
+
+  it('credits a source that names its credit as it asks, short on the view and long in print', () => {
+    const [bag] = credits(status({
+      sources: [{
+        id: 'nl3dbag', label: '3D BAG (Netherlands)', licence: 'CC BY 4.0', link: 'https://3dbag.nl', oldest: '', newest: '',
+        credit: '© 3DBAG by tudelft3d and 3DGI', published: '3DBAG by 3D geoinformation research group (TU Delft) and 3DGI, 3dbag.nl',
+      }],
+    }));
+    expect(bag.text).toBe('3D BAG (Netherlands), CC BY 4.0');
+    expect(bag.credit).toBe('© 3DBAG by tudelft3d and 3DGI');
+    expect(bag.published).toBe('3DBAG by 3D geoinformation research group (TU Delft) and 3DGI, 3dbag.nl');
   });
 
   it('asks before a download, with its size, and stops asking once declined', () => {

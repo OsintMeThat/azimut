@@ -788,6 +788,23 @@ describe('the area selection a capture into the note draws', () => {
     });
   });
 
+  it("reads Google Earth's providers, which it names without a ©", () => {
+    const { chrome } = drawOverlayOn(() => {
+      document.body.innerHTML = '';
+      for (const [text, top] of [['Data SIO, NOAA, U.S. Navy, NGA, GEBCO', 880], ['Image Landsat / Copernicus', 880], ['© 2026 Google', 880], ['Image of the day', 200]]) {
+        const el = document.createElement('span');
+        el.textContent = text;
+        el.getBoundingClientRect = () => ({ width: 120, top, bottom: top + 14 });
+        document.body.append(el);
+      }
+    });
+    const host = document.documentElement.lastElementChild;
+    host.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 10, clientY: 10, bubbles: true }));
+    host.dispatchEvent(new MouseEvent('mouseup', { button: 0, clientX: 200, clientY: 200, bubbles: true }));
+    expect(chrome.runtime.sendMessage.mock.calls[0][0].credit)
+      .toBe('Data SIO, NOAA, U.S. Navy, NGA, GEBCO · Image Landsat / Copernicus · © 2026 Google');
+  });
+
   it('reads the line a lone © stands in, its name being a link beside it', () => {
     const { chrome } = drawOverlayOn(() => {
       document.body.innerHTML = '<div id="strip">© <a href="/copyright">OpenStreetMap contributors</a></div>';

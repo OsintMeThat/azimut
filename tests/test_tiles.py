@@ -4,6 +4,7 @@ import ast
 import dataclasses
 import io
 import math
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -520,7 +521,7 @@ def test_fetch_crop_mapbox_uses_512_tiles_and_meters_served(monkeypatch, tmp_pat
     assert all("/tiles/512/14/" in u for u in urls)
     assert prov["zoom"] == 15  # provenance keeps the visual zoom
     assert len(urls) <= 4  # a 512px crop needs at most 2×2 512px tiles, not 3×3 256s
-    assert prov["attribution"] == "© Mapbox © OpenStreetMap"
+    assert prov["attribution"] == "© Mapbox © OpenStreetMap © Maxar"
     assert prov["attribution_burned"] is False
     assert img.size == (512, 512)  # no footer band for Mapbox
     # exactly the tiles the provider served land in the monthly counter (§6)
@@ -666,7 +667,7 @@ def test_fetch_crop_google_remints_session_on_403(monkeypatch, tmp_path):
     assert invalidated == ["AIza.test"]
     assert prov["tiles_missing"] == 0
     # no viewport copyright reachable — static fallback still carried & burned
-    assert prov["attribution"] == "Google"
+    assert prov["attribution"] == f"Map data ©{datetime.now(timezone.utc).year} Google"
 
 
 def test_record_usage_rolls_months(monkeypatch, tmp_path):

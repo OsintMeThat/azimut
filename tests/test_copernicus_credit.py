@@ -63,22 +63,27 @@ DEM = (
 def test_the_dem_notice_is_the_licence_s_word_for_word():
     # COP-DEM-GLO-30-F licence, Article 6(b), for adapted data
     assert copernicus_credit.DEM == DEM
-    assert copernicus_credit.RELIEF_PUBLISHED == f"© Mapterhorn, {DEM}"
+    assert copernicus_credit.RELIEF_PUBLISHED == f"© Mapterhorn (mapterhorn.com/attribution), {DEM}"
 
 
 def test_only_the_copernicus_parts_of_a_composed_line_change():
     tilted = ("© Copernicus Sentinel data / Sentinel Hub · Relief © Mapterhorn · Far ground Esri, Vantor, "
               "Earthstar Geographics, and the GIS User Community")
     assert normalise_attribution(tilted, "2023-08-08") == (
-        f"{NOTICE} 2023 · Relief © Mapterhorn, {DEM} · Far ground Esri, Vantor, Earthstar Geographics, and the "
+        f"{NOTICE} 2023 · Relief © Mapterhorn (mapterhorn.com/attribution), {DEM} · Far ground Esri, Vantor, "
+        "Earthstar Geographics, and the "
         "GIS User Community"
     )
 
 
 def test_a_bare_relief_credit_takes_the_dem_s_notice_once():
     # a tilted capture or a Horizon picture filed before the notice was written
-    assert normalise_attribution("Esri · Relief © Mapterhorn", None) == f"Esri · Relief © Mapterhorn, {DEM}"
+    assert normalise_attribution("Esri · Relief © Mapterhorn", None) == (
+        f"Esri · Relief © Mapterhorn (mapterhorn.com/attribution), {DEM}")
+    # written before the page's address was, or after: either is left as it is
     assert normalise_attribution(f"© Mapterhorn, {DEM} · 30 m relief", None) == f"© Mapterhorn, {DEM} · 30 m relief"
+    published = copernicus_credit.RELIEF_PUBLISHED
+    assert normalise_attribution(f"{published} · 30 m relief", None) == f"{published} · 30 m relief"
 
 
 def test_the_notice_written_without_a_year_takes_the_day_s():
@@ -94,8 +99,8 @@ def test_the_notice_written_without_a_year_takes_the_day_s():
     cloudless.attribution(2025),
     "Esri, Vantor, Earthstar Geographics, and the GIS User Community",
     "Map data ©2026 Google",
-    "© Mapbox © OpenStreetMap",
-    "© OpenStreetMap contributors",
+    "© Mapbox © OpenStreetMap © Maxar",
+    "© OpenStreetMap contributors, openstreetmap.org/copyright",
     copernicus_credit.RELIEF_PUBLISHED,
     "Contains modified Copernicus Service information 2025",
     "",

@@ -26,6 +26,9 @@ SOURCE = "nl3dbag"
 LABEL = "3D BAG (Netherlands)"
 LICENCE = "CC BY 4.0"
 LINK = "https://3dbag.nl"
+#: 3D BAG's own copyright page: the short credit, and the long one for print.
+CREDIT = "© 3DBAG by tudelft3d and 3DGI"
+PUBLISHED = "3DBAG by 3D geoinformation research group (TU Delft) and 3DGI, 3dbag.nl"
 ARCHIVE = "https://data.source.coop/cholmes/portolan-nl/tudelft/3dbag/3dbag-lod13.pmtiles"
 LAYER = "buildings"
 # the archive's own bounds, a little generous: elsewhere it is not asked at all

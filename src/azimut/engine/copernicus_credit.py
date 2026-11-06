@@ -47,8 +47,9 @@ DEM = (
 )
 #: The relief's short credit, which a map's corner keeps (``terrain.MAPTERHORN``).
 RELIEF = "© Mapterhorn"
-#: What a picture drawn from that relief carries.
-RELIEF_PUBLISHED = f"{RELIEF}, {DEM}"
+#: What a picture drawn from that relief carries: Mapterhorn's page names its 150
+#: national surveys, which a printed picture can only point to.
+RELIEF_PUBLISHED = f"{RELIEF} (mapterhorn.com/attribution), {DEM}"
 
 # A year at the start of a date as the sidecars keep it: 2026-05-12, 2026-05-12~,
 # 2026-05, 2026, or a timestamp.
@@ -58,7 +59,9 @@ _DAY = re.compile(r"(?<!\d)(\d{4})-\d{2}-\d{2}(?!\d)")
 # The notice already written, but with no year after it.
 _UNDATED = re.compile(re.escape(SENTINEL) + r"(?!\s*\d)")
 # The relief's short credit with nothing of the DEM's notice after it.
-_BARE_RELIEF = re.compile(re.escape(RELIEF) + r"(?!, produced using Copernicus WorldDEM-30)")
+_BARE_RELIEF = re.compile(
+    re.escape(RELIEF) + r"(?! \(mapterhorn\.com/attribution\))(?!, produced using Copernicus WorldDEM-30)"
+)
 # What the app wrote before: "© Copernicus Sentinel data / Sentinel Hub",
 # "Copernicus Sentinel data / Sentinel Hub", "© Copernicus Sentinel data". A notice
 # in the modified form, or one carrying its year, is left as it is.

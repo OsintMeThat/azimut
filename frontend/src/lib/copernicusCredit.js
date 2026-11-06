@@ -31,7 +31,7 @@ const UNDATED = /Contains modified Copernicus Sentinel data(?!\s*\d)/g;
 // shorter forms. A notice in the modified form, or one with its year, is left alone.
 const LEGACY = /(?:©\s*)?(?<!modified )Copernicus Sentinel data(?:\s*\/\s*Sentinel Hub)?(?!\s*\d)/g;
 // The relief's short credit with nothing of the DEM's notice after it.
-const BARE_RELIEF = /© Mapterhorn(?!, produced using Copernicus WorldDEM-30)/g;
+const BARE_RELIEF = /© Mapterhorn(?! \(mapterhorn\.com\/attribution\))(?!, produced using Copernicus WorldDEM-30)/g;
 
 /**
  * The years the days in `dated` name: `'2026'`, `'2025-2026'`, or `''`.
@@ -61,5 +61,5 @@ export function normaliseAttribution(text, dated) {
   if (typeof text !== 'string' || !text) return '';
   const years = dataYears(dated);
   const notice = years ? `${SENTINEL_NOTICE} ${years}` : SENTINEL_NOTICE;
-  return text.replace(UNDATED, notice).replace(LEGACY, notice).replace(BARE_RELIEF, `${RELIEF}, ${DEM_NOTICE}`);
+  return text.replace(UNDATED, notice).replace(LEGACY, notice).replace(BARE_RELIEF, `${RELIEF} (mapterhorn.com/attribution), ${DEM_NOTICE}`);
 }

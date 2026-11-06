@@ -1179,6 +1179,8 @@
       names.push(provider?.attribution);
     }
     if (view.peaksOn && view.peaks.length) names.push(...view.peaksCredits.map((credit) => credit.attribution));
+    // the buildings drawn are credited as their sources ask, on the view and on every picture of it
+    if (buildings.on) names.push(...buildings.creditLines.map((line) => (published ? line.published : line.credit)));
     const resolution = view.panorama?.resolution ? `${view.panorama.resolution} m relief` : '';
     const line = [...names, resolution].filter(Boolean).join(' · ');
     return published ? normaliseAttribution(line) : line;
