@@ -18,6 +18,7 @@ from .. import layout
 from ..engine import artifacts as artifact_engine
 from ..engine import inspect as inspect_engine
 from ..engine import inspectwork
+from ..engine import scenes as scenes_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
 from .naming import slugify
@@ -334,6 +335,16 @@ def get_work(case_id: str, path: str) -> dict[str, Any]:
     case = get_case(case_id)
     try:
         return {"work": inspectwork.find_work(case, path)}
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/cases/{case_id}/scenes")
+def list_scenes(case_id: str, video: str) -> dict[str, Any]:
+    """The scenes of one video: the proofs resting on it and the stretches still to prove."""
+    case = get_case(case_id)
+    try:
+        return scenes_engine.video_scenes(case, video)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

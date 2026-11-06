@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_FPS, SPEEDS, barFraction, captureMoment, clampTime, faster, frameDuration, frameIndex, histogram,
   loopIsSet, loopRestart, preciseClock, seekInto, setLoopEnd, shownFrameTime, slower,
-  sortedMarks, speedLabel, stepTarget, tileAt, tileStyle, waveformBars,
+  sortedMarks, speedLabel, stepTarget, tileAt, tileScale, tileStyle, waveformBars,
 } from './inspectPlayer.js';
 
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) < eps;
@@ -132,6 +132,26 @@ describe('the bar', () => {
     expect(tileAt(999, tiles)).toEqual({ index: 24, col: 4, row: 2 });
     expect(tileAt(5, null)).toBe(null);
     expect(tileStyle(tileAt(23, tiles), tiles, '/strip')).toContain('background-position:-160px -90px');
+  });
+
+  it('keeps a hover picture inside its bounds, a portrait clip\'s too, and never grows one', () => {
+    const most = { w: 160, h: 96 };
+    const wide = { count: 25, columns: 10, rows: 3, width: 160, height: 90, interval: 2 };
+    expect(tileScale(wide, most)).toBe(1);
+    expect(tileStyle(tileAt(23, wide), wide, '/strip', most)).toBe(
+      'background-image:url("/strip");background-size:1600px 270px;background-position:-160px -90px;width:160px;height:90px',
+    );
+    // a 9:16 clip: the strip draws its tiles 160 by 284, shown 54 by 96
+    const tall = { ...wide, height: 284 };
+    const k = 96 / 284;
+    expect(tileScale(tall, most)).toBeCloseTo(k, 9);
+    const style = tileStyle(tileAt(23, tall), tall, '/strip', most);
+    expect(style).toContain('width:54.08px;height:96px');
+    expect(style).toContain(`background-size:${Math.round(1600 * k * 100) / 100}px ${Math.round(3 * 96 * 100) / 100}px`);
+    expect(style).toContain(`background-position:-54.08px -96px`);
+    // no bound, the tile's own size
+    expect(tileScale(tall)).toBe(1);
+    expect(tileScale({ width: 0, height: 0 }, most)).toBe(1);
   });
 
   it('scales the waveform to its loudest moment and keeps silence flat', () => {

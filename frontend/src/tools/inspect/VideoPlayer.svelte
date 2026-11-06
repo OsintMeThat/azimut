@@ -30,11 +30,20 @@
     marks = [],
     shots = [],
     picks = [],
+    scenes = [],
     tiles = null,
     stripUrl = null,
     waveform = null,
     original = false,
     oncapture,
+    // The scene whose time is open, and where a handle dragged on the bar puts it.
+    editing = null,
+    onedit,
+    // What the analyst keeps on the clip beside the loop: Inspect's scenes button.
+    tools,
+    // A drawer docked on the video's right, above the bar: it narrows the picture,
+    // which fits itself again, rather than covering it. Inspect's scenes.
+    side,
   } = $props();
 
   let shell = $state();
@@ -89,15 +98,27 @@
   // The frame the browser actually drew, so the clock and a capture name the very
   // frame on screen, even on a variable frame rate. It also keeps the loop to the
   // frame, where `timeupdate` would overshoot B by a quarter of a second.
+  // Where the clip has just been, which a late report may still name. Chrome reports
+  // a frame by its start, and the one drawn before a seek can report itself after
+  // it; Firefox, paused, echoes the time a seek asked for, and can echo one that a
+  // newer seek has already replaced. Heard after the newest seek, either would put
+  // the next step a frame off. So each seek remembers the frame it leaves and the
+  // target it replaces, never anything inside the frame it goes to, and the first
+  // report naming somewhere else ends the watch. Plain variables, not state:
+  // nothing has to wake for them.
+  let left = [];
+  let target = null;
   $effect(() => {
     const el = video;
     if (!el?.requestVideoFrameCallback) return;
     let handle = 0;
     const tick = (_now, meta) => {
+      handle = el.requestVideoFrameCallback(tick);
+      if (left.some((t) => Math.abs(meta.mediaTime - t) < 1e-4)) return;
+      left = [];
       shared.frameTime = meta.mediaTime;
       const back = loopRestart(meta.mediaTime, loop);
       if (back != null && !el.paused) el.currentTime = seekInto(back, fps, totalDuration);
-      handle = el.requestVideoFrameCallback(tick);
     };
     handle = el.requestVideoFrameCallback(tick);
     return () => el.cancelVideoFrameCallback?.(handle);
@@ -105,6 +126,11 @@
 
   function seek(time) {
     if (!video) return;
+    const into = frameIndex(time, fps);
+    left = [...left, shown, ...(target != null ? [target] : [])]
+      .filter((t) => frameIndex(t, fps) !== into)
+      .slice(-6);
+    target = time;
     // until the new frame is drawn, the one on screen is worked out from the time
     shared.frameTime = null;
     video.currentTime = time;
@@ -137,6 +163,14 @@
   }
 
   export const stepFrames = (n) => stepBy(n * frameDuration(fps));
+
+  /** Play one stretch of the clip over and over: a scene, through the A–B loop. */
+  export function playStretch(start, end) {
+    if (!video || !(end > start)) return;
+    loop = { a: start, b: end };
+    seek(seekInto(start, fps, totalDuration));
+    video.play().catch(() => {});
+  }
   export const slower = () => (rate = slowerRate(rate));
   export const faster = () => (rate = fasterRate(rate));
 
@@ -173,54 +207,57 @@
 </script>
 
 <div class="video-shell" bind:this={shell}>
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
-    class="video-canvas"
-    class:rotating={view.turning}
-    bind:this={canvas}
-    {onwheel}
-    {onpointerdown}
-    onmousedown={(e) => e.button === 1 && e.preventDefault()}
-    onauxclick={(e) => e.preventDefault()}
-  >
-    <div class="zoom-layer" bind:this={layerEl} style:transform={view.layerCss}>
-      <div class="stage" bind:this={stageEl} style:transform={view.stageCss} style:transform-origin="0 0">
-        <!-- svelte-ignore a11y_media_has_caption -->
-        <video
-          bind:this={video}
-          {src}
-          playsinline
-          preload="auto"
-          onloadedmetadata={() => (mediaDuration = video?.duration ?? 0)}
-          {ontimeupdate}
-          onseeked={() => (shared.currentTime = video?.currentTime ?? 0)}
-          onplay={() => (paused = false)}
-          onpause={() => (paused = true)}
-          onvolumechange={() => (muted = video?.muted ?? false)}
-          style:filter={original ? '' : filter}
-          style:max-width={maxWidth}
-          style:max-height={maxHeight}
-          style:transform
-        ></video>
+  <div class="video-main">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="video-canvas"
+      class:rotating={view.turning}
+      bind:this={canvas}
+      {onwheel}
+      {onpointerdown}
+      onmousedown={(e) => e.button === 1 && e.preventDefault()}
+      onauxclick={(e) => e.preventDefault()}
+    >
+      <div class="zoom-layer" bind:this={layerEl} style:transform={view.layerCss}>
+        <div class="stage" bind:this={stageEl} style:transform={view.stageCss} style:transform-origin="0 0">
+          <!-- svelte-ignore a11y_media_has_caption -->
+          <video
+            bind:this={video}
+            {src}
+            playsinline
+            preload="auto"
+            onloadedmetadata={() => (mediaDuration = video?.duration ?? 0)}
+            {ontimeupdate}
+            onseeked={() => (shared.currentTime = video?.currentTime ?? 0)}
+            onplay={() => (paused = false)}
+            onpause={() => (paused = true)}
+            onvolumechange={() => (muted = video?.muted ?? false)}
+            style:filter={original ? '' : filter}
+            style:max-width={maxWidth}
+            style:max-height={maxHeight}
+            style:transform
+          ></video>
+        </div>
+      </div>
+      {#if view.turning}
+        <TurnGuide x={view.pivot.x} y={view.pivot.y} />
+      {/if}
+      {#if original}
+        <span class="original-tag">Without adjustments</span>
+      {/if}
+      <div class="view-ctl">
+        {#if view.dirty}
+          {#if view.zoom !== 1}<span class="val">{Math.round(view.zoom * 100)}%</span>{/if}
+          {#if view.angle !== 0}<span class="val">{view.angle}°</span>{/if}
+          <button class="btn btn-ghost btn-sm" onclick={() => view.reset()} title={INSPECT_HELP.fit}>
+            <Icon name="eye" size={14} /> Fit
+          </button>
+        {:else}
+          <span class="hint">scroll zoom · drag pan · middle-drag turns · click plays</span>
+        {/if}
       </div>
     </div>
-    {#if view.turning}
-      <TurnGuide x={view.pivot.x} y={view.pivot.y} />
-    {/if}
-    {#if original}
-      <span class="original-tag">Without adjustments</span>
-    {/if}
-    <div class="view-ctl">
-      {#if view.dirty}
-        {#if view.zoom !== 1}<span class="val">{Math.round(view.zoom * 100)}%</span>{/if}
-        {#if view.angle !== 0}<span class="val">{view.angle}°</span>{/if}
-        <button class="btn btn-ghost btn-sm" onclick={() => view.reset()} title={INSPECT_HELP.fit}>
-          <Icon name="eye" size={14} /> Fit
-        </button>
-      {:else}
-        <span class="hint">scroll zoom · drag pan · middle-drag turns · click plays</span>
-      {/if}
-    </div>
+    {@render side?.()}
   </div>
 
   <div class="player-bar" data-guide="inspect.player">
@@ -231,11 +268,15 @@
       {marks}
       {shots}
       {picks}
+      {scenes}
       {loop}
       {tiles}
       {stripUrl}
       {waveform}
+      {editing}
+      {fps}
       onseek={seekBar}
+      {onedit}
     />
     <div class="controls">
       <button class="player-btn" onclick={togglePlay} aria-label={paused ? 'Play' : 'Pause'} title={INSPECT_HELP.play}>
@@ -269,6 +310,7 @@
           </button>
         {/if}
       </span>
+      {@render tools?.()}
       <span class="spacer"></span>
       <span class="player-btn keys" title={INSPECT_HELP.keys}><Icon name="keyboard" size={16} /></span>
       <button class="player-btn" onclick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'} title={INSPECT_HELP.mute}>
@@ -303,9 +345,15 @@
     flex-direction: column;
     background: var(--bg-0);
   }
+  .video-main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+  }
   .video-canvas {
     position: relative;
     flex: 1;
+    min-width: 0;
     min-height: 0;
     overflow: hidden;
     display: flex;

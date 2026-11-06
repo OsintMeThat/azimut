@@ -1,8 +1,10 @@
 <script>
-  import { barFraction, preciseClock, tileAt, tileStyle, waveformBars } from '../../lib/inspectPlayer.js';
+  import { barFraction, frameDuration, preciseClock, tileAt, tileScale, tileStyle, waveformBars } from '../../lib/inspectPlayer.js';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
+  import { snapToFrame } from '../../lib/scenes.js';
 
   // The bar under the video: where the clip is, and what is known about it. The
+  // scenes kept on it, a coloured band over a passage and a pin at an instant, the
   // frames cut from it, the marks set on it, the shots and the sharpest frames a
   // scan found, the loop, and the sound behind it all. Hovering shows the picture
   // at that point from the strip the server drew; a press near a marker lands on
@@ -10,6 +12,12 @@
   //
   // `onseek(time, exact)` hands the parent a time to show: `exact` is a frame's own
   // timestamp, which the parent seeks half a frame into.
+  //
+  // The scene whose time is open (`editing`: its key, start and end) has handles: its
+  // pin, or a passage's two ends. Dragging one moves it by whole frames, catches on a
+  // marker it passes close to, never crosses the other end, and shows the frame it
+  // stands on; `onedit(which, time)` hands the time up. A press anywhere else still
+  // moves through the clip.
   let {
     duration = 0,
     time = 0,
@@ -17,20 +25,31 @@
     marks = [],
     shots = [],
     picks = [],
+    scenes = [],
     loop = { a: null, b: null },
     tiles = null,
     stripUrl = null,
     waveform = null,
+    editing = null,
+    fps = null,
     onseek,
+    onedit,
   } = $props();
 
   const SNAP_PX = 6;
+  // The hover picture's bounds: a 16:9 tile at its own 160 × 90, a portrait one
+  // shrunk to the same height rather than covering the video it previews.
+  const PEEK = { w: 160, h: 96 };
+  // How close to a handle a press takes it, a little wider than the handle drawn.
+  const GRIP_PX = 8;
 
   let track = $state();
   let canvas = $state();
   let width = $state(0);
   let hover = $state(null); // { x, time, label }
   let dragging = $state(false);
+  let grab = $state(null); // 'start' or 'end' while a handle is dragged
+  let nearGrip = $state(false);
 
   const bars = $derived(waveformBars(waveform));
   const at = (t) => `${barFraction(t, duration) * 100}%`;
@@ -41,7 +60,14 @@
     ...marks.map((m) => ({ time: m.time, label: m.label || 'Mark' })),
     ...shots.map((s, i) => ({ time: s.start, label: `Shot ${i + 1}` })),
     ...picks.map((p) => ({ time: p.time, label: 'Sharp frame' })),
+    ...scenes.map((s) => ({ time: s.start, label: s.label, key: s.key })),
   ].filter((t) => Number.isFinite(t.time)));
+  // What a dragged handle catches on: the same, and where other scenes end, never
+  // the scene being moved.
+  const gripTargets = $derived(editing ? [
+    ...targets,
+    ...scenes.filter((s) => s.end != null).map((s) => ({ time: s.end, label: s.label, key: s.key })),
+  ].filter((t) => t.key !== editing.key) : []);
 
   $effect(() => {
     if (!track) return;
@@ -73,10 +99,10 @@
   });
 
   /** The marker within reach of `x` on a bar `w` pixels wide, if any. */
-  function snapAt(x, w) {
+  function snapAt(x, w, among = targets) {
     if (!w || !(duration > 0)) return null;
     let best = null;
-    for (const t of targets) {
+    for (const t of among) {
       const d = Math.abs((t.time / duration) * w - x);
       if (d <= SNAP_PX && (!best || d < best.d)) best = { ...t, d };
     }
@@ -93,16 +119,62 @@
     return { x, time: w ? (x / w) * duration : 0, label: '', exact: false };
   }
 
+  /** The handle within reach of `clientX`: the nearer end, or the one the press is past. */
+  function gripAt(clientX) {
+    if (!editing || !Number.isFinite(editing.start) || !(duration > 0)) return null;
+    const rect = track.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const px = (t) => (t / duration) * rect.width;
+    const toStart = Math.abs(px(editing.start) - x);
+    const toEnd = Number.isFinite(editing.end) ? Math.abs(px(editing.end) - x) : Infinity;
+    if (Math.min(toStart, toEnd) > GRIP_PX) return null;
+    if (toEnd < toStart || (toEnd === toStart && x >= px(editing.end))) return 'end';
+    return 'start';
+  }
+
+  const gripLabel = (which) => (which === 'end' ? 'End' : Number.isFinite(editing?.end) ? 'Start' : 'Scene');
+
+  /** Show the frame a handle stands on: the scene's first, or the last before its end. */
+  function showGrip(which, time) {
+    onseek?.(which === 'end' ? Math.max(0, time - frameDuration(fps)) : time, true);
+  }
+
+  function dragGrip(clientX) {
+    const rect = track.getBoundingClientRect();
+    const w = rect.width;
+    const x = Math.min(Math.max(0, clientX - rect.left), w);
+    const snap = snapAt(x, w, gripTargets);
+    let time = snap ? snap.time : snapToFrame(w ? (x / w) * duration : 0, fps);
+    const frame = frameDuration(fps);
+    if (grab === 'end') time = Math.min(Math.max(time, editing.start + frame), duration);
+    else time = Math.max(0, Math.min(time, Number.isFinite(editing.end) ? editing.end - frame : duration - frame));
+    hover = { x: (time / duration) * w, time, label: snap ? `${gripLabel(grab)} · ${snap.label}` : gripLabel(grab), exact: true };
+    onedit?.(grab, time);
+    showGrip(grab, time);
+  }
+
   function onpointerdown(e) {
     if (e.button !== 0 || !(duration > 0)) return;
     e.preventDefault();
     track.setPointerCapture?.(e.pointerId);
+    const grip = gripAt(e.clientX);
+    if (grip) {
+      // Taken where it stands: it moves once the pointer does.
+      grab = grip;
+      showGrip(grip, grip === 'end' ? editing.end : editing.start);
+      return;
+    }
     dragging = true;
     const p = point(e.clientX);
     onseek?.(p.time, p.exact);
   }
 
   function onpointermove(e) {
+    if (grab) {
+      dragGrip(e.clientX);
+      return;
+    }
+    nearGrip = gripAt(e.clientX) != null;
     const p = point(e.clientX);
     hover = p;
     if (dragging) onseek?.(p.time, p.exact);
@@ -110,13 +182,14 @@
 
   function onpointerup(e) {
     dragging = false;
+    grab = null;
     track.releasePointerCapture?.(e.pointerId);
   }
 
   const tile = $derived(hover ? tileAt(hover.time, tiles) : null);
   const hoverLeft = $derived.by(() => {
     if (!hover) return 0;
-    const half = (tiles?.width ?? 80) / 2;
+    const half = tiles ? (tiles.width * tileScale(tiles, PEEK)) / 2 : 40;
     return Math.min(Math.max(hover.x, half), Math.max(half, width - half));
   });
 </script>
@@ -124,6 +197,7 @@
 <div
   class="track"
   class:waved={bars.length > 0}
+  class:resize={grab != null || (nearGrip && editing != null)}
   bind:this={track}
   role="slider"
   tabindex="0"
@@ -132,14 +206,31 @@
   aria-valuemax={duration}
   aria-valuenow={time}
   aria-valuetext={preciseClock(time)}
-  title={hover ? '' : INSPECT_HELP.bar}
+  title={hover ? '' : editing ? INSPECT_HELP.barScene : INSPECT_HELP.bar}
   {onpointerdown}
   {onpointermove}
   {onpointerup}
   onpointercancel={onpointerup}
-  onpointerleave={() => (hover = null)}
+  onpointerleave={() => {
+    if (!grab) hover = null;
+    nearGrip = false;
+  }}
 >
   {#if bars.length}<canvas class="wave" bind:this={canvas} aria-hidden="true"></canvas>{:else}<span class="rail"></span>{/if}
+  {#each scenes as s (s.key)}
+    {#if s.end != null}
+      <span
+        class="scene"
+        class:held={s.key === editing?.key}
+        data-testid="scene-band"
+        style:left={at(s.start)}
+        style:width={`${(barFraction(s.end, duration) - barFraction(s.start, duration)) * 100}%`}
+        style:--scene={s.color}
+      ></span>
+    {:else}
+      <span class="scene-pin" data-testid="scene-pin" style:left={at(s.start)} style:--scene={s.color}></span>
+    {/if}
+  {/each}
   <span class="played" style:width={at(time)}></span>
   {#if loop.a != null}
     <span
@@ -162,10 +253,16 @@
     <span class="frame" style:left={at(f.time)}></span>
   {/each}
   <span class="head" style:left={at(time)}></span>
+  {#if editing && Number.isFinite(editing.start)}
+    <span class="grip" class:on={grab === 'start'} data-testid="scene-grip-start" style:left={at(editing.start)} style:--scene={editing.color}></span>
+    {#if Number.isFinite(editing.end)}
+      <span class="grip" class:on={grab === 'end'} data-testid="scene-grip-end" style:left={at(editing.end)} style:--scene={editing.color}></span>
+    {/if}
+  {/if}
   {#if hover}
     <span class="hair" style:left={`${hover.x}px`}></span>
     <div class="peek" style:left={`${hoverLeft}px`}>
-      {#if tile}<span class="thumb" style={tileStyle(tile, tiles, stripUrl)}></span>{/if}
+      {#if tile}<span class="thumb" style={tileStyle(tile, tiles, stripUrl, PEEK)}></span>{/if}
       <span class="peek-time mono">{preciseClock(hover.time)}{hover.label ? ` · ${hover.label}` : ''}</span>
     </div>
   {/if}
@@ -222,6 +319,59 @@
   }
   .loop.open {
     border-right: 0;
+  }
+  /* A scene: a tinted stretch under everything else, edged in its own colour. */
+  .scene {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    min-width: 2px;
+    background: color-mix(in srgb, var(--scene) 22%, transparent);
+    border-bottom: 3px solid var(--scene);
+    pointer-events: none;
+  }
+  /* An instant: a thin line in the scene's colour, footed like a band. */
+  .scene-pin {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--scene);
+    pointer-events: none;
+  }
+  .scene-pin::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: -3px;
+    width: 8px;
+    height: 3px;
+    border-radius: 1px;
+    background: var(--scene);
+  }
+  /* The scene whose time is open stands out from the rest. */
+  .scene.held {
+    background: color-mix(in srgb, var(--scene) 38%, transparent);
+  }
+  .track.resize {
+    cursor: ew-resize;
+  }
+  /* A handle: a bar in the scene's colour, standing proud of the track. */
+  .grip {
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    width: 6px;
+    margin-left: -3px;
+    border-radius: 3px;
+    background: var(--scene, var(--accent));
+    box-shadow: 0 0 0 1.5px var(--bg-1);
+    pointer-events: none;
+    z-index: 2;
+  }
+  .grip.on {
+    box-shadow: 0 0 0 1.5px var(--bg-1), 0 0 0 3px var(--scene, var(--accent));
   }
   .shot {
     position: absolute;

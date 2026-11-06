@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { api, detailLine } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
@@ -11,11 +11,17 @@
   } from '../lib/inspect.js';
   import { captureMoment, frameDuration, preciseClock, seekInto, shownFrameTime } from '../lib/inspectPlayer.js';
   import { INSPECT_HELP } from '../lib/inspectHelp.js';
+  import {
+    isStretch, momentKey, newScene, sameMoments, sceneList, sceneMarks, scenePassage, sceneStart, sceneTime,
+    sceneTitle, sceneToEnd, snapToFrame, stretchFromShot, takenDrafts, timeWords,
+  } from '../lib/scenes.js';
+  import { SceneEdit } from '../lib/sceneEdit.svelte.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import {
-    workState, workSpec, isPristine, frameSignature, videoSignature, isFiled,
+    workState, workSpec, isPristine, frameSignature, videoSignature, isFiled, markRecord, sceneRecord,
   } from '../lib/inspectWork.svelte.js';
   import { createAutosave } from '../lib/autosave.svelte.js';
+  import { createHistory } from '../lib/history.js';
   import { deletedToast } from '../lib/trash.js';
   import { openInHorizon, openInReverseSearch } from '../lib/navigate.js';
   import { offerNote, offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
@@ -35,6 +41,8 @@
   import FrameAnalyze from './inspect/FrameAnalyze.svelte';
   import InfoPanel from './inspect/InfoPanel.svelte';
   import MomentsPanel from './inspect/MomentsPanel.svelte';
+  import SceneButton from './inspect/SceneButton.svelte';
+  import ScenePanel from './inspect/ScenePanel.svelte';
   import SaveToCase from './inspect/SaveToCase.svelte';
   import VideoAdjust from './inspect/VideoAdjust.svelte';
   import VideoPlayer from './inspect/VideoPlayer.svelte';
@@ -73,8 +81,17 @@
     videoFiled: null,
     frames: [],
     marks: [],
+    // Scenes kept on a video and not proved yet; proved ones are the proofs' own.
+    scenes: [],
     activeFrameId: null,
   });
+
+  // What is kept on the clip, scenes and marks, goes back with Ctrl+Z and forward
+  // with Ctrl+Shift+Z, and every toast about it offers Undo while nothing has moved
+  // since (`lib/history.js`).
+  const clipHistory = createHistory(80);
+  const clipSnapshot = () =>
+    JSON.stringify({ scenes: work.scenes.map(sceneRecord), marks: work.marks.map(markRecord) });
 
   // Bumped whenever the open file changes, so a render or a capture that returns
   // afterwards can tell it belongs to a file no longer open.
@@ -253,8 +270,13 @@
     work.videoFiled = null;
     work.frames = [];
     work.marks = [];
+    work.scenes = [];
     work.activeFrameId = null;
     savedSignature = null;
+    listedScenes = [];
+    sceneEdit.close();
+    scenesOpen = false;
+    clipHistory.reset(clipSnapshot());
     probeInfo = null;
     shared.currentTime = 0;
     shared.frameTime = null;
@@ -301,7 +323,11 @@
       if (saved) restore(saved, run);
       else seed();
       savedSignature = signature();
-      if (item.kind === 'video') loadOverview(run);
+      clipHistory.reset(clipSnapshot());
+      if (item.kind === 'video') {
+        loadOverview(run);
+        loadScenes(run);
+      }
     } catch (e) {
       if (run === openRun) {
         toast(e.message, 'danger');
@@ -383,6 +409,7 @@
     work.videoFiled = spec.videoFiled ?? null;
     work.frames = (spec.frames ?? []).map((f) => ({ ...f, adjust: { ...adjustDefaults(filters), ...(f.adjust ?? {}) }, url: null }));
     work.marks = (spec.marks ?? []).map((m) => ({ id: m.id, time: m.time, label: m.label ?? '' }));
+    work.scenes = (spec.scenes ?? []).map((sc) => ({ id: sc.id, start: sc.start, end: sc.end, label: sc.label ?? '' }));
     if (!isVideo && !work.frames.length) {
       seed();
       return;
@@ -693,6 +720,19 @@
     const t = e.target;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable) return;
     if (t.closest?.('[role="dialog"], [role="alertdialog"]')) return;
+    // In the scenes drawer the player's keys still reach the frame, but a button
+    // there answers its own Space and Enter.
+    if (t.closest?.('[data-scene-panel]') && t.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && selected === 'video') {
+      const k = e.key.toLowerCase();
+      const redo = (k === 'z' && e.shiftKey) || (k === 'y' && !e.shiftKey);
+      if ((k === 'z' && !e.shiftKey) || redo) {
+        e.preventDefault();
+        if (redo) redoClip();
+        else undoClip();
+        return;
+      }
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     if (key === 'o') {
@@ -717,6 +757,17 @@
       l: () => player.faster(),
       c: () => !e.repeat && captureNow(),
       m: () => !e.repeat && addMark(),
+      // While a scene's time is open, S and Shift+S move the start and end of the
+      // moment in hand instead.
+      s: () => {
+        if (e.repeat) return;
+        if (sceneEdit.scene) sceneHere(e.shiftKey ? 'end' : 'start');
+        else if (e.shiftKey) endSceneHere();
+        else addSceneHere();
+      },
+      ...(sceneEdit.scene ? { Enter: applySceneEdit } : {}),
+      // Escape lets go of the time being changed first, then closes the drawer.
+      ...(sceneEdit.scene ? { Escape: () => sceneEdit.close() } : scenesOpen ? { Escape: closeScenes } : {}),
     };
     const act = actions[key];
     if (!act) return;
@@ -787,6 +838,261 @@
     }
   }
 
+  // -- scenes -------------------------------------------------------------------------
+  // Where in the clip each geolocation happens (`lib/scenes.js`): an instant, or a
+  // passage once it has an end. The proofs resting on the clip come from the server;
+  // the drafts are this work's own. A draft a proof has taken up is dropped from the
+  // work, which the next save writes down.
+  let listedScenes = $state([]);
+  const scenes = $derived(sceneList(listedScenes, work.scenes));
+
+  // The scene whose time is open (`lib/sceneEdit.svelte.js`). The bar draws it as
+  // its fields read, with handles, before anything is kept.
+  const sceneEdit = new SceneEdit(() => ({ duration: probeInfo?.duration ?? 0, fps: probeInfo?.fps ?? null }));
+  // The drawer beside the video that lists them. Closed whenever a file opens, and
+  // never remembered.
+  let scenesOpen = $state(false);
+  const sceneMarksOnBar = $derived.by(() => {
+    const held = sceneEdit.scene && scenes.find((sc) => sc.key === sceneEdit.key);
+    if (!held) return sceneMarks(scenes);
+    // the scene in hand as its fields read: each moment that reads as a time, by its line
+    const label = sceneTitle(held);
+    const edited = sceneEdit.moments.flatMap((m, i) =>
+      m.start == null ? [] : [{ key: momentKey(held, i), start: m.start, end: isStretch(m) && m.passage ? m.end : null, color: held.color, label }],
+    );
+    return [...sceneMarks(scenes.filter((sc) => sc.key !== held.key)), ...edited];
+  });
+  const sceneOnBar = $derived.by(() => {
+    const held = sceneEdit.scene && scenes.find((sc) => sc.key === sceneEdit.key);
+    return held && sceneEdit.start != null
+      ? { key: sceneEdit.activeKey, start: sceneEdit.start, end: sceneEdit.end, color: held.color }
+      : null;
+  });
+  // A scene that leaves the list (removed, undone, its proof gone) takes its time with it.
+  $effect(() => {
+    if (sceneEdit.key && !scenes.some((sc) => sc.key === sceneEdit.key)) sceneEdit.close();
+  });
+
+  async function loadScenes(run) {
+    const path = work.source?.path;
+    if (!path || !isVideo) return;
+    try {
+      const res = await api.get(`/api/cases/${work.caseId}/scenes?video=${encodeURIComponent(path)}`);
+      if (run !== openRun) return;
+      listedScenes = res.scenes ?? [];
+      const taken = takenDrafts(listedScenes);
+      if (work.scenes.some((sc) => taken.has(sc.id))) {
+        work.scenes = work.scenes.filter((sc) => !taken.has(sc.id));
+        clipHistory.reset(clipSnapshot());
+      }
+    } catch {
+      // the list is a reading: without it the drafts still show, and a reopen asks again
+    }
+  }
+
+  // Coming back to Inspect reads the list again: a proof saved meanwhile joins it.
+  $effect(() => {
+    if (uiState.tool === 'inspect' && isVideo && !opening) untrack(() => loadScenes(openRun));
+  });
+
+  /** Record the clip as it now stands, and say how to take this step back. */
+  function clipChanged(message) {
+    const after = clipSnapshot();
+    clipHistory.push(after);
+    const run = openRun;
+    toast(message, 'info', 6000, {
+      label: 'Undo',
+      onClick: () => {
+        if (run === openRun && clipSnapshot() === after) undoClip();
+      },
+    });
+  }
+
+  function restoreClip(snapshot) {
+    if (!snapshot) return false;
+    const state = JSON.parse(snapshot);
+    work.scenes = state.scenes;
+    work.marks = state.marks;
+    return true;
+  }
+  const undoClip = () => restoreClip(clipHistory.undo());
+  const redoClip = () => restoreClip(clipHistory.redo());
+
+  function keepScene(stretch, message) {
+    if (!stretch) return null;
+    const scene = newScene(stretch);
+    work.scenes.push(scene);
+    clipChanged(message(scene));
+    return scene;
+  }
+
+  /** A scene at the frame on screen (S). */
+  function addSceneHere() {
+    if (!isVideo) return;
+    keepScene({ start: shownTime() }, (scene) => `Scene kept at ${sceneTime(scene)}`);
+  }
+
+  const keepShotScene = (index) =>
+    keepScene(stretchFromShot(scan?.shots, index, probeInfo?.duration ?? 0), (scene) => `Shot kept as a scene, ${sceneTime(scene)}`);
+
+  /** End a scene at the frame on screen: the one named, else the latest started before it (Shift+S). */
+  function endSceneHere(id = null) {
+    const now = shownTime() + frameDur;
+    const target = id ? work.scenes.find((sc) => sc.id === id) : sceneToEnd(scenes, now);
+    const scene = target && work.scenes.find((sc) => sc.id === target.id);
+    if (!scene || scene.start == null) return;
+    if (!(now > scene.start)) {
+      toast('Go past the start of the scene to end it here', 'warn');
+      return;
+    }
+    scene.end = now;
+    clipChanged(`Scene ends at ${sceneTime(scene).split('–')[1]}`);
+  }
+
+  function playScene(scene) {
+    const loop = scenePassage(scene);
+    if (loop) {
+      player?.playStretch(loop.start, loop.end);
+      return;
+    }
+    const start = sceneStart(scene);
+    if (start != null) seekFrame(start);
+  }
+
+  function labelScene(id, label) {
+    const scene = work.scenes.find((sc) => sc.id === id);
+    if (scene) scene.label = label;
+  }
+
+  function removeScene(id) {
+    const index = work.scenes.findIndex((sc) => sc.id === id);
+    if (index === -1) return;
+    work.scenes.splice(index, 1);
+    clipChanged('Scene removed');
+  }
+
+  function openSceneProof(scene) {
+    if (!scene?.proof) return;
+    uiState.openProof = scene.proof;
+    uiState.tool = 'proof';
+  }
+
+  // -- a scene's time, changed --------------------------------------------------------
+  // Pressing a scene's time in the drawer goes there and opens it (`lib/sceneEdit`).
+  // Apply or Enter keeps it, and so does closing the drawer or opening another time
+  // when it reads as one. A draft's new time joins the clip's history like any other
+  // change to it; a proof's moments are written to the proof
+  // (`PUT /cases/{id}/proofs/{name}/scene`) and its toast takes them back.
+
+  function toggleScenes() {
+    if (scenesOpen) closeScenes();
+    else scenesOpen = true;
+  }
+
+  function closeScenes() {
+    leaveSceneEdit();
+    scenesOpen = false;
+  }
+
+  function editSceneTime(scene) {
+    const again = sceneEdit.key === scene.key;
+    leaveSceneEdit();
+    // its time pressed again folds it, kept like closing the drawer
+    if (again) return;
+    const start = sceneStart(scene);
+    if (start != null) seekFrame(start);
+    sceneEdit.begin(scene);
+  }
+
+  /** The frame on screen, and the end of it: where a new moment starts, and a passage ends. */
+  const frameNow = () => ({ start: shownTime(), end: shownTime() + frameDur });
+
+  /**
+   * The frame on screen as a moment's start, or the end of it as its end (S, Shift+S).
+   * A scene about the whole video gets a moment there.
+   */
+  function sceneHere(which, index = sceneEdit.active) {
+    if (sceneEdit.whole) sceneEdit.setKind('instant', frameNow());
+    sceneEdit.activate(index);
+    if (which === 'end') sceneEdit.setEnd(frameNow().end);
+    else sceneEdit.setStart(frameNow().start);
+  }
+
+  const sceneKind = (kind) => sceneEdit.setKind(kind, frameNow());
+  const addMoment = () => sceneEdit.add(frameNow().start);
+
+  /** Move one end of a moment a frame, or a second, and show the frame it lands on. */
+  function nudgeScene(which, direction, wholeSecond, index = sceneEdit.active) {
+    sceneEdit.activate(index);
+    const from = which === 'end' ? sceneEdit.end : sceneEdit.start;
+    if (from == null) return;
+    const time = Math.max(0, snapToFrame(from + direction * (wholeSecond ? 1 : frameDur), probeInfo?.fps));
+    if (which === 'end') {
+      if (!(time > (sceneEdit.start ?? 0))) return;
+      sceneEdit.setEnd(time);
+      seekFrame(time - frameDur);
+    } else {
+      sceneEdit.setStart(time);
+      seekFrame(time);
+    }
+  }
+
+  /** Where a handle dragged on the bar put the start or the end of the moment in hand. */
+  function dragScene(which, time) {
+    if (which === 'end') sceneEdit.setEnd(time);
+    else sceneEdit.setStart(time);
+  }
+
+  async function applySceneEdit() {
+    const scene = sceneEdit.scene;
+    const time = sceneEdit.result;
+    if (!scene || !time) return;
+    const changed = sceneEdit.changed;
+    sceneEdit.close();
+    if (!changed) return;
+    if (scene.kind === 'proof') {
+      await timeProof(scene, time.moments);
+      return;
+    }
+    const draft = work.scenes.find((sc) => sc.id === scene.id);
+    if (!draft) return;
+    draft.start = time.start;
+    draft.end = time.end;
+    clipChanged(`Scene now ${timeWords(time.start == null ? [] : [time])}`);
+  }
+
+  /** Letting go of a time by closing the drawer or opening another keeps it when it reads as one. */
+  function leaveSceneEdit() {
+    if (sceneEdit.result && sceneEdit.changed) applySceneEdit();
+    else sceneEdit.close();
+  }
+
+  async function timeProof(scene, moments, undoable = true) {
+    const run = openRun;
+    const before = (scene.moments ?? []).map(({ start, end }) => ({ start, end: end ?? null }));
+    let res;
+    try {
+      res = await api.put(`/api/cases/${work.caseId}/proofs/${encodeURIComponent(scene.proof)}/scene`, { moments });
+    } catch (e) {
+      if (run === openRun) toast(e.message, 'danger');
+      return;
+    }
+    if (run !== openRun) return;
+    const ours = (sc) => sc.kind === 'proof' && sc.proof === scene.proof;
+    listedScenes = listedScenes.map((sc) =>
+      ours(sc) ? { ...sc, moments: res.moments, at: res.at, stated: res.stated } : sc,
+    );
+    toast(`“${scene.title || scene.proof}” is now ${timeWords(res.moments)}`, 'info', 6000, undoable ? {
+      label: 'Undo',
+      onClick: () => {
+        const now = listedScenes.find(ours);
+        // only while nothing has moved it since
+        if (run === openRun && now && sameMoments(now.moments, res.moments)) timeProof(now, before, false);
+      },
+    } : null);
+    loadScenes(run);
+  }
+
   // -- marks --------------------------------------------------------------------------
   let focusMarkId = $state(null);
 
@@ -794,6 +1100,7 @@
     if (!isVideo) return;
     const mark = { id: uid('mk'), time: shownTime(), label: '' };
     work.marks.push(mark);
+    clipHistory.push(clipSnapshot());
     focusMarkId = mark.id;
     tabs.video = 'moments';
   }
@@ -801,15 +1108,8 @@
   function removeMark(id) {
     const index = work.marks.findIndex((m) => m.id === id);
     if (index === -1) return;
-    const [mark] = work.marks.splice(index, 1);
-    const run = openRun;
-    toast('Mark removed', 'info', 6000, {
-      label: 'Undo',
-      onClick: () => {
-        if (run !== openRun || work.marks.some((m) => m.id === mark.id)) return;
-        work.marks.splice(Math.min(index, work.marks.length), 0, mark);
-      },
-    });
+    work.marks.splice(index, 1);
+    clipChanged('Mark removed');
   }
 
   // -- a frame's adjusted picture, when CSS cannot show it --------------------------------
@@ -1134,12 +1434,42 @@
               marks={work.marks}
               shots={scan?.shots ?? []}
               picks={scan?.frames ?? []}
+              scenes={sceneMarksOnBar}
               tiles={overview?.tiles ?? null}
               stripUrl={overview?.stripUrl ?? null}
               waveform={overview?.waveform ?? null}
               original={holdOriginal}
               oncapture={captureNow}
-            />
+              editing={sceneOnBar}
+              onedit={dragScene}
+            >
+              {#snippet tools()}
+                <SceneButton {scenes} open={scenesOpen} onclick={toggleScenes} />
+              {/snippet}
+              {#snippet side()}
+                {#if scenesOpen}
+                  <ScenePanel
+                    {scenes}
+                    edit={sceneEdit}
+                    onadd={addSceneHere}
+                    onplay={playScene}
+                    onlabel={labelScene}
+                    onend={endSceneHere}
+                    onremove={removeScene}
+                    onopenproof={openSceneProof}
+                    onedit={editSceneTime}
+                    onhere={sceneHere}
+                    onkind={sceneKind}
+                    onnudge={nudgeScene}
+                    onaddmoment={addMoment}
+                    onapply={applySceneEdit}
+                    oncancel={() => sceneEdit.close()}
+                    onleave={leaveSceneEdit}
+                    onclose={closeScenes}
+                  />
+                {/if}
+              {/snippet}
+            </VideoPlayer>
           {:else if activeFrame?.url}
             <FrameViewer
               frame={activeFrame}
@@ -1194,6 +1524,12 @@
                 <span>Capture frame</span>
                 <span class="at mono">{preciseClock(shownFrameTime(shared.currentTime, probeInfo?.fps, shared.frameTime))}</span>
                 <kbd>C</kbd>
+              </button>
+              <button class="btn btn-sm scene-here" data-guide="inspect.scene" onclick={addSceneHere} title={INSPECT_HELP.sceneHere}>
+                <Icon name="pin" size={13} />
+                <span>Scene here</span>
+                {#if scenes.length}<span class="scene-count">{scenes.length} in this video</span>{/if}
+                <kbd>S</kbd>
               </button>
               {#if unfiledCount}
                 <button class="btn btn-sm save-frames" data-guide="inspect.save" disabled={saving === 'all'} onclick={saveAllFrames} title={INSPECT_HELP.saveAll}>
@@ -1254,6 +1590,8 @@
               />
             {:else if selected === 'video'}
               <MomentsPanel
+                duration={probeInfo?.duration ?? 0}
+                onkeepshot={keepShotScene}
                 bind:marks={work.marks}
                 focusId={focusMarkId}
                 onaddmark={addMark}
@@ -1495,6 +1833,23 @@
   .save-frames {
     width: 100%;
     justify-content: center;
+  }
+  .scene-here {
+    width: 100%;
+    justify-content: center;
+    gap: 6px;
+  }
+  .scene-count {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .scene-here kbd {
+    padding: 0 4px;
+    border-radius: 3px;
+    border: 1px solid currentColor;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    opacity: 0.6;
   }
   .ptabs {
     flex-shrink: 0;

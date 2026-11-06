@@ -57,6 +57,10 @@ MAX_SPEC_BYTES = 2_000_000
 MAX_FRAMES = 500
 MAX_MARKS = 500
 MAX_MARK_LABEL = 200
+#: Scenes waiting for a proof: the stretches of one video where something happens
+#: somewhere still to be found. A proved scene is the proof's, not the work's.
+MAX_SCENES = 200
+MAX_SCENE_LABEL = 200
 MAX_PIECES = 200
 #: The collage list's preview: the browser draws it no wider than this, and a
 #: larger one is shrunk rather than stored.
@@ -74,6 +78,7 @@ _FRAME_KEYS = (
     "id", "path", "time", "adjust", "crop", "sourceOps", "rotation", "w", "h", "filed",
 )
 _MARK_KEYS = ("id", "time", "label")
+_SCENE_KEYS = ("id", "start", "end", "label")
 _PIECE_KEYS = ("id", "frameId", "save", "w", "h", "quad", "frameOps", "crop")
 _RIGHT_ANGLES = (-180, -90, 0, 90, 180)
 
@@ -183,6 +188,7 @@ def _work_row(rel: str, spec: dict[str, Any]) -> dict[str, Any]:
         "kind": source.get("kind"),
         "frames": len(spec.get("frames") or []),
         "marks": len(spec.get("marks") or []),
+        "scenes": len(spec.get("scenes") or []),
         "updated_at": spec.get("updated_at"),
     }
 
@@ -288,6 +294,63 @@ def _clean_marks(marks: Any) -> list[dict[str, Any]]:
     return sorted(out, key=lambda m: m["time"])
 
 
+def _seconds(value: Any) -> float | None:
+    """A moment in the file, or None when it is not one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return float(value)
+
+
+def _scene_order(scene: dict[str, Any]) -> tuple[float, float]:
+    """Clip order, a scene about the whole video first."""
+    start = scene["start"]
+    if start is None:
+        return (-math.inf, -math.inf)
+    return (start, scene["end"] if scene["end"] is not None else start)
+
+
+def _clean_scenes(scenes: Any) -> list[dict[str, Any]]:
+    """Scenes still to prove: an id, a start in seconds, an end or none, a short label.
+
+    A scene is an instant until it is given an end, and then a stretch whose end
+    comes after its start. One with neither is about the whole video. The video's
+    length is not checked here: the player is what knows it, and a scene set a frame
+    past the end of a clip whose length was misread is still the analyst's.
+    """
+    if scenes is None:
+        return []
+    if not isinstance(scenes, list):
+        raise CaseError("scenes must be a list")
+    if len(scenes) > MAX_SCENES:
+        raise CaseError(f"a file holds at most {MAX_SCENES} scenes")
+    out = []
+    seen: set[str] = set()
+    for scene in scenes:
+        if not isinstance(scene, dict) or not isinstance(scene.get("id"), str) or not scene["id"]:
+            raise CaseError("every scene needs an id")
+        if scene["id"] in seen:
+            raise CaseError("two scenes share one id")
+        seen.add(scene["id"])
+        start = _seconds(scene.get("start"))
+        whole = scene.get("start") is None and scene.get("end") is None
+        if start is None and not whole:
+            raise CaseError("a scene needs a start in seconds, or no time at all")
+        end = None
+        if start is not None and scene.get("end") is not None:
+            end = _seconds(scene.get("end"))
+            if end is None:
+                raise CaseError("a scene's end is a time in seconds")
+            if end <= start:
+                raise CaseError("a scene must end after it starts")
+        label = scene.get("label", "")
+        if not isinstance(label, str):
+            raise CaseError("a scene label must be text")
+        out.append({"id": scene["id"], "start": start, "end": end, "label": label.strip()[:MAX_SCENE_LABEL]})
+    return sorted(out, key=_scene_order)
+
+
 def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any]:
     """Write one file's work, filing its entity the first time.
 
@@ -300,6 +363,7 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
     _check_size(spec)
     frames = _clean_frames(spec.get("frames", []), subject)
     marks = _clean_marks(spec.get("marks"))
+    scenes = _clean_scenes(spec.get("scenes"))
     rotation = spec.get("videoRotation", 0)
     if rotation not in _RIGHT_ANGLES:
         raise CaseError("video rotation must be a right angle")
@@ -331,6 +395,7 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
             "videoFiled": spec.get("videoFiled") if isinstance(spec.get("videoFiled"), dict) else None,
             "frames": frames,
             "marks": marks,
+            "scenes": scenes,
             "activeFrameId": active if any(f["id"] == active for f in frames) else None,
         }
         if found and previous.get("merged_from"):
@@ -958,6 +1023,20 @@ def _merge_subject(
             ):
                 marks.append(_pick(mark, _MARK_KEYS))
                 seen_marks.add(mark["id"])
+    scenes: list[dict[str, Any]] = []
+    seen_scenes: set[Any] = set()
+    for _r, spec in [(rel, base), *others]:
+        for scene in spec.get("scenes") or []:
+            if not isinstance(scene, dict) or not isinstance(scene.get("id"), str):
+                continue
+            start, end = _seconds(scene.get("start")), _seconds(scene.get("end"))
+            whole = scene.get("start") is None and scene.get("end") is None
+            if (start is None and not whole) or (start is not None and end is not None and end <= start):
+                continue
+            if scene["id"] in seen_scenes:
+                continue
+            scenes.append({**_pick(scene, _SCENE_KEYS), "start": start, "end": end if start is not None else None})
+            seen_scenes.add(scene["id"])
     merged_from = list(base.get("merged_from") or [])
     for r, _spec in others:
         if names[r] not in merged_from:
@@ -975,6 +1054,7 @@ def _merge_subject(
         "videoFiled": base.get("videoFiled"),
         "frames": [_pick(f, _FRAME_KEYS) for f in frames],
         "marks": sorted(marks, key=lambda m: m.get("time", 0))[:MAX_MARKS],
+        "scenes": sorted(scenes, key=_scene_order)[:MAX_SCENES],
         "activeFrameId": base.get("activeFrameId"),
     }
     if merged_from:

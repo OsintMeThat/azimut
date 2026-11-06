@@ -4,6 +4,7 @@ import base64
 
 import graph_read
 import io
+import json
 
 import pytest
 from PIL import Image
@@ -208,6 +209,64 @@ def test_rename_keeps_the_creation_date(client):
         json={"rename_from": saved["name"], "title": "Renamed", "spec": SPEC},
     )
     assert client.get(f"/api/cases/{cid}/proofs/Renamed").json()["created_at"] == born
+
+
+SCENE = {
+    "video": "media/clip.mp4",
+    "moments": [{"start": 12.0, "end": 20.5}, {"start": 31.0, "end": None}],
+    "draft": "sc_1",
+}
+
+
+def _scene_on_disk(cid, name):
+    return Case.open(cid).resolve_inside(layout.proof_spec_rel(name)).read_text(encoding="utf-8")
+
+
+def test_a_save_that_does_not_name_the_scene_keeps_the_one_stated(client):
+    """Where in its video a proof happens is stated through its own route. The composer,
+    the sheet and an import write the rest of the proof, so a save of theirs keeps it."""
+    cid = client.post("/api/cases", json={"name": "SceneKept"}).json()["id"]
+    client.post(f"/api/cases/{cid}/proofs", json={"title": "Depot", "spec": {**SPEC, "scene": SCENE}})
+    assert json.loads(_scene_on_disk(cid, "Depot"))["scene"] == SCENE
+
+    # the composer's save: everything but the scene
+    client.post(f"/api/cases/{cid}/proofs", json={"rename_from": "Depot", "title": "Depot", "spec": SPEC})
+    assert json.loads(_scene_on_disk(cid, "Depot"))["scene"] == SCENE
+    assert client.get(f"/api/cases/{cid}/proofs/Depot").json()["scene"] == SCENE
+
+    # a rename carries it to the new name
+    client.post(f"/api/cases/{cid}/proofs", json={"rename_from": "Depot", "title": "Fuel depot", "spec": SPEC})
+    assert json.loads(_scene_on_disk(cid, "Fuel depot"))["scene"] == SCENE
+
+
+def test_a_save_that_names_the_scene_states_it_in_its_one_shape(client):
+    cid = client.post("/api/cases", json={"name": "SceneNamed"}).json()["id"]
+    client.post(f"/api/cases/{cid}/proofs", json={"title": "Depot", "spec": {**SPEC, "scene": SCENE}})
+
+    # the shape before moments is written as its one moment, in the shape of today
+    single = {"video": "media/clip.mp4", "start": 9, "end": 13, "extra": "dropped"}
+    client.post(f"/api/cases/{cid}/proofs", json={"rename_from": "Depot", "title": "Depot", "spec": {**SPEC, "scene": single}})
+    assert json.loads(_scene_on_disk(cid, "Depot"))["scene"] == {
+        "video": "media/clip.mp4", "moments": [{"start": 9.0, "end": 13.0}], "draft": None,
+    }
+
+    # an end before the start is no time at all, read rather than guessed at
+    broken = {"video": "media/clip.mp4", "moments": [{"start": 9, "end": 3}, {"start": 4}]}
+    client.post(f"/api/cases/{cid}/proofs", json={"rename_from": "Depot", "title": "Depot", "spec": {**SPEC, "scene": broken}})
+    assert json.loads(_scene_on_disk(cid, "Depot"))["scene"] == {
+        "video": "media/clip.mp4", "moments": [{"start": 4.0, "end": None}], "draft": None,
+    }
+
+    # null takes it back
+    client.post(f"/api/cases/{cid}/proofs", json={"rename_from": "Depot", "title": "Depot", "spec": {**SPEC, "scene": None}})
+    assert "scene" not in json.loads(_scene_on_disk(cid, "Depot"))
+
+
+def test_a_new_proof_does_not_inherit_a_scene(client):
+    cid = client.post("/api/cases", json={"name": "SceneFresh"}).json()["id"]
+    client.post(f"/api/cases/{cid}/proofs", json={"title": "Depot", "spec": {**SPEC, "scene": SCENE}})
+    client.post(f"/api/cases/{cid}/proofs", json={"title": "Bridge", "spec": SPEC})
+    assert "scene" not in json.loads(_scene_on_disk(cid, "Bridge"))
 
 
 def test_delete_proof(client):

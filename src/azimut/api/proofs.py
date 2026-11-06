@@ -36,6 +36,7 @@ from ..engine import localtime
 from ..engine import media as media_engine
 from ..engine import reveal as reveal_engine
 from ..engine import satellite as satellite_engine
+from ..engine import scenes as scene_engine
 from ..engine import temporal
 from ..engine import thumbnails as thumbnail_engine
 from ..workspace import Case, CaseError, ensure_dir
@@ -101,8 +102,26 @@ class ProofIn(BaseModel):
     assets: list[AssetIn] = Field(default_factory=list)
 
 
+class SceneIn(BaseModel):
+    """When in its video a proof happens: its moments, each ``{start, end}`` with
+    ``end`` null for an instant. None puts it back at the frames it was built on.
+    Read by `scenes._stated_moments`, which refuses what is not a time rather than
+    letting Pydantic turn ``true`` into 1."""
+
+    moments: Any
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _stored_scene(path: Path) -> Any:
+    """The ``scene`` a proof's spec on disk holds, or None."""
+    try:
+        data: Any = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data.get("scene") if isinstance(data, dict) else None
 
 
 def _write_spec(path: Path, spec: dict[str, Any]) -> None:
@@ -536,6 +555,15 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     spec["description"] = description or None
     previous = case.resolve_inside(layout.proof_spec_rel(name if recased else old or name))
     spec.setdefault("created_at", read_created_at(previous) or _now())
+    # Where in its video the proof happens is stated through its own route
+    # (`state_proof_scene`), so a save that does not name it keeps the one on disk:
+    # the composer, the sheet and an import write the rest of the proof and never
+    # this. One that does name it is read into its one shape.
+    scene = scene_engine.read_scene(body.spec["scene"] if "scene" in body.spec else _stored_scene(previous))
+    if scene is None:
+        spec.pop("scene", None)
+    else:
+        spec["scene"] = scene
     spec["updated_at"] = _now()
     if png_rel:
         spec["thumb"] = thumb_rel
@@ -874,6 +902,24 @@ def save_proof_place(case_id: str, name: str) -> list[dict[str, Any]]:
     if proof is None:
         raise HTTPException(status_code=404, detail="no such proof")
     return file_proof_points(case, proof)
+
+
+@router.put("/cases/{case_id}/proofs/{name}/scene")
+def state_proof_scene(case_id: str, name: str, body: SceneIn) -> dict[str, Any]:
+    """Say when in its video a proof happens. Writes the proof's scene and nothing else."""
+    case = get_case(case_id)
+    try:
+        case.resolve_inside(layout.proof_spec_rel(name))
+    except CaseError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    try:
+        return scene_engine.state_proof_scene(case, name, body.moments)
+    except scene_engine.UnknownProof as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except scene_engine.BadTime as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def read_spec(case: Case, proof: dict[str, Any]) -> dict[str, Any]:

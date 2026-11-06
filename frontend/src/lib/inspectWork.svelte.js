@@ -47,6 +47,11 @@ export function markRecord(mark) {
   return { id: mark.id, time: mark.time, label: String(mark.label ?? '').trim() };
 }
 
+/** One scene still to prove, as it is stored: an instant or a stretch, and a word about it. */
+export function sceneRecord(scene) {
+  return { id: scene.id, start: scene.start, end: scene.end ?? null, label: String(scene.label ?? '').trim() };
+}
+
 /** The body of a work save. */
 export function workSpec(work) {
   return {
@@ -56,6 +61,7 @@ export function workSpec(work) {
     activeFrameId: work.activeFrameId ?? null,
     frames: (work.frames ?? []).map(frameRecord),
     marks: (work.marks ?? []).map(markRecord),
+    scenes: (work.scenes ?? []).map(sceneRecord),
   };
 }
 
@@ -80,7 +86,12 @@ export function isUntouched(frame, filters) {
 export function isPristine(work, filters, videoFilters) {
   const frames = work.frames ?? [];
   if (work.source?.kind === 'video') {
-    return frames.length === 0 && !(work.marks?.length) && !hasVideoEdits(videoFilters, work.videoAdjust, work.videoRotation);
+    return (
+      frames.length === 0 &&
+      !(work.marks?.length) &&
+      !(work.scenes?.length) &&
+      !hasVideoEdits(videoFilters, work.videoAdjust, work.videoRotation)
+    );
   }
   return frames.length <= 1 && frames.every((f) => isUntouched(f, filters) && !f.filed);
 }

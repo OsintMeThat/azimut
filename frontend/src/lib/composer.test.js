@@ -421,6 +421,13 @@ describe('toSpec — persistence of layout', () => {
     expect(spec.panels.map((p) => p.row)).toEqual([0, 1]);
   });
 
+  it('never writes the scene, which Inspect states and the save keeps', () => {
+    // A copy held since the proof was opened would write an older time back over
+    // one changed in Inspect meanwhile: the save keeps the one on disk instead.
+    const scene = { video: 'media/clip.mp4', start: 2, end: 9, draft: null };
+    expect(toSpec({ title: 'T', panels: [], shapes: [], scene })).not.toHaveProperty('scene');
+  });
+
   it('stores a blank footer as null so the automatic attribution shows', () => {
     const proof = { title: 'T', footer: '   ', panels: [], shapes: [] };
     expect(toSpec(proof).footer).toBeNull();

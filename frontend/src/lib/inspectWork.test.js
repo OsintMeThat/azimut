@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   categoryOf, collageSignature, collageSpec, frameRecord, frameSignature, isFiled, isPristine,
-  isUntouched, markRecord, missingPieces, videoSignature, workSpec,
+  isUntouched, markRecord, missingPieces, sceneRecord, videoSignature, workSpec,
 } from './inspectWork.svelte.js';
 
 const FILTERS = [
@@ -30,6 +30,15 @@ describe('what a work save writes', () => {
     expect(markRecord({ id: 'mk_2', time: 1 })).toEqual({ id: 'mk_2', time: 1, label: '' });
   });
 
+  it('keeps a video\'s scenes as a stretch and a trimmed label', () => {
+    expect(workSpec({ frames: [], scenes: [{ id: 'sc_1', start: 4, end: 9.5, label: '  bridge?  ', color: 'x' }] }).scenes)
+      .toEqual([{ id: 'sc_1', start: 4, end: 9.5, label: 'bridge?' }]);
+    expect(workSpec({ frames: [] }).scenes).toEqual([]);
+    expect(sceneRecord({ id: 'sc_2', start: 1, end: 2 })).toEqual({ id: 'sc_2', start: 1, end: 2, label: '' });
+    // an instant says it has no end rather than leaving the key out
+    expect(sceneRecord({ id: 'sc_3', start: 4 })).toEqual({ id: 'sc_3', start: 4, end: null, label: '' });
+  });
+
   it('holds a turn to the right angles the pipeline accepts', () => {
     expect(workSpec({ videoRotation: 45, frames: [frame({ rotation: 33 })] })).toMatchObject({
       videoRotation: 0,
@@ -51,6 +60,12 @@ describe('isPristine: looking at a file files nothing', () => {
     const video = { source: { kind: 'video' }, frames: [], marks: [], videoAdjust: { brightness: 1 }, videoRotation: 0 };
     expect(isPristine(video, FILTERS, VIDEO_FILTERS)).toBe(true);
     expect(isPristine({ ...video, marks: [{ id: 'mk_1', time: 3, label: '' }] }, FILTERS, VIDEO_FILTERS)).toBe(false);
+  });
+
+  it('counts a scene kept on a video as work', () => {
+    const video = { source: { kind: 'video' }, frames: [], scenes: [], videoAdjust: { brightness: 1 }, videoRotation: 0 };
+    expect(isPristine(video, FILTERS, VIDEO_FILTERS)).toBe(true);
+    expect(isPristine({ ...video, scenes: [{ id: 'sc_1', start: 3, end: 6, label: '' }] }, FILTERS, VIDEO_FILTERS)).toBe(false);
   });
 
   it('holds for an image until its one frame changes or a second appears', () => {

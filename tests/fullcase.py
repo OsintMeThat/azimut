@@ -200,7 +200,8 @@ def build_full_case(
             "spec": {"frames": [{
                 "id": "fr_1", "path": full.photo, "time": None,
                 "adjust": {"brightness": 1.2}, "crop": {"x": 0.1, "y": 0.1, "w": 0.5, "h": 0.5},
-            }], "marks": [{"id": "mk_1", "time": 1.5, "label": "Plate visible"}]},
+            }], "marks": [{"id": "mk_1", "time": 1.5, "label": "Plate visible"}],
+                "scenes": [{"id": "sc_1", "start": 1.0, "end": 2.5, "label": "Bridge?"}]},
         },
     )
     assert work.status_code == 200, work.text
@@ -419,6 +420,9 @@ def build_full_case(
                 "shapes": [],
                 "pastes": [{"id": "x0", "asset": asset_name, "natural": [40, 30],
                             "x": 10, "y": 10, "scale": 1}],
+                # When in its clip the proof happens. The full case holds no video, so
+                # a picture the proof does not compose stands in for one.
+                "scene": {"video": full.piece, "moments": [{"start": 1.0, "end": 2.5}], "draft": None},
             },
             "assets": [{"name": asset_name, "data": base64.b64encode(pasted).decode()}],
         },

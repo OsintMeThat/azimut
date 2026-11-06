@@ -133,6 +133,20 @@ def test_a_collage_uses_its_pieces_not_its_export():
     ]
 
 
+def test_a_proof_uses_the_video_it_states_its_scene_in(client):
+    cid = _case(client)
+    panel = _upload(client, cid, "panel.png")
+    clip = _upload(client, cid, "clip.png", (10, 200, 10))
+    res = client.post(f"/api/cases/{cid}/proofs", json={"title": "Bridge", "spec": {
+        "panels": [{"id": "p0", "src": panel}],
+        "scene": {"video": clip, "moments": [{"start": 2.0, "end": 5.0}]},
+    }})
+    assert res.status_code == 200, res.text
+
+    assert clip not in _unused(client, cid)
+    assert _touched(_impact(client, cid, paths=[clip])) == {"Bridge": ["geolocates a scene of it"]}
+
+
 def test_a_relation_uses_both_ends_and_names_its_verb(client):
     cid = _case(client)
     a = _upload(client, cid, "a.png")

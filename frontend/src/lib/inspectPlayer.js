@@ -141,14 +141,30 @@ export function tileAt(time, tiles) {
   return { index, col: index % tiles.columns, row: Math.floor(index / tiles.columns) };
 }
 
-/** CSS that shows one tile of the strip in a box of the tile's own size. */
-export function tileStyle(tile, tiles, url) {
+/**
+ * How much a tile shrinks to fit inside `most` (`{ w, h }`), never grown. The strip
+ * draws every tile 160 px wide, so a portrait clip's tiles are tall: unbounded, its
+ * hover picture would hide most of the video it previews.
+ */
+export function tileScale(tiles, most = null) {
+  if (!most || !(tiles?.width > 0) || !(tiles?.height > 0)) return 1;
+  return Math.min(1, most.w / tiles.width, most.h / tiles.height);
+}
+
+const px = (n) => `${Math.round(n * 100) / 100}px`;
+
+/** CSS that shows one tile of the strip, at its own size or shrunk to fit `most`. */
+export function tileStyle(tile, tiles, url, most = null) {
   if (!tile || !url) return '';
+  const k = tileScale(tiles, most);
+  const w = tiles.width * k;
+  const h = tiles.height * k;
   return [
     `background-image:url("${url}")`,
-    `background-position:-${tile.col * tiles.width}px -${tile.row * tiles.height}px`,
-    `width:${tiles.width}px`,
-    `height:${tiles.height}px`,
+    `background-size:${px(tiles.columns * w)} ${px(tiles.rows * h)}`,
+    `background-position:-${px(tile.col * w)} -${px(tile.row * h)}`,
+    `width:${px(w)}`,
+    `height:${px(h)}`,
   ].join(';');
 }
 

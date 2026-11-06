@@ -22,7 +22,8 @@ Past the chain:
 **Outside the graph**, where a tool names a file or an entity in its own record:
 
 - a plate's picture or video, a collage's pieces, the photo laid over a Horizon view
-  or on Horizon's bench, the photo a Horizon search is for: by media path;
+  or on Horizon's bench, the photo a Horizon search is for, the video a proof states
+  its scene in: by media path;
 - a personal layer's marker following an entity, a sheet's link, vocabulary word or
   attached file: by entity id;
 - an entity's photo chosen from Media (`entity_images`);
@@ -132,6 +133,14 @@ def _layer(data: dict[str, Any]) -> Iterator[Lean]:
         yield Lean(target, "1 marker follows it" if count == 1 else f"{count} markers follow it")
 
 
+def _proof(data: dict[str, Any]) -> Iterator[Lean]:
+    # Its panels and material are its chain (`derived-from`), read in the graph.
+    scene = data.get("scene")
+    video = scene.get("video") if isinstance(scene, dict) else None
+    if isinstance(video, str) and video:
+        yield Lean(video, "geolocates a scene of it")
+
+
 def _routine(data: dict[str, Any]) -> Iterator[Lean]:
     # The pairs `delete_entities_deep` reads before it refuses to delete an area.
     pairs = data.get("area_dates")
@@ -150,6 +159,7 @@ _FOLDERS: tuple[tuple[str, str, Callable[[dict[str, Any]], Iterator[Lean]], str]
     (layout.HORIZON_DIR, "*.json", _view, horizon_views.TYPE),
     (f"{layout.HORIZON_DIR}/{layout.HORIZON_FINDS_DIR}", "*.json", _find, horizon_finds.TYPE),
     (layout.LAYERS_DIR, "*.json", _layer, maplayers.ENTITY_TYPE),
+    (f"proofs/{layout.META_DIR}", "*.json", _proof, "proof"),
     (layout.ANALYSIS_DIR, "followups-*.json", _routine, "analysis-follow-up"),
 )
 

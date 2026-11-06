@@ -1,15 +1,20 @@
 <script>
   import { MARK_LABEL_MAX, preciseClock, sortedMarks, tileAt, tileStyle } from '../../lib/inspectPlayer.js';
   import { clockTime } from '../../lib/inspect.js';
+  import { spanLabel } from '../../lib/scenes.js';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
   import Icon from '../../components/Icon.svelte';
 
   // The Moments tab beside the video: the marks the analyst set on it, kept with the
-  // file's work, and what a scan found, the shot changes with the sharpest frame of
-  // each shot, and the sharpest frames overall.
+  // file's work, and the shots a scan found where the camera cuts, each shown at its
+  // sharpest frame and each one press from becoming a scene. The sharpest frames of
+  // the whole clip fold away under them.
   //
-  // `onseek(time)` goes to a frame by its own timestamp; `oncapture(time)` cuts it.
+  // `onseek(time)` goes to a frame by its own timestamp; `oncapture(time)` cuts it;
+  // `onkeepshot(index)` keeps a shot as a scene to geolocate.
   let {
+    duration = 0,
+    onkeepshot,
     marks = $bindable([]),
     focusId = null,
     onaddmark,
@@ -23,6 +28,10 @@
     tiles = null,
     stripUrl = null,
   } = $props();
+
+  // A shot's picture in its card: a 16:9 tile at 90 × 51, a portrait one no taller
+  // than 80, so a 9:16 clip's shots stay cards rather than columns.
+  const SHOT_THUMB = { w: 90, h: 80 };
 
   const ordered = $derived(sortedMarks(marks));
   const shots = $derived(scan?.shots ?? []);
@@ -72,37 +81,43 @@
 
   <div class="block">
     <div class="block-head">
-      <span class="head"><Icon name="scissors" size={14} /> Shots and sharp frames</span>
+      <span class="head"><Icon name="scissors" size={14} /> Shots</span>
       <button class="btn btn-sm" disabled={scanning} onclick={() => onscan?.()} title={INSPECT_HELP.scan}>
         <Icon name={scanning ? 'clock' : 'search'} size={13} />
-        {scanning ? `Scanning…${progress != null ? ` ${Math.round(progress)}%` : ''}` : scan ? 'Scan again' : 'Scan'}
+        {scanning ? `Finding shots…${progress != null ? ` ${Math.round(progress)}%` : ''}` : scan ? 'Find again' : 'Find shots'}
       </button>
     </div>
     {#if !scan && !scanning}
-      <p class="hint">Reads every frame once to find where the shot changes and which frames are sharpest.</p>
+      <p class="hint">Cuts the video where the camera changes shot. Each shot can then become a scene.</p>
     {/if}
     {#if scan}
-      <p class="sub">{shots.length === 1 ? 'One shot' : `${shots.length} shots`}</p>
+      <p class="sub">{shots.length === 1 ? 'One shot' : `${shots.length} shots`}, each shown at its sharpest frame</p>
       <div class="shots">
         {#each shots as s, i (s.start)}
           {@const tile = tileAt(s.best, tiles)}
           <div class="shot-card">
             <button class="shot-pick" onclick={() => onseek?.(s.best)} title={INSPECT_HELP.shot}>
               {#if tile && stripUrl}
-                <span class="shot-thumb" style={tileStyle(tile, tiles, stripUrl)}></span>
+                <span class="shot-thumb" style={tileStyle(tile, tiles, stripUrl, SHOT_THUMB)}></span>
               {:else}
                 <span class="shot-thumb blank"><Icon name="video" size={16} /></span>
               {/if}
-              <span class="shot-label mono">{i + 1} · {clockTime(s.start)}</span>
+              <span class="shot-label mono">{i + 1} · {spanLabel(s.start, shots[i + 1]?.start ?? duration)}</span>
             </button>
-            <button class="shot-cap" onclick={() => oncapture?.(s.best)} title={INSPECT_HELP.captureHere} aria-label="Capture the sharpest frame of this shot">
-              <Icon name="camera" size={12} />
-            </button>
+            <span class="shot-acts">
+              <button onclick={() => onkeepshot?.(i)} title={INSPECT_HELP.shotScene} aria-label="Keep this shot as a scene">
+                <Icon name="pin" size={12} />
+              </button>
+              <button onclick={() => oncapture?.(s.best)} title={INSPECT_HELP.captureHere} aria-label="Capture the sharpest frame of this shot">
+                <Icon name="camera" size={12} />
+              </button>
+            </span>
           </div>
         {/each}
       </div>
       {#if picks.length}
-        <p class="sub">Sharpest frames</p>
+        <details class="sharpest">
+        <summary class="sub">Sharpest frames of the whole video ({picks.length})</summary>
         {#each picks as s (s.time)}
           <div class="sugg" class:top={s.rank === 0}>
             <span class="mono">{clockTime(s.time)}</span>
@@ -115,6 +130,7 @@
             </button>
           </div>
         {/each}
+        </details>
       {/if}
     {/if}
   </div>
@@ -200,10 +216,8 @@
   .shot-thumb {
     display: block;
     align-self: center;
-    zoom: 0.56;
   }
   .shot-thumb.blank {
-    zoom: 1;
     width: 100%;
     height: 50px;
     display: flex;
@@ -217,10 +231,14 @@
     color: var(--text-2);
     text-align: left;
   }
-  .shot-cap {
+  .shot-acts {
     position: absolute;
     top: 3px;
     right: 3px;
+    display: flex;
+    gap: 2px;
+  }
+  .shot-acts button {
     display: flex;
     padding: 2px;
     border: 0;
@@ -229,9 +247,15 @@
     color: #fff;
     cursor: pointer;
   }
-  .shot-cap:hover {
+  .shot-acts button:hover {
     background: var(--accent);
     color: var(--accent-text);
+  }
+  .sharpest summary {
+    cursor: pointer;
+  }
+  .sharpest[open] summary {
+    margin-bottom: 6px;
   }
   .sugg {
     display: flex;

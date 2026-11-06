@@ -1385,6 +1385,10 @@ export function toSpec(proof) {
       proof.material,
       statedSources(proof.sources ?? proof.source ?? null) ?? autoSourceUrls(proof.panels ?? []),
     ),
+    // No `scene`. When in its video the proof happens is stated from Inspect through
+    // its own route, and a save that leaves it out keeps the one on disk
+    // (`api/proofs.save_proof`). A copy held since the proof was opened would write
+    // an older time back over one changed meanwhile.
     captionSize: proof.captionSize ?? CAPTION_SIZE,
     legendSize: proof.legendSize ?? LEGEND_SIZE,
     footerSize: proof.footerSize ?? FOOTER_SIZE,

@@ -35,7 +35,7 @@ function serveRange(route, body, contentType) {
 }
 
 /** The fixture with one video, and Inspect's routes answered the way the server does. */
-async function openSteps(page) {
+async function openSteps(page, { scenes = [] } = {}) {
   const fixture = await installAppFixture(page, {
     media: [{
       path: STEPS, filename: 'steps.webm', title: 'Steps', kind: 'video', entity_id: 'e_steps',
@@ -44,6 +44,7 @@ async function openSteps(page) {
   });
   const renders = [];
   const saves = [];
+  const proofTimes = [];
   // Registered after the fixture, so these answer first.
   await page.route('**/*', async (route) => {
     const request = route.request();
@@ -53,6 +54,16 @@ async function openSteps(page) {
     if (path === `/files/${CASE_ID}/${STEPS}`) return serveRange(route, STEPS_WEBM, 'video/webm');
     if (path === `/api/cases/${CASE_ID}/inspect/probe`) return json({ kind: 'video', duration: 1.2, fps: FPS, width: 32, height: 32, codec: 'vp9' });
     if (path === `/api/cases/${CASE_ID}/inspect/overview`) return json({ scan: null });
+    if (path === `/api/cases/${CASE_ID}/scenes`) return json({ video: STEPS, video_id: 'e_steps', scenes });
+    // A proof's moments, written the way the server writes them: the listed scene follows.
+    const timed = /^\/api\/cases\/[^/]+\/proofs\/([^/]+)\/scene$/.exec(path);
+    if (timed && request.method() === 'PUT') {
+      const { moments } = request.postDataJSON();
+      proofTimes.push(moments);
+      const scene = scenes.find((sc) => sc.proof === decodeURIComponent(timed[1]));
+      Object.assign(scene, { moments, stated: moments.length > 0 });
+      return json({ proof: scene.proof, video: STEPS, moments, at: scene.at, stated: scene.stated, draft: null });
+    }
     if (path === `/api/cases/${CASE_ID}/media/item`) return json({ kind: 'video', size: STEPS_WEBM.length, sha256: 'ab'.repeat(32), source: { type: 'upload' } });
     if (path === `/api/cases/${CASE_ID}/inspect/work` && request.method() === 'GET') return json({ work: null });
     if (path === `/api/cases/${CASE_ID}/inspect/work` && request.method() === 'PUT') {
@@ -72,7 +83,7 @@ async function openSteps(page) {
   await page.goto('/#inspect');
   await page.locator('.card', { hasText: 'Steps' }).click();
   await page.waitForFunction(() => (document.querySelector('.video-canvas video')?.readyState ?? 0) >= 2);
-  return { fixture, renders, saves };
+  return { fixture, renders, saves, proofTimes };
 }
 
 /** Which frame the browser has on screen, read off its grey. */
@@ -149,4 +160,203 @@ test('keeps Capture frame on top while the tabs change, and marks a moment from 
   await label.press('Enter');
   await expect.poll(() => saves.at(-1)?.spec?.marks).toEqual([{ id: expect.any(String), time: expect.closeTo(0.88, 6), label: 'sign readable' }]);
   await expect(page.locator('.track .mark')).toHaveCount(1);
+});
+
+test('keeps a scene at the frame on screen, ends it a moment later, beside the proofs already resting on the clip', async ({ page }) => {
+  const depot = {
+    kind: 'proof', proof: 'Depot', proof_id: 'e_depot', title: 'Depot', moments: [], at: [0.2],
+    stated: false, draft: null, points: [{ lat: 1, lon: 2, coords: '1, 2', label: '', pov: false, place_id: null }],
+    png: null, thumb: null, when: null, when_zone: null, description: null,
+  };
+  const { saves } = await openSteps(page, { scenes: [depot] });
+
+  // the clip's scenes are counted on the player's own row, and pinned on its bar
+  const button = page.getByRole('button', { name: /^Scenes/ });
+  await expect(button).toContainText('1');
+  await expect(page.getByTestId('scene-pin')).toHaveCount(1);
+
+  await seekTo(page, 0.5);
+  await page.keyboard.press('s');
+  await expect.poll(() => saves.at(-1)?.spec?.scenes).toEqual([
+    { id: expect.any(String), start: expect.closeTo(0.48, 1), end: null, label: '' },
+  ]);
+  // a scene kept by mistake goes back with Ctrl+Z, and forward again with Ctrl+Shift+Z
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => saves.at(-1)?.spec?.scenes).toEqual([]);
+  await expect(page.getByTestId('scene-pin')).toHaveCount(1);
+  await page.keyboard.press('Control+Shift+Z');
+  await expect.poll(() => saves.at(-1)?.spec?.scenes?.length).toBe(1);
+  await seekTo(page, 0.9);
+  await page.keyboard.press('Shift+S');
+  await expect.poll(() => saves.at(-1)?.spec?.scenes?.[0]?.end).toBeCloseTo(0.92, 1);
+  await expect(page.getByTestId('scene-band')).toHaveCount(1);
+
+  await button.click();
+  const rows = page.getByTestId('scene-row');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText('Depot');
+  await expect(rows.first()).toContainText('Proved');
+  const label = page.getByRole('textbox', { name: 'Scene label' });
+  await label.fill('bridge?');
+  await label.press('Enter');
+  await expect.poll(() => saves.at(-1)?.spec?.scenes?.[0]?.label).toBe('bridge?');
+});
+
+/** The scenes drawer's row for the scene at `index`, and its time opened. */
+async function openTime(page, index = 0) {
+  const drawer = page.getByRole('complementary', { name: 'Scenes' });
+  if (!(await drawer.isVisible())) await page.getByRole('button', { name: /^Scenes/ }).click();
+  await page.getByTestId('scene-row').nth(index).getByRole('button', { name: /^Time of the scene/ }).click();
+  await expect(page.getByRole('group', { name: 'When the scene happens' })).toBeVisible();
+}
+
+/** Where on the bar a time is, in page pixels. */
+async function onBar(page, time) {
+  const box = await page.locator('.track').boundingBox();
+  return { x: box.x + (box.width * time) / 1.2, y: box.y + box.height / 2 };
+}
+
+const seconds = (text) => {
+  const [m, s] = text.split(':');
+  return Number(m) * 60 + Number(s);
+};
+
+test('changes a scene\'s time in its row: a passage made of an instant, its end dragged on the bar', async ({ page }) => {
+  const { saves } = await openSteps(page);
+  await seekTo(page, 0.5);
+  await page.keyboard.press('s');
+  await expect.poll(() => saves.at(-1)?.spec?.scenes?.length).toBe(1);
+
+  await openTime(page);
+  const start = page.getByRole('textbox', { name: 'Scene start' });
+  await expect(start).toHaveValue('0:00.48');
+  await expect(start).toBeFocused();
+  await page.getByRole('radio', { name: 'Passage' }).click();
+  const end = page.getByRole('textbox', { name: 'Scene end' });
+  // the clip still on the start, the passage runs a few seconds on: here, to its end
+  await expect(end).toHaveValue('0:01.2');
+  await expect(page.getByTestId('scene-grip-end')).toHaveCount(1);
+  // the drawer stands beside the picture, above the whole bar: nothing of either is covered
+  const drawer = await page.getByRole('complementary', { name: 'Scenes' }).boundingBox();
+  const canvas = await page.locator('.video-canvas').boundingBox();
+  const bar = await page.locator('.track').boundingBox();
+  expect(drawer.x).toBeGreaterThanOrEqual(canvas.x + canvas.width - 1);
+  expect(drawer.y + drawer.height).toBeLessThanOrEqual(bar.y);
+  expect(bar.x + bar.width).toBeGreaterThan(drawer.x + drawer.width - 20);
+
+  // the end's handle, dragged back: the list stays open, and the frame follows it
+  const from = await onBar(page, 1.2);
+  const to = await onBar(page, 0.8);
+  await page.mouse.move(from.x - 1, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.getByRole('group', { name: 'When the scene happens' })).toBeVisible();
+  const dragged = seconds(await end.inputValue());
+  expect(dragged).toBeGreaterThan(0.7);
+  expect(dragged).toBeLessThan(0.9);
+  expect(Math.round(dragged * 25) / 25).toBeCloseTo(dragged, 6); // on a frame
+  await expect.poll(() => frameOnScreen(page)).toBe(Math.round(dragged * 25) - 1);
+  // nothing is kept until it is applied
+  expect(saves.at(-1).spec.scenes[0].end).toBeNull();
+
+  // the press on the bar gave the keys back to the player: Enter applies
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('group', { name: 'When the scene happens' })).toHaveCount(0);
+  await expect.poll(() => saves.at(-1)?.spec?.scenes?.[0]).toEqual({
+    id: expect.any(String), start: expect.closeTo(0.48, 6), end: expect.closeTo(dragged, 6), label: '',
+  });
+  await expect(page.getByTestId('scene-band')).toHaveCount(1);
+  // and like every change to the clip, it goes back with Ctrl+Z
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => saves.at(-1)?.spec?.scenes?.[0]?.end).toBeNull();
+  // Escape with no time open closes the drawer, and the picture takes its room back
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('complementary', { name: 'Scenes' })).toHaveCount(0);
+  await expect.poll(async () => (await page.locator('.video-canvas').boundingBox()).width).toBeGreaterThan(canvas.width + 200);
+});
+
+test('takes a scene\'s start and end from the frame on screen with S and Shift+S, or as typed', async ({ page }) => {
+  const { saves } = await openSteps(page);
+  await seekTo(page, 0.5);
+  await page.keyboard.press('s');
+  await openTime(page);
+
+  // a press on the bar moves the clip and keeps the time open
+  const later = await onBar(page, 0.9);
+  await page.mouse.click(later.x, later.y);
+  await expect.poll(() => frameOnScreen(page)).toBe(22);
+  await page.keyboard.press('Shift+S');
+  await expect(page.getByRole('radio', { name: 'Passage' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('textbox', { name: 'Scene end' })).toHaveValue('0:00.92');
+  // one step at a time, each frame drawn before the next: Firefox can answer a seek
+  // already left behind, which the clock would then name
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('.player-time')).toContainText('0:00.840');
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('.player-time')).toContainText('0:00.800');
+  await expect.poll(() => frameOnScreen(page)).toBe(20);
+  await page.keyboard.press('s');
+  await expect(page.getByRole('textbox', { name: 'Scene start' })).toHaveValue('0:00.8');
+
+  // a typed time is read, and a wrong one is said and never kept
+  const start = page.getByRole('textbox', { name: 'Scene start' });
+  await start.fill('0:01');
+  await expect(page.getByRole('alert').filter({ hasText: 'The end must come after the start' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Apply' })).toBeDisabled();
+  await start.fill('0,2');
+  await start.press('ArrowUp');
+  await expect(start).toHaveValue('0:00.24');
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect.poll(() => saves.at(-1)?.spec?.scenes?.[0]).toEqual({
+    id: expect.any(String), start: expect.closeTo(0.24, 6), end: expect.closeTo(0.92, 6), label: '',
+  });
+  await expect(page.locator('.toast', { hasText: 'Scene now 0:00–0:00' })).toBeVisible();
+});
+
+test('gives a proof about the whole video its moments, two of them, and the whole video back', async ({ page }) => {
+  const depot = {
+    kind: 'proof', proof: 'Depot', proof_id: 'e_depot', title: 'Depot', moments: [], at: [0.2],
+    stated: false, draft: null, points: [], png: null, thumb: null, when: null, when_zone: null, description: null,
+  };
+  const { proofTimes, saves } = await openSteps(page, { scenes: [depot] });
+
+  // a proof that states no time is about the whole video, and its frame still pins it
+  await page.getByRole('button', { name: /^Scenes/ }).click();
+  await expect(page.getByTestId('scene-row').first()).toContainText('Whole video');
+  await expect(page.getByTestId('scene-pin')).toHaveCount(1);
+  await openTime(page);
+  await expect(page.getByRole('radio', { name: 'Whole video' })).toHaveAttribute('aria-checked', 'true');
+  // the clip goes to its frame, where a moment starts once one is asked for
+  await expect.poll(() => frameOnScreen(page)).toBe(5);
+  await page.getByRole('radio', { name: 'Instant' }).click();
+  const start = page.getByRole('textbox', { name: 'Scene start' });
+  await expect(start).toHaveValue('0:00.2');
+  await start.fill('0:00.6');
+  await page.getByRole('radio', { name: 'Passage' }).click();
+  const end = page.getByRole('textbox', { name: 'Scene end' });
+  await end.fill('1');
+  // the same place again later: a second moment, at the frame on screen, typed over
+  await page.getByRole('button', { name: 'Another moment' }).click();
+  await page.getByRole('textbox', { name: 'Scene start' }).nth(1).fill('1.08');
+  await page.getByRole('textbox', { name: 'Scene start' }).nth(1).press('Enter');
+
+  await expect.poll(() => proofTimes).toEqual([[{ start: 0.6, end: 1 }, { start: 1.08, end: null }]]);
+  await expect(page.locator('.toast', { hasText: '“Depot” is now 0:00–0:01 · 0:01' })).toBeVisible();
+  await expect(page.getByTestId('scene-row').first()).toContainText('0:00–0:01 · 0:01');
+  // both drawn in the proof's colour: a band and a pin
+  await expect(page.getByTestId('scene-band')).toHaveCount(1);
+  await expect(page.getByTestId('scene-pin')).toHaveCount(1);
+
+  // the whole video again, which takes every moment back, and the toast's Undo
+  await openTime(page);
+  await page.getByRole('radio', { name: 'Whole video' }).click();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect.poll(() => proofTimes.at(-1)).toEqual([]);
+  await expect(page.getByTestId('scene-row').first()).toContainText('Whole video');
+  await page.locator('.toast', { hasText: '“Depot” is now the whole video' }).getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(() => proofTimes.at(-1)).toEqual([{ start: 0.6, end: 1 }, { start: 1.08, end: null }]);
+  await expect(page.getByTestId('scene-band')).toHaveCount(1);
+  // a proof's time is the proof's: the video's work never holds it
+  expect(saves.every((save) => (save.spec.scenes ?? []).length === 0)).toBe(true);
 });

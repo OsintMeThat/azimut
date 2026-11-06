@@ -1736,7 +1736,8 @@ browser shows the frame a time falls inside, ffmpeg cuts the first frame at or a
 it, so sending a time from inside a frame would cut the next one. The bar under the
 video carries the frames already cut, the marks, the shot changes and the sharpest
 frames a scan found, and an A–B loop; a press near a marker lands on it, and
-hovering shows the picture at that point. The sound runs along the bar as a
+hovering shows the picture at that point, no taller than a 16:9 one so a portrait
+clip's stays clear of the video. The sound runs along the bar as a
 waveform. The hover pictures and the waveform come on their own when a video opens,
 from one keyframe-only decode and one audio decode kept in the case's thumbnail
 cache. The video zooms, pans and turns like a frame, a click plays it, and the speed
@@ -1763,14 +1764,47 @@ its left edge. Its tabs keep their place for the session:
   cannot preview is rendered by the server a moment after the sliders stop, so a
   frame always reads as it will save. On the video, the same tab turns and tunes the
   whole clip and saves it re-encoded.
-- **Moments**, on a video: marks set with **M** or **Mark here**, each labelled,
-  kept with the work and listed in playback order; and the scan, which reads every
-  frame once and finds the shot changes, with the sharpest frame of each shot, and
-  the sharpest frames overall. Its answer is kept, so the shots are on the bar the
-  next time the clip opens.
+- **Moments**, on a video: the marks and the shots. Marks are set with **M** or
+  **Mark here**, each labelled, kept with the work and listed in playback order.
+  **Find shots** reads every frame once and cuts the clip where the camera changes
+  shot: each shot is shown at its sharpest frame, labelled with the stretch it
+  covers, and one press keeps it as a scene. The sharpest frames of the whole clip
+  fold away under them. The answer is kept, so the shots are on the bar the next
+  time the clip opens.
 - **Analyze**, on a frame: Error Level Analysis laid over the frame with its
   strength, and asked again once the frame is edited; Reverse image search and
   Match in Horizon.
+
+**A video's scenes are where its geolocations happen**, since a long clip often
+holds several: a route filmed from a car, or a day's events cut together. **Scene
+here** under Capture frame, or **S**, keeps a scene at the frame on screen; it is an
+instant until **End here** in its row, or **Shift+S**, gives it an end at the frame
+on screen, and then a passage. A scene that states no time is about the **whole
+video** and prints no timecode anywhere. The player's own row carries a **Scenes**
+button with their count, tinted while some are still to prove, and the bar draws each
+one in its colour, a pin at an instant and a band over a passage, named on hover.
+The button opens and closes a **drawer docked on the video's right**, above the bar:
+it narrows the picture, which fits itself again, rather than covering it, and closes
+whenever a file opens. It lists the scenes in clip order, a scene about the whole
+video first: a passage to play on a loop, a word about what to find, End here and
+remove. **Pressing a scene's time goes there and opens it in its row**: Whole video,
+Instant or Passage, each end typed (`1:05`, `65`, `1:05.5`), taken from the frame on
+screen with **Here**, nudged a frame with ↑ and ↓, or dragged by its handle on the
+bar. Meanwhile **S** and **Shift+S** set the start and the end. Enter or Apply keeps
+it, and so does closing the drawer; Escape drops it, and a second Escape closes the
+drawer. A draft's change goes back with Ctrl+Z like the rest.
+**The proofs resting on the clip are its proved scenes**, in the same drawer and on
+the same bar, each opening its proof. A proof built on frames cut here and stating
+no time of its own is about the whole video, pinned at those frames on the bar and
+placed in the list by the first, so the ones made before scenes existed are found
+without being rewritten. **A proof can hold several moments**, since one place often
+comes back in several extracts of a clip: its row reads `0:30–0:45 · 3:10–3:20`, or
+`0:30–0:45 +2` past two, the bar draws each in its colour, and **Another moment**
+adds one at the frame on screen. Its time is written to the proof alone
+(`PUT /cases/{id}/proofs/{name}/scene`), with Undo in the toast, and Whole video
+takes every moment back. Geo Proof never writes it, so saving the composition keeps
+it. A scene still to prove belongs to the work; once a proof takes it up it is the
+proof's, and the work lets it go (`GET /cases/{id}/scenes`).
 
 **Save to case is the one step that files media.** Each output carries its own block
 under the controls that shape it: a name that holds real text from the start, a
