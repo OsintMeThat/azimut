@@ -11,6 +11,11 @@
    * extension names the case, else the one last open in the app; and the note, else
    * the one pinned to the side in the app, else Case notes. Another case picked in
    * the bar shows the note pinned for it the same way.
+   *
+   * The bar also holds the note's Look, set as the Notebook sets it, and Add: what the
+   * browser tab in front can give (its map, its page, the words selected there), asked
+   * of the extension when the menu opens and done by it, then a source to cite as the
+   * note on the side offers. What the extension does comes back as a put.
    */
   import { flushSync, onDestroy, onMount, untrack } from 'svelte';
   import { fetchAllEntities } from '../lib/catalog.js';
@@ -21,16 +26,25 @@
   import { dockNote } from '../lib/notes/noteDock.svelte.js';
   import { keepPageView, readPageView } from '../lib/notes/pageView.js';
   import { pinNote, pinnedNote, putInNote } from '../lib/notes/putInNote.svelte.js';
-  import { receivePuts, tellPanel } from '../lib/notes/panel.js';
+  import { coverChoice, normaliseLook, ownCover, readLook, writeLook } from '../lib/notes/look.js';
+  import { askTab, receivePuts, receiveTab, runTab, tellPanel } from '../lib/notes/panel.js';
   import { panelOffer } from '../lib/notes/panelPuts.js';
+  import { mapSiteOf, quotePreview, tabHost } from '../lib/notes/panelTab.js';
+  import AddSource from './AddSource.svelte';
   import CasePicker from './CasePicker.svelte';
+  import FloatingMenu from './FloatingMenu.svelte';
   import Icon from './Icon.svelte';
   import NoteEditor from './NoteEditor.svelte';
   import NotePages from './NotePages.svelte';
   import NotePicker from './NotePicker.svelte';
   import NoteSaved from './NoteSaved.svelte';
   import Toasts from './Toasts.svelte';
+  import LookControl from '../tools/notebook/LookControl.svelte';
   import ViewModes from '../tools/notebook/ViewModes.svelte';
+
+  /** How long the Add menu waits for the extension to say what the tab is, before it offers to allow it. */
+  const TAB_WAIT = 1000;
+  const UNREAD = { access: 'closed', url: '', title: '', selection: '', post: false };
 
   const asked = splitHash(location.hash).params;
 
@@ -43,6 +57,15 @@
   let casing = $state(null);
   // the note's pages in place of its text, as last left in this browser
   let page = $state(readPageView('panel'));
+  // how the note prints, as the Notebook keeps it: read with the note, set from the bar's Look
+  let look = $state(null);
+  let lookWrites = 0;
+  // the Add menu: its opener, what the tab in front said (null until it does), and the source asked for
+  let adding = $state(null);
+  let sourcing = $state(null);
+  let tab = $state(null);
+  let mapOf = $state({ url: '', site: null });
+  let waiting;
 
   const caseId = $derived(caseState.current?.id ?? '');
   const title = $derived(noteId ? entities.find((entity) => entity.id === noteId)?.label ?? 'Note' : 'Case notes');
@@ -77,7 +100,48 @@
       show(id, note === CASE_NOTES ? null : note || dockNote(id));
     });
   });
-  onDestroy(() => { if (doc) void releaseNote(doc); });
+  onDestroy(() => {
+    clearTimeout(waiting);
+    if (doc) void releaseNote(doc);
+  });
+
+  // the look of the note shown, read with it
+  $effect(() => {
+    const id = caseId;
+    const key = noteId;
+    look = null;
+    if (!id || !doc) return;
+    let live = true;
+    untrack(() => readLook(id, key))
+      .then((value) => { if (live) look = value; })
+      .catch(() => { if (live) look = normaliseLook(null); });
+    return () => { live = false; };
+  });
+
+  /** A look picked in the bar: shown at once, kept beside the note. */
+  async function changeLook(next) {
+    const id = caseId;
+    const key = noteId;
+    const mine = ++lookWrites;
+    look = next;
+    try {
+      const saved = await writeLook(id, key, next);
+      if (mine === lookWrites && id === caseId && noteId === key) look = saved;
+    } catch (error) {
+      toast(`Look not saved: ${error.message}`, 'danger');
+    }
+  }
+
+  /** Turned to Your own page, a note with no cover gets one at its top, so what page 1 prints is there to write. */
+  function pickLook(next) {
+    if (coverChoice(next) === 'own' && coverChoice(look) !== 'own') editor?.cover();
+    void changeLook(next);
+  }
+
+  /** `/` › Cover page wrote the page: the look prints it alone on page 1. */
+  function coverWritten() {
+    if (look && coverChoice(look) !== 'own') void changeLook(ownCover(look));
+  }
 
   function show(id, note) {
     const previous = doc;
@@ -163,11 +227,61 @@
     const gone = () => tellPanel(null);
     window.addEventListener('pagehide', gone);
     const stop = receivePuts(put);
+    const stopTab = receiveTab((said) => {
+      clearTimeout(waiting);
+      tab = said;
+    });
     return () => {
       window.removeEventListener('pagehide', gone);
       stop();
+      stopTab();
     };
   });
+
+  // whether the page in front is a map the extension can capture: the app knows the sites
+  $effect(() => {
+    const url = tab?.access === 'open' ? tab.url : '';
+    if (!url) return;
+    let live = true;
+    mapSiteOf(url).then((site) => { if (live) mapOf = { url, site }; });
+    return () => { live = false; };
+  });
+  const isMap = $derived(tab?.access === 'open' && mapOf.url === tab.url && Boolean(mapOf.site));
+  const host = $derived(tab?.access === 'open' ? tabHost(tab.url) : '');
+
+  /** Open the Add menu, and ask what the tab in front is. No answer in time leaves the first part offering to allow it. */
+  function openAdding(anchor) {
+    if (adding) { closeAdding(); return; }
+    sourcing = null;
+    tab = null;
+    adding = anchor;
+    askTab();
+    clearTimeout(waiting);
+    waiting = setTimeout(() => { if (tab === null) tab = UNREAD; }, TAB_WAIT);
+  }
+
+  function closeAdding() {
+    clearTimeout(waiting);
+    adding = null;
+  }
+
+  /** An item of the tab's part: the extension does it, and what it brings comes back as a put. */
+  function fromTab(action) {
+    runTab(action);
+    closeAdding();
+  }
+
+  function askSource() {
+    const anchor = adding;
+    closeAdding();
+    sourcing = anchor;
+  }
+
+  /** What a source asked for here is put in as every tool's offer is. */
+  function addSource(offer) {
+    sourcing = null;
+    void putInNote(offer);
+  }
 
   /**
    * The case's records read again, before what was filed for a put lands, so its chip
@@ -223,11 +337,15 @@
       </button>
       <span class="spacer"></span>
       <NoteSaved {doc} />
+      <LookControl {look} onchange={pickLook} {entities} disabled={!look} />
       <ViewModes {page} inPlace onchange={setPage} />
+      <button type="button" class="btn btn-ghost btn-sm add" title="Add from the tab in front, or cite a source" aria-haspopup="menu"
+        aria-label="Add" aria-expanded={Boolean(adding)} onclick={(event) => openAdding(event.currentTarget)}>
+        <Icon name="plus" size={14} /><span>Add</span></button>
     </header>
-    <NotePages {page} {caseId} {noteId} {title} {doc} {entities} onjump={jump}>
+    <NotePages {page} {caseId} {noteId} {title} {doc} {entities} {look} onjump={jump}>
       {#key doc}
-        <NoteEditor {doc} {caseId} {entities} compact tools={false} onopen={openSource} onnote={pick}
+        <NoteEditor {doc} {caseId} {entities} compact tools={false} onopen={openSource} onnote={pick} oncover={coverWritten}
           onready={(handle) => (editor = handle)} onarrive={toWrite} placeholder="Write as you read. Type @ to cite, / for more." />
       {/key}
     </NotePages>
@@ -243,6 +361,38 @@
 
 {#if casing}
   <CasePicker anchor={casing} current={caseId} onpick={pickCase} onclose={() => (casing = null)} />
+{/if}
+
+{#if adding}
+  <FloatingMenu anchor={adding} width={260} align="end" label="Add to this note" onclose={closeAdding}>
+    {#if tab === null}
+      <p class="fm-note" role="status">Reading the tab…</p>
+    {:else if tab.access === 'open'}
+      <div class="fm-head">From this tab{host ? ` · ${host}` : ''}</div>
+      {#if isMap}
+        <button type="button" class="fm-item" role="menuitem" title="Capture this map as a picture: draw its area on the page" onclick={() => fromTab('capture')}>
+          <Icon name="camera" size={13} /><span class="fm-grow">This map<small>Draw the area to capture</small></span></button>
+      {/if}
+      <button type="button" class="fm-item" role="menuitem" title={tab.post ? 'Cite this post in the note' : 'Cite this page in the note'} onclick={() => fromTab('cite')}>
+        <Icon name="link" size={13} /><span class="fm-grow">{tab.post ? 'This post' : 'This page'}<small>{host}</small></span></button>
+      <button type="button" class="fm-item" role="menuitem" disabled={!tab.selection}
+        title={tab.selection ? 'Quote the words selected, linked to the passage' : 'Select words on the page to quote them'} onclick={() => fromTab('quote')}>
+        <Icon name="quote" size={13} /><span class="fm-grow">The passage selected<small>{tab.selection ? quotePreview(tab.selection) : 'Select words on the page to quote them'}</small></span></button>
+    {:else if tab.access === 'closed'}
+      <div class="fm-head">From this tab</div>
+      <button type="button" class="fm-item" role="menuitem" title="Asked once: Azimut reads a page only when you add from it" onclick={() => fromTab('allow')}>
+        <Icon name="unlock" size={13} /><span class="fm-grow">Allow Azimut on this tab…<small>Asked once: Azimut reads a page only when you add from it</small></span></button>
+    {:else}
+      <p class="fm-note">Nothing to add from this tab</p>
+    {/if}
+    <div class="fm-sep" role="separator"></div>
+    <button type="button" class="fm-item" role="menuitem" title="Cite a web page or a post, found in the case or kept" onclick={askSource}>
+      <Icon name="link" size={13} /><span class="fm-grow">A source…</span></button>
+  </FloatingMenu>
+{/if}
+
+{#if sourcing}
+  <AddSource {caseId} anchor={sourcing} onpick={addSource} onclose={() => (sourcing = null)} />
 {/if}
 
 <Toasts />
@@ -264,6 +414,13 @@
   .case:hover { color: var(--text-1); }
   .slash { flex: none; color: var(--text-3); }
   .spacer { flex: 1; }
+  .add { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+  /* narrow: the case and the note keep their room; Add is its plus, Look its brush */
+  @container (max-width: 440px) { .panel-bar :global(.look-open .current) { display: none; } }
+  @container (max-width: 400px) { .add span { display: none; } }
+  @container (max-width: 340px) { .panel-bar { gap: 2px; padding-left: 6px; padding-right: 6px; } .panel-bar :global(.look-open .word) { display: none; } }
+  /* two lines to an item of the tab's part: what it does, then what it holds */
+  .fm-grow small { display: block; margin-top: 1px; color: var(--text-3); font-size: 11px; line-height: 1.3; white-space: normal; overflow-wrap: anywhere; }
   .none {
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 100%; margin: 0;
     padding: 0 28px; color: var(--text-3); text-align: center; line-height: 1.5;

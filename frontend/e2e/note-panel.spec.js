@@ -5,7 +5,8 @@ import { CASE_ID, PANEL_PATH, installAppFixture } from './app.fixture.js';
  * The note in the extension's side panel, framed by a stand-in for the extension's
  * page: the panel says which note it holds, and a quote, a cite and a capture sent
  * from the page land in the note, each with the toast and its Undo. Page shows the
- * note's PDF in place of its text, and the bar switches the case in place.
+ * note's PDF in place of its text, and the bar switches the case in place. Its Add
+ * menu asks the page what the tab in front is, and asks it to do the item pressed.
  *
  * A browser test cannot be an extension, so the stand-in is a page of the app's own
  * origin and says so in the frame's address (`testParent=1`). Only a test run honours
@@ -24,7 +25,13 @@ const host = (src) => `<!doctype html><meta charset="utf-8"><body style="margin:
 <iframe src="${src}" title="Notes" style="display:block;width:360px;height:640px;border:0"></iframe>
 <script>
   window.told = [];
-  addEventListener('message', (event) => { if (event.source === frames[0]) window.told.push(event.data); });
+  // the tab in front, which a test sets; the panel is told it when it asks
+  window.tab = null;
+  addEventListener('message', (event) => {
+    if (event.source !== frames[0]) return;
+    window.told.push(event.data);
+    if (event.data && event.data.azimut === 'note-tab-ask' && window.tab) frames[0].postMessage(window.tab, location.origin);
+  });
 </script>`;
 
 const SECOND = { id: 'dock-fire', name: 'Dock fire', scratch: false, entities: [], links: [], folders: [] };
@@ -68,10 +75,10 @@ const put = (id, fields) => ({ azimut: 'note-put', v: 1, id, ...fields });
 test('a quote, a cite and a capture sent from the extension\'s page land in the panel\'s note, each with Undo', async ({ page }) => {
   const { fixture, written, looked, frame } = await framedNote(page);
 
-  // the case, the note and Write | Page, and nothing else
+  // the case, the note, its Look, Write | Page and Add, and nothing else
   await expect(frame.locator('.panel-bar .case')).toHaveText('Browser Test');
   await expect(frame.locator('.panel-bar button.which')).toContainText('Case notes');
-  await expect(frame.locator('.panel-bar button')).toHaveText(['Browser Test', 'Case notes', 'Write', 'Page']);
+  await expect(frame.locator('.panel-bar button')).toHaveText(['Browser Test', 'Case notes', /^Look/, 'Write', 'Page', 'Add']);
   await expect.poll(() => told(page)).toContainEqual({
     azimut: 'note-panel', v: 1, state: 'ready', caseId: CASE_ID, noteId: 'case', title: 'Case notes',
   });
@@ -159,6 +166,48 @@ test('Page shows the panel\'s note as its PDF in place of the text, kept for the
   await expect(shown(frame)).toHaveText('Write');
   await expect(frame.locator('.cm-content')).toContainText('The port reopened.');
   fixture.expectNoUnexpectedRequests();
+});
+
+test('Add asks the extension\'s page what the tab in front is, lists what it can give, and asks for the one pressed', async ({ page }) => {
+  const { frame } = await framedNote(page);
+  await expect.poll(() => told(page)).toContainEqual(expect.objectContaining({ azimut: 'note-panel', state: 'ready' }));
+  await page.evaluate(() => {
+    window.tab = {
+      azimut: 'note-tab', v: 1, access: 'open', url: 'https://example.org/news/strike', title: 'Strike | Example News',
+      selection: 'Berths 10 to 14 were closed.', post: false,
+    };
+  });
+
+  await frame.getByRole('button', { name: 'Add' }).click();
+  const menu = frame.getByRole('menu', { name: 'Add to this note' });
+  await expect(menu.getByRole('menuitem')).toHaveText([/This page/, /The passage selected/, /A source/]);
+  await expect(menu).toContainText('example.org');
+  await expect(menu).toContainText('“Berths 10 to 14 were closed.”');
+  expect(await told(page)).toContainEqual({ azimut: 'note-tab-ask', v: 1 });
+
+  await menu.getByRole('menuitem', { name: /The passage selected/ }).click();
+  await expect(menu).toHaveCount(0);
+  expect(await told(page)).toContainEqual({ azimut: 'note-tab-run', v: 1, action: 'quote' });
+
+  // a tab the extension may not read yet offers its first permission, and the page is asked for it
+  await page.evaluate(() => { window.tab = { azimut: 'note-tab', v: 1, access: 'closed', url: '', title: '', selection: '', post: false }; });
+  await frame.getByRole('button', { name: 'Add' }).click();
+  await frame.getByRole('menuitem', { name: /Allow Azimut on this tab/ }).click();
+  expect(await told(page)).toContainEqual({ azimut: 'note-tab-run', v: 1, action: 'allow' });
+});
+
+test('the Look in the panel\'s bar keeps a style beside the note and fits the panel\'s width', async ({ page }) => {
+  const { frame } = await framedNote(page);
+  await expect(frame.locator('.panel-bar button.which')).toContainText('Case notes');
+  await frame.locator('.panel-bar [data-guide="notebook.look"]').click();
+  const look = frame.getByRole('dialog', { name: 'Look' });
+  // the panel is 360 px wide: the Look is no wider than it, less its margins
+  expect((await look.boundingBox()).width).toBeLessThanOrEqual(344);
+  await expect(look.getByRole('tab')).toHaveCount(5);
+  const wrote = page.waitForRequest((request) => request.method() === 'PUT' && request.url().endsWith('/notes/case/look'));
+  await look.getByRole('tab', { name: 'Style' }).click();
+  await look.locator('.style-card', { hasText: 'Journal' }).click();
+  expect((await wrote).postDataJSON()).toMatchObject({ style: 'journal' });
 });
 
 test('the panel switches to another case in place, from its bar', async ({ page }) => {

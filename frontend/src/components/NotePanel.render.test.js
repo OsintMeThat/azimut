@@ -53,6 +53,7 @@ const { pinnedNote } = await import('../lib/notes/putInNote.svelte.js');
 const { openNote, releaseNote, resetOpenNotes } = await import('../lib/notes/noteDoc.svelte.js');
 const { setDockNote } = await import('../lib/notes/noteDock.svelte.js');
 const { releaseCanvas } = await import('../lib/notes/pdfjs.js');
+const { forgetMaps } = await import('../lib/notes/panelTab.js');
 const { default: NotePanel } = await import('./NotePanel.svelte');
 
 const EXT = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
@@ -93,6 +94,7 @@ const CASES = [
 
 beforeEach(() => {
   localStorage.clear();
+  forgetMaps();
   opened.id = 'case-a';
   written = '';
   pdf.destroy = vi.fn();
@@ -147,9 +149,9 @@ describe('the note in the extension\'s panel', () => {
     await panel();
     expect(target.querySelector('.case').textContent).toBe('Harbour strike');
     expect(target.querySelector('button.which').textContent).toContain('Port lead');
-    // the case, the note and Write | Page: none of the dock's Add, Notebook, own tab or close
+    // the case, the note, the note's look, Write | Page and Add: none of the dock's Notebook, own tab or close
     expect([...target.querySelectorAll('.panel-bar button')].map((button) => button.textContent.trim()))
-      .toEqual(['Harbour strike', 'Port lead', 'Write', 'Page']);
+      .toEqual(['Harbour strike', 'Port lead', 'LookReport', 'Write', 'Page', 'Add']);
     expect(pinnedNote()).toEqual({ caseId: 'case-a', noteId: 'n1', title: 'Port lead' });
     await vi.waitFor(() => expect(told()).toContainEqual({
       azimut: 'note-panel', v: 1, state: 'ready', caseId: 'case-a', noteId: 'n1', title: 'Port lead', to: '*',
@@ -384,5 +386,465 @@ describe('the panel\'s case', () => {
       .toContain('The note is not saved, so this case stays open: disk full'));
     expect(caseState.current.id).toBe('case-a');
     expect(get).not.toHaveBeenCalledWith('/api/cases/case-b');
+  });
+});
+
+describe('the Look in the panel\'s bar', () => {
+  const lookButton = () => target.querySelector('.panel-bar [data-guide="notebook.look"]');
+  const menu = () => document.querySelector('.float-menu[aria-label="Look"]');
+  const goTo = (name) => {
+    [...menu().querySelectorAll('[role="tab"]')].find((item) => item.textContent.trim() === name).click();
+    flushSync();
+  };
+  const looks = () => put.mock.calls.filter(([url]) => url.endsWith('/look'));
+  const keepLooks = () => put.mockImplementation(async (url, body) => {
+    if (url.endsWith('/look')) return { look: body };
+    written = body.text;
+    return { status: 'saved' };
+  });
+
+  it('sits between Saved and Write | Page, names the note\'s style, and is read with the note', async () => {
+    await panel();
+    const bar = target.querySelector('.panel-bar');
+    const order = [...bar.children].map((node) => node.className || node.tagName);
+    expect(order.indexOf(lookButton().className)).toBeGreaterThan(order.findIndex((name) => String(name).includes('said')));
+    expect(lookButton().nextElementSibling.className).toContain('modes');
+    expect(lookButton().textContent).toContain('Report');
+    expect(get).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/look');
+    expect(lookButton().disabled).toBe(false);
+  });
+
+  it('is out of reach until the look is read', async () => {
+    let release;
+    get.mockImplementation(async (url) => {
+      if (url.endsWith('/look')) return new Promise((resolve) => { release = () => resolve({ look: { style: 'brief' } }); });
+      if (url.endsWith('/notes/index')) return { items: [] };
+      if (url === '/api/cases/case-a') return { id: 'case-a', name: 'Harbour strike', folders: [] };
+      return { text: written };
+    });
+    await panel();
+    expect(lookButton().disabled).toBe(true);
+    release();
+    await settle();
+    expect(lookButton().disabled).toBe(false);
+    expect(lookButton().textContent).toContain('Brief');
+  });
+
+  it('keeps a style picked beside the note, as the Notebook does, and shows it at once', async () => {
+    keepLooks();
+    await panel();
+    lookButton().click();
+    flushSync();
+    goTo('Style');
+    [...menu().querySelectorAll('.style-card')].find((card) => card.textContent.includes('Journal')).click();
+    await settle();
+    expect(looks()).toHaveLength(1);
+    expect(looks()[0][0]).toBe('/api/cases/case-a/notes/n1/look');
+    expect(looks()[0][1]).toMatchObject({ style: 'journal' });
+    expect(lookButton().textContent).toContain('Journal');
+    // only the look was written: the note's text is its own
+    expect(put.mock.calls.some(([url]) => url === '/api/cases/case-a/notes/n1')).toBe(false);
+  });
+
+  it('keeps the look of the case notes beside them', async () => {
+    keepLooks();
+    await panel('#notebook?case=case-a&note=case&solo=1&panel=1');
+    expect(get).toHaveBeenCalledWith('/api/cases/case-a/notes/case/look');
+    lookButton().click();
+    flushSync();
+    goTo('Page');
+    [...menu().querySelectorAll('button')].find((button) => button.textContent.trim() === 'Letter').click();
+    await settle();
+    expect(looks()[0][0]).toBe('/api/cases/case-a/notes/case/look');
+    expect(looks()[0][1]).toMatchObject({ page: 'letter' });
+  });
+
+  it('is read again for another note, and writes to that one', async () => {
+    keepLooks();
+    get.mockImplementation(async (url) => {
+      if (url.endsWith('/notes/index')) return { items: [{ id: 'case', title: 'Case notes', folder: '', updated_at: '' }, { id: 'n1', title: 'Port lead', folder: '', updated_at: '' }] };
+      if (url === '/api/cases/case-a/notes/case/look') return { look: { style: 'brief' } };
+      if (url.endsWith('/look')) return { look: { style: 'report' } };
+      if (url === '/api/cases/case-a') return { id: 'case-a', name: 'Harbour strike', folders: [] };
+      return { text: written };
+    });
+    await panel();
+    expect(lookButton().textContent).toContain('Report');
+    target.querySelector('button.which').click();
+    await settle();
+    [...document.querySelectorAll('.float-menu button')][0].click();
+    await settle();
+    await vi.waitFor(() => expect(lookButton().textContent).toContain('Brief'));
+    lookButton().click();
+    flushSync();
+    goTo('Style');
+    [...menu().querySelectorAll('.style-card')].find((card) => card.textContent.includes('Plain')).click();
+    await settle();
+    expect(looks().at(-1)[0]).toBe('/api/cases/case-a/notes/case/look');
+  });
+
+  it('draws the pages again in the look picked', async () => {
+    keepLooks();
+    localStorage.setItem('azimut:notePanel-page', '1');
+    await panel();
+    await vi.waitFor(() => expect(target.querySelectorAll('.sheet')).toHaveLength(2));
+    expect(postBytes.mock.calls.at(-1)[1]).toMatchObject({ look: { style: 'report' } });
+    // read once: the pages do not ask again for a look the panel holds
+    expect(get.mock.calls.filter(([url]) => url === '/api/cases/case-a/notes/n1/look')).toHaveLength(1);
+    lookButton().click();
+    flushSync();
+    goTo('Style');
+    [...menu().querySelectorAll('.style-card')].find((card) => card.textContent.includes('Brief')).click();
+    await settle();
+    await vi.waitFor(() => expect(postBytes.mock.calls.at(-1)[1]).toMatchObject({ look: { style: 'brief' } }));
+    expect(get.mock.calls.filter(([url]) => url === '/api/cases/case-a/notes/n1/look')).toHaveLength(1);
+  });
+
+  it('writes the first page at the top of the note when the cover turns to Your own page', async () => {
+    keepLooks();
+    await panel();
+    lookButton().click();
+    flushSync();
+    goTo('Cover');
+    [...menu().querySelectorAll('button')].find((button) => button.textContent.trim() === 'Your own page').click();
+    await settle();
+    const { EditorView } = await import('@codemirror/view');
+    const view = EditorView.findFromDOM(target.querySelector('.cm-editor'));
+    expect(view.state.doc.toString()).toContain('<!-- cover -->');
+    expect(looks().at(-1)[1].cover).toMatchObject({ on: true, mode: 'own' });
+  });
+
+  it('says so when the look could not be kept, and shows the one that was picked', async () => {
+    put.mockImplementation(async (url, body) => {
+      if (url.endsWith('/look')) throw new Error('disk full');
+      written = body.text;
+      return { status: 'saved' };
+    });
+    await panel();
+    lookButton().click();
+    flushSync();
+    goTo('Style');
+    [...menu().querySelectorAll('.style-card')].find((card) => card.textContent.includes('Journal')).click();
+    await settle();
+    expect(uiState.toasts.map((item) => item.message)).toContain('Look not saved: disk full');
+  });
+
+  it('opens a panel as wide as the window lets it: 440 px, or the panel\'s width less its margins', async () => {
+    const was = window.innerWidth;
+    await panel();
+    lookButton().click();
+    flushSync();
+    expect(menu().style.width).toBe('440px');
+    expect(menu().querySelector('.look').classList.contains('narrow')).toBe(false);
+    lookButton().click();
+    flushSync();
+    Object.defineProperty(window, 'innerWidth', { value: 320, configurable: true });
+    window.dispatchEvent(new Event('resize'));
+    flushSync();
+    lookButton().click();
+    flushSync();
+    expect(menu().style.width).toBe('304px');
+    expect(menu().querySelector('.look').classList.contains('narrow')).toBe(true);
+    // every section is still there to be reached
+    expect([...menu().querySelectorAll('[role="tab"]')].map((item) => item.textContent.trim())).toEqual(['Style', 'Text', 'Page', 'Cover', 'Header & footer']);
+    Object.defineProperty(window, 'innerWidth', { value: was, configurable: true });
+    window.dispatchEvent(new Event('resize'));
+  });
+});
+
+describe('Add in the panel\'s bar', () => {
+  const addButton = () => target.querySelector('.panel-bar button.add');
+  const menu = () => document.querySelector('.float-menu[aria-label="Add to this note"]');
+  const items = () => [...menu().querySelectorAll('[role="menuitem"]')];
+  const labels = () => items().map((item) => item.querySelector('.fm-grow')?.firstChild?.textContent.trim());
+  const item = (label) => items().find((one) => one.querySelector('.fm-grow')?.firstChild?.textContent.trim() === label);
+  const URL = 'https://www.example.org/news/strike';
+  const tab = (fields = {}) => ({ azimut: 'note-tab', v: 1, access: 'open', url: URL, title: 'Strike | Example News', selection: 'Berths 10 to 14 were closed.', post: false, ...fields });
+  const asks = () => told().filter((message) => message.azimut === 'note-tab-ask');
+  const runs = () => told().filter((message) => message.azimut === 'note-tab-run');
+
+  /** The map check answers per address; the pairing token is the app's own. */
+  function mapAnswers(sites = {}) {
+    get.mockImplementation(async (url) => {
+      if (url === '/api/settings') return { ingest_token: 'pairing-token' };
+      if (url.startsWith('/api/ingest/parse')) return { site: sites[decodeURIComponent(url.split('url=')[1])] ?? null };
+      if (url.endsWith('/notes/index')) return { items: [{ id: 'case', title: 'Case notes', folder: '', updated_at: '' }] };
+      if (url.includes('/sources/lookup')) return { url: PAGE, title: 'Strike on the port', found: [] };
+      if (url === '/api/cases/case-a') return { id: 'case-a', name: 'Harbour strike', folders: [] };
+      if (url.endsWith('/look')) return { look: {} };
+      return { text: written };
+    });
+  }
+
+  it('is a button of the bar that asks the extension what the tab in front is when it opens', async () => {
+    await panel();
+    expect(addButton().getAttribute('aria-label')).toBe('Add');
+    expect(addButton().title).toBe('Add from the tab in front, or cite a source');
+    expect(addButton().getAttribute('aria-haspopup')).toBe('menu');
+    expect(addButton().getAttribute('aria-expanded')).toBe('false');
+    expect(asks()).toEqual([]);
+    addButton().click();
+    await settle();
+    expect(addButton().getAttribute('aria-expanded')).toBe('true');
+    expect(asks()).toEqual([{ azimut: 'note-tab-ask', v: 1, to: '*' }]);
+    // pressed again it closes, and asks nothing more
+    addButton().click();
+    await settle();
+    expect(menu()).toBeNull();
+    expect(asks()).toHaveLength(1);
+  });
+
+  it('says it is reading the tab until the extension answers', async () => {
+    await panel();
+    addButton().click();
+    await settle();
+    expect(menu().querySelector('[role="status"]').textContent).toBe('Reading the tab…');
+    expect(labels()).toEqual(['A source…']);
+    send(tab());
+    await settle();
+    expect(menu().querySelector('[role="status"]')).toBeNull();
+    expect(menu().textContent).not.toContain('Reading the tab…');
+  });
+
+  it('offers to allow the tab when the extension says nothing within a second', async () => {
+    await panel();
+    addButton().click();
+    await settle();
+    expect(menu().textContent).toContain('Reading the tab…');
+    await vi.waitFor(() => expect(menu().textContent).toContain('Allow Azimut on this tab…'), { timeout: 2500 });
+    expect(menu().textContent).not.toContain('Reading the tab…');
+  });
+
+  it('lists the page, and the words selected with a preview, for a tab it may read', async () => {
+    mapAnswers();
+    await panel();
+    addButton().click();
+    await settle();
+    send(tab());
+    await settle();
+    expect(menu().querySelector('.fm-head').textContent).toBe('From this tab · example.org');
+    expect(labels()).toEqual(['This page', 'The passage selected', 'A source…']);
+    expect(item('This page').querySelector('small').textContent).toBe('example.org');
+    expect(item('This page').title).toBe('Cite this page in the note');
+    const quote = item('The passage selected');
+    expect(quote.disabled).toBe(false);
+    expect(quote.querySelector('small').textContent).toBe('“Berths 10 to 14 were closed.”');
+    expect(quote.title).toBe('Quote the words selected, linked to the passage');
+    expect(menu().textContent).not.toContain('This map');
+  });
+
+  it('says This post for one post of a social site', async () => {
+    mapAnswers();
+    await panel();
+    addButton().click();
+    send(tab({ url: 'https://x.com/a/status/1', post: true }));
+    await settle();
+    expect(labels()).toEqual(['This post', 'The passage selected', 'A source…']);
+    expect(item('This post').title).toBe('Cite this post in the note');
+    expect(menu().querySelector('.fm-head').textContent).toBe('From this tab · x.com');
+  });
+
+  it('shortens a long selection in its preview, and keeps the quote itself whole', async () => {
+    mapAnswers();
+    await panel();
+    addButton().click();
+    send(tab({ selection: 'Berths 10 to 14 were closed on Tuesday after a strike hit the port overnight and the harbour said' }));
+    await settle();
+    expect(item('The passage selected').querySelector('small').textContent).toBe('“Berths 10 to 14 were closed on Tuesday after a strike hit…”');
+  });
+
+  it('disables the quote, and says how to have one, while nothing is selected', async () => {
+    mapAnswers();
+    await panel();
+    addButton().click();
+    send(tab({ selection: '' }));
+    await settle();
+    const quote = item('The passage selected');
+    expect(quote.disabled).toBe(true);
+    expect(quote.title).toBe('Select words on the page to quote them');
+    expect(quote.querySelector('small').textContent).toBe('Select words on the page to quote them');
+    quote.click();
+    await settle();
+    expect(runs()).toEqual([]);
+    expect(menu()).not.toBeNull();
+  });
+
+  it('adds This map only when the app says the page is a map, asked with the token, once a page', async () => {
+    mapAnswers({ [URL]: 'google-maps' });
+    await panel();
+    addButton().click();
+    send(tab());
+    await settle();
+    await vi.waitFor(() => expect(labels()).toContain('This map'));
+    expect(labels()).toEqual(['This map', 'This page', 'The passage selected', 'A source…']);
+    expect(item('This map').querySelector('small').textContent).toBe('Draw the area to capture');
+    const parse = get.mock.calls.filter(([url]) => url.startsWith('/api/ingest/parse'));
+    expect(parse).toHaveLength(1);
+    expect(parse[0]).toEqual([`/api/ingest/parse?url=${encodeURIComponent(URL)}`, { headers: { 'X-Azimut-Token': 'pairing-token' } }]);
+    // opened again on the same page: no second question
+    addButton().click();
+    await settle();
+    addButton().click();
+    await settle();
+    send(tab());
+    await settle();
+    await vi.waitFor(() => expect(labels()).toContain('This map'));
+    expect(get.mock.calls.filter(([url]) => url.startsWith('/api/ingest/parse'))).toHaveLength(1);
+  });
+
+  it('leaves This map out when the page is no map, or the question could not be put', async () => {
+    mapAnswers();
+    await panel();
+    addButton().click();
+    send(tab());
+    await settle();
+    await settle();
+    expect(labels()).toEqual(['This page', 'The passage selected', 'A source…']);
+    expect(get.mock.calls.some(([url]) => url.startsWith('/api/ingest/parse'))).toBe(true);
+    // an address the app cannot ask about
+    addButton().click();
+    await settle();
+    forgetMaps();
+    get.mockImplementation(async (url) => {
+      if (url === '/api/settings') throw new Error('Azimut is not running');
+      if (url.endsWith('/look')) return { look: {} };
+      return { text: written };
+    });
+    addButton().click();
+    send(tab({ url: 'https://maps.example.org/@1,2' }));
+    await settle();
+    await settle();
+    expect(labels()).toEqual(['This page', 'The passage selected', 'A source…']);
+  });
+
+  it('asks the extension for what is pressed, and closes', async () => {
+    mapAnswers({ [URL]: 'google-maps' });
+    await panel();
+    for (const [label, action] of [['This map', 'capture'], ['This page', 'cite'], ['The passage selected', 'quote']]) {
+      addButton().click();
+      send(tab());
+      await settle();
+      await vi.waitFor(() => expect(labels()).toContain('This map'));
+      item(label).click();
+      await settle();
+      expect(runs().at(-1)).toEqual({ azimut: 'note-tab-run', v: 1, action, to: '*' });
+      expect(menu()).toBeNull();
+    }
+    expect(runs().map((message) => message.action)).toEqual(['capture', 'cite', 'quote']);
+    // nothing is put by the panel itself: what the extension makes comes back as a put
+    expect(post).not.toHaveBeenCalledWith(expect.stringMatching(/\/entities$/), expect.anything());
+  });
+
+  it('offers the first permission for a tab it may not read yet, and asks for it', async () => {
+    mapAnswers();
+    await panel();
+    addButton().click();
+    send(tab({ access: 'closed', url: '', title: '', selection: '' }));
+    await settle();
+    expect(menu().querySelector('.fm-head').textContent).toBe('From this tab');
+    expect(labels()).toEqual(['Allow Azimut on this tab…', 'A source…']);
+    expect(item('Allow Azimut on this tab…').querySelector('small').textContent).toBe('Asked once: Azimut reads a page only when you add from it');
+    expect(menu().textContent).not.toContain('This page');
+    expect(get.mock.calls.some(([url]) => url.startsWith('/api/ingest/parse'))).toBe(false);
+    item('Allow Azimut on this tab…').click();
+    await settle();
+    expect(runs()).toEqual([{ azimut: 'note-tab-run', v: 1, action: 'allow', to: '*' }]);
+    expect(menu()).toBeNull();
+  });
+
+  it('says there is nothing to add from a tab that is no web page, and still offers a source', async () => {
+    mapAnswers();
+    await panel();
+    addButton().click();
+    send(tab({ access: 'none', url: '', title: '', selection: '' }));
+    await settle();
+    expect(menu().textContent).toContain('Nothing to add from this tab');
+    expect(menu().querySelector('.fm-head')).toBeNull();
+    expect(labels()).toEqual(['A source…']);
+  });
+
+  it('takes the answer when it comes after the second, and never one from a web page', async () => {
+    mapAnswers();
+    await panel();
+    addButton().click();
+    await vi.waitFor(() => expect(menu().textContent).toContain('Allow Azimut on this tab…'), { timeout: 2500 });
+    send(tab());
+    await settle();
+    expect(labels()).toEqual(['This page', 'The passage selected', 'A source…']);
+    addButton().click();
+    await settle();
+    addButton().click();
+    await settle();
+    send(tab({ selection: 'from a web page' }), { origin: 'https://evil.example' });
+    send(tab({ selection: 'from another window' }), { source: window });
+    send(tab({ url: 'javascript:alert(1)' }));
+    await settle();
+    expect(menu().textContent).toContain('Reading the tab…');
+  });
+
+  it('starts again at each opening: the last tab is not shown while the new one is asked', async () => {
+    mapAnswers();
+    await panel();
+    addButton().click();
+    send(tab());
+    await settle();
+    expect(labels()).toContain('This page');
+    addButton().click();
+    await settle();
+    addButton().click();
+    await settle();
+    expect(menu().textContent).toContain('Reading the tab…');
+    expect(labels()).toEqual(['A source…']);
+    expect(asks()).toHaveLength(2);
+  });
+
+  it('closes on Escape, and is not moved by an answer that comes after', async () => {
+    mapAnswers();
+    await panel();
+    addButton().click();
+    await settle();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSync();
+    expect(menu()).toBeNull();
+    send(tab());
+    await settle();
+    expect(menu()).toBeNull();
+    expect(runs()).toEqual([]);
+  });
+
+  it('opens a source to cite, as the note on the side does, in place of the menu', async () => {
+    mapAnswers();
+    await panel();
+    addButton().click();
+    send(tab());
+    await settle();
+    expect(item('A source…').title).toBe('Cite a web page or a post, found in the case or kept');
+    item('A source…').click();
+    await settle();
+    expect(menu()).toBeNull();
+    const dialog = document.querySelector('.float-menu[aria-label="A source"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog.querySelector('input[aria-label="Link to cite"]')).not.toBeNull();
+    expect(runs()).toEqual([]);
+  });
+
+  it('cites a source typed in it in the note, like the dock\'s', async () => {
+    mapAnswers();
+    post.mockImplementation(async (url, body) => (url.endsWith('/entities') ? { id: 'b_new', ...body } : { redirects: {} }));
+    await panel();
+    addButton().click();
+    await settle();
+    item('A source…').click();
+    await settle();
+    const input = document.querySelector('input[aria-label="Link to cite"]');
+    input.value = PAGE;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    await settle();
+    const keep = [...document.querySelectorAll('.float-menu .fm-item')].find((row) => row.textContent.includes('Bookmark'));
+    expect(keep).toBeDefined();
+    keep.click();
+    await vi.waitFor(() => expect(post).toHaveBeenCalledWith('/api/cases/case-a/entities', expect.objectContaining({ type: 'bookmark' })));
+    await vi.waitFor(() => expect(uiState.toasts.some((item) => item.message === 'Put in “Port lead”')).toBe(true));
   });
 });

@@ -10,25 +10,30 @@
    * and asks for nothing. A press on a page or a warning hands its line to `onjump`.
    *
    * The pictures' size marks are left out: on a page this narrow their bar does not fit.
+   *
+   * The look is read here each time the pages are shown, unless the surface keeps it
+   * (`look`, where it sets it from a Look beside the note): null while that surface
+   * reads it, which draws nothing yet.
    */
   import { untrack } from 'svelte';
   import { CASE_NOTES } from '../lib/notes/noteDoc.svelte.js';
   import { normaliseLook, readLook } from '../lib/notes/look.js';
   import PagePane from '../tools/notebook/PagePane.svelte';
 
-  let { page = false, caseId, noteId = null, title = '', doc, entities = [], onjump = () => {}, children } = $props();
+  let { page = false, caseId, noteId = null, title = '', doc, entities = [], look: kept = undefined, onjump = () => {}, children } = $props();
 
   // how the note prints, read each time its pages are shown
-  let look = $state(null);
+  let read = $state(null);
+  const look = $derived(kept !== undefined ? kept : read);
   $effect(() => {
     const id = caseId;
     const note = noteId;
-    look = null;
-    if (!page || !id) return;
+    read = null;
+    if (!page || !id || untrack(() => kept !== undefined)) return;
     let live = true;
     untrack(() => readLook(id, note))
-      .then((value) => { if (live) look = value; })
-      .catch(() => { if (live) look = normaliseLook(null); });
+      .then((value) => { if (live) read = value; })
+      .catch(() => { if (live) read = normaliseLook(null); });
     return () => { live = false; };
   });
 </script>

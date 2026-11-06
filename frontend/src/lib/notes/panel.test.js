@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { inNotePanel, panelState, putDone, readPut, receivePuts, tellPanel } from './panel.js';
+import { LIMITS, TAB_ACCESS, TAB_ACTIONS, askTab, inNotePanel, panelState, putDone, readPut, readTab, receivePuts, receiveTab, runTab, tellPanel } from './panel.js';
 import { acceptsOrigin, fromExtension } from './panelOrigin.js';
 
 /**
@@ -167,5 +167,174 @@ describe('the receiver', () => {
     const { win, listeners } = framedWindow();
     receivePuts(vi.fn(), { win })();
     expect(listeners.size).toBe(0);
+  });
+});
+
+const tab = (fields = {}) => ({
+  azimut: 'note-tab', v: 1, access: 'open', url: 'https://example.org/news/strike', title: 'Strike | Example News', selection: 'Berths 10 to 14', post: false, ...fields,
+});
+
+describe('the tab in front', () => {
+  it('is read with its fields cleaned: the address in full, the title on one line, the words as selected', () => {
+    expect(readTab(tab({ title: '  Strike \n  news  ', url: 'https://example.org' }))).toEqual({
+      access: 'open', url: 'https://example.org/', title: 'Strike news', selection: 'Berths 10 to 14', post: false,
+    });
+    expect(readTab(tab({ selection: 'Berths 10\nto 14' })).selection).toBe('Berths 10\nto 14');
+    expect(readTab(tab({ selection: '   \n ' })).selection).toBe('');
+    expect(readTab(tab({ selection: '' })).selection).toBe('');
+    expect(readTab(tab({ post: true })).post).toBe(true);
+    expect(TAB_ACCESS).toEqual(['open', 'closed', 'none']);
+  });
+
+  it('holds nothing of a tab it may not read, whatever it was sent', () => {
+    const blank = { url: '', title: '', selection: '', post: false };
+    expect(readTab(tab({ access: 'closed', url: '', title: '', selection: '' }))).toEqual({ access: 'closed', ...blank });
+    expect(readTab(tab({ access: 'closed' }))).toEqual({ access: 'closed', ...blank });
+    expect(readTab(tab({ access: 'none', post: true }))).toEqual({ access: 'none', ...blank });
+    // still a message that is checked: a bad field refuses it, whatever the access
+    expect(readTab(tab({ access: 'none', url: 'javascript:alert(1)' }))).toBeNull();
+    expect(readTab(tab({ access: 'closed', selection: 'w'.repeat(LIMITS.selection + 1) }))).toBeNull();
+  });
+
+  it.each([
+    ['not a tab', 'hello'],
+    ['null', null],
+    ['an array', []],
+    ['another message', tab({ azimut: 'note-put' })],
+    ['another version', tab({ v: 2 })],
+    ['an unknown key', tab({ kind: 'post' })],
+    ['an unknown access', tab({ access: 'yes' })],
+    ['an access of the wrong kind', tab({ access: ['open'] })],
+    ['a script address', tab({ url: 'javascript:alert(1)' })],
+    ['a file address', tab({ url: 'file:///etc/passwd' })],
+    ['an address that is not one', tab({ url: 'example.org/a' })],
+    ['a long address', tab({ url: `https://example.org/${'a'.repeat(2030)}` })],
+    ['an address of the wrong kind', tab({ url: ['https://example.org'] })],
+    ['no address on a tab that may be read', tab({ url: '' })],
+    ['a long title', tab({ title: 't'.repeat(LIMITS.title + 1) })],
+    ['a title of the wrong kind', tab({ title: { text: 'x' } })],
+    ['a long selection', tab({ selection: 'w'.repeat(LIMITS.selection + 1) })],
+    ['a selection of the wrong kind', tab({ selection: 7 })],
+    ['a post flag of the wrong kind', tab({ post: 'yes' })],
+  ])('is refused when it is %s', (_name, data) => {
+    expect(readTab(data)).toBeNull();
+  });
+
+  it.each(['url', 'title', 'selection', 'post', 'access', 'v', 'azimut'])('is refused with its %s missing', (key) => {
+    const data = tab();
+    delete data[key];
+    expect(readTab(data)).toBeNull();
+    // and absent is not the same as null
+    expect(readTab({ ...tab(), [key]: null })).toBeNull();
+    expect(readTab({ ...tab(), [key]: undefined })).toBeNull();
+  });
+
+  it('takes each field at its bound', () => {
+    expect(readTab(tab({ title: 't'.repeat(LIMITS.title) })).title).toHaveLength(LIMITS.title);
+    expect(readTab(tab({ selection: 'w'.repeat(LIMITS.selection) })).selection).toHaveLength(LIMITS.selection);
+    expect(readTab(tab({ url: `https://example.org/${'a'.repeat(2000)}` })).url).toHaveLength(2020);
+  });
+
+  it('is refused from an object with a strange prototype, and from a class instance', () => {
+    class Tab {}
+    const odd = Object.assign(new Tab(), tab());
+    expect(readTab(odd)).toBeNull();
+    expect(readTab(Object.assign(Object.create(null), tab()))).not.toBeNull();
+  });
+});
+
+describe('the tab receiver', () => {
+  let stop = () => {};
+  afterEach(() => stop());
+
+  function framedWindow() {
+    const listeners = new Set();
+    const parent = { postMessage: vi.fn() };
+    const win = {
+      parent,
+      addEventListener: (type, fn) => type === 'message' && listeners.add(fn),
+      removeEventListener: (type, fn) => listeners.delete(fn),
+    };
+    const send = (data, { origin = EXT, source = parent } = {}) => [...listeners].forEach((fn) => fn({ data, origin, source }));
+    return { win, parent, send, listeners };
+  }
+
+  it('hands up the tab the extension that frames it says, as read, and answers nothing', () => {
+    const { win, parent, send } = framedWindow();
+    const handle = vi.fn();
+    stop = receiveTab(handle, { win });
+    send(tab({ title: '  Strike  ' }));
+    expect(handle).toHaveBeenCalledWith({ access: 'open', url: 'https://example.org/news/strike', title: 'Strike', selection: 'Berths 10 to 14', post: false });
+    send(tab({ access: 'closed' }));
+    expect(handle).toHaveBeenLastCalledWith({ access: 'closed', url: '', title: '', selection: '', post: false });
+    expect(parent.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('drops a web origin, another window, a put, and a tab that is off', () => {
+    const { win, send } = framedWindow();
+    const handle = vi.fn();
+    stop = receiveTab(handle, { win });
+    send(tab(), { origin: 'https://evil.example' });
+    send(tab(), { origin: 'http://127.0.0.1:8477' });
+    send(tab(), { source: { postMessage: vi.fn() } });
+    send(put());
+    send(tab({ url: 'javascript:alert(1)' }));
+    send(tab({ extra: true }));
+    send('open');
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it('is not the put receiver: a tab runs no put, and a put is no tab', async () => {
+    const { win, send, parent } = framedWindow();
+    const run = vi.fn(async () => ({ ok: true }));
+    const handle = vi.fn();
+    stop = (() => { const a = receivePuts(run, { win }); const b = receiveTab(handle, { win }); return () => { a(); b(); }; })();
+    send(tab());
+    send(put());
+    await Promise.resolve();
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(handle).toHaveBeenCalledTimes(1);
+    expect(parent.postMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('listens to nothing in a page that is not framed, and stops when undone', () => {
+    const alone = framedWindow();
+    alone.win.parent = alone.win;
+    expect(receiveTab(vi.fn(), { win: alone.win })).toBeTypeOf('function');
+    expect(alone.listeners.size).toBe(0);
+    const { win, listeners } = framedWindow();
+    receiveTab(vi.fn(), { win })();
+    expect(listeners.size).toBe(0);
+  });
+});
+
+describe('the asks of the Add menu', () => {
+  it('asks what the tab is, to the page that frames it, with nothing else', () => {
+    const parent = { postMessage: vi.fn() };
+    expect(askTab({ parent })).toBe(true);
+    expect(parent.postMessage).toHaveBeenCalledWith({ azimut: 'note-tab-ask', v: 1 }, '*');
+  });
+
+  it('asks for each action it knows, and no other', () => {
+    expect(TAB_ACTIONS).toEqual(['capture', 'cite', 'quote', 'allow']);
+    for (const action of TAB_ACTIONS) {
+      const parent = { postMessage: vi.fn() };
+      expect(runTab(action, { parent })).toBe(true);
+      expect(parent.postMessage).toHaveBeenCalledWith({ azimut: 'note-tab-run', v: 1, action }, '*');
+    }
+    for (const action of ['picture', 'delete', '', undefined, null, ['cite'], 'CAPTURE']) {
+      const parent = { postMessage: vi.fn() };
+      expect(runTab(action, { parent })).toBe(false);
+      expect(parent.postMessage).not.toHaveBeenCalled();
+    }
+  });
+
+  it('says nothing in a page that is not framed', () => {
+    const alone = { postMessage: vi.fn() };
+    alone.parent = alone;
+    expect(askTab(alone)).toBe(false);
+    expect(runTab('cite', alone)).toBe(false);
+    expect(alone.postMessage).not.toHaveBeenCalled();
+    expect(askTab(undefined)).toBe(false);
   });
 });

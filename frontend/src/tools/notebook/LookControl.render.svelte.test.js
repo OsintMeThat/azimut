@@ -121,6 +121,31 @@ describe('the Look panel', () => {
     expect(target.textContent).toContain('Report');
   });
 
+  it('is 440 px wide, and no wider than the window less its margins, which the extension\'s panel makes narrow', () => {
+    const was = window.innerWidth;
+    const resize = (width) => {
+      Object.defineProperty(window, 'innerWidth', { value: width, configurable: true });
+      window.dispatchEvent(new Event('resize'));
+      flushSync();
+    };
+    try {
+      openPanel();
+      expect(panel().style.width).toBe('440px');
+      expect(panel().querySelector('.look').classList.contains('narrow')).toBe(false);
+      for (const [width, wanted] of [[320, '304px'], [400, '384px'], [456, '440px'], [1600, '440px'], [200, '240px']]) {
+        resize(width);
+        expect(panel().style.width, String(width)).toBe(wanted);
+      }
+      resize(320);
+      expect(panel().querySelector('.look').classList.contains('narrow')).toBe(true);
+      // a panel this narrow keeps every tab, and the section under it
+      expect([...panel().querySelectorAll('[role="tab"]')]).toHaveLength(5);
+      expect(panel().querySelector('[role="tabpanel"]')).not.toBeNull();
+    } finally {
+      resize(was);
+    }
+  });
+
   it('puts paper, accent and marking on one column of labels', () => {
     openPanel();
     goTo('Page');

@@ -37,6 +37,10 @@
 
   let { look = null, onchange, template = false, entities = [], disabled = false } = $props();
 
+  // the panel follows the space: a window narrower than it is wide (the extension's panel) gets a narrower one
+  let viewport = $state(typeof window === 'undefined' ? 1024 : window.innerWidth);
+  const panelWidth = $derived(Math.max(240, Math.min(440, viewport - 16)));
+
   let anchor = $state(null);
   let subtitle = $state('');
   let picking = $state(false);
@@ -186,12 +190,14 @@
 <button type="button" class="btn btn-ghost btn-sm look-open" class:on={anchor} {disabled} aria-haspopup="dialog" aria-expanded={Boolean(anchor)}
   title={LOOK_HELP.open} data-guide="notebook.look"
   onclick={(event) => (anchor ? close() : open(event.currentTarget))}>
-  <Icon name="brush" size={14} /> Look<span class="current">{styleLabel(whole.style)}</span>
+  <Icon name="brush" size={14} /> <span class="word">Look</span><span class="current">{styleLabel(whole.style)}</span>
 </button>
 
+<svelte:window bind:innerWidth={viewport} />
+
 {#if anchor}
-  <FloatingMenu {anchor} align="end" width={440} role="dialog" label="Look" onclose={close}>
-    <div class="look" bind:this={panel}>
+  <FloatingMenu {anchor} align="end" width={panelWidth} role="dialog" label="Look" onclose={close}>
+    <div class="look" class:narrow={panelWidth < 420} bind:this={panel}>
       <div class="tabs" role="tablist" aria-label="Look sections" tabindex="-1" onkeydown={tabKey}>
         {#each TABS as item (item.id)}
           <button type="button" class="tab" class:on={tab === item.id} role="tab" id={`${uid}-tab-${item.id}`} aria-selected={tab === item.id}
@@ -407,11 +413,14 @@
   .look { display: flex; flex-direction: column; font-size: var(--fs-sm); }
 
   /* the sections, one at a time */
-  .tabs { display: flex; gap: 2px; padding: 0 2px; border-bottom: 1px solid var(--border); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 0 2px; padding: 0 2px; border-bottom: 1px solid var(--border); }
   .tab {
     display: inline-flex; align-items: center; margin-bottom: -1px; padding: 8px 10px 7px; border: none; border-bottom: 2px solid transparent;
     background: none; color: var(--text-3); font: inherit; font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; cursor: pointer;
   }
+  /* in a narrow panel the five tabs share the width: tighter, then onto a second row rather than cut */
+  .narrow .tab { padding: 8px 6px 7px; }
+  .narrow .section { padding-left: 4px; padding-right: 4px; }
   .tab:hover { color: var(--text-1); }
   .tab.on { color: var(--text-1); border-bottom-color: var(--accent); }
   .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--r-sm); }
