@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EditorSelection } from '@codemirror/state';
-import { focusedState, noteDecorations, noteState } from './liveMarkdown.js';
+import { focusedState, noteDecorations, noteMode, noteState, openedState } from './liveMarkdown.js';
 
 const CASE = {
   caseId: 'c1',
@@ -54,11 +54,11 @@ describe('the note page', () => {
     expect(words.filter((word) => word.startsWith('block'))).toHaveLength(2);
   });
 
-  it('draws a closed mermaid fence as a diagram, and its source while the cursor is in it', () => {
+  it('draws a closed mermaid fence as a diagram, and its source once it is open', () => {
     const text = '```mermaid\nflowchart LR\n  A --> B\n```\n\nAfter';
     const state = noteState(text, { caseInfo: CASE });
     expect(drawn(state)[0]).toBe(`block 0-${text.indexOf('\n\nAfter')}`);
-    expect(drawn(at(state, 14)).every((word) => word.startsWith('line cm-code-line'))).toBe(true);
+    expect(drawn(openedState(state, 14)).every((word) => word.startsWith('line cm-code-line'))).toBe(true);
   });
 
   it('turns tasks into boxes and bullets into dots', () => {
@@ -131,7 +131,9 @@ describe('guidance and chapters', () => {
       if (widget?.constructor.name === 'IncludeWidget') chapters.push([from, to, widget.number, widget.note?.title ?? null]);
     });
     expect(chapters).toEqual([[7, 21, 1, 'Shadows'], [23, 39, 2, null], [41, 57, 3, 'Case notes']]);
-    expect(drawn(at(state, 9))).toContain('mark cm-ref-source 7-21');
+    expect(drawn(openedState(state, 9))).toContain('mark cm-ref-source 7-21');
+    // the cursor at its start picks it, and leaves it drawn
+    expect(drawn(at(state, 7))).toContain('include 7-21');
   });
 
   it('keeps a chapter line inside a sentence or a quote as text', () => {
@@ -205,11 +207,13 @@ describe('a note the old Notebook wrote', () => {
 });
 
 describe('a page break', () => {
-  it('is drawn as a rule, and as its text while the cursor is on it', () => {
+  it('is drawn as a rule, and as its text once it is open', () => {
     const state = noteState('Before\n\n<!-- pagebreak -->\n\nAfter', { caseInfo: CASE });
     expect(drawn(state)).toContain('pagebreak 8-26');
-    expect(drawn(at(state, 10))).toContain('line cm-pagebreak-line @8');
-    expect(drawn(at(state, 10)).some((item) => item.startsWith('pagebreak'))).toBe(false);
+    expect(drawn(openedState(state, 10))).toContain('line cm-pagebreak-line @8');
+    expect(drawn(openedState(state, 10)).some((item) => item.startsWith('pagebreak'))).toBe(false);
+    // a cursor at its start only picks it
+    expect(drawn(at(state, 8))).toContain('pagebreak 8-26');
   });
 
   it('is only an example inside code', () => {
@@ -221,12 +225,13 @@ describe('a page break', () => {
 describe('the end of the cover page', () => {
   const COVER = '::: center\n# {title}\n:::\n<!-- cover -->\n\nBody';
 
-  it('is drawn as a named rule, and as its text while the cursor is on it', () => {
+  it('is drawn as a named rule, and as its text once it is open', () => {
     const state = noteState(COVER, { caseInfo: CASE });
     const rule = COVER.indexOf('<!-- cover -->');
     expect(drawn(state)).toContain(`coverrule ${rule}-${rule + 14}`);
-    expect(drawn(at(state, rule + 3))).toContain(`line cm-pagebreak-line @${rule}`);
-    expect(drawn(at(state, rule + 3)).some((item) => item.startsWith('coverrule'))).toBe(false);
+    expect(drawn(openedState(state, rule))).toContain(`line cm-pagebreak-line @${rule}`);
+    expect(drawn(openedState(state, rule)).some((item) => item.startsWith('coverrule'))).toBe(false);
+    expect(drawn(at(state, rule))).toContain(`coverrule ${rule}-${rule + 14}`);
   });
 
   it('is only an example inside code', () => {
@@ -246,5 +251,123 @@ describe('the words the PDF fills in', () => {
   it('stay as written in code and in guidance', () => {
     expect(drawn(noteState('`{name}`', { caseInfo: CASE })).some((item) => item.startsWith('placeholder'))).toBe(false);
     expect(drawn(noteState('<!--? Sign as {name} -->', { caseInfo: CASE }))).toEqual(['hint 0-24']);
+  });
+});
+
+/** The blocks the page draws whole, as `[kind, from, to, picked]`. */
+function blocks(state) {
+  const found = [];
+  noteDecorations(state).between(0, state.doc.length, (from, to, value) => {
+    const widget = value.spec.widget;
+    const name = widget?.constructor.name;
+    if (widget?.kind) found.push([widget.kind, from, to, widget.picked]);
+    else if (name === 'IncludeWidget') found.push(['include', from, to, widget.picked]);
+    else if (name === 'PageBreakWidget') found.push(['pagebreak', from, to, widget.picked]);
+    else if (name === 'CoverRuleWidget') found.push(['cover', from, to, widget.picked]);
+  });
+  return found;
+}
+
+describe('a block that is clicked', () => {
+  const TEXT = [
+    'Intro', '', '[[media:m1|clip.jpg]]{width=50%}', '', '| A | B |', '| --- | --- |', '| 1 | 2 |', '', '```mermaid', 'flowchart LR', '  A --> B', '```', '',
+    '::: right', 'Signed', ':::', '', '<details>More</details>', '', '<!-- pagebreak -->', '', '[[include:n2]]', '', 'End',
+  ].join('\n');
+  const info = { ...CASE, notes: [{ id: 'n2', title: 'Shadows', excerpt: 'Measured at noon.' }] };
+  const KINDS = ['picture', 'table', 'diagram', 'aligned', 'html', 'pagebreak', 'include'];
+  const start = (needle) => TEXT.indexOf(needle);
+  const kindsOf = (state) => blocks(state).map(([kind]) => kind);
+
+  it('stays drawn with the cursor at its start, and is picked there only', () => {
+    const state = noteState(TEXT, { caseInfo: info });
+    expect(kindsOf(state)).toEqual(KINDS);
+    expect(blocks(state).every((block) => block[3] === false)).toBe(true);
+    for (const [kind, from] of blocks(state)) {
+      const picked = blocks(at(state, from));
+      expect(picked.map((block) => block[0]), kind).toEqual(KINDS);
+      expect(picked.filter((block) => block[3]).map((block) => block[0]), kind).toEqual([kind]);
+    }
+    // a cursor in the words around them picks nothing
+    expect(blocks(at(state, 2)).some((block) => block[3])).toBe(false);
+    // nor does an editor out of focus, or a range
+    expect(blocks(state.update({ selection: EditorSelection.cursor(start('| A')) }).state).some((block) => block[3])).toBe(false);
+    const range = focusedState(state.update({ selection: EditorSelection.range(start('| A'), start('| A') + 3) }).state);
+    expect(blocks(range).some((block) => block[3])).toBe(false);
+  });
+
+  it('shows its source only once it is open, each kind as the page draws it open', () => {
+    const state = noteState(TEXT, { caseInfo: info });
+    const open = (needle) => openedState(state, start(needle));
+    const cases = [
+      ['[[media:m1', 'picture', (pos) => `mark cm-ref-source ${pos}-`],
+      ['| A', 'table', (pos) => `line cm-table-line @${pos}`],
+      ['```mermaid', 'diagram', (pos) => `line cm-code-line @${pos}`],
+      ['::: right', 'aligned', (pos) => `line cm-fence-line @${pos}`],
+      ['<details>', 'html', (pos) => `line cm-code-line @${pos}`],
+      ['<!-- pagebreak', 'pagebreak', (pos) => `line cm-pagebreak-line @${pos}`],
+      ['[[include', 'include', (pos) => `mark cm-ref-source ${pos}-`],
+    ];
+    for (const [needle, kind, source] of cases) {
+      // that block alone is open: the others stay drawn
+      expect(kindsOf(open(needle)), kind).toEqual(KINDS.filter((item) => item !== kind));
+      expect(drawn(open(needle)).some((word) => word.startsWith(source(start(needle)))), kind).toBe(true);
+    }
+    // the picture, open, is its reference as written, not a chip
+    expect(drawn(open('[[media:m1')).some((word) => word.startsWith('chip'))).toBe(false);
+  });
+
+  it('closes as soon as the cursor leaves it, whichever way it goes', () => {
+    const state = noteState(TEXT, { caseInfo: info });
+    const table = start('| A');
+    const open = openedState(state, table);
+    const hasTable = (given) => kindsOf(given).includes('table');
+    expect(hasTable(open)).toBe(false);
+    // still open on any line of it, at its first and last position
+    const end = table + '| A | B |\n| --- | --- |\n| 1 | 2 |'.length;
+    for (const pos of [table, table + 12, end]) expect(hasTable(open.update({ selection: EditorSelection.cursor(pos) }).state), String(pos)).toBe(false);
+    // gone the moment it is outside, and it stays closed on coming back to it
+    const left = open.update({ selection: EditorSelection.cursor(2) }).state;
+    expect(hasTable(left)).toBe(true);
+    expect(hasTable(left.update({ selection: EditorSelection.cursor(table) }).state)).toBe(true);
+    // before it and after it are outside it too
+    expect(hasTable(open.update({ selection: EditorSelection.cursor(table - 1) }).state)).toBe(true);
+    expect(hasTable(open.update({ selection: EditorSelection.cursor(end + 1) }).state)).toBe(true);
+  });
+
+  it('follows what is typed in it', () => {
+    const state = noteState(TEXT, { caseInfo: info });
+    const table = start('| A');
+    const typed = openedState(state, table).update({ changes: { from: table + 2, insert: 'xyz' }, selection: EditorSelection.cursor(table + 5), userEvent: 'input.type' }).state;
+    expect(typed.doc.toString()).toContain('| xyzA | B |');
+    expect(kindsOf(typed).includes('table')).toBe(false);
+    // a line added at its end is still in it
+    const last = typed.doc.lineAt(table + 30).to;
+    const grown = typed.update({ changes: { from: last, insert: '\n| 3 | 4 |' }, selection: EditorSelection.cursor(last + 5), userEvent: 'input' }).state;
+    expect(kindsOf(grown).includes('table')).toBe(false);
+    // and one typed at its start
+    const first = openedState(state, table).update({ changes: { from: table, insert: '\n' }, selection: EditorSelection.cursor(table), userEvent: 'input' }).state;
+    expect(kindsOf(first).includes('table')).toBe(false);
+  });
+
+  it('opens when the cursor is put inside it, as a jump or an Undo can', () => {
+    const state = noteState(TEXT, { caseInfo: info });
+    const inside = focusedState(state.update({ selection: EditorSelection.cursor(start('| 1 | 2 |') + 2) }).state);
+    expect(kindsOf(inside).includes('table')).toBe(false);
+    expect(drawn(inside)).toContain(`line cm-table-line @${start('| 1 | 2 |')}`);
+  });
+
+  it('leaves the marks of the line beside it as they were', () => {
+    const state = noteState('# Title\n\n[[media:m1|clip.jpg]]', { caseInfo: CASE });
+    expect(drawn(at(state, 3))).toContain('line cm-heading cm-h1 @0');
+    expect(drawn(at(state, 3)).some((word) => word.startsWith('hide'))).toBe(false);
+    expect(kindsOf(at(state, 3))).toEqual(['picture']);
+  });
+});
+
+describe('the two modes', () => {
+  it('start drawn, or raw when asked', () => {
+    expect(noteMode(noteState('# Title', { caseInfo: CASE }))).toBe('drawn');
+    expect(noteMode(noteState('# Title', { caseInfo: CASE, mode: 'markdown' }))).toBe('markdown');
+    expect(noteMode(noteState('# Title', { caseInfo: CASE, mode: 'anything' }))).toBe('drawn');
   });
 });

@@ -18,6 +18,10 @@
    * Your own page: through `oncover` where a Look is shown, else here, beside the
    * note. The picture picker offers the app's logo, the analyst's and their
    * signature beside the case's pictures (`lib/notes/reportParts.js`).
+   *
+   * The page is shown drawn or as the raw Markdown, one choice for every editor of
+   * the browser (`lib/notes/noteMode.svelte.js`): a toggle ends the toolbar, and
+   * Ctrl+Shift+M switches it from anywhere in the editor.
    */
   import { onDestroy, onMount, untrack } from 'svelte';
   import { Compartment, EditorState } from '@codemirror/state';
@@ -36,11 +40,12 @@
   import { uploadedImage } from '../lib/notes/syntax.js';
   import { BUILT_IN_PICTURES, builtInLine } from '../lib/notes/reportParts.js';
   import { ownCover, readLook, writeLook } from '../lib/notes/look.js';
+  import { noteMode } from '../lib/notes/noteMode.svelte.js';
   import { differing, editNote, takeBack } from '../lib/notes/noteDoc.svelte.js';
   import { offerWriter } from '../lib/notes/noteDock.svelte.js';
   import {
     captionAt, heldRange, holdRange, insertAtCursor, insertCover, insertInclude, jumpToLine, noteExtensions, placeText, releaseRange,
-    resizePicture, setLinePrefix, setNoteCase, takeBackRange, toggleWrap,
+    resizePicture, setLinePrefix, setNoteCase, setNoteMode, takeBackRange, toggleWrap,
   } from '../lib/notes/liveMarkdown.js';
   import { startCompletion } from '@codemirror/autocomplete';
   import Icon from './Icon.svelte';
@@ -145,7 +150,7 @@
       parent: host,
       state: EditorState.create({
         doc: doc?.text ?? '',
-        extensions: noteExtensions({ handlers, placeholder, readOnly, editable, template }),
+        extensions: noteExtensions({ handlers, placeholder, readOnly, editable, template, mode: noteMode.mode }),
       }),
     });
     view.dispatch({ effects: setNoteCase.of({ caseId, entities, redirects, notes, identity }) });
@@ -176,6 +181,18 @@
     const locked = readOnly;
     if (view) view.dispatch({ effects: editable.reconfigure([EditorState.readOnly.of(locked), EditorView.editable.of(!locked)]) });
   });
+  // drawn or raw Markdown: switched in place, the text, the cursor and the history stay
+  $effect(() => {
+    const mode = noteMode.mode;
+    if (view) setNoteMode(view, mode);
+  });
+
+  /** Ctrl+Shift+M switches the page, from the note or from its toolbar. */
+  function modeKey(event) {
+    if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.altKey || event.key.toLowerCase() !== 'm') return;
+    event.preventDefault();
+    noteMode.toggle();
+  }
   $effect(() => {
     if (!where || !doc) return;
     return offerWriter(where, (text) => arrive(text));
@@ -371,7 +388,8 @@
   }
 </script>
 
-<div class="note-editor" class:compact>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="note-editor" class:compact onkeydown={modeKey}>
   <div class="toolbar" role="toolbar" aria-label="Formatting" data-guide="notebook.toolbar">
     <button type="button" class="tb" title="Heading" aria-label="Heading" disabled={readOnly} onclick={() => prefix('## ')}>H</button>
     <button type="button" class="tb strong" title="Bold (Ctrl+B)" aria-label="Bold" disabled={readOnly} onclick={() => wrap('**')}>B</button>
@@ -386,6 +404,13 @@
     <button type="button" class="tb" title="Put in a case picture" aria-label="Put in a case picture" class:on={pictureOpen} disabled={readOnly}
       onclick={() => (pictureOpen = !pictureOpen)}><Icon name="image" size={14} /></button>
     <button type="button" class="tb" title="More: table, diagram, log entry… (/)" aria-label="More blocks" disabled={readOnly} onclick={slash}><Icon name="plus" size={14} /></button>
+    <span class="rule" role="presentation"></span>
+    <div class="mode" role="radiogroup" aria-label="How the page is shown">
+      <button type="button" class="tb" class:on={noteMode.mode === 'drawn'} role="radio" aria-checked={noteMode.mode === 'drawn'}
+        title="Drawn, as it reads (Ctrl+Shift+M switches)" aria-label="Drawn" onclick={() => noteMode.set('drawn')}><Icon name="eye" size={14} /></button>
+      <button type="button" class="tb code" class:on={noteMode.mode === 'markdown'} role="radio" aria-checked={noteMode.mode === 'markdown'}
+        title="Markdown, the raw text (Ctrl+Shift+M switches)" aria-label="Markdown" onclick={() => noteMode.set('markdown')}>&lt;/&gt;</button>
+    </div>
     {#if uploading}<span class="busy">Adding the image…</span>{/if}
     <input type="file" accept="image/*" hidden bind:this={picker} onchange={chosenFile} />
     {#if pictureOpen}
@@ -475,6 +500,8 @@
   .tb.on { color: var(--accent); border-color: var(--border); }
   .tb:disabled { opacity: 0.4; cursor: default; }
   .tb.strong { font-weight: 700; }
+  .tb.code { font-family: var(--font-mono); font-size: 11px; padding: 0 6px; }
+  .mode { display: inline-flex; gap: 2px; }
   .tb.em { font-style: italic; font-family: var(--font-sans); }
   .rule { width: 1px; height: 16px; background: var(--border); margin: 0 4px; }
   .busy { margin-left: 8px; color: var(--text-3); font-size: var(--fs-xs); }

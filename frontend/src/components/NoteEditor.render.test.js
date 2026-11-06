@@ -15,7 +15,7 @@ vi.mock('../lib/state.svelte.js', async (actual) => ({ ...(await actual()), relo
 const { prefs, uiState } = await import('../lib/state.svelte.js');
 const { openNote, resetOpenNotes, noteReady } = await import('../lib/notes/noteDoc.svelte.js');
 const { default: NoteEditor } = await import('./NoteEditor.svelte');
-const { registerOpener } = await import('../lib/notes/openers.js');
+const { registerOpener } = await import('../lib/notes/openers.js');const { noteMode } = await import('../lib/notes/noteMode.svelte.js');
 
 const ENTITIES = [
   { id: 'm1', type: 'media', label: 'Roof shot', attrs: { path: 'media/roof.png', kind: 'image' } },
@@ -56,6 +56,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  noteMode.set('drawn');
+  localStorage.clear();
   if (app) unmount(app);
   target?.remove();
   app = null;
@@ -230,5 +232,108 @@ describe('without the app\'s tools around it', () => {
     } finally {
       undo();
     }
+  });
+});
+
+describe('the two modes of the page', () => {
+  const choice = (name) => target.querySelector(`.mode button[aria-label="${name}"]`);
+  const mode = () => target.querySelector('.mode');
+  const withBlock = '[[media:m1|Roof shot]]\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n# Title';
+
+  it('ends the toolbar with Drawn and Markdown, Drawn picked until the analyst says otherwise', async () => {
+    await editor(withBlock);
+    expect(mode().getAttribute('role')).toBe('radiogroup');
+    expect([...mode().querySelectorAll('button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Drawn', 'Markdown']);
+    expect(choice('Drawn').getAttribute('aria-checked')).toBe('true');
+    expect(choice('Markdown').getAttribute('aria-checked')).toBe('false');
+    expect(choice('Drawn').querySelector('svg')).not.toBeNull();
+    expect(choice('Markdown').textContent.trim()).toBe('</>');
+    expect(choice('Drawn').title).toContain('Ctrl+Shift+M switches');
+    expect(choice('Markdown').title).toContain('Ctrl+Shift+M switches');
+    expect(target.querySelector('.cm-block-picture')).not.toBeNull();
+  });
+
+  it('shows the raw lines in Markdown and the drawn page again in Drawn, keeping the text', async () => {
+    const doc = await editor(withBlock);
+    choice('Markdown').click();
+    await settle();
+    expect(choice('Markdown').getAttribute('aria-checked')).toBe('true');
+    expect(target.querySelector('.cm-block')).toBeNull();
+    expect(view().textContent).toContain('[[media:m1|Roof shot]]');
+    expect(view().textContent).toContain('| --- | --- |');
+    expect(doc.text).toBe(withBlock);
+    choice('Drawn').click();
+    await settle();
+    expect(target.querySelector('.cm-block-picture')).not.toBeNull();
+    expect(target.querySelector('.cm-block-table')).not.toBeNull();
+    expect(doc.text).toBe(withBlock);
+  });
+
+  it('remembers the choice for this browser, and opens the next editor the same way', async () => {
+    await editor(withBlock);
+    choice('Markdown').click();
+    await settle();
+    expect(localStorage.getItem('azimut.noteMode')).toBe('markdown');
+    unmount(app);
+    target.remove();
+    resetOpenNotes();
+    await editor(withBlock);
+    expect(target.querySelector('.cm-block')).toBeNull();
+    expect(choice('Markdown').getAttribute('aria-checked')).toBe('true');
+    choice('Drawn').click();
+    await settle();
+    expect(localStorage.getItem('azimut.noteMode')).toBe('drawn');
+  });
+
+  it('is switched by Ctrl+Shift+M from the note and from the toolbar', async () => {
+    await editor(withBlock);
+    const press = (on, init = {}) => {
+      const event = new KeyboardEvent('keydown', { key: 'M', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true, ...init });
+      on.dispatchEvent(event);
+      return event;
+    };
+    expect(press(view()).defaultPrevented).toBe(true);
+    await settle();
+    expect(target.querySelector('.cm-block')).toBeNull();
+    expect(noteMode.mode).toBe('markdown');
+    press(target.querySelector('.toolbar'), { key: 'm' });
+    await settle();
+    expect(target.querySelector('.cm-block-picture')).not.toBeNull();
+    // Cmd+Shift+M on a Mac
+    press(view(), { ctrlKey: false, metaKey: true });
+    await settle();
+    expect(noteMode.mode).toBe('markdown');
+    // other chords are not its
+    press(view(), { shiftKey: false });
+    press(view(), { ctrlKey: false });
+    press(view(), { altKey: true });
+    press(view(), { key: 'n' });
+    expect(noteMode.mode).toBe('markdown');
+  });
+
+  it('switches every editor on the page together', async () => {
+    await editor(withBlock);
+    const other = document.createElement('div');
+    document.body.append(other);
+    const doc = openNote('c1', 'n2');
+    get.mockImplementation(async () => ({ text: withBlock }));
+    await noteReady(doc);
+    const second = mount(NoteEditor, { target: other, props: { doc, caseId: 'c1', entities: ENTITIES } });
+    await settle();
+    expect(other.querySelector('.cm-block-picture')).not.toBeNull();
+    choice('Markdown').click();
+    await settle();
+    expect(other.querySelector('.cm-block')).toBeNull();
+    expect(target.querySelector('.cm-block')).toBeNull();
+    unmount(second);
+    other.remove();
+  });
+
+  it('opens a block in the drawn page from its button, and the keyboard goes on from there', async () => {
+    await editor(withBlock);
+    target.querySelector('.cm-block-table [data-edit-source]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+    await settle();
+    expect(target.querySelector('.cm-block-table')).toBeNull();
+    expect(view().textContent).toContain('| --- | --- |');
   });
 });

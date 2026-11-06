@@ -128,10 +128,14 @@ describe('a picture that landed', () => {
 
   it('is brought into view and lit by Go to, rather than opened as text', () => {
     editor('Words\n\n[[media:m1|Roof]]\n\nMore');
-    view.focus();
+    // happy-dom answers focus() with a selection of its own, which a browser does not
+    view.focus = vi.fn();
     jumpToLine(view, 2);
     expect(view.contentDOM.querySelector('.cm-block-picture')).not.toBeNull();
     expect(view.contentDOM.querySelector('.cm-block-picture').classList.contains('cm-block-landed')).toBe(true);
+    // picked, not opened: the cursor is at its start and the picture stays drawn with its bar
+    expect(view.state.selection.main.head).toBe(7);
+    expect(view.contentDOM.querySelector('.cm-block-picture [data-size-bar]')).not.toBeNull();
   });
 
   it('still opens a line of words for Go to', () => {

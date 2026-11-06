@@ -7,6 +7,11 @@
  * callout is a coloured block. The marks come back on the line being edited, so
  * nothing is hidden from the person writing it.
  *
+ * A block (a picture, a table, a diagram, an aligned block, a page break, a chapter)
+ * stays drawn when it is clicked: the press picks it, and its source shows only once
+ * it is opened (a double press, Enter, or its </> button), until the cursor leaves.
+ * The page can also be switched off for the raw Markdown (`setNoteMode`).
+ *
  * Built on CodeMirror 6. Everything the page draws is worked out from the editor
  * state alone (`noteDecorations`), so it is tested without a browser.
  */
@@ -266,23 +271,41 @@ class HintWidget extends WidgetType {
 
 /** The note a report includes as a chapter: its number, name and first words. */
 class IncludeWidget extends WidgetType {
-  constructor(id, number, note) {
+  constructor(id, number, note, picked = false) {
     super();
     this.id = id;
     this.number = number;
     this.note = note;
+    this.picked = picked;
   }
 
-  eq(other) {
+  same(other) {
     return other.id === this.id && other.number === this.number && other.note?.title === this.note?.title
       && other.note?.excerpt === this.note?.excerpt;
   }
 
-  toDOM() {
+  eq(other) {
+    return this.same(other) && other.picked === this.picked;
+  }
+
+  /** Picked or not is the only change that keeps the card where it is. */
+  updateDOM(dom, _view, previous) {
+    if (!previous?.same(this)) return false;
+    markPicked(dom, this.picked);
+    return true;
+  }
+
+  toDOM(view) {
     const box = document.createElement('div');
     box.className = `cm-include${this.note ? '' : ' cm-include-missing'}`;
     box.dataset.include = this.id;
-    box.title = 'Click to edit the line';
+    box.title = 'Double-click to edit the line';
+    markPicked(box, this.picked);
+    box.addEventListener('dblclick', (event) => {
+      if (event.target.closest('button')) return;
+      event.preventDefault();
+      openBlockAt(view, box);
+    });
     const head = document.createElement('div');
     head.className = 'cm-include-head';
     const number = document.createElement('span');
@@ -292,6 +315,7 @@ class IncludeWidget extends WidgetType {
     actions.className = 'cm-include-actions';
     if (this.note) actions.append(includeButton('Open', 'cm-include-open', `Open ${this.note.title}`));
     actions.append(includeButton('Remove', 'cm-include-remove', 'Take this chapter out of the report'));
+    actions.append(sourceButton(view, box, 'cm-include-source'));
     head.append(number, actions);
     const title = document.createElement('div');
     title.className = 'cm-include-title';
@@ -329,9 +353,66 @@ function includeButton(text, className, title) {
   return button;
 }
 
-/** Where the PDF starts a new page: a dashed rule, named. Pressing it opens its line. */
+/** A block that is picked wears an outline; the class is all a widget changes when it is, so it is not drawn again. */
+function markPicked(dom, picked) {
+  dom.classList.toggle('cm-picked', Boolean(picked));
+}
+
+/**
+ * The `</>` button a drawn block wears, which opens its source. `node` is the
+ * block's own element. The press acts at once, as the rest of the block does; the
+ * keyboard's Enter and Space give a click without one.
+ */
+function sourceButton(view, node, className = 'cm-source-edit') {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  button.dataset.editSource = 'true';
+  // the glyph is drawn by the style, so a block's text stays the words it shows
+  button.title = 'Edit the source';
+  button.setAttribute('aria-label', 'Edit the source');
+  button.addEventListener('mousedown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openBlockAt(view, node);
+  });
+  button.addEventListener('click', (event) => {
+    if (event.detail === 0) openBlockAt(view, node);
+  });
+  return button;
+}
+
+/** What a small drawn rule does with the mouse: a press picks it, a double press or its </> button opens its line. */
+function blockMouse(view, box, picked) {
+  markPicked(box, picked);
+  box.addEventListener('mousedown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    view.dispatch({ selection: { anchor: view.posAtDOM(box) } });
+    view.focus();
+  });
+  box.addEventListener('dblclick', (event) => {
+    event.preventDefault();
+    openBlockAt(view, box);
+  });
+  box.append(sourceButton(view, box));
+}
+
+/** Where the PDF starts a new page: a dashed rule, named. Pressing it picks it, a double press opens its line. */
 class PageBreakWidget extends WidgetType {
-  eq() {
+  constructor(picked = false) {
+    super();
+    this.picked = picked;
+  }
+
+  eq(other) {
+    return other.picked === this.picked;
+  }
+
+  updateDOM(dom, _view, previous) {
+    if (!previous) return false;
+    markPicked(dom, this.picked);
     return true;
   }
 
@@ -339,16 +420,11 @@ class PageBreakWidget extends WidgetType {
     const box = document.createElement('div');
     box.className = 'cm-pagebreak';
     box.dataset.pagebreak = 'true';
-    box.title = 'The PDF starts a new page here. Click to edit the line';
+    box.title = 'The PDF starts a new page here. Double-click to edit the line';
     const label = document.createElement('span');
     label.textContent = 'Page break';
     box.append(label);
-    box.addEventListener('mousedown', (event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      view.dispatch({ selection: { anchor: view.posAtDOM(box) } });
-      view.focus();
-    });
+    blockMouse(view, box, this.picked);
     return box;
   }
 
@@ -361,9 +437,20 @@ class PageBreakWidget extends WidgetType {
   }
 }
 
-/** Where the analyst's own first page ends: a rule, named. Pressing it opens its line. */
+/** Where the analyst's own first page ends: a rule, named. Pressing it picks it, a double press opens its line. */
 class CoverRuleWidget extends WidgetType {
-  eq() {
+  constructor(picked = false) {
+    super();
+    this.picked = picked;
+  }
+
+  eq(other) {
+    return other.picked === this.picked;
+  }
+
+  updateDOM(dom, _view, previous) {
+    if (!previous) return false;
+    markPicked(dom, this.picked);
     return true;
   }
 
@@ -371,16 +458,11 @@ class CoverRuleWidget extends WidgetType {
     const box = document.createElement('div');
     box.className = 'cm-pagebreak cm-cover-rule';
     box.dataset.coverRule = 'true';
-    box.title = 'Above this line is page 1 when Look › Cover is Your own page. Click to edit the line';
+    box.title = 'Above this line is page 1 when Look › Cover is Your own page. Double-click to edit the line';
     const label = document.createElement('span');
     label.textContent = 'End of the cover page';
     box.append(label);
-    box.addEventListener('mousedown', (event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      view.dispatch({ selection: { anchor: view.posAtDOM(box) } });
-      view.focus();
-    });
+    blockMouse(view, box, this.picked);
     return box;
   }
 
@@ -602,7 +684,7 @@ function sizeBar(box, source, info, handlers = {}, blockAlign = '') {
       said.textContent = 'Source…';
       said.title = SOURCE_HELP.button;
       said.tabIndex = -1;
-      bar.insertBefore(said, bar.querySelector('[data-open]'));
+      bar.insertBefore(said, bar.querySelector('[data-open], [data-edit-source]'));
     }).catch(() => {});
   }
   return bar;
@@ -688,14 +770,18 @@ function cornerTag(name) {
   return tag;
 }
 
-/** A drawn block (a picture, a table, a diagram): pressing it puts the cursor back in its source. */
+/**
+ * A drawn block (a picture, a table, a diagram): pressing it picks it, and a double
+ * press, Enter or its </> button opens its source.
+ */
 class BlockWidget extends WidgetType {
   /**
    * `writable`: whether the note can be changed, which is when a picture offers its bar.
    * `align`: the place of the `::: center` or `::: right` block a picture stands in.
    * `pinned`: whether this aligned block is a corner of the cover, which it says.
+   * `picked`: whether the cursor stands at its start, which outlines it.
    */
-  constructor(kind, source, info, writable = false, align = '', pinned = false) {
+  constructor(kind, source, info, writable = false, align = '', pinned = false, picked = false) {
     super();
     this.kind = kind;
     this.source = source;
@@ -703,9 +789,11 @@ class BlockWidget extends WidgetType {
     this.writable = writable;
     this.align = align;
     this.pinned = pinned;
+    this.picked = picked;
   }
 
-  eq(other) {
+  /** Whether `other` draws the same, picked or not: a block that only gets picked keeps its element. */
+  same(other) {
     if (other.kind !== this.kind || other.source !== this.source || other.info.caseId !== this.info.caseId
       || other.writable !== this.writable || other.align !== this.align || other.pinned !== this.pinned
       || !sameIdentity(other.info.identity, this.info.identity)) return false;
@@ -713,6 +801,17 @@ class BlockWidget extends WidgetType {
     // new list. The block is drawn again only when what it shows changed, so a picture
     // keeps its open caption field and does not blink.
     return other.info.entities === this.info.entities || other.caseKey() === this.caseKey();
+  }
+
+  eq(other) {
+    return this.same(other) && other.picked === this.picked;
+  }
+
+  /** Picking and unpicking only moves the outline: the element, and what is open in it, stay. */
+  updateDOM(dom, _view, previous) {
+    if (!(previous instanceof BlockWidget) || !previous.same(this)) return false;
+    markPicked(dom, this.picked);
+    return true;
   }
 
   /** What the block draws from the case: the records and notes its source names, as they read now. */
@@ -729,7 +828,8 @@ class BlockWidget extends WidgetType {
     const box = document.createElement('div');
     box.className = `cm-block cm-block-${this.kind}${this.align ? ` cm-in-align-${this.align}` : ''}`;
     box.dataset.block = this.kind;
-    box.title = 'Click to edit';
+    box.title = 'Double-click to edit the source';
+    markPicked(box, this.picked);
     if (this.kind === 'diagram') drawDiagram(box, this.source);
     else {
       const { text, hints } = hintsMarked(this.source);
@@ -739,7 +839,11 @@ class BlockWidget extends WidgetType {
       if (this.pinned) box.prepend(cornerTag(BLOCK_OPEN.exec(this.source.split('\n', 1)[0])?.[1]));
     }
     const handlers = view.state.facet(noteHandlers);
-    if (this.kind === 'picture' && this.writable) box.append(sizeBar(box, this.source, this.info, handlers, this.align));
+    if (this.kind === 'picture' && this.writable) {
+      const bar = sizeBar(box, this.source, this.info, handlers, this.align);
+      bar.append(sourceButton(view, box, 'cm-size-edit'));
+      box.append(bar);
+    } else box.append(sourceButton(view, box));
     /** A button of the picture bar, pressed: a size, a place, the caption field, its tool or its source. */
     const press = (target) => {
       if (target.closest('[data-caption]')) {
@@ -772,14 +876,20 @@ class BlockWidget extends WidgetType {
         press(event.target);
         return;
       }
+      // a press picks the block, which stays drawn: its source opens on a double press, Enter or </>
       const at = view.posAtDOM(box);
       view.dispatch({ selection: { anchor: at } });
       view.focus();
     });
+    box.addEventListener('dblclick', (event) => {
+      if (event.target.closest('a, video, [data-entity-id], [data-size-bar], .picture-caption-field, .picture-source-field')) return;
+      event.preventDefault();
+      openBlockAt(view, box);
+    });
     // the mouse acts on the press, before focus moves; the keyboard's Enter and Space give a click
     box.addEventListener('click', (event) => {
       const button = event.target.closest('[data-size-bar] button');
-      if (event.detail !== 0 || !button) return;
+      if (event.detail !== 0 || !button || button.dataset.editSource) return;
       const from = view.state.doc.lineAt(view.posAtDOM(box)).from;
       if (button.dataset.open || button.dataset.source || button.dataset.posted) {
         press(button);
@@ -818,11 +928,14 @@ function drawDiagram(box, fence) {
   const source = fence.replace(/^\s*(```|~~~)[^\n]*\n/, '').replace(/\n\s*(```|~~~)\s*$/, '');
   const known = diagrams.get(source);
   const show = (result) => {
+    // the drawing replaces what the box held, but not the button that opens its source
+    const edit = box.querySelector('[data-edit-source]');
     if (result.svg) box.innerHTML = result.svg;
     else {
       box.classList.add('cm-block-failed');
       box.textContent = `Diagram not drawn: ${result.error}`;
     }
+    if (edit) box.append(edit);
   };
   if (known && !(known instanceof Promise)) {
     show(known);
@@ -911,6 +1024,221 @@ export function hintLineAt(state, pos) {
   return null;
 }
 
+// -- blocks: closed, picked, open ----------------------------------------------
+
+/**
+ * The block whose source is open, `{ from, to }` over its lines, or null. A drawn
+ * block shows its source only while it is open (or the cursor is inside it, which a
+ * jump or an Undo can do); the field follows the typing in it and lets go as soon as
+ * the cursor leaves.
+ */
+const setOpenBlock = StateEffect.define();
+const openBlock = StateField.define({
+  create: () => null,
+  update(value, transaction) {
+    let next = value;
+    if (next && transaction.docChanged) next = { from: transaction.changes.mapPos(next.from, -1), to: transaction.changes.mapPos(next.to, 1) };
+    for (const effect of transaction.effects) if (effect.is(setOpenBlock)) next = effect.value;
+    if (next) {
+      const { head } = transaction.newSelection.main;
+      if (head < next.from || head > next.to) next = null;
+    }
+    return next;
+  },
+});
+
+/** What kind of drawn block a widget is, or null for anything else. */
+function blockKind(widget) {
+  if (widget instanceof BlockWidget) return widget.kind;
+  if (widget instanceof IncludeWidget) return 'include';
+  if (widget instanceof PageBreakWidget) return 'pagebreak';
+  if (widget instanceof CoverRuleWidget) return 'cover';
+  return null;
+}
+
+/** The blocks drawn now that touch `from`–`to`, as `{ from, to, kind }`: the ones whose source is closed. */
+function blocksIn(state, from, to = from) {
+  const found = [];
+  state.field(drawn, false)?.between(Math.max(0, from), Math.min(state.doc.length, to), (start, end, value) => {
+    const kind = blockKind(value.spec.widget);
+    if (kind) found.push({ from: start, to: end, kind });
+  });
+  return found;
+}
+
+/** The block the cursor stands at the start of, which is picked, or null. */
+function pickedBlock(state) {
+  const range = state.selection.main;
+  return range.empty ? blocksIn(state, range.head).find((block) => block.from === range.head) ?? null : null;
+}
+
+/** A cursor at a block's start, inside it or at its end goes to its start, where it is picked. */
+function settle(state, pos) {
+  return blocksIn(state, pos).find((block) => block.from <= pos && pos <= block.to)?.from ?? pos;
+}
+
+/** Open the source of the block drawn at `at` (a position, or its element), the cursor at its start. */
+export function openBlockAt(view, at) {
+  const pos = typeof at === 'number' ? at : view.posAtDOM(at);
+  const block = blocksIn(view.state, pos).find((item) => item.from <= pos && pos <= item.to);
+  if (!block) return false;
+  view.dispatch({ selection: { anchor: block.from }, effects: setOpenBlock.of({ from: block.from, to: block.to }), scrollIntoView: true });
+  view.focus();
+  return true;
+}
+
+/** Take a drawn block out of the note, with the line break it stands on and a blank line it would leave doubled. */
+function removeBlock(view, block) {
+  const { doc } = view.state;
+  const first = doc.lineAt(block.from);
+  const last = doc.lineAt(block.to);
+  const before = first.number > 1 ? doc.line(first.number - 1) : null;
+  const after = last.number < doc.lines ? doc.line(last.number + 1) : null;
+  let from = first.from;
+  let to = last.to;
+  if (after) {
+    to = after.from;
+    if (!after.text.trim() && (!before || !before.text.trim())) to = after.number < doc.lines ? doc.line(after.number + 1).from : after.to;
+  } else if (before) from = before.to;
+  view.dispatch({ changes: { from, to }, selection: { anchor: from }, scrollIntoView: true, userEvent: 'delete' });
+}
+
+/** Enter on a picked block opens its source. */
+function openPicked(view) {
+  const block = pickedBlock(view.state);
+  return block ? openBlockAt(view, block.from) : false;
+}
+
+/**
+ * Tab on a picked block never indents its source: on a picture it goes to its bar, which
+ * is where it is sized and captioned, and on any other block it does nothing. (After
+ * Escape the editor lets Tab leave it, as it does everywhere.)
+ */
+function tabOnPicked(view) {
+  if (!pickedBlock(view.state)) return false;
+  view.dom.querySelector('.cm-picked [data-size-bar] button')?.focus({ preventScroll: true });
+  return true;
+}
+
+/** Escape inside an open block closes it, and picks it. */
+function closeOpen(view) {
+  const open = view.state.field(openBlock, false);
+  if (!open) return false;
+  view.dispatch({ selection: { anchor: open.from }, effects: setOpenBlock.of(null), scrollIntoView: true });
+  return true;
+}
+
+/**
+ * Backspace and Delete at a drawn block take the whole of it out in one step, which
+ * Undo brings back. Next to it, on a line of words, they pick it first: the words
+ * would otherwise be joined onto the block's source.
+ */
+function removeAtBlock(forward) {
+  return (view) => {
+    const { state } = view;
+    const range = state.selection.main;
+    if (!range.empty || state.readOnly) return false;
+    const block = blocksIn(state, range.head).find((item) => item.from === range.head || item.to === range.head);
+    if (block) {
+      removeBlock(view, block);
+      return true;
+    }
+    const line = state.doc.lineAt(range.head);
+    let next = null;
+    if (forward && range.head === line.to && line.text) next = blocksIn(state, range.head + 1).find((item) => item.from === range.head + 1);
+    if (!forward && range.head === line.from && line.text && line.number > 1) next = blocksIn(state, range.head - 1).find((item) => item.to === range.head - 1);
+    if (!next) return false;
+    view.dispatch({ selection: { anchor: next.from }, scrollIntoView: true });
+    return true;
+  };
+}
+
+/**
+ * Where the cursor goes to leave `block` forward or back: the start of the line after it, the end of the line before it,
+ * or, at the end of the note or its start, where it is.
+ */
+function past(state, block, forward) {
+  if (forward) return block.to < state.doc.length ? settle(state, block.to + 1) : block.to;
+  return block.from > 0 ? settle(state, block.from - 1) : block.from;
+}
+
+/** Left and Right step over a block as one unit: from the next line or the previous, onto it; off it, past it. */
+function stepAcross(forward) {
+  return (view) => {
+    const { state } = view;
+    const range = state.selection.main;
+    if (!range.empty) return false;
+    const picked = pickedBlock(state);
+    let target = null;
+    if (picked) target = past(state, picked, forward);
+    else if (!forward) {
+      const line = state.doc.lineAt(range.head);
+      if (range.head === line.from && line.number > 1) target = blocksIn(state, range.head - 1).find((item) => item.to === range.head - 1)?.from ?? null;
+    }
+    if (target === null) return false;
+    view.dispatch({ selection: { anchor: target }, scrollIntoView: true, userEvent: 'select' });
+    return true;
+  };
+}
+
+/**
+ * Up and Down step over a block as one unit too: off a picked block, to the line
+ * past it; onto one, wherever the vertical move would have put the cursor in it.
+ */
+function stepAlong(down) {
+  return (view) => {
+    const { state } = view;
+    const range = state.selection.main;
+    if (!range.empty) return false;
+    const picked = pickedBlock(state);
+    let target;
+    if (picked) {
+      target = past(state, picked, down);
+    } else {
+      try { target = view.moveVertically(range, down).head; } catch { return false; }
+      if (target === range.head || settle(state, target) === target) return false;
+      target = settle(state, target);
+    }
+    view.dispatch({ selection: { anchor: target }, scrollIntoView: true, userEvent: 'select' });
+    return true;
+  };
+}
+
+/**
+ * Typing at a drawn block starts a line after it and types there: the block's own
+ * line is never typed into, so a picture keeps its line whole.
+ */
+const typeNextToBlock = EditorView.inputHandler.of((view, from, to, text) => {
+  const { state } = view;
+  const range = state.selection.main;
+  if (state.readOnly || from !== to || !text || !range.empty || range.head !== from) return false;
+  const block = blocksIn(state, from).find((item) => item.from === from || item.to === from);
+  if (!block) return false;
+  if (!text.trim()) return true;
+  const last = state.doc.lineAt(block.to);
+  const following = last.number < state.doc.lines ? state.doc.line(last.number + 1) : null;
+  const insert = `\n\n${text}${following?.text.trim() ? '\n' : ''}`;
+  view.dispatch({
+    changes: { from: block.to, insert },
+    selection: { anchor: block.to + 2 + text.length },
+    scrollIntoView: true,
+    userEvent: 'input.type',
+  });
+  return true;
+});
+
+const blockKeys = Prec.high(keymap.of([
+  { key: 'Enter', run: openPicked },
+  { key: 'Tab', run: tabOnPicked, shift: tabOnPicked },
+  { key: 'Escape', run: closeOpen },
+  { key: 'Backspace', run: removeAtBlock(false) },
+  { key: 'Delete', run: removeAtBlock(true) },
+  { key: 'ArrowRight', run: stepAcross(true) },
+  { key: 'ArrowLeft', run: stepAcross(false) },
+  { key: 'ArrowDown', run: stepAlong(true) },
+  { key: 'ArrowUp', run: stepAlong(false) },
+]));
+
 /**
  * Everything the page draws for this state, as one set. Exported so the drawing is
  * tested on a state with no view.
@@ -918,6 +1246,18 @@ export function hintLineAt(state, pos) {
 export function noteDecorations(state) {
   const info = state.field(noteCase);
   const lines = editedLines(state);
+  const open = state.field(openBlock, false);
+  const heads = state.selection.ranges.map((range) => range.head);
+  /** Whether the lines `from`–`to` are in the block that was opened. */
+  const inOpen = (from, to) => Boolean(open && open.from <= state.doc.lineAt(Math.max(from, to)).to && state.doc.lineAt(from).from <= open.to);
+  /** Whether the block over `from`–`to` shows its source: it was opened, or the cursor is inside it (a jump, an Undo). */
+  const isOpen = (from, to) => {
+    const start = state.doc.lineAt(from).from;
+    const end = state.doc.lineAt(Math.max(from, to)).to;
+    return inOpen(from, to) || heads.some((head) => head > start && head < end);
+  };
+  const range = state.selection.main;
+  const pick = state.field(focused, false) && range.empty ? range.head : -1;
   const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
   const ranges = [];
   const covered = []; // [from, to] of blocks drawn whole; nothing else goes inside them
@@ -933,11 +1273,12 @@ export function noteDecorations(state) {
     const last = state.doc.lineAt(to);
     covered.push([first.from, last.to]);
     const align = kind === 'picture' ? blockAligns.get(first.number) ?? '' : '';
-    ranges.push(Decoration.replace({ widget: new BlockWidget(kind, state.doc.sliceString(first.from, last.to), info, !state.readOnly, align, pinned), block: true })
-      .range(first.from, last.to));
+    ranges.push(Decoration.replace({
+      widget: new BlockWidget(kind, state.doc.sliceString(first.from, last.to), info, !state.readOnly, align, pinned, first.from === pick), block: true,
+    }).range(first.from, last.to));
   };
 
-  // `::: center` … `:::`, the old Notebook's aligned text: drawn as it reads unless it is being edited.
+  // `::: center` … `:::`, the old Notebook's aligned text: drawn as it reads unless it is open.
   // A corner (`::: top-right`) reads as its side, and says so when it is in the note's own cover.
   let coverEnd; // the 1-based line of the cover rule, 0 without one: found when a corner asks
   for (let number = 1; number <= state.doc.lines; number += 1) {
@@ -950,7 +1291,7 @@ export function noteDecorations(state) {
     const to = state.doc.line(end).to;
     const side = blockSide(open[1]);
     if (side !== 'left') for (let inner = number + 1; inner < end; inner += 1) blockAligns.set(inner, side);
-    if (touches(lines, state, from, to)) {
+    if (isOpen(from, to)) {
       ranges.push(lineClass('cm-fence-line').range(from));
       ranges.push(lineClass('cm-fence-line').range(state.doc.line(end).from));
     } else {
@@ -970,7 +1311,7 @@ export function noteDecorations(state) {
       if (name === 'FencedCode') {
         code.push([from, to]);
         const opening = state.doc.sliceString(from, Math.min(to, state.doc.lineAt(from).to));
-        if (/^\s*(```|~~~)\s*mermaid\b/.test(opening) && !editing && state.doc.lineAt(to).text.trim().match(/^(```|~~~)$/)) {
+        if (/^\s*(```|~~~)\s*mermaid\b/.test(opening) && !isOpen(from, to) && state.doc.lineAt(to).text.trim().match(/^(```|~~~)$/)) {
           block('diagram', from, to);
           return false;
         }
@@ -988,7 +1329,7 @@ export function noteDecorations(state) {
         return false;
       }
       if (name === 'Table') {
-        if (!editing) {
+        if (!isOpen(from, to)) {
           block('table', from, to);
           return false;
         }
@@ -1006,18 +1347,18 @@ export function noteDecorations(state) {
       }
       if (name === 'CommentBlock' && pageBreakOn(state, from, to)) {
         const line = state.doc.lineAt(from);
-        if (editing) ranges.push(lineClass('cm-pagebreak-line').range(line.from));
-        else ranges.push(Decoration.replace({ widget: new PageBreakWidget(), block: true }).range(line.from, line.to));
+        if (isOpen(line.from, line.to)) ranges.push(lineClass('cm-pagebreak-line').range(line.from));
+        else ranges.push(Decoration.replace({ widget: new PageBreakWidget(line.from === pick), block: true }).range(line.from, line.to));
         return false;
       }
       if (name === 'CommentBlock' && coverRuleOn(state, from, to)) {
         const line = state.doc.lineAt(from);
-        if (editing) ranges.push(lineClass('cm-pagebreak-line').range(line.from));
-        else ranges.push(Decoration.replace({ widget: new CoverRuleWidget(), block: true }).range(line.from, line.to));
+        if (isOpen(line.from, line.to)) ranges.push(lineClass('cm-pagebreak-line').range(line.from));
+        else ranges.push(Decoration.replace({ widget: new CoverRuleWidget(line.from === pick), block: true }).range(line.from, line.to));
         return false;
       }
       if (name === 'HTMLBlock' || name === 'CommentBlock') {
-        if (!editing) block('html', from, to);
+        if (!isOpen(from, to)) block('html', from, to);
         else ranges.push(lineClass('cm-code-line').range(state.doc.lineAt(from).from));
         return false;
       }
@@ -1062,7 +1403,7 @@ export function noteDecorations(state) {
       }
       if (name === 'Image') {
         const line = state.doc.lineAt(from);
-        if (!editing && PICTURE_LINE.test(line.text)) {
+        if (!isOpen(line.from, line.to) && PICTURE_LINE.test(line.text)) {
           block('picture', line.from, line.to);
           return false;
         }
@@ -1123,24 +1464,26 @@ export function noteDecorations(state) {
   for (let number = 1; number <= state.doc.lines; number += 1) {
     const line = state.doc.line(number);
     if (inside(line.from) || !line.text) continue;
-    const editing = lines.has(number);
+    // the line being written in, or one of an open block, shows what it is made of
+    const editing = lines.has(number) || inOpen(line.from, line.to);
     const include = !inCode(line.from) && INCLUDE_LINE.exec(line.text);
     if (include) {
       // a chapter is its line, as the PDF reads it: whatever is around it
       chapters += 1;
       chapterLines.push(line);
-      if (editing) ranges.push(Decoration.mark({ class: 'cm-ref-source' }).range(line.from, line.to));
+      if (isOpen(line.from, line.to)) ranges.push(Decoration.mark({ class: 'cm-ref-source' }).range(line.from, line.to));
       else {
-        ranges.push(Decoration.replace({ widget: new IncludeWidget(include[1], chapters, includedNote(info, include[1])), block: true })
+        ranges.push(Decoration.replace({ widget: new IncludeWidget(include[1], chapters, includedNote(info, include[1]), line.from === pick), block: true })
           .range(line.from, line.to));
       }
       continue;
     }
-    const pictureLine = !editing && PICTURE_LINE.test(line.text) && line.text.includes('[[media:');
+    const pictureLine = !isOpen(line.from, line.to) && PICTURE_LINE.test(line.text) && line.text.includes('[[media:');
     if (pictureLine) {
       covered.push([line.from, line.to]);
-      ranges.push(Decoration.replace({ widget: new BlockWidget('picture', line.text, info, !state.readOnly, blockAligns.get(number) ?? ''), block: true })
-        .range(line.from, line.to));
+      ranges.push(Decoration.replace({
+        widget: new BlockWidget('picture', line.text, info, !state.readOnly, blockAligns.get(number) ?? '', false, line.from === pick), block: true,
+      }).range(line.from, line.to));
       continue;
     }
     const refs = findReferences(line.text, line.from).filter((ref) => !inCode(ref.from));
@@ -1180,15 +1523,18 @@ const drawn = StateField.define({
     const refocused = transaction.effects.some((effect) => effect.is(setFocused) || effect.is(setNoteCase));
     // a note read while it was locked gets its pictures' bars once it can be written
     const unlocked = transaction.startState.readOnly !== transaction.state.readOnly;
-    if (transaction.docChanged || transaction.selection || refocused || unlocked) return noteDecorations(transaction.state);
+    // a block opened or closed is drawn as source or as itself
+    const reopened = transaction.startState.field(openBlock, false) !== transaction.state.field(openBlock, false);
+    if (transaction.docChanged || transaction.selection || refocused || unlocked || reopened) return noteDecorations(transaction.state);
     return value;
   },
   provide: (field) => [
     EditorView.decorations.from(field),
-    // in a note, a line of guidance is one piece: the cursor steps over it and a delete takes it whole
-    EditorView.atomicRanges.of((view) => (view.state.facet(templateMode)
-      ? Decoration.none
-      : view.state.field(field).update({ filter: (_from, _to, value) => value.spec.widget instanceof HintWidget }))),
+    // a drawn block is one piece, so the cursor steps over it; in a note so is a line of guidance, and a delete takes it whole
+    EditorView.atomicRanges.of((view) => view.state.field(field).update({
+      filter: (_from, _to, value) => blockKind(value.spec.widget) !== null
+        || (!view.state.facet(templateMode) && value.spec.widget instanceof HintWidget),
+    })),
   ],
 });
 
@@ -1212,6 +1558,89 @@ export const typeOverHints = EditorState.transactionFilter.of((transaction) => {
     annotations: Transaction.userEvent.of(transaction.annotation(Transaction.userEvent) ?? 'input.type'),
   };
 });
+
+// -- the two modes ----------------------------------------------------------------
+
+/**
+ * The page is drawn, or it is the raw Markdown. Everything that draws or acts on a
+ * drawn block lives in one compartment, so switching reconfigures it: the text, the
+ * cursor, the history and the case stay where they are.
+ */
+const drawing = new Compartment();
+
+/** What the raw Markdown keeps of the page: headings, code, tables and guidance lines in their own type, nothing hidden or replaced. */
+function rawLines(state) {
+  const ranges = [];
+  const code = [];
+  const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
+  const eachLine = (from, to, className) => {
+    for (let number = state.doc.lineAt(from).number; number <= state.doc.lineAt(to).number; number += 1) {
+      ranges.push(lineClass(className).range(state.doc.line(number).from));
+    }
+  };
+  tree?.iterate({
+    enter(node) {
+      const { name, from, to } = node;
+      if (name === 'FencedCode' || name === 'CodeBlock') {
+        code.push([from, to]);
+        eachLine(from, to, 'cm-code-line');
+        return false;
+      }
+      if (name === 'Table') {
+        eachLine(from, to, 'cm-table-line');
+        return false;
+      }
+      if (/^ATXHeading[1-6]$/.test(name)) eachLine(from, from, `cm-heading cm-h${name.slice(-1)}`);
+      else if (name === 'SetextHeading1' || name === 'SetextHeading2') eachLine(from, from, `cm-heading cm-h${name.slice(-1)}`);
+      return undefined;
+    },
+  });
+  for (let number = 1; number <= state.doc.lines; number += 1) {
+    const line = state.doc.line(number);
+    if (!line.text || code.some(([from, to]) => line.from >= from && line.from < to)) continue;
+    if (HINT_LINE.test(line.text)) ranges.push(lineClass('cm-hint-line').range(line.from));
+    else if (PAGE_BREAK_LINE.test(line.text) || COVER_LINE.test(line.text)) ranges.push(lineClass('cm-pagebreak-line').range(line.from));
+  }
+  return Decoration.set(ranges, true);
+}
+
+const rawField = StateField.define({
+  create: (state) => rawLines(state),
+  update: (value, transaction) => (transaction.docChanged ? rawLines(transaction.state) : value),
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+const rawHighlight = HighlightStyle.define([
+  { tag: tags.strong, fontWeight: '650' },
+  { tag: tags.emphasis, fontStyle: 'italic' },
+  { tag: tags.strikethrough, textDecoration: 'line-through' },
+  { tag: tags.link, color: 'var(--info)' },
+]);
+
+/** While a block is picked the editor wears a class, which puts the cursor away: the outline says where it is. */
+const pickedClass = EditorView.editorAttributes.compute(['selection', focused, openBlock, drawn], (state) => (
+  state.field(focused, false) && pickedBlock(state) ? { class: 'cm-block-picking' } : {}
+));
+
+const drawnMode = [openBlock, drawn, typeOverHints, typeNextToBlock, pickedClass, blockKeys];
+const rawMode = [rawField, syntaxHighlighting(rawHighlight)];
+
+/** `drawn` or `markdown`: how the page is shown now. */
+export function noteMode(state) {
+  return state.field(drawn, false) ? 'drawn' : 'markdown';
+}
+
+/**
+ * Show the page drawn or as raw Markdown. The cursor and the selection are the
+ * document's, so they stay; the scroll is held to the line at the top of the page.
+ * Answers whether it changed.
+ */
+export function setNoteMode(view, mode) {
+  const next = mode === 'markdown' ? 'markdown' : 'drawn';
+  if (noteMode(view.state) === next) return false;
+  view.dispatch({ effects: [drawing.reconfigure(next === 'markdown' ? rawMode : drawnMode), view.scrollSnapshot()] });
+  return true;
+}
 
 // -- writing ------------------------------------------------------------------
 
@@ -1300,17 +1729,27 @@ export function resizePicture(view, line, ref, changes) {
 
 /**
  * Put the cursor at the start of a line (0-based), and bring it into view. A line
- * holding a picture is brought into view and lit rather than opened, so the picture
- * stays drawn with its bar, which is where a picture is sized, captioned and sourced.
+ * holding a picture is picked, brought into view and lit rather than opened, so the
+ * picture stays drawn with its bar, which is where a picture is sized, captioned and
+ * sourced. A line inside another drawn block (a table row, a line of an aligned
+ * block) opens that block there.
  */
 export function jumpToLine(view, line) {
   const number = Math.min(view.state.doc.lines, Math.max(1, Number(line) + 1));
   const target = view.state.doc.line(number);
-  if (PICTURE_LINE.test(target.text)) {
+  const block = blocksIn(view.state, target.from, target.to).find((item) => item.from <= target.from && target.to <= item.to);
+  const picture = PICTURE_LINE.test(target.text);
+  if (block && picture) {
+    view.dispatch({ selection: { anchor: block.from } });
     lightLines(view, target.from, target.to);
+    view.focus();
     return;
   }
-  view.dispatch({ selection: { anchor: target.from }, effects: EditorView.scrollIntoView(target.from, { y: 'center' }) });
+  const effects = [EditorView.scrollIntoView(target.from, { y: 'center' })];
+  if (block) effects.push(setOpenBlock.of({ from: block.from, to: block.to }));
+  view.dispatch({ selection: { anchor: target.from }, effects });
+  // a picture's line, shown as text, is lit as a picture is
+  if (picture) lightLines(view, target.from, target.to);
   view.focus();
 }
 
@@ -1747,7 +2186,20 @@ const look = EditorView.theme({
   '.cm-coords-go': {
     border: 'none', background: 'none', color: 'var(--accent)', cursor: 'pointer', padding: '0 2px', font: 'inherit', lineHeight: '1',
   },
-  '.cm-block': { padding: '6px var(--note-gutter, 32px)', cursor: 'text' },
+  '.cm-block': { padding: '6px var(--note-gutter, 32px)', cursor: 'text', position: 'relative' },
+  // a drawn block that is picked (the cursor at its start) is outlined; pressing it again, Enter or its </> opens its source
+  '.cm-picked': { outline: '2px solid var(--accent)', outlineOffset: '-2px', borderRadius: '4px' },
+  '&.cm-block-picking .cm-cursorLayer': { visibility: 'hidden' },
+  '.cm-source-edit, .cm-size-edit, .cm-include-source': { fontFamily: 'var(--font-mono)', fontSize: '11px', lineHeight: '1' },
+  '.cm-source-edit::before, .cm-size-edit::before, .cm-include-source::before': { content: '"</>"' },
+  '.cm-source-edit': {
+    position: 'absolute', top: '6px', right: 'calc(var(--note-gutter, 32px) + 4px)', zIndex: '2', height: '22px', minWidth: '30px', padding: '0 6px',
+    border: '1px solid var(--border-strong)', borderRadius: '4px', background: 'var(--bg-1)', color: 'var(--text-2)', cursor: 'pointer',
+    boxShadow: 'var(--shadow-2)', opacity: '0', pointerEvents: 'none',
+  },
+  '.cm-block:hover > .cm-source-edit, .cm-picked > .cm-source-edit, .cm-source-edit:focus-visible': { opacity: '1', pointerEvents: 'auto' },
+  '.cm-source-edit:hover': { color: 'var(--text-1)', borderColor: 'var(--accent)' },
+  '.cm-include-actions button.cm-include-source': { fontFamily: 'var(--font-mono)' },
   '.cm-block img, .cm-block video': { maxWidth: '100%', borderRadius: '4px', display: 'block' },
   '.cm-block img.align-center, .cm-block video.align-center': { marginLeft: 'auto', marginRight: 'auto' },
   '.cm-block img.align-right, .cm-block video.align-right': { marginLeft: 'auto' },
@@ -1760,6 +2212,7 @@ const look = EditorView.theme({
   '.cm-block th, .cm-block td': { border: '1px solid var(--border-strong)', padding: '4px 10px', textAlign: 'left' },
   '.cm-block th': { background: 'var(--bg-2)' },
   '.cm-block-diagram': { background: '#fff', borderRadius: '4px', padding: '10px', margin: '4px var(--note-gutter, 32px)', overflowX: 'auto', color: '#202124' },
+  '.cm-block-diagram > .cm-source-edit': { right: '6px' },
   '.cm-block-diagram svg': { maxWidth: '100%', height: 'auto', display: 'block', margin: '0 auto' },
   '.cm-block-failed': { color: 'var(--danger)', background: 'var(--danger-soft)', fontSize: '0.9em' },
   '.cm-hint': {
@@ -1768,7 +2221,7 @@ const look = EditorView.theme({
   },
   '.cm-hint-line': { color: 'var(--text-3)', fontStyle: 'italic' },
   '.cm-include': {
-    margin: '6px var(--note-gutter, 32px)', padding: '8px 12px 10px', border: '1px solid var(--border)', borderLeft: '3px solid var(--accent)',
+    position: 'relative', margin: '6px var(--note-gutter, 32px)', padding: '8px 12px 10px', border: '1px solid var(--border)', borderLeft: '3px solid var(--accent)',
     borderRadius: '6px', background: 'var(--bg-2)', cursor: 'text', fontSize: '0.93em', lineHeight: '1.45',
   },
   '.cm-include:hover': { borderColor: 'var(--border-strong)', borderLeftColor: 'var(--accent)' },
@@ -1790,11 +2243,13 @@ const look = EditorView.theme({
     color: 'var(--text-2)', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical', overflow: 'hidden',
   },
   '.cm-pagebreak': {
-    display: 'flex', alignItems: 'center', gap: '10px', margin: '10px var(--note-gutter, 32px)', cursor: 'text',
+    position: 'relative', display: 'flex', alignItems: 'center', gap: '10px', margin: '10px var(--note-gutter, 32px)', cursor: 'text',
     color: 'var(--text-3)', fontFamily: 'var(--font-sans)', fontSize: '0.72em', letterSpacing: '0.06em', textTransform: 'uppercase',
   },
   '.cm-pagebreak::before, .cm-pagebreak::after': { content: '""', flex: '1', borderTop: '1px dashed var(--border-strong)' },
   '.cm-pagebreak:hover': { color: 'var(--text-2)' },
+  '.cm-pagebreak > .cm-source-edit': { top: '-6px', right: '0' },
+  '.cm-pagebreak:hover > .cm-source-edit, .cm-pagebreak.cm-picked > .cm-source-edit': { opacity: '1', pointerEvents: 'auto' },
   '.cm-pagebreak-line': { color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: '0.9em' },
   '.cm-cover-rule': { color: 'var(--accent)', margin: '14px var(--note-gutter, 32px)' },
   '.cm-cover-rule::before, .cm-cover-rule::after': { borderTop: '1px solid color-mix(in srgb, var(--accent) 55%, transparent)' },
@@ -1817,7 +2272,7 @@ const look = EditorView.theme({
     background: 'var(--bg-1)', border: '1px solid var(--border-strong)', borderRadius: '6px', boxShadow: 'var(--shadow-2)',
     fontFamily: 'var(--font-sans)', fontSize: '11px', lineHeight: '1', opacity: '0', pointerEvents: 'none',
   },
-  '.cm-block-picture:hover .cm-size-bar, .cm-size-bar:focus-within': { opacity: '1', pointerEvents: 'auto' },
+  '.cm-block-picture:hover .cm-size-bar, .cm-block-picture.cm-picked .cm-size-bar, .cm-size-bar:focus-within': { opacity: '1', pointerEvents: 'auto' },
   '.cm-size-bar button': {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '30px', height: '22px', padding: '0 6px',
     border: 'none', borderRadius: '4px', background: 'transparent', color: 'var(--text-2)', cursor: 'pointer', font: 'inherit',
@@ -1831,6 +2286,7 @@ const look = EditorView.theme({
   '.cm-size-bar button.cm-size-source, .cm-size-bar button.cm-size-open, .cm-size-bar button.cm-size-posted': { padding: '0 8px', whiteSpace: 'nowrap' },
   '.cm-size-bar button.cm-size-posted.kept': { color: 'var(--accent)' },
   '.cm-size-bar button.cm-size-open': { color: 'var(--accent)' },
+  '.cm-size-bar button.cm-size-edit': { marginLeft: '4px', minWidth: '28px', padding: '0 6px' },
   '.cm-landed': { background: 'color-mix(in srgb, var(--accent) 16%, transparent)', transition: 'background-color 0.6s ease-out' },
   '.cm-block.cm-block-landed': { background: 'color-mix(in srgb, var(--accent) 16%, transparent)', borderRadius: '4px', boxShadow: '0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent)' },
   '.cm-size-bar button:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
@@ -1868,9 +2324,10 @@ const look = EditorView.theme({
  * The extensions a note editor is made of. `handlers` are the editor's outside:
  * `open(entity)`, `note(id)`, `point(lat, lon)`, `picture()`, `upload()`,
  * `include()`, `image(file)`, `url(url, from, to)`, `media(paths, at)` and
- * `change(text)`. `template` writes a template rather than a note.
+ * `change(text)`. `template` writes a template rather than a note. `mode` is
+ * `drawn` or `markdown` (`setNoteMode` switches it later).
  */
-export function noteExtensions({ handlers = {}, placeholder = '', readOnly = false, editable, template = false } = {}) {
+export function noteExtensions({ handlers = {}, placeholder = '', readOnly = false, editable, template = false, mode = 'drawn' } = {}) {
   return [
     noteCase,
     focused,
@@ -1878,8 +2335,7 @@ export function noteExtensions({ handlers = {}, placeholder = '', readOnly = fal
     noteHandlers.of(handlers),
     spots,
     landed,
-    drawn,
-    typeOverHints,
+    drawing.of(mode === 'markdown' ? rawMode : drawnMode),
     history(),
     drawSelection(),
     dropCursor(),
@@ -1994,4 +2450,11 @@ export function noteState(text, { caseInfo, ...options } = {}) {
 /** Mark a state as being edited, for tests of what the line being edited shows. */
 export function focusedState(state) {
   return state.update({ effects: setFocused.of(true) }).state;
+}
+
+/** The state with the block drawn at `pos` open, the cursor at its start, for tests of what an open block shows. */
+export function openedState(state, pos) {
+  const block = blocksIn(state, pos).find((item) => item.from <= pos && pos <= item.to);
+  if (!block) return focusedState(state);
+  return state.update({ selection: { anchor: block.from }, effects: [setFocused.of(true), setOpenBlock.of({ from: block.from, to: block.to })] }).state;
 }

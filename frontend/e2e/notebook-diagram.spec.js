@@ -27,8 +27,10 @@ test('draws a mermaid fence in the note, offline', async ({ page }) => {
   await expect(diagram).toBeVisible();
   await expect(diagram.getByText('Confirmed')).toBeVisible();
   await expect(page.locator('.cm-block-failed')).toHaveCount(0);
-  // the cursor in the fence brings its source back to edit
+  // a press picks it and leaves it drawn; a double press opens its source to edit
   await page.locator('.cm-block-diagram').click();
+  await expect(page.locator('.cm-block-diagram.cm-picked svg')).toBeVisible();
+  await page.locator('.cm-block-diagram').dblclick();
   await expect(page.locator('.cm-block-diagram')).toHaveCount(0);
   await expect(page.locator('.cm-content')).toContainText('flowchart LR');
 
