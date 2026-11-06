@@ -66,6 +66,7 @@ export const INSPECT_HELP = {
   sceneEnd: 'End the scene at the frame on screen (Shift+S)',
   sceneRemove: 'Remove this scene',
   sceneProof: 'Open the proof of this scene in Geo Proof',
+  sceneMakeProof: 'Make the proof of this scene in Geo Proof, from its frames',
   shotScene: 'Keep this shot as a scene to geolocate',
   addMark: 'Mark where the video is (M)',
   markLabel: 'What happens here',

@@ -127,4 +127,30 @@ describe('a scene\'s time, open', () => {
     edit.activate(7);
     expect(edit.active).toBe(1);
   });
+
+  it('takes the frame on screen as a start or an end, giving the whole video a moment there', () => {
+    const edit = new SceneEdit(clip);
+    edit.begin(proof([], [12]));
+    edit.here('start', now(20));
+    expect(edit.result).toEqual({ moments: [{ start: 20, end: null }] });
+    edit.here('end', now(24));
+    expect(edit.result).toEqual({ moments: [{ start: 20, end: 24.04 }] });
+  });
+
+  it('nudges either end a frame or a second, and answers the frame that shows it', () => {
+    const edit = new SceneEdit(clip);
+    edit.begin(proof([{ start: 10, end: 12 }]));
+    expect(edit.nudge('start', 1)).toBeCloseTo(10.04, 9);
+    expect(edit.start).toBeCloseTo(10.04, 9);
+    // the end is shown by the frame before it, the last one inside the passage
+    expect(edit.nudge('end', -1, true)).toBeCloseTo(10.96, 9);
+    expect(edit.end).toBeCloseTo(11, 9);
+    // an end cannot cross its start
+    edit.setEnd(10.08);
+    expect(edit.nudge('end', -1, true)).toBeNull();
+    expect(edit.end).toBeCloseTo(10.08, 9);
+    edit.setKind('whole');
+    expect(edit.nudge('start', 1)).toBeNull();
+  });
 });
+

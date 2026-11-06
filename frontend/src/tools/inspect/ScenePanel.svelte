@@ -1,10 +1,9 @@
 <script>
   import { onDestroy } from 'svelte';
   import Icon from '../../components/Icon.svelte';
+  import SceneTimeEditor from '../../components/SceneTimeEditor.svelte';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
-  import {
-    SCENE_LABEL_MAX, MAX_MOMENTS, isWholeVideo, parseClock, scenePassage, sceneTime, sceneTitle,
-  } from '../../lib/scenes.js';
+  import { SCENE_LABEL_MAX, isWholeVideo, scenePassage, sceneTime, sceneTitle } from '../../lib/scenes.js';
 
   // The scenes of the clip, in a drawer docked beside the video: it narrows the
   // picture rather than covering it, and leaves the whole bar under both. It lists
@@ -14,8 +13,10 @@
   // Pressing a scene's time goes there and opens its time in the row (`edit`, a
   // `lib/sceneEdit.svelte.js` the tool owns): the whole video, or moments, each an
   // instant or a passage, typed, taken from the frame on screen, or dragged on the
-  // bar. A proof may hold several moments, a draft one. A press on the player hands
-  // the keys back to it, so S and the arrows act on the frame, not on a field.
+  // bar (`components/SceneTimeEditor`, which Geo Proof opens too). A proof may hold
+  // several moments, a draft one. A press on the player hands the keys back to it,
+  // so S and the arrows act on the frame, not on a field. A scene still to prove is
+  // made into one from its row: Geo Proof opens on it.
   let {
     scenes = [],
     edit = null,
@@ -25,6 +26,7 @@
     onend,
     onremove,
     onopenproof,
+    onmakeproof,
     onedit,
     onhere,
     onkind,
@@ -56,32 +58,23 @@
     if (edit?.scene) onleave?.();
   });
 
-  function fieldKey(e, which, index) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      onapply?.();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      oncancel?.();
-    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-      e.preventDefault();
-      onnudge?.(which, e.key === 'ArrowUp' ? 1 : -1, e.shiftKey, index);
-    }
-  }
-
-  // A field that opens in hand is picked, so typing replaces it.
-  function picked(node, inHand) {
-    if (inHand) {
-      node.focus();
-      node.select();
-    }
-  }
-
-  const KINDS = [
-    { id: 'whole', label: 'Whole video', help: INSPECT_HELP.sceneWhole },
-    { id: 'instant', label: 'Instant', help: INSPECT_HELP.sceneInstant },
-    { id: 'passage', label: 'Passage', help: INSPECT_HELP.scenePassage },
-  ];
+  // What the editor says in Inspect, where S and the bar move the time too.
+  const HELP = {
+    whole: INSPECT_HELP.sceneWhole,
+    instant: INSPECT_HELP.sceneInstant,
+    passage: INSPECT_HELP.scenePassage,
+    field: INSPECT_HELP.sceneField,
+    startHere: INSPECT_HELP.sceneStartHere,
+    endHere: INSPECT_HELP.sceneEndHere,
+    add: INSPECT_HELP.momentAdd,
+    remove: INSPECT_HELP.momentRemove,
+    apply: INSPECT_HELP.sceneApply,
+  };
+  const tips = (sc) => ({
+    whole: `No timecode, the scene is about the whole video${sc.kind === 'proof' && sc.at?.length ? '. Its frames stay pinned on the bar' : ''}`,
+    instant: 'S sets it at the frame on screen, or drag it on the bar',
+    passage: 'S sets the start, Shift+S the end, or drag them on the bar',
+  });
 </script>
 
 <aside class="scene-panel" aria-label="Scenes" bind:this={node} data-scene-panel>
@@ -141,92 +134,29 @@
             {#if !inHand && !whole}
               <button class="btn btn-ghost btn-xs" onclick={() => onend?.(sc.id)} title={INSPECT_HELP.sceneEnd}>End here</button>
             {/if}
+            {#if !inHand}
+              <button class="btn btn-ghost btn-xs make" onclick={() => onmakeproof?.(sc)} title={INSPECT_HELP.sceneMakeProof} aria-label="Make the proof">
+                <Icon name="proof" size={12} />
+              </button>
+            {/if}
             <button class="btn btn-ghost btn-xs" onclick={() => onremove?.(sc.id)} title={INSPECT_HELP.sceneRemove} aria-label="Remove scene">
               <Icon name="x" size={12} />
             </button>
           {/if}
         </div>
         {#if inHand}
-          <div class="editor" role="group" aria-label="When the scene happens">
-            <div class="kinds" role="radiogroup" aria-label="Kind of time">
-              {#each KINDS as k (k.id)}
-                <button role="radio" aria-checked={edit.kind === k.id} class:on={edit.kind === k.id} onclick={() => onkind?.(k.id)} title={k.help}>{k.label}</button>
-              {/each}
-            </div>
-            {#if edit.whole}
-              <p class="tip">No timecode, the scene is about the whole video{sc.kind === 'proof' && sc.at?.length ? '. Its frames stay pinned on the bar' : ''}</p>
-            {:else}
-              {#each edit.moments as m, i (i)}
-                <div
-                  class="moment"
-                  class:held={edit.moments.length > 1 && i === edit.active}
-                  role="group"
-                  aria-label={`Moment ${i + 1}`}
-                  data-testid="scene-moment"
-                  onfocusin={() => edit.activate(i)}
-                  onpointerdown={() => edit.activate(i)}
-                >
-                  <label class="field">
-                    <span class="name">{m.passage ? 'Start' : 'At'}</span>
-                    <span class="field-with-act">
-                      <input
-                        class="input mono"
-                        value={m.startText}
-                        oninput={(e) => edit.typeStart(e.currentTarget.value, i)}
-                        onkeydown={(e) => fieldKey(e, 'start', i)}
-                        aria-label="Scene start"
-                        aria-invalid={parseClock(m.startText) == null}
-                        title={INSPECT_HELP.sceneField}
-                        spellcheck="false"
-                        autocomplete="off"
-                        use:picked={i === edit.active}
-                      />
-                      <button class="field-act here" onclick={() => onhere?.('start', i)} title={INSPECT_HELP.sceneStartHere}>Here</button>
-                    </span>
-                  </label>
-                  {#if m.passage}
-                    <label class="field">
-                      <span class="name">End</span>
-                      <span class="field-with-act">
-                        <input
-                          class="input mono"
-                          value={m.endText}
-                          oninput={(e) => edit.typeEnd(e.currentTarget.value, i)}
-                          onkeydown={(e) => fieldKey(e, 'end', i)}
-                          aria-label="Scene end"
-                          aria-invalid={parseClock(m.endText) == null}
-                          title={INSPECT_HELP.sceneField}
-                          spellcheck="false"
-                          autocomplete="off"
-                        />
-                        <button class="field-act here" onclick={() => onhere?.('end', i)} title={INSPECT_HELP.sceneEndHere}>Here</button>
-                      </span>
-                    </label>
-                  {:else}
-                    <span class="field"></span>
-                  {/if}
-                  {#if edit.moments.length > 1}
-                    <button class="drop" onclick={() => edit.remove(i)} title={INSPECT_HELP.momentRemove} aria-label="Remove this moment">
-                      <Icon name="x" size={11} />
-                    </button>
-                  {/if}
-                </div>
-              {/each}
-              {#if edit.many && edit.moments.length < MAX_MOMENTS}
-                <button class="btn btn-ghost btn-xs another" onclick={() => onaddmoment?.()} title={INSPECT_HELP.momentAdd}>
-                  <Icon name="plus" size={11} /> Another moment
-                </button>
-              {/if}
-            {/if}
-            {#if edit.problem}
-              <p class="problem" role="alert">{edit.problem}</p>
-            {:else if !edit.whole}
-              <p class="tip">{edit.end != null ? 'S sets the start, Shift+S the end, or drag them on the bar' : 'S sets it at the frame on screen, or drag it on the bar'}</p>
-            {/if}
-            <div class="acts">
-              <button class="btn btn-ghost btn-xs" onclick={() => oncancel?.()}>Cancel</button>
-              <button class="btn btn-primary btn-xs" disabled={Boolean(edit.problem)} onclick={() => onapply?.()} title={INSPECT_HELP.sceneApply}>Apply</button>
-            </div>
+          <div class="in-row">
+            <SceneTimeEditor
+              {edit}
+              help={HELP}
+              tips={tips(sc)}
+              {onhere}
+              {onkind}
+              {onnudge}
+              {onaddmoment}
+              {onapply}
+              {oncancel}
+            />
           </div>
         {/if}
       </div>
@@ -401,103 +331,11 @@
     font-size: var(--fs-xs);
     color: var(--ok);
   }
+  .make:hover {
+    color: var(--accent);
+  }
   /* The scene's time, opened in its own row: indented past the swatch. */
-  .editor {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+  .in-row {
     padding: 0 8px 0 12px;
-  }
-  .kinds {
-    display: grid;
-    grid-template-columns: 1.3fr 1fr 1fr;
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    overflow: hidden;
-  }
-  .kinds button {
-    padding: 3px 0;
-    color: var(--text-2);
-    font-size: var(--fs-xs);
-  }
-  .kinds button + button {
-    border-left: 1px solid var(--border);
-  }
-  .kinds button:hover:not(.on) {
-    color: var(--text-1);
-    background: var(--bg-2);
-  }
-  .kinds button.on {
-    background: var(--accent);
-    color: var(--accent-text);
-  }
-  /* One moment: its start, its end when it is a passage, and its removal. */
-  .moment {
-    display: grid;
-    grid-template-columns: 1fr 1fr auto;
-    align-items: end;
-    gap: 6px;
-    padding-left: 6px;
-    border-left: 2px solid transparent;
-  }
-  .moment.held {
-    border-left-color: var(--scene);
-  }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-  }
-  .name {
-    color: var(--text-3);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-  .field .input {
-    padding: 3px 6px;
-    font-size: var(--fs-xs);
-  }
-  .field .input[aria-invalid='true'] {
-    color: var(--danger);
-  }
-  .here {
-    width: auto;
-    padding: 0 7px;
-    font-size: 11px;
-  }
-  .drop {
-    display: inline-grid;
-    place-items: center;
-    width: 20px;
-    height: 26px;
-    border-radius: var(--r-sm);
-    color: var(--text-3);
-  }
-  .drop:hover {
-    color: var(--text-1);
-    background: var(--bg-2);
-  }
-  .another {
-    align-self: flex-start;
-  }
-  .problem,
-  .tip {
-    margin: 0;
-    font-size: 11px;
-    line-height: 1.35;
-  }
-  .problem {
-    color: var(--danger);
-  }
-  .tip {
-    color: var(--text-3);
-  }
-  .acts {
-    display: flex;
-    justify-content: flex-end;
-    gap: 4px;
   }
 </style>

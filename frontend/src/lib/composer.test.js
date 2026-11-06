@@ -428,6 +428,15 @@ describe('toSpec — persistence of layout', () => {
     expect(toSpec({ title: 'T', panels: [], shapes: [], scene })).not.toHaveProperty('scene');
   });
 
+  it('writes the scene badge only when asked, so a proof that never asked saves as it did', () => {
+    const plain = toSpec({ title: 'T', panels: [], shapes: [] });
+    expect(plain).not.toHaveProperty('sceneBadge');
+    expect(toSpec({ title: 'T', panels: [], shapes: [], sceneBadge: false })).toEqual(plain);
+    expect(toSpec({ title: 'T', panels: [], shapes: [], sceneBadge: true }).sceneBadge).toBe(true);
+    // a house style says nothing about it: it is the proof's own choice
+    expect(templateFromProof({ panels: [], sceneBadge: true })).not.toHaveProperty('sceneBadge');
+  });
+
   it('stores a blank footer as null so the automatic attribution shows', () => {
     const proof = { title: 'T', footer: '   ', panels: [], shapes: [] };
     expect(toSpec(proof).footer).toBeNull();

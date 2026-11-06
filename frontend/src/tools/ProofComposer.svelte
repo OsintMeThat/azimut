@@ -42,6 +42,12 @@
   import ImportProofDialog from './proof/ImportProofDialog.svelte';
   import PointMapDialog from './proof/PointMapDialog.svelte';
   import PanelCategories from './proof/PanelCategories.svelte';
+  import SceneBlock from './proof/SceneBlock.svelte';
+  import { ProofScene } from './proof/proofScene.svelte.js';
+  import { panelFrames, readHandoff, sceneBadges, sceneColor } from '../lib/proofScene.js';
+  import { PROOF_SCENE_HELP } from '../lib/proofSceneHelp.js';
+  import { frameSaveName, sourceStem } from '../lib/inspect.js';
+  import { preciseClock } from '../lib/inspectPlayer.js';
   import { bindPanelPointerLifecycle, createCanvasRenderGate,
   discardDraft,
 } from './proof/canvasLifecycle.js';
@@ -181,6 +187,7 @@
     footerCoords: false, // whether the plate prints the proof's points
     footerText: true, // whether the plate prints its credit line
     footerCredits: false, // whether the panels' imagery credits follow that line
+    sceneBadge: false, // whether the panels cut from the proof's video print the scene's time
     captionSize: CAPTION_SIZE, legendSize: LEGEND_SIZE, footerSize: FOOTER_SIZE, footer: '',
     footerEnabled: true, // false → no footer line at all
     footerColor: null, // null → auto from the background
@@ -387,6 +394,85 @@
     return found;
   });
 
+  // ---- the scene: where in its video the proof happens ------------------------------
+  // Read off the panels Inspect cut from a video, unless the proof states it
+  // (`lib/proofScene.js`). It is shown and stated in the side column (SceneBlock), and
+  // written through its own route, never with a save (proof/proofScene.svelte.js).
+  const sceneFrames = $derived(panelFrames(proof.panels, new Map(caseMedia.map((one) => [one.path, one]))));
+  const scene = new ProofScene({
+    api,
+    toast,
+    where: () => ({ caseId: caseState.current?.id ?? null, name: savedName }),
+    frames: () => sceneFrames,
+    // a time printed on the picture is a picture the saved one no longer is
+    onstated: () => {
+      if (proof.sceneBadge) dirty = true;
+    },
+  });
+  // The badge each panel of the proof's video prints, when asked: part of the picture.
+  const badges = $derived(sceneBadges(proof.sceneBadge, sceneFrames, scene.star, scene.moments));
+  // The scene's colour on Inspect's bar, read when its player opens on the proof's video.
+  const sceneVideo = $derived(scene.view?.video ?? null);
+  let sceneHue = $state(undefined);
+  $effect(() => {
+    const video = sceneVideo, id = caseState.current?.id, name = savedName, draft = scene.stated?.draft ?? null;
+    if (!video || !id) return;
+    let live = true;
+    api.get(`/api/cases/${id}/scenes?video=${encodeURIComponent(video)}`)
+      .then((res) => { if (live) sceneHue = sceneColor(res?.scenes, { proof: name, draft }); })
+      .catch(() => {});
+    return () => { live = false; };
+  });
+
+  /** A panel's ▶ on the canvas: its video's player, on its frame. */
+  function playPanelScene(frame) {
+    if (frame.video !== scene.star) scene.leaveTime();
+    scene.show(frame.video, { at: frame.time });
+  }
+
+  /** Add this frame: the frame on the player saved to the case as Inspect saves one, then a panel. */
+  async function addSceneFrame(video, time) {
+    const c = caseState.current;
+    if (!c || scene.adding) return;
+    scene.adding = true;
+    try {
+      const title = caseMedia.find((one) => one.path === video)?.title;
+      const res = await api.post(`/api/cases/${c.id}/inspect/save-frames`, {
+        items: [{ path: video, time, label: frameSaveName(sourceStem({ path: video, title }), time) }],
+      });
+      const path = res?.saved?.[0]?.item?.path;
+      if (!path) throw new Error('the case did not keep it');
+      await refreshCaseMedia(c.id);
+      await addPanelsFromPaths([path]);
+      toast(`Frame at ${preciseClock(time)} added as a panel`, 'ok', 2600);
+    } catch (e) {
+      toast(`The frame could not be added: ${e.message}`, 'danger');
+    } finally {
+      scene.adding = false;
+    }
+  }
+
+  /**
+   * Make the proof of a scene kept in Inspect: a new proof of its frames, in order,
+   * named after it, its time held for the first save, and its player running.
+   */
+  async function makeSceneProof(handoff) {
+    const made = readHandoff(handoff);
+    if (!made || !(await mayLeave())) return;
+    resetDoc();
+    proofStarted = true;
+    settlePlace('proof', place(), { navigate: true });
+    if (made.title) proof.title = made.title;
+    scene.hold(made.scene);
+    // the frames were filed a moment ago, so the case's media is read again first
+    await readCaseMedia(caseState.current.id);
+    await addPanelsFromPaths(made.panels);
+    dirty = true;
+    anchorHistory();
+    scene.show(made.scene.video, { play: true });
+    requestAnimationFrame(fit);
+  }
+
   // Panels whose media was deleted: the image already drawn stays on the canvas,
   // but the panel is flagged so a re-save is not silently building on a ghost.
   const gonePanels = $derived(
@@ -541,6 +627,7 @@
     proof.footerCoords = spec.footerCoords === true;
     proof.footerText = spec.footerText !== false;
     proof.footerCredits = spec.footerCredits === true;
+    proof.sceneBadge = spec.sceneBadge === true;
     proof.sources = statedSources(spec.sources ?? spec.source ?? null);
     proof.when = typeof spec.when === 'string' ? spec.when : '';
     proof.whenZone = typeof spec.whenZone === 'string' && spec.whenZone ? spec.whenZone : null;
@@ -630,7 +717,7 @@
 
   // ---- konva ------------------------------------------------------------------
   let containerEl = $state();
-  let stage, docLayer, uiLayer, transformer, cropHandles, endHandles, guideGroup, panelCtrls;
+  let stage, docLayer, uiLayer, transformer, cropHandles, endHandles, guideGroup, panelCtrls, scenePlays;
   let rotateKnob;
   let landingGuide; // the outline of where a dragged mark will belong
   let canvasRenderGate;
@@ -700,6 +787,8 @@
     uiLayer.add(endHandles);
     panelCtrls = new Konva.Group();
     uiLayer.add(panelCtrls);
+    scenePlays = new Konva.Group({ name: 'scene-plays' });
+    uiLayer.add(scenePlays);
     landingGuide = new Konva.Group({ listening: false });
     uiLayer.add(landingGuide);
 
@@ -821,6 +910,15 @@
     }
   });
 
+  // consume a "make the proof" handoff from a scene of Inspect
+  $effect(() => {
+    if (uiState.tool === 'proof' && uiState.proofScene && caseState.current) {
+      const handoff = uiState.proofScene;
+      uiState.proofScene = null;
+      untrack(() => makeSceneProof(handoff));
+    }
+  });
+
   // ---- leaving a proof that holds unsaved changes --------------------------
   // Opening another proof, from the list, the sidebar or Back, asks first when this
   // one has changes not saved, so nothing is dropped without the analyst saying so.
@@ -903,6 +1001,8 @@
       // the plate prints these when asked, and printing them changes its height:
       // both have to reach the rebuild, or the picture lags a line behind
       proof.footerCoords, proof.footerText, proof.footerCredits, proof.points,
+      // the scene's badges are drawn on the picture, so a change of time redraws it
+      [...badges],
       proof.bg, proof.space,
       proof.layout,
       proof.panelDirection,
@@ -921,6 +1021,8 @@
     selectedSig;
     guide;
     tool;
+    sceneFrames;
+    scene.star;
     if (stage) canvasRenderGate?.requestUi();
   });
 
@@ -1037,6 +1139,7 @@
     proof.footerCoords = false;
     proof.footerText = true;
     proof.footerCredits = false;
+    proof.sceneBadge = false;
     proof.footerColor = null;
     proof.captionColor = null;
     proof.footerAlign = 'left';
@@ -1062,6 +1165,7 @@
     dirty = false;
     imgCache.clear();
     pasteAssets.clear();
+    scene.reset();
     anchorHistory();
   }
 
@@ -1899,6 +2003,7 @@
       y: (containerEl.clientHeight - height * k) / 2,
     });
     viewFitted = true;
+    drawScenePlays();
     if (cropSurfaceId) drawCropHandles();
     stage.batchDraw();
   }
@@ -1920,6 +2025,7 @@
       drawGuide(width, height);
     }
     drawPanelMoveControls(boxesOf()); // keep the arrow bar screen-sized
+    drawScenePlays();
     if (cropSurfaceId) drawCropHandles();
     stage.batchDraw();
   }
@@ -2677,6 +2783,7 @@
       cropHandles.destroyChildren();
       endHandles.destroyChildren();
       panelCtrls.destroyChildren();
+      scenePlays.destroyChildren();
       guideGroup.destroyChildren();
       docLayer.batchDraw();
       uiLayer.batchDraw();
@@ -2739,6 +2846,8 @@
       });
       if (panel.img) group.add(surfaceImageNode(panel, image));
       if (panel.frame) group.add(frameNode(panel.frame, image, box.scale));
+      // the scene's time, when asked, under the marks: it belongs to the picture
+      if (badges.has(panel.id)) group.add(sceneBadgeNode(badges.get(panel.id), image, box.scale));
       for (const s of proof.shapes.filter((x) => x.panel === panel.id && !isPageMark(x))) {
         addSurfaceShape(group, s, box, panel);
       }
@@ -3058,6 +3167,7 @@
       panelCtrls.destroyChildren();
       cropHandles.destroyChildren();
     }
+    drawScenePlays(boxes);
     drawRotateKnob();
     drawGuide(width, height); // the tweet crop is a view, not a handle: it stays
     uiLayer.batchDraw();
@@ -3495,6 +3605,64 @@
       panelCtrls.add(g);
       bx += s + gap;
     }
+  }
+
+  /**
+   * A ▶ in the corner of each panel cut from a video, which opens the scene's player
+   * on its frame. Drawn with the handles, never on the page, so no export carries it,
+   * and only for Select: a drawing tool holds the canvas alone.
+   */
+  function drawScenePlays(boxes = boxesOf()) {
+    scenePlays.destroyChildren();
+    if (tool !== 'select' || cropSurfaceId) return;
+    const k = stage.scaleX();
+    const r = 11 / k;
+    for (const frame of sceneFrames) {
+      const box = boxes[proof.panels.findIndex((p) => p.id === frame.panel)];
+      if (!box) continue;
+      const g = new Konva.Group({ x: box.x + 8 / k + r, y: box.y + 8 / k + r, name: 'scene-play' });
+      g.add(new Konva.Circle({
+        radius: r, fill: 'rgba(16, 20, 28, 0.78)',
+        stroke: frame.video === scene.star ? ACCENT : 'rgba(255, 255, 255, 0.55)', strokeWidth: 1.5 / k,
+      }));
+      g.add(new Konva.Line({
+        points: [-3 / k, -5 / k, 5.5 / k, 0, -3 / k, 5 / k], closed: true, fill: TEXT_MAIN, listening: false,
+      }));
+      // swallow the press so the stage doesn't treat it as an empty-deselect
+      g.on('pointerdown', (e) => { e.cancelBubble = true; });
+      g.on('click tap', (e) => {
+        e.cancelBubble = true;
+        playPanelScene(frame);
+      });
+      g.on('pointerenter', () => { containerEl.style.cursor = 'pointer'; });
+      g.on('pointerleave', () => { containerEl.style.cursor = ''; });
+      scenePlays.add(g);
+    }
+  }
+
+  /**
+   * The scene's time on a panel of its video, bottom left on the picture: the clip's
+   * name and the moment the frame shows in. Sized in page pixels like any ink, a little
+   * over the captions it reads beside, so it reads the same on every panel and still
+   * once a post shrinks the picture; drawn on the page, so the export carries it.
+   */
+  function sceneBadgeNode(text, image, scale) {
+    const k = 1 / scale; // page pixels → the picture's own
+    const size = Math.round((proof.captionSize ?? CAPTION_SIZE) * 1.1);
+    const pad = Math.round(size * 0.45);
+    const margin = Math.round(size * 0.6);
+    const words = new Konva.Text({
+      x: pad * k, y: pad * k, text, fontSize: size * k, fontFamily: proofFace(),
+      fill: '#ffffff', wrap: 'none', ellipsis: true, listening: false,
+    });
+    const most = image[0] - 2 * (margin + pad) * k;
+    if (words.width() > most) words.width(Math.max(0, most));
+    const w = words.width() + 2 * pad * k;
+    const h = words.height() + 2 * pad * k;
+    const badge = new Konva.Group({ x: margin * k, y: image[1] - margin * k - h, name: 'scene-badge', listening: false });
+    badge.add(new Konva.Rect({ width: w, height: h, cornerRadius: 4 * k, fill: 'rgba(0, 0, 0, 0.62)' }));
+    badge.add(words);
+    return badge;
   }
 
   /**
@@ -5524,6 +5692,8 @@
       proof.title = result.title;
       dirty = false;
       savedSnapshot = docSnapshot();
+      // the time a proof never saved was holding goes in now, through its own route
+      if (scene.held) await scene.flush();
       await reloadCase();
       toast(`Proof saved: ${result.png}`, 'ok');
       void readKin(c.id, result.id, result.name);
@@ -5659,6 +5829,10 @@
     proof.footerCoords = spec.footerCoords === true;
     proof.footerText = spec.footerText !== false;
     proof.footerCredits = spec.footerCredits === true;
+    proof.sceneBadge = spec.sceneBadge === true;
+    // What the proof states about its video, read as the spec holds it; never sent back
+    // with a save (lib/composer.toSpec), only through its own route.
+    scene.load(spec.scene);
     proof.sources = statedSources(spec.sources ?? spec.source ?? null);
     // Both are completed off the entity on the way out of the API, so a date or a
     // sentence edited from Details opens here as the case's answer rather than as
@@ -6143,9 +6317,14 @@
    *  invisible everywhere else until a reload.
    */
   async function refreshCaseMedia(caseId) {
+    await readCaseMedia(caseId);
+    await reloadCase();
+  }
+
+  /** The composer's own two readings of the case's media, read again. */
+  async function readCaseMedia(caseId) {
     caseMedia = await api.get(`/api/cases/${caseId}/media`).catch(() => caseMedia);
     presentPaths = new Set([...caseMedia.map((one) => one.path), ...presentPaths]);
-    await reloadCase();
   }
 
   function takeSourcePick() {
@@ -6648,6 +6827,13 @@
           {/if}
         </div>
 
+        <!-- Where in its video the proof happens: only for a proof built on one. -->
+        {#if scene.videos.length}
+          <div class="meta-field">
+            <SceneBlock {scene} caseId={caseState.current?.id} color={sceneHue} onaddframe={addSceneFrame} />
+          </div>
+        {/if}
+
         <ProofLayersPanel
           {proof}
           {collapsed}
@@ -6736,6 +6922,20 @@
                 bind:value={proof.legendSize} oninput={() => (dirty = true)} />
               <span class="size-val">{proof.legendSize}</span>
             </div>
+            {#if scene.videos.length}
+              <!-- Printed on the picture, like the coordinates below, so asked for. -->
+              <label class="sig-check" title={PROOF_SCENE_HELP.badge}>
+                <input
+                  type="checkbox"
+                  checked={proof.sceneBadge === true}
+                  onchange={(e) => { proof.sceneBadge = e.currentTarget.checked; dirty = true; }}
+                />
+                <span>Scene time on the picture</span>
+              </label>
+              {#if proof.sceneBadge && !scene.moments.length}
+                <div class="adv-hint">The proof is about the whole video, which has no time to print.</div>
+              {/if}
+            {/if}
             <label class="sig-check">
               <input
                 type="checkbox"

@@ -206,6 +206,37 @@ export class SceneEdit {
     this.active = Math.min(this.active > index ? this.active - 1 : this.active, this.moments.length - 1);
   }
 
+  /**
+   * The frame on screen as the start of a moment, or the end of that frame as its
+   * end. `now` is that frame, `{ start, end }`. The whole video gets a moment there.
+   */
+  here(which, now, index = this.active) {
+    if (this.whole) this.setKind('instant', now);
+    this.activate(index);
+    if (which === 'end') this.setEnd(now.end);
+    else this.setStart(now.start);
+  }
+
+  /**
+   * Move one end of a moment a frame, or a second, and answer the frame that now
+   * shows it, or null when it cannot move there.
+   */
+  nudge(which, direction, wholeSecond = false, index = this.active) {
+    this.activate(index);
+    const from = which === 'end' ? this.end : this.start;
+    if (from == null) return null;
+    const { fps } = this.clip();
+    const frame = frameDuration(fps);
+    const time = Math.max(0, snapToFrame(from + direction * (wholeSecond ? 1 : frame), fps));
+    if (which === 'start') {
+      this.setStart(time);
+      return time;
+    }
+    if (!(time > (this.start ?? 0))) return null;
+    this.setEnd(time);
+    return time - frame;
+  }
+
   #typed(text) {
     const time = parseClock(text);
     return time == null ? null : snapToFrame(time, this.clip().fps);

@@ -115,6 +115,18 @@ describe('the scenes drawer', () => {
     expect(handlers.onclose).toHaveBeenCalled();
   });
 
+  it('makes the proof of a scene still to prove, from its row', () => {
+    const onmakeproof = vi.fn();
+    const list = rows(render(ScenePanel, { scenes: SCENES(), onmakeproof }));
+    const make = list[2].querySelector('[aria-label="Make the proof"]');
+    expect(make.getAttribute('title')).toBe('Make the proof of this scene in Geo Proof, from its frames');
+    make.click();
+    expect(onmakeproof).toHaveBeenCalledWith(expect.objectContaining({ kind: 'draft', id: 'sc_1', start: 60 }));
+    // a scene about the whole video is made too; a proved one is already a proof
+    expect(list[0].querySelector('[aria-label="Make the proof"]')).not.toBeNull();
+    expect(list[3].querySelector('[aria-label="Make the proof"]')).toBeNull();
+  });
+
   it('opens a proved scene\'s proof, and offers nothing to remove it', () => {
     const onopenproof = vi.fn();
     const list = rows(render(ScenePanel, { scenes: SCENES(), onopenproof }));

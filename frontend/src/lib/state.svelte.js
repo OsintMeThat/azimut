@@ -292,7 +292,9 @@ export const uiState = $state({
   composeQueue: [], // media paths queued for the Proof Composer
   postProof: null, // proof spec handed to the Post Composer
   openProof: null, // proof name to load in the Proof Composer
-  proofScene: null, // { video, moments, draft, panels, label }: Inspect's Make the proof, a new proof of that scene
+  // A scene of Inspect to make a proof of: { video, moments, draft, panels, label },
+  // the panels its saved frames' paths. Geo Proof opens a new proof on it.
+  proofScene: null,
   openDraft: null, // draft name to load in the Post Composer
   openNotebook: null, // { noteId: string|null, line? }; null noteId opens case notes.md, `home` the Notebook's home
   openNoteTemplate: null, // note template id to edit in the Notebook, from Settings

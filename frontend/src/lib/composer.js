@@ -1368,6 +1368,9 @@ export function toSpec(proof) {
     // Whether the panels' imagery credits follow the credit line. Off unless asked:
     // every panel already carries its own, and the saved proof keeps them.
     footerCredits: proof.footerCredits === true,
+    // Whether the panels cut from the proof's video print its name and the scene's time.
+    // Written only when asked, so a proof that never asked saves exactly as it did.
+    ...(proof.sceneBadge === true ? { sceneBadge: true } : {}),
     // The addresses the proof states, empty → traced from the panels instead. Named
     // for the plural like the multi-parent key of a media's own origin (`sources`,
     // beside `from`), because it draws the same distinction: one of them, or several.

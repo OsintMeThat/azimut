@@ -1447,3 +1447,69 @@ describe('ProofComposer offers what is open to the Add event bar', () => {
     expect(source).toContain("onDestroy(() => withdrawNote('proof'))");
   });
 });
+
+describe('Proof Composer scene', () => {
+  it('shows the scene only for a proof built on a video, after the date', () => {
+    const markup = source.slice(source.indexOf('<aside class="side">'));
+    expect(markup).toContain('{#if scene.videos.length}');
+    expect(markup.indexOf('<SceneBlock')).toBeGreaterThan(markup.indexOf('id="proof-when"'));
+    expect(markup.indexOf('<SceneBlock')).toBeLessThan(markup.indexOf('<ProofLayersPanel'));
+    // and the switch that prints its time, for such a proof alone
+    const advanced = markup.slice(markup.indexOf('{#if advancedOpen}'));
+    expect(advanced.indexOf('Scene time on the picture')).toBeGreaterThan(advanced.indexOf('{#if scene.videos.length}'));
+    expect(advanced.indexOf('Scene time on the picture')).toBeLessThan(advanced.indexOf('<span>Show coordinates</span>'));
+    expect(render(ProofComposer).body).not.toContain('Scene');
+  });
+
+  it('never sends the scene with a save, and writes the held one after the first', () => {
+    const save = bodyOfFn('performSave');
+    expect(save).toContain('spec: toSpec(proof),');
+    expect(save).not.toMatch(/scene:/);
+    expect(save.indexOf('if (scene.held) await scene.flush();')).toBeGreaterThan(save.indexOf('savedName = result.name;'));
+  });
+
+  it('reads the stated scene on open and forgets it with the proof', () => {
+    expect(bodyOfFn('openProof')).toContain('scene.load(spec.scene);');
+    expect(bodyOfFn('resetDoc')).toContain('scene.reset();');
+    expect(bodyOfFn('resetDoc')).toContain('proof.sceneBadge = false;');
+    expect(bodyOfFn('applySnapshot')).toContain('proof.sceneBadge = spec.sceneBadge === true;');
+  });
+
+  it('draws the badge on the picture, so the export carries what the canvas shows', () => {
+    // the panel's group is on the page layer, which is what exportPng renders
+    expect(bodyOfFn('exportPng')).toContain('return docLayer.toDataURL(');
+    expect(bodyOfFn('rebuild')).toContain('if (badges.has(panel.id)) group.add(sceneBadgeNode(badges.get(panel.id), image, box.scale));');
+    expect(source).toContain('[...badges],');
+    expect(source).toContain('const badges = $derived(sceneBadges(proof.sceneBadge, sceneFrames, scene.star, scene.moments));');
+  });
+
+  it('puts a panel\'s ▶ with the handles, where no export reaches', () => {
+    expect(source).toContain('uiLayer.add(scenePlays);');
+    const plays = bodyOfFn('drawScenePlays');
+    expect(plays).toContain("if (tool !== 'select' || cropSurfaceId) return;");
+    expect(plays).toContain('scenePlays.add(g);');
+    expect(plays).not.toContain('docLayer');
+    expect(bodyOfFn('playPanelScene')).toContain('scene.show(frame.video, { at: frame.time });');
+  });
+
+  it('saves the player\'s frame as Inspect saves one, then adds it like the picker', () => {
+    const add = bodyOfFn('addSceneFrame');
+    expect(add).toContain('/inspect/save-frames`');
+    expect(add).toContain('items: [{ path: video, time, label: frameSaveName(sourceStem({ path: video, title }), time) }]');
+    expect(add).toContain('await refreshCaseMedia(c.id);');
+    expect(add).toContain('await addPanelsFromPaths([path]);');
+  });
+
+  it('makes the proof of a scene of Inspect: asks first, a new proof of its frames, its player running', () => {
+    expect(source).toContain('if (uiState.tool === \'proof\' && uiState.proofScene && caseState.current) {');
+    expect(source).toContain('uiState.proofScene = null;');
+    const make = bodyOfFn('makeSceneProof');
+    expect(make).toContain('if (!made || !(await mayLeave())) return;');
+    expect(make.indexOf('resetDoc();')).toBeLessThan(make.indexOf('await addPanelsFromPaths(made.panels);'));
+    expect(make).toContain('scene.hold(made.scene);');
+    expect(make).toContain('scene.show(made.scene.video, { play: true });');
+    // the label names the proof; the description is the analyst's sentence, left to write
+    expect(make).toContain('if (made.title) proof.title = made.title;');
+    expect(make).not.toContain('description');
+  });
+});
