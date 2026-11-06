@@ -261,9 +261,15 @@ def test_scenes_come_in_the_order_of_the_clip(client, tmp_path):
     # a scene about the whole video first, then the clip's order: a proof with no
     # moment of its own sits at the first frame it was built on
     assert [s.get("proof") or s.get("id") for s in scenes] == ["s_all", "Early", "s_mid", "s_flash", "Late"]
-    assert scenes[0] == {"kind": "draft", "id": "s_all", "start": None, "end": None, "label": "Which city?"}
+    assert scenes[0] == {
+        "kind": "draft", "video": video, "id": "s_all", "start": None, "end": None, "label": "Which city?",
+        "state": "todo", "captures": [], "abandoned": None,
+    }
     draft = scenes[2]
-    assert draft == {"kind": "draft", "id": "s_mid", "start": 1.8, "end": 2.4, "label": "Bridge?"}
+    assert draft == {
+        "kind": "draft", "video": video, "id": "s_mid", "start": 1.8, "end": 2.4, "label": "Bridge?",
+        "state": "todo", "captures": [], "abandoned": None,
+    }
 
 
 @needs_ffmpeg
@@ -652,7 +658,8 @@ def test_a_draft_comes_back_with_its_proof_in_the_trash_and_goes_with_it_restore
     deleted = client.delete(f"/api/cases/{cid}/proofs/Bridge")
     assert deleted.status_code == 200, deleted.text
     assert _scenes(client, cid, video)["scenes"] == [
-        {"kind": "draft", "id": "s2", "start": 2.0, "end": 3.5, "label": "Bridge?"},
+        {"kind": "draft", "video": video, "id": "s2", "start": 2.0, "end": 3.5, "label": "Bridge?",
+         "state": "todo", "captures": [], "abandoned": None},
     ]
 
     restored = client.post(f"/api/cases/{cid}/trash/{deleted.json()['trash']}/restore")

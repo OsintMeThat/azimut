@@ -536,7 +536,7 @@ def test_a_tilted_view_is_filed_with_its_tilt_and_the_relief_it_was_drawn_on(cli
     assert body["zoom"] == 13.63
     assert body["relief"] == {"source": "mapterhorn", "exaggeration": 1.0}
     # the relief's credit, and the notice the Copernicus DEM's licence asks of a picture drawn from it
-    assert "Relief © Mapterhorn, produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014" in body["attribution"]
+    assert "Relief © Mapterhorn (mapterhorn.com/attribution), produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014" in body["attribution"]
     assert body["attribution"].endswith("by the European Union and ESA; all rights reserved")
     assert "AWS" not in body["attribution"]
     assert "exaggerated" not in body["attribution"]
@@ -564,7 +564,7 @@ def test_a_tilted_view_drawn_partly_from_the_fallback_relief_credits_it(client):
         data={"lat": "46.5", "lon": "8.0", "zoom": "13", "provider": "esri-world-imagery",
               "pitch": "60", "relief_fallback": "true"},
     ).json()
-    assert "Relief © Mapterhorn, produced using Copernicus WorldDEM-30" in body["attribution"]
+    assert "Relief © Mapterhorn (mapterhorn.com/attribution), produced using Copernicus WorldDEM-30" in body["attribution"]
     # the fallback's licence page lists every source it requires, the EU-DEM among them
     assert " · Terrain Tiles, Mapzen and AWS Open Data: ArcticDEM terrain data" in body["attribution"]
     assert "European Union - EU-DEM layers" in body["attribution"]
