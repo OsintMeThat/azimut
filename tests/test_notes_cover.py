@@ -736,3 +736,10 @@ def test_a_note_s_bands_round_trip_through_its_look(client):
     kept = client.get(f"/api/cases/{cid}/notes/{note['id']}/look").json()["look"]
     assert kept["footer"] == {"left": "{organisation}", "center": "", "right": "Page {page} / {pages}"}
     assert "header" not in kept
+
+
+def test_a_picture_in_a_corner_takes_its_share_of_the_page_not_of_the_corner():
+    text = "::: top-right\n![Azimut](azimut:logo){width=40%}\n:::\n\n# {title}\n<!-- cover -->\nBody.\n"
+    cornered = render(text, the_look=own(style="report"))
+    flowing = render("![Azimut](azimut:logo){width=40%}\n", the_look=look(style="report"))
+    assert cornered.pictures[0].box[2] == pytest.approx(flowing.pictures[0].box[2], abs=0.005)

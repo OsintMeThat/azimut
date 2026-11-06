@@ -1539,6 +1539,8 @@ class _Builder:
         #: and whether the walk is drawing the note's own cover right now.
         self._covered = self.look.cover.on and not self.look.cover.own
         self._on_cover = False
+        #: The page's frame while a corner of the cover is drawn in half of it.
+        self._page_frame: float | None = None
         pdf.on_page = self._page_begins
         self._render = DECODED.begin()
         pdf.place_picture = lambda source, **options: self._picture(source, **options)
@@ -1682,10 +1684,14 @@ class _Builder:
         top = pdf.t_margin
         pdf.set_xy(pdf.l_margin, top)
         self._block_line = piece.line + block.line
-        with self._inset(*inner):
-            pdf.set_x(pdf.l_margin)
-            self._walk(block.tokens, block.start, block.align, stop=None)
-            self._end_entry()
+        self._page_frame = self._frame()
+        try:
+            with self._inset(*inner):
+                pdf.set_x(pdf.l_margin)
+                self._walk(block.tokens, block.start, block.align, stop=None)
+                self._end_entry()
+        finally:
+            self._page_frame = None
         if pdf.page != page:
             self._warn("A corner of your own cover page runs over its page.", piece.line + block.line, OTHER)
             return 0.0
@@ -2887,7 +2893,10 @@ class _Builder:
 
     def _frame(self) -> float:
         """The width a block may take: the plain page's fixed frame, as it always
-        was, or the room left between the current margins."""
+        was, or the room left between the current margins. In a corner of the cover a
+        picture's width is still a share of the page's, as the editor draws it."""
+        if self._page_frame is not None:
+            return self._page_frame
         return self.theme.frame if self.theme.plain else self.pdf.epw
 
     def _indent(self, amount: float) -> "_Indent":
