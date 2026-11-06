@@ -34,7 +34,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .. import __version__, errors, layout
 from ..engine import artifacts as artifact_engine
-from ..engine import exportdir, inspectwork, mapplates
+from ..engine import comparisons, exportdir, inspectwork, mapplates, snapshots
 from ..engine import media as media_engine
 from ..engine.sheets import replace_atomic
 from ..workspace import Case, CaseError
@@ -175,6 +175,9 @@ def _save(case: Case, title: str, rename_from: str | None, spec: dict[str, Any])
         case.update_entity(existing["id"], {"label": name, "attrs": attrs})
     else:
         case.add_entity(mapplates.TYPE, name, attrs=attrs, by=mapplates.PRODUCER)
+    if old_rel:
+        # the figures filed from the plate follow it to its new name
+        comparisons.follow_rename(case, old_rel, rel, mapplates.FIGURE_ATTR, "plate")
     if old_rel and not case_only(old, name):
         case.resolve_inside(old_rel).unlink(missing_ok=True)
     return {"name": name, "title": name, "spec_path": rel, "thumb": thumb}
@@ -492,3 +495,69 @@ async def export_plate(
         raise HTTPException(status_code=409, detail=f"could not write the export: {errors.explain(exc)}") from exc
     return {"file": path.name, "path": str(destination), "format": format}
 
+
+
+#: The words a figure's credits take at most, as the plate's face wrote them.
+FIGURE_CREDIT_MAX = 2000
+
+
+@router.post("/cases/{case_id}/map-plates/{name}/figure")
+async def file_figure(
+    case_id: str,
+    name: str,
+    frame: UploadFile = File(),
+    filename: str = Form(min_length=1, max_length=120),
+    kind: Literal["page", "sheet"] = Form(default="page"),
+    day: str = Form(default="", max_length=40),
+    step: str = Form(default="", max_length=64),
+    attribution: str = Form(default="", max_length=FIGURE_CREDIT_MAX),
+    reuse: bool = Form(default=False),
+) -> dict[str, Any]:
+    """File a picture of a saved plate in the case, for a note to show.
+
+    A page at print resolution, or the page on each of its days side by side (an
+    evolution sheet, what a printed report holds where a video cannot go). It is
+    an ordinary media file that says which plate, which day and which step it
+    shows, and the credits its face carries, so it can be hashed, cited and found
+    again, and the note can open the plate where it was taken. The same plate, day,
+    step and size are one figure, which a second press cites rather than files again.
+    """
+    case = get_case(case_id)
+    stem = slugify(name, mapplates.FALLBACK)
+    rel = layout.map_plate_rel(stem)
+    saved = _read(case, stem)
+    if saved is None or case.find_entity(attr="spec", value=rel) is None:
+        raise HTTPException(status_code=404, detail="save the plate before filing its pictures")
+    raw = await frame.read(mapplates.MAX_PAGE_BYTES + 1)
+    try:
+        page = mapplates.picture(raw, max_bytes=mapplates.MAX_PAGE_BYTES, max_pixels=mapplates.MAX_PAGE_PIXELS)
+    except mapplates.ExportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # What decides the pixels: the plate as saved, what it was read on, and how large it is drawn.
+    state_key = snapshots.view_key(mapplates.SOURCE_TYPE, plate=rel, spec=saved.get("spec"), shows=kind,
+                                   day=day, step=step, size=[page.width, page.height])
+    if reuse and (filed := snapshots.filed_view(case, state_key)) is not None:
+        return {"path": (filed.get("attrs") or {}).get("path"), "entity": filed["id"], "reused": True}
+    data = await run_in_threadpool(mapplates.png_bytes, page)
+    source: dict[str, Any] = {
+        "type": mapplates.SOURCE_TYPE,
+        "plate": rel,
+        "kind": kind,
+        "rendered_at": _now(),
+        # the plate's face carries its credits
+        "attribution_burned": True,
+        snapshots.VIEW_KEY: state_key,
+    }
+    attrs: dict[str, Any] = {mapplates.FIGURE_ATTR: rel, snapshots.VIEW_KEY: state_key}
+    if day:
+        source["day"] = attrs["plate_day"] = day
+    if step:
+        source["step"] = attrs["plate_step"] = step
+    if attribution.strip():
+        source["attribution"] = attribution.strip()
+    try:
+        filed_new = media_engine.import_rendered_bytes(case, data, filename, ".png", source, by=mapplates.PRODUCER,
+                                                       extra_attrs=attrs)
+    except (OSError, ValueError, CaseError) as exc:
+        raise HTTPException(status_code=409, detail=f"could not file the picture: {errors.explain(exc)}") from exc
+    return {"path": filed_new["item"]["path"], "entity": filed_new["entity"]["id"]}

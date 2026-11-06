@@ -115,6 +115,65 @@ def test_an_image_is_kept_only_under_a_saved_comparison(client):
     assert blink.status_code == 422
 
 
+def _evolution(*days, provider="esri-wayback"):
+    return json.dumps({"provider": provider, "days": [{"day": day, "exact": exact} for day, exact in days]})
+
+
+def test_an_evolution_sheet_is_kept_with_every_day_it_shows_and_cited_once(client):
+    from azimut.engine import notesources
+
+    cid = _case(client, "Kept sheet")
+    _save(client, cid, "Harbour reading")
+    shown = _evolution(("2021-05-03", False), ("2023-01-20", False), ("2024-05-03", True))
+    first = _keep(client, cid, "Harbour reading", imagery_a="2021-05-03", imagery_a_exact="false",
+                  imagery_b="2024-05-03", evolution=shown, reuse="true", filename="Harbour reading evolution")
+    assert first.status_code == 200, first.text
+    source = media.read_item(Case.open(cid), first.json()["path"])["source"]
+    assert source["evolution"]["provider"] == "esri-wayback" and len(source["evolution"]["days"]) == 3
+    # the same sheet put twice is one picture; another set of days is another
+    again = _keep(client, cid, "Harbour reading", imagery_a="2021-05-03", imagery_a_exact="false",
+                  imagery_b="2024-05-03", evolution=shown, reuse="true")
+    assert again.json()["reused"] is True and again.json()["entity"] == first.json()["entity"]
+    other = _keep(client, cid, "Harbour reading", imagery_a="2021-05-03", imagery_a_exact="false",
+                  imagery_b="2024-05-03", reuse="true", evolution=_evolution(("2021-05-03", False), ("2024-05-03", True)))
+    assert other.json().get("reused") is None
+    # the annex says whose imagery and every day, the estimated ones as estimates
+    credit = notesources.Reader(Case.open(cid)).entity(first.json()["entity"]).credit()
+    assert credit == notesources.Credit(
+        "Imagery", "Esri Wayback, about 3 May 2021, about 20 January 2023 and 3 May 2024")
+
+
+def test_a_long_evolution_is_credited_by_its_first_and_last_day(client):
+    from azimut.engine import notesources
+
+    cid = _case(client, "Long sheet")
+    _save(client, cid, "Harbour reading")
+    days = [(f"2024-{month:02d}-01", True) for month in range(1, 9)]
+    kept = _keep(client, cid, "Harbour reading", evolution=_evolution(*days, provider="sentinel2"),
+                 imagery_a="2024-01-01", imagery_b="2024-08-01")
+    credit = notesources.Reader(Case.open(cid)).entity(kept.json()["entity"]).credit()
+    assert credit.value == "Sentinel-2, 8 pictures, 1 January 2024 to 1 August 2024"
+
+
+@pytest.mark.parametrize("shown", [
+    "not json",
+    json.dumps({"provider": "esri-wayback", "days": [{"day": "2024-05-03"}]}),
+    json.dumps({"provider": "esri-wayback", "days": [{"day": "May 2024"}, {"day": "2024-06-01"}]}),
+    json.dumps({"provider": "", "days": [{"day": "2024-05-03"}, {"day": "2024-06-01"}]}),
+])
+def test_an_evolution_that_does_not_hold_is_refused(client, shown):
+    cid = _case(client, "Refused sheet")
+    _save(client, cid, "Harbour reading")
+    assert _keep(client, cid, "Harbour reading", evolution=shown).status_code == 422
+
+
+def test_an_evolution_is_a_still(client):
+    cid = _case(client, "Still sheet")
+    _save(client, cid, "Harbour reading")
+    both = _keep(client, cid, "Harbour reading", fmt="slide", evolution=_evolution(("2024-05-03", True), ("2024-06-01", True)))
+    assert both.status_code == 422
+
+
 def test_kept_images_follow_a_renamed_comparison_and_outlive_a_deleted_one(client):
     cid = _case(client, "Kept follow")
     _save(client, cid, "Harbour reading")

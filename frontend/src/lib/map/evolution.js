@@ -169,6 +169,19 @@ export function pictureLabel(archive, entry) {
 }
 
 /**
+ * The days an evolution sheet shows, as a note's annex credits them:
+ * `{ provider, days: [{ day, exact }] }`. A Wayback date is Esri's estimate (or only
+ * its release's), so never exact; a picture with no date stands for no day.
+ */
+export function evolutionDays(archive, entries) {
+  return {
+    provider: archive,
+    days: entries.filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(String(entry.date ?? '')))
+      .map((entry) => ({ day: entry.date, exact: archive !== WAYBACK_ID })),
+  };
+}
+
+/**
  * The ground an evolution shows, as a frame in CSS pixels: the view, or the
  * export frame at the view's scale, upright at the bearing it was drawn at.
  * Nothing needs to be on screen, since every picture is fetched for it.

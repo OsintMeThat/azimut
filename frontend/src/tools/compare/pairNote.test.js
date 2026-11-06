@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { nearestPlace, pairName, pairOffer } from './pairNote.js';
+import { nearestPlace, pairName, pairOffer, sheetOffer } from './pairNote.js';
 
 describe('a Compare pair put in a note', () => {
   const rows = [
@@ -35,3 +35,26 @@ describe('a Compare pair put in a note', () => {
     await expect(offer.put({})).rejects.toThrow('could not be kept');
   });
 });
+
+describe('an evolution sheet put in a note', () => {
+  it('keeps the pictures side by side at the page width, kept once', async () => {
+    const keep = vi.fn().mockResolvedValue({ entity: { id: 'e_sheet' }, label: 'Water tower, evolution 2021 to 2024', fresh: true });
+    const offer = sheetOffer({ keep, unsaved: () => false });
+    expect(offer).toMatchObject({ id: 'sheet', label: 'This evolution sheet', picture: true });
+    expect(offer.hint).toBe('Fetches the pictures and files them side by side, each dated');
+    const signal = new AbortController().signal;
+    expect(await offer.put({ signal })).toEqual({ text: '[[media:e_sheet|Water tower, evolution 2021 to 2024]]{width=100%}', filed: ['e_sheet'] });
+    expect(keep).toHaveBeenCalledWith({ signal });
+    keep.mockResolvedValue({ entity: { id: 'e_sheet' }, label: 'S', fresh: false });
+    expect((await offer.put({})).filed).toEqual([]);
+  });
+
+  it('says it saves the comparison first when it is not saved', () => {
+    expect(sheetOffer({ keep: vi.fn(), unsaved: () => true }).hint).toBe('Saves the comparison, then fetches and files the pictures side by side');
+  });
+
+  it('refuses with a sentence when the sheet could not be kept', async () => {
+    await expect(sheetOffer({ keep: async () => ({ entity: null }) }).put({})).rejects.toThrow('could not be kept');
+  });
+});
+

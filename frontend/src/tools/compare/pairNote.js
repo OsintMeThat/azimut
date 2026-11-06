@@ -74,3 +74,27 @@ export function pairOffer({ keep, unsaved = () => false }) {
     },
   };
 }
+
+/**
+ * The evolution sheet ticked in the export panel, offered to a pinned note: the
+ * pictures of the archive side by side, each dated, one still where a PDF cannot
+ * play a GIF. `keep()` draws it, files it (or finds it filed in this very state)
+ * and answers `{ entity, label, fresh }`.
+ */
+export function sheetOffer({ keep, unsaved = () => false }) {
+  return {
+    id: 'sheet',
+    label: 'This evolution sheet',
+    get hint() {
+      return unsaved() ? 'Saves the comparison, then fetches and files the pictures side by side' : 'Fetches the pictures and files them side by side, each dated';
+    },
+    icon: 'columns',
+    picture: true,
+    busy: 'Drawing the pictures…',
+    put: async ({ signal } = {}) => {
+      const { entity, label, fresh } = await keep({ signal });
+      if (!entity?.id) throw new Error('The sheet could not be kept in the case');
+      return { text: picturePut(entity, { label, width: '100%' }), filed: fresh ? [entity.id] : [] };
+    },
+  };
+}

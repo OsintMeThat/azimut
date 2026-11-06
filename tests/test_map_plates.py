@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from azimut import layout
 from azimut.engine import ffmpeg, mapplates
+from azimut.engine import media as media_engine
 from azimut.workspace import Case
 
 
@@ -995,3 +996,67 @@ def test_a_country_focus_stands_on_its_map_s_ground_and_a_template_leaves_it():
         mapplates.PlateSpec.model_validate({**spec, "elements": [spec["elements"][0], {**focus, "of": None}]})
     # the country is the case's place: a template keeps none
     assert [element["kind"] for element in mapplates.template_of(spec)["elements"]] == ["map"]
+
+
+# -- a page filed in the case, for a note to show -----------------------------------------
+
+
+def figure(client, owner, name="Situation", size=(400, 300), colour=(240, 240, 240), **form):
+    data = {"filename": "Situation, 2026-03-02", "day": "2026-03-02", "step": "step1", "attribution": "Esri, Maxar", **form}
+    return client.post(f"/api/cases/{owner}/map-plates/{name}/figure", data=data,
+                       files={"frame": ("page.png", io.BytesIO(png(size, colour)), "image/png")})
+
+
+def test_a_page_is_filed_in_the_case_as_a_picture_that_names_its_plate_day_and_step(client, owner):
+    save(client, owner)
+    filed = figure(client, owner)
+    assert filed.status_code == 200, filed.text
+    case = Case.open(owner)
+    entity = case.find_entity(attr="path", value=filed.json()["path"])
+    assert entity["type"] == "media" and entity["id"] == filed.json()["entity"]
+    attrs = entity["attrs"]
+    assert (attrs["plate_spec"], attrs["plate_day"], attrs["plate_step"]) == (".mapplates/Situation.json", "2026-03-02", "step1")
+    source = media_engine.read_item(case, filed.json()["path"])["source"]
+    assert (source["type"], source["plate"], source["kind"], source["attribution"]) == (
+        "map-plate", ".mapplates/Situation.json", "page", "Esri, Maxar")
+    # it is a real PNG of the page the browser drew
+    assert Image.open(case.resolve_inside(filed.json()["path"])).size == (400, 300)
+
+
+def test_the_same_page_put_twice_is_one_figure_and_a_changed_plate_is_another(client, owner):
+    save(client, owner)
+    first = figure(client, owner, reuse="true")
+    again = figure(client, owner, reuse="true")
+    assert again.json()["reused"] is True and again.json()["entity"] == first.json()["entity"]
+    # another day, another step, another size, each is another picture
+    assert figure(client, owner, reuse="true", day="2026-03-03").json().get("reused") is None
+    assert figure(client, owner, reuse="true", step="step2").json().get("reused") is None
+    assert figure(client, owner, reuse="true", size=(800, 600)).json().get("reused") is None
+    # the plate edited since is another picture of it
+    save(client, owner, spec=plate_spec(page={"paper": "a3"}), rename_from="Situation")
+    assert figure(client, owner, reuse="true").json().get("reused") is None
+    # without asking to reuse, a figure is filed every time
+    assert figure(client, owner).json().get("reused") is None
+
+
+def test_a_figure_is_refused_for_a_plate_that_is_not_saved_or_a_picture_that_is_not_one(client, owner):
+    assert figure(client, owner, name="Nothing").status_code == 404
+    save(client, owner)
+    refused = client.post(f"/api/cases/{owner}/map-plates/Situation/figure", data={"filename": "x"},
+                          files={"frame": ("page.png", io.BytesIO(b"not a picture"), "image/png")})
+    assert refused.status_code == 422
+
+
+def test_a_figure_follows_its_plate_to_a_new_name_and_names_what_it_shows_in_the_annex(client, owner):
+    from azimut.engine import notesources
+
+    save(client, owner)
+    filed = figure(client, owner)
+    renamed = save(client, owner, title="Front, October", rename_from="Situation")
+    case = Case.open(owner)
+    entity = case.find_entity(attr="path", value=filed.json()["path"])
+    assert entity["attrs"]["plate_spec"] == layout.map_plate_rel(renamed.json()["name"])
+    source = notesources.Reader(case).entity(entity["id"])
+    assert source.noun == "Map plate" and source.arrival == "made"
+    assert source.credit() == notesources.Credit("Map", "Esri, Maxar")
+    assert "Esri, Maxar" in notesources.details(source)

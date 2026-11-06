@@ -6,6 +6,7 @@ import { captureOpener } from './satellite/capture.opener.js';
 import { pairOpener } from './compare/pair.opener.js';
 import { collageOpener, frameOpener } from './inspect/frame.opener.js';
 import { pinOpener } from './detect/pin.opener.js';
+import { plateOpener } from './plate/plate.opener.js';
 import { takeSeek } from './inspect/handoff.js';
 import { takeCandidate } from './detect/handoff.js';
 
@@ -19,7 +20,7 @@ vi.mock('../lib/api.js', () => ({ api: { get: vi.fn() } }));
 beforeEach(() => {
   resetOpeners();
   for (const [tool, opener] of [['proof', proofOpener], ['satellite', captureOpener], ['compare', pairOpener],
-    ['inspect', frameOpener], ['collage', collageOpener], ['detect', pinOpener]]) registerOpener(tool, opener);
+    ['inspect', frameOpener], ['collage', collageOpener], ['detect', pinOpener], ['plate', plateOpener]]) registerOpener(tool, opener);
   uiState.tool = 'notebook';
 });
 
@@ -75,6 +76,18 @@ describe('opening a note\'s picture where it was made', () => {
     found.open();
     expect(uiState.openAnalyzer).toBe('runs-a1b2c3d4e5f6');
     expect(takeCandidate('a1b2c3d4e5f6')).toBe('0-3');
+  });
+
+  it('opens a plate\'s page on the plate, at the day and the step it shows', () => {
+    const found = openerFor(media({ plate_spec: '.mapplates/Port strike.json', plate_day: '2026-03-02', plate_step: 'st_2' }));
+    expect(found.label).toBe('Open in Map plate');
+    found.open();
+    expect(uiState.openPlate).toBe('Port strike');
+    expect(uiState.openPlateAt).toEqual({ day: '2026-03-02', step: 'st_2' });
+    expect(uiState.tool).toBe('plate');
+    // the days side by side show no one day: the plate opens as it was left
+    openerFor(media({ plate_spec: '.mapplates/Port strike.json' })).open();
+    expect(uiState.openPlateAt).toBe(null);
   });
 
   it('offers nothing for a picture no tool can reopen', () => {

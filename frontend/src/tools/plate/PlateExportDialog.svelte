@@ -17,6 +17,7 @@
   import Modal from '../../components/Modal.svelte';
   import { momentLabel } from '../../lib/map/layerHistory.js';
   import { QUALITIES, VIDEO_SIDES, videoSize } from '../../lib/plate/exportPlate.js';
+  import PutInNote from '../../components/PutInNote.svelte';
 
   let {
     /** The moments the plate's tracked layers change at, sorted; empty when it has none. */
@@ -42,6 +43,9 @@
     /** How long a day holds that says nothing of its own, in seconds, and the change of it. */
     hold = 1,
     onhold = null,
+    /** What the pinned note is offered of the page, and of the days picked side by side (`(days) => offer`), from `plateNote.js`. */
+    notePage = null,
+    noteSheet = null,
     onclose,
   } = $props();
 
@@ -60,7 +64,7 @@
 
   /** A played plate goes through two days at least, or through its steps. */
   const playsOn = (id) => (id === 'sheet' ? moments.length >= 2 : moments.length >= 2 || stepped);
-  const offered = (id) => id === 'png' || id === 'pdf' || playsOn(id);
+  const offered = (id) => id === 'png' || id === 'pdf' || (FORMATS.some(([format]) => format === id) && playsOn(id));
   let format = $state(offered(kept.format) ? kept.format : 'png');
   let quality = $state(QUALITIES[kept.quality] ? kept.quality : 'print');
   let pixels = $state(PIXELS.some(([value]) => value === kept.pixels) ? kept.pixels : 0);
@@ -176,6 +180,8 @@
   <p class="note">Written to the folder saved for views, like the analysis plates.</p>
   <div class="acts">
     {#if oncopy && format === 'png'}<button class="btn" disabled={busy} title="The page as a picture, to paste elsewhere" onclick={copy}>{copied || 'Copy image'}</button>{/if}
+    {#if notePage && format === 'png'}<PutInNote offer={notePage} class="btn" role="button" icon={false} onput={onclose} />{/if}
+    {#if noteSheet && format === 'sheet' && ready}<PutInNote offer={noteSheet(days)} class="btn" role="button" icon={false} onput={onclose} />{/if}
     <span class="grow"></span>
     <button class="btn" title="Close without exporting" onclick={onclose}>Cancel</button>
     <button class="btn btn-primary" disabled={busy || !ready} title="Goes on behind: the top bar says how far" onclick={run}>Export</button>

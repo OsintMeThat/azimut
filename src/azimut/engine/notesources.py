@@ -81,10 +81,16 @@ FILE = "file"
 IMAGERY_ROUTES = ("satellite", "screenshot", "compare")
 #: A picture Horizon drew of the terrain from an eye.
 HORIZON = "horizon"
+#: A page of a Map plate, whose face carries the credits it owes.
+PLATE = "map-plate"
 #: How the day an item came into the case is said, by the route it came in by.
 ARRIVALS = {"satellite": "captured", "screenshot": "captured", "inspect": "made", "compare": "made",
-            "horizon": "made"}
+            "horizon": "made", "map-plate": "made"}
 
+#: How many days one provider's imagery names before the first and the last stand for them.
+MAX_DAYS_SAID = 4
+#: What a figure filed from a Map plate is called.
+PLATE_NOUN = "Map plate"
 #: What a file of the case is called, by what its bytes are.
 FILE_NOUNS = {"image": "Picture", "video": "Video", "audio": "Audio"}
 #: Imagery named when the app no longer lists it (a keyed basemap whose key is gone):
@@ -206,7 +212,12 @@ class Source:
         for provider in dict.fromkeys(reading.provider for reading in self.readings):
             days = [spoken_day(reading.day) for reading in self.readings if reading.provider == provider]
             days = [day for day in days if day]
-            said.append(", ".join(part for part in (provider, " and ".join(days)) if part))
+            # an evolution sheet holds many days: its first and last stand for the rest
+            if len(days) > MAX_DAYS_SAID:
+                when = f"{len(days)} pictures, {days[0]} to {days[-1]}"
+            else:
+                when = ", ".join(days[:-1]) + (" and " if len(days) > 1 else "") + "".join(days[-1:])
+            said.append(", ".join(part for part in (provider, when) if part))
         shown = " and ".join(part for part in said if part)
         lead = self.readings[0].provider if len(self.readings) == 1 else ""
         if self.attribution and self.attribution != lead and self.kind == IMAGERY:
@@ -237,7 +248,7 @@ class Source:
             more = f" +{len(found) - 1}" if len(found) > 1 else ""
             return Credit(first.kind, f"{first.value}{more}", first.link)
         if self.attribution:
-            return Credit("Terrain", self.attribution)
+            return Credit("Map" if self.noun == PLATE_NOUN else "Terrain", self.attribution)
         return None
 
 
@@ -356,7 +367,7 @@ class Reader:
         # dated by the imagery they show (`engine/copernicus_credit.py`).
         attribution = copernicus_credit.normalise_attribution(
             _line(sidecar.get("attribution")), *(reading.day.rstrip("~") for reading in readings)
-        ) if imagery or route == HORIZON else ""
+        ) if imagery or route in (HORIZON, PLATE) else ""
         if kind == "account":
             noun, what = "Account", ACCOUNT
         elif kind == "bookmark":
@@ -369,6 +380,8 @@ class Reader:
                 noun = "Proof"
             elif route == HORIZON and sidecar.get("kind") != "photo":
                 noun = "Terrain view"
+            elif route == PLATE:
+                noun = PLATE_NOUN
             else:
                 noun = FILE_NOUNS.get(media, "File")
             what = POST if address else FILE
@@ -403,7 +416,13 @@ class Reader:
 
     def _readings(self, sidecar: dict[str, Any], attrs: dict[str, Any]) -> tuple[Reading, ...]:
         """The pictures of the ground an item holds: a capture's one, or a Compare or
-        Detect picture's two, each with whose imagery it is and its day."""
+        Detect picture's two, or every day of an evolution sheet, each with whose imagery
+        it is and its day."""
+        evolution = sidecar.get("evolution")
+        if isinstance(evolution, dict) and isinstance(evolution.get("days"), list):
+            name = self._name(evolution.get("provider"))
+            held = [(one.get("day"), one.get("exact") is not False) for one in evolution["days"] if isinstance(one, dict)]
+            return tuple(Reading(name, f"{day}{'' if exact else '~'}") for day, exact in held if isinstance(day, str) and day)
         pair = [(side, timeline.imagery_reading(sidecar, f"imagery_{side}")) for side in ("a", "b")]
         if any(day for _, day in pair):
             providers = sidecar.get("providers")

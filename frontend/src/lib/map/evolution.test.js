@@ -7,6 +7,7 @@ import {
   chosenEntries,
   defaultKeys,
   evolutionArchive,
+  evolutionDays,
   evolutionFrame,
   pickerMonth,
   pictureLabel,
@@ -225,5 +226,15 @@ describe('telling pictures apart', () => {
     expect(timelinePositions(['2020-01-01', '2020-01-11', '2020-01-21'])).toEqual([0, 0.5, 1]);
     expect(timelinePositions(['2020-01-01', '2020-01-01'])).toEqual([0, 0]);
     expect(timelinePositions(['', ''])).toEqual([0, 1]);
+  });
+});
+
+describe('the days an evolution sheet says', () => {
+  it('are exact for Sentinel-2 passes and estimates for Wayback, an undated picture standing for none', () => {
+    const entries = [{ date: '2024-05-03' }, { date: '' }, { date: '2024-06-20' }];
+    expect(evolutionDays('sentinel2', entries)).toEqual({
+      provider: 'sentinel2', days: [{ day: '2024-05-03', exact: true }, { day: '2024-06-20', exact: true }],
+    });
+    expect(evolutionDays('esri-wayback', entries).days.every((one) => one.exact === false)).toBe(true);
   });
 });

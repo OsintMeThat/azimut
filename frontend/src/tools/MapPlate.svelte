@@ -52,7 +52,9 @@
   import PlateDays from './plate/PlateDays.svelte';
   import { api } from '../lib/api.js';
   import { createAutosave } from '../lib/autosave.svelte.js';
-  import { caseState, deleteTemplate, prefs, saveTemplate, toast, uiState } from '../lib/state.svelte.js';
+  import { caseState, deleteTemplate, prefs, reloadCase, saveTemplate, toast, uiState } from '../lib/state.svelte.js';
+  import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { faceCredits, figureName, pageOffer, sheetOffer, sheetRefusal } from './plate/plateNote.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { touchesNothing } from '../lib/deleteImpact.js';
   import { RESTORABLE } from '../lib/trash.js';
@@ -292,6 +294,14 @@
     } catch (error) { toast(error.message, 'danger'); }
   }
 
+  /** The plate just opened shown on the day and the step a page in a note was filed on, as far as the plate still has them. */
+  async function landOn({ day = '', step = '' }) {
+    await tick();
+    if (!plate || plate.template) return;
+    if (day) pickDay(day);
+    if (step && stepsOf(spec, day || at).some((item) => item.id === step)) pickStep(step);
+  }
+
   /** A template opened to be edited, from Settings or from the list of plates, where Done goes back to. */
   async function editTemplate(id, from = 'plates') {
     await readTemplates();
@@ -305,8 +315,10 @@
   $effect(() => {
     const name = uiState.openPlate;
     if (uiState.tool !== 'plate' || !name || !caseId) return;
+    const where = uiState.openPlateAt;
     uiState.openPlate = null;
-    untrack(() => open(name));
+    uiState.openPlateAt = null;
+    untrack(async () => { await open(name); if (where) await landOn(where); });
   });
   $effect(() => {
     const id = uiState.openPlateTemplate;
@@ -1611,6 +1623,23 @@
     } catch { exportPreview = ''; }
   }
 
+  /** The page on each of `picked` days side by side, as one PNG (`evolutionSheet`); `check` throws when the export was stopped. */
+  async function drawSheet(picked, check) {
+    const scale = scaleForWidth(spec, 900);
+    const pages = [];
+    for (const [index, day] of picked.entries()) {
+      check();
+      exportSays(`Drawing ${momentLabel(day) || 'the page'} (${index + 1} of ${picked.length})…`, index, picked.length);
+      pages.push(await render(scale, day));
+    }
+    check();
+    exportSays('Writing…');
+    const sheet = evolutionSheet(pages, picked.map((day) => momentLabel(day) || 'The page'), spec.theme);
+    const drawn = await canvasBlob(sheet);
+    release(sheet, ...pages);
+    return drawn;
+  }
+
   /** The export under way, which Cancel stops between two pictures and on its way to the server. */
   let exportRun = null;
   const stopped = () => Object.assign(new Error('The export was stopped'), { stopped: true });
@@ -1643,18 +1672,7 @@
         const picked = playable ? days.slice(0, 120) : [at];
         legendDays = picked;
         if (format === 'sheet') {
-          const scale = scaleForWidth(spec, 900);
-          const pages = [];
-          for (const [index, day] of picked.entries()) {
-            check();
-            exportSays(`Drawing ${momentLabel(day) || 'the page'} (${index + 1} of ${picked.length})…`, index, picked.length);
-            pages.push(await render(scale, day));
-          }
-          check();
-          exportSays('Writing…');
-          const sheet = evolutionSheet(pages, picked.map((day) => momentLabel(day) || 'The page'), spec.theme);
-          const drawn = await canvasBlob(sheet);
-          release(sheet, ...pages);
+          const drawn = await drawSheet(picked, check);
           answer = await postExport(caseId, { format: 'png', frames: [drawn], widthMm, heightMm, filename: `${name} evolution`, signal: run.signal });
         } else {
           // each day, then each of its steps, each held its own seconds; a step's clips run over its picture in an MP4
@@ -1745,6 +1763,82 @@
       throw error;
     }
   }
+
+  // -- into the note pinned beside -------------------------------------------------------
+
+  /**
+   * The page at print resolution, or the plate's days side by side, drawn and filed in the
+   * case as a picture of this plate (`POST /map-plates/{name}/figure`), for the pinned
+   * note. The plate holds still while it is drawn, as for an export; a page filed in this
+   * very state (plate, day, step, size) is cited again rather than filed twice. A map that
+   * had not finished loading its tiles is no picture to file: it says so instead.
+   */
+  async function keepFigure(kind, { signal, days = null } = {}) {
+    if (!plate || plate.template || !plate.caseId) throw new Error('Open a plate first');
+    if (plateExport.running || playing || exportRun) throw new Error('The plate is busy. Try again in a moment');
+    const sheet = kind === 'sheet';
+    const picked = sheet ? [...(days ?? videoPlayed)] : [];
+    const refusal = sheet ? sheetRefusal(picked.length) : '';
+    if (refusal) throw new Error(refusal);
+    // the server reads the plate as it was saved
+    await autosave.flush();
+    if (!plate?.name) throw new Error('The plate is not saved yet');
+    const { caseId: owner, name: stem, title } = plate;
+    const day = sheet ? '' : at ?? '';
+    const step = sheet ? '' : stepId ?? '';
+    const stepWords = !sheet && stepIndex >= 0 ? stepName(stepIndex) : '';
+    const run = new AbortController();
+    signal?.addEventListener('abort', () => run.abort());
+    exportRun = run;
+    startExport(title, owner, () => run.abort());
+    const check = () => { if (run.signal.aborted) throw new DOMException('Stopped', 'AbortError'); };
+    framing = ''; selection = [];
+    tilesMissing = 0;
+    let canvas = null;
+    try {
+      let blob;
+      let size = [0, 0];
+      if (sheet) {
+        legendDays = picked;
+        blob = await drawSheet(picked, check);
+      } else {
+        exportSays('Drawing the page…');
+        canvas = await render(scaleFor(spec, QUALITIES.print.dpi), undefined);
+        check();
+        size = [canvas.width, canvas.height];
+        exportSays('Writing…');
+        blob = await canvasBlob(canvas);
+      }
+      check();
+      if (tilesMissing) throw new Error('Some map tiles had not loaded, so the page would have blank patches. Try again once the map is drawn');
+      const form = new FormData();
+      form.append('frame', blob, 'page.png');
+      const label = figureName({ title, day, step: stepWords, sheet });
+      form.append('filename', label);
+      form.append('kind', sheet ? 'sheet' : 'page');
+      if (day) form.append('day', day);
+      if (step) form.append('step', step);
+      const owed = faceCredits(credits, plateCredits(spec, creditSources)).slice(0, 2000);
+      if (owed) form.append('attribution', owed);
+      form.append('reuse', 'true');
+      const kept = await api.post(`/api/cases/${owner}/map-plates/${encodeURIComponent(stem)}/figure`, form, { signal: run.signal });
+      if (!kept.reused) await reloadCase();
+      return { entity: { id: kept.entity }, label, fresh: !kept.reused, width: size[0], height: size[1] };
+    } finally {
+      if (canvas) release(canvas);
+      if (exportRun === run) exportRun = null;
+      exportTime = null;
+      exportStep = null;
+      legendDays = null;
+      endExport();
+    }
+  }
+
+  const notePage = pageOffer({ keep: (options) => keepFigure('page', options) });
+  /** The days side by side, of `days` (the export's range) or of every day the plate plays. */
+  const noteSheet = (days = null) => sheetOffer({ keep: (options) => keepFigure('sheet', { ...options, days }) });
+  offerPuts('plate', () => (plate && !plate.template && plate.caseId ? [notePage, ...(videoPlayed.length >= 2 ? [noteSheet()] : [])] : []));
+  onDestroy(() => withdrawNote('plate'));
 
   // -- templates -----------------------------------------------------------------------
 
@@ -2026,7 +2120,7 @@
 {#if exporting}
   <PlateExportDialog moments={videoPlayed} {stepped} {runtime} past={pastBox} name={plate?.title ?? 'Map plate'} preview={exportPreview} transparent={!!spec?.page?.transparent}
     page={spec?.page} hold={spec ? plateSeconds(spec) : 1} onhold={holdPlate}
-    onexport={runExport} oncopy={copyImage} onclose={() => (exporting = false)} />
+    {notePage} {noteSheet} onexport={runExport} oncopy={copyImage} onclose={() => (exporting = false)} />
 {/if}
 
 {#if naming}

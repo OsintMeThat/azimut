@@ -51,6 +51,7 @@
     GIF_EDGE,
     MAX_EVOLUTION_FRAMES,
     evolutionArchive,
+    evolutionDays,
     evolutionFrame,
     pictureLabel,
     pictureScale,
@@ -123,7 +124,7 @@
   import { RADAR_ID, radarId } from '../lib/radar.js';
   import { offerNote, offerPuts, pairOffers, withdrawNote } from '../lib/noteHere.svelte.js';
   import PutInNote from '../components/PutInNote.svelte';
-  import { nearestPlace, pairName, pairOffer } from './compare/pairNote.js';
+  import { nearestPlace, pairName, pairOffer, sheetOffer } from './compare/pairNote.js';
   import { holdsUnsaved } from '../lib/backButton.js';
   import { changeInterval, formatTemporalValue } from '../lib/timeline.js';
   import Icon from '../components/Icon.svelte';
@@ -2206,6 +2207,28 @@
   // comparison, whatever reading is on screen. A comparison not saved yet is saved
   // first, named after the case's place there (else its point) and its two dates.
   // The same pair kept before is cited again rather than kept twice.
+  /** A comparison not saved yet is saved, named after the case's place there (else its point) and its two days. */
+  async function saveForNote(owner, dates) {
+    if (openedSession) return;
+    sessionBusy = true;
+    try {
+      let place = '';
+      try {
+        place = nearestPlace(await api.get(`/api/cases/${owner.id}/satellite/index`), view.lat, view.lon);
+      } catch {
+        // named by its point instead
+      }
+      const typed = sessionName.trim();
+      const title = typed && typed !== 'Comparison'
+        ? typed
+        : pairName({ place, lat: view.lat, lon: view.lon, a: dates.a, b: dates.b });
+      const { gone } = await storeSession(owner, title, { unique: true });
+      if (gone) throw new Error('The case changed before the pair was kept');
+    } finally {
+      sessionBusy = false;
+    }
+  }
+
   async function keepForNote({ signal } = {}) {
     if (!both || !a.ready || !b.ready) throw new Error('Both pictures have to be on screen');
     if (outputBusy || sessionBusy) throw new Error('Compare is busy. Try again in a moment');
@@ -2213,25 +2236,7 @@
     try {
       const owner = await ensureCase();
       const dates = pictureDates();
-      if (!openedSession) {
-        sessionBusy = true;
-        try {
-          let place = '';
-          try {
-            place = nearestPlace(await api.get(`/api/cases/${owner.id}/satellite/index`), view.lat, view.lon);
-          } catch {
-            // named by its point instead
-          }
-          const typed = sessionName.trim();
-          const title = typed && typed !== 'Comparison'
-            ? typed
-            : pairName({ place, lat: view.lat, lon: view.lon, a: dates.a, b: dates.b });
-          const { gone } = await storeSession(owner, title, { unique: true });
-          if (gone) throw new Error('The case changed before the pair was kept');
-        } finally {
-          sessionBusy = false;
-        }
-      }
+      await saveForNote(owner, dates);
       if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
       const sources = await exportSources();
       const blob = await canvasBlob(compose(sources, { renderMode: 'side', renderChangeMap: null }));
@@ -2254,8 +2259,69 @@
     }
   }
 
+  /**
+   * The evolution sheet ticked in the export panel, filed in the case under the comparison:
+   * the still that replaces the animation in a PDF, which prints only its first frame. The
+   * pictures are fetched for it as for the export, so this is a press that reaches the
+   * tiles. The same days, view and size filed before are cited again.
+   */
+  async function keepSheetForNote({ signal } = {}) {
+    const pictures = [...evolutionChosen];
+    if (!evolution || pictures.length < 2 || pictures.length > MAX_EVOLUTION_FRAMES) {
+      throw new Error(`Tick 2 to ${MAX_EVOLUTION_FRAMES} pictures for the sheet first`);
+    }
+    if (outputBusy || sessionBusy) throw new Error('Compare is busy. Try again in a moment');
+    const controller = new AbortController();
+    signal?.addEventListener('abort', () => controller.abort());
+    evolutionAbort = controller;
+    outputBusy = 'evolution';
+    evolutionProgress = { done: 0, total: pictures.length };
+    try {
+      const owner = await ensureCase();
+      const dates = pictureDates();
+      await saveForNote(owner, dates);
+      if (controller.signal.aborted) throw new DOMException('Stopped', 'AbortError');
+      const { sheet, shown } = await drawEvolution('sheet', pictures, controller.signal);
+      const form = new FormData();
+      form.append('image_a', sheet, 'evolution.png');
+      form.append('format', 'png');
+      const label = `${openedSession.title}, evolution ${pictures[0].date} to ${pictures.at(-1).date}`;
+      form.append('filename', comparisonFilename(openedSession.title, { a: pictures[0].date, b: pictures.at(-1).date }) + ' evolution');
+      form.append('spec', JSON.stringify({ ...sessionSpec(), mode: 'side', difference: false }));
+      // the sheet's own days, not the two sides on screen
+      if (shown.days.length >= 2) {
+        form.append('evolution', JSON.stringify(shown));
+        const [first, last] = [shown.days[0], shown.days.at(-1)];
+        form.append('imagery_a', first.day);
+        if (!first.exact) form.append('imagery_a_exact', 'false');
+        form.append('imagery_b', last.day);
+        if (!last.exact) form.append('imagery_b_exact', 'false');
+      }
+      form.append('reuse', 'true');
+      const kept = await api.post(
+        `/api/cases/${owner.id}/compare/sessions/${encodeURIComponent(openedSession.name)}/images`,
+        form,
+        { signal: controller.signal },
+      );
+      await reloadCase();
+      return { entity: { id: kept.entity }, label, fresh: !kept.reused };
+    } finally {
+      if (evolution !== WAYBACK_ID) imagery.refreshUsage();
+      if (evolutionAbort === controller) evolutionAbort = null;
+      outputBusy = '';
+      evolutionProgress = null;
+    }
+  }
+
+  /** The sheet is offered while the export panel holds one ticked: it needs the pictures chosen there. */
+  const sheetReady = $derived(rightPanel === 'export' && exportKind === 'sheet' && Boolean(evolution)
+    && evolutionChosen.length >= 2 && evolutionChosen.length <= MAX_EVOLUTION_FRAMES);
   const notePair = pairOffer({ keep: keepForNote, unsaved: () => !openedSession });
-  offerPuts('compare', () => (both && a.ready && b.ready ? [notePair] : []));
+  const noteSheet = sheetOffer({ keep: keepSheetForNote, unsaved: () => !openedSession });
+  offerPuts('compare', () => [
+    ...(both && a.ready && b.ready ? [notePair] : []),
+    ...(sheetReady ? [noteSheet] : []),
+  ]);
 
   async function exportPng() {
     if (outputBusy) return;
@@ -2372,22 +2438,14 @@
     return parts.length ? ` (left out: ${parts.join(', ')})` : '';
   }
 
-  async function exportEvolution(kind) {
-    if (outputBusy || !evolution) return;
-    const pictures = [...evolutionChosen];
-    if (pictures.length < 2 || pictures.length > MAX_EVOLUTION_FRAMES) {
-      toast(`An evolution plays 2 to ${MAX_EVOLUTION_FRAMES} pictures`, 'warn');
-      return;
-    }
+  /**
+   * Draw what an evolution is made of, from the pictures ticked: a GIF's frames, or a
+   * sheet's one picture. `signal` stops it. A sheet answers its pictures' days too,
+   * `{ provider, days: [{ day, exact }] }`, which a note's annex credits it by.
+   */
+  async function drawEvolution(kind, pictures, signal) {
     const plan = evolutionPlan(kind, pictures.length);
-    if (!plan) {
-      toast('Open a map before exporting', 'warn');
-      return;
-    }
-    const controller = new AbortController();
-    evolutionAbort = controller;
-    outputBusy = 'evolution';
-    evolutionProgress = { done: 0, total: pictures.length };
+    if (!plan) throw new Error('Open a map before exporting');
     const archiveId = evolution;
     const provider = imagery.find(archiveId);
     const label = provider?.label ?? (archiveId === WAYBACK_ID ? 'Esri Wayback' : 'Sentinel-2');
@@ -2403,32 +2461,52 @@
     const positions = timelinePositions(pictures.map((entry) => entry.date));
     const frames = [];
     const cells = [];
+    const tally = await drawPictures({
+      entries: pictures,
+      frame: plan.frame,
+      pixelScale: plan.pixelScale,
+      provider,
+      variantFor: evolutionVariant,
+      signal,
+      onprogress: (done, total) => (evolutionProgress = { done, total }),
+      onpicture: async ({ entry, picture, index }) => {
+        const date = pictureLabel(archiveId, entry);
+        if (kind === 'sheet') cells.push({ picture, date });
+        else frames.push(await canvasBlob(composeEvolutionFrame({ ...common, picture, date, current: index, positions })));
+      },
+    });
+    if (tally.drawn < 2) throw new Error(`fewer than two distinct pictures of this ground came back${leftOut(tally)}`);
+    const span = `${pictures[0].date} to ${pictures.at(-1).date}`;
+    const sheet = kind === 'sheet' ? await canvasBlob(composeEvolutionSheet({ ...common, cells, span })) : null;
+    return { frames, sheet, tally, archiveId, shown: evolutionDays(archiveId, pictures) };
+  }
+
+  async function exportEvolution(kind) {
+    if (outputBusy || !evolution) return;
+    const pictures = [...evolutionChosen];
+    if (pictures.length < 2 || pictures.length > MAX_EVOLUTION_FRAMES) {
+      toast(`An evolution plays 2 to ${MAX_EVOLUTION_FRAMES} pictures`, 'warn');
+      return;
+    }
+    if (!evolutionPlan(kind, pictures.length)) {
+      toast('Open a map before exporting', 'warn');
+      return;
+    }
+    const controller = new AbortController();
+    evolutionAbort = controller;
+    outputBusy = 'evolution';
+    evolutionProgress = { done: 0, total: pictures.length };
+    const archiveId = evolution;
     try {
       const owner = await ensureCase();
-      const tally = await drawPictures({
-        entries: pictures,
-        frame: plan.frame,
-        pixelScale: plan.pixelScale,
-        provider,
-        variantFor: evolutionVariant,
-        signal: controller.signal,
-        onprogress: (done, total) => (evolutionProgress = { done, total }),
-        onpicture: async ({ entry, picture, index }) => {
-          const date = pictureLabel(archiveId, entry);
-          if (kind === 'sheet') cells.push({ picture, date });
-          else frames.push(await canvasBlob(composeEvolutionFrame({ ...common, picture, date, current: index, positions })));
-        },
-      });
-      if (tally.drawn < 2) throw new Error(`fewer than two distinct pictures of this ground came back${leftOut(tally)}`);
+      const { frames, sheet, tally } = await drawEvolution(kind, pictures, controller.signal);
       const name = comparisonFilename(sessionName, { a: pictures[0].date, b: pictures.at(-1).date });
       let result;
       if (kind === 'sheet') {
-        const span = `${pictures[0].date} to ${pictures.at(-1).date}`;
-        const blob = await canvasBlob(composeEvolutionSheet({ ...common, cells, span }));
         result = await api.post(`/api/cases/${owner.id}/plates`, {
           filename: `${name} evolution`,
           format: 'png',
-          png: await blobBase64(blob),
+          png: await blobBase64(sheet),
           overwrite: false,
         }, { signal: controller.signal });
       } else {
@@ -3105,6 +3183,8 @@
 
         {#if !evolutionKind}
           <PutInNote offer={notePair} class="btn put-row" role="button" onput={() => (rightPanel = null)} />
+        {:else if sheetReady}
+          <PutInNote offer={noteSheet} class="btn put-row" role="button" onput={() => (rightPanel = null)} />
         {/if}
 
         <div class="panel-actions">

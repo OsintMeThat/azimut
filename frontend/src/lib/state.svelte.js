@@ -310,6 +310,7 @@ export const uiState = $state({
   openHorizonView: null, // saved Horizon view name to reopen in the Horizon tab
   openHorizonFind: null, // a search the case keeps, to open in Horizon's Find
   openPlate: null, // map plate name to reopen in the Map plate tool
+  openPlateAt: null, // { day, step } the plate opened by openPlate lands on, from a page in a note
   openPlateTemplate: null, // map template id to edit in the Map plate tool, from Settings
   newPlate: false, // the Map asked for a plate of what it shows: the Map plate tool opens one
   editLayer: null, // { name, title, view }: a plate made a layer to draw in; the Map opens it for editing there
@@ -722,6 +723,7 @@ function clearCaseHandoffs() {
   uiState.openHorizonView = null;
   uiState.openHorizonFind = null;
   uiState.openPlate = null;
+  uiState.openPlateAt = null;
   uiState.newPlate = false;
   uiState.openAnalyzer = null;
   uiState.drawInGraph = null;

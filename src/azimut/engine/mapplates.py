@@ -65,6 +65,9 @@ TYPE = "map-plate"
 #: A picture's `src` naming the app's own signature badge (Settings), which a template may keep.
 SIGNATURE = "@signature"
 PRODUCER = "map-plate"
+#: What a figure filed from a plate (a page, an evolution sheet) says it came from, in its sidecar and on its entity.
+SOURCE_TYPE = "map-plate"
+FIGURE_ATTR = "plate_spec"
 VERSION = 1
 #: What a plate is called when its title gives a file nothing to be named by.
 FALLBACK = "Map plate"

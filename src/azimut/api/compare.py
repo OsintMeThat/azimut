@@ -93,6 +93,20 @@ MAX_KEPT_COLOURS = 32
 _KEPT_COLOURS = r"^(#[0-9a-fA-F]{6}(,#[0-9a-fA-F]{6}){0,31})?$"
 
 
+class EvolutionDay(BaseModel):
+    """One picture of an evolution sheet: its day, and whether the day is the picture's own."""
+
+    day: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]):[0-5]\d:[0-5]\dZ)?$")
+    exact: bool = True
+
+
+class Evolution(BaseModel):
+    """The pictures an evolution sheet shows, side by side: whose imagery, and the day of each."""
+
+    provider: str = Field(min_length=1, max_length=64)
+    days: list[EvolutionDay] = Field(min_length=2, max_length=MAX_SEQUENCE_FRAMES)
+
+
 class CompareCamera(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
@@ -726,6 +740,7 @@ async def keep_image(
     imagery_a_exact: bool = Form(default=True),
     imagery_b_exact: bool = Form(default=True),
     reuse: bool = Form(default=False),
+    evolution: str = Form(default="", max_length=8000),
 ) -> dict[str, Any]:
     """Keep one export in the case, as an image nothing replaces.
 
@@ -744,6 +759,15 @@ async def keep_image(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="that is not a comparison this image could show") from exc
 
+    shown: Evolution | None = None
+    if evolution:
+        # an evolution sheet: its pictures are the archive's days, not the two sides on screen
+        try:
+            shown = Evolution.model_validate_json(evolution)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="that is not an evolution this image could show") from exc
+        if format_ != "png":
+            raise HTTPException(status_code=422, detail="an evolution sheet is a still")
     a = await _read_png(image_a, "A")
     # The reading drawn, its two dates and the picture's size: the same key is the
     # same image, which a pair put in a note twice cites rather than keeps twice.
@@ -751,6 +775,7 @@ async def keep_image(
         "compare", session=spec_rel, reading=reading, format=format_,
         interval=None if format_ == "png" else interval, keep=None if format_ == "png" else keep,
         imagery=[imagery_a, imagery_a_exact, imagery_b, imagery_b_exact], size=[a.width, a.height],
+        **({"evolution": shown.model_dump()} if shown else {}),
     )
     if reuse and (filed_before := snapshots.filed_view(case, state_key)) is not None:
         attrs_before = filed_before.get("attrs") or {}
@@ -782,6 +807,8 @@ async def keep_image(
         "attribution_burned": True,
         snapshots.VIEW_KEY: state_key,
     }
+    if shown:
+        source["evolution"] = shown.model_dump()
     for key, value, exact in (("imagery_a", imagery_a, imagery_a_exact),
                               ("imagery_b", imagery_b, imagery_b_exact)):
         if value:

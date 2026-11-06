@@ -82,6 +82,7 @@ class BulkBodyLimit:
         ("POST", ("plates",), "plates", "MAX_PLATE_BODY_BYTES"),
         ("POST", ("map-plates", "export"), "mapplates", "MAX_EXPORT_BODY_BYTES"),
         ("POST", ("map-plates", "export", "pictures"), "mapplates", "MAX_PICTURES_BODY_BYTES"),
+        ("POST", ("map-plates", "*", "figure"), "mapplates", "MAX_EXPORT_BODY_BYTES"),
         ("POST", ("map-plates",), "mapplates", "MAX_PLATE_BODY_BYTES"),
         ("POST", ("compare", "gif"), "compare", "MAX_GIF_BODY_BYTES"),
         ("POST", ("compare", "sequence"), "compare", "MAX_SEQUENCE_BODY_BYTES"),
