@@ -26,7 +26,7 @@ export class ProofScene {
   stated = $state(null);
   /** Whether `stated` waits for the proof's first save to be written. */
   held = $state(false);
-  /** The player under the field, `{ video, at, play, n }`, or null while it is folded. */
+  /** The player in the Scene tab, `{ video, at, play, n }`, or null before it opens. */
   view = $state(null);
   /** The clip in the player, `{ duration, fps }`, as its probe read it. */
   clip = $state({ duration: 0, fps: null });
@@ -95,12 +95,6 @@ export class ProofScene {
     this.view = { video, at, play, n: (this.view?.n ?? 0) + 1 };
   }
 
-  /** Fold the player. A time left open is kept when it reads as one, as in Inspect. */
-  fold() {
-    this.leaveTime();
-    this.view = null;
-  }
-
   // -- the time ---------------------------------------------------------------------
 
   /** Open the ★ video's time, with its player paused where the scene starts. */
@@ -120,6 +114,7 @@ export class ProofScene {
     if (changed) await this.write({ video: this.star, moments: result.moments });
   }
 
+  /** Leave the time, as the tab is left: kept when it reads as one, as in Inspect. */
   leaveTime() {
     if (this.edit.result && this.edit.changed) this.applyTime();
     else this.edit.close();

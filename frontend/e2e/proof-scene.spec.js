@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { CASE_ID, installAppFixture } from './app.fixture.js';
+import { CASE_ID, installAppFixture, showProofTab } from './app.fixture.js';
 import { STEPS_DURATION, STEPS_FPS, STEPS_WEBM, serveRange } from './video.fixture.js';
 
 /**
- * A proof built on a video. Its Scene field in the side column says which video it is
+ * A proof built on a video. Its Scene tab in the side column says which video it is
  * about and when in it the place shows, plays that, makes a frame of it a panel, and
  * writes the time through its own route, never with a save. A proof built on no video
- * looks and exports exactly as it did.
+ * has no such tab, and looks and exports exactly as it did.
  */
 
 const VIDEO = 'media/steps.webm';
@@ -91,6 +91,7 @@ async function saveProof(page, fixture, count) {
 }
 
 const sceneBlock = (page) => page.getByTestId('scene-block');
+const sideTab = (page, name) => page.getByRole('tablist', { name: 'Proof settings' }).getByRole('tab', { name });
 const videoState = (page) => page.getByTestId('scene-player').locator('video').evaluate((v) => ({
   paused: v.paused, muted: v.muted, time: v.currentTime,
 }));
@@ -112,6 +113,8 @@ test('makes the proof of a scene of Inspect, its player running, its time writte
 
   await expect(page.locator('.panel-row')).toHaveCount(2);
   await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue('Road bridge');
+  // it opens on its Scene tab
+  await expect(sideTab(page, 'Scene')).toHaveAttribute('aria-selected', 'true');
   // the description is the analyst's sentence, left for them to write
   await expect(page.locator('.desc-input')).toHaveValue('');
   const block = sceneBlock(page);
@@ -144,7 +147,8 @@ test('changes the time of a saved proof at once, adds a frame of its player, and
   const plain = await saveProof(page, fixture, 1);
   expect(scenePuts).toEqual([]);
 
-  // The time, opened on the player: an instant at the frame on screen.
+  // The time, opened on the player in the Scene tab: an instant at the frame on screen.
+  await showProofTab(page, 'Scene');
   await block.getByRole('button', { name: 'Time of the scene, Whole video' }).click();
   await expect(block.getByTestId('scene-player')).toBeVisible();
   await block.getByRole('radio', { name: 'Instant' }).click();
@@ -175,7 +179,7 @@ test('changes the time of a saved proof at once, adds a frame of its player, and
   const two = await saveProof(page, fixture, 2);
 
   // The time on the picture: off by default, printed when asked, gone again byte for byte.
-  await page.getByRole('button', { name: /Advanced/ }).click();
+  await showProofTab(page, 'Style');
   const badge = page.getByRole('checkbox', { name: 'Scene time on the picture' });
   await expect(badge).not.toBeChecked();
   await badge.check();
@@ -193,7 +197,8 @@ test('leaves a proof built on no video as it was, and keeps the player\'s marks 
   const { fixture } = await openCase(page);
   await newProof(page, ['Photo']);
   await expect(sceneBlock(page)).toHaveCount(0);
-  await page.getByRole('button', { name: /Advanced/ }).click();
+  await expect(sideTab(page, 'Scene')).toHaveCount(0);
+  await showProofTab(page, 'Style');
   await expect(page.getByText('Scene time on the picture')).toHaveCount(0);
   const photo = await saveProof(page, fixture, 1);
   expect(photo.spec).not.toHaveProperty('scene');
@@ -204,4 +209,61 @@ test('leaves a proof built on no video as it was, and keeps the player\'s marks 
   await expect(sceneBlock(page)).toHaveCount(1);
   const framed = await saveProof(page, fixture, 2);
   expect(framed.png_base64).toBe(photo.png_base64);
+});
+
+test('opens a new proof on Layout, marks the Proof tab while it needs facts, and the canvas\'s ▶ opens Scene', async ({ page }) => {
+  const { fixture } = await openCase(page);
+  // a saved proof to switch to, which keeps the tab in use
+  await page.route(`**/api/cases/${CASE_ID}/proofs`, (route) => (route.request().method() === 'GET'
+    ? route.fulfill({ json: [{ name: 'kept', title: 'Kept proof', spec_path: 'proofs/.meta/kept.json', updated_at: '2026-10-01T10:00:00Z' }] })
+    : route.fallback()));
+  await page.route(`**/api/cases/${CASE_ID}/proofs/kept`, (route) => (route.request().method() === 'GET'
+    ? route.fulfill({ json: { title: 'Kept proof', panels: [], pastes: [], shapes: [] } })
+    : route.fallback()));
+
+  await newProof(page, ['Frame A']);
+  await expect(sideTab(page, 'Layout')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel', { name: 'Layout' }).locator('.panel-row')).toBeVisible();
+  // a frame of a video brings the Scene tab, between the facts and the layout
+  await expect(page.getByRole('tablist', { name: 'Proof settings' }).getByRole('tab')).toHaveText([/^Proof/, 'Scene', 'Layout', 'Style']);
+  // the blanks the Proof tab marks with a ! are said on its label, from any tab
+  const needs = sideTab(page, 'Proof').getByTestId('proof-tab-needs');
+  await expect(needs).toHaveAttribute('aria-label', 'Still needs coordinates and a source');
+  await showProofTab(page, 'Proof');
+  await page.locator('.point-row').first().locator('.meta-input').fill('48.858400, 2.294500');
+  await expect(needs).toHaveAttribute('aria-label', 'Still needs a source');
+
+  // the arrows walk the tabs, and the Scene tab opens its player paused on the scene
+  await sideTab(page, 'Proof').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(sideTab(page, 'Scene')).toHaveAttribute('aria-selected', 'true');
+  await expect(sideTab(page, 'Scene')).toBeFocused();
+  await expect(sceneBlock(page).getByTestId('scene-player')).toBeVisible();
+  expect((await videoState(page)).paused).toBe(true);
+
+  // played, then left: nothing plays where nobody sees it
+  await sceneBlock(page).getByRole('button', { name: 'Loop the scene' }).click();
+  await expect.poll(async () => (await videoState(page)).paused).toBe(false);
+  await showProofTab(page, 'Layout');
+  await expect.poll(async () => (await videoState(page)).paused).toBe(true);
+
+  // the ▶ in the panel's corner on the canvas shows the Scene tab, on that panel's frame
+  const play = await page.evaluate(() => {
+    const stage = window.Konva.stages.find((s) => s.container().isConnected);
+    const rect = stage.findOne('.scene-play').getClientRect();
+    const box = stage.container().getBoundingClientRect();
+    return { x: box.left + rect.x + rect.width / 2, y: box.top + rect.y + rect.height / 2 };
+  });
+  await page.mouse.click(play.x, play.y);
+  await expect(sideTab(page, 'Scene')).toHaveAttribute('aria-selected', 'true');
+  await expect(sceneBlock(page).locator('.clock')).toContainText('0:00.2');
+
+  // another proof opens on the tab in use; without a video, Scene gives way to Layout
+  await showProofTab(page, 'Style');
+  await saveProof(page, fixture, 1);
+  await page.locator('.tool-header').getByRole('button', { name: 'Open proof' }).click();
+  await page.locator('.open-row', { hasText: 'Kept proof' }).click();
+  await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue('Kept proof');
+  await expect(sideTab(page, 'Style')).toHaveAttribute('aria-selected', 'true');
+  await expect(sideTab(page, 'Scene')).toHaveCount(0);
 });

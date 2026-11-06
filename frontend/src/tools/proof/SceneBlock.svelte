@@ -1,20 +1,25 @@
 <script>
+  import { untrack } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import SceneTimeEditor from '../../components/SceneTimeEditor.svelte';
   import ScenePlayer from './ScenePlayer.svelte';
   import { sceneTime } from '../../lib/scenes.js';
   import { PROOF_SCENE_HELP as HELP, PROOF_TIME_HELP, PROOF_TIME_TIPS } from '../../lib/proofSceneHelp.js';
 
-  // Where in its video the proof happens, in the side column under the date. It is
+  // Where in its video the proof happens: the Scene tab of the side column. It is
   // there only for a proof built on a video, either through a panel Inspect cut from
   // one or through a time the proof states; any other proof reads as it always did.
   //
   // One field per video, like a source: the ★ video with its time, which opens the
   // time editor Inspect uses (`components/SceneTimeEditor`), and any other video as a
-  // confirmation, ☆, made the ★ in one press. The play act at the end of each opens
-  // a small player under the fields (`ScenePlayer`), where Here reads its frame and a
-  // frame becomes a panel. What is stated goes through `proofScene.svelte.js`.
-  let { scene, caseId, color = 'var(--accent)', onaddframe } = $props();
+  // confirmation, ☆, made the ★ in one press. The player under the fields has the tab
+  // to itself (`ScenePlayer`): it opens on the ★ video with the tab, the play act at
+  // the end of a field runs that video in it, Here reads its frame and a frame becomes
+  // a panel. What is stated goes through `proofScene.svelte.js`.
+  //
+  // `active` is whether the tab is shown. A hidden tab keeps its player where it
+  // stood, paused, so coming back finds the same frame.
+  let { scene, caseId, color = 'var(--accent)', active = true, onaddframe } = $props();
 
   let player = $state(null);
 
@@ -40,11 +45,17 @@
     editing && scene.edit.moments.length > 1 ? barMoments.findIndex((m) => m.i === scene.edit.active) : -1,
   );
 
-  function togglePlayer(v) {
-    if (view?.video === v.video) {
-      scene.fold();
-      return;
-    }
+  // The tab is the player's: it shows the ★ video as soon as the tab is shown, paused
+  // where the scene starts, and again when the video it showed left the proof.
+  $effect(() => {
+    if (!active) return;
+    const videos = scene.videos.map((v) => v.video);
+    const shown = scene.view?.video;
+    if (videos.length && !videos.includes(shown)) untrack(() => scene.show(scene.star));
+  });
+
+  /** A field's play act: its video in the player, running through the scene. */
+  function play(v) {
     if (!v.star) scene.leaveTime();
     scene.show(v.video, { play: true });
   }
@@ -65,7 +76,7 @@
 <div class="scene-block" style:--scene={color} data-testid="scene-block">
   <div class="meta-head">
     <Icon name="video" size={13} />
-    <span>Scene</span>
+    <span>{scene.videos.length > 1 ? 'Videos' : 'Video'}</span>
   </div>
   {#each scene.videos as v (v.video)}
     {@const open = view?.video === v.video}
@@ -95,12 +106,11 @@
       <button
         class="field-act"
         class:on={open}
-        onclick={() => togglePlayer(v)}
-        title={open ? HELP.fold : HELP.show}
-        aria-label={open ? 'Fold the player' : `Play ${v.name}`}
-        aria-expanded={open}
+        onclick={() => play(v)}
+        title={HELP.show}
+        aria-label={`Play ${v.name}`}
       >
-        <Icon name={open ? 'chevronUp' : 'play'} size={12} />
+        <Icon name="play" size={12} />
       </button>
     </div>
   {/each}
@@ -127,6 +137,7 @@
           frames={shownFrames}
           from={firstFrame}
           request={view}
+          {active}
           adding={scene.adding}
           onclip={(clip) => (scene.clip = clip)}
           {onaddframe}

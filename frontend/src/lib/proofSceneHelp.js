@@ -12,8 +12,7 @@ export const PROOF_SCENE_HELP = {
   star: 'The video this proof is about, which its date states',
   makeStar: 'Make this the video the proof is about, which its date states',
   time: 'Change when in the video the place shows',
-  show: 'Play it under the field',
-  fold: 'Fold the player',
+  show: 'Play it in the player',
   addMoment: 'Add an instant at the frame of each panel outside these moments',
   badge: 'Prints the video and the scene\'s time on its panels',
 

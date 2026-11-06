@@ -2426,6 +2426,16 @@ export async function openProofWithPanel(page) {
 }
 
 /**
+ * One of Geo Proof's side tabs shown: Proof (the facts), Scene, Layout (the panels
+ * and the elements, where a new proof opens) or Style.
+ */
+export async function showProofTab(page, name) {
+  const tab = page.getByRole('tablist', { name: 'Proof settings' }).getByRole('tab', { name });
+  await tab.click();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+}
+
+/**
  * Where a map is and how close, read as a user would: the point menu's DD row
  * at the map's centre, then 200 px right of it. The first is the place, the gap
  * between the two is the zoom. Read until two readings agree, so a glide or a

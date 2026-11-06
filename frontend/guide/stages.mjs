@@ -959,6 +959,8 @@ export const STAGES = [
       await page.locator('[role="menuitem"]', { hasText: /proof/i }).first().click();
       await page.locator('[data-guide="proof.panels"] button', { hasText: 'Add panel' }).click();
       await page.locator('[role="dialog"]').getByText(CAPTURED).first().click();
+      // a new proof opens on its Layout tab; the facts are on the Proof tab
+      await page.getByRole('tablist', { name: 'Proof settings' }).getByRole('tab', { name: /^Proof/ }).click();
       await page.locator('[data-guide="proof.coords"] input').first().fill(`${CAMERA.lat}, ${CAMERA.lon}`);
       await page.locator('[data-guide="proof.coords"] input').nth(1).fill(CAMERA_PLACE);
       await page.getByPlaceholder('A formation of 13 helicopters heading east').fill('The YM Success under the Vincent Thomas Bridge, seen from the west bank of the Main Channel.');

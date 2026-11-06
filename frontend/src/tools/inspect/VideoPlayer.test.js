@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { render } from 'svelte/server';
 import VideoPlayer from './VideoPlayer.svelte';
 
@@ -66,5 +67,30 @@ describe('Inspect video player', () => {
     const { body } = render(VideoPlayer, { props: props({ filter: 'brightness(1.4)', original: true }) });
     expect(body).toContain('Without adjustments');
     expect(body).not.toContain('brightness(1.4)');
+  });
+});
+
+describe('Inspect video player on a narrow window', () => {
+  const source = readFileSync(new URL('./VideoPlayer.svelte', import.meta.url), 'utf8');
+  const css = source.slice(source.indexOf('<style>'));
+
+  it('never cuts the frame on screen, and lets the length and the count go first', () => {
+    const { body } = render(VideoPlayer, { props: props() });
+    expect(body).toMatch(/class="of total[^"]*">\/ 2:05\.000/);
+    expect(body).toMatch(/class="of count[^"]*">· frame 126 of 3125/);
+    expect(css).toMatch(/\.player-time \{[^}]*flex-shrink: 0;/);
+    expect(css).not.toMatch(/\.player-time \{[^}]*overflow: hidden;/);
+    expect(css).toContain('container-type: inline-size;');
+    expect(css).toMatch(/@container \(max-width: 700px\) \{\s*\.of\.count \{\s*display: none;/);
+    expect(css).toMatch(/@container \(max-width: 600px\) \{\s*\.of\.total,\s*\.player-btn\.keys \{\s*display: none;/);
+  });
+
+  it('wraps its last buttons whole, still on the right, rather than clipping the capture', () => {
+    const { body } = render(VideoPlayer, { props: props() });
+    const end = body.slice(body.indexOf('class="end'));
+    expect(end).toContain('aria-label="Capture this frame"');
+    expect(end).toContain('aria-label="Full screen"');
+    expect(css).toMatch(/\.controls \{[^}]*flex-wrap: wrap;/);
+    expect(css).toMatch(/\.end \{[^}]*margin-left: auto;/);
   });
 });

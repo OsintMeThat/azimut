@@ -43,6 +43,8 @@
   import PointMapDialog from './proof/PointMapDialog.svelte';
   import PanelCategories from './proof/PanelCategories.svelte';
   import SceneBlock from './proof/SceneBlock.svelte';
+  import ProofSideTabs from './proof/ProofSideTabs.svelte';
+  import { needsWords, proofNeeds, shownTab, sideTabs } from './proof/sideTabs.js';
   import { ProofScene } from './proof/proofScene.svelte.js';
   import { panelFrames, readHandoff, sceneBadges, sceneColor } from '../lib/proofScene.js';
   import { PROOF_SCENE_HELP } from '../lib/proofSceneHelp.js';
@@ -215,7 +217,6 @@
       sigImg = null; // No saved logo.
     }
   }
-  let advancedOpen = $state(false);
   let collapsed = $state({ panels: false, overlays: false, annotations: false, elements: false });
   let cropSurfaceId = $state(null);
   let cropDraft = $state(null); // crop rectangle in the selected surface's pixels
@@ -424,9 +425,34 @@
     return () => { live = false; };
   });
 
+  // ---- the header ---------------------------------------------------------------------
+  // Its own width, read for its compact form: under this the secondary buttons show as
+  // icons, so Save and To Post stay in sight beside the case panel on a laptop.
+  const HEADER_COMPACT = 920;
+  let headerW = $state(0);
+
+  // ---- the side column's tabs (proof/sideTabs.js) ----------------------------------
+  // A new proof opens on Layout and one made from a scene on Scene; opening another
+  // keeps the tab in use. The tool stays mounted for the session, so this is that
+  // memory, and nothing writes it to disk.
+  let sideTab = $state('proof');
+  const sideTabList = $derived(sideTabs(scene.videos.length > 0));
+  const sideShown = $derived(shownTab(sideTab, scene.videos.length > 0));
+  // the blanks the Proof tab's fields mark with a `!`, said on its label as well
+  const proofTabNeeds = $derived(
+    needsWords(proofNeeds({ coords: !!displayedCoords, source: !!displayedSource, when: proof.when })),
+  );
+
+  function pickSideTab(id) {
+    // leaving the scene keeps a time that reads as one, as closing Inspect's drawer does
+    if (sideShown === 'scene' && id !== 'scene') scene.leaveTime();
+    sideTab = id;
+  }
+
   /** A panel's ▶ on the canvas: its video's player, on its frame. */
   function playPanelScene(frame) {
     if (frame.video !== scene.star) scene.leaveTime();
+    pickSideTab('scene');
     scene.show(frame.video, { at: frame.time });
   }
 
@@ -461,6 +487,7 @@
     if (!made || !(await mayLeave())) return;
     resetDoc();
     proofStarted = true;
+    pickSideTab('scene');
     settlePlace('proof', place(), { navigate: true });
     if (made.title) proof.title = made.title;
     scene.hold(made.scene);
@@ -1415,6 +1442,7 @@
     try {
       resetDoc();
       proofStarted = true;
+      pickSideTab('layout');
       settlePlace('proof', place(), { navigate: true });
       if (template) applyTemplate(template, { notify: false });
       for (const item of selectedItems) await addPanel(item);
@@ -1496,6 +1524,8 @@
 
   async function addPanel(item) {
     try {
+      // the first panel of a proof not started yet starts a new one, on Layout
+      if (!proofStarted) pickSideTab('layout');
       proofStarted = true;
       const img = await loadImage(fileUrl(caseState.current.id, item.src));
       imgCache.set(item.src, img);
@@ -6350,7 +6380,10 @@
 <svelte:window onkeydown={onKeydown} onkeyup={onKeyup} onpaste={onPaste} />
 
 <div class="tool">
-  <div class="tool-header">
+  <!-- Narrower than its row (the case panel open on a laptop), the header shows the
+       secondary buttons as icons rather than cut off Save and To Post. It is measured on
+       its own width, so the unsaved badge coming and going never moves the canvas. -->
+  <div class="tool-header" class:compact={headerW > 0 && headerW < HEADER_COMPACT} bind:clientWidth={headerW}>
     {#if proofStarted}
       <input
         class="input title-input"
@@ -6362,22 +6395,27 @@
     {/if}
     <div class="spacer"></div>
     {#if caseState.current}
-      <button class="btn btn-sm" onclick={openProofDialog}><Icon name="folderOpen" size={14} /> Open proof</button>
-    {/if}
-    {#if proofStarted}
-      <button class="btn btn-sm" onclick={() => (discardConfirm = true)} title="Clear this proof">
-        <Icon name="reset" size={14} /> Discard
+      <button class="btn btn-sm" onclick={openProofDialog} aria-label="Open proof" title="Open a saved proof">
+        <Icon name="folderOpen" size={14} /> <span class="words">Open proof</span>
       </button>
     {/if}
-    <button class="btn btn-sm" onclick={openNewProofDialog}><Icon name="plus" size={14} /> New proof</button>
+    {#if proofStarted}
+      <button class="btn btn-sm" onclick={() => (discardConfirm = true)} aria-label="Discard" title="Clear this proof">
+        <Icon name="reset" size={14} /> <span class="words">Discard</span>
+      </button>
+    {/if}
+    <button class="btn btn-sm" onclick={openNewProofDialog} aria-label="New proof" title="Start a new proof">
+      <Icon name="plus" size={14} /> <span class="words">New proof</span>
+    </button>
     <div class="export-split">
       <button
         class="btn btn-sm export-main"
         onclick={copyPng}
         disabled={!proofHasContent || copying}
+        aria-label={copying ? 'Copying…' : 'Copy'}
         title="Copy the proof PNG"
       >
-        <Icon name="copy" size={14} /> {copying ? 'Copying…' : 'Copy'}
+        <Icon name="copy" size={14} /> <span class="words">{copying ? 'Copying…' : 'Copy'}</span>
       </button>
       <button
         class="btn btn-sm export-toggle"
@@ -6519,376 +6557,372 @@
     <!-- right: proof settings, panels & annotations -->
     {#if proofStarted}
       <aside class="side">
-        <div class="side-scroll">
-        <!-- House style stays independent from content. A new proof can keep a
-             selected template while its canvas remains empty until panels land. -->
-        <div class="meta-field">
-          <div class="meta-head">
-            <Icon name="layers" size={13} />
-            <span>House style</span>
-            {#if templatesState.proof.length}
-              <button
-                class="tpl-settings-link"
-                type="button"
-                title="Manage proof styles in Settings"
-                onclick={openTemplateSettings}
-              >
-                Settings templates
-              </button>
+        <ProofSideTabs tabs={sideTabList} current={sideShown} needs={proofTabNeeds} onpick={pickSideTab} />
+        <!-- The base facts, filled once: where, from where, what and when. -->
+        <div class="side-scroll" role="tabpanel" id="proof-pane-proof" aria-labelledby="proof-tab-proof" hidden={sideShown !== 'proof'}>
+          <!-- Coordinates + source, auto-filled from the panels, overridable. A ! flags
+               a value the analyst still needs to supply, and the tab says so too. -->
+          <div class="meta-field" data-guide="proof.coords">
+            <div class="meta-head">
+              <Icon name="crosshair" size={13} />
+              <span>Coordinates</span>
+              {#if !displayedCoords}
+                <span class="meta-warn" title="Add a satellite panel or type the coordinates">
+                  <Icon name="alert" size={13} />
+                </span>
+              {/if}
+              {#if proof.points.some((one) => one.coords.trim())}
+                <button class="meta-reset" title="Reset to the coordinates from the imagery" onclick={() => { proof.points = [blankPoint()]; dirty = true; }}>
+                  <Icon name="reset" size={12} />
+                </button>
+              {/if}
+              {#if proof.points.length < MAX_POINTS}
+                <button
+                  class="meta-add"
+                  class:alone={!proof.points.some((one) => one.coords.trim())}
+                  title="Add a point"
+                  onclick={addPoint}
+                >
+                  <Icon name="plus" size={12} />
+                </button>
+              {/if}
+            </div>
+            <!-- One row per point the proof concludes on, the first one the
+                 conclusion. A single-point proof shows the field it always did. -->
+            {#each proof.points as point, i (i)}
+              <div class="point-row">
+                <!-- Six decimals is a tenth of a metre, and nobody moves a corner
+                     of a building by editing digits — so the map is one press from
+                     the field, inside the same box, the way the date beside it
+                     opens its calendar. -->
+                <!-- A point the imagery proposed reads greyed until somebody checks it:
+                     typed, or placed on the map. -->
+                <div
+                  class="field-with-act coords-field"
+                  class:warn={i === 0 && !displayedCoords}
+                  class:proposed={pointProposed(proof.points, i, proof.panels)}
+                >
+                  <input
+                    class="input meta-input"
+                    placeholder="lat, lon"
+                    value={i === 0 ? displayedCoords : point.coords}
+                    oninput={(e) => {
+                      proof.points[i].coords = e.target.value;
+                      proof.points[i].proposed = false;
+                      dirty = true;
+                    }}
+                  />
+                  <button
+                    class="field-act"
+                    class:check={pointProposed(proof.points, i, proof.panels)}
+                    title={pointProposed(proof.points, i, proof.panels)
+                      ? 'Not checked yet. Check it on the map'
+                      : 'Move this point on the map'}
+                    onclick={() => (pointMap = { row: i, view: pointMapView(i) })}
+                  >
+                    <Icon name="pin" size={13} />
+                  </button>
+                </div>
+                <!-- The name and what the point means, in one box: nothing in the
+                     composition can answer the second — a rooftop shot is recorded
+                     somewhere it never shows, and a distant skyline is shown from
+                     kilometres away. -->
+                <div class="field-with-act label-field">
+                  <input
+                    class="input point-label"
+                    placeholder="label"
+                    value={point.label}
+                    oninput={(e) => namePoint(i, e.target.value)}
+                  />
+                  <button
+                    class="field-act"
+                    class:on={point.pov}
+                    title="Point of view"
+                    onclick={() => togglePov(i)}
+                  >
+                    <Icon name="eye" size={13} />
+                  </button>
+                </div>
+                <ProofPointMenu
+                  index={i}
+                  coords={i === 0 ? displayedCoords : point.coords}
+                  proposed={pointProposed(proof.points, i, proof.panels)}
+                  canSave={proof.panels.length > 0}
+                  unsaved={dirty || !savedName}
+                  busy={pointLayers.busy || saving}
+                  caseId={caseState.current?.id ?? null}
+                  targets={layerTargets}
+                  held={new Set((pointPlaces.get(i) ?? []).map((place) => `${place.layer.name}|${place.marker.group ?? ''}`))}
+                  onadd={(choice) => addPointToLayer(i, choice)}
+                  oncreate={(title) => pointLayers.create(caseState.current?.id, savedName, title)}
+                  oncheck={() => (pointMap = { row: i, view: pointMapView(i) })}
+                  onraise={i > 0 ? () => raisePoint(i) : null}
+                  onremove={i > 0 ? () => removePoint(i) : null}
+                />
+              </div>
+              <LayerPlaces
+                places={pointPlaces.get(i) ?? []}
+                busy={pointLayers.busy}
+                caseId={caseState.current?.id ?? null}
+                onopen={openPointInLayer}
+                onremove={(place) => pointLayers.remove(caseState.current?.id, savedName, place)}
+              />
+            {/each}
+            {#if proof.points.length > 1}
+              <div class="point-hint">Order decides the conclusion.</div>
             {/if}
           </div>
-          {#if templatesState.proof.length}
-            <select
-              class="input meta-input"
-              value={appliedTemplate?.id ?? ''}
-              title="Choose a saved house style"
-              onchange={applyFromSelect}
-            >
-              <option value="">No template</option>
-              {#each templatesState.proof as t (t.id)}
-                <option value={t.id}>{t.name}</option>
-              {/each}
-            </select>
-          {:else}
-            <p class="tpl-none">
-              No templates yet.
-              <button
-                class="tpl-inline-link"
-                type="button"
-                title="Open Settings → Templates to create your first house style"
-                onclick={openTemplateSettings}
-              >
-                Create one in Settings → Templates.
-              </button>
-            </p>
-          {/if}
-        </div>
-
-        <!-- Proof context: coordinates + source, auto-filled from the panels,
-             overridable. A ! flags a value the analyst still needs to supply. -->
-        <div class="meta-field" data-guide="proof.coords">
-          <div class="meta-head">
-            <Icon name="crosshair" size={13} />
-            <span>Coordinates</span>
-            {#if !displayedCoords}
-              <span class="meta-warn" title="Add a satellite panel or type the coordinates">
-                <Icon name="alert" size={13} />
-              </span>
-            {/if}
-            {#if proof.points.some((one) => one.coords.trim())}
-              <button class="meta-reset" title="Reset to the coordinates from the imagery" onclick={() => { proof.points = [blankPoint()]; dirty = true; }}>
-                <Icon name="reset" size={12} />
-              </button>
-            {/if}
-            {#if proof.points.length < MAX_POINTS}
+          <div class="meta-field" data-guide="proof.meta">
+            <div class="meta-head">
+              <Icon name="link" size={13} />
+              <span>Source</span>
+              {#if !displayedSource}
+                <span class="meta-warn" title="Missing source link">
+                  <Icon name="alert" size={13} />
+                </span>
+              {/if}
+              {#if proof.sources !== null}
+                <button class="meta-reset" title="Reset to the sources traced from the media" onclick={resetSources}>
+                  <Icon name="reset" size={12} />
+                </button>
+              {/if}
               <button
                 class="meta-add"
-                class:alone={!proof.points.some((one) => one.coords.trim())}
-                title="Add a point"
-                onclick={addPoint}
+                class:alone={proof.sources === null}
+                title="Add a source"
+                onclick={addSource}
               >
                 <Icon name="plus" size={12} />
               </button>
-            {/if}
-          </div>
-          <!-- One row per point the proof concludes on, the first one the
-               conclusion. A single-point proof shows the field it always did. -->
-          {#each proof.points as point, i (i)}
-            <div class="point-row">
-              <!-- Six decimals is a tenth of a metre, and nobody moves a corner
-                   of a building by editing digits — so the map is one press from
-                   the field, inside the same box, the way the date beside it
-                   opens its calendar. -->
-              <!-- A point the imagery proposed reads greyed until somebody checks it:
-                   typed, or placed on the map. -->
-              <div
-                class="field-with-act coords-field"
-                class:warn={i === 0 && !displayedCoords}
-                class:proposed={pointProposed(proof.points, i, proof.panels)}
-              >
-                <input
-                  class="input meta-input"
-                  placeholder="lat, lon"
-                  value={i === 0 ? displayedCoords : point.coords}
-                  oninput={(e) => {
-                    proof.points[i].coords = e.target.value;
-                    proof.points[i].proposed = false;
-                    dirty = true;
-                  }}
-                />
-                <button
-                  class="field-act"
-                  class:check={pointProposed(proof.points, i, proof.panels)}
-                  title={pointProposed(proof.points, i, proof.panels)
-                    ? 'Not checked yet. Check it on the map'
-                    : 'Move this point on the map'}
-                  onclick={() => (pointMap = { row: i, view: pointMapView(i) })}
-                >
-                  <Icon name="pin" size={13} />
-                </button>
-              </div>
-              <!-- The name and what the point means, in one box: nothing in the
-                   composition can answer the second — a rooftop shot is recorded
-                   somewhere it never shows, and a distant skyline is shown from
-                   kilometres away. -->
-              <div class="field-with-act label-field">
-                <input
-                  class="input point-label"
-                  placeholder="label"
-                  value={point.label}
-                  oninput={(e) => namePoint(i, e.target.value)}
-                />
-                <button
-                  class="field-act"
-                  class:on={point.pov}
-                  title="Point of view"
-                  onclick={() => togglePov(i)}
-                >
-                  <Icon name="eye" size={13} />
-                </button>
-              </div>
-              <ProofPointMenu
-                index={i}
-                coords={i === 0 ? displayedCoords : point.coords}
-                proposed={pointProposed(proof.points, i, proof.panels)}
-                canSave={proof.panels.length > 0}
-                unsaved={dirty || !savedName}
-                busy={pointLayers.busy || saving}
-                caseId={caseState.current?.id ?? null}
-                targets={layerTargets}
-                held={new Set((pointPlaces.get(i) ?? []).map((place) => `${place.layer.name}|${place.marker.group ?? ''}`))}
-                onadd={(choice) => addPointToLayer(i, choice)}
-                oncreate={(title) => pointLayers.create(caseState.current?.id, savedName, title)}
-                oncheck={() => (pointMap = { row: i, view: pointMapView(i) })}
-                onraise={i > 0 ? () => raisePoint(i) : null}
-                onremove={i > 0 ? () => removePoint(i) : null}
-              />
             </div>
-            <LayerPlaces
-              places={pointPlaces.get(i) ?? []}
-              busy={pointLayers.busy}
-              caseId={caseState.current?.id ?? null}
-              onopen={openPointInLayer}
-              onremove={(place) => pointLayers.remove(caseState.current?.id, savedName, place)}
+            <!-- One row per address. A proof read from a thread rests on the post that
+                 published it, the photos beside it and the clip under those, and each of
+                 them is a link of its own. -->
+            {#each sourceRows as row, at (at)}
+              <div class="meta-row">
+                <!-- The address itself, one press away in a tab of its own: a
+                     source is read far more often than it is typed, and copying a
+                     link into the browser to see what it points at is the long way
+                     round. -->
+                <div class="field-with-act source-field" class:warn={!displayedSource}>
+                  <input
+                    class="input meta-input"
+                    placeholder="https://…"
+                    value={row}
+                    oninput={(e) => editSource(at, e.target.value)}
+                  />
+                  <a
+                    class="field-act"
+                    class:disabled={!openableSource(row)}
+                    href={openableSource(row) || undefined}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={openableSource(row) ? 'Open this source in a new tab' : 'Not a web address'}
+                    aria-disabled={!openableSource(row)}
+                    onclick={(e) => { if (!openableSource(row)) e.preventDefault(); }}
+                  >
+                    <Icon name="external" size={13} />
+                  </a>
+                </div>
+                {#if missingSource(row)}
+                  <!-- The case holds nothing from this address. Offering to fetch it here
+                       is the difference between a proof that names its material and one
+                       that holds it. -->
+                  <button
+                    class="meta-fetch"
+                    title="The case has nothing from this address. Download it"
+                    disabled={!!sourceJob}
+                    onclick={() => fetchSource(row)}
+                  >
+                    <Icon name={sourceJob?.url === row.trim() ? 'clock' : 'download'} size={12} />
+                  </button>
+                {/if}
+                {#if sourceRows.length > 1}
+                  <button class="meta-drop" title="Remove this source" onclick={() => dropSource(at)}>
+                    <Icon name="x" size={12} />
+                  </button>
+                {/if}
+              </div>
+            {/each}
+          </div>
+
+          <!-- One sentence about what the proof shows. It is the proof's notes, so
+               the graph shows it and case search finds it, and it is what a post is
+               written from instead of a filename. -->
+          <div class="meta-field" data-guide="proof.meta">
+            <div class="meta-head">
+              <Icon name="note" size={13} />
+              <span>Description</span>
+              <span class="meta-optional">optional</span>
+            </div>
+            <textarea
+              class="input meta-input desc-input"
+              rows="2"
+              maxlength="2000"
+              placeholder="A formation of 13 helicopters heading east"
+              value={proof.description}
+              oninput={(e) => { proof.description = e.target.value; dirty = true; }}
+            ></textarea>
+          </div>
+
+          <!-- When the material was taken. Not the day it was published and not the
+               day it was filed — the case already holds both of those, read off the
+               file. This is the analyst's answer, and it is what the Timeline shows
+               the proof at. Nothing of it reaches the plate. -->
+          <div class="meta-field" data-guide="proof.meta">
+            <div class="meta-head">
+              <Icon name="clock" size={13} />
+              <span>Date</span>
+              <span class="meta-optional">optional</span>
+              <!-- Unlike the coordinates and the source, nothing fills this in and
+                   nothing marks it missing. Both would be the same mistake: the date
+                   a file carries is when it was uploaded or when a camera clock said
+                   it was, and neither is when the thing happened. Offered, it would
+                   be accepted without being read, and this date is stated for the
+                   footage itself. So it is typed on purpose, or it stays unknown —
+                   and the bin empties it back to unknown in one press. -->
+              {#if proof.when.trim()}
+                <button
+                  class="meta-clear"
+                  title="Clear the date"
+                  onclick={() => { proof.when = ''; dirty = true; }}
+                >
+                  <Icon name="trash" size={12} />
+                </button>
+              {/if}
+            </div>
+            <!-- The calendar builds the common answer, a whole day, for the
+                 analyst who would rather point at one than spell it; a month, a
+                 range or a mark of doubt is still typed, which is what the
+                 placeholder shows. -->
+            <DateField
+              id="proof-when"
+              label="Date the material was taken"
+              placeholder="dd/mm/yyyy · Oct 2025 · ~2025"
+              calendar
+              zone={proof.whenZone || pointZone || null}
+              value={proof.when}
+              onchange={(value) => { proof.when = value; dirty = true; }}
             />
-          {/each}
-          {#if proof.points.length > 1}
-            <div class="point-hint">Order decides the conclusion.</div>
-          {/if}
-        </div>
-        <div class="meta-field" data-guide="proof.meta">
-          <div class="meta-head">
-            <Icon name="link" size={13} />
-            <span>Source</span>
-            {#if !displayedSource}
-              <span class="meta-warn" title="Missing source link">
-                <Icon name="alert" size={13} />
-              </span>
-            {/if}
-            {#if proof.sources !== null}
-              <button class="meta-reset" title="Reset to the sources traced from the media" onclick={resetSources}>
-                <Icon name="reset" size={12} />
-              </button>
-            {/if}
-            <button
-              class="meta-add"
-              class:alone={proof.sources === null}
-              title="Add a source"
-              onclick={addSource}
-            >
-              <Icon name="plus" size={12} />
-            </button>
-          </div>
-          <!-- One row per address. A proof read from a thread rests on the post that
-               published it, the photos beside it and the clip under those, and each of
-               them is a link of its own. -->
-          {#each sourceRows as row, at (at)}
-            <div class="meta-row">
-              <!-- The address itself, one press away in a tab of its own: a
-                   source is read far more often than it is typed, and copying a
-                   link into the browser to see what it points at is the long way
-                   round. -->
-              <div class="field-with-act source-field" class:warn={!displayedSource}>
-                <input
-                  class="input meta-input"
-                  placeholder="https://…"
-                  value={row}
-                  oninput={(e) => editSource(at, e.target.value)}
-                />
-                <a
-                  class="field-act"
-                  class:disabled={!openableSource(row)}
-                  href={openableSource(row) || undefined}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={openableSource(row) ? 'Open this source in a new tab' : 'Not a web address'}
-                  aria-disabled={!openableSource(row)}
-                  onclick={(e) => { if (!openableSource(row)) e.preventDefault(); }}
-                >
-                  <Icon name="external" size={13} />
-                </a>
-              </div>
-              {#if missingSource(row)}
-                <!-- The case holds nothing from this address. Offering to fetch it here
-                     is the difference between a proof that names its material and one
-                     that holds it. -->
-                <button
-                  class="meta-fetch"
-                  title="The case has nothing from this address. Download it"
-                  disabled={!!sourceJob}
-                  onclick={() => fetchSource(row)}
-                >
-                  <Icon name={sourceJob?.url === row.trim() ? 'clock' : 'download'} size={12} />
-                </button>
-              {/if}
-              {#if sourceRows.length > 1}
-                <button class="meta-drop" title="Remove this source" onclick={() => dropSource(at)}>
-                  <Icon name="x" size={12} />
-                </button>
-              {/if}
-            </div>
-          {/each}
-        </div>
-
-        <!-- One sentence about what the proof shows. It is the proof's notes, so
-             the graph shows it and case search finds it, and it is what a post is
-             written from instead of a filename. -->
-        <div class="meta-field" data-guide="proof.meta">
-          <div class="meta-head">
-            <Icon name="note" size={13} />
-            <span>Description</span>
-            <span class="meta-optional">optional</span>
-          </div>
-          <textarea
-            class="input meta-input desc-input"
-            rows="2"
-            maxlength="2000"
-            placeholder="A formation of 13 helicopters heading east"
-            value={proof.description}
-            oninput={(e) => { proof.description = e.target.value; dirty = true; }}
-          ></textarea>
-        </div>
-
-        <!-- When the material was taken. Not the day it was published and not the
-             day it was filed — the case already holds both of those, read off the
-             file. This is the analyst's answer, and it is what the Timeline shows
-             the proof at. Nothing of it reaches the plate. -->
-        <div class="meta-field" data-guide="proof.meta">
-          <div class="meta-head">
-            <Icon name="clock" size={13} />
-            <span>Date</span>
-            <span class="meta-optional">optional</span>
-            <!-- Unlike the coordinates and the source, nothing fills this in and
-                 nothing marks it missing. Both would be the same mistake: the date
-                 a file carries is when it was uploaded or when a camera clock said
-                 it was, and neither is when the thing happened. Offered, it would
-                 be accepted without being read, and this date is stated for the
-                 footage itself. So it is typed on purpose, or it stays unknown —
-                 and the bin empties it back to unknown in one press. -->
+            <!-- Which clock the date is read on. A day is that place's day, so the
+                 default follows the first point and is named here rather than
+                 assumed: without it the Timeline would put Kyiv's 12th on UTC's. -->
             {#if proof.when.trim()}
-              <button
-                class="meta-clear"
-                title="Clear the date"
-                onclick={() => { proof.when = ''; dirty = true; }}
-              >
-                <Icon name="trash" size={12} />
-              </button>
+              <div class="when-zone">
+                <span class="when-zone-label">Clock</span>
+                <ClockField
+                  value={proof.when}
+                  clock={{ zone: proof.whenZone || pointZone || 'UTC', fixed: '' }}
+                  here={pointZone ? [{ zone: pointZone, place: 'the point' }] : []}
+                  onpick={pickClock}
+                />
+                {#if !proof.whenZone && !pointZone}
+                  <p class="when-zone-note">No point yet, so the day is read in UTC.</p>
+                {/if}
+              </div>
             {/if}
           </div>
-          <!-- The calendar builds the common answer, a whole day, for the
-               analyst who would rather point at one than spell it; a month, a
-               range or a mark of doubt is still typed, which is what the
-               placeholder shows. -->
-          <DateField
-            id="proof-when"
-            label="Date the material was taken"
-            placeholder="dd/mm/yyyy · Oct 2025 · ~2025"
-            calendar
-            zone={proof.whenZone || pointZone || null}
-            value={proof.when}
-            onchange={(value) => { proof.when = value; dirty = true; }}
-          />
-          <!-- Which clock the date is read on. A day is that place's day, so the
-               default follows the first point and is named here rather than
-               assumed: without it the Timeline would put Kyiv's 12th on UTC's. -->
-          {#if proof.when.trim()}
-            <div class="when-zone">
-              <span class="when-zone-label">Clock</span>
-              <ClockField
-                value={proof.when}
-                clock={{ zone: proof.whenZone || pointZone || 'UTC', fixed: '' }}
-                here={pointZone ? [{ zone: pointZone, place: 'the point' }] : []}
-                onpick={pickClock}
-              />
-              {#if !proof.whenZone && !pointZone}
-                <p class="when-zone-note">No point yet, so the day is read in UTC.</p>
-              {/if}
-            </div>
-          {/if}
         </div>
 
-        <!-- Where in its video the proof happens: only for a proof built on one. -->
+        <!-- Where in its video the proof happens: only for a proof built on one. The
+             player has the tab to itself, and is paused whenever the tab is left. -->
         {#if scene.videos.length}
-          <div class="meta-field">
-            <SceneBlock {scene} caseId={caseState.current?.id} color={sceneHue} onaddframe={addSceneFrame} />
+          <div class="side-scroll" role="tabpanel" id="proof-pane-scene" aria-labelledby="proof-tab-scene" hidden={sideShown !== 'scene'}>
+            <SceneBlock {scene} caseId={caseState.current?.id} color={sceneHue} active={sideShown === 'scene'} onaddframe={addSceneFrame} />
           </div>
         {/if}
 
-        <ProofLayersPanel
-          {proof}
-          {collapsed}
-          {gonePanels}
-          {selectedPanelId}
-          {selectedPasteId}
-          {selectedIds}
-          {selectionLive}
-          selectShape={pickShapeRow}
-          selectPanelRow={pickPanelRow}
-          selectPasteRow={pickPasteRow}
-          {activeColor}
-          caseId={caseState.current?.id}
-          scaleMin={PANEL_SCALE_MIN}
-          scaleMax={PANEL_SCALE_MAX}
-          scaleStep={SCALE_STEP}
-          {openPicker}
-          {movePanelZ}
-          {scalePanel}
-          openCrop={beginSurfaceCrop}
-          resetCrop={resetSurfaceCrop}
-          {removePanel}
-          {movePasteZ}
-          {removePaste}
-          {pickImageFile}
-          {featureList}
-          {moveLegendColor}
-          {setColor}
-          {moveShapeTo}
-          kindIcon={KIND_ICON}
-          kindLabel={KIND_LABEL}
-          {duplicateShape}
-          {deleteShape}
-          markDirty={() => (dirty = true)}
-        />
+        <!-- Where composing happens: the panels, the overlays, the annotations and the elements. -->
+        <div class="side-scroll" role="tabpanel" id="proof-pane-layout" aria-labelledby="proof-tab-layout" hidden={sideShown !== 'layout'}>
+          <ProofLayersPanel
+            {proof}
+            {collapsed}
+            {gonePanels}
+            {selectedPanelId}
+            {selectedPasteId}
+            {selectedIds}
+            {selectionLive}
+            selectShape={pickShapeRow}
+            selectPanelRow={pickPanelRow}
+            selectPasteRow={pickPasteRow}
+            {activeColor}
+            caseId={caseState.current?.id}
+            scaleMin={PANEL_SCALE_MIN}
+            scaleMax={PANEL_SCALE_MAX}
+            scaleStep={SCALE_STEP}
+            {openPicker}
+            {movePanelZ}
+            {scalePanel}
+            openCrop={beginSurfaceCrop}
+            resetCrop={resetSurfaceCrop}
+            {removePanel}
+            {movePasteZ}
+            {removePaste}
+            {pickImageFile}
+            {featureList}
+            {moveLegendColor}
+            {setColor}
+            {moveShapeTo}
+            kindIcon={KIND_ICON}
+            kindLabel={KIND_LABEL}
+            {duplicateShape}
+            {deleteShape}
+            markDirty={() => (dirty = true)}
+          />
+        </div>
 
-        <!-- Advanced: text sizes, editable footer, signature (the trickier knobs) -->
-        <button class="adv-toggle" onclick={() => (advancedOpen = !advancedOpen)} style="margin-top: 14px">
-          <Icon name={advancedOpen ? 'chevronDown' : 'chevronRight'} size={13} />
-          Advanced: text, footer &amp; signature
-        </button>
-        {#if advancedOpen}
-          <div class="adv-body">
-            <label class="sig-check">
-              <input
-                type="checkbox"
-                checked={proof.captionsEnabled !== false}
-                onchange={(e) => {
-                  proof.captionsEnabled = e.currentTarget.checked;
-                  dirty = true;
-                }}
-              />
-              <span>Caption new panels</span>
-            </label>
-            <label class="adv-font">
+        <!-- The look: the house style, then the words, the footer and the signature. -->
+        <div class="side-scroll" role="tabpanel" id="proof-pane-style" aria-labelledby="proof-tab-style" hidden={sideShown !== 'style'}>
+          <!-- House style stays independent from content. A new proof can keep a
+               selected template while its canvas remains empty until panels land. -->
+          <div class="meta-field">
+            <div class="meta-head">
+              <Icon name="layers" size={13} />
+              <span>House style</span>
+              {#if templatesState.proof.length}
+                <button
+                  class="tpl-settings-link"
+                  type="button"
+                  title="Manage proof styles in Settings"
+                  onclick={openTemplateSettings}
+                >
+                  Settings templates
+                </button>
+              {/if}
+            </div>
+            {#if templatesState.proof.length}
+              <select
+                class="input meta-input"
+                value={appliedTemplate?.id ?? ''}
+                title="Choose a saved house style"
+                onchange={applyFromSelect}
+              >
+                <option value="">No template</option>
+                {#each templatesState.proof as t (t.id)}
+                  <option value={t.id}>{t.name}</option>
+                {/each}
+              </select>
+            {:else}
+              <p class="tpl-none">
+                No templates yet.
+                <button
+                  class="tpl-inline-link"
+                  type="button"
+                  title="Open Settings → Templates to create your first house style"
+                  onclick={openTemplateSettings}
+                >
+                  Create one in Settings → Templates.
+                </button>
+              </p>
+            {/if}
+          </div>
+
+          <div class="meta-field">
+            <div class="meta-head">
+              <Icon name="text" size={13} />
+              <span>Text</span>
+            </div>
+            <label class="size-row">
               <span>Font</span>
               <select
                 class="input"
@@ -6909,8 +6943,19 @@
               />
               <span>Labels, callouts and tags in bold</span>
             </label>
-            <div class="adv-hint">Off: added panels start blank. You can still type a caption on any panel.</div>
-            <div class="size-row">
+            <label class="sig-check">
+              <input
+                type="checkbox"
+                checked={proof.captionsEnabled !== false}
+                onchange={(e) => {
+                  proof.captionsEnabled = e.currentTarget.checked;
+                  dirty = true;
+                }}
+              />
+              <span>Caption new panels</span>
+            </label>
+            <div class="side-hint">Off: added panels start blank. You can still type a caption on any panel.</div>
+            <div class="size-row first">
               <span>Caption size</span>
               <input class="size-slider" type="range" min="10" max="40" step="1"
                 bind:value={proof.captionSize} oninput={() => (dirty = true)} />
@@ -6933,10 +6978,17 @@
                 <span>Scene time on the picture</span>
               </label>
               {#if proof.sceneBadge && !scene.moments.length}
-                <div class="adv-hint">The proof is about the whole video, which has no time to print.</div>
+                <div class="side-hint">The proof is about the whole video, which has no time to print.</div>
               {/if}
             {/if}
-            <label class="sig-check">
+          </div>
+
+          <div class="meta-field">
+            <div class="meta-head">
+              <Icon name="alignBottom" size={13} />
+              <span>Footer</span>
+            </div>
+            <label class="sig-check first">
               <input
                 type="checkbox"
                 checked={proof.footerEnabled !== false}
@@ -6948,7 +7000,7 @@
               <span>Show footer</span>
             </label>
             {#if proof.footerEnabled !== false}
-              <div class="size-row">
+              <div class="size-row first">
                 <span>Footer size</span>
                 <input class="size-slider" type="range" min="10" max="32" step="1"
                   bind:value={proof.footerSize} oninput={() => (dirty = true)} />
@@ -6981,7 +7033,7 @@
                   />
                   <span>Imagery credits</span>
                 </label>
-                <label class="adv-label" for="footer-text">Footer text</label>
+                <label class="side-label" for="footer-text">Footer text</label>
                 <textarea
                   id="footer-text"
                   class="input footer-input"
@@ -6990,8 +7042,9 @@
                   bind:value={proof.footer}
                   oninput={() => (dirty = true)}
                 ></textarea>
+                <div class="side-hint">Leave empty for “Composed with Azimut”.</div>
               {/if}
-              <div class="size-row">
+              <div class="size-row first">
                 <span>Footer alignment</span>
                 <select class="input" bind:value={proof.footerAlign}
                   onchange={() => (dirty = true)}>
@@ -6999,12 +7052,17 @@
                   <option value="right">Right</option>
                 </select>
               </div>
-              <div class="adv-hint">Leave empty for “Composed with Azimut”.</div>
             {:else}
-              <div class="adv-hint">The band under the panels is gone. Drop all margins for panels-only output.</div>
+              <div class="side-hint">The band under the panels is gone. Drop all margins for panels-only output.</div>
             {/if}
+          </div>
 
-            <label class="sig-check">
+          <div class="meta-field">
+            <div class="meta-head">
+              <Icon name="edit" size={13} />
+              <span>Signature</span>
+            </div>
+            <label class="sig-check first">
               <input
                 type="checkbox"
                 disabled={!sigImg}
@@ -7014,10 +7072,10 @@
                   dirty = true;
                 }}
               />
-              <span>Signature</span>
+              <span>Logo</span>
             </label>
             {#if !sigImg}
-              <div class="adv-hint">Add a logo in Settings → Publishing to sign your proofs.</div>
+              <div class="side-hint">Add a logo in Settings → Publishing to sign your proofs.</div>
             {:else if proof.signature}
               <div class="sig-anchors">
                 {#each SIG_ANCHORS as a (a.id)}
@@ -7061,7 +7119,7 @@
                   }} />
                 <span class="size-val">{Math.round(proof.signature.opacity * 100)}%</span>
               </div>
-              <div class="adv-hint">Drag the logo on the canvas to nudge it off the corner.</div>
+              <div class="side-hint">Drag the logo on the canvas to nudge it off the corner.</div>
             {/if}
 
             <label class="sig-check">
@@ -7077,12 +7135,11 @@
               <span>Add account handle</span>
             </label>
             {#if !prefs.signatureHandle?.trim()}
-              <div class="adv-hint">Add your account handle in Settings → Publishing to use it on proofs.</div>
+              <div class="side-hint">Add your account handle in Settings → Publishing to use it on proofs.</div>
             {:else if proof.signatureText}
-              <div class="adv-hint">Drag the account handle on the canvas to place it.</div>
+              <div class="side-hint">Drag the account handle on the canvas to place it.</div>
             {/if}
           </div>
-        {/if}
         </div>
       </aside>
     {/if}
@@ -7425,6 +7482,11 @@
     padding: 14px 16px 12px;
     flex-shrink: 0;
   }
+  /* the name gives way first, then the secondary buttons keep their icons alone */
+  .tool-header .title-input { min-width: 140px; }
+  /* Folded to no width rather than taken out, so the button keeps the height of its
+     line of text and stands level with Save and To Post. */
+  .tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }
   .spacer { flex: 1; }
   .export-split {
     position: relative;
@@ -7514,13 +7576,21 @@
     border-left: 1px solid var(--border);
     background: var(--bg-1);
     display: flex;
+    flex-direction: column;
     min-height: 0;
   }
+  /* One scroller per tab, so each keeps its place when the analyst comes back to it. */
   .side-scroll {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 12px;
   }
+  .side-scroll[hidden] { display: none; }
+  /* A tab's last field needs no gap under it. */
+  .side-scroll > .meta-field:last-child { margin-bottom: 0; }
+  /* The look's groups stand apart: the house style, the words, the footer, the signature. */
+  #proof-pane-style > .meta-field + .meta-field { margin-top: 18px; }
   .meta-field { margin-bottom: 10px; }
   .when-zone { margin-top: 6px; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 8px; }
   .when-zone-label { font-size: var(--fs-xs); color: var(--text-3); }
@@ -7641,20 +7711,6 @@
   .point-label { width: 100%; min-width: 0; font-size: var(--fs-xs); padding: 5px 8px; }
   .point-hint { margin-top: 5px; font-size: var(--fs-xs); color: var(--text-3); }
   .desc-input { resize: vertical; min-height: 44px; line-height: 1.35; }
-  .adv-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    padding: 6px 2px;
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--text-2);
-  }
-  .adv-toggle:hover { color: var(--text-1); }
-  .adv-body { padding: 4px 2px 2px; }
   .size-row {
     display: flex;
     align-items: center;
@@ -7663,10 +7719,11 @@
     font-size: var(--fs-xs);
     color: var(--text-3);
   }
-  .size-row span:first-child { min-width: 78px; }
+  .size-row span:first-child { min-width: 78px; white-space: nowrap; }
+  .size-row select { flex: 1; min-width: 0; font-size: var(--fs-xs); padding: 4px 6px; }
   .size-slider { flex: 1; accent-color: var(--accent); }
   .size-val { min-width: 18px; text-align: right; color: var(--text-2); }
-  .adv-label {
+  .side-label {
     display: block;
     font-size: var(--fs-xs);
     color: var(--text-3);
@@ -7678,9 +7735,7 @@
     resize: vertical;
     font-family: inherit;
   }
-  .adv-hint { font-size: 11px; color: var(--text-3); margin-top: 5px; }
-  .adv-font { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--text-2); }
-  .adv-font select { flex: 1; min-width: 0; }
+  .side-hint { font-size: 11px; color: var(--text-3); margin-top: 5px; }
   .sig-check {
     display: flex;
     align-items: center;
@@ -7689,6 +7744,9 @@
     font-size: var(--fs-xs);
     cursor: pointer;
   }
+  /* the first control under a group's heading, or the first row after a hint */
+  .sig-check.first { margin-top: 2px; }
+  .size-row.first { margin-top: 12px; }
   .sig-check input:disabled { cursor: not-allowed; }
   .sig-check:has(input:disabled) { color: var(--text-3); cursor: not-allowed; }
   .sig-anchors {

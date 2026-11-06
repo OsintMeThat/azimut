@@ -135,8 +135,8 @@ describe('a proof never saved', () => {
   });
 });
 
-describe('the player under the field', () => {
-  it('opens on a video, paused at a frame or running, and folds with a time kept', async () => {
+describe('the player in the Scene tab', () => {
+  it('opens on a video, paused at a frame or running, and keeps a time open as the tab is left', async () => {
     const { scene, puts } = setup();
     scene.show(CLIP, { play: true });
     expect(scene.view).toMatchObject({ video: CLIP, play: true, n: 1 });
@@ -144,8 +144,10 @@ describe('the player under the field', () => {
     expect(scene.view).toMatchObject({ at: 130, play: false, n: 2 });
     scene.openTime();
     scene.edit.here('start', { start: 131, end: 131.04 });
-    scene.fold();
-    expect(scene.view).toBeNull();
+    scene.leaveTime();
+    // the player stays where it stood, for the tab shown again
+    expect(scene.view).toMatchObject({ video: CLIP, n: 3 });
+    expect(scene.edit.scene).toBeNull();
     await vi.waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0].body.moments).toEqual([{ start: 131, end: null }]);
   });

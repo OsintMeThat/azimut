@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { PANEL_PATH, installAppFixture, openProofWithPanel } from './app.fixture.js';
+import { PANEL_PATH, installAppFixture, openProofWithPanel, showProofTab } from './app.fixture.js';
 
 /**
  * The clock a proof's date is read on. A day is the day of the place the footage
@@ -21,6 +21,7 @@ const framed = {
 test('reads the date on the point’s clock, and sends another only once picked', async ({ page }) => {
   const fixture = await installAppFixture(page, { satCaptures: [framed] });
   await openProofWithPanel(page);
+  await showProofTab(page, 'Proof');
 
   const clock = page.locator('.when-zone .clock-trigger');
   await expect(clock).toHaveCount(0);

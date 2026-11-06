@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CASE_ID, installAppFixture, openProofWithPanel } from './app.fixture.js';
+import { CASE_ID, installAppFixture, openProofWithPanel, showProofTab } from './app.fixture.js';
 
 /**
  * A proof's point joining one of the analyst's layers, from the point's menu.
@@ -28,6 +28,7 @@ test('a point’s menu goes from the layer to its group to the marker’s icon, 
   await installAppFixture(page);
   await page.route(`**/api/cases/${CASE_ID}/layer-targets**`, (route) => route.fulfill({ json: LAYERS }));
   await openProofWithPanel(page);
+  await showProofTab(page, 'Proof');
   const row = page.locator('.point-row').first();
   await row.locator('.meta-input').fill('48.858400, 2.294500');
   await page.getByTitle('Add a point').click();

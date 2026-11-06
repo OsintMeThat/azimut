@@ -711,7 +711,7 @@ export const PAGES = {
       { title: 'The point becomes a place', text: 'Saving files its coordinates as a place on the map, and says the proof shows it.' },
       { title: 'A house style', text: 'A template made in Settings, Templates gives every proof the same look.' },
       { title: 'Right-click the page', text: 'Brings forward, sends back, duplicates or deletes the mark under the cursor.' },
-      { title: 'A proof from a video', text: 'Its Scene field plays the moments the place shows in, and Add this frame makes the frame on screen a panel.' },
+      { title: 'A proof from a video', text: 'Its Scene tab plays the moments the place shows in, and Add this frame makes the frame on screen a panel.' },
     ],
   },
   post: {

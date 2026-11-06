@@ -16,7 +16,8 @@
   // bar (`components/SceneTimeEditor`, which Geo Proof opens too). A proof may hold
   // several moments, a draft one. A press on the player hands the keys back to it,
   // so S and the arrows act on the frame, not on a field. A scene still to prove is
-  // made into one from its row: Geo Proof opens on it.
+  // made into one from its row, where Make the proof is said in words under its
+  // name: Geo Proof opens on it.
   let {
     scenes = [],
     edit = null,
@@ -96,8 +97,8 @@
       {@const inHand = editing?.key === sc.key}
       {@const whole = isWholeVideo(sc)}
       <div class="scene-row" class:open={inHand} style:--scene={sc.color} data-testid="scene-row">
+        <span class="swatch" aria-hidden="true"></span>
         <div class="line">
-          <span class="swatch" aria-hidden="true"></span>
           {#if loop}
             <button class="go" onclick={() => onplay?.(sc)} title={INSPECT_HELP.scenePlay} aria-label="Play scene">
               <Icon name="play" size={10} />
@@ -131,19 +132,23 @@
               title={INSPECT_HELP.sceneLabel}
               onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
             />
-            {#if !inHand && !whole}
-              <button class="btn btn-ghost btn-xs" onclick={() => onend?.(sc.id)} title={INSPECT_HELP.sceneEnd}>End here</button>
-            {/if}
-            {#if !inHand}
-              <button class="btn btn-ghost btn-xs make" onclick={() => onmakeproof?.(sc)} title={INSPECT_HELP.sceneMakeProof} aria-label="Make the proof">
-                <Icon name="proof" size={12} />
-              </button>
-            {/if}
-            <button class="btn btn-ghost btn-xs" onclick={() => onremove?.(sc.id)} title={INSPECT_HELP.sceneRemove} aria-label="Remove scene">
+            <button class="btn btn-ghost btn-xs drop" onclick={() => onremove?.(sc.id)} title={INSPECT_HELP.sceneRemove} aria-label="Remove scene">
               <Icon name="x" size={12} />
             </button>
           {/if}
         </div>
+        <!-- What a scene still to prove can become, under its time: a passage, then a proof.
+             The editor's own End takes the place of these while its time is open. -->
+        {#if sc.kind !== 'proof' && !inHand}
+          <div class="acts">
+            {#if !whole}
+              <button class="btn btn-ghost btn-xs" onclick={() => onend?.(sc.id)} title={INSPECT_HELP.sceneEnd}>End here</button>
+            {/if}
+            <button class="btn btn-ghost btn-xs make" onclick={() => onmakeproof?.(sc)} title={INSPECT_HELP.sceneMakeProof} aria-label="Make the proof">
+              <Icon name="proof" size={12} /> Make the proof
+            </button>
+          </div>
+        {/if}
         {#if inHand}
           <div class="in-row">
             <SceneTimeEditor
@@ -165,9 +170,10 @@
 </aside>
 
 <style>
+  /* It gives way down to 260 px rather than leave the picture a sliver. */
   .scene-panel {
-    flex: 0 0 320px;
-    width: 320px;
+    flex: 0 1 320px;
+    min-width: 260px;
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -223,18 +229,22 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 6px;
     padding: 0 8px 8px;
   }
+  /* The scene's colour runs down its whole row: its line, what it can become, its time. */
   .scene-row {
+    position: relative;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 3px;
+    padding-left: 8px;
     border-radius: var(--r-sm);
   }
   .scene-row.open {
-    padding: 0 0 8px;
+    gap: 6px;
+    padding-bottom: 8px;
     background: var(--bg-0);
     box-shadow: inset 0 0 0 1px var(--border);
   }
@@ -243,14 +253,23 @@
     align-items: center;
     gap: 4px;
     min-width: 0;
+    min-height: 26px;
   }
   .swatch {
-    flex-shrink: 0;
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
     width: 4px;
-    align-self: stretch;
-    min-height: 26px;
     border-radius: 2px;
     background: var(--scene);
+  }
+  /* under the time, past the play press */
+  .acts {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-left: 22px;
   }
   .go {
     flex-shrink: 0;
@@ -331,11 +350,21 @@
     font-size: var(--fs-xs);
     color: var(--ok);
   }
+  /* the step a scene to prove is waiting for, its mark in the accent */
+  .make {
+    margin-left: auto;
+  }
+  .make :global(svg) {
+    color: var(--accent);
+  }
   .make:hover {
     color: var(--accent);
   }
-  /* The scene's time, opened in its own row: indented past the swatch. */
+  .drop {
+    flex-shrink: 0;
+  }
+  /* The scene's time, opened in its own row, under its line. */
   .in-row {
-    padding: 0 8px 0 12px;
+    padding: 0 8px 0 4px;
   }
 </style>
