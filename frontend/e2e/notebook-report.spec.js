@@ -533,10 +533,12 @@ test('a picture bar in the note is one Tab away, walked with the arrows, and kee
   await page.keyboard.press('Escape');
   await page.keyboard.press('Tab');
   const bar = page.locator('.cm-block-picture [data-size-bar]');
-  await expect(bar.getByRole('button', { name: 'S', exact: true })).toBeFocused();
+  await expect(bar.getByRole('button', { name: 'XXS', exact: true })).toBeFocused();
   await expect(bar).toHaveCSS('opacity', '1');
-  await page.keyboard.press('ArrowRight');
-  await expect(bar.getByRole('button', { name: 'M', exact: true })).toBeFocused();
+  for (const size of ['XS', 'S', 'M']) {
+    await page.keyboard.press('ArrowRight');
+    await expect(bar.getByRole('button', { name: size, exact: true })).toBeFocused();
+  }
   await page.keyboard.press('Enter');
   await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('[[media:m1|Roof]]{width=50%}');
   await expect(page.locator('.cm-block-picture [data-size-bar]').getByRole('button', { name: 'M', exact: true })).toBeFocused();
