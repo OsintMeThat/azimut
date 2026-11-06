@@ -295,10 +295,15 @@ export const uiState = $state({
   // A scene of Inspect to make a proof of: { video, moments, draft, panels, label },
   // the panels its saved frames' paths. Geo Proof opens a new proof on it.
   proofScene: null,
+  // A scene being geolocated, for Satellite to open its video as a reference window:
+  // { video, draft, start, end, label } (`lib/geolocating.svelte.js`, geolocateScene).
+  geolocateRef: null,
   openDraft: null, // draft name to load in the Post Composer
   openNotebook: null, // { noteId: string|null, line? }; null noteId opens case notes.md, `home` the Notebook's home
   openNoteTemplate: null, // note template id to edit in the Notebook, from Settings
   inspectPath: null, // media path to open in the Inspect tool
+  // A scene to open in Inspect: { video, draft }, its video opened on it, the drawer on its row.
+  inspectScene: null,
   /**
    * A picture handed to Reverse Search from wherever it is being looked at, in the
    * shape `normalizeReverseTarget` (lib/reverseSearch.js) returns: a case file by
@@ -715,9 +720,11 @@ function clearCaseHandoffs() {
   uiState.postProof = null;
   uiState.openProof = null;
   uiState.proofScene = null;
+  uiState.geolocateRef = null;
   uiState.openDraft = null;
   uiState.openNotebook = null;
   uiState.inspectPath = null;
+  uiState.inspectScene = null;
   uiState.reverseTarget = null;
   uiState.focusMedia = null;
   uiState.focusCapture = null;

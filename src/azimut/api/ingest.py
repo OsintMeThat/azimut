@@ -50,7 +50,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .. import __version__, config, errors
 from ..engine import (
@@ -59,6 +59,7 @@ from ..engine import (
     firms,
     firmspoints,
     geo,
+    geolocate,
     inspect as inspect_engine,
     mapsites,
     media as media_engine,
@@ -68,6 +69,7 @@ from ..engine import (
 from ..workspace import Case, CaseError
 from . import events
 from .cases import get_case
+from .inspect import attach_capture, say_geolocating
 from .limits import MAX_IMAGE_BYTES
 from .satellite import (
     GridSaveIn,
@@ -481,6 +483,8 @@ async def ingest_screenshot(
         {"type": "capture", "case_id": case.id, "path": result["item"]["path"],
          "title": label, "site": site}
     )
+    # the scene being geolocated gathers it, as it gathers the app's own captures
+    scene = attach_capture(case, result["item"]["path"])
     return {
         "path": result["item"]["path"],
         "entity_id": result["entity"]["id"],
@@ -489,6 +493,7 @@ async def ingest_screenshot(
         **provenance,
         # a word for the analyst, said once where the capture was taken; filed nowhere
         **({"notice": notice} if notice else {}),
+        **({"scene": scene} if scene else {}),
     }
 
 
@@ -887,6 +892,41 @@ def mark_grid(body: GridMarksIn) -> dict[str, Any]:
     marked there in between.
     """
     return apply_grid_marks(get_case(body.case_id), body.name, body.marks)
+
+
+# ---- the scenes to geolocate (engine/geolocate.py) ----------------------------
+
+
+class GeolocatingIn(BaseModel):
+    case_id: str = Field(min_length=1, max_length=200)
+    # both to geolocate a scene, neither to stop
+    video: str | None = Field(default=None, min_length=1, max_length=1024)
+    draft: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+@router.get("/scenes", dependencies=[Depends(require_token)])
+def scenes(case_id: str) -> dict[str, Any]:
+    """The case's scenes still to prove, by file, and the one being geolocated: the
+    queue the map panel offers, as the app's To-do does."""
+    return geolocate.queue(get_case(case_id))
+
+
+@router.post("/geolocating", dependencies=[Depends(require_token)])
+def geolocating(body: GeolocatingIn) -> dict[str, Any]:
+    """Geolocate a scene from over another map, or stop. POST for both, since the
+    extension's origins are allowed GET and POST only (``install_cors``)."""
+    case = get_case(body.case_id)
+    if (body.video is None) != (body.draft is None):
+        raise HTTPException(status_code=422, detail="name the video and its scene, or neither to stop")
+    if body.video is None or body.draft is None:
+        if geolocate.stop(case):
+            say_geolocating(case)
+        return {"geolocating": None}
+    try:
+        geolocate.start(case, body.video, body.draft)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"geolocating": say_geolocating(case)}
 
 
 # ---- reading back: the attachments a hand-off carries -------------------------

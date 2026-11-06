@@ -181,17 +181,6 @@ def build_full_case(
     assert collage.status_code == 200, collage.text
     full.collage = collage.json()["item"]["path"]
 
-    # -- capture: a screenshot, which needs no network ------------------------
-    client.put("/api/settings/keys", json={"google_js": "AIza.js"})
-    shot = client.post(
-        f"/api/cases/{case_id}/satellite/screenshot",
-        files={"image": ("shot.png", _png(color=(40, 80, 40)), "image/png")},
-        data={"lat": "48.8584", "lon": "2.2945", "zoom": "18",
-              "provider": "google-js", "bearing": "45"},
-    )
-    assert shot.status_code == 200, shot.text
-    full.capture = client.get(f"/api/cases/{case_id}/satellite").json()[0]["path"]
-
     # -- inspect work: the photo's edits (depends-on) --------------------------
     work = client.put(
         f"/api/cases/{case_id}/inspect/work",
@@ -206,6 +195,22 @@ def build_full_case(
     )
     assert work.status_code == 200, work.text
     full.session = f".inspect/{work.json()['name']}.json"
+
+    # -- capture: a screenshot, which needs no network, taken while the photo's
+    #    scene is being geolocated, so the scene gathers it --------------------
+    geolocating = client.put(f"/api/cases/{case_id}/geolocating", json={"video": full.photo, "draft": "sc_1"})
+    assert geolocating.status_code == 200, geolocating.text
+    client.put("/api/settings/keys", json={"google_js": "AIza.js"})
+    shot = client.post(
+        f"/api/cases/{case_id}/satellite/screenshot",
+        files={"image": ("shot.png", _png(color=(40, 80, 40)), "image/png")},
+        data={"lat": "48.8584", "lon": "2.2945", "zoom": "18",
+              "provider": "google-js", "bearing": "45"},
+    )
+    assert shot.status_code == 200, shot.text
+    assert shot.json()["scene"]["id"] == "sc_1", shot.text
+    assert client.delete(f"/api/cases/{case_id}/geolocating").json() == {"ended": True}
+    full.capture = client.get(f"/api/cases/{case_id}/satellite").json()[0]["path"]
 
     # -- a collage layout: pieces from both uploads, its own document ---------
     layout_doc = client.post(

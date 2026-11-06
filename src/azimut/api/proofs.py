@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from .. import config
 from ..engine import artifacts as artifact_engine
 from ..engine import copernicus_credit
-from ..engine import exportdir, layerediting
+from ..engine import exportdir, geolocate, layerediting
 from ..engine import links as link_engine
 from ..engine import localtime
 from ..engine import media as media_engine
@@ -42,6 +42,7 @@ from ..engine import thumbnails as thumbnail_engine
 from ..workspace import Case, CaseError, ensure_dir
 from .cases import delete_by_path, get_case
 from .cases.common import delete_entity_deep
+from .inspect import say_geolocating
 from .naming import case_only, holders, read_created_at, slugify
 from .satellite import locate_on_save
 from .. import layout
@@ -988,6 +989,9 @@ def state_proof_scene(case_id: str, name: str, body: SceneIn) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     # The date the proof states is about its moments: they moved, so it follows.
     _restate_dated_moments(case, name)
+    # A scene a proof takes up is proved: its geolocating is over.
+    if scene.get("draft") and geolocate.stop(case, scene["draft"]):
+        say_geolocating(case)
     return scene
 
 

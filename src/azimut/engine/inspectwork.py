@@ -32,7 +32,7 @@ import shutil
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from PIL import Image
 
@@ -79,6 +79,10 @@ _FRAME_KEYS = (
 )
 _MARK_KEYS = ("id", "time", "label")
 _SCENE_KEYS = ("id", "start", "end", "label")
+#: What a scene to prove holds that only the server writes (`engine/geolocate.py`): the
+#: captures gathered while it was being geolocated, and the word it was abandoned with.
+#: Inspect saves its scenes whole and never sends these, so a save keeps them.
+SCENE_STATE = ("captures", "abandoned")
 _PIECE_KEYS = ("id", "frameId", "save", "w", "h", "quad", "frameOps", "crop")
 _RIGHT_ANGLES = (-180, -90, 0, 90, 180)
 
@@ -383,6 +387,8 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
             title = layout.free_stem(_taken(case, layout.INSPECT_DIR), label, "Inspect")
             rel = layout.session_rel(title)
             created = _now()
+        if found:
+            _keep_scene_state(scenes, previous.get("scenes"))
         active = spec.get("activeFrameId")
         written = {
             "azimut_inspect": WORK_VERSION,
@@ -407,6 +413,50 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
             filed = case.add_entity(WORK_TYPE, title, attrs={"spec": rel}, by=PRODUCER)
         link_engine.sync(case, filed["id"], link_engine.DEPENDS_ON, [subject], by=PRODUCER)
     return {"name": Path(rel).stem, "title": title}
+
+
+def _keep_scene_state(scenes: list[dict[str, Any]], stored: Any) -> None:
+    """Carry what the server keeps on each scene over a save that never sends it."""
+    held = {s["id"]: s for s in stored or [] if isinstance(s, dict) and isinstance(s.get("id"), str)}
+    for scene in scenes:
+        for key in SCENE_STATE:
+            if key in held.get(scene["id"], {}):
+                scene[key] = held[scene["id"]][key]
+
+
+def update_scene(
+    case: "Case", subject: str, scene_id: str, change: Callable[[dict[str, Any]], None]
+) -> dict[str, Any]:
+    """Change one scene to prove in a file's work, and answer with it as written.
+
+    For what the server keeps on a scene (`SCENE_STATE`): the rest of the work is
+    written back as it was read, so nothing Inspect holds is touched.
+    """
+    with case.lock:
+        found = _settle(case, subject)
+        if not found:
+            raise CaseError("that file has no scenes")
+        rel, previous = found
+        scenes = [dict(s) for s in previous.get("scenes") or [] if isinstance(s, dict)]
+        target = next((s for s in scenes if s.get("id") == scene_id), None)
+        if target is None:
+            raise CaseError("that scene is no longer in its file's work")
+        change(target)
+        _write(case.resolve_inside(rel), {**previous, "scenes": scenes, "updated_at": _now()})
+    return target
+
+
+def scene_works(case: "Case") -> list[tuple[str, str | None, list[dict[str, Any]]]]:
+    """Every file whose work holds scenes to prove: (file, last touched, scenes),
+    most recently touched first."""
+    rows = []
+    for _rel, spec in _work_specs(case):
+        subject = _subject(spec)
+        scenes = [s for s in spec.get("scenes") or [] if isinstance(s, dict) and isinstance(s.get("id"), str)]
+        if subject and scenes and spec.get("azimut_inspect") == WORK_VERSION:
+            rows.append((subject, spec.get("updated_at"), scenes))
+    rows.sort(key=lambda row: row[1] or "", reverse=True)
+    return rows
 
 
 def scene_ids(case: "Case") -> set[str]:

@@ -308,6 +308,42 @@ def _order(scene: dict[str, Any]) -> tuple[float, float]:
     return (start, end if end is not None else start)
 
 
+#: The states of a scene still to prove (`engine/geolocate.py`); a proof is Proved.
+TODO = "todo"
+PROGRESS = "progress"
+ABANDONED = "abandoned"
+
+
+def _captured(case: Case, paths: Any) -> list[str]:
+    """The captures still in the case, in the order they were attached. One sent to
+    the Trash stays listed in the work and comes back with its file."""
+    wanted = [p for p in paths if isinstance(p, str) and p] if isinstance(paths, list) else []
+    if not wanted:
+        return []
+    present = {item.get("path") for item in case.media_items_by_paths(wanted)}
+    return [p for p in wanted if p in present]
+
+
+def draft_row(case: Case, video: str, draft: dict[str, Any]) -> dict[str, Any]:
+    """A scene still to prove as Inspect and the queue read it: its time, its label, its
+    state, the captures it gathered that are still in the case, and why it was left."""
+    captures = _captured(case, draft.get("captures"))
+    abandoned = draft.get("abandoned") if isinstance(draft.get("abandoned"), dict) else None
+    start = _seconds(draft.get("start"))
+    end = _seconds(draft.get("end")) if start is not None else None
+    return {
+        "kind": "draft",
+        "video": video,
+        "id": draft["id"],
+        "start": start,
+        "end": end,
+        "label": str(draft.get("label") or ""),
+        "state": ABANDONED if abandoned else PROGRESS if captures else TODO,
+        "captures": captures,
+        "abandoned": abandoned,
+    }
+
+
 def video_scenes(case: Case, video: str) -> dict[str, Any]:
     """The scenes of one video, in the order they come in the clip.
 
@@ -352,15 +388,7 @@ def video_scenes(case: Case, video: str) -> dict[str, Any]:
         whole = draft.get("start") is None and draft.get("end") is None
         if (start is None and not whole) or (start is not None and end is not None and end <= start):
             continue
-        scenes.append(
-            {
-                "kind": "draft",
-                "id": draft["id"],
-                "start": start,
-                "end": end if start is not None else None,
-                "label": str(draft.get("label") or ""),
-            }
-        )
+        scenes.append(draft_row(case, video, draft))
     scenes.sort(key=_order)
     return {"video": video, "video_id": entity["id"], "scenes": scenes, "used": used, "taken": hidden}
 

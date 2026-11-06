@@ -16,10 +16,12 @@ from pydantic import BaseModel, Field
 from .. import jobs
 from .. import layout
 from ..engine import artifacts as artifact_engine
+from ..engine import geolocate
 from ..engine import inspect as inspect_engine
 from ..engine import inspectwork
 from ..engine import scenes as scenes_engine
 from ..workspace import CaseError
+from . import events
 from .cases import delete_by_path, get_case
 from .naming import slugify
 
@@ -344,7 +346,98 @@ def list_scenes(case_id: str, video: str) -> dict[str, Any]:
     """The scenes of one video: the proofs resting on it and the stretches still to prove."""
     case = get_case(case_id)
     try:
-        return scenes_engine.video_scenes(case, video)
+        found = scenes_engine.video_scenes(case, video)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    held = geolocate.current(case)
+    # the scene of this video being geolocated, which Inspect marks in its list
+    return {**found, "geolocating": held["id"] if held and held["video"] == video else None}
+
+
+# -- geolocating a scene (engine/geolocate.py) ----------------------------------------
+
+
+class GeolocateIn(BaseModel):
+    video: str = Field(min_length=1, max_length=1024)
+    draft: str = Field(min_length=1, max_length=64)
+
+
+class AbandonIn(BaseModel):
+    video: str = Field(min_length=1, max_length=1024)
+    reason: str = Field(default="", max_length=geolocate.MAX_REASON)
+
+
+def say_geolocating(case: Any) -> dict[str, Any] | None:
+    """Tell every open surface, the app's tabs and the extension's map panels, which
+    scene the case is geolocating now, and answer with it."""
+    held = geolocate.current(case)
+    events.publish({
+        "type": "geolocating", "case_id": case.id,
+        "video": held["video"] if held else None, "draft": held["id"] if held else None,
+    })
+    return held
+
+
+def attach_capture(case: Any, path: str) -> dict[str, Any] | None:
+    """Attach a capture just filed to the scene the case is geolocating, if any, so the
+    capture's answer can say which. Every route that files a capture calls this."""
+    scene = geolocate.attach(case, path)
+    if scene is not None:
+        say_geolocating(case)
+    return scene
+
+
+@router.get("/cases/{case_id}/scenes/queue")
+def scene_queue(case_id: str) -> dict[str, Any]:
+    """Every scene still to prove in the case, by file, and the one being geolocated."""
+    return geolocate.queue(get_case(case_id))
+
+
+@router.get("/cases/{case_id}/geolocating")
+def geolocating(case_id: str) -> dict[str, Any]:
+    return {"geolocating": geolocate.current(get_case(case_id))}
+
+
+@router.put("/cases/{case_id}/geolocating")
+def start_geolocating(case_id: str, body: GeolocateIn) -> dict[str, Any]:
+    """Geolocate a scene: from now on every capture filed in the case is attached to it."""
+    case = get_case(case_id)
+    try:
+        geolocate.start(case, body.video, body.draft)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"geolocating": say_geolocating(case)}
+
+
+@router.delete("/cases/{case_id}/geolocating")
+def stop_geolocating(case_id: str) -> dict[str, Any]:
+    case = get_case(case_id)
+    ended = geolocate.stop(case)
+    if ended:
+        say_geolocating(case)
+    return {"ended": ended}
+
+
+@router.put("/cases/{case_id}/scenes/{draft}/abandon")
+def abandon_scene(case_id: str, draft: str, body: AbandonIn) -> dict[str, Any]:
+    """Give up on a scene to prove, with a word if there is one. It stays, greyed."""
+    case = get_case(case_id)
+    was = geolocate.current(case)
+    try:
+        scene = geolocate.abandon(case, body.video, draft, body.reason)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if was and was["id"] == draft:
+        say_geolocating(case)
+    return {"scene": scene}
+
+
+@router.delete("/cases/{case_id}/scenes/{draft}/abandon")
+def restore_scene(case_id: str, draft: str, video: str) -> dict[str, Any]:
+    """Take an abandoned scene up again, as it was."""
+    case = get_case(case_id)
+    try:
+        return {"scene": geolocate.restore(case, video, draft)}
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

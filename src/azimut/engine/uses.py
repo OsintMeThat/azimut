@@ -23,7 +23,7 @@ Past the chain:
 
 - a plate's picture or video, a collage's pieces, the photo laid over a Horizon view
   or on Horizon's bench, the photo a Horizon search is for, the video a proof states
-  its scene in: by media path;
+  its scene in, the captures a scene to geolocate gathered: by media path;
 - a personal layer's marker following an entity, a sheet's link, vocabulary word or
   attached file: by entity id;
 - an entity's photo chosen from Media (`entity_images`);
@@ -141,6 +141,15 @@ def _proof(data: dict[str, Any]) -> Iterator[Lean]:
         yield Lean(video, "geolocates a scene of it")
 
 
+def _work(data: dict[str, Any]) -> Iterator[Lean]:
+    # Its subject is its chain (`depends-on`), and the frames it filed are what it made.
+    for scene in data.get("scenes") or []:
+        captures = scene.get("captures") if isinstance(scene, dict) else None
+        for path in dict.fromkeys(captures if isinstance(captures, list) else []):
+            if isinstance(path, str) and path:
+                yield Lean(path, "gathers it for a scene to geolocate")
+
+
 def _routine(data: dict[str, Any]) -> Iterator[Lean]:
     # The pairs `delete_entities_deep` reads before it refuses to delete an area.
     pairs = data.get("area_dates")
@@ -156,6 +165,7 @@ def _routine(data: dict[str, Any]) -> Iterator[Lean]:
 _FOLDERS: tuple[tuple[str, str, Callable[[dict[str, Any]], Iterator[Lean]], str], ...] = (
     (layout.MAPPLATE_DIR, "*.json", _plate, mapplates.TYPE),
     (layout.COLLAGE_DIR, "*.json", _collage, inspectwork.COLLAGE_TYPE),
+    (layout.INSPECT_DIR, "*.json", _work, inspectwork.WORK_TYPE),
     (layout.HORIZON_DIR, "*.json", _view, horizon_views.TYPE),
     (f"{layout.HORIZON_DIR}/{layout.HORIZON_FINDS_DIR}", "*.json", _find, horizon_finds.TYPE),
     (layout.LAYERS_DIR, "*.json", _layer, maplayers.ENTITY_TYPE),

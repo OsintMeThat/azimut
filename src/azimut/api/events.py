@@ -23,6 +23,8 @@ decide whether the nudge is about the thing it is holding:
 ``grid``          a search grid was created or replaced (``name``, ``title``, ``revision``)
 ``grid-marks``    cells were marked on a grid (``name``, ``revision``)
 ``grid-removed``  a grid was discarded (``name``)
+``geolocating``    the scene being geolocated changed: started, ended, or a capture
+                  attached (``video`` and ``draft``, both null once it ended)
 
 The first three are the ones the analyst cannot see happening, so the app says so
 out loud when they arrive; the rest are quiet and only refresh what they name. The

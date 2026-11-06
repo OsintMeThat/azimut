@@ -52,6 +52,7 @@ from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
 from ..engine import horizon
 from .horizon import HEIGHT_LIMITS, SKYLINE_CUTS
+from .inspect import attach_capture
 from .naming import case_only, holders, read_created_at, slugify
 from .satellite import locate_on_save, saved_changed
 
@@ -697,7 +698,9 @@ async def keep_image(
     except (OSError, ValueError, CaseError) as exc:
         raise HTTPException(status_code=409, detail=f"could not keep the picture: {errors.explain(exc)}") from exc
     saved_changed(case)
-    return {"path": filed["item"]["path"], "entity": filed["entity"]["id"]}
+    answer = {"path": filed["item"]["path"], "entity": filed["entity"]["id"]}
+    scene = attach_capture(case, answer["path"])
+    return {**answer, "scene": scene} if scene else answer
 
 
 @router.post("/cases/{case_id}/horizon/captures")
@@ -761,7 +764,9 @@ async def capture_view(
     except (OSError, ValueError, CaseError) as exc:
         raise HTTPException(status_code=409, detail=f"could not file the capture: {errors.explain(exc)}") from exc
     saved_changed(case)
-    return {"path": filed["item"]["path"], "entity": filed["entity"]["id"]}
+    answer = {"path": filed["item"]["path"], "entity": filed["entity"]["id"]}
+    scene = attach_capture(case, answer["path"])
+    return {**answer, "scene": scene} if scene else answer
 
 
 def _png_bytes(raw: bytes) -> bytes:

@@ -47,6 +47,7 @@ from ..engine import (
 from ..workspace import Case, CaseError, _replace_with_retry
 from . import events, tile_batch
 from .cases import delete_by_path, get_case
+from .inspect import attach_capture
 from .limits import MAX_IMAGE_BYTES
 from .naming import slugify
 from .media import with_thumb_state
@@ -1659,6 +1660,12 @@ def _reused(entity: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _attached(case: Case, answer: dict[str, Any]) -> dict[str, Any]:
+    """A capture's answer, saying which scene it was attached to while one is geolocated."""
+    scene = attach_capture(case, answer["path"]) if answer.get("path") else None
+    return {**answer, "scene": scene} if scene else answer
+
+
 @router.post("/cases/{case_id}/satellite/capture")
 def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
     case = get_case(case_id)
@@ -1680,7 +1687,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
         scale_north=[body.scale_north, units_preference() if body.scale_north else None],
     )
     if body.reuse and (filed := snapshots.filed_view(case, key)) is not None:
-        return _reused(filed)
+        return _attached(case, _reused(filed))
 
     try:
         image, provenance = tiles.fetch_crop(
@@ -1734,7 +1741,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
     locate_on_save(case, result["entity"]["id"], marker_lat, marker_lon)
     saved_changed(case)
 
-    return {"path": result["item"]["path"], "title": label, "entity": result["entity"], **provenance}
+    return _attached(case, {"path": result["item"]["path"], "title": label, "entity": result["entity"], **provenance})
 
 
 @router.post("/cases/{case_id}/satellite/screenshot")
@@ -1853,7 +1860,7 @@ async def capture_screenshot(
     )
     locate_on_save(case, result["entity"]["id"], lat, lon)
     saved_changed(case)
-    return {"path": result["item"]["path"], "title": label, "entity": result["entity"], **provenance}
+    return _attached(case, {"path": result["item"]["path"], "title": label, "entity": result["entity"], **provenance})
 
 
 @router.post("/cases/{case_id}/satellite/oblique")
@@ -1929,7 +1936,7 @@ async def capture_oblique(
         width=img.width, height=img.height,
     )
     if reuse and (filed := snapshots.filed_view(case, key)) is not None:
-        return _reused(filed)
+        return _attached(case, _reused(filed))
 
     relief = terrain.MAPTERHORN
     # a picture drawn from the heights carries what their licences ask of one
@@ -1996,7 +2003,7 @@ async def capture_oblique(
     )
     locate_on_save(case, result["entity"]["id"], lat, lon)
     saved_changed(case)
-    return {"path": result["item"]["path"], "title": label, "entity": result["entity"], **provenance}
+    return _attached(case, {"path": result["item"]["path"], "title": label, "entity": result["entity"], **provenance})
 
 
 @router.post("/cases/{case_id}/satellite/place")
