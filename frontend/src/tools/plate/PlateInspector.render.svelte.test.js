@@ -224,7 +224,7 @@ describe('hover help on every setting', () => {
     flushSync(); await settle();
     // an undated layer has no first day to set
     expect(end('Roads first day')).toBeNull();
-    expect(end('Front first day').textContent).toContain('All its days');
+    expect(end('Front first day').textContent).toContain('Its first day');
     press(end('Front first day'));
     press([...document.body.querySelectorAll('button.btn')].find((button) => button.textContent === 'This day'));
     expect(map.layers[0].start).toBe('2026-10-05');
@@ -237,9 +237,40 @@ describe('hover help on every setting', () => {
     press(end('Front first day'));
     await settle();
     expect(bare()).toEqual([]);
-    press([...document.body.querySelectorAll('button.btn')].find((button) => button.textContent === 'All its days'));
+    press([...document.body.querySelectorAll('button.btn')].find((button) => button.textContent === 'Its first day'));
     expect(map.layers[0].start).toBeNull();
-    expect(end('Front first day').textContent).toContain('All its days');
+    expect(end('Front first day').textContent).toContain('Its first day');
+  });
+
+  it('ends a dated layer on a day of the map, the period it runs between kept apart from the plate\'s', async () => {
+    const spec = $state(houseLayout());
+    spec.time = { ...spec.time, at: '2026-10-15' };
+    const map = spec.elements.find((element) => element.kind === 'map');
+    map.layers = [{ name: 'front', hidden: [], stroke: 1, icons: 1, start: '2026-10-05' }];
+    const rows = [{ name: 'front', title: 'Front', categories: [] }];
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows, at: '2026-10-15', moments: ['2026-10-03'],
+      datedLayer: () => true } });
+    flushSync(); await settle();
+    expect(end('Front last day').textContent).toContain('Its last day');
+    press(end('Front last day'));
+    // one calendar open at a time
+    expect(document.body.querySelector('[aria-label="Front last day calendar"]')).not.toBeNull();
+    expect(document.body.querySelector('[aria-label="Front first day calendar"]')).toBeNull();
+    press(document.body.querySelector('button[title="2026-10-12"]'));
+    expect([map.layers[0].start, map.layers[0].end]).toEqual(['2026-10-05', '2026-10-12']);
+    // the plate stood after it, so it is put on the day just set
+    expect([spec.time.at, spec.time.step]).toEqual(['2026-10-12', null]);
+    expect(end('Front last day').textContent).toContain('12 Oct 2026');
+    expect(bare()).toEqual([]);
+    // a last day before the first pulls the first back to it
+    press(end('Front last day'));
+    press(document.body.querySelector('button[title="2026-10-02"]'));
+    expect([map.layers[0].start, map.layers[0].end]).toEqual(['2026-10-02', '2026-10-02']);
+    press(end('Front last day'));
+    await settle();
+    expect(bare()).toEqual([]);
+    press([...document.body.querySelectorAll('button.btn')].find((button) => button.textContent === 'Its last day'));
+    expect([map.layers[0].start, map.layers[0].end]).toEqual(['2026-10-02', null]);
   });
 
   it('lists the features hidden on the map by name, each shown again by a press', () => {

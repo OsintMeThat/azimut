@@ -174,6 +174,8 @@ class FrameLayer(Strict):
     hidden_features: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list, max_length=500)
     #: The first day this map draws the layer from: what began before it is left out.
     start: Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None = None
+    #: The last day this map draws the layer up to: what began after it is left out.
+    end: Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None = None
     #: Lines drawn this many times their layer's weight.
     stroke: FiniteFloat = Field(default=1.0, ge=0.25, le=4)
     #: Marks drawn this many times their layer's size.
@@ -185,6 +187,12 @@ class FrameLayer(Strict):
     fill: Literal["", "solid", "hatch", "none"] = ""
     #: What the layer stands for on this map (`roles.js`), which the legend says of its areas and lines.
     role: Literal["", "held", "claimed", "contested", "line", "events", "context"] = ""
+
+    @model_validator(mode="after")
+    def _days(self) -> FrameLayer:
+        if self.start and self.end and self.end < self.start:
+            raise ValueError("a layer's last day comes after its first")
+        return self
 
 
 class Tone(Strict):

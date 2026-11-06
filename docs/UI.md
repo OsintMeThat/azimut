@@ -5482,9 +5482,11 @@ dotted), **Front line**, **Events** (larger marks) or **Context** (grey and thin
 legend then names its areas and lines by the role, its points keeping their words.
 One feature can be left out of one map: a right-click on it, or a click on it in the
 framed map, offers to hide it on this map, and the layer's row lists those hidden under
-**Hidden here**, a press bringing one back. A dated layer has a **From** day: what began
-before it is left out of the map, whatever came of it since, and the days it changed on
-leave the plate's bar with it. The legend, `{count}`, the labels tied to a feature and
+**Hidden here**, a press bringing one back. A dated layer has a **From** day and a **To**
+day: what began before the first or after the last is left out of the map, whatever came
+of it since, and the days it changed on leave the plate's bar with it. What began between
+them keeps changing after To. Either end set past the other pulls it along, and a plate
+standing outside them is put on the day just set. The legend, `{count}`, the labels tied to a feature and
 the tables leave out the same; the layer itself keeps them.
 A right-click on a marker that shows a file of the case (one added from a file, or from
 a proof resting on footage) also offers that file, and only there: **Add video** plays

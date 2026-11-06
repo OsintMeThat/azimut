@@ -879,7 +879,7 @@ test('a day no layer changes on is added to the play from its tile, and let go f
   await expect(idle).toHaveCount(1);
 });
 
-test('a feature is hidden on one map from its right-click or a click in the framed map, and a layer starts on a day', async ({ page }) => {
+test('a feature is hidden on one map from its right-click or a click in the framed map, and a layer runs between two days', async ({ page }) => {
   needsWebGL();
   const store = await plateFixture(page);
   const front = { name: 'front', title: 'Front', source: { kind: 'editable' }, editable: true, hidden: [], features: 4,
@@ -939,6 +939,20 @@ test('a feature is hidden on one map from its right-click or a click in the fram
   // a press on a name shows it again
   await page.locator('.hidden-here .chip', { hasText: 'Gate' }).click();
   await expect.poll(hidden).toEqual(['depot']);
+  await expect(ticks).toHaveCount(2);
+
+  // and end it on a day: what began after it goes too, and the plate that stood later is put on it
+  const last = page.getByRole('button', { name: 'Front last day' });
+  await expect(last).toContainText('Its last day');
+  await last.click();
+  await page.locator('button[title="2026-10-08"]').click();
+  await expect.poll(() => lastSave(store)?.spec.elements[0].layers[0].end).toBe('2026-10-08');
+  await expect.poll(() => lastSave(store)?.spec.time.at).toBe('2026-10-08');
+  await expect(ticks).toHaveCount(1);
+  await expect(last).toContainText('8 Oct 2026');
+  await last.click();
+  await page.getByRole('button', { name: 'Its last day', exact: true }).click();
+  await expect.poll(() => lastSave(store)?.spec.elements[0].layers[0].end).toBeNull();
   await expect(ticks).toHaveCount(2);
 });
 

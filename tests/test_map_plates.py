@@ -932,16 +932,20 @@ def test_a_map_s_layer_keeps_what_it_stands_for_and_its_fill():
             mapplates.FrameLayer.model_validate({"name": "front", **bad})
 
 
-def test_a_map_s_layer_keeps_the_features_hidden_on_it_and_the_day_it_starts_on(client, owner):
-    entry = {"name": "front", "hidden": [], "hidden_features": ["4f2a", "~Strike@2.35000,48.86000"], "start": "2026-10-05"}
+def test_a_map_s_layer_keeps_the_features_hidden_on_it_and_the_days_it_runs_between(client, owner):
+    entry = {"name": "front", "hidden": [], "hidden_features": ["4f2a", "~Strike@2.35000,48.86000"], "start": "2026-10-05", "end": "2026-10-20"}
     spec = plate_spec()
     spec["elements"][0]["layers"] = [entry]
     assert save(client, owner, "Hidden", spec).status_code == 200
     kept = client.get(f"/api/cases/{owner}/map-plates/Hidden").json()["spec"]["elements"][0]["layers"][0]
-    assert (kept["hidden_features"], kept["start"]) == (entry["hidden_features"], "2026-10-05")
-    assert mapplates.FrameLayer.model_validate({"name": "front"}).start is None
-    for bad in ({"start": "5 Oct"}, {"start": "2026-10-05T12:00"}, {"hidden_features": [""]}, {"hidden_features": ["x" * 201]},
-                {"hidden_features": ["k"] * 501}):
+    assert (kept["hidden_features"], kept["start"], kept["end"]) == (entry["hidden_features"], "2026-10-05", "2026-10-20")
+    bare = mapplates.FrameLayer.model_validate({"name": "front"})
+    assert (bare.start, bare.end) == (None, None)
+    # one day is a period too, and either end stands alone
+    for fine in ({"start": "2026-10-05", "end": "2026-10-05"}, {"end": "2026-10-20"}):
+        mapplates.FrameLayer.model_validate({"name": "front", **fine})
+    for bad in ({"start": "5 Oct"}, {"start": "2026-10-05T12:00"}, {"end": "20 Oct"}, {"start": "2026-10-20", "end": "2026-10-05"},
+                {"hidden_features": [""]}, {"hidden_features": ["x" * 201]}, {"hidden_features": ["k"] * 501}):
         with pytest.raises(ValueError):
             mapplates.FrameLayer.model_validate({"name": "front", **bad})
 

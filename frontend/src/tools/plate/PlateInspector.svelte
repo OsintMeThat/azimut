@@ -36,7 +36,7 @@
   import { TEXT_STYLES, styled } from '../../lib/plate/design.js';
   import { drawnOn } from '../../lib/plate/toLayer.js';
   import { ROLE_LIST, withRole } from '../../lib/plate/roles.js';
-  import { withHidden } from '../../lib/plate/kept.js';
+  import { spanTo, withHidden } from '../../lib/plate/kept.js';
   import { countryNames } from '../../lib/plate/spotlight.js';
   import { WAYBACK_ID } from '../../lib/wayback.js';
   import { shrinkPicture } from '../../lib/plate/picture.js';
@@ -226,17 +226,21 @@
   function toggleGroup(entry, group) {
     entry.hidden = entry.hidden.includes(group) ? entry.hidden.filter((item) => item !== group) : [...entry.hidden, group];
   }
-  /** The layer whose first day has its calendar open, by name. */
-  let starting = $state('');
-  $effect(() => { void element?.id; starting = ''; });
+  /** The layer whose first or last day has its calendar open: `{ name, which }`. */
+  let dating = $state(null);
+  $effect(() => { void element?.id; dating = null; });
+  const datingOn = (name, which) => dating?.name === name && dating.which === which;
   /**
-   * The first day the map draws a layer from, or none for all of it. A plate on a day
-   * before it is put on it, since the days before no longer play.
+   * The first (`start`) or last (`end`) day the map draws a layer on, or none for all
+   * of it. A plate on a day outside them is put on the end it passed, so the day the
+   * analyst just set is the one shown.
    */
-  function startLayer(entry, day) {
-    entry.start = day || null;
-    starting = '';
-    if (day && at && dayOf(at) < day) Object.assign(spec.time, { at: day, step: null });
+  function dateLayer(entry, which, day) {
+    Object.assign(entry, spanTo(entry, which, day));
+    dating = null;
+    const shown = at ? dayOf(at) : '';
+    const onto = shown && entry.start && shown < entry.start ? entry.start : shown && entry.end && shown > entry.end ? entry.end : '';
+    if (onto) Object.assign(spec.time, { at: onto, step: null });
   }
   async function openPictures(event) {
     pickAnchor = event.currentTarget;
@@ -838,19 +842,26 @@
                       onclick={() => toggleGroup(entry, group.name)}>{group.name}</button>
                   {/each}
                 </div>
-                {#if datedLayer(row.name) || entry.start}
-                  <div class="weight">From
-                    <button type="button" class="end" class:open={starting === row.name} aria-expanded={starting === row.name} aria-label={`${row.title} first day`}
-                      title="What began before this day is left out of this map" onclick={() => (starting = starting === row.name ? '' : row.name)}>
-                      <Icon name="calendar" size={12} />{entry.start ? momentLabel(entry.start) : 'All its days'}</button>
+                {#if datedLayer(row.name) || entry.start || entry.end}
+                  <div class="span">
+                    {#each [['start', 'From', 'first day', 'What began before this day is left out of this map', 'Its first day'],
+                      ['end', 'To', 'last day', 'What began after this day is left out of this map', 'Its last day']] as [which, key, said, title, open] (which)}
+                      <span class="key" {title}>{key}</span>
+                      <button type="button" class="end" class:open={datingOn(row.name, which)} aria-expanded={datingOn(row.name, which)} aria-label={`${row.title} ${said}`}
+                        {title} onclick={() => (dating = datingOn(row.name, which) ? null : { name: row.name, which })}>
+                        <Icon name="calendar" size={12} />{entry[which] ? momentLabel(entry[which]) : open}</button>
+                      {#if datingOn(row.name, which)}
+                        <div class="pick">
+                          <div class="tools wide">
+                            {#if at}<button type="button" class="btn btn-xs" title={`${momentLabel(at)}, the plate's day`} onclick={() => dateLayer(entry, which, dayOf(at))}>This day</button>{/if}
+                            {#if entry[which]}<button type="button" class="btn btn-xs" title={which === 'start' ? 'Draws what began before it again' : 'Draws what began after it again'}
+                              onclick={() => dateLayer(entry, which, '')}>{open}</button>{/if}
+                          </div>
+                          <MonthGrid value={(entry[which] || dayOf(at) || lastDay).slice(0, 10)} max={lastDay} label={`${row.title} ${said}`} onpick={(day) => dateLayer(entry, which, day)} />
+                        </div>
+                      {/if}
+                    {/each}
                   </div>
-                  {#if starting === row.name}
-                    <div class="tools wide">
-                      {#if at}<button type="button" class="btn btn-xs" title={`${momentLabel(at)}, the plate's day`} onclick={() => startLayer(entry, dayOf(at))}>This day</button>{/if}
-                      {#if entry.start}<button type="button" class="btn btn-xs" title="Draws all of it again" onclick={() => startLayer(entry, '')}>All its days</button>{/if}
-                    </div>
-                    <MonthGrid value={(entry.start || dayOf(at) || lastDay).slice(0, 10)} max={lastDay} label={`${row.title} first day`} onpick={(day) => startLayer(entry, day)} />
-                  {/if}
                 {/if}
                 {#if entry.hidden_features?.length}
                   <div class="weight hidden-here">Hidden here
@@ -1450,7 +1461,9 @@
   .chip.off { background: none; color: var(--text-3); text-decoration: line-through; }
   .weight { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 10.5px; }
   .weight.role select { flex: 1; min-width: 0; }
-  .weight .end { flex: 1; }
+  .span { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 6px; align-items: center; color: var(--text-3); font-size: 10.5px; }
+  .span .key { font-size: inherit; }
+  .span .pick { grid-column: 1 / -1; }
   .hidden-here { align-items: flex-start; }
   .hidden-here .groups { flex: 1; min-width: 0; }
   .weight input[type='range'] { flex: 1; }

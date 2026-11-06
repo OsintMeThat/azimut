@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { featureId, firstDay, hiddenName, isDated, keptMoments, keptOf, withHidden } from './kept.js';
+import { featureId, firstDay, hiddenName, isDated, keptMoments, keptOf, spanTo, withHidden } from './kept.js';
 
 const point = (lon, lat = 48.86) => ({ type: 'Point', coordinates: [lon, lat] });
 const tracked = (key, name, states) => ({ type: 'Feature', geometry: states.at(-1).geometry, properties: { key, name, states } });
@@ -47,11 +47,19 @@ describe('what a plate\'s map keeps of a layer', () => {
     expect(names(keptOf(layer(), { start: '2026-10-03' }))).toEqual(['Post', 'Gate', 'Wall', 'Strike', 'Depot']);
   });
 
+  it('leaves out what began after its last day, keeps what began on it, and runs a period between both', () => {
+    expect(names(keptOf(layer(), { end: '2026-10-05' }))).toEqual(['Post', 'Wall', 'Strike', 'Depot']);
+    expect(names(keptOf(layer(), { end: '2026-10-07' }))).toEqual(['Post', 'Gate', 'Wall', 'Strike', 'Depot']);
+    expect(names(keptOf(layer(), { start: '2026-10-04', end: '2026-10-07' }))).toEqual(['Gate', 'Wall', 'Strike', 'Depot']);
+    expect(names(keptOf(layer(), { start: '2026-10-04', end: '2026-10-04' }))).toEqual(['Wall', 'Strike', 'Depot']);
+  });
+
   it('hands back the same reading for the same filter, so a map that drew it is spared drawing it again', () => {
     const collection = layer();
     const entry = { hidden_features: ['gate'], start: '2026-10-04' };
     expect(keptOf(collection, { ...entry })).toBe(keptOf(collection, entry));
     expect(keptOf(collection, { ...entry, start: '2026-10-05' })).not.toBe(keptOf(collection, entry));
+    expect(keptOf(collection, { ...entry, end: '2026-10-08' })).not.toBe(keptOf(collection, entry));
   });
 
   it('moves no day for what it hides: the days start at its first one', () => {
@@ -60,8 +68,24 @@ describe('what a plate\'s map keeps of a layer', () => {
     expect(keptMoments(collection, { start: '2026-10-05' })).toEqual(['2026-10-07', '2026-10-08']);
     expect(keptMoments(collection, { hidden_features: ['post', 'wall'] })).toEqual(['2026-10-04', '2026-10-07']);
     expect(keptMoments(null, { start: '2026-10-05' })).toEqual([]);
+    // what began by the last day still changes after it, and plays those days
+    expect(keptMoments(collection, { end: '2026-10-05' })).toEqual(['2026-10-03', '2026-10-04', '2026-10-08', '2026-10-09']);
     expect(isDated(collection)).toBe(true);
     expect(isDated({ features: [plain('Depot', '', 1)] })).toBe(false);
+  });
+});
+
+describe('the days a map draws a layer between', () => {
+  it('sets either end, pulling the other along when they would cross', () => {
+    expect(spanTo({}, 'start', '2026-10-05')).toEqual({ start: '2026-10-05', end: null });
+    expect(spanTo({ start: '2026-10-05' }, 'end', '2026-10-20')).toEqual({ start: '2026-10-05', end: '2026-10-20' });
+    expect(spanTo({ start: '2026-10-05', end: '2026-10-20' }, 'start', '2026-10-25')).toEqual({ start: '2026-10-25', end: '2026-10-25' });
+    expect(spanTo({ start: '2026-10-05', end: '2026-10-20' }, 'end', '2026-10-01')).toEqual({ start: '2026-10-01', end: '2026-10-01' });
+  });
+
+  it('opens either end again without touching the other', () => {
+    expect(spanTo({ start: '2026-10-05', end: '2026-10-20' }, 'start', '')).toEqual({ start: null, end: '2026-10-20' });
+    expect(spanTo({ start: '2026-10-05', end: '2026-10-20' }, 'end', null)).toEqual({ start: '2026-10-05', end: null });
   });
 });
 

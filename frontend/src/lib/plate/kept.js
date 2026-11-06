@@ -1,8 +1,9 @@
 /**
  * What a plate's map keeps of one of its layers: every feature but those the analyst
- * hid on that map one by one (`hidden_features`), and those that began before the day
- * the map starts the layer on (`start`). The layer itself is never touched, so the Map
- * and the other plates still draw them.
+ * hid on that map one by one (`hidden_features`), those that began before the day the
+ * map starts the layer on (`start`) and those that began after the day it ends it on
+ * (`end`). The layer itself is never touched, so the Map and the other plates still
+ * draw them.
  *
  * A feature is named by its `key`, which every feature of a layer drawn in the case
  * carries through all its dates. A source's feature has none, so it is named by its
@@ -46,23 +47,42 @@ const KEPT_READINGS = 4;
 export function keptOf(collection, entry) {
   const hidden = entry?.hidden_features ?? [];
   const start = entry?.start ?? '';
-  if (!collection || typeof collection !== 'object' || (!hidden.length && !start)) return collection;
-  const filter = `${start}|${hidden.join('|')}`;
+  const end = entry?.end ?? '';
+  if (!collection || typeof collection !== 'object' || (!hidden.length && !start && !end)) return collection;
+  const filter = `${start}|${end}|${hidden.join('|')}`;
   let kept = readings.get(collection);
   if (!kept) readings.set(collection, (kept = new Map()));
   const known = kept.get(filter);
   if (known) return known;
   const off = new Set(hidden);
   const out = { ...collection, features: (collection.features ?? []).filter((feature) => {
-    if (start) {
+    if (start || end) {
       const day = firstDay(feature);
-      if (day && day < start) return false;
+      if (day && ((start && day < start) || (end && day > end))) return false;
     }
     return !off.size || !off.has(featureId(feature));
   }) };
   kept.set(filter, out);
   if (kept.size > KEPT_READINGS) kept.delete(kept.keys().next().value);
   return out;
+}
+
+/**
+ * The layer's days on a map once one end of them is set (`which`, 'start' or 'end'),
+ * the other pulled along when it would cross. No day: from its first, or to its last.
+ */
+export function spanTo(entry, which, day) {
+  const value = day || null;
+  let start = entry?.start ?? null;
+  let end = entry?.end ?? null;
+  if (which === 'start') {
+    start = value;
+    if (value && end && end < value) end = value;
+  } else {
+    end = value;
+    if (value && start && start > value) start = value;
+  }
+  return { start, end };
 }
 
 const momentLists = new WeakMap();
