@@ -846,3 +846,201 @@ def test_the_kept_pictures_are_bounded(tmp_path, decoded, monkeypatch):
     decoded.clear()
     notes_pdf.render(FakeCase(tmp_path), title="P", text=text)
     assert decoded.held == (0, 0)
+
+
+# -- pictures made light for the page pane --------------------------------------
+
+
+@pytest.fixture()
+def light():
+    notes_pdf.PREVIEWS.clear()
+    yield notes_pdf.PREVIEWS
+    notes_pdf.PREVIEWS.clear()
+
+
+def noisy(path: Path, size=(3000, 2000), mode="RGB", fmt="PNG", **options) -> Path:
+    """A picture that does not compress to nothing, as a photo or a screenshot."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pixels = Image.effect_noise(size, 60).convert(mode)
+    pixels.save(path, fmt, **options)
+    return path
+
+
+def placed_images(data: bytes) -> list:
+    return [image for page in PdfReader(BytesIO(data)).pages for image in page.images]
+
+
+def test_the_page_pane_lays_out_the_same_pages_with_lighter_pictures(tmp_path, light):
+    noisy(tmp_path / "media/shot.png")
+    noisy(tmp_path / "media/photo.jpg", size=(4000, 3000), fmt="JPEG", quality=95)
+    case = FakeCase(tmp_path, {
+        "s": {"id": "s", "type": "media", "label": "Shot", "attrs": {"path": "media/shot.png", "kind": "image"}},
+        "p": {"id": "p", "type": "media", "label": "Photo", "attrs": {"path": "media/photo.jpg", "kind": "image"}},
+    })
+    text = "# Day\n\n[[media:s|Shot]]\n\nWords between.\n\n[[media:p|Photo]]{width=30%}\n\nThe end.\n"
+    full = notes_pdf.render(case, title="T", text=text)
+    pane = notes_pdf.render(case, title="T", text=text, light=True)
+    assert pane.pages == full.pages
+    assert [picture.box for picture in pane.pictures] == [picture.box for picture in full.pictures]
+    assert len(pane.pdf) * 4 < len(full.pdf)
+    shot, photo = placed_images(pane.pdf)
+    # a JPEG either way, never more pixels than its place on the page can show
+    assert shot.data.startswith(b"\xff\xd8") and photo.data.startswith(b"\xff\xd8")
+    assert max(shot.image.size) == 1600
+    assert max(photo.image.size) == 800
+    # the PDF that is written keeps every pixel
+    assert max(placed_images(full.pdf)[0].image.size) == 3000
+
+
+def test_a_light_picture_is_a_jpeg_unless_it_shows_through(tmp_path):
+    opaque = noisy(tmp_path / "opaque.png", size=(2400, 1200), mode="RGBA")
+    assert notes_pdf._light_picture(opaque, 1600)[:2] == b"\xff\xd8"
+    clear = Image.effect_noise((2400, 1200), 60).convert("RGBA")
+    clear.putpixel((5, 5), (0, 0, 0, 0))
+    clear.save(tmp_path / "clear.png")
+    made = notes_pdf._light_picture(tmp_path / "clear.png", 1600)
+    assert made[:4] == b"\x89PNG"
+    with Image.open(BytesIO(made)) as image:
+        assert image.size == (1600, 800) and image.mode == "RGBA"
+    # a small screenshot is made a JPEG too, which a PDF takes as it is
+    small = noisy(tmp_path / "small.png", size=(600, 400))
+    assert notes_pdf._light_picture(small, 800)[:2] == b"\xff\xd8"
+
+
+def test_the_file_itself_goes_in_when_it_is_as_light_already(tmp_path):
+    assert notes_pdf._light_picture(noisy(tmp_path / "small.jpg", size=(600, 400), fmt="JPEG"), 800) is None
+    small_clear = Image.new("RGBA", (300, 200), (0, 0, 0, 0))
+    small_clear.save(tmp_path / "logo.png")
+    assert notes_pdf._light_picture(tmp_path / "logo.png", 800) is None
+    Image.new("CMYK", (3000, 2000), (0, 0, 0, 0)).save(tmp_path / "print.jpg", "JPEG")
+    assert notes_pdf._light_picture(tmp_path / "print.jpg", 1600) is None
+    (tmp_path / "broken.png").write_bytes(b"\x89PNG not really")
+    assert notes_pdf._light_picture(tmp_path / "broken.png", 1600) is None
+
+
+def test_a_light_photo_is_drawn_upright(tmp_path):
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    path = tmp_path / "turned.jpg"
+    Image.new("RGB", (60, 30), (200, 40, 40)).save(path, "JPEG", exif=exif.tobytes())
+    with Image.open(BytesIO(notes_pdf._light_picture(path, 800))) as image:
+        assert image.size == (30, 60)
+        assert not image.getexif()
+
+
+def test_the_light_pictures_kept_are_bounded_and_follow_an_edit(tmp_path, light, monkeypatch):
+    paths = [noisy(tmp_path / f"p{n}.png", size=(2000 + n, 1000)) for n in range(3)]
+    first = light.get(paths[0], 800)
+    assert light.get(paths[0], 800) is first
+    noisy(paths[0], size=(1000, 2000))
+    os.utime(paths[0], ns=(1, 1))
+    with Image.open(BytesIO(light.get(paths[0], 800))) as image:
+        assert image.size == (400, 800)
+    monkeypatch.setattr(light, "MAX_ENTRIES", 2)
+    for path in paths:
+        light.get(path, 1600)
+    assert len(light._kept) == 2
+    monkeypatch.setattr(light, "MAX_BYTES", 10)
+    light.get(paths[0], 800)
+    assert light._bytes <= 10
+
+
+def test_the_pane_and_the_check_ask_for_light_pictures_and_the_export_does_not(client, monkeypatch):
+    cid = make_case(client)
+    note = make_note(client, cid, content="Body.\n")
+    asked: list[bool] = []
+    real = notes_pdf.render
+
+    def spy(*args, **kwargs):
+        asked.append(kwargs.get("light", False))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(notes_pdf, "render", spy)
+    assert client.post(f"/api/cases/{cid}/notes/preview", json={"note": note["id"], "text": "Body.\n"}).status_code == 200
+    assert client.post(f"/api/cases/{cid}/notes/pdf/check", json={"notes": [note["id"]]}).status_code == 200
+    assert client.post(f"/api/cases/{cid}/notes/pdf", json={"notes": [note["id"]]}).status_code == 200
+    assert asked == [True, True, False]
+
+
+# -- measuring text -------------------------------------------------------------
+
+
+def old_wrap(pdf, text, width, first):
+    """`_wrap_words` as it measured every line whole, the reference the faster one must match."""
+    lines, line, room = [], "", first
+    for word in text.split():
+        candidate = f"{line} {word}" if line else word
+        if pdf.get_string_width(candidate) <= room:
+            line = candidate
+            continue
+        if line:
+            lines.append(line)
+            room = width
+        while pdf.get_string_width(word) > room:
+            cut = max(1, next((n for n in range(len(word), 0, -1) if pdf.get_string_width(word[:n]) <= room), 1))
+            lines.append(word[:cut])
+            word = word[cut:]
+            room = width
+        line = word
+    lines.append(line)
+    return lines
+
+
+def old_fit(pdf, text, width):
+    if pdf.get_string_width(text) <= width:
+        return text
+    while text and pdf.get_string_width(text + "…") > width:
+        text = text[:-1]
+    return text.rstrip() + "…"
+
+
+WRAPPED = [
+    "Strike on the depot · Video · x.com · by Port Watch · posted 12 March 2026 · from [1], [2]",
+    "https://x.com/someone/status/1890000000000000000?s=20&t=averyveryveryverylongtrackingparameter",
+    "قصف ميناء الحديدة · فيديو · تيليجرام · نشر في 12 مارس 2026",
+    "AV Wa To LT ff fi Ty Yo — kerning pairs, ligatures and a dash",
+    "a " * 120,
+    "",
+]
+
+
+@pytest.mark.parametrize("text", WRAPPED)
+@pytest.mark.parametrize("width", [18.0, 60.0, 140.0])
+def test_measuring_less_wraps_and_cuts_exactly_as_before(text, width):
+    pdf = notes_style.NotePage(title="T", theme=notes_style.PLAIN)
+    from azimut.engine import pdffonts
+
+    pdffonts.install(pdf, "\n".join(WRAPPED), body=pdffonts.SANS)
+    pdf.add_page()
+    for family, style, size in ((pdffonts.SANS, "", 8.0), (pdffonts.SANS, "B", 10.5)):
+        pdf.set_font(family, style, size)
+        assert notes_pdf._wrap_words(pdf, text, width, width * 0.7) == old_wrap(pdf, text, width, width * 0.7)
+        assert notes_style.fit_line(pdf, text, width) == old_fit(pdf, text, width)
+
+
+def test_a_document_measures_a_text_once_per_font():
+    pdf = notes_style.NotePage(title="T", theme=notes_style.PLAIN)
+    from azimut.engine import pdffonts
+
+    pdffonts.install(pdf, "Words", body=pdffonts.SANS)
+    pdf.add_page()
+    pdf.set_font(pdffonts.SANS, "", 9)
+    regular = pdf.get_string_width("Words")
+    assert pdf.get_string_width("Words") == regular
+    pdf.set_font(pdffonts.SANS, "B", 9)
+    assert pdf.get_string_width("Words") > regular
+    pdf.set_font(pdffonts.SANS, "", 18)
+    assert pdf.get_string_width("Words") == pytest.approx(regular * 2)
+
+
+def test_the_longest_prefix_is_found_by_halving():
+    for most in range(0, 40):
+        for limit in range(-1, most + 2):
+            asked: list[int] = []
+
+            def fits(n, limit=limit, asked=asked):
+                asked.append(n)
+                return n <= limit
+
+            assert notes_style.longest_prefix(fits, most) == max(0, min(limit, most))
+            assert len(asked) <= max(1, most.bit_length() + 1)

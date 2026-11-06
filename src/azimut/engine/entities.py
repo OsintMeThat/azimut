@@ -562,6 +562,10 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                    Attr("imagery_credits", "Imagery credits", editable=False,
                         aside="From the panels",
                         hint="the credits the panels' imagery asks for"),
+                   # Where the analyst published it. A report links the proof there
+                   # and names it under the picture (`engine/notes_pdf.py`).
+                   Attr("posted_url", "Posted at", kind="url",
+                        hint="where you published this proof, on X or elsewhere; a report links to it"),
                )),
     EntityType("post", "Post", DOCUMENT, "post", DELIVERABLE,
                hint="a prepared thread or report, saved rather than published"),

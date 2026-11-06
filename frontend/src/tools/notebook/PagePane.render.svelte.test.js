@@ -39,11 +39,12 @@ vi.mock('../../lib/notes/preview.js', () => ({
   }),
 }));
 
-const { canStateSourceOf, stateSourceOf } = vi.hoisted(() => ({
+const { canStateSourceOf, statePostedOf, stateSourceOf } = vi.hoisted(() => ({
   canStateSourceOf: vi.fn(async (_case, entity) => entity.id === 'm2'),
+  statePostedOf: vi.fn(async () => {}),
   stateSourceOf: vi.fn(async () => {}),
 }));
-vi.mock('../../lib/notes/sources.js', () => ({ canStateSourceOf, stateSourceOf }));
+vi.mock('../../lib/notes/sources.js', () => ({ canStateSourceOf, statePostedOf, stateSourceOf }));
 
 const { registerOpener, resetOpeners } = await import('../../lib/notes/openers.js');
 const { editionOf, reloadEditions } = await import('../../lib/notes/editions.svelte.js');
@@ -204,6 +205,31 @@ describe('the way back, and a source', () => {
     flushSync();
     expect(stateSourceOf).toHaveBeenCalledWith('c1', ENTITIES[1], 'https://t.me/port/4');
     expect(sheet(0).querySelector('.caption-here')).toBeNull();
+    // the credit it gives is printed at once, without a word typed
+    expect(asked.length).toBe(2);
+  });
+
+  it('offer Posted… on a proof only, holding where it was posted, and draw the pages again', async () => {
+    const proofs = [
+      { id: 'm1', type: 'capture', label: 'Roof', attrs: { path: 'media/roof.png' } },
+      { id: 'm2', type: 'proof', label: 'Proof 28', attrs: { path: 'proofs/28.png', posted_url: 'https://x.com/me/status/1' } },
+    ];
+    await pane({ onresize: vi.fn(), entities: proofs, text: TEXT });
+    expect(buttons(0)).toContain('Posted ✓');
+    expect(buttons(1).some((label) => label.startsWith('Posted'))).toBe(false);
+    [...sheet(0).querySelectorAll('.picture-bar button')].find((button) => button.textContent.trim() === 'Posted ✓').click();
+    flushSync();
+    const field = sheet(0).querySelector('.caption-here input[type="url"]');
+    expect(field.value).toBe('https://x.com/me/status/1');
+    expect(field.getAttribute('aria-label')).toBe('Posted at');
+    field.value = 'https://x.com/me/status/2';
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    expect(statePostedOf).toHaveBeenCalledWith('c1', proofs[1], 'https://x.com/me/status/2');
+    expect(sheet(0).querySelector('.caption-here')).toBeNull();
+    expect(asked.length).toBe(2);
   });
 });
 

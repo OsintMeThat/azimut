@@ -65,6 +65,9 @@ MAX_LABEL = 200
 FILE_TYPES = links.EMBEDDED_TYPES
 #: The attr an archived copy is kept under (a bookmark's declared field).
 ARCHIVE = "archive_url"
+#: Where the analyst published an item of their own, a proof on X say (a proof's
+#: declared field). Not where it comes from: a report links the item to it.
+POSTED = "posted_url"
 
 #: What kind of thing a source is.
 PAGE = "page"
@@ -130,6 +133,8 @@ class Source:
     #: The original address and an archived copy, both http(s).
     address: str = ""
     archive: str = ""
+    #: Where the analyst published it (`POSTED`), http(s).
+    posted: str = ""
     #: The account or author the case records.
     author: str = ""
     #: The day the content is from (a post's day; imagery days are in ``readings``),
@@ -326,7 +331,7 @@ class Reader:
             *([URL_ATTRS[kind]] if kind in URL_ATTRS else []),
             "url",
             "source_url",
-            *(attr.key for attr in (declared.attrs if declared else ()) if attr.kind == "url" and attr.key != ARCHIVE),
+            *(attr.key for attr in (declared.attrs if declared else ()) if attr.kind == "url" and attr.key not in (ARCHIVE, POSTED)),
         ]
         address = next((one for one in (web(attrs.get(key)) for key in keys) if one), "")
         address = address or web(sidecar.get("url")) or web(sidecar.get("webpage_url"))
@@ -380,6 +385,7 @@ class Reader:
             noun=noun,
             address=address,
             archive=archive,
+            posted=web(attrs.get(POSTED)),
             author=author,
             published=timeline.media_published(sidecar) or "" if not imagery else "",
             collected=collected,

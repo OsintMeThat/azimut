@@ -4,7 +4,9 @@ const { postBytes } = vi.hoisted(() => ({ postBytes: vi.fn() }));
 vi.mock('../api.js', () => ({ api: { postBytes } }));
 vi.mock('../notesExport.js', () => ({ drawDiagrams: vi.fn() }));
 
-const { createPreview, fetchPreview, forgetDiagrams, headerList, internalHeader, noteWarnings, pageLine } = await import('./preview.js');
+const {
+  MOST_DELAY, createPreview, fetchPreview, forgetDiagrams, headerList, internalHeader, noteWarnings, pageLine,
+} = await import('./preview.js');
 
 const page = (overrides = {}) => ({ data: new ArrayBuffer(4), pages: [0], diagrams: [], warnings: [], ...overrides });
 
@@ -117,7 +119,7 @@ describe('a pane drawn as the note is typed', () => {
     expect(onresult).toHaveBeenCalledTimes(1);
   });
 
-  it('cancels the request a newer one makes stale, and shows only the newer', async () => {
+  it('lets the request in flight finish, then asks once for the newest made meanwhile', async () => {
     const signals = [];
     let release;
     const fetch = vi.fn((request, signal) => {
@@ -129,13 +131,60 @@ describe('a pane drawn as the note is typed', () => {
     const busy = [];
     const preview = createPreview({ fetch, onresult, draw: vi.fn(), onbusy: (flag) => busy.push(flag) });
     const first = preview.now({ text: 'old' });
-    await preview.now({ text: 'new' });
-    expect(signals[0].aborted).toBe(true);
+    void preview.now({ text: 'middle' });
+    const last = preview.now({ text: 'new' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(signals[0].aborted).toBe(false);
     release();
     await first;
-    expect(onresult).toHaveBeenCalledTimes(1);
-    expect(onresult.mock.calls[0][0].pages).toEqual([1]);
-    expect(busy.at(-1)).toBe(false);
+    await last;
+    expect(fetch.mock.calls.map(([request]) => request.text)).toEqual(['old', 'new']);
+    expect(onresult.mock.calls.map(([answer]) => answer.pages)).toEqual([[9], [1]]);
+    expect(busy).toEqual([true, false]);
+  });
+
+  it('waits after typing as long as the last pages took to draw, up to a bound', async () => {
+    let time = 0;
+    const fetch = vi.fn(async () => {
+      time += 3000;
+      return page();
+    });
+    const preview = createPreview({ fetch, draw: vi.fn(), now: () => time });
+    await preview.now({ text: 'a' });
+    preview.ask({ text: 'ab' });
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    // a note whose pages took a minute waits no longer than the bound
+    fetch.mockImplementation(async () => {
+      time += 60_000;
+      return page();
+    });
+    await preview.now({ text: 'abc' });
+    preview.ask({ text: 'abcd' });
+    await vi.advanceTimersByTimeAsync(MOST_DELAY - 1);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it('asks again after it was stopped, for a request made since', async () => {
+    let release;
+    const fetch = vi.fn((request, signal) => (request.text === 'old'
+      ? new Promise((_resolve, reject) => {
+        release = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        signal.addEventListener('abort', release);
+      })
+      : Promise.resolve(page({ pages: [2] }))));
+    const onresult = vi.fn();
+    const preview = createPreview({ fetch, onresult, draw: vi.fn() });
+    const first = preview.now({ text: 'old' });
+    preview.stop();
+    const again = preview.now({ text: 'new' });
+    await first;
+    await again;
+    expect(onresult.mock.calls.map(([answer]) => answer.pages)).toEqual([[2]]);
   });
 
   it('draws the diagrams the server could not, once, and asks again with them', async () => {

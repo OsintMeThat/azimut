@@ -29,12 +29,12 @@
   import { onDestroy, untrack } from 'svelte';
   import { createPreview, pageLine } from '../../lib/notes/preview.js';
   import {
-    CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, SOURCE_HELP, blockAlignAt, captionField, pictureAt, pictureLine, rovingToolbar, sizeWidth,
+    CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, pictureAt, pictureLine, rovingToolbar, sizeWidth,
     sourceField,
   } from '../../lib/notes/pictureSize.js';
   import { openerFor } from '../../lib/notes/openers.js';
   import '../../lib/notes/openersLoaded.js';
-  import { canStateSourceOf, stateSourceOf } from '../../lib/notes/sources.js';
+  import { canStateSourceOf, statePostedOf, stateSourceOf } from '../../lib/notes/sources.js';
   import { INTERNAL, editionOf, keepEdition } from '../../lib/notes/editions.svelte.js';
   import Icon from '../../components/Icon.svelte';
   import PagePreview from '../../components/PagePreview.svelte';
@@ -63,6 +63,8 @@
   let captioning = $state(null);
   /** The picture whose source is being stated (`captionKey`), or null. */
   let stating = $state(null);
+  /** The proof whose address it was posted at is being written (`captionKey`), or null. */
+  let posting = $state(null);
   /** Whether each picture's source is the analyst's to state, by record and address. */
   let sourceable = $state({});
 
@@ -91,7 +93,10 @@
   function sourceHere(node, picture) {
     const entity = entityOf(picture);
     const field = sourceField({
-      write: (url) => stateSourceOf(caseId, entity, url),
+      write: async (url) => {
+        await stateSourceOf(caseId, entity, url);
+        redraw();
+      },
       done: (by) => {
         if (by === 'keyboard') node.previousElementSibling?.querySelector('button.source')?.focus({ preventScroll: true });
         stating = null;
@@ -99,6 +104,27 @@
     });
     node.append(field);
     field.focus({ preventScroll: true });
+    return { destroy: () => field.remove() };
+  }
+
+  /** The field under proof `picture` for where it was posted, holding the address kept. */
+  function postedHere(node, picture) {
+    const entity = entityOf(picture);
+    const field = sourceField({
+      help: POSTED_HELP,
+      value: entity?.attrs?.posted_url ?? '',
+      write: async (url) => {
+        await statePostedOf(caseId, entity, url);
+        redraw();
+      },
+      done: (by) => {
+        if (by === 'keyboard') node.previousElementSibling?.querySelector('button.posted')?.focus({ preventScroll: true });
+        posting = null;
+      },
+    });
+    node.append(field);
+    field.focus({ preventScroll: true });
+    field.select();
     return { destroy: () => field.remove() };
   }
 
@@ -167,8 +193,14 @@
   // typing waits for a pause; a new look, a new name or another note is drawn at once
   let lastText = null;
   let lastRest = null;
+  let lastRequest = null;
+  /** The pages again at once: what the case says of a picture changed, not the text. */
+  function redraw() {
+    if (lastRequest) void preview.now(lastRequest);
+  }
   $effect(() => {
     const request = { caseId, note, title, text, look, edition };
+    lastRequest = request;
     const rest = JSON.stringify([caseId, note, title, look, edition]);
     untrack(() => {
       const typed = lastText !== null && rest === lastRest && text !== lastText;
@@ -249,10 +281,16 @@
             <!-- a press while the field is open leaves it open, rather than writing it and opening it again -->
             <button type="button" class="caption" title={CAPTION_HELP.button} aria-expanded={captioning === captionKey(picture)}
               onmousedown={(event) => { if (captioning === captionKey(picture)) event.preventDefault(); }}
-              onclick={() => { stating = null; captioning = captionKey(picture); }}>Caption</button>
+              onclick={() => { stating = null; posting = null; captioning = captionKey(picture); }}>Caption</button>
             {#if entity && sourceable[sourceKey(entity)]}
               <button type="button" class="source" title={SOURCE_HELP.button} aria-expanded={stating === captionKey(picture)}
-                onclick={() => { captioning = null; stating = captionKey(picture); }}>Source…</button>
+                onclick={() => { captioning = null; posting = null; stating = captionKey(picture); }}>Source…</button>
+            {/if}
+            {#if entity?.type === 'proof'}
+              <button type="button" class="posted" class:kept={Boolean(entity.attrs?.posted_url)}
+                title={entity.attrs?.posted_url ? `${POSTED_HELP.button}. Now: ${entity.attrs.posted_url}` : POSTED_HELP.button}
+                aria-expanded={posting === captionKey(picture)}
+                onclick={() => { captioning = null; stating = null; posting = captionKey(picture); }}>{entity.attrs?.posted_url ? 'Posted ✓' : 'Posted…'}</button>
             {/if}
             {#if opener}
               <button type="button" class="open" title={`${opener.label}, where this picture was made`} onclick={() => opener.open()}>{opener.label}</button>
@@ -267,6 +305,10 @@
       {#if stating === captionKey(picture) && entity}
         {@const place = captionPlace(picture.box)}
         <div class="caption-here" style:left={place.left} style:width={place.width} style:top={place.top} use:sourceHere={picture}></div>
+      {/if}
+      {#if posting === captionKey(picture) && entity}
+        {@const place = captionPlace(picture.box)}
+        <div class="caption-here" style:left={place.left} style:width={place.width} style:top={place.top} use:postedHere={picture}></div>
       {/if}
     {/if}
   {/each}
@@ -319,7 +361,8 @@
   .picture-bar.from-left { right: auto; left: 6px; }
   .picture-bar button.align { min-width: 24px; padding: 0; }
   .picture-bar button.align:first-of-type { margin-left: 4px; }
-  .picture-bar button.caption, .picture-bar button.source { margin-left: 4px; padding: 0 8px; }
+  .picture-bar button.caption, .picture-bar button.source, .picture-bar button.posted { margin-left: 4px; padding: 0 8px; white-space: nowrap; }
+  .picture-bar button.posted.kept { color: var(--accent); }
   .picture-bar button.open { margin-left: 4px; padding: 0 8px; white-space: nowrap; border-left: 1px solid var(--border); border-radius: 0 4px 4px 0; }
   .picture-bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .caption-here { position: absolute; margin-top: 4px; }

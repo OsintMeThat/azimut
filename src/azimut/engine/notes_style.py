@@ -358,6 +358,22 @@ class NotePage(FPDF):
         self.band_page = 0
         self.band_bottom = 0.0
         self.boxes: list[Box] = []
+        self._widths: dict[tuple[object, ...], float] = {}
+
+    #: The most text widths one document keeps (`get_string_width`).
+    KEPT_WIDTHS = 20_000
+
+    def get_string_width(self, s: str, normalized: bool = False, markdown: bool = False) -> float:
+        """fpdf2's measure, kept for the document: every measure shapes the text
+        again, and wrapping a long sources list measures the same words over and over."""
+        key = (self.font_family, self.font_style, self.font_size_pt, self.char_spacing, self.font_stretching,
+               s, normalized, markdown)
+        width = self._widths.get(key)
+        if width is None:
+            if len(self._widths) >= self.KEPT_WIDTHS:
+                self._widths.clear()
+            width = self._widths[key] = super().get_string_width(s, normalized, markdown)
+        return width
 
     # -- the boxes behind text ---------------------------------------------
 
@@ -771,6 +787,22 @@ def fit_line(pdf: FPDF, text: str, width: float) -> str:
     """One line of ``text`` that fits ``width``, cut with an ellipsis if it must be."""
     if pdf.get_string_width(text) <= width:
         return text
-    while text and pdf.get_string_width(text + "…") > width:
-        text = text[:-1]
-    return text.rstrip() + "…"
+    cut = longest_prefix(lambda n: pdf.get_string_width(text[:n] + "…") <= width, len(text) - 1)
+    return text[:cut].rstrip() + "…"
+
+
+def longest_prefix(fits: Callable[[int], bool], most: int) -> int:
+    """The largest ``n`` up to ``most`` for which ``fits(n)`` holds, 0 when none does.
+
+    A prefix of a text is never wider than the text, so a halving search finds the
+    cut a walk back one letter at a time would: a long address measured a dozen
+    times rather than once per letter, each measure shaping the whole prefix again.
+    """
+    low, high = 0, max(0, most)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if fits(middle):
+            low = middle
+        else:
+            high = middle - 1
+    return low

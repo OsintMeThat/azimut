@@ -10,7 +10,7 @@ vi.mock('../state.svelte.js', () => ({ reloadCase: vi.fn(async () => {}) }));
 
 const {
   QUOTE_MAX, bookmarkOffer, canStateSourceOf, citeOffer, downloadOffer, forgetSourceable, lookupSource, quoteOffer, quotePost,
-  sourceAddress, stateSourceOf,
+  sourceAddress, statePostedOf, stateSourceOf,
 } = await import('./sources.js');
 
 afterEach(() => forgetSourceable());
@@ -129,6 +129,21 @@ describe('a picture’s stated source', () => {
     expect(patch).toHaveBeenCalledWith('/api/cases/c1/media', { path: 'media/shot.png', source_url: 'https://t.me/port/4' });
     expect(reload).toHaveBeenCalled();
     await expect(stateSourceOf('c1', upload, 'a friend', { patch, reload })).rejects.toThrow('The source must be an http(s) address.');
+  });
+});
+
+describe('where a proof was posted', () => {
+  it('is kept on the proof, taken off when emptied, and refused when it is not an address', async () => {
+    const patch = vi.fn(async () => ({}));
+    const reload = vi.fn();
+    const proof = { id: 'p28', type: 'proof', attrs: { path: 'proofs/28.png' } };
+    await statePostedOf('c1', proof, ' https://x.com/me/status/1 ', { patch, reload });
+    expect(patch).toHaveBeenCalledWith('/api/cases/c1/entities/p28', { attrs: { posted_url: 'https://x.com/me/status/1' } });
+    expect(reload).toHaveBeenCalledTimes(1);
+    await statePostedOf('c1', proof, '', { patch, reload });
+    expect(patch).toHaveBeenLastCalledWith('/api/cases/c1/entities/p28', { attrs: { posted_url: '' } });
+    await expect(statePostedOf('c1', proof, 'my post', { patch, reload })).rejects.toThrow('http(s)');
+    expect(patch).toHaveBeenCalledTimes(2);
   });
 });
 

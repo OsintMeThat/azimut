@@ -555,7 +555,7 @@ def preview_response(
     try:
         rendered = pdf_engine.render(
             case, title=title or "Untitled", text=text, diagrams=decoded, look=look,
-            note_id=note_id, resolve=resolve, public=edition == pdf_engine.PUBLIC,
+            note_id=note_id, resolve=resolve, public=edition == pdf_engine.PUBLIC, light=True,
         )
     except pdffonts.FontError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -793,7 +793,7 @@ def check_pdf(case_id: str, body: EditionSelection) -> dict[str, Any]:
         try:
             rendered = pdf_engine.render(
                 case, title=title, text=text, look=notelook.stored(case, note_id), note_id=note_id,
-                resolve=resolve, public=public,
+                resolve=resolve, public=public, light=True,
             )
         except pdffonts.FontError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc

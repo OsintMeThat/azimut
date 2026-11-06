@@ -80,6 +80,7 @@ import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
+from functools import partial
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable, NamedTuple
@@ -365,6 +366,18 @@ class PagePicture:
 _Credit = notesources.Credit
 
 
+def _posted_credit(url: str) -> _Credit | None:
+    """The line under a picture its analyst published: `Posted: x.com/handle/status/1…`,
+    linked to the post. None when it was not posted."""
+    if not url:
+        return None
+    try:
+        path = urlsplit(url).path.rstrip("/")
+    except ValueError:
+        path = ""
+    return _Credit("Posted", f"{notesources.host(url)}{path}", url)
+
+
 @dataclass
 class _Picture:
     """A picture of the case, its size in pixels, and where it came from."""
@@ -464,6 +477,7 @@ def render(
     created: datetime | None = None,
     public: bool = False,
     identity: notefill.Identity | None = None,
+    light: bool = False,
 ) -> Rendered:
     """Lay one note out as a PDF.
 
@@ -476,6 +490,9 @@ def render(
     ``public`` lays out the public edition: every internal passage left out.
     ``identity`` is who signs (the placeholders and the analyst's two pictures),
     read from Settings when not given.
+    ``light`` sets its pictures at the page pane's size (`PREVIEWS`): the same
+    pages, fewer pixels, for the pane and the check before an export, never for a
+    PDF that is written.
     """
     look = look or DEFAULT_LOOK
     theme = notes_style.theme_for(look)
@@ -514,7 +531,7 @@ def render(
         document.set_creation_date(created)
     words = "\n".join([title, look.cover.subtitle, *(piece.text for piece in shown), *cited.words()])
     faces = pdffonts.install(document, words, body=theme.body_family, font=look.font)
-    builder = _Builder(document, case, diagrams or {}, look=look, faces=faces, cited=cited)
+    builder = _Builder(document, case, diagrams or {}, look=look, faces=faces, cited=cited, light=light)
     try:
         builder.build(title, pieces, blocks, cover=(cover, cut.line) if cover is not None and cut is not None else None)
         output = bytes(document.output())
@@ -1046,6 +1063,113 @@ class _DecodedImages:
 DECODED = _DecodedImages()
 
 
+# -- pictures, made light for the page pane ----------------------------------
+
+#: The most pixels across a page the page pane ever draws: 900 CSS pixels at twice
+#: the screen's density. A picture is given what its place on the page can show,
+#: in two steps (`PREVIEW_SIDES`); the PDF written keeps every pixel.
+PANE_PIXELS = 1800
+PREVIEW_SIDES = (800, 1600)
+
+
+class _PreviewImages:
+    """Pictures at the page pane's size, kept between documents.
+
+    The pane asks for the whole PDF after every pause in typing. A note of sixty
+    phone photos made a 53 MB document, laid out in 2.6 seconds, sent whole and
+    decoded again by the browser for every page drawn. At the pane's size the same
+    note is a few megabytes. Only the pane's PDF and the check before an export are
+    made so: the layout is the same, since a picture is placed by the size of the
+    file itself, and only its pixels are fewer.
+
+    Light on the machine: a few hundred entries and 96 MB at most, keyed by the
+    file's path, size and modification time. A picture already small enough, one
+    with no colours a JPEG can carry (CMYK) or one Pillow cannot read is not kept,
+    and the document takes the file itself.
+    """
+
+    MAX_ENTRIES = 400
+    MAX_BYTES = 96 * 1024 * 1024
+
+    def __init__(self) -> None:
+        self._kept: OrderedDict[tuple[str, int, int, int], bytes | None] = OrderedDict()
+        self._bytes = 0
+        self._lock = threading.Lock()
+
+    def get(self, path: Path, side: int = PREVIEW_SIDES[-1]) -> bytes | None:
+        """The picture made light, at most ``side`` pixels on its longest side, or
+        None when the file itself should be used."""
+        found = _DecodedImages._key(path)
+        if found is None:
+            return None
+        key = (*found, side)
+        with self._lock:
+            if key in self._kept:
+                self._kept.move_to_end(key)
+                return self._kept[key]
+        light = _light_picture(path, side)
+        with self._lock:
+            for stale in [other for other in self._kept if other[0] == key[0] and other != key]:
+                self._bytes -= len(self._kept.pop(stale) or b"")
+            if key not in self._kept:
+                self._kept[key] = light
+                self._bytes += len(light or b"")
+            while len(self._kept) > self.MAX_ENTRIES or self._bytes > self.MAX_BYTES:
+                self._bytes -= len(self._kept.popitem(last=False)[1] or b"")
+        return light
+
+    def clear(self) -> None:
+        with self._lock:
+            self._kept.clear()
+            self._bytes = 0
+
+
+def _light_picture(path: Path, side: int) -> bytes | None:
+    """A picture as the page pane needs it: at most ``side`` pixels on its longest
+    side, drawn upright, and a JPEG unless it shows through somewhere, since a JPEG
+    goes into a PDF as it is while a PNG is decoded and packed again every time.
+    None when the file itself is as light already, or cannot be made lighter."""
+    try:
+        with PILImage.open(path) as image:
+            if image.width * image.height > MAX_IMAGE_PIXELS or image.mode == "CMYK":
+                return None
+            big = max(image.size) > side
+            if image.format == "JPEG":
+                if not big and _orientation(image) in (0, 1):
+                    return None
+                # decodes at a half, a quarter or an eighth at once, never below the size wanted
+                image.draft(image.mode, (side, side))
+            profile = image.info.get("icc_profile")
+            upright = ImageOps.exif_transpose(image)
+            clear = _shows_through(upright)
+            if clear and not big:
+                return None
+            upright = upright.convert("RGBA" if clear else ("L" if upright.mode in ("L", "LA", "1") else "RGB"))
+            upright.thumbnail((side, side), PILImage.Resampling.BICUBIC, reducing_gap=2.0)
+            upright.info = {}
+            buffer = BytesIO()
+            extra = {"icc_profile": profile} if profile else {}
+            if clear:
+                upright.save(buffer, "PNG", compress_level=3, **extra)
+            else:
+                upright.save(buffer, "JPEG", quality=85, **extra)
+            return buffer.getvalue()
+    except (OSError, ValueError, UnidentifiedImageError, PILImage.DecompressionBombError):
+        return None
+
+
+def _shows_through(image: PILImage.Image) -> bool:
+    """Whether some pixel of ``image`` is not fully opaque. A screenshot often comes
+    with an alpha channel it never uses."""
+    if image.mode in ("RGBA", "LA", "PA"):
+        lowest = image.getchannel("A").getextrema()[0]
+        return isinstance(lowest, (int, float)) and lowest < 255
+    return image.mode == "P" and "transparency" in image.info
+
+
+PREVIEWS = _PreviewImages()
+
+
 # -- Markdown to a page ------------------------------------------------------
 
 
@@ -1310,9 +1434,12 @@ class _Builder:
         look: NoteLook | None = None,
         faces: set[tuple[str, str]] | None = None,
         cited: _Cited | None = None,
+        light: bool = False,
     ) -> None:
         self.pdf = pdf
         self.case = case
+        #: Pictures at the page pane's size (`PREVIEWS`) rather than every pixel.
+        self.light = light
         self.diagrams = diagrams
         self.look = look or DEFAULT_LOOK
         self.theme: Theme = getattr(pdf, "theme", PLAIN)
@@ -1544,6 +1671,8 @@ class _Builder:
         addresses = [("", one) for one in (source.address,) if one]
         if source.archive and source.archive != source.address:
             addresses.append(("Archive: ", source.archive))
+        if source.posted and source.posted not in (source.address, source.archive):
+            addresses.append(("Posted: ", source.posted))
         width = pdf.epw - hang - 2 * pdf.c_margin
         # measured first, so an entry that fits on a page is never split over two
         pdf.set_font(theme.heading_family, "", size)
@@ -3013,7 +3142,8 @@ class _Builder:
             self._aside(resolved)
             return True
         self._place(resolved.path, resolved.natural, options.width, place, caption,
-                    figure=figure, credit=resolved.credit, number=number)
+                    figure=figure, credit=resolved.credit, number=number,
+                    posted=resolved.source.posted if resolved.source is not None else "")
         return True
 
     def _caption(self, title: str, alt: str) -> tuple[str, str]:
@@ -3039,6 +3169,7 @@ class _Builder:
         number: int = 0,
         unsized: float = UNSIZED_SHARE,
         framed: bool = True,
+        posted: str = "",
     ) -> None:
         """Draw a picture as a block, its caption and credit kept on its page.
 
@@ -3048,13 +3179,16 @@ class _Builder:
         that only has room for it and not for the words under it. ``number`` is its
         entry in the sources list, said after the credit. ``framed`` draws a styled
         look's hairline round it, which a logo or a signature does without.
+        ``posted`` is where the analyst published it: the picture links there, and a
+        line under its credit says so.
         """
         pdf = self.pdf
         theme = self.theme
         width, height = _fit(natural, width_attr, self._frame(), theme.room, unsized)
+        also = _posted_credit(posted)
         if not theme.plain:
             pdf.ln(0.6)
-        below = self._below(caption, credit, align, width)
+        below = self._below(caption, credit, align, width, also)
         gap = None
         if pdf.will_page_break(height + below):
             room = pdf.page_break_trigger - pdf.get_y() - below - 0.5
@@ -3062,13 +3196,13 @@ class _Builder:
             if (
                 not width_attr
                 and height * (1 - MAX_SHRINK) <= room
-                and not pdf.will_page_break(shrunk[1] + self._below(caption, credit, align, shrunk[0]))
+                and not pdf.will_page_break(shrunk[1] + self._below(caption, credit, align, shrunk[0], also))
             ):
                 width, height = shrunk
             else:
                 gap = self._gap(natural, below)
                 pdf.add_page()
-        self._picture(source, w=width, h=height, x=align)
+        self._picture(source, w=width, h=height, x=align, **({"link": also.link} if also else {}))
         left = self._left(align, width)
         top = pdf.get_y() - height
         if video:
@@ -3086,6 +3220,8 @@ class _Builder:
                 )
             if credit is not None:
                 self._credit_line(credit, align, pdf.l_margin, pdf.epw, number)
+            if also is not None:
+                self._credit_line(also, align, pdf.l_margin, pdf.epw)
             pdf.ln(theme.gap)
             return
         if framed:
@@ -3097,10 +3233,15 @@ class _Builder:
             self._figure_caption(caption, align, box_left, box_width)
         if credit is not None:
             self._credit_line(credit, align, box_left, box_width, number)
+        if also is not None:
+            self._credit_line(also, align, box_left, box_width)
         pdf.ln(theme.gap + 0.6)
 
-    def _below(self, caption: tuple[str, str], credit: _Credit | None, align: Align, width: float) -> float:
-        """How tall the caption and credit under a picture this wide will be."""
+    def _below(
+        self, caption: tuple[str, str], credit: _Credit | None, align: Align, width: float, also: _Credit | None = None
+    ) -> float:
+        """How tall the caption and credit under a picture this wide will be, with
+        the line saying where it was posted (``also``)."""
         pdf, theme = self.pdf, self.theme
         scale = theme.scale
         height = 0.0 if theme.plain else 1.0
@@ -3114,8 +3255,9 @@ class _Builder:
         elif caption[0] or caption[1]:
             box = self._caption_box(align, self._left(align, width), width)[1]
             height += 1.6 + CAPTION_LEADING * scale * len(self._caption_lines(caption, box))
-        if credit is not None:
-            height += 0.6 + CREDIT_LEADING * scale
+        for line in (credit, also):
+            if line is not None:
+                height += 0.6 + CREDIT_LEADING * scale
         return height
 
     def _caption_box(self, align: Align, left: float, width: float) -> tuple[float, float]:
@@ -3278,9 +3420,19 @@ class _Builder:
 
     def _picture(self, source: Path | BytesIO, **options: Any) -> None:
         if isinstance(source, Path):
+            light = PREVIEWS.get(source, self._pane_side(options)) if self.light else None
+            if light is not None:
+                self.pdf.image(light, **options)
+                return
             DECODED.place(self.pdf, source, self._render, **options)
         else:
             self.pdf.image(source, **options)
+
+    def _pane_side(self, options: dict[str, Any]) -> int:
+        """The fewest pixels a picture needs in the page pane, by the room it takes."""
+        drawn = max(float(options.get("w") or 0), float(options.get("h") or 0))
+        needed = drawn / self.pdf.w * PANE_PIXELS if drawn else PANE_PIXELS
+        return next((side for side in PREVIEW_SIDES if needed <= side), PREVIEW_SIDES[-1])
 
     def _placeholder(
         self,
@@ -3582,24 +3734,39 @@ def _wrap_words(pdf: FPDF, text: str, width: float, first: float) -> list[str]:
     cut where it has to be rather than run past the margin."""
     lines: list[str] = []
     line = ""
+    reach = 0.0  # the line's width, its words and spaces added up
     room = first
+    space = pdf.get_string_width(" ")
     for word in text.split():
         candidate = f"{line} {word}" if line else word
-        if pdf.get_string_width(candidate) <= room:
-            line = candidate
+        # Added up, a line is within a hair of its measure, so only a line near the
+        # room is measured whole: shaping every longer line again was most of the
+        # cost of a long sources list.
+        guess = reach + space + pdf.get_string_width(word) if line else pdf.get_string_width(word)
+        near = WRAP_SLACK * room
+        if guess <= room - near or (guess <= room + near and pdf.get_string_width(candidate) <= room):
+            line, reach = candidate, guess
             continue
         if line:
             lines.append(line)
             room = width
         while pdf.get_string_width(word) > room:
-            cut = max(1, next((n for n in range(len(word), 0, -1)
-                               if pdf.get_string_width(word[:n]) <= room), 1))
+            cut = max(1, notes_style.longest_prefix(partial(_prefix_fits, pdf, word, room), len(word)))
             lines.append(word[:cut])
             word = word[cut:]
             room = width
-        line = word
+        line, reach = word, pdf.get_string_width(word)
     lines.append(line)
     return lines
+
+
+def _prefix_fits(pdf: FPDF, word: str, room: float, length: int) -> bool:
+    return bool(pdf.get_string_width(word[:length]) <= room)
+
+
+#: How far off a line's added-up width may be from its measure, as a share of the
+#: room: kerning across a space, never near this much.
+WRAP_SLACK = 0.02
 
 
 def _inline_text(token: Token) -> str:

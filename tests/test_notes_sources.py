@@ -661,3 +661,48 @@ def test_a_case_with_the_key_still_reads_as_0_3_3_reads_it(client):
     assert case.read_note(note["id"]) == "Body.\n"
     assert case.get_entity(note["id"])["attrs"]["look"] == {**NoteLook().model_dump(mode="json"), "sources": "on"}
     assert json.loads(case.get_setting(notelook.CASE_LOOK))["sources"] == "off"
+
+
+# -- where a proof was posted ------------------------------------------------------
+
+POSTED_URL = "https://x.com/osint_unit/status/1890000000000000001"
+
+
+def test_a_proof_posted_links_to_its_post_and_keeps_its_own_source(sourced):
+    cid, case, made = sourced
+    case.update_entity(made["proof"]["id"], {"attrs": {"posted_url": POSTED_URL}})
+    proof = notesources.Reader(case).entity(made["proof"]["id"])
+    assert proof.posted == POSTED_URL
+    # where it comes from is still what it was made of, not where it was posted
+    assert proof.address == ""
+    assert proof.credit() == notesources.Credit("Source", "x.com +1", POST_URL)
+
+
+def test_the_pdf_links_a_posted_proof_names_the_post_under_it_and_lists_it(sourced):
+    cid, case, made = sourced
+    case.update_entity(made["proof"]["id"], {"attrs": {"posted_url": POSTED_URL}})
+    text = f"# Strike\n\n[[media:{made['proof']['id']}|Proof]]{{width=60%}}\n"
+    for style in ("report", "plain"):
+        rendered = notes_pdf.render(case, title="Strike", text=text, look=look(style=style, sources="on"))
+        words = squash(pdf_text(rendered.pdf))
+        assert squash("Posted: x.com/osint_unit/status/1890000000000000001") in words
+        assert link_targets(rendered.pdf).count(POSTED_URL) >= 2  # the picture and the line under it
+    report = notes_pdf.render(case, title="Strike", text=text, look=look(style="report", sources="on"))
+    assert squash(f"Posted: {POSTED_URL}") in squash(pdf_text(report.pdf))
+
+
+def test_a_proof_not_posted_prints_as_it_did(sourced):
+    cid, case, made = sourced
+    text = f"[[media:{made['proof']['id']}|Proof]]{{width=60%}}\n"
+    rendered = notes_pdf.render(case, title="Strike", text=text, look=look(style="report", sources="on"))
+    assert "Posted" not in pdf_text(rendered.pdf)
+
+
+def test_where_a_proof_was_posted_is_a_field_of_its_details(client, sourced):
+    cid, case, made = sourced
+    answer = client.patch(f"/api/cases/{cid}/entities/{made['proof']['id']}", json={"attrs": {"posted_url": POSTED_URL}})
+    assert answer.status_code == 200 and answer.json()["attrs"]["posted_url"] == POSTED_URL
+    from azimut.engine import entities
+
+    declared = {attr.key: attr for attr in entities.entity_type("proof").attrs}
+    assert declared["posted_url"].kind == "url"

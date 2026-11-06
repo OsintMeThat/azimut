@@ -233,3 +233,14 @@ export async function stateSourceOf(caseId, entity, url, { patch = api.patch, re
   asked.delete(`${caseId}:${entity.attrs.path}`);
   await reload();
 }
+
+/**
+ * Where the analyst published proof `entity`, kept on the proof (`posted_url`, a
+ * field its Details shows too): a report links the proof there. "" takes it off.
+ */
+export async function statePostedOf(caseId, entity, url, { patch = api.patch, reload = reloadCase } = {}) {
+  const value = String(url ?? '').trim();
+  if (value && !/^https?:\/\/\S+$/i.test(value)) throw new Error('The address must be an http(s) one.');
+  await patch(`/api/cases/${caseId}/entities/${entity.id}`, { attrs: { posted_url: value } });
+  await reload();
+}

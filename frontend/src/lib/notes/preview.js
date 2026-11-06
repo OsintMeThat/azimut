@@ -107,11 +107,20 @@ export function pageLine(pages, index) {
   return pages?.[index] ?? 0;
 }
 
+/** The longest a pane waits after typing stops, however long its pages take. */
+export const MOST_DELAY = 4000;
+
 /**
  * The preview of one pane. `ask(request)` waits for typing to stop, `now(request)`
- * does not; each cancels the one before. `onresult({ data, pages, warnings, pictures })`
- * is called with the latest page only, `onerror(message)` when it failed, and
- * `onbusy(flag)` while one is being drawn.
+ * does not. One request is in flight at a time: the server lays a note out to the
+ * end even when its asker gave up, so cancelling only queued the next behind it.
+ * A request made meanwhile waits its turn, and only the newest of those is asked.
+ * A note whose pages took long to draw waits as long after typing stops, up to
+ * `MOST_DELAY`, so a long report is not laid out again at every pause.
+ *
+ * `onresult({ data, pages, warnings, pictures })` is called with each answer, the
+ * older one first while a newer is drawn, `onerror(message)` when one failed, and
+ * `onbusy(flag)` while any is being drawn or waits for its turn.
  */
 export function createPreview({
   fetch: fetchPdf = fetchPreview,
@@ -120,10 +129,18 @@ export function createPreview({
   onresult = () => {},
   onerror = () => {},
   onbusy = () => {},
+  now: clock = () => Date.now(),
 } = {}) {
   let timer = null;
   let controller = null;
+  /** The newest request made while another was in flight. */
+  let queued = null;
+  /** The requests in flight and queued, done when both are. */
+  let flight = null;
+  /** Moved on by `stop`, which leaves nothing of what was asked before it. */
   let ticket = 0;
+  /** How long the last pages took, in milliseconds. */
+  let took = 0;
   /** The keys this pane was asked for, newest last: the diagrams it sends. */
   let wanted = [];
 
@@ -132,14 +149,10 @@ export function createPreview({
     wanted = [...wanted.filter((item) => item !== key), key].slice(-SENT_DIAGRAMS);
   };
 
-  async function run(request) {
-    clearTimeout(timer);
-    timer = null;
-    controller?.abort();
+  async function once(request, current) {
     const mine = new AbortController();
     controller = mine;
-    const current = ++ticket;
-    onbusy(true);
+    const started = clock();
     try {
       let answer = await fetchPdf({ ...request, diagrams: sent() }, mine.signal);
       if (answer.diagrams.length) {
@@ -155,28 +168,50 @@ export function createPreview({
         if (ready.length) answer = await fetchPdf({ ...request, diagrams: sent() }, mine.signal);
       }
       if (current !== ticket) return;
+      took = clock() - started;
       onresult(answer);
     } catch (error) {
       if (current !== ticket || error?.name === 'AbortError') return;
       onerror(String(error?.message || error || 'The page could not be drawn').split('\n')[0]);
     } finally {
-      if (current === ticket) {
-        onbusy(false);
-        if (controller === mine) controller = null;
-      }
+      if (controller === mine) controller = null;
     }
+  }
+
+  function run(request) {
+    clearTimeout(timer);
+    timer = null;
+    if (flight) {
+      queued = request;
+      return flight;
+    }
+    onbusy(true);
+    flight = (async () => {
+      let next = request;
+      let current = ticket;
+      while (next) {
+        current = ticket;
+        queued = null;
+        await once(next, current);
+        next = queued;
+      }
+      flight = null;
+      if (current === ticket) onbusy(false);
+    })();
+    return flight;
   }
 
   return {
     ask(request) {
       clearTimeout(timer);
-      timer = setTimeout(() => void run(request), delay);
+      timer = setTimeout(() => void run(request), Math.max(delay, Math.min(took, MOST_DELAY)));
     },
     now: (request) => run(request),
     /** Nothing more: the waiting request is dropped and the one in flight cancelled. */
     stop() {
       clearTimeout(timer);
       timer = null;
+      queued = null;
       ticket += 1;
       controller?.abort();
       controller = null;

@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
 import {
-  CAPTION_MAX, PAGE_TALL, PICTURE_SIZES, captionField, cleanCaption, pictureAt, pictureLine, picturesIn, readAttrs, rovingToolbar,
-  blockAlignAt, sameRef, sizeWidth, sizedLine, writeAttrs,
+  CAPTION_MAX, PAGE_TALL, PICTURE_SIZES, POSTED_HELP, captionField, cleanCaption, pictureAt, pictureLine, picturesIn, readAttrs, rovingToolbar,
+  blockAlignAt, sameRef, sizeWidth, sizedLine, writeAttrs, sourceField,
 } from './pictureSize.js';
 
 describe('a picture line', () => {
@@ -211,11 +211,49 @@ describe('the sizes offered', () => {
     expect(parseFloat(sizeWidth(share('full'), 2.16))).toBe(65);
   });
 
+  it('go down to a fifth and a tenth of the page, for a small picture or a logo', () => {
+    expect(PICTURE_SIZES.map((size) => size.label)).toEqual(['XXS', 'XS', 'S', 'M', 'L', 'Full']);
+    expect(sizeWidth(share('xs'), 0.5)).toBe('20%');
+    expect(sizeWidth(share('xxs'), 0.5)).toBe('10%');
+    // a phone screenshot at a tenth of the page height
+    expect(sizeWidth(share('xxs'), 2.16)).toBe('6%');
+  });
+
   it('size a picture whose shape is not known yet as a wide one', () => {
     expect(sizeWidth(share('large'))).toBe('75%');
   });
 
   it('never write a width the PDF would refuse', () => {
     expect(sizeWidth(share('small'), 500)).toBe('5%');
+  });
+});
+
+describe('the address field under a picture', () => {
+  const keyed = (field, key) => field.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('holds the address kept, and an emptied field takes it off', async () => {
+    const write = vi.fn(async () => {});
+    const done = vi.fn();
+    const field = sourceField({ write, done, help: POSTED_HELP, value: 'https://x.com/me/status/1' });
+    expect(field.value).toBe('https://x.com/me/status/1');
+    expect(field.placeholder).toBe(POSTED_HELP.placeholder);
+    field.value = '';
+    keyed(field, 'Enter');
+    await settle();
+    expect(write).toHaveBeenCalledWith('');
+    expect(done).toHaveBeenCalledWith('keyboard');
+  });
+
+  it('writes nothing for an empty field that held nothing, and refuses what is not an address', async () => {
+    const write = vi.fn(async () => {});
+    const field = sourceField({ write, done: vi.fn() });
+    keyed(field, 'Enter');
+    field.value = 'a friend';
+    keyed(field, 'Enter');
+    await settle();
+    expect(write).not.toHaveBeenCalled();
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    expect(field.getAttribute('aria-label')).toBe('Source');
   });
 });

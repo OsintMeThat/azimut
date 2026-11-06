@@ -268,7 +268,7 @@ describe('a picture’s size in the PDF', () => {
   it('is offered over the picture, and a press writes it on the line', () => {
     withPicture('[[media:m1|Roof]]\n\nAfter');
     const bar = view.dom.querySelector('[data-size-bar]');
-    expect([...bar.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['S', 'M', 'L', 'Full', '', '', '', 'Caption']);
+    expect([...bar.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['XXS', 'XS', 'S', 'M', 'L', 'Full', '', '', '', 'Caption']);
     bar.querySelector('[data-share="0.5"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     expect(view.state.doc.line(1).text).toBe('[[media:m1|Roof]]{width=50%}');
     view.dom.querySelector('[data-align="center"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));

@@ -16,6 +16,8 @@
  * a width alone would leave it a page tall. What is written is still a width.
  */
 export const PICTURE_SIZES = [
+  { id: 'xxs', label: 'XXS', share: 1 / 10, title: 'Tiny: within a tenth of the page, for a logo or an icon' },
+  { id: 'xs', label: 'XS', share: 1 / 5, title: 'Very small: within a fifth of the page' },
   { id: 'small', label: 'S', share: 1 / 3, title: 'Small: within a third of the page' },
   { id: 'medium', label: 'M', share: 1 / 2, title: 'Medium: within half the page' },
   { id: 'large', label: 'L', share: 3 / 4, title: 'Large: within three quarters of the page' },
@@ -204,24 +206,38 @@ export function captionField({ caption = '', title = '', write, done }) {
 
 /** What a picture's Source… says, in the note and on the Page pane alike. */
 export const SOURCE_HELP = {
+  label: 'Source',
   button: 'Where it comes from: a link you state, nothing is fetched',
   field: 'Enter states it, Escape leaves it',
   placeholder: 'https://… where this picture comes from',
+  refused: 'The source must be an http(s) address',
+};
+
+/** What a proof's Posted… says on the Page pane: where the analyst published it. */
+export const POSTED_HELP = {
+  label: 'Posted at',
+  button: 'Where you published this proof, on X or elsewhere: the PDF links the proof there',
+  field: 'Enter keeps it, an empty field takes it off, Escape leaves it',
+  placeholder: 'https://… where you posted this proof',
+  refused: 'The address must be an http(s) one',
 };
 
 /**
  * The one-line field a picture's source is stated in: an address only the analyst
  * knows, as Details states one. Enter writes it (`write(url)`, a promise refused
  * with what is wrong), Escape or leaving the field drops it. `done(by)` is called once.
+ * `help` words it (`SOURCE_HELP`, `POSTED_HELP`); a field opened on an address
+ * already kept (`value`) holds it, and Enter on it emptied writes "" to take it off.
  */
-export function sourceField({ write, done }) {
+export function sourceField({ write, done, help = SOURCE_HELP, value = '' }) {
   const field = document.createElement('input');
   field.type = 'url';
   field.className = 'picture-source-field';
   field.maxLength = 2000;
-  field.placeholder = SOURCE_HELP.placeholder;
-  field.title = SOURCE_HELP.field;
-  field.setAttribute('aria-label', 'Source');
+  field.value = value;
+  field.placeholder = help.placeholder;
+  field.title = help.field;
+  field.setAttribute('aria-label', help.label);
   let over = false;
   let writing = false;
   const finish = (by) => {
@@ -235,7 +251,7 @@ export function sourceField({ write, done }) {
   };
   field.addEventListener('input', () => {
     field.removeAttribute('aria-invalid');
-    field.title = SOURCE_HELP.field;
+    field.title = help.field;
   });
   field.addEventListener('keydown', async (event) => {
     if (event.key !== 'Enter' && event.key !== 'Escape') return;
@@ -246,9 +262,9 @@ export function sourceField({ write, done }) {
       return;
     }
     const url = field.value.trim();
-    if (!url || writing) return;
-    if (!/^https?:\/\/\S+$/i.test(url)) {
-      refuse('The source must be an http(s) address');
+    if (writing || (!url && !value)) return;
+    if (url && !/^https?:\/\/\S+$/i.test(url)) {
+      refuse(help.refused);
       return;
     }
     writing = true;
