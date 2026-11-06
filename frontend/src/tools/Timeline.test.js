@@ -381,9 +381,17 @@ describe('one reading, the axis over the list', () => {
   });
 
   it('puts the same window in the pinned note, from the Copy menu and the note’s Add', () => {
-    expect(source).toContain("offerPuts('timeline', () => (windowItems.length ? [windowOffer] : []));");
+    expect(source).toContain("offerPuts('timeline', () => [...(windowItems.length ? [windowOffer] : []), ...(axisWindow ? [figureOffer] : [])]);");
     expect(source).toContain('chronologyNoteTable(rows, windowSaid(), { truncated: read.truncated })');
     expect(source).toContain('<PutInNote offer={windowOffer} class="put-row" icon={false} onput={() => (copyMenu = false)} />');
+  });
+
+  it('puts the axis in the pinned note as a picture, frozen as a snapshot, from its export dialog and the note’s Add', () => {
+    expect(source).toContain("readingName('Timeline', windowWords(from, to, zone))");
+    // a snapshot already open is pictured as it is, never copied
+    expect(source).toContain("const frozen = open?.mode === 'snapshot' ? open : null;");
+    expect(source).toContain("surface: 'timeline', name, spec: captureAnalysisView(), plate, viewId: frozen?.id, signal");
+    expect(source).toContain('<PlateExport surface="timeline" plate={capturePlate} figure={figureOffer}');
   });
 
   it('draws the Media lane as the files its events date, and opens the event when one is picked', () => {

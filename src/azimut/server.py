@@ -80,6 +80,7 @@ class BulkBodyLimit:
         ("PUT", ("notes",), "notes", "MAX_NOTE_BODY_BYTES"),
         ("PUT", ("notes", "*"), "notes", "MAX_NOTE_BODY_BYTES"),
         ("POST", ("plates",), "plates", "MAX_PLATE_BODY_BYTES"),
+        ("POST", ("analysis-views", "figure"), "analysis_views", "MAX_FIGURE_BODY_BYTES"),
         ("POST", ("map-plates", "export"), "mapplates", "MAX_EXPORT_BODY_BYTES"),
         ("POST", ("map-plates", "export", "pictures"), "mapplates", "MAX_PICTURES_BODY_BYTES"),
         ("POST", ("map-plates", "*", "figure"), "mapplates", "MAX_EXPORT_BODY_BYTES"),

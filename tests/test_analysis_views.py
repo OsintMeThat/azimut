@@ -715,3 +715,107 @@ def test_a_snapshot_freezes_the_claims_that_lack_a_source(client):
     assert saved.status_code == 200, saved.text
     frozen = saved.json()["spec"]["snapshot"]["entities"]
     assert [entity["label"] for entity in frozen] == ["Heard of it"]
+
+
+# -- a reading filed as a picture, for a note to show ---------------------------------
+
+
+def _plate_png(size=(320, 200)) -> str:
+    import base64
+
+    out = io.BytesIO()
+    Image.new("RGB", size, (250, 250, 250)).save(out, "PNG")
+    return base64.b64encode(out.getvalue()).decode("ascii")
+
+
+def _timeline_spec(**extra) -> dict:
+    return {
+        "query": {"filter": {}, "terms": {}, "label": ""},
+        "timeline": {"from": "2024-03-05T00:00:00Z", "to": "2024-03-06T00:00:00Z", "timezone": "UTC",
+                     "zone_choice": "machine", "group_by": "none", "visible_categories": ["statement"],
+                     "tracks": [{"id": "all", "label": "Statements", "categories": ["statement"]}], **extra},
+    }
+
+
+def _figure(client, case_id: str, **body):
+    return client.post(f"/api/cases/{case_id}/analysis-views/figure", json={
+        "name": "Timeline, 5 to 6 Mar 2024", "surface": "timeline", "spec": _timeline_spec(),
+        "png": _plate_png(), "filename": "Timeline 5 to 6 Mar 2024", **body})
+
+
+def test_a_reading_is_filed_as_a_picture_and_frozen_by_a_snapshot_it_names(client):
+    from azimut.engine import media as media_engine
+
+    case_id = _case(client, "Figure case")
+    made = _figure(client, case_id)
+    assert made.status_code == 200, made.text
+    filed = made.json()
+    assert filed["reused"] is False and filed["view"].startswith("v_")
+    case = Case.open(case_id)
+    entity = case.find_entity(attr="path", value=filed["path"])
+    assert entity["id"] == filed["entity"]
+    assert (entity["attrs"]["analysis_view"], entity["attrs"]["analysis_surface"]) == (filed["view"], "timeline")
+    assert media_engine.read_item(case, filed["path"])["source"]["type"] == "analysis-view"
+    # the snapshot it names is a frozen reading in the case, listed beside the others
+    views = client.get(f"/api/cases/{case_id}/analysis-views").json()["views"]
+    assert [(view["id"], view["mode"], view["name"]) for view in views] == [(filed["view"], "snapshot", "Timeline, 5 to 6 Mar 2024")]
+
+
+def test_the_same_reading_put_twice_is_one_picture_and_one_snapshot(client):
+    case_id = _case(client, "Figure twice")
+    first = _figure(client, case_id).json()
+    again = _figure(client, case_id).json()
+    assert again["reused"] is True and again["entity"] == first["entity"] and again["view"] == first["view"]
+    assert len(client.get(f"/api/cases/{case_id}/analysis-views").json()["views"]) == 1
+    # another window is another reading, with a name that does not clash
+    other = _figure(client, case_id, spec=_timeline_spec(to="2024-03-07T00:00:00Z")).json()
+    assert other["reused"] is False and other["view"] != first["view"]
+    names = [view["name"] for view in client.get(f"/api/cases/{case_id}/analysis-views").json()["views"]]
+    assert sorted(names) == ["Timeline, 5 to 6 Mar 2024", "Timeline, 5 to 6 Mar 2024 2"]
+
+
+def test_a_snapshot_already_open_is_pictured_as_it_is_and_never_copied(client):
+    case_id = _case(client, "Figure open snapshot")
+    snapshot = client.post(f"/api/cases/{case_id}/analysis-views",
+                           json={"name": "Frozen", "mode": "snapshot", "surface": "timeline", "spec": _timeline_spec()}).json()
+    made = _figure(client, case_id, view_id=snapshot["id"])
+    assert made.status_code == 200, made.text
+    assert made.json()["view"] == snapshot["id"]
+    assert len(client.get(f"/api/cases/{case_id}/analysis-views").json()["views"]) == 1
+    # a snapshot of another tool, or a live view, or one that is gone, is refused
+    graph = client.post(f"/api/cases/{case_id}/analysis-views",
+                        json={"name": "Network", "mode": "snapshot", "surface": "graph", "spec": {}}).json()
+    assert _figure(client, case_id, view_id=graph["id"]).status_code == 409
+    live = client.post(f"/api/cases/{case_id}/analysis-views", json=_body("Live", surface="timeline")).json()
+    assert _figure(client, case_id, view_id=live["id"]).status_code == 409
+    assert _figure(client, case_id, view_id="v_nothing").status_code == 404
+
+
+def test_a_figure_that_is_not_a_picture_is_refused_and_leaves_no_snapshot(client):
+    case_id = _case(client, "Figure refused")
+    assert _figure(client, case_id, png="not base64!").status_code == 422
+    import base64
+
+    assert _figure(client, case_id, png=base64.b64encode(b"GIF89a....").decode("ascii")).status_code == 422
+    assert client.get(f"/api/cases/{case_id}/analysis-views").json()["views"] == []
+
+
+def test_a_figure_is_named_in_the_annex_as_the_snapshot_it_shows(client):
+    from azimut.engine import notesources
+
+    case_id = _case(client, "Figure annex")
+    filed = _figure(client, case_id).json()
+    source = notesources.Reader(Case.open(case_id)).entity(filed["entity"])
+    assert source.noun == "Timeline snapshot" and source.arrival == "made"
+
+
+def test_a_snapshot_made_for_a_picture_that_could_not_be_filed_does_not_stay_behind(client, monkeypatch):
+    from azimut.engine import media as media_engine
+
+    def refuse(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(media_engine, "import_rendered_bytes", refuse)
+    case_id = _case(client, "Figure rollback")
+    assert _figure(client, case_id).status_code == 409
+    assert client.get(f"/api/cases/{case_id}/analysis-views").json()["views"] == []

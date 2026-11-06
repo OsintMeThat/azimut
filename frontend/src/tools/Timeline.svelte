@@ -77,6 +77,7 @@
   } from '../lib/timelineTracks.js';
   import { chronologyBlock, chronologyMarkdown, chronologyNoteTable, chronologyRows, readChronology } from '../lib/timelineCopy.js';
   import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { fileReading, readingName, readingOffer } from '../lib/notes/readingFigure.js';
   import PutInNote from '../components/PutInNote.svelte';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
   import TimelineLayerCard from '../components/TimelineLayerCard.svelte';
@@ -1942,7 +1943,30 @@
       return { text: chronologyNoteTable(rows, windowSaid(), { truncated: read.truncated }) };
     },
   };
-  offerPuts('timeline', () => (windowItems.length ? [windowOffer] : []));
+  /**
+   * The axis as a picture for the pinned note: its plate filed as a PNG, with the snapshot
+   * that freezes the reading (the one already open, when a snapshot is). The same reading
+   * filed before is cited again.
+   */
+  async function keepTimelineFigure({ signal } = {}) {
+    const caseId = caseState.current?.id;
+    const plate = capturePlate();
+    if (!caseId || !plate) throw new Error('There is nothing on the axis to freeze yet');
+    const open = timelineViews.activeView;
+    const frozen = open?.mode === 'snapshot' ? open : null;
+    const name = frozen?.name ?? readingName('Timeline', windowWords(from, to, zone));
+    const { entity, fresh } = await fileReading({
+      caseId, surface: 'timeline', name, spec: captureAnalysisView(), plate, viewId: frozen?.id, signal,
+    });
+    await reloadCase();
+    return { entity, label: name, fresh, width: plate.width, height: plate.height };
+  }
+  const figureOffer = readingOffer({
+    label: 'This window as a picture',
+    hint: 'A picture of the axis, frozen as a snapshot you can reopen',
+    keep: keepTimelineFigure,
+  });
+  offerPuts('timeline', () => [...(windowItems.length ? [windowOffer] : []), ...(axisWindow ? [figureOffer] : [])]);
   $effect(() => () => withdrawNote('timeline'));
 
   /**
@@ -2097,7 +2121,7 @@
         onopen={openAnalysisView}
         onleave={leaveAnalysisReading}
       />
-      <PlateExport surface="timeline" plate={capturePlate} disabled={!caseState.current} />
+      <PlateExport surface="timeline" plate={capturePlate} figure={figureOffer} disabled={!caseState.current} />
       {#if fullscreen}<button class="btn btn-sm" onclick={toggleFullscreen}>Exit full screen</button>{/if}
       <div class="more" bind:this={moreElement}>
         <button class="btn btn-sm more-btn" aria-expanded={moreMenu} aria-label="More" title="Tracks, grouping, legend, full screen" onclick={() => (moreMenu = !moreMenu)}>

@@ -120,6 +120,8 @@
     now = Date.now();
     renaming = null;
     menu = !menu;
+    // a snapshot made for a note since the list was read is among them
+    if (menu) void read();
   }
 
   function updateSummary(view) {

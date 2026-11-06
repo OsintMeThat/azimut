@@ -8,6 +8,10 @@ import { collageOpener, frameOpener } from './inspect/frame.opener.js';
 import { pinOpener } from './detect/pin.opener.js';
 import { plateOpener } from './plate/plate.opener.js';
 import { viewOpener } from './horizon/view.opener.js';
+import { readingOpener } from './reading.opener.js';
+import { api } from '../lib/api.js';
+import { analysisSearch } from '../lib/analysisSearch.svelte.js';
+import { caseState } from '../lib/state.svelte.js';
 import { takeSeek } from './inspect/handoff.js';
 import { takeCandidate } from './detect/handoff.js';
 
@@ -21,7 +25,8 @@ vi.mock('../lib/api.js', () => ({ api: { get: vi.fn() } }));
 beforeEach(() => {
   resetOpeners();
   for (const [tool, opener] of [['proof', proofOpener], ['satellite', captureOpener], ['compare', pairOpener],
-    ['inspect', frameOpener], ['collage', collageOpener], ['detect', pinOpener], ['plate', plateOpener], ['horizon', viewOpener]]) registerOpener(tool, opener);
+    ['inspect', frameOpener], ['collage', collageOpener], ['detect', pinOpener], ['plate', plateOpener], ['horizon', viewOpener], ['timeline', readingOpener('timeline')],
+    ['graph', readingOpener('graph')]]) registerOpener(tool, opener);
   uiState.tool = 'notebook';
 });
 
@@ -97,6 +102,28 @@ describe('opening a note\'s picture where it was made', () => {
     found.open();
     expect(uiState.openHorizonView).toBe('Ridge above the town');
     expect(uiState.tool).toBe('horizon');
+  });
+
+  it('opens a Timeline or Graph picture on the snapshot that froze it, in the tool that drew it', async () => {
+    caseState.current = { id: 'case-a' };
+    api.get.mockResolvedValue({ id: 'v_1', name: 'Timeline, 5 Mar 2024', mode: 'snapshot', surface: 'timeline', spec: {} });
+    const found = openerFor(media({ analysis_view: 'v_1', analysis_surface: 'timeline' }));
+    expect(found.label).toBe('Open in Timeline');
+    await found.open();
+    expect(api.get).toHaveBeenCalledWith('/api/cases/case-a/analysis-views/v_1');
+    expect(analysisSearch.timeline.activeView.id).toBe('v_1');
+    expect(analysisSearch.timeline.snapshotId).toBe('v_1');
+    expect(uiState.tool).toBe('timeline');
+    // a graph's picture is the graph's, and is not offered to the timeline
+    expect(openerFor(media({ analysis_view: 'v_2', analysis_surface: 'graph' })).label).toBe('Open in Graph');
+  });
+
+  it('says so when the snapshot has gone, and opens nothing', async () => {
+    caseState.current = { id: 'case-a' };
+    uiState.tool = 'notebook';
+    api.get.mockRejectedValue(Object.assign(new Error('analysis view not found'), { status: 404 }));
+    await openerFor(media({ analysis_view: 'v_gone', analysis_surface: 'graph' })).open();
+    expect(uiState.tool).toBe('notebook');
   });
 
   it('offers nothing for a picture no tool can reopen', () => {

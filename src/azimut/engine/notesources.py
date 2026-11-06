@@ -83,9 +83,11 @@ IMAGERY_ROUTES = ("satellite", "screenshot", "compare")
 HORIZON = "horizon"
 #: A page of a Map plate, whose face carries the credits it owes.
 PLATE = "map-plate"
+#: A Graph or a Timeline reading drawn as a picture, and the snapshot that froze it.
+READING = "analysis-view"
 #: How the day an item came into the case is said, by the route it came in by.
 ARRIVALS = {"satellite": "captured", "screenshot": "captured", "inspect": "made", "compare": "made",
-            "horizon": "made", "map-plate": "made"}
+            "horizon": "made", "map-plate": "made", "analysis-view": "made"}
 
 #: How many days one provider's imagery names before the first and the last stand for them.
 MAX_DAYS_SAID = 4
@@ -382,6 +384,8 @@ class Reader:
                 noun = "Terrain view"
             elif route == PLATE:
                 noun = PLATE_NOUN
+            elif route == READING:
+                noun = f"{str(sidecar.get('surface') or 'analysis').capitalize()} snapshot"
             else:
                 noun = FILE_NOUNS.get(media, "File")
             what = POST if address else FILE

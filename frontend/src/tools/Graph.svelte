@@ -59,7 +59,8 @@
     zoomAround,
   } from '../lib/graphViewport.js';
   import { onDestroy, tick, untrack } from 'svelte';
-  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { offerNote, offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { fileReading, readingName, readingOffer } from '../lib/notes/readingFigure.js';
   import { api } from '../lib/api.js';
   import {
     analysisSearch,
@@ -84,7 +85,7 @@
     normalizeFilter,
     toGraphQuery,
   } from '../lib/entityFilter.js';
-  import { caseState, toast, uiState } from '../lib/state.svelte.js';
+  import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import {
     entityIcon,
     entityKindLabel,
@@ -4662,6 +4663,33 @@
     };
   }
 
+  // -- into the note pinned beside ---------------------------------------------------
+
+  /**
+   * The drawing as a picture for the pinned note: its plate filed as a PNG, with the
+   * snapshot that freezes the reading (the one already open, when a snapshot is). The same
+   * reading filed before is cited again.
+   */
+  async function keepGraphFigure({ signal } = {}) {
+    const caseId = caseState.current?.id;
+    const plate = capturePlate();
+    if (!caseId || !plate) throw new Error('There is nothing drawn to freeze yet');
+    const open = catalogViews.activeView;
+    const frozen = open?.mode === 'snapshot' && open.surface === 'graph' ? open : null;
+    const name = frozen?.name ?? readingName('Graph', lensLabel);
+    const { entity, fresh } = await fileReading({
+      caseId, surface: 'graph', name, spec: captureAnalysisView('snapshot'), plate, viewId: frozen?.id, signal,
+    });
+    await reloadCase();
+    return { entity, label: name, fresh, width: plate.width, height: plate.height };
+  }
+  const noteFigure = readingOffer({
+    label: 'This graph',
+    hint: 'A picture of the drawing, frozen as a snapshot you can reopen',
+    keep: keepGraphFigure,
+  });
+  offerPuts('graph', () => (placed.length ? [noteFigure] : []));
+
   let appliedViewId = null;
 
   async function applyGraphView(view) {
@@ -4914,7 +4942,7 @@
       onleave={leaveAnalysisReading}
     />
 
-    <PlateExport surface="graph" plate={capturePlate} disabled={!caseState.current} />
+    <PlateExport surface="graph" plate={capturePlate} figure={noteFigure} disabled={!caseState.current} />
 
     <span class="spacer"></span>
 

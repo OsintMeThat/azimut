@@ -9,12 +9,15 @@
   import ExportFolderPicker from './ExportFolderPicker.svelte';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
+  import PutInNote from './PutInNote.svelte';
 
   let {
     /** Serialise what is on screen: `{ svg, width, height, filename }`, or null. */
     plate = () => null,
     /** What the reading is called in the toast: "graph" or "timeline". */
     surface = 'graph',
+    /** What the pinned note is offered of this reading (`lib/notes/readingFigure.js`); null without. */
+    figure = null,
     disabled = false,
   } = $props();
 
@@ -127,6 +130,7 @@
         <button class="btn" disabled={busy} onclick={copy}>
           <Icon name="copy" size={12} /> Copy image
         </button>
+        {#if figure}<PutInNote offer={figure} class="btn" role="button" icon={false} onput={() => (open = false)} />{/if}
         <button class="btn btn-primary" disabled={busy} onclick={run}>
           {busy ? 'Exporting…' : 'Export'}
         </button>

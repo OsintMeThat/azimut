@@ -2154,6 +2154,17 @@ describe('Graph offers what is open to the Add event bar', () => {
   });
 });
 
+describe('Graph puts the drawing in the pinned note as a picture', () => {
+  it('files its plate with the snapshot that freezes the reading, from the export dialog and the note’s Add', () => {
+    expect(source).toContain("offerPuts('graph', () => (placed.length ? [noteFigure] : []));");
+    expect(source).toContain("readingName('Graph', lensLabel)");
+    // a snapshot of the graph already open is pictured as it is; a Board's is not the graph's
+    expect(source).toContain("open?.mode === 'snapshot' && open.surface === 'graph' ? open : null");
+    expect(source).toContain("captureAnalysisView('snapshot')");
+    expect(source).toContain('<PlateExport surface="graph" plate={capturePlate} figure={noteFigure}');
+  });
+});
+
 describe('a drag and a closing tab', () => {
   it('sends the moves still waiting with keepalive when the page goes', () => {
     expect(source).toMatch(/<svelte:window[^>]*\{onpagehide\}/s);

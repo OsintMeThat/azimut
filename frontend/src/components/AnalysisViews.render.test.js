@@ -24,9 +24,10 @@ const patch = vi.fn((url, body) => {
   return Promise.resolve({ ...row, name: body.name, updated_at: '2026-08-13T11:00:00Z' });
 });
 
+const get = vi.fn(() => Promise.resolve({ views: VIEWS }));
 vi.mock('../lib/api.js', () => ({
   api: {
-    get: () => Promise.resolve({ views: VIEWS }),
+    get,
     post: vi.fn(),
     put: vi.fn(),
     patch,
@@ -182,3 +183,20 @@ describe('managing saved views', () => {
     expect(names(root)).toContain('ports');
   });
 });
+
+describe('the Views menu', () => {
+  it('reads the list again when it opens, so a snapshot made meanwhile (for a note) is in it', async () => {
+    const root = await open();
+    const reads = get.mock.calls.length;
+    // closed, then opened again: another read, and the row that came meanwhile is listed
+    root.querySelector('button[aria-expanded]').click();
+    flushSync();
+    get.mockResolvedValueOnce({ views: [...VIEWS, { id: 'v_new', name: 'Timeline, 5 Mar 2024', mode: 'snapshot', surface: 'board',
+      snapshot_count: 4, created_at: '2026-08-14T07:15:00Z', updated_at: '2026-08-14T07:15:00Z' }] });
+    root.querySelector('button[aria-expanded]').click();
+    await settle();
+    expect(get.mock.calls.length).toBeGreaterThan(reads);
+    expect(names(root)).toContain('Timeline, 5 Mar 2024');
+  });
+});
+
