@@ -10,7 +10,7 @@ import SceneBlock from './SceneBlock.svelte';
 import { ProofScene } from './proofScene.svelte.js';
 
 /**
- * The scene block in Geo Proof's side column, used the way an analyst uses it: the
+ * The Scene tab of Geo Proof's side column, used the way an analyst uses it: the
  * field of each video the proof rests on, its time opened in Inspect's editor, the
  * player under the fields, a frame made a panel, and a panel outside the moments.
  */
@@ -32,7 +32,7 @@ afterEach(() => {
   targets = [];
 });
 
-function setup({ frames = [{ panel: 'p1', video: CLIP, time: 130.4 }], stated = null, name = 'depot' } = {}) {
+function setup({ frames = [{ panel: 'p1', video: CLIP, time: 130.4 }], stated = null, name = 'depot', active = true } = {}) {
   const puts = [];
   const api = {
     put: vi.fn(async (url, body) => {
@@ -47,7 +47,7 @@ function setup({ frames = [{ panel: 'p1', video: CLIP, time: 130.4 }], stated = 
   const target = document.createElement('div');
   document.body.append(target);
   targets.push(target);
-  live.push(mount(SceneBlock, { target, props: { scene, caseId: 'case', color: 'var(--anno-1)', onaddframe } }));
+  live.push(mount(SceneBlock, { target, props: { scene, caseId: 'case', color: 'var(--anno-1)', active, onaddframe } }));
   flushSync();
   return { root: target, scene, puts, onaddframe };
 }
@@ -64,14 +64,40 @@ describe('the scene field', () => {
   it('reads like the fields around it: the ★ video and its time, a play act at its end', () => {
     const { root } = setup({ stated: { video: CLIP, moments: [{ start: 130, end: 158 }] } });
     const [field] = fields(root);
-    expect(root.querySelector('.meta-head').textContent.trim()).toBe('Scene');
+    // the tab says Scene already, so the field names what it lists
+    expect(root.querySelector('.meta-head').textContent.trim()).toBe('Video');
     expect(field.classList.contains('field-with-act')).toBe(true);
     expect(field.querySelector('.line').textContent.replace(/\s+/g, ' ').trim()).toBe('★ clip.mp4 · 2:10–2:38');
     expect(field.querySelector('.time').getAttribute('aria-label')).toBe('Time of the scene, 2:10–2:38');
     expect(field.querySelector('.field-act').getAttribute('aria-label')).toBe('Play clip.mp4');
-    // nothing open until asked
-    expect(root.querySelector('[data-testid="scene-player"]')).toBeNull();
+    expect(field.querySelector('.field-act').getAttribute('title')).toBe('Play it in the player');
+    // the editor waits to be asked
     expect(root.querySelector('.editor')).toBeNull();
+  });
+
+  it('opens the player on the ★ video with the tab, paused where the scene starts', async () => {
+    const { root, scene } = setup({ stated: { video: CLIP, moments: [{ start: 130, end: 158 }] } });
+    await settle();
+    expect(scene.view).toMatchObject({ video: CLIP, play: false, at: null });
+    const player = root.querySelector('[data-testid="scene-player"]');
+    expect(player).not.toBeNull();
+    expect(player.querySelector('video').paused).toBe(true);
+    // half a frame in, at whatever rate is known yet
+    expect(player.querySelector('video').currentTime).toBeCloseTo(130.02, 1);
+    expect(fields(root)[0].querySelector('.field-act').classList.contains('on')).toBe(true);
+  });
+
+  it('opens nothing while its tab is hidden', async () => {
+    const { root, scene } = setup({ active: false });
+    await settle();
+    expect(scene.view).toBeNull();
+    expect(root.querySelector('[data-testid="scene-player"]')).toBeNull();
+  });
+
+  it('names its fields Videos when there are two', () => {
+    const frames = [{ panel: 'p1', video: CLIP, time: 130 }, { panel: 'p2', video: OTHER, time: 12 }];
+    const { root } = setup({ frames });
+    expect(root.querySelector('.meta-head').textContent.trim()).toBe('Videos');
   });
 
   it('says Whole video for a proof that states no time', () => {
@@ -121,8 +147,7 @@ describe('the time, opened', () => {
 
   it('draws the moments in the scene\'s colour on the player\'s bar, and the panels\' frames as dots', async () => {
     const frames = [{ panel: 'p1', video: CLIP, time: 130.4 }, { panel: 'p3', video: CLIP, time: 300 }];
-    const { root } = setup({ frames, stated: { video: CLIP, moments: [{ start: 120, end: 160 }, { start: 200, end: null }] } });
-    fields(root)[0].querySelector('.field-act').click();
+    const { root, scene } = setup({ frames, stated: { video: CLIP, moments: [{ start: 120, end: 160 }, { start: 200, end: null }] } });
     await settle();
     const player = root.querySelector('[data-testid="scene-player"]');
     expect(player.getAttribute('style')).toContain('--scene: var(--anno-1)');
@@ -131,18 +156,31 @@ describe('the time, opened', () => {
     expect(player.querySelector('[data-testid="scene-band"]').style.left).toBe('30%');
     expect(player.querySelector('[data-testid="scene-pin"]').style.left).toBe('50%');
     expect([...player.querySelectorAll('.dot')].map((d) => d.style.left)).toEqual(['32.6%', '75%']);
-    // the act now folds it
-    expect(fields(root)[0].querySelector('.field-act').getAttribute('aria-label')).toBe('Fold the player');
+    // the act runs the scene in the player, which stays
     fields(root)[0].querySelector('.field-act').click();
-    flushSync();
-    expect(root.querySelector('[data-testid="scene-player"]')).toBeNull();
+    await settle();
+    expect(scene.view).toMatchObject({ video: CLIP, play: true });
+    expect(player.querySelector('[aria-label="Loop the scene"]').getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-testid="scene-player"]')).toBe(player);
+  });
+
+  it('runs a confirmation video in the player from its field', async () => {
+    const frames = [{ panel: 'p1', video: CLIP, time: 130 }, { panel: 'p2', video: OTHER, time: 12 }];
+    const { root, scene } = setup({ frames });
+    await settle();
+    expect(root.querySelector('video').getAttribute('src')).toBe('/files/case/media/clip.mp4');
+    fields(root)[1].querySelector('.field-act').click();
+    await settle();
+    expect(scene.view).toMatchObject({ video: OTHER, play: true });
+    expect(root.querySelector('video').getAttribute('src')).toBe('/files/case/media/other.mp4');
+    expect(fields(root)[1].querySelector('.field-act').classList.contains('on')).toBe(true);
+    expect(fields(root)[0].querySelector('.field-act').classList.contains('on')).toBe(false);
   });
 });
 
 describe('the player', () => {
   it('makes the frame on screen a panel', async () => {
     const { root, onaddframe } = setup();
-    fields(root)[0].querySelector('.field-act').click();
     await settle();
     const video = root.querySelector('video');
     video.currentTime = 12.5;
@@ -154,7 +192,6 @@ describe('the player', () => {
 
   it('steps a frame and keeps its keys from the composer behind it', async () => {
     const { root } = setup();
-    fields(root)[0].querySelector('.field-act').click();
     await settle();
     const video = root.querySelector('video');
     video.currentTime = 10.02;

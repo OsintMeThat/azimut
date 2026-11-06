@@ -4,7 +4,8 @@
 
   // The player's own way to the scenes: it says how many the clip holds, tinted
   // while some are still to prove, and opens or closes their drawer beside the video
-  // (`ScenePanel`). It adds no height to the workspace.
+  // (`ScenePanel`). It adds no height to the workspace, and on a narrow player it
+  // keeps its pin and its count, the word going first.
   let { scenes = [], open = false, onclick } = $props();
 
   const toProve = $derived(scenes.filter((s) => s.kind === 'draft').length);
@@ -16,11 +17,12 @@
   class:open
   onclick={() => onclick?.()}
   aria-expanded={open}
+  aria-label={scenes.length ? `Scenes ${scenes.length}` : 'Scenes'}
   title={INSPECT_HELP.scenes}
   data-guide="inspect.scenes"
 >
   <Icon name="pin" size={13} />
-  <span>Scenes</span>
+  <span class="word">Scenes</span>
   {#if scenes.length}<span class="count" class:todo={toProve > 0}>{scenes.length}</span>{/if}
 </button>
 
@@ -60,5 +62,11 @@
   .count.todo {
     background: var(--accent);
     color: var(--accent-text);
+  }
+  /* the player bar is the container (VideoPlayer) */
+  @container (max-width: 480px) {
+    .word {
+      display: none;
+    }
   }
 </style>

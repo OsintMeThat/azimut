@@ -37,7 +37,7 @@ describe('Proof Composer empty state', () => {
 describe('Proof Composer header', () => {
   it('uses the same compact controls as Inspect', () => {
     // Up to the body: the line a save writes under the header sits between the two.
-    const header = source.slice(source.indexOf('<div class="tool-header">'), source.indexOf('\n  <div class="body">'));
+    const header = source.slice(source.indexOf('<div class="tool-header"'), source.indexOf('\n  <div class="body">'));
 
     expect(header).not.toContain('class="btn"');
     expect(header).not.toContain('btn-primary');
@@ -52,9 +52,26 @@ describe('Proof Composer header', () => {
     expect(source).toContain('font-weight: 700;');
   });
 
+  it('shows the secondary buttons as icons on a narrow header rather than cut off Save', () => {
+    const header = source.slice(source.indexOf('<div class="tool-header"'), source.indexOf('\n  <div class="body">'));
+    expect(header).toContain('class:compact={headerW > 0 && headerW < HEADER_COMPACT} bind:clientWidth={headerW}');
+    // named whether their words show or not
+    for (const name of ['Open proof', 'Discard', 'New proof']) {
+      expect(header).toContain(`aria-label="${name}"`);
+      expect(header).toContain(`<span class="words">${name}</span>`);
+    }
+    expect(header).toContain("aria-label={copying ? 'Copying…' : 'Copy'}");
+    // Save and To Post keep their words
+    expect(header).toContain("<Icon name=\"save\" size={14} /> {saving ? 'Saving…' : 'Save proof'}");
+    const css = source.slice(source.indexOf('<style>'));
+    expect(css).toContain('.tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }');
+    // measured, never wrapped: a second line would come and go with the unsaved badge
+    expect(css).not.toMatch(/\.tool-header \{[^}]*flex-wrap/);
+  });
+
   it('exports the current proof and exposes its remembered destination', () => {
     // Up to the body: the line a save writes under the header sits between the two.
-    const header = source.slice(source.indexOf('<div class="tool-header">'), source.indexOf('\n  <div class="body">'));
+    const header = source.slice(source.indexOf('<div class="tool-header"'), source.indexOf('\n  <div class="body">'));
 
     expect(header).toContain("exporting ? 'Exporting…' : 'Export PNG'");
     expect(header).toContain('onclick={exportProofPng}');
@@ -1448,16 +1465,78 @@ describe('ProofComposer offers what is open to the Add event bar', () => {
   });
 });
 
+/** The markup of one of the side column's tabs, up to the next one. */
+const pane = (id) => {
+  const markup = source.slice(source.indexOf('<aside class="side">'), source.indexOf('</aside>'));
+  const at = markup.indexOf(`id="proof-pane-${id}"`);
+  const next = markup.indexOf('role="tabpanel"', at + 1);
+  return markup.slice(at, next < 0 ? undefined : next);
+};
+
+describe('Proof Composer side column', () => {
+  it('runs in four tabs, Proof, Scene, Layout and Style, each its own scroller', () => {
+    const markup = source.slice(source.indexOf('<aside class="side">'), source.indexOf('</aside>'));
+    expect(markup).toContain('<ProofSideTabs tabs={sideTabList} current={sideShown} needs={proofTabNeeds} onpick={pickSideTab} />');
+    const order = ['proof', 'scene', 'layout', 'style'].map((id) => markup.indexOf(`id="proof-pane-${id}"`));
+    expect(order.every((at) => at > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    for (const id of ['proof', 'scene', 'layout', 'style']) {
+      expect(pane(id)).toContain(`aria-labelledby="proof-tab-${id}" hidden={sideShown !== '${id}'}`);
+    }
+    expect(source).toContain('.side-scroll[hidden] { display: none; }');
+    expect(source).not.toMatch(/Advanced|advancedOpen|adv-toggle/);
+  });
+
+  it('puts the facts in Proof, the composing in Layout and the look in Style', () => {
+    const proofPane = pane('proof');
+    for (const words of ['data-guide="proof.coords"', '<span>Source</span>', '<span>Description</span>', 'id="proof-when"']) {
+      expect(proofPane).toContain(words);
+    }
+    expect(pane('layout')).toContain('<ProofLayersPanel');
+    const style = pane('style');
+    const order = ['<span>House style</span>', '<span>Text</span>', '<span>Footer</span>', '<span>Signature</span>'].map((w) => style.indexOf(w));
+    expect(order.every((at) => at > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    for (const words of ['Caption new panels', 'aria-label="proof font"', 'Caption size', 'Legend size', 'Show footer',
+      'Show coordinates', 'Imagery credits', 'Footer text', 'Footer alignment', '<span>Logo</span>', 'Add account handle']) {
+      expect(style).toContain(words);
+    }
+  });
+
+  it('opens a new proof on Layout and one made from a scene on Scene, and keeps the tab on any other', () => {
+    expect(bodyOfFn('createNewProof')).toContain("pickSideTab('layout');");
+    expect(bodyOfFn('addPanel')).toContain("if (!proofStarted) pickSideTab('layout');");
+    const made = bodyOfFn('makeSceneProof');
+    expect(made.indexOf("pickSideTab('scene');")).toBeGreaterThan(made.indexOf('resetDoc();'));
+    expect(made).toContain('scene.show(made.scene.video, { play: true });');
+    expect(bodyOfFn('openProof')).not.toContain('pickSideTab');
+    expect(bodyOfFn('resetDoc')).not.toContain('pickSideTab');
+    // the session remembers the tab, never the disk
+    expect(source).toContain("let sideTab = $state('proof');");
+    expect(source).not.toMatch(/localStorage[^\n]*sideTab|sideTab[^\n]*localStorage/);
+  });
+
+  it('marks the Proof tab with what its fields mark with a !', () => {
+    expect(source).toContain('needsWords(proofNeeds({ coords: !!displayedCoords, source: !!displayedSource, when: proof.when }))');
+    expect(pane('proof')).toContain('{#if !displayedCoords}');
+    expect(pane('proof')).toContain('{#if !displayedSource}');
+  });
+});
+
 describe('Proof Composer scene', () => {
-  it('shows the scene only for a proof built on a video, after the date', () => {
+  it('shows the scene only for a proof built on a video, in a tab of its own', () => {
     const markup = source.slice(source.indexOf('<aside class="side">'));
-    expect(markup).toContain('{#if scene.videos.length}');
-    expect(markup.indexOf('<SceneBlock')).toBeGreaterThan(markup.indexOf('id="proof-when"'));
-    expect(markup.indexOf('<SceneBlock')).toBeLessThan(markup.indexOf('<ProofLayersPanel'));
-    // and the switch that prints its time, for such a proof alone
-    const advanced = markup.slice(markup.indexOf('{#if advancedOpen}'));
-    expect(advanced.indexOf('Scene time on the picture')).toBeGreaterThan(advanced.indexOf('{#if scene.videos.length}'));
-    expect(advanced.indexOf('Scene time on the picture')).toBeLessThan(advanced.indexOf('<span>Show coordinates</span>'));
+    expect(markup.indexOf('{#if scene.videos.length}')).toBeLessThan(markup.indexOf('id="proof-pane-scene"'));
+    expect(pane('scene')).toContain("active={sideShown === 'scene'}");
+    // the canvas's ▶ shows the tab before it points the player
+    const play = bodyOfFn('playPanelScene');
+    expect(play.indexOf("pickSideTab('scene');")).toBeLessThan(play.indexOf('scene.show('));
+    // leaving the tab keeps a time that reads as one
+    expect(bodyOfFn('pickSideTab')).toContain("if (sideShown === 'scene' && id !== 'scene') scene.leaveTime();");
+    // and the switch that prints its time, in Style, for such a proof alone
+    const style = pane('style');
+    expect(style.indexOf('Scene time on the picture')).toBeGreaterThan(style.indexOf('{#if scene.videos.length}'));
+    expect(style.indexOf('Scene time on the picture')).toBeLessThan(style.indexOf('<span>Show coordinates</span>'));
     expect(render(ProofComposer).body).not.toContain('Scene');
   });
 

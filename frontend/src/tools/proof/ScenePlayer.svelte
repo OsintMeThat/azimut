@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import { api } from '../../lib/api.js';
   import { fileUrl } from '../../lib/fileUrl.js';
@@ -7,9 +8,10 @@
   import { INSTANT_HOLD, playSegments, segmentAt } from '../../lib/proofScene.js';
   import { PROOF_SCENE_HELP } from '../../lib/proofSceneHelp.js';
 
-  // The proof's video, small, under its field: the clip played muted, a thin bar of
-  // it with the scene's moments in the scene's colour and the panels' frames as
-  // dots, a frame at a time, and the frame on screen added to the proof as a panel.
+  // The proof's video, in the Scene tab under its field: the clip played muted, at
+  // its own shape, a thin bar of it with the scene's moments in the scene's colour
+  // and the panels' frames as dots, a frame at a time, and the frame on screen added
+  // to the proof as a panel.
   //
   // `request` is how the rest of the block points it somewhere: `{ at, play, n }`,
   // a new `n` each time. `at` shows that frame, paused; `play` runs through the
@@ -29,6 +31,8 @@
     frames = [],
     from = 0,
     request = null,
+    // Whether its tab is shown: a hidden one stops, and keeps its frame.
+    active = true,
     adding = false,
     onclip,
     onaddframe,
@@ -39,6 +43,9 @@
   let bar = $state(null);
   let info = $state({ duration: 0, fps: null });
   let mediaDuration = $state(0);
+  // The clip's own width over its height, once the browser knows it: a phone held
+  // upright fills the tab's room rather than a sliver of a wide box.
+  let ratio = $state(16 / 9);
   let current = $state(0);
   let presented = $state(null);
   let paused = $state(true);
@@ -112,6 +119,11 @@
   });
 
   $effect(() => () => clearTimeout(holdTimer));
+
+  // The tab left: nothing plays where nobody sees it.
+  $effect(() => {
+    if (!active) untrack(stop);
+  });
 
   /** Show the frame that starts at `time`, half a frame into it. */
   function seek(time) {
@@ -241,7 +253,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="scene-player" bind:this={root} style:--scene={color} {onkeydown} data-testid="scene-player">
-  <div class="screen">
+  <div class="screen" style:aspect-ratio={ratio}>
     <!-- svelte-ignore a11y_media_has_caption a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
     <video
       bind:this={el}
@@ -253,6 +265,7 @@
       bind:currentTime={current}
       bind:duration={mediaDuration}
       {onended}
+      onloadedmetadata={() => { if (el.videoWidth > 0 && el.videoHeight > 0) ratio = el.videoWidth / el.videoHeight; }}
       ontimeupdate={() => reachedEnd(el.currentTime)}
       onclick={toggle}
     ></video>
@@ -324,8 +337,9 @@
     flex-direction: column;
     gap: 5px;
   }
+  /* At the clip's own shape, up to the part of the window a player can take. */
   .screen {
-    aspect-ratio: 16 / 9;
+    max-height: 45vh;
     border-radius: var(--r-sm);
     overflow: hidden;
     background: #000;

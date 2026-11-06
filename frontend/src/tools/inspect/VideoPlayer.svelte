@@ -299,8 +299,8 @@
       </button>
       <span class="player-time mono" title={INSPECT_HELP.clock}>
         <span class="now">{preciseClock(shown)}</span>
-        <span class="of">/ {preciseClock(totalDuration)}</span>
-        {#if frameCount}<span class="of">· frame {frameNumber} of {frameCount}</span>{/if}
+        <span class="of total">/ {preciseClock(totalDuration)}</span>
+        {#if frameCount}<span class="of count">· frame {frameNumber} of {frameCount}</span>{/if}
       </span>
       <button
         class="player-btn wide"
@@ -320,7 +320,8 @@
         {/if}
       </span>
       {@render tools?.()}
-      <span class="spacer"></span>
+      <!-- One group at the end, so a row too narrow for it wraps it whole, still on the right. -->
+      <span class="end">
       {#if barZoom}
         {@const label = zoomLabel(barZoom, totalDuration)}
         <button
@@ -340,6 +341,7 @@
       <button class="player-btn capture" onclick={() => oncapture?.()} aria-label="Capture this frame" title={INSPECT_HELP.captureIcon}>
         <Icon name="camera" size={17} />
       </button>
+      </span>
     </div>
   </div>
 </div>
@@ -368,10 +370,11 @@
     min-height: 0;
     display: flex;
   }
+  /* Keeps some of the picture beside the scenes drawer, which gives way first. */
   .video-canvas {
     position: relative;
     flex: 1;
-    min-width: 0;
+    min-width: min(30%, 240px);
     min-height: 0;
     overflow: hidden;
     display: flex;
@@ -417,7 +420,15 @@
     color: var(--text-2);
     font-variant-numeric: tabular-nums;
   }
+  /* One line, cut short over a narrow picture rather than stacked a word a line. */
+  .view-ctl {
+    max-width: calc(100% - 20px);
+  }
   .hint {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 11px;
     color: var(--text-3);
     user-select: none;
@@ -434,6 +445,8 @@
     font-size: var(--fs-xs);
     pointer-events: none;
   }
+  /* Measured as a container, so a narrow player (a small window, the case panel or the
+     scenes drawer open) drops the least needed words first rather than its buttons. */
   .player-bar {
     flex-shrink: 0;
     display: flex;
@@ -442,12 +455,20 @@
     padding: 8px 10px 6px;
     border-top: 1px solid var(--border);
     background: var(--bg-1);
+    container-type: inline-size;
   }
   .controls {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 4px;
     min-width: 0;
+  }
+  .end {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
   }
   .player-btn {
     width: 28px;
@@ -494,14 +515,13 @@
     gap: 1px;
     margin-left: 4px;
   }
+  /* The frame on screen is never cut: the count and the length go first. */
   .player-time {
     display: inline-flex;
     align-items: baseline;
     gap: 6px;
     margin: 0 6px;
-    flex-shrink: 1;
-    min-width: 0;
-    overflow: hidden;
+    flex-shrink: 0;
     white-space: nowrap;
     font-size: var(--fs-xs);
   }
@@ -512,8 +532,19 @@
   .of {
     color: var(--text-3);
   }
-  .spacer {
-    flex: 1;
+  @container (max-width: 700px) {
+    .of.count {
+      display: none;
+    }
+  }
+  @container (max-width: 600px) {
+    .of.total,
+    .player-btn.keys {
+      display: none;
+    }
+    .player-time {
+      margin: 0 4px;
+    }
   }
   .speed-item.on {
     color: var(--accent);

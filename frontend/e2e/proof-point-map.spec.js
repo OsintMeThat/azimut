@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { awaitMapReady, installAppFixture, openProofWithPanel } from './app.fixture.js';
+import { awaitMapReady, installAppFixture, openProofWithPanel, showProofTab } from './app.fixture.js';
 
 /**
  * A proof's point, moved on the ground rather than typed.
@@ -14,6 +14,7 @@ const row = (page) => page.locator('.point-row').first();
 test('a click on the map fills the coordinate row it was opened from', async ({ page }) => {
   await installAppFixture(page);
   await openProofWithPanel(page);
+  await showProofTab(page, 'Proof');
 
   await expect(row(page).locator('.meta-input')).toHaveValue('');
   await row(page).getByTitle('Move this point on the map').click();
@@ -35,6 +36,7 @@ test('a click on the map fills the coordinate row it was opened from', async ({ 
 test('cancelling leaves the row exactly as it was', async ({ page }) => {
   await installAppFixture(page);
   await openProofWithPanel(page);
+  await showProofTab(page, 'Proof');
 
   const field = row(page).locator('.meta-input');
   await field.fill('48.858400, 2.294500');
@@ -54,6 +56,7 @@ test('cancelling leaves the row exactly as it was', async ({ page }) => {
 test('a row added under a point opens beside it, not on the empty ocean', async ({ page }) => {
   await installAppFixture(page);
   await openProofWithPanel(page);
+  await showProofTab(page, 'Proof');
 
   await row(page).locator('.meta-input').fill('48.858400, 2.294500');
   await page.getByTitle('Add a point').click();

@@ -460,3 +460,38 @@ test('gives a proof about the whole video its moments, two of them, and the whol
   // a proof's time is the proof's: the video's work never holds it
   expect(saves.every((save) => (save.spec.scenes ?? []).length === 0)).toBe(true);
 });
+
+test('keeps the frame on screen and every button of the player in a narrow window, the scenes open', async ({ page }) => {
+  // 1100 px with the case panel open: the player is under 400 px wide
+  await page.setViewportSize({ width: 1100, height: 720 });
+  await openSteps(page);
+  await page.getByRole('button', { name: /^Scenes/ }).click();
+  const drawer = page.getByRole('complementary', { name: 'Scenes' });
+  await expect(drawer).toBeVisible();
+  // the bar zoomed, so its chip asks for room too
+  const bar = await page.locator('.track').boundingBox();
+  await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
+  for (let i = 0; i < 3; i += 1) await page.mouse.wheel(0, -100);
+  await expect(page.getByRole('button', { name: /^Bar zoomed/ })).toBeVisible();
+
+  const playerBar = await page.locator('.player-bar').boundingBox();
+  const inside = async (locator) => {
+    const box = await locator.boundingBox();
+    expect(box.width).toBeGreaterThan(0);
+    expect(box.x).toBeGreaterThanOrEqual(playerBar.x - 0.5);
+    expect(box.x + box.width).toBeLessThanOrEqual(playerBar.x + playerBar.width + 0.5);
+  };
+  // the frame on screen is read whole, the length and the count gone first
+  await expect(page.locator('.player-time .now')).toHaveText('0:00.000');
+  await inside(page.locator('.player-time .now'));
+  await expect(page.locator('.player-time .of.count')).toBeHidden();
+  for (const name of ['Play', 'Playback speed', /^Scenes/, /^Bar zoomed/, 'Mute', 'Full screen', 'Capture this frame']) {
+    await inside(page.getByRole('button', { name }).first());
+  }
+  // the drawer gives way before the picture becomes a sliver
+  const picture = await page.locator('.video-canvas').boundingBox();
+  const side = await drawer.boundingBox();
+  expect(side.width).toBeLessThan(320);
+  expect(side.width).toBeGreaterThanOrEqual(260);
+  expect(picture.width).toBeGreaterThan(100);
+});

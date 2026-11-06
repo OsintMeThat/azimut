@@ -2,7 +2,7 @@
 // shows for what is picked: a line's style, a label's box, a panel's border, a
 // view cone's lens and the proof's typeface.
 import { test, expect } from '@playwright/test';
-import { canvasSettled, installAppFixture, openProofWithPanel } from './app.fixture.js';
+import { canvasSettled, installAppFixture, openProofWithPanel, showProofTab } from './app.fixture.js';
 
 async function drag(page, from, to) {
   await page.mouse.move(from.x, from.y);
@@ -226,12 +226,12 @@ test('a view cone opens wider from an edge, and settles on a lens near one', asy
   fixture.expectNoUnexpectedRequests();
 });
 
-test('a new proof is set in the shipped face, and the Advanced section changes it', async ({ page }) => {
+test('a new proof is set in the shipped face, and the Style tab changes it', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await openProofWithPanel(page);
   expect(await save(page, fixture)).toMatchObject({ font: 'inter', fontBold: true });
 
-  await page.getByRole('button', { name: /Advanced/ }).click();
+  await showProofTab(page, 'Style');
   await page.getByLabel('proof font').selectOption('barlow');
   await page.getByLabel('Labels, callouts and tags in bold').uncheck();
   expect(await save(page, fixture)).toMatchObject({ font: 'barlow', fontBold: false });
@@ -252,4 +252,29 @@ test('a new proof is set in the shipped face, and the Advanced section changes i
   await expect.poll(face).toContain('Barlow Condensed');
   expect(await face()).toContain('| normal');
   fixture.expectNoUnexpectedRequests();
+});
+
+test('a narrow header keeps Save and To Post in sight, on the one line it always had', async ({ page }) => {
+  // 1280 px with the case panel open: the header is under 920 px wide
+  await installAppFixture(page);
+  await openProofWithPanel(page);
+  const header = page.locator('.tool-header').first();
+  // inside the header itself, not run on under the case panel beside it
+  for (const name of ['Save proof', 'To Post']) {
+    const button = header.getByRole('button', { name, exact: true });
+    await expect.poll(async () => {
+      const [a, b] = [await button.boundingBox(), await header.boundingBox()];
+      return a.x + a.width <= b.x + b.width;
+    }).toBe(true);
+  }
+  // the secondary buttons keep their names, shown as icons
+  await expect(header.getByRole('button', { name: 'New proof', exact: true })).toBeVisible();
+  await expect.poll(() => header.getByRole('button', { name: 'New proof', exact: true }).locator('.words')
+    .evaluate((words) => words.getBoundingClientRect().width)).toBe(0);
+  // one line, so the unsaved badge coming and going never moves the canvas under it
+  const tops = await header.getByRole('button').evaluateAll((all) => all
+    .filter((b) => b.offsetParent && !b.closest('.export-menu'))
+    .map((b) => Math.round(b.getBoundingClientRect().top)));
+  expect(tops.length).toBeGreaterThanOrEqual(6);
+  expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(1);
 });

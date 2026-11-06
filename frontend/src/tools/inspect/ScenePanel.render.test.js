@@ -64,11 +64,15 @@ describe('the scenes button', () => {
     const root = render(SceneButton, { scenes: SCENES(), open: true, onclick });
     const btn = root.querySelector('.scenes-btn');
     expect(root.querySelector('.count').textContent).toBe('5');
+    // named with its count, which a narrow player keeps when the word goes
+    expect(btn.getAttribute('aria-label')).toBe('Scenes 5');
+    expect(btn.querySelector('.word').textContent).toBe('Scenes');
     expect(root.querySelector('.count').classList.contains('todo')).toBe(true);
     expect(btn.getAttribute('aria-expanded')).toBe('true');
     btn.click();
     expect(onclick).toHaveBeenCalled();
     expect(render(SceneButton, { scenes: [] }).querySelector('.count')).toBeNull();
+    expect(render(SceneButton, { scenes: [] }).querySelector('.scenes-btn').getAttribute('aria-label')).toBe('Scenes');
   });
 });
 
@@ -120,6 +124,11 @@ describe('the scenes drawer', () => {
     const list = rows(render(ScenePanel, { scenes: SCENES(), onmakeproof }));
     const make = list[2].querySelector('[aria-label="Make the proof"]');
     expect(make.getAttribute('title')).toBe('Make the proof of this scene in Geo Proof, from its frames');
+    // said in words, under the scene's name beside End here, where the label keeps its room
+    expect(make.textContent.trim()).toBe('Make the proof');
+    expect(make.parentElement.classList.contains('acts')).toBe(true);
+    expect(button(make.parentElement, 'End here')).toBeDefined();
+    expect(list[2].querySelector('.line').contains(make)).toBe(false);
     make.click();
     expect(onmakeproof).toHaveBeenCalledWith(expect.objectContaining({ kind: 'draft', id: 'sc_1', start: 60 }));
     // a scene about the whole video is made too; a proved one is already a proof
@@ -169,6 +178,7 @@ describe('changing a scene\'s time in its row', () => {
     expect(row.querySelector('[role="radio"][aria-checked="true"]').textContent).toBe('Instant');
     // End here gives way to the editor's own End, and a draft holds one moment
     expect(button(row, 'End here')).toBeUndefined();
+    expect(row.querySelector('[aria-label="Make the proof"]')).toBeNull();
     expect(button(row, 'Another moment')).toBeUndefined();
   });
 
