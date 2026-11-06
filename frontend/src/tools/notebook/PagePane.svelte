@@ -93,10 +93,7 @@
   function sourceHere(node, picture) {
     const entity = entityOf(picture);
     const field = sourceField({
-      write: async (url) => {
-        await stateSourceOf(caseId, entity, url);
-        redraw();
-      },
+      write: (url) => stateSourceOf(caseId, entity, url),
       done: (by) => {
         if (by === 'keyboard') node.previousElementSibling?.querySelector('button.source')?.focus({ preventScroll: true });
         stating = null;
@@ -113,10 +110,7 @@
     const field = sourceField({
       help: POSTED_HELP,
       value: entity?.attrs?.posted_url ?? '',
-      write: async (url) => {
-        await statePostedOf(caseId, entity, url);
-        redraw();
-      },
+      write: (url) => statePostedOf(caseId, entity, url),
       done: (by) => {
         if (by === 'keyboard') node.previousElementSibling?.querySelector('button.posted')?.focus({ preventScroll: true });
         posting = null;
@@ -194,10 +188,22 @@
   let lastText = null;
   let lastRest = null;
   let lastRequest = null;
-  /** The pages again at once: what the case says of a picture changed, not the text. */
-  function redraw() {
-    if (lastRequest) void preview.now(lastRequest);
-  }
+
+  // What the case says of a picture, which prints under it: where it comes from and
+  // where it was posted. Stated here, in the note or in Details, the pages are drawn
+  // again at once, as no text changed to ask for them.
+  const stated = $derived(entities
+    .filter((entity) => entity.attrs?.source_url || entity.attrs?.posted_url)
+    .map((entity) => `${entity.id}=${entity.attrs.source_url ?? ''}|${entity.attrs.posted_url ?? ''}`)
+    .join(','));
+  let lastStated = null;
+  $effect(() => {
+    const key = stated;
+    untrack(() => {
+      if (lastStated !== null && key !== lastStated && lastRequest) void preview.now(lastRequest);
+      lastStated = key;
+    });
+  });
   $effect(() => {
     const request = { caseId, note, title, text, look, edition };
     lastRequest = request;

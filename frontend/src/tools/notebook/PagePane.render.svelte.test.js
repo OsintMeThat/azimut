@@ -205,8 +205,6 @@ describe('the way back, and a source', () => {
     flushSync();
     expect(stateSourceOf).toHaveBeenCalledWith('c1', ENTITIES[1], 'https://t.me/port/4');
     expect(sheet(0).querySelector('.caption-here')).toBeNull();
-    // the credit it gives is printed at once, without a word typed
-    expect(asked.length).toBe(2);
   });
 
   it('offer Posted… on a proof only, holding where it was posted, and draw the pages again', async () => {
@@ -229,7 +227,24 @@ describe('the way back, and a source', () => {
     flushSync();
     expect(statePostedOf).toHaveBeenCalledWith('c1', proofs[1], 'https://x.com/me/status/2');
     expect(sheet(0).querySelector('.caption-here')).toBeNull();
-    expect(asked.length).toBe(2);
+  });
+
+  it('draw the pages again when the case states where a picture comes from or was posted, and only then', async () => {
+    const props = $state({ onresize: vi.fn(), entities: ENTITIES, text: TEXT });
+    target = document.createElement('div');
+    document.body.append(target);
+    app = mount(PagePane, { target, props: { caseId: 'c1', note: 'n1', look: { style: 'report' }, ...props,
+      get entities() { return props.entities; } } });
+    await tick();
+    flushSync();
+    const before = asked.length;
+    props.entities = ENTITIES.map((entity) => ({ ...entity }));
+    flushSync();
+    expect(asked.length).toBe(before);
+    props.entities = [ENTITIES[0], { ...ENTITIES[1], type: 'proof', attrs: { ...ENTITIES[1].attrs, posted_url: 'https://x.com/me/status/3' } }];
+    flushSync();
+    expect(asked.length).toBe(before + 1);
+    expect(asked.at(-1).text).toBe(TEXT);
   });
 });
 

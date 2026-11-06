@@ -186,6 +186,33 @@ describe('the picture bar', () => {
     expect(sourceable).not.toHaveBeenCalled();
     expect(bar().querySelector('[data-source]')).toBeNull();
   });
+
+  it('offers Posted… on a proof, holding where it was posted, and keeps the new address', async () => {
+    const proof = { id: 'm1', type: 'proof', label: 'Proof 28', attrs: { path: 'proofs/28.png', posted_url: 'https://x.com/me/status/1' } };
+    const statePosted = vi.fn(async () => {});
+    editor('[[media:m1|Proof 28]]\n\nAfter', { handlers: { statePosted }, entities: [proof] });
+    const posted = bar().querySelector('[data-posted]');
+    expect(posted.textContent).toBe('Posted ✓');
+    posted.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+    const field = view.contentDOM.querySelector('.picture-source-field');
+    expect(field.value).toBe('https://x.com/me/status/1');
+    expect(field.getAttribute('aria-label')).toBe('Posted at');
+    field.value = 'https://x.com/me/status/2';
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(statePosted).toHaveBeenCalledWith(proof, 'https://x.com/me/status/2');
+    expect(view.contentDOM.querySelector('.picture-source-field')).toBeNull();
+  });
+
+  it('offers no Posted… on a picture that is not a proof, nor where it cannot be kept', () => {
+    editor('[[media:m1|Roof]]\n\nAfter', { handlers: { statePosted: vi.fn() } });
+    expect(bar().querySelector('[data-posted]')).toBeNull();
+    view.destroy();
+    const proof = { id: 'm1', type: 'proof', label: 'Proof 28', attrs: { path: 'proofs/28.png' } };
+    editor('[[media:m1|Proof 28]]\n\nAfter', { handlers: {}, entities: [proof] });
+    expect(bar().querySelector('[data-posted]')).toBeNull();
+  });
 });
 
 describe('lighting lines', () => {

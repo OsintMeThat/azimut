@@ -5821,11 +5821,12 @@ template is guidance by design.
 pane, offers **XXS**, **XS**, **S**, **M**, **L** and **Full**, left, centre or right, and **Caption**,
 written on its line as `{width=… align=… caption="…"}`. The bar also offers *Open in
 <Tool>* when a tool can reopen the state the picture was taken from, and *Source…* for
-a picture brought in by hand with no address (a link stated, never fetched). On the
-Page pane a proof also offers *Posted…*: where it was published, on X or elsewhere,
+a picture brought in by hand with no address (a link stated, never fetched). A proof
+also offers *Posted…*, in the note as on the Page pane: where it was published, on X or elsewhere,
 kept on the proof (`posted_url`, a field of its Details too, an emptied field taking it
 off). The PDF then links the picture to the post and adds *Posted:* and the address
-under its credit, and lists it under the proof in the sources. None of the bar
+under its credit, and lists it under the proof in the sources; the Page pane draws its
+pages again as soon as either address is kept. None of the bar
 prints, and the bar wraps onto two rows in a narrow note. Go to from a warning lands on
 the picture with its bar in reach. The picture picker lists proofs beside pictures.
 Each bar is one Tab stop, walked with the arrows. *Caption* opens a one-line field where the caption prints:

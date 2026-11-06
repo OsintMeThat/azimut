@@ -29,7 +29,7 @@
   import { createBookmark } from '../lib/bookmarks.js';
   import { openerFor } from '../lib/notes/openers.js';
   import '../lib/notes/openersLoaded.js';
-  import { canStateSourceOf, lookupSource, stateSourceOf } from '../lib/notes/sources.js';
+  import { canStateSourceOf, lookupSource, statePostedOf, stateSourceOf } from '../lib/notes/sources.js';
   import { gotoPoint } from '../lib/navigate.js';
   import { droppedMedia, carriesMedia } from '../lib/drag.js';
   import { CALLOUTS, calloutMarkdown } from '../lib/notes/callouts.js';
@@ -137,6 +137,7 @@
     opener: (entity) => (template || !tools ? null : openerFor(entity)),
     sourceable: (entity) => (template || !caseId ? false : canStateSourceOf(caseId, entity)),
     stateSource: (entity, url) => stateSourceOf(caseId, entity, url),
+    get statePosted() { return template || !caseId ? null : (entity, url) => statePostedOf(caseId, entity, url); },
   };
 
   onMount(() => {

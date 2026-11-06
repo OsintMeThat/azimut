@@ -31,7 +31,7 @@ import {
   COVER_LINE, NO_IDENTITY, PLACEHOLDERS, coverChange, findPlaceholders, placeholderValue,
 } from './reportParts.js';
 import {
-  CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, SOURCE_HELP, blockAlignAt, captionField, pictureLine, picturesIn, rovingToolbar, sizeWidth,
+  CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, pictureLine, picturesIn, rovingToolbar, sizeWidth,
   sizedLine, sourceField,
 } from './pictureSize.js';
 import {
@@ -79,7 +79,8 @@ export const templateMode = Facet.define({ combine: (values) => values.some(Bool
 /**
  * The editor's outside, for what the page draws: a picture's bar asks it which tool
  * reopens the picture (`opener(entity)`), whether its source is the analyst's to state
- * (`sourceable(entity)`, a promise) and to state it (`stateSource(entity, url)`).
+ * (`sourceable(entity)`, a promise) and to state it (`stateSource(entity, url)`), and
+ * where a proof was posted (`statePosted(entity, url)`, absent where it cannot be kept).
  */
 const noteHandlers = Facet.define({ combine: (values) => values[0] ?? {} });
 
@@ -578,6 +579,17 @@ function sizeBar(box, source, info, handlers = {}, blockAlign = '') {
     open.title = `${opener.label}, where this picture was made`;
     bar.append(open);
   }
+  if (entity?.type === 'proof' && handlers.statePosted) {
+    const kept = entity.attrs?.posted_url ?? '';
+    const posted = document.createElement('button');
+    posted.type = 'button';
+    posted.className = 'cm-size-posted';
+    posted.classList.toggle('kept', Boolean(kept));
+    posted.dataset.posted = 'true';
+    posted.textContent = kept ? 'Posted ✓' : 'Posted…';
+    posted.title = kept ? `${POSTED_HELP.button}. Now: ${kept}` : POSTED_HELP.button;
+    bar.insertBefore(posted, bar.querySelector('[data-open]'));
+  }
   rovingToolbar(bar);
   // whether the analyst may state a source is read off the file, so it is asked once the bar is drawn
   if (entity && !entity.attrs?.source_url && handlers.sourceable) {
@@ -594,6 +606,27 @@ function sizeBar(box, source, info, handlers = {}, blockAlign = '') {
     }).catch(() => {});
   }
   return bar;
+}
+
+/** Open the field where proof `entity` was posted, under the picture drawn in `box`, holding the address kept. */
+function openPosted(view, box, entity) {
+  if (box.querySelector('.picture-source-field')) return;
+  const handlers = view.state.facet(noteHandlers);
+  if (!handlers.statePosted) return;
+  box.classList.add('cm-captioning');
+  const field = sourceField({
+    help: POSTED_HELP,
+    value: entity.attrs?.posted_url ?? '',
+    write: (url) => handlers.statePosted(entity, url),
+    done: (by) => {
+      box.classList.remove('cm-captioning');
+      field.remove();
+      if (by === 'keyboard') view.focus();
+    },
+  });
+  box.append(field);
+  field.focus();
+  field.select();
 }
 
 /** Open the field a picture's source is stated in, under the picture drawn in `box`. */
@@ -700,11 +733,12 @@ class BlockWidget extends WidgetType {
         openCaption(view, box);
         return;
       }
-      if (target.closest('[data-open], [data-source]')) {
+      if (target.closest('[data-open], [data-source], [data-posted]')) {
         const [shown] = picturesIn(view.state.doc.lineAt(view.posAtDOM(box)).text);
         const entity = pictureEntity(view.state.field(noteCase), shown);
         if (!entity) return;
         if (target.closest('[data-source]')) openSource(view, box, entity);
+        else if (target.closest('[data-posted]')) openPosted(view, box, entity);
         else handlers.opener?.(entity)?.open();
         return;
       }
@@ -734,7 +768,7 @@ class BlockWidget extends WidgetType {
       const button = event.target.closest('[data-size-bar] button');
       if (event.detail !== 0 || !button) return;
       const from = view.state.doc.lineAt(view.posAtDOM(box)).from;
-      if (button.dataset.open || button.dataset.source) {
+      if (button.dataset.open || button.dataset.source || button.dataset.posted) {
         press(button);
         return;
       }
@@ -1757,7 +1791,8 @@ const look = EditorView.theme({
   '.cm-size-bar button:hover': { background: 'var(--bg-3, var(--bg-2))', color: 'var(--text-1)' },
   '.cm-size-bar button[aria-pressed="true"]': { background: 'var(--accent-soft, var(--bg-2))', color: 'var(--accent)' },
   '.cm-size-bar button.cm-size-caption': { marginLeft: '4px', padding: '0 8px' },
-  '.cm-size-bar button.cm-size-source, .cm-size-bar button.cm-size-open': { padding: '0 8px', whiteSpace: 'nowrap' },
+  '.cm-size-bar button.cm-size-source, .cm-size-bar button.cm-size-open, .cm-size-bar button.cm-size-posted': { padding: '0 8px', whiteSpace: 'nowrap' },
+  '.cm-size-bar button.cm-size-posted.kept': { color: 'var(--accent)' },
   '.cm-size-bar button.cm-size-open': { color: 'var(--accent)' },
   '.cm-landed': { background: 'color-mix(in srgb, var(--accent) 16%, transparent)', transition: 'background-color 0.6s ease-out' },
   '.cm-block.cm-block-landed': { background: 'color-mix(in srgb, var(--accent) 16%, transparent)', borderRadius: '4px', boxShadow: '0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent)' },
