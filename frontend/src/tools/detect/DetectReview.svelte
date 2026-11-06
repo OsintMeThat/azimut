@@ -24,6 +24,7 @@
   import { offerPuts, withdrawNote } from '../../lib/noteHere.svelte.js';
   import PutInNote from '../../components/PutInNote.svelte';
   import { pinCaption, pinOffer } from './pinNote.js';
+  import { keptOffer, keptRows } from './keptTable.js';
 
   let {
     caseId,
@@ -266,7 +267,12 @@
       single: !!recipeCapability(run.input.recipe, methods).single,
     }),
   });
-  offerPuts('detect', () => (pinned ? [notePin] : []));
+  // The run's kept and pinned candidates as a table, under what the run read. Never the queue.
+  const noteKept = keptOffer({
+    read: () => ({ run, methods, units: prefs.units, single: !!recipeCapability(run.input.recipe, methods).single }),
+  });
+  const hasKept = $derived(run.status === 'ready' && keptRows(all).length > 0);
+  offerPuts('detect', () => [...(pinned ? [notePin] : []), ...(hasKept ? [noteKept] : [])]);
   onDestroy(() => withdrawNote('detect'));
 
   async function cancel() {
@@ -313,6 +319,7 @@
       manualArea = candidate?.area_id ?? run.area_runs?.find((p) => p.status === 'ready')?.area_id ?? run.input.zones[0]?.id ?? '';
     }}>Add candidate</button>
       <button class="btn btn-sm" onclick={onexport}>Export as layer</button>
+      {#if hasKept}<PutInNote offer={noteKept} class="btn btn-sm" role="button" named />{/if}
       <span class="map-acts">
         <OverlayDisplay bind:markers bind:outlines bind:hidden={bare}
           what="the candidates and areas" shortcut="H" />

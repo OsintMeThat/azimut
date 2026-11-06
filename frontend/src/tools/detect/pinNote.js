@@ -10,7 +10,7 @@ import { formatArea } from '../../lib/measure.js';
 import { formatTemporalValue } from '../../lib/timeline.js';
 
 /** A pass's day as a caption writes it, or ''. */
-function passDay(source) {
+export function passDay(source) {
   const value = String(source?.date ?? '').slice(0, 10);
   return value ? formatTemporalValue(value).label : '';
 }
