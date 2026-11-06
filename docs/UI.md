@@ -1791,13 +1791,17 @@ one in its colour, a pin at an instant and a band over a passage, named on hover
 The button opens and closes a **drawer docked on the video's right**, above the bar:
 it narrows the picture, which fits itself again, rather than covering it, and closes
 whenever a file opens. It lists the scenes in clip order, a scene about the whole
-video first: a passage to play on a loop, a word about what to find, End here and
-remove. **Pressing a scene's time goes there and opens it in its row**: Whole video,
+video first: a passage to play on a loop, a word about what to find and remove on its
+line, and under its time End here and **Make the proof**, said in words. **Pressing a scene's time goes there and opens it in its row**: Whole video,
 Instant or Passage, each end typed (`1:05`, `65`, `1:05.5`), taken from the frame on
 screen with **Here**, nudged a frame with ↑ and ↓, or dragged by its handle on the
 bar. Meanwhile **S** and **Shift+S** set the start and the end. Enter or Apply keeps
 it, and so does closing the drawer; Escape drops it, and a second Escape closes the
 drawer. A draft's change goes back with Ctrl+Z like the rest.
+**A narrow player keeps its buttons.** The frame on screen is never cut: the frame
+count goes first, then the clip's length and the keys hint, then the word Scenes (its
+pin and count stay), and past that the last buttons wrap whole, on the right. The
+drawer gives way down to 260 px before the picture shrinks below a third of the room.
 **The proofs resting on the clip are its proved scenes**, in the same drawer and on
 the same bar, each opening its proof. A proof built on frames cut here and stating
 no time of its own is about the whole video, pinned at those frames on the bar and
@@ -1814,7 +1818,13 @@ the proof sent to the Trash gives it back to geolocate at its own time, and rest
 from there it is proved again (`GET /cases/{id}/scenes`, whose `taken` names the drafts
 a proof in the case cites).
 
-**A capture never makes a scene; a frame belongs to one by its time.** In the strip, a
+**A capture never makes a scene; a frame belongs to one by its time.** A frame captured
+in no scene offers one instead, *Frame captured at 0:00.48 · Add a scene*, with
+**Whole video** and **This moment** (an instant at that frame), each with its Undo. A
+burst of captures shares one offer, which goes by on its own and then keeps quiet a
+while, as it does once a scene is kept any other way; past three offers left unused on
+a file it stops until another file opens, and a clip with a whole-video scene to
+geolocate is never asked again, since that scene already holds every frame. In the strip, a
 frame inside a passage, on an instant, or on a frame a whole-video proof rests on
 carries a small dot in that scene's colour, one per scene and three at most, the
 scenes named on hover. A draft about the whole video dots nothing. A frame a proof lays
@@ -4040,7 +4050,7 @@ in the composer are not panels.
 **Overlays.** Ctrl+V, a drop on the canvas, or `+ Add overlay` put an image
 straight into the proof. Ctrl+V answers to two clipboards, and the rule is which
 copy came last: an annotation copied here wins, until leaving the window and
-coming back hands the chord back to the system clipboard. It lands in the `Overlays` section of the side column,
+coming back hands the chord back to the system clipboard. It lands in the `Overlays` section of the Layout tab,
 sits above the panels and the legend, and is moved,
 resized from its corners and framed like anything else on the canvas — you can
 annotate it too. It claims no source: no media is filed, no entity, no
@@ -4049,7 +4059,23 @@ content hash, travels with a rename, and goes when the proof does. A proof needs
 a panel first, since the panels are what give the document its size — moving an
 overlay never resizes the export.
 
-**Coordinates and sources.** Both sit above the panels and both fill themselves in:
+**The side column is four tabs**: **Proof** (coordinates, source, description and
+date, the facts filled once), **Scene** (only for a proof built on a video), **Layout**
+(panels, overlays, annotations and elements, where composing happens) and **Style**
+(the house style, then **Text**, with the font, bold, Caption new panels, the caption
+and legend sizes and Scene time on the picture, **Footer**, and **Signature**, with
+**Logo** and the account handle). A new proof opens on Layout, since it starts with
+panels; one made with Inspect's Make the proof opens on Scene, its player running; any
+other opens on the tab in use, Proof at first, which lasts the session and is never
+saved. A ▶ pressed on the canvas shows Scene. Each tab scrolls on its own and keeps its
+place, and the arrows, Home and End walk the tabs without reaching the canvas behind.
+**The Proof tab carries its fields' `!`** on its label, *Still needs coordinates and a
+source* on hover, a date the save would refuse included, so a blank is not forgotten
+while composing in Layout. Nothing on the canvas or in the export depends on the tab.
+**A narrow header keeps Save in sight**: under 920 px Open proof, Discard, New proof and
+Copy show their icons alone, on the same single line, so the canvas never moves.
+
+**Coordinates and sources.** Both head the Proof tab and both fill themselves in:
 the coordinates from the first panel that carries them, the sources from the address
 each panel's media traces back to.
 
@@ -4084,7 +4110,7 @@ site as 2 other geolocations · @BashaReport posted 3 other files here*, with **
 graph**. It is read from the points and the addresses (`GET /entities/{id}/kin`), so it
 answers before the link pass has filed anything, and it goes at the next edit. A proof
 that shares nothing draws no line.
-The exported picture prints them only when asked (Advanced → Show coordinates):
+The exported picture prints them only when asked (Style → Show coordinates):
 unnamed points share one line, a named one takes its own, and the plate grows by
 what it prints. **Show text** switches the credit line off beside it, so a plate
 can carry its points and nothing else; with both off the band takes no height at
@@ -4114,7 +4140,8 @@ Wherever a source is *read* rather than edited — the post it is handed to, the
 report — it is one address per line, and a report renders one link each.
 
 **Description and date** sit under the source, both marked *optional* and neither
-printed on the plate. Everything above them carries a `!` when it is empty, so a
+printed on the plate. Everything above them carries a `!` when it is empty, repeated on the Proof tab's
+label, so a
 panel of blanks otherwise reads as a form to finish.
 
 The **description** is one sentence about what the proof shows. It is the proof's
@@ -4175,35 +4202,38 @@ the analyst added. Changing the date restates it, clearing it takes it back, and
 statement someone has since added reasoning to is left alone. Statements written before
 this are corrected on the proof's next save.
 
-**A proof built on a video says so in a Scene field**, under the date. It is there only
-when a panel is a frame Inspect cut from a video, or when the proof states a time of its
-own; any other proof reads, saves and exports exactly as before. One boxed line per
-video, like a source: `★ clip.mp4 · 2:10–2:38` for the video the proof is about, which
+**A proof built on a video gets a Scene tab**, between Proof and Layout. It is there
+only when a panel is a frame Inspect cut from a video, or when the proof states a time of
+its own; any other proof shows three tabs and reads, saves and exports exactly as before.
+Under *Video*, one boxed line per video, like a source: `★ clip.mp4 · 2:10–2:38` for the video the proof is about, which
 its date states, and `☆ other.mp4 · confirmation` for any other video among the panels,
 made the ★ in one press, its time then starting as the whole video. A proof that states
 no time reads *Whole video*: the instants its frames were cut at pin it, they are not
 its time.
 
 **The time opens Inspect's own editor**: Whole video, Instant or Passage, a line per
-moment, typed or nudged a frame with ↑/↓, and **Here** takes the frame on the field's
+moment, typed or nudged a frame with ↑/↓, and **Here** takes the frame on the tab's
 player. Apply writes a saved proof's time at once, through its own route, with Undo in
 the toast; a proof never saved holds it and writes it right after its first save.
 
-**The play act opens a small player under the fields**: muted, the clip in a 16:9
-window, and a thin bar where the moments are bands and pins in the colour the scene has
-on Inspect's bar, and the proof's panels are dots. It runs through the moments, each
-passage played and each instant held a beat, or the whole video from the first panel's
-frame; the loop button starts and stops that, and it never starts on its own for a
-system set to reduce motion. ←/→ step a frame, Shift a second, Space plays, and none of
+**The player has the Scene tab to itself**: it opens with the tab on the ★ video,
+paused where the scene starts, muted, at the clip's own shape up to under half the
+window's height, with a thin bar where the moments are bands and pins in the colour the
+scene has on Inspect's bar, and the proof's panels are dots. The play act at the end of
+a video's line runs that video in it: through the moments, each passage played and each
+instant held a beat, or the whole video from the first panel's frame; the loop button
+starts and stops that, and it never starts on its own for a system set to reduce motion.
+Leaving the tab pauses it on its frame, and keeps a time being changed when it reads as
+one. ←/→ step a frame, Shift a second, Space plays, and none of
 them reach the canvas behind. **Add this frame** files the frame on screen as Inspect
 files a capture and adds it as a panel the way the picker does, so its source traces as
 usual. Each panel cut from a video carries a ▶ in its corner on the canvas, drawn with
-the handles and never exported, which opens the player on that panel's frame.
+the handles and never exported, which shows the Scene tab on that panel's frame.
 
 **Nothing moves the time behind the analyst's back.** When a frame of the ★ video falls
 outside every moment stated, the field says *1 panel is outside these moments* and
 offers **Add its moment**, an instant at that frame. **Scene time on the picture**
-(Advanced, off by default, offered only for a proof built on a video) prints
+(Style, off by default, offered only for a proof built on a video) prints
 `clip.mp4 · 2:10–2:38` in a dark tag at the bottom left of each ★ panel, the moment that
 panel's frame shows in. It is drawn on the page, so the exported picture is the canvas.
 A proof about the whole video has no time to print, and the house style leaves it to
@@ -4266,7 +4296,7 @@ stays out of the legend, which is still built from annotation colours alone.
 so a proof set in it changed width from one computer to the next and a re-export no
 longer matched what was published. A proof is set in Inter, Barlow Condensed,
 Oxanium or IBM Plex Mono, shipped in the build, with Latin and Cyrillic where the
-face has them; Advanced picks it per proof, and the house style carries it, with a
+face has them; the Style tab picks it per proof, and the house style carries it, with a
 switch for labels, callouts and tags in bold. A proof saved before fonts keeps the
 system's until it is changed. An export waits for the face to be loaded.
 
@@ -4429,7 +4459,7 @@ keeps the frame's proportions and turns with a turned picture. It is drawn from 
 picture's pixels and from the blur boxes over them, so a redaction holds in the
 enlargement too.
 
-**The order they stack in.** The side column's **Elements** list runs front-first,
+**The order they stack in.** The Layout tab's **Elements** list runs front-first,
 the way the Panels list above it does: the row on top is the mark on top of the
 picture. A row is **dragged by its grip to reorder it**; the right-click and Ctrl+↑/↓
 restack in place. The order is one order for the whole proof, while what an

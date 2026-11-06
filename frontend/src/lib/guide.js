@@ -701,7 +701,7 @@ export const PAGES = {
       { anchor: 'proof.canvas', title: 'The page', text: 'A mark dragged into the margin stays put, and an arrow between two pictures follows both.' },
       { anchor: 'proof.coords', title: 'The point', text: 'Filled from a satellite panel or typed. Each place can be named, and one can be the camera.' },
       { anchor: 'proof.meta', title: 'Source, description, date', text: 'Several sources, a description, and a date read on a clock, at the point or in UTC.' },
-      { anchor: 'proof.panels', title: 'Panels', text: 'The pictures, each with a caption, a crop and a zoom.' },
+      { anchor: 'proof.tabs', title: 'Tabs', text: 'Proof holds the facts, Layout the pictures and their marks, Style the look. A proof on a video adds Scene.' },
       { anchor: 'proof.save', title: 'Save and post', text: 'Saves the PNG with its spec, so it reopens and edits. To Post carries it into Geo Report.' },
     ],
     tips: [
@@ -928,7 +928,7 @@ export const JOURNEYS = [
         text: 'Search the area and hold the photo over the map in a reference window. Use whichever Map tool helps, Compare, Horizon, Measure or the sun, then capture the view.',
         marks: ['sat.search', 'map.ref', 'sat.tools', 'sat.capture'],
       },
-      { tool: 'proof', text: 'Put the photo beside the capture, mark what agrees in one colour per feature, and name the point. It is filed as a place.', marks: ['proof.panels', 'proof.tools', 'proof.coords'] },
+      { tool: 'proof', text: 'Put the photo beside the capture, mark what agrees in one colour per feature, and name the point. It is filed as a place.', marks: ['proof.tabs', 'proof.tools', 'proof.coords'] },
       { tool: 'post', text: 'Turn the proof into a sourced thread, then Publish copies the posts and opens the site.', marks: ['post.first', 'post.publish'] },
     ],
     result: {

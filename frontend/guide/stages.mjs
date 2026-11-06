@@ -957,12 +957,19 @@ export const STAGES = [
       await go('media');
       await card(page, 'bridge_channel').locator('[title="Open in…"]').click();
       await page.locator('[role="menuitem"]', { hasText: /proof/i }).first().click();
+      // A new proof opens on its Layout tab and the facts are on the Proof tab. The
+      // camera's point goes first, so the capture added after it states its own place
+      // under it, proposed until checked.
+      const tabs = page.getByRole('tablist', { name: 'Proof settings' });
+      const points = page.locator('[data-guide="proof.coords"] input[placeholder="lat, lon"]');
+      await tabs.getByRole('tab', { name: /^Proof/ }).click();
+      await points.first().fill(`${CAMERA.lat}, ${CAMERA.lon}`);
+      await page.locator('[data-guide="proof.coords"] input[placeholder="label"]').first().fill(CAMERA_PLACE);
+      await tabs.getByRole('tab', { name: 'Layout' }).click();
       await page.locator('[data-guide="proof.panels"] button', { hasText: 'Add panel' }).click();
       await page.locator('[role="dialog"]').getByText(CAPTURED).first().click();
-      // a new proof opens on its Layout tab; the facts are on the Proof tab
-      await page.getByRole('tablist', { name: 'Proof settings' }).getByRole('tab', { name: /^Proof/ }).click();
-      await page.locator('[data-guide="proof.coords"] input').first().fill(`${CAMERA.lat}, ${CAMERA.lon}`);
-      await page.locator('[data-guide="proof.coords"] input').nth(1).fill(CAMERA_PLACE);
+      await tabs.getByRole('tab', { name: /^Proof/ }).click();
+      await points.nth(1).waitFor();
       await page.getByPlaceholder('A formation of 13 helicopters heading east').fill('The YM Success under the Vincent Thomas Bridge, seen from the west bank of the Main Channel.');
       // the day the photo was taken, as the case dates it
       const when = page.locator('#proof-when');

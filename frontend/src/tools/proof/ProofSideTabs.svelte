@@ -25,7 +25,7 @@
   }
 </script>
 
-<div class="side-tabs" role="tablist" aria-label="Proof settings" tabindex="-1" onkeydown={key}>
+<div class="side-tabs" role="tablist" aria-label="Proof settings" tabindex="-1" onkeydown={key} data-guide="proof.tabs">
   {#each tabs as one (one.id)}
     {@const on = one.id === current}
     {@const warn = one.id === 'proof' && !!needs}
