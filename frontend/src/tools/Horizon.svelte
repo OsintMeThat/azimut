@@ -44,6 +44,8 @@
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { appInfo, caseState, ensureCase, fmtCoords, prefs, prefsReady, reloadCase, toast, uiState } from '../lib/state.svelte.js';
+  import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { pairOffer, viewpointOffer } from './horizon/horizonNote.js';
   import { findBetaDue } from '../lib/onboarding.js';
   import { assignFolder } from '../lib/filing.js';
   import { reloadedInto, splitHash } from '../lib/hash.js';
@@ -521,6 +523,48 @@
    * With `cut`, a pair's terrain is laid piece by piece as the search read a
    * cut collage (`drawPair`), as Side by side shows it.
    */
+  /**
+   * What an export of `kind` is composed from, once the view has drawn it: the pieces the
+   * header, the ruler and the credits are made of (`common`), the terrain's frame and
+   * tag, the title and the file's name.
+   */
+  function exportParts(kind, drawn, { trace = false, signed = true } = {}) {
+    const searched = drawn.searched ?? null;
+    const title = viewTitle.trim() || views.suggested;
+    return {
+      searched,
+      terrainFrame: searched?.frame ?? drawn.frames[1],
+      terrainTag: searched ? SEARCHED_TERRAIN_TAG : TERRAIN_TAG,
+      title,
+      filename: viewFilename(title, kind),
+      common: {
+        layers: searched?.layers ?? drawn.layers,
+        scale: drawn.scale,
+        title,
+        standing: standingText({ observer: view.observer, camera: drawn.camera, sky: { on: view.skyOn, date: view.skyDate, time: view.skyTime }, kind }),
+        credits: pictureCredits,
+        daylight: view.ground !== 'plain' || Boolean(photoOn && overlay.source),
+        trace,
+        signed,
+      },
+    };
+  }
+
+  /** The picture of a view or of a pair, composed from what the view drew (the blink is two such pictures, made apart). */
+  function exportPicture(kind, drawn, { searched, terrainFrame, terrainTag, common }) {
+    return kind === 'row' || kind === 'column'
+      ? composePair({
+          ...common,
+          photo: drawn.frames[0],
+          terrain: terrainFrame,
+          layout: kind,
+          reshaped: overlay.warped,
+          terrainTag,
+          seams: searched?.seams ?? [],
+        })
+      : composeView({ ...common, picture: drawn.frames[0], tag: reshapedShown() ? photoTag(true) : '' });
+  }
+
   async function exportView(kind, { keep = false, trace = false, signed = true, cut = false } = {}) {
     if (exportBusy || !viewPane || !view.observer) return;
     const pair = kind === 'row' || kind === 'column' || kind === 'blink';
@@ -532,21 +576,8 @@
         ? await drawPair({ cut })
         : await viewPane.exportPicture({ kind: kind === 'turn' ? 'turn' : 'view', variants: [{}] });
       if (!drawn) throw new Error('the view has not finished landing');
-      const searched = drawn.searched ?? null;
-      const terrainFrame = searched?.frame ?? drawn.frames[1];
-      const terrainTag = searched ? SEARCHED_TERRAIN_TAG : TERRAIN_TAG;
-      const title = viewTitle.trim() || views.suggested;
-      const common = {
-        layers: searched?.layers ?? drawn.layers,
-        scale: drawn.scale,
-        title,
-        standing: standingText({ observer: view.observer, camera: drawn.camera, sky: { on: view.skyOn, date: view.skyDate, time: view.skyTime }, kind }),
-        credits: pictureCredits,
-        daylight: view.ground !== 'plain' || Boolean(photoOn && overlay.source),
-        trace,
-        signed,
-      };
-      const filename = viewFilename(title, kind);
+      const parts = exportParts(kind, drawn, { trace, signed });
+      const { terrainFrame, terrainTag, common, filename } = parts;
       let result;
       if (kind === 'blink') {
         const [photoFrame] = drawn.frames;
@@ -559,18 +590,7 @@
         form.append('filename', filename);
         result = await api.post(`/api/cases/${owner.id}/compare/gif`, form);
       } else {
-        const picture = pair
-          ? composePair({
-              ...common,
-              photo: drawn.frames[0],
-              terrain: terrainFrame,
-              layout: kind,
-              reshaped: overlay.warped,
-              terrainTag,
-              seams: searched?.seams ?? [],
-            })
-          : composeView({ ...common, picture: drawn.frames[0], tag: reshapedShown() ? photoTag(true) : '' });
-        const blob = await canvasBlob(picture);
+        const blob = await canvasBlob(exportPicture(kind, drawn, parts));
         result = await api.post(`/api/cases/${owner.id}/plates`, { filename, format: 'png', png: await blobBase64(blob), overwrite: false });
         if (keep && views.current) await keepPicture(owner.id, blob, kind, filename);
       }
@@ -584,6 +604,48 @@
       exportBusy = '';
     }
   }
+
+  // -- into the note pinned beside -----------------------------------------------------
+  // The photo above the terrain it was matched on, kept under the view (saved first when it
+  // is not), and the viewpoint as text. Find's score and ranking go nowhere.
+
+  /**
+   * Keep the pair in the case under the saved view for a note: the photo and the terrain
+   * one above the other, the ridge lines on both. A pair kept in this very state (the view
+   * as saved, the same size) is cited again rather than kept twice.
+   */
+  async function keepPairForNote({ signal } = {}) {
+    if (exportBusy || captureBusy || !viewPane || !view.observer) throw new Error('Horizon is busy. Try again in a moment');
+    if (!(photoOn && overlay.source)) throw new Error('Lay a photo over the view first');
+    exportBusy = 'note';
+    try {
+      const owner = await ensureCase();
+      if (!views.current || unsaved) {
+        if (!(await views.save(viewTitle))) throw new Error(views.error || 'The view could not be saved');
+      }
+      if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
+      const drawn = await drawPair({});
+      if (!drawn) throw new Error('The view has not finished landing');
+      const parts = exportParts('column', drawn);
+      const form = new FormData();
+      form.append('image', await canvasBlob(exportPicture('column', drawn, parts)), 'view.png');
+      form.append('kind', 'column');
+      form.append('filename', parts.filename);
+      if (pictureCredits) form.append('attribution', pictureCredits);
+      form.append('reuse', 'true');
+      const kept = await api.post(`/api/cases/${encodeURIComponent(owner.id)}/horizon/views/${encodeURIComponent(views.current.name)}/images`, form, signal ? { signal } : undefined);
+      await reloadCase();
+      return { entity: { id: kept.entity }, label: `${views.current.title}, photo above terrain`, fresh: !kept.reused };
+    } finally {
+      exportBusy = '';
+    }
+  }
+
+  const notePair = pairOffer({ keep: keepPairForNote, unsaved: () => !views.current || unsaved });
+  const noteViewpoint = viewpointOffer({ read: () => ({ observer: view.observer, camera: shownLens, panorama: view.panorama }) });
+  const pairReady = $derived(Boolean(view.observer && photoOn && overlay.source));
+  offerPuts('horizon', () => (view.observer ? [...(pairReady ? [notePair] : []), noteViewpoint] : []));
+  onDestroy(() => withdrawNote('horizon'));
 
   /** A picture of the saved view kept in the case, listed under it. */
   async function keepPicture(caseId, blob, kind, filename) {
@@ -1822,6 +1884,7 @@
           busy={exportBusy}
           earth={earthLink}
           onexport={exportView}
+          notes={[...(pairReady ? [notePair] : []), noteViewpoint]}
           onproof={sendToProof}
         />
         <button

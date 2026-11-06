@@ -7,6 +7,7 @@ import { pairOpener } from './compare/pair.opener.js';
 import { collageOpener, frameOpener } from './inspect/frame.opener.js';
 import { pinOpener } from './detect/pin.opener.js';
 import { plateOpener } from './plate/plate.opener.js';
+import { viewOpener } from './horizon/view.opener.js';
 import { takeSeek } from './inspect/handoff.js';
 import { takeCandidate } from './detect/handoff.js';
 
@@ -20,7 +21,7 @@ vi.mock('../lib/api.js', () => ({ api: { get: vi.fn() } }));
 beforeEach(() => {
   resetOpeners();
   for (const [tool, opener] of [['proof', proofOpener], ['satellite', captureOpener], ['compare', pairOpener],
-    ['inspect', frameOpener], ['collage', collageOpener], ['detect', pinOpener], ['plate', plateOpener]]) registerOpener(tool, opener);
+    ['inspect', frameOpener], ['collage', collageOpener], ['detect', pinOpener], ['plate', plateOpener], ['horizon', viewOpener]]) registerOpener(tool, opener);
   uiState.tool = 'notebook';
 });
 
@@ -88,6 +89,14 @@ describe('opening a note\'s picture where it was made', () => {
     // the days side by side show no one day: the plate opens as it was left
     openerFor(media({ plate_spec: '.mapplates/Port strike.json' })).open();
     expect(uiState.openPlateAt).toBe(null);
+  });
+
+  it('opens a picture kept from a saved Horizon view on that view', () => {
+    const found = openerFor(media({ horizon_view: '.horizon/Ridge above the town.json' }));
+    expect(found.label).toBe('Open in Horizon');
+    found.open();
+    expect(uiState.openHorizonView).toBe('Ridge above the town');
+    expect(uiState.tool).toBe('horizon');
   });
 
   it('offers nothing for a picture no tool can reopen', () => {

@@ -333,6 +333,33 @@ def test_a_kept_picture_carries_its_relief_s_licences_in_full(client):
     assert source["attribution"] == credit
 
 
+def test_the_same_pair_put_in_a_note_twice_is_one_picture_and_another_view_state_is_another(client):
+    cid = _case(client, "Pair in a note")
+    photo = _photo(client, cid)
+    _save(client, cid, "North ridge", _spec(photo))
+
+    def put(size=(320, 200), name="North ridge"):
+        return client.post(
+            f"/api/cases/{cid}/horizon/views/{name}/images",
+            files={"image": ("view.png", io.BytesIO(_png(size=size)), "image/png")},
+            data={"kind": "column", "filename": "North ridge photo above terrain", "reuse": "true"},
+        )
+
+    first = put()
+    again = put()
+    assert first.status_code == 200 and again.json()["reused"] is True
+    assert again.json()["entity"] == first.json()["entity"]
+    # another size is another picture; so is the view saved again with another look
+    assert put(size=(640, 400)).json().get("reused") is None
+    moved = _spec(photo)
+    moved["look"] = {**moved["look"], "heading": 12}
+    assert _save(client, cid, "North ridge", moved, overwrite=True).status_code == 200
+    assert put().json().get("reused") is None
+    # a copy kept with the export's own checkbox never takes the note's picture for its own
+    plain = _keep(client, cid, "North ridge", "column")
+    assert plain.json().get("reused") is None
+
+
 def test_a_kept_picture_carries_the_credits_and_is_held_back_as_a_working_file(client):
     cid = _case(client, "Kept credits")
     _save(client, cid, "North ridge")

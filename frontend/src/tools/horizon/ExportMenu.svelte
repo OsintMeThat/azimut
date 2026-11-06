@@ -9,6 +9,7 @@
    * and a copy kept in the case under the view, once the view is saved.
    */
   import Icon from '../../components/Icon.svelte';
+  import PutInNote from '../../components/PutInNote.svelte';
   import { EXPORT_KINDS } from '../../lib/horizon/viewExport.js';
 
   let {
@@ -22,6 +23,8 @@
     busy = '',
     /** Google Earth's link for this camera, or ''. */
     earth = '',
+    /** What the pinned note is offered (`horizonNote.js`): a row each while a note is pinned. */
+    notes = [],
     onexport = () => {},
     onproof = () => {},
   } = $props();
@@ -96,6 +99,9 @@
         </button>
       {/each}
       <div class="em-acts">
+        {#each notes as offer (offer.id)}
+          <PutInNote {offer} class="em-row put" named onput={() => (open = false)} />
+        {/each}
         <button
           type="button"
           role="menuitem"
@@ -175,6 +181,26 @@
     text-align: left;
     text-decoration: none;
     cursor: pointer;
+  }
+  /* The note's rows are drawn by PutInNote, outside this component's scope. */
+  .em-menu :global(.em-row.put) {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 6px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--text-1);
+    font: inherit;
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+  .em-menu :global(.em-row.put:hover),
+  .em-menu :global(.em-row.put:focus-visible) {
+    background: var(--bg-3);
   }
   .em-row span {
     display: inline-flex;

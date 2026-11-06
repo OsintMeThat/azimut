@@ -45,7 +45,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .. import __version__, errors, layout
 from ..engine import artifacts as artifact_engine
-from ..engine import comparisons, horizon_views, inspectwork, tiles
+from ..engine import comparisons, horizon_views, inspectwork, snapshots, tiles
 from ..engine import media as media_engine
 from ..engine.sheets import replace_atomic
 from ..workspace import Case, CaseError
@@ -632,6 +632,7 @@ async def keep_image(
     kind: Literal["view", "turn", "row", "column", "photo", "terrain"] = Form(),
     filename: str = Form(min_length=1, max_length=120),
     attribution: str = Form(default="", max_length=PICTURE_CREDIT_MAX),
+    reuse: bool = Form(default=False),
 ) -> dict[str, Any]:
     """Keep one picture of a saved view in the case, as an image nothing replaces.
 
@@ -652,6 +653,13 @@ async def keep_image(
     spec = saved.get("spec") or {}
     eye = spec.get("eye") or {}
     look = spec.get("look") or {}
+    state_key = ""
+    if reuse:
+        # a picture put in a note twice, from the same view as saved, of the same kind and size, is one picture
+        with Image.open(io.BytesIO(data)) as drawn:
+            state_key = snapshots.view_key("horizon", view=spec_rel, spec=spec, shows=kind, size=list(drawn.size))
+        if (filed := snapshots.filed_view(case, state_key)) is not None:
+            return {"path": (filed.get("attrs") or {}).get("path"), "entity": filed["id"], "reused": True}
     source: dict[str, Any] = {
         "type": horizon_views.SOURCE_TYPE,
         horizon_views.VIEW_KEY: spec_rel,
@@ -672,6 +680,8 @@ async def keep_image(
         source["photo"] = photo["path"]
         source["from"] = photo["path"]
     attrs = {"lat": eye.get("lat"), "lon": eye.get("lon"), horizon_views.VIEW_ATTR: spec_rel}
+    if state_key:
+        source[snapshots.VIEW_KEY] = attrs[snapshots.VIEW_KEY] = state_key
     try:
         filed = media_engine.import_rendered_bytes(
             case, data, filename, ".png", source, by="horizon", extra_attrs=attrs
