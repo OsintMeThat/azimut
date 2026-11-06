@@ -58,6 +58,12 @@ const { default: Notebook } = await import('./Notebook.svelte');
 let component;
 let target;
 
+/** The Look panel shows one section at a time, on the tab last used: go to the one holding the control. */
+function lookTab(name) {
+  [...document.querySelectorAll('.float-menu [role="tab"]')].find((tab) => tab.textContent.trim() === name).click();
+  flushSync();
+}
+
 async function settle() {
   for (let i = 0; i < 30; i++) await Promise.resolve();
   flushSync();
@@ -516,6 +522,7 @@ describe('a note, and how it prints', () => {
     await openOldLead();
     target.querySelector('[data-guide="notebook.look"]').click();
     flushSync();
+    lookTab('Style');
     [...document.querySelectorAll('.style-card')].find((card) => card.textContent.includes('Journal')).click();
     await settle();
     const [address, look] = put.mock.calls.find(([url]) => url.endsWith('/look'));
@@ -529,6 +536,7 @@ describe('a note, and how it prints', () => {
     await openOldLead();
     target.querySelector('[data-guide="notebook.look"]').click();
     flushSync();
+    lookTab('Cover');
     [...document.querySelectorAll('[aria-label="Cover page"] button')].find((button) => button.textContent === 'Your own page').click();
     await settle();
     const [, look] = put.mock.calls.find(([url]) => url.endsWith('/look'));
@@ -770,6 +778,7 @@ describe('a template from Settings', () => {
 
     target.querySelector('[data-guide="notebook.look"]').click();
     flushSync();
+    lookTab('Style');
     [...document.querySelectorAll('.style-card')].find((card) => card.textContent.includes('Report')).click();
     await settle();
     const [address, saved] = post.mock.calls.find(([where]) => where === '/api/templates/note');
@@ -782,6 +791,7 @@ describe('a template from Settings', () => {
     await openTemplate();
     target.querySelector('[data-guide="notebook.look"]').click();
     flushSync();
+    lookTab('Cover');
     [...document.querySelectorAll('[aria-label="Cover page"] button')].find((button) => button.textContent === 'Your own page').click();
     await settle();
     await new Promise((resolve) => setTimeout(resolve, 700));

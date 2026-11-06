@@ -84,6 +84,7 @@ test('a template from a ready one opens with its own first page, drawn in the ed
 
   // the Look says so
   await page.locator('[data-guide="notebook.look"]').click();
+  await page.getByRole('tab', { name: 'Cover' }).click();
   await expect(page.locator('[aria-label="Cover page"] [aria-checked="true"]')).toHaveText('Your own page');
   await expect(page.getByRole('switch', { name: 'Centred down the page' })).toBeChecked();
   await page.keyboard.press('Escape');

@@ -191,6 +191,22 @@ export function normaliseLook(look) {
   };
 }
 
+/**
+ * Which sections of the Look hold something set, a note with no look holding none:
+ * what the panel's tabs mark with a dot. Style counts the contents, numbering and
+ * sources switches too, Page its paper, accent and marking.
+ */
+export function sectionsSet(look) {
+  const whole = normaliseLook(look);
+  return {
+    style: whole.style !== DEFAULT_LOOK.style || whole.toc || whole.numbered || whole.sources !== '',
+    text: Boolean(whole.font || whole.size),
+    page: whole.page !== DEFAULT_LOOK.page || Boolean(whole.accent || whole.tlp),
+    cover: whole.cover.on,
+    bands: Boolean(whole.header || whole.footer),
+  };
+}
+
 /** A look a template can carry: no picture and no day of a case. */
 export function templateLook(look) {
   const whole = normaliseLook(look);

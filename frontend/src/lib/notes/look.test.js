@@ -6,7 +6,7 @@ vi.mock('../api.js', () => ({ api: { get, put } }));
 
 const {
   BANDS, BAND_MAX, COVERS, DEFAULT_LOOK, FONTS, HINT_LINE, coverChoice, coverFor, ownCover, INCLUDE_LINE, SIZES, SOURCES_OFF_STYLES, STYLES, hintLine, includeLine, isPlainLook, isReport, lookFont,
-  bandStyleOwn, normaliseLook, readLook, slotText, reportBody, reportLook, sourcesOn, templateLook, writeLook,
+  bandStyleOwn, normaliseLook, readLook, sectionsSet, slotText, reportBody, reportLook, sourcesOn, templateLook, writeLook,
 } = await import('./look.js');
 
 afterEach(() => vi.clearAllMocks());
@@ -131,6 +131,24 @@ describe('a look', () => {
       expect(bandStyleOwn(style).footer, style).toEqual({ left: '{date}', center: '', right: 'Page {page} / {pages}' });
       expect(bandStyleOwn(style).header, style).toEqual({ left: '', center: '', right: '' });
     }
+  });
+
+  it('says which sections of the Look hold something set, none for a look that sets nothing', () => {
+    const none = { style: false, text: false, page: false, cover: false, bands: false };
+    expect(sectionsSet(null)).toEqual(none);
+    expect(sectionsSet({ style: 'plain', page: 'a4' })).toEqual(none);
+    expect(sectionsSet({ style: 'report' })).toEqual({ ...none, style: true });
+    for (const change of [{ toc: true }, { numbered: true }, { sources: 'on' }, { sources: 'off' }]) expect(sectionsSet(change).style, JSON.stringify(change)).toBe(true);
+    expect(sectionsSet({ font: 'book' })).toEqual({ ...none, text: true });
+    expect(sectionsSet({ size: 'small' })).toEqual({ ...none, text: true });
+    for (const change of [{ page: 'letter' }, { accent: '#c8102e' }, { tlp: 'green' }]) expect(sectionsSet(change), JSON.stringify(change)).toEqual({ ...none, page: true });
+    expect(sectionsSet({ cover: { on: true } })).toEqual({ ...none, cover: true });
+    // a subtitle kept while the cover is off is not a cover
+    expect(sectionsSet({ cover: { on: false, subtitle: 'Draft' } }).cover).toBe(false);
+    expect(sectionsSet({ header: { left: 'x' } })).toEqual({ ...none, bands: true });
+    expect(sectionsSet({ footer: { right: 'azimut:logo' } })).toEqual({ ...none, bands: true });
+    // what the look would drop is not set
+    expect(sectionsSet({ footer: { left: '   ' }, accent: 'red' })).toEqual(none);
   });
 
   it('carries its bands into a template, which holds no case content', () => {

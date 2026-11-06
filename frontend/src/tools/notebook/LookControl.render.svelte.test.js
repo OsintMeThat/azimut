@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { normaliseLook } from '../../lib/notes/look.js';
 
-// the server names the families; their faces load as the panel opens, Inter's file is missing
+// the server names the families; their faces load as the Text tab shows, Inter's file is missing
 const { loads } = vi.hoisted(() => ({ loads: [] }));
 vi.mock('../../lib/notes/noteFonts.js', () => ({
   faceFamily: (key) => `azimut-note-${key}`,
@@ -20,8 +20,11 @@ vi.mock('../../lib/notes/noteFonts.js', () => ({
 const { default: LookControl } = await import('./LookControl.svelte');
 
 /**
- * The Look panel, mounted: each setting hands the whole look up at once, which the
- * Notebook saves beside the note. A template's look keeps no picture and no day.
+ * The Look panel, mounted: five tabs, one section at a time, and each setting hands
+ * the whole look up at once, which the Notebook saves beside the note. A template's
+ * look keeps no picture and no day. The panel opens on the tab last used, which the
+ * module remembers between tests as it does between visits to the Notebook, so a
+ * test that needs a section goes to its tab first.
  */
 
 const ENTITIES = [
@@ -56,24 +59,58 @@ afterEach(() => {
 });
 
 const panel = () => document.querySelector('.float-menu');
-const openPanel = () => { target.querySelector('[data-guide="notebook.look"]').click(); flushSync(); };
+const opener = () => target.querySelector('[data-guide="notebook.look"]');
+const openPanel = () => { opener().click(); flushSync(); };
+const tabs = () => [...panel().querySelectorAll('[role="tab"]')];
+const tabNamed = (name) => tabs().find((item) => item.textContent.trim() === name);
+const goTo = (name) => { tabNamed(name).click(); flushSync(); };
 const pressed = (text) => [...panel().querySelectorAll('button')].find((button) => button.textContent.trim() === text);
-const box = (words) => [...panel().querySelectorAll('label.check')].find((label) => label.textContent.includes(words)).querySelector('input');
+const box = (words) => [...panel().querySelectorAll('label.switch')].find((label) => label.textContent.includes(words)).querySelector('input');
 
 describe('the Look panel', () => {
-  it('names the style on its button, and opens on the settings', () => {
-    expect(target.textContent).toContain('Plain');
-    openPanel();
-    expect(panel().getAttribute('role')).toBe('dialog');
-    for (const words of ['Style', 'Page', 'Accent', 'Marking', 'Cover', 'Contents page', 'Numbered headings']) {
-      expect(panel().textContent).toContain(words);
-    }
+  it('names the style on its button, and opens on its first tab the first time, one section shown', async () => {
+    // a module of its own, so nothing was used before it
+    vi.resetModules();
+    const svelte = await import('svelte');
+    const { default: Fresh } = await import('./LookControl.svelte');
+    const home = document.createElement('div');
+    document.body.append(home);
+    const fresh = svelte.mount(Fresh, { target: home, props: { look: normaliseLook(null), onchange() {}, entities: [] } });
+    svelte.flushSync();
+    expect(home.textContent).toContain('Plain');
+    home.querySelector('[data-guide="notebook.look"]').click();
+    svelte.flushSync();
+    const dialog = document.querySelector('.float-menu');
+    expect(dialog.getAttribute('role')).toBe('dialog');
+    expect(dialog.querySelector('[role="tablist"]')).not.toBeNull();
+    expect([...dialog.querySelectorAll('[role="tab"]')].map((item) => item.textContent.trim()))
+      .toEqual(['Style', 'Text', 'Page', 'Cover', 'Header & footer']);
+    expect(dialog.querySelector('[role="tab"][aria-selected="true"]').textContent.trim()).toBe('Style');
+    expect(dialog.querySelectorAll('.style-card')).toHaveLength(4);
+    // the other sections are not drawn
+    for (const words of ['Typeface', 'Accent', 'Marking', 'Subtitle', 'Footer']) expect(dialog.textContent).not.toContain(words);
+    svelte.unmount(fresh);
+    home.remove();
+    dialog.remove();
   });
 
-  it('hands up a style, a page size and a marking as soon as they are picked', () => {
+  it('puts the three switches of the document under the style cards, all as switches', () => {
     openPanel();
+    goTo('Style');
+    const group = panel().querySelector('.group');
+    expect(group.getAttribute('aria-label')).toBe('In the document');
+    expect([...group.querySelectorAll('label.switch')].map((label) => label.textContent.trim()))
+      .toEqual(['Contents page', 'Numbered headings', 'List sources at the end']);
+    expect([...group.querySelectorAll('input')].every((input) => input.getAttribute('role') === 'switch')).toBe(true);
+    expect(panel().querySelector('input[type="checkbox"]:not([role="switch"])')).toBeNull();
+  });
+
+  it('hands up a style, a page size and a marking as soon as they are picked, each on its own tab', () => {
+    openPanel();
+    goTo('Style');
     [...panel().querySelectorAll('.style-card')].find((card) => card.textContent.includes('Report')).click();
     flushSync();
+    goTo('Page');
     pressed('Letter').click();
     flushSync();
     pressed('TLP:AMBER+STRICT').click();
@@ -84,10 +121,21 @@ describe('the Look panel', () => {
     expect(target.textContent).toContain('Report');
   });
 
+  it('puts paper, accent and marking on one column of labels', () => {
+    openPanel();
+    goTo('Page');
+    const rows = [...panel().querySelectorAll('.section > .row')];
+    expect(rows.map((row) => row.querySelector('.key').textContent)).toEqual(['Paper', 'Accent', 'Marking']);
+    expect(panel().querySelector('[aria-label="Page size"]')).not.toBeNull();
+    expect(panel().querySelector('[aria-label="TLP marking"]')).not.toBeNull();
+  });
+
   it('turns the cover, the contents and the numbers on', () => {
     openPanel();
+    goTo('Cover');
     pressed("The style's").click();
     flushSync();
+    goTo('Style');
     box('Contents page').click();
     flushSync();
     box('Numbered headings').click();
@@ -99,6 +147,7 @@ describe('the Look panel', () => {
     vi.useFakeTimers();
     props.look = normaliseLook({ cover: { on: true } });
     openPanel();
+    goTo('Cover');
     const field = panel().querySelector('input[placeholder="A line under the title"]');
     field.value = 'Draft';
     field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -114,6 +163,7 @@ describe('the Look panel', () => {
   it('puts a picture of the case on the cover, never a video, and takes it off', () => {
     props.look = normaliseLook({ cover: { on: true } });
     openPanel();
+    goTo('Cover');
     pressed('Choose a picture').click();
     flushSync();
     const rows = [...panel().querySelectorAll('.picture-row')];
@@ -129,6 +179,7 @@ describe('the Look panel', () => {
 
   it('takes an accent from a pasted code, and gives the style its own back', () => {
     openPanel();
+    goTo('Page');
     const code = panel().querySelector('input[aria-label="Accent colour code"]');
     code.value = 'rgb(200, 16, 46)';
     code.dispatchEvent(new Event('input', { bubbles: true }));
@@ -142,6 +193,11 @@ describe('the Look panel', () => {
 
   it('shows each typeface in its own face, the style\'s own first, and hands the one picked up', async () => {
     openPanel();
+    goTo('Style');
+    await tick();
+    // nothing is asked for before the Text tab shows
+    expect(loads).toEqual([]);
+    goTo('Text');
     for (let round = 0; round < 4; round += 1) await tick();
     flushSync();
     const cards = [...panel().querySelectorAll('.font-card')];
@@ -161,6 +217,7 @@ describe('the Look panel', () => {
 
   it('sets the text smaller or larger, and back to normal', () => {
     openPanel();
+    goTo('Text');
     const sizes = panel().querySelector('[aria-label="Text size"]');
     expect([...sizes.querySelectorAll('button')].map((button) => button.textContent.trim())).toEqual(['Smaller', 'Normal', 'Larger']);
     pressed('Larger').click();
@@ -171,19 +228,20 @@ describe('the Look panel', () => {
     expect(changes.at(-1).size).toBe('');
   });
 
-  it('opens with the style picked in focus, so the keyboard goes on inside the panel', async () => {
+  it('opens with the tab in focus, so the arrows move between sections and Tab goes into one', async () => {
     props.look = normaliseLook({ style: 'journal' });
     openPanel();
     await tick();
     await tick();
-    expect(document.activeElement?.textContent).toContain('Journal');
+    expect(document.activeElement?.getAttribute('role')).toBe('tab');
+    expect(document.activeElement?.getAttribute('aria-selected')).toBe('true');
   });
 
   it('shows the list of sources as the style has it until it is set, then writes on or off', () => {
-    const sources = () => panel().querySelector('input[role="switch"]');
+    const sources = () => box('List sources at the end');
     openPanel();
-    expect(sources().closest('.row').textContent).toContain('Sources');
-    expect(sources().closest('label').textContent).toContain('List sources at the end');
+    goTo('Style');
+    expect(sources().closest('.group').textContent).toContain('In the document');
     // Plain prints none of its own, a report lists them
     expect(sources().checked).toBe(false);
     props.look = normaliseLook({ style: 'report' });
@@ -208,7 +266,8 @@ describe('the Look panel', () => {
     props.template = true;
     props.look = normaliseLook({ style: 'brief' });
     openPanel();
-    const sources = panel().querySelector('input[role="switch"]');
+    goTo('Style');
+    const sources = box('List sources at the end');
     expect(sources.checked).toBe(true);
     sources.click();
     flushSync();
@@ -217,6 +276,7 @@ describe('the Look panel', () => {
 
   it('offers three covers: none, the style\'s with its fields, or the analyst\'s own page', () => {
     openPanel();
+    goTo('Cover');
     const covers = panel().querySelector('[aria-label="Cover page"]');
     expect([...covers.querySelectorAll('button')].map((button) => button.textContent.trim())).toEqual(['Off', "The style's", 'Your own page']);
     expect(pressed('Off').getAttribute('aria-checked')).toBe('true');
@@ -225,6 +285,8 @@ describe('the Look panel', () => {
     flushSync();
     expect(changes.at(-1).cover).toMatchObject({ on: true, mode: '' });
     expect(panel().textContent).toContain('Subtitle');
+    // each field has its label on the one column the cover's own label is on
+    expect([...panel().querySelectorAll('.section > .row')].map((row) => row.querySelector('.key').textContent)).toEqual(['Cover', 'Subtitle', 'Picture', 'Day']);
     pressed('Your own page').click();
     flushSync();
     expect(changes.at(-1).cover).toMatchObject({ on: true, mode: 'own', top: false });
@@ -244,33 +306,186 @@ describe('the Look panel', () => {
     expect(changes.at(-1).cover).toMatchObject({ on: false, mode: '' });
   });
 
+  it('says on the own page how to pin something to a corner', () => {
+    props.look = normaliseLook({ cover: { on: true, mode: 'own' } });
+    openPanel();
+    goTo('Cover');
+    expect(panel().textContent).toContain('A ::: top-right block, or / › Alignment, pins what it holds to a corner.');
+    pressed('Off').click();
+    flushSync();
+    expect(panel().textContent).not.toContain('pins what it holds');
+  });
+
   it('offers a template its own page, with no day', () => {
     props.template = true;
     props.look = normaliseLook({ cover: { on: true, mode: 'own' } });
     openPanel();
+    goTo('Cover');
     expect(pressed('Your own page').getAttribute('aria-checked')).toBe('true');
     expect(panel().textContent).toContain('Centred down the page');
     expect(panel().querySelector('input[type="date"]')).toBeNull();
   });
 
+  it('offers a template no picture and no day', () => {
+    props.template = true;
+    props.look = normaliseLook({ cover: { on: true } });
+    openPanel();
+    goTo('Cover');
+    expect(panel().textContent).toContain('Subtitle');
+    expect(panel().textContent).not.toContain('Picture');
+    expect(panel().querySelector('input[type="date"]')).toBeNull();
+  });
+
+  describe('the tabs', () => {
+    const press = (key, on = document.activeElement) => {
+      on.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      flushSync();
+    };
+    const selected = () => panel().querySelector('[role="tab"][aria-selected="true"]').textContent.trim();
+
+    it('is a tablist of five, one section shown as the panel of the tab chosen', () => {
+      openPanel();
+      goTo('Style');
+      expect(panel().querySelector('[role="tablist"]').getAttribute('aria-label')).toBe('Look sections');
+      const section = panel().querySelector('[role="tabpanel"]');
+      expect(tabNamed('Style').getAttribute('aria-controls')).toBe(section.id);
+      expect(section.getAttribute('aria-labelledby')).toBe(tabNamed('Style').id);
+      goTo('Page');
+      expect(section.getAttribute('aria-labelledby')).toBe(tabNamed('Page').id);
+      expect(panel().querySelectorAll('[role="tabpanel"]')).toHaveLength(1);
+      expect(panel().textContent).toContain('Marking');
+      expect(panel().textContent).not.toContain('Typeface');
+      // only the tab shown is in the tab order
+      expect(tabs().map((item) => item.tabIndex)).toEqual([-1, -1, 0, -1, -1]);
+      // every tab says what it holds on hover
+      for (const item of tabs()) expect(item.title, item.textContent).not.toBe('');
+    });
+
+    it('moves with the arrows, wraps round, and goes to the ends with Home and End', () => {
+      openPanel();
+      goTo('Style');
+      tabNamed('Style').focus();
+      press('ArrowRight');
+      expect(selected()).toBe('Text');
+      expect(document.activeElement).toBe(tabNamed('Text'));
+      expect(panel().textContent).toContain('Typeface');
+      press('ArrowRight');
+      press('ArrowRight');
+      expect(selected()).toBe('Cover');
+      press('End');
+      expect(selected()).toBe('Header & footer');
+      expect(document.activeElement).toBe(tabNamed('Header & footer'));
+      press('ArrowRight');
+      expect(selected()).toBe('Style');
+      press('ArrowLeft');
+      expect(selected()).toBe('Header & footer');
+      press('Home');
+      expect(selected()).toBe('Style');
+      // other keys leave the tabs alone
+      press('a');
+      press('ArrowDown');
+      expect(selected()).toBe('Style');
+      expect(changes).toHaveLength(0);
+    });
+
+    it('leaves the arrows to a field inside a section', () => {
+      props.look = normaliseLook({ cover: { on: true } });
+      openPanel();
+      goTo('Cover');
+      const subtitle = panel().querySelector('input[placeholder="A line under the title"]');
+      subtitle.focus();
+      press('ArrowRight', subtitle);
+      expect(selected()).toBe('Cover');
+    });
+
+    it('opens on the last tab used, for this panel and any other', () => {
+      openPanel();
+      goTo('Header & footer');
+      opener().click();
+      flushSync();
+      expect(panel()).toBeNull();
+      openPanel();
+      expect(selected()).toBe('Header & footer');
+      expect(panel().textContent).toContain('Footer');
+      // another Look, as a template has beside a note, starts where this one left off
+      const other = document.createElement('div');
+      document.body.append(other);
+      const second = mount(LookControl, { target: other, props: { look: normaliseLook(null), onchange() {}, entities: [] } });
+      flushSync();
+      opener().click();
+      flushSync();
+      other.querySelector('[data-guide="notebook.look"]').click();
+      flushSync();
+      expect(selected()).toBe('Header & footer');
+      unmount(second);
+      other.remove();
+    });
+
+    it('marks a tab whose section holds something set, and no tab for a look that sets nothing', () => {
+      openPanel();
+      const dots = () => tabs().filter((item) => item.querySelector('.dot')).map((item) => item.textContent.trim());
+      expect(dots()).toEqual([]);
+      props.look = normaliseLook({ font: 'book' });
+      flushSync();
+      expect(dots()).toEqual(['Text']);
+      props.look = normaliseLook({ size: 'large' });
+      flushSync();
+      expect(dots()).toEqual(['Text']);
+      props.look = normaliseLook({ page: 'letter' });
+      flushSync();
+      expect(dots()).toEqual(['Page']);
+      props.look = normaliseLook({ accent: '#c8102e' });
+      flushSync();
+      expect(dots()).toEqual(['Page']);
+      props.look = normaliseLook({ tlp: 'amber' });
+      flushSync();
+      expect(dots()).toEqual(['Page']);
+      props.look = normaliseLook({ cover: { on: true } });
+      flushSync();
+      expect(dots()).toEqual(['Cover']);
+      props.look = normaliseLook({ footer: { right: 'Draft' } });
+      flushSync();
+      expect(dots()).toEqual(['Header & footer']);
+      props.look = normaliseLook({ style: 'brief' });
+      flushSync();
+      expect(dots()).toEqual(['Style']);
+      props.look = normaliseLook({ toc: true });
+      flushSync();
+      expect(dots()).toEqual(['Style']);
+      props.look = normaliseLook({ style: 'report', font: 'sans', tlp: 'red', cover: { on: true }, header: { left: 'x' } });
+      flushSync();
+      expect(dots()).toEqual(['Style', 'Text', 'Page', 'Cover', 'Header & footer']);
+      expect(tabNamed('Page').querySelector('.dot').title).toBe('Something here is set');
+      expect(tabNamed('Page').querySelector('.dot').getAttribute('aria-label')).toBe('Set');
+      // setting one from its tab lights it at once
+      props.look = normaliseLook(null);
+      flushSync();
+      goTo('Text');
+      pressed('Larger').click();
+      flushSync();
+      expect(tabNamed('Text').querySelector('.dot')).not.toBeNull();
+      pressed('Normal').click();
+      flushSync();
+      expect(tabNamed('Text').querySelector('.dot')).toBeNull();
+    });
+  });
+
   describe('the header and the footer', () => {
-    const fold = () => [...panel().querySelectorAll('button')].find((button) => button.textContent.includes('Header and footer'));
     const field = (name) => panel().querySelector(`input[aria-label="${name}"]`);
     const typeIn = (name, text) => {
       const input = field(name);
       input.value = text;
       input.dispatchEvent(new Event('input', { bubbles: true }));
     };
-
-    it('is folded after the other settings, and opens on two rows of three one-line fields', () => {
+    const show = () => {
       openPanel();
-      expect(fold().getAttribute('aria-expanded')).toBe('false');
-      expect(field('Footer left')).toBeNull();
-      // the last section of the panel
-      expect(panel().querySelector('.look').lastElementChild.contains(fold())).toBe(true);
-      fold().click();
-      flushSync();
-      expect(fold().getAttribute('aria-expanded')).toBe('true');
+      goTo('Header & footer');
+    };
+
+    it('is the last tab, on two rows of three one-line fields, each row labelled above it', () => {
+      openPanel();
+      expect(tabs().at(-1).textContent.trim()).toBe('Header & footer');
+      goTo('Header & footer');
       const rows = [...panel().querySelectorAll('.band')].map((band) => [band.querySelector('.key').textContent, [...band.querySelectorAll('input')].map((input) => input.getAttribute('aria-label'))]);
       expect(rows).toEqual([
         ['Header', ['Header left', 'Header centre', 'Header right']],
@@ -282,9 +497,7 @@ describe('the Look panel', () => {
     });
 
     it('says what the style prints in an empty band, and no more once the band is filled', () => {
-      openPanel();
-      fold().click();
-      flushSync();
+      show();
       // Plain: the note's name and the page number, no header
       expect(['Header left', 'Header centre', 'Header right'].map((name) => field(name).placeholder)).toEqual(['', '', '']);
       expect(['Footer left', 'Footer centre', 'Footer right'].map((name) => field(name).placeholder)).toEqual(['{title}', '', '{page}']);
@@ -300,9 +513,7 @@ describe('the Look panel', () => {
 
     it('writes a slot once typing pauses, or when the field is left, and drops an emptied band', () => {
       vi.useFakeTimers();
-      openPanel();
-      fold().click();
-      flushSync();
+      show();
       typeIn('Footer left', 'Case {title}   ');
       expect(changes).toHaveLength(0);
       vi.advanceTimersByTime(500);
@@ -319,11 +530,16 @@ describe('the Look panel', () => {
       expect('header' in changes.at(-1)).toBe(false);
     });
 
+    it('writes a slot on Enter', () => {
+      show();
+      typeIn('Footer centre', 'Seen');
+      field('Footer centre').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(changes.at(-1).footer.center).toBe('Seen');
+    });
+
     it('keeps a space typed after a word while the look comes back trimmed', () => {
       vi.useFakeTimers();
-      openPanel();
-      fold().click();
-      flushSync();
+      show();
       typeIn('Footer right', 'Page ');
       vi.advanceTimersByTime(500);
       flushSync();
@@ -332,9 +548,7 @@ describe('the Look panel', () => {
     });
 
     it('puts a logo in a slot instead of words, and shows it as a chip that takes it out', () => {
-      openPanel();
-      fold().click();
-      flushSync();
+      show();
       panel().querySelector('button[aria-label="Header left: a logo"]').click();
       flushSync();
       const choices = [...panel().querySelectorAll('.logo-pick button')].map((button) => button.textContent.trim());
@@ -358,21 +572,18 @@ describe('the Look panel', () => {
       expect(field('Header left').value).toBe('');
     });
 
-    it('shows a band already set as On on its folded line, and the words in its fields once open', () => {
+    it('shows a band already set with a dot on its tab, and the words in its fields once the tab is open', () => {
       props.look = normaliseLook({ header: { left: 'Internal' }, footer: { right: 'azimut:logo' } });
       openPanel();
-      expect(fold().textContent).toContain('On');
-      fold().click();
-      flushSync();
+      expect(tabNamed('Header & footer').querySelector('.dot')).not.toBeNull();
+      goTo('Header & footer');
       expect(field('Header left').value).toBe('Internal');
       expect(panel().querySelector('.slot-chip').textContent.trim()).toBe('Azimut logo');
     });
 
     it('is offered to a template as it is to a note', () => {
       props.template = true;
-      openPanel();
-      fold().click();
-      flushSync();
+      show();
       typeIn('Header centre', 'Draft report');
       field('Header centre').dispatchEvent(new Event('blur'));
       expect(changes.at(-1).header).toEqual({ left: '', center: 'Draft report', right: '' });
@@ -380,22 +591,20 @@ describe('the Look panel', () => {
 
     it('writes what is typed when the panel is closed before the pause is over', () => {
       vi.useFakeTimers();
-      openPanel();
-      fold().click();
-      flushSync();
+      show();
       typeIn('Footer centre', 'Seen');
-      target.querySelector('[data-guide="notebook.look"]').click();
+      opener().click();
       flushSync();
       expect(changes.at(-1).footer.center).toBe('Seen');
     });
-  });
 
-  it('offers a template no picture and no day', () => {
-    props.template = true;
-    props.look = normaliseLook({ cover: { on: true } });
-    openPanel();
-    expect(panel().textContent).toContain('Subtitle');
-    expect(panel().textContent).not.toContain('Picture');
-    expect(panel().querySelector('input[type="date"]')).toBeNull();
+    it('writes what is typed when another tab is pressed before the pause is over', () => {
+      vi.useFakeTimers();
+      show();
+      typeIn('Footer centre', 'Seen');
+      goTo('Page');
+      vi.advanceTimersByTime(500);
+      expect(changes.at(-1).footer.center).toBe('Seen');
+    });
   });
 });

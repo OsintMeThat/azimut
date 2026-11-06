@@ -270,6 +270,7 @@ test('a Notebook template is edited from Settings, saved as a file and taken bac
   await expect(page.locator('input[aria-label="Template name"]')).toHaveValue('House brief');
   await expect(page.locator('.cm-hint')).toHaveText('Who said it');
   await page.locator('[data-guide="notebook.look"]').click();
+  await page.getByRole('tab', { name: 'Style' }).click();
   await page.locator('.style-card', { hasText: 'Report' }).click();
   await expect.poll(() => state.savedTemplates.at(-1)?.data?.look?.style).toBe('report');
   await page.keyboard.press('Escape');
@@ -357,10 +358,13 @@ test('Look sets the typeface and the text size, each face drawn in itself, from 
   await openLead(page);
   await page.locator('[data-guide="notebook.view"]').getByRole('button', { name: 'Page' }).click();
   await expect(page.locator('.page-pane .sheet').first()).toBeVisible();
-  // nothing is asked for before the Look opens
+  // nothing is asked for before the Text tab of the Look shows
   expect(state.fontsAsked).toEqual([]);
 
   await page.locator('[data-guide="notebook.look"]').click();
+  await expect(page.getByRole('tab', { name: 'Style' })).toHaveAttribute('aria-selected', 'true');
+  expect(state.fontsAsked).toEqual([]);
+  await page.getByRole('tab', { name: 'Text' }).click();
   const cards = page.locator('.font-card');
   await expect(cards.locator('.font-name')).toHaveText(["Style's own", 'Noto Serif', 'Noto Sans', 'Literata', 'IBM Plex Sans']);
   await expect.poll(() => page.evaluate(() => document.fonts.check('16px "azimut-note-book"'))).toBe(true);
@@ -374,12 +378,12 @@ test('Look sets the typeface and the text size, each face drawn in itself, from 
   await expect.poll(() => state.looks.n1?.size).toBe('large');
   await expect.poll(() => state.previews.at(-1)?.look).toMatchObject({ font: 'book', size: 'large' });
 
-  // the keyboard: the panel opens on the style picked, and Tab carries on inside it
+  // the keyboard: the panel opens on the tab last used with that tab in focus, and Tab carries on inside its section
   await page.keyboard.press('Escape');
   await expect(page.locator('.font-card')).toHaveCount(0);
   await expect(page.locator('[data-guide="notebook.look"]')).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page.locator('.style-card', { hasText: 'Plain' })).toBeFocused();
+  await expect(page.getByRole('tab', { name: 'Text' })).toBeFocused();
   for (let step = 0; step < 20; step += 1) {
     if (await page.evaluate(() => document.activeElement?.textContent?.includes('IBM Plex Sans'))) break;
     await page.keyboard.press('Tab');
