@@ -228,7 +228,9 @@ function connect() {
   port.onMessage.addListener((msg) => {
     if (msg?.type === "put") {
       state.selecting = null;
-      put(msg.put);
+      const notice = typeof msg.notice === "string" ? msg.notice.slice(0, 200) : "";
+      // a word about what was just filed (Street View's rules), once it is in the note
+      put(msg.put).then((ok) => { if (ok && notice) say(notice, "warn"); });
     } else if (msg?.type === "selecting") {
       selecting(msg.tabId);
     } else if (msg?.type === "idle") {

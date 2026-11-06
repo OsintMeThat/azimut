@@ -534,6 +534,25 @@ describe('the notes panel', () => {
     expect($('status').textContent).toBe('The note did not answer. Try again.');
   });
 
+  it('says a word the capture came back with once it is in the note, and then lets it go', async () => {
+    const { fromNote, frameWindow, port } = await openPanel();
+    fromNote(open());
+    vi.useFakeTimers();
+    port().onMessage.fire({
+      type: 'put',
+      put: { action: 'picture', url: 'https://www.google.com/maps/@1,2,3a,75y', title: 'Street', entityId: 'cap_7' },
+      notice: "Google's rules don't allow Street View screenshots in print or published work.",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const [message] = frameWindow.postMessage.mock.calls[0];
+    fromNote({ azimut: 'note-put-done', v: 1, id: message.id, ok: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect($('status').textContent).toBe("Google's rules don't allow Street View screenshots in print or published work.");
+    expect($('status').className).toBe('status warn');
+    await vi.advanceTimersByTimeAsync(8000);
+    expect($('status').hidden).toBe(true);
+  });
+
   it("puts a right-click's facts in the same way", async () => {
     const { fromNote, frameWindow, port } = await openPanel();
     fromNote(open());

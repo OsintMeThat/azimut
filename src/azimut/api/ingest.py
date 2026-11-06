@@ -122,6 +122,15 @@ OPERATORS = {
     "yandex-maps": "Yandex",
     "apple-maps": "Apple",
 }
+#: Said once when a Street View capture is filed: Google's rules forbid screenshots of
+#: Street View, in print above all. The capture is the analyst's to keep or publish.
+STREET_VIEW_NOTICE = "Google's rules don't allow Street View screenshots in print or published work."
+#: The same word for a site whose own rules keep its map screenshots out of published
+#: work: Yandex allows its maps for personal, non-commercial use only and says no
+#: screenshot of them may be used. Bing's print rights allow screenshots, so says nothing.
+SITE_NOTICES = {
+    "yandex-maps": "Yandex's rules don't allow its map screenshots in published work.",
+}
 #: The most of the page's own credit kept, in characters.
 SCREEN_CREDIT_MAX = 400
 
@@ -138,7 +147,9 @@ def _screen_credit(text: str) -> str:
     return ", ".join(parts)
 
 
-def screenshot_credit(site: str, url: str, imagery_date: str | None, screen: str = "", year: int | None = None) -> str:
+def screenshot_credit(
+    site: str, url: str, imagery_date: str | None, screen: str = "", year: int | None = None, *, street: bool = False
+) -> str:
     """The credit burned under a screenshot of ``url``.
 
     Copernicus asks for its notice with the data's year, so a Copernicus Browser
@@ -151,6 +162,7 @@ def screenshot_credit(site: str, url: str, imagery_date: str | None, screen: str
     licences ask to be named with the picture and which a selection rarely holds.
     It is printed as the page words it, the site's operator named first when it
     leaves it out. Without it the site's own line goes, Google's with the year.
+    ``street`` is a Street View panorama, said so in front of whatever names it.
     """
     if site == "copernicus-browser":
         dataset = (parse_qs(urlsplit(url).query).get("datasetId") or [""])[0]
@@ -159,12 +171,17 @@ def screenshot_credit(site: str, url: str, imagery_date: str | None, screen: str
         if dataset.startswith(_SERVICE_DATASET):
             return copernicus_credit.service(imagery_date)
         return "Copernicus Browser"
+    stated = year or datetime.now(timezone.utc).year
+    if street:
+        shown = _screen_credit(screen)
+        named = shown if "google" in shown.lower() else f"©{stated} Google"
+        return named if "street view" in named.lower() else f"Street View · {named}"
     shown = _screen_credit(screen) if site in READS_STRIP else ""
     if shown:
         operator = OPERATORS.get(site)
         return f"{operator} · {shown}" if operator and operator.lower() not in shown.lower() else shown
     said = ATTRIBUTIONS.get(site, f"© {urlsplit(url).netloc.lower()}")
-    return said.replace("{year}", str(year or datetime.now(timezone.utc).year))
+    return said.replace("{year}", str(stated))
 
 
 def require_token(x_azimut_token: str = Header(default="")) -> None:
@@ -370,7 +387,9 @@ async def ingest_screenshot(
         if scale_north
         else None
     )
-    attribution = screenshot_credit(site, url, parsed["imagery_date"], screen_credit)
+    street = parsed.get("view_kind") == mapsites.VIEW_STREET
+    notice = STREET_VIEW_NOTICE if street else SITE_NOTICES.get(site, "")
+    attribution = screenshot_credit(site, url, parsed["imagery_date"], screen_credit, street=street)
     img = tiles.burn_attribution(img, attribution)
 
     case = get_case(case_id) if case_id else Case.create("Scratch session", scratch=True)
@@ -456,6 +475,8 @@ async def ingest_screenshot(
         "case_id": case.id,
         "title": label,
         **provenance,
+        # a word for the analyst, said once where the capture was taken; filed nowhere
+        **({"notice": notice} if notice else {}),
     }
 
 

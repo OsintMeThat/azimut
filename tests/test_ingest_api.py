@@ -144,6 +144,36 @@ def test_the_page_s_credit_names_its_operator_once_and_keeps_its_words():
     assert screenshot_credit("google-earth", earth, None, "", year=2025) == "Google Earth · ©2025 Google"
 
 
+def test_street_view_is_filed_credited_as_such_with_google_s_rule_said_once(client):
+    """Google's rules forbid Street View screenshots, in print above all: the capture
+    is still the analyst's, credited as Street View, and the answer carries the rule
+    for the extension to say once. A map capture carries no such word."""
+    from azimut.api.ingest import STREET_VIEW_NOTICE
+
+    token = _token(client)
+    pano = "https://www.google.com/maps/@48.8584,2.2945,3a,75y,90h,90t/data=!3m6!1e1"
+    body = _post(client, token=token, url=pano, screen_credit="Image capture: Jun 2023 © 2026 Google").json()
+    assert body["attribution"] == "Street View · Image capture: Jun 2023 © 2026 Google"
+    assert body["notice"] == STREET_VIEW_NOTICE
+    bare = _post(client, token=token, url=pano).json()
+    assert bare["attribution"] == f"Street View · ©{datetime.now(timezone.utc).year} Google"
+    assert "notice" not in _post(client, token=token).json()
+
+
+def test_yandex_is_filed_with_its_own_rule_said_once_and_bing_with_none(client):
+    from azimut.api.ingest import SITE_NOTICES
+
+    token = _token(client)
+    yandex = _post(client, token=token, url="https://yandex.com/maps/?ll=2.2945,48.8584&z=17&l=sat").json()
+    assert yandex["site"] == "yandex-maps"
+    assert yandex["notice"] == SITE_NOTICES["yandex-maps"]
+    assert yandex["attribution"] == "© Yandex"
+    bing = _post(client, token=token, url="https://www.bing.com/maps?cp=48.8584~2.2945&lvl=17&style=h",
+                 screen_credit="© 2026 Microsoft Corporation · © 2026 Maxar ©CNES (2026) Distribution Airbus DS").json()
+    assert "notice" not in bing
+    assert bing["attribution"] == "© 2026 Microsoft Corporation, © 2026 Maxar ©CNES (2026) Distribution Airbus DS"
+
+
 def test_the_sites_whose_strip_says_less_keep_a_line_of_their_own():
     """OpenStreetMap's print rule wants the copyright page's address with the credit;
     Apple's web map keeps its providers behind a link, so its own wording goes."""

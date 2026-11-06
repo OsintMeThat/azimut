@@ -1400,6 +1400,7 @@ async function finishNoteCapture(msg, tab, meta) {
     tellPanel(port, {
       type: "put",
       put: { action: "picture", url: meta.url, title: note.title, entityId: body.entity_id },
+      ...(typeof body.notice === "string" && body.notice ? { notice: body.notice } : {}),
     });
     return { ok: true };
   } catch (e) {
@@ -1599,7 +1600,7 @@ async function handle(msg, sender) {
       const dataUrl = await withoutPanel(sender.tab.id, () => captureActiveTab(sender.tab.windowId));
       const { blob, scale } = await cropDataUrl(dataUrl, msg.rect, msg.viewportW);
       const body = await ingest(blob, { ...meta, deviceScale: scale, screenCredit: msg.credit });
-      notify("Capture filed into Azimut", body.title);
+      notify("Capture filed into Azimut", typeof body.notice === "string" && body.notice ? `${body.title}. ${body.notice}` : body.title);
       return { ok: true };
     } catch (e) {
       notify("Azimut capture failed", e.message);
