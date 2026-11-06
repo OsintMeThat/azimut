@@ -1807,9 +1807,25 @@ comes back in several extracts of a clip: its row reads `0:30–0:45 · 3:10–3
 `0:30–0:45 +2` past two, the bar draws each in its colour, and **Another moment**
 adds one at the frame on screen. Its time is written to the proof alone
 (`PUT /cases/{id}/proofs/{name}/scene`), with Undo in the toast, and Whole video
-takes every moment back. Geo Proof never writes it, so saving the composition keeps
-it. A scene still to prove belongs to the work; once a proof takes it up it is the
-proof's, and the work lets it go (`GET /cases/{id}/scenes`).
+takes every moment back. Saving the composition in Geo Proof never carries it, so a tab
+opened earlier cannot put an older time back. A scene still to prove belongs to the
+work. Once a proof takes it up it shows as the proof's and is hidden, never dropped:
+the proof sent to the Trash gives it back to geolocate at its own time, and restored
+from there it is proved again (`GET /cases/{id}/scenes`, whose `taken` names the drafts
+a proof in the case cites).
+
+**A capture never makes a scene; a frame belongs to one by its time.** In the strip, a
+frame inside a passage, on an instant, or on a frame a whole-video proof rests on
+carries a small dot in that scene's colour, one per scene and three at most, the
+scenes named on hover. A draft about the whole video dots nothing. A frame a proof lays
+out says so on hover, *Used in Proof 29*, with no badge of its own (`used`, by saved
+path). **Make the proof**, on a scene to geolocate, opens the scene's frames, inside its
+passage, on its instant, or every one for the whole video, all ticked. A scene holding
+none says which frame it captures instead: the sharpest one a scan found in it, else
+the one it starts on, else the one on screen. The ticked frames not in the case yet are
+saved on the way, under their default names in the last folder, and Geo Proof opens a
+new proof of the scene on them, named after its label, its player already running;
+unsaved work in the open proof is asked about first.
 
 **Save to case is the one step that files media.** Each output carries its own block
 under the controls that shape it: a name that holds real text from the start, a
@@ -4143,11 +4159,55 @@ unknown. Nothing marks it missing either: plenty of material carries no date any
 can defend. A dated proof is what the Timeline shows under **Taken**, beside the dates
 the files themselves carry.
 
-**A date states itself for the footage, not only for the proof.** Saving says so — *Dated
-the material: clip.mp4* — and the video's own Time tab then shows it above the dates read
+**A date states itself for the footage, not only for the proof.** Saving says so, *Dated
+the material: clip.mp4*, and the video's own Time tab then shows it above the dates read
 out of the file, which it never overwrites. The frame is not dated, the video it was cut
-from is; a satellite capture never is. Changing the date restates it, clearing it takes it
-back, and a statement someone has since added reasoning to is left alone.
+from is; a satellite capture never is. **A proof about a video dates that video alone**,
+its ★: the one its scene states, else the one its first frame was cut from. Another video
+among the panels only confirms the place and never takes the date, nor does a photo
+beside it; a proof resting on no video dates every source. When the proof states moments
+the statement holds for them (`span` on the Claim), and the Time tab reads
+`2:10–2:38 · 24 Oct 2025`, `0:30–0:45 +2 · …` past two, every moment on hover; about the
+whole video it is the date alone. Changing the moments or the ★
+(`PUT /cases/{id}/proofs/{name}/scene` with `{moments, video?, draft?}`) moves the span
+and the file the statement is about at once, and leaves its date, its words and whatever
+the analyst added. Changing the date restates it, clearing it takes it back, and a
+statement someone has since added reasoning to is left alone. Statements written before
+this are corrected on the proof's next save.
+
+**A proof built on a video says so in a Scene field**, under the date. It is there only
+when a panel is a frame Inspect cut from a video, or when the proof states a time of its
+own; any other proof reads, saves and exports exactly as before. One boxed line per
+video, like a source: `★ clip.mp4 · 2:10–2:38` for the video the proof is about, which
+its date states, and `☆ other.mp4 · confirmation` for any other video among the panels,
+made the ★ in one press, its time then starting as the whole video. A proof that states
+no time reads *Whole video*: the instants its frames were cut at pin it, they are not
+its time.
+
+**The time opens Inspect's own editor**: Whole video, Instant or Passage, a line per
+moment, typed or nudged a frame with ↑/↓, and **Here** takes the frame on the field's
+player. Apply writes a saved proof's time at once, through its own route, with Undo in
+the toast; a proof never saved holds it and writes it right after its first save.
+
+**The play act opens a small player under the fields**: muted, the clip in a 16:9
+window, and a thin bar where the moments are bands and pins in the colour the scene has
+on Inspect's bar, and the proof's panels are dots. It runs through the moments, each
+passage played and each instant held a beat, or the whole video from the first panel's
+frame; the loop button starts and stops that, and it never starts on its own for a
+system set to reduce motion. ←/→ step a frame, Shift a second, Space plays, and none of
+them reach the canvas behind. **Add this frame** files the frame on screen as Inspect
+files a capture and adds it as a panel the way the picker does, so its source traces as
+usual. Each panel cut from a video carries a ▶ in its corner on the canvas, drawn with
+the handles and never exported, which opens the player on that panel's frame.
+
+**Nothing moves the time behind the analyst's back.** When a frame of the ★ video falls
+outside every moment stated, the field says *1 panel is outside these moments* and
+offers **Add its moment**, an instant at that frame. **Scene time on the picture**
+(Advanced, off by default, offered only for a proof built on a video) prints
+`clip.mp4 · 2:10–2:38` in a dark tag at the bottom left of each ★ panel, the moment that
+panel's frame shows in. It is drawn on the page, so the exported picture is the canvas.
+A proof about the whole video has no time to print, and the house style leaves it to
+each proof.
 
 **The toolbar is two columns.** In one it stood taller than a laptop window, and the
 colour, width and layout controls sat under the fold behind a scrollbar nobody looks
