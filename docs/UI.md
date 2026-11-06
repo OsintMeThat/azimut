@@ -5736,7 +5736,10 @@ edition, file, folder, pages, the PDF's SHA-256 and the printed text's) is kept 
 note, fifty at most, and travels in a bundle.
 
 **How it prints.** **Look** sets the note's style, kept beside the note (the note
-record's `look`, `notes.case_look` for the case notes) and never in its Markdown:
+record's `look`, `notes.case_look` for the case notes) and never in its Markdown. Its
+panel shows one tab at a time, *Style* (the style, then contents, numbered headings and
+sources as three switches), *Text*, *Page* (paper, accent, marking), *Cover* and *Header
+& footer*, a dot on each tab holding something set, and reopens on the last tab used:
 
 - **Plain**, with nothing else set, is the document the Notebook always printed.
 - **Report** has a running header, *Page X / Y*, numbered sections in the accent,
@@ -5777,7 +5780,7 @@ above the case's pictures. A paragraph in a `::: center`, `::: right` or `::: le
 block keeps its bold, italics, code, links, chips and `[n]`, and a picture there with
 no `align=` takes its block's place.
 
-**Header and footer**, the Look's last folded part, are the analyst's own, three slots
+**Header and footer**, the Look's last tab, are the analyst's own, three slots
 each (left, centre, right) of one line, 120 characters at most; an empty slot shows what
 the style prints there, and each has a logo button (*Your logo*, *Azimut logo*). A slot is words, where `{title}`, `{date}`,
 `{name}`, `{role}`, `{organisation}`, `{page}` and `{pages}` are filled on each page
