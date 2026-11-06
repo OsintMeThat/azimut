@@ -16,7 +16,9 @@ note plain. The face, the text size and the sources list came later (`font`,
 `size`, `sources`) and are written only once they are set, so a look that never
 used them reads the same to a reader that predates them. So did the cover's own
 page and where it stands on it (`cover.mode`, `cover.top`): a reader that drops
-them prints the style's cover, and the lines meant for the own page as text.
+them prints the style's cover, and the lines meant for the own page as text. And
+the analyst's own header and footer (`header`, `footer`), written only once a slot
+holds something: a reader that drops them prints the style's own.
 """
 
 from __future__ import annotations
@@ -58,6 +60,10 @@ Sources = Literal["", "on", "off"]
 #: Keys a look writes only once they leave their default, so a look that never used
 #: them is stored, served and bundled exactly as an older Azimut wrote it.
 LATE_KEYS = ("font", "size", "sources")
+#: The page bands under the same rule: one with nothing in it is not written.
+BAND_KEYS = ("header", "footer")
+#: The longest a header or footer slot is, in characters: one line of a page's edge.
+BAND_SLOT_MAX = 120
 #: The cover's keys under the same rule: a cover of the style's own, centred, writes neither.
 COVER_LATE_KEYS = ("mode", "top")
 #: What the cover is: "" the style's (title, subtitle, picture, day), or "own", the
@@ -125,6 +131,29 @@ class NoteCover(BaseModel):
         return value
 
 
+class PageBand(BaseModel):
+    """A header or footer of the analyst's own: three slots, left, centre and right,
+    on every page but the cover. Each is one line of text, its placeholders filled
+    at print time (`{title}`, `{date}`, `{name}`, `{role}`, `{organisation}`,
+    `{page}`, `{pages}`), or one of the pictures `azimut:my-logo` and `azimut:logo`.
+    A band with nothing in it leaves the style's own."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    left: str = Field(default="", max_length=BAND_SLOT_MAX)
+    center: str = Field(default="", max_length=BAND_SLOT_MAX)
+    right: str = Field(default="", max_length=BAND_SLOT_MAX)
+
+    @field_validator("left", "center", "right")
+    @classmethod
+    def one_line(cls, value: str) -> str:
+        return " ".join(value.split())
+
+    @property
+    def empty(self) -> bool:
+        return not (self.left or self.center or self.right)
+
+
 class NoteLook(BaseModel):
     """Every key optional, every missing one at its default; unknown keys refused."""
 
@@ -141,6 +170,8 @@ class NoteLook(BaseModel):
     font: Font = ""
     size: Size = ""
     sources: Sources = ""
+    header: PageBand = Field(default_factory=PageBand)
+    footer: PageBand = Field(default_factory=PageBand)
 
     @model_serializer(mode="wrap")
     def _late_keys_only_when_set(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
@@ -149,6 +180,10 @@ class NoteLook(BaseModel):
         data = dict(handler(self))
         for key in LATE_KEYS:
             if data.get(key) == "":
+                data.pop(key, None)
+        for key in BAND_KEYS:
+            band = data.get(key)
+            if isinstance(band, dict) and not any(band.values()):
                 data.pop(key, None)
         return data
 
@@ -217,17 +252,21 @@ def parse(value: Any) -> NoteLook | None:
     cover = known.get("cover")
     if isinstance(cover, dict):
         known["cover"] = {key: cover[key] for key in NoteCover.model_fields if key in cover}
+    for key in BAND_KEYS:
+        band = known.get(key)
+        if isinstance(band, dict):
+            known[key] = {slot: band[slot] for slot in PageBand.model_fields if slot in band}
     # One unreadable value at a time goes back to its default; a field nested in
     # the cover goes alone, and the rest of the cover stays.
-    for _ in range(len(NoteLook.model_fields) + len(NoteCover.model_fields) + 1):
+    for _ in range(len(NoteLook.model_fields) + len(NoteCover.model_fields) + 2 * len(PageBand.model_fields) + 1):
         try:
             return NoteLook.model_validate(known)
         except ValidationError as exc:
             dropped = False
             for error in exc.errors():
                 where = error.get("loc") or ()
-                inner = known.get("cover")
-                if len(where) >= 2 and where[0] == "cover" and isinstance(inner, dict) and where[1] in inner:
+                inner = known.get(str(where[0])) if where else None
+                if len(where) >= 2 and where[0] in ("cover", *BAND_KEYS) and isinstance(inner, dict) and where[1] in inner:
                     inner.pop(where[1])
                     dropped = True
                 elif where and where[0] in known:

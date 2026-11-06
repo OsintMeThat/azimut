@@ -28,9 +28,11 @@ between them all move together, and the page furniture stays as it is.
 
 from __future__ import annotations
 
+import re
 import types
 from dataclasses import dataclass, field, replace
 from datetime import date
+from pathlib import Path
 from typing import Callable, Sequence
 
 from fpdf import FPDF
@@ -38,7 +40,7 @@ from fpdf.enums import Align, XPos, YPos
 from fpdf.outline import OutlineSection
 
 from . import pdffonts
-from .notelook import TLP_LABELS, NoteLook
+from .notelook import TLP_LABELS, NoteLook, PageBand
 
 RGB = tuple[int, int, int]
 
@@ -358,6 +360,11 @@ class NotePage(FPDF):
         self.band_page = 0
         self.band_bottom = 0.0
         self.boxes: list[Box] = []
+        #: What a header or footer of the analyst's own fills in (`{title}`, `{date}`,
+        #: who signs), and the file and pixel size of a picture one shows, or None
+        #: while it is not set (`PageBand`).
+        self.band_words: dict[str, str] = {}
+        self.band_picture: Callable[[str], tuple[Path, tuple[int, int]] | None] = lambda name: None
         self._widths: dict[tuple[object, ...], float] = {}
 
     #: The most text widths one document keeps (`get_string_width`).
@@ -447,6 +454,8 @@ class NotePage(FPDF):
             return
         if self.page == self.band_page:
             self._band()
+        elif not self.look.header.empty:
+            self._header_band()
         elif not self.theme.plain:
             self._running_header()
         elif self.look.tlp:
@@ -468,6 +477,9 @@ class NotePage(FPDF):
                 self.tlp_mark(self.w - self.theme.margin_side, self.h - COVER_TLP_EDGE - 6.2)
             return
         theme = self.theme
+        if not self.look.footer.empty:
+            self._footer_band()
+            return
         if theme.plain:
             self.set_y(-theme.margin_bottom + 6)
             self.set_draw_color(*theme.rule)
@@ -512,6 +524,83 @@ class NotePage(FPDF):
             self.set_xy(right - width, top)
             self.cell(width, 6.2, text, align=Align.C)
         self.set_xy(x, y)
+
+    def _header_band(self) -> None:
+        """The analyst's own header, where the style's would be, its hairline kept."""
+        theme = self.theme
+        left, right = theme.margin_side, self.w - theme.margin_side
+        top, height = (6.0, 6.2) if theme.plain else (theme.margin_top - 9.0, 5.0)
+        self._own_band(self.look.header, top, height)
+        if not theme.plain:
+            with self.local_context():
+                self.set_draw_color(*theme.rule)
+                self.set_line_width(0.2)
+                self.line(left, top + 6.6, right, top + 6.6)
+        if self.tlp_width():
+            self.tlp_mark(right, top if theme.plain else top - 0.8)
+
+    def _footer_band(self) -> None:
+        """The analyst's own footer, where the style's would be, over its hairline."""
+        theme = self.theme
+        left, right = theme.margin_side, self.w - theme.margin_side
+        rule = self.h - theme.margin_bottom + (6.0 if theme.plain else 8.0)
+        top, height = (rule + 1.5, 4.0) if theme.plain else (rule + 1.8, 4.5)
+        with self.local_context():
+            self.set_draw_color(*theme.rule)
+            self.set_line_width(0.15 if theme.plain else 0.2)
+            self.line(left, rule, right, rule)
+        self._own_band(self.look.footer, top, height)
+        if self.tlp_width():
+            self.tlp_mark(right, top - 1.0 if theme.plain else rule + 1.4)
+
+    def _own_band(self, band: PageBand, top: float, height: float) -> None:
+        """Three slots across the page at ``top``: thirds, or halves with no centre.
+        The right one gives way to the TLP label."""
+        theme = self.theme
+        left = theme.margin_side
+        mark = self.tlp_width()
+        end = self.w - theme.margin_side - (mark + 3 if mark else 0)
+        if band.center:
+            third = (end - left) / 3
+            boxes = {Align.L: (left, third), Align.C: (left + third, third), Align.R: (left + 2 * third, third)}
+        else:
+            half = (end - left) / 2
+            boxes = {Align.L: (left, half), Align.R: (left + half, half)}
+        with self.local_context():
+            self.set_font(theme.heading_family, "", BAND_SIZE)
+            self.set_text_color(*theme.muted)
+            for text, align in ((band.left, Align.L), (band.center, Align.C), (band.right, Align.R)):
+                if not text or align not in boxes:
+                    continue
+                x, width = boxes[align]
+                picture = BAND_PICTURE.match(text)
+                if picture:
+                    self._band_picture(picture.group(1), align, x, width, top, height)
+                    continue
+                words = self.band_text(text)
+                if words:
+                    self.set_xy(x, top)
+                    self.cell(width, height, fit_line(self, words, width - 2 * self.c_margin), align=align)
+
+    def band_text(self, text: str) -> str:
+        """A slot's words with its placeholders filled, the page's number included. An
+        empty one goes, with the separator it leaves at either end."""
+        values = {**self.band_words, "page": str(self.page_no()), "pages": "{nb}"}
+        filled = BAND_WORD.sub(lambda match: values.get(match.group(1), ""), text)
+        return " ".join(filled.split()).strip(" ,;:·/–—-|")
+
+    def _band_picture(self, name: str, align: Align, x: float, width: float, top: float, height: float) -> None:
+        found = self.band_picture(name)
+        if found is None:
+            return
+        path, (wide, high) = found
+        if wide <= 0 or high <= 0:
+            return
+        tall = min(BAND_PICTURE_HEIGHT, height + 1.0)
+        drawn = min(width, tall * wide / high)
+        tall = drawn * high / wide
+        at = x if align is Align.L else x + width - drawn if align is Align.R else x + (width - drawn) / 2
+        self.place_picture(path, x=at, y=top + (height - tall) / 2, w=drawn, h=tall)
 
     def _running_header(self) -> None:
         theme = self.theme
@@ -779,6 +868,14 @@ class NotePage(FPDF):
         while self.page < last_page:
             self.add_page()
 
+
+#: A header or footer slot that is one of the pictures a note can show.
+BAND_PICTURE = re.compile(r"^azimut:(logo|my-logo)$")
+#: What a header or footer slot fills in when it prints.
+BAND_WORD = re.compile(r"\{(title|date|name|role|organisation|page|pages)\}")
+#: A slot's text size, and the tallest a picture in one is, in millimetres.
+BAND_SIZE = 7.5
+BAND_PICTURE_HEIGHT = 5.0
 
 KICKERS = {"plain": "AZIMUT NOTES", "report": "REPORT", "brief": "BRIEF", "journal": "LOG"}
 

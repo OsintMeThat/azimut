@@ -580,3 +580,159 @@ def test_a_picture_in_an_aligned_block_stands_as_its_block_unless_it_says(tmp_pa
         assert abs(x + width - (1 - 16 / 210)) < 0.01  # the plain page's right margin
     assert says.box[0] < 0.1
     assert follows.align == "left"  # as written: nothing was written
+
+
+# -- the analyst's own header and footer ---------------------------------------------
+
+BODY = "# Findings\n\nThe mast matches.\n\n<!-- pagebreak -->\n\nMore.\n"
+
+
+def test_a_band_with_nothing_in_it_is_not_written_and_a_slot_is_one_line():
+    assert notelook.BAND_KEYS == ("header", "footer")
+    plain = look(style="report").model_dump(mode="json")
+    assert "header" not in plain and "footer" not in plain
+    banded = look(header={"left": "  {title}\n  draft ", "right": ""}).model_dump(mode="json")
+    assert banded["header"] == {"left": "{title} draft", "center": "", "right": ""}
+    assert "footer" not in banded
+    with pytest.raises(ValueError):
+        look(footer={"left": "x" * (notelook.BAND_SLOT_MAX + 1)})
+    with pytest.raises(ValueError):
+        look(footer={"middle": "x"})
+    assert look(header={"left": ""}).is_default
+    assert TemplateLook.model_validate({"header": {"left": "azimut:logo"}}).header.left == "azimut:logo"
+
+
+def test_a_look_from_a_later_azimut_keeps_its_bands_but_a_slot_it_cannot_read():
+    parsed = notelook.parse({"style": "report", "footer": {"left": "Kept", "right": "y" * 500, "corner": "?"}})
+    assert parsed is not None and parsed.style == "report"
+    assert parsed.footer.left == "Kept" and parsed.footer.right == ""
+
+
+@pytest.mark.parametrize("style", ["report", "plain", "brief", "journal"])
+def test_the_bands_print_on_every_page_but_the_cover_with_their_words_filled(style):
+    the_look = own(style=style, header={"left": "{organisation}", "center": "{title}", "right": "Internal"},
+                   footer={"left": "{name}, {role}", "right": "Page {page} of {pages}"})
+    out = render(COVER + BODY, the_look=the_look, identity=who(name="Ana Lyst", role="Analyst", organisation="Open Desk"))
+    cover, *body = pages(out.pdf)
+    assert "Open Desk" not in cover and "Internal" not in cover
+    for number, words in enumerate(body, start=2):
+        flat = squash(words)
+        # a brief's first page opens on its band, which a header leaves alone
+        header = ("OpenDesk", "Internal") if style != "brief" or number > 2 else ()
+        for said in (*header, "Portstrike", "AnaLyst,Analyst", f"Page{number}of{len(body) + 1}"):
+            assert said in flat, (style, number, said)
+    # the style's own bands give way
+    assert "REPORT" not in squash("".join(body))
+    assert not [warning for warning in out.warnings if "Publishing" in warning]
+
+
+def test_an_empty_band_keeps_the_style_s_own():
+    out = render(BODY, the_look=look(style="report", header={"left": ""}))
+    assert "REPORT" in pages(out.pdf)[0]
+
+
+def test_an_empty_word_in_a_slot_goes_with_its_separator():
+    the_look = look(style="report", footer={"left": "{role} · {organisation}", "right": "{name}"})
+    out = render(BODY, the_look=the_look, identity=who(organisation="Open Desk"))
+    first = pages(out.pdf)[0]
+    assert "Open Desk" in first and "· Open" not in first
+    # a name a slot shows and Settings does not hold is said once, before export
+    assert [warning for warning in out.warnings if warning == notefill.NO_NAME] == [notefill.NO_NAME]
+
+
+def test_a_slot_can_be_a_logo_and_an_unset_one_is_said_once(tmp_path):
+    the_look = look(style="report", header={"left": "azimut:my-logo", "right": "azimut:logo"})
+    out = render(BODY, the_look=the_look, identity=who(tmp_path, logo=True))
+    # the analyst's logo is a picture on every page, the Azimut mark drawn in lines (SVG)
+    assert all(len(page.images) == 1 for page in PdfReader(BytesIO(out.pdf)).pages)
+    alone = render(BODY, the_look=look(style="report", header={"left": "azimut:my-logo"}), identity=who(tmp_path, logo=True))
+    assert all(drawn(page) > drawn(other) + 300 for page, other in zip(
+        PdfReader(BytesIO(out.pdf)).pages, PdfReader(BytesIO(alone.pdf)).pages, strict=True))
+    unset = render(BODY + "\n![Logo](azimut:my-logo)\n", the_look=the_look, identity=who())
+    assert unset.warnings.count(notefill.NOT_SET[notefill.MY_LOGO]) == 1
+    assert all(not page.images for page in PdfReader(BytesIO(unset.pdf)).pages)
+
+
+def drawn(page) -> int:
+    """How much a page draws, in bytes of its content."""
+    return len(page.get_contents().get_data())
+
+
+def test_a_right_slot_gives_way_to_the_tlp_label():
+    the_look = look(style="report", tlp="red", header={"right": "Internal draft"})
+    first = squash(pages(render(BODY, the_look=the_look).pdf)[0])
+    assert "Internaldraft" in first and "TLP:RED" in first
+
+
+# -- the corners of the own cover -----------------------------------------------------
+
+CORNERED = """::: top-right
+![Azimut](azimut:logo){width=40%}
+:::
+
+::: bottom-left
+![Mark](azimut:logo){width=40%}
+:::
+
+# {title}
+
+::: bottom-right
+Prepared by **{name}**
+:::
+<!-- cover -->
+## Summary
+
+The body starts here.
+"""
+
+
+def test_a_corner_block_is_pinned_to_its_corner_of_the_cover():
+    out = render(CORNERED, the_look=own(style="report"), identity=who(name="Ana Lyst"))
+    top, bottom = sorted(out.pictures, key=lambda picture: picture.box[1])
+    assert top.page == bottom.page == 0
+    left, upper, width, height = top.box
+    assert left + width > 0.85 and upper < 0.15  # top right
+    left, upper, width, height = bottom.box
+    assert left < 0.15 and upper + height > 0.85  # bottom left
+    cover = pages(out.pdf)[0]
+    assert "Prepared by" in cover and "Port strike" in cover
+    assert not out.warnings
+
+
+def test_the_title_is_centred_in_the_room_the_corners_leave():
+    centred = render(COVER, the_look=own(style="report"))
+    cornered = render(CORNERED, the_look=own(style="report"), identity=who(name="Ana Lyst"))
+    # the same page, laid out apart: both covers one page, the body on the next
+    assert len(pages(centred.pdf)) == len(pages(cornered.pdf)) == 2
+    assert pages(cornered.pdf)[1].strip().startswith("Summary") or "Summary" in pages(cornered.pdf)[1]
+
+
+def test_a_cover_set_at_the_top_starts_under_its_top_corners():
+    out = render(CORNERED, the_look=own(style="report", cover={"top": True}), identity=who(name="Ana Lyst"))
+    words = PdfReader(BytesIO(out.pdf)).pages[0]
+    found: list[float] = []
+    words.extract_text(visitor_text=lambda text, cm, tm, *_: found.append(tm[5]) if "Port" in text else None)
+    logo = min(out.pictures, key=lambda picture: picture.box[1])
+    height = float(words.mediabox.height)
+    title_top = 1 - found[0] / height
+    assert title_top > logo.box[1] + logo.box[3]
+
+
+def test_a_corner_block_elsewhere_prints_aligned_to_its_side():
+    text = "Intro.\n\n::: top-right\n![Azimut](azimut:logo){width=30%}\n:::\n"
+    out = render(text, the_look=look(style="report"))
+    [picture] = out.pictures
+    left, _, width, _ = picture.box
+    assert left + width > 0.8 and left > 0.4
+
+
+def test_a_note_s_bands_round_trip_through_its_look(client):
+    from test_notes_report import make_case, make_note
+
+    cid = make_case(client)
+    note = make_note(client, cid)
+    sent = {"style": "report", "footer": {"left": "{organisation}", "right": "Page {page} / {pages}"}}
+    assert client.put(f"/api/cases/{cid}/notes/{note['id']}/look", json=sent).status_code == 200
+    kept = client.get(f"/api/cases/{cid}/notes/{note['id']}/look").json()["look"]
+    assert kept["footer"] == {"left": "{organisation}", "center": "", "right": "Page {page} / {pages}"}
+    assert "header" not in kept

@@ -161,7 +161,9 @@ COMMENT = re.compile(r"\A(?:\s*<!--.*?-->)+\s*\Z", re.S)
 
 MERMAID_INFO = re.compile(r"^\s*mermaid\b")
 IMAGE_ATTRS = re.compile(r"!\[([^\]]*)\]\((\S+?)(?:\s+[\"']([^\"']*)[\"'])?\)\s*\{([^}\n]+)\}")
-ALIGNMENT_BLOCK = re.compile(r"^:::[ \t]*(left|center|right)[ \t]*\n(.*?)^:::[ \t]*$", re.S | re.M)
+ALIGNMENT_BLOCK = re.compile(
+    r"^:::[ \t]*(left|center|right|top-left|top-right|bottom-left|bottom-right)[ \t]*\n(.*?)^:::[ \t]*$", re.S | re.M
+)
 ATTR_PARAM = "__azimut_attrs"
 ATTR_VALUES = re.compile(r"\b(width|align)\s*=\s*([\w.%+-]+)")
 #: `caption="Smoke over the port"` in a picture's braces. Taken out before the
@@ -187,6 +189,11 @@ LOG_STAMP = re.compile(
 )
 
 ALIGNMENTS = {"left": Align.L, "center": Align.C, "right": Align.R}
+#: The corners a block of the note's own cover is pinned to, outside the flow the
+#: page centres; anywhere else such a block prints aligned to its side.
+CORNERS = {"top-left": Align.L, "top-right": Align.R, "bottom-left": Align.L, "bottom-right": Align.R}
+#: How much of the page's width a corner takes at most.
+CORNER_SHARE = 0.5
 #: An aligned paragraph's words, each with the spaces after it, and its hard breaks.
 ALIGNED_WORD = re.compile(r"\n|[^\S\n]*\S+[^\S\n]*|[^\S\n]+")
 
@@ -529,7 +536,12 @@ def render(
     document = NotePage(title=title, theme=theme, look=look, day=day)
     if created is not None:
         document.set_creation_date(created)
-    words = "\n".join([title, look.cover.subtitle, *(piece.text for piece in shown), *cited.words()])
+    document.band_words = {**values, "title": title}
+    document.band_picture = _band_picture(identity)
+    bands = [slot for band in (look.header, look.footer) for slot in (band.left, band.center, band.right) if slot]
+    _warn_bands(cited, bands, identity, named="name" in empty)
+    words = "\n".join([title, look.cover.subtitle, *(piece.text for piece in shown), *cited.words(),
+                       *(document.band_text(slot) for slot in bands)])
     faces = pdffonts.install(document, words, body=theme.body_family, font=look.font)
     builder = _Builder(document, case, diagrams or {}, look=look, faces=faces, cited=cited, light=light)
     try:
@@ -551,6 +563,30 @@ def render(
         internal=passages[0],
         text_sha256=hashlib.sha256(printed_source(shown).encode("utf-8")).hexdigest(),
     )
+
+
+def _band_picture(identity: notefill.Identity) -> Callable[[str], tuple[Path, tuple[int, int]] | None]:
+    """How a header or footer slot finds the picture it names: the Azimut mark, or
+    the analyst's logo from Settings, with its size; None while it is not set."""
+
+    def find(name: str) -> tuple[Path, tuple[int, int]] | None:
+        path = identity.picture(name)
+        if path is None:
+            return None
+        natural = notefill.AZIMUT_LOGO_SIZE if name == notefill.LOGO else _measure(path)
+        return (path, natural) if natural is not None else None
+
+    return find
+
+
+def _warn_bands(cited: "_Cited", slots: list[str], identity: notefill.Identity, *, named: bool) -> None:
+    """What the check says of a header or footer: a logo or a name it shows that
+    Settings does not hold, once however many places show it. ``named`` is whether
+    the text said the name is missing already."""
+    if f"azimut:{notefill.MY_LOGO}" in slots and identity.picture(notefill.MY_LOGO) is None:
+        cited.once(f"picture:{notefill.MY_LOGO}", notefill.NOT_SET[notefill.MY_LOGO], None, SETTING)
+    if not named and not identity.name and any("{name}" in slot for slot in slots):
+        cited.warn(notefill.NO_NAME, None, SETTING)
 
 
 def _cover_piece(
@@ -862,8 +898,9 @@ def _alignment_blocks(text: str) -> list["_Block"]:
     position = 0
     for match in ALIGNMENT_BLOCK.finditer(text):
         blocks.append(_Block(Align.L, _parse(text[position : match.start()]), text.count("\n", 0, position)))
-        blocks.append(_Block(ALIGNMENTS[match.group(1)], _parse(match.group(2)),
-                             text.count("\n", 0, match.start(2))))
+        name = match.group(1)
+        blocks.append(_Block(CORNERS.get(name) or ALIGNMENTS[name], _parse(match.group(2)),
+                             text.count("\n", 0, match.start(2)), corner=name if name in CORNERS else ""))
         position = match.end()
     blocks.append(_Block(Align.L, _parse(text[position:]), text.count("\n", 0, position)))
     return blocks
@@ -1181,6 +1218,8 @@ class _Block:
     tokens: list[Token]
     line: int
     start: int = 0
+    #: The corner of the own cover it is pinned to (`CORNERS`), or "".
+    corner: str = ""
 
 
 @dataclass
@@ -1402,6 +1441,10 @@ class _Cited:
         """Say one more thing the check before export should, from outside the pass."""
         self._warn(message, line, kind)
 
+    def once(self, key: str, message: str, line: int | None, kind: str) -> None:
+        """`warn`, unless something said it under ``key`` already."""
+        self._once(key, message, line, kind)
+
     def _once(self, key: str, message: str, line: int | None, kind: str) -> None:
         if key not in self._warned:
             self._warned.add(key)
@@ -1574,25 +1617,38 @@ class _Builder:
         header, footer or page number, the TLP label still on it, and the whole
         centred down the page unless the look starts it at the top.
 
-        Drawn from the top, then moved down as one: the page's drawing from where
-        the cover began is shifted in the PDF itself, and its links and pictures with
-        it, so nothing is laid out twice. A cover too long for one page runs on, as
-        bare, and is not moved.
+        A `::: top-right` block (or any corner of `CORNERS`) is pinned to that corner,
+        within half the page's width, and the rest is centred in the room the corners
+        leave between them. Drawn from the top, then moved down as one: the page's
+        drawing is shifted in the PDF itself, with its links and pictures, so nothing
+        is laid out twice. A cover too long for one page runs on, as bare, and is not
+        moved.
         """
         pdf, theme = self.pdf, self.theme
         self._line = piece.line
         pdf.covering = True
         pdf.add_page()
         page = pdf.page
-        contents = pdf.pages[page].contents
-        assert isinstance(contents, bytearray)
-        start = len(contents)
-        links = len(pdf.pages[page].annots or [])
-        pictures = len(self.pictures)
+        flow = [block for block in parsed if not block.corner]
+        corners = [block for block in parsed if block.corner]
         self._on_cover = True
         self._shift, self._fixed = 0, False
         try:
-            for block in parsed:
+            # the corners first, each where it stands, so the flow knows the room left
+            reach = {"top": 0.0, "bottom": 0.0}
+            for block in corners:
+                height = self._corner(piece, block, page)
+                side = block.corner.split("-")[0]
+                reach[side] = max(reach[side], height)
+            region_top = pdf.t_margin + (reach["top"] + theme.gap if reach["top"] else 0.0)
+            region_bottom = pdf.h - pdf.b_margin - (reach["bottom"] + theme.gap if reach["bottom"] else 0.0)
+            pdf.set_xy(pdf.l_margin, region_top)
+            contents = pdf.pages[page].contents
+            assert isinstance(contents, bytearray)
+            start = len(contents)
+            links = len(pdf.pages[page].annots or [])
+            pictures = len(self.pictures)
+            for block in flow:
                 self._block_line = piece.line + block.line
                 self._walk(block.tokens, block.start, block.align, stop=None)
             self._end_entry()
@@ -1607,10 +1663,45 @@ class _Builder:
             return
         if self.look.cover.top:
             return
-        used = max(0.0, pdf.get_y() - pdf.t_margin - theme.gap)
-        drop = (pdf.h - pdf.b_margin - pdf.t_margin - used) / 2
+        used = max(0.0, pdf.get_y() - region_top - theme.gap)
+        self._move_down(page, start, links, pictures, (region_bottom - region_top - used) / 2)
+
+    def _corner(self, piece: Piece, block: _Block, page: int) -> float:
+        """Draw corner block ``block`` of the own cover in its corner of page ``page``,
+        and say how tall it is. A bottom corner is drawn at the top, then moved down."""
+        pdf, theme = self.pdf, self.theme
+        frame = pdf.w - 2 * theme.margin_side
+        width = frame * CORNER_SHARE
+        right = block.corner.endswith("right")
+        inner = (frame - width, 0.0) if right else (0.0, frame - width)
+        contents = pdf.pages[page].contents
+        assert isinstance(contents, bytearray)
+        start = len(contents)
+        links = len(pdf.pages[page].annots or [])
+        pictures = len(self.pictures)
+        top = pdf.t_margin
+        pdf.set_xy(pdf.l_margin, top)
+        self._block_line = piece.line + block.line
+        with self._inset(*inner):
+            pdf.set_x(pdf.l_margin)
+            self._walk(block.tokens, block.start, block.align, stop=None)
+            self._end_entry()
+        if pdf.page != page:
+            self._warn("A corner of your own cover page runs over its page.", piece.line + block.line, OTHER)
+            return 0.0
+        height = max(0.0, pdf.get_y() - top - theme.gap)
+        if block.corner.startswith("bottom"):
+            self._move_down(page, start, links, pictures, pdf.h - pdf.b_margin - top - height)
+        return height
+
+    def _move_down(self, page: int, start: int, links: int, pictures: int, drop: float) -> None:
+        """Move what page ``page`` drew since content offset ``start`` down by ``drop``
+        millimetres: its drawing, and the links and pictures it placed."""
+        pdf = self.pdf
         if drop < 0.1:
             return
+        contents = pdf.pages[page].contents
+        assert isinstance(contents, bytearray)
         offset = drop * pdf.k
         contents[start:start] = f"1 0 0 1 0 {-offset:.2f} cm\n".encode("ascii")
         contents.extend(f"1 0 0 1 0 {offset:.2f} cm\n".encode("ascii"))

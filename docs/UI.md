@@ -5754,7 +5754,10 @@ from the case's media, a day) or **Your own page**: what the note holds above a 
 `<!-- cover -->` (drawn in the editor as *End of the cover page*) prints alone on page 1,
 with no running header, footer or page number, the TLP label kept, centred down the
 page unless *Centred down the page* is off, its headings set larger and kept out of the
-contents; the note then starts on page 2. Choosing it writes a skeleton at the top when
+contents; the note then starts on page 2. A `::: top-left`, `::: top-right`,
+`::: bottom-left` or `::: bottom-right` block there is pinned to that corner of the page,
+within half its width, and the rest is centred in the room the corners leave (or starts
+under the top ones); anywhere else such a block prints aligned to its side. Choosing it writes a skeleton at the top when
 the note has no such line, as **/** › *Cover page* does. With nothing above the line the
 check says so, and a cover longer than a page warns. **/** › *Signature* writes a block
 of the analyst's signature picture, `{name}`, `{role}, {organisation}` and `{date}`, and
@@ -5770,6 +5773,16 @@ set prints nothing while the check says *No logo set in Settings › Publishing.
 above the case's pictures. A paragraph in a `::: center`, `::: right` or `::: left`
 block keeps its bold, italics, code, links, chips and `[n]`, and a picture there with
 no `align=` takes its block's place.
+
+**Header and footer** in the Look are the analyst's own, three slots each (left, centre,
+right) of one line, 120 characters at most. A slot is words, where `{title}`, `{date}`,
+`{name}`, `{role}`, `{organisation}`, `{page}` and `{pages}` are filled on each page
+(an empty one going with its separator), or a logo (`azimut:my-logo`, `azimut:logo`)
+about 5 mm tall. A band with anything in it replaces the style's own on every page but
+the cover and the brief's band, over or under its hairline; an empty band keeps the
+style's. The TLP label keeps its place, the right slot giving way to it. A logo or a
+name a slot shows that Settings does not hold is said once in the check. A band with
+nothing in it is not stored, so an older Azimut prints the style's own.
 Its **Text** part sets the typeface, each card drawn in its face: the style's own
 (serif for Plain, Report and Journal, sans for Brief), Noto Serif, Noto Sans,
 Literata (a book face for long write-ups) or IBM Plex Sans (a clean face for briefs),
