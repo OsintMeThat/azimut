@@ -22,9 +22,9 @@ It supports seven flows:
   showing.
 - On another page, it can save the URL and title as a bookmark without
   downloading the page.
-- Beside any page, a panel holds a note of the case. A right-click cites the
-  page or the post, quotes the words selected on it with a link back to them, or
-  puts a capture of an area of a map into the note.
+- Beside any page, a panel holds a note of the case. Its Add (+), a right-click
+  or Alt+Shift+S cites the page or the post, quotes the words selected on it with
+  a link back to them, or puts a capture of an area of a map into the note.
 - On Azimut's Google basemap, the in-app Capture button requests the current
   tab image without a screen-share prompt.
 - When Geo Report publishes, it can open X or Bluesky with the thread already
@@ -307,27 +307,28 @@ While a note is open, three items join the right-click menu on every web page:
 | Quote the selection | The words as they are, linked to the passage itself, then the page's chip. The link opens the page scrolled to the words and highlights them (Chrome, and Firefox 131 or later). |
 | Capture into the note | The popup's area selection, drawn over the map: the rectangle you drag is filed into the case the way the popup files one, then put in as a picture. Esc, on the page or in the panel, puts nothing. |
 
-The same three are buttons at the top of the panel. The note's toast says what
-went in, and its Undo takes it out again.
+The note's **Add (+)** offers the same three first, under *From this tab*: *This
+map* on a map site, *This page* (or *This post*), and *The passage selected* with
+its first words, greyed until words are selected. Under them sit the note's own
+additions, such as *A source…*. **Alt+Shift+S** captures the map in front into the
+note too. The note's toast says what went in, and its Undo takes it out again.
 
 Two limits, and both are rules rather than bugs:
 
-- **The buttons work on a page the extension may read.** A browser opens a tab to
-  an extension only when you point the extension at it: a right-click item, the
-  toolbar button or its shortcut. A press in a side panel is none of those. So the
-  buttons work on a page you have right-clicked or opened the popup on, until it
-  moves to another site, and always on X and Bluesky, which the extension already
-  holds. On any other page the panel says "Right-click the page to cite, quote or
-  capture it", and the right-click items work everywhere. A capture asks more: the
-  extension reads Google, Bing and Yandex for Reverse Search, but may capture
-  their maps only once pointed at the tab. There Capture says "Right-click the map
-  to capture it" before any selection is drawn, and works from the bar once you
-  have right-clicked the tab or opened the popup on it.
+- **Add needs one permission, asked once.** A browser opens a tab to an extension
+  only when you point the extension at it: a right-click item, the toolbar button
+  or its shortcut. A press in a side panel is none of those. So the first time Add
+  needs the page in front, it asks the browser to let Azimut read every site, and
+  the browser shows its own prompt. Where the browser will not ask from inside the
+  note (Firefox), the panel shows *Allow* on a line above the note instead. With
+  it, Add works on every page. Without it, the right-click items and Alt+Shift+S
+  still work everywhere. The extension's options say when it is given and take it
+  back. It is optional, so installing or updating the extension never asks for it.
 - **Captures are for maps**, as everywhere in Azimut. On another page, Capture into
   the note says "Captures are for map sites. Cite this page instead."
 
-The extension reads only the page you pointed it at, and hands its address, title
-and selected words to the local app. The app names the source from the address
+The extension reads a page only when you add from it, right-click it or press the
+shortcut, and hands its address, title and selected words to the local app. The app names the source from the address
 alone and fetches nothing. Citing and quoting need no pairing, since the panel is
 the app's own page; a capture does, like every capture.
 

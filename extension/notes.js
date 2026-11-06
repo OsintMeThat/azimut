@@ -3,21 +3,26 @@
  *
  * It is the app's own note in a frame, not a second editor: the frame is the
  * app's solo note view in panel mode, from the paired address, so there is one
- * copy of the note and the app's rules for it apply as they are. This page adds a
- * bar of three actions over it and nothing else.
+ * copy of the note and the app's rules for it apply as they are. This page adds
+ * a line over it for what is going on, and nothing else.
  *
- * What this page sends the frame is facts (an address, a title, the words
- * selected, the id of a capture just filed), with `window.postMessage` to the
- * app's exact origin. The app writes the Markdown and puts it in, then answers.
+ * The note's Add (+) asks what the tab in front can give (`note-tab-ask`), and
+ * this page answers with the tab's address, title and the words selected there
+ * (`note-tab`). Picking one (`note-tab-run`) has the worker read the page as a
+ * right-click would, and what it found goes back as facts (an address, a title,
+ * the words selected, the id of a capture just filed), with `window.postMessage`
+ * to the app's exact origin. The app writes the Markdown and puts it in, then
+ * answers.
  *
- * The browser decides what the actions may read. A click in a side panel opens
- * no tab to the extension, so the buttons work on a page the extension already
- * holds: one it was right-clicked on or opened on, and the posting sites it
- * holds anyway. On any other page the bar says to right-click it instead, and
- * the right-click items (`background.js`) work everywhere. Whatever the browser
- * still refuses is shown as what to do instead, never in its own words.
+ * A press in a side panel opens no tab to the extension, so Add reads pages
+ * with the one permission the extension asks for at run time: every site, asked
+ * the first time Add needs a page, and taken back in the options. The browser
+ * may refuse the ask from inside the note (Firefox does); the line here then
+ * offers Allow, which is a press on this page. Without it, the right-click items
+ * (`background.js`) and Alt+Shift+S work everywhere. Whatever the browser still
+ * refuses is shown as what to do instead, never in its own words.
  *
- * Capture draws the popup's area selection on the page; the picture comes back
+ * A capture draws the popup's area selection on the page; the picture comes back
  * over the port once the rectangle is dragged, and Escape, here or on the page,
  * puts nothing.
  *
@@ -54,9 +59,9 @@ const state = {
   lastCaseId: "",
   /** The case the frame shows, or was last asked to show. */
   frameCase: "",
-  /** "web" a page the actions can take, "unknown" one the browser keeps from us, "other" the rest. */
-  page: "unknown",
   busy: false,
+  /** What Add asked for while the permission was being asked, run once it is given. */
+  waiting: null,
   /** Whether the frame was ever pointed at the app. */
   framed: false,
   /** The tab an area selection for the note is drawn on, or null. */
@@ -81,34 +86,110 @@ function say(text, kind = "error") {
 
 /** No bar at all when it has nothing to show: the note is the panel. */
 function fold() {
-  $("bar").hidden = $("actions").hidden && $("hint").hidden && $("status").hidden;
+  $("bar").hidden = $("allowing").hidden && $("status").hidden;
 }
 
-function paint() {
-  $("actions").hidden = !(state.ready && state.page === "web");
-  $("hint").hidden = !(state.ready && state.page === "unknown");
-  for (const id of ["cite", "quote", "capture"]) $(id).disabled = state.busy;
-  fold();
+/** The one permission Add needs: every site, read only when the analyst adds from one. */
+const EVERY_PAGE = { origins: ["<all_urls>"] };
+
+async function allowed() {
+  try {
+    return Boolean(await api.permissions.contains(EVERY_PAGE));
+  } catch {
+    return false;
+  }
+}
+
+/** The window's front tab, or null. */
+async function frontTab() {
+  try {
+    const [tab] = await api.tabs.query({ active: true, windowId: state.windowId });
+    return tab ?? null;
+  } catch {
+    // a window closing under us: nothing to read
+    return null;
+  }
+}
+
+/** The words selected on the tab's page, line breaks kept, or "" when none or unreadable. */
+async function selectionOf(tabId) {
+  try {
+    const [hit] = await api.scripting.executeScript({
+      target: { tabId },
+      func: () => String(globalThis.getSelection?.() ?? ""),
+    });
+    return String(hit?.result ?? "");
+  } catch {
+    return "";
+  }
+}
+
+/** What the tab in front can give the note's Add: `{ access, url, title, selection }`. */
+async function tabFacts() {
+  if (!(await allowed())) return { access: "closed" };
+  const tab = await frontTab();
+  const url = tab?.url || "";
+  if (!N.isWeb(url) || N.isApp(url, state.origin)) return { access: "none" };
+  return { access: "open", url, title: tab.title || "", selection: await selectionOf(tab.id) };
+}
+
+/** Answer the note's Add with what the tab in front holds now. */
+async function answerTab() {
+  let facts;
+  try {
+    facts = await tabFacts();
+  } catch {
+    facts = { access: "closed" };
+  }
+  const frame = $("note").contentWindow;
+  if (frame && state.origin) frame.postMessage(N.buildTab(facts), state.origin);
 }
 
 /**
- * What the window's front tab is, as far as the browser lets this page see.
- *
- * No address means the extension was never pointed at that tab, which the
- * browser says by leaving it out.
+ * One of Add's picks for the tab in front. The permission comes first, asked at
+ * once while the press in the note still counts as one; a browser that will not
+ * take that as a press gets Allow on this page's line instead.
  */
-async function readTab() {
-  let tab = null;
-  try {
-    [tab] = await api.tabs.query({ active: true, windowId: state.windowId });
-  } catch {
-    // a window closing under us: nothing to read
+async function runTab(action) {
+  if (action !== "allow" && (await allowed())) {
+    await act(action);
+    return;
   }
-  const url = tab?.url || "";
-  state.page = !url ? "unknown" : N.isWeb(url) && !N.isApp(url, state.origin) ? "web" : "other";
-  $("cite").textContent = N.citeButton(url);
-  $("cite").title = `${N.citeLabel(url)} in the note`;
-  paint();
+  state.waiting = action === "allow" ? null : action;
+  let granted;
+  try {
+    granted = Boolean(await api.permissions.request(EVERY_PAGE));
+  } catch {
+    $("allowing").hidden = false;
+    fold();
+    return;
+  }
+  await allowedNow(granted);
+}
+
+/** Allow on this page's line, pressed. */
+async function pressAllow() {
+  let granted;
+  try {
+    granted = Boolean(await api.permissions.request(EVERY_PAGE));
+  } catch (e) {
+    say(N.plain(e));
+    return;
+  }
+  await allowedNow(granted);
+}
+
+async function allowedNow(granted) {
+  $("allowing").hidden = true;
+  const then = state.waiting;
+  state.waiting = null;
+  fold();
+  if (!granted) {
+    say(N.INSTEAD.any, "info");
+    return;
+  }
+  await answerTab();
+  if (then) await act(then);
 }
 
 /** Tell the worker what this panel holds, so the right-click items follow it. */
@@ -136,7 +217,6 @@ function connect() {
   port.onMessage.addListener((msg) => {
     if (msg?.type === "put") {
       state.selecting = null;
-      readTab();
       put(msg.put);
     } else if (msg?.type === "selecting") {
       selecting(msg.tabId);
@@ -218,11 +298,10 @@ function cancelSelecting(event) {
   }
 }
 
-/** One of the bar's buttons: the worker reads the page, this page hands it over. */
+/** One of Add's picks: the worker reads the page, this page hands it over. */
 async function act(action) {
   if (state.busy || !state.ready) return;
   state.busy = true;
-  paint();
   say("");
   try {
     let answer;
@@ -247,7 +326,6 @@ async function act(action) {
     await put(answer.put);
   } finally {
     state.busy = false;
-    readTab();
   }
 }
 
@@ -260,13 +338,20 @@ function onFrame(event) {
     answer?.(said);
     return;
   }
+  if (said.kind === "tab-ask") {
+    void answerTab();
+    return;
+  }
+  if (said.kind === "tab-run") {
+    void runTab(said.action);
+    return;
+  }
   state.heard = true;
   clearTimeout(loadTimer);
   $("down").hidden = true;
   state.ready = said.ready;
   state.caseId = said.ready ? said.caseId : "";
   if (state.caseId) keepCase(state.caseId);
-  paint();
   tell();
 }
 
@@ -299,7 +384,6 @@ function followCase(caseId) {
 function load() {
   state.heard = false;
   state.ready = false;
-  paint();
   tell();
   $("down").hidden = true;
   $("note").hidden = false;
@@ -349,20 +433,9 @@ async function init() {
   state.url = N.panelUrl(state.backendUrl, { caseId: state.lastCaseId });
   state.windowId = (await api.windows.getCurrent()).id;
 
-  for (const action of ["cite", "quote", "capture"]) $(action).addEventListener("click", () => act(action));
+  $("allow").addEventListener("click", pressAllow);
   $("retry").addEventListener("click", load);
   window.addEventListener("message", onFrame);
-
-  // The front tab changes under the panel; so does what the browser lets us read
-  // of it, after a right-click there, which no event reports. The pointer coming
-  // back to the panel is the moment before a press, so it is read then too.
-  api.tabs.onActivated.addListener((info) => {
-    if (info.windowId === state.windowId) readTab();
-  });
-  api.tabs.onUpdated.addListener((tabId, info, tab) => {
-    if (tab?.active && tab.windowId === state.windowId) readTab();
-  });
-  document.documentElement.addEventListener("pointerenter", () => readTab());
   document.documentElement.addEventListener("keydown", cancelSelecting);
 
   // A new address in the options is a different app: open the note from there.
@@ -389,7 +462,6 @@ async function init() {
       // disconnected between the check and the send; the listener reopens it
     }
   }, WATCH_MS);
-  readTab();
   load();
 }
 

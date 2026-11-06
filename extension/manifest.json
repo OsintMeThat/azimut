@@ -4,6 +4,7 @@
   "version": "0.3.4",
   "description": "File into Azimut: screenshot the map you are looking at (coordinates from the URL), save any other page as a bookmark, cite or quote a page into a case note from a side panel, fill a social composer with a thread the app prepared, or open a reverse-image engine with a picture from the case.",
   "permissions": ["activeTab", "scripting", "storage", "notifications", "contextMenus", "sidePanel"],
+  "optional_host_permissions": ["<all_urls>"],
   "host_permissions": [
     "http://127.0.0.1/*",
     "http://localhost/*",
@@ -56,6 +57,10 @@
     "_execute_action": {
       "suggested_key": { "default": "Alt+Shift+A" },
       "description": "Open the Azimut capture popup"
+    },
+    "capture-note": {
+      "suggested_key": { "default": "Alt+Shift+S" },
+      "description": "Capture this map into the note in the side panel"
     }
   },
   "content_scripts": [

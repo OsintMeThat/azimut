@@ -61,8 +61,26 @@ def test_the_panel_asks_only_for_what_it_uses(manifest):
     # warn of browsing history in Chrome; the right-click opens the tab instead
     assert "tabs" not in permissions
     assert set(manifest["host_permissions"]) == HOSTS
-    assert "optional_host_permissions" not in manifest
-    assert "<all_urls>" not in json.dumps(manifest)
+
+
+def test_every_site_is_asked_for_at_run_time_only(manifest):
+    """The panel's Add reads the page in front, which a press in a side panel never
+    opens to the extension (the owner's choice of 2026-11-06, SPEC §9). So every
+    site is an optional permission, asked the first time Add needs a page: never a
+    required one, which Chrome would warn of at install and Firefox would hold its
+    silent update behind."""
+    assert manifest["optional_host_permissions"] == ["<all_urls>"]
+    assert "<all_urls>" not in manifest["host_permissions"]
+    assert "<all_urls>" not in manifest["permissions"]
+    assert all("<all_urls>" not in script["matches"] for script in manifest["content_scripts"])
+
+
+def test_the_capture_shortcut_is_declared(manifest):
+    """A shortcut opens the tab as a right-click does: it captures without the permission."""
+    command = manifest["commands"]["capture-note"]
+    assert command["suggested_key"]["default"] == "Alt+Shift+S"
+    worker = (EXT / "background.js").read_text(encoding="utf-8")
+    assert '"capture-note"' in worker
 
 
 def test_the_helpers_load_before_the_worker_in_both_browsers(manifest):

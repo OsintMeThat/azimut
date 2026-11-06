@@ -176,6 +176,28 @@ const AzimutNotes = (() => {
     return message;
   }
 
+  /** What the panel's Add may ask of the tab in front. */
+  const TAB_ACTIONS = new Set(["capture", "cite", "quote", "allow"]);
+  const ACCESS = new Set(["open", "closed", "none"]);
+
+  /**
+   * One `note-tab`: what the tab in front can give the note's Add. `closed` is a
+   * tab the browser keeps from the extension, `none` one with nothing to add from
+   * (not a web page, or the app itself); only an `open` tab says what it holds.
+   */
+  function buildTab(facts = {}) {
+    const access = ACCESS.has(facts.access) ? facts.access : "closed";
+    const message = { azimut: "note-tab", v: 1, access, url: "", title: "", selection: "", post: false };
+    if (access !== "open") return message;
+    const url = String(facts.url || "");
+    if (!isWeb(url) || url.length > LIMITS.url) return { ...message, access: "none" };
+    message.url = url;
+    message.title = cutTitle(facts.title);
+    message.selection = cut(String(facts.selection ?? "").replace(/\r\n?/g, "\n").trim(), LIMITS.text);
+    message.post = isPostUrl(url);
+    return message;
+  }
+
   // What each browser says when it keeps a page from the extension: Chrome's
   // "Either the '<all_urls>' or 'activeTab' permission is required." and "Cannot
   // access contents of the page…", Firefox's "Missing activeTab permission" and
@@ -191,7 +213,7 @@ const AzimutNotes = (() => {
    * right-click does the same thing.
    */
   const INSTEAD = {
-    capture: "Right-click the map to capture it.",
+    capture: "Right-click the map, or press Alt+Shift+S, to capture it.",
     quote: "Right-click the selection to quote it.",
     any: "Right-click the page to cite, quote or capture it.",
   };
@@ -228,8 +250,12 @@ const AzimutNotes = (() => {
     if (data.azimut === "note-put-done") {
       return { kind: "done", id: String(data.id ?? ""), ok: data.ok === true, error: text(data.error, 300) };
     }
+    if (data.azimut === "note-tab-ask") return { kind: "tab-ask" };
+    if (data.azimut === "note-tab-run" && TAB_ACTIONS.has(data.action)) return { kind: "tab-run", action: data.action };
     return null;
   }
 
-  return { LIMITS, INSTEAD, isWeb, appOrigin, isApp, panelUrl, citeLabel, citeButton, buildPut, plain, readFrame };
+  return {
+    LIMITS, INSTEAD, isWeb, appOrigin, isApp, panelUrl, isPostUrl, citeLabel, citeButton, buildPut, buildTab, plain, readFrame,
+  };
 })();

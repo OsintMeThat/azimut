@@ -200,7 +200,7 @@ proof for publication.
 | ✅ **Notebook reports** | Prints a note as Plain, Report, Brief or Journal in a choice of typefaces, with a cover, contents and TLP marking on A4 or Letter, captions, credits and live source links, shows its pages beside it while it is written, sizes pictures where they print, breaks pages, gathers notes as chapters, and starts from nine ready templates or Settings' own. |
 | ✅ **Report sources and check** | Credits every picture from what the case recorded, made-from pictures included, ends a report with a numbered list of its sources (addresses, archive, dates, SHA-256) linked from the text, and lists what a PDF would warn about before it is written. |
 | ✅ **Tools into the note** | While a note is pinned to the side, Add and the tools' own menus put what they show in it in one press: a map view, point or measure, a Compare pair, a pinned Detect candidate, an Inspect frame, a collage, a proof with its points, a Timeline or Sheet table, a quoted post, or a source looked up in the case first; each picture filed once, credited, undoable, and reopened where it came from. |
-| ✅ **Notes in the extension** | A folding panel in the extension holds the note, and a right-click on any page cites it (or the post), quotes the selected words with a link to that passage, or puts a map capture in. |
+| ✅ **Notes in the extension** | A folding panel in the extension holds the note; its Add, a right-click or Alt+Shift+S cites the page (or the post), quotes the selected words with a link to that passage, or puts a map capture in. |
 | ✅ **Report editions** | Marks passages internal, prints a report as an internal or a public edition that never carries one, and keeps every PDF it wrote with its fingerprint, listed and checked from the note. |
 | ✅ **From the case** | Writes a note of a period's geolocations from the Notebook home, a figure each or a table, dated by what they show or when they were geolocated. |
 | ✅ **Report covers and signature** | Writes a first page of one's own above a cover line, fills the title, day, name, role and organisation when the PDF is made, prints the Azimut logo, the analyst's logo and a handwritten signature, and starts a template from anything. |
@@ -289,7 +289,6 @@ stops making sense.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
 - **Notes, next:** a preview on hovering a chip.
 - **Map plate, next:** Make a post from a plate: a video over a chosen period for one layer, from a template, handed to the Post composer.
-- **Notes in the extension, next:** an optional all-sites permission asked once, so the panel's own buttons work on a page never right-clicked.
 - **Tools into the note, next:** a Map plate page and evolution sheets filed as figures, public verify links in the Sources list, Horizon's pair and viewpoint, Detect's kept table, Inspect's moments, Timeline and Graph snapshots, an extension capture's toast, a reverse-search log line.
 - **Report, next:** an optional Azimut mark in the footer.
 - **Signed PDFs:** sign the finished file (PAdES, an incremental CMS update, e.g. pyHanko once its wheels are checked on the three OSes) with an X.509 key the analyst holds, kept 0600; a self-signed key proves only that the file is unchanged since it was signed, while a reader-trusted identity needs a CA certificate and a timestamp server, a network call.
@@ -399,6 +398,13 @@ stops making sense.
   home page and draws its uploader there, so the grant has to cover wherever that
   redirect lands. It buys nothing beyond that — the extension injects only into a
   tab it opened itself, at a URL the app handed it, and reads nothing back.
+  Accepted risk (owner's choice, 2026-11-06): the notes panel's Add may ask for
+  every site (`optional_host_permissions: <all_urls>`), since a press in a side
+  panel opens no tab to an extension. It is optional, asked the first time Add
+  needs the page in front and never at install or update, and the options page
+  takes it back. With it the extension reads a page only when Add is pressed: its
+  address, title and selected words, or a capture of a map. Right-click and
+  Alt+Shift+S work without it.
   Updating that extension writes the app's *own* bundled bytes into
   one fixed workspace path and takes nothing off the request — no path, no
   payload — so it sits on the settings router rather than in the ingest island,

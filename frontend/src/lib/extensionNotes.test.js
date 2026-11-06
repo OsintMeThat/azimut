@@ -51,7 +51,7 @@ function event() {
 }
 
 /** Open the panel page against a front tab. */
-async function openPanel({ front = ARTICLE, stored = { lastCaseId: 'case-1' }, sendMessage } = {}) {
+async function openPanel({ front = ARTICLE, stored = { lastCaseId: 'case-1' }, sendMessage, allowed = true, selection = '' } = {}) {
   document.body.innerHTML = bodyOf(panelHtml).replace(/<iframe[^>]*><\/iframe>/, '<div id="note"></div>');
   // Each frame the panel opens is a stand-in with a window of its own; a fresh one
   // comes from cloning the last, as the panel does to load the note again.
@@ -80,6 +80,11 @@ async function openPanel({ front = ARTICLE, stored = { lastCaseId: 'case-1' }, s
       onChanged: event(),
     },
     windows: { getCurrent: vi.fn(async () => ({ id: 1 })) },
+    permissions: {
+      contains: vi.fn(async () => allowed),
+      request: vi.fn(async () => true),
+    },
+    scripting: { executeScript: vi.fn(async () => [{ result: selection }]) },
     tabs: {
       query: vi.fn(async () => (front ? [front] : [])),
       onActivated: event(),
@@ -123,6 +128,11 @@ async function openPanel({ front = ARTICLE, stored = { lastCaseId: 'case-1' }, s
 }
 
 const open = (extra = {}) => ({ azimut: 'note-panel', v: 1, state: 'ready', caseId: 'case-1', noteId: 'n1', title: 'Leads', ...extra });
+/** A pick in the note's Add, as the frame posts it. */
+const run = (action) => ({ azimut: 'note-tab-run', v: 1, action });
+const ASK = { azimut: 'note-tab-ask', v: 1 };
+/** What the panel told the frame of the tab in front, last. */
+const toldTab = (frameWindow) => frameWindow.postMessage.mock.calls.map(([message]) => message).filter((m) => m.azimut === 'note-tab').at(-1);
 
 afterEach(() => {
   vi.useRealTimers();
@@ -214,8 +224,8 @@ describe('notesmsg: what crosses to the note', () => {
   it("never shows a browser's refusal in the browser's words", () => {
     const chrome = "Either the '<all_urls>' or 'activeTab' permission is required.";
     const script = 'Cannot access contents of the page. Extension manifest must request permission to access the respective host.';
-    expect(N.plain(new Error(chrome), 'capture')).toBe('Right-click the map to capture it.');
-    expect(N.plain('Missing activeTab permission', 'capture')).toBe('Right-click the map to capture it.');
+    expect(N.plain(new Error(chrome), 'capture')).toBe('Right-click the map, or press Alt+Shift+S, to capture it.');
+    expect(N.plain('Missing activeTab permission', 'capture')).toBe('Right-click the map, or press Alt+Shift+S, to capture it.');
     expect(N.plain(script, 'quote')).toBe('Right-click the selection to quote it.');
     expect(N.plain('Missing host permission for the tab', 'quote')).toBe('Right-click the selection to quote it.');
     expect(N.plain('The extensions gallery cannot be scripted.', 'cite')).toBe(
@@ -258,53 +268,122 @@ describe('the notes panel', () => {
     expect(fresh.frame.src).toBe(`${APP}/#notebook?solo=1&panel=1`);
   });
 
-  it('shows no action until the note says it is open, and tells the worker', async () => {
+  it('shows no bar over the note, and tells the worker when the note is open', async () => {
     const { fromNote, port } = await openPanel();
     expect($('bar').hidden).toBe(true);
-    expect($('actions').hidden).toBe(true);
-
     fromNote(open());
-    expect($('bar').hidden).toBe(false);
-    expect($('actions').hidden).toBe(false);
+    expect($('bar').hidden).toBe(true);
     expect(port().sent.at(-1)).toEqual({ type: 'state', windowId: 1, ready: true, caseId: 'case-1' });
-
     fromNote({ azimut: 'note-panel', v: 1, state: 'none' });
-    expect($('actions').hidden).toBe(true);
     expect(port().sent.at(-1)).toMatchObject({ type: 'state', ready: false, caseId: '' });
   });
 
   it('ignores a message from anywhere but its frame at the app origin', async () => {
-    const { fromNote } = await openPanel();
+    const { fromNote, frameWindow, port } = await openPanel();
     fromNote(open(), { origin: 'https://evil.example' });
     fromNote(open(), { source: {} });
-    expect($('actions').hidden).toBe(true);
+    expect(port().sent.at(-1)).toMatchObject({ ready: false });
+    fromNote(ASK, { origin: 'https://evil.example' });
+    fromNote(run('cite'), { source: {} });
+    await settle();
+    expect(frameWindow.postMessage).not.toHaveBeenCalled();
   });
 
-  it('says to right-click on a tab it cannot read', async () => {
-    const { fromNote } = await openPanel({ front: { id: 5, windowId: 1 } });
+  it("answers the note's Add with the tab in front: its address, title and the words selected", async () => {
+    const { chrome, fromNote, frameWindow } = await openPanel({ selection: '  the words\r\non two lines ' });
     fromNote(open());
-    expect($('actions').hidden).toBe(true);
-    expect($('hint').hidden).toBe(false);
-    expect($('hint').textContent).toBe('Right-click the page to cite, quote or capture it.');
+    fromNote(ASK);
+    await settle();
+    expect(chrome.scripting.executeScript).toHaveBeenCalledWith(expect.objectContaining({ target: { tabId: 5 } }));
+    const [message, target] = frameWindow.postMessage.mock.calls.at(-1);
+    expect(target).toBe(APP);
+    expect(message).toEqual({
+      azimut: 'note-tab', v: 1, access: 'open', url: ARTICLE.url, title: 'A story', selection: 'the words\non two lines', post: false,
+    });
   });
 
-  it('offers nothing on the app itself', async () => {
-    const { fromNote } = await openPanel({ front: { ...ARTICLE, url: `${APP}/#board` } });
+  it('says a tab is closed until the extension may read pages, and reads nothing of it', async () => {
+    const { chrome, fromNote, frameWindow } = await openPanel({ allowed: false });
     fromNote(open());
-    expect($('actions').hidden).toBe(true);
-    expect($('hint').hidden).toBe(true);
+    fromNote(ASK);
+    await settle();
+    expect(toldTab(frameWindow)).toEqual({ azimut: 'note-tab', v: 1, access: 'closed', url: '', title: '', selection: '', post: false });
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  it('offers nothing from the app itself, nor from a page that is not on the web', async () => {
+    for (const url of [`${APP}/#board`, 'chrome://extensions/']) {
+      const { fromNote, frameWindow } = await openPanel({ front: { ...ARTICLE, url } });
+      fromNote(open());
+      fromNote(ASK);
+      await settle();
+      expect(toldTab(frameWindow)).toMatchObject({ access: 'none', url: '' });
+    }
   });
 
   it('names a post a post', async () => {
-    const { fromNote } = await openPanel({ front: { ...ARTICLE, url: 'https://bsky.app/profile/a.bsky.social/post/3k' } });
+    const { fromNote, frameWindow } = await openPanel({ front: { ...ARTICLE, url: 'https://bsky.app/profile/a.bsky.social/post/3k' } });
     fromNote(open());
-    expect($('cite').textContent).toBe('Cite post');
+    fromNote(ASK);
+    await settle();
+    expect(toldTab(frameWindow)).toMatchObject({ access: 'open', post: true });
+  });
+
+  it('asks for the permission at the first pick, then does what was picked', async () => {
+    const { chrome, fromNote, frameWindow } = await openPanel({ allowed: false });
+    fromNote(open());
+    chrome.permissions.request.mockImplementation(async () => {
+      chrome.permissions.contains.mockImplementation(async () => true);
+      return true;
+    });
+    fromNote(run('cite'));
+    await settle();
+    expect(chrome.permissions.request).toHaveBeenCalledWith({ origins: ['<all_urls>'] });
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'notes-facts', action: 'cite', windowId: 1, caseId: 'case-1' });
+    // the note hears the tab is open now, then gets the citation
+    const said = frameWindow.postMessage.mock.calls.map(([message]) => message.azimut);
+    expect(said).toEqual(['note-tab', 'note-put']);
+    expect($('allowing').hidden).toBe(true);
+  });
+
+  it('offers Allow on its own line when the browser will not ask from inside the note', async () => {
+    const { chrome, fromNote } = await openPanel({ allowed: false });
+    fromNote(open());
+    chrome.permissions.request.mockImplementationOnce(async () => {
+      throw new Error('permissions.request may only be called from a user input handler');
+    });
+    fromNote(run('capture'));
+    await settle();
+    expect($('bar').hidden).toBe(false);
+    expect($('allowing').hidden).toBe(false);
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    // pressed here, it is asked again, and the pick that waited runs
+    $('allow').click();
+    await settle();
+    expect(chrome.permissions.request).toHaveBeenCalledTimes(2);
+    expect($('allowing').hidden).toBe(true);
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ action: 'capture' }));
+  });
+
+  it('says what still works when the permission is refused', async () => {
+    const { chrome, fromNote } = await openPanel({ allowed: false });
+    fromNote(open());
+    chrome.permissions.request.mockImplementation(async () => false);
+    fromNote(run('quote'));
+    await settle();
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    expect($('status').textContent).toBe('Right-click the page to cite, quote or capture it.');
+    // Allow alone asks, and runs nothing
+    fromNote(run('allow'));
+    await settle();
+    expect(chrome.permissions.request).toHaveBeenCalledTimes(2);
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
   });
 
   it("hands a press's facts to the note, at the app's exact origin", async () => {
     const { chrome, fromNote, frameWindow } = await openPanel();
     fromNote(open());
-    $('cite').click();
+    fromNote(run('cite'));
     await settle();
 
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
@@ -327,7 +406,7 @@ describe('the notes panel', () => {
   it("shows the note's refusal in its own words", async () => {
     const { fromNote, frameWindow } = await openPanel();
     fromNote(open());
-    $('quote').click();
+    fromNote(run('quote'));
     await settle();
     const [message] = frameWindow.postMessage.mock.calls[0];
     fromNote({ azimut: 'note-put-done', v: 1, id: message.id, ok: false, error: 'This note is read only.' });
@@ -339,7 +418,7 @@ describe('the notes panel', () => {
     const sendMessage = vi.fn(async () => ({ ok: false, error: 'Captures are for map sites. Cite this page instead.' }));
     const { fromNote, frameWindow } = await openPanel({ sendMessage });
     fromNote(open());
-    $('capture').click();
+    fromNote(run('capture'));
     await settle();
     expect($('status').textContent).toBe('Captures are for map sites. Cite this page instead.');
     expect(frameWindow.postMessage).not.toHaveBeenCalled();
@@ -350,9 +429,9 @@ describe('the notes panel', () => {
     const sendMessage = vi.fn(async () => ({ ok: false, error: raw }));
     const { fromNote, port } = await openPanel({ sendMessage });
     fromNote(open());
-    $('capture').click();
+    fromNote(run('capture'));
     await settle();
-    expect($('status').textContent).toBe('Right-click the map to capture it.');
+    expect($('status').textContent).toBe('Right-click the map, or press Alt+Shift+S, to capture it.');
 
     port().onMessage.fire({ type: 'trouble', error: 'Missing host permission for the tab' });
     expect($('status').textContent).toBe('Right-click the page to cite, quote or capture it.');
@@ -364,7 +443,7 @@ describe('the notes panel', () => {
     });
     const { fromNote } = await openPanel({ sendMessage });
     fromNote(open());
-    $('cite').click();
+    fromNote(run('cite'));
     await settle();
     expect($('status').textContent).toBe('The extension did not answer. Try again.');
   });
@@ -373,7 +452,7 @@ describe('the notes panel', () => {
     const sendMessage = vi.fn(async () => ({ ok: true, selecting: 6 }));
     const { fromNote, frameWindow, port } = await openPanel({ sendMessage });
     fromNote(open());
-    $('capture').click();
+    fromNote(run('capture'));
     await settle();
     expect(sendMessage).toHaveBeenCalledWith({ type: 'notes-facts', action: 'capture', windowId: 1, caseId: 'case-1' });
     expect($('status').textContent).toBe('Drag over the map to capture it. Esc cancels.');
@@ -396,7 +475,7 @@ describe('the notes panel', () => {
     const sendMessage = vi.fn(async () => ({ ok: true, selecting: 6 }));
     const { chrome, fromNote, frameWindow, port, handlers } = await openPanel({ sendMessage });
     fromNote(open());
-    $('capture').click();
+    fromNote(run('capture'));
     await settle();
 
     handlers.keydown({ key: 'a' });
@@ -420,7 +499,7 @@ describe('the notes panel', () => {
       throw new Error('Could not establish connection. Receiving end does not exist.');
     });
     fromNote(open());
-    $('capture').click();
+    fromNote(run('capture'));
     await settle();
     handlers.keydown({ key: 'Escape' });
     await settle();
@@ -440,7 +519,7 @@ describe('the notes panel', () => {
     const { fromNote } = await openPanel();
     fromNote(open());
     vi.useFakeTimers();
-    $('cite').click();
+    fromNote(run('cite'));
     await vi.advanceTimersByTimeAsync(15000);
     expect($('status').textContent).toBe('The note did not answer. Try again.');
   });
@@ -463,7 +542,7 @@ describe('the notes panel', () => {
   });
 
   it("opens the case's note in a fresh frame when a case is picked elsewhere", async () => {
-    const { frame, frames, fromNote, storedChange } = await openPanel();
+    const { frame, frames, fromNote, port, storedChange } = await openPanel();
     fromNote(open());
     storedChange({ lastCaseId: 'case-2' });
     // no note named: the app opens that case's own
@@ -473,13 +552,13 @@ describe('the notes panel', () => {
     expect(frames).toHaveLength(2);
     expect($('note')).not.toBe(frame);
     expect(frame.isConnected).toBe(false);
-    expect($('actions').hidden).toBe(true);
+    expect(port().sent.at(-1)).toMatchObject({ ready: false });
 
     // a late word from the frame it left is not the new note's
     fromNote({ azimut: 'note-panel', v: 1, state: 'ready', caseId: 'case-1' }, { source: frame.contentWindow });
-    expect($('actions').hidden).toBe(true);
+    expect(port().sent.at(-1)).toMatchObject({ ready: false });
     fromNote(open({ caseId: 'case-2' }));
-    expect($('actions').hidden).toBe(false);
+    expect(port().sent.at(-1)).toMatchObject({ ready: true, caseId: 'case-2' });
   });
 
   it('loads nothing again for the case it already shows', async () => {

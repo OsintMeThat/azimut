@@ -5955,10 +5955,15 @@ or pick one in the extension's popup, then open Notes again.*
 
 While the panel holds a note, a right-click on any page offers **Cite this page**
 (**Cite this post** on X, Bluesky or Telegram), **Quote the selection** and **Capture
-into the note**, and the panel's bar has the same three buttons where the browser lets
-the extension read the tab (after one right-click on that page or the popup opened on
-it, and always on X and Bluesky); elsewhere it says *Right-click the page to cite,
-quote or capture it.* The extension sends only facts (the address, the title, the
+into the note**, and **Alt+Shift+S** captures the map in front. The note's **Add (+)**
+offers the same three first, under *From this tab*: it asks the panel (`note-tab-ask`)
+and the panel answers what the tab in front holds (`note-tab`: open, closed or none,
+its address, title and selected words); a pick goes back as `note-tab-run`. A press in
+a side panel opens no tab to an extension, so the first pick asks the browser for every
+site (an optional permission, SPEC §9); where the browser will not ask from inside the
+note (Firefox), *Allow* shows on a line above it. Refused, the panel says *Right-click
+the page to cite, quote or capture it.*, and the extension's options say when it is
+given and take it back. The extension sends only facts (the address, the title, the
 words, a filed capture's id) to the frame (`postMessage`, `note-put`), which writes the
 note through the same Put as every tool, with its light, toast and Undo:
 

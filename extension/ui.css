@@ -108,7 +108,8 @@ body.notes {
   border-bottom: 1px solid var(--border);
 }
 .notes .bar p { margin: 0; }
-.notes .actions { margin: 0; gap: 6px; }
-.notes .actions button { flex: 1; min-width: 0; padding: 4px 6px; white-space: nowrap; }
+.notes .allowing { display: flex; align-items: center; gap: 8px; }
+.notes .allowing p { flex: 1; min-width: 0; }
+.notes .allowing button { flex: none; padding: 4px 10px; }
 .notes .down { padding: 12px; }
 .notes iframe { flex: 1; width: 100%; border: 0; background: var(--bg); }

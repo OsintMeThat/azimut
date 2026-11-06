@@ -1496,6 +1496,38 @@ api.runtime.onConnect.addListener((port) => {
 noteMenus()?.onClicked?.addListener((info, tab) => {
   onNoteMenu(info, tab);
 });
+
+/**
+ * Alt+Shift+S: the map in front captured into the panel's note. A shortcut opens
+ * the tab to the extension as a right-click does, so it works on any map without
+ * the permission the panel's Add asks for.
+ */
+async function onNoteCommand(command, tab) {
+  if (command !== "capture-note") return;
+  let front = tab;
+  if (!front?.id) {
+    try {
+      [front] = await api.tabs.query({ active: true, lastFocusedWindow: true });
+    } catch {
+      front = null;
+    }
+  }
+  const found = notePanelFor(front?.windowId);
+  if (!found) {
+    notify("Azimut notes", "Open a note in the notes panel first.");
+    return;
+  }
+  const [port, panel] = found;
+  try {
+    await armNoteCapture(front, panel.caseId, { menu: true });
+    tellPanel(port, { type: "selecting", tabId: front.id });
+  } catch (e) {
+    tellPanel(port, { type: "trouble", error: AzimutNotes.plain(e, "capture") });
+  }
+}
+api.commands?.onCommand?.addListener((command, tab) => {
+  onNoteCommand(command, tab);
+});
 // The citation's label follows the tab in front, but only while a panel is open.
 api.tabs.onActivated?.addListener(() => {
   if (notePanels.size) syncNoteMenus();

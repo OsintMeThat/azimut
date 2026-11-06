@@ -51,6 +51,7 @@ function load({ front = ARTICLE, answers = {}, selection = '', stored = {}, inje
     connect: event(),
     message: event(),
     clicked: event(),
+    command: event(),
     activated: event(),
     updated: event(),
     focus: event(),
@@ -109,6 +110,7 @@ function load({ front = ARTICLE, answers = {}, selection = '', stored = {}, inje
       }),
     },
     notifications: { create: vi.fn() },
+    commands: { onCommand: on.command },
     management: { getSelf: vi.fn(async () => ({ installType: 'development' })) },
     contextMenus: {
       create: vi.fn((props, cb) => {
@@ -267,6 +269,36 @@ describe('the right-click items', () => {
     run.on.activated.fire({ tabId: 5, windowId: 1 });
     await settle();
     expect(run.items.get('azimut-note-cite').title).toBe('Cite this page');
+  });
+});
+
+describe('the capture shortcut', () => {
+  it('draws the area selection on the map in front, for the panel\'s note, with nothing taken before the drag', async () => {
+    const run = mapRun();
+    const port = connect(run.on);
+    ready(port);
+    run.on.command.fire('capture-note', MAP);
+    await settle();
+    expect(drawsSelection(run)).toBe(true);
+    expect(run.session.get('pending:6')).toMatchObject({ url: MAP.url, caseId: 'case-1' });
+    expect(port.sent.at(-1)).toEqual({ type: 'selecting', tabId: 6 });
+    expect(run.chrome.tabs.captureVisibleTab).not.toHaveBeenCalled();
+  });
+
+  it('says what went wrong in the panel, and asks for a note when none is open', async () => {
+    const run = load({ answers: { '/api/ingest/parse': json({ site: null }) } });
+    run.on.command.fire('capture-note', ARTICLE);
+    await settle();
+    expect(run.chrome.notifications.create).toHaveBeenCalled();
+    const port = connect(run.on);
+    ready(port);
+    run.on.command.fire('capture-note', ARTICLE);
+    await settle();
+    expect(port.sent.at(-1)).toEqual({ type: 'trouble', error: 'Captures are for map sites. Cite this page instead.' });
+    // another command is not this one
+    run.on.command.fire('_execute_action', MAP);
+    await settle();
+    expect(drawsSelection(run)).toBe(false);
   });
 });
 
@@ -431,7 +463,7 @@ describe('a right-click', () => {
     run.on.clicked.fire({ menuItemId: 'azimut-note-capture', pageUrl: MAP.url }, MAP);
     await settle();
     await run.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
-    expect(port.sent.at(-1)).toEqual({ type: 'trouble', error: 'Right-click the map to capture it.' });
+    expect(port.sent.at(-1)).toEqual({ type: 'trouble', error: 'Right-click the map, or press Alt+Shift+S, to capture it.' });
     expect(filed(run)).toBeUndefined();
   });
 
@@ -512,7 +544,7 @@ describe('a panel button', () => {
     // Google Maps, held for the reverse-image engines: its address reads, a capture is refused
     const run = mapRun({ capture: new Error(NO_CAPTURE) });
     const answer = await run.handle({ type: 'notes-facts', action: 'capture', windowId: 1, caseId: 'case-1' }, PANEL);
-    expect(answer).toEqual({ ok: false, error: 'Right-click the map to capture it.' });
+    expect(answer).toEqual({ ok: false, error: 'Right-click the map, or press Alt+Shift+S, to capture it.' });
     expect(drawsSelection(run)).toBe(false);
     expect(run.session.has('pending:6')).toBe(false);
   });
@@ -536,13 +568,13 @@ describe('a panel button', () => {
   it("says the same in Firefox's words", async () => {
     const run = mapRun({ capture: new Error('Missing activeTab permission') });
     const answer = await run.handle({ type: 'notes-facts', action: 'capture', windowId: 1, caseId: 'case-1' }, PANEL);
-    expect(answer.error).toBe('Right-click the map to capture it.');
+    expect(answer.error).toBe('Right-click the map, or press Alt+Shift+S, to capture it.');
   });
 
   it('says to right-click when the page refuses the selection, and leaves nothing waiting', async () => {
     const run = mapRun({ inject: new Error(NO_SCRIPT) });
     const answer = await run.handle({ type: 'notes-facts', action: 'capture', windowId: 1, caseId: 'case-1' }, PANEL);
-    expect(answer).toEqual({ ok: false, error: 'Right-click the map to capture it.' });
+    expect(answer).toEqual({ ok: false, error: 'Right-click the map, or press Alt+Shift+S, to capture it.' });
     expect(run.session.has('pending:6')).toBe(false);
   });
 
