@@ -322,19 +322,6 @@ def build_full_case(
     assert plate_figure.status_code == 200, plate_figure.text
     full.map_plate_figure = plate_figure.json()["path"]
 
-    # a Timeline reading filed as a picture: media that names the snapshot which froze it
-    reading = client.post(
-        f"/api/cases/{case_id}/analysis-views/figure",
-        json={
-            "name": "Chronology, 1 to 2 Aug 2026", "surface": "timeline", "filename": "Chronology 1 to 2 Aug 2026",
-            "png": base64.b64encode(_png((160, 100), (250, 250, 250))).decode("ascii"),
-            "spec": {"timeline": {"from": "2026-08-01", "to": "2026-08-02",
-                                  "tracks": [{"id": "events", "label": "Events", "categories": ["statement"]}]}},
-        },
-    )
-    assert reading.status_code == 200, reading.text
-    full.reading_figure = reading.json()["path"]
-    full.reading_snapshot_id = reading.json()["view"]
 
     # -- a place, and a relation to the photo ---------------------------------
     place = client.post(
@@ -714,6 +701,21 @@ def build_full_case(
     )
     assert timeline_view.status_code == 200, timeline_view.text
     full.timeline_view_id = timeline_view.json()["id"]
+
+    # a Timeline reading filed as a picture: media that names the snapshot which froze it,
+    # planted once the case holds its statements so that snapshot freezes them
+    reading = client.post(
+        f"/api/cases/{case_id}/analysis-views/figure",
+        json={
+            "name": "Chronology, 1 to 2 Aug 2026", "surface": "timeline", "filename": "Chronology 1 to 2 Aug 2026",
+            "png": base64.b64encode(_png((160, 100), (250, 250, 250))).decode("ascii"),
+            "spec": {"timeline": {"from": "2026-08-01", "to": "2026-08-02",
+                                  "tracks": [{"id": "events", "label": "Events", "categories": ["statement"]}]}},
+        },
+    )
+    assert reading.status_code == 200, reading.text
+    full.reading_figure = reading.json()["path"]
+    full.reading_snapshot_id = reading.json()["view"]
 
     # Analyzer input tiles are deterministic cached provider responses; all
     # permanent case artifacts are still produced through the public API.

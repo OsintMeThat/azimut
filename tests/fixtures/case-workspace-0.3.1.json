@@ -1691,11 +1691,12 @@
    "Sources/Telegram": 1
   },
   "by_source": {
+   "analysis-view": 1,
    "compare": 10,
    "horizon": 1,
    "inspect": 3,
    "map-layers": 1,
-   "map-plate": 1,
+   "map-plate": 2,
    "media-library": 3,
    "post-composer": 1,
    "proof-composer": 3,
@@ -1704,7 +1705,7 @@
    "user": 20
   },
   "by_status": {
-   "confirmed": 47,
+   "confirmed": 49,
    "suggested": 1
   },
   "by_type": {
@@ -1723,7 +1724,7 @@
    "inspect-session": 1,
    "map-layer": 1,
    "map-plate": 1,
-   "media": 6,
+   "media": 8,
    "network": 1,
    "note": 1,
    "organization": 2,
@@ -1755,7 +1756,7 @@
     "inspect-session": 1,
     "map-layer": 1,
     "map-plate": 1,
-    "media": 6,
+    "media": 8,
     "network": 1,
     "note": 1,
     "organization": 2,
@@ -1767,7 +1768,7 @@
     "structure": 1,
     "vessel": 1
    },
-   "unfiled": 46
+   "unfiled": 48
   },
   "countable": 1,
   "lacks": {
@@ -1777,11 +1778,11 @@
   "linked_to": {
    "account": 3,
    "bookmark": 3,
-   "capture": 4,
+   "capture": 6,
    "claim": 14,
    "equipment-type": 2,
    "inspect-session": 1,
-   "media": 20,
+   "media": 22,
    "network": 1,
    "note": 3,
    "organization": 3,
@@ -1793,7 +1794,7 @@
    "structure": 4,
    "vessel": 7
   },
-  "total": 48,
+  "total": 50,
   "unlinked": 11
  },
  "views": {
@@ -2810,6 +2811,109 @@
       "case_activity"
      ],
      "zone_choice": "zone:Europe/Kyiv"
+    },
+    "version": 1
+   },
+   "surface": "timeline"
+  },
+  "Chronology, 1 to 2 Aug 2026": {
+   "mode": "snapshot",
+   "spec": {
+    "query": {
+     "terms": {}
+    },
+    "snapshot": {
+     "entities": [],
+     "links": [],
+     "timeline_items": [
+      {
+       "category": "statement",
+       "confidence": "possible",
+       "earliest": null,
+       "id": "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
+       "kind": "claim",
+       "label": "Two Handysize bulkers berthed at Quay 4",
+       "latest": null,
+       "owner_id": "claim:Two Handysize bulkers berthed at Quay 4",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": null,
+       "raw": null,
+       "sources": [],
+       "status": "confirmed",
+       "subjects": [
+        "equipment-type:Handysize bulker"
+       ],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": "probable",
+       "earliest": "2026-08-01T09:12:00.000000Z",
+       "id": "temporal:claim:claim:Where was the photo taken?",
+       "kind": "claim",
+       "label": "Where was the photo taken?",
+       "latest": "2026-08-01T09:12:01.000000Z",
+       "owner_id": "claim:Where was the photo taken?",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": "second",
+       "raw": "2026-08-01T09:12:00Z",
+       "sources": [
+        "bookmark:Harbour watch thread",
+        "note:Witness"
+       ],
+       "status": "confirmed",
+       "subjects": [
+        "media:photo"
+       ],
+       "time_role": "observed"
+      }
+     ],
+     "timeline_tracks": {
+      "events": [
+       "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
+       "temporal:claim:claim:Where was the photo taken?"
+      ]
+     }
+    },
+    "surface": "timeline",
+    "timeline": {
+     "entity": null,
+     "field": null,
+     "from": "2026-08-01",
+     "group_by": "none",
+     "timezone": "UTC",
+     "to": "2026-08-02",
+     "tracks": [
+      {
+       "categories": [
+        "statement"
+       ],
+       "collapsed": false,
+       "color": "",
+       "hidden": [],
+       "id": "events",
+       "label": "Events",
+       "pinned": [],
+       "query": {
+        "filter": {},
+        "label": "",
+        "relation": "any",
+        "roles": [],
+        "terms": {}
+       }
+      }
+     ],
+     "view_mode": "plot",
+     "visible_categories": [
+      "statement"
+     ],
+     "zone_choice": "utc"
     },
     "version": 1
    },
