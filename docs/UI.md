@@ -6,7 +6,7 @@ phasing lives in [SPEC.md](SPEC.md).
 ## Layout anatomy
 
 ```
-┌ topbar: rose+wordmark (home) · case switcher · (spacer) · Add event · guide mark · settings gear · sidebar toggle ┐
+┌ topbar: rose+wordmark (home) · case switcher · geolocating pill · (spacer) · Add event · guide mark · settings gear · sidebar toggle ┐
 ├ rail: Sources · Examine · Map · Compose · ── · Case · … · theme ┬ tab strip (several tools only) ┬ case sidebar ┤
 │                                                                 │ tool canvas                    │              │
 └─────────────────────────────────────────────────────────────────┴────────────────────────────────┴──────────────┘
@@ -32,6 +32,15 @@ problem report that leads to Settings → System. A block stays hidden until its
 exists in `lib/support.js`, and a release refuses a stand-in link. The tip also has a
 quiet link in Home's footer and one line on the last page of What's new. Nothing reaches
 the network before a press, and there is no setting, reminder, counter or donor feature.
+
+**While a scene is geolocated, a pill sits beside the case**: *Geolocating*, the scene's
+colour, its time and label, and the captures gathered for it, a count that pulses as one
+lands, from the app or the extension. Its label opens the scene in Inspect, **Make the
+proof** opens Inspect's chooser on it, and ✕ stops; the captures stay with the scene.
+Every capture filed meanwhile, from any map tool or the extension, is gathered for it on
+the server (`engine/geolocate.py`), and every tab and the extension's panel follow the
+same scene. Narrower than 1240 px it drops its first word, and under 1080 px Make the
+proof keeps its icon alone.
 
 **Case sits on the rail, under the four stages and a rule apart from them.** The
 stages read in the order an investigation runs, and the case is not one of them: it
@@ -1827,6 +1836,17 @@ work. Once a proof takes it up it shows as the proof's and is hidden, never drop
 the proof sent to the Trash gives it back to geolocate at its own time, and restored
 from there it is proved again (`GET /cases/{id}/scenes`, whose `taken` names the drafts
 a proof in the case cites).
+**A scene still to prove says where it stands** under its name: *To geolocate*, *In
+progress* with its count once captures were filed for it on the map, or *Geolocating*
+while it is the one being looked for, its row ringed. **Geolocate** is its main act, in
+the accent, after End here and Make the proof: the work is written, the scene is held on
+the server as the one being geolocated (`PUT /cases/{id}/geolocating`), and Satellite
+opens with its video as a reference window. **Abandon** asks for a word in the row,
+which may stay empty; Enter gives the scene up, Escape keeps it, and the toast offers
+Undo. An abandoned scene leaves the list for **Abandoned (n)**, folded at the foot of the
+drawer, greyed with its word and **Restore**. It keeps its colour and its frames: the bar
+draws it as an outlined band or a hollow pin, its frames carry a grey ring, no scene is
+offered inside it, and the Scenes button does not count it.
 
 **A capture never makes a scene; a frame belongs to one by its time.** A frame captured
 in no scene offers one instead, *Frame captured at 0:00.48 · Add a scene*, with
@@ -1846,6 +1866,10 @@ the one it starts on, else the one on screen. The ticked frames not in the case 
 saved on the way, under their default names in the last folder, and Geo Proof opens a
 new proof of the scene on them, named after its label, on its Proof tab, the facts
 being what is left to do; unsaved work in the open proof is asked about first.
+A scene that gathered captures on the map offers them under its frames, ticked too, and
+Geo Proof lays them out after the frames. A proof still rests on a frame of the video,
+so unticking every frame leaves nothing to make. A frame not in the case yet says so on
+its picture, and a scene with no label is named by its time.
 
 **Save to case is the one step that files media.** Each output carries its own block
 under the controls that shape it: a name that holds real text from the start, a
@@ -2649,6 +2673,11 @@ which it is (`lib/map/tools.js`) rather than adding a button somewhere.
   of the four corners, over the map, clear of the map's own controls and kept
   there as the map changes size. The place it is in sets it free. All of it is
   session-only, like the window.
+  **A scene being geolocated opens its video here**: in the window already open on
+  that clip, or a new one, paused where the scene starts. The scene is marked in the
+  colour Inspect's bar draws it in: a band over a passage on the player's bar, a strip
+  along the window's foot at rest, and a dot in its header. A pin in the player goes
+  back to its start. Nothing loops.
 - **Its settings** open in the rail's one **panel slot**, beside it. One mode is
   armed, so one panel is open; a panel cannot cross another or the map's own
   controls.

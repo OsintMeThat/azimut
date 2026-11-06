@@ -8,22 +8,16 @@
  * kept in Inspect that no proof takes up yet, `todo` with no capture, `progress`
  * once one is attached, `abandoned` with a word if the analyst gave one.
  */
-import { isStretch, sceneList, sceneTime } from './scenes.js';
+import { isStretch, sceneColorAt, sceneTime } from './scenes.js';
 
 /** What a row calls a scene: the analyst's label, else its time. */
 export const queueName = (scene) => scene?.label || sceneTime(scene);
-
-/** The scene palette in clip order, read off `sceneList` so it is Inspect's own. */
-const PALETTE = sceneList([], [0, 1, 2, 3, 4, 5].map((i) => ({ id: `p${i}`, start: i }))).map((s) => s.color);
 
 /**
  * The colour Inspect's bar draws a scene in: by its place among its video's scenes,
  * proofs included (`order`, `engine/geolocate.py`).
  */
-export function queueColor(scene) {
-  const at = Number.isInteger(scene?.order) && scene.order >= 0 ? scene.order : 0;
-  return PALETTE[at % PALETTE.length];
-}
+export const queueColor = (scene) => sceneColorAt(scene?.order);
 
 /** How a scene is marked on its video's bar: a band, a pin, or nothing for the whole video. */
 export function queueMark(scene) {

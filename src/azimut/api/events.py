@@ -26,7 +26,7 @@ decide whether the nudge is about the thing it is holding:
 ``geolocating``    the scene being geolocated changed: started, ended, or a capture
                   attached (``video`` and ``draft``, both null once it ended)
 ``scenes``        a file's scenes to prove may have changed: its Inspect work was saved,
-                  or a proof's time was stated (``video``)
+                  a proof's time was stated, or a scene abandoned or restored (``video``)
 
 The first three are the ones the analyst cannot see happening, so the app says so
 out loud when they arrive; the rest are quiet and only refresh what they name. The

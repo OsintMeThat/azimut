@@ -429,6 +429,8 @@ def abandon_scene(case_id: str, draft: str, body: AbandonIn) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if was and was["id"] == draft:
         say_geolocating(case)
+    # the queue changed wherever it is shown: the other tabs and the extension's panel
+    events.publish({"type": "scenes", "case_id": case.id, "video": body.video})
     return {"scene": scene}
 
 
@@ -437,9 +439,11 @@ def restore_scene(case_id: str, draft: str, video: str) -> dict[str, Any]:
     """Take an abandoned scene up again, as it was."""
     case = get_case(case_id)
     try:
-        return {"scene": geolocate.restore(case, video, draft)}
+        scene = geolocate.restore(case, video, draft)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    events.publish({"type": "scenes", "case_id": case.id, "video": video})
+    return {"scene": scene}
 
 
 @router.get("/cases/{case_id}/inspect/works/{name}")

@@ -285,7 +285,7 @@ def test_a_scene_s_order_is_its_place_among_the_video_s_scenes_proofs_included(c
     assert _geolocate(client, cid, video, "late").json()["geolocating"]["order"] == 2
 
 
-def test_saving_a_file_s_work_says_its_scenes_may_have_moved(client, monkeypatch):
+def test_saving_a_work_or_abandoning_a_scene_says_its_scenes_may_have_moved(client, monkeypatch):
     from azimut.api import events
 
     heard = []
@@ -293,6 +293,12 @@ def test_saving_a_file_s_work_says_its_scenes_may_have_moved(client, monkeypatch
     cid = _case(client)
     photo = _upload(client, cid)
     _save_work(client, cid, photo, SCENES)
+    assert {"type": "scenes", "case_id": cid, "video": photo} in heard
+    heard.clear()
+    client.put(f"/api/cases/{cid}/scenes/s2/abandon", json={"video": photo})
+    assert {"type": "scenes", "case_id": cid, "video": photo} in heard
+    heard.clear()
+    client.delete(f"/api/cases/{cid}/scenes/s2/abandon", params={"video": photo})
     assert {"type": "scenes", "case_id": cid, "video": photo} in heard
 
 
