@@ -130,6 +130,47 @@ AWS_TERRAIN = Source(
     published="Terrain Tiles, Mapzen and AWS Open Data: " + "; ".join(MAPZEN_REQUIRED),
 )
 SOURCES = (MAPTERHORN, AWS_TERRAIN)
+
+#: Where each of the AWS Terrain Tiles' required sources holds data, as a generous
+#: (south, west, north, east) box, so a picture credits the sources under its ground
+#: rather than all eleven. None is global, credited everywhere. A box errs wide: one
+#: credit too many is harmless, one missing is not.
+MAPZEN_COVERS: tuple[tuple[float, float, float, float] | None, ...] = (
+    (59.0, -180.0, 90.0, 180.0),  # ArcticDEM
+    (-45.0, 110.0, -8.0, 156.0),  # Australia
+    (46.0, 9.0, 49.5, 17.5),  # Austria
+    (41.0, -142.0, 84.0, -51.0),  # Canada
+    (26.0, -32.0, 72.5, 46.0),  # Europe, EU-DEM
+    None,  # global ETOPO1
+    (14.0, -119.0, 33.0, -86.0),  # Mexico
+    (-53.0, 165.0, -33.0, 180.0),  # New Zealand
+    (57.5, 4.0, 81.5, 32.0),  # Norway
+    (49.5, -9.0, 61.0, 2.0),  # United Kingdom
+    None,  # United States 3DEP, and the global GMTED2010 and SRTM
+)
+
+
+def mapzen_published(box: tuple[float, float, float, float] | None) -> str:
+    """The AWS Terrain Tiles' published credit for ground within ``box`` (south,
+    west, north, east): its global sources and those whose region the box touches.
+    With no box, every source, as the licence page lists them."""
+    chosen = [
+        line for line, covers in zip(MAPZEN_REQUIRED, MAPZEN_COVERS, strict=True)
+        if box is None or covers is None or (
+            covers[0] <= box[2] and box[0] <= covers[2] and covers[1] <= box[3] and box[1] <= covers[3]
+        )
+    ]
+    return "Terrain Tiles, Mapzen and AWS Open Data: " + "; ".join(chosen)
+
+
+def tile_box(z: int, x: int, y: int) -> tuple[float, float, float, float]:
+    """A tile's (south, west, north, east) in degrees, on the Web Mercator grid."""
+    n = 2 ** z
+
+    def lat(row: int) -> float:
+        return math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * row / n))))
+
+    return lat(y + 1), x / n * 360.0 - 180.0, lat(y), (x + 1) / n * 360.0 - 180.0
 _BY_ID = {source.id: source for source in SOURCES}
 
 
@@ -561,6 +602,9 @@ class Sampler:
     fetch: Callable[[int, int, int], Fetched | None] | None = None
     sources: set[str] = field(default_factory=set)
     zooms: set[int] = field(default_factory=set)
+    #: The ground the AWS fallback answered for, (south, west, north, east), so its
+    #: credit names only the sources under it; None while it answered nothing.
+    fallback_box: tuple[float, float, float, float] | None = None
     keep: int | None = None
     plates: bool = False
     _held: OrderedDict[Key, np.ndarray | None] = field(default_factory=OrderedDict)
@@ -569,6 +613,8 @@ class Sampler:
     _held_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
     _plates: OrderedDict[int, _Plate] = field(default_factory=OrderedDict, repr=False, compare=False)
     _plates_lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
+    # several threads of one sweep widen the fallback's box: a widening lost would leave a source uncredited
+    _credit_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def heights(
         self, lat: np.ndarray | float, lon: np.ndarray | float, zoom: int
@@ -896,7 +942,7 @@ class Sampler:
                 with self._held_lock:
                     self._held[key] = before[key] = remembered[0]
                 if remembered[0] is not None:
-                    self.sources.add(remembered[1])
+                    self._answered(key, remembered[1])
         if not to_fetch:
             return before
         fetch = self.fetch or tile
@@ -929,7 +975,7 @@ class Sampler:
             with self._held_lock:
                 self._held[key] = before[key] = heights
             if heights is not None:
-                self.sources.add(source)
+                self._answered(key, source)
             if shared:
                 _remember(key, (heights, source))
         return before
@@ -951,9 +997,25 @@ class Sampler:
         self.zooms.add(zoom)
         return out
 
+    def _answered(self, key: Key, source_id: str) -> None:
+        """Note that ``source_id`` answered for tile ``key``, and where, for the fallback."""
+        self.sources.add(source_id)
+        if source_id != AWS_TERRAIN.id:
+            return
+        south, west, north, east = tile_box(*key)
+        with self._credit_lock:
+            box = self.fallback_box
+            self.fallback_box = (south, west, north, east) if box is None else (
+                min(box[0], south), min(box[1], west), max(box[2], north), max(box[3], east))
+
     def credits(self) -> list[dict[str, str]]:
-        """Who to credit for the heights this sampler read, on screen and on a picture."""
-        return [credit(s) for s in SOURCES if s.id in self.sources]
+        """Who to credit for the heights this sampler read, on screen and on a picture:
+        the fallback's published credit names only the sources under the ground it read."""
+        said = [credit(s) for s in SOURCES if s.id in self.sources]
+        for entry in said:
+            if entry["id"] == AWS_TERRAIN.id:
+                entry["published"] = mapzen_published(self.fallback_box)
+        return said
 
     def resolution(self, lat: float) -> float | None:
         """Ground size of the finest heights that answered, in metres: a survey's pixel where a level

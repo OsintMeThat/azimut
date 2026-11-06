@@ -569,3 +569,26 @@ def test_threads_asking_one_tile_at_once_download_it_once(tmp_workspace, monkeyp
         thread.join()
     assert len(asked) == 1
     assert not list(terrain._path(terrain.MAPTERHORN.id, 9, 10, 11, "webp").parent.glob("*.part"))
+
+
+def test_the_fallback_credits_only_the_sources_under_the_ground_it_read():
+    """The AWS Terrain Tiles' licence lists eleven sources; a picture of Yemen names
+    the global ones, not ArcticDEM or New Zealand's survey. Ground nobody located
+    keeps the whole list."""
+    yemen = terrain.mapzen_published((15.0, 44.0, 15.6, 44.5))
+    assert "Global ETOPO1" in yemen and "SRTM terrain data courtesy of the U.S. Geological Survey" in yemen
+    for elsewhere in ("ArcticDEM", "Australia", "New Zealand", "Norway", "Europe terrain data", "Mexico"):
+        assert elsewhere not in yemen, elsewhere
+    alps = terrain.mapzen_published((47.0, 10.0, 47.5, 11.0))
+    assert "Austria terrain data" in alps and "Europe terrain data" in alps and "Canada" not in alps
+    assert terrain.mapzen_published(None) == terrain.AWS_TERRAIN.published
+    assert len(terrain.MAPZEN_COVERS) == len(terrain.MAPZEN_REQUIRED)
+
+
+def test_a_sampler_that_read_the_fallback_names_the_sources_of_its_ground():
+    sampler = terrain.Sampler()
+    sampler._answered((10, 637, 467), terrain.AWS_TERRAIN.id)  # a tile over Sanaa
+    [aws] = [c for c in sampler.credits() if c["id"] == terrain.AWS_TERRAIN.id]
+    assert "ArcticDEM" not in aws["published"] and "Global ETOPO1" in aws["published"]
+    south, west, north, east = sampler.fallback_box
+    assert 14 < south < north < 17 and 43 < west < east < 46
