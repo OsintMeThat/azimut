@@ -2,9 +2,9 @@ import { test, expect } from '@playwright/test';
 import { CASE_ID, installAppFixture, pdfAnswer } from './app.fixture.js';
 
 /**
- * From the case: the Notebook home's tile asks for a period, says how many
- * geolocations it holds as the period changes, and writes the note at once, as a
- * report citing each proof, place and file.
+ * From the case: the Notebook home's tile opens New note on that start, which asks
+ * for a period, says how many geolocations it holds as the period changes, and writes
+ * the note, as a report citing each proof, place and file.
  *
  * The server's answer for a period is stood in for here; which geolocations a
  * case holds is the backend's (`tests/test_note_from_case.py`).
@@ -14,7 +14,7 @@ const at = '2026-10-01T10:00:00Z';
 const entity = (id, type, label, attrs = {}) => ({ id, type, label, attrs, provenance: { by: 'user', at, status: 'confirmed' } });
 
 const PROOF = {
-  id: 'pr1', type: 'proof', label: 'Strike on the depot', picture: true, media_kind: null,
+  id: 'pr1', type: 'proof', label: 'Strike on the depot', description: 'Smoke over the tanks.', picture: true, media_kind: null,
   sources: [{ id: 'v1', label: 'Depot video', media_kind: 'video' }],
   points: [{ lat: 48.12345, lon: 37.12345, place: { id: 'pl1', label: 'Fuel depot', coords: false } }],
   shown: { kind: 'taken', raw: '2026-03-12T14:05:00+02:00', tz: 'Europe/Kyiv', day: '2026-03-12', last: '2026-03-12' },
@@ -22,7 +22,7 @@ const PROOF = {
   day: '2026-03-12',
 };
 const PHOTO = {
-  id: 'm1', type: 'media', label: 'Convoy on the bridge', picture: true, media_kind: 'image',
+  id: 'm1', type: 'media', label: 'Convoy on the bridge', description: '', picture: true, media_kind: 'image',
   sources: [{ id: 'm1', label: 'Convoy on the bridge', media_kind: 'image' }],
   points: [{ lat: 48.1302, lon: 37.1421, place: null }],
   shown: { kind: 'published', raw: '2026-03-13', tz: null, day: '2026-03-13', last: '2026-03-13' },
@@ -95,7 +95,7 @@ async function home(page) {
 test('From the case writes every geolocation of a period into a new report', async ({ page }) => {
   const state = await home(page);
   await page.locator('[data-guide="notebook.from-case"]').click();
-  const dialog = page.getByRole('dialog', { name: 'From the case' });
+  const dialog = page.getByRole('dialog', { name: 'New note' });
   await expect(dialog.getByRole('status')).toHaveText('2 geolocations.');
   await expect(dialog.getByRole('button', { name: 'First day' })).toContainText('2026-03-01');
   await expect(dialog.getByRole('button', { name: 'Last day' })).toContainText('2026-03-14');
@@ -115,7 +115,7 @@ test('From the case writes every geolocation of a period into a new report', asy
   await expect(page.locator('input[aria-label="Note name"]')).toHaveValue('Geolocations, 1–14 March 2026');
   const [made] = state.notes;
   const text = state.texts[made.id];
-  expect(text).toContain('### Strike on the depot\n\n[[media:pr1|Strike on the depot]]{width=75%}\n\n- Where: [[entity:pl1|Fuel depot]] 48.12345, 37.12345');
+  expect(text).toContain('### Strike on the depot\n\n[[media:pr1|Strike on the depot]]{width=75%}\n\n- Description: Smoke over the tanks.\n- Where: [[entity:pl1|Fuel depot]] 48.12345, 37.12345');
   expect(text).toContain('- When: posted 13 March 2026');
   expect(state.looks[made.id]).toMatchObject({ style: 'report', sources: 'on' });
   // the editor draws what it cites as chips, and the guidance in grey
@@ -126,7 +126,7 @@ test('From the case writes every geolocation of a period into a new report', asy
 test('From the case reads by the day they were geolocated, as a table', async ({ page }) => {
   const state = await home(page);
   await page.locator('[data-guide="notebook.from-case"]').click();
-  const dialog = page.getByRole('dialog', { name: 'From the case' });
+  const dialog = page.getByRole('dialog', { name: 'New note' });
   await expect(dialog.getByRole('status')).toHaveText('2 geolocations.');
   await dialog.getByRole('radio', { name: 'When they were geolocated' }).click();
   await expect(dialog.getByRole('button', { name: 'First day' })).toContainText('2026-03-14');
@@ -136,6 +136,6 @@ test('From the case reads by the day they were geolocated, as a table', async ({
 
   await expect(page.locator('input[aria-label="Note name"]')).toHaveValue('Geolocated 14–15 March 2026');
   const text = state.texts[state.notes[0].id];
-  expect(text).toContain('| Geolocated | Place | Coordinates | Source |');
-  expect(text).toContain('| 14 March 2026 | [[entity:pl1|Fuel depot]] | 48.12345, 37.12345 | [[entity:pr1|Strike on the depot]], [[entity:v1|Depot video]] |');
+  expect(text).toContain('| Geolocated | Place | Coordinates | Description | Source |');
+  expect(text).toContain('| 14 March 2026 | [[entity:pl1|Fuel depot]] | 48.12345, 37.12345 | Smoke over the tanks. | [[entity:pr1|Strike on the depot]], [[entity:v1|Depot video]] |');
 });

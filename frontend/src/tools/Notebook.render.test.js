@@ -218,6 +218,58 @@ describe('the home', () => {
     expect(look[1]).toMatchObject({ style: 'report', sources: 'on' });
   });
 
+  it('opens New note on the blank page, with every start as a tile and the names the notes already hold', async () => {
+    buttonNamed('New note').click();
+    await settle();
+    const dialog = document.body.querySelector('[role="dialog"][aria-label="New note"]');
+    const starts = [...dialog.querySelectorAll('[role="radio"][data-start]')].map((one) => one.dataset.start);
+    expect(starts.slice(0, 3)).toEqual(['blank', 'from-case', 'geolocation']);
+    // the analyst's own templates come after the ready notes
+    expect(starts.at(-1)).toBe('t:t1');
+    expect(dialog.querySelector('[data-start="t:t1"]').textContent).toContain('House write-up');
+    expect(dialog.querySelector('[data-start="blank"]').getAttribute('aria-checked')).toBe('true');
+    // no title is asked for: the name shown is the one a note gets
+    expect(dialog.querySelector('#notebook-note-title').placeholder).toBe('Note');
+  });
+
+  it('makes a note from the tile picked in New note, under the name shown, with its look', async () => {
+    buttonNamed('New note').click();
+    await settle();
+    const dialog = document.body.querySelector('[role="dialog"][aria-label="New note"]');
+    dialog.querySelector('[data-start="log"]').click();
+    flushSync();
+    anyButton('Create').click();
+    await settle();
+    const [, body] = post.mock.calls.find(([address]) => address.endsWith('/notes'));
+    expect(body.title).toBe('Investigation log');
+    expect(put.mock.calls.find(([address]) => address.endsWith('/look'))[1].style).toBe('journal');
+    // the dialog is gone once the note is made
+    expect(document.body.querySelector('[role="dialog"][aria-label="New note"]')).toBeNull();
+  });
+
+  it('keeps New note open and says so when the note could not be made', async () => {
+    const making = post.getMockImplementation();
+    post.mockImplementation(async (url, body) => {
+      if (url.endsWith('/notes')) throw new Error('The disk is full');
+      return making(url, body);
+    });
+    buttonNamed('New note').click();
+    await settle();
+    anyButton('Create').click();
+    await settle();
+    expect(document.body.querySelector('[role="dialog"][aria-label="New note"]')).not.toBeNull();
+    expect(uiState.toasts.some((one) => one.message === 'The disk is full')).toBe(true);
+    uiState.toasts.length = 0;
+  });
+
+  it('opens New note on From the case when its tile is pressed, and makes nothing yet', async () => {
+    target.querySelector('[data-guide="notebook.from-case"]').click();
+    await settle();
+    const dialog = document.body.querySelector('[role="dialog"][aria-label="New note"]');
+    expect(dialog.querySelector('[data-start="from-case"]').getAttribute('aria-checked')).toBe('true');
+    expect(post.mock.calls.some(([address]) => address.endsWith('/notes'))).toBe(false);
+  });
+
   it('shows the reports first: a note with a style of its own, or chapters', async () => {
     await withMore();
     const reports = target.querySelector('[data-guide="notebook.reports"]');

@@ -7,7 +7,8 @@
  * Markdown the editor and the PDF already read. Everything named is a case
  * reference (`[[media:…]]` for a picture, `[[entity:…]]` for a place or a file), so
  * the list of sources and the imagery credits work on it as on any note. The
- * guidance lines (`<!--? … -->`) say what the analyst writes, and never print.
+ * guidance lines (`<!--? … -->`) say what the analyst writes, and never print. Each
+ * block opens on the geolocation's own description, left empty to fill in when it has none.
  */
 import { api } from '../api.js';
 import { entityReference, mediaReference } from '../markdown.js';
@@ -173,6 +174,8 @@ function block(item, { by, zone }) {
     '',
     pictureLine(item, label),
     '',
+    // the line is always there, so the analyst has the slot to describe what the item shows
+    `- Description: ${oneLine(item.description)}`.trimEnd(),
     `- Where: ${whereWords(item.points)}`.trimEnd(),
     `- When: ${whenWords(item.shown, zone)}`.trimEnd(),
     ...(by === 'geolocated' ? [`- Geolocated: ${dayWords(item.geolocated?.day)}`.trimEnd()] : []),
@@ -186,12 +189,13 @@ function block(item, { by, zone }) {
 function table(items, { by }) {
   const reading = by === 'geolocated' ? 'geolocated' : 'shown';
   return toMarkdown({
-    columns: [by === 'geolocated' ? 'Geolocated' : 'Day', 'Place', 'Coordinates', 'Source'],
+    columns: [by === 'geolocated' ? 'Geolocated' : 'Day', 'Place', 'Coordinates', 'Description', 'Source'],
     rows: items.map((item) => [
       dayCell(item[reading]),
       // a place named by its coordinates would say them twice beside the Coordinates cell
       chipsCell((item.points ?? []).map((point) => point.place).filter((place) => place?.id && !place.coords)),
       (item.points ?? []).map((point) => pointText(point.lat, point.lon)).filter(Boolean).join('; '),
+      oneLine(item.description),
       chipsCell([...(item.type === 'proof' ? [{ id: item.id, label: item.label }] : []), ...(item.sources ?? [])]
         .filter((entry, at, all) => all.findIndex((other) => other.id === entry.id) === at)),
     ]),
@@ -235,8 +239,8 @@ export function fromCaseNote(found, { from = '', to = '', by = 'shown', zone = '
 /** What the tile shows on its page: the parts, without anything of a case. */
 export const FROM_CASE_SAMPLE = [
   '## Summary', '', '## Findings', '',
-  '### Strike on the depot', '', '- Where: 48.12345, 37.12345', '- When: 12 March 2026, 14:05', '- Source: ', '',
-  '### Convoy on the bridge', '', '- Where: 48.13021, 37.14210', '- When: posted 13 March 2026', '- Source: ', '',
+  '### Strike on the depot', '', '- Description: Smoke over the fuel tanks.', '- Where: 48.12345, 37.12345', '- When: 12 March 2026, 14:05', '- Source: ', '',
+  '### Convoy on the bridge', '', '- Description: Trucks queuing at the bridge.', '- Where: 48.13021, 37.14210', '- When: posted 13 March 2026', '- Source: ', '',
   '## Ruled out', '', '## Limits', '',
 ].join('\n');
 

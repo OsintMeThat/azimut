@@ -33,7 +33,7 @@
   } from '../lib/state.svelte.js';
   import { createNote, deleteNote, resetCaseNotes } from '../lib/notes.js';
   import {
-    coverChoice, isPlainLook, normaliseLook, ownCover, readLook, reportBody, reportLook, templateLook, writeLook,
+    coverChoice, isPlainLook, normaliseLook, ownCover, readLook, reportBody, reportLook, styleLabel, templateLook, writeLook,
   } from '../lib/notes/look.js';
   import { keepPageView, readPageView } from '../lib/notes/pageView.js';
   import { exportNotes, revealExports } from '../lib/notesExport.js';
@@ -50,6 +50,7 @@
   import BackButton from '../components/BackButton.svelte';
   import NoteEditor from '../components/NoteEditor.svelte';
   import NotesHome from './notebook/NotesHome.svelte';
+  import NewNoteDialog from './notebook/NewNoteDialog.svelte';
   import LookControl from './notebook/LookControl.svelte';
   import PagePane from './notebook/PagePane.svelte';
   import ViewModes from './notebook/ViewModes.svelte';
@@ -73,8 +74,7 @@
   let titleInput = $state(null);
   let folderField = $state('');
   let menu = $state(null); // { row, anchor } for a card's ⋯, or { anchor } for the open note's
-  let noteModal = $state(null);
-  let noteModalSaving = $state(false);
+  let noteModal = $state(null); // the New note dialog: { start }
   let noteAction = $state(null);
   let noteActionBusy = $state(false);
   let naming = $state(null); // keep as template: { value }
@@ -362,14 +362,20 @@
 
   // -- making notes --------------------------------------------------------------
 
-  function newNote() {
-    noteModal = { title: '', folder: '', start: 'blank' };
+  /** The New note dialog, on the start asked for (`'from-case'`), else on a blank page. */
+  function newNote(start = 'blank') {
+    noteModal = { start: typeof start === 'string' ? start : 'blank' };
   }
 
+  // `start` is the name a note gets when none is typed, which is also the one its thumbnail shows
   const starts = $derived([
-    ...READY_NOTES.map((ready) => ({ id: ready.id, name: ready.name, body: ready.body, folder: '', look: ready.look })),
+    ...READY_NOTES.map((ready) => ({
+      id: ready.id, name: ready.name, start: ready.id === 'blank' ? 'Note' : ready.name, note: ready.note,
+      body: ready.body, folder: '', look: ready.look,
+    })),
     ...templatesState.note.map((record) => ({
-      id: `t:${record.id}`, name: record.name, body: record.data?.body ?? '', folder: record.data?.folder ?? '', look: record.data?.look ?? null,
+      id: `t:${record.id}`, name: record.name, start: record.name, note: styleLabel(record.data?.look?.style ?? 'plain'),
+      body: record.data?.body ?? '', folder: record.data?.folder ?? '', look: record.data?.look ?? null,
     })),
   ]);
 
@@ -382,22 +388,13 @@
     return note;
   }
 
-  async function saveNewNote() {
-    if (!noteModal) return;
-    const title = noteModal.title.trim();
-    if (!title) {
-      toast('Title required', 'warn');
-      return;
-    }
-    const start = starts.find((item) => item.id === noteModal.start);
-    noteModalSaving = true;
+  /** What the New note dialog hands over; the dialog stays open when the note could not be made. */
+  async function saveNewNote(start) {
     try {
-      await make({ title, folder: noteModal.folder || start?.folder || '', body: start?.body ?? '', look: start?.look ?? null });
+      await make(start);
       noteModal = null;
     } catch (error) {
       toast(error.message, 'danger');
-    } finally {
-      noteModalSaving = false;
     }
   }
 
@@ -753,23 +750,8 @@
   {/if}
 
   {#if noteModal}
-    <Modal title="New note" onclose={() => (noteModal = null)} width="580px">
-      <label class="modal-label" for="notebook-note-title">Title</label>
-      <!-- svelte-ignore a11y_autofocus -->
-      <input id="notebook-note-title" class="input" placeholder="Note title…" bind:value={noteModal.title} autofocus
-        onkeydown={(event) => { if (event.key === 'Enter') saveNewNote(); }} />
-      <span class="modal-label" style="margin-top:10px">Folder</span>
-      <FolderSelect bind:value={noteModal.folder} folders={caseState.current?.folders ?? []} emptyLabel="Unfiled" fresh />
-      <label class="modal-label" style="margin-top:10px" for="notebook-note-start">Start from</label>
-      <select id="notebook-note-start" class="input" bind:value={noteModal.start}>
-        {#each starts as item (item.id)}<option value={item.id}>{item.name}</option>{/each}
-      </select>
-      <div class="modal-row">
-        <div style="flex:1"></div>
-        <button class="btn" onclick={() => (noteModal = null)}>Cancel</button>
-        <button class="btn btn-primary" onclick={saveNewNote} disabled={noteModalSaving}>{noteModalSaving ? 'Creating…' : 'Create'}</button>
-      </div>
-    </Modal>
+    <NewNoteDialog {caseId} {starts} start={noteModal.start} folders={caseState.current?.folders ?? []}
+      taken={noteEntities.map((entity) => entity.label)} oncreate={saveNewNote} onclose={() => (noteModal = null)} />
   {/if}
 
   {#if naming}

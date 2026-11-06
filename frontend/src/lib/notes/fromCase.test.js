@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FROM_CASE_LOOK, countWords, dayWords, fromCaseNote, periodTitle, spanWords, whenWords,
+  FROM_CASE_LOOK, FROM_CASE_SAMPLE, countWords, dayWords, fromCaseNote, periodTitle, spanWords, whenWords,
 } from './fromCase.js';
 
 const PROOF = {
   id: 'pr1', type: 'proof', label: 'Strike on the depot', picture: true, media_kind: null,
+  description: 'Smoke over the fuel tanks,\n  seen from the east.',
   sources: [{ id: 'v1', label: 'Depot video', media_kind: 'video' }],
   points: [{ lat: 48.12345, lon: 37.12345, place: { id: 'pl1', label: 'Fuel depot', coords: false } }],
   shown: { kind: 'taken', raw: '2026-03-12T14:05:00+02:00', tz: 'Europe/Kyiv', day: '2026-03-12', last: '2026-03-12' },
@@ -13,6 +14,7 @@ const PROOF = {
 };
 const PHOTO = {
   id: 'm1', type: 'media', label: 'Convoy | bridge', picture: true, media_kind: 'image',
+  description: '',
   sources: [{ id: 'm1', label: 'Convoy | bridge', media_kind: 'image' }],
   points: [{ lat: 48.1302, lon: 37.1421, place: { id: 'pl2', label: '48.13020, 37.14210', coords: true } }],
   shown: { kind: 'published', raw: '2026-03-13', tz: null, day: '2026-03-13', last: '2026-03-13' },
@@ -73,6 +75,7 @@ describe('the note', () => {
       '',
       '[[media:pr1|Strike on the depot]]{width=75%}',
       '',
+      '- Description: Smoke over the fuel tanks, seen from the east.',
       '- Where: [[entity:pl1|Fuel depot]] 48.12345, 37.12345',
       '- When: 12 March 2026, 14:05 (Europe/Kyiv)',
       '- Source: [[entity:v1|Depot video]]',
@@ -83,6 +86,8 @@ describe('the note', () => {
       '',
       '[[media:m1|Convoy | bridge]]',
       '',
+      // the line is there with nothing after it, a slot to fill in
+      '- Description:',
       '- Where: [[entity:pl2|48.13020, 37.14210]]',
       '- When: posted 13 March 2026',
       '- Source: [[entity:m1|Convoy | bridge]]',
@@ -100,22 +105,37 @@ describe('the note', () => {
     ].join('\n'));
   });
 
-  it('writes a table instead: day, place, coordinates and source, one row each', () => {
+  it('writes a table instead: day, place, coordinates, description and source, one row each', () => {
     const { body } = fromCaseNote({ items: [PROOF, PHOTO], total: 2 },
       { from: '2026-03-01', to: '2026-03-14', layout: 'table' });
     expect(body).toContain([
       '## Findings',
       '',
-      '| Day | Place | Coordinates | Source |',
-      '| --- | --- | --- | --- |',
-      '| 12 March 2026 | [[entity:pl1|Fuel depot]] | 48.12345, 37.12345 | [[entity:pr1|Strike on the depot]], [[entity:v1|Depot video]] |',
+      '| Day | Place | Coordinates | Description | Source |',
+      '| --- | --- | --- | --- | --- |',
+      '| 12 March 2026 | [[entity:pl1|Fuel depot]] | 48.12345, 37.12345 | Smoke over the fuel tanks, seen from the east. | [[entity:pr1|Strike on the depot]], [[entity:v1|Depot video]] |',
       // a name's own `|` is kept out of the table's way
-      // a place named by its own coordinates is not said twice
-      '| 13 March 2026 (posted) |  | 48.13020, 37.14210 | [[entity:m1|Convoy bridge]] |',
+      // a place named by its own coordinates is not said twice, and no description leaves its cell empty
+      '| 13 March 2026 (posted) |  | 48.13020, 37.14210 |  | [[entity:m1|Convoy bridge]] |',
       '',
       '## Ruled out',
     ].join('\n'));
     expect(body).not.toContain('### ');
+  });
+
+  it('writes a description in a table cell on one line, its pipes escaped', () => {
+    const piped = { ...PHOTO, description: 'Left | right\nof the road' };
+    const { body } = fromCaseNote({ items: [piped], total: 1 }, { layout: 'table' });
+    expect(body).toContain('| 48.13020, 37.14210 | Left \\| right of the road |');
+  });
+
+  it('opens each figure on its description, the line there even when the item has none', () => {
+    const { body } = fromCaseNote({ items: [PROOF, { ...PHOTO, description: undefined }], total: 2 });
+    const lists = body.split('### ').slice(1).map((one) => one.split('\n').filter((line) => line.startsWith('- ')));
+    expect(lists[0][0]).toBe('- Description: Smoke over the fuel tanks, seen from the east.');
+    expect(lists[1][0]).toBe('- Description:');
+    // the hint after the list stays
+    expect(body).toContain('- Source: [[entity:v1|Depot video]]\n\n<!--? What it shows, and how it was matched. -->');
   });
 
   it('dates by when they were geolocated when asked, and says so', () => {
@@ -123,7 +143,7 @@ describe('the note', () => {
     expect(title).toBe('Geolocated 14–16 March 2026');
     expect(body).toContain('- When: 12 March 2026, 14:05 (Europe/Kyiv)\n- Geolocated: 14 March 2026\n- Source:');
     const table = fromCaseNote({ items: [PHOTO], total: 1 }, { by: 'geolocated', layout: 'table' }).body;
-    expect(table).toContain('| Geolocated | Place | Coordinates | Source |');
+    expect(table).toContain('| Geolocated | Place | Coordinates | Description | Source |');
     expect(table).toContain('| 16 March 2026 |');
   });
 
@@ -132,13 +152,18 @@ describe('the note', () => {
     const { title, body } = fromCaseNote({ items: [bare], total: 1 }, { from: '2026-03-01', to: '2026-03-14', title: 'Geolocations, 1–14 March 2026 2' });
     expect(title).toBe('Geolocations, 1–14 March 2026 2');
     expect(body.startsWith('# Geolocations, 1–14 March 2026 2\n')).toBe(true);
-    expect(body).toContain('[[entity:pr1|Strike on the depot]]\n\n- Where:\n- When:\n- Source:\n');
+    expect(body).toContain('[[entity:pr1|Strike on the depot]]\n\n- Description: Smoke over the fuel tanks, seen from the east.\n- Where:\n- When:\n- Source:\n');
   });
 
   it('says the cut when the period holds more than the note', () => {
     const { body } = fromCaseNote({ items: [PROOF], total: 340 }, { from: '2026-03-01', to: '2026-03-14' });
     expect(body).toContain('## Findings\n\n*Only the first 1 of 340 geolocations. Narrow the period for the rest.*\n\n### Strike');
     expect(fromCaseNote({ items: [PROOF], total: 1 }).body).not.toContain('Only the first');
+  });
+
+  it('shows a description in the page the tile draws', () => {
+    expect(FROM_CASE_SAMPLE).toContain('### Strike on the depot\n\n- Description: ');
+    expect(FROM_CASE_SAMPLE.match(/^- Description: /gm)).toHaveLength(2);
   });
 
   it('prints as a report ending on its sources', () => {

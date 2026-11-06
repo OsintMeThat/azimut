@@ -9,8 +9,8 @@
    * whole folder; the bar at the foot exports the picked notes or makes a report
    * that includes them as chapters, in the order they were picked.
    *
-   * Beside the ready templates, *From the case* writes a note of every geolocation
-   * of a period (`FromCaseDialog.svelte`).
+   * Beside the ready templates, *From the case* opens the New note dialog on the
+   * start that writes a note of every geolocation of a period (`NewNoteDialog.svelte`).
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api.js';
@@ -20,7 +20,6 @@
   import Icon from '../../components/Icon.svelte';
   import SearchInput from '../../components/SearchInput.svelte';
   import PageThumb from './PageThumb.svelte';
-  import FromCaseDialog from './FromCaseDialog.svelte';
   import { FROM_CASE_LOOK, FROM_CASE_SAMPLE } from '../../lib/notes/fromCase.js';
 
   let {
@@ -43,7 +42,6 @@
   let found = $state(null); // { items, total } for the words typed, or null
   let searching = $state(false);
   let armed = $state(false); // Select pressed with nothing picked yet
-  let fromCase = $state(false); // the From the case dialog is open
   let anchorId = null; // where a Shift-press run starts
 
   const caseNotes = $derived(rows.find((row) => row.id === 'case') ?? null);
@@ -185,7 +183,7 @@
         <h3>Notes</h3>
         <p>The case's writing: leads, write-ups and a log, citing what the case holds.</p>
       </div>
-      <button class="btn btn-primary" onclick={onnew} data-guide="notebook.new"><Icon name="plus" size={15} /> New note</button>
+      <button class="btn btn-primary" onclick={() => onnew()} data-guide="notebook.new"><Icon name="plus" size={15} /> New note</button>
     </div>
     <p class="hint">In a note, type @ to cite a place, a person or a file, and / for headings, tasks, pictures, diagrams and chapters.</p>
 
@@ -264,7 +262,7 @@
             body: ready.body, folder: '', look: ready.look })}
           {#if ready.id === 'blank'}
             <button type="button" class="tile" title="A note of every geolocation of a period" data-guide="notebook.from-case"
-              onclick={() => (fromCase = true)}>
+              onclick={() => onnew('from-case')}>
               <span class="stage"><PageThumb name="Geolocations, 1–14 March 2026" body={FROM_CASE_SAMPLE} look={FROM_CASE_LOOK} width={118} /></span>
               <span class="tile-name">From the case</span>
               <span class="tile-said">A period's geolocations</span>
@@ -272,11 +270,6 @@
           {/if}
         {/each}
       </div>
-    {/if}
-
-    {#if fromCase}
-      <FromCaseDialog {caseId} taken={filed.map((row) => row.title)} onclose={() => (fromCase = false)}
-        oncreate={(start) => onstart(start)} />
     {/if}
 
     {#if selecting}

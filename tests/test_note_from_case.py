@@ -87,6 +87,23 @@ def test_a_file_counts_once_its_place_is_confirmed(client):
     assert item["shown"]["kind"] == "published" and item["day"] == "2026-03-12"
 
 
+def test_each_geolocation_carries_its_own_description(client):
+    cid, case = _case(client)
+    place = _place(case, "Quay", 14.798, 42.954)
+    proof = _proof(case, "Described proof", [], place, when="2026-03-10", notes="  Seen from the north bank.\n ")
+    photo = _file(case, "Described photo", {"upload_date": "20260312"})
+    case.add_link(photo, place, link_engine.DEPICTS, by="user")
+    case.update_entity(photo, {"attrs": {"notes": "Taken from a car, facing east."}})
+    bare = _file(case, "Bare photo", {"upload_date": "20260313"})
+    case.add_link(bare, place, link_engine.DEPICTS, by="user")
+
+    items = {item["id"]: item for item in _read(client, cid)["items"]}
+    # the proof's sentence and the analyst's Notes on a file, trimmed; nothing is an empty string
+    assert items[proof]["description"] == "Seen from the north bank."
+    assert items[photo]["description"] == "Taken from a car, facing east."
+    assert items[bare]["description"] == ""
+
+
 def test_a_file_with_no_place_and_what_the_case_made_do_not_count(client):
     cid, case = _case(client)
     _file(case, "Loose", {"upload_date": "20260312"})

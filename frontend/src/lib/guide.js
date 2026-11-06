@@ -783,7 +783,7 @@ export const PAGES = {
     lead: 'The case’s notes, written in place and citing what the case holds.',
     shot: 'notebook',
     marks: [
-      { anchor: 'notebook.new', title: 'New note', text: 'A title, a folder, and a template to start from.' },
+      { anchor: 'notebook.new', title: 'New note', text: 'What to start from, the case’s geolocations included, and a folder. A title is optional.' },
       { anchor: 'notebook.search', title: 'Find words', text: 'Looks inside every note, and opens the one you pick at the line.' },
       { anchor: 'notebook.case', title: 'Case notes', text: 'The case’s own page, always there. A log of the work fits it.' },
       {

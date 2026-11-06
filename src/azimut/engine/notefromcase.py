@@ -298,6 +298,8 @@ def geolocations(case: Case, zone: str = "UTC") -> list[dict[str, Any]]:
             "id": entity["id"],
             "type": entity["type"],
             "label": label_of(entity) or ("Proof" if is_proof else "File"),
+            # the sentence a proof carries, or the analyst's Notes on a file
+            "description": str(attrs.get("notes") or "").strip(),
             "media_kind": links.media_kind(entity),
             # a proof saved without its PNG has no picture to show, only its name
             "picture": bool(attrs.get("path")),
