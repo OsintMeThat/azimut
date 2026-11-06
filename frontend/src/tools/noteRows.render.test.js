@@ -118,7 +118,8 @@ describe('each tool puts its row where the hand already goes', () => {
   it('offers a pinned candidate only, never one still in the queue', () => {
     const source = read('./detect/DetectReview.svelte');
     expect(source).toContain("const pinned = $derived(candidate?.review === 'kept' && candidate?.entity_id ? candidate : null);");
-    expect(source).toContain("offerPuts('detect', () => (pinned ? [notePin] : []));");
+    // the pin when one is pinned, and the kept table once something is kept: never the queue
+    expect(source).toContain("offerPuts('detect', () => [...(pinned ? [notePin] : []), ...(hasKept ? [noteKept] : [])]);");
     // the row sits in the pinned verdict, nowhere else
     const verdict = source.slice(source.indexOf("{#if candidate?.review === 'kept'}"), source.indexOf("{:else if candidate?.review === 'noted'}"));
     expect(verdict).toContain('<PutInNote');

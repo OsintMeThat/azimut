@@ -2257,7 +2257,7 @@ describe('the credits a proof keeps, and prints when asked', () => {
   const CREDITS = [
     'Contains modified Copernicus Sentinel data 2024',
     'Esri, Vantor, Earthstar Geographics, and the GIS User Community',
-    `© Mapterhorn, ${DEM}`,
+    `© Mapterhorn (mapterhorn.com/attribution), ${DEM}`,
     'OpenFreeMap © OpenMapTiles',
     'Map data ©2026 Google',
   ].join(' · ');

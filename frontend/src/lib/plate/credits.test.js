@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { creditParts, plateCredits } from './credits.js';
 
 /** What a page drawn from the relief owes it: Mapterhorn, and the Copernicus DEM licence's notice. */
-const RELIEF_CREDIT = '© Mapterhorn, produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and '
+const RELIEF_CREDIT = '© Mapterhorn (mapterhorn.com/attribution), produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and '
   + 'Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved';
 
 /** The credits of one map, read through the plate's own path. */
