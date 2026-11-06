@@ -5757,7 +5757,10 @@ page unless *Centred down the page* is off, its headings set larger and kept out
 contents; the note then starts on page 2. A `::: top-left`, `::: top-right`,
 `::: bottom-left` or `::: bottom-right` block there is pinned to that corner of the page,
 within half its width, and the rest is centred in the room the corners leave (or starts
-under the top ones); anywhere else such a block prints aligned to its side. Choosing it writes a skeleton at the top when
+under the top ones); anywhere else such a block prints aligned to its side. The editor
+tags one above the cover line *Top right corner* (and so on). **/** › *Alignment* offers
+*Align centre*, *Align right* and the four corners, each wrapping the line in its block.
+The cover skeleton puts the Azimut logo in a `::: top-right` block. Choosing it writes a skeleton at the top when
 the note has no such line, as **/** › *Cover page* does. With nothing above the line the
 check says so, and a cover longer than a page warns. **/** › *Signature* writes a block
 of the analyst's signature picture, `{name}`, `{role}, {organisation}` and `{date}`, and
@@ -5774,8 +5777,9 @@ above the case's pictures. A paragraph in a `::: center`, `::: right` or `::: le
 block keeps its bold, italics, code, links, chips and `[n]`, and a picture there with
 no `align=` takes its block's place.
 
-**Header and footer** in the Look are the analyst's own, three slots each (left, centre,
-right) of one line, 120 characters at most. A slot is words, where `{title}`, `{date}`,
+**Header and footer**, the Look's last folded part, are the analyst's own, three slots
+each (left, centre, right) of one line, 120 characters at most; an empty slot shows what
+the style prints there, and each has a logo button (*Your logo*, *Azimut logo*). A slot is words, where `{title}`, `{date}`,
 `{name}`, `{role}`, `{organisation}`, `{page}` and `{pages}` are filled on each page
 (an empty one going with its separator), or a logo (`azimut:my-logo`, `azimut:logo`)
 about 5 mm tall. A band with anything in it replaces the style's own on every page but
