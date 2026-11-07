@@ -24,7 +24,8 @@ decide whether the nudge is about the thing it is holding:
 ``grid-marks``    cells were marked on a grid (``name``, ``revision``)
 ``grid-removed``  a grid was discarded (``name``)
 ``geolocating``    the scene being geolocated changed: started, ended, or a capture
-                  attached (``video`` and ``draft``, both null once it ended)
+                  attached (``video`` and ``draft``, both null once it ended; a capture
+                  attached adds ``capture``, its path, and ``captures``, the count now)
 ``scenes``        a file's scenes to prove changed: an Inspect save that moved them, a
                   proof's time stated or a proof saved (``video``, null for a proof
                   saved), a scene marked, abandoned or restored

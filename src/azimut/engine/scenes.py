@@ -460,6 +460,41 @@ def _image_scenes(
     return {"video": image, "video_id": entity["id"], "scenes": scenes, "used": {}, "taken": hidden}
 
 
+def scene_places(
+    case: Case,
+    videos: list[str],
+    proofs: tuple[list[tuple[str, dict[str, Any]]], dict[str, tuple[str, float]]],
+    works: dict[str, dict[str, Any]],
+) -> dict[tuple[str, str], int]:
+    """Each draft's place among its video's scenes, proofs included, in the order
+    `video_scenes` lists them, read from their times alone: what the queue colours a
+    scene by, without building every proof's row."""
+    specs, origins = proofs
+    rows: dict[str, list[dict[str, Any]]] = {video: [] for video in videos}
+    taken: set[str] = set()
+    for _name, spec in specs:
+        taken |= cited_drafts(stated_scene(spec))
+        scene = proof_scene(spec, origins)
+        if scene is not None and scene["video"] in rows:
+            rows[scene["video"]].append({"kind": "proof", **scene})
+    for video in videos:
+        for draft in _drafts_of(case, video, works):
+            if not isinstance(draft.get("id"), str) or draft["id"] in taken:
+                continue
+            start, end = _seconds(draft.get("start")), _seconds(draft.get("end"))
+            whole = draft.get("start") is None and draft.get("end") is None
+            if (start is None and not whole) or (start is not None and end is not None and end <= start):
+                continue
+            rows[video].append({"kind": "draft", "id": draft["id"], "start": start, "end": end if start is not None else None})
+    places: dict[tuple[str, str], int] = {}
+    for video, listed in rows.items():
+        listed.sort(key=_order)
+        for at, row in enumerate(listed):
+            if row["kind"] == "draft":
+                places[(video, row["id"])] = at
+    return places
+
+
 def read_proofs(case: Case) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, tuple[str, float]]]:
     """Every proof's spec and where its frames were cut, read once for several videos."""
     specs = proof_specs(case)

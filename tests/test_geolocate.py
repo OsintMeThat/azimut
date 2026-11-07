@@ -107,7 +107,7 @@ def test_a_capture_taken_while_a_scene_is_geolocated_is_attached_to_it(client):
     assert (held["video"], held["id"], held["label"], held["state"]) == (photo, "s1", "Roundabout", "todo")
 
     shot = _capture(client, cid)
-    assert shot["scene"] == {"video": photo, "id": "s1", "label": "Roundabout"}
+    assert shot["scene"] == {"video": photo, "id": "s1", "label": "Roundabout", "captures": 1}
     again = _capture(client, cid)
     s1 = next(s for s in _stored(client, cid, photo) if s["id"] == "s1")
     assert s1["captures"] == [shot["path"], again["path"]]
@@ -296,6 +296,24 @@ def test_a_scene_s_order_is_its_place_among_the_video_s_scenes_proofs_included(c
     # the proof at 0:00.5 comes first, then the passage at 0:01, then the instant at 0:03
     assert rows == {"mid": 1, "late": 2}
     assert _geolocate(client, cid, video, "late").json()["geolocating"]["order"] == 2
+
+
+def test_a_capture_attached_is_said_at_once_with_its_path_and_the_count(client, monkeypatch):
+    from azimut.api import events
+
+    cid = _case(client)
+    photo = _upload(client, cid)
+    _save_work(client, cid, photo, SCENES)
+    _geolocate(client, cid, photo, "s1")
+    heard = []
+    monkeypatch.setattr(events, "publish", heard.append)
+    first = _capture(client, cid)
+    second = _capture(client, cid)
+    said = [e for e in heard if e["type"] == "geolocating"]
+    assert said == [
+        {"type": "geolocating", "case_id": cid, "video": photo, "draft": "s1", "capture": first["path"], "captures": 1},
+        {"type": "geolocating", "case_id": cid, "video": photo, "draft": "s1", "capture": second["path"], "captures": 2},
+    ]
 
 
 def test_saving_a_work_or_abandoning_a_scene_says_its_scenes_may_have_moved(client, monkeypatch):

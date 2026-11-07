@@ -571,18 +571,34 @@ def collage_pieces(case: "Case") -> list[dict[str, Any]]:
     """Every collage with each piece's file and instant, and the picture it last
     exported: what reads a collage back to the video its pieces were cut from."""
     out = []
+    titles = _collage_titles(case)
     for rel, spec in _collage_specs(case):
-        entity = case.find_entity(attr="spec", value=rel)
         nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
         exported: dict[str, Any] = spec["exported"] if isinstance(spec.get("exported"), dict) else {}
         out.append({
             "name": Path(rel).stem,
-            "title": str((entity or {}).get("label") or Path(rel).stem),
+            "title": titles.get(rel) or Path(rel).stem,
             "pieces": [((n.get("save") or {}).get("path"), (n.get("save") or {}).get("time")) for n in nodes],
             "export": exported.get("path") if isinstance(exported.get("path"), str) else None,
             "current": _export_current(case, spec),
         })
     return out
+
+
+def _collage_titles(case: "Case") -> dict[str, str]:
+    """Each collage's name as the case shows it, by its document, in one pass: a lookup
+    per collage scans every entity of a large case."""
+    titles: dict[str, str] = {}
+    cursor: str | None = None
+    while True:
+        page = case.page_entities(limit=500, cursor=cursor, types=[COLLAGE_TYPE])
+        for entity in page.get("items", []):
+            rel = (entity.get("attrs") or {}).get("spec")
+            if isinstance(rel, str) and rel:
+                titles[rel] = str(entity.get("label") or "")
+        cursor = page.get("next_cursor")
+        if not cursor:
+            return titles
 
 
 def collage_export(case: "Case", name: str) -> str | None:

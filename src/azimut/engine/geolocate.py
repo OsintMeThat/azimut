@@ -72,17 +72,8 @@ def _orders(case: Case, videos: list[str], proofs: Any = None) -> dict[tuple[str
     pill and the reference window draw it in the same colour. A file that is not a
     video has no bar, and its scenes no place."""
     proofs = proofs if proofs is not None else scenes_engine.read_proofs(case)
-    works = inspectwork.subject_specs(case)  # read once: a queue walks every worked file
-    places: dict[tuple[str, str], int] = {}
-    for video in videos:
-        try:
-            listed = scenes_engine.video_scenes(case, video, proofs, works)["scenes"]
-        except CaseError:
-            continue
-        for at, scene in enumerate(listed):
-            if scene.get("kind") == "draft":
-                places[(video, scene["id"])] = at
-    return places
+    # every work read once, and the order taken from the times alone
+    return scenes_engine.scene_places(case, videos, proofs, inspectwork.subject_specs(case))
 
 
 def _placed(row: dict[str, Any], places: dict[tuple[str, str], int]) -> dict[str, Any]:
@@ -102,6 +93,18 @@ def _in_case(case: Case, path: str) -> dict[str, Any] | None:
     return entity if entity is not None and entity.get("type") in ("media", "capture") else None
 
 
+def _present(case: Case, paths: list[str]) -> dict[str, dict[str, Any]]:
+    """The files still in the case, by path, from the media index: one query, where a
+    lookup per file scans every entity of a large case."""
+    unique = list(dict.fromkeys(p for p in paths if p))
+    found: dict[str, dict[str, Any]] = {}
+    for at in range(0, len(unique), 500):
+        for item in case.media_items_by_paths(unique[at : at + 500]):
+            if item.get("path"):
+                found[item["path"]] = item
+    return found
+
+
 # -- the scene being geolocated -------------------------------------------------------
 
 
@@ -115,7 +118,7 @@ def current(case: Case) -> dict[str, Any] | None:
         held = dict(_active.get(case.id) or {})
     if not held:
         return None
-    draft = _draft(case, held["video"], held["draft"]) if _in_case(case, held["video"]) else None
+    draft = _draft(case, held["video"], held["draft"]) if _present(case, [held["video"]]) else None
     proofs = scenes_engine.read_proofs(case)
     kind = _kinds(case, [held["video"]]).get(held["video"], "video")
     if draft is None or draft.get("abandoned") or _proved(proofs[0], _taken(proofs[0]), held["video"], draft["id"], kind):
@@ -192,7 +195,14 @@ def attach(case: Case, path: str) -> dict[str, Any] | None:
     except CaseError:
         stop(case, held["draft"])
         return None
-    return {"video": held["video"], "id": held["draft"], "label": str(scene.get("label") or "")}
+    gathered = scene.get("captures") or []
+    return {
+        "video": held["video"],
+        "id": held["draft"],
+        "label": str(scene.get("label") or ""),
+        # how many the scene now holds, so the pills count it without asking again
+        "captures": len(gathered),
+    }
 
 
 # -- abandoning -----------------------------------------------------------------------
@@ -297,11 +307,12 @@ def queue(case: Case) -> dict[str, Any]:
     works = [(subject, drafts) for subject, _touched, drafts in inspectwork.scene_works(case)]
     kinds = _kinds(case, [subject for subject, _drafts in works])
     places = _orders(case, [subject for subject, _drafts in works if kinds.get(subject) == "video"], proofs)
+    present = _present(case, [subject for subject, _drafts in works])
     files = []
     for subject, drafts in works:
-        entity = _in_case(case, subject)
+        item = present.get(subject)
         kind = kinds.get(subject, "video")
-        if entity is None:
+        if item is None:
             continue
         rows = [
             _placed(scene_row(case, subject, d, kind), places)
@@ -311,5 +322,6 @@ def queue(case: Case) -> dict[str, Any]:
         if not rows:
             continue
         rows.sort(key=lambda r: (-math.inf, -math.inf) if r["start"] is None else (r["start"], r["end"] or r["start"]))
-        files.append({"video": subject, "title": str(entity.get("label") or subject), "kind": kind, "scenes": rows})
+        title = item.get("title") or item.get("filename") or subject.rsplit("/", 1)[-1]
+        files.append({"video": subject, "title": str(title), "kind": kind, "scenes": rows})
     return {"files": files, "geolocating": current(case)}

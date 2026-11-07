@@ -410,7 +410,12 @@ def attach_capture(case: Any, path: str) -> dict[str, Any] | None:
     capture's answer can say which. Every route that files a capture calls this."""
     scene = geolocate.attach(case, path)
     if scene is not None:
-        say_geolocating(case)
+        # said at once, with the capture and the count: the pills update without reading
+        # the scene again, which walks every proof of the case
+        events.publish({
+            "type": "geolocating", "case_id": case.id, "video": scene["video"], "draft": scene["id"],
+            "capture": path, "captures": scene["captures"],
+        })
     return scene
 
 
