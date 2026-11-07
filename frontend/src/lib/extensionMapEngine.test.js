@@ -154,15 +154,20 @@ function open({ recording, size, ratio = 1, parse, storage = {}, firefox = false
     saved,
     /** What the app was asked, in order. */
     asks: (path) => sent.filter((m) => m.path === path).map((m) => m.query),
-    /** The status line the analyst reads, stripped of its markup. */
+    /** The status the analyst reads: the words of the dot by the case, which the
+     *  line under the header repeats only when they ask for something. */
     status: () =>
       panel.state.collapsed
         ? ''
-        : window.__AZIMUT_MAP_TOOLS__.root.querySelector('.status span').textContent,
+        : window.__AZIMUT_MAP_TOOLS__.root.querySelector('.sound').getAttribute('aria-label'),
     canvas: () => window.__AZIMUT_MAP_TOOLS__.root.querySelector('canvas'),
-    /** The offset the panel settled on, where the analyst can read it. */
+    /** The offset the panel settled on, where the analyst can read it: under the
+     *  words in the dot's tooltip. */
     statusTitle: () =>
-      window.__AZIMUT_MAP_TOOLS__.root.querySelector('.status span').getAttribute('title') ?? '',
+      (window.__AZIMUT_MAP_TOOLS__.root.querySelector('.sound').getAttribute('title') ?? '')
+        .split('\n')
+        .slice(1)
+        .join('\n'),
     /** Pick a tool up, the way the analyst does — nothing is drawn until one
      *  is open, so nothing about the drawing can be asserted until one is. */
     pick: (id) =>

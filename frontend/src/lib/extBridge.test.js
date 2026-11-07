@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   extensionVersion, extensionOutdated, captureTab, handOffPost, handOffReverse, onActivated,
   extensionState, pingExtensions, reloadExtension, onBridgeHello, mapLinkRelay, onSceneProof, sceneHandoff,
+  onPairingAsked,
 } from './extBridge.js';
 
 // The bridge protocol is the app's only path to widget pixels, so what these
@@ -84,6 +85,25 @@ describe('captureTab', () => {
     const err = await captureTab().catch((e) => e);
     expect(err.needsActivation).toBe(true);
     off();
+  });
+});
+
+describe('onPairingAsked', () => {
+  it('fires when the pairing popup asks for the token, until unsubscribed', async () => {
+    let calls = 0;
+    const off = onPairingAsked(() => calls++);
+    const ask = (type = 'open-pairing') =>
+      new Promise((r) => {
+        window.postMessage({ channel: 'azimut-capture-ext', type }, window.location.origin);
+        setTimeout(r, 30);
+      });
+    await ask('activated'); // another word from the extension is not this one
+    expect(calls).toBe(0);
+    await ask();
+    expect(calls).toBe(1);
+    off();
+    await ask();
+    expect(calls).toBe(1);
   });
 });
 

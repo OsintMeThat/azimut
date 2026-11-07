@@ -86,7 +86,7 @@ export const PAGES = {
       { anchor: 'ext.status', title: 'Is it installed', text: 'Says whether this browser has it, and whether an update is ready.' },
       { anchor: 'ext.folder', title: 'Chrome, Edge, Brave', text: 'Copy the path, turn on developer mode, press Load unpacked and paste it, then reload the tab.' },
       { anchor: 'ext.firefox', title: 'Firefox', text: 'Download the signed .xpi, then Install Add-on From File in the gear menu of about:addons.' },
-      { anchor: 'ext.pairing', title: 'Pairing', text: 'Paste this token in the extension’s options. Rotating it unpairs every copy.' },
+      { anchor: 'ext.pairing', title: 'Pairing', text: 'Press the extension’s button and paste this token where it asks. Rotating it unpairs every copy.' },
     ],
     tips: [
       { title: 'It reaches outside only when you ask', text: 'It can fill a composer on X or Bluesky and hand a picture to a reverse-search engine. Everything else goes to Azimut on this computer.' },
@@ -94,21 +94,19 @@ export const PAGES = {
     ],
   },
   'extension-capture': {
-    lead: 'On a map site, Alt+Shift+A opens the extension. Everything it fills in comes from the page’s address.',
+    lead: 'On a map site, the Azimut button opens its panel over the map. Everything a capture is filed with comes from the page’s address.',
     shot: 'extension-capture',
     marks: [
-      { anchor: 'ext.site', title: 'The site', text: 'The map site it recognised. On any other page it offers a bookmark instead.' },
-      { anchor: 'ext.case', title: 'Case', text: 'The case the capture goes into.' },
-      { anchor: 'ext.position', title: 'Lat / Lon', text: 'Read from the address, and yours to correct.' },
-      { anchor: 'ext.bearing', title: 'Zoom / Bearing', text: 'Most sites write no bearing, so type one for the north arrow to point right.' },
-      { anchor: 'ext.marks', title: 'Scale bar and north arrow', text: 'Drawn on the capture from the zoom, and remembered once ticked.' },
-      { anchor: 'ext.capture', title: 'Select area to capture', text: 'Draw the rectangle to keep. It lands in Media with its address, date and coordinates.' },
-      { anchor: 'ext.place', title: 'Save this place', text: 'Files the middle of the map as a place, with no picture.' },
-      { anchor: 'ext.tools', title: 'Draw tools over this map', text: 'Puts the tools of the next tab over the map.' },
+      { anchor: 'ext.site', title: 'On the ground or not', text: 'Green once what the panel draws sits on the map. Hover it to read why not.' },
+      { anchor: 'ext.case', title: 'Case', text: 'The case the captures, the points and the note go into.' },
+      { anchor: 'ext.capture', title: 'Capture an area', text: 'Draw the rectangle to keep. It lands in Media with its address, date and coordinates.' },
+      { anchor: 'ext.position', title: 'Lat / Lon', text: 'Asked only when the address gives no position.' },
+      { anchor: 'ext.marks', title: 'Scale bar and north arrow', text: 'Ticked on the selection’s bar, drawn from the zoom, and remembered.' },
+      { anchor: 'ext.bearing', title: 'Bearing', text: 'Most sites write no bearing, so type one for the north arrow to point right.' },
     ],
     tips: [
       { title: 'It reads the address, never the page', text: 'A capture’s coordinates are what the address bar says, so anyone with its saved link can check them.' },
-      { title: 'Any other page becomes a bookmark', text: 'A page that is not a map is filed as a link, with nothing downloaded.' },
+      { title: 'Any other page opens the note', text: 'The Azimut button opens the case note beside it, and Save this page files the page as a link.' },
     ],
   },
   'extension-tools': {

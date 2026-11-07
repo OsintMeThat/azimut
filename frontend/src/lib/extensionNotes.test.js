@@ -27,9 +27,7 @@ const ext = join(here, '../../../extension');
 const helpers = readFileSync(join(ext, 'notesmsg.js'), 'utf8');
 const panelSource = readFileSync(join(ext, 'notes.js'), 'utf8');
 const panelHtml = readFileSync(join(ext, 'notes.html'), 'utf8');
-const popupSource = readFileSync(join(ext, 'popup.js'), 'utf8');
 const overlaySource = readFileSync(join(ext, 'overlay.js'), 'utf8');
-const popupHtml = readFileSync(join(ext, 'popup.html'), 'utf8');
 
 const N = new Function(`${helpers}\nreturn AzimutNotes;`)();
 
@@ -692,70 +690,57 @@ describe('the notes panel', () => {
   });
 });
 
-describe('the popup opens the panel', () => {
-  async function runPopup(browser) {
-    document.body.innerHTML = bodyOf(popupHtml);
-    globalThis.Option = function Option(text, value) {
-      const option = document.createElement('option');
-      option.textContent = text;
-      option.value = value ?? text;
-      return option;
-    };
-    const api = {
-      tabs: { query: vi.fn(async () => [{ id: 7, windowId: 4, url: ARTICLE.url }]), sendMessage: vi.fn(async () => {}) },
-      storage: { local: { get: vi.fn(async (defaults) => ({ ...defaults, backendUrl: APP, token: 't' })), set: vi.fn() } },
-      runtime: { getManifest: () => ({ version: '0.3.3' }), sendMessage: vi.fn(), openOptionsPage: vi.fn() },
-      scripting: { executeScript: vi.fn(async () => [{ result: 900 }]) },
-      ...browser,
-    };
-    globalThis.chrome = api;
-    globalThis.fetch = vi.fn(async (url) => ({
-      ok: true,
-      status: 200,
-      json: async () => (String(url).includes('/parse') ? { site: null } : []),
-    }));
-    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
-    new Function('browser', popupSource)(browser.firefox ? api : undefined);
-    await new Promise((r) => setTimeout(r, 0));
-    return { api, close };
+describe('Save this page', () => {
+  /** The panel, its worker answering the bookmark with `answers` in turn. */
+  async function saving(...answers) {
+    const asked = [];
+    const sendMessage = vi.fn(async (message) => {
+      if (message.type !== 'notes-bookmark') return { ok: true };
+      asked.push(message);
+      return answers.shift() ?? { ok: true, title: 'A story' };
+    });
+    const panel = await openPanel({ sendMessage });
+    panel.fromNote(open());
+    return { ...panel, asked };
   }
 
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("opens Chrome's side panel for this window, inside the click", async () => {
-    const open = vi.fn(async () => {});
-    const { close } = await runPopup({ sidePanel: { open } });
-    $('open-notes').click();
-    expect(open).toHaveBeenCalledWith({ windowId: 4 });
+  it('files the page in front into the note’s case, and says so', async () => {
+    const { asked } = await saving({ ok: true, title: 'A story' });
+    $('bookmark').click();
     await settle();
-    expect(close).toHaveBeenCalled();
+    expect(asked).toEqual([{ type: 'notes-bookmark', windowId: 1, caseId: 'case-1' }]);
+    expect($('status').textContent).toBe('Saved “A story” as a bookmark.');
   });
 
-  it("opens Firefox's sidebar", async () => {
-    const open = vi.fn(async () => {});
-    await runPopup({ firefox: true, sidebarAction: { open } });
-    $('open-notes').click();
-    expect(open).toHaveBeenCalled();
-  });
-
-  it('says so when the browser has no panel to open', async () => {
-    await runPopup({});
-    $('open-notes').click();
+  it('asks for the page the browser keeps, and saves it once allowed', async () => {
+    const { asked, chrome } = await saving({ ok: false, closed: true, error: 'kept' }, { ok: true, title: 'A story' });
+    $('bookmark').click();
     await settle();
-    expect($('status').textContent).toMatch(/Could not open the notes panel/);
+    expect($('allowing').hidden).toBe(false);
+    $('allow').click();
+    await settle();
+    expect(chrome.permissions.request).toHaveBeenCalled();
+    expect(asked).toHaveLength(2);
+    expect($('status').textContent).toBe('Saved “A story” as a bookmark.');
+  });
+
+  it('says what the app or the extension said when it cannot', async () => {
+    await saving({ ok: false, error: 'Azimut is not reachable at http://127.0.0.1:18999. Is the app running?' });
+    $('bookmark').click();
+    await settle();
+    expect($('status').textContent).toMatch(/not reachable/);
+    expect($('bookmark').disabled).toBe(false);
   });
 });
 
-describe('the area selection a capture into the note draws', () => {
-  /** The popup's own overlay (extension/overlay.js), on a page of its own. */
-  function drawOverlay() {
-    return drawOverlayOn(() => { document.body.innerHTML = ''; });
+describe('the area selection a capture draws', () => {
+  /** The overlay (extension/overlay.js), on a page of its own. */
+  function drawOverlay(options) {
+    return drawOverlayOn(() => { document.body.innerHTML = ''; }, options);
   }
 
-  /** The same, over a page `dress` lays out first. */
-  function drawOverlayOn(dress) {
+  /** The same, over a page `dress` lays out first, with the worker's `options` if any. */
+  function drawOverlayOn(dress, options) {
     dress();
     const win = {
       __azimutOverlayActive: false,
@@ -763,6 +748,7 @@ describe('the area selection a capture into the note draws', () => {
       innerHeight: 900,
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
+      ...(options ? { __azimutAreaOptions: options } : {}),
     };
     const listeners = [];
     const chrome = {
@@ -773,11 +759,72 @@ describe('the area selection a capture into the note draws', () => {
           removeListener: vi.fn((fn) => listeners.splice(listeners.indexOf(fn), 1)),
         },
       },
+      storage: { local: { set: vi.fn(async () => {}) } },
     };
     const frame = (fn) => fn();
-    new Function('window', 'chrome', 'browser', 'requestAnimationFrame', overlaySource)(win, chrome, undefined, frame);
-    return { chrome, listeners, win };
+    // the bar's root is closed to the page, and so to this test unless it is kept
+    const roots = [];
+    const attach = window.HTMLElement.prototype.attachShadow;
+    window.HTMLElement.prototype.attachShadow = function keep(init) {
+      const root = attach.call(this, init);
+      roots.push(root);
+      return root;
+    };
+    try {
+      new Function('window', 'chrome', 'browser', 'requestAnimationFrame', overlaySource)(win, chrome, undefined, frame);
+    } finally {
+      window.HTMLElement.prototype.attachShadow = attach;
+    }
+    return { chrome, listeners, win, bar: roots[0] ?? null };
   }
+
+  it('asks for the marks on its own bar, as they were last left, and files what it said', () => {
+    const { chrome, bar, win } = drawOverlay({ marks: true, bearing: null });
+    expect(win.__azimutAreaOptions).toBeUndefined(); // read once, and gone
+    const tick = bar.querySelector('.marks');
+    const deg = bar.querySelector('.deg');
+    expect(tick.checked).toBe(true);
+    expect(bar.querySelector('.bearing').hidden).toBe(false);
+    deg.value = '42,5';
+    deg.dispatchEvent(new Event('input'));
+    const host = document.documentElement.lastElementChild;
+    host.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 100, clientY: 100, bubbles: true }));
+    host.dispatchEvent(new MouseEvent('mouseup', { button: 0, clientX: 400, clientY: 300, bubbles: true }));
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'area-selected', marks: true, bearing: 42.5 })
+    );
+  });
+
+  it('remembers the tick the moment it moves, and asks no bearing without it', () => {
+    const { chrome, bar } = drawOverlay({ marks: false, bearing: 30 });
+    const tick = bar.querySelector('.marks');
+    expect(bar.querySelector('.bearing').hidden).toBe(true);
+    expect(bar.querySelector('.deg').value).toBe('30');
+    tick.checked = true;
+    tick.dispatchEvent(new Event('change'));
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({ captureMarks: true });
+    expect(bar.querySelector('.bearing').hidden).toBe(false);
+  });
+
+  it('sends no bearing for what is not one', () => {
+    const { chrome, bar } = drawOverlay({ marks: true, bearing: null });
+    const deg = bar.querySelector('.deg');
+    deg.value = '400';
+    deg.dispatchEvent(new Event('input'));
+    expect(deg.classList.contains('wrong')).toBe(true);
+    const host = document.documentElement.lastElementChild;
+    host.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 100, clientY: 100, bubbles: true }));
+    host.dispatchEvent(new MouseEvent('mouseup', { button: 0, clientX: 400, clientY: 300, bubbles: true }));
+    expect(chrome.runtime.sendMessage.mock.calls[0][0].bearing).toBe(null);
+  });
+
+  it('starts no rectangle from a press on its bar', () => {
+    const { chrome, bar } = drawOverlay({ marks: false, bearing: null });
+    const tick = bar.querySelector('.marks');
+    tick.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 500, clientY: 20, bubbles: true, composed: true }));
+    tick.dispatchEvent(new MouseEvent('mouseup', { button: 0, clientX: 520, clientY: 40, bubbles: true, composed: true }));
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+  });
 
   it("sends the map's own credit line with the rectangle: the providers the strip at the foot names", () => {
     document.body.innerHTML = '';

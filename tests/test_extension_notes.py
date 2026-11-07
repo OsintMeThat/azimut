@@ -85,9 +85,29 @@ def test_the_capture_shortcut_is_declared(manifest):
 
 def test_the_helpers_load_before_the_worker_in_both_browsers(manifest):
     """Firefox runs the listed scripts in order; Chrome's worker imports them."""
-    assert manifest["background"]["scripts"] == ["notesmsg.js", "background.js"]
+    assert manifest["background"]["scripts"] == ["notesmsg.js", "mapsites.js", "background.js"]
     worker = (EXT / manifest["background"]["service_worker"]).read_text(encoding="utf-8")
     assert 'importScripts("notesmsg.js")' in worker
+    assert 'importScripts("mapsites.js")' in worker
+
+
+def test_the_toolbar_button_is_the_workers_once_paired(manifest):
+    """No popup in the manifest: a press reaches the worker, which opens the tools
+    over a map or the note anywhere else, and sets the pairing popup itself while
+    there is no token (``background.js``, "the toolbar button")."""
+    assert "default_popup" not in manifest["action"]
+    worker = (EXT / "background.js").read_text(encoding="utf-8")
+    assert 'popup: token ? "" : "popup.html"' in worker
+    assert (EXT / "popup.html").is_file()
+
+
+def test_the_note_has_a_shortcut_of_its_own(manifest):
+    """A shortcut is a press: it opens the side panel where a click in a page cannot."""
+    command = manifest["commands"]["open-note"]
+    assert command["suggested_key"]["default"] == "Alt+Shift+N"
+    keys = [c["suggested_key"]["default"] for c in manifest["commands"].values()]
+    # Chrome takes four suggested shortcuts at most, and two alike would clash
+    assert len(keys) <= 4 and len(set(keys)) == len(keys)
 
 
 def test_every_script_the_panel_page_loads_ships(manifest):

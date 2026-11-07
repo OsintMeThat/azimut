@@ -1,4 +1,4 @@
-/* Shared popup/options styling — matches the app's dark theme + amber accent. */
+/* Shared styling for the pairing popup, the options and the notes panel: the app's dark theme and amber accent. */
 
 :root {
   --bg: #161616;
@@ -27,14 +27,6 @@ body.options { max-width: 460px; }
 
 h1 { font-size: 15px; margin: 0 0 8px; }
 header { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
-header .badge {
-  margin-left: auto;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 11px;
-  color: var(--muted);
-}
 
 p { margin: 6px 0; }
 .muted { color: var(--muted); font-size: 12px; }
@@ -51,16 +43,10 @@ p { margin: 6px 0; }
   border-radius: 6px;
   font: inherit;
 }
-.row.coords input { width: 50%; }
 .row input:focus, .row select:focus { outline: 1px solid var(--accent); }
 
-/* a switch among the fields above it, not another field: no label column */
-.check { display: flex; align-items: center; gap: 7px; margin: 9px 0 2px; font-size: 12px; }
-.check input { accent-color: var(--accent); }
-.indent { margin-left: 21px; }
-
 .actions { display: flex; gap: 8px; margin-top: 12px; }
-/* two full-width choices for the same page, stacked so neither label truncates */
+/* full-width choices, stacked so no label truncates */
 .actions.stacked { flex-direction: column; }
 .actions.stacked button { width: 100%; }
 button {
@@ -80,15 +66,26 @@ button:disabled { opacity: 0.55; cursor: default; }
 .status.warn { border-color: var(--warn); }
 .status.error { border-color: var(--error); }
 
-footer {
-  display: flex;
-  gap: 14px;
-  margin-top: 12px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  font-size: 11px;
+/* the pairing popup: three steps, the token and its button on one line */
+.steps { margin: 6px 0 10px; padding-left: 18px; color: var(--muted); font-size: 12px; }
+.steps li { margin: 3px 0; }
+.steps strong { color: var(--text); }
+.row.pair input { flex: 1; }
+.row.pair button { flex: none; }
+button.link {
+  padding: 0 0 0 4px;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: underline;
 }
-footer a { color: var(--accent); text-decoration: none; }
+details { margin-top: 8px; font-size: 12px; color: var(--muted); }
+details summary { cursor: pointer; }
+details .row input { width: 100%; }
+#granted { margin: 0 0 8px; }
+#paired .actions { margin-top: 10px; }
+
 /* The notes panel: a bar of three actions over the app's own note, which fills
    the rest. The panel is as narrow as the browser makes it, so the labels are short. */
 body.notes {
@@ -108,6 +105,20 @@ body.notes {
   border-bottom: 1px solid var(--border);
 }
 .notes .bar p { margin: 0; }
+.notes .page {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.notes .page button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  font-size: 12px;
+}
 .notes .allowing { display: flex; align-items: center; gap: 8px; }
 .notes .allowing p { flex: 1; min-width: 0; }
 .notes .allowing button { flex: none; padding: 4px 10px; }

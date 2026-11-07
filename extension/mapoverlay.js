@@ -34,6 +34,11 @@
  * that origin is google.com. Every call goes through the worker's `map-api`
  * relay, which speaks as the extension over the routes it is allowed.
  *
+ * It is also where a map is captured from (Capture, which draws the area
+ * selection and files it), and where the case's note is opened beside the page:
+ * the toolbar button opens this panel and nothing else on a map (`background.js`,
+ * "the toolbar button"), so whatever the extension does to a map starts here.
+ *
  * Injected after mapmath.js, maptheme.js, maptools.js, mapdraw.js, mapref.js and
  * maplink.js. Injecting it a second time closes the panel, which is what the
  * toolbar button does.
@@ -104,8 +109,20 @@
 
   async function call(method, path, { query, body, form } = {}) {
     const answer = await api.runtime.sendMessage({ type: "map-api", method, path, query, body, form });
-    if (!answer?.ok) throw new Error(answer?.error || "the app did not answer");
+    if (!answer?.ok) {
+      // `code` is the worker's word on why: no token, a token turned down, no app
+      throw Object.assign(new Error(answer?.error || "the app did not answer"), { code: answer?.code });
+    }
     return answer.data;
+  }
+
+  /** The troubles that stop the whole panel rather than one errand. */
+  const TROUBLES = new Set(["unpaired", "rejected", "down"]);
+
+  /** Say what went wrong: the whole panel's trouble, or one errand's note. */
+  function failed(e) {
+    if (TROUBLES.has(e?.code)) state.trouble = e.code;
+    else state.note = e?.message || String(e);
   }
 
   /**
@@ -170,6 +187,16 @@
     gridTitle: "",
     grids: null,
     collapsed: false,
+    // Why nothing here can reach the app, which replaces the panel's body:
+    // "unpaired", "rejected" or "down", or null while it answers
+    trouble: null,
+    // Capture: the selection being armed, and a position typed where the
+    // address gives none
+    capturing: false,
+    capLat: "",
+    capLon: "",
+    // A word on how this browser opens the note, after the button could not
+    tip: "",
     // Following the other maps' camera (`linking` below). `asked` is the view
     // this map was last sent to, kept to say how close it came.
     link: { on: false, peers: 0, asked: null },
@@ -179,9 +206,19 @@
   };
 
   function freshScenes() {
+    // `open` is null while the panel decides (`listOpen`), else the analyst's own fold;
     // `proving` while Make the proof is on its way to the app tab
-    return { files: null, geo: null, open: false, busy: false, proving: false };
+    return { files: null, geo: null, open: null, busy: false, proving: false };
   }
+
+  /**
+   * Whether the list is unfolded. Left to the panel, it is open while no scene is
+   * being geolocated and no tool is picked up, which is when a scene is chosen from
+   * it; it folds to one row behind the pill while a scene is in hand, and under a
+   * tool while the map is being worked on, so the panel stays the height of a
+   * panel. A fold pressed by hand holds until a scene starts or stops here.
+   */
+  const listOpen = () => state.scenes.open ?? (!state.scenes.geo && !state.tool);
 
   const tools = {
     measure: T.createMeasure(),
@@ -727,7 +764,7 @@
         query: { url: lastUrl, height },
       });
     } catch (e) {
-      state.note = e.message;
+      failed(e);
       render();
       return;
     }
@@ -1318,9 +1355,110 @@
       loadPins();
       loadScenes();
     } catch (e) {
-      state.note = e.message;
+      failed(e);
       render();
     }
+  }
+
+  // --- capture -----------------------------------------------------------------
+
+  /** A number typed in a field, or null for an empty or unreadable one. */
+  function typed(raw) {
+    const text = String(raw ?? "").trim().replace(",", ".");
+    if (!text) return null;
+    const value = Number(text);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  /**
+   * Capture: the area selection drawn on this tab, and the rectangle filed into the
+   * case with the address it was drawn on (`background.js`, `start-area-select`).
+   *
+   * The position is the address bar's. Where it states none, the two fields under
+   * the button take one, both or neither, checked here where they can still be
+   * fixed. The scale bar, north arrow and bearing are asked on the selection's own
+   * bar, while the rectangle is drawn.
+   */
+  async function capture() {
+    const parsed = state.parsed;
+    if (!parsed?.site || state.capturing) return;
+    let lat = parsed.lat ?? null;
+    let lon = parsed.lon ?? null;
+    if (lat == null || lon == null) {
+      lat = typed(state.capLat);
+      lon = typed(state.capLon);
+      if ((lat === null) !== (lon === null)) {
+        state.note = "Latitude and longitude go together. Fill both or neither.";
+        return render();
+      }
+      if (lat !== null && (lat < -90 || lat > 90)) {
+        state.note = "Latitude runs from -90 to 90.";
+        return render();
+      }
+      if (lon !== null && (lon < -180 || lon > 180)) {
+        state.note = "Longitude runs from -180 to 180.";
+        return render();
+      }
+    }
+    state.capturing = true;
+    render();
+    try {
+      const answer = await api.runtime.sendMessage({
+        type: "start-area-select",
+        meta: {
+          url: location.href,
+          caseId: state.caseId,
+          lat,
+          lon,
+          zoom: parsed.zoom ?? null,
+          bearing: Number.isFinite(parsed.bearing) ? parsed.bearing : null,
+        },
+      });
+      if (!answer?.ok) state.note = answer?.error || "The selection could not start";
+    } catch (e) {
+      state.note = e.message;
+    } finally {
+      state.capturing = false;
+      render();
+    }
+  }
+
+  /**
+   * The case's note, beside the page. Asked inside the click: Chrome opens its side
+   * panel on a press it can still see, and Firefox only on a press in the browser's
+   * own chrome, so there the worker answers with how its sidebar opens instead.
+   */
+  function openNote() {
+    state.tip = "";
+    Promise.resolve(api.runtime.sendMessage({ type: "open-note" })).then(
+      (answer) => {
+        if (answer?.ok) return;
+        state.tip = answer?.error || "The note could not open here";
+        render();
+      },
+      (e) => {
+        state.tip = e.message;
+        render();
+      }
+    );
+  }
+
+  /** The app again, from the top: what a panel opened while it was away does first. */
+  async function reach() {
+    state.trouble = null;
+    state.note = "";
+    render();
+    try {
+      state.units = (await call("GET", "/api/ingest/ping")).units || "metric";
+    } catch (e) {
+      failed(e);
+      render();
+      if (state.trouble) return; // nothing else would answer either
+    }
+    await loadCases();
+    if (state.trouble) return;
+    await reofferFires();
+    await readUrl(true);
   }
 
   async function loadPins() {
@@ -1679,7 +1817,7 @@
       const answer = await call("POST", "/api/ingest/geolocating", { body: { case_id: caseId, video, draft } });
       if (caseId !== state.caseId) return;
       holdScene(answer?.geolocating ?? null);
-      state.scenes.open = false;
+      state.scenes.open = null; // the choice is made: the list folds behind the pill
       if (state.scenes.geo) showScene(state.scenes.geo);
     } catch (e) {
       state.note = e.message;
@@ -1694,7 +1832,10 @@
     const caseId = state.caseId;
     try {
       await call("POST", "/api/ingest/geolocating", { body: { case_id: caseId } });
-      if (caseId === state.caseId) holdScene(null);
+      if (caseId === state.caseId) {
+        holdScene(null);
+        state.scenes.open = null; // nothing in hand: the list is back, to pick the next
+      }
     } catch (e) {
       state.note = e.message;
     }
@@ -2078,6 +2219,23 @@
       flex: 1; font-size: 11px; font-weight: 600;
       letter-spacing: .08em; text-transform: uppercase; color: ${t.text2};
     }
+    /* the case everything here files into, as the header's title: one picker for
+       the panel, the captures and the note */
+    header select.case {
+      flex: 1 1 0; min-width: 0; width: auto; padding: 2px 4px; margin-left: -4px;
+      font-size: 12px; font-weight: 600; color: ${t.text1};
+      background: none; border-color: transparent; text-overflow: ellipsis;
+    }
+    header select.case:hover { border-color: ${t.border}; background: ${t.bg1}; }
+    header select.case option { background: ${t.bg1}; color: ${t.text1}; }
+    /* whether what is drawn here sits on the ground: the line under it said this
+       in words every time; now only when something is to be done about it */
+    .sound {
+      flex: none; width: 8px; height: 8px; border-radius: 50%; margin-right: 2px;
+      background: ${t.text3}; cursor: help;
+    }
+    .sound.ok { background: ${t.ok}; }
+    .sound.warn { background: ${t.warn}; }
     /* Everything the panel holds has to fit the panel, and one thing in it is
        a name the case chose: a forty-word video title used to size this grid,
        push the tab strip and the buttons out past the panel's own width, and
@@ -2086,11 +2244,17 @@
        auto minimums a grid track and a flex item take by default, which are the
        content's own width and no smaller. */
     .beta {
-      margin-left: 6px; padding: 1px 6px; border-radius: 999px;
-      font-size: 9.5px; letter-spacing: .06em; vertical-align: 1px;
+      flex: none; padding: 1px 6px; border-radius: 999px;
+      font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase;
       color: ${t.warn}; border: 1px solid ${t.warn};
     }
-    .body { padding: 9px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; }
+    .beta-line { display: flex; align-items: center; gap: 7px; font-size: 11px; color: ${t.text3}; }
+    /* the window's height at most, the rest scrolled: a tall tool under a long list
+       must not run the panel off the bottom of a laptop's screen */
+    .body {
+      padding: 9px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px;
+      max-height: calc(100vh - 130px); overflow-y: auto; overscroll-behavior: contain;
+    }
     .status { display: flex; gap: 6px; align-items: flex-start; font-size: 11.5px; color: ${t.text2}; }
     .status svg { flex: none; margin-top: 1px; }
     .status.off { color: ${t.warn}; }
@@ -2108,6 +2272,14 @@
       background: ${t.accent}; border-color: ${t.accent}; color: ${t.accentText};
     }
     button[disabled] { opacity: .4; cursor: default; }
+    button.primary {
+      width: 100%; padding: 7px 10px; font-weight: 600;
+      background: ${t.accent}; border-color: ${t.accent}; color: ${t.accentText};
+    }
+    button.primary:hover:not([disabled]) { background: ${t.accentHover}; border-color: ${t.accentHover}; }
+    .capture { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+    .trouble { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    .trouble p { margin: 0; color: ${t.text2}; }
     .tabs { display: grid; grid-template-columns: repeat(${ORDER.length}, minmax(0, 1fr)); gap: 4px; }
     .tabs button { flex-direction: column; gap: 3px; padding: 6px 2px; font-size: 10px; }
     .icon { flex: none; width: 26px; padding: 4px 0; background: none; border-color: transparent; color: ${t.text2}; }
@@ -2209,13 +2381,21 @@
     }
     .geo-proof svg { color: ${t.accent}; }
     .geo-proof:hover:not([disabled]) { background: ${t.bg2}; border-color: ${t.accent}; }
+    /* a row that reads as one: what it holds, how many, and the way it opens */
     .geo-fold {
-      justify-content: flex-start; gap: 6px; padding: 4px 6px;
-      background: none; border-color: transparent; color: ${t.text2};
-      font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+      justify-content: flex-start; gap: 7px; padding: 6px 8px;
+      font-size: 12px; font-weight: 500; color: ${t.text1};
+      background: ${t.bg2}; border-color: ${t.border};
     }
-    .geo-fold .n { color: ${t.text1}; letter-spacing: 0; font-variant-numeric: tabular-nums; }
-    .geo-fold[aria-expanded="true"] { color: ${t.text1}; }
+    .geo-fold .n {
+      flex: none; min-width: 18px; padding: 0 6px; border-radius: 9px; line-height: 18px;
+      background: ${t.accentSoft}; color: ${t.accent}; font-size: 11px; font-weight: 600;
+      font-variant-numeric: tabular-nums; text-align: center;
+    }
+    .geo-fold svg { margin-left: auto; color: ${t.text2}; }
+    .geo-fold:hover:not([disabled]) svg { color: ${t.text1}; }
+    /* unfolded, it is the list's own header and gives the frame to the rows */
+    .geo-fold[aria-expanded="true"] { background: none; border-color: transparent; padding: 3px 6px; }
     .geo-list {
       display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px;
       max-height: 216px; overflow: auto; margin-top: -2px; padding-bottom: 6px;
@@ -2351,7 +2531,7 @@
 
   function toolBody() {
     const tool = current();
-    if (!tool) return `<div class="hint">Pick a tool. The map stays yours until you do.</div>`;
+    if (!tool) return "";
     const readout = tool.readout(state.units) ?? "";
     // A tool that computes cannot be armed on a view that refuses geometry.
     // Disabled rather than restated: the status line above has already given
@@ -2513,13 +2693,15 @@
   }
 
   /**
-   * The scene being geolocated, as a pill, and the case's scenes still to geolocate,
-   * folded to one line until asked for. Nothing at all for a case with none, so the
-   * panel is the one it was before scenes.
+   * The scene being geolocated, as a pill, and the case's scenes still to geolocate:
+   * listed while none is, folded to one row behind the pill while one is
+   * (`listOpen`). Nothing at all for a case with none, so the panel is the one it
+   * was before scenes.
    */
   function scenesBlock() {
     if (!state.caseId) return "";
-    const { geo, open, busy } = state.scenes;
+    const { geo, busy } = state.scenes;
+    const open = listOpen();
     const files = T.openScenes(state.scenes.files);
     const total = files.reduce((n, file) => n + file.scenes.length, 0);
     if (!geo && !total) return "";
@@ -2575,8 +2757,12 @@
             .join("")}
         </div>`
       : "";
-    const fold = total
-      ? `<button data-act="geo-fold" class="geo-fold" aria-expanded="${open}">${icon(open ? "chevronUp" : "chevronDown", 13)}<span>To geolocate</span><span class="n">${total}</span></button>`
+    // behind a pill, the row counts what is left besides the scene in hand
+    const listed = geo && files.some((file) => file.scenes.some(isGeo)) ? 1 : 0;
+    const more = total - listed;
+    const label = geo && !open ? "More to geolocate" : "To geolocate";
+    const fold = (geo && !open ? more : total)
+      ? `<button data-act="geo-fold" class="geo-fold" aria-expanded="${open}" title="${open ? "Fold the list" : "Show the scenes still to geolocate"}"><span>${label}</span><span class="n">${geo && !open ? more : total}</span>${icon(open ? "chevronUp" : "chevronDown", 13)}</button>`
       : "";
     return `<div class="geo" data-guide="ext.scenes">${pill}${fold}${list}</div>`;
   }
@@ -2604,29 +2790,97 @@
 
   function render() {
     const seen = verdict();
+    // the case is the header's title once the app has named the cases
+    const named = !state.trouble && state.cases.length;
+    const title = named
+      ? `<select data-act="case" class="case" data-guide="ext.case" title="The case the captures, the points and the note go into">
+          ${state.cases.map((c) => `<option value="${esc(c.id)}"${c.id === state.caseId ? " selected" : ""}>${esc(c.name)}</option>`).join("")}
+        </select>`
+      : `<span class="name">Azimut</span>`;
     panel.innerHTML = `
       <header>
-        <span class="name">Azimut${betaBadge()}${foldedGeo()}</span>
+        ${soundDot(seen)}${title}${foldedGeo()}
+        ${button("open-note", "note", "", false, ' class="icon" title="Open the case note beside the page" aria-label="Open the case note"')}
         ${button("link", "link", "", state.link.on, ` class="icon" title="${linkTitle()}"${state.link.on || state.link.peers ? "" : " disabled"}`)}
         ${button("collapse", state.collapsed ? "chevronDown" : "chevronUp", "", false, ' class="icon" title="Fold"')}
         ${button("close", "x", "", false, ' class="icon" title="Close"')}
       </header>
       <div class="body">
-        <div class="status ${seen.ok ? "" : "off"}">
-          ${icon(seen.ok ? "satellite" : "alert", 14)}<span${frameTitle()}>${esc(seen.ok ? sound() : K.hiddenBy(location.href) ?? seen.why)}</span>
-        </div>
-        <select data-act="case">
-          ${state.cases.map((c) => `<option value="${esc(c.id)}"${c.id === state.caseId ? " selected" : ""}>${esc(c.name)}</option>`).join("")}
-        </select>
-        ${scenesBlock()}
-        <div class="tabs">
-          ${ORDER.map((id) => tab(id)).join("")}
-        </div>
-        ${toolBody()}
+        ${state.trouble ? troubleBlock() : `
+          ${soundLine(seen)}
+          ${captureBlock()}
+          ${scenesBlock()}
+          <div class="tabs">
+            ${ORDER.map((id) => tab(id)).join("")}
+          </div>
+          ${betaLine()}${toolBody()}`}
+        ${state.tip ? `<div class="hint">${esc(state.tip)}</div>` : ""}
         ${state.note ? `<div class="note">${esc(state.note)}</div>` : ""}
       </div>`;
     panel.classList.toggle("collapsed", state.collapsed);
     paint();
+  }
+
+  /** What the status says, in words: the view's facts, or why nothing is drawn. */
+  function soundText(seen) {
+    if (state.trouble) return troubleText();
+    return seen.ok ? sound() : K.hiddenBy(location.href) ?? seen.why;
+  }
+
+  /**
+   * The status as a dot by the case: green when what is drawn sits on the ground,
+   * amber while it is still placing itself, grey when nothing can be drawn here.
+   * The words are its tooltip, with the offset the drawing is placed by under them.
+   */
+  function soundDot(seen) {
+    const said = soundText(seen);
+    const level = state.trouble || !seen.ok ? "off" : !state.framed || seen.far ? "warn" : "ok";
+    const at = frameDetail();
+    return `<span class="sound ${level}" role="img" data-guide="ext.site" aria-label="${esc(said)}" title="${esc(at ? `${said}\n${at}` : said)}"></span>`;
+  }
+
+  /**
+   * The status in words under the header, only while it asks for something: a view
+   * nothing can be drawn on, a tool that draws on a view still placing itself, or
+   * a linked view this map cannot quite reach. Any other time it is the dot's.
+   */
+  function soundLine(seen) {
+    const drawing = state.tool && state.tool !== "refs";
+    const unsettled = !state.framed || seen.far;
+    if (seen.ok && !(drawing && unsettled) && !linkShort()) return "";
+    return `<div class="status ${seen.ok ? "" : "off"}">${icon(seen.ok ? "satellite" : "alert", 14)}<span>${esc(soundText(seen))}</span></div>`;
+  }
+
+  /** Capture, first in the panel, with the position fields an address left out. */
+  function captureBlock() {
+    const parsed = state.parsed;
+    const lost = parsed?.site && (parsed.lat == null || parsed.lon == null);
+    const fields = lost
+      ? `<div class="row" data-guide="ext.position" title="Not in this address: type it, or add it later in Azimut">
+          <input data-act="cap-lat" inputmode="decimal" placeholder="Latitude" value="${esc(state.capLat)}" />
+          <input data-act="cap-lon" inputmode="decimal" placeholder="Longitude" value="${esc(state.capLon)}" />
+        </div>`
+      : "";
+    const off = !parsed?.site || state.capturing ? " disabled" : "";
+    return `<div class="capture">
+      ${fields}
+      ${button("capture", "camera", "Capture an area", false, ` class="primary" data-guide="ext.capture" title="Files a rectangle of this map into Media, with its address and coordinates"${off}`)}
+    </div>`;
+  }
+
+  function troubleText() {
+    if (state.trouble === "unpaired") return "Not paired with Azimut yet.";
+    if (state.trouble === "rejected") return "Azimut turned this pairing down. Paste the token again.";
+    return "Azimut is not answering. Start it, then try again.";
+  }
+
+  /** Why nothing here answers, and the one press that fixes it. */
+  function troubleBlock() {
+    const fix =
+      state.trouble === "down"
+        ? button("retry", "", "Try again", false, ' class="primary"')
+        : button("pair", "", "Pair with Azimut", false, ' class="primary" title="Opens the extension\'s options, where the token goes"');
+    return `<div class="trouble"><p>${esc(troubleText())}</p>${fix}</div>`;
   }
 
   /** The tools that put a shape on the ground, which is the half of the panel
@@ -2637,10 +2891,11 @@
 
   /** Owning up, on whichever map. It used to name Google Earth, where the drift
    *  is worst, but the caveat was never really about that site: it is about what
-   *  these four draw, so it now follows the tool rather than the map. */
-  function betaBadge() {
+   *  these four draw, so it follows the tool rather than the map. Under the tool
+   *  row rather than in the header, where it pushed the case's name out. */
+  function betaLine() {
     if (!BETA_TOOLS.has(state.tool)) return "";
-    return ` <span class="beta" title="Still settling: check what this tool draws against the map">Beta</span>`;
+    return `<div class="beta-line"><span class="beta">Beta</span><span>Still settling: check what it draws against the map.</span></div>`;
   }
 
   /** The status line when geometry is on: where, what it is drawing in, and
@@ -2655,13 +2910,11 @@
   /** The offset itself, on the line that talks about it. It is the number to
    *  read out when a drawing lands somewhere the ground is not, and there is
    *  nowhere else in the panel it appears. */
-  function frameTitle() {
+  function frameDetail() {
     const { x, y } = state.frame;
     const at = `centre at ${x.toFixed(0)}, ${y.toFixed(0)}`;
-    if (state.framed) {
-      return ` title="${at} from the middle of a ${windowSize.w}×${windowSize.h} window"`;
-    }
-    return seeded ? ` title="${at}, from the site table until a zoom measures it"` : "";
+    if (state.framed) return `${at} from the middle of a ${windowSize.w}×${windowSize.h} window`;
+    return seeded ? `${at}, from the site table until a zoom measures it` : "";
   }
 
   // --- what the panel's controls do ------------------------------------------
@@ -2672,7 +2925,15 @@
     const act = target.dataset.act;
     state.note = "";
 
+    // first, and with nothing awaited before it: the note opens only inside the click
+    if (act === "open-note") return openNote();
     if (act === "close") return close();
+    if (act === "capture") return capture();
+    if (act === "retry") return reach();
+    if (act === "pair") {
+      Promise.resolve(api.runtime.sendMessage({ type: "open-options" })).catch(() => {});
+      return;
+    }
     if (act === "link") return toggleLink();
     if (act === "collapse") {
       state.collapsed = !state.collapsed;
@@ -2789,7 +3050,7 @@
     }
 
     if (act === "geo-fold") {
-      state.scenes.open = !state.scenes.open;
+      state.scenes.open = !listOpen();
       if (state.scenes.open) loadScenes();
       return render();
     }
@@ -2890,6 +3151,8 @@
 
   panel.addEventListener("input", trusted((event) => {
     const act = event.target.dataset.act;
+    if (act === "cap-lat") state.capLat = event.target.value;
+    if (act === "cap-lon") state.capLon = event.target.value;
     if (act === "pin-title") state.pinTitle = event.target.value;
     if (act === "grid-title") state.gridTitle = event.target.value;
     if (act === "sky-scrub") {
@@ -3109,13 +3372,6 @@
   (async () => {
     await restore();
     render();
-    try {
-      state.units = (await call("GET", "/api/ingest/ping")).units || "metric";
-    } catch (e) {
-      state.note = e.message;
-    }
-    await loadCases();
-    await reofferFires();
-    await readUrl(true);
+    await reach();
   })();
 })();

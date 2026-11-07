@@ -180,7 +180,7 @@ presses *Read the guide* on it, which opens the guide on its start page.
   its start, from Settings on its own page. The tool underneath does not move, and
   Escape closes it. A menu on the left reads in the order somebody arriving needs it:
   **Start here** and the **Capture extension** (in tabs of its own: installing it, its
-  popup over a map, its tools drawn over a map, and a table of where it works, Street
+  capture over a map, its tools drawn over a map, and a table of where it works, Street
   View included), then **journeys** (a goal walked across
   the tools: a photo geolocated from its import to the published thread, an analyzer
   of your own built in Detect, from the library to its checks and its save, and a search
@@ -3649,12 +3649,13 @@ without a reload, and the same the other way round. A sweep worked from both
 keeps both hands' marks: what is written is the cells that were marked, never the
 grid around them. A grid discarded elsewhere closes here and says so.
 
-**The extension's panel lists the scenes to geolocate** under its case picker, folded
-to one line and absent when there are none (`GET /api/ingest/scenes`). Geolocate there
+**The extension's panel lists the scenes to geolocate** under its Capture, open while
+none is being geolocated, folded to one row behind the pill while one is, and absent
+when there are none (`GET /api/ingest/scenes`). Geolocate there
 (`POST /api/ingest/geolocating`) holds the scene's video over the other site's map,
 paused on the scene and marked on its bar in its colour, and a pill names it, counts
 its captures and stops it. While it lasts, every capture filed in the case is attached
-to it, the popup's included, and the capture's report says *Attached to “bridge?”*. A
+to it, the panel's included, and the capture's report says *Attached to “bridge?”*. A
 picture reads *Whole picture*, with an image on its file's line, and Geolocate holds the
 picture over the map with the scene's dot and no bar. The pill counts with the same pulse
 as the app's, dots the scene in its colour, and offers **Make the proof**: the app's tab
@@ -6247,7 +6248,30 @@ now, the video at the frame's instant, the collage, the proof, the run at that
 candidate, the plate at that day and step, the Horizon view, the Timeline or Graph
 snapshot. Pictures filed before this build carry no such way back and show none.
 
-**Notes in the extension.** The extension's popup has **Notes panel**, which opens the
+**One press, the right surface.** The extension's toolbar button has no popup once it
+is paired (`extension/background.js`, "the toolbar button"). On a map site its own copy
+of the app's hosts names (`extension/mapsites.js`, held to `engine/mapsites.py` by
+`tests/fixtures/map-site-hosts.json`), it puts the map panel over the map, and a second
+press takes it off. On any other page it opens the note below. On Azimut's own tab it
+opens nothing: the press is the browser's leave to capture that tab, the app says
+*Extension ready. Press Capture again* and the button shows a tick for a moment. The
+decision is made before anything is awaited, because a side panel opens only inside
+the press. Until a token is stored the button opens the pairing popup instead: three
+steps, the token, **Pair** (`extension/pairing.js`, the check the options page makes
+too), a token the app turns down never stored; on Azimut's own tab its **Open it** asks
+the app for Settings on the Capture extension tab (`open-pairing`). Paired, it offers
+what the press was for. The map panel's header holds the case picker, a dot for whether
+its drawing sits on the ground (green placed, amber placing itself, grey nothing to
+draw on; the words in its tooltip, and under the header only while they ask for
+something), the note, the link and the fold. **Capture an area** comes first, with
+Lat/Lon fields only where the address gives no position; the selection's bar holds the
+scale bar and north arrow tick, remembered, and the bearing the arrow needs. A panel
+that cannot reach the app says why in its body: *Not paired with Azimut yet* or a
+token turned down (**Pair with Azimut** opens the options), or *Azimut is not
+answering* (**Try again**).
+
+**Notes in the extension.** The toolbar button on any page that is not a map,
+**Alt+Shift+N** anywhere, and the note button in the map panel's header open the
 browser's side panel (Chrome) or sidebar (Firefox) on the app's own note, framed:
 `#notebook?case=…&note=…&solo=1&panel=1` (`components/NotePanel.svelte`), one copy of
 the note with the app's. Its bar picks the case (the workspace's cases and scratch
@@ -6255,12 +6279,17 @@ sessions, the open one marked), then the note with its picker (Case notes and th
 case's notes), then the save state, **Look** (the Notebook's own, its panel as wide as
 the space allows), **Write | Page** and **Add (+)**. Picking a case writes the note shown, then switches in place to the note pinned
 to the side for that case, else Case notes; the address keeps the new case and note,
-and the extension follows: its popup, Capture and right-click items go to that case,
-and a case picked in the popup reopens the panel on it. The editor is the compact one,
+and the extension follows: its map panel, Capture and right-click items go to that
+case, and a case picked in the map panel reopens the note on it. Firefox opens its
+sidebar only from a press on the browser itself, so its map panel's note button says
+*This browser opens the note from its own sidebar, or with Alt+Shift+N.* **Save this
+page**, over the note, files the page in front into the note's case as a bookmark
+(`notes-bookmark`, `POST /api/ingest/bookmark`), asking for the page first where the
+browser keeps it from the extension. The editor is the compact one,
 with no *Open in…* nor ⌖, and a chip opens the record's address in a new tab. With no
 `case` the app's last case opens, with no `note` the note pinned to the side or Case
 notes, and a pick is kept in the address. With no case it says *Open a case in Azimut,
-or pick one in the extension's popup, then open Notes again.*
+or pick one in the extension's map panel, then open the note again.*
 
 While the panel holds a note, a right-click on any page offers **Cite this page**
 (**Cite this post** on X, Bluesky or Telegram), **Quote the selection** and **Capture
@@ -6286,12 +6315,12 @@ note through the same Put as every tool, with its light, toast and Undo:
   passage itself, a text fragment that opens the page scrolled to them and lit
   (`lib/notes/textFragment.js`), then the page's chip. A written link to a cited
   record's page, a passage link included, is that record in the Sources list.
-- **Capture** works on map sites and always draws the popup's area selection (*Drag over
+- **Capture** works on map sites and always draws the map panel's area selection (*Drag over
   the map to capture it. Esc cancels.*): only the rectangle dragged is filed into the
   panel's case and put in with its caption field open, and Esc, on the page or in the
   panel, puts nothing. Elsewhere it says *Captures are for map sites. Cite this page
   instead.* A browser lets an extension capture a tab only after a gesture on it, so on
-  a map never right-clicked (nor its popup opened there) a press says *Right-click the
+  a map never right-clicked (nor its toolbar button pressed there) a press says *Right-click the
   map to capture it.*, learnt from one capture taken on the press and thrown away; no
   browser message is ever shown as it is.
 

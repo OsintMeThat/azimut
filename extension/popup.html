@@ -8,79 +8,44 @@
   <header>
     <img src="icons/icon32.png" alt="" width="18" height="18" />
     <strong>Azimut Capture</strong>
-    <span id="site" class="badge" data-guide="ext.site"></span>
   </header>
 
-  <!-- one of these three states shows at a time -->
-  <section id="state-nomap" hidden>
-    <p>This is not a supported map site.</p>
-    <p class="muted">
-      Screen capture is maps only (Google Maps/Earth, Bing, Yandex, OSM, Apple
-      Maps, Zoom Earth, Copernicus). You can still file this page as a bookmark:
-      a saved link, nothing downloaded.
-    </p>
-    <div class="row">
-      <label>Case</label>
-      <select id="bm-case"></select>
+  <!-- on Azimut's own tab: opening this popup is what lets the app capture it -->
+  <p id="granted" class="muted" hidden>Azimut may now capture this tab.</p>
+
+  <section id="pairing" hidden>
+    <h1>Pair with Azimut</h1>
+    <ol class="steps">
+      <li>
+        In Azimut, open <strong>Settings › Capture extension</strong>.
+        <button id="open-settings" class="link" hidden>Open it</button>
+      </li>
+      <li>Copy the pairing token.</li>
+      <li>Paste it here.</li>
+    </ol>
+    <div class="row pair">
+      <input id="token" type="password" placeholder="Pairing token" autocomplete="off" />
+      <button id="pair" class="primary">Pair</button>
     </div>
-    <div class="row">
-      <label>Title</label>
-      <input id="bm-title" type="text" placeholder="optional" />
-    </div>
-    <div class="actions">
-      <button id="save-bookmark" class="primary">Save this page as a bookmark</button>
-    </div>
+    <details id="elsewhere">
+      <summary>Azimut on another address?</summary>
+      <div class="row">
+        <input id="backendUrl" type="text" placeholder="http://127.0.0.1:8477" />
+      </div>
+    </details>
   </section>
 
-  <section id="state-azimut" hidden>
-    <p>Permission granted for this tab.</p>
-    <p class="muted">
-      Return to Azimut and use <strong>Capture</strong>.
-    </p>
-  </section>
-
-  <section id="state-map" hidden>
-    <div class="row" data-guide="ext.case">
-      <label>Case</label>
-      <select id="case"></select>
-    </div>
-    <div class="row coords" data-guide="ext.position">
-      <label>Lat / Lon</label>
-      <input id="lat" type="text" inputmode="decimal" placeholder="—" />
-      <input id="lon" type="text" inputmode="decimal" placeholder="—" />
-    </div>
-    <div class="row coords" data-guide="ext.bearing">
-      <label>Zoom / Bearing</label>
-      <input id="zoom" type="text" inputmode="decimal" placeholder="—" />
-      <input id="bearing" type="text" inputmode="decimal" placeholder="—" />
-    </div>
-    <div class="row">
-      <label>Title</label>
-      <input id="title" type="text" placeholder="optional" />
-    </div>
-    <p id="coords-note" class="muted" hidden>
-      No coordinates found. Enter them now or add them later in Azimut.
-    </p>
-    <label class="check" data-guide="ext.marks">
-      <input id="marks" type="checkbox" />
-      <span>Scale bar &amp; north arrow</span>
-    </label>
-    <p id="marks-note" class="muted indent" hidden>
-      The arrow needs a bearing. Type one above to get it.
-    </p>
-    <div class="actions stacked">
-      <button id="capture-area" class="primary" data-guide="ext.capture">Select area to capture…</button>
-      <button id="save-place" data-guide="ext.place">Save this place</button>
-      <button id="map-tools" data-guide="ext.tools">Draw tools over this map</button>
-    </div>
-  </section>
-
+  <!-- under the form while pairing, over the next step once paired -->
   <p id="status" class="status" hidden></p>
-  <footer>
-    <a id="open-notes" href="#" title="Open the case note beside the page">Notes panel</a>
-    <a id="open-options" href="#">Extension options</a>
-  </footer>
 
-  <script type="module" src="popup.js"></script>
+  <section id="paired" hidden>
+    <div class="actions stacked">
+      <button id="next" class="primary" hidden></button>
+    </div>
+  </section>
+
+  <script src="pairing.js"></script>
+  <script src="mapsites.js"></script>
+  <script src="popup.js"></script>
 </body>
 </html>

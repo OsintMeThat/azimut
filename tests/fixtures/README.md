@@ -23,6 +23,7 @@ table written to suit the code.
 |---|---|
 | `map-sites.raw.json` | The observation: every URL nine map sites wrote about themselves after a known gesture, with the window they were driven in. Nothing in it has been parsed. |
 | `map-sites.json` | The same run, parsed by `engine/mapsites.py` and solved for where each site draws its camera. Apple's stale `z`, Google's satellite height in metres, Yandex's longitude-first order, and the five sites that draw their centre somewhere other than the middle of the window. |
+| `map-site-hosts.json` | Which addresses are maps at all: one per site, and the near misses (Google search, Bing search, Yandex images, a `/maps` path on another host). Written by hand, and read by both copies of the hosts: `engine/mapsites.py` and the extension's `mapsites.js`, which decides inside a toolbar press. |
 
 Read from both sides: `tests/test_mapsites.py` checks the parse still returns those
 views, `frontend/src/lib/extensionMapFrame.test.js` that the extension's arithmetic

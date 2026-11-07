@@ -1,14 +1,16 @@
 /**
- * Popup: the user-facing side of a capture on an external map site.
+ * The pairing popup: what the toolbar button opens while the extension holds no
+ * token, and nothing else.
  *
- * Opening it (toolbar click or Alt+Shift+A) is the user gesture that grants
- * activeTab — every capture descends from that gesture.
+ * Once paired, the button opens no popup at all (`background.js`, "the toolbar
+ * button"): the tools over a map, the case's note beside any other page. The token
+ * is typed here, in a page of the extension's own, never into a panel drawn over
+ * somebody else's site, whose scripts hear every key.
  *
- * Deliberately thin (owner decision): the extension knows NOTHING about map
- * sites. The page URL goes to the app (GET /api/ingest/parse), which answers
- * with site, coordinates, place name — every rule that could rot when a site
- * changes its URL format lives in the app, where an update is one pip install
- * instead of a manual extension reinstall on every machine.
+ * Once the app takes the token, the popup offers what the press would have opened,
+ * so the first press still ends where the page was going. Opening it is a press on
+ * the button too, so on Azimut's own tab it is what lets the app capture that tab,
+ * paired or not.
  */
 
 const api = typeof browser !== "undefined" ? browser : chrome;
@@ -21,72 +23,11 @@ const status = (text, kind = "info") => {
   el.className = `status ${kind}`;
 };
 
-const numOrNull = (id) => {
-  const raw = $(id).value.trim();
-  if (!raw) return null;
-  const v = parseFloat(raw.replace(",", "."));
-  return Number.isFinite(v) ? v : null;
-};
+/** Azimut's own tab, by address: any port on this machine, paired or not. */
+const isApp = (url) => /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(String(url || ""));
 
-// The ranges the app accepts, checked here where the field can still be fixed: past
-// this the server answers with a list of objects no message can be made of.
-const RANGES = {
-  lat: [-90, 90, "Latitude runs from -90 to 90."],
-  lon: [-180, 180, "Longitude runs from -180 to 180."],
-  zoom: [0, 23, "Zoom runs from 0 to 23."],
-  bearing: [0, 359.999, "Bearing runs from 0 to 359."],
-};
-
-const outOfRange = () => {
-  for (const [id, [low, high, said]] of Object.entries(RANGES)) {
-    const v = numOrNull(id);
-    if (v !== null && (v < low || v > high)) return said;
-  }
-  return "";
-};
-
-// What the app said, as one line: a refusal is a sentence, a schema rejection was a
-// list of objects, and `new Error(list)` printed "[object Object]".
-const reason = async (r) => {
-  const detail = (await r.json().catch(() => ({}))).detail;
-  if (typeof detail === "string" && detail) return detail;
-  if (Array.isArray(detail)) return detail.map((item) => item?.msg || "").filter(Boolean).join("; ") || `HTTP ${r.status}`;
-  return `HTTP ${r.status}`;
-};
-
-const origin = (url) => {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return null;
-  }
-};
-
-/**
- * How tall the map is drawn in the tab, in CSS pixels, or null.
- *
- * Read by injecting one expression, which `activeTab` allows the moment this
- * popup is opened — and it stays a number about the window, never anything
- * about the page: the coordinates of a capture are still only ever what the
- * address bar says. A page that refuses the injection simply has no height,
- * and the two sites that need one come back without a zoom rather than a
- * guessed one.
- */
-async function mapHeight(tabId) {
-  try {
-    const [result] = await api.scripting.executeScript({
-      target: { tabId },
-      func: () => window.innerHeight,
-    });
-    const height = Number(result?.result);
-    return Number.isFinite(height) && height > 0 ? Math.round(height) : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Firefox's sidebar, or Chrome's side panel for this window. */
-function openNotes(windowId) {
+/** Firefox's sidebar, or Chrome's side panel for this window. Called inside a press. */
+function openNote(windowId) {
   try {
     if (api.sidebarAction?.open) return Promise.resolve(api.sidebarAction.open());
     if (api.sidePanel?.open) return Promise.resolve(api.sidePanel.open({ windowId }));
@@ -96,256 +37,92 @@ function openNotes(windowId) {
   return Promise.reject(new Error("this browser has no side panel for extensions"));
 }
 
-async function loadCases(select, stored) {
-  const { backendUrl, token } = stored;
-  let cases;
-  try {
-    const r = await fetch(`${backendUrl}/api/ingest/cases`, {
-      headers: { "X-Azimut-Token": token },
-    });
-    if (r.status === 401) throw new Error("unpaired");
-    cases = await r.json();
-  } catch (e) {
-    select.replaceChildren(new Option("Azimut unreachable. Check options", ""));
-    status(
-      e.message === "unpaired"
-        ? "Not paired: open the extension options and paste the token from Azimut Settings."
-        : `Cannot reach Azimut at ${backendUrl}. Is the app running?`,
-      "error"
-    );
-    return false;
+/** What a press on this page opens once paired, or null on Azimut's own tab. */
+function nextStep(tab) {
+  const url = tab?.url || "";
+  if (!tab || isApp(url)) return null;
+  if (globalThis.AzimutMapSites?.siteOf(url)) {
+    return {
+      label: "Open the tools on this map",
+      run: async () => {
+        const answer = await api.runtime.sendMessage({ type: "map-tools", tabId: tab.id });
+        if (!answer?.ok) throw new Error(answer?.error || "the tools could not open");
+      },
+    };
   }
-  const options = cases.map(
-    (c) => new Option(c.scratch ? `(scratch) ${c.name}` : c.name, c.id)
-  );
-  options.push(new Option("New scratch session", ""));
-  select.replaceChildren(...options);
-  select.value = cases.some((c) => c.id === stored.lastCaseId) ? stored.lastCaseId : options[0].value;
-  // The case picked is the extension's case at once: the notes panel opens its
-  // note, and the next capture or right-click files there. A new scratch session
-  // is no case until something is filed into it.
-  select.addEventListener("change", () => {
-    if (select.value) api.storage.local.set({ lastCaseId: select.value });
+  return { label: "Open the note", run: () => openNote(tab.windowId) };
+}
+
+/** The pairing taken: say so, and offer the step the press was for. */
+function paired(said, tab) {
+  $("pairing").hidden = true;
+  $("paired").hidden = false;
+  status(said.text, said.kind);
+  const next = nextStep(tab);
+  const button = $("next");
+  if (!next) return;
+  button.textContent = next.label;
+  button.hidden = false;
+  // the side panel opens only inside the press: nothing is awaited before `run`
+  button.addEventListener("click", () => {
+    next.run().then(
+      () => window.close(),
+      (e) => status(`Could not open it: ${e?.message || e}`, "error")
+    );
   });
-  return true;
 }
 
 async function init() {
-  $("open-options").addEventListener("click", (e) => {
-    e.preventDefault();
-    api.runtime.openOptionsPage();
-  });
-
-  const stored = await api.storage.local.get({
-    backendUrl: "http://127.0.0.1:8477",
-    token: "",
-    lastCaseId: "",
-    // The scale bar and north arrow tick. Kept here rather than read from the
-    // app: this popup opens on somebody else's tab and has to answer offline,
-    // and the app's own tick belongs to the map it draws itself. Off until
-    // asked for, then remembered — nobody wants to tick it per capture.
-    captureMarks: false,
-  });
-  stored.backendUrl = stored.backendUrl.replace(/\/+$/, "");
-
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+  const stored = await api.storage.local.get({ backendUrl: AzimutPairing.DEFAULT_URL, token: "" });
 
-  // The notes panel opens from here in either browser. The call is made inside the
-  // click with nothing awaited before it, because both browsers open a side panel
-  // only on a user's gesture.
-  $("open-notes").addEventListener("click", (e) => {
-    e.preventDefault();
-    openNotes(tab?.windowId).then(
-      () => window.close(),
-      (err) => status(`Could not open the notes panel: ${err?.message || err}`, "error")
-    );
-  });
-
-  if (!tab?.url) {
-    $("state-nomap").hidden = false;
-    return;
-  }
-
-  // The app's own tab is recognized locally, by origin — it must work even
-  // unpaired, because opening this popup is what grants the app capture access
-  const tabOrigin = origin(tab.url);
-  const isLocalhost = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(tabOrigin || "");
-  if (tabOrigin && (tabOrigin === origin(stored.backendUrl) || isLocalhost)) {
-    $("site").textContent = "Azimut";
-    $("state-azimut").hidden = false;
-    // this click just granted activeTab for the tab — tell the app through
-    // the bridge so its Capture button knows it can proceed
-    api.tabs.sendMessage(tab.id, { type: "app-activated" }).catch(() => {});
-    return;
-  }
-
-  // everything about the URL is the app's judgment, not ours — except how tall
-  // the map is drawn, which only this side can see. Apple states the span its
-  // view covers and Google's satellite mode the metres its viewport is high;
-  // next to the window's height the app turns either into the zoom the capture
-  // is filed with, and without it neither has one at all.
-  const height = await mapHeight(tab.id);
-  let parsed;
-  try {
-    const r = await fetch(
-      `${stored.backendUrl}/api/ingest/parse?url=${encodeURIComponent(tab.url)}`
-        + (height ? `&height=${height}` : ""),
-      { headers: { "X-Azimut-Token": stored.token } }
-    );
-    if (r.status === 401) {
-      status("Not paired: open the extension options and paste the token from Azimut Settings.", "error");
-      return;
-    }
-    parsed = await r.json();
-  } catch {
-    status(`Cannot reach Azimut at ${stored.backendUrl}. Is the app running?`, "error");
-    return;
-  }
-
-  if (!parsed.site) {
-    // Not a map: capture is out, but the page can still be filed as a bookmark
-    // (a saved link, nothing downloaded). Same token, its own ingest route.
-    $("state-nomap").hidden = false;
-    if (tab.title) $("bm-title").value = tab.title;
-    const paired = await loadCases($("bm-case"), stored);
-    // Azimut down or unpaired: loadCases has already said so above. Leaving the
-    // button live would answer that message with a click that does nothing, and
-    // the analyst reads it as the extension being broken.
-    $("save-bookmark").disabled = !paired;
-    $("save-bookmark").addEventListener("click", async () => {
-      $("save-bookmark").disabled = true;
-      const body = new FormData();
-      body.append("url", tab.url);
-      body.append("case_id", $("bm-case").value);
-      body.append("title", $("bm-title").value.trim());
-      try {
-        const r = await fetch(`${stored.backendUrl}/api/ingest/bookmark`, {
-          method: "POST",
-          headers: { "X-Azimut-Token": stored.token },
-          body,
-        });
-        if (!r.ok) throw new Error(await reason(r));
-        status("Bookmark saved.", "ok");
-        setTimeout(() => window.close(), 700);
-      } catch (e) {
-        $("save-bookmark").disabled = false;
-        status(`Could not save: ${e.message}`, "error");
-      }
+  if (tab && isApp(tab.url)) {
+    $("granted").hidden = false;
+    // this press granted activeTab for the tab: the app's Capture can go on (bridge.js)
+    Promise.resolve(api.tabs.sendMessage(tab.id, { type: "app-activated" })).catch(() => {});
+    const open = $("open-settings");
+    open.hidden = false;
+    open.addEventListener("click", () => {
+      Promise.resolve(api.tabs.sendMessage(tab.id, { type: "app-pairing" })).catch(() => {});
     });
+  }
+
+  // Paired already: the browser kept a popup it should have dropped. Dropped now,
+  // and the step offered as it would be after pairing.
+  if (stored.token) {
+    const toolbar = api.action ?? api.browserAction;
+    Promise.resolve(toolbar?.setPopup?.({ popup: "" })).catch(() => {});
+    paired({ text: "Paired with Azimut.", kind: "ok" }, tab);
     return;
   }
 
-  $("site").textContent = parsed.label;
-  $("state-map").hidden = false;
-  for (const k of ["lat", "lon", "zoom", "bearing"]) {
-    if (parsed[k] !== null && parsed[k] !== undefined) $(k).value = String(parsed[k]);
-  }
-  // the URL's place name becomes the suggested title; with coordinates but no
-  // name, the placeholder shows the fallback Azimut will use (the coordinates)
-  if (parsed.title) $("title").value = parsed.title;
-  else if (parsed.lat !== null) $("title").placeholder = `${parsed.lat}, ${parsed.lon}`;
-  $("coords-note").hidden = parsed.lat !== null;
+  $("pairing").hidden = false;
+  $("backendUrl").value = stored.backendUrl;
+  $("elsewhere").open = AzimutPairing.address(stored.backendUrl) !== AzimutPairing.DEFAULT_URL;
+  $("token").focus();
 
-  const paired = await loadCases($("case"), stored);
-
-  // The marks tick, and what it can honestly promise on this page. Neither mark
-  // is invented: the bar needs a zoom, the arrow a bearing, and most of these
-  // sites write no rotation into their URL — so the note points at the field
-  // that would fix it rather than drawing a needle pointing at a guess.
-  const marks = $("marks");
-  marks.checked = !!stored.captureMarks;
-  const syncMarksNote = () => {
-    $("marks-note").hidden = !marks.checked || numOrNull("bearing") !== null;
+  const pair = async () => {
+    const backendUrl = AzimutPairing.address($("backendUrl").value);
+    const token = $("token").value.trim();
+    if (!token) {
+      status("Paste the pairing token first.", "error");
+      return;
+    }
+    $("pair").disabled = true;
+    status("Checking…");
+    const said = await AzimutPairing.check(backendUrl, token, api.runtime.getManifest().version, fetch);
+    $("pair").disabled = false;
+    if (!said.paired) {
+      status(said.text, "error");
+      return;
+    }
+    // stored only once the app took it: a wrong token never leaves the button pairing
+    await api.storage.local.set({ backendUrl, token });
+    paired(said, tab);
   };
-  marks.addEventListener("change", () => {
-    api.storage.local.set({ captureMarks: marks.checked });
-    syncMarksNote();
-  });
-  $("bearing").addEventListener("input", syncMarksNote);
-  syncMarksNote();
-
-  // Saving the point needs no pixels — only a position. It stays out of reach
-  // until both coordinates are there, parsed from the URL or typed above.
-  const placeBtn = $("save-place");
-  const syncPlaceButton = () => {
-    placeBtn.disabled =
-      !paired || numOrNull("lat") === null || numOrNull("lon") === null;
-  };
-  for (const id of ["lat", "lon"]) $(id).addEventListener("input", syncPlaceButton);
-  syncPlaceButton();
-
-  placeBtn.addEventListener("click", async () => {
-    const wrong = outOfRange();
-    if (wrong) {
-      status(wrong, "error");
-      return;
-    }
-    placeBtn.disabled = true;
-    const body = new FormData();
-    body.append("url", tab.url);
-    body.append("case_id", $("case").value);
-    body.append("title", $("title").value.trim());
-    for (const k of ["lat", "lon", "zoom", "bearing"]) {
-      const v = numOrNull(k);
-      if (v !== null) body.append(k, String(v));
-    }
-    body.append("extension", api.runtime.getManifest().version);
-    try {
-      const r = await fetch(`${stored.backendUrl}/api/ingest/place`, {
-        method: "POST",
-        headers: { "X-Azimut-Token": stored.token },
-        body,
-      });
-      if (!r.ok) throw new Error(await reason(r));
-      // reuse whatever case this landed in, including a freshly minted scratch
-      const saved = await r.json().catch(() => ({}));
-      if (saved.case_id) api.storage.local.set({ lastCaseId: saved.case_id });
-      status("Place saved.", "ok");
-      setTimeout(() => window.close(), 700);
-    } catch (e) {
-      syncPlaceButton();
-      status(`Could not save: ${e.message}`, "error");
-    }
-  });
-
-  // Same reason as Save place just above: unreachable is shown, not swallowed.
-  $("capture-area").disabled = !paired;
-
-  $("capture-area").addEventListener("click", async () => {
-    // half a coordinate would 422 server-side; catch it where it's fixable
-    if ((numOrNull("lat") === null) !== (numOrNull("lon") === null)) {
-      status("Latitude and longitude go together. Fill both or neither.", "error");
-      return;
-    }
-    if (outOfRange()) {
-      status(outOfRange(), "error");
-      return;
-    }
-    const r = await api.runtime.sendMessage({
-      type: "start-area-select",
-      tabId: tab.id,
-      meta: {
-        url: tab.url,
-        caseId: $("case").value,
-        title: $("title").value.trim(),
-        lat: numOrNull("lat"),
-        lon: numOrNull("lon"),
-        zoom: numOrNull("zoom"),
-        bearing: numOrNull("bearing"),
-        marks: marks.checked,
-      },
-    });
-    if (r?.ok) window.close(); // the overlay takes over; a notification reports the result
-    else status(r?.error || "could not start the selection", "error");
-  });
-
-  // The map tools panel. One button both ways: injecting it again is how it
-  // closes (extension/mapoverlay.js), so the popup never has to know whether
-  // the panel is currently up.
-  $("map-tools").addEventListener("click", async () => {
-    const r = await api.runtime.sendMessage({ type: "map-tools", tabId: tab.id });
-    if (r?.ok) window.close();
-    else status(r?.error || "could not open the map tools", "error");
+  $("pair").addEventListener("click", pair);
+  $("token").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") pair();
   });
 }
 

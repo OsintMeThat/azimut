@@ -1,15 +1,17 @@
 // @vitest-environment happy-dom
 /**
- * Tests for the capture extension's popup (extension/popup.js).
+ * Tests for the capture extension's pairing popup (extension/popup.js).
  *
- * Like extension.test.js next door, the popup has no exports: the suite loads
- * popup.html into the document, stubs `chrome` and `fetch`, evaluates the source
- * and reads the resulting DOM.
+ * The toolbar button opens it only while the extension holds no token
+ * (`background.js`, "the toolbar button"); once paired, a press opens the tools
+ * over a map or the note anywhere else, and no popup at all. Like the options page
+ * next door, the popup has no exports: the suite loads popup.html into the
+ * document, stubs `chrome` and `fetch`, evaluates the sources and reads the DOM.
  *
- * What is worth pinning here is the unreachable case. The popup asks the app to
- * read the URL before it draws anything, so a stopped app is caught upstream and
- * these buttons are never wired at all. The window this covers is the narrow one:
- * the app answered the first request and was gone by the second.
+ * What is worth pinning: a token is stored only once the app took it, so a wrong
+ * one never leaves the button pairing; the step the press was for is offered once
+ * paired, inside its own click; and on Azimut's own tab the popup still does what
+ * any press does there, let the app capture it.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -18,291 +20,173 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ext = join(here, '../../../extension');
-const source = readFileSync(join(ext, 'popup.js'), 'utf8');
+const source = ['pairing.js', 'mapsites.js', 'popup.js'].map((name) => readFileSync(join(ext, name), 'utf8')).join('\n');
 const html = readFileSync(join(ext, 'popup.html'), 'utf8');
 
 const $ = (id) => document.getElementById(id);
+const settle = async () => {
+  for (let i = 0; i < 6; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+};
 
-/** Run the popup against a tab, with `fetch` answering per URL fragment. */
-async function runPopup({ tabUrl, answers, height = 940, stored = {} }) {
-  // Body only, without the <script src> happy-dom refuses to fetch: the source is
-  // evaluated below by hand, with the globals a popup really has.
+const ARTICLE = { id: 5, windowId: 4, url: 'https://example.com/story' };
+const MAP = { id: 6, windowId: 4, url: 'https://www.google.com/maps/@48.85,2.29,17z' };
+const APP = { id: 9, windowId: 4, url: 'http://127.0.0.1:8477/#/satellite' };
+
+/** Open the popup over `tab`, the app answering the ping with `ping`. */
+async function openPopup({ tab = ARTICLE, stored = {}, ping = { status: 200, json: async () => ({ version: '0.3.4' }) }, browser = {} } = {}) {
   document.body.innerHTML = html
     .replace(/[\s\S]*<body[^>]*>/, '')
     .replace(/<\/body>[\s\S]*/, '')
     .replace(/<script[\s\S]*?<\/script>/g, '');
-
-  // happy-dom ships no `Option` constructor; the popup fills its case pickers with it.
-  globalThis.Option = function Option(text, value) {
-    const option = document.createElement('option');
-    option.textContent = text;
-    option.value = value ?? text;
-    return option;
-  };
-
-  globalThis.chrome = {
-    tabs: { query: vi.fn(async () => [{ id: 7, url: tabUrl }]), sendMessage: vi.fn(async () => {}) },
+  const api = {
+    tabs: { query: vi.fn(async () => [tab]), sendMessage: vi.fn(async () => {}) },
     storage: {
       local: {
-        get: vi.fn(async (defaults) => ({
-          ...defaults,
-          backendUrl: 'http://127.0.0.1:8477',
-          token: 'tok-123',
-          ...stored,
-        })),
-        set: vi.fn(),
+        get: vi.fn(async (defaults) => ({ ...defaults, token: '', ...stored })),
+        set: vi.fn(async () => {}),
       },
     },
-    runtime: { getManifest: () => ({ version: '0.2.9' }), sendMessage: vi.fn(async () => ({ ok: true })) },
-    scripting: {
-      executeScript: vi.fn(async () =>
-        height === null ? Promise.reject(new Error('cannot access')) : [{ result: height }]
-      ),
-    },
+    runtime: { getManifest: () => ({ version: '0.3.4' }), sendMessage: vi.fn(async () => ({ ok: true })) },
+    action: { setPopup: vi.fn(async () => {}) },
+    ...browser,
   };
-
-  globalThis.fetch = vi.fn(async (url) => {
-    for (const [fragment, answer] of Object.entries(answers)) {
-      if (String(url).includes(fragment)) return answer();
-    }
-    throw new Error('unexpected fetch');
+  const fetchImpl = vi.fn(async () => {
+    if (ping instanceof Error) throw ping;
+    return ping;
   });
-
-  const run = new Function('browser', `${source}\n//# sourceURL=popup.js`);
-  run(undefined);
-  // init() is async and awaits two fetches before it wires the buttons
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+  new Function('chrome', 'browser', 'fetch', source)(browser.firefox ? undefined : api, browser.firefox ? api : undefined, fetchImpl);
+  await settle();
+  return { api, fetchImpl, close };
 }
 
-const ok = (body) => () => ({ ok: true, status: 200, json: async () => body });
-const down = () => {
-  throw new Error('network');
-};
+/** Paste a token and press Pair. */
+async function pair(token = 'tok-123') {
+  $('token').value = token;
+  $('pair').click();
+  await settle();
+}
 
 beforeEach(() => {
   document.body.innerHTML = '';
   vi.restoreAllMocks();
 });
 
-describe('a map page whose app goes away mid-load', () => {
-  const mapPage = {
-    tabUrl: 'https://www.google.fr/maps/@48.85,2.29,17z',
-    answers: {
-      '/parse': ok({ site: 'google-maps', label: 'Google Maps', lat: 48.85, lon: 2.29, zoom: 17 }),
-      '/cases': down,
-    },
-  };
-
-  it('greys out every button, so the error message is the only story', async () => {
-    await runPopup(mapPage);
-
-    expect($('save-place').disabled).toBe(true);
-    expect($('capture-area').disabled).toBe(true);
-    expect($('status').textContent).toContain('Cannot reach Azimut');
+describe('pairing', () => {
+  it('asks for the token, the address folded away at its default', async () => {
+    await openPopup();
+    expect($('pairing').hidden).toBe(false);
+    expect($('paired').hidden).toBe(true);
+    expect($('elsewhere').open).toBe(false);
+    expect($('backendUrl').value).toBe('http://127.0.0.1:8477');
   });
 
-  it('leaves nothing that answers a click with silence', async () => {
-    await runPopup(mapPage);
-
-    const live = ['save-place', 'capture-area'].filter((id) => !$(id).disabled);
-    expect(live).toEqual([]);
+  it('opens the address already when it is not the default', async () => {
+    await openPopup({ stored: { backendUrl: 'http://127.0.0.1:9000' } });
+    expect($('elsewhere').open).toBe(true);
   });
-});
 
-describe('a page that is not a map, whose app goes away mid-load', () => {
-  it('greys out the bookmark button too', async () => {
-    await runPopup({
-      tabUrl: 'https://example.com/article',
-      answers: { '/parse': ok({ site: null }), '/cases': down },
-    });
-
-    expect($('save-bookmark').disabled).toBe(true);
-    expect($('status').textContent).toContain('Cannot reach Azimut');
+  it('stores the token once the app took it, and says which Azimut', async () => {
+    const { api, fetchImpl } = await openPopup();
+    await pair(' tok-123 ');
+    expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:8477/api/ingest/ping', { headers: { 'X-Azimut-Token': 'tok-123' } });
+    expect(api.storage.local.set).toHaveBeenCalledWith({ backendUrl: 'http://127.0.0.1:8477', token: 'tok-123' });
+    expect($('status').textContent).toBe('Paired with Azimut 0.3.4.');
+    expect($('pairing').hidden).toBe(true);
   });
-});
 
-describe('a map page with the app answering', () => {
-  it('leaves capture reachable, and holds the place button for its coordinates', async () => {
-    await runPopup({
-      tabUrl: 'https://www.google.fr/maps/@48.85,2.29,17z',
-      answers: {
-        '/parse': ok({ site: 'google-maps', label: 'Google Maps', lat: 48.85, lon: 2.29, zoom: 17 }),
-        '/cases': ok([{ id: 'c1', name: 'Case one' }]),
-      },
-    });
+  it('keeps a token the app turned down out of storage, so the button goes on pairing', async () => {
+    const { api } = await openPopup({ ping: { status: 401, json: async () => ({}) } });
+    await pair();
+    expect(api.storage.local.set).not.toHaveBeenCalled();
+    expect($('status').textContent).toMatch(/rejected the token/);
+    expect($('pairing').hidden).toBe(false);
+  });
 
-    expect($('capture-area').disabled).toBe(false);
-    expect($('save-place').disabled).toBe(false);
+  it('says so when no Azimut answers at that address', async () => {
+    const { api } = await openPopup({ ping: new Error('network') });
+    await pair();
+    expect(api.storage.local.set).not.toHaveBeenCalled();
+    expect($('status').textContent).toBe('No Azimut at http://127.0.0.1:8477. Is the app running?');
+  });
+
+  it('asks for a token before asking the app anything', async () => {
+    const { fetchImpl } = await openPopup();
+    await pair('   ');
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect($('status').textContent).toBe('Paste the pairing token first.');
   });
 });
 
-describe('how tall the map is drawn', () => {
-  /**
-   * Apple states the span its view covers and Google's satellite mode the metres
-   * its viewport is high. Either is a scale only next to the number of pixels it
-   * was drawn in, and that number is the one thing the app cannot see — so the
-   * popup reads it off the tab and sends it with the URL.
-   */
-  const asked = () => globalThis.fetch.mock.calls.map(([url]) => String(url));
-
-  it('goes with the URL to the app', async () => {
-    await runPopup({
-      tabUrl: 'https://maps.apple.com/frame?center=48.85,2.29&span=0.02,0.03',
-      answers: {
-        '/parse': ok({ site: 'apple-maps', label: 'Apple Maps', lat: 48.85, lon: 2.29, zoom: 17 }),
-        '/cases': ok([{ id: 'c1', name: 'Case one' }]),
-      },
-    });
-
-    expect(asked().some((url) => url.includes('/parse') && url.includes('height=940'))).toBe(true);
+describe('the step the press was for', () => {
+  it('offers the tools on a map, and puts them over it', async () => {
+    const { api, close } = await openPopup({ tab: MAP });
+    await pair();
+    expect($('next').hidden).toBe(false);
+    expect($('next').textContent).toBe('Open the tools on this map');
+    $('next').click();
+    await settle();
+    expect(api.runtime.sendMessage).toHaveBeenCalledWith({ type: 'map-tools', tabId: 6 });
+    expect(close).toHaveBeenCalled();
   });
 
-  it('is left out rather than guessed when the tab refuses to be read', async () => {
-    await runPopup({
-      tabUrl: 'https://maps.apple.com/frame?center=48.85,2.29&span=0.02,0.03',
-      height: null,
-      answers: {
-        '/parse': ok({ site: 'apple-maps', label: 'Apple Maps', lat: 48.85, lon: 2.29, zoom: null }),
-        '/cases': ok([{ id: 'c1', name: 'Case one' }]),
-      },
-    });
-
-    const parse = asked().find((url) => url.includes('/parse'));
-    expect(parse).toBeTruthy();
-    expect(parse).not.toContain('height=');
-  });
-});
-
-describe('the scale bar and north arrow tick', () => {
-  const googleMaps = (stored) => ({
-    tabUrl: 'https://www.google.fr/maps/@48.85,2.29,17z',
-    stored,
-    answers: {
-      '/parse': ok({ site: 'google-maps', label: 'Google Maps', lat: 48.85, lon: 2.29, zoom: 17 }),
-      '/cases': ok([{ id: 'c1', name: 'Case one' }]),
-    },
+  it('offers the note anywhere else, and opens it inside the click', async () => {
+    const open = vi.fn(async () => {});
+    await openPopup({ browser: { sidePanel: { open } } });
+    await pair();
+    expect($('next').textContent).toBe('Open the note');
+    $('next').click();
+    expect(open).toHaveBeenCalledWith({ windowId: 4 });
   });
 
-  it('starts off, and a capture taken without it asks for no marks', async () => {
-    await runPopup(googleMaps());
-
-    expect($('marks').checked).toBe(false);
-    $('capture-area').click();
-    const [[msg]] = globalThis.chrome.runtime.sendMessage.mock.calls;
-    expect(msg.meta.marks).toBe(false);
+  it('opens Firefox’s sidebar the same way', async () => {
+    const open = vi.fn(async () => {});
+    await openPopup({ browser: { firefox: true, sidebarAction: { open } } });
+    await pair();
+    $('next').click();
+    expect(open).toHaveBeenCalled();
   });
 
-  it('is remembered the moment it is ticked, and rides with the capture', async () => {
-    await runPopup(googleMaps());
-
-    $('marks').checked = true;
-    $('marks').dispatchEvent(new Event('change'));
-    expect(globalThis.chrome.storage.local.set).toHaveBeenCalledWith({ captureMarks: true });
-
-    $('capture-area').click();
-    const [[msg]] = globalThis.chrome.runtime.sendMessage.mock.calls;
-    expect(msg.meta.marks).toBe(true);
+  it('says so when the browser has no panel to open', async () => {
+    await openPopup();
+    await pair();
+    $('next').click();
+    await settle();
+    expect($('status').textContent).toMatch(/Could not open it/);
   });
 
-  it('comes back ticked next time it is opened', async () => {
-    await runPopup(googleMaps({ captureMarks: true }));
-
-    expect($('marks').checked).toBe(true);
-  });
-
-  it('points at the bearing field, since this URL states no rotation', async () => {
-    await runPopup(googleMaps({ captureMarks: true }));
-
-    expect($('marks-note').hidden).toBe(false);
-    $('bearing').value = '42';
-    $('bearing').dispatchEvent(new Event('input'));
-    expect($('marks-note').hidden).toBe(true);
-  });
-
-  it('says nothing about a heading when the marks are not wanted', async () => {
-    await runPopup(googleMaps());
-
-    expect($('marks-note').hidden).toBe(true);
+  it('drops a popup the browser kept after the pairing, and goes straight to the step', async () => {
+    const { api, fetchImpl } = await openPopup({ tab: MAP, stored: { token: 'tok-123' } });
+    expect(api.action.setPopup).toHaveBeenCalledWith({ popup: '' });
+    expect($('pairing').hidden).toBe(true);
+    expect($('next').textContent).toBe('Open the tools on this map');
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 
-describe('a place the app would refuse', () => {
-  const mapPage = (extra = {}) => ({
-    tabUrl: 'https://www.google.fr/maps/@48.85,2.29,17z',
-    answers: {
-      '/parse': ok({ site: 'google-maps', label: 'Google Maps', lat: 48.85, lon: 2.29, zoom: 17 }),
-      '/cases': ok([{ id: 'c1', name: 'Case one' }]),
-      ...extra,
-    },
-  });
-  const posted = () => globalThis.fetch.mock.calls.filter(([url]) => String(url).includes('/ingest/place'));
-
-  it('says which field is out of range, before sending anything', async () => {
-    await runPopup(mapPage());
-    $('lat').value = '95';
-    $('lat').dispatchEvent(new Event('input'));
-    $('save-place').click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect($('status').textContent).toBe('Latitude runs from -90 to 90.');
-    expect(posted()).toEqual([]);
+describe('on Azimut’s own tab', () => {
+  it('lets the app capture the tab, paired or not', async () => {
+    const { api } = await openPopup({ tab: APP });
+    expect(api.tabs.sendMessage).toHaveBeenCalledWith(9, { type: 'app-activated' });
+    expect($('granted').hidden).toBe(false);
   });
 
-  it('reads a refusal the app sent as a list, never as [object Object]', async () => {
-    await runPopup(mapPage({
-      '/ingest/place': () => ({
-        ok: false,
-        status: 422,
-        json: async () => ({ detail: [{ loc: ['body', 'title'], msg: 'String should have at most 300 characters' }] }),
-      }),
-    }));
-    $('save-place').click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect($('status').textContent).toBe('Could not save: String should have at most 300 characters');
-  });
-});
-
-describe('the case picked', () => {
-  /**
-   * The notes panel, Capture into the note and the right-click items all work in
-   * the extension's `lastCaseId`. A case chosen here is that case at once, so the
-   * panel opens its note without waiting for something to be filed.
-   */
-  const cases = ok([
-    { id: 'c1', name: 'Case one' },
-    { id: 'c2', name: 'Case two' },
-  ]);
-  const pick = (id, value) => {
-    $(id).value = value;
-    $(id).dispatchEvent(new Event('change'));
-  };
-  const stored = () =>
-    globalThis.chrome.storage.local.set.mock.calls.map(([items]) => items).filter((items) => 'lastCaseId' in items);
-
-  it('is stored the moment it is chosen on a map', async () => {
-    await runPopup({
-      tabUrl: 'https://www.google.fr/maps/@48.85,2.29,17z',
-      stored: { lastCaseId: 'c1' },
-      answers: { '/parse': ok({ site: 'google-maps', label: 'Google Maps', lat: 48.85, lon: 2.29, zoom: 17 }), '/cases': cases },
-    });
-    expect($('case').value).toBe('c1');
-    expect(stored()).toEqual([]);
-    pick('case', 'c2');
-    expect(stored()).toEqual([{ lastCaseId: 'c2' }]);
+  it('opens Settings on the token from step one', async () => {
+    const { api } = await openPopup({ tab: APP });
+    expect($('open-settings').hidden).toBe(false);
+    $('open-settings').click();
+    expect(api.tabs.sendMessage).toHaveBeenCalledWith(9, { type: 'app-pairing' });
   });
 
-  it('is stored the moment it is chosen for a bookmark', async () => {
-    await runPopup({ tabUrl: 'https://example.com/story', answers: { '/parse': ok({ site: null }), '/cases': cases } });
-    pick('bm-case', 'c2');
-    expect(stored()).toEqual([{ lastCaseId: 'c2' }]);
+  it('offers no step once paired: the app is the place', async () => {
+    await openPopup({ tab: APP });
+    await pair();
+    expect($('next').hidden).toBe(true);
   });
 
-  it('leaves the case alone for a scratch session not filed yet', async () => {
-    await runPopup({ tabUrl: 'https://example.com/story', answers: { '/parse': ok({ site: null }), '/cases': cases } });
-    pick('bm-case', '');
-    expect(stored()).toEqual([]);
+  it('keeps step one a sentence anywhere else', async () => {
+    await openPopup();
+    expect($('open-settings').hidden).toBe(true);
+    expect($('granted').hidden).toBe(true);
   });
 });

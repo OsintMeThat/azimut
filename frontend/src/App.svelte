@@ -17,7 +17,7 @@
   import { api } from './lib/api.js';
   import { updateBadges } from './lib/staleness.js';
   import { startEvents, onEvent } from './lib/events.js';
-  import { onSceneProof } from './lib/extBridge.js';
+  import { onPairingAsked, onSceneProof } from './lib/extBridge.js';
   import { takeSceneProof } from './lib/extSceneProof.js';
   import {
     CASE_WORKSPACE,
@@ -31,7 +31,7 @@
   import { readSolo, splitHash } from './lib/hash.js';
   import { caseShown, installBackButton, showTool } from './lib/backButton.js';
   import { landingFor } from './lib/guide.js';
-  import { openGuide, openIssueReport, openTodo } from './lib/navigate.js';
+  import { openExtensionSettings, openGuide, openIssueReport, openTodo } from './lib/navigate.js';
   import { todoHintAt, todoHintGiven } from './lib/sceneHints.js';
   import { listenToGuide } from './lib/guideWindow.js';
   import { openFindExample } from './lib/findExample.js';
@@ -406,6 +406,11 @@
   // Make the proof, pressed on the extension's map panel: this tab is brought to the
   // front and opens Inspect's chooser on the scene; a map window leaves it to the main tab.
   onDestroy(onSceneProof((scene) => takeSceneProof(scene, { solo })));
+  // The extension's pairing popup, asking for the token: Settings, on its tab. A map
+  // or note window opened on its own has no Settings, so the main tab answers.
+  onDestroy(onPairingAsked(() => {
+    if (!solo) openExtensionSettings();
+  }));
 </script>
 
 <div class="shell">

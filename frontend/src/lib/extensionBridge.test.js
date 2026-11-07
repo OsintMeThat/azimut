@@ -335,3 +335,25 @@ describe('a map panel’s Make the proof, handed to the page', () => {
     expect(kept).not.toContain(true);
   });
 });
+
+describe('a press on the toolbar button, told to the app', () => {
+  /** The bridge injected, and what it posts when the worker or the popup says `msg`. */
+  function told(msg) {
+    const chrome = makeChrome();
+    inject(chrome);
+    const listeners = chrome.runtime.onMessage.addListener.mock.calls.map(([cb]) => cb);
+    const posted = [];
+    const spy = vi.spyOn(window, 'postMessage').mockImplementation((d) => posted.push(d));
+    for (const cb of listeners) cb(msg, {}, () => {});
+    spy.mockRestore();
+    return posted;
+  }
+
+  it('says the tab may now be captured', () => {
+    expect(told({ type: 'app-activated' })).toEqual([{ channel: CHANNEL, type: 'activated' }]);
+  });
+
+  it('asks the app for the Settings tab that holds the pairing token', () => {
+    expect(told({ type: 'app-pairing' })).toEqual([{ channel: CHANNEL, type: 'open-pairing' }]);
+  });
+});

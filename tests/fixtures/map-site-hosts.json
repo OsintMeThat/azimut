@@ -1,0 +1,33 @@
+{
+  "about": "Which addresses are maps. Read by engine/mapsites.py's parse and by the extension's copy of its hosts (extension/mapsites.js): both must name the same site, or none, for every address here. Each site in either table needs at least one address.",
+  "addresses": [
+    ["https://earth.google.com/web/@48.8583,2.2945,35a,1000d,35y,0h,0t,0r", "google-earth"],
+    ["https://www.google.com/maps/@48.8583,2.2945,17z", "google-maps"],
+    ["https://www.google.fr/maps/@48.8583,2.2945,17z", "google-maps"],
+    ["https://www.google.co.uk/maps/place/Eiffel+Tower/@48.8583,2.2945,17z", "google-maps"],
+    ["https://maps.google.com/?ll=48.8583,2.2945&z=17", null],
+    ["https://maps.app.goo.gl/AbCdEf123", "google-maps"],
+    ["https://www.google.com/search?q=eiffel+tower", null],
+    ["https://www.google.com/", null],
+    ["https://www.bing.com/maps?cp=48.8583~2.2945&lvl=17.0", "bing-maps"],
+    ["https://www.bing.com/search?q=eiffel+tower", null],
+    ["https://yandex.com/maps/?ll=2.2945%2C48.8583&z=17", "yandex-maps"],
+    ["https://yandex.ru/maps/?ll=2.2945%2C48.8583&z=17", "yandex-maps"],
+    ["https://yandex.com/images/", null],
+    ["https://www.openstreetmap.org/#map=17/48.8583/2.2945", "openstreetmap"],
+    ["https://openstreetmap.org/#map=17/48.8583/2.2945", "openstreetmap"],
+    ["https://maps.apple.com/?ll=48.8583,2.2945&z=17", "apple-maps"],
+    ["https://www.apple.com/maps/", null],
+    ["https://zoom.earth/maps/satellite/#view=48.8583,2.2945,10z", "zoom-earth"],
+    ["https://satellites.pro/France_map#48.8583,2.2945,17", "satellites-pro"],
+    ["https://browser.dataspace.copernicus.eu/?zoom=14&lat=48.8583&lng=2.2945", "copernicus-browser"],
+    ["https://dataspace.copernicus.eu/", null],
+    ["https://example.com/maps/", null],
+    ["https://notgoogle.com/maps", null],
+    ["http://127.0.0.1:8477/", null],
+    ["ftp://www.google.com/maps", null],
+    ["chrome://extensions/", null],
+    ["about:blank", null],
+    ["not a web address", null]
+  ]
+}

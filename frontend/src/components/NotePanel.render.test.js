@@ -223,7 +223,7 @@ describe('the note in the extension\'s panel', () => {
     app = mount(NotePanel, { target });
     await settle();
     expect(target.querySelector('.none').textContent.trim())
-      .toBe("Open a case in Azimut, or pick one in the extension's popup, then open Notes again.");
+      .toBe("Open a case in Azimut, or pick one in the extension's map panel, then open the note again.");
     expect(told()).toEqual([{ azimut: 'note-panel', v: 1, state: 'none', to: '*' }]);
   });
 });
