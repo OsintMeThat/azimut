@@ -206,7 +206,7 @@
 <section class="group" data-guide="ext.pairing">
   <h3>Pairing</h3>
   <p class="note">
-    Paste this token into the extension options; rotating it unpairs existing extensions.
+    Press the extension's button and paste this token where it asks; rotating it unpairs existing extensions.
   </p>
   <div class="row">
     <div class="row-label">

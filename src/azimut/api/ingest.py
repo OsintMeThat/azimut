@@ -291,7 +291,7 @@ async def ingest_events(request: Request) -> StreamingResponse:
 
 @router.get("/cases", dependencies=[Depends(require_token)])
 def cases() -> list[dict[str, Any]]:
-    """The case picker for the extension popup — ids and names, nothing more."""
+    """The case picker for the extension's map panel — ids and names, nothing more."""
     return [
         {"id": c["id"], "name": c["name"], "scratch": bool(c.get("scratch"))}
         for c in Case.list_all()
@@ -300,11 +300,14 @@ def cases() -> list[dict[str, Any]]:
 
 @router.get("/parse", dependencies=[Depends(require_token)])
 def parse(url: str, height: float | None = Query(default=None, gt=0, le=20000)) -> dict[str, Any]:
-    """Parse a map URL for the popup's prefill (engine/mapsites.py).
+    """Parse a map URL for the extension's map panel (engine/mapsites.py).
 
-    The extension deliberately contains no URL knowledge — formats race sites
-    that change without notice, and an app update is easy where an extension
-    update is manual. ``{"site": null}`` means "not a map: don't capture here".
+    The extension deliberately reads no URL — formats race sites that change
+    without notice, and an app update is easy where an extension update is
+    manual. It keeps only the hosts, for its toolbar button to tell a map from
+    another page inside the press (``extension/mapsites.js``, held to this
+    table by ``tests/fixtures/map-site-hosts.json``). ``{"site": null}`` means
+    "not a map: don't capture here".
 
     ``height`` is how tall the map is drawn, in CSS pixels, and it is the one
     thing the caller knows and this side cannot. Two of these sites state their
@@ -326,7 +329,7 @@ async def ingest_screenshot(
     bearing: float | None = Form(default=None, ge=0, lt=360),
     captured_at: str = Form(default=""),
     title: str = Form(default="", max_length=200),
-    # burn a scale bar and a north arrow into the shot (the popup's tick), and
+    # burn a scale bar and a north arrow into the shot (the selection bar's tick), and
     # how many image pixels the grab holds per CSS pixel — a zoom describes CSS
     # pixels, so without the ratio a 2× screen would be told it covers twice
     # the ground it does
@@ -343,7 +346,8 @@ async def ingest_screenshot(
     date are parsed HERE (engine/mapsites.py), never in the extension — URL
     formats race sites that change without notice, and a changed format must
     be an app update, not a manual extension reinstall. The optional form
-    fields are the user's popup corrections and win over the parse; anything
+    fields are what the analyst typed (a position the address lacked, a
+    bearing on the selection's bar) and win over the parse; anything
     the client doesn't send, the URL fills. Coordinates stay optional as a
     pair — a URL with no position still files, fixable later in the sidebar.
     A URL that isn't a recognized map site is refused: captures are for maps
@@ -356,7 +360,7 @@ async def ingest_screenshot(
             status_code=422, detail="not a recognized map site; captures are for maps only"
         )
 
-    # popup corrections win; the URL fills whatever the client didn't send
+    # what the analyst typed wins; the URL fills whatever the client didn't send
     lat = lat if lat is not None else parsed["lat"]
     lon = lon if lon is not None else parsed["lon"]
     zoom = zoom if zoom is not None else parsed["zoom"]
@@ -385,8 +389,8 @@ async def ingest_screenshot(
     site = parsed["site"]
     # Neither mark is invented for a map we did not draw: the bar needs the
     # view's own resolution, and the needle a heading somebody stated — most of
-    # these sites write no rotation into their URL, and the popup's field is
-    # where an analyst says which way the map was turned.
+    # these sites write no rotation into their URL, and the selection bar's field
+    # is where an analyst says which way the map was turned.
     marks = (
         tiles.burn_scale_north(
             img,
@@ -512,7 +516,7 @@ def ingest_place(
 
     The third extension flow, between a capture (map pixels) and a bookmark (a
     page with no position): a saved point the Saved panel can fly back to. The
-    URL is parsed here as everywhere else, popup values win over the parse, and
+    URL is parsed here as everywhere else, values the client sends win over the parse, and
     coordinates are required — without a position there is no place to save,
     and the page belongs in a bookmark instead. An empty ``case_id`` opens a
     fresh scratch session.
@@ -559,8 +563,8 @@ def ingest_bookmark(
 ) -> dict[str, Any]:
     """File a web page as a ``bookmark`` entity — a saved link, no screenshot.
 
-    The capture flow is maps-only (legal rails); this is the other half of the
-    extension popup, offered when the open page is *not* a recognized map site.
+    The capture flow is maps-only (legal rails); this is the other half, the
+    notes panel's Save this page, for any page.
     Nothing is fetched: we store the URL the user is already on, its title and
     the source site — a pointer, not a copy. An empty ``case_id`` opens a fresh
     scratch session, the same as a screenshot ingest.

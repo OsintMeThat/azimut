@@ -442,6 +442,12 @@ export function openIconSettings() {
   uiState.tool = 'settings';
 }
 
+/** Open Settings on the Capture extension tab, where the pairing token is. */
+export function openExtensionSettings() {
+  uiState.settingsTab = 'extension';
+  uiState.tool = 'settings';
+}
+
 /** Open Settings on System, where an issue is reported with what the app knows. */
 export function openIssueReport() {
   uiState.settingsTab = 'system';

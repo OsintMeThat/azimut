@@ -6,6 +6,13 @@
   <link rel="stylesheet" href="ui.css" />
 </head>
 <body class="notes">
+  <!-- the page in front, filed as a link: the toolbar button's popup did this before it opened the note -->
+  <div class="page">
+    <button id="bookmark" title="Files the page in front into this case's Media as a link, nothing downloaded">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5h11a1 1 0 0 1 1 1V20.5L12 16.4l-6.5 4.1V4.5a1 1 0 0 1 1-1Z"/></svg>
+      <span>Save this page</span>
+    </button>
+  </div>
   <div id="bar" class="bar" hidden>
     <!-- asked once, when the note's Add needs a page the browser keeps from the extension -->
     <div id="allowing" class="allowing" hidden>

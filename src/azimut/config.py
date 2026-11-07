@@ -118,7 +118,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "coord_format": "dd",
     "units": "metric",
     # Whether a capture is filed with a scale bar and a north arrow burned into
-    # it (the capture menu's tick, and the extension popup's own). Off by
+    # it (the capture menu's tick; the extension keeps its own, on its selection bar). Off by
     # default: what is drawn onto somebody's evidence is asked for, never
     # assumed — and the tick is remembered here so it is asked for once.
     "capture_scale_north": False,

@@ -19,6 +19,7 @@ import { dirname, join } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const ext = join(here, '../../../extension');
 const helpers = readFileSync(join(ext, 'notesmsg.js'), 'utf8');
+const sites = readFileSync(join(ext, 'mapsites.js'), 'utf8');
 const worker = readFileSync(join(ext, 'background.js'), 'utf8');
 
 const PANEL = { url: 'chrome-extension://id/notes.html' };
@@ -43,7 +44,7 @@ function event() {
 }
 
 /** A worker with stubs, and handles on what it did. */
-function load({ front = ARTICLE, answers = {}, selection = '', stored = {}, inject = null, capture = null } = {}) {
+function load({ front = ARTICLE, answers = {}, selection = '', stored = {}, inject = null, capture = null, more = {}, firefox = false } = {}) {
   const items = new Map();
   const session = new Map();
   const drawn = [];
@@ -55,6 +56,7 @@ function load({ front = ARTICLE, answers = {}, selection = '', stored = {}, inje
     activated: event(),
     updated: event(),
     focus: event(),
+    toolbar: event(),
   };
   const chrome = {
     storage: {
@@ -135,6 +137,7 @@ function load({ front = ARTICLE, answers = {}, selection = '', stored = {}, inje
       onConnect: on.connect,
     },
   };
+  Object.assign(chrome, more);
   const fetchImpl = vi.fn(async (url, init) => {
     const address = String(url);
     for (const [fragment, answer] of Object.entries(answers)) {
@@ -159,9 +162,15 @@ function load({ front = ARTICLE, answers = {}, selection = '', stored = {}, inje
     'fetch',
     'createImageBitmap',
     'OffscreenCanvas',
-    `${helpers}\n${worker}\n;return { handle };`
+    `${helpers}\n${sites}\n${worker}\n;return { handle, syncToolbar };`
   );
-  const internals = factory(chrome, undefined, fetchImpl, async () => ({ width: 2000, height: 1200 }), OffscreenCanvasStub);
+  const internals = factory(
+    firefox ? undefined : chrome,
+    firefox ? chrome : undefined,
+    fetchImpl,
+    async () => ({ width: 2000, height: 1200 }),
+    OffscreenCanvasStub
+  );
   return { chrome, items, on, fetchImpl, session, drawn, ...internals };
 }
 
@@ -469,12 +478,12 @@ describe('a right-click', () => {
     expect(filed(run)).toBeUndefined();
   });
 
-  it("leaves the popup's own capture as it was", async () => {
+  it("leaves the map panel's own capture as it was", async () => {
     const run = mapRun();
     const port = connect(run.on);
     ready(port);
     const meta = { url: MAP.url, caseId: 'case-9', title: 'Here', lat: 1, lon: 2, zoom: 3, bearing: null, marks: false };
-    expect(await run.handle({ type: 'start-area-select', tabId: 6, meta }, {})).toEqual({ ok: true });
+    expect(await run.handle({ type: 'start-area-select', meta }, { tab: MAP })).toEqual({ ok: true });
     expect(run.session.get('pending:6')).toEqual(meta);
 
     await run.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
@@ -486,31 +495,70 @@ describe('a right-click', () => {
     expect(port.sent).toEqual([]);
   });
 
-  it('says which scene the popup’s capture was attached to', async () => {
+  it('says which scene the map panel’s capture was attached to', async () => {
     const run = mapRun({ screenshot: { entity_id: 'cap_42', case_id: 'case-9', title: 'Google Maps', scene: { video: 'media/a.mp4', id: 'sc_1', label: 'bridge?' } } });
     const meta = { url: MAP.url, caseId: 'case-9', title: 'Here', lat: 1, lon: 2, zoom: 3, bearing: null, marks: false };
-    await run.handle({ type: 'start-area-select', tabId: 6, meta }, {});
+    await run.handle({ type: 'start-area-select', meta }, { tab: MAP });
     await run.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
     expect(run.chrome.notifications.create).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Capture filed into Azimut', message: 'Google Maps. Attached to “bridge?”.' })
     );
   });
 
-  it('keeps the popup’s report as it was with no scene, and adds the scene after a notice', async () => {
+  it('keeps the capture’s report as it was with no scene, and adds the scene after a notice', async () => {
     const plain = mapRun({ screenshot: { entity_id: 'cap_42', case_id: 'case-9', title: 'Google Maps' } });
     const meta = { url: MAP.url, caseId: 'case-9', title: 'Here', lat: 1, lon: 2, zoom: 3, bearing: null, marks: false };
-    await plain.handle({ type: 'start-area-select', tabId: 6, meta }, {});
+    await plain.handle({ type: 'start-area-select', meta }, { tab: MAP });
     await plain.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
     expect(plain.chrome.notifications.create.mock.calls.at(-1)[0].message).toBe('Google Maps');
 
     const noted = mapRun({
       screenshot: { entity_id: 'cap_42', case_id: 'case-9', title: 'Street View', notice: 'Credit Google', scene: { video: 'v', id: 'sc_1', label: '' } },
     });
-    await noted.handle({ type: 'start-area-select', tabId: 6, meta }, {});
+    await noted.handle({ type: 'start-area-select', meta }, { tab: MAP });
     await noted.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
     expect(noted.chrome.notifications.create.mock.calls.at(-1)[0].message).toBe(
       'Street View. Credit Google. Attached to the scene being geolocated.'
     );
+  });
+
+  it('starts from the tick as it was left, and files what the selection’s bar said', async () => {
+    const run = mapRun({ stored: { captureMarks: true } });
+    const meta = { url: MAP.url, caseId: 'case-9', lat: 1, lon: 2, zoom: 17, bearing: null };
+    await run.handle({ type: 'start-area-select', meta }, { tab: MAP });
+    expect(run.session.get('pending:6').marks).toBe(true);
+    // the bar is handed what to start from before the overlay runs
+    const [setter] = run.chrome.scripting.executeScript.mock.calls.map(([call]) => call).filter((call) => call.func);
+    expect(setter.args).toEqual([{ marks: true, bearing: null }]);
+    await run.handle(
+      { type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000, marks: true, bearing: 42 },
+      { tab: MAP }
+    );
+    const body = filed(run)[1].body;
+    expect(body.get('scale_north')).toBe('true');
+    expect(body.get('bearing')).toBe('42');
+  });
+
+  it('drops a bearing the bar was given that is not a bearing, and keeps the address’s', async () => {
+    const run = mapRun();
+    const meta = { url: MAP.url, caseId: 'case-9', lat: 1, lon: 2, zoom: 17, bearing: 30, marks: true };
+    await run.handle({ type: 'start-area-select', meta }, { tab: MAP });
+    await run.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000, marks: true, bearing: 400 }, { tab: MAP });
+    expect(filed(run)[1].body.get('bearing')).toBe('30');
+  });
+
+  it('starts a selection only for a map panel, never for Azimut’s own tab', async () => {
+    const run = mapRun();
+    const app = { id: 9, windowId: 1, url: 'http://127.0.0.1:18999/' };
+    expect(await run.handle({ type: 'start-area-select', meta: {} }, { tab: app })).toMatchObject({ ok: false });
+    expect(await run.handle({ type: 'start-area-select', meta: {} }, {})).toMatchObject({ ok: false });
+    expect(drawsSelection(run)).toBe(false);
+  });
+
+  it('says how to give the tab back when the browser took it from the extension', async () => {
+    const run = mapRun({ inject: new Error(NO_SCRIPT) });
+    const answer = await run.handle({ type: 'start-area-select', meta: { lat: 1, lon: 2 } }, { tab: MAP });
+    expect(answer).toEqual({ ok: false, error: 'The browser took this tab back. Open the tools again from the Azimut button.' });
   });
 
   it('tells the note which scene its capture was attached to', async () => {
@@ -632,5 +680,165 @@ describe('a panel button', () => {
       { url: 'chrome-extension://id/options.html' }
     );
     expect(fromOptions.ok).toBe(false);
+  });
+});
+
+describe('the toolbar button', () => {
+  /** A worker whose button is pressed, with a side panel or a sidebar to open. */
+  function pressed({ firefox = false, stored = {}, refuse = false } = {}) {
+    const opened = [];
+    const open = vi.fn((arg) => {
+      opened.push(arg);
+      if (refuse) throw new Error('sidebarAction.open may only be called from a user input handler');
+      return Promise.resolve();
+    });
+    const toolbar = {
+      onClicked: { addListener: (cb) => on.toolbar.listeners.push(cb) },
+      setPopup: vi.fn(async () => {}),
+      setBadgeText: vi.fn(async () => {}),
+      setBadgeBackgroundColor: vi.fn(async () => {}),
+    };
+    const on = { toolbar: { listeners: [] } };
+    const more = {
+      action: toolbar,
+      commands: { onCommand: { addListener: (cb) => commands.push(cb) }, getAll: vi.fn(async () => [{ name: 'open-note', shortcut: 'Alt+Shift+N' }]) },
+      ...(firefox ? { sidebarAction: { open } } : { sidePanel: { open } }),
+    };
+    const commands = [];
+    const run = load({ more, firefox, stored });
+    return {
+      ...run,
+      toolbar,
+      opened,
+      press: (tab) => on.toolbar.listeners.forEach((cb) => cb(tab)),
+      command: (name, tab) => commands.forEach((cb) => cb(name, tab)),
+    };
+  }
+  const injected = (run) =>
+    run.chrome.scripting.executeScript.mock.calls.map(([call]) => call).filter((call) => call.files?.includes('mapoverlay.js'));
+
+  it('puts the tools over a map, and the same press takes them off again', async () => {
+    const run = pressed();
+    run.press(MAP);
+    await settle();
+    expect(injected(run)).toEqual([expect.objectContaining({ target: { tabId: 6 } })]);
+    expect(run.opened).toEqual([]);
+  });
+
+  it('opens the note beside any other page, inside the press, before anything is awaited', () => {
+    const run = pressed();
+    run.press(ARTICLE);
+    // no settle: Firefox stops counting a press at the first thing awaited
+    expect(run.opened).toEqual([{ windowId: 1 }]);
+    expect(injected(run)).toEqual([]);
+  });
+
+  it('opens Firefox’s sidebar the same way', () => {
+    const run = pressed({ firefox: true });
+    run.press({ id: 8, windowId: 2, url: 'about:blank' });
+    expect(run.opened).toHaveLength(1);
+  });
+
+  it('tells Azimut’s own tab it may capture, and opens nothing over it', async () => {
+    const run = pressed();
+    const app = { id: 9, windowId: 1, url: 'http://127.0.0.1:18999/#/satellite' };
+    run.press(app);
+    await settle();
+    expect(run.chrome.tabs.sendMessage).toHaveBeenCalledWith(9, { type: 'app-activated' });
+    expect(run.toolbar.setBadgeText).toHaveBeenCalledWith({ tabId: 9, text: '✓' });
+    expect(run.opened).toEqual([]);
+    expect(injected(run)).toEqual([]);
+  });
+
+  it('opens the pairing popup while there is no token, and nothing once there is one', async () => {
+    const unpaired = pressed({ stored: { token: '' } });
+    await settle();
+    expect(unpaired.toolbar.setPopup).toHaveBeenLastCalledWith({ popup: 'popup.html' });
+    const paired = pressed();
+    await settle();
+    expect(paired.toolbar.setPopup).toHaveBeenLastCalledWith({ popup: '' });
+  });
+
+  it('opens the note from its shortcut, inside the press', () => {
+    const run = pressed();
+    run.command('open-note', MAP);
+    expect(run.opened).toEqual([{ windowId: 1 }]);
+  });
+
+  it('opens the note from a map panel’s button before anything is awaited', async () => {
+    const run = pressed();
+    const answer = run.handle({ type: 'open-note' }, { tab: MAP });
+    expect(run.opened).toEqual([{ windowId: 1 }]);
+    expect(await answer).toEqual({ ok: true });
+  });
+
+  it('says how the sidebar opens where the browser will not take a click in a page', async () => {
+    const run = pressed({ firefox: true, refuse: true });
+    const answer = await run.handle({ type: 'open-note' }, { tab: MAP });
+    expect(answer).toEqual({ ok: false, error: 'This browser opens the note from its own sidebar, or with Alt+Shift+N.' });
+  });
+});
+
+describe('why a map panel cannot reach the app', () => {
+  /** What the relay answers the panel's ping with. */
+  const pinged = (run) => run.handle({ type: 'map-api', method: 'GET', path: '/api/ingest/ping' }, { tab: MAP });
+
+  it('says there is no token, so the panel offers the pairing', async () => {
+    const run = load({ stored: { token: '' } });
+    expect(await pinged(run)).toMatchObject({ ok: false, code: 'unpaired' });
+  });
+
+  it('says the app turned the token down', async () => {
+    const run = load({ answers: { '/api/ingest/ping': () => ({ ok: false, status: 401, text: async () => '' }) } });
+    expect(await pinged(run)).toMatchObject({ ok: false, code: 'rejected' });
+  });
+
+  it('says nothing answers, so the panel offers to try again', async () => {
+    const run = load({ answers: { '/api/ingest/ping': () => { throw new TypeError('Failed to fetch'); } } });
+    expect(await pinged(run)).toEqual({ ok: false, error: 'Azimut is not answering. Is the app running?', code: 'down' });
+  });
+
+  it('leaves an errand the app refused as a line, with no code', async () => {
+    const run = load({
+      answers: { '/api/ingest/ping': () => ({ ok: false, status: 422, text: async () => JSON.stringify({ detail: 'no such case' }) }) },
+    });
+    expect(await pinged(run)).toEqual({ ok: false, error: 'no such case' });
+  });
+});
+
+describe('Save this page, from the notes panel', () => {
+  const bookmarkRun = (front = ARTICLE) =>
+    load({ front, answers: { '/api/ingest/bookmark': json({ entity_id: 'bm_1', case_id: 'case-1', title: 'A story' }) } });
+  const posted = (run) => run.fetchImpl.mock.calls.find(([url]) => String(url).includes('/api/ingest/bookmark'));
+
+  it('files the page in front into the note’s case, as a link', async () => {
+    const run = bookmarkRun();
+    const answer = await run.handle({ type: 'notes-bookmark', windowId: 1, caseId: 'case-1' }, PANEL);
+    expect(answer).toEqual({ ok: true, title: 'A story' });
+    const [, init] = posted(run);
+    expect(init.body.get('url')).toBe(ARTICLE.url);
+    expect(init.body.get('title')).toBe('A story');
+    expect(init.body.get('case_id')).toBe('case-1');
+    expect(init.headers['X-Azimut-Token']).toBe('tok-123');
+  });
+
+  it('answers the panel only', async () => {
+    const run = bookmarkRun();
+    expect(await run.handle({ type: 'notes-bookmark', windowId: 1 }, { tab: MAP })).toMatchObject({ ok: false });
+    expect(posted(run)).toBeUndefined();
+  });
+
+  it('asks for the page when the browser keeps it from the extension', async () => {
+    const run = bookmarkRun({ id: 5, windowId: 1 });
+    expect(await run.handle({ type: 'notes-bookmark', windowId: 1 }, PANEL)).toMatchObject({ ok: false, closed: true });
+    expect(posted(run)).toBeUndefined();
+  });
+
+  it('files nothing of Azimut itself', async () => {
+    const run = bookmarkRun({ id: 9, windowId: 1, url: 'http://127.0.0.1:18999/', title: 'Azimut' });
+    expect(await run.handle({ type: 'notes-bookmark', windowId: 1 }, PANEL)).toEqual({
+      ok: false,
+      error: 'This is Azimut itself, not a source.',
+    });
   });
 });

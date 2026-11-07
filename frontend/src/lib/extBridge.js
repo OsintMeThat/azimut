@@ -210,6 +210,21 @@ export function onActivated(cb, win = window) {
 }
 
 /**
+ * Subscribe to the extension's pairing popup asking for the token: its "Open it",
+ * pressed on this tab, wants Settings on the Capture extension tab, where the token
+ * is. Returns an unsubscribe function.
+ */
+export function onPairingAsked(cb, win = window) {
+  const onMessage = (event) => {
+    if (event.origin !== win.location.origin) return;
+    const msg = event.data;
+    if (msg && msg.channel === CHANNEL && msg.type === 'open-pairing') cb();
+  };
+  win.addEventListener('message', onMessage);
+  return () => win.removeEventListener('message', onMessage);
+}
+
+/**
  * Subscribe to a bridge announcing itself: the manifest injected it at
  * document_start, or the background re-injected it after an update. Either way
  * the version it carries is the one now running. Returns an unsubscribe function.

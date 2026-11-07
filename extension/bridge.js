@@ -45,11 +45,14 @@
   // version: say so rather than waiting to be asked.
   post({ type: "bridge-hello", version: VERSION });
 
-  // The popup announces itself when opened on this tab: that click granted
-  // activeTab, so the app's Capture button works from now on. Relay it so the
-  // app can say "you're set — press Capture again".
+  // A press on the toolbar button on this tab granted activeTab, so the app's
+  // Capture button works from now on. Relay it so the app can say "you're set,
+  // press Capture again". The pairing popup's "Open it" asks the app for the
+  // Settings tab that holds the token.
   api.runtime.onMessage.addListener((msg) => {
-    if (msg?.type === "app-activated" && current()) post({ type: "activated" });
+    if (!current()) return;
+    if (msg?.type === "app-activated") post({ type: "activated" });
+    if (msg?.type === "app-pairing") post({ type: "open-pairing" });
   });
 
   // A map panel's Make the proof, handed over by the worker (`background.js`,

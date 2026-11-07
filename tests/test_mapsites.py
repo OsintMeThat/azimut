@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from azimut.engine.mapsites import _mercator_y, parse_map_url
+from azimut.engine.mapsites import SITES, _mercator_y, parse_map_url
 
 _RECORDED = json.loads(
     (Path(__file__).parent / "fixtures" / "map-sites.json").read_text(encoding="utf-8")
@@ -837,3 +837,25 @@ def test_the_starting_offset_reaches_the_extension_with_the_view():
         r["window"]["w"] for r in RECORDINGS if r["site"] == "yandex-maps"
     }
     assert panelled["centre_hint"]["min_w"] == min(narrowest)
+
+
+# --- the extension's copy of the hosts -------------------------------------------
+
+_HOSTS = json.loads(
+    (Path(__file__).parent / "fixtures" / "map-site-hosts.json").read_text(encoding="utf-8")
+)["addresses"]
+
+
+@pytest.mark.parametrize(("url", "site"), _HOSTS)
+def test_the_extension_and_the_app_agree_on_what_is_a_map(url, site):
+    """The toolbar button decides map or not before the app is asked anything
+    (`extension/mapsites.js`), so its copy of the hosts and this table must give
+    the same answer. The extension's test reads the same file."""
+    parsed = parse_map_url(url)
+    assert (parsed["site"] if parsed else None) == site
+
+
+def test_every_site_has_an_address_both_sides_are_checked_on():
+    """A site added here with no address in the shared file would never be
+    compared with the extension's copy, which would quietly lack it."""
+    assert {site_id for site_id, *_ in SITES} <= {site for _, site in _HOSTS}

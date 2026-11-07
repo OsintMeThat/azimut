@@ -71,6 +71,7 @@ function open(answers = {}) {
     ...answers,
   };
   const asked = [];
+  const sent = [];
   const ports = [];
   const handed = []; // what Make the proof handed the worker
   let proof = { ok: true };
@@ -79,6 +80,7 @@ function open(answers = {}) {
     runtime: {
       onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
       sendMessage: vi.fn(async (message) => {
+        sent.push(message);
         if (message.type === 'map-file') return { ok: true, file: { type: 'video/mp4', data: '', next: null, total: 0 } };
         if (message.type === 'scene-proof') {
           handed.push(message);
@@ -87,7 +89,7 @@ function open(answers = {}) {
         if (message.type !== 'map-api') return { ok: true, data: {} };
         asked.push(message);
         const answer = app[message.path];
-        if (answer instanceof Error) return { ok: false, error: answer.message };
+        if (answer instanceof Error) return { ok: false, error: answer.message, ...(answer.code ? { code: answer.code } : {}) };
         return { ok: true, data: typeof answer === 'function' ? answer(message) : (answer ?? null) };
       }),
       connect: vi.fn((info) => {
@@ -115,6 +117,7 @@ function open(answers = {}) {
     $,
     $$: (selector) => [...root.querySelectorAll(selector)],
     calls: (path) => asked.filter((m) => m.path === path),
+    sent: () => sent,
     handed,
     /** What the worker answers Make the proof with: a value, or a function of the message. */
     proveWith: (answer) => {
@@ -138,14 +141,51 @@ const settle = async () => {
 };
 
 describe('the list', () => {
-  it('reads the case’s queue when the case is picked, and folds it to one line', async () => {
+  it('reads the case’s queue when the case is picked, and lists it while nothing is in hand', async () => {
     panel = open();
     await settle();
     expect(panel.calls('/api/ingest/scenes').map((m) => m.query)).toEqual([{ case_id: CASE }]);
     const fold = panel.$('[data-act="geo-fold"]');
     // the abandoned stay in the app's To-do; here only what is left to geolocate
     expect(fold.textContent).toBe('To geolocate2');
-    expect(fold.getAttribute('aria-expanded')).toBe('false');
+    // a scene is picked from the list, so the list is out until one is
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+    expect(panel.$$('.geo-row')).toHaveLength(2);
+    expect(panel.$('[data-act="geo-go"][data-draft="sc_1"]')).not.toBe(null);
+  });
+
+  it('folds to one row by hand, and reads the queue afresh when unfolded', async () => {
+    panel = open();
+    await settle();
+    panel.press('geo-fold');
+    expect(panel.$('.geo-row')).toBe(null);
+    expect(panel.$('[data-act="geo-fold"]').getAttribute('aria-expanded')).toBe('false');
+    panel.forget();
+    panel.press('geo-fold');
+    await settle();
+    expect(panel.calls('/api/ingest/scenes')).toHaveLength(1);
+    expect(panel.$$('.geo-row')).toHaveLength(2);
+  });
+
+  it('folds to one row while a tool is picked up, and comes back when it is put down', async () => {
+    panel = open();
+    await settle();
+    panel.$('[data-tab="measure"]').click();
+    await settle();
+    expect(panel.$('.geo-row')).toBe(null);
+    expect(panel.$('[data-act="geo-fold"]').textContent).toBe('To geolocate2');
+    panel.$('[data-tab="measure"]').click();
+    await settle();
+    expect(panel.$$('.geo-row')).toHaveLength(2);
+  });
+
+  it('keeps a fold made by hand when the queue is read again', async () => {
+    panel = open();
+    await settle();
+    panel.press('geo-fold');
+    panel.nudge({ type: 'scenes', case_id: CASE, video: VIDEO });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await settle();
     expect(panel.$('.geo-row')).toBe(null);
   });
 
@@ -162,13 +202,9 @@ describe('the list', () => {
     expect(panel.$('.note')).toBe(null);
   });
 
-  it('unfolds by file, each scene with its time, name and state, read afresh', async () => {
+  it('lists by file, each scene with its time, name and state', async () => {
     panel = open();
     await settle();
-    panel.forget();
-    panel.press('geo-fold');
-    await settle();
-    expect(panel.calls('/api/ingest/scenes')).toHaveLength(1);
     expect(panel.$('.geo-file').textContent).toBe('Market walk');
     const rows = panel.$$('.geo-row').map((el) => [el.querySelector('.geo-name').textContent, el.querySelector('.geo-meta').textContent]);
     expect(rows).toEqual([
@@ -189,8 +225,6 @@ describe('the list', () => {
         geolocating: null,
       },
     });
-    await settle();
-    panel.press('geo-fold');
     await settle();
     const [whole, passage, instant] = panel.$$('.geo-row');
     expect(whole.querySelector('.geo-mark')).toBe(null);
@@ -217,8 +251,6 @@ describe('a picture marked to geolocate', () => {
 
   async function unfolded() {
     panel = open(PICTURES);
-    await settle();
-    panel.press('geo-fold');
     await settle();
   }
 
@@ -255,8 +287,6 @@ describe('geolocating a scene from over this map', () => {
   async function geolocateBridge() {
     panel = open();
     await settle();
-    panel.press('geo-fold');
-    await settle();
     panel.press('geo-go', { draft: 'sc_2' });
     await settle();
   }
@@ -271,8 +301,26 @@ describe('geolocating a scene from over this map', () => {
     expect(panel.tools.refs.open[0].scene).toMatchObject({ id: 'sc_2', start: 238, end: 252 });
     expect(panel.panes()).toHaveLength(1);
     expect(panel.panes()[0].querySelector('.rw-scene')).not.toBe(null);
-    // the choice is made: the list folds away behind the pill
-    expect(panel.$('[data-act="geo-fold"]').getAttribute('aria-expanded')).toBe('false');
+    // the choice is made: the list folds away behind the pill, counting what is left
+    const fold = panel.$('[data-act="geo-fold"]');
+    expect(fold.getAttribute('aria-expanded')).toBe('false');
+    expect(fold.textContent).toBe('More to geolocate1');
+  });
+
+  it('opens the list again when the scene in hand stops, to pick the next', async () => {
+    await geolocateBridge();
+    panel.press('geo-stop');
+    await settle();
+    expect(panel.$('[data-act="geo-fold"]').getAttribute('aria-expanded')).toBe('true');
+    expect(panel.$$('.geo-row')).toHaveLength(2);
+  });
+
+  it('shows no row behind the pill when the scene in hand was the last one', async () => {
+    const LAST = { files: [{ video: VIDEO, title: 'Market walk', scenes: [BRIDGE] }], geolocating: BRIDGE };
+    panel = open({ '/api/ingest/scenes': LAST });
+    await settle();
+    expect(panel.$('.geo-pill')).not.toBe(null);
+    expect(panel.$('[data-act="geo-fold"]')).toBe(null);
   });
 
   it('shows a pill with the scene, its captures and a way to stop', async () => {
@@ -329,8 +377,6 @@ describe('geolocating a scene from over this map', () => {
   it('says why when the app refuses, and reads the queue again', async () => {
     panel = open({ '/api/ingest/geolocating': new Error('a proof already geolocates that scene') });
     await settle();
-    panel.press('geo-fold');
-    await settle();
     panel.forget();
     panel.press('geo-go', { draft: 'sc_2' });
     await settle();
@@ -343,6 +389,45 @@ describe('geolocating a scene from over this map', () => {
     await geolocateBridge();
     panel.press('collapse');
     expect(panel.$('header .geo-dot').title).toBe('Geolocating bridge?');
+  });
+});
+
+describe('a panel that cannot reach the app', () => {
+  const fail = (message, code) => Object.assign(new Error(message), { code });
+
+  it('says nothing answers, in place of its body, and comes back on Try again', async () => {
+    panel = open({ '/api/ingest/ping': fail('Azimut is not answering. Is the app running?', 'down') });
+    await settle();
+    expect(panel.$('.trouble p').textContent).toBe('Azimut is not answering. Start it, then try again.');
+    expect(panel.$('[data-act="capture"]')).toBe(null);
+    expect(panel.$('.tabs')).toBe(null);
+    expect(panel.$('.sound').classList.contains('off')).toBe(true);
+    panel.app['/api/ingest/ping'] = { units: 'metric' };
+    panel.press('retry');
+    await settle();
+    expect(panel.$('.trouble')).toBe(null);
+    expect(panel.$('select.case').value).toBe(CASE);
+    expect(panel.$$('.geo-row')).toHaveLength(2);
+  });
+
+  it('offers the pairing when there is no token, or one the app turned down', async () => {
+    for (const [code, said] of [['unpaired', 'Not paired with Azimut yet.'], ['rejected', 'Azimut turned this pairing down. Paste the token again.']]) {
+      panel = open({ '/api/ingest/ping': fail('no', code) });
+      await settle();
+      expect(panel.$('.trouble p').textContent).toBe(said);
+      panel.press('pair');
+      expect(panel.sent()).toContainEqual({ type: 'open-options' });
+      panel.close();
+      panel = null;
+    }
+  });
+
+  it('keeps the case in the header and the tools in the body otherwise', async () => {
+    panel = open();
+    await settle();
+    expect(panel.$('header select.case').value).toBe(CASE);
+    expect(panel.$('.trouble')).toBe(null);
+    expect(panel.$('[data-act="capture"]').disabled).toBe(false);
   });
 });
 

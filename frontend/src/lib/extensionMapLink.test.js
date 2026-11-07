@@ -286,7 +286,7 @@ function open({ extra = {}, href = 'https://www.openstreetmap.org/#map=17/50.45/
     /** This tab going behind another, and being come back to. */
     hide: () => showTab(false),
     show: () => showTab(true),
-    status: () => root().querySelector('.status')?.textContent ?? '',
+    status: () => root().querySelector('.sound')?.getAttribute('aria-label') ?? '',
     note: () => root().querySelector('.note')?.textContent ?? '',
   };
 }

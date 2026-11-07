@@ -20,7 +20,7 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ext = join(here, '../../../extension');
-const source = readFileSync(join(ext, 'options.js'), 'utf8');
+const source = `${readFileSync(join(ext, 'pairing.js'), 'utf8')}\n${readFileSync(join(ext, 'options.js'), 'utf8')}`;
 const html = readFileSync(join(ext, 'options.html'), 'utf8');
 
 const settle = () => new Promise((r) => setTimeout(r, 0));

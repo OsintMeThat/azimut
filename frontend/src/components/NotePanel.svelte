@@ -343,7 +343,7 @@
     </NotePages>
   {:else if started}
     <p class="none"><Icon name="note" size={28} />
-      <span>Open a case in Azimut, or pick one in the extension's popup, then open Notes again.</span></p>
+      <span>Open a case in Azimut, or pick one in the extension's map panel, then open the note again.</span></p>
   {/if}
 </div>
 

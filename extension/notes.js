@@ -26,9 +26,13 @@
  * over the port once the rectangle is dragged, and Escape, here or on the page,
  * puts nothing.
  *
- * The case is the extension's `lastCaseId`, both ways: a case chosen in the popup
- * opens its note here, and a case chosen in the note is stored for the popup,
- * Capture and the right-click items.
+ * Save this page, over the note, files the page in front into the note's case as
+ * a bookmark: a saved link, nothing downloaded. It reads the tab as Add does, so a
+ * tab the browser keeps from the extension asks for the same permission.
+ *
+ * The case is the extension's `lastCaseId`, both ways: a case chosen in the map
+ * panel opens its note here, and a case chosen in the note is stored for the map
+ * panel, Capture and the right-click items.
  */
 
 const api = typeof browser !== "undefined" ? browser : chrome;
@@ -200,7 +204,46 @@ async function allowedNow(granted) {
     return;
   }
   await answerTab();
-  if (then) await act(then);
+  if (then === "bookmark") await saveBookmark();
+  else if (then) await act(then);
+}
+
+/**
+ * Save this page: the window's front tab, filed into the note's case as a bookmark.
+ * A tab the browser keeps from the extension asks for the permission Add asks for,
+ * on this page's line, and is saved once it is given.
+ */
+async function saveBookmark() {
+  if (state.busy) return;
+  state.busy = true;
+  $("bookmark").disabled = true;
+  say("");
+  try {
+    let answer;
+    try {
+      answer = await api.runtime.sendMessage({
+        type: "notes-bookmark",
+        windowId: state.windowId,
+        caseId: state.caseId || state.lastCaseId,
+      });
+    } catch {
+      answer = { ok: false, error: "The extension did not answer. Try again." };
+    }
+    if (answer?.ok) {
+      say(`Saved “${answer.title}” as a bookmark.`, "ok");
+      return;
+    }
+    if (answer?.closed) {
+      state.waiting = "bookmark";
+      $("allowing").hidden = false;
+      fold();
+      return;
+    }
+    say(N.plain(answer?.error) || "The extension did not answer. Try again.");
+  } finally {
+    state.busy = false;
+    $("bookmark").disabled = false;
+  }
 }
 
 /** Tell the worker what this panel holds, so the right-click items follow it. */
@@ -452,6 +495,7 @@ async function init() {
   state.windowId = (await api.windows.getCurrent()).id;
 
   $("allow").addEventListener("click", pressAllow);
+  $("bookmark").addEventListener("click", saveBookmark);
   $("retry").addEventListener("click", load);
   window.addEventListener("message", onFrame);
   document.documentElement.addEventListener("keydown", cancelSelecting);

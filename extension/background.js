@@ -7,7 +7,7 @@
  * restart lives in storage.session.
  *
  * Every capture is one captureVisibleTab behind one explicit user action
- * (repo legal rails): the popup's buttons, the notes panel's Capture (which
+ * (repo legal rails): the map panel's Capture, the notes panel's Capture (which
  * first tries one it throws away, to learn whether the browser allows it), or
  * the Azimut app's own Capture button relayed by bridge.js. Nothing here is
  * schedulable or repeatable without a fresh user gesture.
@@ -15,9 +15,13 @@
 
 const api = typeof browser !== "undefined" ? browser : chrome;
 
-// The notes panel's helpers (`notesmsg.js`). Firefox's event page has them already,
-// listed before this file in the manifest; Chrome's worker loads them here.
-if (typeof AzimutNotes === "undefined" && typeof importScripts === "function") importScripts("notesmsg.js");
+// The notes panel's helpers (`notesmsg.js`) and the map hosts (`mapsites.js`). Firefox's
+// event page has them already, listed before this file in the manifest; Chrome's worker
+// loads them here.
+if (typeof importScripts === "function") {
+  if (typeof AzimutNotes === "undefined") importScripts("notesmsg.js");
+  if (typeof AzimutMapSites === "undefined") importScripts("mapsites.js");
+}
 
 const APP_ORIGINS = ["http://127.0.0.1", "http://localhost"];
 const isAppUrl = (url) => APP_ORIGINS.some((o) => url === o || url?.startsWith(o + ":") || url?.startsWith(o + "/"));
@@ -171,12 +175,61 @@ async function ingest(blob, meta) {
 
 /**
  * Draw the area selection (`overlay.js`) on a tab. What to file the rectangle as
- * waits in storage.session, since whoever asked (the popup closes at once) may be
- * gone by the time the drag ends in "area-selected".
+ * waits in storage.session, since whoever asked may be gone by the time the drag
+ * ends in "area-selected".
+ *
+ * The selection's own bar offers the scale bar and north arrow, and the bearing
+ * the arrow needs: they belong to the capture being drawn, so they are asked
+ * there rather than before it. The bar starts from the tick as it was last left
+ * and from the bearing the address gave, handed over before the overlay runs.
  */
 async function armAreaSelect(tabId, meta) {
-  await api.storage.session.set({ [`pending:${tabId}`]: meta });
+  const { captureMarks } = await api.storage.local.get({ captureMarks: false });
+  const asked = { ...meta, marks: typeof meta.marks === "boolean" ? meta.marks : Boolean(captureMarks) };
+  await api.storage.session.set({ [`pending:${tabId}`]: asked });
+  await api.scripting.executeScript({
+    target: { tabId },
+    func: (options) => {
+      window.__azimutAreaOptions = options;
+    },
+    args: [{ marks: asked.marks, bearing: Number.isFinite(asked.bearing) ? asked.bearing : null }],
+  });
   await api.scripting.executeScript({ target: { tabId }, files: ["overlay.js"] });
+}
+
+/**
+ * What the selection's bar said, over what the capture was armed with: the tick,
+ * and the bearing typed or cleared. A bar that was not drawn says nothing, and a
+ * bearing outside a turn is no bearing.
+ */
+function toldByBar(meta, msg) {
+  const told = { ...meta };
+  if (typeof msg.marks === "boolean") told.marks = msg.marks;
+  if (msg.bearing === null) told.bearing = null;
+  else if (Number.isFinite(msg.bearing) && msg.bearing >= 0 && msg.bearing < 360) told.bearing = msg.bearing;
+  return told;
+}
+
+/** File the page in front as a bookmark: a saved link, nothing downloaded. */
+async function fileBookmark(url, title, caseId) {
+  const { backendUrl, token } = await settings();
+  if (!token) throw new Error("Not paired yet. Press the Azimut button to pair it");
+  const form = new FormData();
+  form.append("url", url);
+  form.append("case_id", caseId || "");
+  if (title) form.append("title", title.slice(0, 200));
+  let r;
+  try {
+    r = await fetch(`${backendUrl}/api/ingest/bookmark`, {
+      method: "POST",
+      headers: { "X-Azimut-Token": token },
+      body: form,
+    });
+  } catch {
+    throw new Error(`Azimut is not reachable at ${backendUrl}. Is the app running?`);
+  }
+  if (!r.ok) throw new Error(await refusal(r, "the bookmark"));
+  return r.json();
 }
 
 // --- post hand-off: fill a composer the app prepared ----------------------------
@@ -703,10 +756,14 @@ const MAP_FILES = [
   "mapoverlay.js",
 ];
 
+/** An error the map panel answers with its whole body rather than one line: no
+ *  token (`unpaired`), a token the app turned down (`rejected`), no app (`down`). */
+const mapTrouble = (message, code) => Object.assign(new Error(message), { code });
+
 async function mapApi(msg) {
   if (!MAP_ROUTES.has(msg.path)) throw new Error(`the map tools may not call ${msg.path}`);
   const { backendUrl, token } = await settings();
-  if (!token) throw new Error("not paired. Open the extension options and paste the token from Azimut Settings");
+  if (!token) throw mapTrouble("not paired. Open the extension options and paste the token from Azimut Settings", "unpaired");
 
   const url = new URL(backendUrl + msg.path);
   for (const [key, value] of Object.entries(msg.query || {})) {
@@ -728,9 +785,9 @@ async function mapApi(msg) {
   try {
     r = await fetch(url, init);
   } catch {
-    throw new Error("Azimut is not answering. Is the app running?");
+    throw mapTrouble("Azimut is not answering. Is the app running?", "down");
   }
-  if (r.status === 401) throw new Error("pairing token rejected. Pair again in the extension options");
+  if (r.status === 401) throw mapTrouble("pairing token rejected. Pair again in the extension options", "rejected");
   const text = await r.text();
   if (!r.ok) {
     let detail = text;
@@ -839,7 +896,7 @@ async function mapFile(caseId, path, offset = 0) {
 /** Why the app would not hand a file over, in its own words where it gave any —
  *  the size ceiling is stated there, and a second copy of the number here is a
  *  number that goes stale. */
-async function refusal(r) {
+async function refusal(r, what = "that file") {
   if (r.status === 401) return "pairing token rejected. Pair again in the extension options";
   let detail = "";
   try {
@@ -847,7 +904,7 @@ async function refusal(r) {
   } catch {
     // a proxy or a crash can answer with something that is not JSON
   }
-  return typeof detail === "string" && detail ? detail : `the app refused that file (${r.status})`;
+  return typeof detail === "string" && detail ? detail : `the app refused ${what} (${r.status})`;
 }
 
 /** How long the panel is given to say it has left the frame. */
@@ -1670,6 +1727,11 @@ async function onNoteCommand(command, tab) {
   }
 }
 api.commands?.onCommand?.addListener((command, tab) => {
+  // inside the press, before anything is awaited: a side panel opens only there
+  if (command === "open-note") {
+    openNote(tab?.windowId).catch((e) => notify("Azimut notes", `The note could not open: ${e?.message || e}`));
+    return;
+  }
   onNoteCommand(command, tab);
 });
 // The citation's label follows the tab in front, but only while a panel is open.
@@ -1683,9 +1745,118 @@ api.windows?.onFocusChanged?.addListener(() => {
   if (notePanels.size) syncNoteMenus();
 });
 
+// --- the toolbar button ----------------------------------------------------------
+//
+// One press, and the page gets what it is for: the tools over a map, the case's
+// note beside any other page, and on Azimut's own tab the one thing the press is
+// there for, the browser's leave to capture that tab (`activeTab`), which the app's
+// Capture is told about at once and says so in its own words.
+//
+// Which of the three is decided before anything is awaited. A side panel opens
+// only inside the press, and Firefox stops counting it as one at the first thing
+// awaited (MDN, "User actions"), so the hosts are the extension's own copy of the
+// app's table (`mapsites.js`) rather than a question to the app.
+//
+// Until the extension is paired the button opens the pairing popup instead
+// (`popup.html`): the token is typed into a page of the extension's own, never
+// into a panel drawn over somebody else's site, whose scripts hear every key.
+
+const toolbar = api.action ?? api.browserAction;
+
+/** The pairing popup while there is no token, nothing once there is one. */
+async function syncToolbar() {
+  if (!toolbar?.setPopup) return;
+  const { token } = await settings();
+  try {
+    await toolbar.setPopup({ popup: token ? "" : "popup.html" });
+  } catch {
+    // a browser that refuses keeps the last popup it was given
+  }
+}
+
+/** Firefox's sidebar, or Chrome's side panel for this window. Called inside a press. */
+function openNote(windowId) {
+  try {
+    if (api.sidebarAction?.open) return Promise.resolve(api.sidebarAction.open());
+    if (api.sidePanel?.open) return Promise.resolve(api.sidePanel.open({ windowId }));
+  } catch (e) {
+    return Promise.reject(e);
+  }
+  return Promise.reject(new Error("this browser has no side panel for extensions"));
+}
+
+/** A tick on the button for a moment, on that tab only. */
+const DONE_MS = 2500;
+function flashDone(tabId) {
+  const quiet = (call) => Promise.resolve(call).catch(() => {});
+  try {
+    if (!toolbar?.setBadgeText) return;
+    if (toolbar.setBadgeBackgroundColor) quiet(toolbar.setBadgeBackgroundColor({ tabId, color: "#66b578" }));
+    quiet(toolbar.setBadgeText({ tabId, text: "✓" }));
+    setTimeout(() => quiet(toolbar.setBadgeText({ tabId, text: "" })), DONE_MS);
+  } catch {
+    // a badge is a courtesy
+  }
+}
+
+function onToolbar(tab) {
+  const url = tab?.url || "";
+  if (isAppUrl(url)) {
+    // the press is the leave: the app's Capture is told it may go on (bridge.js)
+    Promise.resolve(api.tabs.sendMessage(tab.id, { type: "app-activated" })).catch(() => {});
+    flashDone(tab.id);
+  } else if (Number.isInteger(tab?.id) && globalThis.AzimutMapSites?.siteOf(url)) {
+    // injecting the tools again is what closes them, so the same press does both
+    Promise.resolve(api.scripting.executeScript({ target: { tabId: tab.id }, files: MAP_FILES })).catch((e) =>
+      notify("Azimut", `The tools could not open on this page: ${e?.message || e}`)
+    );
+  } else {
+    openNote(tab?.windowId).catch((e) => notify("Azimut notes", `The note could not open: ${e?.message || e}`));
+  }
+  // a browser that forgot the pairing popup gets it back for the next press
+  syncToolbar();
+}
+
+toolbar?.onClicked?.addListener(onToolbar);
+api.runtime.onInstalled?.addListener(() => syncToolbar());
+api.runtime.onStartup?.addListener(() => syncToolbar());
+api.storage.onChanged?.addListener((changes, area) => {
+  if (area === "local" && (changes.token || changes.backendUrl)) syncToolbar();
+});
+
+/** The keys that open the note, as the browser has them now, or "". */
+async function noteShortcut() {
+  try {
+    const all = await api.commands.getAll();
+    return all.find((one) => one.name === "open-note")?.shortcut || "";
+  } catch {
+    return "";
+  }
+}
+
 // --- message routes ------------------------------------------------------------
 
 async function handle(msg, sender) {
+  // A map panel's note button. First, and opened before anything is awaited: Chrome
+  // counts a click in a page as the press that may open a side panel, as long as
+  // nothing came between. Firefox never does (MDN, "User actions"), and the panel
+  // then says how its sidebar opens instead.
+  if (msg.type === "open-note") {
+    if (!sender.tab) return { ok: false, error: "only a map panel may ask" };
+    try {
+      await openNote(sender.tab.windowId);
+      return { ok: true };
+    } catch {
+      const keys = await noteShortcut();
+      return {
+        ok: false,
+        error: keys
+          ? `This browser opens the note from its own sidebar, or with ${keys}.`
+          : "This browser opens the note from its own sidebar.",
+      };
+    }
+  }
+
   // The Azimut app's own Capture button (bridge.js relay): return the raw
   // frame — the app does its own registration, cropping and filing. Only the
   // app's localhost origin may ask for it.
@@ -1717,11 +1888,32 @@ async function handle(msg, sender) {
     }
   }
 
-  // Popup: arm an area selection on the page. The popup closes right after,
-  // so the meta waits in storage.session for the overlay's rect.
+  // A map panel's Capture: arm an area selection on its own tab. The meta waits in
+  // storage.session for the overlay's rect.
   if (msg.type === "start-area-select") {
+    const tab = sender.tab;
+    if (!Number.isInteger(tab?.id) || isAppUrl(tab.url)) return { ok: false, error: "only a map panel may ask" };
     try {
-      await armAreaSelect(msg.tabId, msg.meta);
+      await armAreaSelect(tab.id, { ...(msg.meta || {}), url: tab.url || msg.meta?.url });
+      return { ok: true };
+    } catch (e) {
+      await api.storage.session.remove(`pending:${tab.id}`);
+      // the browser took the tab back from the extension: a press on the button gives it again
+      const refused = /activeTab|<all_urls>|Cannot access|must request permission|Missing host permission/i;
+      return {
+        ok: false,
+        error: refused.test(e?.message || "")
+          ? "The browser took this tab back. Open the tools again from the Azimut button."
+          : e.message,
+      };
+    }
+  }
+
+  // A map panel that cannot reach the app as paired: the options, where the pairing is.
+  if (msg.type === "open-options") {
+    if (!sender.tab) return { ok: false, error: "only a map panel may ask" };
+    try {
+      await api.runtime.openOptionsPage();
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e.message };
@@ -1731,8 +1923,9 @@ async function handle(msg, sender) {
   // Overlay: the user finished (or cancelled) the drag.
   if (msg.type === "area-selected" || msg.type === "area-cancelled") {
     const key = `pending:${sender.tab.id}`;
-    const meta = (await api.storage.session.get(key))[key];
+    const armed = (await api.storage.session.get(key))[key];
     await api.storage.session.remove(key);
+    const meta = armed ? toldByBar(armed, msg) : armed;
     if (meta?.note) return finishNoteCapture(msg, sender.tab, meta);
     if (msg.type === "area-cancelled" || !meta) return { ok: true };
     try {
@@ -1782,8 +1975,9 @@ async function handle(msg, sender) {
     }
   }
 
-  // Popup: draw the map tools over this tab. Injecting the panel a second time
-  // closes it, which is what makes one button both open and close.
+  // The pairing popup, once paired on a map: draw the map tools over this tab.
+  // Injecting the panel a second time closes it, which is what makes the toolbar
+  // button both open and close it.
   if (msg.type === "map-tools") {
     try {
       await api.scripting.executeScript({ target: { tabId: msg.tabId }, files: MAP_FILES });
@@ -1799,7 +1993,7 @@ async function handle(msg, sender) {
     try {
       return { ok: true, data: await mapApi(msg) };
     } catch (e) {
-      return { ok: false, error: e.message };
+      return { ok: false, error: e.message, ...(e.code ? { code: e.code } : {}) };
     }
   }
 
@@ -1817,6 +2011,25 @@ async function handle(msg, sender) {
   if (msg.type === "map-file") {
     try {
       return { ok: true, file: await mapFile(msg.caseId, msg.path, msg.offset) };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
+  // The notes panel's Save this page: the window's front tab, filed into the note's
+  // case as a bookmark. `closed` is a tab the browser keeps from the extension,
+  // which the panel answers by asking for the permission its Add asks for.
+  if (msg.type === "notes-bookmark") {
+    if (!fromNotesPanel(sender)) return { ok: false, error: "only the notes panel may ask" };
+    if (!Number.isInteger(msg.windowId)) return { ok: false, error: "no window to read" };
+    try {
+      const [tab] = await api.tabs.query({ active: true, windowId: msg.windowId });
+      const url = tab?.url || "";
+      if (!url) return { ok: false, closed: true, error: "This page is kept from the extension until you allow it." };
+      if (!AzimutNotes.isWeb(url)) return { ok: false, error: "Open a web page to save it." };
+      if (await isPairedApp(url)) return { ok: false, error: "This is Azimut itself, not a source." };
+      const body = await fileBookmark(url, tab.title || "", String(msg.caseId || ""));
+      return { ok: true, title: body?.title || tab.title || url };
     } catch (e) {
       return { ok: false, error: e.message };
     }
@@ -1888,5 +2101,7 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 // Worker start — including the one right after ext-reload, which is the point.
 reattachBridge();
+// The button as the pairing says it should be, whatever a browser restart kept of it.
+syncToolbar();
 // Items a previous worker left up belong to panels that will say so again.
 syncNoteMenus();

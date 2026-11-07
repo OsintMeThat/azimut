@@ -358,8 +358,9 @@ describe('an open sweep', () => {
 });
 
 describe('the beta badge', () => {
+  // under the tool row: in the header it pushed the case's name out
   const badge = () =>
-    window.__AZIMUT_MAP_TOOLS__.root.querySelector('header .beta');
+    window.__AZIMUT_MAP_TOOLS__.root.querySelector('.beta-line .beta');
 
   it('marks every tool that draws on the ground, on whichever map', async () => {
     // It used to name Google Earth. The caveat was never about the site: these

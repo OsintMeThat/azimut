@@ -8,23 +8,29 @@ The extension sends the screenshot and page URL. Azimut parses supported sites,
 coordinates, place names and imagery dates, so URL-format fixes ship with the
 app.
 
+One press on its toolbar button (or Alt+Shift+A) opens what the page is for: on a
+supported map site, a panel over the map; on any other page, the case's note
+beside it; on Azimut's own tab, nothing, since the press is what lets the app
+capture that tab. Until the extension is paired, the button opens the pairing
+instead (see Pair).
+
 It supports seven flows:
 
-- On a supported map site, the popup can capture a selected area or save its
-  coordinates as a place. A capture can carry a scale bar and a north arrow,
-  ticked in the popup and remembered from then on; the app draws them, from the
+- On a supported map site, the panel's **Capture an area** draws a selection and
+  files it. A capture can carry a scale bar and a north arrow, ticked on the
+  selection's own bar and remembered from then on; the app draws them, from the
   zoom and the pixel ratio the grab was taken at. Most of these sites write no
-  rotation into their URL, so the needle waits for a bearing in the field above
+  rotation into their URL, so the needle waits for a bearing typed on that bar
   rather than pointing at a guess.
-- On a 2D map, it can draw Azimut's own tools over the site: measure, media
-  pins, sun and moon, a search grid, the case's own images and videos held over
+- On a 2D map, the same panel draws Azimut's own tools over the site: measure,
+  points, sun and moon, a search grid, the case's own images and videos held over
   the map, and NASA FIRMS fire detections laid over whatever that map is
-  showing. The same panel lists the case's scenes still to geolocate.
-- On another page, it can save the URL and title as a bookmark without
-  downloading the page.
+  showing. It lists the case's scenes still to geolocate.
 - Beside any page, a panel holds a note of the case. Its Add (+), a right-click
   or Alt+Shift+S cites the page or the post, quotes the words selected on it with
-  a link back to them, or puts a capture of an area of a map into the note.
+  a link back to them, or puts a capture of an area of a map into the note. Its
+  **Save this page** files the page as a bookmark, without downloading it.
+  Alt+Shift+N opens it from any page, and the map panel's note button from a map.
 - On Azimut's Google basemap, the in-app Capture button requests the current
   tab image without a screen-share prompt.
 - When Geo Report publishes, it can open X or Bluesky with the thread already
@@ -102,8 +108,10 @@ than hidden:
 
 ## Map tools
 
-**Draw tools over this map**, in the popup, opens a panel over the site you are
-on. Press it again to close it. Six tools share it:
+The toolbar button opens a panel over the map you are on. Press it again to close
+it. Its header holds the case, a dot that turns green once what it draws sits on
+the ground (its tooltip says why when it does not), the note, the link and the
+fold. **Capture an area** comes first, then the scenes to geolocate, then six tools:
 
 | Tool | What it does |
 |---|---|
@@ -121,10 +129,10 @@ fire layer are the exceptions: the windows are not on the map, and the fires are
 ground rather than drawing, so both stay while you measure over them.
 
 **Scenes to geolocate.** A case whose videos or pictures hold scenes kept in Inspect
-or marked in the app, and not
-yet taken up by a proof, shows a "To geolocate" line under the case picker, with
-their count. Unfolded, it lists them by file as the app's To-do does: the time,
-the label, and whether captures were gathered for it. **Geolocate** tells the app
+or marked in the app, and not yet taken up by a proof, lists them under Capture,
+by file as the app's To-do does: the time, the label, and whether captures were
+gathered for it. The list stays open while no scene is being geolocated, and folds
+to one row behind the scene's pill while one is. **Geolocate** tells the app
 which scene this map is for and holds the scene's video over the map, paused on
 the scene, which is marked on the bar in the colour Inspect gives it: a band for
 a passage, a pin for an instant. A pill then names the scene in its colour and
@@ -132,7 +140,7 @@ counts its captures, the moment the app says one landed; its ✕ stops, and **Ma
 proof** brings the Azimut tab to the front on its proof chooser, or opens one when none
 is open. Nothing is written from the map.
 While it lasts, the app attaches every capture filed in the case to that scene,
-the popup's included, and the capture's report says "Attached to" it. A scene
+the panel's included, and the capture's report says "Attached to" it. A scene
 started from the app shows the same pill here, and pressing the pill brings its
 video up. A picture marked to geolocate reads "Whole picture" and is held over the
 map as a picture, with nothing on a bar. A case with no scene to geolocate shows
@@ -307,17 +315,24 @@ measured places the drawing again without asking.
 
 ## Notes panel
 
-**Notes panel**, at the foot of the popup, opens a note of the case beside the
-page: Chrome's side panel, Firefox's sidebar. The browser's own close button folds
-it away, and it opens on the same note next time. In Firefox it is also under
-View → Sidebar.
+The toolbar button, pressed on any page that is not a map, opens a note of the
+case beside the page: Chrome's side panel, Firefox's sidebar. **Alt+Shift+N**
+opens it from any page, maps included, and so does the note button in the map
+panel's header in Chrome. Firefox opens its sidebar only from a press on the
+browser itself, so there the button says to use the shortcut or Firefox's own
+sidebar. The browser's own close button folds it away, and it opens on the same
+note next time. In Firefox it is also under View → Sidebar.
 
 The panel is Azimut's own note, the one the app shows, not a copy. What you type
 there is in the case at once, and the bar at its top picks the note: Case notes,
 or one of the case's own. The case is the extension's case: the one last picked in
-the popup or filed into, else the one Azimut has open. Picking a case in the popup
-opens its note in the panel, and a case picked in the panel is the one the popup
-and the right-click items file into next.
+the map panel or filed into, else the one Azimut has open. Picking a case in the
+map panel opens its note in the panel, and a case picked in the panel is the one
+the map panel and the right-click items file into next.
+
+**Save this page**, over the note, files the page in front into that case as a
+bookmark: a saved link, with nothing downloaded. It reads the tab as Add does, so
+a tab the browser keeps from the extension asks for the same permission first.
 
 While a note is open, three items join the right-click menu on every web page:
 
@@ -325,7 +340,7 @@ While a note is open, three items join the right-click menu on every web page:
 |---|---|
 | Cite this page | A chip for the case's item at that address, or a bookmark filed for it. Nothing is downloaded. It reads **Cite this post** on a post on X, Bluesky, Telegram, Instagram, TikTok, Facebook or Reddit. |
 | Quote the selection | The words as they are, linked to the passage itself, then the page's chip. The link opens the page scrolled to the words and highlights them (Chrome, and Firefox 131 or later). |
-| Capture into the note | The popup's area selection, drawn over the map: the rectangle you drag is filed into the case the way the popup files one, then put in as a picture. Esc, on the page or in the panel, puts nothing. |
+| Capture into the note | The area selection the map panel's Capture draws: the rectangle you drag is filed into the case the way Capture files one, then put in as a picture. Esc, on the page or in the panel, puts nothing. |
 
 The note's **Add (+)** offers the same three first, under *From this tab*: *This
 map* on a map site, *This page* (or *This post*), and *The passage selected* with
@@ -354,9 +369,17 @@ the app's own page; a capture does, like every capture.
 
 ## Pair (external sites only)
 
-1. Azimut → **Settings → Capture extension** → copy the pairing token.
-2. Extension options (right-click the toolbar icon → Options) → paste the
-   token → **Save & test**.
+Until it is paired, the toolbar button opens the pairing:
+
+1. Azimut → **Settings → Capture extension** → copy the pairing token. Pressed on
+   Azimut's own tab, the pairing's **Open it** goes straight there.
+2. Paste the token → **Pair**. A token the app turns down is not kept, so the
+   button goes on offering the pairing until one is taken.
+
+Once paired, the pairing offers what the press was for (the tools on a map, the
+note anywhere else), and the button opens that from then on. The extension's
+options (right-click the toolbar icon → Options) change the address or the token
+later.
 
 The token allows this extension to file captures through the local Azimut
 server, to read back the media and proofs a thread attaches, and, for the map
@@ -410,7 +433,7 @@ image is on your clipboard either way.
 | `activeTab` | Reads the current URL and captures the tab only after you click the extension. |
 | `scripting` | Shows the area-selection overlay, draws the map tools panel, fills a composer you allowed, and hands an image to an engine you opened. |
 | `storage` | Stores the local app URL, pairing token and last-used case. |
-| `notifications` | Reports an area capture after the popup closes. |
+| `notifications` | Reports an area capture once it is filed, and says why the tools or the note could not open. |
 | `contextMenus` | Adds Cite, Quote and Capture to the right-click menu while a note is open in the panel. Firefox reads it as `menus`. |
 | `sidePanel` | Shows the notes panel in Chrome. Firefox has its own key for it, `sidebar_action`, and each browser ignores the other's with a warning. |
 | `http://127.0.0.1/*`, `http://localhost/*` | Connects to the local Azimut app. |
