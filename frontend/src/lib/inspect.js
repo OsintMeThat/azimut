@@ -175,6 +175,46 @@ export function videoSeed(filters, videoAdjust) {
 const paramName = (f) => f.params[0]?.name ?? 'amount';
 const defaultOf = (f) => f.params[0]?.default ?? 0;
 
+/**
+ * Where a range slider's thumb sits for a value, and the value for a thumb.
+ *
+ * Most sliders spread min..max evenly. A `centred` one (brightness, 0 to ×4) puts
+ * its default mid-travel: the lower half runs evenly to it one step a notch, and
+ * the upper half starts at that same pace and quickens towards max. So ×1.05 is
+ * as easy to set as on the old 0–2 slider, ×2 sits at three quarters and ×4 at
+ * the end. The value stays the real factor, rounded to the param's step; only the
+ * thumb's position is curved.
+ */
+export function sliderTravel(p) {
+  if (p?.travel !== 'centred') {
+    return { min: p?.min, max: p?.max, step: p?.step, toValue: Number, toPosition: (v) => v };
+  }
+  const step = p.step || 0.01;
+  const mid = p.default;
+  const low = mid - p.min; // value run of the lower half
+  const curve = p.max - mid - low; // what the upper half adds over an even run
+  const half = Math.round(low / step); // notches per half
+  const decimals = Math.max(0, Math.ceil(-Math.log10(step) - 1e-9));
+  const snap = (v) => Number((Math.round(v / step) * step).toFixed(decimals));
+  return {
+    min: 0,
+    max: 2 * half,
+    step: 1,
+    toValue(position) {
+      const at = Math.min(2 * half, Math.max(0, Number(position) || 0));
+      if (at <= half) return snap(p.min + (at / half) * low);
+      const s = at / half - 1;
+      return Math.min(p.max, snap(mid + low * s + curve * s * s));
+    },
+    toPosition(value) {
+      const v = Math.min(p.max, Math.max(p.min, Number(value ?? mid)));
+      if (v <= mid) return Math.round(((v - p.min) / low) * half);
+      const s = curve ? (Math.sqrt(low * low + 4 * curve * (v - mid)) - low) / (2 * curve) : (v - mid) / low;
+      return Math.round(half * (1 + s));
+    },
+  };
+}
+
 /** Build the live-preview CSS `filter` + `transform` strings from slider values. */
 export function previewStyle(filters, values) {
   values = values ?? {};

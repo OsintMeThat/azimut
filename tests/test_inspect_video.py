@@ -283,8 +283,99 @@ def test_channel_replicates_one_band(pick, band):
 def test_new_filters_keep_the_alpha_channel(name):
     img = _noisy().convert("RGBA")
     img.putalpha(Image.new("L", img.size, 77))
-    out = ie.apply_ops(img, [{"op": name, "params": {"amount": 5, "on": 1, "pick": 2}}])
+    out = ie.apply_ops(img, [{"op": name, "params": {"amount": 3, "on": 1, "pick": 2}}])
     assert out.mode == "RGBA" and out.getchannel("A").getextrema() == (77, 77)
+
+
+# --- brightness up to x4 ----------------------------------------------------
+
+
+def _css_brightness(arr, factor):
+    """The preview's CSS `brightness()`: each RGB channel multiplied, then clipped."""
+    return np.clip(np.round(arr.astype(float) * factor), 0, 255)
+
+
+@pytest.mark.parametrize("factor", [0.5, 1.4, 2, 2.5, 3, 3.7, 4])
+def test_a_brightened_frame_saves_as_its_preview_shows(factor):
+    img = _gradient(0, 255)
+    out = np.asarray(_run("brightness", img, amount=factor)).astype(float)
+    assert np.abs(out - _css_brightness(np.asarray(img), factor)).max() <= 1
+
+
+def test_brightness_multiplies_and_clips_each_channel():
+    img = Image.new("RGB", (4, 4), (48, 50, 20))
+    assert _run("brightness", img, amount=3).getpixel((0, 0)) == (144, 150, 60)
+    assert _run("brightness", img, amount=4).getpixel((0, 0)) == (192, 200, 80)
+    hot = Image.new("RGB", (4, 4), (200, 50, 20))
+    assert _run("brightness", hot, amount=2).getpixel((0, 0)) == (255, 100, 40)
+
+
+def test_an_old_brightness_renders_as_it_did():
+    """Values from the 0–2 slider go through the same Pillow call as before."""
+    from PIL import ImageEnhance
+
+    img = _noisy()
+    for factor in (0, 0.35, 1.4, 2):
+        assert _same(_run("brightness", img, amount=factor), ImageEnhance.Brightness(img).enhance(factor))
+
+
+def test_brightness_past_x4_is_refused():
+    img = _noisy(size=(8, 8))
+    for factor in (4.01, 6, -0.1, float("nan")):
+        with pytest.raises(ValueError, match="brightness must be between 0 and 4"):
+            _run("brightness", img, amount=factor)
+    # an unreadable value still falls back to neutral, as it always has
+    assert _same(_run("brightness", img, amount="junk"), img)
+
+
+def _two_greys(tmp_path):
+    """A clip whose left half is RGB 48 and right half RGB 144, kept 4:2:0 like a phone's."""
+    out = tmp_path / "greys.mp4"
+    _ffmpeg("-f", "lavfi", "-i", "color=c=0x303030:s=64x32:r=10:d=1",
+            "-f", "lavfi", "-i", "color=c=0x909090:s=64x32:r=10:d=1",
+            "-filter_complex", "[0:v][1:v]hstack", "-c:v", "libx264", "-qp", "0",
+            "-pix_fmt", "yuv420p", str(out))
+    return out
+
+
+def _halves(img):
+    arr = np.asarray(img.convert("RGB")).astype(float)
+    return arr[4:-4, 8:56].mean(), arr[4:-4, 72:120].mean()
+
+
+@needs_ffmpeg
+def test_a_brightened_video_saves_multiplied_like_its_preview(client, tmp_path):
+    cid = client.post("/api/cases", json={"name": "Bright"}).json()["id"]
+    item = _upload_video(client, cid, _two_greys(tmp_path))
+    case = Case.open(cid)
+    assert _halves(ie.extract_frame(case.resolve_inside(item["path"]), 0)) == pytest.approx((48, 144), abs=2)
+
+    res = client.post(f"/api/cases/{cid}/inspect/enhance-video",
+                      json={"path": item["path"], "params": {"brightness": 3}})
+    assert res.status_code == 200, res.text
+    saved = case.resolve_inside(res.json()["item"]["path"])
+    dark, light = _halves(ie.extract_frame(saved, 0))
+    # x3 lifts 48 to 144 and clips 144 at white; the old additive `eq` whitened both
+    assert dark == pytest.approx(144, abs=4)
+    assert light >= 253
+    # back to 4:2:0, so the browser that showed the preview plays the file too
+    stream = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=pix_fmt",
+         "-of", "csv=p=0", str(saved)], capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert stream == "yuv420p"
+
+
+@needs_ffmpeg
+def test_a_video_past_x4_is_refused(client, tmp_path):
+    cid = client.post("/api/cases", json={"name": "Too bright"}).json()["id"]
+    item = _upload_video(client, cid, _two_greys(tmp_path))
+    before = len(client.get(f"/api/cases/{cid}/media").json())
+    res = client.post(f"/api/cases/{cid}/inspect/enhance-video",
+                      json={"path": item["path"], "params": {"brightness": 4.5}})
+    assert res.status_code == 422
+    assert "brightness must be between 0 and 4" in res.text
+    assert len(client.get(f"/api/cases/{cid}/media").json()) == before
 
 
 # --- video overview and shots ---------------------------------------------

@@ -58,6 +58,70 @@ def test_video_rotation_filterchain_covers_every_orientation_control():
         inspect_engine._video_filterchain({}, 45)
 
 
+def test_brightness_slider_reaches_x4_on_a_curved_travel(client):
+    filters = {f["id"]: f for f in client.get("/api/inspect/ops").json()["filters"]}
+    brightness = filters["brightness"]["params"][0]
+    assert (brightness["min"], brightness["max"], brightness["default"]) == (0, 4, 1)
+    assert brightness["travel"] == "centred"
+    assert {filters[k]["params"][0]["travel"] for k in ("contrast", "saturation", "gamma", "sharpness")} == {"linear"}
+
+
+def test_video_brightness_multiplies_rgb_ahead_of_the_other_tones():
+    """The preview's CSS runs brightness, contrast, saturate, grayscale, invert in that order."""
+    gain = "round(val*3)"
+    lut = f"lutrgb=r={gain}:g={gain}:b={gain},format=yuv420p"
+    tones = {"brightness": 3, "contrast": 1.2, "saturation": 0.8, "gamma": 1, "grayscale": 0, "invert": 1}
+    assert inspect_engine._video_filterchain(tones, 90) == (
+        f"transpose=clock,{lut},eq=contrast=1.2:saturation=0.8:gamma=1.0,negate"
+    )
+    assert inspect_engine._video_filterchain({"brightness": 3}, 0) == lut
+    assert inspect_engine._video_filterchain({"brightness": 1.35}, 0) == (
+        "lutrgb=r=round(val*1.35):g=round(val*1.35):b=round(val*1.35),format=yuv420p"
+    )
+    # neutral brightness adds no lookup table, and `eq` never carries a brightness again
+    assert inspect_engine._video_filterchain({"brightness": 1, "contrast": 1.2}, 0) == (
+        "eq=contrast=1.2:saturation=1.0:gamma=1.0"
+    )
+    assert inspect_engine._video_filterchain({"brightness": 1, "grayscale": 1}, 0) == (
+        "eq=contrast=1.0:saturation=0.0:gamma=1.0"
+    )
+    assert "brightness=" not in inspect_engine._video_filterchain(tones, 0)
+
+
+@pytest.mark.parametrize("params", [
+    {"brightness": 4}, {"brightness": 0}, {"brightness": 2}, {"contrast": 2, "gamma": 0.2},
+])
+def test_video_tones_up_to_their_slider_ends_are_accepted(params):
+    assert inspect_engine._video_filterchain(params, 0)
+
+
+@pytest.mark.parametrize("params,message", [
+    ({"brightness": 4.2}, "brightness must be between 0 and 4"),
+    ({"brightness": -1}, "brightness must be between 0 and 4"),
+    ({"contrast": 3}, "contrast must be between 0 and 2"),
+    ({"gamma": 0.1}, "gamma must be between 0.2 and 3"),
+])
+def test_video_tones_past_their_slider_are_refused(params, message):
+    with pytest.raises(ValueError, match=message):
+        inspect_engine._video_filterchain(params, 0)
+
+
+def test_a_preview_past_x4_brightness_is_refused(client):
+    cid = client.post("/api/cases", json={"name": "Bounds"}).json()["id"]
+    item = _upload(client, cid, "img.png", _png_bytes(color=(40, 40, 40), size=(10, 10)))
+    url = f"/api/cases/{cid}/inspect/render-preview"
+
+    ok = client.post(url, json={"path": item["path"], "ops": [{"op": "brightness", "params": {"amount": 4}}]})
+    assert ok.status_code == 200
+    assert Image.open(io.BytesIO(ok.content)).convert("RGB").getpixel((0, 0)) == (160, 160, 160)
+    old = client.post(url, json={"path": item["path"], "ops": [{"op": "brightness", "params": {"amount": 1.5}}]})
+    assert Image.open(io.BytesIO(old.content)).convert("RGB").getpixel((0, 0)) == (60, 60, 60)
+
+    res = client.post(url, json={"path": item["path"], "ops": [{"op": "brightness", "params": {"amount": 4.5}}]})
+    assert res.status_code == 422
+    assert "brightness must be between 0 and 4" in res.text
+
+
 def test_focus_scan_redirects_stderr_and_terminates_a_stalled_decoder(client, monkeypatch):
     cid = client.post("/api/cases", json={"name": "Scan"}).json()["id"]
     case = Case.open(cid)

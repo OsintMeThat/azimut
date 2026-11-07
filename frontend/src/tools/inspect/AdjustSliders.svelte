@@ -1,9 +1,12 @@
 <script>
+  import { sliderTravel } from '../../lib/inspect.js';
   import { FILTER_HELP } from '../../lib/inspectHelp.js';
 
   // Slider bank generated from the backend filter registry (/api/inspect/ops).
   // Writes live into `values` (a reactive object owned by the work), so the
   // caller can build both the live preview and the backend op pipeline.
+  //
+  // The thumb sits where `sliderTravel` puts the value, curved for brightness.
   //
   // `rendered` says the caller shows the picture as the server renders it, so every
   // filter previews; otherwise a filter with no CSS twin is marked as applied on save.
@@ -43,7 +46,15 @@
             onchange={(e) => (values[f.id] = e.target.checked ? 1 : 0)}
           />
         {:else}
-          <input type="range" min={p.min} max={p.max} step={p.step} bind:value={values[f.id]} />
+          {@const t = sliderTravel(p)}
+          <input
+            type="range"
+            min={t.min}
+            max={t.max}
+            step={t.step}
+            value={t.toPosition(values[f.id])}
+            oninput={(e) => (values[f.id] = t.toValue(e.currentTarget.value))}
+          />
           <span class="val mono">
             {Number(values[f.id]).toFixed(p.step < 1 ? (p.step < 0.1 ? 2 : 1) : 0)}{p.unit}
           </span>
