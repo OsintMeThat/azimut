@@ -594,3 +594,19 @@ def test_a_picture_is_never_marked_over_a_moment(client):
     cid = _case(client)
     photo = _upload(client, cid)
     assert client.post(f"/api/cases/{cid}/scenes/mark", json={"path": photo, "start": 2}).status_code == 400
+
+
+@needs_ffmpeg
+def test_a_straightened_collage_of_one_video_keeps_its_video(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    pieces = [(video, 1.0), (video, 2.5)]
+    # Straighten files the bent picture of the pieces, then the collage holds it alone
+    bent = _export(client, cid, None, pieces, label="Pano straightened")
+    name = _collage(client, cid, "Pano", [(bent, None)])
+    [row] = client.get(f"/api/cases/{cid}/scenes", params={"video": video}).json()["collages"]
+    assert (row["collage"], row["times"]) == (name, [1.0, 2.5])
+    picture = _export(client, cid, name, [(bent, None)], label="Pano final")
+    from azimut.engine import scenes as scenes_engine
+
+    assert scenes_engine.frame_origins(Case.open(cid), [picture]) == {picture: (video, 1.0)}

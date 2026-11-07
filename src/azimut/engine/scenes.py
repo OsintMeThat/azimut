@@ -199,6 +199,15 @@ def collage_video(case: Case, pieces: list[tuple[Any, Any]]) -> tuple[str, list[
     A piece is a video at an instant, or a frame Inspect cut from one; a collage that
     also holds a picture, or pieces of two videos, is a picture of its own.
     """
+    return _collage_video(case, pieces, depth=0)
+
+
+#: How deep a collage's pieces are followed through pictures composed from other pieces:
+#: a straightened collage is one picture of the pieces it bent.
+_COMPOSED_DEPTH = 3
+
+
+def _collage_video(case: Case, pieces: list[tuple[Any, Any]], depth: int) -> tuple[str, list[float]] | None:
     paths = [p for p, _t in pieces if isinstance(p, str) and p]
     if not pieces or len(paths) != len(pieces):
         return None
@@ -208,14 +217,32 @@ def collage_video(case: Case, pieces: list[tuple[Any, Any]]) -> tuple[str, list[
     times: list[float] = []
     for path, time in pieces:
         if path in cut:
-            video, moment = cut[path]
+            videos.add(cut[path][0])
+            times.append(cut[path][1])
         elif (items.get(path) or {}).get("kind") == "video" and _seconds(time) is not None:
-            video, moment = path, float(time)
+            videos.add(path)
+            times.append(float(time))
         else:
-            return None
-        videos.add(video)
-        times.append(moment)
+            # a piece that is itself a picture composed from one video's frames, such as
+            # a straightened collage, stands for those frames
+            inner = _composed_pieces(items.get(path)) if depth < _COMPOSED_DEPTH else None
+            found = _collage_video(case, inner, depth + 1) if inner else None
+            if found is None:
+                return None
+            videos.add(found[0])
+            times.extend(found[1])
     return (videos.pop(), sorted(times)) if len(videos) == 1 else None
+
+
+def _composed_pieces(item: dict[str, Any] | None) -> list[tuple[Any, Any]] | None:
+    """The pieces a composed picture records (`source.sources` and `source.times`)."""
+    source = (item or {}).get("source")
+    if not isinstance(source, dict) or source.get("type") != "inspect" or source.get("op") != COLLAGE_OP:
+        return None
+    files, moments = source.get("sources"), source.get("times")
+    if not isinstance(files, list) or not isinstance(moments, list) or len(files) != len(moments):
+        return None
+    return list(zip(files, moments))
 
 
 def _collage_origins(case: Case, items: list[dict[str, Any]]) -> dict[str, tuple[str, float]]:
