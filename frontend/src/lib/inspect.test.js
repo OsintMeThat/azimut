@@ -8,7 +8,7 @@ import {
   newCollage, clampCollageDim, stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
   exportFrame, COLLAGE_MAX_EXPORT_PIXELS, clockTime,
   COLLAGE_DEFAULT_SIZE, ADJUST_ORDER, ADJUST_PRESETS, activePreset, buildOps, needsRender,
-  presetValues, previewOps,
+  presetValues, previewOps, previewStyle, sliderTravel,
 } from './inspect.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -582,5 +582,59 @@ describe('adjusting a frame', () => {
     expect(activePreset(FILTERS, values)).toBe('text');
     expect(activePreset(FILTERS, { ...values, brightness: 1.1 })).toBe(null);
     expect(activePreset(FILTERS, neutral)).toBe(null);
+  });
+});
+
+describe('a slider\'s travel', () => {
+  // The brightness param as /api/inspect/ops serves it.
+  const BRIGHTNESS = { name: 'amount', type: 'range', min: 0, max: 4, step: 0.01, default: 1, unit: '', travel: 'centred' };
+  const t = sliderTravel(BRIGHTNESS);
+  const notches = Array.from({ length: 201 }, (_, i) => t.toValue(i));
+
+  it('runs brightness from black to ×4 with neutral mid-travel and ×2 at three quarters', () => {
+    expect([t.min, t.max, t.step]).toEqual([0, 200, 1]);
+    expect(t.toValue(0)).toBe(0);
+    expect(t.toValue(100)).toBe(1);
+    expect(t.toValue(150)).toBe(2);
+    expect(t.toValue(200)).toBe(4);
+  });
+
+  it('keeps the old slider\'s 0.01 a notch on both sides of neutral', () => {
+    expect(notches.slice(95, 106)).toEqual([0.95, 0.96, 0.97, 0.98, 0.99, 1, 1.01, 1.02, 1.03, 1.04, 1.06]);
+    expect(notches.slice(0, 100).every((v, i) => v === i / 100)).toBe(true);
+  });
+
+  it('never steps back or stands still, and the steps only grow past neutral', () => {
+    const steps = notches.slice(1).map((v, i) => +(v - notches[i]).toFixed(2));
+    expect(steps.every((d) => d > 0)).toBe(true);
+    expect(steps[199]).toBeGreaterThan(steps[100]);
+    expect(steps[199]).toBeLessThanOrEqual(0.05);
+  });
+
+  it('stores the real factor, rounded to the step', () => {
+    for (const v of notches) expect(v).toBe(Number(v.toFixed(2)));
+    expect(t.toValue('175')).toBe(2.88);
+  });
+
+  it('puts a saved value back under its own notch, old ones from the 0–2 slider included', () => {
+    notches.forEach((v, i) => expect(t.toPosition(v)).toBe(i));
+    expect(t.toPosition(1.5)).toBe(131);
+    expect(t.toPosition(0.25)).toBe(25);
+    expect(t.toPosition(7)).toBe(200);
+    expect(t.toPosition(undefined)).toBe(100);
+  });
+
+  it('leaves every other slider linear on its own bounds', () => {
+    const contrast = { name: 'amount', type: 'range', min: 0, max: 2, step: 0.01, default: 1 };
+    const linear = sliderTravel(contrast);
+    expect([linear.min, linear.max, linear.step]).toEqual([0, 2, 0.01]);
+    expect(linear.toPosition(1.37)).toBe(1.37);
+    expect(linear.toValue('1.37')).toBe(1.37);
+  });
+
+  it('previews ×4 as the factor itself', () => {
+    const filters = [{ id: 'brightness', params: [BRIGHTNESS], css: 'brightness({v})' }];
+    expect(previewStyle(filters, { brightness: 4 }).filter).toBe('brightness(4)');
+    expect(previewStyle(filters, { brightness: 1.5 }).filter).toBe('brightness(1.5)');
   });
 });

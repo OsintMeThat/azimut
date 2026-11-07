@@ -122,6 +122,11 @@ class Param:
     default: float = 1.0
     unit: str = ""
     options: tuple[dict[str, Any], ...] = ()  # a 'choice' param's {value, label} list
+    # How the slider's travel maps to the value. "linear" spreads min..max evenly.
+    # "centred" puts the default mid-travel, keeps the lower half's pace just past
+    # it and lets the steps grow towards max, so a wide upper range keeps fine
+    # control where the picture is barely touched. The value is always the real one.
+    travel: str = "linear"
 
 
 @dataclass(frozen=True)
@@ -165,7 +170,7 @@ def _enhance(cls):
 
 _register_filter(Filter(
     "brightness", "Brightness", _enhance(ImageEnhance.Brightness),
-    [Param("amount", "Amount", min=0, max=2, default=1)], css="brightness({v})",
+    [Param("amount", "Amount", min=0, max=4, default=1, travel="centred")], css="brightness({v})",
 ))
 _register_filter(Filter(
     "contrast", "Contrast", _enhance(ImageEnhance.Contrast),
@@ -316,6 +321,23 @@ def _apply_keeping_alpha(flt: Filter, img: Image.Image, params: dict[str, Any]) 
     return out
 
 
+def _check_range(flt: Filter, params: dict[str, Any]) -> None:
+    """Refuse a slider value outside its slider, so a request asks no more than the UI offers.
+
+    A value that does not read as a number is left alone: the filter falls back to
+    its default for it, as it always has.
+    """
+    for p in flt.params:
+        if p.type != "range" or p.name not in params:
+            continue
+        try:
+            value = float(params[p.name])
+        except (TypeError, ValueError):
+            continue
+        if not p.min <= value <= p.max:  # NaN fails both sides
+            raise ValueError(f"{flt.label.lower()} must be between {p.min:g} and {p.max:g}")
+
+
 def apply_ops(image: Image.Image, ops: list[dict[str, Any]]) -> Image.Image:
     """Run an ordered list of ``{"op": id, "params": {...}}`` through the pipeline."""
     out = image if image.mode == "RGBA" else image.convert("RGB")
@@ -323,7 +345,9 @@ def apply_ops(image: Image.Image, ops: list[dict[str, Any]]) -> Image.Image:
         flt = FILTERS.get(op.get("op", ""))
         if flt is None:
             raise ValueError(f"unknown filter {op.get('op')!r}")
-        out = _apply_keeping_alpha(flt, out, op.get("params") or {})
+        params = op.get("params") or {}
+        _check_range(flt, params)
+        out = _apply_keeping_alpha(flt, out, params)
     return out
 
 
@@ -1424,24 +1448,41 @@ def solve_collage_layout(
     }
 
 
-# Map the frontend's css-filter values (multiplicative, 1.0 = neutral) to ffmpeg's
-# `eq` filter, whose brightness is additive. Only the css-previewable filters carry
-# over to video; grayscale/invert are handled as saturation/negate.
-def _eq_filterchain(params: dict[str, Any]) -> str | None:
+# Map the frontend's tone values (1.0 = neutral) to ffmpeg filters, in the order the
+# preview's CSS filter string applies them: brightness, then contrast and saturation,
+# then grayscale and invert. Gamma has no CSS twin and keeps its place in `eq`.
+#
+# CSS brightness multiplies each RGB channel and clips it, so it gets an RGB lookup
+# table of its own: `eq` adds its brightness to the luma instead, which matched the
+# preview only near neutral and stops at +1. The table leaves the pixels in RGB,
+# and RGB handed to the encoder makes a 4:4:4 file no browser plays, hence the
+# return to yuv420p before anything else runs. Grayscale and invert are handled as
+# saturation and negate.
+def _tone_filterchain(params: dict[str, Any]) -> str | None:
+    for key, value in params.items():
+        flt = FILTERS.get(key)
+        if flt is not None and flt.params:
+            _check_range(flt, {flt.params[0].name: value})
+
     def val(key, default):
         try:
             return float(params.get(key, default))
         except (TypeError, ValueError):
             return default
 
+    parts = []
+    brightness = round(val("brightness", 1.0), 4)
+    if brightness != 1.0:
+        gain = f"round(val*{brightness:g})"
+        parts += [f"lutrgb=r={gain}:g={gain}:b={gain}", "format=yuv420p"]
     eq = {
-        "brightness": round(val("brightness", 1.0) - 1.0, 4),
         "contrast": round(val("contrast", 1.0), 4),
         "saturation": 0.0 if val("grayscale", 0) >= 1 else round(val("saturation", 1.0), 4),
         "gamma": round(val("gamma", 1.0), 4),
     }
-    neutral = {"brightness": 0.0, "contrast": 1.0, "saturation": 1.0, "gamma": 1.0}
-    parts = [f"eq={':'.join(f'{k}={v}' for k, v in eq.items())}"] if eq != neutral else []
+    neutral = {"contrast": 1.0, "saturation": 1.0, "gamma": 1.0}
+    if eq != neutral:
+        parts.append(f"eq={':'.join(f'{k}={v}' for k, v in eq.items())}")
     if val("invert", 0) >= 1:
         parts.append("negate")
     return ",".join(parts) or None
@@ -1462,7 +1503,7 @@ def _rotation_filterchain(rotation: int) -> str | None:
 
 
 def _video_filterchain(params: dict[str, Any], rotation: int) -> str | None:
-    parts = (_rotation_filterchain(rotation), _eq_filterchain(params))
+    parts = (_rotation_filterchain(rotation), _tone_filterchain(params))
     return ",".join(part for part in parts if part) or None
 
 
