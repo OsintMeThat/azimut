@@ -1,6 +1,6 @@
 /**
  * The scene the open case is geolocating, and the queue of scenes still to prove, for
- * every surface that shows them: Inspect's scenes drawer, the pill over the tools, the
+ * every surface that shows them: Inspect's Scenes tab, the pill over the tools, the
  * To-do's "To geolocate" group and the count on the sidebar's To-do tab
  * (`engine/geolocate.py`).
  *
@@ -55,8 +55,8 @@ export async function startGeolocating(caseId, video, draft) {
  * scene marked on its bar in its colour (`uiState.geolocateRef`, which Satellite takes
  * up; `order` is its place among its video's scenes, `lib/scenes.sceneColorAt`). A
  * picture's scene opens the picture instead (`kind`), with no bar to mark. The one
- * entry point of every Geolocate press: Inspect's drawer, the To-do, the pill.
- * `scene` is a queue row or a drawer's draft: `{video, id}` at least.
+ * entry point of every Geolocate press: Inspect's Scenes tab, the To-do, the extension's panel.
+ * `scene` is a queue row or a row of that tab: `{video, id}` at least.
  */
 export async function geolocateScene(caseId, scene) {
   const held = await startGeolocating(caseId, scene.video, scene.id);

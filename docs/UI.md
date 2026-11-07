@@ -1790,18 +1790,14 @@ plays it, and the speed goes from 0.1× to 4×. Holding **O** shows the picture
 without its adjustments, on a video and on a frame.
 
 **The one press every visit needs stays on top of the panel.** Above the tabs sit
-**Capture frame** on the video, with the time it will cut and **Save N frames** once
-there are captures, and **Save to case** on a frame. C captures from the keyboard and
+**Capture frame** on the video, with the time it will cut, **Mark to geolocate** under it
+and **Save N frames** once there are captures, and **Save to case** on a frame. C captures from the keyboard and
 takes as fast as it is pressed: the frame joins the strip at once and its picture
 follows, and taking the same frame twice only points at it. The panel is resized by
 its left edge. Its tabs keep their place for the session:
 
-- **Info**, what the file says about itself: the stream from the probe (resolution,
-  frame rate and whether it varies, codec, bit rate, sound, a turn stored in the
-  file, the software it went through), the capture date and position from its
-  metadata with the point opened on Satellite, and the file's size, SHA-256, source
-  and when it was added. The full metadata dump folds below. On a frame, the frame
-  comes first: the time and number it was cut at and its size after the crop.
+- **Scenes**, first, and open on a video: the places to find in the file, below. A
+  frame of a video, a capture and a frame opened on its own have no such tab.
 - **Adjust**: crop, orientation and tones. A live histogram reads the picture as it
   is shown and says how much of it is pure black or white. Presets (dark scene,
   haze, text and plates) set the sliders and leave them to move. Denoise, auto
@@ -1813,37 +1809,49 @@ its left edge. Its tabs keep their place for the session:
   **Mark here**, each labelled, kept with the work and listed in playback order.
   **Find shots** reads every frame once and cuts the clip where the camera changes
   shot: each shot is shown at its sharpest frame, labelled with the stretch it
-  covers, and one press keeps it as a scene. The sharpest frames of the whole clip
+  covers, and one press keeps it as a scene and stays here for the next. The sharpest frames of the whole clip
   fold away under them. The answer is kept, so the shots are on the bar the next
   time the clip opens.
 - **Analyze**, on a frame: Error Level Analysis laid over the frame with its
   strength, and asked again once the frame is edited; Reverse image search and
   Match in Horizon.
+- **Info**, what the file says about itself: the stream from the probe (resolution,
+  frame rate and whether it varies, codec, bit rate, sound, a turn stored in the
+  file, the software it went through), the capture date and position from its
+  metadata with the point opened on Satellite, and the file's size, SHA-256, source
+  and when it was added. The full metadata dump folds below. On a frame, the frame
+  comes first: the time and number it was cut at and its size after the crop.
 
-**A video's scenes are where its geolocations happen**, since a long clip often
-holds several: a route filmed from a car, or a day's events cut together. **Scene
-here** under Capture frame, or **S**, keeps a scene at the frame on screen; it is an
-instant until **End here** in its row, or **Shift+S**, gives it an end at the frame
-on screen, and then a passage. A scene that states no time is about the **whole
-video** and prints no timecode anywhere. The player's own row carries a **Scenes**
-button with their count, tinted while some are still to prove, and the bar draws each
-one in its colour, a pin at an instant and a band over a passage, named on hover.
-The button opens and closes a **drawer docked on the video's right**, above the bar:
-it narrows the picture, which fits itself again, rather than covering it, and closes
-whenever a file opens. It lists the scenes in clip order, a scene about the whole
-video first: a passage to play on a loop, a word about what to find and remove on its
-line, and under its time End here and **Make the proof**, said in words. **Pressing a scene's time goes there and opens it in its row**: Whole video,
-Instant or Passage, each end typed (`1:05`, `65`, `1:05.5`), taken from the frame on
-screen with **Here**, nudged a frame with ↑ and ↓, or dragged by its handle on the
-bar. Meanwhile **S** and **Shift+S** set the start and the end. Enter or Apply keeps
-it, and so does closing the drawer; Escape drops it, and a second Escape closes the
-drawer. A draft's change goes back with Ctrl+Z like the rest.
-**A narrow player keeps its buttons.** The frame on screen is never cut: the frame
-count goes first, then the clip's length and the keys hint, then the word Scenes (its
-pin and count stay), and past that the last buttons wrap whole, on the right. The
-drawer gives way down to 260 px before the picture shrinks below a third of the room.
-**The proofs resting on the clip are its proved scenes**, in the same drawer and on
-the same bar, each opening its proof. A proof built on frames cut here and stating
+**A video's scenes are where its geolocations happen**, since a long clip often holds
+several: a route filmed from a car, or a day's events cut together. **Mark to geolocate**
+under Capture frame, or **S**, keeps a scene at the frame on screen, and its arrow offers
+This moment or Whole video. A scene is an instant until **End here** or **Shift+S** gives
+it an end at the frame on screen, and then a passage. A scene that states no time is
+about the **whole video** and prints no timecode anywhere. The bar draws each one in its
+colour, a pin at an instant and a band over a passage, named on hover, and a click on
+either opens the Scenes tab on that scene. The empty strip of a video with no scene and
+no proof asks *Several places in this video?* with This moment, Whole video and Not now,
+remembered per file in this browser. The first scene ever kept says once that it is in
+the To-do too, with **Show**.
+
+**The Scenes tab lists them in clip order**, a scene about the whole video first, its
+label counting them, tinted while some are still to prove. A closed row writes its name,
+its kind and time (`Passage · 0:30–0:45`, `Instant · 3:49`, `Whole video`) and where it
+stands, and a press anywhere on it opens it and goes there. One row is open at a time:
+the one under the playhead on landing in the tab, else the last touched, else the first
+still to prove. It shows Whole video, Instant or Passage, each end typed (`1:05`, `65`,
+`1:05.5`), taken from the frame on screen with **Here**, nudged a frame with ↑ and ↓, or
+dragged by its handle on the bar. Apply comes once something changed. Enter keeps it, and
+so does leaving the row or the tab when it reads as one; Escape drops it, and a second
+Escape folds the row. S keeps a new scene whichever row is open, and Shift+S ends the
+open one at once. A draft's change goes back with Ctrl+Z like the rest.
+
+**A narrow player keeps its buttons.** The frame on screen is never cut: the frame count
+goes first, then the clip's length and the keys hint, and past that the last buttons wrap
+whole, on the right.
+
+**The proofs resting on the clip are its proved scenes**, in the same list and on the
+same bar, with **Open the proof** in their row. A proof built on frames cut here and stating
 no time of its own is about the whole video, pinned at those frames on the bar and
 placed in the list by the first, so the ones made before scenes existed are found
 without being rewritten. **A proof can hold several moments**, since one place often
@@ -1857,19 +1865,26 @@ work. Once a proof takes it up it shows as the proof's and is hidden, never drop
 the proof sent to the Trash gives it back to geolocate at its own time, and restored
 from there it is proved again (`GET /cases/{id}/scenes`, whose `taken` names the drafts
 a proof in the case cites).
-**A scene still to prove says where it stands** under its name: *To geolocate*, *In
-progress* with its count once captures were filed for it on the map, or *Geolocating*
-while it is the one being looked for, its row ringed. **Geolocate** is its main act, in
-the accent, after End here and Make the proof: the work is written, the scene is held on
-the server as the one being geolocated (`PUT /cases/{id}/geolocating`), and Satellite
-opens with its video as a reference window. Pressed again on the scene in hand it
-reads **Stop** and stops it, its captures kept, as in the To-do and the extension's
-panel. **Abandon** asks for a word in the row,
-which may stay empty; Enter gives the scene up, Escape keeps it, and the toast offers
-Undo. An abandoned scene leaves the list for **Abandoned (n)**, folded at the foot of the
-drawer, greyed with its word and **Restore**. It keeps its colour and its frames: the bar
-draws it as an outlined band or a hollow pin, its frames carry a grey ring, no scene is
-offered inside it, and the Scenes button does not count it.
+**A scene still to prove says where it stands**: *To geolocate*, *In progress* with its
+count once captures were filed for it on the map, or *Geolocating* while it is the one
+being looked for, its row ringed. **Geolocate** is its main act, in the accent, after End
+here and Make the proof: the work is written, the scene is held on the server as the one
+being geolocated (`PUT /cases/{id}/geolocating`), and Satellite opens with its video as a
+reference window. Pressed again on the scene in hand it reads **Stop** and stops it, its
+captures kept, as in the To-do and the extension's panel. **Abandon** asks for a word in
+the row, which may stay empty; Enter gives the scene up, Escape keeps it, and the toast
+offers Undo. An abandoned scene leaves the list for **Abandoned (n)**, folded at the foot
+of the tab, greyed with its word and **Restore**. It keeps its colour and its frames: the
+bar draws it as an outlined band or a hollow pin, its frames carry a grey ring, no scene
+is offered inside it, and the tab's count leaves it out.
+
+**A picture is marked whole.** Its Scenes tab offers **Mark to geolocate**, one press that
+keeps one scene about the whole picture in its work, never an instant or a passage. Its
+row has a name, where it stands, Abandon, Geolocate and Make the proof. **Make the proof**
+opens a new proof of the picture and the captures gathered for it, on its Proof tab,
+stating no time. Any proof laying the picture out proves it, and the row then reads
+*Proved · Proof 12* and opens it. A frame cut from a video belongs to that video's scenes
+and a capture is an answer, so neither has the tab.
 
 **A capture never makes a scene; a frame belongs to one by its time.** A frame captured
 in no scene offers one instead, *Frame captured at 0:00.48 · Add a scene*, with
