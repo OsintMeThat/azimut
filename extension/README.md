@@ -120,7 +120,8 @@ an open sweep all come back when you pick it up again. Reference windows and the
 fire layer are the exceptions: the windows are not on the map, and the fires are
 ground rather than drawing, so both stay while you measure over them.
 
-**Scenes to geolocate.** A case whose videos hold scenes kept in Inspect, and not
+**Scenes to geolocate.** A case whose videos or pictures hold scenes kept in Inspect
+or marked in the app, and not
 yet taken up by a proof, shows a "To geolocate" line under the case picker, with
 their count. Unfolded, it lists them by file as the app's To-do does: the time,
 the label, and whether captures were gathered for it. **Geolocate** tells the app
@@ -131,7 +132,9 @@ captures; its ✕ stops.
 While it lasts, the app attaches every capture filed in the case to that scene,
 the popup's included, and the capture's report says "Attached to" it. A scene
 started from the app shows the same pill here, and pressing the pill brings its
-video up. A case with no scene to geolocate shows nothing new.
+video up. A picture marked to geolocate reads "Whole picture" and is held over the
+map as a picture, with nothing on a bar. A case with no scene to geolocate shows
+nothing new.
 
 **Link the view** with the chain button in the panel's header. It puts this map on
 one camera with the other linked maps: other panels on other sites, and the app's

@@ -40,7 +40,8 @@ proof** opens Inspect's chooser on it, and ✕ stops; the captures stay with the
 Every capture filed meanwhile, from any map tool or the extension, is gathered for it on
 the server (`engine/geolocate.py`), and every tab and the extension's panel follow the
 same scene. Narrower than 1240 px it drops its first word, and under 1080 px Make the
-proof keeps its icon alone.
+proof keeps its icon alone. A picture marked to geolocate reads *Whole picture* where a
+scene reads its time.
 
 **Case sits on the rail, under the four stages and a rule apart from them.** The
 stages read in the order an investigation runs, and the case is not one of them: it
@@ -99,6 +100,10 @@ presses *Read the guide* on it, which opens the guide on its start page.
   stay empty. Three rows show and the rest are counted; the abandoned fold below, each
   with its word and **Restore**. The group is absent while the case has no scene to
   prove, and read again on the server's word while it is shown, never once it is not.
+  A picture marked to geolocate is a row like the others: *Whole picture*, an image on
+  its file's line and no mark, having no bar. Geolocate holds the picture beside the
+  map, and the first proof that lays it out proves it, so the row, the pill and the
+  count go together.
   Lists are case metadata in `case.json`, included in case bundles; they are not
   graph entities and own no artifact files. Task and list deletions are permanent,
   outside Trash. Concurrent edits from another browser tab require reloading the
@@ -269,7 +274,10 @@ Rules:
   recently added documents, then searches tools, Horizon's settings, workspace
   cases, documents in the current case and the words inside its notes, each found
   note opening on its line, and *Note on the side* opens the note on the side. A Horizon setting opens Horizon with
-  its inspector out, its group unfolded and its row lit a moment. Arrow keys select a result, Enter opens it and Escape
+  its inspector out, its group unfolded and its row lit a moment. While scenes wait,
+  *To geolocate* leads the tools with their count and opens the sidebar on its To-do;
+  typed, it is there at any count. Words also find a scene by its label or its file's
+  title, which opens it in Inspect. Arrow keys select a result, Enter opens it and Escape
   returns focus. Changing case through `openCase` asks before discarding unsaved
   work; document handoffs retain their existing save and confirmation paths.
   Reads start only when the palette opens; document search uses bounded catalog
@@ -983,6 +991,11 @@ remembered per workspace for the current session. Reloading restores the default
   worth having there rather than a second Files. **To-do** is the case's lists from
   Home, one copy shared by both, so a task ticked on the map is ticked on Home. Its
   **To geolocate** group is the same one, so a scene can be picked up from any tool.
+  The tab counts the scenes waiting, the accent's dot and their number, the abandoned
+  left out, and says nothing at zero. The queue is read once for the case while the
+  sidebar is open; a nudge naming a file then asks that file's scenes alone
+  (`GET /scenes?video=`), and the queue is read again only when the open scenes there
+  changed. In the narrowest sidebar the count takes the room of the tab icons.
   **Recent** is the last forty items filed, newest first, read only while it is
   open.
 - **Body** — one rule: no filter shows the tree, a query or a chip shows a flat
@@ -1704,6 +1717,13 @@ only what acts on the file itself stays out — the map pin, Details, opening th
 file, Delete. The menu is placed against the window rather than inside the row,
 because a card clips what overflows it and the last row of a scrolled list would
 cut the menu off.
+
+**Mark to geolocate** sits under a rule in the same menu and in Files' right-click. It
+puts a picture or a whole video in the To-do's To geolocate (`POST /scenes/mark`), says so
+with **Show**, and reads *Marked to geolocate* once there, when a press shows the list. A
+map capture, a picture the app drew of a place and a frame Inspect cut are not offered;
+Files cannot tell a frame, so there the server refuses it and says why. Marking a file
+given up on takes it up again.
 
 **Reverse Search starts from Inspect's file list.** Every image and video in the
 case, filterable and searchable, with no worked-on row since the tab keeps nothing.
@@ -2680,7 +2700,9 @@ which it is (`lib/map/tools.js`) rather than adding a button somewhere.
   that clip, or a new one, paused where the scene starts. The scene is marked in the
   colour Inspect's bar draws it in: a band over a passage on the player's bar, a strip
   along the window's foot at rest, and a dot in its header. A pin in the player goes
-  back to its start. Nothing loops.
+  back to its start. Nothing loops. A picture marked to geolocate opens the same way,
+  in the window already on it or a new one, with the scene's dot in its header and
+  nothing to mark or cue.
 - **Its settings** open in the rail's one **panel slot**, beside it. One mode is
   armed, so one panel is open; a panel cannot cross another or the map's own
   controls.
@@ -3540,7 +3562,9 @@ to one line and absent when there are none (`GET /api/ingest/scenes`). Geolocate
 (`POST /api/ingest/geolocating`) holds the scene's video over the other site's map,
 paused on the scene and marked on its bar in its colour, and a pill names it, counts
 its captures and stops it. While it lasts, every capture filed in the case is attached
-to it, the popup's included, and the capture's report says *Attached to “bridge?”*.
+to it, the popup's included, and the capture's report says *Attached to “bridge?”*. A
+picture reads *Whole picture*, with an image on its file's line, and Geolocate holds the
+picture over the map with the scene's dot and no bar.
 
 ## Detect
 
