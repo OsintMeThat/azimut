@@ -460,6 +460,59 @@ def export_proof_png(case_id: str, name: str) -> dict[str, str]:
     return {"file": written.name, "folder": str(folder), "path": str(written)}
 
 
+class SeriesExportIn(BaseModel):
+    """A video's slides to copy out as one numbered set. ``folder`` names the set's
+    folder inside the proofs export folder, the video's own name when left out."""
+
+    video: str = Field(min_length=1, max_length=1024)
+    folder: str | None = Field(default=None, max_length=200)
+
+
+@router.post("/cases/{case_id}/proofs/series-export")
+def export_proof_series(case_id: str, body: SeriesExportIn) -> dict[str, Any]:
+    """Copy the saved picture of every proof about one video into a folder of its own,
+    numbered in clip order: `<video>/01 Road bridge.png`, `02 …`.
+
+    Nothing is rendered again, since each slide is saved as it is left. The scenes
+    still to prove have no picture, so they are not slides here; a proof never
+    exported is left out and named in the answer. The numbers count what is written,
+    so the set has no gap. The folder is a new one each time, numbered past a set
+    already there, inside the destination saved for proofs: the browser names a
+    folder, never a path.
+    """
+    case = get_case(case_id)
+    try:
+        rows = scene_engine.slides(case, body.video)
+    except scene_engine.BadScene as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    pictured = [row for row in rows if row["png"]]
+    skipped = [{"proof": row["proof"], "title": row["title"]} for row in rows if not row["png"]]
+    if not pictured:
+        raise HTTPException(status_code=422, detail="no slide of this video has a picture yet")
+    width = max(2, len(str(len(pictured))))
+    files = []
+    for number, row in enumerate(pictured, start=1):
+        filename = layout.visible_filename(f"{number:0{width}d} {row['title']}", ".png", row["proof"])
+        files.append((row, case.resolve_inside(row["png"]), filename))
+    name = layout.slugify((body.folder or "").strip() or Path(body.video).stem, "Slides")
+    try:
+        destination = exportdir.destination("proofs", case.path)
+        folder = exportdir.copy_set([(png, filename) for _row, png, filename in files], destination, name)
+    except exportdir.ExportDirError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "folder": str(folder),
+        "name": folder.name,
+        "files": [
+            {"proof": row["proof"], "title": row["title"], "file": filename}
+            for row, _png, filename in files
+        ],
+        "skipped": skipped,
+    }
+
+
 @router.post("/cases/{case_id}/proofs/export/reveal")
 def reveal_proof_exports(case_id: str) -> dict[str, str]:
     """Open the proofs export folder, resolved here rather than sent by the browser."""

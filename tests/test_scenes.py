@@ -972,3 +972,218 @@ def test_a_given_back_scene_stays_named_on_the_proof_through_its_time_and_its_sa
         "video": video, "moments": [], "draft": None, "gave": gave,
     }
     assert _drafts(client, cid, video) == []
+
+
+# -- what Geo Proof's slides read -----------------------------------------------------
+
+
+def _png_b64(color=(120, 60, 30)) -> str:
+    import base64
+
+    return base64.b64encode(_png(color)).decode()
+
+
+def _exported(client, cid, title, *srcs, **extra):
+    spec = {"panels": [{"id": f"p{i}", "src": s} for i, s in enumerate(srcs)], **extra}
+    res = client.post(f"/api/cases/{cid}/proofs", json={"title": title, "spec": spec, "png_base64": _png_b64()})
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+def _without_spec_thumb(cid, name):
+    """What a proof saved before the spec recorded its thumbnail left on disk."""
+    path = Case.open(cid).resolve_inside(layout.proof_spec_rel(name))
+    spec = json.loads(path.read_text(encoding="utf-8"))
+    spec.pop("thumb", None)
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    return path
+
+
+@needs_ffmpeg
+def test_proof_row_thumb_falls_back_to_entity(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    saved = _exported(client, cid, "Bridge", _cut(client, cid, video, 1.0))
+    assert saved["thumb"]
+    spec_path = _without_spec_thumb(cid, "Bridge")
+    before = spec_path.read_bytes()
+
+    [row] = _scenes(client, cid, video)["scenes"]
+
+    assert row["thumb"] == saved["thumb"]
+    assert row["png"] == saved["png"]
+    # read, not repaired: the spec stays as the old save left it
+    assert spec_path.read_bytes() == before
+
+
+@needs_ffmpeg
+def test_proof_row_thumb_prefers_the_spec_and_skips_a_dead_one(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    saved = _exported(client, cid, "Bridge", _cut(client, cid, video, 1.0))
+    case = Case.open(cid)
+    entity = case.find_entity(attr="spec", value=layout.proof_spec_rel("Bridge"))
+
+    # the entity naming a file that is gone, or one outside the case, reads as none
+    case.update_entity(entity["id"], {"attrs": {"thumb": "../../outside.png"}})
+    assert _scenes(client, cid, video)["scenes"][0]["thumb"] == saved["thumb"]
+    _without_spec_thumb(cid, "Bridge")
+    assert _scenes(client, cid, video)["scenes"][0]["thumb"] is None
+
+
+@needs_ffmpeg
+def test_proof_row_thumb_never_full_png(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    saved = _exported(client, cid, "Bridge", _cut(client, cid, video, 1.0))
+    case = Case.open(cid)
+    entity = case.find_entity(attr="spec", value=layout.proof_spec_rel("Bridge"))
+    case.update_entity(entity["id"], {"attrs": {"thumb": ""}})
+    spec_path = _without_spec_thumb(cid, "Bridge")
+    case.resolve_inside(saved["thumb"]).unlink()
+    before = spec_path.read_bytes()
+
+    [row] = _scenes(client, cid, video)["scenes"]
+
+    # no thumbnail anywhere: none, rather than the export a strip would load whole
+    assert row["thumb"] is None
+    assert row["png"] == saved["png"]
+    # and none made on a read
+    assert spec_path.read_bytes() == before
+    assert not case.resolve_inside(saved["thumb"]).exists()
+    assert case.get_entity(entity["id"])["attrs"]["thumb"] == ""
+
+
+@needs_ffmpeg
+def test_the_rows_of_a_video_look_their_proofs_and_places_up_once(client, tmp_path, monkeypatch):
+    """`find_entity` scans every entity of the case. One per row made the read of a
+    video with 150 proofs take a third of a second, and the strip reads it on every save."""
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    photo = _upload_png(client, cid)
+    real = Case.find_entity
+
+    def counted():
+        asked = []
+
+        def find_entity(self, **kwargs):
+            asked.append(kwargs)
+            return real(self, **kwargs)
+
+        monkeypatch.setattr(Case, "find_entity", find_entity)
+        try:
+            rows = scenes_engine.video_scenes(Case.open(cid), video)["scenes"]
+        finally:
+            monkeypatch.setattr(Case, "find_entity", real)
+        return len(asked), rows
+
+    def prove(at):
+        _proof(client, cid, f"Slide {at}", photo, coords=f"48.{at}1, 35.{at}2",
+               scene={"video": video, "moments": [{"start": at * 0.4}]})
+
+    for at in range(2):
+        prove(at)
+    few, _rows = counted()
+    for at in range(2, 8):
+        prove(at)
+    many, rows = counted()
+
+    assert many == few
+    assert [r["proof"] for r in rows] == [f"Slide {at}" for at in range(8)]
+    for row in rows:
+        entity = Case.open(cid).find_entity(attr="spec", value=layout.proof_spec_rel(row["proof"]))
+        assert row["proof_id"] == entity["id"]
+        [point] = row["points"]
+        assert Case.open(cid).get_entity(point["place_id"])["type"] == "place"
+
+
+def _frames(client, cid, video, draft):
+    return client.get(f"/api/cases/{cid}/scenes/{draft}/frames", params={"video": video})
+
+
+def _work_frame(video, fid, time, filed=None):
+    return {"id": fid, "path": video, "time": time, "filed": {"path": filed, "signature": "[]"} if filed else None}
+
+
+@needs_ffmpeg
+def test_draft_frames_route_lists_work_frames_in_moment(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)  # ten frames a second: half a frame is 0.05 s
+    kept = _cut(client, cid, video, 1.5)
+    gone = _cut(client, cid, video, 1.2)
+    case = Case.open(cid)
+    _save_work(client, cid, video, frames=[
+        _work_frame(video, "late", 1.94),
+        _work_frame(video, "kept", 1.5, kept),
+        _work_frame(video, "edge_in", 0.96),       # its middle is past the start
+        _work_frame(video, "edge_out", 1.96),      # its middle is past the end
+        _work_frame(video, "before", 0.9),
+        _work_frame(video, "gone", 1.2, gone),
+        _work_frame(video, "flash", 2.96),         # starts within half a frame of 3.0
+        _work_frame(video, "after_flash", 3.06),
+        {"id": "untimed", "path": video, "time": None},
+    ], scenes=[
+        {"id": "s_pass", "start": 1.0, "end": 2.0, "label": "Bridge?"},
+        {"id": "s_flash", "start": 3.0, "label": ""},
+        {"id": "s_all", "start": None, "end": None, "label": "Which city?"},
+    ])
+    client.delete(f"/api/cases/{cid}/media", params={"path": gone})
+    assert case.media_items_by_paths([gone]) == []
+    work_path = case.resolve_inside(layout.session_rel(_work(client, cid, video)["name"]))
+    before = work_path.read_bytes()
+
+    res = _frames(client, cid, video, "s_pass")
+
+    assert res.status_code == 200, res.text
+    frames = res.json()["frames"]
+    # in clip order, each with the picture it was saved as while the case holds it
+    assert [f["id"] for f in frames] == ["edge_in", "gone", "kept", "late"]
+    by_id = {f["id"]: f for f in frames}
+    assert set(by_id["kept"]) == {"id", "time", "path", "thumb"}
+    assert by_id["kept"]["path"] == kept and by_id["kept"]["time"] == 1.5
+    [item] = case.media_items_by_paths([kept])
+    assert by_id["kept"]["thumb"] == item.get("thumbnail") and by_id["kept"]["thumb"] != kept
+    # never saved, or its picture deleted since: the composer files it first
+    assert by_id["late"] == {"id": "late", "time": 1.94, "path": None, "thumb": None}
+    assert by_id["gone"]["path"] is None and by_id["gone"]["thumb"] is None
+
+    assert [f["id"] for f in _frames(client, cid, video, "s_flash").json()["frames"]] == ["flash"]
+    # the whole video holds every frame with a time
+    assert [f["id"] for f in _frames(client, cid, video, "s_all").json()["frames"]] == [
+        "before", "edge_in", "gone", "kept", "late", "edge_out", "flash", "after_flash",
+    ]
+    # reading is reading
+    assert work_path.read_bytes() == before
+
+
+@needs_ffmpeg
+def test_draft_frames_route_refuses_what_is_not_a_video_scene(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    photo = _upload_png(client, cid)
+    _save_work(client, cid, photo, scenes=[{"id": "s_pic", "start": None, "end": None, "label": ""}])
+    _save_work(client, cid, video, scenes=[{"id": "s_v", "start": 1.0, "label": ""}])
+
+    assert _frames(client, cid, photo, "s_pic").status_code == 422
+    assert _frames(client, cid, video, "s_nope").status_code == 404
+    assert _frames(client, cid, "media/never.mp4", "s_v").status_code == 400
+    assert _frames(client, cid, video, "s_v").json() == {"frames": []}
+    # a video nothing was done to has no scene to read
+    other = _video(client, cid, tmp_path, "other.mp4", pattern="testsrc2")
+    assert _frames(client, cid, other, "s_v").status_code == 404
+
+
+def test_frame_in_moment_is_inspects_rule():
+    tenth = 0.1
+    # a passage holds a frame by its middle, the end excluded
+    assert scenes_engine.frame_in_moment(0.95, 1.0, 2.0, tenth)
+    assert not scenes_engine.frame_in_moment(0.94, 1.0, 2.0, tenth)
+    assert scenes_engine.frame_in_moment(1.94, 1.0, 2.0, tenth)
+    assert not scenes_engine.frame_in_moment(1.95, 1.0, 2.0, tenth)
+    # an instant is shown by the frame that starts within half a frame of it
+    assert scenes_engine.frame_in_moment(2.96, 3.0, None, tenth)
+    assert scenes_engine.frame_in_moment(3.04, 3.0, None, tenth)
+    assert not scenes_engine.frame_in_moment(3.06, 3.0, None, tenth)
+    assert not scenes_engine.frame_in_moment(2.94, 3.0, None, tenth)
+    # an end that is no end after the start reads as the instant
+    assert scenes_engine.frame_in_moment(3.0, 3.0, 3.0, tenth)

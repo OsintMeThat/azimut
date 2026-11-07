@@ -459,6 +459,22 @@ def list_scenes(case_id: str, video: str) -> dict[str, Any]:
     }
 
 
+@router.get("/cases/{case_id}/scenes/{draft}/frames")
+def list_draft_frames(case_id: str, draft: str, video: str) -> dict[str, Any]:
+    """The frames Inspect cut inside one scene still to prove, in clip order, with the
+    picture each was saved as, if any: what Geo Proof offers to make it a slide."""
+    case = get_case(case_id)
+    try:
+        frames = scenes_engine.draft_frames(case, video, draft)
+    except scenes_engine.UnknownDraft as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except scenes_engine.BadScene as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"frames": frames}
+
+
 # -- geolocating a scene (engine/geolocate.py) ----------------------------------------
 
 

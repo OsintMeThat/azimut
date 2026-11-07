@@ -212,6 +212,52 @@ def test_a_failed_external_copy_removes_its_reserved_file(tmp_path, monkeypatch)
     assert list(destination.iterdir()) == []
 
 
+def test_a_set_lands_in_a_folder_of_its_own_numbered_past_one_there(tmp_path):
+    sources = []
+    for index in range(2):
+        source = tmp_path / f"source-{index}.png"
+        source.write_bytes(f"picture {index}".encode())
+        sources.append(source)
+    destination = tmp_path / "exports"
+    destination.mkdir()
+    files = [(sources[0], "01 Bridge.png"), (sources[1], "02 Depot.png")]
+
+    first = exportdir.copy_set(files, destination, "clip")
+    second = exportdir.copy_set(files, destination, "clip")
+
+    assert (first.name, second.name) == ("clip", "clip (2)")
+    assert sorted(p.name for p in first.iterdir()) == ["01 Bridge.png", "02 Depot.png"]
+    assert (second / "02 Depot.png").read_bytes() == b"picture 1"
+
+
+def test_a_set_that_fails_halfway_takes_itself_back(tmp_path, monkeypatch):
+    source = tmp_path / "source.png"
+    source.write_bytes(b"picture")
+    destination = tmp_path / "exports"
+    destination.mkdir()
+    real = exportdir.copy_out
+    calls = []
+
+    def second_fails(src, folder, filename):
+        calls.append(filename)
+        if len(calls) == 2:
+            raise exportdir.ExportDirError("could not write to that folder: disk full")
+        return real(src, folder, filename)
+
+    monkeypatch.setattr(exportdir, "copy_out", second_fails)
+
+    with pytest.raises(exportdir.ExportDirError, match="disk full"):
+        exportdir.copy_set([(source, "01 a.png"), (source, "02 b.png")], destination, "clip")
+    assert list(destination.iterdir()) == []
+
+
+@pytest.mark.parametrize("name", ["", "..", ".hidden", "a/b", "a\\b"])
+def test_a_set_folder_is_one_plain_name(tmp_path, name):
+    with pytest.raises(exportdir.ExportDirError):
+        exportdir.copy_set([], tmp_path, name)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_media_export_refuses_a_case_file_that_is_not_registered_media(client):
     case_id = _case(client, "Media boundary")
     case = Case.open(case_id)

@@ -361,10 +361,49 @@ def proof_specs(case: Case) -> list[tuple[str, dict[str, Any]]]:
     return out
 
 
-def _points(case: Case, spec: dict[str, Any]) -> list[dict[str, Any]]:
+def _by_attr(case: Case, entity_type: str, attr: str) -> dict[Any, dict[str, Any]]:
+    """The entities of one type by one of their attributes, the first filed winning as
+    `find_entity` has it, read in pages."""
+    found: dict[Any, dict[str, Any]] = {}
+    cursor: str | None = None
+    while True:
+        page = case.page_entities(limit=LOOKUP_BATCH, cursor=cursor, types=[entity_type])
+        for entity in page.get("items", []):
+            value = (entity.get("attrs") or {}).get(attr)
+            if isinstance(value, str) and value:
+                found.setdefault(value, entity)
+        cursor = page.get("next_cursor")
+        if not cursor:
+            return found
+
+
+class _Lookup:
+    """Each proof's entity by its spec and each place by its point, read in one pass
+    the first time a row asks. `find_entity` scans every entity of the case, and the
+    rows of a video with 150 proofs asked it 300 times. A point no place answers is
+    asked of `place_at` itself, which also follows a place merged into another."""
+
+    def __init__(self, case: Case) -> None:
+        self.case = case
+        self._proofs: dict[Any, dict[str, Any]] | None = None
+        self._places: dict[Any, dict[str, Any]] | None = None
+
+    def proof(self, rel: str) -> dict[str, Any] | None:
+        if self._proofs is None:
+            self._proofs = _by_attr(self.case, "proof", "spec")
+        return self._proofs.get(rel)
+
+    def place(self, lat: float, lon: float) -> dict[str, Any] | None:
+        if self._places is None:
+            self._places = _by_attr(self.case, "place", satellite_engine.COORD_KEY)
+        found = self._places.get(satellite_engine.coord_key(lat, lon))
+        return found if found is not None else satellite_engine.place_at(self.case, lat, lon)
+
+
+def _points(lookup: _Lookup, spec: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     for point in satellite_engine.spec_points(spec):
-        place = satellite_engine.place_at(case, point["lat"], point["lon"])
+        place = lookup.place(point["lat"], point["lon"])
         out.append(
             {
                 "lat": point["lat"],
@@ -387,19 +426,28 @@ def _existing(case: Case, rel: str | None) -> str | None:
         return None
 
 
-def _proof_row(case: Case, name: str, spec: dict[str, Any], scene: dict[str, Any]) -> dict[str, Any]:
-    proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(name))
+def _text(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _proof_row(lookup: _Lookup, name: str, spec: dict[str, Any], scene: dict[str, Any]) -> dict[str, Any]:
+    case = lookup.case
+    proof = lookup.proof(layout.proof_spec_rel(name))
     attrs = (proof or {}).get("attrs") or {}
     zone = attrs.get("when_zone") or spec.get("whenZone")
+    # The spec's thumbnail, else the one its entity carries: a proof saved before the
+    # spec recorded it still has one there. Never the export itself, which a strip of
+    # thirty slides would load whole, and never one made here, since this is a read.
+    thumb = _existing(case, _text(spec.get("thumb"))) or _existing(case, _text(attrs.get("thumb")))
     return {
         "kind": "proof",
         "proof": name,
         "proof_id": proof["id"] if proof else None,
         "title": spec.get("title") or name,
         **scene,
-        "points": _points(case, spec),
+        "points": _points(lookup, spec),
         "png": _existing(case, layout.proof_export_rel(name)),
-        "thumb": _existing(case, spec.get("thumb") if isinstance(spec.get("thumb"), str) else None),
+        "thumb": thumb,
         "when": spec.get("when") or None,
         "when_zone": zone if isinstance(zone, str) and zone else None,
         "description": spec.get("description") or None,
@@ -480,7 +528,8 @@ def _image_scenes(
     the app marks it, all proved by any proof that lays the picture out, which then
     lists in their place. A picture has no time to order them by."""
     laid = laid_out_by(specs, image)
-    scenes = [_proof_row(case, name, spec, {"video": image, "moments": [], "at": []}) for name, spec in laid]
+    lookup = _Lookup(case)
+    scenes = [_proof_row(lookup, name, spec, {"video": image, "moments": [], "at": []}) for name, spec in laid]
     drafts = [d for d in _drafts_of(case, image, works) if isinstance(d.get("id"), str)]
     hidden = sorted(d["id"] for d in drafts) if laid else []
     if not laid:
@@ -560,6 +609,7 @@ def video_scenes(
     scenes: list[dict[str, Any]] = []
     taken: set[str] = set()
     used: dict[str, list[dict[str, str]]] = {}
+    lookup = _Lookup(case)
     for name, spec in specs:
         for src in dict.fromkeys(_panel_sources(spec)):
             if src in origins and origins[src][0] == video:
@@ -569,7 +619,7 @@ def video_scenes(
         if scene is None:
             continue
         if scene["video"] == video:
-            scenes.append(_proof_row(case, name, spec, scene))
+            scenes.append(_proof_row(lookup, name, spec, scene))
 
     drafts = _drafts_of(case, video, works)
     hidden = sorted(taken & {d.get("id") for d in drafts if isinstance(d.get("id"), str)})
@@ -591,6 +641,106 @@ def _case_video(case: Case, path: str) -> bool:
         return False
     items = case.media_items_by_paths([path])
     return bool(items) and items[0].get("kind") == "video"
+
+
+def _a_case_video(case: Case, path: str) -> None:
+    """Refuse a file the case does not hold, then one that is not a video."""
+    entity = case.find_entity(attr="path", value=path)
+    if entity is None or entity.get("type") != "media":
+        raise CaseError("that file is not in the case")
+    if not _case_video(case, path):
+        raise BadScene("only a video has scenes in a clip")
+
+
+def slides(case: Case, video: str) -> list[dict[str, Any]]:
+    """The proofs about one video in clip order, as `video_scenes` lists them: Geo
+    Proof's slides of that video, without the scenes still to prove."""
+    _a_case_video(case, video)
+    return [row for row in video_scenes(case, video)["scenes"] if row["kind"] == "proof"]
+
+
+class UnknownDraft(LookupError):
+    """No scene still to prove by that id in the video's Inspect work."""
+
+
+#: The rate a frame's length is counted at while the clip's is unknown
+#: (`lib/inspectPlayer.js` `DEFAULT_FPS`).
+DEFAULT_FPS = 30.0
+
+
+def frame_in_moment(time: float, start: float, end: float | None, frame: float) -> bool:
+    """Whether the frame cut at ``time``, ``frame`` seconds long, falls in a moment:
+    the rule of `lib/sceneFrames.frameInMoment`, so Geo Proof offers the frames
+    Inspect's dots put in that scene. Each boundary gives half a frame, since the time
+    a frame keeps is read off the file and the one a scene keeps is counted by the
+    player. A frame is in a passage when its middle is, and shows an instant when it
+    starts within half a frame of it."""
+    half = frame / 2
+    if end is not None and end > start:
+        return start <= time + half < end
+    return time - half <= start < time + half
+
+
+def _frame_length(case: Case, video: str) -> float:
+    """One frame of the clip in seconds, as Inspect's player counts it."""
+    try:
+        fps = inspect_engine.probe(case, video).get("fps")
+    except (OSError, ValueError, CaseError, subprocess.SubprocessError):
+        fps = None
+    rate = fps if isinstance(fps, (int, float)) and math.isfinite(fps) and fps > 0 else DEFAULT_FPS
+    return 1 / rate
+
+
+def draft_frames(case: Case, video: str, draft: str) -> list[dict[str, Any]]:
+    """The frames Inspect cut inside one scene still to prove, in clip order, each
+    with the picture it was saved to the case as, and that picture's thumbnail.
+
+    What Geo Proof offers to make that scene a slide. A frame never saved, or whose
+    picture has left the case, has no ``path``: the composer files it first, as
+    Inspect does. A scene about the whole video holds every frame. Read only: nothing
+    is filed, and no thumbnail is made.
+    """
+    _a_case_video(case, video)
+    work = (inspectwork.find_work(case, video) or {}).get("spec") or {}
+    scene = next(
+        (d for d in work.get("scenes") or [] if isinstance(d, dict) and d.get("id") == draft), None
+    )
+    if scene is None:
+        raise UnknownDraft("no such scene to geolocate in that video")
+    start = _seconds(scene.get("start"))
+    end = _seconds(scene.get("end")) if start is not None else None
+    frames = [
+        (frame, time)
+        for frame in work.get("frames") or []
+        if isinstance(frame, dict)
+        and isinstance(frame.get("id"), str)
+        and frame.get("path", video) == video
+        and (time := _seconds(frame.get("time"))) is not None
+    ]
+    if start is not None:
+        length = _frame_length(case, video)
+        frames = [(frame, time) for frame, time in frames if frame_in_moment(time, start, end, length)]
+    frames.sort(key=lambda pair: pair[1])
+
+    def filed(frame: dict[str, Any]) -> str | None:
+        record = frame.get("filed")
+        return _text(record.get("path")) if isinstance(record, dict) else None
+
+    wanted = list(dict.fromkeys(p for frame, _time in frames if (p := filed(frame))))
+    held: dict[str, dict[str, Any]] = {}
+    for at in range(0, len(wanted), LOOKUP_BATCH):
+        held.update((item["path"], item) for item in case.media_items_by_paths(wanted[at : at + LOOKUP_BATCH]))
+    out = []
+    for frame, time in frames:
+        path = filed(frame)
+        item = held.get(path) if path else None
+        out.append({
+            "id": frame["id"],
+            "time": time,
+            "path": path if item is not None else None,
+            "thumb": _existing(case, _text(item.get("thumbnail"))) if item is not None else None,
+        })
+    return out
 
 
 def _stated_moments(value: Any) -> list[dict[str, float | None]]:

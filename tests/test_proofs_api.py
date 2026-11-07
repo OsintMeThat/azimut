@@ -5,10 +5,12 @@ import base64
 import graph_read
 import io
 import json
+from pathlib import Path
 
 import pytest
 from PIL import Image
 from azimut import layout
+from azimut.engine import media as media_engine
 from azimut.workspace import Case
 
 
@@ -2013,3 +2015,150 @@ def test_two_proofs_differing_only_by_case_cannot_both_be_saved(client):
     client.post(f"/api/cases/{cid}/proofs", json={"title": "Roof", "spec": SPEC})
 
     assert client.post(f"/api/cases/{cid}/proofs", json={"title": "roof", "spec": SPEC}).status_code == 409
+
+
+# -- the slides of a video, exported as one set ------------------------------------------
+
+
+def _clip(client, cid, tmp_path, name="clip.mp4"):
+    """A real four-second clip, so the case reads it as a video."""
+    import subprocess
+
+    path = tmp_path / name
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=s=64x48:r=10:d=4",
+         "-pix_fmt", "yuv420p", str(path)],
+        check=True,
+    )
+    with path.open("rb") as fh:
+        res = client.post(f"/api/cases/{cid}/media/upload", files={"file": (name, fh, "video/mp4")})
+    assert res.status_code == 200, res.text
+    return res.json()["item"]["path"]
+
+
+def _photo(client, cid, color=(10, 200, 30), name="photo.png"):
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 30), color).save(buf, "PNG")
+    res = client.post(f"/api/cases/{cid}/media/upload", files={"file": (name, io.BytesIO(buf.getvalue()), "image/png")})
+    assert res.status_code == 200, res.text
+    return res.json()["item"]["path"]
+
+
+def _slide(client, cid, title, panels, *, scene=None, png=True, color=(40, 40, 60)):
+    spec = {"panels": [{"id": f"p{i}", "src": src} for i, src in enumerate(panels)]}
+    if scene is not None:
+        spec["scene"] = scene
+    body = {"title": title, "spec": spec}
+    if png:
+        buf = io.BytesIO()
+        Image.new("RGB", (80, 50), color).save(buf, "PNG")
+        body["png_base64"] = base64.b64encode(buf.getvalue()).decode()
+    res = client.post(f"/api/cases/{cid}/proofs", json=body)
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+def _series(client, cid, video, **extra):
+    return client.post(f"/api/cases/{cid}/proofs/series-export", json={"video": video, **extra})
+
+
+def _tree(folder):
+    return {p.relative_to(folder).as_posix(): p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+
+
+needs_ffmpeg = pytest.mark.skipif(not media_engine.ffmpeg_available(), reason="ffmpeg not installed")
+
+
+@needs_ffmpeg
+def test_series_export_numbers_in_clip_order(client, tmp_path):
+    cid = client.post("/api/cases", json={"name": "Series"}).json()["id"]
+    video = _clip(client, cid, tmp_path)
+    photo = _photo(client, cid)
+    cut = client.post(f"/api/cases/{cid}/inspect/save-frames", json={"items": [{"path": video, "time": 0.5}]})
+    frame = cut.json()["saved"][0]["item"]["path"]
+    # an old proof, traced off the frame it was built on, comes first by that frame
+    depot = _slide(client, cid, "Depot", [frame], color=(200, 10, 10))
+    bridge = _slide(client, cid, "Road bridge", [photo], scene={"video": video, "moments": [{"start": 2.0}]}, color=(10, 10, 200))
+    # a slide never exported has no picture to copy
+    _slide(client, cid, "Market", [photo], scene={"video": video, "moments": [{"start": 3.0, "end": 3.5}]}, png=False)
+    # a proof on another file is not a slide of this video
+    _slide(client, cid, "Elsewhere", [photo])
+    # the scenes still to prove, abandoned or not, are not slides
+    client.put(f"/api/cases/{cid}/inspect/work", json={"path": video, "spec": {"frames": [], "scenes": [
+        {"id": "s_todo", "start": 1.0, "end": None, "label": "Roundabout?"},
+        {"id": "s_gone", "start": 2.5, "end": None, "label": "Too blurry"},
+    ]}})
+    client.put(f"/api/cases/{cid}/scenes/s_gone/abandon", json={"video": video, "reason": "blurry"})
+    case = Case.open(cid)
+    proofs_before = _tree(case.subdir("proofs"))
+
+    res = _series(client, cid, video)
+
+    assert res.status_code == 200, res.text
+    answer = res.json()
+    exports = layout.subdir(case.path, "exports")
+    assert answer["folder"] == str(exports / "clip")
+    assert answer["name"] == "clip"
+    assert answer["files"] == [
+        {"proof": "Depot", "title": "Depot", "file": "01 Depot.png"},
+        {"proof": "Road bridge", "title": "Road bridge", "file": "02 Road bridge.png"},
+    ]
+    assert answer["skipped"] == [{"proof": "Market", "title": "Market"}]
+    written = _tree(exports / "clip")
+    assert written == {
+        "01 Depot.png": case.resolve_inside(depot["png"]).read_bytes(),
+        "02 Road bridge.png": case.resolve_inside(bridge["png"]).read_bytes(),
+    }
+    # the proofs are read, never written
+    assert _tree(case.subdir("proofs")) == proofs_before
+
+    # a second set lands beside the first, never over it
+    again = _series(client, cid, video).json()
+    assert again["name"] == "clip (2)"
+    assert _tree(exports / "clip") == written
+    assert _tree(exports / "clip (2)") == written
+
+
+@needs_ffmpeg
+def test_series_export_names_a_folder_and_never_a_path(client, tmp_path):
+    cid = client.post("/api/cases", json={"name": "Series"}).json()["id"]
+    video = _clip(client, cid, tmp_path)
+    _slide(client, cid, "Bridge", [_photo(client, cid)], scene={"video": video, "moments": [{"start": 1.0}]})
+    chosen = tmp_path / "published"
+    chosen.mkdir()
+    client.put("/api/settings/prefs", json={"export_dirs": {"proofs": str(chosen)}})
+
+    named = _series(client, cid, video, folder="  Kharkiv route  ").json()
+    assert named["folder"] == str(chosen / "Kharkiv route")
+    assert (chosen / "Kharkiv route" / "01 Bridge.png").is_file()
+
+    # a name reaching out of the folder stays one name inside it
+    for folder in ("../escape", "..\\escape", "/etc", "a/../../b"):
+        answer = _series(client, cid, video, folder=folder)
+        assert answer.status_code == 200, answer.text
+        landed = Path(answer.json()["folder"])
+        assert landed.parent == chosen
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(["published", "clip.mp4"])
+    # a blank name is the video's own
+    assert _series(client, cid, video, folder="   ").json()["name"] == "clip"
+
+
+@needs_ffmpeg
+def test_series_export_refuses_what_has_no_slides(client, tmp_path):
+    cid = client.post("/api/cases", json={"name": "Series"}).json()["id"]
+    video = _clip(client, cid, tmp_path)
+    photo = _photo(client, cid)
+    exports = layout.subdir(Case.open(cid).path, "exports")
+
+    # no proof about it, then only one never exported: nothing is made
+    assert _series(client, cid, video).status_code == 422
+    _slide(client, cid, "Market", [photo], scene={"video": video, "moments": [{"start": 3.0}]}, png=False)
+    refused = _series(client, cid, video)
+    assert refused.status_code == 422
+    assert "picture" in refused.json()["detail"]
+    assert not (exports / "clip").exists()
+    # a picture has no clip order, and a file the case does not hold no slides
+    _slide(client, cid, "On the photo", [photo])
+    assert _series(client, cid, photo).status_code == 422
+    assert _series(client, cid, "media/never.mp4").status_code == 400
+    assert client.post(f"/api/cases/{cid}/proofs/series-export", json={"video": ""}).status_code == 422
