@@ -56,8 +56,13 @@ test('keeps every act in view on a laptop, and nothing moves when a piece is pic
     save,
     page.getByRole('button', { name: /^Auto-stitch/ }),
     page.getByRole('button', { name: 'Draw the line' }),
+    page.getByRole('button', { name: 'Ignore areas' }),
+    page.getByRole('button', { name: 'Cut' }),
     page.getByRole('button', { name: 'Fit' }),
   ]) await expect(control).toBeInViewport();
+  // the bar keeps one line beside the case sidebar: its secondary tools show their icon alone
+  const bar = await page.getByRole('toolbar', { name: 'Collage tools' }).boundingBox();
+  expect(bar.height).toBeLessThan(50);
   await expect(page.locator('.group-head')).toHaveCount(40);
 
   const before = { save: await save.boundingBox(), pieces: await pieces.boundingBox(), foot: await page.locator('.panel .selection').boundingBox() };

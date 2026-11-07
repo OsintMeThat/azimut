@@ -1954,11 +1954,16 @@ it was cut at.
 **The Collage tool is laid out for a laptop.** A bar over the canvas holds what acts on
 the whole collage: **Auto-stitch**, whose arrow picks Planar, Cylindrical or Spherical
 (the last pick named on the button and kept in this browser), **Ignore areas**,
-**Straighten** with Draw the line, and **Fit**, which frames every piece, with the zoom
-beside it. Auto-stitch moves every piece at once, draws again three at a time the ones a
-panorama warp reshapes, frames the pieces, and is one Ctrl+Z. A piece it found no overlap
-for stays where it was, outlined, marked *No overlap* and selected for the arrows; its
-message carries Undo, which its arrow keeps after the message goes. The panel keeps
+**Straighten** with Draw the line, **Cut**, and **Fit**, which frames every piece, with the
+zoom beside it. Narrower than its tools, beside the case sidebar on a laptop, the bar keeps
+one line: the secondary tools show their icon alone, named on hover. A collage opens framed
+on its pieces, as Fit frames them, and a framed view stays framed as the pane changes size.
+Auto-stitch moves every piece at once, draws again three at a time the ones a panorama warp
+reshapes, frames the pieces, and is one Ctrl+Z. A piece it leaves where it was is outlined,
+selected for the arrows, and says why on itself: *No overlap*, *Nothing to match: blank or
+painted out*, or *Fell off the canvas*, with *try Cylindrical* after a Planar stitch. Its
+message says the same and carries Undo, which its arrow keeps after the message goes. A
+stitch lays the pieces out anew, so it takes the cut away, and its Undo brings it back. The panel keeps
 **Save to case** on top: one press files the picture under the collage's name and the
 last folder, its arrow unfolds the name, folder and note, and the export size is written
 under it. **Add pieces** takes the room left and scrolls on its own; the
@@ -1980,8 +1985,19 @@ brush is out; otherwise a small brush mark on the piece takes it up again. The a
 with the collage (`exclude` on each piece, in the picture the stitch receives) and go with
 the next stitch, never into the saved picture.
 
+**Cut frames the saved picture, like a mat.** One frame over the whole collage, drawn from
+the cut kept or the pieces' bounds: drag an edge or a corner, or the inside to move it. An
+edge snaps to the pieces' sides, and Alt drags freely. What lies outside is dimmed while the
+frame is drawn; Enter or **Apply** keeps it, Esc or **Cancel** leaves the cut as it was.
+Kept, the canvas shows the pieces cut to it with a hairline round what the picture holds.
+Every piece stays whole and its own, and shows whole again while the frame is drawn.
+**Clear** takes the cut off, and a frame holding every piece cuts nothing. The cut belongs
+to the collage (`clip: {x, y, w, h}` in canvas pixels, one Ctrl+Z). The saved picture is
+the pieces within it at the same sharpness (`/inspect/compose` with `clip`), and a new cut
+makes the last saved picture out of date. Find reads a cut picture from its frame's corner.
+
 **A collage of one video is marked as that video.** When every piece is one video at an
-instant, or a frame saved from it, or a picture composed from them such as the collage straightened, the panel reads *From channel_departure · 0:01–0:03*,
+instant, or a frame saved from it, or a picture composed from them such as a piece straightened, the panel reads *From channel_departure · 0:01–0:03*,
 and **Mark to geolocate** marks the whole video; its arrow offers the stretch the pieces
 span, or the instant of a single piece. A collage of several sources is a picture: the
 press saves it first when it is not in the case as it stands and marks it whole, and
@@ -2004,7 +2020,7 @@ matches none of them is tried against every piece before it is left in place. Ea
 a picture answers one point of the other, so two unrelated pictures no longer stitch on
 chance matches. A hazy or flat picture is looked at again for detail before the stitch gives
 up on it, and the same pieces always stitch the same way (`POST /inspect/auto-stitch` with
-`exclude`; each placed piece answers with the `size` it was matched at).
+`exclude`; each placed piece answers with the `size` it was matched at, and each piece left out with `why`: `no-overlap`, `no-detail` or `off-canvas`).
 
 **Straighten lays a bent pan flat.** A pan stitched with its tilt a little off bends a
 level line into a slope or a smile. **Draw the line**, in the bar over the canvas, then click point
@@ -2016,17 +2032,20 @@ curve is drawn across the whole collage, so that shows before anything bends. A 
 be dragged while the line shows, drawing or done.
 Ctrl+Z takes the last point back while the line shows; a double-click, Enter or Esc ends
 the drawing; while it is drawn, the canvas takes the line's yellow at its edge and its
-corner says what to click. **Straighten** draws the whole collage as one picture and bends it so that
-line comes out flat: every column of pixels moves up or down by what the line is off
-there, so each frame's own pixels follow the line and the seams a stitch matched stay
-matched. The bent picture is a new file in the case ("… straightened"), and it takes the
-pieces' place in the collage as one piece; Ctrl+Z puts the pieces back. A line coming
+corner says what to click. **Straighten** bends every piece by the same column shifts so that line comes out flat:
+every column of the collage moves up or down by what the line is off there, so each frame's
+own pixels follow the line and the seams a stitch matched stay matched. Each bent piece is a
+new file in the work folder, named after the collage and the piece ("Pan straightened
+00-00-02 Convoy clip"), and takes that piece's place in the same order, so a photo stays one
+piece (`POST /inspect/straighten`, every piece or none). Ctrl+Z puts the pieces back. Each
+bent picture records the file and instant it came from, so a straightened collage of one
+video still reads as that video. A line coming
 towards the eye curves in a pan for real, so it is no line to draw. Find reads a
 straightened collage's picture as one rather than frame by frame, since the stitch's own
 rotations are what bent it.
 
 **The export keeps full resolution without a setting.** It is a transparent PNG of the
-pieces trimmed to their bounds, enlarged until the sharpest piece is back at its own
+pieces trimmed to their bounds within the cut, enlarged until the sharpest piece is back at its own
 pixels, however small it sits on the canvas. It holds under 8192 px a side and 40
 megapixels in all, and the size it will have is written under Save to case.
 

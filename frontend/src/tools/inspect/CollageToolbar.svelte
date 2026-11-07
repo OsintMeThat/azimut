@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { pinholeOps, stitchCanvas } from '../../lib/inspect.js';
   import { BRUSH_MAX, BRUSH_MIN, excludeRequest } from '../../lib/excludeBrush.js';
   import { LEVEL_MIN_POINTS } from '../../lib/straighten.js';
@@ -243,9 +243,33 @@
 
   const lineReady = $derived(!!level && level.points.length >= LEVEL_MIN_POINTS);
 
+
+  // The bar keeps one line, so the canvas never moves: it starts with every word and, only
+  // while it would wrap, lets go of them a step at a time. Tight, the projection's name and
+  // Fit's word go; compact, the other tools show their icon alone too, each named on hover
+  // and to a reader. Measured, not guessed, so a longer word or a larger font still fits.
+  const ONE_LINE = 50;
+  let barEl = $state(null);
+  let barWidth = $state(0);
+  let squeeze = $state(0);
+  $effect(() => {
+    void [barWidth, brush?.on, cut?.editing];
+    const el = barEl;
+    if (!el || !barWidth) return;
+    untrack(async () => {
+      squeeze = 0;
+      await tick();
+      while (el.offsetHeight > ONE_LINE && squeeze < 2) {
+        squeeze += 1;
+        await tick();
+      }
+    });
+  });
 </script>
 
-<div class="bar" role="toolbar" aria-label="Collage tools">
+<!-- Narrower than its tools (a laptop with the case sidebar open), the bar keeps one
+     line: the secondary tools show their icon alone, named on hover and to a reader. -->
+<div class="bar" class:tight={squeeze >= 1} class:compact={squeeze >= 2} role="toolbar" aria-label="Collage tools" bind:this={barEl} bind:clientWidth={barWidth}>
   <div class="split" role="group" aria-label="Auto-stitch" data-guide="collage.arrange">
     <button
       class="btn btn-sm press"
@@ -255,7 +279,7 @@
     >
       <Icon name={stitching ? 'clock' : 'hash'} size={14} />
       <span>{stitching ? 'Stitching…' : 'Auto-stitch'}</span>
-      <span class="mode">{modeLabel}</span>
+      <span class="mode minor">{modeLabel}</span>
     </button>
     <button
       class="btn btn-sm more"
@@ -279,9 +303,10 @@
         disabled={!active?.nodes.length}
         onclick={toggleBrush}
         title={brush.on ? 'Stop painting (Esc)' : 'Paint over what auto-stitch must not match on, such as people, vehicles or a watermark'}
+        aria-label={brush.on ? 'Done' : 'Ignore areas'}
       >
         <Icon name={brush.on ? 'check' : 'brush'} size={13} />
-        {brush.on ? 'Done' : 'Ignore areas'}
+        <span class="words">{brush.on ? 'Done' : 'Ignore areas'}</span>
       </button>
       {#if brush.on}
         <input
@@ -300,8 +325,9 @@
           aria-pressed={brush.erase}
           onclick={() => (brush.erase = !brush.erase)}
           title="Erase what was painted, also Alt while painting"
+          aria-label="Erase"
         >
-          <Icon name="eraser" size={13} /> Erase
+          <Icon name="eraser" size={13} /> <span class="words">Erase</span>
         </button>
         <button
           class="btn btn-ghost btn-sm"
@@ -324,9 +350,10 @@
         disabled={!active || !active.nodes.length}
         onclick={toggleLevel}
         title={level.drawing ? 'Stop drawing the line (Esc)' : 'Draw the level line on the canvas'}
+        aria-label={level.drawing ? 'Done' : level.points.length ? 'Draw more' : 'Draw the line'}
       >
         <Icon name="edit" size={13} />
-        {level.drawing ? 'Done' : level.points.length ? 'Draw more' : 'Draw the line'}
+        <span class="words">{level.drawing ? 'Done' : level.points.length ? 'Draw more' : 'Draw the line'}</span>
       </button>
       <button
         class="btn btn-sm"
@@ -362,8 +389,9 @@
           disabled={!active?.nodes.length}
           onclick={startCut}
           title={active?.clip ? 'Move the frame the saved picture is cut to' : 'Frame what the saved picture keeps, every piece staying whole'}
+          aria-label="Cut"
         >
-          <Icon name="scissors" size={13} /> Cut
+          <Icon name="scissors" size={13} /> <span class="words">Cut</span>
         </button>
       {/if}
       {#if active?.clip}
@@ -377,8 +405,8 @@
     {#if view && view.zoom !== 1}
       <span class="zoom" title="Zoom against the whole canvas in view">{Math.round(view.zoom * 100)}%</span>
     {/if}
-    <button class="btn btn-ghost btn-sm" disabled={fitted || !fit} onclick={() => fit?.()} title="Show every piece whole">
-      <Icon name="maximize" size={14} /> Fit
+    <button class="btn btn-ghost btn-sm" disabled={fitted || !fit} onclick={() => fit?.()} title="Show every piece whole" aria-label="Fit">
+      <Icon name="maximize" size={14} /> <span class="minor">Fit</span>
     </button>
   </div>
 </div>
@@ -406,6 +434,10 @@
 {/if}
 
 <style>
+  .bar.tight .minor,
+  .bar.compact .words {
+    display: none;
+  }
   .bar {
     display: flex;
     align-items: center;

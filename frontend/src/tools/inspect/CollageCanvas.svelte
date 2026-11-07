@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte';
   import {
     quadMatrix3d, quadCentroid, rotateQuad, quadEdgeMidpoints, scaleQuad,
     quadsBounds, moveQuads, rotateQuads, scaleQuads, quadUnitAt, fitView, translateQuad,
@@ -113,14 +114,28 @@
       { width: cw, height: ch },
     ),
   );
+  // A view framed as Fit frames it stays framed while the pane changes size (the window,
+  // the case sidebar, the bar over the canvas taking one line): `fitPane` is the pane it
+  // was framed in, dropped once the analyst moves the view.
+  let fitPane = null;
   $effect(() => {
     const at = pieceView;
+    const pane = { w: availW, h: availH };
+    void [cam.zoom, cam.x, cam.y];
+    untrack(() => {
+      if (fitPane && (fitPane.w !== pane.w || fitPane.h !== pane.h)) {
+        Object.assign(cam, at);
+        fitPane = pane;
+      }
+    });
     fitted = Math.abs(cam.zoom - at.zoom) < 1e-3 && Math.abs(cam.x - at.x) < 0.5 && Math.abs(cam.y - at.y) < 0.5;
+    if (!fitted && fitPane && fitPane.w === pane.w && fitPane.h === pane.h) fitPane = null;
   });
 
   /** Frame every piece, a margin around them; the whole canvas when there is none. */
   export function fitPieces() {
     Object.assign(cam, pieceView);
+    fitPane = { w: availW, h: availH };
   }
 
   // A collage opens framed on its pieces, as Fit frames them, once the pane has its size. A new
