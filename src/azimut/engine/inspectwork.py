@@ -840,7 +840,7 @@ def _unit(value: Any) -> float | None:
     return float(value)
 
 
-def _clean_exclude(strokes: Any) -> list[dict[str, Any]]:
+def clean_exclude(strokes: Any) -> list[dict[str, Any]]:
     """A piece's painted exclusions, checked at the edge: never exported, read by the
     auto-stitch only. An empty list or null clears them."""
     if strokes is None:
@@ -888,7 +888,7 @@ def _clean_collage(spec: dict[str, Any]) -> dict[str, Any]:
             raise CaseError("every piece needs four corners")
         piece = _pick(node, _PIECE_KEYS)
         if "exclude" in piece:
-            cleaned = _clean_exclude(piece["exclude"])
+            cleaned = clean_exclude(piece["exclude"])
             if cleaned:
                 piece["exclude"] = cleaned
             else:

@@ -97,7 +97,7 @@ class StitchIn(BaseModel):
     # bounded, undistorted strip (see engine/stitch).
     mode: Literal["planar", "cylindrical", "spherical"] = "planar"
     # The areas painted out of each piece, one entry per node (null: none), checked
-    # by the rule the saved collage keeps them under (`inspectwork._clean_exclude`).
+    # by the rule the saved collage keeps them under (`inspectwork.clean_exclude`).
     exclude: list[list[dict[str, Any]] | None] | None = Field(default=None, max_length=inspectwork.MAX_PIECES)
 
     @field_validator("exclude")
@@ -106,7 +106,7 @@ class StitchIn(BaseModel):
         if value is None:
             return None
         try:
-            return [inspectwork._clean_exclude(strokes) or None for strokes in value]
+            return [inspectwork.clean_exclude(strokes) or None for strokes in value]
         except CaseError as exc:
             raise ValueError(str(exc)) from exc
 

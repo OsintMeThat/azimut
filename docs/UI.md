@@ -1976,6 +1976,16 @@ proof**, which opens Inspect's chooser on that scene. A proved scene says Proved
 opens its proof. On the server a collage of one video's frames reads back to that video
 like a frame (`engine/scenes.py`), so a proof resting on it alone states its scene.
 
+**Auto-stitch leaves out what is painted out.** Areas brushed out of a piece (a
+passer-by, a car, a caption) are never matched, read on the piece as it is cut, its crop
+included. Frames of one video are matched with the frames filmed just before and after them
+rather than with every frame, which is quicker and keeps a long pan straighter; a frame that
+matches none of them is tried against every piece before it is left in place. Each point of
+a picture answers one point of the other, so two unrelated pictures no longer stitch on
+chance matches. A hazy or flat picture is looked at again for detail before the stitch gives
+up on it, and the same pieces always stitch the same way (`POST /inspect/auto-stitch` with
+`exclude`; each placed piece answers with the `size` it was matched at).
+
 **Straighten lays a bent pan flat.** A pan stitched with its tilt a little off bends a
 level line into a slope or a smile. **Draw the line**, in the bar over the canvas, then click point
 by point along something level that crosses the view, such as a shore, a field's far edge or a road
