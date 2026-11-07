@@ -23,6 +23,10 @@
   // stands on; `onedit(which, time)` hands the time up. A press anywhere else still
   // moves through the clip.
   //
+  // A click on a scene's pin or band, a press that stays where it landed, moves the
+  // clip like any other and names that scene too (`onscene(key)`), which Inspect opens
+  // in its Scenes tab.
+  //
   // The wheel zooms the bar's time about the pointer, from the whole clip down to
   // frames drawn `FRAME_PX` wide, and Shift+wheel or a sideways scroll slides it.
   // Everything above is drawn, pressed and dragged in that window, and a thin line
@@ -47,9 +51,12 @@
     zoom = $bindable(null),
     onseek,
     onedit,
+    onscene,
   } = $props();
 
   const SNAP_PX = 6;
+  // How far a press may stray and still be a click, in pixels.
+  const CLICK_PX = 3;
   // How long after the wheel moved the window the playhead leaves it alone.
   const FOLLOW_AFTER_MS = 1500;
   // A line's worth of wheel, in pixels, as the map reads it.
@@ -67,6 +74,7 @@
   let dragging = $state(false);
   let grab = $state(null); // 'start' or 'end' while a handle is dragged
   let nearGrip = $state(false);
+  let pressed = null; // where a press landed: { x, scene }
 
   const bars = $derived(waveformBars(waveform));
   // What the bar shows: the whole clip, or the stretch the wheel zoomed to.
@@ -205,6 +213,18 @@
     return 'start';
   }
 
+  /** The scene a press at `clientX` lands on: a pin within reach, else the shortest band under it. */
+  function sceneUnder(clientX) {
+    if (!onscene || !(duration > 0)) return null;
+    const rect = track.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const pin = snapAt(x, rect.width, scenes.filter((s) => s.end == null).map((s) => ({ time: s.start, scene: s.scene })));
+    if (pin) return pin.scene;
+    const time = windowTime(x / rect.width, view);
+    const bands = scenes.filter((s) => s.end != null && time >= s.start && time < s.end);
+    return bands.length ? bands.reduce((a, b) => (b.end - b.start < a.end - a.start ? b : a)).scene : null;
+  }
+
   const gripLabel = (which) => (which === 'end' ? 'End' : Number.isFinite(editing?.end) ? 'Start' : 'Scene');
 
   /** Show the frame a handle stands on: the scene's first, or the last before its end. */
@@ -238,6 +258,7 @@
       return;
     }
     dragging = true;
+    pressed = { x: e.clientX, scene: sceneUnder(e.clientX) };
     const p = point(e.clientX);
     onseek?.(p.time, p.exact);
   }
@@ -254,6 +275,8 @@
   }
 
   function onpointerup(e) {
+    if (pressed?.scene && Math.abs(e.clientX - pressed.x) <= CLICK_PX) onscene?.(pressed.scene);
+    pressed = null;
     dragging = false;
     grab = null;
     track.releasePointerCapture?.(e.pointerId);

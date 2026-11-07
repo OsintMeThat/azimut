@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { api, detailLine } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
@@ -12,15 +12,19 @@
   import { captureMoment, frameDuration, preciseClock, seekInto, shownFrameTime } from '../lib/inspectPlayer.js';
   import { INSPECT_HELP } from '../lib/inspectHelp.js';
   import {
-    editClock, isAbandoned, isStretch, liveScenes, momentKey, newScene, sameMoments, sceneList, sceneMarks, scenePassage,
-    sceneStart, sceneTime, sceneTitle, sceneToEnd, snapToFrame, stretchFromShot, timeWords,
+    editClock, isAbandoned, isStretch, isWholeVideo, liveScenes, markablePicture, momentKey, newScene, sameMoments, sceneList,
+    sceneMarks, sceneMoments, scenePassage, sceneStart, sceneTime, sceneTitle, sceneToEnd, snapToFrame, sortMoments,
+    stretchFromShot, timeWords, toProve,
   } from '../lib/scenes.js';
   import {
     abandonScene, geolocateScene, geolocating, restoreScene, sceneEdit as sceneGiven, stopGeolocating,
   } from '../lib/geolocating.svelte.js';
   import { onEvent } from '../lib/events.js';
-  import { frameScenes, frameToCapture, frameUses, framesOfScene, proofHandoff, scenesAt } from '../lib/sceneFrames.js';
+  import {
+    frameScenes, frameToCapture, frameUses, framesOfScene, pictureHandoff, proofHandoff, scenesAt,
+  } from '../lib/sceneFrames.js';
   import { createSceneOffer } from '../lib/sceneOffer.js';
+  import { declineInvite, inviteDeclined, todoHintDue, todoHintGiven } from '../lib/sceneHints.js';
   import { SceneEdit } from '../lib/sceneEdit.svelte.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import {
@@ -29,7 +33,7 @@
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { createHistory } from '../lib/history.js';
   import { deletedToast } from '../lib/trash.js';
-  import { openInHorizon, openInReverseSearch } from '../lib/navigate.js';
+  import { openInHorizon, openInReverseSearch, openTodo } from '../lib/navigate.js';
   import { offerNote, offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
   import { lookupEntity } from '../lib/catalog.js';
   import PutInNote from '../components/PutInNote.svelte';
@@ -47,8 +51,9 @@
   import FrameAnalyze from './inspect/FrameAnalyze.svelte';
   import InfoPanel from './inspect/InfoPanel.svelte';
   import MomentsPanel from './inspect/MomentsPanel.svelte';
-  import SceneButton from './inspect/SceneButton.svelte';
-  import ScenePanel from './inspect/ScenePanel.svelte';
+  import MarkScene from './inspect/MarkScene.svelte';
+  import SceneInvite from './inspect/SceneInvite.svelte';
+  import SceneTab from './inspect/SceneTab.svelte';
   import ProofFrames from './inspect/ProofFrames.svelte';
   import SaveToCase from './inspect/SaveToCase.svelte';
   import VideoAdjust from './inspect/VideoAdjust.svelte';
@@ -88,7 +93,7 @@
     videoFiled: null,
     frames: [],
     marks: [],
-    // Scenes kept on a video and not proved yet; proved ones are the proofs' own.
+    // Scenes kept on a video, or a picture's mark, not proved yet; proved ones are the proofs' own.
     scenes: [],
     activeFrameId: null,
   });
@@ -109,6 +114,9 @@
 
   const videoFilters = $derived(filters.filter((f) => VIDEO_ADJUST_IDS.includes(f.id)));
   const isVideo = $derived(work.source?.kind === 'video');
+  // A picture marked whole, unless it is a frame of a video or an answer from the map.
+  const markable = $derived(markablePicture(work.source));
+  const hasScenes = $derived(isVideo || markable);
 
   // The file open here is what the topbar's Add event seats.
   $effect(() => {
@@ -237,7 +245,7 @@
     } else if (id) {
       // a proof deleted or restored meanwhile hides or gives back the scene it took up
       refresh(id).then(recheckOpenFile).then(() => {
-        if (uiState.tool === 'inspect' && isVideo && !opening) loadScenes(openRun);
+        if (uiState.tool === 'inspect' && hasScenes && !opening) loadScenes(openRun);
       });
     }
   });
@@ -287,13 +295,15 @@
     listedScenes = [];
     takenScenes = [];
     listedGeolocating = null;
+    scenesRead = false;
     sceneFocus = null;
+    openKey = null;
+    folded = false;
     framesRendered = null;
     usedFrames = {};
     proofChooser = null;
     sceneOffer.reset();
     sceneEdit.close();
-    scenesOpen = false;
     clipHistory.reset(clipSnapshot());
     probeInfo = null;
     shared.currentTime = 0;
@@ -342,10 +352,9 @@
       else seed();
       savedSignature = signature();
       clipHistory.reset(clipSnapshot());
-      if (item.kind === 'video') {
-        loadOverview(run);
-        loadScenes(run);
-      }
+      if (item.kind === 'video') loadOverview(run);
+      inviteOff = inviteDeclined(caseId, item.path);
+      loadScenes(run);
     } catch (e) {
       if (run === openRun) {
         toast(e.message, 'danger');
@@ -494,8 +503,8 @@
     }
   });
 
-  // A scene sent from elsewhere (the pill, the To-do): its video opened on it, the
-  // drawer on its row, and with `proof` its Make the proof.
+  // A scene sent from elsewhere (the pill, the To-do): its file opened on it, the
+  // Scenes tab on its row, and with `proof` its Make the proof.
   $effect(() => {
     if (uiState.tool === 'inspect' && uiState.inspectScene && mediaList.length) {
       const wanted = uiState.inspectScene;
@@ -654,9 +663,9 @@
   }
 
   // A capture the analyst asked for (C, Capture frame, a shot's or a pick's capture):
-  // a new frame in no scene of the clip offers to start one there, since the Scenes
-  // button is easy to miss (`lib/sceneOffer.js`). The frame Make the proof captures
-  // for its scene is in it, and is not asked about.
+  // a new frame in no scene of the clip offers to start one there, since S is easy
+  // to miss (`lib/sceneOffer.js`). The frame Make the proof captures for its scene is
+  // in it, and is not asked about.
   const sceneOffer = createSceneOffer();
   onDestroy(() => sceneOffer.withdraw());
 
@@ -788,10 +797,10 @@
     const t = e.target;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable) return;
     if (t.closest?.('[role="dialog"], [role="alertdialog"]')) return;
-    // In the scenes drawer the player's keys still reach the frame, but a button
-    // there answers its own Space and Enter.
+    // In the Scenes tab the player's keys still reach the frame, but a button there
+    // answers its own Space and Enter.
     if (t.closest?.('[data-scene-panel]') && t.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && selected === 'video') {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (selected === 'video' || scenesShown)) {
       const k = e.key.toLowerCase();
       const redo = (k === 'z' && e.shiftKey) || (k === 'y' && !e.shiftKey);
       if ((k === 'z' && !e.shiftKey) || redo) {
@@ -829,17 +838,16 @@
       '-': () => player.zoomBar(-1),
       c: () => !e.repeat && captureNow(),
       m: () => !e.repeat && addMark(),
-      // While a scene's time is open, S and Shift+S move the start and end of the
-      // moment in hand instead.
+      // S keeps a scene here, whichever row is open. Shift+S ends the open one.
       s: () => {
         if (e.repeat) return;
-        if (sceneEdit.scene) sceneHere(e.shiftKey ? 'end' : 'start');
-        else if (e.shiftKey) endSceneHere();
+        if (e.shiftKey) endSceneHere();
         else addSceneHere();
       },
-      ...(sceneEdit.scene ? { Enter: applySceneEdit } : {}),
-      // Escape lets go of the time being changed first, then closes the drawer.
-      ...(sceneEdit.scene ? { Escape: () => sceneEdit.close() } : scenesOpen ? { Escape: closeScenes } : {}),
+      // A time changed and not applied: Enter keeps it, Escape drops it. With none,
+      // Escape folds the open row.
+      ...(sceneEdit.changed ? { Enter: applySceneEdit, Escape: dropSceneEdit } : {}),
+      ...(!sceneEdit.changed && scenesShown && openRow ? { Escape: foldScenes } : {}),
     };
     const act = actions[key];
     if (!act) return;
@@ -914,9 +922,13 @@
   // Where in the clip each geolocation happens (`lib/scenes.js`): an instant, or a
   // passage once it has an end. The proofs resting on the clip come from the server;
   // the drafts are this work's own. A draft a proof has taken up stays in the work,
-  // hidden while that proof is in the case, so deleting the proof gives it back.
+  // hidden while that proof is in the case, so deleting the proof gives it back. A
+  // picture holds one mark about the whole of it, proved by any proof laying it out.
   let listedScenes = $state([]);
   let takenScenes = $state([]);
+  // Whether the server's list was read for this file: until then a file with proofs
+  // resting on it could pass for one with nothing marked.
+  let scenesRead = $state(false);
   // The draft of this clip being geolocated, as the server read it with the list. The
   // app's own copy (`lib/geolocating.svelte.js`) is fresher once it has read the case:
   // the extension and other tabs move it, and it carries the captures gathered since.
@@ -934,7 +946,7 @@
       return fresh ? { ...sc, geolocating: true, captures: fresh.captures ?? sc.captures, state: fresh.state ?? sc.state } : { ...sc, geolocating: true };
     }),
   );
-  // The row the drawer brings into view and lights, `{ key, n }`.
+  // The row the Scenes tab brings into view and lights, `{ key, n }`.
   let sceneFocus = $state(null);
   // The proofs laying out each saved frame of the clip, by the frame's path.
   let usedFrames = $state({});
@@ -942,19 +954,16 @@
   const frameDots = $derived(isVideo ? frameScenes(work.frames, scenes, frameDur) : new Map());
   const frameUsed = $derived(isVideo ? frameUses(work.frames, usedFrames) : new Map());
 
-  // The scene whose time is open (`lib/sceneEdit.svelte.js`). The bar draws it as
-  // its fields read, with handles, before anything is kept.
+  // The time of the open row (`lib/sceneEdit.svelte.js`). The bar draws it as its
+  // fields read, with handles, before anything is kept.
   const sceneEdit = new SceneEdit(() => ({ duration: probeInfo?.duration ?? 0, fps: probeInfo?.fps ?? null }));
-  // The drawer beside the video that lists them. Closed whenever a file opens, and
-  // never remembered.
-  let scenesOpen = $state(false);
   const sceneMarksOnBar = $derived.by(() => {
-    const held = sceneEdit.scene && scenes.find((sc) => sc.key === sceneEdit.key);
+    const held = sceneEdit.changed && scenes.find((sc) => sc.key === sceneEdit.key);
     if (!held) return sceneMarks(scenes);
-    // the scene in hand as its fields read: each moment that reads as a time, by its line
+    // a time being changed as its fields read: each moment that reads as a time, by its line
     const label = sceneTitle(held);
     const edited = sceneEdit.moments.flatMap((m, i) =>
-      m.start == null ? [] : [{ key: momentKey(held, i), start: m.start, end: isStretch(m) && m.passage ? m.end : null, color: held.color, label }],
+      m.start == null ? [] : [{ key: momentKey(held, i), scene: held.key, start: m.start, end: isStretch(m) && m.passage ? m.end : null, color: held.color, label }],
     );
     return [...sceneMarks(scenes.filter((sc) => sc.key !== held.key)), ...edited];
   });
@@ -971,7 +980,7 @@
 
   async function loadScenes(run) {
     const path = work.source?.path;
-    if (!path || !isVideo) return;
+    if (!path || !hasScenes) return;
     try {
       const res = await api.get(`/api/cases/${work.caseId}/scenes?video=${encodeURIComponent(path)}`);
       if (run !== openRun) return;
@@ -979,6 +988,7 @@
       takenScenes = res.taken ?? [];
       listedGeolocating = res.geolocating ?? null;
       usedFrames = res.used ?? {};
+      scenesRead = true;
       adoptGivenBack(listedScenes);
     } catch {
       // the list is a reading: without it the drafts still show, and a reopen asks again
@@ -1002,7 +1012,7 @@
 
   // Coming back to Inspect reads the list again: a proof saved meanwhile joins it.
   $effect(() => {
-    if (uiState.tool === 'inspect' && isVideo && !opening) untrack(() => loadScenes(openRun));
+    if (uiState.tool === 'inspect' && hasScenes && !opening) untrack(() => loadScenes(openRun));
   });
 
   // A scene of this clip given up or taken up again from the To-do beside it.
@@ -1010,7 +1020,7 @@
     void sceneGiven.n;
     untrack(() => {
       if (sceneGiven.caseId !== work.caseId || sceneGiven.video !== work.source?.path) return;
-      if (uiState.tool === 'inspect' && isVideo && !opening) loadScenes(openRun);
+      if (uiState.tool === 'inspect' && hasScenes && !opening) loadScenes(openRun);
     });
   });
 
@@ -1019,21 +1029,30 @@
   onDestroy(
     onEvent('geolocating', (event) => {
       if (event.case_id !== work.caseId || event.video !== work.source?.path) return;
-      if (uiState.tool === 'inspect' && isVideo && !opening) loadScenes(openRun);
+      if (uiState.tool === 'inspect' && hasScenes && !opening) loadScenes(openRun);
     }),
   );
 
-  /** Record the clip as it now stands, and say how to take this step back. */
-  function clipChanged(message) {
+  /**
+   * Record the clip as it now stands, and say how to take this step back. The first
+   * scene ever kept here (`kept`) says once that it waits in the To-do too.
+   */
+  function clipChanged(message, { kept = false } = {}) {
     const after = clipSnapshot();
     clipHistory.push(after);
     const run = openRun;
-    toast(message, 'info', 6000, {
+    const undo = {
       label: 'Undo',
       onClick: () => {
         if (run === openRun && clipSnapshot() === after) undoClip();
       },
-    });
+    };
+    if (kept && todoHintDue()) {
+      todoHintGiven();
+      toast(`${message} · Also in the To-do`, 'info', 9000, [{ label: 'Show', onClick: openTodo }, undo]);
+      return;
+    }
+    toast(message, 'info', 6000, undo);
   }
 
   function restoreClip(snapshot) {
@@ -1046,28 +1065,52 @@
   const undoClip = () => restoreClip(clipHistory.undo());
   const redoClip = () => restoreClip(clipHistory.redo());
 
-  function keepScene(stretch, message) {
+  /** The Scenes tab on this scene, its row open as the last one touched. */
+  function touchScene(key) {
+    openKey = key;
+    folded = false;
+    landed = true;
+    tabs[isVideo ? 'video' : 'frame'] = 'scenes';
+  }
+
+  function keepScene(stretch, message, { reveal = true } = {}) {
     if (!stretch) return null;
     const scene = newScene(stretch);
     work.scenes.push(scene);
     sceneOffer.quiet();
-    clipChanged(message(scene));
+    clipChanged(message(scene), { kept: true });
+    if (reveal) touchScene(scene.id);
     return scene;
   }
 
-  /** A scene at the frame on screen (S). */
+  /** A scene at the frame on screen (S, or Mark to geolocate). */
   function addSceneHere() {
     if (!isVideo) return;
     keepScene({ start: shownTime() }, (scene) => `Scene kept at ${sceneTime(scene)}`);
   }
 
-  const keepShotScene = (index) =>
-    keepScene(stretchFromShot(scan?.shots, index, probeInfo?.duration ?? 0), (scene) => `Shot kept as a scene, ${sceneTime(scene)}`);
+  /** A scene about the whole video, with no timecode. */
+  const keepWholeVideo = () => keepScene({ start: null, end: null }, () => 'Scene kept for the whole video');
 
-  /** End a scene at the frame on screen: the one named, else the latest started before it (Shift+S). */
+  /** A picture marked to geolocate, the whole of it, once. */
+  function markPicture() {
+    if (!markable || work.scenes.length) return;
+    keepScene({ start: null, end: null }, () => 'Picture marked to geolocate');
+  }
+
+  // Beside the shots it stays in Moments, where the next one is kept from.
+  const keepShotScene = (index) =>
+    keepScene(stretchFromShot(scan?.shots, index, probeInfo?.duration ?? 0), (scene) => `Shot kept as a scene, ${sceneTime(scene)}`, { reveal: false });
+
+  /**
+   * End a scene at the frame on screen (Shift+S, End here): the one named, else the row
+   * open in the Scenes tab when that started before it, else the latest that did.
+   */
   function endSceneHere(id = null) {
+    if (sceneEdit.changed && sceneEdit.result) applySceneEdit();
     const now = shownTime() + frameDur;
-    const target = id ? work.scenes.find((sc) => sc.id === id) : sceneToEnd(scenes, now);
+    const open = scenesShown && openRow?.kind === 'draft' && openRow.start != null && openRow.start < now ? openRow : null;
+    const target = id ? work.scenes.find((sc) => sc.id === id) : open ?? sceneToEnd(scenes, now);
     const scene = target && work.scenes.find((sc) => sc.id === target.id);
     if (!scene || scene.start == null) return;
     if (!(now > scene.start)) {
@@ -1076,6 +1119,7 @@
     }
     scene.end = now;
     clipChanged(`Scene ends at ${sceneTime(scene).split('–')[1]}`);
+    touchScene(scene.id);
   }
 
   function playScene(scene) {
@@ -1100,10 +1144,29 @@
     clipChanged('Scene removed');
   }
 
-  /** Go to where a scene starts, for one that is only looked at. */
+  /** Go to where a scene starts. */
   function goToScene(scene) {
     const start = sceneStart(scene);
     if (start != null) seekFrame(start);
+  }
+
+  /** A row pressed in the Scenes tab: it opens, and the clip goes there. */
+  function pickScene(scene) {
+    touchScene(scene.key);
+    goToScene(scene);
+  }
+
+  /** A pin or a band pressed on the bar, which has already moved the clip there. */
+  function pressedOnBar(key) {
+    if (!scenes.some((sc) => sc.key === key)) return;
+    const there = scenesShown && openRow?.key === key;
+    touchScene(key);
+    if (!there) sceneFocus = { key, n: (sceneFocus?.n ?? 0) + 1 };
+  }
+
+  function foldScenes() {
+    openKey = null;
+    folded = true;
   }
 
   // -- geolocating a scene ----------------------------------------------------------
@@ -1115,12 +1178,14 @@
   let sceneBusy = $state(false);
 
   async function heldWork() {
+    await tick(); // a change made a moment ago reaches the autosave first
     await autosave.flush();
     if (autosave.unsaved) throw new Error('The work is not saved yet. Retry, then try again');
   }
 
-  async function geolocate(scene) {
-    if (scene?.kind !== 'draft' || !isVideo || sceneBusy) return;
+  async function geolocate(pressed) {
+    if (pressed?.kind !== 'draft' || !hasScenes || sceneBusy) return;
+    const scene = settled(pressed);
     sceneBusy = true;
     const run = openRun;
     try {
@@ -1140,7 +1205,7 @@
     }
   }
 
-  /** A row of the server's list put in place of the one it had, so the drawer moves at once. */
+  /** A row of the server's list put in place of the one it had, so the tab moves at once. */
   function heardRow(row) {
     if (!row?.id) return;
     const at = listedScenes.findIndex((sc) => sc.kind === 'draft' && sc.id === row.id);
@@ -1148,7 +1213,7 @@
   }
 
   async function abandon(scene, reason = '') {
-    if (scene?.kind !== 'draft' || !isVideo || sceneBusy) return;
+    if (scene?.kind !== 'draft' || !hasScenes || sceneBusy) return;
     sceneBusy = true;
     const run = openRun;
     const caseId = work.caseId;
@@ -1174,7 +1239,7 @@
   }
 
   async function bringBack(scene) {
-    if (scene?.kind !== 'draft' || !isVideo) return;
+    if (scene?.kind !== 'draft' || !hasScenes) return;
     const run = openRun;
     try {
       heardRow(await restoreScene(work.caseId, work.source.path, scene.id));
@@ -1188,14 +1253,14 @@
   }
 
   /**
-   * Open a scene asked for from elsewhere (`uiState.inspectScene`): its video, the
-   * video itself on screen at the scene's start, the drawer open on its row, and
-   * with `proof` its Make the proof.
+   * Open a scene asked for from elsewhere (`uiState.inspectScene`): its file, a video
+   * on screen at the scene's start, the Scenes tab open on its row, and with `proof`
+   * its Make the proof.
    */
   async function openScene({ video, draft, proof = false }) {
     const target = mediaList.find((m) => m.path === video);
     if (!target) {
-      toast('That video is no longer in the case', 'warn');
+      toast('That file is no longer in the case', 'warn');
       return;
     }
     if (work.source?.path !== video) {
@@ -1205,13 +1270,13 @@
     const run = openRun;
     await loadScenes(run);
     if (run !== openRun) return;
-    if (selected !== 'video') select('video');
-    scenesOpen = true;
+    if (isVideo && selected !== 'video') select('video');
     const scene = scenes.find((sc) => sc.kind === 'draft' && sc.id === draft);
     if (!scene) {
-      toast('That scene is no longer in this video', 'warn');
+      toast(`That scene is no longer in this ${isVideo ? 'video' : 'picture'}`, 'warn');
       return;
     }
+    touchScene(scene.key);
     goToScene(scene);
     sceneFocus = { key: scene.key, n: (sceneFocus?.n ?? 0) + 1 };
     if (proof && !isAbandoned(scene)) makeProof(scene);
@@ -1223,32 +1288,59 @@
     uiState.tool = 'proof';
   }
 
+  // -- the open row ---------------------------------------------------------------------
+  // One row of the Scenes tab is open at a time: the last one touched. Landing in the
+  // tab opens the one under the playhead instead, and with neither, the first still to
+  // prove. Escape folds it, until the tab is landed in again. A picture's row has no
+  // time to open.
+  let openKey = $state(null);
+  let folded = $state(false);
+  const scenesShown = $derived(uiState.tool === 'inspect' && !opening && hasScenes && shownTab === 'scenes');
+  const openRow = $derived.by(() => {
+    if (!isVideo) return null;
+    const live = liveScenes(scenes);
+    return live.find((sc) => sc.key === openKey) ?? (folded ? null : live.find((sc) => sc.kind === 'draft') ?? null);
+  });
+
+  let landed = false;
+  $effect(() => {
+    const shown = scenesShown;
+    untrack(() => {
+      if (shown && !landed) {
+        folded = false;
+        const under = isVideo ? scenesAt(shownTime(), liveScenes(scenes), frameDur)[0] : null;
+        if (under) openKey = under.key;
+      }
+      if (!shown) sceneFocus = null;
+      landed = shown;
+    });
+  });
+
+  // The editor stands on the open row while the tab shows it, which is what gives the
+  // bar its handles. Leaving a row, or the tab, keeps a time that reads as one. A scene
+  // whose time moved under it (applied, ended, undone) is read again.
+  $effect(() => {
+    const target = scenesShown ? openRow : null;
+    untrack(() => {
+      if (!target) {
+        if (sceneEdit.scene) leaveSceneEdit();
+        return;
+      }
+      if (sceneEdit.key !== target.key) {
+        if (sceneEdit.scene) leaveSceneEdit();
+        sceneEdit.begin(target);
+      } else if (!sameMoments(sortMoments(sceneMoments(target)), sortMoments(sceneMoments(sceneEdit.scene)))) {
+        sceneEdit.begin(target);
+      }
+    });
+  });
+
   // -- a scene's time, changed --------------------------------------------------------
-  // Pressing a scene's time in the drawer goes there and opens it (`lib/sceneEdit`).
-  // Apply or Enter keeps it, and so does closing the drawer or opening another time
-  // when it reads as one. A draft's new time joins the clip's history like any other
-  // change to it; a proof's moments are written to the proof
-  // (`PUT /cases/{id}/proofs/{name}/scene`) and its toast takes them back.
-
-  function toggleScenes() {
-    if (scenesOpen) closeScenes();
-    else scenesOpen = true;
-  }
-
-  function closeScenes() {
-    leaveSceneEdit();
-    scenesOpen = false;
-  }
-
-  function editSceneTime(scene) {
-    const again = sceneEdit.key === scene.key;
-    leaveSceneEdit();
-    // its time pressed again folds it, kept like closing the drawer
-    if (again) return;
-    const start = sceneStart(scene);
-    if (start != null) seekFrame(start);
-    sceneEdit.begin(scene);
-  }
+  // The open row shows its time as it stands (`lib/sceneEdit`). Nothing is kept until
+  // Apply or Enter, and leaving the row keeps it too when it reads as one; Escape drops
+  // it. A draft's new time joins the clip's history like any other change to it; a
+  // proof's moments are written to the proof (`PUT /cases/{id}/proofs/{name}/scene`)
+  // and its toast takes them back.
 
   /** The frame on screen, and the end of it: where a new moment starts, and a passage ends. */
   const frameNow = () => ({ start: shownTime(), end: shownTime() + frameDur });
@@ -1289,15 +1381,20 @@
     else sceneEdit.setStart(time);
   }
 
+  // A proof's time is on its way to the server: Apply waits for the answer.
+  let applyingTime = false;
+
   async function applySceneEdit() {
     const scene = sceneEdit.scene;
     const time = sceneEdit.result;
-    if (!scene || !time) return;
-    const changed = sceneEdit.changed;
-    sceneEdit.close();
-    if (!changed) return;
+    if (!scene || !time || !sceneEdit.changed || applyingTime) return;
     if (scene.kind === 'proof') {
-      await timeProof(scene, time.moments);
+      applyingTime = true;
+      try {
+        await timeProof(scene, time.moments);
+      } finally {
+        applyingTime = false;
+      }
       return;
     }
     const draft = work.scenes.find((sc) => sc.id === scene.id);
@@ -1307,10 +1404,23 @@
     clipChanged(`Scene now ${timeWords(time.start == null ? [] : [time])}`);
   }
 
-  /** Letting go of a time by closing the drawer or opening another keeps it when it reads as one. */
+  /** A scene as it stands once a time changed on its open row is kept, when it reads as one. */
+  function settled(scene) {
+    if (sceneEdit.key === scene.key && sceneEdit.changed && sceneEdit.result) applySceneEdit();
+    return scenes.find((sc) => sc.key === scene.key) ?? scene;
+  }
+
+  /** Back to what the open row's scene says. */
+  function dropSceneEdit() {
+    const held = sceneEdit.key && scenes.find((sc) => sc.key === sceneEdit.key);
+    if (held) sceneEdit.begin(held);
+    else sceneEdit.close();
+  }
+
+  /** Letting go of a row keeps a time that reads as one. */
   function leaveSceneEdit() {
     if (sceneEdit.result && sceneEdit.changed) applySceneEdit();
-    else sceneEdit.close();
+    sceneEdit.close();
   }
 
   async function timeProof(scene, moments, undoable = true) {
@@ -1344,7 +1454,8 @@
   // proof from (`lib/sceneFrames.js`). A scene holding none captures one, the sharpest
   // a scan found in it, else the one it starts on. Frames not in the case are saved
   // on the way, with their default names and the last folder, then Geo Proof opens a
-  // proof of the scene on them (`uiState.proofScene`).
+  // proof of the scene on them (`uiState.proofScene`). A picture has no frames to
+  // choose: its proof opens on the picture and the captures gathered for it.
   let proofChooser = $state(null); // { scene, ids, capture, captures }
   let makingProof = $state(false);
   const chooserFrames = $derived(
@@ -1361,8 +1472,14 @@
     };
   }
 
-  async function makeProof(scene) {
-    if (scene?.kind !== 'draft' || !isVideo || makingProof || isAbandoned(scene)) return;
+  async function makeProof(pressed) {
+    if (pressed?.kind !== 'draft' || !hasScenes || makingProof || isAbandoned(pressed)) return;
+    const scene = settled(pressed);
+    if (!isVideo) {
+      uiState.proofScene = pictureHandoff(scene, work.source.path, scene.captures);
+      uiState.tool = 'proof';
+      return;
+    }
     if (framesRendered) {
       const run = openRun;
       await framesRendered;
@@ -1507,27 +1624,47 @@
   // The one press every visit needs stays pinned above the tabs: Capture frame on the
   // video, Save to case on a frame. The tabs hold the rest, and keep their place for
   // the session.
-  const tabs = $state({ video: 'info', frame: 'adjust' });
+  const tabs = $state({ video: 'scenes', frame: 'adjust' });
   const panelHelpers = panelWidth({ key: 'azimut:inspectPanelW', min: 300, max: 560, def: 340, fraction: 0.4 });
   let panelW = $state(panelHelpers.loadWidth());
   const unfiledCount = $derived(work.frames.filter((f) => !filedIds.has(f.id) && !savingFrames.has(f.id) && f.url).length);
   const frameTouched = $derived(
     !!activeFrame && (!!activeFrame.crop || !!activeFrame.rotation || !isNeutral(filters, activeFrame.adjust))
   );
+  // Scenes first where the file has any, Info last: what the file says is looked up,
+  // and where its places stand is why it is open.
+  const scenesTab = $derived({
+    id: 'scenes', label: 'Scenes', title: INSPECT_HELP.tabScenes, count: liveScenes(scenes).length, todo: toProve(scenes) > 0,
+  });
   const panelTabs = $derived(
     selected === 'video'
       ? [
-          { id: 'info', label: 'Info', title: INSPECT_HELP.tabInfo },
+          scenesTab,
           { id: 'adjust', label: 'Adjust', title: INSPECT_HELP.tabAdjust, dot: videoEdited },
           { id: 'moments', label: 'Moments', title: INSPECT_HELP.tabMoments, count: work.marks.length },
+          { id: 'info', label: 'Info', title: INSPECT_HELP.tabInfo },
         ]
       : [
-          { id: 'info', label: 'Info', title: INSPECT_HELP.tabInfo },
+          ...(markable ? [scenesTab] : []),
           { id: 'adjust', label: 'Adjust', title: INSPECT_HELP.tabAdjust, dot: frameTouched },
           { id: 'analyze', label: 'Analyze', title: INSPECT_HELP.tabAnalyze, dot: !!overlay },
+          { id: 'info', label: 'Info', title: INSPECT_HELP.tabInfo },
         ]
   );
   const mode = $derived(selected === 'video' ? 'video' : 'frame');
+  // The tab in use, or Adjust where it does not exist: a frame of a video has no Scenes.
+  const shownTab = $derived(panelTabs.some((t) => t.id === tabs[mode]) ? tabs[mode] : 'adjust');
+
+  // -- the strip's invitation ----------------------------------------------------------
+  // A video with nothing marked in it asks, in its empty strip, whether it holds several
+  // places (`lib/sceneHints.js`). The first scene ends it, and Not now keeps it quiet.
+  let inviteOff = $state(false);
+  const inviting = $derived(isVideo && scenesRead && !scenes.length && !inviteOff);
+
+  function notNow() {
+    inviteOff = true;
+    declineInvite(work.caseId, work.source.path);
+  }
 
   // -- save to case: the one step that files media ------------------------------------
   function dupeNote(results) {
@@ -1676,6 +1813,10 @@
 
 <svelte:window onkeydown={onWindowKeydown} onkeyup={onWindowKeyup} onblur={() => (holdOriginal = false)} {onpagehide} />
 
+{#snippet stripInvite()}
+  <SceneInvite onmoment={addSceneHere} onwhole={keepWholeVideo} onlater={notNow} />
+{/snippet}
+
 <div class="tool">
   {#if work.source}
     <div class="tool-header">
@@ -1763,40 +1904,8 @@
               oncapture={captureNow}
               editing={sceneOnBar}
               onedit={dragScene}
-            >
-              {#snippet tools()}
-                <SceneButton {scenes} open={scenesOpen} onclick={toggleScenes} />
-              {/snippet}
-              {#snippet side()}
-                {#if scenesOpen}
-                  <ScenePanel
-                    {scenes}
-                    edit={sceneEdit}
-                    focus={sceneFocus}
-                    onadd={addSceneHere}
-                    onplay={playScene}
-                    ongo={goToScene}
-                    ongeolocate={geolocate}
-                    onabandon={abandon}
-                    onrestore={bringBack}
-                    onlabel={labelScene}
-                    onend={endSceneHere}
-                    onremove={removeScene}
-                    onopenproof={openSceneProof}
-                    onmakeproof={makeProof}
-                    onedit={editSceneTime}
-                    onhere={sceneHere}
-                    onkind={sceneKind}
-                    onnudge={nudgeScene}
-                    onaddmoment={addMoment}
-                    onapply={applySceneEdit}
-                    oncancel={() => sceneEdit.close()}
-                    onleave={leaveSceneEdit}
-                    onclose={closeScenes}
-                  />
-                {/if}
-              {/snippet}
-            </VideoPlayer>
+              onscene={pressedOnBar}
+            />
           {:else if activeFrame?.url}
             <FrameViewer
               frame={activeFrame}
@@ -1837,6 +1946,7 @@
             onsaveall={saveAllFrames}
             dots={frameDots}
             uses={frameUsed}
+            invite={inviting ? stripInvite : undefined}
           />
         {/if}
       </div>
@@ -1854,12 +1964,11 @@
                 <span class="at mono">{preciseClock(shownFrameTime(shared.currentTime, probeInfo?.fps, shared.frameTime))}</span>
                 <kbd>C</kbd>
               </button>
-              <button class="btn btn-sm scene-here" data-guide="inspect.scene" onclick={addSceneHere} title={INSPECT_HELP.sceneHere}>
-                <Icon name="pin" size={13} />
-                <span>Scene here</span>
-                {#if liveScenes(scenes).length}<span class="scene-count">{liveScenes(scenes).length} in this video</span>{/if}
-                <kbd>S</kbd>
-              </button>
+              <MarkScene
+                wholeTaken={liveScenes(scenes).some((sc) => sc.kind === 'draft' && isWholeVideo(sc))}
+                onmoment={addSceneHere}
+                onwhole={keepWholeVideo}
+              />
               {#if unfiledCount}
                 <button class="btn btn-sm save-frames" data-guide="inspect.save" disabled={saving === 'all'} onclick={saveAllFrames} title={INSPECT_HELP.saveAll}>
                   <Icon name="save" size={13} />
@@ -1886,22 +1995,48 @@
             {#each panelTabs as t (t.id)}
               <button
                 class="ptab"
-                class:on={tabs[mode] === t.id}
+                class:on={shownTab === t.id}
                 role="tab"
-                aria-selected={tabs[mode] === t.id}
+                aria-selected={shownTab === t.id}
                 title={t.title}
                 onclick={() => (tabs[mode] = t.id)}
               >
                 {t.label}
-                {#if t.count}<span class="count">{t.count}</span>{:else if t.dot}<span class="dot"></span>{/if}
+                {#if t.count}<span class="count" class:todo={t.todo}>{t.count}</span>{:else if t.dot}<span class="dot"></span>{/if}
               </button>
             {/each}
           </div>
 
-          <div class="tab-body" role="tabpanel">
-            {#if tabs[mode] === 'info'}
+          <div class="tab-body" role="tabpanel" aria-label={panelTabs.find((t) => t.id === shownTab)?.label}>
+            {#if shownTab === 'scenes'}
+              <SceneTab
+                {scenes}
+                edit={sceneEdit}
+                open={openRow?.key ?? null}
+                focus={sceneFocus}
+                picture={!isVideo}
+                onopen={pickScene}
+                onmark={markPicture}
+                onplay={playScene}
+                ongo={goToScene}
+                ongeolocate={geolocate}
+                onabandon={abandon}
+                onrestore={bringBack}
+                onlabel={labelScene}
+                onend={endSceneHere}
+                onremove={removeScene}
+                onopenproof={openSceneProof}
+                onmakeproof={makeProof}
+                onhere={sceneHere}
+                onkind={sceneKind}
+                onnudge={nudgeScene}
+                onaddmoment={addMoment}
+                onapply={applySceneEdit}
+                oncancel={dropSceneEdit}
+              />
+            {:else if shownTab === 'info'}
               <InfoPanel caseId={work.caseId} source={work.source} probe={probeInfo} frame={selected === 'video' ? null : activeFrame} />
-            {:else if selected === 'video' && tabs.video === 'adjust'}
+            {:else if selected === 'video' && shownTab === 'adjust'}
               <VideoAdjust
                 {videoFilters} {work}
                 video={videoEl}
@@ -1934,7 +2069,7 @@
                 tiles={overview?.tiles ?? null}
                 stripUrl={overview?.stripUrl ?? null}
               />
-            {:else if tabs.frame === 'adjust'}
+            {:else if shownTab === 'adjust'}
               {#key activeFrame.id}
                 <FrameAdjust
                   frame={activeFrame} {filters} {shared}
@@ -2177,23 +2312,6 @@
     width: 100%;
     justify-content: center;
   }
-  .scene-here {
-    width: 100%;
-    justify-content: center;
-    gap: 6px;
-  }
-  .scene-count {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-  }
-  .scene-here kbd {
-    padding: 0 4px;
-    border-radius: 3px;
-    border: 1px solid currentColor;
-    font-size: 10px;
-    font-family: var(--font-mono);
-    opacity: 0.6;
-  }
   .ptabs {
     flex-shrink: 0;
     display: flex;
@@ -2225,6 +2343,11 @@
     background: var(--bg-2);
     color: var(--text-2);
     font-size: 10px;
+  }
+  /* some of them still to prove */
+  .ptab .count.todo {
+    background: var(--accent);
+    color: var(--accent-text);
   }
   .ptab .dot {
     width: 6px;

@@ -40,11 +40,8 @@
     // The scene whose time is open, and where a handle dragged on the bar puts it.
     editing = null,
     onedit,
-    // What the analyst keeps on the clip beside the loop: Inspect's scenes button.
-    tools,
-    // A drawer docked on the video's right, above the bar: it narrows the picture,
-    // which fits itself again, rather than covering it. Inspect's scenes.
-    side,
+    // A press on a scene's pin or band, by the scene's key.
+    onscene,
   } = $props();
 
   let shell = $state();
@@ -214,57 +211,54 @@
 </script>
 
 <div class="video-shell" bind:this={shell}>
-  <div class="video-main">
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="video-canvas"
-      class:rotating={view.turning}
-      bind:this={canvas}
-      {onwheel}
-      {onpointerdown}
-      onmousedown={(e) => e.button === 1 && e.preventDefault()}
-      onauxclick={(e) => e.preventDefault()}
-    >
-      <div class="zoom-layer" bind:this={layerEl} style:transform={view.layerCss}>
-        <div class="stage" bind:this={stageEl} style:transform={view.stageCss} style:transform-origin="0 0">
-          <!-- svelte-ignore a11y_media_has_caption -->
-          <video
-            bind:this={video}
-            {src}
-            playsinline
-            preload="auto"
-            onloadedmetadata={() => (mediaDuration = video?.duration ?? 0)}
-            {ontimeupdate}
-            onseeked={() => (shared.currentTime = video?.currentTime ?? 0)}
-            onplay={() => (paused = false)}
-            onpause={() => (paused = true)}
-            onvolumechange={() => (muted = video?.muted ?? false)}
-            style:filter={original ? '' : filter}
-            style:max-width={maxWidth}
-            style:max-height={maxHeight}
-            style:transform
-          ></video>
-        </div>
-      </div>
-      {#if view.turning}
-        <TurnGuide x={view.pivot.x} y={view.pivot.y} />
-      {/if}
-      {#if original}
-        <span class="original-tag">Without adjustments</span>
-      {/if}
-      <div class="view-ctl">
-        {#if view.dirty}
-          {#if view.zoom !== 1}<span class="val">{Math.round(view.zoom * 100)}%</span>{/if}
-          {#if view.angle !== 0}<span class="val">{view.angle}°</span>{/if}
-          <button class="btn btn-ghost btn-sm" onclick={() => view.reset()} title={INSPECT_HELP.fit}>
-            <Icon name="eye" size={14} /> Fit
-          </button>
-        {:else}
-          <span class="hint">scroll zoom · drag pan · middle-drag turns · click plays</span>
-        {/if}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="video-canvas"
+    class:rotating={view.turning}
+    bind:this={canvas}
+    {onwheel}
+    {onpointerdown}
+    onmousedown={(e) => e.button === 1 && e.preventDefault()}
+    onauxclick={(e) => e.preventDefault()}
+  >
+    <div class="zoom-layer" bind:this={layerEl} style:transform={view.layerCss}>
+      <div class="stage" bind:this={stageEl} style:transform={view.stageCss} style:transform-origin="0 0">
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <video
+          bind:this={video}
+          {src}
+          playsinline
+          preload="auto"
+          onloadedmetadata={() => (mediaDuration = video?.duration ?? 0)}
+          {ontimeupdate}
+          onseeked={() => (shared.currentTime = video?.currentTime ?? 0)}
+          onplay={() => (paused = false)}
+          onpause={() => (paused = true)}
+          onvolumechange={() => (muted = video?.muted ?? false)}
+          style:filter={original ? '' : filter}
+          style:max-width={maxWidth}
+          style:max-height={maxHeight}
+          style:transform
+        ></video>
       </div>
     </div>
-    {@render side?.()}
+    {#if view.turning}
+      <TurnGuide x={view.pivot.x} y={view.pivot.y} />
+    {/if}
+    {#if original}
+      <span class="original-tag">Without adjustments</span>
+    {/if}
+    <div class="view-ctl">
+      {#if view.dirty}
+        {#if view.zoom !== 1}<span class="val">{Math.round(view.zoom * 100)}%</span>{/if}
+        {#if view.angle !== 0}<span class="val">{view.angle}°</span>{/if}
+        <button class="btn btn-ghost btn-sm" onclick={() => view.reset()} title={INSPECT_HELP.fit}>
+          <Icon name="eye" size={14} /> Fit
+        </button>
+      {:else}
+        <span class="hint">scroll zoom · drag pan · middle-drag turns · click plays</span>
+      {/if}
+    </div>
   </div>
 
   <div class="player-bar" data-guide="inspect.player">
@@ -286,6 +280,7 @@
       {fps}
       onseek={seekBar}
       {onedit}
+      {onscene}
     />
     <div class="controls">
       <button class="player-btn" onclick={togglePlay} aria-label={paused ? 'Play' : 'Pause'} title={INSPECT_HELP.play}>
@@ -319,7 +314,6 @@
           </button>
         {/if}
       </span>
-      {@render tools?.()}
       <!-- One group at the end, so a row too narrow for it wraps it whole, still on the right. -->
       <span class="end">
       {#if barZoom}
@@ -365,16 +359,9 @@
     flex-direction: column;
     background: var(--bg-0);
   }
-  .video-main {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-  }
-  /* Keeps some of the picture beside the scenes drawer, which gives way first. */
   .video-canvas {
     position: relative;
     flex: 1;
-    min-width: min(30%, 240px);
     min-height: 0;
     overflow: hidden;
     display: flex;
@@ -445,8 +432,8 @@
     font-size: var(--fs-xs);
     pointer-events: none;
   }
-  /* Measured as a container, so a narrow player (a small window, the case panel or the
-     scenes drawer open) drops the least needed words first rather than its buttons. */
+  /* Measured as a container, so a narrow player (a small window, the case panel open)
+     drops the least needed words first rather than its buttons. */
   .player-bar {
     flex-shrink: 0;
     display: flex;

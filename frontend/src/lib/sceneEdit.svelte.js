@@ -2,10 +2,10 @@
  * The scene whose time is being changed, one at a time: what its fields read, and
  * what pressing Apply would make of it.
  *
- * Three hands move it and all three land here: the fields in the Scenes drawer, the
- * handles on the player's bar, and S or Shift+S at the frame on screen. Nothing is
- * kept until Apply, so a drag or a typo costs nothing, and the list does not
- * reorder under the pointer while a start moves.
+ * Three hands move it and all three land here: the fields of the open scene, the
+ * handles on the player's bar, and Here at the frame on screen. Nothing is kept
+ * until Apply, so a drag or a typo costs nothing, and the list does not reorder
+ * under the pointer while a start moves.
  *
  * A scene is about the whole video, or holds moments, each an instant or a passage.
  * A draft holds one at most; a proof as many as the place shows in. The fields and

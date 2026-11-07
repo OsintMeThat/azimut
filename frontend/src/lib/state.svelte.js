@@ -293,7 +293,8 @@ export const uiState = $state({
   postProof: null, // proof spec handed to the Post Composer
   openProof: null, // proof name to load in the Proof Composer
   // A scene of Inspect to make a proof of: { video, moments, draft, panels, label },
-  // the panels its saved frames' paths. Geo Proof opens a new proof on it.
+  // the panels its saved frames' paths, or { picture, panels, label } for a picture
+  // marked to geolocate. Geo Proof opens a new proof on it.
   proofScene: null,
   // A scene being geolocated, for Satellite to open its video as a reference window:
   // { video, draft, start, end, label } (`lib/geolocating.svelte.js`, geolocateScene).
@@ -302,8 +303,9 @@ export const uiState = $state({
   openNotebook: null, // { noteId: string|null, line? }; null noteId opens case notes.md, `home` the Notebook's home
   openNoteTemplate: null, // note template id to edit in the Notebook, from Settings
   inspectPath: null, // media path to open in the Inspect tool
-  // A scene to open in Inspect: { video, draft, proof? }, its video opened on it, the
-  // drawer on its row; `proof: true` opens its Make the proof as well (the pill's).
+  // A scene to open in Inspect: { video, draft, proof? }, its file opened on it (a
+  // video, or a picture marked to geolocate), the Scenes tab on its row; `proof: true`
+  // opens its Make the proof as well (the pill's).
   inspectScene: null,
   /**
    * A picture handed to Reverse Search from wherever it is being looked at, in the

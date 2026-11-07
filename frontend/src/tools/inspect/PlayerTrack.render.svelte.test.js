@@ -144,6 +144,53 @@ describe('pressing the bar', () => {
   });
 });
 
+describe('a click on a scene', () => {
+  const SCENES = [
+    { key: 'sc_1', scene: 'sc_1', start: 2, end: 5, color: 'red', label: 'Bridge' },
+    { key: 'sc_2', scene: 'sc_2', start: 7, end: null, color: 'red', label: 'Market' },
+    { key: 'sc_3', scene: 'sc_3', start: 3, end: 4, color: 'red', label: 'Inner' },
+    { key: 'proof:P#1', scene: 'proof:P', start: 9, end: null, color: 'red', label: 'P' },
+  ];
+
+  it('names the scene of a band or a pin pressed, and still moves the clip', () => {
+    const onscene = vi.fn();
+    const onseek = vi.fn();
+    const track = open({ scenes: SCENES, onscene, onseek });
+    press(track, 45);
+    expect(onscene).toHaveBeenLastCalledWith('sc_1');
+    press(track, 71);
+    expect(onscene).toHaveBeenLastCalledWith('sc_2');
+    expect(onseek).toHaveBeenLastCalledWith(7, true);
+    // a proof's moment names the proof, not the moment
+    press(track, 90);
+    expect(onscene).toHaveBeenLastCalledWith('proof:P');
+  });
+
+  it('takes the shortest of the bands stacked there', () => {
+    const onscene = vi.fn();
+    press(open({ scenes: SCENES, onscene }), 35);
+    expect(onscene).toHaveBeenCalledWith('sc_3');
+  });
+
+  it('names nothing away from a scene, or for a drag across one', () => {
+    const onscene = vi.fn();
+    const track = open({ scenes: SCENES, onscene, onseek: vi.fn() });
+    press(track, 15);
+    expect(onscene).not.toHaveBeenCalled();
+    track.dispatchEvent(new PointerEvent('pointerdown', { clientX: 40, button: 0, bubbles: true }));
+    track.dispatchEvent(new PointerEvent('pointermove', { clientX: 60, bubbles: true }));
+    track.dispatchEvent(new PointerEvent('pointerup', { clientX: 60, button: 0, bubbles: true }));
+    expect(onscene).not.toHaveBeenCalled();
+  });
+
+  it('leaves the handles of the scene in hand to their drag', () => {
+    const onscene = vi.fn();
+    const track = open({ scenes: SCENES, onscene, onseek: vi.fn(), onedit: vi.fn(), editing: { key: 'sc_1', start: 2, end: 5, color: 'red' } });
+    press(track, 20);
+    expect(onscene).not.toHaveBeenCalled();
+  });
+});
+
 describe('the handles of a scene whose time is open', () => {
   const move = (track, x) => {
     track.dispatchEvent(new PointerEvent('pointermove', { clientX: x, bubbles: true }));

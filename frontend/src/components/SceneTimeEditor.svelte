@@ -7,13 +7,18 @@
   // time, and Apply. Driven by a `lib/sceneEdit.svelte.js`, which holds what the
   // fields read; nothing is kept until Apply.
   //
-  // Inspect opens it in a scene's row of its drawer, Geo Proof under its scene's
-  // player. Only the words differ: what a control says on hover (`help`), and what
-  // the line under the moments says about the frame on screen (`tips`).
+  // Geo Proof opens it under its scene's player when the time is pressed, on the
+  // start, ready to be typed over. Inspect shows it in the open row of its Scenes tab
+  // all along (`autofocus` off, so the player keeps the keys), and offers Apply and
+  // Cancel only once something changed (`actsWhenChanged`). Otherwise only the words
+  // differ: what a control says on hover (`help`), and the line under the moments
+  // (`tips`).
   let {
     edit,
     help,
     tips,
+    autofocus = true,
+    actsWhenChanged = false,
     onhere,
     onkind,
     onnudge,
@@ -35,13 +40,23 @@
     }
   }
 
-  // A field that opens in hand is picked, so typing replaces it.
+  // A field that opens in hand is picked, so typing replaces it; without `autofocus`,
+  // only the one Another moment just added.
+  let adding = false;
   function picked(node, inHand) {
-    if (inHand) {
+    if (inHand && (autofocus || adding)) {
+      adding = false;
       node.focus();
       node.select();
     }
   }
+
+  function another() {
+    adding = true;
+    onaddmoment?.();
+  }
+
+  const actsShown = $derived(!actsWhenChanged || edit.changed);
 
   const KINDS = $derived([
     { id: 'whole', label: 'Whole video', help: help.whole },
@@ -50,7 +65,7 @@
   ]);
 </script>
 
-<div class="editor" role="group" aria-label="When the scene happens">
+<div class="editor" class:several={edit.moments.length > 1} role="group" aria-label="When the scene happens">
   <div class="kinds" role="radiogroup" aria-label="Kind of time">
     {#each KINDS as k (k.id)}
       <button role="radio" aria-checked={edit.kind === k.id} class:on={edit.kind === k.id} onclick={() => onkind?.(k.id)} title={k.help}>{k.label}</button>
@@ -116,7 +131,7 @@
       </div>
     {/each}
     {#if edit.many && edit.moments.length < MAX_MOMENTS}
-      <button class="btn btn-ghost btn-xs another" onclick={() => onaddmoment?.()} title={help.add}>
+      <button class="btn btn-ghost btn-xs another" onclick={another} title={help.add}>
         <Icon name="plus" size={11} /> Another moment
       </button>
     {/if}
@@ -126,10 +141,12 @@
   {:else if !edit.whole}
     <p class="tip">{edit.end != null ? tips.passage : tips.instant}</p>
   {/if}
-  <div class="acts">
-    <button class="btn btn-ghost btn-xs" onclick={() => oncancel?.()}>Cancel</button>
-    <button class="btn btn-primary btn-xs" disabled={Boolean(edit.problem)} onclick={() => onapply?.()} title={help.apply}>Apply</button>
-  </div>
+  {#if actsShown}
+    <div class="acts">
+      <button class="btn btn-ghost btn-xs" onclick={() => oncancel?.()}>Cancel</button>
+      <button class="btn btn-primary btn-xs" disabled={Boolean(edit.problem)} onclick={() => onapply?.()} title={help.apply}>Apply</button>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -161,16 +178,20 @@
     background: var(--accent);
     color: var(--accent-text);
   }
-  /* One moment: its start, its end when it is a passage, and its removal. */
+  /* One moment: its start and its end when it is a passage. Among several, its removal
+     too, and an edge in the scene's colour on the one in hand. */
   .moment {
     display: grid;
-    grid-template-columns: 1fr 1fr auto;
+    grid-template-columns: 1fr 1fr;
     align-items: end;
     gap: 6px;
+  }
+  .several .moment {
+    grid-template-columns: 1fr 1fr auto;
     padding-left: 6px;
     border-left: 2px solid transparent;
   }
-  .moment.held {
+  .several .moment.held {
     border-left-color: var(--scene, var(--accent));
   }
   .field {

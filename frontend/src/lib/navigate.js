@@ -9,6 +9,7 @@ import { api } from './api.js';
 import { mediaKindOf } from './entityIcon.js';
 import { revealMediaFolder } from './reveal.js';
 import { normalizeReverseTarget } from './reverseSearch.js';
+import { saveSidebarView } from './sidebar.js';
 
 /**
  * A number an entity actually recorded, or NaN when it recorded nothing.
@@ -281,6 +282,17 @@ export function openEntity(entity, resolved = false) {
     uiState.openBoardEntity = entity.id;
     uiState.tool = 'board';
   }
+}
+
+/**
+ * Open the case sidebar on its To-do view, whose first group is To geolocate, from
+ * wherever the analyst is: the tool underneath stays where it is. The view is kept
+ * across reloads, as one picked by hand is.
+ */
+export function openTodo() {
+  uiState.sidebarView = 'todo';
+  saveSidebarView('todo');
+  uiState.sidebarOpen = true;
 }
 
 /** Open the Notebook on its home of cards, whatever note it had open. */

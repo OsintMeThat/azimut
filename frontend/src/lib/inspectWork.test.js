@@ -62,6 +62,12 @@ describe('isPristine: looking at a file files nothing', () => {
     expect(isPristine({ ...video, marks: [{ id: 'mk_1', time: 3, label: '' }] }, FILTERS, VIDEO_FILTERS)).toBe(false);
   });
 
+  it('counts a picture marked to geolocate as work', () => {
+    const image = { source: { kind: 'image' }, frames: [frame()], scenes: [] };
+    expect(isPristine(image, FILTERS, VIDEO_FILTERS)).toBe(true);
+    expect(isPristine({ ...image, scenes: [{ id: 'sc_1', start: null, end: null, label: '' }] }, FILTERS, VIDEO_FILTERS)).toBe(false);
+  });
+
   it('counts a scene kept on a video as work', () => {
     const video = { source: { kind: 'video' }, frames: [], scenes: [], videoAdjust: { brightness: 1 }, videoRotation: 0 };
     expect(isPristine(video, FILTERS, VIDEO_FILTERS)).toBe(true);

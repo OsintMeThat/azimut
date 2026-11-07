@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  frameInMoment, frameScenes, frameToCapture, frameUses, framesOfScene, inScenes, proofHandoff, scenesAt, usedIn,
+  frameInMoment, frameScenes, frameToCapture, frameUses, framesOfScene, inScenes, pictureHandoff, proofHandoff, scenesAt, usedIn,
 } from './sceneFrames.js';
 import { sceneList } from './scenes.js';
 
@@ -167,5 +167,20 @@ describe('what Geo Proof is handed', () => {
   it('keeps the panels in the order given: the frames, then the captures', () => {
     const panels = ['media/frame-1.png', 'media/frame-2.png', 'media/capture.png'];
     expect(proofHandoff(draft('sc_1', 10, 20), 'media/clip.mp4', panels).panels).toEqual(panels);
+  });
+});
+
+describe('what Geo Proof is handed for a picture', () => {
+  it('lays out the picture, then its captures, and states no time and no draft', () => {
+    expect(pictureHandoff({ label: 'Market?' }, 'media/market.jpg', ['media/cap-1.png', 'media/cap-2.png'])).toEqual({
+      picture: 'media/market.jpg',
+      panels: ['media/market.jpg', 'media/cap-1.png', 'media/cap-2.png'],
+      label: 'Market?',
+    });
+  });
+
+  it('holds with no capture, and never lays the picture out twice', () => {
+    expect(pictureHandoff({ label: '' }, 'media/market.jpg').panels).toEqual(['media/market.jpg']);
+    expect(pictureHandoff({}, 'media/market.jpg', ['media/market.jpg', '']).panels).toEqual(['media/market.jpg']);
   });
 });

@@ -133,3 +133,17 @@ export function proofHandoff(scene, video, panels) {
     label: scene.kind === 'proof' ? sceneTitle(scene) : scene.label ?? '',
   };
 }
+
+/**
+ * What Geo Proof is handed to open a proof of a picture marked to geolocate
+ * (`uiState.proofScene`): the picture, then the captures its scene gathered on the
+ * map, and the scene's label. It states no time and takes up no draft, since a
+ * picture is proved by any proof that lays it out.
+ */
+export function pictureHandoff(scene, picture, captures = []) {
+  return {
+    picture,
+    panels: [picture, ...captures.filter((path) => path && path !== picture)],
+    label: scene?.label ?? '',
+  };
+}

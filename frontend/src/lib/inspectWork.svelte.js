@@ -81,7 +81,7 @@ export function isUntouched(frame, filters) {
  * Opening a file to look at it must not file a work for it. A video has done
  * nothing until a frame is cut, a moment is marked or the clip is adjusted; an
  * image starts as one frame, the image itself, and has done nothing until that
- * frame changes or a second one appears.
+ * frame changes, a second one appears or it is marked to geolocate.
  */
 export function isPristine(work, filters, videoFilters) {
   const frames = work.frames ?? [];
@@ -93,7 +93,7 @@ export function isPristine(work, filters, videoFilters) {
       !hasVideoEdits(videoFilters, work.videoAdjust, work.videoRotation)
     );
   }
-  return frames.length <= 1 && frames.every((f) => isUntouched(f, filters) && !f.filed);
+  return frames.length <= 1 && frames.every((f) => isUntouched(f, filters) && !f.filed) && !(work.scenes?.length);
 }
 
 /** What a frame would be saved as: its whole op pipeline. */

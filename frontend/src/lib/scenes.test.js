@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ABANDONED, PROGRESS, TODO, isAbandoned, liveScenes, sceneColorAt,
+  ABANDONED, PROGRESS, TODO, isAbandoned, liveScenes, markablePicture, sceneColorAt, sceneKind, sceneWhen, toProve,
   WHOLE_VIDEO, defaultEnd, editClock, isStretch, isWholeVideo, momentKey, momentsClash, newScene, parseClock,
   sameMoments, sameTime, sceneList, shortClock, sceneMarks, scenePassage, sceneStart, sceneTime, sceneTitle,
   sceneToEnd, shortMoments, snapToFrame, sortMoments, spanLabel, stretchFromShot, timeProblem, timeWords,
@@ -77,6 +77,42 @@ describe('a scene\'s time', () => {
   });
 });
 
+describe('a scene\'s kind, in words', () => {
+  it('says what kind of time a scene states', () => {
+    expect(sceneKind(draft('a', null))).toBe(WHOLE_VIDEO);
+    expect(sceneKind(draft('a', 3))).toBe('Instant');
+    expect(sceneKind(draft('a', 3, 9))).toBe('Passage');
+    expect(sceneKind(proof('P', { moments: [m(30, 45), m(100)] }))).toBe('2 moments');
+    expect(sceneKind(proof('P', { at: [3] }))).toBe(WHOLE_VIDEO);
+  });
+
+  it('writes the kind before the time, and the whole video alone', () => {
+    expect(sceneWhen(draft('a', null))).toBe('Whole video');
+    expect(sceneWhen(draft('a', 229))).toBe('Instant · 3:49');
+    expect(sceneWhen(draft('a', 30, 45))).toBe('Passage · 0:30–0:45');
+    expect(sceneWhen(proof('P', { moments: [m(30, 45), m(100), m(190, 200)] }))).toBe('3 moments · 0:30–0:45 +2');
+  });
+});
+
+describe('what can be marked to geolocate', () => {
+  const picture = (source) => ({ kind: 'image', source });
+
+  it('takes a picture of the analyst\'s', () => {
+    expect(markablePicture(picture({ type: 'upload' }))).toBe(true);
+    expect(markablePicture(picture({ type: 'download' }))).toBe(true);
+    expect(markablePicture(picture(undefined))).toBe(true);
+    // adjusted and saved from Inspect, it is still that picture and no frame of a video
+    expect(markablePicture(picture({ type: 'inspect', op: 'frame', time: null }))).toBe(true);
+  });
+
+  it('leaves out a frame of a video, which belongs to its video\'s scenes, and a capture', () => {
+    expect(markablePicture(picture({ type: 'inspect', op: 'frame', from: 'media/clip.mp4', time: 12.4 }))).toBe(false);
+    for (const type of ['satellite', 'screenshot', 'horizon', 'compare']) expect(markablePicture(picture({ type }))).toBe(false);
+    expect(markablePicture({ kind: 'video', source: { type: 'upload' } })).toBe(false);
+    expect(markablePicture(null)).toBe(false);
+  });
+});
+
 describe('sceneList', () => {
   it('puts proofs and drafts in the order of the clip, coloured by place', () => {
     const list = sceneList(
@@ -131,6 +167,8 @@ describe('sceneList', () => {
     expect(list[1].abandoned.reason).toBe('no landmark');
     expect(list.map(isAbandoned)).toEqual([false, true, false]);
     expect(liveScenes(list).map((s) => s.id)).toEqual(['sc_1', 'sc_3']);
+    expect(toProve(list)).toBe(2);
+    expect(toProve([...list.filter((s) => s.id === 'sc_2'), { kind: 'proof', proof: 'P' }])).toBe(0);
     // the abandoned keep their place in the colours, so giving one up recolours nothing
     expect(new Set(list.map((s) => s.color)).size).toBe(3);
   });
@@ -161,6 +199,10 @@ describe('what the bar draws', () => {
     expect(new Set(marks.filter((k) => k.key.startsWith('proof:Twice')).map((k) => k.color))).toEqual(new Set([twice.color]));
     expect(momentKey(twice, 1)).toBe('proof:Twice#1');
     expect(momentKey(list.find((s) => s.key === 'sc_1'), 0)).toBe('sc_1');
+    // each mark names its scene, which a press on it opens
+    expect(marks.map((k) => k.scene)).toEqual([
+      'proof:Traced', 'proof:Traced', 'proof:Twice', 'proof:Twice', 'proof:Twice', 'sc_1', 'sc_2',
+    ]);
   });
 
   it('draws an abandoned scene too, flagged so the bar greys it, and names it so on hover', () => {
