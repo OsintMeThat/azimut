@@ -4,7 +4,8 @@
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
   import {
-    uid, initialQuad, quadFromCropRect, exportFrame, collageVideo, mediaOrigin, COLLAGE_DEFAULT_SIZE, COLLAGE_MAX_DIM,
+    uid, initialQuad, quadFromCropRect, exportFrame, collageVideo, mediaOrigin, sourceStem, timecode,
+    COLLAGE_DEFAULT_SIZE, COLLAGE_MAX_DIM,
   } from '../lib/inspect.js';
   import { BRUSH_DEFAULT, recrop } from '../lib/excludeBrush.js';
   import { shortClock, spanLabel } from '../lib/scenes.js';
@@ -98,11 +99,15 @@
     transparent: true,
     nodes: [],
     exported: null,
+    // the frame its picture is cut to, canvas pixels (lib/collageCut.js), or none
+    clip: null,
     // bent by hand along a level line (lib/straighten.js): Find then reads its picture as one
     straightened: false,
   });
   // The level line being drawn on the canvas to straighten the collage by, canvas pixels.
   let level = $state({ drawing: false, points: [] });
+  // The frame being drawn over the collage to cut its picture to (lib/collageCut.js).
+  let cut = $state({ editing: false, frame: null });
   // How close the canvas is looked at, which the toolbar's Fit puts back.
   let view = $state({ zoom: 1, x: 0, y: 0 });
   // Counts the collages opened, so each one gets its canvas, bar and panel afresh.
@@ -130,7 +135,7 @@
     isFiled(doc.exported, collageSignature(doc), mediaPaths) ? doc.exported.path : null
   );
   // What the export will be, said beside the button that makes it.
-  const output = $derived(doc.nodes.length ? exportFrame(doc.nodes) : null);
+  const output = $derived(doc.nodes.length ? exportFrame(doc.nodes, doc.clip) : null);
   const outputHint = $derived(
     output ? `Exports at ${output.width} × ${output.height} px${output.capped ? ', the size limit' : ''}.` : ''
   );
@@ -148,7 +153,9 @@
       ? 'Add a piece first.'
       : lost
         ? `${lost} piece${lost === 1 ? '' : 's'} lost ${lost === 1 ? 'its' : 'their'} file. Remove ${lost === 1 ? 'it' : 'them'} to save.`
-        : '',
+        : !output
+          ? 'No piece lies in the cut. Move it or clear it.'
+          : '',
   );
 
   /** The empty canvas's ways in: the list of frames or of images, shown in the panel. */
@@ -211,7 +218,7 @@
   // it was last drawn from is kept, so reopening an unchanged collage sends nothing.
   let thumbDrawnFrom = null;
   let thumbTimer = null;
-  const thumbKey = () => JSON.stringify(doc.nodes.map((n) => [n.save, n.quad, !!n.missing]));
+  const thumbKey = () => JSON.stringify([doc.nodes.map((n) => [n.save, n.quad, !!n.missing]), doc.clip]);
   const piecesIn = () => doc.nodes.length > 0 && doc.nodes.every((n) => n.url || n.missing);
 
   /** Draw and file the preview now. Takes its own copy, so the collage can close meanwhile. */
@@ -225,8 +232,9 @@
     const nodes = doc.nodes.map((n) => ({
       id: n.id, quad: n.quad.map(([x, y]) => [x, y]), url: n.url, w: n.w, h: n.h, missing: !!n.missing,
     }));
+    const clip = doc.clip ? { ...doc.clip } : null;
     thumbDrawnFrom = key;
-    return renderCollageThumb(nodes)
+    return renderCollageThumb(nodes, { clip })
       .then((blob) => {
         if (!blob) return;
         const form = new FormData();
@@ -265,7 +273,7 @@
   let held = 0; // plain: how many changes made in steps are under way (holdHistory)
   let historyTimer = null;
   const layoutSnapshot = () =>
-    JSON.stringify({ width: doc.width, height: doc.height, nodes: doc.nodes, straightened: doc.straightened });
+    JSON.stringify({ width: doc.width, height: doc.height, nodes: doc.nodes, clip: doc.clip, straightened: doc.straightened });
 
   function syncHistory() {
     canUndo = history.canUndo;
@@ -322,9 +330,11 @@
       const same = now?.url && !n.url && !n.missing && JSON.stringify(now.save) === JSON.stringify(n.save);
       return same ? { ...n, url: now.url, baseUrl: now.baseUrl, frameOps: now.frameOps ?? n.frameOps } : n;
     });
+    doc.clip = snap.clip ?? null;
     doc.straightened = snap.straightened ?? false;
     selectedIds = [];
     unstitched = [];
+    cut.editing = false;
     // outlast the capture debounce so the restore itself is not recorded
     setTimeout(() => (restoring = false), 400);
   }
@@ -454,9 +464,10 @@
     docRun += 1;
     Object.assign(doc, {
       open: false, caseId: null, name: null, title: '', ...COLLAGE_DEFAULT_SIZE,
-      background: '#12141c', transparent: true, nodes: [], exported: null, straightened: false,
+      background: '#12141c', transparent: true, nodes: [], exported: null, clip: null, straightened: false,
     });
     Object.assign(level, { drawing: false, points: [] });
+    Object.assign(cut, { editing: false, frame: null });
     Object.assign(view, { zoom: 1, x: 0, y: 0 });
     Object.assign(brush, { on: false, erase: false });
     unstitched = [];
@@ -512,6 +523,7 @@
         background: spec.background ?? '#12141c',
         transparent: spec.transparent ?? true,
         exported: spec.exported ?? null,
+        clip: spec.clip ?? null,
         straightened: spec.straightened ?? false,
         // Marked lost up front, so the preview key reads as it did when last drawn.
         nodes: (spec.nodes ?? []).map((n) => ({
@@ -713,14 +725,17 @@
   async function composeCollage({ name, folder, note }) {
     exportFolder = folder ?? '';
     const signatureNow = collageSignature(doc);
-    // Always a transparent PNG of just the pieces, trimmed to their bounds and at
-    // the sharpest piece's own resolution, however small it sits on the canvas.
-    const f = exportFrame(doc.nodes);
-    const nodes = doc.nodes.map((n) => ({
-      src: n.save, quad: n.quad.map(([x, y]) => [(x - f.minX) * f.scale, (y - f.minY) * f.scale]),
-    }));
+    // Always a transparent PNG of just the pieces, trimmed to their bounds within the
+    // cut and at the sharpest piece's own resolution, however small it sits on the canvas.
+    const f = exportFrame(doc.nodes, doc.clip);
+    if (!f) throw new Error('No piece lies in the cut. Move it or clear it');
+    const at = ([x, y]) => [(x - f.minX) * f.scale, (y - f.minY) * f.scale];
+    const nodes = doc.nodes.map((n) => ({ src: n.save, quad: n.quad.map(at) }));
+    const { clip } = doc;
     const res = await api.post(`/api/cases/${doc.caseId}/inspect/compose`, {
       width: f.width, height: f.height, background: null, nodes, folder, label: name, notes: note,
+      // the frame the picture is cut to, in its own pixels
+      ...(clip ? { clip: { x: at([clip.x, clip.y])[0], y: at([clip.x, clip.y])[1], w: clip.w * f.scale, h: clip.h * f.scale } } : {}),
       // the saved collage this is the export of, so its picture opens it again
       ...(doc.name ? { collage: doc.name } : {}),
     });
@@ -779,9 +794,17 @@
   offerPuts('collage', () => (doc.open && doc.nodes.length && !lost ? [noteCollage] : []));
   onDestroy(() => withdrawNote('collage'));
 
-  // Straighten: the whole collage drawn as one picture and bent along the level line, every column of its
-  // pixels moved by what the line is off there (lib/straighten.js). The bent picture is a new file in the case;
-  // it takes the pieces' place as one piece, where they lay, and Ctrl+Z puts the pieces back.
+  // Straighten: every piece bent along the level line by the same column shifts, as the whole collage
+  // would bend (lib/straighten.js), so the seams a stitch matched stay matched. Each bent piece is a new
+  // file in the case, named after the collage and the piece, and takes that piece's place, in the same
+  // order; Ctrl+Z puts the pieces back.
+  const pieceName = (node, title) => {
+    const own = sourceStem(mediaList.find((m) => m.path === node.save.path) ?? { path: node.save.path });
+    // a piece straightened before keeps its own name, not the collage's twice
+    const stem = own.startsWith(`${title} `) ? own.slice(title.length + 1) : own;
+    return `${title} ${node.save.time == null ? stem : `${timecode(node.save.time)} ${stem}`}`;
+  };
+
   async function straightenCollage() {
     const f = exportFrame(doc.nodes);
     const bend = exportBend(level.points, f);
@@ -791,31 +814,37 @@
       return;
     }
     const title = `${doc.title} straightened`;
+    const run = docRun;
+    const { caseId } = doc;
     try {
-      const nodes = doc.nodes.map((n) => ({
-        src: n.save, quad: n.quad.map(([x, y]) => [(x - f.minX) * f.scale, (y - f.minY) * f.scale + bend.pad]),
-      }));
-      const res = await api.post(`/api/cases/${doc.caseId}/inspect/compose`, {
-        width: f.width, height: bend.height, background: null, nodes, bend: bend.shifts, label: title,
-        folder: exportFolder || null,
+      const res = await api.post(`/api/cases/${caseId}/inspect/straighten`, {
+        width: f.width, height: bend.height, bend: bend.shifts, folder: null,
+        nodes: doc.nodes.map((n) => ({
+          src: n.save,
+          quad: n.quad.map(([x, y]) => [(x - f.minX) * f.scale, (y - f.minY) * f.scale + bend.pad]),
+          label: pieceName(n, title),
+        })),
       });
-      const [left, top, right, bottom] = res.box;
-      const path = res.item.path;
-      const x0 = f.minX + left / f.scale;
-      const x1 = f.minX + right / f.scale;
-      const y0 = f.minY + (top - bend.pad) / f.scale;
-      const y1 = f.minY + (bottom - bend.pad) / f.scale;
-      const url = fileUrl(doc.caseId, path);
-      doc.nodes = [{
-        id: uid('nd'), frameId: null, url, baseUrl: url, w: right - left, h: bottom - top, frameOps: [], crop: null,
-        save: { path, time: null, ops: [] }, quad: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
-      }];
+      if (run !== docRun) return;
+      // where each bent piece lies on the canvas: its box on the bent picture, back in canvas pixels
+      const canvasAt = (x, y) => [f.minX + x / f.scale, f.minY + (y - bend.pad) / f.scale];
+      doc.nodes = res.pieces.map(({ item, box: [left, top, right, bottom] }) => {
+        const url = fileUrl(caseId, item.path);
+        const [x0, y0] = canvasAt(left, top);
+        const [x1, y1] = canvasAt(right, bottom);
+        return {
+          id: uid('nd'), frameId: null, url, baseUrl: url, w: right - left, h: bottom - top, frameOps: [], crop: null,
+          save: { path: item.path, time: null, ops: [] }, quad: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+        };
+      });
       doc.straightened = true;
       selectedIds = [];
+      unstitched = [];
       Object.assign(level, { drawing: false, points: [] });
       await reloadCase();
       await refresh();
-      toast(`Straightened into “${title}”. Ctrl+Z puts the pieces back`, 'ok');
+      const n = res.pieces.length;
+      toast(`Straightened ${n === 1 ? 'the piece' : `the ${n} pieces`}. Ctrl+Z puts ${n === 1 ? 'it' : 'them'} back`, 'ok');
     } catch (e) {
       toast(e.message, 'danger');
     }
@@ -962,6 +991,7 @@
             bind:view
             bind:brush
             bind:unstitched
+            bind:cut
             hold={holdHistory}
             fit={() => canvas?.fitPieces()}
             {fitted}
@@ -977,6 +1007,7 @@
               bind:brush
               bind:unstitched
               bind:fitted
+              bind:cut
             />
             {#if !doc.nodes.length && !opening}
               <div class="empty-canvas">

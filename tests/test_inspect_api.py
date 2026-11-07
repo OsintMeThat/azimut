@@ -431,47 +431,177 @@ def test_compose_transparent_background_keeps_alpha(client):
     assert img.getpixel((60, 60))[3] == 255
 
 
-def test_compose_bends_the_whole_collage_as_one_picture(client):
-    """Collage → Straighten: every column of the composite moved by its own shift, the pixels of each piece
-    bent with it, the canvas trimmed to what it holds and the box said."""
-    cid = client.post("/api/cases", json={"name": "Bend"}).json()["id"]
-    stripes = Image.new("RGB", (100, 40), (0, 0, 0))
-    for y in range(20, 40):
-        for x in range(100):
-            stripes.putpixel((x, y), (255, 255, 255))
+def _stripes(size=(100, 40), split=20) -> bytes:
+    """Dark above, light from row ``split`` down: a level edge to bend."""
+    img = Image.new("RGB", size, (0, 0, 0))
+    img.paste((255, 255, 255), (0, split, size[0], size[1]))
     buf = io.BytesIO()
-    stripes.save(buf, "PNG")
-    a = _upload(client, cid, "a.png", buf.getvalue())
-    # the line between dark and light falls 0 px at the left, 20 px at the right: a slope across one piece
-    shifts = [-20.0 * x / 99 for x in range(100)]
-    res = client.post(
-        f"/api/cases/{cid}/inspect/compose",
-        json={"width": 100, "height": 80, "background": None, "bend": shifts,
-              "nodes": [{"src": {"path": a["path"]}, "quad": [[0, 30], [100, 30], [100, 70], [0, 70]]}]},
-    ).json()
-    left, top, right, bottom = res["box"]
-    assert (left, right) == (0, 100) and top == 10 and bottom == 70
-    img = Image.open(io.BytesIO(client.get(f"/files/{cid}/{res['item']['path']}").content))
-    assert img.size == (100, 60) and img.mode == "RGBA"
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _rect(left, top, right, bottom):
+    return [[left, top], [right, top], [right, bottom], [left, bottom]]
+
+
+def test_straighten_bends_each_piece_alike_and_files_one_picture_each(client):
+    """Collage → Straighten: every column of every piece moved by its own shift, the pieces bent apart,
+    each filed with the file and instant it was bent from, trimmed to what it holds, its box said."""
+    cid = client.post("/api/cases", json={"name": "Bend"}).json()["id"]
+    a = _upload(client, cid, "a.png", _stripes())
+    b = _upload(client, cid, "b.png", _stripes(size=(60, 40)))
+    # the edge falls 0 px at the left, 20 px at the right of the canvas: a slope across both pieces
+    shifts = [-20.0 * x / 159 for x in range(160)]
+    res = client.post(f"/api/cases/{cid}/inspect/straighten", json={
+        "width": 160, "height": 80, "bend": shifts, "nodes": [
+            {"src": {"path": a["path"]}, "quad": _rect(0, 30, 100, 70), "label": "Pan straightened a"},
+            {"src": {"path": b["path"]}, "quad": _rect(100, 30, 160, 70), "label": "Pan straightened b"},
+        ],
+    })
+    assert res.status_code == 200, res.text
+    first, second = res.json()["pieces"]
+    # its right column rises 20 * 99 / 159 = 12.45 px, so its top row is 17, its bottom stays at 70
+    assert first["box"] == [0, 17, 100, 70] and second["box"][0] == 100 and second["box"][2] == 160
+    listing = {m["path"]: m for m in client.get(f"/api/cases/{cid}/media").json()}
+    for piece, source, title in ((first, a, "Pan straightened a"), (second, b, "Pan straightened b")):
+        item = listing[piece["item"]["path"]]
+        assert item["title"] == title
+        assert item["source"]["op"] == "collage" and item["source"]["straightened"] is True
+        assert (item["source"]["sources"], item["source"]["times"]) == ([source["path"]], [None])
+    img = Image.open(io.BytesIO(client.get(f"/files/{cid}/{first['item']['path']}").content))
+    assert img.size == (100, 53) and img.mode == "RGBA"
     # inside the piece, not just at its corners: the edge rises across it, column by column
-    def edge(x: int) -> int:
-        return next(y for y in range(img.height) if img.getpixel((x, y))[0] > 128)
-    assert edge(0) == 50 - top and edge(99) == 30 - top
-    assert abs(edge(50) - (50 - 20 * 50 / 99 - top)) <= 1
-    listing = client.get(f"/api/cases/{cid}/media").json()
-    assert next(m for m in listing if m["path"] == res["item"]["path"])["source"]["straightened"] is True
+    def edge(picture, x: int) -> int:
+        return next(y for y in range(picture.height) if picture.getpixel((x, y))[0] > 128)
+    assert edge(img, 0) == 50 - 17 and abs(edge(img, 99) - (50 - 20 * 99 / 159 - 17)) <= 1
+    # the second piece carries the slope on where the first left it, so the seam holds
+    other = Image.open(io.BytesIO(client.get(f"/files/{cid}/{second['item']['path']}").content))
+    top = second["box"][1]
+    assert abs((edge(other, 0) + top) - (edge(img, 99) + 17)) <= 1
 
 
-def test_compose_bend_needs_a_shift_a_column_on_a_transparent_canvas(client):
+def test_straighten_needs_a_shift_a_column(client):
     cid = client.post("/api/cases", json={"name": "Bend2"}).json()["id"]
     a = _upload(client, cid, "a.png", _png_bytes(size=(40, 40)))
-    node = {"src": {"path": a["path"]}, "quad": [[0, 0], [40, 0], [40, 40], [0, 40]]}
-    short = client.post(f"/api/cases/{cid}/inspect/compose",
-                        json={"width": 40, "height": 40, "background": None, "bend": [0.0] * 10, "nodes": [node]})
+    node = {"src": {"path": a["path"]}, "quad": _rect(0, 0, 40, 40)}
+    short = client.post(f"/api/cases/{cid}/inspect/straighten", json={"width": 40, "height": 40, "bend": [0.0] * 20, "nodes": [node]})
     assert short.status_code == 422
-    opaque = client.post(f"/api/cases/{cid}/inspect/compose",
-                         json={"width": 40, "height": 40, "bend": [0.0] * 40, "nodes": [node]})
-    assert opaque.status_code == 422
+    endless = client.post(f"/api/cases/{cid}/inspect/straighten",
+                          json={"width": 40, "height": 40, "bend": [0.0] * 39 + ["NaN"], "nodes": [node]})
+    assert endless.status_code == 422
+
+
+def test_straighten_files_every_piece_or_none(client):
+    cid = client.post("/api/cases", json={"name": "Bend3"}).json()["id"]
+    a = _upload(client, cid, "a.png", _stripes())
+    before = {m["path"] for m in client.get(f"/api/cases/{cid}/media").json()}
+    res = client.post(f"/api/cases/{cid}/inspect/straighten", json={
+        "width": 160, "height": 80, "bend": [0.0] * 160, "nodes": [
+            {"src": {"path": a["path"]}, "quad": _rect(0, 20, 100, 60), "label": "Kept"},
+            {"src": {"path": "media/gone.png"}, "quad": _rect(100, 20, 160, 60), "label": "Gone"},
+        ],
+    })
+    assert res.status_code in (400, 422)
+    # the first piece, filed before the second failed, is taken back
+    assert {m["path"] for m in client.get(f"/api/cases/{cid}/media").json()} == before
+
+
+def test_straightening_each_piece_composes_as_bending_the_whole_collage(client):
+    """The pieces bent one by one and laid at their boxes against the whole collage composed then bent,
+    as Straighten did before it kept one picture per piece. Overlapping pieces, three of them remapped
+    onto a cylinder with their footprint in alpha, two laid across them higher and lower so their top
+    and bottom edges cross the others, and a bend with fractional shifts.
+
+    The two agree within 2 levels (rounding) everywhere but on each piece's soft top and bottom edge, the
+    row of pixels its footprint only partly covers and the row either side of it. There the order
+    differs: a bend reads each pixel between two rows, t of the way, and reading a piece and then laying
+    it over the one below is not laying it and then reading both. The gap is exactly
+    t(1 - t) * (how much the piece's cover changes between the rows) * (how much the picture below does),
+    at most a quarter of a full step: 64 levels, 66 with the rounding. On these hard-edged blobs it
+    reaches 17 to 33 levels on some 0.05% of the pixels; softer, camera-like pictures stay nearer 10."""
+    import math
+
+    import numpy as np
+
+    cid = client.post("/api/cases", json={"name": "Equivalent"}).json()["id"]
+    paths = [_upload(client, cid, f"v{i}.png", png)["path"] for i, png in enumerate(_pan_pngs())]
+    solved = client.post(f"/api/cases/{cid}/inspect/auto-stitch", json={
+        "width": 1200, "height": 600, "mode": "cylindrical", "nodes": [{"path": p} for p in paths],
+    }).json()
+    width, tall = solved["canvas"]["width"], solved["canvas"]["height"]
+    nodes = [{"src": {"path": paths[n["index"]], "time": None, "ops": [n["op"]]}, "quad": n["quad"]} for n in solved["nodes"]]
+    left_png, right_png = _overlapping_pair()
+    a = _upload(client, cid, "a.png", left_png)["path"]
+    b = _upload(client, cid, "b.png", right_png)["path"]
+    nodes.append({"src": {"path": a, "time": None, "ops": []},
+                  "quad": [[100, tall * 0.45], [520, tall * 0.42], [530, tall * 0.85], [110, tall * 0.88]]})
+    nodes.append({"src": {"path": b, "time": None, "ops": []}, "quad": _rect(width * 0.5, 30.3, width * 0.5 + 400, 330.7)})
+    shifts = [12.3 * math.sin(c / width * math.pi * 1.7) + 7.1 * c / width - 3.3 for c in range(width)]
+    pad = math.ceil(-min(shifts))
+    height = tall + pad + math.ceil(max(shifts))
+    nodes = [{**n, "quad": [[x, y + pad] for x, y in n["quad"]]} for n in nodes]
+
+    # before: the whole collage composed, then bent as one picture
+    canvas, _, _ = inspect_engine._compose_canvas(Case.open(cid), width=width, height=height, nodes=nodes, background=None)
+    whole = np.asarray(inspect_engine._bent(canvas, shifts)).astype(np.float64)
+    # now: each piece bent and filed, then the pictures laid at their boxes as the collage exports them
+    res = client.post(f"/api/cases/{cid}/inspect/straighten", json={
+        "width": width, "height": height, "bend": shifts,
+        "nodes": [{**n, "label": f"Piece {i}"} for i, n in enumerate(nodes)],
+    })
+    assert res.status_code == 200, res.text
+    pieces = res.json()["pieces"]
+    laid = client.post(f"/api/cases/{cid}/inspect/compose", json={
+        "width": width, "height": height, "background": None,
+        "nodes": [{"src": {"path": p["item"]["path"]}, "quad": _rect(*p["box"])} for p in pieces],
+    }).json()
+    apart = np.asarray(Image.open(io.BytesIO(client.get(f"/files/{cid}/{laid['item']['path']}").content)).convert("RGBA")).astype(np.float64)
+
+    soft = np.zeros(whole.shape[:2], bool)
+    for piece in pieces:
+        left, top, right, bottom = piece["box"]
+        alpha = np.asarray(Image.open(io.BytesIO(client.get(f"/files/{cid}/{piece['item']['path']}").content)))[..., 3]
+        edge = (alpha > 0) & (alpha < 255)
+        edge[1:] |= edge[:-1].copy()
+        edge[:-1] |= edge[1:].copy()
+        soft[top:bottom, left:right] |= edge
+    assert soft.mean() < 0.05
+
+    alpha_off = np.abs(whole[..., 3] - apart[..., 3])
+    assert alpha_off[~soft].max() <= 1
+    for ground in (0.0, 128.0, 255.0):
+        def shown(px, ground=ground):
+            cover = px[..., 3:4] / 255.0
+            return px[..., :3] * cover + ground * (1 - cover)
+
+        off = np.abs(shown(whole) - shown(apart)).max(axis=2)
+        assert off[~soft].max() <= 2, ground
+        assert (off[~soft] > 1).sum() <= 20, ground
+        assert off[soft].max() <= 66, ground
+        assert (off > 1).mean() < 0.001, ground
+
+
+def test_compose_cuts_the_picture_to_the_collages_frame(client):
+    """Collage → Cut: the picture keeps what lies inside the frame, the pieces composed whole first."""
+    cid = client.post("/api/cases", json={"name": "Cut"}).json()["id"]
+    a = _upload(client, cid, "a.png", _stripes(size=(100, 40), split=20))
+    node = {"src": {"path": a["path"]}, "quad": _rect(0, 0, 100, 40)}
+
+    res = client.post(f"/api/cases/{cid}/inspect/compose", json={
+        "width": 100, "height": 40, "background": None, "nodes": [node], "clip": {"x": 10.4, "y": -5, "w": 60, "h": 30},
+    })
+    assert res.status_code == 200, res.text
+    img = Image.open(io.BytesIO(client.get(f"/files/{cid}/{res.json()['item']['path']}").content))
+    # cut to the frame where it lies over the canvas, the ragged lower part gone
+    assert img.size == (60, 25)
+    assert img.getpixel((0, 0))[:3] == (0, 0, 0) and img.getpixel((0, 24))[:3] == (255, 255, 255)
+
+    for bad in ({"x": 0, "y": 0, "w": 0, "h": 10}, {"x": "NaN", "y": 0, "w": 10, "h": 10},
+                {"x": 500, "y": 0, "w": 10, "h": 10}):
+        refused = client.post(f"/api/cases/{cid}/inspect/compose", json={
+            "width": 100, "height": 40, "background": None, "nodes": [node], "clip": bad,
+        })
+        assert refused.status_code == 422, bad
 
 
 def test_compose_paints_through_a_remapped_piece_footprint(client):
@@ -884,7 +1014,8 @@ def test_auto_stitch_hands_the_solver_each_pieces_file_time_and_strokes(client, 
 
     def solve(images, **kwargs):
         seen.update(kwargs)
-        return {"quads": {0: [[0, 0], [1, 0], [1, 1], [0, 1]]}, "dropped": [1, 2], "canvas": {"width": 16, "height": 16}}
+        return {"quads": {0: [[0, 0], [1, 0], [1, 1], [0, 1]]}, "dropped": [1, 2], "why": ["no-overlap", "no-detail"],
+                "canvas": {"width": 16, "height": 16}}
 
     monkeypatch.setattr(inspect_engine, "_source_image", lambda case, path, time, ops: Image.new("RGB", (64, 48)))
     monkeypatch.setattr(stitch, "solve_layout", solve)
@@ -905,6 +1036,32 @@ def test_auto_stitch_hands_the_solver_each_pieces_file_time_and_strokes(client, 
     assert seen["sources"] == [("media/clip.mp4", 1.5), ("media/clip.mp4", 3.0), ("media/photo.jpg", None)]
     assert seen["exclude"] == [[{"points": [[0.1235, 0.5]], "radius": 0.1}], None, None]
     assert res.json()["nodes"][0]["size"] == [64, 48]
+    assert (res.json()["dropped"], res.json()["why"]) == ([1, 2], ["no-overlap", "no-detail"])
+
+
+def test_auto_stitch_says_why_it_left_each_piece_out(client):
+    """A stranger has detail and none of it matches; a blank picture and one painted out whole have
+    nothing to match at all."""
+    cid = client.post("/api/cases", json={"name": "StitchWhy"}).json()["id"]
+    left_png, right_png = _overlapping_pair()
+    a = _upload(client, cid, "left.png", left_png)
+    b = _upload(client, cid, "right.png", right_png)
+    stranger = _upload(client, cid, "stranger.png", _overlapping_pair(seed=777)[0])
+    blank = _upload(client, cid, "blank.png", _png_bytes(color=(90, 90, 90), size=(500, 500)))
+    painted = _upload(client, cid, "painted.png", right_png)
+    whole = [{"points": [[0.5, 0.5]], "radius": 1.0}]
+
+    body = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={
+            "width": 1200, "height": 600,
+            "nodes": [{"path": item["path"]} for item in (a, b, stranger, blank, painted)],
+            "exclude": [None, None, None, None, whole],
+        },
+    ).json()
+
+    assert body["dropped"] == [2, 3, 4]
+    assert body["why"] == ["no-overlap", "no-detail", "no-detail"]
 
 
 def test_analyze_accepts_transient_ops_without_filing(client):

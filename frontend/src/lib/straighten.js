@@ -4,10 +4,11 @@
  * its tilt a little off bends such a line into a smile or a slope; this lays it
  * flat again.
  *
- * The whole collage is bent as one picture: every column of its pixels moves up or
- * down by what the line is off there, so the pixels of each frame follow the line and
- * two frames meeting at a seam move alike. The server draws the collage and bends it
- * (`exportBend` says by how much). The line is a rounded curve through every click, read left to right
+ * Every column of the collage moves up or down by what the line is off there, so the
+ * pixels of each frame follow the line and two frames meeting at a seam move alike.
+ * The server bends each piece by those same column shifts and files one picture per
+ * piece (`exportBend` says by how much, `/inspect/straighten` does it), so the pieces
+ * stay pieces. The line is a rounded curve through every click, read left to right
  * whatever order they came in, so a point added between two others bends only
  * the stretch around it. Past its ends the picture moves as the end does: a slope
  * carried on across a wide pan would tip its far side off the canvas.
@@ -74,7 +75,7 @@ export function levelShift(points) {
 }
 
 /**
- * The bend an export of the collage takes (`/inspect/compose`'s `bend`): each output column's downward shift in
+ * The bend Straighten sends (`/inspect/straighten`'s `bend`): each output column's downward shift in
  * output pixels, for the export frame `frame` (lib/inspect.js `exportFrame`), and the room it needs: the pieces
  * laid `pad` pixels lower so nothing bends past the top, the picture `height` tall. Null when the line cannot say.
  *

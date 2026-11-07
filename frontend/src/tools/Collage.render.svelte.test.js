@@ -721,7 +721,11 @@ describe('a collage of one video', () => {
 
 describe('a collage straightened', () => {
   const at = (id, path, time) => ({ ...piece(path), id, save: { path, time, ops: [] } });
-  const STRAIGHT = 'media/Pan straightened.png';
+  const bent = (time) => ({
+    path: `media/Pan straightened 00-00-0${time} Convoy clip.png`, kind: 'image', title: `Pan straightened 00-00-0${time} Convoy clip`,
+    filename: `Pan straightened 00-00-0${time} Convoy clip.png`,
+    source: { type: 'inspect', op: 'collage', sources: ['media/clip.mp4'], times: [time], straightened: true },
+  });
 
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['png'], { type: 'image/png' }))));
@@ -730,15 +734,15 @@ describe('a collage straightened', () => {
     media = MEDIA;
     collages = [{ name: 'Pan', title: 'Pan', pieces: 2 }];
     saved.Pan = { name: 'Pan', title: 'Pan', spec: { width: 800, height: 400, transparent: true, nodes: [at('nd_1', 'media/clip.mp4', 2), { ...at('nd_2', 'media/clip.mp4', 5), quad: [[80, 0], [160, 0], [160, 60], [80, 60]] }] } };
-    // the bent picture lands in the case as the server files it: composed from the pieces' frames
+    // each bent piece lands in the case as the server files it: bent from its frame, and its own picture
     post.mockImplementation(async (path, body) => {
       if (path === '/api/cases/case-a/collages') return { name: body.title, title: body.title };
-      if (path === '/api/cases/case-a/inspect/compose') {
-        media = [...MEDIA, {
-          path: STRAIGHT, kind: 'image', title: 'Pan straightened', filename: 'Pan straightened.png',
-          source: { type: 'inspect', op: 'collage', sources: ['media/clip.mp4', 'media/clip.mp4'], times: [2, 5], straightened: true },
-        }];
-        return { item: { path: STRAIGHT }, box: [0, 0, 160, 60] };
+      if (path === '/api/cases/case-a/inspect/straighten') {
+        media = [...MEDIA, bent(2), bent(5)];
+        return { pieces: [
+          { item: { path: bent(2).path }, box: [0, 3, 80, 66] },
+          { item: { path: bent(5).path }, box: [80, 0, 160, 63] },
+        ] };
       }
       return {};
     });
@@ -746,27 +750,126 @@ describe('a collage straightened', () => {
 
   afterEach(() => post.mockImplementation(async (path, body) => (path === '/api/cases/case-a/collages' ? { name: body.title, title: body.title } : {})));
 
+  async function straighten() {
+    await start();
+    button('Pan').click();
+    await settle(20);
+    button('Draw the line').click();
+    flushSync();
+    const catcher = target.querySelector('.level-catch');
+    for (const [x, y] of [[10, 30], [150, 36]]) {
+      catcher.dispatchEvent(new MouseEvent('pointerdown', { clientX: x, clientY: y, button: 0, bubbles: true }));
+      flushSync();
+    }
+    [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Straighten').click();
+    await settle(20);
+  }
+
+  it('bends every piece alike and keeps one piece per frame, each in its place', async () => {
+    await straighten();
+
+    const [, body] = post.mock.calls.find(([path]) => path === '/api/cases/case-a/inspect/straighten');
+    expect(body.bend).toHaveLength(body.width);
+    expect(body.folder).toBeNull();
+    expect(body.nodes.map((n) => [n.src, n.label])).toEqual([
+      [{ path: 'media/clip.mp4', time: 2, ops: [] }, 'Pan straightened 00-00-02 Convoy clip'],
+      [{ path: 'media/clip.mp4', time: 5, ops: [] }, 'Pan straightened 00-00-05 Convoy clip'],
+    ]);
+    const pieces = target.querySelectorAll('img.node');
+    expect(pieces).toHaveLength(2);
+    // each its box on the bent picture, back on the canvas
+    await afterQuiet();
+    const written = collagePosts().at(-1)[1].spec;
+    expect(written.straightened).toBe(true);
+    expect(written.nodes.map((n) => n.save.path)).toEqual([bent(2).path, bent(5).path]);
+    const pad = body.nodes[0].quad[0][1];
+    expect(written.nodes[0].quad).toEqual([[0, 3 - pad], [80, 3 - pad], [80, 66 - pad], [0, 66 - pad]]);
+    expect(written.nodes[1].quad[0]).toEqual([80, -pad]);
+    expect(toast).toHaveBeenCalledWith('Straightened the 2 pieces. Ctrl+Z puts them back', 'ok');
+  });
+
   it('still reads as its video, the stretch of its pieces, never as a picture of its own', async () => {
     await start();
     button('Pan').click();
     await settle(20);
     expect(target.querySelector('.panel .from .from-when').textContent).toBe('0:02–0:05');
+    unmount(live);
+    live = null;
+    target.remove();
 
-    button('Draw the line').click();
-    flushSync();
-    const catcher = target.querySelector('.level-catch');
-    for (const x of [10, 150]) {
-      catcher.dispatchEvent(new MouseEvent('pointerdown', { clientX: x, clientY: 30, button: 0, bubbles: true }));
-      flushSync();
-    }
-    [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Straighten').click();
-    await settle(20);
-
-    expect(post.mock.calls.some(([path]) => path === '/api/cases/case-a/inspect/compose')).toBe(true);
-    expect(target.querySelectorAll('img.node')).toHaveLength(1);
+    await straighten();
     expect(target.querySelector('.panel .from').textContent.replace(/\s+/g, ' ').trim()).toBe('From Convoy clip 0:02–0:05');
     // Mark to geolocate offers the video and its stretch, as before the bend
     expect(target.querySelector('.panel button[aria-label="More ways to mark"]')).not.toBeNull();
+  });
+
+  it('puts the pieces back on Ctrl+Z', async () => {
+    await straighten();
+    await afterQuiet();
+    expect(collagePosts().at(-1)[1].spec.straightened).toBe(true);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+    flushSync();
+    await afterQuiet();
+    const written = collagePosts().at(-1)[1].spec;
+    expect(written.nodes.map((n) => n.save)).toEqual([
+      { path: 'media/clip.mp4', time: 2, ops: [] }, { path: 'media/clip.mp4', time: 5, ops: [] },
+    ]);
+    expect(written).not.toHaveProperty('straightened');
+  });
+});
+
+describe('a cut', () => {
+  beforeEach(() => {
+    collages = [{ name: 'Strip', title: 'Strip', pieces: 1 }];
+    saved.Strip = { name: 'Strip', title: 'Strip', spec: { width: 800, height: 400, transparent: true, nodes: [piece('media/roof.png')] } };
+  });
+
+  async function cutTo(bottom) {
+    await start();
+    button('Strip').click();
+    await settle(20);
+    button('Cut').click();
+    flushSync();
+    // the pane is not measured here, so the canvas reads the pointer as canvas pixels
+    const edge = target.querySelector('[data-handle="s"]');
+    edge.dispatchEvent(new MouseEvent('pointerdown', { clientX: 40, clientY: 60, button: 0, bubbles: true }));
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 40, clientY: bottom, bubbles: true }));
+    window.dispatchEvent(new MouseEvent('pointerup', { clientX: 40, clientY: bottom, bubbles: true }));
+    flushSync();
+    button('Apply').click();
+    flushSync();
+  }
+
+  it('keeps its frame with the collage and saves the picture cut to it', async () => {
+    await cutTo(30);
+    await afterQuiet();
+    expect(collagePosts().at(-1)[1].spec.clip).toEqual({ x: 0, y: 0, w: 80, h: 30 });
+    expect(target.textContent).toContain('Exports at 80 × 30 px.');
+
+    [...document.querySelectorAll('.save .btn-primary')][0].click();
+    await settle(20);
+    const [, body] = post.mock.calls.find(([path]) => path.endsWith('/inspect/compose'));
+    expect(body).toMatchObject({ width: 80, height: 30, clip: { x: 0, y: 0, w: 80, h: 30 } });
+  });
+
+  it('waits for a piece in the frame before it saves', async () => {
+    saved.Strip.spec.clip = { x: 500, y: 0, w: 40, h: 40 };
+    await start();
+    button('Strip').click();
+    await settle(20);
+    expect(target.querySelector('[data-guide="collage.save"]').textContent).toContain('No piece lies in the cut. Move it or clear it.');
+    expect(target.textContent).not.toContain('Exports at');
+  });
+
+  it('is one undo, and the piece stays whole', async () => {
+    await cutTo(30);
+    await afterQuiet();
+    expect(target.querySelectorAll('img.node, .node.placeholder')).toHaveLength(1);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+    flushSync();
+    await afterQuiet();
+    expect(collagePosts().at(-1)[1].spec).not.toHaveProperty('clip');
+    expect(target.textContent).toContain('Exports at 80 × 60 px.');
   });
 });
 

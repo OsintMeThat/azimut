@@ -447,6 +447,81 @@ def test_a_straightened_collage_says_so_and_find_reads_its_picture_as_one(client
         inspectwork.frames_of(None, "media/pan.png")
 
 
+def test_a_cut_collage_keeps_its_frame_and_refuses_a_bad_one(client):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    clip = {"x": -12.5, "y": 4, "w": 300, "h": 120.25}
+
+    assert _save_collage(client, cid, "Cut", [_piece(photo)], clip=clip).status_code == 200
+    assert client.get(f"/api/cases/{cid}/collages/Cut").json()["spec"]["clip"] == clip
+    _save_collage(client, cid, "Cut", [_piece(photo)], name="Cut", clip=None)
+    assert "clip" not in client.get(f"/api/cases/{cid}/collages/Cut").json()["spec"]
+    for bad in (
+        {"x": 0, "y": 0, "w": 0.5, "h": 10},
+        {"x": 0, "y": 0, "w": 10},
+        {"x": "left", "y": 0, "w": 10, "h": 10},
+        {"x": 0, "y": inspectwork.MAX_CLIP + 1, "w": 10, "h": 10},
+        [0, 0, 10, 10],
+    ):
+        assert _save_collage(client, cid, "Cut", [_piece(photo)], name="Cut", clip=bad).status_code == 400, bad
+
+
+def test_a_cut_signs_the_export_beside_the_pieces(client):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    piece = _piece(photo)
+    clip = {"x": 0, "y": 0, "w": 80, "h": 40}
+    exported = client.post(
+        f"/api/cases/{cid}/inspect/compose",
+        json={"width": 80, "height": 60, "label": "Strip", "clip": clip,
+              "nodes": [{"src": piece["save"], "quad": piece["quad"]}]},
+    ).json()["item"]["path"]
+    listed = lambda: client.get(f"/api/cases/{cid}/collages").json()[0]["filed"]  # noqa: E731
+    pieces = [[piece["save"], piece["quad"]]]
+
+    cut = {"path": exported, "signature": json.dumps({"nodes": pieces, "clip": clip})}
+    _save_collage(client, cid, "Strip", [piece], exported=cut, clip=clip)
+    assert listed() is True
+    # cut again since the export: the picture is not the collage as it stands
+    _save_collage(client, cid, "Strip", [piece], name="Strip", exported=cut, clip={**clip, "h": 30})
+    assert listed() is False
+    # nor is it once the cut is cleared, while a signature of the pieces alone still reads as before
+    _save_collage(client, cid, "Strip", [piece], name="Strip", exported=cut)
+    assert listed() is False
+    _save_collage(client, cid, "Strip", [piece], name="Strip", exported={"path": exported, "signature": json.dumps(pieces)})
+    assert listed() is True
+
+
+def test_find_reads_a_cut_collage_from_its_frame(monkeypatch):
+    """The picture of a cut collage starts at its frame's corner, as wide as the frame keeps of it."""
+    from azimut.engine import frames
+
+    nodes = [
+        {"save": {"path": "media/pan.mp4", "time": t, "ops": []}, "w": 640, "h": 360,
+         "quad": [[x, 20], [x + 640, 20], [x + 640, 380], [x, 380]]}
+        for t, x in ((1.0, 0), (2.0, 500))
+    ]
+    spec = {"exported": {"path": "media/pan.png"}, "nodes": nodes, "clip": {"x": 100, "y": -50, "w": 900, "h": 330}}
+    monkeypatch.setattr(inspectwork, "_export_current", lambda case, spec: True)
+    monkeypatch.setattr(inspectwork, "_collage_specs", lambda case: [(".collages/Pan.json", spec)])
+    monkeypatch.setattr(inspectwork, "_frame_size", lambda case, path: (640.0, 360.0))
+    seen = {}
+    real = frames.pieces_of
+
+    def pieces_of(spec, sources, origin=None):
+        seen["origin"] = origin
+        return real(spec, sources, origin=origin)
+
+    monkeypatch.setattr(frames, "pieces_of", pieces_of)
+
+    found = inspectwork.frames_of(None, "media/pan.png")
+    assert found is not None
+    model, said = found
+    assert seen["origin"] == (100.0, 20.0)
+    assert said["export"] == [900.0, 260.0]
+    assert model.pieces[0].quad[0].tolist() == [-100.0, 0.0]
+
+
 def test_renaming_a_collage_moves_its_file_and_keeps_its_entity(client):
     cid = _case(client)
     photo = _upload(client, cid, "roof.png")

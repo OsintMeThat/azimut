@@ -222,7 +222,7 @@ def build_full_case(
                  "w": 80, "h": 60, "quad": [[0, 0], [80, 0], [80, 60], [0, 60]]},
                 {"id": "nd_2", "save": {"path": full.piece, "time": None, "ops": []},
                  "w": 60, "h": 60, "quad": [[90, 0], [150, 0], [150, 60], [90, 60]]},
-            ]},
+            ], "clip": {"x": 0, "y": 0, "w": 150, "h": 50}},
         },
     )
     assert layout_doc.status_code == 200, layout_doc.text

@@ -1264,6 +1264,50 @@ def _perspective_coeffs(dst_quad: list[list[float]], src_quad: list[list[float]]
     return _solve_linear(matrix, rhs)
 
 
+# Pixels of room kept round a piece's quad when it is warped alone: the resampling of
+# its edge reaches a pixel or so past it.
+_PIECE_MARGIN = 2
+
+
+def _warp_piece(
+    case: Case, node: dict[str, Any], width: int, height: int
+) -> tuple[Image.Image | None, tuple[int, int], str, float | None]:
+    """One node's source warped into its quad, on the part of a ``width`` × ``height``
+    canvas the quad covers: the pixels with their footprint as alpha (RGBA), where they
+    sit on the canvas (left, top), the file and the instant it was cut at (None for a
+    picture). No pixels when the quad lies off the canvas.
+
+    Only the quad's bounds are drawn, offset by whole pixels, so every pixel is the one
+    the whole canvas would have drawn there, at a fraction of the cost."""
+    spec = node.get("src") or {}
+    rel = spec.get("path")
+    if not rel:
+        raise ValueError("collage node is missing a source path")
+    moment = spec.get("time")
+    time = float(moment) if isinstance(moment, (int, float)) and not isinstance(moment, bool) else None
+    img = _source_image(case, rel, spec.get("time"), spec.get("ops"))
+    quad = [[float(x), float(y)] for x, y in node["quad"]]
+    xs, ys = [x for x, _ in quad], [y for _, y in quad]
+    if not all(math.isfinite(v) for v in (*xs, *ys)):
+        raise ValueError("a collage piece's corners must be numbers")
+    left, top = max(0, math.floor(min(xs)) - _PIECE_MARGIN), max(0, math.floor(min(ys)) - _PIECE_MARGIN)
+    right, bottom = min(width, math.ceil(max(xs)) + _PIECE_MARGIN), min(height, math.ceil(max(ys)) + _PIECE_MARGIN)
+    if right <= left or bottom <= top:
+        return None, (0, 0), rel, time
+    # A piece remapped onto a panorama's cylinder arrives with its footprint in
+    # the alpha channel — paint through that rather than over it, or its
+    # transparent corners land as black wedges on the neighbour underneath.
+    footprint = img.getchannel("A") if img.mode == "RGBA" else Image.new("L", img.size, 255)
+    img = img.convert("RGB")
+    w, h = img.size
+    src_corners = [[0.0, 0.0], [float(w), 0.0], [float(w), float(h)], [0.0, float(h)]]
+    coeffs = _perspective_coeffs([[x - left, y - top] for x, y in quad], src_corners)
+    size = (right - left, bottom - top)
+    warped = img.transform(size, Image.Transform.PERSPECTIVE, coeffs, Image.Resampling.BICUBIC)
+    warped.putalpha(footprint.transform(size, Image.Transform.PERSPECTIVE, coeffs, Image.Resampling.BILINEAR))
+    return warped, (left, top), rel, time
+
+
 def _compose_canvas(
     case: Case,
     *,
@@ -1273,7 +1317,10 @@ def _compose_canvas(
     background: str | None,
 ) -> tuple[Image.Image, list[str], list[float | None]]:
     """Warp each node's source into its quad and paint onto one canvas: the canvas, each
-    piece's file and the instant it was cut at (None for a picture)."""
+    piece's file and the instant it was cut at (None for a picture).
+
+    A transparent canvas lays each piece over the ones before it as alpha does, so a
+    soft edge over nothing keeps its colour rather than darkening with its cover."""
     if not nodes:
         raise ValueError("collage needs at least one image")
     width = max(16, min(int(width), 8192))
@@ -1287,30 +1334,14 @@ def _compose_canvas(
     sources: list[str] = []
     times: list[float | None] = []
     for node in nodes:
-        spec = node.get("src") or {}
-        rel = spec.get("path")
-        if not rel:
-            raise ValueError("collage node is missing a source path")
-        img = _source_image(case, rel, spec.get("time"), spec.get("ops"))
-        # A piece remapped onto a panorama's cylinder arrives with its footprint in
-        # the alpha channel — paint through that rather than over it, or its
-        # transparent corners land as black wedges on the neighbour underneath.
-        footprint = img.getchannel("A") if img.mode == "RGBA" else Image.new("L", img.size, 255)
-        img = img.convert("RGB")
-        w, h = img.size
-        src_corners = [[0.0, 0.0], [float(w), 0.0], [float(w), float(h)], [0.0, float(h)]]
-        quad = [[float(x), float(y)] for x, y in node["quad"]]
-        coeffs = _perspective_coeffs(quad, src_corners)
-        warped = img.transform(
-            (width, height), Image.Transform.PERSPECTIVE, coeffs, Image.Resampling.BICUBIC
-        )
-        mask = footprint.transform(
-            (width, height), Image.Transform.PERSPECTIVE, coeffs, Image.Resampling.BILINEAR
-        )
-        canvas.paste(warped, (0, 0), mask)
+        piece, at, rel, time = _warp_piece(case, node, width, height)
+        if piece is not None:
+            if background:
+                canvas.paste(piece.convert("RGB"), at, piece.getchannel("A"))
+            else:
+                canvas.alpha_composite(piece, at)
         sources.append(rel)
-        moment = spec.get("time")
-        times.append(float(moment) if isinstance(moment, (int, float)) and not isinstance(moment, bool) else None)
+        times.append(time)
     return canvas, sources, times
 
 
@@ -1346,6 +1377,17 @@ def _bent(canvas: Image.Image, shifts: Sequence[float]) -> Image.Image:
     return Image.fromarray(out, "RGBA")
 
 
+def _cut_box(clip: Sequence[float], width: int, height: int) -> tuple[int, int, int, int]:
+    """The canvas's pixels a cut ``(x, y, w, h)`` keeps, as ``(left, top, right, bottom)``."""
+    x, y, w, h = (float(v) for v in clip)
+    if not all(math.isfinite(v) for v in (x, y, w, h)) or w <= 0 or h <= 0:
+        raise ValueError("a cut is a frame with a size")
+    box = (max(0, round(x)), max(0, round(y)), min(width, round(x + w)), min(height, round(y + h)))
+    if box[2] <= box[0] or box[3] <= box[1]:
+        raise ValueError("the cut leaves nothing of the collage")
+    return box
+
+
 def compose_perspective(
     case: Case,
     *,
@@ -1356,7 +1398,7 @@ def compose_perspective(
     label: str | None = None,
     folder: str | None = None,
     notes: str | None = None,
-    bend: Sequence[float] | None = None,
+    clip: Sequence[float] | None = None,
     collage: str | None = None,
 ) -> dict[str, Any]:
     """Composite frames and case images, each warped into a 4-point quad, onto a canvas.
@@ -1366,37 +1408,94 @@ def compose_perspective(
     pixels (top-left, top-right, bottom-right, bottom-left). A falsy ``background``
     yields a transparent (RGBA) canvas so the saved PNG carries only the pieces.
 
-    ``bend``, one shift a column in pixels, bends the whole composite as one
-    picture (Collage → Straighten): each column moved down by its own, the
-    transparent canvas then trimmed to what it holds, the box kept (``box``:
-    left, top, right, bottom on the bent canvas).
+    ``clip``, ``(x, y, w, h)`` in canvas pixels, is the collage's cut (Collage →
+    Cut): the picture is cropped to it, the pieces left whole in the collage.
     """
     canvas, sources, times = _compose_canvas(
         case, width=width, height=height, nodes=nodes, background=background
     )
-    box = None
-    if bend is not None:
-        if background:
-            raise ValueError("a collage is bent on a transparent canvas")
-        if len(bend) != canvas.width or not all(math.isfinite(s) for s in bend):
-            raise ValueError("a bend needs one shift for every column")
-        canvas = _bent(canvas, bend)
-        box = canvas.getchannel("A").getbbox()
-        if box is None:
-            raise ValueError("the bend left nothing on the canvas")
-        canvas = canvas.crop(box)
-    extra = {"straightened": True} if bend is not None else {}
+    if clip is not None:
+        canvas = canvas.crop(_cut_box(clip, canvas.width, canvas.height))
     # each piece's instant beside its file: a collage cut from one video is read back to
     # its scene by them (`engine/scenes.py`)
-    source = _derivation("", None, op="collage", sources=sources, times=times, perspective=True, **extra)
+    source = _derivation("", None, op="collage", sources=sources, times=times, perspective=True)
     name = f"{_name_stem(label, 'collage')}.png"
     # The saved collage it was exported from, so its picture can open it again.
     made_by = {"collage": collage} if collage else None
     result = media_engine.import_image(case, canvas, name, source, by="inspect", extra_attrs=made_by)
     _apply_meta(case, result, label=label, folder=folder, notes=notes)
-    if box is not None:
-        result["box"] = list(box)
     return result
+
+
+def bend_piece(
+    case: Case, node: dict[str, Any], width: int, height: int, shifts: Sequence[float]
+) -> tuple[Image.Image, tuple[int, int, int, int], str, float | None]:
+    """One piece of a collage bent as the whole collage would bend (Collage → Straighten).
+
+    The piece is drawn on the columns of the ``width`` × ``height`` canvas it covers,
+    the canvas's whole height, and each column moved by its own of ``shifts``: the very
+    pixels it shows on the canvas the whole collage is bent on. Returns the bent
+    picture trimmed to what it holds, its box on that canvas (left, top, right,
+    bottom), its file and its instant.
+    """
+    piece, (left, top), rel, time = _warp_piece(case, node, width, height)
+    if piece is None:
+        raise ValueError("a piece lies off the canvas it is bent on")
+    strip = Image.new("RGBA", (piece.width, height), (0, 0, 0, 0))
+    strip.paste(piece, (0, top))
+    bent = _bent(strip, shifts[left : left + piece.width])
+    box = bent.getchannel("A").getbbox()
+    if box is None:
+        raise ValueError("the bend left nothing of a piece")
+    return bent.crop(box), (box[0] + left, box[1], box[2] + left, box[3]), rel, time
+
+
+def straighten_pieces(
+    case: Case,
+    *,
+    width: int,
+    height: int,
+    nodes: list[dict[str, Any]],
+    bend: Sequence[float],
+    folder: str | None = None,
+    discard: Callable[[str], Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Collage → Straighten: every piece bent by the same column shifts, one picture each.
+
+    ``nodes`` are the collage's pieces, ``{"src", "quad", "label"?}``, quads in the
+    pixels of the canvas the bend needs (``width`` × ``height``, room for the bend
+    included) and ``bend`` one downward shift for each of its columns. Each piece is
+    bent as :func:`bend_piece` says and filed under its ``label``, its record naming
+    the file and instant it was bent from, so a collage of one video's frames still
+    reads back to the video. Laid at their boxes in the same order, the pictures
+    compose the collage as bending it whole would have, seams included.
+
+    Returns each piece as filed, in order, with its ``box`` on that canvas. All or
+    none: a piece failing to bend or to file hands each picture filed before it to
+    ``discard``, by its path, then raises.
+    """
+    if len(bend) != width or not all(math.isfinite(s) for s in bend):
+        raise ValueError("a bend needs one shift for every column")
+    filed: list[dict[str, Any]] = []
+    try:
+        for node in nodes:
+            picture, box, rel, time = bend_piece(case, node, width, height, bend)
+            label = node.get("label")
+            source = _derivation(
+                "", None, op="collage", sources=[rel], times=[time], perspective=True, straightened=True
+            )
+            result = media_engine.import_image(
+                case, picture, f"{_name_stem(label, 'straightened')}.png", source, by="inspect"
+            )
+            _apply_meta(case, result, label=label, folder=folder)
+            result["box"] = list(box)
+            filed.append(result)
+    except Exception:
+        for result in filed:
+            if not result.get("duplicate") and discard is not None:
+                discard(result["item"]["path"])
+        raise
+    return filed
 
 
 STITCH_MODES = ("planar", *stitch.WARPS)
@@ -1433,7 +1532,9 @@ def solve_collage_layout(
 
     ``exclude`` holds each piece's painted strokes or None, in the picture its
     recipe renders (:func:`azimut.engine.stitch.exclusion_mask`); each placed node
-    answers with that picture's ``size``, ``[w, h]``.
+    answers with that picture's ``size``, ``[w, h]``. ``why`` says, for each piece in
+    ``dropped``, why it was left out: ``no-overlap``, ``no-detail`` or ``off-canvas``
+    (:data:`azimut.engine.stitch.LEFT_NO_OVERLAP` and the two beside it).
     """
     if mode not in STITCH_MODES:
         raise ValueError(f"unknown panorama mode {mode!r}")
@@ -1468,6 +1569,7 @@ def solve_collage_layout(
             for i, q in sorted(solved["quads"].items())
         ],
         "dropped": solved["dropped"],
+        "why": solved["why"],
         "canvas": solved["canvas"],
     }
 

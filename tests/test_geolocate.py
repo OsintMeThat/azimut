@@ -600,13 +600,23 @@ def test_a_picture_is_never_marked_over_a_moment(client):
 def test_a_straightened_collage_of_one_video_keeps_its_video(client, tmp_path):
     cid = _case(client)
     video = _video(client, cid, tmp_path)
-    pieces = [(video, 1.0), (video, 2.5)]
-    # Straighten files the bent picture of the pieces, then the collage holds it alone
-    bent = _export(client, cid, None, pieces, label="Pano straightened")
-    name = _collage(client, cid, "Pano", [(bent, None)])
+    times = [1.0, 2.5, 3.2]
+    # Straighten bends each frame by the line and files one picture each, which take the frames' places
+    res = client.post(f"/api/cases/{cid}/inspect/straighten", json={
+        "width": 200, "height": 80, "bend": [6 * ((c - 100) / 100) ** 2 - 3 for c in range(200)],
+        "nodes": [
+            {"src": {"path": video, "time": t, "ops": []}, "quad": [[x, 12], [x + 64, 12], [x + 64, 60], [x, 60]],
+             "label": f"Pano straightened {i}"}
+            for i, (t, x) in enumerate(zip(times, (0, 60, 120)))
+        ],
+    })
+    assert res.status_code == 200, res.text
+    bent = [piece["item"]["path"] for piece in res.json()["pieces"]]
+    assert len(set(bent)) == 3
+    name = _collage(client, cid, "Pano", [(path, None) for path in bent])
     [row] = client.get(f"/api/cases/{cid}/scenes", params={"video": video}).json()["collages"]
-    assert (row["collage"], row["times"]) == (name, [1.0, 2.5])
-    picture = _export(client, cid, name, [(bent, None)], label="Pano final")
+    assert (row["collage"], row["times"]) == (name, times)
+    picture = _export(client, cid, name, [(path, None) for path in bent], label="Pano final")
     from azimut.engine import scenes as scenes_engine
 
     assert scenes_engine.frame_origins(Case.open(cid), [picture]) == {picture: (video, 1.0)}

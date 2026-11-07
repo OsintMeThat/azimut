@@ -6,7 +6,7 @@ import {
   buildFrameOps, hasVideoEdits, normalizeRightAngleRotation, rotationOps,
   sourceStem, timecode, frameSaveName, frameSaveNames, saveNameOf,
   newCollage, clampCollageDim, stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
-  exportFrame, COLLAGE_MAX_EXPORT_PIXELS, clockTime, collageVideo, mediaOrigin, quadUnitAt, quadMapUnit, fitView,
+  exportFrame, cutBounds, COLLAGE_MAX_EXPORT_PIXELS, clockTime, collageVideo, mediaOrigin, quadUnitAt, quadMapUnit, fitView,
   COLLAGE_DEFAULT_SIZE, ADJUST_ORDER, ADJUST_PRESETS, activePreset, buildOps, needsRender,
   presetValues, previewOps, previewStyle, sliderTravel,
 } from './inspect.js';
@@ -618,6 +618,21 @@ describe('exportFrame', () => {
     const frame = exportFrame([{ w: 100, h: 100, quad: rect(0, 0, 10000, 500) }]);
     expect(frame.width).toBe(COLLAGE_MAX_DIM);
     expect(frame.scale).toBeLessThan(1);
+  });
+
+  it('keeps what lies in a cut, at the same sharpness, and nothing when the cut holds no piece', () => {
+    const pieces = [{ w: 1920, h: 1080, quad: rect(100, 50, 800, 450) }];
+    // the ground cut off and the frame running past the left: the picture is the pieces within it
+    const frame = exportFrame(pieces, { x: 0, y: 0, w: 600, h: 350 });
+    expect(frame).toMatchObject({ minX: 100, minY: 50, scale: 2.4, width: 1200, height: 720 });
+    expect(exportFrame(pieces, { x: 1000, y: 0, w: 50, h: 50 })).toBeNull();
+    expect(cutBounds(pieces, { x: 0, y: 0, w: 600, h: 350 })).toEqual({ minX: 100, minY: 50, width: 500, height: 300 });
+  });
+
+  it('lifts the cap a cut makes room for', () => {
+    const wide = [{ w: 20000, h: 2000, quad: rect(0, 0, 2000, 200) }];
+    expect(exportFrame(wide).capped).toBe(true);
+    expect(exportFrame(wide, { x: 0, y: 0, w: 500, h: 200 })).toMatchObject({ width: 5000, scale: 10, capped: false });
   });
 });
 

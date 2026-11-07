@@ -3,6 +3,8 @@
   import { pinholeOps, stitchCanvas } from '../../lib/inspect.js';
   import { BRUSH_MAX, BRUSH_MIN, excludeRequest } from '../../lib/excludeBrush.js';
   import { LEVEL_MIN_POINTS } from '../../lib/straighten.js';
+  import { cutOf, cutStart } from '../../lib/collageCut.js';
+  import { stitchedWords } from '../../lib/leftOut.js';
   import { api } from '../../lib/api.js';
   import { caseState, toast } from '../../lib/state.svelte.js';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
@@ -10,17 +12,18 @@
 
   // The bar over the canvas, for what acts on the whole collage: Auto-stitch places
   // the pieces by the imagery they share, Ignore areas paints what it must not match
-  // on, Straighten bends the collage along a level line, and Fit shows the pieces
-  // whole. The piece in hand has its own block in the panel.
+  // on, Straighten bends the collage along a level line, Cut frames the picture it
+  // saves, and Fit shows the pieces whole. The piece in hand has its own block in the panel.
   // `level` is the line the canvas draws to straighten the collage by, `straighten` what
   // bends the collage along it; `view` is the canvas's zoom and pan, `fit` what fits it
   // to the pieces and `fitted` whether it does. `brush` is the canvas's brush, `{ on,
-  // size, erase }`; `unstitched` the pieces the last stitch found no overlap for. `hold`
-  // makes the stitch one undo: it answers the release.
+  // size, erase }`; `unstitched` the pieces the last stitch left where they were and why,
+  // `{ id, why, mode }`. `cut` is the frame being drawn over the collage, `{ editing,
+  // frame }` (lib/collageCut.js). `hold` makes the stitch one undo: it answers the release.
   let {
     collage: active, selectedIds = $bindable([]), renderPiece, level = $bindable(null), straighten = null,
     view = $bindable(), brush = $bindable(null), unstitched = $bindable([]), hold = null, fit = null,
-    fitted = false,
+    fitted = false, cut = $bindable(null),
   } = $props();
 
   // ---- auto-stitch ----------------------------------------------------------
@@ -100,22 +103,16 @@
     await Promise.all(Array.from({ length: Math.min(at, queue.length) }, next));
   }
 
-  /** What the message says of a stitch: how many it placed, and the pieces it outlined. */
-  function stitchedWords(placed, left) {
-    if (!left) return `Stitched ${placed} pieces`;
-    if (!placed) return 'No overlap found between the pieces, so none moved';
-    const which = left === 1 ? 'the outlined piece' : `the ${left} outlined pieces`;
-    return `Stitched ${placed}. No overlap found for ${which}, left where ${left === 1 ? 'it was' : 'they were'}`;
-  }
-
   async function autoStitch() {
     if (few) return;
     stitching = true;
+    if (cut) cut.editing = false;
     // the whole stitch is one undo, however many steps its pieces come back in
     const release = hold?.();
     try {
       const nodes = active.nodes;
-      const before = { nodes: nodes.map(snapshot), width: active.width, height: active.height };
+      const asked = mode;
+      const before = { nodes: nodes.map(snapshot), width: active.width, height: active.height, clip: active.clip ?? null };
       const exclude = excludeRequest(nodes);
       const res = await api.post(`/api/cases/${caseState.current.id}/inspect/auto-stitch`, {
         width: active.width,
@@ -131,6 +128,8 @@
       // is the pieces' bounds, so a canvas left too small *is* the lost detail.
       // Pieces the solver could not place keep their place as it grows.
       applyCanvas(res.canvas, new Set(res.nodes.map((n) => n.index)));
+      // a cut frames a layout, and the stitch lays the pieces out anew
+      if (res.nodes.length) active.clip = null;
       // Every piece goes to its place at once; the ones a panorama warp reshapes are
       // drawn again three at a time, as a collage's pieces are when it opens.
       const redraw = [];
@@ -145,14 +144,16 @@
       }
       await inTurn(redraw, 3, ([node, ops]) => renderPiece(node, ops));
       undoSnap = before;
-      // the pieces it could not place are outlined and in hand, for the arrows or a drag
-      const left = res.dropped.map((i) => nodes[i]?.id).filter(Boolean);
+      // the pieces it could not place are outlined, saying why, and in hand for the arrows or a drag
+      const left = res.dropped
+        .map((i, k) => ({ id: nodes[i]?.id, why: res.why?.[k] ?? 'no-overlap', mode: asked }))
+        .filter((piece) => piece.id);
       unstitched = left;
-      selectedIds = left;
+      selectedIds = left.map((piece) => piece.id);
       fit?.();
       // The undo rides on the message, and stays in the arrow's menu after it goes.
       const undo = { label: 'Undo', onClick: undoStitch };
-      toast(stitchedWords(res.nodes.length, left.length), left.length ? 'warn' : 'ok', null, undo);
+      toast(stitchedWords(res.nodes.length, left.map((piece) => piece.why), asked), left.length ? 'warn' : 'ok', null, undo);
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
@@ -169,9 +170,10 @@
       const node = active.nodes.find((n) => n.id === snap.id);
       if (node) Object.assign(node, snap);
     }
-    // The canvas moved with the stitch, so it comes back with it.
+    // The canvas moved with the stitch, so it comes back with it, and the cut it held.
     active.width = undoSnap.width;
     active.height = undoSnap.height;
+    active.clip = undoSnap.clip;
     undoSnap = null;
   }
 
@@ -179,17 +181,38 @@
   onDestroy(() => (undoSnap = null));
 
   // ---- straighten -------------------------------------------------------------
-  // A line the analyst says is level in the world bends the whole collage flat along
-  // it as one picture (lib/straighten.js, the Collage tool's `straighten`): every
-  // column of pixels moves alike, so each frame bends with the line and the seams a
-  // stitch matched stay matched. Find then reads the straightened picture as one.
+  // A line the analyst says is level in the world bends the collage flat along it
+  // (lib/straighten.js, the Collage tool's `straighten`): every piece is bent by the
+  // same column shifts, so each frame bends with the line and the seams a stitch
+  // matched stay matched. Find then reads the straightened collage's picture as one.
   let bending = $state(false);
   function toggleLevel() {
     level.drawing = !level.drawing;
     if (level.drawing) {
       selectedIds = [];
       if (brush) brush.on = false;
+      if (cut) cut.editing = false;
     }
+  }
+
+  // ---- cut ----------------------------------------------------------------------
+  // One frame over the whole collage, like a mat (lib/collageCut.js): the saved picture
+  // keeps what lies inside it, and every piece stays whole on the canvas. The canvas
+  // draws the frame and its handles while it is edited.
+  function startCut() {
+    cut.frame = cutStart(active.nodes, active.clip);
+    cut.editing = !!cut.frame;
+    selectedIds = [];
+    if (brush) brush.on = false;
+    if (level) level.drawing = false;
+  }
+  function applyCut() {
+    active.clip = cutOf(cut.frame, active.nodes);
+    cut.editing = false;
+  }
+  function clearCut() {
+    active.clip = null;
+    cut.editing = false;
   }
 
   // ---- the areas a stitch must not match on ----------------------------------
@@ -201,6 +224,7 @@
   function toggleBrush() {
     brush.on = !brush.on;
     if (brush.on && level) level.drawing = false;
+    if (brush.on && cut) cut.editing = false;
     if (!brush.on) brush.erase = false;
   }
   function clearPiece() {
@@ -291,7 +315,7 @@
     </div>
   {/if}
 
-  {#if level && !brush?.on}
+  {#if level && !brush?.on && !cut?.editing}
     <span class="sep" aria-hidden="true"></span>
     <div class="straighten" role="group" aria-label="Straighten" data-guide="collage.straighten">
       <button
@@ -309,7 +333,7 @@
         class:btn-primary={lineReady}
         disabled={!lineReady || bending || !straighten}
         onclick={bend}
-        title={lineReady ? 'Bend the whole collage as one picture so the line lies flat' : 'Click two points or more along the line first'}
+        title={lineReady ? 'Bend every piece alike so the line lies flat' : 'Click two points or more along the line first'}
       >
         {bending ? 'Straightening…' : 'Straighten'}
       </button>
@@ -318,6 +342,32 @@
       {/if}
       {#if active?.straightened}
         <span class="done" title="Bent flat along a level line; Ctrl+Z puts the pieces back"><Icon name="check" size={12} /> straightened</span>
+      {/if}
+    </div>
+  {/if}
+
+  {#if cut && !brush?.on}
+    <span class="sep" aria-hidden="true"></span>
+    <div class="cut" role="group" aria-label="Cut" data-guide="collage.cut">
+      {#if cut.editing}
+        <button class="btn btn-sm btn-primary" onclick={applyCut} title="Keep this frame for the saved picture (Enter)">
+          <Icon name="check" size={13} /> Apply
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick={() => (cut.editing = false)} title="Leave the cut as it was (Esc)">Cancel</button>
+      {:else}
+        <button
+          class="btn btn-sm frame"
+          class:on={!!active?.clip}
+          aria-pressed={!!active?.clip}
+          disabled={!active?.nodes.length}
+          onclick={startCut}
+          title={active?.clip ? 'Move the frame the saved picture is cut to' : 'Frame what the saved picture keeps, every piece staying whole'}
+        >
+          <Icon name="scissors" size={13} /> Cut
+        </button>
+      {/if}
+      {#if active?.clip}
+        <button class="btn btn-ghost btn-sm" onclick={clearCut} title="Save the whole collage again">Clear</button>
       {/if}
     </div>
   {/if}
@@ -367,7 +417,8 @@
     flex-wrap: wrap;
   }
   .straighten,
-  .brush {
+  .brush,
+  .cut {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -443,6 +494,11 @@
   :global([data-theme='light']) .draw.on {
     border-color: #b58f00;
     color: #8a6d00;
+  }
+  /* Cut and kept: the frame's own colour, as the canvas draws it. */
+  .frame.on {
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .done {
     display: inline-flex;

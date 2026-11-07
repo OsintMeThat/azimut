@@ -7,6 +7,7 @@ vi.mock('../../lib/state.svelte.js', () => ({ uiState }));
 
 const { default: CollageCanvas } = await import('./CollageCanvas.svelte');
 const { joinOverlays } = await import('../../lib/overlayStack.js');
+const { fitView } = await import('../../lib/inspect.js');
 
 const rect = [[0, 0], [80, 0], [80, 60], [0, 60]];
 const node = (id) => ({ id, save: { path: `media/${id}.png`, time: null, ops: [] }, quad: rect, w: 80, h: 60, url: `blob:${id}` });
@@ -17,8 +18,8 @@ let collage;
 
 let props;
 
-function show(selectedIds, level = null, view = undefined, more = {}) {
-  const shown = $state({ width: 1600, height: 800, nodes: [node('nd_1'), node('nd_2')] });
+function show(selectedIds, level = null, view = undefined, { collage: extra = {}, ...more } = {}) {
+  const shown = $state({ width: 1600, height: 800, nodes: [node('nd_1'), node('nd_2')], clip: null, ...extra });
   collage = shown;
   target = document.createElement('div');
   document.body.append(target);
@@ -264,14 +265,137 @@ describe('the arrows', () => {
   });
 
   it('take the outline off a piece the stitch left out once it is moved', () => {
-    show(['nd_2'], null, undefined, { unstitched: ['nd_2'] });
+    show(['nd_2'], null, undefined, { unstitched: [{ id: 'nd_2', why: 'no-overlap', mode: 'cylindrical' }] });
     const outlined = () => [...target.querySelectorAll('img.node.unstitched')].map((img) => img.title);
-    expect(outlined()).toEqual(['Auto-stitch found no overlap for this piece']);
+    expect(outlined()).toEqual(['Auto-stitch left it here. No overlap']);
     expect(target.querySelector('[data-testid="piece-left-out"]').textContent.trim()).toBe('No overlap');
     press('ArrowRight');
     expect(props.unstitched).toEqual([]);
     expect(outlined()).toEqual([]);
     expect(target.querySelector('[data-testid="piece-left-out"]')).toBeNull();
+  });
+});
+
+describe('a piece the stitch left out', () => {
+  const chips = () => [...target.querySelectorAll('[data-testid="piece-left-out"]')].map((chip) => chip.textContent.trim());
+
+  it('says why on the piece itself, above every other piece', () => {
+    show([], null, undefined, { unstitched: [
+      { id: 'nd_1', why: 'no-detail', mode: 'cylindrical' },
+      { id: 'nd_2', why: 'off-canvas', mode: 'planar' },
+    ] });
+    expect(chips()).toEqual(['Nothing to match: blank or painted out', 'Fell off the canvas: try Cylindrical']);
+    expect(target.querySelector('img.node').title).toBe('Auto-stitch left it here. Nothing to match: blank or painted out');
+    // drawn over the pieces' layer, so a piece laid on top never hides it
+    expect(target.querySelector('.pieces [data-testid="piece-left-out"]')).toBeNull();
+  });
+});
+
+describe('the cut', () => {
+  const frame = () => ({ ...props.cut.frame });
+
+  it('draws the frame with its edges and corners, says what to do, and dims what lies outside', () => {
+    show([], null, undefined, { cut: { editing: true, frame: { x: 0, y: 0, w: 80, h: 60 } } });
+    expect(target.querySelector('[data-testid="cut-frame"]')).not.toBeNull();
+    expect([...target.querySelectorAll('[data-handle]')].map((h) => h.dataset.handle)).toEqual(['n', 'e', 's', 'w', 'nw', 'ne', 'se', 'sw']);
+    expect(target.querySelector('.cut-cue').textContent).toContain('frame what the saved picture keeps');
+    expect(target.querySelector('.wrap').classList.contains('cutting')).toBe(true);
+    // the pieces whole while it is drawn
+    expect(target.querySelector('.pieces.cut')).toBeNull();
+  });
+
+  it('moves the edge in hand, snapping to a piece, never past the other edge, and the whole frame from inside', () => {
+    show([], null, undefined, { cut: { editing: true, frame: { x: 0, y: 0, w: 80, h: 60 } } });
+    pointer(target.querySelector('[data-handle="s"]'), 'pointerdown', 40, 60);
+    pointer(window, 'pointermove', 40, 38);
+    expect(frame()).toEqual({ x: 0, y: 0, w: 80, h: 38 });
+    // near the pieces' bottom it snaps to it, and Alt lets it go
+    pointer(window, 'pointermove', 40, 57);
+    expect(frame().h).toBe(60);
+    pointer(window, 'pointermove', 40, 57, { altKey: true });
+    expect(frame().h).toBe(57);
+    pointer(window, 'pointermove', 40, -200);
+    expect(frame().h).toBe(24);
+    pointer(window, 'pointerup', 40, -200);
+
+    pointer(target.querySelector('.cut-inside'), 'pointerdown', 20, 10);
+    pointer(window, 'pointermove', 31, 25);
+    expect(frame()).toEqual({ x: 11, y: 15, w: 80, h: 24 });
+    // its top edge near the pieces' top, the whole frame snaps there
+    pointer(window, 'pointermove', 31, 14);
+    pointer(window, 'pointerup', 31, 14);
+    expect(frame()).toEqual({ x: 11, y: 0, w: 80, h: 24 });
+  });
+
+  it('keeps the frame on Enter and leaves the cut as it was on Esc', () => {
+    show([], null, undefined, { cut: { editing: true, frame: { x: 0, y: 0, w: 80, h: 40 } } });
+    press('Escape');
+    expect(props.cut.editing).toBe(false);
+    expect(collage.clip).toBeNull();
+
+    props.cut.editing = true;
+    flushSync();
+    press('Enter');
+    expect(collage.clip).toEqual({ x: 0, y: 0, w: 80, h: 40 });
+    expect(props.cut.editing).toBe(false);
+  });
+
+  it('pans from outside the frame, as from the background', () => {
+    const view = $state({ zoom: 1, x: 0, y: 0 });
+    show([], null, view, { cut: { editing: true, frame: { x: 0, y: 0, w: 80, h: 40 } } });
+    pointer(target.querySelector('.cut-layer'), 'pointerdown', 300, 300);
+    pointer(window, 'pointermove', 320, 290);
+    pointer(window, 'pointerup', 320, 290);
+    expect({ ...view }).toEqual({ zoom: 1, x: 20, y: -10 });
+    expect(frame()).toEqual({ x: 0, y: 0, w: 80, h: 40 });
+  });
+
+  it('draws the pieces cut to the frame once kept, with a hairline round what the picture holds', () => {
+    show([], null, undefined, { collage: { clip: { x: 10, y: -5, w: 50, h: 40 } }, cut: { editing: false, frame: null } });
+    const layer = target.querySelector('.pieces.cut');
+    expect([layer.style.left, layer.style.top, layer.style.width, layer.style.height]).toEqual(['10px', '-5px', '50px', '40px']);
+    expect(target.querySelector('.pieces-in').style.transform).toBe('translate(-10px, 5px)');
+    expect(layer.querySelectorAll('img.node')).toHaveLength(2);
+    const mark = target.querySelector('.cut-mark');
+    expect([mark.style.left, mark.style.top, mark.style.width, mark.style.height]).toEqual(['10px', '0px', '50px', '35px']);
+  });
+});
+
+describe('opening a collage', () => {
+  const pane = (width, height) => {
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => width });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => height });
+  };
+  afterEach(() => {
+    delete HTMLElement.prototype.clientWidth;
+    delete HTMLElement.prototype.clientHeight;
+  });
+
+  it('frames its pieces, as Fit does, once the pane has its size', () => {
+    pane(900, 500);
+    const view = $state({ zoom: 1, x: 0, y: 0 });
+    show([], null, view);
+    const fitted = fitView([rect], { width: 900, height: 500 }, { width: 1600, height: 800 });
+    expect(view.zoom).toBeCloseTo(fitted.zoom);
+    expect([view.x, view.y]).toEqual([fitted.x, fitted.y]);
+    expect(props.fitted).toBe(true);
+  });
+
+  it('frames a cut collage on what its picture holds', () => {
+    pane(900, 500);
+    const view = $state({ zoom: 1, x: 0, y: 0 });
+    show([], null, view, { collage: { clip: { x: 0, y: 0, w: 40, h: 30 } } });
+    const fitted = fitView([[[0, 0], [40, 30]]], { width: 900, height: 500 }, { width: 1600, height: 800 });
+    expect(view.zoom).toBeCloseTo(fitted.zoom);
+  });
+
+  it('leaves a new, empty one on the whole canvas, and its first piece too', () => {
+    pane(900, 500);
+    const view = $state({ zoom: 1, x: 0, y: 0 });
+    show([], null, view, { collage: { nodes: [] } });
+    collage.nodes.push(node('nd_1'));
+    flushSync();
+    expect({ ...view }).toEqual({ zoom: 1, x: 0, y: 0 });
   });
 });
 

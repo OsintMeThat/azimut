@@ -576,11 +576,32 @@ def canvas_for_layout(
 
 NO_OVERLAP = "auto-stitch found no overlap between these pieces. Do they show the same scene?"
 
+#: Why a piece was left where it was, one word each, as the Collage tool says it: its
+#: detail matched no other piece; it had too little to match at all, being blank, flat
+#: or painted out; or it matched, and its projection folded, ran off to infinity or grew
+#: past the bound a projection may grow by.
+LEFT_NO_OVERLAP = "no-overlap"
+LEFT_NO_DETAIL = "no-detail"
+LEFT_OFF_CANVAS = "off-canvas"
+
+
+def _why_left_out(dropped: list[int], points: list[int], off: set[int]) -> list[str]:
+    """Why each piece of ``sorted(dropped)`` was left out. ``points`` is how many points
+    each piece had left to match with, once its painted areas and whatever sat still
+    across the set were taken out; fewer than a pair needs to be believed
+    (:data:`MIN_INLIERS`) is nothing to match. ``off`` are the pieces that matched but
+    projected badly."""
+    return [
+        LEFT_OFF_CANVAS if i in off else LEFT_NO_DETAIL if points[i] < MIN_INLIERS else LEFT_NO_OVERLAP
+        for i in sorted(dropped)
+    ]
+
 
 def _planar_place(cv2, images: list[Image.Image], tried: dict[tuple[int, int], tuple[Any, int]]):
-    """Chain the matched pairs from the anchor: ``(anchor, quads, dropped)``, or None
-    when no pair matched. Edges go in pair order, so every pair tried gives exactly
-    the layout the all-pairs solver always gave."""
+    """Chain the matched pairs from the anchor: ``(anchor, quads, dropped, off)``, or None
+    when no pair matched, ``off`` the dropped pieces whose projection failed. Edges go
+    in pair order, so every pair tried gives exactly the layout the all-pairs solver
+    always gave."""
     edges: dict[tuple[int, int], Any] = {}
     weights: dict[tuple[int, int], int] = {}
     for pair in sorted(tried):
@@ -594,6 +615,7 @@ def _planar_place(cv2, images: list[Image.Image], tried: dict[tuple[int, int], t
     anchor, chained = _anchor_and_chain(edges, weights, len(images))
     solved: dict[int, Quad] = {}
     dropped: list[int] = []
+    off: set[int] = set()
     for idx, img in enumerate(images):
         H = chained.get(idx)
         if H is None:
@@ -602,9 +624,10 @@ def _planar_place(cv2, images: list[Image.Image], tried: dict[tuple[int, int], t
         quad = _project_corners(cv2, H, img.size)
         if not quad_ok(quad):
             dropped.append(idx)
+            off.add(idx)
             continue
         solved[idx] = quad
-    return anchor, solved, dropped
+    return anchor, solved, dropped, off
 
 
 def solve_layout(
@@ -617,10 +640,12 @@ def solve_layout(
 ) -> dict[str, Any]:
     """Solve collage quads for ``images`` (canvas pixels), reporting what failed.
 
-    Returns ``{"quads": {index: quad}, "dropped": [...], "anchor": index,
+    Returns ``{"quads": {index: quad}, "dropped": [...], "why": [...], "anchor": index,
     "canvas": {"width", "height"}}``. ``dropped`` holds images that matched
     nothing (or projected degenerately) — they keep whatever the caller had;
-    nothing is invented for them.
+    nothing is invented for them. ``why`` says, for each in ``dropped``, which of
+    the three it was (:data:`LEFT_NO_OVERLAP`, :data:`LEFT_NO_DETAIL`,
+    :data:`LEFT_OFF_CANVAS`).
 
     ``width`` and ``height`` are the canvas the caller already has, and the answer
     is fitted into the larger of that and the layout's own extent
@@ -672,7 +697,7 @@ def solve_layout(
         placed = _planar_place(cv2, images, tried)
     if placed is None:
         raise RuntimeError(NO_OVERLAP)
-    anchor, solved, dropped = placed
+    anchor, solved, dropped, off = placed
 
     if not solved:
         raise RuntimeError("auto-stitch could not place any piece")
@@ -683,9 +708,11 @@ def solve_layout(
     raw = [solved[i] for i in order]
     canvas = canvas_for_layout(raw, minimum=(width, height))
     fitted = fit_quads_to_canvas(raw, *canvas)
+    points = [0 if pts is None else len(pts) for pts, _ in feats]
     return {
         "quads": {i: q for i, q in zip(order, fitted)},
         "dropped": sorted(dropped),
+        "why": _why_left_out(dropped, points, off),
         "anchor": anchor,
         "canvas": {"width": canvas[0], "height": canvas[1]},
     }
@@ -1084,8 +1111,9 @@ def apply_warp(img: Image.Image, params: dict[str, Any]) -> Image.Image:
 
 
 def _rotation_place(cv2, arrays: list[Any], feats: list[Any], pairwise: list[Any], keep: list[int], warp: str):
-    """Solve the cameras of the group ``keep`` and warp it: ``(quads, remaps, dropped)``,
-    quads in warp pixels. Raises RuntimeError when the group does not solve."""
+    """Solve the cameras of the group ``keep`` and warp it: ``(quads, remaps, dropped,
+    off)``, quads in warp pixels, ``off`` the dropped pieces whose projection failed.
+    Raises RuntimeError when the group does not solve."""
     import numpy as np
 
     count = len(arrays)
@@ -1117,6 +1145,7 @@ def _rotation_place(cv2, arrays: list[Any], feats: list[Any], pairwise: list[Any
     quads: dict[int, Quad] = {}
     remaps: dict[int, dict[str, Any]] = {}
     dropped = [i for i in range(count) if i not in set(keep)]
+    off: set[int] = set()
     for pos, idx in enumerate(keep):
         src_h, src_w = arrays[idx].shape[:2]
         out_h, out_w = warped[pos].shape[:2]
@@ -1124,10 +1153,11 @@ def _rotation_place(cv2, arrays: list[Any], feats: list[Any], pairwise: list[Any
         quad = [[x, y], [x + out_w, y], [x + out_w, y + out_h], [x, y + out_h]]
         if not quad_ok(quad) or (out_w * out_h) > _MAX_WARP_AREA * src_w * src_h:
             dropped.append(idx)
+            off.add(idx)
             continue
         quads[idx] = quad
         remaps[idx] = _remap_params(warp, cameras[pos], scale, (src_w, src_h), gains[pos])
-    return quads, remaps, dropped
+    return quads, remaps, dropped, off
 
 
 def solve_rotation_layout(
@@ -1142,12 +1172,12 @@ def solve_rotation_layout(
     """Solve a panorama layout under the rotation model — geometry *and* a remap.
 
     Returns ``{"quads": {index: quad}, "remaps": {index: params}, "dropped": [...],
-    "canvas": {"width", "height"}}``. Each quad is the upright rectangle the
-    piece's remapped pixels fill, in canvas pixels; each remap is the op that
-    produces those pixels from the piece's recipe. ``dropped`` holds the pieces no
-    trusted match reached — the caller leaves them untouched, and ``canvas`` sizes
-    the answer, both exactly as in :func:`solve_layout`. ``sources`` and
-    ``exclude`` are read as there too.
+    "why": [...], "canvas": {"width", "height"}}``. Each quad is the upright
+    rectangle the piece's remapped pixels fill, in canvas pixels; each remap is the
+    op that produces those pixels from the piece's recipe. ``dropped`` holds the
+    pieces no trusted match reached — the caller leaves them untouched, ``why``
+    says why each was, and ``canvas`` sizes the answer, all exactly as in
+    :func:`solve_layout`. ``sources`` and ``exclude`` are read as there too.
     """
     if len(images) < 2:
         raise ValueError("auto-stitch needs at least two pieces")
@@ -1175,7 +1205,7 @@ def solve_rotation_layout(
         # every pair, the ones matched above kept rather than matched twice
         pairwise, keep = _match_component(cv2, feats, before=pairwise)
         placed = _rotation_place(cv2, arrays, feats, pairwise, keep, warp)
-    quads, remaps, dropped = placed
+    quads, remaps, dropped, off = placed
 
     if not quads:
         raise RuntimeError("auto-stitch could not place any piece")
@@ -1193,6 +1223,7 @@ def solve_rotation_layout(
         "quads": {i: q for i, q in zip(order, fitted)},
         "remaps": remaps,
         "dropped": sorted(dropped),
+        "why": _why_left_out(dropped, [len(ft.keypoints) for ft in feats], off),
         "canvas": {"width": canvas[0], "height": canvas[1]},
     }
 

@@ -141,12 +141,20 @@ export function collageSpec(collage) {
     transparent: collage.transparent,
     nodes: collage.nodes.map(pieceRecord),
     exported: collage.exported ?? null,
+    // cut to a frame (lib/collageCut.js): the picture keeps what lies inside
+    ...(collage.clip ? { clip: collage.clip } : {}),
     ...(collage.straightened ? { straightened: true } : {}),
   };
 }
 
-/** What a collage would export as: its pieces' recipes and corners. */
-export const collageSignature = (collage) => JSON.stringify(collage.nodes.map((n) => [n.save, n.quad]));
+/**
+ * What a collage would export as: its pieces' recipes and corners, and its frame
+ * once it is cut (engine/inspectwork.py `_export_current` reads it back).
+ */
+export function collageSignature(collage) {
+  const pieces = collage.nodes.map((n) => [n.save, n.quad]);
+  return JSON.stringify(collage.clip ? { nodes: pieces, clip: collage.clip } : pieces);
+}
 
 /** Pieces whose file is gone. They keep their place but cannot be exported. */
 export const missingPieces = (collage) => collage.nodes.filter((n) => n.missing);
