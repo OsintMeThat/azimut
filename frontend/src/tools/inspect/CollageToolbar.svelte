@@ -1,6 +1,7 @@
 <script>
   import { onDestroy } from 'svelte';
   import { pinholeOps, stitchCanvas } from '../../lib/inspect.js';
+  import { BRUSH_MAX, BRUSH_MIN, excludeRequest } from '../../lib/excludeBrush.js';
   import { LEVEL_MIN_POINTS } from '../../lib/straighten.js';
   import { api } from '../../lib/api.js';
   import { caseState, toast } from '../../lib/state.svelte.js';
@@ -8,13 +9,18 @@
   import Icon from '../../components/Icon.svelte';
 
   // The bar over the canvas, for what acts on the whole collage: Auto-stitch places
-  // the pieces by the imagery they share, Straighten bends the collage along a level
-  // line, and Fit puts the view back. The piece in hand has its own block in the panel.
+  // the pieces by the imagery they share, Ignore areas paints what it must not match
+  // on, Straighten bends the collage along a level line, and Fit shows the pieces
+  // whole. The piece in hand has its own block in the panel.
   // `level` is the line the canvas draws to straighten the collage by, `straighten` what
-  // bends the collage along it; `view` is the canvas's zoom and pan.
+  // bends the collage along it; `view` is the canvas's zoom and pan, `fit` what fits it
+  // to the pieces and `fitted` whether it does. `brush` is the canvas's brush, `{ on,
+  // size, erase }`; `unstitched` the pieces the last stitch found no overlap for. `hold`
+  // makes the stitch one undo: it answers the release.
   let {
     collage: active, selectedIds = $bindable([]), renderPiece, level = $bindable(null), straighten = null,
-    view = $bindable(),
+    view = $bindable(), brush = $bindable(null), unstitched = $bindable([]), hold = null, fit = null,
+    fitted = false,
   } = $props();
 
   // ---- auto-stitch ----------------------------------------------------------
@@ -85,55 +91,80 @@
     active.height = height;
   }
 
+  /** Run `work` on every item, `at` a time, as the canvas fills in when a collage opens. */
+  async function inTurn(items, at, work) {
+    const queue = [...items];
+    const next = async () => {
+      while (queue.length) await work(queue.shift());
+    };
+    await Promise.all(Array.from({ length: Math.min(at, queue.length) }, next));
+  }
+
+  /** What the message says of a stitch: how many it placed, and the pieces it outlined. */
+  function stitchedWords(placed, left) {
+    if (!left) return `Stitched ${placed} pieces`;
+    if (!placed) return 'No overlap found between the pieces, so none moved';
+    const which = left === 1 ? 'the outlined piece' : `the ${left} outlined pieces`;
+    return `Stitched ${placed}. No overlap found for ${which}, left where ${left === 1 ? 'it was' : 'they were'}`;
+  }
+
   async function autoStitch() {
     if (few) return;
     stitching = true;
+    // the whole stitch is one undo, however many steps its pieces come back in
+    const release = hold?.();
     try {
       const nodes = active.nodes;
       const before = { nodes: nodes.map(snapshot), width: active.width, height: active.height };
+      const exclude = excludeRequest(nodes);
       const res = await api.post(`/api/cases/${caseState.current.id}/inspect/auto-stitch`, {
         width: active.width,
         height: active.height,
         mode,
         // frozen snapshot recipes (path/time/ops), stripped back to pinhole pixels
         nodes: nodes.map((n) => ({ ...n.save, ops: pinholeOps(n.save) })),
+        // the areas painted out of a piece's matching, sent only when a piece has some
+        ...(exclude ? { exclude } : {}),
       });
       // A stitch is solved in source pixels, so the canvas follows it: the answer
       // carries the size that keeps the pieces at full resolution, and the export
       // is the pieces' bounds, so a canvas left too small *is* the lost detail.
       // Pieces the solver could not place keep their place as it grows.
       applyCanvas(res.canvas, new Set(res.nodes.map((n) => n.index)));
+      // Every piece goes to its place at once; the ones a panorama warp reshapes are
+      // drawn again three at a time, as a collage's pieces are when it opens.
+      const redraw = [];
       for (const { index, quad, op } of res.nodes) {
         const node = nodes[index];
         const base = pinholeOps(node.save);
         const ops = op ? [...base, op] : base;
         // Planar leaves the pixels alone; only re-derive when the recipe moved
         // (a panorama warp arriving, or dropping off on the way back to planar).
-        if (JSON.stringify(ops) !== JSON.stringify(node.save.ops ?? [])) {
-          await renderPiece(node, ops);
-        }
+        if (JSON.stringify(ops) !== JSON.stringify(node.save.ops ?? [])) redraw.push([node, ops]);
         node.quad = quad;
       }
+      await inTurn(redraw, 3, ([node, ops]) => renderPiece(node, ops));
       undoSnap = before;
-      selectedIds = [];
-      const placed = res.nodes.length;
+      // the pieces it could not place are outlined and in hand, for the arrows or a drag
+      const left = res.dropped.map((i) => nodes[i]?.id).filter(Boolean);
+      unstitched = left;
+      selectedIds = left;
+      fit?.();
       // The undo rides on the message, and stays in the arrow's menu after it goes.
       const undo = { label: 'Undo', onClick: undoStitch };
-      if (res.dropped.length) {
-        toast(`Stitched ${placed}. ${res.dropped.length} left in place because no overlap was found`, 'warn', null, undo);
-      } else {
-        toast(`Stitched ${placed} pieces`, 'ok', null, undo);
-      }
+      toast(stitchedWords(res.nodes.length, left.length), left.length ? 'warn' : 'ok', null, undo);
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
       stitching = false;
+      release?.();
     }
   }
 
   function undoStitch() {
     menuOpen = false;
     if (!undoSnap) return;
+    unstitched = [];
     for (const snap of undoSnap.nodes) {
       const node = active.nodes.find((n) => n.id === snap.id);
       if (node) Object.assign(node, snap);
@@ -155,8 +186,27 @@
   let bending = $state(false);
   function toggleLevel() {
     level.drawing = !level.drawing;
-    if (level.drawing) selectedIds = [];
+    if (level.drawing) {
+      selectedIds = [];
+      if (brush) brush.on = false;
+    }
   }
+
+  // ---- the areas a stitch must not match on ----------------------------------
+  // Painted on a piece over what moves or was laid over the picture: a person, a car,
+  // a watermark (lib/excludeBrush.js). They stay with the collage, never in its picture.
+  const target = $derived(
+    selectedIds.length === 1 ? (active?.nodes.find((n) => n.id === selectedIds[0]) ?? null) : null,
+  );
+  function toggleBrush() {
+    brush.on = !brush.on;
+    if (brush.on && level) level.drawing = false;
+    if (!brush.on) brush.erase = false;
+  }
+  function clearPiece() {
+    if (target) target.exclude = [];
+  }
+  const sizeTitle = `Brush size, also [ and ]`;
 
   async function bend() {
     bending = true;
@@ -169,11 +219,6 @@
 
   const lineReady = $derived(!!level && level.points.length >= LEVEL_MIN_POINTS);
 
-  // ---- the view ---------------------------------------------------------------
-  const fitted = $derived(!view || (view.zoom === 1 && view.x === 0 && view.y === 0));
-  function fit() {
-    Object.assign(view, { zoom: 1, x: 0, y: 0 });
-  }
 </script>
 
 <div class="bar" role="toolbar" aria-label="Collage tools">
@@ -201,9 +246,53 @@
     </button>
   </div>
 
-  <span class="sep" aria-hidden="true"></span>
+  {#if brush}
+    <div class="brush" role="group" aria-label="Ignore areas">
+      <button
+        class="btn btn-sm paint"
+        class:on={brush.on}
+        aria-pressed={brush.on}
+        disabled={!active?.nodes.length}
+        onclick={toggleBrush}
+        title={brush.on ? 'Stop painting (Esc)' : 'Paint over what auto-stitch must not match on, such as people, vehicles or a watermark'}
+      >
+        <Icon name={brush.on ? 'check' : 'brush'} size={13} />
+        {brush.on ? 'Done' : 'Ignore areas'}
+      </button>
+      {#if brush.on}
+        <input
+          class="size"
+          type="range"
+          min={BRUSH_MIN}
+          max={BRUSH_MAX}
+          step="2"
+          bind:value={brush.size}
+          aria-label="Brush size"
+          title={sizeTitle}
+        />
+        <button
+          class="btn btn-ghost btn-sm"
+          class:on={brush.erase}
+          aria-pressed={brush.erase}
+          onclick={() => (brush.erase = !brush.erase)}
+          title="Erase what was painted, also Alt while painting"
+        >
+          <Icon name="eraser" size={13} /> Erase
+        </button>
+        <button
+          class="btn btn-ghost btn-sm"
+          disabled={!target?.exclude?.length}
+          onclick={clearPiece}
+          title={target ? 'Take every painted area off this piece' : 'Select a piece first'}
+        >
+          Clear piece
+        </button>
+      {/if}
+    </div>
+  {/if}
 
-  {#if level}
+  {#if level && !brush?.on}
+    <span class="sep" aria-hidden="true"></span>
     <div class="straighten" role="group" aria-label="Straighten" data-guide="collage.straighten">
       <button
         class="btn btn-sm draw"
@@ -233,14 +322,15 @@
     </div>
   {/if}
 
-  <span class="grow"></span>
-
-  {#if view && view.zoom !== 1}
-    <span class="zoom" title="Zoom against the fitted view">{Math.round(view.zoom * 100)}%</span>
-  {/if}
-  <button class="btn btn-ghost btn-sm" disabled={fitted} onclick={fit} title="Fit the collage back in view">
-    <Icon name="eye" size={14} /> Fit
-  </button>
+  <!-- the view's own corner, at the right of the bar however it wraps -->
+  <div class="view">
+    {#if view && view.zoom !== 1}
+      <span class="zoom" title="Zoom against the whole canvas in view">{Math.round(view.zoom * 100)}%</span>
+    {/if}
+    <button class="btn btn-ghost btn-sm" disabled={fitted || !fit} onclick={() => fit?.()} title="Show every piece whole">
+      <Icon name="maximize" size={14} /> Fit
+    </button>
+  </div>
 </div>
 
 {#if menuOpen}
@@ -276,14 +366,16 @@
     background: var(--bg-1);
     flex-wrap: wrap;
   }
-  .split,
-  .straighten {
+  .straighten,
+  .brush {
     display: flex;
     align-items: center;
     gap: 6px;
   }
+  /* The press and its arrow as one button: the same height, one hairline between. */
   .split {
-    gap: 0;
+    display: flex;
+    align-items: stretch;
   }
   .press {
     gap: 6px;
@@ -295,6 +387,16 @@
   }
   .press:disabled :global(svg) {
     color: inherit;
+  }
+  /* Waiting for a second piece, the press dims its words, not its box, so the arrow
+     still reads as part of it. */
+  .press:disabled {
+    opacity: 1;
+    color: var(--text-3);
+  }
+  .split .btn:hover:not(:disabled) {
+    position: relative;
+    z-index: 1;
   }
   .mode {
     padding-left: 6px;
@@ -313,6 +415,19 @@
   }
   .more[aria-expanded='true'] {
     color: var(--accent);
+  }
+  /* Painting: the brush's own colour, as on the canvas. */
+  .paint.on {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+  .brush .btn-ghost.on {
+    background: var(--bg-3);
+    color: var(--text-1);
+  }
+  .size {
+    width: 84px;
+    accent-color: var(--danger);
   }
   .sep {
     width: 1px;
@@ -337,8 +452,11 @@
     color: var(--ok);
     font-size: var(--fs-xs);
   }
-  .grow {
-    flex: 1;
+  .view {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
   }
   .zoom {
     color: var(--text-2);

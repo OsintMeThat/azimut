@@ -14,7 +14,7 @@ describe('CollageMenu scope', () => {
   });
 
   it('leaves what acts on the whole collage to the bar over the canvas', () => {
-    expect(menu).not.toContain('auto-stitch');
+    expect(menu).not.toContain('/inspect/auto-stitch');
     expect(menu).not.toContain('straighten');
     expect(toolbar).toContain('/inspect/auto-stitch');
   });

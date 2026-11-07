@@ -79,6 +79,7 @@ vi.mock('../lib/trash.js', () => ({ deletedToast: vi.fn() }));
 
 const { default: Inspector } = await import('./Inspector.svelte');
 const { geolocating } = await import('../lib/geolocating.svelte.js');
+const { retimed } = await import('../lib/sceneRetime.svelte.js');
 
 let live;
 let target;
@@ -593,6 +594,26 @@ describe('the collages of the clip', () => {
     lines[0].click();
     expect(uiState.openCollage).toBe('Pan');
     expect(uiState.tool).toBe('collage');
+  });
+
+  it('take up a time their scene was given in the Collage tool, so the next save keeps it', async () => {
+    work(CLIP, [kept('sc_1', 1, 4, 'Bridge?'), kept('sc_2', 10, 12, '')]);
+    await start();
+    await openFile('Convoy clip');
+    expect(field('Scene start').value).toBe('0:01');
+
+    Object.assign(retimed, { caseId: 'case-a', video: CLIP, draft: 'sc_1', start: 2, end: 6, n: retimed.n + 1 });
+    await settle();
+    expect(field('Scene start').value).toBe('0:02');
+    expect(field('Scene end').value).toBe('0:06');
+    await afterQuiet();
+    expect(lastSpec().scenes).toEqual([kept('sc_1', 2, 6, 'Bridge?'), kept('sc_2', 10, 12, '')]);
+
+    // another video's scene is none of its business
+    put.mockClear();
+    Object.assign(retimed, { caseId: 'case-a', video: 'media/other.mp4', draft: 'sc_2', start: 0, end: 1, n: retimed.n + 1 });
+    await afterQuiet();
+    expect(put.mock.calls.filter(([path]) => path.endsWith('/inspect/work'))).toHaveLength(0);
   });
 
   it('come into the scene\'s proof by their saved picture, with no frame to capture', async () => {

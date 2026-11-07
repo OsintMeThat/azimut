@@ -44,7 +44,8 @@
    *
    * Absent while the case has nothing to geolocate, and a few rows when it has, so
    * the analyst's own lists stay in reach. Geolocate is the row's act; the scene's
-   * name opens it in Inspect; Abandon asks for a word, which may stay empty.
+   * name opens it in Inspect, or the collage a picture was exported from (`collage`
+   * on its file) in Collage; Abandon asks for a word, which may stay empty.
    */
   import { onDestroy, tick, untrack } from 'svelte';
   import {
@@ -141,10 +142,17 @@
   // Geolocate is a switch: pressed again on the scene in hand, it stops, the captures kept.
   const go = (scene) => act(() => (isLive(scene) ? stopGeolocating(caseId) : geolocateScene(caseId, scene)));
 
-  function openInInspect(scene) {
+  /** The scene's file where it is worked: a collage's picture in Collage, any other in Inspect. */
+  function openScene(file, scene) {
+    if (file.collage) {
+      uiState.openCollage = file.collage;
+      uiState.tool = 'collage';
+      return;
+    }
     uiState.inspectScene = { video: scene.video, draft: scene.id };
     uiState.tool = 'inspect';
   }
+  const openTitle = (file) => (file.collage ? 'Open the collage' : 'Open in Inspect');
 
   async function askWhy(scene) {
     leaving = keyOf(scene);
@@ -176,7 +184,7 @@
 {/snippet}
 
 {#snippet fileHead(file)}
-  <span class="file-title" title={file.title}><Icon name={isPicture(file) ? 'image' : 'video'} size={11} /><span dir="auto">{file.title}</span></span>
+  <span class="file-title" title={file.title}><Icon name={file.collage ? 'grid' : isPicture(file) ? 'image' : 'video'} size={11} /><span dir="auto">{file.title}</span></span>
 {/snippet}
 
 {#if open.length || left.length}
@@ -190,7 +198,7 @@
             {#each file.scenes as scene (scene.id)}
               <li class="scene" class:live={isLive(scene)} class:progress={scene.state === 'progress'}>
                 <span class="pip" aria-hidden="true"></span>
-                <button type="button" class="open" title="Open in Inspect" onclick={() => openInInspect(scene)}>
+                <button type="button" class="open" title={openTitle(file)} onclick={() => openScene(file, scene)}>
                   <span class="name" dir="auto">{#if !scene.label}{@render mark(scene)}{/if}{nameOf(scene)}</span>
                   <span class="meta">{#each saidParts(scene) as part, i (i)}{#if i}{SEP}{/if}<span class="part" class:time={part.time}>{#if part.time}{@render mark(scene)}{/if}{part.text}</span>{/each}</span>
                 </button>
@@ -237,7 +245,7 @@
               {#each file.scenes as scene (scene.id)}
                 <li class="scene gone">
                   <span class="pip" aria-hidden="true"></span>
-                  <button type="button" class="open" title="Open in Inspect" onclick={() => openInInspect(scene)}>
+                  <button type="button" class="open" title={openTitle(file)} onclick={() => openScene(file, scene)}>
                     <span class="name" dir="auto">{#if !scene.label}{@render mark(scene)}{/if}{nameOf(scene)}</span>
                     <span class="meta">{#if scene.label}<span class="part" class:time={!isPicture(scene)}>{@render mark(scene)}{queueTime(scene)}</span>{/if}{#if scene.label && whyOf(scene)}{SEP}{/if}{#if whyOf(scene)}<q dir="auto">{whyOf(scene)}</q>{:else if !scene.label}Abandoned{/if}</span>
                   </button>

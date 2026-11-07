@@ -70,6 +70,24 @@ describe('the selected piece', () => {
   });
 });
 
+describe('the areas kept out of its stitch', () => {
+  it('counts them under the piece, and clears them', () => {
+    const strokes = [{ points: [[0.2, 0.2]], radius: 0.1 }, { points: [[0.6, 0.6]], radius: 0.1 }];
+    const collage = show([node('nd_1', { path: 'media/roof.png', time: null, ops: [] }, { exclude: strokes })], ['nd_1']);
+
+    expect(target.querySelector('.ignored').textContent).toContain('2 areas kept out of auto-stitch');
+    button('Clear').click();
+    flushSync();
+    expect(collage.nodes[0].exclude).toEqual([]);
+    expect(target.querySelector('.ignored')).toBeNull();
+  });
+
+  it('says nothing of a piece with none', () => {
+    show([node('nd_1', { path: 'media/roof.png', time: null, ops: [] })], ['nd_1']);
+    expect(target.querySelector('.ignored')).toBeNull();
+  });
+});
+
 describe('the selected block', () => {
   it('counts the pieces and acts on them as one', () => {
     const collage = show([node('nd_1', { path: 'media/a.png', time: null, ops: [] }), node('nd_2', { path: 'media/b.png', time: null, ops: [] })], ['nd_1', 'nd_2']);

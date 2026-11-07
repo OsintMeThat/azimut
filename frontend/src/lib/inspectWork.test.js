@@ -132,6 +132,15 @@ describe('collages', () => {
     expect(spec.exported).toBeNull();
   });
 
+  it('keeps the areas painted out of a piece\'s stitch, which never change what it exports', () => {
+    const strokes = [{ points: [[0.5, 0.5]], radius: 0.1 }];
+    const spec = collageSpec({ width: 800, height: 400, nodes: [piece({ exclude: strokes }), piece({ id: 'nd_2', exclude: [] })] });
+    expect(spec.nodes[0].exclude).toEqual(strokes);
+    // none painted, or all cleared: no field, as the server stores it
+    expect(spec.nodes[1]).not.toHaveProperty('exclude');
+    expect(collageSignature({ nodes: [piece({ exclude: strokes })] })).toBe(collageSignature({ nodes: [piece()] }));
+  });
+
   it('moves its signature when a piece moves', () => {
     const before = collageSignature({ nodes: [piece()] });
     const moved = collageSignature({ nodes: [piece({ quad: [[5, 0], [85, 0], [85, 60], [5, 60]] })] });

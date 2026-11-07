@@ -4,8 +4,9 @@
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
   import {
-    uid, initialQuad, quadFromCropRect, exportFrame, collageVideo, COLLAGE_DEFAULT_SIZE, COLLAGE_MAX_DIM,
+    uid, initialQuad, quadFromCropRect, exportFrame, collageVideo, mediaOrigin, COLLAGE_DEFAULT_SIZE, COLLAGE_MAX_DIM,
   } from '../lib/inspect.js';
+  import { BRUSH_DEFAULT, recrop } from '../lib/excludeBrush.js';
   import { shortClock, spanLabel } from '../lib/scenes.js';
   import {
     workState, collageSpec, collageSignature, missingPieces, isFiled,
@@ -72,11 +73,12 @@
   // A work is listed under its file's name as the file has it now, whatever the
   // work itself is called.
   const fileTitles = $derived(new Map(mediaList.map((m) => [m.path, m.title || m.filename])));
-  // A frame saved from a video, read back to the video and the instant it was cut at.
-  const cutFrames = $derived(new Map(mediaList.flatMap((m) => {
-    const src = m.source;
-    const cut = src?.type === 'inspect' && src.op === 'frame' && typeof src.from === 'string' && Number.isFinite(src.time);
-    return cut ? [[m.path, { video: src.from, time: src.time }]] : [];
+  // What a picture of the case was made from: a frame saved from a video, read back to
+  // the video and its instant, or a picture composed from pieces, such as a collage
+  // straightened, read back to those pieces.
+  const origins = $derived(new Map(mediaList.flatMap((m) => {
+    const origin = mediaOrigin(m);
+    return origin ? [[m.path, origin]] : [];
   })));
   const fileThumbs = $derived(new Map(mediaList.map((m) => [m.path, m.thumbnail])));
   const pickerWorks = $derived(
@@ -108,6 +110,13 @@
   // The list of pieces the panel shows, Frames or Images, and a flash when the empty canvas points to it.
   let pickerTab = $state('frames');
   let pointed = $state(0);
+  // The brush that paints, on a piece, what auto-stitch must not match on (lib/excludeBrush.js).
+  let brush = $state({ on: false, size: BRUSH_DEFAULT, erase: false });
+  // The pieces the last auto-stitch found no overlap for, outlined on the canvas until moved.
+  let unstitched = $state([]);
+  // Whether the view shows the pieces whole, as Fit would; the canvas knows, and fits them.
+  let fitted = $state(true);
+  let canvas = $state(null);
   let docRun = 0;
   const blobs = new Set();
 
@@ -127,7 +136,7 @@
   );
   // The video every piece comes from, said under the save: one instant, or the stretch they span.
   const fromVideo = $derived.by(() => {
-    const found = collageVideo(doc.nodes, (path) => cutFrames.get(path) ?? null);
+    const found = collageVideo(doc.nodes, (path) => origins.get(path) ?? null);
     if (!found) return null;
     const when = found.from === found.to ? shortClock(found.from) : spanLabel(found.from, found.to);
     return { ...found, title: fileTitles.get(found.path) ?? found.path.split('/').pop(), when };
@@ -253,6 +262,7 @@
   let canUndo = $state(false);
   let canRedo = $state(false);
   let restoring = false; // plain: suppresses capture while a snapshot is put back
+  let held = 0; // plain: how many changes made in steps are under way (holdHistory)
   let historyTimer = null;
   const layoutSnapshot = () =>
     JSON.stringify({ width: doc.width, height: doc.height, nodes: doc.nodes, straightened: doc.straightened });
@@ -270,7 +280,7 @@
 
   $effect(() => {
     const json = layoutSnapshot();
-    if (restoring || !doc.open) return;
+    if (restoring || held || !doc.open) return;
     clearTimeout(historyTimer);
     historyTimer = setTimeout(() => {
       history.push(json);
@@ -278,14 +288,43 @@
     }, 350);
   });
 
+  // A change made in many steps, such as an auto-stitch whose pieces come back one by
+  // one, is one undo: the layout before it is kept, nothing is recorded meanwhile, and
+  // the release records what it made.
+  function holdHistory() {
+    if (!doc.open) return () => {};
+    clearTimeout(historyTimer);
+    history.push(layoutSnapshot());
+    syncHistory();
+    held += 1;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      held -= 1;
+      if (held || !doc.open) return;
+      clearTimeout(historyTimer);
+      history.push(layoutSnapshot());
+      syncHistory();
+    };
+  }
+
   function applySnapshot(json) {
     restoring = true;
     const snap = JSON.parse(json);
     doc.width = snap.width;
     doc.height = snap.height;
-    doc.nodes = snap.nodes;
+    // The first step is kept as the collage opens, before its pieces have pixels: a
+    // piece put back without them takes the ones on screen, drawn from the same recipe.
+    const shown = new Map(doc.nodes.map((n) => [n.id, n]));
+    doc.nodes = snap.nodes.map((n) => {
+      const now = shown.get(n.id);
+      const same = now?.url && !n.url && !n.missing && JSON.stringify(now.save) === JSON.stringify(n.save);
+      return same ? { ...n, url: now.url, baseUrl: now.baseUrl, frameOps: now.frameOps ?? n.frameOps } : n;
+    });
     doc.straightened = snap.straightened ?? false;
     selectedIds = [];
+    unstitched = [];
     // outlast the capture debounce so the restore itself is not recorded
     setTimeout(() => (restoring = false), 400);
   }
@@ -419,6 +458,8 @@
     });
     Object.assign(level, { drawing: false, points: [] });
     Object.assign(view, { zoom: 1, x: 0, y: 0 });
+    Object.assign(brush, { on: false, erase: false });
+    unstitched = [];
     opened += 1;
     savedSignature = null;
     selectedIds = [];
@@ -582,6 +623,8 @@
         ? quadFromCropRect(node.quad, { x: -prev.x / prev.w, y: -prev.y / prev.h, w: 1 / prev.w, h: 1 / prev.h })
         : node.quad;
       node.quad = crop ? quadFromCropRect(baseQuad, crop) : baseQuad.map(([x, y]) => [x, y]);
+      // the areas painted out of its stitch stay where they were on the picture
+      if (node.exclude?.length) node.exclude = recrop(node.exclude, prev, crop);
       Object.assign(node, { url, w: dim.w, h: dim.h, crop, save: { ...node.save, ops } });
     } catch (e) {
       toast(e.message, 'danger');
@@ -910,9 +953,31 @@
     {#key opened}
       <div class="workspace">
         <div class="stage">
-          <CollageToolbar collage={doc} bind:selectedIds {renderPiece} bind:level straighten={straightenCollage} bind:view />
+          <CollageToolbar
+            collage={doc}
+            bind:selectedIds
+            {renderPiece}
+            bind:level
+            straighten={straightenCollage}
+            bind:view
+            bind:brush
+            bind:unstitched
+            hold={holdHistory}
+            fit={() => canvas?.fitPieces()}
+            {fitted}
+          />
           <div class="viewer" data-guide="collage.canvas">
-            <CollageCanvas collage={doc} bind:selectedIds {requestCrop} bind:level bind:view />
+            <CollageCanvas
+              bind:this={canvas}
+              collage={doc}
+              bind:selectedIds
+              {requestCrop}
+              bind:level
+              bind:view
+              bind:brush
+              bind:unstitched
+              bind:fitted
+            />
             {#if !doc.nodes.length && !opening}
               <div class="empty-canvas">
                 <div class="ways-in">
