@@ -39,7 +39,9 @@ lands, from the app or the extension. Its label opens the scene in Inspect, **Ma
 proof** opens Inspect's chooser on it, and ✕ stops; the captures stay with the scene.
 Every capture filed meanwhile, from any map tool or the extension, is gathered for it on
 the server (`engine/geolocate.py`), and every tab and the extension's panel follow the
-same scene. Narrower than 1240 px it drops its first word, and under 1080 px Make the
+same scene. The server's word is shown as it lands, the capture counted and the pill gone
+when the scene ends, and the server is read again behind it; an answer asked before that
+word is dropped, so a count never steps back. Narrower than 1240 px it drops its first word, and under 1080 px Make the
 proof keeps its icon alone. A picture marked to geolocate reads *Whole picture* where a
 scene reads its time.
 
@@ -3624,7 +3626,12 @@ paused on the scene and marked on its bar in its colour, and a pill names it, co
 its captures and stops it. While it lasts, every capture filed in the case is attached
 to it, the popup's included, and the capture's report says *Attached to “bridge?”*. A
 picture reads *Whole picture*, with an image on its file's line, and Geolocate holds the
-picture over the map with the scene's dot and no bar.
+picture over the map with the scene's dot and no bar. The pill counts with the same pulse
+as the app's, dots the scene in its colour, and offers **Make the proof**: the app's tab
+comes to the front on Inspect's chooser for the scene, opening its case first through the
+usual question about unsaved work, or a tab is opened at the paired address when none is.
+Nothing is written from the map page. The extension's reference window carries the app's
+pin back to the scene's start, beside the frame steps.
 
 ## Detect
 

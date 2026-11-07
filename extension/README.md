@@ -127,8 +127,10 @@ their count. Unfolded, it lists them by file as the app's To-do does: the time,
 the label, and whether captures were gathered for it. **Geolocate** tells the app
 which scene this map is for and holds the scene's video over the map, paused on
 the scene, which is marked on the bar in the colour Inspect gives it: a band for
-a passage, a pin for an instant. A pill then names the scene and counts its
-captures; its ✕ stops.
+a passage, a pin for an instant. A pill then names the scene in its colour and
+counts its captures, the moment the app says one landed; its ✕ stops, and **Make the
+proof** brings the Azimut tab to the front on its proof chooser, or opens one when none
+is open. Nothing is written from the map.
 While it lasts, the app attaches every capture filed in the case to that scene,
 the popup's included, and the capture's report says "Attached to" it. A scene
 started from the app shows the same pill here, and pressing the pill brings its
@@ -182,6 +184,8 @@ over a map must never end up inside the evidence.
 and ordered by the app rather than by this tab: what crosses is one page of a case,
 never the case. A video plays in the window in a small player of its own: frame
 steps at the clip's own rate, slow motion, sound, and a frame kept as a picture.
+A video held for the scene being geolocated has a pin in the scene's colour, beside
+the frame steps, that goes back to where the scene starts.
 
 Two limits worth knowing. A reference has to be **under 512 MB**, and it crosses in
 pieces, so a long clip opens the way it does in the app's own Satellite tab: the
