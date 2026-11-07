@@ -69,6 +69,12 @@ describe('thumbFrame', () => {
     expect(thumbFrame([{ quad: rect(0, 0, 120, 80) }])).toMatchObject({ scale: 1, width: 120, height: 80 });
     expect(thumbFrame([])).toBeNull();
   });
+
+  it('shows a cut collage as its picture: the pieces within the frame', () => {
+    const pieces = [{ quad: rect(0, 0, 120, 80) }];
+    expect(thumbFrame(pieces, THUMB_EDGE, { x: 10, y: -5, w: 100, h: 60 })).toMatchObject({ minX: 10, minY: 0, width: 100, height: 55 });
+    expect(thumbFrame(pieces, THUMB_EDGE, { x: 500, y: 0, w: 10, h: 10 })).toBeNull();
+  });
 });
 
 describe('paintCollage', () => {

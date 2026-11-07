@@ -1,4 +1,4 @@
-import { collageBounds, quadMapUnit } from './inspect.js';
+import { collageBounds, cutBounds, quadMapUnit } from './inspect.js';
 
 // The picture the collage list shows for a collage. The pieces are already drawn
 // in the open tool, so the browser paints them once more onto a small canvas and
@@ -63,12 +63,14 @@ export function pieceTriangles(w, h, quad) {
 }
 
 /**
- * Where the pieces land on a preview: their bounds, scaled to fit `edge` and
- * never enlarged. Null for a collage with no piece.
+ * Where the pieces land on a preview: their bounds, cut to the collage's frame when
+ * it has one (`clip`), scaled to fit `edge` and never enlarged. Null for a collage
+ * with no piece, or none in its frame.
  */
-export function thumbFrame(nodes, edge = THUMB_EDGE) {
+export function thumbFrame(nodes, edge = THUMB_EDGE, clip = null) {
   if (!nodes.length) return null;
-  const b = collageBounds(nodes);
+  const b = clip ? cutBounds(nodes, clip) : collageBounds(nodes);
+  if (!b) return null;
   const scale = Math.min(1, edge / Math.max(b.width, b.height));
   return {
     minX: b.minX,
@@ -157,10 +159,10 @@ function loadImage(url) {
 /**
  * The preview of a collage as a PNG blob, or null when there is nothing to show.
  * `nodes` are plain copies of the pieces ({ id, quad, url, w, h, missing }), so the
- * caller can let the open collage go while this finishes.
+ * caller can let the open collage go while this finishes; `clip` its frame, if cut.
  */
-export async function renderCollageThumb(nodes, { edge = THUMB_EDGE, load = loadImage } = {}) {
-  const frame = thumbFrame(nodes, edge);
+export async function renderCollageThumb(nodes, { edge = THUMB_EDGE, load = loadImage, clip = null } = {}) {
+  const frame = thumbFrame(nodes, edge, clip);
   if (!frame) return null;
   const images = new Map();
   await Promise.all(

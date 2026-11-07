@@ -176,7 +176,8 @@ def _parent_video(case: Case, item: dict[str, Any], cache: dict[str, str | None]
     return recorded if isinstance(recorded, str) and recorded else None
 
 
-#: What Inspect records for a picture it composed from pieces (`inspect.compose_perspective`).
+#: What Inspect records for a picture it composed from pieces (`inspect.compose_perspective`), or bent
+#: from one (`inspect.straighten_pieces`).
 COLLAGE_OP = "collage"
 
 

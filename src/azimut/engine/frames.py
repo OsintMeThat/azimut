@@ -462,17 +462,20 @@ def mesh(model: Model, camera: np.ndarray, export: tuple[float, float], lens: fl
     return {"across": MESH_ACROSS, "down": MESH_DOWN, "points": points}
 
 
-def pieces_of(spec: dict[str, Any], sources: dict[str, tuple[float, float]]) -> list[Piece]:
+def pieces_of(
+    spec: dict[str, Any], sources: dict[str, tuple[float, float]], origin: tuple[float, float] | None = None
+) -> list[Piece]:
     """The frames of a Collage document, laid on its export (the canvas trimmed to its pieces).
 
     `sources` gives each video's frame size by its path; a piece whose source size
-    is unknown is left out."""
+    is unknown is left out. `origin` is where the export's corner sits on the canvas,
+    the pieces' top-left by default; a cut collage's export starts at its frame."""
     nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict) and isinstance(n.get("quad"), list)]
     if not nodes:
         return []
     xs = [float(x) for n in nodes for x, _ in n["quad"]]
     ys = [float(y) for n in nodes for _, y in n["quad"]]
-    x0, y0 = min(xs), min(ys)
+    x0, y0 = origin if origin is not None else (min(xs), min(ys))
     out = []
     for node in nodes:
         save = node.get("save") or {}

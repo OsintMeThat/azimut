@@ -20,7 +20,7 @@ let level;
 let props;
 
 function show({ nodes = [node('nd_1', 0), node('nd_2', 100)], drawn = null, straighten = null, renderPiece = vi.fn(), ...more } = {}) {
-  const shownCollage = $state({ width: 1600, height: 800, nodes, straightened: false });
+  const shownCollage = $state({ width: 1600, height: 800, nodes, straightened: false, clip: null });
   const shownView = $state({ zoom: 1, x: 0, y: 0 });
   const shownLevel = $state(drawn ?? { drawing: false, points: [] });
   collage = shownCollage;
@@ -31,7 +31,7 @@ function show({ nodes = [node('nd_1', 0), node('nd_2', 100)], drawn = null, stra
   // what the tool binds, read back here as it would
   const held = $state({
     collage, selectedIds: [], renderPiece, level, straighten, view, unstitched: [],
-    brush: { on: false, size: 40, erase: false }, fit: vi.fn(), fitted: false, ...more,
+    brush: { on: false, size: 40, erase: false }, fit: vi.fn(), fitted: false, cut: { editing: false, frame: null }, ...more,
   });
   props = held;
   live = mount(CollageToolbar, { target, props });
@@ -105,8 +105,8 @@ describe('Auto-stitch', () => {
     expect(message).toBe('Stitched 1. No overlap found for the outlined piece, left where it was');
     expect(kind).toBe('warn');
     expect(action.label).toBe('Undo');
-    // the piece left out is outlined and in hand, and the view shows the pieces whole
-    expect(props.unstitched).toEqual(['nd_2']);
+    // the piece left out is outlined and in hand, saying why, and the view shows the pieces whole
+    expect(props.unstitched).toEqual([{ id: 'nd_2', why: 'no-overlap', mode: 'cylindrical' }]);
     expect(props.selectedIds).toEqual(['nd_2']);
     expect(props.fit).toHaveBeenCalledTimes(1);
 
@@ -128,7 +128,37 @@ describe('Auto-stitch', () => {
     button('Auto-stitch').click();
     await settle();
     expect(toast.mock.calls.at(-1)[0]).toBe('No overlap found between the pieces, so none moved');
-    expect(props.unstitched).toEqual(['nd_1', 'nd_2']);
+    expect(props.unstitched.map((piece) => piece.id)).toEqual(['nd_1', 'nd_2']);
+  });
+
+  it('says why it left each piece where it was, on the piece and in its message', async () => {
+    post.mockResolvedValue({ nodes: [{ index: 0, quad: rect(5), op: null }], dropped: [1, 2], why: ['no-detail', 'off-canvas'], canvas: null });
+    show({ nodes: [node('nd_1', 0), node('nd_2', 100), node('nd_3', 200)] });
+    target.querySelector('button[aria-label="More ways to stitch"]').click();
+    flushSync();
+    [...document.querySelectorAll('[role="menuitemradio"]')][0].click();
+    flushSync();
+
+    button('Auto-stitch').click();
+    await settle();
+    expect(props.unstitched).toEqual([
+      { id: 'nd_2', why: 'no-detail', mode: 'planar' },
+      { id: 'nd_3', why: 'off-canvas', mode: 'planar' },
+    ]);
+    expect(toast.mock.calls.at(-1)[0]).toBe('Stitched 1. The 2 outlined pieces stay where they were: 1 with nothing to match, 1 off the canvas');
+  });
+
+  it('lays the pieces out anew, so the cut goes, and its Undo brings the cut back', async () => {
+    post.mockResolvedValue({ nodes: [{ index: 0, quad: rect(5), op: null }, { index: 1, quad: rect(90), op: null }], dropped: [], canvas: null });
+    show();
+    collage.clip = { x: 0, y: 0, w: 100, h: 40 };
+    flushSync();
+
+    button('Auto-stitch').click();
+    await settle();
+    expect(collage.clip).toBeNull();
+    toast.mock.calls.at(-1)[3].onClick();
+    expect(collage.clip).toEqual({ x: 0, y: 0, w: 100, h: 40 });
   });
 
   it('names the pieces left out in its message, two or more', async () => {
@@ -267,6 +297,77 @@ describe('Straighten', () => {
     collage.straightened = true;
     flushSync();
     expect(target.querySelector('.done').textContent).toContain('straightened');
+  });
+});
+
+describe('Cut', () => {
+  it('frames the pieces on its press, and keeps the frame on Apply', () => {
+    show();
+    expect(button('Cut').closest('[data-guide="collage.cut"]')).not.toBeNull();
+    expect(button('Clear')).toBeFalsy();
+
+    button('Cut').click();
+    flushSync();
+    expect(props.cut).toEqual({ editing: true, frame: { x: 0, y: 0, w: 180, h: 60 } });
+    // the line steps aside while the frame is drawn
+    expect(target.querySelector('[data-guide="collage.straighten"]')).toBeNull();
+    props.cut.frame = { x: 0, y: 0, w: 180, h: 45.257 };
+    button('Apply').click();
+    flushSync();
+    expect(collage.clip).toEqual({ x: 0, y: 0, w: 180, h: 45.26 });
+    expect(props.cut.editing).toBe(false);
+    expect(button('Cut').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('starts again from the frame kept, leaves it as it was on Cancel, and clears it', () => {
+    show();
+    collage.clip = { x: 10, y: 0, w: 100, h: 40 };
+    flushSync();
+    button('Cut').click();
+    flushSync();
+    expect(props.cut.frame).toEqual({ x: 10, y: 0, w: 100, h: 40 });
+    props.cut.frame = { x: 20, y: 0, w: 100, h: 40 };
+    button('Cancel').click();
+    flushSync();
+    expect(collage.clip).toEqual({ x: 10, y: 0, w: 100, h: 40 });
+
+    button('Clear').click();
+    flushSync();
+    expect(collage.clip).toBeNull();
+    expect(button('Clear')).toBeFalsy();
+  });
+
+  it('cuts nothing when the frame still holds every piece', () => {
+    show();
+    button('Cut').click();
+    flushSync();
+    button('Apply').click();
+    flushSync();
+    expect(collage.clip).toBeNull();
+  });
+
+  it('puts the frame down for the brush and the line, and waits for a piece', () => {
+    show();
+    button('Cut').click();
+    flushSync();
+    button('Ignore areas').click();
+    flushSync();
+    expect(props.cut.editing).toBe(false);
+    // the brush out, the frame waits
+    expect(target.querySelector('[data-guide="collage.cut"]')).toBeNull();
+    button('Done').click();
+    flushSync();
+    button('Draw the line').click();
+    flushSync();
+    button('Cut').click();
+    flushSync();
+    expect(level.drawing).toBe(false);
+    expect(props.cut.editing).toBe(true);
+
+    unmount(live);
+    target.remove();
+    show({ nodes: [] });
+    expect(button('Cut').disabled).toBe(true);
   });
 });
 

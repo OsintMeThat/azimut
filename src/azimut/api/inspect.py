@@ -75,6 +75,15 @@ class ComposeNode(BaseModel):
     quad: list[tuple[float, float]] = Field(min_length=4, max_length=4)
 
 
+class Cut(BaseModel):
+    """A frame over the collage, canvas pixels: the picture keeps what lies inside it."""
+
+    x: float = Field(ge=-inspectwork.MAX_CLIP, le=inspectwork.MAX_CLIP, allow_inf_nan=False)
+    y: float = Field(ge=-inspectwork.MAX_CLIP, le=inspectwork.MAX_CLIP, allow_inf_nan=False)
+    w: float = Field(gt=0, le=inspectwork.MAX_CLIP, allow_inf_nan=False)
+    h: float = Field(gt=0, le=inspectwork.MAX_CLIP, allow_inf_nan=False)
+
+
 class ComposeIn(BaseModel):
     width: int = Field(ge=16, le=8192)
     height: int = Field(ge=16, le=8192)
@@ -83,10 +92,25 @@ class ComposeIn(BaseModel):
     label: str | None = Field(default=None, max_length=200)
     folder: str | None = None
     notes: str | None = Field(default=None, max_length=2000)
-    # Collage → Straighten: each column's downward shift, pixels, bending the whole composite as one picture
-    bend: list[float] | None = Field(default=None, max_length=8192)
+    # Collage → Cut: the picture is cropped to this frame, the pieces left whole
+    clip: Cut | None = None
     # The saved collage this is the export of, recorded on the picture
     collage: str | None = Field(default=None, max_length=200)
+
+
+class StraightenNode(ComposeNode):
+    # the name its bent picture is filed under
+    label: str | None = Field(default=None, max_length=200)
+
+
+class StraightenIn(BaseModel):
+    # the canvas the collage is bent on, room for the bend included
+    width: int = Field(ge=16, le=8192)
+    height: int = Field(ge=16, le=8192)
+    nodes: list[StraightenNode] = Field(min_length=1, max_length=inspectwork.MAX_PIECES)
+    # each column's downward shift, pixels: one for every column of the canvas
+    bend: list[float] = Field(min_length=16, max_length=8192)
+    folder: str | None = None
 
 
 class StitchIn(BaseModel):
@@ -276,11 +300,12 @@ def compose(case_id: str, body: ComposeIn) -> dict[str, Any]:
         nodes.append({"src": src, "quad": [list(pt) for pt in n.quad]})
     # the picture this collage exported before, whose mark follows the new one
     before = inspectwork.collage_export(case, body.collage) if body.collage else None
+    clip = (body.clip.x, body.clip.y, body.clip.w, body.clip.h) if body.clip else None
     try:
         made = inspect_engine.compose_perspective(
             case, width=body.width, height=body.height, nodes=nodes,
             background=body.background, label=body.label, folder=body.folder,
-            notes=body.notes, bend=body.bend, collage=body.collage,
+            notes=body.notes, clip=clip, collage=body.collage,
         )
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -290,6 +315,38 @@ def compose(case_id: str, body: ComposeIn) -> dict[str, Any]:
     if before and after and before != after:
         follow_mark(case, before, after)
     return made
+
+
+@router.post("/cases/{case_id}/inspect/straighten")
+def straighten(case_id: str, body: StraightenIn) -> dict[str, Any]:
+    """Collage → Straighten: bend every piece by the line's column shifts and file one
+    picture each, all or none. Answers ``pieces``, each as filed with its ``box`` on the
+    bent canvas (left, top, right, bottom), in the order sent."""
+    case = get_case(case_id)
+    nodes = [
+        {
+            "src": {**n.src.model_dump(exclude={"ops"}), "ops": [op.model_dump() for op in n.src.ops]},
+            "quad": [list(pt) for pt in n.quad],
+            "label": n.label,
+        }
+        for n in body.nodes
+    ]
+    try:
+        pieces = inspect_engine.straighten_pieces(
+            case, width=body.width, height=body.height, nodes=nodes, bend=body.bend,
+            folder=body.folder, discard=lambda path: _take_back(case, path),
+        )
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, RuntimeError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"pieces": pieces}
+
+
+def _take_back(case: Any, path: str) -> None:
+    """A picture a straighten filed before one of its pieces failed: gone again."""
+    if not delete_by_path(case, path)["deleted"]:
+        artifact_engine.delete(case, {"type": "media", "attrs": {"path": path}})
 
 
 def follow_mark(case: Any, before: str, after: str) -> None:

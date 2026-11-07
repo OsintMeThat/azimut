@@ -632,13 +632,30 @@ export const COLLAGE_MAX_EXPORT_PIXELS = 40_000_000;
 const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
 
 /**
- * The size a collage exports at: its pieces' bounds, enlarged until the sharpest
- * piece is back at its own pixels, so what was placed small on the canvas does not
- * come out small. Held under `COLLAGE_MAX_DIM` a side and `COLLAGE_MAX_EXPORT_PIXELS`
- * in all; `capped` says the limit, not the pieces, set the size.
+ * The pieces' bounds within a collage's cut (lib/collageCut.js), as `collageBounds`
+ * gives them: what its picture shows. Null when the frame holds none of the pieces.
  */
-export function exportFrame(nodes) {
-  const b = collageBounds(nodes);
+export function cutBounds(nodes, clip) {
+  const b = quadsBounds(nodes.map((n) => n.quad));
+  if (!b) return null;
+  const minX = Math.max(b.minX, clip.x);
+  const minY = Math.max(b.minY, clip.y);
+  const width = Math.min(b.maxX, clip.x + clip.w) - minX;
+  const height = Math.min(b.maxY, clip.y + clip.h) - minY;
+  if (!(width > 0 && height > 0)) return null;
+  return { minX, minY, width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)) };
+}
+
+/**
+ * The size a collage exports at: its pieces' bounds, cut to its frame when it has
+ * one (`clip`), enlarged until the sharpest piece is back at its own pixels, so what
+ * was placed small on the canvas does not come out small. Held under
+ * `COLLAGE_MAX_DIM` a side and `COLLAGE_MAX_EXPORT_PIXELS` in all; `capped` says the
+ * limit, not the pieces, set the size. Null when the frame holds none of the pieces.
+ */
+export function exportFrame(nodes, clip = null) {
+  const b = clip ? cutBounds(nodes, clip) : collageBounds(nodes);
+  if (!b) return null;
   let wanted = 1;
   for (const n of nodes) {
     const [p0, p1, p2, p3] = n.quad;

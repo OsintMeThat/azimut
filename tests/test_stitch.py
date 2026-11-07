@@ -195,6 +195,43 @@ def test_solve_layout_drops_a_piece_that_matches_nothing():
     assert sorted(solved["quads"]) == [0, 1]
 
 
+def test_solve_layout_says_why_it_left_each_piece_out(monkeypatch):
+    """A stranger's detail matches nothing; a blank piece and one painted out whole have nothing to
+    match; a piece that matched but projected degenerately fell off the canvas."""
+    scene = _scene(seed=3)
+    pieces = [
+        scene.crop((0, 0, 500, 500)),
+        scene.crop((300, 0, 800, 500)),
+        _scene(width=500, height=500, seed=999),
+        Image.new("RGB", (500, 500), (90, 90, 90)),
+        scene.crop((200, 0, 700, 500)),
+    ]
+    whole = [{"points": [[0.5, 0.5]], "radius": 1.0}]
+
+    solved = stitch.solve_layout(pieces, width=1000, height=600, exclude=[None, None, None, None, whole])
+
+    assert solved["dropped"] == [2, 3, 4]
+    assert solved["why"] == [stitch.LEFT_NO_OVERLAP, stitch.LEFT_NO_DETAIL, stitch.LEFT_NO_DETAIL]
+
+    # the second piece's projection folds: it matched, and fell off the canvas
+    checked = []
+
+    def second_folds(quad):
+        checked.append(quad)
+        return len(checked) != 2
+
+    monkeypatch.setattr(stitch, "quad_ok", second_folds)
+    solved = stitch.solve_layout(pieces[:3], width=1000, height=600)
+    assert (solved["dropped"], solved["why"]) == ([1, 2], [stitch.LEFT_OFF_CANVAS, stitch.LEFT_NO_OVERLAP])
+
+
+def test_why_a_piece_was_left_out_reads_its_points_and_its_projection():
+    points = [500, 3, 0, 19, 20, 800]
+    assert stitch._why_left_out([5, 1, 2, 3, 4], points, {5}) == [
+        "no-detail", "no-detail", "no-detail", "no-overlap", "off-canvas",
+    ]
+
+
 def test_solve_layout_rejects_a_lone_piece():
     with pytest.raises(ValueError, match="at least two"):
         stitch.solve_layout([_scene(width=200, height=200)], width=400, height=400)
@@ -287,6 +324,17 @@ def test_rotation_layout_drops_a_piece_that_matches_nothing():
     assert solved["dropped"] == [3]
     assert sorted(solved["quads"]) == [0, 1, 2]
     assert 3 not in solved["remaps"]
+
+
+def test_rotation_layout_says_why_it_left_each_piece_out():
+    views = _pan([-20, 0, 20])
+    views.append(_scene(width=520, height=420, seed=999))
+    views.append(Image.new("RGB", (520, 420), (90, 90, 90)))
+
+    solved = stitch.solve_rotation_layout(views, width=1200, height=600)
+
+    assert solved["dropped"] == [3, 4]
+    assert solved["why"] == [stitch.LEFT_NO_OVERLAP, stitch.LEFT_NO_DETAIL]
 
 
 def test_rotation_layout_rejects_a_lone_piece():

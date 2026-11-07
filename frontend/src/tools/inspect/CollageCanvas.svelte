@@ -8,6 +8,9 @@
   import { uiState } from '../../lib/state.svelte.js';
   import { anyOverlayOpen } from '../../lib/overlayStack.js';
   import { levelShift } from '../../lib/straighten.js';
+  import { CUT_MIN_SCREEN, CUT_SNAP_SCREEN, cutOf, dragCut, snapLines } from '../../lib/collageCut.js';
+  import { cutBounds } from '../../lib/inspect.js';
+  import { leftOutLine, leftOutWords } from '../../lib/leftOut.js';
   import { shortcut } from '../../lib/keys.js';
   import Icon from '../../components/Icon.svelte';
 
@@ -26,11 +29,15 @@
   // `x`, `y` the pan in screen pixels. It is the tool's; `fitPieces` frames the pieces whole,
   // and `fitted` says whether the view does.
   // `brush` paints, on a piece, what auto-stitch must not match on (`{ on, size, erase }`,
-  // lib/excludeBrush.js). `unstitched` names the pieces the last stitch found no overlap for:
-  // outlined until moved.
+  // lib/excludeBrush.js). `unstitched` names the pieces the last stitch left where they were,
+  // `{ id, why, mode }`: outlined, saying why, until moved.
+  // `collage.clip` is the frame its picture is cut to (lib/collageCut.js): the pieces are drawn
+  // cut to it. `cut` is that frame being drawn, `{ editing, frame }`: the pieces whole, what lies
+  // outside dimmed, its edges and corners in hand.
   let {
     collage, selectedIds = $bindable([]), requestCrop, level = $bindable(null),
     view = $bindable(), brush = $bindable(null), unstitched = $bindable([]), fitted = $bindable(true),
+    cut = $bindable(null),
   } = $props();
   // its own while no tool binds one
   const ownView = $state({ zoom: 1, x: 0, y: 0 });
@@ -93,8 +100,18 @@
   }
 
   // -- the pieces whole -----------------------------------------------------------------
+  // The pieces as the collage shows them: cut to its frame once it has one, whole while the
+  // frame is drawn.
+  const clipShown = $derived(collage.clip && !cut?.editing ? collage.clip : null);
+  const shownBox = $derived(clipShown ? cutBounds(collage.nodes, clipShown) : null);
   const pieceView = $derived(
-    fitView(collage.nodes.map((n) => n.quad), { width: availW, height: availH }, { width: cw, height: ch }),
+    fitView(
+      shownBox
+        ? [[[shownBox.minX, shownBox.minY], [shownBox.minX + shownBox.width, shownBox.minY + shownBox.height]]]
+        : collage.nodes.map((n) => n.quad),
+      { width: availW, height: availH },
+      { width: cw, height: ch },
+    ),
   );
   $effect(() => {
     const at = pieceView;
@@ -106,10 +123,31 @@
     Object.assign(cam, pieceView);
   }
 
+  // A collage opens framed on its pieces, as Fit frames them, once the pane has its size. A new
+  // one opens empty, on the whole canvas, and its first pieces leave the view alone.
+  let framedOnOpen = false;
+  $effect(() => {
+    void [availW, availH];
+    if (framedOnOpen || !wrapEl) return;
+    if (!collage.nodes.length) {
+      framedOnOpen = true;
+      return;
+    }
+    const pane = { width: wrapEl.clientWidth, height: wrapEl.clientHeight };
+    if (!(pane.width > 0 && pane.height > 0)) return;
+    framedOnOpen = true;
+    availW = pane.width;
+    availH = pane.height;
+    fitPieces();
+  });
+
+  // The pieces the last stitch left where they were, by id, with why.
+  const leftOut = $derived(new Map(unstitched.map((piece) => [piece.id, piece])));
+
   /** Pieces moved by hand are no longer the ones a stitch left out. */
   function placed(ids) {
-    if (unstitched.length && ids.some((id) => unstitched.includes(id))) {
-      unstitched = unstitched.filter((id) => !ids.includes(id));
+    if (unstitched.length && ids.some((id) => leftOut.has(id))) {
+      unstitched = unstitched.filter((piece) => !ids.includes(piece.id));
     }
   }
 
@@ -278,6 +316,17 @@
   // and when typing in a field or when a modal (e.g. the crop editor) is open.
   function onKey(e) {
     if (uiState.tool !== 'collage') return;
+    // While the cut is drawn, Enter keeps it and Esc leaves it as it was.
+    if (cut?.editing && !anyOverlayOpen()) {
+      const t = e.target;
+      const typing = t && (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable);
+      if (!typing && (e.key === 'Enter' || e.key === 'Escape')) {
+        e.preventDefault();
+        if (e.key === 'Enter') collage.clip = cutOf(cut.frame, collage.nodes);
+        cut.editing = false;
+        return;
+      }
+    }
     // While the level line is drawn, or still shown, Ctrl+Z takes its last point back (Collage leaves
     // the layout's undo alone then).
     if (level && (level.drawing || level.points.length) && !anyOverlayOpen()) {
@@ -454,6 +503,46 @@
     window.addEventListener('pointerup', up);
   }
 
+  // -- the cut -----------------------------------------------------------------------------
+  // The frame drawn over the pane in screen pixels, so its handles keep their size however
+  // close the canvas is: an edge or a corner follows the pointer, snapping to the pieces' sides
+  // (Alt drags freely), and a drag inside carries the frame whole.
+  const cutAt = $derived(
+    cut?.editing && cut.frame
+      ? { x: cam.x + cut.frame.x * scale, y: cam.y + cut.frame.y * scale, w: cut.frame.w * scale, h: cut.frame.h * scale }
+      : null,
+  );
+  const CUT_SIDES = ['n', 'e', 's', 'w'];
+  const CUT_CORNERS = ['nw', 'ne', 'se', 'sw'];
+
+  function grabCut(e, handle) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const start = { ...cut.frame };
+    const [sx, sy] = toCanvas(e);
+    const snaps = snapLines(collage.nodes);
+    const move = (ev) => {
+      const [x, y] = toCanvas(ev);
+      cut.frame = dragCut(start, handle, [x - sx, y - sy], {
+        min: CUT_MIN_SCREEN / scale, snaps: ev.altKey ? null : snaps, reach: CUT_SNAP_SCREEN / scale,
+      });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  /** Where a handle sits on the frame, screen pixels: its middle. */
+  function cutHandleAt(handle, f) {
+    const x = handle.includes('w') ? f.x : handle.includes('e') ? f.x + f.w : f.x + f.w / 2;
+    const y = handle.includes('n') ? f.y : handle.includes('s') ? f.y + f.h : f.y + f.h / 2;
+    return [x, y];
+  }
+
   // Rotate the piece around its centroid by dragging the rotate handle around
   // the centre — the angle tracks the pointer. Pure quad math (composes w/ warp).
   function startRotate(e, node) {
@@ -486,6 +575,7 @@
   class:checker={collage.transparent}
   class:drawing={level?.drawing}
   class:brushing={brush?.on}
+  class:cutting={!!cutAt}
   bind:this={wrapEl}
   bind:clientWidth={availW}
   bind:clientHeight={availH}
@@ -501,103 +591,124 @@
     style:height={`${ch}px`}
     style:transform={`translate(${cam.x}px, ${cam.y}px) scale(${scale})`}
   >
-    {#each collage.nodes as node (node.id)}
-      {@const box = boxOf(node)}
-      {#if !box.url}
-        <!-- A piece whose file is gone keeps its place, so the layout still reads
-             and the analyst can see what to replace. One still rendering holds
-             its place the same way, without the warning. -->
-        {@const mark = Math.max(16, Math.min(box.w, box.h) / 4)}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="node placeholder"
-          class:missing={node.missing}
-          class:selected={isSel(node.id)}
-          style:width={`${box.w}px`}
-          style:height={`${box.h}px`}
-          style:transform={quadMatrix3d(box.w, box.h, node.quad)}
-          onpointerdown={(e) => (e.stopPropagation(), startMove(e, node))}
-          title={node.missing ? "This piece's file is no longer in the case" : 'Loading this piece'}
-        >
-          {#if node.missing}
-            <Icon name="alert" size={mark} />
+    <!-- The pieces, cut to the collage's frame once it has one: the frame keeps what the saved
+         picture keeps, and a piece is drawn whole again as soon as the frame is drawn. -->
+    <div
+      class="pieces"
+      class:cut={clipShown}
+      style:left={clipShown ? `${clipShown.x}px` : null}
+      style:top={clipShown ? `${clipShown.y}px` : null}
+      style:width={clipShown ? `${clipShown.w}px` : null}
+      style:height={clipShown ? `${clipShown.h}px` : null}
+    >
+      <div class="pieces-in" style:transform={clipShown ? `translate(${-clipShown.x}px, ${-clipShown.y}px)` : null}>
+        {#each collage.nodes as node (node.id)}
+          {@const box = boxOf(node)}
+          {@const left = leftOut.get(node.id)}
+          {#if !box.url}
+            <!-- A piece whose file is gone keeps its place, so the layout still reads
+                 and the analyst can see what to replace. One still rendering holds
+                 its place the same way, without the warning. -->
+            {@const mark = Math.max(16, Math.min(box.w, box.h) / 4)}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              class="node placeholder"
+              class:missing={node.missing}
+              class:selected={isSel(node.id)}
+              style:width={`${box.w}px`}
+              style:height={`${box.h}px`}
+              style:transform={quadMatrix3d(box.w, box.h, node.quad)}
+              onpointerdown={(e) => (e.stopPropagation(), startMove(e, node))}
+              title={node.missing ? "This piece's file is no longer in the case" : 'Loading this piece'}
+            >
+              {#if node.missing}
+                <Icon name="alert" size={mark} />
+              {:else}
+                <span class="spinner" style:width={`${mark}px`} style:height={`${mark}px`} style:border-width={`${Math.max(2, mark / 10)}px`}></span>
+              {/if}
+            </div>
           {:else}
-            <span class="spinner" style:width={`${mark}px`} style:height={`${mark}px`} style:border-width={`${Math.max(2, mark / 10)}px`}></span>
+            <img
+              class="node"
+              class:selected={isSel(node.id)}
+              class:ghost={node.ghost || movingIds.includes(node.id)}
+              class:unstitched={!!left}
+              src={box.url}
+              alt="collage piece"
+              title={left ? `Auto-stitch left it here. ${leftOutLine(left.why, left.mode)}` : null}
+              style:width={`${box.w}px`}
+              style:height={`${box.h}px`}
+              style:transform={quadMatrix3d(box.w, box.h, node.quad)}
+              style:outline-width={left ? `${2 / scale}px` : null}
+              draggable="false"
+              onpointerdown={(e) => (e.stopPropagation(), startMove(e, node))}
+              ondblclick={() => { if (brush?.on) return; selectedIds = [node.id]; requestCrop?.(node); }}
+            />
+            {#if node.exclude?.length}
+              {#if brush?.on}
+                <!-- what is painted out of its stitch, drawn on the piece only while the brush is out -->
+                <svg
+                  class="paint"
+                  width={box.w}
+                  height={box.h}
+                  viewBox={`0 0 ${box.w} ${box.h}`}
+                  style:transform={quadMatrix3d(box.w, box.h, node.quad)}
+                  aria-hidden="true"
+                  data-testid="piece-paint"
+                >
+                  <g>
+                    {#each strokesShown(node) as stroke, i (i)}
+                      {#if stroke.points.length > 1}
+                        <polyline points={stroke.points.map((p) => p.join(',')).join(' ')} stroke-width={stroke.width} />
+                      {:else}
+                        <circle cx={stroke.points[0][0]} cy={stroke.points[0][1]} r={stroke.width / 2} />
+                      {/if}
+                    {/each}
+                  </g>
+                </svg>
+              {:else}
+                <!-- a small mark says the piece holds some, and takes the brush up on it -->
+                <button
+                  class="ignored"
+                  style:left={`${node.quad[0][0]}px`}
+                  style:top={`${node.quad[0][1]}px`}
+                  style:width={`${20 / scale}px`}
+                  style:height={`${20 / scale}px`}
+                  style:transform={`translate(${6 / scale}px, ${6 / scale}px)`}
+                  onpointerdown={(e) => e.stopPropagation()}
+                  onclick={() => { selectedIds = [node.id]; if (brush) brush.on = true; }}
+                  aria-label="Areas left out of auto-stitch"
+                  title="Areas left out of auto-stitch: paint or erase them"
+                  data-testid="piece-ignored"
+                >
+                  <Icon name="brush" size={11 / scale} />
+                </button>
+              {/if}
+            {/if}
           {/if}
-        </div>
-      {:else}
-      <img
-        class="node"
-        class:selected={isSel(node.id)}
-        class:ghost={node.ghost || movingIds.includes(node.id)}
-        class:unstitched={unstitched.includes(node.id)}
-        src={box.url}
-        alt="collage piece"
-        title={unstitched.includes(node.id) ? 'Auto-stitch found no overlap for this piece' : null}
-        style:width={`${box.w}px`}
-        style:height={`${box.h}px`}
-        style:transform={quadMatrix3d(box.w, box.h, node.quad)}
-        style:outline-width={unstitched.includes(node.id) ? `${2 / scale}px` : null}
-        draggable="false"
-        onpointerdown={(e) => (e.stopPropagation(), startMove(e, node))}
-        ondblclick={() => { if (brush?.on) return; selectedIds = [node.id]; requestCrop?.(node); }}
-      />
-      {#if node.exclude?.length}
-        {#if brush?.on}
-          <!-- what is painted out of its stitch, drawn on the piece only while the brush is out -->
-          <svg
-            class="paint"
-            width={box.w}
-            height={box.h}
-            viewBox={`0 0 ${box.w} ${box.h}`}
-            style:transform={quadMatrix3d(box.w, box.h, node.quad)}
-            aria-hidden="true"
-            data-testid="piece-paint"
-          >
-            <g>
-              {#each strokesShown(node) as stroke, i (i)}
-                {#if stroke.points.length > 1}
-                  <polyline points={stroke.points.map((p) => p.join(',')).join(' ')} stroke-width={stroke.width} />
-                {:else}
-                  <circle cx={stroke.points[0][0]} cy={stroke.points[0][1]} r={stroke.width / 2} />
-                {/if}
-              {/each}
-            </g>
-          </svg>
-        {:else}
-          <!-- a small mark says the piece holds some, and takes the brush up on it -->
-          <button
-            class="ignored"
-            style:left={`${node.quad[0][0]}px`}
-            style:top={`${node.quad[0][1]}px`}
-            style:width={`${20 / scale}px`}
-            style:height={`${20 / scale}px`}
-            style:transform={`translate(${6 / scale}px, ${6 / scale}px)`}
-            onpointerdown={(e) => e.stopPropagation()}
-            onclick={() => { selectedIds = [node.id]; if (brush) brush.on = true; }}
-            aria-label="Areas left out of auto-stitch"
-            title="Areas left out of auto-stitch: paint or erase them"
-            data-testid="piece-ignored"
-          >
-            <Icon name="brush" size={11 / scale} />
-          </button>
-        {/if}
-      {/if}
-      {#if unstitched.includes(node.id)}
+        {/each}
+      </div>
+    </div>
+
+    <!-- Over every piece: why a stitch left one where it was, and the piece in hand's handles. -->
+    {#each collage.nodes as node (node.id)}
+      {@const left = leftOut.get(node.id)}
+      {#if left && boxOf(node).url}
+        {@const words = leftOutWords(left.why, left.mode)}
         <!-- said on the piece itself: the outline alone reads as a selection -->
         <span
           class="left-out"
           style:left={`${node.quad[1][0]}px`}
           style:top={`${node.quad[1][1]}px`}
           style:font-size={`${11 / scale}px`}
-          style:padding={`${2 / scale}px ${6 / scale}px`}
+          style:padding={`${2 / scale}px ${7 / scale}px`}
           style:gap={`${4 / scale}px`}
           style:transform={`translate(calc(-100% - ${12 / scale}px), ${12 / scale}px)`}
           data-testid="piece-left-out"
         >
-          <Icon name="alert" size={11 / scale} /> No overlap
+          <Icon name="alert" size={11 / scale} />
+          <span>{words.say}{#if words.more}<span class="more">: {words.more}</span>{/if}</span>
         </span>
-      {/if}
       {/if}
       {#if node.id === soloId && !brush?.on}
         <!-- round corner handles: free perspective warp -->
@@ -708,6 +819,19 @@
       {/if}
     {/each}
 
+    {#if shownBox}
+      <!-- what the saved picture holds: the pieces within the frame -->
+      <div
+        class="cut-mark"
+        style:left={`${shownBox.minX}px`}
+        style:top={`${shownBox.minY}px`}
+        style:width={`${shownBox.width}px`}
+        style:height={`${shownBox.height}px`}
+        style:border-width={`${1 / scale}px`}
+        aria-hidden="true"
+      ></div>
+    {/if}
+
     <!-- Block frame for a multi-piece selection: one axis-aligned box around the
          lot, with corner handles that scale it and a knob that turns it — all
          about the box's centre, so the pieces hold their relative places. The
@@ -781,6 +905,56 @@
     ></div>
   {/if}
 
+  {#if cutAt}
+    <!-- The frame being drawn, in screen pixels: what lies outside is dimmed, the pieces whole
+         under it. A press outside pans, as the background does. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="cut-layer" onpointerdown={startPan} data-testid="cut-frame">
+      <svg class="cut-shade" aria-hidden="true">
+        <path
+          fill-rule="evenodd"
+          d={`M-99999 -99999H99999V99999H-99999Z M${cutAt.x} ${cutAt.y}h${cutAt.w}v${cutAt.h}h${-cutAt.w}Z`}
+        />
+        <rect class="cut-line" x={cutAt.x} y={cutAt.y} width={cutAt.w} height={cutAt.h} />
+        {#each [1, 2] as k (k)}
+          <line class="cut-third" x1={cutAt.x + (cutAt.w * k) / 3} y1={cutAt.y} x2={cutAt.x + (cutAt.w * k) / 3} y2={cutAt.y + cutAt.h} />
+          <line class="cut-third" x1={cutAt.x} y1={cutAt.y + (cutAt.h * k) / 3} x2={cutAt.x + cutAt.w} y2={cutAt.y + (cutAt.h * k) / 3} />
+        {/each}
+      </svg>
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="cut-inside"
+        style:left={`${cutAt.x}px`}
+        style:top={`${cutAt.y}px`}
+        style:width={`${cutAt.w}px`}
+        style:height={`${cutAt.h}px`}
+        onpointerdown={(e) => grabCut(e, 'move')}
+      ></div>
+      {#each CUT_SIDES as side (side)}
+        {@const [hx, hy] = cutHandleAt(side, cutAt)}
+        {@const across = side === 'n' || side === 's'}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="cut-side"
+          class:across
+          style:left={`${across ? cutAt.x : hx}px`}
+          style:top={`${across ? hy : cutAt.y}px`}
+          style:width={across ? `${cutAt.w}px` : null}
+          style:height={across ? null : `${cutAt.h}px`}
+          onpointerdown={(e) => grabCut(e, side)}
+          data-handle={side}
+        >
+          <span class="cut-grip" style:left={across ? `${cutAt.w / 2}px` : null} style:top={across ? null : `${cutAt.h / 2}px`}></span>
+        </div>
+      {/each}
+      {#each CUT_CORNERS as corner (corner)}
+        {@const [hx, hy] = cutHandleAt(corner, cutAt)}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class={`cut-corner ${corner}`} style:left={`${hx}px`} style:top={`${hy}px`} onpointerdown={(e) => grabCut(e, corner)} data-handle={corner}></div>
+      {/each}
+    </div>
+  {/if}
+
   {#if brush?.on && ring}
     <div
       class="brush-ring"
@@ -800,6 +974,14 @@
         Paint over what moves or was laid over the picture, such as people, vehicles or a watermark. Auto-stitch does not match there.
       </p>
       <p>Alt erases · [ and ] change the size · Esc ends · never in the saved picture</p>
+    </div>
+  {:else if cutAt}
+    <div class="view-hint level-cue cut-cue" role="status">
+      <p class="cue-say">
+        <span class="level-dot cut-dot" aria-hidden="true"></span>
+        Drag an edge or a corner to frame what the saved picture keeps. Every piece stays whole.
+      </p>
+      <p>drag inside to move it · edges snap to the pieces, Alt drags freely · Enter applies · Esc cancels</p>
     </div>
   {:else if level?.drawing}
     <!-- What to click while the line is drawn, in the corner the keys are said in. -->
@@ -932,6 +1114,154 @@
     line-height: 1.3;
     white-space: nowrap;
     pointer-events: none;
+  }
+  .left-out .more {
+    color: rgba(255, 255, 255, 0.72);
+    font-weight: 400;
+  }
+  /* The pieces' own layer: at the canvas's corner, holding nothing of its own, until a cut
+     frames it and hides what lies outside. */
+  .pieces {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+  }
+  .pieces.cut {
+    overflow: hidden;
+  }
+  .pieces-in {
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+  /* What the saved picture holds, once cut: a hairline round it. */
+  .cut-mark {
+    position: absolute;
+    box-sizing: border-box;
+    border-style: solid;
+    border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+    pointer-events: none;
+  }
+  /* Drawing the cut: the pane takes the frame's colour at its edge, the outside dims. */
+  .wrap.cutting {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+  .cut-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    overflow: hidden;
+    cursor: grab;
+  }
+  .cut-shade {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  .cut-shade path {
+    fill: rgba(8, 10, 14, 0.62);
+  }
+  .cut-line {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.5;
+  }
+  .cut-third {
+    stroke: rgba(255, 255, 255, 0.22);
+    stroke-width: 1;
+  }
+  .cut-inside {
+    position: absolute;
+    cursor: move;
+  }
+  /* An edge is held anywhere along it, a grip in its middle showing where. */
+  .cut-side {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    transform: translate(-50%, -50%);
+    cursor: ew-resize;
+    touch-action: none;
+  }
+  .cut-side.across {
+    transform: translateY(-50%);
+    cursor: ns-resize;
+  }
+  .cut-side:not(.across) {
+    transform: translateX(-50%);
+  }
+  .cut-grip {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 4px;
+    height: 22px;
+    border-radius: 2px;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+    transform: translate(-50%, -50%);
+  }
+  .cut-side.across .cut-grip {
+    width: 22px;
+    height: 4px;
+  }
+  /* A corner is held round its point, its bracket drawn along the frame's two edges. */
+  .cut-corner {
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    transform: translate(-50%, -50%);
+    touch-action: none;
+  }
+  .cut-corner::before {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    border: 0 solid #fff;
+    filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.85));
+  }
+  .cut-corner.nw,
+  .cut-corner.se {
+    cursor: nwse-resize;
+  }
+  .cut-corner.ne,
+  .cut-corner.sw {
+    cursor: nesw-resize;
+  }
+  .cut-corner.nw::before {
+    left: 50%;
+    top: 50%;
+    border-width: 3px 0 0 3px;
+    transform: translate(-1.5px, -1.5px);
+  }
+  .cut-corner.ne::before {
+    right: 50%;
+    top: 50%;
+    border-width: 3px 3px 0 0;
+    transform: translate(1.5px, -1.5px);
+  }
+  .cut-corner.se::before {
+    right: 50%;
+    bottom: 50%;
+    border-width: 0 3px 3px 0;
+    transform: translate(1.5px, 1.5px);
+  }
+  .cut-corner.sw::before {
+    left: 50%;
+    bottom: 50%;
+    border-width: 0 0 3px 3px;
+    transform: translate(-1.5px, 1.5px);
+  }
+  .cut-cue {
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  .level-dot.cut-dot {
+    background: var(--accent);
   }
   .wrap.brushing .node {
     cursor: none;

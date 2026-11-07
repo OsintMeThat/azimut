@@ -89,6 +89,10 @@ _PIECE_KEYS = ("id", "frameId", "save", "w", "h", "quad", "frameOps", "crop", "e
 #: `pinholeOps` renders it, crop included), each with a radius as a fraction of its width.
 MAX_EXCLUDE_STROKES = 200
 MAX_EXCLUDE_POINTS = 400
+#: How far a collage's cut (Collage → Cut, `clip: {x, y, w, h}` in canvas pixels) may
+#: reach: a frame round pieces a canvas of at most 8192 pixels holds, with room for
+#: pieces dragged off it, and never a runaway number.
+MAX_CLIP = 100_000
 _RIGHT_ANGLES = (-180, -90, 0, 90, 180)
 
 #: Names the app hands out before the analyst types one. They describe nothing, so a
@@ -705,7 +709,10 @@ def _export_current(case: "Case", spec: dict[str, Any]) -> bool:
     except ValueError:
         return False
     nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
-    if recorded != [[n.get("save"), n.get("quad")] for n in nodes]:
+    pieces = [[n.get("save"), n.get("quad")] for n in nodes]
+    # a cut collage signs its frame beside its pieces (frontend lib/inspectWork.svelte.js)
+    clip = spec.get("clip")
+    if recorded != ({"nodes": pieces, "clip": clip} if isinstance(clip, dict) else pieces):
         return False
     try:
         return media_engine.read_item(case, path) is not None
@@ -736,6 +743,26 @@ def _outline(spec: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _cut_box(spec: dict[str, Any]) -> tuple[float, float, float, float] | None:
+    """What a cut collage's picture shows, canvas pixels (left, top, right, bottom): its
+    pieces' bounds within its frame. None for a collage with no cut, or nothing in it."""
+    clip = spec.get("clip")
+    if not isinstance(clip, dict):
+        return None
+    try:
+        points = [
+            (float(x), float(y))
+            for node in spec.get("nodes") or [] if isinstance(node, dict) and isinstance(node.get("quad"), list)
+            for x, y in node["quad"]
+        ]
+        x, y, w, h = (float(clip[key]) for key in ("x", "y", "w", "h"))
+        left, top = max(x, min(p[0] for p in points)), max(y, min(p[1] for p in points))
+        right, bottom = min(x + w, max(p[0] for p in points)), min(y + h, max(p[1] for p in points))
+    except (KeyError, TypeError, ValueError):
+        return None
+    return (left, top, right, bottom) if right > left and bottom > top else None
+
+
 def strip_of(case: "Case", path: str) -> dict[str, Any] | None:
     """How many degrees of turn a picture exported from a stitched collage spans.
 
@@ -756,8 +783,11 @@ def strip_of(case: "Case", path: str) -> dict[str, Any] | None:
         outline = _outline(spec)
         if scale is None or outline is None or not outline["width"] > 0:
             return None
+        # a cut collage's picture is as wide as its frame keeps of the pieces
+        cut = _cut_box(spec)
+        width = cut[2] - cut[0] if cut else outline["width"]
         return {
-            "degrees": round(outline["width"] / scale["per_degree"], 2),
+            "degrees": round(width / scale["per_degree"], 2),
             "stitched": scale["stitched"],
             "by_hand": scale["by_hand"],
             "warp": scale["warp"],
@@ -818,12 +848,14 @@ def frames_of(case: "Case", path: str) -> tuple[Any, dict[str, Any]] | None:
                 size = _frame_size(case, source)
                 if size is not None:
                     sources[source] = size
-        pieces = frames.pieces_of(spec, sources)
+        # a cut collage's picture is its frame over the pieces, read from the frame's corner
+        cut = _cut_box(spec)
+        pieces = frames.pieces_of(spec, sources, origin=cut[:2] if cut else None)
         if len(pieces) < 2:
             return None
         # the export is the pieces trimmed to their bounds: the plane's middle and width are the outline's,
         # in canvas pixels, however sharply the picture was drawn
-        export = (
+        export = (cut[2] - cut[0], cut[3] - cut[1]) if cut else (
             float(max(piece.quad[:, 0].max() for piece in pieces)),
             float(max(piece.quad[:, 1].max() for piece in pieces)),
         )
@@ -884,6 +916,23 @@ def clean_exclude(strokes: Any) -> list[dict[str, Any]]:
     return out
 
 
+def clean_clip(clip: Any) -> dict[str, float] | None:
+    """A collage's cut, checked at the edge: a frame `{x, y, w, h}` in canvas pixels,
+    at least a pixel each way and within :data:`MAX_CLIP`. Null is no cut."""
+    if clip is None:
+        return None
+    if not isinstance(clip, dict):
+        raise CaseError("a cut is a frame, {x, y, w, h}")
+    x, y, w, h = (_unit(clip.get(key)) for key in ("x", "y", "w", "h"))
+    if x is None or y is None or w is None or h is None:
+        raise CaseError("a cut's x, y, w and h are numbers")
+    if w < 1 or h < 1:
+        raise CaseError("a cut is at least a pixel wide and high")
+    if max(abs(x), abs(y), w, h) > MAX_CLIP:
+        raise CaseError(f"a cut stays within {MAX_CLIP} pixels of the canvas")
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
 def _clean_collage(spec: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(spec, dict):
         raise CaseError("the collage must be an object")
@@ -918,6 +967,10 @@ def _clean_collage(spec: dict[str, Any]) -> dict[str, Any]:
     }
     if isinstance(spec.get("exported"), dict):
         out["exported"] = spec["exported"]
+    # cut to a frame (Collage → Cut): its picture keeps what lies inside, its pieces stay whole
+    clip = clean_clip(spec.get("clip"))
+    if clip is not None:
+        out["clip"] = clip
     # bent by hand along a level line (frontend lib/straighten.js): its stitch is what bent it
     if spec.get("straightened") is True:
         out["straightened"] = True

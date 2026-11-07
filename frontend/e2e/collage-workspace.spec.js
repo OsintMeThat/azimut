@@ -94,14 +94,33 @@ test('saves in one press under its name, and unfolds the name, folder and note o
   fixture.expectNoUnexpectedRequests();
 });
 
-test('straightens from the bar over the canvas, as it did from the panel', async ({ page }) => {
+test('straightens from the bar over the canvas, each piece bent alike and kept apart', async ({ page }) => {
   await openStrip(page, { works: [] });
   let bent = null;
-  await page.route(`**/api/cases/${CASE_ID}/inspect/compose`, (route) => {
+  await page.route(`**/api/cases/${CASE_ID}/inspect/straighten`, (route) => {
     bent = route.request().postDataJSON();
-    return route.fulfill({ json: { item: { path: 'media/Strip straightened.png' }, box: [0, 0, bent.width, bent.height], entity: null } });
+    // each piece's box on the bent canvas: where it lay, its columns moved
+    const pieces = bent.nodes.map((n, i) => {
+      const xs = n.quad.map(([x]) => x);
+      const ys = n.quad.map(([, y]) => y);
+      const box = [Math.min(...xs), Math.min(...ys) - 4, Math.max(...xs), Math.max(...ys) + 4].map(Math.round);
+      return { item: { path: `media/Strip straightened ${i + 1}.png` }, box, entity: null, duplicate: false };
+    });
+    return route.fulfill({ json: { pieces } });
   });
-  await page.route(`**/files/${CASE_ID}/media/Strip%20straightened.png`, (route) => route.fulfill({
+  // once filed, the bent pictures are in the case beside the panel they were bent from
+  await page.route(`**/api/cases/${CASE_ID}/media`, (route) => {
+    if (!bent || route.request().method() !== 'GET') return route.fallback();
+    return route.fulfill({ json: [
+      { path: PANEL_PATH, filename: 'panel.svg', kind: 'image', title: '', source: { type: 'upload' }, thumbnail: null },
+      ...bent.nodes.map((_, i) => ({
+        path: `media/Strip straightened ${i + 1}.png`, filename: `Strip straightened ${i + 1}.png`, kind: 'image',
+        title: `Strip straightened ${i + 1}`, thumbnail: null,
+        source: { type: 'inspect', op: 'collage', sources: [PANEL_PATH], times: [null], straightened: true },
+      })),
+    ] });
+  });
+  await page.route(`**/files/${CASE_ID}/media/Strip%20straightened*.png`, (route) => route.fulfill({
     contentType: 'image/svg+xml',
     body: '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#38bdf8"/></svg>',
   }));
@@ -117,8 +136,56 @@ test('straightens from the bar over the canvas, as it did from the panel', async
 
   await page.getByRole('button', { name: 'Straighten', exact: true }).click();
   await expect.poll(() => Array.isArray(bent?.bend)).toBe(true);
+  expect(bent.bend).toHaveLength(bent.width);
+  expect(bent.nodes.map((n) => n.label)).toEqual(['Strip straightened panel', 'Strip straightened panel']);
   await expect(page.locator('[data-guide="collage.straighten"]')).toContainText('straightened');
   await expect(page.locator('.level-line')).toHaveCount(0);
+  // one picture per piece, each its own piece still
+  await expect(page.locator('img.node')).toHaveCount(2);
+  await page.locator('img.node').nth(1).click();
+  await expect(page.locator('.identity .source')).toHaveText('Strip straightened 2');
+  await expect(page.getByRole('button', { name: 'Rotate piece' })).toBeVisible();
+  if (process.env.COLLAGE_SHOT) await page.screenshot({ path: process.env.COLLAGE_SHOT.replace('.png', '-straightened.png') });
+});
+
+test('cuts the collage to a frame, its pieces whole, and saves the picture cut to it', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const { writes } = await openStrip(page, { works: [] });
+  let composed = null;
+  await page.route(`**/api/cases/${CASE_ID}/inspect/compose`, (route) => {
+    composed = route.request().postDataJSON();
+    return route.fulfill({ json: { item: { path: EXPORT }, entity: null, duplicate: false } });
+  });
+
+  await page.getByRole('button', { name: 'Cut' }).click();
+  await expect(page.locator('.cut-cue')).toContainText('frame what the saved picture keeps');
+  const bottom = await page.locator('[data-handle="s"]').boundingBox();
+  const piece = await page.locator('img.node').first().boundingBox();
+  // the ground cut off: the lower edge raised a third of the way up the pieces
+  await page.mouse.move(bottom.x + bottom.width / 2, bottom.y + bottom.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bottom.x + bottom.width / 2, piece.y + piece.height * 0.66, { steps: 6 });
+  await page.mouse.up();
+  if (process.env.COLLAGE_SHOT) await page.screenshot({ path: process.env.COLLAGE_SHOT.replace('.png', '-cutting.png') });
+  await page.getByRole('button', { name: 'Apply' }).click();
+
+  await expect(page.locator('.pieces.cut')).toHaveCount(1);
+  await expect(page.locator('.cut-layer')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Cut' })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => writes.at(-1)?.spec.clip?.h ?? null).not.toBeNull();
+  const clip = writes.at(-1).spec.clip;
+  expect(clip.h).toBeCloseTo(270 * 0.66 + 40 - 40, -1);
+  // the pieces stay whole, each its own piece
+  await page.locator('img.node').nth(1).click({ position: { x: 20, y: 20 } });
+  await expect(page.locator('.identity .source')).toHaveText('panel.svg');
+  if (process.env.COLLAGE_SHOT) await page.screenshot({ path: process.env.COLLAGE_SHOT.replace('.png', '-cut.png') });
+
+  await page.locator('[data-guide="collage.save"] .press').click();
+  await expect.poll(() => composed?.clip ?? null).not.toBeNull();
+  expect(composed.height).toBeLessThan(composed.width / 4);
+
+  await page.getByRole('button', { name: 'Clear' }).click();
+  await expect(page.locator('.pieces.cut')).toHaveCount(0);
 });
 
 test('stitches from its press, and takes the stitch back from its message', async ({ page }) => {
@@ -234,25 +301,39 @@ test('draws each split button as one control, its arrow joined to its press', as
     // the arrow begins where the press ends, sharing its border
     expect(Math.abs(arrow.x - (press.x + press.width)), group).toBeLessThanOrEqual(1);
   }
-  if (process.env.COLLAGE_SHOT) await page.locator('.bar').screenshot({ path: process.env.COLLAGE_SHOT.replace('.png', '-split.png') });
+  if (process.env.COLLAGE_SHOT) await page.getByRole('toolbar', { name: 'Collage tools' }).screenshot({ path: process.env.COLLAGE_SHOT.replace('.png', '-split.png') });
 });
 
-test('outlines the pieces a stitch left out, in hand for the arrows, and frames the pieces', async ({ page }) => {
+test('opens a collage framed on its pieces, closer than the whole canvas', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await openStrip(page, { works: [] });
+  await expect(page.getByRole('button', { name: 'Fit' })).toBeDisabled();
+  const wrap = await page.locator('.wrap').boundingBox();
+  // the pieces span 1040 of the 1200 px canvas, laid across the pane less a margin either side
+  const whole = Math.min(wrap.width / 1200, wrap.height / 400);
+  await expect.poll(async () => (await surface(page)).scale).toBeCloseTo(Math.min((wrap.width - 56) / 1040, (wrap.height - 56) / 270), 3);
+  expect((await surface(page)).scale).toBeGreaterThan(whole);
+  const [first, last] = [await page.locator('img.node').first().boundingBox(), await page.locator('img.node').nth(1).boundingBox()];
+  expect(Math.abs((first.x - wrap.x) - (wrap.x + wrap.width - (last.x + last.width)))).toBeLessThan(2);
+});
+
+test('outlines the pieces a stitch left out, saying why, in hand for the arrows, and frames the pieces', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await openStrip(page, { works: [] });
   await page.route(`**/api/cases/${CASE_ID}/inspect/auto-stitch`, (route) => route.fulfill({ json: {
     nodes: [{ index: 0, quad: [[100, 60], [580, 60], [580, 330], [100, 330]], op: null }],
     dropped: [1],
+    why: ['no-detail'],
     canvas: { width: 1200, height: 400 },
   } }));
-  const fitted = await surface(page);
 
   await page.getByRole('button', { name: /^Auto-stitch/ }).click();
-  await expect(page.getByText('Stitched 1. No overlap found for the outlined piece, left where it was')).toBeVisible();
+  await expect(page.getByText('Stitched 1. The outlined piece stays where it was: nothing to match, blank or painted out')).toBeVisible();
   await expect(page.locator('img.node.unstitched')).toHaveCount(1);
+  await expect(page.getByTestId('piece-left-out')).toHaveText('Nothing to match: blank or painted out');
   await expect(page.locator('.identity .source')).toHaveText('panel.svg');
-  // Fit now frames the pieces, closer than the whole canvas
-  await expect.poll(async () => (await surface(page)).scale).toBeGreaterThan(fitted.scale);
+  if (process.env.COLLAGE_SHOT) await page.screenshot({ path: process.env.COLLAGE_SHOT.replace('.png', '-left-out.png') });
+  // Fit frames the pieces as the stitch left them
   await expect(page.getByRole('button', { name: 'Fit' })).toBeDisabled();
 
   const left = async () => (await page.locator('img.node').nth(1).boundingBox()).x;

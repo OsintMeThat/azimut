@@ -147,6 +147,18 @@ describe('collages', () => {
     expect(moved).not.toBe(before);
   });
 
+  it('keeps a cut, and signs it beside the pieces so a new cut is a new picture', () => {
+    const clip = { x: 0, y: 0, w: 60, h: 40 };
+    expect(collageSpec({ width: 800, height: 400, nodes: [piece()], clip }).clip).toEqual(clip);
+    expect(collageSpec({ width: 800, height: 400, nodes: [piece()], clip: null })).not.toHaveProperty('clip');
+    const plain = collageSignature({ nodes: [piece()] });
+    const cut = collageSignature({ nodes: [piece()], clip });
+    // as the server reads it back: the pieces alone, or the pieces and the frame
+    expect(JSON.parse(plain)).toEqual([[piece().save, piece().quad]]);
+    expect(JSON.parse(cut)).toEqual({ nodes: [[piece().save, piece().quad]], clip });
+    expect(collageSignature({ nodes: [piece()], clip: { ...clip, h: 30 } })).not.toBe(cut);
+  });
+
   it('finds the pieces whose file is gone', () => {
     expect(missingPieces({ nodes: [piece(), piece({ id: 'nd_2', missing: true })] }).map((n) => n.id)).toEqual(['nd_2']);
   });
