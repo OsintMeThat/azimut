@@ -14,7 +14,7 @@ import subprocess
 import pytest
 from PIL import Image
 
-from azimut.engine import geolocate
+from azimut.engine import geolocate, inspectwork
 from azimut.engine import media as media_engine
 from azimut.engine import uses as uses_engine
 from azimut.workspace import Case
@@ -155,6 +155,18 @@ def test_a_scene_gone_from_its_work_ends_the_geolocating_and_takes_nothing(clien
     assert _geolocate(client, cid, photo, "s1").status_code == 400
 
 
+def test_the_queue_reads_each_work_once_however_many_files_it_walks(client, monkeypatch):
+    cid = _case(client)
+    for n in range(4):
+        photo = _upload(client, cid, f"p{n}.png", (n * 40, 10, 10))
+        _save_work(client, cid, photo, SCENES)
+    calls = []
+    real = inspectwork._work_specs
+    monkeypatch.setattr(inspectwork, "_work_specs", lambda case: calls.append(1) or real(case))
+    assert len(_queue(client, cid)["files"]) == 4
+    assert len(calls) <= 2  # the files, and the one pass the order reads them for
+
+
 def test_a_scene_keeps_no_more_captures_than_its_limit(client, monkeypatch):
     monkeypatch.setattr(geolocate, "MAX_CAPTURES", 2)
     cid = _case(client)
@@ -293,6 +305,13 @@ def test_saving_a_work_or_abandoning_a_scene_says_its_scenes_may_have_moved(clie
     cid = _case(client)
     photo = _upload(client, cid)
     _save_work(client, cid, photo, SCENES)
+    assert {"type": "scenes", "case_id": cid, "video": photo} in heard
+    # an autosave that changes nothing about the scenes says nothing
+    heard.clear()
+    _save_work(client, cid, photo, SCENES)
+    assert heard == []
+    moved = [{**SCENES[0], "label": "Roundabout north"}, SCENES[1]]
+    _save_work(client, cid, photo, moved)
     assert {"type": "scenes", "case_id": cid, "video": photo} in heard
     heard.clear()
     client.put(f"/api/cases/{cid}/scenes/s2/abandon", json={"video": photo})

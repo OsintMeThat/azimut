@@ -72,10 +72,11 @@ def _orders(case: Case, videos: list[str], proofs: Any = None) -> dict[tuple[str
     pill and the reference window draw it in the same colour. A file that is not a
     video has no bar, and its scenes no place."""
     proofs = proofs if proofs is not None else scenes_engine.read_proofs(case)
+    works = inspectwork.subject_specs(case)  # read once: a queue walks every worked file
     places: dict[tuple[str, str], int] = {}
     for video in videos:
         try:
-            listed = scenes_engine.video_scenes(case, video, proofs)["scenes"]
+            listed = scenes_engine.video_scenes(case, video, proofs, works)["scenes"]
         except CaseError:
             continue
         for at, scene in enumerate(listed):

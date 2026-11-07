@@ -387,6 +387,7 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
             title = layout.free_stem(_taken(case, layout.INSPECT_DIR), label, "Inspect")
             rel = layout.session_rel(title)
             created = _now()
+        moved = _scene_lines(previous.get("scenes") if found else None) != _scene_lines(scenes)
         if found:
             _keep_scene_state(scenes, previous.get("scenes"))
         active = spec.get("activeFrameId")
@@ -412,7 +413,13 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
         if filed is None:
             filed = case.add_entity(WORK_TYPE, title, attrs={"spec": rel}, by=PRODUCER)
         link_engine.sync(case, filed["id"], link_engine.DEPENDS_ON, [subject], by=PRODUCER)
-    return {"name": Path(rel).stem, "title": title}
+    return {"name": Path(rel).stem, "title": title, "scenes_moved": moved}
+
+
+def _scene_lines(scenes: Any) -> list[tuple[Any, ...]]:
+    """What a save can change about a file's scenes, to tell one that did from the many
+    autosaves that did not. The server's own fields (`SCENE_STATE`) are not among it."""
+    return [tuple(s.get(key) for key in _SCENE_KEYS) for s in scenes or [] if isinstance(s, dict)]
 
 
 def _keep_scene_state(scenes: list[dict[str, Any]], stored: Any) -> None:
@@ -457,6 +464,16 @@ def scene_works(case: "Case") -> list[tuple[str, str | None, list[dict[str, Any]
             rows.append((subject, spec.get("updated_at"), scenes))
     rows.sort(key=lambda row: row[1] or "", reverse=True)
     return rows
+
+
+def subject_specs(case: "Case") -> dict[str, dict[str, Any]]:
+    """Each file's work as it stands, read once for a pass over many files. It settles
+    nothing: `find_work` is the read that merges a file's stray works."""
+    return {
+        subject: spec
+        for _rel, spec in _work_specs(case)
+        if (subject := _subject(spec)) and spec.get("azimut_inspect") == WORK_VERSION
+    }
 
 
 def scene_ids(case: "Case") -> set[str]:

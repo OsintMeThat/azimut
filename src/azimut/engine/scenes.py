@@ -351,14 +351,25 @@ def laid_out_by(specs: list[tuple[str, dict[str, Any]]], path: str) -> list[tupl
     return [(name, spec) for name, spec in specs if path in _panel_sources(spec)]
 
 
-def _image_scenes(case: Case, image: str, entity: dict[str, Any], specs: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
+def _drafts_of(case: Case, path: str, works: dict[str, dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """A file's scenes to prove, from the works already read for a pass over many files."""
+    spec = works.get(path) if works is not None else (inspectwork.find_work(case, path) or {}).get("spec")
+    return [d for d in (spec or {}).get("scenes") or [] if isinstance(d, dict)]
+
+
+def _image_scenes(
+    case: Case,
+    image: str,
+    entity: dict[str, Any],
+    specs: list[tuple[str, dict[str, Any]]],
+    works: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """A picture's scenes: what the analyst marked to geolocate in it, the whole of it as
     the app marks it, all proved by any proof that lays the picture out, which then
     lists in their place. A picture has no time to order them by."""
     laid = laid_out_by(specs, image)
     scenes = [_proof_row(case, name, spec, {"video": image, "moments": [], "at": []}) for name, spec in laid]
-    work = inspectwork.find_work(case, image)
-    drafts = [d for d in ((work or {}).get("spec") or {}).get("scenes") or [] if isinstance(d, dict) and isinstance(d.get("id"), str)]
+    drafts = [d for d in _drafts_of(case, image, works) if isinstance(d.get("id"), str)]
     hidden = sorted(d["id"] for d in drafts) if laid else []
     if not laid:
         scenes += [draft_row(case, image, d, "image") for d in drafts]
@@ -375,6 +386,7 @@ def video_scenes(
     case: Case,
     video: str,
     proofs: tuple[list[tuple[str, dict[str, Any]]], dict[str, tuple[str, float]]] | None = None,
+    works: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The scenes of one video, in the order they come in the clip, or of one picture
     (`_image_scenes`): its whole, marked to geolocate, and the proofs laying it out.
@@ -396,7 +408,7 @@ def video_scenes(
         raise CaseError("only a video or a picture has scenes")
     specs, origins = proofs if proofs is not None else read_proofs(case)
     if kind == "image":
-        return _image_scenes(case, video, entity, specs)
+        return _image_scenes(case, video, entity, specs, works)
 
     scenes: list[dict[str, Any]] = []
     taken: set[str] = set()
@@ -412,8 +424,7 @@ def video_scenes(
         if scene["video"] == video:
             scenes.append(_proof_row(case, name, spec, scene))
 
-    work = inspectwork.find_work(case, video)
-    drafts = [d for d in ((work or {}).get("spec") or {}).get("scenes") or [] if isinstance(d, dict)]
+    drafts = _drafts_of(case, video, works)
     hidden = sorted(taken & {d.get("id") for d in drafts if isinstance(d.get("id"), str)})
     for draft in drafts:
         if draft.get("id") in taken:

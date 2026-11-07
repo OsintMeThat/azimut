@@ -483,8 +483,10 @@ def save_work(case_id: str, body: WorkIn) -> dict[str, Any]:
         saved = inspectwork.save_work(case, body.path, body.spec)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    # its scenes may have moved: the To-do and the extension's queue read them again
-    events.publish({"type": "scenes", "case_id": case.id, "video": body.path})
+    # its scenes moved: the To-do and the extension's queue read them again. An autosave
+    # that changed nothing about them says nothing.
+    if saved.pop("scenes_moved"):
+        events.publish({"type": "scenes", "case_id": case.id, "video": body.path})
     return saved
 
 
