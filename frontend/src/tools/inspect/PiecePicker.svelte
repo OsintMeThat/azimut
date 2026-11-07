@@ -10,9 +10,9 @@
   // Where a collage's pieces come from: the frames cut in Inspect, from any file,
   // or any image already in the case. A piece is a recipe frozen when it is added,
   // so what is picked here stays as it was even if the frame is edited later.
-  let { caseId, filters, works, images, used, rev = 0, onadd } = $props();
+  // `tab` is bound, so the empty canvas can open the list it points to.
+  let { caseId, filters, works, images, used, rev = 0, onadd, tab = $bindable('frames') } = $props();
 
-  let tab = $state('frames');
   let query = $state('');
 
   // Both lists keep the order they arrive in, the files last worked on and the
@@ -158,7 +158,11 @@
 </div>
 
 <style>
+  /* The picker takes the room its block is given and the files scroll inside it,
+     so a long list never pushes what sits below. */
   .picker {
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -177,12 +181,12 @@
   .find :global(.search-box) {
     flex: 1;
   }
-  /* The files scroll on their own, so the controls below stay in reach. */
   .list {
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 4px;
-    max-height: 38vh;
     overflow: auto;
     padding-right: 2px;
   }

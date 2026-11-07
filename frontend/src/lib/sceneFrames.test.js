@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  frameInMoment, frameScenes, frameToCapture, frameUses, framesOfScene, inScenes, pictureHandoff, proofHandoff, scenesAt, usedIn,
+  collagesOfScene, collagesUnder, frameInMoment, frameScenes, frameToCapture, frameUses, framesOfScene, inScenes, pictureHandoff,
+  proofHandoff, sceneOfCollage, scenesAt, usedIn,
 } from './sceneFrames.js';
 import { sceneList } from './scenes.js';
 
@@ -182,5 +183,46 @@ describe('what Geo Proof is handed for a picture', () => {
   it('holds with no capture, and never lays the picture out twice', () => {
     expect(pictureHandoff({ label: '' }, 'media/market.jpg').panels).toEqual(['media/market.jpg']);
     expect(pictureHandoff({}, 'media/market.jpg', ['media/market.jpg', '']).panels).toEqual(['media/market.jpg']);
+  });
+});
+
+describe('a collage among the scenes', () => {
+  const collage = (name, times) => ({ collage: name, title: name, times, start: times[0], end: times.length > 1 ? times.at(-1) : null });
+  const listed = (drafts, proofs = []) => sceneList(proofs, drafts);
+
+  it('is in the scene holding most of its pieces, else in the whole video, else in none', () => {
+    const scenes = listed([draft('whole', null), draft('a', 1, 3), draft('b', 2, 6)]);
+    expect(sceneOfCollage([2.4, 3.6, 5], scenes, FRAME).id).toBe('b');
+    expect(sceneOfCollage([1.2], scenes, FRAME).id).toBe('a');
+    expect(sceneOfCollage([40], scenes, FRAME).id).toBe('whole');
+    expect(sceneOfCollage([40], listed([draft('a', 1, 3)]), FRAME)).toBeNull();
+  });
+
+  it('counts a piece on the last instant of a period marked from it', () => {
+    // a period marked first to last piece: the last piece starts where it ends
+    const scenes = listed([draft('p', 1.2, 3.6)]);
+    expect(sceneOfCollage([3.6], scenes, FRAME)).toBeNull();
+    expect(sceneOfCollage([1.2, 3.6], scenes, FRAME).id).toBe('p');
+  });
+
+  it('is held by no abandoned scene, and by a proof at the frames it rests on', () => {
+    const gone = { kind: 'draft', id: 'gone', captures: [], abandoned: { reason: '' } };
+    const scenes = sceneList([gone, proof('Bridge', { at: [5] })], [draft('gone', 1, 3)]);
+    expect(sceneOfCollage([2], scenes, FRAME)).toBeNull();
+    expect(sceneOfCollage([5], scenes, FRAME).kind).toBe('proof');
+  });
+
+  it('is listed under each scene holding a piece, and under the whole video when none does', () => {
+    const scenes = listed([draft('whole', null), draft('a', 1, 3), draft('b', 2, 6)]);
+    const under = collagesUnder(scenes, [collage('Pan', [1.5, 2.5]), collage('Far', [30])], FRAME);
+    expect(under.get('a').map((c) => c.collage)).toEqual(['Pan']);
+    expect(under.get('b').map((c) => c.collage)).toEqual(['Pan']);
+    expect(under.get('whole').map((c) => c.collage)).toEqual(['Far']);
+  });
+
+  it('is offered to a scene\'s proof when it holds one of its moments, and to the whole video always', () => {
+    const pieces = [collage('Late', [8, 9]), collage('Pan', [1.5, 2.5])];
+    expect(collagesOfScene(listed([draft('a', 2, 4)])[0], pieces, FRAME).map((c) => c.collage)).toEqual(['Pan']);
+    expect(collagesOfScene(listed([draft('w', null)])[0], pieces, FRAME).map((c) => c.collage)).toEqual(['Pan', 'Late']);
   });
 });

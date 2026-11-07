@@ -2,9 +2,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
-vi.mock('../../lib/api.js', () => ({ api: { post: vi.fn() } }));
-vi.mock('../../lib/state.svelte.js', () => ({ caseState: { current: { id: 'case-a' } }, toast: vi.fn() }));
-
 const { default: CollageMenu } = await import('./CollageMenu.svelte');
 
 const rect = [[0, 0], [80, 0], [80, 60], [0, 60]];
@@ -12,23 +9,22 @@ const node = (id, save, extra = {}) => ({ id, save, quad: rect, w: 80, h: 60, ur
 
 let live;
 let target;
+let requestCrop;
 
-function show(nodes, selectedIds, extra = {}) {
+function show(nodes, selectedIds) {
+  const collage = $state({ width: 1600, height: 800, nodes });
+  requestCrop = vi.fn();
   target = document.createElement('div');
   document.body.append(target);
   live = mount(CollageMenu, {
     target,
-    props: {
-      ...extra,
-      collage: extra.collage ?? { width: 1600, height: 800, nodes },
-      selectedIds,
-      requestCrop: vi.fn(),
-      renderPiece: vi.fn(),
-      fileTitles: new Map([['media/clip.mp4', 'Convoy clip']]),
-    },
+    props: { collage, selectedIds, requestCrop, fileTitles: new Map([['media/clip.mp4', 'Convoy clip']]) },
   });
   flushSync();
+  return collage;
 }
+
+const button = (text) => [...target.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith(text));
 
 afterEach(() => {
   if (live) unmount(live);
@@ -50,41 +46,48 @@ describe('the selected piece', () => {
     expect(target.querySelector('.identity .source').textContent).toBe('roof.png');
   });
 
-  it('shows nothing of a piece while none is selected, and asks for no canvas size', () => {
-    show([node('nd_1', { path: 'media/roof.png', time: null, ops: [] })], []);
+  it('keeps every act on the piece: scale, turn, crop, unwarp, order and remove', () => {
+    const collage = show([node('nd_1', { path: 'media/roof.png', time: null, ops: [] }), node('nd_2', { path: 'media/b.png', time: null, ops: [] })], ['nd_1']);
 
-    expect(target.querySelector('.identity')).toBeNull();
-    expect(target.querySelector('input[type="number"]')).toBeNull();
-    expect(target.querySelector('.hint')).toBeNull();
+    for (const label of ['Shrink piece', 'Enlarge piece', 'Rotate left', 'Rotate right']) {
+      expect(target.querySelector(`button[aria-label="${label}"]`), label).not.toBeNull();
+    }
+    button('Crop').click();
+    expect(requestCrop).toHaveBeenCalledWith(collage.nodes[0]);
+    button('Front').click();
+    flushSync();
+    expect(collage.nodes.map((n) => n.id)).toEqual(['nd_2', 'nd_1']);
+    button('Remove').click();
+    flushSync();
+    expect(collage.nodes.map((n) => n.id)).toEqual(['nd_2']);
+  });
+
+  it('offers to clear a crop beside Crop, once there is one', () => {
+    show([node('nd_1', { path: 'media/roof.png', time: null, ops: [] }, { crop: { x: 0, y: 0, w: 0.5, h: 0.5 } })], ['nd_1']);
+
+    target.querySelector('button[aria-label="Clear crop"]').click();
+    expect(requestCrop).toHaveBeenCalledWith(expect.objectContaining({ id: 'nd_1' }), true);
   });
 });
 
-describe('straightening along a level line', () => {
-  const straightenButton = () => [...target.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Straighten');
+describe('the selected block', () => {
+  it('counts the pieces and acts on them as one', () => {
+    const collage = show([node('nd_1', { path: 'media/a.png', time: null, ops: [] }), node('nd_2', { path: 'media/b.png', time: null, ops: [] })], ['nd_1', 'nd_2']);
 
-  it('waits for a line of two points or more', () => {
-    show([node('nd_1', { path: 'media/roof.png', time: null, ops: [] })], [], { level: { drawing: false, points: [[10, 30]] } });
-
-    expect(target.querySelector('[data-guide="collage.straighten"] .say').textContent).toMatch(/level that crosses the view/);
-    expect(straightenButton().disabled).toBe(true);
+    expect(target.querySelector('.identity .source').textContent).toBe('2 pieces selected');
+    expect(target.querySelector('button[aria-label="Enlarge block"]')).not.toBeNull();
+    button('Remove 2').click();
+    flushSync();
+    expect(collage.nodes).toHaveLength(0);
   });
+});
 
-  it('hands the line to the tool to bend the whole collage, and waits for it', async () => {
-    const pieces = [node('nd_1', { path: 'media/pan.png', time: null, ops: [] })];
-    const level = { drawing: true, points: [[5, 30], [145, 50]] };
-    let finish;
-    const straighten = vi.fn(() => new Promise((resolve) => (finish = resolve)));
-    show(pieces, [], { level, straighten });
+describe('with nothing selected', () => {
+  it('says how to pick a piece, in the place its controls take, and asks for no canvas size', () => {
+    show([node('nd_1', { path: 'media/roof.png', time: null, ops: [] })], []);
 
-    straightenButton().click();
-    flushSync();
-    expect(straighten).toHaveBeenCalledTimes(1);
-    // one bend at a time
-    expect([...target.querySelectorAll('button')].find((b) => b.textContent.includes('Straightening')).disabled).toBe(true);
-    finish();
-    await Promise.resolve();
-    await Promise.resolve();
-    flushSync();
-    expect(straightenButton().disabled).toBe(false);
+    expect(target.querySelector('.identity')).toBeNull();
+    expect(target.querySelector('.none').textContent).toContain('Click a piece to scale, turn or crop it.');
+    expect(target.querySelector('input[type="number"]')).toBeNull();
   });
 });

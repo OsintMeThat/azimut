@@ -403,3 +403,27 @@ describe('a picture', () => {
     expect(given.querySelector('.gone-time')).toBeNull();
   });
 });
+
+describe('the collages of the clip', () => {
+  const collage = (name, start, end = null) => ({ collage: name, title: name, start, end, times: end == null ? [start] : [start, end] });
+
+  it('hang under the scenes they fall in, and open in the Collage tool on a press', () => {
+    const scenes = SCENES();
+    const byKey = new Map([['sc_1', [collage('Pan', 60.2, 63.4)]], ['sc_all', [collage('Quay', 900)]]]);
+    const onopencollage = vi.fn();
+    const root = render(SceneTab, { scenes, collages: byKey, onopencollage });
+
+    const lines = [...root.querySelectorAll('[data-testid="scene-collage"]')];
+    expect(lines.map((el) => el.textContent.replace(/\s+/g, ' ').trim())).toEqual(['Quay 15:00', 'Pan 1:00–1:03']);
+    // each sits right under its own row
+    const under = (el) => el.closest('ul').previousElementSibling.dataset.sceneKey;
+    expect(lines.map(under)).toEqual(['sc_all', 'sc_1']);
+    lines[1].click();
+    expect(onopencollage).toHaveBeenCalledWith(expect.objectContaining({ collage: 'Pan' }));
+  });
+
+  it('adds nothing to a scene holding none', () => {
+    const root = render(SceneTab, { scenes: SCENES() });
+    expect(root.querySelector('.collage-lines')).toBeNull();
+  });
+});

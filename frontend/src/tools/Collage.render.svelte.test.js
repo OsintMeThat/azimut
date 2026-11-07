@@ -594,3 +594,127 @@ describe('the export', () => {
     expect(body.nodes[0].quad).toEqual([[0, 0], [1920, 0], [1920, 1080], [0, 1080]]);
   });
 });
+
+describe('the layout', () => {
+  beforeEach(() => {
+    collages = [{ name: 'Strip', title: 'Strip', pieces: 1 }];
+    saved.Strip = {
+      name: 'Strip', title: 'Strip',
+      spec: { width: 800, height: 400, transparent: true, nodes: [piece('media/roof.png')] },
+    };
+  });
+
+  it('puts what acts on the whole collage over the canvas, and the save on top of the panel', async () => {
+    await start();
+    button('Strip').click();
+    await settle(20);
+
+    const stage = target.querySelector('.stage');
+    expect(stage.querySelector('[role="toolbar"] [data-guide="collage.arrange"]')).not.toBeNull();
+    expect(stage.querySelector('[role="toolbar"] [data-guide="collage.straighten"]')).not.toBeNull();
+    expect(button('Fit').closest('[role="toolbar"]')).not.toBeNull();
+    // the panel reads top to bottom: the save, the pieces to add, the piece in hand
+    const blocks = [...target.querySelectorAll('.panel [data-guide="collage.save"], .panel [data-guide="collage.add"], .panel .selection')];
+    expect(blocks.map((el) => el.dataset.guide ?? 'selection')).toEqual(['collage.save', 'collage.add', 'selection']);
+  });
+
+  it('keeps the piece in hand in one place, whether one is selected or none', async () => {
+    await start();
+    button('Strip').click();
+    await settle(20);
+    const foot = target.querySelector('.panel .selection');
+    expect(foot.textContent).toContain('Click a piece to scale, turn or crop it.');
+
+    target.querySelector('img.node').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    window.dispatchEvent(new MouseEvent('pointerup'));
+    flushSync();
+    expect(target.querySelector('.panel .selection')).toBe(foot);
+    expect(foot.querySelector('.identity .source').textContent).toBe('Roof');
+  });
+});
+
+describe('an empty canvas', () => {
+  const clipWork = { name: 'Convoy clip', title: 'Convoy clip', source: 'media/clip.mp4', frames: 2, kind: 'video' };
+  const tabOn = () => target.querySelector('.picker [role="tab"].on').textContent.trim();
+
+  it('says how pieces come in, and opens the list each way leads to', async () => {
+    works = [clipWork];
+    await start();
+    button('New collage').click();
+    await settle();
+
+    const card = target.querySelector('.empty-canvas');
+    expect(card.textContent).toContain('Add frames from a video, or pictures');
+    [...card.querySelectorAll('button')].find((b) => b.textContent.includes('Images')).click();
+    flushSync();
+    expect(tabOn()).toBe('Images');
+    [...card.querySelectorAll('button')].find((b) => b.textContent.includes('Frames')).click();
+    flushSync();
+    expect(tabOn()).toBe('Frames');
+    expect(target.querySelector('[data-guide="collage.add"]').classList.contains('pointed')).toBe(true);
+  });
+
+  it('leads to Inspect while no frame is cut, and steps aside once a piece is in', async () => {
+    await start();
+    button('New collage').click();
+    await settle();
+
+    const card = target.querySelector('.empty-canvas');
+    [...card.querySelectorAll('button')].find((b) => b.textContent.includes('Cut frames in Inspect')).click();
+    expect(uiState.tool).toBe('inspect');
+    uiState.tool = 'collage';
+
+    [...card.querySelectorAll('button')].find((b) => b.textContent.includes('Images')).click();
+    flushSync();
+    target.querySelector('.picker .thumb').click();
+    await settle(20);
+    expect(target.querySelector('.empty-canvas')).toBeNull();
+  });
+});
+
+describe('a collage of one video', () => {
+  const at = (id, path, time) => ({ ...piece(path), id, save: { path, time, ops: [] } });
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['png'], { type: 'image/png' }))));
+    URL.createObjectURL = vi.fn(() => 'blob:piece');
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  async function openWith(nodes, extraMedia = []) {
+    media = [...MEDIA, ...extraMedia];
+    collages = [{ name: 'Pan', title: 'Pan', pieces: nodes.length }];
+    saved.Pan = { name: 'Pan', title: 'Pan', spec: { width: 800, height: 400, transparent: true, nodes } };
+    await start();
+    button('Pan').click();
+    await settle(20);
+  }
+
+  it('says which video and which stretch of it the pieces come from', async () => {
+    await openWith([at('nd_1', 'media/clip.mp4', 5), at('nd_2', 'media/clip.mp4', 2)]);
+
+    expect(target.querySelector('.panel .from').textContent.replace(/\s+/g, ' ').trim()).toBe('From Convoy clip 0:02–0:05');
+  });
+
+  it('reads one piece as one instant', async () => {
+    await openWith([at('nd_1', 'media/clip.mp4', 2)]);
+
+    expect(target.querySelector('.panel .from .from-when').textContent).toBe('0:02');
+  });
+
+  it('reads a frame saved from the video back to the video', async () => {
+    const frame = {
+      path: 'media/00-00-07 clip.png', kind: 'image', title: '00-00-07 clip', filename: '00-00-07 clip.png',
+      source: { type: 'inspect', op: 'frame', from: 'media/clip.mp4', time: 7 },
+    };
+    await openWith([at('nd_1', 'media/clip.mp4', 2), { ...piece(frame.path), id: 'nd_2' }], [frame]);
+
+    expect(target.querySelector('.panel .from .from-when').textContent).toBe('0:02–0:07');
+  });
+
+  it('says nothing of a collage that also holds a picture', async () => {
+    await openWith([at('nd_1', 'media/clip.mp4', 2), { ...piece('media/roof.png'), id: 'nd_2' }]);
+
+    expect(target.querySelector('.panel .from')).toBeNull();
+  });
+});

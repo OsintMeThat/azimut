@@ -69,6 +69,12 @@ describe('Geolocate', () => {
     expect(uiState.geolocateRef).toMatchObject({ video: 'media/photo.png', draft: 's1', kind: 'image' });
   });
 
+  it('hands Satellite a collage of the video to open beside it', async () => {
+    answers.set('PUT /api/cases/c1/geolocating', { geolocating: { ...SCENE, start: 1, end: 4, order: 0 } });
+    await geolocateScene('c1', { video: 'media/clip.mp4', id: 's1' }, { picture: 'media/Pan.png' });
+    expect(uiState.geolocateRef).toMatchObject({ video: 'media/clip.mp4', kind: 'video', picture: 'media/Pan.png' });
+  });
+
   it('leaves the tool where it is when the server refuses', async () => {
     uiState.tool = 'inspect';
     uiState.geolocateRef = null;
@@ -194,6 +200,17 @@ describe('the queue', () => {
     expect(calls[0]).toMatchObject({ method: 'POST', path: '/api/cases/c1/scenes/mark', body: { path: 'media/photo.png', label: '' } });
     expect(calls.at(-1)).toMatchObject({ method: 'GET', path: '/api/cases/c1/scenes/queue' });
     expect(sceneEdit).toMatchObject({ caseId: 'c1', video: 'media/photo.png', n: before + 1 });
+  });
+
+  it('marks a moment of a video, and a collage of one as its video', async () => {
+    answers.set('POST /api/cases/c1/scenes/mark', { scene: { ...SCENE, start: 1.2, end: 3.6 } });
+    const before = sceneEdit.n;
+    await markToGeolocate('c1', 'media/Pan.png', '', { start: 1.2, end: 3.6 });
+    expect(calls.at(-1).body).toEqual({ path: 'media/Pan.png', label: '', start: 1.2, end: 3.6 });
+    // the list told to read again is the video's, which the collage marked
+    expect(sceneEdit).toMatchObject({ video: 'media/clip.mp4', n: before + 1 });
+    await markToGeolocate('c1', 'media/clip.mp4', '', { start: 2, end: 2 });
+    expect(calls.at(-1).body).toEqual({ path: 'media/clip.mp4', label: '', start: 2 });
   });
 
   it('brings an abandoned scene back by its video', async () => {

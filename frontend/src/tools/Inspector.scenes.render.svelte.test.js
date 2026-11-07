@@ -578,6 +578,41 @@ describe('the Scenes tab on a video', () => {
   });
 });
 
+describe('the collages of the clip', () => {
+  const PAN = { collage: 'Pan', title: 'Harbour pan', export: 'media/Pan.png', current: true, times: [1.5, 3], start: 1.5, end: 3 };
+
+  it('hang under the scene they fall in, and open in the Collage tool', async () => {
+    work(CLIP, [kept('sc_1', 1, 4, 'Bridge?'), kept('sc_2', 10, 12, '')]);
+    listed[CLIP] = { scenes: [row('sc_1', 1, 4, 'Bridge?'), row('sc_2', 10, 12, '')], collages: [PAN] };
+    await start();
+    await openFile('Convoy clip');
+
+    const lines = [...target.querySelectorAll('[data-testid="scene-collage"]')];
+    expect(lines.map((el) => el.textContent.replace(/\s+/g, ' ').trim())).toEqual(['Harbour pan 0:01–0:03']);
+    expect(lines[0].closest('ul').previousElementSibling.dataset.sceneKey).toBe('sc_1');
+    lines[0].click();
+    expect(uiState.openCollage).toBe('Pan');
+    expect(uiState.tool).toBe('collage');
+  });
+
+  it('come into the scene\'s proof by their saved picture, with no frame to capture', async () => {
+    work(CLIP, [kept('sc_1', 1, 4, 'Bridge?')]);
+    listed[CLIP] = { scenes: [row('sc_1', 1, 4, 'Bridge?')], collages: [PAN, { ...PAN, collage: 'Unsaved', export: null }] };
+    await start();
+    await openFile('Convoy clip');
+
+    target.querySelector('[aria-label="Make the proof"]').click();
+    await settle();
+    const chooser = document.querySelector('[role="dialog"][aria-label="Make the proof"]');
+    expect(chooser.textContent).toContain('1 of 1 collage in the proof');
+    expect(chooser.textContent).not.toContain('No frame in this scene yet');
+    [...chooser.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Make the proof').click();
+    await settle(10);
+    expect(uiState.proofScene).toMatchObject({ video: CLIP, draft: 'sc_1', panels: ['media/Pan.png'] });
+    expect(uiState.tool).toBe('proof');
+  });
+});
+
 describe('the empty strip', () => {
   const invite = () => target.querySelector('[data-testid="scene-invite"]');
 

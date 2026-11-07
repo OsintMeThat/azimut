@@ -5,6 +5,7 @@
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
   import {
     PROGRESS, SCENE_LABEL_MAX, isAbandoned, isWholeVideo, sceneColorAt, scenePassage, sceneTime, sceneTitle, sceneWhen,
+    shortClock, spanLabel,
   } from '../../lib/scenes.js';
 
   // The Scenes tab: the places to find in the open file, in clip order, a scene about
@@ -28,8 +29,13 @@
   //
   // A picture (`picture`) is marked whole, once, from here: its row has no time, and
   // once a proof lays the picture out, the proof's row takes its place.
+  //
+  // The collages cut from the clip alone sit under the scenes they fall in
+  // (`collages`, by scene key, `lib/sceneFrames.collagesUnder`); a press opens one.
   let {
     scenes = [],
+    collages = new Map(),
+    onopencollage,
     edit = null,
     open = null,
     // `{ key, n }`: the row to bring into view and light a moment, `n` counting asks
@@ -235,6 +241,23 @@
   {/if}
 {/snippet}
 
+{#snippet collageLines(sc)}
+  {@const held = collages.get(sc.key) ?? []}
+  {#if held.length}
+    <ul class="collage-lines" style:--scene={sc.color} aria-label="Collages in this scene">
+      {#each held as col (col.collage)}
+        <li>
+          <button class="collage-line" onclick={() => onopencollage?.(col)} title={INSPECT_HELP.collageOpen} data-testid="scene-collage">
+            <Icon name="grid" size={11} />
+            <span class="collage-title" dir="auto">{col.title}</span>
+            <span class="collage-when">{col.end != null ? spanLabel(col.start, col.end) : shortClock(col.start)}</span>
+          </button>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+{/snippet}
+
 {#snippet labelField(sc)}
   <input
     class="input scene-label"
@@ -369,6 +392,7 @@
           {/if}
         </button>
       {/if}
+      {@render collageLines(sc)}
     {/each}
   {/if}
 
@@ -407,6 +431,50 @@
 </div>
 
 <style>
+  /* A scene's collages, hung under its row on a rule in its colour. */
+  .collage-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin: -1px 0 3px 10px;
+    padding: 0 0 0 8px;
+    border-left: 2px solid color-mix(in srgb, var(--scene, var(--accent)) 55%, transparent);
+    list-style: none;
+  }
+  .collage-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    padding: 3px 6px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    text-align: left;
+  }
+  .collage-line:hover {
+    background: var(--bg-2);
+    color: var(--text-1);
+  }
+  .collage-line :global(svg) {
+    flex: none;
+    color: var(--text-3);
+  }
+  .collage-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .collage-when {
+    flex: none;
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
+  }
   .scenes {
     display: flex;
     flex-direction: column;

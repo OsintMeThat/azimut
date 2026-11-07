@@ -40,7 +40,7 @@ const MEDIA = () => [
 ];
 
 /** Inspect's routes answered the way the server does, over the app's fixture. */
-async function serve(page, { scenes = [], proofs = [], held = {}, viewport = { width: 1500, height: 900 }, opens = 'Convoy clip' } = {}) {
+async function serve(page, { scenes = [], proofs = [], held = {}, collages = [], viewport = { width: 1500, height: 900 }, opens = 'Convoy clip' } = {}) {
   await page.setViewportSize(viewport);
   const media = MEDIA();
   const fixture = await installAppFixture(page, { media });
@@ -100,7 +100,10 @@ async function serve(page, { scenes = [], proofs = [], held = {}, viewport = { w
     if (path === `/api/cases/${CASE_ID}/scenes`) {
       const file = fileOf(url);
       if (file === VIDEO) {
-        return json({ video: VIDEO, video_id: 'e_steps', used: {}, taken: [], scenes: [...server.proofs, ...server.scenes.map((sc) => row(sc, VIDEO))], geolocating: null });
+        return json({
+          video: VIDEO, video_id: 'e_steps', used: {}, taken: [], scenes: [...server.proofs, ...server.scenes.map((sc) => row(sc, VIDEO))],
+          geolocating: null, collages,
+        });
       }
       // a picture: the proofs laying it out, else its marks
       const laid = server.pictureProofs ?? [];
@@ -164,6 +167,32 @@ test('opens a video on its Scenes tab, first of four, the count tinted while som
   expect(canvas.width).toBeGreaterThan(bar.width);
   await expect(rows(page)).toHaveCount(4);
   await shoot(page, 'video-scenes');
+});
+
+test('hangs the collages of the clip under their scenes, and offers them to the proof', async ({ page }) => {
+  const pan = { collage: 'Pan', title: 'Bridge pan', export: 'media/pan.png', current: true, times: [0.5, 0.7], start: 0.5, end: 0.7 };
+  const { media } = await serve(page, { scenes: [kept('sc_1', 0.4, 0.9, 'Road bridge?'), kept('sc_2', 1, null, '')], collages: [pan] });
+  media.push(image('media/pan.png', 'Bridge pan', { type: 'inspect', op: 'collage' }));
+
+  const line = panel(page).getByTestId('scene-collage');
+  await expect(line).toHaveCount(1);
+  await expect(line).toContainText('Bridge pan');
+  // right under the scene it falls in
+  // the first row, open, its label in its field
+  const scene = await rows(page).first().boundingBox();
+  const hung = await line.boundingBox();
+  expect(hung.y).toBeGreaterThanOrEqual(scene.y + scene.height - 1);
+  expect(hung.y - (scene.y + scene.height)).toBeLessThan(12);
+  await shoot(page, 'scene-collages');
+
+  await rows(page).first().getByRole('button', { name: 'Make the proof' }).click();
+  const chooser = page.getByRole('dialog', { name: 'Make the proof' });
+  await expect(chooser.getByRole('list', { name: 'Collages of the scene' }).getByRole('checkbox')).toBeChecked();
+  await shoot(page, 'chooser-collages');
+  await chooser.getByRole('button', { name: 'Cancel' }).click();
+
+  await line.click();
+  await expect(page).toHaveURL(/#collage/);
 });
 
 test('offers Mark to geolocate above the tabs, its arrow This moment and Whole video', async ({ page }) => {

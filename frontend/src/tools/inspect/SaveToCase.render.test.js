@@ -119,3 +119,68 @@ describe('Save to case with a work folder', () => {
     expect(onsave).toHaveBeenLastCalledWith({ name: '00-00-12 roof', folder: '', note: null });
   });
 });
+
+describe('Save to case in one press', () => {
+  const press = () => target.querySelector('.split .press');
+  const arrow = () => target.querySelector('button[aria-label="Name, folder and note"]');
+
+  it('files under the name and the last folder on its press, the fields folded away', async () => {
+    const onsave = vi.fn(async () => {});
+    show({ fold: true, onsave, folder: 'Roofs', hint: 'Exports at 1920 × 1080 px.' });
+
+    expect(nameField()).toBeNull();
+    expect(press().title).toBe('Save as “00-00-12 roof” in Roofs');
+    expect(target.textContent).toContain('Exports at 1920 × 1080 px.');
+    press().click();
+    await Promise.resolve();
+    expect(onsave).toHaveBeenCalledWith({ name: '00-00-12 roof', folder: 'Roofs', note: null });
+  });
+
+  it('unfolds the name, folder and note under its arrow, and files what they say', async () => {
+    const onsave = vi.fn(async () => {});
+    show({ fold: true, onsave });
+
+    arrow().click();
+    flushSync();
+    expect(arrow().getAttribute('aria-expanded')).toBe('true');
+    nameField().value = 'Chimney';
+    nameField().dispatchEvent(new Event('input', { bubbles: true }));
+    const note = target.querySelector('textarea[aria-label="Note"]');
+    note.value = 'The sign names the street';
+    note.dispatchEvent(new Event('input'));
+    flushSync();
+    press().click();
+    await Promise.resolve();
+    expect(onsave).toHaveBeenCalledWith({ name: 'Chimney', folder: null, note: 'The sign names the street' });
+    await Promise.resolve();
+    flushSync();
+    expect(nameField()).toBeNull(); // folded again, for the next one
+  });
+
+  it('starts on the work folder, as the folder picker would', async () => {
+    caseState.current = { id: 'case-a', folders: ['Roofs'], work_folder: 'Roofs' };
+    const onsave = vi.fn(async () => {});
+    show({ fold: true, onsave });
+
+    press().click();
+    await Promise.resolve();
+    expect(onsave).toHaveBeenLastCalledWith({ name: '00-00-12 roof', folder: 'Roofs', note: null });
+  });
+
+  it('rests, arrow and all, while it cannot save, and says why', () => {
+    show({ fold: true, blocked: 'Add a piece first.' });
+
+    expect(press().disabled).toBe(true);
+    expect(arrow().disabled).toBe(true);
+    expect(target.textContent).toContain('Add a piece first.');
+  });
+
+  it('says an output is already in the case, and leads to it', () => {
+    show({ fold: true, filedPath: 'media/roof.png' });
+
+    expect(press().disabled).toBe(true);
+    expect(press().textContent).toContain('Saved');
+    [...target.querySelectorAll('button')].find((b) => b.textContent.includes('In the case')).click();
+    expect(uiState.focusMedia).toBe('media/roof.png');
+  });
+});

@@ -4,8 +4,9 @@
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
   import {
-    uid, initialQuad, quadFromCropRect, exportFrame, COLLAGE_DEFAULT_SIZE, COLLAGE_MAX_DIM,
+    uid, initialQuad, quadFromCropRect, exportFrame, collageVideo, COLLAGE_DEFAULT_SIZE, COLLAGE_MAX_DIM,
   } from '../lib/inspect.js';
+  import { shortClock, spanLabel } from '../lib/scenes.js';
   import {
     workState, collageSpec, collageSignature, missingPieces, isFiled,
   } from '../lib/inspectWork.svelte.js';
@@ -29,6 +30,8 @@
   import SearchInput from '../components/SearchInput.svelte';
   import CollageCanvas from './inspect/CollageCanvas.svelte';
   import CollageMenu from './inspect/CollageMenu.svelte';
+  import CollageToolbar from './inspect/CollageToolbar.svelte';
+  import CollageScene from './inspect/CollageScene.svelte';
   import CollagePreview from './inspect/CollagePreview.svelte';
   import PiecePicker from './inspect/PiecePicker.svelte';
   import PieceCropModal from './inspect/PieceCropModal.svelte';
@@ -69,6 +72,12 @@
   // A work is listed under its file's name as the file has it now, whatever the
   // work itself is called.
   const fileTitles = $derived(new Map(mediaList.map((m) => [m.path, m.title || m.filename])));
+  // A frame saved from a video, read back to the video and the instant it was cut at.
+  const cutFrames = $derived(new Map(mediaList.flatMap((m) => {
+    const src = m.source;
+    const cut = src?.type === 'inspect' && src.op === 'frame' && typeof src.from === 'string' && Number.isFinite(src.time);
+    return cut ? [[m.path, { video: src.from, time: src.time }]] : [];
+  })));
   const fileThumbs = $derived(new Map(mediaList.map((m) => [m.path, m.thumbnail])));
   const pickerWorks = $derived(
     works.map((w) => ({ ...w, title: fileTitles.get(w.source) ?? w.title, thumb: fileThumbs.get(w.source) ?? null }))
@@ -91,7 +100,14 @@
     straightened: false,
   });
   // The level line being drawn on the canvas to straighten the collage by, canvas pixels.
-  const level = $state({ drawing: false, points: [] });
+  let level = $state({ drawing: false, points: [] });
+  // How close the canvas is looked at, which the toolbar's Fit puts back.
+  let view = $state({ zoom: 1, x: 0, y: 0 });
+  // Counts the collages opened, so each one gets its canvas, bar and panel afresh.
+  let opened = $state(0);
+  // The list of pieces the panel shows, Frames or Images, and a flash when the empty canvas points to it.
+  let pickerTab = $state('frames');
+  let pointed = $state(0);
   let docRun = 0;
   const blobs = new Set();
 
@@ -109,6 +125,28 @@
   const outputHint = $derived(
     output ? `Exports at ${output.width} × ${output.height} px${output.capped ? ', the size limit' : ''}.` : ''
   );
+  // The video every piece comes from, said under the save: one instant, or the stretch they span.
+  const fromVideo = $derived.by(() => {
+    const found = collageVideo(doc.nodes, (path) => cutFrames.get(path) ?? null);
+    if (!found) return null;
+    const when = found.from === found.to ? shortClock(found.from) : spanLabel(found.from, found.to);
+    return { ...found, title: fileTitles.get(found.path) ?? found.path.split('/').pop(), when };
+  });
+  const hasFrames = $derived(works.some((w) => w.frames));
+  // Why the picture cannot be saved as the layout stands, if it cannot.
+  const saveBlocked = $derived(
+    !doc.nodes.length
+      ? 'Add a piece first.'
+      : lost
+        ? `${lost} piece${lost === 1 ? '' : 's'} lost ${lost === 1 ? 'its' : 'their'} file. Remove ${lost === 1 ? 'it' : 'them'} to save.`
+        : '',
+  );
+
+  /** The empty canvas's ways in: the list of frames or of images, shown in the panel. */
+  function showPieces(tab) {
+    pickerTab = tab;
+    pointed += 1;
+  }
 
   // -- saving as it is made -----------------------------------------------------
   let savedSignature = $state(null);
@@ -380,6 +418,8 @@
       background: '#12141c', transparent: true, nodes: [], exported: null, straightened: false,
     });
     Object.assign(level, { drawing: false, points: [] });
+    Object.assign(view, { zoom: 1, x: 0, y: 0 });
+    opened += 1;
     savedSignature = null;
     selectedIds = [];
     cropPieceNode = null;
@@ -670,14 +710,26 @@
     }
     if (!doc.nodes.length) throw new Error('Add a piece first');
     if (lost) throw new Error('A piece lost its file. Remove it first');
+    const res = await composeAsNamed();
+    return { entity: res?.entity ?? null, fresh: !res?.duplicate };
+  }
+
+  /** The picture saved as the layout stands, under the collage's name and the last folder. */
+  async function composeAsNamed() {
     if (exporting) throw new Error('The collage is being saved. Try again in a moment');
     exporting = true;
     try {
-      const res = await composeCollage({ name: doc.title, folder: exportFolder || (workFolder() ? '' : null), note: null });
-      return { entity: res?.entity ?? null, fresh: !res?.duplicate };
+      return await composeCollage({ name: doc.title, folder: exportFolder || (workFolder() ? '' : null), note: null });
     } finally {
       exporting = false;
     }
+  }
+
+  /** Mark to geolocate's save: the picture's path once it is in the case. */
+  async function savePicture() {
+    const path = (await composeAsNamed())?.item?.path;
+    if (!path) throw new Error('The collage could not be saved');
+    return path;
   }
 
   const noteCollage = collageOffer({ title: () => doc.title, file: fileForNote });
@@ -855,45 +907,87 @@
       </div>
     </div>
   {:else}
-    <div class="workspace">
-      <div class="viewer" data-guide="collage.canvas">
-        <CollageCanvas collage={doc} bind:selectedIds {requestCrop} {level} />
+    {#key opened}
+      <div class="workspace">
+        <div class="stage">
+          <CollageToolbar collage={doc} bind:selectedIds {renderPiece} bind:level straighten={straightenCollage} bind:view />
+          <div class="viewer" data-guide="collage.canvas">
+            <CollageCanvas collage={doc} bind:selectedIds {requestCrop} bind:level bind:view />
+            {#if !doc.nodes.length && !opening}
+              <div class="empty-canvas">
+                <div class="ways-in">
+                  <Icon name="layers" size={26} />
+                  <p>Add frames from a video, or pictures</p>
+                  <div class="ways">
+                    {#if hasFrames}
+                      <button class="btn btn-sm" onclick={() => showPieces('frames')}><Icon name="video" size={14} /> Frames</button>
+                    {:else}
+                      <button class="btn btn-sm" onclick={() => (uiState.tool = 'inspect')} title="Frames are cut from a video in Inspect">
+                        <Icon name="video" size={14} /> Cut frames in Inspect
+                      </button>
+                    {/if}
+                    <button class="btn btn-sm" onclick={() => showPieces('images')}><Icon name="image" size={14} /> Images</button>
+                  </div>
+                </div>
+              </div>
+            {/if}
+          </div>
+        </div>
+        <aside class="panel">
+          <div class="top">
+            <div data-guide="collage.save">
+              <SaveToCase
+                fold
+                defaultName={doc.title}
+                filedPath={exportedPath}
+                busy={exporting}
+                blocked={saveBlocked}
+                hint={outputHint}
+                bind:folder={exportFolder}
+                onsave={exportCollage}
+              >
+                <PutInNote offer={noteCollage} class="btn btn-sm" role="button" />
+              </SaveToCase>
+            </div>
+            {#if doc.nodes.length}
+              <CollageScene
+                caseId={doc.caseId}
+                name={doc.name}
+                video={fromVideo ? { path: fromVideo.path, times: fromVideo.times } : null}
+                picture={doc.exported?.path ?? null}
+                current={exportedPath}
+                blocked={saveBlocked}
+                save={savePicture}
+              />
+            {/if}
+            {#if fromVideo}
+              <p class="from" title={`Every piece is cut from ${fromVideo.title}`}>
+                <Icon name="video" size={13} />
+                <span class="from-words">From <span class="from-file">{fromVideo.title}</span></span>
+                <span class="from-when">{fromVideo.when}</span>
+              </p>
+            {/if}
+          </div>
+          <section class="block pieces" class:pointed={pointed > 0} data-guide="collage.add">
+            {#key pointed}<span class="flash" aria-hidden="true"></span>{/key}
+            <div class="section-head"><span><Icon name="plus" size={14} /> Add pieces</span></div>
+            <PiecePicker
+              caseId={doc.caseId}
+              {filters}
+              works={pickerWorks}
+              {images}
+              {used}
+              rev={workState.rev}
+              onadd={addPiece}
+              bind:tab={pickerTab}
+            />
+          </section>
+          <section class="block selection" aria-label="Selected">
+            <CollageMenu collage={doc} bind:selectedIds {requestCrop} {fileTitles} />
+          </section>
+        </aside>
       </div>
-      <aside class="panel">
-        <div class="section first" data-guide="collage.add">
-          <div class="section-head"><span><Icon name="plus" size={14} /> Add pieces</span></div>
-          <PiecePicker
-            caseId={doc.caseId}
-            {filters}
-            works={pickerWorks}
-            {images}
-            {used}
-            rev={workState.rev}
-            onadd={addPiece}
-          />
-        </div>
-        <div class="section" data-guide="collage.arrange">
-          <CollageMenu collage={doc} bind:selectedIds {requestCrop} {renderPiece} {fileTitles} {level} straighten={straightenCollage} />
-        </div>
-        <div class="section" data-guide="collage.save">
-          <SaveToCase
-            defaultName={doc.title}
-            filedPath={exportedPath}
-            busy={exporting}
-            blocked={!doc.nodes.length
-              ? 'Add a piece first.'
-              : lost
-                ? `${lost} piece${lost === 1 ? '' : 's'} lost ${lost === 1 ? 'its' : 'their'} file. Remove ${lost === 1 ? 'it' : 'them'} to save.`
-                : ''}
-            hint={outputHint}
-            bind:folder={exportFolder}
-            onsave={exportCollage}
-          >
-            <PutInNote offer={noteCollage} class="btn btn-sm" role="button" />
-          </SaveToCase>
-        </div>
-      </aside>
-    </div>
+    {/key}
   {/if}
 
   {#if cropPieceNode}
@@ -1133,13 +1227,56 @@
     display: flex;
     min-height: 0;
   }
-  .viewer {
+  /* The canvas and the bar over it, for what acts on the whole collage. */
+  .stage {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .viewer {
+    position: relative;
+    flex: 1;
+    min-height: 0;
     display: flex;
     background: var(--bg-0);
     overflow: hidden;
   }
+  /* An empty canvas says how pieces come in, and leads there. */
+  .empty-canvas {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    pointer-events: none;
+  }
+  .ways-in {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 22px 28px 20px;
+    border-radius: var(--r-lg);
+    background: color-mix(in srgb, var(--bg-1) 88%, transparent);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-1);
+    color: var(--text-3);
+    text-align: center;
+    pointer-events: auto;
+  }
+  .ways-in p {
+    margin: 0 0 2px;
+    color: var(--text-1);
+    font-size: var(--fs-md);
+    font-weight: 600;
+  }
+  .ways {
+    display: flex;
+    gap: 8px;
+  }
+  /* The panel: the save always on top, the pieces taking what room there is, and the
+     piece in hand at the foot, where nothing pushes it. */
   .panel {
     width: 320px;
     flex-shrink: 0;
@@ -1147,21 +1284,92 @@
     background: var(--bg-1);
     display: flex;
     flex-direction: column;
-    gap: 12px;
     min-height: 0;
     overflow: auto;
-    padding: 14px;
   }
-  .section {
+  .top {
+    flex: none;
     display: flex;
     flex-direction: column;
     gap: 8px;
-    border-top: 1px solid var(--border);
-    padding-top: 12px;
+    padding: 14px 14px 12px;
+    border-bottom: 1px solid var(--border);
   }
-  .section.first {
-    border-top: 0;
-    padding-top: 0;
+  .from {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+  .from :global(svg) {
+    flex: none;
+    color: var(--text-3);
+  }
+  .from-words {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .from-file {
+    color: var(--text-1);
+    font-weight: 600;
+  }
+  .from-when {
+    flex: none;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .from-when::before {
+    content: '·';
+    margin-right: 6px;
+    color: var(--text-3);
+  }
+  .block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+  }
+  .pieces {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 190px;
+  }
+  .selection {
+    flex: none;
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg-0) 35%, var(--bg-1));
+  }
+  /* Pointed to from the empty canvas: the block lights up once. */
+  .flash {
+    position: absolute;
+    inset: 4px;
+    border-radius: var(--r-md);
+    pointer-events: none;
+    opacity: 0;
+  }
+  .pointed .flash {
+    animation: point 0.9s var(--ease);
+  }
+  @keyframes point {
+    0%,
+    40% {
+      opacity: 1;
+      box-shadow: inset 0 0 0 2px var(--accent);
+    }
+    100% {
+      opacity: 0;
+      box-shadow: inset 0 0 0 2px var(--accent);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pointed .flash {
+      animation: none;
+    }
   }
   .section-head {
     display: flex;

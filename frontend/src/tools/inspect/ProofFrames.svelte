@@ -7,15 +7,18 @@
 
   // Make the proof, the step before Geo Proof: the frames of the scene, all ticked,
   // to start the proof from (`lib/sceneFrames.js`), then the captures it gathered on
-  // the map while it was geolocated, ticked too. A scene holding no frame says which
-  // frame is captured for it instead, since a proof of the scene rests on one of its
-  // frames. Frames not in the case yet are saved on the way, which the note under
-  // them says.
+  // the map while it was geolocated, ticked too. The collages cut from the scene come
+  // between them, ticked, by the picture each was last saved as. A scene holding no
+  // frame and no collage says which frame is captured for it instead, since a proof of
+  // the scene rests on one of its frames. Frames not in the case yet are saved on the
+  // way, which the note under them says.
   let {
     scene,
     frames = [],
     // `{ path, url, title }`, in the order they were attached
     captures = [],
+    // `{ path, url, title, current }`: a collage's saved picture, in clip order
+    collages = [],
     filters = [],
     filedIds = new Set(),
     capture = null,
@@ -29,10 +32,12 @@
   let picked = $state(new Set(frames.map((f) => f.id)));
   // svelte-ignore state_referenced_locally
   let pickedCaptures = $state(new Set(captures.map((c) => c.path)));
+  // svelte-ignore state_referenced_locally
+  let pickedCollages = $state(new Set(collages.map((c) => c.path)));
 
   const allPicked = $derived(frames.length > 0 && frames.every((f) => picked.has(f.id)));
   const unsaved = $derived(frames.filter((f) => picked.has(f.id) && !filedIds.has(f.id)).length);
-  const ready = $derived(!busy && (!frames.length || picked.size > 0));
+  const ready = $derived(!busy && ((!frames.length && !collages.length) || picked.size + pickedCollages.size > 0));
   // An unnamed scene is told by its time, which then needs no second mention.
   const named = $derived(scene.kind === 'proof' || Boolean(scene.label));
 
@@ -48,6 +53,13 @@
     if (next.has(path)) next.delete(path);
     else next.add(path);
     pickedCaptures = next;
+  }
+
+  function toggleCollage(path) {
+    const next = new Set(pickedCollages);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    pickedCollages = next;
   }
 
   function toggleAll() {
@@ -68,6 +80,7 @@
     onconfirm?.(
       frames.filter((f) => picked.has(f.id)).map((f) => f.id),
       captures.filter((c) => pickedCaptures.has(c.path)).map((c) => c.path),
+      collages.filter((c) => pickedCollages.has(c.path)).map((c) => c.path),
     );
   }
 </script>
@@ -111,11 +124,33 @@
       {#if unsaved}
         <p class="note">{unsaved === 1 ? 'Saves 1 frame to the case on the way.' : `Saves ${unsaved} frames to the case on the way.`}</p>
       {/if}
-    {:else if capture}
+    {:else if capture && !collages.length}
       <div class="none">
         <Icon name="camera" size={16} />
         <p><strong>No frame in this scene yet.</strong> {captureWords(capture)}.</p>
       </div>
+    {/if}
+
+    {#if collages.length}
+      <div class="row-head" title={INSPECT_HELP.proofCollages}>
+        <span>{pickedCollages.size} of {collages.length} {collages.length === 1 ? 'collage' : 'collages'} in the proof</span>
+      </div>
+      <ul class="frames" aria-label="Collages of the scene">
+        {#each collages as col (col.path)}
+          <li>
+            <label class="frame" class:off={!pickedCollages.has(col.path)}>
+              <input type="checkbox" checked={pickedCollages.has(col.path)} onchange={() => toggleCollage(col.path)} aria-label={`Collage ${col.title}`} />
+              <span class="thumb">
+                <img src={col.url} alt="" />
+                {#if !col.current}
+                  <span class="unsaved" title={INSPECT_HELP.proofCollageStale}>Changed since</span>
+                {/if}
+              </span>
+              <span class="at" dir="auto" title={col.title}>{col.title}</span>
+            </label>
+          </li>
+        {/each}
+      </ul>
     {/if}
 
     {#if captures.length}

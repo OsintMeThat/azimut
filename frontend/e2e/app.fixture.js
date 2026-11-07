@@ -2289,6 +2289,11 @@ export async function installAppFixture(page, options = {}) {
     // The scenes still to geolocate, which the To-do lists over its own: none, unless a
     // spec routes its own queue over this one.
     if (/^\/api\/cases\/[^/]+\/scenes\/queue$/.test(path)) return json(route, { files: [], geolocating: null });
+    // One file's scenes, which the Collage tool reads for its Mark to geolocate: none, unless
+    // a spec routes its own over this one.
+    if (/^\/api\/cases\/[^/]+\/scenes$/.test(path) && request.method() === 'GET') {
+      return json(route, { video: url.searchParams.get('video'), scenes: [], taken: [], used: {}, geolocating: null, collages: [] });
+    }
 
     unexpected.push(`${request.method()} ${path}`);
     return json(route, { detail: `Unhandled browser fixture request: ${path}` }, 404);

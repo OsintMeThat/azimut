@@ -21,7 +21,8 @@
   } from '../lib/geolocating.svelte.js';
   import { onEvent } from '../lib/events.js';
   import {
-    frameScenes, frameToCapture, frameUses, framesOfScene, pictureHandoff, proofHandoff, scenesAt,
+    collagesOfScene, collagesUnder, frameScenes, frameToCapture, frameUses, framesOfScene, pictureHandoff, proofHandoff,
+    scenesAt,
   } from '../lib/sceneFrames.js';
   import { createSceneOffer } from '../lib/sceneOffer.js';
   import { declineInvite, inviteDeclined, todoHintDue } from '../lib/sceneHints.js';
@@ -301,6 +302,7 @@
     folded = false;
     framesRendered = null;
     usedFrames = {};
+    listedCollages = [];
     proofChooser = null;
     sceneOffer.reset();
     sceneEdit.close();
@@ -957,6 +959,16 @@
   let sceneFocus = $state(null);
   // The proofs laying out each saved frame of the clip, by the frame's path.
   let usedFrames = $state({});
+  // The collages cut from this clip alone, each with its pieces' instants (`GET /scenes`),
+  // listed under the scenes they fall in and offered to their proofs as frames are.
+  let listedCollages = $state([]);
+  const collagesByScene = $derived(isVideo ? collagesUnder(scenes, listedCollages, frameDur) : new Map());
+
+  /** A collage listed under a scene, opened in the Collage tool. */
+  function openCollage(row) {
+    uiState.openCollage = row.collage;
+    uiState.tool = 'collage';
+  }
   // What the strip marks on a frame: the scenes it falls in, and the proofs using it.
   const frameDots = $derived(isVideo ? frameScenes(work.frames, scenes, frameDur) : new Map());
   const frameUsed = $derived(isVideo ? frameUses(work.frames, usedFrames) : new Map());
@@ -995,6 +1007,7 @@
       takenScenes = res.taken ?? [];
       listedGeolocating = res.geolocating ?? null;
       usedFrames = res.used ?? {};
+      listedCollages = res.collages ?? [];
       scenesRead = true;
       adoptGivenBack(listedScenes);
     } catch {
@@ -1461,7 +1474,7 @@
   // on the way, with their default names and the last folder, then Geo Proof opens a
   // proof of the scene on them (`uiState.proofScene`). A picture has no frames to
   // choose: its proof opens on the picture and the captures gathered for it.
-  let proofChooser = $state(null); // { scene, ids, capture, captures }
+  let proofChooser = $state(null); // { scene, ids, capture, captures, collages }
   let makingProof = $state(false);
   const chooserFrames = $derived(
     proofChooser ? proofChooser.ids.map((id) => work.frames.find((f) => f.id === id)).filter(Boolean) : [],
@@ -1491,15 +1504,20 @@
       if (run !== openRun || makingProof) return;
     }
     const frames = framesOfScene(scene, work.frames, frameDur);
+    // a collage of the scene is offered by the picture it was last saved as
+    const collages = collagesOfScene(scene, listedCollages.filter((c) => c.export), frameDur).map((c) => ({
+      ...gathered(c.export), name: c.collage, title: c.title, start: c.start, current: c.current,
+    }));
     proofChooser = {
       scene,
       ids: frames.map((f) => f.id),
-      capture: frames.length ? null : frameToCapture(scene, { scan, now: shownTime(), frame: frameDur }),
+      capture: frames.length || collages.length ? null : frameToCapture(scene, { scan, now: shownTime(), frame: frameDur }),
       captures: (scene.captures ?? []).map(gathered),
+      collages,
     };
   }
 
-  async function confirmProof(ids, capturePaths = []) {
+  async function confirmProof(ids, capturePaths = [], collagePaths = []) {
     const chooser = proofChooser;
     if (!chooser || makingProof) return;
     const run = openRun;
@@ -1511,7 +1529,8 @@
         if (!cut || run !== openRun) return;
         frames = [cut];
       }
-      if (!frames.length) return;
+      const collages = (chooser.collages ?? []).filter((c) => collagePaths.includes(c.path));
+      if (!frames.length && !collages.length) return;
       if (frames.some((f) => savingFrames.has(f.id))) throw new Error('A frame is being saved. Try again in a moment');
       const unsaved = frames.filter((f) => !filedIds.has(f.id));
       if (unsaved.length) {
@@ -1523,10 +1542,13 @@
         }
       }
       if (run !== openRun) return;
-      const panels = frames.map((f) => f.filed?.path);
-      if (!panels.every(Boolean)) throw new Error('A frame could not be saved to the case');
+      if (!frames.every((f) => f.filed?.path)) throw new Error('A frame could not be saved to the case');
+      // the frames and the collages in clip order, a collage at its first piece, then the captures as they came
+      const panels = [
+        ...frames.map((f) => ({ at: f.time, path: f.filed.path })),
+        ...collages.map((c) => ({ at: c.start, path: c.path })),
+      ].sort((a, b) => a.at - b.at).map((p) => p.path);
       proofChooser = null;
-      // the frames first, in clip order, then the captures, in the order they came
       uiState.proofScene = proofHandoff(chooser.scene, work.source.path, [...panels, ...capturePaths]);
       uiState.tool = 'proof';
     } catch (e) {
@@ -2029,6 +2051,8 @@
             {#if shownTab === 'scenes'}
               <SceneTab
                 {scenes}
+                collages={collagesByScene}
+                onopencollage={openCollage}
                 edit={sceneEdit}
                 open={openRow?.key ?? null}
                 focus={sceneFocus}
@@ -2130,6 +2154,7 @@
       {filedIds}
       capture={proofChooser.capture}
       captures={proofChooser.captures}
+      collages={proofChooser.collages}
       busy={makingProof}
       onconfirm={confirmProof}
       oncancel={() => (proofChooser = null)}

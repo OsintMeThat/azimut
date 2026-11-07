@@ -640,7 +640,11 @@
     if (uiState.tool !== 'satellite' || !uiState.geolocateRef || !caseState.current) return;
     const ref = uiState.geolocateRef;
     uiState.geolocateRef = null;
-    untrack(() => refs.openScene(ref));
+    untrack(() => {
+      refs.openScene(ref);
+      // a collage cut from the video, its picture opened beside it (the Collage tool's Geolocate)
+      if (ref.picture) refs.openScene({ ...ref, video: ref.picture, kind: 'image' });
+    });
   });
   // A docked reference narrows the map beside it, so the engine remeasures
   // whenever a column opens, closes or changes width.

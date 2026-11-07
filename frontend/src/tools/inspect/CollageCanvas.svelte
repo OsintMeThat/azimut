@@ -6,6 +6,7 @@
   import { uiState } from '../../lib/state.svelte.js';
   import { anyOverlayOpen } from '../../lib/overlayStack.js';
   import { levelShift } from '../../lib/straighten.js';
+  import { shortcut } from '../../lib/keys.js';
   import Icon from '../../components/Icon.svelte';
 
   // Interactive collage surface. Each node is a piece (a frame or a case image)
@@ -19,14 +20,19 @@
   // a single block frame that moves/rotates/scales them as one rigid unit.
   // `level` is the line drawn to straighten the collage by (lib/straighten.js): while it is drawn, a click
   // anywhere adds a point to it instead of moving pieces.
-  let { collage, selectedIds = $bindable([]), requestCrop, level = null } = $props();
+  // `view` is how close the canvas is looked at: `zoom` 1 is the collage fitted in the pane, and
+  // `x`, `y` the pan in screen pixels. It is the tool's, so Fit in its toolbar puts it back.
+  let {
+    collage, selectedIds = $bindable([]), requestCrop, level = $bindable(null),
+    view = $bindable(),
+  } = $props();
+  // its own while no tool binds one
+  const ownView = $state({ zoom: 1, x: 0, y: 0 });
+  const cam = $derived(view ?? ownView);
 
   let wrapEl = $state();
   let availW = $state(800);
   let availH = $state(600);
-  let zoom = $state(1); // 1 = fit; wheel zooms toward the pointer
-  let panX = $state(0);
-  let panY = $state(0);
   let movingIds = $state([]); // pieces being dragged — semi-transparent to align
 
   const isSel = (id) => selectedIds.includes(id);
@@ -44,7 +50,7 @@
   const cw = $derived(collage.width);
   const ch = $derived(collage.height);
   const fitScale = $derived(Math.min(availW / cw, availH / ch, 1) || 1);
-  const scale = $derived(fitScale * zoom);
+  const scale = $derived(fitScale * cam.zoom);
 
   function boxOf(node) {
     return { w: node.w || 320, h: node.h || 240, url: node.url };
@@ -53,7 +59,7 @@
   // client px -> canvas px (the inner surface is translated then scaled, origin 0 0)
   function toCanvas(e) {
     const r = wrapEl.getBoundingClientRect();
-    return [(e.clientX - r.left - panX) / scale, (e.clientY - r.top - panY) / scale];
+    return [(e.clientX - r.left - cam.x) / scale, (e.clientY - r.top - cam.y) / scale];
   }
 
   // Wheel zooms toward the pointer so the feature under the cursor stays put —
@@ -64,17 +70,11 @@
     const px = e.clientX - r.left;
     const py = e.clientY - r.top;
     const old = scale;
-    const next = Math.min(Math.max(zoom * (e.deltaY > 0 ? 0.9 : 1.1), 0.2), 8);
+    const next = Math.min(Math.max(cam.zoom * (e.deltaY > 0 ? 0.9 : 1.1), 0.2), 8);
     const k = fitScale * next;
-    panX = px - ((px - panX) / old) * k;
-    panY = py - ((py - panY) / old) * k;
-    zoom = next;
-  }
-
-  function resetView() {
-    zoom = 1;
-    panX = 0;
-    panY = 0;
+    cam.x = px - ((px - cam.x) / old) * k;
+    cam.y = py - ((py - cam.y) / old) * k;
+    cam.zoom = next;
   }
 
   // Drag on the empty background pans the view (a plain click still deselects).
@@ -82,11 +82,11 @@
     selectedIds = [];
     const sx = e.clientX;
     const sy = e.clientY;
-    const ox = panX;
-    const oy = panY;
+    const ox = cam.x;
+    const oy = cam.y;
     const move = (ev) => {
-      panX = ox + ev.clientX - sx;
-      panY = oy + ev.clientY - sy;
+      cam.x = ox + ev.clientX - sx;
+      cam.y = oy + ev.clientY - sy;
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
@@ -351,6 +351,7 @@
 <div
   class="wrap"
   class:checker={collage.transparent}
+  class:drawing={level?.drawing}
   bind:this={wrapEl}
   bind:clientWidth={availW}
   bind:clientHeight={availH}
@@ -362,7 +363,7 @@
     class="surface"
     style:width={`${cw}px`}
     style:height={`${ch}px`}
-    style:transform={`translate(${panX}px, ${panY}px) scale(${scale})`}
+    style:transform={`translate(${cam.x}px, ${cam.y}px) scale(${scale})`}
   >
     {#each collage.nodes as node (node.id)}
       {@const box = boxOf(node)}
@@ -585,23 +586,18 @@
     ></div>
   {/if}
 
-  <div class="view-ctl">
-    {#if zoom !== 1}
-      <span class="zoom-val">{Math.round(zoom * 100)}%</span>
-      <button class="btn btn-ghost btn-sm" onclick={resetView} title="Fit the collage back in view">
-        <Icon name="eye" size={14} /> Fit
-      </button>
-    {:else if level?.drawing}
-      <span class="zoom-hint">click point by point along the level line · drag a point to move it · Ctrl+Z takes the last one back · double-click or Enter ends</span>
-    {:else}
-      <span class="zoom-hint">scroll to zoom · drag background to pan · pull corners to warp · shift-click to select several</span>
-    {/if}
-  </div>
-
-  {#if collage.nodes.length === 0}
-    <div class="empty">
-      <Icon name="layers" size={34} />
-      <p>Add frames from the menu, then drag to move and pull the corners to warp.</p>
+  {#if level?.drawing}
+    <!-- What to click while the line is drawn, in the corner the keys are said in. -->
+    <div class="view-hint level-cue" role="status">
+      <p class="cue-say">
+        <span class="level-dot" aria-hidden="true"></span>
+        Click point by point along something level that crosses the view, such as a shore or a field's far edge.
+      </p>
+      <p>drag a point to move it · {shortcut('Ctrl+Z')} takes the last one back · double-click or Enter ends</p>
+    </div>
+  {:else if collage.nodes.length}
+    <div class="view-hint">
+      scroll to zoom · drag background to pan · pull corners to warp · shift-click to select several
     </div>
   {/if}
 </div>
@@ -716,30 +712,52 @@
   .tbtn.on {
     background: var(--bg-3);
   }
-  .view-ctl {
+  /* The keys of the canvas, quiet in its corner; never in the way of a click. */
+  .view-hint {
     position: absolute;
     right: 10px;
     bottom: 10px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 6px;
+    max-width: calc(100% - 20px);
+    padding: 3px 8px;
     border-radius: var(--r-md);
-    background: rgba(22, 22, 22, 0.85);
-    border: 1px solid var(--border);
-    /* over the level line's click catcher, so Fit still answers while it is drawn */
+    background: rgba(18, 18, 18, 0.78);
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 11px;
+    line-height: 1.4;
+    pointer-events: none;
+    user-select: none;
     z-index: 7;
   }
-  .zoom-val {
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    color: var(--text-2);
-    font-variant-numeric: tabular-nums;
+  /* Drawing the level line: the pane takes the line's colour at its edge, and says what to click. */
+  .wrap.drawing {
+    box-shadow: inset 0 0 0 2px rgba(255, 204, 0, 0.7);
   }
-  .zoom-hint {
-    font-size: 11px;
-    color: var(--text-3);
-    user-select: none;
+  .level-cue {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-width: min(460px, calc(100% - 20px));
+    padding: 7px 11px;
+    border: 1px solid rgba(255, 204, 0, 0.5);
+    background: rgba(18, 18, 18, 0.9);
+  }
+  .level-cue p {
+    margin: 0;
+  }
+  .cue-say {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    color: #f3f3f3;
+    font-size: var(--fs-xs);
+  }
+  .level-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ffcc00;
+    transform: translateY(-1px);
   }
   .handle {
     position: absolute;
@@ -812,22 +830,5 @@
   }
   .rot-handle:hover {
     background: rgba(255, 255, 255, 0.09);
-  }
-  .empty {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    color: var(--text-3);
-    text-align: center;
-    padding: 20px;
-    pointer-events: none;
-  }
-  .empty p {
-    max-width: 260px;
-    font-size: var(--fs-sm);
   }
 </style>

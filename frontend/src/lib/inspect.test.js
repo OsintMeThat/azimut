@@ -6,7 +6,7 @@ import {
   buildFrameOps, hasVideoEdits, normalizeRightAngleRotation, rotationOps,
   sourceStem, timecode, frameSaveName, frameSaveNames, saveNameOf,
   newCollage, clampCollageDim, stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
-  exportFrame, COLLAGE_MAX_EXPORT_PIXELS, clockTime,
+  exportFrame, COLLAGE_MAX_EXPORT_PIXELS, clockTime, collageVideo,
   COLLAGE_DEFAULT_SIZE, ADJUST_ORDER, ADJUST_PRESETS, activePreset, buildOps, needsRender,
   presetValues, previewOps, previewStyle, sliderTravel,
 } from './inspect.js';
@@ -486,6 +486,32 @@ describe('stitchCanvas', () => {
   it('leaves the canvas alone when the answer says nothing about it', () => {
     expect(stitchCanvas(undefined, current)).toEqual({ ...current, scale: 1 });
     expect(stitchCanvas({}, current)).toEqual({ ...current, scale: 1 });
+  });
+});
+
+describe('collageVideo', () => {
+  const piece = (path, time = null) => ({ save: { path, time, ops: [] } });
+
+  it('names the one video every piece is cut from, and the stretch they span', () => {
+    const nodes = [piece('media/pan.mp4', 3.6), piece('media/pan.mp4', 1.2), piece('media/pan.mp4', 2.4)];
+    expect(collageVideo(nodes)).toEqual({ path: 'media/pan.mp4', from: 1.2, to: 3.6, times: [1.2, 2.4, 3.6] });
+  });
+
+  it('reads a single piece as one instant', () => {
+    expect(collageVideo([piece('media/pan.mp4', 0)])).toMatchObject({ path: 'media/pan.mp4', from: 0, to: 0 });
+  });
+
+  it('reads a frame saved from the video back to it', () => {
+    const cutFrom = (path) => (path === 'media/00-00-05 pan.png' ? { video: 'media/pan.mp4', time: 5 } : null);
+    expect(collageVideo([piece('media/pan.mp4', 1), piece('media/00-00-05 pan.png')], cutFrom))
+      .toEqual({ path: 'media/pan.mp4', from: 1, to: 5, times: [1, 5] });
+  });
+
+  it('says nothing of a collage with a picture of its own, another file or no piece', () => {
+    expect(collageVideo([piece('media/pan.mp4', 1), piece('media/roof.png')])).toBeNull();
+    expect(collageVideo([piece('media/pan.mp4', 1), piece('media/other.mp4', 2)])).toBeNull();
+    expect(collageVideo([])).toBeNull();
+    expect(collageVideo(undefined)).toBeNull();
   });
 });
 

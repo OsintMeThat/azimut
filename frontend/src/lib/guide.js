@@ -340,7 +340,7 @@ export const PAGES = {
     marks: [
       { anchor: 'collage.canvas', title: 'The canvas', text: 'Scroll to zoom, pull a corner to warp a piece, Shift-click to select several.' },
       { anchor: 'collage.add', title: 'Add pieces', text: 'Frames cut in Inspect and the case’s images.' },
-      { anchor: 'collage.arrange', title: 'Auto panorama', text: 'Stitches overlapping pieces into one picture, planar, cylindrical or spherical.' },
+      { anchor: 'collage.arrange', title: 'Auto-stitch', text: 'Stitches overlapping pieces into one picture, and its arrow picks planar, cylindrical or spherical.' },
       {
         anchor: 'collage.straighten',
         title: 'Straighten',
@@ -351,7 +351,7 @@ export const PAGES = {
           marks: [{ anchor: 'collage.canvas', title: 'The level line', text: 'A click adds a point, and Ctrl+Z takes the last one back.' }],
         },
       },
-      { anchor: 'collage.save', title: 'Save to case', text: 'Files the collage as media at full resolution, while its layout stays editable.' },
+      { anchor: 'collage.save', title: 'Save to case', text: 'One press files the collage as media at full resolution, and its arrow sets the name, folder and note.' },
     ],
     tips: [
       { title: 'A document of its own', text: 'Each collage keeps its layout, so it reopens from the Collage tab and edits.' },

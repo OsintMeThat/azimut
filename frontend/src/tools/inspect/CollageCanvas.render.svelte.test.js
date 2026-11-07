@@ -15,12 +15,12 @@ let live;
 let target;
 let collage;
 
-function show(selectedIds, level = null) {
+function show(selectedIds, level = null, view = undefined) {
   const shown = $state({ width: 1600, height: 800, nodes: [node('nd_1'), node('nd_2')] });
   collage = shown;
   target = document.createElement('div');
   document.body.append(target);
-  live = mount(CollageCanvas, { target, props: { collage, selectedIds, requestCrop: vi.fn(), level } });
+  live = mount(CollageCanvas, { target, props: { collage, selectedIds, requestCrop: vi.fn(), level, view } });
   flushSync();
 }
 
@@ -140,5 +140,30 @@ describe('the level line', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
     flushSync();
     expect(level.points).toHaveLength(1);
+  });
+});
+
+describe('the view and the cue', () => {
+  it('zooms the view the tool holds, so the bar over it can say so and fit it back', () => {
+    const view = $state({ zoom: 1, x: 0, y: 0 });
+    show([], null, view);
+
+    target.querySelector('.wrap').dispatchEvent(new WheelEvent('wheel', { deltaY: -100, clientX: 50, clientY: 40, bubbles: true, cancelable: true }));
+    flushSync();
+    expect(view.zoom).toBeCloseTo(1.1);
+    expect(target.querySelector('.surface').style.transform).toContain(`translate(${view.x}px, ${view.y}px)`);
+  });
+
+  it('says what to click while the line is drawn, in place of the keys of the canvas', () => {
+    const level = $state({ drawing: false, points: [] });
+    show([], level);
+    expect(target.querySelector('.view-hint').textContent).toContain('scroll to zoom');
+    expect(target.querySelector('.wrap').classList.contains('drawing')).toBe(false);
+
+    level.drawing = true;
+    flushSync();
+    expect(target.querySelector('.level-cue').textContent).toContain('along something level that crosses the view');
+    expect(target.querySelector('.level-cue').textContent).toContain('double-click or Enter ends');
+    expect(target.querySelector('.wrap').classList.contains('drawing')).toBe(true);
   });
 });

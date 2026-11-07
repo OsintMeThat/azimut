@@ -100,7 +100,17 @@ export const INSPECT_HELP = {
   captureHere: 'Capture this frame',
   seekHere: 'Go here',
 
+  // a collage's scene, in the Collage tool
+  collageMarkVideo: 'Mark the whole video its pieces come from',
+  collageMarkMenu: 'Mark the whole video or the stretch its pieces span',
+  collageMarkPeriod: 'A scene over the stretch its pieces span',
+  collageMarkPicture: 'Keep its picture as a place to geolocate, saved first if need be',
+  collageGeolocate: 'Find it on the map, the video and the collage open beside it',
+  collageMakeProof: 'Make the proof of this scene, from its frames, collages and captures',
+  collageOpen: 'Open this collage',
   // make the proof
+  proofCollages: 'Collages cut from this scene, their saved picture laid out',
+  proofCollageStale: 'Changed since its picture was saved: the saved one is laid out',
   proofFramesAll: 'Tick or untick every frame',
   proofFramesMake: 'Save the ticked frames and open a proof of the scene on them',
   proofFrameUnsaved: 'Not in the case yet, saved on the way',

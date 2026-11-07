@@ -673,6 +673,27 @@ export function stitchCanvas(canvas, current) {
   return { width, height, scale: Math.min(width / current.width, height / current.height) };
 }
 
+/**
+ * The one video a collage is cut from, and the stretch of it its pieces span:
+ * `{ path, from, to, times }` in seconds, the times sorted, or null when a piece is
+ * a picture of its own or comes from another file. A piece is the video at an
+ * instant, or a frame saved from it, which `cutFrom(path)` reads back to
+ * `{ video, time }`. A single instant reads `from === to`.
+ */
+export function collageVideo(nodes, cutFrom = () => null) {
+  if (!nodes?.length) return null;
+  let path = null;
+  const times = [];
+  for (const n of nodes) {
+    const at = n.save?.time != null ? { video: n.save.path, time: Number(n.save.time) } : cutFrom(n.save?.path);
+    if (!at?.video || !Number.isFinite(at.time) || (path && at.video !== path)) return null;
+    path = at.video;
+    times.push(at.time);
+  }
+  times.sort((a, b) => a - b);
+  return { path, from: times[0], to: times[times.length - 1], times };
+}
+
 /** A sensible starting quad: the image scaled to fit `maxW`, placed at (ox, oy). */
 export function initialQuad(natW, natH, maxW, ox, oy) {
   const scale = Math.min(1, maxW / (natW || maxW));

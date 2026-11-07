@@ -42,7 +42,7 @@ describe('making the proof of a scene', () => {
     flushSync();
     expect(dialog().textContent).toContain('1 of 2 frames in the proof');
     button('Make the proof').click();
-    expect(props.onconfirm).toHaveBeenCalledWith(['b'], []);
+    expect(props.onconfirm).toHaveBeenCalledWith(['b'], [], []);
   });
 
   it('makes nothing once every frame is unticked, and ticks them all back in one press', () => {
@@ -57,7 +57,7 @@ describe('making the proof of a scene', () => {
     button('Tick all').click();
     flushSync();
     button('Make the proof').click();
-    expect(props.onconfirm).toHaveBeenCalledWith(['f1', 'f2', 'f3', 'f4'], []);
+    expect(props.onconfirm).toHaveBeenCalledWith(['f1', 'f2', 'f3', 'f4'], [], []);
   });
 
   it('keeps the tick-all press out of the way for a few frames', () => {
@@ -73,7 +73,7 @@ describe('making the proof of a scene', () => {
     expect(dialog().textContent).toContain('No frame in this scene yet.');
     expect(dialog().textContent).toContain('Captures and saves the sharpest frame of the scene, at 0:14.');
     button('Make the proof').click();
-    expect(props.onconfirm).toHaveBeenCalledWith([], []);
+    expect(props.onconfirm).toHaveBeenCalledWith([], [], []);
   });
 
   it.each([
@@ -101,7 +101,36 @@ describe('making the proof of a scene', () => {
     flushSync();
     expect(dialog().textContent).toContain('1 of 2 captures from the map');
     button('Make the proof').click();
-    expect(props.onconfirm).toHaveBeenCalledWith(['a'], ['media/cap-1.png']);
+    expect(props.onconfirm).toHaveBeenCalledWith(['a'], ['media/cap-1.png'], []);
+  });
+
+  it('offers the collages cut from the scene between its frames and its captures, ticked too', () => {
+    const collages = [
+      { path: 'media/Pan.png', url: 'blob:pan', title: 'Pan', current: true },
+      { path: 'media/Quay.png', url: 'blob:quay', title: 'Quay', current: false },
+    ];
+    const captures = [{ path: 'media/cap-1.png', url: 'blob:c1', title: 'Cap' }];
+    const props = show({ frames: [frame('a', 11)], collages, captures, filedIds: new Set(['a']) });
+
+    const lists = [...dialog().querySelectorAll('ul')].map((ul) => ul.getAttribute('aria-label'));
+    expect(lists).toEqual(['Frames of the scene', 'Collages of the scene', 'Captures of the scene']);
+    expect(dialog().textContent).toContain('2 of 2 collages in the proof');
+    // one changed since its picture was saved says so on it
+    expect([...dialog().querySelectorAll('[aria-label="Collages of the scene"] .unsaved')].map((el) => el.textContent)).toEqual(['Changed since']);
+    boxes()[2].click();
+    flushSync();
+    button('Make the proof').click();
+    expect(props.onconfirm).toHaveBeenCalledWith(['a'], ['media/cap-1.png'], ['media/Pan.png']);
+  });
+
+  it('makes the proof from a collage alone, with no frame to capture', () => {
+    const props = show({ collages: [{ path: 'media/Pan.png', url: 'blob:pan', title: 'Pan', current: true }] });
+    expect(dialog().textContent).not.toContain('No frame in this scene yet.');
+    button('Make the proof').click();
+    expect(props.onconfirm).toHaveBeenCalledWith([], [], ['media/Pan.png']);
+    boxes()[0].click();
+    flushSync();
+    expect(button('Make the proof').disabled).toBe(true);
   });
 
   it('needs a frame of the video even when captures are ticked, since the proof rests on one', () => {
@@ -115,7 +144,7 @@ describe('making the proof of a scene', () => {
     const props = show({ capture: { time: 14.2, why: 'start' }, captures: [{ path: 'media/cap-1.png', url: 'blob:c1', title: 'Cap' }] });
     expect(dialog().textContent).toContain('No frame in this scene yet.');
     button('Make the proof').click();
-    expect(props.onconfirm).toHaveBeenCalledWith([], ['media/cap-1.png']);
+    expect(props.onconfirm).toHaveBeenCalledWith([], ['media/cap-1.png'], []);
   });
 
   it('names an unlabelled scene by its time, and the whole video in words', () => {

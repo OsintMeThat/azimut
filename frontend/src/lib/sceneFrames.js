@@ -9,7 +9,7 @@
  * video marks no frame, since it would mark them all, but it offers every one.
  */
 import { DEFAULT_FPS } from './inspectPlayer.js';
-import { isAbandoned, isStretch, sceneMoments, sceneStart, sceneTitle } from './scenes.js';
+import { isAbandoned, isStretch, isWholeVideo, liveScenes, sceneMoments, sceneStart, sceneTitle } from './scenes.js';
 
 /** A frame's length in seconds: the clip's, else a thirtieth while its rate is unknown. */
 const frameLength = (frame) => (frame > 0 ? frame : 1 / DEFAULT_FPS);
@@ -96,6 +96,52 @@ export function framesOfScene(scene, frames, frame) {
     .filter((f) => f.time != null && f.url && !f.missing)
     .filter((f) => !moments.length || moments.some((m) => frameInMoment(f.time, m, frame)))
     .sort((a, b) => a.time - b.time);
+}
+
+// A collage cut from one video belongs to its scenes by its pieces' instants
+// (`GET /scenes` lists it with its `times`), each read as a frame is.
+
+/** Whether a scene holds one of a collage's pieces. */
+const holdsPiece = (scene, times, frame) => (times ?? []).some((t) => scenesAt(t, [scene], frame).length > 0);
+
+/**
+ * The scene a collage of the clip is in: the one holding the most of its pieces,
+ * else the scene about the whole video, else none. An abandoned scene holds nothing.
+ */
+export function sceneOfCollage(times, scenes, frame) {
+  const live = liveScenes(scenes);
+  const held = live
+    .map((scene, i) => ({ scene, i, n: (times ?? []).filter((t) => scenesAt(t, [scene], frame).length).length }))
+    .filter((x) => x.n > 0)
+    .sort((a, b) => b.n - a.n || a.i - b.i);
+  return held[0]?.scene ?? live.find((s) => s.kind === 'draft' && isWholeVideo(s)) ?? null;
+}
+
+/**
+ * By scene key, the collages the Scenes tab lists under each scene: under every
+ * scene holding one of its pieces, and under the scene about the whole video when
+ * none does.
+ */
+export function collagesUnder(scenes, collages, frame) {
+  const out = new Map();
+  const live = liveScenes(scenes);
+  const whole = live.find((s) => s.kind === 'draft' && isWholeVideo(s));
+  for (const collage of collages ?? []) {
+    const held = live.filter((s) => holdsPiece(s, collage.times, frame));
+    for (const scene of held.length ? held : whole ? [whole] : []) out.set(scene.key, [...(out.get(scene.key) ?? []), collage]);
+  }
+  return out;
+}
+
+/**
+ * The collages a scene's proof can start from, in clip order: those holding one of
+ * its moments, or every one for the whole video, as with its frames.
+ */
+export function collagesOfScene(scene, collages, frame) {
+  const moments = sceneMoments(scene);
+  return (collages ?? [])
+    .filter((c) => !moments.length || moments.some((m) => (c.times ?? []).some((t) => frameInMoment(t, m, frame))))
+    .sort((a, b) => a.start - b.start);
 }
 
 /**

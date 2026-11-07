@@ -55,14 +55,16 @@ export async function startGeolocating(caseId, video, draft) {
  * scene marked on its bar in its colour (`uiState.geolocateRef`, which Satellite takes
  * up; `order` is its place among its video's scenes, `lib/scenes.sceneColorAt`). A
  * picture's scene opens the picture instead (`kind`), with no bar to mark. The one
- * entry point of every Geolocate press: Inspect's Scenes tab, the To-do, the extension's panel.
- * `scene` is a queue row or a row of that tab: `{video, id}` at least.
+ * entry point of every Geolocate press: Inspect's Scenes tab, the To-do, the extension's panel,
+ * the Collage tool. `scene` is a queue row or a row of that tab: `{video, id}` at least.
+ * `picture` is one more picture to open beside the video: a collage cut from it.
  */
-export async function geolocateScene(caseId, scene) {
+export async function geolocateScene(caseId, scene, { picture = null } = {}) {
   const held = await startGeolocating(caseId, scene.video, scene.id);
   uiState.geolocateRef = {
     video: held.video, draft: held.id, start: held.start, end: held.end, label: held.label, order: held.order,
     kind: (held.file_kind ?? scene.file_kind) === 'image' ? 'image' : 'video',
+    ...(picture && picture !== held.video ? { picture } : {}),
   };
   uiState.tool = 'satellite';
   return held;
@@ -128,13 +130,16 @@ export function scenesWaiting(caseId) {
 }
 
 /**
- * Mark a whole picture or video to geolocate, from outside Inspect: its scene about
- * the whole file, or the one already there (`POST /scenes/mark`). The server refuses
- * a map capture and a frame Inspect cut from a video. Answers with the scene's row.
+ * Mark a picture or a video to geolocate, from outside Inspect: its scene about the
+ * whole file, or with `start` (and `end` for a passage) a moment of a video, or the
+ * scene already there (`POST /scenes/mark`). A collage cut from one video marks that
+ * video. The server refuses a map capture, a frame Inspect cut from a video, and a
+ * time on a picture. Answers with the scene's row.
  */
-export async function markToGeolocate(caseId, path, label = '') {
-  const { scene } = await api.post(`${base(caseId)}/scenes/mark`, { path, label });
-  edited(caseId, path);
+export async function markToGeolocate(caseId, path, label = '', { start = null, end = null } = {}) {
+  const at = Number.isFinite(start) ? { start, ...(Number.isFinite(end) && end > start ? { end } : {}) } : {};
+  const { scene } = await api.post(`${base(caseId)}/scenes/mark`, { path, label, ...at });
+  edited(caseId, scene?.video ?? path);
   await refreshQueue(caseId);
   return scene;
 }
