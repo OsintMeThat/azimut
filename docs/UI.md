@@ -1898,6 +1898,13 @@ stating no time. Any proof laying the picture out proves it, and the row then re
 *Proved · Proof 12* and opens it. A frame cut from a video belongs to that video's scenes
 and a capture is an answer, so neither has the tab.
 
+**Collages hang under their scenes.** The Scenes tab lists each collage cut from the clip
+under every scene holding one of its pieces, on a rule in the scene's colour, and under
+the whole video's scene when none does; a press opens it in the Collage tool. Make the
+proof offers the scene's collages between its frames and its captures, ticked, by the
+picture each was last saved as (*Changed since* on one edited after), and a proof can rest
+on a collage alone.
+
 **A capture never makes a scene; a frame belongs to one by its time.** A frame captured
 in no scene offers one instead, *Frame captured at 0:00.48 · Add a scene*, with
 **Whole video** and **This moment** (an instant at that frame), each with its Undo. A
@@ -1942,16 +1949,42 @@ piece whose file was deleted keeps its place as a hatched gap, and the export wa
 until it is removed. The selected piece is named by its file and, for a video, the time
 it was cut at.
 
+**The Collage tool is laid out for a laptop.** A bar over the canvas holds what acts on
+the whole collage: **Auto-stitch**, whose arrow picks Planar, Cylindrical or Spherical
+(the last pick named on the button and kept in this browser), **Straighten** with Draw
+the line, and **Fit**, with the zoom beside it once the canvas is zoomed. Auto-stitch's
+message carries Undo, and its arrow keeps Undo auto-stitch after the message goes. The
+panel keeps **Save to case** on top: one press files the picture under the collage's
+name and the last folder, its arrow unfolds the name, folder and note, and the export
+size is written under it. **Add pieces** takes the room left and scrolls on its own; the
+piece in hand sits at the foot (Scale, Rotate, Crop, Unwarp, Front, Back, Remove, or the
+block selected) and keeps its place and height whatever is selected. An empty collage
+says *Add frames from a video, or pictures* on its canvas, with Frames and Images opening
+those lists, or Cut frames in Inspect while no frame is cut.
+
+**A collage of one video is marked as that video.** When every piece is one video at an
+instant, or a frame saved from it, the panel reads *From channel_departure · 0:01–0:03*,
+and **Mark to geolocate** marks the whole video; its arrow offers the stretch the pieces
+span, or the instant of a single piece. A collage of several sources is a picture: the
+press saves it first when it is not in the case as it stands and marks it whole, and
+saved again, its mark follows the new picture (`POST /scenes/mark`). Marked, or with its
+pieces already in a scene of the video, it says where the scene stands, with
+**Geolocate**, which opens the collage beside the video on the map, and **Make the
+proof**, which opens Inspect's chooser on that scene. A proved scene says Proved and
+opens its proof. On the server a collage of one video's frames reads back to that video
+like a frame (`engine/scenes.py`), so a proof resting on it alone states its scene.
+
 **Straighten lays a bent pan flat.** A pan stitched with its tilt a little off bends a
-level line into a slope or a smile. **Draw the line**, then click point by point along
-something level that crosses the view, such as a shore, a field's far edge or a road
+level line into a slope or a smile. **Draw the line**, in the bar over the canvas, then click point
+by point along something level that crosses the view, such as a shore, a field's far edge or a road
 along the valley. The line is a rounded curve through every point, running on to the
 pointer as the next click would make it; a point added between two others bends only
 the stretch around it, and past the line's ends the picture moves as the end does. The
 curve is drawn across the whole collage, so that shows before anything bends. A point can
 be dragged while the line shows, drawing or done.
 Ctrl+Z takes the last point back while the line shows; a double-click, Enter or Esc ends
-the drawing. **Straighten** draws the whole collage as one picture and bends it so that
+the drawing; while it is drawn, the canvas takes the line's yellow at its edge and its
+corner says what to click. **Straighten** draws the whole collage as one picture and bends it so that
 line comes out flat: every column of pixels moves up or down by what the line is off
 there, so each frame's own pixels follow the line and the seams a stitch matched stay
 matched. The bent picture is a new file in the case ("… straightened"), and it takes the

@@ -1,12 +1,12 @@
 {
-  "width": 1036,
-  "height": 610,
+  "width": 910,
+  "height": 601,
   "anchors": {
     "collage.canvas": {
       "x": 0,
-      "y": 28,
+      "y": 63.1,
       "w": 716,
-      "h": 581.6
+      "h": 537.6
     }
   }
 }
