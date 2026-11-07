@@ -267,6 +267,28 @@ it('opens a scene in Inspect from its name', async () => {
   expect(uiState.tool).toBe('inspect');
 });
 
+it('opens the collage a picture was exported from, rather than Inspect, from its name', async () => {
+  const PICTURE = 'media/Harbour pan.png';
+  const whole = row('w', null, null, '', { video: PICTURE, file_kind: 'image' });
+  answerWith({
+    files: [
+      { video: PICTURE, title: 'Harbour pan', kind: 'image', collage: 'Harbour pan', scenes: [whole] },
+      { video: VIDEO, title: 'Market walk', scenes: [row('p', 238, 252, 'bridge?')] },
+    ],
+    geolocating: null,
+  });
+  uiState.openCollage = null;
+  await open();
+  const [picture, video] = rows().map((li) => li.querySelector('button.open'));
+  expect(picture.title).toBe('Open the collage');
+  expect(video.title).toBe('Open in Inspect');
+
+  picture.click();
+  expect(uiState.openCollage).toBe('Harbour pan');
+  expect(uiState.tool).toBe('collage');
+  expect(uiState.inspectScene).toBeNull();
+});
+
 it('abandons a scene with a word, or with none, and Escape keeps it', async () => {
   const scene = row('p', 238, 252, 'bridge?');
   answerWith({ files: [{ video: VIDEO, title: 'Market walk', scenes: [scene] }], geolocating: null });

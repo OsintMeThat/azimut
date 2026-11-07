@@ -108,6 +108,8 @@ export const INSPECT_HELP = {
   collageGeolocate: 'Find it on the map, the video and the collage open beside it',
   collageMakeProof: 'Make the proof of this scene, from its frames, collages and captures',
   collageOpen: 'Open this collage',
+  collageTime: 'Change when in the video the scene happens, the video playing it beside',
+  collagePieceFrame: 'Go to the frame of this piece',
   // make the proof
   proofCollages: 'Collages cut from this scene, their saved picture laid out',
   proofCollageStale: 'Changed since its picture was saved: the saved one is laid out',
@@ -137,4 +139,14 @@ export const FILTER_HELP = {
   channel: 'Shows one colour channel alone',
   grayscale: 'Drops the colour',
   invert: 'Swaps dark and light',
+};
+
+/**
+ * The line under the time editor in the Collage tool, about the frame on its player
+ * (`tools/inspect/CollageMoment.svelte`), as Geo Proof says it of its own.
+ */
+export const COLLAGE_TIME_TIPS = {
+  whole: 'No timecode, the scene is about the whole video',
+  instant: 'Here takes the frame on the player',
+  passage: 'Here takes the frame on the player, for the start or the end',
 };

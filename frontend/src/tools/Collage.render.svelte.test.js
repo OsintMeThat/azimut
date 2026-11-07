@@ -718,3 +718,131 @@ describe('a collage of one video', () => {
     expect(target.querySelector('.panel .from')).toBeNull();
   });
 });
+
+describe('a collage straightened', () => {
+  const at = (id, path, time) => ({ ...piece(path), id, save: { path, time, ops: [] } });
+  const STRAIGHT = 'media/Pan straightened.png';
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['png'], { type: 'image/png' }))));
+    URL.createObjectURL = vi.fn(() => 'blob:piece');
+    URL.revokeObjectURL = vi.fn();
+    media = MEDIA;
+    collages = [{ name: 'Pan', title: 'Pan', pieces: 2 }];
+    saved.Pan = { name: 'Pan', title: 'Pan', spec: { width: 800, height: 400, transparent: true, nodes: [at('nd_1', 'media/clip.mp4', 2), { ...at('nd_2', 'media/clip.mp4', 5), quad: [[80, 0], [160, 0], [160, 60], [80, 60]] }] } };
+    // the bent picture lands in the case as the server files it: composed from the pieces' frames
+    post.mockImplementation(async (path, body) => {
+      if (path === '/api/cases/case-a/collages') return { name: body.title, title: body.title };
+      if (path === '/api/cases/case-a/inspect/compose') {
+        media = [...MEDIA, {
+          path: STRAIGHT, kind: 'image', title: 'Pan straightened', filename: 'Pan straightened.png',
+          source: { type: 'inspect', op: 'collage', sources: ['media/clip.mp4', 'media/clip.mp4'], times: [2, 5], straightened: true },
+        }];
+        return { item: { path: STRAIGHT }, box: [0, 0, 160, 60] };
+      }
+      return {};
+    });
+  });
+
+  afterEach(() => post.mockImplementation(async (path, body) => (path === '/api/cases/case-a/collages' ? { name: body.title, title: body.title } : {})));
+
+  it('still reads as its video, the stretch of its pieces, never as a picture of its own', async () => {
+    await start();
+    button('Pan').click();
+    await settle(20);
+    expect(target.querySelector('.panel .from .from-when').textContent).toBe('0:02–0:05');
+
+    button('Draw the line').click();
+    flushSync();
+    const catcher = target.querySelector('.level-catch');
+    for (const x of [10, 150]) {
+      catcher.dispatchEvent(new MouseEvent('pointerdown', { clientX: x, clientY: 30, button: 0, bubbles: true }));
+      flushSync();
+    }
+    [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Straighten').click();
+    await settle(20);
+
+    expect(post.mock.calls.some(([path]) => path === '/api/cases/case-a/inspect/compose')).toBe(true);
+    expect(target.querySelectorAll('img.node')).toHaveLength(1);
+    expect(target.querySelector('.panel .from').textContent.replace(/\s+/g, ' ').trim()).toBe('From Convoy clip 0:02–0:05');
+    // Mark to geolocate offers the video and its stretch, as before the bend
+    expect(target.querySelector('.panel button[aria-label="More ways to mark"]')).not.toBeNull();
+  });
+});
+
+describe('undo', () => {
+  const two = () => [
+    { ...piece('media/roof.png'), id: 'nd_1' },
+    { ...piece('media/roof.png'), id: 'nd_2', quad: [[100, 0], [180, 0], [180, 60], [100, 60]] },
+  ];
+  const ctrlZ = () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+    flushSync();
+  };
+  const press = (key) => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    flushSync();
+  };
+  const corner = (i) => {
+    const node = target.querySelectorAll('img.node')[i];
+    return node.style.transform;
+  };
+
+  beforeEach(() => {
+    collages = [{ name: 'Strip', title: 'Strip', pieces: 2 }];
+    saved.Strip = { name: 'Strip', title: 'Strip', spec: { width: 800, height: 400, transparent: true, nodes: two() } };
+  });
+
+  afterEach(() => post.mockImplementation(async (path, body) => (path === '/api/cases/case-a/collages' ? { name: body.title, title: body.title } : {})));
+
+  it('takes a whole auto-stitch back in one step, however long its pieces take to come back', async () => {
+    // a panorama warp redraws each piece, slower than the history's pause between steps
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => setTimeout(() => resolve(new Response(new Blob(['png'], { type: 'image/png' }))), 450))));
+    URL.createObjectURL = vi.fn(() => 'blob:warped');
+    URL.revokeObjectURL = vi.fn();
+    post.mockImplementation(async (path, body) => {
+      if (path === '/api/cases/case-a/collages') return { name: body.title, title: body.title };
+      if (path === '/api/cases/case-a/inspect/auto-stitch') {
+        const op = { op: 'remap', params: { warp: 'cylindrical' } };
+        return { nodes: [{ index: 0, quad: [[0, 100], [80, 100], [80, 160], [0, 160]], op }, { index: 1, quad: [[70, 100], [150, 100], [150, 160], [70, 160]], op }], dropped: [], canvas: null };
+      }
+      return {};
+    });
+    await start();
+    button('Strip').click();
+    await settle(20);
+    const before = [corner(0), corner(1)];
+
+    button('Auto-stitch').click();
+    await settle(1200);
+    expect(corner(0)).not.toBe(before[0]);
+    expect(target.querySelector('img.node').getAttribute('src')).toBe('blob:warped');
+
+    ctrlZ();
+    expect([corner(0), corner(1)]).toEqual(before);
+  });
+
+  it('takes a burst of arrow presses back at once, and the next burst on its own', async () => {
+    await start();
+    button('Strip').click();
+    await settle(20);
+    const start0 = corner(0);
+    target.querySelector('img.node').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    window.dispatchEvent(new MouseEvent('pointerup'));
+    flushSync();
+
+    for (let i = 0; i < 5; i += 1) press('ArrowRight');
+    await settle(500);
+    const afterFirst = corner(0);
+    expect(afterFirst).not.toBe(start0);
+    press('ArrowDown');
+    press('ArrowDown');
+    await settle(500);
+
+    ctrlZ();
+    expect(corner(0)).toBe(afterFirst);
+    await settle(450);
+    ctrlZ();
+    expect(corner(0)).toBe(start0);
+  });
+});

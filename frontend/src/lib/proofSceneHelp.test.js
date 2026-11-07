@@ -23,7 +23,8 @@ describe('what Geo Proof\'s scene says on hover', () => {
   it('has no text left that no control shows', () => {
     const code = sources();
     for (const key of Object.keys(PROOF_SCENE_HELP)) {
-      expect(code.includes(`PROOF_SCENE_HELP.${key}`) || code.includes(`HELP.${key}`), key).toBe(true);
+      // the player takes its words as `help`, Geo Proof's by default (the Collage tool lends it its own)
+      expect(code.includes(`PROOF_SCENE_HELP.${key}`) || code.includes(`HELP.${key}`) || code.includes(`help.${key}`), key).toBe(true);
     }
     expect(code).toContain('help={PROOF_TIME_HELP}');
     expect(code).toContain('tips={PROOF_TIME_TIPS}');

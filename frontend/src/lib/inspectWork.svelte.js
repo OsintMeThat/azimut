@@ -127,6 +127,8 @@ export function pieceRecord(node) {
     quad: node.quad.map(([x, y]) => [x, y]),
     frameOps: node.frameOps ?? node.save?.ops ?? [],
     crop: node.crop ?? null,
+    // the areas auto-stitch must not match on (lib/excludeBrush.js): kept, never exported
+    ...(node.exclude?.length ? { exclude: node.exclude } : {}),
   };
 }
 

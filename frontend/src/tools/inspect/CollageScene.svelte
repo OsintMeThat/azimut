@@ -8,10 +8,12 @@
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
   import { sceneOfCollage } from '../../lib/sceneFrames.js';
   import { queueState } from '../../lib/sceneQueue.js';
-  import { WHOLE_VIDEO, isWholeVideo, sceneList, sceneTime, sceneTitle, shortClock, spanLabel } from '../../lib/scenes.js';
+  import { retimeScene } from '../../lib/sceneRetime.svelte.js';
+  import { isWholeVideo, sceneList, sceneTime, sceneTitle, shortClock, spanLabel, timeWords } from '../../lib/scenes.js';
   import { toast, uiState } from '../../lib/state.svelte.js';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import Icon from '../../components/Icon.svelte';
+  import CollageMoment from './CollageMoment.svelte';
 
   // Mark to geolocate, in the Collage tool, under its save. A collage cut from one
   // video belongs to that video's scenes by its pieces' instants (`GET /scenes` lists
@@ -19,7 +21,8 @@
   // pieces span. One of several sources is a picture of its own, marked whole once
   // saved, and its mark follows the picture when it is saved again (`/inspect/compose`).
   // Marked, or already in a scene of its video, it says where the scene stands, with
-  // Geolocate and Make the proof, as Inspect's Scenes tab does.
+  // Geolocate and Make the proof, as Inspect's Scenes tab does. A press on the scene's
+  // time unfolds its editor with the video playing it (`CollageMoment`).
   //
   // `video` is `{ path, times }` when every piece comes from one video; `picture` the
   // collage's last saved picture and `current` that picture while it still reads as the
@@ -86,13 +89,44 @@
   const period = $derived(
     times.length ? (times[0] === times.at(-1) ? shortClock(times[0]) : spanLabel(times[0], times.at(-1))) : '',
   );
+  // A scene still to prove of the collage's video says its time, which a press opens;
+  // a proof, or a picture's scene, only says what it is.
+  const timed = $derived(!!video && scene?.kind === 'draft');
   const where = $derived.by(() => {
     if (!scene) return '';
     if (!video) return 'Whole picture';
     if (scene.kind === 'proof') return sceneTitle(scene);
-    if (isWholeVideo(scene)) return WHOLE_VIDEO;
-    return scene.label ? `In scene · ${scene.label}` : `In scene · ${sceneTime(scene)}`;
+    if (isWholeVideo(scene)) return '';
+    return scene.label || 'In scene';
   });
+
+  // -- its time, changed here ---------------------------------------------------------
+  let editing = $state(false);
+  let editingKey = null;
+  $effect(() => {
+    const key = timed ? scene.key : null;
+    if (key !== editingKey) {
+      editingKey = key;
+      editing = false;
+    }
+  });
+
+  function applyTime(time) {
+    const draft = scene;
+    return act(async () => {
+      const before = await retimeScene(caseId, video.path, draft.id, time);
+      editing = false;
+      await read();
+      const undo = {
+        label: 'Undo',
+        onClick: () => act(async () => {
+          await retimeScene(caseId, video.path, draft.id, before);
+          await read();
+        }),
+      };
+      toast(`Scene now ${timeWords(time.start == null ? [] : [time])}`, 'info', 6000, undo);
+    });
+  }
 
   /** The picture as the layout stands, saved first when it is not. */
   async function picturePath() {
@@ -209,13 +243,36 @@
   {:else}
     <div class="state" style:--scene={scene.color}>
       <span class="swatch" aria-hidden="true"></span>
-      <span class="where" dir="auto" title={where}>{where}</span>
+      {#if where}<span class="where" dir="auto" title={where}>{where}</span>{/if}
+      {#if timed}
+        {#if where}<span class="sep" aria-hidden="true">·</span>{/if}
+        <button
+          class="time"
+          class:whole={isWholeVideo(scene)}
+          class:on={editing}
+          aria-expanded={editing}
+          aria-label={`Time of the scene, ${sceneTime(scene)}`}
+          onclick={() => (editing = !editing)}
+          title={INSPECT_HELP.collageTime}
+        >{sceneTime(scene)}</button>
+      {/if}
       {#if scene.kind === 'proof'}
         <span class="proved"><Icon name="check" size={11} /> Proved</span>
       {:else}
         <span class="standing" class:going={live} data-testid="collage-scene-state">{queueState(liveScene, live)}</span>
       {/if}
     </div>
+    {#if editing && timed}
+      <CollageMoment
+        {caseId}
+        video={video.path}
+        {scene}
+        {times}
+        {busy}
+        onapply={applyTime}
+        oncancel={() => (editing = false)}
+      />
+    {/if}
     <div class="acts">
       {#if scene.kind === 'proof'}
         <button class="btn btn-sm" disabled={busy} onclick={makeProof} title={INSPECT_HELP.sceneProof}>
@@ -320,6 +377,34 @@
     white-space: nowrap;
     color: var(--text-1);
     font-weight: 600;
+  }
+  .sep {
+    flex: none;
+    color: var(--text-3);
+  }
+  /* The scene's time, which a press opens: dotted, as Geo Proof's is. */
+  .time {
+    flex: none;
+    padding: 1px 4px;
+    margin: -1px 0;
+    border-radius: var(--r-sm);
+    color: var(--text-1);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    text-decoration: underline dotted var(--text-3);
+    text-underline-offset: 3px;
+  }
+  .time.whole {
+    font-family: inherit;
+  }
+  .time:hover,
+  .time.on {
+    background: var(--bg-3);
+  }
+  .time.on {
+    text-decoration: none;
+    box-shadow: inset 0 0 0 1px var(--accent);
   }
   .standing,
   .proved {

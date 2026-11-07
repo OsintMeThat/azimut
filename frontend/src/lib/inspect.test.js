@@ -6,7 +6,7 @@ import {
   buildFrameOps, hasVideoEdits, normalizeRightAngleRotation, rotationOps,
   sourceStem, timecode, frameSaveName, frameSaveNames, saveNameOf,
   newCollage, clampCollageDim, stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
-  exportFrame, COLLAGE_MAX_EXPORT_PIXELS, clockTime, collageVideo,
+  exportFrame, COLLAGE_MAX_EXPORT_PIXELS, clockTime, collageVideo, mediaOrigin, quadUnitAt, quadMapUnit, fitView,
   COLLAGE_DEFAULT_SIZE, ADJUST_ORDER, ADJUST_PRESETS, activePreset, buildOps, needsRender,
   presetValues, previewOps, previewStyle, sliderTravel,
 } from './inspect.js';
@@ -507,11 +507,74 @@ describe('collageVideo', () => {
       .toEqual({ path: 'media/pan.mp4', from: 1, to: 5, times: [1, 5] });
   });
 
+  it('follows a picture composed from the video\'s frames, as a straightened collage is, back to them', () => {
+    const origins = {
+      'media/00-00-05 pan.png': { video: 'media/pan.mp4', time: 5 },
+      'media/Pan straightened.png': { pieces: [{ path: 'media/pan.mp4', time: 1 }, { path: 'media/00-00-05 pan.png', time: null }] },
+      'media/Mixed.png': { pieces: [{ path: 'media/pan.mp4', time: 1 }, { path: 'media/roof.png', time: null }] },
+      'media/Loop.png': { pieces: [{ path: 'media/Loop.png', time: null }] },
+    };
+    const origin = (path) => origins[path] ?? null;
+    expect(collageVideo([piece('media/Pan straightened.png')], origin)).toEqual({ path: 'media/pan.mp4', from: 1, to: 5, times: [1, 5] });
+    expect(collageVideo([piece('media/Pan straightened.png'), piece('media/pan.mp4', 3)], origin).times).toEqual([1, 3, 5]);
+    // a picture of its own inside, another video beside, or a picture made of itself
+    expect(collageVideo([piece('media/Mixed.png')], origin)).toBeNull();
+    expect(collageVideo([piece('media/Pan straightened.png'), piece('media/other.mp4', 2)], origin)).toBeNull();
+    expect(collageVideo([piece('media/Loop.png')], origin)).toBeNull();
+  });
+
   it('says nothing of a collage with a picture of its own, another file or no piece', () => {
     expect(collageVideo([piece('media/pan.mp4', 1), piece('media/roof.png')])).toBeNull();
     expect(collageVideo([piece('media/pan.mp4', 1), piece('media/other.mp4', 2)])).toBeNull();
     expect(collageVideo([])).toBeNull();
     expect(collageVideo(undefined)).toBeNull();
+  });
+});
+
+describe('mediaOrigin', () => {
+  it('reads a frame back to its video and a composed picture back to its pieces', () => {
+    expect(mediaOrigin({ source: { type: 'inspect', op: 'frame', from: 'media/pan.mp4', time: 5 } })).toEqual({ video: 'media/pan.mp4', time: 5 });
+    expect(mediaOrigin({ source: { type: 'inspect', op: 'collage', sources: ['media/pan.mp4', 'media/a.png'], times: [2, null], straightened: true } }))
+      .toEqual({ pieces: [{ path: 'media/pan.mp4', time: 2 }, { path: 'media/a.png', time: null }] });
+  });
+
+  it('reads nothing else', () => {
+    expect(mediaOrigin({ source: { type: 'inspect', op: 'collage', sources: ['media/a.png'], times: [] } })).toBeNull();
+    expect(mediaOrigin({ source: { type: 'download', op: 'frame', from: 'x', time: 1 } })).toBeNull();
+    expect(mediaOrigin({})).toBeNull();
+  });
+});
+
+describe('quadUnitAt', () => {
+  it('finds a canvas point in a warped piece\'s own square, the inverse of quadMapUnit', () => {
+    const quad = [[10, 20], [210, 5], [230, 160], [0, 140]];
+    for (const unit of [[0, 0], [1, 1], [0.25, 0.75], [0.6, 0.1], [1.2, -0.1]]) {
+      const [[x, y]] = quadMapUnit(quad, [unit]);
+      const back = quadUnitAt(quad, [x, y]);
+      expect(near(back[0], unit[0], 1e-9) && near(back[1], unit[1], 1e-9)).toBe(true);
+    }
+  });
+});
+
+describe('fitView', () => {
+  const rect = (x, y, w, h) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+  const pane = { width: 1000, height: 500 };
+  const canvas = { width: 2000, height: 1000 }; // fitted at half scale
+
+  it('frames the pieces whole, centred, a margin from the edges', () => {
+    const view = fitView([rect(100, 100, 400, 100), rect(500, 150, 300, 100)], pane, canvas, 20);
+    // 700 × 150 canvas pixels into 960 × 460: the width rules, at 960 / 700
+    const scale = 0.5 * view.zoom;
+    expect(scale).toBeCloseTo(960 / 700);
+    expect(100 * scale + view.x).toBeCloseTo(20);
+    expect(100 * scale + view.y + (150 * scale) / 2).toBeCloseTo(250);
+  });
+
+  it('stays within the view\'s zoom, and fits the canvas with nothing to frame', () => {
+    expect(fitView([rect(0, 0, 2, 2)], pane, canvas).zoom).toBe(8);
+    expect(fitView([rect(-20000, 0, 40000, 10)], pane, canvas).zoom).toBe(0.2);
+    expect(fitView([], pane, canvas)).toEqual({ zoom: 1, x: 0, y: 0 });
+    expect(fitView([rect(0, 0, 5, 5)], { width: 0, height: 0 }, canvas)).toEqual({ zoom: 1, x: 0, y: 0 });
   });
 });
 

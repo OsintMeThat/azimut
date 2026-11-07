@@ -10,6 +10,7 @@ import { flushSync, mount, unmount } from 'svelte';
  */
 
 let listed = {};
+let works = {};
 const calls = [];
 const respond = (method) => vi.fn(async (path, body) => {
   calls.push({ method, path, body });
@@ -26,6 +27,17 @@ const respond = (method) => vi.fn(async (path, body) => {
     return { geolocating: { video: body.video, id: body.draft, start: null, end: null, label: '', order: 0, captures: [], file_kind: body.video.endsWith('.png') ? 'image' : 'video' } };
   }
   if (method === 'DELETE' && path.endsWith('/geolocating')) return { ended: true };
+  if (method === 'GET' && path.includes('/inspect/work?path=')) return { work: structuredClone(works[decodeURIComponent(path.split('path=')[1])] ?? null) };
+  if (method === 'PUT' && path.endsWith('/inspect/work')) {
+    works[body.path] = { name: 'clip', title: 'clip', spec: structuredClone(body.spec) };
+    const rows = listed[body.path]?.scenes ?? [];
+    listed[body.path] = { ...listed[body.path], scenes: rows.map((row) => {
+      const kept = body.spec.scenes.find((sc) => sc.id === row.id);
+      return kept ? { ...row, start: kept.start, end: kept.end } : row;
+    }) };
+    return { name: 'clip', title: 'clip' };
+  }
+  if (method === 'GET' && path.includes('/inspect/probe')) return { duration: 60, fps: 25 };
   if (path.endsWith('/scenes/queue')) return { files: [], geolocating: null };
   return {};
 });
@@ -38,6 +50,7 @@ vi.mock('../../lib/state.svelte.js', () => ({ uiState, toast, caseState: { curre
 
 const { default: CollageScene } = await import('./CollageScene.svelte');
 const { geolocating } = await import('../../lib/geolocating.svelte.js');
+const { retimed } = await import('../../lib/sceneRetime.svelte.js');
 
 let live;
 let target;
@@ -58,10 +71,13 @@ async function show(props) {
 
 const button = (text) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith(text));
 const marks = () => calls.filter((c) => c.path.endsWith('/scenes/mark')).map((c) => c.body);
+/** The scene's line as it reads: its name, then its time, which is a button. */
+const sceneLine = () => [...target.querySelectorAll('.state .where, .state .sep, .state .time')].map((el) => el.textContent.trim()).join(' ');
 const ONE_VIDEO = { path: 'media/clip.mp4', times: [1.2, 2.4, 3.6] };
 
 beforeEach(() => {
   listed = {};
+  works = {};
   calls.length = 0;
   toast.mockClear();
   Object.assign(uiState, { tool: 'collage', geolocateRef: null, inspectScene: null, openProof: null });
@@ -83,7 +99,7 @@ describe('a collage of one video', () => {
     await settle();
     expect(save).toHaveBeenCalledTimes(1);
     expect(marks()).toEqual([{ path: 'media/clip.mp4', label: '' }]);
-    expect(target.querySelector('.where').textContent).toBe('Whole video');
+    expect(sceneLine()).toBe('Whole video');
     expect(target.querySelector('[data-testid="collage-scene-state"]').textContent).toBe('To geolocate');
   });
 
@@ -99,7 +115,7 @@ describe('a collage of one video', () => {
     await settle();
     expect(save).not.toHaveBeenCalled();
     expect(marks()).toEqual([{ path: 'media/clip.mp4', label: '', start: 1.2, end: 3.6 }]);
-    expect(target.querySelector('.where').textContent).toBe('In scene · 0:01–0:03');
+    expect(sceneLine()).toBe('In scene · 0:01–0:03');
   });
 
   it('marks a single piece as its instant', async () => {
@@ -122,7 +138,7 @@ describe('a collage of one video', () => {
     await show({ video: { path: 'media/clip.mp4', times: [12] } });
 
     expect(button('Mark to geolocate')).toBeUndefined();
-    expect(target.querySelector('.where').textContent).toBe('In scene · Bridge?');
+    expect(sceneLine()).toBe('Bridge? · 0:10–0:20');
     expect(target.querySelector('[data-testid="collage-scene-state"]').textContent).toBe('In progress · 1 capture');
   });
 
@@ -169,7 +185,9 @@ describe('a collage of one video', () => {
     };
     await show({ video: ONE_VIDEO });
 
-    expect(target.querySelector('.where').textContent).toBe('Harbour bridge');
+    expect(sceneLine()).toBe('Harbour bridge');
+    // a proof's time is changed in Geo Proof, not here
+    expect(target.querySelector('.state .time')).toBeNull();
     expect(target.querySelector('.proved').textContent).toContain('Proved');
     button('Open the proof').click();
     await settle();
@@ -202,12 +220,96 @@ describe('a collage of several sources', () => {
     const save = vi.fn(async () => 'media/Pan 2.png');
     await show({ picture: 'media/Pan.png', current: null, save });
 
-    expect(target.querySelector('.where').textContent).toBe('Whole picture');
+    expect(sceneLine()).toBe('Whole picture');
+    expect(target.querySelector('.state .time')).toBeNull();
     button('Geolocate').click();
     await settle();
     expect(save).toHaveBeenCalledTimes(1);
     expect(calls.find((c) => c.method === 'PUT').body).toEqual({ video: 'media/Pan 2.png', draft: 'sc_p' });
     expect(uiState.geolocateRef).toMatchObject({ video: 'media/Pan 2.png', kind: 'image' });
     expect(uiState.geolocateRef.picture).toBeUndefined();
+  });
+});
+
+describe('the moment it was marked over', () => {
+  const STRETCH = { kind: 'draft', id: 'sc_s', video: 'media/clip.mp4', start: 1, end: 4, label: '', state: 'todo', captures: [], abandoned: null };
+  const field = (name) => target.querySelector(`input[aria-label="${name}"]`);
+  const type = (input, text) => {
+    input.value = text;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  };
+
+  beforeEach(() => {
+    listed['media/clip.mp4'] = { scenes: [STRETCH], taken: [], collages: [], geolocating: null };
+    works['media/clip.mp4'] = { name: 'clip', title: 'clip', spec: { frames: [{ id: 'f1', time: 2 }], marks: [], scenes: [{ id: 'sc_s', start: 1, end: 4, label: '' }, { id: 'sc_o', start: 30, end: null, label: 'Other' }] } };
+  });
+
+  it('opens from its time, the video playing it beside Inspect\'s time editor, and folds away on Cancel', async () => {
+    await show({ video: ONE_VIDEO, current: 'media/Pan.png' });
+    expect(target.querySelector('[data-testid="collage-moment"]')).toBeNull();
+
+    const time = target.querySelector('.state .time');
+    expect(time.getAttribute('aria-expanded')).toBe('false');
+    time.click();
+    await settle();
+    const editor = target.querySelector('[data-testid="collage-moment"]');
+    expect(editor).not.toBeNull();
+    expect(time.getAttribute('aria-expanded')).toBe('true');
+    expect(editor.querySelector('[data-testid="scene-player"] video').getAttribute('src')).toContain('clip.mp4');
+    // the pieces' frames on the bar, the moment as a band, and nothing to add from here
+    expect(editor.querySelectorAll('.bar .dot')).toHaveLength(3);
+    expect(editor.querySelectorAll('[data-testid="scene-band"]')).toHaveLength(1);
+    expect(editor.querySelector('.dot').title).toBe('Go to the frame of this piece');
+    expect(button('Add this frame')).toBeUndefined();
+    expect(editor.querySelector('[role="radio"][aria-checked="true"]').textContent).toBe('Passage');
+    expect(field('Scene start').value).toBe('0:01');
+
+    button('Cancel').click();
+    flushSync();
+    expect(target.querySelector('[data-testid="collage-moment"]')).toBeNull();
+    expect(calls.some((c) => c.method === 'PUT' && c.path.endsWith('/inspect/work'))).toBe(false);
+  });
+
+  it('keeps a new start and end through the video\'s work, as Inspect does, and takes it back from its message', async () => {
+    await show({ video: ONE_VIDEO, current: 'media/Pan.png' });
+    const n = retimed.n;
+    target.querySelector('.state .time').click();
+    await settle();
+
+    type(field('Scene start'), '0:02');
+    type(field('Scene end'), '0:06');
+    button('Apply').click();
+    await settle();
+
+    const put = calls.filter((c) => c.method === 'PUT' && c.path.endsWith('/inspect/work'));
+    expect(put).toHaveLength(1);
+    expect(put[0].body.path).toBe('media/clip.mp4');
+    // only its scene moves: the frames and the other scene are written back as they were
+    expect(put[0].body.spec.scenes).toEqual([{ id: 'sc_s', start: 2, end: 6, label: '' }, { id: 'sc_o', start: 30, end: null, label: 'Other' }]);
+    expect(put[0].body.spec.frames).toEqual([{ id: 'f1', time: 2 }]);
+    // an Inspect tab on the video hears it, so its next save keeps the new time
+    expect(retimed).toMatchObject({ caseId: 'case-a', video: 'media/clip.mp4', draft: 'sc_s', start: 2, end: 6, n: n + 1 });
+    expect(target.querySelector('[data-testid="collage-moment"]')).toBeNull();
+    expect(sceneLine()).toBe('In scene · 0:02–0:06');
+    const [message, , , undo] = toast.mock.calls.at(-1);
+    expect(message).toBe('Scene now 0:02–0:06');
+
+    undo.onClick();
+    await settle();
+    expect(calls.filter((c) => c.method === 'PUT' && c.path.endsWith('/inspect/work')).at(-1).body.spec.scenes[0]).toEqual({ id: 'sc_s', start: 1, end: 4, label: '' });
+    expect(sceneLine()).toBe('In scene · 0:01–0:04');
+  });
+
+  it('says when the time typed leaves every piece out, and still lets it be kept', async () => {
+    await show({ video: ONE_VIDEO, current: 'media/Pan.png' });
+    target.querySelector('.state .time').click();
+    await settle();
+    expect(target.querySelector('.outside')).toBeNull();
+
+    type(field('Scene start'), '0:20');
+    type(field('Scene end'), '0:25');
+    expect(target.querySelector('.outside').textContent).toBe('No piece of the collage is in this time, so it leaves the scene.');
+    expect(button('Apply').disabled).toBe(false);
   });
 });

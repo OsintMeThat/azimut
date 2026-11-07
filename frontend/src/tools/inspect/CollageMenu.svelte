@@ -120,6 +120,13 @@
       <button class="btn btn-sm" onclick={() => bringFront(selected.id)} title="Bring to the front">Front</button>
       <button class="btn btn-sm" onclick={() => sendBack(selected.id)} title="Send to the back">Back</button>
     </div>
+    {#if selected.exclude?.length}
+      <p class="ignored">
+        <Icon name="brush" size={12} />
+        <span>{selected.exclude.length} {selected.exclude.length === 1 ? 'area' : 'areas'} kept out of auto-stitch</span>
+        <button class="btn btn-ghost btn-xs" onclick={() => (selected.exclude = [])} title="Take every painted area off this piece">Clear</button>
+      </p>
+    {/if}
   {:else if selectedGroup.length > 1}
     <div class="head">
       <div class="identity">
@@ -230,6 +237,22 @@
     height: 18px;
     margin: 0 2px;
     background: var(--border);
+  }
+  /* What the brush painted out of this piece's stitch, in the brush's colour. */
+  .ignored {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: -2px 0 0;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+  .ignored :global(svg) {
+    flex: none;
+    color: var(--danger);
+  }
+  .ignored button {
+    margin-left: auto;
   }
   .danger {
     flex-shrink: 0;
