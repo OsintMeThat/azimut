@@ -992,10 +992,12 @@ remembered per workspace for the current session. Reloading restores the default
   Home, one copy shared by both, so a task ticked on the map is ticked on Home. Its
   **To geolocate** group is the same one, so a scene can be picked up from any tool.
   The tab counts the scenes waiting, the accent's dot and their number, the abandoned
-  left out, and says nothing at zero. The queue is read once for the case while the
-  sidebar is open; a nudge naming a file then asks that file's scenes alone
+  left out, and says nothing at zero. Closed, the sidebar's toggle in the top bar wears
+  the Settings gear's dot while scenes wait, and its tooltip says they are in the To-do;
+  pressed, it opens the sidebar as before. The queue is read once for the case while a
+  case is open; a nudge naming a file then asks that file's scenes alone
   (`GET /scenes?video=`), and the queue is read again only when the open scenes there
-  changed. In the narrowest sidebar the count takes the room of the tab icons.
+  changed, the sidebar open or closed. In the narrowest sidebar the count takes the room of the tab icons.
   **Recent** is the last forty items filed, newest first, read only while it is
   open.
 - **Body** — one rule: no filter shows the tree, a query or a chip shows a flat
@@ -1794,10 +1796,12 @@ without its adjustments, on a video and on a frame.
 and **Save N frames** once there are captures, and **Save to case** on a frame. C captures from the keyboard and
 takes as fast as it is pressed: the frame joins the strip at once and its picture
 follows, and taking the same frame twice only points at it. The panel is resized by
-its left edge. Its tabs keep their place for the session:
+its left edge. Its tabs keep their place while the file stays open, and every video and
+picture opens on Scenes, a video on the clip rather than a frame of it:
 
-- **Scenes**, first, and open on a video: the places to find in the file, below. A
-  frame of a video, a capture and a frame opened on its own have no such tab.
+- **Scenes**, first, and where a video or a picture opens: the places to find in the
+  file, below. A frame of a video, a capture and a frame opened on its own have no such
+  tab, and keep the tab they had.
 - **Adjust**: crop, orientation and tones. A live histogram reads the picture as it
   is shown and says how much of it is pure black or white. Presets (dark scene,
   haze, text and plates) set the sliders and leave them to move. Brightness goes from black to ×4,
@@ -1830,11 +1834,17 @@ under Capture frame, or **S**, keeps a scene at the frame on screen, and its arr
 This moment or Whole video. A scene is an instant until **End here** or **Shift+S** gives
 it an end at the frame on screen, and then a passage. A scene that states no time is
 about the **whole video** and prints no timecode anywhere. The bar draws each one in its
-colour, a pin at an instant and a band over a passage, named on hover, and a click on
-either opens the Scenes tab on that scene. The empty strip of a video with no scene and
+colour, a pin at an instant and a band over a passage, named on hover. A click on a pin
+opens the Scenes tab on its scene from any tab; a click on a band does so on the Scenes
+tab only, and elsewhere just moves the clip. The empty strip of a video with no scene and
 no proof asks *Several places in this video?* with This moment, Whole video and Not now,
-remembered per file in this browser. The first scene ever kept says once that it is in
-the To-do too, with **Show**.
+remembered per file in this browser. The first scene ever kept points once, in this
+browser, at where it waits: a small bubble with an arrow, *Your scenes wait here*, with
+**Show** to open the To-do and ✕. It hangs under the sidebar's toggle while the sidebar is
+closed, or under its To-do tab while another view is shown; with the To-do on screen it
+waits for a later scene. It takes no focus, goes on Show, ✕, Escape, a press elsewhere,
+another tool or after ten seconds, and follows its control on a resize. The toast keeps
+its own words and Undo.
 
 **The Scenes tab lists them in clip order**, a scene about the whole video first, its
 label counting them, tinted while some are still to prove. A closed row writes its name,
