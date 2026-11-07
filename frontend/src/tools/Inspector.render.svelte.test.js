@@ -63,30 +63,33 @@ const toast = vi.fn();
 const dismissToast = vi.fn();
 const reloadCase = vi.fn(async () => {});
 vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast, dismissToast, reloadCase }));
-vi.mock('../lib/navigate.js', () => ({ openInReverseSearch: vi.fn() }));
+vi.mock('../lib/navigate.js', () => ({ openInReverseSearch: vi.fn(), openTodo: vi.fn() }));
 const deletedToast = vi.fn();
 vi.mock('../lib/trash.js', () => ({ deletedToast }));
-// The scenes drawer as far as Inspect needs it here: a row's Make the proof, Geolocate,
-// Abandon and Restore, each handing the tool its scene (the drawer's own rows are
-// driven in its tests). What it was last handed is kept, to read the rows' state.
-let drawerHeld = null;
-vi.mock('./inspect/ScenePanel.svelte', () => ({
-  default: function ScenePanelStub(anchor, props) {
-    drawerHeld = props;
+// The Scenes tab as far as Inspect needs it here: a row's Make the proof, Geolocate,
+// Abandon and Restore, each handing the tool its scene (the tab's own rows are driven
+// in its tests). What it was last handed is kept, to read the rows' state.
+let tabHeld = null;
+vi.mock('./inspect/SceneTab.svelte', () => ({
+  default: function SceneTabStub(anchor, props) {
+    tabHeld = props;
     const acts = [
       ['Prove', (scene) => props.onmakeproof?.(scene)],
       ['Geolocate', (scene) => props.ongeolocate?.(scene)],
       ['Abandon', (scene) => props.onabandon?.(scene, 'no landmark')],
       ['Restore', (scene) => props.onrestore?.(scene)],
     ];
+    const presses = [];
     for (const scene of props.scenes.filter((sc) => sc.kind === 'draft')) {
       for (const [word, act] of acts) {
         const press = document.createElement('button');
         press.textContent = `${word} ${scene.id}`;
         press.onclick = () => act(scene);
         anchor.before(press);
+        presses.push(press);
       }
     }
+    $effect(() => () => presses.forEach((press) => press.remove()));
   },
 }));
 
@@ -122,8 +125,17 @@ async function openFile(title) {
 }
 
 const button = (text) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith(text));
+/** The Scenes tab shown afresh, its stub handed the list as it stands. */
+function showScenes() {
+  [...target.querySelectorAll('.ptab')].find((t) => t.textContent.includes('Adjust')).click();
+  flushSync();
+  [...target.querySelectorAll('.ptab')].find((t) => t.textContent.includes('Scenes')).click();
+  flushSync();
+}
 
 beforeEach(() => {
+  // the To-do named once has its own test (`Inspector.scenes.render.svelte.test.js`)
+  localStorage.setItem('azimut:sceneTodoHint', '1');
   saved = {};
   works = [];
   media = MEDIA;
@@ -427,7 +439,7 @@ describe('the capture and the save, in reach whatever the panel shows', () => {
     await openFile('Convoy clip');
 
     expect(target.querySelector('.pinned').textContent).toContain('Capture frame');
-    for (const name of ['Info', 'Adjust', 'Moments']) {
+    for (const name of ['Scenes', 'Adjust', 'Moments', 'Info']) {
       tab(name).click();
       flushSync();
       expect(tab(name).getAttribute('aria-selected')).toBe('true');
@@ -440,7 +452,7 @@ describe('the capture and the save, in reach whatever the panel shows', () => {
     await openFile('Roof');
 
     expect(target.querySelector('.pinned').textContent).toContain('Save to case');
-    expect([...target.querySelectorAll('.ptab')].map((t) => t.textContent.trim())).toEqual(['Info', 'Adjust', 'Analyze']);
+    expect([...target.querySelectorAll('.ptab')].map((t) => t.textContent.trim())).toEqual(['Scenes', 'Adjust', 'Analyze', 'Info']);
     tab('Analyze').click();
     flushSync();
     expect(target.querySelector('.pinned').textContent).toContain('Save to case');
@@ -687,10 +699,6 @@ describe('the scenes of the clip, in the strip and in a proof', () => {
     };
   };
   const tiles = () => [...target.querySelectorAll('.strip > div.tile')];
-  const openScenes = () => {
-    [...target.querySelectorAll('button')].find((b) => b.getAttribute('aria-expanded') !== null && b.textContent.includes('Scenes')).click();
-    flushSync();
-  };
   const dialog = () => document.querySelector('[role="dialog"][aria-label="Make the proof"]');
 
   beforeEach(() => {
@@ -722,7 +730,7 @@ describe('the scenes of the clip, in the strip and in a proof', () => {
     await start();
     await openFile('Convoy clip');
     await settle(10);
-    openScenes();
+    showScenes();
 
     // one to prove: the proof's draft is not offered again
     expect([...target.querySelectorAll('button')].map((b) => b.textContent).filter((t) => t.startsWith('Prove'))).toEqual(['Prove sc_2']);
@@ -783,7 +791,7 @@ describe('the scenes of the clip, in the strip and in a proof', () => {
     await start();
     await openFile('Convoy clip');
     await settle(10);
-    openScenes();
+    showScenes();
     button('Prove sc_1').click();
     flushSync();
 
@@ -824,7 +832,7 @@ describe('the scenes of the clip, in the strip and in a proof', () => {
     await start();
     await openFile('Convoy clip');
     await settle(10);
-    openScenes();
+    showScenes();
     button('Prove sc_1').click();
     flushSync();
 
@@ -847,7 +855,7 @@ describe('the scenes of the clip, in the strip and in a proof', () => {
     await start();
     await openFile('Convoy clip');
     await settle(10);
-    openScenes();
+    showScenes();
     button('Prove sc_1').click();
     flushSync();
     [...dialog().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Make the proof').click();
@@ -873,20 +881,12 @@ describe('geolocating a scene', () => {
   };
   let listed = [];
   let held = null;
-  const openScenes = () => {
-    [...target.querySelectorAll('button')].find((b) => b.getAttribute('aria-expanded') !== null && b.textContent.includes('Scenes')).click();
-    flushSync();
-  };
-  const reopenScenes = () => {
-    openScenes();
-    openScenes();
-  };
   const sceneReads = () => get.mock.calls.filter(([path]) => path.startsWith('/api/cases/case-a/scenes?')).length;
 
   beforeEach(() => {
     listed = [draftRow('sc_1', 1, 4, 'bridge?')];
     held = null;
-    drawerHeld = null;
+    tabHeld = null;
     // the app's copy of the scene being geolocated, unread
     Object.assign(geolocating, { caseId: null, scene: null, error: '' });
     uiState.tool = 'inspect';
@@ -933,8 +933,8 @@ describe('geolocating a scene', () => {
     // a scene kept a moment ago, its save still pending
     playheadAt(6);
     press('s');
-    openScenes();
-    const fresh = drawerHeld.scenes.find((sc) => sc.kind === 'draft' && sc.id !== 'sc_1');
+    showScenes();
+    const fresh = tabHeld.scenes.find((sc) => sc.kind === 'draft' && sc.id !== 'sc_1');
     button(`Geolocate ${fresh.id}`).click();
     await settle(10);
 
@@ -953,8 +953,8 @@ describe('geolocating a scene', () => {
     await start();
     await openFile('Convoy clip');
     await settle(10);
-    openScenes();
-    const rows = Object.fromEntries(drawerHeld.scenes.map((sc) => [sc.id, sc]));
+    showScenes();
+    const rows = Object.fromEntries(tabHeld.scenes.map((sc) => [sc.id, sc]));
     expect(rows.sc_1).toMatchObject({ state: 'progress', captures: ['media/cap.png'], geolocating: true });
     expect(rows.sc_2).toMatchObject({ state: 'todo', captures: [] });
     expect(rows.sc_2.geolocating).toBeUndefined();
@@ -967,7 +967,7 @@ describe('geolocating a scene', () => {
     await start();
     await openFile('Convoy clip');
     await settle(10);
-    openScenes();
+    showScenes();
     const before = sceneReads();
     del.mockClear();
     put.mockClear();
@@ -985,15 +985,15 @@ describe('geolocating a scene', () => {
     await start();
     await openFile('Convoy clip');
     await settle(10);
-    openScenes();
+    showScenes();
     const before = sceneReads();
     button('Abandon sc_1').click();
     await settle(10);
 
     expect(put).toHaveBeenCalledWith('/api/cases/case-a/scenes/sc_1/abandon', { video: 'media/clip.mp4', reason: 'no landmark' });
     expect(sceneReads()).toBeGreaterThan(before);
-    reopenScenes();
-    expect(drawerHeld.scenes.find((sc) => sc.id === 'sc_1')).toMatchObject({ state: 'abandoned', abandoned: { reason: 'no landmark' } });
+    showScenes();
+    expect(tabHeld.scenes.find((sc) => sc.id === 'sc_1')).toMatchObject({ state: 'abandoned', abandoned: { reason: 'no landmark' } });
     // greyed on the bar, still where it was
     expect(target.querySelector('[data-testid="scene-band"]').classList.contains('abandoned')).toBe(true);
 
@@ -1002,8 +1002,8 @@ describe('geolocating a scene', () => {
     action.onClick();
     await settle(10);
     expect(del).toHaveBeenCalledWith('/api/cases/case-a/scenes/sc_1/abandon?video=media%2Fclip.mp4');
-    reopenScenes();
-    expect(drawerHeld.scenes.find((sc) => sc.id === 'sc_1')).toMatchObject({ state: 'todo', abandoned: null });
+    showScenes();
+    expect(tabHeld.scenes.find((sc) => sc.id === 'sc_1')).toMatchObject({ state: 'todo', abandoned: null });
     toast.mockReset();
   });
 
@@ -1020,7 +1020,7 @@ describe('geolocating a scene', () => {
     await settle(10);
 
     expect(uiState.inspectScene).toBeNull();
-    expect(drawerHeld?.focus).toEqual({ key: 'sc_1', n: 1 });
+    expect(tabHeld?.focus).toEqual({ key: 'sc_1', n: 1 });
     const dialog = document.querySelector('[role="dialog"][aria-label="Make the proof"]');
     expect(dialog).not.toBeNull();
     expect([...dialog.querySelectorAll('input[type="checkbox"]')].map((b) => [b.getAttribute('aria-label'), b.checked]))

@@ -181,6 +181,18 @@ describe('a Make the proof handoff', () => {
     expect(readHandoff({ moments: [], panels: ['media/a.png'] })).toBeNull();
   });
 
+  it('reads a picture marked to geolocate as a proof with no scene', () => {
+    expect(readHandoff({ picture: 'media/photo.jpg', panels: ['media/photo.jpg', 'media/cap.png', 'media/cap.png'], label: 'Market?' })).toEqual({
+      scene: null,
+      panels: ['media/photo.jpg', 'media/cap.png'],
+      title: 'Market',
+    });
+    // nothing to lay out is no proof
+    expect(readHandoff({ picture: 'media/photo.jpg', panels: [] })).toBeNull();
+    // a video named wins: its scene states its time
+    expect(readHandoff({ picture: 'media/photo.jpg', video: CLIP, moments: [], panels: ['media/a.png'] }).scene.video).toBe(CLIP);
+  });
+
   it('names the proof after the label, without the question it was kept with', () => {
     expect(handoffTitle('Pont routier ?')).toBe('Pont routier');
     expect(handoffTitle('  Depot  ')).toBe('Depot');

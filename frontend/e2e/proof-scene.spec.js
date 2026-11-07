@@ -144,6 +144,26 @@ test('makes the proof of a scene of Inspect on its Proof tab, its player ready, 
   });
 });
 
+test('makes the proof of a picture marked to geolocate with no scene, the picture its first panel', async ({ page }) => {
+  const { fixture, scenePuts } = await openCase(page);
+
+  // What Inspect's Make the proof hands over for a picture (`lib/sceneFrames.js`).
+  await page.evaluate(async () => {
+    const { uiState } = await import('/src/lib/state.svelte.js');
+    uiState.proofScene = { picture: 'media/photo.png', panels: ['media/photo.png', 'media/frame-a.png'], label: 'Market?' };
+  });
+
+  await expect(page.locator('.panel-row')).toHaveCount(2);
+  await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue('Market');
+  await expect(sideTab(page, 'Proof')).toHaveAttribute('aria-selected', 'true');
+  // its time is nobody's: the frame beside it brings a Scene tab of its own, stating nothing
+  const saved = await saveProof(page, fixture, 1);
+  expect(saved.spec.panels.map((panel) => panel.src)).toEqual(['media/photo.png', 'media/frame-a.png']);
+  expect(saved.spec).not.toHaveProperty('scene');
+  await page.waitForTimeout(300);
+  expect(scenePuts).toEqual([]);
+});
+
 test('changes the time of a saved proof at once, adds a frame of its player, and prints it only when asked', async ({ page }) => {
   const { fixture, scenePuts, frameSaves } = await openCase(page);
   await newProof(page, ['Frame A']);

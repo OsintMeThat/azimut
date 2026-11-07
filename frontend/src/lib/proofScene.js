@@ -164,12 +164,19 @@ export function sceneColor(listed, { proof = null, draft = null } = {}) {
   return own?.color ?? sceneList([{ kind: 'proof', proof: '', moments: [] }], [])[0].color;
 }
 
-/** A Make the proof handoff as the composer holds it, or null when it names no video. */
+/**
+ * A Make the proof handoff as the composer holds it, or null when it names neither a
+ * video nor a picture. A picture's proof holds no scene (`scene: null`).
+ */
 export function readHandoff(handoff) {
+  const panels = [...new Set((Array.isArray(handoff?.panels) ? handoff.panels : []).filter((p) => typeof p === 'string' && p))];
+  // a picture marked to geolocate: its proof states no scene, the picture is its panel
+  if (typeof handoff?.picture === 'string' && handoff.picture && !handoff.video) {
+    return panels.length ? { scene: null, panels, title: handoffTitle(handoff.label) } : null;
+  }
   const stated = readStatedScene(handoff);
   if (!stated) return null;
-  const panels = (Array.isArray(handoff.panels) ? handoff.panels : []).filter((p) => typeof p === 'string' && p);
-  return { scene: stated, panels: [...new Set(panels)], title: handoffTitle(handoff.label) };
+  return { scene: stated, panels, title: handoffTitle(handoff.label) };
 }
 
 /**

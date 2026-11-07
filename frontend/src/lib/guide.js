@@ -315,8 +315,8 @@ export const PAGES = {
       },
       {
         anchor: 'inspect.tabs',
-        title: 'Info, Adjust, Moments',
-        text: 'What the file says about itself, how it looks, and where things happen in it.',
+        title: 'Scenes, Adjust, Moments, Info',
+        text: 'The places to find in it, how it looks, where things happen, and what the file says about itself.',
         opens: {
           shot: 'inspect-adjust',
           lead: 'Adjust turns, tunes and crops, with presets for a dark scene, haze, or text and plates.',

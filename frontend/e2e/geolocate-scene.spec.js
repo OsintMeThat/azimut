@@ -3,7 +3,7 @@ import { awaitMapReady, CASE_ID, installAppFixture } from './app.fixture.js';
 import { STEPS_DURATION, STEPS_FPS, STEPS_WEBM, serveRange } from './video.fixture.js';
 
 /**
- * Geolocating a scene of a long video. Its row in Inspect's drawer says where it
+ * Geolocating a scene of a long video. Its row in Inspect's Scenes tab says where it
  * stands and offers Geolocate first, Make the proof second; Geolocate opens the map
  * with the video as a reference window, the scene marked on its bar, and a pill over
  * the tools counts the captures gathered for it. A scene given up on waits, greyed,
@@ -158,15 +158,19 @@ async function openCase(page, { viewport = { width: 1500, height: 900 } } = {}) 
   return { fixture, server };
 }
 
-const drawer = (page) => page.getByRole('complementary', { name: 'Scenes' });
-const rows = (page) => drawer(page).getByTestId('scene-row');
-/** A row by the label typed in it: the drawer lists the proof on the clip first, then the bridge, then the unnamed one. */
+const scenesTab = (page) => page.getByRole('tab', { name: /^Scenes/ });
+const panel = (page) => page.getByRole('tabpanel', { name: 'Scenes' });
+const rows = (page) => panel(page).getByTestId('scene-row');
+/** A row by its name: the tab lists the proof on the clip first, then the bridge, then the unnamed one. */
 const ORDER = { 'Fuel depot': 0, 'Road bridge?': 1, '': 2 };
 const rowOf = (page, text) => rows(page).nth(ORDER[text]);
 
-async function openDrawer(page) {
-  await page.getByRole('button', { name: /^Scenes/ }).click();
-  await expect(drawer(page)).toBeVisible();
+/** That row open, with its acts. */
+async function openRow(page, text) {
+  const row = rowOf(page, text);
+  if (await row.evaluate((node) => node.tagName === 'BUTTON')) await row.click();
+  await expect(row.getByRole('group', { name: 'When the scene happens' })).toBeVisible();
+  return row;
 }
 
 async function theme(page, which) {
@@ -179,11 +183,13 @@ async function theme(page, which) {
 test('says where each scene to prove stands, with Geolocate first and Make the proof beside it', async ({ page }) => {
   await openCase(page);
   // the abandoned one is left out of the count
-  await expect(page.getByRole('button', { name: /^Scenes/ })).toHaveAttribute('aria-label', 'Scenes 3');
-  await openDrawer(page);
+  await expect(scenesTab(page).locator('.count')).toHaveText('3');
+  await expect(panel(page)).toBeVisible();
 
   await expect(rows(page)).toHaveCount(3);
-  const bridge = rowOf(page, 'Road bridge?');
+  // the first still to prove opens on its own, the proof before it stays folded
+  await expect(rowOf(page, 'Fuel depot')).toContainText('Whole video');
+  const bridge = await openRow(page, 'Road bridge?');
   await expect(bridge.getByRole('textbox', { name: 'Scene label' })).toHaveValue('Road bridge?');
   await expect(bridge.getByTestId('scene-state')).toContainText('To geolocate');
   await expect(bridge.getByRole('button', { name: 'Geolocate' })).toBeVisible();
@@ -191,23 +197,22 @@ test('says where each scene to prove stands, with Geolocate first and Make the p
   const found = rows(page).nth(2);
   await expect(found.getByTestId('scene-state')).toContainText('In progress · 1 capture');
   // the abandoned one waits folded, its stretch still on the bar, greyed and hollow
-  await expect(drawer(page).getByRole('button', { name: 'Abandoned (1)' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(panel(page).getByRole('button', { name: 'Abandoned (1)' })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('.track .scene-pin.abandoned')).toHaveCount(1);
-  await page.screenshot({ path: `${SHOTS}/drawer-dark.png` });
-  await drawer(page).screenshot({ path: `${SHOTS}/drawer-dark-close.png` });
+  await page.screenshot({ path: `${SHOTS}/tab-dark.png` });
+  await panel(page).screenshot({ path: `${SHOTS}/tab-dark-close.png` });
 
   await theme(page, 'light');
-  await drawer(page).getByRole('button', { name: 'Abandoned (1)' }).click();
-  await expect(drawer(page).getByTestId('scene-row-abandoned')).toContainText('no landmark in view');
-  await drawer(page).screenshot({ path: `${SHOTS}/drawer-light-abandoned.png` });
-  await page.screenshot({ path: `${SHOTS}/drawer-light.png` });
+  await panel(page).getByRole('button', { name: 'Abandoned (1)' }).click();
+  await expect(panel(page).getByTestId('scene-row-abandoned')).toContainText('no landmark in view');
+  await panel(page).screenshot({ path: `${SHOTS}/tab-light-abandoned.png` });
+  await page.screenshot({ path: `${SHOTS}/tab-light.png` });
   await theme(page, 'dark');
 });
 
 test('abandons a scene with a word, keeps it greyed in its group, and brings it back', async ({ page }) => {
   const { server } = await openCase(page);
-  await openDrawer(page);
-  const bridge = rowOf(page, 'Road bridge?');
+  const bridge = await openRow(page, 'Road bridge?');
   await bridge.getByRole('button', { name: 'Abandon' }).click();
   const word = bridge.getByRole('textbox', { name: 'Why it is abandoned' });
   await expect(word).toBeFocused();
@@ -218,16 +223,16 @@ test('abandons a scene with a word, keeps it greyed in its group, and brings it 
 
   await bridge.getByRole('button', { name: 'Abandon' }).click();
   await bridge.getByRole('textbox', { name: 'Why it is abandoned' }).fill('bridge is out of shot');
-  await drawer(page).screenshot({ path: `${SHOTS}/drawer-abandon-word.png` });
+  await panel(page).screenshot({ path: `${SHOTS}/tab-abandon-word.png` });
   await page.keyboard.press('Enter');
   await expect.poll(() => server.calls).toContain('abandon sc_1 bridge is out of shot');
   await expect(rows(page)).toHaveCount(2);
-  await expect(drawer(page).getByRole('button', { name: 'Abandoned (2)' })).toBeVisible();
+  await expect(panel(page).getByRole('button', { name: 'Abandoned (2)' })).toBeVisible();
   await expect(page.locator('.track .scene.abandoned')).toHaveCount(1);
-  await expect(page.getByRole('button', { name: /^Scenes/ })).toHaveAttribute('aria-label', 'Scenes 2');
+  await expect(scenesTab(page).locator('.count')).toHaveText('2');
 
-  await drawer(page).getByRole('button', { name: 'Abandoned (2)' }).click();
-  const given = drawer(page).getByTestId('scene-row-abandoned').filter({ hasText: 'Road bridge?' });
+  await panel(page).getByRole('button', { name: 'Abandoned (2)' }).click();
+  const given = panel(page).getByTestId('scene-row-abandoned').filter({ hasText: 'Road bridge?' });
   await expect(given).toContainText('bridge is out of shot');
   await given.getByRole('button', { name: 'Restore' }).click();
   await expect.poll(() => server.calls).toContain('restore sc_1');
@@ -237,9 +242,9 @@ test('abandons a scene with a word, keeps it greyed in its group, and brings it 
 
 test('geolocates a scene on the map, its video beside it and the captures counted on the pill', async ({ page }) => {
   const { server } = await openCase(page);
-  await openDrawer(page);
-  const colour = await rowOf(page, 'Road bridge?').evaluate((row) => row.style.getPropertyValue('--scene'));
-  await rowOf(page, 'Road bridge?').getByRole('button', { name: 'Geolocate' }).click();
+  const bridge = await openRow(page, 'Road bridge?');
+  const colour = await bridge.evaluate((row) => row.style.getPropertyValue('--scene'));
+  await bridge.getByRole('button', { name: 'Geolocate' }).click();
   await expect.poll(() => server.calls).toContain('PUT geolocating');
   await expect(page).toHaveURL(/#satellite/);
   await awaitMapReady(page);
@@ -294,16 +299,16 @@ test('geolocates a scene on the map, its video beside it and the captures counte
   await window.hover();
   await expect(window.getByTestId('ref-scene')).toHaveClass(/pin/);
 
-  // its label goes back to the scene in Inspect, the drawer open on its row
+  // its label goes back to the scene in Inspect, the Scenes tab open on its row
   await expect(pill.getByRole('button', { name: /^Geolocating/ })).toHaveAttribute('title', 'Open the scene in Inspect, on steps.webm');
   await pill.getByRole('button', { name: /^Geolocating/ }).click();
   await expect(page).toHaveURL(/#inspect/);
-  await expect(drawer(page)).toBeVisible();
+  await expect(panel(page)).toBeVisible();
   const held = rowOf(page, 'Road bridge?');
   await expect(held).toHaveClass(/active/);
   await expect(held.getByTestId('scene-state')).toHaveText(/Geolocating · 1 capture/);
   await page.waitForTimeout(1700);
-  await drawer(page).screenshot({ path: `${SHOTS}/drawer-active-dark.png` });
+  await panel(page).screenshot({ path: `${SHOTS}/tab-active-dark.png` });
 
   // ✕ stops it, from whichever tool
   await pill.getByRole('button', { name: 'Stop geolocating' }).click();
@@ -314,8 +319,8 @@ test('geolocates a scene on the map, its video beside it and the captures counte
 
 test('makes the proof from the pill, the scene\'s frames first and then its captures', async ({ page }) => {
   const { server } = await openCase(page);
-  await openDrawer(page);
-  await rows(page).nth(2).getByRole('button', { name: 'Geolocate' }).click();
+  const scene = await openRow(page, '');
+  await scene.getByRole('button', { name: 'Geolocate' }).click();
   await expect(page).toHaveURL(/#satellite/);
   const pill = page.locator('.geo-pill');
   await expect(pill.getByTestId('geolocating-count')).toHaveText('1');
@@ -339,9 +344,9 @@ test('makes the proof from the pill, the scene\'s frames first and then its capt
 
 test('keeps the pill whole and clear of the map at 1280 px', async ({ page }) => {
   const { server } = await openCase(page, { viewport: { width: 1280, height: 800 } });
-  await openDrawer(page);
-  await drawer(page).screenshot({ path: `${SHOTS}/drawer-1280.png` });
-  await rowOf(page, 'Road bridge?').getByRole('button', { name: 'Geolocate' }).click();
+  const bridge = await openRow(page, 'Road bridge?');
+  await panel(page).screenshot({ path: `${SHOTS}/tab-1280.png` });
+  await bridge.getByRole('button', { name: 'Geolocate' }).click();
   await expect.poll(() => server.calls).toContain('PUT geolocating');
   await awaitMapReady(page);
   const pill = page.locator('.geo-pill');

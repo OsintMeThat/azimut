@@ -103,11 +103,29 @@ export const TODO = 'todo';
 export const PROGRESS = 'progress';
 export const ABANDONED = 'abandoned';
 
+/** Where a capture comes from: the map, the extension, Horizon, or a Compare render. */
+const CAPTURE_SOURCES = new Set(['satellite', 'screenshot', 'horizon', 'compare']);
+
+/**
+ * Whether a picture can be marked to geolocate, the whole of it. Not a frame Inspect
+ * cut from a video, which belongs to that video's scenes, and not a capture, which is
+ * an answer from the map rather than a question (`engine/geolocate.mark`).
+ */
+export function markablePicture(item) {
+  if (item?.kind !== 'image') return false;
+  const source = item.source ?? {};
+  if (source.type === 'inspect' && source.op === 'frame' && Number.isFinite(source.time)) return false;
+  return !CAPTURE_SOURCES.has(source.type);
+}
+
 /** Whether a scene still to prove was given up on. It stays, greyed, and can come back. */
 export const isAbandoned = (scene) => scene?.kind === 'draft' && Boolean(scene.abandoned);
 
-/** The scenes the drawer lists first and the Scenes button counts: all but the abandoned. */
+/** The scenes Inspect lists first and its Scenes tab counts: all but the abandoned. */
 export const liveScenes = (scenes) => (scenes ?? []).filter((s) => !isAbandoned(s));
+
+/** How many scenes are still to prove: the drafts not abandoned, which tint the tab's count. */
+export const toProve = (scenes) => liveScenes(scenes).filter((s) => s.kind === 'draft').length;
 
 /**
  * The list the player shows: the proofs the server read back, and the drafts as
@@ -153,7 +171,7 @@ export const momentKey = (scene, index) => (scene.kind === 'proof' ? `${scene.ke
  * What the player's bar draws: a band over each passage, a pin at each instant,
  * every moment of a proof in its colour. A proof with no moment of its own is
  * pinned at every frame it was built on; a draft about the whole video draws
- * nothing.
+ * nothing. Each mark names its scene (`scene`, its key), which a press on it opens.
  */
 export function sceneMarks(scenes) {
   const marks = [];
@@ -164,12 +182,12 @@ export function sceneMarks(scenes) {
     const abandoned = isAbandoned(s);
     moments.forEach((m, i) =>
       marks.push({
-        key: momentKey(s, i), start: m.start, end: isStretch(m) ? m.end : null, color: s.color,
+        key: momentKey(s, i), scene: s.key, start: m.start, end: isStretch(m) ? m.end : null, color: s.color,
         label: abandoned ? `${label} · abandoned` : label, ...(abandoned ? { abandoned } : {}),
       }),
     );
     if (!moments.length && s.kind === 'proof') {
-      (s.at ?? []).forEach((t, i) => marks.push({ key: `${s.key}@${i}`, start: t, end: null, color: s.color, label }));
+      (s.at ?? []).forEach((t, i) => marks.push({ key: `${s.key}@${i}`, scene: s.key, start: t, end: null, color: s.color, label }));
     }
   }
   return marks;
@@ -200,6 +218,23 @@ export function shortMoments(moments) {
 
 /** A scene's time as its row shows it (`shortMoments`). */
 export const sceneTime = (scene) => shortMoments(sceneMoments(scene));
+
+/**
+ * The kind of time a scene states, in the words its row writes before the time:
+ * `Whole video`, `Instant`, `Passage`, or `3 moments` for a proof holding several.
+ */
+export function sceneKind(scene) {
+  const moments = sceneMoments(scene);
+  if (!moments.length) return WHOLE_VIDEO;
+  if (moments.length > 1) return `${moments.length} moments`;
+  return isStretch(moments[0]) ? 'Passage' : 'Instant';
+}
+
+/** A scene's kind and time together: `Passage · 0:30–0:45`, `Instant · 3:49`, `Whole video`. */
+export function sceneWhen(scene) {
+  const kind = sceneKind(scene);
+  return kind === WHOLE_VIDEO ? kind : `${kind} · ${sceneTime(scene)}`;
+}
 
 /** The draft to end at `time`: the latest one started before it and not abandoned, else none. */
 export function sceneToEnd(scenes, time) {

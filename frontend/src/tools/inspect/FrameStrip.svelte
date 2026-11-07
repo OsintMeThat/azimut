@@ -13,7 +13,8 @@
   //
   // A frame inside a scene carries a dot in its colour, one per scene, a grey ring for
   // an abandoned one, and one a proof lays out says so on hover (`lib/sceneFrames.js`).
-  // A clip with no scene shows the strip it always did.
+  // A clip with no scene shows the strip it always did. `invite` takes the place of
+  // the empty strip's line, in the same height.
   let {
     source,
     sourceThumb = null,
@@ -26,6 +27,7 @@
     savingAll = false,
     dots = new Map(),
     uses = new Map(),
+    invite,
     onselect,
     onremove,
     onsave,
@@ -101,7 +103,11 @@
   {/each}
 
   {#if source.kind === 'video' && frames.length === 0}
-    <p class="empty">Frames you capture are kept with this video.</p>
+    {#if invite}
+      {@render invite()}
+    {:else}
+      <p class="waiting">Frames you capture are kept with this video.</p>
+    {/if}
   {/if}
 
   {#if unfiled > 1}
@@ -267,7 +273,7 @@
       transform: rotate(360deg);
     }
   }
-  .empty {
+  .waiting {
     margin: 0;
     color: var(--text-3);
     font-size: var(--fs-xs);

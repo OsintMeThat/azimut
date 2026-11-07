@@ -444,7 +444,7 @@
   );
 
   function pickSideTab(id) {
-    // leaving the scene keeps a time that reads as one, as closing Inspect's drawer does
+    // leaving the scene keeps a time that reads as one, as leaving a row of Inspect's Scenes tab does
     if (sideShown === 'scene' && id !== 'scene') scene.leaveTime();
     sideTab = id;
   }
@@ -482,6 +482,8 @@
    * Make the proof of a scene kept in Inspect: a new proof of its frames, in order,
    * named after it, its time held for the first save. It opens on the Proof tab, the
    * facts being what is left to do, its player ready on the Scene tab where it starts.
+   * A picture marked to geolocate states no time: its proof lays out the picture and
+   * the captures gathered for it, and that alone proves it.
    */
   async function makeSceneProof(handoff) {
     const made = readHandoff(handoff);
@@ -491,13 +493,13 @@
     pickSideTab('proof');
     settlePlace('proof', place(), { navigate: true });
     if (made.title) proof.title = made.title;
-    scene.hold(made.scene);
+    if (made.scene) scene.hold(made.scene);
     // the frames were filed a moment ago, so the case's media is read again first
     await readCaseMedia(caseState.current.id);
     await addPanelsFromPaths(made.panels);
     dirty = true;
     anchorHistory();
-    scene.show(made.scene.video);
+    if (made.scene) scene.show(made.scene.video);
     requestAnimationFrame(fit);
   }
 
