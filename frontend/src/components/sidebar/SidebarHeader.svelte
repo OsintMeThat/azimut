@@ -3,6 +3,7 @@
   // view. Fixed — it never scrolls away.
   import Icon from '../Icon.svelte';
   import SearchInput from '../SearchInput.svelte';
+  import { waitingWords } from '../../lib/sceneQueue.js';
 
   let {
     caseName,
@@ -13,6 +14,8 @@
     total = 0,
     resultCount = null,
     view = 'folders',
+    // the scenes waiting to be geolocated, counted on the To-do tab while there are some
+    todoCount = 0,
     notesOpen = false,
     onnotes = () => {},
     onselecttype = () => {},
@@ -52,16 +55,20 @@
     </button>
   </div>
 
-  <div class="views" role="tablist" aria-label="Sidebar view">
+  <div class="views" class:counted={todoCount > 0} role="tablist" aria-label="Sidebar view">
     {#each VIEWS as v (v.id)}
+      {@const waiting = v.id === 'todo' && todoCount > 0 ? todoCount : 0}
       <button
         class="view"
         class:active={view === v.id}
         role="tab"
         aria-selected={view === v.id}
+        title={waiting ? waitingWords(waiting) : undefined}
+        aria-label={waiting ? `${v.label}, ${waitingWords(waiting)}` : undefined}
         onclick={() => onview(v.id)}
       >
         <Icon name={v.icon} size={13} /> {v.label}
+        {#if waiting}<span class="waiting" aria-hidden="true">{waiting}</span>{/if}
       </button>
     {/each}
   </div>
@@ -158,6 +165,7 @@
   }
   .n { font-weight: 600; }
   .views {
+    container-type: inline-size;
     display: flex;
     gap: 2px;
     margin: -4px -4px 0;
@@ -170,7 +178,31 @@
     color: var(--text-3);
     font-size: var(--fs-xs);
     font-weight: 600;
+    white-space: nowrap;
+  }
+  /* In the narrowest sidebar the count takes the room of the icons, so all three
+     tabs keep their one line and their words. */
+  @container (max-width: 270px) {
+    .views.counted .view > :global(svg) { display: none; }
   }
   .view:hover { color: var(--text-1); }
   .view.active { color: var(--text-1); box-shadow: inset 0 -2px 0 var(--accent); }
+  /* The scenes still to geolocate: the accent's dot and their number, quiet beside
+     the label, the one sign outside the view that something waits in it. */
+  .waiting {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 1px;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .waiting::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .view.active .waiting { color: var(--text-1); }
 </style>

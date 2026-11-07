@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPaletteKey, matchRuns, paletteActions, paletteSettings, paletteTools } from './commandPalette.js';
+import { isPaletteKey, matchRuns, paletteActions, paletteScenes, paletteSettings, paletteTools } from './commandPalette.js';
 
 describe('the palette shortcut', () => {
   it('opens with Control or Command, including from a text field', () => {
@@ -80,5 +80,55 @@ describe('what the palette does', () => {
 
   it('offers nothing a case is needed for when none is open', () => {
     expect(paletteActions('note')).toEqual([]);
+    expect(paletteActions('geolocate', { toGeolocate: 2 })).toEqual([]);
+  });
+
+  it('offers To geolocate unasked only while scenes wait, and to anyone who types it', () => {
+    const ids = (query, toGeolocate) => paletteActions(query, { caseOpen: true, toGeolocate }).map((row) => row.id);
+    expect(ids('', null)).toEqual(['note-side']);
+    expect(ids('', 0)).toEqual(['note-side']);
+    expect(ids('', 2)).toEqual(['note-side', 'to-geolocate']);
+    expect(ids('geoloc', 0)).toEqual(['to-geolocate']);
+    expect(ids('to-do', 0)).toEqual(['to-geolocate']);
+  });
+
+  it('counts the scenes waiting beside To geolocate', () => {
+    const row = (toGeolocate) => paletteActions('geolocate', { caseOpen: true, toGeolocate })[0];
+    expect(row(2)).toEqual({ kind: 'action', id: 'to-geolocate', label: 'To geolocate', detail: '2 scenes · To-do', icon: 'crosshair' });
+    expect(row(1).detail).toBe('1 scene · To-do');
+    expect(row(0).detail).toBe('To-do');
+    expect(row(null).detail).toBe('To-do');
+  });
+});
+
+describe('the scenes Go to finds', () => {
+  const scene = (video, id, label, extra = {}) => ({ video, id, start: 4, end: null, label, state: 'todo', ...extra });
+  const FILES = [
+    { video: 'media/market.mp4', title: 'Market walk', kind: 'video', scenes: [scene('media/market.mp4', 'a', 'bridge?'), scene('media/market.mp4', 'b', 'Minaret')] },
+    {
+      video: 'media/harbour.png', title: 'Harbour photo', kind: 'image',
+      scenes: [scene('media/harbour.png', 'c', '', { start: null, file_kind: 'image' }), scene('media/harbour.png', 'd', 'Left', { state: 'abandoned' })],
+    },
+  ];
+
+  it('lists nothing until something is typed, nor without a queue', () => {
+    expect(paletteScenes(FILES, '')).toEqual([]);
+    expect(paletteScenes(null, 'bridge')).toEqual([]);
+  });
+
+  it('finds a scene by its label or its file, and never an abandoned one', () => {
+    expect(paletteScenes(FILES, 'bridge')).toEqual([{
+      kind: 'scene', id: 'media/market.mp4#a', label: 'bridge?', detail: 'Market walk', icon: 'video', video: 'media/market.mp4', draft: 'a',
+    }]);
+    expect(paletteScenes(FILES, 'market').map((row) => row.draft)).toEqual(['a', 'b']);
+    expect(paletteScenes(FILES, 'harbour')).toEqual([{
+      kind: 'scene', id: 'media/harbour.png#c', label: 'Whole picture', detail: 'Harbour photo', icon: 'image', video: 'media/harbour.png', draft: 'c',
+    }]);
+    expect(paletteScenes(FILES, 'left')).toEqual([]);
+  });
+
+  it('keeps to a few rows', () => {
+    const many = [{ video: 'v', title: 'Long clip', kind: 'video', scenes: Array.from({ length: 12 }, (_, i) => scene('v', `s${i}`, `Spot ${i}`)) }];
+    expect(paletteScenes(many, 'spot')).toHaveLength(6);
   });
 });

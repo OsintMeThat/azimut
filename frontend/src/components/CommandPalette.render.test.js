@@ -243,7 +243,8 @@ describe('Go to', () => {
     document.body.append(trigger);
     trigger.focus();
     await show();
-    const signals = get.mock.calls.map(([, options]) => options.signal);
+    // the queue is the case's own read, shared with the sidebar: only searches are cancelled
+    const signals = get.mock.calls.filter(([path]) => !path.endsWith('/scenes/queue')).map(([, options]) => options.signal);
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     await settle();
     expect(document.querySelector('[role="dialog"]')).toBeNull();

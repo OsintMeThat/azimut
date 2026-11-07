@@ -1,7 +1,8 @@
 /**
  * The scene the open case is geolocating, and the queue of scenes still to prove, for
  * every surface that shows them: Inspect's scenes drawer, the pill over the tools, the
- * To-do's "To geolocate" group (`engine/geolocate.py`).
+ * To-do's "To geolocate" group and the count on the sidebar's To-do tab
+ * (`engine/geolocate.py`).
  *
  * The server holds which scene is being geolocated, one per case and for the session
  * only, and attaches every capture filed meanwhile to it, the extension's included.
@@ -11,6 +12,7 @@
  */
 import { api } from './api.js';
 import { onEvent } from './events.js';
+import { openScenes, sceneCount } from './sceneQueue.js';
 import { uiState } from './state.svelte.js';
 
 /** `scene` is the queue's row for it (`video`, `id`, `start`, `end`, `label`, `state`,
@@ -51,7 +53,8 @@ export async function startGeolocating(caseId, video, draft) {
 /**
  * Geolocate a scene and go to the map, its video open as a reference window with the
  * scene marked on its bar in its colour (`uiState.geolocateRef`, which Satellite takes
- * up; `order` is its place among its video's scenes, `lib/scenes.sceneColorAt`). The one
+ * up; `order` is its place among its video's scenes, `lib/scenes.sceneColorAt`). A
+ * picture's scene opens the picture instead (`kind`), with no bar to mark. The one
  * entry point of every Geolocate press: Inspect's drawer, the To-do, the pill.
  * `scene` is a queue row or a drawer's draft: `{video, id}` at least.
  */
@@ -59,6 +62,7 @@ export async function geolocateScene(caseId, scene) {
   const held = await startGeolocating(caseId, scene.video, scene.id);
   uiState.geolocateRef = {
     video: held.video, draft: held.id, start: held.start, end: held.end, label: held.label, order: held.order,
+    kind: (held.file_kind ?? scene.file_kind) === 'image' ? 'image' : 'video',
   };
   uiState.tool = 'satellite';
   return held;
@@ -71,27 +75,68 @@ export async function stopGeolocating(caseId) {
   return ended;
 }
 
+// Whether the queue held may be behind what the server has: a capture gathered or a
+// scene renamed while only its number was shown (`holdSceneCount`), and the read in
+// flight, which a second surface opening at the same moment shares.
+let stale = false;
+let reading = null;
+
 /** Read the scenes still to prove, by file. */
-export async function readSceneQueue(caseId) {
-  if (!caseId) return null;
+export function readSceneQueue(caseId) {
+  if (!caseId) return Promise.resolve(null);
   if (sceneQueue.caseId !== caseId) {
     sceneQueue.caseId = caseId;
     sceneQueue.files = null;
   }
   sceneQueue.busy = true;
   sceneQueue.error = '';
-  try {
-    const answer = await api.get(`${base(caseId)}/scenes/queue`);
-    if (sceneQueue.caseId !== caseId) return null;
-    sceneQueue.files = answer.files;
-    hold(caseId, answer.geolocating);
-    return answer;
-  } catch (e) {
-    if (sceneQueue.caseId === caseId) sceneQueue.error = e.message;
-    return null;
-  } finally {
-    if (sceneQueue.caseId === caseId) sceneQueue.busy = false;
-  }
+  stale = false;
+  const read = (async () => {
+    try {
+      const answer = await api.get(`${base(caseId)}/scenes/queue`);
+      // a later read answers for this one, whichever lands first
+      if (sceneQueue.caseId !== caseId || reading?.read !== read) return null;
+      sceneQueue.files = answer.files;
+      hold(caseId, answer.geolocating);
+      return answer;
+    } catch (e) {
+      if (sceneQueue.caseId === caseId && reading?.read === read) sceneQueue.error = e.message;
+      return null;
+    } finally {
+      if (reading?.read === read) reading = null;
+      if (sceneQueue.caseId === caseId && !reading) sceneQueue.busy = false;
+    }
+  })();
+  reading = { caseId, read };
+  return read;
+}
+
+/** Read the queue unless the one held for this case is up to date, or being read. */
+export function ensureSceneQueue(caseId) {
+  if (!caseId) return Promise.resolve(null);
+  if (reading?.caseId === caseId) return reading.read;
+  const kept = queueHolders > 0 || countHolders > 0;
+  if (kept && sceneQueue.caseId === caseId && sceneQueue.files && !stale) return Promise.resolve(null);
+  return readSceneQueue(caseId);
+}
+
+/** How many scenes of the case wait to be geolocated, the abandoned left out; null
+ *  until its queue is read. */
+export function scenesWaiting(caseId) {
+  if (!caseId || sceneQueue.caseId !== caseId || !sceneQueue.files) return null;
+  return sceneCount(openScenes(sceneQueue.files));
+}
+
+/**
+ * Mark a whole picture or video to geolocate, from outside Inspect: its scene about
+ * the whole file, or the one already there (`POST /scenes/mark`). The server refuses
+ * a map capture and a frame Inspect cut from a video. Answers with the scene's row.
+ */
+export async function markToGeolocate(caseId, path, label = '') {
+  const { scene } = await api.post(`${base(caseId)}/scenes/mark`, { path, label });
+  edited(caseId, path);
+  await refreshQueue(caseId);
+  return scene;
 }
 
 /**
@@ -130,43 +175,114 @@ function refreshQueue(caseId) {
   return sceneQueue.caseId === caseId && sceneQueue.files ? readSceneQueue(caseId) : null;
 }
 
-// The queue is read again only while a surface shows it (the To-do's group): once
-// none does, a nudge reads the scene being geolocated alone, so an Inspect autosave
-// does not walk every worked video for a list nobody is looking at.
+// The queue is read again only while a surface shows it. Its rows (the To-do's group,
+// `holdSceneQueue`) are read again on every nudge. Its number alone (the sidebar's
+// To-do tab, Go to, `holdSceneCount`) is read again only once it may have moved: the
+// queue walks every worked file, and Inspect saves its work, and says so, at every
+// change, a slider's included. So a nudge naming a file asks that file's scenes alone
+// (`GET /scenes?video=`, a few milliseconds), and the queue is read again only when the
+// scenes still open there are not the ones held. Once nothing shows it, a nudge reads
+// the scene being geolocated alone.
 let queueHolders = 0;
+let countHolders = 0;
 const queueHeld = () => queueHolders > 0;
+const countHeld = () => countHolders > 0;
 
-/** A surface showing the queue: it is kept in step until the release this returns. */
-export function holdSceneQueue() {
-  queueHolders += 1;
-  let held = true;
+function holder(add) {
+  add(1);
+  let on = true;
   return () => {
-    if (!held) return;
-    held = false;
-    queueHolders -= 1;
-    if (!queueHolders) clearTimeout(requeuing);
+    if (!on) return;
+    on = false;
+    add(-1);
+    if (!queueHolders && !countHolders) {
+      // nothing keeps it in step from here: whoever shows it next reads it again
+      stale = true;
+      clearTimeout(requeuing);
+      clearTimeout(rechecking);
+      checking.clear();
+    }
   };
 }
 
+/** A surface showing the queue: it is kept in step until the release this returns. */
+export const holdSceneQueue = () => holder((n) => (queueHolders += n));
+
+/** A surface showing how many scenes wait: the number is kept right until the release
+ *  this returns, the queue read for it only when it may have moved. */
+export const holdSceneCount = () => holder((n) => (countHolders += n));
+
+const held = (caseId) => caseId === sceneQueue.caseId && Boolean(sceneQueue.files);
+
 // A file's scenes saved or a proof's time stated (`scenes`), or something deleted or
 // restored (`saved`), which can give a scene back or take one up: a queue held for the
-// case is read again, once for a burst.
+// case is read again, once for a burst, and later when only its number is shown.
 const REQUEUE_MS = 300;
+const RECOUNT_MS = 1000;
 let requeuing = null;
-function requeue(caseId) {
-  if (!queueHeld() || caseId !== sceneQueue.caseId || !sceneQueue.files) return;
+function requeue(caseId, wait = REQUEUE_MS) {
+  if (!held(caseId)) return;
   clearTimeout(requeuing);
   requeuing = setTimeout(() => {
     requeuing = null;
     readSceneQueue(caseId);
+  }, wait);
+}
+
+/** The ids of the scenes still open among these rows, as a key to compare. */
+const openKey = (rows) => rows
+  .filter((scene) => scene.state !== 'abandoned')
+  .map((scene) => scene.id)
+  .sort()
+  .join('\n');
+
+// The files a nudge named while only the number is shown, asked about once for a burst.
+const checking = new Set();
+let rechecking = null;
+function recheck(caseId, video) {
+  checking.add(video);
+  clearTimeout(rechecking);
+  rechecking = setTimeout(async () => {
+    rechecking = null;
+    const videos = [...checking];
+    checking.clear();
+    for (const one of videos) {
+      if (!held(caseId) || requeuing) return;
+      let now;
+      try {
+        const { scenes } = await api.get(`${base(caseId)}/scenes?${new URLSearchParams({ video: one })}`);
+        // a proof's own row is a scene proved, never one still to prove
+        now = openKey((scenes ?? []).filter((scene) => scene.kind === 'draft'));
+      } catch {
+        now = null; // the file left the case, or cannot be read: the queue says what is left
+      }
+      if (!held(caseId)) return;
+      const file = sceneQueue.files.find((entry) => entry.video === one);
+      if (now === openKey(file?.scenes ?? [])) continue;
+      requeue(caseId, 0);
+      return;
+    }
   }, REQUEUE_MS);
 }
-onEvent('scenes', (event) => requeue(event.case_id));
-onEvent('saved', (event) => requeue(event.case_id));
 
-// Started, ended, or a capture attached, from this tab, another, or the extension.
+function nudged(event, video) {
+  if (queueHeld()) return requeue(event.case_id);
+  if (!countHeld() || !held(event.case_id)) return;
+  stale = true;
+  if (video) recheck(event.case_id, video);
+  else requeue(event.case_id, RECOUNT_MS);
+}
+onEvent('scenes', (event) => nudged(event, event.video));
+onEvent('saved', (event) => nudged(event, null));
+
+// Started, ended, or a capture attached, from this tab, another, or the extension. The
+// number of scenes waiting stays the same, so a queue held for its number is only
+// marked behind on the captures it counts.
 onEvent('geolocating', (event) => {
   if (event.case_id !== geolocating.caseId && event.case_id !== sceneQueue.caseId) return;
-  if (queueHeld() && event.case_id === sceneQueue.caseId && sceneQueue.files) readSceneQueue(event.case_id);
-  else readGeolocating(event.case_id);
+  if (queueHeld() && held(event.case_id)) readSceneQueue(event.case_id);
+  else {
+    if (held(event.case_id)) stale = true;
+    readGeolocating(event.case_id);
+  }
 });

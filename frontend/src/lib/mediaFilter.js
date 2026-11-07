@@ -74,6 +74,19 @@ export function isMadeHere(item) {
   return MADE_HERE.has(item?.source?.type);
 }
 
+/** What the app drew of a place: a map capture, a Compare render, a Horizon picture.
+ *  An answer to where something is, never a question. */
+const DRAWN_HERE = new Set(['satellite', 'screenshot', 'compare', 'horizon']);
+
+/** Whether a file can be marked to geolocate from the Media Library: a picture or a
+ *  video the analyst holds, not a capture, and not a frame Inspect cut, which belongs
+ *  to its video's scenes (`engine/geolocate.mark` refuses both). */
+export function isMarkable(item) {
+  if (item?.kind !== 'image' && item?.kind !== 'video') return false;
+  const source = item.source ?? {};
+  return !DRAWN_HERE.has(source.type) && !(source.type === 'inspect' && source.op === 'frame');
+}
+
 /** The type and source facets, shared by the Media Library's filter and the
  *  Satellite reference picker's chips. They overlap on purpose: a downloaded
  *  video is both a Video and a Download. Keys and order are the server's

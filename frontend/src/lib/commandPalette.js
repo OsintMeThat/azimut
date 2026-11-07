@@ -1,6 +1,7 @@
 import { foldTerms, foldText } from './textFold.js';
 import { workspaceOf } from './workspaces.js';
 import { HORIZON_GROUPS, HORIZON_SETTINGS } from './horizon/panelIndex.js';
+import { isPicture, openScenes, queueName } from './sceneQueue.js';
 
 export function isPaletteKey(event) {
   return Boolean(
@@ -65,18 +66,58 @@ export function paletteTools(tools, query) {
   });
 }
 
-/** What the palette does rather than opens, by the words each goes by. */
+/** What the palette does rather than opens, by the words each goes by. To geolocate
+ *  opens the sidebar's To-do, and offers itself unasked only while scenes wait there. */
 const ACTIONS = [
   { id: 'note-side', label: 'Note on the side', detail: 'Notebook', icon: 'panelRight', words: 'note side pin panel dock write beside', needsCase: true },
+  {
+    id: 'to-geolocate', label: 'To geolocate', detail: 'To-do', icon: 'crosshair', needsCase: true, whileWaiting: true,
+    words: 'geolocate scenes locate place where find todo to-do queue pictures videos',
+  },
 ];
 
-/** The actions on offer: every one while nothing is typed, the ones the words find after. */
-export function paletteActions(query, { caseOpen = false } = {}) {
+/** `To-do`, or `2 scenes · To-do` while some wait. */
+const waitingDetail = (n) => (n > 0 ? `${n === 1 ? '1 scene' : `${n} scenes`} · To-do` : 'To-do');
+
+/**
+ * The actions on offer: every one while nothing is typed, the ones the words find
+ * after. `toGeolocate` is how many scenes wait to be geolocated, null if unknown.
+ */
+export function paletteActions(query, { caseOpen = false, toGeolocate = null } = {}) {
   const terms = foldTerms(query);
   return ACTIONS
     .filter((one) => caseOpen || !one.needsCase)
+    .filter((one) => terms.length || !one.whileWaiting || toGeolocate > 0)
     .filter((one) => terms.every((term) => foldText(`${one.label} ${one.words}`).includes(term)))
-    .map(({ id, label, detail, icon }) => ({ kind: 'action', id, label, detail, icon }));
+    .map(({ id, label, detail, icon }) => ({
+      kind: 'action', id, label, icon, detail: id === 'to-geolocate' ? waitingDetail(toGeolocate) : detail,
+    }));
+}
+
+/** Scenes listed before the rest are left to the To-do. */
+const SCENES_SHOWN = 6;
+
+/**
+ * The scenes still to geolocate that the words name, by their label or their file's
+ * title, once something is typed: a row opens the scene in Inspect, as its name does
+ * in the To-do. `files` is the queue (`GET /scenes/queue`).
+ */
+export function paletteScenes(files, query) {
+  const terms = foldTerms(query);
+  if (!terms.length) return [];
+  const rows = [];
+  for (const file of openScenes(files)) {
+    for (const scene of file.scenes) {
+      const label = queueName(scene);
+      if (!terms.every((term) => foldText(`${label} ${file.title}`).includes(term))) continue;
+      rows.push({
+        kind: 'scene', id: `${scene.video}#${scene.id}`, label, detail: file.title,
+        icon: isPicture(file) ? 'image' : 'video', video: scene.video, draft: scene.id,
+      });
+      if (rows.length === SCENES_SHOWN) return rows;
+    }
+  }
+  return rows;
 }
 
 /**

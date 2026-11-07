@@ -275,6 +275,19 @@ describe('a clip', () => {
   });
 });
 
+describe('a picture marked to geolocate', () => {
+  it('wears the scene’s dot and no mark, there being no bar', () => {
+    const opened = open(SHOT);
+    opened.viewer.scene = { draft: 'sc_p', start: null, end: null, label: 'Harbour wall', color: 'var(--anno-4)' };
+    flushSync();
+    const dot = opened.root.querySelector('.rv-scene-dot');
+    expect(dot.getAttribute('aria-label')).toBe('Scene · Harbour wall · Whole picture');
+    expect(dot.style.getPropertyValue('--scene')).toBe('var(--anno-4)');
+    expect(opened.root.querySelector('.rv-scene-line')).toBeNull();
+    expect(opened.root.querySelector('[data-testid="ref-scene"]')).toBeNull();
+  });
+});
+
 describe('a clip holding a scene being geolocated', () => {
   /** A clip a hundred seconds long, with what it says about itself read. */
   function scened(scene, extra = {}) {

@@ -381,7 +381,8 @@
     function mount(viewer) {
       const moving = viewer.kind === "video";
       const facts = T.hasFacts(viewer.facts) ? viewer.facts : null;
-      const scene = moving ? viewer.scene : null;
+      // a clip marks its scene on the bar; a picture has none, and keeps the dot alone
+      const scene = viewer.scene ?? null;
       const el = document.createElement("div");
       el.className = "rw";
       el.dataset.guide = "ext.ref";

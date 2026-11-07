@@ -17,6 +17,7 @@ const {
   openInTimeline,
   openMapAt,
   opensInFileManager,
+  openTodo,
 } = await import('./navigate.js');
 
 beforeEach(() => {
@@ -30,6 +31,15 @@ beforeEach(() => {
   post.mockClear();
   caseState.current = { id: 'c1', name: 'Case', entities: [], links: [], folders: [] };
   vi.stubGlobal('window', { open: vi.fn() });
+});
+
+describe('openTodo', () => {
+  it('opens the sidebar on its To-do, kept across reloads, the tool left where it is', () => {
+    uiState.sidebarOpen = false;
+    uiState.sidebarView = 'folders';
+    openTodo();
+    expect(uiState).toMatchObject({ sidebarOpen: true, sidebarView: 'todo', tool: 'media' });
+  });
 });
 
 describe('openInTimeline', () => {

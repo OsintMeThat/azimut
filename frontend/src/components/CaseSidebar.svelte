@@ -1,6 +1,7 @@
 <script>
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { api } from '../lib/api.js';
+  import { ensureSceneQueue, holdSceneCount, scenesWaiting } from '../lib/geolocating.svelte.js';
   import {
     caseState,
     uiState,
@@ -443,6 +444,15 @@
     uiState.sidebarView = next;
     saveSidebarView(next);
   }
+  // The scenes waiting to be geolocated, counted on the To-do tab so they are found
+  // from any view: the queue read once for the case while the sidebar is open, and
+  // again only when its number may have moved (`holdSceneCount`).
+  onDestroy(holdSceneCount());
+  $effect(() => {
+    const id = caseState.current?.id;
+    if (id) untrack(() => ensureSceneQueue(id));
+  });
+  const toGeolocate = $derived(scenesWaiting(caseState.current?.id) ?? 0);
   // What was filed last, read only while the view is open, and again after any
   // write so a save in another tool shows up here.
   const RECENT = 40;
@@ -641,6 +651,7 @@
       total={summary?.total ?? 0}
       resultCount={filtering ? resultRows.length : null}
       {view}
+      todoCount={toGeolocate}
       notesOpen={Boolean(notesMenu)}
       onnotes={(anchor) => (notesMenu = notesMenu ? null : anchor)}
       onselecttype={(t) => (typeFilter = t)}

@@ -1,19 +1,25 @@
 <script module>
-  import { readSceneQueue } from '../../lib/geolocating.svelte.js';
+  import { ensureSceneQueue, readSceneQueue } from '../../lib/geolocating.svelte.js';
 
   // The sidebar and the Overview can both show the group, and every trigger below
-  // fires in each of them: one read answers all.
+  // fires in each of them: one read answers all. Mounting asks only for a queue that
+  // is up to date, which the sidebar's count may already hold; a reload reads it again.
   let timer = null;
   let target = null;
+  let again = false;
   let holders = 0;
 
-  function reread(caseId) {
-    if (timer !== null && target === caseId) return;
+  function reread(caseId, fresh = true) {
+    if (timer !== null && target === caseId) {
+      again ||= fresh;
+      return;
+    }
     clearTimeout(timer);
     target = caseId;
+    again = fresh;
     timer = setTimeout(() => {
       timer = null;
-      readSceneQueue(caseId);
+      (again ? readSceneQueue : ensureSceneQueue)(caseId);
     });
   }
 
@@ -33,6 +39,8 @@
    * The scenes still to geolocate, at the top of the To-do: every scene kept in
    * Inspect that no proof takes up yet, by file, the file worked on last first
    * (`GET /scenes/queue`, `engine/geolocate.py`). Files with no scene stay in Sheet.
+   * A picture marked to geolocate is a row like any other, Whole picture, with no bar
+   * to mark it on.
    *
    * Absent while the case has nothing to geolocate, and a few rows when it has, so
    * the analyst's own lists stay in reach. Geolocate is the row's act; the scene's
@@ -42,9 +50,8 @@
   import {
     abandonScene, geolocateScene, geolocating, holdSceneQueue, restoreScene, sceneQueue, stopGeolocating,
   } from '../../lib/geolocating.svelte.js';
-  import { sceneTime } from '../../lib/scenes.js';
   import {
-    abandonedScenes, firstScenes, openScenes, queueColor, queueMark, queueName, queueState, sceneCount,
+    abandonedScenes, firstScenes, isPicture, openScenes, queueColor, queueMark, queueName, queueState, queueTime, sceneCount,
   } from '../../lib/sceneQueue.js';
   import { caseState, toast, uiState } from '../../lib/state.svelte.js';
   import Icon from '../../components/Icon.svelte';
@@ -85,10 +92,15 @@
   onDestroy(hold());
   // kept in step by the module's nudges while it is shown, and only then
   onDestroy(holdSceneQueue());
+  let mounted = null;
   $effect(() => {
     const id = caseId;
     void caseState.rev;
-    if (id) untrack(() => reread(id));
+    if (!id) return;
+    untrack(() => {
+      reread(id, mounted === id);
+      mounted = id;
+    });
   });
   // What was unfolded or half-typed belonged to the case before.
   $effect(() => {
@@ -106,7 +118,7 @@
   /** The row's small print in pieces that each stay whole, so a narrow sidebar
    *  wraps it between them rather than cutting the capture count off. */
   const saidParts = (scene) => [
-    ...(scene.label ? [{ text: sceneTime(scene), time: true }] : []),
+    ...(scene.label ? [{ text: queueTime(scene), time: !isPicture(scene) }] : []),
     ...said(scene).split(SEP).map((text) => ({ text, time: false })),
   ];
   /** The word a scene was abandoned with, if one was given. */
@@ -164,7 +176,7 @@
 {/snippet}
 
 {#snippet fileHead(file)}
-  <span class="file-title" title={file.title}><Icon name="video" size={11} /><span dir="auto">{file.title}</span></span>
+  <span class="file-title" title={file.title}><Icon name={isPicture(file) ? 'image' : 'video'} size={11} /><span dir="auto">{file.title}</span></span>
 {/snippet}
 
 {#if open.length || left.length}
@@ -188,7 +200,7 @@
                 </button>
                 <button type="button" class="btn btn-xs go" class:on={isLive(scene)} disabled={busy} aria-pressed={isLive(scene)}
                   aria-label={isLive(scene) ? `Stop geolocating ${nameOf(scene)}` : `Geolocate ${nameOf(scene)}`}
-                  title={isLive(scene) ? 'Stop geolocating it; its captures stay' : 'Find it on the map, its video beside it'} onclick={() => go(scene)}>
+                  title={isLive(scene) ? 'Stop geolocating it; its captures stay' : `Find it on the map, its ${isPicture(scene) ? 'picture' : 'video'} beside it`} onclick={() => go(scene)}>
                   {isLive(scene) ? 'Stop' : 'Geolocate'}
                 </button>
               </li>
@@ -227,7 +239,7 @@
                   <span class="pip" aria-hidden="true"></span>
                   <button type="button" class="open" title="Open in Inspect" onclick={() => openInInspect(scene)}>
                     <span class="name" dir="auto">{#if !scene.label}{@render mark(scene)}{/if}{nameOf(scene)}</span>
-                    <span class="meta">{#if scene.label}<span class="part time">{@render mark(scene)}{sceneTime(scene)}</span>{/if}{#if scene.label && whyOf(scene)}{SEP}{/if}{#if whyOf(scene)}<q dir="auto">{whyOf(scene)}</q>{:else if !scene.label}Abandoned{/if}</span>
+                    <span class="meta">{#if scene.label}<span class="part" class:time={!isPicture(scene)}>{@render mark(scene)}{queueTime(scene)}</span>{/if}{#if scene.label && whyOf(scene)}{SEP}{/if}{#if whyOf(scene)}<q dir="auto">{whyOf(scene)}</q>{:else if !scene.label}Abandoned{/if}</span>
                   </button>
                   <button type="button" class="btn btn-ghost btn-xs" disabled={busy} aria-label={`Restore ${nameOf(scene)}`}
                     title="Back among the scenes to geolocate" onclick={() => restore(scene)}>Restore</button>

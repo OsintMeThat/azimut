@@ -238,7 +238,7 @@ export const PAGES = {
         opens: {
           shot: 'media-open-in',
           lead: 'Inspect reads it closely, Reverse Search looks for earlier copies, Geo Proof argues where it was taken.',
-          marks: [{ anchor: 'media.open-in-menu', title: 'Where it can go', text: 'Geo Proof takes pictures only, so a video offers the first two.' }],
+          marks: [{ anchor: 'media.open-in-menu', title: 'Where it can go', text: 'Geo Proof takes pictures only. Mark to geolocate adds the file to the To-do.' }],
         },
       },
     ],

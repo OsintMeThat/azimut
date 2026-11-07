@@ -46,8 +46,9 @@ const get = vi.fn(async (url) => {
   return {};
 });
 const post = vi.fn(async () => ({ queued: 1 }));
+const del = vi.fn();
 vi.mock('../lib/api.js', () => ({
-  api: { get, post, del: vi.fn(), patch: vi.fn(), put: vi.fn() },
+  api: { get, post, del, patch: vi.fn(), put: vi.fn() },
   ApiError: Error,
 }));
 
@@ -62,6 +63,7 @@ vi.mock('../lib/state.svelte.js', async () => {
 vi.mock('../components/EntityDetails.svelte', async () => await import('../components/Modal.svelte'));
 
 const { pinNote } = await import('../lib/notes/putInNote.svelte.js');
+const { sceneQueue } = await import('../lib/geolocating.svelte.js');
 const { default: MediaLibrary } = await import('./MediaLibrary.svelte');
 
 let live = null;
@@ -187,6 +189,117 @@ describe('open in… from a row', () => {
     [...document.querySelectorAll('.open-in-menu [role="menuitem"]')].map((b) => b.textContent.trim());
   const choice = (label) =>
     [...document.querySelectorAll('.open-in-menu [role="menuitem"]')].find((b) => b.textContent.trim() === label);
+  const MARK = 'Mark to geolocate';
+
+  describe('marking to geolocate', () => {
+    const scene = (extra = {}) => ({ id: 'sc_1', start: null, end: null, state: 'todo', ...extra });
+    const answer = (route) => post.mockImplementation(async (url, body) => route(url, body));
+
+    beforeEach(() => {
+      Object.assign(sceneQueue, { caseId: null, files: null, busy: false, error: '' });
+      post.mockClear();
+      del.mockClear();
+      toast.mockClear();
+      uiState.sidebarOpen = false;
+      uiState.sidebarView = 'folders';
+    });
+
+    afterEach(() => post.mockImplementation(async () => ({ queued: 1 })));
+
+    it('marks the row it was opened on, says so, and Show opens the To-do', async () => {
+      answer(() => ({ scene: scene() }));
+      await open();
+      await press(doorOf('media/quai.jpg'));
+      await press(choice(MARK));
+      await settle();
+
+      expect(post).toHaveBeenCalledWith('/api/cases/case-a/scenes/mark', { path: 'media/quai.jpg', label: '' });
+      expect(document.querySelector('.open-in-menu')).toBeNull();
+      const [message, kind, , action] = toast.mock.calls[0];
+      expect([message, kind, action.label]).toEqual(['Marked to geolocate', 'ok', 'Show']);
+      action.onClick();
+      expect(uiState).toMatchObject({ sidebarOpen: true, sidebarView: 'todo' });
+    });
+
+    it('says a video is marked whole', async () => {
+      answer(() => ({ scene: scene() }));
+      await open();
+      await press(doorOf('media/clip.mp4'));
+      await press(choice(MARK));
+      await settle();
+      expect(toast.mock.calls[0][0]).toBe('Whole video marked to geolocate');
+    });
+
+    it('leaves a capture and a frame of a video out of the menu', async () => {
+      page = {
+        ...page,
+        items: [
+          { ...ITEMS[0], path: 'media/map.png', source: { type: 'satellite' } },
+          { ...ITEMS[0], path: 'media/frame.png', source: { type: 'inspect', op: 'frame', from: 'media/clip.mp4', time: 3 } },
+        ],
+      };
+      await open();
+      // made here, so behind the working-files switch
+      await press(target.querySelector('.gps-filter[aria-pressed="false"][title^="Show the"]'));
+      await press(doorOf('media/map.png'));
+      expect(choices()).toEqual(['Inspect', 'Reverse Search', 'Geo Proof']);
+      await press(document.querySelector('.open-in-backdrop'));
+      await press(doorOf('media/frame.png'));
+      expect(choices()).toEqual(['Inspect', 'Reverse Search', 'Geo Proof']);
+    });
+
+    it('offers no mark on a file with no tool to go to', async () => {
+      page = { ...page, items: [{ ...ITEMS[0], path: 'media/map.pdf', kind: 'file' }] };
+      await open();
+      expect(doors()).toHaveLength(0);
+    });
+
+    it('says a file already in the list is marked, and shows the list with no second mark', async () => {
+      Object.assign(sceneQueue, {
+        caseId: 'case-a',
+        files: [{ video: 'media/quai.jpg', title: 'quai', kind: 'image', scenes: [scene()] }],
+      });
+      await open();
+      await press(doorOf('media/quai.jpg'));
+      expect(choices()).toContain('Marked to geolocate');
+      await press(choice('Marked to geolocate'));
+      await settle();
+      expect(post).not.toHaveBeenCalledWith('/api/cases/case-a/scenes/mark', expect.anything());
+      expect(uiState).toMatchObject({ sidebarOpen: true, sidebarView: 'todo' });
+    });
+
+    it('still marks a video the whole of which is not in the list yet', async () => {
+      Object.assign(sceneQueue, {
+        caseId: 'case-a',
+        files: [{ video: 'media/clip.mp4', title: 'clip', kind: 'video', scenes: [scene({ start: 12 })] }],
+      });
+      await open();
+      await press(doorOf('media/clip.mp4'));
+      expect(choices()).toContain(MARK);
+    });
+
+    it('takes up a file marked after being given up on', async () => {
+      answer(() => ({ scene: scene({ state: 'abandoned' }) }));
+      del.mockResolvedValue({ scene: scene() });
+      await open();
+      await press(doorOf('media/quai.jpg'));
+      await press(choice(MARK));
+      await settle();
+      expect(del).toHaveBeenCalledWith('/api/cases/case-a/scenes/sc_1/abandon?video=media%2Fquai.jpg');
+      expect(toast.mock.calls[0][0]).toBe('Marked to geolocate again');
+    });
+
+    it('says calmly why the server refused', async () => {
+      answer(() => {
+        throw new Error("a frame cut from a video belongs to its video's scenes");
+      });
+      await open();
+      await press(doorOf('media/quai.jpg'));
+      await press(choice(MARK));
+      await settle();
+      expect(toast).toHaveBeenCalledWith("A frame cut from a video belongs to its video's scenes", 'warn');
+    });
+  });
 
   it('keeps the tools behind one door per row instead of a button each', async () => {
     await open();
@@ -198,10 +311,10 @@ describe('open in… from a row', () => {
   it('offers Geo Proof for a picture and not for a video', async () => {
     await open();
     await press(doorOf('media/quai.jpg'));
-    expect(choices()).toEqual(['Inspect', 'Reverse Search', 'Geo Proof']);
+    expect(choices()).toEqual(['Inspect', 'Reverse Search', 'Geo Proof', MARK]);
 
     await press(doorOf('media/clip.mp4'));
-    expect(choices()).toEqual(['Inspect', 'Reverse Search']);
+    expect(choices()).toEqual(['Inspect', 'Reverse Search', MARK]);
   });
 
   it('hands Reverse Search the row it was opened on, and closes', async () => {
@@ -238,16 +351,16 @@ describe('open in… from a row', () => {
     await open();
     await press(doorOf('media/clip.mp4'));
     // no note pinned: the door holds the tools and nothing else
-    expect(choices()).toEqual(['Inspect', 'Reverse Search']);
+    expect(choices()).toEqual(['Inspect', 'Reverse Search', MARK]);
     await press(document.querySelector('.open-in-backdrop'));
 
     const unpin = pinNote({ caseId: 'case-a', noteId: 'n1', title: 'Port strike', editor: {} });
     try {
       await press(doorOf('media/clip.mp4'));
-      expect(choices()).toEqual(['Inspect', 'Reverse Search', 'Quote the post in “Port strike”']);
+      expect(choices()).toEqual(['Inspect', 'Reverse Search', MARK, 'Quote the post in “Port strike”']);
       await press(document.querySelector('.open-in-backdrop'));
       await press(doorOf('media/quai.jpg'));
-      expect(choices()).toEqual(['Inspect', 'Reverse Search', 'Geo Proof']);
+      expect(choices()).toEqual(['Inspect', 'Reverse Search', 'Geo Proof', MARK]);
     } finally {
       unpin();
     }

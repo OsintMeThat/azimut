@@ -193,6 +193,16 @@
     }
     previousTool = nextTool;
   });
+  // Opened from elsewhere (a toast's Show, Go to's To geolocate, `openTodo`), the
+  // sidebar stays open in this workspace, as one opened by its toggle does. After
+  // the switch above, so a workspace's own default is read first.
+  $effect(() => {
+    if (!uiState.sidebarOpen) return;
+    untrack(() => {
+      const ws = workspaceOf(uiState.tool);
+      if (ws) sidebarOpenByWorkspace[ws.id] = true;
+    });
+  });
   // A tool that holds the screen is left with it. Its host is hidden as soon as
   // another tool is picked, and a hidden fullscreen element blacks the screen
   // out with the new tool behind it. Every way across lands here: a toast's

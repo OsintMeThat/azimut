@@ -15,12 +15,15 @@
   import { caseState, toast, uiState } from '../lib/state.svelte.js';
   import { geolocating, readGeolocating, stopGeolocating } from '../lib/geolocating.svelte.js';
   import { GEOLOCATING_HELP as HELP } from '../lib/geolocatingHelp.js';
-  import { sceneColorAt, sceneTime } from '../lib/scenes.js';
+  import { sceneColorAt } from '../lib/scenes.js';
+  import { isPicture, queueTime } from '../lib/sceneQueue.js';
 
   const held = $derived(
     geolocating.caseId && geolocating.caseId === caseState.current?.id ? geolocating.scene : null,
   );
-  const time = $derived(held ? sceneTime({ kind: 'draft', start: held.start, end: held.end }) : '');
+  // a picture says Whole picture where a video's scene says its time
+  const time = $derived(held ? queueTime({ start: held.start, end: held.end, file_kind: held.file_kind }) : '');
+  const picture = $derived(isPicture(held));
   const count = $derived(held?.captures?.length ?? 0);
   const file = $derived(held ? String(held.video).split('/').pop() : '');
   const color = $derived(held ? sceneColorAt(held.order) : null);
@@ -84,7 +87,7 @@
       <Icon name="crosshair" size={13} />
       <span class="geo-what">Geolocating</span>
       <span class="geo-dot" style:--scene={color} aria-hidden="true" data-testid="geolocating-dot"></span>
-      <span class="geo-time" class:mono={held.start != null}>{time}</span>
+      <span class="geo-time" class:mono={held.start != null && !picture}>{time}</span>
       {#if held.label}
         <span class="geo-sep" aria-hidden="true">·</span>
         <span class="geo-label" dir="auto">{held.label}</span>
@@ -104,7 +107,7 @@
       </span>
     {/key}
     <span class="geo-rule" aria-hidden="true"></span>
-    <button class="geo-make" onclick={() => backToScene(true)} title={HELP.make}>
+    <button class="geo-make" onclick={() => backToScene(true)} title={picture ? HELP.makePicture : HELP.make}>
       <Icon name="proof" size={12} />
       <span class="geo-make-words">Make the proof</span>
     </button>

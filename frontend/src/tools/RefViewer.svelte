@@ -15,7 +15,8 @@
   import Icon from '../components/Icon.svelte';
   import RefVideoBar from './satellite/RefVideoBar.svelte';
   import { fileUrl } from '../lib/fileUrl.js';
-  import { momentTime } from '../lib/scenes.js';
+  import { momentTime, WHOLE_VIDEO } from '../lib/scenes.js';
+  import { WHOLE_PICTURE } from '../lib/sceneQueue.js';
   import { chromeBoxes } from '../lib/mapChrome.js';
   import {
     snapWindow,
@@ -283,11 +284,12 @@
   const src = $derived(viewer.still ?? (caseId ? fileUrl(caseId, viewer.path) : null));
   const transform = $derived(`translate(${viewer.ox}px, ${viewer.oy}px) scale(${viewer.scale})`);
   const place = $derived(placeOf(viewer));
-  // A scene geolocated in the clip, named in its header beside the file's title.
+  // A scene geolocated in the clip or the picture, named in its header beside the
+  // file's title. A picture has no bar, so the dot is all that marks it.
   const sceneTitle = $derived.by(() => {
     const held = viewer.scene;
     if (!held) return '';
-    const time = Number.isFinite(held.start) ? momentTime({ start: held.start, end: held.end }) : 'Whole video';
+    const time = !isVideo ? WHOLE_PICTURE : Number.isFinite(held.start) ? momentTime({ start: held.start, end: held.end }) : WHOLE_VIDEO;
     return ['Scene', held.label, time].filter(Boolean).join(' · ');
   });
 </script>
@@ -372,7 +374,7 @@
         {/each}
       </div>
     {:else}
-      {#if isVideo && viewer.scene}
+      {#if viewer.scene}
         <span
           class="rv-scene-dot"
           style:--scene={viewer.scene.color ?? 'var(--accent)'}

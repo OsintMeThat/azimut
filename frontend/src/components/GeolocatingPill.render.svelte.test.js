@@ -105,6 +105,27 @@ describe('the pill', () => {
     expect(pill().querySelector('.geo-label')).toBeNull();
   });
 
+  it('names a picture as a picture, its Make the proof going through Inspect the same way', async () => {
+    const picture = { ...SCENE, video: 'media/harbour.png', start: null, end: null, label: 'Harbour wall', file_kind: 'image' };
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: picture });
+    await show();
+    expect(target.querySelector('.geo-pill').getAttribute('aria-label')).toBe('Geolocating · Whole picture · Harbour wall');
+    expect(target.querySelector('.geo-time').textContent).toBe('Whole picture');
+    expect(target.querySelector('.geo-time').classList.contains('mono')).toBe(false);
+    const make = target.querySelector('.geo-make');
+    expect(make.title).toBe('Make the proof from the picture and its captures');
+    make.click();
+    expect(uiState.inspectScene).toEqual({ video: 'media/harbour.png', draft: 'sc_1', proof: true });
+    expect(uiState.tool).toBe('inspect');
+  });
+
+  it('keeps a video’s words for a video', async () => {
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: { ...SCENE, file_kind: 'video' } });
+    await show();
+    expect(target.querySelector('.geo-make').title).toBe('Make the proof from its frames and captures');
+    expect(target.querySelector('.geo-time').textContent).toBe('3:58–4:12');
+  });
+
   it('steps the count up with a pulse when a capture is gathered, rather than a toast', async () => {
     answers.set('GET /api/cases/c1/geolocating', { geolocating: SCENE });
     await show();

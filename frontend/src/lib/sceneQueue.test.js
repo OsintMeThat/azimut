@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { abandonedScenes, captureWords, firstScenes, openScenes, queueColor, queueMark, queueName, queueState, sceneCount } from './sceneQueue.js';
+import {
+  abandonedScenes, captureWords, firstScenes, isPicture, openScenes, queueColor, queueMark, queueName, queueState, queueTime, sceneCount,
+  waitingWords,
+} from './sceneQueue.js';
 import { sceneList } from './scenes.js';
 
 const row = (id, start, end, label = '', extra = {}) => ({
@@ -18,6 +21,28 @@ describe('what a row says', () => {
     expect(queueName(row('a', 238, 252))).toBe('3:58–4:12');
     expect(queueName(row('a', 3, null))).toBe('0:03');
     expect(queueName(row('a', null, null))).toBe('Whole video');
+  });
+
+  it('says Whole picture for a picture, which has no time to read', () => {
+    const picture = row('a', null, null, '', { file_kind: 'image' });
+    expect(queueTime(picture)).toBe('Whole picture');
+    expect(queueName(picture)).toBe('Whole picture');
+    expect(queueName({ ...picture, label: 'Harbour wall' })).toBe('Harbour wall');
+    expect(queueTime(row('a', 238, 252, '', { file_kind: 'video' }))).toBe('3:58–4:12');
+  });
+
+  it('tells a picture from a video on a row and on a file of the queue', () => {
+    expect(isPicture({ file_kind: 'image' })).toBe(true);
+    expect(isPicture({ file_kind: 'video' })).toBe(false);
+    expect(isPicture({ kind: 'image', title: 'A file' })).toBe(true);
+    // a row's own `kind` is `draft`, never read for its file
+    expect(isPicture({ kind: 'draft', file_kind: 'video' })).toBe(false);
+    expect(isPicture(null)).toBe(false);
+  });
+
+  it('counts what waits in words', () => {
+    expect(waitingWords(1)).toBe('1 scene to geolocate');
+    expect(waitingWords(3)).toBe('3 scenes to geolocate');
   });
 
   it('says the state, the captures it holds, and which one is being geolocated', () => {
@@ -61,5 +86,7 @@ describe('how a row marks its scene', () => {
     expect(queueMark(row('a', 10, null))).toBe('instant');
     expect(queueMark(row('a', 10, 10))).toBe('instant');
     expect(queueMark(row('a', null, null))).toBe(null);
+    // a picture has no bar, whatever its work holds
+    expect(queueMark(row('a', 10, 20, '', { file_kind: 'image' }))).toBe(null);
   });
 });

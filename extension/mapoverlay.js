@@ -1624,7 +1624,7 @@
     render();
   }
 
-  /** The scene's video over the map: the window already holding it, else a new one. */
+  /** The scene's video or picture over the map: the window already holding it, else a new one. */
   function showScene(scene) {
     tools.refs.holdScene(scene, sceneFile(scene.video));
     refLayer.sync();
@@ -2404,7 +2404,7 @@
     const pill = geo
       ? `<div class="geo-pill">
           <span class="geo-dot"></span>
-          ${button("geo-show", "", `Geolocating · ${T.sceneTime(geo)}${geo.label ? ` · ${geo.label}` : ""}`, false, ` class="geo-what" title="Show its video over the map"`)}
+          ${button("geo-show", "", `Geolocating · ${T.queueTime(geo)}${geo.label ? ` · ${geo.label}` : ""}`, false, ` class="geo-what" title="Show its ${geo.file_kind === "image" ? "picture" : "video"} over the map"`)}
           <span class="geo-count" title="Captures attached to it">${icon("camera", 12)}${geo.captures?.length ?? 0}</span>
           ${button("geo-stop", "x", "", false, ` class="icon" title="Stop geolocating"`)}
         </div>`
@@ -2421,7 +2421,7 @@
         <span class="geo-text">
           <span class="geo-name" dir="auto" title="${esc(T.sceneName(scene))}">${scene.label ? "" : mark(scene)}${esc(T.sceneName(scene))}</span>
           <span class="geo-meta">${[
-            ...(scene.label ? [`${mark(scene)}${esc(T.sceneTime(scene))}`] : []),
+            ...(scene.label ? [`${mark(scene)}${esc(T.queueTime(scene))}`] : []),
             ...T.sceneState(scene, isGeo(scene)).split(" · ").map(esc),
           ]
             .map((part) => `<span>${part}</span>`)
@@ -2430,13 +2430,13 @@
         ${isGeo(scene)
           // a switch: pressed again on the scene in hand, it stops, as in the app
           ? button("geo-stop", "", "Stop", true, ` aria-pressed="true" title="Stop geolocating it; its captures stay"${busy ? " disabled" : ""}`)
-          : button("geo-go", "", "Geolocate", false, ` aria-pressed="false" data-video="${esc(scene.video)}" data-draft="${esc(scene.id)}" title="Find it on this map, its video beside it"${busy ? " disabled" : ""}`)}
+          : button("geo-go", "", "Geolocate", false, ` aria-pressed="false" data-video="${esc(scene.video)}" data-draft="${esc(scene.id)}" title="Find it on this map, its ${scene.file_kind === "image" ? "picture" : "video"} beside it"${busy ? " disabled" : ""}`)}
       </div>`;
     const list = open
       ? `<div class="geo-list">
           ${files
             .map((file) => `
-              <div class="geo-file" title="${esc(file.title)}">${icon("video", 11)}<span dir="auto">${esc(file.title)}</span></div>
+              <div class="geo-file" title="${esc(file.title)}">${icon(file.kind === "image" ? "image" : "video", 11)}<span dir="auto">${esc(file.title)}</span></div>
               ${file.scenes.map(row).join("")}`)
             .join("")}
         </div>`

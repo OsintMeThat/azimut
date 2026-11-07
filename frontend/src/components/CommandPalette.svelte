@@ -5,8 +5,9 @@
   import { buildCatalogQuery } from '../lib/catalog.js';
   import { entityLabel, entityTypes } from '../lib/entityTypes.svelte.js';
   import { entityIcon, entityKindLabel } from '../lib/entityIcon.js';
-  import { openEntity, openNotebook } from '../lib/navigate.js';
-  import { matchRuns, paletteActions, paletteSettings, paletteTools } from '../lib/commandPalette.js';
+  import { openEntity, openNotebook, openTodo } from '../lib/navigate.js';
+  import { matchRuns, paletteActions, paletteScenes, paletteSettings, paletteTools } from '../lib/commandPalette.js';
+  import { ensureSceneQueue, holdSceneCount, sceneQueue, scenesWaiting } from '../lib/geolocating.svelte.js';
   import { setDockOpen } from '../lib/notes/noteDock.svelte.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
@@ -30,7 +31,25 @@
   const documentTypes = $derived(entityTypes()
     .filter((entry) => ['document', 'collected'].includes(entry.family))
     .map((entry) => entry.type));
-  const toolRows = $derived([...paletteTools(tools, loadedQuery), ...paletteActions(loadedQuery, { caseOpen: Boolean(caseState.current) })]);
+  // The scenes waiting to be geolocated, read once as it opens unless the sidebar holds them.
+  $effect(() => {
+    const id = caseState.current?.id;
+    if (!open || !id) return;
+    const release = holdSceneCount();
+    untrack(() => ensureSceneQueue(id));
+    return release;
+  });
+  const waiting = $derived(scenesWaiting(caseState.current?.id));
+  const sceneFiles = $derived(sceneQueue.caseId === caseState.current?.id ? sceneQueue.files : null);
+  // Scenes waiting lead the tools until something is typed: below twenty tools, it
+  // would be the one row nobody sees.
+  const toolRows = $derived.by(() => {
+    const found = paletteTools(tools, loadedQuery);
+    const actions = paletteActions(loadedQuery, { caseOpen: Boolean(caseState.current), toGeolocate: waiting });
+    const lead = loadedQuery ? [] : actions.filter((row) => row.id === 'to-geolocate');
+    return [...lead, ...found, ...actions.filter((row) => !lead.includes(row))];
+  });
+  const sceneRows = $derived(paletteScenes(sceneFiles, loadedQuery));
   const settingRows = $derived(paletteSettings(loadedQuery));
   const documentRows = $derived(documents.map((entity) => ({
     kind: 'document', id: entity.id, label: entity.label, caseId: documentCase,
@@ -47,7 +66,8 @@
     detail: [item.scratch ? 'Scratch' : 'Case', item.id === caseState.current?.id ? 'Current' : ''].filter(Boolean).join(' · '), icon: 'folder',
   })));
   const groups = $derived(loadedQuery
-    ? [{ label: 'Tools', rows: toolRows }, { label: 'Horizon settings', rows: settingRows }, { label: 'Documents', rows: documentRows },
+    ? [{ label: 'Tools', rows: toolRows }, { label: 'Scenes to geolocate', rows: sceneRows },
+      { label: 'Horizon settings', rows: settingRows }, { label: 'Documents', rows: documentRows },
       { label: 'In notes', rows: noteRows }, { label: 'Cases', rows: caseRows }]
     : [{ label: 'Recently added', rows: documentRows }, { label: 'Tools', rows: toolRows }, { label: 'Cases', rows: caseRows }]);
   const rows = $derived(groups.flatMap((group) => group.rows));
@@ -138,7 +158,12 @@
     if (row.kind === 'document' && row.caseId !== caseState.current?.id) return;
     try {
       if (row.kind === 'tool') { close(); uiState.tool = row.id; }
-      else if (row.kind === 'action') { close(); if (row.id === 'note-side') setDockOpen(true); }
+      else if (row.kind === 'action') {
+        close();
+        if (row.id === 'note-side') setDockOpen(true);
+        else if (row.id === 'to-geolocate') openTodo();
+      }
+      else if (row.kind === 'scene') { close(); uiState.inspectScene = { video: row.video, draft: row.draft }; uiState.tool = 'inspect'; }
       else if (row.kind === 'setting') { close(); uiState.horizonSetting = row.id; uiState.tool = 'horizon'; }
       else if (row.kind === 'document') { close(); await openEntity(row.entity); }
       else if (row.kind === 'note-line') { close(); openNotebook(row.noteId === 'case' ? null : row.noteId, { line: row.line }); }

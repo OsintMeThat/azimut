@@ -10,8 +10,17 @@
  */
 import { isStretch, sceneColorAt, sceneTime } from './scenes.js';
 
+/** What a picture's scene says instead of a time: a picture is only ever marked whole. */
+export const WHOLE_PICTURE = 'Whole picture';
+
+/** Whether a row, or a file of the queue, is a picture rather than a video. */
+export const isPicture = (row) => (row?.file_kind ?? row?.kind) === 'image';
+
+/** A scene's time as a row says it: `3:58–4:12`, Whole video, or Whole picture. */
+export const queueTime = (scene) => (scene?.file_kind === 'image' ? WHOLE_PICTURE : sceneTime(scene));
+
 /** What a row calls a scene: the analyst's label, else its time. */
-export const queueName = (scene) => scene?.label || sceneTime(scene);
+export const queueName = (scene) => scene?.label || queueTime(scene);
 
 /**
  * The colour Inspect's bar draws a scene in: by its place among its video's scenes,
@@ -19,9 +28,10 @@ export const queueName = (scene) => scene?.label || sceneTime(scene);
  */
 export const queueColor = (scene) => sceneColorAt(scene?.order);
 
-/** How a scene is marked on its video's bar: a band, a pin, or nothing for the whole video. */
+/** How a scene is marked on its video's bar: a band, a pin, or nothing for the whole
+ *  video and for a picture, which has no bar. */
 export function queueMark(scene) {
-  if (!Number.isFinite(scene?.start)) return null;
+  if (scene?.file_kind === 'image' || !Number.isFinite(scene?.start)) return null;
   return isStretch(scene) ? 'passage' : 'instant';
 }
 
@@ -51,6 +61,9 @@ export const abandonedScenes = (files) => queueFiles(files, (scene) => scene.sta
 
 /** How many scenes the files hold. */
 export const sceneCount = (files) => (files ?? []).reduce((n, file) => n + file.scenes.length, 0);
+
+/** `1 scene to geolocate`, `3 scenes to geolocate`. */
+export const waitingWords = (n) => (n === 1 ? '1 scene to geolocate' : `${n} scenes to geolocate`);
 
 /**
  * The first `shown` rows across the files, and any row `always` names wherever it

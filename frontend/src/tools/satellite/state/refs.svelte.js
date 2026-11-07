@@ -31,7 +31,8 @@
  *   Nothing loops: the analyst plays and steps as they like. The window carries it
  *   as `scene` (`{ draft, start, end, label, color }`) and the time to show as `cue`,
  *   both the app's own: the extension's windows are made the same way and hold
- *   neither.
+ *   neither. A picture marked to geolocate opens the same way, in a window of the
+ *   picture, its scene named in the header and nothing to mark or cue.
  *
  * The window's own geometry — placement, clamping, cursor-anchored zoom — is
  * `lib/refViewers.js`, and the pointer handling is `RefViewer.svelte`. This
@@ -79,9 +80,10 @@ export function createRefsState({ api, notify, caseId, viewers, setViewers }) {
     return open[open.length - 1];
   }
 
-  /** The window a scene's video is shown in: one already open on that clip. */
-  const clipWindow = (video) =>
-    viewers().find((window) => window.kind === 'video' && !window.still && window.path === video) ?? null;
+  /** The window a scene's file is shown in: one already open on that clip or that
+   *  picture, never a frame kept from a clip. */
+  const clipWindow = (video, kind = 'video') =>
+    viewers().find((window) => window.kind === kind && !window.still && window.path === video) ?? null;
 
   /** Bring one to the front, renumbering the rest so the values stay small. */
   function focus(id) {
@@ -208,12 +210,14 @@ export function createRefsState({ api, notify, caseId, viewers, setViewers }) {
      * marked on the window's bar and the clip paused where the scene starts. A window
      * already open on the clip takes it, unfolded and brought to the front; else one
      * opens with the file's own title and facts. A scene about the whole video marks
-     * nothing and leaves the clip where it is.
+     * nothing and leaves the clip where it is, and a picture (`kind: 'image'`) opens
+     * in a window of its own the same way, with no time to cue.
      */
-    async openScene({ video, draft, start = null, end = null, label = '', order = 0 }) {
+    async openScene({ video, draft, start = null, end = null, label = '', order = 0, kind = 'video' }) {
       const id = caseId();
       if (!id || !video) return;
-      const at = Number.isFinite(start) ? start : null;
+      const picture = kind === 'image';
+      const at = !picture && Number.isFinite(start) ? start : null;
       const scene = {
         draft, start: at, end: at != null && Number.isFinite(end) && end > at ? end : null, label: label ?? '',
         color: sceneColorAt(order),
@@ -224,24 +228,27 @@ export function createRefsState({ api, notify, caseId, viewers, setViewers }) {
         if (at != null) pane.cue = at;
         focus(pane.id);
       };
-      const open = clipWindow(video);
+      const as = picture ? 'image' : 'video';
+      const open = clipWindow(video, as);
       if (open) reuse(open);
       else {
-        let item = { path: video, kind: 'video', title: video.split('/').pop() };
+        let item = { path: video, kind: as, title: video.split('/').pop() };
         try {
-          item = { ...(await api.get(`/api/cases/${id}/media/item?path=${encodeURIComponent(video)}`)), path: video, kind: 'video' };
+          item = { ...(await api.get(`/api/cases/${id}/media/item?path=${encodeURIComponent(video)}`)), path: video, kind: as };
         } catch {
           // named after its file
         }
         if (caseId() !== id) return;
         // a second press while the file was read finds the window the first opened
-        const opened = clipWindow(video);
+        const opened = clipWindow(video, as);
         if (opened) reuse(opened);
         else {
           const pane = spawn(item);
           pane.scene = scene;
-          pane.cue = at;
-          readRate(pane);
+          if (!picture) {
+            pane.cue = at;
+            readRate(pane);
+          }
         }
       }
     },

@@ -120,6 +120,70 @@ it('names an unlabelled scene by its time, and reads a label in its own directio
   expect(second.querySelector('.name').textContent).toBe(ARABIC);
 });
 
+it('reads a picture’s row as a picture: Whole picture, its icon, and no mark', async () => {
+  const PHOTO = 'media/harbour.png';
+  const picture = (id, label = '', extra = {}) => ({ ...row(id, null, null, label, extra), video: PHOTO, file_kind: 'image' });
+  answerWith({
+    files: [{ video: PHOTO, title: 'Harbour photo', kind: 'image', scenes: [picture('a'), picture('b', 'Harbour wall')] }],
+    geolocating: null,
+  });
+  await open();
+  const lines = rows().map((li) => [li.querySelector('.name').textContent, li.querySelector('.meta').textContent]);
+  expect(lines).toEqual([
+    ['Whole picture', 'To geolocate'],
+    ['Harbour wall', 'Whole picture · To geolocate'],
+  ]);
+  // an image icon on the file's line, drawn from its path, unlike a video's
+  const icon = section().querySelector('.file-title svg').innerHTML;
+  answerWith({ files: [{ video: VIDEO, title: 'Market walk', kind: 'video', scenes: [row('v', 3, null)] }], geolocating: null });
+  dispatch({ type: 'scenes', case_id: 'c1', video: VIDEO });
+  await new Promise((resolve) => setTimeout(resolve, 320));
+  await settle();
+  expect(section().querySelector('.file-title svg').innerHTML).not.toBe(icon);
+  expect(target.querySelector('.mark')).not.toBeNull();
+});
+
+it('says what Geolocate will hold beside the map, a picture or a video', async () => {
+  const PHOTO = 'media/harbour.png';
+  answerWith({
+    files: [
+      { video: PHOTO, title: 'Harbour photo', kind: 'image', scenes: [{ ...row('a', null, null, 'Wall'), video: PHOTO, file_kind: 'image' }] },
+      { video: VIDEO, title: 'Market walk', kind: 'video', scenes: [row('v', 3, null, 'Tower')] },
+    ],
+    geolocating: null,
+  });
+  await open();
+  expect(byLabel('Geolocate Wall').title).toBe('Find it on the map, its picture beside it');
+  expect(byLabel('Geolocate Tower').title).toBe('Find it on the map, its video beside it');
+});
+
+it('sends a picture to Satellite as a picture', async () => {
+  const PHOTO = 'media/harbour.png';
+  const scene = { ...row('a', null, null, 'Wall'), video: PHOTO, file_kind: 'image' };
+  answerWith({ files: [{ video: PHOTO, title: 'Harbour photo', kind: 'image', scenes: [scene] }], geolocating: null });
+  put.mockResolvedValue({ geolocating: { ...scene, since: 'now' } });
+  await open();
+  byLabel('Geolocate Wall').click();
+  await settle();
+  expect(uiState.geolocateRef).toMatchObject({ video: PHOTO, draft: 'a', kind: 'image' });
+});
+
+it('shows the queue a sidebar already holds up to date, with no read of its own', async () => {
+  const { holdSceneCount } = await import('../../lib/geolocating.svelte.js');
+  const release = holdSceneCount();
+  try {
+    answerWith({ files: [{ video: VIDEO, title: 'Market walk', scenes: [row('p', 238, 252, 'bridge?')] }], geolocating: null });
+    await open();
+    expect(queueReads()).toBe(1);
+    const again = mount(ToGeolocate, { target, props: { caseId: 'c1' } });
+    await settle();
+    unmount(again);
+    expect(queueReads()).toBe(1);
+  } finally {
+    release();
+  }
+});
+
 it('marks each scene as its bar does, in the colour Inspect gives it', async () => {
   answerWith({
     files: [{ video: VIDEO, title: 'Market walk', scenes: [
@@ -178,7 +242,7 @@ it('geolocates a scene: the server holds it, and Satellite opens with its video'
   byLabel('Geolocate bridge?').click();
   await settle();
   expect(put).toHaveBeenCalledWith('/api/cases/c1/geolocating', { video: VIDEO, draft: 'p' });
-  expect(uiState.geolocateRef).toEqual({ video: VIDEO, draft: 'p', start: 238, end: 252, label: 'bridge?' });
+  expect(uiState.geolocateRef).toEqual({ video: VIDEO, draft: 'p', start: 238, end: 252, label: 'bridge?', kind: 'video' });
   expect(uiState.tool).toBe('satellite');
   expect(rows()[0].classList.contains('live')).toBe(true);
 });

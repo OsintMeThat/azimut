@@ -1192,6 +1192,8 @@ describe('the scenes to geolocate, on both sides of the boundary', () => {
     row('h', 3725, 3790, 'جسر'),
     row('q', 12, null, '', { state: 'progress', captures: ['media/c.png'] }),
     row('a', 40, 45, 'Gone', { state: 'abandoned', abandoned: { reason: 'no', at: 'x' } }),
+    row('pic', null, null, '', { file_kind: 'image' }),
+    row('wall', null, null, 'Harbour wall', { file_kind: 'image' }),
   ];
 
   it('writes a time as the app writes it', () => {
@@ -1200,10 +1202,12 @@ describe('the scenes to geolocate, on both sides of the boundary', () => {
     }
     for (const scene of ROWS) expect(ext.sceneTime(scene), scene.id).toBe(appScenes.sceneTime(scene));
     expect(ext.WHOLE_VIDEO).toBe(appScenes.WHOLE_VIDEO);
+    expect(ext.WHOLE_PICTURE).toBe(appQueue.WHOLE_PICTURE);
   });
 
   it('names a row and says its state as the To-do does', () => {
     for (const scene of ROWS) {
+      expect(ext.queueTime(scene), scene.id).toBe(appQueue.queueTime(scene));
       expect(ext.sceneName(scene), scene.id).toBe(appQueue.queueName(scene));
       for (const live of [false, true]) expect(ext.sceneState(scene, live), scene.id).toBe(appQueue.queueState(scene, live));
     }
@@ -1225,6 +1229,14 @@ describe('the scenes to geolocate, on both sides of the boundary', () => {
     expect(ext.sceneMark(row('i', 3, null))).toMatchObject({ start: 3, end: null, name: '0:03' });
     expect(ext.sceneMark(row('e', 61, 61))).toMatchObject({ start: 61, end: null });
     expect(ext.sceneMark(row('w', null, null))).toMatchObject({ start: null, end: null, name: 'Whole video' });
+  });
+
+  it('holds a picture as a picture, named, with nothing to mark', () => {
+    const scene = row('pic', 12, 14, 'Harbour wall', { file_kind: 'image', video: 'media/harbour.png' });
+    expect(ext.sceneMark(scene)).toMatchObject({ start: null, end: null, name: 'Harbour wall', time: 'Whole picture' });
+    const held = ext.createRefs().holdScene(scene, 'Harbour photo');
+    expect(held).toMatchObject({ path: 'media/harbour.png', kind: 'image', title: 'Harbour wall · Harbour photo' });
+    expect(ext.createRefs().holdScene({ ...scene, label: '' })).toMatchObject({ title: 'Whole picture · Picture' });
   });
 
   it('colours a scene by its place among its video’s scenes, as Inspect does', () => {

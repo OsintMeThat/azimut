@@ -295,8 +295,9 @@ export const uiState = $state({
   // A scene of Inspect to make a proof of: { video, moments, draft, panels, label },
   // the panels its saved frames' paths. Geo Proof opens a new proof on it.
   proofScene: null,
-  // A scene being geolocated, for Satellite to open its video as a reference window:
-  // { video, draft, start, end, label } (`lib/geolocating.svelte.js`, geolocateScene).
+  // A scene being geolocated, for Satellite to open its video, or its picture, as a
+  // reference window: { video, draft, start, end, label, order, kind }
+  // (`lib/geolocating.svelte.js`, geolocateScene).
   geolocateRef: null,
   openDraft: null, // draft name to load in the Post Composer
   openNotebook: null, // { noteId: string|null, line? }; null noteId opens case notes.md, `home` the Notebook's home

@@ -193,6 +193,53 @@ describe('the list', () => {
   });
 });
 
+describe('a picture marked to geolocate', () => {
+  const PHOTO = 'media/harbour.png';
+  const WALL = { ...row('sc_p', null, null, 'Harbour wall'), video: PHOTO, file_kind: 'image' };
+  const PICTURES = {
+    '/api/ingest/scenes': {
+      files: [{ video: PHOTO, title: 'Harbour photo', kind: 'image', scenes: [WALL, { ...row('sc_q', null, null), video: PHOTO, file_kind: 'image' }] }],
+      geolocating: null,
+    },
+    '/api/ingest/geolocating': (message) => (message.body.video ? { geolocating: { ...WALL, since: 'now' } } : { geolocating: null }),
+  };
+
+  async function unfolded() {
+    panel = open(PICTURES);
+    await settle();
+    panel.press('geo-fold');
+    await settle();
+  }
+
+  it('reads as a picture: Whole picture, and no mark', async () => {
+    await unfolded();
+    const rows = panel.$$('.geo-row').map((el) => [el.querySelector('.geo-name').textContent, el.querySelector('.geo-meta').textContent]);
+    expect(rows).toEqual([
+      ['Harbour wall', 'Whole picture · To geolocate'],
+      ['Whole picture', 'To geolocate'],
+    ]);
+    expect(panel.$('.geo-mark')).toBe(null);
+    expect(panel.$('.geo-file svg path').getAttribute('d')).toBe(window.AzimutMapTheme.ICONS.image);
+    expect(panel.$('[data-act="geo-go"]').title).toBe('Find it on this map, its picture beside it');
+  });
+
+  it('is held over the map as a picture, its scene dotted and nothing on a bar', async () => {
+    await unfolded();
+    panel.press('geo-go', { draft: 'sc_p' });
+    await settle();
+    await settle();
+    const [pane] = panel.panes();
+    expect(pane.querySelector('.rw-title').textContent).toBe('Harbour wall · Harbour photo');
+    expect(pane.querySelector('.rw-dot')).not.toBe(null);
+    expect(pane.querySelector('canvas')).not.toBe(null);
+    expect(pane.querySelector('video')).toBe(null);
+    expect(pane.querySelector('.rw-scene')).toBe(null);
+    expect(pane.querySelector('.rw-rest')).toBe(null);
+    expect(panel.$('[data-act="geo-show"]').textContent).toBe('Geolocating · Whole picture · Harbour wall');
+    expect(panel.$('[data-act="geo-show"]').title).toBe('Show its picture over the map');
+  });
+});
+
 describe('geolocating a scene from over this map', () => {
   async function geolocateBridge() {
     panel = open();

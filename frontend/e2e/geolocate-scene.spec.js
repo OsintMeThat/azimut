@@ -120,6 +120,8 @@ async function openCase(page, { viewport = { width: 1500, height: 900 } } = {}) 
         geolocating: server.geolocating,
       });
     }
+    // the same answer the route below gives: the sidebar reads the queue for its count
+    if (path === `/api/cases/${CASE_ID}/scenes/queue`) return json({ files: [], geolocating: current() });
     if (path === `/api/cases/${CASE_ID}/geolocating`) {
       server.calls.push(`${method} geolocating`);
       if (method === 'PUT') {

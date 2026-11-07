@@ -6,6 +6,7 @@ import {
   isGenericImage,
   isBroughtIn,
   isMadeHere,
+  isMarkable,
   MEDIA_CATEGORIES,
   isSatelliteMedia,
   mediaDisplayKind,
@@ -25,6 +26,29 @@ const item = (extra = {}) => ({
   size: 100,
   added_at: '2026-07-01T10:00:00Z',
   ...extra,
+});
+
+describe('what can be marked to geolocate', () => {
+  it('takes a picture or a video the analyst holds, a collage and an adjusted copy included', () => {
+    expect(isMarkable({ kind: 'image', source: { type: 'upload' } })).toBe(true);
+    expect(isMarkable({ kind: 'image', source: { type: 'clipboard' } })).toBe(true);
+    expect(isMarkable({ kind: 'video', source: { type: 'download' } })).toBe(true);
+    expect(isMarkable({ kind: 'image' })).toBe(true);
+    expect(isMarkable({ kind: 'image', source: { type: 'inspect', op: 'collage' } })).toBe(true);
+  });
+
+  it('leaves out what is not a picture or a video', () => {
+    expect(isMarkable({ kind: 'audio', source: { type: 'upload' } })).toBe(false);
+    expect(isMarkable({ kind: 'file', source: { type: 'upload' } })).toBe(false);
+    expect(isMarkable(null)).toBe(false);
+  });
+
+  it('leaves out a frame of a video, which belongs to its scenes, and what the app drew of a place', () => {
+    expect(isMarkable({ kind: 'image', source: { type: 'inspect', op: 'frame', from: 'media/a.mp4', time: 3 } })).toBe(false);
+    for (const type of ['satellite', 'screenshot', 'compare', 'horizon']) {
+      expect(isMarkable({ kind: 'image', source: { type } }), type).toBe(false);
+    }
+  });
 });
 
 describe('matchesQuery', () => {

@@ -41,6 +41,7 @@
     workFolder,
   } from '../lib/folders.js';
   import { openInOptions } from '../lib/openIn.js';
+  import { markedWhole, markWhole } from '../lib/markToGeolocate.js';
   import { TOOL_LABELS } from '../lib/workspaces.js';
   import { typeChips } from '../lib/sidebarSearch.js';
   import { entityLabel } from '../lib/entityTypes.svelte.js';
@@ -787,11 +788,12 @@
   let ctxName = $state('');
   const MENU_W = 230;
   const MENU_H = 360;
+  const ENTITY_MENU_H = 540; // a picture's menu, the longest of them
   /** Keep the menu on screen: a press near the right or bottom edge opens it inward. */
-  function at(e) {
+  function at(e, height = MENU_H) {
     return {
       x: Math.min(e.clientX, window.innerWidth - MENU_W - 8),
-      y: Math.min(e.clientY, Math.max(8, window.innerHeight - MENU_H - 8)),
+      y: Math.min(e.clientY, Math.max(8, window.innerHeight - height - 8)),
     };
   }
   function openCtx(e, parent, isFolder = false, inTree = false) {
@@ -839,7 +841,7 @@
       selected = [entity.id];
       anchor = entity.id;
     }
-    ctx = { ...at(e), kind: 'entity', ids: [...selected] };
+    ctx = { ...at(e, ENTITY_MENU_H), kind: 'entity', ids: [...selected] };
   }
   const ctxEntities = $derived(
     ctx?.kind === 'entity' ? selectable.filter((e) => ctx.ids.includes(e.id)) : []
@@ -850,6 +852,13 @@
       ? openInOptions({ path: ctxOne.attrs.path, kind: mediaKindOf(ctxOne), label: ctxOne.label })
       : []
   );
+  // Files holds no origin for a file, so a frame of a video is offered and refused by
+  // the server, calmly; a capture is known by its type and never offered.
+  const markTarget = (entity) =>
+    entity?.type === 'media' && entity.attrs?.path && ['image', 'video'].includes(mediaKindOf(entity))
+      ? { path: entity.attrs.path, kind: mediaKindOf(entity) }
+      : null;
+  const ctxMark = $derived(markTarget(ctxOne));
   const onMap = (e) =>
     e?.type === 'capture' && Number.isFinite(Number(e.attrs?.lat)) && Number.isFinite(Number(e.attrs?.lon));
 
@@ -1716,6 +1725,11 @@
             <Icon name={option.icon} size={14} /> Open in {TOOL_LABELS[option.id]}
           </button>
         {/each}
+        {#if ctxMark}
+          <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => markWhole(markTarget(held.one)))}>
+            <Icon name={markedWhole(ctxMark.path) ? 'check' : 'pin'} size={14} /> {markedWhole(ctxMark.path) ? 'Marked to geolocate' : 'Mark to geolocate'}
+          </button>
+        {/if}
         <div class="ctx-sep"></div>
         <button class="ctx-item" role="menuitem" onclick={() => startRename({ kind: 'entity', entity: ctxOne })}>
           <Icon name="edit" size={14} /> Rename <kbd>F2</kbd>

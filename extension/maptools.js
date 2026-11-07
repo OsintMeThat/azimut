@@ -1563,7 +1563,13 @@
           for (const viewer of open) viewer.z = z.get(viewer.id);
           return held;
         }
-        const viewer = spawn({ path: scene.video, kind: "video", title: `${sceneName(scene)} · ${title || "Video"}` });
+        // a picture marked to geolocate is held as a picture, its scene named and unmarked
+        const picture = scene.file_kind === "image";
+        const viewer = spawn({
+          path: scene.video,
+          kind: picture ? "image" : "video",
+          title: `${sceneName(scene)} · ${title || (picture ? "Picture" : "Video")}`,
+        });
         viewer.scene = sceneMark(scene);
         return viewer;
       },
@@ -1603,6 +1609,8 @@
 
   /** What a scene with no time of its own says instead of a timecode. */
   const WHOLE_VIDEO = "Whole video";
+  /** What a picture's scene says: a picture is only ever marked whole. */
+  const WHOLE_PICTURE = "Whole picture";
   /** The colour a scene is marked in, as Inspect marks it: by its place among its
    *  video's scenes, proofs included (`order`, `engine/geolocate.py`). */
   const sceneColor = (scene) => {
@@ -1626,8 +1634,11 @@
     return Number.isFinite(end) && end > start ? `${sceneClock(start)}–${sceneClock(end)}` : sceneClock(start);
   }
 
+  /** A scene's time as a row says it, a picture's included. */
+  const queueTime = (scene) => (scene?.file_kind === "image" ? WHOLE_PICTURE : sceneTime(scene));
+
   /** What a row calls a scene: the analyst's label, else its time. */
-  const sceneName = (scene) => scene?.label || sceneTime(scene);
+  const sceneName = (scene) => scene?.label || queueTime(scene);
 
   const captureWords = (n) => (n === 1 ? "1 capture" : `${n} captures`);
 
@@ -1647,11 +1658,11 @@
   }
 
   /** Where a scene is drawn on its video's bar: a band for a passage, a pin for an
-   *  instant, nothing for the whole video. */
+   *  instant, nothing for the whole video or a picture, which has no bar. */
   function sceneMark(scene) {
-    const start = Number.isFinite(scene?.start) ? scene.start : null;
+    const start = scene?.file_kind !== "image" && Number.isFinite(scene?.start) ? scene.start : null;
     const end = start != null && Number.isFinite(scene.end) && scene.end > start ? scene.end : null;
-    return { id: scene.id, name: sceneName(scene), time: sceneTime(scene), start, end, color: sceneColor(scene) };
+    return { id: scene.id, name: sceneName(scene), time: queueTime(scene), start, end, color: sceneColor(scene) };
   }
 
   // --- the calendar ----------------------------------------------------------
@@ -1909,8 +1920,10 @@
     stepTarget,
     preciseClock,
     WHOLE_VIDEO,
+    WHOLE_PICTURE,
     sceneClock,
     sceneTime,
+    queueTime,
     sceneName,
     sceneState,
     openScenes,

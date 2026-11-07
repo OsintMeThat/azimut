@@ -13,6 +13,7 @@
   import {
     hasMediaForFilters,
     isMadeHere,
+    isMarkable,
     mediaDisplayKind,
     mediaPoint,
     visibleMedia,
@@ -21,6 +22,7 @@
   } from '../lib/mediaFilter.js';
   import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
   import { gotoPoint } from '../lib/navigate.js';
+  import { markedWhole, markWhole } from '../lib/markToGeolocate.js';
   import { openInOptions } from '../lib/openIn.js';
   import { filedToast } from '../lib/folders.js';
   import { carriesOutsideFiles, leftZone, startMediaDrag } from '../lib/drag.js';
@@ -783,7 +785,7 @@
   // The tools a picture can be taken on to, behind one door per row. Three of them
   // side by side made the widest row seven buttons, and a small card more buttons
   // than card; the ones that stay out are about the file itself.
-  const OPEN_IN_HEIGHT = 130; // room the menu needs under its button before it opens upward
+  const OPEN_IN_HEIGHT = 170; // room the menu needs under its button before it opens upward
   let openIn = $state(null); // { item, left, right, top, bottom } while a row's menu is up
 
   const fileOf = (item) => ({ path: item.path, kind: item.kind, label: item.title ?? item.filename });
@@ -1497,6 +1499,22 @@
         <span>{TOOL_LABELS[option.id]}</span>
       </button>
     {/each}
+    {#if isMarkable(openIn.item)}
+      {@const marked = markedWhole(openIn.item.path)}
+      <button
+        class="upkeep-option mark-row"
+        role="menuitem"
+        title={marked ? 'Show it in the To-do' : 'Adds it to the To-do, to find where it was taken'}
+        onclick={() => {
+          const item = openIn.item;
+          openIn = null;
+          markWhole(item);
+        }}
+      >
+        <Icon name={marked ? 'check' : 'pin'} size={14} />
+        <span>{marked ? 'Marked to geolocate' : 'Mark to geolocate'}</span>
+      </button>
+    {/if}
     {#if quoteOf(openIn.item)}
       <PutInNote offer={quoteOf(openIn.item)} class="upkeep-option put-row" say="Quote the post" onput={() => (openIn = null)} />
     {/if}
@@ -1790,6 +1808,16 @@
   }
   .upkeep-option:disabled {
     color: var(--text-3);
+  }
+  /* Mark to geolocate is about the file, not a tool it goes to: a rule sets it apart */
+  .mark-row {
+    margin-top: 3px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+    border-radius: 0 0 var(--r-sm) var(--r-sm);
+  }
+  .mark-row :global(svg) {
+    color: var(--accent);
   }
   /* the Put in row is drawn by its own component, so it is reached as a global class */
   .open-in-menu :global(.put-row) {

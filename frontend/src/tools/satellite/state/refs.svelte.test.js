@@ -349,6 +349,50 @@ describe('a scene being geolocated', () => {
     expect(refs.open[0].scene).toMatchObject({ start: null, end: null, label: 'which town?' });
   });
 
+  describe('on a picture', () => {
+    const PHOTO = { path: 'media/harbour.png', kind: 'image', title: 'Harbour photo', notes: 'From the quay' };
+    const PICTURE = { video: PHOTO.path, draft: 'sc_p', start: null, end: null, label: 'Harbour wall', order: 0, kind: 'image' };
+
+    beforeEach(() => {
+      api.get = vi.fn(async (path) => {
+        if (path.startsWith('/api/cases/case-1/media/item?')) return PHOTO;
+        throw new Error(`unexpected ${path}`);
+      });
+    });
+
+    it('opens the picture in a window of its own, named, with nothing to cue or probe', async () => {
+      const refs = store();
+      await refs.openScene(PICTURE);
+      expect(refs.open).toHaveLength(1);
+      const pane = refs.open[0];
+      expect(pane).toMatchObject({ path: PHOTO.path, kind: 'image', title: 'Harbour photo' });
+      expect(pane.facts.notes).toBe('From the quay');
+      expect(pane.scene).toMatchObject({ draft: 'sc_p', start: null, end: null, label: 'Harbour wall' });
+      expect(pane.cue ?? null).toBeNull();
+      expect(api.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('takes a window already open on that picture rather than a second', async () => {
+      const refs = store();
+      refs.add({ ...PHOTO });
+      refs.add(SHOT);
+      const pane = refs.open[0];
+      pane.collapsed = true;
+      await refs.openScene(PICTURE);
+      expect(refs.open).toHaveLength(2);
+      expect(pane).toMatchObject({ collapsed: false });
+      expect(pane.scene.draft).toBe('sc_p');
+      expect(api.get).not.toHaveBeenCalled();
+    });
+
+    it('never takes a frame kept from a clip for the picture', async () => {
+      const refs = store();
+      refs.add({ path: PHOTO.path, kind: 'image', title: 'A frame', still: 'blob:frame' });
+      await refs.openScene(PICTURE);
+      expect(refs.open).toHaveLength(2);
+    });
+  });
+
   it('keeps an instant an instant', async () => {
     const refs = store();
     await refs.openScene({ ...REF, end: null });
