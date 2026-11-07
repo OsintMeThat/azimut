@@ -870,7 +870,18 @@ describe('Proof Composer — one document at a time', () => {
     // document now bound to B's name, and Save wrote the hybrid over B.
     expect(composer).toContain('let openRun = 0;');
     expect(composer).toContain('const run = ++openRun;');
-    expect(composer.match(/if \(run !== openRun\) return;/g)?.length).toBeGreaterThanOrEqual(4);
+    // after the spec is read, and after every picture of it has come in
+    const open = composer.slice(composer.indexOf('async function openProof('), composer.indexOf('const selectedShapes'));
+    expect(open.match(/if \(run !== openRun\) return;/g)?.length).toBe(2);
+    expect(open).toMatch(/const pictures = await Promise\.all\(\[[\s\S]*?\]\);\s*\n\s*if \(run !== openRun\) return;/);
+  });
+
+  it('asks for every picture of a proof at once, and lays them in the spec\'s order', () => {
+    const open = composer.slice(composer.indexOf('async function openProof('), composer.indexOf('const selectedShapes'));
+    expect(open).not.toMatch(/for \(const p of spec\.(panels|pastes)/);
+    expect(open).toContain('spec.panels.map((p) => loadImage(fileUrl(caseId, p.src)).catch(() => null))');
+    expect(open).toContain('const img = pictures[spec.panels.length + i];');
+    expect(open).toContain("toast(`Missing panel image: ${p.src}`, 'warn');");
   });
 
   it('cancels a pending history capture before an undo restores the document', () => {
@@ -1599,7 +1610,9 @@ describe('Proof Composer scene', () => {
     expect(source).toContain('if (uiState.tool === \'proof\' && uiState.proofScene && caseState.current) {');
     expect(source).toContain('uiState.proofScene = null;');
     const make = bodyOfFn('makeSceneProof');
-    expect(make).toContain('if (!made || !(await mayLeave())) return;');
+    // a proof with changes asks first, unless it is a slide of the same video: that one is saved
+    expect(make).toContain("const onSlides = proofStarted && !!made.scene?.video && made.scene.video === scene.star;");
+    expect(make).toContain('if (!(await (onSlides ? settleSlide() : mayLeave()))) return;');
     expect(make.indexOf('resetDoc();')).toBeLessThan(make.indexOf('await addPanelsFromPaths(made.panels);'));
     expect(make).toContain('scene.hold(made.scene);');
     // ready where the scene starts, playing only once its tab is shown
