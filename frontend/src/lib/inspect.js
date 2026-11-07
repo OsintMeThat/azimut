@@ -343,6 +343,38 @@ export function quadMapUnit(quad, pts) {
 }
 
 /**
+ * Where a canvas point falls in a piece's own unit square (u,v, TL origin): the
+ * inverse of `quadMapUnit`. A point off the piece lands outside 0..1, and a point
+ * past its horizon, where the warp folds over, answers null.
+ */
+export function quadUnitAt(quad, [x, y]) {
+  const H = mul(basisToPoints(quad), adj(basisToPoints(_UNIT)));
+  const p = mulV(adj(H), [x, y, 1]);
+  if (!p[2] || !Number.isFinite(p[2])) return null;
+  return [p[0] / p[2], p[1] / p[2]];
+}
+
+/**
+ * The view that shows the pieces whole, `pad` screen pixels from the pane's edges:
+ * `{ zoom, x, y }` as the canvas reads it, `zoom` 1 being the canvas fitted in the
+ * pane. No piece, or no pane yet, is the canvas fitted.
+ */
+export function fitView(quads, pane, canvas, pad = 28) {
+  const box = quadsBounds(quads ?? []);
+  const fit = Math.min(pane.width / canvas.width, pane.height / canvas.height, 1) || 1;
+  if (!box || !(pane.width > 0) || !(pane.height > 0)) return { zoom: 1, x: 0, y: 0 };
+  const room = (side, size) => Math.max(1, side - 2 * pad) / Math.max(size, 1);
+  const wanted = Math.min(room(pane.width, box.width), room(pane.height, box.height));
+  const zoom = Math.min(8, Math.max(0.2, wanted / fit));
+  const scale = fit * zoom;
+  return {
+    zoom,
+    x: (pane.width - box.width * scale) / 2 - box.minX * scale,
+    y: (pane.height - box.height * scale) / 2 - box.minY * scale,
+  };
+}
+
+/**
  * New quad for a piece that now shows only the fractional sub-rectangle
  * `rect` ({x,y,w,h} in 0..1) of what `quad` currently shows. Preserves the
  * warp and keeps the piece in place, with the right proportions for the region.
@@ -673,25 +705,66 @@ export function stitchCanvas(canvas, current) {
   return { width, height, scale: Math.min(width / current.width, height / current.height) };
 }
 
+/** How deep a piece is followed through pictures composed from other pieces, as the server does. */
+const COMPOSED_DEPTH = 3;
+
 /**
  * The one video a collage is cut from, and the stretch of it its pieces span:
  * `{ path, from, to, times }` in seconds, the times sorted, or null when a piece is
  * a picture of its own or comes from another file. A piece is the video at an
- * instant, or a frame saved from it, which `cutFrom(path)` reads back to
- * `{ video, time }`. A single instant reads `from === to`.
+ * instant, or a picture `origin(path)` reads back: a frame saved from the video,
+ * `{ video, time }`, or a picture composed from pieces of its own, `{ pieces: [{ path,
+ * time }] }`, such as a straightened collage, which stands for those pieces
+ * (`engine/scenes.collage_video`). A single instant reads `from === to`.
  */
-export function collageVideo(nodes, cutFrom = () => null) {
+export function collageVideo(nodes, origin = () => null) {
   if (!nodes?.length) return null;
+  const found = piecesVideo(nodes.map((n) => n.save), origin, 0);
+  if (!found) return null;
+  const times = found.times.sort((a, b) => a - b);
+  return { path: found.path, from: times[0], to: times[times.length - 1], times };
+}
+
+function piecesVideo(pieces, origin, depth) {
   let path = null;
   const times = [];
-  for (const n of nodes) {
-    const at = n.save?.time != null ? { video: n.save.path, time: Number(n.save.time) } : cutFrom(n.save?.path);
-    if (!at?.video || !Number.isFinite(at.time) || (path && at.video !== path)) return null;
-    path = at.video;
-    times.push(at.time);
+  const take = (video, time) => {
+    if (!video || !Number.isFinite(time) || (path && video !== path)) return false;
+    path = video;
+    times.push(time);
+    return true;
+  };
+  for (const piece of pieces) {
+    if (piece?.time != null) {
+      if (!take(piece.path, Number(piece.time))) return null;
+      continue;
+    }
+    const at = origin(piece?.path);
+    if (at?.pieces) {
+      const inner = depth < COMPOSED_DEPTH && at.pieces.length ? piecesVideo(at.pieces, origin, depth + 1) : null;
+      if (!inner || !inner.times.every((time) => take(inner.path, time))) return null;
+    } else if (!take(at?.video, Number(at?.time))) {
+      return null;
+    }
   }
-  times.sort((a, b) => a - b);
-  return { path, from: times[0], to: times[times.length - 1], times };
+  return path ? { path, times } : null;
+}
+
+/**
+ * What a case file says it was made from, for `collageVideo`: a frame Inspect saved
+ * from a video, `{ video, time }`, or a picture composed from pieces (a collage's
+ * export, a straightened collage), `{ pieces }`. Anything else answers null.
+ */
+export function mediaOrigin(item) {
+  const src = item?.source;
+  if (src?.type !== 'inspect') return null;
+  if (src.op === 'frame' && typeof src.from === 'string' && Number.isFinite(src.time)) {
+    return { video: src.from, time: src.time };
+  }
+  if (src.op === 'collage' && Array.isArray(src.sources) && Array.isArray(src.times) && src.sources.length === src.times.length) {
+    return { pieces: src.sources.map((path, i) => ({ path, time: src.times[i] ?? null })) };
+  }
+  return null;
 }
 
 /** A sensible starting quad: the image scaled to fit `maxW`, placed at (ox, oy). */

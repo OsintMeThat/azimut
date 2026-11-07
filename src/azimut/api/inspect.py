@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .. import jobs
 from .. import layout
@@ -92,10 +92,29 @@ class ComposeIn(BaseModel):
 class StitchIn(BaseModel):
     width: int = Field(ge=16, le=8192)
     height: int = Field(ge=16, le=8192)
-    nodes: list[NodeSrc] = Field(min_length=2)
+    nodes: list[NodeSrc] = Field(min_length=2, max_length=inspectwork.MAX_PIECES)
     # 'planar' keeps pieces hand-warpable; the panorama modes trade that for a
     # bounded, undistorted strip (see engine/stitch).
     mode: Literal["planar", "cylindrical", "spherical"] = "planar"
+    # The areas painted out of each piece, one entry per node (null: none), checked
+    # by the rule the saved collage keeps them under (`inspectwork.clean_exclude`).
+    exclude: list[list[dict[str, Any]] | None] | None = Field(default=None, max_length=inspectwork.MAX_PIECES)
+
+    @field_validator("exclude")
+    @classmethod
+    def _strokes(cls, value: list[list[dict[str, Any]] | None] | None) -> list[list[dict[str, Any]] | None] | None:
+        if value is None:
+            return None
+        try:
+            return [inspectwork.clean_exclude(strokes) or None for strokes in value]
+        except CaseError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @model_validator(mode="after")
+    def _one_entry_per_node(self) -> StitchIn:
+        if self.exclude is not None and len(self.exclude) != len(self.nodes):
+            raise ValueError("exclude needs one entry per node")
+        return self
 
 
 class EnhanceVideoIn(BaseModel):
@@ -296,6 +315,7 @@ def auto_stitch(case_id: str, body: StitchIn) -> dict[str, Any]:
     The pieces stay live on the canvas afterwards (spec § v2 Panorama: machine
     stitch first, hand-tune after), so this returns a recipe, not pixels: a quad
     each, plus — in the panorama modes — the remap op that shapes the piece.
+    ``exclude`` keeps the matcher off what the analyst painted out of a piece.
     """
     case = get_case(case_id)
     srcs = [
@@ -304,7 +324,8 @@ def auto_stitch(case_id: str, body: StitchIn) -> dict[str, Any]:
     ]
     try:
         return inspect_engine.solve_collage_layout(
-            case, srcs=srcs, width=body.width, height=body.height, mode=body.mode
+            case, srcs=srcs, width=body.width, height=body.height, mode=body.mode,
+            exclude=body.exclude,
         )
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -470,6 +491,26 @@ def stop_geolocating(case_id: str) -> dict[str, Any]:
     if ended:
         say_geolocating(case)
     return {"ended": ended}
+
+
+class RetimeIn(BaseModel):
+    video: str = Field(min_length=1, max_length=1024)
+    # both null for the whole video, no end for an instant
+    start: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    end: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+
+@router.put("/cases/{case_id}/scenes/{draft}/time")
+def retime_scene(case_id: str, draft: str, body: RetimeIn) -> dict[str, Any]:
+    """Give a scene to prove a new time, the rest of its video's work untouched. Answers
+    with the time it had, for an Undo."""
+    case = get_case(case_id)
+    try:
+        before = inspectwork.retime_scene(case, body.video, draft, body.start, body.end)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    events.publish({"type": "scenes", "case_id": case.id, "video": body.video})
+    return {"before": before}
 
 
 @router.put("/cases/{case_id}/scenes/{draft}/abandon")

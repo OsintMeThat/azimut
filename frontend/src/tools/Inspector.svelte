@@ -12,7 +12,7 @@
   import { captureMoment, frameDuration, preciseClock, seekInto, shownFrameTime } from '../lib/inspectPlayer.js';
   import { INSPECT_HELP } from '../lib/inspectHelp.js';
   import {
-    editClock, isAbandoned, isStretch, isWholeVideo, liveScenes, markablePicture, momentKey, newScene, sameMoments, sceneList,
+    editClock, isAbandoned, isStretch, isWholeVideo, liveScenes, markablePicture, momentKey, newScene, sameMoments, sameTime, sceneList,
     sceneMarks, sceneMoments, scenePassage, sceneStart, sceneTime, sceneTitle, sceneToEnd, snapToFrame, sortMoments,
     stretchFromShot, timeWords, toProve,
   } from '../lib/scenes.js';
@@ -27,6 +27,7 @@
   import { createSceneOffer } from '../lib/sceneOffer.js';
   import { declineInvite, inviteDeclined, todoHintDue } from '../lib/sceneHints.js';
   import { SceneEdit } from '../lib/sceneEdit.svelte.js';
+  import { retimed } from '../lib/sceneRetime.svelte.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import {
     workState, workSpec, isPristine, frameSignature, videoSignature, isFiled, markRecord, sceneRecord,
@@ -1042,6 +1043,24 @@
     untrack(() => {
       if (sceneGiven.caseId !== work.caseId || sceneGiven.video !== work.source?.path) return;
       if (uiState.tool === 'inspect' && hasScenes && !opening) loadScenes(openRun);
+    });
+  });
+
+  // A scene of this clip given a new time in the Collage tool (`lib/sceneRetime.svelte.js`):
+  // the work takes it up, or its next save would write the old time back.
+  $effect(() => {
+    void retimed.n;
+    untrack(() => {
+      if (!retimed.n || retimed.caseId !== work.caseId || retimed.video !== work.source?.path) return;
+      const draft = work.scenes.find((sc) => sc.id === retimed.draft);
+      if (!draft || (sameTime(draft.start, retimed.start) && sameTime(draft.end, retimed.end))) return;
+      draft.start = retimed.start;
+      draft.end = retimed.end;
+      clipHistory.reset(clipSnapshot());
+      if (sceneEdit.key === draft.id && !sceneEdit.changed) {
+        const row = scenes.find((sc) => sc.key === draft.id);
+        if (row) sceneEdit.begin(row);
+      }
     });
   });
 

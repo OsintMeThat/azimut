@@ -19,6 +19,10 @@
   // whole video from `from`, the first frame a panel was cut at. That loop never
   // starts by itself for someone who asked the system for less motion, and nothing
   // here ever plays sound unasked.
+  //
+  // The Collage tool shows it too, to change the moment its collage was marked over:
+  // the dots are its pieces' frames, `help` says so, and with no `onaddframe` there is
+  // no frame to add.
   let {
     caseId,
     video,
@@ -34,8 +38,9 @@
     // Whether its tab is shown: a hidden one stops, and keeps its frame.
     active = true,
     adding = false,
+    help = PROOF_SCENE_HELP,
     onclip,
-    onaddframe,
+    onaddframe = null,
   } = $props();
 
   let root = $state(null);
@@ -280,7 +285,7 @@
     aria-valuemax={Math.round(duration * 1000) / 1000}
     aria-valuenow={Math.round(shown * 1000) / 1000}
     aria-valuetext={preciseClock(shown)}
-    title={PROOF_SCENE_HELP.bar}
+    title={help.bar}
     onpointerdown={pressBar}
     onpointermove={dragBar}
     onpointerup={releaseBar}
@@ -299,7 +304,7 @@
       <button
         class="dot"
         style:left={at(f.time)}
-        title={PROOF_SCENE_HELP.panelFrame}
+        title={help.panelFrame}
         aria-label={`Panel frame at ${preciseClock(f.time)}`}
         onpointerdown={(e) => e.stopPropagation()}
         onclick={() => show(f.time)}
@@ -307,28 +312,30 @@
     {/each}
   </div>
   <div class="controls">
-    <button class="ctl" onclick={toggle} title={PROOF_SCENE_HELP.play} aria-label={looping || !paused ? 'Pause' : 'Play'}>
+    <button class="ctl" onclick={toggle} title={help.play} aria-label={looping || !paused ? 'Pause' : 'Play'}>
       <Icon name={looping || !paused ? 'pause' : 'play'} size={13} />
     </button>
-    <button class="ctl" onclick={(e) => step(-1, e.shiftKey)} title={PROOF_SCENE_HELP.frameBack} aria-label="Back one frame">
+    <button class="ctl" onclick={(e) => step(-1, e.shiftKey)} title={help.frameBack} aria-label="Back one frame">
       <Icon name="chevronLeft" size={13} />
     </button>
-    <button class="ctl" onclick={(e) => step(1, e.shiftKey)} title={PROOF_SCENE_HELP.frameForward} aria-label="Forward one frame">
+    <button class="ctl" onclick={(e) => step(1, e.shiftKey)} title={help.frameForward} aria-label="Forward one frame">
       <Icon name="chevronRight" size={13} />
     </button>
-    <span class="clock mono" title={PROOF_SCENE_HELP.clock}>
+    <span class="clock mono" title={help.clock}>
       {preciseClock(shown)}{#if duration > 0}<span class="total">/ {shortClock(duration)}</span>{/if}
     </span>
-    <button class="ctl" class:on={looping} onclick={toggleLoop} title={PROOF_SCENE_HELP.loop} aria-label="Loop the scene" aria-pressed={looping}>
+    <button class="ctl" class:on={looping} onclick={toggleLoop} title={help.loop} aria-label="Loop the scene" aria-pressed={looping}>
       <Icon name="always" size={14} />
     </button>
-    <button class="ctl" class:on={!muted} onclick={() => (muted = !muted)} title={PROOF_SCENE_HELP.mute} aria-label={muted ? 'Sound on' : 'Sound off'}>
+    <button class="ctl" class:on={!muted} onclick={() => (muted = !muted)} title={help.mute} aria-label={muted ? 'Sound on' : 'Sound off'}>
       <Icon name={muted ? 'volumeOff' : 'volume'} size={13} />
     </button>
   </div>
-  <button class="btn btn-xs add-frame" disabled={adding} onclick={() => onaddframe?.(video, shown)} title={PROOF_SCENE_HELP.addFrame}>
-    <Icon name="plus" size={11} /> {adding ? 'Adding…' : 'Add this frame'}
-  </button>
+  {#if onaddframe}
+    <button class="btn btn-xs add-frame" disabled={adding} onclick={() => onaddframe(video, shown)} title={help.addFrame}>
+      <Icon name="plus" size={11} /> {adding ? 'Adding…' : 'Add this frame'}
+    </button>
+  {/if}
 </div>
 
 <style>

@@ -1,8 +1,10 @@
 <script>
   import {
     quadMatrix3d, quadCentroid, rotateQuad, quadEdgeMidpoints, scaleQuad,
-    quadsBounds, moveQuads, rotateQuads, scaleQuads,
+    quadsBounds, moveQuads, rotateQuads, scaleQuads, quadUnitAt, fitView, translateQuad,
   } from '../../lib/inspect.js';
+  import { BRUSH_MAX, BRUSH_MIN, erase, paint, pieceFrame, strokePoint } from '../../lib/excludeBrush.js';
+  import { readWheel } from '../../lib/wheelGesture.js';
   import { uiState } from '../../lib/state.svelte.js';
   import { anyOverlayOpen } from '../../lib/overlayStack.js';
   import { levelShift } from '../../lib/straighten.js';
@@ -21,10 +23,14 @@
   // `level` is the line drawn to straighten the collage by (lib/straighten.js): while it is drawn, a click
   // anywhere adds a point to it instead of moving pieces.
   // `view` is how close the canvas is looked at: `zoom` 1 is the collage fitted in the pane, and
-  // `x`, `y` the pan in screen pixels. It is the tool's, so Fit in its toolbar puts it back.
+  // `x`, `y` the pan in screen pixels. It is the tool's; `fitPieces` frames the pieces whole,
+  // and `fitted` says whether the view does.
+  // `brush` paints, on a piece, what auto-stitch must not match on (`{ on, size, erase }`,
+  // lib/excludeBrush.js). `unstitched` names the pieces the last stitch found no overlap for:
+  // outlined until moved.
   let {
     collage, selectedIds = $bindable([]), requestCrop, level = $bindable(null),
-    view = $bindable(),
+    view = $bindable(), brush = $bindable(null), unstitched = $bindable([]), fitted = $bindable(true),
   } = $props();
   // its own while no tool binds one
   const ownView = $state({ zoom: 1, x: 0, y: 0 });
@@ -62,19 +68,49 @@
     return [(e.clientX - r.left - cam.x) / scale, (e.clientY - r.top - cam.y) / scale];
   }
 
-  // Wheel zooms toward the pointer so the feature under the cursor stays put —
-  // pixel-level alignment needs to get closer than the fitted view.
+  // A mouse wheel and a pinch zoom toward the pointer, so the feature under the cursor
+  // stays put: pixel-level alignment needs to get closer than the fitted view. Two
+  // fingers on a touchpad pan (lib/wheelGesture.js).
+  const wheel = { pad: 0 };
   function onWheel(e) {
     e.preventDefault();
+    const asked = readWheel(e, wheel);
+    if (!asked) return;
+    if (asked.kind === 'pan') {
+      cam.x += asked.dx;
+      cam.y += asked.dy;
+      return;
+    }
     const r = wrapEl.getBoundingClientRect();
     const px = e.clientX - r.left;
     const py = e.clientY - r.top;
     const old = scale;
-    const next = Math.min(Math.max(cam.zoom * (e.deltaY > 0 ? 0.9 : 1.1), 0.2), 8);
+    const next = Math.min(Math.max(cam.zoom * asked.factor, 0.2), 8);
     const k = fitScale * next;
     cam.x = px - ((px - cam.x) / old) * k;
     cam.y = py - ((py - cam.y) / old) * k;
     cam.zoom = next;
+  }
+
+  // -- the pieces whole -----------------------------------------------------------------
+  const pieceView = $derived(
+    fitView(collage.nodes.map((n) => n.quad), { width: availW, height: availH }, { width: cw, height: ch }),
+  );
+  $effect(() => {
+    const at = pieceView;
+    fitted = Math.abs(cam.zoom - at.zoom) < 1e-3 && Math.abs(cam.x - at.x) < 0.5 && Math.abs(cam.y - at.y) < 0.5;
+  });
+
+  /** Frame every piece, a margin around them; the whole canvas when there is none. */
+  export function fitPieces() {
+    Object.assign(cam, pieceView);
+  }
+
+  /** Pieces moved by hand are no longer the ones a stitch left out. */
+  function placed(ids) {
+    if (unstitched.length && ids.some((id) => unstitched.includes(id))) {
+      unstitched = unstitched.filter((id) => !ids.includes(id));
+    }
   }
 
   // Drag on the empty background pans the view (a plain click still deselects).
@@ -103,6 +139,10 @@
   // on release (a plain click still means "just this one").
   function startMove(e, node) {
     e.preventDefault();
+    if (brush?.on) {
+      startPaint(e, node);
+      return;
+    }
     if (e.shiftKey) {
       toggleSel(node.id);
       return;
@@ -119,6 +159,7 @@
         if (Math.hypot(nx - px, ny - py) * scale < 3) return;
         moved = true;
         movingIds = group.map((n) => n.id); // once, not on every move
+        placed(movingIds);
       }
       // always re-derive from the quads captured at press: accumulating deltas
       // would drift the piece away from the pointer over a long drag
@@ -252,14 +293,106 @@
       }
       if (level.drawing) return;
     }
-    if (!selectedIds.length) return;
-    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     const t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-    if (anyOverlayOpen()) return;
+    const typing = t && (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable);
+    if (typing || anyOverlayOpen()) return;
+    // the brush: Esc puts it down, [ and ] change its size
+    if (brush?.on && !(e.ctrlKey || e.metaKey)) {
+      const step = e.key === '[' ? -BRUSH_STEP : e.key === ']' ? BRUSH_STEP : 0;
+      if (step || e.key === 'Escape') {
+        e.preventDefault();
+        if (step) brush.size = Math.min(BRUSH_MAX, Math.max(BRUSH_MIN, brush.size + step));
+        else brush.on = false;
+        return;
+      }
+    }
+    if (!selectedIds.length) return;
+    // The arrows nudge what is selected a canvas pixel, ten with Shift. A burst of them
+    // is one undo, as a drag is (the tool's history waits for the moves to stop).
+    const arrow = ARROWS[e.key];
+    // a control that moves by the arrows itself keeps them, such as the moment's player bar
+    const steers = typeof t?.closest === 'function' && t.closest(STEERED);
+    if (arrow && !steers && !(e.ctrlKey || e.metaKey || e.altKey)) {
+      e.preventDefault();
+      const by = e.shiftKey ? 10 : 1;
+      for (const n of collage.nodes) if (isSel(n.id)) n.quad = translateQuad(n.quad, arrow[0] * by, arrow[1] * by);
+      placed(selectedIds);
+      return;
+    }
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     e.preventDefault();
     collage.nodes = collage.nodes.filter((n) => !isSel(n.id));
     selectedIds = [];
+  }
+
+  const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  const STEERED = '[role="slider"], [role="radiogroup"], [role="menu"], [role="listbox"], [role="tablist"]';
+  const BRUSH_STEP = 8;
+
+  // -- the brush --------------------------------------------------------------------------
+  // A stroke goes on the piece it starts on, in the picture the stitch receives
+  // (lib/excludeBrush.js), and the piece is selected so its strokes can be cleared. Alt,
+  // or Erase, takes paint off instead. The size is the ring's, in screen pixels, so the
+  // brush feels the same however close the canvas is.
+  let ring = $state(null); // where the brush ring is over the pane, screen pixels, and whether it erases
+
+  /** A piece's width on the canvas, along its top and bottom edges. */
+  const across = (q) => (Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]) + Math.hypot(q[2][0] - q[3][0], q[2][1] - q[3][1])) / 2 || 1;
+
+  function startPaint(e, node) {
+    if (e.button !== 0 || !node.url) return;
+    selectedIds = [node.id];
+    const frame = pieceFrame(node);
+    // the radius as a fraction of the stitched picture's width, fixed for the stroke
+    const radius = (brush.size / 2 / (scale * across(node.quad))) * frame.ratio;
+    const aspect = node.w > 0 ? node.h / node.w : 1;
+    let fresh = true;
+    const at = (ev) => {
+      const unit = quadUnitAt(node.quad, toCanvas(ev));
+      const spot = unit ? frame.toStitch(unit) : null;
+      if (!spot) {
+        fresh = true;
+        return;
+      }
+      if (brush.erase || ev.altKey) {
+        const left = erase(node.exclude, spot, radius, aspect);
+        if (left) node.exclude = left;
+        fresh = true;
+        return;
+      }
+      const point = strokePoint(spot, radius);
+      if (!point) {
+        fresh = true;
+        return;
+      }
+      const next = paint(node.exclude, point, radius, { start: fresh });
+      if (next) node.exclude = next;
+      fresh = false;
+    };
+    at(e);
+    const up = () => {
+      window.removeEventListener('pointermove', at);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', at);
+    window.addEventListener('pointerup', up);
+  }
+
+  function moveRing(e) {
+    if (!brush?.on) return;
+    const r = wrapEl.getBoundingClientRect();
+    ring = { x: e.clientX - r.left, y: e.clientY - r.top, erase: brush.erase || e.altKey };
+  }
+
+  /** A piece's strokes as the canvas shows them: in its shown picture's pixels. */
+  function strokesShown(node) {
+    const frame = pieceFrame(node);
+    const w = node.w || 1;
+    const h = node.h || 1;
+    return (node.exclude ?? []).map((stroke) => {
+      const points = stroke.points.map((p) => frame.toShown(p)).map(([x, y]) => [x * w, y * h]);
+      return { points, width: ((2 * stroke.radius) / frame.ratio) * w };
+    });
   }
 
   // Where the pointer is over the canvas while the line is drawn: the curve runs on to it, as the
@@ -352,11 +485,14 @@
   class="wrap"
   class:checker={collage.transparent}
   class:drawing={level?.drawing}
+  class:brushing={brush?.on}
   bind:this={wrapEl}
   bind:clientWidth={availW}
   bind:clientHeight={availH}
   style:background={collage.transparent ? null : collage.background}
   onpointerdown={startPan}
+  onpointermove={moveRing}
+  onpointerleave={() => (ring = null)}
   onwheel={onWheel}
 >
   <div
@@ -394,17 +530,76 @@
         class="node"
         class:selected={isSel(node.id)}
         class:ghost={node.ghost || movingIds.includes(node.id)}
+        class:unstitched={unstitched.includes(node.id)}
         src={box.url}
         alt="collage piece"
+        title={unstitched.includes(node.id) ? 'Auto-stitch found no overlap for this piece' : null}
         style:width={`${box.w}px`}
         style:height={`${box.h}px`}
         style:transform={quadMatrix3d(box.w, box.h, node.quad)}
+        style:outline-width={unstitched.includes(node.id) ? `${2 / scale}px` : null}
         draggable="false"
         onpointerdown={(e) => (e.stopPropagation(), startMove(e, node))}
-        ondblclick={() => { selectedIds = [node.id]; requestCrop?.(node); }}
+        ondblclick={() => { if (brush?.on) return; selectedIds = [node.id]; requestCrop?.(node); }}
       />
+      {#if node.exclude?.length}
+        {#if brush?.on}
+          <!-- what is painted out of its stitch, drawn on the piece only while the brush is out -->
+          <svg
+            class="paint"
+            width={box.w}
+            height={box.h}
+            viewBox={`0 0 ${box.w} ${box.h}`}
+            style:transform={quadMatrix3d(box.w, box.h, node.quad)}
+            aria-hidden="true"
+            data-testid="piece-paint"
+          >
+            <g>
+              {#each strokesShown(node) as stroke, i (i)}
+                {#if stroke.points.length > 1}
+                  <polyline points={stroke.points.map((p) => p.join(',')).join(' ')} stroke-width={stroke.width} />
+                {:else}
+                  <circle cx={stroke.points[0][0]} cy={stroke.points[0][1]} r={stroke.width / 2} />
+                {/if}
+              {/each}
+            </g>
+          </svg>
+        {:else}
+          <!-- a small mark says the piece holds some, and takes the brush up on it -->
+          <button
+            class="ignored"
+            style:left={`${node.quad[0][0]}px`}
+            style:top={`${node.quad[0][1]}px`}
+            style:width={`${20 / scale}px`}
+            style:height={`${20 / scale}px`}
+            style:transform={`translate(${6 / scale}px, ${6 / scale}px)`}
+            onpointerdown={(e) => e.stopPropagation()}
+            onclick={() => { selectedIds = [node.id]; if (brush) brush.on = true; }}
+            aria-label="Areas left out of auto-stitch"
+            title="Areas left out of auto-stitch: paint or erase them"
+            data-testid="piece-ignored"
+          >
+            <Icon name="brush" size={11 / scale} />
+          </button>
+        {/if}
       {/if}
-      {#if node.id === soloId}
+      {#if unstitched.includes(node.id)}
+        <!-- said on the piece itself: the outline alone reads as a selection -->
+        <span
+          class="left-out"
+          style:left={`${node.quad[1][0]}px`}
+          style:top={`${node.quad[1][1]}px`}
+          style:font-size={`${11 / scale}px`}
+          style:padding={`${2 / scale}px ${6 / scale}px`}
+          style:gap={`${4 / scale}px`}
+          style:transform={`translate(calc(-100% - ${12 / scale}px), ${12 / scale}px)`}
+          data-testid="piece-left-out"
+        >
+          <Icon name="alert" size={11 / scale} /> No overlap
+        </span>
+      {/if}
+      {/if}
+      {#if node.id === soloId && !brush?.on}
         <!-- round corner handles: free perspective warp -->
         {#each node.quad as pt, i (i)}
           <button
@@ -586,7 +781,27 @@
     ></div>
   {/if}
 
-  {#if level?.drawing}
+  {#if brush?.on && ring}
+    <div
+      class="brush-ring"
+      class:erase={ring.erase}
+      style:left={`${ring.x}px`}
+      style:top={`${ring.y}px`}
+      style:width={`${brush.size}px`}
+      style:height={`${brush.size}px`}
+      aria-hidden="true"
+    ></div>
+  {/if}
+
+  {#if brush?.on}
+    <div class="view-hint level-cue brush-cue" role="status">
+      <p class="cue-say">
+        <span class="level-dot brush-dot" aria-hidden="true"></span>
+        Paint over what moves or was laid over the picture, such as people, vehicles or a watermark. Auto-stitch does not match there.
+      </p>
+      <p>Alt erases · [ and ] change the size · Esc ends · never in the saved picture</p>
+    </div>
+  {:else if level?.drawing}
     <!-- What to click while the line is drawn, in the corner the keys are said in. -->
     <div class="view-hint level-cue" role="status">
       <p class="cue-say">
@@ -597,7 +812,7 @@
     </div>
   {:else if collage.nodes.length}
     <div class="view-hint">
-      scroll to zoom · drag background to pan · pull corners to warp · shift-click to select several
+      wheel or pinch to zoom · drag the background or two fingers to pan · arrows nudge · pull corners to warp · shift-click to select several
     </div>
   {/if}
 </div>
@@ -700,6 +915,86 @@
   }
   .node.ghost {
     opacity: 0.55;
+  }
+  /* Left where it was by the last auto-stitch, until moved. */
+  .node.unstitched {
+    outline-style: solid;
+    outline-color: var(--warn);
+  }
+  .left-out {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    background: rgba(22, 22, 22, 0.9);
+    color: var(--warn);
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .wrap.brushing .node {
+    cursor: none;
+  }
+  /* What a piece keeps out of its stitch: one wash of the brush's colour, however the
+     strokes cross. */
+  .paint {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .paint g {
+    opacity: 0.45;
+  }
+  .paint polyline {
+    fill: none;
+    stroke: #ff3b30;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .paint circle {
+    fill: #ff3b30;
+  }
+  .ignored {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border-radius: 50%;
+    background: rgba(22, 22, 22, 0.88);
+    color: #ff6b61;
+    border: 1px solid rgba(255, 107, 97, 0.7);
+    cursor: pointer;
+  }
+  .ignored:hover {
+    background: rgba(40, 22, 22, 0.95);
+  }
+  .brush-ring {
+    position: absolute;
+    z-index: 8;
+    border-radius: 50%;
+    border: 1.5px solid #ff3b30;
+    background: rgba(255, 59, 48, 0.12);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+  .brush-ring.erase {
+    border-color: #f3f3f3;
+    border-style: dashed;
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .wrap.brushing {
+    box-shadow: inset 0 0 0 2px rgba(255, 59, 48, 0.55);
+  }
+  .brush-cue {
+    border-color: rgba(255, 59, 48, 0.5);
+  }
+  .level-dot.brush-dot {
+    background: #ff3b30;
   }
   /* Frame around a multi-piece selection. Never listens — the pieces it spans
      (and their own handles) must stay clickable through it. */

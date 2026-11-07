@@ -98,7 +98,7 @@ presses *Read the guide* on it, which opens the guide on its start page.
   (a band for a passage, a pin for an instant), and its state: To geolocate, In progress
   with its captures, or Geolocating for the one in hand. **Geolocate** goes to the map
   with its video, and on the scene in hand it reads **Stop** and stops it, the captures
-  kept; the name opens it in Inspect; ✕ abandons it with a word, which may
+  kept; the name opens it in Inspect, or in Collage for a picture a collage exported; ✕ abandons it with a word, which may
   stay empty. Three rows show and the rest are counted; the abandoned fold below, each
   with its word and **Restore**. The group is absent while the case has no scene to
   prove, and read again on the server's word while it is shown, never once it is not.
@@ -1953,28 +1953,58 @@ it was cut at.
 
 **The Collage tool is laid out for a laptop.** A bar over the canvas holds what acts on
 the whole collage: **Auto-stitch**, whose arrow picks Planar, Cylindrical or Spherical
-(the last pick named on the button and kept in this browser), **Straighten** with Draw
-the line, and **Fit**, with the zoom beside it once the canvas is zoomed. Auto-stitch's
-message carries Undo, and its arrow keeps Undo auto-stitch after the message goes. The
-panel keeps **Save to case** on top: one press files the picture under the collage's
-name and the last folder, its arrow unfolds the name, folder and note, and the export
-size is written under it. **Add pieces** takes the room left and scrolls on its own; the
+(the last pick named on the button and kept in this browser), **Ignore areas**,
+**Straighten** with Draw the line, and **Fit**, which frames every piece, with the zoom
+beside it. Auto-stitch moves every piece at once, draws again three at a time the ones a
+panorama warp reshapes, frames the pieces, and is one Ctrl+Z. A piece it found no overlap
+for stays where it was, outlined, marked *No overlap* and selected for the arrows; its
+message carries Undo, which its arrow keeps after the message goes. The panel keeps
+**Save to case** on top: one press files the picture under the collage's name and the
+last folder, its arrow unfolds the name, folder and note, and the export size is written
+under it. **Add pieces** takes the room left and scrolls on its own; the
 piece in hand sits at the foot (Scale, Rotate, Crop, Unwarp, Front, Back, Remove, or the
 block selected) and keeps its place and height whatever is selected. An empty collage
 says *Add frames from a video, or pictures* on its canvas, with Frames and Images opening
 those lists, or Cut frames in Inspect while no frame is cut.
 
+**The canvas answers the hand.** The mouse wheel zooms toward the pointer a notch at a
+time; on a touchpad two fingers pan and a pinch zooms; a drag on the background pans. The
+arrows nudge the selected piece or block a canvas pixel, ten with Shift, a burst of them
+one undo; Delete removes it.
+
+**Ignore areas paints what a stitch must not match on**, such as a person, a car or a
+watermark. With it on, a drag on a piece paints it red, Alt or **Erase** takes paint off,
+`[` and `]` change the brush and Esc puts it down; **Clear piece**, or *N areas kept out of
+auto-stitch · Clear* under the piece, takes it all off. The paint shows only while the
+brush is out; otherwise a small brush mark on the piece takes it up again. The areas stay
+with the collage (`exclude` on each piece, in the picture the stitch receives) and go with
+the next stitch, never into the saved picture.
+
 **A collage of one video is marked as that video.** When every piece is one video at an
-instant, or a frame saved from it, the panel reads *From channel_departure · 0:01–0:03*,
+instant, or a frame saved from it, or a picture composed from them such as the collage straightened, the panel reads *From channel_departure · 0:01–0:03*,
 and **Mark to geolocate** marks the whole video; its arrow offers the stretch the pieces
 span, or the instant of a single piece. A collage of several sources is a picture: the
 press saves it first when it is not in the case as it stands and marks it whole, and
 saved again, its mark follows the new picture (`POST /scenes/mark`). Marked, or with its
 pieces already in a scene of the video, it says where the scene stands, with
 **Geolocate**, which opens the collage beside the video on the map, and **Make the
-proof**, which opens Inspect's chooser on that scene. A proved scene says Proved and
+proof**, which opens Inspect's chooser on that scene. A press on its scene's time unfolds the moment
+under it: the video looping it in a small player, the pieces' frames as dots on its bar,
+and Inspect's time editor; Apply moves that scene's time alone
+(`PUT /cases/{id}/scenes/{draft}/time`), with Undo, and a time holding none of the pieces
+says the collage leaves the scene. A proved scene says Proved and
 opens its proof. On the server a collage of one video's frames reads back to that video
 like a frame (`engine/scenes.py`), so a proof resting on it alone states its scene.
+
+**Auto-stitch leaves out what is painted out.** Areas brushed out of a piece (a
+passer-by, a car, a caption) are never matched, read on the piece as it is cut, its crop
+included. Frames of one video are matched with the frames filmed just before and after them
+rather than with every frame, which is quicker and keeps a long pan straighter; a frame that
+matches none of them is tried against every piece before it is left in place. Each point of
+a picture answers one point of the other, so two unrelated pictures no longer stitch on
+chance matches. A hazy or flat picture is looked at again for detail before the stitch gives
+up on it, and the same pieces always stitch the same way (`POST /inspect/auto-stitch` with
+`exclude`; each placed piece answers with the `size` it was matched at).
 
 **Straighten lays a bent pan flat.** A pan stitched with its tilt a little off bends a
 level line into a slope or a smile. **Draw the line**, in the bar over the canvas, then click point
