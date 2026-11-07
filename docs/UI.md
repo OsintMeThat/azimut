@@ -1800,7 +1800,9 @@ its left edge. Its tabs keep their place for the session:
   frame of a video, a capture and a frame opened on its own have no such tab.
 - **Adjust**: crop, orientation and tones. A live histogram reads the picture as it
   is shown and says how much of it is pure black or white. Presets (dark scene,
-  haze, text and plates) set the sliders and leave them to move. Denoise, auto
+  haze, text and plates) set the sliders and leave them to move. Brightness goes from black to ×4,
+  neutral at the middle and ×2 at three quarters; its steps stay fine near ×1 and widen
+  towards the end. A saved video is brightened the way its preview is. Denoise, auto
   levels, local contrast and a single colour channel join the sliders; a filter CSS
   cannot preview is rendered by the server a moment after the sliders stop, so a
   frame always reads as it will save. On the video, the same tab turns and tunes the
