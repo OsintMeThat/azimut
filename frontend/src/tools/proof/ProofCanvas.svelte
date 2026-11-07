@@ -11,6 +11,8 @@
     proofStarted,
     openPicker,
     openNewProofDialog,
+    /** What stands in place of an empty composer: a scene of the strip, still to prove. */
+    page = null,
   } = $props();
 </script>
 
@@ -44,7 +46,9 @@
       }}
     ></textarea>
   {/if}
-  {#if !proofHasContent}
+  {#if page}
+    {@render page()}
+  {:else if !proofHasContent}
     <div class="empty overlay-empty">
       <div class="empty-icon"><Icon name="proof" size={42} /></div>
       {#if proofStarted}
