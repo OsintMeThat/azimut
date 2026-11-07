@@ -23,9 +23,10 @@
   // stands on; `onedit(which, time)` hands the time up. A press anywhere else still
   // moves through the clip.
   //
-  // A click on a scene's pin or band, a press that stays where it landed, moves the
-  // clip like any other and names that scene too (`onscene(key)`), which Inspect opens
-  // in its Scenes tab.
+  // A click on a scene's pin, a press that stays where it landed, moves the clip like
+  // any other and names that scene too (`onscene(key)`), which Inspect opens in its
+  // Scenes tab. A click on a band names its scene only while that tab is shown
+  // (`bandsOpen`); otherwise it only moves the clip, as a click anywhere does.
   //
   // The wheel zooms the bar's time about the pointer, from the whole clip down to
   // frames drawn `FRAME_PX` wide, and Shift+wheel or a sideways scroll slides it.
@@ -52,6 +53,7 @@
     onseek,
     onedit,
     onscene,
+    bandsOpen = true,
   } = $props();
 
   const SNAP_PX = 6;
@@ -213,13 +215,15 @@
     return 'start';
   }
 
-  /** The scene a press at `clientX` lands on: a pin within reach, else the shortest band under it. */
+  /** The scene a press at `clientX` lands on: a pin within reach, else the shortest band
+   *  under it while bands open their scene. */
   function sceneUnder(clientX) {
     if (!onscene || !(duration > 0)) return null;
     const rect = track.getBoundingClientRect();
     const x = clientX - rect.left;
     const pin = snapAt(x, rect.width, scenes.filter((s) => s.end == null).map((s) => ({ time: s.start, scene: s.scene })));
     if (pin) return pin.scene;
+    if (!bandsOpen) return null;
     const time = windowTime(x / rect.width, view);
     const bands = scenes.filter((s) => s.end != null && time >= s.start && time < s.end);
     return bands.length ? bands.reduce((a, b) => (b.end - b.start < a.end - a.start ? b : a)).scene : null;

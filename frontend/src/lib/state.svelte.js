@@ -280,6 +280,9 @@ export const uiState = $state({
   sidebarOpen: true,
   sidebarW: loadWidth(), // px, drag-resizable and remembered across reloads
   sidebarView: loadSidebarView(), // 'folders' | 'todo' | 'recent', remembered across reloads
+  // Raised by Inspect on the first scene ever kept: App points at where it waits, once
+  // in this browser (lib/sceneHints.js `todoHintAt`).
+  todoHint: false,
   toasts: [],
   settingsTab: null, // settings section id to open when switching to Settings
   // The guide open over the tools, and what it opened on: a tool, a page or a

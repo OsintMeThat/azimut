@@ -24,7 +24,7 @@
     frameScenes, frameToCapture, frameUses, framesOfScene, pictureHandoff, proofHandoff, scenesAt,
   } from '../lib/sceneFrames.js';
   import { createSceneOffer } from '../lib/sceneOffer.js';
-  import { declineInvite, inviteDeclined, todoHintDue, todoHintGiven } from '../lib/sceneHints.js';
+  import { declineInvite, inviteDeclined, todoHintDue } from '../lib/sceneHints.js';
   import { SceneEdit } from '../lib/sceneEdit.svelte.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import {
@@ -33,7 +33,7 @@
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { createHistory } from '../lib/history.js';
   import { deletedToast } from '../lib/trash.js';
-  import { openInHorizon, openInReverseSearch, openTodo } from '../lib/navigate.js';
+  import { openInHorizon, openInReverseSearch } from '../lib/navigate.js';
   import { offerNote, offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
   import { lookupEntity } from '../lib/catalog.js';
   import PutInNote from '../components/PutInNote.svelte';
@@ -330,11 +330,17 @@
     return true;
   }
 
+  /** The same file under another path too: renamed here, or moved elsewhere. */
+  const sameFile = (a, b) => Boolean(a && b && (a.path === b.path || (a.entity_id && a.entity_id === b.entity_id)));
+
   async function open(item) {
     pickerOpen = false;
     await autosave.flush();
     if (heldUnsaved()) return;
     await ensureOps();
+    // Another file opens on its Scenes tab, a video on the clip itself; the same one
+    // reopened (renamed, cleared, restored) keeps the place it was looked at from.
+    const another = !sameFile(work.source, item);
     closeFile();
     const run = openRun;
     const caseId = caseState.current?.id;
@@ -350,6 +356,7 @@
       probeInfo = probe;
       if (saved) restore(saved, run);
       else seed();
+      if (another) landOnScenes(item);
       savedSignature = signature();
       clipHistory.reset(clipSnapshot());
       if (item.kind === 'video') loadOverview(run);
@@ -1035,7 +1042,8 @@
 
   /**
    * Record the clip as it now stands, and say how to take this step back. The first
-   * scene ever kept here (`kept`) says once that it waits in the To-do too.
+   * scene ever kept here (`kept`) asks the app to point once at the To-do, where it
+   * waits too (`uiState.todoHint`).
    */
   function clipChanged(message, { kept = false } = {}) {
     const after = clipSnapshot();
@@ -1047,11 +1055,7 @@
         if (run === openRun && clipSnapshot() === after) undoClip();
       },
     };
-    if (kept && todoHintDue()) {
-      todoHintGiven();
-      toast(`${message} · Also in the To-do`, 'info', 9000, [{ label: 'Show', onClick: openTodo }, undo]);
-      return;
-    }
+    if (kept && todoHintDue()) uiState.todoHint = true;
     toast(message, 'info', 6000, undo);
   }
 
@@ -1156,7 +1160,8 @@
     goToScene(scene);
   }
 
-  /** A pin or a band pressed on the bar, which has already moved the clip there. */
+  /** A pin pressed on the bar, or a band while the Scenes tab is shown, which has
+   *  already moved the clip there. */
   function pressedOnBar(key) {
     if (!scenes.some((sc) => sc.key === key)) return;
     const there = scenesShown && openRow?.key === key;
@@ -1622,8 +1627,8 @@
 
   // -- the panel ----------------------------------------------------------------------
   // The one press every visit needs stays pinned above the tabs: Capture frame on the
-  // video, Save to case on a frame. The tabs hold the rest, and keep their place for
-  // the session.
+  // video, Save to case on a frame. The tabs hold the rest, and keep their place while
+  // the file stays open; another file opens on its Scenes tab (`landOnScenes`).
   const tabs = $state({ video: 'scenes', frame: 'adjust' });
   const panelHelpers = panelWidth({ key: 'azimut:inspectPanelW', min: 300, max: 560, def: 340, fraction: 0.4 });
   let panelW = $state(panelHelpers.loadWidth());
@@ -1654,6 +1659,18 @@
   const mode = $derived(selected === 'video' ? 'video' : 'frame');
   // The tab in use, or Adjust where it does not exist: a frame of a video has no Scenes.
   const shownTab = $derived(panelTabs.some((t) => t.id === tabs[mode]) ? tabs[mode] : 'adjust');
+
+  /**
+   * A file opened lands on its Scenes tab, whatever tab the last one was left on: a
+   * video on the clip rather than a frame of it, a picture on its own Scenes. A frame of
+   * a video and a capture have none, and keep the tab they had.
+   */
+  function landOnScenes(item) {
+    if (item.kind === 'video') {
+      work.activeFrameId = null;
+      tabs.video = 'scenes';
+    } else if (markablePicture(item)) tabs.frame = 'scenes';
+  }
 
   // -- the strip's invitation ----------------------------------------------------------
   // A video with nothing marked in it asks, in its empty strip, whether it holds several
@@ -1905,6 +1922,7 @@
               editing={sceneOnBar}
               onedit={dragScene}
               onscene={pressedOnBar}
+              bandsOpen={scenesShown}
             />
           {:else if activeFrame?.url}
             <FrameViewer

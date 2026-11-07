@@ -29,7 +29,8 @@
   import { readSolo, splitHash } from './lib/hash.js';
   import { caseShown, installBackButton, showTool } from './lib/backButton.js';
   import { landingFor } from './lib/guide.js';
-  import { openGuide, openIssueReport } from './lib/navigate.js';
+  import { openGuide, openIssueReport, openTodo } from './lib/navigate.js';
+  import { todoHintAt, todoHintGiven } from './lib/sceneHints.js';
   import { listenToGuide } from './lib/guideWindow.js';
   import { openFindExample } from './lib/findExample.js';
   import { leaveFullscreen } from './lib/fullscreen.js';
@@ -40,6 +41,8 @@
   import Wordmark from './components/Wordmark.svelte';
   import CaseSwitcher from './components/CaseSwitcher.svelte';
   import CaseSidebar from './components/CaseSidebar.svelte';
+  import SidebarToggle from './components/SidebarToggle.svelte';
+  import Coachmark from './components/Coachmark.svelte';
   import Toasts from './components/Toasts.svelte';
   import UpdateModal from './components/UpdateModal.svelte';
   import DetectActivity from './components/DetectActivity.svelte';
@@ -256,6 +259,33 @@
   let paletteOpen = $state(false);
   let supportOpen = $state(false);
 
+  // The first scene ever kept points once at where it waits (lib/sceneHints.js): the
+  // sidebar's toggle while it is closed, its To-do tab while it shows another view.
+  // With the To-do on screen, the bars put away or a video full screen, there is
+  // nothing to point at, and a later scene asks again.
+  let sidebarToggle = $state(null);
+  let todoPointer = $state.raw(null); // { anchor, within }
+  $effect(() => {
+    if (!uiState.todoHint) return;
+    untrack(() => {
+      uiState.todoHint = false;
+      const at = bare || document.fullscreenElement ? null : todoHintAt(uiState.sidebarOpen, uiState.sidebarView);
+      const anchor = at === 'toggle'
+        ? sidebarToggle
+        : at === 'tab' ? document.querySelector('aside.sidebar [role="tab"][data-view="todo"]') : null;
+      if (!anchor) return;
+      todoHintGiven();
+      todoPointer = { anchor, within: at === 'tab' ? anchor.closest('aside.sidebar') : null };
+    });
+  });
+  // and goes once what it points at moves: the sidebar opened or shut, another view,
+  // tool or case. Read as one value, so a case reloaded under it is no move.
+  const pointedFrom = $derived(`${uiState.sidebarOpen} ${uiState.sidebarView} ${uiState.tool} ${caseState.current?.id}`);
+  $effect(() => {
+    void pointedFrom;
+    untrack(() => (todoPointer = null));
+  });
+
   // Tools mount lazily on first visit, then stay mounted (hidden via CSS) so
   // unsaved editor state — a half-composed proof, a collage in progress —
   // survives switching tabs to grab another capture or media.
@@ -456,13 +486,8 @@
         <span class="update-dot" aria-label="something to install or update"></span>
       {/if}
     </button>
-    <button
-      class="btn btn-ghost btn-sm"
-      title="Toggle case sidebar"
-      onclick={toggleSidebar}
-    >
-      <Icon name="panelRight" size={16} />
-    </button>
+    <!-- with the accent's dot while it is closed on scenes waiting to be geolocated -->
+    <SidebarToggle bind:button={sidebarToggle} onclick={toggleSidebar} />
   </header>
   {/if}
 
@@ -578,6 +603,19 @@
 {/if}
 <CaseChangeGuard />
 <Toasts />
+{#if todoPointer}
+  <Coachmark
+    anchor={todoPointer.anchor}
+    within={todoPointer.within}
+    text="Your scenes wait here"
+    action="Show"
+    onaction={() => {
+      todoPointer = null;
+      openTodo();
+    }}
+    onclose={() => (todoPointer = null)}
+  />
+{/if}
 
 {#if workspaceStopped}
   <WorkspaceStopped {...workspaceStopped} />

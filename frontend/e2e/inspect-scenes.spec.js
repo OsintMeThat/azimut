@@ -6,8 +6,9 @@ import { STEPS_DURATION, STEPS_FPS, STEPS_WEBM, serveRange } from './video.fixtu
  * The Scenes tab of Inspect, first of its tabs and open on a video: a closed scene
  * writes its kind and time, one is open at a time with its time as it stands, Mark to
  * geolocate sits above the tabs, the empty strip invites, the first scene ever kept
- * says it is in the To-do, and a picture is marked whole and proved by a proof laying
- * it out. `SCENE_SHOTS` names a folder for the pictures of each state.
+ * points once at the To-do, every file opens on its Scenes, and a picture is marked
+ * whole and proved by a proof laying it out. `SCENE_SHOTS` names a folder for the
+ * pictures of each state.
  */
 
 const VIDEO = 'media/steps.webm';
@@ -90,6 +91,11 @@ async function serve(page, { scenes = [], proofs = [], held = {}, viewport = { w
     }
     if (path === `/api/cases/${CASE_ID}/inspect/render-preview`) {
       return route.fulfill({ contentType: 'image/png', body: PIXEL_PNG });
+    }
+    // the To-do's scenes waiting, the clip's that no proof takes up
+    if (path === `/api/cases/${CASE_ID}/scenes/queue`) {
+      const open = server.scenes.map((sc) => row(sc, VIDEO));
+      return json({ files: open.length ? [{ video: VIDEO, title: 'Convoy clip', kind: 'video', scenes: open }] : [], geolocating: null });
     }
     if (path === `/api/cases/${CASE_ID}/scenes`) {
       const file = fileOf(url);
@@ -225,21 +231,148 @@ test('invites in the empty strip of a video with nothing marked, and remembers N
   await expect(invite).toHaveCount(0);
 });
 
-test('says once that the first scene kept is in the To-do too, and Show opens it', async ({ page }) => {
-  await serve(page, { scenes: [] });
+/** Where the coachmark's arrow points, and the box it lies in. */
+async function arrowOf(coach) {
+  const box = await coach.boundingBox();
+  const arrow = await coach.evaluate((node) => parseFloat(getComputedStyle(node).getPropertyValue('--arrow')));
+  return { box, x: box.x + arrow };
+}
+const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+test('points once at the To-do tab from the open sidebar, the toast keeping its words, and Show opens the To-do', async ({ page }) => {
+  const { server } = await serve(page, { scenes: [], viewport: { width: 1280, height: 800 } });
+  const views = page.getByRole('tablist', { name: 'Sidebar view' });
   await page.getByTestId('scene-invite').getByRole('button', { name: 'This moment' }).click();
-  const toast = page.locator('.toast', { hasText: 'Also in the To-do' });
-  await expect(toast).toContainText('Scene kept at 0:00');
-  await expect(page.getByTestId('scene-invite')).toHaveCount(0);
+  // the toast says what was done and offers Undo, nothing more
+  const toast = page.locator('.toast', { hasText: 'Scene kept at 0:00' });
+  await expect(toast).toBeVisible();
+  await expect(toast).not.toContainText('To-do');
+  await expect(toast.getByRole('button')).toHaveText(['Undo']);
   await expect(rows(page)).toHaveCount(1);
-  await shoot(page, 'first-hint');
-  await toast.getByRole('button', { name: 'Show' }).click();
-  await expect(page.getByRole('tablist', { name: 'Sidebar view' }).getByRole('tab', { name: 'To-do' })).toHaveAttribute('aria-selected', 'true');
+
+  const coach = page.locator('.coachmark');
+  await expect(coach).toContainText('Your scenes wait here');
+  await expect(coach.getByRole('button')).toHaveText(['Show', '']);
+  // the work written, the server says so, and the tab gains its count: the arrow stays on it
+  await expect.poll(() => server.saves.at(-1)?.spec?.scenes?.length).toBe(1);
+  await page.evaluate(async ({ caseId, video }) => {
+    const { dispatch } = await import('/src/lib/events.js');
+    dispatch({ type: 'scenes', case_id: caseId, video });
+  }, { caseId: CASE_ID, video: VIDEO });
+  await expect(views.getByRole('tab', { name: /^To-do/ })).toContainText('1');
+  // its arrow on the To-do tab, under it, never over the capture
+  await expect.poll(async () => {
+    const tab = await views.getByRole('tab', { name: /^To-do/ }).boundingBox();
+    return Math.abs((await arrowOf(coach)).x - (tab.x + tab.width / 2));
+  }).toBeLessThan(2);
+  const todo = await views.getByRole('tab', { name: /^To-do/ }).boundingBox();
+  const { box } = await arrowOf(coach);
+  expect(box.y).toBeGreaterThan(todo.y + todo.height);
+  expect(box.x + box.width).toBeLessThanOrEqual(1280);
+  expect(overlaps(box, await page.locator('.pinned').boundingBox())).toBe(false);
+  // it takes no focus, so the work goes on under it
+  expect(await coach.evaluate((node) => node.contains(document.activeElement))).toBe(false);
+  await shoot(page, 'coach-tab');
+
+  await coach.getByRole('button', { name: 'Show' }).click();
+  await expect(views.getByRole('tab', { name: /^To-do/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(coach).toHaveCount(0);
 
   // never again in this browser
-  await page.keyboard.press('Escape');
+  await views.getByRole('tab', { name: 'Folders' }).click();
   await page.locator('.pinned').getByRole('button', { name: /^Mark to geolocate/ }).click();
-  await expect(page.locator('.toast', { hasText: 'Scene kept at 0:00' }).last()).not.toContainText('Also in the To-do');
+  await expect(page.locator('.toast', { hasText: 'Scene kept at 0:00' }).last()).toBeVisible();
+  await expect(coach).toHaveCount(0);
+  await page.reload();
+  await openFile(page, 'Convoy clip');
+  await page.locator('.pinned').getByRole('button', { name: /^Mark to geolocate/ }).click();
+  await expect(page.locator('.toast', { hasText: 'Scene kept at 0:00' })).toBeVisible();
+  await expect(coach).toHaveCount(0);
+});
+
+test('points at the sidebar’s toggle while the sidebar is closed, follows it on a resize, and goes on a press elsewhere', async ({ page }) => {
+  const { server } = await serve(page, { scenes: [], viewport: { width: 1280, height: 800 } });
+  const toggle = page.locator('.topbar').getByTitle(/^Toggle case sidebar/);
+  await toggle.click();
+  await expect(page.locator('aside.sidebar')).toHaveCount(0);
+  await page.keyboard.press('s');
+  // the work written, the server says so, as it does after every save
+  await expect.poll(() => server.saves.at(-1)?.spec?.scenes?.length).toBe(1);
+  await page.evaluate(async ({ caseId, video }) => {
+    const { dispatch } = await import('/src/lib/events.js');
+    dispatch({ type: 'scenes', case_id: caseId, video });
+  }, { caseId: CASE_ID, video: VIDEO });
+  const coach = page.locator('.coachmark');
+  await expect(coach).toContainText('Your scenes wait here');
+  const under = async () => {
+    const button = await toggle.boundingBox();
+    const { box, x } = await arrowOf(coach);
+    expect(Math.abs(x - (button.x + button.width / 2))).toBeLessThan(2);
+    expect(box.y).toBeGreaterThan(button.y + button.height);
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize().width - 8);
+    // clear of Capture frame and Mark to geolocate, and of the file's own buttons
+    expect(overlaps(box, await page.locator('.pinned').boundingBox())).toBe(false);
+    for (const name of ['Clear work', 'Change file']) {
+      expect(overlaps(box, await page.getByRole('button', { name }).boundingBox())).toBe(false);
+    }
+  };
+  await under();
+  // the dot on the toggle, once the queue says the scene waits
+  await expect(toggle.locator('.waiting-dot')).toBeVisible();
+  await expect(toggle).toHaveAttribute('title', 'Toggle case sidebar · a scene to geolocate in the To-do');
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.mouse.move(400, 500);
+  await shoot(page, 'coach-toggle');
+
+  await page.setViewportSize({ width: 1100, height: 760 });
+  await expect.poll(async () => {
+    const button = await toggle.boundingBox();
+    const { x } = await arrowOf(coach);
+    return Math.abs(x - (button.x + button.width / 2));
+  }).toBeLessThan(2);
+  await under();
+
+  // a press anywhere else, which does its own work too
+  await tab(page, 'Info').click();
+  await expect(coach).toHaveCount(0);
+  await expect(tab(page, 'Info')).toHaveAttribute('aria-selected', 'true');
+  // the toggle opens the sidebar as before, the To-do counting what the dot stood for
+  await toggle.click();
+  await expect(toggle.locator('.waiting-dot')).toHaveCount(0);
+  await expect(page.getByRole('tablist', { name: 'Sidebar view' }).getByRole('tab', { name: /^To-do/ })).toContainText('1');
+});
+
+test('lets the coachmark go on ✕, on Escape and by itself, and draws it still for reduced motion', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await serve(page, { scenes: [] });
+  const coach = page.locator('.coachmark');
+  // asked again as Inspect asks, the pointer resting away from where it lands
+  const again = async () => {
+    await page.mouse.move(400, 500);
+    await page.evaluate(async () => {
+      const { uiState } = await import('/src/lib/state.svelte.js');
+      uiState.todoHint = true;
+    });
+    await expect(coach).toBeVisible();
+  };
+  await page.keyboard.press('s');
+  await expect(coach).toBeVisible();
+  expect(await coach.evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
+  await coach.getByRole('button', { name: 'Close' }).click();
+  await expect(coach).toHaveCount(0);
+  // the scene kept all the same
+  await expect(rows(page)).toHaveCount(1);
+
+  await again();
+  await page.keyboard.press('Escape');
+  await expect(coach).toHaveCount(0);
+
+  await page.clock.install();
+  await again();
+  await page.clock.runFor(9000);
+  await expect(coach).toBeVisible();
+  await page.clock.runFor(1500);
+  await expect(coach).toHaveCount(0);
 });
 
 test('marks a picture whole, and shows the proof that lays it out', async ({ page }) => {
@@ -266,17 +399,46 @@ test('marks a picture whole, and shows the proof that lays it out', async ({ pag
   await shoot(page, 'picture-proved');
 });
 
-test('opens the Scenes tab on a pin or a band pressed on the bar, from any tab', async ({ page }) => {
+test('opens the Scenes tab on a pin pressed on the bar from any tab, and on a band only from Scenes', async ({ page }) => {
   await serve(page, { scenes: THREE() });
-  await tab(page, 'Info').click();
+  await tab(page, 'Adjust').click();
   const bar = await page.locator('.track').boundingBox();
   const at = (time) => [bar.x + (bar.width * time) / STEPS_DURATION, bar.y + bar.height / 2];
+  // a band pressed from Adjust moves the clip there, and Adjust stays
   await page.mouse.click(...at(0.6));
-  await expect(tab(page, /^Scenes/)).toHaveAttribute('aria-selected', 'true');
-  await expect(rows(page).nth(1).getByRole('textbox', { name: 'Scene label' })).toHaveValue('Road bridge?');
+  await expect(page.locator('.player-time .now')).toHaveText(/^0:00\.(5|6)/);
+  await expect(tab(page, 'Adjust')).toHaveAttribute('aria-selected', 'true');
+  // a pin opens its scene from there
   await page.mouse.click(...at(1));
+  await expect(tab(page, /^Scenes/)).toHaveAttribute('aria-selected', 'true');
   await expect(rows(page).nth(2).getByRole('radio', { name: 'Instant' })).toHaveAttribute('aria-checked', 'true');
   await expect(page.locator('.player-time .now')).toHaveText('0:01.000');
+  // on the Scenes tab, a band opens its own
+  await page.mouse.click(...at(0.6));
+  await expect(rows(page).nth(1).getByRole('textbox', { name: 'Scene label' })).toHaveValue('Road bridge?');
+});
+
+test('opens every file on its Scenes tab, whatever tab the last was left on', async ({ page }) => {
+  await serve(page, { scenes: THREE() });
+  await tab(page, 'Info').click();
+  await page.getByRole('button', { name: 'Change file' }).click();
+  await page.getByRole('dialog').locator('.card', { hasText: 'Market' }).click();
+  await expect(page.locator('.file-name')).toHaveValue('Market');
+  await expect(tab(page, /^Scenes/)).toHaveAttribute('aria-selected', 'true');
+  await tab(page, 'Analyze').click();
+  // a capture has no Scenes, and keeps the tab it had
+  await page.getByRole('button', { name: 'Change file' }).click();
+  await page.getByRole('dialog').locator('.card', { hasText: 'Bridge from above' }).click();
+  await expect(page.locator('.file-name')).toHaveValue('Bridge from above');
+  await expect(tab(page, 'Analyze')).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('button', { name: 'Change file' }).click();
+  await page.getByRole('dialog').locator('.card', { hasText: 'Convoy clip' }).click();
+  await expect(page.locator('.file-name')).toHaveValue('Convoy clip');
+  await expect(tab(page, /^Scenes/)).toHaveAttribute('aria-selected', 'true');
+  // switching while it stays open is as it was
+  await tab(page, 'Moments').click();
+  await page.keyboard.press('ArrowRight');
+  await expect(tab(page, /^Moments/)).toHaveAttribute('aria-selected', 'true');
 });
 
 test('keeps a scene with S whichever row is open, and folds the row with Escape', async ({ page }) => {

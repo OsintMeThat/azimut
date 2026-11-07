@@ -517,11 +517,15 @@ svg[id^='azimut-mermaid-'] .label {
 
    It hangs off the top-right corner rather than sitting inside: on a primary
    button the inside is amber on amber, and on any button with a label the dot
-   lands on the words. */
+   lands on the words.
+
+   The sidebar's toggle wears the same dot, under its own name, while the sidebar is
+   closed on scenes waiting to be geolocated. */
 .dotted {
   position: relative;
 }
-.update-dot {
+.update-dot,
+.waiting-dot {
   position: absolute;
   top: -3px;
   right: -3px;

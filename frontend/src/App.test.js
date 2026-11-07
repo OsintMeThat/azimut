@@ -84,3 +84,27 @@ describe('the tab strip', () => {
     expect(readFileSync(new URL('./tools/PostComposer.svelte', import.meta.url), 'utf8')).not.toContain('<h2>Geo Report</h2>');
   });
 });
+
+describe('the sidebar’s toggle and the first scene kept', () => {
+  it('is the one toggle, with its dot, last in the top bar', () => {
+    expect(markup).toContain('<SidebarToggle bind:button={sidebarToggle} onclick={toggleSidebar} />');
+    expect(markup).not.toContain('title="Toggle case sidebar"');
+    expect(markup.indexOf('<SidebarToggle')).toBeLessThan(markup.indexOf('</header>'));
+    expect(markup.indexOf('<SidebarToggle')).toBeGreaterThan(markup.indexOf('data-guide="start.settings"'));
+  });
+
+  it('points once at the toggle or the To-do tab, Show opening the To-do', () => {
+    expect(source).toContain('todoHintAt(uiState.sidebarOpen, uiState.sidebarView)');
+    expect(source).toContain('aside.sidebar [role="tab"][data-view="todo"]');
+    // given only once it has somewhere to point, so a later scene asks again
+    expect(source.indexOf('if (!anchor) return;')).toBeLessThan(source.indexOf('todoHintGiven();'));
+    expect(source).toContain('const at = bare || document.fullscreenElement ? null');
+    expect(markup).toMatch(/<Coachmark[\s\S]{0,120}text="Your scenes wait here"[\s\S]{0,40}action="Show"/);
+    expect(markup).toMatch(/onaction=\{\(\) => \{\s*todoPointer = null;\s*openTodo\(\);/);
+  });
+
+  it('lets it go once what it points at moves', () => {
+    expect(source).toContain('const pointedFrom = $derived(`${uiState.sidebarOpen} ${uiState.sidebarView} ${uiState.tool} ${caseState.current?.id}`);');
+    expect(source).toMatch(/void pointedFrom;\s*untrack\(\(\) => \(todoPointer = null\)\);/);
+  });
+});

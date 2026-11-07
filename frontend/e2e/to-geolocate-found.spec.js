@@ -3,8 +3,8 @@ import { awaitMapReady, CASE_ID, installAppFixture } from './app.fixture.js';
 import { STEPS_DURATION, STEPS_FPS, STEPS_WEBM, serveRange } from './video.fixture.js';
 
 /**
- * To geolocate found from anywhere: a count on the sidebar's To-do tab, Go to's entry,
- * and pictures marked from the Media Library. A picture walks the same road as a
+ * To geolocate found from anywhere: a count on the sidebar's To-do tab, a dot on its
+ * toggle while it is closed, Go to's entry, and pictures marked from the Media Library. A picture walks the same road as a
  * video's scene, its row says Whole picture, Geolocate holds the picture over the map
  * and the pill names it.
  */
@@ -105,6 +105,75 @@ const hearNudges = (page) => page.addInitScript(() => {
 
 const sidebarOf = (page) => page.locator('aside.sidebar');
 const todoTab = (page) => sidebarOf(page).getByRole('tab', { name: /^To-do/ });
+const toggleOf = (page) => page.locator('.topbar').getByTitle(/^Toggle case sidebar/);
+const SHOTS = process.env.SCENE_SHOTS;
+
+/** A picture of the top bar's right end, dark and light, when a folder is named for them. */
+async function shootBar(page, name) {
+  if (!SHOTS) return;
+  const { width } = page.viewportSize();
+  const clip = { x: width - 520, y: 0, width: 520, height: 120 };
+  const theme = (wanted) => page.evaluate(async (which) => {
+    const { setTheme } = await import('/src/lib/state.svelte.js');
+    setTheme(which);
+  }, wanted);
+  await page.mouse.move(700, 500);
+  await page.screenshot({ path: `${SHOTS}/${name}-dark.png`, clip });
+  await page.screenshot({ path: `${SHOTS}/${name}-dark-full.png` });
+  await theme('light');
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: `${SHOTS}/${name}-light.png`, clip });
+  await page.screenshot({ path: `${SHOTS}/${name}-light-full.png` });
+  await theme('dark');
+  await page.waitForTimeout(350);
+}
+
+test('the sidebar’s toggle wears a dot while it is closed on scenes waiting, the To-do counting them once open', async ({ page }) => {
+  const { fixture, server } = await openCase(page, [PASSAGE, INSTANT, row(VIDEO, 'sc_3', 40, null, 'Gone', { state: 'abandoned' })]);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/#board');
+  await expect(sidebarOf(page)).toHaveCount(0);
+  const toggle = toggleOf(page);
+  await expect(toggle.locator('.waiting-dot')).toBeVisible();
+  await expect(toggle).toHaveAttribute('title', 'Toggle case sidebar · scenes to geolocate in the To-do');
+  expect(server.reads).toBe(1);
+  await shootBar(page, 'toggle-dot');
+
+  // pressed, the sidebar opens as it always did and its To-do tab says the rest
+  await toggle.click();
+  await expect(sidebarOf(page)).toBeVisible();
+  await expect(toggle.locator('.waiting-dot')).toHaveCount(0);
+  await expect(toggle).toHaveAttribute('title', 'Toggle case sidebar');
+  await expect(todoTab(page)).toHaveAccessibleName('To-do, 2 scenes to geolocate');
+  // the number was already in hand
+  expect(server.reads).toBe(1);
+  await toggle.click();
+  await expect(toggle.locator('.waiting-dot')).toBeVisible();
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('with the sidebar closed, an autosave asks the file’s scenes alone, as an open sidebar does', async ({ page }) => {
+  await hearNudges(page);
+  const { server } = await openCase(page);
+  await page.goto('/#board');
+  const toggle = toggleOf(page);
+  await expect(toggle.locator('.waiting-dot')).toBeVisible();
+  expect(server.reads).toBe(1);
+
+  for (let save = 0; save < 3; save += 1) {
+    await page.evaluate((video) => window.nudge({ type: 'scenes', case_id: 'browser-test', video }), VIDEO);
+    await expect.poll(() => server.fileReads.length).toBe(save + 1);
+  }
+  await page.waitForTimeout(500);
+  expect(server.reads).toBe(1);
+
+  // every scene given up elsewhere: the file's answer differs, the queue is read, the dot goes
+  for (const one of server.scenes) Object.assign(one, { state: 'abandoned', abandoned: { reason: '', at: 'now' } });
+  await page.evaluate((video) => window.nudge({ type: 'scenes', case_id: 'browser-test', video }), VIDEO);
+  await expect(toggle.locator('.waiting-dot')).toHaveCount(0);
+  await expect(toggle).toHaveAttribute('title', 'Toggle case sidebar');
+  expect(server.reads).toBe(2);
+});
 
 test('the To-do tab counts the scenes waiting, and says nothing when there are none', async ({ page }) => {
   const { fixture, server } = await openCase(page, [PASSAGE, INSTANT, row(VIDEO, 'sc_3', 40, null, 'Gone', { state: 'abandoned' })]);
@@ -177,6 +246,11 @@ test('a case with no scene shows the tab as it always was', async ({ page }) => 
   await page.goto('/#files');
   await expect(todoTab(page)).toHaveAccessibleName('To-do');
   await expect(todoTab(page)).toHaveText('To-do');
+  // and the toggle, the sidebar closed
+  await toggleOf(page).click();
+  await expect(sidebarOf(page)).toHaveCount(0);
+  await expect(toggleOf(page)).toHaveAttribute('title', 'Toggle case sidebar');
+  await expect(page.locator('.topbar .waiting-dot')).toHaveCount(0);
   fixture.expectNoUnexpectedRequests();
 });
 
