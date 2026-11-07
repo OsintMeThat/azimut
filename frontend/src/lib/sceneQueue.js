@@ -38,9 +38,31 @@ export function queueMark(scene) {
 /** `1 capture`, `3 captures`. */
 export const captureWords = (n) => (n === 1 ? '1 capture' : `${n} captures`);
 
+/** How many captures a scene holds: the number the server's last nudge gave, until
+ *  its rows are read again (`captureCount`, `lib/geolocating.svelte.js`), else its list's. */
+export const captureCount = (scene) =>
+  Number.isInteger(scene?.captureCount) ? scene.captureCount : (scene?.captures?.length ?? 0);
+
+/**
+ * A scene as a `geolocating` nudge leaves it, before the server is read again: the
+ * capture it names attached, and the number it says the scene now holds kept as
+ * `captureCount` when the list says otherwise (`api/events.py`). A scene still to
+ * geolocate is in progress from its first capture.
+ */
+export function gatheredScene(scene, event) {
+  const next = { ...scene, captures: [...(scene?.captures ?? [])] };
+  delete next.captureCount;
+  const path = event?.capture;
+  if (typeof path === 'string' && path && !next.captures.includes(path)) next.captures.push(path);
+  const told = Number.isInteger(event?.captures) && event.captures >= 0 ? event.captures : null;
+  if (told != null && told !== next.captures.length) next.captureCount = told;
+  if ((told ?? next.captures.length) > 0 && next.state === 'todo') next.state = 'progress';
+  return next;
+}
+
 /** A scene's state as its row says it; `live` is the one being geolocated. */
 export function queueState(scene, live = false) {
-  const n = scene?.captures?.length ?? 0;
+  const n = captureCount(scene);
   if (live) return n ? `Geolocating · ${captureWords(n)}` : 'Geolocating';
   if (scene?.state === 'progress' && n) return `In progress · ${captureWords(n)}`;
   return 'To geolocate';

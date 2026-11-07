@@ -81,7 +81,11 @@
     !!scene && scene.kind === 'draft'
       && (geolocating.caseId === caseId ? geolocating.scene?.id === scene.id && geolocating.scene?.video === file : listing?.geolocating === scene.id),
   );
-  const liveScene = $derived(live && geolocating.scene?.id === scene?.id ? { ...scene, captures: geolocating.scene.captures ?? scene.captures } : scene);
+  const liveScene = $derived(
+    live && geolocating.scene?.id === scene?.id
+      ? { ...scene, captures: geolocating.scene.captures ?? scene.captures, captureCount: geolocating.scene.captureCount }
+      : scene,
+  );
 
   const period = $derived(
     times.length ? (times[0] === times.at(-1) ? shortClock(times[0]) : spanLabel(times[0], times.at(-1))) : '',

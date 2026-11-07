@@ -3,6 +3,7 @@
   import Icon from '../../components/Icon.svelte';
   import SceneTimeEditor from '../../components/SceneTimeEditor.svelte';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
+  import { captureCount } from '../../lib/sceneQueue.js';
   import {
     PROGRESS, SCENE_LABEL_MAX, isAbandoned, isWholeVideo, sceneColorAt, scenePassage, sceneTime, sceneTitle, sceneWhen,
     shortClock, spanLabel,
@@ -141,7 +142,7 @@
 
   /** Where a scene still to prove stands, in a few words. */
   function standing(sc) {
-    const count = sc.captures?.length ?? 0;
+    const count = captureCount(sc);
     const captures = count === 1 ? '1 capture' : `${count} captures`;
     if (sc.geolocating) return count ? `Geolocating · ${captures}` : 'Geolocating';
     return sc.state === PROGRESS ? `In progress · ${captures}` : 'To geolocate';

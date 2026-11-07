@@ -357,3 +357,31 @@ test('keeps the pill whole and clear of the map at 1280 px', async ({ page }) =>
   await expect(pill.getByRole('button', { name: 'Make the proof' })).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/satellite-1280.png` });
 });
+
+test('makes the proof when the extension\'s map panel asks, from whichever tool is open', async ({ page }) => {
+  const { server } = await openCase(page);
+  await page.goto('/#files');
+  await expect(page).toHaveURL(/#files/);
+  // what the extension's bridge posts into this tab when Make the proof is pressed over Google Maps
+  const answer = await page.evaluate(async (scene) => {
+    const heard = new Promise((resolve) => {
+      window.addEventListener('message', function onMessage(event) {
+        if (event.data?.type !== 'scene-proof-result' || event.data.id !== 'scene-1-1') return;
+        window.removeEventListener('message', onMessage);
+        resolve(event.data);
+      });
+    });
+    window.postMessage({ channel: 'azimut-capture-ext', type: 'scene-proof', id: 'scene-1-1', scene }, location.origin);
+    return heard;
+  }, { caseId: CASE_ID, video: VIDEO, draft: 'sc_2', id: 'handoff-1' });
+  expect(answer).toMatchObject({ ok: true });
+  await expect(page).toHaveURL(/#inspect/);
+  const chooser = page.getByRole('dialog', { name: 'Make the proof' });
+  await expect(chooser).toBeVisible();
+  await expect(chooser.locator('.scene-line')).toHaveText('0:01');
+  await expect(chooser.getByRole('checkbox', { name: 'Capture Bridge from above' })).toBeChecked();
+  // nothing was written for it: the chooser asks first
+  expect(server.frameSaves).toHaveLength(0);
+  expect(server.calls).not.toContain('PUT geolocating');
+  await chooser.screenshot({ path: '/tmp/claude-1000/m2h/shots/app-chooser-from-extension-dark.png' });
+});

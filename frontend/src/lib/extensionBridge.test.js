@@ -268,3 +268,70 @@ describe('a map tab on the linked views', () => {
     }
   });
 });
+
+describe('a map panel’s Make the proof, handed to the page', () => {
+  const SCENE = { caseId: 'case-1', video: 'media/walk.mp4', draft: 'sc_2', id: 'h-1' };
+
+  /** The bridge injected, and a way to hand it what the worker hands it. */
+  function handing() {
+    const chrome = makeChrome();
+    inject(chrome);
+    const listeners = chrome.runtime.onMessage.addListener.mock.calls.map(([cb]) => cb);
+    return (msg) => {
+      const posted = [];
+      const spy = vi.spyOn(window, 'postMessage').mockImplementation((d) => posted.push(d));
+      let answer;
+      const answered = new Promise((resolve) => (answer = resolve));
+      const kept = listeners.map((cb) => cb(msg, {}, answer));
+      spy.mockRestore();
+      return { posted, answered, kept };
+    };
+  }
+
+  it('posts the scene to the page and gives the worker the page’s answer', async () => {
+    const hand = handing();
+    const { posted, answered, kept } = hand({ type: 'scene-proof', scene: SCENE });
+    // the channel stays open for an answer that comes later
+    expect(kept).toContain(true);
+    const sent = posted.find((m) => m.type === 'scene-proof');
+    expect(sent).toMatchObject({ channel: CHANNEL, scene: SCENE });
+    await fromPage({ type: 'scene-proof-result', id: sent.id, ok: true });
+    expect(await answered).toEqual({ ok: true });
+  });
+
+  it('carries a refusal back as one, so the worker does not ask again', async () => {
+    const hand = handing();
+    const { posted, answered } = hand({ type: 'scene-proof', scene: SCENE });
+    const sent = posted.find((m) => m.type === 'scene-proof');
+    await fromPage({ type: 'scene-proof-result', id: 'someone-else', ok: true });
+    await fromPage({ type: 'scene-proof-result', id: sent.id, ok: false, refused: true, error: 'a map window of Azimut makes no proof' });
+    expect(await answered).toEqual({ ok: false, refused: true, error: 'a map window of Azimut makes no proof' });
+  });
+
+  it('says the page did not answer when it stays silent, as one still loading does', async () => {
+    vi.useFakeTimers();
+    try {
+      const hand = handing();
+      const { answered } = hand({ type: 'scene-proof', scene: SCENE });
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(await answered).toEqual({ ok: false, error: 'Azimut did not answer' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('takes it from the worker only: a page asking for it reaches nothing', async () => {
+    const sendMessage = vi.fn(async () => ({ ok: true }));
+    inject(makeChrome(sendMessage));
+    const posted = await fromPage({ type: 'scene-proof', id: 'x', scene: SCENE });
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(posted).toEqual([]);
+  });
+
+  it('leaves other messages from the worker alone', () => {
+    const hand = handing();
+    const { posted, kept } = hand({ type: 'something-else' });
+    expect(posted).toEqual([]);
+    expect(kept).not.toContain(true);
+  });
+});

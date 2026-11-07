@@ -7,7 +7,8 @@
  *     answer for later checks);
  *  2. relays the app's requests to the background worker and hands its answer
  *     back — capture, publish, reverse search, and the two the update
- *     button needs.
+ *     button needs — and the one the worker hands the app: a map panel's
+ *     Make the proof.
  *
  * The app keeps all judgment: registration, cropping, filing. The bridge
  * never touches the backend and never sees the pairing token — the app files
@@ -49,6 +50,27 @@
   // app can say "you're set — press Capture again".
   api.runtime.onMessage.addListener((msg) => {
     if (msg?.type === "app-activated" && current()) post({ type: "activated" });
+  });
+
+  // A map panel's Make the proof, handed over by the worker (`background.js`,
+  // `scene-proof`): the scene goes to the page, and the page's answer back. It comes
+  // from the worker only, never from the page, which is why it is not a relay below.
+  // A page still loading says nothing, and the worker asks again.
+  const ANSWER_MS = 1500;
+  const answers = new Map(); // what each scene handed over waits to hear back
+  let handed = 0;
+  api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type !== "scene-proof" || !current()) return false;
+    const id = `scene-${generation}-${++handed}`;
+    const timer = setTimeout(() => reply({ ok: false, error: "Azimut did not answer" }), ANSWER_MS);
+    function reply(answer) {
+      clearTimeout(timer);
+      answers.delete(id);
+      sendResponse(answer);
+    }
+    answers.set(id, reply);
+    post({ type: "scene-proof", id, scene: msg.scene });
+    return true; // answered once the page has
   });
 
   // What the app may ask for, and what the answer is called coming back. The
@@ -140,6 +162,13 @@
     }
     if (msg.type === "map-link") {
       onLink(msg);
+      return;
+    }
+    if (msg.type === "scene-proof-result") {
+      const taken = msg.ok === true;
+      answers.get(msg.id)?.(
+        taken ? { ok: true } : { ok: false, refused: msg.refused === true, error: String(msg.error || "Azimut refused") }
+      );
       return;
     }
 

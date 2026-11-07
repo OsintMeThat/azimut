@@ -17,6 +17,8 @@
   import { api } from './lib/api.js';
   import { updateBadges } from './lib/staleness.js';
   import { startEvents, onEvent } from './lib/events.js';
+  import { onSceneProof } from './lib/extBridge.js';
+  import { takeSceneProof } from './lib/extSceneProof.js';
   import {
     CASE_WORKSPACE,
     HOME_WORKSPACE,
@@ -401,6 +403,9 @@
   onEvent('saved', (ev) => {
     if (caseState.current?.id === ev.case_id) reloadCase();
   });
+  // Make the proof, pressed on the extension's map panel: this tab is brought to the
+  // front and opens Inspect's chooser on the scene; a map window leaves it to the main tab.
+  onDestroy(onSceneProof((scene) => takeSceneProof(scene, { solo })));
 </script>
 
 <div class="shell">

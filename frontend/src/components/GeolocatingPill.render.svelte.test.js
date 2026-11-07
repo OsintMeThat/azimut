@@ -138,6 +138,31 @@ describe('the pill', () => {
     expect(toast).not.toHaveBeenCalled();
   });
 
+  it('steps up on the server’s word that a capture was gathered, before it is read again', async () => {
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: SCENE });
+    await show();
+    const count = () => target.querySelector('[data-testid="geolocating-count"]');
+    const two = { ...SCENE, captures: ['media/cap-1.png', 'media/cap-2.png'] };
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: two });
+    calls.length = 0;
+    dispatch({ type: 'geolocating', case_id: 'c1', video: SCENE.video, draft: SCENE.id, capture: 'media/cap-2.png', captures: 2 });
+    flushSync();
+    // nothing read yet, and the pill says it already
+    expect(calls).toEqual(['GET /api/cases/c1/geolocating']);
+    expect(count().textContent.trim()).toBe('2');
+    expect(count().classList.contains('bump')).toBe(true);
+    expect(count().getAttribute('aria-label')).toBe('2 captures');
+    await settle();
+    expect(count().textContent.trim()).toBe('2');
+    // and it goes the moment it ends
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: null });
+    dispatch({ type: 'geolocating', case_id: 'c1', video: null, draft: null });
+    flushSync();
+    expect(pill()).toBeNull();
+    await settle();
+    expect(pill()).toBeNull();
+  });
+
   it('reads it again when the case reloads while one is held, as a capture reloads it', async () => {
     answers.set('GET /api/cases/c1/geolocating', { geolocating: SCENE });
     await show();

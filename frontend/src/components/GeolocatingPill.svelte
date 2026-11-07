@@ -3,7 +3,8 @@
    * The top bar's word on the scene the open case is geolocating, from every tool:
    * its time, its label and the captures gathered for it so far. Every capture filed
    * meanwhile is gathered for it on the server, the extension's included, so the
-   * count is all that moves here, with a short pulse when it does. A dot in the
+   * count is all that moves here, with a short pulse when it does, on the server's
+   * word and before it is read again (`lib/geolocating.svelte.js`). A dot in the
    * scene's colour, the one Inspect's bar and the reference window draw it in, ties
    * the three together (`order`, `lib/scenes.sceneColorAt`). Its label goes
    * back to the scene in Inspect, Make the proof opens Inspect's chooser on it, and ✕
@@ -16,7 +17,7 @@
   import { geolocating, readGeolocating, stopGeolocating } from '../lib/geolocating.svelte.js';
   import { GEOLOCATING_HELP as HELP } from '../lib/geolocatingHelp.js';
   import { sceneColorAt } from '../lib/scenes.js';
-  import { isPicture, queueTime } from '../lib/sceneQueue.js';
+  import { captureCount, isPicture, queueTime } from '../lib/sceneQueue.js';
 
   const held = $derived(
     geolocating.caseId && geolocating.caseId === caseState.current?.id ? geolocating.scene : null,
@@ -24,7 +25,7 @@
   // a picture says Whole picture where a video's scene says its time
   const time = $derived(held ? queueTime({ start: held.start, end: held.end, file_kind: held.file_kind }) : '');
   const picture = $derived(isPicture(held));
-  const count = $derived(held?.captures?.length ?? 0);
+  const count = $derived(captureCount(held));
   const file = $derived(held ? String(held.video).split('/').pop() : '');
   const color = $derived(held ? sceneColorAt(held.order) : null);
   // a narrow bar drops the word and the label; the whole line stays on the pill

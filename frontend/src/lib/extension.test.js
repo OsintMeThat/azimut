@@ -841,6 +841,140 @@ describe('handle: ext-reload', () => {
   });
 });
 
+/**
+ * Make the proof, pressed on a map panel's pill: the app's own tab comes to the front
+ * and is handed the scene (`bridge.js` takes it to the page), or one is opened at the
+ * paired address and handed it once it answers. Nothing is written on the way.
+ */
+describe('handle: scene-proof (a map panel making the proof)', () => {
+  const SCENE = { caseId: 'case-1', video: 'media/walk.mp4', draft: 'sc_2' };
+  const MAP = { tab: { id: 40, url: 'https://www.google.com/maps/@50,30,15z', windowId: 1 } };
+  const APP = (id, url, extra = {}) => ({ id, url, windowId: 2, lastAccessed: 100, ...extra });
+
+  function proofChrome(tabs = [], answers = () => ({ ok: true })) {
+    const chrome = makeChrome();
+    chrome.tabs.query = vi.fn(async () => tabs);
+    chrome.tabs.update = vi.fn(async () => ({}));
+    chrome.windows = { update: vi.fn(async () => ({})) };
+    chrome.tabs.sendMessage = vi.fn(async (tabId, msg) => answers(tabId, msg));
+    chrome.scripting.executeScript = vi.fn(async () => []);
+    return chrome;
+  }
+
+  /** The worker loaded, its start-up errands out of the way. */
+  async function worker(chrome) {
+    const loaded = load({ chrome });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    chrome.scripting.executeScript.mockClear();
+    return loaded;
+  }
+
+  it('brings the app’s tab to the front and hands it the scene, once', async () => {
+    const chrome = proofChrome([APP(5, 'http://127.0.0.1:8477/#satellite')]);
+    const { handle } = await worker(chrome);
+    const answer = await handle({ type: 'scene-proof', scene: SCENE }, MAP);
+    expect(answer).toEqual({ ok: true });
+    expect(chrome.tabs.update).toHaveBeenCalledWith(5, { active: true });
+    expect(chrome.windows.update).toHaveBeenCalledWith(2, { focused: true });
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledTimes(1);
+    const [tabId, msg] = chrome.tabs.sendMessage.mock.calls[0];
+    expect(tabId).toBe(5);
+    expect(msg).toMatchObject({ type: 'scene-proof', scene: SCENE });
+    // named, so a second ask of the same hand-off opens nothing twice
+    expect(msg.scene.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+    // nothing of the case is fetched or written for it
+    expect(chrome.notifications.create).not.toHaveBeenCalled();
+  });
+
+  it('picks the paired app’s main tab used last, never a map window or another program', async () => {
+    const chrome = proofChrome([
+      APP(1, 'http://127.0.0.1:3000/', { lastAccessed: 900 }),
+      APP(2, 'http://127.0.0.1:8477/#satellite?solo=1&case=case-1&w=2', { lastAccessed: 800 }),
+      APP(3, 'http://localhost:8477/#inspect', { lastAccessed: 300 }),
+      APP(4, 'http://127.0.0.1:8477/#files', { lastAccessed: 200 }),
+    ]);
+    const { handle } = await worker(chrome);
+    await handle({ type: 'scene-proof', scene: SCENE }, MAP);
+    expect(chrome.tabs.update).toHaveBeenCalledWith(3, { active: true });
+    expect(chrome.tabs.sendMessage.mock.calls.map(([id]) => id)).toEqual([3]);
+  });
+
+  it('asks again while the tab says nothing, then puts a fresh bridge on it', async () => {
+    let asked = 0;
+    const chrome = proofChrome([APP(5, 'http://127.0.0.1:8477/')], () => {
+      asked += 1;
+      if (asked < 3) throw new Error('Could not establish connection. Receiving end does not exist.');
+      return { ok: true };
+    });
+    const { handle } = await worker(chrome);
+    const answer = await handle({ type: 'scene-proof', scene: SCENE }, MAP);
+    expect(answer).toEqual({ ok: true });
+    expect(chrome.scripting.executeScript).toHaveBeenCalledWith({ target: { tabId: 5 }, files: ['bridge.js'] });
+    // the same hand-off each time
+    expect(new Set(chrome.tabs.sendMessage.mock.calls.map(([, msg]) => msg.scene.id)).size).toBe(1);
+  });
+
+  it('says so, here and in a notification, when the tab never answers', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => vi.useRealTimers());
+    const chrome = proofChrome([APP(5, 'http://127.0.0.1:8477/')], () => ({ ok: false, error: 'Azimut did not answer' }));
+    const { handle } = load({ chrome });
+    const asked = handle({ type: 'scene-proof', scene: SCENE }, MAP);
+    await vi.runAllTimersAsync();
+    expect(await asked).toEqual({ ok: false, error: 'Azimut did not answer' });
+    expect(chrome.notifications.create).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Azimut did not answer. Reload its tab, then press Make the proof again.',
+    }));
+  });
+
+  it('stops at a tab that refuses, rather than asking again', async () => {
+    const chrome = proofChrome([APP(5, 'http://127.0.0.1:8477/')], () => ({ ok: false, refused: true, error: 'not a scene to prove' }));
+    const { handle } = await worker(chrome);
+    expect(await handle({ type: 'scene-proof', scene: SCENE }, MAP)).toEqual({ ok: false, error: 'not a scene to prove' });
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the app at its paired address when no tab holds it, and hands the scene over once it answers', async () => {
+    let asked = 0;
+    const chrome = proofChrome([], () => {
+      asked += 1;
+      return asked === 1 ? { ok: false, error: 'Azimut did not answer' } : { ok: true };
+    });
+    chrome.tabs.create = vi.fn(async () => ({ id: 7, windowId: 3 }));
+    const { handle } = await worker(chrome);
+    const answer = await handle({ type: 'scene-proof', scene: SCENE }, MAP);
+    // taken at once: the tab is the analyst's to watch load
+    expect(answer).toEqual({ ok: true, opened: true });
+    expect(chrome.tabs.create).toHaveBeenCalledWith({ url: 'http://127.0.0.1:8477/#inspect', active: true });
+    await vi.waitFor(() => expect(chrome.tabs.sendMessage).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    expect(chrome.tabs.sendMessage.mock.calls.every(([id]) => id === 7)).toBe(true);
+    expect(chrome.tabs.sendMessage.mock.calls[0][1].scene).toMatchObject(SCENE);
+    expect(chrome.notifications.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses what is not a scene, a page of the app, and an address off this machine', async () => {
+    const chrome = proofChrome([APP(5, 'http://127.0.0.1:8477/')]);
+    const { handle } = await worker(chrome);
+    for (const scene of [null, { ...SCENE, draft: '' }, { ...SCENE, caseId: 4 }, { ...SCENE, video: 'x'.repeat(2000) }]) {
+      expect(await handle({ type: 'scene-proof', scene }, MAP)).toEqual({ ok: false, error: 'not a scene to prove' });
+    }
+    expect(await handle({ type: 'scene-proof', scene: SCENE }, { tab: APP(5, 'http://127.0.0.1:8477/') })).toEqual({
+      ok: false, error: 'only a map panel may ask',
+    });
+    expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(chrome.tabs.update).not.toHaveBeenCalled();
+
+    const away = proofChrome([]);
+    away.storage.local.get = vi.fn(async (defaults) => ({ ...defaults, backendUrl: 'https://azimut.example.com', token: 't' }));
+    const remote = await worker(away);
+    expect(await remote.handle({ type: 'scene-proof', scene: SCENE }, MAP)).toEqual({
+      ok: false, error: 'the Azimut address in the options is not on this machine',
+    });
+    expect(away.tabs.create).not.toHaveBeenCalled();
+  });
+});
+
 describe('reattachBridge', () => {
   it('re-injects the bridge into the app tabs, so an update needs no page reload', async () => {
     const { chrome, fetchImpl } = stampChrome();

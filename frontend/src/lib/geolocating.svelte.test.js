@@ -329,3 +329,142 @@ describe('the number of scenes waiting', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe('a nudge, shown before the server is read again', () => {
+  const VIDEO = 'media/clip.mp4';
+  const HELD = { ...SCENE, kind: 'draft', video: VIDEO, id: 's1', state: 'todo', captures: [], order: 1 };
+  const gathered = (n) => Array.from({ length: n }, (_, i) => `media/cap-${i + 1}.png`);
+  let held = [];
+
+  /** Reads that wait to be answered, in the order they were asked. */
+  let pending;
+  let spy;
+  async function answeredByHand() {
+    const { api } = await import('./api.js');
+    pending = [];
+    spy = vi.spyOn(api, 'get').mockImplementation((path) => new Promise((resolve) => pending.push({ path, resolve })));
+  }
+  const tick = async () => {
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+  };
+
+  afterEach(async () => {
+    // every read still out answered, so none holds the next test's back
+    for (let round = 0; round < 4 && pending?.length; round += 1) {
+      for (const read of pending.splice(0)) read.resolve(read.path.endsWith('/queue') ? { files: [], geolocating: null } : { geolocating: null });
+      await tick();
+    }
+    spy?.mockRestore();
+    spy = null;
+    for (const release of held) release();
+    held = [];
+  });
+
+  it('counts the capture attached at once, the read behind it coming after', async () => {
+    Object.assign(geolocating, { caseId: 'c1', scene: { ...HELD } });
+    await answeredByHand();
+    dispatch({ type: 'geolocating', case_id: 'c1', video: VIDEO, draft: 's1', capture: 'media/cap-1.png', captures: 1 });
+    // nothing answered yet, and the scene holds its capture already
+    expect(geolocating.scene.captures).toEqual(['media/cap-1.png']);
+    expect(geolocating.scene.state).toBe('progress');
+    expect(pending.map((read) => read.path)).toEqual(['/api/cases/c1/geolocating']);
+    pending[0].resolve({ geolocating: { ...HELD, state: 'progress', captures: ['media/cap-1.png'], since: 't' } });
+    await tick();
+    expect(geolocating.scene).toMatchObject({ captures: ['media/cap-1.png'], since: 't' });
+  });
+
+  it('trusts the number it gives over a list that is behind', async () => {
+    Object.assign(geolocating, { caseId: 'c1', scene: { ...HELD, captures: gathered(2), state: 'progress' } });
+    await answeredByHand();
+    dispatch({ type: 'geolocating', case_id: 'c1', video: VIDEO, draft: 's1', capture: 'media/cap-9.png', captures: 5 });
+    expect(geolocating.scene.captures).toHaveLength(3);
+    expect(geolocating.scene.captureCount).toBe(5);
+    // the server's list, once read, is the count again
+    pending[0].resolve({ geolocating: { ...HELD, state: 'progress', captures: gathered(5) } });
+    await tick();
+    expect(geolocating.scene.captureCount).toBe(undefined);
+    expect(geolocating.scene.captures).toHaveLength(5);
+  });
+
+  it('drops an answer asked before it landed, and reads once more after', async () => {
+    Object.assign(geolocating, { caseId: 'c1', scene: { ...HELD, captures: gathered(2), state: 'progress' } });
+    await answeredByHand();
+    // a read already out, as the pill asks when the case reloads
+    readGeolocating('c1');
+    dispatch({ type: 'geolocating', case_id: 'c1', video: VIDEO, draft: 's1', capture: 'media/cap-3.png', captures: 3 });
+    dispatch({ type: 'geolocating', case_id: 'c1', video: VIDEO, draft: 's1', capture: 'media/cap-4.png', captures: 4 });
+    expect(geolocating.scene.captures).toHaveLength(4);
+    // the first nudge's read is out, the second waits for it: two reads, not three
+    expect(pending).toHaveLength(2);
+    pending[0].resolve({ geolocating: { ...HELD, captures: gathered(2), state: 'progress' } });
+    pending[1].resolve({ geolocating: { ...HELD, captures: gathered(3), state: 'progress' } });
+    await tick();
+    expect(geolocating.scene.captures).toHaveLength(4);
+    expect(pending).toHaveLength(3);
+    pending[2].resolve({ geolocating: { ...HELD, captures: gathered(4), state: 'progress' } });
+    await tick();
+    expect(geolocating.scene.captures).toEqual(gathered(4));
+    expect(pending).toHaveLength(3);
+  });
+
+  it('drops the scene at once when it ends, and an answer asked before cannot bring it back', async () => {
+    Object.assign(geolocating, { caseId: 'c1', scene: { ...HELD } });
+    await answeredByHand();
+    readGeolocating('c1');
+    dispatch({ type: 'geolocating', case_id: 'c1', video: null, draft: null });
+    expect(geolocating.scene).toBe(null);
+    pending[0].resolve({ geolocating: { ...HELD } });
+    await tick();
+    expect(geolocating.scene).toBe(null);
+  });
+
+  it('holds a scene the queue lists as soon as it starts elsewhere', async () => {
+    const files = [{ video: VIDEO, title: 'clip', scenes: [{ ...HELD }] }];
+    answers.set('GET /api/cases/c1/scenes/queue', { files, geolocating: null });
+    await readSceneQueue('c1');
+    held.push(holdSceneQueue());
+    await answeredByHand();
+    dispatch({ type: 'geolocating', case_id: 'c1', video: VIDEO, draft: 's1' });
+    expect(geolocating.scene).toMatchObject({ video: VIDEO, id: 's1', label: 'Bridge', order: 1 });
+    // the queue is held for its rows, so it is the queue that is read behind it
+    expect(pending.map((read) => read.path)).toEqual(['/api/cases/c1/scenes/queue']);
+  });
+
+  it('tells the queue’s row too, and a queue read asked before keeps what the row was told', async () => {
+    const files = [{ video: VIDEO, title: 'clip', scenes: [{ ...HELD }] }];
+    answers.set('GET /api/cases/c1/scenes/queue', { files, geolocating: { ...HELD } });
+    await readSceneQueue('c1');
+    held.push(holdSceneQueue());
+    await answeredByHand();
+    readSceneQueue('c1');
+    dispatch({ type: 'geolocating', case_id: 'c1', video: VIDEO, draft: 's1', capture: 'media/cap-1.png', captures: 1 });
+    expect(sceneQueue.files[0].scenes[0]).toMatchObject({ captures: ['media/cap-1.png'], state: 'progress' });
+    // the read asked before the capture lands with the row as it was
+    pending[0].resolve({ files: structuredClone(files), geolocating: { ...HELD } });
+    await tick();
+    expect(geolocating.scene.captures).toEqual(['media/cap-1.png']);
+    expect(sceneQueue.files[0].scenes[0]).toMatchObject({ captures: ['media/cap-1.png'], state: 'progress' });
+  });
+
+  it('leaves a scene it knows nothing of to the read', async () => {
+    Object.assign(geolocating, { caseId: 'c1', scene: null });
+    await answeredByHand();
+    dispatch({ type: 'geolocating', case_id: 'c1', video: VIDEO, draft: 's9', capture: 'media/cap-1.png', captures: 1 });
+    expect(geolocating.scene).toBe(null);
+    expect(pending).toHaveLength(1);
+  });
+
+  it('keeps a start or a stop answered here over a read asked before it', async () => {
+    Object.assign(geolocating, { caseId: 'c1', scene: null });
+    await answeredByHand();
+    readGeolocating('c1');
+    answers.set('DELETE /api/cases/c1/geolocating', { ended: true });
+    const { api } = await import('./api.js');
+    const put = vi.spyOn(api, 'put').mockResolvedValue({ geolocating: { ...HELD } });
+    await startGeolocating('c1', VIDEO, 's1');
+    put.mockRestore();
+    pending[0].resolve({ geolocating: null });
+    await tick();
+    expect(geolocating.scene).toMatchObject({ id: 's1' });
+  });
+});

@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   extensionVersion, extensionOutdated, captureTab, handOffPost, handOffReverse, onActivated,
-  extensionState, pingExtensions, reloadExtension, onBridgeHello, mapLinkRelay,
+  extensionState, pingExtensions, reloadExtension, onBridgeHello, mapLinkRelay, onSceneProof, sceneHandoff,
 } from './extBridge.js';
 
 // The bridge protocol is the app's only path to widget pixels, so what these
@@ -425,5 +425,70 @@ describe('mapLinkRelay', () => {
     expect(views).toEqual([]);
     expect(page.posted.at(-1).kind).toBe('close');
     page.stop();
+  });
+});
+
+describe('onSceneProof', () => {
+  const SCENE = { caseId: 'case-1', video: 'media/walk.mp4', draft: 'sc_2', id: 'h-1' };
+
+  /** What the bridge would post, and the answer the page posts back to it. */
+  function handed(message, { origin = window.location.origin } = {}) {
+    return new Promise((resolve) => {
+      const answers = [];
+      const onMessage = (event) => {
+        if (event.data?.type === 'scene-proof-result') answers.push(event.data);
+      };
+      window.addEventListener('message', onMessage);
+      window.dispatchEvent(new MessageEvent('message', { data: { channel: 'azimut-capture-ext', ...message }, origin }));
+      setTimeout(() => {
+        window.removeEventListener('message', onMessage);
+        resolve(answers);
+      }, 30);
+    });
+  }
+
+  it('gives the scene to the tab and the tab’s answer back, under the bridge’s id', async () => {
+    const taken = [];
+    const off = onSceneProof((scene) => {
+      taken.push(scene);
+      return { ok: true };
+    });
+    const answers = await handed({ type: 'scene-proof', id: 'scene-1-1', scene: SCENE });
+    off();
+    expect(taken).toEqual([SCENE]);
+    expect(answers).toEqual([{ channel: 'azimut-capture-ext', type: 'scene-proof-result', id: 'scene-1-1', ok: true }]);
+  });
+
+  it('refuses what is not a scene, and keeps the bridge’s id over anything the answer carries', async () => {
+    const taken = [];
+    const off = onSceneProof((scene) => {
+      taken.push(scene);
+      return { ok: false, refused: true, error: 'a map window of Azimut makes no proof', id: 'not-this' };
+    });
+    const bad = await handed({ type: 'scene-proof', id: 'a', scene: { ...SCENE, draft: '' } });
+    const refused = await handed({ type: 'scene-proof', id: 'b', scene: SCENE });
+    off();
+    expect(taken).toEqual([SCENE]);
+    expect(bad[0]).toMatchObject({ id: 'a', ok: false, refused: true, error: 'not a scene to prove' });
+    expect(refused[0]).toMatchObject({ id: 'b', ok: false, refused: true, error: 'a map window of Azimut makes no proof' });
+  });
+
+  it('hears nothing from another origin, nor once unsubscribed', async () => {
+    let taken = 0;
+    const off = onSceneProof(() => {
+      taken += 1;
+    });
+    expect(await handed({ type: 'scene-proof', id: 'x', scene: SCENE }, { origin: 'https://evil.example' })).toEqual([]);
+    off();
+    expect(await handed({ type: 'scene-proof', id: 'y', scene: SCENE })).toEqual([]);
+    expect(taken).toBe(0);
+  });
+
+  it('reads a hand-off strictly: strings of a sane length, the hand-off’s own id kept', () => {
+    expect(sceneHandoff(SCENE)).toEqual(SCENE);
+    expect(sceneHandoff({ ...SCENE, id: 4 })).toEqual({ caseId: 'case-1', video: 'media/walk.mp4', draft: 'sc_2' });
+    for (const scene of [null, 'x', { ...SCENE, caseId: null }, { ...SCENE, video: 'v'.repeat(1025) }, { ...SCENE, draft: {} }]) {
+      expect(sceneHandoff(scene)).toBe(null);
+    }
   });
 });

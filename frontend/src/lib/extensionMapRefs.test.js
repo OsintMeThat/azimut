@@ -212,6 +212,77 @@ describe('a video held for the scene being geolocated', () => {
     await settle();
     expect(pane().querySelector('.rw-scene')).toBe(null);
     expect(pane().querySelector('.rw-dot')).toBe(null);
+    expect(pane().querySelector('[data-rw="scene"]')).toBe(null);
+  });
+
+  /** The pin that goes back to the scene, where the app's window has it: past the zoom, before the frame steps. */
+  const toScene = () => pane().querySelector('[data-rw="scene"]');
+
+  it('goes back to the start of a passage on its pin, paused, and plays on past it', async () => {
+    refs.holdScene(SCENE, 'The walk');
+    layer.sync();
+    await settle();
+    const video = pane().querySelector('video');
+    video.pause = vi.fn();
+    video.play = vi.fn(() => Promise.resolve());
+    loaded(video);
+    await settle(); // the frame rate read
+    const pin = toScene();
+    expect(pin.tagName).toBe('BUTTON');
+    expect(pin.getAttribute('aria-label')).toBe('Back to the scene');
+    expect(pin.title).toBe('Back to the start of the scene, bridge? · 0:04–0:06');
+    expect(pin.querySelector('svg path').getAttribute('d')).toBe(window.AzimutMapTheme.ICONS.pin);
+    // in the scene's colour, which the window carries
+    expect(pane().style.getPropertyValue('--scene')).toBe('#40c4ff');
+    const row = [...pin.parentElement.children].map((node) => node.dataset.rw ?? node.className);
+    expect(row.indexOf('scene')).toBe(row.indexOf('reset') + 1);
+    expect(row.indexOf('back')).toBe(row.indexOf('scene') + 1);
+    video.currentTime = 8.5;
+    press(pin);
+    // half a frame into its first frame, at the clip's own rate, as a step lands
+    expect(video.currentTime).toBeCloseTo(4.02, 6);
+    expect(video.pause).toHaveBeenCalled();
+    expect(pane().querySelector('.rw-time').textContent).toBe('0:04.000');
+    press(pane().querySelector('[data-rw="play"]'));
+    expect(video.play).toHaveBeenCalled();
+  });
+
+  it('goes back to an instant’s time, and names it by its time when it has no label', async () => {
+    refs.holdScene({ ...SCENE, start: 2, end: null, label: '' }, 'The walk');
+    layer.sync();
+    await settle();
+    const video = pane().querySelector('video');
+    video.pause = vi.fn();
+    loaded(video);
+    expect(toScene().title).toBe('Back to the start of the scene, 0:02');
+    video.currentTime = 7;
+    press(toScene());
+    expect(video.currentTime).toBeGreaterThanOrEqual(2);
+    expect(video.currentTime).toBeLessThan(2.05);
+  });
+
+  it('has no pin for the whole video, nor for a picture', async () => {
+    refs.holdScene({ ...SCENE, start: null, end: null }, 'The walk');
+    refs.holdScene({ ...SCENE, id: 'sc_p', video: 'media/roof.jpg', file_kind: 'image' }, 'The roof');
+    layer.sync();
+    await settle();
+    expect(panes()).toHaveLength(2);
+    expect(document.body.querySelector('[data-rw="scene"]')).toBe(null);
+  });
+
+  it('is in the keyboard’s reach: Enter on it is the button’s, not the clip’s', async () => {
+    refs.holdScene(SCENE, 'The walk');
+    layer.sync();
+    await settle();
+    const video = pane().querySelector('video');
+    video.play = vi.fn(() => Promise.resolve());
+    loaded(video);
+    expect(toScene().tabIndex).toBe(0);
+    const key = new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    toScene().dispatchEvent(key);
+    // left to the browser, which presses the focused button
+    expect(key.defaultPrevented).toBe(false);
+    expect(video.play).not.toHaveBeenCalled();
   });
 });
 

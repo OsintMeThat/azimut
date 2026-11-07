@@ -6,13 +6,15 @@
  *
  * The server holds which scene is being geolocated, one per case and for the session
  * only, and attaches every capture filed meanwhile to it, the extension's included.
- * So this copy is only what the app shows: read from the server, read again when the
- * server says it changed (the `geolocating` nudge, `api/events.py`), and never the
- * thing that decides where a capture goes.
+ * So this copy is only what the app shows: read from the server, and never the thing
+ * that decides where a capture goes. When the server says it changed (the
+ * `geolocating` nudge, `api/events.py`), what the nudge says is shown at once (the
+ * capture just attached and how many the scene holds, or that it ended) and the
+ * server is read again behind it, an answer asked before the nudge landed dropped.
  */
 import { api } from './api.js';
 import { onEvent } from './events.js';
-import { openScenes, sceneCount } from './sceneQueue.js';
+import { gatheredScene, openScenes, sceneCount } from './sceneQueue.js';
 import { uiState } from './state.svelte.js';
 
 /** `scene` is the queue's row for it (`video`, `id`, `start`, `end`, `label`, `state`,
@@ -30,15 +32,37 @@ function hold(caseId, scene) {
   geolocating.error = '';
 }
 
+// Which word about the scene being geolocated is the newest. A read takes a ticket as
+// it sets out; what is said here first (a nudge applied, a start or a stop answered)
+// takes the next one. An answer whose ticket is older than the last held was asked
+// before that, and says less than what is shown: it is dropped.
+let tickets = 0;
+let applied = 0;
+
+/** Hold what an answer says, unless something newer was held since it was asked. */
+function holdNewer(caseId, scene, asked) {
+  if (asked < applied) return false;
+  applied = asked;
+  hold(caseId, scene);
+  return true;
+}
+
+/** Hold what was just said here: newer than any answer still on its way. */
+function holdNow(caseId, scene) {
+  applied = ++tickets;
+  hold(caseId, scene);
+}
+
 /** Read which scene the case is geolocating. */
 export async function readGeolocating(caseId) {
   if (!caseId) return null;
+  const asked = ++tickets;
   try {
     const { geolocating: scene } = await api.get(`${base(caseId)}/geolocating`);
-    hold(caseId, scene);
+    holdNewer(caseId, scene, asked);
     return scene;
   } catch (e) {
-    if (geolocating.caseId === caseId) geolocating.error = e.message;
+    if (geolocating.caseId === caseId && asked >= applied) geolocating.error = e.message;
     return null;
   }
 }
@@ -46,7 +70,7 @@ export async function readGeolocating(caseId) {
 /** Geolocate one scene to prove: from now on every capture filed is attached to it. */
 export async function startGeolocating(caseId, video, draft) {
   const { geolocating: scene } = await api.put(`${base(caseId)}/geolocating`, { video, draft });
-  hold(caseId, scene);
+  holdNow(caseId, scene);
   return scene;
 }
 
@@ -73,7 +97,7 @@ export async function geolocateScene(caseId, scene, { picture = null } = {}) {
 /** Stop geolocating. True when there was one to stop. */
 export async function stopGeolocating(caseId) {
   const { ended } = await api.del(`${base(caseId)}/geolocating`);
-  hold(caseId, null);
+  holdNow(caseId, null);
   return ended;
 }
 
@@ -93,13 +117,15 @@ export function readSceneQueue(caseId) {
   sceneQueue.busy = true;
   sceneQueue.error = '';
   stale = false;
+  const asked = ++tickets;
   const read = (async () => {
     try {
       const answer = await api.get(`${base(caseId)}/scenes/queue`);
       // a later read answers for this one, whichever lands first
       if (sceneQueue.caseId !== caseId || reading?.read !== read) return null;
       sceneQueue.files = answer.files;
-      hold(caseId, answer.geolocating);
+      // a nudge landed since it was asked: its scene's row says what the pill says
+      if (!holdNewer(caseId, answer.geolocating, asked)) mirror(geolocating.caseId === caseId ? geolocating.scene : null);
       return answer;
     } catch (e) {
       if (sceneQueue.caseId === caseId && reading?.read === read) sceneQueue.error = e.message;
@@ -160,7 +186,7 @@ function edited(caseId, video) {
 /** Give up on a scene, with a word if there is one. Answers with its row. */
 export async function abandonScene(caseId, video, draft, reason = '') {
   const { scene } = await api.put(`${base(caseId)}/scenes/${encodeURIComponent(draft)}/abandon`, { video, reason });
-  if (geolocating.caseId === caseId && geolocating.scene?.id === draft) hold(caseId, null);
+  if (geolocating.caseId === caseId && geolocating.scene?.id === draft) holdNow(caseId, null);
   edited(caseId, video);
   await refreshQueue(caseId);
   return scene;
@@ -280,14 +306,74 @@ function nudged(event, video) {
 onEvent('scenes', (event) => nudged(event, event.video));
 onEvent('saved', (event) => nudged(event, null));
 
-// Started, ended, or a capture attached, from this tab, another, or the extension. The
-// number of scenes waiting stays the same, so a queue held for its number is only
-// marked behind on the captures it counts.
+/** The queue's row for this scene, if the queue held lists it. */
+function rowOf(caseId, video, id) {
+  if (!held(caseId)) return null;
+  return sceneQueue.files.find((file) => file.video === video)?.scenes?.find((scene) => scene.id === id) ?? null;
+}
+
+/** The queue's row for the scene held, told what the pill was told. */
+function mirror(scene) {
+  const row = scene ? rowOf(geolocating.caseId, scene.video, scene.id) : null;
+  if (!row) return;
+  row.captures = [...(scene.captures ?? [])];
+  row.state = scene.state;
+  if (Number.isInteger(scene.captureCount)) row.captureCount = scene.captureCount;
+  else delete row.captureCount;
+}
+
+/**
+ * A nudge applied before the server is read again: an end drops the scene, a capture
+ * attached to the scene held is counted, and a scene the queue lists is held from its
+ * row. False when it says too little to show, and only the read can say.
+ */
+function applyNudge(event) {
+  const caseId = event.case_id;
+  if (event.draft == null) {
+    holdNow(caseId, null);
+    return true;
+  }
+  const now = geolocating.caseId === caseId ? geolocating.scene : null;
+  const same = now && now.video === event.video && now.id === event.draft;
+  const from = same ? now : rowOf(caseId, event.video, event.draft);
+  if (!from) return false;
+  const scene = gatheredScene(from, event);
+  holdNow(caseId, scene);
+  mirror(scene);
+  return true;
+}
+
+// The read a nudge asks for, one at a time: nudges landing while it is out ask for one
+// more, which sets out once it is back, after all of them. A read that never comes
+// back holds nothing up for long.
+const STUCK_MS = 5000;
+let refreshing = 0; // when the read out set out, or 0
+let refreshAgain = null;
+async function refresh(caseId) {
+  if (refreshing && Date.now() - refreshing < STUCK_MS) {
+    refreshAgain = caseId;
+    return;
+  }
+  const mine = (refreshing = Date.now());
+  try {
+    if (queueHeld() && held(caseId)) await readSceneQueue(caseId);
+    else await readGeolocating(caseId);
+  } finally {
+    if (refreshing === mine) {
+      refreshing = 0;
+      const next = refreshAgain;
+      refreshAgain = null;
+      if (next) refresh(next);
+    }
+  }
+}
+
+// Started, ended, or a capture attached, from this tab, another, or the extension:
+// shown at once, then read. The number of scenes waiting stays the same, so a queue
+// held for its number is only marked behind on the captures it counts.
 onEvent('geolocating', (event) => {
   if (event.case_id !== geolocating.caseId && event.case_id !== sceneQueue.caseId) return;
-  if (queueHeld() && held(event.case_id)) readSceneQueue(event.case_id);
-  else {
-    if (held(event.case_id)) stale = true;
-    readGeolocating(event.case_id);
-  }
+  applyNudge(event);
+  if (!queueHeld() && held(event.case_id)) stale = true;
+  refresh(event.case_id);
 });
