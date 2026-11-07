@@ -493,6 +493,26 @@ def stop_geolocating(case_id: str) -> dict[str, Any]:
     return {"ended": ended}
 
 
+class RetimeIn(BaseModel):
+    video: str = Field(min_length=1, max_length=1024)
+    # both null for the whole video, no end for an instant
+    start: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    end: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+
+@router.put("/cases/{case_id}/scenes/{draft}/time")
+def retime_scene(case_id: str, draft: str, body: RetimeIn) -> dict[str, Any]:
+    """Give a scene to prove a new time, the rest of its video's work untouched. Answers
+    with the time it had, for an Undo."""
+    case = get_case(case_id)
+    try:
+        before = inspectwork.retime_scene(case, body.video, draft, body.start, body.end)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    events.publish({"type": "scenes", "case_id": case.id, "video": body.video})
+    return {"before": before}
+
+
 @router.put("/cases/{case_id}/scenes/{draft}/abandon")
 def abandon_scene(case_id: str, draft: str, body: AbandonIn) -> dict[str, Any]:
     """Give up on a scene to prove, with a word if there is one. It stays, greyed."""

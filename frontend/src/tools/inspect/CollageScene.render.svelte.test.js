@@ -37,6 +37,16 @@ const respond = (method) => vi.fn(async (path, body) => {
     }) };
     return { name: 'clip', title: 'clip' };
   }
+  if (method === 'PUT' && /\/scenes\/[^/]+\/time$/.test(path)) {
+    const draft = decodeURIComponent(path.split('/scenes/')[1].split('/time')[0]);
+    const spec = works[body.video]?.spec;
+    const held = spec?.scenes?.find((sc) => sc.id === draft);
+    const before = { start: held?.start ?? null, end: held?.end ?? null };
+    if (held) Object.assign(held, { start: body.start, end: body.end });
+    const rows = listed[body.video]?.scenes ?? [];
+    listed[body.video] = { ...listed[body.video], scenes: rows.map((row) => (row.id === draft ? { ...row, start: body.start, end: body.end } : row)) };
+    return { before };
+  }
   if (method === 'GET' && path.includes('/inspect/probe')) return { duration: 60, fps: 25 };
   if (path.endsWith('/scenes/queue')) return { files: [], geolocating: null };
   return {};
@@ -271,7 +281,7 @@ describe('the moment it was marked over', () => {
     expect(calls.some((c) => c.method === 'PUT' && c.path.endsWith('/inspect/work'))).toBe(false);
   });
 
-  it('keeps a new start and end through the video\'s work, as Inspect does, and takes it back from its message', async () => {
+  it('keeps a new start and end by the scene\'s own route, and takes it back from its message', async () => {
     await show({ video: ONE_VIDEO, current: 'media/Pan.png' });
     const n = retimed.n;
     target.querySelector('.state .time').click();
@@ -282,12 +292,11 @@ describe('the moment it was marked over', () => {
     button('Apply').click();
     await settle();
 
-    const put = calls.filter((c) => c.method === 'PUT' && c.path.endsWith('/inspect/work'));
+    // only its scene's time moves, by its own route: the video's work is never written whole
+    expect(calls.some((c) => c.method === 'PUT' && c.path.endsWith('/inspect/work'))).toBe(false);
+    const put = calls.filter((c) => c.method === 'PUT' && c.path.endsWith('/scenes/sc_s/time'));
     expect(put).toHaveLength(1);
-    expect(put[0].body.path).toBe('media/clip.mp4');
-    // only its scene moves: the frames and the other scene are written back as they were
-    expect(put[0].body.spec.scenes).toEqual([{ id: 'sc_s', start: 2, end: 6, label: '' }, { id: 'sc_o', start: 30, end: null, label: 'Other' }]);
-    expect(put[0].body.spec.frames).toEqual([{ id: 'f1', time: 2 }]);
+    expect(put[0].body).toEqual({ video: 'media/clip.mp4', start: 2, end: 6 });
     // an Inspect tab on the video hears it, so its next save keeps the new time
     expect(retimed).toMatchObject({ caseId: 'case-a', video: 'media/clip.mp4', draft: 'sc_s', start: 2, end: 6, n: n + 1 });
     expect(target.querySelector('[data-testid="collage-moment"]')).toBeNull();
@@ -297,7 +306,7 @@ describe('the moment it was marked over', () => {
 
     undo.onClick();
     await settle();
-    expect(calls.filter((c) => c.method === 'PUT' && c.path.endsWith('/inspect/work')).at(-1).body.spec.scenes[0]).toEqual({ id: 'sc_s', start: 1, end: 4, label: '' });
+    expect(calls.filter((c) => c.method === 'PUT' && c.path.endsWith('/scenes/sc_s/time')).at(-1).body).toEqual({ video: 'media/clip.mp4', start: 1, end: 4 });
     expect(sceneLine()).toBe('In scene · 0:01–0:04');
   });
 

@@ -656,3 +656,19 @@ def test_the_queue_names_the_collage_a_picture_was_exported_from(client):
     client.post(f"/api/cases/{cid}/scenes/mark", json={"path": plain})
     rows = {f["video"]: f for f in _queue(client, cid)["files"]}
     assert "collage" not in rows[plain]
+
+
+def test_a_scene_takes_a_new_time_alone_and_says_the_time_it_had(client):
+    cid = _case(client)
+    photo = _upload(client, cid)
+    _save_work(client, cid, photo, [{"id": "s1", "start": 4, "end": 9, "label": "Roundabout"}, SCENES[1]])
+    res = client.put(f"/api/cases/{cid}/scenes/s1/time", json={"video": photo, "start": 5, "end": 12})
+    assert res.status_code == 200, res.text
+    assert res.json()["before"] == {"start": 4.0, "end": 9.0}
+    stored = {s["id"]: s for s in _stored(client, cid, photo)}
+    assert (stored["s1"]["start"], stored["s1"]["end"], stored["s1"]["label"]) == (5.0, 12.0, "Roundabout")
+    # an instant, the whole video, and what a scene cannot be
+    assert client.put(f"/api/cases/{cid}/scenes/s1/time", json={"video": photo, "start": 7}).status_code == 200
+    assert {s["id"]: s for s in _stored(client, cid, photo)}["s1"]["end"] is None
+    assert client.put(f"/api/cases/{cid}/scenes/s1/time", json={"video": photo, "start": 7, "end": 3}).status_code == 400
+    assert client.put(f"/api/cases/{cid}/scenes/nope/time", json={"video": photo, "start": 1}).status_code == 400

@@ -458,6 +458,21 @@ def update_scene(
     return target
 
 
+def retime_scene(case: "Case", subject: str, scene_id: str, start: Any, end: Any) -> dict[str, Any]:
+    """Give one scene to prove a new time, the rest of the work untouched: Collage
+    changing the moment its collage was marked over, without saving the work whole
+    over an Inspect save that may land meanwhile. Answers with the time it had."""
+    [checked] = _clean_scenes([{"id": scene_id, "start": start, "end": end, "label": ""}])
+    before: dict[str, Any] = {}
+
+    def move(scene: dict[str, Any]) -> None:
+        before.update(start=scene.get("start"), end=scene.get("end"))
+        scene["start"], scene["end"] = checked["start"], checked["end"]
+
+    update_scene(case, subject, scene_id, move)
+    return before
+
+
 def scene_works(case: "Case") -> list[tuple[str, str | None, list[dict[str, Any]]]]:
     """Every file whose work holds scenes to prove: (file, last touched, scenes),
     most recently touched first."""

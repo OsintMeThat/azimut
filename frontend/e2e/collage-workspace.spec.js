@@ -356,12 +356,11 @@ test('changes the moment its collage was marked over, the video playing it besid
     source: { path: VIDEO, kind: 'video' }, frames: [], marks: [], videoAdjust: {}, videoRotation: 0,
     scenes: [{ id: 'sc_1', start: draft.start, end: draft.end, label: '' }],
   } } } }));
-  await page.route(`**/api/cases/${CASE_ID}/inspect/work`, (route) => {
-    if (route.request().method() !== 'PUT') return route.fallback();
+  await page.route(`**/api/cases/${CASE_ID}/scenes/sc_1/time`, (route) => {
     written = route.request().postDataJSON();
-    const kept = written.spec.scenes[0];
-    draft = { ...draft, start: kept.start, end: kept.end };
-    return route.fulfill({ json: { name: 'Steps', title: 'Steps' } });
+    const before = { start: draft.start, end: draft.end };
+    draft = { ...draft, start: written.start, end: written.end };
+    return route.fulfill({ json: { before } });
   });
 
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -382,8 +381,7 @@ test('changes the moment its collage was marked over, the video playing it besid
   await editor.getByRole('textbox', { name: 'Scene start' }).fill('0:00.4');
   await editor.getByRole('textbox', { name: 'Scene end' }).fill('0:01');
   await editor.getByRole('button', { name: 'Apply' }).click();
-  await expect.poll(() => written?.spec.scenes[0]).toEqual({ id: 'sc_1', start: 0.4, end: 1, label: '' });
-  expect(written.path).toBe(VIDEO);
+  await expect.poll(() => written).toEqual({ video: VIDEO, start: 0.4, end: 1 });
   await expect(editor).toHaveCount(0);
   await expect(page.getByText('Scene now 0:00–0:01')).toBeVisible();
 });
