@@ -93,6 +93,17 @@ def _in_case(case: Case, path: str) -> dict[str, Any] | None:
     return entity if entity is not None and entity.get("type") in ("media", "capture") else None
 
 
+def _collage_of(case: Case, item: dict[str, Any]) -> str | None:
+    """The collage that exported this picture, by the name its entity keeps."""
+    source = item.get("source")
+    if not isinstance(source, dict) or source.get("op") != scenes_engine.COLLAGE_OP:
+        return None
+    entity_id = item.get("entity_id")
+    entity = case.get_entity(entity_id) if isinstance(entity_id, str) and entity_id else None
+    name = ((entity or {}).get("attrs") or {}).get("collage")
+    return name if isinstance(name, str) and name else None
+
+
 def _present(case: Case, paths: list[str]) -> dict[str, dict[str, Any]]:
     """The files still in the case, by path, from the media index: one query, where a
     lookup per file scans every entity of a large case."""
@@ -323,5 +334,10 @@ def queue(case: Case) -> dict[str, Any]:
             continue
         rows.sort(key=lambda r: (-math.inf, -math.inf) if r["start"] is None else (r["start"], r["end"] or r["start"]))
         title = item.get("title") or item.get("filename") or subject.rsplit("/", 1)[-1]
-        files.append({"video": subject, "title": str(title), "kind": kind, "scenes": rows})
+        row = {"video": subject, "title": str(title), "kind": kind, "scenes": rows}
+        # a picture a collage exported names it, so its row opens the collage
+        made_by = _collage_of(case, item)
+        if made_by:
+            row["collage"] = made_by
+        files.append(row)
     return {"files": files, "geolocating": current(case)}

@@ -83,7 +83,12 @@ _SCENE_KEYS = ("id", "start", "end", "label")
 #: captures gathered while it was being geolocated, and the word it was abandoned with.
 #: Inspect saves its scenes whole and never sends these, so a save keeps them.
 SCENE_STATE = ("captures", "abandoned")
-_PIECE_KEYS = ("id", "frameId", "save", "w", "h", "quad", "frameOps", "crop")
+_PIECE_KEYS = ("id", "frameId", "save", "w", "h", "quad", "frameOps", "crop", "exclude")
+#: The areas painted on a piece that auto-stitch must not match on (Collage's brush):
+#: strokes of points normalised 0–1 in the picture the stitch receives (the piece as
+#: `pinholeOps` renders it, crop included), each with a radius as a fraction of its width.
+MAX_EXCLUDE_STROKES = 200
+MAX_EXCLUDE_POINTS = 400
 _RIGHT_ANGLES = (-180, -90, 0, 90, 180)
 
 #: Names the app hands out before the analyst types one. They describe nothing, so a
@@ -829,6 +834,41 @@ def load_collage(case: "Case", name: str) -> dict[str, Any] | None:
     return {"name": Path(rel).stem, "title": Path(rel).stem, "spec": spec}
 
 
+def _unit(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def _clean_exclude(strokes: Any) -> list[dict[str, Any]]:
+    """A piece's painted exclusions, checked at the edge: never exported, read by the
+    auto-stitch only. An empty list or null clears them."""
+    if strokes is None:
+        return []
+    if not isinstance(strokes, list) or len(strokes) > MAX_EXCLUDE_STROKES:
+        raise CaseError(f"a piece holds at most {MAX_EXCLUDE_STROKES} painted strokes")
+    out = []
+    for stroke in strokes:
+        if not isinstance(stroke, dict):
+            raise CaseError("a painted stroke is an object")
+        radius = _unit(stroke.get("radius"))
+        if radius is None or not 0 < radius <= 1:
+            raise CaseError("a stroke's radius is a fraction of the piece's width, above 0 and up to 1")
+        points = stroke.get("points")
+        if not isinstance(points, list) or not points or len(points) > MAX_EXCLUDE_POINTS:
+            raise CaseError(f"a stroke holds 1 to {MAX_EXCLUDE_POINTS} points")
+        kept = []
+        for point in points:
+            if not isinstance(point, list) or len(point) != 2:
+                raise CaseError("a stroke's point is [x, y]")
+            x, y = _unit(point[0]), _unit(point[1])
+            if x is None or y is None or not (0 <= x <= 1 and 0 <= y <= 1):
+                raise CaseError("a stroke's points lie within the piece, 0 to 1")
+            kept.append([round(x, 4), round(y, 4)])
+        out.append({"points": kept, "radius": round(radius, 4)})
+    return out
+
+
 def _clean_collage(spec: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(spec, dict):
         raise CaseError("the collage must be an object")
@@ -846,7 +886,14 @@ def _clean_collage(spec: dict[str, Any]) -> dict[str, Any]:
         quad = node.get("quad")
         if not isinstance(quad, list) or len(quad) != 4:
             raise CaseError("every piece needs four corners")
-        pieces.append(_pick(node, _PIECE_KEYS))
+        piece = _pick(node, _PIECE_KEYS)
+        if "exclude" in piece:
+            cleaned = _clean_exclude(piece["exclude"])
+            if cleaned:
+                piece["exclude"] = cleaned
+            else:
+                piece.pop("exclude")
+        pieces.append(piece)
     out = {
         "width": spec.get("width"),
         "height": spec.get("height"),

@@ -610,3 +610,49 @@ def test_a_straightened_collage_of_one_video_keeps_its_video(client, tmp_path):
     from azimut.engine import scenes as scenes_engine
 
     assert scenes_engine.frame_origins(Case.open(cid), [picture]) == {picture: (video, 1.0)}
+
+
+def test_a_collage_keeps_the_areas_painted_out_of_its_stitch_and_refuses_bad_ones(client):
+    cid = _case(client)
+    one = _upload(client, cid, "one.png", (10, 10, 10))
+    stroke = {"points": [[0.1, 0.2], [0.123456, 0.5]], "radius": 0.05}
+
+    def save(exclude):
+        return client.post(f"/api/cases/{cid}/collages", json={"name": None, "title": f"Brush {len(str(exclude))}", "spec": {
+            "width": 200, "height": 60,
+            "nodes": [{"id": "nd_0", "save": {"path": one, "time": None, "ops": []}, "w": 64, "h": 48, "quad": QUAD,
+                       "exclude": exclude}],
+        }})
+
+    res = save([stroke])
+    assert res.status_code == 200, res.text
+    stored = Case.open(cid).resolve_inside(f".collages/{res.json()['name']}.json")
+    node = json.loads(stored.read_text())["nodes"][0]
+    assert node["exclude"] == [{"points": [[0.1, 0.2], [0.1235, 0.5]], "radius": 0.05}]
+    # none painted: no key at all
+    cleared = save([])
+    assert "exclude" not in json.loads(Case.open(cid).resolve_inside(f".collages/{cleared.json()['name']}.json").read_text())["nodes"][0]
+    for bad in (
+        [{"points": [[1.2, 0.5]], "radius": 0.05}],
+        [{"points": [[0.5, 0.5]], "radius": 0}],
+        [{"points": [], "radius": 0.1}],
+        [{"points": [[0.5, 0.5]], "radius": 0.1}] * 201,
+        [{"points": [[0.5, 0.5]] * 401, "radius": 0.1}],
+    ):
+        assert save(bad).status_code == 400
+
+
+def test_the_queue_names_the_collage_a_picture_was_exported_from(client):
+    cid = _case(client)
+    one = _upload(client, cid, "one.png", (10, 10, 10))
+    two = _upload(client, cid, "two.png", (200, 10, 10))
+    pieces = [(one, None), (two, None)]
+    name = _collage(client, cid, "Both banks", pieces)
+    picture = _export(client, cid, name, pieces)
+    client.post(f"/api/cases/{cid}/scenes/mark", json={"path": picture})
+    [file] = _queue(client, cid)["files"]
+    assert (file["video"], file["collage"]) == (picture, name)
+    plain = _upload(client, cid, "plain.png", (90, 90, 10))
+    client.post(f"/api/cases/{cid}/scenes/mark", json={"path": plain})
+    rows = {f["video"]: f for f in _queue(client, cid)["files"]}
+    assert "collage" not in rows[plain]
