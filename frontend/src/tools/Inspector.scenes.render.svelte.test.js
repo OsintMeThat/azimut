@@ -71,11 +71,10 @@ const del = vi.fn(async () => ({}));
 vi.mock('../lib/api.js', () => ({ api: { get, put, post, del, patch: vi.fn() } }));
 
 const caseState = $state({ current: { id: 'case-a', folders: [] }, rev: 0 });
-const uiState = $state({ tool: 'inspect', inspectPath: null, openInspect: null, inspectScene: null, proofScene: null, geolocateRef: null, focusMedia: null, toasts: [] });
+const uiState = $state({ tool: 'inspect', inspectPath: null, openInspect: null, inspectScene: null, proofScene: null, geolocateRef: null, focusMedia: null, todoHint: false, toasts: [] });
 const toast = vi.fn();
 vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast, dismissToast: vi.fn(), reloadCase: vi.fn(async () => {}) }));
-const openTodo = vi.fn();
-vi.mock('../lib/navigate.js', () => ({ openInReverseSearch: vi.fn(), openInHorizon: vi.fn(), openTodo }));
+vi.mock('../lib/navigate.js', () => ({ openInReverseSearch: vi.fn(), openInHorizon: vi.fn() }));
 vi.mock('../lib/trash.js', () => ({ deletedToast: vi.fn() }));
 
 const { default: Inspector } = await import('./Inspector.svelte');
@@ -156,6 +155,7 @@ beforeEach(() => {
   uiState.inspectScene = null;
   uiState.proofScene = null;
   uiState.geolocateRef = null;
+  uiState.todoHint = false;
   Object.assign(geolocating, { caseId: null, scene: null, error: '' });
   vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['png'], { type: 'image/png' }))));
   URL.createObjectURL = vi.fn(() => `blob:${Math.random()}`);
@@ -170,29 +170,40 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// First in the file: the hint is said once for a module's life.
+// First in the file: the hint is asked for once for a module's life.
 describe('the first scene ever kept', () => {
-  it('says once that it is in the To-do too, with Show and Undo, and never again', async () => {
+  it('asks the app to point at the To-do while it is due, the toast keeping its plain words and Undo', async () => {
     await start();
     await openFile('Convoy clip');
     playheadAt(2);
     press('s');
 
-    const [message, , , actions] = toasts('Scene kept')[0];
-    expect(message).toBe('Scene kept at 0:02 · Also in the To-do');
-    expect(actions.map((a) => a.label)).toEqual(['Show', 'Undo']);
-    actions[0].onClick();
-    expect(openTodo).toHaveBeenCalledTimes(1);
-    expect(uiState.tool).toBe('inspect');
-    actions[1].onClick();
+    expect(uiState.todoHint).toBe(true);
+    const [message, , , action] = toasts('Scene kept')[0];
+    expect(message).toBe('Scene kept at 0:02');
+    expect(action.label).toBe('Undo');
+    action.onClick();
     flushSync();
     expect(rows()).toHaveLength(0);
 
+    // the app gave it (App.svelte): never asked again in this browser
+    uiState.todoHint = false;
+    localStorage.setItem('azimut:sceneTodoHint', '1');
     playheadAt(4);
     press('s');
-    const [next, , , action] = toasts('Scene kept')[1];
-    expect(next).toBe('Scene kept at 0:04');
-    expect(action.label).toBe('Undo');
+    expect(uiState.todoHint).toBe(false);
+    expect(toasts('Scene kept')[1][0]).toBe('Scene kept at 0:04');
+    localStorage.clear();
+  });
+
+  it('asks only for a scene kept, never for a time moved or a scene removed', async () => {
+    localStorage.removeItem('azimut:sceneTodoHint');
+    work(CLIP, [kept('sc_1', 1, 4, '')]);
+    await start();
+    await openFile('Convoy clip');
+    type(field('Scene start'), '2');
+    await settle();
+    expect(uiState.todoHint).toBe(false);
   });
 });
 
@@ -218,7 +229,7 @@ describe('the Scenes tab on a video', () => {
     expect(tab('Scenes').querySelector('.count').classList.contains('todo')).toBe(false);
   });
 
-  it('keeps the tab in use for the session, and a frame of the clip has none of its own', async () => {
+  it('keeps the tab in use while the file stays open, and a frame of the clip has none of its own', async () => {
     work(CLIP, [kept('sc_1', 1, 4, '')]);
     saved[CLIP].spec.frames = [{ id: 'fr_a', path: CLIP, time: 2, adjust: { brightness: 1 }, crop: null, sourceOps: [], rotation: 0, w: 640, h: 360, filed: null }];
     await start();
@@ -231,6 +242,41 @@ describe('the Scenes tab on a video', () => {
     target.querySelector('.tile.source').click();
     await settle(10);
     expect(picked()).toContain('Moments');
+  });
+
+  it('opens every file on its Scenes tab, whatever tab the last was left on', async () => {
+    work(CLIP, [kept('sc_1', 1, 4, '')]);
+    saved[CLIP].spec.frames = [{ id: 'fr_a', path: CLIP, time: 2, adjust: { brightness: 1 }, crop: null, sourceOps: [], rotation: 0, w: 640, h: 360, filed: null }];
+    saved[CLIP].spec.activeFrameId = 'fr_a';
+    const back = async () => {
+      target.querySelector('.tool-header .btn').click();
+      await settle(10);
+    };
+    await start();
+    // a video on the clip itself, not on the frame it was left on
+    await openFile('Convoy clip');
+    expect(picked()).toContain('Scenes');
+    expect(target.querySelector('.tile.source').classList.contains('active')).toBe(true);
+    pick('Info');
+    await back();
+    // a picture, marked or not
+    await openFile('Roof');
+    expect(picked()).toBe('Scenes');
+    pick('Analyze');
+    await back();
+    // a capture and a frame have no Scenes, and keep the tab they had
+    await openFile('From above');
+    expect(panelTabs().map((t) => t.textContent.trim())).toEqual(['Adjust', 'Analyze', 'Info']);
+    expect(picked()).toBe('Analyze');
+    await back();
+    await openFile('A frame');
+    expect(picked()).toBe('Analyze');
+    await back();
+    await openFile('Convoy clip');
+    expect(picked()).toContain('Scenes');
+    await back();
+    await openFile('Roof');
+    expect(picked()).toBe('Scenes');
   });
 
   it('opens the first row until one is touched, a press opening another alone, the clip going there', async () => {
@@ -459,25 +505,32 @@ describe('the Scenes tab on a video', () => {
     expect(document.querySelector('[role="dialog"][aria-label="Make the proof"]').textContent).toContain('0:02–0:04');
   });
 
-  it('opens the Scenes tab on a pin or a band pressed on the bar, from any tab', async () => {
+  it('opens the Scenes tab on a pin pressed on the bar from any tab, and on a band only from Scenes', async () => {
     work(CLIP, [kept('sc_1', 2, 6, 'bridge?'), kept('sc_2', 10, null, '')]);
     await start();
     await openFile('Convoy clip');
-    pick('Info');
+    pick('Adjust');
+    // a band pressed from another tab moves the clip and nothing else
     pressBar(20); // 4 s, inside the band
     await settle();
-    expect(picked()).toContain('Scenes');
-    expect(openRow().dataset.sceneKey).toBe('sc_1');
-    expect(openRow().classList.contains('lit')).toBe(true);
+    expect(picked()).toBe('Adjust');
+    expect(target.querySelector('.player-time .now').textContent).toBe('0:04.000');
 
     pressBar(50); // the pin at 10 s
     await settle();
+    expect(picked()).toContain('Scenes');
     expect(openRow().dataset.sceneKey).toBe('sc_2');
     expect(target.querySelector('.player-time .now').textContent).toBe('0:10.000');
+
+    // on the Scenes tab, the band opens its scene
+    pressBar(20);
+    await settle();
+    expect(openRow().dataset.sceneKey).toBe('sc_1');
+    expect(openRow().classList.contains('lit')).toBe(true);
     // away from either, only the clip moves
     pressBar(80);
     await settle();
-    expect(openRow().dataset.sceneKey).toBe('sc_2');
+    expect(openRow().dataset.sceneKey).toBe('sc_1');
   });
 
   it('unfolds the abandoned scene pressed on the bar', async () => {
@@ -598,8 +651,7 @@ describe('a picture', () => {
     await start();
     await openFile('Roof');
     expect(panelTabs().map((t) => t.textContent.trim())).toEqual(['Scenes', 'Adjust', 'Analyze', 'Info']);
-    expect(picked()).toBe('Adjust');
-    pick('Scenes');
+    expect(picked()).toBe('Scenes');
     expect(inside(target.querySelector('[data-scene-panel]'), 'Mark to geolocate')).toBeDefined();
     await afterQuiet();
     expect(put).not.toHaveBeenCalled();

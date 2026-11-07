@@ -62,6 +62,7 @@
         class="view"
         class:active={view === v.id}
         role="tab"
+        data-view={v.id}
         aria-selected={view === v.id}
         title={waiting ? waitingWords(waiting) : undefined}
         aria-label={waiting ? `${v.label}, ${waitingWords(waiting)}` : undefined}

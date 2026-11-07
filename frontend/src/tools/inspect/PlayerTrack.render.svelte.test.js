@@ -166,6 +166,22 @@ describe('a click on a scene', () => {
     expect(onscene).toHaveBeenLastCalledWith('proof:P');
   });
 
+  it('names only a pin while bands are shut, a band moving the clip alone', () => {
+    const onscene = vi.fn();
+    const onseek = vi.fn();
+    const track = open({ scenes: SCENES, onscene, onseek, bandsOpen: false });
+    press(track, 45);
+    expect(onscene).not.toHaveBeenCalled();
+    expect(onseek).toHaveBeenLastCalledWith(4.5, false);
+    // nor the shortest of two stacked, while a pin and a proof's moment still do
+    press(track, 35);
+    expect(onscene).not.toHaveBeenCalled();
+    press(track, 71);
+    expect(onscene).toHaveBeenLastCalledWith('sc_2');
+    press(track, 90);
+    expect(onscene).toHaveBeenLastCalledWith('proof:P');
+  });
+
   it('takes the shortest of the bands stacked there', () => {
     const onscene = vi.fn();
     press(open({ scenes: SCENES, onscene }), 35);

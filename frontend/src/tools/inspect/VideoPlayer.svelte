@@ -40,8 +40,9 @@
     // The scene whose time is open, and where a handle dragged on the bar puts it.
     editing = null,
     onedit,
-    // A press on a scene's pin or band, by the scene's key.
+    // A press on a scene's pin, or on its band while `bandsOpen`, by the scene's key.
     onscene,
+    bandsOpen = true,
   } = $props();
 
   let shell = $state();
@@ -281,6 +282,7 @@
       onseek={seekBar}
       {onedit}
       {onscene}
+      {bandsOpen}
     />
     <div class="controls">
       <button class="player-btn" onclick={togglePlay} aria-label={paused ? 'Play' : 'Pause'} title={INSPECT_HELP.play}>

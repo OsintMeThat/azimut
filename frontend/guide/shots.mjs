@@ -377,7 +377,7 @@ async function run() {
         // menu that picture is about.
         const sidebar = page.locator('aside[data-guide="start.sidebar"]');
         if (!outside && !stage.from && (await sidebar.isVisible()) !== Boolean(stage.sidebar)) {
-          await page.locator('.topbar button[title="Toggle case sidebar"]').click();
+          await page.locator('.topbar button[title^="Toggle case sidebar"]').click();
         }
         await settle(shooter, clip, stage.settle ?? (stage.map ? 5000 : 800));
         await shooter.mouse.move(1, 1);

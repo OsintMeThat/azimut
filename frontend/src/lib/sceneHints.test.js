@@ -76,3 +76,18 @@ describe('the To-do named once', () => {
     expect(todoHintDue()).toBe(false);
   });
 });
+
+describe('where the first scene kept points', () => {
+  it('at the toggle while the sidebar is closed, its To-do tab while it shows another view', async () => {
+    const { todoHintAt } = await fresh();
+    expect(todoHintAt(false, 'folders')).toBe('toggle');
+    expect(todoHintAt(false, 'todo')).toBe('toggle');
+    expect(todoHintAt(true, 'folders')).toBe('tab');
+    expect(todoHintAt(true, 'recent')).toBe('tab');
+  });
+
+  it('nowhere while the To-do is on screen, where the scene shows up by itself', async () => {
+    const { todoHintAt } = await fresh();
+    expect(todoHintAt(true, 'todo')).toBeNull();
+  });
+});

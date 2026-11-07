@@ -3,7 +3,7 @@
  *
  * A video with nothing marked in it yet asks, in its empty frame strip, whether it
  * holds several places; Not now keeps that file quiet. The first scene ever kept
- * says once that it waits in the To-do as well.
+ * points once at where it waits, the case sidebar's To-do (`todoHintAt`).
  *
  * Storage may be missing or refuse (a private window, blocked site data): each nudge
  * then keeps its word for the session and asks again on the next one.
@@ -61,6 +61,16 @@ export function declineInvite(caseId, path) {
 /** Whether the next scene kept is the first ever here, which says where it waits. */
 export function todoHintDue() {
   return !session.hinted && read(HINT_KEY) == null;
+}
+
+/**
+ * What the first scene kept points at: the sidebar's toggle while the sidebar is
+ * closed, its To-do tab while it shows another view. Nothing while the To-do is on
+ * screen, where the scene shows up by itself, so the hint waits for a later scene.
+ */
+export function todoHintAt(sidebarOpen, sidebarView) {
+  if (!sidebarOpen) return 'toggle';
+  return sidebarView === 'todo' ? null : 'tab';
 }
 
 /** The To-do was named once: never again in this browser. */

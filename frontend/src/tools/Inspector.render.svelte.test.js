@@ -125,6 +125,11 @@ async function openFile(title) {
 }
 
 const button = (text) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith(text));
+/** A picture opens on its Scenes tab: its Duplicate is on Adjust. */
+function toAdjust() {
+  [...target.querySelectorAll('.ptab')].find((t) => t.textContent.includes('Adjust')).click();
+  flushSync();
+}
 /** The Scenes tab shown afresh, its stub handed the list as it stands. */
 function showScenes() {
   [...target.querySelectorAll('.ptab')].find((t) => t.textContent.includes('Adjust')).click();
@@ -196,6 +201,7 @@ describe('leaving a file', () => {
   it('goes back to the file list, writing what was pending first', async () => {
     await start();
     await openFile('Roof');
+    toAdjust();
     button('Duplicate').click();
     flushSync();
 
@@ -226,6 +232,7 @@ describe('saving as it is made', () => {
   it('files the work once the edits stop, and says it is saved', async () => {
     await start();
     await openFile('Roof');
+    toAdjust();
 
     button('Duplicate').click();
     flushSync();
@@ -367,6 +374,7 @@ describe('renaming the file', () => {
       const { entity_id: _id, ...answer } = renamed; // the route answers without it
       return answer;
     });
+    toAdjust();
     button('Duplicate').click();
     flushSync();
 
@@ -379,6 +387,8 @@ describe('renaming the file', () => {
     expect(get).toHaveBeenCalledWith('/api/cases/case-a/inspect/work?path=media%2FNorth%20roof.png');
     expect(field().value).toBe('North roof');
     expect(reloadCase).toHaveBeenCalled();
+    // the same file under its new name, still on the tab it was looked at from
+    expect(tab('Adjust').getAttribute('aria-selected')).toBe('true');
   });
 
   it('leaves the name as it was on Escape', async () => {
