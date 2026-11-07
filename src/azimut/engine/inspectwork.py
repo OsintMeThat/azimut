@@ -567,6 +567,66 @@ def _collage_specs(case: "Case") -> list[tuple[str, dict[str, Any]]]:
     return out
 
 
+def collage_pieces(case: "Case") -> list[dict[str, Any]]:
+    """Every collage with each piece's file and instant, and the picture it last
+    exported: what reads a collage back to the video its pieces were cut from."""
+    out = []
+    for rel, spec in _collage_specs(case):
+        entity = case.find_entity(attr="spec", value=rel)
+        nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
+        exported: dict[str, Any] = spec["exported"] if isinstance(spec.get("exported"), dict) else {}
+        out.append({
+            "name": Path(rel).stem,
+            "title": str((entity or {}).get("label") or Path(rel).stem),
+            "pieces": [((n.get("save") or {}).get("path"), (n.get("save") or {}).get("time")) for n in nodes],
+            "export": exported.get("path") if isinstance(exported.get("path"), str) else None,
+            "current": _export_current(case, spec),
+        })
+    return out
+
+
+def collage_export(case: "Case", name: str) -> str | None:
+    """The picture a collage last exported, as its document records it."""
+    spec = _read(case.resolve_inside(layout.collage_rel(layout.slugify(name, "Collage"))))
+    exported = (spec or {}).get("exported")
+    path = exported.get("path") if isinstance(exported, dict) else None
+    return path if isinstance(path, str) and path else None
+
+
+def _merge_into(fields: dict[str, Any]) -> Callable[[dict[str, Any]], None]:
+    def merge(scene: dict[str, Any]) -> None:
+        scene.update(fields)
+
+    return merge
+
+
+def move_scenes(case: "Case", old: str, new: str) -> list[dict[str, Any]]:
+    """Carry the whole-picture scenes of one file to another, with what the server keeps
+    on them: a collage saved again, its mark following the new picture. Answers with
+    the scenes moved."""
+    with case.lock:
+        found = _settle(case, old)
+        if not found:
+            return []
+        rel, spec = found
+        scenes = [s for s in spec.get("scenes") or [] if isinstance(s, dict)]
+        moving = [s for s in scenes if s.get("start") is None and s.get("end") is None]
+        if not moving:
+            return []
+        _write(case.resolve_inside(rel), {**spec, "scenes": [s for s in scenes if s not in moving], "updated_at": _now()})
+        there = _settle(case, new)
+        target = dict(there[1]) if there else {"frames": []}
+        held = [s for s in target.get("scenes") or [] if isinstance(s, dict)]
+        if any(s.get("start") is None and s.get("end") is None for s in held):
+            return []  # the new picture is marked already: the old mark has nothing to add
+        save_work(case, new, {**target, "scenes": held + [{k: s.get(k) for k in _SCENE_KEYS} for s in moving]})
+        for scene in moving:
+            kept = {k: scene[k] for k in SCENE_STATE if k in scene}
+            if kept:
+                update_scene(case, new, scene["id"], _merge_into(kept))
+    return moving
+
+
 def list_collages(case: "Case") -> list[dict[str, Any]]:
     rows = []
     for rel, spec in _collage_specs(case):

@@ -255,8 +255,10 @@ def compose(case_id: str, body: ComposeIn) -> dict[str, Any]:
         src = n.src.model_dump(exclude={"ops"})
         src["ops"] = [op.model_dump() for op in n.src.ops]
         nodes.append({"src": src, "quad": [list(pt) for pt in n.quad]})
+    # the picture this collage exported before, whose mark follows the new one
+    before = inspectwork.collage_export(case, body.collage) if body.collage else None
     try:
-        return inspect_engine.compose_perspective(
+        made = inspect_engine.compose_perspective(
             case, width=body.width, height=body.height, nodes=nodes,
             background=body.background, label=body.label, folder=body.folder,
             notes=body.notes, bend=body.bend, collage=body.collage,
@@ -265,6 +267,26 @@ def compose(case_id: str, body: ComposeIn) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (ValueError, RuntimeError, OSError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    after = (made.get("item") or {}).get("path")
+    if before and after and before != after:
+        follow_mark(case, before, after)
+    return made
+
+
+def follow_mark(case: Any, before: str, after: str) -> None:
+    """A collage saved again: a mark to geolocate on its last picture, not proved yet,
+    moves to the new one with its captures. A proved picture keeps what proved it."""
+    if scenes_engine.laid_out_by(scenes_engine.proof_specs(case), before):
+        return
+    try:
+        moved = inspectwork.move_scenes(case, before, after)
+    except CaseError:
+        return
+    if not moved:
+        return
+    if geolocate.repath(case, before, after, {scene["id"] for scene in moved}):
+        say_geolocating(case)
+    events.publish({"type": "scenes", "case_id": case.id, "video": after})
 
 
 @router.post("/cases/{case_id}/inspect/auto-stitch")
@@ -350,8 +372,13 @@ def list_scenes(case_id: str, video: str) -> dict[str, Any]:
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     held = geolocate.current(case)
-    # the scene of this video being geolocated, which Inspect marks in its list
-    return {**found, "geolocating": held["id"] if held and held["video"] == video else None}
+    return {
+        **found,
+        # the scene of this video being geolocated, which Inspect marks in its list
+        "geolocating": held["id"] if held and held["video"] == video else None,
+        # the collages composed from its frames alone, placed among its scenes by time
+        "collages": scenes_engine.video_collages(case, video),
+    }
 
 
 # -- geolocating a scene (engine/geolocate.py) ----------------------------------------
@@ -390,18 +417,22 @@ def attach_capture(case: Any, path: str) -> dict[str, Any] | None:
 class MarkIn(BaseModel):
     path: str = Field(min_length=1, max_length=1024)
     label: str = Field(default="", max_length=inspectwork.MAX_SCENE_LABEL)
+    # on a video (or a collage of one): a moment, its end making it a passage
+    start: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    end: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 @router.post("/cases/{case_id}/scenes/mark")
 def mark_to_geolocate(case_id: str, body: MarkIn) -> dict[str, Any]:
-    """Mark a whole picture or video to geolocate, from the Media Library or Inspect:
-    its scene about the whole file, or the one already there."""
+    """Mark a picture or a video to geolocate, from the Media Library or the Collage tool:
+    a picture whole, a video whole or over a moment, a collage of one video's frames as
+    that video. Answers with the scene, or the one already there."""
     case = get_case(case_id)
     try:
-        scene = geolocate.mark(case, body.path, body.label)
+        scene = geolocate.mark(case, body.path, body.label, body.start, body.end)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    events.publish({"type": "scenes", "case_id": case.id, "video": body.path})
+    events.publish({"type": "scenes", "case_id": case.id, "video": scene["video"]})
     return {"scene": scene}
 
 

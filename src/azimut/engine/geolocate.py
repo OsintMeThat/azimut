@@ -163,6 +163,16 @@ def stop(case: Case, draft_id: str | None = None) -> bool:
     return True
 
 
+def repath(case: Case, old: str, new: str, draft_ids: set[str]) -> bool:
+    """Follow a scene being geolocated to the file its mark moved to. True if it did."""
+    with _lock:
+        held = _active.get(case.id)
+        if held is None or held["video"] != old or held["draft"] not in draft_ids:
+            return False
+        held["video"] = new
+    return True
+
+
 def attach(case: Case, path: str) -> dict[str, Any] | None:
     """Attach a capture just filed to the scene being geolocated, if there is one, and
     answer with that scene (``video``, ``id``, ``label``) so the capture can say so."""
@@ -212,10 +222,15 @@ def restore(case: Case, video: str, draft_id: str) -> dict[str, Any]:
 # -- marking a whole file -------------------------------------------------------------
 
 
-def mark(case: Case, path: str, label: Any = "") -> dict[str, Any]:
-    """Mark a whole picture or video to geolocate, from outside Inspect: a scene about
-    the whole file, or the one already there. A frame Inspect cut from a video belongs
-    to that video's scenes, and a capture is an answer, not a question: neither is marked."""
+def mark(case: Case, path: str, label: Any = "", start: Any = None, end: Any = None) -> dict[str, Any]:
+    """Mark a picture or a video to geolocate from outside Inspect, and answer with its scene.
+
+    A picture is marked whole. A video is marked whole, or over ``start``–``end`` (an
+    instant without an end), the scene already there at that time if there is one. A
+    collage composed from one video's frames belongs to that video: marking it marks
+    the video, over the same time. A frame Inspect cut belongs to its video's scenes and
+    a capture is an answer, not a question: neither is marked.
+    """
     if label is not None and not isinstance(label, str):
         raise CaseError("a scene label must be text")
     entity = case.find_entity(attr="path", value=path)
@@ -224,22 +239,50 @@ def mark(case: Case, path: str, label: Any = "") -> dict[str, Any]:
     kind = _kinds(case, [path]).get(path)
     if kind not in ("image", "video"):
         raise CaseError("only a picture or a video is marked to geolocate")
-    if kind == "image" and path in scenes_engine.frame_origins(case, [path]):
-        raise CaseError("a frame cut from a video belongs to its video's scenes")
+    if kind == "image":
+        origin = scenes_engine.frame_origins(case, [path]).get(path)
+        if origin is not None:
+            if not _composed(case, path):
+                raise CaseError("a frame cut from a video belongs to its video's scenes")
+            path, kind = origin[0], "video"
+    at = scenes_engine._seconds(start) if start is not None else None
+    until = scenes_engine._seconds(end) if end is not None and at is not None else None
+    if start is not None and at is None:
+        raise CaseError("a scene's start is a time in seconds")
+    if kind == "image" and at is not None:
+        raise CaseError("a picture is marked whole")
+    if until is not None and at is not None and until <= at:
+        raise CaseError("a scene must end after it starts")
     word = (label or "").strip()[: inspectwork.MAX_SCENE_LABEL]
-    inspectwork.add_scenes(case, path, [{"start": None, "end": None, "label": word}])
-    whole = next(iter(_whole_drafts(case, path)), None)
-    if whole is None:
+    inspectwork.add_scenes(case, path, [{"start": at, "end": until, "label": word}])
+    scene = next(
+        (
+            s for s in _drafts(case, path)
+            if _same(s.get("start"), at) and _same(s.get("end"), until)
+        ),
+        None,
+    )
+    if scene is None:
         raise CaseError("that file holds as many scenes as it can")
-    return scene_row(case, path, whole, kind)
+    return scene_row(case, path, scene, kind)
 
 
-def _whole_drafts(case: Case, path: str) -> list[dict[str, Any]]:
+def _composed(case: Case, path: str) -> bool:
+    items = case.media_items_by_paths([path])
+    source = (items[0].get("source") if items else None) or {}
+    return isinstance(source, dict) and source.get("op") == scenes_engine.COLLAGE_OP
+
+
+def _same(a: Any, b: Any) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    return abs(float(a) - float(b)) < 1e-6
+
+
+def _drafts(case: Case, path: str) -> list[dict[str, Any]]:
     work = inspectwork.find_work(case, path)
-    return [
-        s for s in ((work or {}).get("spec") or {}).get("scenes") or []
-        if isinstance(s, dict) and isinstance(s.get("id"), str) and s.get("start") is None and s.get("end") is None
-    ]
+    return [s for s in ((work or {}).get("spec") or {}).get("scenes") or [] if isinstance(s, dict) and isinstance(s.get("id"), str)]
+
 
 
 # -- the queue ------------------------------------------------------------------------

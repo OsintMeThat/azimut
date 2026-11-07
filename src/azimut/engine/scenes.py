@@ -176,23 +176,107 @@ def _parent_video(case: Case, item: dict[str, Any], cache: dict[str, str | None]
     return recorded if isinstance(recorded, str) and recorded else None
 
 
+#: What Inspect records for a picture it composed from pieces (`inspect.compose_perspective`).
+COLLAGE_OP = "collage"
+
+
+def _cut_frames(case: Case, items: list[dict[str, Any]], parents: dict[str, str | None]) -> dict[str, tuple[str, float]]:
+    origins: dict[str, tuple[str, float]] = {}
+    for item in items:
+        source = item.get("source")
+        if not isinstance(source, dict) or source.get("type") != "inspect" or source.get("op") != FRAME_OP:
+            continue
+        moment = _seconds(source.get("time"))
+        video = _parent_video(case, item, parents)
+        if moment is not None and video:
+            origins[item["path"]] = (video, moment)
+    return origins
+
+
+def collage_video(case: Case, pieces: list[tuple[Any, Any]]) -> tuple[str, list[float]] | None:
+    """The one video a collage's pieces were all cut from, and their instants, or None.
+
+    A piece is a video at an instant, or a frame Inspect cut from one; a collage that
+    also holds a picture, or pieces of two videos, is a picture of its own.
+    """
+    paths = [p for p, _t in pieces if isinstance(p, str) and p]
+    if not pieces or len(paths) != len(pieces):
+        return None
+    items = {item["path"]: item for item in case.media_items_by_paths(list(dict.fromkeys(paths)))}
+    cut = _cut_frames(case, list(items.values()), {})
+    videos: set[str] = set()
+    times: list[float] = []
+    for path, time in pieces:
+        if path in cut:
+            video, moment = cut[path]
+        elif (items.get(path) or {}).get("kind") == "video" and _seconds(time) is not None:
+            video, moment = path, float(time)
+        else:
+            return None
+        videos.add(video)
+        times.append(moment)
+    return (videos.pop(), sorted(times)) if len(videos) == 1 else None
+
+
+def _collage_origins(case: Case, items: list[dict[str, Any]]) -> dict[str, tuple[str, float]]:
+    """A picture composed from one video's frames, read back to that video at its first piece."""
+    composed = [
+        item for item in items
+        if isinstance(item.get("source"), dict)
+        and item["source"].get("type") == "inspect" and item["source"].get("op") == COLLAGE_OP
+    ]
+    if not composed:
+        return {}
+    documents: dict[str, list[tuple[Any, Any]]] | None = None
+    origins: dict[str, tuple[str, float]] = {}
+    for item in composed:
+        source = item["source"]
+        files, moments = source.get("sources"), source.get("times")
+        if isinstance(files, list) and isinstance(moments, list) and len(files) == len(moments):
+            pieces = list(zip(files, moments))
+        else:
+            # exported before the instants were recorded: its document still holds them
+            if documents is None:
+                documents = {c["export"]: c["pieces"] for c in inspectwork.collage_pieces(case) if c["export"]}
+            pieces = documents.get(item["path"], [])
+        found = collage_video(case, pieces)
+        if found:
+            origins[item["path"]] = (found[0], found[1][0])
+    return origins
+
+
 def frame_origins(case: Case, paths: list[str]) -> dict[str, tuple[str, float]]:
-    """For each of these files that Inspect cut from a video: the video and the instant."""
+    """For each of these files that Inspect cut from a video: the video and the instant.
+    A collage composed from one video's frames counts, at its first piece."""
     unique = list(dict.fromkeys(p for p in paths if p))
     origins: dict[str, tuple[str, float]] = {}
     parents: dict[str, str | None] = {}
     for at in range(0, len(unique), LOOKUP_BATCH):
-        for item in case.media_items_by_paths(unique[at : at + LOOKUP_BATCH]):
-            source = item.get("source")
-            if not isinstance(source, dict):
-                continue
-            if source.get("type") != "inspect" or source.get("op") != FRAME_OP:
-                continue
-            moment = _seconds(source.get("time"))
-            video = _parent_video(case, item, parents)
-            if moment is not None and video:
-                origins[item["path"]] = (video, moment)
+        items = case.media_items_by_paths(unique[at : at + LOOKUP_BATCH])
+        origins.update(_cut_frames(case, items, parents))
+        origins.update(_collage_origins(case, items))
     return origins
+
+
+def video_collages(case: Case, video: str) -> list[dict[str, Any]]:
+    """The collages composed from this video's frames alone, each with its pieces'
+    instants: a collage belongs to the scenes of its video by them, as a frame does."""
+    rows = []
+    for collage in inspectwork.collage_pieces(case):
+        found = collage_video(case, collage["pieces"])
+        if not found or found[0] != video:
+            continue
+        times = found[1]
+        rows.append({
+            "collage": collage["name"],
+            "title": collage["title"],
+            "export": collage["export"],
+            "current": collage["current"],
+            "times": times,
+            "start": times[0],
+            "end": times[-1] if times[-1] > times[0] else None,
+        })
+    return rows
 
 
 def traced_video(spec: dict[str, Any], origins: dict[str, tuple[str, float]]) -> str | None:

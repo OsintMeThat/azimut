@@ -9,6 +9,7 @@ attached to it on the server, from the app's map tools or from the extension.
 from __future__ import annotations
 
 import io
+import json
 import subprocess
 
 import pytest
@@ -432,3 +433,146 @@ def test_neither_a_capture_nor_a_frame_cut_from_a_video_is_marked(client, tmp_pa
         # a whole video can be marked from outside Inspect too
         whole = _mark(client, cid, video)
         assert whole.status_code == 200 and whole.json()["scene"]["file_kind"] == "video"
+
+
+# -- collages: one video's frames belong to its scenes; several sources make a picture ----
+
+
+QUAD = [[0, 0], [64, 0], [64, 48], [0, 48]]
+
+
+def _collage(client, cid, title, pieces, name=None):
+    """A collage document of these (path, time) pieces, saved as the tool saves it."""
+    nodes = [
+        {"id": f"nd_{i}", "save": {"path": p, "time": t, "ops": []}, "w": 64, "h": 48, "quad": QUAD}
+        for i, (p, t) in enumerate(pieces)
+    ]
+    res = client.post(f"/api/cases/{cid}/collages", json={
+        "name": name, "title": title, "spec": {"width": 200, "height": 60, "nodes": nodes},
+    })
+    assert res.status_code == 200, res.text
+    return res.json()["name"]
+
+
+def _export(client, cid, name, pieces, label="Panorama"):
+    res = client.post(f"/api/cases/{cid}/inspect/compose", json={
+        "width": 200, "height": 60, "background": None, "label": label, "collage": name,
+        "nodes": [{"src": {"path": p, "time": t, "ops": []}, "quad": QUAD} for p, t in pieces],
+    })
+    assert res.status_code == 200, res.text
+    return res.json()["item"]["path"]
+
+
+def _record_export(client, cid, name, title, pieces, path):
+    """The tool writes the picture it exported into its document."""
+    nodes = [
+        {"id": f"nd_{i}", "save": {"path": p, "time": t, "ops": []}, "w": 64, "h": 48, "quad": QUAD}
+        for i, (p, t) in enumerate(pieces)
+    ]
+    signature = json.dumps([[n["save"], n["quad"]] for n in nodes])
+    res = client.post(f"/api/cases/{cid}/collages", json={
+        "name": name, "title": title,
+        "spec": {"width": 200, "height": 60, "nodes": nodes, "exported": {"path": path, "signature": signature}},
+    })
+    assert res.status_code == 200, res.text
+
+
+@needs_ffmpeg
+def test_a_collage_of_one_video_belongs_to_it_and_marks_it(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    pieces = [(video, 1.0), (video, 2.5)]
+    name = _collage(client, cid, "Bridge pano", pieces)
+    picture = _export(client, cid, name, pieces)
+
+    listed = client.get(f"/api/cases/{cid}/scenes", params={"video": video}).json()
+    [row] = listed["collages"]
+    assert (row["collage"], row["times"], row["start"], row["end"]) == (name, [1.0, 2.5], 1.0, 2.5)
+
+    # marked from the Library, the collage marks its video, whole
+    whole = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": picture})
+    assert whole.status_code == 200, whole.text
+    assert (whole.json()["scene"]["video"], whole.json()["scene"]["start"]) == (video, None)
+    # or over its period, from the Collage tool
+    period = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": video, "start": 1.0, "end": 2.5})
+    assert period.status_code == 200, period.text
+    assert (period.json()["scene"]["start"], period.json()["scene"]["end"]) == (1.0, 2.5)
+    again = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": picture, "start": 1.0, "end": 2.5})
+    assert again.json()["scene"]["id"] == period.json()["scene"]["id"]
+
+    # a proof of the collage alone states the video's scene, as a frame would let it
+    made = client.post(f"/api/cases/{cid}/proofs", json={"title": "Pano", "spec": {"panels": [{"id": "p0", "src": picture}]}})
+    assert made.status_code == 200, made.text
+    stated = client.put(
+        f"/api/cases/{cid}/proofs/{made.json()['name']}/scene",
+        json={"moments": [{"start": 1.0, "end": 2.5}], "video": video, "draft": period.json()["scene"]["id"]},
+    )
+    assert stated.status_code == 200, stated.text
+    assert [s["id"] for s in _queue(client, cid)["files"][0]["scenes"]] == [whole.json()["scene"]["id"]]
+
+
+@needs_ffmpeg
+def test_a_collage_exported_before_instants_were_recorded_is_read_from_its_document(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    pieces = [(video, 0.5)]
+    name = _collage(client, cid, "Gate", pieces)
+    picture = _export(client, cid, name, pieces)
+    _record_export(client, cid, name, "Gate", pieces, picture)
+    # as an older release wrote it: the files and no instants
+    case = Case.open(cid)
+    item = case.media_items_by_paths([picture])[0]
+    sidecar = case.resolve_inside(f"media/.meta/{picture.split('/')[-1]}.json")
+    data = json.loads(sidecar.read_text())
+    data["source"].pop("times", None)
+    sidecar.write_text(json.dumps(data))
+    case.upsert_media_item({**item, "source": data["source"]}, entity_id=item.get("entity_id"))
+    from azimut.engine import scenes as scenes_engine
+
+    assert scenes_engine.frame_origins(case, [picture]) == {picture: (video, 0.5)}
+
+
+def test_a_collage_of_several_pictures_is_a_picture_and_its_mark_follows_it(client):
+    cid = _case(client)
+    one = _upload(client, cid, "one.png", (10, 10, 10))
+    two = _upload(client, cid, "two.png", (200, 10, 10))
+    pieces = [(one, None), (two, None)]
+    name = _collage(client, cid, "Both banks", pieces)
+    first = _export(client, cid, name, pieces)
+    _record_export(client, cid, name, "Both banks", pieces, first)
+    mark = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": first})
+    assert mark.status_code == 200 and mark.json()["scene"]["file_kind"] == "image"
+    scene = mark.json()["scene"]
+    _geolocate(client, cid, first, scene["id"])
+    shot = _capture(client, cid)
+
+    # saved again, changed: a new picture, and the mark goes with it, captures and all
+    second = _export(client, cid, name, [(two, None), (one, None)], label="Both banks again")
+    assert second != first
+    [file] = _queue(client, cid)["files"]
+    assert file["video"] == second
+    assert [s["id"] for s in file["scenes"]] == [scene["id"]]
+    assert file["scenes"][0]["captures"] == [shot["path"]]
+    assert client.get(f"/api/cases/{cid}/geolocating").json()["geolocating"]["video"] == second
+
+
+def test_a_proved_collage_picture_keeps_its_mark_when_saved_again(client):
+    cid = _case(client)
+    one = _upload(client, cid, "one.png", (10, 10, 10))
+    two = _upload(client, cid, "two.png", (200, 10, 10))
+    pieces = [(one, None), (two, None)]
+    name = _collage(client, cid, "Both banks", pieces)
+    first = _export(client, cid, name, pieces)
+    _record_export(client, cid, name, "Both banks", pieces, first)
+    client.post(f"/api/cases/{cid}/scenes/mark", json={"path": first})
+    client.post(f"/api/cases/{cid}/proofs", json={"title": "Banks", "spec": {"panels": [{"id": "p0", "src": first}]}})
+    _export(client, cid, name, [(two, None), (one, None)], label="Both banks again")
+    assert _queue(client, cid)["files"] == []
+    listed = client.get(f"/api/cases/{cid}/scenes", params={"video": first}).json()
+    assert [s["kind"] for s in listed["scenes"]] == ["proof"]
+
+
+def test_a_picture_is_never_marked_over_a_moment(client):
+    cid = _case(client)
+    photo = _upload(client, cid)
+    assert client.post(f"/api/cases/{cid}/scenes/mark", json={"path": photo, "start": 2}).status_code == 400

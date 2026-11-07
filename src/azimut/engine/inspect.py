@@ -1247,8 +1247,9 @@ def _compose_canvas(
     height: int,
     nodes: list[dict[str, Any]],
     background: str | None,
-) -> tuple[Image.Image, list[str]]:
-    """Warp each node's source into its quad and paint onto one canvas."""
+) -> tuple[Image.Image, list[str], list[float | None]]:
+    """Warp each node's source into its quad and paint onto one canvas: the canvas, each
+    piece's file and the instant it was cut at (None for a picture)."""
     if not nodes:
         raise ValueError("collage needs at least one image")
     width = max(16, min(int(width), 8192))
@@ -1260,6 +1261,7 @@ def _compose_canvas(
     )
 
     sources: list[str] = []
+    times: list[float | None] = []
     for node in nodes:
         spec = node.get("src") or {}
         rel = spec.get("path")
@@ -1283,7 +1285,9 @@ def _compose_canvas(
         )
         canvas.paste(warped, (0, 0), mask)
         sources.append(rel)
-    return canvas, sources
+        moment = spec.get("time")
+        times.append(float(moment) if isinstance(moment, (int, float)) and not isinstance(moment, bool) else None)
+    return canvas, sources, times
 
 
 # Columns a bend reads at once: bounds its memory on the largest canvas.
@@ -1343,7 +1347,7 @@ def compose_perspective(
     transparent canvas then trimmed to what it holds, the box kept (``box``:
     left, top, right, bottom on the bent canvas).
     """
-    canvas, sources = _compose_canvas(
+    canvas, sources, times = _compose_canvas(
         case, width=width, height=height, nodes=nodes, background=background
     )
     box = None
@@ -1358,7 +1362,9 @@ def compose_perspective(
             raise ValueError("the bend left nothing on the canvas")
         canvas = canvas.crop(box)
     extra = {"straightened": True} if bend is not None else {}
-    source = _derivation("", None, op="collage", sources=sources, perspective=True, **extra)
+    # each piece's instant beside its file: a collage cut from one video is read back to
+    # its scene by them (`engine/scenes.py`)
+    source = _derivation("", None, op="collage", sources=sources, times=times, perspective=True, **extra)
     name = f"{_name_stem(label, 'collage')}.png"
     # The saved collage it was exported from, so its picture can open it again.
     made_by = {"collage": collage} if collage else None
