@@ -292,3 +292,39 @@ test('opens a new proof on Layout, marks the Proof tab while it needs facts, and
   await expect(sideTab(page, 'Style')).toHaveAttribute('aria-selected', 'true');
   await expect(sideTab(page, 'Scene')).toHaveCount(0);
 });
+
+
+test('puts a point of a proof made from a scene in a layer, saving it first, even as the save writes its time', async ({ page }) => {
+  const { scenePuts } = await openCase(page);
+  const LAYERS = [{ name: 'front', title: 'Front', markers: [], styles: [], groups: [
+    { id: 'g1', name: 'Positions', mode: 'individual', colour: '#0072b2', symbol: 'pin' }] }];
+  await page.route(`**/api/cases/${CASE_ID}/layer-targets**`, (route) => route.fulfill({ json: LAYERS }));
+  const linked = [];
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/front/links`, (route) => {
+    linked.push(route.request().postDataJSON());
+    return route.fulfill({ json: { key: 'mk_1', lat: 48.8584, lon: 2.2945 } });
+  });
+
+  await page.evaluate(async () => {
+    const { uiState, caseState } = await import('/src/lib/state.svelte.js');
+    uiState.proofScene = {
+      video: 'media/steps.webm', moments: [{ start: 0.2, end: 1 }], draft: 's3',
+      panels: ['media/frame-a.png', 'media/frame-b.png'], label: 'Road bridge?',
+    };
+    // the layers were read when the case opened, before this case had any
+    caseState.rev += 1;
+  });
+  await expect(page.locator('.panel-row')).toHaveCount(2);
+  await page.locator('.point-row').first().locator('.meta-input').fill('48.858400, 2.294500');
+
+  // never saved: the point's menu saves the proof, then puts its point in the layer
+  await page.getByRole('button', { name: 'Point 1 actions', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'Point 1 actions', exact: true });
+  await menu.getByRole('button', { name: 'Front', exact: true }).click();
+  // a layer of one group goes straight to the marker's look
+  await menu.getByRole('button', { name: 'Add to Front', exact: true }).click();
+
+  // the save wrote the scene's time, and the point still joined the layer
+  await expect.poll(() => scenePuts.length).toBe(1);
+  await expect.poll(() => linked.length).toBe(1);
+});

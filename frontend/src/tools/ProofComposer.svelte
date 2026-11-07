@@ -5539,7 +5539,7 @@
   // the top-of-screen name reads apart ("Proof 2"). Called on reset.
   const freshTitle = () => nextName('proof', savedProofTitles());
 
-  let overwritePrompt = $state(null); // { slug, andPost } when a save hits a named proof
+  let overwritePrompt = $state(null); // { slug, andPost, then } when a save hits a named proof
   // { name, lat, lon } — the point a save carried, where the setting says to ask
   // first. Only ever set for a point the case does not already hold.
   let placeOffer = $state(null);
@@ -5674,11 +5674,12 @@
     // a name another proof holds. An unbound proof landing on a saved name is
     // the one case that can go either way, so it asks first.
     if (!savedName && savedProofNames().has(slugify(proof.title, 'proof'))) {
-      overwritePrompt = { slug: slugify(proof.title, 'proof'), andPost };
+      overwritePrompt = { slug: slugify(proof.title, 'proof'), andPost, then };
       return;
     }
-    await performSave(andPost);
-    if (then && !dirty) then();
+    // What asked for the save (a point into a layer, an export) goes on once it landed,
+    // whatever the save moved after it: a scene's time written, the case read again.
+    if ((await performSave(andPost)) && then) then();
   }
 
   /** The point on screen is right, or was moved: on to the next one, or the save. */
@@ -5697,8 +5698,9 @@
     if (later && !dirty) toast('Unchecked points stay off the case map until you check them.', 'warn', 5200);
   }
 
+  /** Save the proof; true once it is saved. */
   async function performSave(andPost = false) {
-    if (!proof.panels.length || saving) return;
+    if (!proof.panels.length || saving) return false;
     saving = true;
     try {
       const c = await ensureCase();
@@ -5760,8 +5762,10 @@
         };
         uiState.tool = 'post';
       }
+      return true;
     } catch (e) {
       toast(`Save failed: ${e.message}`, 'danger', 6000);
+      return false;
     } finally {
       saving = false;
     }
@@ -7260,10 +7264,10 @@
     confirmLabel="Overwrite"
     tone="danger"
     icon="check"
-    onconfirm={() => {
+    onconfirm={async () => {
       const p = overwritePrompt;
       overwritePrompt = null;
-      performSave(p.andPost);
+      if ((await performSave(p.andPost)) && p.then) p.then();
     }}
     oncancel={() => (overwritePrompt = null)}
   />

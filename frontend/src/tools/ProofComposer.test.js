@@ -698,6 +698,22 @@ describe('the points a proof states', () => {
     expect(bodyOfFn('addPointToLayer')).toContain('if (dirty || !savedName) save({ then: go }); else go();');
   });
 
+  it('puts the point in its layer once the save landed, whatever the save moved after it', () => {
+    // a proof made from a scene writes its time and reads the case again after the save,
+    // which may mark it changed: the point still goes in its layer
+    const save = bodyOfFn('save');
+    expect(save).toContain('if ((await performSave(andPost)) && then) then();');
+    expect(save).not.toContain('!dirty) then()');
+    const perform = bodyOfFn('performSave');
+    expect(perform).toContain('return true;');
+    expect(perform).toContain('return false;');
+  });
+
+  it('keeps what asked for the save through the question about a proof of the same name', () => {
+    expect(bodyOfFn('save')).toContain("overwritePrompt = { slug: slugify(proof.title, 'proof'), andPost, then };");
+    expect(source).toContain('if ((await performSave(p.andPost)) && p.then) p.then();');
+  });
+
   it('caps the list where the engine caps it', () => {
     expect(source).toContain('if (proof.points.length >= MAX_POINTS) return;');
   });
