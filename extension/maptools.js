@@ -1642,9 +1642,28 @@
 
   const captureWords = (n) => (n === 1 ? "1 capture" : `${n} captures`);
 
+  /** How many captures a scene holds: the number the app's last nudge gave, until the
+   *  queue is read again (`captureCount`), else its list's. */
+  const captureCount = (scene) =>
+    Number.isInteger(scene?.captureCount) ? scene.captureCount : (scene?.captures?.length ?? 0);
+
+  /** A scene as the app's `geolocating` nudge leaves it, before the queue is read
+   *  again: the capture it names attached, the number it gives kept as `captureCount`
+   *  when the list says otherwise, in progress from its first capture. */
+  function gatheredScene(scene, event) {
+    const next = { ...scene, captures: [...(scene?.captures ?? [])] };
+    delete next.captureCount;
+    const path = event?.capture;
+    if (typeof path === "string" && path && !next.captures.includes(path)) next.captures.push(path);
+    const told = Number.isInteger(event?.captures) && event.captures >= 0 ? event.captures : null;
+    if (told != null && told !== next.captures.length) next.captureCount = told;
+    if ((told ?? next.captures.length) > 0 && next.state === "todo") next.state = "progress";
+    return next;
+  }
+
   /** A scene's state as its row says it; `live` is the one being geolocated. */
   function sceneState(scene, live = false) {
-    const n = scene?.captures?.length ?? 0;
+    const n = captureCount(scene);
     if (live) return n ? `Geolocating · ${captureWords(n)}` : "Geolocating";
     if (scene?.state === "progress" && n) return `In progress · ${captureWords(n)}`;
     return "To geolocate";
@@ -1925,6 +1944,8 @@
     sceneTime,
     queueTime,
     sceneName,
+    captureCount,
+    gatheredScene,
     sceneState,
     openScenes,
     sceneMark,

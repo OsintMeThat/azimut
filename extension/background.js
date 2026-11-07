@@ -446,6 +446,117 @@ async function fillEngine(url, image) {
   if (done?.result?.error) trouble(done.result.error);
 }
 
+// --- Make the proof, from a map panel ------------------------------------------
+//
+// The panel over another site's map holds the scene being geolocated, and its pill
+// offers Make the proof. That is the app's to make: its tab comes to the front on
+// Inspect's chooser for the scene, which opens the case first if it must, through the
+// app's own guards (`lib/extSceneProof.js`). Nothing is written on the way, and the
+// scene goes to no tab but the paired app's.
+//
+// The bridge takes it to the page and brings the page's answer back (`bridge.js`).
+// A tab still loading has no one to answer yet, so it is asked again a moment later.
+// With no app tab open, one is opened at the paired address and handed the scene once
+// it answers; the panel hears at once that it was taken, and a notification says if
+// the tab never answered.
+
+/** How long to wait before each ask: a tab that just opened answers within seconds. */
+const SCENE_WAITS = [0, 400, 800, 1600, 3200];
+/** A detached map window of the app, which is not where a proof is made. */
+const MAP_WINDOW = /[#?&]solo=1(?:&|$)/;
+
+/** The scene a panel hands over, or null when it is not one. */
+function sceneHandoff(scene) {
+  const text = (value, max) => (typeof value === "string" && value && value.length <= max ? value : null);
+  const caseId = text(scene?.caseId, 200);
+  const video = text(scene?.video, 1024);
+  const draft = text(scene?.draft, 200);
+  return caseId && video && draft ? { caseId, video, draft } : null;
+}
+
+/** The paired app's own tabs, the one used last first, its map windows left out. */
+async function appTabs() {
+  let tabs;
+  try {
+    tabs = await api.tabs.query({ url: APP_ORIGINS.map((o) => `${o}/*`) });
+  } catch {
+    return [];
+  }
+  const main = [];
+  for (const tab of tabs ?? []) {
+    if (!(await isPairedApp(tab.url))) continue;
+    let hash = "";
+    try {
+      hash = new URL(tab.url).hash;
+    } catch {
+      continue;
+    }
+    if (!MAP_WINDOW.test(hash)) main.push(tab);
+  }
+  return main.sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
+}
+
+/** A tab and its window in front. */
+async function bringForward(tab) {
+  await api.tabs.update(tab.id, { active: true });
+  try {
+    await api.windows?.update(tab.windowId, { focused: true });
+  } catch {
+    // a window the system keeps behind still shows the tab once it is looked at
+  }
+}
+
+/** The scene handed to an app tab's bridge, asked again while nobody answers. */
+async function deliverScene(tabId, scene, waits = SCENE_WAITS) {
+  let error = "Azimut did not answer";
+  for (const wait of waits) {
+    if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+    let answer = null;
+    try {
+      answer = await api.tabs.sendMessage(tabId, { type: "scene-proof", scene });
+    } catch {
+      // no bridge on it yet: the page is still loading
+    }
+    if (answer?.ok) return { ok: true };
+    if (answer?.refused) return { ok: false, refused: true, error: answer.error || "Azimut refused" };
+    if (answer?.error) error = answer.error;
+  }
+  return { ok: false, error };
+}
+
+async function sceneProof(msg) {
+  const scene = sceneHandoff(msg.scene);
+  if (!scene) return { ok: false, error: "not a scene to prove" };
+  const { backendUrl } = await settings();
+  if (!isAppUrl(backendUrl)) return { ok: false, error: "the Azimut address in the options is not on this machine" };
+  // one hand-off, however many times it is asked for: the app opens it once
+  const handed = { ...scene, id: crypto.randomUUID() };
+  const [tab] = await appTabs();
+  if (tab) {
+    await bringForward(tab);
+    let answer = await deliverScene(tab.id, handed, [0, 300]);
+    if (!answer.ok && !answer.refused) {
+      // a bridge left behind by an update of this extension: a fresh one, then again
+      await api.scripting.executeScript({ target: { tabId: tab.id }, files: ["bridge.js"] }).catch(() => {});
+      answer = await deliverScene(tab.id, handed, [0, 400, 800]);
+    }
+    if (!answer.ok) notify("Azimut", `${answer.error}. Reload its tab, then press Make the proof again.`);
+    return answer.ok ? { ok: true } : { ok: false, error: answer.error };
+  }
+  const opened = await api.tabs.create({ url: `${backendUrl}/#inspect`, active: true });
+  try {
+    await api.windows?.update(opened.windowId, { focused: true });
+  } catch {
+    // the tab is in front of its window all the same
+  }
+  tabLoaded(opened.id)
+    .then(() => deliverScene(opened.id, handed))
+    .then((answer) => {
+      if (!answer.ok) notify("Azimut", `${answer.error}. Press Make the proof again once it has loaded.`);
+    });
+  return { ok: true, opened: true };
+}
+
 // --- the folder this copy was loaded from ---------------------------------------
 //
 // The app owns that folder (engine/extinstall.py) and stamps install.json into
@@ -1655,6 +1766,17 @@ async function handle(msg, sender) {
     if (refused) return { ok: false, error: refused };
     try {
       return await handOffReverse(msg.payload ?? {});
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
+  // A map panel's Make the proof: the app's tab, in front, on Inspect's chooser for
+  // the scene. Asked by the panel, never by a page: the bridge relays nothing of it.
+  if (msg.type === "scene-proof") {
+    if (!sender.tab || isAppUrl(sender.tab.url)) return { ok: false, error: "only a map panel may ask" };
+    try {
+      return await sceneProof(msg);
     } catch (e) {
       return { ok: false, error: e.message };
     }

@@ -9,7 +9,8 @@
  *
  * A window fades so the site's map shows and moves under it, unfolds what the
  * case knows about the file (dates, source, notes), plays a clip in a slim
- * player of its own (frame steps, slow motion, a frame kept as a picture), and
+ * player of its own (frame steps, slow motion, a frame kept as a picture, and
+ * back to the start of the scene being geolocated in it), and
  * is put in one of six places from the pin in its header: a column on either
  * side of the screen, or a corner, clear of the panel. Dragged into a corner,
  * it stays there too. Its controls lie over the bottom of the picture and come
@@ -218,6 +219,7 @@
       .rw-rest.at { width: 3px; height: 6px; margin-left: -1.5px; }
       .rw:hover .rw-rest, .rw.see-through .rw-rest { opacity: 0; }
       .rw-dot { flex: none; width: 7px; height: 7px; margin-right: 2px; border-radius: 50%; background: var(--scene); }
+      .rw-foot .rw-to-scene svg { color: var(--scene); }
       .rw-time {
         flex: none; min-width: 58px; padding: 0 2px 0 6px; text-align: right;
         font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: ${t.text2};
@@ -300,8 +302,14 @@
     <button class="rw-zoom" data-rw="reset" title="Fit the image">100%</button>
     <button class="icon" data-rw="in" title="Zoom in">${icon("plus", 13)}</button>`;
 
+  /** A scene as its pin's tooltip says it: its label and its time, or its time. */
+  const sceneWords = (scene) => (scene.name && scene.name !== scene.time ? `${scene.name} · ${scene.time}` : scene.time);
+
   /** The slim player under a clip: its own controls, since the native ones
-   *  would zoom with it. A clip held for a scene marks it on the bar. */
+   *  would zoom with it. A clip held for a scene marks it on the bar, and a pin
+   *  in its colour beside the frame steps goes back to where it starts, as the
+   *  app's window does (`tools/satellite/RefVideoBar.svelte`). Nothing for the
+   *  whole video, which starts where the clip does. */
   const clipBar = (scene) => `
     <div class="rw-row">
       <button class="icon" data-rw="play" title="Play">${icon("play", 13)}</button>
@@ -316,6 +324,9 @@
       ${fadeControl()}
       <span class="rw-gap"></span>
       <button class="rw-zoom" data-rw="reset" title="Fit the clip">100%</button>
+      ${scene?.start != null
+        ? `<button class="icon rw-to-scene" data-rw="scene" title="${esc(`Back to the start of the scene, ${sceneWords(scene)}`)}" aria-label="Back to the scene">${icon("pin", 13)}</button>`
+        : ""}
       <button class="icon" data-rw="back" title="Back one frame">${icon("chevronLeft", 13)}</button>
       <button class="icon" data-rw="forward" title="Forward one frame">${icon("chevronRight", 13)}</button>
       <button class="rw-rate" data-rw="rate" title="Slower">1×</button>
@@ -610,6 +621,17 @@
       seek(pane, duration ? Math.min(start, duration) : start);
     }
 
+    /** Back to the frame the scene starts on, paused: half a frame into it, as a
+     *  frame step lands. It plays on past the scene from there, as any clip. */
+    function toScene(pane) {
+      const video = pane.video;
+      const start = pane.viewer.scene?.start;
+      if (!video || start == null) return;
+      video.pause();
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      seek(pane, T.stepTarget(start, 0, pane.viewer.fps, duration));
+    }
+
     function seek(pane, to) {
       if (!pane.video) return;
       pane.presented = null; // until the new frame is drawn, it is worked out
@@ -693,6 +715,7 @@
         else if (act === "fade") Object.assign(viewer, T.flipFade(viewer));
         else if (act === "play") togglePlay(pane);
         else if (act === "back" || act === "forward") step(pane, act === "back" ? -1 : 1);
+        else if (act === "scene") toScene(pane);
         else if (act === "rate") {
           viewer.rate = T.nextSlowRate(viewer.rate);
           if (pane.video) pane.video.playbackRate = viewer.rate;

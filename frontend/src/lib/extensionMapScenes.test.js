@@ -72,12 +72,18 @@ function open(answers = {}) {
   };
   const asked = [];
   const ports = [];
+  const handed = []; // what Make the proof handed the worker
+  let proof = { ok: true };
   const api = {
     storage: { local: { get: vi.fn(async (defaults) => ({ ...defaults })), set: vi.fn() } },
     runtime: {
       onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
       sendMessage: vi.fn(async (message) => {
         if (message.type === 'map-file') return { ok: true, file: { type: 'video/mp4', data: '', next: null, total: 0 } };
+        if (message.type === 'scene-proof') {
+          handed.push(message);
+          return typeof proof === 'function' ? proof(message) : proof;
+        }
         if (message.type !== 'map-api') return { ok: true, data: {} };
         asked.push(message);
         const answer = app[message.path];
@@ -109,6 +115,11 @@ function open(answers = {}) {
     $,
     $$: (selector) => [...root.querySelectorAll(selector)],
     calls: (path) => asked.filter((m) => m.path === path),
+    handed,
+    /** What the worker answers Make the proof with: a value, or a function of the message. */
+    proveWith: (answer) => {
+      proof = answer;
+    },
     forget: () => (asked.length = 0),
     nudge: (event) => {
       for (const cb of ports.at(-1).messages) cb({ type: 'app-event', event });
@@ -383,5 +394,147 @@ describe('in step with the app', () => {
     await settle();
     expect(panel.calls('/api/ingest/scenes').map((m) => m.query)).toEqual([{ case_id: OTHER }]);
     expect(panel.$('.geo')).toBe(null);
+  });
+});
+
+describe('a nudge, shown before the queue is read again', () => {
+  /** The panel geolocating the bridge, the queue's next answers held back by hand. */
+  async function heldBack() {
+    panel = open({ '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: BRIDGE } });
+    await settle();
+    const later = [];
+    panel.app['/api/ingest/scenes'] = () => new Promise((resolve) => later.push(resolve));
+    panel.forget();
+    return later;
+  }
+  const count = () => panel.$('.geo-pill .geo-count');
+  const captured = (n) => Array.from({ length: n }, (_, i) => `media/c${i + 1}.png`);
+
+  it('counts the capture attached at once, with a pulse, before the queue answers', async () => {
+    const later = await heldBack();
+    expect(count().textContent).toBe('2');
+    expect(count().classList.contains('bump')).toBe(false);
+    panel.nudge({ type: 'geolocating', case_id: CASE, video: VIDEO, draft: 'sc_2', capture: 'media/c3.png', captures: 3 });
+    expect(count().textContent).toBe('3');
+    expect(count().classList.contains('bump')).toBe(true);
+    expect(count().getAttribute('aria-label')).toBe('3 captures');
+    await settle();
+    expect(later).toHaveLength(1);
+    later[0]({ ...structuredClone(QUEUE), geolocating: { ...BRIDGE, captures: captured(3) } });
+    await settle();
+    expect(count().textContent).toBe('3');
+  });
+
+  it('tells the list’s row too', async () => {
+    const later = await heldBack();
+    panel.press('geo-fold');
+    later.shift()({ ...structuredClone(QUEUE), geolocating: BRIDGE });
+    await settle();
+    panel.nudge({ type: 'geolocating', case_id: CASE, video: VIDEO, draft: 'sc_2', capture: 'media/c3.png', captures: 3 });
+    expect(panel.$('.geo-row.live .geo-meta').textContent).toBe('3:58–4:12 · Geolocating · 3 captures');
+  });
+
+  it('drops an answer asked before the nudge, and reads once more after a burst', async () => {
+    const later = await heldBack();
+    panel.press('geo-fold'); // a read out, as unfolding asks
+    panel.nudge({ type: 'geolocating', case_id: CASE, video: VIDEO, draft: 'sc_2', capture: 'media/c3.png', captures: 3 });
+    panel.nudge({ type: 'geolocating', case_id: CASE, video: VIDEO, draft: 'sc_2', capture: 'media/c4.png', captures: 4 });
+    expect(count().textContent).toBe('4');
+    await settle();
+    // the fold's read and the first nudge's; the second waits for that one
+    expect(later).toHaveLength(2);
+    later[0]({ ...structuredClone(QUEUE), geolocating: BRIDGE });
+    later[1]({ ...structuredClone(QUEUE), geolocating: { ...BRIDGE, captures: captured(3) } });
+    await settle();
+    expect(count().textContent).toBe('4');
+    expect(later).toHaveLength(3);
+    later[2]({ ...structuredClone(QUEUE), geolocating: { ...BRIDGE, captures: captured(4) } });
+    await settle();
+    expect(count().textContent).toBe('4');
+    expect(later).toHaveLength(3);
+  });
+
+  it('drops the pill at once when the scene ends, and a read asked before cannot bring it back', async () => {
+    const later = await heldBack();
+    panel.press('geo-fold');
+    panel.nudge({ type: 'geolocating', case_id: CASE, video: null, draft: null });
+    expect(panel.$('.geo-pill')).toBe(null);
+    await settle();
+    later[0]({ ...structuredClone(QUEUE), geolocating: BRIDGE });
+    await settle();
+    expect(panel.$('.geo-pill')).toBe(null);
+  });
+
+  it('shows a scene started elsewhere from its row, before the queue answers', async () => {
+    panel = open();
+    await settle();
+    panel.app['/api/ingest/scenes'] = () => new Promise(() => {});
+    panel.nudge({ type: 'geolocating', case_id: CASE, video: VIDEO, draft: 'sc_2' });
+    expect(panel.$('.geo-pill .geo-what').textContent).toBe('Geolocating · 3:58–4:12 · bridge?');
+    expect(count().textContent).toBe('2');
+  });
+});
+
+describe('making the proof from over this map', () => {
+  async function geolocating() {
+    panel = open({ '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: BRIDGE } });
+    await settle();
+  }
+  const proof = () => panel.$('.geo-pill [data-act="geo-proof"]');
+
+  it('dots the pill in the scene’s colour, as the list marks it, folded panel included', async () => {
+    panel = open({ '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: { ...BRIDGE, order: 1 } } });
+    await settle();
+    const red = window.AzimutMapTheme.SCENE_COLORS[1];
+    expect(panel.$('.geo-pill .geo-dot').style.getPropertyValue('--scene')).toBe(red);
+    panel.press('collapse');
+    expect(panel.$('header .geo-dot').style.getPropertyValue('--scene')).toBe(red);
+  });
+
+  it('sits on the pill beside the count, worded and explained', async () => {
+    await geolocating();
+    expect(proof().textContent).toBe('Make the proof');
+    expect(proof().title).toBe('Make the proof in Azimut, from its frames and captures');
+    expect(panel.$('.geo-pill [data-act="geo-stop"]').getAttribute('aria-label')).toBe('Stop geolocating');
+  });
+
+  it('hands the scene held to the app, case and all, and writes nothing to it', async () => {
+    await geolocating();
+    panel.forget();
+    proof().click();
+    await settle();
+    expect(panel.handed).toEqual([{ type: 'scene-proof', scene: { caseId: CASE, video: VIDEO, draft: 'sc_2' } }]);
+    expect(panel.calls('/api/ingest/geolocating')).toHaveLength(0);
+    expect(panel.$('.note')).toBe(null);
+    expect(proof().disabled).toBe(false);
+  });
+
+  it('is pressed once while the app is being reached', async () => {
+    await geolocating();
+    let answer;
+    panel.proveWith(() => new Promise((resolve) => (answer = resolve)));
+    proof().click();
+    await settle();
+    expect(proof().disabled).toBe(true);
+    proof().click();
+    answer({ ok: true });
+    await settle();
+    expect(panel.handed).toHaveLength(1);
+    expect(proof().disabled).toBe(false);
+  });
+
+  it('says why when the app could not be reached', async () => {
+    await geolocating();
+    panel.proveWith({ ok: false, error: 'Azimut did not answer' });
+    proof().click();
+    await settle();
+    expect(panel.$('.note').textContent).toBe('Azimut did not answer');
+  });
+
+  it('speaks of the picture for a picture', async () => {
+    const picture = { ...BRIDGE, video: 'media/harbour.png', file_kind: 'image', start: null, end: null };
+    panel = open({ '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: picture } });
+    await settle();
+    expect(proof().title).toBe('Make the proof in Azimut, from the picture and its captures');
   });
 });

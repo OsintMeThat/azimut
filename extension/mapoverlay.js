@@ -179,7 +179,8 @@
   };
 
   function freshScenes() {
-    return { files: null, geo: null, open: false, busy: false };
+    // `proving` while Make the proof is on its way to the app tab
+    return { files: null, geo: null, open: false, busy: false, proving: false };
   }
 
   const tools = {
@@ -1560,6 +1561,12 @@
   // file's scenes may have moved (`scenes`) or something was deleted or restored
   // (`saved`), which can give a scene back or take one up. An app from before scenes
   // answers nothing here, and the panel stays as it was.
+  //
+  // What the `geolocating` nudge says is shown before that read (`heardScene`): the
+  // capture just attached and how many the scene holds, or that it ended. A read
+  // asked before the nudge landed says less than the pill does, so its word on the
+  // scene being geolocated is dropped, the same rule as the app's
+  // (`lib/geolocating.svelte.js`).
 
   /** A burst of nudges is read once. */
   const REQUEUE_MS = 300;
@@ -1572,9 +1579,19 @@
     }, REQUEUE_MS);
   }
 
+  // A read takes a ticket as it sets out, a word said here (a nudge applied, a start
+  // or a stop answered) the next one; the newest held wins.
+  let tickets = 0;
+  let heldTicket = 0;
+  function holdScene(geo) {
+    heldTicket = ++tickets;
+    state.scenes.geo = geo;
+  }
+
   async function loadScenes() {
     const caseId = state.caseId;
     if (!caseId) return;
+    const asked = ++tickets;
     let answer;
     try {
       answer = await call("GET", "/api/ingest/scenes", { query: { case_id: caseId } });
@@ -1583,8 +1600,68 @@
     }
     if (caseId !== state.caseId) return;
     state.scenes.files = answer?.files ?? [];
-    state.scenes.geo = answer?.geolocating ?? null;
+    if (asked >= heldTicket) {
+      heldTicket = asked;
+      state.scenes.geo = answer?.geolocating ?? null;
+    } else mirrorScene(state.scenes.geo);
     render();
+  }
+
+  /** The queue's row for a scene, if the queue read lists it. */
+  function queuedScene(video, id) {
+    const file = (state.scenes.files ?? []).find((one) => one.video === video);
+    return file?.scenes?.find((scene) => scene.id === id) ?? null;
+  }
+
+  /** The row of the scene held, told what the pill was told. */
+  function mirrorScene(geo) {
+    const row = geo ? queuedScene(geo.video, geo.id) : null;
+    if (!row) return;
+    row.captures = [...(geo.captures ?? [])];
+    row.state = geo.state;
+    if (Number.isInteger(geo.captureCount)) row.captureCount = geo.captureCount;
+    else delete row.captureCount;
+  }
+
+  /**
+   * The `geolocating` nudge, shown before the queue is read again: an end drops the
+   * pill, a capture attached to the scene held is counted, and a scene the queue
+   * lists is held from its row. False when it says too little, and the read must.
+   */
+  function heardScene(event) {
+    if (event.draft == null) {
+      holdScene(null);
+      return true;
+    }
+    const geo = state.scenes.geo;
+    const same = geo && geo.video === event.video && geo.id === event.draft;
+    const from = same ? geo : queuedScene(event.video, event.draft);
+    if (!from) return false;
+    const next = T.gatheredScene(from, event);
+    holdScene(next);
+    mirrorScene(next);
+    return true;
+  }
+
+  // The read a nudge asks for, one at a time: nudges landing while it is out ask for
+  // one more, which sets out once it is back, after all of them.
+  let rereading = false;
+  let rereadAgain = false;
+  async function rereadScenes() {
+    if (rereading) {
+      rereadAgain = true;
+      return;
+    }
+    rereading = true;
+    try {
+      await loadScenes();
+    } finally {
+      rereading = false;
+      if (rereadAgain) {
+        rereadAgain = false;
+        rereadScenes();
+      }
+    }
   }
 
   /** The file a scene is in, as the queue names it. */
@@ -1601,7 +1678,7 @@
     try {
       const answer = await call("POST", "/api/ingest/geolocating", { body: { case_id: caseId, video, draft } });
       if (caseId !== state.caseId) return;
-      state.scenes.geo = answer?.geolocating ?? null;
+      holdScene(answer?.geolocating ?? null);
       state.scenes.open = false;
       if (state.scenes.geo) showScene(state.scenes.geo);
     } catch (e) {
@@ -1617,11 +1694,35 @@
     const caseId = state.caseId;
     try {
       await call("POST", "/api/ingest/geolocating", { body: { case_id: caseId } });
-      if (caseId === state.caseId) state.scenes.geo = null;
+      if (caseId === state.caseId) holdScene(null);
     } catch (e) {
       state.note = e.message;
     }
     render();
+  }
+
+  /**
+   * Make the proof, in the app: its tab comes to the front on Inspect's chooser for
+   * the scene held, where the frames, the collages and the captures are offered
+   * (`background.js`, `scene-proof`). Nothing is written from this map.
+   */
+  async function makeProof() {
+    const geo = state.scenes.geo;
+    if (!state.caseId || !geo || state.scenes.proving) return;
+    state.scenes.proving = true;
+    render();
+    try {
+      const answer = await api.runtime.sendMessage({
+        type: "scene-proof",
+        scene: { caseId: state.caseId, video: geo.video, draft: geo.id },
+      });
+      if (!answer?.ok) state.note = answer?.error || "Azimut did not answer";
+    } catch (e) {
+      state.note = e.message;
+    } finally {
+      state.scenes.proving = false;
+      render();
+    }
   }
 
   /** The scene's video or picture over the map: the window already holding it, else a new one. */
@@ -1644,9 +1745,11 @@
    */
   function applyEvent(event) {
     if (!event || event.case_id !== state.caseId) return;
-    // started, ended or a capture attached, from here, the app or another map
+    // started, ended or a capture attached, from here, the app or another map:
+    // shown at once, then read
     if (event.type === "geolocating") {
-      loadScenes();
+      if (heardScene(event)) render();
+      rereadScenes();
       return;
     }
     if (event.type === "scenes") {
@@ -2067,12 +2170,16 @@
        the scene being geolocated, the one amber thing here while it lasts. */
     .geo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; }
     .geo-pill {
-      display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 2px 2px 9px;
-      border: 1px solid ${t.accent}; border-radius: 999px; background: ${t.accentSoft};
+      display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: 0; padding: 2px 3px 4px 9px;
+      border: 1px solid ${t.accent}; border-radius: 12px; background: ${t.accentSoft};
     }
+    .geo-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .geo-line + .geo-line { padding-left: 13px; justify-content: space-between; }
+    /* in the scene's colour, as the app's pill, the list's mark and the window's dot */
     .geo-dot {
       flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-      background: ${t.accent}; box-shadow: 0 0 0 3px ${t.accentSoft};
+      background: var(--scene, ${t.accent});
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--scene, ${t.accent}) 28%, transparent);
     }
     header .geo-dot { margin-left: 6px; vertical-align: 1px; }
     .geo-what {
@@ -2082,10 +2189,26 @@
     .geo-what > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .geo-what:hover:not([disabled]) { background: none; color: ${t.accent}; }
     .geo-count {
-      flex: none; display: inline-flex; align-items: center; gap: 3px;
-      font-size: 11px; color: ${t.text2}; font-variant-numeric: tabular-nums;
+      flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px;
+      border-radius: 10px; background: ${t.bg3}; color: ${t.text3};
+      font-size: 11px; font-variant-numeric: tabular-nums;
     }
+    .geo-count.some { color: ${t.text1}; }
+    .geo-count.bump { animation: geo-bump .9s cubic-bezier(.25, .7, .3, 1); }
+    @keyframes geo-bump {
+      0% { transform: scale(1); background: ${t.bg3}; }
+      25% { transform: scale(1.18); background: ${t.accent}; color: ${t.accentText}; }
+      100% { transform: scale(1); background: ${t.bg3}; }
+    }
+    @media (prefers-reduced-motion: reduce) { .geo-count.bump { animation: none; } }
     .geo-pill .icon { width: 24px; padding: 3px 0; border-radius: 999px; }
+    .geo-proof {
+      flex: none; gap: 5px; padding: 3px 9px; border-radius: 999px;
+      font-size: 11px; font-weight: 500; color: ${t.text1};
+      background: ${t.bg1}; border-color: ${t.border};
+    }
+    .geo-proof svg { color: ${t.accent}; }
+    .geo-proof:hover:not([disabled]) { background: ${t.bg2}; border-color: ${t.accent}; }
     .geo-fold {
       justify-content: flex-start; gap: 6px; padding: 4px 6px;
       background: none; border-color: transparent; color: ${t.text2};
@@ -2401,12 +2524,23 @@
     const total = files.reduce((n, file) => n + file.scenes.length, 0);
     if (!geo && !total) return "";
     const isGeo = (scene) => !!geo && geo.video === scene.video && geo.id === scene.id;
+    const picture = geo?.file_kind === "image";
+    const count = T.captureCount(geo);
+    // the count steps up with a pulse, as the app's pill does, carried on across a redraw
+    const pulse = bump(geo, count);
     const pill = geo
       ? `<div class="geo-pill">
-          <span class="geo-dot"></span>
-          ${button("geo-show", "", `Geolocating · ${T.queueTime(geo)}${geo.label ? ` · ${geo.label}` : ""}`, false, ` class="geo-what" title="Show its ${geo.file_kind === "image" ? "picture" : "video"} over the map"`)}
-          <span class="geo-count" title="Captures attached to it">${icon("camera", 12)}${geo.captures?.length ?? 0}</span>
-          ${button("geo-stop", "x", "", false, ` class="icon" title="Stop geolocating"`)}
+          <div class="geo-line">
+            <span class="geo-dot" style="--scene: ${esc(T.sceneColor(geo))}"></span>
+            ${button("geo-show", "", `Geolocating · ${T.queueTime(geo)}${geo.label ? ` · ${geo.label}` : ""}`, false, ` class="geo-what" title="Show its ${picture ? "picture" : "video"} over the map"`)}
+            <button data-act="geo-stop" class="icon" title="Stop geolocating it, its captures stay with it" aria-label="Stop geolocating">${icon("x", 13)}</button>
+          </div>
+          <div class="geo-line">
+            <span class="geo-count${count ? " some" : ""}${pulse == null ? "" : " bump"}"${pulse ? ` style="animation-delay: -${pulse}ms"` : ""}
+              title="${count === 1 ? "1 capture gathered for it" : count ? `${count} captures gathered for it` : "Nothing captured for it yet"}"
+              aria-label="${count === 1 ? "1 capture" : `${count} captures`}">${icon("camera", 12)}${count}</span>
+            <button data-act="geo-proof" class="geo-proof" title="Make the proof in Azimut, from ${picture ? "the picture and its captures" : "its frames and captures"}"${state.scenes.proving ? " disabled" : ""}>${icon("proof", 12)}<span>Make the proof</span></button>
+          </div>
         </div>`
       : "";
     // the scene as its video's bar draws it, in the colour Inspect gives it, beside its time
@@ -2447,11 +2581,25 @@
     return `<div class="geo" data-guide="ext.scenes">${pill}${fold}${list}</div>`;
   }
 
+  // The count's pulse: when it began, for the scene and the count it was for.
+  const PULSE_MS = 900;
+  let counted = { id: null, count: 0, at: 0 };
+
+  /** How far into its pulse the count is, in ms, or null when it is not pulsing. */
+  function bump(geo, count) {
+    const id = geo ? `${geo.video}#${geo.id}` : null;
+    const now = Date.now();
+    if (id && id === counted.id && count > counted.count) counted = { id, count, at: now };
+    else if (id !== counted.id || count !== counted.count) counted = { id, count, at: 0 };
+    const into = counted.at ? now - counted.at : PULSE_MS;
+    return into < PULSE_MS ? into : null;
+  }
+
   /** A folded panel still says a scene is being geolocated. */
   function foldedGeo() {
     const geo = state.scenes.geo;
     if (!state.collapsed || !geo) return "";
-    return ` <span class="geo-dot" title="Geolocating ${esc(T.sceneName(geo))}"></span>`;
+    return ` <span class="geo-dot" style="--scene: ${esc(T.sceneColor(geo))}" title="Geolocating ${esc(T.sceneName(geo))}"></span>`;
   }
 
   function render() {
@@ -2651,6 +2799,7 @@
       return render();
     }
     if (act === "geo-stop") return stopGeolocating();
+    if (act === "geo-proof") return makeProof();
 
     if (act === "ref-add") {
       refLayer.openPicker();

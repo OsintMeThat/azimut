@@ -1194,6 +1194,8 @@ describe('the scenes to geolocate, on both sides of the boundary', () => {
     row('a', 40, 45, 'Gone', { state: 'abandoned', abandoned: { reason: 'no', at: 'x' } }),
     row('pic', null, null, '', { file_kind: 'image' }),
     row('wall', null, null, 'Harbour wall', { file_kind: 'image' }),
+    // counted by a nudge before its list was read again
+    row('n', 30, 40, 'Ridge', { state: 'progress', captures: ['media/c1.png'], captureCount: 4 }),
   ];
 
   it('writes a time as the app writes it', () => {
@@ -1211,6 +1213,24 @@ describe('the scenes to geolocate, on both sides of the boundary', () => {
       expect(ext.sceneName(scene), scene.id).toBe(appQueue.queueName(scene));
       for (const live of [false, true]) expect(ext.sceneState(scene, live), scene.id).toBe(appQueue.queueState(scene, live));
     }
+  });
+
+  it('takes a nudge the way the app does, before the queue is read again', () => {
+    const nudges = [
+      { draft: 'x' },
+      { draft: 'x', capture: 'media/c1.png', captures: 1 },
+      { draft: 'x', capture: 'media/c2.png', captures: 2 },
+      { draft: 'x', capture: 'media/c9.png', captures: 7 },
+      { draft: 'x', capture: '', captures: -1 },
+      { draft: 'x', capture: 3, captures: 1.5 },
+    ];
+    for (const scene of ROWS) {
+      expect(ext.captureCount(scene), scene.id).toBe(appQueue.captureCount(scene));
+      for (const nudge of nudges) {
+        expect(ext.gatheredScene(scene, nudge), `${scene.id} ${JSON.stringify(nudge)}`).toEqual(appQueue.gatheredScene(scene, nudge));
+      }
+    }
+    expect(ext.captureCount(null)).toBe(0);
   });
 
   it('offers the same open scenes, file by file', () => {

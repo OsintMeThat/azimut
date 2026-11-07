@@ -952,7 +952,8 @@
     sceneList(listedScenes, work.scenes, takenScenes).map((sc) => {
       if (sc.kind !== 'draft' || sc.id !== geolocatingId) return sc;
       const fresh = heldHere?.id === sc.id ? heldHere : null;
-      return fresh ? { ...sc, geolocating: true, captures: fresh.captures ?? sc.captures, state: fresh.state ?? sc.state } : { ...sc, geolocating: true };
+      if (!fresh) return { ...sc, geolocating: true };
+      return { ...sc, geolocating: true, captures: fresh.captures ?? sc.captures, captureCount: fresh.captureCount, state: fresh.state ?? sc.state };
     }),
   );
   // The row the Scenes tab brings into view and lights, `{ key, n }`.

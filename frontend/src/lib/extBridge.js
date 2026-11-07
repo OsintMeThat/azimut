@@ -155,6 +155,45 @@ export function handOffReverse(payload, { timeoutMs = 2000, win = window } = {})
   });
 }
 
+/** The scene a map panel hands over (`extension/background.js`, `scene-proof`), or
+ *  null when it is not one: the case, the file and the scene, by id. */
+export function sceneHandoff(scene) {
+  const text = (value, max) => (typeof value === 'string' && value && value.length <= max ? value : null);
+  const caseId = text(scene?.caseId, 200);
+  const video = text(scene?.video, 1024);
+  const draft = text(scene?.draft, 200);
+  if (!caseId || !video || !draft) return null;
+  const id = text(scene.id, 200);
+  return { caseId, video, draft, ...(id ? { id } : {}) };
+}
+
+/**
+ * Subscribe to Make the proof asked from the extension's map panel, for the scene
+ * its pill holds. The bridge posts it here (`extension/bridge.js`) and waits for the
+ * answer: `take` gets the scene and says whether this tab takes it, `{ ok: true }`,
+ * or `{ ok: false, refused: true, error }` for a tab that never will. It answers at
+ * once; what the tab then does is its own to say. Returns an unsubscribe function.
+ */
+export function onSceneProof(take, win = window) {
+  const onMessage = async (event) => {
+    if (event.origin !== win.location.origin) return;
+    const msg = event.data;
+    if (!msg || msg.channel !== CHANNEL || msg.type !== 'scene-proof') return;
+    const scene = sceneHandoff(msg.scene);
+    let answer = { ok: false, refused: true, error: 'not a scene to prove' };
+    if (scene) {
+      try {
+        answer = (await take(scene)) ?? { ok: true };
+      } catch (e) {
+        answer = { ok: false, refused: true, error: e.message };
+      }
+    }
+    win.postMessage({ channel: CHANNEL, ...answer, type: 'scene-proof-result', id: msg.id }, win.location.origin);
+  };
+  win.addEventListener('message', onMessage);
+  return () => win.removeEventListener('message', onMessage);
+}
+
 /**
  * Subscribe to the extension's "activated" signal: the user just clicked the
  * extension on this tab (granting activeTab), so a previously refused capture

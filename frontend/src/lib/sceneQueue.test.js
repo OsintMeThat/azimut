@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  abandonedScenes, captureWords, firstScenes, isPicture, openScenes, queueColor, queueMark, queueName, queueState, queueTime, sceneCount,
-  waitingWords,
+  abandonedScenes, captureCount, captureWords, firstScenes, gatheredScene, isPicture, openScenes, queueColor, queueMark, queueName, queueState,
+  queueTime, sceneCount, waitingWords,
 } from './sceneQueue.js';
 import { sceneList } from './scenes.js';
 
@@ -54,6 +54,37 @@ describe('what a row says', () => {
     expect(queueState(row('a', 1, null), true)).toBe('Geolocating');
     expect(queueState(row('a', 1, null, '', { captures: ['x', 'y', 'z'] }), true)).toBe('Geolocating · 3 captures');
     expect(captureWords(0)).toBe('0 captures');
+  });
+});
+
+describe('a scene as a nudge leaves it', () => {
+  const nudge = (capture, captures) => ({ type: 'geolocating', case_id: 'c1', video: 'media/a.mp4', draft: 'a', capture, captures });
+
+  it('attaches the capture it names, once, and is in progress from the first', () => {
+    const first = gatheredScene(row('a', 1, null), nudge('media/c1.png', 1));
+    expect(first).toMatchObject({ captures: ['media/c1.png'], state: 'progress' });
+    expect(first.captureCount).toBe(undefined);
+    expect(gatheredScene(first, nudge('media/c1.png', 1)).captures).toEqual(['media/c1.png']);
+    expect(queueState(gatheredScene(first, nudge('media/c2.png', 2)), true)).toBe('Geolocating · 2 captures');
+  });
+
+  it('keeps the number it gives when the list is behind, and leaves the scene it had alone', () => {
+    const scene = row('a', 1, null, '', { state: 'progress', captures: ['media/c1.png'] });
+    const next = gatheredScene(scene, nudge('media/c4.png', 4));
+    expect(next.captures).toEqual(['media/c1.png', 'media/c4.png']);
+    expect(captureCount(next)).toBe(4);
+    expect(queueState(next)).toBe('In progress · 4 captures');
+    expect(scene.captures).toEqual(['media/c1.png']);
+    // a later word that agrees with the list hands the count back to it
+    expect(captureCount(gatheredScene(next, nudge('media/c5.png', 3)))).toBe(3);
+    expect(gatheredScene({ ...next, captures: ['a', 'b', 'c', 'd'] }, nudge('d', 4)).captureCount).toBe(undefined);
+  });
+
+  it('changes nothing on a word that names no capture, as a start does', () => {
+    const scene = row('a', 1, null);
+    expect(gatheredScene(scene, { draft: 'a' })).toEqual(scene);
+    expect(gatheredScene(row('g', 1, null, '', { state: 'abandoned' }), nudge('x', 1)).state).toBe('abandoned');
+    expect(captureCount(null)).toBe(0);
   });
 });
 
