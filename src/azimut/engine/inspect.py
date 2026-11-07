@@ -1403,7 +1403,13 @@ STITCH_MODES = ("planar", *stitch.WARPS)
 
 
 def solve_collage_layout(
-    case: Case, *, srcs: list[dict[str, Any]], width: int, height: int, mode: str = "planar"
+    case: Case,
+    *,
+    srcs: list[dict[str, Any]],
+    width: int,
+    height: int,
+    mode: str = "planar",
+    exclude: list[list[dict[str, Any]] | None] | None = None,
 ) -> dict[str, Any]:
     """Auto-stitch: solve each piece's placement from the imagery itself (no filing).
 
@@ -1424,17 +1430,28 @@ def solve_collage_layout(
     answer is the one the quads are expressed in: the solver grows it to whatever
     the stitch is worth in source pixels rather than shrinking the stitch to fit.
     The caller resizes its canvas to match, or the detail is lost on the way back.
+
+    ``exclude`` holds each piece's painted strokes or None, in the picture its
+    recipe renders (:func:`azimut.engine.stitch.exclusion_mask`); each placed node
+    answers with that picture's ``size``, ``[w, h]``.
     """
     if mode not in STITCH_MODES:
         raise ValueError(f"unknown panorama mode {mode!r}")
     images = [
         _source_image(case, s["path"], s.get("time"), s.get("ops")) for s in srcs
     ]
+    sizes = [img.size for img in images]
+    # frames of one video are matched along their time (`stitch.near_pairs`)
+    sources = [(s["path"], s.get("time")) for s in srcs]
     try:
         if mode == "planar":
-            solved = stitch.solve_layout(images, width=width, height=height)
+            solved = stitch.solve_layout(
+                images, width=width, height=height, sources=sources, exclude=exclude
+            )
         else:
-            solved = stitch.solve_rotation_layout(images, width=width, height=height, warp=mode)
+            solved = stitch.solve_rotation_layout(
+                images, width=width, height=height, warp=mode, sources=sources, exclude=exclude
+            )
     finally:
         for img in images:
             img.close()
@@ -1446,6 +1463,7 @@ def solve_collage_layout(
                 "index": i,
                 "quad": q,
                 "op": ({"op": "remap", "params": remaps[i]} if i in remaps else None),
+                "size": list(sizes[i]),
             }
             for i, q in sorted(solved["quads"].items())
         ],

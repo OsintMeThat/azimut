@@ -574,3 +574,330 @@ def test_a_pan_that_hardly_turns_or_frames_that_do_not_overlap_say_why():
         stitch.lens_of_pan(_pan([0, 150], width=520, height=420))
     with pytest.raises(RuntimeError, match="Two frames"):
         stitch.lens_of_pan(_pan([0]))
+
+
+# --- painted-out areas -----------------------------------------------------
+
+
+def test_an_exclusion_mask_covers_each_stroke_as_a_trail_of_discs():
+    # radius 0.1 of a 200 px width is 20 px; the stroke runs from (40, 50) to (160, 50)
+    mask = stitch.exclusion_mask([{"points": [[0.2, 0.5], [0.8, 0.5]], "radius": 0.1}], (200, 100))
+
+    assert mask.shape == (100, 200)
+    assert mask[50, 100] == 0  # between the two points: the band joins them
+    assert mask[50, 24] == 0 and mask[50, 176] == 0  # round ends, past the points
+    assert mask[50, 15] == 255 and mask[50, 185] == 255
+    assert mask[25, 100] == 255  # above the band
+    assert mask[5, 5] == 255
+
+
+def test_an_exclusion_mask_is_none_when_nothing_is_painted():
+    assert stitch.exclusion_mask(None, (200, 100)) is None
+    assert stitch.exclusion_mask([], (200, 100)) is None
+
+
+def test_no_keypoint_is_found_under_a_painted_area():
+    import cv2
+
+    scene = _scene(width=800, height=500, seed=17)
+    det, _ = stitch._detector(cv2)
+    left_half = [{"points": [[0.0, 0.0], [0.0, 1.0]], "radius": 0.5}]
+
+    pts, _ = stitch._features(cv2, det, scene, left_half)
+    every, _ = stitch._features(cv2, det, scene)
+
+    assert pts is not None and len(pts) < len(every)
+    assert min(x for x, _ in pts) > 0.5 * 800 - 2
+    # the panorama pipeline honours the same strokes
+    arr = stitch._work_array(scene)
+    [feats] = stitch._detail_features(cv2, [arr], [left_half])
+    assert min(k.pt[0] for k in feats.keypoints) > 0.5 * arr.shape[1] - 2
+
+
+def test_a_piece_painted_out_entirely_has_nothing_to_match():
+    import cv2
+
+    det, _ = stitch._detector(cv2)
+    everything = [{"points": [[0.5, 0.5]], "radius": 1.0}]
+    assert stitch._features(cv2, det, _scene(width=400, height=300), everything) == (None, None)
+
+
+def test_painting_out_a_shared_logo_stops_it_stitching_unrelated_scenes():
+    """Two pieces are too few for the overlay filter to call a logo pinned, so it
+    glues two unrelated scenes together. The analyst painting it out is what
+    stops that, and the stitch then refuses as it should."""
+    pieces = _overlaid([_scene(width=500, height=500, seed=s) for s in (1, 2)])
+    logo = [{"points": [[78 / 500, 53 / 500]], "radius": 80 / 500}]
+
+    assert sorted(stitch.solve_layout(pieces, width=900, height=900)["quads"]) == [0, 1]
+    with pytest.raises(RuntimeError, match="no overlap"):
+        stitch.solve_layout(pieces, width=900, height=900, exclude=[logo, logo])
+
+
+def test_painted_areas_leave_the_real_overlap_to_stitch():
+    scene = _scene()
+    pieces = [scene.crop((0, 0, 500, 500)), scene.crop((300, 0, 800, 500))]
+    # a passer-by over the left piece's far side, outside the overlap
+    passer = [{"points": [[0.1, 0.2], [0.15, 0.8]], "radius": 0.08}]
+
+    planar = stitch.solve_layout(pieces, width=1200, height=600, exclude=[passer, None])
+    width_a = planar["quads"][0][1][0] - planar["quads"][0][0][0]
+    offset = _centroid(planar["quads"][1])[0] - _centroid(planar["quads"][0])[0]
+    assert offset / width_a == pytest.approx(300 / 500, abs=0.06)
+
+    views = _pan([-20, 0, 20])
+    rotation = stitch.solve_rotation_layout(views, width=1200, height=600, exclude=[None, passer, None])
+    assert rotation["dropped"] == []
+
+
+def test_exclude_needs_one_entry_per_piece():
+    scene = _scene()
+    pieces = [scene.crop((0, 0, 500, 500)), scene.crop((300, 0, 800, 500))]
+    with pytest.raises(ValueError, match="one entry per piece"):
+        stitch.solve_layout(pieces, width=900, height=600, exclude=[None])
+
+
+# --- frames of one video ---------------------------------------------------
+
+
+def test_frames_of_one_video_pair_with_their_neighbours_in_time():
+    sources = [("media/clip.mp4", float(t)) for t in range(8)]
+    pairs = stitch.near_pairs(sources, 8)
+    assert pairs == sorted({(i, i + s) for i in range(8) for s in (1, 2, 4) if i + s < 8})
+    assert len(pairs) == 17  # where every pair is 28
+
+
+def test_neighbours_follow_time_not_the_order_pieces_were_added():
+    times = [3.0, 0.0, 2.0, 1.0, 5.0, 4.0]
+    pairs = stitch.near_pairs([("media/clip.mp4", t) for t in times], 6)
+    by_time = sorted(range(6), key=lambda i: times[i])
+    expected = {
+        tuple(sorted((by_time[r], by_time[r + s]))) for r in range(6) for s in (1, 2, 4) if r + s < 6
+    }
+    assert set(pairs) == expected
+
+
+def test_pictures_and_other_videos_still_meet_every_piece():
+    sources = [("media/a.mp4", float(t)) for t in range(6)]
+    sources += [("media/photo.jpg", None), ("media/b.mp4", 1.0), ("media/b.mp4", 2.0)]
+    pairs = set(stitch.near_pairs(sources, 9))
+    for i in range(6):
+        assert (i, 6) in pairs and (i, 7) in pairs and (i, 8) in pairs  # a picture, another video
+    assert (7, 8) in pairs
+    assert (0, 5) not in pairs  # frames of one video five apart
+
+
+def test_nothing_is_saved_when_neighbours_are_every_pair():
+    assert stitch.near_pairs(None, 5) is None
+    assert stitch.near_pairs([("media/clip.mp4", float(t)) for t in range(3)], 3) is None
+    assert stitch.near_pairs([("media/p.jpg", None)] * 6, 6) is None
+
+
+def _pan_frames(count, step=110):
+    """``count`` frames of a camera sliding ``step`` px across one scene."""
+    scene = _scene(width=400 + step * count, height=420, seed=23, blobs=120 + 40 * count)
+    return [scene.crop((step * k, 0, step * k + 400, 420)) for k in range(count)]
+
+
+def test_a_videos_frames_stitch_on_fewer_pairs_to_the_same_layout(monkeypatch):
+    frames = _pan_frames(8)
+    sources = [("media/clip.mp4", 0.5 * k) for k in range(8)]
+    tried = []
+    real = stitch._pair_homography
+
+    def counted(cv2, matcher, a, b, *rest):
+        tried.append(1)
+        return real(cv2, matcher, a, b, *rest)
+
+    monkeypatch.setattr(stitch, "_pair_homography", counted)
+    near = stitch.solve_layout(frames, width=1600, height=600, sources=sources)
+    near_count = len(tried)
+    tried.clear()
+    every = stitch.solve_layout(frames, width=1600, height=600)
+
+    assert (near_count, len(tried)) == (17, 28)
+    assert near["dropped"] == every["dropped"] == []
+    assert near["canvas"] == every["canvas"]
+    for i in range(8):
+        for p, q in zip(near["quads"][i], every["quads"][i]):
+            assert p == pytest.approx(q, abs=2.0)
+
+
+def test_a_frame_its_neighbours_miss_sends_the_stitch_back_to_every_pair():
+    """A cut in the video: the stranger frame matches no neighbour, so the stitch
+    tries every pair before leaving it out, and answers exactly as it always did."""
+    frames = _pan_frames(6)
+    frames.insert(3, _scene(width=400, height=420, seed=999))
+    sources = [("media/clip.mp4", 0.5 * k) for k in range(7)]
+
+    near = stitch.solve_layout(frames, width=1600, height=600, sources=sources)
+    every = stitch.solve_layout(frames, width=1600, height=600)
+
+    assert near == every
+    assert near["dropped"] == [3]
+
+
+def test_a_videos_frames_stitch_on_fewer_pairs_in_the_panorama_modes():
+    views = _pan([-36, -24, -12, 0, 12, 24, 36])
+    sources = [("media/clip.mp4", float(k)) for k in range(7)]
+
+    near = stitch.solve_rotation_layout(views, width=1600, height=800, sources=sources)
+    every = stitch.solve_rotation_layout(views, width=1600, height=800)
+
+    assert near["dropped"] == every["dropped"] == []
+    xs = [_centroid(near["quads"][i])[0] for i in range(7)]
+    assert xs == sorted(xs)
+    width = near["quads"][3][1][0] - near["quads"][3][0][0]
+    for i in range(7):
+        assert _centroid(near["quads"][i])[0] == pytest.approx(_centroid(every["quads"][i])[0], abs=0.02 * width)
+
+
+def test_a_cut_in_the_video_falls_back_to_every_pair_in_the_panorama_modes():
+    views = _pan([-24, -12, 0, 12, 24])
+    views.insert(2, _scene(width=520, height=420, seed=999))
+    sources = [("media/clip.mp4", float(k)) for k in range(6)]
+
+    solved = stitch.solve_rotation_layout(views, width=1600, height=800, sources=sources)
+
+    assert solved["dropped"] == [2]
+    assert sorted(solved["quads"]) == [0, 1, 3, 4, 5]
+
+
+# --- reliability -----------------------------------------------------------
+
+
+def test_the_same_pieces_always_stitch_the_same_way():
+    """OpenCV's matcher draws on a global random generator every earlier stitch
+    has moved on, so the same panorama used to come back a pixel or so apart
+    from one press to the next. Each solve now starts it from the same seed."""
+    import cv2
+
+    views = _pan([-30, -15, 0, 15, 30])
+    answers = []
+    for state in (1, 2, 3):
+        cv2.setRNGSeed(state)  # whatever ran before
+        answers.append(stitch.solve_rotation_layout(views, width=900, height=600))
+    assert answers[0] == answers[1] == answers[2]
+
+
+class _Matches:
+    """A matcher answering with the knn pairs it is given."""
+
+    def __init__(self, knn):
+        self._knn = knn
+
+    def knnMatch(self, query, train, k):
+        return self._knn
+
+
+def test_a_pair_is_believed_on_distinct_points_not_one_point_counted_many_times():
+    """A picture with a few points soaks up matches from a busy one, several to
+    each of its points; counted that way a pair of unrelated pictures (a cloudy
+    sky and a mountain) cleared every guard. Each point now answers once."""
+    import cv2
+    import numpy as np
+
+    rng = np.random.default_rng(3)
+    pts_a = rng.uniform(0, 400, size=(12, 2)).astype(np.float32)
+    # every point of a seen three times over in b, as SIFT does at one spot
+    pts_b = np.repeat(pts_a + np.float32([30, 10]), 3, axis=0)
+    knn = [
+        [cv2.DMatch(q, q // 3, 0.1 * (1 + q % 3)), cv2.DMatch(q, (q // 3 + 1) % 12, 9.0)]
+        for q in range(len(pts_b))
+    ]
+    desc = np.zeros((36, 128), np.float32)
+
+    H, inliers = stitch._pair_homography(cv2, _Matches(knn), (pts_a, desc[:12]), (pts_b, desc))
+
+    assert (H, inliers) == (None, 0)  # 12 distinct points, under MIN_INLIERS
+    unique = [[cv2.DMatch(q, q, 0.1), cv2.DMatch(q, (q + 1) % 36, 9.0)] for q in range(36)]
+    pts_a36 = rng.uniform(0, 400, size=(36, 2)).astype(np.float32)
+    H, inliers = stitch._pair_homography(
+        cv2, _Matches(unique), (pts_a36, desc), (pts_a36 + np.float32([30, 10]), desc)
+    )
+    assert H is not None and inliers == 36
+
+
+def test_the_ransac_tolerance_is_counted_on_the_detectors_grid(monkeypatch):
+    """Keypoints are found on a 1000 px copy, so their error is a work pixel, not a
+    source pixel: a 4000 px piece gets four times the tolerance in its own pixels.
+    Held at 4 source pixels it shrank to one work pixel and a lens's barrel was
+    enough to refuse a true pair of phone photos."""
+    seen = []
+    real = stitch._pair_homography
+
+    def spy(cv2, matcher, a, b, ransac_px):
+        seen.append(ransac_px)
+        return real(cv2, matcher, a, b, ransac_px)
+
+    monkeypatch.setattr(stitch, "_pair_homography", spy)
+    scene = _scene(width=1400, height=700, seed=31)
+    big = [scene.crop((0, 0, 900, 700)).resize((3600, 2800)), scene.crop((500, 0, 1400, 700)).resize((3600, 2800))]
+    stitch.solve_layout(big, width=900, height=600)
+    assert seen == [pytest.approx(4.0 * 3600 / 1000)]
+
+
+def test_a_faded_picture_is_looked_at_again_with_a_lower_contrast_floor():
+    """Haze, mist or a washed-out frame leave OpenCV's default detector nothing to
+    find, and the stitch said the pieces do not overlap."""
+    import cv2
+
+    faded = Image.eval(_scene(seed=21), lambda v: 120 + v // 14)
+    pieces = [faded.crop((0, 0, 500, 500)), faded.crop((300, 0, 800, 500))]
+    det, _ = stitch._detector(cv2)
+    assert stitch._features(cv2, det, pieces[0]) == (None, None)  # OpenCV's floor alone
+
+    solved = stitch.solve_layout(pieces, width=1200, height=600)
+
+    assert solved["dropped"] == []
+    width_a = solved["quads"][0][1][0] - solved["quads"][0][0][0]
+    offset = _centroid(solved["quads"][1])[0] - _centroid(solved["quads"][0])[0]
+    assert offset / width_a == pytest.approx(300 / 500, abs=0.06)
+
+
+def test_a_pair_too_alike_for_opencv_keeps_its_confidence():
+    """OpenCV zeroes a pair scoring above 3 as too close to add anything: frames a
+    moment apart in a sharp video, which then read as pieces with no overlap."""
+    import cv2
+    import numpy as np
+
+    def info(inliers, matches, confidence):
+        m = cv2.detail.MatchesInfo()
+        m.src_img_idx, m.dst_img_idx = 0, 1
+        m.num_inliers, m.confidence = inliers, confidence
+        m.matches = [cv2.DMatch(k, k, 0.1) for k in range(matches)]
+        m.H = np.eye(3)
+        return m
+
+    close = info(980, 1000, 0.0)  # 980 / (8 + 300) = 3.18
+    stitch._undo_too_close(close)
+    assert close.confidence == pytest.approx(980 / 308)
+
+    weak = info(5, 100, 0.0)  # zero because it is weak, not because it is close
+    stitch._undo_too_close(weak)
+    assert weak.confidence == 0.0
+
+
+def test_the_camera_solve_reads_a_bounded_sample_of_each_pairs_inliers():
+    """The ray adjuster's cost grows with cameras times matches; a sharp pan's
+    neighbours share some 1500 inliers each. It gets an even sample, the matches
+    themselves stay whole for anything that reads them after."""
+    import cv2
+    import numpy as np
+
+    def info(inliers):
+        m = cv2.detail.MatchesInfo()
+        m.src_img_idx, m.dst_img_idx, m.confidence = 0, 1, 2.0
+        m.matches = [cv2.DMatch(k, k, 0.1) for k in range(inliers + 50)]
+        m.inliers_mask = np.array([1] * inliers + [0] * 50, np.uint8)
+        m.num_inliers = inliers
+        m.H = np.eye(3)
+        return m
+
+    rich, poor, unused = info(1500), info(120), cv2.detail.MatchesInfo()
+    thin_rich, thin_poor, thin_unused = stitch._thinned(cv2, [rich, poor, unused])
+
+    assert thin_rich.num_inliers == int(np.asarray(thin_rich.inliers_mask).sum()) == stitch._ADJUST_INLIERS
+    assert np.flatnonzero(thin_rich.inliers_mask).max() > 1400  # spread through, not the first 200
+    assert rich.num_inliers == 1500 and int(np.asarray(rich.inliers_mask).sum()) == 1500
+    assert thin_poor is poor and thin_unused is unused

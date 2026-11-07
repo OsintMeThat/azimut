@@ -771,6 +771,142 @@ def test_auto_stitch_needs_two_pieces(client):
     assert res.status_code == 422
 
 
+def _logo_pngs():
+    """Two unrelated scenes wearing one textured logo at the same pixel."""
+    from stitchscene import _scene
+
+    logo = _scene(120, 70, seed=41, blobs=90)
+    out = []
+    for seed in (1, 2):
+        img = _scene(width=500, height=500, seed=seed)
+        img.paste(logo, (18, 18))
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        out.append(buf.getvalue())
+    return out
+
+
+def test_auto_stitch_keeps_off_what_the_analyst_painted_out(client):
+    """The logo is all two unrelated scenes share, and it glues them together until
+    it is painted out of both: then nothing is left to match and the stitch says so."""
+    cid = client.post("/api/cases", json={"name": "StitchExclude"}).json()["id"]
+    paths = [_upload(client, cid, f"s{i}.png", png)["path"] for i, png in enumerate(_logo_pngs())]
+    body = {"width": 900, "height": 900, "nodes": [{"path": p} for p in paths]}
+    logo = [{"points": [[78 / 500, 53 / 500]], "radius": 80 / 500}]
+
+    glued = client.post(f"/api/cases/{cid}/inspect/auto-stitch", json=body)
+    painted = client.post(f"/api/cases/{cid}/inspect/auto-stitch", json={**body, "exclude": [logo, logo]})
+
+    assert glued.status_code == 200 and glued.json()["dropped"] == []
+    assert painted.status_code == 422
+    assert "no overlap" in painted.json()["detail"]
+    # nothing painted, or a null per piece, is the stitch as it was
+    unpainted = client.post(f"/api/cases/{cid}/inspect/auto-stitch", json={**body, "exclude": [None, []]})
+    assert unpainted.json()["nodes"] == glued.json()["nodes"]
+
+
+def test_auto_stitch_answers_each_placed_piece_with_the_picture_size_it_matched(client):
+    cid = client.post("/api/cases", json={"name": "StitchSize"}).json()["id"]
+    left_png, right_png = _overlapping_pair()
+    a = _upload(client, cid, "left.png", left_png)
+    b = _upload(client, cid, "right.png", right_png)
+    # the right piece cropped to its left 400 px: strokes are read on that picture
+    crop = {"op": "crop", "params": {"x": 0.0, "y": 0.0, "w": 0.8, "h": 1.0}}
+
+    body = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={"width": 1200, "height": 600, "nodes": [{"path": a["path"]}, {"path": b["path"], "ops": [crop]}]},
+    ).json()
+
+    assert [n["size"] for n in body["nodes"]] == [[500, 500], [400, 500]]
+
+
+_STROKE = {"points": [[0.1, 0.1], [0.2, 0.2]], "radius": 0.05}
+
+
+@pytest.mark.parametrize(
+    ("exclude", "says"),
+    [
+        ([[_STROKE]], "one entry per node"),
+        ([[_STROKE], None, None], "one entry per node"),
+        ([[{**_STROKE, "radius": 0}], None], "radius is a fraction"),
+        ([[{**_STROKE, "radius": 1.5}], None], "radius is a fraction"),
+        ([[{**_STROKE, "points": [[1.2, 0.5]]}], None], "within the piece"),
+        ([[{**_STROKE, "points": [[0.5, -0.1]]}], None], "within the piece"),
+        ([[{**_STROKE, "points": []}], None], "1 to 400 points"),
+        ([[{**_STROKE, "points": [[0.5]]}], None], "point is [x, y]"),
+        ([[_STROKE] * 201, None], "at most 200 painted strokes"),
+        ([[{**_STROKE, "points": [[0.5, 0.5]] * 401}], None], "1 to 400 points"),
+        ([["stroke"], None], "Exclude"),
+        ("everything", "Exclude"),
+    ],
+)
+def test_auto_stitch_refuses_a_malformed_exclusion(client, exclude, says):
+    cid = client.post("/api/cases", json={"name": "StitchBadExclude"}).json()["id"]
+    a = _upload(client, cid, "a.png")
+    b = _upload(client, cid, "b.png")
+    res = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={"width": 800, "height": 600, "nodes": [{"path": a["path"]}, {"path": b["path"]}], "exclude": exclude},
+    )
+    # refused at the edge, before any matching (two flat pictures would say "no overlap")
+    assert res.status_code == 422
+    assert says in res.json()["detail"]
+
+
+def test_auto_stitch_takes_exclusions_up_to_the_limits_a_collage_keeps(client):
+    """The route checks strokes by the rule the saved collage keeps them under, so
+    whatever a collage holds can be stitched."""
+    from azimut.engine import inspectwork
+
+    cid = client.post("/api/cases", json={"name": "StitchExcludeLimits"}).json()["id"]
+    left_png, right_png = _overlapping_pair()
+    a = _upload(client, cid, "left.png", left_png)
+    b = _upload(client, cid, "right.png", right_png)
+    corner = {"points": [[0.0, 0.0]] * inspectwork.MAX_EXCLUDE_POINTS, "radius": 0.01}
+    full = [corner] * inspectwork.MAX_EXCLUDE_STROKES
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={"width": 1200, "height": 600, "nodes": [{"path": a["path"]}, {"path": b["path"]}], "exclude": [full, full]},
+    )
+
+    assert res.status_code == 200
+    assert res.json()["dropped"] == []
+
+
+def test_auto_stitch_hands_the_solver_each_pieces_file_time_and_strokes(client, monkeypatch):
+    """Frames of one video are told apart from pictures by their file and time, and
+    the strokes arrive one entry per piece, as checked."""
+    from azimut.engine import stitch
+
+    seen = {}
+
+    def solve(images, **kwargs):
+        seen.update(kwargs)
+        return {"quads": {0: [[0, 0], [1, 0], [1, 1], [0, 1]]}, "dropped": [1, 2], "canvas": {"width": 16, "height": 16}}
+
+    monkeypatch.setattr(inspect_engine, "_source_image", lambda case, path, time, ops: Image.new("RGB", (64, 48)))
+    monkeypatch.setattr(stitch, "solve_layout", solve)
+    cid = client.post("/api/cases", json={"name": "StitchSources"}).json()["id"]
+    stroke = {"points": [[0.123456, 0.5]], "radius": 0.1}
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={
+            "width": 800, "height": 600,
+            "nodes": [{"path": "media/clip.mp4", "time": 1.5}, {"path": "media/clip.mp4", "time": 3.0},
+                      {"path": "media/photo.jpg"}],
+            "exclude": [[stroke], None, []],
+        },
+    )
+
+    assert res.status_code == 200
+    assert seen["sources"] == [("media/clip.mp4", 1.5), ("media/clip.mp4", 3.0), ("media/photo.jpg", None)]
+    assert seen["exclude"] == [[{"points": [[0.1235, 0.5]], "radius": 0.1}], None, None]
+    assert res.json()["nodes"][0]["size"] == [64, 48]
+
+
 def test_analyze_accepts_transient_ops_without_filing(client):
     cid = client.post("/api/cases", json={"name": "AnalyzeOps"}).json()["id"]
     item = _upload(client, cid, "img.png", _png_bytes(color=(255, 0, 0), size=(20, 20)))
