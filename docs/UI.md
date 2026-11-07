@@ -1140,7 +1140,7 @@ proof PNGs, views and comparisons (map plates included) and sheet CSVs. **Change
 only and can create one; the case's `exports/` stays the default. Media Details,
 saved proofs and Notebook use those same destinations. Files already outside a
 case are never overwritten, and concurrent exports reserve distinct numbered
-names.
+names. Geo Proof's Export the slides uses the proofs destination, one new folder per set.
 
 Settings → Icons is the icon library: files, a folder or a zipped pack dropped or
 picked (PNG, JPEG, WebP, GIF or SVG, 512 KB a file, a thousand icons), each pack
@@ -4428,6 +4428,59 @@ offers **Add its moment**, an instant at that frame. **Scene time on the picture
 panel's frame shows in. It is drawn on the page, so the exported picture is the canvas.
 A proof about the whole video has no time to print, and the house style leaves it to
 each proof.
+
+**A proof on a video shows its slides under the canvas**, on a strip laid out like Map
+plate's bar under its page, between the toolbar and the side column. It holds every proof
+resting on the ★ video and every scene of it still to prove, in clip order and in the
+colour Inspect's bar gives each: a proved slide by its thumbnail, a scene still to prove
+dashed round a pin, the one geolocated now with a beat in its corner, the abandoned ones
+greyed after a rule at the end. The video's name heads it and shows the Scene tab. **+**
+starts a new scene, the list holds every slide with a search, ⋯ holds **Export the
+slides**, and the fold folds it to one line for the session. Past what the strip holds
+whole, the tiles shrink to their picture and number, an arrow each side says how many are
+out of sight and a count says which one is shown. A tight strip fades into its ends, and
+a very narrow one is a pager. A proof alone on its video has one thin line with **+ New
+scene**. A proof on photos has no strip. The slides are a view: nothing is added to a
+proof, and an old proof opens and saves as it did. The tiles are the rows of
+`GET /cases/{id}/scenes?video=`, and a tile's picture is the proof's cached thumbnail,
+the spec's or else its entity's, never the exported PNG.
+
+**Moving to another slide saves the one left.** A press on a tile, **Alt+←** and
+**Alt+→** (never the browser's Back), the arrows of the folded line and the list all go
+through the save Save proof runs. Points nobody checked are saved as *Later*, kept off
+the case map, and the toast says so beside *Saved Road bridge*. A refused save keeps the
+slide and says why. A slide never started, with no panel and nothing typed, goes without
+a save; one holding only typed words asks first. Presses during the save only move where
+it heads, so three fast Alt+→ go three slides on with one save. A switch rewrites the
+step it is on, so Back leaves the series at once. With the strip focused, ←/→ walk the
+tiles and Enter opens one. A proved tile's ⋯ has **Show in Inspect**, which opens the
+video on that slide's moment.
+
+**A scene still to prove shows its page** in place of the canvas, and landing on it
+starts nothing: its label or time, where it stands, the captures it gathered, and
+**Make this slide**, **Geolocate** and **Abandon…** with a word, or **Restore**. Make
+this slide chooses its frames as Inspect's Make the proof does, from
+`GET /cases/{id}/scenes/{draft}/frames?video=`: the frames Inspect cut inside that
+scene by the rule its dots use (half a frame at each edge, at the clip's own rate), all
+of them for a scene about the whole video. A frame not in the case yet is filed on the
+way with the crop, turn and sliders Inspect keeps for it, so it comes out as Inspect
+would have saved it. The slide made of it keeps the look of the slide before, and its
+first save takes the scene up, as from Inspect. Inspect handing over a scene of the same
+video, from its Scenes tab or the pill, saves the slide open rather than asking, and the
+new slide keeps its look too.
+
+**+ New scene** saves the slide on screen and starts one of the same video in its look:
+the house style, the text and footer switches, the signature and the palette, never its
+panels, marks, legend words or facts. It opens on the Scene tab, the player after the
+last moment proved, for **Add this frame**.
+
+**Export the slides** copies every proved slide's saved picture into one new folder of
+the proofs export folder, named after the video and numbered in clip order without gaps
+(`clip/01 Road bridge.png`, `02 Market.png`). Nothing is drawn again, and the slide on
+screen is saved first. Scenes still to prove are not slides, and a proof never exported
+is left out and named in the toast. A second export lands in `clip (2)`, never over the
+first, and a copy that fails takes the whole set back
+(`POST /cases/{id}/proofs/series-export`).
 
 **The toolbar is two columns.** In one it stood taller than a laptop window, and the
 colour, width and layout controls sat under the fold behind a scrollbar nobody looks

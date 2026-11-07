@@ -29,7 +29,7 @@ export const PROOF_SLIDES_HELP = {
   dirty: 'Changed since it was saved',
 
   // what a tile's menu does
-  inspect: 'Open the video in Inspect',
+  inspect: 'Open the video in Inspect on this moment',
   make: 'Make the proof of this scene from its frames',
   geolocate: 'Find this scene on the map, its captures kept with it',
   abandon: 'Give up on this scene, kept greyed at the end',

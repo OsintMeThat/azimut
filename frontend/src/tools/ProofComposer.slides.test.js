@@ -89,6 +89,19 @@ describe('moving between slides', () => {
     const make = bodyOfFn('makeSceneProof');
     expect(make).toContain('if (!(await (onSlides ? settleSlide() : mayLeave()))) return;');
     expect(make.indexOf('if (look) applyLook(look);')).toBeLessThan(make.indexOf('await addPanelsFromPaths(made.panels);'));
+    // the pill's Make the proof on the same video keeps the open slide's look, read before it is reset
+    expect(make.indexOf('look ??= onSlides ? slideStyle(proof) : null;')).toBeLessThan(make.indexOf('resetDoc();'));
+  });
+
+  it('files a frame Inspect never saved through the edits Inspect keeps for it', () => {
+    expect(bodyOfFn('drawUnfiledFrames')).toContain('ops: await frameOps(frame.edits)');
+    expect(bodyOfFn('confirmSlideFrames')).toContain('ops: await frameOps(f.edits)');
+    expect(bodyOfFn('frameOps')).toContain('buildFrameOps(frameFilters, edits)');
+  });
+
+  it('shows a slide in Inspect on its own moment', () => {
+    const action = bodyOfFn('slideAction');
+    expect(action).toContain('uiState.inspectScene = { video, slide: tile.name };');
   });
 
   it('starts a new scene from the look alone, its time held for its first save', () => {

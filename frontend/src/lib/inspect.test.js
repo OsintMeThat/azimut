@@ -8,7 +8,7 @@ import {
   newCollage, clampCollageDim, stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
   exportFrame, cutBounds, COLLAGE_MAX_EXPORT_PIXELS, clockTime, collageVideo, mediaOrigin, quadUnitAt, quadMapUnit, fitView,
   COLLAGE_DEFAULT_SIZE, ADJUST_ORDER, ADJUST_PRESETS, activePreset, buildOps, needsRender,
-  presetValues, previewOps, previewStyle, sliderTravel,
+  presetValues, previewOps, previewStyle, sliderTravel, sliderFilters,
 } from './inspect.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -40,6 +40,14 @@ describe('video orientation', () => {
       { op: 'rotate', params: { angle: 180 } },
       { op: 'brightness', params: { amount: 1.2 } },
     ]);
+  });
+});
+
+describe('sliderFilters', () => {
+  it('keeps the filters a slider drives and drops the crop box, the view turn and the stitch warp', () => {
+    const all = ['crop', 'brightness', 'rotate', 'remap', 'contrast'].map((id) => ({ id }));
+    expect(sliderFilters(all).map((f) => f.id)).toEqual(['brightness', 'contrast']);
+    expect(sliderFilters(undefined)).toEqual([]);
   });
 });
 

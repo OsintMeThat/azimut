@@ -7,7 +7,7 @@
   import {
     adjustDefaults, buildFrameOps, previewStyle, uid, videoSeed, VIDEO_ADJUST_IDS,
     hasVideoEdits, normalizeRightAngleRotation, rotationOps, sourceStem, frameSaveNames,
-    needsRender, previewOps, isNeutral,
+    needsRender, previewOps, isNeutral, sliderFilters,
   } from '../lib/inspect.js';
   import { captureMoment, frameDuration, preciseClock, seekInto, shownFrameTime } from '../lib/inspectPlayer.js';
   import { INSPECT_HELP } from '../lib/inspectHelp.js';
@@ -210,10 +210,7 @@
   async function ensureOps() {
     if (filters.length) return;
     const ops = await api.get('/api/inspect/ops');
-    // `crop` is the interactive box, `rotate` a view-only turn and `remap` what
-    // auto-stitch solves: none of the three belongs in the slider pipeline.
-    const solved = ['crop', 'rotate', 'remap'];
-    filters = ops.filters.filter((f) => !solved.includes(f.id));
+    filters = sliderFilters(ops.filters);
     analyses = ops.analyses;
   }
 
@@ -1293,9 +1290,10 @@
   /**
    * Open a scene asked for from elsewhere (`uiState.inspectScene`): its file, a video
    * on screen at the scene's start, the Scenes tab open on its row, and with `proof`
-   * its Make the proof.
+   * its Make the proof. `slide` names a proof instead of a scene still to prove: Geo
+   * Proof's strip shows its slide where it happens.
    */
-  async function openScene({ video, draft, proof = false }) {
+  async function openScene({ video, draft, proof = false, slide = null }) {
     const target = mediaList.find((m) => m.path === video);
     if (!target) {
       toast('That file is no longer in the case', 'warn');
@@ -1309,7 +1307,9 @@
     await loadScenes(run);
     if (run !== openRun) return;
     if (isVideo && selected !== 'video') select('video');
-    const scene = scenes.find((sc) => sc.kind === 'draft' && sc.id === draft);
+    const scene = slide
+      ? scenes.find((sc) => sc.kind === 'proof' && sc.proof === slide)
+      : scenes.find((sc) => sc.kind === 'draft' && sc.id === draft);
     if (!scene) {
       toast(`That scene is no longer in this ${isVideo ? 'video' : 'picture'}`, 'warn');
       return;

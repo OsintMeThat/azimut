@@ -48,7 +48,7 @@
   import { ProofScene } from './proof/proofScene.svelte.js';
   import { panelFrames, readHandoff, readStatedScene, sceneBadges, sceneColor } from '../lib/proofScene.js';
   import { PROOF_SCENE_HELP } from '../lib/proofSceneHelp.js';
-  import { frameSaveName, sourceStem } from '../lib/inspect.js';
+  import { buildFrameOps, frameSaveName, sliderFilters, sourceStem } from '../lib/inspect.js';
   import { preciseClock } from '../lib/inspectPlayer.js';
   import { bindPanelPointerLifecycle, createCanvasRenderGate,
   discardDraft,
@@ -716,7 +716,8 @@
     const video = slides.video;
     if (!caseId || !video) return;
     if (action === 'inspect') {
-      uiState.inspectPath = video;
+      // the video opened on this slide's moment and its row of the Scenes tab
+      uiState.inspectScene = { video, slide: tile.name };
       uiState.tool = 'inspect';
       return;
     }
@@ -797,7 +798,7 @@
     const shown = frames
       .filter((f) => Number.isFinite(f?.time))
       .sort((a, b) => a.time - b.time)
-      .map((f) => ({ id: String(f.id), time: f.time, path: f.path ?? null, url: f.thumb || f.path ? fileUrl(caseId, f.thumb || f.path) : '' }));
+      .map((f) => ({ id: String(f.id), time: f.time, path: f.path ?? null, edits: f.edits ?? {}, url: f.thumb || f.path ? fileUrl(caseId, f.thumb || f.path) : '' }));
     const collages = collagesOfScene(tile.row, (slides.answer?.collages ?? []).filter((c) => c.export), 0).map((c) => ({
       path: c.export, url: fileUrl(caseId, thumbOf(c.export) || c.export), title: c.title, start: c.start, current: c.current,
     }));
@@ -817,6 +818,15 @@
     void drawUnfiledFrames(caseId, video, shown);
   }
 
+  // Inspect's sliders, read once: a frame the case does not hold yet is drawn and filed
+  // through the edits Inspect keeps for it, so it comes out as Inspect would save it.
+  let frameFilters = null;
+  async function frameOps(edits) {
+    if (!edits || !Object.keys(edits).length) return [];
+    frameFilters ??= sliderFilters((await api.get('/api/inspect/ops')).filters);
+    return buildFrameOps(frameFilters, edits);
+  }
+
   /** The frames the case does not hold yet, drawn from the video for the chooser, a few at a time. */
   async function drawUnfiledFrames(caseId, video, frames) {
     for (const frame of frames.filter((f) => !f.url).slice(0, 24)) {
@@ -824,7 +834,7 @@
         const res = await fetch(`/api/cases/${caseId}/inspect/render-preview`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: video, time: frame.time, ops: [], format: 'jpeg' }),
+          body: JSON.stringify({ path: video, time: frame.time, ops: await frameOps(frame.edits), format: 'jpeg' }),
         });
         if (!res.ok || !slideChooser) return;
         const url = URL.createObjectURL(await res.blob());
@@ -858,9 +868,11 @@
       const unfiled = frames.filter((f) => !f.path);
       if (unfiled.length) {
         const title = caseMedia.find((one) => one.path === video)?.title;
-        const res = await api.post(`/api/cases/${caseId}/inspect/save-frames`, {
-          items: unfiled.map((f) => ({ path: video, time: f.time, label: frameSaveName(sourceStem({ path: video, title }), f.time) })),
-        });
+        const items = [];
+        for (const f of unfiled) {
+          items.push({ path: video, time: f.time, ops: await frameOps(f.edits), label: frameSaveName(sourceStem({ path: video, title }), f.time) });
+        }
+        const res = await api.post(`/api/cases/${caseId}/inspect/save-frames`, { items });
         unfiled.forEach((f, i) => { f.path = res?.saved?.[i]?.item?.path ?? null; });
       }
       if (!frames.every((f) => f.path)) throw new Error('A frame could not be saved to the case');
@@ -944,10 +956,11 @@
     // On the video of the slide open, that slide is saved as moving to the next one saves
     // it; any other proof with changes asks first, as it always did.
     const onSlides = proofStarted && !!made.scene?.video && made.scene.video === scene.star;
+    // a new slide of the same video keeps the look of the slide before it, wherever it was asked
+    look ??= onSlides ? slideStyle(proof) : null;
     if (!(await (onSlides ? settleSlide() : mayLeave()))) return;
     resetDoc();
     proofStarted = true;
-    // a slide made from the strip keeps the look of the slide before it
     if (look) applyLook(look);
     pickSideTab('proof');
     settlePlace('proof', place(), { navigate });

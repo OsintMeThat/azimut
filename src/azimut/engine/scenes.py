@@ -691,14 +691,19 @@ def _frame_length(case: Case, video: str) -> float:
     return 1 / rate
 
 
+#: What Inspect keeps on a frame that changes the picture it saves (``buildFrameOps``).
+FRAME_EDITS = ("sourceOps", "rotation", "adjust", "crop")
+
+
 def draft_frames(case: Case, video: str, draft: str) -> list[dict[str, Any]]:
     """The frames Inspect cut inside one scene still to prove, in clip order, each
     with the picture it was saved to the case as, and that picture's thumbnail.
 
     What Geo Proof offers to make that scene a slide. A frame never saved, or whose
     picture has left the case, has no ``path``: the composer files it first, as
-    Inspect does. A scene about the whole video holds every frame. Read only: nothing
-    is filed, and no thumbnail is made.
+    Inspect does, through the ``edits`` Inspect keeps for it (crop, turn, sliders),
+    so the picture comes out as Inspect would have saved it. A scene about the whole
+    video holds every frame. Read only: nothing is filed, and no thumbnail is made.
     """
     _a_case_video(case, video)
     work = (inspectwork.find_work(case, video) or {}).get("spec") or {}
@@ -739,6 +744,7 @@ def draft_frames(case: Case, video: str, draft: str) -> list[dict[str, Any]]:
             "time": time,
             "path": path if item is not None else None,
             "thumb": _existing(case, _text(item.get("thumbnail"))) if item is not None else None,
+            "edits": {key: frame[key] for key in FRAME_EDITS if frame.get(key) is not None},
         })
     return out
 

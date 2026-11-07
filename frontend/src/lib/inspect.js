@@ -251,6 +251,14 @@ export function buildOps(filters, values, crop = null) {
   return ops;
 }
 
+/**
+ * The filters Inspect's sliders drive, out of `/api/inspect/ops`: `crop` is the
+ * interactive box, `rotate` a view-only turn and `remap` what auto-stitch solves.
+ */
+export function sliderFilters(filters) {
+  return (filters ?? []).filter((f) => !['crop', 'rotate', 'remap'].includes(f.id));
+}
+
 /** Build the full recipe for a captured frame, including its video orientation. */
 export function buildFrameOps(filters, frame) {
   return [

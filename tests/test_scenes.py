@@ -1113,7 +1113,8 @@ def test_draft_frames_route_lists_work_frames_in_moment(client, tmp_path):
     gone = _cut(client, cid, video, 1.2)
     case = Case.open(cid)
     _save_work(client, cid, video, frames=[
-        _work_frame(video, "late", 1.94),
+        {**_work_frame(video, "late", 1.94), "crop": {"x": 0.1, "y": 0.2, "w": 0.5, "h": 0.5},
+         "rotation": 90, "adjust": {"brightness": 1.4}},
         _work_frame(video, "kept", 1.5, kept),
         _work_frame(video, "edge_in", 0.96),       # its middle is past the start
         _work_frame(video, "edge_out", 1.96),      # its middle is past the end
@@ -1139,12 +1140,17 @@ def test_draft_frames_route_lists_work_frames_in_moment(client, tmp_path):
     # in clip order, each with the picture it was saved as while the case holds it
     assert [f["id"] for f in frames] == ["edge_in", "gone", "kept", "late"]
     by_id = {f["id"]: f for f in frames}
-    assert set(by_id["kept"]) == {"id", "time", "path", "thumb"}
+    assert set(by_id["kept"]) == {"id", "time", "path", "thumb", "edits"}
     assert by_id["kept"]["path"] == kept and by_id["kept"]["time"] == 1.5
     [item] = case.media_items_by_paths([kept])
     assert by_id["kept"]["thumb"] == item.get("thumbnail") and by_id["kept"]["thumb"] != kept
-    # never saved, or its picture deleted since: the composer files it first
-    assert by_id["late"] == {"id": "late", "time": 1.94, "path": None, "thumb": None}
+    # never saved, or its picture deleted since: the composer files it first, cut and
+    # set as Inspect would have saved it
+    assert by_id["late"] == {
+        "id": "late", "time": 1.94, "path": None, "thumb": None,
+        "edits": {"crop": {"x": 0.1, "y": 0.2, "w": 0.5, "h": 0.5}, "rotation": 90, "adjust": {"brightness": 1.4}},
+    }
+    assert by_id["kept"]["edits"] == {}
     assert by_id["gone"]["path"] is None and by_id["gone"]["thumb"] is None
 
     assert [f["id"] for f in _frames(client, cid, video, "s_flash").json()["frames"]] == ["flash"]
