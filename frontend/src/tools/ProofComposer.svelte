@@ -1309,10 +1309,18 @@
     // A cut picture turning under its square cut has no frame to show: Konva's
     // would tilt with the turn while the cut stays put. The knob carries on alone
     // and the frame comes back with the next selection drawn.
+    let frameHidden = false;
     transformer.on('transformstart', () => {
       if (transformer.getActiveAnchor() !== 'rotater' || !transformer.nodes()[0]?.hasName('surface-cut')) return;
+      frameHidden = true;
       transformer.borderEnabled(false);
       transformer.enabledAnchors([]);
+    });
+    // a knob let go where it started changes nothing, and redraws nothing either
+    transformer.on('transformend', () => {
+      if (!frameHidden) return;
+      frameHidden = false;
+      requestAnimationFrame(() => { if (stage) refreshCanvasUi(); });
     });
     guideGroup = new Konva.Group({ listening: false });
     uiLayer.add(guideGroup);
