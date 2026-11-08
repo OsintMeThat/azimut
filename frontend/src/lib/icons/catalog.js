@@ -36,7 +36,8 @@ const STAMP_KEYWORDS = {
 /** A badge's place in a proof's picker, by its layer group, with the exceptions named. */
 const BADGE_GROUP = { Markers: 'Marks', Events: 'Events', Places: 'Places' };
 const BADGE_EXCEPTIONS = {
-  'badge-soldier': 'People', 'badge-shield': 'People', 'badge-missile': 'Events', 'badge-bomb': 'Events',
+  'badge-soldier': 'People', 'badge-shield': 'People', 'badge-group': 'People', 'badge-person-above': 'People',
+  'badge-missile': 'Events', 'badge-bomb': 'Events',
   // the stamps of the same name are the proof's person and building
   'badge-user': null, 'badge-building': null,
 };

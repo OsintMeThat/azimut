@@ -52,6 +52,8 @@ const DASH = [6, 4];
 
 const round = (value) => Math.round(value * 100) / 100;
 const ring = (x, y, r) => `M${x} ${round(y - r)}a${r} ${r} 0 1 1 0 ${round(2 * r)} ${r} ${r} 0 0 1 0-${round(2 * r)}Z`;
+/** A sandbag: a box with rounded corners. */
+const bag = (x0, y0, x1, y1, r = 1.4) => `M${round(x0 + r)} ${y0}H${round(x1 - r)}a${r} ${r} 0 0 1 ${r} ${r}V${round(y1 - r)}a${r} ${r} 0 0 1-${r} ${r}H${round(x0 + r)}a${r} ${r} 0 0 1-${r}-${r}V${round(y0 + r)}a${r} ${r} 0 0 1 ${r}-${r}Z`;
 
 export const BADGE_GLYPHS = {
   // Markers
@@ -113,6 +115,20 @@ export const BADGE_GLYPHS = {
     ['fill', ring(12, 12, 9.2)],
     ['cutline', 'M12 6.6V12l3.6 2.4', { width: 2.1 }],
   ],
+  'badge-group': [
+    ['fill', ring(12, 7.4, 3.5)],
+    ['fill', 'M5.6 21.2c.2-4.7 2.9-7.8 6.4-7.8s6.2 3.1 6.4 7.8Z'],
+    ['fill', ring(4.8, 9.2, 2.5)],
+    ['fill', ring(19.2, 9.2, 2.5)],
+    ['fill', 'M.8 19.2c.1-3.8 1.6-6.2 4-6.2.9 0 1.6.3 2.2.8-1.5 1.4-2.5 3.2-2.8 5.4ZM23.2 19.2c-.1-3.8-1.6-6.2-4-6.2-.9 0-1.6.3-2.2.8 1.5 1.4 2.5 3.2 2.8 5.4Z'],
+  ],
+  // seen from above: shoulders round a head, facing up
+  'badge-person-above': [
+    ['fill', 'M3 16.2c0-2.6 4-4.6 9-4.6s9 2 9 4.6v1.4c0 1.3-1 2.2-2.3 2.2H5.3C4 19.8 3 18.9 3 17.6Z'],
+    ['cutline', ring(12, 11.4, 3.6), { width: 1.6 }],
+    ['fill', ring(12, 11.4, 3.6)],
+    ['fill', 'M12 1.8 15 6.2H9Z'],
+  ],
   // Events
   'badge-explosion': [
     ['fill', 'M12 2.4 13.4 7.3 17.4 3.6 15.9 8.9 20.7 8.2 17.1 11.6 22.2 13.9 16.7 14.5 19.4 18.8 14.8 16.7 14.9 22.1 12 17.6 9.3 21.6 9.2 16.7 4.4 19 7.3 14.5 1.8 13.8 6.9 11.6 3.1 8.4 8 8.9 6.5 3.7 10.6 7.3Z'],
@@ -147,6 +163,29 @@ export const BADGE_GLYPHS = {
     ['fill', 'M8.8 12 2.8 12A9.2 9.2 0 0 1 7.4 4.03L10.4 9.23A3.2 3.2 0 0 0 8.8 12Z'],
     ['fill', 'M13.6 9.23 16.6 4.03A9.2 9.2 0 0 1 21.2 12L15.2 12A3.2 3.2 0 0 0 13.6 9.23Z'],
     ['fill', ring(12, 12, 1.9)],
+  ],
+  'badge-smoke': [
+    ['fill', `${ring(7.6, 17.4, 3.6)}${ring(12.2, 14.2, 4.1)}${ring(9.6, 9.2, 3.8)}${ring(14.8, 6.8, 4.2)}${ring(19.2, 4.2, 2.6)}`],
+    ['fill', 'M3.2 20.4h13.6v2H3.2Z'],
+  ],
+  // a barrel on its mount, and the flash at its muzzle
+  'badge-firing-position': [
+    ['fill', 'M2 15.6 12.4 10.8l1.3 2.8L3.3 18.4Z'],
+    ['fill', 'M1.8 19.6h10.4v2.2H1.8Z'],
+    ['fill', 'M6.6 16.2h2.2v3.6H6.6Z'],
+    ['fill', 'M18.2 2.8 19.4 7.4 23.2 5.6 21 9.6 23.6 11.8 19.8 12.4 20.6 16.6 17.4 13.8 14.8 16.8 14.8 12.8 13.4 10.6 16 8.6 14.8 4.6 17.4 7Z'],
+  ],
+  'badge-launch': [
+    ['fill', 'M12 1.6c2.2 1.9 3.2 4.6 3.2 7.8v5.2H8.8V9.4c0-3.2 1-5.9 3.2-7.8Z'],
+    ['cut', ring(12, 8.6, 1.35)],
+    ['fill', 'M8.8 10.6 5.4 14.6v3.2l3.4-2.1Zm6.4 0 3.4 4v3.2l-3.4-2.1Z'],
+    ['fill', 'M9.8 15.8h4.4L12 21.6Z'],
+    ['fill', 'M2.6 20.6h5.4v2H2.6ZM16 20.6h5.4v2H16Z'],
+  ],
+  'badge-flare': [
+    ['fill', 'M12 1.4 13.9 7.9 20.4 9.8 13.9 11.7 12 18.2 10.1 11.7 3.6 9.8 10.1 7.9Z'],
+    ['line', 'M5.4 3.2 7.4 5.2M18.6 3.2 16.6 5.2M5.4 16.4 7.4 14.4M18.6 16.4 16.6 14.4', { width: 1.7 }],
+    ['line', 'M12 19.8c-1.1.9-1.1 1.7-.2 2.7', { width: 1.5 }],
   ],
   // Forces
   'badge-soldier': [
@@ -239,6 +278,13 @@ export const BADGE_GLYPHS = {
     ['fill', 'M17.8 13.4v-1.6h1.8v1.6Z'],
     ['line', 'M19 12.2 21.6 11', { width: 1.2 }],
     ['line', 'M12 5.4V2.8', { width: 1.3 }],
+  ],
+  'badge-usv': [
+    ['fill', 'M1.6 13.2h20.8l-3.4 7H5.2Z'],
+    ['fill', 'M7.2 9.4h7.4l2.1 3.2H6.3Z'],
+    ['line', 'M10.4 9V4.4', { width: 1.6 }],
+    ['fill', ring(10.4, 3.6, 1.6)],
+    ['line', 'M14 9V6.4', { width: 1.4 }],
   ],
   // Vehicles
   'badge-car': [
@@ -380,6 +426,21 @@ export const BADGE_GLYPHS = {
     ['fill', 'M3.2 19.4v-4c0-5.1 3.9-8.8 8.8-8.8s8.8 3.7 8.8 8.8v4Z'],
     ['cut', 'M7.4 12.6h9.2v2.2H7.4Z'],
     ['line', 'M2.2 20.6h19.6', { width: 1.6 }],
+  ],
+  // a wall of sandbags with a firing gap
+  'badge-fortified': [
+    ['fill', `${bag(1.6, 17, 8.2, 21.6)}${bag(8.8, 17, 15.2, 21.6)}${bag(15.8, 17, 22.4, 21.6)}`],
+    ['fill', `${bag(1.6, 11.8, 5.2, 16.4)}${bag(5.8, 11.8, 11.6, 16.4)}${bag(12.4, 11.8, 18.2, 16.4)}${bag(18.8, 11.8, 22.4, 16.4)}`],
+    ['fill', `${bag(1.6, 6.6, 8.4, 11.2)}${bag(15.6, 6.6, 22.4, 11.2)}`],
+    ['fill', `${bag(2.4, 2.4, 8.4, 6)}${bag(15.6, 2.4, 21.6, 6)}`],
+  ],
+  // anti-tank teeth, two in front and one behind, their shaded side cut in
+  'badge-obstacles': [
+    ['fill', 'M8.8 12.8 10.6 5.6h2.8l1.8 7.2Z'],
+    ['fill', 'M1.4 21.2 4.6 9.8h4l3.2 11.4Z'],
+    ['cut', 'M6.6 9.8h2l3.2 11.4H7.6Z'],
+    ['fill', 'M12.2 21.2 15.4 9.8h4l3.2 11.4Z'],
+    ['cut', 'M17.4 9.8h2l3.2 11.4h-4.2Z'],
   ],
 };
 

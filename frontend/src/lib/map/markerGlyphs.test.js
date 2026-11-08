@@ -136,3 +136,25 @@ describe("a marker in one of the analyst's own icons", () => {
     expect(inkBox({ width: 4, height: 4 }, () => null)).toEqual({ x: 0, y: 0, w: 4, h: 4 });
   });
 });
+
+describe('the glyphs added for conflict and incident maps', () => {
+  const added = ['badge-smoke', 'badge-firing-position', 'badge-launch', 'badge-flare', 'badge-group',
+    'badge-person-above', 'badge-usv', 'badge-fortified', 'badge-obstacles'];
+
+  it('draws each on its disc, filed in the palette beside its kin', () => {
+    for (const id of added) {
+      const parts = markerParts(id, '#d55e00');
+      expect(parts.filter((part) => part.fill === '#ffffff').length, id).toBeGreaterThan(0);
+      expect(symbols.find((s) => s.id === id)?.label, id).toBeTruthy();
+    }
+    const group = (id) => symbols.find((s) => s.id === id).group;
+    expect(['badge-smoke', 'badge-firing-position', 'badge-launch', 'badge-flare'].map(group)).toEqual(['Events', 'Events', 'Events', 'Events']);
+    expect(group('badge-fortified')).toBe('Places');
+    expect(group('badge-obstacles')).toBe('Places');
+  });
+
+  it('keeps the bunker and the trench as they were drawn, beside the new fieldworks', () => {
+    expect(BADGE_GLYPHS['badge-bunker'][0][1]).toBe('M3.2 19.4v-4c0-5.1 3.9-8.8 8.8-8.8s8.8 3.7 8.8 8.8v4Z');
+    expect(BADGE_GLYPHS['badge-trench'][0][1]).toBe('M2.2 10.2h3.6v5.6h4.2v-5.6h4v5.6h4.2v-5.6h3.6');
+  });
+});

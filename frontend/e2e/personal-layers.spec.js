@@ -91,7 +91,7 @@ test('the entire symbol palette rasterizes inside its badge and pin height match
     const pin = bounds(personalMarkerImage('pin', '#0072b2'));
     return { badges, pinHeight: (pin.bottom - pin.top + 1) * .4, roundHeight: (badges[0].bounds.bottom - badges[0].bounds.top + 1) * .4 };
   });
-  expect(result.badges).toHaveLength(62);
+  expect(result.badges).toHaveLength(71);
   for (const badge of result.badges) { expect(badge.bounds.left).toBeGreaterThan(0); expect(badge.bounds.right).toBeLessThan(63); }
   expect(Math.abs(result.pinHeight - result.roundHeight)).toBeLessThan(1);
 });
@@ -853,7 +853,7 @@ test('groups share round icons, case places span layers, and popup removals can 
   await expect(settings.getByRole('button', { name: 'One style', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await settings.getByRole('button', { name: 'Group style', exact: true }).click();
   const palette = page.getByRole('group', { name: 'Group style icon palette', exact: true });
-  await expect(palette.getByRole('button')).toHaveCount(66);
+  await expect(palette.getByRole('button')).toHaveCount(75);
   await page.screenshot({ path: test.info().outputPath('round-icon-palette.png') });
   await page.getByLabel('Group style find icon').click();
   await expect(palette).toBeVisible();

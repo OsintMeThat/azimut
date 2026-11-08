@@ -39,7 +39,9 @@ describe('the proof picker', () => {
     expect(of('Events')[0]).toBe('impact');
     expect(of('Events')).toContain('badge-flame');
     expect(of('Places')).toEqual(expect.arrayContaining(['building', 'antenna', 'badge-bridge']));
-    expect(of('People')).toEqual(expect.arrayContaining(['person', 'badge-soldier']));
+    expect(of('People')).toEqual(expect.arrayContaining(['person', 'badge-soldier', 'badge-group', 'badge-person-above']));
+    expect(of('Events')).toEqual(expect.arrayContaining(['badge-smoke', 'badge-firing-position', 'badge-launch', 'badge-flare']));
+    expect(of('Places')).toEqual(expect.arrayContaining(['badge-bunker', 'badge-trench', 'badge-fortified', 'badge-obstacles']));
   });
 
   it('offers every one of the eleven stamps somewhere', () => {

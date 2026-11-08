@@ -34,6 +34,7 @@ SYMBOLS = ("pin", "circle", "star", "flag") + tuple(f"badge-{icon}" for icon in 
     "roadblock", "factory", "fuel-depot", "bridge", "crater", "hospital", "camp", "harbour",
     "railway", "power-station", "explosion", "clash", "casualty", "chemical", "nuclear", "soldier",
     "rocket-launcher", "attack-drone", "warship", "airfield",
+    "smoke", "firing-position", "launch", "flare", "group", "person-above", "usv", "fortified", "obstacles",
 ))
 #: What happened to the thing a marker shows, drawn as a stroke across its badge.
 STATUSES = ("damaged", "destroyed")
