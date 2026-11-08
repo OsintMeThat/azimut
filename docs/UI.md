@@ -2232,9 +2232,10 @@ zoom and rotation. Notes, arrows, boxes, ellipses, lines, freehand strokes, dist
 measures, polygons, **numbered markers and symbols** can belong to A, B or both.
 The last two are the Proof Maker's stamps, put down on the ground with one press
 and keeping the tool in hand: a marker counts a series per colour and starts back
-at 1 for the next one, and the symbol button opens the same grid of glyphs. Both
-are sized by their own number rather than by a line width, and a symbol drawn in
-outline takes a second control for how heavy that line is. Polygon drawing ends
+at 1 for the next one, and the symbol button opens the proof's first eleven
+symbols, drawn as a proof draws them, filled and haloed. Both are sized by their own
+number rather than by a line width, and a symbol that takes a weight has a second
+control for it. Polygon drawing ends
 with a double-click or Enter; Escape cancels. Select a mark to move it or edit its style,
 double-click a note to edit its text, and use Undo/Redo for annotation changes. A
 selected mark shows its corner handles, so its geometry is corrected where it was
@@ -2416,10 +2417,14 @@ after it and numbered. Both offer **Undo**.
 
 **Style** opens one palette, the same in the bar, the sheet, the right-click menu
 and a group's settings: the styles the layer already uses first, then the
-colours, then four plain symbols and sixty-two round pictograms drawn locally in
+colours, then four plain symbols and seventy-one round pictograms drawn locally in
 the chosen colour (a filled white silhouette on the disc, dark on a pale one),
 laid out by theme (Markers, Sources, Events, Forces, Vehicles, Places) with a
-search by name, theme or keyword. Each pick applies at once and the palette stays
+search by name, theme or keyword. Among them are smoke, a firing position, a launch
+point, a flare, a group, a person seen from above (it turns with its direction), an
+uncrewed boat, a fortified position and anti-tank obstacles, beside the bunker and
+the trench; Geo Proof's picker offers the same pictograms, apart from the source and
+vehicle ones. Each pick applies at once and the palette stays
 open for the next. With nothing selected it sets the next markers and the group
 they go into; with a selection it restyles it and can move it to another group. A
 group with one style draws every feature in it, so a pick on its features
@@ -4634,18 +4639,45 @@ instead, so any point can be re-placed. A stroke is the exception among the
 points-based kinds: it has too many samples to show, so it takes the frame and
 the handles rather than a canvas full of dots.
 
-**Symbols.** A grid of fixed marks — a pin, an impact, vehicles, a building, a
-drone, a camera, an antenna, a north arrow — stamped with one click. The one tool
-that stays in hand afterwards, since marking six vehicles is one act rather than six.
-A symbol takes the active colour like anything else drawn, so it joins the legend
-by colour and claims no vocabulary the legend cannot say. It resizes from its
-corners with the ratio locked: the box is square and there is one side to change,
-so a squashed symbol is not expressible. The pin hangs from its tip rather than
-its middle, which is what keeps it on its pixel while it is resized. The solid
-marks carry no outline and the width control stays away for them. Fill on a
-symbol is a disc behind the glyph rather than paint inside it — a thin stroke
-over aerial imagery needs something to sit on — and how opaque that disc goes
-stays your call, because it covers the picture.
+**Symbols.** The symbol button opens a grid of everything a proof can stamp, filed
+under Marks, Vehicles, Events, Places and People. One click stamps it, and the tool
+stays in hand afterwards, since marking six vehicles is one act rather than six. A
+symbol takes the active colour like anything else drawn, so it joins the legend by
+colour and claims no vocabulary the legend cannot say. It resizes from its corners
+with the ratio locked, and the pin hangs from its tip, which keeps it on its pixel
+while it is resized.
+
+Over imagery a symbol is a filled silhouette with a dark halo, its details carved in a
+dark shade, so it holds over a busy roof. Fill on a symbol is a disc behind it: on a
+solid disc the symbol turns white, or dark on a pale colour, and the disc shows
+through its details as on a map badge. How opaque that disc goes stays your call,
+because it covers the picture. Eight of the first eleven symbols (vehicle, truck,
+tank, person, building, drone, camera, antenna) read the width control as weight;
+every other symbol carries its own weight, and the control stays away.
+
+**Vehicle models.** The Vehicles group holds small models drawn at any angle: a car,
+a technical, a van, a truck, a tanker, a bus, a motorbike, an armoured car, an APC,
+an IFV, a tank, self-propelled artillery, a towed gun, a rocket launcher, air
+defence, an anti-aircraft gun and its pickup, an engineering vehicle, a helicopter,
+a fighter, a transport, a quadcopter, an FPV drone, a UAV, a one-way drone, a skiff,
+an uncrewed boat, a warship, a cargo ship, a locomotive and a wagon, plus Any
+vehicle and a Heading chevron. Each is generic, with proportions per class and no
+real type's shape or markings. The four flat vehicle stamps come first, named as
+flat. They are drawn by a module loaded the first time the picker opens or a proof
+names a model.
+
+The picker's **View** (Top, Angled, Side) sets how the tiles are drawn and how the
+next model is stamped, for the session. A picked model wears a ring: the amber knob
+turns it on the ground, and the white knob on the arc tilts the view from above, at
+the top of the arc, to the side, at the bottom. A label reads the heading and the
+tilt. The turn moves in 5° steps and the tilt settles on the offered views; Shift
+frees both, and a drag is one undo. The frame's own turn knob still turns the stamp
+on the page, to match a picture's horizon. A model's size is its length on the
+page, so turning it never resizes it, and the stamp stores its `heading` and `tilt`.
+
+An old proof opens with every stamp in its place, at its size, colour and turn, and
+draws the new drawing; the names on disk did not change, and a view cone keeps its
+camera.
 
 **Numbered markers.** A filled disc carrying a number, stamped like a symbol and
 keeping the tool in hand for the same reason. **Each colour counts its own series**
