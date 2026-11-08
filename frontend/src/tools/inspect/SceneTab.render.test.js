@@ -328,6 +328,47 @@ describe('giving up on a scene', () => {
     expect(onrestore).toHaveBeenCalledWith(expect.objectContaining({ id: 'sc_1' }));
   });
 
+  it('reads a proof with no place yet as In progress, abandons it with a word, and restores it from the foot', () => {
+    const onabandon = vi.fn();
+    const onopenproof = vi.fn();
+    const scenes = sceneList([
+      proof('Depot', { moments: [{ start: 130, end: 158 }], stated: true, points: [{ lat: 1, lon: 2 }], state: 'proved' }),
+      proof('Bridge', { moments: [{ start: 60, end: 70 }], stated: true, state: 'progress', abandoned: null }),
+    ], []);
+    const closed = render(SceneTab, { scenes });
+    const states = [...closed.querySelectorAll('[data-testid="scene-row"]')].map((r) => r.textContent.replace(/\s+/g, ' ').trim());
+    expect(states.find((t) => t.includes('Bridge'))).toContain('In progress · no place');
+    expect(states.find((t) => t.includes('Bridge'))).not.toContain('Proved');
+    expect(states.find((t) => t.includes('Depot'))).toContain('Proved');
+
+    const root = openOn(scenes, 'proof:Bridge', { onabandon, onopenproof });
+    const row = () => rows(root).find((r) => r.classList.contains('open'));
+    button(row(), 'Open the proof').click();
+    expect(onopenproof).toHaveBeenCalledWith(expect.objectContaining({ proof: 'Bridge' }));
+    button(row(), 'Abandon').click();
+    flushSync();
+    type(field(root, 'Why it is abandoned'), 'no landmark');
+    key(field(root, 'Why it is abandoned'), 'Enter');
+    expect(onabandon).toHaveBeenCalledWith(expect.objectContaining({ proof: 'Bridge' }), 'no landmark');
+    // a proof that states a place is proved, and offers no Abandon
+    const placed = openOn(scenes, 'proof:Depot');
+    expect(button(rows(placed).find((r) => r.classList.contains('open')), 'Abandon')).toBeUndefined();
+
+    const onrestore = vi.fn();
+    const left = sceneList([
+      proof('Bridge', { moments: [{ start: 60, end: 70 }], stated: true, state: 'abandoned', abandoned: { reason: 'too blurry' } }),
+    ], []);
+    const foot = render(SceneTab, { scenes: left, onrestore });
+    expect(rows(foot)).toHaveLength(0);
+    button(foot, 'Abandoned (1)').click();
+    flushSync();
+    const given = foot.querySelector('[data-testid="scene-row-abandoned"]');
+    expect(given.textContent).toContain('Bridge');
+    expect(given.textContent).toContain('too blurry');
+    button(given, 'Restore').click();
+    expect(onrestore).toHaveBeenCalledWith(expect.objectContaining({ proof: 'Bridge' }));
+  });
+
   it('brings a scene asked for into view, unfolding its group when it was abandoned', async () => {
     const root = render(SceneTab, { scenes: abandoned(SCENES(), 'sc_1', ''), focus: { key: 'sc_1', n: 1 } });
     await new Promise((resolve) => setTimeout(resolve, 0));

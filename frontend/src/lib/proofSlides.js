@@ -12,7 +12,7 @@
  * keeps of the one before it: the look, never the content.
  */
 import { templateFromProof } from './composer.js';
-import { isAbandoned, sceneColorAt, sceneList, sceneMoments, sceneTime, sceneTitle } from './scenes.js';
+import { isAbandoned, sceneColorAt, sceneList, sceneMoments, sceneTime, sceneTitle, unplaced } from './scenes.js';
 
 /** What each tile says it is, in the order a scene goes through them. */
 export const PROVED = 'proved';
@@ -26,6 +26,7 @@ export const ABANDONED = 'abandoned';
 /** A tile's second row, by state. */
 const WORDS = {
   [NO_PICTURE]: 'No picture yet',
+  unplaced: 'No place yet',
   [NEW]: 'Not saved',
   [TODO]: 'To geolocate',
   [GEOLOCATING]: 'Geolocating',
@@ -34,19 +35,27 @@ const WORDS = {
 
 const captureWords = (n) => (n === 1 ? '1 capture' : `${n} captures`);
 
-/** The tile of a proof the server listed. */
+/**
+ * The tile of a proof the server listed. One that states no place yet is `unplaced`,
+ * a slide still being geolocated, and can be abandoned like a scene; abandoned, it goes
+ * greyed to the end with the scenes given up on.
+ */
 function proofTile(row) {
   const picture = Boolean(row.png);
+  const state = isAbandoned(row) ? ABANDONED : picture ? PROVED : NO_PICTURE;
+  const open = state !== ABANDONED && unplaced(row);
   return {
     key: row.key,
     kind: 'proof',
     name: row.proof,
-    state: picture ? PROVED : NO_PICTURE,
+    state,
+    unplaced: open,
     title: sceneTitle(row),
     time: sceneTime(row),
-    words: picture ? sceneTime(row) : WORDS[NO_PICTURE],
+    words: state === ABANDONED ? WORDS[ABANDONED] : !picture ? WORDS[NO_PICTURE] : open ? WORDS.unplaced : sceneTime(row),
     thumb: row.thumb || null,
     color: row.color,
+    reason: row.abandoned?.reason ?? '',
     row,
   };
 }

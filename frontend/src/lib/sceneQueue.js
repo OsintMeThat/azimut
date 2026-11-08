@@ -68,6 +68,17 @@ export function queueState(scene, live = false) {
   return 'To geolocate';
 }
 
+/**
+ * The files with each one's proofs that state no place yet among its scenes, in the
+ * order its bar draws them: what the app's To-do lists and counts. Only the app reads
+ * the queue with `proofs`; the extension's never carries them.
+ */
+export function withProofs(files) {
+  return (files ?? []).map((file) => (file.proofs?.length
+    ? { ...file, scenes: [...(file.scenes ?? []), ...file.proofs].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) }
+    : file));
+}
+
 /** The files holding scenes `keep` accepts, each with only those scenes. */
 export function queueFiles(files, keep) {
   return (files ?? [])

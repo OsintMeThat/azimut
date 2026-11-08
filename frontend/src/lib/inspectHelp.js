@@ -81,6 +81,7 @@ export const INSPECT_HELP = {
   sceneStopGeolocating: 'Stop geolocating it; its captures stay',
   sceneToGeolocate: 'Nothing captured for it on the map yet',
   sceneInProgress: 'Captures were filed for it on the map, nothing is proved yet',
+  proofUnplaced: 'Its proof states no place yet: open it to add the point, or abandon it',
   sceneGeolocating: 'Being geolocated: every capture filed now is gathered for it',
   sceneAbandon: 'Give up on it, with a word if you like',
   sceneAbandonWord: 'Enter abandons it, Escape keeps it',

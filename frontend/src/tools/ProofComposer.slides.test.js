@@ -32,7 +32,7 @@ describe('the strip in the composer', () => {
     expect(body.indexOf('<ProofToolbar')).toBeLessThan(body.indexOf('<div class="stage">'));
     expect(stage.indexOf('<ProofCanvas')).toBeLessThan(stage.indexOf('<ProofSlides'));
     expect(stage).toContain('{#if stripShown}');
-    expect(source).toMatch(/\.stage \{\s*flex: 1;\s*display: flex;\s*flex-direction: column;\s*min-width: 0;\s*min-height: 0;\s*\}/);
+    expect(source).toMatch(/\.stage \{\s*position: relative;\s*flex: 1;\s*display: flex;\s*flex-direction: column;\s*min-width: 0;\s*min-height: 0;\s*\}/);
   });
 
   it('reads a video\'s scenes only while the proof open, or the scene shown, has one', () => {

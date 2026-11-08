@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ABANDONED, PROGRESS, TODO, isAbandoned, liveScenes, markablePicture, sceneColorAt, sceneKind, sceneWhen, toProve,
+  ABANDONED, PROGRESS, TODO, isAbandoned, liveScenes, markablePicture, sceneColorAt, sceneKind, sceneWhen, toProve, unplaced,
   WHOLE_VIDEO, defaultEnd, editClock, isStretch, isWholeVideo, momentKey, momentsClash, newScene, parseClock,
   sameMoments, sameTime, sceneList, shortClock, sceneMarks, scenePassage, sceneStart, sceneTime, sceneTitle,
   sceneToEnd, shortMoments, snapToFrame, sortMoments, spanLabel, stretchFromShot, timeProblem, timeWords,
@@ -171,6 +171,18 @@ describe('sceneList', () => {
     expect(toProve([...list.filter((s) => s.id === 'sc_2'), { kind: 'proof', proof: 'P' }])).toBe(0);
     // the abandoned keep their place in the colours, so giving one up recolours nothing
     expect(new Set(list.map((s) => s.color)).size).toBe(3);
+  });
+
+  it('counts a proof that states no place yet as still to prove, and one given up on as abandoned', () => {
+    const placed = { kind: 'proof', proof: 'A', state: 'proved', abandoned: null };
+    const open = { kind: 'proof', proof: 'B', state: PROGRESS, abandoned: null };
+    const left = { kind: 'proof', proof: 'C', state: ABANDONED, abandoned: { reason: 'no landmark' } };
+    // an older answer stated no state: proved, as it always read
+    const older = { kind: 'proof', proof: 'D' };
+    expect([placed, open, left, older].map(unplaced)).toEqual([false, true, false, false]);
+    expect([placed, open, left, older].map(isAbandoned)).toEqual([false, false, true, false]);
+    expect(liveScenes([placed, open, left, older]).map((s) => s.proof)).toEqual(['A', 'B', 'D']);
+    expect(toProve([placed, open, left, older])).toBe(1);
   });
 
   it('keeps a proof with no time at all last', () => {

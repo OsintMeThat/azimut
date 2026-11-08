@@ -54,6 +54,23 @@ describe('the tiles of a strip', () => {
     expect(by.s2).toMatchObject({ state: ABANDONED, words: 'Abandoned', reason: 'too blurry', thumb: null });
   });
 
+  it('mark a slide saved with no place yet, and send one given up on to the end, greyed', () => {
+    const answer = {
+      ...ANSWER,
+      scenes: [
+        proof('road-bridge', { title: 'Road bridge', moments: [{ start: 30, end: 45 }], state: PROGRESS }),
+        proof('market', { title: 'Market', at: [80], state: 'abandoned', abandoned: { reason: 'no landmark' } }),
+        proof('square', { title: 'Square', at: [100], state: PROVED, points: [{ lat: 1, lon: 2 }] }),
+      ],
+    };
+    const tiles = slideTiles(answer, { started: true, name: 'square' });
+    expect(tiles.map((t) => t.key)).toEqual(['proof:road-bridge', 'proof:square', 'proof:market']);
+    const by = Object.fromEntries(tiles.map((t) => [t.key, t]));
+    expect(by['proof:road-bridge']).toMatchObject({ state: PROVED, unplaced: true, words: 'No place yet' });
+    expect(by['proof:market']).toMatchObject({ state: ABANDONED, unplaced: false, words: 'Abandoned', reason: 'no landmark' });
+    expect(by['proof:square']).toMatchObject({ state: PROVED, unplaced: false, words: 'Whole video' });
+  });
+
   it('count a scene\'s captures once nobody geolocates it', () => {
     const tiles = slideTiles({ ...ANSWER, geolocating: null }, { started: true, name: 'market' });
     expect(tiles.find((t) => t.key === 's3')).toMatchObject({ state: PROGRESS, words: '2 captures' });

@@ -21,13 +21,16 @@ scenes whole and never sends ``captures`` or ``abandoned``, and a save keeps the
 
 from __future__ import annotations
 
+import json
 import math
 import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from .. import layout
 from ..workspace import CaseError
 from . import inspectwork
+from . import satellite as satellite_engine
 from . import scenes as scenes_engine
 from .scenes import draft_row as scene_row
 
@@ -61,9 +64,12 @@ def _kinds(case: Case, paths: list[str]) -> dict[str, str]:
 
 
 def _proved(specs: list[tuple[str, dict[str, Any]]], taken: set[str], path: str, draft_id: str, kind: str) -> bool:
-    """A scene of a video is proved once a proof cites it; a picture marked to
-    geolocate, once a proof lays it out."""
-    return draft_id in taken or (kind == "image" and bool(scenes_engine.laid_out_by(specs, path)))
+    """A scene of a video leaves the queue once a proof cites it, the proof standing in
+    its place there until it states a place (`scenes.unplaced_proofs`); a picture marked
+    to geolocate, once a proof that states a place lays it out."""
+    if kind == "image":
+        return any(satellite_engine.spec_points(spec) for _name, spec in scenes_engine.laid_out_by(specs, path))
+    return draft_id in taken
 
 
 def _orders(case: Case, videos: list[str], proofs: Any = None) -> dict[tuple[str, str], int]:
@@ -240,6 +246,50 @@ def restore(case: Case, video: str, draft_id: str) -> dict[str, Any]:
     return scene_row(case, video, scene, _kinds(case, [video]).get(video, "video"))
 
 
+def _proof_entity(case: Case, name: str) -> dict[str, Any]:
+    entity = case.find_entity(attr="spec", value=layout.proof_spec_rel(name))
+    if entity is None or entity.get("type") != "proof":
+        raise CaseError("no such proof in the case")
+    return entity
+
+
+def _proof_spec(case: Case, name: str) -> dict[str, Any]:
+    try:
+        spec = json.loads(case.resolve_inside(layout.proof_spec_rel(name)).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CaseError("that proof cannot be read") from exc
+    return spec if isinstance(spec, dict) else {}
+
+
+def _proof_video(spec: dict[str, Any]) -> str | None:
+    stated = scenes_engine.stated_scene(spec)
+    return stated["video"] if stated else None
+
+
+def abandon_proof(case: Case, name: str, reason: Any = "") -> dict[str, Any]:
+    """Give up on a proof that states no place, as on a scene still to prove: it stays
+    as it is, greyed among the abandoned, and `restore_proof` takes it up again. One
+    that states a place is Proved, and refused."""
+    if reason is not None and not isinstance(reason, str):
+        raise CaseError("the reason is text")
+    entity = _proof_entity(case, name)
+    spec = _proof_spec(case, name)
+    if satellite_engine.spec_points(spec):
+        raise CaseError("this proof states a place: it is proved")
+    word = (reason or "").strip()[:MAX_REASON]
+    abandoned = {"reason": word, "at": _now()}
+    case.update_entity(entity["id"], {"attrs": {"abandoned": abandoned}})
+    return {"proof": name, "video": _proof_video(spec), "state": scenes_engine.ABANDONED, "abandoned": abandoned}
+
+
+def restore_proof(case: Case, name: str) -> dict[str, Any]:
+    """Take an abandoned proof up again."""
+    entity = _proof_entity(case, name)
+    if (entity.get("attrs") or {}).get("abandoned") is not None:
+        case.update_entity(entity["id"], {"attrs": {"abandoned": None}})
+    return {"proof": name, "video": _proof_video(_proof_spec(case, name)), "state": scenes_engine.PROGRESS, "abandoned": None}
+
+
 # -- marking a whole file -------------------------------------------------------------
 
 
@@ -309,13 +359,21 @@ def _drafts(case: Case, path: str) -> list[dict[str, Any]]:
 # -- the queue ------------------------------------------------------------------------
 
 
-def queue(case: Case) -> dict[str, Any]:
+def queue(case: Case, with_proofs: bool = False) -> dict[str, Any]:
     """Every scene still to prove in the case, grouped by its file, the file most
     recently worked on first and each file's scenes in clip order, the whole video
-    first. Those a proof took up are Proved and left out; the abandoned stay, marked."""
+    first. Those a proof took up are Proved and left out; the abandoned stay, marked.
+
+    ``with_proofs`` adds, under ``proofs`` beside a file's scenes, the proofs made for
+    a scene of it that state no place yet: the app's To-do lists them, while the
+    extension, which only geolocates scenes, reads the queue without them."""
     proofs = scenes_engine.read_proofs(case)
     taken = _taken(proofs[0])
     works = [(subject, drafts) for subject, _touched, drafts in inspectwork.scene_works(case)]
+    unplaced = scenes_engine.unplaced_proofs(case, proofs) if with_proofs else {}
+    # a video whose only scenes left are proofs with no place has no draft in the queue
+    worked = {subject for subject, _drafts in works}
+    works += [(video, []) for video in unplaced if video not in worked]
     kinds = _kinds(case, [subject for subject, _drafts in works])
     places = _orders(case, [subject for subject, _drafts in works if kinds.get(subject) == "video"], proofs)
     present = _present(case, [subject for subject, _drafts in works])
@@ -330,11 +388,17 @@ def queue(case: Case) -> dict[str, Any]:
             for d in drafts
             if not _proved(proofs[0], taken, subject, d["id"], kind)
         ]
-        if not rows:
+        open_proofs = unplaced.get(subject, [])
+        if not rows and not open_proofs:
             continue
         rows.sort(key=lambda r: (-math.inf, -math.inf) if r["start"] is None else (r["start"], r["end"] or r["start"]))
         title = item.get("title") or item.get("filename") or subject.rsplit("/", 1)[-1]
-        row = {"video": subject, "title": str(title), "kind": kind, "scenes": rows}
+        row: dict[str, Any] = {"video": subject, "title": str(title), "kind": kind, "scenes": rows}
+        if with_proofs:
+            row["proofs"] = [
+                _placed(proof, places)
+                for proof in sorted(open_proofs, key=lambda r: math.inf if r["start"] is None else r["start"])
+            ]
         # a picture a collage exported names it, so its row opens the collage
         made_by = _collage_of(case, item)
         if made_by:

@@ -14,7 +14,7 @@ export const PROOF_SCENE_HELP = {
   time: 'Change when in the video the place shows',
   show: 'Play it in the player',
   addMoment: 'Add an instant at the frame of each panel outside these moments',
-  badge: 'Prints the video and the scene\'s time on its panels',
+  badge: 'Prints the scene\'s timecode on its panels',
 
   // the player
   play: 'Play or pause (Space)',

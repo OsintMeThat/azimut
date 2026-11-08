@@ -174,8 +174,19 @@ describe('Proof Composer pickers', () => {
   it('files panels and saved proofs by their case folder', () => {
     expect(source).toContain("folder: m.folder ?? ''");
     expect(source).toContain("folder: s.folder ?? ''");
-    expect(source).toContain("fetchAllEntities(caseState.current.id, { types: ['proof'] })");
+    expect(source).toContain("fetchAllEntities(caseId, { types: ['proof'] })");
     expect(source).toContain('folders.get(entry.spec_path)');
+  });
+
+  it('opens the saved proofs\' list on the press, both reads at once, and leaves it as soon as one is picked', () => {
+    const list = bodyOfFn('openProofList');
+    expect(list).toContain('await Promise.all([');
+    // closed while it was read: it stays closed
+    expect(list).toContain('if (openList === null) return;');
+    expect(bodyOfFn('openProofDialog')).toContain('openList ??= [];');
+    const pick = bodyOfFn('requestOpenProof');
+    expect(pick.indexOf('openList = null;')).toBeLessThan(pick.indexOf('await openProof(entry);'));
+    expect(pick).toContain('openingTitle = entry.title || entry.name;');
   });
 });
 

@@ -168,7 +168,7 @@
     const parts = [tile.title];
     if (tile.time && tile.time !== tile.title) parts.push(tile.time);
     if (tile.state === ABANDONED) parts.push(tile.reason ? `Abandoned: ${tile.reason}` : 'Abandoned');
-    else if (tile.kind === 'draft') parts.push(tile.words);
+    else if (tile.kind === 'draft' || tile.unplaced) parts.push(tile.words);
     else if (tile.state === NEW) parts.push(HELP.unsaved);
     const act = tile.current ? HELP.current : heading === tile.key ? HELP.heading : tile.kind === 'draft' ? HELP.scene : HELP.open;
     return `${parts.filter(Boolean).join(' · ')}. ${act}`;
@@ -274,6 +274,7 @@
       <Icon name="proof" size={15} />
     {/if}
     {#if tile.state === GEOLOCATING}<span class="live" aria-hidden="true"></span>{/if}
+    {#if tile.unplaced}<span class="unplaced" aria-hidden="true"></span>{/if}
     {#if compact}<span class="tile-num">{tile.number}</span>{/if}
   </span>
 {/snippet}
@@ -357,8 +358,26 @@
   <FloatingMenu anchor={menu.anchor} at={menu.at} width={240} label={tile.title} onclose={() => (menu = null)}>
     <p class="fm-head" dir="auto">{tile.title}</p>
     {#if tile.kind === 'proof'}
-      <button type="button" class="fm-item" title={HELP.inspect} onclick={() => act('inspect')}>
-        <Icon name="inspect" size={14} /><span class="fm-grow">Show in Inspect</span></button>
+      {#if tile.state === ABANDONED && tile.reason}<p class="fm-note" dir="auto">Abandoned: {tile.reason}</p>{/if}
+      {#if menu.asking}
+        <form class="slide-why" onsubmit={(event) => { event.preventDefault(); act('abandon', reason.trim()); }}>
+          <input class="input" aria-label="Why it is abandoned" placeholder="Why? (optional)" maxlength="200" dir="auto"
+            title={HELP.reason} bind:value={reason} />
+          <button class="btn btn-xs">Abandon</button>
+        </form>
+      {:else}
+        <button type="button" class="fm-item" title={HELP.inspect} onclick={() => act('inspect')}>
+          <Icon name="inspect" size={14} /><span class="fm-grow">Show in Inspect</span></button>
+        {#if tile.state === ABANDONED}
+          <button type="button" class="fm-item" title={HELP.restore} onclick={() => act('restore')}>
+            <Icon name="undo" size={14} /><span class="fm-grow">Restore</span></button>
+        {:else if tile.unplaced}
+          <p class="fm-note">{HELP.unplaced}</p>
+          <div class="fm-sep"></div>
+          <button type="button" class="fm-item" title={HELP.abandon} onclick={askWhy}>
+            <Icon name="eyeOff" size={14} /><span class="fm-grow">Abandon…</span></button>
+        {/if}
+      {/if}
     {:else if tile.state === ABANDONED}
       {#if tile.reason}<p class="fm-note" dir="auto">Abandoned: {tile.reason}</p>{/if}
       <button type="button" class="fm-item" title={HELP.restore} onclick={() => act('restore')}>
@@ -471,6 +490,9 @@
     box-shadow: 0 0 0 0 var(--accent); animation: beat 1.6s ease-out infinite; }
   @keyframes beat { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 70%, transparent); } 80%, 100% { box-shadow: 0 0 0 6px transparent; } }
   @media (prefers-reduced-motion: reduce) { .live { animation: none; } }
+  /* a slide saved with no place yet: a small amber dot in the corner */
+  .unplaced { position: absolute; right: 3px; bottom: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--warn);
+    box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .55); }
 
   .tile-title { align-self: end; display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; white-space: nowrap;
     font-weight: 600; line-height: 14px; }

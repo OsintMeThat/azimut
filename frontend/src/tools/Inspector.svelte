@@ -17,7 +17,7 @@
     stretchFromShot, timeWords, toProve,
   } from '../lib/scenes.js';
   import {
-    abandonScene, geolocateScene, geolocating, restoreScene, sceneEdit as sceneGiven, stopGeolocating,
+    abandonProof, abandonScene, geolocateScene, geolocating, restoreProof, restoreScene, sceneEdit as sceneGiven, stopGeolocating,
   } from '../lib/geolocating.svelte.js';
   import { onEvent } from '../lib/events.js';
   import {
@@ -1247,7 +1247,34 @@
     listedScenes = at === -1 ? [...listedScenes, row] : listedScenes.map((sc, i) => (i === at ? row : sc));
   }
 
+  /**
+   * A proof that states no place yet given up on, or taken up again: the word lives on
+   * the proof, so the tab reads its rows again rather than patching one.
+   */
+  async function leaveProof(scene, reason, back = false) {
+    const run = openRun;
+    try {
+      if (back) await restoreProof(work.caseId, scene.proof);
+      else await abandonProof(work.caseId, scene.proof, reason);
+    } catch (e) {
+      if (run === openRun) toast(e.message, 'danger');
+      return;
+    }
+    if (run !== openRun) return;
+    if (back) sceneFocus = { key: scene.key, n: (sceneFocus?.n ?? 0) + 1 };
+    loadScenes(run);
+    if (!back) {
+      toast('Proof abandoned', 'info', 6000, {
+        label: 'Undo',
+        onClick: () => {
+          if (run === openRun) leaveProof(scene, '', true);
+        },
+      });
+    }
+  }
+
   async function abandon(scene, reason = '') {
+    if (scene?.kind === 'proof' && hasScenes) return leaveProof(scene, reason);
     if (scene?.kind !== 'draft' || !hasScenes || sceneBusy) return;
     sceneBusy = true;
     const run = openRun;
@@ -1274,6 +1301,7 @@
   }
 
   async function bringBack(scene) {
+    if (scene?.kind === 'proof' && hasScenes) return leaveProof(scene, '', true);
     if (scene?.kind !== 'draft' || !hasScenes) return;
     const run = openRun;
     try {

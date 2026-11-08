@@ -1892,12 +1892,23 @@ of the tab, greyed with its word and **Restore**. It keeps its colour and its fr
 bar draws it as an outlined band or a hollow pin, its frames carry a grey ring, no scene
 is offered inside it, and the tab's count leaves it out.
 
+**A proof is Proved once it states a place.** Saved with no point yet, its row reads *In
+progress · no place* rather than Proved, with **Open the proof** and **Abandon**. It stays
+in the To-do beside its file's scenes (`proofs` on a file of `GET /scenes/queue`), where a
+press opens it in Geo Proof, and on Geo Proof's strip its tile carries an amber dot and
+its ⋯ offers Abandon. Abandoned, it joins the scenes given up on, greyed with its word,
+and **Restore** brings it back (`PUT` and `DELETE /cases/{id}/proofs/{name}/abandon`). The
+word lives on the proof's entity, never in its spec, and a save with a point lets it go. A
+proof that states a place is refused. An older proof traced to a video by its frames reads
+In progress in Inspect too but never joins the To-do, which only holds what was asked for
+as a scene. The extension's list stays scenes only.
+
 **A picture is marked whole.** Its Scenes tab offers **Mark to geolocate**, one press that
 keeps one scene about the whole picture in its work, never an instant or a passage. Its
 row has a name, where it stands, Abandon, Geolocate and Make the proof. **Make the proof**
 opens a new proof of the picture and the captures gathered for it, on its Proof tab,
-stating no time. Any proof laying the picture out proves it, and the row then reads
-*Proved · Proof 12* and opens it. A frame cut from a video belongs to that video's scenes
+stating no time. Any proof laying the picture out takes the row's place, and once it
+states a place the row reads *Proved · Proof 12* and opens it. A frame cut from a video belongs to that video's scenes
 and a capture is an answer, so neither has the tab.
 
 **Collages hang under their scenes.** The Scenes tab lists each collage cut from the clip
@@ -4237,6 +4248,10 @@ pass date, detector, area and run id. Exported layers survive deletion of their 
 A proof is composed of panels: case images, each carrying its source. Two things
 in the composer are not panels.
 
+**Open proof** shows its list on the press, its rows following when the case answers. A
+pick closes it at once, and a small tag over the canvas names the proof while its pictures
+load.
+
 **Overlays.** Ctrl+V, a drop on the canvas, or `+ Add overlay` put an image
 straight into the proof. Ctrl+V answers to two clipboards, and the rule is which
 copy came last: an annotation copied here wins, until leaving the window and
@@ -4424,8 +4439,8 @@ the handles and never exported, which shows the Scene tab on that panel's frame.
 outside every moment stated, the field says *1 panel is outside these moments* and
 offers **Add its moment**, an instant at that frame. **Scene time on the picture**
 (Style, off by default, offered only for a proof built on a video) prints
-`clip.mp4 · 2:10–2:38` in a dark tag at the bottom left of each ★ panel, the moment that
-panel's frame shows in. It is drawn on the page, so the exported picture is the canvas.
+`2:10–2:38`, the timecode alone and never the video's name, in a dark tag at the bottom
+left of each ★ panel, the moment that panel's frame shows in. It is drawn on the page, so the exported picture is the canvas.
 A proof about the whole video has no time to print, and the house style leaves it to
 each proof.
 

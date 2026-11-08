@@ -30,6 +30,7 @@ export const PROOF_SLIDES_HELP = {
 
   // what a tile's menu does
   inspect: 'Open the video in Inspect on this moment',
+  unplaced: 'This slide states no place yet',
   make: 'Make the proof of this scene from its frames',
   geolocate: 'Find this scene on the map, its captures kept with it',
   abandon: 'Give up on this scene, kept greyed at the end',

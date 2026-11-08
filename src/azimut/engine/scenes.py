@@ -439,13 +439,17 @@ def _proof_row(lookup: _Lookup, name: str, spec: dict[str, Any], scene: dict[str
     # spec recorded it still has one there. Never the export itself, which a strip of
     # thirty slides would load whole, and never one made here, since this is a read.
     thumb = _existing(case, _text(spec.get("thumb"))) or _existing(case, _text(attrs.get("thumb")))
+    points = _points(lookup, spec)
+    state, abandoned = proof_state(bool(points), attrs)
     return {
         "kind": "proof",
         "proof": name,
         "proof_id": proof["id"] if proof else None,
         "title": spec.get("title") or name,
         **scene,
-        "points": _points(lookup, spec),
+        "points": points,
+        "state": state,
+        "abandoned": abandoned,
         "png": _existing(case, layout.proof_export_rel(name)),
         "thumb": thumb,
         "when": spec.get("when") or None,
@@ -468,10 +472,59 @@ def _order(scene: dict[str, Any]) -> tuple[float, float]:
     return (start, end if end is not None else start)
 
 
-#: The states of a scene still to prove (`engine/geolocate.py`); a proof is Proved.
+#: The states of a scene still to prove (`engine/geolocate.py`); a proof is Proved
+#: once it states a place.
 TODO = "todo"
 PROGRESS = "progress"
 ABANDONED = "abandoned"
+PROVED = "proved"
+
+
+def proof_state(located: bool, attrs: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+    """Where a proof stands: Proved once it states a place. Until then it is a scene
+    still being geolocated, In progress, unless the analyst gave up on it: the word it
+    was abandoned with lives on the proof's entity (`attrs.abandoned`), never in its
+    spec, so a save from Geo Proof leaves it be."""
+    if located:
+        return PROVED, None
+    abandoned = attrs.get("abandoned")
+    if isinstance(abandoned, dict):
+        return ABANDONED, abandoned
+    return PROGRESS, None
+
+
+def unplaced_proofs(
+    case: Case, proofs: tuple[list[tuple[str, dict[str, Any]]], dict[str, tuple[str, float]]]
+) -> dict[str, list[dict[str, Any]]]:
+    """The proofs made for a scene of a video that state no place yet, by video, in the
+    shape the queue lists a scene in: what the To-do still counts as to geolocate. Only
+    a proof that states its scene: an older proof traced to a video by its frames was
+    never asked to be one of its places."""
+    specs, origins = proofs
+    lookup = _Lookup(case)
+    out: dict[str, list[dict[str, Any]]] = {}
+    for name, spec in specs:
+        if satellite_engine.spec_points(spec):
+            continue
+        scene = proof_scene(spec, origins)
+        if scene is None or not scene["stated"]:
+            continue
+        attrs = (lookup.proof(layout.proof_spec_rel(name)) or {}).get("attrs") or {}
+        state, abandoned = proof_state(False, attrs)
+        first = scene["moments"][0] if scene["moments"] else {}
+        out.setdefault(scene["video"], []).append({
+            "kind": "proof",
+            "id": f"proof:{name}",
+            "proof": name,
+            "video": scene["video"],
+            "label": str(spec.get("title") or name),
+            "start": first.get("start"),
+            "end": first.get("end"),
+            "state": state,
+            "abandoned": abandoned,
+            "captures": [],
+        })
+    return out
 
 
 def _captured(case: Case, paths: Any) -> list[str]:
@@ -545,15 +598,16 @@ def scene_places(
 ) -> dict[tuple[str, str], int]:
     """Each draft's place among its video's scenes, proofs included, in the order
     `video_scenes` lists them, read from their times alone: what the queue colours a
-    scene by, without building every proof's row."""
+    scene by, without building every proof's row. A proof's place is under
+    ``proof:<name>``, the id the queue lists one that states no place yet by."""
     specs, origins = proofs
     rows: dict[str, list[dict[str, Any]]] = {video: [] for video in videos}
     taken: set[str] = set()
-    for _name, spec in specs:
+    for name, spec in specs:
         taken |= cited_drafts(stated_scene(spec))
         scene = proof_scene(spec, origins)
         if scene is not None and scene["video"] in rows:
-            rows[scene["video"]].append({"kind": "proof", **scene})
+            rows[scene["video"]].append({"kind": "proof", "name": name, **scene})
     for video in videos:
         for draft in _drafts_of(case, video, works):
             if not isinstance(draft.get("id"), str) or draft["id"] in taken:
@@ -567,8 +621,8 @@ def scene_places(
     for video, listed in rows.items():
         listed.sort(key=_order)
         for at, row in enumerate(listed):
-            if row["kind"] == "draft":
-                places[(video, row["id"])] = at
+            # a proof by the id the queue lists it under (`unplaced_proofs`)
+            places[(video, row["id"] if row["kind"] == "draft" else f"proof:{row['name']}")] = at
     return places
 
 

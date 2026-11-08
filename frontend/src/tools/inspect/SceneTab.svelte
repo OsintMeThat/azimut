@@ -6,7 +6,7 @@
   import { captureCount } from '../../lib/sceneQueue.js';
   import {
     PROGRESS, SCENE_LABEL_MAX, isAbandoned, isWholeVideo, sceneColorAt, scenePassage, sceneTime, sceneTitle, sceneWhen,
-    shortClock, spanLabel,
+    shortClock, spanLabel, unplaced,
   } from '../../lib/scenes.js';
 
   // The Scenes tab: the places to find in the open file, in clip order, a scene about
@@ -27,6 +27,9 @@
   // switch that stops it when pressed again; Make the proof stays beside it. Abandon
   // asks for a word, which may stay empty, and the scene goes to the folded Abandoned
   // group at the foot, greyed with its word, where Restore brings it back.
+  //
+  // A proof stands Proved once it states a place. Saved with no point yet, it reads In
+  // progress and can be abandoned and restored like a scene (`engine/scenes.proof_state`).
   //
   // A picture (`picture`) is marked whole, once, from here: its row has no time, and
   // once a proof lays the picture out, the proof's row takes its place.
@@ -154,6 +157,8 @@
   }
 
   const proved = (sc) => (sc.points?.length > 1 ? `${sc.points.length} places` : 'Proved');
+  /** A gone row's name: the label, or the proof's title. */
+  const goneName = (sc) => (sc.kind === 'proof' ? sceneTitle(sc) : sc.label);
   /** A closed row's name: the label or the proof's title, else its time says what it is. */
   const named = (sc) => (sc.kind === 'proof' ? sceneTitle(sc) : sc.label.trim());
 
@@ -187,6 +192,17 @@
     {/if}
     <span class="words">{standing(sc)}</span>
   </div>
+{/snippet}
+
+<!-- Where a proof stands: Proved with its place, or In progress while it states none. -->
+{#snippet proofState(sc)}
+  {#if unplaced(sc)}
+    <span class="standing found" title={INSPECT_HELP.proofUnplaced} data-testid="scene-state">
+      <span class="ring" aria-hidden="true"></span><span class="words">In progress · no place</span>
+    </span>
+  {:else}
+    <span class="proved"><Icon name="check" size={11} /> {proved(sc)}</span>
+  {/if}
 {/snippet}
 
 {#snippet leave(sc)}
@@ -242,6 +258,25 @@
   {/if}
 {/snippet}
 
+<!-- What a proof's open row offers: the proof, and while it states no place, Abandon. -->
+{#snippet proofActs(sc)}
+  {#if leaving === sc.key}
+    {@render leave(sc)}
+  {:else}
+    {#if unplaced(sc)}
+      <div class="state-line">
+        {@render proofState(sc)}
+        <button class="quiet" onclick={() => askReason(sc)} title={INSPECT_HELP.sceneAbandon}>Abandon</button>
+      </div>
+    {/if}
+    <div class="acts">
+      <button class="btn btn-ghost btn-xs make" onclick={() => onopenproof?.(sc)} title={picture ? INSPECT_HELP.pictureProof : INSPECT_HELP.sceneProof}>
+        <Icon name="proof" size={12} /> Open the proof
+      </button>
+    </div>
+  {/if}
+{/snippet}
+
 {#snippet collageLines(sc)}
   {@const held = collages.get(sc.key) ?? []}
   {#if held.length}
@@ -288,11 +323,20 @@
     {/if}
     {#each listed as sc (sc.key)}
       {#if sc.kind === 'proof'}
-        <button class="proved-row" onclick={() => onopenproof?.(sc)} title={INSPECT_HELP.pictureProof} data-testid="scene-row" data-scene-key={sc.key} class:lit={lit === sc.key}>
-          <Icon name="check" size={12} />
-          <span class="proved-words">{proved(sc)} · <span class="proved-title" dir="auto">{sceneTitle(sc)}</span></span>
-          <Icon name="chevronRight" size={12} />
-        </button>
+        {#if unplaced(sc)}
+          <div class="scene-row open" class:lit={lit === sc.key} style:--scene={sceneColorAt(0)} role="group"
+            aria-label="The picture's proof" data-testid="scene-row" data-scene-key={sc.key}>
+            <span class="swatch" aria-hidden="true"></span>
+            <div class="head"><span class="title" dir="auto">{sceneTitle(sc)}</span></div>
+            {@render proofActs(sc)}
+          </div>
+        {:else}
+          <button class="proved-row" onclick={() => onopenproof?.(sc)} title={INSPECT_HELP.pictureProof} data-testid="scene-row" data-scene-key={sc.key} class:lit={lit === sc.key}>
+            <Icon name="check" size={12} />
+            <span class="proved-words">{proved(sc)} · <span class="proved-title" dir="auto">{sceneTitle(sc)}</span></span>
+            <Icon name="chevronRight" size={12} />
+          </button>
+        {/if}
       {:else}
         <div
           class="scene-row open"
@@ -334,7 +378,7 @@
           <div class="head">
             {#if sc.kind === 'proof'}
               <span class="title" dir="auto">{sceneTitle(sc)}</span>
-              <span class="proved"><Icon name="check" size={11} /> {proved(sc)}</span>
+              {#if !unplaced(sc)}{@render proofState(sc)}{/if}
             {/if}
             {#if loop}
               <button class="icon-btn play" onclick={() => onplay?.(sc)} title={INSPECT_HELP.scenePlay} aria-label="Play scene">
@@ -359,11 +403,7 @@
             />
           {/if}
           {#if sc.kind === 'proof'}
-            <div class="acts">
-              <button class="btn btn-ghost btn-xs make" onclick={() => onopenproof?.(sc)} title={INSPECT_HELP.sceneProof}>
-                <Icon name="proof" size={12} /> Open the proof
-              </button>
-            </div>
+            {@render proofActs(sc)}
           {:else}
             {@render acts(sc)}
           {/if}
@@ -387,7 +427,7 @@
             {#if name}<span class="row-when" data-testid="scene-when">{sceneWhen(sc)}</span>{/if}
           </span>
           {#if sc.kind === 'proof'}
-            <span class="proved"><Icon name="check" size={11} /> {proved(sc)}</span>
+            {@render proofState(sc)}
           {:else}
             {@render where(sc)}
           {/if}
@@ -418,7 +458,7 @@
                   aria-label={`Go to the scene, ${sceneTime(sc)}`}
                 >{sceneTime(sc)}</button>
               {/if}
-              <span class="gone-title" class:unnamed={!sc.label} dir="auto">{sc.label || 'No label'}</span>
+              <span class="gone-title" class:unnamed={!goneName(sc)} dir="auto">{goneName(sc) || 'No label'}</span>
               <button class="btn btn-ghost btn-xs" onclick={() => onrestore?.(sc)} title={INSPECT_HELP.sceneRestore}>Restore</button>
             </div>
             {#if sc.abandoned?.reason}

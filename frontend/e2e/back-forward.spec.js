@@ -159,6 +159,39 @@ test('opening another proof asks first too, so the list cannot drop an edit', as
   fixture.expectNoUnexpectedRequests();
 });
 
+test('Open proof shows its list on the press and leaves it on a pick, the canvas naming the proof while it loads', async ({ page }) => {
+  const fixture = await withProofs(page);
+  // the list answers late, and the proof picked later still
+  let releaseList;
+  const listHeld = new Promise((resolve) => { releaseList = resolve; });
+  await page.route(`**/api/cases/${CASE_ID}/proofs`, async (route) => {
+    if (route.request().method() === 'GET') await listHeld;
+    return route.fallback();
+  });
+  let releaseProof;
+  const proofHeld = new Promise((resolve) => { releaseProof = resolve; });
+  await page.route(`**/api/cases/${CASE_ID}/proofs/*`, async (route) => {
+    if (route.request().method() === 'GET') await proofHeld;
+    return route.fallback();
+  });
+  await page.goto('/#proof');
+
+  await page.locator('.tool-header').getByRole('button', { name: 'Open proof' }).click();
+  const list = page.getByRole('dialog', { name: 'Open a saved proof' });
+  await expect(list.getByText('Reading the saved proofs…')).toBeVisible();
+  releaseList();
+  const title = PROOFS['proof-a'];
+  await list.locator('.open-row', { hasText: title }).click();
+  await expect(list).toHaveCount(0);
+  const opening = page.getByRole('status').filter({ hasText: `Opening ${title}…` });
+  await expect(opening).toBeVisible();
+
+  releaseProof();
+  await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue(title);
+  await expect(opening).toHaveCount(0);
+  fixture.expectNoUnexpectedRequests();
+});
+
 test('Back on an open dialog closes it and stays on the tool', async ({ page }) => {
   const fixture = await withProofs(page);
   await page.goto('/#files');

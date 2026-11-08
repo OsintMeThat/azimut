@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   abandonedScenes, captureCount, captureWords, firstScenes, gatheredScene, isPicture, openScenes, queueColor, queueMark, queueName, queueState,
-  queueTime, sceneCount, waitingWords,
+  queueTime, sceneCount, waitingWords, withProofs,
 } from './sceneQueue.js';
 import { sceneList } from './scenes.js';
 
@@ -94,6 +94,23 @@ describe('the rows a list shows', () => {
     expect(abandonedScenes(FILES).map((f) => [f.title, f.scenes.map((s) => s.id)])).toEqual([['A', ['g']], ['B', ['x']]]);
     expect(sceneCount(openScenes(FILES))).toBe(4);
     expect(openScenes(null)).toEqual([]);
+  });
+
+  it('lists a file’s proofs with no place yet among its scenes, in the order its bar draws them', () => {
+    const proof = (name, order, state = 'progress') => ({ kind: 'proof', id: `proof:${name}`, proof: name, video: 'media/v.mp4', label: name, start: order, end: null, state, order });
+    const files = withProofs([
+      { video: 'media/v.mp4', title: 'V', scenes: [row('s0', 0, null, '', { order: 0 }), row('s2', 20, null, '', { order: 2 })],
+        proofs: [proof('Bridge', 1), proof('Depot', 3, 'abandoned')] },
+      { video: 'media/w.mp4', title: 'W', scenes: [], proofs: [proof('Only', 0)] },
+      { video: 'media/x.mp4', title: 'X', scenes: [row('x0', 1, null)] },
+    ]);
+    expect(openScenes(files).map((f) => [f.title, f.scenes.map((s) => s.id)])).toEqual([
+      ['V', ['s0', 'proof:Bridge', 's2']], ['W', ['proof:Only']], ['X', ['x0']],
+    ]);
+    expect(abandonedScenes(files).map((f) => f.scenes.map((s) => s.id))).toEqual([['proof:Depot']]);
+    expect(sceneCount(openScenes(files))).toBe(5);
+    // the extension's queue carries no proofs, and reads as it did
+    expect(withProofs(FILES)).toEqual(FILES);
   });
 
   it('keeps the first few across the files, and always the one named', () => {

@@ -118,14 +118,27 @@ export function markablePicture(item) {
   return !CAPTURE_SOURCES.has(source.type);
 }
 
-/** Whether a scene still to prove was given up on. It stays, greyed, and can come back. */
-export const isAbandoned = (scene) => scene?.kind === 'draft' && Boolean(scene.abandoned);
+/**
+ * Whether a scene was given up on: one still to prove, or a proof that states no place
+ * yet (`engine/scenes.proof_state`). It stays, greyed, and can come back.
+ */
+export const isAbandoned = (scene) => (scene?.kind === 'draft' || scene?.kind === 'proof') && Boolean(scene.abandoned);
+
+/**
+ * Whether a proof states no place yet: made for a scene and saved, but not geolocated.
+ * It reads In progress rather than Proved, until a point is saved on it. A row the
+ * server never stated a state for (an older answer) is taken as proved.
+ */
+export const unplaced = (scene) => scene?.kind === 'proof' && scene.state === PROGRESS;
 
 /** The scenes Inspect lists first and its Scenes tab counts: all but the abandoned. */
 export const liveScenes = (scenes) => (scenes ?? []).filter((s) => !isAbandoned(s));
 
-/** How many scenes are still to prove: the drafts not abandoned, which tint the tab's count. */
-export const toProve = (scenes) => liveScenes(scenes).filter((s) => s.kind === 'draft').length;
+/**
+ * How many scenes are still to prove, which tint the tab's count: the drafts not
+ * abandoned, and the proofs that state no place yet.
+ */
+export const toProve = (scenes) => liveScenes(scenes).filter((s) => s.kind === 'draft' || unplaced(s)).length;
 
 /**
  * The list the player shows: the proofs the server read back, and the drafts as

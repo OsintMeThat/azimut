@@ -14,7 +14,7 @@
  */
 import { api } from './api.js';
 import { onEvent } from './events.js';
-import { gatheredScene, openScenes, sceneCount } from './sceneQueue.js';
+import { gatheredScene, openScenes, sceneCount, withProofs } from './sceneQueue.js';
 import { uiState } from './state.svelte.js';
 
 /** `scene` is the queue's row for it (`video`, `id`, `start`, `end`, `label`, `state`,
@@ -152,7 +152,7 @@ export function ensureSceneQueue(caseId) {
  *  until its queue is read. */
 export function scenesWaiting(caseId) {
   if (!caseId || sceneQueue.caseId !== caseId || !sceneQueue.files) return null;
-  return sceneCount(openScenes(sceneQueue.files));
+  return sceneCount(openScenes(withProofs(sceneQueue.files)));
 }
 
 /**
@@ -199,6 +199,26 @@ export async function restoreScene(caseId, video, draft) {
   edited(caseId, video);
   await refreshQueue(caseId);
   return scene;
+}
+
+/**
+ * Give up on a proof that states no place yet, as on a scene: it stays, greyed among the
+ * abandoned, its word on the proof's entity and never in its spec. One that states a
+ * place is proved, and the server refuses it.
+ */
+export async function abandonProof(caseId, name, reason = '') {
+  const answer = await api.put(`${base(caseId)}/proofs/${encodeURIComponent(name)}/abandon`, { reason });
+  if (answer?.video) edited(caseId, answer.video);
+  await refreshQueue(caseId);
+  return answer;
+}
+
+/** Take an abandoned proof up again. */
+export async function restoreProof(caseId, name) {
+  const answer = await api.del(`${base(caseId)}/proofs/${encodeURIComponent(name)}/abandon`);
+  if (answer?.video) edited(caseId, answer.video);
+  await refreshQueue(caseId);
+  return answer;
 }
 
 /** Read the queue again if a surface holds it for this case. */
@@ -282,14 +302,17 @@ function recheck(caseId, video) {
       let now;
       try {
         const { scenes } = await api.get(`${base(caseId)}/scenes?${new URLSearchParams({ video: one })}`);
-        // a proof's own row is a scene proved, never one still to prove
-        now = openKey((scenes ?? []).filter((scene) => scene.kind === 'draft'));
+        // a proof's row is proved once it states a place; until then, one made for a
+        // scene stays in the queue under `proof:<name>`
+        now = openKey((scenes ?? [])
+          .filter((scene) => scene.kind === 'draft' || (scene.kind === 'proof' && scene.stated && scene.state !== 'proved'))
+          .map((scene) => (scene.kind === 'proof' ? { ...scene, id: `proof:${scene.proof}` } : scene)));
       } catch {
         now = null; // the file left the case, or cannot be read: the queue says what is left
       }
       if (!held(caseId)) return;
       const file = sceneQueue.files.find((entry) => entry.video === one);
-      if (now === openKey(file?.scenes ?? [])) continue;
+      if (now === openKey([...(file?.scenes ?? []), ...(file?.proofs ?? [])])) continue;
       requeue(caseId, 0);
       return;
     }

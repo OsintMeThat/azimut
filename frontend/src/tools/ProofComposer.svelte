@@ -140,7 +140,7 @@
   import ProofFrames from './inspect/ProofFrames.svelte';
   import { neighbour, resumeAt, slideStyle, slideTiles, switchPlan } from '../lib/proofSlides.js';
   import { onEvent } from '../lib/events.js';
-  import { abandonScene, geolocateScene, restoreScene } from '../lib/geolocating.svelte.js';
+  import { abandonProof, abandonScene, geolocateScene, restoreProof, restoreScene } from '../lib/geolocating.svelte.js';
   import { collagesOfScene, proofHandoff } from '../lib/sceneFrames.js';
   import { sceneMoments, sceneStart } from '../lib/scenes.js';
 
@@ -731,6 +731,17 @@
     try {
       if (action === 'geolocate') {
         await geolocateScene(caseId, { video, id: tile.id });
+      } else if (action === 'abandon' && tile.kind === 'proof') {
+        // a slide saved with no place yet is given up on as a scene is
+        await abandonProof(caseId, tile.name, extra);
+        await readSlides();
+        toast('Slide abandoned', 'info', 6000, {
+          label: 'Undo',
+          onClick: () => restoreProof(caseId, tile.name).then(() => readSlides(), (e) => toast(e.message, 'danger')),
+        });
+      } else if (action === 'restore' && tile.kind === 'proof') {
+        await restoreProof(caseId, tile.name);
+        await readSlides();
       } else if (action === 'abandon') {
         await abandonScene(caseId, video, tile.id, extra);
         await readSlides();
@@ -1437,8 +1448,22 @@
       };
     });
   }
+  // The proof being opened, named on the canvas while its pictures load: the list goes
+  // at once rather than standing frozen until the last picture arrives.
+  let openingTitle = $state(null);
+  let openingRun = 0;
   async function requestOpenProof(entry) {
-    if (await mayLeave()) await openProof(entry);
+    if (!(await mayLeave())) return;
+    const mine = ++openingRun;
+    openList = null;
+    openingTitle = entry.title || entry.name;
+    try {
+      await openProof(entry);
+    } catch (e) {
+      toast(`This proof cannot be opened: ${e.message}`, 'warn');
+    } finally {
+      if (mine === openingRun) openingTitle = null;
+    }
   }
 
   // Where the composer is, in the address: the saved proof open, or none. Opening a
@@ -6268,21 +6293,33 @@
     proofBrowserOpen = false;
     proofBrowsePath = '';
     proofBrowseSelection = null;
+    // the dialog opens on the press, its rows following when the case answers
+    openList ??= [];
+    openListLoading = true;
     return openProofList();
   }
 
+  let openListLoading = $state(false);
   async function openProofList() {
-    const proofs = await api.get(`/api/cases/${caseState.current.id}/proofs`);
-    // A saved proof is filed like any other entity, so its folder lives on the
-    // catalog side; the proofs route only knows the files.
+    const caseId = caseState.current.id;
     try {
-      const entities = await fetchAllEntities(caseState.current.id, { types: ['proof'] });
+      // A saved proof is filed like any other entity, so its folder lives on the
+      // catalog side; the proofs route only knows the files. Both are read at once.
+      const [proofs, entities] = await Promise.all([
+        api.get(`/api/cases/${caseId}/proofs`),
+        fetchAllEntities(caseId, { types: ['proof'] }).catch(() => null),
+      ]);
+      // closed while it was read: it stays closed
+      if (openList === null) return;
       const folders = new Map(
-        entities.map((entity) => [entity.attrs?.spec ?? '', entity.attrs?.folder ?? ''])
+        (entities ?? []).map((entity) => [entity.attrs?.spec ?? '', entity.attrs?.folder ?? ''])
       );
       openList = proofs.map((entry) => ({ ...entry, folder: folders.get(entry.spec_path) ?? '' }));
-    } catch {
-      openList = proofs;
+    } catch (e) {
+      openList = null;
+      toast(`The saved proofs could not be read: ${e.message}`, 'warn');
+    } finally {
+      openListLoading = false;
     }
   }
 
@@ -7057,6 +7094,9 @@
         {openNewProofDialog}
         page={pageTile ? scenePage : null}
       />
+      {#if openingTitle}
+        <p class="opening" role="status" dir="auto">Opening {openingTitle}…</p>
+      {/if}
       {#if stripShown}
         <ProofSlides
           tiles={strip}
@@ -7962,7 +8002,9 @@
 
 {#if openList}
   <Modal title="Open a saved proof" onclose={() => (openList = null)} width="560px">
-    {#if !openList.length}
+    {#if !openList.length && openListLoading}
+      <p class="picker-hint" aria-busy="true">Reading the saved proofs…</p>
+    {:else if !openList.length}
       <div class="empty"><p>No saved proofs in this case yet.</p></div>
     {:else}
       <div class="picker-stack">
@@ -8119,11 +8161,33 @@
   }
   /* the canvas over the strip of its video's slides, between the toolbar and the side column */
   .stage {
+    position: relative;
     flex: 1;
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
+  }
+  /* what is opening, over the top of the canvas until its pictures are in */
+  .opening {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    margin: 0;
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    font-size: 12px;
+    box-shadow: 0 2px 10px rgb(0 0 0 / 0.25);
+    pointer-events: none;
+    z-index: 5;
+    max-width: 70%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .side {
     width: 300px;

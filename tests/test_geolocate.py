@@ -87,6 +87,9 @@ def _queue(client, cid):
     return res.json()
 
 
+#: A place a proof states, which is what makes it Proved.
+PLACE = "15.3547, 44.2066"
+
 SCENES = [
     {"id": "s1", "start": 4, "end": 9, "label": "Roundabout"},
     {"id": "s2", "start": None, "end": None, "label": "Whole"},
@@ -268,7 +271,7 @@ def test_a_proof_taking_the_scene_up_proves_it_and_ends_the_geolocating(client, 
     frame = cut.json()["saved"][0]["item"]["path"]
     made = client.post(f"/api/cases/{cid}/proofs", json={"title": "Bridge", "spec": {"panels": [
         {"id": "p0", "src": frame}, {"id": "p1", "src": shot["path"]},
-    ]}})
+    ], "coordsText": PLACE}})
     assert made.status_code == 200, made.text
     name = made.json()["name"]
     res = client.put(f"/api/cases/{cid}/proofs/{name}/scene", json={"moments": [{"start": 1, "end": 2}], "video": video, "draft": "s1"})
@@ -429,7 +432,7 @@ def test_a_picture_is_proved_by_a_proof_laying_it_out_which_ends_its_geolocating
 
     made = client.post(f"/api/cases/{cid}/proofs", json={"title": "Market", "spec": {"panels": [
         {"id": "p0", "src": photo}, {"id": "p1", "src": shot["path"]},
-    ]}})
+    ], "coordsText": PLACE}})
     assert made.status_code == 200, made.text
     assert client.get(f"/api/cases/{cid}/geolocating").json() == {"geolocating": None}
     assert _queue(client, cid)["files"] == []
@@ -583,7 +586,7 @@ def test_a_proved_collage_picture_keeps_its_mark_when_saved_again(client):
     first = _export(client, cid, name, pieces)
     _record_export(client, cid, name, "Both banks", pieces, first)
     client.post(f"/api/cases/{cid}/scenes/mark", json={"path": first})
-    client.post(f"/api/cases/{cid}/proofs", json={"title": "Banks", "spec": {"panels": [{"id": "p0", "src": first}]}})
+    client.post(f"/api/cases/{cid}/proofs", json={"title": "Banks", "spec": {"panels": [{"id": "p0", "src": first}], "coordsText": PLACE}})
     _export(client, cid, name, [(two, None), (one, None)], label="Both banks again")
     assert _queue(client, cid)["files"] == []
     listed = client.get(f"/api/cases/{cid}/scenes", params={"video": first}).json()
@@ -682,3 +685,114 @@ def test_a_scene_takes_a_new_time_alone_and_says_the_time_it_had(client):
     assert {s["id"]: s for s in _stored(client, cid, photo)}["s1"]["end"] is None
     assert client.put(f"/api/cases/{cid}/scenes/s1/time", json={"video": photo, "start": 7, "end": 3}).status_code == 400
     assert client.put(f"/api/cases/{cid}/scenes/nope/time", json={"video": photo, "start": 1}).status_code == 400
+
+
+# -- a proof that states no place yet ---------------------------------------------------
+
+
+def _scene_proof(client, cid, video, draft, title="Bridge", coords=None):
+    cut = client.post(f"/api/cases/{cid}/inspect/save-frames", json={"items": [{"path": video, "time": 1.5}]})
+    frame = cut.json()["saved"][0]["item"]["path"]
+    spec = {"panels": [{"id": "p0", "src": frame}], **({"coordsText": coords} if coords else {})}
+    made = client.post(f"/api/cases/{cid}/proofs", json={"title": title, "spec": spec})
+    assert made.status_code == 200, made.text
+    name = made.json()["name"]
+    res = client.put(f"/api/cases/{cid}/proofs/{name}/scene", json={"moments": [{"start": 1, "end": 2}], "video": video, "draft": draft})
+    assert res.status_code == 200, res.text
+    return name
+
+
+def _place_it(client, cid, name):
+    """Save the proof again as Geo Proof does, a place stated this time."""
+    spec = client.get(f"/api/cases/{cid}/proofs/{name}").json()
+    saved = client.post(f"/api/cases/{cid}/proofs", json={
+        "title": spec["title"], "rename_from": name, "spec": {"panels": spec["panels"], "coordsText": PLACE},
+    })
+    assert saved.status_code == 200, saved.text
+
+
+def _proof_row(client, cid, video, name):
+    listed = client.get(f"/api/cases/{cid}/scenes", params={"video": video}).json()["scenes"]
+    return next(s for s in listed if s["kind"] == "proof" and s["proof"] == name)
+
+
+@needs_ffmpeg
+def test_a_proof_with_no_place_is_still_in_progress_and_stays_in_the_to_do(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save_work(client, cid, video, [{"id": "s1", "start": 1, "end": 2, "label": "Bridge"}])
+    name = _scene_proof(client, cid, video, "s1")
+
+    row = _proof_row(client, cid, video, name)
+    assert (row["state"], row["abandoned"], row["points"]) == ("progress", None, [])
+    # the app's To-do lists it beside the file's scenes, the scene it took up gone
+    [file] = _queue(client, cid)["files"]
+    assert file["video"] == video and file["scenes"] == []
+    [proof] = file["proofs"]
+    assert (proof["proof"], proof["kind"], proof["state"], proof["start"], proof["end"]) == (name, "proof", "progress", 1, 2)
+    # the extension geolocates scenes only, and reads the queue without them
+    assert client.get("/api/ingest/scenes", params={"case_id": cid}, headers=_headers(client)).json()["files"] == []
+
+    # a place stated, it is Proved and leaves the To-do
+    _place_it(client, cid, name)
+    assert _proof_row(client, cid, video, name)["state"] == "proved"
+    assert _queue(client, cid)["files"] == []
+
+
+@needs_ffmpeg
+def test_a_proof_with_no_place_is_abandoned_with_a_word_restored_and_a_proved_one_refused(client, tmp_path, monkeypatch):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save_work(client, cid, video, [
+        {"id": "s1", "start": 1, "end": 2, "label": "Bridge"},
+        {"id": "s2", "start": 3, "end": 4, "label": "Depot"},
+    ])
+    name = _scene_proof(client, cid, video, "s1")
+    said = []
+    monkeypatch.setattr("azimut.api.inspect.events.publish", said.append)
+
+    res = client.put(f"/api/cases/{cid}/proofs/{name}/abandon", json={"reason": "  no landmark  "})
+    assert res.status_code == 200, res.text
+    assert res.json()["state"] == "abandoned" and res.json()["video"] == video
+    assert said == [{"type": "scenes", "case_id": cid, "video": video}]
+    row = _proof_row(client, cid, video, name)
+    assert row["state"] == "abandoned" and row["abandoned"]["reason"] == "no landmark"
+    assert _queue(client, cid)["files"][0]["proofs"][0]["state"] == "abandoned"
+    # the proof itself is untouched: the word lives on its entity, never in its spec
+    assert "abandoned" not in client.get(f"/api/cases/{cid}/proofs/{name}").json()
+
+    assert client.delete(f"/api/cases/{cid}/proofs/{name}/abandon").status_code == 200
+    row = _proof_row(client, cid, video, name)
+    assert (row["state"], row["abandoned"]) == ("progress", None)
+
+    placed = _scene_proof(client, cid, video, "s2", title="Depot", coords=PLACE)
+    refused = client.put(f"/api/cases/{cid}/proofs/{placed}/abandon", json={})
+    assert refused.status_code == 400 and "proved" in refused.json()["detail"]
+    assert client.put(f"/api/cases/{cid}/proofs/nothing/abandon", json={}).status_code == 400
+
+
+@needs_ffmpeg
+def test_a_proof_given_up_on_and_saved_with_a_place_lets_its_word_go(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save_work(client, cid, video, [{"id": "s1", "start": 1, "end": 2, "label": "Bridge"}])
+    name = _scene_proof(client, cid, video, "s1")
+    assert client.put(f"/api/cases/{cid}/proofs/{name}/abandon", json={"reason": "later"}).status_code == 200
+
+    _place_it(client, cid, name)
+    entity = Case.open(cid).find_entity(attr="spec", value=f"proofs/.meta/{name}.json")
+    assert entity["attrs"].get("abandoned") is None
+    assert _proof_row(client, cid, video, name)["state"] == "proved"
+
+
+@needs_ffmpeg
+def test_a_picture_laid_out_by_a_proof_with_no_place_stays_to_geolocate(client):
+    cid = _case(client)
+    photo = _upload(client, cid)
+    scene = _mark(client, cid, photo).json()["scene"]
+    made = client.post(f"/api/cases/{cid}/proofs", json={"title": "Market", "spec": {"panels": [{"id": "p0", "src": photo}]}})
+    assert made.status_code == 200, made.text
+    [file] = _queue(client, cid)["files"]
+    assert [s["id"] for s in file["scenes"]] == [scene["id"]]
+    listed = client.get(f"/api/cases/{cid}/scenes", params={"video": photo}).json()["scenes"]
+    assert [(s["kind"], s["state"]) for s in listed] == [("proof", "progress")]

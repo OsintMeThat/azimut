@@ -115,9 +115,9 @@ describe('the badge on the picture', () => {
   const moments = [{ start: 130, end: 158 }, { start: 190, end: 200 }];
 
   it('prints the moment the panel\'s frame shows in, else every moment', () => {
-    expect(badgeText(CLIP, moments, 130.4)).toBe('clip.mp4 · 2:10–2:38');
-    expect(badgeText(CLIP, moments, 300)).toBe('clip.mp4 · 2:10–2:38 · 3:10–3:20');
-    expect(badgeText(CLIP, [{ start: 144, end: null }], 144)).toBe('clip.mp4 · 2:24');
+    expect(badgeText(CLIP, moments, 130.4)).toBe('2:10–2:38');
+    expect(badgeText(CLIP, moments, 300)).toBe('2:10–2:38 · 3:10–3:20');
+    expect(badgeText(CLIP, [{ start: 144, end: null }], 144)).toBe('2:24');
   });
 
   it('never prints for the whole video, nor while the switch is off', () => {
@@ -128,8 +128,8 @@ describe('the badge on the picture', () => {
 
   it('goes on the ★ video\'s panels alone', () => {
     expect([...sceneBadges(true, frames, CLIP, moments)]).toEqual([
-      ['p1', 'clip.mp4 · 2:10–2:38'],
-      ['p3', 'clip.mp4 · 2:10–2:38 · 3:10–3:20'],
+      ['p1', '2:10–2:38'],
+      ['p3', '2:10–2:38 · 3:10–3:20'],
     ]);
   });
 });

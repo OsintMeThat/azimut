@@ -352,6 +352,46 @@ it('keeps the abandoned folded below, each with its word, and restores one', asy
   expect(del).toHaveBeenCalledWith(`/api/cases/c1/scenes/g/abandon?video=${encodeURIComponent(VIDEO)}`);
 });
 
+it('lists a proof saved with no place yet among its file’s scenes: In progress, opened in Geo Proof, abandoned and restored', async () => {
+  const placeless = (name, start, extra = {}) => ({
+    kind: 'proof', id: `proof:${name}`, proof: name, video: VIDEO, label: name, start, end: null, state: 'progress',
+    abandoned: null, captures: [], ...extra,
+  });
+  answerWith({ files: [
+    { video: VIDEO, title: 'Market walk', scenes: [row('p', 238, 252, 'bridge?', { order: 1 })],
+      proofs: [placeless('Depot', 30, { order: 0 }), placeless('Ridge', 300, { order: 2, state: 'abandoned', abandoned: { reason: 'too far', at: 'then' } })] },
+    { video: OTHER, title: 'Convoy', scenes: [], proofs: [placeless('Gate', 10, { video: OTHER, order: 0 })] },
+  ], geolocating: null });
+  put.mockResolvedValue({ proof: 'Depot', video: VIDEO, state: 'abandoned' });
+  del.mockResolvedValue({ proof: 'Ridge', video: VIDEO, state: 'progress' });
+  await open();
+  // in the order the video's bar draws them, the count taking the proofs in
+  expect(rows().map((li) => li.querySelector('.name').textContent)).toEqual(['Depot', 'bridge?', 'Gate']);
+  expect(section().querySelector('h4 .count').textContent).toBe('3');
+  const depot = rows()[0];
+  expect(depot.querySelector('.meta').textContent).toContain('In progress · no place');
+  expect(byLabel('Geolocate Depot')).toBeNull();
+
+  byLabel('Open Depot').click();
+  expect(uiState.openProof).toBe('Depot');
+  expect(uiState.tool).toBe('proof');
+
+  byLabel('Abandon Depot').click();
+  await settle();
+  const word = byLabel('Why it is abandoned');
+  word.value = 'no landmark';
+  word.dispatchEvent(new Event('input', { bubbles: true }));
+  word.closest('form').requestSubmit();
+  await settle();
+  expect(put).toHaveBeenCalledWith('/api/cases/c1/proofs/Depot/abandon', { reason: 'no landmark' });
+
+  byText('Abandoned (1)').click();
+  await settle();
+  byLabel('Restore Ridge').click();
+  await settle();
+  expect(del).toHaveBeenCalledWith('/api/cases/c1/proofs/Ridge/abandon');
+});
+
 it('shows a few rows and counts the rest, the one being geolocated among them', async () => {
   const scenes = [1, 2, 3, 4, 5, 6].map((n) => row(`s${n}`, n * 10, null, `Scene ${n}`));
   answerWith({ files: [{ video: VIDEO, title: 'Market walk', scenes }], geolocating: scenes[5] });

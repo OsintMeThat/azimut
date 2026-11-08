@@ -110,14 +110,14 @@ export function sceneLine(video, moments) {
 }
 
 /**
- * The time a panel's badge prints on the exported picture, or null for none. The
- * moment its frame shows in, else every moment the proof states; never anything for
- * the whole video, which has no timecode.
+ * The time a panel's badge prints on the exported picture, or null for none: the
+ * timecode alone, never the video's name. The moment its frame shows in, else every
+ * moment the proof states; never anything for the whole video, which has no timecode.
  */
 export function badgeText(video, moments, time = null) {
   if (!video || !moments?.length) return null;
   const own = moments.find((m) => momentHolds(m, time));
-  return `${videoName(video)} · ${own ? momentTime(own) : momentsTime(moments)}`;
+  return own ? momentTime(own) : momentsTime(moments);
 }
 
 /**

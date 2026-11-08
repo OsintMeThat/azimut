@@ -537,8 +537,9 @@ def mark_to_geolocate(case_id: str, body: MarkIn) -> dict[str, Any]:
 
 @router.get("/cases/{case_id}/scenes/queue")
 def scene_queue(case_id: str) -> dict[str, Any]:
-    """Every scene still to prove in the case, by file, and the one being geolocated."""
-    return geolocate.queue(get_case(case_id))
+    """Every scene still to prove in the case, by file, and the one being geolocated,
+    with the proofs made for a scene that state no place yet."""
+    return geolocate.queue(get_case(case_id), with_proofs=True)
 
 
 @router.get("/cases/{case_id}/geolocating")
@@ -612,6 +613,34 @@ def restore_scene(case_id: str, draft: str, video: str) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     events.publish({"type": "scenes", "case_id": case.id, "video": video})
     return {"scene": scene}
+
+
+class ProofAbandonIn(BaseModel):
+    reason: str = Field(default="", max_length=geolocate.MAX_REASON)
+
+
+@router.put("/cases/{case_id}/proofs/{name}/abandon")
+def abandon_proof(case_id: str, name: str, body: ProofAbandonIn) -> dict[str, Any]:
+    """Give up on a proof that states no place yet, as on a scene: it stays, greyed."""
+    case = get_case(case_id)
+    try:
+        answer = geolocate.abandon_proof(case, name, body.reason)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    events.publish({"type": "scenes", "case_id": case.id, "video": answer["video"]})
+    return answer
+
+
+@router.delete("/cases/{case_id}/proofs/{name}/abandon")
+def restore_proof(case_id: str, name: str) -> dict[str, Any]:
+    """Take an abandoned proof up again."""
+    case = get_case(case_id)
+    try:
+        answer = geolocate.restore_proof(case, name)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    events.publish({"type": "scenes", "case_id": case.id, "video": answer["video"]})
+    return answer
 
 
 @router.get("/cases/{case_id}/inspect/works/{name}")

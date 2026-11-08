@@ -42,6 +42,10 @@
    * A picture marked to geolocate is a row like any other, Whole picture, with no bar
    * to mark it on.
    *
+   * A proof made for a scene and saved with no place yet stays here too, beside its
+   * file's scenes (`proofs` on the file, `engine/scenes.unplaced_proofs`): In progress,
+   * its press opens it in Geo Proof, and it is abandoned and restored like a scene.
+   *
    * Absent while the case has nothing to geolocate, and a few rows when it has, so
    * the analyst's own lists stay in reach. Geolocate is the row's act; the scene's
    * name opens it in Inspect, or the collage a picture was exported from (`collage`
@@ -49,10 +53,12 @@
    */
   import { onDestroy, tick, untrack } from 'svelte';
   import {
-    abandonScene, geolocateScene, geolocating, holdSceneQueue, restoreScene, sceneQueue, stopGeolocating,
+    abandonProof, abandonScene, geolocateScene, geolocating, holdSceneQueue, restoreProof, restoreScene, sceneQueue,
+    stopGeolocating,
   } from '../../lib/geolocating.svelte.js';
   import {
     abandonedScenes, firstScenes, isPicture, openScenes, queueColor, queueMark, queueName, queueState, queueTime, sceneCount,
+    withProofs,
   } from '../../lib/sceneQueue.js';
   import { caseState, toast, uiState } from '../../lib/state.svelte.js';
   import Icon from '../../components/Icon.svelte';
@@ -69,8 +75,11 @@
   const keyOf = (scene) => `${scene.video}#${scene.id}`;
   const isLive = (scene) => Boolean(live && live.video === scene.video && live.id === scene.id);
 
-  const open = $derived(openScenes(files));
-  const left = $derived(abandonedScenes(files));
+  const isProof = (scene) => scene?.kind === 'proof';
+  // each file's scenes and its proofs with no place yet, in the order its bar draws them
+  const merged = $derived(withProofs(files));
+  const open = $derived(openScenes(merged));
+  const left = $derived(abandonedScenes(merged));
   const total = $derived(sceneCount(open));
   const leftCount = $derived(sceneCount(left));
 
@@ -115,7 +124,7 @@
 
   const SEP = ' · ';
   const nameOf = queueName;
-  const said = (scene) => queueState(scene, isLive(scene));
+  const said = (scene) => (isProof(scene) ? 'In progress · no place' : queueState(scene, isLive(scene)));
   /** The row's small print in pieces that each stay whole, so a narrow sidebar
    *  wraps it between them rather than cutting the capture count off. */
   const saidParts = (scene) => [
@@ -142,8 +151,15 @@
   // Geolocate is a switch: pressed again on the scene in hand, it stops, the captures kept.
   const go = (scene) => act(() => (isLive(scene) ? stopGeolocating(caseId) : geolocateScene(caseId, scene)));
 
+  /** A proof with no place yet opens in Geo Proof, where its point is added. */
+  function openProof(scene) {
+    uiState.openProof = scene.proof;
+    uiState.tool = 'proof';
+  }
+
   /** The scene's file where it is worked: a collage's picture in Collage, any other in Inspect. */
   function openScene(file, scene) {
+    if (isProof(scene)) return openProof(scene);
     if (file.collage) {
       uiState.openCollage = file.collage;
       uiState.tool = 'collage';
@@ -152,7 +168,7 @@
     uiState.inspectScene = { video: scene.video, draft: scene.id };
     uiState.tool = 'inspect';
   }
-  const openTitle = (file) => (file.collage ? 'Open the collage' : 'Open in Inspect');
+  const openTitle = (file, scene) => (isProof(scene) ? 'Open the proof in Geo Proof' : file.collage ? 'Open the collage' : 'Open in Inspect');
 
   async function askWhy(scene) {
     leaving = keyOf(scene);
@@ -170,12 +186,13 @@
     event.preventDefault();
     const word = reason.trim();
     return act(async () => {
-      await abandonScene(caseId, scene.video, scene.id, word);
+      if (isProof(scene)) await abandonProof(caseId, scene.proof, word);
+      else await abandonScene(caseId, scene.video, scene.id, word);
       stayed();
     });
   }
 
-  const restore = (scene) => act(() => restoreScene(caseId, scene.video, scene.id));
+  const restore = (scene) => act(() => (isProof(scene) ? restoreProof(caseId, scene.proof) : restoreScene(caseId, scene.video, scene.id)));
 </script>
 
 <!-- the scene as its video's bar draws it, in the colour Inspect gives it -->
@@ -198,19 +215,24 @@
             {#each file.scenes as scene (scene.id)}
               <li class="scene" class:live={isLive(scene)} class:progress={scene.state === 'progress'}>
                 <span class="pip" aria-hidden="true"></span>
-                <button type="button" class="open" title={openTitle(file)} onclick={() => openScene(file, scene)}>
+                <button type="button" class="open" title={openTitle(file, scene)} onclick={() => openScene(file, scene)}>
                   <span class="name" dir="auto">{#if !scene.label}{@render mark(scene)}{/if}{nameOf(scene)}</span>
                   <span class="meta">{#each saidParts(scene) as part, i (i)}{#if i}{SEP}{/if}<span class="part" class:time={part.time}>{#if part.time}{@render mark(scene)}{/if}{part.text}</span>{/each}</span>
                 </button>
-                <button type="button" class="btn btn-ghost btn-sm why-btn" title="Abandon this scene" aria-label={`Abandon ${nameOf(scene)}`}
+                <button type="button" class="btn btn-ghost btn-sm why-btn" title={isProof(scene) ? 'Abandon this proof' : 'Abandon this scene'} aria-label={`Abandon ${nameOf(scene)}`}
                   aria-expanded={leaving === keyOf(scene)} disabled={busy} onclick={() => (leaving === keyOf(scene) ? stayed() : askWhy(scene))}>
                   <Icon name="x" size={13} />
                 </button>
-                <button type="button" class="btn btn-xs go" class:on={isLive(scene)} disabled={busy} aria-pressed={isLive(scene)}
-                  aria-label={isLive(scene) ? `Stop geolocating ${nameOf(scene)}` : `Geolocate ${nameOf(scene)}`}
-                  title={isLive(scene) ? 'Stop geolocating it; its captures stay' : `Find it on the map, its ${isPicture(scene) ? 'picture' : 'video'} beside it`} onclick={() => go(scene)}>
-                  {isLive(scene) ? 'Stop' : 'Geolocate'}
-                </button>
+                {#if isProof(scene)}
+                  <button type="button" class="btn btn-xs go" aria-label={`Open ${nameOf(scene)}`}
+                    title="Its proof states no place yet: add the point in Geo Proof" onclick={() => openProof(scene)}>Open</button>
+                {:else}
+                  <button type="button" class="btn btn-xs go" class:on={isLive(scene)} disabled={busy} aria-pressed={isLive(scene)}
+                    aria-label={isLive(scene) ? `Stop geolocating ${nameOf(scene)}` : `Geolocate ${nameOf(scene)}`}
+                    title={isLive(scene) ? 'Stop geolocating it; its captures stay' : `Find it on the map, its ${isPicture(scene) ? 'picture' : 'video'} beside it`} onclick={() => go(scene)}>
+                    {isLive(scene) ? 'Stop' : 'Geolocate'}
+                  </button>
+                {/if}
               </li>
               {#if leaving === keyOf(scene)}
                 <li class="why">
@@ -245,7 +267,7 @@
               {#each file.scenes as scene (scene.id)}
                 <li class="scene gone">
                   <span class="pip" aria-hidden="true"></span>
-                  <button type="button" class="open" title={openTitle(file)} onclick={() => openScene(file, scene)}>
+                  <button type="button" class="open" title={openTitle(file, scene)} onclick={() => openScene(file, scene)}>
                     <span class="name" dir="auto">{#if !scene.label}{@render mark(scene)}{/if}{nameOf(scene)}</span>
                     <span class="meta">{#if scene.label}<span class="part" class:time={!isPicture(scene)}>{@render mark(scene)}{queueTime(scene)}</span>{/if}{#if scene.label && whyOf(scene)}{SEP}{/if}{#if whyOf(scene)}<q dir="auto">{whyOf(scene)}</q>{:else if !scene.label}Abandoned{/if}</span>
                   </button>
