@@ -17,6 +17,8 @@
   {"id":"badge-mail","label":"Email","group":"Sources","keywords":["message","mail"]},
   {"id":"badge-user","label":"Person","group":"Sources","keywords":["individual","people","subject"]},
   {"id":"badge-clock","label":"Time","group":"Sources","keywords":["hour","timestamp"]},
+  {"id":"badge-group","label":"Group","group":"Sources","keywords":["people","crowd","several","team"]},
+  {"id":"badge-person-above","label":"Person from above","group":"Sources","keywords":["individual","overhead","top view","heading"]},
   {"id":"badge-explosion","label":"Explosion","group":"Events","keywords":["blast","strike","impact","shelling","detonation"]},
   {"id":"badge-flame","label":"Fire","group":"Events","keywords":["burning","blaze","smoke"]},
   {"id":"badge-crater","label":"Crater","group":"Events","keywords":["impact","strike","blast"]},
@@ -24,6 +26,10 @@
   {"id":"badge-casualty","label":"Casualty","group":"Events","keywords":["killed","dead","death","kia","fatality","coffin"]},
   {"id":"badge-chemical","label":"Chemical","group":"Events","keywords":["gas","cbrn","toxic","poison"]},
   {"id":"badge-nuclear","label":"Nuclear","group":"Events","keywords":["radiation","radiological","cbrn","reactor"]},
+  {"id":"badge-smoke","label":"Smoke","group":"Events","keywords":["plume","burning","smoke column","fire"]},
+  {"id":"badge-firing-position","label":"Firing position","group":"Events","keywords":["muzzle flash","gun","shooting","fire point"]},
+  {"id":"badge-launch","label":"Launch point","group":"Events","keywords":["rocket","missile launch","launch site"]},
+  {"id":"badge-flare","label":"Flare","group":"Events","keywords":["light","illumination","signal"]},
   {"id":"badge-soldier","label":"Soldier","group":"Forces","keywords":["infantry","troops","military","personnel"]},
   {"id":"badge-shield","label":"Security","group":"Forces","keywords":["police","guard","protection"]},
   {"id":"badge-tank","label":"Tank","group":"Forces","keywords":["armour","armor","tracked"]},
@@ -40,6 +46,7 @@
   {"id":"badge-fighter","label":"Fighter jet","group":"Forces","keywords":["aircraft","military"]},
   {"id":"badge-plane","label":"Aircraft","group":"Forces","keywords":["airplane","airliner","transport"]},
   {"id":"badge-warship","label":"Warship","group":"Forces","keywords":["navy","naval","frigate","destroyer"]},
+  {"id":"badge-usv","label":"Uncrewed boat","group":"Forces","keywords":["usv","sea drone","naval drone","surface drone"]},
   {"id":"badge-car","label":"Car","group":"Vehicles","keywords":["vehicle","automobile"]},
   {"id":"badge-pickup","label":"Pickup","group":"Vehicles","keywords":["technical","4x4","vehicle"]},
   {"id":"badge-truck","label":"Truck","group":"Vehicles","keywords":["lorry","transport","logistics"]},
@@ -64,5 +71,7 @@
   {"id":"badge-checkpoint","label":"Checkpoint","group":"Places","keywords":["gate","barrier"]},
   {"id":"badge-roadblock","label":"Roadblock","group":"Places","keywords":["barricade","barrier"]},
   {"id":"badge-trench","label":"Trench","group":"Places","keywords":["fortification","earthworks","defensive line"]},
-  {"id":"badge-bunker","label":"Bunker","group":"Places","keywords":["fortification","shelter"]}
+  {"id":"badge-bunker","label":"Bunker","group":"Places","keywords":["fortification","shelter"]},
+  {"id":"badge-fortified","label":"Fortified position","group":"Places","keywords":["sandbags","emplacement","fortification","dugout","bunker"]},
+  {"id":"badge-obstacles","label":"Obstacles","group":"Places","keywords":["dragon's teeth","anti-tank","barrier","fortification"]}
 ]

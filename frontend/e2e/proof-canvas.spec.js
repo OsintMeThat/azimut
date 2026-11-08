@@ -941,7 +941,7 @@ test('stamps a symbol, keeps the tool in hand, and saves it', async ({ page }) =
   const cy = box.y + box.height / 2;
 
   await page.getByTitle('Symbol (s)').click();
-  await page.getByRole('button', { name: 'Tank', exact: true }).click();
+  await page.getByRole('button', { name: 'Tank, flat', exact: true }).click();
 
   await page.mouse.click(cx - 60, cy);
   await expect(page.locator('.shape-row')).toHaveCount(1);
@@ -971,7 +971,7 @@ test('a solid symbol takes a colour and offers no stroke width', async ({ page }
   await expect(page.getByTitle('Annotation colour')).toBeVisible();
 
   await page.getByTitle('Symbol (s)').click();
-  await page.getByRole('button', { name: 'Vehicle', exact: true }).click();
+  await page.getByRole('button', { name: 'Vehicle, flat', exact: true }).click();
   await expect(page.getByTitle('Stroke width')).toBeVisible();
 });
 
@@ -990,7 +990,7 @@ test('panels stay resizable and movable once a symbol tool exists', async ({ pag
   await expect(page.locator('.konva canvas').first()).toBeVisible();
 
   await page.getByTitle('Symbol (s)').click();
-  await page.getByRole('button', { name: 'Drone', exact: true }).click();
+  await page.getByRole('button', { name: 'Drone, flat', exact: true }).click();
   await page.getByTitle('Select / move (v)').click();
   await page.locator('.panel-thumb').click();
 

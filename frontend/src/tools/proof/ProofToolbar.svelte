@@ -7,6 +7,7 @@
   import { CALLOUT_FONT } from '../../lib/pageMarks.js';
   import { LINE_STYLES } from '../../lib/proofEdits.js';
   import { LENSES, lensFov } from '../../lib/viewCone.js';
+  import StampPicker from './StampPicker.svelte';
   import ToolbarFlyout from './ToolbarFlyout.svelte';
 
   let {
@@ -207,8 +208,18 @@
   $effect(() => {
     if (fillOpen && fillBtn) fillPos = anchor(fillBtn);
   });
+  // The picker is tall, so it is kept on-screen rather than grown either way: it
+  // opens level with its button, moved up only as far as it has to, and scrolls
+  // once the window is shorter than it.
   $effect(() => {
-    if (iconOpen && iconBtn) iconPos = anchor(iconBtn);
+    if (!iconOpen || !iconBtn) return;
+    const r = iconBtn.getBoundingClientRect();
+    const height = Math.min(584, window.innerHeight - 40); // inside the flyout's padding
+    iconPos = {
+      left: `${r.right + 6}px`,
+      top: `${Math.max(12, Math.min(r.top, window.innerHeight - 28 - height))}px`,
+      height: `${height}px`,
+    };
   });
   $effect(() => {
     if (tailOpen && tailBtn) tailPos = anchor(tailBtn);
@@ -298,17 +309,10 @@
       style:top={iconPos.top}
       style:bottom={iconPos.bottom}
     >
-      {#each PROOF_ICONS as entry (entry.name)}
-        <button
-          class="icon-btn"
-          class:active={iconName === entry.name}
-          title={entry.label}
-          aria-label={entry.label}
-          onclick={() => { setIconName(entry.name); iconOpen = false; }}
-        >
-          <ProofGlyph name={entry.name} size={20} />
-        </button>
-      {/each}
+      <!-- Mounted when opened: a hundred drawings have no business on every rail. -->
+      {#if iconOpen}
+        <StampPicker {iconName} maxHeight={iconPos.height} pick={(name) => { setIconName(name); iconOpen = false; }} />
+      {/if}
     </div>
   </div>
   <div class="tb-sep"></div>
@@ -915,35 +919,6 @@
     align-items: center;
   }
   .flyout-size { align-items: center; }
-  .flyout-icons {
-    flex-wrap: wrap;
-    gap: 4px;
-    width: 168px;
-    align-items: center;
-  }
-
-  .icon-btn {
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid transparent;
-    border-radius: var(--r-sm, 5px);
-    color: var(--text-2);
-    background: transparent;
-    cursor: pointer;
-    transition: border-color 0.12s var(--ease), color 0.12s var(--ease);
-  }
-  .icon-btn:hover { border-color: var(--border); color: var(--text-1); }
-  .icon-btn.active {
-    border-color: var(--accent);
-    /* --accent-text is ink for sitting ON the accent, not a foreground: on a
-       transparent button it is near-black, which in the dark theme is invisible.
-       Active follows .tb-btn.active instead — full-strength text, raised back. */
-    color: var(--text-1);
-    background: var(--bg-3);
-  }
   .flyout-overflow { flex-direction: column; gap: 6px; }
   .flyout-tails { gap: 6px; }
   /* Sizes: one labelled row per size the pick has. */

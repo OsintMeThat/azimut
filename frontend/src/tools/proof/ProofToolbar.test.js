@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { render } from 'svelte/server';
 import ProofToolbar from './ProofToolbar.svelte';
-import { PROOF_ICONS, iconByName } from '../../lib/proofIcons.js';
+import { iconByName } from '../../lib/proofIcons.js';
 
 const DRAW_TOOLS = [
   { id: 'select', icon: 'cursor', label: 'Select / move', shortcut: 'v' },
@@ -147,11 +147,12 @@ describe('ProofToolbar document controls (overflow flyout)', () => {
 });
 
 describe('the symbol picker', () => {
-  it('offers every symbol in the set, each named', () => {
+  it('keeps the grid shut and unmounted until the button opens it', () => {
     const { body } = render(ProofToolbar, { props: props() });
 
-    for (const entry of PROOF_ICONS) expect(body).toContain(`aria-label="${entry.label}"`);
     expect(body).toContain('flyout-icons');
+    // a hundred drawings have no business on a rail that is only being looked at
+    expect(body).not.toContain('class="tile');
   });
 
   it('shows the symbol in hand on the button that opens the grid', () => {
@@ -185,13 +186,13 @@ describe('the symbol picker', () => {
 });
 
 describe('the symbol picker reads in both themes', () => {
-  const css = readFileSync(new URL('./ProofToolbar.svelte', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./StampPicker.svelte', import.meta.url), 'utf8');
 
   it('never paints a glyph with the ink meant for sitting on the accent', () => {
     // --accent-text is near-black in both themes: as a foreground on a
     // transparent button it disappears the moment the theme goes dark
     const rule = css
-      .slice(css.indexOf('.icon-btn.active'), css.indexOf('}', css.indexOf('.icon-btn.active')))
+      .slice(css.indexOf('.tile.active'), css.indexOf('}', css.indexOf('.tile.active')))
       .replace(/\/\*[\s\S]*?\*\//g, ''); // the declarations, not the note explaining them
 
     expect(rule).not.toContain('--accent-text');

@@ -1,12 +1,11 @@
 <script>
   import { onMount } from 'svelte';
   import {
-    ANGLED, STAMPED, TURNABLE, glyphBox, markCentre, markGlyph, markLabel, markSize, markTop,
+    ANGLED, STAMPED, TURNABLE, glyphBox, glyphParts, markCentre, markLabel, markSize, markTop,
     movedMark, nextMarkNumber, onSide, projectMark, stampInk, turnedMark,
   } from '../../lib/map/compareAnnotations.js';
   import { compassAngle } from '../../lib/map/groundFrame.js';
   import { relayWheel } from '../../lib/map/wheelRelay.js';
-  import { isSolidIcon } from '../../lib/proofIcons.js';
 
   let { annotations = [], engine, letter = 'a', units = 'metric', active = true,
     tool = $bindable('select'), selectedId = $bindable(null), colour = '#f6a81a',
@@ -347,13 +346,14 @@
             font-size={markSize(mark) * 0.58} fill={stampInk(mark)}>{mark.number}</text>
         {:else}
           {@const box = glyphBox(mark, shape.anchor)}
-          {@const entry = markGlyph(mark)}
-          <path d={entry.path} transform={`translate(${box.x} ${box.y}) scale(${box.scale})`}
-            fill={isSolidIcon(entry.name) ? mark.colour : 'none'} fill-rule="evenodd"
-            stroke={isSolidIcon(entry.name) ? 'none' : mark.colour}
-            stroke-width={Math.max(1.5, mark.stroke_width) / box.scale} />
-          <!-- A stroked glyph is mostly holes, so the press lands on its box
-               rather than on a 2px line. -->
+          <g transform={`translate(${box.x} ${box.y}) scale(${box.scale})`}>
+            {#each glyphParts(mark) as part, i (i)}
+              <path d={part.d} fill={part.fill} fill-rule="evenodd"
+                stroke={part.stroke ?? 'none'} stroke-width={part.stroke ? part.width : null} />
+            {/each}
+          </g>
+          <!-- A glyph has holes, so the press lands on its box rather than on
+               whatever part of it is under the pointer. -->
           <rect class="hit" x={box.x} y={box.y} width={box.size} height={box.size} fill="transparent" />
         {/if}
       {:else if mark.kind !== 'text'}

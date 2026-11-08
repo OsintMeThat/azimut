@@ -113,6 +113,9 @@
     ICON_BOX, ICON_SIZE_DEFAULT, ICON_SIZE_MIN, PROOF_ICONS,
     glyphInk, iconByName, iconOrigin, isSolidIcon,
   } from '../lib/proofIcons.js';
+  import { isModel } from '../lib/icons/catalog.js';
+  import { drawModelRing } from '../lib/proofModelRing.js';
+  import { stampNodes } from '../lib/proofStamp.js';
   import {
     assetName, base64Of, PASTE_TYPES, MAX_PASTES, MAX_PASTE_BYTES,
   } from '../lib/pasteAsset.js';
@@ -3936,6 +3939,14 @@
     endHandles.destroyChildren();
     const s = selectedShape;
     if (tool !== 'select' || !s) return;
+    // A model stamp turns and tilts on its ring, the turn saved on the shape.
+    if (s.kind === 'icon' && isModel(s.name)) {
+      drawModelRing(Konva, {
+        group: endHandles, node: docLayer.findOne(`#${s.id}`), s, screen: stage.scaleX(), accent: ACCENT, edge: HANDLE_RING,
+        commit: (view) => { Object.assign(s, view); dirty = true; },
+      });
+      return;
+    }
     if (!POINT_KINDS.has(s.kind) && s.kind !== 'callout' && s.kind !== 'zoom' && s.kind !== 'cone') return;
     const surface = list.find((x) => x.id === s.panel);
     if (!surface) return;
@@ -5081,32 +5092,9 @@
     group.add(new Konva.Rect({
       x: origin.x, y: origin.y, width: size, height: size, fill: '#000', opacity: 0,
     }));
-    const disc = s.fillOpacity ?? 0;
-    if (disc > 0) {
-      group.add(new Konva.Circle({
-        x: origin.x + size / 2, y: origin.y + size / 2, radius: size / 2,
-        fill: fillPaint(s.color, disc),
-        // The ring stays at full opacity so a sheer disc keeps an edge; without
-        // it a badge at 30% has no silhouette left to read against the imagery.
-        stroke: s.color, strokeWidth: Math.max(placed * 0.035, 0.5) / scale, listening: false,
-      }));
-    }
-    if (entry) {
-      const k = size / ICON_BOX;
-      const ink = glyphInk(s.color, disc);
-      group.add(new Konva.Path({
-        data: entry.path, x: origin.x, y: origin.y, scaleX: k, scaleY: k, listening: false,
-        ...(isSolidIcon(s.name)
-          ? { fill: ink, fillRule: 'evenodd' }
-          : {
-              stroke: ink,
-              // the glyph is drawn scaled, so the width is divided back out:
-              // a bigger symbol is a bigger drawing, not a fatter outline
-              strokeWidth: (s.strokeWidth ?? 4) / scale / k,
-              lineCap: 'round', lineJoin: 'round',
-            }),
-      }));
-    }
+    // The badge disc and the symbol come from `lib/proofStamp.js`. A name this
+    // build does not know keeps its box, so it can still be picked and deleted.
+    if (entry) for (const node of stampNodes(Konva, s, { size, scale, origin })) group.add(node);
     bindShapePick(group, s);
     group.on('dragstart', () => {
       dragMoved = true;

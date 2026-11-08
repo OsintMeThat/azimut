@@ -422,7 +422,9 @@ def build_full_case(
             "png_base64": base64.b64encode(_png(size=(200, 120))).decode(),
             "spec": {
                 "panels": [{"id": "p0", "src": full.photo, "natural": [80, 60]}],
-                "shapes": [],
+                # A vehicle model, turned and tilted: two fields only a model stamp writes.
+                "shapes": [{"id": "s0", "panel": "p0", "kind": "icon", "name": "model-tank", "color": "#ff5252",
+                            "x": 40, "y": 30, "size": 56, "heading": 40, "tilt": 55}],
                 "pastes": [{"id": "x0", "asset": asset_name, "natural": [40, 30],
                             "x": 10, "y": 10, "scale": 1}],
                 # When in its clip the proof happens. The full case holds no video, so
