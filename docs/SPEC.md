@@ -160,7 +160,7 @@ proof for publication.
 | ✅ **Imported proofs** | Turns a published post into a composed proof, every picture a panel and its text read for a position, with nothing filed before the preview is approved. |
 | ✅ **Import origin** | States one origin for a whole import, offers it to a batch that landed without one, and corrects any file later from Details. |
 | ✅ **Drawing on a proof** | Stamps a fixed set of marks, fills boxes and ellipses at a chosen opacity, keeps every shape tool in hand, and recolours, restyles, nudges, drags or deletes a picked family at once. |
-| ✅ **Proof image transforms** | Turns or crops a panel or proof-owned overlay without changing its source, while keeping attached annotations on the same pixels. |
+| ✅ **Proof image transforms** | Turns a panel or proof-owned overlay and crops it square to the page without changing its source, while keeping attached annotations on the same pixels. |
 | ✅ **A proof of several points** | States every place a proof argues, each optionally named and moved on a map, files them under one title and carries them into the post and the exported picture. |
 | ✅ **What a proof says about itself** | Carries an optional sentence, which is its notes and what a post is written from, and an optional date for its material, never pre-filled and shown on the Timeline. |
 | ✅ **A date that reaches the footage** | A dated proof states that date for the original sources it rests on, as one cited statement restated on every save and never written over the file's own clock. |

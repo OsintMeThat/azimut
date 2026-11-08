@@ -22,6 +22,7 @@ import {
   newPaste, pasteBoxes, pasteInsertScale, clampPasteScale, clampPaste,
   surfaces, surfaceHitTest, PASTE_SCALE_MAX, PASTE_SHARE,
   surfaceFrame, pageToSurface, surfaceToPage, pageStepOnSurface, moveShapeToSurface,
+  surfaceShows, holdOnSurface, surfaceCorners,
   withInkOnPage, INK_UNITS,
   specPoints, statePoints, statePanelPoint, MAX_POINTS,
   captureAimed, pointProposed, uncheckedPoints,
@@ -2457,4 +2458,101 @@ describe('a template and the scene keys', () => {
     applyProofStyle(target, templateFromProof(original));
     expect(templateFromProof(target)).toEqual(templateFromProof(original));
   });
+});
+
+describe('a surface cut square to the page', () => {
+  // 640×360 turned 30°, cut to a 200×100 window whose middle is 40 right of the picture's
+  const cut = { x: -60, y: -50, w: 200, h: 100 };
+  const item = { id: 'p1', natural: [200, 100], sourceNatural: [640, 360], rotation: 30, cut };
+  const entry = { id: 'p1', item, box: { x: 10, y: 20, w: 400, h: 200, scale: 2 } };
+  const close = (p, q) => {
+    expect(p.x).toBeCloseTo(q.x, 6);
+    expect(p.y).toBeCloseTo(q.y, 6);
+  };
+
+  it('lays the picture out so the cut fills its box', () => {
+    const frame = surfaceFrame(entry);
+    // the picture's middle is 40 units left of the box's, at scale 2
+    close(frame.middle, { x: 10 + 200 - 80, y: 20 + 100 });
+    close(surfaceToPage({ x: 320, y: 180 }, frame), frame.middle);
+    // the cut's corners are the box's corners
+    const corners = surfaceCorners(frame);
+    close(corners[0], { x: 10, y: 20 });
+    close(corners[2], { x: 410, y: 220 });
+    close(pageToSurface(surfaceToPage({ x: 37, y: 81 }, frame), frame), { x: 37, y: 81 });
+  });
+
+  it('answers over what the cut keeps and nowhere else', () => {
+    const frame = surfaceFrame(entry);
+    // inside the box, on the picture
+    expect(surfaceHitTest([entry], { x: 200, y: 120 })?.id).toBe('p1');
+    // on the picture but cut away, left of the box
+    const away = pageToSurface({ x: 5, y: 120 }, frame);
+    expect(away.x > 0 && away.x < 640 && away.y > 0 && away.y < 360).toBe(true);
+    expect(surfaceShows(away, frame)).toBe(false);
+    expect(surfaceHitTest([entry], { x: 5, y: 120 })).toBeNull();
+  });
+
+  it('holds a mark inside the cut, then on the picture', () => {
+    const frame = surfaceFrame(entry);
+    const held = holdOnSurface(pageToSurface({ x: 0, y: 120 }, frame), frame);
+    close(surfaceToPage(held, frame), { x: 10, y: 120 });
+    expect(holdOnSurface({ x: 900, y: 900 }, surfaceFrame({ ...entry, item: { ...item, cut: null } })))
+      .toEqual({ x: 640, y: 360 });
+  });
+
+  it('fills the row with the cut, the way a crop does', () => {
+    const [box] = layoutPanels([{ ...item, scale: 1 }]);
+    expect(box.h).toBeCloseTo(PANEL_H, 6);
+    expect(box.w).toBeCloseTo(PANEL_H * 2, 6);
+    expect(panelScale({ ...item, scale: 1 })).toBeCloseTo(PANEL_H / 100, 6);
+  });
+
+  it('saves a cut beside the turn and leaves it out where there is none', () => {
+    const spec = toSpec({ title: 'T', panels: [{ ...item, src: 'a.png' }], shapes: [] });
+    expect(spec.panels[0]).toMatchObject({ natural: [640, 360], rotation: 30, cut });
+    expect(spec.panels[0]).not.toHaveProperty('crop');
+    const plain = toSpec({ title: 'T', panels: [{ id: 'p1', src: 'a.png', natural: [640, 360], rotation: 30 }], shapes: [] });
+    expect(plain.panels[0]).not.toHaveProperty('cut');
+  });
+});
+
+describe('a proof saved before cuts existed', () => {
+  // today's shape, as a build without cuts wrote it: a panel turned and cropped
+  // along its own edges, an overlay turned, and marks measured from the crop
+  const saved = {
+    azimut_proof: 1,
+    ink: 'page',
+    title: 'Old proof',
+    panels: [{
+      id: 'p1', src: 'media/a.png', caption: '', row: 0, scale: 1, x: null, y: null,
+      natural: [1200, 800], meta: {}, frame: null,
+      crop: { x: 100, y: 200, w: 500, h: 300 }, rotation: 37.5,
+    }],
+    pastes: [{
+      id: 'x1', asset: 'a1.png', natural: [800, 400], x: 12, y: 34, scale: 0.25, frame: null, rotation: -12,
+    }],
+    shapes: [{ id: 's1', kind: 'rect', panel: 'p1', x: 40, y: 30, w: 80, h: 50, color: '#ff5252' }],
+  };
+
+  it('reads, lays out and saves back the same document', () => {
+    const hydrated = {
+      ...saved,
+      panels: saved.panels.map((p) => ({ ...p, sourceNatural: p.natural, natural: [500, 300] })),
+      pastes: saved.pastes.map((p) => ({ ...p, sourceNatural: p.natural })),
+    };
+    const spec = toSpec(hydrated);
+    expect(spec.panels[0]).toEqual(saved.panels[0]);
+    expect(spec.pastes[0]).toEqual(saved.pastes[0]);
+    expect(spec.shapes).toEqual(saved.shapes);
+    // drawn where it always was: the box's middle is the crop's middle
+    const frame = surfaceFrame(surfaces(hydrated).find((one) => one.id === 'p1'));
+    expect(frame.outline).toBeNull();
+    close(frame.middle, { x: frame.box.x + frame.box.w / 2, y: frame.box.y + frame.box.h / 2 });
+  });
+
+  function close(p, q) {
+    expect(p.x).toBeCloseTo(q.x, 6);
+    expect(p.y).toBeCloseTo(q.y, 6);
+  }
 });

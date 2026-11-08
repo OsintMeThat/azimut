@@ -80,6 +80,49 @@ def test_save_load_roundtrip(client):
     assert entities[0]["label"] == "Kharkiv strike proof"
 
 
+# How a build before upright cuts saved a turned and cropped panel and a turned
+# overlay: no `cut` key anywhere, the crop in source pixels along the picture.
+TURNED_SPEC = {
+    "panels": [
+        {"id": "p1", "src": "media/frame.png", "caption": "", "row": 0, "natural": [1280, 720], "meta": {},
+         "crop": {"x": 100, "y": 60, "w": 800, "h": 400}, "rotation": 7.5},
+    ],
+    "pastes": [],
+    "shapes": [
+        {"id": "s1", "panel": "p1", "kind": "rect", "x": 40, "y": 30, "w": 80, "h": 50, "color": "#ff5252"},
+    ],
+}
+
+
+def _saved_panels(client, cid, title, spec):
+    client.post(f"/api/cases/{cid}/proofs", json={"title": title, "spec": spec, "png_base64": _png_b64()})
+    return client.get(f"/api/cases/{cid}/proofs/{title}").json()
+
+
+def test_a_turned_and_cropped_proof_from_before_cuts_comes_back_unchanged(client):
+    cid = client.post("/api/cases", json={"name": "Old proofs"}).json()["id"]
+    spec = _saved_panels(client, cid, "Levelled", TURNED_SPEC)
+    assert spec["panels"] == TURNED_SPEC["panels"]
+    assert spec["shapes"] == TURNED_SPEC["shapes"]
+    assert "cut" not in spec["panels"][0]
+
+
+def test_an_upright_cut_is_kept_as_the_composer_wrote_it(client):
+    # a panel turned 7.5 degrees and cut square on the page: the source crop is
+    # gone and the cut, measured from the picture's middle, stands beside the turn
+    cid = client.post("/api/cases", json={"name": "Cut proofs"}).json()["id"]
+    cut = {"x": -520, "y": -300, "w": 1000, "h": 560}
+    panel = {**TURNED_SPEC["panels"][0], "cut": cut}
+    del panel["crop"]
+    spec = _saved_panels(client, cid, "Levelled", {**TURNED_SPEC, "panels": [panel]})
+    assert spec["panels"][0]["cut"] == cut
+    assert spec["panels"][0]["rotation"] == 7.5
+    assert "crop" not in spec["panels"][0]
+    # and a resave leaves it as it was
+    client.post(f"/api/cases/{cid}/proofs", json={"rename_from": "Levelled", "title": "Levelled", "spec": spec})
+    assert client.get(f"/api/cases/{cid}/proofs/Levelled").json()["panels"][0]["cut"] == cut
+
+
 def test_resave_with_png_adds_the_path_to_the_entity(client):
     cid = client.post("/api/cases", json={"name": "SpecFirst"}).json()["id"]
 

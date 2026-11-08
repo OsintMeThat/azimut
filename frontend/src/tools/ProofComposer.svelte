@@ -73,6 +73,7 @@
     denseRowValues, clampPanelScale, trimClosingDuplicate, freehandShape,
     canReassignLegendNote,
     surfaces, surfaceHitTest, surfaceFrame, pageToSurface, surfaceToPage, pageStepOnSurface,
+    surfaceShows, holdOnSurface, surfaceCorners, panelSizedHeight,
     moveShapeToSurface, withInkOnPage, pasteBoxes, clampPaste, clampPasteScale,
     pasteInsertScale, newPaste, newFrame, normalizeFrame, FRAME_WIDTH_MAX, FRAME_COLOR,
     PASTE_SCALE_MIN, PASTE_SCALE_MAX,
@@ -101,13 +102,24 @@
   import {
     blurPatch,
     blurRadiusFor,
+    cutToSourceCrop,
+    fitSurfaceCut,
+    isQuarterTurn,
     mapSurfaceShapes,
     normalizeSourceCrop,
     normalizeSurfaceAngle,
+    settleSurfaceCut,
     shiftProofShape,
     sourceSize,
     surfaceBoxSize,
+    surfaceCutMiddle,
+    surfaceCutOutline,
+    surfaceCutReach,
+    surfaceCutSeat,
+    surfaceCutStart,
     surfaceImageSize,
+    turnSurfaceCut,
+    turned,
   } from '../lib/proofSurface.js';
   import {
     ICON_BOX, ICON_SIZE_DEFAULT, ICON_SIZE_MIN, PROOF_ICONS,
@@ -235,7 +247,8 @@
   }
   let collapsed = $state({ panels: false, overlays: false, annotations: false, elements: false });
   let cropSurfaceId = $state(null);
-  let cropDraft = $state(null); // crop rectangle in the selected surface's pixels
+  let cropDraft = $state(null); // the box the crop marks frame, upright, from the source's middle
+  let cropStart = null; // where the marks opened: leaving them there changes nothing
   // Saved proof slug, or null before the first save.
   let savedName = $state(null);
   let dirty = $state(false);
@@ -1095,20 +1108,24 @@
    */
   function hydratedSurface(surface, img) {
     const sourceNatural = sourceSize(surface.sourceNatural ?? surface.natural);
+    const crop = normalizeSourceCrop(surface.crop, sourceNatural);
+    const rotation = normalizeSurfaceAngle(surface.rotation);
     const hydrated = {
       ...surface,
       sourceNatural,
-      crop: normalizeSourceCrop(surface.crop, sourceNatural),
-      rotation: normalizeSurfaceAngle(surface.rotation),
+      crop,
+      rotation,
+      // an upright cut, which a surface with a crop never has
+      cut: crop ? null : fitSurfaceCut(surface.cut, sourceNatural),
       img,
     };
     refreshSurface(hydrated);
     return hydrated;
   }
 
-  /** Re-measure one hydrated surface after its crop or turn changes. */
+  /** Re-measure one hydrated surface after its crop, cut or turn changes. */
   function refreshSurface(surface) {
-    surface.natural = surfaceBoxSize(surface.sourceNatural, surface.crop, surface.rotation);
+    surface.natural = surfaceBoxSize(surface.sourceNatural, surface.crop, surface.rotation, surface.cut);
   }
 
   /** The pixels a surface draws: its crop, or the whole source. */
@@ -1300,6 +1317,22 @@
           anchor.cornerRadius(anchor.width() / 2);
         }
       },
+    });
+    // A cut picture turning under its square cut has no frame to show: Konva's
+    // would tilt with the turn while the cut stays put. The knob carries on alone
+    // and the frame comes back with the next selection drawn.
+    let frameHidden = false;
+    transformer.on('transformstart', () => {
+      if (transformer.getActiveAnchor() !== 'rotater' || !transformer.nodes()[0]?.hasName('surface-cut')) return;
+      frameHidden = true;
+      transformer.borderEnabled(false);
+      transformer.enabledAnchors([]);
+    });
+    // a knob let go where it started changes nothing, and redraws nothing either
+    transformer.on('transformend', () => {
+      if (!frameHidden) return;
+      frameHidden = false;
+      requestAnimationFrame(() => { if (stage) refreshCanvasUi(); });
     });
     guideGroup = new Konva.Group({ listening: false });
     uiLayer.add(guideGroup);
@@ -1525,11 +1558,11 @@
     JSON.stringify([
       proof.panels.map((p) => [
         p.src, p.caption, p.row, p.scale, p.x, p.y, p.frame,
-        p.crop, p.rotation, p.natural, !!p.img,
+        p.crop, p.cut, p.rotation, p.natural, !!p.img,
       ]),
       proof.pastes.map((p) => [
         p.asset, p.x, p.y, p.scale, p.frame,
-        p.crop, p.rotation, p.natural, !!p.img,
+        p.crop, p.cut, p.rotation, p.natural, !!p.img,
       ]),
       proof.shapes,
       proof.notes,
@@ -2180,8 +2213,8 @@
     const centre = node.position();
     // The node's scale is the image's, so the panel's own height reads off the
     // image too — the box around a turned one is bigger and is not what was sized.
-    if (resized) panel.scale = scaleFromNode(node.scaleX(), imageSizeOf(panel)[1]);
-    const turned = applySurfaceRotation(panel, node.rotation());
+    if (resized) panel.scale = scaleFromNode(node.scaleX(), panelSizedHeight(panel));
+    const turned = applyNodeTurn(panel, node);
     if (free) {
       const k = panelScale(panel);
       panel.x = centre.x - panel.natural[0] * k / 2;
@@ -2445,6 +2478,55 @@
     return true;
   }
 
+  /**
+   * Fold a turn the selection made into a surface. One without a cut is held by
+   * its own turned group, whose angle is the turn; a cut one by the upright group
+   * standing on its cut, which starts square, so its angle is the step taken.
+   */
+  function applyNodeTurn(item, node) {
+    return item.cut ? turnCutSurface(item, node.rotation()) : applySurfaceRotation(item, node.rotation());
+  }
+
+  /**
+   * Turn a cut surface by a step, about the middle of its cut (`turnSurfaceCut`).
+   * Brought level again, the cut is a plain crop, the way a cut that ran along the
+   * picture's edges always was. A panel keeps the size its pixels are drawn at, so
+   * a quarter turn that swaps the cut's sides does not grow or shrink the picture.
+   */
+  function turnCutSurface(item, step) {
+    const delta = normalizeSurfaceAngle(step);
+    if (!delta) return false;
+    const before = panelSizedHeight(item);
+    const from = item.rotation ?? 0;
+    const to = normalizeSurfaceAngle(from + delta);
+    const cut = turnSurfaceCut(item.cut, from, to);
+    item.rotation = to;
+    if (isQuarterTurn(to)) {
+      const crop = cutToSourceCrop(cut, item.sourceNatural, to);
+      shiftSurfaceMarks(item, -(crop?.x ?? 0), -(crop?.y ?? 0));
+      item.crop = crop;
+      item.cut = null;
+    } else {
+      item.cut = cut;
+    }
+    refreshSurface(item);
+    if (proof.panels.includes(item)) {
+      const scale = (item.scale ?? 1) * panelSizedHeight(item) / before;
+      item.scale = Math.min(Math.max(scale, PANEL_SCALE_MIN), PANEL_SCALE_MAX);
+    }
+    return true;
+  }
+
+  /**
+   * Annotations are measured from the corner of the pixels a surface draws, so a
+   * crop that moves that corner moves them back by as much, and they stay on the
+   * same spot of the picture. A cut moves no corner: it only hides.
+   */
+  function shiftSurfaceMarks(item, dx, dy) {
+    if (!dx && !dy) return;
+    proof.shapes = shiftedTies(mapSurfaceShapes(proof.shapes, item.id, (s) => shiftProofShape(s, dx, dy)), item.id, dx, dy);
+  }
+
   const surfaceById = (id) => (id
     ? proof.panels.find((panel) => panel.id === id)
       ?? proof.pastes.find((paste) => paste.id === id)
@@ -2466,10 +2548,11 @@
     tool = 'select';
     cropSurfaceId = item.id;
     // The whole source comes back into view, shaded outside the box it already
-    // keeps, so what an earlier crop cut off can be taken back in this pass.
-    cropDraft = item.crop
-      ? { ...item.crop }
-      : { x: 0, y: 0, w: item.sourceNatural[0], h: item.sourceNatural[1] };
+    // keeps, so what an earlier crop cut off can be taken back in this pass. The
+    // marks stand square on the page however the picture is turned, and open on
+    // what it shows now: its cut, or the upright box around its picture.
+    cropDraft = item.cut ? { ...item.cut } : surfaceCutStart(item.sourceNatural, item.crop, item.rotation);
+    cropStart = { ...cropDraft };
     if (proof.panels.includes(item)) selectPanel(item.id);
     else selectPaste(item.id);
     requestAnimationFrame(() => { if (stage) { rebuild(); refreshCanvasUi(); } });
@@ -2483,51 +2566,67 @@
   function endSurfaceCrop() {
     const item = surfaceById(cropSurfaceId);
     const selection = cropDraft;
+    // marks never moved say nothing, which keeps a crop that runs along a turned
+    // picture's edges rather than trading it for the upright box around it
+    const moved = !!selection && !sameBox(selection, cropStart);
     discardSurfaceCrop();
-    if (item && selection) applySurfaceCrop(item, selection);
+    if (item && moved) applySurfaceCrop(item, selection);
   }
+
+  const sameBox = (a, b) => !!a && !!b
+    && ['x', 'y', 'w', 'h'].every((key) => Math.abs(a[key] - b[key]) < 1e-6);
 
   /** Leave crop mode and drop the draft: the image keeps the pixels it had. */
   function discardSurfaceCrop() {
     const hadMarks = !!cropSurfaceId;
     cropSurfaceId = null;
     cropDraft = null;
+    cropStart = null;
     cropHandles?.destroyChildren();
     cropHandles?.getLayer()?.batchDraw();
     if (hadMarks) requestAnimationFrame(() => { if (stage) { rebuild(); refreshCanvasUi(); } });
   }
 
-  /** Commit the box the marks frame, in source pixels. */
+  /**
+   * Commit the box the marks frame. Where it runs along the picture's own edges,
+   * unturned or a quarter turn round, it is a crop in source pixels, as it always
+   * was. Across them it is a cut, square on the page, and the picture keeps all
+   * its pixels under it.
+   */
   function applySurfaceCrop(item, selection) {
-    const kept = normalizeSourceCrop(selection, item.sourceNatural);
-    const before = item.crop;
-    if (JSON.stringify(kept) === JSON.stringify(before ?? null)) return;
-    // Annotations are measured from the crop's own corner, so they travel by
-    // whatever that corner moved. Their own angles never change: the turn is on
-    // the group they are drawn in.
-    const dx = (before?.x ?? 0) - (kept?.x ?? 0);
-    const dy = (before?.y ?? 0) - (kept?.y ?? 0);
+    const turn = item.rotation ?? 0;
+    const square = isQuarterTurn(turn);
+    const crop = square ? cutToSourceCrop(selection, item.sourceNatural, turn) : null;
+    const cut = square ? null : settleSurfaceCut(selection, item.sourceNatural, turn);
+    if (JSON.stringify([crop, cut]) === JSON.stringify([item.crop ?? null, item.cut ?? null])) return;
+    reshapeSurface(item, crop, cut);
+  }
+
+  /**
+   * Give a surface a new crop and cut. Annotations are measured from the crop's
+   * own corner, so they travel by whatever that corner moved. Their own angles
+   * never change: the turn is on the group they are drawn in.
+   */
+  function reshapeSurface(item, crop, cut) {
+    const dx = (item.crop?.x ?? 0) - (crop?.x ?? 0);
+    const dy = (item.crop?.y ?? 0) - (crop?.y ?? 0);
     withSurfaceCentrePreserved(item, () => {
-      proof.shapes = shiftedTies(mapSurfaceShapes(proof.shapes, item.id, (s) => shiftProofShape(s, dx, dy)), item.id, dx, dy);
-      item.crop = kept;
+      shiftSurfaceMarks(item, dx, dy);
+      item.crop = crop;
+      item.cut = cut;
       refreshSurface(item);
     });
     dirty = true;
   }
 
-  /** Expand the source back to full size and restore annotation coordinates. */
+  /** Expand the source back to full size, crop or cut, and keep the turn. */
   function resetSurfaceCrop(item) {
-    if (!item?.crop) return;
-    const { x: dx, y: dy } = item.crop;
-    withSurfaceCentrePreserved(item, () => {
-      proof.shapes = shiftedTies(mapSurfaceShapes(proof.shapes, item.id, (s) => shiftProofShape(s, dx, dy)), item.id, dx, dy);
-      item.crop = null;
-      refreshSurface(item);
-    });
+    if (!item?.crop && !item?.cut) return;
+    reshapeSurface(item, null, null);
     if (cropSurfaceId === item.id) {
-      cropDraft = { x: 0, y: 0, w: item.sourceNatural[0], h: item.sourceNatural[1] };
+      cropDraft = surfaceCutStart(item.sourceNatural, null, item.rotation);
+      cropStart = { ...cropDraft };
     }
-    dirty = true;
   }
 
   /**
@@ -2659,11 +2758,7 @@
    */
   function pointerOn(frame, loose = false) {
     if (loose) return pageToSurface(onPage(docPoint()), frame);
-    const p = pageToSurface(docPoint(), frame);
-    return {
-      x: Math.min(Math.max(p.x, 0), frame.image[0]),
-      y: Math.min(Math.max(p.y, 0), frame.image[1]),
-    };
+    return holdOnSurface(pageToSurface(docPoint(), frame), frame);
   }
 
   /** Take hold of the view. The cursor says so, since the tool's own crosshair
@@ -2935,7 +3030,9 @@
       const at = pageToSurface(docPoint(), drawing.frame);
       drawing.cone = newCone(drawing, at);
       drawing.node?.destroy();
-      drawing.node = makeConeNode(drawing.cone, drawing.box.scale, drawing.frame.rotation, { live: false, image: drawing.frame.image });
+      drawing.node = makeConeNode(drawing.cone, drawing.box.scale, drawing.frame.rotation, {
+        live: false, image: drawing.frame.image, outline: drawing.frame.outline,
+      });
       drawing.group.add(drawing.node);
       docLayer.batchDraw();
       return;
@@ -3245,7 +3342,7 @@
   function commitPasteNode(paste, node, { resized = false } = {}) {
     const centre = node.position();
     if (resized) paste.scale = clampPasteScale(node.scaleX());
-    applySurfaceRotation(paste, node.rotation());
+    applyNodeTurn(paste, node);
     paste.x = centre.x - paste.natural[0] * paste.scale / 2;
     paste.y = centre.y - paste.natural[1] * paste.scale / 2;
     const { width, height } = measureDoc();
@@ -3273,15 +3370,131 @@
   // ---- rebuild canvas from state ------------------------------------------------------
 
   /**
+   * The nodes a surface is drawn in. `group` is the surface's own pixels, turned,
+   * where its picture and its marks live. Without a cut it is also `node`, what
+   * the selection holds and a drag moves, and it stands on its layout box as it
+   * always has. A cut surface stands on its cut instead: `node` is an upright
+   * group on the cut, holding the turned group, so the selection frame and its
+   * handles are square on the page like the cut they frame.
+   */
+  function surfaceNodes(item, box, draggable) {
+    const image = imageSizeOf(item);
+    const turn = item.rotation ?? 0;
+    const centre = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+    if (!item.cut) {
+      const group = new Konva.Group({
+        id: `pg-${item.id}`, ...centre,
+        offsetX: image[0] / 2, offsetY: image[1] / 2,
+        rotation: turn, scaleX: box.scale, scaleY: box.scale, draggable,
+      });
+      return { node: group, group, image };
+    }
+    const { w, h } = item.cut;
+    const off = surfaceCutMiddle(item.cut);
+    const node = new Konva.Group({
+      id: `pc-${item.id}`, name: 'surface-cut', ...centre, scaleX: box.scale, scaleY: box.scale, draggable,
+    });
+    // Konva measures a group by everything in it and looks past a clip, which
+    // would frame the whole picture the cut hides. The surface is its cut.
+    node.getClientRect = ({ skipTransform, relativeTo } = {}) => {
+      const rect = { x: -w / 2, y: -h / 2, width: w, height: h };
+      if (skipTransform) return rect;
+      const at = node.getAbsoluteTransform(relativeTo);
+      const corners = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]]
+        .map(([x, y]) => at.point({ x, y }));
+      const xs = corners.map((p) => p.x);
+      const ys = corners.map((p) => p.y);
+      const left = Math.min(...xs);
+      const top = Math.min(...ys);
+      return { x: left, y: top, width: Math.max(...xs) - left, height: Math.max(...ys) - top };
+    };
+    const group = new Konva.Group({
+      id: `pg-${item.id}`, x: -off.x, y: -off.y,
+      offsetX: image[0] / 2, offsetY: image[1] / 2, rotation: turn,
+    });
+    // a mark dragged to the front brings its picture with it, cut and all
+    group.moveToTop = () => {
+      node.moveToTop();
+      return true;
+    };
+    node.add(group);
+    // While the knob turns it, the cut stays square on the page and the picture
+    // turns under it, as it will once let go. The clip reads the same live cut.
+    node.on('transform', () => {
+      const live = liveCutOf(item, node);
+      group.findOne('.cut-seat')?.setAttrs(surfaceCutSeat(live.cut, image, live.turn));
+    });
+    return { node, group, image };
+  }
+
+  /**
+   * A cut surface's cut and turn as they stand mid-gesture: the upright group it
+   * is held by has turned by a step the surface does not have yet.
+   */
+  function liveCutOf(item, node) {
+    const from = item.rotation ?? 0;
+    const turn = normalizeSurfaceAngle(from + (node?.rotation() ?? 0));
+    return { cut: turnSurfaceCut(item.cut, from, turn), turn };
+  }
+
+  /**
+   * What catches a press on a surface: its picture, or its whole cut, blank
+   * corners included, since that is the box the page shows for it.
+   */
+  function surfaceHitNode(item, image) {
+    if (!item.cut) {
+      return new Konva.Rect({
+        x: 0, y: 0, width: image[0], height: image[1],
+        fill: 'transparent', listening: true, name: 'panel-hit',
+      });
+    }
+    return new Konva.Line({
+      points: surfaceCutOutline(item.cut, image, item.rotation).flatMap((p) => [p.x, p.y]),
+      closed: true, fill: 'transparent', listening: true, name: 'panel-hit',
+    });
+  }
+
+  /**
+   * Where a surface's border and its scene time go: on the picture's own edges,
+   * or on its cut, square on the page. Returns the group to draw them in and the
+   * size of what they frame.
+   */
+  function shownLayer(group, item, image) {
+    if (!item.cut) return { layer: group, size: image };
+    const seat = surfaceCutSeat(item.cut, image, item.rotation);
+    const layer = new Konva.Group({ ...seat, name: 'cut-seat', listening: false });
+    group.add(layer);
+    return { layer, size: [item.cut.w, item.cut.h] };
+  }
+
+  /** A surface's cut in its own pixels, or null when it has none. */
+  function cutOutlineOf(item) {
+    return item?.cut ? surfaceCutOutline(item.cut, imageSizeOf(item), item.rotation) : null;
+  }
+
+  /** Trace a closed outline on a canvas, for a clip that is not a rectangle. */
+  function traceOutline(ctx, outline) {
+    outline.forEach((p, index) => (index ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    ctx.closePath();
+  }
+
+  /**
    * What a surface draws. Ordinarily its crop, straight out of the source with
-   * no intermediate canvas. Under the crop marks it is the whole source instead,
-   * shifted so the kept box does not move and shaded outside it — the pixels an
-   * earlier crop cut off are there to be taken back.
+   * no intermediate canvas, and only what its cut keeps when it has one. Under
+   * the crop marks it is the whole source instead, shifted so the kept box does
+   * not move and shaded outside it — the pixels an earlier crop or cut left out
+   * are there to be taken back.
    */
   function surfaceImageNode(item, image) {
     if (cropSurfaceId !== item.id) {
+      const cutClip = (ctx, self) => {
+        const live = liveCutOf(item, self.findAncestor('.surface-cut'));
+        traceOutline(ctx, surfaceCutOutline(live.cut, image, live.turn));
+      };
       const group = new Konva.Group({
-        clip: { x: 0, y: 0, width: image[0], height: image[1] },
+        ...(item.cut
+          ? { clipFunc: cutClip }
+          : { clip: { x: 0, y: 0, width: image[0], height: image[1] } }),
         listening: false,
       });
       group.add(new Konva.Image({
@@ -3299,32 +3512,36 @@
     ghost.add(new Konva.Image({
       image: item.img, x: originX, y: originY, width: sw, height: sh, listening: false,
     }));
+    // The shade is square on the page, like the marks, from the source's middle,
+    // and lies on the picture only: the page around a turned one stays the page.
+    const onPicture = new Konva.Group({ clip: { x: originX, y: originY, width: sw, height: sh }, listening: false });
+    const upright = new Konva.Group({
+      x: originX + sw / 2, y: originY + sh / 2, rotation: -(item.rotation ?? 0), listening: false,
+    });
     for (let index = 0; index < 4; index++) {
-      ghost.add(new Konva.Rect({ name: 'crop-shade', fill: 'rgba(0, 0, 0, 0.55)', listening: false }));
+      upright.add(new Konva.Rect({ name: 'crop-shade', fill: 'rgba(0, 0, 0, 0.55)', listening: false }));
     }
+    onPicture.add(upright);
+    ghost.add(onPicture);
     shadeCropGhost(ghost, item);
     return ghost;
   }
 
-  /** Lay the four shaded bands over everything the crop box leaves out. */
+  /** Lay the four shaded bands over everything the marks leave out. */
   function shadeCropGhost(ghost, item) {
     if (!ghost || !cropDraft) return;
-    const [sw, sh] = item.sourceNatural;
-    const left = -(item.crop?.x ?? 0);
-    const top = -(item.crop?.y ?? 0);
-    const boxLeft = left + cropDraft.x;
-    const boxTop = top + cropDraft.y;
-    const boxRight = boxLeft + cropDraft.w;
-    const boxBottom = boxTop + cropDraft.h;
+    // a hair past the picture's reach, so no sliver of it is left unshaded
+    const reach = surfaceCutReach(item.sourceNatural, item.rotation);
+    const left = reach.left - 2;
+    const top = reach.top - 2;
+    const right = reach.right + 2;
+    const bottom = reach.bottom + 2;
+    const { x, y, w, h } = cropDraft;
     const bands = ghost.find('.crop-shade');
-    bands[0]?.setAttrs({ x: left, y: top, width: sw, height: Math.max(0, boxTop - top) });
-    bands[1]?.setAttrs({ x: left, y: boxBottom, width: sw, height: Math.max(0, top + sh - boxBottom) });
-    bands[2]?.setAttrs({
-      x: left, y: boxTop, width: Math.max(0, boxLeft - left), height: cropDraft.h,
-    });
-    bands[3]?.setAttrs({
-      x: boxRight, y: boxTop, width: Math.max(0, left + sw - boxRight), height: cropDraft.h,
-    });
+    bands[0]?.setAttrs({ x: left, y: top, width: right - left, height: Math.max(0, y - top) });
+    bands[1]?.setAttrs({ x: left, y: y + h, width: right - left, height: Math.max(0, bottom - y - h) });
+    bands[2]?.setAttrs({ x: left, y, width: Math.max(0, x - left), height: h });
+    bands[3]?.setAttrs({ x: x + w, y, width: Math.max(0, right - x - w), height: h });
   }
 
   function rebuild() {
@@ -3362,49 +3579,38 @@
       const box = boxes[i];
       // Outer group is NOT clipped so an element can be dragged across panels;
       // only the image itself is clipped to the panel box (inner group).
-      const image = imageSizeOf(panel);
       // The group's own space is the image's pixels and it carries the turn, so
       // the frame, the marks and the annotations all sit on the image's edges.
-      // The box around it is the upright room the page reserved for it.
-      const group = new Konva.Group({
-        id: `pg-${panel.id}`,
-        x: box.x + box.w / 2,
-        y: box.y + box.h / 2,
-        offsetX: image[0] / 2,
-        offsetY: image[1] / 2,
-        rotation: panel.rotation ?? 0,
-        scaleX: box.scale, scaleY: box.scale,
-        draggable: free,
-      });
+      // The box around it is the upright room the page reserved for it, which is
+      // the cut itself when there is one (`surfaceNodes`).
+      const { node, group, image } = surfaceNodes(panel, box, free);
       // Invisible full-panel hit target: the image itself never listens (so
       // drawing tools pass through to the stage), but the panel must catch
       // select-clicks — and, in free mode, drags. Added first so shapes stay
       // on top for hit-testing.
-      group.add(new Konva.Rect({
-        x: 0, y: 0, width: image[0], height: image[1],
-        fill: 'transparent', listening: true, name: 'panel-hit',
-      }));
-      bindPanelPointerLifecycle(group, {
+      group.add(surfaceHitNode(panel, image));
+      bindPanelPointerLifecycle(node, {
         // Only the select tool touches panels. Selection itself waits until the
         // gesture settles so rebuild() cannot destroy the pointerdown target.
-        onPress: () => group.draggable(free && tool === 'select' && !spacePan),
+        onPress: () => node.draggable(free && tool === 'select' && !spacePan),
         onSelect: () => selectPanel(panel.id),
-        onDragEnd: free ? () => commitPanelNode(panel, group) : null,
+        onDragEnd: free ? () => commitPanelNode(panel, node) : null,
       });
-      group.on('transformend', () => commitPanelNode(panel, group, { resized: true }));
-      group.on('dblclick dbltap', (event) => {
+      node.on('transformend', () => commitPanelNode(panel, node, { resized: true }));
+      node.on('dblclick dbltap', (event) => {
         if (tool !== 'select') return;
         event.cancelBubble = true;
         beginSurfaceCrop(panel);
       });
       if (panel.img) group.add(surfaceImageNode(panel, image));
-      if (panel.frame) group.add(frameNode(panel.frame, image, box.scale));
+      const shown = shownLayer(group, panel, image);
+      if (panel.frame) shown.layer.add(frameNode(panel.frame, shown.size, box.scale));
       // the scene's time, when asked, under the marks: it belongs to the picture
-      if (badges.has(panel.id)) group.add(sceneBadgeNode(badges.get(panel.id), image, box.scale));
+      if (badges.has(panel.id)) shown.layer.add(sceneBadgeNode(badges.get(panel.id), shown.size, box.scale));
       for (const s of proof.shapes.filter((x) => x.panel === panel.id && !isPageMark(x))) {
         addSurfaceShape(group, s, box, panel);
       }
-      docLayer.add(group);
+      docLayer.add(node);
       if (panel.caption?.trim()) {
         // A press on the caption picks its panel, whose rail sizes and colours
         // the captions; a double-click writes on it (see onCanvasDblClick).
@@ -3473,40 +3679,28 @@
     for (let i = proof.pastes.length - 1; i >= 0; i--) {
       const paste = proof.pastes[i];
       const box = pasteBox[i];
-      const image = imageSizeOf(paste);
-      const group = new Konva.Group({
-        id: `pg-${paste.id}`,
-        x: box.x + box.w / 2,
-        y: box.y + box.h / 2,
-        offsetX: image[0] / 2,
-        offsetY: image[1] / 2,
-        rotation: paste.rotation ?? 0,
-        scaleX: box.scale, scaleY: box.scale,
-        draggable: false,
-      });
+      const { node, group, image } = surfaceNodes(paste, box, false);
       // same invisible hit target as a panel: the image never listens, so a
       // drawing tool passes through to the stage, but a click still selects.
-      group.add(new Konva.Rect({
-        x: 0, y: 0, width: image[0], height: image[1],
-        fill: 'transparent', listening: true, name: 'panel-hit',
-      }));
-      bindPanelPointerLifecycle(group, {
-        onPress: () => group.draggable(tool === 'select' && !spacePan),
+      group.add(surfaceHitNode(paste, image));
+      bindPanelPointerLifecycle(node, {
+        onPress: () => node.draggable(tool === 'select' && !spacePan),
         onSelect: () => selectPaste(paste.id),
-        onDragEnd: () => commitPasteNode(paste, group),
+        onDragEnd: () => commitPasteNode(paste, node),
       });
-      group.on('transformend', () => commitPasteNode(paste, group, { resized: true }));
-      group.on('dblclick dbltap', (event) => {
+      node.on('transformend', () => commitPasteNode(paste, node, { resized: true }));
+      node.on('dblclick dbltap', (event) => {
         if (tool !== 'select') return;
         event.cancelBubble = true;
         beginSurfaceCrop(paste);
       });
       if (paste.img) group.add(surfaceImageNode(paste, image));
-      if (paste.frame) group.add(frameNode(paste.frame, image, box.scale));
+      const shown = shownLayer(group, paste, image);
+      if (paste.frame) shown.layer.add(frameNode(paste.frame, shown.size, box.scale));
       for (const s of proof.shapes.filter((x) => x.panel === paste.id && !isPageMark(x))) {
         addSurfaceShape(group, s, box, paste);
       }
-      docLayer.add(group);
+      docLayer.add(node);
     }
 
     // Callouts and zoom insets point from a picture out onto the page, and the
@@ -3641,7 +3835,7 @@
       .filter(Boolean);
     const selectedNode = selectedNodes.length === 1 ? selectedNodes[0] : null;
     const panelNode = !selectedNodes.length && selectedPanelId
-      ? docLayer.findOne(`#pg-${selectedPanelId}`)
+      ? surfaceNodeOf(selectedPanelId)
       : null;
     // Panels are scale-clamped *during* the gesture: letting the transform run
     // free and clamping on release made the panel visibly snap back whenever
@@ -3651,7 +3845,7 @@
     // a pasted image resizes from its corners with its aspect locked, within the
     // same kind of scale bounds a panel has
     const pasteNode = !selectedNodes.length && !panelNode && selectedPasteId
-      ? docLayer.findOne(`#pg-${selectedPasteId}`)
+      ? surfaceNodeOf(selectedPasteId)
       : null;
     // the footer is picked for its size and colour only: framed, with nothing to pull
     const sigNode = !selectedNodes.length && !panelNode && !pasteNode && selectedSig
@@ -3695,6 +3889,13 @@
     transformer.keepRatio(
       !!sigNode || !!panelNode || !!pasteNode || selKind === 'icon' || selKind === 'number' || selKind === 'zoom'
     );
+    // A cut surface is held square, so its knob turns from nothing: it settles on a
+    // quarter turn and on the angles that bring its picture level again, as an
+    // uncut one settles on the page's quarters, and a small step stays small.
+    const held = boundPanel ?? boundPaste;
+    transformer.rotationSnaps(held?.cut
+      ? [90, 180, 270, ...[0, 90, 180, 270].map((quarter) => quarter - (held.rotation ?? 0))]
+      : [0, 90, 180, 270]);
     transformer.rotateEnabled(
       !!panelNode || !!pasteNode
         || selKind === 'text' || selKind === 'rect' || selKind === 'ellipse' || selKind === 'icon'
@@ -3754,34 +3955,46 @@
     }));
   }
 
+  /** What the selection holds for a surface: the upright group on its cut, or its own. */
+  function surfaceNodeOf(id) {
+    return docLayer.findOne(`#pc-${id}`) ?? docLayer.findOne(`#pg-${id}`);
+  }
+
   /**
-   * The selected surface's group, and the two ways between source pixels and the
-   * screen. The group carries the turn, so a box drawn through this stays on the
-   * image's own edges however far it is turned.
+   * The selected surface's group, and the two ways between the draft and the
+   * screen. The draft is square on the page and measured from the source's
+   * middle, so the marks stand upright however far the picture is turned, and
+   * pull as far as the turned picture reaches.
    */
   function cropFrameOf() {
     const item = surfaceById(cropSurfaceId);
     const group = item && docLayer.findOne(`#pg-${item.id}`);
     if (!group) return null;
-    const originX = item.crop?.x ?? 0;
-    const originY = item.crop?.y ?? 0;
+    const [sw, sh] = item.sourceNatural;
+    // the source's middle, in the group's own pixels
+    const originX = sw / 2 - (item.crop?.x ?? 0);
+    const originY = sh / 2 - (item.crop?.y ?? 0);
+    const turn = item.rotation ?? 0;
     return {
       item,
       group,
-      angle: group.getAbsoluteRotation(),
       scale: group.getAbsoluteScale().x,
-      toScreen: (x, y) => group.getAbsoluteTransform().point({ x: x - originX, y: y - originY }),
-      toSource: (point) => {
+      reach: surfaceCutReach(item.sourceNatural, turn),
+      toScreen: (x, y) => {
+        const own = turned(x, y, -turn);
+        return group.getAbsoluteTransform().point({ x: originX + own.x, y: originY + own.y });
+      },
+      toDraft: (point) => {
         const local = group.getAbsoluteTransform().copy().invert().point(point);
-        return { x: local.x + originX, y: local.y + originY };
+        return turned(local.x - originX, local.y - originY, turn);
       },
     };
   }
 
   /**
-   * PowerPoint-style crop marks: eight black edge and corner marks turned onto
-   * the image's own edges. They are drawn on the ui layer so they keep their
-   * screen size at any zoom; the shading behind them rides with the image.
+   * PowerPoint-style crop marks: eight black edge and corner marks, square on
+   * the page. They are drawn on the ui layer so they keep their screen size at
+   * any zoom; the shading behind them rides with the image.
    */
   function drawCropHandles() {
     cropHandles.destroyChildren();
@@ -3815,7 +4028,6 @@
       const handle = new Konva.Group({
         name: 'crop-anchor',
         draggable: true,
-        rotation: frame.angle, // the mark sits square on the turned image
         cropKey: key,
       });
       handle.add(new Konva.Rect({
@@ -3851,14 +4063,14 @@
     positionCropHandles(frame);
   }
 
-  /** Move one edge or corner of the draft, in the source's own pixels. */
+  /** Move one edge or corner of the draft, square on the page, within the picture's reach. */
   function updateCropFromHandle(frame, key, screenPoint, start) {
     if (!start) return;
-    const [width, height] = frame.item.sourceNatural;
-    const min = Math.min(width, height, Math.max(1, 16 / frame.scale));
-    const point = frame.toSource(screenPoint);
-    const px = Math.max(0, Math.min(width, point.x));
-    const py = Math.max(0, Math.min(height, point.y));
+    const { reach } = frame;
+    const min = Math.min(reach.right - reach.left, reach.bottom - reach.top, Math.max(1, 16 / frame.scale));
+    const point = frame.toDraft(screenPoint);
+    const px = Math.max(reach.left, Math.min(reach.right, point.x));
+    const py = Math.max(reach.top, Math.min(reach.bottom, point.y));
     let left = start.x;
     let top = start.y;
     let right = start.x + start.w;
@@ -3880,7 +4092,6 @@
     };
     for (const handle of cropHandles.find('.crop-anchor')) {
       const [sx, sy] = corners[handle.getAttr('cropKey')];
-      handle.rotation(frame.angle);
       handle.setAbsolutePosition(frame.toScreen(sx, sy));
     }
     const border = cropHandles.findOne('.crop-border');
@@ -3979,9 +4190,7 @@
         ...look,
       });
       const apply = (commit) => {
-        const own = pageToSurface(handle.position(), frame);
-        const nx = Math.min(Math.max(own.x, 0), frame.image[0]);
-        const ny = Math.min(Math.max(own.y, 0), frame.image[1]);
+        const { x: nx, y: ny } = holdOnSurface(pageToSurface(handle.position(), frame), frame);
         handle.position(surfaceToPage({ x: nx, y: ny }, frame));
         if (commit) {
           s.points[vi] = nx;
@@ -4073,12 +4282,7 @@
         s.panel = hit.id;
         landed = { x: hit.nx, y: hit.ny, frame: hit.frame };
       } else {
-        const own = pageToSurface(at, frame);
-        landed = {
-          x: Math.min(Math.max(own.x, 0), frame.image[0]),
-          y: Math.min(Math.max(own.y, 0), frame.image[1]),
-          frame,
-        };
+        landed = { ...holdOnSurface(pageToSurface(at, frame), frame), frame };
       }
       s.x = landed.x;
       s.y = landed.y;
@@ -4106,9 +4310,7 @@
       const [ax, ay] = own[(i + 2) % 4];
       const minSide = 4 / frame.box.scale;
       handle.on('dragend', () => {
-        const p = pageToSurface(handle.position(), frame);
-        const px = Math.min(Math.max(p.x, 0), frame.image[0]);
-        const py = Math.min(Math.max(p.y, 0), frame.image[1]);
+        const { x: px, y: py } = holdOnSurface(pageToSurface(handle.position(), frame), frame);
         const w = Math.abs(px - ax);
         const h = Math.abs(py - ay);
         if (w >= minSide && h >= minSide) {
@@ -4446,8 +4648,7 @@
     if (isFree(s)) return false;
     const frame = frameOf(s.panel);
     if (!frame) return false;
-    const p = anchorOf(s);
-    return p.x < 0 || p.y < 0 || p.x > frame.image[0] || p.y > frame.image[1];
+    return !surfaceShows(anchorOf(s), frame);
   }
 
   /** Whether a page point is on a zoom inset's enlargement. */
@@ -4521,8 +4722,7 @@
     if (entry) {
       const z = stage.scaleX();
       const frame = entry.frame ?? surfaceFrame(entry);
-      const [w, h] = frame.image;
-      const corners = [[0, 0], [w, 0], [w, h], [0, h]].map(([x, y]) => surfaceToPage({ x, y }, frame));
+      const corners = surfaceCorners(frame);
       landingGuide.add(new Konva.Line({
         points: corners.flatMap((p) => [p.x, p.y]), closed: true,
         stroke: ACCENT, strokeWidth: 2 / z, dash: [8 / z, 5 / z], fill: 'rgba(232, 163, 61, 0.07)',
@@ -4676,8 +4876,7 @@
     let best = null;
     for (const entry of surfaces(proof)) {
       const frame = surfaceFrame(entry);
-      const [w, h] = frame.image;
-      const corners = [[0, 0], [w, 0], [w, h], [0, h]].map(([x, y]) => surfaceToPage({ x, y }, frame));
+      const corners = surfaceCorners(frame);
       const xs = corners.map((p) => p.x);
       const ys = corners.map((p) => p.y);
       const dx = Math.max(Math.min(...xs) - point.x, 0, point.x - Math.max(...xs));
@@ -4809,7 +5008,9 @@
       return node;
     }
     if (s.kind === 'cone') {
-      return makeConeNode(s, k, surface?.rotation ?? 0, { image: surface ? imageSizeOf(surface) : null });
+      return makeConeNode(s, k, surface?.rotation ?? 0, {
+        image: surface ? imageSizeOf(surface) : null, outline: cutOutlineOf(surface),
+      });
     }
     if (s.kind === 'icon') return makeIconNode(s, k);
     if (s.kind === 'number') return makeNumberNode(s, k);
@@ -5045,6 +5246,20 @@
             name: 'blur-fill', x: 0, y: 0, width: s.w, height: s.h,
             fill: 'rgba(20, 22, 26, 0.92)', listening: false,
           });
+      // On a cut picture the patch stops at the cut, as it stops at a crop: what
+      // the cut hides is not shown again, even blurred.
+      const outline = patch ? cutOutlineOf(surface) : null;
+      if (outline) {
+        const toBox = group.getTransform().copy().invert();
+        const own = outline.map((p) => toBox.point(p));
+        const held = new Konva.Group({ name: 'blur-fill', clipFunc: (ctx) => traceOutline(ctx, own), listening: false });
+        node.name('');
+        held.add(node);
+        group.add(held);
+        node.cache();
+        held.moveToTop();
+        return;
+      }
       group.add(node);
       if (patch) node.cache();
       node.moveToTop();
@@ -5136,7 +5351,7 @@
    * of view running out over the page says nothing. The badge stays whole even at
    * the picture's edge, upright on the page, `turn` being the picture's own turn.
    */
-  function makeConeNode(s, k, turn = 0, { live = true, image = null } = {}) {
+  function makeConeNode(s, k, turn = 0, { live = true, image = null, outline = null } = {}) {
     const fov = s.fov ?? lensFov('1');
     const reach = Math.max(1 / k, s.reach ?? 100);
     const width = s.strokeWidth ?? 4;
@@ -5147,7 +5362,14 @@
     });
     const kept = new Konva.Group(image ? { clip: { x: -s.x, y: -s.y, width: image[0], height: image[1] } } : {});
     const group = new Konva.Group({ rotation: s.rotation ?? 0 });
-    kept.add(group);
+    // and to what its picture's cut keeps, on a cut one
+    const shown = outline ? new Konva.Group({ clipFunc: (ctx) => traceOutline(ctx, outline.map((p) => ({ x: p.x - s.x, y: p.y - s.y }))) }) : null;
+    if (shown) {
+      shown.add(group);
+      kept.add(shown);
+    } else {
+      kept.add(group);
+    }
     node.add(kept);
     // Konva's wedge starts along +x and runs clockwise; the cone is centred on up.
     group.add(new Konva.Wedge({
@@ -5211,7 +5433,7 @@
     let preview = null;
     const show = (draft) => {
       preview?.destroy();
-      preview = makeConeNode(draft, k, frame.rotation, { live: false, image: frame.image });
+      preview = makeConeNode(draft, k, frame.rotation, { live: false, image: frame.image, outline: frame.outline });
       node?.getParent()?.add(preview);
       node?.hide();
       docLayer.batchDraw();
@@ -5409,7 +5631,11 @@
       x: -iw / 2, y: -ih / 2, width: iw, height: ih, fill: 'rgba(20, 22, 26, 0.92)',
     }));
     const k = iw / s.w;
-    const pixels = new Konva.Group({ x: -iw / 2 - s.x * k, y: -ih / 2 - s.y * k, scaleX: k, scaleY: k });
+    // what the picture's cut hides, the enlargement does not show either
+    const pixels = new Konva.Group({
+      x: -iw / 2 - s.x * k, y: -ih / 2 - s.y * k, scaleX: k, scaleY: k,
+      ...(frame.outline ? { clipFunc: (ctx) => traceOutline(ctx, frame.outline) } : {}),
+    });
     // only the part of the frame that is over the picture has pixels to show
     const x0 = Math.max(0, s.x);
     const y0 = Math.max(0, s.y);
@@ -5830,6 +6056,13 @@
     // its pixels. Clicking away or saving is what keeps the box instead.
     if (e.key === 'Escape' && cropSurfaceId) {
       discardSurfaceCrop();
+      refreshCanvasUi();
+      return;
+    }
+    // …and Enter keeps it, like a press off the image
+    if (e.key === 'Enter' && cropSurfaceId) {
+      e.preventDefault();
+      endSurfaceCrop();
       refreshCanvasUi();
       return;
     }

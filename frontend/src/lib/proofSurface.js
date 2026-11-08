@@ -7,6 +7,14 @@
  * however far it is turned. What the page has to reserve is the upright box a
  * turned image needs, which is what `surfaceBoxSize` answers — the layout keeps
  * working in upright boxes and knows nothing about the angle.
+ *
+ * A crop runs along the picture's edges, so it tilts with a turned picture. A cut
+ * is the other way to keep part of one: a rectangle square to the page, which is
+ * what cropping a turned image means to the person looking at it. It is held in
+ * upright units, one to a source pixel, measured from the middle of the picture,
+ * and it replaces the box the page reserves. The picture's own pixels, and so
+ * every annotation, stay exactly where they were. A surface has a crop or a cut,
+ * never both, and one that has never been turned only ever has a crop.
  */
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -70,10 +78,165 @@ export function rotatedBoxSize(width, height, angle) {
   return [ceil(width * cos + height * sin), ceil(width * sin + height * cos)];
 }
 
-/** What the page reserves for a surface: its image, turned, boxed upright. */
-export function surfaceBoxSize(natural, crop, rotation) {
+/** What the page reserves for a surface: its cut, or its image turned and boxed upright. */
+export function surfaceBoxSize(natural, crop, rotation, cut = null) {
+  if (cut) return [cut.w, cut.h];
   const [width, height] = surfaceImageSize(natural, crop);
   return rotatedBoxSize(width, height, rotation);
+}
+
+/** A vector turned by `degrees`, clockwise on the page as Konva turns a node. */
+export function turned(x, y, degrees) {
+  if (!degrees) return { x, y };
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return { x: x * cos - y * sin, y: x * sin + y * cos };
+}
+
+/** No turn or a quarter turn: the picture's edges already lie along the page's. */
+export function isQuarterTurn(angle) {
+  const off = Math.abs(normalizeSurfaceAngle(angle)) % 90;
+  return Math.min(off, 90 - off) < 0.01;
+}
+
+/**
+ * A cut read off a spec or a draft, in whole upright units, or null for none. A
+ * surface with a crop has no cut: only a hand-edited spec could hold both, and
+ * the crop is the one every older build reads.
+ */
+export function normalizeSurfaceCut(cut, crop = null) {
+  if (crop || !cut || typeof cut !== 'object' || Array.isArray(cut)) return null;
+  const x = Number(cut.x);
+  const y = Number(cut.y);
+  const w = Number(cut.w);
+  const h = Number(cut.h);
+  if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return null;
+  const left = Math.round(x);
+  const top = Math.round(y);
+  return {
+    x: left,
+    y: top,
+    w: Math.max(1, Math.round(x + w) - left),
+    h: Math.max(1, Math.round(y + h) - top),
+  };
+}
+
+/** How far a whole source reaches once turned, about its middle: where upright marks stop. */
+export function surfaceCutReach(natural, rotation) {
+  const [width, height] = sourceSize(natural);
+  const radians = normalizeSurfaceAngle(rotation) * Math.PI / 180;
+  const cos = Math.abs(Math.cos(radians));
+  const sin = Math.abs(Math.sin(radians));
+  const halfW = (width * cos + height * sin) / 2;
+  const halfH = (width * sin + height * cos) / 2;
+  return { left: -halfW, top: -halfH, right: halfW, bottom: halfH };
+}
+
+/** The upright box around what a surface shows before any cut: where its marks open. */
+export function surfaceCutStart(natural, crop, rotation) {
+  const [width, height] = sourceSize(natural);
+  const kept = normalizeSourceCrop(crop, [width, height]) ?? { x: 0, y: 0, w: width, h: height };
+  const middle = turned(kept.x + kept.w / 2 - width / 2, kept.y + kept.h / 2 - height / 2, rotation);
+  const reach = surfaceCutReach([kept.w, kept.h], rotation);
+  return {
+    x: middle.x + reach.left,
+    y: middle.y + reach.top,
+    w: reach.right - reach.left,
+    h: reach.bottom - reach.top,
+  };
+}
+
+/** The cut upright marks leave behind. Marks standing on the whole picture leave none. */
+export function settleSurfaceCut(draft, natural, rotation) {
+  const kept = normalizeSurfaceCut(draft);
+  if (!kept) return null;
+  const reach = surfaceCutReach(natural, rotation);
+  const whole = kept.x <= reach.left + 1 && kept.y <= reach.top + 1
+    && kept.x + kept.w >= reach.right - 1 && kept.y + kept.h >= reach.bottom - 1;
+  return whole ? null : kept;
+}
+
+/** Where a cut's middle lies from the picture's, which is where the page box is off the group. */
+export function surfaceCutMiddle(cut) {
+  return cut ? { x: cut.x + cut.w / 2, y: cut.y + cut.h / 2 } : { x: 0, y: 0 };
+}
+
+/** Whether a turn swaps width and height: a quarter turn either way, or three. */
+export function isSideways(angle) {
+  return isQuarterTurn(angle) && Math.abs(Math.round(normalizeSurfaceAngle(angle) / 90)) % 2 === 1;
+}
+
+/**
+ * The same cut once its picture has turned from one angle to another, about the
+ * cut's own middle, so what the analyst is looking at turns in place. A quarter
+ * turn takes the cut round with the picture, the way a cropped photo turns. Any
+ * other turn leaves the cut square on the page and turns the picture under it,
+ * which is how a horizon is levelled a little further.
+ */
+export function turnSurfaceCut(cut, from, to) {
+  if (!cut) return cut;
+  const delta = normalizeSurfaceAngle(to - from);
+  const middle = surfaceCutMiddle(cut);
+  const moved = turned(middle.x, middle.y, delta);
+  const [w, h] = isSideways(delta) ? [cut.h, cut.w] : [cut.w, cut.h];
+  return { x: moved.x - w / 2, y: moved.y - h / 2, w, h };
+}
+
+/**
+ * A cut read off a spec, or null when nothing of it is left. It is kept as it was
+ * saved, blank corners and all, since a cut picture turned a few degrees further
+ * may lie past its picture's reach, and a reload must draw what was saved. Only a
+ * cut out of all proportion to its picture is held in, at a bound no gesture
+ * reaches: half again the picture's diagonal from its middle.
+ */
+export function fitSurfaceCut(cut, natural) {
+  const kept = normalizeSurfaceCut(cut);
+  if (!kept) return null;
+  const [width, height] = sourceSize(natural);
+  const bound = Math.ceil(Math.hypot(width, height) * 1.5);
+  const left = Math.max(kept.x, -bound);
+  const top = Math.max(kept.y, -bound);
+  const right = Math.min(kept.x + kept.w, bound);
+  const bottom = Math.min(kept.y + kept.h, bound);
+  if (right - left < 1 || bottom - top < 1) return null;
+  return { x: left, y: top, w: right - left, h: bottom - top };
+}
+
+/**
+ * The source rectangle an upright cut stands for once the picture's edges lie
+ * along the page's, at no turn or a quarter turn: a plain crop, held to the
+ * source, or null when it keeps the whole picture. At any other angle it is the
+ * source rectangle around the cut.
+ */
+export function cutToSourceCrop(cut, natural, rotation) {
+  const [width, height] = sourceSize(natural);
+  const corners = [[cut.x, cut.y], [cut.x + cut.w, cut.y], [cut.x + cut.w, cut.y + cut.h], [cut.x, cut.y + cut.h]]
+    .map(([x, y]) => turned(x, y, -normalizeSurfaceAngle(rotation)));
+  const xs = corners.map((p) => p.x + width / 2);
+  const ys = corners.map((p) => p.y + height / 2);
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  return normalizeSourceCrop({ x: left, y: top, w: Math.max(...xs) - left, h: Math.max(...ys) - top }, [width, height]);
+}
+
+/**
+ * How a cut sits in its surface's own pixels: at this corner, turned back this
+ * far, it stands square on the page. `image` is the size of the pixels drawn.
+ */
+export function surfaceCutSeat(cut, image, rotation) {
+  const turn = normalizeSurfaceAngle(rotation);
+  const corner = turned(cut.x, cut.y, -turn);
+  return { x: image[0] / 2 + corner.x, y: image[1] / 2 + corner.y, rotation: -turn || 0 };
+}
+
+/** A cut's four corners in its surface's own pixels, clockwise from its top left. */
+export function surfaceCutOutline(cut, image, rotation) {
+  const turn = normalizeSurfaceAngle(rotation);
+  return [[0, 0], [cut.w, 0], [cut.w, cut.h], [0, cut.h]].map(([x, y]) => {
+    const corner = turned(cut.x + x, cut.y + y, -turn);
+    return { x: image[0] / 2 + corner.x, y: image[1] / 2 + corner.y };
+  });
 }
 
 /**
