@@ -5,8 +5,10 @@ import { STEPS_DURATION, STEPS_FPS, STEPS_WEBM, serveRange } from './video.fixtu
 /**
  * A proof built on a video. Its Scene tab in the side column says which video it is
  * about and when in it the place shows, plays that, makes a frame of it a panel, and
- * writes the time through its own route, never with a save. A proof built on no video
- * has no such tab, and looks and exports exactly as it did.
+ * writes the time through its own route, never with a save. A proof made by hand finds
+ * the scene still to prove its frames fall in, and its save takes it up. A proof built
+ * on no video has no such tab, and looks and exports exactly as it did. `SCENE_SHOTS`
+ * names a folder for pictures of the scene found and of Inspect after the save.
  */
 
 const VIDEO = 'media/steps.webm';
@@ -327,4 +329,241 @@ test('puts a point of a proof made from a scene in a layer, saving it first, eve
   // the save wrote the scene's time, and the point still joined the layer
   await expect.poll(() => scenePuts.length).toBe(1);
   await expect.poll(() => linked.length).toBe(1);
+});
+
+// -- a proof made by hand finds its scene by its frames ------------------------------------
+
+/**
+ * The clip with two scenes still to prove in Inspect: Bridge? from 0:00.1 to 0:01, which
+ * holds frames A and B, and Tower?, an instant on frame C. With `older`, a proof made by
+ * hand before, on frame B, stating nothing. The server is faked the way it answers:
+ * a proof's scene written through its route takes the draft up, which `/scenes` then
+ * hides, and Inspect lists the proof in its place.
+ */
+async function openClip(page, { older = false } = {}) {
+  const media = [
+    { path: VIDEO, filename: 'steps.webm', title: 'Steps', kind: 'video', entity_id: 'e_steps', size: STEPS_WEBM.length, source: { type: 'upload' }, thumbnail: null, folder: '' },
+    frame('media/frame-a.png', 'Frame A', 0.2),
+    frame('media/frame-b.png', 'Frame B', 0.96),
+    frame('media/frame-c.png', 'Frame C', 1.12),
+  ];
+  const drafts = [
+    { id: 's1', start: 0.1, end: 1, label: 'Bridge?' },
+    { id: 's2', start: 1.12, end: null, label: 'Tower?' },
+  ];
+  const proofs = {};
+  if (older) {
+    proofs.lookout = {
+      azimut_proof: 1, ink: 'page', title: 'Lookout', pastes: [], shapes: [], notes: {}, legendOrder: [], material: [],
+      panels: [{ id: 'p1', src: 'media/frame-b.png', caption: '', row: 0, scale: 1, natural: [640, 360] }],
+      points: [{ coords: '', label: '', pov: false }], when: null, description: null, sources: null,
+    };
+  }
+  const fixture = await installAppFixture(page, {
+    media,
+    lookupEntities: Object.fromEntries(['road-bridge', 'lookout', 'proof-1', 'proof-2'].map((name) => [`proofs/.meta/${name}.json`, {
+      id: `e_${name}`, type: 'proof', attrs: { spec: `proofs/.meta/${name}.json`, path: `proofs/${name}.png` },
+    }])),
+  });
+  const scenePuts = [];
+  const saves = [];
+  const timeOf = (src) => media.find((m) => m.path === src)?.source?.time;
+  const proofRow = (name) => {
+    const spec = proofs[name];
+    const placed = spec.points.some((p) => String(p.coords ?? '').trim());
+    return {
+      kind: 'proof', proof: name, proof_id: `e_${name}`, title: spec.title, video: VIDEO,
+      moments: spec.scene?.moments ?? [], at: spec.panels.map((p) => timeOf(p.src)).filter((t) => t != null).sort(),
+      stated: !!spec.scene, draft: spec.scene?.draft ?? null, points: [], state: placed ? 'proved' : 'progress', abandoned: null,
+      png: `proofs/${name}.png`, thumb: null, when: null, when_zone: null, description: null,
+    };
+  };
+  const draftRow = (d) => ({ kind: 'draft', video: VIDEO, ...d, state: 'todo', captures: [], abandoned: null, file_kind: 'video' });
+  const answer = () => {
+    const taken = new Set(Object.values(proofs).map((spec) => spec.scene?.draft).filter(Boolean));
+    const rows = [...Object.keys(proofs).map(proofRow), ...drafts.filter((d) => !taken.has(d.id)).map(draftRow)];
+    const start = (s) => (s.kind === 'draft' ? s.start : s.moments[0]?.start ?? s.at[0] ?? Infinity);
+    return {
+      video: VIDEO, video_id: 'e_steps', scenes: rows.sort((a, b) => start(a) - start(b)), used: {},
+      taken: drafts.filter((d) => taken.has(d.id)).map((d) => d.id), geolocating: null, collages: [],
+    };
+  };
+  const slug = (title) => title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+  await page.route('**/*', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+    const method = request.method();
+    const json = (body) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+    if (path === `/files/${CASE_ID}/${VIDEO}`) return serveRange(route, STEPS_WEBM, 'video/webm');
+    if (path.startsWith(`/files/${CASE_ID}/`) && /\.(png|webp)$/.test(path)) {
+      return route.fulfill({ contentType: 'image/svg+xml', body: PANEL_SVG });
+    }
+    if (path === `/api/cases/${CASE_ID}/media`) return json(media);
+    if (path === `/api/cases/${CASE_ID}/inspect/probe`) return json({ kind: 'video', duration: STEPS_DURATION, fps: STEPS_FPS, width: 32, height: 32 });
+    if (path === `/api/cases/${CASE_ID}/scenes`) return json(answer());
+    if (path === `/api/cases/${CASE_ID}/scenes/queue`) {
+      const open = answer().scenes.filter((s) => s.kind === 'draft');
+      return json({ files: open.length ? [{ video: VIDEO, title: 'Steps', kind: 'video', scenes: open }] : [], geolocating: null });
+    }
+    if (path === `/api/cases/${CASE_ID}/inspect/overview`) return json({ scan: null });
+    if (path === `/api/cases/${CASE_ID}/inspect/work` && method === 'GET') {
+      // the drafts stay in the work: a proof taking one up hides it, never drops it
+      return json({ work: { name: 'Work', title: 'Work', spec: {
+        source: { path: VIDEO, kind: 'video' }, videoAdjust: {}, videoRotation: 0, frames: [], marks: [], scenes: drafts, activeFrameId: null,
+      } } });
+    }
+    if (path === `/api/cases/${CASE_ID}/proofs` && method === 'POST') {
+      const payload = request.postDataJSON();
+      saves.push(payload);
+      const name = payload.rename_from ?? slug(payload.title);
+      proofs[name] = { ...payload.spec, scene: proofs[name]?.scene };
+      return json({ id: `e_${name}`, name, title: payload.title, png: `proofs/${name}.png` });
+    }
+    const one = /^\/api\/cases\/[^/]+\/proofs\/([^/]+)$/.exec(path);
+    if (one && method === 'GET' && proofs[decodeURIComponent(one[1])]) return json(proofs[decodeURIComponent(one[1])]);
+    const timed = /^\/api\/cases\/[^/]+\/proofs\/([^/]+)\/scene$/.exec(path);
+    if (timed && method === 'PUT') {
+      const body = request.postDataJSON();
+      const name = decodeURIComponent(timed[1]);
+      scenePuts.push({ proof: name, body });
+      proofs[name].scene = { video: body.video, moments: body.moments, draft: body.draft ?? null };
+      return json({ proof: name, video: body.video, moments: body.moments, at: [], stated: true, draft: body.draft ?? null });
+    }
+    return route.fallback();
+  });
+  await page.goto('/#proof');
+  await expect(page.locator('.tool-header').getByRole('button', { name: 'New proof', exact: true })).toBeVisible({ timeout: 15_000 });
+  return { fixture, scenePuts, saves, proofs };
+}
+
+const matchLine = (page) => sceneBlock(page).getByTestId('scene-match');
+const stripTiles = (page) => page.getByRole('region', { name: 'Slides of the video' }).getByRole('listbox', { name: 'Slides' }).getByRole('option');
+/** What the server says after a save or a scene change: the strip reads its video again. */
+const nudge = (page) => page.evaluate(async (caseId) => {
+  const { dispatch } = await import('/src/lib/events.js');
+  dispatch({ type: 'scenes', case_id: caseId, video: null });
+}, CASE_ID);
+
+async function saveClip(page, saves, count) {
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => saves.length).toBe(count);
+  await expect(page.locator('.tool-header .badge')).toHaveCount(0);
+  return saves[count - 1];
+}
+
+/** A picture of the screen at 1280×720, dark and light, when a folder is named for them. */
+const SHOTS = process.env.SCENE_SHOTS;
+async function shoot(page, name) {
+  if (!SHOTS) return;
+  const theme = (wanted) => page.evaluate(async (which) => {
+    const { setTheme } = await import('/src/lib/state.svelte.js');
+    setTheme(which);
+  }, wanted);
+  const size = page.viewportSize();
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await theme('dark');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${SHOTS}/${name}-dark.png` });
+  await theme('light');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${SHOTS}/${name}-light.png` });
+  await theme('dark');
+  await page.setViewportSize(size);
+  await page.waitForTimeout(350);
+}
+
+test('ties a proof made by hand to the scene still to prove its frames fall in, and its save takes it up, so Inspect lists one row', async ({ page }) => {
+  const { scenePuts, saves } = await openClip(page);
+  await newProof(page, ['Frame A', 'Frame B']);
+  await page.getByRole('textbox', { name: 'Proof name' }).fill('Road bridge');
+  await showProofTab(page, 'Proof');
+  await page.locator('.point-row').first().locator('.meta-input').fill('48.858400, 2.294500');
+
+  // the slide not saved yet stands where Bridge? stood on the strip
+  await expect(stripTiles(page)).toHaveCount(2);
+  await expect(stripTiles(page).locator('.tile-title')).toHaveText(['Road bridge', 'Tower?']);
+  await expect(stripTiles(page).nth(0)).toHaveAttribute('aria-selected', 'true');
+
+  // the Scene tab names the scene under the ★ field, its time in the field
+  await showProofTab(page, 'Scene');
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*steps\.webm\s*·\s*0:00–0:01/);
+  await expect(matchLine(page)).toHaveText(/Bridge\?\s*·\s*found by its frames\s*Not this scene/);
+  await expect(matchLine(page).getByRole('button', { name: 'Not this scene' })).toBeVisible();
+  await page.mouse.move(0, 0);
+  await shoot(page, 'scene-match');
+
+  // the first save takes the scene up through the scene's own route, as Make the proof does
+  const saved = await saveClip(page, saves, 1);
+  expect(saved.spec).not.toHaveProperty('scene');
+  await expect.poll(() => scenePuts.length).toBe(1);
+  expect(scenePuts[0]).toEqual({ proof: 'road-bridge', body: { moments: [{ start: 0.1, end: 1 }], video: VIDEO, draft: 's1' } });
+  await expect(matchLine(page)).toHaveCount(0);
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*steps\.webm\s*·\s*0:00–0:01/);
+  await nudge(page);
+  await expect(stripTiles(page).locator('.tile-title')).toHaveText(['Road bridge', 'Tower?']);
+
+  // Inspect: one row for the bridge, the proof, and the scene still to prove after it
+  await page.goto('/#inspect');
+  await page.locator('.card', { hasText: 'Steps' }).click();
+  const rows = page.getByRole('tabpanel', { name: 'Scenes' }).getByTestId('scene-row');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText('Road bridge');
+  await expect(rows.nth(0)).toContainText('Proved');
+  // Tower? is open, its label in its field
+  await expect(rows.nth(1)).toHaveAttribute('data-scene-key', 's2');
+  await expect(page.getByRole('tabpanel', { name: 'Scenes' })).not.toContainText('Bridge?');
+  await page.mouse.move(0, 0);
+  await shoot(page, 'inspect-after-save');
+});
+
+test('leaves a proof made by hand apart with Not this scene, and says nothing of frames in two scenes', async ({ page }) => {
+  const { scenePuts, saves } = await openClip(page);
+  await newProof(page, ['Frame A']);
+  await showProofTab(page, 'Scene');
+  await expect(matchLine(page)).toContainText('Bridge?');
+  await matchLine(page).getByRole('button', { name: 'Not this scene' }).click();
+  await expect(matchLine(page)).toHaveCount(0);
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*steps\.webm\s*·\s*Whole video/);
+  // the strip keeps Bridge? to geolocate, the new slide after the scenes
+  await expect(stripTiles(page).locator('.tile-title')).toHaveText(['Bridge?', 'Tower?', /^Proof/]);
+
+  // saved, it states no scene, and the refusal holds for this proof once listed
+  const saved = await saveClip(page, saves, 1);
+  expect(saved.spec).not.toHaveProperty('scene');
+  await nudge(page);
+  await expect(stripTiles(page)).toHaveCount(3);
+  await expect(matchLine(page)).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(scenePuts).toEqual([]);
+
+  // frames in Bridge? and on Tower? are in two scenes: nothing is said, nothing tied
+  await newProof(page, ['Frame A', 'Frame C']);
+  await showProofTab(page, 'Scene');
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*steps\.webm\s*·\s*Whole video/);
+  await expect(matchLine(page)).toHaveCount(0);
+  await saveClip(page, saves, 2);
+  await page.waitForTimeout(300);
+  expect(scenePuts).toEqual([]);
+});
+
+test('names the scene of an older proof made by hand, and writes nothing until it is saved', async ({ page }) => {
+  const { scenePuts, saves } = await openClip(page, { older: true });
+  await page.evaluate(async () => {
+    const { uiState } = await import('/src/lib/state.svelte.js');
+    uiState.openProof = 'lookout';
+  });
+  await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue('Lookout');
+  await showProofTab(page, 'Scene');
+  await expect(matchLine(page)).toHaveText(/Bridge\?\s*·\s*found by its frames/);
+  // opening it is no change: nothing to save, nothing written
+  await expect(page.locator('.tool-header .badge')).toHaveCount(0);
+  await expect(stripTiles(page).locator('.tile-title')).toHaveText(['Lookout', 'Tower?']);
+  await page.waitForTimeout(300);
+  expect(scenePuts).toEqual([]);
+
+  await saveClip(page, saves, 1);
+  await expect.poll(() => scenePuts.length).toBe(1);
+  expect(scenePuts[0]).toEqual({ proof: 'lookout', body: { moments: [{ start: 0.1, end: 1 }], video: VIDEO, draft: 's1' } });
 });

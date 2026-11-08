@@ -1571,11 +1571,20 @@ describe('Proof Composer scene', () => {
     expect(render(ProofComposer).body).not.toContain('Scene');
   });
 
-  it('never sends the scene with a save, and writes the held one after the first', () => {
+  it('never sends the scene with a save, and writes the held one, or the one its frames found, after it', () => {
     const save = bodyOfFn('performSave');
     expect(save).toContain('spec: toSpec(proof),');
     expect(save).not.toMatch(/scene:/);
-    expect(save.indexOf('if (scene.held) await scene.flush();')).toBeGreaterThan(save.indexOf('savedName = result.name;'));
+    // every save, so an older proof made by hand takes its scene up when it is saved
+    expect(save.indexOf('await scene.flush();')).toBeGreaterThan(save.indexOf('savedName = result.name;'));
+    expect(save).not.toContain('if (scene.held)');
+  });
+
+  it('finds the scene of a proof made by hand in the scenes the strip read, and places its slide there', () => {
+    expect(source).toMatch(/new ProofScene\(\{[\s\S]*?listed: \(\) => slides\.answer,[\s\S]*?\}\);/);
+    expect(source).toMatch(/const slideOpen = \$derived\(\{[\s\S]*?draft: scene\.draft,/);
+    // the player's bands take the colour of that scene on Inspect's bar
+    expect(source).toContain('draft = scene.draft;');
   });
 
   it('reads the stated scene on open and forgets it with the proof', () => {

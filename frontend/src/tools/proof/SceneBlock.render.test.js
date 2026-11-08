@@ -32,7 +32,7 @@ afterEach(() => {
   targets = [];
 });
 
-function setup({ frames = [{ panel: 'p1', video: CLIP, time: 130.4 }], stated = null, name = 'depot', active = true } = {}) {
+function setup({ frames = [{ panel: 'p1', video: CLIP, time: 130.4 }], stated = null, name = 'depot', active = true, listed = null } = {}) {
   const puts = [];
   const api = {
     put: vi.fn(async (url, body) => {
@@ -41,7 +41,7 @@ function setup({ frames = [{ panel: 'p1', video: CLIP, time: 130.4 }], stated = 
       return { video: body.video, moments: body.moments, at: [], stated: body.moments.length > 0 || body.video !== CLIP, draft: null };
     }),
   };
-  const scene = new ProofScene({ api, toast: vi.fn(), where: () => ({ caseId: 'case', name }), frames: () => frames });
+  const scene = new ProofScene({ api, toast: vi.fn(), where: () => ({ caseId: 'case', name }), frames: () => frames, listed: () => listed });
   if (stated) scene.load(stated);
   const onaddframe = vi.fn();
   const target = document.createElement('div');
@@ -223,5 +223,70 @@ describe('a panel outside the moments', () => {
     const frames = [{ panel: 'p1', video: CLIP, time: 130 }, { panel: 'p3', video: CLIP, time: 300 }];
     const { root } = setup({ frames });
     expect(root.querySelector('.outside')).toBeNull();
+  });
+});
+
+describe('the scene its frames found', () => {
+  /** The clip's scenes still to prove, as the strip read them: Bridge? from 2:00 to 2:20, an instant at 5:00. */
+  const LISTED = {
+    video: CLIP,
+    scenes: [
+      { kind: 'draft', id: 's1', start: 120, end: 140, label: 'Bridge?', state: 'todo', captures: [], abandoned: null },
+      { kind: 'draft', id: 's2', start: 300, end: null, label: '', state: 'todo', captures: [], abandoned: null },
+    ],
+    taken: [],
+    collages: [],
+  };
+  const line = (root) => root.querySelector('[data-testid="scene-match"]');
+  const words = (node) => node.textContent.replace(/\s+/g, ' ').trim();
+
+  it('is named under the ★ field in its colour, with its time in the field and a way out', () => {
+    const { root } = setup({ name: null, listed: LISTED });
+    const [field] = fields(root);
+    expect(words(field.querySelector('.line'))).toBe('★ clip.mp4 · 2:00–2:20');
+    const found = line(root);
+    expect(field.nextElementSibling).toBe(found);
+    expect(words(found)).toBe('Bridge? · found by its frames Not this scene');
+    expect(found.getAttribute('title')).toBe('Its panels from this video all fall in this scene, which the save takes up');
+    expect(found.querySelector('.swatch').style.background).toBe('var(--anno-2)');
+    expect(button(found, 'Not this scene').getAttribute('title')).toBe('Keep this proof apart from that scene');
+    // all of its frames are in the scene, so none is said to be outside
+    expect(root.querySelector('.outside')).toBeNull();
+  });
+
+  it('names a scene with no label by its time, and the whole video as its only scene', () => {
+    const instant = setup({ name: null, listed: LISTED, frames: [{ panel: 'p1', video: CLIP, time: 300 }] });
+    expect(words(line(instant.root))).toBe('5:00 · found by its frames Not this scene');
+    const whole = {
+      video: CLIP, taken: [], collages: [],
+      scenes: [{ kind: 'draft', id: 'w', start: null, end: null, label: 'Which town?', state: 'todo', captures: [], abandoned: null }],
+    };
+    const only = setup({ name: null, listed: whole });
+    expect(words(line(only.root))).toBe('Which town? · the video\'s only scene Not this scene');
+    expect(line(only.root).getAttribute('title')).toBe('The one scene of this video to geolocate, which the save takes up');
+    expect(words(fields(only.root)[0].querySelector('.line'))).toBe('★ clip.mp4 · Whole video');
+  });
+
+  it('goes with Not this scene, the field reading the whole video again, and nothing written', async () => {
+    const { root, puts } = setup({ name: null, listed: LISTED });
+    button(line(root), 'Not this scene').click();
+    await settle();
+    expect(line(root)).toBeNull();
+    expect(words(fields(root)[0].querySelector('.line'))).toBe('★ clip.mp4 · Whole video');
+    expect(puts).toEqual([]);
+  });
+
+  it('is not said of frames in two scenes, nor of a proof stating its scene', () => {
+    const frames = [{ panel: 'p1', video: CLIP, time: 130 }, { panel: 'p2', video: CLIP, time: 300 }];
+    expect(line(setup({ name: null, listed: LISTED, frames }).root)).toBeNull();
+    expect(line(setup({ listed: LISTED, stated: { video: CLIP, moments: [{ start: 125, end: 135 }] } }).root)).toBeNull();
+  });
+
+  it('stands under the ★ alone, with a confirmation video below', () => {
+    const frames = [{ panel: 'p1', video: CLIP, time: 130 }, { panel: 'p2', video: OTHER, time: 12 }];
+    const { root } = setup({ name: null, listed: LISTED, frames });
+    const [star, other] = fields(root);
+    expect(star.nextElementSibling).toBe(line(root));
+    expect(line(root).nextElementSibling).toBe(other);
   });
 });

@@ -11,7 +11,10 @@
  * A proof that states no moment is about the whole video, and prints no timecode
  * anywhere. The instants its frames were cut at only pin it on a bar.
  */
-import { isStretch, momentTime, momentsTime, sceneList, sceneTime, sortMoments } from './scenes.js';
+import {
+  isStretch, isWholeVideo, liveScenes, momentTime, momentsTime, sceneList, sceneMoments, sceneTime, sortMoments,
+} from './scenes.js';
+import { scenesAt } from './sceneFrames.js';
 
 /** How long the player holds an instant before it moves on to the next moment, in seconds. */
 export const INSTANT_HOLD = 1.5;
@@ -120,6 +123,53 @@ export function proofVideos(frames, stated) {
 
 /** The moments the ★ video is stated at: none is the whole video. */
 export const statedMoments = (stated, star) => (stated && stated.video === star ? stated.moments : []);
+
+/**
+ * The scene still to prove that a proof stating none is about, found by its frames, or
+ * null. What Make the proof states for a proof made from a scene, read back for one
+ * made by hand.
+ *
+ * Every instant the ★ video's panels were cut at, each piece of a collage of it
+ * included, falls in that one scene by the rule Inspect's dots use (`frameInMoment`,
+ * at the clip's frame length `frame`), and in no other scene of the video, a proof's
+ * included. Only a scene Inspect still lists to geolocate is taken: not abandoned, not
+ * taken up by a proof. A scene about the whole video holds every frame, so it is taken
+ * only as the video's one scene. Frames in several scenes, or in none, decide nothing.
+ *
+ * `answer` is what `GET /cases/{id}/scenes?video=` answered for the ★ video, and `own`
+ * the name the proof is listed under there, whose row is left out. Answers
+ * `{ id, moments, title, color, whole }`: the draft, its moments, its label or else its
+ * time, its colour on Inspect's bar, and whether it was taken as the only scene.
+ */
+export function sceneOfFrames(frames, star, answer, { own = null, frame = 0 } = {}) {
+  if (!star || answer?.video !== star) return null;
+  const pieces = new Map((answer.collages ?? []).filter((c) => c?.export).map((c) => [c.export, c.times ?? []]));
+  const times = (frames ?? [])
+    .filter((f) => f.video === star)
+    .flatMap((f) => pieces.get(f.src) ?? [f.time])
+    .filter(Number.isFinite);
+  if (!times.length) return null;
+  const listed = (answer.scenes ?? []).filter((s) => s?.kind === 'proof' || s?.kind === 'draft');
+  const scenes = liveScenes(sceneList(listed, listed.filter((s) => s.kind === 'draft'), answer.taken ?? []))
+    .filter((s) => !(s.kind === 'proof' && s.proof === own));
+  // a scene about the whole video holds no frame here, or it would hold them all
+  const touched = new Set(times.flatMap((t) => scenesAt(t, scenes, frame)));
+  let found = null;
+  if (touched.size === 1) {
+    const [one] = touched;
+    if (one.kind === 'draft' && times.every((t) => scenesAt(t, [one], frame).length)) found = one;
+  } else if (!touched.size && scenes.length === 1 && scenes[0].kind === 'draft' && isWholeVideo(scenes[0])) {
+    found = scenes[0];
+  }
+  if (!found) return null;
+  return {
+    id: found.id,
+    moments: sceneMoments(found).map(({ start, end }) => ({ start, end: end ?? null })),
+    title: found.label || sceneTime(found),
+    color: found.color,
+    whole: isWholeVideo(found),
+  };
+}
 
 /**
  * Whether a frame cut at `time` shows in `moment`. A fixed reading, never the clip's
