@@ -392,6 +392,19 @@ it('lists a proof saved with no place yet among its file’s scenes: In progress
   expect(del).toHaveBeenCalledWith('/api/cases/c1/proofs/Ridge/abandon');
 });
 
+it('gives a time of several moments its own line, so no line ends on a dot', async () => {
+  answerWith({ files: [{ video: VIDEO, title: 'Market walk', scenes: [
+    row('j', 0, 7, 'Road bridge', { more: [{ start: 65, end: 72 }] }),
+    row('k', 30, 34, 'Square'),
+  ] }], geolocating: null });
+  await open();
+  const [joined, single] = rows().map((li) => li.querySelector('.meta'));
+  expect(joined.textContent).toBe('0:00–0:07 · 1:05–1:12To geolocate');
+  expect(joined.querySelector('br')).not.toBeNull();
+  expect(single.textContent).toBe('0:30–0:34 · To geolocate');
+  expect(single.querySelector('br')).toBeNull();
+});
+
 it('shows a few rows and counts the rest, the one being geolocated among them', async () => {
   const scenes = [1, 2, 3, 4, 5, 6].map((n) => row(`s${n}`, n * 10, null, `Scene ${n}`));
   answerWith({ files: [{ video: VIDEO, title: 'Market walk', scenes }], geolocating: scenes[5] });

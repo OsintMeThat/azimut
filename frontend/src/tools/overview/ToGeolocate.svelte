@@ -126,11 +126,16 @@
   const nameOf = queueName;
   const said = (scene) => (isProof(scene) ? 'In progress · no place' : queueState(scene, isLive(scene)));
   /** The row's small print in pieces that each stay whole, so a narrow sidebar
-   *  wraps it between them rather than cutting the capture count off. */
-  const saidParts = (scene) => [
-    ...(scene.label ? [{ text: queueTime(scene), time: !isPicture(scene) }] : []),
-    ...said(scene).split(SEP).map((text) => ({ text, time: false })),
-  ];
+   *  wraps it between them rather than cutting the capture count off. A time of
+   *  several moments takes its own line, and the state starts the next one, so no
+   *  line ends on a dangling dot. */
+  const saidParts = (scene) => {
+    const times = scene.label ? queueTime(scene) : '';
+    return [
+      ...(times ? [{ text: times, time: !isPicture(scene) }] : []),
+      ...said(scene).split(SEP).map((text, i) => ({ text, time: false, line: i === 0 && times.includes(SEP) })),
+    ];
+  };
   /** The word a scene was abandoned with, if one was given. */
   const whyOf = (scene) => scene.abandoned?.reason ?? '';
 
@@ -217,7 +222,7 @@
                 <span class="pip" aria-hidden="true"></span>
                 <button type="button" class="open" title={openTitle(file, scene)} onclick={() => openScene(file, scene)}>
                   <span class="name" dir="auto">{#if !scene.label}{@render mark(scene)}{/if}{nameOf(scene)}</span>
-                  <span class="meta">{#each saidParts(scene) as part, i (i)}{#if i}{SEP}{/if}<span class="part" class:time={part.time}>{#if part.time}{@render mark(scene)}{/if}{part.text}</span>{/each}</span>
+                  <span class="meta">{#each saidParts(scene) as part, i (i)}{#if part.line}<br />{:else if i}{SEP}{/if}<span class="part" class:time={part.time}>{#if part.time}{@render mark(scene)}{/if}{part.text}</span>{/each}</span>
                 </button>
                 <button type="button" class="btn btn-ghost btn-sm why-btn" title={isProof(scene) ? 'Abandon this proof' : 'Abandon this scene'} aria-label={`Abandon ${nameOf(scene)}`}
                   aria-expanded={leaving === keyOf(scene)} disabled={busy} onclick={() => (leaving === keyOf(scene) ? stayed() : askWhy(scene))}>
