@@ -10,8 +10,8 @@
    * Where the clip was rides on the viewer, since docking draws the window again.
    *
    * A scene being geolocated in the clip (`viewer.scene`) is marked on the bar in
-   * its colour, a band over a passage and a pin at an instant, and a press on its
-   * mark goes back to where it starts. Nothing loops: the clip plays on past it.
+   * its colour, a band over each passage and a pin at each instant, and a press on
+   * its mark goes back to where it starts. Nothing loops: the clip plays on past it.
    * A time handed in (`viewer.cue`) is shown once, paused.
    */
   import { untrack } from 'svelte';
@@ -20,7 +20,7 @@
     frameDuration, preciseClock, seekInto, shownFrameTime, speedLabel, stepTarget,
   } from '../../lib/inspectPlayer.js';
   import { nextSlowRate } from '../../lib/refViewers.js';
-  import { momentTime } from '../../lib/scenes.js';
+  import { sceneMoments, sceneTime } from '../../lib/scenes.js';
 
   let {
     /** The clip's element, owned by the window it plays in. */
@@ -34,8 +34,8 @@
     onkeep,
     /** How far the clip has played, as a width, for the hairline at rest. */
     progress = $bindable('0%'),
-    /** The scene's stretch as the hairline at rest marks it: `{ left, width, color }`. */
-    sceneMark = $bindable(null),
+    /** The scene's moments as the hairline at rest marks them: `[{ left, width, color }]`. */
+    sceneMarks = $bindable([]),
   } = $props();
 
   let paused = $state(true);
@@ -50,24 +50,28 @@
     progress = fill;
   });
 
-  // The scene's place on the bar, as fractions of the clip once its length is known.
+  // The scene's place on the bar, each of its moments, as fractions of the clip once its
+  // length is known.
   const scene = $derived(viewer.scene && Number.isFinite(viewer.scene.start) ? viewer.scene : null);
-  const mark = $derived.by(() => {
-    if (!scene || !(duration > 0)) return null;
-    const left = Math.min(1, Math.max(0, scene.start / duration));
-    const right = Number.isFinite(scene.end) ? Math.min(1, Math.max(left, scene.end / duration)) : null;
-    return {
-      left: `${left * 100}%`,
-      width: right == null ? null : `${(right - left) * 100}%`,
-      color: scene.color ?? 'var(--accent)',
-    };
+  const marks = $derived.by(() => {
+    if (!scene || !(duration > 0)) return [];
+    return sceneMoments({ kind: 'draft', ...scene }).map((m) => {
+      const left = Math.min(1, Math.max(0, m.start / duration));
+      const right = Number.isFinite(m.end) ? Math.min(1, Math.max(left, m.end / duration)) : null;
+      return {
+        left: `${left * 100}%`,
+        width: right == null ? null : `${(right - left) * 100}%`,
+        color: scene.color ?? 'var(--accent)',
+      };
+    });
   });
+  const mark = $derived(marks[0] ?? null);
   const sceneWords = $derived(
-    scene ? [scene.label, momentTime({ start: scene.start, end: scene.end })].filter(Boolean).join(' · ') : '',
+    scene ? [scene.label, sceneTime({ kind: 'draft', ...scene })].filter(Boolean).join(' · ') : '',
   );
 
   $effect(() => {
-    sceneMark = mark;
+    sceneMarks = marks;
   });
 
   // A time handed in is shown once, paused, whenever the clip can seek.
@@ -184,17 +188,19 @@
     <Icon name={paused ? 'play' : 'pause'} size={13} />
   </button>
   <span class="vb-track">
-    {#if mark}
+    {#if marks.length}
       <!-- the scene under the bar, inset by half the thumb as the browser draws the track -->
       <span class="vb-lane" aria-hidden="true">
-        <span
-          class="vb-scene"
-          class:pin={mark.width == null}
-          data-testid="ref-scene"
-          style:left={mark.left}
-          style:width={mark.width}
-          style:--scene={mark.color}
-        ></span>
+        {#each marks as one, i (i)}
+          <span
+            class="vb-scene"
+            class:pin={one.width == null}
+            data-testid="ref-scene"
+            style:left={one.left}
+            style:width={one.width}
+            style:--scene={one.color}
+          ></span>
+        {/each}
       </span>
     {/if}
     <input

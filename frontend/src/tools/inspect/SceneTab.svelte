@@ -1,12 +1,13 @@
 <script>
   import { tick } from 'svelte';
+  import FloatingMenu from '../../components/FloatingMenu.svelte';
   import Icon from '../../components/Icon.svelte';
   import SceneTimeEditor from '../../components/SceneTimeEditor.svelte';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
   import { captureCount } from '../../lib/sceneQueue.js';
   import {
-    PROGRESS, SCENE_LABEL_MAX, isAbandoned, isWholeVideo, sceneColorAt, scenePassage, sceneTime, sceneTitle, sceneWhen,
-    shortClock, spanLabel, unplaced,
+    PROGRESS, SCENE_LABEL_MAX, isAbandoned, isWholeVideo, samePlaceChoices, sceneColorAt, scenePassage, sceneTime,
+    sceneTitle, sceneWhen, shortClock, spanLabel, unplaced,
   } from '../../lib/scenes.js';
 
   // The Scenes tab: the places to find in the open file, in clip order, a scene about
@@ -30,6 +31,11 @@
   //
   // A proof stands Proved once it states a place. Saved with no point yet, it reads In
   // progress and can be abandoned and restored like a scene (`engine/scenes.proof_state`).
+  //
+  // A scene still to prove may hold several moments, where its place shows again: the
+  // open row's Another moment adds the frame on screen, and Same place as… beside it
+  // lists the clip's other scenes still to prove, one press joining this one into the
+  // scene chosen (`onjoin`).
   //
   // A picture (`picture`) is marked whole, once, from here: its row has no time, and
   // once a proof lays the picture out, the proof's row takes its place.
@@ -61,11 +67,21 @@
     onkind,
     onnudge,
     onaddmoment,
+    onjoin,
     onapply,
     oncancel,
   } = $props();
 
   let node = $state(null);
+
+  // Same place as…: the row whose chooser is open, and the button it hangs from.
+  let joining = $state(null);
+  let joinButton = $state(null);
+
+  function join(sc, target) {
+    joining = null;
+    onjoin?.(sc, target);
+  }
 
   const listed = $derived(scenes.filter((s) => !isAbandoned(s)));
   const given = $derived(scenes.filter(isAbandoned));
@@ -82,10 +98,11 @@
     reason = '';
   }
 
-  // Another row opened lets go of the word being asked.
+  // Another row opened lets go of the word being asked, and of the chooser.
   $effect(() => {
     void open;
     leaving = null;
+    joining = null;
   });
 
   function giveUp(sc) {
@@ -388,6 +405,20 @@
             {#if sc.kind !== 'proof'}{@render labelField(sc)}{/if}
           </div>
           {#if edit?.key === sc.key}
+            {@const choices = onjoin ? samePlaceChoices(scenes, sc) : []}
+            <!-- beside Another moment: the other scenes still to prove that show this place -->
+            {#snippet samePlace()}
+              <button
+                class="btn btn-ghost btn-xs"
+                bind:this={joinButton}
+                aria-haspopup="menu"
+                aria-expanded={joining === sc.key}
+                onclick={() => (joining = joining === sc.key ? null : sc.key)}
+                title={INSPECT_HELP.samePlace}
+              >
+                <Icon name="link" size={11} /> Same place as…
+              </button>
+            {/snippet}
             <SceneTimeEditor
               {edit}
               help={HELP}
@@ -400,6 +431,7 @@
               {onaddmoment}
               {onapply}
               {oncancel}
+              besides={choices.length ? samePlace : undefined}
             />
           {/if}
           {#if sc.kind === 'proof'}
@@ -435,6 +467,31 @@
       {/if}
       {@render collageLines(sc)}
     {/each}
+  {/if}
+
+  <!-- Same place as…: the clip's other scenes still to prove, each in its colour with its time. -->
+  {#if joining && joinButton}
+    {@const from = scenes.find((s) => s.key === joining)}
+    {#if from}
+      <FloatingMenu anchor={joinButton} width={264} label="Same place as" onclose={() => (joining = null)}>
+        <p class="fm-head">Same place as</p>
+        {#each samePlaceChoices(scenes, from) as other (other.key)}
+          {@const name = other.label.trim()}
+          <button
+            class="fm-item same-choice"
+            role="menuitem"
+            style:--scene={other.color}
+            onclick={() => join(from, other)}
+            title={INSPECT_HELP.samePlaceAs}
+            data-testid="same-place-choice"
+          >
+            <span class="choice-swatch" aria-hidden="true"></span>
+            <span class="fm-grow" dir="auto">{name || sceneTime(other)}</span>
+            {#if name}<span class="choice-when">{sceneTime(other)}</span>{/if}
+          </button>
+        {/each}
+      </FloatingMenu>
+    {/if}
   {/if}
 
   <!-- Given up on, kept where it was in the clip: folded at the foot of the tab. -->
@@ -906,6 +963,20 @@
     font-style: italic;
     line-height: 1.35;
     overflow-wrap: anywhere;
+  }
+  /* Same place as…'s choices: each scene by the colour the bar draws it in, its time after. */
+  .choice-swatch {
+    flex: none;
+    width: 3px;
+    height: 16px;
+    border-radius: 2px;
+    background: var(--scene);
+  }
+  .choice-when {
+    flex: none;
+    color: var(--text-3);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
   }
   /* a narrow panel keeps Make the proof's mark and drops its words */
   @container (max-width: 290px) {

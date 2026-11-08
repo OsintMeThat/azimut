@@ -204,7 +204,7 @@
       .rw-scrub { position: relative; z-index: 1; flex: 1; min-width: 0; margin: 0; }
       .rw-scrub:disabled { opacity: .5; cursor: default; }
       /* The scene being geolocated, under the track in its own colour: a band over
-         its passage, a pin at its instant. The thumb's middle runs 5 px in from
+         each passage, a pin at each instant. The thumb's middle runs 5 px in from
          either end, and the mark is laid on that same span. At rest, a line at the
          window's foot says where it is. */
       .rw-scene {
@@ -302,6 +302,11 @@
     <button class="rw-zoom" data-rw="reset" title="Fit the image">100%</button>
     <button class="icon" data-rw="in" title="Zoom in">${icon("plus", 13)}</button>`;
 
+  /** The moments a held scene marks on the bar (`maptools.js` `sceneMark`): none for the
+   *  whole video, and the one it starts at for a mark from before it held several. */
+  const sceneMoments = (scene) =>
+    scene?.start == null ? [] : Array.isArray(scene.moments) && scene.moments.length ? scene.moments : [{ start: scene.start, end: scene.end }];
+
   /** A scene as its pin's tooltip says it: its label and its time, or its time. */
   const sceneWords = (scene) => (scene.name && scene.name !== scene.time ? `${scene.name} · ${scene.time}` : scene.time);
 
@@ -314,7 +319,7 @@
     <div class="rw-row">
       <button class="icon" data-rw="play" title="Play">${icon("play", 13)}</button>
       <span class="rw-track">
-        ${scene?.start != null ? `<span class="rw-scene${scene.end == null ? " at" : ""}" hidden></span>` : ""}
+        ${sceneMoments(scene).map((m) => `<span class="rw-scene${m.end == null ? " at" : ""}" hidden></span>`).join("")}
         <input class="rw-scrub" data-rw-input="seek" type="range" min="0" max="1" step="any"
           value="0" aria-label="Position" style="--fill: 0%" disabled>
       </span>
@@ -421,7 +426,7 @@
             ${moving ? "" : "<canvas></canvas>"}
             <div class="rw-wait">Loading…</div>
           </div>
-          ${scene?.start != null ? `<div class="rw-rest${scene.end == null ? " at" : ""}" hidden></div>` : ""}
+          ${sceneMoments(scene).map((m) => `<div class="rw-rest${m.end == null ? " at" : ""}" hidden></div>`).join("")}
           ${moving ? '<div class="rw-line"></div>' : ""}
           <div class="rw-foot${moving ? " clip" : ""}">${moving ? clipBar(scene) : imageBar()}</div>
         </div>
@@ -451,8 +456,8 @@
         zoom: q(".rw-zoom"),
         fade: q(".rw-fade"),
         range: q(".rw-range"),
-        sceneBar: q(".rw-scene"),
-        sceneRest: q(".rw-rest"),
+        sceneBars: [...el.querySelectorAll(".rw-scene")],
+        sceneRests: [...el.querySelectorAll(".rw-rest")],
         sceneOn: 0, // the duration the scene's mark was laid out for
         cued: false, // whether the clip was taken to the scene's start
       };
@@ -593,23 +598,27 @@
       markScene(pane, duration);
     }
 
-    /** Lay the scene's mark on the bar, once the clip says how long it is. */
+    /** Lay the scene's marks on the bar, one per moment, once the clip says how long it is. */
     function markScene(pane, duration) {
       const scene = pane.viewer.scene;
       if (!scene || scene.start == null || !duration || pane.sceneOn === duration) return;
       pane.sceneOn = duration;
-      const from = Math.min(1, scene.start / duration);
-      const span = scene.end == null ? null : Math.max(0, Math.min(scene.end, duration) - scene.start) / duration;
-      if (pane.sceneBar) {
-        pane.sceneBar.hidden = false;
-        pane.sceneBar.style.left = `calc(5px + (100% - 10px) * ${from})`;
-        if (span != null) pane.sceneBar.style.width = `calc((100% - 10px) * ${span})`;
-      }
-      if (pane.sceneRest) {
-        pane.sceneRest.hidden = false;
-        pane.sceneRest.style.left = `${from * 100}%`;
-        if (span != null) pane.sceneRest.style.width = `${span * 100}%`;
-      }
+      sceneMoments(scene).forEach((moment, i) => {
+        const from = Math.min(1, moment.start / duration);
+        const span = moment.end == null ? null : Math.max(0, Math.min(moment.end, duration) - moment.start) / duration;
+        const bar = pane.sceneBars[i];
+        const rest = pane.sceneRests[i];
+        if (bar) {
+          bar.hidden = false;
+          bar.style.left = `calc(5px + (100% - 10px) * ${from})`;
+          if (span != null) bar.style.width = `calc((100% - 10px) * ${span})`;
+        }
+        if (rest) {
+          rest.hidden = false;
+          rest.style.left = `${from * 100}%`;
+          if (span != null) rest.style.width = `${span * 100}%`;
+        }
+      });
     }
 
     /** Take a clip held for a scene to the scene's start, once, and leave it paused. */

@@ -9,7 +9,7 @@
   import { sceneOfCollage } from '../../lib/sceneFrames.js';
   import { queueState } from '../../lib/sceneQueue.js';
   import { retimeScene } from '../../lib/sceneRetime.svelte.js';
-  import { isWholeVideo, sceneList, sceneTime, sceneTitle, shortClock, spanLabel, timeWords } from '../../lib/scenes.js';
+  import { isWholeVideo, sceneList, sceneMoments, sceneTime, sceneTitle, shortClock, spanLabel, timeWords } from '../../lib/scenes.js';
   import { toast, uiState } from '../../lib/state.svelte.js';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import Icon from '../../components/Icon.svelte';
@@ -128,7 +128,7 @@
           await read();
         }),
       };
-      toast(`Scene now ${timeWords(time.start == null ? [] : [time])}`, 'info', 6000, undo);
+      toast(`Scene now ${timeWords(sceneMoments({ kind: 'draft', ...time }))}`, 'info', 6000, undo);
     });
   }
 

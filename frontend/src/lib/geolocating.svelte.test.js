@@ -17,8 +17,8 @@ vi.mock('./state.svelte.js', () => ({ uiState: { tool: 'inspect', geolocateRef: 
 const { dispatch } = await import('./events.js');
 const { uiState } = await import('./state.svelte.js');
 const {
-  abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneCount, holdSceneQueue, markToGeolocate, sceneEdit, readGeolocating,
-  readSceneQueue, restoreScene, sceneQueue, scenesWaiting, startGeolocating, stopGeolocating,
+  abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneCount, holdSceneQueue, joinScenes, markToGeolocate, sceneEdit,
+  readGeolocating, readSceneQueue, restoreScene, sceneQueue, scenesWaiting, startGeolocating, stopGeolocating, unjoinScenes,
 } = await import('./geolocating.svelte.js');
 
 const SCENE = { video: 'media/clip.mp4', id: 's1', label: 'Bridge', state: 'todo', captures: [] };
@@ -62,6 +62,13 @@ describe('Geolocate', () => {
     expect(uiState.tool).toBe('satellite');
   });
 
+  it('hands Satellite every moment of a scene showing its place again', async () => {
+    const more = [{ start: 65, end: 72 }];
+    answers.set('PUT /api/cases/c1/geolocating', { geolocating: { ...SCENE, start: 0, end: 7, more, order: 0 } });
+    await geolocateScene('c1', { video: 'media/clip.mp4', id: 's1' });
+    expect(uiState.geolocateRef).toMatchObject({ start: 0, end: 7, more });
+  });
+
   it('hands Satellite a picture as a picture', async () => {
     const picture = { ...SCENE, video: 'media/photo.png', start: null, end: null, order: 0, file_kind: 'image' };
     answers.set('PUT /api/cases/c1/geolocating', { geolocating: picture });
@@ -81,6 +88,36 @@ describe('Geolocate', () => {
     await expect(geolocateScene('c1', { video: 'media/clip.mp4', id: 'gone' })).rejects.toThrow();
     expect(uiState.tool).toBe('inspect');
     expect(uiState.geolocateRef).toBe(null);
+  });
+});
+
+describe('Same place as…', () => {
+  it('joins one scene into another through its route, and the scene geolocated follows it', async () => {
+    const joined = { ...SCENE, id: 's2', start: 0, end: 7, more: [{ start: 65, end: 72 }], captures: ['media/c.png'] };
+    const undo = { kept: { id: 's2' }, gone: { id: 's1' }, geolocating: 's1' };
+    Object.assign(geolocating, { caseId: 'c1', scene: { ...SCENE, since: 't' } });
+    answers.set('POST /api/cases/c1/scenes/s1/join', { scene: joined, undo });
+    const seen = sceneEdit.n;
+
+    const answer = await joinScenes('c1', 'media/clip.mp4', 's1', 's2');
+
+    expect(calls.at(-1)).toMatchObject({ method: 'POST', body: { video: 'media/clip.mp4', into: 's2' } });
+    expect(answer.undo).toEqual(undo);
+    expect(geolocating.scene).toMatchObject({ id: 's2', more: [{ start: 65, end: 72 }], since: 't' });
+    // Inspect, if it shows that video, reads its scenes again
+    expect([sceneEdit.n, sceneEdit.video]).toEqual([seen + 1, 'media/clip.mp4']);
+  });
+
+  it('puts both scenes back through the Undo route, and reads the scene geolocated again', async () => {
+    const undo = { kept: { id: 's2' }, gone: { id: 's1' }, geolocating: 's1' };
+    geolocating.caseId = 'c1';
+    answers.set('POST /api/cases/c1/scenes/s2/unjoin', { scenes: [{ id: 's2' }, { id: 's1' }] });
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: SCENE });
+
+    await unjoinScenes('c1', 'media/clip.mp4', undo);
+
+    expect(calls.find((c) => c.method === 'POST').body).toEqual({ video: 'media/clip.mp4', ...undo });
+    expect(geolocating.scene).toEqual(SCENE);
   });
 });
 

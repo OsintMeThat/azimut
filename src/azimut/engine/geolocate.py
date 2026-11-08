@@ -221,6 +221,51 @@ def attach(case: Case, path: str) -> dict[str, Any] | None:
     }
 
 
+# -- the same place -------------------------------------------------------------------
+
+
+def _follow(case: Case, video: str, was: str, now: str) -> bool:
+    """Move the scene being geolocated from one draft of a video to another. True if it did."""
+    with _lock:
+        held = _active.get(case.id)
+        if held is None or held["video"] != video or held["draft"] != was:
+            return False
+        held["draft"] = now
+    return True
+
+
+def join(case: Case, video: str, draft_id: str, into: str) -> dict[str, Any]:
+    """Join a scene to prove to another of its video that shows the same place
+    (`inspectwork.join_scenes`): one scene, its moments together. The scene being
+    geolocated, if it was either, is the joined one. Answers with its row, what an
+    Undo hands back (`unjoin`), and whether the scene being geolocated moved."""
+    proofs = scenes_engine.read_proofs(case)
+    if {draft_id, into} & _taken(proofs[0]):
+        raise CaseError("a proof already geolocates that scene")
+    done = inspectwork.join_scenes(case, video, draft_id, into, MAX_CAPTURES)
+    moved = _follow(case, video, draft_id, into)
+    kind = _kinds(case, [video]).get(video, "video")
+    row = _placed(scene_row(case, video, done["scene"], kind), _orders(case, [video], proofs))
+    return {
+        "scene": row,
+        "undo": {"kept": done["kept"], "gone": done["gone"], "geolocating": draft_id if moved else None},
+        "moved": moved,
+    }
+
+
+def unjoin(case: Case, video: str, kept: Any, gone: Any, geolocating: Any = None) -> dict[str, Any]:
+    """Put two joined scenes back as they were (`inspectwork.unjoin_scenes`), the one
+    that was being geolocated geolocated again while the joined one still is. Answers
+    with both rows and whether the scene being geolocated moved."""
+    done = inspectwork.unjoin_scenes(case, video, kept, gone, MAX_CAPTURES)
+    back = done["gone"]["id"]
+    moved = geolocating == back and _follow(case, video, done["scene"]["id"], back)
+    kind = _kinds(case, [video]).get(video, "video")
+    places = _orders(case, [video])
+    rows = [_placed(scene_row(case, video, one, kind), places) for one in (done["scene"], done["gone"])]
+    return {"scenes": rows, "moved": moved}
+
+
 # -- abandoning -----------------------------------------------------------------------
 
 
@@ -325,10 +370,11 @@ def mark(case: Case, path: str, label: Any = "", start: Any = None, end: Any = N
         raise CaseError("a scene must end after it starts")
     word = (label or "").strip()[: inspectwork.MAX_SCENE_LABEL]
     inspectwork.add_scenes(case, path, [{"start": at, "end": until, "label": word}])
+    # the scene holding that one moment: one holding further moments is another scene
     scene = next(
         (
             s for s in _drafts(case, path)
-            if _same(s.get("start"), at) and _same(s.get("end"), until)
+            if _same(s.get("start"), at) and _same(s.get("end"), until) and not s.get("more")
         ),
         None,
     )

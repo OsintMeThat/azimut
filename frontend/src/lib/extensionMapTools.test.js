@@ -1196,6 +1196,9 @@ describe('the scenes to geolocate, on both sides of the boundary', () => {
     row('wall', null, null, 'Harbour wall', { file_kind: 'image' }),
     // counted by a nudge before its list was read again
     row('n', 30, 40, 'Ridge', { state: 'progress', captures: ['media/c1.png'], captureCount: 4 }),
+    // one place showing again further on: every moment, the rest counted past two
+    row('j', 0, 7, '', { more: [{ start: 65, end: 72 }] }),
+    row('k', 0, 7, 'Bridge', { more: [{ start: 30, end: null }, { start: 65, end: 72 }] }),
   ];
 
   it('writes a time as the app writes it', () => {
@@ -1244,11 +1247,19 @@ describe('the scenes to geolocate, on both sides of the boundary', () => {
 
   it('marks a passage as a band, an instant as a pin, the whole video not at all', () => {
     expect(ext.sceneMark(row('p', 238, 252, 'bridge?'))).toEqual({
-      id: 'p', name: 'bridge?', time: '3:58–4:12', start: 238, end: 252, color: '#40c4ff',
+      id: 'p', name: 'bridge?', time: '3:58–4:12', start: 238, end: 252, moments: [{ start: 238, end: 252 }], color: '#40c4ff',
     });
     expect(ext.sceneMark(row('i', 3, null))).toMatchObject({ start: 3, end: null, name: '0:03' });
-    expect(ext.sceneMark(row('e', 61, 61))).toMatchObject({ start: 61, end: null });
-    expect(ext.sceneMark(row('w', null, null))).toMatchObject({ start: null, end: null, name: 'Whole video' });
+    expect(ext.sceneMark(row('e', 61, 61))).toMatchObject({ start: 61, end: null, moments: [{ start: 61, end: null }] });
+    expect(ext.sceneMark(row('w', null, null))).toMatchObject({ start: null, end: null, moments: [], name: 'Whole video' });
+  });
+
+  it('marks every moment of a scene showing its place again, as Inspect’s bar does', () => {
+    const scene = row('j', 0, 7, '', { more: [{ start: 30, end: null }, { start: 65, end: 72 }] });
+    expect(ext.sceneMark(scene)).toMatchObject({
+      start: 0, end: 7, time: '0:00–0:07 +2', moments: [{ start: 0, end: 7 }, { start: 30, end: null }, { start: 65, end: 72 }],
+    });
+    expect(ext.sceneMark(scene).moments).toEqual(appScenes.sceneMoments(scene));
   });
 
   it('holds a picture as a picture, named, with nothing to mark', () => {

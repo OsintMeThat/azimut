@@ -847,8 +847,9 @@ def _drafts(client, cid, video):
 
 
 @needs_ffmpeg
-def test_a_deleted_proof_gives_each_moment_back_to_geolocate_and_takes_them_on_restore(client, tmp_path):
-    """A timecode is knowledge about the video: it does not leave with the proof."""
+def test_a_deleted_proof_gives_its_moments_back_as_one_scene_and_takes_it_on_restore(client, tmp_path):
+    """A timecode is knowledge about the video: it does not leave with the proof. Its
+    moments show one place, so they come back as one scene holding them all."""
     cid = _case(client)
     video = _video(client, cid, tmp_path)
     _proof(client, cid, "Proof 32", _cut(client, cid, video, 1.0), scene={"video": video, "moments": [
@@ -860,7 +861,9 @@ def test_a_deleted_proof_gives_each_moment_back_to_geolocate_and_takes_them_on_r
     assert deleted.status_code == 200, deleted.text
 
     given = _drafts(client, cid, video)
-    assert [(d["start"], d["end"], d["label"]) for d in given] == [(0.5, 1.5, "Proof 32"), (3.0, None, "Proof 32")]
+    assert [(d["start"], d["end"], d.get("more"), d["label"]) for d in given] == [
+        (0.5, 1.5, [{"start": 3.0, "end": None}], "Proof 32"),
+    ]
     ids = [d["id"] for d in given]
     assert [s["id"] for s in _work(client, cid, video)["spec"]["scenes"]] == ids
 
@@ -876,7 +879,7 @@ def test_a_deleted_proof_gives_each_moment_back_to_geolocate_and_takes_them_on_r
     # a second delete gives nothing twice
     deleted = client.delete(f"/api/cases/{cid}/proofs/Proof 32")
     assert [d["id"] for d in _drafts(client, cid, video)] == ids
-    assert len(_work(client, cid, video)["spec"]["scenes"]) == 2
+    assert len(_work(client, cid, video)["spec"]["scenes"]) == 1
 
 
 @needs_ffmpeg

@@ -86,7 +86,8 @@ export async function startGeolocating(caseId, video, draft) {
 export async function geolocateScene(caseId, scene, { picture = null } = {}) {
   const held = await startGeolocating(caseId, scene.video, scene.id);
   uiState.geolocateRef = {
-    video: held.video, draft: held.id, start: held.start, end: held.end, label: held.label, order: held.order,
+    video: held.video, draft: held.id, start: held.start, end: held.end, ...(held.more?.length ? { more: held.more } : {}),
+    label: held.label, order: held.order,
     kind: (held.file_kind ?? scene.file_kind) === 'image' ? 'image' : 'video',
     ...(picture && picture !== held.video ? { picture } : {}),
   };
@@ -199,6 +200,31 @@ export async function restoreScene(caseId, video, draft) {
   edited(caseId, video);
   await refreshQueue(caseId);
   return scene;
+}
+
+/**
+ * Same place as…: scene `draft` of `video` joins scene `into`, their moments, labels
+ * and captures in one scene, written in one go on the server. Answers with its row
+ * (`scene`) and what the Undo hands back (`undo`, `unjoinScenes`). The scene being
+ * geolocated, if it was the one joined, is the joined one from now on.
+ */
+export async function joinScenes(caseId, video, draft, into) {
+  const answer = await api.post(`${base(caseId)}/scenes/${encodeURIComponent(draft)}/join`, { video, into });
+  const held = geolocating.caseId === caseId ? geolocating.scene : null;
+  if (held?.video === video && (held.id === draft || held.id === into)) holdNow(caseId, { ...answer.scene, since: held.since });
+  edited(caseId, video);
+  await refreshQueue(caseId);
+  return answer;
+}
+
+/** Undo a join: both scenes back as they were. Answers with both rows. */
+export async function unjoinScenes(caseId, video, undo) {
+  const answer = await api.post(`${base(caseId)}/scenes/${encodeURIComponent(undo.kept.id)}/unjoin`, { video, ...undo });
+  edited(caseId, video);
+  await refreshQueue(caseId);
+  // the scene being geolocated may be the one put back: the server says which
+  if (geolocating.caseId === caseId) await readGeolocating(caseId);
+  return answer;
 }
 
 /**

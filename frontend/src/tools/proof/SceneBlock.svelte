@@ -224,9 +224,10 @@
     flex-shrink: 0;
     color: var(--text-3);
   }
+  /* two moments read whole beside the file's name, which gives way first */
   .time {
     flex-shrink: 0;
-    max-width: 55%;
+    max-width: 70%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

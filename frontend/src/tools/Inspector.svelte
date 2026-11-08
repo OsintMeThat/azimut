@@ -12,12 +12,13 @@
   import { captureMoment, frameDuration, preciseClock, seekInto, shownFrameTime } from '../lib/inspectPlayer.js';
   import { INSPECT_HELP } from '../lib/inspectHelp.js';
   import {
-    editClock, isAbandoned, isStretch, isWholeVideo, liveScenes, markablePicture, momentKey, newScene, sameMoments, sameTime, sceneList,
-    sceneMarks, sceneMoments, scenePassage, sceneStart, sceneTime, sceneTitle, sceneToEnd, snapToFrame, sortMoments,
-    stretchFromShot, timeWords, toProve,
+    editClock, isAbandoned, isStretch, isWholeVideo, liveScenes, markablePicture, momentBefore, momentKey, momentsClash, newScene,
+    sameMoments, sameTime, sceneList, sceneMarks, sceneMoments, scenePassage, sceneStart, sceneTime, sceneTitle, sceneToEnd,
+    setDraftTime, shortClock, snapToFrame, sortMoments, stretchFromShot, timeWords, toProve,
   } from '../lib/scenes.js';
   import {
-    abandonProof, abandonScene, geolocateScene, geolocating, restoreProof, restoreScene, sceneEdit as sceneGiven, stopGeolocating,
+    abandonProof, abandonScene, geolocateScene, geolocating, joinScenes, restoreProof, restoreScene, sceneEdit as sceneGiven,
+    stopGeolocating, unjoinScenes,
   } from '../lib/geolocating.svelte.js';
   import { onEvent } from '../lib/events.js';
   import {
@@ -443,7 +444,7 @@
     work.videoFiled = spec.videoFiled ?? null;
     work.frames = (spec.frames ?? []).map((f) => ({ ...f, adjust: { ...adjustDefaults(filters), ...(f.adjust ?? {}) }, url: null }));
     work.marks = (spec.marks ?? []).map((m) => ({ id: m.id, time: m.time, label: m.label ?? '' }));
-    work.scenes = (spec.scenes ?? []).map((sc) => ({ id: sc.id, start: sc.start, end: sc.end, label: sc.label ?? '' }));
+    work.scenes = (spec.scenes ?? []).map(draftOf);
     if (!isVideo && !work.frames.length) {
       seed();
       return;
@@ -1025,8 +1026,13 @@
     const known = new Set([...work.scenes, ...saved].map((sc) => sc.id));
     const given = listed.filter((sc) => sc.kind === 'draft' && !known.has(sc.id));
     if (!given.length) return;
-    work.scenes = [...work.scenes, ...given.map(({ id, start, end, label }) => ({ id, start, end, label }))];
+    work.scenes = [...work.scenes, ...given.map(draftOf)];
     clipHistory.reset(clipSnapshot());
+  }
+
+  /** A scene still to prove as this work holds it, from the work saved or a row of the server's. */
+  function draftOf({ id, start, end, label, more }) {
+    return { id, start, end, label: label ?? '', ...(more?.length ? { more: more.map((m) => ({ start: m.start, end: m.end ?? null })) } : {}) };
   }
 
   // Coming back to Inspect reads the list again: a proof saved meanwhile joins it.
@@ -1050,9 +1056,9 @@
     untrack(() => {
       if (!retimed.n || retimed.caseId !== work.caseId || retimed.video !== work.source?.path) return;
       const draft = work.scenes.find((sc) => sc.id === retimed.draft);
-      if (!draft || (sameTime(draft.start, retimed.start) && sameTime(draft.end, retimed.end))) return;
-      draft.start = retimed.start;
-      draft.end = retimed.end;
+      const now = sceneMoments({ kind: 'draft', ...retimed });
+      if (!draft || sameMoments(sceneMoments({ kind: 'draft', ...draft }), now)) return;
+      setDraftTime(draft, now);
       clipHistory.reset(clipSnapshot());
       if (sceneEdit.key === draft.id && !sceneEdit.changed) {
         const row = scenes.find((sc) => sc.key === draft.id);
@@ -1138,21 +1144,33 @@
 
   /**
    * End a scene at the frame on screen (Shift+S, End here): the one named, else the row
-   * open in the Scenes tab when that started before it, else the latest that did.
+   * open in the Scenes tab when it started before it, else the latest that did. Of a
+   * scene holding several moments, the one in hand on its open row, else the latest
+   * started before the frame.
    */
   function endSceneHere(id = null) {
     if (sceneEdit.changed && sceneEdit.result) applySceneEdit();
     const now = shownTime() + frameDur;
-    const open = scenesShown && openRow?.kind === 'draft' && openRow.start != null && openRow.start < now ? openRow : null;
+    const open = scenesShown && openRow?.kind === 'draft' && momentBefore(openRow, now) !== -1 ? openRow : null;
     const target = id ? work.scenes.find((sc) => sc.id === id) : open ?? sceneToEnd(scenes, now);
     const scene = target && work.scenes.find((sc) => sc.id === target.id);
-    if (!scene || scene.start == null) return;
-    if (!(now > scene.start)) {
+    const moments = scene ? sceneMoments({ kind: 'draft', ...scene }) : [];
+    if (!moments.length) return;
+    // the moment in hand on the open row, found by its start: Apply may have just put it in clip order
+    const inHand = sceneEdit.key === scene.id ? sceneEdit.moments[sceneEdit.active]?.start : null;
+    const held = moments.findIndex((m) => sameTime(m.start, inHand));
+    const index = held !== -1 && moments[held].start < now ? held : momentBefore({ kind: 'draft', ...scene }, now);
+    if (index === -1) {
       toast('Go past the start of the scene to end it here', 'warn');
       return;
     }
-    scene.end = now;
-    clipChanged(`Scene ends at ${sceneTime(scene).split('–')[1]}`);
+    const ended = moments.map((m, i) => (i === index ? { start: m.start, end: now } : m));
+    if (momentsClash(ended)) {
+      toast('That end runs into another moment of the scene', 'warn');
+      return;
+    }
+    setDraftTime(scene, ended);
+    clipChanged(`Scene ends at ${shortClock(now)}`);
     touchScene(scene.id);
   }
 
@@ -1315,6 +1333,92 @@
     loadScenes(run);
   }
 
+  // -- the same place --------------------------------------------------------------------
+  // Same place as…: a scene still to prove joins another of the clip that shows the same
+  // place (`POST /scenes/{draft}/join`), into one scene holding both moments, in the
+  // colour its first moment gives it, its captures gathered. The server writes it in one
+  // go, so the work is saved first and takes the answer up; the toast's Undo puts both
+  // back as they were (`/unjoin`), while nothing has moved the joined scene since.
+
+  async function joinScene(pressed, into) {
+    if (pressed?.kind !== 'draft' || into?.kind !== 'draft' || !isVideo || sceneBusy) return;
+    const scene = settled(pressed);
+    sceneBusy = true;
+    const run = openRun;
+    const caseId = work.caseId;
+    const video = work.source.path;
+    let answer;
+    try {
+      await heldWork();
+      if (run !== openRun) return;
+      answer = await joinScenes(caseId, video, scene.id, into.id);
+    } catch (e) {
+      if (run === openRun) toast(e.message, 'danger');
+      return;
+    } finally {
+      sceneBusy = false;
+    }
+    if (run !== openRun) return;
+    const joined = answer.scene;
+    tookScenes([draftOf(joined)], [scene.id]);
+    listedScenes = listedScenes.filter((sc) => !(sc.kind === 'draft' && sc.id === scene.id));
+    heardRow(joined);
+    touchScene(joined.id);
+    sceneFocus = { key: joined.id, n: (sceneFocus?.n ?? 0) + 1 };
+    const moments = sceneMoments(joined);
+    const said = joined.label ? `“${joined.label}” is now ${timeWords(moments)}` : `Scene now ${timeWords(moments)}`;
+    toast(said, 'info', 6000, {
+      label: 'Undo',
+      onClick: () => {
+        const now = work.scenes.find((sc) => sc.id === joined.id);
+        // only while nothing has moved it since, its time or its label
+        const same = now && now.label.trim() === joined.label && sameMoments(sceneMoments({ kind: 'draft', ...now }), moments);
+        if (run === openRun && same) unjoinScene(answer.undo);
+      },
+    });
+    loadScenes(run);
+  }
+
+  async function unjoinScene(undo) {
+    const run = openRun;
+    let answer;
+    try {
+      await heldWork();
+      if (run !== openRun) return;
+      answer = await unjoinScenes(work.caseId, work.source.path, undo);
+    } catch (e) {
+      if (run === openRun) toast(e.message, 'danger');
+      return;
+    }
+    if (run !== openRun) return;
+    tookScenes(answer.scenes.map(draftOf), []);
+    for (const row of answer.scenes) heardRow(row);
+    loadScenes(run);
+  }
+
+  /**
+   * The work as the server just wrote it: these scenes in place of the ones of the same
+   * id, or beside them, and the `gone` ids out. What was saved reads the same, so no
+   * save follows, and Ctrl+Z starts from here.
+   */
+  function tookScenes(scenes, gone) {
+    const apply = (list) => {
+      const held = list.filter((sc) => !gone.includes(sc.id));
+      for (const scene of scenes) {
+        const at = held.findIndex((sc) => sc.id === scene.id);
+        if (at === -1) held.push(scene);
+        else held[at] = scene;
+      }
+      return held;
+    };
+    work.scenes = apply(work.scenes);
+    if (savedSignature) {
+      const saved = JSON.parse(savedSignature);
+      savedSignature = JSON.stringify({ ...saved, scenes: apply(saved.scenes ?? []).map(sceneRecord) });
+    }
+    clipHistory.reset(clipSnapshot());
+  }
+
   /**
    * Open a scene asked for from elsewhere (`uiState.inspectScene`): its file, a video
    * on screen at the scene's start, the Scenes tab open on its row, and with `proof`
@@ -1465,9 +1569,9 @@
     }
     const draft = work.scenes.find((sc) => sc.id === scene.id);
     if (!draft) return;
-    draft.start = time.start;
-    draft.end = time.end;
-    clipChanged(`Scene now ${timeWords(time.start == null ? [] : [time])}`);
+    const moments = sceneMoments({ kind: 'draft', ...time });
+    setDraftTime(draft, moments);
+    clipChanged(`Scene now ${timeWords(moments)}`);
   }
 
   /** A scene as it stands once a time changed on its open row is kept, when it reads as one. */
@@ -2121,6 +2225,7 @@
                 onkind={sceneKind}
                 onnudge={nudgeScene}
                 onaddmoment={addMoment}
+                onjoin={joinScene}
                 onapply={applySceneEdit}
                 oncancel={dropSceneEdit}
               />

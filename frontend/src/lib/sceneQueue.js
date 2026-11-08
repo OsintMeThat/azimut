@@ -8,7 +8,7 @@
  * kept in Inspect that no proof takes up yet, `todo` with no capture, `progress`
  * once one is attached, `abandoned` with a word if the analyst gave one.
  */
-import { isStretch, sceneColorAt, sceneTime } from './scenes.js';
+import { compactTime, isStretch, sceneColorAt, sceneTime } from './scenes.js';
 
 /** What a picture's scene says instead of a time: a picture is only ever marked whole. */
 export const WHOLE_PICTURE = 'Whole picture';
@@ -16,8 +16,14 @@ export const WHOLE_PICTURE = 'Whole picture';
 /** Whether a row, or a file of the queue, is a picture rather than a video. */
 export const isPicture = (row) => (row?.file_kind ?? row?.kind) === 'image';
 
-/** A scene's time as a row says it: `3:58–4:12`, Whole video, or Whole picture. */
+/**
+ * A scene's time as a row says it: `3:58–4:12`, every moment of one holding several
+ * (`0:00–0:07 · 1:05–1:12`), Whole video, or Whole picture.
+ */
 export const queueTime = (scene) => (scene?.file_kind === 'image' ? WHOLE_PICTURE : sceneTime(scene));
+
+/** The same where room is short, the pill's: the first moment and the rest counted (`0:00–0:07 +1`). */
+export const queueShortTime = (scene) => (scene?.file_kind === 'image' ? WHOLE_PICTURE : compactTime(scene));
 
 /** What a row calls a scene: the analyst's label, else its time. */
 export const queueName = (scene) => scene?.label || queueTime(scene);

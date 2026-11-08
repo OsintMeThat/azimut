@@ -15,7 +15,7 @@
   import Icon from '../components/Icon.svelte';
   import RefVideoBar from './satellite/RefVideoBar.svelte';
   import { fileUrl } from '../lib/fileUrl.js';
-  import { momentTime, WHOLE_VIDEO } from '../lib/scenes.js';
+  import { sceneTime } from '../lib/scenes.js';
   import { WHOLE_PICTURE } from '../lib/sceneQueue.js';
   import { chromeBoxes } from '../lib/mapChrome.js';
   import {
@@ -43,7 +43,7 @@
   let video = $state();
   let bar = $state();
   let progress = $state('0%'); // a clip's hairline, at rest
-  let sceneMark = $state(null); // the scene being geolocated in the clip, marked at rest too
+  let sceneMarks = $state([]); // the scene being geolocated in the clip, each moment marked at rest too
   let placing = $state(false); // the header showing the six places
   // The map's size and its controls, read while the window is pinned: where the
   // corner is, and what the window keeps clear of in it.
@@ -289,7 +289,7 @@
   const sceneTitle = $derived.by(() => {
     const held = viewer.scene;
     if (!held) return '';
-    const time = !isVideo ? WHOLE_PICTURE : Number.isFinite(held.start) ? momentTime({ start: held.start, end: held.end }) : WHOLE_VIDEO;
+    const time = !isVideo ? WHOLE_PICTURE : sceneTime({ kind: 'draft', ...held });
     return ['Scene', held.label, time].filter(Boolean).join(' · ');
   });
 </script>
@@ -475,14 +475,16 @@
       </div>
 
       {#if isVideo}
-        {#if sceneMark}
+        {#if sceneMarks.length}
           <div class="rv-scene-line" aria-hidden="true">
-            <span
-              class:pin={sceneMark.width == null}
-              style:left={sceneMark.left}
-              style:width={sceneMark.width}
-              style:--scene={sceneMark.color}
-            ></span>
+            {#each sceneMarks as one, i (i)}
+              <span
+                class:pin={one.width == null}
+                style:left={one.left}
+                style:width={one.width}
+                style:--scene={one.color}
+              ></span>
+            {/each}
           </div>
         {/if}
         <div class="rv-line" style:width={progress}></div>
@@ -490,7 +492,7 @@
           <RefVideoBar
             bind:this={bar}
             bind:progress
-            bind:sceneMark
+            bind:sceneMarks
             {video}
             {viewer}
             {fade}

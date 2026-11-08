@@ -12,7 +12,7 @@
   // all along (`autofocus` off, so the player keeps the keys), and offers Apply and
   // Cancel only once something changed (`actsWhenChanged`). Otherwise only the words
   // differ: what a control says on hover (`help`), and the line under the moments
-  // (`tips`).
+  // (`tips`). `besides` is what sits beside Another moment: Inspect's Same place as….
   let {
     edit,
     help,
@@ -25,6 +25,7 @@
     onaddmoment,
     onapply,
     oncancel,
+    besides,
   } = $props();
 
   function fieldKey(e, which, index) {
@@ -130,10 +131,15 @@
         {/if}
       </div>
     {/each}
-    {#if edit.many && edit.moments.length < MAX_MOMENTS}
-      <button class="btn btn-ghost btn-xs another" onclick={another} title={help.add}>
-        <Icon name="plus" size={11} /> Another moment
-      </button>
+    {#if (onaddmoment && edit.many && edit.moments.length < MAX_MOMENTS) || besides}
+      <div class="more-acts">
+        {#if onaddmoment && edit.many && edit.moments.length < MAX_MOMENTS}
+          <button class="btn btn-ghost btn-xs" onclick={another} title={help.add}>
+            <Icon name="plus" size={11} /> Another moment
+          </button>
+        {/if}
+        {@render besides?.()}
+      </div>
     {/if}
   {/if}
   {#if edit.problem}
@@ -231,8 +237,11 @@
     color: var(--text-1);
     background: var(--bg-2);
   }
-  .another {
-    align-self: flex-start;
+  .more-acts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
   }
   .problem,
   .tip {

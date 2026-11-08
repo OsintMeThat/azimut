@@ -70,6 +70,8 @@ export const INSPECT_HELP = {
   sceneApply: 'Keep this time (Enter)',
   momentAdd: 'Another moment the place shows in, at the frame on screen',
   momentRemove: 'Remove this moment',
+  samePlace: 'Join it with another scene of this place',
+  samePlaceAs: 'Both moments and their captures in one scene',
   sceneEnd: 'End the scene at the frame on screen (Shift+S)',
   sceneRemove: 'Remove this scene',
   sceneProof: 'Open the proof of this scene in Geo Proof',
