@@ -145,6 +145,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # classic layout. An id whose template has since been deleted is ignored
     # where it is read, so nothing here needs cleaning up after a delete.
     "post_template": "",
+    # The proof template New proof starts with, by id, read the same way: empty
+    # means none, and an id whose template is gone reads as none.
+    "proof_template": "",
     # Whether Publish lets the capture extension fill that composer — the thread
     # typed in, the proof and the media attached, nothing posted. The only switch
     # for it: the extension keeps none of its own, so this is where the answer

@@ -21,7 +21,11 @@ made up; the places and dates are the photos' own.
 | `half_dome_1901.jpg` | Half Dome, Vernal and Nevada Falls from Glacier Point, Yosemite, 1901, its plate border trimmed | California Historical Society, photographer unknown | [Commons](https://commons.wikimedia.org/wiki/File:Vernal_Falls,_Nevada_Falls_and_Half_Dome_from_Glacier_Point_in_Yosemite_National_Park,_California,_1901_(CHS-1175).jpg) |
 
 `half_dome_1901.jpg` also ships in the app, which files it with its source when a
-reader presses *Try this search* (`src/lib/findExample.js`).
+reader presses *Try this search* (`src/lib/findExample.js`). It is also the ground
+photo of the sample proof Settings › Templates shows a proof template on
+(`src/lib/proofSample.js`), beside `src/assets/proof-sample/half-dome-usgs.webp`:
+the same ground from above, cut from USGS The National Map orthoimagery (public
+domain) at zoom 15 around Glacier Point and Half Dome, 720 px wide.
 
 A replacement keeps to the same rule: public domain or CC0, no face anyone
 could recognise, metadata stripped, and a line here.

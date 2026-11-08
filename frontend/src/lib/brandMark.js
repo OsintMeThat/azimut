@@ -48,51 +48,72 @@ function layout(tight) {
 export const INK_ON_DARK = '#e3e3e3';
 export const AMBER = '#e8a33d';
 
-/** How wide the lockup is when drawn `height` px high. */
-export function signatureWidth(height, { tight = false } = {}) {
+/** The width of the mark's flanks in its 24-unit square, the air either side taken off. */
+const FLANKS = 24 - 2 * MARK_AIR;
+
+/**
+ * How wide the lockup is when drawn `height` px high. Without its `name`, the mark
+ * alone, as wide as its flanks.
+ */
+export function signatureWidth(height, { tight = false, name = true } = {}) {
+  if (!name) return (FLANKS / 24) * height;
   const { mark, gap } = layout(tight);
   return (mark + gap + (WORD_HEIGHT * WORD_BOX.width) / WORD_BOX.height) * (height / MARK_SIZE);
 }
 
 /**
- * Draw the lockup with its right edge at `right`, centred on `middle`.
+ * Draw the lockup with its right edge at `right`, centred on `middle`. Without its
+ * `name`, the mark alone, its flanks from edge to edge. A `halo` colour rings every
+ * stroke first, so the lockup still reads over a picture.
  *
  * Nothing is drawn where the canvas has no `Path2D` to trace the paths with,
  * so a signature never costs an export its picture.
  *
  * @returns {number} the width drawn, 0 when nothing was
  */
-export function drawSignature(ctx, right, middle, { height, ink = INK_ON_DARK, makePath, tight = false } = {}) {
+export function drawSignature(ctx, right, middle, { height, ink = INK_ON_DARK, makePath, tight = false, name = true, halo = null } = {}) {
   const pathOf = makePath ?? (typeof Path2D === 'function' ? (d) => new Path2D(d) : null);
   if (!pathOf || !(height > 0)) return 0;
   const unit = height / MARK_SIZE;
-  const { air, mark, gap } = layout(tight);
-  const width = signatureWidth(height, { tight });
+  const { air, mark, gap } = name ? layout(tight) : { air: (MARK_AIR / 24) * MARK_SIZE };
+  const width = signatureWidth(height, { tight, name });
   const left = right - width;
   ctx.save();
   // The mark: a 24-unit viewBox drawn MARK_SIZE px square, its side air hanging out when tight.
   ctx.translate(left - air * unit, middle - height / 2);
   ctx.scale(height / 24, height / 24);
+  if (halo) {
+    ctx.strokeStyle = halo;
+    ctx.lineWidth = 2.4;
+    ctx.lineJoin = 'round';
+    ctx.stroke(pathOf(MARK.west));
+    ctx.stroke(pathOf(MARK.east));
+  }
   ctx.fillStyle = ink;
   ctx.fill(pathOf(MARK.west));
   ctx.fillStyle = AMBER;
   ctx.fill(pathOf(MARK.east));
   ctx.restore();
+  if (!name) return width;
 
   ctx.save();
   const wordScale = (WORD_HEIGHT * unit) / WORD_BOX.height;
   ctx.translate(left + (mark + gap) * unit - WORD_BOX.x * wordScale, middle - (WORD_HEIGHT * unit) / 2 - WORD_BOX.y * wordScale);
   ctx.scale(wordScale, wordScale);
-  ctx.strokeStyle = ink;
-  ctx.lineWidth = 15;
-  ctx.lineCap = 'butt';
-  ctx.lineJoin = 'miter';
-  for (const letter of LETTERS) {
-    ctx.save();
-    ctx.translate(letter.dx, 0);
-    ctx.stroke(pathOf(letter.d));
-    ctx.restore();
-  }
+  const letters = (strokeStyle, lineWidth, join) => {
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = join === 'round' ? 'round' : 'butt';
+    ctx.lineJoin = join;
+    for (const letter of LETTERS) {
+      ctx.save();
+      ctx.translate(letter.dx, 0);
+      ctx.stroke(pathOf(letter.d));
+      ctx.restore();
+    }
+  };
+  if (halo) letters(halo, 39, 'round');
+  letters(ink, 15, 'miter');
   ctx.restore();
   return width;
 }

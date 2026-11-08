@@ -56,3 +56,9 @@ reads differently.
 Written by hand. Read by `tests/test_textfold.py` against `engine/textfold.py` and by
 `frontend/src/lib/textFold.test.js` against `lib/textFold.js`, so the server's index
 and the browser's in-memory search cannot fold one text two ways.
+
+## Proof templates
+
+| File | What it is there to break |
+|---|---|
+| `proof-templates-0.3.3.json` | A `templates.json` as 0.3.3 writes it: one house style that uses every key the editor holds without showing (a dragged logo's offsets and ratios, a handle's opacity, a stack direction kept under free layout) and one written before most keys existed. Read by `tests/test_templates_api.py`, which saves both back byte for byte, and by `frontend/src/components/ProofTemplateEditor.render.test.js`, which opens them in the editor and saves them untouched. |

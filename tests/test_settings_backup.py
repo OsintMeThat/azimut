@@ -405,28 +405,30 @@ def test_a_backup_naming_a_dropped_target_still_restores(client):
     assert client.put("/api/settings/prefs", json={"post_target": "mastodon"}).status_code == 422
 
 
-def test_default_post_template_travels_with_the_backup(client):
-    client.put("/api/settings/prefs", json={"post_template": "tpl_house"})
+@pytest.mark.parametrize("key", ["post_template", "proof_template"])
+def test_default_template_travels_with_the_backup(client, key):
+    client.put("/api/settings/prefs", json={key: "tpl_house"})
     blob = client.get("/api/settings/export").json()
-    assert blob["settings"]["post_template"] == "tpl_house"
+    assert blob["settings"][key] == "tpl_house"
 
-    client.put("/api/settings/prefs", json={"post_template": ""})
+    client.put("/api/settings/prefs", json={key: ""})
     res = client.post("/api/settings/import", json=blob)
     assert res.status_code == 200, res.text
-    assert "post_template" in res.json()["imported"]
-    assert client.get("/api/settings").json()["post_template"] == "tpl_house"
+    assert key in res.json()["imported"]
+    assert client.get("/api/settings").json()[key] == "tpl_house"
 
 
-def test_a_backup_with_an_unreadable_template_id_still_restores(client):
+@pytest.mark.parametrize("key", ["post_template", "proof_template"])
+def test_a_backup_with_an_unreadable_template_id_still_restores(client, key):
     """The default template is one preference among a machine's keys and presets,
     so an id no template can carry reads as none instead of refusing the rest."""
     res = client.post(
         "/api/settings/import",
-        json={"settings": {"post_template": "../not an id", "post_mention": "@kept"}},
+        json={"settings": {key: "../not an id", "post_mention": "@kept"}},
     )
     assert res.status_code == 200, res.text
     body = client.get("/api/settings").json()
-    assert body["post_template"] == ""
+    assert body[key] == ""
     assert body["post_mention"] == "@kept"
 
 

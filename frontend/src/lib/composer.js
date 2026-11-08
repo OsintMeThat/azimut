@@ -1096,6 +1096,26 @@ export function signatureOffset(sig, docW, docH, natural, x, y) {
   };
 }
 
+// ---- the Azimut mark: the app's own mark beside the signature, when asked ------
+
+/** The height the mark stands at by default, in page pixels: the handle's. */
+export const MARK_SIZE = SIG_TEXT_SIZE;
+
+/** A fresh mark: in the corner given, with its name, at the handle's size. */
+export function newAzimutMark(anchor = 'br') {
+  return { anchor: ['tl', 'tr', 'bl', 'br'].includes(anchor) ? anchor : 'br', name: true, size: MARK_SIZE };
+}
+
+/** The mark as stored, or null for none: anything unreadable reads as none (lib/proofMark.js draws it). */
+export function normalizeAzimutMark(mark) {
+  if (!mark || typeof mark !== 'object' || Array.isArray(mark)) return null;
+  return {
+    anchor: ['tl', 'tr', 'bl', 'br'].includes(mark.anchor) ? mark.anchor : 'br',
+    name: typeof mark.name === 'boolean' ? mark.name : true,
+    size: boundedNumber(mark.size, MARK_SIZE, 12, 300),
+  };
+}
+
 // ---- frames & pasted images --------------------------------------------------
 
 export const FRAME_WIDTH = 6; // default border thickness, in page pixels like any ink
@@ -1371,6 +1391,8 @@ export function toSpec(proof) {
     // Whether the panels cut from the proof's video print its name and the scene's time.
     // Written only when asked, so a proof that never asked saves exactly as it did.
     ...(proof.sceneBadge === true ? { sceneBadge: true } : {}),
+    // The Azimut mark beside the signature, written only when on for the same reason.
+    ...(normalizeAzimutMark(proof.azimutMark) ? { azimutMark: normalizeAzimutMark(proof.azimutMark) } : {}),
     // The addresses the proof states, empty → traced from the panels instead. Named
     // for the plural like the multi-parent key of a media's own origin (`sources`,
     // beside `from`), because it draws the same distinction: one of them, or several.
@@ -1480,6 +1502,10 @@ export function templateFromProof(proof) {
     fontBold: proof.fontBold !== false,
     signature: proof.signature ? { ...proof.signature } : null,
     signatureText: textSignatureStyle(proof.signatureText),
+    // A proof always has an answer for these, so a style taken from one states it.
+    sceneBadge: proof.sceneBadge === true,
+    footerCredits: proof.footerCredits === true,
+    azimutMark: normalizeAzimutMark(proof.azimutMark),
     palette: normalizePreferredColors(proof.palette),
   });
 }
@@ -1525,6 +1551,11 @@ export function normalizeProofStyle(style = {}) {
     fontBold: typeof source.fontBold === 'boolean' ? source.fontBold : true,
     signature: normalizedSignature(source.signature),
     signatureText: textSignatureStyle(source.signatureText),
+    // A style from before these says nothing about them, and null keeps it so: the
+    // proof it is laid on keeps its own (see applyProofStyle).
+    sceneBadge: typeof source.sceneBadge === 'boolean' ? source.sceneBadge : null,
+    footerCredits: typeof source.footerCredits === 'boolean' ? source.footerCredits : null,
+    azimutMark: normalizeAzimutMark(source.azimutMark),
     palette: normalizePreferredColors(source.palette),
   };
 }
@@ -1561,10 +1592,16 @@ export function applyProofStyle(proof, style, available = {}) {
     proof.panelDirection = normalized.panelDirection;
     orientFirstPanels(proof.panels ?? [], proof.panelDirection);
   }
+  // Only a style that states them changes them: a template saved before they
+  // existed, or one that leaves them to each proof, holds null.
+  if (normalized.sceneBadge !== null) proof.sceneBadge = normalized.sceneBadge;
+  if (normalized.footerCredits !== null) proof.footerCredits = normalized.footerCredits;
   proof.signature = normalized.signature && available.logo !== false ? normalized.signature : null;
   proof.signatureText = normalized.signatureText && available.handle !== false
     ? normalized.signatureText
     : null;
+  // The rest of the signature: what a style says about signing, it says whole.
+  proof.azimutMark = normalized.azimutMark;
   if ('palette' in source) proof.palette = normalized.palette;
   return proof;
 }

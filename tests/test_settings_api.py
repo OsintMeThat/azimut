@@ -1059,6 +1059,19 @@ def test_post_template_rejects_anything_that_is_not_an_id(client):
     assert client.get("/api/settings").json()["post_template"] == "keep"
 
 
+@pytest.mark.parametrize("key", ["post_template", "proof_template"])
+def test_each_default_template_is_its_own_setting(client, key):
+    other = "proof_template" if key == "post_template" else "post_template"
+    assert client.get("/api/settings").json()[key] == ""
+    saved = client.put("/api/settings/prefs", json={key: "tpl_house"})
+    assert saved.json()[key] == "tpl_house"
+    assert saved.json()[other] == ""
+    for bad in ("../x", "has space", "a" * 65):
+        assert client.put("/api/settings/prefs", json={key: bad}).status_code == 422
+    assert client.get("/api/settings").json()[key] == "tpl_house"
+    assert client.put("/api/settings/prefs", json={key: ""}).json()[key] == ""
+
+
 def test_extension_hand_off_switches_default_on_and_round_trip(client):
     """Both are on out of the box, because with no extension installed neither
     changes anything: Publish opens the intent page and a Reverse Search button

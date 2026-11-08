@@ -4,7 +4,9 @@
    *
    * Content-free presets: a template carries house style, never a case's
    * material. Plate and note templates are edited in their own tools. Editing or duplicating one opens the parent's editor modal. One
-   * post template can be the one new posts start with (`post_template`).
+   * post template can be the one new posts start with (`post_template`), and one
+   * proof template the one New proof starts with (`proof_template`). A proof template
+   * is shown by a sketch of its page and its layout in words.
    *
    * A Notebook template starts from anything, under one New template menu: blank,
    * a ready one, one of the analyst's own (a copy), or a note of the open case,
@@ -14,6 +16,8 @@
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import PageThumb from '../notebook/PageThumb.svelte';
   import NotePicker from '../../components/NotePicker.svelte';
+  import ProofTemplateSketch from '../../components/ProofTemplateSketch.svelte';
+  import { proofTemplateSummary } from '../../lib/proofTemplates.js';
   import { api } from '../../lib/api.js';
   import { caseState, templatesState, prefs, saveTemplate, toast, uiState } from '../../lib/state.svelte.js';
   import { houseLayout, templateOf } from '../../lib/plate/page.js';
@@ -26,9 +30,12 @@
   let { newTemplate, editTemplate, duplicateTemplate, savePrefs, deleteTpl = $bindable() } = $props();
 
   // Pressing the template that is already the default clears it, which brings
-  // back the classic layout.
+  // back the classic layout, or no template for a proof.
   function toggleDefault(id) {
     savePrefs({ post_template: prefs.postTemplate === id ? '' : id });
+  }
+  function toggleProofDefault(id) {
+    savePrefs({ proof_template: prefs.proofTemplate === id ? '' : id });
   }
 
   // Map plate templates are laid out in the plate editor itself, over the Map's ground.
@@ -135,13 +142,25 @@
 <section class="group" data-guide="settings.proof-templates">
   <h3>Geo Proof templates</h3>
   <p class="note">
-    Reusable proof styles shared across cases.
+    Reusable proof styles shared across cases. New proof starts with the default one.
   </p>
   <div class="tpl-list">
     {#each templatesState.proof as t (t.id)}
-      <div class="tpl-row">
-        <span class="tpl-name">{t.name}</span>
+      {@const isDefault = prefs.proofTemplate === t.id}
+      <div class="tpl-row proof-row">
+        <ProofTemplateSketch data={t.data} />
+        <span class="tpl-label stacked">
+          <span class="tpl-label">
+            <span class="tpl-name">{t.name}</span>
+            {#if isDefault}<span class="tpl-tag">Default</span>{/if}
+          </span>
+          <span class="tpl-said">{proofTemplateSummary(t.data)}</span>
+        </span>
         <div class="tpl-actions">
+          <button class="btn btn-sm" class:on={isDefault} aria-pressed={isDefault}
+            title="Start new proofs with this template" onclick={() => toggleProofDefault(t.id)}>
+            <Icon name="bookmark" size={13} />
+          </button>
           <button class="btn btn-sm" onclick={() => editTemplate('proof', t)}>
             <Icon name="edit" size={13} /> Edit
           </button>
@@ -317,7 +336,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    margin-bottom: 12px;
+    margin: 10px 0 12px;
   }
 
   .tpl-row {
@@ -350,7 +369,8 @@
     font-size: var(--fs-xs);
   }
 
-  .note-row {
+  .note-row,
+  .proof-row {
     justify-content: flex-start;
     padding: 6px 10px 6px 8px;
   }

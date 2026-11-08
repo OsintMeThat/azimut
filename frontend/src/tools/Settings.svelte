@@ -6,7 +6,8 @@
   import {
     templatesState, loadTemplates, saveTemplate, deleteTemplate,
   } from '../lib/state.svelte.js';
-  import { templateFromProof, textSignatureStyle } from '../lib/composer.js';
+  import { textSignatureStyle } from '../lib/composer.js';
+  import { starterData } from '../lib/proofTemplates.js';
   import { templateFromPost } from '../lib/post.js';
   import { formatCoords, parseHomeView } from '../lib/coords.js';
   import { USAGE_LINKS, ECO_MAX_ZOOM } from '../lib/usage.js';
@@ -19,7 +20,7 @@
   import Icon from '../components/Icon.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import ProofTemplateEditor from '../components/ProofTemplateEditor.svelte';
-  import { DEFAULT_PROOF_FONT } from '../lib/proofFonts.js';
+  import ProofTemplateStarters from '../components/ProofTemplateStarters.svelte';
   import PostTemplateEditor from '../components/PostTemplateEditor.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import ExtensionTab from './settings/ExtensionTab.svelte';
@@ -737,18 +738,31 @@
   // One editor draft at a time. `editing` = { kind, id|null, name, data }; a
   // fresh id is null until first save, and `fresh` marks a blank new template
   // (a duplicate has no id either, yet is not one). Content-free presets,
-  // workspace-level.
+  // workspace-level. A new proof template is first a choice of starts
+  // (`choosing`), each drawn on the sample proof; the pick opens the editor.
   let editing = $state(null);
   let savingTpl = $state(false);
   let deleteTpl = $state(null); // { kind, id, name } pending confirmation
 
-  function freshTemplate(kind) {
-    // a new house style is set in the shipped default face, not the system's
-    return kind === 'proof' ? templateFromProof({ font: DEFAULT_PROOF_FONT }) : templateFromPost({});
+  function newTemplate(kind) {
+    editing = kind === 'proof'
+      ? { kind, id: null, name: '', data: null, fresh: true, choosing: true }
+      : { kind, id: null, name: '', data: templateFromPost({}), fresh: true };
   }
 
-  function newTemplate(kind) {
-    editing = { kind, id: null, name: '', data: freshTemplate(kind), fresh: true };
+  /** A start picked: the editor opens on a copy of it, named after it unless it is the blank one. */
+  function startFrom(starter) {
+    editing = {
+      ...editing,
+      choosing: false,
+      data: starterData(starter.id),
+      name: starter.id === 'blank' ? '' : starter.name,
+      sampleLegend: starter.legend,
+    };
+  }
+
+  function otherStarts() {
+    editing = { ...editing, choosing: true, data: null };
   }
 
   function editTemplate(kind, rec) {
@@ -802,6 +816,7 @@
       await deleteTemplate(t.kind, t.id);
       if (editing?.kind === t.kind && editing?.id === t.id) editing = null;
       if (t.kind === 'post' && prefs.postTemplate === t.id) await savePrefs({ post_template: '' });
+      if (t.kind === 'proof' && prefs.proofTemplate === t.id) await savePrefs({ proof_template: '' });
       toast(`Deleted "${t.name}"`, 'info');
     } catch (e) {
       toast(e.message, 'danger');
@@ -1026,26 +1041,43 @@
 {#if editing}
   <div class="tpl-modal-overlay" role="presentation"
     onclick={(e) => e.target === e.currentTarget && cancelEdit()}>
-    <div class="tpl-modal">
+    <div class="tpl-modal" class:wide={editing.kind === 'proof'} role="dialog" aria-modal="true"
+      aria-label={editing.choosing ? 'New proof template' : 'Template'}>
       <div class="tpl-modal-head">
-        <input class="tpl-title" type="text" placeholder="Template name"
-          maxlength="120" bind:value={editing.name} />
+        {#if editing.choosing}
+          <div class="tpl-heading">
+            <h3>New proof template</h3>
+            <p>Pick a start. Everything in it can be changed.</p>
+          </div>
+        {:else}
+          <input class="tpl-title" type="text" placeholder="Template name"
+            maxlength="120" bind:value={editing.name} />
+        {/if}
         <button class="btn btn-ghost btn-sm" onclick={cancelEdit} aria-label="Close" title="Close">
           <Icon name="x" size={16} />
         </button>
       </div>
-      <div class="tpl-modal-body">
-        {#if editing.kind === 'proof'}
-          <ProofTemplateEditor bind:data={editing.data} />
+      <div class="tpl-modal-body" class:canvas={editing.kind === 'proof' && !editing.choosing}>
+        {#if editing.choosing}
+          <ProofTemplateStarters onpick={startFrom} />
+        {:else if editing.kind === 'proof'}
+          <ProofTemplateEditor bind:data={editing.data} sampleLegend={editing.sampleLegend} />
         {:else}
           <PostTemplateEditor bind:data={editing.data} fresh={editing.fresh === true} />
         {/if}
       </div>
       <div class="tpl-modal-foot">
+        {#if editing.kind === 'proof' && editing.fresh && !editing.choosing}
+          <button class="btn btn-ghost tpl-back" onclick={otherStarts}>
+            <Icon name="chevronLeft" size={14} /> Other starts
+          </button>
+        {/if}
         <button class="btn btn-ghost" onclick={cancelEdit}>Cancel</button>
-        <button class="btn btn-primary" disabled={savingTpl} onclick={saveEditingTemplate}>
-          <Icon name="save" size={14} /> {savingTpl ? 'Saving…' : 'Save template'}
-        </button>
+        {#if !editing.choosing}
+          <button class="btn btn-primary" disabled={savingTpl} onclick={saveEditingTemplate}>
+            <Icon name="save" size={14} /> {savingTpl ? 'Saving…' : 'Save template'}
+          </button>
+        {/if}
       </div>
     </div>
   </div>
@@ -1190,6 +1222,43 @@
   .tpl-modal-body {
     padding: 16px;
     overflow-y: auto;
+  }
+
+  /* A proof template is a page to look at: the modal takes the room it needs. */
+  .tpl-modal.wide {
+    width: min(1240px, 100%);
+    height: 88vh;
+  }
+
+  .tpl-modal.wide .tpl-modal-body {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .tpl-modal-body.canvas {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .tpl-heading {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .tpl-heading h3 {
+    margin: 0;
+    font-size: var(--fs-md, 15px);
+    color: var(--text-1);
+  }
+
+  .tpl-heading p {
+    margin: 2px 0 0;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+
+  .tpl-back {
+    margin-right: auto;
   }
 
   .tpl-modal-foot {

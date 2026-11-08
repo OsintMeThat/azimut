@@ -173,7 +173,7 @@ export const PAGES = {
     lead: 'Starting points shared by every case: how a proof looks, how a thread runs, how a plate is laid out.',
     shot: 'settings-templates',
     marks: [
-      { anchor: 'settings.proof-templates', title: 'Geo Proof templates', text: 'Proof styles offered as a house style in every proof.' },
+      { anchor: 'settings.proof-templates', title: 'Geo Proof templates', text: 'House styles for proofs, each started from a ready one and shown on a sample. New proof starts with the one marked as the default.' },
       { anchor: 'settings.report-templates', title: 'Geo Report templates', text: 'The structures a thread can follow, with words that fill themselves.' },
       { anchor: 'settings.plate-templates', title: 'Map plate templates', text: 'A plate’s layout, paper and colours without its ground, to share as a file.' },
     ],

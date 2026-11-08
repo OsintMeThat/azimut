@@ -13,8 +13,8 @@ import { flushSync, mount, unmount } from 'svelte';
 import { api } from '../lib/api.js';
 import { prefs, templatesState } from '../lib/state.svelte.js';
 
-// The template editors reach Konva through the composer; nothing here draws.
-vi.mock('konva', () => ({ default: {} }));
+// The proof-template editor draws its sample page; here onto a stand-in that keeps the nodes.
+vi.mock('konva', async () => ({ default: (await import('../lib/konva.fixture.js')).FakeKonva }));
 
 vi.mock('../lib/api.js', () => ({
   api: {
@@ -364,6 +364,92 @@ describe('post templates', () => {
     expect(api.del).toHaveBeenCalledWith('/api/templates/post/po_1');
     expect(api.put).not.toHaveBeenCalled();
     expect(prefs.postTemplate).toBe('po_2');
+  });
+});
+
+describe('proof templates', () => {
+  const HOUSE = { id: 'pf_1', name: 'House', data: { bg: '#000000', layout: 'free' } };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const click = (el) => {
+    el.click();
+    flushSync();
+  };
+  const section = () => pane().querySelector('[data-guide="settings.proof-templates"]');
+  const editor = () => document.querySelector('.tpl-modal');
+  const cards = () => [...document.querySelectorAll('.pts-card')];
+  const footButton = (text) => [...editor().querySelectorAll('.tpl-modal-foot button')].find((b) => b.textContent.trim() === text);
+
+  beforeEach(async () => {
+    await settle();
+    templatesState.proof = [HOUSE];
+    api.put.mockImplementation(async (path, patch) => ({ ...settingsBlob(), ...patch }));
+    api.put.mockClear();
+    api.post.mockClear();
+    api.del.mockClear();
+    rail()[TABS.indexOf('templates')].click();
+    flushSync();
+  });
+
+  afterEach(() => {
+    if (editor()) click(footButton('Cancel'));
+    api.put.mockImplementation(async () => settingsBlob());
+    templatesState.proof = [];
+    prefs.proofTemplate = '';
+  });
+
+  it('starts a new one from a choice of starts, each named and said in a line', () => {
+    click(section().querySelector(':scope > button'));
+    expect(editor().querySelector('h3').textContent).toBe('New proof template');
+    expect(cards().map((card) => card.querySelector('.pts-name').textContent))
+      .toEqual(['Blank', 'Free layout', 'Grid with a legend', 'Before and after', 'Stacked for a post', 'Pictures only']);
+    expect(footButton('Save template')).toBeUndefined();
+    expect(api.post).not.toHaveBeenCalled(); // nothing is stored by looking
+  });
+
+  it('opens the editor on the start picked, under its name, and can go back to the others', async () => {
+    click(section().querySelector(':scope > button'));
+    click(cards().find((card) => card.dataset.starter === 'free'));
+    expect(editor().querySelector('.tpl-title').value).toBe('Free layout');
+    expect(editor().querySelector('.pte')).not.toBeNull();
+
+    click(footButton('Other starts'));
+    expect(cards()).toHaveLength(6);
+    click(cards().find((card) => card.dataset.starter === 'blank'));
+    expect(editor().querySelector('.tpl-title').value).toBe('');
+  });
+
+  it('saves the start as a new template, which is put in the list then and only then', async () => {
+    click(section().querySelector(':scope > button'));
+    click(cards().find((card) => card.dataset.starter === 'pair'));
+    api.post.mockResolvedValueOnce({ id: 'pf_new', name: 'Before and after', data: {} });
+    click(footButton('Save template'));
+    await settle();
+    const [url, body] = api.post.mock.calls[0];
+    expect(url).toBe('/api/templates/proof');
+    expect(body).toMatchObject({ id: null, name: 'Before and after' });
+    expect(body.data).toMatchObject({ bg: '#ffffff', footerCoords: true, footerCredits: true, sceneBadge: false });
+  });
+
+  it('opens an existing one straight in the editor, with no starts', () => {
+    click([...section().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Edit'));
+    expect(cards()).toHaveLength(0);
+    expect(editor().querySelector('.tpl-title').value).toBe('House');
+    expect(footButton('Other starts')).toBeUndefined();
+  });
+
+  it('saves the template New proof starts with, and forgets it when that template is deleted', async () => {
+    click(section().querySelector('button[aria-pressed]'));
+    await settle();
+    expect(api.put).toHaveBeenCalledWith('/api/settings/prefs', { proof_template: 'pf_1' });
+    expect(prefs.proofTemplate).toBe('pf_1');
+
+    flushSync();
+    click(section().querySelector('button[title="Delete"]'));
+    click([...document.querySelectorAll('[role="alertdialog"] button')].find((b) => b.textContent.trim() === 'Delete'));
+    await settle();
+    expect(api.del).toHaveBeenCalledWith('/api/templates/proof/pf_1');
+    expect(api.put).toHaveBeenLastCalledWith('/api/settings/prefs', { proof_template: '' });
+    expect(prefs.proofTemplate).toBe('');
   });
 });
 
