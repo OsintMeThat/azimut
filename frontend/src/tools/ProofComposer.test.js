@@ -582,7 +582,7 @@ describe('Proof Composer panel and overlay transforms', () => {
     expect(body).toContain('const crop = normalizeSourceCrop(surface.crop, sourceNatural);');
     expect(body).toContain('const rotation = normalizeSurfaceAngle(surface.rotation);');
     // a cut is read, held to the picture, and never sits beside a crop
-    expect(body).toContain('cut: crop ? null : fitSurfaceCut(surface.cut, sourceNatural, rotation)');
+    expect(body).toContain('cut: crop ? null : fitSurfaceCut(surface.cut, sourceNatural)');
     expect(bodyOfFn('refreshSurface'))
       .toContain('surfaceBoxSize(surface.sourceNatural, surface.crop, surface.rotation, surface.cut)');
     expect(source).toContain("proof.panels.push(hydratedSurface({");

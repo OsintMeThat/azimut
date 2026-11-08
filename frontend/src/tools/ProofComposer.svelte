@@ -1105,7 +1105,7 @@
       crop,
       rotation,
       // an upright cut, which a surface with a crop never has
-      cut: crop ? null : fitSurfaceCut(surface.cut, sourceNatural, rotation),
+      cut: crop ? null : fitSurfaceCut(surface.cut, sourceNatural),
       img,
     };
     refreshSurface(hydrated);

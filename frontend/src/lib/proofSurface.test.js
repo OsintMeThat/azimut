@@ -191,9 +191,12 @@ describe('an upright cut over a turned picture', () => {
       .toEqual({ x: -200, y: -100, w: 300, h: 150 });
   });
 
-  it('holds a cut a spec carries to the picture it can reach', () => {
-    expect(fitSurfaceCut({ x: -1000, y: -10, w: 3000, h: 20 }, [640, 360], 30)).toEqual({ x: -368, y: -10, w: 736, h: 20 });
-    expect(fitSurfaceCut({ x: 5000, y: 0, w: 10, h: 10 }, [640, 360], 30)).toBeNull();
+  it('reads a cut a spec carries as it was saved, past its picture\'s reach included', () => {
+    // a cut picture turned further can stand past what its picture reaches
+    expect(fitSurfaceCut({ x: -400, y: -10, w: 800, h: 20 }, [640, 360])).toEqual({ x: -400, y: -10, w: 800, h: 20 });
+    // only a cut out of all proportion is held in
+    expect(fitSurfaceCut({ x: -1e6, y: -10, w: 2e6, h: 20 }, [640, 360])).toEqual({ x: -1102, y: -10, w: 2204, h: 20 });
+    expect(fitSurfaceCut({ x: 5000, y: 0, w: 10, h: 10 }, [640, 360])).toBeNull();
   });
 
   it('stays square on a small turn and goes round with a quarter turn', () => {

@@ -184,19 +184,23 @@ export function turnSurfaceCut(cut, from, to) {
 }
 
 /**
- * A cut held to the reach of its whole picture, or null when nothing of it is
- * left or it keeps everything. What a spec says is read, never trusted.
+ * A cut read off a spec, or null when nothing of it is left. It is kept as it was
+ * saved, blank corners and all, since a cut picture turned a few degrees further
+ * may lie past its picture's reach, and a reload must draw what was saved. Only a
+ * cut out of all proportion to its picture is held in, at a bound no gesture
+ * reaches: half again the picture's diagonal from its middle.
  */
-export function fitSurfaceCut(cut, natural, rotation) {
+export function fitSurfaceCut(cut, natural) {
   const kept = normalizeSurfaceCut(cut);
   if (!kept) return null;
-  const reach = surfaceCutReach(natural, rotation);
-  const left = Math.max(kept.x, Math.floor(reach.left));
-  const top = Math.max(kept.y, Math.floor(reach.top));
-  const right = Math.min(kept.x + kept.w, Math.ceil(reach.right));
-  const bottom = Math.min(kept.y + kept.h, Math.ceil(reach.bottom));
+  const [width, height] = sourceSize(natural);
+  const bound = Math.ceil(Math.hypot(width, height) * 1.5);
+  const left = Math.max(kept.x, -bound);
+  const top = Math.max(kept.y, -bound);
+  const right = Math.min(kept.x + kept.w, bound);
+  const bottom = Math.min(kept.y + kept.h, bound);
   if (right - left < 1 || bottom - top < 1) return null;
-  return settleSurfaceCut({ x: left, y: top, w: right - left, h: bottom - top }, natural, rotation);
+  return { x: left, y: top, w: right - left, h: bottom - top };
 }
 
 /**
