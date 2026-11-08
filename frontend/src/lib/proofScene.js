@@ -26,11 +26,44 @@ export function videoName(path) {
 }
 
 /** The video and the instant a case file was cut at by Inspect, or null when it was not. */
-export function frameOrigin(item) {
+export function frameOrigin(item, mediaByPath = null) {
   const source = item?.source;
-  if (source?.type !== 'inspect' || source.op !== 'frame') return null;
+  if (source?.type !== 'inspect') return null;
+  if (source.op === 'collage') return collageOrigin(source, mediaByPath, 0);
+  if (source.op !== 'frame') return null;
   if (typeof source.from !== 'string' || !source.from || !Number.isFinite(source.time)) return null;
   return { video: source.from, time: source.time };
+}
+
+/** How deep a collage's pieces are followed through pictures composed from others. */
+const COMPOSED_DEPTH = 3;
+
+/**
+ * A collage composed from one video's frames, read back to that video at its first
+ * piece, as the server reads it (`engine/scenes._collage_origins`). Each piece is a
+ * frame Inspect cut, the video itself at an instant, or a picture composed in turn
+ * (a straightened collage). A piece of another video, or any other picture, makes it a
+ * picture of its own: null. Needs the case's media to look its pieces up.
+ */
+function collageOrigin(source, mediaByPath, depth) {
+  const files = source?.sources;
+  const times = source?.times;
+  if (!mediaByPath?.get || depth >= COMPOSED_DEPTH) return null;
+  if (!Array.isArray(files) || !Array.isArray(times) || !files.length || files.length !== times.length) return null;
+  let video = null;
+  let first = Infinity;
+  for (let i = 0; i < files.length; i += 1) {
+    const piece = mediaByPath.get(files[i]);
+    const own = piece?.source?.type === 'inspect' && piece.source.op === 'collage'
+      ? collageOrigin(piece.source, mediaByPath, depth + 1)
+      : piece?.kind === 'video' && Number.isFinite(times[i])
+        ? { video: files[i], time: times[i] }
+        : frameOrigin(piece);
+    if (!own || (video && own.video !== video)) return null;
+    video = own.video;
+    first = Math.min(first, own.time);
+  }
+  return { video, time: first };
 }
 
 /**
@@ -40,7 +73,7 @@ export function frameOrigin(item) {
 export function panelFrames(panels, mediaByPath) {
   const out = [];
   for (const panel of panels ?? []) {
-    const origin = frameOrigin(mediaByPath?.get?.(panel.src));
+    const origin = frameOrigin(mediaByPath?.get?.(panel.src), mediaByPath);
     if (origin) out.push({ panel: panel.id, src: panel.src, ...origin });
   }
   return out;

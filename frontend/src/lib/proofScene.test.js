@@ -33,6 +33,33 @@ describe('the panels cut from a video', () => {
     expect(frameOrigin({ source: { type: 'upload' } })).toBeNull();
     expect(frameOrigin({ source: { type: 'inspect', op: 'adjust', from: CLIP } })).toBeNull();
     expect(frameOrigin(frameOf('', 2))).toBeNull();
+  });
+
+  it('reads a collage of one video\'s frames back to that video at its first piece', () => {
+    const collage = (sources, times) => ({ kind: 'image', source: { type: 'inspect', op: 'collage', sources, times } });
+    const media = new Map([
+      ['frames/a.png', frameOf(CLIP, 4.2)],
+      ['frames/b.png', frameOf(CLIP, 2.5)],
+      ['frames/other.png', frameOf('media/other.mp4', 1)],
+      [CLIP, { kind: 'video' }],
+      ['photos/street.jpg', { kind: 'image', source: { type: 'upload' } }],
+    ]);
+    const pano = collage(['frames/a.png', 'frames/b.png'], [null, null]);
+    expect(frameOrigin(pano, media)).toEqual({ video: CLIP, time: 2.5 });
+    // a piece taken from the video at an instant counts too
+    expect(frameOrigin(collage([CLIP, 'frames/a.png'], [1.5, null]), media)).toEqual({ video: CLIP, time: 1.5 });
+    // a straightened collage stands for the frames of the one it bent
+    media.set('collages/pano.png', pano);
+    expect(frameOrigin(collage(['collages/pano.png'], [null]), media)).toEqual({ video: CLIP, time: 2.5 });
+    // two videos, or a photo among the pieces: a picture of its own
+    expect(frameOrigin(collage(['frames/a.png', 'frames/other.png'], [null, null]), media)).toBeNull();
+    expect(frameOrigin(collage(['frames/a.png', 'photos/street.jpg'], [null, null]), media)).toBeNull();
+    // with no media to look the pieces up, nothing is guessed
+    expect(frameOrigin(pano)).toBeNull();
+    // Geo Proof's panels: the collage panel rests on the clip like a frame
+    expect(panelFrames([{ id: 'p1', src: 'collages/pano.png' }], media)).toEqual([
+      { panel: 'p1', src: 'collages/pano.png', video: CLIP, time: 2.5 },
+    ]);
     expect(frameOrigin(null)).toBeNull();
   });
 
