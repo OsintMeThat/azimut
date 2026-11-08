@@ -4450,12 +4450,29 @@ left of each ★ panel, the moment that panel's frame shows in. It is drawn on t
 A proof about the whole video has no time to print, and the house style leaves it to
 each proof.
 
+**A proof made by hand finds its scene by its frames.** When it states no scene and
+every frame of the ★ video among its panels (each piece of a collage of it included) falls
+in one scene still to prove, and in no other scene of the video, by the rule Inspect's
+dots use, the proof takes that scene. Its field reads the scene's time, and a line under
+it names the scene in its colour, *Bridge? · found by its frames*, with **Not this
+scene**. A scene about the whole video is taken only as the video's one scene, *Which
+town? · the video's only scene*. Frames in several scenes, or in none, tie nothing. The
+next save takes the scene up as Make the proof's first save does, so Inspect shows one
+row. A time changed meanwhile is stated for that scene. **Not this scene** keeps the
+proof as it was for the session and writes nothing. An older proof made by hand reads the
+same when opened, and nothing changes on disk until it is saved. Abandoned scenes and
+scenes another proof took up are never offered, and the line follows the panels as they
+change. The scenes are the ones the strip reads (`GET /cases/{id}/scenes?video=`), so
+nothing more is asked of the server.
+
 **A proof on a video shows its slides under the canvas**, on a strip laid out like Map
 plate's bar under its page, between the toolbar and the side column. It holds every proof
 resting on the ★ video and every scene of it still to prove, in clip order and in the
 colour Inspect's bar gives each: a proved slide by its thumbnail, a scene still to prove
 dashed round a pin, the one geolocated now with a beat in its corner, the abandoned ones
-greyed after a rule at the end. The video's name heads it and shows the Scene tab. **+**
+greyed after a rule at the end. A proof taking up a scene the server still lists, made
+from it or found in it by its frames, stands in that scene's place and colour, saved or
+not. The video's name heads it and shows the Scene tab. **+**
 starts a new scene, the list holds every slide with a search, ⋯ holds **Export the
 slides**, and the fold folds it to one line for the session. Past what the strip holds
 whole, the tiles shrink to their picture and number, an arrow each side says how many are
