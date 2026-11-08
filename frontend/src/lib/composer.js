@@ -7,7 +7,8 @@
 
 import { formatCoords as renderCoords } from './coords.js';
 import {
-  normalizeSourceCrop, normalizeSurfaceAngle, surfaceImageSize,
+  normalizeSourceCrop, normalizeSurfaceAngle, normalizeSurfaceCut, surfaceCutMiddle, surfaceCutOutline,
+  surfaceImageSize, turned,
 } from './proofSurface.js';
 import { ICON_SIZE_DEFAULT } from './proofIcons.js';
 import { isPageMark } from './pageMarks.js';
@@ -216,13 +217,17 @@ export function panelHeight(p) {
 /** The pixels a panel draws — its crop when it has one, else its whole source. */
 const panelImage = (p) => surfaceImageSize(p.sourceNatural ?? p.natural, p.crop);
 
+/** What a panel's height measures: its cut when it has one, else the pixels it draws. */
+export const panelSizedHeight = (p) => (p.cut ? p.cut.h : panelImage(p)[1]);
+
 /**
  * How a panel's own pixels map to doc pixels. Its height is applied to the
  * image and never to the upright box a turned image sits in, or turning a photo
- * would shrink it to keep that growing box the same height.
+ * would shrink it to keep that growing box the same height. A cut is the panel's
+ * height the way a crop is: what is kept fills the row.
  */
 export function panelScale(p) {
-  return panelHeight(p) / panelImage(p)[1];
+  return panelHeight(p) / panelSizedHeight(p);
 }
 
 /** The upright room a panel occupies, scaled: its own box, turn included. */
@@ -289,7 +294,7 @@ function layoutPanelsGrid(panels, captionSize = CAPTION_SIZE, space) {
   return panels.map((p) => {
     const r = p.row ?? 0;
     const { scale, w, h } = panelBox(p);
-    const baseScale = PANEL_H / panelImage(p)[1];
+    const baseScale = PANEL_H / panelSizedHeight(p);
     const y = rowTop.get(r) + (rowHeight.get(r) - h); // bottom-align within row
     const box = { x: cursor.get(r), y, w, h, scale, baseScale, row: r };
     cursor.set(r, cursor.get(r) + w + gap);
@@ -323,7 +328,7 @@ export function layoutPanelsFree(panels, captionSize = CAPTION_SIZE, space) {
       w,
       h,
       scale,
-      baseScale: PANEL_H / panelImage(p)[1],
+      baseScale: PANEL_H / panelSizedHeight(p),
       row: p.row ?? 0,
     };
   });
@@ -1195,40 +1200,88 @@ export function surfaces(proof) {
  * its annotations live in those pixels. `pageToSurface` and `surfaceToPage` are
  * that transform and its inverse, so a turned panel is read where it is drawn
  * rather than as the upright box the layout reserved for it.
+ *
+ * A cut surface's box is its cut, and the picture's middle may lie far off that
+ * box's: `middle` says where it is. `outline` is the cut in the surface's own
+ * pixels, null for a surface without one.
  */
 export function surfaceFrame(entry) {
   const { item, box } = entry;
+  const image = surfaceImageSize(item.sourceNatural ?? item.natural, item.crop);
+  const rotation = normalizeSurfaceAngle(item.rotation);
   return {
     box,
-    image: surfaceImageSize(item.sourceNatural ?? item.natural, item.crop),
-    rotation: normalizeSurfaceAngle(item.rotation),
+    image,
+    rotation,
+    middle: surfaceMiddle(box, item.cut),
+    outline: item.cut ? surfaceCutOutline(item.cut, image, rotation) : null,
   };
 }
 
-function turned(x, y, degrees) {
-  if (!degrees) return { x, y };
-  const radians = (degrees * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  return { x: x * cos - y * sin, y: x * sin + y * cos };
+/** Where the middle of a surface's picture lies on the page, given its box and its cut. */
+export function surfaceMiddle(box, cut) {
+  const off = surfaceCutMiddle(cut);
+  return { x: box.x + box.w / 2 - off.x * box.scale, y: box.y + box.h / 2 - off.y * box.scale };
 }
+
+/** Where a frame's picture is centred on the page: its box's middle unless a cut moved it. */
+const middleOf = (frame) => frame.middle ?? surfaceMiddle(frame.box, null);
 
 /** A page point in a surface's own pixels. */
 export function pageToSurface(point, frame) {
   const { box, image, rotation } = frame;
-  const v = turned(
-    (point.x - (box.x + box.w / 2)) / box.scale,
-    (point.y - (box.y + box.h / 2)) / box.scale,
-    -rotation,
-  );
+  const middle = middleOf(frame);
+  const v = turned((point.x - middle.x) / box.scale, (point.y - middle.y) / box.scale, -rotation);
   return { x: v.x + image[0] / 2, y: v.y + image[1] / 2 };
 }
 
 /** A point in a surface's own pixels, on the page. */
 export function surfaceToPage(point, frame) {
   const { box, image, rotation } = frame;
+  const middle = middleOf(frame);
   const v = turned((point.x - image[0] / 2) * box.scale, (point.y - image[1] / 2) * box.scale, rotation);
-  return { x: v.x + box.x + box.w / 2, y: v.y + box.y + box.h / 2 };
+  return { x: v.x + middle.x, y: v.y + middle.y };
+}
+
+const within = (value, low, high) => value >= low && value <= high;
+
+/** Whether a page point lies in a box. */
+const inBox = (point, box) => within(point.x, box.x, box.x + box.w) && within(point.y, box.y, box.y + box.h);
+
+/**
+ * Whether a point in a surface's own pixels is on what the surface shows: on its
+ * picture, and inside its cut when it has one.
+ */
+export function surfaceShows(point, frame) {
+  if (!within(point.x, 0, frame.image[0]) || !within(point.y, 0, frame.image[1])) return false;
+  return !frame.outline || inBox(surfaceToPage(point, frame), frame.box);
+}
+
+/**
+ * A point in a surface's own pixels held to what the surface shows: into its cut,
+ * then onto its picture. Marks drawn or pulled on a surface stop at this edge.
+ */
+export function holdOnSurface(point, frame) {
+  let held = point;
+  if (frame.outline) {
+    const { box } = frame;
+    const page = surfaceToPage(point, frame);
+    held = pageToSurface({
+      x: Math.min(Math.max(page.x, box.x), box.x + box.w),
+      y: Math.min(Math.max(page.y, box.y), box.y + box.h),
+    }, frame);
+  }
+  return {
+    x: Math.min(Math.max(held.x, 0), frame.image[0]),
+    y: Math.min(Math.max(held.y, 0), frame.image[1]),
+  };
+}
+
+/** The four page corners of what a surface shows, clockwise from its top left. */
+export function surfaceCorners(frame) {
+  const [w, h] = frame.image;
+  const own = frame.outline ?? [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }];
+  return own.map((corner) => surfaceToPage(corner, frame));
 }
 
 /** A step on the page as the same step in a surface's own pixels. */
@@ -1240,15 +1293,14 @@ export function pageStepOnSurface(dx, dy, frame) {
 /**
  * Topmost surface under a page point, with the point in its own pixels. A turned
  * surface answers over its picture only, not in the corners of the upright box
- * the page keeps around it. The list is front→back, so the first hit wins.
+ * the page keeps around it, and a cut one over what is left inside its cut. The
+ * list is front→back, so the first hit wins.
  */
 export function surfaceHitTest(list, point) {
   for (const entry of list) {
     const frame = surfaceFrame(entry);
     const p = pageToSurface(point, frame);
-    if (p.x >= 0 && p.x <= frame.image[0] && p.y >= 0 && p.y <= frame.image[1]) {
-      return { ...entry, frame, nx: p.x, ny: p.y };
-    }
+    if (surfaceShows(p, frame)) return { ...entry, frame, nx: p.x, ny: p.y };
   }
   return null;
 }
@@ -1313,14 +1365,16 @@ export function clampPaste(paste, docW, docH) {
 }
 
 /**
- * An image's crop and turn, left out of the spec when it has neither. Both are
+ * An image's crop, turn and cut, left out of the spec when it has none of them, so
+ * a proof with no cut saves the same document it always did. A crop and a turn are
  * read against the source size, which is what the spec's `natural` holds.
  */
 function surfaceGeometry(surface) {
   const source = surface.sourceNatural ?? surface.natural;
   const crop = normalizeSourceCrop(surface.crop, source);
   const rotation = normalizeSurfaceAngle(surface.rotation);
-  return { ...(crop ? { crop } : {}), ...(rotation ? { rotation } : {}) };
+  const cut = normalizeSurfaceCut(surface.cut, crop);
+  return { ...(crop ? { crop } : {}), ...(rotation ? { rotation } : {}), ...(cut ? { cut } : {}) };
 }
 
 /** What the panels answer with, frozen for the spec, marked when nobody aimed it. */

@@ -2,7 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
   blurPatch,
   blurRadiusFor,
+  cutToSourceCrop,
+  fitSurfaceCut,
+  isQuarterTurn,
+  isSideways,
   mapSurfaceShapes,
+  normalizeSurfaceCut,
+  settleSurfaceCut,
+  surfaceCutOutline,
+  surfaceCutReach,
+  surfaceCutSeat,
+  surfaceCutStart,
+  turnSurfaceCut,
   normalizeSourceCrop,
   normalizeSurfaceAngle,
   rotatedBoxSize,
@@ -130,5 +141,89 @@ describe('a blur box over a surface', () => {
     expect(blurRadiusFor({ w: 200, h: 100 })).toBe(20);
     expect(blurRadiusFor({ w: 10, h: 10 })).toBe(6);
     expect(blurRadiusFor({ w: 4000, h: 3000 })).toBe(80);
+  });
+});
+
+describe('an upright cut over a turned picture', () => {
+  const close = (p, q) => {
+    expect(p.x).toBeCloseTo(q.x, 6);
+    expect(p.y).toBeCloseTo(q.y, 6);
+  };
+
+  it('reserves the cut itself on the page, whatever the turn', () => {
+    expect(surfaceBoxSize([640, 360], null, 30, { x: -100, y: -50, w: 200, h: 100 })).toEqual([200, 100]);
+    // no cut: the turned picture's upright box, as before
+    expect(surfaceBoxSize([640, 360], null, 30)).toEqual(rotatedBoxSize(640, 360, 30));
+  });
+
+  it('reads a cut in whole units and gives way to a crop', () => {
+    expect(normalizeSurfaceCut({ x: -10.4, y: 5.6, w: 20.2, h: 9.9 })).toEqual({ x: -10, y: 6, w: 20, h: 10 });
+    expect(normalizeSurfaceCut({ x: 0, y: 0, w: 0, h: 10 })).toBeNull();
+    expect(normalizeSurfaceCut({ x: 'a', y: 0, w: 4, h: 4 })).toBeNull();
+    expect(normalizeSurfaceCut([1, 2, 3, 4])).toBeNull();
+    // only a hand-edited spec holds both, and every older build reads the crop
+    expect(normalizeSurfaceCut({ x: 0, y: 0, w: 4, h: 4 }, { x: 0, y: 0, w: 4, h: 4 })).toBeNull();
+  });
+
+  it('tells the turns whose edges lie along the page', () => {
+    expect([0, 90, -90, 180, 270, 89.999].map(isQuarterTurn)).toEqual([true, true, true, true, true, true]);
+    expect([7, 45, 135.5].map(isQuarterTurn)).toEqual([false, false, false]);
+    expect([90, -90, 270].map(isSideways)).toEqual([true, true, true]);
+    expect([0, 180, 7].map(isSideways)).toEqual([false, false, false]);
+  });
+
+  it('opens its marks on what the surface shows, upright', () => {
+    // unturned: the whole picture, measured from its middle
+    expect(surfaceCutStart([640, 360], null, 0)).toEqual({ x: -320, y: -180, w: 640, h: 360 });
+    // unturned and cropped: the crop, measured the same way
+    expect(surfaceCutStart([640, 360], { x: 40, y: 20, w: 200, h: 100 }, 0))
+      .toEqual({ x: -280, y: -160, w: 200, h: 100 });
+    // turned: the upright box around the turned picture
+    const start = surfaceCutStart([640, 360], null, 30);
+    const reach = surfaceCutReach([640, 360], 30);
+    expect(start.x).toBeCloseTo(reach.left, 6);
+    expect(start.w).toBeCloseTo(reach.right - reach.left, 6);
+  });
+
+  it('keeps no cut when the marks were left round the whole picture', () => {
+    expect(settleSurfaceCut(surfaceCutStart([640, 360], null, 30), [640, 360], 30)).toBeNull();
+    expect(settleSurfaceCut({ x: -200, y: -100, w: 300, h: 150 }, [640, 360], 30))
+      .toEqual({ x: -200, y: -100, w: 300, h: 150 });
+  });
+
+  it('holds a cut a spec carries to the picture it can reach', () => {
+    expect(fitSurfaceCut({ x: -1000, y: -10, w: 3000, h: 20 }, [640, 360], 30)).toEqual({ x: -368, y: -10, w: 736, h: 20 });
+    expect(fitSurfaceCut({ x: 5000, y: 0, w: 10, h: 10 }, [640, 360], 30)).toBeNull();
+  });
+
+  it('stays square on a small turn and goes round with a quarter turn', () => {
+    const cut = { x: 0, y: -50, w: 200, h: 100 }; // its middle 100 right of the picture's
+    // a few degrees more: the same box, its middle turned about the picture's
+    const levelled = turnSurfaceCut(cut, 7, 10);
+    expect([levelled.w, levelled.h]).toEqual([200, 100]);
+    close({ x: levelled.x + 100, y: levelled.y + 50 }, { x: 100 * Math.cos(Math.PI / 60), y: 100 * Math.sin(Math.PI / 60) });
+    // a quarter turn: the box goes round with the picture
+    const sideways = turnSurfaceCut(cut, 7, 97);
+    expect([sideways.w, sideways.h]).toEqual([100, 200]);
+    close({ x: sideways.x + 50, y: sideways.y + 100 }, { x: 0, y: 100 });
+  });
+
+  it('becomes a plain crop once the picture lies square again', () => {
+    // a quarter turn: 200 across the page is 200 down the source
+    expect(cutToSourceCrop({ x: -100, y: -50, w: 200, h: 100 }, [640, 360], 90)).toEqual({ x: 270, y: 80, w: 100, h: 200 });
+    // what lies past the picture is not kept
+    expect(cutToSourceCrop({ x: -400, y: -50, w: 500, h: 100 }, [640, 360], 0)).toEqual({ x: 0, y: 130, w: 420, h: 100 });
+    expect(cutToSourceCrop({ x: -320, y: -180, w: 640, h: 360 }, [640, 360], 0)).toBeNull();
+  });
+
+  it('seats the cut in the picture\'s own pixels, turned back square', () => {
+    const cut = { x: -100, y: -50, w: 200, h: 100 };
+    const seat = surfaceCutSeat(cut, [640, 360], 30);
+    const outline = surfaceCutOutline(cut, [640, 360], 30);
+    expect(seat.rotation).toBe(-30);
+    close(outline[0], seat);
+    // its corners are as far apart as the cut is wide and tall
+    expect(Math.hypot(outline[1].x - outline[0].x, outline[1].y - outline[0].y)).toBeCloseTo(200, 6);
+    expect(Math.hypot(outline[3].x - outline[0].x, outline[3].y - outline[0].y)).toBeCloseTo(100, 6);
   });
 });
