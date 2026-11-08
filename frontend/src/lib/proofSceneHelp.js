@@ -15,7 +15,7 @@ export const PROOF_SCENE_HELP = {
   show: 'Play it in the player',
   addMoment: 'Add an instant at the frame of each panel outside these moments',
   badge: 'Prints the scene\'s timecode on its panels',
-  matched: 'Every frame of this video falls in this scene, which the save takes up',
+  matched: 'Its panels from this video all fall in this scene, which the save takes up',
   onlyScene: 'The one scene of this video to geolocate, which the save takes up',
   notThisScene: 'Keep this proof apart from that scene',
 

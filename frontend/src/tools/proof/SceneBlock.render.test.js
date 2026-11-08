@@ -247,7 +247,7 @@ describe('the scene its frames found', () => {
     const found = line(root);
     expect(field.nextElementSibling).toBe(found);
     expect(words(found)).toBe('Bridge? · found by its frames Not this scene');
-    expect(found.getAttribute('title')).toBe('Every frame of this video falls in this scene, which the save takes up');
+    expect(found.getAttribute('title')).toBe('Its panels from this video all fall in this scene, which the save takes up');
     expect(found.querySelector('.swatch').style.background).toBe('var(--anno-2)');
     expect(button(found, 'Not this scene').getAttribute('title')).toBe('Keep this proof apart from that scene');
     // all of its frames are in the scene, so none is said to be outside
