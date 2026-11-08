@@ -91,6 +91,19 @@ class ProofSignatureText(CanonicalModel):
         return color.lower()
 
 
+class ProofAzimutMark(CanonicalModel):
+    """The Azimut mark in a corner of the proof: the logo and the name, or either alone."""
+
+    anchor: Literal["tl", "tr", "bl", "br"] = "br"
+    show: Literal["both", "logo", "name"] = "both"
+    size: Annotated[FiniteFloat, Field(ge=12, le=300)] = 28
+
+
+#: Keys a style stored before them never had. Unset, the template says nothing about
+#: them, and they stay unwritten, so a style saved again reads back as it was written.
+UNSTATED_WHEN_NONE = ("sceneBadge", "footerCredits", "azimutMark")
+
+
 class ProofTemplateData(CanonicalModel):
     bg: Color = "#0d1117"
     space: ProofSpace = Field(default_factory=ProofSpace)
@@ -117,6 +130,13 @@ class ProofTemplateData(CanonicalModel):
     fontBold: StrictBool = True
     signature: ProofSignature | None = None
     signatureText: ProofSignatureText | None = None
+    # What the look says about the scene's time on a video's frames and the panels'
+    # imagery credits. None leaves each proof its own answer, as `footerText` does
+    # for a style from before it.
+    sceneBadge: StrictBool | None = None
+    footerCredits: StrictBool | None = None
+    # The Azimut mark beside the signature. None draws none.
+    azimutMark: ProofAzimutMark | None = None
     palette: list[Color] = Field(
         default_factory=lambda: [
             "#ff5252",
@@ -143,6 +163,14 @@ class ProofTemplateData(CanonicalModel):
         if len(set(normalized)) != len(normalized):
             raise ValueError("palette colors must be unique")
         return normalized
+
+    @model_serializer(mode="wrap")
+    def _unstated_stays_unwritten(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = dict(handler(self))
+        for key in UNSTATED_WHEN_NONE:
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
 
 
 class PostExtraTweet(CanonicalModel):

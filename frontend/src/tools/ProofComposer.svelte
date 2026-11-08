@@ -139,6 +139,10 @@
   import DraftPage from './proof/DraftPage.svelte';
   import ProofFrames from './inspect/ProofFrames.svelte';
   import { neighbour, resumeAt, slideStyle, slideTiles, switchPlan } from '../lib/proofSlides.js';
+  import { defaultProofTemplate } from '../lib/proofTemplates.js';
+  import { addMark, newAzimutMark } from '../lib/proofMark.js';
+  import { PROOF_TEMPLATE_HELP } from '../lib/proofTemplateHelp.js';
+  import MarkShowChoice from '../components/MarkShowChoice.svelte';
   import { onEvent } from '../lib/events.js';
   import { abandonProof, abandonScene, geolocateScene, restoreProof, restoreScene } from '../lib/geolocating.svelte.js';
   import { collagesOfScene, proofHandoff } from '../lib/sceneFrames.js';
@@ -212,6 +216,7 @@
     panelDirection: 'horizontal', // preferred arrangement for the first two panels
     signature: null, // null → unsigned; else { anchor, dx, dy, scale, opacity }
     signatureText: null, // null → none; else a Settings-handle slot over the panels
+    azimutMark: null, // null → none; else the Azimut mark beside the signature (lib/proofMark.js)
     palette: [...ANNO_COLORS], // ordered drawing colours, most preferred first
   });
 
@@ -973,6 +978,7 @@
     resetDoc();
     proofStarted = true;
     if (look) applyLook(look);
+    else applyDefaultTemplate();
     pickSideTab('proof');
     settlePlace('proof', place(), { navigate });
     if (made.title) proof.title = made.title;
@@ -1163,6 +1169,7 @@
     proof.panelDirection = style.panelDirection;
     proof.signature = style.signature;
     proof.signatureText = style.signatureText;
+    proof.azimutMark = style.azimutMark;
     // The colour in hand is not part of the document, so a step back keeps it.
     // Only a step across a template, which changes the palette, takes its first
     // colour the way applying the template did.
@@ -1535,6 +1542,7 @@
       proof.panelDirection,
       proof.signature,
       proof.signatureText,
+      proof.azimutMark,
     ]);
     sigImg; // the logo lands async — redraw once it does
     prefs.signatureHandle; // Settings can change the rendered handle live
@@ -1679,6 +1687,7 @@
     proof.panelDirection = 'horizontal';
     proof.signature = null;
     proof.signatureText = null;
+    proof.azimutMark = null;
     proof.palette = [...ANNO_COLORS];
     color = proof.palette[0];
     savedName = null;
@@ -1724,6 +1733,12 @@
     dirty = true;
     requestAnimationFrame(fit); // margins/layout may have changed the doc size
     if (notify) toast(`Template loaded: ${t.name}`, 'ok', 1400);
+  }
+
+  /** The template Settings marks as the default, laid on a proof just started, when there is one. */
+  function applyDefaultTemplate() {
+    const template = defaultProofTemplate(templatesState.proof, prefs.proofTemplate);
+    if (template) applyTemplate(template, { notify: false });
   }
 
   function applyFromSelect(e) {
@@ -1902,7 +1917,8 @@
   }
 
   async function openNewProofDialog() {
-    newProofTemplateId = '';
+    // the default template, preselected while it still exists
+    newProofTemplateId = defaultProofTemplate(templatesState.proof, prefs.proofTemplate)?.id ?? '';
     newProofPanelPaths = [];
     newProofQuery = '';
     newProofCategory = 'all';
@@ -2025,8 +2041,9 @@
 
   async function addPanel(item) {
     try {
-      // the first panel of a proof not started yet starts a new one, on Layout
+      // the first panel of a proof not started yet starts a new one, on Layout, from the default
       if (!proofStarted) pickSideTab('layout');
+      if (!proofStarted) applyDefaultTemplate();
       proofStarted = true;
       const img = await loadImage(fileUrl(caseState.current.id, item.src));
       imgCache.set(item.src, img);
@@ -3594,6 +3611,9 @@
       });
       docLayer.add(node);
     }
+
+    // the Azimut mark, when asked, beside the logo and the handle (lib/proofMark.js)
+    addMark(Konva, docLayer, proof, { width, height, pad, footerLines: proof.panels.length ? printed.length : 0 });
 
     docLayer.batchDraw();
     refreshCanvasUi(boxes, width, height);
@@ -6423,6 +6443,7 @@
     proof.panelDirection = style.panelDirection;
     proof.signature = style.signature;
     proof.signatureText = style.signatureText;
+    proof.azimutMark = style.azimutMark;
     proof.palette = style.palette;
     color = proof.palette[0];
     // Every picture asked for at once, then laid in the spec's order: a slide opens in
@@ -7710,6 +7731,46 @@
               <div class="side-hint">Add your account handle in Settings → Publishing to use it on proofs.</div>
             {:else if proof.signatureText}
               <div class="side-hint">Drag the account handle on the canvas to place it.</div>
+            {/if}
+
+            <label class="sig-check" title={PROOF_TEMPLATE_HELP.mark}>
+              <input
+                type="checkbox"
+                checked={!!proof.azimutMark}
+                onchange={(e) => {
+                  proof.azimutMark = e.currentTarget.checked
+                    ? newAzimutMark(proof.signature?.anchor ?? proof.signatureText?.anchor ?? 'br')
+                    : null;
+                  dirty = true;
+                }}
+              />
+              <span>Azimut mark</span>
+            </label>
+            {#if proof.azimutMark}
+              <div class="sig-anchors" title={PROOF_TEMPLATE_HELP.markCorner}>
+                {#each SIG_ANCHORS as a (a.id)}
+                  <button
+                    class="sig-anchor"
+                    class:active={proof.azimutMark.anchor === a.id}
+                    onclick={() => { proof.azimutMark = { ...proof.azimutMark, anchor: a.id }; dirty = true; }}
+                  >{a.label}</button>
+                {/each}
+              </div>
+              <div class="size-row" title={PROOF_TEMPLATE_HELP.markSize}>
+                <span>Size</span>
+                <input class="size-slider" type="range" min="12" max={Math.max(96, proof.azimutMark.size)} step="1"
+                  value={proof.azimutMark.size}
+                  oninput={(e) => {
+                    proof.azimutMark = { ...proof.azimutMark, size: Number(e.currentTarget.value) };
+                    dirty = true;
+                  }} />
+                <span class="size-val">{proof.azimutMark.size}</span>
+              </div>
+              <MarkShowChoice
+                value={proof.azimutMark.show}
+                title={PROOF_TEMPLATE_HELP.markShow}
+                onchange={(show) => { proof.azimutMark = { ...proof.azimutMark, show }; dirty = true; }}
+              />
             {/if}
           </div>
         </div>

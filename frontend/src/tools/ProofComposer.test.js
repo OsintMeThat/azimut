@@ -1634,3 +1634,31 @@ describe('Proof Composer scene', () => {
     expect(make).not.toContain('description');
   });
 });
+
+describe('Proof Composer — the default template and the Azimut mark', () => {
+  it('preselects the default template in New proof, while it exists', () => {
+    expect(bodyOfFn('openNewProofDialog'))
+      .toContain("newProofTemplateId = defaultProofTemplate(templatesState.proof, prefs.proofTemplate)?.id ?? '';");
+  });
+
+  it('starts a proof made from Inspect from the default, and the next slide from the slide before', () => {
+    const made = bodyOfFn('makeSceneProof');
+    expect(made).toContain('if (look) applyLook(look);\n    else applyDefaultTemplate();');
+    // + New scene copies the look of the slide it leaves, never the default
+    expect(bodyOfFn('newSlide')).not.toContain('applyDefaultTemplate');
+    expect(bodyOfFn('applyDefaultTemplate')).toContain('applyTemplate(template, { notify: false })');
+    // and a picture sent over from another tool, which starts a proof with no dialog
+    expect(bodyOfFn('addPanel')).toContain('if (!proofStarted) applyDefaultTemplate();');
+  });
+
+  it('reads, resets and draws the mark with the rest of the signature', () => {
+    expect(bodyOfFn('resetDoc')).toContain('proof.azimutMark = null;');
+    expect(bodyOfFn('openProof')).toContain('proof.azimutMark = style.azimutMark;');
+    expect(bodyOfFn('applySnapshot')).toContain('proof.azimutMark = style.azimutMark;');
+    expect(bodyOfFn('rebuild')).toContain('addMark(Konva, docLayer, proof,');
+    // the redraw reads it, or the switch lands on a page that does not change
+    const redraw = source.slice(source.indexOf('Rebuild only when published document'));
+    expect(redraw.slice(0, redraw.indexOf('requestRebuild'))).toContain('proof.azimutMark,');
+    expect(source).toContain('<span>Azimut mark</span>');
+  });
+});

@@ -116,11 +116,12 @@ test('a signature resize whose release the window never sees still lands, and st
   const rail = page.getByRole('navigation', { name: 'Settings sections' });
   await rail.getByRole('button', { name: 'Templates' }).click();
   await page.getByRole('button', { name: 'New proof template' }).click();
+  await page.locator('.pts-card[data-starter="blank"]').click();
 
-  await page.getByLabel('Stamp the logo').check();
-  const size = page.getByRole('slider', { name: 'Size' });
+  await page.getByRole('checkbox', { name: 'Logo', exact: true }).check();
+  const size = page.getByRole('slider', { name: 'Size', exact: true });
   const before = await size.inputValue();
-  const canvas = page.locator('.preview-frame canvas').first();
+  const canvas = page.locator('.pte-canvas canvas').first();
   await expect(canvas).toBeVisible();
 
   // Select the logo, then take its frame's corner. Both live on the canvas,

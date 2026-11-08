@@ -433,8 +433,17 @@ describe('toSpec — persistence of layout', () => {
     expect(plain).not.toHaveProperty('sceneBadge');
     expect(toSpec({ title: 'T', panels: [], shapes: [], sceneBadge: false })).toEqual(plain);
     expect(toSpec({ title: 'T', panels: [], shapes: [], sceneBadge: true }).sceneBadge).toBe(true);
-    // a house style says nothing about it: it is the proof's own choice
-    expect(templateFromProof({ panels: [], sceneBadge: true })).not.toHaveProperty('sceneBadge');
+    // a style taken from a proof states the proof's answer, which a template then carries
+    expect(templateFromProof({ panels: [], sceneBadge: true }).sceneBadge).toBe(true);
+    expect(templateFromProof({ panels: [] }).sceneBadge).toBe(false);
+  });
+
+  it('writes the Azimut mark only when it is on, so a proof from before saves as it did', () => {
+    const plain = toSpec({ title: 'T', panels: [], shapes: [] });
+    expect(plain).not.toHaveProperty('azimutMark');
+    expect(toSpec({ title: 'T', panels: [], shapes: [], azimutMark: null })).toEqual(plain);
+    expect(toSpec({ title: 'T', panels: [], shapes: [], azimutMark: { anchor: 'tl', show: 'logo' } }).azimutMark)
+      .toEqual({ anchor: 'tl', show: 'logo', size: 28 });
   });
 
   it('stores a blank footer as null so the automatic attribution shows', () => {
@@ -1604,6 +1613,10 @@ describe('templateFromProof — a content-free house style', () => {
       fontBold: true,
       signature: { anchor: 'br', dx: 5, dy: 0, scale: 0.12, opacity: 0.9 },
       signatureText: { anchor: 'tr', dx: 0, dy: 0, size: 44, color: '#ffffff', opacity: 1 },
+      // what the proof answers for its scene time, its credits and the Azimut mark
+      sceneBadge: false,
+      footerCredits: false,
+      azimutMark: null,
       palette: ['#123456', '#ff5252', '#40c4ff'],
     });
     expect(t).not.toHaveProperty('panels');
@@ -2404,5 +2417,44 @@ describe('a proof\'s typeface', () => {
   it('is saved with the proof', () => {
     expect(toSpec({ title: 't', panels: [], shapes: [], font: 'oxanium', fontBold: false }))
       .toMatchObject({ font: 'oxanium', fontBold: false });
+  });
+});
+
+describe('a template and the scene keys', () => {
+  it('leaves the scene time and the credits alone when a style says nothing of them', () => {
+    const proof = { panels: [], shapes: [], sceneBadge: true, footerCredits: true };
+    applyProofStyle(proof, { bg: '#101418' });
+    expect(proof).toMatchObject({ sceneBadge: true, footerCredits: true });
+    applyProofStyle(proof, { bg: '#101418', sceneBadge: null, footerCredits: null });
+    expect(proof).toMatchObject({ sceneBadge: true, footerCredits: true });
+  });
+
+  it('sets them when the style states them, off as well as on', () => {
+    const proof = { panels: [], shapes: [], sceneBadge: true, footerCredits: false };
+    applyProofStyle(proof, { sceneBadge: false, footerCredits: true });
+    expect(proof).toMatchObject({ sceneBadge: false, footerCredits: true });
+  });
+
+  it('keeps null for a style from before them, and reads nothing else as a choice', () => {
+    expect(normalizeProofStyle({})).toMatchObject({ sceneBadge: null, footerCredits: null, azimutMark: null });
+    expect(normalizeProofStyle({ sceneBadge: 'yes', footerCredits: 1 })).toMatchObject({ sceneBadge: null, footerCredits: null });
+  });
+
+  it('carries the Azimut mark whole, like the rest of the signature', () => {
+    const marked = { panels: [], shapes: [] };
+    applyProofStyle(marked, { azimutMark: { anchor: 'tl', show: 'name', size: 40 } });
+    expect(marked.azimutMark).toEqual({ anchor: 'tl', show: 'name', size: 40 });
+    // a style that signs without it takes it off, as one without a logo takes the logo off
+    applyProofStyle(marked, { bg: '#000000' });
+    expect(marked.azimutMark).toBeNull();
+  });
+
+  it('goes through a template and back unchanged, the mark and both switches included', () => {
+    const original = {
+      panels: [], shapes: [], sceneBadge: true, footerCredits: true, azimutMark: { anchor: 'br', show: 'logo', size: 34 },
+    };
+    const target = { panels: [], shapes: [] };
+    applyProofStyle(target, templateFromProof(original));
+    expect(templateFromProof(target)).toEqual(templateFromProof(original));
   });
 });

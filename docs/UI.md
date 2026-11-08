@@ -4269,7 +4269,7 @@ date, the facts filled once), **Scene** (only for a proof built on a video), **L
 (panels, overlays, annotations and elements, where composing happens) and **Style**
 (the house style, then **Text**, with the font, bold, Caption new panels, the caption
 and legend sizes and Scene time on the picture, **Footer**, and **Signature**, with
-**Logo** and the account handle). A new proof opens on Layout, since it starts with
+**Logo**, the account handle and the **Azimut mark**). A new proof opens on Layout, since it starts with
 panels; one made with Inspect's Make the proof opens on Proof, its facts still to fill;
 any other opens on the tab in use, Proof at first, which lasts the session and is never
 saved. A ▶ pressed on the canvas shows Scene. Each tab scrolls on its own and keeps its
@@ -4830,6 +4830,71 @@ under `media/.dl/`, which bundles skip and the Doctor ignores; closing the dialo
 deletes it, and one left behind goes when the next import opens. What Create
 writes is a normal proof: it lists, travels in a bundle, and reopens in the
 composer as a composition to annotate — one panel per picture taken.
+
+## Geo Proof templates
+
+Settings → Templates lists the house styles a proof can take, made there and nowhere
+else: the composer offers no "save as template". A template holds a look and never a
+case's material: the background, the margins, the layout, the type, the footer, the
+signature and the drawing colours. Each row shows it by a sketch of its page, its name,
+how its pictures sit and its typeface. The sketch is plain shapes measured with the
+composer's layout, so a long list costs no canvas and no picture.
+
+**New proof template opens a choice of starts**, each drawn as the sample proof set in
+it: **Blank** (the look a new proof has), **Free layout** (pictures placed freely on
+black, no captions or legend, one footer line), **Grid with a legend** (captioned
+pictures in a row, the colour legend under them, the point and the credits below),
+**Before and after** (two pictures side by side on white, each with its caption),
+**Stacked for a post** (one over the other, the words large enough for a phone) and
+**Pictures only** (no margin, caption or footer, for a report). A press opens the editor
+on a copy under that name, with **Other starts** to go back. Nothing joins the list
+until Save, and none of it is ever installed on its own. They name nobody: a logo and a
+handle are slots, filled from Settings → Publishing when there is one.
+
+**The editor puts the page first.** On the left is the sample proof in the template's
+look, redrawn as each setting moves; on the right are the settings, in the groups of the
+Style tab: **Page**, **Text**, **Footer**, **Signature** and **Drawing colours**, each
+saying what it does on hover. The sample is Half Dome photographed from Glacier Point in
+1901 and the USGS orthoimagery of the same ground, both public domain, with the marks a
+geolocation carries. The template is laid on it by `applyProofStyle`, the function New
+proof uses, and the page is measured by the composer's own layout, footer and signature
+code, so what it shows is what a proof gets. Only the Azimut mark is drawn by the very
+same code as the composer (`lib/proofMark.js`): the rest of `lib/proofPage.js` is a still
+copy of `rebuild`'s drawing, which the composer's canvas cannot lend without its editing.
+A logo or a handle is dragged into place on the page and resized from its corners.
+**Legend** above the page shows the sample with a legend or without, since a legend's
+words are each proof's own and a template holds only its size. Pictures load the first
+time a template is shown.
+
+**A template from before opens as it was.** Saved untouched, it writes back what it held,
+including what the editor does not show, such as a dragged logo's offsets or a handle's
+opacity (`tests/fixtures/proof-templates-0.3.3.json`). **Scene time on the picture** and
+**Imagery credits** are switches a template may leave unset: unset, it says nothing, the
+proof it is laid on keeps its own, and the editor says so under the switch. Pressed, on
+or off, the template states it and new templates state it from the start. A style taken
+from a proof always states it, so choosing No template puts the proof's own answer back.
+
+**Default** is the bookmark button on a proof row, as on a post row. New proof opens with
+that template chosen, and it can be changed or set to No template there. A picture sent
+over from another tool and a proof made from Inspect start from it too, unless the proof
+is the next slide of a video: **+ New scene** and a slide made from a scene still copy the
+slide before them. Pressing the bookmark again clears it, and so does deleting the
+template; an id whose template is gone reads as none, without a word. It is a setting
+(`proof_template`), so the Settings backup carries it.
+
+**The Azimut mark** is a switch in the template's and the proof's Signature, off by
+default. Under it, **Shows** offers three buttons, each drawn as what it puts on the
+page with the app's own logo and wordmark: the logo and the name (the default), the logo
+alone, or the name alone, set like type of the mark's size so its capitals match a
+handle's beside it. It takes the
+corner it is given, the signature's at first, and steps inward past a logo or a handle
+already there, so it never covers them. In a bottom corner it rides on the footer's last line, or
+just above the band when the footer's words run along that side. Its ink follows what it
+lies on: light on a dark page, dark on a pale one, and light with a dark halo over a
+picture. It takes no press, and a proof saved without it writes no key and draws as it did.
+The export draws it with the canvas's own code, so the saved picture, and the PDF a note
+prints it in, carry it as the page shows it.
+The footer's *Composed with Azimut* line is separate and stays as it is.
 
 ## Geo Report templates
 

@@ -43,6 +43,7 @@ beforeEach(() => {
   templatesState.proof = [PROOF];
   templatesState.post = [CLASSIC, SHORT];
   prefs.postTemplate = '';
+  prefs.proofTemplate = '';
 });
 
 afterEach(() => {
@@ -55,6 +56,7 @@ afterEach(() => {
   templatesState.post = [];
   templatesState.note = [];
   prefs.postTemplate = '';
+  prefs.proofTemplate = '';
 });
 
 describe('Notebook templates', () => {
@@ -266,9 +268,9 @@ describe('Duplicate', () => {
 });
 
 describe('the template new posts start with', () => {
-  it('is offered on post rows only', () => {
+  it('is offered on every post row, and asks about posts', () => {
     open();
-    expect(toggle('House proof')).toBeNull();
+    expect(toggle('House proof').getAttribute('title')).toBe('Start new proofs with this template');
     expect(toggle('Classic')).not.toBeNull();
     expect(toggle('Short')).not.toBeNull();
     expect(toggle('Short').getAttribute('title')).toBe('Start new posts with this template');
@@ -277,6 +279,7 @@ describe('the template new posts start with', () => {
   it('is none until one is chosen', () => {
     open();
     expect(target.querySelectorAll('.tpl-tag')).toHaveLength(0);
+    expect(toggle('House proof').getAttribute('aria-pressed')).toBe('false');
     expect(toggle('Classic').getAttribute('aria-pressed')).toBe('false');
     expect(toggle('Short').getAttribute('aria-pressed')).toBe('false');
   });
@@ -317,5 +320,41 @@ describe('the template new posts start with', () => {
     flushSync();
     expect(toggle('Classic').getAttribute('aria-pressed')).toBe('true');
     expect(target.querySelectorAll('.tpl-tag')).toHaveLength(1);
+  });
+});
+
+describe('the template New proof starts with', () => {
+  const HOUSE = { id: 'pf_2', name: 'Free black', data: { bg: '#000000', layout: 'free', font: 'barlow' } };
+
+  beforeEach(() => {
+    templatesState.proof = [PROOF, HOUSE];
+  });
+
+  it('is pressed on the proof row to choose it, and pressed again to clear it', () => {
+    open();
+    toggle('Free black').click();
+    expect(props.savePrefs).toHaveBeenCalledWith({ proof_template: 'pf_2' });
+    prefs.proofTemplate = 'pf_2';
+    flushSync();
+    toggle('Free black').click();
+    expect(props.savePrefs).toHaveBeenLastCalledWith({ proof_template: '' });
+  });
+
+  it('marks its own row and leaves the post default alone', () => {
+    prefs.proofTemplate = 'pf_2';
+    prefs.postTemplate = 'po_1';
+    open();
+    expect(toggle('Free black').getAttribute('aria-pressed')).toBe('true');
+    expect(toggle('House proof').getAttribute('aria-pressed')).toBe('false');
+    expect(rowOf('Free black').querySelector('.tpl-tag').textContent).toBe('Default');
+    expect(rowOf('Classic').querySelector('.tpl-tag').textContent).toBe('Default');
+    expect(target.querySelectorAll('.tpl-tag')).toHaveLength(2);
+  });
+
+  it('shows each proof template by a sketch of its page and its layout in words', () => {
+    open();
+    expect(rowOf('Free black').querySelector('svg.pts-sketch')).not.toBeNull();
+    expect(rowOf('Free black').textContent).toContain('Free layout · Barlow Condensed');
+    expect(rowOf('House proof').textContent).toContain('Side by side · ');
   });
 });

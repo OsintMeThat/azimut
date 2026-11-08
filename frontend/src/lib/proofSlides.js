@@ -176,7 +176,8 @@ export function resumeAt(tiles) {
 export const SLIDE_LOOK = [
   'templateId', 'bg', 'space', 'layout', 'panelDirection', 'captionSize', 'legendSize', 'footerSize',
   'footer', 'footerEnabled', 'footerText', 'footerCoords', 'footerCredits', 'footerColor', 'footerAlign',
-  'captionColor', 'captionsEnabled', 'sceneBadge', 'font', 'fontBold', 'signature', 'signatureText', 'palette',
+  'captionColor', 'captionsEnabled', 'sceneBadge', 'font', 'fontBold', 'signature', 'signatureText', 'azimutMark',
+  'palette',
 ];
 export const SLIDE_CONTENT = [
   'title', 'panels', 'pastes', 'shapes', 'notes', 'legendOrder', 'points', 'sources', 'material',

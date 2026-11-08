@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -241,3 +242,80 @@ def test_a_proof_template_keeps_its_caption_colour(client):
     assert older["data"]["captionColor"] is None
     refused = client.post("/api/templates/proof", json={"name": "Bad", "data": {"captionColor": "amber"}})
     assert refused.status_code == 422
+
+
+# -- styles stored before the scene keys and the Azimut mark ------------------
+
+FIXTURE = Path(__file__).parent / "fixtures" / "proof-templates-0.3.3.json"
+
+
+def test_proof_templates_from_before_read_and_save_back_as_written(client):
+    """A templates.json written by 0.3.3 lists, and saves again, byte for byte.
+
+    The fixture holds what the editor never shows (a dragged logo's offsets and
+    ratios, a handle's opacity, a stack direction under free layout), so a save
+    that dropped or reset any of them would show here.
+    """
+    stored = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    config.save_templates(stored)
+
+    listed = client.get("/api/templates").json()["proof"]
+    assert [t["data"] for t in listed] == [t["data"] for t in stored["proof"]]
+
+    for record in stored["proof"]:
+        saved = client.post(
+            "/api/templates/proof",
+            json={"id": record["id"], "name": record["name"], "data": record["data"]},
+        )
+        assert saved.status_code == 200, saved.text
+        assert json.dumps(saved.json()["data"]) == json.dumps(record["data"])
+
+    on_disk = json.loads(config.templates_path().read_text(encoding="utf-8"))["proof"]
+    assert [json.dumps(t["data"]) for t in on_disk] == [json.dumps(t["data"]) for t in stored["proof"]]
+    assert [t["id"] for t in on_disk] == [t["id"] for t in stored["proof"]]
+
+
+def test_a_style_says_nothing_about_the_scene_keys_until_it_is_told(client):
+    older = client.post("/api/templates/proof", json={"name": "Before", "data": {"bg": "#101418"}}).json()
+    for key in ("sceneBadge", "footerCredits", "azimutMark"):
+        assert key not in older["data"]
+
+    stated = client.post(
+        "/api/templates/proof",
+        json={"name": "Series", "data": {"sceneBadge": True, "footerCredits": False}},
+    ).json()
+    assert stated["data"]["sceneBadge"] is True
+    assert stated["data"]["footerCredits"] is False
+
+    unset = client.post(
+        "/api/templates/proof",
+        json={"name": "Unset", "data": {"sceneBadge": None, "footerCredits": None, "azimutMark": None}},
+    ).json()
+    for key in ("sceneBadge", "footerCredits", "azimutMark"):
+        assert key not in unset["data"]
+
+
+def test_a_style_can_carry_the_azimut_mark(client):
+    saved = client.post(
+        "/api/templates/proof",
+        json={"name": "Marked", "data": {"azimutMark": {"anchor": "tl", "show": "logo"}}},
+    ).json()
+    assert saved["data"]["azimutMark"] == {"anchor": "tl", "show": "logo", "size": 28.0}
+    plain = client.post("/api/templates/proof", json={"name": "Lockup", "data": {"azimutMark": {}}}).json()
+    assert plain["data"]["azimutMark"] == {"anchor": "br", "show": "both", "size": 28.0}
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"sceneBadge": "yes"},
+        {"footerCredits": 1},
+        {"azimutMark": True},
+        {"azimutMark": {"anchor": "middle"}},
+        {"azimutMark": {"size": 4}},
+        {"azimutMark": {"show": "icon"}},
+        {"azimutMark": {"show": True}},
+    ],
+)
+def test_unreadable_scene_keys_and_marks_are_refused(client, data):
+    assert client.post("/api/templates/proof", json={"name": "Bad", "data": data}).status_code == 422

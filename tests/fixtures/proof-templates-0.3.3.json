@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "proof": [
+    {
+      "id": "a1b2c3d4e5f60718",
+      "name": "Desk house style",
+      "data": {
+        "bg": "#f4f1ea",
+        "space": {
+          "pad": 32.0,
+          "gap": 12.0,
+          "rowGap": 24.0
+        },
+        "layout": "free",
+        "captionSize": 26.0,
+        "legendSize": 18.5,
+        "footerSize": 22.0,
+        "footer": "Desk A · geolocation",
+        "footerEnabled": true,
+        "footerText": true,
+        "footerCoords": true,
+        "footerColor": "#3a3a3a",
+        "footerAlign": "right",
+        "captionColor": "#1b2a4a",
+        "captionsEnabled": false,
+        "panelDirection": "vertical",
+        "font": "plexmono",
+        "fontBold": false,
+        "signature": {
+          "anchor": "tl",
+          "dx": 14.5,
+          "dy": -6.25,
+          "scale": 0.12,
+          "opacity": 0.75,
+          "xRatio": 0.031,
+          "yRatio": 0.92
+        },
+        "signatureText": {
+          "anchor": "bl",
+          "dx": 3.0,
+          "dy": -2.0,
+          "size": 44.0,
+          "color": "#1b2a4a",
+          "opacity": 0.8,
+          "xRatio": 0.05,
+          "yRatio": 0.97
+        },
+        "palette": [
+          "#d32f2f",
+          "#1565c0",
+          "#f9a825",
+          "#2e7d32",
+          "#6a1b9a",
+          "#ef6c00",
+          "#212121"
+        ]
+      },
+      "updated_at": "2026-10-31T09:12:44Z"
+    },
+    {
+      "id": "0f1e2d3c4b5a6978",
+      "name": "Plain old style",
+      "data": {
+        "bg": "#101418",
+        "space": {
+          "pad": 20.0,
+          "gap": 16.0,
+          "rowGap": 18.0
+        },
+        "layout": "grid",
+        "captionSize": 20.0,
+        "legendSize": 20.0,
+        "footerSize": 15.0,
+        "footer": "",
+        "footerEnabled": true,
+        "footerText": true,
+        "footerCoords": false,
+        "footerColor": null,
+        "footerAlign": "left",
+        "captionColor": null,
+        "captionsEnabled": true,
+        "panelDirection": "horizontal",
+        "font": "system",
+        "fontBold": true,
+        "signature": null,
+        "signatureText": null,
+        "palette": [
+          "#ff5252",
+          "#40c4ff",
+          "#ffd740",
+          "#69f0ae",
+          "#e040fb",
+          "#ff9e40",
+          "#ffffff"
+        ]
+      },
+      "updated_at": "2026-07-02T18:03:10Z"
+    }
+  ],
+  "post": [],
+  "map": [],
+  "note": []
+}

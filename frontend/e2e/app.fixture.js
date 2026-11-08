@@ -1117,7 +1117,10 @@ export async function installAppFixture(page, options = {}) {
       return route.abort('blockedbyclient');
     }
 
+    // The app's own files, the public-domain photos it ships among them (the
+    // Find example, the sample proof templates are shown on).
     if (path.startsWith('/@') || path.startsWith('/src/') || path.startsWith('/node_modules/') ||
+        path.startsWith('/guide/photos/') ||
         path === '/' || path === '/index.html' || path === '/favicon.svg') {
       return route.continue();
     }
