@@ -12,7 +12,8 @@ import { STEPS_FPS, STEPS_WEBM, serveRange } from './video.fixture.js';
  *
  * The clip is the short one of `video.fixture.js`, read by its probe as a longer one so
  * its times are the ones an analyst writes. `MOMENT_SHOTS` names a folder for a picture
- * of each state, and `MOMENT_CLIP` (with `MOMENT_FPS`) a longer clip to take them on.
+ * of each state, `MOMENT_CLIP` (with `MOMENT_FPS`) a longer clip to take them on, and
+ * `MOMENT_STILL` a JPEG its frames show.
  */
 
 const VIDEO = 'media/convoy.webm';
@@ -20,6 +21,7 @@ const LENGTH = 90;
 const SHOTS = process.env.MOMENT_SHOTS;
 const CLIP = process.env.MOMENT_CLIP ? readFileSync(process.env.MOMENT_CLIP) : STEPS_WEBM;
 const FPS = Number(process.env.MOMENT_FPS) || STEPS_FPS;
+const STILL = process.env.MOMENT_STILL ? readFileSync(process.env.MOMENT_STILL) : null;
 const PIXEL_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
   'base64',
@@ -57,8 +59,10 @@ async function serve(page, { scenes, frames = [], opens = true } = {}) {
     },
   });
   const server = { scenes, frames, saves: [], joins: [], unjoins: [], scenePuts: [], proved: null };
+  // its place among the clip's scenes is what colours it, as `engine/geolocate.py` orders it
   const row = (scene) => ({
     kind: 'draft', video: VIDEO, ...scene, state: 'todo', captures: [], abandoned: null, file_kind: 'video',
+    order: server.scenes.findIndex((sc) => sc.id === scene.id),
   });
   await page.route('**/*', async (route) => {
     const request = route.request();
@@ -68,12 +72,15 @@ async function serve(page, { scenes, frames = [], opens = true } = {}) {
     const json = (body) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
     if (path === `/files/${CASE_ID}/${VIDEO}`) return serveRange(route, CLIP, 'video/webm');
     if (path.startsWith(`/files/${CASE_ID}/media/`) && path.endsWith('.png')) {
-      return route.fulfill({ contentType: 'image/svg+xml', body: PANEL_SVG });
+      return STILL ? route.fulfill({ contentType: 'image/jpeg', body: STILL }) : route.fulfill({ contentType: 'image/svg+xml', body: PANEL_SVG });
     }
     if (path === `/api/cases/${CASE_ID}/media`) return json(media);
+    if (path === `/api/cases/${CASE_ID}/todos`) return json({ revision: 0, lists: [{ id: 'default', name: 'Tasks', tasks: [] }] });
     if (path === `/api/cases/${CASE_ID}/inspect/probe`) return json({ kind: 'video', duration: LENGTH, fps: FPS, width: 32, height: 32 });
     if (path === `/api/cases/${CASE_ID}/inspect/overview`) return json({ scan: null });
-    if (path === `/api/cases/${CASE_ID}/inspect/render-preview`) return route.fulfill({ contentType: 'image/png', body: PIXEL_PNG });
+    if (path === `/api/cases/${CASE_ID}/inspect/render-preview`) {
+      return STILL ? route.fulfill({ contentType: 'image/jpeg', body: STILL }) : route.fulfill({ contentType: 'image/png', body: PIXEL_PNG });
+    }
     if (path === `/api/cases/${CASE_ID}/inspect/work` && method === 'GET') {
       return json({
         work: {
@@ -135,7 +142,13 @@ async function serve(page, { scenes, frames = [], opens = true } = {}) {
     if (timedProof && method === 'PUT') {
       const body = request.postDataJSON();
       server.scenePuts.push(body);
-      return json({ proof: timedProof[1], video: body.video, moments: body.moments, at: [], stated: true, draft: body.draft ?? null });
+      const scene = { video: body.video, moments: body.moments, at: [], stated: true, draft: body.draft ?? null };
+      // the proof takes its scene up: listed in its place, saved with no point yet
+      server.proved = {
+        kind: 'proof', proof: timedProof[1], title: 'Road bridge', ...scene, points: [], state: 'progress', abandoned: null,
+        png: 'proofs/browser-proof.png', thumb: null,
+      };
+      return json({ proof: timedProof[1], ...scene });
     }
     return route.fallback();
   });
