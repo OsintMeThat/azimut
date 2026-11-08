@@ -9,8 +9,9 @@ import { ProofScene } from './proofScene.svelte.js';
 const CLIP = 'media/clip.mp4';
 const OTHER = 'media/other.mp4';
 
-function setup({ name = 'depot', frames = [{ panel: 'p1', video: CLIP, time: 130 }], answer } = {}) {
+function setup({ name = 'depot', frames = [{ panel: 'p1', video: CLIP, time: 130 }], answer, listed = null } = {}) {
   const where = { caseId: 'case', name };
+  const scenes = { answer: listed };
   const puts = [];
   const api = {
     put: vi.fn(async (url, body) => {
@@ -23,8 +24,8 @@ function setup({ name = 'depot', frames = [{ panel: 'p1', video: CLIP, time: 130
   };
   const toast = vi.fn();
   const onstated = vi.fn();
-  const scene = new ProofScene({ api, toast, where: () => where, frames: () => frames, onstated });
-  return { scene, api, puts, toast, onstated, where };
+  const scene = new ProofScene({ api, toast, where: () => where, frames: () => frames, listed: () => scenes.answer, onstated });
+  return { scene, api, puts, toast, onstated, where, scenes };
 }
 
 describe('a saved proof\'s scene', () => {
@@ -132,6 +133,112 @@ describe('a proof never saved', () => {
     await scene.flush();
     expect(scene.held).toBe(true);
     expect(toast).toHaveBeenCalledWith('The scene\'s time was not written: offline', 'danger', 8000);
+  });
+});
+
+describe('a proof made by hand, whose frames fall in a scene still to prove', () => {
+  /** The clip's scenes as `GET /scenes` reads them: Bridge? from 2:00 to 2:20, and another at 5:00. */
+  const LISTED = {
+    video: CLIP,
+    scenes: [
+      { kind: 'draft', id: 's1', start: 120, end: 140, label: 'Bridge?', state: 'todo', captures: [], abandoned: null },
+      { kind: 'draft', id: 's2', start: 300, end: null, label: '', state: 'todo', captures: [], abandoned: null },
+    ],
+    taken: [],
+    collages: [],
+  };
+
+  it('reads the scene\'s time and takes it up right after its first save, as Make the proof does', async () => {
+    const { scene, puts, where } = setup({ name: null, listed: LISTED });
+    expect(scene.match).toMatchObject({ id: 's1', title: 'Bridge?' });
+    expect([scene.stated, scene.moments, scene.draft]).toEqual([null, [{ start: 120, end: 140 }], 's1']);
+    where.name = 'bridge';
+    await scene.flush();
+    expect(puts).toEqual([{
+      url: '/api/cases/case/proofs/bridge/scene',
+      body: { moments: [{ start: 120, end: 140 }], video: CLIP, draft: 's1' },
+    }]);
+    expect(scene.stated).toEqual({ video: CLIP, moments: [{ start: 120, end: 140 }], draft: 's1' });
+    expect(scene.match).toBeNull();
+  });
+
+  it('follows the panels: frames moved into two scenes, or out of it, take nothing', () => {
+    const held = $state({ frames: [{ panel: 'p1', video: CLIP, time: 130 }], answer: LISTED });
+    const scene = new ProofScene({
+      api: {}, toast: vi.fn(), where: () => ({ caseId: 'case', name: null }), frames: () => held.frames, listed: () => held.answer,
+    });
+    expect(scene.match?.id).toBe('s1');
+    held.frames = [...held.frames, { panel: 'p2', video: CLIP, time: 300 }];
+    expect([scene.match, scene.moments]).toEqual([null, []]);
+    held.frames = [{ panel: 'p1', video: CLIP, time: 200 }];
+    expect(scene.match).toBeNull();
+    held.frames = [{ panel: 'p1', video: CLIP, time: 135 }];
+    expect(scene.match?.id).toBe('s1');
+    // the strip read again once another proof took the scene up
+    held.answer = { ...LISTED, taken: ['s1'] };
+    expect(scene.match).toBeNull();
+  });
+
+  it('leaves a proof that states a scene alone', () => {
+    const { scene } = setup({ listed: LISTED });
+    scene.load({ video: CLIP, moments: [{ start: 125, end: 135 }] });
+    expect(scene.match).toBeNull();
+    expect(scene.moments).toEqual([{ start: 125, end: 135 }]);
+    // nor one made from a scene of Inspect
+    scene.hold({ video: CLIP, moments: [], draft: 's9' });
+    expect(scene.match).toBeNull();
+  });
+
+  it('finds the scene of a slide begun with + New scene, which holds only its video', () => {
+    const { scene } = setup({ name: null, listed: LISTED });
+    scene.hold({ video: CLIP, moments: [], draft: null });
+    expect(scene.match?.id).toBe('s1');
+  });
+
+  it('keeps an older proof as it is on disk until it is saved', async () => {
+    const { scene, puts } = setup({ listed: { ...LISTED, scenes: [...LISTED.scenes, { kind: 'proof', proof: 'depot', moments: [], at: [130], stated: false }] } });
+    scene.load(undefined);
+    // its own row is no other scene
+    expect(scene.match?.id).toBe('s1');
+    expect(puts).toEqual([]);
+    await scene.flush();
+    expect(puts[0].body).toEqual({ moments: [{ start: 120, end: 140 }], video: CLIP, draft: 's1' });
+  });
+
+  it('refuses it with Not this scene, for this proof and the session, writing nothing', async () => {
+    const { scene, puts, where, onstated } = setup({ name: null, listed: LISTED });
+    scene.refuse();
+    expect([scene.match, scene.moments, scene.draft]).toEqual([null, [], null]);
+    expect(onstated).toHaveBeenCalledTimes(1);
+    where.name = 'bridge';
+    await scene.flush();
+    expect(puts).toEqual([]);
+    // opened again in the session, it stays apart; another proof is asked afresh
+    scene.load(undefined);
+    expect(scene.match).toBeNull();
+    where.name = 'market';
+    scene.load(undefined);
+    expect(scene.match?.id).toBe('s1');
+    scene.reset();
+    expect(scene.refused).toEqual([]);
+  });
+
+  it('states the scene with a time changed meanwhile, at once for a saved proof', async () => {
+    const { scene, puts } = setup({ listed: LISTED });
+    scene.openTime();
+    expect(scene.edit.moments.map((m) => [m.start, m.end])).toEqual([[120, 140]]);
+    scene.edit.typeEnd('2:10');
+    await scene.applyTime();
+    expect(puts[0].body).toEqual({ moments: [{ start: 120, end: 130 }], video: CLIP, draft: 's1' });
+    expect(scene.stated.draft).toBe('s1');
+  });
+
+  it('takes nothing to another video made the ★', async () => {
+    const frames = [{ panel: 'p1', video: CLIP, time: 130 }, { panel: 'p2', video: OTHER, time: 12 }];
+    const { scene, puts } = setup({ listed: LISTED, frames });
+    expect(scene.match?.id).toBe('s1');
+    await scene.makeStar(OTHER);
+    expect(puts[0].body).toEqual({ moments: [], video: OTHER });
   });
 });
 

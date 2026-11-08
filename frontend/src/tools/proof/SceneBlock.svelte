@@ -113,6 +113,17 @@
         <Icon name="play" size={12} />
       </button>
     </div>
+    {#if v.star && scene.match}
+      <!-- The scene still to prove its frames found, taken up at the next save. -->
+      {@const found = scene.match}
+      <p class="matched" role="status" data-testid="scene-match" title={found.whole ? HELP.onlyScene : HELP.matched}>
+        <span class="swatch" style:background={found.color} aria-hidden="true"></span>
+        <span class="found" dir="auto">{found.title}</span>
+        <span class="sep" aria-hidden="true">·</span>
+        <span class="why">{found.whole ? 'the video\'s only scene' : 'found by its frames'}</span>
+        <button class="link refuse" onclick={() => scene.refuse()} title={HELP.notThisScene}>Not this scene</button>
+      </p>
+    {/if}
   {/each}
 
   {#if outside.length}
@@ -243,6 +254,39 @@
   .confirm {
     flex-shrink: 0;
     color: var(--text-3);
+  }
+  /* Under the ★ field, in the scene's colour: what the frames found, and the way out. */
+  .matched {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 4px 0 0;
+    padding: 0 0 0 8px;
+    font-size: var(--fs-xs);
+    line-height: 1.4;
+    color: var(--text-2);
+  }
+  .swatch {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  .found {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-1);
+  }
+  .why {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .refuse {
+    flex-shrink: 0;
+    margin-left: auto;
+    white-space: nowrap;
   }
   .outside {
     margin: 5px 0 0;

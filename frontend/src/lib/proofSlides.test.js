@@ -89,6 +89,20 @@ describe('the tiles of a strip', () => {
     expect(tiles.some((t) => t.key === 's1')).toBe(false);
   });
 
+  it('put a saved proof in the place of the scene it takes up, while the server still lists that scene', () => {
+    // an older proof made by hand, its frames found in the scene, or one saved a moment ago
+    const tiles = slideTiles(ANSWER, { started: true, name: 'market', title: 'Market', draft: 's1' });
+    expect(tiles.map((t) => t.key)).toEqual(['proof:road-bridge', 'proof:market', 's3', 'proof:square', 's2']);
+    const bar = sceneList(ANSWER.scenes, ANSWER.scenes.filter((s) => s.kind === 'draft'));
+    expect(tiles[1]).toMatchObject({ kind: 'proof', name: 'market', current: true, color: bar.find((s) => s.key === 's1').color });
+    const fresh = slideTiles(ANSWER, { started: true, name: 'fresh', title: 'Fresh', draft: 's1', thumb: 'proofs/.thumbs/fresh.webp' });
+    expect(fresh[1]).toMatchObject({ key: 'proof:fresh', current: true, title: 'Fresh', thumb: 'proofs/.thumbs/fresh.webp' });
+    expect(fresh.some((t) => t.key === 's1')).toBe(false);
+    // a scene the server no longer lists leaves the proof where the server puts it
+    expect(slideTiles(ANSWER, { started: true, name: 'market', draft: 's9' }).map((t) => t.key))
+      .toEqual(['proof:road-bridge', 's1', 'proof:market', 's3', 'proof:square', 's2']);
+  });
+
   it('add a new slide at the end of the live ones, before the abandoned', () => {
     const tiles = slideTiles(ANSWER, { started: true, name: null, title: 'Proof 7' });
     expect(tiles.map((t) => t.key).slice(-2)).toEqual(['new', 's2']);

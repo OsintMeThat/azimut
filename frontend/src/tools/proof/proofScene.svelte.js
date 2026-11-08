@@ -12,11 +12,16 @@
  *
  * What the proof states is `stated`, `{ video, moments, draft }`, or null while the
  * scene is read off the panels (`lib/proofScene.js`).
+ *
+ * A proof made by hand states nothing, yet its frames may all fall in one scene of
+ * Inspect still to prove. That scene is its `match`: the time reads the scene's, the
+ * tab names it, and the next save takes it up as Make the proof's first save does.
+ * **Not this scene** keeps the proof apart from it for the session, and writes nothing.
  */
 import { SceneEdit } from '../../lib/sceneEdit.svelte.js';
 import { sameMoments, sortMoments, timeWords } from '../../lib/scenes.js';
 import {
-  outsideFrames, proofVideos, readStatedScene, starVideo, statedMoments, videoName,
+  outsideFrames, proofVideos, readStatedScene, sceneOfFrames, starVideo, statedMoments, videoName,
 } from '../../lib/proofScene.js';
 
 const plain = (moments) => (moments ?? []).map(({ start, end }) => ({ start, end: end ?? null }));
@@ -32,18 +37,41 @@ export class ProofScene {
   clip = $state({ duration: 0, fps: null });
   /** A frame being saved to the case, to come back as a panel. */
   adding = $state(false);
+  /** The scenes refused with Not this scene for the proof open, by id. */
+  refused = $state([]);
+  /** The name the open proof is listed under in its video's scenes, whose row is its own. */
+  #listedAs = $state(null);
+  /** What Not this scene refused, by case and proof, for the session only. */
+  #refusals = new Map();
   edit;
 
   /**
+   * The scene still to prove the proof's frames all fall in, which its next save takes
+   * up (`lib/proofScene.sceneOfFrames`), or null. Only while the proof states no scene:
+   * none at all, or only the video a slide started with + New scene holds.
+   */
+  match = $derived.by(() => {
+    const stated = this.stated;
+    if (stated && !(this.held && !stated.draft && !stated.moments.length)) return null;
+    const star = this.star;
+    // the clip's own frame once the player read it, else a thirtieth, as in Inspect
+    const frame = this.view?.video === star && this.clip.fps > 0 ? 1 / this.clip.fps : 0;
+    const found = sceneOfFrames(this.frames(), star, this.listed(), { own: this.#listedAs, frame });
+    return found && !this.refused.includes(found.id) ? found : null;
+  });
+
+  /**
    * `where()` answers `{ caseId, name }`, the name null until the first save;
-   * `frames()` the panels cut from a video (`lib/proofScene.panelFrames`).
+   * `frames()` the panels cut from a video (`lib/proofScene.panelFrames`);
+   * `listed()` what `GET /scenes?video=` answered for the ★ video, or null.
    * `onstated()` hears every change the analyst states, not the first save's.
    */
-  constructor({ api, toast, where, frames, onstated = () => {} }) {
+  constructor({ api, toast, where, frames, listed = () => null, onstated = () => {} }) {
     this.api = api;
     this.toast = toast;
     this.where = where;
     this.frames = frames;
+    this.listed = listed;
     this.onstated = onstated;
     this.edit = new SceneEdit(() => this.clip);
   }
@@ -53,9 +81,14 @@ export class ProofScene {
     return starVideo(this.frames(), this.stated);
   }
 
-  /** When in it the place shows: none is the whole video. */
+  /** When in it the place shows: none is the whole video, and a match reads its scene's. */
   get moments() {
-    return statedMoments(this.stated, this.star);
+    return this.match ? this.match.moments : statedMoments(this.stated, this.star);
+  }
+
+  /** The scene of Inspect the proof takes up: the one it states, else the one its frames found. */
+  get draft() {
+    return this.stated?.draft ?? this.match?.id ?? null;
   }
 
   /** Every video the proof rests on, the ★ first. The block shows itself when there is one. */
@@ -73,13 +106,37 @@ export class ProofScene {
     this.stated = null;
     this.held = false;
     this.view = null;
+    this.refused = [];
+    this.#listedAs = null;
     this.edit.close();
   }
 
-  /** A saved proof opened: what its spec states. */
+  /** A saved proof opened: what its spec states, and the scene it refused this session. */
   load(scene) {
     this.reset();
     this.stated = readStatedScene(scene);
+    this.#listedAs = this.where().name ?? null;
+    this.refused = this.#refusals.get(this.#refusalKey()) ?? [];
+  }
+
+  /** Not this scene: the proof stays apart from the scene its frames found. Nothing is written. */
+  refuse() {
+    const found = this.match;
+    if (!found) return;
+    this.refused = [...this.refused, found.id];
+    this.#keepRefusals();
+    // a time printed on the picture now reads the whole video
+    this.onstated();
+  }
+
+  #refusalKey() {
+    const { caseId, name } = this.where();
+    return name ? `${caseId ?? ''}\n${name}` : null;
+  }
+
+  #keepRefusals() {
+    const key = this.#refusalKey();
+    if (key && this.refused.length) this.#refusals.set(key, this.refused);
   }
 
   /** A new proof made from a scene: held until its first save. */
@@ -144,7 +201,9 @@ export class ProofScene {
    * takes them back; a proof never saved holds them for its first save.
    */
   async write({ video, moments }, { undoable = true } = {}) {
-    const next = { video, moments: sortMoments(plain(moments)), draft: this.stated?.draft ?? null };
+    // a time stated for the scene its frames found states that scene too, as Make the proof's does
+    const taking = !this.stated?.draft && video === this.star ? this.match?.id ?? null : null;
+    const next = { video, moments: sortMoments(plain(moments)), draft: this.stated?.draft ?? taking };
     const { caseId, name } = this.where();
     if (!name) {
       this.stated = next;
@@ -152,12 +211,13 @@ export class ProofScene {
       this.onstated();
       return true;
     }
-    const before = { video: this.star, moments: plain(this.moments) };
+    const before = { video: this.star, moments: plain(statedMoments(this.stated, this.star)) };
     let res;
     try {
       res = await this.api.put(`/api/cases/${caseId}/proofs/${encodeURIComponent(name)}/scene`, {
         moments: next.moments,
         video,
+        ...(taking ? { draft: taking } : {}),
       });
     } catch (e) {
       this.toast(e.message, 'danger');
@@ -184,11 +244,20 @@ export class ProofScene {
 
   /**
    * Write what a proof never saved was holding, right after its first save named it:
-   * the video, the moments and the scene of Inspect it was made from.
+   * the video, the moments and the scene of Inspect it was made from. Run after every
+   * save: the scene the frames of a proof made by hand found is taken up the same way.
    */
   async flush() {
     const { caseId, name } = this.where();
-    if (!this.held || !this.stated || !name) return;
+    if (!name) return;
+    const found = this.match;
+    if (found) {
+      this.stated = { video: this.star, moments: plain(found.moments), draft: found.id };
+      this.held = true;
+    }
+    this.#listedAs = name;
+    this.#keepRefusals();
+    if (!this.held || !this.stated) return;
     const { video, moments, draft } = this.stated;
     try {
       const res = await this.api.put(`/api/cases/${caseId}/proofs/${encodeURIComponent(name)}/scene`, {

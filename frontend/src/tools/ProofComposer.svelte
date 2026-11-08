@@ -424,6 +424,8 @@
     toast,
     where: () => ({ caseId: caseState.current?.id ?? null, name: savedName }),
     frames: () => sceneFrames,
+    // the ★ video's scenes, as the strip read them: where a proof made by hand finds its own
+    listed: () => slides.answer,
     // a time printed on the picture is a picture the saved one no longer is
     onstated: () => {
       if (proof.sceneBadge) dirty = true;
@@ -435,7 +437,7 @@
   const sceneVideo = $derived(scene.view?.video ?? null);
   let sceneHue = $state(undefined);
   $effect(() => {
-    const video = sceneVideo, id = caseState.current?.id, name = savedName, draft = scene.stated?.draft ?? null;
+    const video = sceneVideo, id = caseState.current?.id, name = savedName, draft = scene.draft;
     if (!video || !id) return;
     // the strip under the canvas has read this video's scenes already
     if (slides.answer?.video === video) {
@@ -562,7 +564,7 @@
     started: proofStarted,
     name: savedName,
     title: proof.title,
-    draft: scene.stated?.draft ?? null,
+    draft: scene.draft,
     thumb: savedThumb?.name === savedName ? savedThumb.thumb : null,
     page: draftShown?.id ?? null,
   });
@@ -6246,8 +6248,9 @@
       proof.title = result.title;
       dirty = false;
       savedSnapshot = docSnapshot();
-      // the time a proof never saved was holding goes in now, through its own route
-      if (scene.held) await scene.flush();
+      // the time a proof never saved was holding goes in now, through its own route, and
+      // the scene the frames of one made by hand found is taken up the same way
+      await scene.flush();
       await reloadCase();
       savedThumb = { name: result.name, thumb: result.thumb ?? null };
       if (!slide) toast(`Proof saved: ${result.png}`, 'ok');

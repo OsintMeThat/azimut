@@ -87,8 +87,9 @@ function draftTile(row, geolocating, thumbOf) {
  *
  * `answer` is what `/scenes` answered, or null. `open` is the slide on screen:
  * `{ started, name, title, draft, thumb, page }`, `name` the saved proof's (null before
- * its first save), `draft` the scene a proof never saved was made from, which it takes
- * the place of, and `page` the scene whose page is shown in place of a proof.
+ * its first save), `draft` the scene the slide takes up (made from it, or found by its
+ * frames), whose place it stands in while the server still lists that scene, and
+ * `page` the scene whose page is shown in place of a proof.
  * `thumbOf(path)` is a case file's thumbnail, for a scene's first capture.
  *
  * Each tile: `{ key, kind, state, title, time, words, thumb, color, number, current }`,
@@ -99,34 +100,43 @@ export function slideTiles(answer, open = {}, { thumbOf = null } = {}) {
   const ordered = sceneList(listed, listed.filter((s) => s.kind === 'draft'), answer?.taken ?? []);
   const geolocating = answer?.geolocating ?? null;
   const unsaved = open.started && !open.name;
+  // the scene the slide open takes up while the server still lists it
+  const takes = open.started && open.draft ? ordered.find((row) => row.kind === 'draft' && row.id === open.draft) ?? null : null;
   let placed = false;
   const tiles = ordered.map((row) => {
     if (row.kind === 'proof') {
-      const tile = proofTile(row);
       if (open.started && open.name && row.proof === open.name) {
+        // it stands where the scene it takes up does
+        if (takes) return null;
         placed = true;
-        return { ...tile, current: true, thumb: open.thumb || tile.thumb, title: open.title || tile.title };
+        return savedTile(open, row, row.color);
       }
-      return { ...tile, current: false };
+      return { ...proofTile(row), current: false };
     }
-    // a proof not saved yet, made from this scene, stands where the scene did
-    if (unsaved && open.draft && row.id === open.draft) {
+    // a proof made from this scene, or found in it by its frames, stands where the scene did
+    if (row === takes) {
       placed = true;
-      return newTile(open, row.color, 'new');
+      if (unsaved) return newTile(open, row.color, 'new');
+      return savedTile(open, ordered.find((one) => one.kind === 'proof' && one.proof === open.name), row.color);
     }
     return { ...draftTile(row, geolocating, thumbOf), current: !open.started && open.page === row.id };
-  });
+  }).filter(Boolean);
   const live = tiles.filter((t) => t.state !== ABANDONED);
   const left = tiles.filter((t) => t.state === ABANDONED);
   if (open.started && !placed) {
     // a slide the strip has not heard of yet: never saved, or saved a moment ago
     const color = sceneColorAt(ordered.length);
-    live.push(open.name
-      ? { key: `proof:${open.name}`, kind: 'proof', name: open.name, state: PROVED, title: open.title || open.name, time: '',
-          words: '', thumb: open.thumb || null, color, current: true }
-      : newTile(open, color, 'new'));
+    live.push(open.name ? savedTile(open, null, color) : newTile(open, color, 'new'));
   }
   return [...live, ...left].map((tile, i) => ({ ...tile, number: i + 1 }));
+}
+
+/** The saved slide open: its row's tile, else the one its save answered, in `color`. */
+function savedTile(open, row, color) {
+  const tile = row
+    ? proofTile(row)
+    : { key: `proof:${open.name}`, kind: 'proof', name: open.name, state: PROVED, title: open.name, time: '', words: '', thumb: null };
+  return { ...tile, current: true, thumb: open.thumb || tile.thumb, title: open.title || tile.title, color };
 }
 
 function newTile(open, color, key) {

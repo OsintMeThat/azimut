@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   badgeText, frameOrigin, handoffTitle, momentHolds, outsideFrames, panelFrames, playSegments, proofVideos,
-  readHandoff, readStatedScene, sceneBadges, sceneColor, sceneLine, segmentAt, starVideo, statedMoments, videoName,
+  readHandoff, readStatedScene, sceneBadges, sceneColor, sceneLine, sceneOfFrames, segmentAt, starVideo, statedMoments,
+  videoName,
 } from './proofScene.js';
+import { sceneList } from './scenes.js';
 
 /**
  * A proof's scene as Geo Proof reads it: the panels Inspect cut from a video, the
@@ -225,5 +227,100 @@ describe('a Make the proof handoff', () => {
     expect(handoffTitle('  Depot  ')).toBe('Depot');
     expect(handoffTitle('???')).toBe('');
     expect(handoffTitle(null)).toBe('');
+  });
+});
+
+describe('the scene a proof made by hand finds by its frames', () => {
+  const draft = (id, start, end, extra = {}) => ({
+    kind: 'draft', id, start, end, label: '', state: 'todo', captures: [], abandoned: null, ...extra,
+  });
+  const proofRow = (name, extra = {}) => ({ kind: 'proof', proof: name, title: name, moments: [], at: [], stated: false, ...extra });
+  /** What `GET /scenes` answers for the clip: a bridge passage, a tower instant, a market passage. */
+  const answer = (scenes, extra = {}) => ({ video: CLIP, scenes, taken: [], collages: [], ...extra });
+  const SCENES = [
+    draft('s1', 0, 7, { label: 'Bridge?' }),
+    draft('s2', 30, null),
+    draft('s3', 60, 90, { label: 'Market?' }),
+  ];
+  const at = (...times) => times.map((time, i) => ({ panel: `p${i}`, src: `media/f${i}.png`, video: CLIP, time }));
+
+  it('takes the one scene still to prove every frame falls in, with its moments, name and colour', () => {
+    const found = sceneOfFrames(at(0.2, 3, 6.9), CLIP, answer(SCENES));
+    const bar = sceneList(SCENES, SCENES);
+    expect(found).toEqual({
+      id: 's1', moments: [{ start: 0, end: 7 }], title: 'Bridge?', color: bar.find((s) => s.id === 's1').color, whole: false,
+    });
+    // an instant holds the frame cut on it; a scene with no label is named by its time
+    expect(sceneOfFrames(at(30), CLIP, answer(SCENES))).toMatchObject({ id: 's2', moments: [{ start: 30, end: null }], title: '0:30' });
+  });
+
+  it('decides nothing for frames in two scenes, nor for frames in none', () => {
+    expect(sceneOfFrames(at(3, 70), CLIP, answer(SCENES))).toBeNull();
+    expect(sceneOfFrames(at(3, 20), CLIP, answer(SCENES))).toBeNull();
+    expect(sceneOfFrames(at(20, 40), CLIP, answer(SCENES))).toBeNull();
+    // two scenes over the same frame are two scenes
+    expect(sceneOfFrames(at(3), CLIP, answer([...SCENES, draft('s4', 2, 4)]))).toBeNull();
+    // nor for a proof with no frame of the clip, or a reading of another video
+    expect(sceneOfFrames([], CLIP, answer(SCENES))).toBeNull();
+    expect(sceneOfFrames(at(3), CLIP, { ...answer(SCENES), video: OTHER })).toBeNull();
+    expect(sceneOfFrames(at(3), CLIP, null)).toBeNull();
+  });
+
+  it('reads a frame in a scene by Inspect\'s rule, half a frame at each edge, at the clip\'s rate', () => {
+    // the frame before the passage starts, at 25 fps: its middle is outside
+    expect(sceneOfFrames(at(6.96), CLIP, answer([draft('s1', 7, 9)]), { frame: 0.04 })).toBeNull();
+    // a frame read off the file a hair before the start S counted: its middle is inside
+    expect(sceneOfFrames(at(6.981), CLIP, answer([draft('s1', 7, 9)]), { frame: 0.04 })).toMatchObject({ id: 's1' });
+    // while the clip's rate is unknown a frame lasts a thirtieth, so that middle falls outside
+    expect(sceneOfFrames(at(6.981), CLIP, answer([draft('s1', 7, 9)]))).toBeNull();
+    // the last frame of the passage is in it, the one at its end is not
+    expect(sceneOfFrames(at(8.96), CLIP, answer([draft('s1', 7, 9)]), { frame: 0.04 })).toMatchObject({ id: 's1' });
+    expect(sceneOfFrames(at(9), CLIP, answer([draft('s1', 7, 9)]), { frame: 0.04 })).toBeNull();
+  });
+
+  it('leaves out a scene given up on, and one a proof has taken up', () => {
+    const abandoned = SCENES.map((s) => (s.id === 's1' ? { ...s, abandoned: { reason: 'blurry' }, state: 'abandoned' } : s));
+    expect(sceneOfFrames(at(3), CLIP, answer(abandoned))).toBeNull();
+    // taken: named by the server, or cited by a proof of the clip
+    expect(sceneOfFrames(at(3), CLIP, answer(SCENES, { taken: ['s1'] }))).toBeNull();
+    const cited = [proofRow('bridge', { moments: [{ start: 0, end: 7 }], draft: 's1', stated: true }), ...SCENES];
+    expect(sceneOfFrames(at(3), CLIP, answer(cited))).toBeNull();
+  });
+
+  it('counts the scene of another proof its frames fall in, never its own row', () => {
+    // another proof pinned at the same frame: two scenes hold it
+    const shared = [...SCENES, proofRow('old', { at: [3] })];
+    expect(sceneOfFrames(at(3), CLIP, answer(shared))).toBeNull();
+    // the proof open is listed under its name: its own frames are no other scene
+    expect(sceneOfFrames(at(3), CLIP, answer(shared), { own: 'old' })).toMatchObject({ id: 's1' });
+  });
+
+  it('takes a scene about the whole video only as the video\'s one scene', () => {
+    const whole = draft('w', null, null, { label: 'Which town?' });
+    expect(sceneOfFrames(at(3, 50), CLIP, answer([whole]))).toMatchObject({ id: 'w', moments: [], title: 'Which town?', whole: true });
+    // a timed scene holding the frames wins over the whole video's
+    expect(sceneOfFrames(at(3), CLIP, answer([whole, ...SCENES]))).toMatchObject({ id: 's1', whole: false });
+    // frames outside the timed scenes say nothing while there are others
+    expect(sceneOfFrames(at(20), CLIP, answer([whole, ...SCENES]))).toBeNull();
+    // nor beside another proof of the clip, whichever frames it rests on
+    expect(sceneOfFrames(at(3), CLIP, answer([whole, proofRow('elsewhere', { at: [50] })]))).toBeNull();
+    expect(sceneOfFrames(at(3), CLIP, answer([whole, proofRow('mine', { at: [3] })]), { own: 'mine' })).toMatchObject({ id: 'w' });
+    // given up on, it is no scene to take
+    expect(sceneOfFrames(at(3), CLIP, answer([{ ...whole, abandoned: { reason: '' } }]))).toBeNull();
+  });
+
+  it('reads a collage of the clip by every piece, as Inspect lists it under its scenes', () => {
+    const collage = { panel: 'pc', src: 'collages/bridge.png', video: CLIP, time: 1 };
+    const listed = (times) => answer(SCENES, { collages: [{ collage: 'c1', export: 'collages/bridge.png', times, start: times[0] }] });
+    expect(sceneOfFrames([collage], CLIP, listed([1, 4, 6]))).toMatchObject({ id: 's1' });
+    // a piece in another scene: the collage spans two
+    expect(sceneOfFrames([collage], CLIP, listed([1, 65]))).toBeNull();
+    // a collage the reading does not list stands at its first piece, as the server traces it
+    expect(sceneOfFrames([collage], CLIP, answer(SCENES))).toMatchObject({ id: 's1' });
+  });
+
+  it('reads only the frames of the ★ video', () => {
+    const frames = [...at(3), { panel: 'po', src: 'media/o.png', video: OTHER, time: 70 }];
+    expect(sceneOfFrames(frames, CLIP, answer(SCENES))).toMatchObject({ id: 's1' });
   });
 });
