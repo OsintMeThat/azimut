@@ -560,9 +560,11 @@ describe('Proof Composer frames', () => {
     // the legend is built from shape colours; frames are not shapes
     expect(source).toContain('orderedFeatureColors(proof.shapes');
     expect(source).not.toContain('orderedFeatureColors([...proof.shapes');
-    // …and it frames the image, not the upright box a turned image sits in
-    expect(source).toContain('if (panel.frame) group.add(frameNode(panel.frame, image, box.scale))');
-    expect(source).toContain('if (paste.frame) group.add(frameNode(paste.frame, image, box.scale))');
+    // …and it frames the image, not the upright box a turned image sits in, or
+    // the cut square on the page when the image has one
+    expect(source).toContain('if (panel.frame) shown.layer.add(frameNode(panel.frame, shown.size, box.scale))');
+    expect(source).toContain('if (paste.frame) shown.layer.add(frameNode(paste.frame, shown.size, box.scale))');
+    expect(bodyOfFn('shownLayer')).toContain('if (!item.cut) return { layer: group, size: image };');
   });
 
   it('draws the border inset so it cannot move the layout', () => {
@@ -575,12 +577,14 @@ describe('Proof Composer frames', () => {
 });
 
 describe('Proof Composer panel and overlay transforms', () => {
-  it('hydrates a spec surface into its crop, its turn and its upright box', () => {
+  it('hydrates a spec surface into its crop, its turn, its cut and its upright box', () => {
     const body = bodyOfFn('hydratedSurface');
-    expect(body).toContain('crop: normalizeSourceCrop(surface.crop, sourceNatural)');
-    expect(body).toContain('rotation: normalizeSurfaceAngle(surface.rotation)');
+    expect(body).toContain('const crop = normalizeSourceCrop(surface.crop, sourceNatural);');
+    expect(body).toContain('const rotation = normalizeSurfaceAngle(surface.rotation);');
+    // a cut is read, held to the picture, and never sits beside a crop
+    expect(body).toContain('cut: crop ? null : fitSurfaceCut(surface.cut, sourceNatural, rotation)');
     expect(bodyOfFn('refreshSurface'))
-      .toContain('surfaceBoxSize(surface.sourceNatural, surface.crop, surface.rotation)');
+      .toContain('surfaceBoxSize(surface.sourceNatural, surface.crop, surface.rotation, surface.cut)');
     expect(source).toContain("proof.panels.push(hydratedSurface({");
     expect(source).toContain("proof.pastes.push(hydratedSurface({ ...p, id: p.id ?? newId('x') }, img))");
   });
@@ -592,32 +596,65 @@ describe('Proof Composer panel and overlay transforms', () => {
     const body = bodyOfFn('applySurfaceRotation');
     expect(body).toContain('item.rotation = turned');
     expect(body).not.toContain('mapSurfaceShapes');
-    expect(source).toContain('rotation: panel.rotation ?? 0');
-    expect(source).toContain('rotation: paste.rotation ?? 0');
+    // one builder seats panels and overlays alike, turned in their own group
+    expect(bodyOfFn('surfaceNodes')).toContain('rotation: turn');
+    expect(source.match(/surfaceNodes\((panel|paste), box,/g)).toHaveLength(2);
     expect(source).not.toContain('renderSurfaceImage');
   });
 
-  it('crops in source pixels and walks annotations by the corner they moved', () => {
+  it('crops along the picture\'s edges, cuts across them, and walks annotations by the corner they moved', () => {
     const body = bodyOfFn('applySurfaceCrop');
-    expect(body).toContain('normalizeSourceCrop(selection, item.sourceNatural)');
-    expect(body).toContain('shiftProofShape(s, dx, dy)');
-    expect(body).toContain('item.crop = kept');
+    // unturned or a quarter turn round: a crop in source pixels, as always
+    expect(body).toContain('const square = isQuarterTurn(turn);');
+    expect(body).toContain('cutToSourceCrop(selection, item.sourceNatural, turn)');
+    // at any other angle: a cut, square on the page
+    expect(body).toContain('settleSurfaceCut(selection, item.sourceNatural, turn)');
+    const reshape = bodyOfFn('reshapeSurface');
+    expect(reshape).toContain('shiftSurfaceMarks(item, dx, dy)');
+    expect(reshape).toContain('item.crop = crop;');
+    expect(reshape).toContain('item.cut = cut;');
+    expect(bodyOfFn('shiftSurfaceMarks')).toContain('shiftProofShape(s, dx, dy)');
   });
 
   it('shows the whole source under the marks, so a crop can be taken back', () => {
     const body = bodyOfFn('surfaceImageNode');
     expect(body).toContain("name: 'crop-ghost'");
     expect(body).toContain('width: sw, height: sh'); // the source, not the crop
-    expect(bodyOfFn('beginSurfaceCrop')).toContain('cropDraft = item.crop');
-    // …and the marks clamp to the source, which is what lets them pull back out
-    expect(bodyOfFn('updateCropFromHandle')).toContain('frame.item.sourceNatural');
+    // the shade is square on the page, like the marks, and lies on the picture only
+    expect(body).toContain("rotation: -(item.rotation ?? 0)");
+    expect(bodyOfFn('beginSurfaceCrop'))
+      .toContain('cropDraft = item.cut ? { ...item.cut } : surfaceCutStart(item.sourceNatural, item.crop, item.rotation);');
+    // …and the marks reach as far as the turned picture, which is what lets them pull back out
+    expect(bodyOfFn('updateCropFromHandle')).toContain('const { reach } = frame;');
+    expect(bodyOfFn('cropFrameOf')).toContain('reach: surfaceCutReach(item.sourceNatural, turn)');
+  });
+
+  it('stands the crop marks square on the page however the picture is turned', () => {
+    expect(bodyOfFn('drawCropHandles')).not.toContain('rotation:');
+    expect(bodyOfFn('positionCropHandles')).not.toContain('.rotation(');
+    // marks left where they opened change nothing, so a turned crop is kept as it was
+    expect(bodyOfFn('endSurfaceCrop')).toContain('!sameBox(selection, cropStart)');
+  });
+
+  it('holds a cut surface by an upright group, so its frame and handles are square', () => {
+    const nodes = bodyOfFn('surfaceNodes');
+    expect(nodes).toContain('id: `pc-${item.id}`');
+    expect(nodes).toContain('node.getClientRect = ');
+    expect(bodyOfFn('surfaceNodeOf')).toContain('docLayer.findOne(`#pc-${id}`) ?? docLayer.findOne(`#pg-${id}`)');
+    expect(bodyOfFn('applyNodeTurn')).toContain('turnCutSurface(item, node.rotation())');
+    // the picture is clipped to the cut, and the marks stay on its pixels
+    expect(bodyOfFn('surfaceImageNode')).toContain('clipFunc: (ctx) => traceOutline(ctx, outline)');
+  });
+
+  it('keeps a crop or a cut with Enter, like a press off the image', () => {
+    expect(source).toMatch(/Enter' && cropSurfaceId\) \{\s*\n\s*e\.preventDefault\(\);\s*\n\s*endSurfaceCrop\(\);/);
   });
 
   it('enters crop mode on the canvas by double-click and draws eight marks', () => {
     expect(source).toContain('openCrop={beginSurfaceCrop}');
     expect(source.match(/beginSurfaceCrop\((panel|paste)\)/g)).toHaveLength(2);
     expect(source).toContain("cropHandles = new Konva.Group({ id: 'proof-crop-handles' })");
-    expect(source).toContain("group.on('dblclick dbltap'");
+    expect(source).toContain("node.on('dblclick dbltap'");
     expect(source).toContain('for (const [key, mark] of Object.entries(points))');
     expect(source).not.toContain('ProofCropDialog');
   });
@@ -1595,7 +1632,7 @@ describe('Proof Composer scene', () => {
   it('draws the badge on the picture, so the export carries what the canvas shows', () => {
     // the panel's group is on the page layer, which is what exportPng renders
     expect(bodyOfFn('exportPng')).toContain('return docLayer.toDataURL(');
-    expect(bodyOfFn('rebuild')).toContain('if (badges.has(panel.id)) group.add(sceneBadgeNode(badges.get(panel.id), image, box.scale));');
+    expect(bodyOfFn('rebuild')).toContain('if (badges.has(panel.id)) shown.layer.add(sceneBadgeNode(badges.get(panel.id), shown.size, box.scale));');
     expect(source).toContain('[...badges],');
     expect(source).toContain('const badges = $derived(sceneBadges(proof.sceneBadge, sceneFrames, scene.star, scene.moments));');
   });

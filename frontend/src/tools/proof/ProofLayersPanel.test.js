@@ -53,10 +53,10 @@ describe('panel and overlay transforms', () => {
     expect(source).not.toContain('rotateRight');
   });
 
-  it('shows a separate reset only after a crop exists', () => {
-    expect(source).toContain('{#if item.crop}');
+  it('shows a separate reset only after a crop or an upright cut exists', () => {
+    expect(source).toContain('{#if item.crop || item.cut}');
     expect(source).toContain('onclick={() => resetCrop(item)}');
-    expect(source).toContain('class:active={!!item.crop}');
+    expect(source).toContain('class:active={!!(item.crop || item.cut)}');
   });
 
   it('thumbs the overlay from its own image, which is now the untouched source', () => {

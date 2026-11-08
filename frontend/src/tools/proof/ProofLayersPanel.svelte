@@ -144,17 +144,19 @@
      thickness 0 or the cross takes it away. -->
 
 <!-- The crop button is the keyboard-accessible counterpart to double-clicking
-     an image. Rotation lives on the canvas as the round selection handle. -->
+     an image. Rotation lives on the canvas as the round selection handle. A turned
+     image is cut square on the page (`cut`) rather than cropped, and its reset
+     takes either back. -->
 {#snippet transformControl(item, label)}
   <div class="transform-ctl">
     <button
       class="btn btn-ghost btn-sm"
-      class:active={!!item.crop}
+      class:active={!!(item.crop || item.cut)}
       title={`Crop ${label}`}
       aria-label={`Crop ${label}`}
       onclick={() => openCrop(item)}
     ><Icon name="crop" size={13} /></button>
-    {#if item.crop}
+    {#if item.crop || item.cut}
       <button
         class="btn btn-ghost btn-sm"
         title={`Reset ${label} crop`}
