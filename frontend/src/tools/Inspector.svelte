@@ -1371,8 +1371,9 @@
       label: 'Undo',
       onClick: () => {
         const now = work.scenes.find((sc) => sc.id === joined.id);
-        // only while nothing has moved it since
-        if (run === openRun && now && sameMoments(sceneMoments({ kind: 'draft', ...now }), moments)) unjoinScene(answer.undo);
+        // only while nothing has moved it since, its time or its label
+        const same = now && now.label.trim() === joined.label && sameMoments(sceneMoments({ kind: 'draft', ...now }), moments);
+        if (run === openRun && same) unjoinScene(answer.undo);
       },
     });
     loadScenes(run);
