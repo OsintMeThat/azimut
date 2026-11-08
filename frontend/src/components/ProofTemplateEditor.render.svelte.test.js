@@ -87,12 +87,22 @@ describe('the switches a template now holds', () => {
     expect(payload(data)).toMatchObject({ sceneBadge: false, footerCredits: true });
   });
 
-  it('puts the Azimut mark in the logo\'s corner, with its name, and takes it off again', () => {
+  it('puts the Azimut mark in the logo\'s corner, its logo and name, and takes it off again', () => {
     const data = open(DESK);
     toggle('Azimut mark');
-    expect(data.azimutMark).toEqual({ anchor: 'tl', name: true, size: 28 });
-    toggle('With the name');
-    expect(data.azimutMark.name).toBe(false);
+    expect(data.azimutMark).toEqual({ anchor: 'tl', show: 'both', size: 28 });
+    const choice = (label) => target.querySelector(`[aria-label="What the mark shows"] [aria-label="${label}"]`);
+    expect(choice('Logo and name').getAttribute('aria-checked')).toBe('true');
+    // each choice is drawn as what it puts on the page: the app's own logo and wordmark
+    expect(choice('Logo and name').querySelectorAll('svg')).toHaveLength(2);
+    expect(choice('Logo').querySelector('svg').getAttribute('aria-label')).toBe('Azimut logo');
+    expect(choice('Name').querySelector('svg').getAttribute('aria-label')).toBe('Azimut');
+    for (const [label, show] of [['Logo', 'logo'], ['Name', 'name'], ['Logo and name', 'both']]) {
+      choice(label).click();
+      flushSync();
+      expect(data.azimutMark.show).toBe(show);
+      expect(choice(label).getAttribute('aria-checked')).toBe('true');
+    }
     toggle('Azimut mark');
     expect(data.azimutMark).toBeNull();
   });

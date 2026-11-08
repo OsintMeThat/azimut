@@ -298,9 +298,11 @@ def test_a_style_says_nothing_about_the_scene_keys_until_it_is_told(client):
 def test_a_style_can_carry_the_azimut_mark(client):
     saved = client.post(
         "/api/templates/proof",
-        json={"name": "Marked", "data": {"azimutMark": {"anchor": "tl", "name": False}}},
+        json={"name": "Marked", "data": {"azimutMark": {"anchor": "tl", "show": "logo"}}},
     ).json()
-    assert saved["data"]["azimutMark"] == {"anchor": "tl", "name": False, "size": 28.0}
+    assert saved["data"]["azimutMark"] == {"anchor": "tl", "show": "logo", "size": 28.0}
+    plain = client.post("/api/templates/proof", json={"name": "Lockup", "data": {"azimutMark": {}}}).json()
+    assert plain["data"]["azimutMark"] == {"anchor": "br", "show": "both", "size": 28.0}
 
 
 @pytest.mark.parametrize(
@@ -311,7 +313,8 @@ def test_a_style_can_carry_the_azimut_mark(client):
         {"azimutMark": True},
         {"azimutMark": {"anchor": "middle"}},
         {"azimutMark": {"size": 4}},
-        {"azimutMark": {"name": "no"}},
+        {"azimutMark": {"show": "icon"}},
+        {"azimutMark": {"show": True}},
     ],
 )
 def test_unreadable_scene_keys_and_marks_are_refused(client, data):

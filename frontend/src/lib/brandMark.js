@@ -53,31 +53,43 @@ const FLANKS = 24 - 2 * MARK_AIR;
 
 /**
  * How wide the lockup is when drawn `height` px high. Without its `name`, the mark
- * alone, as wide as its flanks.
+ * alone, as wide as its flanks; without its `mark`, the name alone, `height` tall.
  */
-export function signatureWidth(height, { tight = false, name = true } = {}) {
+export function signatureWidth(height, { tight = false, name = true, mark: arrow = true } = {}) {
   if (!name) return (FLANKS / 24) * height;
+  if (!arrow) return (height * WORD_BOX.width) / WORD_BOX.height;
   const { mark, gap } = layout(tight);
   return (mark + gap + (WORD_HEIGHT * WORD_BOX.width) / WORD_BOX.height) * (height / MARK_SIZE);
 }
 
 /**
  * Draw the lockup with its right edge at `right`, centred on `middle`. Without its
- * `name`, the mark alone, its flanks from edge to edge. A `halo` colour rings every
- * stroke first, so the lockup still reads over a picture.
+ * `name`, the mark alone, its flanks from edge to edge; without its `mark`, the name
+ * alone, `height` tall. A `halo` colour rings every stroke first, so the lockup
+ * still reads over a picture.
  *
  * Nothing is drawn where the canvas has no `Path2D` to trace the paths with,
  * so a signature never costs an export its picture.
  *
  * @returns {number} the width drawn, 0 when nothing was
  */
-export function drawSignature(ctx, right, middle, { height, ink = INK_ON_DARK, makePath, tight = false, name = true, halo = null } = {}) {
+export function drawSignature(ctx, right, middle, { height, ink = INK_ON_DARK, makePath, tight = false, name = true, mark: arrow = true, halo = null } = {}) {
   const pathOf = makePath ?? (typeof Path2D === 'function' ? (d) => new Path2D(d) : null);
   if (!pathOf || !(height > 0)) return 0;
   const unit = height / MARK_SIZE;
   const { air, mark, gap } = name ? layout(tight) : { air: (MARK_AIR / 24) * MARK_SIZE };
-  const width = signatureWidth(height, { tight, name });
+  const width = signatureWidth(height, { tight, name, mark: arrow });
   const left = right - width;
+  if (!arrow) {
+    // the name alone, its box `height` tall
+    const scale = height / WORD_BOX.height;
+    ctx.save();
+    ctx.translate(left - WORD_BOX.x * scale, middle - height / 2 - WORD_BOX.y * scale);
+    ctx.scale(scale, scale);
+    strokeLetters(ctx, pathOf, ink, halo);
+    ctx.restore();
+    return width;
+  }
   ctx.save();
   // The mark: a 24-unit viewBox drawn MARK_SIZE px square, its side air hanging out when tight.
   ctx.translate(left - air * unit, middle - height / 2);
@@ -100,6 +112,13 @@ export function drawSignature(ctx, right, middle, { height, ink = INK_ON_DARK, m
   const wordScale = (WORD_HEIGHT * unit) / WORD_BOX.height;
   ctx.translate(left + (mark + gap) * unit - WORD_BOX.x * wordScale, middle - (WORD_HEIGHT * unit) / 2 - WORD_BOX.y * wordScale);
   ctx.scale(wordScale, wordScale);
+  strokeLetters(ctx, pathOf, ink, halo);
+  ctx.restore();
+  return width;
+}
+
+/** The seven letter paths, in wordmark units: the halo under all of them first, then the ink. */
+function strokeLetters(ctx, pathOf, ink, halo) {
   const letters = (strokeStyle, lineWidth, join) => {
     ctx.strokeStyle = strokeStyle;
     ctx.lineWidth = lineWidth;
@@ -114,6 +133,4 @@ export function drawSignature(ctx, right, middle, { height, ink = INK_ON_DARK, m
   };
   if (halo) letters(halo, 39, 'round');
   letters(ink, 15, 'miter');
-  ctx.restore();
-  return width;
 }

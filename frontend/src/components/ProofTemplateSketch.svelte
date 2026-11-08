@@ -59,9 +59,17 @@
   {/if}
   {#if proof.azimutMark}
     {@const size = proof.azimutMark.size * 1.6}
-    {@const at = corner(proof.azimutMark.anchor, size * 0.52, size)}
-    <path d="M{at.x + size * 0.26} {at.y} L{at.x + size * 0.52} {at.y + size} L{at.x + size * 0.26} {at.y + size * 0.78} Z" fill={AMBER} />
-    <path d="M{at.x + size * 0.26} {at.y} L{at.x} {at.y + size} L{at.x + size * 0.26} {at.y + size * 0.78} Z" fill={ink.main} />
+    {@const show = proof.azimutMark.show}
+    {@const arrow = show !== 'name' ? size * 0.52 : 0}
+    {@const word = show !== 'logo' ? size * 2.2 : 0}
+    {@const at = corner(proof.azimutMark.anchor, arrow + word + (arrow && word ? size * 0.2 : 0), size)}
+    {#if arrow}
+      <path d="M{at.x + size * 0.26} {at.y} L{at.x + size * 0.52} {at.y + size} L{at.x + size * 0.26} {at.y + size * 0.78} Z" fill={AMBER} />
+      <path d="M{at.x + size * 0.26} {at.y} L{at.x} {at.y + size} L{at.x + size * 0.26} {at.y + size * 0.78} Z" fill={ink.main} />
+    {/if}
+    {#if word}
+      <rect x={at.x + arrow + (arrow ? size * 0.2 : 0)} y={at.y + size * 0.3} width={word} height={size * 0.4} rx="2" fill={ink.main} />
+    {/if}
   {/if}
 </svg>
 

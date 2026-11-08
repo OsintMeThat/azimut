@@ -442,8 +442,8 @@ describe('toSpec — persistence of layout', () => {
     const plain = toSpec({ title: 'T', panels: [], shapes: [] });
     expect(plain).not.toHaveProperty('azimutMark');
     expect(toSpec({ title: 'T', panels: [], shapes: [], azimutMark: null })).toEqual(plain);
-    expect(toSpec({ title: 'T', panels: [], shapes: [], azimutMark: { anchor: 'tl', name: false } }).azimutMark)
-      .toEqual({ anchor: 'tl', name: false, size: 28 });
+    expect(toSpec({ title: 'T', panels: [], shapes: [], azimutMark: { anchor: 'tl', show: 'logo' } }).azimutMark)
+      .toEqual({ anchor: 'tl', show: 'logo', size: 28 });
   });
 
   it('stores a blank footer as null so the automatic attribution shows', () => {
@@ -2442,8 +2442,8 @@ describe('a template and the scene keys', () => {
 
   it('carries the Azimut mark whole, like the rest of the signature', () => {
     const marked = { panels: [], shapes: [] };
-    applyProofStyle(marked, { azimutMark: { anchor: 'tl', name: false, size: 40 } });
-    expect(marked.azimutMark).toEqual({ anchor: 'tl', name: false, size: 40 });
+    applyProofStyle(marked, { azimutMark: { anchor: 'tl', show: 'name', size: 40 } });
+    expect(marked.azimutMark).toEqual({ anchor: 'tl', show: 'name', size: 40 });
     // a style that signs without it takes it off, as one without a logo takes the logo off
     applyProofStyle(marked, { bg: '#000000' });
     expect(marked.azimutMark).toBeNull();
@@ -2451,7 +2451,7 @@ describe('a template and the scene keys', () => {
 
   it('goes through a template and back unchanged, the mark and both switches included', () => {
     const original = {
-      panels: [], shapes: [], sceneBadge: true, footerCredits: true, azimutMark: { anchor: 'br', name: true, size: 34 },
+      panels: [], shapes: [], sceneBadge: true, footerCredits: true, azimutMark: { anchor: 'br', show: 'logo', size: 34 },
     };
     const target = { panels: [], shapes: [] };
     applyProofStyle(target, templateFromProof(original));

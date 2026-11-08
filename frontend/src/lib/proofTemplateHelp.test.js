@@ -29,7 +29,7 @@ describe('what a proof template\'s settings say on hover', () => {
   });
 
   it('says the same of the Azimut mark in Geo Proof\'s Style tab', () => {
-    for (const key of ['mark', 'markCorner', 'markSize', 'markName']) {
+    for (const key of ['mark', 'markCorner', 'markSize', 'markShow']) {
       expect(composer, key).toContain(`PROOF_TEMPLATE_HELP.${key}`);
     }
   });

@@ -93,7 +93,7 @@ describe('the sample drawn as a page', () => {
 
   it('adds the Azimut mark only when the template carries it', () => {
     expect(draw(starterData('free')).layer.findOne('#azimut-mark')).toBeUndefined();
-    const marked = { ...starterData('free'), azimutMark: { anchor: 'br', name: true, size: 28 } };
+    const marked = { ...starterData('free'), azimutMark: { anchor: 'br', show: 'both', size: 28 } };
     const { layer, page } = draw(marked, { handle: '@desk' });
     const mark = layer.findOne('#azimut-mark');
     expect(mark).toBeDefined();

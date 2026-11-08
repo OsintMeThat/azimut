@@ -1101,9 +1101,19 @@ export function signatureOffset(sig, docW, docH, natural, x, y) {
 /** The height the mark stands at by default, in page pixels: the handle's. */
 export const MARK_SIZE = SIG_TEXT_SIZE;
 
-/** A fresh mark: in the corner given, with its name, at the handle's size. */
+/**
+ * What the mark shows: the logo (the north arrow of `components/Logo.svelte`) and the
+ * name after it (`components/Wordmark.svelte`), the logo alone, or the name alone.
+ */
+export const MARK_SHOWS = [
+  { id: 'both', label: 'Logo and name' },
+  { id: 'logo', label: 'Logo' },
+  { id: 'name', label: 'Name' },
+];
+
+/** A fresh mark: in the corner given, the logo and the name, at the handle's size. */
 export function newAzimutMark(anchor = 'br') {
-  return { anchor: ['tl', 'tr', 'bl', 'br'].includes(anchor) ? anchor : 'br', name: true, size: MARK_SIZE };
+  return { anchor: ['tl', 'tr', 'bl', 'br'].includes(anchor) ? anchor : 'br', show: 'both', size: MARK_SIZE };
 }
 
 /** The mark as stored, or null for none: anything unreadable reads as none (lib/proofMark.js draws it). */
@@ -1111,7 +1121,7 @@ export function normalizeAzimutMark(mark) {
   if (!mark || typeof mark !== 'object' || Array.isArray(mark)) return null;
   return {
     anchor: ['tl', 'tr', 'bl', 'br'].includes(mark.anchor) ? mark.anchor : 'br',
-    name: typeof mark.name === 'boolean' ? mark.name : true,
+    show: MARK_SHOWS.some((one) => one.id === mark.show) ? mark.show : 'both',
     size: boundedNumber(mark.size, MARK_SIZE, 12, 300),
   };
 }

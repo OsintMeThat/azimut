@@ -1,6 +1,6 @@
 /**
- * The Azimut mark a proof can carry beside its signature: the north arrow, with the
- * name after it unless asked otherwise, in a corner of the page.
+ * The Azimut mark a proof can carry beside its signature, in a corner of the page:
+ * the logo (the north arrow) and the name after it, the logo alone, or the name alone.
  *
  * Off unless asked. A proof saved before it existed has no `azimutMark` and draws
  * as it always did. It is part of the look, so a template carries it and a new
@@ -17,7 +17,7 @@ import {
   BG, FOOTER_SIZE, SIG_MARGIN, footerBand, isLightColor, layoutPanels, normalizeAzimutMark,
 } from './composer.js';
 
-export { MARK_SIZE, newAzimutMark, normalizeAzimutMark } from './composer.js';
+export { MARK_SHOWS, MARK_SIZE, newAzimutMark, normalizeAzimutMark } from './composer.js';
 /** The ink a pale page takes, the app's own on its light theme. */
 export const INK_ON_LIGHT = '#23262b';
 
@@ -28,9 +28,13 @@ export function markInk(bg) {
     : { ink: INK_ON_DARK, halo: 'rgba(0, 0, 0, 0.45)' };
 }
 
-/** How wide the mark is at its size, with or without its name. */
+/** What `drawSignature` is asked to draw for each choice of what the mark shows. */
+const PARTS = { both: { name: true, mark: true }, logo: { name: false, mark: true }, name: { name: true, mark: false } };
+const partsOf = (mark) => PARTS[mark.show] ?? PARTS.both;
+
+/** How wide the mark is at its size, for what it shows. */
 export function markWidth(mark) {
-  return signatureWidth(mark.size, { tight: true, name: mark.name });
+  return signatureWidth(mark.size, { tight: true, ...partsOf(mark) });
 }
 
 const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
@@ -76,7 +80,7 @@ export function markBox(mark, width, height, { avoid = [], footer = null } = {})
 export function drawMark(ctx, mark, box, bg, { makePath } = {}) {
   const { ink, halo } = markInk(bg);
   return drawSignature(ctx, box.x + box.w, box.y + box.h / 2, {
-    height: mark.size, ink, halo, tight: true, name: mark.name, makePath,
+    height: mark.size, ink, halo, tight: true, ...partsOf(mark), makePath,
   });
 }
 

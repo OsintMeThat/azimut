@@ -92,10 +92,10 @@ class ProofSignatureText(CanonicalModel):
 
 
 class ProofAzimutMark(CanonicalModel):
-    """The Azimut mark in a corner of the proof, with or without its name."""
+    """The Azimut mark in a corner of the proof: the logo and the name, or either alone."""
 
     anchor: Literal["tl", "tr", "bl", "br"] = "br"
-    name: StrictBool = True
+    show: Literal["both", "logo", "name"] = "both"
     size: Annotated[FiniteFloat, Field(ge=12, le=300)] = 28
 
 

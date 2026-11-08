@@ -52,7 +52,7 @@ test('a template picked from a start becomes the default, and New proof starts w
   expect(saves).toHaveLength(1);
   expect(saves[0].data).toMatchObject({
     bg: '#000000', layout: 'free', captionsEnabled: false, font: 'barlow',
-    azimutMark: { anchor: 'br', name: true, size: 28 },
+    azimutMark: { anchor: 'br', show: 'both', size: 28 },
   });
 
   const row = page.locator('.tpl-row', { hasText: 'Free layout' });
@@ -79,9 +79,47 @@ test('a template picked from a start becomes the default, and New proof starts w
     };
   })).toEqual({ ground: '#000000', mark: true });
 
+  // The picture the proof exports, as the composer takes it (`exportPng`), read for the
+  // amber of the arrow's east flank: the export draws the mark with the canvas's own code.
+  const amberInExport = () => page.evaluate(async () => {
+    const stage = window.Konva.stages[0];
+    const layer = stage.getLayers()[0];
+    const bg = layer.findOne('.bg');
+    const [scale, position, size] = [stage.scale(), stage.position(), stage.size()];
+    stage.scale({ x: 1, y: 1 });
+    stage.position({ x: 0, y: 0 });
+    stage.size({ width: bg.width(), height: bg.height() });
+    const url = layer.toDataURL({ x: 0, y: 0, width: bg.width(), height: bg.height(), pixelRatio: 1 });
+    stage.scale(scale);
+    stage.position(position);
+    stage.size(size);
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let amber = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (Math.abs(pixels[i] - 232) < 12 && Math.abs(pixels[i + 1] - 163) < 12 && Math.abs(pixels[i + 2] - 61) < 12) amber += 1;
+    }
+    return amber;
+  });
+  await expect.poll(amberInExport).toBeGreaterThan(20);
+
+  // the proof's own choice: the name alone has no arrow, and so no amber
+  await page.getByRole('radiogroup', { name: 'What the mark shows' }).getByRole('radio', { name: 'Name', exact: true }).click();
+  await expect.poll(amberInExport).toBe(0);
+  await page.getByRole('radiogroup', { name: 'What the mark shows' }).getByRole('radio', { name: 'Logo', exact: true }).click();
+  await expect.poll(amberInExport).toBeGreaterThan(20);
+
   // the proof's own switch answers at once, and leaves the template alone
   await page.getByRole('checkbox', { name: 'Azimut mark' }).uncheck();
   await expect.poll(() => page.evaluate(() => Boolean(window.Konva.stages[0].findOne('#azimut-mark')))).toBe(false);
+  await expect.poll(amberInExport).toBe(0);
   fixture.expectNoUnexpectedRequests();
 });
 

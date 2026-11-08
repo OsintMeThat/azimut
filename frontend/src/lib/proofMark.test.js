@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FakeKonva } from './konva.fixture.js';
 import { SIG_MARGIN, footerBand, toSpec } from './composer.js';
-import { signatureWidth } from './brandMark.js';
+import { LETTERS, MARK, signatureWidth } from './brandMark.js';
 import {
   INK_ON_LIGHT, MARK_SIZE, addMark, drawMark, markBox, markGround, markInk, markWidth, newAzimutMark,
   normalizeAzimutMark,
@@ -19,12 +19,13 @@ describe('the Azimut mark as a proof stores it', () => {
   });
 
   it('starts in the corner given, with its name, at the handle size', () => {
-    expect(newAzimutMark('tl')).toEqual({ anchor: 'tl', name: true, size: MARK_SIZE });
+    expect(newAzimutMark('tl')).toEqual({ anchor: 'tl', show: 'both', size: MARK_SIZE });
     expect(newAzimutMark('middle').anchor).toBe('br');
   });
 
   it('reads what it can and bounds the rest', () => {
-    expect(normalizeAzimutMark({ anchor: 'nowhere', size: 9000, name: 'yes' })).toEqual({ anchor: 'br', name: true, size: 300 });
+    expect(normalizeAzimutMark({ anchor: 'nowhere', size: 9000, show: 'icon' })).toEqual({ anchor: 'br', show: 'both', size: 300 });
+    for (const show of ['both', 'logo', 'name']) expect(normalizeAzimutMark({ show }).show).toBe(show);
     expect(normalizeAzimutMark({ size: 2 }).size).toBe(12);
   });
 });
@@ -40,9 +41,12 @@ describe('where the mark lands', () => {
     expect([top.x, top.y]).toEqual([SIG_MARGIN, SIG_MARGIN]);
   });
 
-  it('is as wide as the lockup, or as the arrow alone without the name', () => {
+  it('is as wide as what it shows: the lockup, the arrow alone, or the name alone at its height', () => {
     expect(markWidth(mark())).toBeCloseTo(signatureWidth(MARK_SIZE, { tight: true }));
-    expect(markWidth(mark({ name: false }))).toBeLessThan(MARK_SIZE);
+    expect(markWidth(mark({ show: 'logo' }))).toBeLessThan(MARK_SIZE);
+    // the name alone stands as tall as the arrow would, so it is wider than in the lockup
+    expect(markWidth(mark({ show: 'name' }))).toBeCloseTo((MARK_SIZE * 503.3) / 115);
+    expect(markWidth(mark({ show: 'name' }))).toBeGreaterThan(markWidth(mark({ show: 'logo' })));
   });
 
   it('steps inward past the logo and the handle already in its corner', () => {
@@ -84,22 +88,39 @@ describe('how the mark is inked', () => {
     expect(markGround({ bg: '#ffffff' }, { x: 0, y: 0, w: 10, h: 10 })).toBe('#ffffff');
   });
 
-  it('draws the arrow and the six letters, or the arrow alone', () => {
+  /** What a draw does to a canvas: each call by name, and the paths it filled and stroked. */
+  function record(show) {
     const calls = [];
     const ctx = new Proxy({}, {
       get: (_, key) => (typeof key === 'string' && ['save', 'restore', 'translate', 'scale', 'fill', 'stroke'].includes(key)
-        ? (...args) => calls.push(key) : undefined),
+        ? (...args) => calls.push([key, args[0]]) : undefined),
       set: () => true,
     });
-    const makePath = (d) => d;
-    const box = { x: 100, y: 100, w: markWidth(newAzimutMark()), h: MARK_SIZE };
-    drawMark(ctx, newAzimutMark(), box, '#0d1117', { makePath });
-    expect(calls.filter((c) => c === 'fill')).toHaveLength(2);
-    // the halo first, then the ink: two strokes per flank and letter path
-    expect(calls.filter((c) => c === 'stroke')).toHaveLength(2 + 7 * 2);
-    calls.length = 0;
-    drawMark(ctx, { ...newAzimutMark(), name: false }, box, '#0d1117', { makePath });
-    expect(calls.filter((c) => c === 'stroke')).toHaveLength(2);
+    const mark = { ...newAzimutMark(), show };
+    const box = markBox(mark, W, H);
+    drawMark(ctx, mark, box, '#0d1117', { makePath: (d) => d });
+    return {
+      fills: calls.filter(([c]) => c === 'fill').map(([, d]) => d),
+      strokes: calls.filter(([c]) => c === 'stroke').map(([, d]) => d),
+    };
+  }
+
+  it('draws the logo and the name: both flanks of the arrow, then the six letters, each over its halo', () => {
+    const { fills, strokes } = record('both');
+    expect(fills).toEqual([MARK.west, MARK.east]);
+    expect(strokes).toEqual([MARK.west, MARK.east, ...LETTERS.map((l) => l.d), ...LETTERS.map((l) => l.d)]);
+  });
+
+  it('draws the logo alone: the arrow and no letter', () => {
+    const { fills, strokes } = record('logo');
+    expect(fills).toEqual([MARK.west, MARK.east]);
+    expect(strokes).toEqual([MARK.west, MARK.east]);
+  });
+
+  it('draws the name alone: the letters and no arrow', () => {
+    const { fills, strokes } = record('name');
+    expect(fills).toEqual([]);
+    expect(strokes).toEqual([...LETTERS.map((l) => l.d), ...LETTERS.map((l) => l.d)]);
   });
 });
 

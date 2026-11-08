@@ -50,7 +50,7 @@ export const PROOF_TEMPLATE_HELP = {
   mark: 'Draws the Azimut mark in a corner, beside your signature',
   markCorner: 'The corner the mark sits in, stepping past a logo or a handle there',
   markSize: 'How tall the mark stands',
-  markName: 'Writes AZIMUT after the arrow',
+  markShow: 'The logo and the name, the logo alone, or the name alone',
 
   // the colours
   palette: 'The colours Geo Proof offers for marks, the first one in hand',

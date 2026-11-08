@@ -142,6 +142,7 @@
   import { defaultProofTemplate } from '../lib/proofTemplates.js';
   import { addMark, newAzimutMark } from '../lib/proofMark.js';
   import { PROOF_TEMPLATE_HELP } from '../lib/proofTemplateHelp.js';
+  import MarkShowChoice from '../components/MarkShowChoice.svelte';
   import { onEvent } from '../lib/events.js';
   import { abandonScene, geolocateScene, restoreScene } from '../lib/geolocating.svelte.js';
   import { collagesOfScene, proofHandoff } from '../lib/sceneFrames.js';
@@ -7725,14 +7726,11 @@
                   }} />
                 <span class="size-val">{proof.azimutMark.size}</span>
               </div>
-              <label class="sig-check first" title={PROOF_TEMPLATE_HELP.markName}>
-                <input
-                  type="checkbox"
-                  checked={proof.azimutMark.name !== false}
-                  onchange={(e) => { proof.azimutMark = { ...proof.azimutMark, name: e.currentTarget.checked }; dirty = true; }}
-                />
-                <span>With the name</span>
-              </label>
+              <MarkShowChoice
+                value={proof.azimutMark.show}
+                title={PROOF_TEMPLATE_HELP.markShow}
+                onchange={(show) => { proof.azimutMark = { ...proof.azimutMark, show }; dirty = true; }}
+              />
             {/if}
           </div>
         </div>

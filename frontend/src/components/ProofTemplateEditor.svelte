@@ -24,6 +24,7 @@
   import { prefs } from '../lib/state.svelte.js';
   import Icon from './Icon.svelte';
   import ProofStylePreview from './ProofStylePreview.svelte';
+  import MarkShowChoice from './MarkShowChoice.svelte';
 
   let { data = $bindable(), sampleLegend = null } = $props();
   // Fill what an older template never stated, keeping what it did.
@@ -336,8 +337,10 @@
               oninput={(e) => setMark({ size: Number(e.currentTarget.value) })} />
             <span class="pte-val">{mark.size}</span>
           </div>
-          <label class="pte-check" title={HELP.markName}><input type="checkbox" checked={mark.name}
-            onchange={(e) => setMark({ name: e.currentTarget.checked })} /> With the name</label>
+          <div class="pte-row" title={HELP.markShow}>
+            <span class="pte-label">Shows</span>
+            <span class="pte-grow"><MarkShowChoice value={mark.show} onchange={(show) => setMark({ show })} /></span>
+          </div>
         </div>
       {/if}
     </section>
@@ -433,6 +436,7 @@
     border: 1px solid var(--border); border-radius: 6px; background: none;
   }
   .pte-colour { display: flex; align-items: center; gap: 8px; }
+  .pte-grow { flex: 1; min-width: 0; }
   .pte-said { color: var(--text-3); }
   .pte-link {
     padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: var(--fs-xs); cursor: pointer;
