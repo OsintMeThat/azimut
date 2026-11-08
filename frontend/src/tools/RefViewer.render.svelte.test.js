@@ -320,6 +320,15 @@ describe('a clip holding a scene being geolocated', () => {
     expect(pct(rest.style.width)).toBeCloseTo(15, 6);
   });
 
+  it('marks every moment of a scene showing its place again, in its one colour, on the bar and at rest', () => {
+    const { root } = scened({ ...BRIDGE, start: 10, end: 20, more: [{ start: 60, end: null }] });
+    const marks = [...root.querySelectorAll('[data-testid="ref-scene"]')];
+    expect(marks.map((m) => [parseFloat(m.style.left), m.classList.contains('pin')])).toEqual([[10, false], [60, true]]);
+    expect(new Set(marks.map((m) => m.style.getPropertyValue('--scene')))).toEqual(new Set(['var(--anno-4)']));
+    expect(root.querySelectorAll('.rv-scene-line span')).toHaveLength(2);
+    expect(root.querySelector('.rv-scene-dot').getAttribute('aria-label')).toBe('Scene · bridge? · 0:10–0:20 · 1:00');
+  });
+
   it('names the scene in its header beside the file', () => {
     const { root } = scened(BRIDGE);
     expect(root.querySelector('.rv-scene-dot').getAttribute('aria-label')).toBe('Scene · bridge? · 0:40–0:55');

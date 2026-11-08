@@ -6,7 +6,8 @@
  * moments the place shows in, since one place often comes back in several extracts
  * of a clip, and each moment is an instant or a passage. A scene the analyst kept
  * in Inspect and has not proved yet is a draft, held in the video's work until a
- * proof takes it up: one moment of its own.
+ * proof takes it up: one moment of its own (`start`, `end`), and the moments after it
+ * (`more`) when the same place shows again further on.
  *
  * **A scene that states no time is about the whole video**, and says so rather
  * than print a timecode. A proof's frames still pin it on the bar, where they
@@ -56,10 +57,36 @@ export function spanLabel(start, end) {
 export const isStretch = (moment) =>
   Number.isFinite(moment?.start) && Number.isFinite(moment?.end) && moment.end > moment.start;
 
-/** The moments a scene states: a draft's own, if it has a time, or a proof's list. */
+/**
+ * The moments a scene states: a proof's list, or a draft's own time and the ones
+ * after it (`more`), none for the whole video.
+ */
 export function sceneMoments(scene) {
   if (scene?.kind === 'proof') return scene.moments ?? [];
-  return Number.isFinite(scene?.start) ? [{ start: scene.start, end: scene.end ?? null }] : [];
+  if (!Number.isFinite(scene?.start)) return [];
+  const more = Array.isArray(scene.more) ? scene.more.filter((m) => Number.isFinite(m?.start)) : [];
+  return [{ start: scene.start, end: scene.end ?? null }, ...more.map((m) => ({ start: m.start, end: m.end ?? null }))];
+}
+
+/**
+ * Moments as a scene still to prove keeps them: the first in clip order as its own
+ * `start` and `end`, the rest under `more` only when there are some, so a scene of
+ * one moment is written as it always was. None is the whole video.
+ */
+export function draftTime(moments) {
+  const [first, ...rest] = sortMoments(moments);
+  if (!first) return { start: null, end: null };
+  const time = { start: first.start, end: isStretch(first) ? first.end : null };
+  return rest.length ? { ...time, more: rest.map((m) => ({ start: m.start, end: isStretch(m) ? m.end : null })) } : time;
+}
+
+/** Give a draft these moments, in place: its start, its end, and `more` only when it holds several. */
+export function setDraftTime(draft, moments) {
+  const time = draftTime(moments);
+  draft.start = time.start;
+  draft.end = time.end;
+  if (time.more) draft.more = time.more;
+  else delete draft.more;
 }
 
 /** Whether a scene states no time, and so is about the whole video. */
@@ -163,8 +190,8 @@ export function sceneList(listed, drafts, taken = []) {
       const captures = Array.isArray(row?.captures) ? row.captures : [];
       const abandoned = row?.abandoned ?? null;
       return {
-        kind: 'draft', id: d.id, start: d.start ?? null, end: d.end ?? null, label: d.label ?? '',
-        state: abandoned ? ABANDONED : captures.length ? PROGRESS : TODO, captures, abandoned,
+        kind: 'draft', id: d.id, start: d.start ?? null, end: d.end ?? null, ...(d.more?.length ? { more: d.more } : {}),
+        label: d.label ?? '', state: abandoned ? ABANDONED : captures.length ? PROGRESS : TODO, captures, abandoned,
       };
     });
   return [...proofs, ...open]
@@ -177,8 +204,11 @@ export function sceneList(listed, drafts, taken = []) {
     }));
 }
 
-/** What the bar calls a scene's moment `index`, so one moment of many is told apart. */
-export const momentKey = (scene, index) => (scene.kind === 'proof' ? `${scene.key}#${index}` : scene.key);
+/**
+ * What the bar calls a scene's moment `index`, so one moment of many is told apart. A
+ * draft's first moment keeps the scene's own key, as it had while a draft held one.
+ */
+export const momentKey = (scene, index) => (scene.kind === 'proof' || index > 0 ? `${scene.key}#${index}` : scene.key);
 
 /**
  * What the player's bar draws: a band over each passage, a pin at each instant,
@@ -232,6 +262,12 @@ export function shortMoments(moments) {
 /** A scene's time as its row shows it (`shortMoments`). */
 export const sceneTime = (scene) => shortMoments(sceneMoments(scene));
 
+/** A scene's time where room is short, the pill's: its first moment, the rest counted (`0:00–0:07 +1`). */
+export function compactTime(scene) {
+  const moments = sceneMoments(scene);
+  return moments.length > 1 ? `${momentTime(moments[0])} +${moments.length - 1}` : momentsTime(moments);
+}
+
 /**
  * The kind of time a scene states, in the words its row writes before the time:
  * `Whole video`, `Instant`, `Passage`, or `3 moments` for a proof holding several.
@@ -249,10 +285,35 @@ export function sceneWhen(scene) {
   return kind === WHOLE_VIDEO ? kind : `${kind} · ${sceneTime(scene)}`;
 }
 
-/** The draft to end at `time`: the latest one started before it and not abandoned, else none. */
+/**
+ * The scenes Same place as… offers for `scene`: the clip's other scenes still to prove,
+ * in clip order, each with a time. Nothing for a proof, an abandoned scene or one about
+ * the whole video, which already holds every moment.
+ */
+export function samePlaceChoices(scenes, scene) {
+  const timed = (s) => s?.kind === 'draft' && !isAbandoned(s) && !isWholeVideo(s);
+  if (!timed(scene)) return [];
+  return (scenes ?? []).filter((s) => timed(s) && s.key !== scene.key);
+}
+
+/** Where the latest of a scene's moments started before `time`, by its index, else -1. */
+export function momentBefore(scene, time) {
+  const moments = sceneMoments(scene);
+  let found = -1;
+  moments.forEach((m, i) => {
+    if (m.start < time && (found === -1 || m.start >= moments[found].start)) found = i;
+  });
+  return found;
+}
+
+/**
+ * The draft to end at `time`: the one with a moment started latest before it, not
+ * abandoned, else none. That moment is the one ended (`momentBefore`).
+ */
 export function sceneToEnd(scenes, time) {
-  const before = liveScenes(scenes).filter((s) => s.kind === 'draft' && Number.isFinite(s.start) && s.start < time);
-  return before.length ? before.reduce((a, b) => (b.start > a.start ? b : a)) : null;
+  const started = (s) => sceneMoments(s)[momentBefore(s, time)]?.start ?? -Infinity;
+  const before = liveScenes(scenes).filter((s) => s.kind === 'draft' && momentBefore(s, time) !== -1);
+  return before.length ? before.reduce((a, b) => (started(b) > started(a) ? b : a)) : null;
 }
 
 // -- changing a scene's time ------------------------------------------------------------

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   abandonedScenes, captureCount, captureWords, firstScenes, gatheredScene, isPicture, openScenes, queueColor, queueMark, queueName, queueState,
-  queueTime, sceneCount, waitingWords, withProofs,
+  queueShortTime, queueTime, sceneCount, waitingWords, withProofs,
 } from './sceneQueue.js';
 import { sceneList } from './scenes.js';
 
@@ -21,6 +21,18 @@ describe('what a row says', () => {
     expect(queueName(row('a', 238, 252))).toBe('3:58–4:12');
     expect(queueName(row('a', 3, null))).toBe('0:03');
     expect(queueName(row('a', null, null))).toBe('Whole video');
+  });
+
+  it('says every moment of a scene showing its place again, and the first with the rest counted where room is short', () => {
+    const twice = row('a', 0, 7, '', { more: [{ start: 65, end: 72 }] });
+    expect(queueTime(twice)).toBe('0:00–0:07 · 1:05–1:12');
+    expect(queueName(twice)).toBe('0:00–0:07 · 1:05–1:12');
+    expect(queueShortTime(twice)).toBe('0:00–0:07 +1');
+    expect(queueShortTime(row('b', 3, null))).toBe('0:03');
+    expect(queueMark(twice)).toBe('passage');
+    // a proof with no place yet, in the To-do beside the scenes, says its own moments
+    const proofRow = { kind: 'proof', id: 'proof:P', proof: 'P', label: 'P', start: 0, end: 7, moments: [{ start: 0, end: 7 }, { start: 80, end: null }] };
+    expect(queueTime(proofRow)).toBe('0:00–0:07 · 1:20');
   });
 
   it('says Whole picture for a picture, which has no time to read', () => {

@@ -90,6 +90,15 @@ describe('the pill', () => {
     expect(button('Geolocating').getAttribute('title')).toBe('Open the scene in Inspect, on convoy.mp4');
   });
 
+  it('says the first moment of a scene showing its place again and counts the rest, every one on hover', async () => {
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: { ...SCENE, start: 0, end: 7, more: [{ start: 65, end: 72 }] } });
+    await show();
+    const time = pill().querySelector('.geo-time');
+    expect(time.textContent).toBe('0:00–0:07 +1');
+    expect(time.getAttribute('title')).toBe('0:00–0:07 · 1:05–1:12');
+    expect(pill().getAttribute('aria-label')).toBe('Geolocating · 0:00–0:07 · 1:05–1:12 · bridge?');
+  });
+
   it('dots the scene in the colour Inspect\'s bar draws it in, by its place in the clip', async () => {
     answers.set('GET /api/cases/c1/geolocating', { geolocating: { ...SCENE, order: 2 } });
     await show();

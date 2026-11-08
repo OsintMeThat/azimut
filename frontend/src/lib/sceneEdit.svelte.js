@@ -7,8 +7,8 @@
  * until Apply, so a drag or a typo costs nothing, and the list does not reorder
  * under the pointer while a start moves.
  *
- * A scene is about the whole video, or holds moments, each an instant or a passage.
- * A draft holds one at most; a proof as many as the place shows in. The fields and
+ * A scene is about the whole video, or holds moments, each an instant or a passage,
+ * as many as the place shows in, a scene still to prove as a proof. The fields and
  * the keys work on the moment in hand (`active`), and so do the bar's handles.
  *
  * A field's text is what the analyst sees and types; the time beside it is what a
@@ -17,7 +17,7 @@
  * the problem line reads.
  */
 import {
-  MAX_MOMENTS, defaultEnd, editClock, isStretch, momentKey, momentsClash, parseClock, sameMoments, sceneMoments,
+  MAX_MOMENTS, defaultEnd, draftTime, editClock, isStretch, momentKey, momentsClash, parseClock, sameMoments, sceneMoments,
   snapToFrame, sortMoments, timeProblem,
 } from './scenes.js';
 import { frameDuration } from './inspectPlayer.js';
@@ -54,9 +54,9 @@ export class SceneEdit {
     return this.scene?.key ?? null;
   }
 
-  /** Whether the scene may hold several moments: a proof's place can come back. */
+  /** Whether the scene may hold several moments: a place can come back in the clip. */
   get many() {
-    return this.scene?.kind === 'proof';
+    return Boolean(this.scene);
   }
 
   get whole() {
@@ -97,14 +97,15 @@ export class SceneEdit {
 
   /**
    * What Apply would keep, or null while the fields do not read as a time: a
-   * draft's `{ start, end }`, both null for the whole video, or a proof's
-   * `{ moments }` in clip order, none for the whole video.
+   * draft's `{ start, end }`, both null for the whole video, with `more` once it holds
+   * several (`draftTime`), or a proof's `{ moments }` in clip order, none for the
+   * whole video.
    */
   get result() {
     if (!this.scene || this.problem) return null;
     const moments = sortMoments(this.moments.map(said));
-    if (this.many) return { moments };
-    return moments[0] ?? { start: null, end: null };
+    if (this.scene.kind === 'proof') return { moments };
+    return draftTime(moments);
   }
 
   /** Whether Apply would change anything. */
@@ -192,7 +193,7 @@ export class SceneEdit {
     this.setEnd(kept ?? defaultEnd(start, now.end, { frame: frameDuration(fps), duration }));
   }
 
-  /** Another moment of a proof, an instant at `time`, taken in hand. */
+  /** Another moment of the scene, an instant at `time`, taken in hand. */
   add(time) {
     if (!this.many || this.moments.length >= MAX_MOMENTS) return;
     this.moments.push(line({ start: time }));

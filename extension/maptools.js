@@ -1627,11 +1627,24 @@
     return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
   }
 
-  /** `3:58–4:12` for a passage, `0:03` for an instant, Whole video for none. */
+  /** Every moment of a scene: its own start and end, then the ones after it (`more`). */
+  function sceneMoments(scene) {
+    if (!Number.isFinite(scene?.start)) return [];
+    const more = Array.isArray(scene.more) ? scene.more.filter((m) => Number.isFinite(m?.start)) : [];
+    return [{ start: scene.start, end: scene.end ?? null }, ...more.map((m) => ({ start: m.start, end: m.end ?? null }))];
+  }
+
+  /** `3:58–4:12` for a passage, `0:03` for an instant. */
+  const momentTime = ({ start, end }) =>
+    Number.isFinite(end) && end > start ? `${sceneClock(start)}–${sceneClock(end)}` : sceneClock(start);
+
+  /** A scene's time: each moment, `0:00–0:07 · 1:05–1:12`, the rest counted past two
+   *  (`0:30–0:45 +2`), and Whole video for none. */
   function sceneTime(scene) {
-    if (!Number.isFinite(scene?.start)) return WHOLE_VIDEO;
-    const { start, end } = scene;
-    return Number.isFinite(end) && end > start ? `${sceneClock(start)}–${sceneClock(end)}` : sceneClock(start);
+    const moments = sceneMoments(scene);
+    if (!moments.length) return WHOLE_VIDEO;
+    if (moments.length > 2) return `${momentTime(moments[0])} +${moments.length - 1}`;
+    return moments.map(momentTime).join(" · ");
   }
 
   /** A scene's time as a row says it, a picture's included. */
@@ -1677,11 +1690,13 @@
   }
 
   /** Where a scene is drawn on its video's bar: a band for a passage, a pin for an
-   *  instant, nothing for the whole video or a picture, which has no bar. */
+   *  instant, nothing for the whole video or a picture, which has no bar. Its first
+   *  moment as its own `start` and `end`, every one under `moments`. */
   function sceneMark(scene) {
     const start = scene?.file_kind !== "image" && Number.isFinite(scene?.start) ? scene.start : null;
     const end = start != null && Number.isFinite(scene.end) && scene.end > start ? scene.end : null;
-    return { id: scene.id, name: sceneName(scene), time: queueTime(scene), start, end, color: sceneColor(scene) };
+    const moments = start == null ? [] : sceneMoments(scene).map((m) => ({ start: m.start, end: Number.isFinite(m.end) && m.end > m.start ? m.end : null }));
+    return { id: scene.id, name: sceneName(scene), time: queueTime(scene), start, end, moments, color: sceneColor(scene) };
   }
 
   // --- the calendar ----------------------------------------------------------

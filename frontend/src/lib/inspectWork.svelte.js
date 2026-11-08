@@ -47,9 +47,14 @@ export function markRecord(mark) {
   return { id: mark.id, time: mark.time, label: String(mark.label ?? '').trim() };
 }
 
-/** One scene still to prove, as it is stored: an instant or a stretch, and a word about it. */
+/**
+ * One scene still to prove, as it is stored: an instant or a stretch, and a word about
+ * it, then the moments after the first (`more`) when the place shows again.
+ */
 export function sceneRecord(scene) {
-  return { id: scene.id, start: scene.start, end: scene.end ?? null, label: String(scene.label ?? '').trim() };
+  const record = { id: scene.id, start: scene.start, end: scene.end ?? null, label: String(scene.label ?? '').trim() };
+  if (!scene.more?.length) return record;
+  return { ...record, more: scene.more.map((m) => ({ start: m.start, end: m.end ?? null })) };
 }
 
 /** The body of a work save. */

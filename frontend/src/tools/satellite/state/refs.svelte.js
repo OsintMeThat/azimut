@@ -206,20 +206,21 @@ export function createRefsState({ api, notify, caseId, viewers, setViewers }) {
     focus,
 
     /**
-     * The video of a scene being geolocated (`uiState.geolocateRef`), its stretch
-     * marked on the window's bar and the clip paused where the scene starts. A window
+     * The video of a scene being geolocated (`uiState.geolocateRef`), each of its
+     * moments marked on the window's bar and the clip paused where the scene starts. A window
      * already open on the clip takes it, unfolded and brought to the front; else one
      * opens with the file's own title and facts. A scene about the whole video marks
      * nothing and leaves the clip where it is, and a picture (`kind: 'image'`) opens
      * in a window of its own the same way, with no time to cue.
      */
-    async openScene({ video, draft, start = null, end = null, label = '', order = 0, kind = 'video' }) {
+    async openScene({ video, draft, start = null, end = null, more = null, label = '', order = 0, kind = 'video' }) {
       const id = caseId();
       if (!id || !video) return;
       const picture = kind === 'image';
       const at = !picture && Number.isFinite(start) ? start : null;
       const scene = {
-        draft, start: at, end: at != null && Number.isFinite(end) && end > at ? end : null, label: label ?? '',
+        draft, start: at, end: at != null && Number.isFinite(end) && end > at ? end : null,
+        ...(at != null && more?.length ? { more } : {}), label: label ?? '',
         color: sceneColorAt(order),
       };
       const reuse = (pane) => {

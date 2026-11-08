@@ -4,6 +4,7 @@ import {
   WHOLE_VIDEO, defaultEnd, editClock, isStretch, isWholeVideo, momentKey, momentsClash, newScene, parseClock,
   sameMoments, sameTime, sceneList, shortClock, sceneMarks, scenePassage, sceneStart, sceneTime, sceneTitle,
   sceneToEnd, shortMoments, snapToFrame, sortMoments, spanLabel, stretchFromShot, timeProblem, timeWords,
+  compactTime, draftTime, momentBefore, samePlaceChoices, sceneMoments, setDraftTime,
 } from './scenes.js';
 
 const proof = (name, extra = {}) => ({
@@ -232,6 +233,69 @@ describe('what the bar draws', () => {
     expect(sceneTitle(proof('Bridge', { title: 'Road bridge' }))).toBe('Road bridge');
     expect(sceneTitle({ kind: 'draft', label: 'bridge?' })).toBe('bridge?');
     expect(sceneTitle({ kind: 'draft', label: '' })).toBe('To geolocate');
+  });
+});
+
+describe('one scene, several moments', () => {
+  const joined = (id, start, end, more, label = '') => ({ id, start, end, label, more });
+
+  it('reads a scene still to prove as its own time, then the moments after it', () => {
+    expect(sceneMoments({ kind: 'draft', ...joined('a', 0, 7, [m(65, 72)]) })).toEqual([m(0, 7), m(65, 72)]);
+    expect(sceneMoments({ kind: 'draft', ...draft('a', 3) })).toEqual([m(3)]);
+    // the whole video holds no moment, whatever it carries
+    expect(sceneMoments({ kind: 'draft', ...joined('a', null, null, [m(65)]) })).toEqual([]);
+  });
+
+  it('keeps moments as a scene writes them, its first in clip order as its own time', () => {
+    expect(draftTime([m(65, 72), m(0, 7)])).toEqual({ start: 0, end: 7, more: [m(65, 72)] });
+    // one moment writes no `more`, so a scene of one is written as it always was
+    expect(draftTime([m(3)])).toEqual({ start: 3, end: null });
+    expect(draftTime([])).toEqual({ start: null, end: null });
+    const scene = joined('a', 0, 7, [m(65, 72)]);
+    setDraftTime(scene, [m(2, 7)]);
+    expect(scene).toEqual({ id: 'a', start: 2, end: 7, label: '' });
+  });
+
+  it('lists, marks and words every moment, in the colour of the first', () => {
+    const list = sceneList([], [joined('a', 0, 7, [m(65, 72)], 'Bridge'), draft('b', 30)]);
+    const a = list.find((s) => s.key === 'a');
+    expect(a.more).toEqual([m(65, 72)]);
+    expect([list[0].key, a.color]).toEqual(['a', sceneColorAt(0)]);
+    const marks = sceneMarks(list);
+    expect(marks.map((k) => [k.key, k.scene, k.start, k.end, k.color])).toEqual([
+      ['a', 'a', 0, 7, a.color],
+      ['a#1', 'a', 65, 72, a.color],
+      ['b', 'b', 30, null, list[1].color],
+    ]);
+    expect(sceneTime(a)).toBe('0:00–0:07 · 1:05–1:12');
+    expect(sceneWhen(a)).toBe('2 moments · 0:00–0:07 · 1:05–1:12');
+    expect(compactTime(a)).toBe('0:00–0:07 +1');
+    expect(compactTime(list[1])).toBe('0:30');
+    expect(timeWords(sceneMoments(a))).toBe('0:00–0:07 · 1:05–1:12');
+  });
+
+  it('offers the clip’s other scenes still to prove as the same place, never a proof, the whole video or one abandoned', () => {
+    const list = sceneList(
+      [proof('P', { moments: [m(40, 45)], stated: true }),
+        { kind: 'draft', id: 'gone', start: 50, end: null, label: '', captures: [], abandoned: { reason: '', at: 't' } }],
+      [draft('a', 5), draft('b', 20, 25), draft('all', null), draft('gone', 50)],
+    );
+    const key = (k) => list.find((s) => s.key === k);
+    expect(samePlaceChoices(list, key('a')).map((s) => s.key)).toEqual(['b']);
+    expect(samePlaceChoices(list, key('b')).map((s) => s.key)).toEqual(['a']);
+    expect(samePlaceChoices(list, key('all'))).toEqual([]);
+    expect(samePlaceChoices(list, key('proof:P'))).toEqual([]);
+    expect(samePlaceChoices(list, key('gone'))).toEqual([]);
+  });
+
+  it('ends the moment started latest before the frame', () => {
+    const list = sceneList([], [joined('a', 5, null, [m(60)]), draft('b', 20)]);
+    const a = list.find((s) => s.key === 'a');
+    expect(momentBefore(a, 30)).toBe(0);
+    expect(momentBefore(a, 70)).toBe(1);
+    expect(momentBefore(a, 2)).toBe(-1);
+    expect(sceneToEnd(list, 30).id).toBe('b');
+    expect(sceneToEnd(list, 70).id).toBe('a');
   });
 });
 

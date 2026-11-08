@@ -17,19 +17,21 @@
   import { geolocating, readGeolocating, stopGeolocating } from '../lib/geolocating.svelte.js';
   import { GEOLOCATING_HELP as HELP } from '../lib/geolocatingHelp.js';
   import { sceneColorAt } from '../lib/scenes.js';
-  import { captureCount, isPicture, queueTime } from '../lib/sceneQueue.js';
+  import { captureCount, isPicture, queueShortTime, queueTime } from '../lib/sceneQueue.js';
 
   const held = $derived(
     geolocating.caseId && geolocating.caseId === caseState.current?.id ? geolocating.scene : null,
   );
-  // a picture says Whole picture where a video's scene says its time
-  const time = $derived(held ? queueTime({ start: held.start, end: held.end, file_kind: held.file_kind }) : '');
+  // a picture says Whole picture where a video's scene says its time, its first moment
+  // and the rest counted when it holds several; every one of them on hover
+  const said = $derived(held ? { kind: 'draft', start: held.start, end: held.end, more: held.more, file_kind: held.file_kind } : null);
+  const time = $derived(said ? queueShortTime(said) : '');
   const picture = $derived(isPicture(held));
   const count = $derived(captureCount(held));
   const file = $derived(held ? String(held.video).split('/').pop() : '');
   const color = $derived(held ? sceneColorAt(held.order) : null);
   // a narrow bar drops the word and the label; the whole line stays on the pill
-  const named = $derived(held ? ['Geolocating', time, held.label].filter(Boolean).join(' · ') : '');
+  const named = $derived(held ? ['Geolocating', queueTime(said), held.label].filter(Boolean).join(' · ') : '');
 
   // Read when a case opens, and again when the case reloads while one is held: a
   // capture reloads it, so the count is right even with no word from the server.
@@ -88,7 +90,7 @@
       <Icon name="crosshair" size={13} />
       <span class="geo-what">Geolocating</span>
       <span class="geo-dot" style:--scene={color} aria-hidden="true" data-testid="geolocating-dot"></span>
-      <span class="geo-time" class:mono={held.start != null && !picture}>{time}</span>
+      <span class="geo-time" class:mono={held.start != null && !picture} title={held.more?.length ? queueTime(said) : undefined}>{time}</span>
       {#if held.label}
         <span class="geo-sep" aria-hidden="true">·</span>
         <span class="geo-label" dir="auto">{held.label}</span>

@@ -39,6 +39,15 @@ describe('what a work save writes', () => {
     expect(sceneRecord({ id: 'sc_3', start: 4 })).toEqual({ id: 'sc_3', start: 4, end: null, label: '' });
   });
 
+  it('writes the moments after a scene\'s first only when it holds several, in the order the server writes them', () => {
+    const several = sceneRecord({ id: 'sc_1', start: 0, end: 7, label: 'Bridge', more: [{ start: 65, end: 72 }, { start: 80 }] });
+    expect(several).toEqual({ id: 'sc_1', start: 0, end: 7, label: 'Bridge', more: [{ start: 65, end: 72 }, { start: 80, end: null }] });
+    expect(Object.keys(several)).toEqual(['id', 'start', 'end', 'label', 'more']);
+    // one moment is written as it always was
+    expect(JSON.stringify(sceneRecord({ id: 'sc_2', start: 1, end: 2, label: '', more: [] })))
+      .toBe('{"id":"sc_2","start":1,"end":2,"label":""}');
+  });
+
   it('holds a turn to the right angles the pipeline accepts', () => {
     expect(workSpec({ videoRotation: 45, frames: [frame({ rotation: 33 })] })).toMatchObject({
       videoRotation: 0,

@@ -77,6 +77,18 @@ describe('a frame in a scene', () => {
   });
 });
 
+describe('a frame in a scene of several moments', () => {
+  it('belongs to it inside any of its moments, dotted in its one colour, and is offered to its proof', () => {
+    const scenes = sceneList([], [{ ...draft('sc_1', 0, 7), more: [m(65, 72)] }, draft('sc_2', 30)]);
+    expect(scenesAt(66, scenes, FRAME).map((s) => s.id)).toEqual(['sc_1']);
+    expect(scenesAt(20, scenes, FRAME)).toEqual([]);
+    const frames = [frame('a', 3), frame('b', 30), frame('c', 66)];
+    const dots = frameScenes(frames, scenes, FRAME);
+    expect(dots.get('a')[0].color).toBe(dots.get('c')[0].color);
+    expect(framesOfScene(scenes[0], frames, FRAME).map((f) => f.id)).toEqual(['a', 'c']);
+  });
+});
+
 describe('a frame in an abandoned scene', () => {
   const row = (id, extra) => ({ kind: 'draft', id, start: 4, end: 6, label: '', captures: [], abandoned: null, ...extra });
 
@@ -163,6 +175,11 @@ describe('what Geo Proof is handed', () => {
     });
     expect(proofHandoff(draft('sc_2', 3.2), 'media/clip.mp4', []).moments).toEqual([{ start: 3.2, end: null }]);
     expect(proofHandoff(draft('sc_3', null), 'media/clip.mp4', []).moments).toEqual([]);
+  });
+
+  it('hands every moment of a scene showing its place again', () => {
+    const twice = { ...draft('sc_1', 0, 7, 'Bridge'), more: [m(65, 72)] };
+    expect(proofHandoff(twice, 'media/clip.mp4', []).moments).toEqual([m(0, 7), m(65, 72)]);
   });
 
   it('keeps the panels in the order given: the frames, then the captures', () => {

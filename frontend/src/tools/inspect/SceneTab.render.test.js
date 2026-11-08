@@ -468,3 +468,69 @@ describe('the collages of the clip', () => {
     expect(root.querySelector('.collage-lines')).toBeNull();
   });
 });
+
+describe('one scene, several moments', () => {
+  const LIST = () => sceneList(
+    [proof('Depot', { moments: [{ start: 130, end: 158 }], stated: true })],
+    [
+      { id: 'sc_a', start: 0, end: 7, label: 'Bridge', more: [{ start: 65, end: 72 }] },
+      { id: 'sc_b', start: 30, end: null, label: '' },
+      { id: 'sc_c', start: 300, end: 310, label: 'Mast' },
+      { id: 'sc_all', start: null, end: null, label: 'which town?' },
+    ],
+  );
+  const opened = (scenes, id, handlers = {}) => {
+    const edit = new SceneEdit(() => ({ duration: 900, fps: 25 }));
+    edit.begin(scenes.find((sc) => sc.key === id));
+    return render(SceneTab, { scenes, edit, open: id, ...handlers });
+  };
+  const choices = () => [...document.querySelectorAll('[data-testid="same-place-choice"]')];
+
+  it('writes every moment on the closed row, as a proof holding several does', () => {
+    const row = rows(render(SceneTab, { scenes: LIST() })).find((r) => r.dataset.sceneKey === 'sc_a');
+    expect([row.querySelector('.row-title').textContent, row.querySelector('.row-when').textContent])
+      .toEqual(['Bridge', '2 moments · 0:00–0:07 · 1:05–1:12']);
+  });
+
+  it('opens on a line per moment, each with a way to take it off, and offers another', () => {
+    const onaddmoment = vi.fn();
+    const root = opened(LIST(), 'sc_a', { onaddmoment, onjoin: vi.fn() });
+    const moments = [...root.querySelectorAll('[data-testid="scene-moment"]')];
+    expect(moments.map((m) => m.querySelector('input').value)).toEqual(['0:00', '1:05']);
+    expect(moments.every((m) => m.querySelector('[aria-label="Remove this moment"]'))).toBe(true);
+    button(root, 'Another moment').click();
+    expect(onaddmoment).toHaveBeenCalled();
+  });
+
+  it('lists the clip’s other scenes still to prove under Same place as…, each in its colour with its time, and joins the one picked', () => {
+    const onjoin = vi.fn();
+    const scenes = LIST();
+    const root = opened(scenes, 'sc_b', { onaddmoment: vi.fn(), onjoin });
+    const open = button(root, 'Same place as…');
+    expect(open.getAttribute('aria-expanded')).toBe('false');
+    open.click();
+    flushSync();
+    expect(open.getAttribute('aria-expanded')).toBe('true');
+    // never a proof, the whole video or the scene itself
+    expect(choices().map((c) => c.textContent.replace(/\s+/g, ' ').trim())).toEqual([
+      'Bridge 0:00–0:07 · 1:05–1:12',
+      'Mast 5:00–5:10',
+    ]);
+    const bridge = scenes.find((sc) => sc.key === 'sc_a');
+    expect(choices()[0].getAttribute('style')).toContain(bridge.color);
+    choices()[1].click();
+    flushSync();
+    expect(onjoin).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'sc_b' }),
+      expect.objectContaining({ id: 'sc_c', label: 'Mast' }),
+    );
+    expect(choices()).toHaveLength(0);
+  });
+
+  it('offers no Same place as… with no other scene to join, on the whole video or on a proof', () => {
+    const alone = sceneList([], [{ id: 'sc_1', start: 30, end: null, label: '' }]);
+    expect(button(opened(alone, 'sc_1', { onjoin: vi.fn() }), 'Same place as…')).toBeUndefined();
+    expect(button(opened(LIST(), 'sc_all', { onjoin: vi.fn() }), 'Same place as…')).toBeUndefined();
+    expect(button(opened(LIST(), 'proof:Depot', { onjoin: vi.fn() }), 'Same place as…')).toBeUndefined();
+  });
+});

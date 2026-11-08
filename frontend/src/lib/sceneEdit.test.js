@@ -90,10 +90,28 @@ describe('a scene\'s time, open', () => {
     edit.remove(0); // the last one goes by choosing the whole video
     expect(edit.moments).toHaveLength(1);
 
-    // a draft keeps one moment
-    edit.begin(draft(3));
-    edit.add(10);
-    expect(edit.moments).toHaveLength(1);
+  });
+
+  it('gives a scene still to prove several moments, kept as its first and the ones after it', () => {
+    const edit = new SceneEdit(clip);
+    edit.begin(draft(45, 52));
+    edit.add(0);
+    edit.setEnd(7);
+    expect(edit.many).toBe(true);
+    // its first moment in clip order is its own time, the rest under `more`
+    expect(edit.result).toEqual({ start: 0, end: 7, more: [{ start: 45, end: 52 }] });
+    expect(edit.changed).toBe(true);
+    // the fields keep the order they were added in: the one just added goes
+    edit.remove(1);
+    expect(edit.result).toEqual({ start: 45, end: 52 });
+
+    edit.begin({ ...draft(0, 7), more: [{ start: 45, end: 52 }] });
+    expect(edit.moments.map((m) => [m.start, m.end])).toEqual([[0, 7], [45, 52]]);
+    expect(edit.changed).toBe(false);
+    edit.setStart(5, 1);
+    edit.setEnd(9, 1);
+    expect(edit.problem).toBe('Two passages overlap');
+    expect(edit.result).toBeNull();
   });
 
   it('keeps nothing while the fields do not read as a time, and says which moment', () => {
