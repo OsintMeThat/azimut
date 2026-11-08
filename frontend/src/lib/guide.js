@@ -1209,6 +1209,7 @@ export const KEYMAP = [
       { combo: 'Ctrl+Z', does: 'undoes the last change' },
       { combo: 'Ctrl+Shift+Z', does: 'redoes it' },
       { combo: 'Escape', does: 'drops the shape being drawn, then the selection, then the pen' },
+      { combo: 'Enter / Escape', does: 'in crop mode, keeps the crop or drops it' },
     ],
   },
   {

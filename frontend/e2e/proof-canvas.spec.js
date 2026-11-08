@@ -71,15 +71,17 @@ test('a panel rotates from its round handle and crops in place on double-click',
   const transformed = fixture.proofSaves[0].spec.panels[0];
   expect(transformed.natural).toEqual([640, 360]); // source pixels stay intact
   expect(Math.abs(transformed.rotation)).toBeGreaterThan(5);
-  expect(transformed.crop.w).toBeGreaterThan(0);
-  expect(transformed.crop.h).toBeGreaterThan(0);
-  expect(transformed.crop.w).toBeLessThan(640);
+  // cropped the way it is seen: square on the page, every source pixel kept under it
+  expect(transformed).not.toHaveProperty('crop');
+  expect(transformed.cut.w).toBeGreaterThan(0);
+  expect(transformed.cut.h).toBeGreaterThan(0);
 
-  // The reset takes the crop and leaves the turn: they are two statements.
+  // The reset takes the cut and leaves the turn: they are two statements.
   await page.getByRole('button', { name: 'Reset panel crop' }).click();
   await page.getByRole('button', { name: 'Save proof', exact: true }).click();
   await expect.poll(() => fixture.proofSaves.length).toBe(2);
   expect(fixture.proofSaves[1].spec.panels[0]).not.toHaveProperty('crop');
+  expect(fixture.proofSaves[1].spec.panels[0]).not.toHaveProperty('cut');
   expect(Math.abs(fixture.proofSaves[1].spec.panels[0].rotation)).toBeGreaterThan(5);
   fixture.expectNoUnexpectedRequests();
 });

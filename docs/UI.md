@@ -4597,20 +4597,35 @@ where they were; a copy is a free line, stepped aside.
 **Panel and overlay transforms.** Selecting either image shows a round knob on a
 short stem above it — the one Collage turns its pieces by — for a free turn, with
 quarter turns as gentle snap points. The turn is carried by the image rather than
-burnt into its pixels, so the selection frame, the crop marks, the border and the
-annotations all stay on the picture's own edges however far it comes round, and
-turning one never resizes it: the page reserves the upright room the turned
-picture needs.
+burnt into its pixels, so the selection frame, the border and the annotations all
+stay on the picture's own edges however far it comes round, and turning one never
+resizes it: the page reserves the upright room the turned picture needs.
 
 A double-click enters crop mode on the canvas itself: eight black edge and corner
-marks frame the kept pixels, as in a slide editor, over the whole source shown
-shaded outside them — so an earlier crop is there to be taken back, not only
-undone. The crop button in the image row opens the same mode, and closes it. The
-marks pull both ways until you leave crop mode, so a corner taken too far comes
-back in the same pass; clicking off the image, that button again, or saving keeps
-the box, and Escape drops it. The source file stays untouched: the proof stores
-the crop rectangle and the angle, and the export draws through them. Reset crop
+marks frame what is kept, as in a slide editor, over the whole source shown
+shaded outside them, so an earlier crop is there to be taken back, not only
+undone. The marks stand square on the page however the picture is turned, and
+pull along the page's horizontal and vertical, so a picture levelled by a few
+degrees can lose its tilted corners and the empty wedges around them. The crop
+button in the image row opens the same mode, and closes it. The marks pull both
+ways until you leave crop mode, so a corner taken too far comes back in the same
+pass; clicking off the image, that button again, Enter or saving keeps the box,
+and Escape drops it. Marks left where they opened change nothing. The source file
+stays untouched, and the export draws through what the proof stores. Reset crop
 restores the full source while preserving the turn.
+
+What is stored depends on the angle. Unturned or turned by a quarter, the box runs
+along the picture's edges and is kept as a crop rectangle in source pixels, as it
+always was. At any other angle it is a `cut`: an upright window over the turned
+picture, measured from the picture's middle, which replaces the room the page
+reserves for it. A proof never turned, or saved before cuts existed, has no `cut`
+and opens and saves exactly as before; a crop saved along a turned picture's edges
+stays one until its marks are moved. A cut picture is selected by its cut, its
+frame and handles square like it. Turned a few degrees more, the picture turns
+inside the cut, which stays put; turned by a quarter, the cut goes round with it;
+brought level, the cut becomes a plain crop again. Annotations keep their pixels
+through all of it, since a cut moves no corner they are measured from, and marks,
+blur boxes, zoom insets and view cones stop at the cut as they stop at a crop.
 
 **Drawing.** A tool in hand holds the canvas alone. Nothing already drawn answers
 the pointer, so a stroke started inside a box draws a new element instead of
