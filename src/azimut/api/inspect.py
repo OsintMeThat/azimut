@@ -567,11 +567,18 @@ def stop_geolocating(case_id: str) -> dict[str, Any]:
     return {"ended": ended}
 
 
+class MomentIn(BaseModel):
+    start: float = Field(ge=0, allow_inf_nan=False)
+    end: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+
 class RetimeIn(BaseModel):
     video: str = Field(min_length=1, max_length=1024)
     # both null for the whole video, no end for an instant
     start: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     end: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    # the moments after the first, for a scene showing its place again further on
+    more: list[MomentIn] | None = Field(default=None, max_length=inspectwork.MAX_SCENE_MOMENTS)
 
 
 @router.put("/cases/{case_id}/scenes/{draft}/time")
@@ -579,12 +586,58 @@ def retime_scene(case_id: str, draft: str, body: RetimeIn) -> dict[str, Any]:
     """Give a scene to prove a new time, the rest of its video's work untouched. Answers
     with the time it had, for an Undo."""
     case = get_case(case_id)
+    more = [m.model_dump() for m in body.more] if body.more else None
     try:
-        before = inspectwork.retime_scene(case, body.video, draft, body.start, body.end)
+        before = inspectwork.retime_scene(case, body.video, draft, body.start, body.end, more)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     events.publish({"type": "scenes", "case_id": case.id, "video": body.video})
     return {"before": before}
+
+
+class JoinIn(BaseModel):
+    video: str = Field(min_length=1, max_length=1024)
+    # the scene this one shows the same place as, which it joins
+    into: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/cases/{case_id}/scenes/{draft}/join")
+def join_scene(case_id: str, draft: str, body: JoinIn) -> dict[str, Any]:
+    """Same place as…: a scene to prove joins another of its video, their moments, labels
+    and captures in one scene. Answers with it, and what an Undo hands back."""
+    case = get_case(case_id)
+    try:
+        answer = geolocate.join(case, body.video, draft, body.into)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if answer.pop("moved"):
+        say_geolocating(case)
+    events.publish({"type": "scenes", "case_id": case.id, "video": body.video})
+    return answer
+
+
+class UnjoinIn(BaseModel):
+    video: str = Field(min_length=1, max_length=1024)
+    # both scenes as the join answered them, and the one geolocated then, if it moved
+    kept: dict[str, Any]
+    gone: dict[str, Any]
+    geolocating: str | None = Field(default=None, max_length=64)
+
+
+@router.post("/cases/{case_id}/scenes/{draft}/unjoin")
+def unjoin_scene(case_id: str, draft: str, body: UnjoinIn) -> dict[str, Any]:
+    """Undo a join: both scenes back as they were, ids, captures and all."""
+    if body.kept.get("id") != draft:
+        raise HTTPException(status_code=400, detail="that is not the scene joined into")
+    case = get_case(case_id)
+    try:
+        answer = geolocate.unjoin(case, body.video, body.kept, body.gone, body.geolocating)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if answer.pop("moved"):
+        say_geolocating(case)
+    events.publish({"type": "scenes", "case_id": case.id, "video": body.video})
+    return answer
 
 
 @router.put("/cases/{case_id}/scenes/{draft}/abandon")

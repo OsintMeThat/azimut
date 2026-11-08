@@ -1,0 +1,55 @@
+{
+  "azimut_inspect": 2,
+  "title": "clip",
+  "created_at": "…",
+  "updated_at": "…",
+  "source": {
+    "path": "media/clip.png",
+    "kind": "image"
+  },
+  "videoAdjust": {},
+  "videoRotation": 0,
+  "videoFiled": null,
+  "frames": [],
+  "marks": [
+    {
+      "id": "m1",
+      "time": 2.5,
+      "label": "flash"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "s0",
+      "start": null,
+      "end": null,
+      "label": "somewhere on the road"
+    },
+    {
+      "id": "s1",
+      "start": 4.25,
+      "end": 6.0,
+      "label": "Mast?",
+      "captures": [
+        "Captures/a.png"
+      ]
+    },
+    {
+      "id": "s2",
+      "start": 12.0,
+      "end": null,
+      "label": "Road bridge?",
+      "abandoned": {
+        "reason": "no landmark",
+        "at": "2026-11-08T09:00:00+00:00"
+      }
+    },
+    {
+      "id": "s3",
+      "start": 31.0,
+      "end": 40.0,
+      "label": "Bridge"
+    }
+  ],
+  "activeFrameId": null
+}

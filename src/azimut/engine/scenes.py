@@ -23,13 +23,14 @@ the clip as it was when the frame was cut. The ``derived-from`` edge follows a
 rename, so it is read first and the recorded path is only the fallback.
 
 **A scene still to prove lives in the video's Inspect work**, one instant, one
-stretch or the whole video, until a proof cites it (``scene.draft``). From then on the proof's own
+stretch, several of them where the place shows again (``more``, `inspectwork.scene_moments`)
+or the whole video, until a proof cites it (``scene.draft``). From then on the proof's own
 moments are the ones shown and the draft is left out, so a scene is never said
 twice, and a proof never writes into an Inspect work, but for one moment: as it
 leaves for the Trash. The draft stays in the work all the same, hidden only while a
 proof in the case cites it: the proof sent to the Trash gives it back at its own time,
 and the proof restored takes it up again. A proof that came from no draft gives its
-scene back as new ones (`give_back`), so no timecode leaves with a proof.
+scene back as a new one (`give_back`), so no timecode leaves with a proof.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ from __future__ import annotations
 import json
 import math
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -62,7 +64,8 @@ END_SLACK = 1.0
 MAX_MOMENTS = 20
 #: The longest Inspect scene id a proof keeps (`lib/inspect.js` `uid` is about 20).
 MAX_DRAFT_ID = 64
-#: The most scenes a proof gives back: one per moment, or one for the whole video.
+#: The most scenes a proof names as given back (`scene.gave`): it gives one now, holding
+#: every moment, where it once gave one per moment.
 MAX_GIVEN = MAX_MOMENTS
 
 
@@ -525,6 +528,8 @@ def unplaced_proofs(
             "proof": name,
             "video": scene["video"],
             "label": str(spec.get("title") or name),
+            # every moment, as a proof's row says them; the first also as a scene's, for its mark
+            "moments": scene["moments"],
             "start": first.get("start"),
             "end": first.get("end"),
             "state": state,
@@ -552,12 +557,14 @@ def draft_row(case: Case, video: str, draft: dict[str, Any], file_kind: str = "v
     abandoned = draft.get("abandoned") if isinstance(draft.get("abandoned"), dict) else None
     start = _seconds(draft.get("start"))
     end = _seconds(draft.get("end")) if start is not None else None
+    # a scene of one place holding several moments: the first is its start and end
+    moments = inspectwork.scene_moments(draft)
+    time = inspectwork.scene_time(moments) if len(moments) > 1 else {"start": start, "end": end}
     return {
         "kind": "draft",
         "video": video,
         "id": draft["id"],
-        "start": start,
-        "end": end,
+        **time,
         "label": str(draft.get("label") or ""),
         "state": ABANDONED if abandoned else PROGRESS if captures else TODO,
         "captures": captures,
@@ -764,7 +771,8 @@ def draft_frames(case: Case, video: str, draft: str) -> list[dict[str, Any]]:
     picture has left the case, has no ``path``: the composer files it first, as
     Inspect does, through the ``edits`` Inspect keeps for it (crop, turn, sliders),
     so the picture comes out as Inspect would have saved it. A scene about the whole
-    video holds every frame. Read only: nothing is filed, and no thumbnail is made.
+    video holds every frame, and one holding several moments the frames inside any of
+    them. Read only: nothing is filed, and no thumbnail is made.
     """
     _a_case_video(case, video)
     work = (inspectwork.find_work(case, video) or {}).get("spec") or {}
@@ -773,8 +781,7 @@ def draft_frames(case: Case, video: str, draft: str) -> list[dict[str, Any]]:
     )
     if scene is None:
         raise UnknownDraft("no such scene to geolocate in that video")
-    start = _seconds(scene.get("start"))
-    end = _seconds(scene.get("end")) if start is not None else None
+    moments = inspectwork.scene_moments(scene)
     frames = [
         (frame, time)
         for frame in work.get("frames") or []
@@ -783,9 +790,12 @@ def draft_frames(case: Case, video: str, draft: str) -> list[dict[str, Any]]:
         and frame.get("path", video) == video
         and (time := _seconds(frame.get("time"))) is not None
     ]
-    if start is not None:
+    if moments:
         length = _frame_length(case, video)
-        frames = [(frame, time) for frame, time in frames if frame_in_moment(time, start, end, length)]
+        frames = [
+            (frame, time) for frame, time in frames
+            if any(frame_in_moment(time, m["start"], m["end"], length) for m in moments)
+        ]
     frames.sort(key=lambda pair: pair[1])
 
     def filed(frame: dict[str, Any]) -> str | None:
@@ -957,14 +967,23 @@ def state_proof_scene(
     return {"proof": name, **(proof_scene(spec, origins) or {})}
 
 
+def _same_moment(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
+    if abs(a["start"] - b["start"]) >= 1e-6:
+        return False
+    return (a["end"] is None and b["end"] is None) or (
+        a["end"] is not None and b["end"] is not None and abs(a["end"] - b["end"]) < 1e-6
+    )
+
+
 def give_back(case: Case, proof: dict[str, Any], leaving: set[str]) -> list[str]:
     """Give a proof's scene back to its video's Inspect work as the proof goes to the
     Trash, and answer with the ids of the scenes added.
 
     A timecode is knowledge about the video, not only the proof's, so it must not leave
-    with it: one scene to geolocate per moment the proof states, since such a scene
-    holds one, or one about the whole video when it states none, each named with the
-    proof's title. A proof that took a scene up, or already gave one back, adds nothing:
+    with it: one scene to geolocate holding every moment the proof states, since they
+    show one place, or about the whole video when it states none, named with the
+    proof's title. A moment a scene of the work already holds is not given twice. A
+    proof that took a scene up, or already gave one back, adds nothing:
     that scene is still in a work, and shows again on its own once no proof in the case
     cites it. Nor does a proof on no video, or one whose video leaves with it.
 
@@ -991,8 +1010,14 @@ def give_back(case: Case, proof: dict[str, Any], leaving: set[str]) -> list[str]
         if cited & inspectwork.scene_ids(case):
             return []
         title = str(spec.get("title") or proof.get("label") or "")
-        wanted = [{"start": m["start"], "end": m["end"]} for m in moments] or [{"start": None, "end": None}]
-        added = inspectwork.add_scenes(case, video, [{**m, "label": title} for m in wanted])
+        # a moment a scene of the work already holds is not given twice
+        held = [m for d in _drafts_of(case, video, None) for m in inspectwork.scene_moments(d)]
+        fresh = [m for m in moments if not any(_same_moment(m, h) for h in held)]
+        if moments and not fresh:
+            return []
+        # moments a proof read leniently may clash: a scene holds them the way a join does
+        time = inspectwork.scene_time(inspectwork.join_moments(fresh)[: inspectwork.MAX_SCENE_MOMENTS])
+        added = inspectwork.add_scenes(case, video, [{**time, "label": title}])
         if not added:
             return []
         spec["scene"] = {

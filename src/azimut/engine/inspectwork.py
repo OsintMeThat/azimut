@@ -32,7 +32,8 @@ import shutil
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, TypedDict
 
 from PIL import Image
 
@@ -61,6 +62,9 @@ MAX_MARK_LABEL = 200
 #: somewhere still to be found. A proved scene is the proof's, not the work's.
 MAX_SCENES = 200
 MAX_SCENE_LABEL = 200
+#: The most moments one scene still to prove holds, as many as a proof states
+#: (`engine/scenes.MAX_MOMENTS`): one place often comes back in several extracts of a clip.
+MAX_SCENE_MOMENTS = 20
 MAX_PIECES = 200
 #: The collage list's preview: the browser draws it no wider than this, and a
 #: larger one is shrunk rather than stored.
@@ -78,7 +82,9 @@ _FRAME_KEYS = (
     "id", "path", "time", "adjust", "crop", "sourceOps", "rotation", "w", "h", "filed",
 )
 _MARK_KEYS = ("id", "time", "label")
-_SCENE_KEYS = ("id", "start", "end", "label")
+#: A scene's first moment is its own `start` and `end`, so a scene of one moment is
+#: written as it always was; `more` holds the moments after it, only when there are some.
+_SCENE_KEYS = ("id", "start", "end", "label", "more")
 #: What a scene to prove holds that only the server writes (`engine/geolocate.py`): the
 #: captures gathered while it was being geolocated, and the word it was abandoned with.
 #: Inspect saves its scenes whole and never sends these, so a save keeps them.
@@ -324,8 +330,127 @@ def _scene_order(scene: dict[str, Any]) -> tuple[float, float]:
     return (start, scene["end"] if scene["end"] is not None else start)
 
 
+# -- a scene's moments ---------------------------------------------------------------
+# A scene still to prove holds one moment, an instant or a passage, or none for the
+# whole video. The same place often shows again further on, so it may hold several:
+# its own `start` and `end` are the first in clip order, and `more` the rest, written
+# only when there are some. Every reader that knows one moment still reads the first.
+
+
+class Moment(TypedDict):
+    """One moment of a scene: an instant (no end) or a passage."""
+
+    start: float
+    end: float | None
+
+
+def _moment_order(moment: Any) -> tuple[float, float]:
+    return (moment["start"], moment["end"] if moment["end"] is not None else moment["start"])
+
+
+def _moment(value: Any) -> Moment:
+    """One moment as a request states it: a start, and an end after it or none."""
+    if not isinstance(value, dict):
+        raise CaseError("a scene's moment is a start, and an end or none")
+    start = _seconds(value.get("start"))
+    if start is None:
+        raise CaseError("a scene needs a start in seconds, or no time at all")
+    if value.get("end") is None:
+        return {"start": start, "end": None}
+    end = _seconds(value.get("end"))
+    if end is None:
+        raise CaseError("a scene's end is a time in seconds")
+    if end <= start:
+        raise CaseError("a scene must end after it starts")
+    return {"start": start, "end": end}
+
+
+def moments_clash(moments: Sequence[Mapping[str, Any]]) -> str:
+    """What is wrong between moments each right on its own, or '' for nothing: two
+    passages that overlap, or one instant said twice. A proof's rule
+    (`scenes._stated_moments`): two passages that touch, or an instant inside a passage,
+    are fine."""
+    passages = sorted((m["start"], m["end"]) for m in moments if m["end"] is not None)
+    if any(after[0] < before[1] for before, after in zip(passages, passages[1:])):
+        return "two passages of one scene overlap"
+    instants = [m["start"] for m in moments if m["end"] is None]
+    if len(instants) != len(set(instants)):
+        return "one scene holds the same instant twice"
+    return ""
+
+
+def join_moments(moments: Sequence[Mapping[str, Any]]) -> list[Moment]:
+    """Moments said of one place as a scene holds them: passages that overlap become
+    one, an instant said twice is said once, all in clip order."""
+    fused: list[list[float]] = []
+    for start, end in sorted((m["start"], m["end"]) for m in moments if m["end"] is not None):
+        if fused and start < fused[-1][1]:
+            fused[-1][1] = max(fused[-1][1], end)
+        else:
+            fused.append([start, end])
+    out: list[Moment] = [{"start": t, "end": None} for t in {m["start"] for m in moments if m["end"] is None}]
+    out += [{"start": start, "end": end} for start, end in fused]
+    return sorted(out, key=_moment_order)
+
+
+def scene_moments(scene: dict[str, Any]) -> list[Moment]:
+    """Every moment a scene still to prove holds, in clip order: none for the whole
+    video. Read as stored, so a moment that does not read as one is left out rather
+    than guessed at, and moments that clash are read as one."""
+    start = _seconds(scene.get("start"))
+    if start is None:
+        return []
+    end = _seconds(scene.get("end"))
+    held: list[Moment] = [{"start": start, "end": end if end is not None and end > start else None}]
+    further = scene.get("more")
+    for value in further[: MAX_SCENE_MOMENTS - 1] if isinstance(further, list) else []:
+        try:
+            held.append(_moment(value))
+        except CaseError:
+            continue
+    return join_moments(held)[:MAX_SCENE_MOMENTS]
+
+
+def scene_time(moments: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Moments as a scene writes them: the first as its own `start` and `end`, the rest
+    under `more` only when there are some; both null for the whole video."""
+    ordered = sorted(moments, key=_moment_order)
+    if not ordered:
+        return {"start": None, "end": None}
+    first, *rest = ordered
+    time: dict[str, Any] = {"start": first["start"], "end": first["end"]}
+    if rest:
+        time["more"] = [{"start": m["start"], "end": m["end"]} for m in rest]
+    return time
+
+
+def _scene_time(scene: dict[str, Any]) -> dict[str, Any]:
+    """A scene's time as a request states it, checked: its moments in clip order, none
+    clashing and no more than a scene holds."""
+    start = _seconds(scene.get("start"))
+    whole = scene.get("start") is None and scene.get("end") is None
+    if start is None and not whole:
+        raise CaseError("a scene needs a start in seconds, or no time at all")
+    further = scene.get("more")
+    if further is not None and not isinstance(further, list):
+        raise CaseError("a scene's further moments are a list")
+    if whole:
+        if further:
+            raise CaseError("a scene about the whole video holds no moment")
+        return {"start": None, "end": None}
+    moments = [_moment({"start": scene.get("start"), "end": scene.get("end")})]
+    moments += [_moment(value) for value in further or []]
+    if len(moments) > MAX_SCENE_MOMENTS:
+        raise CaseError(f"a scene holds at most {MAX_SCENE_MOMENTS} moments")
+    clash = moments_clash(moments)
+    if clash:
+        raise CaseError(clash)
+    return scene_time(moments)
+
+
 def _clean_scenes(scenes: Any) -> list[dict[str, Any]]:
-    """Scenes still to prove: an id, a start in seconds, an end or none, a short label.
+    """Scenes still to prove: an id, a start in seconds, an end or none, a short label,
+    and the further moments of a scene that holds several.
 
     A scene is an instant until it is given an end, and then a stretch whose end
     comes after its start. One with neither is about the whole video. The video's
@@ -346,21 +471,14 @@ def _clean_scenes(scenes: Any) -> list[dict[str, Any]]:
         if scene["id"] in seen:
             raise CaseError("two scenes share one id")
         seen.add(scene["id"])
-        start = _seconds(scene.get("start"))
-        whole = scene.get("start") is None and scene.get("end") is None
-        if start is None and not whole:
-            raise CaseError("a scene needs a start in seconds, or no time at all")
-        end = None
-        if start is not None and scene.get("end") is not None:
-            end = _seconds(scene.get("end"))
-            if end is None:
-                raise CaseError("a scene's end is a time in seconds")
-            if end <= start:
-                raise CaseError("a scene must end after it starts")
+        time = _scene_time(scene)
         label = scene.get("label", "")
         if not isinstance(label, str):
             raise CaseError("a scene label must be text")
-        out.append({"id": scene["id"], "start": start, "end": end, "label": label.strip()[:MAX_SCENE_LABEL]})
+        cleaned = {"id": scene["id"], "start": time["start"], "end": time["end"], "label": label.strip()[:MAX_SCENE_LABEL]}
+        if "more" in time:
+            cleaned["more"] = time["more"]
+        out.append(cleaned)
     return sorted(out, key=_scene_order)
 
 
@@ -462,19 +580,155 @@ def update_scene(
     return target
 
 
-def retime_scene(case: "Case", subject: str, scene_id: str, start: Any, end: Any) -> dict[str, Any]:
+def retime_scene(
+    case: "Case", subject: str, scene_id: str, start: Any, end: Any, more: Any = None
+) -> dict[str, Any]:
     """Give one scene to prove a new time, the rest of the work untouched: Collage
     changing the moment its collage was marked over, without saving the work whole
-    over an Inspect save that may land meanwhile. Answers with the time it had."""
-    [checked] = _clean_scenes([{"id": scene_id, "start": start, "end": end, "label": ""}])
+    over an Inspect save that may land meanwhile. Answers with the time it had, its
+    further moments (`more`) only when it held some."""
+    checked = _scene_time({"start": start, "end": end, "more": more})
     before: dict[str, Any] = {}
 
     def move(scene: dict[str, Any]) -> None:
         before.update(start=scene.get("start"), end=scene.get("end"))
+        if scene.get("more"):
+            before["more"] = scene["more"]
         scene["start"], scene["end"] = checked["start"], checked["end"]
+        _set_more(scene, checked.get("more"))
 
     update_scene(case, subject, scene_id, move)
     return before
+
+
+def _set_more(scene: dict[str, Any], more: Any) -> None:
+    """Give a stored scene its further moments, kept right after its label, or none."""
+    if not more:
+        scene.pop("more", None)
+        return
+    if "more" in scene:
+        scene["more"] = more
+        return
+    after = dict(scene)
+    scene.clear()
+    for key, value in after.items():
+        scene[key] = value
+        if key == "label":
+            scene["more"] = more
+    scene.setdefault("more", more)
+
+
+def _undo_record(value: Any, max_captures: int) -> dict[str, Any]:
+    """A scene as a join answered it, handed back to be put back: checked as a save
+    checks one, with what only the server writes on it (`SCENE_STATE`)."""
+    if not isinstance(value, dict):
+        raise CaseError("a scene is an object")
+    [record] = _clean_scenes([value])
+    captures = value.get("captures")
+    if captures is not None:
+        if not isinstance(captures, list) or len(captures) > max_captures:
+            raise CaseError("a scene's captures are a list of files")
+        record["captures"] = list(dict.fromkeys(p for p in captures if isinstance(p, str) and p))
+    abandoned = value.get("abandoned")
+    if abandoned is not None:
+        if not isinstance(abandoned, dict):
+            raise CaseError("an abandoned scene says why in an object")
+        record["abandoned"] = {
+            "reason": str(abandoned.get("reason") or "")[:MAX_SCENE_LABEL], "at": str(abandoned.get("at") or ""),
+        }
+    return record
+
+
+def _joined_label(theirs: Any, mine: Any) -> str:
+    """The label of two scenes joined: the one joined into, and the other after it
+    unless it says the same."""
+    kept, other = str(theirs or "").strip(), str(mine or "").strip()
+    if not kept or not other or kept.casefold() == other.casefold():
+        return kept or other
+    return f"{kept} / {other}"[:MAX_SCENE_LABEL]
+
+
+def join_scenes(case: "Case", subject: str, scene_id: str, into: str, max_captures: int) -> dict[str, Any]:
+    """Say that two scenes still to prove of one file show the same place: ``scene_id``
+    joins ``into``, in one write. The moments come together (`join_moments`), the label
+    joined into is kept with the other's after it, and the captures gathered for either
+    stay with the scene, the first ones first. Answers with the scene as written, and
+    both as they were (``kept``, ``gone``) for an Undo (`unjoin_scenes`).
+
+    A scene about the whole video already holds every moment, and an abandoned one is
+    brought back first, so neither joins.
+    """
+    if scene_id == into:
+        raise CaseError("a scene is already the same place as itself")
+    with case.lock:
+        found = _settle(case, subject)
+        if not found:
+            raise CaseError("that file has no scenes")
+        rel, previous = found
+        scenes = [dict(s) for s in previous.get("scenes") or [] if isinstance(s, dict)]
+        source = next((s for s in scenes if s.get("id") == scene_id), None)
+        target = next((s for s in scenes if s.get("id") == into), None)
+        if source is None or target is None:
+            raise CaseError("that scene is no longer in its file's work")
+        if source.get("abandoned") or target.get("abandoned"):
+            raise CaseError("an abandoned scene is brought back before it is joined")
+        theirs, mine = scene_moments(target), scene_moments(source)
+        if not theirs or not mine:
+            raise CaseError("a scene about the whole video already holds every moment")
+        moments = join_moments(theirs + mine)
+        if len(moments) > MAX_SCENE_MOMENTS:
+            raise CaseError(f"a scene holds at most {MAX_SCENE_MOMENTS} moments")
+        kept, gone = json.loads(json.dumps(target)), json.loads(json.dumps(source))
+        time = scene_time(moments)
+        label = _joined_label(target.get("label"), source.get("label"))
+        joined: dict[str, Any] = {"id": into, "start": time["start"], "end": time["end"], "label": label}
+        if "more" in time:
+            joined["more"] = time["more"]
+        held = [p for p in [*(target.get("captures") or []), *(source.get("captures") or [])] if isinstance(p, str) and p]
+        captures = list(dict.fromkeys(held))[:max_captures]
+        if captures:
+            joined["captures"] = captures
+        scenes = [joined if s is target else s for s in scenes if s is not source]
+        _write(case.resolve_inside(rel), {**previous, "scenes": sorted(scenes, key=_stored_order), "updated_at": _now()})
+    return {"scene": joined, "kept": kept, "gone": gone}
+
+
+def unjoin_scenes(case: "Case", subject: str, kept: Any, gone: Any, max_captures: int) -> dict[str, Any]:
+    """Undo a join: the scene joined into back as it was (``kept``) and the other one
+    beside it again (``gone``), ids, time, label, captures and all, as `join_scenes`
+    answered them. A capture gathered for the joined scene since stays with it.
+    Answers with both as written."""
+    held, given = _undo_record(kept, max_captures), _undo_record(gone, max_captures)
+    if held["id"] == given["id"]:
+        raise CaseError("two scenes share one id")
+    _check_size({"kept": held, "gone": given})
+    with case.lock:
+        found = _settle(case, subject)
+        if not found:
+            raise CaseError("that file has no scenes")
+        rel, previous = found
+        scenes = [dict(s) for s in previous.get("scenes") or [] if isinstance(s, dict)]
+        joined = next((s for s in scenes if s.get("id") == held["id"]), None)
+        if joined is None:
+            raise CaseError("that scene is no longer in its file's work")
+        if any(s.get("id") == given["id"] for s in scenes):
+            raise CaseError("that scene is back already")
+        before = set(held.get("captures") or []) | set(given.get("captures") or [])
+        since = [p for p in joined.get("captures") or [] if isinstance(p, str) and p not in before]
+        if since:
+            held["captures"] = [*(held.get("captures") or []), *since][:max_captures]
+        scenes = [held if s is joined else s for s in scenes] + [given]
+        _write(case.resolve_inside(rel), {**previous, "scenes": sorted(scenes, key=_stored_order), "updated_at": _now()})
+    return {"scene": held, "gone": given}
+
+
+def _stored_order(scene: dict[str, Any]) -> tuple[float, float]:
+    """Clip order for a scene as stored, which a save always sorts by."""
+    start = _seconds(scene.get("start"))
+    if start is None:
+        return (-math.inf, -math.inf)
+    end = _seconds(scene.get("end"))
+    return (start, end if end is not None else start)
 
 
 def scene_works(case: "Case") -> list[tuple[str, str | None, list[dict[str, Any]]]]:
@@ -516,13 +770,20 @@ def _same_time(a: Any, b: Any) -> bool:
     return abs(float(a) - float(b)) < 1e-6
 
 
+def _same_moments(a: Sequence[Mapping[str, Any]], b: Sequence[Mapping[str, Any]]) -> bool:
+    return len(a) == len(b) and all(
+        _same_time(x["start"], y["start"]) and _same_time(x["end"], y["end"]) for x, y in zip(a, b)
+    )
+
+
 def add_scenes(case: "Case", subject: str, scenes: list[dict[str, Any]]) -> list[str]:
     """Add scenes to prove to a file's work, filing the work if it has none yet, and
     answer with the ids of those added.
 
-    A scene already there at the same time is not added twice, and the work keeps no
-    more than it ever holds: past the limit the rest are left out. Each scene is
-    ``{start, end, label}``, given an id here.
+    A scene already there at the same time, every moment of it, is not added twice,
+    and the work keeps no more than it ever holds: past the limit the rest are left
+    out. Each scene is ``{start, end, label}``, with ``more`` for a scene holding
+    several moments, given an id here.
     """
     with case.lock:
         found = _settle(case, subject)
@@ -533,13 +794,17 @@ def add_scenes(case: "Case", subject: str, scenes: list[dict[str, Any]]) -> list
         for scene in scenes:
             if len(held) >= MAX_SCENES:
                 break
-            if any(_same_time(s.get("start"), scene["start"]) and _same_time(s.get("end"), scene["end"]) for s in held):
+            wanted = scene_moments(scene)
+            if any(_same_moments(scene_moments(s), wanted) for s in held):
                 continue
             scene_id = _new_id("sc")
             while scene_id in taken:
                 scene_id = _new_id("sc")
             taken.add(scene_id)
-            held.append({"id": scene_id, "start": scene["start"], "end": scene["end"], "label": scene["label"]})
+            entry = {"id": scene_id, "start": scene["start"], "end": scene["end"], "label": scene["label"]}
+            if scene.get("more"):
+                entry["more"] = scene["more"]
+            held.append(entry)
             added.append(scene_id)
         if added:
             save_work(case, subject, {**spec, "scenes": held})
@@ -1339,7 +1604,14 @@ def _merge_subject(
                 continue
             if scene["id"] in seen_scenes:
                 continue
-            scenes.append({**_pick(scene, _SCENE_KEYS), "start": start, "end": end if start is not None else None})
+            entry = {**_pick(scene, _SCENE_KEYS), "start": start, "end": end if start is not None else None}
+            # the further moments as they read, the whole scene written the way a save writes it
+            entry.pop("more", None)
+            time = scene_time(scene_moments(scene))
+            if "more" in time:
+                entry.update(time)
+                entry = {**_pick(entry, _SCENE_KEYS)}
+            scenes.append(entry)
             seen_scenes.add(scene["id"])
     merged_from = list(base.get("merged_from") or [])
     for r, _spec in others:
