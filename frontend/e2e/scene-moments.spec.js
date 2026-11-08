@@ -271,7 +271,11 @@ test('the To-do’s row says every moment of a scene showing its place again', a
   const group = sidebar.getByRole('region', { name: 'To geolocate' });
   await expect(group.getByRole('heading', { name: 'To geolocate 2' })).toBeVisible();
   await expect(group.locator('li.scene').nth(0)).toContainText('Road bridge');
-  await expect(group.locator('li.scene').nth(0)).toContainText('0:00–0:07 · 1:05–1:12 · To geolocate');
+  // every moment on its own line, the state on the next: no line ends on a dot
+  const meta = group.locator('li.scene').nth(0).locator('.meta');
+  await expect(meta).toContainText('0:00–0:07 · 1:05–1:12');
+  await expect(meta.locator('br')).toHaveCount(1);
+  await expect(meta).toContainText('To geolocate');
   // a scene with no label goes by its time, every moment of it
   await expect(group.locator('li.scene').nth(1)).toContainText('0:30–0:34 · 1:20');
   await shoot(page, 'todo-rows');
