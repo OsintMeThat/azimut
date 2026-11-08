@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING, Any
 from .. import layout
 from ..workspace import CaseError
 from . import inspectwork
-from . import satellite as satellite_engine
 from . import scenes as scenes_engine
 from .scenes import draft_row as scene_row
 
@@ -68,7 +67,7 @@ def _proved(specs: list[tuple[str, dict[str, Any]]], taken: set[str], path: str,
     its place there until it states a place (`scenes.unplaced_proofs`); a picture marked
     to geolocate, once a proof that states a place lays it out."""
     if kind == "image":
-        return any(satellite_engine.spec_points(spec) for _name, spec in scenes_engine.laid_out_by(specs, path))
+        return any(scenes_engine.states_place(spec) for _name, spec in scenes_engine.laid_out_by(specs, path))
     return draft_id in taken
 
 
@@ -274,7 +273,7 @@ def abandon_proof(case: Case, name: str, reason: Any = "") -> dict[str, Any]:
         raise CaseError("the reason is text")
     entity = _proof_entity(case, name)
     spec = _proof_spec(case, name)
-    if satellite_engine.spec_points(spec):
+    if scenes_engine.states_place(spec):
         raise CaseError("this proof states a place: it is proved")
     word = (reason or "").strip()[:MAX_REASON]
     abandoned = {"reason": word, "at": _now()}

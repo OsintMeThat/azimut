@@ -1892,8 +1892,9 @@ of the tab, greyed with its word and **Restore**. It keeps its colour and its fr
 bar draws it as an outlined band or a hollow pin, its frames carry a grey ring, no scene
 is offered inside it, and the tab's count leaves it out.
 
-**A proof is Proved once it states a place.** Saved with no point yet, its row reads *In
-progress · no place* rather than Proved, with **Open the proof** and **Abandon**. It stays
+**A proof is Proved once it states a place someone checked.** Saved with no point yet,
+or only with one the imagery proposed and nobody looked at, its row reads *In progress ·
+no place* rather than Proved, with **Open the proof** and **Abandon**. It stays
 in the To-do beside its file's scenes (`proofs` on a file of `GET /scenes/queue`), where a
 press opens it in Geo Proof, and on Geo Proof's strip its tile carries an amber dot and
 its ⋯ offers Abandon. Abandoned, it joins the scenes given up on, greyed with its word,

@@ -668,7 +668,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         if existing["attrs"].get("imagery_credits", "") != credits:
             attrs["imagery_credits"] = credits
         # a proof given up on and saved with a place is proved: the word it was left with goes
-        if existing["attrs"].get("abandoned") is not None and satellite_engine.spec_points(spec):
+        if existing["attrs"].get("abandoned") is not None and scene_engine.states_place(spec):
             attrs["abandoned"] = None
         if attrs:
             patch["attrs"] = attrs

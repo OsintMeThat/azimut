@@ -786,6 +786,30 @@ def test_a_proof_given_up_on_and_saved_with_a_place_lets_its_word_go(client, tmp
 
 
 @needs_ffmpeg
+def test_a_proof_whose_only_point_nobody_checked_is_still_in_progress(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save_work(client, cid, video, [{"id": "s1", "start": 1, "end": 2, "label": "Bridge"}])
+    name = _scene_proof(client, cid, video, "s1")
+    spec = client.get(f"/api/cases/{cid}/proofs/{name}").json()
+    guessed = {"panels": spec["panels"], "points": [{"coords": PLACE, "proposed": True}]}
+    saved = client.post(f"/api/cases/{cid}/proofs", json={"title": spec["title"], "rename_from": name, "spec": guessed})
+    assert saved.status_code == 200, saved.text
+
+    # the imagery's guess says where to look, not where it is
+    assert _proof_row(client, cid, video, name)["state"] == "progress"
+    assert [p["proof"] for p in _queue(client, cid)["files"][0]["proofs"]] == [name]
+    assert client.put(f"/api/cases/{cid}/proofs/{name}/abandon", json={}).status_code == 200
+    assert client.delete(f"/api/cases/{cid}/proofs/{name}/abandon").status_code == 200
+
+    checked = {"panels": spec["panels"], "points": [{"coords": PLACE}]}
+    saved = client.post(f"/api/cases/{cid}/proofs", json={"title": spec["title"], "rename_from": name, "spec": checked})
+    assert saved.status_code == 200, saved.text
+    assert _proof_row(client, cid, video, name)["state"] == "proved"
+    assert _queue(client, cid)["files"] == []
+
+
+@needs_ffmpeg
 def test_a_picture_laid_out_by_a_proof_with_no_place_stays_to_geolocate(client):
     cid = _case(client)
     photo = _upload(client, cid)

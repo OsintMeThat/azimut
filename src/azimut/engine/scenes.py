@@ -440,7 +440,7 @@ def _proof_row(lookup: _Lookup, name: str, spec: dict[str, Any], scene: dict[str
     # thirty slides would load whole, and never one made here, since this is a read.
     thumb = _existing(case, _text(spec.get("thumb"))) or _existing(case, _text(attrs.get("thumb")))
     points = _points(lookup, spec)
-    state, abandoned = proof_state(bool(points), attrs)
+    state, abandoned = proof_state(states_place(spec), attrs)
     return {
         "kind": "proof",
         "proof": name,
@@ -480,6 +480,13 @@ ABANDONED = "abandoned"
 PROVED = "proved"
 
 
+def states_place(spec: dict[str, Any]) -> bool:
+    """Whether a proof states a place someone checked. A point the imagery proposed and
+    nobody looked at (``proposed``, `satellite.spec_points`) says where to look, not
+    where it is, so a proof holding only those is still being geolocated."""
+    return any(not point.get("proposed") for point in satellite_engine.spec_points(spec))
+
+
 def proof_state(located: bool, attrs: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
     """Where a proof stands: Proved once it states a place. Until then it is a scene
     still being geolocated, In progress, unless the analyst gave up on it: the word it
@@ -496,7 +503,7 @@ def proof_state(located: bool, attrs: dict[str, Any]) -> tuple[str, dict[str, An
 def unplaced_proofs(
     case: Case, proofs: tuple[list[tuple[str, dict[str, Any]]], dict[str, tuple[str, float]]]
 ) -> dict[str, list[dict[str, Any]]]:
-    """The proofs made for a scene of a video that state no place yet, by video, in the
+    """The proofs made for a scene of a video that state no checked place yet, by video, in the
     shape the queue lists a scene in: what the To-do still counts as to geolocate. Only
     a proof that states its scene: an older proof traced to a video by its frames was
     never asked to be one of its places."""
@@ -504,7 +511,7 @@ def unplaced_proofs(
     lookup = _Lookup(case)
     out: dict[str, list[dict[str, Any]]] = {}
     for name, spec in specs:
-        if satellite_engine.spec_points(spec):
+        if states_place(spec):
             continue
         scene = proof_scene(spec, origins)
         if scene is None or not scene["stated"]:
