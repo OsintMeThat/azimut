@@ -4624,8 +4624,9 @@ stays one until its marks are moved. A cut picture is selected by its cut, its
 frame and handles square like it. Turned a few degrees more, the picture turns
 inside the cut, which stays put; turned by a quarter, the cut goes round with it;
 brought level, the cut becomes a plain crop again. Annotations keep their pixels
-through all of it, since a cut moves no corner they are measured from, and marks,
-blur boxes, zoom insets and view cones stop at the cut as they stop at a crop.
+through all of it, since a cut moves no corner they are measured from. New marks
+are held inside the cut, and blur boxes, zoom insets and view cones show nothing
+past it, as at a crop.
 
 **Drawing.** A tool in hand holds the canvas alone. Nothing already drawn answers
 the pointer, so a stroke started inside a box draws a new element instead of
