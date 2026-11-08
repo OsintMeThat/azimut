@@ -643,7 +643,11 @@ describe('Proof Composer panel and overlay transforms', () => {
     expect(bodyOfFn('surfaceNodeOf')).toContain('docLayer.findOne(`#pc-${id}`) ?? docLayer.findOne(`#pg-${id}`)');
     expect(bodyOfFn('applyNodeTurn')).toContain('turnCutSurface(item, node.rotation())');
     // the picture is clipped to the cut, and the marks stay on its pixels
-    expect(bodyOfFn('surfaceImageNode')).toContain('clipFunc: (ctx) => traceOutline(ctx, outline)');
+    expect(bodyOfFn('surfaceImageNode')).toContain('{ clipFunc: cutClip }');
+    // mid-turn the cut stays square and the picture turns under it, frame hidden
+    expect(bodyOfFn('surfaceImageNode')).toContain("liveCutOf(item, self.findAncestor('.surface-cut'))");
+    expect(bodyOfFn('liveCutOf')).toContain('turnSurfaceCut(item.cut, from, turn)');
+    expect(source).toContain("if (transformer.getActiveAnchor() !== 'rotater' || !transformer.nodes()[0]?.hasName('surface-cut')) return;");
   });
 
   it('keeps a crop or a cut with Enter, like a press off the image', () => {
