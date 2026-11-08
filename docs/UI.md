@@ -4657,7 +4657,7 @@ tank, person, building, drone, camera, antenna) read the width control as weight
 every other symbol carries its own weight, and the control stays away.
 
 **Vehicle models.** The Vehicles group holds small models drawn at any angle: a car,
-a technical, a van, a truck, a tanker, a bus, a motorbike, an armoured car, an APC,
+a pickup, a technical, a van, a truck, a tanker, a bus, a motorbike, an armoured car, an APC,
 an IFV, a tank, self-propelled artillery, a towed gun, a rocket launcher, air
 defence, an anti-aircraft gun and its pickup, an engineering vehicle, a helicopter,
 a fighter, a transport, a quadcopter, an FPV drone, a UAV, a one-way drone, a skiff,

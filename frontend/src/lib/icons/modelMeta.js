@@ -22,6 +22,7 @@ export const MODEL_META = [
   { id: 'model-chevron', label: 'Heading', family: 'Generic', keywords: ['direction', 'arrow', 'movement', 'bearing'] },
 
   { id: 'model-car', label: 'Car', family: 'Road', keywords: ['automobile', 'sedan', 'suv'] },
+  { id: 'model-pickup-plain', label: 'Pickup', family: 'Road', keywords: ['pickup', '4x4', 'ute', 'light truck', 'civilian'] },
   { id: 'model-pickup', label: 'Technical', family: 'Road', keywords: ['pickup', '4x4', 'machine gun', 'militia'] },
   { id: 'model-van', label: 'Van', family: 'Road', keywords: ['minibus', 'ambulance', 'delivery'] },
   { id: 'model-truck', label: 'Truck', family: 'Road', keywords: ['lorry', 'transport', 'logistics', 'covered'] },

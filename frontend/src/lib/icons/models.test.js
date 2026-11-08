@@ -18,10 +18,10 @@ describe('the models', () => {
 
   it('holds the mockup\'s 23 classes, the eight added ones and the anti-aircraft guns', () => {
     for (const id of ['model-tank', 'model-heli', 'model-cargo', 'model-van', 'model-towed-gun', 'model-dozer',
-      'model-fpv', 'model-usv', 'model-locomotive', 'model-wagon', 'model-aa-gun', 'model-aa-pickup', 'model-mrap']) {
+      'model-fpv', 'model-usv', 'model-locomotive', 'model-wagon', 'model-aa-gun', 'model-aa-pickup', 'model-mrap', 'model-pickup-plain']) {
       expect(isModelId(id)).toBe(true);
     }
-    expect(MODEL_IDS.length).toBe(33);
+    expect(MODEL_IDS.length).toBe(34);
     expect(modelMeta('model-nope')).toBeNull();
     expect(modelById('model-nope')).toBeNull();
   });

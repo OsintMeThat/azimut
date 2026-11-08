@@ -90,6 +90,10 @@ export const GEOMETRY = {
     b.box(0, -0.26, 1.62, 2.72, 0.88, 1.44, { tx: 0.17, tf: 0.74, tb: 0.42, side: 'glass', top: 'light' });
     for (const s of [-1, 1]) b.box(s * 0.58, 2.27, 0.42, 0.06, 0.56, 0.72, { ink: 'light' });
   },
+  // a plain pickup: the cab and the open bed, nothing mounted
+  'model-pickup-plain': (b) => {
+    pickupBase(b);
+  },
   'model-pickup': (b) => {
     pickupBase(b);
     b.cyl(0, -1.45, 0.07, 0.72, 2.02, { ink: 'metal', n: 8 });
