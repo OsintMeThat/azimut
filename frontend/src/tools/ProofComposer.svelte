@@ -113,6 +113,8 @@
     ICON_BOX, ICON_SIZE_DEFAULT, ICON_SIZE_MIN, PROOF_ICONS,
     glyphInk, iconByName, iconOrigin, isSolidIcon,
   } from '../lib/proofIcons.js';
+  import { isModel } from '../lib/icons/catalog.js';
+  import { drawModelRing } from '../lib/proofModelRing.js';
   import { stampNodes } from '../lib/proofStamp.js';
   import {
     assetName, base64Of, PASTE_TYPES, MAX_PASTES, MAX_PASTE_BYTES,
@@ -3892,6 +3894,14 @@
     endHandles.destroyChildren();
     const s = selectedShape;
     if (tool !== 'select' || !s) return;
+    // A model stamp turns and tilts on its ring, the turn saved on the shape.
+    if (s.kind === 'icon' && isModel(s.name)) {
+      drawModelRing(Konva, {
+        group: endHandles, node: docLayer.findOne(`#${s.id}`), s, screen: stage.scaleX(), accent: ACCENT, edge: HANDLE_RING,
+        commit: (view) => { Object.assign(s, view); dirty = true; },
+      });
+      return;
+    }
     if (!POINT_KINDS.has(s.kind) && s.kind !== 'callout' && s.kind !== 'zoom' && s.kind !== 'cone') return;
     const surface = list.find((x) => x.id === s.panel);
     if (!surface) return;

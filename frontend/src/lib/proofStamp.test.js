@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { MODEL_VIEWS } from './icons/modelMeta.js';
+import { setStampView } from './icons/stampView.svelte.js';
 import { STAMP_CUT, STAMP_HALO } from './proofIcons.js';
-import { stampNodes } from './proofStamp.js';
+import { modelHalo, modelLine, modelPaint } from './proofModelNode.js';
+import { glyphOps, paintGlyph, stampNodes } from './proofStamp.js';
 
 /** Konva's constructors as records of what they were asked to draw. */
 const node = (kind) => class {
@@ -68,4 +71,136 @@ describe('a stamp on its disc', () => {
 
 it('draws nothing for a name this build does not know', () => {
   expect(stampNodes(Konva, { name: 'battleship', color: '#ff5252' }, box(56))).toEqual([]);
+});
+
+describe('a stamp on its disc, sized', () => {
+  it('draws a symbol smaller than the disc, about its middle, so its corners stay inside', () => {
+    const [, , body] = stampNodes(Konva, { name: 'truck', color: '#ff5252', size: 96, fillOpacity: 1 }, box(96));
+    expect(body.scaleX).toBeCloseTo((96 * 0.76) / 24);
+    expect(body.x + 12 * body.scaleX).toBeCloseTo(0);
+    expect(body.y + 12 * body.scaleX).toBeCloseTo(0);
+  });
+
+  it('leaves the pin its whole box, so its tip stays on the point', () => {
+    const size = 96;
+    const origin = { x: -48, y: (-22.4 / 24) * size };
+    const [, , body] = stampNodes(Konva, { name: 'point', color: '#ff5252', size, fillOpacity: 1 }, { size, origin });
+    expect(body.scaleX).toBeCloseTo(4);
+    expect(body.x).toBeCloseTo(origin.x);
+    expect(body.y).toBeCloseTo(origin.y);
+  });
+});
+
+describe('a layer glyph on a proof', () => {
+  it('takes the colour over a dark halo when free, its cuts in the stamp\'s dark shade', () => {
+    const ops = glyphOps('badge-flame', { color: '#ff5252', size: 56 });
+    expect(ops[0].fill).toBe(STAMP_HALO);
+    expect(ops[0].width).toBeGreaterThan(1);
+    // one halo per painted layer, then the layers in order
+    expect(ops.slice(1).map((op) => op.fill)).toEqual(['#ff5252', STAMP_CUT]);
+  });
+
+  it('is the map badge on a solid disc: the disc\'s ink, its cuts in the disc\'s colour', () => {
+    const ops = glyphOps('badge-flame', { color: '#ff5252', disc: 1 });
+    expect(ops.map((op) => op.fill)).toEqual(['#ffffff', '#ff5252']);
+    expect(ops.some((op) => op.fill === STAMP_HALO)).toBe(false);
+  });
+
+  it('keeps a stroked layer a stroke, with the width and turn its layer gives', () => {
+    const clash = glyphOps('badge-clash', { color: '#ff5252', disc: 1 });
+    expect(clash[0].rotate).toBe(45);
+    const antenna = glyphOps('badge-telecom-antenna', { color: '#40c4ff', size: 56 });
+    expect(antenna.filter((op) => op.stroke === '#40c4ff')[0].width).toBe(1.9);
+    expect(antenna.find((op) => op.stroke === STAMP_HALO && !op.fill).width).toBeGreaterThan(1.9);
+  });
+
+  it('draws through one shape in its box, at the box\'s scale', () => {
+    const [shape] = stampNodes(Konva, { name: 'badge-flame', color: '#ff5252', size: 48 }, box(48));
+    expect(shape.kind).toBe('shape');
+    expect(shape.x).toBeCloseTo(-24);
+    expect(shape.listening).toBe(false);
+    expect(typeof shape.sceneFunc).toBe('function');
+  });
+
+  it('turns a layer about the box\'s middle as it paints', () => {
+    vi.stubGlobal('Path2D', class { constructor(d) { this.d = d; } });
+    const calls = [];
+    const ctx = new Proxy({}, {
+      get: (target, key) => (key in target ? target[key] : (...args) => calls.push([key, ...args])),
+      set: (target, key, value) => { target[key] = value; return true; },
+    });
+    paintGlyph(ctx, [{ d: 'M0 0L1 1Z', fill: '#ff0000', rotate: 90 }, { d: 'M0 0L1 0', stroke: '#00ff00', width: 2 }]);
+    expect(calls.map(([k]) => k)).toEqual(['save', 'translate', 'rotate', 'translate', 'fill', 'restore', 'save', 'stroke', 'restore']);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('a vehicle model on a proof', () => {
+  it('takes the picker\'s view when fresh from the tool, and never again', () => {
+    setStampView('angled');
+    const fresh = { kind: 'icon', name: 'model-tank', color: '#ff5252', size: 56 };
+    stampNodes(Konva, fresh, box(56));
+    const angled = MODEL_VIEWS.find((v) => v.id === 'angled');
+    expect(fresh.tilt).toBe(angled.tilt);
+    expect(fresh.heading).toBe(angled.heading);
+
+    setStampView('side');
+    stampNodes(Konva, fresh, box(56));
+    expect(fresh.tilt).toBe(angled.tilt);
+    setStampView('top');
+  });
+
+  it('leaves a model stamp that has a view as it is', () => {
+    setStampView('side');
+    const saved = { kind: 'icon', name: 'model-tank', color: '#ff5252', size: 56, heading: 12, tilt: 0 };
+    const [shape] = stampNodes(Konva, saved, box(56));
+    expect(saved.tilt).toBe(0);
+    expect(shape.viewHeading).toBe(12);
+    expect(shape.viewTilt).toBe(0);
+    setStampView('top');
+  });
+
+  it('centres one shape on the box, and lets nothing press through it', () => {
+    const [shape] = stampNodes(Konva, { kind: 'icon', name: 'model-car', color: '#ff5252', size: 40, heading: 0, tilt: 0 }, { size: 40, origin: { x: -20, y: -20 } });
+    expect(shape.kind).toBe('shape');
+    expect(shape.x).toBe(0);
+    expect(shape.y).toBe(0);
+    expect(shape.listening).toBe(false);
+  });
+
+  it('is the model\'s length across the box, free and haloed, or smaller in white on a disc', () => {
+    const s = { name: 'model-car', color: '#ff5252', size: 100, heading: 30, tilt: 55 };
+    const free = modelPaint(s, { size: 50, scale: 2 });
+    expect(free).toMatchObject({ px: 50, fit: 'length', heading: 30, tilt: 55, mode: 'tone', colour: '#ff5252' });
+    expect(free.line).toBeCloseTo(modelLine(100) / 2);
+    expect(free.halo).toBeCloseTo(modelHalo(100) / 2);
+
+    const badge = modelPaint(s, { size: 50, scale: 2, disc: 1 });
+    expect(badge).toMatchObject({ mode: 'ink', disc: '#ff5252', paper: '#ffffff', halo: 0 });
+    expect(badge.px).toBeLessThan(50);
+
+    expect(modelPaint(s, { size: 50, disc: 0.2 })).toMatchObject({ mode: 'tone', px: 40 });
+  });
+
+  it('keeps its outline and halo in step with its size, within sane bounds', () => {
+    expect(modelLine(10)).toBeCloseTo(0.35);
+    expect(modelLine(1000)).toBe(3);
+    expect(modelHalo(56)).toBeGreaterThan(1);
+    expect(modelHalo(1000)).toBe(6);
+  });
+
+  it('asks for the models it has not got, and repaints when they land', async () => {
+    const [shape] = stampNodes(Konva, { kind: 'icon', name: 'model-car', color: '#ff5252', size: 40, heading: 0, tilt: 0 }, box(40));
+    const batchDraw = vi.fn();
+    const target = { getLayer: () => ({ batchDraw }), getAttr: () => 0 };
+    const fill = vi.fn();
+    const native = new Proxy({ fill }, {
+      get: (t, key) => (key in t ? t[key] : () => {}),
+      set: (t, key, value) => { t[key] = value; return true; },
+    });
+    shape.sceneFunc({ _context: native }, target);
+    await vi.waitFor(() => expect(batchDraw).toHaveBeenCalled());
+    shape.sceneFunc({ _context: native }, target);
+    expect(fill).toHaveBeenCalled();
+  });
 });

@@ -17,12 +17,7 @@
 import { rad } from './build.js';
 import { project, solved } from './solve.js';
 
-/** The three views offered for a stamp: the tilt each sets, and the turn a preview shows it at. */
-export const VIEWS = [
-  { id: 'top', label: 'Top', tilt: 0, heading: 0 },
-  { id: 'angled', label: 'Angled', tilt: 55, heading: 130 },
-  { id: 'side', label: 'Side', tilt: 84, heading: 90 },
-];
+export { MODEL_VIEWS as VIEWS } from './modelMeta.js';
 
 const WHITE = [255, 255, 255];
 const BLACK = [0, 0, 0];

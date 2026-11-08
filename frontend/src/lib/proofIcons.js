@@ -121,6 +121,9 @@ const WEIGHT_PER_STROKE = 0.12;
 const HALO_BOX = 0.85;
 const HALO_MIN_PX = 1.2;
 
+/** How far a free symbol's halo reaches, in box units, at this placed side. */
+export const stampHalo = (size) => Math.max(HALO_BOX, (HALO_MIN_PX * ICON_BOX) / Math.max(size, 1));
+
 /** The stamp's weight in box units: what its stroke width adds round its outline. */
 export function stampWeight(name, strokeWidth) {
   if (isSolidIcon(name)) return 0;
@@ -144,7 +147,7 @@ export function stampParts(name, { color = '#ff5252', disc = 0, strokeWidth, siz
   const weight = stampWeight(name, strokeWidth);
   const ink = glyphInk(color, disc);
   if (disc > 0.45) return [{ d: stamp.path, fill: ink, stroke: weight ? ink : null, width: weight }];
-  const halo = Math.max(HALO_BOX, (HALO_MIN_PX * ICON_BOX) / Math.max(size, 1));
+  const halo = stampHalo(size);
   const parts = [
     { d: stamp.fill, fill: STAMP_HALO, stroke: STAMP_HALO, width: weight + 2 * halo },
     { d: stamp.fill, fill: ink, stroke: weight ? ink : null, width: weight },

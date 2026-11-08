@@ -3,6 +3,17 @@
  * so a picker or a layer list can name a model before `models.js` has loaded.
  */
 
+/**
+ * The three views offered for a model: the tilt each sets, and the heading it is
+ * shown at. Top looks straight down; Side sees the model's right flank, nose to
+ * the right of the page.
+ */
+export const MODEL_VIEWS = [
+  { id: 'top', label: 'Top', tilt: 0, heading: 0 },
+  { id: 'angled', label: 'Angled', tilt: 55, heading: 130 },
+  { id: 'side', label: 'Side', tilt: 84, heading: 90 },
+];
+
 /** Families in the order a picker shows them. */
 export const MODEL_FAMILIES = ['Generic', 'Road', 'Armour', 'Air', 'Sea', 'Rail'];
 
