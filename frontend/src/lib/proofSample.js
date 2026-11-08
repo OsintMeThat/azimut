@@ -11,10 +11,14 @@
  */
 import { ANNO_COLORS, applyProofStyle, normalizeProofStyle } from './composer.js';
 
-/** The 1901 photo as it ships (`findExample.js` files the same file), its plate border and number left out. */
+/**
+ * The 1901 photo as it ships (`findExample.js` files the same file), its plate border
+ * and number left out. Cut to the overhead's shape, so the two pictures line up side
+ * by side and stacked, as a template's own layout lays them.
+ */
 const PHOTO = {
   natural: [1554, 1187],
-  crop: { x: 30, y: 26, w: 1484, h: 1084 },
+  crop: { x: 30, y: 26, w: 1484, h: 989 },
 };
 /** The orthoimagery, cut from the USGS tiles at zoom 15 around the two places. */
 const OVERHEAD = { natural: [720, 480] };
@@ -89,11 +93,6 @@ export function sampleProof(style, { pictures = null, legend = true } = {}) {
   applyProofStyle(proof, normalizeProofStyle(style), {});
   // Captions are a proof's own words, and a template only says whether new panels get them.
   if (proof.captionsEnabled === false) for (const panel of proof.panels) panel.caption = '';
-  // Stacked, the two pictures share a width; side by side, a height. The analyst would size them so.
-  const stacked = (proof.panels[1].row ?? 0) !== (proof.panels[0].row ?? 0);
-  const photoAspect = PHOTO.crop.w / PHOTO.crop.h;
-  const overheadAspect = OVERHEAD.natural[0] / OVERHEAD.natural[1];
-  proof.panels[0].scale = stacked ? overheadAspect / photoAspect : 1;
   proof.shapes = sampleShapes(proof.palette);
   if (legend) {
     const [first, second, third] = [...proof.palette, ...ANNO_COLORS];

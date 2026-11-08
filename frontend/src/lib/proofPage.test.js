@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FakeKonva } from './konva.fixture.js';
-import { docSize, footerBand } from './composer.js';
+import { docSize, footerBand, layoutPanels } from './composer.js';
 import { drawPage, measurePage } from './proofPage.js';
 import { SAMPLE_POINT, SAMPLE_SCENE, sampleProof } from './proofSample.js';
 import { sceneBadges } from './proofScene.js';
@@ -26,12 +26,13 @@ describe('the sample a template is shown on', () => {
     expect(proof.panels.every((panel) => !panel.caption)).toBe(true);
   });
 
-  it('gives the two pictures one width when stacked and one height side by side', () => {
-    const stacked = sampleProof({ panelDirection: 'vertical' });
-    const wide = sampleProof({ panelDirection: 'horizontal' });
-    const width = (p) => (p.natural[0] / p.natural[1]) * (p.scale ?? 1);
-    expect(width(stacked.panels[0])).toBeCloseTo(width(stacked.panels[1]));
-    expect(wide.panels.map((p) => p.scale)).toEqual([1, 1]);
+  it('holds two pictures of one shape, so they line up however the template lays them', () => {
+    for (const panelDirection of ['horizontal', 'vertical']) {
+      const proof = sampleProof({ panelDirection });
+      const boxes = layoutPanels(proof.panels, proof.captionSize, proof.layout, proof.space);
+      expect(boxes[0].h).toBeCloseTo(boxes[1].h, 0);
+      expect(Math.abs(boxes[0].w - boxes[1].w)).toBeLessThan(2);
+    }
   });
 
   it('carries a legend only when asked, since its words are a proof\'s own', () => {

@@ -39,11 +39,11 @@ export const PROOF_TEMPLATE_HELP = {
   footerAlign: 'Which side the footer\'s words sit on',
 
   // the signature
-  logo: 'Stamps your logo from Settings › Publishing',
+  logo: 'Stamps your logo from Settings → Publishing',
   logoCorner: 'The corner the logo starts from, before it is dragged',
   logoSize: 'How much of the page the logo takes',
   logoOpacity: 'How much of the picture shows through the logo',
-  handle: 'Prints your handle from Settings › Publishing',
+  handle: 'Prints your handle from Settings → Publishing',
   handleCorner: 'The corner the handle starts from, before it is dragged',
   handleSize: 'The size of the handle',
   handleColour: 'The colour of the handle',

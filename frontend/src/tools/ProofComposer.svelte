@@ -7717,7 +7717,7 @@
               </div>
               <div class="size-row" title={PROOF_TEMPLATE_HELP.markSize}>
                 <span>Size</span>
-                <input class="size-slider" type="range" min="12" max="96" step="1"
+                <input class="size-slider" type="range" min="12" max={Math.max(96, proof.azimutMark.size)} step="1"
                   value={proof.azimutMark.size}
                   oninput={(e) => {
                     proof.azimutMark = { ...proof.azimutMark, size: Number(e.currentTarget.value) };

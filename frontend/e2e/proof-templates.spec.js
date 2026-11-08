@@ -78,5 +78,38 @@ test('a template picked from a start becomes the default, and New proof starts w
       mark: Boolean(stage.findOne('#azimut-mark')),
     };
   })).toEqual({ ground: '#000000', mark: true });
+
+  // the proof's own switch answers at once, and leaves the template alone
+  await page.getByRole('checkbox', { name: 'Azimut mark' }).uncheck();
+  await expect.poll(() => page.evaluate(() => Boolean(window.Konva.stages[0].findOne('#azimut-mark')))).toBe(false);
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('a default template that was deleted leaves New proof on no template, without a word', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  const { store } = await templateStore(page);
+  await page.route('**/api/templates/proof/*', (route) => {
+    store.proof = [];
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ deleted: true }) });
+  });
+
+  await page.goto('/#settings');
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Templates' }).click();
+  await page.getByRole('button', { name: 'New proof template' }).click();
+  await page.locator('.pts-card[data-starter="blank"]').click();
+  await page.locator('.tpl-title').fill('House');
+  await page.getByRole('button', { name: 'Save template' }).click();
+  const row = page.locator('.tpl-row', { hasText: 'House' });
+  await row.getByRole('button', { name: 'Start new proofs with this template' }).click();
+  await expect(row.locator('.tpl-tag')).toHaveText('Default');
+
+  await row.getByTitle('Delete').click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
+  await expect(row).toHaveCount(0);
+
+  await page.goto('/#proof');
+  await page.getByRole('button', { name: 'New proof' }).first().click();
+  const create = page.getByRole('dialog', { name: 'Create proof' });
+  await expect(create.locator('select')).toHaveValue('');
   fixture.expectNoUnexpectedRequests();
 });

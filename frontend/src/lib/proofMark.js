@@ -9,10 +9,13 @@
  * It takes its corner and steps inward past whatever already sits there (the logo,
  * the handle), so turning it on never covers the analyst's own signature. In a
  * bottom corner it rides on the footer's last line, or just above the band when
- * the footer's words run along that same side.
+ * the footer's words run along that same side. Its ink answers to what it sits on:
+ * the page's colour, or the light one with a dark halo over a picture.
  */
 import { INK_ON_DARK, drawSignature, signatureWidth } from './brandMark.js';
-import { BG, FOOTER_SIZE, SIG_MARGIN, footerBand, isLightColor, normalizeAzimutMark } from './composer.js';
+import {
+  BG, FOOTER_SIZE, SIG_MARGIN, footerBand, isLightColor, layoutPanels, normalizeAzimutMark,
+} from './composer.js';
 
 export { MARK_SIZE, newAzimutMark, normalizeAzimutMark } from './composer.js';
 /** The ink a pale page takes, the app's own on its light theme. */
@@ -109,7 +112,13 @@ export function addMark(Konva, layer, proof, { width, height, pad, footerLines =
     ? { lines: footerLines, size: proof.footerSize ?? FOOTER_SIZE, pad, align: proof.footerAlign }
     : null;
   const box = markBox(mark, width, height, { avoid, footer });
-  const node = markNode(Konva, mark, box, proof.bg ?? BG);
+  const node = markNode(Konva, mark, box, markGround(proof, box));
   layer.add(node);
   return node;
+}
+
+/** What the mark's ink has to read on: the page, or a dark ground when it lies over a picture. */
+export function markGround(proof, box) {
+  const panels = layoutPanels(proof.panels ?? [], proof.captionSize, proof.layout, proof.space);
+  return panels.some((panel) => overlaps(box, panel)) ? BG : (proof.bg ?? BG);
 }

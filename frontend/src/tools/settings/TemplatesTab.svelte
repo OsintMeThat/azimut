@@ -142,7 +142,7 @@
 <section class="group" data-guide="settings.proof-templates">
   <h3>Geo Proof templates</h3>
   <p class="note">
-    Reusable proof styles shared across cases. New proof starts with the default one.
+    Reusable proof styles shared across cases. The bookmark marks the one New proof starts with.
   </p>
   <div class="tpl-list">
     {#each templatesState.proof as t (t.id)}

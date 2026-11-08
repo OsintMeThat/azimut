@@ -3,7 +3,8 @@ import { FakeKonva } from './konva.fixture.js';
 import { SIG_MARGIN, footerBand, toSpec } from './composer.js';
 import { signatureWidth } from './brandMark.js';
 import {
-  INK_ON_LIGHT, MARK_SIZE, addMark, drawMark, markBox, markInk, markWidth, newAzimutMark, normalizeAzimutMark,
+  INK_ON_LIGHT, MARK_SIZE, addMark, drawMark, markBox, markGround, markInk, markWidth, newAzimutMark,
+  normalizeAzimutMark,
 } from './proofMark.js';
 
 const W = 1800;
@@ -73,6 +74,14 @@ describe('how the mark is inked', () => {
     expect(markInk('#ffffff').ink).toBe(INK_ON_LIGHT);
     expect(markInk('#000000').halo).toMatch(/^rgba\(0, 0, 0/);
     expect(markInk('#f4f1ea').halo).toMatch(/^rgba\(255, 255, 255/);
+  });
+
+  it('reads on what it lies over: the page in a margin, a dark ground on a picture', () => {
+    const panel = { id: 'p', row: 0, scale: 1, natural: [1600, 900], sourceNatural: [1600, 900] };
+    const proof = { bg: '#ffffff', panels: [panel], layout: 'grid', space: { pad: 20, gap: 16, rowGap: 18 } };
+    expect(markGround(proof, { x: 100, y: 100, w: 80, h: 28 })).toBe('#0d1117');
+    expect(markGround(proof, { x: 100, y: 1000, w: 80, h: 28 })).toBe('#ffffff');
+    expect(markGround({ bg: '#ffffff' }, { x: 0, y: 0, w: 10, h: 10 })).toBe('#ffffff');
   });
 
   it('draws the arrow and the six letters, or the arrow alone', () => {

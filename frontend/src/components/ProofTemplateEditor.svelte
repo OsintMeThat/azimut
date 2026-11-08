@@ -72,6 +72,9 @@
     if (Number.isFinite(number)) data[key] = Math.max(min, Math.min(max, number));
   };
 
+  // A slider's far end, past it when a template already holds more, so the thumb never jumps.
+  const reach = (limit, value) => Math.max(limit, Number(value) || 0);
+
   const ground = $derived(data.bg ?? BG);
   const auto = $derived(textColors(ground));
   const footerOn = $derived(data.footerEnabled !== false);
@@ -99,7 +102,9 @@
   <div class="pte-stage">
     <div class="pte-bar">
       <span class="pte-bar-title">Sample proof</span>
-      <span class="pte-bar-hint">Drag the logo or the handle to place them.</span>
+      <span class="pte-bar-hint">
+        {#if data.signature || (data.signatureText && handleSet)}Drag the logo or the handle to place them.{/if}
+      </span>
       <label class="pte-bar-check" title={HELP.sampleLegend}>
         <input type="checkbox" bind:checked={showLegend} /> Legend
       </label>
@@ -146,19 +151,19 @@
       </div>
       <div class="pte-slider" title={HELP.outerMargin}>
         <span class="pte-label">Outer margin</span>
-        <input type="range" min="0" max="80" step="1" value={space.pad} aria-label="Outer margin"
+        <input type="range" min="0" max={reach(80, space.pad)} step="1" value={space.pad} aria-label="Outer margin"
           oninput={(e) => setSpace('pad', e.currentTarget.value)} />
         <span class="pte-val">{space.pad}</span>
       </div>
       <div class="pte-slider" title={HELP.betweenPictures}>
         <span class="pte-label">Between pictures</span>
-        <input type="range" min="0" max="80" step="1" value={space.gap} aria-label="Between pictures"
+        <input type="range" min="0" max={reach(80, space.gap)} step="1" value={space.gap} aria-label="Between pictures"
           oninput={(e) => setSpace('gap', e.currentTarget.value)} />
         <span class="pte-val">{space.gap}</span>
       </div>
       <div class="pte-slider" title={HELP.betweenRows}>
         <span class="pte-label">Between rows</span>
-        <input type="range" min="0" max="80" step="1" value={space.rowGap} aria-label="Between rows"
+        <input type="range" min="0" max={reach(80, space.rowGap)} step="1" value={space.rowGap} aria-label="Between rows"
           oninput={(e) => setSpace('rowGap', e.currentTarget.value)} />
         <span class="pte-val">{space.rowGap}</span>
       </div>
@@ -179,7 +184,7 @@
         onchange={(e) => (data.captionsEnabled = e.currentTarget.checked)} /> Caption new panels</label>
       <div class="pte-slider" title={HELP.captionSize}>
         <span class="pte-label">Caption size</span>
-        <input type="range" min="10" max="40" step="1" value={data.captionSize} aria-label="Caption size"
+        <input type="range" min="8" max={reach(40, data.captionSize)} step="1" value={data.captionSize} aria-label="Caption size"
           oninput={setNumber('captionSize', 8, 80)} />
         <span class="pte-val">{data.captionSize}</span>
       </div>
@@ -197,7 +202,7 @@
       </div>
       <div class="pte-slider" title={HELP.legendSize}>
         <span class="pte-label">Legend size</span>
-        <input type="range" min="11" max="40" step="1" value={data.legendSize} aria-label="Legend size"
+        <input type="range" min="8" max={reach(40, data.legendSize)} step="1" value={data.legendSize} aria-label="Legend size"
           oninput={setNumber('legendSize', 8, 80)} />
         <span class="pte-val">{data.legendSize}</span>
       </div>
@@ -215,7 +220,7 @@
       {#if footerOn}
         <div class="pte-slider" title={HELP.footerSize}>
           <span class="pte-label">Footer size</span>
-          <input type="range" min="10" max="60" step="1" value={data.footerSize} aria-label="Footer size"
+          <input type="range" min="8" max={reach(60, data.footerSize)} step="1" value={data.footerSize} aria-label="Footer size"
             oninput={setNumber('footerSize', 8, 80)} />
           <span class="pte-val">{data.footerSize}</span>
         </div>
@@ -272,18 +277,18 @@
           </div>
           <div class="pte-slider" title={HELP.logoSize}>
             <span class="pte-label">Size</span>
-            <input type="range" min="0.03" max="0.3" step="0.01" value={data.signature.scale ?? SIG_SCALE} aria-label="Size"
+            <input type="range" min="0.03" max={reach(0.3, data.signature.scale)} step="0.01" value={data.signature.scale ?? SIG_SCALE} aria-label="Size"
               oninput={(e) => (data.signature = { ...data.signature, scale: Number(e.currentTarget.value) })} />
             <span class="pte-val">{Math.round((data.signature.scale ?? SIG_SCALE) * 100)}%</span>
           </div>
           <div class="pte-slider" title={HELP.logoOpacity}>
             <span class="pte-label">Opacity</span>
-            <input type="range" min="0.2" max="1" step="0.05" value={data.signature.opacity ?? SIG_OPACITY} aria-label="Opacity"
+            <input type="range" min="0" max="1" step="0.05" value={data.signature.opacity ?? SIG_OPACITY} aria-label="Opacity"
               oninput={(e) => (data.signature = { ...data.signature, opacity: Number(e.currentTarget.value) })} />
             <span class="pte-val">{Math.round((data.signature.opacity ?? SIG_OPACITY) * 100)}%</span>
           </div>
           {#if logoMissing}
-            <p class="pte-hint warn"><Icon name="alert" size={12} /> No logo saved yet. Add one in Settings › Publishing.</p>
+            <p class="pte-hint warn"><Icon name="alert" size={12} /> No logo saved yet. Add one in Settings → Publishing.</p>
           {/if}
         </div>
       {/if}
@@ -300,7 +305,7 @@
           </div>
           <div class="pte-slider" title={HELP.handleSize}>
             <span class="pte-label">Size</span>
-            <input type="range" min="12" max="120" step="1" value={data.signatureText.size ?? SIG_TEXT_SIZE} aria-label="Handle size"
+            <input type="range" min="12" max={reach(120, data.signatureText.size)} step="1" value={data.signatureText.size ?? SIG_TEXT_SIZE} aria-label="Handle size"
               oninput={(e) => (data.signatureText = { ...data.signatureText, size: Number(e.currentTarget.value) })} />
             <span class="pte-val">{data.signatureText.size ?? SIG_TEXT_SIZE}</span>
           </div>
@@ -310,7 +315,7 @@
               oninput={(e) => (data.signatureText = { ...data.signatureText, color: e.currentTarget.value })} />
           </div>
           {#if !handleSet}
-            <p class="pte-hint">Your handle is set in Settings › Publishing.</p>
+            <p class="pte-hint">Add your handle in Settings → Publishing.</p>
           {/if}
         </div>
       {/if}
@@ -327,7 +332,7 @@
           </div>
           <div class="pte-slider" title={HELP.markSize}>
             <span class="pte-label">Size</span>
-            <input type="range" min="12" max="96" step="1" value={mark.size} aria-label="Mark size"
+            <input type="range" min="12" max={reach(96, mark.size)} step="1" value={mark.size} aria-label="Mark size"
               oninput={(e) => setMark({ size: Number(e.currentTarget.value) })} />
             <span class="pte-val">{mark.size}</span>
           </div>
@@ -356,7 +361,7 @@
             title="Another colour" onchange={(e) => replaceColour(e.currentTarget.value)} />
         </div>
       {:else}
-        <p class="pte-hint">The first is the one a new mark takes. Press one to change it.</p>
+        <p class="pte-hint">Press one to change it.</p>
       {/if}
     </section>
   </div>

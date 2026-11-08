@@ -1047,7 +1047,7 @@
         {#if editing.choosing}
           <div class="tpl-heading">
             <h3>New proof template</h3>
-            <p>Pick a start. Everything in it can be changed.</p>
+            <p>Pick a start, then change anything in it.</p>
           </div>
         {:else}
           <input class="tpl-title" type="text" placeholder="Template name"
