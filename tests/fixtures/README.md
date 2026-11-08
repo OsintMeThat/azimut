@@ -47,6 +47,16 @@ means to alter a reading rewrites it with `AZIMUT_WRITE_GOLDEN=1 uv run pytest
 tests/test_case_workspace_fixture.py`, and the diff is that change's account of what
 reads differently.
 
+## Inspect's scenes
+
+| File | What it is there to break |
+|---|---|
+| `inspect-work-one-moment.json` | A file's scenes to geolocate, each holding one moment (an instant, a passage, the whole video, one with captures, one abandoned), saved, written by the server and saved again. A scene may now hold several moments (`more`), and one holding one must still be written byte for byte as before. |
+
+Written by the steps of `tests/onemoment.py` on the code from before `more`, compared by
+`tests/test_scene_moments.py` with the moment of writing scrubbed. `AZIMUT_WRITE_GOLDEN=1`
+rewrites it, and only a change meant to alter how every work is written should.
+
 ## Search folding
 
 | File | What it is there to break |
