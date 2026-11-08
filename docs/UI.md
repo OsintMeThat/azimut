@@ -4870,7 +4870,8 @@ template; an id whose template is gone reads as none, without a word. It is a se
 **The Azimut mark** is a switch in the template's and the proof's Signature, off by
 default. Under it, **Shows** offers three buttons, each drawn as what it puts on the
 page with the app's own logo and wordmark: the logo and the name (the default), the logo
-alone, or the name alone, which then stands as tall as the logo would. It takes the
+alone, or the name alone, set like type of the mark's size so its capitals match a
+handle's beside it. It takes the
 corner it is given, the signature's at first, and steps inward past a logo or a handle
 already there, so it never covers them. In a bottom corner it rides on the footer's last line, or
 just above the band when the footer's words run along that side. Its ink follows what it

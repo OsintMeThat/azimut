@@ -3,7 +3,7 @@ import { FakeKonva } from './konva.fixture.js';
 import { SIG_MARGIN, footerBand, toSpec } from './composer.js';
 import { LETTERS, MARK, signatureWidth } from './brandMark.js';
 import {
-  INK_ON_LIGHT, MARK_SIZE, addMark, drawMark, markBox, markGround, markInk, markWidth, newAzimutMark,
+  INK_ON_LIGHT, MARK_SIZE, NAME_ALONE, addMark, drawMark, markBox, markGround, markInk, markWidth, newAzimutMark,
   normalizeAzimutMark,
 } from './proofMark.js';
 
@@ -44,8 +44,8 @@ describe('where the mark lands', () => {
   it('is as wide as what it shows: the lockup, the arrow alone, or the name alone at its height', () => {
     expect(markWidth(mark())).toBeCloseTo(signatureWidth(MARK_SIZE, { tight: true }));
     expect(markWidth(mark({ show: 'logo' }))).toBeLessThan(MARK_SIZE);
-    // the name alone stands as tall as the arrow would, so it is wider than in the lockup
-    expect(markWidth(mark({ show: 'name' }))).toBeCloseTo((MARK_SIZE * 503.3) / 115);
+    // the name alone is set like type of that size, its capitals a handle's beside it
+    expect(markWidth(mark({ show: 'name' }))).toBeCloseTo((MARK_SIZE * NAME_ALONE * 503.3) / 115);
     expect(markWidth(mark({ show: 'name' }))).toBeGreaterThan(markWidth(mark({ show: 'logo' })));
   });
 

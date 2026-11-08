@@ -31,10 +31,16 @@ export function markInk(bg) {
 /** What `drawSignature` is asked to draw for each choice of what the mark shows. */
 const PARTS = { both: { name: true, mark: true }, logo: { name: false, mark: true }, name: { name: true, mark: false } };
 const partsOf = (mark) => PARTS[mark.show] ?? PARTS.both;
+/**
+ * The name alone is set like type of the mark's size: its letters as tall as the
+ * capitals of a handle of that size beside it, rather than as tall as the arrow.
+ */
+export const NAME_ALONE = 0.82;
+const drawnHeight = (mark) => (mark.show === 'name' ? mark.size * NAME_ALONE : mark.size);
 
 /** How wide the mark is at its size, for what it shows. */
 export function markWidth(mark) {
-  return signatureWidth(mark.size, { tight: true, ...partsOf(mark) });
+  return signatureWidth(drawnHeight(mark), { tight: true, ...partsOf(mark) });
 }
 
 const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
@@ -80,7 +86,7 @@ export function markBox(mark, width, height, { avoid = [], footer = null } = {})
 export function drawMark(ctx, mark, box, bg, { makePath } = {}) {
   const { ink, halo } = markInk(bg);
   return drawSignature(ctx, box.x + box.w, box.y + box.h / 2, {
-    height: mark.size, ink, halo, tight: true, ...partsOf(mark), makePath,
+    height: drawnHeight(mark), ink, halo, tight: true, ...partsOf(mark), makePath,
   });
 }
 
