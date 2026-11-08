@@ -21,7 +21,7 @@ import {
   boxCorners, boxPoint, compassAngle, fromMercator, toMercator, turnAbout, turnedBox,
 } from './groundFrame.js';
 import {
-  ICON_BOX, PROOF_ICONS, glyphInk, iconByName, iconOrigin, isSolidIcon,
+  ICON_BOX, PROOF_ICONS, glyphInk, iconOrigin, stampByName, stampParts,
 } from '../proofIcons.js';
 
 export const ANNOTATION_COLOURS = Object.freeze([
@@ -103,7 +103,7 @@ export function comparisonAnnotations(value) {
       // build does not know is drawn as the first one rather than as nothing,
       // so a comparison made on a newer version still shows a mark there.
       number: Math.round(bounded(raw.number, 1, 1, 999)),
-      glyph: iconByName(raw.glyph) ? String(raw.glyph) : PROOF_ICONS[0].name,
+      glyph: stampByName(raw.glyph) ? String(raw.glyph) : PROOF_ICONS[0].name,
       angle: ANGLED.has(raw.kind) ? compassAngle(raw.angle) : 0,
     }];
   });
@@ -137,8 +137,18 @@ export function glyphBox(mark, [x, y], scale = 1) {
   return { x: x + origin.x, y: y + origin.y, size, scale: size / ICON_BOX };
 }
 
-/** The glyph a symbol draws, always one this build knows. */
-export const markGlyph = (mark) => iconByName(mark.glyph) ?? PROOF_ICONS[0];
+/** The glyph a symbol draws, always one of the proof's stamps this build knows. */
+export const markGlyph = (mark) => stampByName(mark.glyph) ?? PROOF_ICONS[0];
+
+/**
+ * What a symbol is drawn from, in its box's units: its halo, its silhouette and
+ * its carved details, the way a proof stamp is (`stampParts`). The stroke width
+ * is its weight, and the size the one it is seen at on screen, so an export keeps
+ * the halo the screen showed.
+ */
+export const glyphParts = (mark) => stampParts(markGlyph(mark).name, {
+  color: mark.colour, strokeWidth: mark.stroke_width, size: markSize(mark),
+});
 
 /**
  * The first number no marker of this colour holds.
@@ -371,20 +381,21 @@ function drawStamp(ctx, mark, [x, y], scale) {
     ctx.textBaseline = 'middle';
     ctx.fillText(String(mark.number), x, y);
   } else {
-    const entry = markGlyph(mark);
     const box = glyphBox(mark, [x, y], scale);
     ctx.translate(box.x, box.y);
     ctx.scale(box.scale, box.scale);
-    const path = new Path2D(entry.path);
-    if (isSolidIcon(entry.name)) {
-      ctx.fillStyle = mark.colour;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    // drawn in the box's units, so a bigger symbol is the same drawing, bigger
+    for (const part of glyphParts(mark)) {
+      const path = new Path2D(part.d);
+      if (part.stroke) {
+        ctx.strokeStyle = part.stroke;
+        ctx.lineWidth = part.width;
+        ctx.stroke(path);
+      }
+      ctx.fillStyle = part.fill;
       ctx.fill(path, 'evenodd');
-    } else {
-      ctx.strokeStyle = mark.colour;
-      // the glyph is drawn scaled, so the width is divided back out: a bigger
-      // symbol is a bigger drawing, not a fatter outline
-      ctx.lineWidth = Math.max(1.5, mark.stroke_width * scale) / box.scale;
-      ctx.stroke(path);
     }
   }
   ctx.restore();

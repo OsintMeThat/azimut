@@ -976,20 +976,13 @@ describe('stamping a symbol', () => {
     expect(bodyOfFn('anchorOf')).toContain('if (!Array.isArray(s.points)) return { x: s.x, y: s.y };');
   });
 
-  it('turns the fill into a badge disc behind the glyph', () => {
+  it('draws the disc and the symbol from the stamp module, inside its own box', () => {
     const node = source.slice(source.indexOf('function makeIconNode'), source.indexOf('// ---- inline text editing'));
 
-    expect(node).toContain('const disc = s.fillOpacity ?? 0');
-    expect(node).toContain('fill: fillPaint(s.color, disc)');
-    expect(node).toContain('glyphInk(s.color, disc)');
-    // a stroked glyph is mostly holes, so the press lands on the box
+    // lib/proofStamp.test.js holds what is drawn; the composer hands it the box
+    expect(node).toContain('stampNodes(Konva, s, { size, scale, origin })');
+    // a glyph has holes, so the press lands on the box
     expect(node).toContain("fill: '#000', opacity: 0");
-  });
-
-  it('divides the scale back out of the stroke, so a big symbol is not a fat one', () => {
-    const node = source.slice(source.indexOf('function makeIconNode'), source.indexOf('// ---- inline text editing'));
-
-    expect(node).toContain('strokeWidth: (s.strokeWidth ?? 4) / scale / k');
   });
 
   it('reaches the stamp with a key nothing else claims', () => {

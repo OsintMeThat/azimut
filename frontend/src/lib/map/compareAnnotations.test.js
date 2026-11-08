@@ -4,6 +4,7 @@ import {
   drawAnnotations,
   ellipseRing,
   glyphBox,
+  glyphParts,
   markGlyph,
   markCentre,
   markLabel,
@@ -178,6 +179,17 @@ describe('the two marks stamped on one point', () => {
     expect(box.scale).toBeCloseTo(box.size / 24, 6);
     // and a glyph this build does not know is still drawn as something
     expect(markGlyph({ glyph: 'not-a-symbol' }).name).toBe('point');
+  });
+
+  it('draws a symbol the way a proof stamps it: haloed, filled, its stroke as weight', () => {
+    const truck = { ...stamp({ kind: 'icon', glyph: 'truck' }), colour: '#ef4444', stroke_width: 6 };
+    const [halo, body, cut] = glyphParts(truck);
+    expect(halo.fill).toBe('rgba(0, 0, 0, 0.6)');
+    expect(body.fill).toBe('#ef4444');
+    expect(body.width).toBeGreaterThan(glyphParts({ ...truck, stroke_width: 2 })[1].width);
+    expect(cut.d).toBe(markGlyph(truck).cut);
+    // a comparison only names the proof's own stamps until it learns the rest
+    expect(comparisonAnnotations([{ ...truck, glyph: 'model-tank', points: [[1, 2]] }])[0].glyph).toBe('point');
   });
 
   it('burns a numbered disc into an export at the point it was stamped on', () => {

@@ -7,6 +7,8 @@ import {
   iconByName,
   iconOrigin,
   isSolidIcon,
+  stampByName,
+  stampWeight,
 } from './proofIcons.js';
 
 describe('the symbol set', () => {
@@ -32,15 +34,29 @@ describe('the symbol set', () => {
     for (const entry of PROOF_ICONS) expect(entry.path.startsWith('M')).toBe(true);
   });
 
-  it('closes the paths that are filled rather than stroked', () => {
-    for (const entry of PROOF_ICONS) {
-      if (isSolidIcon(entry.name)) expect(entry.path).toMatch(/[Zz]$/);
-    }
+  it('closes every path, since every stamp is filled', () => {
+    for (const entry of PROOF_ICONS) expect(entry.path).toMatch(/[Zz]$/);
   });
 
   it('answers by name and refuses one it does not carry', () => {
     expect(iconByName('tank').label).toBe('Tank');
     expect(iconByName('battleship')).toBeNull();
+  });
+
+  it('answers for a glyph or a model too, by its catalogue name', () => {
+    expect(iconByName('model-tank')).toEqual({ name: 'model-tank', label: 'Tank', kind: 'model' });
+    expect(iconByName('badge-flame')).toEqual({ name: 'badge-flame', label: 'Fire', kind: 'glyph' });
+    expect(iconByName('pin')).toBeNull();
+    expect(stampByName('model-tank')).toBeNull();
+  });
+
+  it('takes a stroke width only on the eight stamps first drawn in strokes', () => {
+    expect(isSolidIcon('tank')).toBe(false);
+    expect(isSolidIcon('impact')).toBe(true);
+    expect(isSolidIcon('model-tank')).toBe(true);
+    expect(isSolidIcon('badge-flame')).toBe(true);
+    expect(stampWeight('tank', 4)).toBeGreaterThan(0);
+    expect(stampWeight('impact', 4)).toBe(0);
   });
 });
 
