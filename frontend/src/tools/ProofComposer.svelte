@@ -6887,7 +6887,7 @@
   // The header's ⋯ for the proof open, and the menu it holds.
   let proofMenu = $state(null);
 
-  /** Show the proof open in Inspect, on its moment: what a slide's menu does. */
+  /** Show the proof open in Inspect, on its passage: what a slide's menu does. */
   function showInInspect() {
     proofMenu = null;
     if (!scene.star || !savedName) return;
@@ -7549,7 +7549,7 @@
   {#if proofMenu}
     <FloatingMenu anchor={proofMenu} width={220} label="This proof" onclose={() => (proofMenu = null)}>
       {#if scene.star}
-        <button type="button" class="fm-item" title="Open its video in Inspect on its moment" onclick={showInInspect}>
+        <button type="button" class="fm-item" title="Open its video in Inspect on its passage" onclick={showInInspect}>
           <Icon name="inspect" size={14} /><span class="fm-grow">Show in Inspect</span></button>
         <div class="fm-sep"></div>
       {/if}

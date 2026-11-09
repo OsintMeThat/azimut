@@ -32,7 +32,7 @@ export const PROOF_SLIDES_HELP = {
   rename: 'Give this slide another name',
   name: 'The slide\'s new name, its file following it',
   delete: 'Send this proof to the Trash, asking about its scene',
-  inspect: 'Open the video in Inspect on this moment',
+  inspect: 'Open the video in Inspect on this passage',
   unplaced: 'This slide states no place yet',
   make: 'Make the proof of this scene from its frames',
   geolocate: 'Find this scene on the map, its captures kept with it',
