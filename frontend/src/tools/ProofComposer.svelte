@@ -8663,7 +8663,7 @@
                   {/if}
                   <div class="open-meta">
                     <span class="open-title">{entry.title}</span>
-                    <span class="open-sub">{entry.panels} panels · {entry.shapes} annotations · {entry.updated_at?.slice(0, 10)}</span>
+                    <span class="open-sub">{entry.panels === 1 ? '1 panel' : `${entry.panels} panels`} · {entry.shapes === 1 ? '1 annotation' : `${entry.shapes} annotations`} · {entry.updated_at?.slice(0, 10)}</span>
                     {#if slideTag(entry)}
                       {@const tag = slideTag(entry)}
                       <span class="open-slide" style:--scene={tag.color}><span class="open-dot" aria-hidden="true"></span>{tag.text}</span>

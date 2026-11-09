@@ -186,16 +186,33 @@
     menu = menu?.tile.key === tile.key && !menu.at ? null : { tile, anchor };
   }
 
-  // The menu the keys opened, so the context-menu event the same key may raise after it
-  // leaves it where it is, under its tile.
-  let keyed = 0;
-
   function context(event, tile) {
     if (!hasMenu(tile)) return;
     event.preventDefault();
-    if (Date.now() - keyed < 400) return;
     reason = '';
     menu = { tile, at: { x: event.clientX, y: event.clientY } };
+  }
+
+  /**
+   * The context-menu event the same key may raise once the menu is up: some browsers send
+   * it as the key comes back up, at what holds the focus by then, which would open the
+   * browser's own menu over this one. It is taken, and only until just after the key is let go.
+   */
+  function swallowContext() {
+    const swallow = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      done();
+    };
+    const later = () => setTimeout(done, 50);
+    const timer = setTimeout(done, 400);
+    function done() {
+      clearTimeout(timer);
+      window.removeEventListener('contextmenu', swallow, true);
+      window.removeEventListener('keyup', later, true);
+    }
+    window.addEventListener('contextmenu', swallow, true);
+    window.addEventListener('keyup', later, true);
   }
 
   /** The context-menu key, or Shift+F10, on a focused tile: its menu, under it, the keys in it. */
@@ -204,7 +221,7 @@
     if (!hasMenu(tile)) return;
     event.preventDefault();
     event.stopPropagation();
-    keyed = Date.now();
+    swallowContext();
     reason = '';
     menu = { tile, anchor: event.currentTarget };
     await tick();

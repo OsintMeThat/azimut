@@ -114,7 +114,7 @@ describe('New proof, the old way', () => {
     byText('.np-row', 'Videos').click();
     flushSync();
     expect(dialog().querySelector('.np-video h5').textContent).toBe('Clip');
-    expect(dialog().querySelector('.np-video .np-count').textContent.trim()).toBe('2 frames');
+    expect(dialog().querySelector('.np-video .np-count').textContent).toBe('2 frames');
     expect(tiles().map((t) => t.querySelector('.np-name').textContent)).toEqual(['Frame B', 'Frame A']);
     expect(tiles()[1].querySelector('.np-time').textContent).toBe('0:04.2');
   });
@@ -138,12 +138,14 @@ describe('New proof, the old way', () => {
 
 describe('New proof from a scene', () => {
   it('lists the scenes to prove with their dot, name, time and video', () => {
-    open({ scenes: [SCENE] });
-    const row = dialog().querySelector('.np-scene');
+    open({ scenes: [SCENE, { ...SCENE, key: 'k2', id: 's2', name: '1:30', time: '1:30' }] });
+    const [row, timed] = dialog().querySelectorAll('.np-scene');
     expect(dialog().textContent).toContain('Scenes to prove');
     expect(row.querySelector('.np-scene-name').textContent).toBe('Water tower?');
     expect(row.querySelector('.np-scene-said').textContent).toBe('0:03–0:08 · clip.mp4');
     expect(row.getAttribute('style')).toContain('--scene: #ff5252');
+    // a scene named by its time says it once
+    expect(timed.querySelector('.np-scene-said').textContent).toBe('clip.mp4');
   });
 
   it('shows only the scene\'s material, all of it ticked, and the proof takes the scene up', async () => {
@@ -154,6 +156,10 @@ describe('New proof from a scene', () => {
     expect(tiles().every((t) => t.classList.contains('selected'))).toBe(true);
     expect([...dialog().querySelectorAll('.np-body h5')].map((h) => h.firstChild.textContent.trim())).toEqual(['Frames', 'Captures gathered for it']);
     expect(dialog().querySelector('.np-takes').textContent).toContain('Water tower?');
+    // what the proof takes, and the frame it files on the way, said once with their spaces
+    expect(dialog().querySelector('.np-note').textContent)
+      .toBe('All ticked. The proof made of them takes this scene. Saves 1 frame to the case on the way.');
+    expect(tiles()[1].querySelector('.np-name').textContent).toBe('Not in the case yet');
 
     byText('button', 'Create proof').click();
     expect(oncreate).toHaveBeenCalledWith({ keys: ['media/frame-a.png', 'frame:f2', 'captures/sat.png'], scene: SCENE });

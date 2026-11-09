@@ -38,9 +38,10 @@ test.use({ viewport: { width: 1440, height: 900 } });
 /**
  * A case of one video holding two proofs (Road bridge, made from a scene, and Market),
  * a scene still to prove (Water tower?), a satellite capture and a photo proved apart.
- * `empty` is a case holding nothing; `scenes: false` one with no scene to prove.
+ * `empty` is a case holding nothing; `scenes: false` one with no scene to prove; `gate.wait`
+ * holds the answer of the proofs list while it is set.
  */
-async function openCase(page, { empty = false, scenes = true } = {}) {
+async function openCase(page, { empty = false, scenes = true, gate = null } = {}) {
   const media = empty ? [] : [
     { path: VIDEO, filename: 'clip.webm', title: 'clip.webm', kind: 'video', entity_id: 'e_clip', size: STEPS_WEBM.length, sha256: '1'.repeat(64),
       source: { type: 'upload' }, thumbnail: null, folder: '' },
@@ -106,7 +107,7 @@ async function openCase(page, { empty = false, scenes = true } = {}) {
     const path = url.pathname;
     const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
     if (path === `/files/${CASE_ID}/${VIDEO}`) return serveRange(route, STEPS_WEBM, 'video/webm');
-    const picture = /\/([a-z-]+)\.(png|webp|jpg)$/.exec(path);
+    const picture = /\/([a-z0-9-]+)\.(png|webp|jpg)$/.exec(path);
     if (path.startsWith(`/files/${CASE_ID}/`) && picture) {
       return route.fulfill({ contentType: 'image/svg+xml', body: PICTURES[picture[1]] ?? svg('#3a3a3a', '#8a9a6a') });
     }
@@ -137,6 +138,7 @@ async function openCase(page, { empty = false, scenes = true } = {}) {
     }
     if (path === `/api/cases/${CASE_ID}/proofs` && request.method() === 'GET') {
       proofReads.push(Date.now());
+      if (gate?.wait) await gate.wait;
       return json(listed());
     }
     const one = /^\/api\/cases\/[^/]+\/proofs\/([^/]+)$/.exec(path);
@@ -205,6 +207,7 @@ test('New proof the old way: a picture and Create proof, in three presses', asyn
   await dialog.locator('.selectable-pick', { hasText: 'Harbour photo' }).click();
   await dialog.locator('.selectable-pick', { hasText: 'z17' }).click();
   await expect(dialog.locator('.np-chip')).toHaveCount(2);
+  await expect(dialog.locator('.selectable-pick', { hasText: 'Harbour photo' }).locator('.np-mark')).toHaveText('1');
   await dialog.getByRole('button', { name: 'Create proof' }).click();
 
   await expect(dialog).toHaveCount(0);
@@ -213,6 +216,31 @@ test('New proof the old way: a picture and Create proof, in three presses', asyn
   // laid out in the order pressed
   await expect(page.locator('.panel-row .panel-thumb img').first()).toHaveAttribute('src', /photo\.png$/);
   fixture.expectNoUnexpectedRequests();
+});
+
+test('New proof reorders the panels by a drag or the keys, and takes one out', async ({ page }) => {
+  await openCase(page, { scenes: false });
+  await openNewProof(page);
+  const dialog = newProof(page);
+  for (const name of ['Harbour photo', 'frame-a', 'frame-b']) await dialog.locator('.selectable-pick', { hasText: name }).click();
+  const chips = dialog.locator('.np-chip');
+  const order = () => chips.evaluateAll((all) => all.map((chip) => chip.getAttribute('aria-label').split(': ')[1]));
+  await expect.poll(order).toEqual(['Harbour photo', 'frame-a', 'frame-b']);
+
+  await chips.nth(2).dragTo(chips.nth(0));
+  await expect.poll(order).toEqual(['frame-b', 'Harbour photo', 'frame-a']);
+  await chips.nth(0).focus();
+  await page.keyboard.press('Alt+ArrowRight');
+  await expect.poll(order).toEqual(['Harbour photo', 'frame-b', 'frame-a']);
+  await expect(chips.nth(1)).toBeFocused();
+  await page.keyboard.press('Delete');
+  await expect.poll(order).toEqual(['Harbour photo', 'frame-a']);
+  await chips.nth(1).hover();
+  await dialog.getByRole('button', { name: 'Take panel 2 out' }).click();
+  await expect.poll(order).toEqual(['Harbour photo']);
+
+  await dialog.getByRole('button', { name: 'Create proof' }).click();
+  await expect(page.locator('.panel-row')).toHaveCount(1);
 });
 
 test('New proof keeps the keyboard: the search first, Enter creates, Escape closes', async ({ page }) => {
@@ -277,7 +305,7 @@ test('Open proof tags a proof of a video and filters by video, a proof on photos
   await expect(list.locator('.open-title')).toHaveText(['Road bridge', 'Market', 'Holiday']);
   await expect(list.locator('.open-slide')).toHaveText(['clip.webm · slide 1 of 2', 'clip.webm · slide 2 of 2']);
   await expect(list.locator('.open-row-wrap', { hasText: 'Holiday' }).locator('.open-slide')).toHaveCount(0);
-  await expect(list.locator('.open-row-wrap', { hasText: 'Holiday' }).locator('.open-sub')).toHaveText('1 panels · 0 annotations · 2026-11-06');
+  await expect(list.locator('.open-row-wrap', { hasText: 'Holiday' }).locator('.open-sub')).toHaveText('1 panel · 0 annotations · 2026-11-06');
 
   const video = list.getByRole('combobox', { name: 'Video' });
   await video.selectOption({ label: 'clip.webm · 2' });
@@ -287,6 +315,23 @@ test('Open proof tags a proof of a video and filters by video, a proof on photos
   await video.selectOption({ label: 'Every video' });
   await list.locator('.open-row', { hasText: 'Market' }).click();
   await expect(proofName(page)).toHaveValue('Market');
+});
+
+test('Open proof deletes a row as the header does, its scene asked about, and the list stays', async ({ page }) => {
+  const { deletes } = await openCase(page);
+  await header(page).getByRole('button', { name: 'Open proof' }).click();
+  const list = page.getByRole('dialog', { name: 'Open a saved proof' });
+  await list.locator('.open-row-wrap', { hasText: 'Market' }).getByTitle('Delete this saved proof').click();
+  const ask = page.getByRole('alertdialog', { name: 'Delete this proof?' });
+  await expect(ask.getByRole('radio', { name: 'Goes back to To geolocate' })).toBeChecked();
+  await ask.getByRole('button', { name: 'Delete' }).click();
+  await expect.poll(() => deletes).toEqual([{ name: 'market', scene: 'keep' }]);
+  await expect(list.locator('.open-title')).toHaveText(['Road bridge', 'Holiday']);
+
+  await list.locator('.open-row-wrap', { hasText: 'Holiday' }).getByTitle('Delete this saved proof').click();
+  await expect(ask.getByRole('radio')).toHaveCount(0);
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(list.locator('.open-title')).toHaveText(['Road bridge', 'Holiday']);
 });
 
 // -- the home ---------------------------------------------------------------------------------
@@ -303,6 +348,27 @@ test('the home of an empty case is the big button and one sentence', async ({ pa
   await expect(newProof(page)).toBeVisible();
   await expect(newProof(page).getByText('No pictures in this case yet.', { exact: false })).toBeVisible();
   fixture.expectNoUnexpectedRequests();
+});
+
+test('the home opens at once, its cards held in place until the list answers, then on what it read last', async ({ page }) => {
+  let release;
+  const gate = { wait: new Promise((resolve) => { release = resolve; }) };
+  await openCase(page, { gate });
+  // the button and the scenes are there while the list is out
+  await expect(home(page).getByRole('button', { name: 'New proof' })).toBeVisible();
+  await expect(home(page).locator('.ph-card.ghost')).toHaveCount(3);
+  await expect(home(page).locator('.ph-chip')).toHaveCount(1);
+  release();
+  await expect(home(page).locator('.ph-card:not(.ghost)')).toHaveCount(3);
+  await expect(home(page).locator('.ph-card.ghost')).toHaveCount(0);
+
+  // back in the tool, it shows what it read last while it reads again
+  gate.wait = new Promise((resolve) => { release = resolve; });
+  await page.goto('/#media');
+  await page.goto('/#proof');
+  await expect(home(page).locator('.ph-card:not(.ghost)')).toHaveCount(3);
+  await expect(home(page).locator('.ph-card.ghost')).toHaveCount(0);
+  release();
 });
 
 test('the home continues from the last proofs, finds one by name, and makes the proof of a scene', async ({ page }) => {
@@ -415,6 +481,18 @@ test('a slide\'s right-click menu renames, deletes and gives up, and the keys op
   await expect(tiles.nth(1).locator('.tile-title')).toHaveText('Covered market');
   // the slide open stays as it was
   await expect(proofName(page)).toHaveValue('Road bridge');
+
+  // the slide open takes a name as its field does: shown at once, saved with it
+  await tiles.nth(0).click({ button: 'right' });
+  const openOne = page.getByRole('menu', { name: 'Road bridge' });
+  await openOne.getByRole('button', { name: 'Rename' }).click();
+  await expect(openOne.getByRole('textbox', { name: 'New name' })).toHaveValue('Road bridge');
+  await openOne.getByRole('textbox', { name: 'New name' }).fill('Bridge at dawn');
+  await page.keyboard.press('Enter');
+  await expect(proofName(page)).toHaveValue('Bridge at dawn');
+  await expect(header(page).locator('.badge')).toHaveText('unsaved');
+  expect(saves).toHaveLength(1);
+  await proofName(page).fill('Road bridge');
 
   // the keys: Shift+F10 on a focused tile, the menu's first item focused, Escape back to the tile
   await tiles.nth(0).focus();

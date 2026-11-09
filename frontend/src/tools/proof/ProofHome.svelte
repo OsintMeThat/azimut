@@ -171,7 +171,7 @@
       radial-gradient(circle at 1px 1px, rgba(148, 163, 196, 0.07) 1px, transparent 0) 0 0 / 22px 22px,
       var(--bg-0);
   }
-  .ph-col { max-width: 1060px; margin: 0 auto; padding: 34px 28px 48px; }
+  .ph-col { max-width: 1060px; margin: 0 auto; padding: 26px 28px 44px; }
 
   .ph-start { display: flex; align-items: center; gap: 14px; }
   .ph-new { flex: none; height: 44px; padding: 0 22px; border-radius: var(--r-lg); font-size: var(--fs-md); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 22%, transparent); }
@@ -193,13 +193,13 @@
   .ph-clear { display: flex; color: var(--text-3); }
   .ph-clear:hover { color: var(--text-1); }
 
-  .ph-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 30px 0 10px; }
+  .ph-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 24px 0 10px; }
   h4 { margin: 0; color: var(--text-3); font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
   .ph-count { color: var(--text-3); font-size: var(--fs-xs); }
   .ph-link { color: var(--text-2); font-size: var(--fs-xs); }
   .ph-link:hover { color: var(--accent); }
 
-  .ph-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+  .ph-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(186px, 1fr)); gap: 12px; }
   .ph-card {
     display: flex;
     flex-direction: column;
@@ -224,7 +224,7 @@
     color: var(--text-3);
   }
   .ph-pic img { width: 100%; height: 100%; object-fit: contain; }
-  .ph-card-words { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px 11px; min-width: 0; }
+  .ph-card-words { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 9px; min-width: 0; }
   .ph-title { overflow: hidden; color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .ph-said { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-3); font-size: var(--fs-xs); }
   .ph-when { flex: none; color: var(--text-3); font-size: var(--fs-xs); margin-left: auto; }
@@ -335,5 +335,5 @@
     background: var(--accent-soft);
     color: var(--accent);
   }
-  .ph-empty p { max-width: 380px; margin: 0 0 14px; color: var(--text-2); font-size: var(--fs-md); }
+  .ph-empty p { max-width: 520px; margin: 0 0 14px; color: var(--text-2); font-size: var(--fs-md); }
 </style>

@@ -91,6 +91,11 @@
     return out;
   });
   const place = $derived(new Map(picked.map((key, i) => [key, i + 1])));
+  /** The frames ticked that the case does not hold yet, filed on the way. */
+  const unfiled = $derived(material.filter((one) => one.frame && !one.frame.path && place.has(one.key)).length);
+  const labels = $derived(new Map(items.map((item) => [item.src, item.label])));
+  const sceneNote = $derived(`All ticked. The proof made of them takes this scene.${
+    unfiled ? ` Saves ${unfiled === 1 ? '1 frame' : `${unfiled} frames`} to the case on the way.` : ''}`);
   const heading = $derived(
     view.scene ? scene?.entry.name ?? ''
       : view.folder != null ? view.folder
@@ -103,15 +108,21 @@
   });
 
   const clock = (time) => preciseClock(time).replace(/(\.\d)\d\d$/, '$1');
+  /** A scene's time and its file; a scene named by its time says it once. */
+  const sceneWhere = (entry) => (entry.name === entry.time ? entry.title : `${entry.time} · ${entry.title}`);
+  const many = (n, word) => (n === 1 ? `1 ${word}` : `${n} ${word}s`);
+  /** `5 frames · 1 collage`, whichever of them there are. */
+  const counted = (frames, frame, collages, collage) => [frames ? many(frames, frame) : '', collages ? many(collages, collage) : ''].filter(Boolean).join(' · ');
 
   function pictureOf(one) {
     if (one.frame) return one.frame.url || '';
     return one.collage?.url || one.capture?.url || one.picture?.url || '';
   }
 
+  /** What a piece of a scene is called: as the case calls it, a frame it does not hold yet said so. */
   function labelOf(one) {
-    if (one.frame) return `Frame at ${clock(one.frame.time)}`;
-    return one.collage?.title || one.capture?.title || one.picture?.title || '';
+    if (one.frame) return one.frame.path ? labels.get(one.frame.path) ?? `Frame at ${clock(one.frame.time)}` : 'Not in the case yet';
+    return one.collage?.title || labels.get(one.capture?.path) || one.capture?.title || one.picture?.title || '';
   }
 
   function pick(key) {
@@ -144,7 +155,8 @@
       scene = { entry, material: read };
       picked = sceneMaterial(read).map((one) => one.key);
     } finally {
-      sceneBusy = false;
+      // a scene pressed since is still being read
+      if (scene?.entry.key === entry.key) sceneBusy = false;
     }
   }
 
@@ -218,6 +230,7 @@
 <Modal title="New proof" width="min(1100px, calc(100vw - 40px))" onclose={() => { if (!creating) onclose?.(); }}>
   <form class="np" onsubmit={create}>
     <nav class="np-from" aria-label="Where the pictures come from">
+      <div class="np-lists">
       <h4>From</h4>
       <ul class="np-list">
         {#each sources as source (source.id)}
@@ -252,12 +265,12 @@
             {@const on = view.scene === entry.key}
             <li>
               <button type="button" class="np-scene" class:on class:taken={scene?.entry.key === entry.key} style:--scene={entry.color}
-                aria-current={on ? 'true' : undefined} title={`${entry.name} · ${entry.time} · ${entry.title}. ${entry.state}`}
+                aria-current={on ? 'true' : undefined} title={`${entry.name} · ${sceneWhere(entry)}. ${entry.state}`}
                 onclick={() => showScene(entry)}>
                 <span class="np-dot" aria-hidden="true"></span>
                 <span class="np-scene-words">
                   <span class="np-scene-name" dir="auto">{entry.name}</span>
-                  <span class="np-scene-said"><span class="num">{entry.time}</span> · <span dir="auto">{entry.title}</span></span>
+                  <span class="np-scene-said num" dir="auto">{sceneWhere(entry)}</span>
                 </span>
               </button>
             </li>
@@ -265,6 +278,7 @@
         </ul>
       {/if}
 
+      </div>
       <button type="button" class="np-import" disabled={creating} onclick={() => onimport?.()}
         title="A proof somebody already published, brought in whole">
         <Icon name="download" size={13} /> Import a published proof
@@ -290,7 +304,7 @@
               <span class="np-dot big" aria-hidden="true"></span>
               <div>
                 <h3 dir="auto">{entry.name}</h3>
-                <p><span class="num">{entry.time}</span> · <span dir="auto">{entry.title}</span> · {entry.state}</p>
+                <p class="num" dir="auto">{sceneWhere(entry)} · {entry.state}</p>
               </div>
             </div>
           {/if}
@@ -299,7 +313,7 @@
           {:else if sceneError}
             <p class="np-say">{sceneError}</p>
           {:else}
-            <p class="np-note">All of it is ticked, and the proof takes this scene up, as Make the proof does.</p>
+            <p class="np-note">{sceneNote}</p>
             {#each groups as group (group.id)}
               <h5>{group.label} <span class="np-count">{group.list.length}</span></h5>
               <div class="np-grid">
@@ -330,9 +344,7 @@
                 {#if thumb}<img src={fileUrl(caseId, thumb)} alt="" loading="lazy" decoding="async" />{:else}<Icon name="video" size={15} />{/if}
               </span>
               <h5 dir="auto">{block.title}</h5>
-              <span class="np-count">
-                {block.frames.length === 1 ? '1 frame' : `${block.frames.length} frames`}{#if block.collages.length} · {block.collages.length === 1 ? '1 collage' : `${block.collages.length} collages`}{/if}
-              </span>
+              <span class="np-count">{counted(block.frames.length, 'frame', block.collages.length, 'collage')}</span>
             </div>
             <div class="np-grid">
               {#each [...block.frames, ...block.collages] as item (item.src)}{@render itemTile(item)}{/each}
@@ -408,11 +420,10 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    overflow-y: auto;
-    padding: 12px 10px 12px 14px;
     border-right: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg-0) 55%, var(--bg-1));
   }
+  .np-lists { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 10px 10px 14px; }
   h4 {
     display: flex;
     align-items: center;
@@ -484,11 +495,12 @@
   .np-scene-said { overflow: hidden; color: var(--text-3); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
 
   .np-import {
-    display: inline-flex;
+    flex: none;
+    display: flex;
     align-items: center;
-    gap: 6px;
-    margin-top: auto;
-    padding: 14px 8px 2px;
+    gap: 7px;
+    padding: 10px 14px 11px 22px;
+    border-top: 1px solid var(--border);
     color: var(--text-3);
     font-size: var(--fs-xs);
     text-align: left;
