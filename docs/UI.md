@@ -4593,7 +4593,7 @@ it heads, so three fast Alt+→ go three slides on with one save. A switch rewri
 step it is on, so Back leaves the series at once. With the strip focused, ←/→ walk the
 tiles and Enter opens one. **A slide's menu** comes up on its ⋯, a right-click, or the
 context-menu key and Shift+F10 on a focused tile, its first item focused: for a proof
-**Rename**, **Show in Inspect** (the video on that slide's passage), **Abandon…** while it
+**Rename**, **Show in Inspect** (the video on that slide's scene), **Abandon…** while it
 states no place, and **Delete…**, the question the header asks; a scene still to prove keeps
 Make this slide, Geolocate and Abandon…. Rename holds the name in the menu: the slide open
 takes it as if typed in its name field, saved with it, and another slide is saved under it
