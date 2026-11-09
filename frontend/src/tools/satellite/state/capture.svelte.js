@@ -98,6 +98,8 @@ export function createCaptureState({
   tilt = () => 0,
   reliefScale = () => 1,
   farProvider = () => null,
+  // the mode the main button starts on: an area drawn on the map, the owner's usual capture
+  startMode = 'select',
 }) {
   let preset = $state('1200x675');
   let customW = $state(1200);
@@ -105,8 +107,9 @@ export function createCaptureState({
   let ratio = $state('free');
   // 1 = the view's own zoom, 2 = one zoom deeper, 'max' = the provider's deepest.
   let resolution = $state(1);
-  // The button runs whichever mode was used last, so this *is* that memory.
-  let mode = $state('center'); // 'center' | 'select'
+  // The button runs whichever mode was used last, so this *is* that memory. It starts on
+  // Select area; the centred frame is one choice away in the arrow's menu.
+  let mode = $state(startMode === 'center' ? 'center' : 'select'); // 'center' | 'select'
   let menuOpen = $state(false); // the mode/size/ratio/resolution popover
   let armed = $state(false); // marquee: drag a box on the map to capture it
   let busy = $state(false);

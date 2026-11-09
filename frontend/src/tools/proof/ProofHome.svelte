@@ -1,6 +1,6 @@
 <script>
   /**
-   * Where Geo Proof opens with no proof open, in place of the canvas: a large **New proof**
+   * Where Geo Proof opens with no proof open, in place of the canvas: **New proof**
    * and a search that finds a proof by name and opens it; **Continue**, the last proofs
    * saved as large thumbnails, a proof of a video tagged `clip.mp4 · 2/4` in its scene's
    * colour; and **To prove**, only when the case has scenes still to prove, one card per
@@ -68,12 +68,12 @@
     <div class="ph-empty">
       <span class="ph-mark" aria-hidden="true"><Icon name="proof" size={34} /></span>
       <p>A proof lays pictures side by side and marks where they match.</p>
-      <button type="button" class="btn btn-primary ph-new" onclick={() => onnew?.()}><Icon name="plus" size={17} /> New proof</button>
+      <button type="button" class="btn btn-primary ph-new" onclick={() => onnew?.()}><Icon name="plus" size={14} /> New proof</button>
     </div>
   {:else}
     <div class="ph-col">
       <div class="ph-start">
-        <button type="button" class="btn btn-primary ph-new" onclick={() => onnew?.()}><Icon name="plus" size={17} /> New proof</button>
+        <button type="button" class="btn btn-primary ph-new" onclick={() => onnew?.()}><Icon name="plus" size={14} /> New proof</button>
         <label class="ph-find">
           <Icon name="search" size={15} />
           <input bind:value={query} onkeydown={find} placeholder="Find a proof by name…" aria-label="Find a proof by name" />
@@ -177,14 +177,14 @@
   .ph-col { max-width: 1060px; margin: 0 auto; padding: 26px 28px 44px; }
 
   .ph-start { display: flex; align-items: center; gap: 14px; }
-  .ph-new { flex: none; height: 44px; padding: 0 22px; border-radius: var(--r-lg); font-size: var(--fs-md); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 22%, transparent); }
+  .ph-new { flex: none; height: 36px; padding: 0 16px; font-size: var(--fs-sm); }
   .ph-find {
     flex: 1;
     display: flex;
     align-items: center;
     gap: 9px;
     max-width: 520px;
-    height: 44px;
+    height: 36px;
     padding: 0 14px;
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
@@ -192,7 +192,7 @@
     color: var(--text-3);
   }
   .ph-find:focus-within { border-color: var(--accent); }
-  .ph-find input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text-1); font: inherit; font-size: var(--fs-md); }
+  .ph-find input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text-1); font: inherit; font-size: var(--fs-sm); }
   .ph-clear { display: flex; color: var(--text-3); }
   .ph-clear:hover { color: var(--text-1); }
 

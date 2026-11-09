@@ -64,8 +64,8 @@ test('captures a marquee drawn on the real map surface', async ({ page }) => {
   await awaitMapReady(page);
   const map = page.locator('.map');
 
-  await page.getByRole('button', { name: 'Capture options' }).click();
-  await page.getByRole('button', { name: 'Select area', exact: true }).click();
+  // the main button starts on Select area, so one press arms the marquee
+  await expect(page.locator('.capture-main')).toHaveText(/Select area/);
   await page.locator('.capture-main').click();
 
   const box = await map.boundingBox();

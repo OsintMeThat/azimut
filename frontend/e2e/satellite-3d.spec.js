@@ -331,6 +331,8 @@ test('a tilted capture files the picture with its tilt and exact zoom', async ({
   // no deeper zoom to take and no one scale to mark on a tilted view
   await expect(page.getByText('A tilted view is filed as the map draws it on screen')).toBeVisible();
   await expect(page.getByText('Scale bar & north arrow')).toHaveCount(0);
+  // the main button starts on Select area: the centred frame is chosen here
+  await page.locator('.size-menu .chip', { hasText: /^Capture$/ }).click();
   await page.getByRole('button', { name: 'Capture options' }).click();
 
   await page.locator('.capture-main').click();

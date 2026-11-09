@@ -2874,7 +2874,8 @@ Map chrome sorts into four kinds, each with one place, and a tool declares
 which it is (`lib/map/tools.js`) rather than adding a button somewhere.
 
 - **Modes** — what the pointer does: measure, grid search, sun & moon, and the
-  capture marquee, which is armed from the Capture button rather than from a
+  capture marquee, which is armed from the Capture button (it starts on Select area, the
+  centred frame one choice away in its arrow) rather than from a
   toolbox. Exactly one is ever armed: arming any of them closes the rest, and
   Escape disarms whatever is. They sit in the **rail**, a column floating in the
   map's top-left corner with the zoom buttons stacked under it, grouped by a
@@ -4329,7 +4330,7 @@ A proof is composed of panels: case images, each carrying its source. Two things
 in the composer are not panels.
 
 **With no proof open, Geo Proof shows its home** in place of the canvas, and the side
-column and the toolbar wait for a proof. On top, a large **New proof** and a search that
+column and the toolbar wait for a proof. On top, **New proof** and a search that
 finds a proof by name, Enter opening the first. **Continue** holds the last proofs saved
 as large thumbnails with their name and how long ago, six at most and as many as make whole
 rows, a proof of a video tagged *Harbour run · 2/4* in its scene's colour (a video's only

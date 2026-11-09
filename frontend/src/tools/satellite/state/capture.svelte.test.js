@@ -63,6 +63,8 @@ function store(overrides = {}) {
     provenance: () => pixels,
     onRect: (rect) => rects.push(rect),
     onArm: () => (armedOff += 1),
+    // most cases here press the centred capture; the default is checked on its own
+    startMode: 'center',
     ...overrides,
   });
 }
@@ -394,6 +396,13 @@ describe('the marquee', () => {
     capture.toggleSelect();
     capture.startSelect({ button: 1 });
     expect(rects).toEqual([]);
+  });
+
+  it('starts the main button on Select area', () => {
+    const capture = store({ startMode: undefined });
+    expect(capture.mode).toBe('select');
+    capture.mode = 'center';
+    expect(capture.mode).toBe('center');
   });
 
   it('runs the marquee, not the centred frame, when that is the mode', () => {
