@@ -8675,7 +8675,7 @@
                     <span class="open-sub">{entry.panels === 1 ? '1 panel' : `${entry.panels} panels`} · {entry.shapes === 1 ? '1 annotation' : `${entry.shapes} annotations`} · {entry.updated_at?.slice(0, 10)}</span>
                     {#if slideTag(entry)}
                       {@const tag = slideTag(entry)}
-                      <span class="open-slide" style:--scene={tag.color}><span class="open-dot" aria-hidden="true"></span>{tag.text}</span>
+                      <span class="open-slide" style:--scene={tag.color} title={tag.text}><span class="open-dot" aria-hidden="true"></span><span class="open-video" dir="auto">{tag.name}</span>{#if tag.where}<span class="open-where">{` · ${tag.where}`}</span>{/if}</span>
                     {/if}
                   </div>
                 </button>
@@ -9106,16 +9106,19 @@
     border-radius: var(--r-sm);
     background: var(--bg-3);
   }
-  .open-meta { display: flex; flex-direction: column; gap: 2px; }
+  .open-meta { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
   .open-title { font-weight: 600; font-size: var(--fs-sm); }
   .open-sub { font-size: var(--fs-xs); color: var(--text-3); }
   /* a proof of a video: its video and its place among the slides, in its scene's colour */
   .open-slide {
-    display: inline-flex; align-items: center; gap: 5px; margin-top: 1px;
+    display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: 1px;
     color: color-mix(in srgb, var(--scene) 72%, var(--text-1)); font-size: var(--fs-xs); font-weight: 600;
-    font-variant-numeric: tabular-nums;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
   }
-  .open-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--scene); }
+  .open-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--scene); }
+  /* a long name gives way, and where the slide stands stays in sight */
+  .open-video { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .open-where { flex: none; margin-left: -5px; white-space: pre; }
   .video-filter { flex: none; width: auto; max-width: 220px; }
   .kin {
     display: flex; align-items: center; gap: 8px; padding: 5px 14px;

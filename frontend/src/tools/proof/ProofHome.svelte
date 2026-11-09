@@ -13,7 +13,7 @@
   import Icon from '../../components/Icon.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { timeAgo } from '../../lib/analysisViews.js';
-  import { findProofs, recentProofs, slideTag } from '../../lib/proofList.js';
+  import { continueShown, findProofs, recentProofs, slideTag } from '../../lib/proofList.js';
   import { captureCount, queueColor, queueName, queueState, queueTime, waitingWords } from '../../lib/sceneQueue.js';
 
   let {
@@ -37,7 +37,12 @@
 
   let query = $state('');
 
-  const recent = $derived(recentProofs(proofs ?? []));
+  // A card's narrowest and the gap between two (`.ph-cards`): as many as make whole rows.
+  const CARD_MIN = 186;
+  const CARD_GAP = 12;
+  let cardsWidth = $state(0);
+  const columns = $derived(Math.floor((cardsWidth + CARD_GAP) / (CARD_MIN + CARD_GAP)));
+  const recent = $derived(recentProofs(proofs ?? [], continueShown(columns)));
   const found = $derived(findProofs(proofs ?? [], query).slice(0, 8));
   const empty = $derived(proofs !== null && !proofs.length && !files.length);
   const waiting = $derived(files.reduce((n, file) => n + file.scenes.length, 0));
@@ -56,7 +61,7 @@
 
 {#snippet tag(entry, short)}
   {@const said = slideTag(entry, { short })}
-  {#if said}<span class="ph-tag" style:--scene={said.color}><span class="ph-dot" aria-hidden="true"></span>{said.text}</span>{/if}
+  {#if said}<span class="ph-tag" style:--scene={said.color} title={said.text}><span class="ph-dot" aria-hidden="true"></span><span class="ph-name" dir="auto">{said.name}</span>{#if said.where}<span class="ph-where">{` · ${said.where}`}</span>{/if}</span>{/if}
 {/snippet}
 
 <div class="ph" data-testid="proof-home">
@@ -101,7 +106,7 @@
               <button type="button" class="ph-link" onclick={() => onall?.()}>All {proofs.length} proofs</button>
             {/if}
           </div>
-          <div class="ph-cards">
+          <div class="ph-cards" bind:clientWidth={cardsWidth}>
             {#each recent as entry (entry.name)}
               <button type="button" class="ph-card" onclick={() => onopen?.(entry)} title={`Open ${entry.title}`}>
                 <span class="ph-pic">
@@ -240,9 +245,10 @@
     font-size: 10.5px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
-    text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .ph-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ph-where { flex: none; margin-left: -5px; white-space: pre; }
   .ph-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--scene, var(--accent)); }
   .ghost .ph-pic { background: var(--bg-2); }
   .ph-bar { width: 60%; height: 10px; border-radius: 3px; background: var(--bg-3); }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONTINUE_SHOWN, NO_VIDEO, findProofs, inVideo, onVideo, proofVideos, recentProofs, slideTag } from './proofList.js';
+import { CONTINUE_SHOWN, NO_VIDEO, continueShown, findProofs, inVideo, onVideo, proofVideos, recentProofs, slideTag } from './proofList.js';
 import { sceneColorAt } from './scenes.js';
 
 const ROWS = [
@@ -12,9 +12,24 @@ const ROWS = [
 
 describe('a proof of a video, tagged', () => {
   it('says its video and its place among the slides, in its scene\'s colour', () => {
-    expect(slideTag(ROWS[0])).toEqual({ text: 'clip.mp4 · slide 2 of 4', color: sceneColorAt(2) });
-    expect(slideTag(ROWS[0], { short: true })).toEqual({ text: 'clip.mp4 · 2/4', color: sceneColorAt(2) });
-    expect(slideTag(ROWS[3], { short: true }).text).toBe('road.webm · 1/1');
+    expect(slideTag(ROWS[0])).toEqual({ name: 'clip.mp4', where: 'slide 2 of 4', text: 'clip.mp4 · slide 2 of 4', color: sceneColorAt(2) });
+    expect(slideTag(ROWS[0], { short: true })).toEqual({ name: 'clip.mp4', where: '2/4', text: 'clip.mp4 · 2/4', color: sceneColorAt(2) });
+  });
+
+  it('states no place for a video\u2019s only slide', () => {
+    for (const short of [false, true]) {
+      expect(slideTag(ROWS[3], { short })).toMatchObject({ name: 'road.webm', where: '', text: 'road.webm' });
+    }
+  });
+
+  it('keeps Continue to whole rows, whatever the width', () => {
+    expect(continueShown(0)).toBe(CONTINUE_SHOWN);
+    expect(continueShown(undefined)).toBe(CONTINUE_SHOWN);
+    expect(continueShown(8)).toBe(6);
+    expect(continueShown(5)).toBe(5);
+    expect(continueShown(3)).toBe(3);
+    expect(continueShown(2)).toBe(4);
+    expect(continueShown(1)).toBe(2);
   });
 
   it('leaves a proof on photos exactly as it was', () => {

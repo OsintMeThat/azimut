@@ -4308,9 +4308,10 @@ in the composer are not panels.
 
 **With no proof open, Geo Proof shows its home** in place of the canvas, and the side
 column and the toolbar wait for a proof. On top, a large **New proof** and a search that
-finds a proof by name, Enter opening the first. **Continue** holds the last six proofs saved
-as large thumbnails with their name and how long ago, a proof of a video tagged
-*clip.mp4 · 2/4* in its scene's colour, and *All N proofs* opens the Open proof list. **To
+finds a proof by name, Enter opening the first. **Continue** holds the last proofs saved
+as large thumbnails with their name and how long ago, six at most and as many as make whole
+rows, a proof of a video tagged *clip.mp4 · 2/4* in its scene's colour (a video's only slide
+says just its name), and *All N proofs* opens the Open proof list. **To
 prove** shows only when the case has scenes still to prove: a card per video with its
 thumbnail and its scenes as chips, each with its colour, name, time and where it stands. A
 chip is Make the proof: the frames of the scene chosen as from the strip, or for a picture
@@ -4340,7 +4341,8 @@ Enter creates and Escape closes. A case with no scene shows no scene anywhere.
 **Open proof** shows its list on the press, its rows following when the case answers. A
 pick closes it at once, and a small tag over the canvas names the proof while its pictures
 load. A proof of a video carries a small line in its scene's colour, *clip.mp4 · slide 2 of
-4*: its place among that video's proofs in clip order, the abandoned last, and a select
+4*: its place among that video's proofs in clip order, the abandoned last, or just its name
+when it is that video's only one. A long name gives way and the place stays. A select
 beside the search narrows the list to one video or to the proofs on no video. A proof on
 photos reads as it always did. The list says it for every proof in one pass on the server
 (`GET /cases/{id}/proofs`, `engine/scenes.proof_slides`): about 140 ms for 300 proofs on

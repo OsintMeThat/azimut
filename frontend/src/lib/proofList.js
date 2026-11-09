@@ -16,14 +16,27 @@ export const CONTINUE_SHOWN = 6;
 export const onVideo = (entry) => typeof entry?.video === 'string' && !!entry.video && Number.isInteger(entry.slide);
 
 /**
- * The small coloured line a proof of a video carries, or null for one on photos:
- * `clip.mp4 · 2/4` where room is short, `clip.mp4 · slide 2 of 4` in the list. Its colour
- * is the one Inspect's bar and the strip give the proof's scene.
+ * The small coloured line a proof of a video carries, or null for one on photos: its
+ * video's `name`, and `where` it stands, `2/4` where room is short and `slide 2 of 4` in
+ * the list. A video's only slide has no place to state, so its `where` is empty. A long
+ * name gives way on screen and `where` never does; `text` is the whole line, for a hover.
+ * Its colour is the one Inspect's bar and the strip give the proof's scene.
  */
 export function slideTag(entry, { short = false } = {}) {
   if (!onVideo(entry)) return null;
-  const where = short ? `${entry.slide}/${entry.slides}` : `slide ${entry.slide} of ${entry.slides}`;
-  return { text: `${videoName(entry.video)} · ${where}`, color: sceneColorAt(entry.order) };
+  const name = videoName(entry.video);
+  const where = entry.slides > 1 ? (short ? `${entry.slide}/${entry.slides}` : `slide ${entry.slide} of ${entry.slides}`) : '';
+  return { name, where, text: where ? `${name} · ${where}` : name, color: sceneColorAt(entry.order) };
+}
+
+/**
+ * How many of the last proofs the home's Continue shows in a grid `columns` wide, so no
+ * card stands alone on a line: one full row, or two where the grid is too narrow for
+ * three. Every one while the grid has not been measured.
+ */
+export function continueShown(columns, shown = CONTINUE_SHOWN) {
+  if (!Number.isInteger(columns) || columns < 1) return shown;
+  return Math.min(shown, columns >= 3 ? columns : columns * 2);
 }
 
 /** The proofs the home's Continue shows: the last ones saved. */
