@@ -1,11 +1,14 @@
 <script>
   import { onMount } from 'svelte';
   import {
-    ANGLED, STAMPED, TURNABLE, glyphBox, glyphParts, markCentre, markLabel, markSize, markTop,
-    movedMark, nextMarkNumber, onSide, projectMark, stampInk, turnedMark,
+    ANGLED, STAMPED, canTurn, glyphBox, glyphParts, isModelMark, markCentre, markLabel, markSize, markTop,
+    modelMarkup, movedMark, nextMarkNumber, onSide, projectMark, screenHeading, stampInk, turnedMark,
   } from '../../lib/map/compareAnnotations.js';
+  import { isModel } from '../../lib/icons/catalog.js';
+  import { loadModels, modelsNow } from '../../lib/icons/loadModels.svelte.js';
   import { compassAngle } from '../../lib/map/groundFrame.js';
   import { relayWheel } from '../../lib/map/wheelRelay.js';
+  import { windOf } from '../../lib/proofModelRing.js';
 
   let { annotations = [], engine, letter = 'a', units = 'metric', active = true,
     tool = $bindable('select'), selectedId = $bindable(null), colour = '#f6a81a',
@@ -33,6 +36,12 @@
   /** The step a turn snaps to with Shift held, in degrees. */
   const TURN_STEP = 15;
 
+  // A vehicle model is drawn by a module loaded on demand: the first mark that
+  // names one fetches it, and every model draws itself once it has landed.
+  $effect(() => {
+    if (!modelsNow() && annotations.some(isModelMark)) loadModels();
+  });
+
   $effect(() => {
     if (!engine) return;
     const refresh = () => revision++;
@@ -58,14 +67,19 @@
   );
   /**
    * Where the grip that turns a mark stands: past a box's top edge along its own
-   * up axis, so it turns with the box, or straight above anything else.
+   * up axis, so it turns with the box, past a model's nose, or straight above
+   * anything else.
    */
   function turnGrip(mark, shape) {
     const centre = project(markCentre(mark));
     const top = markTop(mark);
     let dir = [0, -1];
     let reach = centre[1] - Math.min(...shape.path.map((point) => point[1]));
-    if (top) {
+    if (isModelMark(mark)) {
+      const nose = (screenHeading(mark, project) * Math.PI) / 180;
+      dir = [Math.sin(nose), -Math.cos(nose)];
+      reach = markSize(mark) / 2;
+    } else if (top) {
       const at = project(top);
       const length = Math.hypot(at[0] - centre[0], at[1] - centre[1]);
       if (length > 0.5) { dir = [(at[0] - centre[0]) / length, (at[1] - centre[1]) / length]; reach = length; }
@@ -75,7 +89,7 @@
       reach = turning.reach;
     }
     const edge = [centre[0] + dir[0] * reach, centre[1] + dir[1] * reach];
-    return { edge, at: [edge[0] + dir[0] * TURN_REACH, edge[1] + dir[1] * TURN_REACH], reach };
+    return { edge, at: [edge[0] + dir[0] * TURN_REACH, edge[1] + dir[1] * TURN_REACH], reach, dir };
   }
   const pathOf = (shape) => shape.path.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join(' ') + (shape.closed ? ' Z' : '');
   const relay = (event) => relayWheel(event, { engine, root: svg });
@@ -96,8 +110,10 @@
       ...(tool === 'icon' ? { glyph } : {}),
       // A box drawn on a turned map runs along the screen it was drawn on. Its
       // angle is the compass direction that was up; the app's bearing turns
-      // the map clockwise, which is that direction counted the other way.
-      ...(ANGLED.has(tool) ? { angle: turnable ? compassAngle(-bearing) : 0 } : {}) };
+      // the map clockwise, which is that direction counted the other way. A
+      // model lands nose up on the screen, as the picker showed it.
+      ...(ANGLED.has(tool) || (tool === 'icon' && isModel(glyph))
+        ? { angle: turnable ? compassAngle(-bearing) : 0 } : {}) };
   }
 
   /**
@@ -188,7 +204,12 @@
       const [px, py] = gesture.pivot;
       const heading = Math.atan2(event.clientY - box.top - py, event.clientX - box.left - px) * 180 / Math.PI;
       let degrees = heading - gesture.heading;
-      if (event.shiftKey) degrees = Math.round(degrees / TURN_STEP) * TURN_STEP;
+      if (event.shiftKey) {
+        // A model's heading is what is read, so Shift lands it on a round one
+        // rather than on a round amount of turn.
+        const from = isModelMark(gesture.mark) ? gesture.mark.angle ?? 0 : 0;
+        degrees = Math.round((from + degrees) / TURN_STEP) * TURN_STEP - from;
+      }
       turning = { ...turning, degrees };
       const turned = turnedMark(gesture.mark, gesture.centre, degrees);
       onchange(annotations.map((mark) => mark.id === turned.id ? turned : mark), false);
@@ -344,11 +365,21 @@
             stroke-width={Math.max(1, markSize(mark) * 0.05)} />
           <text class="numeral" x={shape.anchor[0]} y={shape.anchor[1]}
             font-size={markSize(mark) * 0.58} fill={stampInk(mark)}>{mark.number}</text>
+        {:else if isModelMark(mark)}
+          <!-- A model is seen from above, as the map is, its nose where its
+               heading points on this screen. -->
+          {@const box = glyphBox(mark, shape.anchor)}
+          <g class="model-art" transform={`translate(${box.x} ${box.y})`}>
+            <!-- eslint-disable-next-line svelte/no-at-html-tags -- drawn by lib/icons/paint.js from the app's own numbers -->
+            {@html modelMarkup(mark, screenHeading(mark, project))}
+          </g>
+          <rect class="hit" x={box.x} y={box.y} width={box.size} height={box.size} fill="transparent" />
         {:else}
           {@const box = glyphBox(mark, shape.anchor)}
           <g transform={`translate(${box.x} ${box.y}) scale(${box.scale})`}>
             {#each glyphParts(mark) as part, i (i)}
-              <path d={part.d} fill={part.fill} fill-rule="evenodd"
+              <path d={part.d} fill={part.fill ?? 'none'} fill-rule={part.rule}
+                transform={part.rotate ? `rotate(${part.rotate} 12 12)` : undefined}
                 stroke={part.stroke ?? 'none'} stroke-width={part.stroke ? part.width : null} />
             {/each}
           </g>
@@ -373,7 +404,7 @@
       {/if}
     </g>
     {#if editVertices && active && selectedId === mark.id && tool === 'select'}
-      {#if turnable && TURNABLE.has(mark.kind)}
+      {#if turnable && canTurn(mark)}
         {@const grip = turnGrip(mark, shape)}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <g class="turn" class:held={turning?.id === mark.id} onpointerdown={(e) => turnStart(e, mark, grip)}>
@@ -382,6 +413,13 @@
           <circle class="grip" cx={grip.at[0]} cy={grip.at[1]} r="13" fill="transparent" />
           <circle cx={grip.at[0]} cy={grip.at[1]} r="6" fill="#fff" stroke={mark.colour} stroke-width="2" />
         </g>
+        {#if isModelMark(mark)}
+          <!-- A model's heading is a reading in itself: the compass degrees and
+               the wind they fall in, beside the grip that sets them. -->
+          {@const clear = 14 + Math.abs(grip.dir[0]) * 22}
+          <text class="heading" x={grip.at[0] + grip.dir[0] * clear} y={grip.at[1] + grip.dir[1] * clear + 4}
+            >{`${Math.round(mark.angle ?? 0) % 360}° ${windOf(mark.angle ?? 0)}`}</text>
+        {/if}
       {/if}
       {#each vertices as at, i}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -427,6 +465,9 @@
   text { fill: white; stroke: #111; stroke-width: 3px; paint-order: stroke; font-family: system-ui, sans-serif; font-weight: 600; }
   /* The numeral is read off its own disc, so it takes the disc's ink and none of
      the dark casing a label needs over imagery. */
+  .heading { font-size: 11px; text-anchor: middle; pointer-events: none; }
+  /* The halo round a model's nose and tail stands outside its box. */
+  .model-art :global(svg) { overflow: visible; }
   .numeral {
     stroke: none;
     font-weight: 700;
