@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Build, finish } from './build.js';
-import { HALO, drawModel, frameOf, inksOf, modelSvg, paintOps, rgbOf } from './paint.js';
+import { HALO, drawModel, drawnBox, frameOf, inksOf, modelSvg, paintOps, rgbOf } from './paint.js';
 import { solved } from './solve.js';
 
 const car = finish('model-paint-test', new Build()
@@ -82,5 +82,26 @@ describe('drawings', () => {
     expect(calls[0][0]).toBe('save');
     expect(calls.at(-1)[0]).toBe('restore');
     expect(vi.isMockFunction(ctx.fill)).toBe(false);
+  });
+
+  it('says the box its drawing covers, every point of it inside', () => {
+    for (const [heading, tilt] of [[0, 0], [30, 55], [90, 84], [217, 20]]) {
+      const opts = { px: 56, colour: '#d55e00', heading, tilt, halo: 1.5, line: 0.5 };
+      const [x0, y0, x1, y1] = drawnBox(car, opts);
+      const frame = frameOf(car, solved(car, heading, tilt), 56, 'length');
+      const { ops } = paintOps(car, { ...opts, ppm: frame.ppm });
+      for (const op of ops) {
+        for (const poly of op.polys) {
+          for (const [x, y] of poly) {
+            const px = (x - frame.cx) * frame.ppm;
+            const py = (y - frame.cy) * frame.ppm;
+            expect(px).toBeGreaterThanOrEqual(x0 + 1.5);
+            expect(px).toBeLessThanOrEqual(x1 - 1.5);
+            expect(py).toBeGreaterThanOrEqual(y0 + 1.5);
+            expect(py).toBeLessThanOrEqual(y1 - 1.5);
+          }
+        }
+      }
+    }
   });
 });

@@ -4848,7 +4848,10 @@ an uncrewed boat, a warship, a cargo ship, a locomotive and a wagon, plus Any
 vehicle and a Heading chevron. Each is generic, with proportions per class and no
 real type's shape or markings. The four flat vehicle stamps come first, named as
 flat. They are drawn by a module loaded the first time the picker opens or a proof
-names a model.
+names a model. On screen each painted model is kept as a picture, laid down pixel for
+pixel, until its view, size, colour or ink change (64 kept at most, 4 million pixels in
+all, the oldest going first), so a canvas with thirty of them redraws in a tenth of
+the time; an export paints every model again, as before.
 
 The picker's **View** (Top, Angled, Side) sets how the tiles are drawn and how the
 next model is stamped, for the session. A picked model wears a ring: the amber knob
