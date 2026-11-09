@@ -42,7 +42,7 @@ the server (`engine/geolocate.py`), and every tab and the extension's panel foll
 same scene. The server's word is shown as it lands, the capture counted and the pill gone
 when the scene ends, and the server is read again behind it; an answer asked before that
 word is dropped, so a count never steps back. Narrower than 1240 px it drops its first word, and under 1080 px Make the
-proof keeps its icon alone. A scene holding several moments reads its first and counts
+proof keeps its icon alone. A scene holding several passages reads its first and counts
 the rest, `0:00–0:07 +1`, every one on hover. A picture marked to geolocate reads *Whole
 picture* where a scene reads its time.
 
@@ -95,7 +95,7 @@ presses *Read the guide* on it, which opens the guide on its start page.
   text opens the note on that line.
   Over the lists, **To geolocate** gathers the scenes kept in Inspect that no proof
   takes up yet, by file, the file worked on last first (`GET /cases/{id}/scenes/queue`).
-  Each row gives its label or its time, every moment of a scene holding several
+  Each row gives its label or its time, every passage of a scene holding several
   (`0:00–0:07 · 1:05–1:12`), a mark in the colour Inspect gives the scene
   (a band for a passage, a pin for an instant), and its state: To geolocate, In progress
   with its captures, or Geolocating for the one in hand. **Geolocate** goes to the map
@@ -1835,20 +1835,37 @@ picture opens on Scenes, a video on the clip rather than a frame of it:
 **A video's scenes are where its geolocations happen**, since a long clip often holds
 several: a route filmed from a car, or a day's events cut together. **Mark to geolocate**
 under Capture frame, or **S**, keeps a scene at the frame on screen, and its arrow offers
-This moment or Whole video. A scene is an instant until **End here** or **Shift+S** gives
-it an end at the frame on screen, and then a passage. A scene that states no time is
-about the **whole video** and prints no timecode anywhere. The bar draws each one in its
+This instant or Whole video. A scene is an instant until **End here** or **Shift+S** gives
+it an end at the frame on screen, and then a stretch, the kind its row calls Passage. On
+screen, a scene's parts are its **passages**, each an instant or a stretch; the Moments
+tab keeps the word moment for its marks. A scene that states no time is about the **whole video** and prints no timecode anywhere. The bar draws each one in its
 colour, a pin at an instant and a band over a passage, named on hover. A click on a pin
 opens the Scenes tab on its scene from any tab; a click on a band does so on the Scenes
 tab only, and elsewhere just moves the clip. The empty strip of a video with no scene and
-no proof asks *Several places in this video?* with This moment, Whole video and Not now,
-remembered per file in this browser. The first scene ever kept points once, in this
+no proof asks *One place or several?* with **The whole video: one place**, which keeps one
+scene about all of it, **Several places: mark them as you watch S**, which only says in a
+toast how S and Shift+S mark them, and Not now. Several places and Not now are remembered
+per file in this browser, and the first scene ends the question. The first scene ever kept points once, in this
 browser, at where it waits: a small bubble with an arrow, *Your scenes wait here*, with
 **Show** to open the To-do and ✕. It hangs under the sidebar's toggle while the sidebar is
 closed, or under its To-do tab while another view is shown; with the To-do on screen it
 waits for a later scene. It takes no focus, goes on Show, ✕, Escape, a press elsewhere,
 another tool or after ten seconds, and follows its control on a resize. The toast keeps
 its own words and Undo.
+
+**A video is one place or several, never both.** Once a scene holds passages of the clip,
+a proof's included, Whole video is greyed in Mark to geolocate's arrow and in the kinds of
+every other scene still to prove, its hover saying why, and the capture's offer leaves it
+out. While the clip's one live scene is still to prove and about the whole video, a
+passage marked with S, the main press, Shift+S or a shot kept goes to that scene instead
+of a second one. It keeps its label, its captures and its geolocating; Shift+S gives it
+the passage from the clip's start, and the toast, *Scene now at 0:09, no longer the whole
+video*, has its Undo. Among other scenes still to prove, as an older case may hold, or
+beside a proof stating passages, it stays as it is and the passage is a scene of its own.
+A proof about the whole video is an answer, not a question: it stays beside new scenes,
+lets the one about the whole video take a time, and keeps Whole video in its own kinds.
+Marking a time from outside Inspect (`POST /cases/{id}/scenes/mark`) follows the same
+rule, and a save stays lenient. A picture is marked whole as before.
 
 **The Scenes tab lists them in clip order**, a scene about the whole video first, its
 label counting them, tinted while some are still to prove. A closed row writes its name,
@@ -1862,21 +1879,25 @@ so does leaving the row or the tab when it reads as one; Escape drops it, and a 
 Escape folds the row. S keeps a new scene whichever row is open, and Shift+S ends the
 open one at once. A draft's change goes back with Ctrl+Z like the rest.
 
-**One place often shows again further on, so a scene holds several moments.** The open
-row's **Another moment** adds an instant at the frame on screen, on a line of its own with
-its ✕; the last one goes only by choosing Whole video. Two passages may touch and an
-instant may sit inside a passage, but two passages that overlap, or one instant twice,
-are said and not kept. Closed, such a scene reads `2 moments · 0:00–0:07 · 1:05–1:12`, or
-`0:30–0:45 +2` past two, and the bar draws each moment in the one colour its first moment
-gives it. Shift+S ends the moment in hand, else the latest started before the frame, and
-says so when that end would run into another moment. The work keeps the first moment as
-the scene's own time and the others under `more`, so a scene of one is written as it
-always was.
+**One place often shows again further on, so a scene holds several passages.** The open
+row's **Another passage** adds one of the kind its first passage in clip order is, from
+the frame on screen, on a line of its own with its ✕, and takes it in hand: its ends drag
+on the bar and Here moves it. An instant goes at that frame. A stretch is as long as the
+first, starting there, or where the stretch that frame falls in ends, and is shortened to
+the room before the scene's next stretch and to the clip's end; with no frame free, a
+short line says so and nothing is added. The last one goes only by choosing Whole video.
+Two stretches may touch and an instant may sit inside one, but two stretches that
+overlap, or one instant twice, are said and not kept. Closed, such a scene reads
+`2 passages · 0:00–0:07 · 1:05–1:12`, or `0:30–0:45 +2` past two, and the bar draws each
+passage in the one colour its first gives it. Shift+S ends the passage in hand, else the
+latest started before the frame, and says so when that end would run into another
+passage. The work keeps the first passage as the scene's own time and the others under
+`more`, so a scene of one is written as it always was.
 
-**Same place as…**, beside Another moment, joins two scenes kept apart before anyone saw
+**Same place as…**, beside Another passage, joins two scenes kept apart before anyone saw
 they show one place. It lists the clip's other scenes still to prove that hold a time,
 each in its colour with its time, and a press joins this one into the scene picked
-(`POST /cases/{id}/scenes/{draft}/join`): the moments come together, passages that
+(`POST /cases/{id}/scenes/{draft}/join`): the passages come together, stretches that
 overlap made one; the label picked stays, with the other's after it unless it says the
 same; the captures gathered for either stay with the scene; and if either was the one
 being geolocated, the joined scene is. The server writes it in one go, and the toast's
@@ -1892,17 +1913,17 @@ whole, on the right.
 same bar, with **Open the proof** in their row. A proof built on frames cut here and stating
 no time of its own is about the whole video, pinned at those frames on the bar and
 placed in the list by the first, so the ones made before scenes existed are found
-without being rewritten. **A proof holds several moments the same way**: its row and
-its bar read as a scene's, and **Another moment** adds one at the frame on screen. Its
+without being rewritten. **A proof holds several passages the same way**: its row and
+its bar read as a scene's, and **Another passage** adds one as a scene's does. Its
 time is written to the proof alone
 (`PUT /cases/{id}/proofs/{name}/scene`), with Undo in the toast, and Whole video
-takes every moment back. Saving the composition in Geo Proof never carries it, so a tab
+takes every passage back. Saving the composition in Geo Proof never carries it, so a tab
 opened earlier cannot put an older time back. A scene still to prove belongs to the
 work. Once a proof takes it up it shows as the proof's and is hidden, never dropped:
 the proof sent to the Trash gives it back to geolocate at its own time, and restored
 from there it is proved again (`GET /cases/{id}/scenes`, whose `taken` names the drafts
-a proof in the case cites). A proof that took up no scene gives its moments back as one
-new scene, named after it, leaving out any moment a scene of the clip already holds.
+a proof in the case cites). A proof that took up no scene gives its passages back as one
+new scene, named after it, leaving out any passage a scene of the clip already holds.
 **A scene still to prove says where it stands**: *To geolocate*, *In progress* with its
 count once captures were filed for it on the map, or *Geolocating* while it is the one
 being looked for, its row ringed. **Geolocate** is its main act, in the accent, after End
@@ -1945,7 +1966,8 @@ on a collage alone.
 
 **A capture never makes a scene; a frame belongs to one by its time.** A frame captured
 in no scene offers one instead, *Frame captured at 0:00.48 · Add a scene*, with
-**Whole video** and **This moment** (an instant at that frame), each with its Undo. A
+**Whole video** and **This instant** (at that frame), each with its Undo, and This instant
+alone once scenes hold passages of the clip. A
 burst of captures shares one offer, which goes by on its own and then keeps quiet a
 while, as it does once a scene is kept any other way; past three offers left unused on
 a file it stops until another file opens, and a clip with a whole-video scene to
@@ -1956,7 +1978,7 @@ scenes named on hover. A draft about the whole video dots nothing. A frame a pro
 out says so on hover, *Used in Proof 29*, with no badge of its own (`used`, by saved
 path). **Make the proof**, on a scene to geolocate, opens the scene's frames, inside its
 passages, on its instants, or every one for the whole video, all ticked, and the proof
-starts with every moment the scene holds. A scene holding
+starts with every passage the scene holds. A scene holding
 none says which frame it captures instead: the sharpest one a scan found in it, else
 the one it starts on, else the one on screen. The ticked frames not in the case yet are
 saved on the way, under their default names in the last folder, and Geo Proof opens a
@@ -2036,12 +2058,14 @@ makes the last saved picture out of date. Find reads a cut picture from its fram
 **A collage of one video is marked as that video.** When every piece is one video at an
 instant, or a frame saved from it, or a picture composed from them such as a piece straightened, the panel reads *From channel_departure · 0:01–0:03*,
 and **Mark to geolocate** marks the whole video; its arrow offers the stretch the pieces
-span, or the instant of a single piece. A collage of several sources is a picture: the
+span, or the instant of a single piece. Once scenes hold passages of the video, the press
+marks that stretch and the arrow's Whole video is greyed, as in Inspect. A collage of
+several sources is a picture: the
 press saves it first when it is not in the case as it stands and marks it whole, and
 saved again, its mark follows the new picture (`POST /scenes/mark`). Marked, or with its
 pieces already in a scene of the video, it says where the scene stands, with
 **Geolocate**, which opens the collage beside the video on the map, and **Make the
-proof**, which opens Inspect's chooser on that scene. A press on its scene's time unfolds the moment
+proof**, which opens Inspect's chooser on that scene. A press on its scene's time unfolds its time
 under it: the video looping it in a small player, the pieces' frames as dots on its bar,
 and Inspect's time editor; Apply moves that scene's time alone
 (`PUT /cases/{id}/scenes/{draft}/time`), with Undo, and a time holding none of the pieces
@@ -3714,7 +3738,7 @@ grid around them. A grid discarded elsewhere closes here and says so.
 none is being geolocated, folded to one row behind the pill while one is, and absent
 when there are none (`GET /api/ingest/scenes`). Geolocate there
 (`POST /api/ingest/geolocating`) holds the scene's video over the other site's map,
-paused on the scene and each of its moments marked on its bar in its colour, and a pill names it, counts
+paused on the scene and each of its passages marked on its bar in its colour, and a pill names it, counts
 its captures and stops it. While it lasts, every capture filed in the case is attached
 to it, the panel's included, and the capture's report says *Attached to “bridge?”*. A
 picture reads *Whole picture*, with an image on its file's line, and Geolocate holds the
@@ -4428,10 +4452,10 @@ out of the file, which it never overwrites. The frame is not dated, the video it
 from is; a satellite capture never is. **A proof about a video dates that video alone**,
 its ★: the one its scene states, else the one its first frame was cut from. Another video
 among the panels only confirms the place and never takes the date, nor does a photo
-beside it; a proof resting on no video dates every source. When the proof states moments
+beside it; a proof resting on no video dates every source. When the proof states passages
 the statement holds for them (`span` on the Claim), and the Time tab reads
-`2:10–2:38 · 24 Oct 2025`, `0:30–0:45 +2 · …` past two, every moment on hover; about the
-whole video it is the date alone. Changing the moments or the ★
+`2:10–2:38 · 24 Oct 2025`, `0:30–0:45 +2 · …` past two, every passage on hover; about the
+whole video it is the date alone. Changing the passages or the ★
 (`PUT /cases/{id}/proofs/{name}/scene` with `{moments, video?, draft?}`) moves the span
 and the file the statement is about at once, and leaves its date, its words and whatever
 the analyst added. Changing the date restates it, clearing it takes it back, and a
@@ -4448,15 +4472,16 @@ no time reads *Whole video*: the instants its frames were cut at pin it, they ar
 its time.
 
 **The time opens Inspect's own editor**: Whole video, Instant or Passage, a line per
-moment, typed or nudged a frame with ↑/↓, and **Here** takes the frame on the tab's
-player. Apply writes a saved proof's time at once, through its own route, with Undo in
+passage, typed or nudged a frame with ↑/↓, and **Here** takes the frame on the tab's
+player. **Another passage** adds one of the scene's kind from that frame as Inspect's
+does, held in the scene's colour on the player's bar and moved by Here. Apply writes a saved proof's time at once, through its own route, with Undo in
 the toast; a proof never saved holds it and writes it right after its first save.
 
 **The player has the Scene tab to itself**: it opens with the tab on the ★ video,
 paused where the scene starts, muted, at the clip's own shape up to under half the
-window's height, with a thin bar where the moments are bands and pins in the colour the
+window's height, with a thin bar where the passages are bands and pins in the colour the
 scene has on Inspect's bar, and the proof's panels are dots. The play act at the end of
-a video's line runs that video in it: through the moments, each passage played and each
+a video's line runs that video in it: through the passages, each stretch played and each
 instant held a beat, or the whole video from the first panel's frame; the loop button
 starts and stops that, and it never starts on its own for a system set to reduce motion.
 Leaving the tab pauses it on its frame, and keeps a time being changed when it reads as
@@ -4467,11 +4492,11 @@ usual. Each panel cut from a video carries a ▶ in its corner on the canvas, dr
 the handles and never exported, which shows the Scene tab on that panel's frame.
 
 **Nothing moves the time behind the analyst's back.** When a frame of the ★ video falls
-outside every moment stated, the field says *1 panel is outside these moments* and
-offers **Add its moment**, an instant at that frame. **Scene time on the picture**
+outside every passage stated, the field says *1 panel is outside these passages* and
+offers **Add its passage**, an instant at that frame. **Scene time on the picture**
 (Style, off by default, offered only for a proof built on a video) prints
 `2:10–2:38`, the timecode alone and never the video's name, in a dark tag at the bottom
-left of each ★ panel, the moment that panel's frame shows in. It is drawn on the page, so the exported picture is the canvas.
+left of each ★ panel, the passage that panel's frame shows in. It is drawn on the page, so the exported picture is the canvas.
 A proof about the whole video has no time to print, and the house style leaves it to
 each proof.
 
@@ -4517,16 +4542,16 @@ a save; one holding only typed words asks first. Presses during the save only mo
 it heads, so three fast Alt+→ go three slides on with one save. A switch rewrites the
 step it is on, so Back leaves the series at once. With the strip focused, ←/→ walk the
 tiles and Enter opens one. A proved tile's ⋯ has **Show in Inspect**, which opens the
-video on that slide's moment.
+video on that slide's scene.
 
 **A scene still to prove shows its page** in place of the canvas, and landing on it
 starts nothing: its label or time, where it stands, the captures it gathered, and
 **Make this slide**, **Geolocate** and **Abandon…** with a word, or **Restore**. Make
 this slide chooses its frames as Inspect's Make the proof does, from
 `GET /cases/{id}/scenes/{draft}/frames?video=`: the frames Inspect cut inside any of
-that scene's moments by the rule its dots use (half a frame at each edge, at the clip's
+that scene's passages by the rule its dots use (half a frame at each edge, at the clip's
 own rate), all of them for a scene about the whole video, and the slide states every
-moment. A frame not in the case yet is filed on the
+passage. A frame not in the case yet is filed on the
 way with the crop, turn and sliders Inspect keeps for it, so it comes out as Inspect
 would have saved it. The slide made of it keeps the look of the slide before, and its
 first save takes the scene up, as from Inspect. Inspect handing over a scene of the same
@@ -4536,7 +4561,7 @@ new slide keeps its look too.
 **+ New scene** saves the slide on screen and starts one of the same video in its look:
 the house style, the text and footer switches, the signature and the palette, never its
 panels, marks, legend words or facts. It opens on the Scene tab, the player after the
-last moment proved, for **Add this frame**.
+last passage proved, for **Add this frame**.
 
 **Export the slides** copies every proved slide's saved picture into one new folder of
 the proofs export folder, named after the video and numbered in clip order without gaps
