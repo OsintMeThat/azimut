@@ -5,6 +5,7 @@ import {
   sameMoments, sameTime, sceneList, shortClock, sceneMarks, scenePassage, sceneStart, sceneTime, sceneTitle,
   sceneToEnd, shortMoments, snapToFrame, sortMoments, spanLabel, stretchFromShot, timeProblem, timeWords,
   compactTime, draftTime, momentBefore, samePlaceChoices, sceneMoments, setDraftTime, nextPassage, timedBeside, wholeTaker,
+  mixedWhole, wholeBarred, wholeDrafts,
 } from './scenes.js';
 
 const proof = (name, extra = {}) => ({
@@ -449,6 +450,42 @@ describe('one place or several, never both', () => {
     // the other one given up on, it is the only live one again
     const rows = list([draft('w', null), draft('a', 3)]).map((s) => (s.id === 'a' ? gone(s) : s));
     expect(wholeTaker(rows)?.id).toBe('w');
+  });
+
+  it('offers the whole video only to the video\'s one live scene still to prove, with no passages beside it', () => {
+    const alone = list([draft('a', 3)]);
+    expect(wholeBarred(alone, alone[0])).toBe('');
+    expect(wholeBarred(list([]))).toBe('');
+    // a second one about the whole video would ask the same question twice
+    const twins = list([draft('w', null), draft('a', 3, 9)]);
+    expect(wholeBarred(twins, twins.find((s) => s.id === 'a'))).toBe('whole');
+    expect(wholeBarred(list([draft('w', null)]))).toBe('whole');
+    // beside passages, a proof's included, the video is several places
+    const timed = list([draft('a', 3), draft('b', 20)]);
+    expect(wholeBarred(timed, timed[0])).toBe('timed');
+    const proved = list([draft('a', 3)], [proof('P', { moments: [m(5)] })]);
+    expect(wholeBarred(proved, proved.find((s) => s.kind === 'draft'))).toBe('timed');
+    // a proof about the whole video is an answer and bars nothing; the abandoned do not count
+    const answered = list([draft('a', 3)], [proof('P', { at: [5] })]);
+    expect(wholeBarred(answered, answered.find((s) => s.kind === 'draft'))).toBe('');
+    const given = list([draft('a', 3), draft('w', null)]).map((s) => (s.id === 'w' ? gone(s) : s));
+    expect(wholeBarred(given, given.find((s) => s.id === 'a'))).toBe('');
+  });
+
+  it('finds an older case\'s scenes about the whole video, and one standing beside passages', () => {
+    const rows = list([draft('w1', null), draft('a', 3), draft('w2', null)]);
+    expect(wholeDrafts(rows).map((s) => s.id)).toEqual(['w1', 'w2']);
+    expect(wholeDrafts(rows.map((s) => (s.id === 'w2' ? gone(s) : s))).map((s) => s.id)).toEqual(['w1']);
+    expect(mixedWhole(rows, rows.find((s) => s.id === 'w1'))).toBe(true);
+    expect(mixedWhole(rows, rows.find((s) => s.id === 'a'))).toBe(false);
+    // two about the whole video alone are twins, not mixed
+    const twins = list([draft('w1', null), draft('w2', null)]);
+    expect(mixedWhole(twins, twins[0])).toBe(false);
+    // a proof's passages make it mixed too, a proof about the whole video does not
+    const proved = list([draft('w', null)], [proof('P', { moments: [m(5)] })]);
+    expect(mixedWhole(proved, proved.find((s) => s.kind === 'draft'))).toBe(true);
+    const answered = list([draft('w', null)], [proof('P', { at: [5] })]);
+    expect(mixedWhole(answered, answered.find((s) => s.kind === 'draft'))).toBe(false);
   });
 });
 

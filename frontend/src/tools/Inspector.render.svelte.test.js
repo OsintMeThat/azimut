@@ -1134,6 +1134,39 @@ describe('a frame captured in no scene', () => {
     expect(offers()).toEqual([]);
   });
 
+  it('makes no second scene about the whole video when the offer is picked after one was kept', async () => {
+    await start();
+    await openFile('Convoy clip');
+    await captureAt(2.01);
+    const [offer] = offers();
+    // the whole video kept from the arrow while the offer is up
+    target.querySelector('[aria-label="More ways to mark"]').click();
+    flushSync();
+    [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent.includes('Whole video')).click();
+    await settle();
+
+    choice(offer, 'Whole video').onClick();
+    flushSync();
+    await afterQuiet();
+    expect(put.mock.calls.at(-1)[1].spec.scenes).toEqual([{ id: expect.any(String), start: null, end: null, label: '' }]);
+  });
+
+  it('keeps no scene about the whole video from the offer once a time was marked elsewhere', async () => {
+    await start();
+    await openFile('Convoy clip');
+    await captureAt(2.01);
+    const [offer] = offers();
+    playheadAt(6);
+    press('s');
+    await settle();
+
+    choice(offer, 'Whole video').onClick();
+    flushSync();
+    expect(toast).toHaveBeenCalledWith('Scenes already hold passages of this video, so the whole of it is not one place', 'warn');
+    await afterQuiet();
+    expect(put.mock.calls.at(-1)[1].spec.scenes.map((sc) => sc.start)).toEqual([6]);
+  });
+
   it('asks nothing of a frame already in a scene', async () => {
     keep([{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
     await start();

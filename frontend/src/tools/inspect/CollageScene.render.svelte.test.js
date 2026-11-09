@@ -340,4 +340,14 @@ describe('the moment it was marked over', () => {
     expect(target.querySelector('.outside').textContent).toBe('No piece of the collage is in this time, so it leaves the scene.');
     expect(button('Apply').disabled).toBe(false);
   });
+
+  it('greys the whole video beside another scene still to prove about it, as Inspect does', async () => {
+    const whole = { ...STRETCH, id: 'sc_w', start: null, end: null, label: 'Which town?' };
+    listed['media/clip.mp4'] = { scenes: [whole, STRETCH], taken: [], collages: [], geolocating: null };
+    await show({ video: ONE_VIDEO, current: 'media/Pan.png' });
+    target.querySelector('.state .time').click();
+    await settle();
+    const kind = [...target.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Whole video');
+    expect([kind.disabled, kind.title]).toEqual([true, 'Another scene of this video is already about the whole video']);
+  });
 });

@@ -10,10 +10,10 @@
  * (`more`) when the same place shows again further on.
  *
  * The code says moment; the screen says **passage**, since Inspect's Moments tab holds
- * the timecoded marks. A video is one place or several, never both: a scene about the
- * whole video is not offered beside scenes holding passages (`timedBeside`), and a new
- * time marked on a video whose one scene is about the whole of it goes to that scene
- * (`wholeTaker`).
+ * the timecoded marks. A video is one place or several, never both: a scene still to
+ * prove is about the whole video only as the video's one live scene still to prove,
+ * with no scene holding passages beside it (`wholeBarred`), and a new time marked on a
+ * video whose one scene is about the whole of it goes to that scene (`wholeTaker`).
  *
  * **A scene that states no time is about the whole video**, and says so rather
  * than print a timecode. A proof's frames still pin it on the bar, where they
@@ -300,6 +300,31 @@ export function sceneWhen(scene) {
  */
 export const timedBeside = (scenes, scene = null) =>
   liveScenes(scenes).some((s) => s.key !== scene?.key && sceneMoments(s).length > 0);
+
+/**
+ * The live scenes still to prove about the whole video, in list order. A video holds
+ * one at most; an older case may hold two, the same question asked twice, which the
+ * Scenes tab offers to join into the first.
+ */
+export const wholeDrafts = (scenes) => liveScenes(scenes).filter((s) => s.kind === 'draft' && isWholeVideo(s));
+
+/**
+ * Why a scene still to prove may not be about the whole video, or '' when it may. It may
+ * only as the video's one live scene still to prove, with no scene holding passages
+ * beside it: `'whole'` when another live one is about the whole video already, `'timed'`
+ * when another live scene holds passages, a proof's included. `scene` is the one asking,
+ * left out; none for a scene not kept yet. A proof about the whole video is an answer,
+ * not a question, and bars nothing (`engine/geolocate.whole_barred`).
+ */
+export function wholeBarred(scenes, scene = null) {
+  const others = liveScenes(scenes).filter((s) => s.key !== scene?.key);
+  if (others.some((s) => s.kind === 'draft' && isWholeVideo(s))) return 'whole';
+  return others.some((s) => sceneMoments(s).length > 0) ? 'timed' : '';
+}
+
+/** Whether a scene is about the whole video beside live scenes holding passages, as an older case may hold. */
+export const mixedWhole = (scenes, scene) =>
+  scene?.kind === 'draft' && !isAbandoned(scene) && isWholeVideo(scene) && timedBeside(scenes, scene);
 
 /**
  * The scene about the whole video that a new time marked on its video goes to, or null:

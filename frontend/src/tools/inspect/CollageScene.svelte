@@ -10,7 +10,7 @@
   import { queueState } from '../../lib/sceneQueue.js';
   import { retimeScene } from '../../lib/sceneRetime.svelte.js';
   import {
-    isWholeVideo, sceneList, sceneMoments, sceneTime, sceneTitle, shortClock, spanLabel, timeWords, timedBeside,
+    isWholeVideo, sceneList, sceneMoments, sceneTime, sceneTitle, shortClock, spanLabel, timeWords, timedBeside, wholeBarred,
   } from '../../lib/scenes.js';
   import { toast, uiState } from '../../lib/state.svelte.js';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
@@ -26,7 +26,8 @@
   // Geolocate and Make the proof, as Inspect's Scenes tab does. A press on the scene's
   // time unfolds its editor with the video playing it (`CollageMoment`). A video is one
   // place or several: once scenes hold passages of it, the whole video is not offered,
-  // and the press marks the stretch the pieces span.
+  // and the press marks the stretch the pieces span. The scene's own time offers it only
+  // as the video's one live scene still to prove (`wholeBarred`).
   //
   // `video` is `{ path, times }` when every piece comes from one video; `picture` the
   // collage's last saved picture and `current` that picture while it still reads as the
@@ -285,7 +286,7 @@
         {caseId}
         video={video.path}
         {scene}
-        wholeOff={timedBeside(listOf(listing), scene) ? INSPECT_HELP.sceneWholeTimed : ''}
+        wholeOff={{ whole: INSPECT_HELP.sceneWholeTaken, timed: INSPECT_HELP.sceneWholeTimed }[wholeBarred(listOf(listing), scene)] ?? ''}
         {times}
         {busy}
         onapply={applyTime}

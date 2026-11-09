@@ -14,7 +14,8 @@
   import {
     editClock, isAbandoned, isStretch, isWholeVideo, liveScenes, markablePicture, momentBefore, momentKey, momentsClash, newScene,
     sameMoments, sameTime, sceneList, sceneMarks, sceneMoments, scenePassage, sceneStart, sceneTime, sceneTitle, sceneToEnd,
-    setDraftTime, shortClock, snapToFrame, sortMoments, stretchFromShot, timeWords, timedBeside, toProve, wholeTaker,
+    setDraftTime, shortClock, snapToFrame, sortMoments, stretchFromShot, timeWords, toProve, wholeBarred,
+    wholeDrafts, wholeTaker,
   } from '../lib/scenes.js';
   import {
     abandonProof, abandonScene, geolocateScene, geolocating, joinScenes, restoreProof, restoreScene, sceneEdit as sceneGiven,
@@ -173,8 +174,31 @@
       work.name = res.name;
       savedSignature = sig;
       if (first) reloadCase(); // the sidebar lists the work it just filed
+      if (res.kept?.length) keptTimes(res.kept);
     }
     workState.rev += 1;
+  }
+
+  /**
+   * A video is one place or several, never both, and the server holds to it: a save that
+   * made a scene with a time the whole video beside another scene about it, or beside
+   * scenes holding passages, kept the time that scene had (`engine/geolocate.save_work`).
+   * Only an Undo stepping back over such a change sends one. The work takes the time
+   * back, so what is shown is what is kept, and says why.
+   */
+  function keptTimes(kept) {
+    let said = null;
+    for (const { id, start, end, more, why } of kept) {
+      const draft = work.scenes.find((sc) => sc.id === id);
+      if (!draft || Number.isFinite(draft.start)) continue;
+      setDraftTime(draft, sceneMoments({ kind: 'draft', start, end, more }));
+      said ??= { label: (draft.label ?? '').trim(), why };
+    }
+    if (!said) return;
+    clipHistory.reset(clipSnapshot());
+    const who = said.label ? `“${said.label}”` : 'Scene';
+    const why = said.why === 'whole' ? 'another scene of this video is already about the whole video' : 'other scenes of this video already hold passages';
+    toast(`${who} keeps its time: ${why}`, 'info', 8000);
   }
 
   const autosave = createAutosave({ write: () => writeWork() });
@@ -696,7 +720,7 @@
     };
     const instant = { label: 'This instant', pick: keep({ start: at }, (scene) => `Scene kept at ${sceneTime(scene)}`) };
     const whole = { label: 'Whole video', pick: keep({ start: null, end: null }, () => 'Scene kept for the whole video') };
-    sceneOffer.offer(`Frame captured at ${editClock(at)} · Add a scene`, timedBeside(scenes) ? [instant] : [whole, instant]);
+    sceneOffer.offer(`Frame captured at ${editClock(at)} · Add a scene`, wholeBarred(scenes) ? [instant] : [whole, instant]);
   }
 
   function select(id) {
@@ -1086,7 +1110,7 @@
    * scene ever kept here (`kept`) asks the app to point once at the To-do, where it
    * waits too (`uiState.todoHint`).
    */
-  function clipChanged(message, { kept = false } = {}) {
+  function clipChanged(message, { kept = false, undoable = true } = {}) {
     const after = clipSnapshot();
     clipHistory.push(after);
     const run = openRun;
@@ -1097,7 +1121,7 @@
       },
     };
     if (kept && todoHintDue()) uiState.todoHint = true;
-    toast(message, 'info', 6000, undo);
+    toast(message, 'info', 6000, undoable ? undo : null);
   }
 
   function restoreClip(snapshot) {
@@ -1119,13 +1143,18 @@
   }
 
   /**
-   * Keep a scene over `stretch`. A time marked on a clip whose one scene still to prove
-   * is about the whole video goes to that scene instead (`wholeTaker`): a video is one
-   * place or several, never both.
+   * Keep a scene over `stretch`. A video is one place or several, never both: a time
+   * marked on a clip whose one scene still to prove is about the whole video goes to
+   * that scene instead (`wholeTaker`), and one marked while an older case holds two
+   * about the whole video asks for them to be joined first, since either could take it.
+   * The whole video kept while a scene is about it already answers that scene, and is
+   * refused beside scenes holding passages.
    */
   function keepScene(stretch, message, { reveal = true } = {}) {
     if (!stretch) return null;
-    const whole = Number.isFinite(stretch.start) ? wholeTaker(scenes) : null;
+    const timed = Number.isFinite(stretch.start);
+    if (isVideo && (timed ? twinsAsked() : wholeRefused())) return null;
+    const whole = timed ? wholeTaker(scenes) : null;
     if (whole) return takeWhole(whole, stretch, { reveal });
     const scene = newScene(stretch);
     work.scenes.push(scene);
@@ -1138,9 +1167,10 @@
 
   /**
    * The scene about the whole video takes this time, keeping its label, its captures and
-   * its geolocating, and the toast's Undo makes it the whole video again.
+   * its geolocating, and the toast's Undo makes it the whole video again. Taken beside
+   * scenes at a time (`giveTime`) it has no Undo, which would make the video both again.
    */
-  function takeWhole(whole, stretch, { reveal = true } = {}) {
+  function takeWhole(whole, stretch, { reveal = true, undoable = true } = {}) {
     const draft = work.scenes.find((sc) => sc.id === whole.id);
     if (!draft) return null;
     const moments = [{ start: stretch.start, end: isStretch(stretch) ? stretch.end : null }];
@@ -1148,9 +1178,49 @@
     frameInstants(moments);
     sceneOffer.quiet();
     const label = (draft.label ?? '').trim();
-    clipChanged(`${label ? `“${label}”` : 'Scene'} now ${timeWords(moments)}, no longer the whole video`);
+    clipChanged(`${label ? `“${label}”` : 'Scene'} now ${timeWords(moments)}, no longer the whole video`, { undoable });
     if (reveal) touchScene(draft.id);
     return draft;
+  }
+
+  /**
+   * An older case's scene about the whole video beside scenes at a time: Give it a time
+   * makes it the instant on screen, as the clip's one scene about the whole video takes
+   * the instant S marks, its frame kept in the strip. Ctrl+Z starts from here.
+   */
+  function giveTime(pressed) {
+    if (pressed?.kind !== 'draft' || !isVideo || !isWholeVideo(pressed)) return;
+    if (takeWhole(pressed, { start: shownTime() }, { undoable: false })) clipHistory.reset(clipSnapshot());
+  }
+
+  /**
+   * A time marked while an older case holds several scenes about the whole video: none
+   * of them takes it, and the toast offers to join them. Answers whether it asked.
+   */
+  function twinsAsked() {
+    const twins = wholeDrafts(scenes);
+    if (twins.length < 2) return false;
+    toast(`${twins.length} scenes for the whole video: join them first`, 'warn', 8000, {
+      label: 'Join them',
+      onClick: () => joinWhole(wholeDrafts(scenes)),
+    });
+    return true;
+  }
+
+  /**
+   * The whole video kept while a scene is about it already: that scene, brought into view.
+   * Beside scenes holding passages, a toast says why it is not kept. Answers whether either was.
+   */
+  function wholeRefused() {
+    const [standing] = wholeDrafts(scenes);
+    if (standing) {
+      touchScene(standing.key);
+      sceneFocus = { key: standing.key, n: (sceneFocus?.n ?? 0) + 1 };
+      return true;
+    }
+    if (!wholeBarred(scenes)) return false;
+    toast(INSPECT_HELP.markWholeTimed, 'warn');
+    return true;
   }
 
   /**
@@ -1205,7 +1275,8 @@
     const scene = target && work.scenes.find((sc) => sc.id === target.id);
     const moments = scene ? sceneMoments({ kind: 'draft', ...scene }) : [];
     if (!moments.length) {
-      const whole = id ? null : wholeTaker(scenes);
+      if (id || twinsAsked()) return;
+      const whole = wholeTaker(scenes);
       if (whole) takeWhole(whole, { start: 0, end: now });
       return;
     }
@@ -1447,6 +1518,58 @@
     tookScenes(answer.scenes.map(draftOf), []);
     for (const row of answer.scenes) heardRow(row);
     loadScenes(run);
+  }
+
+  /**
+   * An older case's scenes about the whole video, the same question asked more than once:
+   * Join them makes them the first, one join after another as Same place as… joins two,
+   * the labels after its own and the captures gathered. The toast's Undo parts them again,
+   * the last join first, while nothing has moved the scene since.
+   */
+  async function joinWhole(twins) {
+    const [into, ...rest] = twins ?? [];
+    if (!into || !rest.length || !isVideo || sceneBusy) return;
+    sceneBusy = true;
+    const run = openRun;
+    const caseId = work.caseId;
+    const video = work.source.path;
+    const undos = [];
+    let joined = null;
+    try {
+      await heldWork();
+      for (const one of rest) {
+        if (run !== openRun) return;
+        const answer = await joinScenes(caseId, video, one.id, into.id);
+        undos.push(answer.undo);
+        joined = answer.scene;
+        tookScenes([draftOf(joined)], [one.id]);
+        listedScenes = listedScenes.filter((sc) => !(sc.kind === 'draft' && sc.id === one.id));
+        heardRow(joined);
+      }
+    } catch (e) {
+      if (run === openRun) toast(e.message, 'danger');
+    } finally {
+      sceneBusy = false;
+    }
+    if (run !== openRun || !joined) return;
+    touchScene(joined.id);
+    sceneFocus = { key: joined.id, n: (sceneFocus?.n ?? 0) + 1 };
+    const label = joined.label;
+    toast(label ? `Joined into “${label}”, about the whole video` : 'Joined into one scene about the whole video', 'info', 6000, {
+      label: 'Undo',
+      onClick: () => {
+        const now = work.scenes.find((sc) => sc.id === joined.id);
+        // only while nothing has moved it since, its time or its label
+        const same = now && now.label.trim() === label && now.start == null;
+        if (run === openRun && same) unjoinAll(undos);
+      },
+    });
+    loadScenes(run);
+  }
+
+  /** Undo Join them: each join taken back, the last first. */
+  async function unjoinAll(undos) {
+    for (const undo of [...undos].reverse()) await unjoinScene(undo);
   }
 
   /**
@@ -1914,9 +2037,7 @@
   // Why Mark to geolocate's arrow does not offer the whole video: a scene says so, or
   // scenes hold passages of the clip, which makes it several places.
   const markWholeOff = $derived(
-    liveScenes(scenes).some((sc) => sc.kind === 'draft' && isWholeVideo(sc))
-      ? INSPECT_HELP.markWholeTaken
-      : timedBeside(scenes) ? INSPECT_HELP.markWholeTimed : '',
+    { whole: INSPECT_HELP.markWholeTaken, timed: INSPECT_HELP.markWholeTimed }[wholeBarred(scenes)] ?? '',
   );
 
   // -- save to case: the one step that files media ------------------------------------
@@ -2287,6 +2408,8 @@
                 onnudge={nudgeScene}
                 onaddmoment={addMoment}
                 onjoin={joinScene}
+                onjoinwhole={joinWhole}
+                ongivetime={giveTime}
                 onapply={applySceneEdit}
                 oncancel={dropSceneEdit}
               />

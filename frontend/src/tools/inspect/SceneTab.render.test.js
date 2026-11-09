@@ -574,7 +574,7 @@ describe('one place or several', () => {
     const { root } = opened(scenes, 'sc_1', { onkind });
     const whole = kind(root, 'Whole video');
     expect(whole.disabled).toBe(true);
-    expect(whole.getAttribute('title')).toBe('Another scene holds passages of this video, so the whole of it is not one place');
+    expect(whole.getAttribute('title')).toBe('Other scenes of this video already hold passages, so the whole of it is not one place');
     whole.click();
     expect(onkind).not.toHaveBeenCalled();
     expect(kind(root, 'Passage').disabled).toBe(false);
@@ -601,6 +601,79 @@ describe('one place or several', () => {
     flushSync();
     expect([kind(root, 'Whole video').disabled, kind(root, 'Instant').getAttribute('aria-checked')]).toEqual([false, 'true']);
     expect(kind(opened(SCENES(), 'proof:Depot').root, 'Whole video').disabled).toBe(false);
+  });
+
+  it('greys Whole video beside another scene about it, a second being the same question twice', () => {
+    const scenes = sceneList([], [{ id: 'sc_all', start: null, end: null, label: '' }]);
+    // one kept a moment ago, not saved yet, beside the one about the whole video
+    const both = sceneList([], [{ id: 'sc_all', start: null, end: null, label: '' }, { id: 'sc_new', start: 4, end: null, label: '' }]);
+    const whole = kind(opened(both, 'sc_new').root, 'Whole video');
+    expect([whole.disabled, whole.getAttribute('title')]).toEqual([true, 'Another scene of this video is already about the whole video']);
+    // the one about it keeps it, and so does a scene alone
+    expect(kind(opened(scenes, 'sc_all').root, 'Whole video').disabled).toBe(false);
+  });
+
+  it('says nothing new on a video that is one place or several', () => {
+    const clean = [
+      sceneList([], [{ id: 'sc_all', start: null, end: null, label: '' }]),
+      sceneList([], [{ id: 'sc_1', start: 60, end: null, label: '' }, { id: 'sc_2', start: 90, end: 95, label: '' }]),
+      sceneList([proof('Proof 28', { at: [3.4] })], [{ id: 'sc_all', start: null, end: null, label: '' }]),
+    ];
+    for (const scenes of clean) {
+      const root = render(SceneTab, { scenes, open: scenes.find((sc) => sc.kind === 'draft').key, onjoinwhole: vi.fn(), ongivetime: vi.fn() });
+      expect(root.querySelector('[data-testid="whole-twins"]')).toBeNull();
+      expect(root.querySelector('[data-testid="whole-mixed"]')).toBeNull();
+      expect(root.querySelector('[data-testid="whole-mixed-mark"]')).toBeNull();
+    }
+  });
+
+  it('offers to join an older case\'s scenes about the whole video in one press', () => {
+    const onjoinwhole = vi.fn();
+    const scenes = sceneList([], [
+      { id: 'w1', start: null, end: null, label: 'Market' },
+      { id: 'w2', start: null, end: null, label: '' },
+      { id: 'gone', start: null, end: null, label: '' },
+    ]).map((sc) => (sc.id === 'gone' ? { ...sc, abandoned: { reason: '' } } : sc));
+    const root = render(SceneTab, { scenes, onjoinwhole });
+    const line = root.querySelector('[data-testid="whole-twins"]');
+    // the abandoned one is not counted
+    expect(line.textContent.replace(/\s+/g, ' ').trim()).toBe('2 scenes for the whole video · Join them');
+    const join = button(line, 'Join them');
+    expect(join.getAttribute('title')).toBe('Make them one scene, their labels and captures together');
+    join.click();
+    expect(onjoinwhole.mock.calls[0][0].map((sc) => sc.id)).toEqual(['w1', 'w2']);
+    // nothing to join once one is left
+    const one = render(SceneTab, { scenes: scenes.filter((sc) => sc.id !== 'w2'), onjoinwhole });
+    expect(one.querySelector('[data-testid="whole-twins"]')).toBeNull();
+  });
+
+  it('says a scene about the whole video stands beside scenes at a time, gives it one or abandons it', () => {
+    const ongivetime = vi.fn();
+    const onabandon = vi.fn();
+    const scenes = sceneList([], [{ id: 'sc_all', start: null, end: null, label: 'Which town?' }, { id: 'sc_1', start: 8, end: null, label: '' }]);
+    const { root } = opened(scenes, 'sc_all', { ongivetime, onabandon });
+    const note = root.querySelector('[data-testid="whole-mixed"]');
+    expect(note.textContent).toContain('This video also has scenes at a time');
+    // only on the row about the whole video
+    expect(rows(root).find((r) => r.dataset.sceneKey === 'sc_1').querySelector('[data-testid="whole-mixed-mark"]')).toBeNull();
+    button(note, 'Give it a time').click();
+    expect(ongivetime.mock.calls[0][0].id).toBe('sc_all');
+
+    button(note, 'Abandon…').click();
+    flushSync();
+    // the usual word asked, the note out of the way meanwhile
+    expect(root.querySelector('[data-testid="whole-mixed"]')).toBeNull();
+    type(field(root, 'Why it is abandoned'), 'Same as the bridge');
+    button(root, 'Abandon').click();
+    expect(onabandon).toHaveBeenCalledWith(expect.objectContaining({ id: 'sc_all' }), 'Same as the bridge');
+  });
+
+  it('marks the closed row of a scene about the whole video beside passages, a proof\'s included', () => {
+    const scenes = sceneList([proof('Depot', { moments: [{ start: 130, end: 158 }], stated: true })], [{ id: 'sc_all', start: null, end: null, label: '' }]);
+    const root = render(SceneTab, { scenes, open: null });
+    const mark = rows(root)[0].querySelector('[data-testid="whole-mixed-mark"]');
+    expect(mark.getAttribute('title')).toBe('This video also has scenes at a time');
+    expect(root.querySelector('[data-testid="whole-mixed"]')).toBeNull();
   });
 
   it('says under the passages when Another passage finds no room, and adds none', () => {
