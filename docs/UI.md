@@ -34,8 +34,8 @@ quiet link in Home's footer and one line on the last page of What's new. Nothing
 the network before a press, and there is no setting, reminder, counter or donor feature.
 
 **While a scene is geolocated, a pill sits beside the case**: *Geolocating*, the scene's
-colour, its time and label, and the captures gathered for it, a count that pulses as one
-lands, from the app or the extension. Its label opens the scene in Inspect, **Make the
+colour, its time and label, and its two counts (below): the captures gathered for it, which
+pulses as one lands from the app or the extension, and what its video gives it. Its label opens the scene in Inspect, **Make the
 proof** opens Inspect's chooser on it, and ✕ stops; the captures stay with the scene.
 Every capture filed meanwhile, from any map tool or the extension, is gathered for it on
 the server (`engine/geolocate.py`), and every tab and the extension's panel follow the
@@ -97,8 +97,9 @@ presses *Read the guide* on it, which opens the guide on its start page.
   takes up yet, by file, the file worked on last first (`GET /cases/{id}/scenes/queue`).
   Each row gives its label or its time, every passage of a scene holding several
   (`0:00–0:07 · 1:05–1:12`), a mark in the colour Inspect gives the scene
-  (a band for a passage, a pin for an instant), and its state: To geolocate, In progress
-  with its captures, or Geolocating for the one in hand. **Geolocate** goes to the map
+  (a band for a passage, a pin for an instant), its state by the pip at its start (an
+  empty ring To geolocate, a ring holding a dot In progress, the solid accent for the one
+  in hand) and its two counts. **Geolocate** goes to the map
   with its video, and on the scene in hand it reads **Stop** and stops it, the captures
   kept; the name opens it in Inspect, or in Collage for a picture a collage exported; ✕ abandons it with a word, which may
   stay empty. Three rows show and the rest are counted; the abandoned fold below, each
@@ -1927,9 +1928,19 @@ the proof sent to the Trash gives it back to geolocate at its own time, and rest
 from there it is proved again (`GET /cases/{id}/scenes`, whose `taken` names the drafts
 a proof in the case cites). A proof that took up no scene gives its passages back as one
 new scene, named after it, leaving out any passage a scene of the clip already holds.
-**A scene still to prove says where it stands**: *To geolocate*, *In progress* with its
-count once captures were filed for it on the map, or *Geolocating* while it is the one
-being looked for, its row ringed. **Geolocate** is its main act, in the accent, after End
+**A scene still to prove says where it stands**, by a small mark: an empty ring *To
+geolocate*, a ring holding a dot *In progress* once captures were filed for it on the map,
+the solid accent *Geolocating* while it is the one being looked for, its row ringed.
+**Beside the mark, two counts say at a glance whether it is ready to prove**, each by its
+icon and greyed at 0: the map's, the captures gathered for it (Satellite, Compare, Horizon,
+the extension's screenshots), and the video's, the frames of the strip inside its passages,
+filed or not, and the collages of the clip holding one of them, every one for the whole
+video. A picture marked to geolocate gives one, itself. The hover says them in words,
+*In progress: 2 map captures, 5 pictures from the video*. The server's rows carry the
+video's count (`footage`, `engine/scenes.draft_row`), read by Inspect's rule at a
+thirtieth of a second, so the To-do, the pill, Geo Proof's home, its strip and a scene's
+page say the same numbers; Inspect counts its own strip as it stands, so a frame captured
+counts at once. The queue reads every file's work and the collage documents once for it. **Geolocate** is its main act, in the accent, after End
 here and Make the proof: the work is written, the scene is held on the server as the one
 being geolocated (`PUT /cases/{id}/geolocating`), and Satellite opens with its video as a
 reference window. Pressed again on the scene in hand it reads **Stop** and stops it, its
@@ -4320,8 +4331,8 @@ the title Media gives it, else by its file name without the extension, here and 
 scene or a proof names its video: the Open list, the strip, the Scene tab, New proof, the
 To-do and the pill. **To
 prove** shows only when the case has scenes still to prove: a card per video with its
-thumbnail and its scenes as chips, each with its colour, name, time and where it stands. A
-chip is Make the proof: the frames of the scene chosen as from the strip, or for a picture
+thumbnail and its scenes as chips, each with its colour, name, time, its mark and its two
+counts. A chip is Make the proof: the frames of the scene chosen as from the strip, or for a picture
 the proof of it and its captures. A case holding nothing shows the button and one sentence.
 The home opens on the list it read last and reads it again behind (`GET /proofs`, one read),
 the scenes coming from the queue the app already keeps. A scene of the strip still shows its
@@ -4578,7 +4589,8 @@ nothing more is asked of the server.
 plate's bar under its page, between the toolbar and the side column. It holds every proof
 resting on the ★ video and every scene of it still to prove, in clip order and in the
 colour Inspect's bar gives each: a proved slide by its thumbnail, a scene still to prove
-dashed round a pin, the one geolocated now with a beat in its corner, the abandoned ones
+dashed round a pin with its two counts, the one geolocated now with a beat in its corner,
+its page saying its time and its counts, the abandoned ones
 greyed after a rule at the end. A proof taking up a scene the server still lists, made
 from it or found in it by its frames, stands in that scene's place and colour, saved or
 not. The video's name heads it and shows the Scene tab. **+**

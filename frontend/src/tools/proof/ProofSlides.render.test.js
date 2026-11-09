@@ -111,10 +111,14 @@ describe('the strip of a video\'s slides', () => {
     expect(water.classList).toContain('draft');
     expect(water.querySelector('.pin')).not.toBeNull();
     expect(water.querySelector('.tile-title').textContent).toBe('Water tower?');
-    expect(water.querySelector('.tile-words').textContent).toBe('To geolocate');
+    // its two counts in place of words, a count at 0 greyed, its hover saying them
+    const counts = (t) => [...t.querySelectorAll('.tile-words [data-testid^="count-"]')].map((c) => [c.textContent.trim(), c.classList.contains('none')]);
+    expect(counts(water)).toEqual([['0', true], ['0', true]]);
     expect(water.title).toContain('0:50–1:00');
+    expect(water.title).toContain('To geolocate: no map capture yet, nothing from the video yet');
     expect(tile('s3').querySelector('.live')).not.toBeNull();
-    expect(tile('s3').querySelector('.tile-words').textContent).toBe('Geolocating');
+    expect(tile('s3').querySelector('.tile-words [data-testid="scene-counts"]').dataset.stage).toBe('live');
+    expect(counts(tile('s3'))).toEqual([['1', false], ['0', true]]);
     // the reason a scene was given up is on hover
     expect(tile('s2').title).toContain('Abandoned: too blurry');
   });

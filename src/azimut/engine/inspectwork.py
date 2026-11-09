@@ -731,14 +731,20 @@ def _stored_order(scene: dict[str, Any]) -> tuple[float, float]:
     return (start, end if end is not None else start)
 
 
-def scene_works(case: "Case") -> list[tuple[str, str | None, list[dict[str, Any]]]]:
+def scene_works(
+    case: "Case", specs: dict[str, dict[str, Any]] | None = None
+) -> list[tuple[str, str | None, list[dict[str, Any]]]]:
     """Every file whose work holds scenes to prove: (file, last touched, scenes),
-    most recently touched first."""
+    most recently touched first. ``specs`` are the works as `subject_specs` read them,
+    when the caller holds them already."""
+    if specs is None:
+        pairs = [(_subject(spec), spec) for _rel, spec in _work_specs(case) if spec.get("azimut_inspect") == WORK_VERSION]
+    else:
+        pairs = list(specs.items())
     rows = []
-    for _rel, spec in _work_specs(case):
-        subject = _subject(spec)
+    for subject, spec in pairs:
         scenes = [s for s in spec.get("scenes") or [] if isinstance(s, dict) and isinstance(s.get("id"), str)]
-        if subject and scenes and spec.get("azimut_inspect") == WORK_VERSION:
+        if subject and scenes:
             rows.append((subject, spec.get("updated_at"), scenes))
     rows.sort(key=lambda row: row[1] or "", reverse=True)
     return rows

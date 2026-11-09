@@ -46,6 +46,10 @@
    * file's scenes (`proofs` on the file, `engine/scenes.unplaced_proofs`): In progress,
    * its press opens it in Geo Proof, and it is abandoned and restored like a scene.
    *
+   * Each scene's row says its time and its two counts (`components/SceneCounts`): the
+   * captures the map gave it and the frames and collages its video gives it, the pip
+   * at its start saying where it stands.
+   *
    * Absent while the case has nothing to geolocate, and a few rows when it has, so
    * the analyst's own lists stay in reach. Geolocate is the row's act; the scene's
    * name opens it in Inspect, or the collage a picture was exported from (`collage`
@@ -57,11 +61,11 @@
     stopGeolocating,
   } from '../../lib/geolocating.svelte.js';
   import {
-    abandonedScenes, firstScenes, isPicture, openScenes, queueColor, queueMark, queueName, queueState, queueTime, sceneCount,
-    withProofs,
+    abandonedScenes, firstScenes, isPicture, openScenes, queueColor, queueMark, queueName, queueTime, sceneCount, withProofs,
   } from '../../lib/sceneQueue.js';
   import { caseState, toast, uiState } from '../../lib/state.svelte.js';
   import Icon from '../../components/Icon.svelte';
+  import SceneCounts from '../../components/SceneCounts.svelte';
 
   let { caseId } = $props();
 
@@ -124,18 +128,8 @@
 
   const SEP = ' · ';
   const nameOf = queueName;
-  const said = (scene) => (isProof(scene) ? 'In progress · no place' : queueState(scene, isLive(scene)));
-  /** The row's small print in pieces that each stay whole, so a narrow sidebar
-   *  wraps it between them rather than cutting the capture count off. A time of
-   *  several moments takes its own line, and the state starts the next one, so no
-   *  line ends on a dangling dot. */
-  const saidParts = (scene) => {
-    const times = scene.label ? queueTime(scene) : '';
-    return [
-      ...(times ? [{ text: times, time: !isPicture(scene) }] : []),
-      ...said(scene).split(SEP).map((text, i) => ({ text, time: false, line: i === 0 && times.includes(SEP) })),
-    ];
-  };
+  /** The time a named row says under its name; an unnamed one says it as its name. */
+  const timeOf = (scene) => (scene.label ? queueTime(scene) : '');
   /** The word a scene was abandoned with, if one was given. */
   const whyOf = (scene) => scene.abandoned?.reason ?? '';
 
@@ -205,6 +199,14 @@
   {#if queueMark(scene)}<span class="mark {queueMark(scene)}" style:background={queueColor(scene)} aria-hidden="true"></span>{/if}
 {/snippet}
 
+<!-- a row's small print: its time, then its counts, or a proof's word; a time of
+     several moments takes its own line, so the counts never hang on a dot -->
+{#snippet meta(scene)}
+  {@const time = timeOf(scene)}
+  {@const own = time.includes(SEP)}
+  <span class="meta">{#if time}<span class="part" class:time={!isPicture(scene)}>{#if !isPicture(scene)}{@render mark(scene)}{/if}{time}</span>{#if own}<br />{/if}{/if}{#if isProof(scene)}{time && !own ? SEP : ''}In progress · no place{:else}<span class="counts" class:after={time && !own}><SceneCounts {scene} live={isLive(scene)} mark={false} size={10} /></span>{/if}</span>
+{/snippet}
+
 {#snippet fileHead(file)}
   <span class="file-title" title={file.title}><Icon name={file.collage ? 'grid' : isPicture(file) ? 'image' : 'video'} size={11} /><span dir="auto">{file.title}</span></span>
 {/snippet}
@@ -222,7 +224,7 @@
                 <span class="pip" aria-hidden="true"></span>
                 <button type="button" class="open" title={openTitle(file, scene)} onclick={() => openScene(file, scene)}>
                   <span class="name" dir="auto">{#if !scene.label}{@render mark(scene)}{/if}{nameOf(scene)}</span>
-                  <span class="meta">{#each saidParts(scene) as part, i (i)}{#if part.line}<br />{:else if i}{SEP}{/if}<span class="part" class:time={part.time}>{#if part.time}{@render mark(scene)}{/if}{part.text}</span>{/each}</span>
+                  {@render meta(scene)}
                 </button>
                 <button type="button" class="btn btn-ghost btn-sm why-btn" title={isProof(scene) ? 'Abandon this proof' : 'Abandon this scene'} aria-label={`Abandon ${nameOf(scene)}`}
                   aria-expanded={leaving === keyOf(scene)} disabled={busy} onclick={() => (leaving === keyOf(scene) ? stayed() : askWhy(scene))}>
@@ -331,6 +333,8 @@
   .open:hover .name { color: var(--accent); }
   .meta { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.3; overflow-wrap: anywhere; }
   .part { white-space: nowrap; }
+  .counts { display: inline-flex; vertical-align: middle; }
+  .counts.after { margin-left: 8px; }
   /* a word given on abandoning runs up to two hundred characters */
   .gone .meta { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
   .time { font-variant-numeric: tabular-nums; color: var(--text-2); }

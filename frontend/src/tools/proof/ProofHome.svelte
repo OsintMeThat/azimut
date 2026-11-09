@@ -4,17 +4,19 @@
    * and a search that finds a proof by name and opens it; **Continue**, the last proofs
    * saved as large thumbnails, a proof of a video tagged `clip.mp4 · 2/4` in its scene's
    * colour; and **To prove**, only when the case has scenes still to prove, one card per
-   * video with its scenes as chips. A chip starts Make the proof.
+   * video with its scenes as chips, each with its two counts (`components/SceneCounts`):
+   * what the map gave it and what its video gives it. A chip starts Make the proof.
    *
    * A case holding no proof and no scene shows the button and one sentence. What it
    * shows is read once as the home comes up (`GET /proofs`) and the scene queue the app
    * already keeps, so it opens on what it held last while that read runs.
    */
   import Icon from '../../components/Icon.svelte';
+  import SceneCounts from '../../components/SceneCounts.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { timeAgo } from '../../lib/analysisViews.js';
   import { continueShown, findProofs, recentProofs, slideTag } from '../../lib/proofList.js';
-  import { captureCount, queueColor, queueName, queueState, queueTime, waitingWords } from '../../lib/sceneQueue.js';
+  import { queueColor, queueName, queueTime, waitingWords } from '../../lib/sceneQueue.js';
 
   let {
     caseId = '',
@@ -53,10 +55,7 @@
     if (found[0]) onopen?.(found[0]);
   }
 
-  const sceneTip = (scene) => {
-    const n = captureCount(scene);
-    return `Make the proof of ${queueName(scene)}${n ? `, ${n === 1 ? '1 capture' : `${n} captures`} gathered` : ''}`;
-  };
+  const sceneTip = (scene) => `Make the proof of ${queueName(scene)}`;
 </script>
 
 {#snippet tag(entry, short)}
@@ -152,7 +151,7 @@
                         <span class="ph-dot" aria-hidden="true"></span>
                         <span class="ph-chip-name" dir="auto">{queueName(scene)}</span>
                         {#if scene.label}<span class="ph-chip-time">{queueTime(scene)}</span>{/if}
-                        <span class="ph-chip-state">{queueState(scene, now)}</span>
+                        <span class="ph-chip-counts"><SceneCounts {scene} live={now} /></span>
                       </button>
                     {/each}
                   </div>
@@ -298,7 +297,7 @@
   .ph-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .ph-chip-name { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .ph-chip-time { flex: none; color: var(--text-2); font-variant-numeric: tabular-nums; }
-  .ph-chip-state { flex: none; color: var(--text-3); }
+  .ph-chip-counts { flex: none; display: inline-flex; margin-left: 2px; padding-left: 8px; border-left: 1px solid color-mix(in srgb, var(--scene) 30%, var(--border)); }
   .ph-chip.live .ph-dot { animation: beat 1.6s ease-out infinite; }
   @keyframes beat { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--scene) 70%, transparent); } 80%, 100% { box-shadow: 0 0 0 6px transparent; } }
   @media (prefers-reduced-motion: reduce) { .ph-chip.live .ph-dot { animation: none; } }

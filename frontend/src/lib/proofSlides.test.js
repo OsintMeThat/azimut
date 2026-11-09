@@ -48,9 +48,9 @@ describe('the tiles of a strip', () => {
     expect(by['proof:road-bridge']).toMatchObject({ state: PROVED, title: 'Road bridge', words: '0:30–0:45', thumb: 'proofs/.thumbs/road-bridge.webp' });
     expect(by['proof:market']).toMatchObject({ state: PROVED, words: 'Whole video', current: true });
     expect(by['proof:square']).toMatchObject({ state: NO_PICTURE, words: 'No picture yet', thumb: null });
-    expect(by.s1).toMatchObject({ kind: 'draft', state: TODO, title: 'Water tower?', words: 'To geolocate', time: '0:50–1:00', thumb: null });
+    expect(by.s1).toMatchObject({ kind: 'draft', state: TODO, title: 'Water tower?', words: 'To geolocate: no map capture yet, nothing from the video yet', time: '0:50–1:00', thumb: null });
     // the scene geolocated now says so; its first capture is its picture
-    expect(by.s3).toMatchObject({ state: GEOLOCATING, words: 'Geolocating', title: '1:30–1:35', thumb: 'media/.thumbs/a.png.webp' });
+    expect(by.s3).toMatchObject({ state: GEOLOCATING, words: 'Geolocating: 2 map captures, nothing from the video yet', title: '1:30–1:35', thumb: 'media/.thumbs/a.png.webp' });
     expect(by.s2).toMatchObject({ state: ABANDONED, words: 'Abandoned', reason: 'too blurry', thumb: null });
   });
 
@@ -73,7 +73,7 @@ describe('the tiles of a strip', () => {
 
   it('count a scene\'s captures once nobody geolocates it', () => {
     const tiles = slideTiles({ ...ANSWER, geolocating: null }, { started: true, name: 'market' });
-    expect(tiles.find((t) => t.key === 's3')).toMatchObject({ state: PROGRESS, words: '2 captures' });
+    expect(tiles.find((t) => t.key === 's3')).toMatchObject({ state: PROGRESS, words: 'In progress: 2 map captures, nothing from the video yet' });
   });
 
   it('never show a proof\'s full picture, only its thumbnail', () => {

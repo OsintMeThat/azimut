@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  sceneFootage,
   collagesOfScene, collagesUnder, frameInMoment, frameScenes, frameToCapture, frameUses, framesOfScene, inScenes, pictureHandoff,
   proofHandoff, sceneOfCollage, scenesAt, usedIn,
 } from './sceneFrames.js';
@@ -74,6 +75,22 @@ describe('a frame in a scene', () => {
       { key: 'sc_b', color: scenes[1].color, title: 'a scene to geolocate' },
     ]);
     expect(inScenes(dots.get('in'))).toBe('In bridge? and a scene to geolocate');
+  });
+});
+
+describe('what a video gives a scene', () => {
+  const frames = [0.5, 1.2, 1.25, 3.0].map((time, i) => ({ id: `f${i}`, time }));
+  frames.push({ id: 'untimed', time: null });
+  const collages = [{ collage: 'Quay', times: [1.5, 1.7] }, { collage: 'Old', times: [] }];
+
+  it('counts the frames of the strip and the collages in its moments, every one for the whole video', () => {
+    // the rule the server counts the queue by (`engine/scenes.Footage`), at a thirtieth
+    expect(sceneFootage({ kind: 'draft', start: null, end: null }, frames, collages, 1 / 30)).toBe(6);
+    expect(sceneFootage({ kind: 'draft', start: 1, end: 2 }, frames, collages, 1 / 30)).toBe(3);
+    expect(sceneFootage({ kind: 'draft', start: 3, end: null }, frames, collages, 1 / 30)).toBe(1);
+    expect(sceneFootage({ kind: 'draft', start: 3.5, end: 3.9 }, frames, collages, 1 / 30)).toBe(0);
+    expect(sceneFootage({ kind: 'draft', start: 0.4, end: 0.6, more: [{ start: 3, end: null }] }, frames, [], 1 / 30)).toBe(2);
+    expect(sceneFootage({ kind: 'draft', start: 1, end: 2 }, null, null, 1 / 30)).toBe(0);
   });
 });
 

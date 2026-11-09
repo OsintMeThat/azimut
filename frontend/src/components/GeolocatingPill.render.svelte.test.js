@@ -26,13 +26,15 @@ const toast = vi.fn();
 vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast }));
 
 const { default: GeolocatingPill } = await import('./GeolocatingPill.svelte');
+const { paths } = await import('./Icon.svelte');
+const cameraPath = paths.camera;
 const { geolocating } = await import('../lib/geolocating.svelte.js');
 const { sceneColorAt } = await import('../lib/scenes.js');
 const { dispatch } = await import('../lib/events.js');
 
 const SCENE = {
   kind: 'draft', video: 'media/convoy.mp4', id: 'sc_1', start: 238, end: 252, label: 'bridge?',
-  state: 'progress', captures: ['media/cap-1.png'], abandoned: null, since: 't',
+  state: 'progress', captures: ['media/cap-1.png'], footage: 4, abandoned: null, since: 't',
 };
 
 let live = null;
@@ -78,15 +80,18 @@ describe('the pill', () => {
     expect(pill()).toBeNull();
   });
 
-  it('says what is being geolocated, when in the clip, and how many captures it holds', async () => {
+  it('says what is being geolocated, when in the clip, and what the map and the video gave it', async () => {
     answers.set('GET /api/cases/c1/geolocating', { geolocating: SCENE });
     await show();
     expect(pill().getAttribute('aria-label')).toBe('Geolocating · 3:58–4:12 · bridge?');
     expect(pill().querySelector('.geo-time').textContent).toBe('3:58–4:12');
     expect(pill().querySelector('.geo-label').textContent).toBe('bridge?');
     const count = target.querySelector('[data-testid="geolocating-count"]');
-    expect(count.textContent.trim()).toBe('1');
-    expect(count.getAttribute('title')).toBe('1 capture gathered for it');
+    expect(count.querySelector('[data-testid="count-map"]').textContent.trim()).toBe('1');
+    expect(count.querySelector('[data-testid="count-video"]').textContent.trim()).toBe('4');
+    expect(count.querySelector('[data-testid="scene-counts"]').title).toBe('Geolocating: 1 map capture, 4 pictures from the video');
+    // the camera and its one number are gone
+    expect(count.querySelector(`path[d="${cameraPath}"]`)).toBeNull();
     // its file by what the case calls it, else its name without the extension
     expect(button('Geolocating').getAttribute('title')).toBe('Open the scene in Inspect, on convoy');
   });
@@ -145,7 +150,7 @@ describe('the pill', () => {
   it('steps the count up with a pulse when a capture is gathered, rather than a toast', async () => {
     answers.set('GET /api/cases/c1/geolocating', { geolocating: SCENE });
     await show();
-    const count = () => target.querySelector('[data-testid="geolocating-count"]');
+    const count = () => target.querySelector('[data-testid="geolocating-count"] [data-testid="count-map"]');
     expect(count().classList.contains('bump')).toBe(false);
     geolocating.scene = { ...SCENE, captures: ['media/cap-1.png', 'media/cap-2.png'] };
     flushSync();
@@ -157,7 +162,7 @@ describe('the pill', () => {
   it('steps up on the server’s word that a capture was gathered, before it is read again', async () => {
     answers.set('GET /api/cases/c1/geolocating', { geolocating: SCENE });
     await show();
-    const count = () => target.querySelector('[data-testid="geolocating-count"]');
+    const count = () => target.querySelector('[data-testid="geolocating-count"] [data-testid="count-map"]');
     const two = { ...SCENE, captures: ['media/cap-1.png', 'media/cap-2.png'] };
     answers.set('GET /api/cases/c1/geolocating', { geolocating: two });
     calls.length = 0;
@@ -167,7 +172,7 @@ describe('the pill', () => {
     expect(calls).toEqual(['GET /api/cases/c1/geolocating']);
     expect(count().textContent.trim()).toBe('2');
     expect(count().classList.contains('bump')).toBe(true);
-    expect(count().getAttribute('aria-label')).toBe('2 captures');
+    expect(target.querySelector('[data-testid="scene-counts"]').title).toBe('Geolocating: 2 map captures, 4 pictures from the video');
     await settle();
     expect(count().textContent.trim()).toBe('2');
     // and it goes the moment it ends

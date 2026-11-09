@@ -71,26 +71,31 @@ def _proved(specs: list[tuple[str, dict[str, Any]]], taken: set[str], path: str,
     return draft_id in taken
 
 
-def _orders(case: Case, videos: list[str], proofs: Any = None) -> dict[tuple[str, str], int]:
+def _orders(case: Case, videos: list[str], proofs: Any = None, specs: Any = None) -> dict[tuple[str, str], int]:
     """Each draft's place among its video's scenes, proofs included, in clip order:
     what Inspect colours a scene by (`lib/scenes.js`, sceneList), so the queue, the
     pill and the reference window draw it in the same colour. A file that is not a
     video has no bar, and its scenes no place."""
     proofs = proofs if proofs is not None else scenes_engine.read_proofs(case)
     # every work read once, and the order taken from the times alone
-    return scenes_engine.scene_places(case, videos, proofs, inspectwork.subject_specs(case))
+    return scenes_engine.scene_places(case, videos, proofs, specs if specs is not None else inspectwork.subject_specs(case))
 
 
 def _placed(row: dict[str, Any], places: dict[tuple[str, str], int]) -> dict[str, Any]:
     return {**row, "order": places.get((row["video"], row["id"]), 0)}
 
 
-def _draft(case: Case, video: str, draft_id: str) -> dict[str, Any] | None:
-    work = inspectwork.find_work(case, video)
-    for scene in ((work or {}).get("spec") or {}).get("scenes") or []:
+def _work_draft(case: Case, video: str, draft_id: str) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """One scene of a file's work, or None, and the work it was read from."""
+    spec = (inspectwork.find_work(case, video) or {}).get("spec") or {}
+    for scene in spec.get("scenes") or []:
         if isinstance(scene, dict) and scene.get("id") == draft_id:
-            return scene
-    return None
+            return scene, spec
+    return None, spec
+
+
+def _draft(case: Case, video: str, draft_id: str) -> dict[str, Any] | None:
+    return _work_draft(case, video, draft_id)[0]
 
 
 def _in_case(case: Case, path: str) -> dict[str, Any] | None:
@@ -124,26 +129,36 @@ def _present(case: Case, paths: list[str]) -> dict[str, dict[str, Any]]:
 # -- the scene being geolocated -------------------------------------------------------
 
 
-def current(case: Case) -> dict[str, Any] | None:
+def current(
+    case: Case, proofs: Any = None, specs: Any = None, collages: dict[str, list[list[float]]] | None = None
+) -> dict[str, Any] | None:
     """The scene the case is geolocating, read afresh, or None.
 
     One that left meanwhile (deleted in Inspect, taken up by a proof, abandoned, its
     video sent to the Trash) ends here, so nothing is attached to a scene that is gone.
+    What a caller already read for the whole case is given rather than read twice: the
+    proofs (`scenes.read_proofs`), every file's work (`inspectwork.subject_specs`) and
+    each video's collages (`scenes.collage_times`).
     """
     with _lock:
         held = dict(_active.get(case.id) or {})
     if not held:
         return None
-    item = _present(case, [held["video"]]).get(held["video"])
-    draft = _draft(case, held["video"], held["draft"]) if item is not None else None
-    proofs = scenes_engine.read_proofs(case)
-    kind = _kinds(case, [held["video"]]).get(held["video"], "video")
-    if draft is None or draft.get("abandoned") or _proved(proofs[0], _taken(proofs[0]), held["video"], draft["id"], kind):
+    video = held["video"]
+    item = _present(case, [video]).get(video)
+    draft, spec = _work_draft(case, video, held["draft"]) if item is not None else (None, {})
+    proofs = proofs if proofs is not None else scenes_engine.read_proofs(case)
+    kind = str((item or {}).get("kind") or "") or "video"
+    if draft is None or draft.get("abandoned") or _proved(proofs[0], _taken(proofs[0]), video, draft["id"], kind):
         stop(case, held["draft"])
         return None
-    row = _placed(scene_row(case, held["video"], draft, kind), _orders(case, [held["video"]], proofs))
+    footage = None
+    if kind != "image":
+        times = (collages if collages is not None else scenes_engine.collage_times(case)).get(video, [])
+        footage = scenes_engine.Footage(scenes_engine.strip_times(spec, video), times)
+    row = _placed(scene_row(case, video, draft, kind, footage), _orders(case, [video], proofs, specs))
     # what the case calls its file, which the pill names
-    return {**row, "file_title": scenes_engine.file_title(item, held["video"]), "since": held["since"]}
+    return {**row, "file_title": scenes_engine.file_title(item, video), "since": held["since"]}
 
 
 def settle(case: Case) -> bool:
@@ -462,22 +477,30 @@ def queue(case: Case, with_proofs: bool = False) -> dict[str, Any]:
     extension, which only geolocates scenes, reads the queue without them."""
     proofs = scenes_engine.read_proofs(case)
     taken = _taken(proofs[0])
-    works = [(subject, drafts) for subject, _touched, drafts in inspectwork.scene_works(case)]
+    # every file's work read once, for its scenes, their order and what the video gives them
+    specs = inspectwork.subject_specs(case)
+    works = [(subject, drafts) for subject, _touched, drafts in inspectwork.scene_works(case, specs)]
     unplaced = scenes_engine.unplaced_proofs(case, proofs) if with_proofs else {}
     # a video whose only scenes left are proofs with no place has no draft in the queue
     worked = {subject for subject, _drafts in works}
     works += [(video, []) for video in unplaced if video not in worked]
     kinds = _kinds(case, [subject for subject, _drafts in works])
-    places = _orders(case, [subject for subject, _drafts in works if kinds.get(subject) == "video"], proofs)
+    places = _orders(case, [subject for subject, _drafts in works if kinds.get(subject) == "video"], proofs, specs)
     present = _present(case, [subject for subject, _drafts in works])
+    # what each video gives its scenes: its strip's frames, and its collages read in one pass
+    collages = scenes_engine.collage_times(case) if any(kinds.get(s) == "video" and d for s, d in works) else {}
     files = []
     for subject, drafts in works:
         item = present.get(subject)
         kind = kinds.get(subject, "video")
         if item is None:
             continue
+        footage = (
+            scenes_engine.Footage(scenes_engine.strip_times(specs.get(subject), subject), collages.get(subject, []))
+            if kind == "video" else None
+        )
         rows = [
-            _placed(scene_row(case, subject, d, kind), places)
+            _placed(scene_row(case, subject, d, kind, footage), places)
             for d in drafts
             if not _proved(proofs[0], taken, subject, d["id"], kind)
         ]
@@ -497,4 +520,4 @@ def queue(case: Case, with_proofs: bool = False) -> dict[str, Any]:
         if made_by:
             row["collage"] = made_by
         files.append(row)
-    return {"files": files, "geolocating": current(case)}
+    return {"files": files, "geolocating": current(case, proofs, specs, collages if collages else None)}

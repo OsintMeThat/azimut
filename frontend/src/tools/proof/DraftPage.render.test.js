@@ -33,9 +33,13 @@ const buttons = (root) => [...root.querySelectorAll('button')].map((b) => b.text
 
 describe('the page of a scene still to prove', () => {
   it('names the scene, says when it is and where it stands, and offers the next steps', () => {
-    const { root, onaction } = show(tileOf(draft('s1', { start: 130, end: 158, label: 'Road bridge?' })));
+    const { root, onaction } = show(tileOf(draft('s1', { start: 130, end: 158, label: 'Road bridge?', footage: 3 })));
     expect(root.querySelector('h3').textContent).toBe('Road bridge?');
-    expect(root.querySelector('.draft-line').textContent.trim()).toBe('2:10–2:38 · To geolocate');
+    // its time, then its mark and its two counts, the hover saying them in words
+    const counts = root.querySelector('.draft-line [data-testid="scene-counts"]');
+    expect(root.querySelector('.draft-line > span').textContent).toBe('2:10–2:38');
+    expect(counts.title).toBe('To geolocate: no map capture yet, 3 pictures from the video');
+    expect([...counts.querySelectorAll('[data-testid^="count-"]')].map((c) => c.textContent.trim())).toEqual(['0', '3']);
     expect(buttons(root)).toEqual(['Make this slide', 'Geolocate', 'Abandon…']);
     root.querySelector('.btn-primary').click();
     expect(onaction).toHaveBeenCalledWith('make');
@@ -47,8 +51,9 @@ describe('the page of a scene still to prove', () => {
     const tile = tileOf(draft('s3', { start: 5, end: null, captures: ['captures/a.png', 'captures/b.png'] }), 's3');
     const { root } = show(tile, { captures: [{ path: 'captures/a.png', thumb: 'captures/.thumbs/a.webp' }, { path: 'captures/b.png', thumb: null }] });
     expect(root.querySelector('h3').textContent).toBe('0:05');
-    expect(root.querySelector('.draft-line').textContent.trim()).toBe('Geolocating');
-    expect(root.querySelector('.draft-line .live')).not.toBeNull();
+    const counts = root.querySelector('.draft-line [data-testid="scene-counts"]');
+    expect(counts.dataset.stage).toBe('live');
+    expect(counts.title).toBe('Geolocating: 2 map captures, nothing from the video yet');
     const pictures = [...root.querySelectorAll('.draft-captures img')].map((img) => img.getAttribute('src'));
     expect(pictures).toEqual([expect.stringContaining('captures/.thumbs/a.webp'), expect.stringContaining('captures/b.png')]);
   });

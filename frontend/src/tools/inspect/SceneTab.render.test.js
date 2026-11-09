@@ -195,18 +195,22 @@ describe('the open row', () => {
       if (sc.id === 'sc_all') return { ...sc, state: 'progress', captures: ['c.png'], geolocating: true };
       return sc;
     });
-    const { root } = opened(scenes, 'sc_all');
+    const { root } = opened(scenes, 'sc_all', { footage: new Map([['sc_all', 6], ['sc_1', 2]]) });
     const list = rows(root);
     const state = (row) => row.querySelector('[data-testid="scene-state"]');
-    expect(state(list[0]).textContent).toContain('Geolocating · 1 capture');
-    expect(state(list[0]).getAttribute('title')).toBe('Being geolocated: every capture filed now is gathered for it');
+    const counts = (row) => [...state(row).querySelectorAll('[data-testid^="count-"]')].map((c) => c.textContent.trim());
+    // its mark and its two counts, the map's and the clip's, the hover saying them in words
+    expect(counts(list[0])).toEqual(['1', '6']);
+    expect(state(list[0]).querySelector('[data-testid="scene-counts"]').dataset.stage).toBe('live');
+    expect(state(list[0]).querySelector('[data-testid="scene-counts"]').title).toBe('Geolocating: 1 map capture, 6 pictures from the video');
     expect(list[0].classList.contains('active')).toBe(true);
     const stop = list[0].querySelector('.locate');
     expect(stop.textContent.trim()).toBe('Stop');
     expect(stop.getAttribute('aria-pressed')).toBe('true');
     expect(stop.getAttribute('title')).toBe('Stop geolocating it; its captures stay');
     // closed, it still says so
-    expect(state(list[2]).textContent).toContain('In progress · 2 captures');
+    expect(counts(list[2])).toEqual(['2', '2']);
+    expect(state(list[2]).querySelector('[data-testid="scene-counts"]').title).toBe('In progress: 2 map captures, 2 pictures from the video');
     expect(list[2].classList.contains('active')).toBe(false);
     // a proof states nothing of the kind
     expect(state(list[1])).toBeNull();
@@ -402,7 +406,8 @@ describe('a picture', () => {
     expect(button(root, 'Mark to geolocate')).toBeUndefined();
     const [row] = rows(root);
     expect(row.querySelector('[role="radio"]')).toBeNull();
-    expect(row.querySelector('[data-testid="scene-state"]').textContent).toContain('To geolocate');
+    // a picture gives itself: one from the file, and nothing from the map yet
+    expect(row.querySelector('[data-testid="scene-counts"]').title).toBe('To geolocate: no map capture yet, the picture itself');
     expect(field(root, 'Scene label').value).toBe('Market');
     expect(button(row, 'End here')).toBeUndefined();
     expect(button(row, 'Abandon')).toBeDefined();
@@ -418,7 +423,7 @@ describe('a picture', () => {
   it('says Geolocating and offers Stop on the one being looked for', () => {
     const root = render(SceneTab, { scenes: marked({ geolocating: true, captures: ['a.png'], state: 'progress' }), picture: true });
     const [row] = rows(root);
-    expect(row.querySelector('[data-testid="scene-state"]').textContent).toContain('Geolocating · 1 capture');
+    expect(row.querySelector('[data-testid="scene-counts"]').title).toBe('Geolocating: 1 map capture, the picture itself');
     expect(button(row, 'Stop')).toBeDefined();
   });
 

@@ -588,7 +588,7 @@ describe('the Scenes tab on a video', () => {
     expect(openRow().dataset.sceneKey).toBe('sc_all');
     expect(field('Scene start').value).toBe('0:09');
     expect(openRow().querySelector('.scene-label').value).toBe('Market');
-    expect(openRow().textContent).toContain('In progress · 1 capture');
+    expect(openRow().textContent).toContain('In progress: 1 map capture');
     const [said] = toasts('no longer the whole video');
     expect(said.slice(0, 2)).toEqual(['“Market” now at 0:09, no longer the whole video', 'info']);
     await afterQuiet();

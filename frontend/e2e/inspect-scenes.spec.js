@@ -544,6 +544,25 @@ test('keeps a scene with S whichever row is open, and folds the row with Escape'
   await expect(page.locator('.player-time .now')).toHaveText('0:00.080');
 });
 
+test('a scene counts what the map gave it and the frames of the strip in it, a frame captured counting at once', async ({ page }) => {
+  await serve(page, {
+    scenes: [kept('sc_1', 0.2, 0.6, 'Road bridge?'), kept('sc_2', 1, null, 'Mast')],
+    held: { sc_1: { captures: [CAPTURE], abandoned: null } },
+  });
+  const scene = (id) => panel(page).locator(`[data-scene-key="${id}"]`);
+  await expect(scene('sc_1').getByTestId('count-map')).toHaveText('1');
+  await expect(scene('sc_1').getByTestId('count-video')).toHaveText('0');
+  await expect(scene('sc_1').getByTestId('count-video')).toHaveClass(/none/);
+  await expect(scene('sc_1').getByTestId('scene-counts')).toHaveAttribute('title', 'In progress: 1 map capture, nothing from the video yet');
+  // the frame on screen moved into the passage and captured: it counts there, and only there
+  for (let i = 0; i < 8; i += 1) await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('c');
+  await expect(scene('sc_1').getByTestId('count-video')).toHaveText('1');
+  await expect(scene('sc_1').getByTestId('count-video')).not.toHaveClass(/none/);
+  await expect(scene('sc_2').getByTestId('count-video')).toHaveText('0');
+  await shoot(page, 'counts');
+});
+
 test('makes the proof of a picture on it and its captures, stating no scene', async ({ page }) => {
   const { fixture, server } = await serve(page, { opens: 'Market' });
   await tab(page, /^Scenes/).click();
@@ -558,7 +577,7 @@ test('makes the proof of a picture on it and its captures, stating no scene', as
     await reloadCase();
   });
   await tab(page, /^Scenes/).click();
-  await expect(rows(page).first().getByTestId('scene-state')).toContainText('In progress · 1 capture');
+  await expect(rows(page).first().getByTestId('scene-state')).toContainText('In progress: 1 map capture');
   await rows(page).first().getByRole('button', { name: 'Make the proof' }).click();
 
   await expect(page).toHaveURL(/#proof/);

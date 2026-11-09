@@ -198,6 +198,8 @@ export function sceneList(listed, drafts, taken = []) {
       return {
         kind: 'draft', id: d.id, start: d.start ?? null, end: d.end ?? null, ...(d.more?.length ? { more: d.more } : {}),
         label: d.label ?? '', state: abandoned ? ABANDONED : captures.length ? PROGRESS : TODO, captures, abandoned,
+        // what its video gives it, as the server counted it (`engine/scenes.draft_row`)
+        ...(Number.isInteger(row?.footage) ? { footage: row.footage } : {}),
       };
     });
   return [...proofs, ...open]

@@ -386,7 +386,7 @@ test('the home continues from the last proofs, finds one by name, and makes the 
   // To prove: the video's card, its scene as a chip
   const chip = home(page).locator('.ph-chip');
   await expect(home(page).locator('.ph-video h5')).toHaveText(TITLE);
-  await expect(chip).toHaveText(/Water tower\?\s*0:00–0:00\s*In progress · 1 capture/);
+  await expect(chip).toHaveText(/Water tower\?\s*0:00–0:00\s*In progress: 1 map capture/);
 
   // the search opens the first proof found on Enter
   await home(page).getByRole('textbox', { name: 'Find a proof by name' }).fill('mark');

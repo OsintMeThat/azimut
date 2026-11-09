@@ -195,7 +195,7 @@ test('says where each scene to prove stands, with Geolocate first and Make the p
   await expect(bridge.getByRole('button', { name: 'Geolocate' })).toBeVisible();
   await expect(bridge.getByRole('button', { name: 'Make the proof' })).toBeVisible();
   const found = rows(page).nth(2);
-  await expect(found.getByTestId('scene-state')).toContainText('In progress · 1 capture');
+  await expect(found.getByTestId('scene-state')).toContainText('In progress: 1 map capture');
   // the abandoned one waits folded, its stretch still on the bar, greyed and hollow
   await expect(panel(page).getByRole('button', { name: 'Abandoned (1)' })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('.track .scene-pin.abandoned')).toHaveCount(1);
@@ -272,7 +272,7 @@ test('geolocates a scene on the map, its video beside it and the captures counte
   // the pill over the tools, with nothing captured yet
   const pill = page.getByRole('group', { name: 'Geolocating · 0:00–0:00 · Road bridge?' });
   await expect(pill).toBeVisible();
-  await expect(pill.getByTestId('geolocating-count')).toHaveText('0');
+  await expect(pill.getByTestId('count-map')).toHaveText('0');
   await page.screenshot({ path: `${SHOTS}/satellite-dark.png` });
   await page.locator('.topbar').screenshot({ path: `${SHOTS}/pill-dark.png` });
 
@@ -282,8 +282,8 @@ test('geolocates a scene on the map, its video beside it and the captures counte
     const { dispatch } = await import('/src/lib/events.js');
     dispatch({ type: 'geolocating', case_id: caseId, video: 'media/steps.webm', draft: 'sc_1' });
   }, CASE_ID);
-  await expect(pill.getByTestId('geolocating-count')).toHaveText('1');
-  await expect(pill.getByTestId('geolocating-count')).toHaveClass(/bump/);
+  await expect(pill.getByTestId('count-map')).toHaveText('1');
+  await expect(pill.getByTestId('count-map')).toHaveClass(/bump/);
 
   await theme(page, 'light');
   await page.screenshot({ path: `${SHOTS}/satellite-light.png` });
@@ -306,7 +306,7 @@ test('geolocates a scene on the map, its video beside it and the captures counte
   await expect(panel(page)).toBeVisible();
   const held = rowOf(page, 'Road bridge?');
   await expect(held).toHaveClass(/active/);
-  await expect(held.getByTestId('scene-state')).toHaveText(/Geolocating · 1 capture/);
+  await expect(held.getByTestId('scene-state')).toHaveText(/Geolocating: 1 map capture/);
   await page.waitForTimeout(1700);
   await panel(page).screenshot({ path: `${SHOTS}/tab-active-dark.png` });
 
@@ -323,7 +323,7 @@ test('makes the proof from the pill, the scene\'s frames first and then its capt
   await scene.getByRole('button', { name: 'Geolocate' }).click();
   await expect(page).toHaveURL(/#satellite/);
   const pill = page.locator('.geo-pill');
-  await expect(pill.getByTestId('geolocating-count')).toHaveText('1');
+  await expect(pill.getByTestId('count-map')).toHaveText('1');
 
   await pill.getByRole('button', { name: 'Make the proof' }).click();
   await expect(page).toHaveURL(/#inspect/);

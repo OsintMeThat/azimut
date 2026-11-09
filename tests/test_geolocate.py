@@ -627,6 +627,41 @@ def test_a_picture_missing_its_instants_takes_none_from_a_collage_laid_out_since
     assert scenes_engine.frame_origins(Case.open(cid), [picture]) == {picture: (video, None)}
 
 
+@needs_ffmpeg
+def test_each_scene_counts_what_its_video_gives_it_beside_what_the_map_gave_it(client, tmp_path):
+    """A scene's two counts, on every row the app reads: the captures gathered for it on
+    the map, and the frames of its video's strip, filed or not, and the collages of the
+    video that fall in it. A scene about the whole video holds every one; a picture
+    marked to geolocate gives itself."""
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    frames = [{"id": f"f{i}", "path": video, "time": t} for i, t in enumerate((0.5, 1.2, 1.25, 3.0))]
+    res = client.put(f"/api/cases/{cid}/inspect/work", json={"path": video, "spec": {"frames": frames, "scenes": [
+        {"id": "all", "start": None, "end": None, "label": "Which town?"},
+        {"id": "pass", "start": 1.0, "end": 2.0, "label": "Bridge"},
+        {"id": "flash", "start": 3.0, "end": None, "label": ""},
+        {"id": "far", "start": 3.5, "end": 3.9, "label": "Nothing yet"},
+    ]}})
+    assert res.status_code == 200, res.text
+    _collage(client, cid, "Quay", [(video, 1.5), (video, 1.7)])
+    photo = _upload(client, cid)
+    client.post(f"/api/cases/{cid}/scenes/mark", json={"path": photo})
+
+    expected = {"all": 5, "pass": 3, "flash": 1, "far": 0}
+    queued = {f["video"]: {s["id"]: s for s in f["scenes"]} for f in _queue(client, cid)["files"]}
+    assert {sid: row["footage"] for sid, row in queued[video].items()} == expected
+    assert [row["footage"] for row in queued[photo].values()] == [1]
+    listed = client.get(f"/api/cases/{cid}/scenes", params={"video": video}).json()["scenes"]
+    assert {row["id"]: row["footage"] for row in listed} == expected
+
+    # the scene being geolocated carries both counts, and what its file is called
+    _geolocate(client, cid, video, "pass")
+    _capture(client, cid)
+    held = client.get(f"/api/cases/{cid}/geolocating").json()["geolocating"]
+    assert (held["footage"], len(held["captures"]), held["file_title"]) == (3, 1, "clip")
+    assert _queue(client, cid)["geolocating"]["footage"] == 3
+
+
 def test_a_file_with_no_title_is_named_by_its_file_name_without_the_extension():
     from azimut.engine import scenes as scenes_engine
 

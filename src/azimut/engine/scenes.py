@@ -38,7 +38,7 @@ from __future__ import annotations
 import json
 import math
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
@@ -246,6 +246,19 @@ class _Trace:
             self._exports = inspectwork.collage_exports(self.case)
         return self._exports.get(path)
 
+    def documents(self, collages: list[dict[str, Any]]) -> None:
+        """Every collage document, read already: what `exported` answers from, and every
+        file they lay out looked up in one go, with the files the pictures among them
+        were composed from, so a straightened collage costs no lookup of its own."""
+        self._exports = {c["export"]: c["pieces"] for c in collages if c.get("export")}
+        items = self.items([p for c in collages for p, _t in c["pieces"] if isinstance(p, str) and p])
+        inner = [
+            p for item in items.values()
+            if (source := item.get("source")) and isinstance(source, dict) and source.get("op") == COLLAGE_OP
+            for p in source.get("sources") or [] if isinstance(p, str) and p
+        ]
+        self.items(inner)
+
 
 def _collage_video(trace: _Trace, pieces: list[tuple[Any, Any]], depth: int) -> tuple[str, list[float]] | None:
     paths = [p for p, _t in pieces if isinstance(p, str) and p]
@@ -323,9 +336,9 @@ def frame_origins(case: Case, paths: list[str]) -> Origins:
 
 
 def _video_layouts(trace: _Trace, collages: list[dict[str, Any]]) -> list[tuple[dict[str, Any], str, list[float]]]:
-    """Each collage laid out from one video's pieces alone, with that video and the
-    instants known: every file the collages lay out looked up in one go."""
-    trace.items([p for collage in collages for p, _t in collage["pieces"] if isinstance(p, str) and p])
+    """Each of these collage documents laid out from one video's pieces alone, with that
+    video and the instants known."""
+    trace.documents(collages)
     out = []
     for collage in collages:
         found = _collage_video(trace, collage["pieces"], 0)
@@ -352,6 +365,15 @@ def video_collages(case: Case, video: str) -> list[dict[str, Any]]:
             "end": times[-1] if times and times[-1] > times[0] else None,
         })
     return rows
+
+
+def collage_times(case: Case) -> dict[str, list[list[float]]]:
+    """Each video's collages by the instants of their pieces, in one pass over the
+    collage documents: what a scene counts among what its video gives it."""
+    out: dict[str, list[list[float]]] = {}
+    for _collage, video, times in _video_layouts(_Trace(case), inspectwork.collage_layouts(case)):
+        out.setdefault(video, []).append(times)
+    return out
 
 
 def traced_video(spec: dict[str, Any], origins: Origins) -> str | None:
@@ -606,10 +628,55 @@ def file_title(item: dict[str, Any] | None, path: str) -> str:
     return PurePosixPath(name).stem or name
 
 
-def draft_row(case: Case, video: str, draft: dict[str, Any], file_kind: str = "video") -> dict[str, Any]:
+def strip_times(spec: dict[str, Any] | None, video: str) -> list[float]:
+    """The instants of the frames in a video's Inspect strip, filed to the case or not."""
+    return [
+        time for frame in (spec or {}).get("frames") or []
+        if isinstance(frame, dict) and frame.get("path", video) == video and (time := _seconds(frame.get("time"))) is not None
+    ]
+
+
+class Footage:
+    """What a video gives its scenes to prove: the frames of its Inspect strip and its
+    collages, by their instants (`strip_times`, `collage_times`).
+
+    A scene counts each one that falls in one of its moments, by the rule Inspect's dots
+    use (`frame_in_moment`) at a thirtieth of a second, the frame Inspect's player counts
+    while it has not read the clip: the clip itself is never probed for a count. A scene
+    about the whole video counts every one, and a collage that kept no instant counts
+    only there."""
+
+    def __init__(self, frames: list[float] | None = None, collages: list[list[float]] | None = None) -> None:
+        self.frames = frames or []
+        self.collages = collages or []
+
+    def count(self, moments: Sequence[Mapping[str, Any]]) -> int:
+        if not moments:
+            return len(self.frames) + len(self.collages)
+
+        def held(time: float) -> bool:
+            return any(frame_in_moment(time, m["start"], m["end"], 1 / DEFAULT_FPS) for m in moments)
+
+        return sum(1 for time in self.frames if held(time)) + sum(1 for times in self.collages if any(map(held, times)))
+
+
+def video_footage(case: Case, video: str) -> Footage:
+    """What one video gives its scenes, its work and the collage documents read for it."""
+    spec = (inspectwork.find_work(case, video) or {}).get("spec") or {}
+    return Footage(strip_times(spec, video), collage_times(case).get(video, []))
+
+
+def draft_row(
+    case: Case, video: str, draft: dict[str, Any], file_kind: str = "video", footage: Footage | None = None
+) -> dict[str, Any]:
     """A scene still to prove as Inspect and the queue read it: its time, its label, its
     state, the captures it gathered that are still in the case, and why it was left.
-    ``file_kind`` is the file's (`video` or `image`): an image is only ever marked whole."""
+    ``file_kind`` is the file's (`video` or `image`): an image is only ever marked whole.
+
+    ``footage`` is how much its file gives it: the frames and the collages of its video
+    in it (`Footage`, read for the video when not given), or 1 for a picture, which is
+    the picture itself. With ``len(captures)``, what the map gave it, the two counts say
+    at a glance whether the scene is ready to prove."""
     captures = _captured(case, draft.get("captures"))
     abandoned = draft.get("abandoned") if isinstance(draft.get("abandoned"), dict) else None
     start = _seconds(draft.get("start"))
@@ -617,6 +684,10 @@ def draft_row(case: Case, video: str, draft: dict[str, Any], file_kind: str = "v
     # a scene of one place holding several moments: the first is its start and end
     moments = inspectwork.scene_moments(draft)
     time = inspectwork.scene_time(moments) if len(moments) > 1 else {"start": start, "end": end}
+    if file_kind == "image":
+        given = 1
+    else:
+        given = (footage if footage is not None else video_footage(case, video)).count(moments)
     return {
         "kind": "draft",
         "video": video,
@@ -625,6 +696,7 @@ def draft_row(case: Case, video: str, draft: dict[str, Any], file_kind: str = "v
         "label": str(draft.get("label") or ""),
         "state": ABANDONED if abandoned else PROGRESS if captures else TODO,
         "captures": captures,
+        "footage": given,
         "abandoned": abandoned,
         "file_kind": file_kind,
     }
@@ -767,6 +839,7 @@ def video_scenes(
     video: str,
     proofs: tuple[list[tuple[str, dict[str, Any]]], Origins] | None = None,
     works: dict[str, dict[str, Any]] | None = None,
+    collages: list[list[float]] | None = None,
 ) -> dict[str, Any]:
     """The scenes of one video, in the order they come in the clip, or of one picture
     (`_image_scenes`): its whole, marked to geolocate, and the proofs laying it out.
@@ -778,6 +851,9 @@ def video_scenes(
 
     ``used`` names, for each frame of this video a proof lays out, the proofs that
     do, whichever video each of them is about: Inspect says so on the frame.
+
+    ``collages`` are the instants of the video's collages when the caller read them
+    (`video_collages`), counted with its frames in each scene still to prove.
     """
     entity = case.find_entity(attr="path", value=video)
     if entity is None or entity.get("type") != "media":
@@ -805,8 +881,10 @@ def video_scenes(
         if scene["video"] == video:
             scenes.append(_proof_row(lookup, name, spec, scene))
 
-    drafts = _drafts_of(case, video, works)
+    work = works.get(video) if works is not None else (inspectwork.find_work(case, video) or {}).get("spec")
+    drafts = [d for d in (work or {}).get("scenes") or [] if isinstance(d, dict)]
     hidden = sorted(taken & {d.get("id") for d in drafts if isinstance(d.get("id"), str)})
+    footage: Footage | None = None
     for draft in drafts:
         if draft.get("id") in taken:
             continue
@@ -814,7 +892,9 @@ def video_scenes(
         whole = draft.get("start") is None and draft.get("end") is None
         if (start is None and not whole) or (start is not None and end is not None and end <= start):
             continue
-        scenes.append(draft_row(case, video, draft))
+        if footage is None:
+            footage = Footage(strip_times(work, video), collages if collages is not None else collage_times(case).get(video, []))
+        scenes.append(draft_row(case, video, draft, footage=footage))
     scenes.sort(key=_order)
     return {"video": video, "video_id": entity["id"], "scenes": scenes, "used": used, "taken": hidden}
 

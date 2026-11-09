@@ -20,8 +20,8 @@ const PROOFS = [
 ];
 const FILES = [{
   video: 'media/clip.mp4', title: 'clip.mp4', kind: 'video', scenes: [
-    { kind: 'draft', id: 's1', start: 36, end: 48, label: 'Water tower?', state: 'progress', captures: ['c.png'], order: 2 },
-    { kind: 'draft', id: 's2', start: 90, end: null, label: '', state: 'todo', captures: [], order: 3 },
+    { kind: 'draft', id: 's1', start: 36, end: 48, label: 'Water tower?', state: 'progress', captures: ['c.png'], footage: 4, order: 2 },
+    { kind: 'draft', id: 's2', start: 90, end: null, label: '', state: 'todo', captures: [], footage: 0, order: 3 },
   ],
 }];
 
@@ -106,9 +106,15 @@ describe('To prove', () => {
     const chips = [...home().querySelectorAll('.ph-chip')];
     expect(chips.map((c) => c.querySelector('.ph-chip-name').textContent)).toEqual(['Water tower?', '1:30']);
     expect(chips[0].querySelector('.ph-chip-time').textContent).toBe('0:36–0:48');
-    expect(chips[0].querySelector('.ph-chip-state').textContent).toBe('Geolocating · 1 capture');
+    // two counts, the map's and the video's, a count at 0 greyed, the hover saying them in words
+    const counts = (chip) => [...chip.querySelectorAll('[data-testid^="count-"]')].map((c) => [c.textContent.trim(), c.classList.contains('none')]);
+    expect(counts(chips[0])).toEqual([['1', false], ['4', false]]);
+    expect(chips[0].querySelector('[data-testid="scene-counts"]').title).toBe('Geolocating: 1 map capture, 4 pictures from the video');
+    expect(chips[0].querySelector('[data-testid="scene-counts"]').dataset.stage).toBe('live');
     expect(chips[0].classList.contains('live')).toBe(true);
-    expect(chips[1].querySelector('.ph-chip-state').textContent).toBe('To geolocate');
+    expect(counts(chips[1])).toEqual([['0', true], ['0', true]]);
+    expect(chips[1].querySelector('[data-testid="scene-counts"]').title).toBe('To geolocate: no map capture yet, nothing from the video yet');
+    expect(chips[1].querySelector('[data-testid="scene-counts"]').dataset.stage).toBe('todo');
     chips[1].click();
     expect(onscene).toHaveBeenCalledWith(FILES[0], FILES[0].scenes[1]);
   });

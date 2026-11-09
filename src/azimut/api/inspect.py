@@ -445,17 +445,20 @@ def get_work(case_id: str, path: str) -> dict[str, Any]:
 def list_scenes(case_id: str, video: str) -> dict[str, Any]:
     """The scenes of one video: the proofs resting on it and the stretches still to prove."""
     case = get_case(case_id)
+    # the collages composed from its frames alone, placed among its scenes by time
+    collages = scenes_engine.video_collages(case, video)
+    # the proofs read once, for the list and for the scene being geolocated
+    proofs = scenes_engine.read_proofs(case)
     try:
-        found = scenes_engine.video_scenes(case, video)
+        found = scenes_engine.video_scenes(case, video, proofs, collages=[row["times"] for row in collages])
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    held = geolocate.current(case)
+    held = geolocate.current(case, proofs)
     return {
         **found,
         # the scene of this video being geolocated, which Inspect marks in its list
         "geolocating": held["id"] if held and held["video"] == video else None,
-        # the collages composed from its frames alone, placed among its scenes by time
-        "collages": scenes_engine.video_collages(case, video),
+        "collages": collages,
     }
 
 

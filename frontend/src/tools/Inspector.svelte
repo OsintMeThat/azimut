@@ -23,7 +23,7 @@
   import { onEvent } from '../lib/events.js';
   import {
     collagesOfScene, collagesUnder, frameScenes, frameToCapture, frameUses, framesOfScene, pictureHandoff, proofHandoff,
-    scenesAt,
+    sceneFootage, scenesAt,
   } from '../lib/sceneFrames.js';
   import { createSceneOffer } from '../lib/sceneOffer.js';
   import { declineInvite, inviteDeclined, todoHintDue } from '../lib/sceneHints.js';
@@ -971,6 +971,13 @@
   }
   // What the strip marks on a frame: the scenes it falls in, and the proofs using it.
   const frameDots = $derived(isVideo ? frameScenes(work.frames, scenes, frameDur) : new Map());
+  // What the clip gives each scene still to prove, by its key: the strip's frames and the
+  // collages in it, counted off the strip in hand as the To-do counts them on the server.
+  const footageByScene = $derived(
+    isVideo
+      ? new Map(scenes.filter((sc) => sc.kind === 'draft').map((sc) => [sc.key, sceneFootage(sc, work.frames, listedCollages, frameDur)]))
+      : new Map(),
+  );
   const frameUsed = $derived(isVideo ? frameUses(work.frames, usedFrames) : new Map());
 
   // The time of the open row (`lib/sceneEdit.svelte.js`). The bar draws it as its
@@ -2246,6 +2253,7 @@
             {#if shownTab === 'scenes'}
               <SceneTab
                 {scenes}
+                footage={footageByScene}
                 collages={collagesByScene}
                 onopencollage={openCollage}
                 edit={sceneEdit}

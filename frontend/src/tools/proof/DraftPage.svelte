@@ -2,12 +2,14 @@
   /**
    * A scene still to prove, shown in place of a proof when the strip lands on it. Nothing
    * is started by landing here: a slide never started is never saved. The page says what
-   * the scene is and where it stands, and offers what comes next: **Make this slide**
+   * the scene is, where it stands and its two counts (`components/SceneCounts`), and
+   * offers what comes next: **Make this slide**
    * (its frames chosen, the proof opened on them), **Geolocate** (the map, the scene
    * gathering its captures) and **Abandon…** with a word, or **Restore** once given up.
    */
   import { tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
+  import SceneCounts from '../../components/SceneCounts.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { ABANDONED, GEOLOCATING } from '../../lib/proofSlides.js';
   import { PROOF_SLIDES_HELP as HELP } from '../../lib/proofSlidesHelp.js';
@@ -29,10 +31,9 @@
   let reasonField = $state(null);
 
   const given = $derived(tile.state === ABANDONED);
-  const line = $derived.by(() => {
-    const state = given ? (tile.reason ? `Abandoned: ${tile.reason}` : 'Abandoned') : tile.words;
-    return tile.time && tile.time !== tile.title ? `${tile.time} · ${state}` : state;
-  });
+  // its time when its title is not already that, then why it was given up
+  const time = $derived(tile.time && tile.time !== tile.title ? tile.time : '');
+  const why = $derived(given ? (tile.reason ? `Abandoned: ${tile.reason}` : 'Abandoned') : '');
 
   async function ask() {
     asking = true;
@@ -53,8 +54,12 @@
     <span class="draft-pin" aria-hidden="true"><Icon name="pin" size={22} /></span>
     <h3 dir="auto">{tile.title}</h3>
     <p class="draft-line">
-      {#if tile.state === GEOLOCATING}<span class="live" aria-hidden="true"></span>{/if}
-      <span dir="auto">{line}</span>
+      {#if time}<span>{time}</span>{/if}
+      {#if given}
+        {#if time}<span aria-hidden="true">·</span>{/if}<span dir="auto">{why}</span>
+      {:else}
+        <SceneCounts scene={tile.row} live={tile.state === GEOLOCATING} size={12} />
+      {/if}
     </p>
     {#if captures.length && !given}
       <ul class="draft-captures" aria-label="Captures gathered for it">
@@ -100,11 +105,8 @@
   h3 { margin: 4px 0 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1);
     font-size: var(--fs-lg); font-weight: 650; }
   .given h3 { color: var(--text-2); }
-  .draft-line { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--text-3); font-size: var(--fs-sm);
+  .draft-line { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--text-3); font-size: var(--fs-sm);
     font-variant-numeric: tabular-nums; }
-  .live { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: beat 1.6s ease-out infinite; }
-  @keyframes beat { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 70%, transparent); } 80%, 100% { box-shadow: 0 0 0 6px transparent; } }
-  @media (prefers-reduced-motion: reduce) { .live { animation: none; } }
   .draft-captures { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin: 4px 0 0; padding: 0; list-style: none; }
   .draft-captures li { display: grid; place-items: center; width: 54px; height: 36px; overflow: hidden; border-radius: 3px; background: var(--bg-3);
     color: var(--text-3); font-size: 11px; }

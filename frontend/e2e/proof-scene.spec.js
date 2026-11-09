@@ -123,7 +123,7 @@ test('makes the proof of a scene of Inspect on its Proof tab, its player ready, 
   expect((await videoState(page)).paused).toBe(true);
   await showProofTab(page, 'Scene');
   const block = sceneBlock(page);
-  await expect(block.getByTestId('scene-video')).toHaveText(/★\s*steps\.webm\s*·\s*0:00–0:01/);
+  await expect(block.getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*0:00–0:01/);
   await expect.poll(async () => (await videoState(page)).time).toBeGreaterThanOrEqual(0.19);
   // played, it runs muted, on a loop through its moment
   await expect(block.getByTestId('scene-player')).toBeInViewport();
@@ -170,7 +170,7 @@ test('changes the time of a saved proof at once, adds a frame of its player, and
   const { fixture, scenePuts, frameSaves } = await openCase(page);
   await newProof(page, ['Frame A']);
   const block = sceneBlock(page);
-  await expect(block.getByTestId('scene-video')).toHaveText(/★\s*steps\.webm\s*·\s*Whole video/);
+  await expect(block.getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*Whole video/);
   const plain = await saveProof(page, fixture, 1);
   expect(scenePuts).toEqual([]);
 
@@ -488,7 +488,7 @@ test('ties a proof made by hand to the scene still to prove its frames fall in, 
 
   // the Scene tab names the scene under the ★ field, its time in the field
   await showProofTab(page, 'Scene');
-  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*steps\.webm\s*·\s*0:00–0:01/);
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*0:00–0:01/);
   await expect(matchLine(page)).toHaveText(/Bridge\?\s*·\s*found by its frames\s*Not this scene/);
   await expect(matchLine(page).getByRole('button', { name: 'Not this scene' })).toBeVisible();
   await page.mouse.move(0, 0);
@@ -500,7 +500,7 @@ test('ties a proof made by hand to the scene still to prove its frames fall in, 
   await expect.poll(() => scenePuts.length).toBe(1);
   expect(scenePuts[0]).toEqual({ proof: 'road-bridge', body: { moments: [{ start: 0.1, end: 1 }], video: VIDEO, draft: 's1' } });
   await expect(matchLine(page)).toHaveCount(0);
-  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*steps\.webm\s*·\s*0:00–0:01/);
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*0:00–0:01/);
   await nudge(page);
   await expect(stripTiles(page).locator('.tile-title')).toHaveText(['Road bridge', 'Tower?']);
 
@@ -525,7 +525,7 @@ test('leaves a proof made by hand apart with Not this scene, and says nothing of
   await expect(matchLine(page)).toContainText('Bridge?');
   await matchLine(page).getByRole('button', { name: 'Not this scene' }).click();
   await expect(matchLine(page)).toHaveCount(0);
-  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*steps\.webm\s*·\s*Whole video/);
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*Whole video/);
   // the strip keeps Bridge? to geolocate, the new slide after the scenes
   await expect(stripTiles(page).locator('.tile-title')).toHaveText(['Bridge?', 'Tower?', /^Proof/]);
 
@@ -541,7 +541,7 @@ test('leaves a proof made by hand apart with Not this scene, and says nothing of
   // frames in Bridge? and on Tower? are in two scenes: nothing is said, nothing tied
   await newProof(page, ['Frame A', 'Frame C']);
   await showProofTab(page, 'Scene');
-  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*steps\.webm\s*·\s*Whole video/);
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*Whole video/);
   await expect(matchLine(page)).toHaveCount(0);
   await saveClip(page, saves, 2);
   await page.waitForTimeout(300);
