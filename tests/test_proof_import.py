@@ -1159,3 +1159,14 @@ def test_a_thread_states_its_point_once_and_rests_on_everything_it_hung_off_it(c
     # And the proof states all three addresses, so its line traces back to each post.
     spec = client.get(f"/api/cases/{case_id}/proofs/{created['proof']['name']}").json()
     assert spec["sources"] == urls
+
+
+def test_a_page_past_the_composer_s_bounds_is_never_composed(monkeypatch):
+    """The server composes a set's export itself, so the bounds hold there too, whoever
+    wrote the spec it is composing."""
+    import pytest
+
+    monkeypatch.setattr(import_engine, "MAX_PAGE_SIDE", 300)
+    with pytest.raises(ValueError):
+        import_engine.published_png([picture(size=(200, 200)), picture(size=(200, 200))])
+    assert import_engine.published_png([picture(size=(200, 140))]) == picture(size=(200, 140))

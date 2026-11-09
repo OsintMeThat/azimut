@@ -785,6 +785,10 @@ def published_png(pictures: list[bytes]) -> bytes:
         return _png(_opened(pictures[0]))
     opened = [_opened(data) for data in pictures]
     width, height, at = published_page([(img.width, img.height) for img in opened])
+    # Each picture answers to the pixel clamp, and the page they make to the composer's
+    # export bounds, so a spec listing eight huge pictures composes nothing.
+    if width > MAX_PAGE_SIDE or height > MAX_PAGE_SIDE or width * height > MAX_PAGE_PIXELS:
+        raise ValueError("these pictures are too large to stack into one page")
     page = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     for img, corner in zip(opened, at):
         page.paste(img.convert("RGBA"), corner)
