@@ -4365,7 +4365,8 @@ with its count and left out when the case holds none (`lib/newProof.js`). A fram
 collage Inspect cut from one video is under Videos, the collage under Collages too; a map
 grab, a Compare render or a Horizon view is a screenshot; the rest is a photo. The case's
 folders follow, then **Scenes to prove** when the queue holds some, each with its colour
-dot, its name, its time and its file. On the right, the pictures as large thumbnails: a
+dot, its name, its time and its file, and its two counts with the mark of where it
+stands, as on the home's chips. On the right, the pictures as large thumbnails: a
 press adds one and its number says its place among the panels, and under Videos each video
 is a block of its frames in clip order and its collages. **A scene pressed shows only its
 material, all ticked**: the frames inside its passages, the collages holding one and the

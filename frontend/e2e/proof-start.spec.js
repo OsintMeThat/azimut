@@ -279,6 +279,10 @@ test('New proof from a scene: its material all ticked, and the proof takes the s
   const scenes = dialog.getByRole('list', { name: 'Scenes to prove' });
   await expect(scenes.locator('.np-scene-name')).toHaveText(['Water tower?']);
   await expect(scenes.locator('.np-scene-said')).toHaveText(`0:00–0:00 · ${TITLE}`);
+  // the two counts, as everywhere else, and its state only in the hover's words
+  await expect(scenes.getByTestId('count-map')).toHaveText('1');
+  await expect(scenes.getByTestId('scene-counts')).toHaveAttribute('title', /^In progress: 1 map capture, /);
+  await expect(scenes.locator('.np-scene')).not.toContainText('In progress ·');
 
   await scenes.locator('.np-scene').click();
   // its frame in the case, the one not in it drawn for the choice, and the capture it gathered

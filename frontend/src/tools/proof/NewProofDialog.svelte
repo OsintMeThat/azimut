@@ -18,6 +18,7 @@
   import { tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
+  import SceneCounts from '../../components/SceneCounts.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { filterProofPanelItems } from '../../lib/composer.js';
   import { preciseClock } from '../../lib/inspectPlayer.js';
@@ -265,12 +266,16 @@
             {@const on = view.scene === entry.key}
             <li>
               <button type="button" class="np-scene" class:on class:taken={scene?.entry.key === entry.key} style:--scene={entry.color}
-                aria-current={on ? 'true' : undefined} title={`${entry.name} · ${sceneWhere(entry)}. ${entry.state}`}
+                aria-current={on ? 'true' : undefined} title={`${entry.name} · ${sceneWhere(entry)}`}
                 onclick={() => showScene(entry)}>
                 <span class="np-dot" aria-hidden="true"></span>
                 <span class="np-scene-words">
                   <span class="np-scene-name" dir="auto">{entry.name}</span>
-                  <span class="np-scene-said num" dir="auto">{sceneWhere(entry)}</span>
+                  <span class="np-scene-line">
+                    <span class="np-scene-said num" dir="auto">{sceneWhere(entry)}</span>
+                    <!-- what the map and the video gave it, as everywhere else -->
+                    <span class="np-scene-counts"><SceneCounts scene={entry.row} live={entry.live} size={10} /></span>
+                  </span>
                 </span>
               </button>
             </li>
@@ -304,7 +309,8 @@
               <span class="np-dot big" aria-hidden="true"></span>
               <div>
                 <h3 dir="auto">{entry.name}</h3>
-                <p class="num" dir="auto">{sceneWhere(entry)} · {entry.state}</p>
+                <p class="num" dir="auto">{sceneWhere(entry)}</p>
+                <p class="np-scene-head-counts"><SceneCounts scene={entry.row} live={entry.live} size={12} /></p>
               </div>
             </div>
           {/if}
@@ -490,9 +496,12 @@
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--scene, var(--accent)) 25%, transparent);
   }
   .np-dot.big { width: 12px; height: 12px; margin-top: 6px; }
-  .np-scene-words { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .np-scene-words { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
   .np-scene-name { overflow: hidden; color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .np-scene-said { overflow: hidden; color: var(--text-3); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
+  .np-scene-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .np-scene-said { min-width: 0; }
+  .np-scene-counts { flex: none; margin-left: auto; font-size: var(--fs-xs); }
 
   .np-import {
     flex: none;
@@ -605,6 +614,7 @@
   .np-scene-head { display: flex; align-items: flex-start; gap: 11px; margin: 6px 0 2px; }
   .np-scene-head h3 { margin: 0; color: var(--text-1); font-size: var(--fs-lg); font-weight: 650; }
   .np-scene-head p { margin: 2px 0 0; color: var(--text-3); font-size: var(--fs-sm); }
+  .np-scene-head .np-scene-head-counts { margin-top: 4px; }
   .np-note { margin: 8px 0 0; color: var(--text-3); font-size: var(--fs-xs); }
   .np-say { margin: 24px 0; color: var(--text-3); font-size: var(--fs-sm); text-align: center; }
   .np-empty {

@@ -12,7 +12,7 @@
  * a name, its time and its file, as the To-do words them (`lib/sceneQueue.js`).
  */
 import { fileStem } from './proofScene.js';
-import { captureCount, isPicture, openScenes, queueColor, queueName, queueTime, queueState } from './sceneQueue.js';
+import { isPicture, openScenes, queueColor, queueName, queueTime } from './sceneQueue.js';
 
 /** The sources a new proof picks from, in the order the window lists them. */
 export const SOURCES = [
@@ -98,7 +98,9 @@ export function videoBlocks(items, titleOf = () => '') {
 
 /**
  * The scenes still to prove, as New proof lists them: the abandoned left out, by file
- * in the queue's order. Each `{ key, video, id, title, name, time, color, state, picture, row }`.
+ * in the queue's order. Each `{ key, video, id, title, name, time, color, live, picture, row }`,
+ * `live` while it is the one being geolocated and `row` the scene as the queue gives it,
+ * which its two counts are read from (`components/SceneCounts`).
  */
 export function scenesToProve(files, live = null) {
   return openScenes(files).flatMap((file) => file.scenes.map((scene) => ({
@@ -109,8 +111,7 @@ export function scenesToProve(files, live = null) {
     name: queueName(scene),
     time: queueTime(scene),
     color: queueColor(scene),
-    state: queueState(scene, live?.video === file.video && live?.id === scene.id),
-    captures: captureCount(scene),
+    live: live?.video === file.video && live?.id === scene.id,
     picture: isPicture(scene),
     row: { ...scene, video: file.video },
   })));

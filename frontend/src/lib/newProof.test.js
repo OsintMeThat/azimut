@@ -69,14 +69,14 @@ describe('the scenes still to prove', () => {
     ] },
   ];
 
-  it('lists the open ones by file, each with its dot, name, time, file and state', () => {
+  it('lists the open ones by file, each with its dot, name, time, file and the row its counts read', () => {
     const listed = scenesToProve(files, { video: 'media/clip.mp4', id: 's2' });
     expect(listed.map((s) => [s.key, s.name, s.time, s.title, s.picture])).toEqual([
       ['media/clip.mp4#s1', 'Water tower?', '0:03–0:08', 'clip.mp4', false],
       ['media/clip.mp4#s2', '0:09', '0:09', 'clip.mp4', false],
       ['media/roof.jpg#p1', 'Whole picture', 'Whole picture', 'Roof', true],
     ]);
-    expect(listed[1].state).toBe('Geolocating · 1 capture');
+    expect(listed.map((s) => s.live)).toEqual([false, true, false]);
     expect(listed[0].color).not.toBe(listed[1].color);
     // the row keeps its file, which Make the proof hands over
     expect(listed[0].row).toMatchObject({ id: 's1', video: 'media/clip.mp4' });

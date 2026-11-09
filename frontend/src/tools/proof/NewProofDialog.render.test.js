@@ -21,8 +21,11 @@ const ITEMS = [
 ];
 const SCENE = {
   key: 'media/clip.mp4#s1', video: 'media/clip.mp4', id: 's1', title: 'clip.mp4', name: 'Water tower?', time: '0:03–0:08',
-  color: '#ff5252', state: 'To geolocate', captures: 1, picture: false,
-  row: { kind: 'draft', id: 's1', video: 'media/clip.mp4', start: 3, end: 8, label: 'Water tower?', captures: ['captures/sat.png'] },
+  color: '#ff5252', live: false, picture: false,
+  row: {
+    kind: 'draft', id: 's1', video: 'media/clip.mp4', start: 3, end: 8, label: 'Water tower?',
+    state: 'progress', captures: ['captures/sat.png'], footage: 4,
+  },
 };
 const MATERIAL = {
   frames: [{ id: 'f1', time: 4.25, path: 'media/frame-a.png', url: '/a.jpg' }, { id: 'f2', time: 5, path: null, url: '' }],
@@ -146,6 +149,12 @@ describe('New proof from a scene', () => {
     expect(row.getAttribute('style')).toContain('--scene: #ff5252');
     // a scene named by its time says it once
     expect(timed.querySelector('.np-scene-said').textContent).toBe('clip.mp4');
+    // and each one its two counts, what the map and the video gave it, in words on hover
+    expect(row.querySelector('[data-testid="count-map"]').textContent.trim()).toBe('1');
+    expect(row.querySelector('[data-testid="count-video"]').textContent.trim()).toBe('4');
+    expect(row.querySelector('[data-testid="scene-counts"]').getAttribute('title'))
+      .toBe('In progress: 1 map capture, 4 pictures from the video');
+    expect(row.getAttribute('title')).toBe('Water tower? · 0:03–0:08 · clip.mp4');
   });
 
   it('shows only the scene\'s material, all of it ticked, and the proof takes the scene up', async () => {
@@ -154,6 +163,9 @@ describe('New proof from a scene', () => {
     await vi.waitFor(() => expect(tiles()).toHaveLength(3));
     expect(readScene).toHaveBeenCalledWith(SCENE);
     expect(tiles().every((t) => t.classList.contains('selected'))).toBe(true);
+    // its head says its time and the same two counts, never its state in words
+    expect(dialog().querySelector('.np-scene-head p').textContent).toBe('0:03–0:08 · clip.mp4');
+    expect(dialog().querySelector('.np-scene-head [data-testid="count-map"]').textContent.trim()).toBe('1');
     expect([...dialog().querySelectorAll('.np-body h5')].map((h) => h.firstChild.textContent.trim())).toEqual(['Frames', 'Captures gathered for it']);
     expect(dialog().querySelector('.np-takes').textContent).toContain('Water tower?');
     // what the proof takes, and the frame it files on the way, said once with their spaces
