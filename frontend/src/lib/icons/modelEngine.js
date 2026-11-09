@@ -4,4 +4,4 @@
  * app's first load carries none of it.
  */
 export { MODEL_IDS, modelById } from './models.js';
-export { drawModel, modelSvg } from './paint.js';
+export { drawModel, drawnBox, modelSvg } from './paint.js';

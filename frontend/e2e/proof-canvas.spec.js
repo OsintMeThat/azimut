@@ -631,6 +631,9 @@ test('Ctrl+C then Ctrl+V duplicates the selected annotation', async ({ page }) =
 test('a copied shape outranks a screenshot the clipboard was already holding', async ({ page }) => {
   // The two clipboards answer one chord, and the analyst copied the shape last.
   // Reading the system one first pasted an hour-old screenshot over their rectangle.
+  // This page is not let write to the system clipboard, so the copy stays in memory
+  // and the rule is that a copy made here without leaving the window came last
+  // (e2e/proof-clipboard.spec.js runs the same chord with the clipboard written).
   const fixture = await installAppFixture(page);
   await openProofWithPanel(page);
   await drawBox(page);

@@ -13,7 +13,7 @@ import { fillPaint } from './proofEdits.js';
 import {
   ICON_BOX, ICON_SIZE_DEFAULT, STAMP_CUT, STAMP_HALO, glyphInk, stampByName, stampHalo, stampParts,
 } from './proofIcons.js';
-import { applyPickedView, modelNode } from './proofModelNode.js';
+import { modelNode } from './proofModelNode.js';
 
 /** The thin dark ring outside a disc, so a pale one holds over snow or sand. */
 const DISC_HALO = 'rgba(0, 0, 0, 0.35)';
@@ -113,7 +113,6 @@ export function stampNodes(Konva, s, { size, scale = 1, origin }) {
     }));
   }
   if (isModel(s.name)) {
-    applyPickedView(s);
     nodes.push(modelNode(Konva, s, { size, scale, origin, disc }));
     return nodes;
   }

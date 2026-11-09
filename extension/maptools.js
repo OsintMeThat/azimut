@@ -1603,8 +1603,8 @@
   // --- the scenes to geolocate ------------------------------------------------
   //
   // `lib/scenes.js` a second time, only as much as the panel's list needs: a scene's
-  // time in the app's own words, and what its state says. A scene is one the analyst
-  // kept in Inspect and no proof takes up yet (`engine/geolocate.py`); the app's To-do
+  // time in the app's own words, and its two counts. A scene is one the analyst kept
+  // in Inspect and no proof takes up yet (`engine/geolocate.py`); the app's To-do
   // lists the same ones. `extensionMapTools.test.js` runs both over the same rows.
 
   /** What a scene with no time of its own says instead of a timecode. */
@@ -1653,8 +1653,6 @@
   /** What a row calls a scene: the analyst's label, else its time. */
   const sceneName = (scene) => scene?.label || queueTime(scene);
 
-  const captureWords = (n) => (n === 1 ? "1 capture" : `${n} captures`);
-
   /** How many captures a scene holds: the number the app's last nudge gave, until the
    *  queue is read again (`captureCount`), else its list's. */
   const captureCount = (scene) =>
@@ -1674,12 +1672,51 @@
     return next;
   }
 
-  /** A scene's state as its row says it; `live` is the one being geolocated. */
-  function sceneState(scene, live = false) {
-    const n = captureCount(scene);
-    if (live) return n ? `Geolocating · ${captureWords(n)}` : "Geolocating";
-    if (scene?.state === "progress" && n) return `In progress · ${captureWords(n)}`;
-    return "To geolocate";
+  // A scene's two counts, `lib/sceneCounts.js` a second time: what the map gave it,
+  // the captures gathered for it, and what its file gives it, the frames and collages
+  // of its video in it (`footage`) or 1 for a picture, which is the picture itself.
+
+  const isPictureScene = (scene) => scene?.file_kind === "image";
+
+  /** What the map gave a scene: the captures gathered for it. */
+  const mapCount = (scene) => captureCount(scene);
+
+  /** What its file gives it: its video's frames and collages in it, or 1 for a picture. */
+  function videoCount(scene) {
+    if (isPictureScene(scene)) return 1;
+    return Number.isInteger(scene?.footage) && scene.footage > 0 ? scene.footage : 0;
+  }
+
+  /** Where a scene stands, as its small mark shows it: `live`, `abandoned`, `progress`
+   *  once a capture is gathered for it, else `todo`. */
+  function sceneStage(scene, live = false) {
+    if (live) return "live";
+    if (scene?.state === "abandoned") return "abandoned";
+    return scene?.state === "progress" && mapCount(scene) > 0 ? "progress" : "todo";
+  }
+
+  const STAGE_WORDS = { live: "Geolocating", progress: "In progress", todo: "To geolocate", abandoned: "Abandoned" };
+
+  /** `To geolocate`, `In progress`, `Geolocating`, `Abandoned`. */
+  const stageWords = (stage) => STAGE_WORDS[stage] ?? STAGE_WORDS.todo;
+
+  /** `no map capture yet`, `1 map capture`, `3 map captures`. */
+  function mapWords(n) {
+    if (!n) return "no map capture yet";
+    return n === 1 ? "1 map capture" : `${n} map captures`;
+  }
+
+  /** `nothing from the video yet`, `1 picture from the video`, …, or `the picture itself`. */
+  function videoWords(n, picture = false) {
+    if (picture) return "the picture itself";
+    if (!n) return "nothing from the video yet";
+    return n === 1 ? "1 picture from the video" : `${n} pictures from the video`;
+  }
+
+  /** The counts in words, for a hover: `In progress: 2 map captures, 5 pictures from the video`. */
+  function countWords(scene, live = false) {
+    const said = `${mapWords(mapCount(scene))}, ${videoWords(videoCount(scene), isPictureScene(scene))}`;
+    return `${stageWords(sceneStage(scene, live))}: ${said}`;
   }
 
   /** The queue as the panel lists it: each file with the scenes still open in it. */
@@ -1961,7 +1998,13 @@
     sceneName,
     captureCount,
     gatheredScene,
-    sceneState,
+    mapCount,
+    videoCount,
+    sceneStage,
+    stageWords,
+    mapWords,
+    videoWords,
+    countWords,
     openScenes,
     sceneMark,
     sceneColor,

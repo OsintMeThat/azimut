@@ -531,6 +531,22 @@ describe('collageVideo', () => {
     expect(collageVideo([piece('media/Loop.png')], origin)).toBeNull();
   });
 
+  it('names the video of pieces that are the video itself with no instant recorded, at no instant', () => {
+    // "Collage 15": its pieces are the video, filed before their instants were kept
+    const origins = { 'media/pan.mp4': { video: 'media/pan.mp4', time: null } };
+    const origin = (path) => origins[path] ?? null;
+    expect(collageVideo([piece('media/pan.mp4'), piece('media/pan.mp4')], origin))
+      .toEqual({ path: 'media/pan.mp4', from: null, to: null, times: [] });
+    // the instants known still say the stretch
+    expect(collageVideo([piece('media/pan.mp4'), piece('media/pan.mp4', 4)], origin))
+      .toEqual({ path: 'media/pan.mp4', from: 4, to: 4, times: [4] });
+    // and a picture composed of them, its instants never recorded, names the video too
+    const straight = { ...origins, 'media/Old straightened.png': { pieces: [{ path: 'media/pan.mp4', time: null }] } };
+    expect(collageVideo([piece('media/Old straightened.png')], (path) => straight[path] ?? null))
+      .toEqual({ path: 'media/pan.mp4', from: null, to: null, times: [] });
+    expect(collageVideo([piece('media/pan.mp4'), piece('media/other.mp4')], (path) => ({ video: path, time: null }))).toBeNull();
+  });
+
   it('says nothing of a collage with a picture of its own, another file or no piece', () => {
     expect(collageVideo([piece('media/pan.mp4', 1), piece('media/roof.png')])).toBeNull();
     expect(collageVideo([piece('media/pan.mp4', 1), piece('media/other.mp4', 2)])).toBeNull();
@@ -546,8 +562,16 @@ describe('mediaOrigin', () => {
       .toEqual({ pieces: [{ path: 'media/pan.mp4', time: 2 }, { path: 'media/a.png', time: null }] });
   });
 
+  it('reads a video as itself, and a collage filed before its instants as its pieces at none', () => {
+    expect(mediaOrigin({ kind: 'video', path: 'media/pan.mp4', source: { type: 'download' } })).toEqual({ video: 'media/pan.mp4', time: null });
+    expect(mediaOrigin({ source: { type: 'inspect', op: 'collage', sources: ['media/pan.mp4', 'media/a.png'] } }))
+      .toEqual({ pieces: [{ path: 'media/pan.mp4', time: null }, { path: 'media/a.png', time: null }] });
+    expect(mediaOrigin({ source: { type: 'inspect', op: 'collage', sources: ['media/a.png'], times: [] } }))
+      .toEqual({ pieces: [{ path: 'media/a.png', time: null }] });
+  });
+
   it('reads nothing else', () => {
-    expect(mediaOrigin({ source: { type: 'inspect', op: 'collage', sources: ['media/a.png'], times: [] } })).toBeNull();
+    expect(mediaOrigin({ source: { type: 'inspect', op: 'collage', sources: [], times: [] } })).toBeNull();
     expect(mediaOrigin({ source: { type: 'download', op: 'frame', from: 'x', time: 1 } })).toBeNull();
     expect(mediaOrigin({})).toBeNull();
   });

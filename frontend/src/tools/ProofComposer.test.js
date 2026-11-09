@@ -475,8 +475,13 @@ describe('Proof Composer pasted images', () => {
 
   it('decides that chord on which copy came last', () => {
     // Ctrl+C on a rectangle then Ctrl+V pasted whatever screenshot the system
-    // clipboard was holding, because the system one was read first.
-    expect(source).toContain('if (clipboard && (shapeCopyFresh || !item))');
+    // clipboard was holding, because the system one was read first. The marks are
+    // written there as marked text, which then says which copy came last.
+    const body = bodyOfFn('onPaste');
+    expect(body).toContain("const marked = readClip(e.clipboardData?.getData?.('text/plain') ?? '');");
+    expect(body).toContain('} else if (clipboard && (!item || (shapeCopyFresh && !clipOnSystem))) {');
+    expect(body.indexOf('if (marked)')).toBeLessThan(body.indexOf('addPastedImage'));
+    expect(source).toContain('await navigator.clipboard.writeText(clipText(copy));');
     expect(source).toContain('shapeCopyFresh = true;');
   });
 
@@ -541,7 +546,8 @@ describe('Proof Composer pasted images', () => {
   });
 
   it('drops a pasted image with its annotations, and only one thing is selected', () => {
-    expect(source).toContain('proof.shapes.filter((s) => s.panel !== paste.id)');
+    // its marks go, and those drawn over the insets on it (lib/insetMarks.goingWith)
+    expect(source).toContain('const going = goingWith(proof.shapes, [paste.id]);');
     expect(source).toContain('selectedPasteId = null');
     expect(source).toContain('removePaste(proof.pastes.findIndex((p) => p.id === selectedPasteId))');
   });
@@ -1442,23 +1448,16 @@ describe('Proof Composer — numbered markers and blur boxes', () => {
   it('stamps a marker and keeps the tool, the way the symbol stamp does', () => {
     const body = bodyOfFn('onPointerDown');
     expect(body).toContain("if (tool === 'number') {");
-    expect(body).toContain('n: nextMarkerNumber(color)');
+    // counted on the picture it lands on (lib/proofEdits.nextMarkerNumber)
+    expect(body).toContain('n: nextMarkerNumber(proof.shapes, color, panel.id)');
     // no `tool = 'select'` in that branch: numbering four things is one act
     const branch = body.slice(body.indexOf("if (tool === 'number') {"));
     expect(branch.slice(0, branch.indexOf('return;'))).not.toContain("tool = 'select'");
   });
 
-  it('counts each colour as its own series, starting back at 1', () => {
-    const body = bodyOfFn('nextMarkerNumber');
-    // colour is what this composer says "same feature" with, so a second colour
-    // is a second series rather than a continuation of the first
-    expect(body).toContain("x.kind === 'number' && x.color === ink");
-    expect(body).toContain('while (taken.has(n)) n += 1;');
-  });
-
   it('renumbers a marker recoloured into another series', () => {
     const body = bodyOfFn('setColor');
-    expect(body).toContain("if (s.kind === 'number' && s.color !== c) s.n = nextMarkerNumber(c);");
+    expect(body).toContain("if (s.kind === 'number' && s.color !== c) s.n = nextMarkerNumber(proof.shapes, c, s.panel);");
   });
 
   it('gives both a marker and a blur box handles to resize and turn', () => {

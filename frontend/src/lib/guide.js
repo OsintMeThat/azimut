@@ -704,7 +704,7 @@ export const PAGES = {
     ],
     tips: [
       { title: 'A blur hides for real', text: 'A blur box redraws the picture under it, so what is hidden is hidden in the exported file.' },
-      { title: 'Numbers count by colour', text: 'Each colour counts its own series from 1, to tie a spot to a line of your text.' },
+      { title: 'Numbers count per picture', text: 'Each picture counts from 1 in each colour, so one number marks one point on two pictures.' },
       { title: 'Paste a screenshot', text: 'Ctrl+V lays a picture over the proof, and it stays in this proof only.' },
       { title: 'The point becomes a place', text: 'Saving files its coordinates as a place on the map, and says the proof shows it.' },
       { title: 'A house style', text: 'A template made in Settings, Templates gives every proof the same look.' },
@@ -1202,6 +1202,8 @@ export const KEYMAP = [
     keys: [
       { combo: 'V R E A L C D T K S N B Z O', does: 'picks select, rectangle, ellipse, arrow, line, curve, freehand, text, callout, icon, numbered marker, blur box, zoom inset and view cone' },
       { combo: 'Ctrl+↑ / Ctrl+↓', does: 'brings the picked marks forward or sends them back, all the way with Shift' },
+      { combo: 'Ctrl+C / Ctrl+V', does: 'copies the picked marks, and pastes them on the picture picked or under the pointer' },
+      { combo: 'Ctrl+D', does: 'duplicates the picked marks' },
       { combo: 'Right-click', does: 'opens what can be done to the mark, the picture or the page under the pointer' },
       { combo: 'F', does: 'fits the document' },
       { combo: 'Space (held)', does: 'pans, whatever tool is in hand' },

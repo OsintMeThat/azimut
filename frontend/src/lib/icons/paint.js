@@ -211,6 +211,24 @@ export function modelSvg(model, { px = 56, fit = 'bbox', pad = 1.1, label = '', 
 }
 
 /**
+ * The box a `drawModel` drawing covers, `[x0, y0, x1, y1]` in the context's units
+ * about its origin, its outline and its halo included: what a picture kept of the
+ * drawing, to be laid down again, has to hold. Options are `drawModel`'s.
+ */
+export function drawnBox(model, { fit = 'length', px = 56, line = 0.5, halo = 0, ...opts } = {}) {
+  const view = solved(model, opts.heading ?? 0, opts.tilt ?? 0);
+  const frame = frameOf(model, view, px, fit);
+  const [x0, y0, x1, y1] = viewBox(view);
+  const pad = line + halo + 1;
+  return [
+    (x0 - frame.cx) * frame.ppm - pad,
+    (y0 - frame.cy) * frame.ppm - pad,
+    (x1 - frame.cx) * frame.ppm + pad,
+    (y1 - frame.cy) * frame.ppm + pad,
+  ];
+}
+
+/**
  * Draws a model into a 2D context, its middle at the context's origin, `ppm`
  * pixels to the metre. Options are `paintOps'`, plus `fit` for where the middle is
  * (`length` by default: the model's own middle, as a stamp is anchored).

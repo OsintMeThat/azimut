@@ -295,6 +295,26 @@ test('marks a collage of one video, then geolocates it with the collage beside t
   await expect(page.locator('.ref-viewer')).toHaveCount(2);
 });
 
+test('names the video of a collage whose pieces kept no instant, with no time', async ({ page }) => {
+  // an old collage: its pieces are the video itself, filed before their instants were kept
+  const CLIP = 'media/clip.mp4';
+  const piece = (id, x) => ({ ...panel(id, x), save: { path: CLIP, time: null, ops: [] } });
+  const old = { name: 'Old', title: 'Collage 15', spec: { width: 1200, height: 400, transparent: true, nodes: [piece('nd_1', 40), piece('nd_2', 600)] } };
+  await installAppFixture(page, {
+    media: [{ path: CLIP, filename: 'clip.mp4', kind: 'video', title: 'Convoy clip', source: { type: 'upload' }, thumbnail: null }],
+    collages: [{ name: 'Old', title: 'Collage 15', pieces: 2, updated_at: '2026-09-20T10:00:00Z', outline: null }],
+  });
+  await page.route(`**/api/cases/${CASE_ID}/collages/Old`, (route) => route.fulfill({ json: old }));
+  await page.route(`**/api/cases/${CASE_ID}/collages/Old/thumb`, (route) => route.fulfill({ json: { thumb: null } }));
+  await page.route(`**/api/cases/${CASE_ID}/scenes?*`, (route) => route.fulfill({ json: {
+    video: CLIP, scenes: [], taken: [], used: {}, geolocating: null, collages: [],
+  } }));
+  await page.goto('/#collage');
+  await page.getByRole('button', { name: /^Collage 15/ }).click();
+  await expect(page.locator('.panel .from')).toContainText('From Convoy clip');
+  await expect(page.locator('.panel .from .from-when')).toHaveCount(0);
+});
+
 test('draws each split button as one control, its arrow joined to its press', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await openStrip(page, { works: [] });

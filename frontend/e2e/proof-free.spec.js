@@ -302,7 +302,7 @@ test('the footer is picked for its size and colour, and its credit line written 
   fixture.expectNoUnexpectedRequests();
 });
 
-test('a mark drawn or dropped over a zoom inset goes on the page, in front of the inset', async ({ page }) => {
+test('a mark drawn or dropped over a zoom inset belongs to the inset', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await openProofWithPanel(page);
   const [picture] = await pictures(page);
@@ -326,9 +326,11 @@ test('a mark drawn or dropped over a zoom inset goes on the page, in front of th
   await pickBox(page, early.id);
   await drag(page, await middleOf(page, early.id), { x: inset.x + 20, y: inset.y + 20 });
   const shapes = (await save(page, fixture)).shapes;
+  // both are the inset's now, drawn over its enlargement, and the rows say so
   expect(shapes.map((s) => [s.id === early.id ? 'early' : s.kind, s.panel])).toEqual([
-    ['zoom', picture.id], ['rect', 'page'], ['early', 'page'],
+    ['early', zoom.id], ['zoom', picture.id], ['rect', zoom.id],
   ]);
+  await expect(page.locator('.shape-row .on-what').first()).toHaveText('Z1');
   fixture.expectNoUnexpectedRequests();
 });
 

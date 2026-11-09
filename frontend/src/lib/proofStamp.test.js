@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { MODEL_VIEWS } from './icons/modelMeta.js';
 import { setStampView } from './icons/stampView.svelte.js';
 import { STAMP_CUT, STAMP_HALO } from './proofIcons.js';
-import { modelHalo, modelLine, modelPaint } from './proofModelNode.js';
+import { loadModels } from './icons/loadModels.svelte.js';
+import { createModelCache, modelHalo, modelLine, modelNode, modelPaint, pickedModelView } from './proofModelNode.js';
 import { glyphOps, paintGlyph, stampNodes } from './proofStamp.js';
 
 /** Konva's constructors as records of what they were asked to draw. */
@@ -136,17 +137,25 @@ describe('a layer glyph on a proof', () => {
 });
 
 describe('a vehicle model on a proof', () => {
-  it('takes the picker\'s view when fresh from the tool, and never again', () => {
+  it('is given the picker\'s view where the tool makes it, and only a model is', () => {
     setStampView('angled');
-    const fresh = { kind: 'icon', name: 'model-tank', color: '#ff5252', size: 56 };
-    stampNodes(Konva, fresh, box(56));
     const angled = MODEL_VIEWS.find((v) => v.id === 'angled');
-    expect(fresh.tilt).toBe(angled.tilt);
-    expect(fresh.heading).toBe(angled.heading);
+    expect(pickedModelView('model-tank')).toEqual({ heading: angled.heading, tilt: angled.tilt });
+    expect(pickedModelView('tank')).toEqual({});
+    expect(pickedModelView('point')).toEqual({});
+    setStampView('top');
+    expect(pickedModelView('model-tank')).toEqual({ heading: 0, tilt: 0 });
+  });
 
+  it('draws a stamp saved without a view from above, nose up, whatever the picker holds', () => {
     setStampView('side');
-    stampNodes(Konva, fresh, box(56));
-    expect(fresh.tilt).toBe(angled.tilt);
+    const old = { kind: 'icon', name: 'model-tank', color: '#ff5252', size: 56 };
+    const [shape] = stampNodes(Konva, old, box(56));
+    // drawing writes nothing on the stamp
+    expect('tilt' in old).toBe(false);
+    expect('heading' in old).toBe(false);
+    expect(shape.viewHeading).toBe(0);
+    expect(shape.viewTilt).toBe(0);
     setStampView('top');
   });
 
@@ -201,6 +210,104 @@ describe('a vehicle model on a proof', () => {
     shape.sceneFunc({ _context: native }, target);
     await vi.waitFor(() => expect(batchDraw).toHaveBeenCalled());
     shape.sceneFunc({ _context: native }, target);
+    expect(fill).toHaveBeenCalled();
+  });
+});
+
+describe('a vehicle model kept as a picture', () => {
+  const upright = (a = 2) => ({ a, b: 0, c: 0, d: a, e: 10.3, f: 20.6 });
+  const turnedBy = (deg, a = 2) => {
+    const r = (deg * Math.PI) / 180;
+    return { a: a * Math.cos(r), b: a * Math.sin(r), c: -a * Math.sin(r), d: a * Math.cos(r), e: 5, f: 5 };
+  };
+  const screen = (transform) => {
+    const calls = [];
+    return {
+      calls,
+      getTransform: () => transform,
+      save: () => calls.push(['save']),
+      restore: () => calls.push(['restore']),
+      setTransform: (...args) => calls.push(['setTransform', ...args]),
+      drawImage: (...args) => calls.push(['drawImage', ...args]),
+    };
+  };
+  const engine = (box = [-30, -12, 30, 12]) => ({ drawModel: vi.fn(), drawnBox: vi.fn(() => box) });
+  const makeCanvas = (width, height) => ({ width, height, getContext: () => ({ setTransform: vi.fn() }) });
+  const model = { id: 'model-car' };
+  const paintOf = (extra = {}) => modelPaint({ name: 'model-car', color: '#ff5252', size: 56, heading: 30, tilt: 55, ...extra }, { size: 56 });
+
+  it('paints a model once, then lays its picture down', () => {
+    const cache = createModelCache({ makeCanvas });
+    const painter = engine();
+    for (let i = 0; i < 5; i += 1) expect(cache.draw(screen(upright()), painter, model, paintOf())).toBe(true);
+    expect(painter.drawModel).toHaveBeenCalledTimes(1);
+    expect(cache.size()).toBe(1);
+  });
+
+  it('paints it again for another view, colour, ink or size on screen', () => {
+    const cache = createModelCache({ makeCanvas });
+    const painter = engine();
+    cache.draw(screen(upright()), painter, model, paintOf());
+    cache.draw(screen(upright()), painter, model, paintOf({ heading: 31 }));
+    cache.draw(screen(upright()), painter, model, paintOf({ tilt: 0 }));
+    cache.draw(screen(upright()), painter, model, paintOf({ color: '#40c4ff' }));
+    cache.draw(screen(upright()), painter, model, paintOf({ size: 80 }));
+    cache.draw(screen(upright(3)), painter, model, paintOf());
+    expect(painter.drawModel).toHaveBeenCalledTimes(6);
+    // a stage moved, not zoomed, lays the same picture down
+    cache.draw(screen({ ...upright(), e: 400 }), painter, model, paintOf());
+    expect(painter.drawModel).toHaveBeenCalledTimes(6);
+  });
+
+  it('lays it down pixel for pixel upright, and resampled when turned', () => {
+    const cache = createModelCache({ makeCanvas });
+    const painter = engine();
+    const flat = screen(upright());
+    cache.draw(flat, painter, model, paintOf());
+    const laid = flat.calls.find(([name]) => name === 'drawImage');
+    expect(laid).toHaveLength(4);
+    expect(Number.isInteger(laid[2]) && Number.isInteger(laid[3])).toBe(true);
+    expect(flat.calls[0]).toEqual(['save']);
+    const turned = screen(turnedBy(30));
+    cache.draw(turned, painter, model, paintOf());
+    expect(turned.calls.find(([name]) => name === 'drawImage')).toHaveLength(6);
+  });
+
+  it('keeps no more than its cap or its pixels, the oldest going first', () => {
+    const cache = createModelCache({ makeCanvas, cap: 3 });
+    const painter = engine();
+    for (let h = 0; h < 5; h += 1) cache.draw(screen(upright()), painter, model, paintOf({ heading: h }));
+    expect(cache.size()).toBe(3);
+    cache.draw(screen(upright()), painter, model, paintOf({ heading: 0 }));
+    expect(painter.drawModel).toHaveBeenCalledTimes(6);
+    const tight = createModelCache({ makeCanvas, budget: 20_000 });
+    for (let h = 0; h < 5; h += 1) tight.draw(screen(upright()), painter, model, paintOf({ heading: h }));
+    expect(tight.pixels()).toBeLessThanOrEqual(20_000);
+  });
+
+  it('paints one too big to keep every time, and leaves a context it cannot read to the painter', () => {
+    const cache = createModelCache({ makeCanvas, largest: 100 });
+    expect(cache.draw(screen(upright()), engine(), model, paintOf())).toBe(false);
+    expect(cache.size()).toBe(0);
+    expect(createModelCache({ makeCanvas }).draw({}, engine(), model, paintOf())).toBe(false);
+  });
+
+  it('draws an export as before, never from the pictures kept', async () => {
+    await loadModels();
+    const cache = { draw: vi.fn(() => true) };
+    const shape = modelNode(Konva, { name: 'model-car', color: '#ff5252', size: 40, heading: 0, tilt: 0 }, { ...box(40), cache });
+    const fill = vi.fn();
+    const native = new Proxy({ fill }, {
+      get: (t, key) => (key in t ? t[key] : () => {}),
+      set: (t, key, value) => { t[key] = value; return true; },
+    });
+    const layerContext = { _context: native };
+    const on = (context) => ({ getAttr: () => 0, getLayer: () => ({ getCanvas: () => ({ getContext: () => context }) }) });
+    shape.sceneFunc(layerContext, on(layerContext));
+    expect(cache.draw).toHaveBeenCalledTimes(1);
+    expect(fill).not.toHaveBeenCalled();
+    shape.sceneFunc({ _context: native }, on(layerContext));
+    expect(cache.draw).toHaveBeenCalledTimes(1);
     expect(fill).toHaveBeenCalled();
   });
 });

@@ -2104,7 +2104,9 @@ the pieces within it at the same sharpness (`/inspect/compose` with `clip`), and
 makes the last saved picture out of date. Find reads a cut picture from its frame's corner.
 
 **A collage of one video is marked as that video.** When every piece is one video at an
-instant, or a frame saved from it, or a picture composed from them such as a piece straightened, the panel reads *From channel_departure · 0:01–0:03*,
+instant, or a frame saved from it, or a picture composed from them such as a piece straightened, the panel reads *From channel_departure · 0:01–0:03*;
+a collage whose pieces kept no instant, filed before instants were recorded, reads
+*From channel_departure* alone, as the server reads it (`engine/scenes._collage_video`),
 and **Mark to geolocate** marks the whole video; its arrow offers the stretch the pieces
 span, or the instant of a single piece. Once scenes hold passages of the video, the press
 marks that stretch and the arrow's Whole video is greyed, as in Inspect, and its time
@@ -3804,7 +3806,11 @@ none is being geolocated, folded to one row behind the pill while one is, and ab
 when there are none (`GET /api/ingest/scenes`). Geolocate there
 (`POST /api/ingest/geolocating`) holds the scene's video over the other site's map,
 paused on the scene and each of its passages marked on its bar in its colour, and a pill names it, counts
-its captures and stops it. While it lasts, every capture filed in the case is attached
+what it was given and stops it. Each row, and the pill, carries the scene's two counts as
+the app's do: the map's captures by the map's icon, its video's frames and collages by the
+video's, a picture giving itself by the picture's, a count at 0 greyed, a row's pip marking
+where it stands and the hover saying it all in words (`extension/maptools.js` mirrors
+`lib/sceneCounts.js`). While it lasts, every capture filed in the case is attached
 to it, the panel's included, and the capture's report says *Attached to “bridge?”*. A
 picture reads *Whole picture*, with an image on its file's line, and Geolocate holds the
 picture over the map with the scene's dot and no bar. The pill counts with the same pulse
@@ -4391,7 +4397,8 @@ with its count and left out when the case holds none (`lib/newProof.js`). A fram
 collage Inspect cut from one video is under Videos, the collage under Collages too; a map
 grab, a Compare render or a Horizon view is a screenshot; the rest is a photo. The case's
 folders follow, then **Scenes to prove** when the queue holds some, each with its colour
-dot, its name, its time and its file. On the right, the pictures as large thumbnails: a
+dot, its name, its time and its file, and its two counts with the mark of where it
+stands, as on the home's chips. On the right, the pictures as large thumbnails: a
 press adds one and its number says its place among the panels, and under Videos each video
 is a block of its frames in clip order and its collages. **A scene pressed shows only its
 material, all ticked**: the frames inside its passages, the collages holding one and the
@@ -4426,8 +4433,8 @@ video, else the one before, else the home.
 
 **Overlays.** Ctrl+V, a drop on the canvas, or `+ Add overlay` put an image
 straight into the proof. Ctrl+V answers to two clipboards, and the rule is which
-copy came last: an annotation copied here wins, until leaving the window and
-coming back hands the chord back to the system clipboard. It lands in the `Overlays` section of the Layout tab,
+copy came last (see Copy and paste): marks copied here paste as marks, an image copied
+since pastes as an overlay. It lands in the `Overlays` section of the Layout tab,
 sits above the panels and the legend, and is moved,
 resized from its corners and framed like anything else on the canvas — you can
 annotate it too. It claims no source: no media is filed, no entity, no
@@ -4720,9 +4727,11 @@ picture: it would cover what is being annotated.
 
 **The canvas has its own right-click.** It never opens the browser's menu. On a
 mark it picks it, if it was not picked, and offers Bring to front, Bring forward,
-Send backward, Send to back, Duplicate, Copy and Delete; on an overlay, or a panel
-in free layout, the same stacking, Crop and Remove; on the page, Fit view and a
-Paste when a mark was copied; on a caption or the footer, the editor. With a drawing tool in hand the right button stays
+Send backward, Send to back, Duplicate, Copy and Delete, for every mark picked, with
+**Lock position** on a zoom inset; on an overlay, or a panel
+in free layout, the same stacking, Crop and Remove, and on any panel or overlay a
+**Paste** onto it once marks are copied; on the page, Fit view and a Paste where the
+marks were; on a caption or the footer, the editor. With a drawing tool in hand the right button stays
 silent, as it neither draws nor drops a pick. **Ctrl+↑ and Ctrl+↓** step the picked
 marks forward and back, with Shift all the way; a step passes the next mark of the
 same picture, the only one it can cover.
@@ -4770,15 +4779,16 @@ stroke, a label, a symbol or a marker belongs to where it is let go. On a pictur
 it follows that picture; **dragged out into a margin it comes free**: it stays where
 it is when a panel moves, and it is drawn over every picture, in one stack with the
 callouts and the insets. **Put back on a picture, it is anchored to it again.** A
-mark drawn in a margin is free, and so is one drawn over a zoom inset, so it lands
-on the inset it annotates rather than under it. A free mark out in a margin can
+mark drawn in a margin is free. One drawn or let go over a zoom inset's enlargement
+belongs to that inset (see Zoom insets). A free mark out in a margin can
 still follow a picture: the right-click **pins it to the nearest one**, and it stays
 pinned while it is moved about out there. While a mark is dragged, the picture or
 the page it will belong to is outlined and named. **The
 page grows** right and down to hold a free mark put past its edge, background
 and all, with the footer kept under it; it never grows up or left, so a mark taken
 past those edges comes back to them. Blur boxes, insets, callouts and cones stay
-on their pictures, since they only mean something on its pixels.
+on their pictures, since they only mean something on its pixels, and never go on
+an inset.
 
 **Lines that hold to two pictures.** A line or an arrow drawn from one picture to
 another holds by each end to the pixel it was pressed or let go on, and follows
@@ -4789,7 +4799,8 @@ it holds; an end let go over a picture holds there and one let go in a margin co
 free, for a handle and for the whole line dragged alike, and both ends on one
 picture make it that picture's mark again. The Elements row says
 what it ties, `P1→P2`. A picture that is removed lets go of the ends it held,
-where they were; a copy is a free line, stepped aside.
+where they were. A copy keeps holding to both pictures, stepped aside on each, while
+both are in the proof, and is a free line where it stood otherwise.
 
 **Panel and overlay transforms.** Selecting either image shows a round knob on a
 short stem above it — the one Collage turns its pieces by — for a free turn, with
@@ -4872,7 +4883,10 @@ an uncrewed boat, a warship, a cargo ship, a locomotive and a wagon, plus Any
 vehicle and a Heading chevron. Each is generic, with proportions per class and no
 real type's shape or markings. The four flat vehicle stamps come first, named as
 flat. They are drawn by a module loaded the first time the picker opens or a proof
-names a model.
+names a model. On screen each painted model is kept as a picture, laid down pixel for
+pixel, until its view, size, colour or ink change (64 kept at most, 4 million pixels in
+all, the oldest going first), so a canvas with thirty of them redraws in an eighth of
+the time; an export paints every model again, as before.
 
 The picker's **View** (Top, Angled, Side) sets how the tiles are drawn and how the
 next model is stamped, for the session. A picked model wears a ring: the amber knob
@@ -4881,18 +4895,26 @@ the top of the arc, to the side, at the bottom. A label reads the heading and th
 tilt. The turn moves in 5° steps and the tilt settles on the offered views; Shift
 frees both, and a drag is one undo. The frame's own turn knob still turns the stamp
 on the page, to match a picture's horizon. A model's size is its length on the
-page, so turning it never resizes it, and the stamp stores its `heading` and `tilt`.
+page, so turning it never resizes it, and the stamp stores its `heading` and `tilt`,
+written from the View as it is stamped. A model saved without them draws from above,
+its nose up, whatever View the picker holds.
 
 An old proof opens with every stamp in its place, at its size, colour and turn, and
 draws the new drawing; the names on disk did not change, and a view cone keeps its
 camera.
 
 **Numbered markers.** A filled disc carrying a number, stamped like a symbol and
-keeping the tool in hand for the same reason. **Each colour counts its own series**
-and starts back at 1, because colour is what this composer says "same feature" with
-everywhere else. The number is the **first one free** in that series, so deleting #2
-and stamping again fills that hole rather than leaving a proof that counts 1, 3, 4;
-recolouring a marker moves it into the series it joins. The numeral takes a
+keeping the tool in hand for the same reason. **Each picture counts from 1**, and
+within it **each colour counts its own series**, because colour is what this composer
+says "same feature" with everywhere else. A frame and a satellite capture then carry
+1, 2, 3 each, and the same number on both pictures marks the same point, the way a
+published geolocation pairs them. An overlay counts as a picture, and a marker on the
+page, off every picture, counts in the page's own series. The number is the **first
+one free** in that series, so deleting #2 and stamping again fills that hole rather
+than leaving a picture that counts 1, 3, 4; recolouring a marker moves it into the
+series it joins on its picture. A marker dragged onto another picture, or pasted
+there, keeps its number. Markers saved before this keep theirs too: only the next
+number offered follows the rule. The numeral takes a
 contrasting ink off the disc's own colour, since it has to be read over whatever it
 is standing on. It resizes from its corners and turns like a symbol; there is no
 line in it, so the width control stays away.
@@ -4957,6 +4979,27 @@ keeps the frame's proportions and turns with a turned picture. It is drawn from 
 picture's pixels and from the blur boxes over them, so a redaction holds in the
 enlargement too.
 
+**A mark drawn over an enlargement belongs to it**, as a mark belongs to its picture:
+a box, an ellipse, a line, a curve, a stroke, a label, a symbol or a marker drawn or
+let go there is the inset's, and the Elements row says `Z1`. Moved or resized, the
+enlargement carries its marks along, and its selection frame still hugs it alone.
+When its frame is moved or reshaped on its picture, the marks keep to the pixels they
+were drawn on; carried onto another picture, they keep their place in the
+enlargement. Dragged off it, a mark lands on the picture or the margin it is let go
+over. An end of a line can hold to an enlargement as it holds to a picture. Deleting
+the inset, or the picture under its frame, deletes its marks with it. A proof saved
+before this kept such marks free on the page, and they stay free where they are.
+
+**An inset can be locked in place**, from the lock on its Elements row or its
+right-click, **Lock position**. Locked, neither its frame nor its enlargement moves or
+resizes by pointer or arrow key: a press on the enlargement draws, picks the marks
+over it or opens a marquee there, and a press on the frame reaches the picture under
+it. A marquee never catches it, and a right-click on it offers **Unlock** and Delete.
+It stays editable from its row, where the lock stays lit, and picked there it shows a
+small lock in the enlargement's corner and nothing to pull. Picked with other marks, it
+stays out of their drag. A copy of it pastes unlocked, to be placed. It is stored as
+`locked: true` on the inset, absent when it is not, so an older proof reads unlocked.
+
 **The order they stack in.** The Layout tab's **Elements** list runs front-first,
 the way the Panels list above it does: the row on top is the mark on top of the
 picture. A row is **dragged by its grip to reorder it**; the right-click and Ctrl+↑/↓
@@ -4971,9 +5014,33 @@ page picks everything it touches, and in grid layout it can be dragged across a
 panel too, since the grid decides where a panel sits and the drag cannot be
 moving it. In free layout that same drag moves the panel, so the rectangle starts
 on the page around it. What a family answers to: colour, stroke width, fill,
-arrow keys, Delete, and a drag from any one of them, which carries the rest.
-Resizing, rotating and copying still want one element, and the handles say so —
-several picked at once show the border and no anchors.
+arrow keys, Delete, Duplicate, Copy, and a drag from any one of them, which
+carries the rest. Resizing and rotating still want one element, and the handles say
+so: several picked at once show the border and no anchors.
+
+**Copy and paste.** Ctrl+C (Cmd+C on a Mac) copies the marks picked, Ctrl+V pastes
+them as one step, picked, and Ctrl+D duplicates them without touching the clipboard.
+Every kind copies, a model keeping its view and a marker its number. Where a paste
+lands (`lib/proofClipboard.js`):
+
+- **A picture picked, or under the pointer**: the marks are set at the same places on
+  it, measured from its edges, each one's lines and boxes sized with the picture and
+  its ink kept on the page. This is the pairs workflow: 1, 2, 3 drawn on the frame,
+  copied, pasted on the satellite capture, then each moved onto its point.
+- **No picture**: back on the pictures they were copied from, stepped down and right.
+- **Another proof or slide**: the copy waits in memory through a switch, and lands on
+  the picture in the same place (panel 2 on panel 2), else on the first one.
+- A mark free on the page stays free; a line holding to two pictures keeps holding
+  while both are there; the marks over a copied zoom inset ride on its copy. A blur,
+  a callout, a cone or an inset never goes on an inset.
+
+A paste that would cover what it copies, or the paste before it, steps on by one more
+step. The copy is also written to the system clipboard as a marked text, which is how
+Ctrl+V tells it from an image copied since, from any tab: the marked text pastes the
+marks, an image pastes an overlay. Where the page may not write there, the copy stays
+in memory and a copy made without leaving the window counts as the last one. Nothing
+is pasted into a field being typed in, or behind a dialog, and words selected on the
+page copy as words.
 
 **The gestures.** Escape unwinds one level per press: the draft in hand first,
 then whatever is picked, and only with nothing left to drop does it put the pen

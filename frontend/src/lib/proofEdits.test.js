@@ -6,6 +6,7 @@ import {
   DASHABLE,
   fillPaint,
   movedBy,
+  nextMarkerNumber,
   nextPanelRow,
   notesAfterRemoval,
   nudgeShape,
@@ -70,6 +71,45 @@ describe('notesAfterRemoval', () => {
   it('does not write to the legend it was handed', () => {
     notesAfterRemoval(notes, [], { color: '#ff5252' });
     expect(notes['#ff5252']).toBe('the vehicle');
+  });
+});
+
+describe('nextMarkerNumber', () => {
+  const marker = (panel, color, n) => ({ kind: 'number', panel, color, n });
+  const red = '#ff5252';
+  const blue = '#40c4ff';
+
+  it('counts from 1 on each picture, so a frame and a capture carry the same numbers', () => {
+    const shapes = [marker('frame', red, 1), marker('frame', red, 2), marker('frame', red, 3)];
+    expect(nextMarkerNumber(shapes, red, 'frame')).toBe(4);
+    expect(nextMarkerNumber(shapes, red, 'satellite')).toBe(1);
+    expect(nextMarkerNumber([...shapes, marker('satellite', red, 1)], red, 'satellite')).toBe(2);
+  });
+
+  it('keeps one series per colour within a picture', () => {
+    const shapes = [marker('frame', red, 1), marker('frame', red, 2)];
+    expect(nextMarkerNumber(shapes, blue, 'frame')).toBe(1);
+  });
+
+  it('gives the page, and an overlay, series of their own', () => {
+    const shapes = [marker('frame', red, 1), marker('page', red, 1), marker('overlay', red, 1)];
+    expect(nextMarkerNumber(shapes, red, 'page')).toBe(2);
+    expect(nextMarkerNumber(shapes, red, 'overlay')).toBe(2);
+    expect(nextMarkerNumber(shapes, red, 'other')).toBe(1);
+  });
+
+  it('fills the first hole, and reads nothing but markers', () => {
+    const shapes = [marker('frame', red, 1), marker('frame', red, 3), { kind: 'icon', panel: 'frame', color: red, n: 2 }];
+    expect(nextMarkerNumber(shapes, red, 'frame')).toBe(2);
+    expect(nextMarkerNumber([marker('frame', red, 'x')], red, 'frame')).toBe(1);
+    expect(nextMarkerNumber(null, red, 'frame')).toBe(1);
+  });
+
+  it('takes the old numbers as they are, carried on from the whole proof', () => {
+    // a proof saved before numbering restarted per picture: 1, 2 on the frame, 3 on the capture
+    const shapes = [marker('frame', red, 1), marker('frame', red, 2), marker('satellite', red, 3)];
+    expect(nextMarkerNumber(shapes, red, 'satellite')).toBe(1);
+    expect(nextMarkerNumber(shapes, red, 'frame')).toBe(3);
   });
 });
 

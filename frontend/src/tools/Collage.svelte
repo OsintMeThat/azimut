@@ -139,11 +139,12 @@
   const outputHint = $derived(
     output ? `Exports at ${output.width} × ${output.height} px${output.capped ? ', the size limit' : ''}.` : ''
   );
-  // The video every piece comes from, said under the save: one instant, or the stretch they span.
+  // The video every piece comes from, said under the save: one instant, the stretch they
+  // span, or the video alone when no piece kept its instant.
   const fromVideo = $derived.by(() => {
     const found = collageVideo(doc.nodes, (path) => origins.get(path) ?? null);
     if (!found) return null;
-    const when = found.from === found.to ? shortClock(found.from) : spanLabel(found.from, found.to);
+    const when = !found.times.length ? '' : found.from === found.to ? shortClock(found.from) : spanLabel(found.from, found.to);
     return { ...found, title: fileTitles.get(found.path) ?? found.path.split('/').pop(), when };
   });
   const hasFrames = $derived(works.some((w) => w.frames));
@@ -1060,7 +1061,7 @@
               <p class="from" title={`Every piece is cut from ${fromVideo.title}`}>
                 <Icon name="video" size={13} />
                 <span class="from-words">From <span class="from-file">{fromVideo.title}</span></span>
-                <span class="from-when">{fromVideo.when}</span>
+                {#if fromVideo.when}<span class="from-when">{fromVideo.when}</span>{/if}
               </p>
             {/if}
           </div>

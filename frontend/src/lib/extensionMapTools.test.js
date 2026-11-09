@@ -31,6 +31,7 @@ import * as appFires from './map/firms.js';
 import * as appCal from './calendar.js';
 import * as appScenes from './scenes.js';
 import * as appQueue from './sceneQueue.js';
+import * as appCounts from './sceneCounts.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const load = (name) => readFileSync(join(here, `../../../extension/${name}`), 'utf8');
@@ -1196,6 +1197,11 @@ describe('the scenes to geolocate, on both sides of the boundary', () => {
     row('wall', null, null, 'Harbour wall', { file_kind: 'image' }),
     // counted by a nudge before its list was read again
     row('n', 30, 40, 'Ridge', { state: 'progress', captures: ['media/c1.png'], captureCount: 4 }),
+    // what the video gives each: its frames and collages in it
+    row('f', 12, 20, 'Depot', { footage: 6 }),
+    row('g', 12, 20, '', { state: 'progress', captures: ['media/c.png'], footage: 1 }),
+    row('bad', 12, 20, '', { footage: -2 }),
+    row('half', 12, 20, '', { footage: 2.5 }),
     // one place showing again further on: every moment, the rest counted past two
     row('j', 0, 7, '', { more: [{ start: 65, end: 72 }] }),
     row('k', 0, 7, 'Bridge', { more: [{ start: 30, end: null }, { start: 65, end: 72 }] }),
@@ -1210,12 +1216,26 @@ describe('the scenes to geolocate, on both sides of the boundary', () => {
     expect(ext.WHOLE_PICTURE).toBe(appQueue.WHOLE_PICTURE);
   });
 
-  it('names a row and says its state as the To-do does', () => {
+  it('names a row and counts it as the To-do does, its two counts in the same words', () => {
     for (const scene of ROWS) {
       expect(ext.queueTime(scene), scene.id).toBe(appQueue.queueTime(scene));
       expect(ext.sceneName(scene), scene.id).toBe(appQueue.queueName(scene));
-      for (const live of [false, true]) expect(ext.sceneState(scene, live), scene.id).toBe(appQueue.queueState(scene, live));
+      expect(ext.mapCount(scene), scene.id).toBe(appCounts.mapCount(scene));
+      expect(ext.videoCount(scene), scene.id).toBe(appCounts.videoCount(scene));
+      for (const live of [false, true]) {
+        expect(ext.sceneStage(scene, live), scene.id).toBe(appCounts.sceneStage(scene, live));
+        expect(ext.countWords(scene, live), scene.id).toBe(appCounts.countWords(scene, live));
+      }
     }
+    for (const stage of ['live', 'progress', 'todo', 'abandoned', 'nonsense']) {
+      expect(ext.stageWords(stage), stage).toBe(appCounts.stageWords(stage));
+    }
+    for (const n of [0, 1, 2, 17]) {
+      expect(ext.mapWords(n)).toBe(appCounts.mapWords(n));
+      expect(ext.videoWords(n)).toBe(appCounts.videoWords(n));
+      expect(ext.videoWords(n, true)).toBe(appCounts.videoWords(n, true));
+    }
+    expect(ext.videoCount(null)).toBe(0);
   });
 
   it('takes a nudge the way the app does, before the queue is read again', () => {

@@ -62,14 +62,14 @@
     CAPTION_SIZE, LEGEND_SIZE, FOOTER_SIZE,
     BG, TEXT_MAIN, normSpace, textColors,
     layoutPanels, panelsBottom, panelScale, freeNormalizeDelta, legendLineHeight, footerBand,
-    attributionLine, creditLine, footerLine, imageryCredits, docSize, offsetShape, autoLayoutRows,
+    attributionLine, creditLine, footerLine, imageryCredits, docSize, autoLayoutRows,
     autoCoords, formatCoords, autoSourceUrls, proofSource, statedSources, openableSource,
     specPoints, statePanelPoint, pointProposed, uncheckedPoints, footerLines, coordsPostLines, proofCoordsLines, MAX_POINTS,
     normalizeMaterial, resolveSourceUrls,
     toSpec, newId, loadImage, orderedFeatureColors, notesFromShapes,
     templateFromProof, applyProofStyle, normalizeProofStyle, newSignatureText,
     anchoredPos, anchoredOffset, SIG_TEXT_SIZE,
-    copyShapeSpec, dedupeBySrc, satPanelInput, mediaPanelInput,
+    dedupeBySrc, satPanelInput, mediaPanelInput,
     SIG_ANCHORS, SIG_SCALE, newSignature, signatureBox, signatureOffset, signaturePairPositions,
     groupNeighborIndex, hasGroupNeighbor,
     denseRowValues, clampPanelScale, trimClosingDuplicate, freehandShape,
@@ -86,6 +86,7 @@
     canFill,
     fillPaint,
     movedBy,
+    nextMarkerNumber,
     nextPanelRow,
     notesAfterRemoval,
     nudgeShape,
@@ -131,6 +132,7 @@
   import { isModel } from '../lib/icons/catalog.js';
   import { drawModelRing } from '../lib/proofModelRing.js';
   import { stampNodes } from '../lib/proofStamp.js';
+  import { pickedModelView } from '../lib/proofModelNode.js';
   import {
     assetName, base64Of, PASTE_TYPES, MAX_PASTES, MAX_PASTE_BYTES,
   } from '../lib/pasteAsset.js';
@@ -151,6 +153,8 @@
     PAGE, isFree, canBeFree, pageEntry, onPage, pageHit, isLink, holdsToPicture, linkPoints, settleLink,
     pictureUnder, nudgedLink, letGoOf, shiftedTies, markBounds, freeExtent,
   } from '../lib/freeMarks.js';
+  import { INSET, goingWith, insetSurfaces, isLocked, reframedInsetMarks } from '../lib/insetMarks.js';
+  import { clipText, makeCopy, pasteShapes, readClip } from '../lib/proofClipboard.js';
   import { pollWhile } from '../lib/poll.js';
   import { carriesOutsideFiles } from '../lib/drag.js';
   import ProofSlides from './proof/ProofSlides.svelte';
@@ -1232,6 +1236,8 @@
     clearTimeout(histTimer);
     history.reset(docSnapshot());
     syncHist();
+    // another proof, or a fresh one: a paste of marks copied before lands as into another proof
+    docKey += 1;
   }
 
   $effect(() => {
@@ -1745,11 +1751,18 @@
   // document, so moving a paste can never change the export.
   const boxesOf = () => layoutPanels(proof.panels, proof.captionSize, proof.layout, proof.space);
   // The pictures front→back, then the page itself, which takes the marks drawn
-  // free of any picture (see lib/freeMarks.js).
+  // free of any picture (see lib/freeMarks.js). The zoom insets' enlargements come
+  // first, since they are drawn over every picture, and take the marks drawn over
+  // them (see lib/insetMarks.js).
   function surfacesOf() {
     if (!hasProofCanvasContent(proof)) return surfaces(proof);
     const { width, height } = measureDoc();
-    return [...surfaces(proof), pageEntry(width, height)];
+    const pictures = surfaces(proof);
+    const pictureFrame = (id) => {
+      const entry = pictures.find((x) => x.id === id);
+      return entry ? surfaceFrame(entry) : null;
+    };
+    return [...insetSurfaces(proof.shapes, pictureFrame, width, height), ...pictures, pageEntry(width, height)];
   }
   // The proof's typeface, and the weight a mark's words are set in.
   const proofFace = () => fontStack(proof.font);
@@ -2539,11 +2552,21 @@
     if (frame) proof.shapes = proof.shapes.map((s) => letGoOf(s, surfaceId, frame));
   }
 
+  /** A picture leaving, and the insets on it: the lines they hold let go, where they were. */
+  function letGoOfSurfaceAndInsets(surfaceId) {
+    for (const inset of proof.shapes.filter((s) => s.kind === 'zoom' && s.panel === surfaceId)) letGoOfSurface(inset.id);
+    letGoOfSurface(surfaceId);
+  }
+
+  /** How many zoom insets the proof holds, for naming one of them. */
+  const insetCount = () => proof.shapes.filter((s) => s.kind === 'zoom').length;
+
   function removePanel(index) {
     const panel = proof.panels[index];
     if (cropSurfaceId === panel?.id) discardSurfaceCrop(); // it is leaving anyway
-    letGoOfSurface(panel.id);
-    proof.shapes = proof.shapes.filter((s) => s.panel !== panel.id);
+    letGoOfSurfaceAndInsets(panel.id);
+    const going = goingWith(proof.shapes, [panel.id]);
+    proof.shapes = proof.shapes.filter((s) => !going.has(s.id));
     proof.panels.splice(index, 1);
     normalizeRows();
     selectedIds = [];
@@ -2622,21 +2645,25 @@
   /**
    * One place decides what Ctrl+V means, and the rule is which copy came last.
    *
-   * Two clipboards answer one chord: the system's, which may hold a screenshot from
-   * an hour ago, and this composer's, which holds the annotation just copied. Only
-   * one of them is visible to this page, so freshness cannot be compared directly —
-   * what can be is whether the analyst left. A copy made here without leaving the
-   * window is necessarily the more recent of the two, so it wins; going somewhere
-   * else and coming back is the only way an outside copy could have happened, and
-   * that hands the chord back to the system clipboard. Without this, Ctrl+C on a
-   * rectangle followed by Ctrl+V pasted whatever image was in the clipboard.
+   * Two clipboards answer one chord: the system's, which may hold a screenshot,
+   * and this composer's, which holds the marks just copied. A copy made here is
+   * written to the system clipboard too, as a marked text (lib/proofClipboard.js),
+   * so the system clipboard says which came last: the marked text pastes the
+   * marks, from this tab or another, and an image there means it was copied since.
+   * When the copy could not be written there, the older rule stands: a copy made
+   * here without leaving the window wins, and leaving it hands the chord back.
+   * Nothing is pasted into a field being typed in, nor behind a dialog.
    */
   function onPaste(e) {
-    if (uiState.tool !== 'proof' || isTextTarget(e.target) || middleClickPaste()) return;
+    if (uiState.tool !== 'proof' || modalOpen || isTextTarget(e.target) || middleClickPaste()) return;
+    const marked = readClip(e.clipboardData?.getData?.('text/plain') ?? '');
     const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith('image/'));
-    if (clipboard && (shapeCopyFresh || !item)) {
+    if (marked) {
       e.preventDefault();
-      pasteShape();
+      pasteClip(marked.id === clipboard?.id ? clipboard : marked);
+    } else if (clipboard && (!item || (shapeCopyFresh && !clipOnSystem))) {
+      e.preventDefault();
+      pasteClip(clipboard);
     } else if (item) {
       e.preventDefault();
       addPastedImage(item.getAsFile());
@@ -2678,8 +2705,9 @@
     const paste = proof.pastes[index];
     if (!paste) return;
     if (cropSurfaceId === paste.id) discardSurfaceCrop(); // it is leaving anyway
-    letGoOfSurface(paste.id);
-    proof.shapes = proof.shapes.filter((s) => s.panel !== paste.id);
+    letGoOfSurfaceAndInsets(paste.id);
+    const going = goingWith(proof.shapes, [paste.id]);
+    proof.shapes = proof.shapes.filter((s) => !going.has(s.id));
     proof.pastes.splice(index, 1);
     selectedIds = [];
     if (selectedPasteId === paste.id) selectedPasteId = null;
@@ -2993,6 +3021,8 @@
   function shapesTouching(box) {
     const caught = [];
     for (const s of proof.shapes) {
+      // a locked inset is held out of reach, the marks over it are not
+      if (isLocked(s)) continue;
       const node = docLayer.findOne(`#${s.id}`);
       if (!node) continue;
       const r = node.getClientRect({ relativeTo: docLayer });
@@ -3003,15 +3033,14 @@
     return caught;
   }
 
-  // Annotations are drawn on whatever surface is under the pointer — a panel or
-  // a pasted image, or the page around them. Pasted images are in front, so they
-  // claim the point first, and the page answers last. `page: false` for the
-  // marks that only mean something on a picture; `page: 'only'` to draw free.
+  // Annotations are drawn on whatever surface is under the pointer — a zoom
+  // inset's enlargement, a panel or a pasted image, or the page around them.
+  // Insets and pasted images are in front, so they claim the point first, and the
+  // page answers last. `page: false` for the marks that only mean something on a
+  // picture's own pixels, which no inset or page takes.
   function surfaceAt(doc, { page = true } = {}) {
     const list = surfacesOf();
-    const held = page === 'only'
-      ? list.filter((x) => x.id === PAGE)
-      : page ? list : list.filter((x) => x.id !== PAGE);
+    const held = page ? list : list.filter((x) => x.id !== PAGE && x.kind !== INSET);
     return surfaceHitTest(held, doc);
   }
 
@@ -3070,7 +3099,8 @@
       // the panels, and across a panel the grid pins in place — an overlay or a
       // free-layout panel is dragged instead, and the room outside the page
       // still pans, which is the gesture that was there before the marquee.
-      const onPage = e.target.name() === 'bg';
+      // a locked inset is ground to pick the marks over it from, as the page is
+      const onPage = e.target.name() === 'bg' || e.target.name() === 'inset-hold';
       const parentId = e.target.getParent()?.id() ?? '';
       const onPinnedPanel = e.target.name() === 'panel-hit'
         && proof.layout !== 'free'
@@ -3093,12 +3123,10 @@
     }
     stage.draggable(false);
     // A mark drawn where no picture is, in a margin or a gap, is free on the
-    // page, and so is every mark drawn while the rail says to draw free. The
-    // marks that only mean something on a picture's pixels need one under them.
-    // A mark drawn over a zoom inset goes on the page too, so it is drawn over
-    // the inset it annotates rather than under it, on the picture beneath.
-    const free = overInset(docPoint()) && canBeFree(tool);
-    const hit = surfaceAt(docPoint(), { page: free ? 'only' : canBeFree(tool) });
+    // page. One drawn over a zoom inset belongs to that inset and follows it.
+    // The marks that only mean something on a picture's pixels need one under
+    // them.
+    const hit = surfaceAt(docPoint(), { page: canBeFree(tool) });
     // Nothing to draw on under the pointer. The room around the page pans in
     // Select, and it is the same room: a drag that cannot mean an annotation
     // means the view, rather than nothing at all.
@@ -3166,6 +3194,8 @@
         x: hit.nx, y: hit.ny, size: ICON_SIZE_DEFAULT,
         ...(isSolidIcon(entry.name) ? {} : { strokeWidth: strokeW }),
         ...(fillOpacity > 0 ? { fillOpacity } : {}),
+        // a model is laid down at the picker's View, written on it at once
+        ...pickedModelView(entry.name),
       };
       proof.shapes.push(s);
       selectedIds = [s.id];
@@ -3174,12 +3204,13 @@
     }
     // A numbered marker is stamped like a symbol, and keeps the tool: numbering
     // four things in a picture is one act. The number is the first one free in
-    // its own colour, so deleting #2 and stamping again fills the hole rather
-    // than leaving a proof that counts 1, 3, 4.
+    // its colour on this picture (or on the page), so each picture counts from 1
+    // and deleting #2 and stamping again fills the hole rather than leaving a
+    // picture that counts 1, 3, 4.
     if (tool === 'number') {
       const s = {
         id: newId('s'), panel: panel.id, kind: 'number', color,
-        x: hit.nx, y: hit.ny, size: ICON_SIZE_DEFAULT, n: nextMarkerNumber(color),
+        x: hit.nx, y: hit.ny, size: ICON_SIZE_DEFAULT, n: nextMarkerNumber(proof.shapes, color, panel.id),
       };
       proof.shapes.push(s);
       selectedIds = [s.id];
@@ -3262,7 +3293,7 @@
       });
     }
     group.add(node);
-    drawing = { panel, node, start: { x: hit.nx, y: hit.ny }, box: hit.box, frame: hit.frame, kind: tool, free };
+    drawing = { panel, node, start: { x: hit.nx, y: hit.ny }, box: hit.box, frame: hit.frame, kind: tool };
   }
 
   function onPointerMove() {
@@ -3385,7 +3416,7 @@
       commitCone();
       return;
     }
-    const { node, kind, panel, frame, free } = drawing;
+    const { node, kind, panel, frame } = drawing;
     const box = drawing.box;
     drawing = null;
     const minSize = 5 / box.scale;
@@ -3418,7 +3449,7 @@
         ...(canFill(kind) && fillOpacity > 0 ? { fillOpacity } : {}),
         ...shape,
       };
-      if (kind === 'arrow' || kind === 'line') s = linkFromDraft(s, frame, free);
+      if (kind === 'arrow' || kind === 'line') s = linkFromDraft(s, frame);
       proof.shapes.push(s);
       selectedIds = [s.id];
       // The pen goes down with the shape. What follows a stroke is almost always
@@ -3437,17 +3468,17 @@
    * A line or arrow just drawn, settled from what is under each end: drawn
    * within one picture it is that picture's mark, as ever; drawn from one picture
    * to another, or out into a margin, it goes on the page and each end holds to
-   * the picture it was pressed or let go on. Drawn free, it holds to nothing.
+   * the picture it was pressed or let go on, a zoom inset's enlargement included.
    */
-  function linkFromDraft(s, frame, free) {
+  function linkFromDraft(s, frame) {
     const [x0, y0, x1, y1] = s.points;
     const start = surfaceToPage({ x: x0, y: y0 }, frame);
     const end = surfaceToPage({ x: x1, y: y1 }, frame);
-    const held = s.panel === PAGE || free ? null : { id: s.panel, nx: x0, ny: y0 };
+    const held = s.panel === PAGE ? null : { id: s.panel, nx: x0, ny: y0 };
     return settleLink(
       s,
       { page: start, on: held },
-      { page: end, on: free ? null : pictureUnder(surfacesOf(), end) },
+      { page: end, on: pictureUnder(surfacesOf(), end) },
     );
   }
 
@@ -4026,7 +4057,7 @@
       if (!entry) continue;
       const frame = surfaceFrame(entry);
       if (s.kind === 'callout') addCalloutNodes(pageMarks, s, frame, { width, height });
-      else addZoomNodes(pageMarks, s, frame, { width, height }, entry.item);
+      else addZoomNodes(pageMarks, s, frame, { width, height }, entry.item, surfaceList.find((x) => x.id === s.id));
     }
     docLayer.add(pageMarks);
 
@@ -4141,8 +4172,13 @@
     // A whole panel can be selected instead (both modes): corner anchors keep
     // its aspect, and the round handle rotates its pixels and annotations. In
     // grid mode the grid re-flows the resulting bounds.
-    const selectedNodes = selectedIds
-      .map((id) => docLayer.findOne(`#${id}`))
+    // The marks drawn over a picked inset ride with it, so the frame holds the
+    // inset alone: holding both would carry them twice.
+    // A locked inset is held alone or not at all, so a family's drag never carries it.
+    const pickedInsets = new Set(selectedShapes.filter((s) => s.kind === 'zoom').map((s) => s.id));
+    const selectedNodes = selectedShapes
+      .filter((s) => !pickedInsets.has(s.panel) && !(isLocked(s) && selectedShapes.length > 1))
+      .map((s) => docLayer.findOne(`#${s.id}`))
       .filter(Boolean);
     const selectedNode = selectedNodes.length === 1 ? selectedNodes[0] : null;
     const panelNode = !selectedNodes.length && selectedPanelId
@@ -4219,7 +4255,7 @@
     // stroke showed a dashed frame and nothing to pull, which reads as a broken
     // selection rather than a stroke that can only be moved.
     transformer.enabledAnchors(
-      selKind === 'rect' || selKind === 'ellipse' || selKind === 'freehand' || selKind === 'blur'
+      isLocked(selectedShape) ? [] : selKind === 'rect' || selKind === 'ellipse' || selKind === 'freehand' || selKind === 'blur'
         ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
         : selKind === 'text' || selKind === 'icon' || selKind === 'number' || selKind === 'zoom'
             || panelNode || pasteNode || (sigNode && !footerPicked)
@@ -4484,7 +4520,9 @@
       return;
     }
     if (s.kind === 'zoom') {
-      drawFrameHandles(s, frame, look);
+      // a locked inset says so where it is, and offers nothing to pull
+      if (isLocked(s)) drawLockHint(s);
+      else drawFrameHandles(s, frame, look);
       return;
     }
     if (s.kind === 'cone') {
@@ -4605,6 +4643,29 @@
     endHandles.add(handle);
   }
 
+  /** The lock a 24-unit glyph draws, as the side list's lock icon draws it. */
+  const LOCK_GLYPH = 'M7 11V7a5 5 0 0 1 10 0v4M5 11h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z';
+
+  /**
+   * A picked locked inset says so in the corner of its enlargement: a small dark
+   * disc with the lock, the same size on screen at any zoom, and nothing to pull.
+   */
+  function drawLockHint(s) {
+    const node = docLayer.findOne(`#${s.id}`);
+    if (!node) return;
+    const z = stage.scaleX();
+    const r = 11 / z;
+    const box = node.getClientRect({ relativeTo: docLayer });
+    const badge = new Konva.Group({ x: box.x + box.width - r - 5 / z, y: box.y + r + 5 / z, listening: false, name: 'lock-hint' });
+    badge.add(new Konva.Circle({ radius: r, fill: 'rgba(16, 20, 28, 0.82)', stroke: ACCENT, strokeWidth: 1.2 / z }));
+    const glyph = 13 / z;
+    badge.add(new Konva.Path({
+      data: LOCK_GLYPH, x: -glyph / 2, y: -glyph / 2, scaleX: glyph / 24, scaleY: glyph / 24,
+      stroke: '#ffffff', strokeWidth: 2.2, lineCap: 'round', lineJoin: 'round',
+    }));
+    endHandles.add(badge);
+  }
+
   /**
    * An inset's frame, reshaped from its corners on its own picture: each corner
    * pulls against the one across from it, and the enlargement follows the new
@@ -4625,10 +4686,13 @@
         const w = Math.abs(px - ax);
         const h = Math.abs(py - ay);
         if (w >= minSide && h >= minSide) {
+          const before = { x: s.x, y: s.y, w: s.w, h: s.h };
           s.x = Math.min(px, ax);
           s.y = Math.min(py, ay);
           s.w = w;
           s.h = h;
+          // the marks drawn over the enlargement keep to what they were drawn on
+          proof.shapes = reframedInsetMarks(proof.shapes, s.id, before, s);
         }
         dirty = true;
       });
@@ -4799,6 +4863,20 @@
   // so that is what a step in the stack steps past.
   const stackLayer = (s) => (isPageMark(s) ? 'page' : s.panel);
 
+  /**
+   * Hold an inset in place, or let it go. Locked, no press or drag moves it or
+   * resizes it, and a press on it draws or picks the marks over it; the side
+   * list and its right-click still reach it. Stored as `locked` on the mark,
+   * absent when it is not (lib/insetMarks.isLocked).
+   */
+  function setLocked(s, on) {
+    const shape = proof.shapes.find((x) => x.id === s?.id);
+    if (!shape || isLocked(shape) === on) return;
+    if (on) shape.locked = true;
+    else delete shape.locked;
+    dirty = true;
+  }
+
   /** Bring the picked marks to the front or forward, send them backward or to the back. */
   function restack(how) {
     const next = restacked(proof.shapes, selectedIds, how, stackLayer);
@@ -4844,7 +4922,17 @@
     const keys = (k) => shortcut(k);
     let title = '';
     let items = [];
-    if (at.shape) {
+    if (at.shape && isLocked(at.shape)) {
+      // A locked inset is not picked by a press, a right-click included: its menu
+      // acts on it where it stands.
+      const inset = at.shape;
+      title = 'Zoom inset';
+      items = [
+        { label: 'Unlock', icon: 'unlock', run: () => setLocked(inset, false) },
+        'sep',
+        { label: 'Delete', icon: 'trash', keys: 'Del', danger: true, run: () => deleteShape(inset.id) },
+      ];
+    } else if (at.shape) {
       if (!selectedIds.includes(at.shape.id)) pickShape(at.shape.id);
       const many = selectedIds.length > 1;
       const can = (how) => restacked(proof.shapes, selectedIds, how, stackLayer) !== proof.shapes;
@@ -4856,8 +4944,11 @@
         { label: 'Send to back', keys: keys('Ctrl+Shift+↓'), run: () => restack('back'), disabled: !can('back') },
         'sep',
         ...anchorItems(),
-        { label: 'Duplicate', icon: 'copy', keys: keys('Ctrl+D'), run: () => duplicateShape(), disabled: many },
-        { label: 'Copy', icon: 'clipboard', keys: keys('Ctrl+C'), run: () => copyShape(), disabled: many },
+        ...(at.shape.kind === 'zoom' && !many
+          ? [{ label: 'Lock position', icon: 'lock', run: () => setLocked(at.shape, true) }, 'sep']
+          : []),
+        { label: 'Duplicate', icon: 'copy', keys: keys('Ctrl+D'), run: () => duplicateSelection() },
+        { label: 'Copy', icon: 'clipboard', keys: keys('Ctrl+C'), run: () => copySelection() },
         'sep',
         { label: 'Delete', icon: 'trash', keys: 'Del', danger: true, run: deleteSelected },
       ];
@@ -4890,6 +4981,8 @@
           'sep',
         ] : []),
         { label: 'Crop', icon: 'crop', run: () => beginSurfaceCrop(item) },
+        // what was copied, set at the same place on this picture
+        ...(clipboard ? [{ label: 'Paste', icon: 'clipboard', keys: keys('Ctrl+V'), run: () => pasteClip(clipboard, item.id) }] : []),
         'sep',
         {
           label: at.panel ? 'Remove panel' : 'Remove overlay', icon: 'trash', danger: true,
@@ -4898,7 +4991,7 @@
       ];
     } else {
       items = [
-        ...(clipboard ? [{ label: 'Paste', icon: 'clipboard', keys: keys('Ctrl+V'), run: pasteShape }, 'sep'] : []),
+        ...(clipboard ? [{ label: 'Paste', icon: 'clipboard', keys: keys('Ctrl+V'), run: () => pasteClip(clipboard, null) }, 'sep'] : []),
         { label: 'Fit view', icon: 'eye', keys: 'F', run: fit },
       ];
     }
@@ -4938,8 +5031,8 @@
    */
   function landingFor(s, point, list = surfacesOf()) {
     const free = canBeFree(s.kind);
-    // let go over an inset, it goes on the page to be drawn over it (see onPointerDown)
-    const hit = free && overInset(point) ? null : pictureUnder(list, point);
+    // let go over an inset it belongs to the inset, if it means anything there
+    const hit = pictureUnder(free ? list : list.filter((x) => x.kind !== INSET), point);
     if (hit) return hit.id !== s.panel ? hit : null;
     // In a margin a picture's mark comes free, unless it was pinned out there
     // and is only being moved about out there.
@@ -4960,25 +5053,6 @@
     const frame = frameOf(s.panel);
     if (!frame) return false;
     return !surfaceShows(anchorOf(s), frame);
-  }
-
-  /** Whether a page point is on a zoom inset's enlargement. */
-  function overInset(point) {
-    const doc = measureDoc();
-    for (const s of proof.shapes) {
-      if (s.kind !== 'zoom') continue;
-      const frame = frameOf(s.panel);
-      if (!frame) continue;
-      const box = insetBox(surfaceToPage({ x: s.x + s.w / 2, y: s.y + s.h / 2 }, frame), s, doc.width, doc.height);
-      // the enlargement is turned like its picture, about its middle
-      const r = (-frame.rotation * Math.PI) / 180;
-      const dx = point.x - (box.x + box.w / 2);
-      const dy = point.y - (box.y + box.h / 2);
-      const x = dx * Math.cos(r) - dy * Math.sin(r);
-      const y = dx * Math.sin(r) + dy * Math.cos(r);
-      if (Math.abs(x) <= box.w / 2 && Math.abs(y) <= box.h / 2) return true;
-    }
-    return false;
   }
 
   /**
@@ -5019,6 +5093,7 @@
   /** What a surface is called on the canvas, the way the side lists number them. */
   function surfaceLabel(entry) {
     if (entry.id === PAGE) return 'Free on the page';
+    if (entry.kind === INSET) return insetCount() > 1 ? `Zoom inset ${entry.index + 1}` : 'Zoom inset';
     if (entry.kind === 'published') return proof.published.length > 1 ? `Picture ${entry.index + 1}` : 'Picture';
     return entry.kind === 'paste' ? `Overlay ${entry.index + 1}` : `Panel ${entry.index + 1}`;
   }
@@ -5419,29 +5494,6 @@
    * anchor point the shape stores — the pin's tip, everything else's centre —
    * which is what keeps a pin on its pixel while it is resized or turned.
    */
-  /**
-   * The first number no marker of this colour holds.
-   *
-   * Counted per colour, because colour is what this composer says "same feature"
-   * with everywhere else — the legend is a list of colours. So a second colour
-   * is a second series and starts at 1, rather than carrying on from wherever
-   * the first one stopped and numbering two different things 1 through 9.
-   *
-   * A gap is refilled rather than left: deleting #2 and stamping again gives 2
-   * back, instead of a proof that counts 1, 3, 4.
-   */
-  function nextMarkerNumber(ink) {
-    const taken = new Set(
-      proof.shapes
-        .filter((x) => x.kind === 'number' && x.color === ink)
-        .map((x) => Number(x.n))
-        .filter(Number.isFinite)
-    );
-    let n = 1;
-    while (taken.has(n)) n += 1;
-    return n;
-  }
-
   /**
    * A numbered marker: a filled disc carrying its number.
    *
@@ -5886,8 +5938,15 @@
    * resizes from its corners on its own, turned like its picture. It is drawn
    * from the picture's pixels and from the blur boxes over them, so a redaction
    * holds in the enlargement too.
+   *
+   * The marks drawn over the enlargement are its own (lib/insetMarks.js): they are
+   * drawn in a group laid on it in its pixels, which follows it through a drag or
+   * a resize. A locked inset takes no press: its frame lets the picture under it
+   * answer, and its enlargement opens a marquee over the marks on it, so drawing
+   * or picking there never moves it.
    */
-  function addZoomNodes(parent, s, frame, doc, surface) {
+  function addZoomNodes(parent, s, frame, doc, surface, entry) {
+    const locked = isLocked(s);
     const lw = Math.max(1, (s.strokeWidth ?? 4) / 2);
     const pattern = dashPattern(s.dash, lw);
     const dashed = pattern ? { dash: pattern, lineCap: s.dash === 'dot' ? 'round' : 'butt' } : {};
@@ -5922,21 +5981,25 @@
 
     const outline = new Konva.Line({
       name: 'zoom-frame', points: corners.flatMap((p) => [p.x, p.y]), closed: true,
-      stroke: s.color, strokeWidth: lw, hitStrokeWidth: Math.max(lw * 3, 10), draggable: true, ...dashed,
+      stroke: s.color, strokeWidth: lw, hitStrokeWidth: Math.max(lw * 3, 10), draggable: !locked,
+      listening: !locked, ...dashed,
     });
     bindShapePick(outline, s);
     outline.on('dragstart', () => { dragMoved = true; });
     outline.on('dragend', () => {
+      const before = { panel: s.panel, x: s.x, y: s.y, w: s.w, h: s.h };
       const step = pageStepOnSurface(outline.x(), outline.y(), frame);
       s.x += step.dx;
       s.y += step.dy;
       outline.position({ x: 0, y: 0 });
       landShape(s);
+      // the marks drawn over the enlargement keep to what they were drawn on
+      proof.shapes = reframedInsetMarks(proof.shapes, s.id, before, s, s.panel === before.panel);
       dirty = true;
     });
 
     const node = new Konva.Group({
-      id: s.id, x: placed.x + iw / 2, y: placed.y + ih / 2, rotation: turn, draggable: true,
+      id: s.id, x: placed.x + iw / 2, y: placed.y + ih / 2, rotation: turn, draggable: !locked,
     });
     const view = new Konva.Group({ clip: { x: -iw / 2, y: -ih / 2, width: iw, height: ih } });
     view.add(new Konva.Rect({
@@ -5965,14 +6028,36 @@
     }
     view.add(pixels);
     node.add(view);
-    // the border, and the whole inset as something to press
+    // the border, and the whole inset as something to press; a locked one is a
+    // ground to open a marquee on (see onPointerDown), never the inset itself
     node.add(new Konva.Rect({
       x: -iw / 2, y: -ih / 2, width: iw, height: ih, fill: 'transparent', stroke: s.color, strokeWidth: lw, ...dashed,
+      ...(locked ? { name: 'inset-hold' } : {}),
     }));
-    bindShapePick(node, s);
+    if (!locked) bindShapePick(node, s);
+    // The marks drawn over the enlargement, in its own pixels, laid on it: a sibling
+    // rather than a child, so the selection frame and its handles hug the
+    // enlargement alone, and kept on it through a drag and a resize.
+    const onInset = entry ? surfaceFrame(entry) : null;
+    const marks = new Konva.Group({ x: node.x(), y: node.y(), rotation: turn });
+    if (onInset) {
+      const k = onInset.box.scale;
+      const surfaceMarks = new Konva.Group({
+        id: `pg-${s.id}`, x: (-onInset.image[0] / 2) * k, y: (-onInset.image[1] / 2) * k, scaleX: k, scaleY: k,
+      });
+      for (const mark of proof.shapes.filter((x) => x.panel === s.id)) addSurfaceShape(surfaceMarks, mark, onInset.box, entry.item);
+      marks.add(surfaceMarks);
+    }
+    const follow = () => marks.setAttrs({ x: node.x(), y: node.y(), scaleX: node.scaleX(), scaleY: node.scaleY() });
     node.on('dragstart', () => { dragMoved = true; });
-    node.on('dragmove', () => drawLinks(node.x(), node.y()));
-    node.on('transform', () => drawLinks(node.x(), node.y(), Math.abs(node.scaleX())));
+    node.on('dragmove', () => {
+      drawLinks(node.x(), node.y());
+      follow();
+    });
+    node.on('transform', () => {
+      drawLinks(node.x(), node.y(), Math.abs(node.scaleX()));
+      follow();
+    });
     node.on('dragend', () => {
       s.dx = node.x() - centre.x;
       s.dy = node.y() - centre.y;
@@ -5985,7 +6070,7 @@
       node.scale({ x: 1, y: 1 });
       dirty = true;
     });
-    parent.add(links, outline, node);
+    parent.add(links, outline, node, marks);
   }
 
   /**
@@ -6152,22 +6237,45 @@
 
   // ---- shape ops from the side panel -----------------------------------------------------
 
-  // ---- clipboard (copy / paste / duplicate of a single element) ---------------
-  let clipboard = null; // detached deep copy of a shape spec (no id)
-  let clipboardFrame = null; // where it sat on the page when it was copied
+  // ---- clipboard (copy / paste / duplicate of the picked marks) ----------------
+  // What is copied, where a paste puts it and how it steps on: lib/proofClipboard.js.
+  let clipboard = null; // the last copy made here
+  let clipOnSystem = false; // whether that copy reached the system clipboard
   /** Whether that copy is the last one the analyst made without leaving the window.
-   *  What lets Ctrl+V tell a shape just copied here from an older screenshot sitting
-   *  in the system clipboard (see `onPaste`). */
+   *  What lets Ctrl+V tell marks just copied here from an older screenshot sitting
+   *  in the system clipboard, when the copy could not be written there (see `onPaste`). */
   let shapeCopyFresh = false;
+  // How many times the copy was pasted, by proof and by where, so each paste steps
+  // on from the last; and where the last paste went, which the next one follows.
+  let pasteRuns = new Map();
+  let lastPaste = null;
+  // Which proof is open: bumped as each one opens (see anchorHistory).
+  let docKey = 0;
+  // Whether the pointer is over the canvas, so a paste can go on the picture under it.
+  let pointerOnCanvas = false;
 
-  function copyShape(id = selectedId) {
-    const s = proof.shapes.find((x) => x.id === id);
-    if (!s) return;
-    // A copy of a line that holds to pictures is a free one, where it stood: a
-    // copy stepped aside would otherwise be pulled straight back over it.
-    clipboard = copyShapeSpec(s.ends ? { ...s, points: linkPoints(s, frameOf), ends: undefined } : s);
-    clipboardFrame = frameOf(s.panel);
+  /** A copy of these marks, with what their pictures showed: the marks over a picked inset come along. */
+  const copyOf = (ids) => makeCopy(proof.shapes, ids, { surfaces: surfacesOf(), frameOf, docKey, id: newId('c') });
+
+  /** Copy the picked marks: kept here, and written to the system clipboard as marked text. */
+  function copySelection(ids = selectedIds) {
+    const copy = copyOf(ids);
+    if (!copy) return;
+    clipboard = copy;
+    clipOnSystem = false;
     shapeCopyFresh = true;
+    pasteRuns = new Map();
+    lastPaste = null;
+    writeSystemClip(copy);
+  }
+
+  async function writeSystemClip(copy) {
+    try {
+      await navigator.clipboard.writeText(clipText(copy));
+      if (clipboard === copy) clipOnSystem = true;
+    } catch {
+      // refused or not offered: the copy here stands, under the older rule (see onPaste)
+    }
   }
 
   // The composer only ever hears about its own copies, so losing focus is the one
@@ -6178,53 +6286,86 @@
     return () => window.removeEventListener('blur', release);
   });
 
-  // Paste the clipboard as a fresh element, stepped down-right on the page so it
-  // doesn't hide the original. It lands on the surface it was copied from, panel
-  // or overlay alike; once that surface is gone, on the first panel, unchanged on
-  // the page. Points-based kinds shift every vertex.
-  function pasteShape() {
-    if (!clipboard) return;
-    let spec = clipboard;
-    let frame = frameOf(clipboard.panel);
-    if (!frame) {
-      const target = proof.panels[0]?.id;
-      frame = target ? frameOf(target) : null;
-      if (!frame || !clipboardFrame) return;
-      spec = { ...moveShapeToSurface(clipboard, clipboardFrame, frame), panel: target };
+  $effect(() => {
+    if (!containerEl) return;
+    const enter = () => (pointerOnCanvas = true);
+    const leave = () => (pointerOnCanvas = false);
+    containerEl.addEventListener('pointerenter', enter);
+    containerEl.addEventListener('pointerleave', leave);
+    return () => {
+      containerEl.removeEventListener('pointerenter', enter);
+      containerEl.removeEventListener('pointerleave', leave);
+    };
+  });
+
+  /**
+   * The picture a paste goes on: the panel or overlay picked, else the picture or
+   * inset under the pointer, else where the last paste of this copy went in this
+   * proof. Null for where each mark was copied from.
+   */
+  function pasteTarget() {
+    if (selectedPanelId) return selectedPanelId;
+    if (selectedPasteId) return selectedPasteId;
+    if (pointerOnCanvas && stage?.getPointerPosition()) {
+      const hit = surfaceHitTest(surfacesOf().filter((x) => x.id !== PAGE), docPoint());
+      if (hit) return hit.id;
     }
-    const step = pageStepOnSurface(PASTE_STEP, PASTE_STEP, frame);
-    const s = { ...offsetShape(spec, step.dx, step.dy), id: newId('s'), panel: spec.panel };
-    proof.shapes.push(s);
-    selectedIds = [s.id];
-    // cascade further pastes so repeated Ctrl+V steps down-right
-    clipboard = offsetShape(s, 0);
-    clipboardFrame = frame;
+    return lastPaste?.docKey === docKey ? lastPaste.target : null;
+  }
+
+  /**
+   * Add a copy's marks to the proof as one step, picked: on `target`, or where
+   * each was copied from (lib/proofClipboard.pasteShapes). `runs` counts the
+   * pastes so far, so a second one steps on from the first.
+   */
+  function pasteClip(copy = clipboard, target = pasteTarget(), runs = pasteRuns) {
+    if (!copy) return;
+    if (!hasProofCanvasContent(proof)) {
+      toast('Add a panel before pasting marks', 'warn', 5000);
+      return;
+    }
+    const added = pasteShapes(copy, {
+      surfaces: surfacesOf(), frameOf, target, docKey, runs, newId: () => newId('s'), step: PASTE_STEP,
+    });
+    if (!added.length) return;
+    if (runs === pasteRuns) lastPaste = { docKey, target };
+    proof.shapes.push(...added);
+    tool = 'select';
+    selectedIds = added.map((s) => s.id);
+    selectedPanelId = null;
+    selectedPasteId = null;
+    selectedSig = null;
     dirty = true;
   }
 
-  function duplicateShape(id = selectedId) {
-    copyShape(id);
-    pasteShape();
+  /** The picked marks again, stepped down and right of them, without touching the clipboard. */
+  function duplicateSelection(ids = selectedIds) {
+    const copy = copyOf(ids);
+    if (copy) pasteClip(copy, null, new Map());
   }
 
-  /** Delete every picked annotation, and drop the legend notes left with nothing. */
-  function deleteSelected() {
-    const going = new Set(selectedIds);
+  const duplicateShape = (id) => duplicateSelection(id ? [id] : selectedIds);
+
+  /**
+   * Delete these annotations, and drop the legend notes left with nothing. A zoom
+   * inset takes the marks drawn over it along, as a picture does, and lets go of
+   * the lines that held to it.
+   */
+  function deleteShapes(ids) {
+    const going = goingWith(proof.shapes, ids);
     const gone = proof.shapes.filter((s) => going.has(s.id));
     if (!gone.length) return;
+    for (const s of gone) if (s.kind === 'zoom') letGoOfSurface(s.id);
     proof.shapes = proof.shapes.filter((s) => !going.has(s.id));
     for (const s of gone) proof.notes = notesAfterRemoval(proof.notes, proof.shapes, s);
-    selectedIds = [];
+    selectedIds = selectedIds.filter((x) => !going.has(x));
     dirty = true;
   }
 
-  function deleteShape(id) {
-    const gone = proof.shapes.find((s) => s.id === id);
-    proof.shapes = proof.shapes.filter((s) => s.id !== id);
-    proof.notes = notesAfterRemoval(proof.notes, proof.shapes, gone);
-    selectedIds = selectedIds.filter((x) => x !== id);
-    dirty = true;
-  }
+  /** Delete every picked annotation. */
+  const deleteSelected = () => deleteShapes(selectedIds);
+
+  const deleteShape = (id) => deleteShapes([id]);
 
   /**
    * Move an element to a place in the order: `to` is the index it ends at.
@@ -6266,11 +6407,12 @@
     if (inked.length) {
       const before = [...new Set(inked.map((s) => s.color))];
       for (const s of inked) {
-        // A marker belongs to its colour's series (see nextMarkerNumber), so one
-        // moved to another colour takes the first number free in the series it
-        // joins. Assigned before the colour, so a family recoloured at once
-        // numbers itself in order rather than all landing on the same number.
-        if (s.kind === 'number' && s.color !== c) s.n = nextMarkerNumber(c);
+        // A marker belongs to its colour's series on its picture (see
+        // nextMarkerNumber), so one moved to another colour takes the first
+        // number free in the series it joins. Assigned before the colour, so a
+        // family recoloured at once numbers itself in order rather than all
+        // landing on the same number.
+        if (s.kind === 'number' && s.color !== c) s.n = nextMarkerNumber(proof.shapes, c, s.panel);
         s.color = c;
       }
       // A legend note is written against a colour. Carry it over for each colour
@@ -6323,11 +6465,17 @@
   };
   function nudgeSelected(dx, dy) {
     if (!editableShapes.length) return;
-    for (const s of editableShapes) {
+    // a locked inset stays put, and the marks of an inset that moves follow it
+    const moving = editableShapes.filter((s) => !isLocked(s));
+    const insets = new Set(moving.filter((s) => s.kind === 'zoom').map((s) => s.id));
+    for (const s of moving) {
+      if (insets.has(s.panel)) continue;
       const frame = frameOf(s.panel);
       if (!frame) continue;
       const step = pageStepOnSurface(dx, dy, frame);
+      const before = s.kind === 'zoom' ? { x: s.x, y: s.y, w: s.w, h: s.h } : null;
       Object.assign(s, s.ends ? nudgedLink(s, dx, dy, frameOf) : nudgeShape(s, step.dx, step.dy));
+      if (before) proof.shapes = reframedInsetMarks(proof.shapes, s.id, before, s);
     }
     dirty = true;
   }
@@ -6342,7 +6490,7 @@
     // the tool on the canvas behind it, and its Escape closes the dialog — that
     // is not also a reason to put the pen down underneath.
     if (modalOpen) return;
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+    if (isTextTarget(e.target)) return;
     // Alt+←/→ go from slide to slide wherever the strip shows, and never reach the
     // browser, whose Back they are on Windows and Linux.
     if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && stripShown) {
@@ -6382,11 +6530,12 @@
     if (e.ctrlKey || e.metaKey) {
       const k = e.key.toLowerCase();
       // Ctrl+V is deliberately absent: the paste event decides between an image
-      // in the system clipboard and a copied annotation (see onPaste).
-      // Copying and duplicating stay open to a drawing tool: they read the last
-      // element rather than changing it, and what they add lands in plain sight.
-      if (k === 'c' && selectedId) { e.preventDefault(); copyShape(); }
-      else if (k === 'd' && selectedId) { e.preventDefault(); duplicateShape(); }
+      // in the system clipboard and copied marks (see onPaste).
+      // Copying and duplicating stay open to a drawing tool: they read the picked
+      // marks rather than changing them, and what they add lands in plain sight.
+      // Words selected on the page are the browser's to copy.
+      if (k === 'c' && selectedIds.length && !window.getSelection()?.toString()) { e.preventDefault(); copySelection(); }
+      else if (k === 'd' && selectedIds.length) { e.preventDefault(); duplicateSelection(); }
       // the stacking order: a step with the arrow, all the way with Shift too
       else if ((k === 'arrowup' || k === 'arrowdown') && editableShapes.length) {
         e.preventDefault();
@@ -8088,6 +8237,7 @@
             kindLabel={KIND_LABEL}
             {duplicateShape}
             {deleteShape}
+            {setLocked}
             markDirty={() => (dirty = true)}
           />
         </div>

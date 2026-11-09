@@ -71,6 +71,29 @@ export function notesAfterRemoval(notes, remaining, gone) {
 }
 
 /**
+ * The number a new numbered marker takes: the first one free in its series.
+ *
+ * A series is one colour on one picture: a panel, an overlay, or the page itself
+ * (`surfaceId`, the marker's `panel`). Colour is what this composer says "same
+ * feature" with, and a picture restarts the count, so a frame and a satellite
+ * capture each carry 1, 2, 3 and the same number on both marks the same point.
+ * A gap is refilled rather than left: deleting #2 and stamping again gives 2
+ * back, instead of a picture that counts 1, 3, 4. Markers already placed keep
+ * their numbers; only the next one offered follows this.
+ */
+export function nextMarkerNumber(shapes, color, surfaceId) {
+  const taken = new Set(
+    (shapes ?? [])
+      .filter((s) => s.kind === 'number' && s.color === color && s.panel === surfaceId)
+      .map((s) => Number(s.n))
+      .filter(Number.isFinite)
+  );
+  let n = 1;
+  while (taken.has(n)) n += 1;
+  return n;
+}
+
+/**
  * The row a panel moves to, or null when the move is refused.
  *
  * One past the last row is allowed and starts a fresh one — that is how a row is
