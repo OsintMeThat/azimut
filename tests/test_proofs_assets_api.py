@@ -269,3 +269,107 @@ def test_the_composer_reads_a_paste_back_where_the_save_wrote_it():
 
     folder = layout.proof_assets_rel("${entry.name}")
     assert f"`{folder}/${{p.asset}}`" in source
+
+
+# -- a proof that is a published picture -------------------------------------------
+#
+# A proof imported as published keeps its picture where an overlay is kept, named the
+# same way, under the spec's `published` list. The save is the one door into that folder.
+
+
+def _published(asset: str, natural=(60, 40), **extra) -> dict:
+    return {
+        "panels": [],
+        "shapes": [],
+        "pastes": [],
+        "published": [{"id": "u1", "asset": asset, "natural": list(natural), **extra}],
+    }
+
+
+def test_a_published_picture_is_kept_through_a_save_that_sends_no_bytes(client):
+    """The import sends the picture once; every later save from the composer names it and
+    sends nothing, and the folder keeps it because the spec still shows it."""
+    cid = _case(client, "Published")
+    data = _png()
+    asset = _asset(data)
+    spec = _published(asset["name"], url="https://x.com/a/1")
+    first = client.post(
+        f"/api/cases/{cid}/proofs", json={"title": "As published", "spec": spec, "assets": [asset]}
+    )
+    assert first.status_code == 200, first.text
+    name = first.json()["name"]
+
+    again = client.post(
+        f"/api/cases/{cid}/proofs", json={"title": "As published", "spec": spec, "rename_from": name}
+    )
+    assert again.status_code == 200, again.text
+    rel = f"{layout.proof_assets_rel(name)}/{asset['name']}"
+    assert client.get(f"/files/{cid}/{rel}").content == data
+    # and with nothing drawn on it, the picture is its own export
+    assert client.get(f"/files/{cid}/{layout.proof_export_rel(name)}").content == data
+
+
+def test_a_published_picture_follows_a_rename_and_stays_its_export(client):
+    cid = _case(client, "Renamed")
+    data = _png(color=(10, 200, 10))
+    asset = _asset(data)
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Before", "spec": _published(asset["name"]), "assets": [asset]},
+    )
+    moved = client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "After", "spec": _published(asset["name"]), "rename_from": "Before"},
+    )
+    assert moved.status_code == 200, moved.text
+    assert client.get(f"/files/{cid}/{layout.proof_assets_rel('After')}/{asset['name']}").content == data
+    assert client.get(f"/files/{cid}/{layout.proof_export_rel('After')}").content == data
+
+
+def test_a_published_picture_names_a_file_in_its_folder_and_nothing_else(client):
+    """Its name is held to an overlay's shape, so a spec cannot point the save at a path."""
+    cid = _case(client, "Traversal")
+    for bad in ("../../case.json", "abc.png", "0123456789abcdef.svg"):
+        refused = client.post(
+            f"/api/cases/{cid}/proofs", json={"title": "Bad", "spec": _published(bad)}
+        )
+        assert refused.status_code == 422, bad
+    for natural in ((0, 40), (60, 100_000)):
+        refused = client.post(
+            f"/api/cases/{cid}/proofs",
+            json={"title": "Bad", "spec": _published(_asset(_png())["name"], natural=natural)},
+        )
+        assert refused.status_code == 422, natural
+    refused = client.post(
+        f"/api/cases/{cid}/proofs", json={"title": "Bad", "spec": {"published": "a.png"}}
+    )
+    assert refused.status_code == 422
+    assert client.get(f"/api/cases/{cid}/proofs").json() == []
+
+
+def test_an_address_that_is_not_one_is_not_kept_as_the_picture_s_post(client):
+    cid = _case(client, "Origin")
+    asset = _asset(_png())
+    saved = client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Odd origin", "spec": _published(asset["name"], url="javascript:alert(1)"),
+              "assets": [asset]},
+    ).json()
+    spec = client.get(f"/api/cases/{cid}/proofs/{saved['name']}").json()
+    assert "url" not in spec["published"][0]
+
+
+def test_a_proof_that_is_not_published_saves_exactly_as_before(client):
+    """The field is additive: a spec without it gains nothing on the way through."""
+    from azimut.engine import proofimport
+
+    cid = _case(client, "Plain")
+    asset = _asset(_png())
+    saved = client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Plain proof", "spec": _spec(asset["name"]), "assets": [asset]},
+    ).json()
+    spec = client.get(f"/api/cases/{cid}/proofs/{saved['name']}").json()
+    assert "published" not in spec
+    entity = next(e for e in graph_read.entities(cid) if e["type"] == "proof")
+    assert proofimport.PUBLISHED_URL not in entity["attrs"]

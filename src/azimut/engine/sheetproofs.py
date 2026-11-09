@@ -47,7 +47,7 @@ from . import links as link_engine
 from . import satellite as satellite_engine
 from . import sheetroles
 from .sheetpromote import ERROR, JOIN, MAKE, SKIP, UPDATE, counts_of, urls_in
-from .proofimport import MAX_SOURCES
+from .proofimport import MAX_SOURCES, PUBLISHED_URL
 from .sheets import SheetError, key_index
 
 if TYPE_CHECKING:
@@ -296,7 +296,7 @@ def _decide(
         # against the case too, and this is where.
         held = built_proof(case, proof_url)
         taken = case.find_entity(attr="spec", value=layout.proof_spec_rel(name))
-        decision["writes"] = "a proof, its two files and its point"
+        decision["writes"] = "a proof, its footage and its point"
         if taken is not None and (held is None or taken["id"] != held["id"]):
             decision.update(action=ERROR, reason=f"another proof is already called '{name}'")
             return decision
@@ -365,9 +365,13 @@ def built_proof(case: "Case", proof_url: str) -> dict[str, Any] | None:
     rather than a rename — and, worse, makes two rows publishing *one* picture under two
     titles two separate proofs of the same image.
 
-    Read off the panel: the picture was downloaded from that address and records it
-    (`attrs.source_url`), and the proof is what composes it.
+    Read off the proof: it keeps the picture as published and records the post it came
+    from (`PUBLISHED_URL`). A proof built before that filed the picture as media, which
+    records the address itself (`attrs.source_url`), so that is asked next.
     """
+    found = case.find_entity(attr=PUBLISHED_URL, value=proof_url)
+    if found is not None and found.get("type") == "proof":
+        return found
     panel = held_media(case, proof_url)
     if panel is None:
         return None

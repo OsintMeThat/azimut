@@ -50,8 +50,8 @@ class FetchIn(BaseModel):
     #: 1-based pick when the post carries several attachments, as in Media.
     index: int | None = None
     #: Several picks: a post publishing a geolocation as a set publishes one proof and the
-    #: set becomes its panels, and a post carrying two photos of the scene is two pieces
-    #: of material, not one. In the order they were ticked.
+    #: set becomes its pictures, stacked, and a post carrying two photos of the scene is
+    #: two pieces of material, not one. In the order they were ticked.
     indexes: list[int] = Field(default_factory=list, max_length=import_engine.MAX_PANELS)
     use_cookies: bool = False
 
@@ -201,9 +201,9 @@ async def attach(
     with path.open("wb") as out:
         shutil.copyfileobj(file.file, out)
     if slot == import_engine.SLOT_PANEL:
-        # A proof is composed of pictures: the composer lays panels out on a canvas and
-        # a clip has nothing to lay out. Said at the door the file comes through rather
-        # than at the preview, which is two screens and one staged file later.
+        # The proof is the published picture, and a clip is not one. Said at the door the
+        # file comes through rather than at the preview, which is two screens and one
+        # staged file later.
         if media_engine.media_kind(name) != "image":
             path.unlink(missing_ok=True)
             raise HTTPException(
@@ -247,10 +247,11 @@ def write_import(
 ) -> dict[str, Any]:
     """Write one held import, in the order that keeps the graph readable.
 
-    The footage is filed first so the picture can record that it came out of it;
-    the proof is saved through the composer's own route, so the place, the verbs
-    and the derivation are the ones a hand-made proof would have written. There
-    is no second implementation of any of that here.
+    The footage is filed first, as media, so the proof can rest on it; the published
+    picture is not, and lives with the proof. The proof is saved through the
+    composer's own route, so the place, the verbs and the derivation are the ones a
+    hand-made proof would have written. There is no second implementation of any of
+    that here.
 
     Called by the dialog's own commit and by the sheet road that builds a hundred
     of these in a job (`api/sheetproofs.py`). ``by`` is the only thing that
@@ -296,63 +297,42 @@ def write_import(
             created["sources"] = filed_sources
 
     # Path and manifest entry together: pairing them by position meant a file whose bytes
-    # had gone — quarantined by an antivirus, swept by hand — filed every picture after it
-    # under its neighbour's origin.
+    # had gone — quarantined by an antivirus, swept by hand — gave every picture after it
+    # its neighbour's origin.
     held_panels = import_engine.staged_pairs(case, token, import_engine.SLOT_PANEL)
     if not held_panels:
         raise HTTPException(status_code=400, detail="the picture is no longer held")
-    panel_paths = [path for path, _ in held_panels]
-    name = import_engine.proof_name(form["title"])
-    # Both read before a single file moves: filing a produced file *moves* it out of the
-    # staging directory, so anything the spec needs from the bytes has to be taken first.
-    naturals = [import_engine.panel_size(path) for path in panel_paths]
-    # One picture is already a rendered proof, so it is filed as the export. A set has no
-    # render — the layout is the composer's canvas, in the browser — and a second renderer
-    # here would drift from it at the first change. So the set is saved without one, and
-    # the first save in the composer writes the real thing.
-    export = (
-        base64.b64encode(import_engine.png_bytes(panel_paths[0])).decode("ascii")
-        if len(panel_paths) == 1
-        else None
-    )
-    panels: list[tuple[str, tuple[int, int]]] = []
-    filed_panels: list[dict[str, Any]] = []
-    for at, (panel_path, held) in enumerate(held_panels):
-        # The picture states where it came from once, in its provenance: the post that
-        # published it. What the geolocation *rests* on is the proof's own claim, filed
-        # from the spec below — a published picture is one file among the several the
-        # proof was read from, not the thing they all hang off.
-        panel_source = dict(held.get("source") or {})  # the post, and nothing else
-        # Numbered from the second, so a single-picture import keeps the name it had.
-        stem = name if at == 0 else f"{name} {at + 1}"
-        filed = media_engine.import_produced_file(
-            case,
-            panel_path,
-            layout.visible_filename(stem, panel_path.suffix),
-            panel_source,
-            by=by,
-        )
-        panels.append((filed["entity"]["attrs"]["path"], naturals[at]))
-        filed_panels.append(filed)
-    created["panel"] = _summary(filed_panels[0])
-    if len(filed_panels) > 1:
-        created["panels"] = [_summary(one) for one in filed_panels]
+    # The published picture is the proof as it was published, so it is kept with the
+    # proof the way a pasted overlay is, and never filed as media. It goes in through the
+    # composer's own save, which checks each asset's name against its bytes and writes
+    # them before anything else: there is no second way into a proof's assets folder.
+    pictures: list[tuple[str, tuple[int, int], str]] = []
+    assets: dict[str, bytes] = {}
+    for panel_path, held in held_panels:
+        asset, data, natural = import_engine.published_asset(panel_path.read_bytes())
+        assets[asset] = data
+        # The post it came from: the address it was fetched for, or the one stated beside
+        # a hand-attached file.
+        url = str(held.get("for_url") or (held.get("source") or {}).get("url") or "")
+        pictures.append((asset, natural, url if media_engine.is_address(url) else ""))
 
-    spec = import_engine.build_spec(panels, form, material=source_rels)
+    spec = import_engine.build_spec(
+        import_engine.published_entries(pictures), form, material=source_rels
+    )
+    # No export is sent: a published proof nobody drew on is its own export, and the save
+    # writes it from the pictures it was handed (`proofs.published_export`).
     saved = proofs.save_proof(
         case_id,
-        proofs.ProofIn(title=form["title"], spec=spec, png_base64=export),
+        proofs.ProofIn(
+            title=form["title"],
+            spec=spec,
+            assets=[
+                proofs.AssetIn(name=asset, data=base64.b64encode(data).decode("ascii"))
+                for asset, data in assets.items()
+            ],
+        ),
     )
     proof_entity = case.find_entity(attr="spec", value=layout.proof_spec_rel(str(saved["name"])))
-    # Without an export there is no thumbnail, and a proof draws in the graph off the one
-    # recorded on its own row (`graph._previews`) — so it would be the only blank node of
-    # its own constellation. It borrows the first picture's, read off that media's sidecar
-    # where the thumbnailer put it. A thumbnail is a preview and never an assertion, which
-    # is what makes borrowing honest here where filing one picture as `proofs/<name>.png`
-    # would not be.
-    borrowed = (filed_panels[0].get("item") or {}).get("thumbnail")
-    if export is None and borrowed and proof_entity is not None:
-        case.update_entity(proof_entity["id"], {"attrs": {"thumb": borrowed}})
     created["proof"] = {
         "name": saved["name"],
         "png": saved.get("png"),

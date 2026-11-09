@@ -128,6 +128,25 @@ def test_deleting_a_proof_takes_its_pasted_images(client):
     assert not case.resolve_inside(full.proof).exists()
 
 
+def test_a_published_proof_owns_its_picture_and_takes_it_to_the_trash(client):
+    """A proof imported as published keeps its picture where an overlay is kept, so the
+    registry's assets folder is what carries it: owned, sent to the Trash with the proof
+    and restored with it."""
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    entity = case.find_entity(attr="spec", value=full.published_proof)
+    picture = case.resolve_inside(full.published_asset)
+    kept = picture.read_bytes()
+
+    assert full.published_asset.rsplit("/", 1)[0] in artifacts.owned(case, entity)
+    group = client.delete(f"/api/cases/{full.case_id}/entities/{entity['id']}").json()["trash"]
+    assert not picture.exists()
+
+    restored = client.post(f"/api/cases/{full.case_id}/trash/{group}/restore")
+    assert restored.status_code == 200, restored.text
+    assert picture.read_bytes() == kept
+
+
 def test_a_collage_owns_its_preview_but_not_its_exported_picture(client):
     full = fullcase.build_full_case(client)
     case = Case.open(full.case_id)

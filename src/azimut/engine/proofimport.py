@@ -7,24 +7,22 @@ the same nodes the composer writes when somebody geolocates a clip by hand:
 - the **source media** — what was filmed on the spot. It takes ``located-at``
   when the analyst says the camera was there, because the registry gives that
   verb to material and to nothing else;
-- the **panel images** — the pictures the post published. They are files the case
-  collected too, and they are what the proof composes. A post publishing a set —
-  the overhead, the ground shot, the match — is one proof of several panels, not
-  one picture kept and the rest dropped;
 - the **place** — filed exactly as the composer files one, so a point already in
   the case is reused rather than pinned twice;
 - the **proof** — a real spec, so it lists, exports, travels in a bundle and
   reopens for editing like every other proof. Nothing here is a second class of
   proof.
 
-**One picture exports itself; a set waits for the composer.** A published panel is
-already a rendered proof, so a single-picture import files it as ``proofs/<name>.png``
-and is done. Several panels have no render — laying them out is the composer's
-canvas, in the browser — and inventing a second renderer here would drift from it
-at the first change to a layout. So a set is filed **without an export**, borrowing
-the first picture's thumbnail so the proof still draws in the graph, and the first
-save in the composer writes the real one. A composition nobody composed is worth
-opening anyway.
+**The published picture is the proof, as it was published.** It is somebody else's
+finished work, so it is not laid out as a panel inside Azimut's background, margins
+and footer, and it is not filed as media either: nothing in it is material to
+analyse. Its bytes live with the proof, in ``proofs/.meta/<name>.assets/`` like a
+pasted overlay, and the spec names them under ``published`` (`published_entries`).
+A post publishing a set — the overhead, the ground shot, the match — is one proof
+whose pictures are stacked top to bottom with no margin, each at its own size
+(`published_page`). The export is those pictures and nothing else
+(`published_png`): the bytes as published for one PNG, the same pixels re-encoded
+for any other picture.
 
 **Nothing is written until the analyst approves the preview.** Both downloads
 land in a staging directory under ``media/.dl/``, which the bundle already
@@ -43,6 +41,8 @@ by hand, which is the same screen.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import math
 import re
@@ -52,7 +52,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from .. import layout
 from ..workspace import Case, CaseError, ensure_dir
@@ -91,6 +91,26 @@ SLOTS = (SLOT_PANEL, SLOT_SOURCE)
 #: How many pictures one import composes. A published set is a handful; past this it is an
 #: album, and an album is not a proof.
 MAX_PANELS = 8
+
+#: The most one published picture may weigh. It is kept with the proof the way a pasted
+#: overlay is, so it answers to the same limit (`api/proofs.MAX_ASSET_BYTES`).
+MAX_PICTURE_BYTES = 20 * 1024 * 1024
+
+#: How big the stacked page may be. The composer's own export bounds
+#: (`MAX_EXPORT_DIMENSION` and `MAX_EXPORT_PIXELS` in `lib/composer.js`), so a published
+#: proof can always be drawn on and exported again, and the server never composes a
+#: page larger than that.
+MAX_PAGE_SIDE = 16_384
+MAX_PAGE_PIXELS = 64_000_000
+
+#: The formats a proof's assets folder keeps as they arrived (`api/proofs.ASSET_NAME`).
+#: Any other picture is re-encoded to PNG, which loses nothing.
+KEPT_FORMATS = {"PNG": ".png", "JPEG": ".jpg", "WEBP": ".webp"}
+
+#: The proof attribute naming the post its published picture came from. Mirrored off the
+#: spec on every save, so a second import of the same post and a sheet row building it
+#: again can find the proof without opening every spec in the case.
+PUBLISHED_URL = "published_url"
 
 #: How much material one proof may rest on. A thread hangs a handful of photos and clips
 #: off its point; past this it is a channel dump, and that is the Media Library's job.
@@ -435,19 +455,14 @@ def preview(case: Case, token: str, form: dict[str, Any]) -> dict[str, Any]:
     """
     draft = read_draft(case, token)
     panels = _held(draft, SLOT_PANEL)
-    #: One name per picture, because the report is a list of *files* and every line of it
-    #: is about one of them. Calling three of them `panel` made the reading ambiguous —
-    #: "panel derived-from source", three times, says nothing about which — and made the
-    #: screen that renders it keyed on a name three rows shared.
-    panel_slots = _numbered(SLOT_PANEL, len(panels))
     panel = panels[0] if panels else {}
     source_urls = read_source_urls(form)
     held_source = stated_sources(_held(draft, SLOT_SOURCE), source_urls)
+    #: One name per file, because the report is a list of *files* and every line of it
+    #: is about one of them. Calling three of them `source` made the reading ambiguous,
+    #: and made the screen that renders it keyed on a name three rows shared.
     source_slots = _numbered(SLOT_SOURCE, len(held_source))
-    #: Both halves as one list of (name, file), which is the order the report reads in:
-    #: the material first, then the pictures composed out of it.
     material = list(zip(source_slots, held_source))
-    composed = list(zip(panel_slots, panels))
 
     title = str(form.get("title") or "").strip()
     coords_text = str(form.get("coords") or "").strip()
@@ -462,6 +477,10 @@ def preview(case: Case, token: str, form: dict[str, Any]) -> dict[str, Any]:
         blocking.append("There is no image for the proof yet.")
     elif any(held.get("kind") != "image" for held in panels):
         blocking.append("A proof is composed of pictures, and this file is not one.")
+    else:
+        blocking += _picture_problems(
+            [path for path, _held_entry in staged_pairs(case, token, SLOT_PANEL)]
+        )
     if not title:
         blocking.append("The proof needs a name.")
     if not source_urls:
@@ -512,8 +531,9 @@ def preview(case: Case, token: str, form: dict[str, Any]) -> dict[str, Any]:
                 }
             )
 
-    # -- the material, then the pictures that compose it
-    for slot, staged in material + composed:
+    # -- the material. The published pictures are not in this list: they are kept with
+    # the proof rather than filed as media, and the proof's own row says so.
+    for slot, staged in material:
         if not staged.get("filename"):
             continue
         held = case.find_entity(attr="sha256", value=staged.get("sha256"))
@@ -547,35 +567,37 @@ def preview(case: Case, token: str, form: dict[str, Any]) -> dict[str, Any]:
 
     if name:
         entities.append(
-            {"slot": "proof", "type": "proof", "label": name, "state": "new", "detail": ""}
+            {
+                "slot": "proof",
+                "type": "proof",
+                "label": name,
+                "state": "new",
+                "detail": (
+                    "the picture as published, not added to Media"
+                    if len(panels) < 2
+                    else f"{len(panels)} pictures as published, stacked, not added to Media"
+                ),
+            }
         )
 
     # -- the edges, and every one the save will write
     #
-    # The point reaches the whole derivation closure, not just the footage: the
-    # picture the proof composes is in that closure too, so it takes the verb as
-    # well. Drawing only the footage would make the preview quieter than the
-    # graph, which is the one way a preview can be wrong.
+    # The point reaches the whole derivation closure: the material the proof rests on
+    # takes the verb, and the proof states the place itself. The published picture is
+    # not a node, so it takes no edge.
     if point is not None and name and panels:
         verb = link_engine.LOCATED_AT if pov else link_engine.DEPICTS
         kinds = ("image", "video", "audio") if pov else ("image", "video")
-        for slot, staged in material + composed:
+        for slot, staged in material:
             if staged.get("filename") and str(staged.get("kind") or "") in kinds:
                 links.append(_edge(slot, verb, "place"))
-        # **The proof rests on the material, and composes the pictures.** Both are its own
-        # edges, which is what makes it the node the constellation hangs off — the reading
-        # somebody looking at the graph is after, since the proof is the finding and a
-        # published picture is one file among the several it was read from. Hanging the
-        # material off the *picture* instead made a media node the hub of the geolocation
-        # and left the proof a leaf beside it.
-        #
-        # It is also the shape the composer writes by hand (`spec.material`, ONTOLOGY §3),
-        # so a proof re-saved there restates exactly these edges rather than losing them.
+        # **The proof rests on the material.** Its own edges, which is what makes it the
+        # node the constellation hangs off. It is also the shape the composer writes by
+        # hand (`spec.material`, ONTOLOGY §3), so a proof re-saved there restates exactly
+        # these edges rather than losing them.
         for source_slot, staged in material:
             if staged.get("filename"):
                 links.append(_edge("proof", link_engine.DERIVED_FROM, source_slot))
-        for slot in panel_slots:
-            links.append(_edge("proof", link_engine.DERIVED_FROM, slot))
         links.append(_edge("proof", link_engine.DEPICTS, "place"))
 
     # -- what the files say about themselves
@@ -624,14 +646,17 @@ def _media_detail(staged: dict[str, Any], held: dict[str, Any] | None) -> str:
 def _already_imported(
     case: Case, draft: dict[str, Any], panel: dict[str, Any]
 ) -> dict[str, str] | None:
-    """Whether this post's picture is already filed, by its bytes then its URL.
+    """Whether this post's picture is already in the case, by its bytes then its URL.
 
     Two questions, because the same post can arrive twice with a re-encoded
-    image, and the same picture can arrive from two posts.
+    image, and the same picture can arrive from two posts. Each is asked of the
+    proofs, which keep the pictures imported now, then of the media, which hold the
+    ones imported before a published picture stayed with its proof.
     """
-    digest = panel.get("sha256")
+    digest = str(panel.get("sha256") or "")
     if digest:
-        held = case.find_entity(attr="sha256", value=digest)
+        proof = _proof_keeping(case, digest)
+        held = proof or case.find_entity(attr="sha256", value=digest)
         if held is not None:
             return {
                 "code": "already-imported",
@@ -639,12 +664,33 @@ def _already_imported(
             }
     post_url = str((draft.get("post") or {}).get("url") or "")
     if post_url:
-        held = case.find_entity(attr="source_url", value=post_url)
+        held = case.find_entity(attr=PUBLISHED_URL, value=post_url) or case.find_entity(
+            attr="source_url", value=post_url
+        )
         if held is not None:
             return {
                 "code": "already-imported",
                 "text": f"This post was already imported as '{held['label']}'.",
             }
+    return None
+
+
+def _proof_keeping(case: Case, digest: str) -> dict[str, Any] | None:
+    """The proof whose assets folder holds these bytes, read off the file names.
+
+    An asset is named by the first sixteen hex digits of its own hash, so one glob
+    answers without opening a spec. A picture re-encoded to PNG on the way in has a
+    name of its own and is found by its post instead.
+    """
+    # Read without creating: a preview writes nothing, not even an empty folder.
+    folder = case.resolve_inside(f"proofs/{layout.META_DIR}")
+    if not folder.is_dir():
+        return None
+    for path in folder.glob(f"*.assets/{digest[:16]}.*"):
+        name = path.parent.name.removesuffix(".assets")
+        proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(name))
+        if proof is not None:
+            return proof
     return None
 
 
@@ -663,70 +709,154 @@ def _edge(from_slot: str, type_: str, to_slot: str) -> dict[str, str]:
     }
 
 
-def panel_size(path: Path) -> tuple[int, int]:
-    """The picture's own pixel size, which the composer lays a panel out from."""
-    with Image.open(path) as img:
-        return int(img.width), int(img.height)
+# -- the published picture ------------------------------------------------------
 
 
-def png_bytes(path: Path) -> bytes:
-    """The imported picture as the proof's export.
+def _opened(data: bytes) -> Image.Image:
+    """A picture read upright, the way a browser draws it: a camera's orientation tag
+    turns the pixels rather than being left for the next reader to notice."""
+    img = Image.open(io.BytesIO(data))
+    img.load()
+    return ImageOps.exif_transpose(img) or img
 
-    A published panel is already a rendered proof, so the import files it as one
-    rather than re-rendering a composition nobody composed. Re-encoded to PNG
-    because that is what `proofs/<name>.png` claims to be, and a JPEG under that
-    name is a lie the next reader has to sniff its way out of.
+
+def _turned(img: Image.Image) -> bool:
+    """Whether a picture carries an orientation tag that turns it."""
+    try:
+        return int(img.getexif().get(0x0112, 1) or 1) != 1
+    except (AttributeError, ValueError, TypeError):
+        return False
+
+
+def published_asset(data: bytes) -> tuple[str, bytes, tuple[int, int]]:
+    """How a published picture is kept with its proof: its asset name, its bytes and
+    the size it is drawn at.
+
+    A PNG, a JPEG or a WebP is kept byte for byte, named by its own hash like a pasted
+    overlay (`api/proofs.ASSET_NAME`). Anything else a post can carry, a GIF or an
+    AVIF, is re-encoded to PNG, which keeps every pixel. The size is the upright one,
+    since that is what the composer lays the page out from.
     """
-    import io
+    with Image.open(io.BytesIO(data)) as raw:
+        suffix = KEPT_FORMATS.get(str(raw.format or ""))
+    img = _opened(data)
+    if suffix is None:
+        data = _png(img)
+        suffix = ".png"
+    name = f"{hashlib.sha256(data).hexdigest()[:16]}{suffix}"
+    return name, data, (int(img.width), int(img.height))
 
-    with Image.open(path) as img:
-        buffer = io.BytesIO()
-        (img if img.mode in ("RGB", "RGBA", "L") else img.convert("RGB")).save(buffer, "PNG")
-        return buffer.getvalue()
+
+def published_page(naturals: list[tuple[int, int]]) -> tuple[int, int, list[tuple[int, int]]]:
+    """The page a set of published pictures makes: its width, its height, and where
+    each picture's top left corner sits on it.
+
+    Stacked top to bottom in the order they were published, each at its own size and
+    centred on the widest, with no margin. Mirrors `publishedBoxes` in
+    `lib/composer.js`, which draws the same page in the composer.
+    """
+    width = max((w for w, _h in naturals), default=0)
+    at: list[tuple[int, int]] = []
+    top = 0
+    for w, h in naturals:
+        at.append(((width - w) // 2, top))
+        top += h
+    return width, top, at
+
+
+def _png(img: Image.Image) -> bytes:
+    buffer = io.BytesIO()
+    (img if img.mode in ("RGB", "RGBA", "L", "LA") else img.convert("RGBA")).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def published_png(pictures: list[bytes]) -> bytes:
+    """The export of a published proof nobody drew on: its pictures and nothing else.
+
+    One PNG is its own export, byte for byte. Any other single picture is the same
+    pixels re-encoded to PNG, because that is what `proofs/<name>.png` claims to be.
+    A set is its page (`published_page`), transparent where a narrower picture leaves
+    the page bare, since a published proof has no background of its own.
+    """
+    if len(pictures) == 1:
+        with Image.open(io.BytesIO(pictures[0])) as raw:
+            if raw.format == "PNG" and not _turned(raw):
+                return pictures[0]
+        return _png(_opened(pictures[0]))
+    opened = [_opened(data) for data in pictures]
+    width, height, at = published_page([(img.width, img.height) for img in opened])
+    page = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    for img, corner in zip(opened, at):
+        page.paste(img.convert("RGBA"), corner)
+    return _png(page)
+
+
+def _picture_problems(paths: list[Path]) -> list[str]:
+    """Why the held pictures cannot become a proof, said before anything is written.
+
+    Each one is bounded by its weight and by the pixel clamp every picture entering
+    the app answers to, and the page they stack into by what the composer can export.
+    """
+    naturals: list[tuple[int, int]] = []
+    for path in paths:
+        if path.stat().st_size > MAX_PICTURE_BYTES:
+            return [f"A picture over {MAX_PICTURE_BYTES // 1024 // 1024} MB is too large to keep with a proof."]
+        try:
+            naturals.append(published_asset(path.read_bytes())[2])
+        except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+            return ["A picture of this post could not be read."]
+    width, height, _at = published_page(naturals)
+    if width > MAX_PAGE_SIDE or height > MAX_PAGE_SIDE or width * height > MAX_PAGE_PIXELS:
+        return ["These pictures are too large to stack into one proof."]
+    return []
+
+
+def published_entries(
+    pictures: list[tuple[str, tuple[int, int], str]],
+) -> list[dict[str, Any]]:
+    """The spec's ``published`` list: one entry per picture, top to bottom.
+
+    ``id`` is what a mark drawn on the picture is bound to, like a panel's. ``url`` is
+    the post that published it, kept because the picture is no media and has nowhere
+    else to say where it came from.
+    """
+    return [
+        {
+            "id": f"u{uuid.uuid4().hex[:8]}",
+            "asset": asset,
+            "natural": [natural[0], natural[1]],
+            **({"url": url} if url else {}),
+        }
+        for asset, natural, url in pictures
+    ]
 
 
 def build_spec(
-    panels: list[tuple[str, tuple[int, int]]],
+    published: list[dict[str, Any]],
     form: dict[str, Any],
     material: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """The proof an import writes: the pictures it published, the point, the source.
+    """The proof an import writes: the pictures as published, the point, the source.
 
-    Everything else is left out on purpose. A spec omits what it does not state,
-    and the composer's `normalizeProofStyle` fills every look from its own
-    defaults — so an imported proof opens as a plain composition the analyst can
-    annotate, rather than one frozen into whatever this module happened to think a
-    proof should look like.
-
-    **A post publishing several pictures is one proof of several panels**, laid in
-    one row and in the order they were published. Which is not a new kind of thing:
-    a proof is a composition, and the only reason an import used to write exactly
-    one panel is that it had exactly one picture. The note lands on the first — it
-    is one sentence about the proof, not a caption per picture.
+    Everything else is left out on purpose. A spec omits what it does not state, and a
+    published proof has no background, margins, footer or layout to state. The note is
+    the proof's description, one sentence about it, since it has no caption to land on.
     """
+    note = str(form.get("note") or "").strip()
     spec = {
         "azimut_proof": 1,
-        "panels": [
-            {
-                "id": f"p{uuid.uuid4().hex[:8]}",
-                "src": rel,
-                "caption": str(form.get("note") or "").strip() if at == 0 else "",
-                "row": 0,
-                "scale": 1,
-                "natural": [natural[0], natural[1]],
-                "meta": {},
-            }
-            for at, (rel, natural) in enumerate(panels)
-        ],
+        "ink": "page",
+        "published": [dict(one) for one in published],
+        "panels": [],
         "pastes": [],
         "shapes": [],
         "notes": {},
         "legendOrder": [],
-        # The files the proof rests on without composing them, each with the address it
-        # came from. Written into the spec rather than onto the pictures, so the save
-        # states the edges and a re-save in the composer restates them — and so taking a
-        # source off the proof there takes its files out of the chain with it. The
-        # composer's own Source list writes the same key.
+        **({"description": note} if note else {}),
+        # The files the proof rests on, each with the address it came from. Written into
+        # the spec, so the save states the edges and a re-save in the composer restates
+        # them, and so taking a source off the proof there takes its files out of the
+        # chain with it. The composer's own Source list writes the same key.
         "material": [dict(one) for one in material or []],
         "sources": read_source_urls(form),
     }

@@ -11,6 +11,7 @@ Three promises are what these tests hold to:
   nothing out prefills nothing and the form is filled by hand.
 """
 
+import base64
 import io
 
 from fakeydl import install_fake_ydl
@@ -297,20 +298,20 @@ def test_the_preview_lists_what_the_import_would_create(client):
 
     report = preview(client, case_id, token)
     assert report["ready"] is True
+    # The published picture is the proof itself, so it is no media row of its own.
     assert [(e["slot"], e["type"], e["state"]) for e in report["entities"]] == [
         ("place", "place", "new"),
         ("source", "media", "new"),
-        ("panel", "media", "new"),
         ("proof", "proof", "new"),
     ]
+    proof = report["entities"][-1]
+    assert proof["detail"] == "the picture as published, not added to Media"
     edges = {(e["from"], e["type"], e["to"]) for e in report["links"]}
-    assert ("source", link_engine.LOCATED_AT, "place") in edges
-    assert ("proof", link_engine.DEPICTS, "place") in edges
-    # The proof is what the constellation hangs off: it composes the picture and rests
-    # on the material, and both are its own edges.
-    assert ("proof", link_engine.DERIVED_FROM, "source") in edges
-    assert ("proof", link_engine.DERIVED_FROM, "panel") in edges
-    assert ("panel", link_engine.DERIVED_FROM, "source") not in edges
+    assert edges == {
+        ("source", link_engine.LOCATED_AT, "place"),
+        ("proof", link_engine.DERIVED_FROM, "source"),
+        ("proof", link_engine.DEPICTS, "place"),
+    }
 
 
 def test_without_the_camera_on_site_the_footage_shows_the_place(client):
@@ -353,7 +354,7 @@ def test_the_preview_says_when_the_footage_was_not_recovered(client):
     report = preview(client, case_id, token)
     assert report["ready"] is True  # a dead link is information, not a blockage
     assert any(w["code"] == "no-source-media" for w in report["warnings"])
-    assert [e["slot"] for e in report["entities"]] == ["place", "panel", "proof"]
+    assert [e["slot"] for e in report["entities"]] == ["place", "proof"]
 
 
 def test_a_missing_source_is_said_once_not_twice(client):
@@ -420,9 +421,27 @@ def test_the_preview_reads_the_bytes_it_holds_for_a_duplicate(client):
     attach(client, case_id, token, "panel", same, "panel.png")
 
     report = preview(client, case_id, token)
-    panel = next(e for e in report["entities"] if e["slot"] == "panel")
-    assert panel["state"] == "existing"
-    assert any(w["code"] == "already-imported" for w in report["warnings"])
+    assert any(
+        w["code"] == "already-imported" and "already-here" in w["text"] for w in report["warnings"]
+    )
+
+
+def test_a_picture_kept_with_a_proof_is_noticed_by_its_bytes(client):
+    """A published picture lives in its proof's assets folder, not in Media, so the
+    question "is this already here" is asked of the proofs too."""
+    case_id = make_case(client)
+    same = picture()
+    first = start(client, case_id)
+    attach(client, case_id, first, "panel", same, "panel.png")
+    created = commit(client, case_id, first)
+
+    second = start(client, case_id)
+    attach(client, case_id, second, "panel", same, "again.png")
+    report = preview(client, case_id, second, title="Second sighting")
+    assert {
+        "code": "already-imported",
+        "text": f"This picture is already in the case as '{created['proof']['name']}'.",
+    } in report["warnings"]
 
 
 def test_the_same_post_twice_is_noticed_by_its_address(client):
@@ -579,15 +598,40 @@ def test_the_import_writes_the_graph_the_composer_would_have(client):
     case = case_of(case_id)
     proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(created["proof"]["name"]))
     place_id = created["place"]["id"]
-    panel_id = created["panel"]["id"]
     source_id = created["source"]["id"]
 
+    assert "panel" not in created
     assert links_between(case, source_id, place_id) == {link_engine.LOCATED_AT}
     assert links_between(case, proof["id"], place_id) == {link_engine.DEPICTS}
-    # The proof composes the picture and rests on the material: one node the whole
-    # geolocation hangs off, which is what a hand-made proof writes too.
-    assert link_engine.DERIVED_FROM in links_between(case, proof["id"], panel_id)
-    assert link_engine.DERIVED_FROM in links_between(case, proof["id"], source_id)
+    # The proof rests on the material: one node the whole geolocation hangs off, which
+    # is what a hand-made proof writes too. The published picture is no node at all.
+    chain = [
+        link["to"] for link in case.links_of(proof["id"])
+        if link["from"] == proof["id"] and link["type"] == link_engine.DERIVED_FROM
+    ]
+    assert chain == [source_id]
+
+
+def test_the_published_picture_is_not_added_to_media(client):
+    """The footage is material to analyse and is filed. The picture is somebody else's
+    finished proof: it stays with the proof, in its assets folder, like an overlay."""
+    case_id = make_case(client)
+    token = start(client, case_id)
+    attach(client, case_id, token, "panel", picture(), "panel.png")
+    attach(client, case_id, token, "source", b"video-bytes", "reel.mp4")
+    created = commit(client, case_id, token)
+
+    case = case_of(case_id)
+    media = [e for e in case.list_entities() if e["type"] == "media"]
+    assert [e["id"] for e in media] == [created["source"]["id"]]
+    page = client.get(f"/api/cases/{case_id}/media/page", params={"limit": 50}).json()
+    assert [item["path"] for item in page["items"]] == [created["source"]["path"]]
+
+    name = created["proof"]["name"]
+    spec = client.get(f"/api/cases/{case_id}/proofs/{name}").json()
+    asset = spec["published"][0]["asset"]
+    kept = case.resolve_inside(f"{layout.proof_assets_rel(name)}/{asset}")
+    assert kept.read_bytes() == picture()
 
 
 def test_the_preview_promises_exactly_the_edges_the_commit_writes(client):
@@ -605,7 +649,6 @@ def test_the_preview_promises_exactly_the_edges_the_commit_writes(client):
     proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(created["proof"]["name"]))
     by_slot = {
         "place": created["place"]["id"],
-        "panel": created["panel"]["id"],
         "source": created["source"]["id"],
         "proof": proof["id"],
     }
@@ -640,15 +683,33 @@ def test_the_proof_is_a_real_proof(client):
     assert spec["azimut_proof"] == 1
     assert spec["pov"] is True
     assert spec["sources"] == FORM["source_urls"]
-    assert len(spec["panels"]) == 1
-    assert spec["panels"][0]["natural"] == [320, 200]
+    # The picture as published: no panel, no layout, the note as the proof's description.
+    assert spec["panels"] == []
+    assert len(spec["published"]) == 1
+    assert spec["published"][0]["natural"] == [320, 200]
+    assert spec["description"] == FORM["note"]
+    for unstated in ("bg", "space", "layout", "footer", "footerEnabled", "signature"):
+        assert unstated not in spec
 
     case = case_of(case_id)
     assert case.resolve_inside(layout.proof_export_rel(name)).is_file()
-    assert case.resolve_inside(spec["panels"][0]["src"]).is_file()
+    proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(name))
+    assert proof["attrs"]["thumb"], "it draws in the graph off its own export"
 
 
-def test_the_export_is_a_png_whatever_arrived(client):
+def test_one_png_is_its_own_export_byte_for_byte(client):
+    """No background, no margin, no footer: the export is the picture as published."""
+    case_id = make_case(client)
+    token = start(client, case_id)
+    published = picture(size=(333, 217))
+    attach(client, case_id, token, "panel", published, "panel.png")
+
+    created = commit(client, case_id, token)
+    export = case_of(case_id).resolve_inside(layout.proof_export_rel(created["proof"]["name"]))
+    assert export.read_bytes() == published
+
+
+def test_the_export_is_a_png_of_the_same_pixels_whatever_arrived(client):
     case_id = make_case(client)
     token = start(client, case_id)
     jpeg = io.BytesIO()
@@ -656,20 +717,69 @@ def test_the_export_is_a_png_whatever_arrived(client):
     attach(client, case_id, token, "panel", jpeg.getvalue(), "panel.jpg")
 
     created = commit(client, case_id, token)
-    export = case_of(case_id).resolve_inside(layout.proof_export_rel(created["proof"]["name"]))
-    with Image.open(export) as img:
+    name = created["proof"]["name"]
+    case = case_of(case_id)
+    export = case.resolve_inside(layout.proof_export_rel(name))
+    # the JPEG itself is kept as it arrived, and the export is its pixels, losslessly
+    spec = client.get(f"/api/cases/{case_id}/proofs/{name}").json()
+    asset = spec["published"][0]["asset"]
+    assert asset.endswith(".jpg")
+    kept = case.resolve_inside(f"{layout.proof_assets_rel(name)}/{asset}")
+    assert kept.read_bytes() == jpeg.getvalue()
+    with Image.open(export) as img, Image.open(kept) as original:
         assert img.format == "PNG"
+        assert img.size == (64, 48)
+        assert img.convert("RGB").tobytes() == original.convert("RGB").tobytes()
+
+
+def test_a_picture_turned_by_its_camera_is_kept_upright(client):
+    """A browser draws a photo by its orientation tag, so the size the page is laid out
+    from is the upright one, and so is the export."""
+    case_id = make_case(client)
+    token = start(client, case_id)
+    exif = Image.Exif()
+    exif[0x0112] = 6  # turned a quarter clockwise
+    jpeg = io.BytesIO()
+    Image.new("RGB", (80, 40), (20, 160, 90)).save(jpeg, "JPEG", exif=exif.tobytes())
+    attach(client, case_id, token, "panel", jpeg.getvalue(), "phone.jpg")
+
+    created = commit(client, case_id, token)
+    name = created["proof"]["name"]
+    spec = client.get(f"/api/cases/{case_id}/proofs/{name}").json()
+    assert spec["published"][0]["natural"] == [40, 80]
+    export = case_of(case_id).resolve_inside(layout.proof_export_rel(name))
+    with Image.open(export) as img:
+        assert img.size == (40, 80)
+
+
+def test_a_picture_in_another_format_is_kept_as_a_png(client):
+    """The assets folder keeps PNG, JPEG and WebP as they arrived; a GIF is the same
+    pixels in a PNG, since an overlay's name is held to those three."""
+    case_id = make_case(client)
+    token = start(client, case_id)
+    gif = io.BytesIO()
+    Image.new("P", (30, 20), 3).save(gif, "GIF")
+    attach(client, case_id, token, "panel", gif.getvalue(), "loop.gif")
+
+    created = commit(client, case_id, token)
+    spec = client.get(f"/api/cases/{case_id}/proofs/{created['proof']['name']}").json()
+    assert spec["published"][0]["asset"].endswith(".png")
+    assert spec["published"][0]["natural"] == [30, 20]
 
 
 def test_the_post_travels_with_the_picture_it_published(client):
+    """The picture is no media, so where it was published is kept on the proof: in its
+    spec beside the picture, and on its record so it is found without reading the spec."""
     case_id = make_case(client)
     token = start(client, case_id)
     attach(client, case_id, token, "panel", picture(), "panel.png", source_url="https://x.com/a/1")
 
     created = commit(client, case_id, token)
-    case = case_of(case_id)
-    panel = case.get_entity(created["panel"]["id"])
-    assert panel["attrs"]["source_url"] == "https://x.com/a/1"
+    name = created["proof"]["name"]
+    spec = client.get(f"/api/cases/{case_id}/proofs/{name}").json()
+    assert spec["published"][0]["url"] == "https://x.com/a/1"
+    proof = case_of(case_id).find_entity(attr="spec", value=layout.proof_spec_rel(name))
+    assert proof["attrs"][import_engine.PUBLISHED_URL] == "https://x.com/a/1"
 
 
 def test_committing_empties_the_staging_directory(client):
@@ -708,7 +818,9 @@ def test_the_place_is_filed_even_when_the_composer_would_have_asked(client):
     assert case.get_entity(created["place"]["id"])["type"] == "place"
 
 
-def test_the_same_picture_twice_is_one_media(client):
+def test_the_same_picture_twice_is_two_proofs_and_no_media(client):
+    """Imported twice on purpose, after the warning, it is two proofs each holding its
+    picture. Neither files it in Media."""
     case_id = make_case(client)
     same = picture()
     first = start(client, case_id)
@@ -719,11 +831,14 @@ def test_the_same_picture_twice_is_one_media(client):
     attach(client, case_id, second, "panel", same, "panel.png")
     again = commit(client, case_id, second, title="Hoyo de la Puerta 2")
 
-    assert again["panel"]["id"] == created["panel"]["id"]
-    assert again["panel"]["duplicate"] is True
     case = case_of(case_id)
-    assert len([e for e in case.list_entities() if e["type"] == "media"]) == 1
+    assert [e for e in case.list_entities() if e["type"] == "media"] == []
     assert len([e for e in case.list_entities() if e["type"] == "proof"]) == 2
+    for made in (created, again):
+        name = made["proof"]["name"]
+        spec = client.get(f"/api/cases/{case_id}/proofs/{name}").json()
+        kept = case.resolve_inside(f"{layout.proof_assets_rel(name)}/{spec['published'][0]['asset']}")
+        assert kept.read_bytes() == same
 
 
 def test_the_import_names_the_place_it_landed_on_even_when_it_reused_one(client):
@@ -777,6 +892,41 @@ def test_the_imported_proof_reopens_and_saves_like_any_other(client):
     assert len(stated) == 1
     assert case.get_entity(stated[0])["attrs"]["lat"] == 48.8584
     assert len(places) == 2  # the old point is left standing, not deleted
+    # The re-save sent no picture, and the proof still holds it and exports it.
+    again_spec = client.get(f"/api/cases/{case_id}/proofs/{name}").json()
+    assert again_spec["published"] == spec["published"]
+    asset = spec["published"][0]["asset"]
+    assert case.resolve_inside(f"{layout.proof_assets_rel(name)}/{asset}").is_file()
+
+
+def test_a_published_proof_nobody_drew_on_keeps_its_picture_as_its_export(client):
+    """The composer redraws the page it shows, and a redraw is not the published bytes.
+    With no mark and no overlay, the save writes the picture itself whatever arrives."""
+    case_id = make_case(client)
+    token = start(client, case_id)
+    published = picture(size=(240, 160))
+    attach(client, case_id, token, "panel", published, "panel.png")
+    name = commit(client, case_id, token)["proof"]["name"]
+    export = case_of(case_id).resolve_inside(layout.proof_export_rel(name))
+
+    spec = client.get(f"/api/cases/{case_id}/proofs/{name}").json()
+    redrawn = base64.b64encode(picture(colour=(1, 1, 1), size=(240, 160))).decode()
+    saved = client.post(
+        f"/api/cases/{case_id}/proofs",
+        json={"title": name, "spec": spec, "png_base64": redrawn, "rename_from": name},
+    )
+    assert saved.status_code == 200, saved.text
+    assert export.read_bytes() == published
+
+    # A mark makes it the composer's to draw: the picture and the mark, as it sent them.
+    marked = {**spec, "shapes": [{"id": "s1", "panel": spec["published"][0]["id"], "kind": "rect",
+                                  "x": 10, "y": 10, "w": 40, "h": 30, "color": "#ff5252"}]}
+    saved = client.post(
+        f"/api/cases/{case_id}/proofs",
+        json={"title": name, "spec": marked, "png_base64": redrawn, "rename_from": name},
+    )
+    assert saved.status_code == 200, saved.text
+    assert export.read_bytes() == base64.b64decode(redrawn)
 
 
 def test_deleting_the_imported_proof_takes_its_files(client):
@@ -789,14 +939,17 @@ def test_deleting_the_imported_proof_takes_its_files(client):
     case = case_of(case_id)
     spec_path = case.resolve_inside(layout.proof_spec_rel(name))
     export = case.resolve_inside(layout.proof_export_rel(name))
+    assets = case.resolve_inside(layout.proof_assets_rel(name))
+    assert assets.is_dir()
     assert client.delete(f"/api/cases/{case_id}/proofs/{name}").status_code == 200
     assert not spec_path.exists()
     assert not export.exists()
+    assert not assets.exists(), "the published picture goes with its proof"
 
 
 def hold_pictures(case_id, token, count):
     """Put a set of pictures in the panel slot, the way a picker answered with several
-    ticks does. Distinct colours, because the library dedupes on the bytes."""
+    ticks does. Distinct colours and widths, so each is told apart by its bytes."""
     from azimut.engine import media as media_engine
 
     case = case_of(case_id)
@@ -805,16 +958,19 @@ def hold_pictures(case_id, token, count):
     for at in range(count):
         path = stage / f"panel-{at}.png"
         path.write_bytes(picture(colour=(20 + at * 60, 90, 140), size=(300 + at * 10, 200)))
-        held.append(media_engine.stage_descriptor(path, {"type": "test", "url": f"u{at}"}))
+        held.append(
+            media_engine.stage_descriptor(path, {"type": "test", "url": f"https://x.com/a/{at}"})
+        )
     import_engine.fill_files(case, token, import_engine.SLOT_PANEL, held)
     return held
 
 
-def test_a_post_publishing_a_set_is_one_proof_of_several_panels(client):
+def test_a_post_publishing_a_set_is_one_proof_of_its_pictures_stacked(client):
     """A published geolocation is often the overhead, the ground shot and the match.
 
-    Keeping one and dropping the rest keeps a third of what was published, and the thing
-    that holds them is not new: a proof **is** a composition.
+    Keeping one and dropping the rest keeps a third of what was published. The set is one
+    proof whose pictures are stacked top to bottom as published, each at its own size,
+    centred on the widest, with no margin and no background.
     """
     case_id = make_case(client)
     token = start(client, case_id)
@@ -824,39 +980,45 @@ def test_a_post_publishing_a_set_is_one_proof_of_several_panels(client):
         f"/api/cases/{case_id}/proof-imports/{token}/preview", json=FORM
     ).json()
     assert report["ready"] is True
-    # Every picture is named in the preview, and named *apart*: three rows called `panel`
-    # say nothing about which one an edge is about, and the screen that renders the report
-    # is keyed on that name — so a shared one throws and blanks the whole reading.
-    slots = [entity["slot"] for entity in report["entities"] if entity["type"] == "media"]
-    assert slots == ["panel", "panel 2", "panel 3"]
-    assert len(set(slots)) == len(slots)
+    assert [entity["type"] for entity in report["entities"]] == ["place", "proof"]
+    assert report["entities"][-1]["detail"] == "3 pictures as published, stacked, not added to Media"
     edges = [(link["from"], link["type"], link["to"]) for link in report["links"]]
-    assert len(set(edges)) == len(edges), "every stated edge is its own line"
-    chain = [link for link in report["links"] if link["from"] == "proof"]
-    assert [link["to"] for link in chain] == ["panel", "panel 2", "panel 3", "place"]
+    assert edges == [("proof", link_engine.DEPICTS, "place")]
 
     created = commit(client, case_id, token)
     name = created["proof"]["name"]
     spec = client.get(f"/api/cases/{case_id}/proofs/{name}").json()
-    assert len(spec["panels"]) == 3
-    assert [panel["natural"] for panel in spec["panels"]] == [[300, 200], [310, 200], [320, 200]]
-    # The note is one sentence about the proof, not a caption per picture.
-    assert [panel["caption"] for panel in spec["panels"]] == [FORM["note"], "", ""]
+    assert spec["panels"] == []
+    assert [one["natural"] for one in spec["published"]] == [[300, 200], [310, 200], [320, 200]]
+    assert len({one["id"] for one in spec["published"]}) == 3
+    # The note is one sentence about the proof, its description.
+    assert spec["description"] == FORM["note"]
 
     case = case_of(case_id)
-    for panel in spec["panels"]:
-        assert case.resolve_inside(panel["src"]).is_file()
+    assert [e for e in case.list_entities() if e["type"] == "media"] == []
+    with Image.open(case.resolve_inside(layout.proof_export_rel(name))) as page:
+        assert page.size == (320, 600)
+        # the narrower pictures leave the page bare at their sides, not painted
+        assert page.getpixel((0, 0))[3] == 0
+        assert page.getpixel((10, 0))[:3] == (20, 90, 140)
+        assert page.getpixel((0, 450)) == (140, 90, 140, 255)
+
+
+def test_the_page_a_set_stacks_into(client):
+    assert import_engine.published_page([(300, 200), (310, 100), (320, 50)]) == (
+        320, 350, [(10, 0), (5, 200), (0, 300)],
+    )
+    assert import_engine.published_page([(401, 10), (400, 10)]) == (401, 20, [(0, 0), (0, 10)])
 
 
 def test_a_picture_whose_bytes_went_missing_takes_its_own_provenance_with_it(client):
-    """A wrong origin on a proof is worse than none: the panel claims a page it never
+    """A wrong origin on a proof is worse than none: the picture claims a post it never
     came from, and nothing in the case contradicts it.
 
     The paths that survive and the entries describing them were two lists zipped by
     position, so one file gone from the staging directory — quarantined by an antivirus,
-    swept by hand — shifted every picture after it onto its neighbour's post, title and
-    derivation. Paired by identity now, so the second picture keeps its own `u1` or is not
-    filed at all.
+    swept by hand — shifted every picture after it onto its neighbour's post. Paired by
+    identity now, so the second picture keeps its own address or is not kept at all.
     """
     case_id = make_case(client)
     token = start(client, case_id)
@@ -865,14 +1027,58 @@ def test_a_picture_whose_bytes_went_missing_takes_its_own_provenance_with_it(cli
     (import_engine.staging_dir(case, token) / "panel-1.png").unlink()
 
     created = commit(client, case_id, token)
-    filed = created.get("panels") or [created["panel"]]
-    origins = []
-    for entry in filed:
-        media = case.find_entity(attr="path", value=entry["path"])
-        origins.append((media["attrs"].get("source_url"), entry["path"]))
+    spec = client.get(f"/api/cases/{case_id}/proofs/{created['proof']['name']}").json()
+    assert [one["url"] for one in spec["published"]] == ["https://x.com/a/0", "https://x.com/a/2"]
+    assert [one["natural"] for one in spec["published"]] == [[300, 200], [320, 200]]
 
-    assert len(filed) == 2, "the picture whose bytes went is not filed"
-    assert [url for url, _ in origins] == ["u0", "u2"], origins
+
+def test_a_picture_too_heavy_to_keep_is_refused_at_the_preview(client, monkeypatch):
+    monkeypatch.setattr(import_engine, "MAX_PICTURE_BYTES", 64)
+    case_id = make_case(client)
+    token = start(client, case_id)
+    attach(client, case_id, token, "panel", picture(), "panel.png")
+
+    report = preview(client, case_id, token)
+    assert report["ready"] is False
+    assert any("too large to keep with a proof" in line for line in report["blocking"])
+
+
+def test_a_stack_the_composer_could_not_export_is_refused(client, monkeypatch):
+    monkeypatch.setattr(import_engine, "MAX_PAGE_SIDE", 500)
+    case_id = make_case(client)
+    token = start(client, case_id)
+    hold_pictures(case_id, token, 3)  # 600 px tall once stacked
+
+    report = preview(client, case_id, token)
+    assert report["ready"] is False
+    assert "These pictures are too large to stack into one proof." in report["blocking"]
+    refused = client.post(f"/api/cases/{case_id}/proof-imports/{token}/commit", json=FORM)
+    assert refused.status_code == 400
+    assert case_of(case_id).list_entities() == []
+
+
+def test_a_picture_that_cannot_be_read_is_refused(client):
+    case_id = make_case(client)
+    token = start(client, case_id)
+    attach(client, case_id, token, "panel", b"not a picture at all", "panel.png")
+
+    report = preview(client, case_id, token)
+    assert report["ready"] is False
+    assert "A picture of this post could not be read." in report["blocking"]
+
+
+def test_the_pixel_clamp_holds_for_a_published_picture(client, monkeypatch):
+    """The process-wide clamp turns a decompression bomb into a refusal at the preview."""
+    from PIL import Image as PILImage
+
+    monkeypatch.setattr(PILImage, "MAX_IMAGE_PIXELS", 1000)
+    case_id = make_case(client)
+    token = start(client, case_id)
+    attach(client, case_id, token, "panel", picture(size=(320, 200)), "panel.png")
+
+    report = preview(client, case_id, token)
+    assert report["ready"] is False
+    assert "A picture of this post could not be read." in report["blocking"]
 
 
 def test_an_origin_that_is_not_a_link_is_refused_on_the_hand_attached_file(client):
@@ -933,7 +1139,7 @@ def test_a_thread_states_its_point_once_and_rests_on_everything_it_hung_off_it(c
     assert report["ready"] is True
     # One name per file, so a report about four of them can be read.
     assert [e["slot"] for e in report["entities"]] == [
-        "place", "source", "source 2", "source 3", "panel", "proof",
+        "place", "source", "source 2", "source 3", "proof",
     ]
     edges = {(e["from"], e["type"], e["to"]) for e in report["links"]}
     for slot in ("source", "source 2", "source 3"):
@@ -943,46 +1149,13 @@ def test_a_thread_states_its_point_once_and_rests_on_everything_it_hung_off_it(c
     created = commit(client, case_id, token, source_urls=urls)
     case = case_of(case_id)
     proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(created["proof"]["name"]))
-    panel = case.get_entity(created["panel"]["id"])
     sources = [case.get_entity(one["id"]) for one in created["sources"]]
 
     assert len(sources) == 3
     assert len({one["id"] for one in sources}) == 3  # three files, not one filed thrice
     for one in sources:
         assert link_engine.DERIVED_FROM in links_between(case, proof["id"], one["id"])
-        # and not off the published picture, which is one file among the several rather
-        # than the thing they all hang off
-        assert links_between(case, panel["id"], one["id"]) == set()
-    assert link_engine.DERIVED_FROM in links_between(case, proof["id"], panel["id"])
 
     # And the proof states all three addresses, so its line traces back to each post.
     spec = client.get(f"/api/cases/{case_id}/proofs/{created['proof']['name']}").json()
     assert spec["sources"] == urls
-
-
-def test_a_set_has_no_render_yet_and_still_draws_in_the_graph(client):
-    """A single picture is already a rendered proof, so it is filed as the export. A set
-    has no render — laying panels out is the composer's canvas, in the browser — and a
-    second renderer here would drift from it at the first change to a layout.
-
-    So the set is saved without an export and borrows the first picture's thumbnail, or it
-    would be the only blank node of its own constellation. The first save in the composer
-    writes the real one.
-    """
-    case_id = make_case(client)
-    token = start(client, case_id)
-    hold_pictures(case_id, token, 2)
-    created = commit(client, case_id, token)
-    name = created["proof"]["name"]
-
-    case = case_of(case_id)
-    assert not case.resolve_inside(layout.proof_export_rel(name)).exists()
-    proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(name))
-    assert "path" not in proof["attrs"]
-    assert proof["attrs"].get("thumb"), "a proof with no render still draws, off a panel's"
-
-    # And one picture is unchanged: it exports, exactly as it did before.
-    other = start(client, case_id)
-    attach(client, case_id, other, "panel", picture(colour=(9, 9, 9)), "solo.png")
-    solo = commit(client, case_id, other, title="Solo proof")
-    assert case.resolve_inside(layout.proof_export_rel(solo["proof"]["name"])).is_file()

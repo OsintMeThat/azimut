@@ -173,8 +173,8 @@ def build_proofs(case_id: str, sheet_id: str, body: SheetBuildIn) -> dict[str, s
 
 #: Which column a row's cell points at, once the row has produced it. The sidecar keys
 #: entities by the column their cell sits in, so a built row gets its own chips: the title
-#: points at the proof it named, the two addresses at the files they fetched, and the
-#: coordinates at the ground.
+#: points at the proof it named, the footage address at the files it fetched, the proof
+#: address at the proof keeping its picture, and the coordinates at the ground.
 _IN_COLUMN = {"proof": "title", "source": "source", "panel": "proof", "place": "point"}
 
 
@@ -520,6 +520,9 @@ def _row_proof(
     proof = written.get("proof") or {}
     if proof.get("id"):
         made["proof"] = {"id": proof["id"], "label": proof.get("name") or ""}
+        # The picture the proof cell points at is kept with the proof, so that cell's
+        # chip is the proof too.
+        made.setdefault("panel", made["proof"])
     place = written.get("place")
     if place:
         made["place"] = place
@@ -579,6 +582,7 @@ def _added_point(case: Case, decision: dict[str, Any], *, pov: bool) -> dict[str
     if proof is not None:
         _state(case, proof["id"], place["id"], link_engine.DEPICTS)
         made["proof"] = proof
+        made.setdefault("panel", proof)
     return made
 
 
@@ -594,7 +598,8 @@ def _restate_proof(
 
     A blank note leaves the caption alone. The column says what the worklist knows about
     the row; an empty cell is nothing said, not an instruction to erase what somebody
-    wrote in the composer.
+    wrote in the composer. A proof kept as published has no caption, so its note is its
+    description, which is where the import put it.
     """
     proof = case.get_entity(str(decision["entity"] or ""))
     if proof is None:
@@ -606,7 +611,9 @@ def _restate_proof(
     # holds a list, and setting the old field beside it would be read as nothing
     # said. A sheet row states one point, and this is how it says so.
     satellite_engine.state_points(spec, [{"coords": form["coords"], "pov": form["pov"]}])
-    if form["note"]:
+    if form["note"] and spec.get("published"):
+        spec["description"] = form["note"]
+    elif form["note"]:
         panels = [dict(panel) for panel in spec.get("panels") or []]
         if panels:
             panels[0]["caption"] = form["note"]

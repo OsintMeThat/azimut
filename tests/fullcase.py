@@ -95,6 +95,8 @@ class FullCase:
     analyzer_run: str = ""
     proof: str = ""
     proof_asset: str = ""
+    published_proof: str = ""  # a proof imported as published: its picture is the proof
+    published_asset: str = ""  # that picture, kept in the proof's assets folder
     draft: str = ""
     note_id: str = ""
     note: str = ""  # its case-relative path
@@ -129,9 +131,38 @@ class FullCase:
     entity_types: set[str] = field(default_factory=set)
 
 
+def _plant_published_proof(client, case_id: str, full: FullCase) -> None:
+    """A proof imported as published: no panel, its picture kept in its assets folder,
+    and a mark drawn over it. Left out of a case standing for a release before it."""
+    published_picture = _png(size=(48, 32), color=(40, 120, 200))
+    published_name = f"{hashlib.sha256(published_picture).hexdigest()[:16]}.png"
+    published = client.post(
+        f"/api/cases/{case_id}/proofs",
+        json={
+            "title": "Published proof",
+            "spec": {
+                "ink": "page",
+                "panels": [],
+                "pastes": [],
+                "published": [{"id": "u0", "asset": published_name, "natural": [48, 32],
+                               "url": "https://example.org/post/1"}],
+                # a mark drawn over someone else's picture
+                "shapes": [{"id": "s1", "panel": "u0", "kind": "rect", "color": "#ff5252",
+                            "x": 4, "y": 4, "w": 20, "h": 12}],
+            },
+            "png_base64": base64.b64encode(_png(size=(48, 32))).decode(),
+            "assets": [{"name": published_name, "data": base64.b64encode(published_picture).decode()}],
+        },
+    )
+    assert published.status_code == 200, published.text
+    full.published_proof = published.json()["spec_path"]
+    full.published_asset = f"{layout.proof_assets_rel(published.json()['name'])}/{published_name}"
+
+
 def build_full_case(
     client, name: str = "Full case", *, subject_changes: bool = True, personal_layers: bool = True,
     horizon_find: bool = True,
+    published_proof: bool = True,
 ) -> FullCase:
     """Fill one case through every tool that files an artifact.
 
@@ -437,6 +468,10 @@ def build_full_case(
     assert proof.status_code == 200, proof.text
     full.proof = proof.json()["spec_path"]
     full.proof_asset = f"{layout.proof_assets_rel(proof.json()['name'])}/{asset_name}"
+
+    # -- a proof imported as published: no panel, its picture kept with it -----------
+    if published_proof:
+        _plant_published_proof(client, case_id, full)
 
     # -- post: derived from the proof and the photo ---------------------------
     draft = client.post(

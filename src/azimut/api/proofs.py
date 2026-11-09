@@ -8,6 +8,10 @@ A proof may also hold pasted images: pixels that belong to the composition
 alone, with no source in the case. They live in a ``<name>.assets`` folder
 beside the spec, named by their own hash, and they are never filed as media or
 as an entity — nothing in the graph claims a paste came from anywhere.
+
+A proof imported as published keeps its picture in the same folder, named the
+same way, under the spec's ``published`` list: the picture is the proof as it
+was published, with no background, margins or footer around it.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from .. import config
@@ -34,6 +39,7 @@ from ..engine import exportdir, geolocate, inspectwork, layerediting
 from ..engine import links as link_engine
 from ..engine import localtime
 from ..engine import media as media_engine
+from ..engine import proofimport as import_engine
 from ..engine import reveal as reveal_engine
 from ..engine import satellite as satellite_engine
 from ..engine import scenes as scene_engine
@@ -295,13 +301,87 @@ def _decode_assets(assets: list[AssetIn]) -> dict[str, bytes]:
 
 
 def _referenced_assets(spec: dict[str, Any]) -> set[str]:
-    """Asset filenames the spec still shows."""
-    pastes = spec.get("pastes")
-    if not isinstance(pastes, list):
-        return set()
-    return {
-        p["asset"] for p in pastes if isinstance(p, dict) and isinstance(p.get("asset"), str)
-    }
+    """Asset filenames the spec still shows: its overlays and its published pictures."""
+    held: set[str] = set()
+    for key in ("pastes", "published"):
+        items = spec.get(key)
+        if isinstance(items, list):
+            held |= {
+                p["asset"] for p in items if isinstance(p, dict) and isinstance(p.get("asset"), str)
+            }
+    return held
+
+
+def _published(spec: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """The spec's published pictures, checked at the door, or None for a proof that is not one.
+
+    Each names a file in the proof's own assets folder, so its name is held to the shape
+    a pasted overlay's is: the folder is read by it, and a name is never a path. Its size
+    is what the composer lays the page out from, held to the bounds it can export.
+    """
+    raw = spec.get("published")
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or not 0 < len(raw) <= import_engine.MAX_PANELS:
+        raise HTTPException(status_code=422, detail="invalid published pictures")
+    entries: list[dict[str, Any]] = []
+    for one in raw:
+        natural = one.get("natural") if isinstance(one, dict) else None
+        if (
+            not isinstance(one, dict)
+            or not isinstance(one.get("id"), str)
+            or not 0 < len(one["id"]) <= 40
+            or not isinstance(one.get("asset"), str)
+            or not ASSET_NAME.match(one["asset"])
+            or not isinstance(natural, list)
+            or len(natural) != 2
+            or not all(
+                isinstance(n, int) and 0 < n <= import_engine.MAX_PAGE_SIDE for n in natural
+            )
+        ):
+            raise HTTPException(status_code=422, detail="invalid published picture")
+        url = one.get("url")
+        entries.append(
+            {
+                "id": one["id"],
+                "asset": one["asset"],
+                "natural": [natural[0], natural[1]],
+                **(
+                    {"url": url[:4000]}
+                    if isinstance(url, str) and media_engine.is_address(url)
+                    else {}
+                ),
+            }
+        )
+    return entries
+
+
+def published_export(
+    spec: dict[str, Any], incoming: dict[str, bytes], folder: Path
+) -> bytes | None:
+    """The export of a published proof nobody drew on, made from its own pictures.
+
+    Such a proof is the published picture and nothing else, so its export is that
+    picture, byte for byte where it can be (`proofimport.published_png`), rather than
+    the browser's redraw of it. A mark or an overlay makes it the composer's to draw,
+    and None hands the save back the picture the browser sent.
+    """
+    published = spec.get("published")
+    if not published or spec.get("shapes") or spec.get("pastes"):
+        return None
+    pictures: list[bytes] = []
+    for entry in published:
+        data = incoming.get(entry["asset"])
+        if data is None:
+            path = folder / entry["asset"]
+            if not path.is_file():
+                return None
+            data = path.read_bytes()
+        pictures.append(data)
+    try:
+        return import_engine.published_png(pictures)
+    except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+        return None
 
 
 def _move_assets(src: Path, dst: Path) -> None:
@@ -555,6 +635,9 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
 
     # Decoded up front: a bad batch must be refused before anything is written.
     incoming = _decode_assets(body.assets)
+    # Read up front too: a published picture names a file this save reads and keeps.
+    published = _published(body.spec)
+    published_url = next((one["url"] for one in published or [] if one.get("url")), "")
     # Read up front for the same reason: a date outside the profile is refused
     # before the rename below moves this proof's export and its pasted images.
     zone = _stated_zone(body.spec)
@@ -603,6 +686,17 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
             case.resolve_inside(layout.proof_assets_rel(name)),
         )
 
+    # A published picture nobody drew on is its own export, whatever the browser drew.
+    # Read after the rename above, which carried its assets folder to this name.
+    if published:
+        own = published_export(
+            {**body.spec, "published": published},
+            incoming,
+            case.resolve_inside(layout.proof_assets_rel(name)),
+        )
+        if own is not None:
+            png_bytes = own
+
     # the export lands first: its thumbnail is recorded in the spec written below
     png_rel = thumb_rel = None
     if png_bytes is not None:
@@ -616,6 +710,8 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     spec = dict(body.spec)
     spec["azimut_proof"] = 1
     spec["title"] = name
+    if published is not None:
+        spec["published"] = published
     spec["when"] = when or None
     # The pick, not the answer: left empty, the zone follows the point each save.
     spec["whenZone"] = _chosen_zone(body.spec)
@@ -675,6 +771,9 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         # kept for the record, printed only when the footer is asked to
         if existing["attrs"].get("imagery_credits", "") != credits:
             attrs["imagery_credits"] = credits
+        # the post a published picture came from, so it is found without opening the spec
+        if existing["attrs"].get(import_engine.PUBLISHED_URL, "") != published_url:
+            attrs[import_engine.PUBLISHED_URL] = published_url
         # a proof given up on and saved with a place is proved: the word it was left with goes
         if existing["attrs"].get("abandoned") is not None and scene_engine.states_place(spec):
             attrs["abandoned"] = None
@@ -694,6 +793,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
                 **({"when_zone": when_zone} if when_zone else {}),
                 **({"notes": description} if description else {}),
                 **({"imagery_credits": credits} if credits else {}),
+                **({import_engine.PUBLISHED_URL: published_url} if published_url else {}),
             },
             by="proof-composer",
         )["id"]

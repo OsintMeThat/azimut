@@ -133,7 +133,7 @@ def test_the_plan_answers_the_six_readings_of_a_row_without_fetching_anything(
         "make", "make", "make", "error", "error", "error",
     ]
     assert [row["writes"] for row in said["rows"][:3]] == [
-        "a proof, its two files and its point",
+        "a proof, its footage and its point",
         "the footage, posed on its point",
         "a place",
     ]
@@ -293,7 +293,7 @@ def edges(case_id):
 
 
 def test_a_full_row_writes_the_whole_constellation(client, monkeypatch):
-    """The five edges an import writes by hand, written by a row of a binder instead.
+    """The edges an import writes by hand, written by a row of a binder instead.
 
     `derived-from` is honest here and only here: the app fetched the file and composed the
     proof, so it observed the derivation. A pass that merely read two addresses could not
@@ -307,20 +307,20 @@ def test_a_full_row_writes_the_whole_constellation(client, monkeypatch):
     assert result["counts"] == {"built": 1, "restated": 0, "failed": 0}
 
     assert [entity["label"] for entity in case_entities(case_id, "proof")] == ["Bridge strike"]
-    assert len(case_entities(case_id, "media")) == 2
+    # The footage is filed; the published picture is the proof, kept with it.
+    assert len(case_entities(case_id, "media")) == 1
     assert len(case_entities(case_id, "place")) == 1
-    # The proof composes the picture and rests on the footage: both are its own edges,
-    # so the whole geolocation hangs off one node.
+    # The proof rests on the footage, so the whole geolocation hangs off one node.
     assert edges(case_id) == [
-        "media depicts place",
         "media depicts place",
         "proof depicts place",
         "proof derived-from media",
-        "proof derived-from media",
     ]
-    # And the row says what it made, which is what the grid logs beside it.
+    # And the row says what it made, which is what the grid logs beside it. The proof
+    # address made the proof, which keeps its picture.
     made = result["rows"][0]["made"]
     assert set(made) == {"source", "panel", "proof", "place"}
+    assert made["panel"] == made["proof"]
 
     # The sidecar the browser writes back points each cell at what that cell produced, so
     # the built row carries chips rather than four addresses nobody can follow.
@@ -338,12 +338,14 @@ def test_a_full_row_writes_the_whole_constellation(client, monkeypatch):
     spec = json.loads(
         get_case(case_id).resolve_inside(proof["attrs"]["spec"]).read_text(encoding="utf-8")
     )
-    assert spec["panels"][0]["caption"] == "south bank"
+    assert spec["description"] == "south bank"
+    assert spec["panels"] == []
+    assert spec["published"][0]["url"] == "https://ex.org/pic"
     assert spec["pov"] is False
     assert spec["sources"] == ["https://ex.org/clip"]
 
 
-def test_pov_moves_the_two_files_onto_the_ground_instead_of_showing_it(client, monkeypatch):
+def test_pov_moves_the_footage_onto_the_ground_instead_of_showing_it(client, monkeypatch):
     """`located-at` says the camera was there and `depicts` says the frame shows it. The
     proof itself never takes the first: it was composed, never recorded anywhere."""
     stub_downloads(monkeypatch)
@@ -353,9 +355,7 @@ def test_pov_moves_the_two_files_onto_the_ground_instead_of_showing_it(client, m
     press(client, case_id, sheet, pov=True)
     assert edges(case_id) == [
         "media located-at place",
-        "media located-at place",
         "proof depicts place",
-        "proof derived-from media",
         "proof derived-from media",
     ]
 
@@ -434,7 +434,7 @@ def test_a_row_whose_source_cannot_be_reached_writes_nothing_and_stops_nobody(
     assert result["counts"] == {"built": 2, "restated": 0, "failed": 1}
     assert [entity["label"] for entity in case_entities(case_id, "proof")] == ["First", "Third"]
     # The broken row left nothing of itself, not even the picture it did reach.
-    assert len(case_entities(case_id, "media")) == 4
+    assert len(case_entities(case_id, "media")) == 2
     failed = next(row for row in result["rows"] if row["outcome"] == "failed")
     assert "could not be reached" in failed["reason"]
     assert failed["made"] == {}
@@ -544,7 +544,7 @@ def test_a_source_cell_of_several_addresses_is_one_proof_resting_on_all_of_them(
     result = press(client, case_id, sheet)
     assert result["counts"] == {"built": 1, "restated": 0, "failed": 0}
     media = case_entities(case_id, "media")
-    assert len(media) == 4  # three pieces of material and the picture composed of them
+    assert len(media) == 3  # three pieces of material; the picture is the proof
 
     proof = case_entities(case_id, "proof")[0]
     spec = json.loads(
@@ -555,19 +555,13 @@ def test_a_source_cell_of_several_addresses_is_one_proof_resting_on_all_of_them(
     ]
 
     links = case_links(case_id)
-    panel = next(one for one in media if one["attrs"].get("source_url") == "https://ex.org/pic")
-    material = {one["id"] for one in media} - {panel["id"]}
-    # The proof composes the picture and rests on the three files: one node the whole
-    # geolocation hangs off, rather than a media node the rest is strung from.
+    material = {one["id"] for one in media}
+    # The proof rests on the three files: one node the whole geolocation hangs off.
     from_proof = {
         link["to"] for link in links
         if link["from"] == proof["id"] and link["type"] == "derived-from"
     }
-    assert from_proof == material | {panel["id"]}
-    assert not [
-        link for link in links
-        if link["from"] == panel["id"] and link["type"] == "derived-from"
-    ]
+    assert from_proof == material
 
 
 def test_a_post_that_quotes_another_gives_up_only_its_own(client, monkeypatch):
@@ -604,16 +598,14 @@ def test_a_post_that_quotes_another_gives_up_only_its_own(client, monkeypatch):
     assert [call["index"] for call in calls] == [None, 1]
 
 
-def test_a_post_publishing_several_pictures_is_one_proof_of_several_panels(
+def test_a_post_publishing_several_pictures_is_one_proof_of_them_stacked(
     client, monkeypatch
 ):
     """A published geolocation is often a set — the overhead, the ground shot, the match —
     and keeping the first of three keeps a third of what was published.
 
-    They become the panels of one composition, which is what a proof already is. And the
-    set has no render: laying panels out is the composer's canvas, in the browser, so a
-    second renderer here would drift from it. It is filed without an export, borrowing the
-    first picture's thumbnail so it still draws in the graph.
+    They become one proof, stacked as published with no margin, kept with the proof and
+    exported as that page.
     """
     import json
 
@@ -641,21 +633,23 @@ def test_a_post_publishing_several_pictures_is_one_proof_of_several_panels(
     assert result["counts"] == {"built": 1, "restated": 0, "failed": 0}
     proofs_held = case_entities(case_id, "proof")
     assert [entity["label"] for entity in proofs_held] == ["Published set"]
-    # Three pictures and the footage, and the proof composes the three.
-    assert len(case_entities(case_id, "media")) == 4
+    # The footage alone is media; the three pictures are the proof.
+    assert len(case_entities(case_id, "media")) == 1
 
     case = get_case(case_id)
     spec = json.loads(case.resolve_inside(proofs_held[0]["attrs"]["spec"]).read_text("utf-8"))
-    assert len(spec["panels"]) == 3
-    # The note is one sentence about the proof, not a caption per picture.
-    assert [panel["caption"] for panel in spec["panels"]] == ["south bank", "", ""]
+    assert spec["panels"] == []
+    assert len(spec["published"]) == 3
+    # The note is one sentence about the proof, its description.
+    assert spec["description"] == "south bank"
 
     attrs = proofs_held[0]["attrs"]
-    assert "path" not in attrs, "a set has no render, so it has no export to point at"
-    assert attrs.get("thumb"), "and it borrows the first picture's, so it is not a blank node"
+    assert attrs.get("path"), "the stacked page is its export"
+    assert attrs.get("thumb")
+    with Image.open(case.resolve_inside(attrs["path"])) as page:
+        assert page.size == (32, 96)
 
-    # The proof composes all three and rests on the footage: four edges of its own, and
-    # that closure is what makes the point reach every one of them.
+    # The proof rests on the footage, and that closure is what the point reaches.
     from test_sheet_bridge import case_links
 
     named = {entity["id"]: entity for entity in case.list_entities()}
@@ -663,7 +657,7 @@ def test_a_post_publishing_several_pictures_is_one_proof_of_several_panels(
         link for link in case_links(case_id)
         if link["type"] == "derived-from" and named[link["from"]]["type"] == "proof"
     ]
-    assert len(chain) == 4
+    assert len(chain) == 1
 
 
 def test_a_post_holding_nothing_of_the_kind_is_a_row_to_do_by_hand(client, monkeypatch):
@@ -762,7 +756,7 @@ def test_a_second_press_refreshes_the_point_and_the_note_and_downloads_nothing(
     assert calls == []
     assert result["counts"] == {"built": 0, "restated": 1, "failed": 0}
     assert len(case_entities(case_id, "proof")) == 1
-    assert len(case_entities(case_id, "media")) == 2
+    assert len(case_entities(case_id, "media")) == 1
 
     # The proof states the new point and nothing states the old one any more: a corrected
     # geolocation is a withdrawal, not a second claim.
@@ -820,8 +814,9 @@ def test_a_cancelled_press_keeps_the_rows_it_finished_and_leaves_no_half_row(
     assert result["stopped"] is True
     assert result["counts"] == {"built": 1, "restated": 0, "failed": 0}
     assert [entity["label"] for entity in case_entities(case_id, "proof")] == ["Done first"]
-    # The interrupted row downloaded two files and filed neither.
-    assert len(case_entities(case_id, "media")) == 2
+    # The interrupted row downloaded two files and filed neither: the finished row's
+    # footage is the only media, its picture being its proof.
+    assert len(case_entities(case_id, "media")) == 1
 
 
 def test_the_rows_the_analyst_put_aside_are_not_built(client, monkeypatch):
@@ -923,11 +918,8 @@ def test_one_published_proof_seen_at_two_points_is_one_proof(client, monkeypatch
     assert edges(case_id) == [
         "media depicts place",
         "media depicts place",
-        "media depicts place",
-        "media depicts place",
         "proof depicts place",
         "proof depicts place",
-        "proof derived-from media",
         "proof derived-from media",
     ]
     # And the second row's cell still points at the proof it is about, so the line reads as
@@ -1096,3 +1088,34 @@ def test_a_rename_onto_a_name_another_proof_holds_is_refused_by_the_plan(client,
         "Bridge strike",
         "Second reading",
     ]
+
+
+def test_a_proof_imported_before_its_picture_stayed_with_it_is_still_found(client):
+    """An import made before the published picture stayed with its proof filed the picture
+    as media, and the proof composed it. A second press over that row still finds it, off
+    the media's own address, rather than building it a second time."""
+    from azimut.api.cases import get_case
+    from azimut.engine import sheetproofs as build_engine
+
+    case_id = make_case(client)
+    upload = client.post(
+        f"/api/cases/{case_id}/media/upload",
+        files={"file": ("published.png", io.BytesIO(_picture()), "image/png")},
+        data={"source_url": "https://ex.org/old-post"},
+    )
+    assert upload.status_code == 200, upload.text
+    path = upload.json()["item"]["path"]
+    saved = client.post(
+        f"/api/cases/{case_id}/proofs",
+        json={"title": "Older import", "spec": {"panels": [{"id": "p1", "src": path, "natural": [8, 8]}]}},
+    )
+    assert saved.status_code == 200, saved.text
+
+    found = build_engine.built_proof(get_case(case_id), "https://ex.org/old-post")
+    assert found is not None and found["label"] == "Older import"
+
+
+def _picture():
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), (12, 34, 56)).save(buffer, "PNG")
+    return buffer.getvalue()

@@ -51,9 +51,11 @@ def _ok(response, what: str) -> dict[str, Any]:
 def build_workspace_case(client) -> WorkspaceCase:
     from azimut.engine import workqueue
 
-    # This fixture represents 0.3.1, before retyping, merge journals and personal layers.
+    # This fixture represents 0.3.1, before retyping, merge journals, personal layers and
+    # proofs kept as published.
     full = build_full_case(
         client, name="Case workspace", subject_changes=False, personal_layers=False, horizon_find=False,
+        published_proof=False,
     )
     ws = WorkspaceCase(full=full)
     case_id = full.case_id
