@@ -337,3 +337,59 @@ test('the home continues from the last proofs, finds one by name, and makes the 
   expect(frameSaves).toHaveLength(1);
   await expect(page.locator('.panel-row')).toHaveCount(3);
 });
+
+// -- Delete the open proof -----------------------------------------------------------------------
+
+/** Open a saved proof the way the sidebar hands one over. */
+async function openSaved(page, name, title) {
+  await page.evaluate(async (wanted) => {
+    const { uiState } = await import('/src/lib/state.svelte.js');
+    uiState.openProof = wanted;
+  }, name);
+  await expect(proofName(page)).toHaveValue(title);
+}
+
+async function deleteFromHeader(page) {
+  await header(page).getByRole('button', { name: 'More for this proof' }).click();
+  await page.getByRole('menu', { name: 'This proof' }).getByRole('button', { name: 'Delete…' }).click();
+  return page.getByRole('alertdialog', { name: 'Delete this proof?' });
+}
+
+test('deletes the open proof on photos from the header, as simply as before, then shows the home', async ({ page }) => {
+  const { deletes } = await openCase(page);
+  await openSaved(page, 'holiday', 'Holiday');
+  const ask = await deleteFromHeader(page);
+  await expect(ask).toContainText('“Holiday” will be removed from the case.');
+  await expect(ask).toContainText('You can restore it from Trash');
+  await expect(ask.getByRole('radio')).toHaveCount(0);
+  await ask.getByRole('button', { name: 'Delete' }).click();
+
+  await expect.poll(() => deletes).toEqual([{ name: 'holiday', scene: 'keep' }]);
+  await expect(home(page)).toBeVisible();
+  await expect(page.locator('.toast', { hasText: 'Deleted “Holiday”' })).toBeVisible();
+  // gone on purpose: no word about a proof deleted behind the composer
+  await expect(page.locator('.toast', { hasText: 'Saving now creates a new one' })).toHaveCount(0);
+});
+
+test('deletes a proof of a scene from the header, asking what becomes of its scene, then shows the next slide', async ({ page }) => {
+  const { deletes } = await openCase(page);
+  await openSaved(page, 'market', 'Market');
+  const ask = await deleteFromHeader(page);
+  await expect(ask.locator('legend')).toHaveText('Its scene in clip.webm');
+  await expect(ask.getByRole('radio', { name: 'Goes back to To geolocate' })).toBeChecked();
+  await ask.getByRole('radio', { name: 'Is removed with it' }).check();
+  await ask.getByRole('button', { name: 'Delete' }).click();
+
+  await expect.poll(() => deletes).toEqual([{ name: 'market', scene: 'drop' }]);
+  // the last proof of the video: the one before it opens
+  await expect(proofName(page)).toHaveValue('Road bridge');
+});
+
+test('a proof of a scene deleted by default gives its scene back', async ({ page }) => {
+  const { deletes } = await openCase(page);
+  await openSaved(page, 'bridge', 'Road bridge');
+  const ask = await deleteFromHeader(page);
+  await ask.getByRole('button', { name: 'Delete' }).click();
+  await expect.poll(() => deletes).toEqual([{ name: 'bridge', scene: 'keep' }]);
+  await expect(proofName(page)).toHaveValue('Market');
+});

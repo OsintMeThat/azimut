@@ -764,6 +764,53 @@ def scene_ids(case: "Case") -> set[str]:
     }
 
 
+def remove_scenes(case: "Case", ids: set[str]) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Take these scenes to prove out of whichever file's work holds them, the rest of
+    each work written back as it was read: a proof deleted with its scene (Geo Proof's
+    delete, `api/proofs.delete_proof`). Answers with each file and the scenes taken from
+    it, as they were stored, for `put_back_scenes`."""
+    wanted = {i for i in ids if isinstance(i, str) and i}
+    if not wanted:
+        return []
+    taken: list[tuple[str, list[dict[str, Any]]]] = []
+    with case.lock:
+        subjects = [
+            subject for _rel, spec in _work_specs(case)
+            if (subject := _subject(spec))
+            and any(isinstance(s, dict) and s.get("id") in wanted for s in spec.get("scenes") or [])
+        ]
+        for subject in dict.fromkeys(subjects):
+            found = _settle(case, subject)
+            if not found:
+                continue
+            rel, previous = found
+            scenes = [dict(s) for s in previous.get("scenes") or [] if isinstance(s, dict)]
+            gone = [s for s in scenes if s.get("id") in wanted]
+            if not gone:
+                continue
+            kept = [s for s in scenes if s.get("id") not in wanted]
+            _write(case.resolve_inside(rel), {**previous, "scenes": kept, "updated_at": _now()})
+            taken.append((subject, gone))
+    return taken
+
+
+def put_back_scenes(case: "Case", taken: list[tuple[str, list[dict[str, Any]]]]) -> None:
+    """Undo `remove_scenes`: each scene back in its file's work, as it was, unless one by
+    its id is there again."""
+    with case.lock:
+        for subject, gone in taken:
+            found = _settle(case, subject)
+            if not found:
+                continue
+            rel, previous = found
+            scenes = [dict(s) for s in previous.get("scenes") or [] if isinstance(s, dict)]
+            held = {s.get("id") for s in scenes}
+            back = [s for s in gone if s.get("id") not in held]
+            if back:
+                merged = sorted(scenes + back, key=_stored_order)
+                _write(case.resolve_inside(rel), {**previous, "scenes": merged, "updated_at": _now()})
+
+
 def _same_time(a: Any, b: Any) -> bool:
     if a is None or b is None:
         return a is None and b is None

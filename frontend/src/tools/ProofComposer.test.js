@@ -906,7 +906,7 @@ describe("the point a proof concludes on", () => {
   it('queues that question behind the other one, since a save can raise both', () => {
     const dialogs = source.slice(source.indexOf('{#if placeOffer}'));
     expect(dialogs.indexOf('{:else if orphanOffer}')).toBeGreaterThan(-1);
-    expect(dialogs.indexOf('{:else if orphanOffer}')).toBeLessThan(dialogs.indexOf('{#if deleteEntry}'));
+    expect(dialogs.indexOf('{:else if orphanOffer}')).toBeLessThan(dialogs.indexOf('{#if deleteTarget}'));
   });
 
   it('drops it through the entity route, so it lands in the trash like any delete', () => {
@@ -1178,7 +1178,7 @@ describe('a dialog over the composer', () => {
     for (const flag of [
       'picker', 'newProofOpen', 'importOpen', 'openList', 'discardConfirm',
       'replaceWithNewConfirm', 'exportPicker', 'overwritePrompt', 'placeOffer',
-      'orphanOffer', 'deleteEntry', 'sourcePick',
+      'orphanOffer', 'deleteTarget', 'sourcePick',
     ]) {
       expect(derived).toContain(flag);
     }
@@ -1705,5 +1705,37 @@ describe('Proof Composer — the default template and the Azimut mark', () => {
     const redraw = source.slice(source.indexOf('Rebuild only when published document'));
     expect(redraw.slice(0, redraw.indexOf('requestRebuild'))).toContain('proof.azimutMark,');
     expect(source).toContain('<span>Azimut mark</span>');
+  });
+});
+
+describe('Proof Composer — deleting a saved proof', () => {
+  it('asks once wherever it is pressed, a proof of a video asked what becomes of its scene', () => {
+    const dialog = source.slice(source.indexOf('{#if deleteTarget}'), source.indexOf('{#if picker}'));
+    expect(dialog).toContain("impact={{ caseId: caseState.current?.id, paths: [specPath('proof', deleteTarget.name)] }}");
+    expect(dialog).toContain('restorable={RESTORABLE}');
+    expect(dialog).toContain('{#if deleteTarget.video}');
+    expect(dialog).toContain('value="keep" bind:group={deleteScene}');
+    expect(dialog).toContain('value="drop" bind:group={deleteScene}');
+    // back to To geolocate unless asked otherwise, as a delete always gave it back
+    expect(bodyOfFn('askDelete')).toContain("deleteScene = 'keep';");
+    expect(bodyOfFn('deleteSavedProof')).toContain("target.video && deleteScene === 'drop' ? '?scene=drop' : ''");
+    // the Open list, the header's ⋯ and a slide's menu all ask through it
+    expect(source).toContain('onclick={() => askDelete(entry)}');
+    expect(source.match(/askDelete\(\{/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('moves the proof open to the next slide of its video, else to the home', () => {
+    const run = bodyOfFn('deleteSavedProof');
+    expect(run.indexOf('slideAfterDelete(strip, current.key)')).toBeLessThan(run.indexOf('await api.del('));
+    expect(run).toContain('if (next) await openSlide(next);');
+    expect(run).toContain('else resetDoc();');
+    expect(run).toContain('deletedToast(caseId, result, target.title);');
+  });
+
+  it('keeps the delete of the proof open in the header\'s ⋯, once it is saved', () => {
+    const header = source.slice(source.indexOf('<div class="tool-header"'), source.indexOf('\n  <div class="body">'));
+    expect(header).toContain('{#if savedName}');
+    expect(header).toContain('aria-label="More for this proof"');
+    expect(header).toContain('<span class="fm-grow">Delete…</span>');
   });
 });

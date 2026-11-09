@@ -4319,6 +4319,17 @@ photos reads as it always did. The list says it for every proof in one pass on t
 (`GET /cases/{id}/proofs`, `engine/scenes.proof_slides`): about 140 ms for 300 proofs on
 three videos, 50 of them for the slides.
 
+**Delete** is in the header's ⋯ once the proof open is saved, with **Show in Inspect** for
+a proof of a video, and on each row of the Open list. It asks one question everywhere,
+the delete preview listing what it touches, and the proof goes to the Trash, from where it
+comes back. A proof of a video also asks what becomes of its scene: by default it **goes
+back to To geolocate**, as a delete always gave it back, or it **is removed with it**
+(`DELETE /cases/{id}/proofs/{name}?scene=drop`): the scenes to prove it took up or gave back
+leave its video's Inspect work and none is given back, in one go under the case's lock, the
+scenes put back if the delete fails. Restored, the proof states its moments as it did, and
+deleted again it gives a scene of them back. The proof open goes to the next proof of its
+video, else the one before, else the home.
+
 **Overlays.** Ctrl+V, a drop on the canvas, or `+ Add overlay` put an image
 straight into the proof. Ctrl+V answers to two clipboards, and the rule is which
 copy came last: an annotation copied here wins, until leaving the window and

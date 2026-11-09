@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   ABANDONED, GEOLOCATING, NEW, NO_PICTURE, PROGRESS, PROVED, SLIDE_CONTENT, SLIDE_LOOK, TODO,
-  findTiles, neighbour, resumeAt, slideStyle, slideTiles, switchPlan,
+  findTiles, neighbour, resumeAt, slideAfterDelete, slideStyle, slideTiles, switchPlan,
 } from './proofSlides.js';
 import { sceneList } from './scenes.js';
 
@@ -142,6 +142,22 @@ describe('the next and the previous slide', () => {
     expect(neighbour(tiles, 'nothing', 1).key).toBe('proof:road-bridge');
     expect(neighbour(tiles, 'nothing', -1).key).toBe('s2');
     expect(neighbour([], 'x', 1)).toBeNull();
+  });
+});
+
+describe('where a delete goes', () => {
+  const tiles = slideTiles(ANSWER, { started: true, name: 'market' });
+
+  it('goes to the next proof of the video, past a scene still to prove', () => {
+    expect(tiles.map((t) => t.key)).toEqual(['proof:road-bridge', 's1', 'proof:market', 's3', 'proof:square', 's2']);
+    expect(slideAfterDelete(tiles, 'proof:market').key).toBe('proof:square');
+    expect(slideAfterDelete(tiles, 'proof:road-bridge').key).toBe('proof:market');
+  });
+
+  it('goes back to the proof before when it was the last, and home when it was alone', () => {
+    expect(slideAfterDelete(tiles, 'proof:square').key).toBe('proof:market');
+    expect(slideAfterDelete(tiles.filter((t) => t.key === 'proof:market' || t.kind === 'draft'), 'proof:market')).toBeNull();
+    expect(slideAfterDelete(tiles, 'gone')).toBeNull();
   });
 });
 

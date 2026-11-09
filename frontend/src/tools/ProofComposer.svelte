@@ -30,6 +30,7 @@
   import SearchInput from '../components/SearchInput.svelte';
   import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import FloatingMenu from '../components/FloatingMenu.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
   import ProofToolbar from './proof/ProofToolbar.svelte';
@@ -154,14 +155,15 @@
   import ProofSlides from './proof/ProofSlides.svelte';
   import DraftPage from './proof/DraftPage.svelte';
   import ProofFrames from './inspect/ProofFrames.svelte';
-  import { neighbour, resumeAt, slideStyle, slideTiles, switchPlan } from '../lib/proofSlides.js';
+  import { neighbour, resumeAt, slideAfterDelete, slideStyle, slideTiles, switchPlan } from '../lib/proofSlides.js';
   import { defaultProofTemplate } from '../lib/proofTemplates.js';
   import { addMark, newAzimutMark } from '../lib/proofMark.js';
   import { PROOF_TEMPLATE_HELP } from '../lib/proofTemplateHelp.js';
   import MarkShowChoice from '../components/MarkShowChoice.svelte';
   import { onEvent } from '../lib/events.js';
   import {
-    abandonProof, abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneQueue, restoreProof, restoreScene, sceneQueue,
+    abandonProof, abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneQueue, readSceneQueue, restoreProof, restoreScene,
+    sceneQueue,
   } from '../lib/geolocating.svelte.js';
   import { sceneMaterial, scenesToProve } from '../lib/newProof.js';
   import { openScenes, queueColor } from '../lib/sceneQueue.js';
@@ -6795,18 +6797,63 @@
     if (entry) requestOpenProof(entry);
   }
 
-  let deleteEntry = $state(null); // open-list entry pending deletion
+  // ---- deleting a saved proof ---------------------------------------------------------------
+  // From the Open list, the header's ⋯ for the proof open, or a slide's menu: one question,
+  // which for a proof of a video also asks what becomes of its scene. By default it goes back
+  // to To geolocate, as a delete always gave it back; or it is removed with the proof. Either
+  // way the proof goes to the Trash and comes back from there.
+  let deleteTarget = $state(null); // `{ name, title, video }` pending deletion
+  let deleteScene = $state('keep');
+  let deleting = $state(false);
+
+  function askDelete({ name, title, video = null }) {
+    if (!name) return;
+    deleteScene = 'keep';
+    deleteTarget = { name, title: title || name, video: video || null };
+  }
+
+  /** Delete the proof asked about. The proof open goes to the next slide of its video, else home. */
   async function deleteSavedProof() {
-    const entry = deleteEntry;
-    deleteEntry = null;
+    const target = deleteTarget;
+    const caseId = caseState.current?.id;
+    if (!target || !caseId || deleting) return;
+    deleting = true;
+    const open = proofStarted && savedName === target.name;
+    // where to go once it is gone, read off the strip as it stands
+    const current = open ? shownSlide : null;
+    const next = current ? slideAfterDelete(strip, current.key) : null;
     try {
-      const caseId = caseState.current.id;
-      const result = await api.del(`/api/cases/${caseId}/proofs/${encodeURIComponent(entry.name)}`);
-      await Promise.all([openProofList(), reloadCase()]);
-      deletedToast(caseId, result, entry.title);
+      const scene = target.video && deleteScene === 'drop' ? '?scene=drop' : '';
+      const result = await api.del(`/api/cases/${caseId}/proofs/${encodeURIComponent(target.name)}${scene}`);
+      deleteTarget = null;
+      if (open) {
+        // gone on purpose: no word that the saved proof was deleted behind the composer
+        savedName = null;
+        dirty = false;
+        if (next) await openSlide(next);
+        else resetDoc();
+      } else if (slides.video) {
+        readSlides();
+      }
+      deletedToast(caseId, result, target.title);
+      await Promise.all([openList !== null ? openProofList() : null, reloadCase()]);
+      if (sceneQueue.caseId === caseId && sceneQueue.files) readSceneQueue(caseId);
     } catch (e) {
       toast(e.message, 'danger');
+    } finally {
+      deleting = false;
     }
+  }
+
+  // The header's ⋯ for the proof open, and the menu it holds.
+  let proofMenu = $state(null);
+
+  /** Show the proof open in Inspect, on its moment: what a slide's menu does. */
+  function showInInspect() {
+    proofMenu = null;
+    if (!scene.star || !savedName) return;
+    uiState.inspectScene = { video: scene.star, slide: savedName };
+    uiState.tool = 'inspect';
   }
 
   // Bumped by every open, so panels still streaming in for a proof the analyst
@@ -6949,7 +6996,7 @@
   const modalOpen = $derived(
     picker || newProofOpen || importOpen || openList !== null || discardConfirm
       || replaceWithNewConfirm || exportPicker || overwritePrompt !== null
-      || placeOffer !== null || orphanOffer !== null || deleteEntry !== null
+      || placeOffer !== null || orphanOffer !== null || deleteTarget !== null
       || sourcePick !== null || pointMap !== null || checking !== null || leaving !== null
       || slideChooser !== null
   );
@@ -7388,6 +7435,12 @@
         oninput={() => (dirty = true)}
       />
       {#if dirty}<span class="badge">unsaved</span>{/if}
+      {#if savedName}
+        <button class="btn btn-ghost btn-sm proof-more" aria-label="More for this proof" title="More for this proof"
+          aria-haspopup="menu" aria-expanded={!!proofMenu} onclick={(event) => (proofMenu = proofMenu ? null : event.currentTarget)}>
+          <Icon name="more" size={14} stroke={2.4} />
+        </button>
+      {/if}
     {/if}
     <div class="spacer"></div>
     {#if caseState.current}
@@ -7453,6 +7506,19 @@
       <Icon name="post" size={14} /> To Post
     </button>
   </div>
+
+  {#if proofMenu}
+    <FloatingMenu anchor={proofMenu} width={220} label="This proof" onclose={() => (proofMenu = null)}>
+      {#if scene.star}
+        <button type="button" class="fm-item" title="Open its video in Inspect on its moment" onclick={showInInspect}>
+          <Icon name="inspect" size={14} /><span class="fm-grow">Show in Inspect</span></button>
+        <div class="fm-sep"></div>
+      {/if}
+      <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored"
+        onclick={() => { proofMenu = null; askDelete({ name: savedName, title: savedTitle(proofEntities, 'proof', savedName) || proof.title, video: scene.star }); }}>
+        <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
+    </FloatingMenu>
+  {/if}
 
   {#if kinWords}
     <!-- What the save just joined: the site this point shares with other geolocations,
@@ -8377,19 +8443,32 @@
   />
 {/if}
 
-{#if deleteEntry}
+{#if deleteTarget}
   <ConfirmDialog
     title="Delete this proof?"
-    message={`“${deleteEntry.title}” will be removed from the case.`}
+    message={`“${deleteTarget.title}” will be removed from the case.`}
     detail="Moves the PNG and editable proof to the case trash."
-    impact={{ caseId: caseState.current?.id, paths: [deleteEntry.spec_path] }}
+    impact={{ caseId: caseState.current?.id, paths: [specPath('proof', deleteTarget.name)] }}
     restorable={RESTORABLE}
     confirmLabel="Delete"
     tone="default"
     icon="trash"
+    busy={deleting}
     onconfirm={deleteSavedProof}
-    oncancel={() => (deleteEntry = null)}
-  />
+    oncancel={() => (deleteTarget = null)}
+  >
+    {#snippet children()}
+      {#if deleteTarget.video}
+        <!-- A proof of a video: its scene goes back to geolocate, as a delete always gave
+             it back, or goes with it. -->
+        <fieldset class="scene-choice">
+          <legend>Its scene in {videoName(deleteTarget.video)}</legend>
+          <label><input type="radio" name="proof-scene" value="keep" bind:group={deleteScene} /> Goes back to To geolocate</label>
+          <label><input type="radio" name="proof-scene" value="drop" bind:group={deleteScene} /> Is removed with it</label>
+        </fieldset>
+      {/if}
+    {/snippet}
+  </ConfirmDialog>
 {/if}
 
 {#if picker}
@@ -8558,7 +8637,7 @@
                     {/if}
                   </div>
                 </button>
-                <button class="btn btn-ghost btn-sm open-del" title="Delete this saved proof" onclick={() => (deleteEntry = entry)}>
+                <button class="btn btn-ghost btn-sm open-del" title="Delete this saved proof" onclick={() => askDelete(entry)}>
                   <Icon name="trash" size={13} />
                 </button>
               </div>
@@ -8583,6 +8662,11 @@
      line of text and stands level with Save and To Post. */
   .tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }
   .spacer { flex: 1; }
+  .proof-more { align-self: center; padding-inline: 5px; color: var(--text-2); }
+  .scene-choice { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
+  .scene-choice legend { margin-bottom: 4px; padding: 0; color: var(--text-2); font-weight: 600; }
+  .scene-choice label { display: flex; align-items: center; gap: 8px; color: var(--text-1); cursor: pointer; }
+  .scene-choice input { margin: 0; accent-color: var(--accent); }
   .export-split {
     position: relative;
     display: flex;

@@ -690,6 +690,17 @@ def proof_slides(case: Case, specs: list[tuple[str, dict[str, Any]]]) -> dict[st
     return out
 
 
+def scenes_cited(case: Case, rel: str) -> tuple[str | None, set[str]]:
+    """The video a proof rests on and the scenes to prove it cites, by its spec's path:
+    what goes with it when its delete takes its scene too (`api/proofs.delete_proof`)."""
+    try:
+        spec = _read_proof(case.resolve_inside(rel))
+    except (UnknownProof, CaseError):
+        return None, set()
+    video, _moments = star_video(case, spec)
+    return video, cited_drafts(stated_scene(spec))
+
+
 def video_scenes(
     case: Case,
     video: str,

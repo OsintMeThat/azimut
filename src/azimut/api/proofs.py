@@ -22,7 +22,7 @@ import struct
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from .. import config
 from ..engine import artifacts as artifact_engine
 from ..engine import copernicus_credit
-from ..engine import exportdir, geolocate, layerediting
+from ..engine import exportdir, geolocate, inspectwork, layerediting
 from ..engine import links as link_engine
 from ..engine import localtime
 from ..engine import media as media_engine
@@ -1079,7 +1079,12 @@ def read_spec(case: Case, proof: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.delete("/cases/{case_id}/proofs/{name}")
-def delete_proof(case_id: str, name: str) -> dict[str, Any]:
+def delete_proof(case_id: str, name: str, scene: Literal["keep", "drop"] = "keep") -> dict[str, Any]:
+    """Send a proof to the Trash. Its scene goes back to its video's work to geolocate
+    again (``scene=keep``, `scenes.give_back`), or with ``scene=drop`` it goes with the
+    proof: the scenes to prove it took up or gave back leave the work, and none is given
+    back. Both in one go under the case's lock, the scenes put back if the delete fails.
+    Restored, the proof states its moments as it did, so nothing is lost but the draft."""
     case = get_case(case_id)
     # Named the way the save named it — see `api/satellite.delete_search_grid`.
     rel = layout.proof_spec_rel(slugify(name, "proof"))
@@ -1087,9 +1092,21 @@ def delete_proof(case_id: str, name: str) -> dict[str, Any]:
         case.resolve_inside(rel)
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    result = delete_by_path(case, rel)
-    if not result["deleted"]:  # never filed as an entity: drop the files anyway
-        # The registry knows what a proof owns — spec, export and the pasted
-        # images beside them — so this path and the chokepoint cannot drift.
-        artifact_engine.delete(case, {"type": "proof", "attrs": {"spec": rel}})
-    return result
+    drop = scene == "drop"
+    with case.lock:
+        video, cited = scene_engine.scenes_cited(case, rel)
+        taken = inspectwork.remove_scenes(case, cited) if drop else []
+        try:
+            result = delete_by_path(case, rel, give_back=not drop)
+            if not result["deleted"]:  # never filed as an entity: drop the files anyway
+                # The registry knows what a proof owns — spec, export and the pasted
+                # images beside them — so this path and the chokepoint cannot drift.
+                artifact_engine.delete(case, {"type": "proof", "attrs": {"spec": rel}})
+        except Exception:
+            inspectwork.put_back_scenes(case, taken)
+            raise
+        dropped = [s["id"] for _subject, gone in taken for s in gone]
+    if video:
+        # its scene went back to the work, or left it: the strip, Inspect and the queue read again
+        events.publish({"type": "scenes", "case_id": case.id, "video": video})
+    return {**result, "scene": scene, "dropped": dropped}
