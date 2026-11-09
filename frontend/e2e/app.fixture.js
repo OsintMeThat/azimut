@@ -2148,6 +2148,9 @@ export async function installAppFixture(page, options = {}) {
         attrs: payload,
       });
     }
+    // The saved proofs, which Geo Proof's home and Open proof list: none, unless a spec
+    // names them (`proofList`) or routes its own over this one.
+    if (path === `/api/cases/${CASE_ID}/proofs` && request.method() === 'GET') return json(route, options.proofList ?? []);
     if (path === `/api/cases/${CASE_ID}/proofs` && request.method() === 'POST') {
       const payload = request.postDataJSON();
       proofSaves.push(payload);

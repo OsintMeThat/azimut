@@ -8,11 +8,11 @@
     focusSelect,
     commitTextEdit,
     proofHasContent,
-    proofStarted,
     openPicker,
-    openNewProofDialog,
     /** What stands in place of an empty composer: a scene of the strip, still to prove. */
     page = null,
+    /** Geo Proof's home, in place of the canvas while no proof is open (`ProofHome.svelte`). */
+    home = null,
   } = $props();
 </script>
 
@@ -48,22 +48,16 @@
   {/if}
   {#if page}
     {@render page()}
+  {:else if home}
+    {@render home()}
   {:else if !proofHasContent}
     <div class="empty overlay-empty">
       <div class="empty-icon"><Icon name="proof" size={42} /></div>
-      {#if proofStarted}
-        <h3>No panels yet</h3>
-        <p>Add panels when you are ready.</p>
-        <button class="btn" onclick={openPicker}>
-          <Icon name="plus" size={15} /> Add panel
-        </button>
-      {:else}
-        <h3>Compose a proof</h3>
-        <p>Create a proof to choose its template and starting panels.</p>
-        <button class="btn" onclick={openNewProofDialog}>
-          <Icon name="plus" size={15} /> New proof
-        </button>
-      {/if}
+      <h3>No panels yet</h3>
+      <p>Add panels when you are ready.</p>
+      <button class="btn" onclick={openPicker}>
+        <Icon name="plus" size={15} /> Add panel
+      </button>
     </div>
   {/if}
 </div>

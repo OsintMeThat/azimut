@@ -21,10 +21,12 @@ const bodyOfFn = (name) => {
 };
 
 describe('Proof Composer empty state', () => {
-  it('hides proof-specific chrome until a proof is started', () => {
+  it('hides proof-specific chrome until a proof is started, its home in place of the canvas', () => {
     const { body } = render(ProofComposer);
 
-    expect(body).toContain('Compose a proof');
+    expect(body).toContain('data-testid="proof-home"');
+    expect(body).toContain('Find a proof by name');
+    expect(body).not.toContain('No panels yet');
     expect(body).not.toContain('Freehand (d)');
     expect(body).not.toContain('title-input');
     expect(body).not.toContain('<aside');

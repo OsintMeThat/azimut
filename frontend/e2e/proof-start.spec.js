@@ -288,3 +288,52 @@ test('Open proof tags a proof of a video and filters by video, a proof on photos
   await list.locator('.open-row', { hasText: 'Market' }).click();
   await expect(proofName(page)).toHaveValue('Market');
 });
+
+// -- the home ---------------------------------------------------------------------------------
+
+const home = (page) => page.getByTestId('proof-home');
+
+test('the home of an empty case is the big button and one sentence', async ({ page }) => {
+  const { fixture } = await openCase(page, { empty: true });
+  await expect(home(page).locator('.ph-empty p')).toHaveText('A proof lays pictures side by side and marks where they match.');
+  await expect(home(page).getByRole('textbox')).toHaveCount(0);
+  // the side column waits for a proof
+  await expect(page.locator('aside.side')).toHaveCount(0);
+  await home(page).getByRole('button', { name: 'New proof' }).click();
+  await expect(newProof(page)).toBeVisible();
+  await expect(newProof(page).getByText('No pictures in this case yet.', { exact: false })).toBeVisible();
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('the home continues from the last proofs, finds one by name, and makes the proof of a scene', async ({ page }) => {
+  const { proofReads, frameSaves } = await openCase(page);
+  const cards = home(page).locator('.ph-card');
+  await expect(cards.locator('.ph-title')).toHaveText(['Road bridge', 'Market', 'Holiday']);
+  await expect(cards.locator('.ph-tag')).toHaveText(['clip.webm · 1/2', 'clip.webm · 2/2']);
+  await expect(page.locator('aside.side')).toHaveCount(0);
+  // one read for the home
+  expect(proofReads).toHaveLength(1);
+
+  // To prove: the video's card, its scene as a chip
+  const chip = home(page).locator('.ph-chip');
+  await expect(home(page).locator('.ph-video h5')).toHaveText('clip.webm');
+  await expect(chip).toHaveText(/Water tower\?\s*0:00–0:00\s*In progress · 1 capture/);
+
+  // the search opens the first proof found on Enter
+  await home(page).getByRole('textbox', { name: 'Find a proof by name' }).fill('mark');
+  await expect(home(page).locator('.ph-hit-title')).toHaveText(['Market']);
+  await page.keyboard.press('Enter');
+  await expect(proofName(page)).toHaveValue('Market');
+  await expect(home(page)).toHaveCount(0);
+
+  // Back is the home again, and a chip makes the proof of its scene as Make the proof does
+  await page.goBack();
+  await expect(home(page)).toBeVisible();
+  await home(page).locator('.ph-chip').click();
+  const chooser = page.getByRole('dialog', { name: 'Make the proof' });
+  await expect(chooser.getByRole('list', { name: 'Frames of the scene' }).getByRole('listitem')).toHaveCount(2);
+  await chooser.getByRole('button', { name: 'Make the proof' }).click();
+  await expect(proofName(page)).toHaveValue('Water tower');
+  expect(frameSaves).toHaveLength(1);
+  await expect(page.locator('.panel-row')).toHaveCount(3);
+});

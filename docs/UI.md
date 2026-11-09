@@ -4279,6 +4279,19 @@ pass date, detector, area and run id. Exported layers survive deletion of their 
 A proof is composed of panels: case images, each carrying its source. Two things
 in the composer are not panels.
 
+**With no proof open, Geo Proof shows its home** in place of the canvas, and the side
+column and the toolbar wait for a proof. On top, a large **New proof** and a search that
+finds a proof by name, Enter opening the first. **Continue** holds the last six proofs saved
+as large thumbnails with their name and how long ago, a proof of a video tagged
+*clip.mp4 · 2/4* in its scene's colour, and *All N proofs* opens the Open proof list. **To
+prove** shows only when the case has scenes still to prove: a card per video with its
+thumbnail and its scenes as chips, each with its colour, name, time and where it stands. A
+chip is Make the proof: the frames of the scene chosen as from the strip, or for a picture
+the proof of it and its captures. A case holding nothing shows the button and one sentence.
+The home opens on the list it read last and reads it again behind (`GET /proofs`, one read),
+the scenes coming from the queue the app already keeps. A scene of the strip still shows its
+page in place of the canvas, as before.
+
 **New proof** opens a window of the case's pictures. On the left, where they come from:
 **All**, then **Satellite**, **Videos**, **Collages**, **Screenshots** and **Photos**, each
 with its count and left out when the case holds none (`lib/newProof.js`). A frame or a

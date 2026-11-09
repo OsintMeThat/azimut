@@ -39,6 +39,7 @@
   import '../lib/proofFontFaces.js';
   import { PROOF_FONTS, DEFAULT_PROOF_FONT, fontStack, loadProofFont } from '../lib/proofFonts.js';
   import NewProofDialog from './proof/NewProofDialog.svelte';
+  import ProofHome from './proof/ProofHome.svelte';
   import ImportProofDialog from './proof/ImportProofDialog.svelte';
   import PointMapDialog from './proof/PointMapDialog.svelte';
   import PanelCategories from './proof/PanelCategories.svelte';
@@ -163,6 +164,7 @@
     abandonProof, abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneQueue, restoreProof, restoreScene, sceneQueue,
   } from '../lib/geolocating.svelte.js';
   import { sceneMaterial, scenesToProve } from '../lib/newProof.js';
+  import { openScenes, queueColor } from '../lib/sceneQueue.js';
   import { NO_VIDEO, inVideo, proofVideos, slideTag } from '../lib/proofList.js';
   import { collagesOfScene, pictureHandoff, proofHandoff } from '../lib/sceneFrames.js';
   import { sceneMoments, sceneStart } from '../lib/scenes.js';
@@ -2027,14 +2029,69 @@
     newProofScene = null;
   }
 
-  // The queue is kept in step while New proof shows its scenes.
+  // The queue is kept in step while New proof or the home shows its scenes.
   $effect(() => {
-    if (!newProofOpen) return;
+    if (!newProofOpen && !(homeShown && uiState.tool === 'proof')) return;
     return holdSceneQueue();
   });
   const queueFiles = $derived(sceneQueue.caseId === caseState.current?.id ? sceneQueue.files ?? [] : []);
   const live = $derived(geolocating.caseId === caseState.current?.id ? geolocating.scene : null);
   const newProofScenes = $derived(scenesToProve(queueFiles, live));
+
+  // ---- the home: what Geo Proof shows with no proof open ---------------------------------
+  // The last proofs saved, the search, and the scenes still to prove (`proof/ProofHome.svelte`).
+  // It opens on the list read last while one read brings it up to date (`GET /proofs`, the
+  // list Open proof reads too), read again when the case moves.
+  const homeShown = $derived(!proofStarted && !draftShown);
+  let homeProofs = $state(null);
+  let homeFor = null;
+  let homeRun = 0;
+  const homeFiles = $derived(openScenes(queueFiles));
+  $effect(() => {
+    const id = caseState.current?.id;
+    void caseState.rev;
+    if (!homeShown || uiState.tool !== 'proof') return;
+    untrack(() => {
+      if (!id) {
+        homeProofs = [];
+        return;
+      }
+      if (homeFor !== id) homeProofs = null;
+      homeFor = id;
+      void ensureSceneQueue(id);
+      readHomeProofs(id);
+    });
+  });
+
+  async function readHomeProofs(caseId) {
+    const run = ++homeRun;
+    try {
+      const list = await api.get(`/api/cases/${caseId}/proofs`);
+      if (run === homeRun && homeFor === caseId) homeProofs = list;
+    } catch {
+      if (run === homeRun && homeFor === caseId) homeProofs ??= [];
+    }
+  }
+
+  /**
+   * A chip of the home's To prove: Make the proof of that scene, as from Inspect. A video's
+   * scene chooses its frames first; a picture's proof lays the picture and its captures out.
+   */
+  async function makeFromHome(file, row) {
+    const caseId = caseState.current?.id;
+    if (!caseId) return;
+    if (file.kind === 'image' || row.file_kind === 'image') {
+      await makeSceneProof(pictureHandoff(row, file.video, row.captures ?? []));
+      return;
+    }
+    let collages = [];
+    try {
+      collages = (await api.get(`/api/cases/${caseId}/scenes?video=${encodeURIComponent(file.video)}`))?.collages ?? [];
+    } catch {
+      // its collages are only offered: the frames are read below, and say if the scene went
+    }
+    await chooseSceneFrames({ video: file.video, row: { ...row, video: file.video }, color: queueColor(row), collages, navigate: true });
+  }
 
   /**
    * A scene picked in New proof: its material, read as Make the proof reads it, the
@@ -7312,6 +7369,12 @@
   {/if}
 {/snippet}
 
+<!-- Geo Proof's home, in place of the canvas while no proof is open. -->
+{#snippet homeView()}
+  <ProofHome caseId={caseState.current?.id ?? ''} proofs={homeProofs} files={homeFiles} {live} {thumbOf}
+    onnew={openNewProofDialog} onopen={requestOpenProof} onall={openProofDialog} onscene={makeFromHome} />
+{/snippet}
+
 <div class="tool">
   <!-- Narrower than its row (the case panel open on a laptop), the header shows the
        secondary buttons as icons rather than cut off Save and To Post. It is measured on
@@ -7475,10 +7538,9 @@
         {focusSelect}
         {commitTextEdit}
         {proofHasContent}
-        {proofStarted}
         {openPicker}
-        {openNewProofDialog}
         page={pageTile ? scenePage : null}
+        home={homeShown ? homeView : null}
       />
       {#if openingTitle}
         <p class="opening" role="status" dir="auto">Opening {openingTitle}…</p>
