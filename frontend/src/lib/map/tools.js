@@ -75,7 +75,7 @@ export const MAP_MODES = [
   },
   {
     id: 'capture',
-    label: 'Select area',
+    label: 'Capture an area',
     icon: 'crop',
     group: 'capture',
     cursor: 'selecting',

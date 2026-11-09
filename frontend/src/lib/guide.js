@@ -431,7 +431,7 @@ export const PAGES = {
         opens: {
           shot: 'satellite-capture',
           lead: 'The arrow sets how a capture is taken: centred or drawn, its size, ratio and resolution.',
-          marks: [{ anchor: 'sat.capture-menu', title: 'Capture settings', text: 'The main button starts on Select area and repeats the last mode used.' }],
+          marks: [{ anchor: 'sat.capture-menu', title: 'Capture settings', text: 'The main button starts on Capture an area and repeats the last mode used.' }],
         },
       },
     ],

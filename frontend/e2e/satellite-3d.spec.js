@@ -331,7 +331,7 @@ test('a tilted capture files the picture with its tilt and exact zoom', async ({
   // no deeper zoom to take and no one scale to mark on a tilted view
   await expect(page.getByText('A tilted view is filed as the map draws it on screen')).toBeVisible();
   await expect(page.getByText('Scale bar & north arrow')).toHaveCount(0);
-  // the main button starts on Select area: the centred frame is chosen here
+  // the main button starts on Capture an area: the centred frame is chosen here
   await page.locator('.size-menu .chip', { hasText: /^Capture$/ }).click();
   await page.getByRole('button', { name: 'Capture options' }).click();
 
@@ -611,7 +611,7 @@ test('a box drawn over the globe captures that box and leaves the view where it 
   const ll = address(page).get('ll');
 
   await page.getByRole('button', { name: 'Capture options' }).click();
-  await page.locator('.size-menu .chip', { hasText: 'Select area' }).click();
+  await page.locator('.size-menu .chip', { hasText: 'Capture an area' }).click();
   await page.locator('.capture-main').click();
   await expect(page.locator('.capture-main')).toHaveText(/Draw box/);
 
@@ -638,7 +638,7 @@ test('a box over the sky alone is refused with the reason, and the marquee stays
   await expect(globe(page)).toBeVisible();
   await expect(tilt(page)).toHaveText(/Tilt \d+°/, LEANS);
   await page.getByRole('button', { name: 'Capture options' }).click();
-  await page.locator('.size-menu .chip', { hasText: 'Select area' }).click();
+  await page.locator('.size-menu .chip', { hasText: 'Capture an area' }).click();
   await page.locator('.capture-main').click();
   // the top strip of a view leaning to the horizon is sky
   const map = await page.locator('.map').boundingBox();

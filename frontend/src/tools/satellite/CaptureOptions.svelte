@@ -57,7 +57,7 @@
     {#if capturing}
       <span class="spinner"></span> Capturing…
     {:else if mode === 'select'}
-      <Icon name="crop" size={14} /> {selectArmed ? 'Draw box…' : 'Select area'}
+      <Icon name="crop" size={14} /> {selectArmed ? 'Draw box…' : 'Capture an area'}
     {:else}
       <Icon name="satellite" size={15} /> Capture
     {/if}
@@ -79,7 +79,7 @@
           <span class="menu-label">Mode</span>
           <div class="chips">
             <button class="chip" class:on={mode === 'center'} onclick={() => (mode = 'center')}>Capture</button>
-            <button class="chip" class:on={mode === 'select'} onclick={() => (mode = 'select')}>Select area</button>
+            <button class="chip" class:on={mode === 'select'} onclick={() => (mode = 'select')}>Capture an area</button>
             {#if openFigure}
               <button
                 class="chip"

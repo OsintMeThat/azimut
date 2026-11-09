@@ -398,7 +398,7 @@ describe('the marquee', () => {
     expect(rects).toEqual([]);
   });
 
-  it('starts the main button on Select area', () => {
+  it('starts the main button on Capture an area', () => {
     const capture = store({ startMode: undefined });
     expect(capture.mode).toBe('select');
     capture.mode = 'center';

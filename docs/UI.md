@@ -2874,7 +2874,7 @@ Map chrome sorts into four kinds, each with one place, and a tool declares
 which it is (`lib/map/tools.js`) rather than adding a button somewhere.
 
 - **Modes** — what the pointer does: measure, grid search, sun & moon, and the
-  capture marquee, which is armed from the Capture button (it starts on Select area, the
+  capture marquee, which is armed from the Capture button (it starts on Capture an area, the
   centred frame one choice away in its arrow) rather than from a
   toolbox. Exactly one is ever armed: arming any of them closes the rest, and
   Escape disarms whatever is. They sit in the **rail**, a column floating in the
@@ -3001,7 +3001,7 @@ time rather than the picture itself. What was drawn is written into the
 capture's provenance.
 
 **Figure** sits in the same menu while Sentinel-2 is on, in its first row beside
-Capture and Select area, since it is a third thing to take off this map rather
+Capture and Capture an area, since it is a third thing to take off this map rather
 than a setting for the other two: the same ground on the day already chosen,
 through the layers you pick, each panel captioned and filed as its own capture.
 It opens in Geo Proof with its credit line written — the day, the point,

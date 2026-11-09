@@ -108,7 +108,7 @@ export function createCaptureState({
   // 1 = the view's own zoom, 2 = one zoom deeper, 'max' = the provider's deepest.
   let resolution = $state(1);
   // The button runs whichever mode was used last, so this *is* that memory. It starts on
-  // Select area; the centred frame is one choice away in the arrow's menu.
+  // Capture an area; the centred frame is one choice away in the arrow's menu.
   let mode = $state(startMode === 'center' ? 'center' : 'select'); // 'center' | 'select'
   let menuOpen = $state(false); // the mode/size/ratio/resolution popover
   let armed = $state(false); // marquee: drag a box on the map to capture it

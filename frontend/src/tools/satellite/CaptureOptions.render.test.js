@@ -5,7 +5,7 @@
  * A figure is the one thing in here that is not a size or a ratio, and it was
  * buried under them: a row of its own at the bottom of the menu, below the
  * custom size inputs, which nobody scrolls to. It now sits where the menu is
- * read, beside Capture and Select area. So what is asserted is that it is
+ * read, beside Capture and Capture an area. So what is asserted is that it is
  * there, that it is pressable whatever the map is set to, since what a figure
  * still needs is the dialog's to say, and that pressing it opens that dialog
  * without arming a capture mode.
@@ -71,7 +71,7 @@ describe('on Sentinel-2', () => {
   it('is a chip beside the two capture modes, pressable', () => {
     show({ openFigure: vi.fn() });
 
-    expect(labels()).toEqual(['Capture', 'Select area', 'Figure…']);
+    expect(labels()).toEqual(['Capture', 'Capture an area', 'Figure…']);
     expect(chip('Figure…').disabled).toBe(false);
   });
 
@@ -92,7 +92,7 @@ describe('on a basemap with no figure to build', () => {
   it('leaves the row at the two capture modes, and the menu unchanged', () => {
     show({ openFigure: null });
 
-    expect(labels()).toEqual(['Capture', 'Select area']);
+    expect(labels()).toEqual(['Capture', 'Capture an area']);
     expect(hints()).toEqual([
       'Captures the centred size below.',
       'Captures a deeper zoom for a sharper file.',
