@@ -227,12 +227,15 @@ class CompareAnnotation(BaseModel):
     #: What a numbered marker counts to. Its series is its colour's, and the
     #: browser assigns it; the ceiling is what one picture can carry legibly.
     number: int = Field(default=1, ge=1, le=999)
-    #: Which symbol a stamp draws, by name. Not checked against the drawing set:
+    #: Which symbol a stamp draws, by name: one of Geo Proof's stamps, a layer
+    #: badge's glyph or a vehicle model. Not checked against the drawing set:
     #: that set lives in the browser and grows there, and a name this build does
     #: not know is drawn as the first symbol rather than refused on the way in.
     glyph: str = Field(default="", max_length=40)
-    #: The compass direction that was up on the screen a box or an ellipse was
-    #: drawn on, in degrees: its sides run along that screen, not along north.
+    #: The compass direction a mark's own up runs along, in degrees. For a box or
+    #: an ellipse, the up of the screen it was drawn on, so its sides run along
+    #: that screen rather than along north; for a vehicle model, where its nose
+    #: points.
     angle: float = Field(default=0, allow_inf_nan=False)
 
     @field_validator("angle")

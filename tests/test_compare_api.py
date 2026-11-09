@@ -123,6 +123,9 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
         # drawn on a camera turned 30° anticlockwise, so its sides run along that screen
         {"id": "roof", "kind": "rect", "colour": "#f6a81a",
          "points": [[2.2945, 48.8584], [2.2950, 48.8580]], "angle": -30},
+        # a vehicle model keeps where its nose points in the same field
+        {"id": "tank", "kind": "icon", "colour": "#ef4444",
+         "points": [[2.2948, 48.8587]], "glyph": "model-tank", "angle": -45},
     ]
     saved = _save(client, cid, "Harbour change", spec)
     assert saved.status_code == 200, saved.text
@@ -160,6 +163,10 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
     assert loaded["spec"]["annotations"][2]["number"] == 2
     assert loaded["spec"]["annotations"][3]["glyph"] == "vehicle"
     assert loaded["spec"]["annotations"][4]["angle"] == 330
+    tank = loaded["spec"]["annotations"][5]
+    assert (tank["glyph"], tank["angle"]) == ("model-tank", 315)
+    # the stored shape every mark has had, with nothing added for the model
+    assert set(tank) == set(loaded["spec"]["annotations"][3])
     assert loaded["spec"]["annotations"][0]["angle"] == 0
 
     entity = _entities(cid, "compare-session")[0]
