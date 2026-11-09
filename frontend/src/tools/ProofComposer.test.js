@@ -1442,23 +1442,16 @@ describe('Proof Composer — numbered markers and blur boxes', () => {
   it('stamps a marker and keeps the tool, the way the symbol stamp does', () => {
     const body = bodyOfFn('onPointerDown');
     expect(body).toContain("if (tool === 'number') {");
-    expect(body).toContain('n: nextMarkerNumber(color)');
+    // counted on the picture it lands on (lib/proofEdits.nextMarkerNumber)
+    expect(body).toContain('n: nextMarkerNumber(proof.shapes, color, panel.id)');
     // no `tool = 'select'` in that branch: numbering four things is one act
     const branch = body.slice(body.indexOf("if (tool === 'number') {"));
     expect(branch.slice(0, branch.indexOf('return;'))).not.toContain("tool = 'select'");
   });
 
-  it('counts each colour as its own series, starting back at 1', () => {
-    const body = bodyOfFn('nextMarkerNumber');
-    // colour is what this composer says "same feature" with, so a second colour
-    // is a second series rather than a continuation of the first
-    expect(body).toContain("x.kind === 'number' && x.color === ink");
-    expect(body).toContain('while (taken.has(n)) n += 1;');
-  });
-
   it('renumbers a marker recoloured into another series', () => {
     const body = bodyOfFn('setColor');
-    expect(body).toContain("if (s.kind === 'number' && s.color !== c) s.n = nextMarkerNumber(c);");
+    expect(body).toContain("if (s.kind === 'number' && s.color !== c) s.n = nextMarkerNumber(proof.shapes, c, s.panel);");
   });
 
   it('gives both a marker and a blur box handles to resize and turn', () => {

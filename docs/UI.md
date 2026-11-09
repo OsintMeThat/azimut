@@ -4860,11 +4860,17 @@ draws the new drawing; the names on disk did not change, and a view cone keeps i
 camera.
 
 **Numbered markers.** A filled disc carrying a number, stamped like a symbol and
-keeping the tool in hand for the same reason. **Each colour counts its own series**
-and starts back at 1, because colour is what this composer says "same feature" with
-everywhere else. The number is the **first one free** in that series, so deleting #2
-and stamping again fills that hole rather than leaving a proof that counts 1, 3, 4;
-recolouring a marker moves it into the series it joins. The numeral takes a
+keeping the tool in hand for the same reason. **Each picture counts from 1**, and
+within it **each colour counts its own series**, because colour is what this composer
+says "same feature" with everywhere else. A frame and a satellite capture then carry
+1, 2, 3 each, and the same number on both pictures marks the same point, the way a
+published geolocation pairs them. An overlay counts as a picture, and a marker on the
+page, off every picture, counts in the page's own series. The number is the **first
+one free** in that series, so deleting #2 and stamping again fills that hole rather
+than leaving a picture that counts 1, 3, 4; recolouring a marker moves it into the
+series it joins on its picture. A marker dragged onto another picture, or pasted
+there, keeps its number. Markers saved before this keep theirs too: only the next
+number offered follows the rule. The numeral takes a
 contrasting ink off the disc's own colour, since it has to be read over whatever it
 is standing on. It resizes from its corners and turns like a symbol; there is no
 line in it, so the width control stays away.

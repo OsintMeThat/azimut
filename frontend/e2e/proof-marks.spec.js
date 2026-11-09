@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installAppFixture, openProofWithPanel } from './app.fixture.js';
+import { CASE_ID, PANEL_PATH, installAppFixture, openProofWithPanel } from './app.fixture.js';
 
 /**
  * The two marks that are neither a line nor a word, driven on the real canvas.
@@ -116,6 +116,64 @@ test('each colour numbers its own series from 1', async ({ page }) => {
     ['#ff5252', 1],
     ['#ff5252', 2],
     ['#40c4ff', 1],
+  ]);
+  fixture.expectNoUnexpectedRequests();
+});
+
+const SECOND_PATH = 'media/second.svg';
+const SECOND_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720">
+  <rect width="1280" height="720" fill="#445566"/><circle cx="640" cy="360" r="200" fill="#99aabb"/></svg>`;
+
+const mediaItem = (path, width, height, sha) => ({
+  path, filename: path.split('/').pop(), kind: 'image', width, height, size: 256, sha256: sha.repeat(64),
+  source: { type: 'upload' }, thumbnail: null, thumb_state: 'ready', enrich_state: 'ready', folder: '', notes: '',
+});
+
+test('each picture counts its markers from 1, the page too', async ({ page }) => {
+  const fixture = await installAppFixture(page, {
+    media: [mediaItem(PANEL_PATH, 640, 360, 'a'), mediaItem(SECOND_PATH, 1280, 720, 'b')],
+  });
+  await page.route(`**/files/${CASE_ID}/${SECOND_PATH}`, (route) =>
+    route.fulfill({ contentType: 'image/svg+xml', body: SECOND_SVG }));
+  await page.goto('/#proof');
+  await page.getByRole('button', { name: 'New proof' }).first().click();
+  await page.locator('.selectable-pick').nth(0).click();
+  await page.locator('.selectable-pick').nth(1).click();
+  await page.getByRole('button', { name: 'Create proof' }).click();
+  await expect(page.locator('.panel-row')).toHaveCount(2);
+  await settle(page);
+  const pictures = await page.evaluate(() => {
+    const stage = window.Konva.stages.find((s) => s.container().isConnected && s.findOne('.panel-hit'));
+    const c = stage.container().getBoundingClientRect();
+    return stage.find('.panel-hit').map((hit) => {
+      const r = hit.getClientRect();
+      return { id: hit.getParent().id().slice(3), x: c.left + r.x + r.width / 2, y: c.top + r.y + r.height / 2 };
+    }).sort((a, b) => a.x - b.x);
+  });
+  expect(pictures).toHaveLength(2);
+  const [frame, capture] = pictures;
+
+  await page.getByTitle('Numbered marker (n)').click();
+  for (const dx of [-30, 0, 30]) await page.mouse.click(frame.x + dx, frame.y);
+  for (const dx of [-30, 0]) await page.mouse.click(capture.x + dx, capture.y);
+  // in the page's top left margin, off both pictures: a series of its own
+  const margin = await page.evaluate(() => {
+    const stage = window.Konva.stages.find((s) => s.container().isConnected && s.findOne('.bg'));
+    const c = stage.container().getBoundingClientRect();
+    const r = stage.findOne('.bg').getClientRect();
+    return { x: c.left + r.x + 3, y: c.top + r.y + 3 };
+  });
+  await page.mouse.click(margin.x, margin.y);
+  await expect(page.locator('.shape-row')).toHaveCount(6);
+
+  await page.getByTitle('Select / move (v)').click();
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(1);
+  const markers = fixture.proofSaves[0].spec.shapes.filter((s) => s.kind === 'number');
+  expect(markers.map((s) => [s.panel, s.n])).toEqual([
+    [frame.id, 1], [frame.id, 2], [frame.id, 3],
+    [capture.id, 1], [capture.id, 2],
+    ['page', 1],
   ]);
   fixture.expectNoUnexpectedRequests();
 });

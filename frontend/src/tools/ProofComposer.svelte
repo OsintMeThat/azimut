@@ -86,6 +86,7 @@
     canFill,
     fillPaint,
     movedBy,
+    nextMarkerNumber,
     nextPanelRow,
     notesAfterRemoval,
     nudgeShape,
@@ -3174,12 +3175,13 @@
     }
     // A numbered marker is stamped like a symbol, and keeps the tool: numbering
     // four things in a picture is one act. The number is the first one free in
-    // its own colour, so deleting #2 and stamping again fills the hole rather
-    // than leaving a proof that counts 1, 3, 4.
+    // its colour on this picture (or on the page), so each picture counts from 1
+    // and deleting #2 and stamping again fills the hole rather than leaving a
+    // picture that counts 1, 3, 4.
     if (tool === 'number') {
       const s = {
         id: newId('s'), panel: panel.id, kind: 'number', color,
-        x: hit.nx, y: hit.ny, size: ICON_SIZE_DEFAULT, n: nextMarkerNumber(color),
+        x: hit.nx, y: hit.ny, size: ICON_SIZE_DEFAULT, n: nextMarkerNumber(proof.shapes, color, panel.id),
       };
       proof.shapes.push(s);
       selectedIds = [s.id];
@@ -5420,29 +5422,6 @@
    * which is what keeps a pin on its pixel while it is resized or turned.
    */
   /**
-   * The first number no marker of this colour holds.
-   *
-   * Counted per colour, because colour is what this composer says "same feature"
-   * with everywhere else — the legend is a list of colours. So a second colour
-   * is a second series and starts at 1, rather than carrying on from wherever
-   * the first one stopped and numbering two different things 1 through 9.
-   *
-   * A gap is refilled rather than left: deleting #2 and stamping again gives 2
-   * back, instead of a proof that counts 1, 3, 4.
-   */
-  function nextMarkerNumber(ink) {
-    const taken = new Set(
-      proof.shapes
-        .filter((x) => x.kind === 'number' && x.color === ink)
-        .map((x) => Number(x.n))
-        .filter(Number.isFinite)
-    );
-    let n = 1;
-    while (taken.has(n)) n += 1;
-    return n;
-  }
-
-  /**
    * A numbered marker: a filled disc carrying its number.
    *
    * Filled rather than outlined, and the ink read off the colour, because this
@@ -6266,11 +6245,12 @@
     if (inked.length) {
       const before = [...new Set(inked.map((s) => s.color))];
       for (const s of inked) {
-        // A marker belongs to its colour's series (see nextMarkerNumber), so one
-        // moved to another colour takes the first number free in the series it
-        // joins. Assigned before the colour, so a family recoloured at once
-        // numbers itself in order rather than all landing on the same number.
-        if (s.kind === 'number' && s.color !== c) s.n = nextMarkerNumber(c);
+        // A marker belongs to its colour's series on its picture (see
+        // nextMarkerNumber), so one moved to another colour takes the first
+        // number free in the series it joins. Assigned before the colour, so a
+        // family recoloured at once numbers itself in order rather than all
+        // landing on the same number.
+        if (s.kind === 'number' && s.color !== c) s.n = nextMarkerNumber(proof.shapes, c, s.panel);
         s.color = c;
       }
       // A legend note is written against a colour. Carry it over for each colour
