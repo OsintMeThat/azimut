@@ -429,7 +429,9 @@ def test_an_undo_handed_back_wrong_is_refused(client):
 # -- one place or several ------------------------------------------------------------------
 # A video is one place or several, never both. A time marked on a video whose only live
 # scene is still to prove and about the whole video goes to that scene, which keeps its
-# label, its captures and its geolocating. Saves stay lenient: only a mark asks.
+# label, its captures and its geolocating. A video holds one live scene about the whole
+# of it at most. Saves stay lenient for what an older case holds, and only a scene a
+# save makes the whole video where that would break the rule keeps its time.
 
 
 def _mark(client, cid, path, start, end=None, label=""):
@@ -539,3 +541,157 @@ def test_a_save_holding_both_kinds_stays_allowed(client, tmp_path):
     # marked whole beside a timed scene, from outside Inspect, it is kept too
     res = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": video, "label": ""})
     assert res.status_code == 200 and res.json()["scene"]["id"] == "w"
+
+
+
+# -- the whole video, once ---------------------------------------------------------------------
+# An older case may hold two scenes about the whole video, or one beside scenes at a time.
+# It opens as it is; nothing is rewritten. Going forward, no route makes either.
+
+
+def _retime(client, cid, video, draft, start=None, end=None):
+    return client.put(f"/api/cases/{cid}/scenes/{draft}/time", json={"video": video, "start": start, "end": end})
+
+
+@needs_ffmpeg
+def test_two_scenes_about_the_whole_video_join_into_one_and_undo_puts_both_back(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save(client, cid, video, [
+        {"id": "w1", "start": None, "end": None, "label": "Market"},
+        {"id": "w2", "start": None, "end": None, "label": "Old town"},
+    ])
+    client.put(f"/api/cases/{cid}/geolocating", json={"video": video, "draft": "w2"})
+    shot = _capture(client, cid)
+    before = _stored(client, cid, video)
+
+    res = _join(client, cid, video, "w2", "w1")
+
+    assert res.status_code == 200, res.text
+    answer = res.json()
+    assert (answer["scene"]["id"], answer["scene"]["start"], answer["scene"]["end"]) == ("w1", None, None)
+    assert answer["scene"]["label"] == "Market / Old town" and answer["scene"]["captures"] == [shot]
+    assert _stored(client, cid, video) == [
+        {"id": "w1", "start": None, "end": None, "label": "Market / Old town", "captures": [shot]},
+    ]
+    assert client.get(f"/api/cases/{cid}/geolocating").json()["geolocating"]["id"] == "w1"
+
+    undone = _unjoin(client, cid, video, answer["undo"])
+
+    assert undone.status_code == 200, undone.text
+    assert {s["id"]: s for s in _stored(client, cid, video)} == {s["id"]: s for s in before}
+    assert client.get(f"/api/cases/{cid}/geolocating").json()["geolocating"]["id"] == "w2"
+
+
+@needs_ffmpeg
+def test_a_time_marked_beside_two_scenes_about_the_whole_video_waits_for_them_to_be_joined(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save(client, cid, video, [
+        {"id": "w1", "start": None, "end": None, "label": ""},
+        {"id": "w2", "start": None, "end": None, "label": ""},
+    ])
+
+    refused = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": video, "start": 2.0})
+    assert refused.status_code == 400 and "join them" in refused.json()["detail"]
+    assert len(_stored(client, cid, video)) == 2
+    # marked whole, the first answers, and no third is made
+    assert client.post(f"/api/cases/{cid}/scenes/mark", json={"path": video}).json()["scene"]["id"] == "w1"
+    assert len(_stored(client, cid, video)) == 2
+
+    assert _join(client, cid, video, "w2", "w1").status_code == 200
+    assert (_mark(client, cid, video, 2.0)["id"], _stored(client, cid, video)[0]["start"]) == ("w1", 2.0)
+
+
+@needs_ffmpeg
+def test_marking_whole_answers_the_live_scene_about_it_before_one_given_up_on(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save(client, cid, video, [
+        {"id": "gone", "start": None, "end": None, "label": ""},
+        {"id": "live", "start": None, "end": None, "label": ""},
+    ])
+    client.put(f"/api/cases/{cid}/scenes/gone/abandon", json={"video": video, "reason": ""})
+
+    res = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": video})
+
+    assert res.status_code == 200 and res.json()["scene"]["id"] == "live"
+
+
+@needs_ffmpeg
+def test_a_scene_is_made_the_whole_video_only_as_the_video_s_one_live_scene_still_to_prove(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save(client, cid, video, [
+        {"id": "w", "start": None, "end": None, "label": ""},
+        {"id": "a", "start": 1.0, "end": 2.0, "label": ""},
+        {"id": "b", "start": 3.0, "end": None, "label": ""},
+    ])
+
+    beside_whole = _retime(client, cid, video, "a")
+    assert beside_whole.status_code == 400 and "already about the whole video" in beside_whole.json()["detail"]
+    client.put(f"/api/cases/{cid}/scenes/w/abandon", json={"video": video, "reason": ""})
+    beside_timed = _retime(client, cid, video, "a")
+    assert beside_timed.status_code == 400 and "not one place" in beside_timed.json()["detail"]
+    client.put(f"/api/cases/{cid}/scenes/b/abandon", json={"video": video, "reason": ""})
+    # alone among the live, it may
+    assert _retime(client, cid, video, "a").status_code == 200
+    assert {s["id"]: s["start"] for s in _stored(client, cid, video)}["a"] is None
+    # and the way back to a time is always open
+    assert _retime(client, cid, video, "a", 1.0, 2.0).status_code == 200
+
+
+@needs_ffmpeg
+def test_a_save_making_a_timed_scene_the_whole_video_beside_others_keeps_its_time(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save(client, cid, video, [
+        {"id": "a", "start": 1.0, "end": 2.0, "label": "Bridge", "more": [{"start": 3.0, "end": None}]},
+        {"id": "b", "start": 3.5, "end": None, "label": ""},
+    ])
+
+    res = _save(client, cid, video, [
+        {"id": "a", "start": None, "end": None, "label": "Bridge"},
+        {"id": "b", "start": 3.5, "end": None, "label": ""},
+    ])
+
+    assert res.status_code == 200, res.text
+    assert res.json()["kept"] == [
+        {"id": "a", "start": 1.0, "end": 2.0, "more": [{"start": 3.0, "end": None}], "why": "timed"},
+    ]
+    stored = {s["id"]: s for s in _stored(client, cid, video)}
+    assert (stored["a"]["start"], stored["a"]["end"], stored["a"]["more"]) == (1.0, 2.0, [{"start": 3.0, "end": None}])
+
+    # beside a scene about the whole video, the same
+    _save(client, cid, video, [{"id": "w", "start": None, "end": None, "label": ""}, {"id": "a", "start": 1.0, "label": ""}])
+    res = _save(client, cid, video, [{"id": "w", "start": None, "end": None, "label": ""}, {"id": "a", "start": None, "end": None, "label": ""}])
+    assert res.json()["kept"] == [{"id": "a", "start": 1.0, "end": None, "why": "whole"}]
+
+
+@needs_ffmpeg
+def test_a_save_stays_lenient_for_what_an_older_case_holds_and_for_a_scene_alone(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    twins = [{"id": "w1", "start": None, "end": None, "label": ""}, {"id": "w2", "start": None, "end": None, "label": ""}]
+    assert "kept" not in _save(client, cid, video, twins).json()
+    assert "kept" not in _save(client, cid, video, [*twins, {"id": "t", "start": 1.0, "end": None, "label": ""}]).json()
+    assert len(_stored(client, cid, video)) == 3
+
+    # alone, or beside a scene given up on, a scene may become the whole video
+    _save(client, cid, video, [{"id": "a", "start": 1.0, "end": None, "label": ""}, {"id": "b", "start": 2.0, "end": None, "label": ""}])
+    client.put(f"/api/cases/{cid}/scenes/b/abandon", json={"video": video, "reason": ""})
+    res = _save(client, cid, video, [{"id": "a", "start": None, "end": None, "label": ""}, {"id": "b", "start": 2.0, "end": None, "label": ""}])
+    assert "kept" not in res.json()
+    assert {s["id"]: s["start"] for s in _stored(client, cid, video)}["a"] is None
+
+
+@needs_ffmpeg
+def test_a_proof_stating_passages_keeps_a_saved_scene_s_time_too(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save(client, cid, video, [{"id": "a", "start": 2.0, "end": None, "label": ""}])
+    _timed_proof(client, cid, video, "Bridge", [{"start": 0.5, "end": 1.0}])
+
+    res = _save(client, cid, video, [{"id": "a", "start": None, "end": None, "label": ""}])
+
+    assert res.json()["kept"] == [{"id": "a", "start": 2.0, "end": None, "why": "timed"}]

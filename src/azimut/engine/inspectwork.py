@@ -655,8 +655,9 @@ def join_scenes(case: "Case", subject: str, scene_id: str, into: str, max_captur
     stay with the scene, the first ones first. Answers with the scene as written, and
     both as they were (``kept``, ``gone``) for an Undo (`unjoin_scenes`).
 
-    A scene about the whole video already holds every moment, and an abandoned one is
-    brought back first, so neither joins.
+    A scene about the whole video already holds every moment, so it joins no scene with a
+    time; two about the whole video, the same question an older case asked twice, join
+    into one about the whole video. An abandoned one is brought back first.
     """
     if scene_id == into:
         raise CaseError("a scene is already the same place as itself")
@@ -673,7 +674,7 @@ def join_scenes(case: "Case", subject: str, scene_id: str, into: str, max_captur
         if source.get("abandoned") or target.get("abandoned"):
             raise CaseError("an abandoned scene is brought back before it is joined")
         theirs, mine = scene_moments(target), scene_moments(source)
-        if not theirs or not mine:
+        if bool(theirs) != bool(mine):
             raise CaseError("a scene about the whole video already holds every moment")
         moments = join_moments(theirs + mine)
         if len(moments) > MAX_SCENE_MOMENTS:
