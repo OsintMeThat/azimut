@@ -167,10 +167,10 @@ describe('a tile\'s menu', () => {
     return [...document.body.querySelectorAll('.float-menu .fm-item')].map((one) => one.textContent.trim());
   };
 
-  it('offers Inspect for a proof, the next steps for a scene to prove, Restore for one given up', () => {
+  it('offers Rename, Inspect and Delete for a proof, the next steps for a scene to prove, Restore for one given up', () => {
     show();
-    expect(open('proof:Road bridge')).toEqual(['Show in Inspect']);
-    document.body.querySelector('.float-menu .fm-item').click();
+    expect(open('proof:Road bridge')).toEqual(['Rename', 'Show in Inspect', 'Delete…']);
+    document.body.querySelectorAll('.float-menu .fm-item')[1].click();
     flushSync();
     expect(open('s1')).toEqual(['Make this slide', 'Geolocate', 'Abandon…']);
     document.body.querySelector('.float-menu .fm-item').click();
@@ -203,7 +203,47 @@ describe('a tile\'s menu', () => {
     show();
     tile('proof:Market').parentElement.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 }));
     flushSync();
-    expect([...document.body.querySelectorAll('.float-menu .fm-item')].map((one) => one.textContent.trim())).toEqual(['Show in Inspect']);
+    expect([...document.body.querySelectorAll('.float-menu .fm-item')].map((one) => one.textContent.trim()))
+      .toEqual(['Rename', 'Show in Inspect', 'Delete…']);
+  });
+
+  it('opens from the keys on a focused tile, the context-menu key or Shift+F10, its first item focused', async () => {
+    show();
+    for (const init of [{ key: 'ContextMenu' }, { key: 'F10', shiftKey: true }]) {
+      tile('proof:Market').dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+      await tick();
+      flushSync();
+      const items = [...document.body.querySelectorAll('.float-menu .fm-item')];
+      expect(items.map((one) => one.textContent.trim())).toEqual(['Rename', 'Show in Inspect', 'Delete…']);
+      await vi.waitFor(() => expect(document.activeElement).toBe(items[0]));
+      // the context-menu event the same key raises leaves the menu where the keys put it
+      tile('proof:Market').parentElement.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      flushSync();
+      expect(document.body.querySelectorAll('.float-menu')).toHaveLength(1);
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      flushSync();
+    }
+    expect(tile('proof:Market').getAttribute('aria-keyshortcuts')).toBe('Shift+F10');
+  });
+
+  it('renames a proof with its name held in the menu', async () => {
+    const calls = show();
+    open('proof:Road bridge');
+    document.body.querySelector('.float-menu .fm-item').click();
+    await tick();
+    const field = document.body.querySelector('.slide-name input');
+    expect(field.value).toBe('Road bridge');
+    field.value = 'Bridge at dawn ';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    document.body.querySelector('.slide-name').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    expect(calls.onaction).toHaveBeenCalledWith('rename', expect.objectContaining({ key: 'proof:Road bridge' }), 'Bridge at dawn');
+  });
+
+  it('deletes a proof, and gives up on one that states no place', () => {
+    const calls = show({ tiles: slideTiles({ ...ANSWER, scenes: [...ANSWER.scenes, proof('Mast', { at: [120], state: 'progress' })] }, { started: true, name: 'Market' }) });
+    expect(open('proof:Mast')).toEqual(['Rename', 'Show in Inspect', 'Abandon…', 'Delete…']);
+    [...document.body.querySelectorAll('.float-menu .fm-item')].at(-1).click();
+    expect(calls.onaction).toHaveBeenCalledWith('delete', expect.objectContaining({ key: 'proof:Mast' }), undefined);
   });
 });
 

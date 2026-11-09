@@ -393,3 +393,50 @@ test('a proof of a scene deleted by default gives its scene back', async ({ page
   await expect.poll(() => deletes).toEqual([{ name: 'bridge', scene: 'keep' }]);
   await expect(proofName(page)).toHaveValue('Market');
 });
+
+// -- a slide's menu ------------------------------------------------------------------------------
+
+test('a slide\'s right-click menu renames, deletes and gives up, and the keys open it too', async ({ page }) => {
+  const { saves, deletes } = await openCase(page);
+  await openSaved(page, 'bridge', 'Road bridge');
+  const strip = page.getByRole('region', { name: 'Slides of the video' });
+  const tiles = strip.getByRole('listbox', { name: 'Slides' }).getByRole('option');
+  await expect(tiles.locator('.tile-title')).toHaveText(['Road bridge', 'Market', 'Water tower?']);
+
+  // Market states no place yet: it can be given up on as well
+  await tiles.nth(1).click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: 'Market' });
+  await expect(menu.locator('.fm-item')).toHaveText(['Rename', 'Show in Inspect', 'Abandon…', 'Delete…']);
+  await menu.getByRole('button', { name: 'Rename' }).click();
+  await menu.getByRole('textbox', { name: 'New name' }).fill('Covered market');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => saves.length).toBe(1);
+  expect(saves[0]).toMatchObject({ title: 'Covered market', rename_from: 'market' });
+  await expect(tiles.nth(1).locator('.tile-title')).toHaveText('Covered market');
+  // the slide open stays as it was
+  await expect(proofName(page)).toHaveValue('Road bridge');
+
+  // the keys: Shift+F10 on a focused tile, the menu's first item focused, Escape back to the tile
+  await tiles.nth(0).focus();
+  await page.keyboard.press('Shift+F10');
+  const own = page.getByRole('menu', { name: 'Road bridge' });
+  await expect(own.locator('.fm-item')).toHaveText(['Rename', 'Show in Inspect', 'Delete…']);
+  await expect(own.locator('.fm-item').first()).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(own).toHaveCount(0);
+  await expect(tiles.nth(0)).toBeFocused();
+
+  // a scene still to prove keeps its own steps
+  await tiles.nth(2).click({ button: 'right' });
+  await expect(page.getByRole('menu', { name: 'Water tower?' }).locator('.fm-item')).toHaveText(['Make this slide', 'Geolocate', 'Abandon…']);
+  await page.keyboard.press('Escape');
+
+  // Delete… asks about the scene, and the slide open stays
+  await tiles.nth(1).click({ button: 'right' });
+  await page.getByRole('menu', { name: 'Covered market' }).getByRole('button', { name: 'Delete…' }).click();
+  const ask = page.getByRole('alertdialog', { name: 'Delete this proof?' });
+  await expect(ask.getByRole('radio', { name: 'Goes back to To geolocate' })).toBeChecked();
+  await ask.getByRole('button', { name: 'Delete' }).click();
+  await expect.poll(() => deletes).toEqual([{ name: 'covered-market', scene: 'keep' }]);
+  await expect(proofName(page)).toHaveValue('Road bridge');
+});

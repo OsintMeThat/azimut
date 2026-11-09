@@ -103,6 +103,17 @@ describe('moving between slides', () => {
     expect(bodyOfFn('frameOps')).toContain('buildFrameOps(frameFilters, edits)');
   });
 
+  it('renames and deletes a slide from its menu, the slide open renamed as its name field would', () => {
+    const action = bodyOfFn('slideAction');
+    expect(action).toContain('askDelete({ name: tile.name, title: tile.title, video });');
+    expect(action).toContain('await renameSlide(tile, extra);');
+    const rename = bodyOfFn('renameSlide');
+    // the slide open takes the name as if typed in its field, saved with it
+    expect(rename).toContain('if (tile.current && proofStarted) {\n      proof.title = name;\n      dirty = true;');
+    // another one is saved under it at once, its files following
+    expect(rename).toContain('{ title: name, spec: loaded, rename_from: tile.name }');
+  });
+
   it('shows a slide in Inspect on its own moment', () => {
     const action = bodyOfFn('slideAction');
     expect(action).toContain('uiState.inspectScene = { video, slide: tile.name };');

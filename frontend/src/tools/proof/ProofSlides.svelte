@@ -6,8 +6,10 @@
    * greyed at the end), **+ New scene**, the list of every slide and the fold.
    *
    * A press on a tile moves there, which saves the slide left (the composer's
-   * `switchSlide`); the strip itself never writes. Each tile's ⋯, and a right-click,
-   * holds what can be done to its scene from here.
+   * `switchSlide`); the strip itself never writes. Each tile's ⋯, a right-click, and the
+   * context-menu key or Shift+F10 on a focused tile open one menu: for a proof Rename, Show
+   * in Inspect, Abandon… while it states no place and Delete…; for a scene still to prove
+   * Make this slide, Geolocate and Abandon….
    *
    * Past what the strip holds whole, the tiles shrink to their picture and number, an
    * arrow each side says how many are out of sight and a count says which one is shown.
@@ -48,7 +50,8 @@
     onstep,
     /** The video's name pressed: its player. */
     onvideo,
-    /** `(action, tile, extra)`: `inspect`, `make`, `geolocate`, `abandon` (`extra` the reason) or `restore`. */
+    /** `(action, tile, extra)`: `inspect`, `make`, `geolocate`, `abandon` (`extra` the reason), `restore`,
+     *  `rename` (`extra` the new name) or `delete`. */
     onaction,
     /** Every proved slide's picture copied into one numbered folder; null where it is not offered. */
     onexport = null,
@@ -68,9 +71,11 @@
   let before = $state(0);
   let after = $state(0);
   let overflowing = $state(false);
-  /** `{ tile, anchor }` or `{ tile, at }` of the tile's menu, `asking` once Abandon asks why. */
+  /** `{ tile, anchor }` or `{ tile, at }` of the tile's menu, `asking` once Abandon asks why,
+   *  `renaming` while Rename holds the new name. */
   let menu = $state(null);
   let reason = $state('');
+  let rename = $state('');
   let listAnchor = $state(null);
   /** The strip's own menu, by its ⋯. */
   let seriesAnchor = $state(null);
@@ -181,11 +186,29 @@
     menu = menu?.tile.key === tile.key && !menu.at ? null : { tile, anchor };
   }
 
+  // The menu the keys opened, so the context-menu event the same key may raise after it
+  // leaves it where it is, under its tile.
+  let keyed = 0;
+
   function context(event, tile) {
     if (!hasMenu(tile)) return;
     event.preventDefault();
+    if (Date.now() - keyed < 400) return;
     reason = '';
     menu = { tile, at: { x: event.clientX, y: event.clientY } };
+  }
+
+  /** The context-menu key, or Shift+F10, on a focused tile: its menu, under it, the keys in it. */
+  async function menuKeys(event, tile) {
+    if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+    if (!hasMenu(tile)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    keyed = Date.now();
+    reason = '';
+    menu = { tile, anchor: event.currentTarget };
+    await tick();
+    document.querySelector('.float-menu .fm-item')?.focus();
   }
 
   function act(action, extra) {
@@ -198,6 +221,13 @@
     menu = { ...menu, asking: true };
     await tick();
     document.querySelector('.slide-why input')?.focus();
+  }
+
+  async function askName() {
+    rename = menu.tile.title;
+    menu = { ...menu, renaming: true };
+    await tick();
+    document.querySelector('.slide-name input')?.select();
   }
 
   // -- the list --------------------------------------------------------------------------
@@ -323,8 +353,8 @@
           <button type="button" class="tile {tile.kind} {tile.state}" class:on={tile.current} class:heading={heading === tile.key}
             role="option" aria-selected={tile.current} data-key={tile.key} style:--scene={tile.color}
             tabindex={tile.current || (index < 0 && i === 0) ? 0 : -1}
-            aria-label={`${tile.number}. ${tile.title}, ${tile.words}`} title={tip(tile)}
-            onclick={() => !tile.current && onpick?.(tile)}>
+            aria-label={`${tile.number}. ${tile.title}, ${tile.words}`} title={tip(tile)} aria-keyshortcuts={hasMenu(tile) ? 'Shift+F10' : undefined}
+            onclick={() => !tile.current && onpick?.(tile)} onkeydown={(event) => menuKeys(event, tile)}>
             {@render thumb(tile)}
             <span class="tile-title" dir="auto">{tile.title}{#if tile.current && dirty}<span class="dirty" title={HELP.dirty}></span>{/if}</span>
             <span class="tile-words">{tile.words}</span>
@@ -365,18 +395,28 @@
             title={HELP.reason} bind:value={reason} />
           <button class="btn btn-xs">Abandon</button>
         </form>
+      {:else if menu.renaming}
+        <form class="slide-name" onsubmit={(event) => { event.preventDefault(); if (rename.trim()) act('rename', rename.trim()); }}>
+          <input class="input" aria-label="New name" maxlength="200" dir="auto" title={HELP.name} bind:value={rename} />
+          <button class="btn btn-xs" disabled={!rename.trim()}>Rename</button>
+        </form>
       {:else}
+        <button type="button" class="fm-item" title={HELP.rename} onclick={askName}>
+          <Icon name="edit" size={14} /><span class="fm-grow">Rename</span></button>
         <button type="button" class="fm-item" title={HELP.inspect} onclick={() => act('inspect')}>
           <Icon name="inspect" size={14} /><span class="fm-grow">Show in Inspect</span></button>
         {#if tile.state === ABANDONED}
           <button type="button" class="fm-item" title={HELP.restore} onclick={() => act('restore')}>
             <Icon name="undo" size={14} /><span class="fm-grow">Restore</span></button>
         {:else if tile.unplaced}
-          <p class="fm-note">{HELP.unplaced}</p>
           <div class="fm-sep"></div>
+          <p class="fm-note">{HELP.unplaced}</p>
           <button type="button" class="fm-item" title={HELP.abandon} onclick={askWhy}>
             <Icon name="eyeOff" size={14} /><span class="fm-grow">Abandon…</span></button>
         {/if}
+        <div class="fm-sep"></div>
+        <button type="button" class="fm-item danger" title={HELP.delete} onclick={() => act('delete')}>
+          <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
       {/if}
     {:else if tile.state === ABANDONED}
       {#if tile.reason}<p class="fm-note" dir="auto">Abandoned: {tile.reason}</p>{/if}
@@ -534,8 +574,8 @@
   .step:disabled { opacity: .35; cursor: default; }
   .tally { min-width: 40px; color: var(--text-3); font-size: 10.5px; text-align: center; white-space: nowrap; }
 
-  .slide-why { display: flex; gap: 6px; padding: 4px; }
-  .slide-why .input { flex: 1; min-width: 0; height: 26px; font-size: var(--fs-xs); }
+  .slide-why, .slide-name { display: flex; gap: 6px; padding: 4px; }
+  .slide-why .input, .slide-name .input { flex: 1; min-width: 0; height: 26px; font-size: var(--fs-xs); }
   .list-search { padding: 2px 2px 6px; }
   .list-rows { min-height: 0; overflow-y: auto; }
   .row { gap: 7px; }

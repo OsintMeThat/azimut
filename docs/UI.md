@@ -4320,7 +4320,7 @@ photos reads as it always did. The list says it for every proof in one pass on t
 three videos, 50 of them for the slides.
 
 **Delete** is in the header's ⋯ once the proof open is saved, with **Show in Inspect** for
-a proof of a video, and on each row of the Open list. It asks one question everywhere,
+a proof of a video, in a slide's menu, and on each row of the Open list. It asks one question everywhere,
 the delete preview listing what it touches, and the proof goes to the Trash, from where it
 comes back. A proof of a video also asks what becomes of its scene: by default it **goes
 back to To geolocate**, as a delete always gave it back, or it **is removed with it**
@@ -4563,8 +4563,13 @@ slide and says why. A slide never started, with no panel and nothing typed, goes
 a save; one holding only typed words asks first. Presses during the save only move where
 it heads, so three fast Alt+→ go three slides on with one save. A switch rewrites the
 step it is on, so Back leaves the series at once. With the strip focused, ←/→ walk the
-tiles and Enter opens one. A proved tile's ⋯ has **Show in Inspect**, which opens the
-video on that slide's moment.
+tiles and Enter opens one. **A slide's menu** comes up on its ⋯, a right-click, or the
+context-menu key and Shift+F10 on a focused tile, its first item focused: for a proof
+**Rename**, **Show in Inspect** (the video on that slide's moment), **Abandon…** while it
+states no place, and **Delete…**, the question the header asks; a scene still to prove keeps
+Make this slide, Geolocate and Abandon…. Rename holds the name in the menu: the slide open
+takes it as if typed in its name field, saved with it, and another slide is saved under it
+at once, its picture moving with it.
 
 **A scene still to prove shows its page** in place of the canvas, and landing on it
 starts nothing: its label or time, where it stands, the captures it gathered, and

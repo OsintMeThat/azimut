@@ -752,6 +752,14 @@
       uiState.tool = 'inspect';
       return;
     }
+    if (action === 'delete') {
+      askDelete({ name: tile.name, title: tile.title, video });
+      return;
+    }
+    if (action === 'rename') {
+      await renameSlide(tile, extra);
+      return;
+    }
     if (action === 'make') {
       if (!pageTile || pageTile.key !== tile.key) {
         if (!(await switchSlide(tile))) return;
@@ -788,6 +796,31 @@
       toast(e.message, 'danger');
       readSlides();
     }
+  }
+
+  /**
+   * Rename a slide from its menu, the way the name field renames a proof. The slide open
+   * takes the name as if typed there, and its next save moves its files; another slide is
+   * saved under it at once, its picture moving with it, as Map plate renames a plate.
+   */
+  async function renameSlide(tile, title) {
+    const caseId = caseState.current?.id;
+    const name = String(title ?? '').trim();
+    if (!caseId || !name || name === tile.title || tile.kind !== 'proof') return;
+    if (tile.current && proofStarted) {
+      proof.title = name;
+      dirty = true;
+      return;
+    }
+    try {
+      const loaded = await api.get(`/api/cases/${caseId}/proofs/${encodeURIComponent(tile.name)}`);
+      const saved = await api.post(`/api/cases/${caseId}/proofs`, { title: name, spec: loaded, rename_from: tile.name });
+      toast(`Renamed to ${saved?.title ?? name}`, 'ok', 1800);
+      await reloadCase();
+    } catch (e) {
+      toast(e.status === 409 ? 'Another proof already uses that name' : e.message, 'danger');
+    }
+    readSlides();
   }
 
   /**
