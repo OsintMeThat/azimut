@@ -163,6 +163,7 @@
     abandonProof, abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneQueue, restoreProof, restoreScene, sceneQueue,
   } from '../lib/geolocating.svelte.js';
   import { sceneMaterial, scenesToProve } from '../lib/newProof.js';
+  import { NO_VIDEO, inVideo, proofVideos, slideTag } from '../lib/proofList.js';
   import { collagesOfScene, pictureHandoff, proofHandoff } from '../lib/sceneFrames.js';
   import { sceneMoments, sceneStart } from '../lib/scenes.js';
 
@@ -1113,9 +1114,13 @@
   let proofBrowserOpen = $state(false);
   let proofBrowsePath = $state('');
   let proofBrowseSelection = $state(null);
-  const visibleProofs = $derived((openList ?? []).filter((entry) => matchesProofQuery(entry, proofQuery)));
+  // The video the list is narrowed to, '' for every proof (`lib/proofList.js`).
+  let proofVideo = $state('');
+  const listVideos = $derived(proofVideos(openList ?? []));
+  const visibleProofs = $derived((openList ?? []).filter((entry) => inVideo(entry, proofVideo) && matchesProofQuery(entry, proofQuery)));
   const proofBrowserEntries = $derived(
-    (openList ?? []).map((entry) => ({ ...entry, id: entry.name, attrs: { folder: entry.folder ?? '' } }))
+    (openList ?? []).filter((entry) => inVideo(entry, proofVideo))
+      .map((entry) => ({ ...entry, id: entry.name, attrs: { folder: entry.folder ?? '' } }))
   );
   let saving = $state(false);
   let proofFor = $state(undefined);
@@ -6669,6 +6674,7 @@
    *  refreshes through openProofList instead, which keeps them. */
   function openProofDialog() {
     proofQuery = '';
+    proofVideo = '';
     proofBrowserOpen = false;
     proofBrowsePath = '';
     proofBrowseSelection = null;
@@ -8428,14 +8434,28 @@
       <div class="empty"><p>No saved proofs in this case yet.</p></div>
     {:else}
       <div class="picker-stack">
-        {#if proofBrowserOpen || openList.length > PICKER_SEARCH_MIN}
+        {#if proofBrowserOpen || openList.length > PICKER_SEARCH_MIN || listVideos.videos.length}
           <div class="picker-search">
-            <SearchInput bind:value={proofQuery} placeholder="Search proofs…" width="100%" />
-            <button
-              class="btn btn-ghost btn-sm browse-btn"
-              title={proofBrowserOpen ? 'Show every proof' : 'Browse folders'}
-              onclick={toggleProofBrowser}
-            >…</button>
+            {#if proofBrowserOpen || openList.length > PICKER_SEARCH_MIN}
+              <SearchInput bind:value={proofQuery} placeholder="Search proofs…" width="100%" />
+            {/if}
+            {#if listVideos.videos.length}
+              <!-- The proofs of one video, or those on photos: a series is found as a series. -->
+              <select class="input video-filter" aria-label="Video" title="Only the proofs of one video" bind:value={proofVideo}>
+                <option value="">Every video</option>
+                {#each listVideos.videos as one (one.video)}
+                  <option value={one.video}>{one.name} · {one.count}</option>
+                {/each}
+                {#if listVideos.none}<option value={NO_VIDEO}>On no video · {listVideos.none}</option>{/if}
+              </select>
+            {/if}
+            {#if proofBrowserOpen || openList.length > PICKER_SEARCH_MIN}
+              <button
+                class="btn btn-ghost btn-sm browse-btn"
+                title={proofBrowserOpen ? 'Show every proof' : 'Browse folders'}
+                onclick={toggleProofBrowser}
+              >…</button>
+            {/if}
           </div>
         {/if}
         {#if proofBrowserOpen}
@@ -8470,6 +8490,10 @@
                   <div class="open-meta">
                     <span class="open-title">{entry.title}</span>
                     <span class="open-sub">{entry.panels} panels · {entry.shapes} annotations · {entry.updated_at?.slice(0, 10)}</span>
+                    {#if slideTag(entry)}
+                      {@const tag = slideTag(entry)}
+                      <span class="open-slide" style:--scene={tag.color}><span class="open-dot" aria-hidden="true"></span>{tag.text}</span>
+                    {/if}
                   </div>
                 </button>
                 <button class="btn btn-ghost btn-sm open-del" title="Delete this saved proof" onclick={() => (deleteEntry = entry)}>
@@ -8897,6 +8921,14 @@
   .open-meta { display: flex; flex-direction: column; gap: 2px; }
   .open-title { font-weight: 600; font-size: var(--fs-sm); }
   .open-sub { font-size: var(--fs-xs); color: var(--text-3); }
+  /* a proof of a video: its video and its place among the slides, in its scene's colour */
+  .open-slide {
+    display: inline-flex; align-items: center; gap: 5px; margin-top: 1px;
+    color: color-mix(in srgb, var(--scene) 72%, var(--text-1)); font-size: var(--fs-xs); font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .open-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--scene); }
+  .video-filter { flex: none; width: auto; max-width: 220px; }
   .kin {
     display: flex; align-items: center; gap: 8px; padding: 5px 14px;
     border-bottom: 1px solid var(--border); background: var(--accent-soft);

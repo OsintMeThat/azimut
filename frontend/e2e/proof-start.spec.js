@@ -267,3 +267,24 @@ test('New proof from a scene: its material all ticked, and the proof takes the s
   const strip = page.getByRole('region', { name: 'Slides of the video' });
   await expect(strip.getByRole('option').nth(2)).toHaveText(/Water tower\s*Not saved/);
 });
+
+// -- Open proof ---------------------------------------------------------------------------
+
+test('Open proof tags a proof of a video and filters by video, a proof on photos as before', async ({ page }) => {
+  await openCase(page);
+  await header(page).getByRole('button', { name: 'Open proof' }).click();
+  const list = page.getByRole('dialog', { name: 'Open a saved proof' });
+  await expect(list.locator('.open-title')).toHaveText(['Road bridge', 'Market', 'Holiday']);
+  await expect(list.locator('.open-slide')).toHaveText(['clip.webm · slide 1 of 2', 'clip.webm · slide 2 of 2']);
+  await expect(list.locator('.open-row-wrap', { hasText: 'Holiday' }).locator('.open-slide')).toHaveCount(0);
+  await expect(list.locator('.open-row-wrap', { hasText: 'Holiday' }).locator('.open-sub')).toHaveText('1 panels · 0 annotations · 2026-11-06');
+
+  const video = list.getByRole('combobox', { name: 'Video' });
+  await video.selectOption({ label: 'clip.webm · 2' });
+  await expect(list.locator('.open-title')).toHaveText(['Road bridge', 'Market']);
+  await video.selectOption({ label: 'On no video · 1' });
+  await expect(list.locator('.open-title')).toHaveText(['Holiday']);
+  await video.selectOption({ label: 'Every video' });
+  await list.locator('.open-row', { hasText: 'Market' }).click();
+  await expect(proofName(page)).toHaveValue('Market');
+});

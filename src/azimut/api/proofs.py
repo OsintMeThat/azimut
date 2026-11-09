@@ -346,8 +346,12 @@ def _write_assets(folder: Path, incoming: dict[str, bytes], keep: set[str]) -> N
 
 @router.get("/cases/{case_id}/proofs")
 def list_proofs(case_id: str) -> list[dict[str, Any]]:
+    """Every saved proof, newest first. A proof resting on a video says which and where
+    it stands among its slides (`scenes.proof_slides`): ``video``, ``order`` (its colour
+    on Inspect's bar) and ``slide`` of ``slides``. On photos, ``video`` is null."""
     case = get_case(case_id)
     proofs = []
+    specs: list[tuple[str, dict[str, Any]]] = []
     for spec_path in sorted(case.subdir("proofs").joinpath(layout.META_DIR).glob("*.json")):
         try:
             spec = json.loads(spec_path.read_text(encoding="utf-8"))
@@ -356,6 +360,7 @@ def list_proofs(case_id: str) -> list[dict[str, Any]]:
         if spec.get("azimut_proof") != 1:
             continue
         name = spec_path.stem
+        specs.append((name, spec))
         png = case.resolve_inside(layout.proof_export_rel(name))
         # Proofs saved before thumbnails existed (or whose cached file was
         # evicted) produce one here and record it, so this costs a hash of the
@@ -383,6 +388,9 @@ def list_proofs(case_id: str) -> list[dict[str, Any]]:
                 "spec_path": layout.proof_spec_rel(spec_path.stem),
             }
         )
+    slides = scene_engine.proof_slides(case, specs)
+    for row in proofs:
+        row.update(slides.get(row["name"]) or {"video": None})
     proofs.sort(key=lambda p: p.get("updated_at") or "", reverse=True)
     return proofs
 

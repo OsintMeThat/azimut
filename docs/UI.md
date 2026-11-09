@@ -4299,7 +4299,12 @@ Enter creates and Escape closes. A case with no scene shows no scene anywhere.
 
 **Open proof** shows its list on the press, its rows following when the case answers. A
 pick closes it at once, and a small tag over the canvas names the proof while its pictures
-load.
+load. A proof of a video carries a small line in its scene's colour, *clip.mp4 · slide 2 of
+4*: its place among that video's proofs in clip order, the abandoned last, and a select
+beside the search narrows the list to one video or to the proofs on no video. A proof on
+photos reads as it always did. The list says it for every proof in one pass on the server
+(`GET /cases/{id}/proofs`, `engine/scenes.proof_slides`): about 140 ms for 300 proofs on
+three videos, 50 of them for the slides.
 
 **Overlays.** Ctrl+V, a drop on the canvas, or `+ Add overlay` put an image
 straight into the proof. Ctrl+V answers to two clipboards, and the rule is which
