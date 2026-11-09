@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { awaitMapReady, CASE_ID, installAppFixture, restingCamera } from './app.fixture.js';
+import { STAMPS } from '../src/lib/icons/stamps.js';
 
 async function openCompare(page, providerB = 'Esri World Imagery', { routes } = {}) {
   const fixture = await installAppFixture(page);
@@ -119,7 +120,7 @@ test('stamps a numbered marker and a symbol on the ground, and saves both', asyn
 
   // The symbol button opens its grid with the tool; a glyph picked, then stamped.
   await page.getByTitle('Symbol (S)', { exact: true }).click();
-  await page.locator('.flyout.glyphs .glyph-button').nth(2).click();
+  await page.locator('.flyout.glyphs').getByRole('button', { name: 'Impact', exact: true }).click();
   await page.mouse.click(...at(0, 50));
   await expect(canvas.locator('.mark')).toHaveCount(4);
 
@@ -143,8 +144,84 @@ test('stamps a numbered marker and a symbol on the ground, and saves both', asyn
   expect(marks.map((mark) => mark.colour)).toEqual(
     ['#f6a81a', '#f6a81a', '#22c55e', '#22c55e']
   );
-  expect(marks[2].glyph).toBeTruthy();
+  expect(marks[3].glyph).toBe('impact');
   expect(marks[0].points).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test("stamps a vehicle model from Geo Proof's picker, turns it, and reopens it beside the old symbols", async ({ page }) => {
+  const { errors, saved } = await openCompare(page);
+  const canvas = page.getByLabel('Annotations on imagery A', { exact: true });
+  const box = await canvas.boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+
+  // Geo Proof's grouped picker, its models seen from above: no view to choose.
+  await page.getByTitle('Symbol (S)', { exact: true }).click();
+  const picker = page.locator('.flyout.glyphs');
+  await expect(picker.locator('h3')).toHaveText(['Marks', 'Vehicles', 'Events', 'Places', 'People']);
+  await expect(picker.getByRole('radiogroup')).toHaveCount(0);
+  await expect(picker.getByRole('button', { name: 'Tank', exact: true }).locator('svg path').first()).toBeAttached();
+  await page.screenshot({ path: test.info().outputPath('picker.png') });
+  await picker.getByRole('button', { name: 'Tank', exact: true }).click();
+  await expect(picker).toHaveCount(0);
+
+  // Stamped nose up, on both pictures.
+  await page.mouse.click(cx, cy);
+  await expect(page.locator('.annotation-canvas .model-art svg')).toHaveCount(2);
+  await page.getByTitle('Select and move (V)', { exact: true }).click();
+  await expect(canvas.locator('.heading')).toHaveText('0° N');
+
+  // The grip past its nose turns it on its point; Shift lands it on 90°.
+  const grip = canvas.locator('.turn circle').last();
+  const at = await grip.boundingBox();
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+  await page.mouse.down();
+  await page.keyboard.down('Shift');
+  await page.mouse.move(cx + 40, cy - 30, { steps: 4 });
+  await page.mouse.move(cx + 60, cy + 2, { steps: 6 });
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  await expect(canvas.locator('.heading')).toHaveText('90° E');
+  const turned = await canvas.locator('.model-art svg').getAttribute('viewBox');
+  await page.screenshot({ path: test.info().outputPath('turned.png') });
+
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Save comparison', exact: true }).click();
+  await expect.poll(() => saved.length).toBe(1);
+  const [tank] = saved[0].spec.annotations;
+  expect(tank).toMatchObject({ kind: 'icon', glyph: 'model-tank', angle: 90 });
+  expect(tank.heading).toBeUndefined();
+
+  // Reopened from disk beside two symbols saved before the picker: an old stamp,
+  // and a name no build knows, which still draws as the pin.
+  const old = (id, glyph, lon) => ({ id, kind: 'icon', side: 'both', colour: '#38bdf8', points: [[lon, tank.points[0][1]]],
+    stroke_width: 3, fill_opacity: 0, font_size: 16, text: '', number: 1, glyph, angle: 0 });
+  const spec = { ...saved[0].spec, annotations: [tank, old('truck', 'truck', tank.points[0][0] - 0.0004),
+    old('junk', 'not-a-symbol', tank.points[0][0] + 0.0004)] };
+  await page.route('**/api/cases/*/compare/sessions', (route) => route.fulfill({
+    json: [{ name: 'Comparison', title: 'Comparison', mode: 'side' }] }));
+  await page.route('**/api/cases/*/compare/sessions/Comparison', (route) => route.fulfill({
+    json: { title: 'Comparison', spec } }));
+  await page.reload();
+  await expect(page.locator('.surface-shell').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await page.locator('.session-open').click();
+  await awaitMapReady(page, 2);
+  const reopened = page.getByLabel('Annotations on imagery A', { exact: true });
+  await expect(reopened.locator('.mark')).toHaveCount(3);
+  await expect(reopened.locator('.model-art svg')).toHaveAttribute('viewBox', turned);
+  // The old stamps draw their own drawing, halo, body and carved details, as before.
+  const parts = (index) => reopened.locator('.mark').nth(index).locator('g > path');
+  const truck = STAMPS.find((stamp) => stamp.name === 'truck');
+  const pin = STAMPS.find((stamp) => stamp.name === 'point');
+  expect(await parts(1).evaluateAll((nodes) => nodes.map((node) => node.getAttribute('d'))))
+    .toEqual([truck.fill, truck.fill, truck.cut]);
+  await expect(parts(1).nth(1)).toHaveAttribute('fill', '#38bdf8');
+  await expect(parts(1).nth(1)).toHaveAttribute('fill-rule', 'evenodd');
+  expect(await parts(2).evaluateAll((nodes) => nodes.map((node) => node.getAttribute('d'))))
+    .toEqual([pin.fill, pin.fill, pin.cut]);
+  await page.screenshot({ path: test.info().outputPath('reopened.png') });
   expect(errors).toEqual([]);
 });
 

@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 const { default: Canvas } = await import('./AnnotationCanvas.svelte');
-const { markRing } = await import('../../lib/map/compareAnnotations.js');
+const { markRing, markSize, modelMarkup } = await import('../../lib/map/compareAnnotations.js');
 const { fromMercator, toMercator } = await import('../../lib/map/groundFrame.js');
+const { loadModels } = await import('../../lib/icons/loadModels.svelte.js');
 
 globalThis.ResizeObserver = class { observe() {} disconnect() {} };
 
@@ -267,5 +268,94 @@ describe('turning a mark', () => {
     // Half a turn about the middle of what it spans: the apex points up now.
     expect(apex.x).toBeCloseTo(200, 4);
     expect(apex.y).toBeCloseTo(100, 4);
+  });
+});
+
+describe('a vehicle model on the ground', () => {
+  /** A tank stamped at the middle of a turning camera's screen, its nose to `angle`. */
+  const tank = (engine, angle = 0) => {
+    const { lon, lat } = engine.containerPointToLatLng({ x: 200, y: 150 });
+    return { ...area(), kind: 'icon', glyph: 'model-tank', points: [[lon, lat]], text: '', font_size: 20, angle };
+  };
+  const grip = () => target.querySelector('.turn circle:last-of-type');
+  const lastDrag = (onchange) => onchange.mock.calls.filter(([, commit]) => !commit).at(-1)[0];
+
+  it('draws from above once the models land, its nose where the turned map puts it', async () => {
+    await loadModels();
+    const engine = turningEngine(30);
+    stage({ engine, annotations: [tank(engine, 0)], tool: 'select' });
+    const art = target.querySelector('.model-art');
+    const drawn = (heading) => {
+      const box = document.createElement('div');
+      box.innerHTML = modelMarkup(tank(engine, 0), heading);
+      return box.querySelector('svg').outerHTML;
+    };
+    // north, on a map turned 30° clockwise, is 30° right of up
+    expect(art.querySelector('svg').outerHTML).toBe(drawn(30));
+    expect(art.querySelector('svg').outerHTML).not.toBe(drawn(0));
+    expect(art.querySelectorAll('svg path').length).toBeGreaterThan(10);
+    // its box is its length, about the point it stands on
+    const hit = target.querySelector('.hit');
+    expect(Number(hit.getAttribute('width'))).toBe(markSize(tank(engine)));
+    expect(Number(hit.getAttribute('x')) + Number(hit.getAttribute('width')) / 2).toBeCloseTo(200, 6);
+  });
+
+  it('lands nose up on the screen it was stamped on', () => {
+    const onchange = vi.fn();
+    const svg = stage({ engine: turningEngine(30), annotations: [], tool: 'icon', glyph: 'model-tank',
+      bearing: 30, turnable: true, onchange });
+    press(svg, 'pointerdown', 200, 150);
+    const [stamped] = onchange.mock.calls.at(-1)[0];
+    expect(stamped.glyph).toBe('model-tank');
+    expect(stamped.angle).toBe(330);
+    unmount(live);
+
+    // a flat symbol has no nose, and keeps no angle
+    stage({ engine: turningEngine(30), annotations: [], tool: 'icon', glyph: 'truck', bearing: 30, turnable: true, onchange });
+    press(target.querySelector('svg'), 'pointerdown', 200, 150);
+    expect(onchange.mock.calls.at(-1)[0][0].angle).toBeUndefined();
+  });
+
+  it('stands its grip past its nose, and turns it there with its heading read beside', () => {
+    const onchange = vi.fn();
+    const engine = turningEngine();
+    const svg = stage({ engine, annotations: [tank(engine, 90)], editVertices: true, selectedId: 'z1',
+      tool: 'select', turnable: true, onchange });
+    const reach = markSize(tank(engine)) / 2 + 26;
+    expect(Number(grip().getAttribute('cx'))).toBeCloseTo(200 + reach, 4);
+    expect(Number(grip().getAttribute('cy'))).toBeCloseTo(150, 4);
+    expect(target.querySelector('.heading').textContent).toBe('90° E');
+
+    // from east of it to south of it: a quarter turn clockwise, on its own point
+    press(grip().parentNode, 'pointerdown', 200 + reach, 150);
+    press(svg, 'pointermove', 200, 150 + reach);
+    press(svg, 'pointerup', 200, 150 + reach);
+    const [turned] = lastDrag(onchange);
+    expect(turned.angle).toBeCloseTo(180, 6);
+    expect(turned.points).toEqual(tank(engine).points);
+    expect(onchange.mock.calls.at(-1)[1]).toBe(true);
+  });
+
+  it('lands its heading on a round 15° with Shift held, not its turn', () => {
+    const onchange = vi.fn();
+    const engine = turningEngine();
+    const svg = stage({ engine, annotations: [tank(engine, 7)], editVertices: true, selectedId: 'z1',
+      tool: 'select', turnable: true, onchange });
+    const at = [Number(grip().getAttribute('cx')), Number(grip().getAttribute('cy'))];
+    press(grip().parentNode, 'pointerdown', ...at);
+    // 37° on from where it pointed: 44°, which Shift lands on 45°
+    const turn = (44 * Math.PI) / 180;
+    const to = [200 + 60 * Math.sin(turn), 150 - 60 * Math.cos(turn)];
+    press(svg, 'pointermove', ...to, { shiftKey: true });
+    press(svg, 'pointerup', ...to, { shiftKey: true });
+    expect(lastDrag(onchange)[0].angle).toBeCloseTo(45, 6);
+  });
+
+  it('offers no grip to a flat symbol, which has no nose to turn', () => {
+    const engine = turningEngine();
+    stage({ engine, annotations: [{ ...tank(engine), glyph: 'truck' }], editVertices: true, selectedId: 'z1',
+      tool: 'select', turnable: true });
+    expect(target.querySelector('.turn')).toBeNull();
+    expect(target.querySelector('.model-art')).toBeNull();
   });
 });

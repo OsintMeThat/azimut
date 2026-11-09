@@ -2307,10 +2307,13 @@ zoom and rotation. Notes, arrows, boxes, ellipses, lines, freehand strokes, dist
 measures, polygons, **numbered markers and symbols** can belong to A, B or both.
 The last two are the Proof Maker's stamps, put down on the ground with one press
 and keeping the tool in hand: a marker counts a series per colour and starts back
-at 1 for the next one, and the symbol button opens the proof's first eleven
-symbols, drawn as a proof draws them, filled and haloed. Both are sized by their own
-number rather than by a line width, and a symbol that takes a weight has a second
-control for it. Polygon drawing ends
+at 1 for the next one, and the symbol button opens Geo Proof's own picker, filed
+under Marks, Vehicles, Events, Places and People, every symbol drawn as a proof
+draws it, filled and haloed. The maps are seen from above, so a vehicle model is too
+and the picker's View switch stays away. A model lands nose up on the screen it was
+stamped on, and its size is its length. Both stamps are sized by their own
+number rather than by a line width, and one of the eight older symbols that takes a
+weight has a second control for it. Polygon drawing ends
 with a double-click or Enter; Escape cancels. Select a mark to move it or edit its style,
 double-click a note to edit its text, and use Undo/Redo for annotation changes. A
 selected mark shows its corner handles, so its geometry is corrected where it was
@@ -2318,7 +2321,15 @@ drawn rather than deleted and redrawn; a note is dragged whole and has none.
 A box or an ellipse drawn on a turned map runs along that screen, not along north,
 and keeps the bearing it was drawn at. Any selected shape but a note or a stamp
 also shows a round grip above it: drag it to turn the shape about its centre,
-with Shift snapping to 15°.
+with Shift snapping to 15°. A vehicle model has the same grip past its nose: it
+turns on its point, the grip reads its heading and wind (`135° SE`), and Shift
+lands the heading itself on a multiple of 15°. The heading is stored in the
+`angle` a box keeps its own up in, as a compass direction, so a turned map turns
+the model with the ground and nothing new is written to disk. The models are drawn
+by a module loaded when the picker opens or a comparison names one, and an export
+waits for it. Every older comparison opens as it was: the eleven stamps draw the
+same pixels on screen and in an export, and a name this build does not know still
+draws as the pin.
 Every mark carries a wide invisible band along its outline, because a four-pixel
 arrow is a target nobody hits twice. That band is how a box, an ellipse or a
 polygon is picked and moved: its middle belongs to the map, filled or not, so a

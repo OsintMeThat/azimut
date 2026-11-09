@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  canTurn,
   comparisonAnnotations,
   drawAnnotations,
   ellipseRing,
@@ -12,13 +13,20 @@ import {
   markRing,
   markTop,
   markSize,
+  marksReady,
+  modelLook,
+  modelMarkup,
   movedMark,
   nextMarkNumber,
   onSide,
   projectMark,
+  screenHeading,
   turnedMark,
 } from './compareAnnotations.js';
-import { toMercator } from './groundFrame.js';
+import { fromMercator, toMercator } from './groundFrame.js';
+import { modelsNow } from '../icons/loadModels.svelte.js';
+import { STAMPS } from '../icons/stamps.js';
+import { stampParts } from '../proofIcons.js';
 
 const mark = (patch) => ({ id: 'm', colour: '#f6a81a', side: 'both', ...patch });
 
@@ -188,8 +196,6 @@ describe('the two marks stamped on one point', () => {
     expect(body.fill).toBe('#ef4444');
     expect(body.width).toBeGreaterThan(glyphParts({ ...truck, stroke_width: 2 })[1].width);
     expect(cut.d).toBe(markGlyph(truck).cut);
-    // a comparison only names the proof's own stamps until it learns the rest
-    expect(comparisonAnnotations([{ ...truck, glyph: 'model-tank', points: [[1, 2]] }])[0].glyph).toBe('point');
   });
 
   it('burns a numbered disc into an export at the point it was stamped on', () => {
@@ -204,5 +210,140 @@ describe('the two marks stamped on one point', () => {
 
     expect(ctx.arc).toHaveBeenCalledWith(20, 480, 29, 0, Math.PI * 2);
     expect(ctx.fillText).toHaveBeenCalledWith('4', 20, 480);
+  });
+});
+
+/** A context that records what is drawn on it, Path2D included. */
+function recorder() {
+  const calls = [];
+  const ctx = new Proxy({ calls, measureText: (text) => ({ width: text.length * 7 }) }, {
+    get(target, name) {
+      if (name in target) return target[name];
+      return (...args) => calls.push([name, ...args]);
+    },
+    set(target, name, value) {
+      target[name] = value;
+      calls.push([`=${String(name)}`, value]);
+      return true;
+    },
+  });
+  return { ctx, calls };
+}
+globalThis.Path2D ??= class { constructor(d) { this.d = d; } };
+
+describe('the symbols the proof picker offers, on the ground', () => {
+  const symbol = (glyph, extra) => mark({ kind: 'icon', points: [[2, 48]], glyph, ...extra });
+
+  it('loads the models only once a mark names one', async () => {
+    // first in this file to touch the models, so nothing has loaded them yet
+    expect(modelsNow()).toBeNull();
+    await marksReady([symbol('tank'), symbol('badge-flame'), mark({ kind: 'line', points: [[0, 0], [1, 1]] })]);
+    expect(modelsNow()).toBeNull();
+    expect(modelMarkup(symbol('model-tank'), 0)).toBe('');
+    await marksReady([symbol('model-tank')]);
+    expect(modelsNow()).not.toBeNull();
+  });
+
+  it('keeps every name the picker can give, and still draws junk as the pin', () => {
+    const names = ['vehicle', 'nord', 'badge-flame', 'badge-hospital', 'model-tank', 'model-cargo',
+      'not-a-symbol', 'pin', 'model-', '', null];
+    expect(comparisonAnnotations(names.map((glyph) => symbol(glyph))).map((m) => m.glyph)).toEqual([
+      'vehicle', 'nord', 'badge-flame', 'badge-hospital', 'model-tank', 'model-cargo',
+      // a plain layer marker is a layer's, never a stamp
+      'point', 'point', 'point', 'point', 'point',
+    ]);
+    expect(markGlyph(symbol('badge-flame')).name).toBe('badge-flame');
+    expect(markGlyph(symbol('pin')).name).toBe('point');
+  });
+
+  it("keeps a model's heading in the angle a box keeps its up in, and no other symbol's", () => {
+    const [tank, truck, fire] = comparisonAnnotations([
+      symbol('model-tank', { angle: -45 }),
+      symbol('truck', { angle: 70 }),
+      symbol('badge-flame', { angle: 70 }),
+    ]);
+    expect(tank.angle).toBe(315);
+    expect(truck.angle).toBe(0);
+    expect(fire.angle).toBe(0);
+    // the stored shape is the one every mark has had: nothing added to it
+    expect(Object.keys(tank).sort()).toEqual(Object.keys(truck).sort());
+  });
+
+  it('turns a model on its point, and leaves every other symbol where it was', () => {
+    const tank = symbol('model-tank', { angle: 350 });
+    expect(canTurn(tank)).toBe(true);
+    const turned = turnedMark(tank, [0, 0], 25);
+    expect(turned.angle).toBe(15);
+    expect(turned.points).toEqual(tank.points);
+    for (const glyph of ['truck', 'badge-flame']) {
+      expect(canTurn(symbol(glyph))).toBe(false);
+      expect(turnedMark(symbol(glyph), [0, 0], 25)).toEqual(symbol(glyph));
+    }
+  });
+
+  it("reads where a model's nose points through the picture's own projection", () => {
+    const north = ([lon, lat]) => { const [x, y] = toMercator(lon, lat); return [x, -y]; };
+    expect(screenHeading(symbol('model-tank', { angle: 0 }), north)).toBeCloseTo(0, 6);
+    expect(screenHeading(symbol('model-tank', { angle: 120 }), north)).toBeCloseTo(120, 6);
+    // the map turned 30° clockwise turns the model with it
+    const turn = (30 * Math.PI) / 180;
+    const turned = (point) => {
+      const [x, y] = north(point);
+      return [x * Math.cos(turn) - y * Math.sin(turn), x * Math.sin(turn) + y * Math.cos(turn)];
+    };
+    expect(screenHeading(symbol('model-tank', { angle: 0 }), turned)).toBeCloseTo(30, 6);
+    expect(screenHeading(symbol('model-tank', { angle: 340 }), turned)).toBeCloseTo(10, 6);
+  });
+
+  it('draws one of the eleven stamps exactly as before', () => {
+    for (const { name } of STAMPS) {
+      const stamp = symbol(name, { colour: '#ef4444', stroke_width: 5, font_size: 14 });
+      const old = stampParts(name, { color: '#ef4444', strokeWidth: 5, size: markSize(stamp) });
+      expect(glyphParts(stamp)).toEqual(old.map((part) => ({ ...part, rule: 'evenodd' })));
+    }
+  });
+
+  it("draws a badge's glyph as a proof does: haloed, in the mark's colour, its parts turned where they turn", () => {
+    const parts = glyphParts(symbol('badge-flame', { colour: '#22c55e' }));
+    expect(parts[0].fill).toBe('rgba(0, 0, 0, 0.6)');
+    expect(parts.some((part) => part.fill === '#22c55e')).toBe(true);
+    expect(parts.every((part) => part.rule === 'nonzero')).toBe(true);
+    expect(glyphParts(symbol('model-tank'))).toEqual([]);
+  });
+
+  it('draws a model from above, its length the size of the stamp, turned to its heading', () => {
+    const tank = symbol('model-tank', { font_size: 20, colour: '#38bdf8' });
+    const look = modelLook(tank, 90, 2);
+    expect(look).toMatchObject({ px: 72, fit: 'length', heading: 90, tilt: 0, colour: '#38bdf8', mode: 'tone' });
+    expect(look.halo).toBeGreaterThan(0);
+    const east = modelMarkup(tank, 90);
+    expect(east).toContain('<svg width="36" height="36"');
+    expect(modelMarkup(tank, 90)).toBe(east);
+    expect(modelMarkup(tank, 0)).not.toBe(east);
+    expect(modelMarkup({ ...tank, glyph: 'model-nothing' }, 0)).toBe('');
+  });
+
+  it('burns a model into an export where it stands, turned as the picture shows it, with no shadow', () => {
+    const { ctx, calls } = recorder();
+    // north up, ten pixels a metre about the origin
+    const project = ([lon, lat]) => { const [x, y] = toMercator(lon, lat); return [x * 10 + 100, 200 - y * 10]; };
+    const at = fromMercator(4, -3);
+    drawAnnotations(ctx, [symbol('model-tank', { points: [at], angle: 90 })], project, { scale: 2 });
+    const moved = calls.find((call) => call[0] === 'translate');
+    expect(moved[1]).toBeCloseTo(140, 6);
+    expect(moved[2]).toBeCloseTo(230, 6);
+    expect(calls.filter((call) => call[0] === 'fill').length).toBeGreaterThan(10);
+    expect(calls.some((call) => call[0] === '=shadowBlur' && call[1] > 0)).toBe(false);
+  });
+
+  it('keeps the soft shadow an old stamp has always had in an export, and gives none to a glyph', () => {
+    const stamped = recorder();
+    drawAnnotations(stamped.ctx, [symbol('truck')], () => [10, 10], { scale: 2 });
+    expect(stamped.calls).toContainEqual(['=shadowBlur', 6]);
+    expect(stamped.calls.filter((call) => call[0] === 'fill').every((call) => call[2] === 'evenodd')).toBe(true);
+    const flat = recorder();
+    drawAnnotations(flat.ctx, [symbol('badge-flame')], () => [10, 10], { scale: 2 });
+    expect(flat.calls.some((call) => call[0] === '=shadowBlur')).toBe(false);
+    expect(flat.calls.filter((call) => call[0] === 'fill').length).toBeGreaterThan(0);
   });
 });

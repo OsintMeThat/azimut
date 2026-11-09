@@ -14,6 +14,12 @@
  * mark turns its points about its centre, and a box's angle with them.
  * Measures and polygons read their length and area off the ground, not the
  * screen.
+ *
+ * A symbol names anything the Proof Maker can stamp (`lib/icons/catalog.js`): one
+ * of its eleven stamps, a layer badge's flat glyph, or a vehicle model. A model
+ * is seen from above, as the map is, and its `angle` is where its nose points on
+ * the compass: the same field a box keeps its own up in, so turning one is the
+ * turn every other mark already has.
  */
 
 import { formatArea, formatDistance, haversine, polygonArea } from '../measure.js';
@@ -21,8 +27,12 @@ import {
   boxCorners, boxPoint, compassAngle, fromMercator, toMercator, turnAbout, turnedBox,
 } from './groundFrame.js';
 import {
-  ICON_BOX, PROOF_ICONS, glyphInk, iconOrigin, stampByName, stampParts,
+  ICON_BOX, PROOF_ICONS, glyphInk, iconByName, iconOrigin, stampByName, stampParts,
 } from '../proofIcons.js';
+import { isModel, isStampable } from '../icons/catalog.js';
+import { loadModels, modelsNow } from '../icons/loadModels.svelte.js';
+import { modelHalo, modelLine } from '../proofModelNode.js';
+import { glyphOps } from '../proofStamp.js';
 
 export const ANNOTATION_COLOURS = Object.freeze([
   '#f6a81a', '#22c55e', '#ef4444', '#38bdf8', '#e879f9', '#f4f5f6', '#111827',
@@ -62,6 +72,15 @@ export const ANGLED = new Set(['rect', 'ellipse']);
 
 /** The kinds a turn means anything to: one point turns about itself. */
 export const TURNABLE = new Set(['arrow', 'line', 'measure', 'rect', 'ellipse', 'polygon', 'freehand']);
+
+/** A symbol that is a vehicle model, which has a nose and so a heading. */
+export const isModelMark = (mark) => mark?.kind === 'icon' && isModel(mark.glyph);
+
+/** Whether a mark can be turned: a shape about its centre, or a model on its point. */
+export const canTurn = (mark) => TURNABLE.has(mark?.kind) || isModelMark(mark);
+
+/** Whether a mark keeps an angle of its own: a box's up, or a model's nose. */
+const keepsAngle = (mark) => ANGLED.has(mark?.kind) || isModelMark(mark);
 
 const bounded = (value, fallback, min, max) => {
   const number = Number(value);
@@ -103,8 +122,8 @@ export function comparisonAnnotations(value) {
       // build does not know is drawn as the first one rather than as nothing,
       // so a comparison made on a newer version still shows a mark there.
       number: Math.round(bounded(raw.number, 1, 1, 999)),
-      glyph: stampByName(raw.glyph) ? String(raw.glyph) : PROOF_ICONS[0].name,
-      angle: ANGLED.has(raw.kind) ? compassAngle(raw.angle) : 0,
+      glyph: isStampable(raw.glyph) ? String(raw.glyph) : PROOF_ICONS[0].name,
+      angle: keepsAngle(raw) ? compassAngle(raw.angle) : 0,
     }];
   });
 }
@@ -137,18 +156,88 @@ export function glyphBox(mark, [x, y], scale = 1) {
   return { x: x + origin.x, y: y + origin.y, size, scale: size / ICON_BOX };
 }
 
-/** The glyph a symbol draws, always one of the proof's stamps this build knows. */
-export const markGlyph = (mark) => stampByName(mark.glyph) ?? PROOF_ICONS[0];
+/** The symbol a mark draws, always one this build knows: an unknown name draws the pin. */
+export const markGlyph = (mark) => iconByName(mark.glyph) ?? PROOF_ICONS[0];
 
 /**
- * What a symbol is drawn from, in its box's units: its halo, its silhouette and
- * its carved details, the way a proof stamp is (`stampParts`). The stroke width
- * is its weight, and the size the one it is seen at on screen, so an export keeps
- * the halo the screen showed.
+ * What a flat symbol is drawn from, in its box's units, bottom first: each part a
+ * path `d` with a `fill` (under `rule`), maybe a `stroke` of `width`, maybe turned
+ * by `rotate` degrees about the box's middle.
+ *
+ * One of the eleven stamps is drawn as a proof stamps it (`stampParts`): its halo,
+ * its silhouette and its carved details, the stroke width as its weight. A layer
+ * badge's glyph is drawn as a proof draws one (`glyphOps`), in its own weight.
+ * Either way the size is the one seen on screen, so an export keeps the halo the
+ * screen showed. A model has no flat parts.
  */
-export const glyphParts = (mark) => stampParts(markGlyph(mark).name, {
-  color: mark.colour, strokeWidth: mark.stroke_width, size: markSize(mark),
-});
+export function glyphParts(mark) {
+  const { name } = markGlyph(mark);
+  if (stampByName(name)) {
+    return stampParts(name, { color: mark.colour, strokeWidth: mark.stroke_width, size: markSize(mark) })
+      .map((part) => ({ ...part, rule: 'evenodd' }));
+  }
+  return glyphOps(name, { color: mark.colour, size: markSize(mark) }).map((op) => ({ ...op, rule: 'nonzero' }));
+}
+
+/** How far along its heading a model is looked at to find where its nose points on screen, in ground metres. */
+const NOSE_REACH = 10;
+
+/**
+ * Where a model's nose points on a picture, in degrees clockwise from the
+ * picture's up, read through the same projection that places it: a map turned
+ * under it turns it, and a framed export turned upright does too.
+ */
+export function screenHeading(mark, project) {
+  const [lon, lat] = mark.points[0];
+  const [x, y] = toMercator(lon, lat);
+  const turn = ((mark.angle ?? 0) * Math.PI) / 180;
+  const from = project([lon, lat]);
+  const to = project(fromMercator(x + Math.sin(turn) * NOSE_REACH, y + Math.cos(turn) * NOSE_REACH));
+  return compassAngle((Math.atan2(to[0] - from[0], from[1] - to[1]) * 180) / Math.PI);
+}
+
+/**
+ * How a model is painted at `heading` on a picture `scale` times the screen: from
+ * above, its length the mark's size, outlined and haloed by the Proof Maker's
+ * rule for a stamp that size, so it holds over imagery the way a proof's does.
+ */
+export function modelLook(mark, heading, scale = 1) {
+  const size = markSize(mark);
+  return {
+    px: size * scale, fit: 'length', heading, tilt: 0, colour: mark.colour, mode: 'tone',
+    line: modelLine(size) * scale, halo: modelHalo(size) * scale,
+  };
+}
+
+/** The SVG of each model look drawn so far, the last few kept: a pan redraws none. */
+const DRAWN = new Map();
+const DRAWN_CAP = 96;
+
+/**
+ * A model mark as an SVG `markSize` wide, its middle at the box's, or '' while the
+ * models have not landed (they load when a comparison names one, `marksReady`).
+ */
+export function modelMarkup(mark, heading) {
+  const engine = modelsNow();
+  const model = engine?.modelById(mark.glyph);
+  if (!model) return '';
+  const look = modelLook(mark, heading);
+  const key = `${mark.glyph}|${Math.round(heading) % 360}|${look.px}|${mark.colour}`;
+  let svg = DRAWN.get(key);
+  if (svg === undefined) {
+    svg = engine.modelSvg(model, look);
+    DRAWN.set(key, svg);
+    if (DRAWN.size > DRAWN_CAP) DRAWN.delete(DRAWN.keys().next().value);
+  }
+  return svg;
+}
+
+/**
+ * Settles once everything the marks need to be drawn has landed: the models'
+ * module when one of them is a model, nothing otherwise. An export awaits it, since
+ * it draws its picture in one go.
+ */
+export const marksReady = (marks) => ((marks ?? []).some(isModelMark) ? loadModels() : Promise.resolve());
 
 /**
  * The first number no marker of this colour holds.
@@ -254,9 +343,14 @@ export function markTop(mark) {
   return boxPoint(box, 0, -Math.sign(box.height || 1) / 2);
 }
 
-/** A mark turned clockwise by `degrees` about `pivot`, its points clamped to the map. */
+/**
+ * A mark turned clockwise by `degrees` about `pivot`, its points clamped to the
+ * map. A model stays on its point and turns its nose.
+ */
 export function turnedMark(mark, pivot, degrees) {
-  if (!TURNABLE.has(mark.kind) || !degrees) return mark;
+  if (!degrees) return mark;
+  if (isModelMark(mark)) return { ...mark, angle: compassAngle((mark.angle ?? 0) + degrees) };
+  if (!TURNABLE.has(mark.kind)) return mark;
   return {
     ...mark,
     points: mark.points.map((point) => {
@@ -355,16 +449,21 @@ function drawPlate(ctx, text, x, y, { colour, fontSize, scale, centred }) {
 }
 
 /**
- * A stamped mark on a 2D context: a numbered disc, or a symbol in its box.
+ * A stamped mark on a 2D context: a numbered disc, a flat symbol in its box, or a
+ * model turned to where its nose points on this picture (`project` says).
  *
  * Drawn from the same numbers the map's own SVG draws from, so what the export
- * holds is what was on screen.
+ * holds is what was on screen. The disc and the eleven stamps keep the soft shadow
+ * an export has always given them; a badge's glyph and a model wear their own halo
+ * and nothing more, as on screen.
  */
-function drawStamp(ctx, mark, [x, y], scale) {
+function drawStamp(ctx, mark, [x, y], scale, project) {
   const size = markSize(mark) * scale;
   ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,.55)';
-  ctx.shadowBlur = 3 * scale;
+  if (mark.kind === 'number' || stampByName(markGlyph(mark).name)) {
+    ctx.shadowColor = 'rgba(0,0,0,.55)';
+    ctx.shadowBlur = 3 * scale;
+  }
   if (mark.kind === 'number') {
     const ink = stampInk(mark);
     ctx.beginPath();
@@ -380,6 +479,13 @@ function drawStamp(ctx, mark, [x, y], scale) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(String(mark.number), x, y);
+  } else if (isModelMark(mark)) {
+    const engine = modelsNow();
+    const model = engine?.modelById(mark.glyph);
+    if (model) {
+      ctx.translate(x, y);
+      engine.drawModel(ctx, model, modelLook(mark, screenHeading(mark, project), scale));
+    }
   } else {
     const box = glyphBox(mark, [x, y], scale);
     ctx.translate(box.x, box.y);
@@ -388,14 +494,23 @@ function drawStamp(ctx, mark, [x, y], scale) {
     ctx.lineCap = 'round';
     // drawn in the box's units, so a bigger symbol is the same drawing, bigger
     for (const part of glyphParts(mark)) {
+      ctx.save();
+      if (part.rotate) {
+        ctx.translate(ICON_BOX / 2, ICON_BOX / 2);
+        ctx.rotate((part.rotate * Math.PI) / 180);
+        ctx.translate(-ICON_BOX / 2, -ICON_BOX / 2);
+      }
       const path = new Path2D(part.d);
       if (part.stroke) {
         ctx.strokeStyle = part.stroke;
         ctx.lineWidth = part.width;
         ctx.stroke(path);
       }
-      ctx.fillStyle = part.fill;
-      ctx.fill(path, 'evenodd');
+      if (part.fill) {
+        ctx.fillStyle = part.fill;
+        ctx.fill(path, part.rule);
+      }
+      ctx.restore();
     }
   }
   ctx.restore();
@@ -417,7 +532,7 @@ export function drawAnnotations(ctx, marks, project, { scale = 1, units = 'metri
     ctx.lineWidth = Math.max(1, mark.stroke_width * scale);
     ctx.strokeStyle = mark.colour;
     if (STAMPED.has(mark.kind)) {
-      drawStamp(ctx, mark, shape.anchor, scale);
+      drawStamp(ctx, mark, shape.anchor, scale, project);
     } else if (mark.kind !== 'text') {
       // a thin dark casing keeps a light stroke readable on bright ground
       ctx.save();

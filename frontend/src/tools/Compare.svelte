@@ -74,6 +74,7 @@
     canFill,
     nextMarkNumber,
     comparisonAnnotations,
+    marksReady,
   } from '../lib/map/compareAnnotations.js';
   import { PROOF_ICONS } from '../lib/proofIcons.js';
   import { cropSources, exportFrameSpec, frameSpan } from '../lib/map/exportFrame.js';
@@ -2021,7 +2022,17 @@
 
   /** The captured surfaces as the export shows them: whole, or cut to the frame. */
   async function exportSources() {
-    return cropSources(await sourceCanvases(), exportFrame);
+    return markedSources(exportFrame);
+  }
+
+  /**
+   * The captured surfaces cut to `frame`, once the marks can be drawn on them: a
+   * vehicle model is drawn by a module loaded on demand, and a picture is drawn
+   * in one go.
+   */
+  async function markedSources(frame) {
+    await marksReady(annotations);
+    return cropSources(await sourceCanvases(), frame);
   }
 
   /** The frame stated as the ground it covers, which no camera can change. */
@@ -2264,7 +2275,7 @@
       const dates = pictureDates();
       await saveForNote(owner, dates);
       if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
-      const sources = cropSources(await sourceCanvases(), frame);
+      const sources = await markedSources(frame);
       const blob = await canvasBlob(compose(sources, { renderMode: 'side', renderChangeMap: null }));
       const form = new FormData();
       form.append('image_a', blob, 'comparison.png');
@@ -2472,6 +2483,7 @@
   async function drawEvolution(kind, pictures, signal) {
     const plan = evolutionPlan(kind, pictures.length);
     if (!plan) throw new Error('Open a map before exporting');
+    await marksReady(annotations);
     const archiveId = evolution;
     const provider = imagery.find(archiveId);
     const label = provider?.label ?? (archiveId === WAYBACK_ID ? 'Esri Wayback' : 'Sentinel-2');

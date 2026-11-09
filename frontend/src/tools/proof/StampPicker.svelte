@@ -3,16 +3,19 @@
    * What the symbol button opens: every icon a proof can stamp, grouped, with the
    * view the next model is drawn at. A model shows at that view here, so a picture
    * of the tile is a picture of the stamp.
+   *
+   * Compare's symbol button opens it too, with `views` off: a map is seen from
+   * above, so its models are drawn from the top and the View switch stays away.
    */
   import ProofGlyph from '../../components/ProofGlyph.svelte';
   import { proofPicker } from '../../lib/icons/catalog.js';
   import { MODEL_VIEWS } from '../../lib/icons/modelMeta.js';
   import { setStampView, stampViewId } from '../../lib/icons/stampView.svelte.js';
 
-  let { iconName, pick = () => {}, maxHeight = null } = $props();
+  let { iconName, pick = () => {}, maxHeight = null, views = true } = $props();
 
   const groups = proofPicker();
-  const view = $derived(stampViewId());
+  const view = $derived(views ? stampViewId() : 'top');
   // A family starts a row, so each row of models is one family: Road, then Armour…
   const rowStarts = new Set(groups.flatMap(({ items }) => items
     .filter((e, i) => e.family && e.family !== 'Generic' && e.family !== 'Rail' && items[i - 1]?.family !== e.family)
@@ -44,20 +47,22 @@
       </section>
     {/each}
   </div>
-  <div class="foot">
-    <span class="foot-label">View</span>
-    <div class="seg" role="radiogroup" aria-label="View of the next model">
-      {#each MODEL_VIEWS as option (option.id)}
-        <button
-          type="button"
-          role="radio"
-          aria-checked={view === option.id}
-          class:on={view === option.id}
-          onclick={() => setStampView(option.id)}
-        >{option.label}</button>
-      {/each}
+  {#if views}
+    <div class="foot">
+      <span class="foot-label">View</span>
+      <div class="seg" role="radiogroup" aria-label="View of the next model">
+        {#each MODEL_VIEWS as option (option.id)}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={view === option.id}
+            class:on={view === option.id}
+            onclick={() => setStampView(option.id)}
+          >{option.label}</button>
+        {/each}
+      </div>
     </div>
-  </div>
+  {/if}
 </div>
 
 <style>
