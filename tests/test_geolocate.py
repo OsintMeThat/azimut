@@ -531,7 +531,9 @@ def test_a_collage_of_one_video_belongs_to_it_and_marks_it(client, tmp_path):
         json={"moments": [{"start": 1.0, "end": 2.5}], "video": video, "draft": period.json()["scene"]["id"]},
     )
     assert stated.status_code == 200, stated.text
-    assert _queue(client, cid)["files"] == []
+    # its one scene taken up, the proof stands in its place while it states no place
+    [file] = _queue(client, cid)["files"]
+    assert file["scenes"] == [] and [row["proof"] for row in file["proofs"]] == [made.json()["name"]]
 
 
 @needs_ffmpeg
