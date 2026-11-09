@@ -586,12 +586,13 @@ class RetimeIn(BaseModel):
 
 @router.put("/cases/{case_id}/scenes/{draft}/time")
 def retime_scene(case_id: str, draft: str, body: RetimeIn) -> dict[str, Any]:
-    """Give a scene to prove a new time, the rest of its video's work untouched. Answers
-    with the time it had, for an Undo."""
+    """Give a scene to prove a new time, the rest of its video's work untouched, the whole
+    video only as the video's one live scene still to prove with no passages beside it.
+    Answers with the time it had, for an Undo."""
     case = get_case(case_id)
     more = [m.model_dump() for m in body.more] if body.more else None
     try:
-        before = inspectwork.retime_scene(case, body.video, draft, body.start, body.end, more)
+        before = geolocate.retime(case, body.video, draft, body.start, body.end, more)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     events.publish({"type": "scenes", "case_id": case.id, "video": body.video})
@@ -715,7 +716,8 @@ def load_work(case_id: str, name: str) -> dict[str, Any]:
 def save_work(case_id: str, body: WorkIn) -> dict[str, Any]:
     case = get_case(case_id)
     try:
-        saved = inspectwork.save_work(case, body.path, body.spec)
+        # a scene made the whole video where the video is several places keeps its time
+        saved = geolocate.save_work(case, body.path, body.spec)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     # its scenes moved: the To-do and the extension's queue read them again. An autosave

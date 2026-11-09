@@ -482,12 +482,18 @@ def _clean_scenes(scenes: Any) -> list[dict[str, Any]]:
     return sorted(out, key=_scene_order)
 
 
-def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any]:
+#: What a save may do to the scenes it writes, given the ones stored before it, in place:
+#: answers what it changed (`geolocate.save_work`).
+SceneGuard = Callable[[list[dict[str, Any]], list[dict[str, Any]]], list[dict[str, Any]]]
+
+
+def save_work(case: "Case", subject: str, spec: dict[str, Any], guard: SceneGuard | None = None) -> dict[str, Any]:
     """Write one file's work, filing its entity the first time.
 
     The first save is named after the file, numbered past any work already holding
     that name. Later saves keep whatever name the entity carries, including one the
-    analyst gave it from Details.
+    analyst gave it from Details. ``guard`` sees the scenes before they are written,
+    beside the ones stored, and what it answers comes back under ``kept``.
     """
     if not isinstance(spec, dict):
         raise CaseError("the work must be an object")
@@ -514,6 +520,9 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
             title = layout.free_stem(_taken(case, layout.INSPECT_DIR), label, "Inspect")
             rel = layout.session_rel(title)
             created = _now()
+        kept = guard(scenes, [s for s in previous.get("scenes") or [] if isinstance(s, dict)]) if guard and found else []
+        if kept:
+            scenes.sort(key=_scene_order)
         moved = _scene_lines(previous.get("scenes") if found else None) != _scene_lines(scenes)
         if found:
             _keep_scene_state(scenes, previous.get("scenes"))
@@ -540,7 +549,8 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
         if filed is None:
             filed = case.add_entity(WORK_TYPE, title, attrs={"spec": rel}, by=PRODUCER)
         link_engine.sync(case, filed["id"], link_engine.DEPENDS_ON, [subject], by=PRODUCER)
-    return {"name": Path(rel).stem, "title": title, "scenes_moved": moved}
+    saved = {"name": Path(rel).stem, "title": title, "scenes_moved": moved}
+    return {**saved, "kept": kept} if kept else saved
 
 
 def _scene_lines(scenes: Any) -> list[tuple[Any, ...]]:
@@ -655,8 +665,9 @@ def join_scenes(case: "Case", subject: str, scene_id: str, into: str, max_captur
     stay with the scene, the first ones first. Answers with the scene as written, and
     both as they were (``kept``, ``gone``) for an Undo (`unjoin_scenes`).
 
-    A scene about the whole video already holds every moment, and an abandoned one is
-    brought back first, so neither joins.
+    A scene about the whole video already holds every moment, so it joins no scene with a
+    time; two about the whole video, the same question an older case asked twice, join
+    into one about the whole video. An abandoned one is brought back first.
     """
     if scene_id == into:
         raise CaseError("a scene is already the same place as itself")
@@ -673,7 +684,7 @@ def join_scenes(case: "Case", subject: str, scene_id: str, into: str, max_captur
         if source.get("abandoned") or target.get("abandoned"):
             raise CaseError("an abandoned scene is brought back before it is joined")
         theirs, mine = scene_moments(target), scene_moments(source)
-        if not theirs or not mine:
+        if bool(theirs) != bool(mine):
             raise CaseError("a scene about the whole video already holds every moment")
         moments = join_moments(theirs + mine)
         if len(moments) > MAX_SCENE_MOMENTS:

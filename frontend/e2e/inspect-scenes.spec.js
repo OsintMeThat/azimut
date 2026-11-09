@@ -213,7 +213,7 @@ test('greys Whole video once a scene holds a passage, in the arrow and in anothe
   await page.keyboard.press('Escape');
   const kind = rows(page).first().getByRole('radio', { name: 'Whole video' });
   await expect(kind).toBeDisabled();
-  await expect(kind).toHaveAttribute('title', 'Another scene holds passages of this video, so the whole of it is not one place');
+  await expect(kind).toHaveAttribute('title', 'Other scenes of this video already hold passages, so the whole of it is not one place');
   await expect(rows(page).first().getByRole('radio', { name: 'Instant' })).toBeEnabled();
 });
 

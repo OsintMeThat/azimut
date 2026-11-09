@@ -645,7 +645,7 @@ describe('the Scenes tab on a video', () => {
     target.querySelector('[aria-label="More ways to mark"]').click();
     flushSync();
     const kind = [...openRow().querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Whole video');
-    expect([kind.disabled, kind.title]).toEqual([true, 'Another scene holds passages of this video, so the whole of it is not one place']);
+    expect([kind.disabled, kind.title]).toEqual([true, 'Other scenes of this video already hold passages, so the whole of it is not one place']);
   });
 
   it('adds a passage of the scene\'s kind with Another passage, in hand on the bar', async () => {
@@ -982,5 +982,148 @@ describe('a picture', () => {
     await openFile('A frame');
     expect(panelTabs().map((t) => t.textContent.trim())).toEqual(['Adjust', 'Analyze', 'Info']);
     expect(get.mock.calls.some(([path]) => path.startsWith('/api/cases/case-a/scenes?'))).toBe(false);
+  });
+});
+
+describe('the whole video, once', () => {
+  /** The server's join and its Undo, as `engine/inspectwork.join_scenes` writes them, the list following. */
+  function serveJoins(video) {
+    const plain = post.getMockImplementation();
+    const calls = [];
+    post.mockImplementation(async (path, body) => {
+      const joining = /\/scenes\/([^/]+)\/(join|unjoin)$/.exec(path);
+      if (!joining) return plain(path, body);
+      calls.push([joining[2], decodeURIComponent(joining[1]), body]);
+      const scenes = listed[video].scenes;
+      if (joining[2] === 'join') {
+        const source = scenes.find((sc) => sc.id === joining[1]);
+        const target = scenes.find((sc) => sc.id === body.into);
+        const joined = { ...target, label: [target.label, source.label].filter(Boolean).join(' / ') };
+        listed[video].scenes = scenes.filter((sc) => sc.id !== source.id).map((sc) => (sc.id === target.id ? joined : sc));
+        const plainScene = ({ id, start, end, label }) => ({ id, start, end, label });
+        return { scene: joined, undo: { kept: plainScene(target), gone: plainScene(source), geolocating: null } };
+      }
+      const back = [row(body.kept.id, null, null, body.kept.label), row(body.gone.id, null, null, body.gone.label)];
+      listed[video].scenes = [...scenes.filter((sc) => sc.id !== body.kept.id), ...back];
+      return { scenes: back };
+    });
+    return { calls, restore: () => post.mockImplementation(plain) };
+  }
+
+  it('asks to join an older case\'s two scenes about the whole video before S marks a time, joins them in one press and parts them on Undo', async () => {
+    work(CLIP, [kept('w1', null, null, 'Market'), kept('w2', null, null, 'Old town')]);
+    listed[CLIP] = { scenes: [row('w1', null, null, 'Market'), row('w2', null, null, 'Old town')] };
+    const joins = serveJoins(CLIP);
+    try {
+      await start();
+      await openFile('Convoy clip');
+      expect(target.querySelector('[data-testid="whole-twins"]').textContent).toContain('2 scenes for the whole video');
+      playheadAt(4);
+      press('s');
+      await settle();
+      // neither takes the time, and nothing is kept beside them
+      expect(rows()).toHaveLength(2);
+      const [asked] = toasts('2 scenes for the whole video');
+      expect(asked.slice(0, 2)).toEqual(['2 scenes for the whole video: join them first', 'warn']);
+      expect(asked[3].label).toBe('Join them');
+
+      inside(target.querySelector('[data-testid="whole-twins"]'), 'Join them').click();
+      await settle(10);
+      expect(joins.calls).toEqual([['join', 'w2', { video: CLIP, into: 'w1' }]]);
+      expect(rows()).toHaveLength(1);
+      expect(target.querySelector('[data-testid="whole-twins"]')).toBeNull();
+      expect(field('Scene label').value).toBe('Market / Old town');
+      const [said] = toasts('Joined into');
+      expect(said[0]).toBe('Joined into “Market / Old town”, about the whole video');
+
+      said[3].onClick();
+      await settle(10);
+      expect(joins.calls.at(-1).slice(0, 2)).toEqual(['unjoin', 'w1']);
+      expect(joins.calls.at(-1)[2]).toEqual({
+        video: CLIP, kept: kept('w1', null, null, 'Market'), gone: kept('w2', null, null, 'Old town'), geolocating: null,
+      });
+      expect(rows()).toHaveLength(2);
+
+      // joined, the one scene takes the next time as the clip's one place
+      inside(target.querySelector('[data-testid="whole-twins"]'), 'Join them').click();
+      await settle(10);
+      playheadAt(6);
+      press('s');
+      await settle();
+      expect(rows()).toHaveLength(1);
+      expect(toasts('no longer the whole video')).toHaveLength(1);
+    } finally {
+      joins.restore();
+    }
+  });
+
+  it('keeps a time marked beside two scenes about the whole video and one at a time as a place of its own', async () => {
+    work(CLIP, [kept('w1', null, null, ''), kept('w2', null, null, ''), kept('sc_1', 2, null, '')]);
+    await start();
+    await openFile('Convoy clip');
+    playheadAt(9);
+    press('s');
+    await settle();
+    expect(rows()).toHaveLength(4);
+    expect(toasts('join them first')).toHaveLength(0);
+    expect(toasts('Scene kept at 0:09')).toHaveLength(1);
+  });
+
+  it('gives a scene about the whole video beside scenes at a time the instant on screen, its frame kept, with no Undo', async () => {
+    work(CLIP, [kept('sc_all', null, null, 'Which town?'), kept('sc_1', 8, null, '')]);
+    await start();
+    await openFile('Convoy clip');
+    expect(openRow().dataset.sceneKey).toBe('sc_all');
+    const note = openRow().querySelector('[data-testid="whole-mixed"]');
+    expect(note.textContent).toContain('This video also has scenes at a time');
+    playheadAt(12);
+    inside(note, 'Give it a time').click();
+    await settle();
+
+    expect(openRow().dataset.sceneKey).toBe('sc_all');
+    expect(field('Scene start').value).toBe('0:12');
+    expect(target.querySelector('[data-testid="whole-mixed"]')).toBeNull();
+    const [said] = toasts('no longer the whole video');
+    expect(said[0]).toBe('“Which town?” now at 0:12, no longer the whole video');
+    expect(said[3]).toBeNull();
+    await afterQuiet();
+    expect(Object.fromEntries(lastSpec().scenes.map((sc) => [sc.id, sc.start]))).toEqual({ sc_all: 12, sc_1: 8 });
+    expect(lastSpec().frames.map((f) => f.time)).toEqual([12]);
+    // Ctrl+Z goes no further back than it: the video stays several places
+    press('z', { ctrlKey: true });
+    await settle();
+    expect(field('Scene start').value).toBe('0:12');
+  });
+
+  it('takes back the time the server kept when an Undo made a scene the whole video beside another', async () => {
+    work(CLIP, [kept('w1', null, null, 'Market'), kept('w2', null, null, '')]);
+    await start();
+    await openFile('Convoy clip');
+    expect(openRow().dataset.sceneKey).toBe('w1');
+    playheadAt(5);
+    [...openRow().querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Instant').click();
+    flushSync();
+    inside(openRow(), 'Apply').click();
+    await afterQuiet();
+    expect(lastSpec().scenes.find((sc) => sc.id === 'w1').start).toBe(5);
+
+    const plain = put.getMockImplementation();
+    put.mockImplementation(async (path, body) => {
+      const w1 = path.endsWith('/inspect/work') ? body.spec.scenes.find((sc) => sc.id === 'w1') : null;
+      if (w1 && w1.start == null) return { name: 'Work', title: 'x', kept: [{ id: 'w1', start: 5, end: null, why: 'whole' }] };
+      return plain(path, body);
+    });
+    try {
+      press('z', { ctrlKey: true });
+      await afterQuiet();
+      await afterQuiet();
+      expect(toasts('keeps its time').map(([message]) => message)).toEqual([
+        '“Market” keeps its time: another scene of this video is already about the whole video',
+      ]);
+      expect(lastSpec().scenes.find((sc) => sc.id === 'w1').start).toBe(5);
+      expect(rows().find((r) => r.dataset.sceneKey === 'w1').textContent).toContain('0:05');
+    } finally {
+      put.mockImplementation(plain);
+    }
   });
 });

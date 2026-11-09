@@ -6,8 +6,8 @@
   import SceneTimeEditor from '../../components/SceneTimeEditor.svelte';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
   import {
-    SCENE_LABEL_MAX, isAbandoned, isWholeVideo, samePlaceChoices, sceneColorAt, scenePassage, sceneTime,
-    sceneTitle, sceneWhen, shortClock, spanLabel, timedBeside, unplaced,
+    SCENE_LABEL_MAX, isAbandoned, isWholeVideo, mixedWhole, samePlaceChoices, sceneColorAt, scenePassage, sceneTime,
+    sceneTitle, sceneWhen, shortClock, spanLabel, unplaced, wholeBarred, wholeDrafts,
   } from '../../lib/scenes.js';
 
   // The Scenes tab: the places to find in the open file, in clip order, a scene about
@@ -37,9 +37,17 @@
   // A scene still to prove may hold several passages, where its place shows again: the
   // open row's Another passage adds one of its kind from the frame on screen, and Same
   // place as… beside it lists the clip's other scenes still to prove, one press joining
-  // this one into the scene chosen (`onjoin`). A video is one place or several: beside
-  // another scene holding passages, a scene still to prove is not offered the whole
-  // video, greyed with why. A proof is an answer and keeps it.
+  // this one into the scene chosen (`onjoin`). A video is one place or several: a scene
+  // still to prove is offered the whole video only as the video's one live scene still
+  // to prove with no scene holding passages beside it, else it is greyed with why
+  // (`wholeBarred`). A proof is an answer and keeps it.
+  //
+  // An older case may hold what is no longer made, and opens as it is. Two scenes still
+  // to prove about the whole video get a quiet line over the list, **2 scenes for the
+  // whole video · Join them**, which joins them into the first (`onjoinwhole`). One about
+  // the whole video beside scenes holding passages says so in its open row, with **Give
+  // it a time**, the instant on screen (`ongivetime`), and **Abandon…**; closed, a small
+  // mark says it. A video in neither state shows none of it.
   //
   // A video with no live scene asks whether it is one place or several, once its list
   // is read (`read`): **The whole video: one place** keeps one scene about all of it
@@ -81,6 +89,8 @@
     onnudge,
     onaddmoment,
     onjoin,
+    onjoinwhole,
+    ongivetime,
     onapply,
     oncancel,
   } = $props();
@@ -98,6 +108,10 @@
 
   const listed = $derived(scenes.filter((s) => !isAbandoned(s)));
   const given = $derived(scenes.filter(isAbandoned));
+  // an older case's scenes about the whole video, more than the one a video holds
+  const twins = $derived(picture ? [] : wholeDrafts(scenes));
+  // why the whole video is greyed in a scene's kinds, by what bars it
+  const WHOLE_OFF = { whole: INSPECT_HELP.sceneWholeTaken, timed: INSPECT_HELP.sceneWholeTimed };
 
   // The Abandoned group, folded each time the tab is shown, never remembered.
   let showGiven = $state(false);
@@ -382,8 +396,16 @@
         </div>
       </div>
     {/if}
+    {#if twins.length > 1 && onjoinwhole}
+      <p class="twins" data-testid="whole-twins">
+        <span>{twins.length} scenes for the whole video</span>
+        <span class="twins-dot" aria-hidden="true">·</span>
+        <button class="twins-join" onclick={() => onjoinwhole?.(twins)} title={INSPECT_HELP.wholeJoin}>Join them</button>
+      </p>
+    {/if}
     {#each listed as sc (sc.key)}
       {@const loop = scenePassage(sc)}
+      {@const mixed = mixedWhole(scenes, sc)}
       {#if sc.key === open}
         <div
           class="scene-row open"
@@ -408,6 +430,15 @@
             {/if}
             {#if sc.kind !== 'proof'}{@render labelField(sc)}{/if}
           </div>
+          {#if mixed && leaving !== sc.key}
+            <div class="mixed" role="note" data-testid="whole-mixed">
+              <p class="mixed-says"><Icon name="alert" size={12} /> This video also has scenes at a time</p>
+              <div class="mixed-acts">
+                <button class="btn btn-ghost btn-xs" onclick={() => ongivetime?.(sc)} title={INSPECT_HELP.wholeGiveTime}>Give it a time</button>
+                <button class="btn btn-ghost btn-xs" onclick={() => askReason(sc)} title={INSPECT_HELP.sceneAbandon}>Abandon…</button>
+              </div>
+            </div>
+          {/if}
           {#if edit?.key === sc.key}
             {@const choices = onjoin ? samePlaceChoices(scenes, sc) : []}
             <!-- beside Another passage: the other scenes still to prove that show this place -->
@@ -427,7 +458,7 @@
               {edit}
               help={HELP}
               tips={tips(sc)}
-              wholeOff={sc.kind === 'draft' && timedBeside(scenes, sc) ? INSPECT_HELP.sceneWholeTimed : ''}
+              wholeOff={sc.kind === 'draft' ? WHOLE_OFF[wholeBarred(scenes, sc)] ?? '' : ''}
               autofocus={false}
               actsWhenChanged
               {onhere}
@@ -463,6 +494,11 @@
             <span class="row-title" dir="auto">{name || sceneWhen(sc)}</span>
             {#if name}<span class="row-when" data-testid="scene-when">{sceneWhen(sc)}</span>{/if}
           </span>
+          {#if mixed}
+            <span class="mixed-mark" title={INSPECT_HELP.wholeMixed} data-testid="whole-mixed-mark">
+              <Icon name="alert" size={12} />
+            </span>
+          {/if}
           {#if sc.kind === 'proof'}
             {@render proofState(sc)}
           {:else}
@@ -657,6 +693,64 @@
     border-radius: 50%;
     background: var(--accent-soft);
     color: var(--accent);
+  }
+
+  /* An older case's scenes about the whole video, more than one: a quiet line over the list. */
+  .twins {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin: 0 0 2px;
+    padding: 2px 4px 4px 14px;
+    color: var(--text-2);
+    font-size: 11.5px;
+  }
+  .twins-dot {
+    color: var(--text-3);
+  }
+  .twins-join {
+    padding: 1px 5px;
+    border-radius: var(--r-sm);
+    color: var(--accent);
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .twins-join:hover {
+    background: var(--accent-soft);
+  }
+  /* One about the whole video beside scenes at a time: said in its open row, marked when closed. */
+  .mixed {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 5px 6px 4px 8px;
+    border-radius: var(--r-sm);
+    background: color-mix(in srgb, var(--warn) 9%, transparent);
+  }
+  .mixed-says {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    color: var(--text-1);
+    font-size: 11.5px;
+    line-height: 1.35;
+  }
+  .mixed-says :global(svg),
+  .mixed-mark {
+    flex: none;
+    color: var(--warn);
+  }
+  .mixed-acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    margin-left: 12px;
+  }
+  .mixed-mark {
+    display: inline-grid;
+    place-items: center;
   }
 
   /* A row: the scene's colour down its left edge, its name, its time, where it stands. */

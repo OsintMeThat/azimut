@@ -8,7 +8,10 @@ import { STEPS_FPS, STEPS_WEBM, serveRange } from './video.fixture.js';
  * as… joins two scenes still to prove into one, two bands in one colour, and its Undo
  * parts them again; Another passage adds one of the scene's kind from the frame on
  * screen; the To-do says every passage; Make the proof hands them all to Geo Proof,
- * which states them, each panel printing the passage it shows in.
+ * which states them, each panel printing the passage it shows in. A video holds one
+ * scene about the whole of it at most: Whole video is greyed beside it, an older case's
+ * two are joined from a line over the list, and one beside scenes at a time is given a
+ * time or abandoned from its row.
  *
  * The clip is the short one of `video.fixture.js`, read by its probe as a longer one so
  * its times are the ones an analyst writes. `MOMENT_SHOTS` names a folder for a picture
@@ -58,12 +61,15 @@ async function serve(page, { scenes, frames = [], opens = true } = {}) {
       'proofs/.meta/browser-proof.json': { id: 'browser-proof-entity', type: 'proof', attrs: { spec: 'proofs/.meta/browser-proof.json', path: 'proofs/browser-proof.png' } },
     },
   });
-  const server = { scenes, frames, saves: [], joins: [], unjoins: [], scenePuts: [], proved: null };
+  const server = { scenes, frames, saves: [], joins: [], unjoins: [], abandons: [], abandoned: {}, scenePuts: [], proved: null };
   // its place among the clip's scenes is what colours it, as `engine/geolocate.py` orders it
-  const row = (scene) => ({
-    kind: 'draft', video: VIDEO, ...scene, state: 'todo', captures: [], abandoned: null, file_kind: 'video',
-    order: server.scenes.findIndex((sc) => sc.id === scene.id),
-  });
+  const row = (scene) => {
+    const abandoned = server.abandoned[scene.id] ?? null;
+    return {
+      kind: 'draft', video: VIDEO, ...scene, state: abandoned ? 'abandoned' : 'todo', captures: [], abandoned, file_kind: 'video',
+      order: server.scenes.findIndex((sc) => sc.id === scene.id),
+    };
+  };
   await page.route('**/*', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -130,13 +136,24 @@ async function serve(page, { scenes, frames = [], opens = true } = {}) {
         const source = server.scenes.find((sc) => sc.id === draft);
         const target = server.scenes.find((sc) => sc.id === body.into);
         const label = [target.label, source.label].filter(Boolean).join(' / ');
-        const joined = timed(target.id, label, [...momentsOf(target), ...momentsOf(source)]);
+        // two about the whole video join into one about it
+        const both = [...momentsOf(target), ...momentsOf(source)];
+        const joined = both.length ? timed(target.id, label, both) : kept(target.id, null, null, label);
         server.scenes = server.scenes.filter((sc) => sc.id !== draft).map((sc) => (sc.id === target.id ? joined : sc));
         return json({ scene: row(joined), undo: { kept: target, gone: source, geolocating: null } });
       }
       server.unjoins.push({ draft, body });
       server.scenes = [...server.scenes.map((sc) => (sc.id === body.kept.id ? body.kept : sc)), body.gone];
       return json({ scenes: [row(body.kept), row(body.gone)] });
+    }
+    // Abandon, with its word
+    const leaving = /^\/api\/cases\/[^/]+\/scenes\/([^/]+)\/abandon$/.exec(path);
+    if (leaving && method === 'PUT') {
+      const body = request.postDataJSON();
+      const id = decodeURIComponent(leaving[1]);
+      server.abandons.push({ id, body });
+      server.abandoned[id] = { reason: body.reason ?? '', at: '2026-11-09T10:00:00+00:00' };
+      return json({ scene: row(server.scenes.find((sc) => sc.id === id)) });
     }
     const timedProof = /^\/api\/cases\/[^/]+\/proofs\/([^/]+)\/scene$/.exec(path);
     if (timedProof && method === 'PUT') {
@@ -177,6 +194,29 @@ async function shoot(page, name) {
   await page.screenshot({ path: `${SHOTS}/${name}-light.png` });
   await theme(page, 'dark');
   await page.waitForTimeout(400);
+}
+
+/**
+ * The browser's own tooltip never shows in a screenshot: for the picture alone, one is
+ * drawn where it would show, with the control's title, and taken away after.
+ */
+async function shootWithTitle(page, name, control) {
+  if (!SHOTS) return;
+  const box = await control.boundingBox();
+  const title = await control.getAttribute('title');
+  await page.evaluate(({ box, title }) => {
+    const tip = document.createElement('div');
+    tip.id = 'shot-title';
+    tip.textContent = title;
+    Object.assign(tip.style, {
+      position: 'fixed', left: `${Math.round(box.x + 10)}px`, top: `${Math.round(box.y + box.height + 8)}px`, zIndex: '99999',
+      maxWidth: '300px', padding: '4px 8px', borderRadius: '4px', background: '#2b2b2b', color: '#f2f2f2',
+      font: '12px/1.35 system-ui, sans-serif', boxShadow: '0 2px 8px rgba(0,0,0,.35)', pointerEvents: 'none',
+    });
+    document.body.append(tip);
+  }, { box, title });
+  await shoot(page, name);
+  await page.evaluate(() => document.getElementById('shot-title')?.remove());
 }
 
 const panel = (page) => page.getByRole('tabpanel', { name: 'Scenes' });
@@ -341,4 +381,88 @@ test('makes the proof of a scene of two moments, stating both, each panel printi
   await showProofTab(page, 'Scene');
   await page.mouse.move(0, 0);
   await shoot(page, 'proof-two-moments');
+});
+
+// -- the whole video, once -------------------------------------------------------------------
+
+test('greys Whole video on an instant beside the scene about the whole video, saying why', async ({ page }) => {
+  await serve(page, { scenes: [kept('sc_w', null, null, 'Which town?'), kept('sc_i', 8, null, '')] });
+  // the instant, opened: a second scene about the whole video would ask the same question twice
+  await rows(page).nth(1).click();
+  const instant = rows(page).nth(1);
+  const whole = instant.getByRole('radio', { name: 'Whole video' });
+  await expect(whole).toBeDisabled();
+  await expect(whole).toHaveAttribute('title', 'Another scene of this video is already about the whole video');
+  await expect(instant.getByRole('radio', { name: 'Instant' })).toHaveAttribute('aria-checked', 'true');
+  // closed, the scene about the whole video is marked as standing beside a time
+  await expect(rows(page).nth(0).getByTestId('whole-mixed-mark')).toHaveAttribute('title', 'This video also has scenes at a time');
+  await page.mouse.move(0, 0);
+  await shootWithTitle(page, 'whole-greyed', whole);
+});
+
+test('joins an older case\'s two scenes about the whole video from the line over the list, and parts them on Undo', async ({ page }) => {
+  const { server } = await serve(page, { scenes: [kept('sc_w1', null, null, 'Which town?'), kept('sc_w2', null, null, 'Market')] });
+  const line = panel(page).getByTestId('whole-twins');
+  await expect(line).toHaveText(/2 scenes for the whole video\s*·\s*Join them/);
+  await expect(rows(page)).toHaveCount(2);
+  await page.mouse.move(0, 0);
+  await shoot(page, 'whole-twins');
+  // neither takes a time while both stand: S asks for them to be joined
+  await page.keyboard.press('s');
+  await expect(toast(page)).toContainText('2 scenes for the whole video: join them first');
+  await expect(rows(page)).toHaveCount(2);
+
+  await line.getByRole('button', { name: 'Join them' }).click();
+  await expect.poll(() => server.joins).toEqual([{ draft: 'sc_w2', body: { video: VIDEO, into: 'sc_w1' } }]);
+  await expect(rows(page)).toHaveCount(1);
+  await expect(line).toHaveCount(0);
+  await expect(rows(page).first().getByRole('textbox', { name: 'Scene label' })).toHaveValue('Which town? / Market');
+  await expect(toast(page)).toContainText('Joined into “Which town? / Market”, about the whole video');
+
+  await page.locator('.toast', { hasText: 'Joined into' }).getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(() => server.unjoins.length).toBe(1);
+  expect(server.unjoins[0].body).toEqual({
+    video: VIDEO, kept: kept('sc_w1', null, null, 'Which town?'), gone: kept('sc_w2', null, null, 'Market'), geolocating: null,
+  });
+  await expect(rows(page)).toHaveCount(2);
+  await expect(line).toBeVisible();
+});
+
+test('gives a scene about the whole video beside scenes at a time the instant on screen, its frame kept', async ({ page }) => {
+  const { server } = await serve(page, { scenes: [kept('sc_w', null, null, 'Which town?'), kept('sc_i', 0.4, null, '')] });
+  const whole = rows(page).first();
+  const note = whole.getByTestId('whole-mixed');
+  await expect(note).toContainText('This video also has scenes at a time');
+  await page.mouse.move(0, 0);
+  await shoot(page, 'whole-mixed');
+
+  const now = page.locator('.player-time .now');
+  for (let i = 0; i < 40 && (await now.textContent()) !== '0:00.720'; i += 1) await page.keyboard.press('ArrowRight');
+  await expect(now).toHaveText('0:00.720');
+  await note.getByRole('button', { name: 'Give it a time' }).click();
+
+  const said = page.locator('.toast', { hasText: 'no longer the whole video' });
+  await expect(said).toContainText('“Which town?” now at 0:00, no longer the whole video');
+  await expect(said.getByRole('button', { name: 'Undo' })).toHaveCount(0);
+  await expect(panel(page).getByTestId('whole-mixed')).toHaveCount(0);
+  await expect(rows(page).nth(1).getByRole('textbox', { name: 'Scene start' })).toHaveValue('0:00.72');
+  await expect.poll(() => server.saves.at(-1)?.spec?.scenes?.find((sc) => sc.id === 'sc_w')).toEqual(kept('sc_w', 0.72, null, 'Which town?'));
+  // its frame goes into the strip, as an instant's does
+  await expect.poll(() => server.saves.at(-1)?.spec?.frames?.map((f) => f.time)).toEqual([0.72]);
+});
+
+test('abandons a scene about the whole video beside scenes at a time with a word, from its row', async ({ page }) => {
+  const { server } = await serve(page, { scenes: [kept('sc_w', null, null, 'Which town?'), kept('sc_i', 0.4, null, '')] });
+  const note = rows(page).first().getByTestId('whole-mixed');
+  await note.getByRole('button', { name: 'Abandon…' }).click();
+  await expect(note).toHaveCount(0);
+  await panel(page).getByRole('textbox', { name: 'Why it is abandoned' }).fill('Several places in fact');
+  await panel(page).getByRole('button', { name: 'Abandon', exact: true }).click();
+
+  await expect.poll(() => server.abandons).toEqual([{ id: 'sc_w', body: { video: VIDEO, reason: 'Several places in fact' } }]);
+  await expect(rows(page)).toHaveCount(1);
+  await expect(panel(page).getByTestId('scene-row-abandoned')).toHaveCount(0);
+  await expect(panel(page).getByRole('button', { name: /Abandoned \(1\)/ })).toBeVisible();
+  await expect(panel(page).getByTestId('whole-mixed')).toHaveCount(0);
+  await expect(panel(page).getByTestId('whole-mixed-mark')).toHaveCount(0);
 });
