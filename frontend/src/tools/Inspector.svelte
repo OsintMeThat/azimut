@@ -14,7 +14,7 @@
   import {
     editClock, isAbandoned, isStretch, isWholeVideo, liveScenes, markablePicture, momentBefore, momentKey, momentsClash, newScene,
     sameMoments, sameTime, sceneList, sceneMarks, sceneMoments, scenePassage, sceneStart, sceneTime, sceneTitle, sceneToEnd,
-    setDraftTime, shortClock, snapToFrame, sortMoments, stretchFromShot, timeWords, toProve, wholeBarred,
+    setDraftTime, shortClock, snapToFrame, sortMoments, stretchFromShot, timeWords, timedBeside, toProve, wholeBarred,
     wholeDrafts, wholeTaker,
   } from '../lib/scenes.js';
   import {
@@ -1146,7 +1146,8 @@
    * Keep a scene over `stretch`. A video is one place or several, never both: a time
    * marked on a clip whose one scene still to prove is about the whole video goes to
    * that scene instead (`wholeTaker`), and one marked while an older case holds two
-   * about the whole video asks for them to be joined first, since either could take it.
+   * about the whole video and nothing at a time asks for them to be joined first, since
+   * either could take it.
    * The whole video kept while a scene is about it already answers that scene, and is
    * refused beside scenes holding passages.
    */
@@ -1194,12 +1195,13 @@
   }
 
   /**
-   * A time marked while an older case holds several scenes about the whole video: none
-   * of them takes it, and the toast offers to join them. Answers whether it asked.
+   * A time marked while an older case holds several scenes about the whole video and
+   * nothing at a time, so that one of them would take it: none does, and the toast offers
+   * to join them. Answers whether it asked.
    */
   function twinsAsked() {
     const twins = wholeDrafts(scenes);
-    if (twins.length < 2) return false;
+    if (twins.length < 2 || timedBeside(scenes)) return false;
     toast(`${twins.length} scenes for the whole video: join them first`, 'warn', 8000, {
       label: 'Join them',
       onClick: () => joinWhole(wholeDrafts(scenes)),

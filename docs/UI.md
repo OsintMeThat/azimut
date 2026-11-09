@@ -1862,21 +1862,48 @@ waits for a later scene. It takes no focus, goes on Show, ✕, Escape, a press e
 another tool or after ten seconds, and follows its control on a resize. The toast keeps
 its own words and Undo.
 
-**A video is one place or several, never both.** Once a scene holds passages of the clip,
-a proof's included, Whole video is greyed in Mark to geolocate's arrow and in the kinds of
-every other scene still to prove, its hover saying why, and the capture's offer leaves it
-out. While the clip's one live scene is still to prove and about the whole video, a
-passage marked with S, the main press, Shift+S or a shot kept goes to that scene instead
-of a second one. It keeps its label, its captures and its geolocating; Shift+S gives it
-the passage from the clip's start, and the toast, *Scene now at 0:09, no longer the whole
-video*, has its Undo. Among other scenes still to prove, as an older case may hold, or
-beside a proof stating passages, it stays as it is and the passage is a scene of its own.
-A proof about the whole video is an answer, not a question: it stays beside new scenes,
-lets the one about the whole video take a time, and keeps Whole video in its own kinds.
-The menus of the Media Library and Files follow the same rule: marking whole a video whose
-scenes hold passages is refused, and the toast says why.
-Marking a time from outside Inspect (`POST /cases/{id}/scenes/mark`) follows the same
-rule, and a save stays lenient. A picture is marked whole as before.
+**A video is one place or several, never both, and one place is one scene.** A scene
+still to prove is offered Whole video, in its open row's kinds and in the Collage tool's,
+only as the video's one live scene still to prove with no scene holding passages beside
+it, a proof's included. Otherwise Whole video is greyed and its hover says why: *Another
+scene of this video is already about the whole video*, or *Other scenes of this video
+already hold passages, so the whole of it is not one place*. Mark to geolocate's arrow
+greys it the same way and the capture's offer leaves it out; the whole video kept while a
+scene is about it already answers that scene. While the clip's one live scene is still
+to prove and about the whole video, a passage marked with S, the main press, Shift+S or a
+shot kept goes to that scene instead of a second one. It keeps its label, its captures
+and its geolocating; Shift+S gives it the passage from the clip's start, and the toast,
+*Scene now at 0:09, no longer the whole video*, has its Undo. Beside a proof stating
+passages it stays as it is and the passage is a scene of its own. A proof about the whole
+video is an answer, not a question: it stays beside new scenes, lets the one about the
+whole video take a time, and keeps Whole video in its own kinds. The menus of the Media
+Library and Files follow the same rule: marking whole a video whose scenes hold passages
+is refused, and the toast says why, and one with a live scene about the whole video
+answers that scene, never a second.
+
+**An older case opens as it is, and nothing in it is rewritten.** Two live scenes still to
+prove about the whole video, the same question asked twice, get a quiet line over the
+list, *2 scenes for the whole video · Join them*. One press joins them into the first as
+Same place as… joins two: its label first and the other's after it, the captures gathered,
+the geolocating moved. The toast's Undo parts them again, ids and captures included. Until
+they are joined, where no scene holds a time, S, the main press, Shift+S and a shot kept
+take none, since either could, and their toast offers Join them. A scene about the whole
+video beside scenes at a time says so in its open row, *This video also has scenes at a
+time*, with **Give it a time**, which makes it the instant on screen as S would and keeps
+that frame in the strip, and **Abandon…**, which asks for the usual word; closed, its row
+carries a small ⚠. It takes no time S marks meanwhile, each passage a scene of its own.
+Give it a time has no Undo, which would make the video both again, and Ctrl+Z starts from
+it. A video in neither state shows none of this.
+
+**The server keeps to it wherever a scene is made or given a time.** Marking a time from
+outside Inspect (`POST /cases/{id}/scenes/mark`) goes to the clip's one scene about the
+whole video, and is refused while two stand alone; marking whole answers the live one
+first, never one given up on beside it. `PUT /cases/{id}/scenes/{draft}/time` refuses the
+whole video where Inspect greys it, and the join makes two scenes about the whole video
+one but never joins one to a scene with a time. A save stays lenient for whatever a case
+already holds. Only a scene it would turn from a time into the whole video, beside another
+about it or beside passages, keeps the time it had; the answer names it under `kept`, and
+Inspect takes that time back with a toast. A picture is marked whole as before.
 
 **The Scenes tab lists them in clip order**, a scene about the whole video first, its
 label counting them, tinted while some are still to prove. A closed row writes its name,
@@ -2080,7 +2107,8 @@ makes the last saved picture out of date. Find reads a cut picture from its fram
 instant, or a frame saved from it, or a picture composed from them such as a piece straightened, the panel reads *From channel_departure · 0:01–0:03*,
 and **Mark to geolocate** marks the whole video; its arrow offers the stretch the pieces
 span, or the instant of a single piece. Once scenes hold passages of the video, the press
-marks that stretch and the arrow's Whole video is greyed, as in Inspect. A collage of
+marks that stretch and the arrow's Whole video is greyed, as in Inspect, and its time
+offers Whole video only as Inspect's kinds do. A collage of
 several sources is a picture: the
 press saves it first when it is not in the case as it stands and marks it whole, and
 saved again, its mark follows the new picture (`POST /scenes/mark`). Marked, or with its

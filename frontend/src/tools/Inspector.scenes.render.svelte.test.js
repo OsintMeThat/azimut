@@ -1057,6 +1057,18 @@ describe('the whole video, once', () => {
     }
   });
 
+  it('keeps a time marked beside two scenes about the whole video and one at a time as a place of its own', async () => {
+    work(CLIP, [kept('w1', null, null, ''), kept('w2', null, null, ''), kept('sc_1', 2, null, '')]);
+    await start();
+    await openFile('Convoy clip');
+    playheadAt(9);
+    press('s');
+    await settle();
+    expect(rows()).toHaveLength(4);
+    expect(toasts('join them first')).toHaveLength(0);
+    expect(toasts('Scene kept at 0:09')).toHaveLength(1);
+  });
+
   it('gives a scene about the whole video beside scenes at a time the instant on screen, its frame kept, with no Undo', async () => {
     work(CLIP, [kept('sc_all', null, null, 'Which town?'), kept('sc_1', 8, null, '')]);
     await start();

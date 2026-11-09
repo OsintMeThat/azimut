@@ -604,6 +604,22 @@ def test_a_time_marked_beside_two_scenes_about_the_whole_video_waits_for_them_to
 
 
 @needs_ffmpeg
+def test_a_time_marked_beside_two_scenes_about_the_whole_video_and_one_at_a_time_is_a_place_of_its_own(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save(client, cid, video, [
+        {"id": "w1", "start": None, "end": None, "label": ""},
+        {"id": "w2", "start": None, "end": None, "label": ""},
+        {"id": "t", "start": 1.0, "end": None, "label": ""},
+    ])
+
+    scene = _mark(client, cid, video, 2.0)
+
+    assert scene["id"] not in ("w1", "w2", "t")
+    assert [s["start"] for s in _stored(client, cid, video)] == [None, None, 1.0, 2.0]
+
+
+@needs_ffmpeg
 def test_marking_whole_answers_the_live_scene_about_it_before_one_given_up_on(client, tmp_path):
     cid = _case(client)
     video = _video(client, cid, tmp_path)

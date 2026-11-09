@@ -702,7 +702,7 @@
     flex-wrap: wrap;
     gap: 5px;
     margin: 0 0 2px;
-    padding: 2px 4px 4px 8px;
+    padding: 2px 4px 4px 14px;
     color: var(--text-2);
     font-size: 11.5px;
   }

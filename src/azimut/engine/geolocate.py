@@ -367,8 +367,8 @@ def mark(case: Case, path: str, label: Any = "", start: Any = None, end: Any = N
     scene (`whole_taker`), as Inspect's S does, and marking whole one that already
     holds passages is refused. Marked whole, a video with a live scene about the whole
     of it answers that scene, never a second. A time marked on one an older case left
-    with several scenes about the whole video is refused until they are joined, since
-    either could take it. A collage composed from one video's frames belongs to that
+    with several scenes about the whole video and none at a time is refused until they
+    are joined, since either could take it. A collage composed from one video's frames belongs to that
     video: marking it marks the video, over the same time. A frame Inspect cut belongs
     to its video's scenes and a capture is an answer, not a question: neither is marked.
     """
@@ -412,8 +412,12 @@ def mark(case: Case, path: str, label: Any = "", start: Any = None, end: Any = N
         if (standing is None or standing.get("abandoned")) and holds_passages(case, path):
             raise CaseError("scenes already hold passages of this video, so the whole of it is not one place")
 
-    if at is not None and kind == "video" and held() is None and len(whole_drafts(case, path)) > 1:
-        raise CaseError("this video has several scenes about the whole of it: join them in Inspect first")
+    # an older case's several scenes about the whole video, nothing at a time: either could
+    # take the time, so they are joined first
+    if at is not None and kind == "video" and held() is None:
+        live = [row for row in _rows(case, path)["scenes"] if not row.get("abandoned")]
+        if sum(row["kind"] == "draft" and row["start"] is None for row in live) > 1 and not any(map(_timed, live)):
+            raise CaseError("this video has several scenes about the whole of it: join them in Inspect first")
     whole = whole_taker(case, path) if at is not None and held() is None else None
     if whole is not None:
         inspectwork.retime_scene(case, path, whole["id"], at, until)
@@ -438,15 +442,6 @@ def _timed(row: dict[str, Any]) -> bool:
 def holds_passages(case: Case, video: str) -> bool:
     """Whether a live scene of this video, still to prove or a proof's, states passages."""
     return any(not row.get("abandoned") and _timed(row) for row in _rows(case, video)["scenes"])
-
-
-def whole_drafts(case: Case, video: str) -> list[dict[str, Any]]:
-    """The live scenes still to prove about the whole video, as their rows read: one at
-    most, or more in an older case, which Inspect offers to join."""
-    return [
-        row for row in _rows(case, video)["scenes"]
-        if row["kind"] == "draft" and not row.get("abandoned") and row["start"] is None
-    ]
 
 
 #: What `barred` answers, in the words a refusal says.
@@ -492,45 +487,32 @@ def save_work(case: Case, subject: str, spec: Any) -> dict[str, Any]:
     takes the time back. Scenes the save adds, and the ones it leaves as they were, are
     kept as sent, whatever the case already held.
     """
-    with case.lock:
-        kept = _keep_times(case, subject, spec)
-        saved = inspectwork.save_work(case, subject, spec)
-    return {**saved, "kept": kept} if kept else saved
+    return inspectwork.save_work(case, subject, spec, lambda scenes, stored: _keep_times(case, subject, scenes, stored))
 
 
-def _keep_times(case: Case, subject: str, spec: Any) -> list[dict[str, Any]]:
-    scenes = spec.get("scenes") if isinstance(spec, dict) else None
-    if not isinstance(scenes, list):
-        return []
-    stored = {
-        s["id"]: s for s in ((inspectwork.find_work(case, subject) or {}).get("spec") or {}).get("scenes") or []
-        if isinstance(s, dict) and isinstance(s.get("id"), str)
-    }
-
-    def whole(scene: Any) -> bool:
-        return isinstance(scene, dict) and scene.get("start") is None and scene.get("end") is None and not scene.get("more")
-
-    turned = [
-        s for s in scenes
-        if whole(s) and isinstance(s.get("id"), str) and inspectwork.scene_moments(stored.get(s["id"]) or {})
-    ]
+def _keep_times(case: Case, subject: str, scenes: list[dict[str, Any]], stored: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give back their stored time to the scenes a save would make the whole video where
+    the video is several places or one already, in place, and answer them."""
+    before = {s["id"]: s for s in stored if isinstance(s.get("id"), str)}
+    turned = [s for s in scenes if s["start"] is None and inspectwork.scene_moments(before.get(s["id"]) or {})]
+    # most saves turn nothing, and read nothing more
     if not turned or _kinds(case, [subject]).get(subject) != "video":
         return []
-    listed = _rows(case, subject)
-    hidden = set(listed["taken"])
+    proofs = scenes_engine.read_proofs(case)
+    hidden = _taken(proofs[0])
+    listed = scenes_engine.video_scenes(case, subject, proofs, works={subject: {}}, collages=[])
     # the proofs as listed, and the scenes still to prove as the save states them
     rows = [row for row in listed["scenes"] if row["kind"] == "proof"]
-    for s in scenes:
-        if not isinstance(s, dict) or s.get("id") in hidden:
-            continue
-        before = stored.get(s.get("id")) or {}
-        rows.append({"kind": "draft", "id": s.get("id"), "start": s.get("start"), "abandoned": before.get("abandoned")})
+    rows += [
+        {"kind": "draft", "id": s["id"], "start": s["start"], "abandoned": (before.get(s["id"]) or {}).get("abandoned")}
+        for s in scenes if s["id"] not in hidden
+    ]
     kept = []
     for scene in turned:
         why = barred(rows, scene["id"])
         if not why:
             continue
-        time = inspectwork.scene_time(inspectwork.scene_moments(stored[scene["id"]]))
+        time = inspectwork.scene_time(inspectwork.scene_moments(before[scene["id"]]))
         scene.update(start=time["start"], end=time["end"])
         if "more" in time:
             scene["more"] = time["more"]
@@ -544,7 +526,8 @@ def whole_taker(case: Case, video: str) -> dict[str, Any] | None:
     stating passages beside it (`lib/scenes.js`, wholeTaker). It keeps its label, its
     captures and its geolocating. One among other scenes still to prove, an older
     case's, is left as it is, and a proof about the whole video is an answer, not a
-    question, so it lets the scene take the time. Saves stay lenient: only a mark asks."""
+    question, so it lets the scene take the time. A save never hands a scene a time on
+    its own: only a mark asks."""
     if _kinds(case, [video]).get(video) != "video":
         return None
     rows = _rows(case, video)["scenes"]
