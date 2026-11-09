@@ -1845,7 +1845,8 @@ tab only, and elsewhere just moves the clip. The empty strip of a video with no 
 no proof asks *One place or several?* with **The whole video: one place**, which keeps one
 scene about all of it, **Several places: mark them as you watch S**, which only says in a
 toast how S and Shift+S mark them, and Not now. Several places and Not now are remembered
-per file in this browser, and the first scene ends the question. The first scene ever kept points once, in this
+per file in this browser, and the first scene ends the question. It keeps the strip's
+height: on a short strip the question goes first, then the choices take a line each. The first scene ever kept points once, in this
 browser, at where it waits: a small bubble with an arrow, *Your scenes wait here*, with
 **Show** to open the To-do and ✕. It hangs under the sidebar's toggle while the sidebar is
 closed, or under its To-do tab while another view is shown; with the To-do on screen it

@@ -10,48 +10,45 @@
 </script>
 
 <div class="invite" role="group" aria-label="Mark to geolocate" data-testid="scene-invite">
-  <span class="ask">One place or several?</span>
-  <span class="picks">
+  <div class="line">
+    <span class="ask">One place or several?</span>
     <button class="btn btn-sm" onclick={() => onwhole?.()} title={INSPECT_HELP.inviteWhole}>
-      <Icon name="video" size={13} /> The whole video: one place
+      <Icon name="video" size={13} /> <span>The whole video<span class="spare">: one place</span></span>
     </button>
     <button class="btn btn-sm several" onclick={() => onseveral?.()} title={INSPECT_HELP.inviteSeveral}>
-      <Icon name="pin" size={13} /> Several places: mark them as you watch <kbd>S</kbd>
+      <Icon name="pin" size={13} /> <span>Several places: mark them <span class="watch">as you watch</span></span> <kbd>S</kbd>
     </button>
     <button class="later" onclick={() => onlater?.()} title={INSPECT_HELP.inviteLater}>Not now</button>
-  </span>
+  </div>
 </div>
 
 <style>
-  /* One line, or the question over its answers where the strip is narrow: both fit the
-     height a frame's tile gives the strip. */
+  /* It keeps to the height a frame's tile gives the strip, whatever room the strip has:
+     the question goes first, then the choices take a line each, then their spare words. */
   .invite {
     flex: 1;
     min-width: 0;
+    container-type: inline-size;
+  }
+  .line {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 4px 10px;
+    gap: 4px 6px;
     white-space: nowrap;
   }
   .ask {
+    margin-right: 4px;
     color: var(--text-2);
     font-size: var(--fs-sm);
   }
-  .picks {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-  }
-  .picks .btn {
+  .btn {
     flex-shrink: 0;
     gap: 5px;
     min-height: 24px;
     padding-top: 2px;
     padding-bottom: 2px;
   }
-  .picks .btn :global(svg) {
+  .btn :global(svg) {
     color: var(--text-2);
   }
   .several :global(svg) {
@@ -75,5 +72,28 @@
   .later:hover {
     color: var(--text-1);
     background: var(--bg-2);
+  }
+  @container (max-width: 680px) {
+    .ask {
+      display: none;
+    }
+  }
+  @container (max-width: 530px) {
+    .line {
+      flex-wrap: wrap;
+    }
+    .several {
+      order: 1;
+    }
+  }
+  @container (max-width: 290px) {
+    .watch {
+      display: none;
+    }
+  }
+  @container (max-width: 250px) {
+    .spare {
+      display: none;
+    }
   }
 </style>
