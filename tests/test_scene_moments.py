@@ -424,3 +424,118 @@ def test_an_undo_handed_back_wrong_is_refused(client):
     swapped = client.post(f"/api/cases/{cid}/scenes/b/unjoin", json={"video": photo, **undo})
     assert swapped.status_code == 400
     assert [s["id"] for s in _stored(client, cid, photo)] == ["a"]
+
+
+# -- one place or several ------------------------------------------------------------------
+# A video is one place or several, never both. A time marked on a video whose only live
+# scene is still to prove and about the whole video goes to that scene, which keeps its
+# label, its captures and its geolocating. Saves stay lenient: only a mark asks.
+
+
+def _mark(client, cid, path, start, end=None, label=""):
+    res = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": path, "label": label, "start": start, "end": end})
+    assert res.status_code == 200, res.text
+    return res.json()["scene"]
+
+
+def _timed_proof(client, cid, video, title, moments):
+    cut = client.post(f"/api/cases/{cid}/inspect/save-frames", json={"items": [{"path": video, "time": 0.7}]})
+    frame = cut.json()["saved"][0]["item"]["path"]
+    made = client.post(f"/api/cases/{cid}/proofs", json={"title": title, "spec": {
+        "panels": [{"id": "p0", "src": frame}], "scene": {"video": video, "moments": moments},
+    }})
+    assert made.status_code == 200, made.text
+
+
+@needs_ffmpeg
+def test_a_time_marked_goes_to_the_video_s_one_scene_about_the_whole_of_it(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save(client, cid, video, [{"id": "w", "start": None, "end": None, "label": "Market"}])
+    client.put(f"/api/cases/{cid}/geolocating", json={"video": video, "draft": "w"})
+    shot = _capture(client, cid)
+
+    scene = _mark(client, cid, video, 1.0, 2.5, label="ignored")
+
+    assert (scene["id"], scene["start"], scene["end"], scene["label"]) == ("w", 1.0, 2.5, "Market")
+    assert scene["captures"] == [shot]
+    assert _stored(client, cid, video) == [
+        {"id": "w", "start": 1.0, "end": 2.5, "label": "Market", "captures": [shot]},
+    ]
+    assert client.get(f"/api/cases/{cid}/geolocating").json()["geolocating"]["id"] == "w"
+    # an instant goes the same way, and once timed the next one is a scene of its own
+    other = _mark(client, cid, video, 3.0)
+    assert other["id"] != "w" and len(_stored(client, cid, video)) == 2
+
+
+@needs_ffmpeg
+def test_a_whole_video_scene_among_others_is_left_as_it_is(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    # an older case holding both: nothing is merged, a new time is a scene of its own
+    _save(client, cid, video, [
+        {"id": "w", "start": None, "end": None, "label": ""},
+        {"id": "t", "start": 0.5, "end": None, "label": ""},
+    ])
+
+    scene = _mark(client, cid, video, 2.0)
+
+    assert scene["id"] not in ("w", "t")
+    assert {s["id"]: s["start"] for s in _stored(client, cid, video)}["w"] is None
+
+
+@needs_ffmpeg
+def test_a_proof_stating_passages_keeps_the_whole_video_scene_as_it_is(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save(client, cid, video, [{"id": "w", "start": None, "end": None, "label": ""}])
+    _timed_proof(client, cid, video, "Bridge", [{"start": 0.5, "end": 1.0}])
+
+    scene = _mark(client, cid, video, 2.0)
+
+    assert scene["id"] != "w"
+    assert {s["id"]: s["start"] for s in _stored(client, cid, video)}["w"] is None
+
+
+@needs_ffmpeg
+def test_a_proof_about_the_whole_video_lets_the_scene_take_the_time(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save(client, cid, video, [{"id": "w", "start": None, "end": None, "label": ""}])
+    # a proof is an answer, not a question: about the whole video, it stays beside
+    _timed_proof(client, cid, video, "Depot", [])
+
+    scene = _mark(client, cid, video, 2.0)
+
+    assert (scene["id"], scene["start"]) == ("w", 2.0)
+
+
+@needs_ffmpeg
+def test_an_abandoned_whole_video_scene_takes_no_time_and_a_scene_at_that_time_is_answered(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save(client, cid, video, [{"id": "w", "start": None, "end": None, "label": ""}])
+    client.put(f"/api/cases/{cid}/scenes/w/abandon", json={"video": video, "reason": ""})
+
+    first = _mark(client, cid, video, 2.0)
+    assert first["id"] != "w"
+
+    # given up on, then a new whole-video scene: the time marked again is the scene
+    # already there, not taken by the whole video
+    client.delete(f"/api/cases/{cid}/scenes/w/abandon", params={"video": video})
+    client.put(f"/api/cases/{cid}/scenes/{first['id']}/abandon", json={"video": video, "reason": ""})
+    again = _mark(client, cid, video, 2.0)
+    assert again["id"] == first["id"]
+    assert {s["id"]: s["start"] for s in _stored(client, cid, video)}["w"] is None
+
+
+@needs_ffmpeg
+def test_a_save_holding_both_kinds_stays_allowed(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    scenes = [{"id": "w", "start": None, "end": None, "label": ""}, {"id": "t", "start": 0.5, "end": 1.0, "label": ""}]
+
+    assert _save(client, cid, video, scenes).status_code == 200
+    # marked whole beside a timed scene, from outside Inspect, it is kept too
+    res = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": video, "label": ""})
+    assert res.status_code == 200 and res.json()["scene"]["id"] == "w"

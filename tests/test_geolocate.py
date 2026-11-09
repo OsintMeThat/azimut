@@ -514,10 +514,12 @@ def test_a_collage_of_one_video_belongs_to_it_and_marks_it(client, tmp_path):
     whole = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": picture})
     assert whole.status_code == 200, whole.text
     assert (whole.json()["scene"]["video"], whole.json()["scene"]["start"]) == (video, None)
-    # or over its period, from the Collage tool
+    # or over its period, from the Collage tool: the video's one scene, about the whole
+    # of it, takes that time rather than stand beside a timed one
     period = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": video, "start": 1.0, "end": 2.5})
     assert period.status_code == 200, period.text
     assert (period.json()["scene"]["start"], period.json()["scene"]["end"]) == (1.0, 2.5)
+    assert period.json()["scene"]["id"] == whole.json()["scene"]["id"]
     again = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": picture, "start": 1.0, "end": 2.5})
     assert again.json()["scene"]["id"] == period.json()["scene"]["id"]
 
@@ -529,7 +531,7 @@ def test_a_collage_of_one_video_belongs_to_it_and_marks_it(client, tmp_path):
         json={"moments": [{"start": 1.0, "end": 2.5}], "video": video, "draft": period.json()["scene"]["id"]},
     )
     assert stated.status_code == 200, stated.text
-    assert [s["id"] for s in _queue(client, cid)["files"][0]["scenes"]] == [whole.json()["scene"]["id"]]
+    assert _queue(client, cid)["files"] == []
 
 
 @needs_ffmpeg

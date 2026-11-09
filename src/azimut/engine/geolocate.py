@@ -342,9 +342,11 @@ def mark(case: Case, path: str, label: Any = "", start: Any = None, end: Any = N
 
     A picture is marked whole. A video is marked whole, or over ``start``–``end`` (an
     instant without an end), the scene already there at that time if there is one. A
-    collage composed from one video's frames belongs to that video: marking it marks
-    the video, over the same time. A frame Inspect cut belongs to its video's scenes and
-    a capture is an answer, not a question: neither is marked.
+    video is one place or several: a time marked on one whose only live scene is still
+    to prove and about the whole video goes to that scene (`whole_taker`), as Inspect's
+    S does. A collage composed from one video's frames belongs to that video: marking it
+    marks the video, over the same time. A frame Inspect cut belongs to its video's
+    scenes and a capture is an answer, not a question: neither is marked.
     """
     if label is not None and not isinstance(label, str):
         raise CaseError("a scene label must be text")
@@ -369,18 +371,45 @@ def mark(case: Case, path: str, label: Any = "", start: Any = None, end: Any = N
     if until is not None and at is not None and until <= at:
         raise CaseError("a scene must end after it starts")
     word = (label or "").strip()[: inspectwork.MAX_SCENE_LABEL]
-    inspectwork.add_scenes(case, path, [{"start": at, "end": until, "label": word}])
+
     # the scene holding that one moment: one holding further moments is another scene
-    scene = next(
-        (
-            s for s in _drafts(case, path)
-            if _same(s.get("start"), at) and _same(s.get("end"), until) and not s.get("more")
-        ),
-        None,
-    )
+    def held() -> dict[str, Any] | None:
+        return next(
+            (
+                s for s in _drafts(case, path)
+                if _same(s.get("start"), at) and _same(s.get("end"), until) and not s.get("more")
+            ),
+            None,
+        )
+
+    whole = whole_taker(case, path) if at is not None and held() is None else None
+    if whole is not None:
+        inspectwork.retime_scene(case, path, whole["id"], at, until)
+        return scene_row(case, path, _draft(case, path, whole["id"]) or whole, kind)
+    inspectwork.add_scenes(case, path, [{"start": at, "end": until, "label": word}])
+    scene = held()
     if scene is None:
         raise CaseError("that file holds as many scenes as it can")
     return scene_row(case, path, scene, kind)
+
+
+def whole_taker(case: Case, video: str) -> dict[str, Any] | None:
+    """The scene about the whole video that a time marked on it goes to, or None: the
+    video's one live scene still to prove, about the whole video, with no live proof
+    stating passages beside it (`lib/scenes.js`, wholeTaker). It keeps its label, its
+    captures and its geolocating. One among other scenes still to prove, an older
+    case's, is left as it is, and a proof about the whole video is an answer, not a
+    question, so it lets the scene take the time. Saves stay lenient: only a mark asks."""
+    if _kinds(case, [video]).get(video) != "video":
+        return None
+    rows = scenes_engine.video_scenes(case, video)["scenes"]
+    live = [row for row in rows if not row.get("abandoned")]
+    drafts = [row for row in live if row["kind"] == "draft"]
+    if len(drafts) != 1 or drafts[0]["start"] is not None:
+        return None
+    if any(row["kind"] == "proof" and row.get("moments") for row in live):
+        return None
+    return _draft(case, video, drafts[0]["id"])
 
 
 def _composed(case: Case, path: str) -> bool:
