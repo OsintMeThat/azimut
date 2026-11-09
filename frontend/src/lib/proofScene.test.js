@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   badgeText, frameOrigin, handoffTitle, momentHolds, outsideFrames, panelFrames, playSegments, proofVideos,
-  readHandoff, readStatedScene, sceneBadges, sceneColor, sceneLine, sceneOfFrames, segmentAt, starVideo, statedMoments,
-  videoName,
+  readHandoff, readStatedScene, sceneBadges, sceneColor, sceneOfFrames, segmentAt, starVideo, statedMoments,
+  mediaTitles, videoName,
 } from './proofScene.js';
 import { sceneList } from './scenes.js';
 
@@ -65,6 +65,29 @@ describe('the panels cut from a video', () => {
     expect(frameOrigin(null)).toBeNull();
   });
 
+  it('keeps on its video a cut of a straightened collage filed before instants were recorded', () => {
+    // Proof 24's shape: the video three times, bent into one picture, then a cut of it,
+    // neither recording an instant
+    const composed = (sources, extra = {}) => ({ kind: 'image', source: { type: 'inspect', op: 'collage', sources, ...extra } });
+    const media = new Map([
+      [CLIP, { kind: 'video' }],
+      ['media/Collage 15 straightened.png', composed([CLIP, CLIP, CLIP], { straightened: true })],
+      ['media/Collage 15.png', composed(['media/Collage 15 straightened.png'])],
+    ]);
+    expect(frameOrigin(media.get('media/Collage 15.png'), media)).toEqual({ video: CLIP, time: null });
+    expect(panelFrames([{ id: 'p1', src: 'media/Collage 15.png' }], media)).toEqual([
+      { panel: 'p1', src: 'media/Collage 15.png', video: CLIP, time: null },
+    ]);
+    // the instants it does know still count, at every depth
+    media.set('media/bent.png', composed([CLIP, CLIP], { times: [3, 1.5] }));
+    expect(frameOrigin(composed(['media/bent.png']), media)).toEqual({ video: CLIP, time: 1.5 });
+    // a frame with no instant shows outside no moment, and its proof is still the video's
+    const frames = panelFrames([{ id: 'p1', src: 'media/Collage 15.png' }], media);
+    expect(starVideo(frames, null)).toBe(CLIP);
+    expect(outsideFrames(frames, CLIP, [{ start: 1, end: 2 }])).toEqual([]);
+    expect(sceneBadges(true, frames, CLIP, [{ start: 1, end: 2 }]).get('p1')).toBe('0:01–0:02');
+  });
+
   it('lists them in the panels\' order', () => {
     expect(panelFrames(PANELS, MEDIA)).toEqual([
       { panel: 'p1', src: 'media/a.png', video: CLIP, time: 130.4 },
@@ -86,11 +109,11 @@ describe('the video the proof is about', () => {
 
   it('comes first, the others after as confirmations, each with its frames', () => {
     expect(proofVideos(frames, { video: OTHER, moments: [] }).map((v) => [v.name, v.star, v.frames.length])).toEqual([
-      ['other.mp4', true, 1],
-      ['clip.mp4', false, 2],
+      ['other', true, 1],
+      ['clip', false, 2],
     ]);
     // a video the proof states keeps its field when its panels are gone
-    expect(proofVideos([], { video: CLIP, moments: [] }).map((v) => v.name)).toEqual(['clip.mp4']);
+    expect(proofVideos([], { video: CLIP, moments: [] }).map((v) => v.name)).toEqual(['clip']);
     expect(proofVideos([], null)).toEqual([]);
   });
 
@@ -132,10 +155,17 @@ describe('the time against the panels', () => {
     expect(outsideFrames(frames, CLIP, [])).toEqual([]);
   });
 
-  it('words the field: the file and its time, or the whole video', () => {
-    expect(sceneLine(CLIP, [{ start: 130, end: 158 }])).toBe('clip.mp4 · 2:10–2:38');
-    expect(sceneLine(CLIP, [])).toBe('clip.mp4 · Whole video');
-    expect(videoName('media\\win\\clip.mp4')).toBe('clip.mp4');
+  it('names a video by its title in Media, else its file name without the extension', () => {
+    expect(videoName(CLIP)).toBe('clip');
+    expect(videoName('media\\win\\clip.mp4')).toBe('clip');
+    expect(videoName('media/road.v2.webm')).toBe('road.v2');
+    expect(videoName('media/.hidden')).toBe('.hidden');
+    expect(videoName(CLIP, 'Harbour, from the ferry')).toBe('Harbour, from the ferry');
+    expect(videoName(CLIP, '  ')).toBe('clip');
+    const titleOf = mediaTitles([{ path: CLIP, title: 'Harbour' }, { path: 'media/b.mp4' }]);
+    expect(videoName(CLIP, titleOf)).toBe('Harbour');
+    expect(videoName('media/b.mp4', titleOf)).toBe('b');
+    expect(proofVideos(panelFrames(PANELS, MEDIA), null, titleOf)[0]).toMatchObject({ video: CLIP, name: 'Harbour', star: true });
   });
 });
 

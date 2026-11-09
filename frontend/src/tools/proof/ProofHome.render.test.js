@@ -14,14 +14,14 @@ const proof = (name, title, hoursAgo, extra = {}) => ({
   name, title, updated_at: at(hoursAgo), thumb: `proofs/.thumbs/${name}.webp`, png: `proofs/${name}.png`, video: null, ...extra,
 });
 const PROOFS = [
-  proof('market', 'Market', 2, { video: 'media/clip.mp4', order: 1, slide: 2, slides: 4 }),
+  proof('market', 'Market', 2, { video: 'media/clip.mp4', video_title: 'Harbour run', order: 1, slide: 2, slides: 4 }),
   proof('holiday', 'Holiday', 5),
   ...Array.from({ length: 6 }, (_, i) => proof(`p${i}`, `Proof ${i}`, 30 + i)),
 ];
 const FILES = [{
   video: 'media/clip.mp4', title: 'clip.mp4', kind: 'video', scenes: [
-    { kind: 'draft', id: 's1', start: 36, end: 48, label: 'Water tower?', state: 'progress', captures: ['c.png'], order: 2 },
-    { kind: 'draft', id: 's2', start: 90, end: null, label: '', state: 'todo', captures: [], order: 3 },
+    { kind: 'draft', id: 's1', start: 36, end: 48, label: 'Water tower?', state: 'progress', captures: ['c.png'], footage: 4, order: 2 },
+    { kind: 'draft', id: 's2', start: 90, end: null, label: '', state: 'todo', captures: [], footage: 0, order: 3 },
   ],
 }];
 
@@ -52,12 +52,12 @@ describe('the home of a case with proofs', () => {
     expect(home().querySelector('input[aria-label="Find a proof by name"]')).not.toBeNull();
   });
 
-  it('continues from the last six proofs, a proof of a video tagged in its scene\'s colour', () => {
+  it('continues from the last six proofs, a proof of a video tagged by its title in its scene\'s colour', () => {
     const { onopen, onall } = open();
     const cards = [...home().querySelectorAll('.ph-card')];
     expect(cards.map((c) => c.querySelector('.ph-title').textContent)).toEqual(['Market', 'Holiday', 'Proof 0', 'Proof 1', 'Proof 2', 'Proof 3']);
     const tag = cards[0].querySelector('.ph-tag');
-    expect(tag.textContent).toBe('clip.mp4 · 2/4');
+    expect(tag.textContent).toBe('Harbour run · 2/4');
     expect(tag.getAttribute('style')).toContain(`--scene: ${sceneColorAt(1)}`);
     expect(cards[1].querySelector('.ph-tag')).toBeNull();
     expect(cards[0].querySelector('.ph-when').textContent).toBe('2 h ago');
@@ -106,9 +106,15 @@ describe('To prove', () => {
     const chips = [...home().querySelectorAll('.ph-chip')];
     expect(chips.map((c) => c.querySelector('.ph-chip-name').textContent)).toEqual(['Water tower?', '1:30']);
     expect(chips[0].querySelector('.ph-chip-time').textContent).toBe('0:36–0:48');
-    expect(chips[0].querySelector('.ph-chip-state').textContent).toBe('Geolocating · 1 capture');
+    // two counts, the map's and the video's, a count at 0 greyed, the hover saying them in words
+    const counts = (chip) => [...chip.querySelectorAll('[data-testid^="count-"]')].map((c) => [c.textContent.trim(), c.classList.contains('none')]);
+    expect(counts(chips[0])).toEqual([['1', false], ['4', false]]);
+    expect(chips[0].querySelector('[data-testid="scene-counts"]').title).toBe('Geolocating: 1 map capture, 4 pictures from the video');
+    expect(chips[0].querySelector('[data-testid="scene-counts"]').dataset.stage).toBe('live');
     expect(chips[0].classList.contains('live')).toBe(true);
-    expect(chips[1].querySelector('.ph-chip-state').textContent).toBe('To geolocate');
+    expect(counts(chips[1])).toEqual([['0', true], ['0', true]]);
+    expect(chips[1].querySelector('[data-testid="scene-counts"]').title).toBe('To geolocate: no map capture yet, nothing from the video yet');
+    expect(chips[1].querySelector('[data-testid="scene-counts"]').dataset.stage).toBe('todo');
     chips[1].click();
     expect(onscene).toHaveBeenCalledWith(FILES[0], FILES[0].scenes[1]);
   });

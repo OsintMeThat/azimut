@@ -51,7 +51,7 @@ describe('the Videos source', () => {
   it('makes a block per video, frames in clip order then collages, the video worked on last first', () => {
     const titles = { 'media/clip.mp4': 'Clip' };
     const blocks = videoBlocks(ALL, (path) => titles[path] ?? '');
-    expect(blocks.map((b) => [b.video, b.title])).toEqual([['media/road.mp4', 'road.mp4'], ['media/clip.mp4', 'Clip']]);
+    expect(blocks.map((b) => [b.video, b.title])).toEqual([['media/road.mp4', 'road'], ['media/clip.mp4', 'Clip']]);
     expect(blocks[1].frames.map((f) => f.src)).toEqual(['media/b.png', 'media/a.png']);
     expect(blocks[1].collages.map((f) => f.src)).toEqual(['media/c.png']);
   });

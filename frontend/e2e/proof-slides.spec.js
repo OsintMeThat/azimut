@@ -323,7 +323,7 @@ test('makes a slide of a scene still to prove, its frames chosen in Geo Proof, a
   await tiles(page).nth(2).click();
   const draftPage = page.getByTestId('draft-page');
   await expect(draftPage).toBeVisible();
-  await expect(draftPage.locator('.draft-line')).toHaveText('0:00–0:00 · To geolocate');
+  await expect(draftPage.locator('.draft-line')).toHaveText(/^0:00–0:00\s*To geolocate: no map capture yet/);
   await draftPage.getByRole('button', { name: 'Make this slide' }).click();
 
   const chooser = page.getByRole('dialog', { name: 'Make the proof' });
@@ -391,7 +391,9 @@ test('draws a thin line for a video this proof is alone on', async ({ page }) =>
   await openCase(page, { alone: true });
   await openProof(page, 'market', 'Market');
   await expect(slides(page)).toHaveClass(/line/);
-  await expect(slides(page)).toContainText('clip.webm');
+  // the video by its title in Media
+  await expect(slides(page)).toContainText('Clip');
+  await expect(slides(page)).not.toContainText('clip.webm');
   await expect(slides(page)).toContainText('1 scene');
   await expect(slides(page).getByRole('button', { name: 'New scene' })).toBeVisible();
   const line = await slides(page).boundingBox();

@@ -134,6 +134,21 @@ export function collagesUnder(scenes, collages, frame) {
 }
 
 /**
+ * How much a video gives one of its scenes, the count its row shows beside the map's:
+ * the frames of the strip in it, filed or not, and the collages holding one of its
+ * moments; every frame and every collage for the whole video. The rule the server
+ * counts the queue's rows by (`engine/scenes.Footage`), read here off the strip in
+ * hand, so a frame just captured counts at once.
+ */
+export function sceneFootage(scene, frames, collages, frame) {
+  const moments = sceneMoments(scene);
+  const holds = (time) => !moments.length || moments.some((m) => frameInMoment(time, m, frame));
+  const cut = (frames ?? []).filter((f) => Number.isFinite(f?.time) && holds(f.time)).length;
+  const laid = (collages ?? []).filter((c) => !moments.length || (c?.times ?? []).some(holds)).length;
+  return cut + laid;
+}
+
+/**
  * The collages a scene's proof can start from, in clip order: those holding one of
  * its moments, or every one for the whole video, as with its frames.
  */

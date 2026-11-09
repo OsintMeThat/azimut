@@ -31,7 +31,7 @@ function setup({ name = 'depot', frames = [{ panel: 'p1', video: CLIP, time: 130
 describe('a saved proof\'s scene', () => {
   it('reads the ★ off the panels until the proof states one', () => {
     const { scene } = setup();
-    expect([scene.star, scene.moments, scene.videos.map((v) => v.name)]).toEqual([CLIP, [], ['clip.mp4']]);
+    expect([scene.star, scene.moments, scene.videos.map((v) => v.name)]).toEqual([CLIP, [], ['clip']]);
     scene.load({ video: CLIP, start: 130, end: 158 });
     expect(scene.moments).toEqual([{ start: 130, end: 158 }]);
   });
@@ -82,11 +82,11 @@ describe('a saved proof\'s scene', () => {
     const frames = [{ panel: 'p1', video: CLIP, time: 130 }, { panel: 'p2', video: OTHER, time: 12 }];
     const { scene, puts, toast } = setup({ frames });
     scene.load({ video: CLIP, moments: [{ start: 120, end: 140 }] });
-    expect(scene.videos.map((v) => [v.name, v.star])).toEqual([['clip.mp4', true], ['other.mp4', false]]);
+    expect(scene.videos.map((v) => [v.name, v.star])).toEqual([['clip', true], ['other', false]]);
     await scene.makeStar(OTHER);
     expect(puts[0].body).toEqual({ moments: [], video: OTHER });
     expect(scene.star).toBe(OTHER);
-    expect(toast.mock.calls[0][0]).toBe('The proof is now about other.mp4');
+    expect(toast.mock.calls[0][0]).toBe('The proof is now about other');
   });
 
   it('says what the server refused, and keeps what was there', async () => {

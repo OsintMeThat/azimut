@@ -325,7 +325,7 @@ test('makes the proof of a scene of two moments, stating both, each panel printi
   await expect(page.locator('.panel-row')).toHaveCount(2, { timeout: 20_000 });
   await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue('Road bridge');
   await showProofTab(page, 'Scene');
-  await expect(page.getByTestId('scene-block').getByTestId('scene-video')).toHaveText(/★\s*convoy\.webm\s*·\s*0:00–0:07 · 1:05–1:12/);
+  await expect(page.getByTestId('scene-block').getByTestId('scene-video')).toHaveText(/★\s*Convoy clip\s*·\s*0:00–0:07 · 1:05–1:12/);
 
   await page.getByRole('button', { name: 'Save proof', exact: true }).click();
   await expect.poll(() => fixture.proofSaves.length).toBe(1);

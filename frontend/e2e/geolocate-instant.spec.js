@@ -66,9 +66,9 @@ test('a capture attached steps the count up before the server is read again, and
   await sidebar.getByRole('tab', { name: 'To-do' }).click();
   const group = sidebar.getByRole('region', { name: 'To geolocate' });
   const pill = page.locator('.geo-pill');
-  const count = pill.getByTestId('geolocating-count');
+  const count = pill.getByTestId('count-map');
   await expect(count).toHaveText('2');
-  await expect(group.locator('li.scene.live')).toContainText('Geolocating · 2 captures');
+  await expect(group.locator('li.scene.live')).toContainText('Geolocating: 2 map captures');
 
   // from here every read takes four seconds
   server.slow = 4000;
@@ -77,7 +77,7 @@ test('a capture attached steps the count up before the server is read again, and
   await nudge(page, { video: VIDEO, draft: 'sc_2', capture: 'media/c3.png', captures: 3 });
   await expect(count).toHaveText('3', { timeout: 1500 });
   await expect(count).toHaveClass(/bump/);
-  await expect(group.locator('li.scene.live')).toContainText('Geolocating · 3 captures', { timeout: 1500 });
+  await expect(group.locator('li.scene.live')).toContainText('Geolocating: 3 map captures', { timeout: 1500 });
   // shown before any read answered
   expect(server.answered).toEqual([]);
   expect(Date.now() - said).toBeLessThan(4000);
@@ -105,7 +105,7 @@ test('a capture attached steps the count up before the server is read again, and
 test('a read asked before the capture cannot take the count back down', async ({ page }) => {
   const { server } = await geolocatingBridge(page);
   await page.goto('/#files');
-  const count = page.locator('.geo-pill').getByTestId('geolocating-count');
+  const count = page.locator('.geo-pill').getByTestId('count-map');
   await expect(count).toHaveText('2');
 
   // a read out before the capture, as the pill asks when its video's scenes are saved

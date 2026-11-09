@@ -64,14 +64,16 @@ export class ProofScene {
    * `where()` answers `{ caseId, name }`, the name null until the first save;
    * `frames()` the panels cut from a video (`lib/proofScene.panelFrames`);
    * `listed()` what `GET /scenes?video=` answered for the ★ video, or null.
+   * `titleOf(path)` a video's title in Media, '' when it has none.
    * `onstated()` hears every change the analyst states, not the first save's.
    */
-  constructor({ api, toast, where, frames, listed = () => null, onstated = () => {} }) {
+  constructor({ api, toast, where, frames, listed = () => null, titleOf = () => '', onstated = () => {} }) {
     this.api = api;
     this.toast = toast;
     this.where = where;
     this.frames = frames;
     this.listed = listed;
+    this.titleOf = titleOf;
     this.onstated = onstated;
     this.edit = new SceneEdit(() => this.clip);
   }
@@ -93,7 +95,7 @@ export class ProofScene {
 
   /** Every video the proof rests on, the ★ first. The block shows itself when there is one. */
   get videos() {
-    return proofVideos(this.frames(), this.stated);
+    return proofVideos(this.frames(), this.stated, this.titleOf);
   }
 
   /** The ★ panels whose frame shows in none of the moments. */
@@ -158,7 +160,8 @@ export class ProofScene {
   openTime() {
     const star = this.star;
     if (!star) return;
-    const at = this.frames().filter((f) => f.video === star).map((f) => f.time).sort((a, b) => a - b);
+    // a collage that kept no instant pins nothing on the bar
+    const at = this.frames().filter((f) => f.video === star && Number.isFinite(f.time)).map((f) => f.time).sort((a, b) => a - b);
     this.edit.begin({ kind: 'proof', key: 'proof', moments: this.moments, at });
     this.show(star, { at: this.moments[0]?.start ?? at[0] ?? 0 });
   }
@@ -228,7 +231,7 @@ export class ProofScene {
     this.onstated();
     const now = { video: this.star, moments: plain(this.moments) };
     const words = before.video !== now.video
-      ? `The proof is now about ${videoName(now.video)}`
+      ? `The proof is now about ${videoName(now.video, this.titleOf)}`
       : `Scene now ${timeWords(now.moments)}`;
     this.toast(words, 'info', 6000, undoable ? {
       label: 'Undo',

@@ -22,6 +22,43 @@ describe('createCanvasRenderGate', () => {
     return { gate, calls, frame: () => { const fn = pending; pending = null; fn?.(); } };
   }
 
+  it('skips a rebuild of the document it last built, and never one asked with no signature', () => {
+    const { gate, calls, frame } = gateHarness();
+    gate.requestRebuild('doc-1');
+    frame();
+    expect(calls.rebuild).toBe(1);
+    // a case read again after a save: equal values, the same document
+    gate.requestRebuild('doc-1');
+    frame();
+    expect(calls.rebuild).toBe(1);
+    gate.requestRebuild('doc-2');
+    frame();
+    expect(calls.rebuild).toBe(2);
+    gate.requestRebuild();
+    frame();
+    expect(calls.rebuild).toBe(3);
+    // what was built last is the one an equal ask is measured against
+    gate.requestRebuild('doc-2');
+    frame();
+    expect(calls.rebuild).toBe(4);
+  });
+
+  it('keeps a change asked during a gesture even when it goes back before the gesture ends', () => {
+    const { gate, calls, frame } = gateHarness();
+    gate.requestRebuild('doc-1');
+    frame();
+    gate.beginPointer();
+    expect(gate.active).toBe(true);
+    gate.requestRebuild('doc-2');
+    gate.requestRebuild('doc-1');
+    frame();
+    expect(calls.rebuild).toBe(1);
+    gate.endPointer();
+    expect(gate.active).toBe(false);
+    frame();
+    expect(calls.rebuild).toBe(2);
+  });
+
   it('holds a rebuild until the gesture settles', () => {
     const { gate, calls, frame } = gateHarness();
     gate.beginPointer();

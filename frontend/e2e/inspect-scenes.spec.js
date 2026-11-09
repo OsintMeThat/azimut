@@ -5,7 +5,8 @@ import { STEPS_DURATION, STEPS_FPS, STEPS_WEBM, serveRange } from './video.fixtu
 /**
  * The Scenes tab of Inspect, first of its tabs and open on a video: a closed scene
  * writes its kind and time, one is open at a time with its time as it stands, Mark to
- * geolocate sits above the tabs, the empty strip invites, the first scene ever kept
+ * geolocate sits above the tabs, a clip with no live scene asks one place or several,
+ * an instant marked keeps its frame, the first scene ever kept
  * points once at the To-do, every file opens on its Scenes, and a picture is marked
  * whole and proved by a proof laying it out. `SCENE_SHOTS` names a folder for the
  * pictures of each state.
@@ -270,54 +271,99 @@ test('writes each closed scene\'s kind and time, and opens one at a time', async
   await expect(opened.getByRole('textbox', { name: 'Scene start' })).toHaveValue('0:00.4');
 });
 
-test('invites in the empty strip of a video with nothing marked, and remembers Not now for that file', async ({ page }) => {
-  await serve(page, { scenes: [] });
-  const invite = page.getByTestId('scene-invite');
-  await expect(invite).toContainText('One place or several?');
-  await expect(invite.getByRole('button', { name: 'The whole video: one place' })).toBeVisible();
-  await expect(invite.getByRole('button', { name: /^Several places: mark them as you watch/ })).toBeVisible();
-  await page.mouse.move(0, 0);
-  await shoot(page, 'invite');
-  // it takes no room of its own: the strip stands as high as with frames in it
-  expect((await page.locator('.strip').boundingBox()).height).toBeLessThan(80);
-  await page.setViewportSize({ width: 1100, height: 720 });
-  await expect(invite.getByRole('button', { name: 'Not now' })).toBeInViewport();
-  const strip = await page.locator('.strip').boundingBox();
-  expect(strip.height).toBeLessThan(80);
-  // every choice inside the strip, none running under the panel beside it
-  for (const button of await invite.getByRole('button').all()) {
-    const box = await button.boundingBox();
-    expect(box.x + box.width).toBeLessThanOrEqual(strip.x + strip.width);
-  }
-  await shoot(page, 'invite-narrow');
-  await invite.getByRole('button', { name: 'Not now' }).click();
-  await expect(invite).toHaveCount(0);
-  await expect(page.locator('.strip')).toContainText('Frames you capture are kept with this video.');
-  await page.reload();
-  await openFile(page, 'Convoy clip');
-  await expect(page.locator('.strip')).toContainText('Frames you capture are kept with this video.');
-  await expect(invite).toHaveCount(0);
-});
-
-test('says how S marks several places, marks nothing, and stops asking; the whole video keeps one scene', async ({ page }) => {
+test('asks one place or several in the Scenes tab of a video with no live scene, and asks again until one is kept', async ({ page }) => {
   const { server } = await serve(page, { scenes: [] });
-  const invite = page.getByTestId('scene-invite');
-  await invite.getByRole('button', { name: /^Several places/ }).click();
-  await expect(invite).toHaveCount(0);
+  const choice = panel(page).getByTestId('scene-choice');
+  await expect(choice).toContainText('One place or several?');
+  await expect(choice.getByRole('button', { name: 'The whole video: one place' })).toBeVisible();
+  await expect(choice.getByRole('button', { name: /^Several places: mark them as you watch/ })).toBeVisible();
+  // the strip says what it always did: the question is the tab's
+  await expect(page.locator('.strip')).toContainText('Frames you capture are kept with this video.');
+  await expect(page.getByTestId('scene-invite')).toHaveCount(0);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await shoot(page, 'choice');
+  // every choice inside the panel, none running out of it
+  const box = await panel(page).boundingBox();
+  for (const button of await choice.getByRole('button').all()) {
+    const at = await button.boundingBox();
+    expect(at.x + at.width).toBeLessThanOrEqual(box.x + box.width + 1);
+  }
+
+  // several places says how S marks them, marks nothing, and the question stays, then and later
+  await choice.getByRole('button', { name: /^Several places/ }).click();
   await expect(page.locator('.toast', { hasText: 'Press S where a place shows' })).toBeVisible();
   await expect(rows(page)).toHaveCount(0);
+  await expect(choice).toBeVisible();
   await page.reload();
   await openFile(page, 'Convoy clip');
-  await expect(page.locator('.strip')).toContainText('Frames you capture are kept with this video.');
-  await expect(invite).toHaveCount(0);
+  await expect(choice).toBeVisible();
 
-  await page.evaluate(() => localStorage.clear());
-  await page.reload();
-  await openFile(page, 'Convoy clip');
-  await invite.getByRole('button', { name: 'The whole video: one place' }).click();
+  // the whole video keeps one scene, and the question goes with it
+  await choice.getByRole('button', { name: 'The whole video: one place' }).click();
   await expect(rows(page)).toHaveCount(1);
+  await expect(choice).toHaveCount(0);
   await expect(rows(page).first().getByRole('radio', { name: 'Whole video' })).toHaveAttribute('aria-checked', 'true');
   await expect.poll(() => server.saves.at(-1)?.spec?.scenes?.[0]).toMatchObject({ start: null, end: null });
+  // and it is nowhere remembered: nothing kept in the browser
+  expect(await page.evaluate(() => localStorage.getItem('azimut:sceneInviteDeclined'))).toBeNull();
+});
+
+test('asks again once every scene of the clip is abandoned, and never while a proof rests on it', async ({ page }) => {
+  await serve(page, { scenes: [kept('sc_1', 0.4, null, 'Mast')], held: { sc_1: { captures: [], abandoned: { reason: 'blurry', at: 'now' } } } });
+  await expect(panel(page).getByTestId('scene-choice')).toBeVisible();
+  await expect(panel(page).getByRole('button', { name: 'Abandoned (1)' })).toBeVisible();
+});
+
+const frames = (page) => page.locator('.strip .pick');
+
+test('an instant marked keeps its frame in the strip, unfiled, and a passage takes none', async ({ page }) => {
+  const { server } = await serve(page, { scenes: [] });
+  await expect(frames(page)).toHaveCount(0);
+  // S on a frame: the scene, and its frame beside the clip
+  for (let i = 0; i < 5; i += 1) await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('s');
+  await expect(rows(page)).toHaveCount(1);
+  await expect(frames(page)).toHaveCount(1);
+  await expect(frames(page).first()).toHaveAttribute('aria-label', /0:00\.2/);
+  // a work frame: not in the case until a proof uses it
+  await expect(page.locator('.strip .mark.filed')).toHaveCount(0);
+  await expect.poll(() => server.saves.at(-1)?.spec?.frames?.length).toBe(1);
+  // its count says so at once
+  await expect(rows(page).first().getByTestId('count-video')).toHaveText('1');
+
+  // a frame already there is not cut twice
+  await page.keyboard.press('c');
+  await expect(page.locator('.toast', { hasText: 'already in the strip' })).toBeVisible();
+  await expect(frames(page)).toHaveCount(1);
+
+  // Shift+S makes it a passage: no frame of its own
+  for (let i = 0; i < 4; i += 1) await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Shift+S');
+  await expect(frames(page)).toHaveCount(1);
+
+  // Mark to geolocate's main press, at another frame: another instant, another frame
+  for (let i = 0; i < 6; i += 1) await page.keyboard.press('ArrowRight');
+  await page.locator('.pinned').getByRole('button', { name: /^Mark to geolocate/ }).click();
+  await expect(rows(page)).toHaveCount(2);
+  await expect(frames(page)).toHaveCount(2);
+});
+
+test('the instant a whole-video scene takes, and one added on its open row, keep their frames', async ({ page }) => {
+  await serve(page, { scenes: [kept('sc_all', null, null, 'Which town?')] });
+  await expect(frames(page)).toHaveCount(0);
+  for (let i = 0; i < 5; i += 1) await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('s');
+  // the one scene takes the instant rather than stand beside a second
+  await expect(rows(page)).toHaveCount(1);
+  await expect(frames(page)).toHaveCount(1);
+
+  // another instant of the same place, from a frame further on, applied
+  for (let i = 0; i < 10; i += 1) await page.keyboard.press('ArrowRight');
+  const row = rows(page).first();
+  await row.getByRole('button', { name: 'Another passage' }).click();
+  await row.getByRole('button', { name: 'Apply' }).click();
+  await expect(frames(page)).toHaveCount(2);
+  await expect(row.getByTestId('count-video')).toHaveText('2');
 });
 
 /** Where the coachmark's arrow points, and the box it lies in. */
@@ -544,6 +590,25 @@ test('keeps a scene with S whichever row is open, and folds the row with Escape'
   await expect(page.locator('.player-time .now')).toHaveText('0:00.080');
 });
 
+test('a scene counts what the map gave it and the frames of the strip in it, a frame captured counting at once', async ({ page }) => {
+  await serve(page, {
+    scenes: [kept('sc_1', 0.2, 0.6, 'Road bridge?'), kept('sc_2', 1, null, 'Mast')],
+    held: { sc_1: { captures: [CAPTURE], abandoned: null } },
+  });
+  const scene = (id) => panel(page).locator(`[data-scene-key="${id}"]`);
+  await expect(scene('sc_1').getByTestId('count-map')).toHaveText('1');
+  await expect(scene('sc_1').getByTestId('count-video')).toHaveText('0');
+  await expect(scene('sc_1').getByTestId('count-video')).toHaveClass(/none/);
+  await expect(scene('sc_1').getByTestId('scene-counts')).toHaveAttribute('title', 'In progress: 1 map capture, nothing from the video yet');
+  // the frame on screen moved into the passage and captured: it counts there, and only there
+  for (let i = 0; i < 8; i += 1) await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('c');
+  await expect(scene('sc_1').getByTestId('count-video')).toHaveText('1');
+  await expect(scene('sc_1').getByTestId('count-video')).not.toHaveClass(/none/);
+  await expect(scene('sc_2').getByTestId('count-video')).toHaveText('0');
+  await shoot(page, 'counts');
+});
+
 test('makes the proof of a picture on it and its captures, stating no scene', async ({ page }) => {
   const { fixture, server } = await serve(page, { opens: 'Market' });
   await tab(page, /^Scenes/).click();
@@ -558,7 +623,7 @@ test('makes the proof of a picture on it and its captures, stating no scene', as
     await reloadCase();
   });
   await tab(page, /^Scenes/).click();
-  await expect(rows(page).first().getByTestId('scene-state')).toContainText('In progress · 1 capture');
+  await expect(rows(page).first().getByTestId('scene-state')).toContainText('In progress: 1 map capture');
   await rows(page).first().getByRole('button', { name: 'Make the proof' }).click();
 
   await expect(page).toHaveURL(/#proof/);

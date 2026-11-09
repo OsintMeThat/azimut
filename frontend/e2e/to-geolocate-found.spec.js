@@ -397,7 +397,7 @@ test('a picture’s row says Whole picture with no bar mark', async ({ page }) =
   const group = sidebarOf(page).getByRole('region', { name: 'To geolocate' });
   await expect(group.locator('li.scene').first()).toContainText('Whole picture');
   await expect(group.locator('li.scene').nth(1)).toContainText('Harbour wall');
-  await expect(group.locator('li.scene').nth(1)).toContainText('Whole picture · To geolocate');
+  await expect(group.locator('li.scene').nth(1)).toContainText('Whole pictureTo geolocate: no map capture yet, the picture itself');
   await expect(group.locator('.mark')).toHaveCount(0);
   fixture.expectNoUnexpectedRequests();
 });

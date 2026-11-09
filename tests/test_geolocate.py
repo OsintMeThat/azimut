@@ -557,6 +557,119 @@ def test_a_collage_exported_before_instants_were_recorded_is_read_from_its_docum
     assert scenes_engine.frame_origins(case, [picture]) == {picture: (video, 0.5)}
 
 
+def _as_filed_before_instants(case, picture, **extra):
+    """A composed picture as an older release filed it: its files, and no instants."""
+    item = case.media_items_by_paths([picture])[0]
+    sidecar = case.resolve_inside(f"media/.meta/{picture.split('/')[-1]}.json")
+    data = json.loads(sidecar.read_text())
+    data["source"].pop("times", None)
+    data["source"].update(extra)
+    sidecar.write_text(json.dumps(data))
+    case.upsert_media_item({**item, "source": data["source"]}, entity_id=item.get("entity_id"))
+
+
+@needs_ffmpeg
+def test_a_cut_of_a_straightened_collage_filed_with_no_instants_stays_on_its_video(client, tmp_path):
+    """The shape an older release left behind: the video three times bent into one
+    picture, a collage laying that picture out alone, and its export, a cut of it.
+    Neither picture recorded an instant and no document holds the bent one's: the cut
+    is still the video's, at no instant, and a proof laying it out is a proof of it."""
+    from azimut.engine import scenes as scenes_engine
+
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    bent = _export(client, cid, None, [(video, 0.5), (video, 1.5), (video, 2.5)], label="Gate straightened")
+    _as_filed_before_instants(Case.open(cid), bent, straightened=True)
+    name = _collage(client, cid, "Gate", [(bent, None)])
+    cut = _export(client, cid, name, [(bent, None)], label="Gate")
+    _record_export(client, cid, name, "Gate", [(bent, None)], cut)
+    _as_filed_before_instants(Case.open(cid), cut)
+
+    case = Case.open(cid)
+    assert scenes_engine.frame_origins(case, [bent, cut]) == {bent: (video, None), cut: (video, None)}
+    [row] = client.get(f"/api/cases/{cid}/scenes", params={"video": video}).json()["collages"]
+    assert (row["collage"], row["times"], row["start"], row["end"]) == (name, [], None, None)
+
+    # Proof 24's shape: a map capture beside the cut, placed
+    shot = _capture(client, cid)
+    made = client.post(f"/api/cases/{cid}/proofs", json={"title": "Proof 24", "spec": {
+        "panels": [{"id": "p0", "src": shot["path"]}, {"id": "p1", "src": cut}], "coordsText": PLACE,
+    }})
+    assert made.status_code == 200, made.text
+    listed = client.get(f"/api/cases/{cid}/scenes", params={"video": video}).json()
+    [proof] = [s for s in listed["scenes"] if s["kind"] == "proof"]
+    assert (proof["proof"], proof["at"], proof["moments"], proof["stated"]) == (made.json()["name"], [], [], False)
+    [entry] = [p for p in client.get(f"/api/cases/{cid}/proofs").json() if p["name"] == made.json()["name"]]
+    assert (entry["video"], entry["slide"], entry["slides"]) == (video, 1, 1)
+
+    # a mark from the Library marks the video, whole, and the proof's time may be stated
+    whole = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": cut})
+    assert whole.status_code == 200, whole.text
+    assert (whole.json()["scene"]["video"], whole.json()["scene"]["start"]) == (video, None)
+    stated = client.put(f"/api/cases/{cid}/proofs/{made.json()['name']}/scene", json={"moments": [{"start": 1.0}]})
+    assert stated.status_code == 200, stated.text
+    assert (stated.json()["video"], stated.json()["at"]) == (video, [])
+
+
+@needs_ffmpeg
+def test_a_picture_missing_its_instants_takes_none_from_a_collage_laid_out_since(client, tmp_path):
+    from azimut.engine import scenes as scenes_engine
+
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    photo = _upload(client, cid)
+    pieces = [(video, 0.5), (video, 2.0)]
+    name = _collage(client, cid, "Quay", pieces)
+    picture = _export(client, cid, name, pieces)
+    # the collage now lays other files out than the ones it exported
+    _record_export(client, cid, name, "Quay", [(video, 3.0), (photo, None)], picture)
+    _as_filed_before_instants(Case.open(cid), picture)
+    assert scenes_engine.frame_origins(Case.open(cid), [picture]) == {picture: (video, None)}
+
+
+@needs_ffmpeg
+def test_each_scene_counts_what_its_video_gives_it_beside_what_the_map_gave_it(client, tmp_path):
+    """A scene's two counts, on every row the app reads: the captures gathered for it on
+    the map, and the frames of its video's strip, filed or not, and the collages of the
+    video that fall in it. A scene about the whole video holds every one; a picture
+    marked to geolocate gives itself."""
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    frames = [{"id": f"f{i}", "path": video, "time": t} for i, t in enumerate((0.5, 1.2, 1.25, 3.0))]
+    res = client.put(f"/api/cases/{cid}/inspect/work", json={"path": video, "spec": {"frames": frames, "scenes": [
+        {"id": "all", "start": None, "end": None, "label": "Which town?"},
+        {"id": "pass", "start": 1.0, "end": 2.0, "label": "Bridge"},
+        {"id": "flash", "start": 3.0, "end": None, "label": ""},
+        {"id": "far", "start": 3.5, "end": 3.9, "label": "Nothing yet"},
+    ]}})
+    assert res.status_code == 200, res.text
+    _collage(client, cid, "Quay", [(video, 1.5), (video, 1.7)])
+    photo = _upload(client, cid)
+    client.post(f"/api/cases/{cid}/scenes/mark", json={"path": photo})
+
+    expected = {"all": 5, "pass": 3, "flash": 1, "far": 0}
+    queued = {f["video"]: {s["id"]: s for s in f["scenes"]} for f in _queue(client, cid)["files"]}
+    assert {sid: row["footage"] for sid, row in queued[video].items()} == expected
+    assert [row["footage"] for row in queued[photo].values()] == [1]
+    listed = client.get(f"/api/cases/{cid}/scenes", params={"video": video}).json()["scenes"]
+    assert {row["id"]: row["footage"] for row in listed} == expected
+
+    # the scene being geolocated carries both counts, and what its file is called
+    _geolocate(client, cid, video, "pass")
+    _capture(client, cid)
+    held = client.get(f"/api/cases/{cid}/geolocating").json()["geolocating"]
+    assert (held["footage"], len(held["captures"]), held["file_title"]) == (3, 1, "clip")
+    assert _queue(client, cid)["geolocating"]["footage"] == 3
+
+
+def test_a_file_with_no_title_is_named_by_its_file_name_without_the_extension():
+    from azimut.engine import scenes as scenes_engine
+
+    assert scenes_engine.file_title({"title": "Harbour run", "filename": "clip.mp4"}, "media/clip.mp4") == "Harbour run"
+    assert scenes_engine.file_title({"title": "  ", "filename": "clip.mp4"}, "media/clip.mp4") == "clip"
+    assert scenes_engine.file_title(None, "media/sub/road.v2.webm") == "road.v2"
+
+
 def test_a_collage_of_several_pictures_is_a_picture_and_its_mark_follows_it(client):
     cid = _case(client)
     one = _upload(client, cid, "one.png", (10, 10, 10))

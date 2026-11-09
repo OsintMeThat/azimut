@@ -23,12 +23,34 @@ const INSTANT_SLACK = 0.5;
 /** How far past a passage's ends a frame still falls in it: under a frame at any rate. */
 const PASSAGE_SLACK = 0.02;
 
-/** The file's own name, which is what the field and the badge say: `clip.mp4`. */
-export function videoName(path) {
-  return String(path ?? '').split(/[\\/]/).pop() ?? '';
+/** A file's name without its folder or its extension: `media/clip.mp4` reads `clip`. */
+export function fileStem(path) {
+  const name = String(path ?? '').split(/[\\/]/).pop() ?? '';
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(0, dot) : name;
 }
 
-/** The video and the instant a case file was cut at by Inspect, or null when it was not. */
+/**
+ * What the app calls a video wherever a scene or a proof names it: the title Media
+ * gives it, else its file name without the extension, `clip`. `title` is the title, or
+ * `(path) => title` to look it up.
+ */
+export function videoName(path, title = '') {
+  const own = typeof title === 'function' ? title(path) : title;
+  return (typeof own === 'string' && own.trim()) || fileStem(path);
+}
+
+/** A video's title in the case's media, by its path, for `videoName`. */
+export const mediaTitles = (media) => {
+  const titles = new Map((media ?? []).filter((one) => one?.path).map((one) => [one.path, one.title ?? '']));
+  return (path) => titles.get(path) ?? '';
+};
+
+/**
+ * The video and the instant a case file was cut at by Inspect, or null when it was not.
+ * A collage filed before its pieces' instants were recorded names its video at no
+ * instant, `time: null`.
+ */
 export function frameOrigin(item, mediaByPath = null) {
   const source = item?.source;
   if (source?.type !== 'inspect') return null;
@@ -44,29 +66,32 @@ const COMPOSED_DEPTH = 3;
 /**
  * A collage composed from one video's frames, read back to that video at its first
  * piece, as the server reads it (`engine/scenes._collage_origins`). Each piece is a
- * frame Inspect cut, the video itself at an instant, or a picture composed in turn
- * (a straightened collage). A piece of another video, or any other picture, makes it a
- * picture of its own: null. Needs the case's media to look its pieces up.
+ * frame Inspect cut, the video itself, or a picture composed in turn (a straightened
+ * collage), at every depth. A piece of another video, or any other picture, makes it a
+ * picture of its own: null. A collage filed before its pieces' instants were recorded
+ * (`source.times` missing) still names its video, at the instants known, `null` when
+ * none is: the server reads them off the collage's document, which the media list does
+ * not carry. Needs the case's media to look its pieces up.
  */
 function collageOrigin(source, mediaByPath, depth) {
   const files = source?.sources;
-  const times = source?.times;
   if (!mediaByPath?.get || depth >= COMPOSED_DEPTH) return null;
-  if (!Array.isArray(files) || !Array.isArray(times) || !files.length || files.length !== times.length) return null;
+  if (!Array.isArray(files) || !files.length) return null;
+  const times = Array.isArray(source.times) && source.times.length === files.length ? source.times : [];
   let video = null;
   let first = Infinity;
   for (let i = 0; i < files.length; i += 1) {
     const piece = mediaByPath.get(files[i]);
     const own = piece?.source?.type === 'inspect' && piece.source.op === 'collage'
       ? collageOrigin(piece.source, mediaByPath, depth + 1)
-      : piece?.kind === 'video' && Number.isFinite(times[i])
-        ? { video: files[i], time: times[i] }
+      : piece?.kind === 'video'
+        ? { video: files[i], time: Number.isFinite(times[i]) ? times[i] : null }
         : frameOrigin(piece);
     if (!own || (video && own.video !== video)) return null;
     video = own.video;
-    first = Math.min(first, own.time);
+    if (Number.isFinite(own.time)) first = Math.min(first, own.time);
   }
-  return { video, time: first };
+  return { video, time: Number.isFinite(first) ? first : null };
 }
 
 /**
@@ -107,15 +132,16 @@ export function starVideo(frames, stated) {
 
 /**
  * Every video the proof rests on, the ★ first and then the others in the order of
- * their first panel. Each with the instants its panels were cut at.
+ * their first panel. Each with the instants its panels were cut at, and its name
+ * (`videoName`, by `titleOf(path)`).
  */
-export function proofVideos(frames, stated) {
+export function proofVideos(frames, stated, titleOf = () => '') {
   const star = starVideo(frames, stated);
   if (!star) return [];
   const order = [star, ...(frames ?? []).map((f) => f.video)];
   return [...new Set(order)].map((video) => ({
     video,
-    name: videoName(video),
+    name: videoName(video, titleOf),
     star: video === star,
     frames: (frames ?? []).filter((f) => f.video === video),
   }));
@@ -181,15 +207,13 @@ export function momentHolds(moment, time) {
   return Math.abs(time - moment.start) <= INSTANT_SLACK;
 }
 
-/** The ★ video's panels whose frame shows in none of the moments. None for the whole video. */
+/**
+ * The ★ video's panels whose frame shows in none of the moments. None for the whole
+ * video, and never a collage that kept no instant: nothing says where it falls.
+ */
 export function outsideFrames(frames, star, moments) {
   if (!moments?.length) return [];
-  return (frames ?? []).filter((f) => f.video === star && !moments.some((m) => momentHolds(m, f.time)));
-}
-
-/** What a video's field says: `clip.mp4 · 2:10–2:38`, or `· Whole video` with no moment stated. */
-export function sceneLine(video, moments) {
-  return `${videoName(video)} · ${sceneTime({ kind: 'proof', moments: moments ?? [] })}`;
+  return (frames ?? []).filter((f) => f.video === star && Number.isFinite(f.time) && !moments.some((m) => momentHolds(m, f.time)));
 }
 
 /**

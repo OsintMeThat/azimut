@@ -731,14 +731,20 @@ def _stored_order(scene: dict[str, Any]) -> tuple[float, float]:
     return (start, end if end is not None else start)
 
 
-def scene_works(case: "Case") -> list[tuple[str, str | None, list[dict[str, Any]]]]:
+def scene_works(
+    case: "Case", specs: dict[str, dict[str, Any]] | None = None
+) -> list[tuple[str, str | None, list[dict[str, Any]]]]:
     """Every file whose work holds scenes to prove: (file, last touched, scenes),
-    most recently touched first."""
+    most recently touched first. ``specs`` are the works as `subject_specs` read them,
+    when the caller holds them already."""
+    if specs is None:
+        pairs = [(_subject(spec), spec) for _rel, spec in _work_specs(case) if spec.get("azimut_inspect") == WORK_VERSION]
+    else:
+        pairs = list(specs.items())
     rows = []
-    for _rel, spec in _work_specs(case):
-        subject = _subject(spec)
+    for subject, spec in pairs:
         scenes = [s for s in spec.get("scenes") or [] if isinstance(s, dict) and isinstance(s.get("id"), str)]
-        if subject and scenes and spec.get("azimut_inspect") == WORK_VERSION:
+        if subject and scenes:
             rows.append((subject, spec.get("updated_at"), scenes))
     rows.sort(key=lambda row: row[1] or "", reverse=True)
     return rows
@@ -903,22 +909,44 @@ def _collage_specs(case: "Case") -> list[tuple[str, dict[str, Any]]]:
     return out
 
 
+def _pieces(spec: dict[str, Any]) -> list[tuple[Any, Any]]:
+    """Each piece of a collage document as (file, instant), in the order it lays them out."""
+    nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
+    return [((n.get("save") or {}).get("path"), (n.get("save") or {}).get("time")) for n in nodes]
+
+
+def _exported_path(spec: dict[str, Any]) -> str | None:
+    exported = spec.get("exported")
+    path = exported.get("path") if isinstance(exported, dict) else None
+    return path if isinstance(path, str) and path else None
+
+
 def collage_pieces(case: "Case") -> list[dict[str, Any]]:
     """Every collage with each piece's file and instant, and the picture it last
     exported: what reads a collage back to the video its pieces were cut from."""
     out = []
     titles = _collage_titles(case)
     for rel, spec in _collage_specs(case):
-        nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
-        exported: dict[str, Any] = spec["exported"] if isinstance(spec.get("exported"), dict) else {}
         out.append({
             "name": Path(rel).stem,
             "title": titles.get(rel) or Path(rel).stem,
-            "pieces": [((n.get("save") or {}).get("path"), (n.get("save") or {}).get("time")) for n in nodes],
-            "export": exported.get("path") if isinstance(exported.get("path"), str) else None,
+            "pieces": _pieces(spec),
+            "export": _exported_path(spec),
             "current": _export_current(case, spec),
         })
     return out
+
+
+def collage_layouts(case: "Case") -> list[dict[str, Any]]:
+    """Every collage's pieces and the picture it last exported, with no title and no
+    check of the export: one pass over the documents, for a read over many files."""
+    return [{"pieces": _pieces(spec), "export": _exported_path(spec)} for _rel, spec in _collage_specs(case)]
+
+
+def collage_exports(case: "Case") -> dict[str, list[tuple[Any, Any]]]:
+    """The pieces of every collage by the picture it last exported: how a picture filed
+    before the pieces' instants were recorded on it finds them again."""
+    return {layout["export"]: layout["pieces"] for layout in collage_layouts(case) if layout["export"]}
 
 
 def _collage_titles(case: "Case") -> dict[str, str]:

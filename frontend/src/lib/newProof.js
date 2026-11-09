@@ -11,6 +11,7 @@
  * The scenes still to prove are the queue's (`GET /scenes/queue`), each a colour dot,
  * a name, its time and its file, as the To-do words them (`lib/sceneQueue.js`).
  */
+import { fileStem } from './proofScene.js';
 import { captureCount, isPicture, openScenes, queueColor, queueName, queueTime, queueState } from './sceneQueue.js';
 
 /** The sources a new proof picks from, in the order the window lists them. */
@@ -75,7 +76,7 @@ export const inFolder = (item, folder) => {
 /**
  * The Videos source, one block per video: its frames in clip order, then its
  * collages, the video last worked on first. `titleOf(path)` is what the case calls
- * the video, its file name when it says nothing.
+ * the video, its file name without the extension when it says nothing.
  */
 export function videoBlocks(items, titleOf = () => '') {
   const blocks = new Map();
@@ -83,7 +84,7 @@ export function videoBlocks(items, titleOf = () => '') {
     const video = item?.origin?.video;
     if (!video) continue;
     if (!blocks.has(video)) {
-      blocks.set(video, { video, title: titleOf(video) || String(video).split('/').pop(), frames: [], collages: [], latest: '' });
+      blocks.set(video, { video, title: titleOf(video) || fileStem(video), frames: [], collages: [], latest: '' });
     }
     const block = blocks.get(video);
     (item.collage ? block.collages : block.frames).push(item);
@@ -104,7 +105,7 @@ export function scenesToProve(files, live = null) {
     key: `${file.video}#${scene.id}`,
     video: file.video,
     id: scene.id,
-    title: file.title || String(file.video).split('/').pop(),
+    title: file.title || fileStem(file.video),
     name: queueName(scene),
     time: queueTime(scene),
     color: queueColor(scene),

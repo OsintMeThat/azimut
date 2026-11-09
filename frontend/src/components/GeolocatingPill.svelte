@@ -1,10 +1,11 @@
 <script>
   /**
    * The top bar's word on the scene the open case is geolocating, from every tool:
-   * its time, its label and the captures gathered for it so far. Every capture filed
-   * meanwhile is gathered for it on the server, the extension's included, so the
-   * count is all that moves here, with a short pulse when it does, on the server's
-   * word and before it is read again (`lib/geolocating.svelte.js`). A dot in the
+   * its time, its label and its two counts (`components/SceneCounts`), the captures
+   * gathered for it on the map and the frames and collages its video gives it. Every
+   * capture filed meanwhile is gathered for it on the server, the extension's included,
+   * so the map's count is what moves here, with a short pulse when it does, on the
+   * server's word and before it is read again (`lib/geolocating.svelte.js`). A dot in the
    * scene's colour, the one Inspect's bar and the reference window draw it in, ties
    * the three together (`order`, `lib/scenes.sceneColorAt`). Its label goes
    * back to the scene in Inspect, Make the proof opens Inspect's chooser on it, and ✕
@@ -12,7 +13,9 @@
    */
   import { onDestroy, untrack } from 'svelte';
   import Icon from './Icon.svelte';
+  import SceneCounts from './SceneCounts.svelte';
   import { onEvent } from '../lib/events.js';
+  import { fileStem } from '../lib/proofScene.js';
   import { caseState, toast, uiState } from '../lib/state.svelte.js';
   import { geolocating, readGeolocating, stopGeolocating } from '../lib/geolocating.svelte.js';
   import { GEOLOCATING_HELP as HELP } from '../lib/geolocatingHelp.js';
@@ -28,7 +31,8 @@
   const time = $derived(said ? queueShortTime(said) : '');
   const picture = $derived(isPicture(held));
   const count = $derived(captureCount(held));
-  const file = $derived(held ? String(held.video).split('/').pop() : '');
+  // what the case calls its file: its title in Media, else its name with no extension
+  const file = $derived(held ? held.file_title || fileStem(held.video) : '');
   const color = $derived(held ? sceneColorAt(held.order) : null);
   // a narrow bar drops the word and the label; the whole line stays on the pill
   const named = $derived(held ? ['Geolocating', queueTime(said), held.label].filter(Boolean).join(' · ') : '');
@@ -97,16 +101,8 @@
       {/if}
     </button>
     {#key pulse}
-      <span
-        class="geo-count"
-        class:some={count > 0}
-        class:bump={pulse > 0}
-        title={count === 1 ? HELP.one : count ? HELP.some(count) : HELP.none}
-        aria-label={count === 1 ? '1 capture' : `${count} captures`}
-        data-testid="geolocating-count"
-      >
-        <Icon name="camera" size={12} />
-        {count}
+      <span class="geo-count" data-testid="geolocating-count">
+        <SceneCounts scene={held} live mark={false} size={12} bump={pulse > 0} />
       </span>
     {/key}
     <span class="geo-rule" aria-hidden="true"></span>
@@ -187,24 +183,10 @@
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
     height: 20px;
-    padding: 0 7px;
+    padding: 0 8px;
     border-radius: 10px;
     background: var(--bg-3);
-    color: var(--text-3);
-    font-variant-numeric: tabular-nums;
-  }
-  .geo-count.some {
-    color: var(--text-1);
-  }
-  .geo-count.bump {
-    animation: bump 0.9s var(--ease);
-  }
-  @keyframes bump {
-    0% { transform: scale(1); background: var(--bg-3); }
-    25% { transform: scale(1.18); background: var(--accent); color: var(--accent-text); }
-    100% { transform: scale(1); background: var(--bg-3); }
   }
   .geo-rule {
     flex-shrink: 0;
@@ -254,11 +236,6 @@
     }
     .geo-label {
       max-width: 80px;
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .geo-count.bump {
-      animation: none;
     }
   }
 </style>

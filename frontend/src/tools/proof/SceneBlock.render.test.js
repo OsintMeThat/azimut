@@ -67,9 +67,9 @@ describe('the scene field', () => {
     // the tab says Scene already, so the field names what it lists
     expect(root.querySelector('.meta-head').textContent.trim()).toBe('Video');
     expect(field.classList.contains('field-with-act')).toBe(true);
-    expect(field.querySelector('.line').textContent.replace(/\s+/g, ' ').trim()).toBe('★ clip.mp4 · 2:10–2:38');
+    expect(field.querySelector('.line').textContent.replace(/\s+/g, ' ').trim()).toBe('★ clip · 2:10–2:38');
     expect(field.querySelector('.time').getAttribute('aria-label')).toBe('Time of the scene, 2:10–2:38');
-    expect(field.querySelector('.field-act').getAttribute('aria-label')).toBe('Play clip.mp4');
+    expect(field.querySelector('.field-act').getAttribute('aria-label')).toBe('Play clip');
     expect(field.querySelector('.field-act').getAttribute('title')).toBe('Play it in the player');
     // the editor waits to be asked
     expect(root.querySelector('.editor')).toBeNull();
@@ -110,11 +110,11 @@ describe('the scene field', () => {
     const { root, puts } = setup({ frames });
     const [first, second] = fields(root);
     expect(first.textContent).toContain('★');
-    expect(second.querySelector('.line').textContent.replace(/\s+/g, ' ').trim()).toBe('☆ other.mp4 · confirmation');
-    second.querySelector('[aria-label="Make other.mp4 the proof\'s video"]').click();
+    expect(second.querySelector('.line').textContent.replace(/\s+/g, ' ').trim()).toBe('☆ other · confirmation');
+    second.querySelector('[aria-label="Make other the proof\'s video"]').click();
     await settle();
     expect(puts).toEqual([{ moments: [], video: OTHER }]);
-    expect(fields(root).map((f) => f.querySelector('.name').textContent)).toEqual(['other.mp4', 'clip.mp4']);
+    expect(fields(root).map((f) => f.querySelector('.name').textContent)).toEqual(['other', 'clip']);
   });
 });
 
@@ -277,7 +277,7 @@ describe('the scene its frames found', () => {
   it('is named under the ★ field in its colour, with its time in the field and a way out', () => {
     const { root } = setup({ name: null, listed: LISTED });
     const [field] = fields(root);
-    expect(words(field.querySelector('.line'))).toBe('★ clip.mp4 · 2:00–2:20');
+    expect(words(field.querySelector('.line'))).toBe('★ clip · 2:00–2:20');
     const found = line(root);
     expect(field.nextElementSibling).toBe(found);
     expect(words(found)).toBe('Bridge? · found by its frames Not this scene');
@@ -298,7 +298,7 @@ describe('the scene its frames found', () => {
     const only = setup({ name: null, listed: whole });
     expect(words(line(only.root))).toBe('Which town? · the video\'s only scene Not this scene');
     expect(line(only.root).getAttribute('title')).toBe('The one scene of this video to geolocate, which the save takes up');
-    expect(words(fields(only.root)[0].querySelector('.line'))).toBe('★ clip.mp4 · Whole video');
+    expect(words(fields(only.root)[0].querySelector('.line'))).toBe('★ clip · Whole video');
   });
 
   it('goes with Not this scene, the field reading the whole video again, and nothing written', async () => {
@@ -306,7 +306,7 @@ describe('the scene its frames found', () => {
     button(line(root), 'Not this scene').click();
     await settle();
     expect(line(root)).toBeNull();
-    expect(words(fields(root)[0].querySelector('.line'))).toBe('★ clip.mp4 · Whole video');
+    expect(words(fields(root)[0].querySelector('.line'))).toBe('★ clip · Whole video');
     expect(puts).toEqual([]);
   });
 

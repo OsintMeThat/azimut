@@ -63,7 +63,7 @@ test('the sidebar’s To-do lists the scenes to geolocate over the lists, and ge
   const group = sidebar.getByRole('region', { name: 'To geolocate' });
   await expect(group.getByRole('heading', { name: 'To geolocate 3' })).toBeVisible();
   await expect(group.getByRole('list', { name: 'Market walk' }).getByRole('listitem')).toHaveCount(3);
-  await expect(group.locator('li.scene').nth(1)).toContainText('3:58–4:12 · In progress · 2 captures');
+  await expect(group.locator('li.scene').nth(1)).toContainText('3:58–4:12In progress: 2 map captures');
   // over the analyst's own lists, never under them
   const groupBox = await group.boundingBox();
   const entryBox = await sidebar.getByLabel('New task', { exact: true }).boundingBox();
@@ -77,7 +77,7 @@ test('the sidebar’s To-do lists the scenes to geolocate over the lists, and ge
   await expect(page.locator('.ref-viewer').getByRole('img', { name: /Scene · bridge\?/ })).toBeVisible();
   // the map tools open with the sidebar folded; brought back, it marks the scene
   await page.getByTitle('Toggle case sidebar').click();
-  await expect(group.locator('li.scene.live')).toContainText('Geolocating · 2 captures');
+  await expect(group.locator('li.scene.live')).toContainText('Geolocating: 2 map captures');
   fixture.expectNoUnexpectedRequests();
 });
 

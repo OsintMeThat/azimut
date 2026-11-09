@@ -71,7 +71,13 @@ describe('the strip of a video\'s slides', () => {
     expect(tile('s2').classList).toContain('abandoned');
     expect(document.body.querySelector('[aria-label="New scene"]')).not.toBeNull();
     expect(document.body.querySelector('[aria-label="Every slide"]').textContent.trim()).toBe('6');
-    expect(document.body.querySelector('.chip').textContent.trim()).toBe('clip.mp4');
+    // the video by its file name, no extension, until Media gives it a title
+    expect(document.body.querySelector('.chip').textContent.trim()).toBe('clip');
+  });
+
+  it('names the video by its title in Media', () => {
+    show({ title: 'Harbour run' });
+    expect(document.body.querySelector('.chip').textContent.trim()).toBe('Harbour run');
   });
 
   it('draws a proved slide with its thumbnail, never its full picture, and its time', () => {
@@ -105,10 +111,14 @@ describe('the strip of a video\'s slides', () => {
     expect(water.classList).toContain('draft');
     expect(water.querySelector('.pin')).not.toBeNull();
     expect(water.querySelector('.tile-title').textContent).toBe('Water tower?');
-    expect(water.querySelector('.tile-words').textContent).toBe('To geolocate');
+    // its two counts in place of words, a count at 0 greyed, its hover saying them
+    const counts = (t) => [...t.querySelectorAll('.tile-words [data-testid^="count-"]')].map((c) => [c.textContent.trim(), c.classList.contains('none')]);
+    expect(counts(water)).toEqual([['0', true], ['0', true]]);
     expect(water.title).toContain('0:50–1:00');
+    expect(water.title).toContain('To geolocate: no map capture yet, nothing from the video yet');
     expect(tile('s3').querySelector('.live')).not.toBeNull();
-    expect(tile('s3').querySelector('.tile-words').textContent).toBe('Geolocating');
+    expect(tile('s3').querySelector('.tile-words [data-testid="scene-counts"]').dataset.stage).toBe('live');
+    expect(counts(tile('s3'))).toEqual([['1', false], ['0', true]]);
     // the reason a scene was given up is on hover
     expect(tile('s2').title).toContain('Abandoned: too blurry');
   });
@@ -358,7 +368,7 @@ describe('many slides', () => {
   it('fade into the ends of a tight strip rather than take arrows, the video named on hover', () => {
     show({ tiles: slideTiles(many(12), { started: true, name: 'Place 6' }), width: 620 });
     expect(document.body.querySelector('.chip').classList).toContain('bare');
-    expect(document.body.querySelector('.chip').getAttribute('aria-label')).toBe('clip.mp4');
+    expect(document.body.querySelector('.chip').getAttribute('aria-label')).toBe('clip');
     const lane = document.body.querySelector('.lane');
     [...lane.querySelectorAll('.slot')].forEach((slot, index) => {
       Object.defineProperty(slot, 'offsetLeft', { value: index * 81, configurable: true });

@@ -2,8 +2,9 @@
   /**
    * The slides of a proof's video, on a strip under the canvas, the way Map plate lays
    * its steps under the page: the video's name, then a tile per scene in clip order
-   * (each proved one with its thumbnail, each still to prove dashed, the abandoned ones
-   * greyed at the end), **+ New scene**, the list of every slide and the fold.
+   * (each proved one with its thumbnail, each still to prove dashed with its two counts,
+   * the abandoned ones greyed at the end), **+ New scene**, the list of every slide and
+   * the fold.
    *
    * A press on a tile moves there, which saves the slide left (the composer's
    * `switchSlide`); the strip itself never writes. Each tile's ⋯, a right-click, and the
@@ -22,6 +23,7 @@
   import { tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
+  import SceneCounts from '../../components/SceneCounts.svelte';
   import SearchInput from '../../components/SearchInput.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { videoName } from '../../lib/proofScene.js';
@@ -31,8 +33,9 @@
   let {
     /** `lib/proofSlides.slideTiles`, in strip order. */
     tiles = [],
-    /** The video the slides are of, a path in the case. */
+    /** The video the slides are of, a path in the case, and its title in Media. */
     video = '',
+    title = '',
     caseId = '',
     /** The video is no longer in the case: the line says so, with no tiles. */
     gone = false,
@@ -92,7 +95,7 @@
   const compact = $derived(width > 0 && tiles.length * TILE > width - lead - tail - ROOM);
   const mode = $derived(gone ? 'gone' : lone ? 'lone' : folded ? 'folded' : narrow ? 'pager' : 'strip');
   const found = $derived(findTiles(tiles, query));
-  const name = $derived(videoName(video));
+  const name = $derived(videoName(video, title));
   const count = (n) => (n === 1 ? '1 scene' : `${n} scenes`);
   const proved = $derived(tiles.filter((t) => t.kind === 'proof' && t.state !== NO_PICTURE).length);
 
@@ -374,7 +377,11 @@
             onclick={() => !tile.current && onpick?.(tile)} onkeydown={(event) => menuKeys(event, tile)}>
             {@render thumb(tile)}
             <span class="tile-title" dir="auto">{tile.title}{#if tile.current && dirty}<span class="dirty" title={HELP.dirty}></span>{/if}</span>
-            <span class="tile-words">{tile.words}</span>
+            {#if tile.kind === 'draft' && tile.state !== ABANDONED}
+              <span class="tile-words counted"><SceneCounts scene={tile.row} live={tile.state === GEOLOCATING} size={10} /></span>
+            {:else}
+              <span class="tile-words">{tile.words}</span>
+            {/if}
           </button>
           {#if hasMenu(tile)}
             <button type="button" class="more" aria-label={`More for ${tile.title}`} title={HELP.more} aria-haspopup="menu"

@@ -12,6 +12,7 @@
  * keeps of the one before it: the look, never the content.
  */
 import { templateFromProof } from './composer.js';
+import { countWords } from './sceneCounts.js';
 import { isAbandoned, sceneColorAt, sceneList, sceneMoments, sceneTime, sceneTitle, unplaced } from './scenes.js';
 
 /** What each tile says it is, in the order a scene goes through them. */
@@ -23,17 +24,13 @@ export const PROGRESS = 'progress';
 export const GEOLOCATING = 'geolocating';
 export const ABANDONED = 'abandoned';
 
-/** A tile's second row, by state. */
+/** A tile's second row, by state. A scene still to prove shows its counts there instead. */
 const WORDS = {
   [NO_PICTURE]: 'No picture yet',
   unplaced: 'No place yet',
   [NEW]: 'Not saved',
-  [TODO]: 'To geolocate',
-  [GEOLOCATING]: 'Geolocating',
   [ABANDONED]: 'Abandoned',
 };
-
-const captureWords = (n) => (n === 1 ? '1 capture' : `${n} captures`);
 
 /**
  * The tile of a proof the server listed. One that states no place yet is `unplaced`,
@@ -60,7 +57,10 @@ function proofTile(row) {
   };
 }
 
-/** The tile of a scene still to prove: its label, else its time, and where it stands. */
+/**
+ * The tile of a scene still to prove: its label, else its time, and where it stands
+ * with its two counts (`lib/sceneCounts.js`), which its `words` say in full.
+ */
 function draftTile(row, geolocating, thumbOf) {
   const captures = row.captures ?? [];
   const state = isAbandoned(row) ? ABANDONED : row.id === geolocating ? GEOLOCATING : captures.length ? PROGRESS : TODO;
@@ -73,7 +73,7 @@ function draftTile(row, geolocating, thumbOf) {
     state,
     title: row.label || time,
     time,
-    words: state === PROGRESS ? captureWords(captures.length) : WORDS[state],
+    words: state === ABANDONED ? WORDS[ABANDONED] : countWords(row, state === GEOLOCATING),
     thumb: state === ABANDONED ? null : first,
     color: row.color,
     reason: row.abandoned?.reason ?? '',

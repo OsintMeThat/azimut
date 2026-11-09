@@ -11,6 +11,8 @@ import { STEPS_DURATION, STEPS_FPS, STEPS_WEBM, serveRange } from './video.fixtu
  */
 
 const VIDEO = 'media/clip.webm';
+/** What Media calls the video, which every surface names it by. */
+const TITLE = 'Quay steps';
 const svg = (fill, ground) => `
   <svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
     <rect width="640" height="360" fill="${fill}"/>
@@ -43,7 +45,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
  */
 async function openCase(page, { empty = false, scenes = true, gate = null } = {}) {
   const media = empty ? [] : [
-    { path: VIDEO, filename: 'clip.webm', title: 'clip.webm', kind: 'video', entity_id: 'e_clip', size: STEPS_WEBM.length, sha256: '1'.repeat(64),
+    { path: VIDEO, filename: 'clip.webm', title: TITLE, kind: 'video', entity_id: 'e_clip', size: STEPS_WEBM.length, sha256: '1'.repeat(64),
       source: { type: 'upload' }, thumbnail: null, folder: '' },
     frame('frame-a', 0.2), frame('frame-b', 0.5), frame('frame-d', 0.64),
     image('media/photo.png', 'Harbour photo', { type: 'upload' }, { folder: 'field' }),
@@ -92,12 +94,12 @@ async function openCase(page, { empty = false, scenes = true, gate = null } = {}
       return {
         name, title: proofs[name].title, updated_at: updated[name] ?? '2026-11-09T09:00:00Z', panels: proofs[name].panels.length, shapes: 0,
         points: [], png: `proofs/${name}.png`, thumb: `proofs/.thumbs/${name}.webp`, spec_path: `proofs/.meta/${name}.json`,
-        ...(slide >= 0 ? { video: VIDEO, order: slide === 0 ? 0 : 1, slide: slide + 1, slides: onVideo.length } : { video: null }),
+        ...(slide >= 0 ? { video: VIDEO, video_title: TITLE, order: slide === 0 ? 0 : 1, slide: slide + 1, slides: onVideo.length } : { video: null }),
       };
     });
   };
   const queue = () => ({
-    files: drafts.length ? [{ video: VIDEO, title: 'clip.webm', kind: 'video', scenes: drafts.map((d) => ({ ...d, file_kind: 'video', order: 2 })), proofs: [] }] : [],
+    files: drafts.length ? [{ video: VIDEO, title: TITLE, kind: 'video', scenes: drafts.map((d) => ({ ...d, file_kind: 'video', order: 2 })), proofs: [] }] : [],
     geolocating: null,
   });
 
@@ -265,7 +267,7 @@ test('New proof shows each video as a block of its frames', async ({ page }) => 
   await openNewProof(page);
   const dialog = newProof(page);
   await dialog.locator('.np-from .np-row', { hasText: 'Videos' }).click();
-  await expect(dialog.locator('.np-video h5')).toHaveText(['clip.webm']);
+  await expect(dialog.locator('.np-video h5')).toHaveText([TITLE]);
   await expect(dialog.locator('.np-video .np-count')).toHaveText('3 frames');
   await expect(dialog.locator('.np-tile .np-time')).toHaveText(['0:00.2', '0:00.5', '0:00.6']);
 });
@@ -276,7 +278,7 @@ test('New proof from a scene: its material all ticked, and the proof takes the s
   const dialog = newProof(page);
   const scenes = dialog.getByRole('list', { name: 'Scenes to prove' });
   await expect(scenes.locator('.np-scene-name')).toHaveText(['Water tower?']);
-  await expect(scenes.locator('.np-scene-said')).toHaveText('0:00–0:00 · clip.webm');
+  await expect(scenes.locator('.np-scene-said')).toHaveText(`0:00–0:00 · ${TITLE}`);
 
   await scenes.locator('.np-scene').click();
   // its frame in the case, the one not in it drawn for the choice, and the capture it gathered
@@ -303,12 +305,13 @@ test('Open proof tags a proof of a video and filters by video, a proof on photos
   await header(page).getByRole('button', { name: 'Open proof' }).click();
   const list = page.getByRole('dialog', { name: 'Open a saved proof' });
   await expect(list.locator('.open-title')).toHaveText(['Road bridge', 'Market', 'Holiday']);
-  await expect(list.locator('.open-slide')).toHaveText(['clip.webm · slide 1 of 2', 'clip.webm · slide 2 of 2']);
+  // the video by the title Media gives it, never its file name
+  await expect(list.locator('.open-slide')).toHaveText([`${TITLE} · slide 1 of 2`, `${TITLE} · slide 2 of 2`]);
   await expect(list.locator('.open-row-wrap', { hasText: 'Holiday' }).locator('.open-slide')).toHaveCount(0);
   await expect(list.locator('.open-row-wrap', { hasText: 'Holiday' }).locator('.open-sub')).toHaveText('1 panel · 0 annotations · 2026-11-06');
 
   const video = list.getByRole('combobox', { name: 'Video' });
-  await video.selectOption({ label: 'clip.webm · 2' });
+  await video.selectOption({ label: `${TITLE} · 2` });
   await expect(list.locator('.open-title')).toHaveText(['Road bridge', 'Market']);
   await video.selectOption({ label: 'On no video · 1' });
   await expect(list.locator('.open-title')).toHaveText(['Holiday']);
@@ -375,15 +378,15 @@ test('the home continues from the last proofs, finds one by name, and makes the 
   const { proofReads, frameSaves } = await openCase(page);
   const cards = home(page).locator('.ph-card');
   await expect(cards.locator('.ph-title')).toHaveText(['Road bridge', 'Market', 'Holiday']);
-  await expect(cards.locator('.ph-tag')).toHaveText(['clip.webm · 1/2', 'clip.webm · 2/2']);
+  await expect(cards.locator('.ph-tag')).toHaveText([`${TITLE} · 1/2`, `${TITLE} · 2/2`]);
   await expect(page.locator('aside.side')).toHaveCount(0);
   // one read for the home
   expect(proofReads).toHaveLength(1);
 
   // To prove: the video's card, its scene as a chip
   const chip = home(page).locator('.ph-chip');
-  await expect(home(page).locator('.ph-video h5')).toHaveText('clip.webm');
-  await expect(chip).toHaveText(/Water tower\?\s*0:00–0:00\s*In progress · 1 capture/);
+  await expect(home(page).locator('.ph-video h5')).toHaveText(TITLE);
+  await expect(chip).toHaveText(/Water tower\?\s*0:00–0:00\s*In progress: 1 map capture/);
 
   // the search opens the first proof found on Enter
   await home(page).getByRole('textbox', { name: 'Find a proof by name' }).fill('mark');
@@ -441,7 +444,7 @@ test('deletes a proof of a scene from the header, asking what becomes of its sce
   const { deletes } = await openCase(page);
   await openSaved(page, 'market', 'Market');
   const ask = await deleteFromHeader(page);
-  await expect(ask.locator('legend')).toHaveText('Its scene in clip.webm');
+  await expect(ask.locator('legend')).toHaveText(`Its scene in ${TITLE}`);
   await expect(ask.getByRole('radio', { name: 'Goes back to To geolocate' })).toBeChecked();
   await ask.getByRole('radio', { name: 'Is removed with it' }).check();
   await ask.getByRole('button', { name: 'Delete' }).click();

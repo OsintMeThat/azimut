@@ -74,6 +74,15 @@ const byLabel = (label) => target.querySelector(`[aria-label="${label}"]`);
 const byText = (text) => [...target.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
 const queueReads = () => get.mock.calls.filter(([url]) => url === '/api/cases/c1/scenes/queue').length;
 
+/** A row's small print as the analyst reads it: its time, then its counts as their hover words them. */
+function said(li) {
+  const meta = li.querySelector('.meta');
+  const counts = meta.querySelector('[data-testid="scene-counts"]');
+  if (!counts) return meta.textContent;
+  const time = [...meta.querySelectorAll(':scope > .part')].map((part) => part.textContent).join('');
+  return [time, counts.title].filter(Boolean).join(' | ');
+}
+
 it('is not there at all while the case has no scene to geolocate', async () => {
   await open();
   expect(queueReads()).toBe(1);
@@ -89,7 +98,7 @@ it('lists each file’s scenes with their time, name and state', async () => {
         title: 'Market walk',
         scenes: [
           row('w', null, null),
-          row('p', 238, 252, 'bridge?', { state: 'progress', captures: ['media/c1.png', 'media/c2.png'] }),
+          row('p', 238, 252, 'bridge?', { state: 'progress', captures: ['media/c1.png', 'media/c2.png'], footage: 3 }),
         ],
       },
       { video: OTHER, title: 'Convoy', scenes: [{ ...row('i', 3, null, 'Water tower'), video: OTHER }] },
@@ -100,12 +109,16 @@ it('lists each file’s scenes with their time, name and state', async () => {
   expect(section().querySelector('h4').textContent).toBe('To geolocate 3');
   const files = [...section().querySelectorAll('.file-title')].map((el) => el.textContent.trim());
   expect(files).toEqual(['Market walk', 'Convoy']);
-  const lines = rows().map((li) => [li.querySelector('.name').textContent, li.querySelector('.meta').textContent]);
+  const lines = rows().map((li) => [li.querySelector('.name').textContent, said(li)]);
   expect(lines).toEqual([
-    ['Whole video', 'To geolocate'],
-    ['bridge?', '3:58–4:12 · In progress · 2 captures'],
-    ['Water tower', '0:03 · To geolocate'],
+    ['Whole video', 'To geolocate: no map capture yet, nothing from the video yet'],
+    ['bridge?', '3:58–4:12 | In progress: 2 map captures, 3 pictures from the video'],
+    ['Water tower', '0:03 | To geolocate: no map capture yet, nothing from the video yet'],
   ]);
+  // each count by its icon, one at 0 greyed
+  const counts = (li) => [...li.querySelectorAll('[data-testid^="count-"]')].map((c) => [c.textContent.trim(), c.classList.contains('none')]);
+  expect(counts(rows()[1])).toEqual([['2', false], ['3', false]]);
+  expect(counts(rows()[0])).toEqual([['0', true], ['0', true]]);
   expect(rows()[1].classList.contains('progress')).toBe(true);
   expect(rows()[0].classList.contains('progress')).toBe(false);
 });
@@ -115,7 +128,7 @@ it('names an unlabelled scene by its time, and reads a label in its own directio
   await open();
   const [first, second] = rows();
   expect(first.querySelector('.name').textContent).toBe('1:01–1:04');
-  expect(first.querySelector('.meta').textContent).toBe('To geolocate');
+  expect(said(first)).toBe('To geolocate: no map capture yet, nothing from the video yet');
   expect(second.querySelector('.name').getAttribute('dir')).toBe('auto');
   expect(second.querySelector('.name').textContent).toBe(ARABIC);
 });
@@ -128,10 +141,10 @@ it('reads a picture’s row as a picture: Whole picture, its icon, and no mark',
     geolocating: null,
   });
   await open();
-  const lines = rows().map((li) => [li.querySelector('.name').textContent, li.querySelector('.meta').textContent]);
+  const lines = rows().map((li) => [li.querySelector('.name').textContent, said(li)]);
   expect(lines).toEqual([
-    ['Whole picture', 'To geolocate'],
-    ['Harbour wall', 'Whole picture · To geolocate'],
+    ['Whole picture', 'To geolocate: no map capture yet, the picture itself'],
+    ['Harbour wall', 'Whole picture | To geolocate: no map capture yet, the picture itself'],
   ]);
   // an image icon on the file's line, drawn from its path, unlike a video's
   const icon = section().querySelector('.file-title svg').innerHTML;
@@ -203,7 +216,7 @@ it('marks each scene as its bar does, in the colour Inspect gives it', async () 
   const pin = instant.querySelector('.name .mark');
   expect(pin.classList.contains('instant')).toBe(true);
   expect(pin.style.background).toBe('var(--anno-6)');
-  expect(passage.querySelector('.meta').textContent).toBe('3:58–4:12 · To geolocate');
+  expect(said(passage)).toBe('3:58–4:12 | To geolocate: no map capture yet, nothing from the video yet');
 });
 
 it('marks the scene being geolocated', async () => {
@@ -212,7 +225,7 @@ it('marks the scene being geolocated', async () => {
   await open();
   const [, marked] = rows();
   expect(marked.classList.contains('live')).toBe(true);
-  expect(marked.querySelector('.meta').textContent).toBe('3:58–4:12 · Geolocating · 1 capture');
+  expect(said(marked)).toBe('3:58–4:12 | Geolocating: 1 map capture, nothing from the video yet');
   expect(rows()[0].classList.contains('live')).toBe(false);
 });
 
@@ -398,11 +411,11 @@ it('gives a time of several moments its own line, so no line ends on a dot', asy
     row('k', 30, 34, 'Square'),
   ] }], geolocating: null });
   await open();
-  const [joined, single] = rows().map((li) => li.querySelector('.meta'));
-  expect(joined.textContent).toBe('0:00–0:07 · 1:05–1:12To geolocate');
-  expect(joined.querySelector('br')).not.toBeNull();
-  expect(single.textContent).toBe('0:30–0:34 · To geolocate');
-  expect(single.querySelector('br')).toBeNull();
+  const [joined, single] = rows();
+  expect(said(joined)).toBe('0:00–0:07 · 1:05–1:12 | To geolocate: no map capture yet, nothing from the video yet');
+  expect(joined.querySelector('.meta br')).not.toBeNull();
+  expect(said(single)).toBe('0:30–0:34 | To geolocate: no map capture yet, nothing from the video yet');
+  expect(single.querySelector('.meta br')).toBeNull();
 });
 
 it('shows a few rows and counts the rest, the one being geolocated among them', async () => {
@@ -491,7 +504,7 @@ it('follows the server when it says the scene being geolocated changed', async (
   answerWith({ files: [{ video: VIDEO, title: 'Market walk', scenes: [{ ...scene, state: 'progress', captures: ['media/c.png'] }] }], geolocating: { ...scene, captures: ['media/c.png'] } });
   dispatch({ type: 'geolocating', case_id: 'c1', video: VIDEO, draft: 'p' });
   await settle();
-  expect(rows()[0].querySelector('.meta').textContent).toBe('3:58–4:12 · Geolocating · 1 capture');
+  expect(said(rows()[0])).toBe('3:58–4:12 | Geolocating: 1 map capture, nothing from the video yet');
 });
 
 it('says when the queue could not be read, and reads it again on Retry', async () => {
