@@ -572,7 +572,7 @@ describe('the Scenes tab on a video', () => {
     target.querySelector('[aria-label="More ways to mark"]').click();
     flushSync();
     const whole = [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent.includes('Whole video'));
-    expect([whole.disabled, whole.title]).toEqual([true, 'Scenes are marked at passages of this video already']);
+    expect([whole.disabled, whole.title]).toEqual([true, 'Scenes already hold passages of this video, so the whole of it is not one place']);
   });
 
   it('gives the clip\'s one scene about the whole video the instant S marks, label and captures kept, Undo making it whole again', async () => {
@@ -641,11 +641,11 @@ describe('the Scenes tab on a video', () => {
     target.querySelector('[aria-label="More ways to mark"]').click();
     flushSync();
     const item = [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent.includes('Whole video'));
-    expect([item.disabled, item.title]).toEqual([true, 'Scenes are marked at passages of this video already']);
+    expect([item.disabled, item.title]).toEqual([true, 'Scenes already hold passages of this video, so the whole of it is not one place']);
     target.querySelector('[aria-label="More ways to mark"]').click();
     flushSync();
     const kind = [...openRow().querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Whole video');
-    expect([kind.disabled, kind.title]).toEqual([true, 'Another scene is marked at passages of this video']);
+    expect([kind.disabled, kind.title]).toEqual([true, 'Another scene holds passages of this video, so the whole of it is not one place']);
   });
 
   it('adds a passage of the scene\'s kind with Another passage, in hand on the bar', async () => {

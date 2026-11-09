@@ -208,11 +208,11 @@ test('greys Whole video once a scene holds a passage, in the arrow and in anothe
   await page.getByRole('button', { name: 'More ways to mark' }).click();
   const item = page.getByRole('menuitem', { name: /Whole video/ });
   await expect(item).toBeDisabled();
-  await expect(item).toHaveAttribute('title', 'Scenes are marked at passages of this video already');
+  await expect(item).toHaveAttribute('title', 'Scenes already hold passages of this video, so the whole of it is not one place');
   await page.keyboard.press('Escape');
   const kind = rows(page).first().getByRole('radio', { name: 'Whole video' });
   await expect(kind).toBeDisabled();
-  await expect(kind).toHaveAttribute('title', 'Another scene is marked at passages of this video');
+  await expect(kind).toHaveAttribute('title', 'Another scene holds passages of this video, so the whole of it is not one place');
   await expect(rows(page).first().getByRole('radio', { name: 'Instant' })).toBeEnabled();
 });
 

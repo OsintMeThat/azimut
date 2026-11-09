@@ -549,7 +549,7 @@ describe('one place or several', () => {
     const { root } = opened(scenes, 'sc_1', { onkind });
     const whole = kind(root, 'Whole video');
     expect(whole.disabled).toBe(true);
-    expect(whole.getAttribute('title')).toBe('Another scene is marked at passages of this video');
+    expect(whole.getAttribute('title')).toBe('Another scene holds passages of this video, so the whole of it is not one place');
     whole.click();
     expect(onkind).not.toHaveBeenCalled();
     expect(kind(root, 'Passage').disabled).toBe(false);

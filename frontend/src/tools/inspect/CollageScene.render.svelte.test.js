@@ -139,7 +139,7 @@ describe('a collage of one video', () => {
     target.querySelector('button[aria-label="More ways to mark"]').click();
     flushSync();
     const whole = button('Whole video');
-    expect([whole.disabled, whole.title]).toEqual([true, 'Scenes are marked at passages of this video already']);
+    expect([whole.disabled, whole.title]).toEqual([true, 'Scenes already hold passages of this video, so the whole of it is not one place']);
     target.querySelector('button[aria-label="More ways to mark"]').click();
     flushSync();
     press.click();

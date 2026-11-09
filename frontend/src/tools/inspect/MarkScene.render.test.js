@@ -77,11 +77,11 @@ describe('Mark to geolocate', () => {
 
   it('greys Whole video beside scenes holding passages, and says why on hover', () => {
     const onwhole = vi.fn();
-    const root = render({ wholeOff: 'Scenes are marked at passages of this video already', onwhole });
+    const root = render({ wholeOff: 'Scenes already hold passages of this video, so the whole of it is not one place', onwhole });
     openMenu(root);
     const whole = item('Whole video');
     expect(whole.disabled).toBe(true);
-    expect(whole.getAttribute('title')).toBe('Scenes are marked at passages of this video already');
+    expect(whole.getAttribute('title')).toBe('Scenes already hold passages of this video, so the whole of it is not one place');
     whole.click();
     expect(onwhole).not.toHaveBeenCalled();
   });
