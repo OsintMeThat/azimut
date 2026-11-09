@@ -738,25 +738,28 @@ const COMPOSED_DEPTH = 3;
  * `{ path, from, to, times }` in seconds, the times sorted, or null when a piece is
  * a picture of its own or comes from another file. A piece is the video at an
  * instant, or a picture `origin(path)` reads back: a frame saved from the video,
- * `{ video, time }`, or a picture composed from pieces of its own, `{ pieces: [{ path,
- * time }] }`, such as a straightened collage, which stands for those pieces
- * (`engine/scenes.collage_video`). A single instant reads `from === to`.
+ * `{ video, time }`, the video itself, `{ video, time: null }`, or a picture composed
+ * from pieces of its own, `{ pieces: [{ path, time }] }`, such as a straightened
+ * collage, which stands for those pieces (`engine/scenes._collage_video`). A single
+ * instant reads `from === to`. Pieces that all come from one video with no instant
+ * recorded still belong to it, at no instant: `times` is empty, `from` and `to` null.
  */
 export function collageVideo(nodes, origin = () => null) {
   if (!nodes?.length) return null;
   const found = piecesVideo(nodes.map((n) => n.save), origin, 0);
   if (!found) return null;
   const times = found.times.sort((a, b) => a - b);
-  return { path: found.path, from: times[0], to: times[times.length - 1], times };
+  return { path: found.path, from: times[0] ?? null, to: times.at(-1) ?? null, times };
 }
 
 function piecesVideo(pieces, origin, depth) {
   let path = null;
   const times = [];
+  // a piece names its video, at an instant when one is known
   const take = (video, time) => {
-    if (!video || !Number.isFinite(time) || (path && video !== path)) return false;
+    if (!video || (path && video !== path)) return false;
     path = video;
-    times.push(time);
+    if (Number.isFinite(time)) times.push(time);
     return true;
   };
   for (const piece of pieces) {
@@ -767,8 +770,8 @@ function piecesVideo(pieces, origin, depth) {
     const at = origin(piece?.path);
     if (at?.pieces) {
       const inner = depth < COMPOSED_DEPTH && at.pieces.length ? piecesVideo(at.pieces, origin, depth + 1) : null;
-      if (!inner || !inner.times.every((time) => take(inner.path, time))) return null;
-    } else if (!take(at?.video, Number(at?.time))) {
+      if (!inner || !take(inner.path, null) || !inner.times.every((time) => take(inner.path, time))) return null;
+    } else if (!take(at?.video, at?.time == null ? null : Number(at.time))) {
       return null;
     }
   }
@@ -776,18 +779,22 @@ function piecesVideo(pieces, origin, depth) {
 }
 
 /**
- * What a case file says it was made from, for `collageVideo`: a frame Inspect saved
- * from a video, `{ video, time }`, or a picture composed from pieces (a collage's
- * export, a straightened collage), `{ pieces }`. Anything else answers null.
+ * What a case file says it was made from, for `collageVideo`: a video is itself,
+ * `{ video, time: null }`; a frame Inspect saved from a video, `{ video, time }`; a
+ * picture composed from pieces (a collage's export, a straightened collage),
+ * `{ pieces }`, each at the instant it recorded, or at none when it was filed before
+ * the instants were (`engine/scenes._composed_pieces`). Anything else answers null.
  */
 export function mediaOrigin(item) {
+  if (item?.kind === 'video' && typeof item.path === 'string' && item.path) return { video: item.path, time: null };
   const src = item?.source;
   if (src?.type !== 'inspect') return null;
   if (src.op === 'frame' && typeof src.from === 'string' && Number.isFinite(src.time)) {
     return { video: src.from, time: src.time };
   }
-  if (src.op === 'collage' && Array.isArray(src.sources) && Array.isArray(src.times) && src.sources.length === src.times.length) {
-    return { pieces: src.sources.map((path, i) => ({ path, time: src.times[i] ?? null })) };
+  if (src.op === 'collage' && Array.isArray(src.sources) && src.sources.length) {
+    const times = Array.isArray(src.times) && src.times.length === src.sources.length ? src.times : [];
+    return { pieces: src.sources.map((path, i) => ({ path, time: times[i] ?? null })) };
   }
   return null;
 }

@@ -2077,7 +2077,9 @@ the pieces within it at the same sharpness (`/inspect/compose` with `clip`), and
 makes the last saved picture out of date. Find reads a cut picture from its frame's corner.
 
 **A collage of one video is marked as that video.** When every piece is one video at an
-instant, or a frame saved from it, or a picture composed from them such as a piece straightened, the panel reads *From channel_departure · 0:01–0:03*,
+instant, or a frame saved from it, or a picture composed from them such as a piece straightened, the panel reads *From channel_departure · 0:01–0:03*;
+a collage whose pieces kept no instant, filed before instants were recorded, reads
+*From channel_departure* alone, as the server reads it (`engine/scenes._collage_video`),
 and **Mark to geolocate** marks the whole video; its arrow offers the stretch the pieces
 span, or the instant of a single piece. Once scenes hold passages of the video, the press
 marks that stretch and the arrow's Whole video is greyed, as in Inspect. A collage of
