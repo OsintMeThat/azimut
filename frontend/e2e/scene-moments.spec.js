@@ -4,11 +4,11 @@ import { CASE_ID, installAppFixture, showProofTab } from './app.fixture.js';
 import { STEPS_FPS, STEPS_WEBM, serveRange } from './video.fixture.js';
 
 /**
- * One scene, several moments: the same place showing twice in one video. Same place
+ * One scene, several passages: the same place showing twice in one video. Same place
  * as… joins two scenes still to prove into one, two bands in one colour, and its Undo
- * parts them again; Another moment adds the frame on screen; the To-do says every
- * moment; Make the proof hands them all to Geo Proof, which states them, each panel
- * printing the moment it shows in.
+ * parts them again; Another passage adds one of the scene's kind from the frame on
+ * screen; the To-do says every passage; Make the proof hands them all to Geo Proof,
+ * which states them, each panel printing the passage it shows in.
  *
  * The clip is the short one of `video.fixture.js`, read by its probe as a longer one so
  * its times are the ones an analyst writes. `MOMENT_SHOTS` names a folder for a picture
@@ -221,7 +221,7 @@ test('joins two scenes of one place into one, two bands in one colour, and its U
 
   // closed, it writes every moment
   await rows(page).nth(0).click();
-  await expect(rows(page).nth(1).getByTestId('scene-when')).toHaveText('2 moments · 0:00–0:07 · 1:05–1:12');
+  await expect(rows(page).nth(1).getByTestId('scene-when')).toHaveText('2 passages · 0:00–0:07 · 1:05–1:12');
   await page.mouse.move(0, 0);
   await shoot(page, 'joined-closed');
 
@@ -234,7 +234,7 @@ test('joins two scenes of one place into one, two bands in one colour, and its U
   await expect(page.getByTestId('scene-band')).toHaveCount(2);
 });
 
-test('adds the frame on screen as another moment of a scene still to prove, and takes it off again', async ({ page }) => {
+test('adds another passage of a scene still to prove, of its kind, from the frame on screen, and takes it off again', async ({ page }) => {
   const { server } = await serve(page, { scenes: [kept('sc_a', 0.12, 0.32, 'Road bridge')] });
   const row = rows(page).first();
   await expect(row.getByRole('radio', { name: 'Passage' })).toHaveAttribute('aria-checked', 'true');
@@ -243,21 +243,49 @@ test('adds the frame on screen as another moment of a scene still to prove, and 
   for (let i = 0; i < 40 && (await now.textContent()) !== '0:00.720'; i += 1) await page.keyboard.press('ArrowRight');
   await expect(now).toHaveText('0:00.720');
 
-  await row.getByRole('button', { name: 'Another moment' }).click();
+  // a stretch as long as the first, from that frame, in hand on the bar
+  await row.getByRole('button', { name: 'Another passage' }).click();
   await expect(row.getByTestId('scene-moment')).toHaveCount(2);
   await expect(row.getByRole('textbox', { name: 'Scene start' }).nth(1)).toHaveValue('0:00.72');
+  await expect(row.getByRole('textbox', { name: 'Scene end' }).nth(1)).toHaveValue('0:00.92');
+  await expect(page.getByTestId('scene-grip-start')).toHaveCount(1);
+  await expect(page.getByTestId('scene-grip-end')).toHaveCount(1);
+  await page.mouse.move(0, 0);
+  await shoot(page, 'another-passage');
   await row.getByRole('button', { name: 'Apply' }).click();
-  await expect.poll(() => server.saves.at(-1)?.spec?.scenes?.[0]?.more).toEqual([{ start: 0.72, end: null }]);
+  await expect.poll(() => server.saves.at(-1)?.spec?.scenes?.[0]?.more).toEqual([{ start: 0.72, end: 0.92 }]);
   expect(server.saves.at(-1).spec.scenes[0]).toMatchObject({ start: 0.12, end: 0.32 });
-  await expect(page.getByTestId('scene-band')).toHaveCount(1);
-  await expect(page.getByTestId('scene-pin')).toHaveCount(1);
+  await expect(page.getByTestId('scene-band')).toHaveCount(2);
+  await expect(page.getByTestId('scene-pin')).toHaveCount(0);
 
-  // a moment comes off again, never the last
-  await row.getByRole('button', { name: 'Remove this moment' }).nth(1).click();
-  await expect(row.getByRole('button', { name: 'Remove this moment' })).toHaveCount(0);
+  // inside a passage of its own, it starts where that one ends
+  await row.getByRole('button', { name: 'Another passage' }).click();
+  await expect(row.getByRole('textbox', { name: 'Scene start' }).nth(2)).toHaveValue('0:00.92');
+  await expect(row.getByRole('textbox', { name: 'Scene end' }).nth(2)).toHaveValue('0:01.12');
+
+  // a passage comes off again, never the last
+  await row.getByRole('button', { name: 'Remove this passage' }).nth(2).click();
+  await row.getByRole('button', { name: 'Remove this passage' }).nth(1).click();
+  await expect(row.getByRole('button', { name: 'Remove this passage' })).toHaveCount(0);
   await row.getByRole('button', { name: 'Apply' }).click();
   await expect.poll(() => server.saves.at(-1)?.spec?.scenes?.[0]).toEqual({ id: 'sc_a', start: 0.12, end: 0.32, label: 'Road bridge' });
-  await expect(page.getByTestId('scene-pin')).toHaveCount(0);
+  await expect(page.getByTestId('scene-band')).toHaveCount(1);
+});
+
+test('adds an instant to a scene of instants, and says so when none is free', async ({ page }) => {
+  await serve(page, { scenes: [kept('sc_a', 0.12, null, 'Mast')] });
+  const row = rows(page).first();
+  const now = page.locator('.player-time .now');
+  for (let i = 0; i < 40 && (await now.textContent()) !== '0:00.120'; i += 1) await page.keyboard.press('ArrowRight');
+  await row.getByRole('button', { name: 'Another passage' }).click();
+  await expect(row.getByTestId('scene-moment')).toHaveCount(1);
+  await expect(row.getByRole('status')).toHaveText('The scene holds this instant already');
+  await page.keyboard.press('ArrowRight');
+  await row.getByRole('button', { name: 'Another passage' }).click();
+  await expect(row.getByTestId('scene-moment')).toHaveCount(2);
+  await expect(row.getByRole('textbox', { name: 'Scene start' }).nth(1)).toHaveValue('0:00.16');
+  await expect(row.getByRole('textbox', { name: 'Scene end' })).toHaveCount(0);
+  await expect(row.getByRole('status')).toHaveCount(0);
 });
 
 test('the To-do’s row says every moment of a scene showing its place again', async ({ page }) => {

@@ -233,12 +233,12 @@ test('marks a captured frame with the colour of each scene it falls in, by its t
   await expect(tiles.nth(2).getByTestId('scene-dots')).toHaveAttribute('title', 'In a scene to geolocate');
 });
 
-test('offers a scene on a frame captured in none, the whole video or this moment, and keeps an instant there in one press', async ({ page }) => {
+test('offers a scene on a frame captured in none, the whole video or this instant, and keeps an instant there in one press', async ({ page }) => {
   const { saves } = await openSteps(page);
 
   await seekTo(page, 0.5);
   await page.keyboard.press('c');
-  const add = page.getByRole('button', { name: 'This moment' });
+  const add = page.getByRole('button', { name: 'This instant' });
   await expect(add).toBeVisible();
   const offer = page.locator('.toast', { has: add });
   await expect(offer).toContainText('Frame captured at 0:00.48 · Add a scene');
@@ -415,7 +415,7 @@ test('ends the open scene with Shift+S, and takes its start from the frame on sc
   await expect(page.locator('.toast', { hasText: 'Scene now 0:00–0:00' })).toBeVisible();
 });
 
-test('gives a proof about the whole video its moments, two of them, and the whole video back', async ({ page }) => {
+test('gives a proof about the whole video its passages, two of them, and the whole video back', async ({ page }) => {
   const depot = {
     kind: 'proof', proof: 'Depot', proof_id: 'e_depot', title: 'Depot', moments: [], at: [0.2],
     stated: false, draft: null, points: [], png: null, thumb: null, when: null, when_zone: null, description: null,
@@ -437,14 +437,18 @@ test('gives a proof about the whole video its moments, two of them, and the whol
   await page.getByRole('radio', { name: 'Passage' }).click();
   const end = page.getByRole('textbox', { name: 'Scene end' });
   await end.fill('1');
-  // the same place again later: a second moment, at the frame on screen, typed over
-  await page.getByRole('button', { name: 'Another moment' }).click();
+  // the same place again: a second passage of the first's kind, from the frame on screen
+  // and shortened to the room before the first, made an instant and typed over
+  await page.getByRole('button', { name: 'Another passage' }).click();
+  await expect(page.getByRole('textbox', { name: 'Scene start' }).nth(1)).toHaveValue('0:00.2');
+  await expect(page.getByRole('textbox', { name: 'Scene end' }).nth(1)).toHaveValue('0:00.6');
+  await page.getByRole('radio', { name: 'Instant' }).click();
   await page.getByRole('textbox', { name: 'Scene start' }).nth(1).fill('1.08');
   await page.getByRole('textbox', { name: 'Scene start' }).nth(1).press('Enter');
 
   await expect.poll(() => proofTimes).toEqual([[{ start: 0.6, end: 1 }, { start: 1.08, end: null }]]);
   await expect(page.locator('.toast', { hasText: '“Depot” is now 0:00–0:01 · 0:01' })).toBeVisible();
-  await expect(row).toHaveAttribute('aria-label', 'Scene, 2 moments · 0:00–0:01 · 0:01');
+  await expect(row).toHaveAttribute('aria-label', 'Scene, 2 passages · 0:00–0:01 · 0:01');
   // both drawn in the proof's colour: a band and a pin
   await expect(page.getByTestId('scene-band')).toHaveCount(1);
   await expect(page.getByTestId('scene-pin')).toHaveCount(1);

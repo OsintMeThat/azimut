@@ -195,12 +195,42 @@ test('hangs the collages of the clip under their scenes, and offers them to the 
   await expect(page).toHaveURL(/#collage/);
 });
 
-test('offers Mark to geolocate above the tabs, its arrow This moment and Whole video', async ({ page }) => {
-  await serve(page, { scenes: [kept('sc_1', 0.4, 0.9, 'Road bridge?')] });
+test('offers Mark to geolocate above the tabs, its arrow This instant and Whole video', async ({ page }) => {
+  await serve(page, { scenes: [] });
   await page.getByRole('button', { name: 'More ways to mark' }).click();
-  await expect(page.getByRole('menuitem', { name: /This moment/ })).toBeVisible();
-  await expect(page.getByRole('menuitem', { name: /Whole video/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /This instant/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Whole video/ })).toBeEnabled();
   await shoot(page, 'mark-menu');
+});
+
+test('greys Whole video once a scene holds a passage, in the arrow and in another scene\'s kinds, saying why', async ({ page }) => {
+  await serve(page, { scenes: [kept('sc_1', 0.4, 0.9, 'Road bridge?'), kept('sc_2', 1, null, '')] });
+  await page.getByRole('button', { name: 'More ways to mark' }).click();
+  const item = page.getByRole('menuitem', { name: /Whole video/ });
+  await expect(item).toBeDisabled();
+  await expect(item).toHaveAttribute('title', 'Scenes are marked at passages of this video already');
+  await page.keyboard.press('Escape');
+  const kind = rows(page).first().getByRole('radio', { name: 'Whole video' });
+  await expect(kind).toBeDisabled();
+  await expect(kind).toHaveAttribute('title', 'Another scene is marked at passages of this video');
+  await expect(rows(page).first().getByRole('radio', { name: 'Instant' })).toBeEnabled();
+});
+
+test('gives the clip\'s one scene about the whole video the instant S marks, Undo making it whole again', async ({ page }) => {
+  const { server } = await serve(page, { scenes: [kept('sc_all', null, null, 'Which town?')] });
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('s');
+  const toast = page.locator('.toast', { hasText: 'no longer the whole video' });
+  await expect(toast).toContainText('“Which town?” now at 0:00, no longer the whole video');
+  await expect(rows(page)).toHaveCount(1);
+  await expect(rows(page).first().getByRole('radio', { name: 'Instant' })).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(() => server.saves.at(-1)?.spec?.scenes).toEqual([{ id: 'sc_all', start: 0.08, end: null, label: 'Which town?' }]);
+  await page.mouse.move(0, 0);
+  await shoot(page, 'takeover-toast');
+  await toast.getByRole('button', { name: 'Undo' }).click();
+  await expect(rows(page).first().getByRole('radio', { name: 'Whole video' })).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(() => server.saves.at(-1)?.spec?.scenes).toEqual([{ id: 'sc_all', start: null, end: null, label: 'Which town?' }]);
 });
 
 test('writes each closed scene\'s kind and time, and opens one at a time', async ({ page }) => {
@@ -243,13 +273,22 @@ test('writes each closed scene\'s kind and time, and opens one at a time', async
 test('invites in the empty strip of a video with nothing marked, and remembers Not now for that file', async ({ page }) => {
   await serve(page, { scenes: [] });
   const invite = page.getByTestId('scene-invite');
-  await expect(invite).toContainText('Several places in this video?');
+  await expect(invite).toContainText('One place or several?');
+  await expect(invite.getByRole('button', { name: 'The whole video: one place' })).toBeVisible();
+  await expect(invite.getByRole('button', { name: /^Several places: mark them as you watch/ })).toBeVisible();
+  await page.mouse.move(0, 0);
   await shoot(page, 'invite');
   // it takes no room of its own: the strip stands as high as with frames in it
   expect((await page.locator('.strip').boundingBox()).height).toBeLessThan(80);
   await page.setViewportSize({ width: 1100, height: 720 });
   await expect(invite.getByRole('button', { name: 'Not now' })).toBeInViewport();
-  expect((await page.locator('.strip').boundingBox()).height).toBeLessThan(80);
+  const strip = await page.locator('.strip').boundingBox();
+  expect(strip.height).toBeLessThan(80);
+  // every choice inside the strip, none running under the panel beside it
+  for (const button of await invite.getByRole('button').all()) {
+    const box = await button.boundingBox();
+    expect(box.x + box.width).toBeLessThanOrEqual(strip.x + strip.width);
+  }
   await shoot(page, 'invite-narrow');
   await invite.getByRole('button', { name: 'Not now' }).click();
   await expect(invite).toHaveCount(0);
@@ -258,6 +297,27 @@ test('invites in the empty strip of a video with nothing marked, and remembers N
   await openFile(page, 'Convoy clip');
   await expect(page.locator('.strip')).toContainText('Frames you capture are kept with this video.');
   await expect(invite).toHaveCount(0);
+});
+
+test('says how S marks several places, marks nothing, and stops asking; the whole video keeps one scene', async ({ page }) => {
+  const { server } = await serve(page, { scenes: [] });
+  const invite = page.getByTestId('scene-invite');
+  await invite.getByRole('button', { name: /^Several places/ }).click();
+  await expect(invite).toHaveCount(0);
+  await expect(page.locator('.toast', { hasText: 'Press S where a place shows' })).toBeVisible();
+  await expect(rows(page)).toHaveCount(0);
+  await page.reload();
+  await openFile(page, 'Convoy clip');
+  await expect(page.locator('.strip')).toContainText('Frames you capture are kept with this video.');
+  await expect(invite).toHaveCount(0);
+
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await openFile(page, 'Convoy clip');
+  await invite.getByRole('button', { name: 'The whole video: one place' }).click();
+  await expect(rows(page)).toHaveCount(1);
+  await expect(rows(page).first().getByRole('radio', { name: 'Whole video' })).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(() => server.saves.at(-1)?.spec?.scenes?.[0]).toMatchObject({ start: null, end: null });
 });
 
 /** Where the coachmark's arrow points, and the box it lies in. */
@@ -271,7 +331,7 @@ const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b
 test('points once at the To-do tab from the open sidebar, the toast keeping its words, and Show opens the To-do', async ({ page }) => {
   const { server } = await serve(page, { scenes: [], viewport: { width: 1280, height: 800 } });
   const views = page.getByRole('tablist', { name: 'Sidebar view' });
-  await page.getByTestId('scene-invite').getByRole('button', { name: 'This moment' }).click();
+  await page.keyboard.press('s');
   // the toast says what was done and offers Undo, nothing more
   const toast = page.locator('.toast', { hasText: 'Scene kept at 0:00' });
   await expect(toast).toBeVisible();

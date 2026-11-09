@@ -198,8 +198,8 @@ test('changes the time of a saved proof at once, adds a frame of its player, and
   expect(frameSaves[0].items[0].time).toBeGreaterThan(1);
   expect(frameSaves[0].items[0].label).toBe('00-00-01 Steps');
   // the new panel's frame is outside the instant, which says so
-  await expect(block.locator('.outside')).toContainText('1 panel is outside these moments');
-  await block.getByRole('button', { name: 'Add its moment' }).click();
+  await expect(block.locator('.outside')).toContainText('1 panel is outside these passages');
+  await block.getByRole('button', { name: 'Add its passage' }).click();
   await expect.poll(() => scenePuts.length).toBe(2);
   expect(scenePuts[1].body.moments).toHaveLength(2);
   await expect(block.locator('.outside')).toHaveCount(0);
