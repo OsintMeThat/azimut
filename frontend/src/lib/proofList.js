@@ -1,9 +1,9 @@
 /**
  * The saved proofs as Geo Proof lists them: its home (Continue, the search) and the Open
  * proof list. The rows are `GET /cases/{id}/proofs`, newest first; a proof resting on a
- * video says which and where it stands among that video's slides (`video`, `order`,
- * `slide` of `slides`, `engine/scenes.proof_slides`), and a proof on photos says nothing
- * of the kind, so it reads exactly as it always did.
+ * video says which, what the case calls it and where it stands among that video's
+ * slides (`video`, `video_title`, `order`, `slide` of `slides`, `engine/scenes.proof_slides`),
+ * and a proof on photos says nothing of the kind, so it reads exactly as it always did.
  */
 import { matchesTerms } from './folderBrowse.js';
 import { videoName } from './proofScene.js';
@@ -24,7 +24,7 @@ export const onVideo = (entry) => typeof entry?.video === 'string' && !!entry.vi
  */
 export function slideTag(entry, { short = false } = {}) {
   if (!onVideo(entry)) return null;
-  const name = videoName(entry.video);
+  const name = videoName(entry.video, entry.video_title);
   const where = entry.slides > 1 ? (short ? `${entry.slide}/${entry.slides}` : `slide ${entry.slide} of ${entry.slides}`) : '';
   return { name, where, text: where ? `${name} · ${where}` : name, color: sceneColorAt(entry.order) };
 }
@@ -54,12 +54,15 @@ export function findProofs(entries, query) {
  */
 export function proofVideos(entries) {
   const counts = new Map();
+  const titles = new Map();
   let none = 0;
   for (const entry of entries ?? []) {
-    if (onVideo(entry)) counts.set(entry.video, (counts.get(entry.video) ?? 0) + 1);
-    else none += 1;
+    if (onVideo(entry)) {
+      counts.set(entry.video, (counts.get(entry.video) ?? 0) + 1);
+      if (entry.video_title) titles.set(entry.video, entry.video_title);
+    } else none += 1;
   }
-  const videos = [...counts].map(([video, count]) => ({ video, name: videoName(video), count }))
+  const videos = [...counts].map(([video, count]) => ({ video, name: videoName(video, titles.get(video)), count }))
     .sort((a, b) => a.name.localeCompare(b.name) || a.video.localeCompare(b.video));
   return { videos, none };
 }

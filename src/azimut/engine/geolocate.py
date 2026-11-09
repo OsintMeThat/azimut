@@ -134,14 +134,16 @@ def current(case: Case) -> dict[str, Any] | None:
         held = dict(_active.get(case.id) or {})
     if not held:
         return None
-    draft = _draft(case, held["video"], held["draft"]) if _present(case, [held["video"]]) else None
+    item = _present(case, [held["video"]]).get(held["video"])
+    draft = _draft(case, held["video"], held["draft"]) if item is not None else None
     proofs = scenes_engine.read_proofs(case)
     kind = _kinds(case, [held["video"]]).get(held["video"], "video")
     if draft is None or draft.get("abandoned") or _proved(proofs[0], _taken(proofs[0]), held["video"], draft["id"], kind):
         stop(case, held["draft"])
         return None
     row = _placed(scene_row(case, held["video"], draft, kind), _orders(case, [held["video"]], proofs))
-    return {**row, "since": held["since"]}
+    # what the case calls its file, which the pill names
+    return {**row, "file_title": scenes_engine.file_title(item, held["video"]), "since": held["since"]}
 
 
 def settle(case: Case) -> bool:
@@ -169,7 +171,9 @@ def start(case: Case, video: str, draft_id: str) -> dict[str, Any]:
     since = _now()
     with _lock:
         _active[case.id] = {"video": video, "draft": draft_id, "since": since}
-    return {**_placed(scene_row(case, video, draft, kind), _orders(case, [video], proofs)), "since": since}
+    row = _placed(scene_row(case, video, draft, kind), _orders(case, [video], proofs))
+    title = scenes_engine.file_title(_present(case, [video]).get(video), video)
+    return {**row, "file_title": title, "since": since}
 
 
 def stop(case: Case, draft_id: str | None = None) -> bool:
@@ -481,7 +485,7 @@ def queue(case: Case, with_proofs: bool = False) -> dict[str, Any]:
         if not rows and not open_proofs:
             continue
         rows.sort(key=lambda r: (-math.inf, -math.inf) if r["start"] is None else (r["start"], r["end"] or r["start"]))
-        title = item.get("title") or item.get("filename") or subject.rsplit("/", 1)[-1]
+        title = scenes_engine.file_title(item, subject)
         row: dict[str, Any] = {"video": subject, "title": str(title), "kind": kind, "scenes": rows}
         if with_proofs:
             row["proofs"] = [

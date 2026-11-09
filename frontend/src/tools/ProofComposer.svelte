@@ -445,6 +445,8 @@
     toast,
     where: () => ({ caseId: caseState.current?.id ?? null, name: savedName }),
     frames: () => sceneFrames,
+    // a video by its title in Media, as every surface of Geo Proof names it
+    titleOf: (path) => mediaTitle(path),
     // the ★ video's scenes, as the strip read them: where a proof made by hand finds its own
     listed: () => slides.answer,
     // a time printed on the picture is a picture the saved one no longer is
@@ -847,8 +849,10 @@
     }
   }
 
-  /** What a case file is called in the chooser. */
-  const fileTitle = (path) => caseMedia.find((one) => one.path === path)?.title || String(path).split('/').pop();
+  /** A case file's title in Media, or '' when the case does not say one. */
+  const mediaTitle = (path) => caseMedia.find((one) => one.path === path)?.title ?? '';
+  /** What a case file is called in the chooser and wherever a proof names its video. */
+  const fileTitle = (path) => videoName(path, mediaTitle);
 
   // ---- a scene's material, as Make the proof reads it -----------------------------------
   // Read once here for every surface of Geo Proof that makes the proof of a scene still to
@@ -7657,6 +7661,7 @@
         <ProofSlides
           tiles={strip}
           video={slides.video}
+          title={mediaTitle(slides.video)}
           caseId={caseState.current?.id ?? ''}
           gone={slides.gone}
           bind:folded={slides.folded}
@@ -8504,7 +8509,7 @@
         <!-- A proof of a video: its scene goes back to geolocate, as a delete always gave
              it back, or goes with it. -->
         <fieldset class="scene-choice">
-          <legend>Its scene in {videoName(deleteTarget.video)}</legend>
+          <legend>Its scene in {videoName(deleteTarget.video, mediaTitle)}</legend>
           <label><input type="radio" name="proof-scene" value="keep" bind:group={deleteScene} /> Goes back to To geolocate</label>
           <label><input type="radio" name="proof-scene" value="drop" bind:group={deleteScene} /> Is removed with it</label>
         </fieldset>

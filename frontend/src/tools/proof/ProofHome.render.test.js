@@ -14,7 +14,7 @@ const proof = (name, title, hoursAgo, extra = {}) => ({
   name, title, updated_at: at(hoursAgo), thumb: `proofs/.thumbs/${name}.webp`, png: `proofs/${name}.png`, video: null, ...extra,
 });
 const PROOFS = [
-  proof('market', 'Market', 2, { video: 'media/clip.mp4', order: 1, slide: 2, slides: 4 }),
+  proof('market', 'Market', 2, { video: 'media/clip.mp4', video_title: 'Harbour run', order: 1, slide: 2, slides: 4 }),
   proof('holiday', 'Holiday', 5),
   ...Array.from({ length: 6 }, (_, i) => proof(`p${i}`, `Proof ${i}`, 30 + i)),
 ];
@@ -52,12 +52,12 @@ describe('the home of a case with proofs', () => {
     expect(home().querySelector('input[aria-label="Find a proof by name"]')).not.toBeNull();
   });
 
-  it('continues from the last six proofs, a proof of a video tagged in its scene\'s colour', () => {
+  it('continues from the last six proofs, a proof of a video tagged by its title in its scene\'s colour', () => {
     const { onopen, onall } = open();
     const cards = [...home().querySelectorAll('.ph-card')];
     expect(cards.map((c) => c.querySelector('.ph-title').textContent)).toEqual(['Market', 'Holiday', 'Proof 0', 'Proof 1', 'Proof 2', 'Proof 3']);
     const tag = cards[0].querySelector('.ph-tag');
-    expect(tag.textContent).toBe('clip.mp4 · 2/4');
+    expect(tag.textContent).toBe('Harbour run · 2/4');
     expect(tag.getAttribute('style')).toContain(`--scene: ${sceneColorAt(1)}`);
     expect(cards[1].querySelector('.ph-tag')).toBeNull();
     expect(cards[0].querySelector('.ph-when').textContent).toBe('2 h ago');

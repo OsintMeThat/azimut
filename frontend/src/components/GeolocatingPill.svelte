@@ -13,6 +13,7 @@
   import { onDestroy, untrack } from 'svelte';
   import Icon from './Icon.svelte';
   import { onEvent } from '../lib/events.js';
+  import { fileStem } from '../lib/proofScene.js';
   import { caseState, toast, uiState } from '../lib/state.svelte.js';
   import { geolocating, readGeolocating, stopGeolocating } from '../lib/geolocating.svelte.js';
   import { GEOLOCATING_HELP as HELP } from '../lib/geolocatingHelp.js';
@@ -28,7 +29,8 @@
   const time = $derived(said ? queueShortTime(said) : '');
   const picture = $derived(isPicture(held));
   const count = $derived(captureCount(held));
-  const file = $derived(held ? String(held.video).split('/').pop() : '');
+  // what the case calls its file: its title in Media, else its name with no extension
+  const file = $derived(held ? held.file_title || fileStem(held.video) : '');
   const color = $derived(held ? sceneColorAt(held.order) : null);
   // a narrow bar drops the word and the label; the whole line stays on the pill
   const named = $derived(held ? ['Geolocating', queueTime(said), held.label].filter(Boolean).join(' · ') : '');

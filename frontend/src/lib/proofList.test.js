@@ -3,22 +3,22 @@ import { CONTINUE_SHOWN, NO_VIDEO, continueShown, findProofs, inVideo, onVideo, 
 import { sceneColorAt } from './scenes.js';
 
 const ROWS = [
-  { name: 'market', title: 'Market', video: 'media/clip.mp4', order: 2, slide: 2, slides: 4 },
+  { name: 'market', title: 'Market', video: 'media/clip.mp4', video_title: 'Harbour run', order: 2, slide: 2, slides: 4 },
   { name: 'holiday', title: 'Holiday snaps', video: null },
-  { name: 'bridge', title: 'Road bridge', video: 'media/clip.mp4', order: 0, slide: 1, slides: 4 },
+  { name: 'bridge', title: 'Road bridge', video: 'media/clip.mp4', video_title: 'Harbour run', order: 0, slide: 1, slides: 4 },
   { name: 'tower', title: 'Water tower', video: 'media/other/road.webm', order: 1, slide: 1, slides: 1 },
   { name: 'old', title: 'Old proof' },
 ];
 
 describe('a proof of a video, tagged', () => {
-  it('says its video and its place among the slides, in its scene\'s colour', () => {
-    expect(slideTag(ROWS[0])).toEqual({ name: 'clip.mp4', where: 'slide 2 of 4', text: 'clip.mp4 · slide 2 of 4', color: sceneColorAt(2) });
-    expect(slideTag(ROWS[0], { short: true })).toEqual({ name: 'clip.mp4', where: '2/4', text: 'clip.mp4 · 2/4', color: sceneColorAt(2) });
+  it('says its video by its title and its place among the slides, in its scene\'s colour', () => {
+    expect(slideTag(ROWS[0])).toEqual({ name: 'Harbour run', where: 'slide 2 of 4', text: 'Harbour run · slide 2 of 4', color: sceneColorAt(2) });
+    expect(slideTag(ROWS[0], { short: true })).toEqual({ name: 'Harbour run', where: '2/4', text: 'Harbour run · 2/4', color: sceneColorAt(2) });
   });
 
-  it('states no place for a video\u2019s only slide', () => {
+  it('states no place for a video\u2019s only slide, and names one with no title by its file, no extension', () => {
     for (const short of [false, true]) {
-      expect(slideTag(ROWS[3], { short })).toMatchObject({ name: 'road.webm', where: '', text: 'road.webm' });
+      expect(slideTag(ROWS[3], { short })).toMatchObject({ name: 'road', where: '', text: 'road' });
     }
   });
 
@@ -60,8 +60,8 @@ describe('the Open list\'s filter by video', () => {
   it('names each video once with its count, and counts the proofs on no video', () => {
     expect(proofVideos(ROWS)).toEqual({
       videos: [
-        { video: 'media/clip.mp4', name: 'clip.mp4', count: 2 },
-        { video: 'media/other/road.webm', name: 'road.webm', count: 1 },
+        { video: 'media/clip.mp4', name: 'Harbour run', count: 2 },
+        { video: 'media/other/road.webm', name: 'road', count: 1 },
       ],
       none: 2,
     });

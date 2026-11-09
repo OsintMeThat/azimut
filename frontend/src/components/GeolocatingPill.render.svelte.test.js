@@ -87,7 +87,14 @@ describe('the pill', () => {
     const count = target.querySelector('[data-testid="geolocating-count"]');
     expect(count.textContent.trim()).toBe('1');
     expect(count.getAttribute('title')).toBe('1 capture gathered for it');
-    expect(button('Geolocating').getAttribute('title')).toBe('Open the scene in Inspect, on convoy.mp4');
+    // its file by what the case calls it, else its name without the extension
+    expect(button('Geolocating').getAttribute('title')).toBe('Open the scene in Inspect, on convoy');
+  });
+
+  it('names its file by its title in Media when the server says one', async () => {
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: { ...SCENE, file_title: 'Convoy on the coast road' } });
+    await show();
+    expect(button('Geolocating').getAttribute('title')).toBe('Open the scene in Inspect, on Convoy on the coast road');
   });
 
   it('says the first moment of a scene showing its place again and counts the rest, every one on hover', async () => {

@@ -903,22 +903,44 @@ def _collage_specs(case: "Case") -> list[tuple[str, dict[str, Any]]]:
     return out
 
 
+def _pieces(spec: dict[str, Any]) -> list[tuple[Any, Any]]:
+    """Each piece of a collage document as (file, instant), in the order it lays them out."""
+    nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
+    return [((n.get("save") or {}).get("path"), (n.get("save") or {}).get("time")) for n in nodes]
+
+
+def _exported_path(spec: dict[str, Any]) -> str | None:
+    exported = spec.get("exported")
+    path = exported.get("path") if isinstance(exported, dict) else None
+    return path if isinstance(path, str) and path else None
+
+
 def collage_pieces(case: "Case") -> list[dict[str, Any]]:
     """Every collage with each piece's file and instant, and the picture it last
     exported: what reads a collage back to the video its pieces were cut from."""
     out = []
     titles = _collage_titles(case)
     for rel, spec in _collage_specs(case):
-        nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
-        exported: dict[str, Any] = spec["exported"] if isinstance(spec.get("exported"), dict) else {}
         out.append({
             "name": Path(rel).stem,
             "title": titles.get(rel) or Path(rel).stem,
-            "pieces": [((n.get("save") or {}).get("path"), (n.get("save") or {}).get("time")) for n in nodes],
-            "export": exported.get("path") if isinstance(exported.get("path"), str) else None,
+            "pieces": _pieces(spec),
+            "export": _exported_path(spec),
             "current": _export_current(case, spec),
         })
     return out
+
+
+def collage_layouts(case: "Case") -> list[dict[str, Any]]:
+    """Every collage's pieces and the picture it last exported, with no title and no
+    check of the export: one pass over the documents, for a read over many files."""
+    return [{"pieces": _pieces(spec), "export": _exported_path(spec)} for _rel, spec in _collage_specs(case)]
+
+
+def collage_exports(case: "Case") -> dict[str, list[tuple[Any, Any]]]:
+    """The pieces of every collage by the picture it last exported: how a picture filed
+    before the pieces' instants were recorded on it finds them again."""
+    return {layout["export"]: layout["pieces"] for layout in collage_layouts(case) if layout["export"]}
 
 
 def _collage_titles(case: "Case") -> dict[str, str]:

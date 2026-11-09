@@ -2074,7 +2074,11 @@ and Inspect's time editor; Apply moves that scene's time alone
 (`PUT /cases/{id}/scenes/{draft}/time`), with Undo, and a time holding none of the pieces
 says the collage leaves the scene. A proved scene says Proved and
 opens its proof. On the server a collage of one video's frames reads back to that video
-like a frame (`engine/scenes.py`), so a proof resting on it alone states its scene.
+like a frame (`engine/scenes.py`), so a proof resting on it alone states its scene. The
+rule holds at every depth, a cut of a straightened collage included. A picture filed before
+the pieces' instants were recorded takes them from the collage that exported it while it
+still lays out the same files, and with none to be found it still belongs to its video, at
+no instant: the proof sorts after the timed ones and its frame pins nothing on the bar.
 
 **Auto-stitch leaves out what is painted out.** Areas brushed out of a piece (a
 passer-by, a car, a caption) are never matched, read on the piece as it is cut, its crop
@@ -4310,8 +4314,11 @@ in the composer are not panels.
 column and the toolbar wait for a proof. On top, a large **New proof** and a search that
 finds a proof by name, Enter opening the first. **Continue** holds the last proofs saved
 as large thumbnails with their name and how long ago, six at most and as many as make whole
-rows, a proof of a video tagged *clip.mp4 · 2/4* in its scene's colour (a video's only slide
-says just its name), and *All N proofs* opens the Open proof list. **To
+rows, a proof of a video tagged *Harbour run · 2/4* in its scene's colour (a video's only
+slide says just its name), and *All N proofs* opens the Open proof list. A video is named by
+the title Media gives it, else by its file name without the extension, here and wherever a
+scene or a proof names its video: the Open list, the strip, the Scene tab, New proof, the
+To-do and the pill. **To
 prove** shows only when the case has scenes still to prove: a card per video with its
 thumbnail and its scenes as chips, each with its colour, name, time and where it stands. A
 chip is Make the proof: the frames of the scene chosen as from the strip, or for a picture
@@ -4340,8 +4347,8 @@ Enter creates and Escape closes. A case with no scene shows no scene anywhere.
 
 **Open proof** shows its list on the press, its rows following when the case answers. A
 pick closes it at once, and a small tag over the canvas names the proof while its pictures
-load. A proof of a video carries a small line in its scene's colour, *clip.mp4 · slide 2 of
-4*: its place among that video's proofs in clip order, the abandoned last, or just its name
+load. A proof of a video carries a small line in its scene's colour, *Harbour run · slide 2
+of 4*: its place among that video's proofs in clip order, the abandoned last, or just its name
 when it is that video's only one. A long name gives way and the place stays. A select
 beside the search narrows the list to one video or to the proofs on no video. A proof on
 photos reads as it always did. The list says it for every proof in one pass on the server

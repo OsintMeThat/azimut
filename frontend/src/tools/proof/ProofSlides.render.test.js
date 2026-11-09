@@ -71,7 +71,13 @@ describe('the strip of a video\'s slides', () => {
     expect(tile('s2').classList).toContain('abandoned');
     expect(document.body.querySelector('[aria-label="New scene"]')).not.toBeNull();
     expect(document.body.querySelector('[aria-label="Every slide"]').textContent.trim()).toBe('6');
-    expect(document.body.querySelector('.chip').textContent.trim()).toBe('clip.mp4');
+    // the video by its file name, no extension, until Media gives it a title
+    expect(document.body.querySelector('.chip').textContent.trim()).toBe('clip');
+  });
+
+  it('names the video by its title in Media', () => {
+    show({ title: 'Harbour run' });
+    expect(document.body.querySelector('.chip').textContent.trim()).toBe('Harbour run');
   });
 
   it('draws a proved slide with its thumbnail, never its full picture, and its time', () => {
@@ -358,7 +364,7 @@ describe('many slides', () => {
   it('fade into the ends of a tight strip rather than take arrows, the video named on hover', () => {
     show({ tiles: slideTiles(many(12), { started: true, name: 'Place 6' }), width: 620 });
     expect(document.body.querySelector('.chip').classList).toContain('bare');
-    expect(document.body.querySelector('.chip').getAttribute('aria-label')).toBe('clip.mp4');
+    expect(document.body.querySelector('.chip').getAttribute('aria-label')).toBe('clip');
     const lane = document.body.querySelector('.lane');
     [...lane.querySelectorAll('.slot')].forEach((slot, index) => {
       Object.defineProperty(slot, 'offsetLeft', { value: index * 81, configurable: true });

@@ -31,8 +31,9 @@
   let {
     /** `lib/proofSlides.slideTiles`, in strip order. */
     tiles = [],
-    /** The video the slides are of, a path in the case. */
+    /** The video the slides are of, a path in the case, and its title in Media. */
     video = '',
+    title = '',
     caseId = '',
     /** The video is no longer in the case: the line says so, with no tiles. */
     gone = false,
@@ -92,7 +93,7 @@
   const compact = $derived(width > 0 && tiles.length * TILE > width - lead - tail - ROOM);
   const mode = $derived(gone ? 'gone' : lone ? 'lone' : folded ? 'folded' : narrow ? 'pager' : 'strip');
   const found = $derived(findTiles(tiles, query));
-  const name = $derived(videoName(video));
+  const name = $derived(videoName(video, title));
   const count = (n) => (n === 1 ? '1 scene' : `${n} scenes`);
   const proved = $derived(tiles.filter((t) => t.kind === 'proof' && t.state !== NO_PICTURE).length);
 

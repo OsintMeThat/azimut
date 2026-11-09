@@ -300,7 +300,7 @@ test('geolocates a scene on the map, its video beside it and the captures counte
   await expect(window.getByTestId('ref-scene')).toHaveClass(/pin/);
 
   // its label goes back to the scene in Inspect, the Scenes tab open on its row
-  await expect(pill.getByRole('button', { name: /^Geolocating/ })).toHaveAttribute('title', 'Open the scene in Inspect, on steps.webm');
+  await expect(pill.getByRole('button', { name: /^Geolocating/ })).toHaveAttribute('title', 'Open the scene in Inspect, on steps');
   await pill.getByRole('button', { name: /^Geolocating/ }).click();
   await expect(page).toHaveURL(/#inspect/);
   await expect(panel(page)).toBeVisible();
