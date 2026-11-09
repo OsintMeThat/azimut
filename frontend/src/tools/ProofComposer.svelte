@@ -1477,6 +1477,11 @@
     // starts here, before Konva hears of it, and given back at the release.
     const dragButtons = [...Konva.dragButtons];
     const beginPointer = (event) => {
+      // a press is tested against the page on screen, never one rebuilt a frame ago
+      if (hitStale && docLayer) {
+        hitStale = false;
+        docLayer.drawHit();
+      }
       if (event.button === 1) Konva.dragButtons = dragButtons.filter((b) => b !== 1);
       closeStranded(); // a new press proves the last gesture is over, however it ended
       gestureSeq += 1;
@@ -1640,15 +1645,18 @@
 
   // Rebuild only when published document content changes. Selection is UI-only
   // and gets a lightweight refresh below, without recreating every image node.
+  // What the page draws is its signature: asked again with the same one, as a case
+  // read again after a save hands over equal values in new objects, the gate skips
+  // the rebuild rather than replace every node a press about to land would hit.
   $effect(() => {
-    JSON.stringify([
+    const signature = JSON.stringify([
       proof.panels.map((p) => [
         p.src, p.caption, p.row, p.scale, p.x, p.y, p.frame,
-        p.crop, p.cut, p.rotation, p.natural, !!p.img,
+        p.crop, p.cut, p.rotation, p.natural, pictureId(p.img),
       ]),
       proof.pastes.map((p) => [
         p.asset, p.x, p.y, p.scale, p.frame,
-        p.crop, p.cut, p.rotation, p.natural, !!p.img,
+        p.crop, p.cut, p.rotation, p.natural, pictureId(p.img),
       ]),
       proof.shapes,
       proof.notes,
@@ -1667,10 +1675,10 @@
       proof.signature,
       proof.signatureText,
       proof.azimutMark,
+      pictureId(sigImg), // the logo lands async — redraw once it does
+      prefs.signatureHandle, // Settings can change the rendered handle live
     ]);
-    sigImg; // the logo lands async — redraw once it does
-    prefs.signatureHandle; // Settings can change the rendered handle live
-    if (stage) canvasRenderGate?.requestRebuild();
+    if (stage) canvasRenderGate?.requestRebuild(signature);
   });
 
   $effect(() => {
@@ -2797,7 +2805,8 @@
     cropStart = { ...cropDraft };
     if (proof.panels.includes(item)) selectPanel(item.id);
     else selectPaste(item.id);
-    requestAnimationFrame(() => { if (stage) { rebuild(); refreshCanvasUi(); } });
+    // through the gate, which holds it past a press still under way
+    canvasRenderGate?.requestRebuild();
   }
 
   /**
@@ -2826,7 +2835,7 @@
     cropStart = null;
     cropHandles?.destroyChildren();
     cropHandles?.getLayer()?.batchDraw();
-    if (hadMarks) requestAnimationFrame(() => { if (stage) { rebuild(); refreshCanvasUi(); } });
+    if (hadMarks) canvasRenderGate?.requestRebuild();
   }
 
   /**
@@ -3786,7 +3795,23 @@
     bands[3]?.setAttrs({ x: x + w, y, width: Math.max(0, right - x - w), height: h });
   }
 
+  // Each picture the page draws, by a number of its own: a picture replaced by another
+  // changes what is drawn though every field around it reads the same.
+  const pictureIds = new WeakMap();
+  let pictureSeq = 0;
+  function pictureId(img) {
+    if (!img || typeof img !== 'object') return 0;
+    if (!pictureIds.has(img)) pictureIds.set(img, (pictureSeq += 1));
+    return pictureIds.get(img);
+  }
+
+  // Whether the page was rebuilt since its hit graph was last drawn. Konva draws it a
+  // frame later, so a press landing inside that frame would be tested against nodes
+  // gone: it lost its target, and with it the selection (`beginPointer`).
+  let hitStale = false;
+
   function rebuild() {
+    hitStale = true;
     docLayer.destroyChildren();
     // A template can be selected before any panels are chosen. Keep its style
     // in state, but do not render a background, footer, logo, or handle yet.
@@ -6419,7 +6444,12 @@
       stage.position(prevPos);
       stage.width(prevSize.w);
       stage.height(prevSize.h);
-      rebuild();
+      // a save asked under a press (Ctrl+S mid-drag) keeps the nodes in hand: the
+      // handles come back now and the page is rebuilt once the press is over
+      if (canvasRenderGate?.active) {
+        refreshCanvasUi();
+        canvasRenderGate.requestRebuild();
+      } else rebuild();
     }
   }
 

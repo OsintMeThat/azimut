@@ -27,12 +27,19 @@ export function bindPanelPointerLifecycle(group, { onPress, onSelect, onDragEnd 
  * Coalesce document rebuilds and keep them out of an active pointer gesture.
  * Replacing Konva nodes between pointerdown and pointerup can leave Firefox
  * dispatching the rest of the gesture to a node that no longer exists.
+ *
+ * A rebuild asked with the document's `signature` is skipped when the document
+ * last built had the same one: a case read again after a save hands the composer
+ * equal values in new objects, and rebuilding for them only replaced every node a
+ * press about to land would have hit. One asked with none always runs.
  */
 export function createCanvasRenderGate(schedule, cancel, { rebuild, refreshUi }) {
   let pointerActive = false;
   let rebuildPending = false;
   let uiPending = false;
   let frame = null;
+  let built = null;
+  let wanted = null;
 
   function arm() {
     if (pointerActive || (!rebuildPending && !uiPending) || frame !== null) return;
@@ -43,12 +50,18 @@ export function createCanvasRenderGate(schedule, cancel, { rebuild, refreshUi })
       const needsUi = uiPending;
       rebuildPending = false;
       uiPending = false;
-      if (needsRebuild) rebuild();
-      else if (needsUi) refreshUi();
+      if (needsRebuild) {
+        built = wanted;
+        rebuild();
+      } else if (needsUi) refreshUi();
     });
   }
 
   return {
+    /** Whether a pointer gesture is under way, which no rebuild may cut into. */
+    get active() {
+      return pointerActive;
+    },
     beginPointer() {
       pointerActive = true;
     },
@@ -56,7 +69,9 @@ export function createCanvasRenderGate(schedule, cancel, { rebuild, refreshUi })
       pointerActive = false;
       arm();
     },
-    requestRebuild() {
+    requestRebuild(signature = null) {
+      if (signature !== null && signature === built && !rebuildPending) return;
+      wanted = signature;
       rebuildPending = true;
       arm();
     },
@@ -70,6 +85,8 @@ export function createCanvasRenderGate(schedule, cancel, { rebuild, refreshUi })
       rebuildPending = false;
       uiPending = false;
       pointerActive = false;
+      built = null;
+      wanted = null;
     },
   };
 }
