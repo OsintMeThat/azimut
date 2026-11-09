@@ -7495,6 +7495,8 @@
     <button class="btn btn-sm" onclick={openNewProofDialog} aria-label="New proof" title="Start a new proof">
       <Icon name="plus" size={14} /> <span class="words">New proof</span>
     </button>
+    <!-- Copy, Save and To Post have nothing to act on at home, so they wait for a proof. -->
+    {#if !homeShown}
     <div class="export-split">
       <button
         class="btn btn-sm export-main"
@@ -7544,12 +7546,13 @@
     <button class="btn btn-info btn-sm" data-guide="proof.save" onclick={() => save({ andPost: true })} disabled={!proofHasContent || saving}>
       <Icon name="post" size={14} /> To Post
     </button>
+    {/if}
   </div>
 
   {#if proofMenu}
     <FloatingMenu anchor={proofMenu} width={220} label="This proof" onclose={() => (proofMenu = null)}>
       {#if scene.star}
-        <button type="button" class="fm-item" title="Open its video in Inspect on its passage" onclick={showInInspect}>
+        <button type="button" class="fm-item" title="Open its video in Inspect on its scene" onclick={showInInspect}>
           <Icon name="inspect" size={14} /><span class="fm-grow">Show in Inspect</span></button>
         <div class="fm-sep"></div>
       {/if}

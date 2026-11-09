@@ -23,12 +23,18 @@ for (const theme of ['dark', 'light']) {
     const header = page.locator('.tool-header');
     const saveProof = header.getByRole('button', { name: 'Save proof', exact: true });
     const toPost = header.getByRole('button', { name: 'To Post', exact: true });
+    // nothing to save at home: the two wait for a proof, and stay disabled on an empty one
+    await expect(saveProof).toHaveCount(0);
+    await expect(toPost).toHaveCount(0);
+    await header.getByRole('button', { name: 'New proof', exact: true }).click();
+    await page.getByRole('dialog', { name: 'New proof' }).getByRole('button', { name: 'Start empty' }).click();
     await expect(saveProof).toBeDisabled();
     const disabledSave = await buttonStyle(saveProof);
     const disabledPublish = await buttonStyle(toPost);
     const neutral = await buttonStyle(header.getByRole('button', { name: 'Open proof', exact: true }));
     const spacing = await header.evaluate((element) => getComputedStyle(element).gap);
 
+    await page.reload();
     await openProofWithPanel(page);
     await expect(saveProof).toBeEnabled();
     const save = await buttonStyle(saveProof);
