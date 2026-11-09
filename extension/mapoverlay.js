@@ -2361,11 +2361,15 @@
     .geo-what > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .geo-what:hover:not([disabled]) { background: none; color: ${t.accent}; }
     .geo-count {
-      flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px;
-      border-radius: 10px; background: ${t.bg3}; color: ${t.text3};
+      flex: none; display: inline-flex; align-items: center; height: 20px; padding: 0 7px;
+      border-radius: 10px; background: ${t.bg3}; color: ${t.text1};
       font-size: 11px; font-variant-numeric: tabular-nums;
     }
-    .geo-count.some { color: ${t.text1}; }
+    /* the two counts, the map's then the file's, a count at 0 greyed */
+    .geo-counts { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .geo-n { display: inline-flex; align-items: center; gap: 3px; }
+    .geo-n svg { flex: none; color: ${t.text3}; }
+    .geo-n.none { color: ${t.text3}; opacity: .6; }
     .geo-count.bump { animation: geo-bump .9s cubic-bezier(.25, .7, .3, 1); }
     @keyframes geo-bump {
       0% { transform: scale(1); background: ${t.bg3}; }
@@ -2423,8 +2427,11 @@
     .geo-row.live .geo-pip { border-color: ${t.accent}; background: ${t.accent}; }
     .geo-text { flex: 1 1 0; min-width: 0; display: grid; }
     .geo-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: ${t.text1}; }
-    /* in whole pieces, so a long state wraps between them rather than losing its count */
-    .geo-meta { font-size: 10.5px; line-height: 1.35; color: ${t.text3}; font-variant-numeric: tabular-nums; }
+    /* its time, then its two counts, in whole pieces so a narrow panel wraps between them */
+    .geo-meta {
+      display: flex; flex-wrap: wrap; align-items: center; column-gap: 9px;
+      font-size: 10.5px; line-height: 1.35; color: ${t.text3}; font-variant-numeric: tabular-nums;
+    }
     .geo-meta > span { white-space: nowrap; }
     /* a band for a passage, a pin for an instant, as the window's bar draws them */
     .geo-mark {
@@ -2707,7 +2714,19 @@
     if (!geo && !total) return "";
     const isGeo = (scene) => !!geo && geo.video === scene.video && geo.id === scene.id;
     const picture = geo?.file_kind === "image";
-    const count = T.captureCount(geo);
+    const count = T.mapCount(geo);
+    // A scene's two counts, as the app shows them: the map's captures by the map's
+    // icon, the video's frames and collages by the video's, a picture's by the
+    // picture's, a count at 0 greyed; the hover says them in words.
+    const counts = (scene, live) => {
+      const words = esc(T.countWords(scene, live));
+      const map = T.mapCount(scene);
+      const given = T.videoCount(scene);
+      const own = scene?.file_kind === "image" ? "image" : "video";
+      return `<span class="geo-counts" title="${words}" role="img" aria-label="${words}">`
+        + `<span class="geo-n${map ? "" : " none"}">${icon("satellite", 11)}${map}</span>`
+        + `<span class="geo-n${given ? "" : " none"}">${icon(own, 11)}${given}</span></span>`;
+    };
     // the count steps up with a pulse, as the app's pill does, carried on across a redraw
     const pulse = bump(geo, count);
     const pill = geo
@@ -2718,9 +2737,7 @@
             <button data-act="geo-stop" class="icon" title="Stop geolocating it, its captures stay with it" aria-label="Stop geolocating">${icon("x", 13)}</button>
           </div>
           <div class="geo-line">
-            <span class="geo-count${count ? " some" : ""}${pulse == null ? "" : " bump"}"${pulse ? ` style="animation-delay: -${pulse}ms"` : ""}
-              title="${count === 1 ? "1 capture gathered for it" : count ? `${count} captures gathered for it` : "Nothing captured for it yet"}"
-              aria-label="${count === 1 ? "1 capture" : `${count} captures`}">${icon("camera", 12)}${count}</span>
+            <span class="geo-count${pulse == null ? "" : " bump"}"${pulse ? ` style="animation-delay: -${pulse}ms"` : ""}>${counts(geo, true)}</span>
             <button data-act="geo-proof" class="geo-proof" title="Make the proof in Azimut, from ${picture ? "the picture and its captures" : "its frames and captures"}"${state.scenes.proving ? " disabled" : ""}>${icon("proof", 12)}<span>Make the proof</span></button>
           </div>
         </div>`
@@ -2731,17 +2748,13 @@
       if (start == null) return "";
       return `<span class="geo-mark${end == null ? " at" : ""}" style="background: ${esc(color)}"></span>`;
     };
+    // the pip is the scene's small mark of where it stands, as the app's counts carry it
     const row = (scene) => `
-      <div class="geo-row${isGeo(scene) ? " live" : ""}${scene.state === "progress" ? " progress" : ""}">
+      <div class="geo-row ${T.sceneStage(scene, isGeo(scene))}">
         <span class="geo-pip"></span>
         <span class="geo-text">
           <span class="geo-name" dir="auto" title="${esc(T.sceneName(scene))}">${scene.label ? "" : mark(scene)}${esc(T.sceneName(scene))}</span>
-          <span class="geo-meta">${[
-            ...(scene.label ? [`${mark(scene)}${esc(T.queueTime(scene))}`] : []),
-            ...T.sceneState(scene, isGeo(scene)).split(" · ").map(esc),
-          ]
-            .map((part) => `<span>${part}</span>`)
-            .join(" · ")}</span>
+          <span class="geo-meta">${scene.label ? `<span>${mark(scene)}${esc(T.queueTime(scene))}</span>` : ""}${counts(scene, isGeo(scene))}</span>
         </span>
         ${isGeo(scene)
           // a switch: pressed again on the scene in hand, it stops, as in the app

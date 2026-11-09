@@ -23,7 +23,19 @@ const VIDEO = 'media/market.mp4';
 const row = (id, start, end, label = '', extra = {}) => ({
   kind: 'draft', video: VIDEO, id, start, end, label, state: 'todo', captures: [], abandoned: null, ...extra,
 });
-const BRIDGE = row('sc_2', 238, 252, 'bridge?', { state: 'progress', captures: ['media/c1.png', 'media/c2.png'] });
+const BRIDGE = row('sc_2', 238, 252, 'bridge?', { state: 'progress', captures: ['media/c1.png', 'media/c2.png'], footage: 5 });
+
+/** What a row of the list says: its name, its time, its two counts, and those in words. */
+function said(el) {
+  const meta = el.querySelector('.geo-meta');
+  const counts = meta.querySelector('.geo-counts');
+  const [map, video] = [...counts.querySelectorAll('.geo-n')];
+  return [
+    el.querySelector('.geo-name').textContent,
+    [...meta.children].filter((part) => part !== counts).map((part) => part.textContent).join(''),
+    map.textContent, video.textContent, counts.getAttribute('title'),
+  ];
+}
 const QUEUE = {
   files: [
     {
@@ -202,15 +214,24 @@ describe('the list', () => {
     expect(panel.$('.note')).toBe(null);
   });
 
-  it('lists by file, each scene with its time, name and state', async () => {
+  it('lists by file, each scene with its time, name and two counts, as the app shows them', async () => {
     panel = open();
     await settle();
     expect(panel.$('.geo-file').textContent).toBe('Market walk');
-    const rows = panel.$$('.geo-row').map((el) => [el.querySelector('.geo-name').textContent, el.querySelector('.geo-meta').textContent]);
-    expect(rows).toEqual([
-      ['Whole video', 'To geolocate'],
-      ['bridge?', '3:58–4:12 · In progress · 2 captures'],
+    expect(panel.$$('.geo-row').map(said)).toEqual([
+      ['Whole video', '', '0', '0', 'To geolocate: no map capture yet, nothing from the video yet'],
+      ['bridge?', '3:58–4:12', '2', '5', 'In progress: 2 map captures, 5 pictures from the video'],
     ]);
+    const [whole, bridge] = panel.$$('.geo-row');
+    // a count at 0 is greyed, and the pip says where the scene stands
+    expect([...whole.querySelectorAll('.geo-n')].map((n) => n.classList.contains('none'))).toEqual([true, true]);
+    expect([...bridge.querySelectorAll('.geo-n')].map((n) => n.classList.contains('none'))).toEqual([false, false]);
+    expect([whole.classList.contains('todo'), bridge.classList.contains('progress')]).toEqual([true, true]);
+    // the map's icon, then the video's
+    expect([...bridge.querySelectorAll('.geo-n svg path')].map((p) => p.getAttribute('d')))
+      .toEqual([window.AzimutMapTheme.ICONS.satellite, window.AzimutMapTheme.ICONS.video]);
+    // and nothing says the state in words but the hover
+    expect(bridge.querySelector('.geo-meta').textContent).not.toContain('In progress');
     expect(panel.$$('.geo-name').every((el) => el.getAttribute('dir') === 'auto')).toBe(true);
   });
 
@@ -256,11 +277,12 @@ describe('a picture marked to geolocate', () => {
 
   it('reads as a picture: Whole picture, and no mark', async () => {
     await unfolded();
-    const rows = panel.$$('.geo-row').map((el) => [el.querySelector('.geo-name').textContent, el.querySelector('.geo-meta').textContent]);
-    expect(rows).toEqual([
-      ['Harbour wall', 'Whole picture · To geolocate'],
-      ['Whole picture', 'To geolocate'],
+    expect(panel.$$('.geo-row').map(said)).toEqual([
+      ['Harbour wall', 'Whole picture', '0', '1', 'To geolocate: no map capture yet, the picture itself'],
+      ['Whole picture', '', '0', '1', 'To geolocate: no map capture yet, the picture itself'],
     ]);
+    // a picture gives itself, by the picture's icon
+    expect(panel.$('.geo-row .geo-n:last-child svg path').getAttribute('d')).toBe(window.AzimutMapTheme.ICONS.image);
     expect(panel.$('.geo-mark')).toBe(null);
     expect(panel.$('.geo-file svg path').getAttribute('d')).toBe(window.AzimutMapTheme.ICONS.image);
     expect(panel.$('[data-act="geo-go"]').title).toBe('Find it on this map, its picture beside it');
@@ -327,7 +349,8 @@ describe('geolocating a scene from over this map', () => {
     await geolocateBridge();
     const pill = panel.$('.geo-pill');
     expect(pill.querySelector('.geo-what').textContent).toBe('Geolocating · 3:58–4:12 · bridge?');
-    expect(pill.querySelector('.geo-count').textContent).toBe('2');
+    expect([...pill.querySelectorAll('.geo-count .geo-n')].map((n) => n.textContent)).toEqual(['2', '5']);
+    expect(pill.querySelector('.geo-counts').getAttribute('title')).toBe('Geolocating: 2 map captures, 5 pictures from the video');
     panel.press('geo-stop');
     await settle();
     expect(panel.calls('/api/ingest/geolocating').at(-1).body).toEqual({ case_id: CASE });
@@ -371,7 +394,7 @@ describe('geolocating a scene from over this map', () => {
     await settle();
     const live = panel.$('.geo-row.live');
     expect(live.querySelector('.geo-name').textContent).toBe('bridge?');
-    expect(live.querySelector('.geo-meta').textContent).toBe('3:58–4:12 · Geolocating · 2 captures');
+    expect(said(live)).toEqual(['bridge?', '3:58–4:12', '2', '5', 'Geolocating: 2 map captures, 5 pictures from the video']);
   });
 
   it('says why when the app refuses, and reads the queue again', async () => {
@@ -440,7 +463,7 @@ describe('in step with the app', () => {
     panel.nudge({ type: 'geolocating', case_id: CASE, video: VIDEO, draft: 'sc_2' });
     await settle();
     expect(panel.calls('/api/ingest/scenes')).toHaveLength(1);
-    expect(panel.$('.geo-pill .geo-count').textContent).toBe('3');
+    expect(panel.$('.geo-pill .geo-count .geo-n').textContent).toBe('3');
     // started in the app, it is offered here without opening anything on its own
     expect(panel.tools.refs.open).toHaveLength(0);
   });
@@ -492,17 +515,19 @@ describe('a nudge, shown before the queue is read again', () => {
     panel.forget();
     return later;
   }
-  const count = () => panel.$('.geo-pill .geo-count');
+  // the map's count, in the pill's chip, which pulses as a capture lands
+  const count = () => panel.$('.geo-pill .geo-count .geo-n');
+  const chip = () => panel.$('.geo-pill .geo-count');
   const captured = (n) => Array.from({ length: n }, (_, i) => `media/c${i + 1}.png`);
 
   it('counts the capture attached at once, with a pulse, before the queue answers', async () => {
     const later = await heldBack();
     expect(count().textContent).toBe('2');
-    expect(count().classList.contains('bump')).toBe(false);
+    expect(chip().classList.contains('bump')).toBe(false);
     panel.nudge({ type: 'geolocating', case_id: CASE, video: VIDEO, draft: 'sc_2', capture: 'media/c3.png', captures: 3 });
     expect(count().textContent).toBe('3');
-    expect(count().classList.contains('bump')).toBe(true);
-    expect(count().getAttribute('aria-label')).toBe('3 captures');
+    expect(chip().classList.contains('bump')).toBe(true);
+    expect(panel.$('.geo-pill .geo-counts').getAttribute('aria-label')).toBe('Geolocating: 3 map captures, 5 pictures from the video');
     await settle();
     expect(later).toHaveLength(1);
     later[0]({ ...structuredClone(QUEUE), geolocating: { ...BRIDGE, captures: captured(3) } });
@@ -516,7 +541,7 @@ describe('a nudge, shown before the queue is read again', () => {
     later.shift()({ ...structuredClone(QUEUE), geolocating: BRIDGE });
     await settle();
     panel.nudge({ type: 'geolocating', case_id: CASE, video: VIDEO, draft: 'sc_2', capture: 'media/c3.png', captures: 3 });
-    expect(panel.$('.geo-row.live .geo-meta').textContent).toBe('3:58–4:12 · Geolocating · 3 captures');
+    expect(said(panel.$('.geo-row.live'))).toEqual(['bridge?', '3:58–4:12', '3', '5', 'Geolocating: 3 map captures, 5 pictures from the video']);
   });
 
   it('drops an answer asked before the nudge, and reads once more after a burst', async () => {

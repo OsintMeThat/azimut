@@ -3778,7 +3778,11 @@ none is being geolocated, folded to one row behind the pill while one is, and ab
 when there are none (`GET /api/ingest/scenes`). Geolocate there
 (`POST /api/ingest/geolocating`) holds the scene's video over the other site's map,
 paused on the scene and each of its passages marked on its bar in its colour, and a pill names it, counts
-its captures and stops it. While it lasts, every capture filed in the case is attached
+what it was given and stops it. Each row, and the pill, carries the scene's two counts as
+the app's do: the map's captures by the map's icon, its video's frames and collages by the
+video's, a picture giving itself by the picture's, a count at 0 greyed, a row's pip marking
+where it stands and the hover saying it all in words (`extension/maptools.js` mirrors
+`lib/sceneCounts.js`). While it lasts, every capture filed in the case is attached
 to it, the panel's included, and the capture's report says *Attached to “bridge?”*. A
 picture reads *Whole picture*, with an image on its file's line, and Geolocate holds the
 picture over the map with the scene's dot and no bar. The pill counts with the same pulse

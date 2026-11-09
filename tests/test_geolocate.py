@@ -359,6 +359,8 @@ def test_the_extension_reads_the_queue_geolocates_and_its_captures_are_attached(
     queue = client.get("/api/ingest/scenes", params={"case_id": cid}, headers=headers)
     assert queue.status_code == 200, queue.text
     assert [s["id"] for s in queue.json()["files"][0]["scenes"]] == ["s2", "s1"]
+    # the two counts the panel shows, as the app does: what the map gave, what the file gives
+    assert [(len(s["captures"]), s["footage"]) for s in queue.json()["files"][0]["scenes"]] == [(0, 1), (0, 1)]
 
     res = client.post("/api/ingest/geolocating", json={"case_id": cid, "video": photo, "draft": "s1"}, headers=headers)
     assert res.status_code == 200, res.text
