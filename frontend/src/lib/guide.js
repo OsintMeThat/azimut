@@ -709,7 +709,7 @@ export const PAGES = {
       { title: 'The point becomes a place', text: 'Saving files its coordinates as a place on the map, and says the proof shows it.' },
       { title: 'A house style', text: 'A template made in Settings, Templates gives every proof the same look.' },
       { title: 'Right-click the page', text: 'Brings forward, sends back, duplicates or deletes the mark under the cursor.' },
-      { title: 'A proof from a video', text: 'Its Scene tab plays the moments the place shows in, and Add this frame makes the frame on screen a panel.' },
+      { title: 'A proof from a video', text: 'Its Scene tab plays the passages the place shows in, and Add this frame makes the frame on screen a panel.' },
     ],
   },
   post: {
@@ -1236,7 +1236,7 @@ export const KEYMAP = [
       { combo: 'C', does: 'captures the frame on screen' },
       { combo: 'S', does: 'keeps a scene to geolocate at the frame on screen' },
       { combo: 'Shift+S', does: 'ends the last scene at the frame on screen' },
-      { combo: 'S / Shift+S', does: 'with a scene\'s time open, moves the start or the end of the moment in hand to the frame on screen' },
+      { combo: 'S / Shift+S', does: 'with a scene\'s time open, moves the start or the end of the passage in hand to the frame on screen' },
       { combo: '↑ / ↓', does: 'in a scene\'s time, nudges it a frame, Shift for a second' },
       { combo: 'Escape', does: 'lets go of a scene\'s time, then closes the scenes' },
       { combo: 'Ctrl+Z / Ctrl+Shift+Z', does: 'takes a scene or a mark back, or puts it back' },

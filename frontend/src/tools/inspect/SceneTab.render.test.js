@@ -72,7 +72,7 @@ describe('the list of scenes', () => {
       // a scene with no name goes by its time
       ['Instant · 1:00', null],
       ['Depot', 'Passage · 2:10–2:38'],
-      ['Crossroads', '3 moments · 3:20–3:35 +2'],
+      ['Crossroads', '3 passages · 3:20–3:35 +2'],
     ]);
     expect(list[1].textContent).toContain('Proved');
     expect(list[3].textContent).toContain('2 places');
@@ -104,7 +104,7 @@ describe('the open row', () => {
     expect(field(root, 'Scene start').value).toBe('1:00');
     expect(field(root, 'Scene end')).toBeNull();
     expect(document.activeElement).not.toBe(field(root, 'Scene start'));
-    expect(button(open[0], 'Another moment')).toBeUndefined();
+    expect(button(open[0], 'Another passage')).toBeUndefined();
   });
 
   it('asks for Apply only once something changed, and drops it on Cancel', () => {
@@ -223,7 +223,7 @@ describe('the open row', () => {
     expect(button(row, 'Geolocate')).toBeUndefined();
     button(row, 'Open the proof').click();
     expect(onopenproof).toHaveBeenCalledWith(expect.objectContaining({ proof: 'Crossroads' }));
-    button(row, 'Another moment').click();
+    button(row, 'Another passage').click();
     expect(onaddmoment).toHaveBeenCalled();
   });
 
@@ -232,14 +232,14 @@ describe('the open row', () => {
     expect(root.textContent).toContain('No timecode, the scene is about the whole video. Its frames stay pinned on the bar');
   });
 
-  it('gives the field Another moment just added the keys, and no other', async () => {
+  it('gives the field Another passage just added the keys, and no other', async () => {
     const scenes = SCENES();
     const edit = new SceneEdit(() => ({ duration: 900, fps: 25 }));
     edit.begin(scenes.find((sc) => sc.key === 'proof:Crossroads'));
     const onaddmoment = () => edit.add(600);
     const root = render(SceneTab, { scenes, edit, open: 'proof:Crossroads', onaddmoment });
     expect(document.activeElement).toBe(document.body);
-    button(root, 'Another moment').click();
+    button(root, 'Another passage').click();
     flushSync();
     expect(root.querySelectorAll('[data-testid="scene-moment"]')).toHaveLength(4);
     expect(document.activeElement).toBe(field(root, 'Scene start', 3));
@@ -489,7 +489,7 @@ describe('one scene, several moments', () => {
   it('writes every moment on the closed row, as a proof holding several does', () => {
     const row = rows(render(SceneTab, { scenes: LIST() })).find((r) => r.dataset.sceneKey === 'sc_a');
     expect([row.querySelector('.row-title').textContent, row.querySelector('.row-when').textContent])
-      .toEqual(['Bridge', '2 moments · 0:00–0:07 · 1:05–1:12']);
+      .toEqual(['Bridge', '2 passages · 0:00–0:07 · 1:05–1:12']);
   });
 
   it('opens on a line per moment, each with a way to take it off, and offers another', () => {
@@ -497,8 +497,8 @@ describe('one scene, several moments', () => {
     const root = opened(LIST(), 'sc_a', { onaddmoment, onjoin: vi.fn() });
     const moments = [...root.querySelectorAll('[data-testid="scene-moment"]')];
     expect(moments.map((m) => m.querySelector('input').value)).toEqual(['0:00', '1:05']);
-    expect(moments.every((m) => m.querySelector('[aria-label="Remove this moment"]'))).toBe(true);
-    button(root, 'Another moment').click();
+    expect(moments.every((m) => m.querySelector('[aria-label="Remove this passage"]'))).toBe(true);
+    button(root, 'Another passage').click();
     expect(onaddmoment).toHaveBeenCalled();
   });
 
@@ -532,5 +532,73 @@ describe('one scene, several moments', () => {
     expect(button(opened(alone, 'sc_1', { onjoin: vi.fn() }), 'Same place as…')).toBeUndefined();
     expect(button(opened(LIST(), 'sc_all', { onjoin: vi.fn() }), 'Same place as…')).toBeUndefined();
     expect(button(opened(LIST(), 'proof:Depot', { onjoin: vi.fn() }), 'Same place as…')).toBeUndefined();
+  });
+});
+
+describe('one place or several', () => {
+  const opened = (scenes, id, handlers = {}) => {
+    const edit = new SceneEdit(() => ({ duration: 900, fps: 25 }));
+    edit.begin(scenes.find((sc) => sc.key === id));
+    return { edit, root: render(SceneTab, { scenes, edit, open: id, ...handlers }) };
+  };
+  const kind = (root, name) => [...root.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === name);
+
+  it('greys Whole video on a scene still to prove beside one holding passages, and says why on hover', () => {
+    const onkind = vi.fn();
+    const scenes = sceneList([], [{ id: 'sc_1', start: 60, end: null, label: '' }, { id: 'sc_2', start: 90, end: 95, label: '' }]);
+    const { root } = opened(scenes, 'sc_1', { onkind });
+    const whole = kind(root, 'Whole video');
+    expect(whole.disabled).toBe(true);
+    expect(whole.getAttribute('title')).toBe('Another scene is marked at passages of this video');
+    whole.click();
+    expect(onkind).not.toHaveBeenCalled();
+    expect(kind(root, 'Passage').disabled).toBe(false);
+    kind(root, 'Passage').click();
+    expect(onkind).toHaveBeenCalledWith('passage');
+  });
+
+  it('counts a proof\'s passages too, and offers Whole video to a scene alone', () => {
+    const beside = sceneList([proof('Depot', { moments: [{ start: 130, end: 158 }], stated: true })], [{ id: 'sc_1', start: 60, end: null, label: '' }]);
+    expect(kind(opened(beside, 'sc_1').root, 'Whole video').disabled).toBe(true);
+    const alone = sceneList([proof('Proof 28', { at: [3.4] })], [{ id: 'sc_1', start: 60, end: null, label: '' }]);
+    const whole = kind(opened(alone, 'sc_1').root, 'Whole video');
+    expect(whole.disabled).toBe(false);
+    expect(whole.getAttribute('title')).toBe('The whole video, with no timecode');
+  });
+
+  it('keeps Whole video on a scene about it already, and on a proof, which is an answer', () => {
+    // an older case holding both kinds: its whole-video scene stays chosen and can come back
+    const both = sceneList([], [{ id: 'sc_all', start: null, end: null, label: '' }, { id: 'sc_1', start: 60, end: null, label: '' }]);
+    const { edit, root } = opened(both, 'sc_all');
+    expect([kind(root, 'Whole video').disabled, kind(root, 'Whole video').getAttribute('aria-checked')]).toEqual([false, 'true']);
+    // left for an instant before Apply, it can still come back
+    edit.setKind('instant', { start: 3, end: 3.04 });
+    flushSync();
+    expect([kind(root, 'Whole video').disabled, kind(root, 'Instant').getAttribute('aria-checked')]).toEqual([false, 'true']);
+    expect(kind(opened(SCENES(), 'proof:Depot').root, 'Whole video').disabled).toBe(false);
+  });
+
+  it('says under the passages when Another passage finds no room, and adds none', () => {
+    const scenes = sceneList([], [{ id: 'sc_1', start: 880, end: 900, label: '' }]);
+    const edit = new SceneEdit(() => ({ duration: 900, fps: 25 }));
+    edit.begin(scenes[0]);
+    const box = render(SceneTab, { scenes, edit, open: 'sc_1', onaddmoment: () => edit.another({ start: 890, end: 890.04 }) });
+    button(box, 'Another passage').click();
+    flushSync();
+    expect(box.querySelectorAll('[data-testid="scene-moment"]')).toHaveLength(1);
+    expect(box.querySelector('[role="status"]').textContent).toBe('No room here for another passage');
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('adds a stretch as long as the first, its start field in hand', () => {
+    const scenes = sceneList([], [{ id: 'sc_1', start: 10, end: 14, label: '' }]);
+    const edit = new SceneEdit(() => ({ duration: 900, fps: 25 }));
+    edit.begin(scenes[0]);
+    const root = render(SceneTab, { scenes, edit, open: 'sc_1', onaddmoment: () => edit.another({ start: 30, end: 30.04 }) });
+    button(root, 'Another passage').click();
+    flushSync();
+    expect([field(root, 'Scene start', 1).value, field(root, 'Scene end', 1).value]).toEqual(['0:30', '0:34']);
+    expect(document.activeElement).toBe(field(root, 'Scene start', 1));
+    expect(root.querySelectorAll('.moment.held')).toHaveLength(1);
   });
 });

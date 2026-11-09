@@ -1,7 +1,7 @@
 /**
  * "Add a scene", offered on a frame captured in no scene of its clip: S is easy to
  * miss when Azimut is new, and the capture is the moment a place is being looked at.
- * The toast holds the choices, each its own button: the whole video, or this moment.
+ * The toast holds the choices, each its own button: the whole video, or this instant.
  *
  * One toast at most. A capture while it is up rewrites it in place and points its
  * choices at that frame, so quick captures never stack. It goes by on its own, and it

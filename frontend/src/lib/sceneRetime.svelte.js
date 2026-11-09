@@ -26,3 +26,15 @@ export async function retimeScene(caseId, video, draft, { start = null, end = nu
   Object.assign(retimed, { caseId, video, draft, ...time, n: retimed.n + 1 });
   return { start: before?.start ?? null, end: before?.end ?? null, more: before?.more ?? null };
 }
+
+/**
+ * A scene the server gave a time of its own accord: marking a time on a video whose one
+ * scene still to prove is about the whole of it hands that scene the time
+ * (`POST /scenes/mark`, `engine/geolocate.mark`). Told as a retime, so a tab holding the
+ * video takes it up; a scene it does not hold, or holds at that time, changes nothing.
+ */
+export function retimedBy(caseId, scene) {
+  if (scene?.kind !== 'draft' || !Number.isFinite(scene.start)) return;
+  const more = scene.more?.length ? scene.more : null;
+  Object.assign(retimed, { caseId, video: scene.video, draft: scene.id, start: scene.start, end: scene.end ?? null, more, n: retimed.n + 1 });
+}

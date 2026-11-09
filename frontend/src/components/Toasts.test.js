@@ -30,11 +30,11 @@ describe('Toasts with a choice', () => {
       id: 1,
       message: 'Frame captured at 0:02 · Add a scene',
       kind: 'info',
-      action: [{ label: 'Whole video', onClick: vi.fn() }, { label: 'This moment', onClick: vi.fn() }],
+      action: [{ label: 'Whole video', onClick: vi.fn() }, { label: 'This instant', onClick: vi.fn() }],
     }];
     const { body } = render(Toasts);
     expect(body).toContain('>Whole video</button>');
-    expect(body).toContain('>This moment</button>');
+    expect(body).toContain('>This instant</button>');
     expect(body.match(/toast-action/g)).toHaveLength(2);
   });
 });

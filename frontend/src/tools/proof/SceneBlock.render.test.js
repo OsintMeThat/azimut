@@ -145,6 +145,40 @@ describe('the time, opened', () => {
     expect(root.querySelector('.editor')).toBeNull();
   });
 
+  it('adds a passage of the scene\'s kind from the player\'s frame, held on the bar, the end of the clip bounding it', async () => {
+    const { root, scene, puts } = setup({ stated: { video: CLIP, moments: [{ start: 130, end: 158 }] } });
+    fields(root)[0].querySelector('.time').click();
+    await settle();
+    const video = root.querySelector('video');
+    video.currentTime = 200;
+    video.dispatchEvent(new Event('timeupdate'));
+    flushSync();
+    const editor = root.querySelector('.editor');
+    button(editor, 'Another passage').click();
+    flushSync();
+    expect([scene.edit.active, scene.edit.start, scene.edit.end]).toEqual([1, 200, 228]);
+    expect(root.querySelectorAll('[data-testid="scene-band"].held')).toHaveLength(1);
+
+    // near the clip's end it is cut there; with no frame left it is said, not added
+    video.currentTime = 390;
+    video.dispatchEvent(new Event('timeupdate'));
+    flushSync();
+    button(editor, 'Another passage').click();
+    flushSync();
+    expect([scene.edit.start, scene.edit.end]).toEqual([390, 400]);
+    video.currentTime = 395;
+    video.dispatchEvent(new Event('timeupdate'));
+    flushSync();
+    button(editor, 'Another passage').click();
+    flushSync();
+    expect(scene.edit.moments).toHaveLength(3);
+    expect(editor.querySelector('[role="status"]').textContent).toBe('No room here for another passage');
+
+    button(editor, 'Apply').click();
+    await settle();
+    expect(puts).toEqual([{ moments: [{ start: 130, end: 158 }, { start: 200, end: 228 }, { start: 390, end: 400 }], video: CLIP }]);
+  });
+
   it('draws the moments in the scene\'s colour on the player\'s bar, and the panels\' frames as dots', async () => {
     const frames = [{ panel: 'p1', video: CLIP, time: 130.4 }, { panel: 'p3', video: CLIP, time: 300 }];
     const { root, scene } = setup({ frames, stated: { video: CLIP, moments: [{ start: 120, end: 160 }, { start: 200, end: null }] } });
@@ -207,13 +241,13 @@ describe('the player', () => {
   });
 });
 
-describe('a panel outside the moments', () => {
+describe('a panel outside the passages', () => {
   it('is said, and its moment added on demand', async () => {
     const frames = [{ panel: 'p1', video: CLIP, time: 130 }, { panel: 'p3', video: CLIP, time: 300 }];
     const { root, puts } = setup({ frames, stated: { video: CLIP, moments: [{ start: 120, end: 140 }] } });
     const note = root.querySelector('.outside');
-    expect(note.textContent.replace(/\s+/g, ' ').trim()).toBe('1 panel is outside these moments. Add its moment');
-    button(note, 'Add its moment').click();
+    expect(note.textContent.replace(/\s+/g, ' ').trim()).toBe('1 panel is outside these passages. Add its passage');
+    button(note, 'Add its passage').click();
     await settle();
     expect(puts).toEqual([{ moments: [{ start: 120, end: 140 }, { start: 300, end: null }], video: CLIP }]);
     expect(root.querySelector('.outside')).toBeNull();

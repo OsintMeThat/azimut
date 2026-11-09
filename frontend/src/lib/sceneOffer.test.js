@@ -36,9 +36,9 @@ describe('the choices', () => {
     const picked = [];
     offer.offer('Frame captured at 0:02 · Add a scene', [
       { label: 'Whole video', pick: () => picked.push('whole') },
-      { label: 'This moment', pick: () => picked.push('moment') },
+      { label: 'This instant', pick: () => picked.push('moment') },
     ]);
-    expect(toasts[0].action.map((a) => a.label)).toEqual(['Whole video', 'This moment']);
+    expect(toasts[0].action.map((a) => a.label)).toEqual(['Whole video', 'This instant']);
     press(1);
     expect(picked).toEqual(['moment']);
   });
@@ -48,9 +48,9 @@ describe('the offer of a scene on a captured frame', () => {
   it('stays one toast, rewritten by each capture and pointing at the latest', () => {
     const { toasts, show, offer, press } = harness();
     const picked = [];
-    offer.offer('Frame captured at 0:02', [{ label: 'This moment', pick: () => picked.push(2) }]);
+    offer.offer('Frame captured at 0:02', [{ label: 'This instant', pick: () => picked.push(2) }]);
     vi.advanceTimersByTime(OFFER_SHOWN - 100);
-    offer.offer('Frame captured at 0:05', [{ label: 'This moment', pick: () => picked.push(5) }]);
+    offer.offer('Frame captured at 0:05', [{ label: 'This instant', pick: () => picked.push(5) }]);
 
     expect(show).toHaveBeenCalledTimes(1);
     expect(toasts).toHaveLength(1);
@@ -64,44 +64,44 @@ describe('the offer of a scene on a captured frame', () => {
 
   it('goes by on its own, then keeps quiet a while', () => {
     const { toasts, offer } = harness();
-    offer.offer('Frame captured at 0:02', [{ label: 'This moment', pick: () => {} }]);
+    offer.offer('Frame captured at 0:02', [{ label: 'This instant', pick: () => {} }]);
     vi.advanceTimersByTime(OFFER_SHOWN);
     expect(toasts).toHaveLength(0);
 
-    expect(offer.offer('Frame captured at 0:05', [{ label: 'This moment', pick: () => {} }])).toBe(false);
+    expect(offer.offer('Frame captured at 0:05', [{ label: 'This instant', pick: () => {} }])).toBe(false);
     vi.advanceTimersByTime(OFFER_QUIET);
-    expect(offer.offer('Frame captured at 0:09', [{ label: 'This moment', pick: () => {} }])).toBe(true);
+    expect(offer.offer('Frame captured at 0:09', [{ label: 'This instant', pick: () => {} }])).toBe(true);
   });
 
   it('keeps quiet a while once a scene is kept, from it or any other way', () => {
     const { toasts, offer, press } = harness();
-    offer.offer('Frame captured at 0:02', [{ label: 'This moment', pick: () => {} }]);
+    offer.offer('Frame captured at 0:02', [{ label: 'This instant', pick: () => {} }]);
     press();
-    expect(offer.offer('Frame captured at 0:05', [{ label: 'This moment', pick: () => {} }])).toBe(false);
+    expect(offer.offer('Frame captured at 0:05', [{ label: 'This instant', pick: () => {} }])).toBe(false);
     vi.advanceTimersByTime(OFFER_QUIET);
 
-    offer.offer('Frame captured at 0:09', [{ label: 'This moment', pick: () => {} }]);
+    offer.offer('Frame captured at 0:09', [{ label: 'This instant', pick: () => {} }]);
     offer.quiet(); // S pressed
     expect(toasts).toHaveLength(0);
-    expect(offer.offer('Frame captured at 0:11', [{ label: 'This moment', pick: () => {} }])).toBe(false);
+    expect(offer.offer('Frame captured at 0:11', [{ label: 'This instant', pick: () => {} }])).toBe(false);
   });
 
   it('stops offering on a file where it went by unused three times, until another opens', () => {
     const { offer } = harness();
     for (let i = 0; i < OFFER_UNUSED; i += 1) {
-      expect(offer.offer('Frame captured', [{ label: 'This moment', pick: () => {} }])).toBe(true);
+      expect(offer.offer('Frame captured', [{ label: 'This instant', pick: () => {} }])).toBe(true);
       vi.advanceTimersByTime(OFFER_SHOWN + OFFER_QUIET);
     }
-    expect(offer.offer('Frame captured', [{ label: 'This moment', pick: () => {} }])).toBe(false);
+    expect(offer.offer('Frame captured', [{ label: 'This instant', pick: () => {} }])).toBe(false);
     offer.reset();
-    expect(offer.offer('Frame captured', [{ label: 'This moment', pick: () => {} }])).toBe(true);
+    expect(offer.offer('Frame captured', [{ label: 'This instant', pick: () => {} }])).toBe(true);
   });
 
   it('is taken down with the tool, without counting as unused', () => {
     const { toasts, offer } = harness();
-    offer.offer('Frame captured at 0:02', [{ label: 'This moment', pick: () => {} }]);
+    offer.offer('Frame captured at 0:02', [{ label: 'This instant', pick: () => {} }]);
     offer.withdraw();
     expect(toasts).toHaveLength(0);
-    expect(offer.offer('Frame captured at 0:05', [{ label: 'This moment', pick: () => {} }])).toBe(true);
+    expect(offer.offer('Frame captured at 0:05', [{ label: 'This instant', pick: () => {} }])).toBe(true);
   });
 });

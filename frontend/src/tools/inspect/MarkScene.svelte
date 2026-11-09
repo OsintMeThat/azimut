@@ -4,9 +4,10 @@
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
 
   // Mark to geolocate, under Capture frame: the main press keeps a scene at the frame
-  // on screen, as S does, and the arrow offers that or the whole video, greyed once a
-  // scene to geolocate says so already. Both keys are said here.
-  let { wholeTaken = false, onmoment, onwhole } = $props();
+  // on screen, as S does, and the arrow offers that or the whole video. `wholeOff` says
+  // why the whole video is not offered, greyed with those words on hover: a scene says
+  // so already, or scenes hold passages of the video. Both keys are said here.
+  let { wholeOff = '', onmoment, onwhole } = $props();
 
   let arrow = $state(null);
   let open = $state(false);
@@ -40,15 +41,15 @@
   <FloatingMenu anchor={arrow} width={200} align="end" label="Mark to geolocate" onclose={() => (open = false)}>
     <button class="fm-item" role="menuitem" onclick={() => pick(onmoment)} title={INSPECT_HELP.markMoment}>
       <Icon name="pin" size={13} />
-      <span class="fm-grow">This moment</span>
+      <span class="fm-grow">This instant</span>
       <kbd class="hint">S</kbd>
     </button>
     <button
       class="fm-item"
       role="menuitem"
-      disabled={wholeTaken}
+      disabled={Boolean(wholeOff)}
       onclick={() => pick(onwhole)}
-      title={wholeTaken ? INSPECT_HELP.markWholeTaken : INSPECT_HELP.markWhole}
+      title={wholeOff || INSPECT_HELP.markWhole}
     >
       <Icon name="video" size={13} />
       <span class="fm-grow">Whole video</span>

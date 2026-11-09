@@ -3,18 +3,21 @@
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
 
   // The first thing a video with nothing marked says, in place of the empty strip's
-  // line, in the strip's own height: does it hold several places? It goes at the first
-  // scene, and Not now keeps that file quiet.
-  let { onmoment, onwhole, onlater } = $props();
+  // line, in the strip's own height: is it one place or several? The whole video keeps
+  // one scene about all of it. Several places only says how S marks them as the video
+  // plays, and the strip stops asking, as Not now does. It goes at the first scene.
+  let { onwhole, onseveral, onlater } = $props();
 </script>
 
 <div class="invite" role="group" aria-label="Mark to geolocate" data-testid="scene-invite">
-  <span class="ask">Several places in this video?</span>
+  <span class="ask">One place or several?</span>
   <span class="picks">
-    <button class="btn btn-sm mark-one" onclick={() => onmoment?.()} title={INSPECT_HELP.inviteMoment}>
-      <Icon name="pin" size={13} /> This moment
+    <button class="btn btn-sm" onclick={() => onwhole?.()} title={INSPECT_HELP.inviteWhole}>
+      <Icon name="video" size={13} /> The whole video: one place
     </button>
-    <button class="btn btn-sm" onclick={() => onwhole?.()} title={INSPECT_HELP.inviteWhole}>Whole video</button>
+    <button class="btn btn-sm several" onclick={() => onseveral?.()} title={INSPECT_HELP.inviteSeveral}>
+      <Icon name="pin" size={13} /> Several places: mark them as you watch <kbd>S</kbd>
+    </button>
     <button class="later" onclick={() => onlater?.()} title={INSPECT_HELP.inviteLater}>Not now</button>
   </span>
 </div>
@@ -37,6 +40,7 @@
   }
   .picks {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 6px;
   }
@@ -47,8 +51,19 @@
     padding-top: 2px;
     padding-bottom: 2px;
   }
-  .mark-one :global(svg) {
+  .picks .btn :global(svg) {
+    color: var(--text-2);
+  }
+  .several :global(svg) {
     color: var(--accent);
+  }
+  kbd {
+    padding: 0 4px;
+    border-radius: 3px;
+    border: 1px solid currentColor;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    opacity: 0.6;
   }
   .later {
     flex-shrink: 0;

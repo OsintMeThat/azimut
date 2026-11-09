@@ -32,8 +32,9 @@
     view ? scene.frames().filter((f) => f.video === view.video).map((f) => ({ panel: f.panel, time: f.time })) : [],
   );
   const firstFrame = $derived(shownFrames.length ? Math.min(...shownFrames.map((f) => f.time)) : 0);
-  // What the bar draws: the moments as the editor reads them while it is open, so a
-  // time typed or taken shows before Apply, else as the proof states them.
+  // What the bar draws: the passages as the editor reads them while it is open, so a
+  // time typed or taken shows before Apply, else as the proof states them. Another
+  // passage adds one of the scene's kind from the frame on the player, taken in hand.
   const barMoments = $derived.by(() => {
     if (view?.video !== star) return [];
     if (!editing) return scene.moments.map((m, i) => ({ start: m.start, end: m.end, i }));
@@ -128,9 +129,9 @@
 
   {#if outside.length}
     <p class="outside" role="status">
-      {outside.length === 1 ? '1 panel is' : `${outside.length} panels are`} outside these moments.
+      {outside.length === 1 ? '1 panel is' : `${outside.length} panels are`} outside these passages.
       <button class="link" onclick={() => scene.addInstants(outside.map((f) => f.time))} title={HELP.addMoment}>
-        {outside.length === 1 ? 'Add its moment' : 'Add their moments'}
+        {outside.length === 1 ? 'Add its passage' : 'Add their passages'}
       </button>
     </p>
   {/if}
@@ -162,7 +163,7 @@
           onhere={(which, i) => scene.edit.here(which, frameNow(), i)}
           onkind={(kind) => scene.edit.setKind(kind, frameNow())}
           onnudge={nudge}
-          onaddmoment={() => scene.edit.add(frameNow().start)}
+          onaddmoment={() => scene.edit.another(frameNow())}
           onapply={() => scene.applyTime()}
           oncancel={() => scene.edit.close()}
         />

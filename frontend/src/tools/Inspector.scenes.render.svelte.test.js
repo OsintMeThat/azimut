@@ -13,6 +13,8 @@ const ROOF = 'media/roof.png';
 const MEDIA = [
   { path: ROOF, kind: 'image', title: 'Roof', filename: 'roof.png', entity_id: 'e_roof', source: { type: 'upload' } },
   { path: CLIP, kind: 'video', title: 'Convoy clip', filename: 'clip.mp4', entity_id: 'e_clip', source: { type: 'upload' } },
+  // a second video, for an answer the invitation keeps for the module's life
+  { path: 'media/walk-clip.mp4', kind: 'video', title: 'Walk clip', filename: 'walk-clip.mp4', entity_id: 'e_walk', source: { type: 'upload' } },
   { path: 'media/cap.png', kind: 'image', title: 'From above', filename: 'cap.png', entity_id: 'e_cap', source: { type: 'satellite' } },
   { path: 'media/frame.png', kind: 'image', title: 'A frame', filename: 'frame.png', entity_id: 'e_frame', source: { type: 'inspect', op: 'frame', from: CLIP, time: 2 } },
 ];
@@ -390,15 +392,15 @@ describe('the Scenes tab on a video', () => {
     expect(field('Scene end').value).toBe('0:09.04');
   });
 
-  it('leaves the open row as it was when there is nothing to end', async () => {
-    work(CLIP, [kept('sc_1', null, null, 'town?')]);
+  it('leaves the clip as it was when there is nothing to end', async () => {
+    work(CLIP, []);
     await start();
     await openFile('Convoy clip');
+    playheadAt(5);
     press('S', { shiftKey: true });
     await settle();
-    expect(openRow().querySelector('[role="radio"][aria-checked="true"]').textContent).toBe('Whole video');
-    expect(target.querySelector('.editor')).not.toBeNull();
-    expect(toasts('Scene ends')).toHaveLength(0);
+    expect(rows()).toHaveLength(0);
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it('drops the word being asked when another row is opened', async () => {
@@ -564,7 +566,104 @@ describe('the Scenes tab on a video', () => {
     target.querySelector('[title="Keep this shot as a scene to geolocate"]').click();
     await settle();
     expect(picked()).toContain('Moments');
-    expect(tab('Scenes').querySelector('.count').textContent).toBe('2');
+    // the clip's one scene, about the whole of it, takes the shot's stretch
+    expect(tab('Scenes').querySelector('.count').textContent).toBe('1');
+    expect(toasts('Scene now 0:03–0:08, no longer the whole video')).toHaveLength(1);
+    target.querySelector('[aria-label="More ways to mark"]').click();
+    flushSync();
+    const whole = [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent.includes('Whole video'));
+    expect([whole.disabled, whole.title]).toEqual([true, 'Scenes are marked at passages of this video already']);
+  });
+
+  it('gives the clip\'s one scene about the whole video the instant S marks, label and captures kept, Undo making it whole again', async () => {
+    work(CLIP, [kept('sc_all', null, null, 'Market')]);
+    listed[CLIP] = { scenes: [row('sc_all', null, null, 'Market', { state: 'progress', captures: ['media/cap.png'] })] };
+    await start();
+    await openFile('Convoy clip');
+    playheadAt(9);
+    press('s');
+    await settle();
+
+    expect(rows()).toHaveLength(1);
+    expect(openRow().dataset.sceneKey).toBe('sc_all');
+    expect(field('Scene start').value).toBe('0:09');
+    expect(openRow().querySelector('.scene-label').value).toBe('Market');
+    expect(openRow().textContent).toContain('In progress · 1 capture');
+    const [said] = toasts('no longer the whole video');
+    expect(said.slice(0, 2)).toEqual(['“Market” now at 0:09, no longer the whole video', 'info']);
+    await afterQuiet();
+    expect(lastSpec().scenes).toEqual([kept('sc_all', 9, null, 'Market')]);
+
+    said[3].onClick();
+    await settle();
+    expect(openRow().querySelector('[role="radio"][aria-checked="true"]').textContent).toBe('Whole video');
+    await afterQuiet();
+    expect(lastSpec().scenes).toEqual([kept('sc_all', null, null, 'Market')]);
+  });
+
+  it('gives it the passage from the clip\'s start with Shift+S, and the main press its instant', async () => {
+    work(CLIP, [kept('sc_all', null, null, '')]);
+    await start();
+    await openFile('Convoy clip');
+    playheadAt(5);
+    press('S', { shiftKey: true });
+    await settle();
+    expect(toasts('Scene now 0:00–0:05, no longer the whole video')).toHaveLength(1);
+    await afterQuiet();
+    expect(lastSpec().scenes.map((sc) => [sc.id, sc.start, Number(sc.end.toFixed(2))])).toEqual([['sc_all', 0, 5.04]]);
+    // timed now, the next mark is a scene of its own
+    playheadAt(12);
+    target.querySelector('.split .press').click();
+    await settle();
+    expect(rows()).toHaveLength(2);
+  });
+
+  it('leaves a scene about the whole video among others as it is, an older case\'s, and greys Whole video', async () => {
+    work(CLIP, [kept('sc_all', null, null, ''), kept('sc_1', 1, 4, '')]);
+    await start();
+    await openFile('Convoy clip');
+    playheadAt(9);
+    press('s');
+    await settle();
+    expect(rows()).toHaveLength(3);
+    await afterQuiet();
+    expect(lastSpec().scenes.map((sc) => sc.start)).toEqual([null, 1, 9]);
+    target.querySelector('[aria-label="More ways to mark"]').click();
+    flushSync();
+    const whole = [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent.includes('Whole video'));
+    expect(whole.disabled).toBe(true);
+  });
+
+  it('greys Whole video in the arrow and in a scene\'s kinds once a scene holds a passage', async () => {
+    work(CLIP, [kept('sc_1', 1, 4, ''), kept('sc_2', 10, null, '')]);
+    await start();
+    await openFile('Convoy clip');
+    target.querySelector('[aria-label="More ways to mark"]').click();
+    flushSync();
+    const item = [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent.includes('Whole video'));
+    expect([item.disabled, item.title]).toEqual([true, 'Scenes are marked at passages of this video already']);
+    target.querySelector('[aria-label="More ways to mark"]').click();
+    flushSync();
+    const kind = [...openRow().querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Whole video');
+    expect([kind.disabled, kind.title]).toEqual([true, 'Another scene is marked at passages of this video']);
+  });
+
+  it('adds a passage of the scene\'s kind with Another passage, in hand on the bar', async () => {
+    work(CLIP, [kept('sc_1', 1, 4, '')]);
+    await start();
+    await openFile('Convoy clip');
+    playheadAt(9);
+    inside(openRow(), 'Another passage').click();
+    await settle();
+    const starts = [...openRow().querySelectorAll('input[aria-label="Scene start"]')].map((i) => i.value);
+    const ends = [...openRow().querySelectorAll('input[aria-label="Scene end"]')].map((i) => i.value);
+    expect([starts, ends]).toEqual([['0:01', '0:09'], ['0:04', '0:12']]);
+    // the bar's handles stand on the one just added
+    const grips = ['start', 'end'].map((end) => target.querySelector(`[data-testid="scene-grip-${end}"]`).style.left);
+    expect(grips).toEqual(['45%', '60%']);
+    inside(openRow(), 'Apply').click();
+    await afterQuiet();
+    expect(lastSpec().scenes).toEqual([{ id: 'sc_1', start: 1, end: 4, label: '', more: [{ start: 9, end: 12 }] }]);
   });
 
   it('offers no scene key on a frame of the clip', async () => {
@@ -654,17 +753,39 @@ describe('the empty strip', () => {
     await settle(5);
     get.mockImplementation(plain);
 
-    expect(invite().textContent).toContain('Several places in this video?');
-    inside(invite(), 'This moment').click();
+    expect(invite().textContent).toContain('One place or several?');
+    expect([...invite().querySelectorAll('.btn')].map((b) => b.textContent.replace(/\s+/g, ' ').trim())).toEqual([
+      'The whole video: one place',
+      'Several places: mark them as you watch S',
+    ]);
+    playheadAt(3);
+    press('s');
     await settle();
     expect(invite()).toBeNull();
     expect(rows()).toHaveLength(1);
   });
 
-  it('keeps the whole video from its second press', async () => {
+  it('says how S marks several places, marks nothing, and stops asking on that file', async () => {
+    await start();
+    await openFile('Walk clip');
+    inside(invite(), 'Several places').click();
+    await settle();
+    expect(invite()).toBeNull();
+    expect(rows()).toHaveLength(0);
+    expect(toasts('Press S where a place shows')).toHaveLength(1);
+    expect(target.querySelector('.strip').textContent).toContain('Frames you capture are kept with this video.');
+
+    target.querySelector('.tool-header .btn').click();
+    await settle(10);
+    await openFile('Walk clip');
+    expect(invite()).toBeNull();
+    localStorage.clear();
+  });
+
+  it('keeps the whole video from its first press', async () => {
     await start();
     await openFile('Convoy clip');
-    inside(invite(), 'Whole video').click();
+    inside(invite(), 'The whole video').click();
     await settle();
     expect(invite()).toBeNull();
     await afterQuiet();

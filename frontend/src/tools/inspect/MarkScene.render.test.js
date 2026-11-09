@@ -45,7 +45,7 @@ describe('Mark to geolocate', () => {
     expect(onmoment).toHaveBeenCalledTimes(1);
   });
 
-  it('offers This moment and Whole video from its arrow, and closes on a pick', () => {
+  it('offers This instant and Whole video from its arrow, and closes on a pick', () => {
     const onmoment = vi.fn();
     const onwhole = vi.fn();
     const root = render({ onmoment, onwhole });
@@ -53,7 +53,7 @@ describe('Mark to geolocate', () => {
     expect(arrow.getAttribute('aria-expanded')).toBe('false');
     openMenu(root);
     expect(arrow.getAttribute('aria-expanded')).toBe('true');
-    expect(item('This moment').querySelector('kbd').textContent).toBe('S');
+    expect(item('This instant').querySelector('kbd').textContent).toBe('S');
     expect(document.querySelector('.fm-note').textContent).toContain('Shift+S ends a scene at the frame on screen');
     item('Whole video').click();
     flushSync();
@@ -61,17 +61,35 @@ describe('Mark to geolocate', () => {
     expect(item('Whole video')).toBeUndefined();
 
     openMenu(root);
-    item('This moment').click();
+    item('This instant').click();
     flushSync();
     expect(onmoment).toHaveBeenCalledTimes(1);
   });
 
   it('greys Whole video once a scene to geolocate says so already', () => {
     const onwhole = vi.fn();
-    const root = render({ wholeTaken: true, onwhole });
+    const root = render({ wholeOff: 'The whole video is marked already', onwhole });
     openMenu(root);
     expect(item('Whole video').disabled).toBe(true);
     expect(item('Whole video').getAttribute('title')).toBe('The whole video is marked already');
-    expect(item('This moment').disabled).toBe(false);
+    expect(item('This instant').disabled).toBe(false);
+  });
+
+  it('greys Whole video beside scenes holding passages, and says why on hover', () => {
+    const onwhole = vi.fn();
+    const root = render({ wholeOff: 'Scenes are marked at passages of this video already', onwhole });
+    openMenu(root);
+    const whole = item('Whole video');
+    expect(whole.disabled).toBe(true);
+    expect(whole.getAttribute('title')).toBe('Scenes are marked at passages of this video already');
+    whole.click();
+    expect(onwhole).not.toHaveBeenCalled();
+  });
+
+  it('offers Whole video with its own hover when nothing bars it', () => {
+    const root = render({});
+    openMenu(root);
+    expect(item('Whole video').disabled).toBe(false);
+    expect(item('Whole video').getAttribute('title')).toBe('A scene about the whole video, with no timecode');
   });
 });

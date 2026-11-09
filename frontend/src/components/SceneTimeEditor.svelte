@@ -1,9 +1,9 @@
 <script>
   import Icon from './Icon.svelte';
-  import { MAX_MOMENTS, parseClock } from '../lib/scenes.js';
+  import { MAX_MOMENTS, isWholeVideo, parseClock } from '../lib/scenes.js';
 
   // When a scene happens, opened for a change: Whole video, Instant or Passage, then
-  // its moments, each typed, taken from the frame on screen or nudged a frame at a
+  // its passages, each typed, taken from the frame on screen or nudged a frame at a
   // time, and Apply. Driven by a `lib/sceneEdit.svelte.js`, which holds what the
   // fields read; nothing is kept until Apply.
   //
@@ -11,12 +11,17 @@
   // start, ready to be typed over. Inspect shows it in the open row of its Scenes tab
   // all along (`autofocus` off, so the player keeps the keys), and offers Apply and
   // Cancel only once something changed (`actsWhenChanged`). Otherwise only the words
-  // differ: what a control says on hover (`help`), and the line under the moments
-  // (`tips`). `besides` is what sits beside Another moment: Inspect's Same place as….
+  // differ: what a control says on hover (`help`), and the line under the passages
+  // (`tips`). `besides` is what sits beside Another passage: Inspect's Same place as….
+  //
+  // `wholeOff` says why Whole video is not offered, greyed with those words on hover,
+  // or '' when it is: a video is one place or several, never both. A scene about the
+  // whole video already keeps it, so it can be left and chosen again.
   let {
     edit,
     help,
     tips,
+    wholeOff = '',
     autofocus = true,
     actsWhenChanged = false,
     onhere,
@@ -42,7 +47,8 @@
   }
 
   // A field that opens in hand is picked, so typing replaces it; without `autofocus`,
-  // only the one Another moment just added.
+  // only the one Another passage just added. `onaddmoment` answers false when it
+  // added none.
   let adding = false;
   function picked(node, inHand) {
     if (inHand && (autofocus || adding)) {
@@ -54,13 +60,15 @@
 
   function another() {
     adding = true;
-    onaddmoment?.();
+    if (onaddmoment?.() === false) adding = false;
   }
 
   const actsShown = $derived(!actsWhenChanged || edit.changed);
+  // never on a scene about the whole video as it stands, which can leave it and come back
+  const wholeBarred = $derived(Boolean(wholeOff) && !!edit.scene && !isWholeVideo(edit.scene));
 
   const KINDS = $derived([
-    { id: 'whole', label: 'Whole video', help: help.whole },
+    { id: 'whole', label: 'Whole video', help: wholeBarred ? wholeOff : help.whole, off: wholeBarred },
     { id: 'instant', label: 'Instant', help: help.instant },
     { id: 'passage', label: 'Passage', help: help.passage },
   ]);
@@ -69,7 +77,14 @@
 <div class="editor" class:several={edit.moments.length > 1} role="group" aria-label="When the scene happens">
   <div class="kinds" role="radiogroup" aria-label="Kind of time">
     {#each KINDS as k (k.id)}
-      <button role="radio" aria-checked={edit.kind === k.id} class:on={edit.kind === k.id} onclick={() => onkind?.(k.id)} title={k.help}>{k.label}</button>
+      <button
+        role="radio"
+        aria-checked={edit.kind === k.id}
+        class:on={edit.kind === k.id}
+        disabled={k.off}
+        onclick={() => onkind?.(k.id)}
+        title={k.help}
+      >{k.label}</button>
     {/each}
   </div>
   {#if edit.whole}
@@ -80,7 +95,7 @@
         class="moment"
         class:held={edit.moments.length > 1 && i === edit.active}
         role="group"
-        aria-label={`Moment ${i + 1}`}
+        aria-label={`Passage ${i + 1}`}
         data-testid="scene-moment"
         onfocusin={() => edit.activate(i)}
         onpointerdown={() => edit.activate(i)}
@@ -125,7 +140,7 @@
           <span class="field"></span>
         {/if}
         {#if edit.moments.length > 1}
-          <button class="drop" onclick={() => edit.remove(i)} title={help.remove} aria-label="Remove this moment">
+          <button class="drop" onclick={() => edit.remove(i)} title={help.remove} aria-label="Remove this passage">
             <Icon name="x" size={11} />
           </button>
         {/if}
@@ -135,7 +150,7 @@
       <div class="more-acts">
         {#if onaddmoment && edit.many && edit.moments.length < MAX_MOMENTS}
           <button class="btn btn-ghost btn-xs" onclick={another} title={help.add}>
-            <Icon name="plus" size={11} /> Another moment
+            <Icon name="plus" size={11} /> Another passage
           </button>
         {/if}
         {@render besides?.()}
@@ -144,6 +159,8 @@
   {/if}
   {#if edit.problem}
     <p class="problem" role="alert">{edit.problem}</p>
+  {:else if edit.note}
+    <p class="tip note" role="status">{edit.note}</p>
   {:else if !edit.whole}
     <p class="tip">{edit.end != null ? tips.passage : tips.instant}</p>
   {/if}
@@ -176,15 +193,20 @@
   .kinds button + button {
     border-left: 1px solid var(--border);
   }
-  .kinds button:hover:not(.on) {
+  .kinds button:hover:not(.on):not(:disabled) {
     color: var(--text-1);
     background: var(--bg-2);
+  }
+  .kinds button:disabled {
+    color: var(--text-3);
+    opacity: 0.55;
+    cursor: not-allowed;
   }
   .kinds button.on {
     background: var(--accent);
     color: var(--accent-text);
   }
-  /* One moment: its start and its end when it is a passage. Among several, its removal
+  /* One passage: its start, and its end when it is a stretch. Among several, its removal
      too, and an edge in the scene's colour on the one in hand. */
   .moment {
     display: grid;
@@ -254,6 +276,9 @@
   }
   .tip {
     color: var(--text-3);
+  }
+  .note {
+    color: var(--text-2);
   }
   .acts {
     display: flex;

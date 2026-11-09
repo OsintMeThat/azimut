@@ -9,7 +9,9 @@
   import { sceneOfCollage } from '../../lib/sceneFrames.js';
   import { queueState } from '../../lib/sceneQueue.js';
   import { retimeScene } from '../../lib/sceneRetime.svelte.js';
-  import { isWholeVideo, sceneList, sceneMoments, sceneTime, sceneTitle, shortClock, spanLabel, timeWords } from '../../lib/scenes.js';
+  import {
+    isWholeVideo, sceneList, sceneMoments, sceneTime, sceneTitle, shortClock, spanLabel, timeWords, timedBeside,
+  } from '../../lib/scenes.js';
   import { toast, uiState } from '../../lib/state.svelte.js';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import Icon from '../../components/Icon.svelte';
@@ -22,7 +24,9 @@
   // saved, and its mark follows the picture when it is saved again (`/inspect/compose`).
   // Marked, or already in a scene of its video, it says where the scene stands, with
   // Geolocate and Make the proof, as Inspect's Scenes tab does. A press on the scene's
-  // time unfolds its editor with the video playing it (`CollageMoment`).
+  // time unfolds its editor with the video playing it (`CollageMoment`). A video is one
+  // place or several: once scenes hold passages of it, the whole video is not offered,
+  // and the press marks the stretch the pieces span.
   //
   // `video` is `{ path, times }` when every piece comes from one video; `picture` the
   // collage's last saved picture and `current` that picture while it still reads as the
@@ -72,14 +76,19 @@
   // the pieces' instants as the server reads them, which follows a frame saved from the video
   const times = $derived(listing?.collages?.find((c) => c.collage === name)?.times ?? video?.times ?? []);
 
+  /** A reading of a file's scenes as Inspect lists them. */
+  const listOf = (read) => sceneList(read.scenes, read.scenes.filter((s) => s.kind === 'draft'), read.taken);
+
   /** The scene the collage is in, by a reading of its file's scenes. */
   function sceneIn(read) {
     if (!read) return null;
-    const rows = sceneList(read.scenes, read.scenes.filter((s) => s.kind === 'draft'), read.taken);
+    const rows = listOf(read);
     if (video) return sceneOfCollage(times, rows, null);
     return rows.find((s) => s.kind === 'proof') ?? rows.find((s) => s.kind === 'draft' && !s.abandoned) ?? null;
   }
   const scene = $derived(listing?.file === file ? sceneIn(listing) : null);
+  // why the video's whole is not offered: scenes hold passages of it
+  const wholeOff = $derived(video && listing?.file === file && timedBeside(listOf(listing)) ? INSPECT_HELP.markWholeTimed : '');
   const live = $derived(
     !!scene && scene.kind === 'draft'
       && (geolocating.caseId === caseId ? geolocating.scene?.id === scene.id && geolocating.scene?.video === file : listing?.geolocating === scene.id),
@@ -216,7 +225,12 @@
   {#if !scene}
     {#if video}
       <div class="split" role="group" aria-label="Mark to geolocate">
-        <button class="btn btn-sm press" disabled={busy || !file} onclick={() => markVideo(false)} title={INSPECT_HELP.collageMarkVideo}>
+        <button
+          class="btn btn-sm press"
+          disabled={busy || !file || (Boolean(wholeOff) && !times.length)}
+          onclick={() => markVideo(Boolean(wholeOff))}
+          title={wholeOff ? INSPECT_HELP.collageMarkPeriod : INSPECT_HELP.collageMarkVideo}
+        >
           <Icon name="pin" size={13} />
           <span>Mark to geolocate</span>
         </button>
@@ -271,6 +285,7 @@
         {caseId}
         video={video.path}
         {scene}
+        wholeOff={timedBeside(listOf(listing), scene) ? INSPECT_HELP.sceneWholeTimed : ''}
         {times}
         {busy}
         onapply={applyTime}
@@ -303,7 +318,7 @@
 
 {#if menuOpen}
   <FloatingMenu anchor={arrow} width={240} align="end" label="Mark to geolocate" onclose={() => (menuOpen = false)}>
-    <button class="fm-item" role="menuitem" onclick={() => markVideo(false)} title={INSPECT_HELP.collageMarkVideo}>
+    <button class="fm-item" role="menuitem" disabled={Boolean(wholeOff)} onclick={() => markVideo(false)} title={wholeOff || INSPECT_HELP.collageMarkVideo}>
       <Icon name="video" size={13} />
       <span class="fm-grow">Whole video</span>
     </button>

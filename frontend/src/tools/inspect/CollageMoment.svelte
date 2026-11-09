@@ -13,7 +13,8 @@
   // fields read it, its pieces' frames as dots on the bar, and Inspect's time editor
   // beneath (`components/SceneTimeEditor`). Nothing is kept until Apply, which the
   // scene's line writes as Inspect would (`lib/sceneRetime.svelte.js`).
-  let { caseId, video, scene, times = [], busy = false, onapply, oncancel } = $props();
+  // `wholeOff` says why the whole video is not offered (`components/SceneTimeEditor`).
+  let { caseId, video, scene, times = [], busy = false, wholeOff = '', onapply, oncancel } = $props();
 
   let clip = $state({ duration: 0, fps: null });
   const edit = new SceneEdit(() => clip);
@@ -67,6 +68,7 @@
     {edit}
     help={PROOF_TIME_HELP}
     tips={COLLAGE_TIME_TIPS}
+    {wholeOff}
     onhere={(which, i) => edit.here(which, frameNow(), i)}
     onkind={(kind) => edit.setKind(kind, frameNow())}
     onnudge={nudge}

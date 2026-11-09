@@ -7,7 +7,7 @@
   import { captureCount } from '../../lib/sceneQueue.js';
   import {
     PROGRESS, SCENE_LABEL_MAX, isAbandoned, isWholeVideo, samePlaceChoices, sceneColorAt, scenePassage, sceneTime,
-    sceneTitle, sceneWhen, shortClock, spanLabel, unplaced,
+    sceneTitle, sceneWhen, shortClock, spanLabel, timedBeside, unplaced,
   } from '../../lib/scenes.js';
 
   // The Scenes tab: the places to find in the open file, in clip order, a scene about
@@ -32,10 +32,12 @@
   // A proof stands Proved once it states a place. Saved with no point yet, it reads In
   // progress and can be abandoned and restored like a scene (`engine/scenes.proof_state`).
   //
-  // A scene still to prove may hold several moments, where its place shows again: the
-  // open row's Another moment adds the frame on screen, and Same place as… beside it
-  // lists the clip's other scenes still to prove, one press joining this one into the
-  // scene chosen (`onjoin`).
+  // A scene still to prove may hold several passages, where its place shows again: the
+  // open row's Another passage adds one of its kind from the frame on screen, and Same
+  // place as… beside it lists the clip's other scenes still to prove, one press joining
+  // this one into the scene chosen (`onjoin`). A video is one place or several: beside
+  // another scene holding passages, a scene still to prove is not offered the whole
+  // video, greyed with why. A proof is an answer and keeps it.
   //
   // A picture (`picture`) is marked whole, once, from here: its row has no time, and
   // once a proof lays the picture out, the proof's row takes its place.
@@ -406,7 +408,7 @@
           </div>
           {#if edit?.key === sc.key}
             {@const choices = onjoin ? samePlaceChoices(scenes, sc) : []}
-            <!-- beside Another moment: the other scenes still to prove that show this place -->
+            <!-- beside Another passage: the other scenes still to prove that show this place -->
             {#snippet samePlace()}
               <button
                 class="btn btn-ghost btn-xs"
@@ -423,6 +425,7 @@
               {edit}
               help={HELP}
               tips={tips(sc)}
+              wholeOff={sc.kind === 'draft' && timedBeside(scenes, sc) ? INSPECT_HELP.sceneWholeTimed : ''}
               autofocus={false}
               actsWhenChanged
               {onhere}

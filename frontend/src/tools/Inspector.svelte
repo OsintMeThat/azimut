@@ -14,7 +14,7 @@
   import {
     editClock, isAbandoned, isStretch, isWholeVideo, liveScenes, markablePicture, momentBefore, momentKey, momentsClash, newScene,
     sameMoments, sameTime, sceneList, sceneMarks, sceneMoments, scenePassage, sceneStart, sceneTime, sceneTitle, sceneToEnd,
-    setDraftTime, shortClock, snapToFrame, sortMoments, stretchFromShot, timeWords, toProve,
+    setDraftTime, shortClock, snapToFrame, sortMoments, stretchFromShot, timeWords, timedBeside, toProve, wholeTaker,
   } from '../lib/scenes.js';
   import {
     abandonProof, abandonScene, geolocateScene, geolocating, joinScenes, restoreProof, restoreScene, sceneEdit as sceneGiven,
@@ -684,8 +684,9 @@
   }
 
   // The analyst picks what the scene is: the whole video, the commonest answer for a
-  // clip filmed in one place, or the moment just captured. Once a scene to geolocate
-  // already says the whole video, the clip is one place and nothing more is asked.
+  // clip filmed in one place, or the instant just captured. Once a scene to geolocate
+  // already says the whole video, the clip is one place and nothing more is asked; once
+  // scenes hold passages of it, it is several, and the whole video is not offered.
   function offerScene(frame) {
     if (!isVideo || frame.time == null || scenesAt(frame.time, scenes, frameDur).length) return;
     if (work.scenes.some((sc) => sc.start == null)) return;
@@ -695,10 +696,9 @@
       if (run !== openRun || scenesAt(at, scenes, frameDur).length) return;
       keepScene(stretch, said);
     };
-    sceneOffer.offer(`Frame captured at ${editClock(at)} · Add a scene`, [
-      { label: 'Whole video', pick: keep({ start: null, end: null }, () => 'Scene kept for the whole video') },
-      { label: 'This moment', pick: keep({ start: at }, (scene) => `Scene kept at ${sceneTime(scene)}`) },
-    ]);
+    const instant = { label: 'This instant', pick: keep({ start: at }, (scene) => `Scene kept at ${sceneTime(scene)}`) };
+    const whole = { label: 'Whole video', pick: keep({ start: null, end: null }, () => 'Scene kept for the whole video') };
+    sceneOffer.offer(`Frame captured at ${editClock(at)} · Add a scene`, timedBeside(scenes) ? [instant] : [whole, instant]);
   }
 
   function select(id) {
@@ -1113,14 +1113,37 @@
     tabs[isVideo ? 'video' : 'frame'] = 'scenes';
   }
 
+  /**
+   * Keep a scene over `stretch`. A time marked on a clip whose one scene still to prove
+   * is about the whole video goes to that scene instead (`wholeTaker`): a video is one
+   * place or several, never both.
+   */
   function keepScene(stretch, message, { reveal = true } = {}) {
     if (!stretch) return null;
+    const whole = Number.isFinite(stretch.start) ? wholeTaker(scenes) : null;
+    if (whole) return takeWhole(whole, stretch, { reveal });
     const scene = newScene(stretch);
     work.scenes.push(scene);
     sceneOffer.quiet();
     clipChanged(message(scene), { kept: true });
     if (reveal) touchScene(scene.id);
     return scene;
+  }
+
+  /**
+   * The scene about the whole video takes this time, keeping its label, its captures and
+   * its geolocating, and the toast's Undo makes it the whole video again.
+   */
+  function takeWhole(whole, stretch, { reveal = true } = {}) {
+    const draft = work.scenes.find((sc) => sc.id === whole.id);
+    if (!draft) return null;
+    const moments = [{ start: stretch.start, end: isStretch(stretch) ? stretch.end : null }];
+    setDraftTime(draft, moments);
+    sceneOffer.quiet();
+    const label = (draft.label ?? '').trim();
+    clipChanged(`${label ? `“${label}”` : 'Scene'} now ${timeWords(moments)}, no longer the whole video`);
+    if (reveal) touchScene(draft.id);
+    return draft;
   }
 
   /** A scene at the frame on screen (S, or Mark to geolocate). */
@@ -1146,7 +1169,8 @@
    * End a scene at the frame on screen (Shift+S, End here): the one named, else the row
    * open in the Scenes tab when it started before it, else the latest that did. Of a
    * scene holding several moments, the one in hand on its open row, else the latest
-   * started before the frame.
+   * started before the frame. With none, the clip's one scene about the whole video
+   * takes the passage from the clip's start to here (`takeWhole`).
    */
   function endSceneHere(id = null) {
     if (sceneEdit.changed && sceneEdit.result) applySceneEdit();
@@ -1155,7 +1179,11 @@
     const target = id ? work.scenes.find((sc) => sc.id === id) : open ?? sceneToEnd(scenes, now);
     const scene = target && work.scenes.find((sc) => sc.id === target.id);
     const moments = scene ? sceneMoments({ kind: 'draft', ...scene }) : [];
-    if (!moments.length) return;
+    if (!moments.length) {
+      const whole = id ? null : wholeTaker(scenes);
+      if (whole) takeWhole(whole, { start: 0, end: now });
+      return;
+    }
     // the moment in hand on the open row, found by its start: Apply may have just put it in clip order
     const inHand = sceneEdit.key === scene.id ? sceneEdit.moments[sceneEdit.active]?.start : null;
     const held = moments.findIndex((m) => sameTime(m.start, inHand));
@@ -1166,7 +1194,7 @@
     }
     const ended = moments.map((m, i) => (i === index ? { start: m.start, end: now } : m));
     if (momentsClash(ended)) {
-      toast('That end runs into another moment of the scene', 'warn');
+      toast('That end runs into another passage of the scene', 'warn');
       return;
     }
     setDraftTime(scene, ended);
@@ -1527,7 +1555,8 @@
   }
 
   const sceneKind = (kind) => sceneEdit.setKind(kind, frameNow());
-  const addMoment = () => sceneEdit.add(frameNow().start);
+  // Another passage, of the scene's kind, from the frame on screen (`sceneEdit.another`)
+  const addMoment = () => sceneEdit.another(frameNow());
 
   /** Move one end of a moment a frame, or a second, and show the frame it lands on. */
   function nudgeScene(which, direction, wholeSecond, index = sceneEdit.active) {
@@ -1857,6 +1886,20 @@
     declineInvite(work.caseId, work.source.path);
   }
 
+  /** Several places: the strip says how S marks them, and stops asking on this file. */
+  function severalPlaces() {
+    notNow();
+    toast('Press S where a place shows as the video plays, and Shift+S where it ends', 'info', 8000);
+  }
+
+  // Why Mark to geolocate's arrow does not offer the whole video: a scene says so, or
+  // scenes hold passages of the clip, which makes it several places.
+  const markWholeOff = $derived(
+    liveScenes(scenes).some((sc) => sc.kind === 'draft' && isWholeVideo(sc))
+      ? INSPECT_HELP.markWholeTaken
+      : timedBeside(scenes) ? INSPECT_HELP.markWholeTimed : '',
+  );
+
   // -- save to case: the one step that files media ------------------------------------
   function dupeNote(results) {
     const dupes = results.filter((r) => r?.duplicate).length;
@@ -2005,7 +2048,7 @@
 <svelte:window onkeydown={onWindowKeydown} onkeyup={onWindowKeyup} onblur={() => (holdOriginal = false)} {onpagehide} />
 
 {#snippet stripInvite()}
-  <SceneInvite onmoment={addSceneHere} onwhole={keepWholeVideo} onlater={notNow} />
+  <SceneInvite onwhole={keepWholeVideo} onseveral={severalPlaces} onlater={notNow} />
 {/snippet}
 
 <div class="tool">
@@ -2157,7 +2200,7 @@
                 <kbd>C</kbd>
               </button>
               <MarkScene
-                wholeTaken={liveScenes(scenes).some((sc) => sc.kind === 'draft' && isWholeVideo(sc))}
+                wholeOff={markWholeOff}
                 onmoment={addSceneHere}
                 onwhole={keepWholeVideo}
               />

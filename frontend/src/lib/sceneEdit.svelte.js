@@ -7,9 +7,10 @@
  * until Apply, so a drag or a typo costs nothing, and the list does not reorder
  * under the pointer while a start moves.
  *
- * A scene is about the whole video, or holds moments, each an instant or a passage,
- * as many as the place shows in, a scene still to prove as a proof. The fields and
- * the keys work on the moment in hand (`active`), and so do the bar's handles.
+ * A scene is about the whole video, or holds moments, each an instant or a stretch,
+ * as many as the place shows in, a scene still to prove as a proof. The screen calls
+ * them passages. The fields and the keys work on the moment in hand (`active`), and so
+ * do the bar's handles.
  *
  * A field's text is what the analyst sees and types; the time beside it is what a
  * handle or a key set to the very frame, and what typing set rounded to the
@@ -17,8 +18,8 @@
  * the problem line reads.
  */
 import {
-  MAX_MOMENTS, defaultEnd, draftTime, editClock, isStretch, momentKey, momentsClash, parseClock, sameMoments, sceneMoments,
-  snapToFrame, sortMoments, timeProblem,
+  MAX_MOMENTS, defaultEnd, draftTime, editClock, isStretch, momentKey, momentsClash, nextPassage, parseClock, sameMoments,
+  sceneMoments, snapToFrame, sortMoments, timeProblem,
 } from './scenes.js';
 import { frameDuration } from './inspectPlayer.js';
 
@@ -42,6 +43,8 @@ export class SceneEdit {
   moments = $state([]);
   /** The moment in hand, which the handles and S move. */
   active = $state(0);
+  /** Why Another passage added none, until the next change; '' when it did. */
+  note = $state('');
   // The moments put aside by Whole video, given back if Instant or Passage is chosen again.
   #kept = [];
 
@@ -90,7 +93,7 @@ export class SceneEdit {
     const several = this.moments.length > 1;
     for (const [i, l] of this.moments.entries()) {
       const wrong = timeProblem({ start: l.start, end: l.end, passage: l.passage, duration, frame });
-      if (wrong) return several ? `Moment ${i + 1}: ${wrong[0].toLowerCase()}${wrong.slice(1)}` : wrong;
+      if (wrong) return several ? `Passage ${i + 1}: ${wrong[0].toLowerCase()}${wrong.slice(1)}` : wrong;
     }
     return momentsClash(this.moments.map(said));
   }
@@ -120,11 +123,13 @@ export class SceneEdit {
     this.moments = sceneMoments(scene).map(line);
     this.active = 0;
     this.#kept = [];
+    this.note = '';
   }
 
   close() {
     this.scene = null;
     this.moments = [];
+    this.note = '';
   }
 
   activate(index) {
@@ -135,6 +140,7 @@ export class SceneEdit {
   setStart(time, index = this.active) {
     const l = this.moments[index];
     if (!l) return;
+    this.note = '';
     l.start = time;
     l.startText = editClock(time);
   }
@@ -143,6 +149,7 @@ export class SceneEdit {
   setEnd(time, index = this.active) {
     const l = this.moments[index];
     if (!l) return;
+    this.note = '';
     l.passage = true;
     l.end = time;
     l.endText = editClock(time);
@@ -151,6 +158,7 @@ export class SceneEdit {
   typeStart(text, index = this.active) {
     const l = this.moments[index];
     if (!l) return;
+    this.note = '';
     l.startText = text;
     l.start = this.#typed(text);
   }
@@ -158,6 +166,7 @@ export class SceneEdit {
   typeEnd(text, index = this.active) {
     const l = this.moments[index];
     if (!l) return;
+    this.note = '';
     l.endText = text;
     l.end = this.#typed(text);
   }
@@ -169,6 +178,7 @@ export class SceneEdit {
    * has moved past its start, else a few seconds on.
    */
   setKind(kind, now = { start: 0, end: 0 }) {
+    this.note = '';
     if (kind === 'whole') {
       if (!this.whole) this.#kept = this.moments.map((l) => ({ ...l }));
       this.moments = [];
@@ -196,13 +206,36 @@ export class SceneEdit {
   /** Another moment of the scene, an instant at `time`, taken in hand. */
   add(time) {
     if (!this.many || this.moments.length >= MAX_MOMENTS) return;
+    this.note = '';
     this.moments.push(line({ start: time }));
     this.active = this.moments.length - 1;
+  }
+
+  /**
+   * Another passage, of the kind the scene's first is, from the frame on screen `now`
+   * (`{ start, end }`, `scenes.nextPassage`), taken in hand so its ends drag on the bar
+   * and Here moves it. Answers whether one was added; when no frame is free, `note`
+   * says so and nothing changes.
+   */
+  another(now) {
+    if (!this.many || this.moments.length >= MAX_MOMENTS) return false;
+    const { duration, fps } = this.clip();
+    const next = nextPassage(this.moments.map(said), now, { frame: frameDuration(fps), duration });
+    if (next.refused) {
+      this.note = next.refused;
+      return false;
+    }
+    this.note = '';
+    // its end on a frame, as a typed one lands, so a length added leaves no float dust
+    this.moments.push(line({ start: next.start, end: next.end == null ? null : snapToFrame(next.end, fps) }));
+    this.active = this.moments.length - 1;
+    return true;
   }
 
   /** Take one moment off; the last one goes by choosing Whole video. */
   remove(index) {
     if (this.moments.length < 2 || !this.moments[index]) return;
+    this.note = '';
     this.moments.splice(index, 1);
     this.active = Math.min(this.active > index ? this.active - 1 : this.active, this.moments.length - 1);
   }

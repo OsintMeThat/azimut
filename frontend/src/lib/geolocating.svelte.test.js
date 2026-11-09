@@ -250,6 +250,18 @@ describe('the queue', () => {
     expect(calls.at(-1).body).toEqual({ path: 'media/clip.mp4', label: '', start: 2 });
   });
 
+  it('tells a tab holding the video the time a scene took, the whole-video one taking it', async () => {
+    const { retimed } = await import('./sceneRetime.svelte.js');
+    answers.set('POST /api/cases/c1/scenes/mark', { scene: { ...SCENE, kind: 'draft', start: 1.2, end: 3.6 } });
+    const before = retimed.n;
+    await markToGeolocate('c1', 'media/clip.mp4', '', { start: 1.2, end: 3.6 });
+    expect(retimed).toMatchObject({ caseId: 'c1', video: 'media/clip.mp4', draft: 's1', start: 1.2, end: 3.6, more: null, n: before + 1 });
+    // a whole file marked moves no time
+    answers.set('POST /api/cases/c1/scenes/mark', { scene: { ...SCENE, kind: 'draft', start: null, end: null } });
+    await markToGeolocate('c1', 'media/clip.mp4');
+    expect(retimed.n).toBe(before + 1);
+  });
+
   it('brings an abandoned scene back by its video', async () => {
     answers.set('DELETE /api/cases/c1/scenes/s1/abandon', { scene: SCENE });
     const before = sceneEdit.n;

@@ -4,10 +4,16 @@
  * Two kinds sit in one list. A proof resting on the video is a scene the case has
  * already proved, read back by the server (`GET /cases/{id}/scenes`): it states the
  * moments the place shows in, since one place often comes back in several extracts
- * of a clip, and each moment is an instant or a passage. A scene the analyst kept
+ * of a clip, and each moment is an instant or a stretch. A scene the analyst kept
  * in Inspect and has not proved yet is a draft, held in the video's work until a
  * proof takes it up: one moment of its own (`start`, `end`), and the moments after it
  * (`more`) when the same place shows again further on.
+ *
+ * The code says moment; the screen says **passage**, since Inspect's Moments tab holds
+ * the timecoded marks. A video is one place or several, never both: a scene about the
+ * whole video is not offered beside scenes holding passages (`timedBeside`), and a new
+ * time marked on a video whose one scene is about the whole of it goes to that scene
+ * (`wholeTaker`).
  *
  * **A scene that states no time is about the whole video**, and says so rather
  * than print a timecode. A proof's frames still pin it on the bar, where they
@@ -270,12 +276,12 @@ export function compactTime(scene) {
 
 /**
  * The kind of time a scene states, in the words its row writes before the time:
- * `Whole video`, `Instant`, `Passage`, or `3 moments` for a proof holding several.
+ * `Whole video`, `Instant`, `Passage`, or `3 passages` for a scene holding several.
  */
 export function sceneKind(scene) {
   const moments = sceneMoments(scene);
   if (!moments.length) return WHOLE_VIDEO;
-  if (moments.length > 1) return `${moments.length} moments`;
+  if (moments.length > 1) return `${moments.length} passages`;
   return isStretch(moments[0]) ? 'Passage' : 'Instant';
 }
 
@@ -283,6 +289,29 @@ export function sceneKind(scene) {
 export function sceneWhen(scene) {
   const kind = sceneKind(scene);
   return kind === WHOLE_VIDEO ? kind : `${kind} · ${sceneTime(scene)}`;
+}
+
+/**
+ * Whether another live scene of the video holds passages, a proof's included, so the
+ * video is several places and a scene about the whole of it is not offered. `scene` is
+ * the one asking, left out; none for a scene not kept yet. The abandoned do not count.
+ */
+export const timedBeside = (scenes, scene = null) =>
+  liveScenes(scenes).some((s) => s.key !== scene?.key && sceneMoments(s).length > 0);
+
+/**
+ * The scene about the whole video that a new time marked on its video goes to, or null:
+ * the one live scene still to prove, about the whole video, with no proof stating
+ * passages beside it. It keeps its label, its captures and its geolocating, and takes
+ * the time in place of a second scene. One among other scenes still to prove, an
+ * older case's, stays as it is. A proof about the whole video is an answer, not a
+ * question, and lets it take the time (`engine/geolocate.whole_taker`).
+ */
+export function wholeTaker(scenes) {
+  const live = liveScenes(scenes);
+  const drafts = live.filter((s) => s.kind === 'draft');
+  if (drafts.length !== 1 || !isWholeVideo(drafts[0])) return null;
+  return live.some((s) => s.kind === 'proof' && sceneMoments(s).length) ? null : drafts[0];
 }
 
 /**
@@ -381,6 +410,33 @@ export function defaultEnd(start, now, { frame, duration = 0 }) {
 
 /** Whether two times are the same, to well under a frame. */
 export const sameTime = (a, b) => (a == null ? b == null : b != null && Math.abs(a - b) < 1e-6);
+
+/**
+ * Where Another passage puts a scene's next passage, from the frame on screen `now`
+ * (`{ start }`) and the passages it holds as their fields read: of the kind of its first
+ * in clip order. An instant at that frame, unless the scene holds it already. A stretch
+ * as long as its first stretch, starting there, or where the stretch that frame falls
+ * in ends, shortened to the room before its next stretch and to the clip's end
+ * (`duration`, 0 while unknown). Answers `{ start, end }`, or `{ refused }` in a few
+ * words when no frame is free (`frame`, one frame's length).
+ */
+export function nextPassage(moments, now, { frame = 0, duration = 0 } = {}) {
+  const held = sortMoments((moments ?? []).filter((m) => Number.isFinite(m?.start)));
+  const at = Math.max(0, Number(now?.start) || 0);
+  if (!held.length || !isStretch(held[0])) {
+    if (held.some((m) => !isStretch(m) && sameTime(m.start, at))) return { refused: 'The scene holds this instant already' };
+    return { start: at, end: null };
+  }
+  const length = held[0].end - held[0].start;
+  const stretches = held.filter(isStretch);
+  let start = at;
+  // in clip order, so a frame in a stretch that touches the next leaves both behind
+  for (const s of stretches) if (s.start <= start + 1e-6 && start < s.end - 1e-6) start = s.end;
+  const next = stretches.find((s) => s.start > start + 1e-6)?.start ?? Infinity;
+  const end = Math.min(start + length, next, duration > 0 ? duration : Infinity);
+  if (!(end - start >= Math.max(frame, 1e-6) - 1e-6)) return { refused: 'No room here for another passage' };
+  return { start, end };
+}
 
 /** Moments in the words of a toast: `at 0:03`, `0:03–0:08 · 1:12`, or `the whole video`. */
 export function timeWords(moments) {

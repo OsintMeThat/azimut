@@ -128,6 +128,25 @@ describe('a collage of one video', () => {
     expect(sceneLine()).toBe('In scene · 0:01–0:03');
   });
 
+  it('marks its stretch on its press once scenes hold passages of the video, the whole video greyed with why', async () => {
+    listed['media/clip.mp4'] = {
+      scenes: [{ kind: 'draft', id: 'sc_b', video: 'media/clip.mp4', start: 40, end: 50, label: 'Bridge?', state: 'todo', captures: [], abandoned: null }],
+      taken: [], collages: [], geolocating: null,
+    };
+    await show({ video: ONE_VIDEO, current: 'media/Pan.png', picture: 'media/Pan.png' });
+    const press = button('Mark to geolocate');
+    expect(press.title).toBe('A scene over the stretch its pieces span');
+    target.querySelector('button[aria-label="More ways to mark"]').click();
+    flushSync();
+    const whole = button('Whole video');
+    expect([whole.disabled, whole.title]).toEqual([true, 'Scenes are marked at passages of this video already']);
+    target.querySelector('button[aria-label="More ways to mark"]').click();
+    flushSync();
+    press.click();
+    await settle();
+    expect(marks()).toEqual([{ path: 'media/clip.mp4', label: '', start: 1.2, end: 3.6 }]);
+  });
+
   it('marks a single piece as its instant', async () => {
     await show({ video: { path: 'media/clip.mp4', times: [5] }, current: 'media/Pan.png' });
     target.querySelector('button[aria-label="More ways to mark"]').click();

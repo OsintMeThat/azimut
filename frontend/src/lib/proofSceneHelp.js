@@ -13,7 +13,7 @@ export const PROOF_SCENE_HELP = {
   makeStar: 'Make this the video the proof is about, which its date states',
   time: 'Change when in the video the place shows',
   show: 'Play it in the player',
-  addMoment: 'Add an instant at the frame of each panel outside these moments',
+  addMoment: 'Add an instant at the frame of each panel outside these passages',
   badge: 'Prints the scene\'s timecode on its panels',
   matched: 'Its panels from this video all fall in this scene, which the save takes up',
   onlyScene: 'The one scene of this video to geolocate, which the save takes up',
@@ -23,7 +23,7 @@ export const PROOF_SCENE_HELP = {
   play: 'Play or pause (Space)',
   frameBack: 'Back one frame (←), one second with Shift',
   frameForward: 'Forward one frame (→), one second with Shift',
-  loop: 'Play the scene\'s moments over and over',
+  loop: 'Play the scene\'s passages over and over',
   mute: 'Sound on or off',
   bar: 'Click or drag to move through the clip',
   panelFrame: 'Go to the frame of this panel',
@@ -39,12 +39,12 @@ export const PROOF_TIME_HELP = {
   field: INSPECT_HELP.sceneField,
   startHere: 'Start at the frame on the player',
   endHere: 'End at the frame on the player',
-  add: 'Another moment the place shows in, at the frame on the player',
+  add: 'Another passage the place shows in, from the frame on the player',
   remove: INSPECT_HELP.momentRemove,
   apply: INSPECT_HELP.sceneApply,
 };
 
-/** The line under the editor's moments, about the frame on screen. */
+/** The line under the editor's passages, about the frame on screen. */
 export const PROOF_TIME_TIPS = {
   whole: 'No timecode, the proof is about the whole video',
   instant: 'Here takes the frame on the player',

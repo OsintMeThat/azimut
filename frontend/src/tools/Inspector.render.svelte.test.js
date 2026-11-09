@@ -1056,7 +1056,7 @@ describe('geolocating a scene', () => {
 
 describe('a frame captured in no scene', () => {
   let seq = 0;
-  const offers = () => uiState.toasts.filter((t) => Array.isArray(t.action) && t.action.some((a) => a.label === 'This moment'));
+  const offers = () => uiState.toasts.filter((t) => Array.isArray(t.action) && t.action.some((a) => a.label === 'This instant'));
   const choice = (t, label) => t.action.find((a) => a.label === label);
   const keep = (scenes) => {
     saved['media/clip.mp4'] = {
@@ -1108,8 +1108,8 @@ describe('a frame captured in no scene', () => {
 
     const [offer] = offers();
     expect(offer.message).toBe('Frame captured at 0:02 · Add a scene');
-    expect(offer.action.map((a) => a.label)).toEqual(['Whole video', 'This moment']);
-    choice(offer, 'This moment').onClick();
+    expect(offer.action.map((a) => a.label)).toEqual(['Whole video', 'This instant']);
+    choice(offer, 'This instant').onClick();
     flushSync();
 
     expect(toast).toHaveBeenCalledWith('Scene kept at 0:02', 'info', 6000, expect.objectContaining({ label: 'Undo' }));
@@ -1153,7 +1153,7 @@ describe('a frame captured in no scene', () => {
     expect(target.querySelectorAll('.strip > div.tile')).toHaveLength(2);
     const all = offers();
     expect(all.map((t) => t.message)).toEqual(['Frame captured at 0:08 · Add a scene']);
-    choice(all[0], 'This moment').onClick();
+    choice(all[0], 'This instant').onClick();
     await afterQuiet();
     expect(put.mock.calls.at(-1)[1].spec.scenes.map((sc) => sc.start)).toEqual([8]);
   });
@@ -1176,5 +1176,15 @@ describe('a frame captured in no scene', () => {
     press('c');
     await settle(10);
     expect(offers()).toEqual([]);
+  });
+
+  it('offers no whole video beside scenes holding passages, a video being one place or several', async () => {
+    keep([{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
+    await start();
+    await openFile('Convoy clip');
+    await captureAt(8.01);
+
+    const [offer] = offers();
+    expect(offer.action.map((a) => a.label)).toEqual(['This instant']);
   });
 });

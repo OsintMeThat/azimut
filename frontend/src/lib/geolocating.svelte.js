@@ -15,6 +15,7 @@
 import { api } from './api.js';
 import { onEvent } from './events.js';
 import { gatheredScene, openScenes, sceneCount, withProofs } from './sceneQueue.js';
+import { retimedBy } from './sceneRetime.svelte.js';
 import { uiState } from './state.svelte.js';
 
 /** `scene` is the queue's row for it (`video`, `id`, `start`, `end`, `label`, `state`,
@@ -159,13 +160,15 @@ export function scenesWaiting(caseId) {
 /**
  * Mark a picture or a video to geolocate, from outside Inspect: its scene about the
  * whole file, or with `start` (and `end` for a passage) a moment of a video, or the
- * scene already there (`POST /scenes/mark`). A collage cut from one video marks that
- * video. The server refuses a map capture, a frame Inspect cut from a video, and a
+ * scene already there (`POST /scenes/mark`), or the video's one scene about the whole of
+ * it given that time. A collage cut from one video marks that video. The server refuses a map capture, a frame Inspect cut from a video, and a
  * time on a picture. Answers with the scene's row.
  */
 export async function markToGeolocate(caseId, path, label = '', { start = null, end = null } = {}) {
   const at = Number.isFinite(start) ? { start, ...(Number.isFinite(end) && end > start ? { end } : {}) } : {};
   const { scene } = await api.post(`${base(caseId)}/scenes/mark`, { path, label, ...at });
+  // the video's one scene about the whole of it may have taken the time
+  if (Number.isFinite(start)) retimedBy(caseId, scene);
   edited(caseId, scene?.video ?? path);
   await refreshQueue(caseId);
   return scene;

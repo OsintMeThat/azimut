@@ -127,7 +127,7 @@ describe('a scene\'s time, open', () => {
 
     edit.begin(proof([{ start: 5, end: 10 }, { start: 30, end: null }]));
     edit.typeStart('soon', 1);
-    expect(edit.problem).toBe('Moment 2: type a time, like 1:05 or 65');
+    expect(edit.problem).toBe('Passage 2: type a time, like 1:05 or 65');
     edit.typeStart('0:08', 1);
     edit.setEnd(12, 1);
     expect(edit.problem).toBe('Two passages overlap');
@@ -172,3 +172,52 @@ describe('a scene\'s time, open', () => {
   });
 });
 
+describe('Another passage, open', () => {
+  it('adds an instant to a scene of instants, taken in hand', () => {
+    const edit = new SceneEdit(clip);
+    edit.begin(draft(3));
+    expect(edit.another(now(20))).toBe(true);
+    expect([edit.active, edit.kind, edit.start, edit.end]).toEqual([1, 'instant', 20, null]);
+    expect(edit.activeKey).toBe('sc_1#1');
+    expect(edit.result).toEqual({ start: 3, end: null, more: [{ start: 20, end: null }] });
+  });
+
+  it('adds a stretch as long as the first to a scene of stretches, its ends in hand', () => {
+    const edit = new SceneEdit(clip);
+    edit.begin(proof([{ start: 10, end: 14 }]));
+    expect(edit.another(now(30))).toBe(true);
+    expect([edit.active, edit.kind, edit.start, edit.end]).toEqual([1, 'passage', 30, 34]);
+    expect(edit.moments[1].endText).toBe('0:34');
+    // Here moves the one just added
+    edit.here('end', now(31));
+    expect(edit.result).toEqual({ moments: [{ start: 10, end: 14 }, { start: 30, end: 31.04 }] });
+  });
+
+  it('keeps it inside the clip and out of the scene\'s other stretches', () => {
+    const edit = new SceneEdit(clip);
+    edit.begin(proof([{ start: 10, end: 14 }, { start: 32, end: 40 }]));
+    edit.another(now(58));
+    expect([edit.start, edit.end]).toEqual([58, 60]);
+    edit.remove(2);
+    edit.another(now(30));
+    expect([edit.start, edit.end]).toEqual([30, 32]);
+    edit.remove(2);
+    edit.another(now(12));
+    expect([edit.start, edit.end]).toEqual([14, 18]);
+    expect(edit.problem).toBe('');
+  });
+
+  it('adds none when no frame is free, says so, and forgets it at the next change', () => {
+    const edit = new SceneEdit(clip);
+    edit.begin(proof([{ start: 50, end: 60 }]));
+    expect(edit.another(now(55))).toBe(false);
+    expect(edit.moments).toHaveLength(1);
+    expect(edit.note).toBe('No room here for another passage');
+    expect(edit.changed).toBe(false);
+    edit.setStart(48);
+    expect(edit.note).toBe('');
+    edit.another(now(55));
+    edit.begin(proof([{ start: 50, end: 60 }]));
+    expect(edit.note).toBe('');
+  });
+});

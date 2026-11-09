@@ -4,7 +4,7 @@ import {
   WHOLE_VIDEO, defaultEnd, editClock, isStretch, isWholeVideo, momentKey, momentsClash, newScene, parseClock,
   sameMoments, sameTime, sceneList, shortClock, sceneMarks, scenePassage, sceneStart, sceneTime, sceneTitle,
   sceneToEnd, shortMoments, snapToFrame, sortMoments, spanLabel, stretchFromShot, timeProblem, timeWords,
-  compactTime, draftTime, momentBefore, samePlaceChoices, sceneMoments, setDraftTime,
+  compactTime, draftTime, momentBefore, samePlaceChoices, sceneMoments, setDraftTime, nextPassage, timedBeside, wholeTaker,
 } from './scenes.js';
 
 const proof = (name, extra = {}) => ({
@@ -83,7 +83,7 @@ describe('a scene\'s kind, in words', () => {
     expect(sceneKind(draft('a', null))).toBe(WHOLE_VIDEO);
     expect(sceneKind(draft('a', 3))).toBe('Instant');
     expect(sceneKind(draft('a', 3, 9))).toBe('Passage');
-    expect(sceneKind(proof('P', { moments: [m(30, 45), m(100)] }))).toBe('2 moments');
+    expect(sceneKind(proof('P', { moments: [m(30, 45), m(100)] }))).toBe('2 passages');
     expect(sceneKind(proof('P', { at: [3] }))).toBe(WHOLE_VIDEO);
   });
 
@@ -91,7 +91,7 @@ describe('a scene\'s kind, in words', () => {
     expect(sceneWhen(draft('a', null))).toBe('Whole video');
     expect(sceneWhen(draft('a', 229))).toBe('Instant · 3:49');
     expect(sceneWhen(draft('a', 30, 45))).toBe('Passage · 0:30–0:45');
-    expect(sceneWhen(proof('P', { moments: [m(30, 45), m(100), m(190, 200)] }))).toBe('3 moments · 0:30–0:45 +2');
+    expect(sceneWhen(proof('P', { moments: [m(30, 45), m(100), m(190, 200)] }))).toBe('3 passages · 0:30–0:45 +2');
   });
 });
 
@@ -268,7 +268,7 @@ describe('one scene, several moments', () => {
       ['b', 'b', 30, null, list[1].color],
     ]);
     expect(sceneTime(a)).toBe('0:00–0:07 · 1:05–1:12');
-    expect(sceneWhen(a)).toBe('2 moments · 0:00–0:07 · 1:05–1:12');
+    expect(sceneWhen(a)).toBe('2 passages · 0:00–0:07 · 1:05–1:12');
     expect(compactTime(a)).toBe('0:00–0:07 +1');
     expect(compactTime(list[1])).toBe('0:30');
     expect(timeWords(sceneMoments(a))).toBe('0:00–0:07 · 1:05–1:12');
@@ -405,5 +405,90 @@ describe('what is wrong with a scene\'s time', () => {
     expect(sameTime(1, 1 + 1e-9)).toBe(true);
     expect(sameTime(null, null)).toBe(true);
     expect(sameTime(null, 0)).toBe(false);
+  });
+});
+
+describe('one place or several, never both', () => {
+  const list = (drafts, proofs = []) => sceneList(proofs, drafts);
+  const gone = (scene) => ({ ...scene, kind: 'draft', abandoned: { reason: '' } });
+
+  it('bars the whole video beside a scene holding passages, a proof\'s included, never for the scene itself', () => {
+    expect(timedBeside(list([]))).toBe(false);
+    expect(timedBeside(list([draft('w', null)]))).toBe(false);
+    const timed = list([draft('a', 3, 9)]);
+    expect(timedBeside(timed)).toBe(true);
+    // the scene asking is left out: alone, it may become the whole video
+    expect(timedBeside(timed, timed[0])).toBe(false);
+    const both = list([draft('a', 3, 9), draft('b', 20)]);
+    expect(timedBeside(both, both[0])).toBe(true);
+    // a proof's passages count, a proof about the whole video does not
+    expect(timedBeside(list([], [proof('P', { moments: [m(5)] })]))).toBe(true);
+    expect(timedBeside(list([], [proof('P', { at: [5] })]))).toBe(false);
+  });
+
+  it('leaves out a scene given up on', () => {
+    const rows = sceneList([], [draft('a', 3, 9)]).map(gone);
+    expect(timedBeside(rows)).toBe(false);
+  });
+
+  it('gives a new time to the one scene still to prove about the whole video', () => {
+    const one = list([draft('w', null, null, 'Market')]);
+    expect(wholeTaker(one)?.id).toBe('w');
+    // a proof about the whole video is an answer and lets it take the time
+    expect(wholeTaker(list([draft('w', null)], [proof('P', { at: [5] })]))?.id).toBe('w');
+  });
+
+  it('leaves it as it is among other scenes, or beside a proof holding passages', () => {
+    expect(wholeTaker(list([]))).toBeNull();
+    expect(wholeTaker(list([draft('a', 3)]))).toBeNull();
+    // an older case holding both: no merging
+    expect(wholeTaker(list([draft('w', null), draft('a', 3)]))).toBeNull();
+    expect(wholeTaker(list([draft('w', null)], [proof('P', { moments: [m(5)] })]))).toBeNull();
+    // given up on, it takes nothing
+    expect(wholeTaker(list([draft('w', null)]).map(gone))).toBeNull();
+    // the other one given up on, it is the only live one again
+    const rows = list([draft('w', null), draft('a', 3)]).map((s) => (s.id === 'a' ? gone(s) : s));
+    expect(wholeTaker(rows)?.id).toBe('w');
+  });
+});
+
+describe('Another passage', () => {
+  const at = (start) => ({ start, end: start + 0.04 });
+  const clip = { frame: 0.04, duration: 60 };
+
+  it('adds an instant at the frame on screen when the scene holds instants', () => {
+    expect(nextPassage([m(3)], at(20), clip)).toEqual({ start: 20, end: null });
+    expect(nextPassage([], at(20), clip)).toEqual({ start: 20, end: null });
+    // the same instant twice is said, not added
+    expect(nextPassage([m(3), m(20)], at(20), clip)).toEqual({ refused: 'The scene holds this instant already' });
+  });
+
+  it('adds a stretch as long as the first one, from the frame on screen', () => {
+    expect(nextPassage([m(10, 14)], at(30), clip)).toEqual({ start: 30, end: 34 });
+    // the first in clip order sets the kind and the length
+    expect(nextPassage([m(40), m(10, 16)], at(30), clip)).toEqual({ start: 30, end: 36 });
+    expect(nextPassage([m(40, 42), m(10)], at(30), clip)).toEqual({ start: 30, end: null });
+  });
+
+  it('keeps it inside the clip', () => {
+    expect(nextPassage([m(10, 14)], at(58), clip)).toEqual({ start: 58, end: 60 });
+    // an unknown length bounds nothing
+    expect(nextPassage([m(10, 14)], at(58), { frame: 0.04, duration: 0 })).toEqual({ start: 58, end: 62 });
+  });
+
+  it('shortens it to the room before the next stretch, and starts it after the one the frame is in', () => {
+    expect(nextPassage([m(10, 14), m(32, 40)], at(30), clip)).toEqual({ start: 30, end: 32 });
+    expect(nextPassage([m(10, 14)], at(12), clip)).toEqual({ start: 14, end: 18 });
+    // stretches that touch are left behind together
+    expect(nextPassage([m(10, 14), m(14, 16)], at(12), clip)).toEqual({ start: 16, end: 20 });
+    // an instant inside is no obstacle
+    expect(nextPassage([m(10, 14), m(31)], at(30), clip)).toEqual({ start: 30, end: 34 });
+  });
+
+  it('refuses gently when no frame is free', () => {
+    const refused = { refused: 'No room here for another passage' };
+    expect(nextPassage([m(10, 14), m(14, 20)], at(12), clip)).toEqual({ start: 20, end: 24 });
+    expect(nextPassage([m(50, 60)], at(55), clip)).toEqual(refused);
+    expect(nextPassage([m(10, 14), m(30.02, 40)], at(30), clip)).toEqual(refused);
   });
 });
