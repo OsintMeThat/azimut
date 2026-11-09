@@ -344,7 +344,7 @@ def mark(case: Case, path: str, label: Any = "", start: Any = None, end: Any = N
     instant without an end), the scene already there at that time if there is one. A
     video is one place or several: a time marked on one whose only live scene is still
     to prove and about the whole video goes to that scene (`whole_taker`), as Inspect's
-    S does. A collage composed from one video's frames belongs to that video: marking it
+    S does, and marking whole one that already holds passages is refused. A collage composed from one video's frames belongs to that video: marking it
     marks the video, over the same time. A frame Inspect cut belongs to its video's
     scenes and a capture is an answer, not a question: neither is marked.
     """
@@ -382,6 +382,13 @@ def mark(case: Case, path: str, label: Any = "", start: Any = None, end: Any = N
             None,
         )
 
+    # the whole of a video that already holds passages is not one place; a whole scene
+    # still standing beside them, an older case's, is only answered
+    if at is None and kind == "video":
+        standing = held()
+        if (standing is None or standing.get("abandoned")) and holds_passages(case, path):
+            raise CaseError("scenes already hold passages of this video, so the whole of it is not one place")
+
     whole = whole_taker(case, path) if at is not None and held() is None else None
     if whole is not None:
         inspectwork.retime_scene(case, path, whole["id"], at, until)
@@ -391,6 +398,14 @@ def mark(case: Case, path: str, label: Any = "", start: Any = None, end: Any = N
     if scene is None:
         raise CaseError("that file holds as many scenes as it can")
     return scene_row(case, path, scene, kind)
+
+
+def holds_passages(case: Case, video: str) -> bool:
+    """Whether a live scene of this video, still to prove or a proof's, states passages."""
+    return any(
+        not row.get("abandoned") and (row["start"] is not None if row["kind"] == "draft" else bool(row.get("moments")))
+        for row in scenes_engine.video_scenes(case, video)["scenes"]
+    )
 
 
 def whole_taker(case: Case, video: str) -> dict[str, Any] | None:

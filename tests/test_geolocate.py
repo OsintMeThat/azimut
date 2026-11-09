@@ -824,3 +824,38 @@ def test_a_picture_laid_out_by_a_proof_with_no_place_stays_to_geolocate(client):
     assert [s["id"] for s in file["scenes"]] == [scene["id"]]
     listed = client.get(f"/api/cases/{cid}/scenes", params={"video": photo}).json()["scenes"]
     assert [(s["kind"], s["state"]) for s in listed] == [("proof", "progress")]
+
+
+@needs_ffmpeg
+def test_marking_a_video_whole_is_refused_once_its_scenes_hold_passages(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    timed = client.post(f"/api/cases/{cid}/scenes/mark", json={"path": video, "start": 1.0, "end": 2.0})
+    assert timed.status_code == 200, timed.text
+
+    refused = _mark(client, cid, video)
+    assert refused.status_code == 400 and "not one place" in refused.json()["detail"]
+    assert [s["id"] for s in _queue(client, cid)["files"][0]["scenes"]] == [timed.json()["scene"]["id"]]
+
+    # given up on, the passage no longer speaks for the video, and the whole may be marked
+    abandon = client.put(f"/api/cases/{cid}/scenes/{timed.json()['scene']['id']}/abandon", json={"video": video})
+    assert abandon.status_code == 200, abandon.text
+    whole = _mark(client, cid, video)
+    assert whole.status_code == 200, whole.text
+    assert whole.json()["scene"]["start"] is None
+
+
+@needs_ffmpeg
+def test_marking_whole_answers_a_whole_scene_standing_beside_passages_in_an_older_case(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save_work(client, cid, video, [
+        {"id": "s_all", "start": None, "end": None, "label": "Which town?"},
+        {"id": "s_at", "start": 1, "end": 2, "label": "Bridge"},
+    ])
+    answered = _mark(client, cid, video)
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["scene"]["id"] == "s_all"
+    # abandoned, it would come back beside the passages: the press is refused instead
+    assert client.put(f"/api/cases/{cid}/scenes/s_all/abandon", json={"video": video}).status_code == 200
+    assert _mark(client, cid, video).status_code == 400

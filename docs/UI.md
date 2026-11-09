@@ -1865,6 +1865,8 @@ video*, has its Undo. Among other scenes still to prove, as an older case may ho
 beside a proof stating passages, it stays as it is and the passage is a scene of its own.
 A proof about the whole video is an answer, not a question: it stays beside new scenes,
 lets the one about the whole video take a time, and keeps Whole video in its own kinds.
+The menus of the Media Library and Files follow the same rule: marking whole a video whose
+scenes hold passages is refused, and the toast says why.
 Marking a time from outside Inspect (`POST /cases/{id}/scenes/mark`) follows the same
 rule, and a save stays lenient. A picture is marked whole as before.
 
