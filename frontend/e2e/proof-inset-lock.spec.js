@@ -105,6 +105,29 @@ test('a locked inset stays put under a drag, takes marks drawn over it, and they
   fixture.expectNoUnexpectedRequests();
 });
 
+test('a family picked with a locked inset drags without it', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+  const { zoom } = await drawInset(page, fixture);
+  await insetRow(page).getByTitle('Lock position').click();
+  // a box beside it, on the picture, and both picked from the rows
+  const picture = await firstPicture(page);
+  await page.getByTitle('Box (r)').click();
+  await drag(page, { x: picture.x - 60, y: picture.y + 20 }, { x: picture.x - 20, y: picture.y + 50 });
+  const rows = page.locator('.shape-row');
+  await rows.nth(0).click();
+  await rows.nth(1).click({ modifiers: ['Shift'] });
+  await expect(page.locator('.shape-row.selected')).toHaveCount(2);
+  const [box] = (await save(page, fixture)).shapes.filter((s) => s.kind === 'rect');
+  await canvasSettled(page);
+  const at = await middleOf(page, box.id);
+  await drag(page, { x: at.x - 20, y: at.y - 15 }, { x: at.x + 20, y: at.y + 25 });
+  const spec = await save(page, fixture);
+  expect(spec.shapes.find((s) => s.id === box.id).x).toBeGreaterThan(box.x);
+  expect(spec.shapes.find((s) => s.id === zoom.id)).toMatchObject({ x: zoom.x, y: zoom.y, dx: zoom.dx, dy: zoom.dy, locked: true });
+  fixture.expectNoUnexpectedRequests();
+});
+
 test('a picked locked inset offers nothing to pull, and arrow keys leave it where it is', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await openProofWithPanel(page);

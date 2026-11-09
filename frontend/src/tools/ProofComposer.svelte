@@ -4174,9 +4174,10 @@
     // grid mode the grid re-flows the resulting bounds.
     // The marks drawn over a picked inset ride with it, so the frame holds the
     // inset alone: holding both would carry them twice.
+    // A locked inset is held alone or not at all, so a family's drag never carries it.
     const pickedInsets = new Set(selectedShapes.filter((s) => s.kind === 'zoom').map((s) => s.id));
     const selectedNodes = selectedShapes
-      .filter((s) => !pickedInsets.has(s.panel))
+      .filter((s) => !pickedInsets.has(s.panel) && !(isLocked(s) && selectedShapes.length > 1))
       .map((s) => docLayer.findOne(`#${s.id}`))
       .filter(Boolean);
     const selectedNode = selectedNodes.length === 1 ? selectedNodes[0] : null;

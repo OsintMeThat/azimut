@@ -180,6 +180,14 @@ describe('a paste', () => {
     expect(b2).toMatchObject({ panel: 'f', x: 52, y: 52 });
   });
 
+  it('lands a locked inset unlocked, to be placed', () => {
+    const zoom = { id: 'z', panel: 'f', kind: 'zoom', color: '#fff', x: 100, y: 100, w: 100, h: 50, iw: 200, dx: 300, dy: 0, locked: true };
+    const copied = makeCopy([zoom], ['z'], { surfaces: list, frameOf, docKey: 1 });
+    expect(copied.shapes[0].locked).toBe(true);
+    const [pasted] = pasteShapes(copied, { surfaces: list, frameOf, docKey: 1, runs: new Map(), newId });
+    expect('locked' in pasted).toBe(false);
+  });
+
   it('adds nothing when nothing in the proof can take it', () => {
     const lonely = makeCopy(markers, ['m1'], { surfaces: list, frameOf, docKey: 1 });
     expect(pasteShapes(lonely, { surfaces: [page], frameOf: frameOfIn([page]), docKey: 2, runs: new Map(), newId })).toEqual([]);

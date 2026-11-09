@@ -246,7 +246,10 @@ export function pasteShapes(copy, { surfaces, frameOf, target = null, docKey = n
         s = offset(s, by.dx, by.dy);
       }
     }
-    out.push({ ...s, id: fresh });
+    // a copy lands to be placed, so a locked inset's comes unlocked
+    const unlocked = { ...s, id: fresh };
+    delete unlocked.locked;
+    out.push(unlocked);
   }
   return out;
 }

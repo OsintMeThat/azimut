@@ -4968,7 +4968,8 @@ resizes by pointer or arrow key: a press on the enlargement draws, picks the mar
 over it or opens a marquee there, and a press on the frame reaches the picture under
 it. A marquee never catches it, and a right-click on it offers **Unlock** and Delete.
 It stays editable from its row, where the lock stays lit, and picked there it shows a
-small lock in the enlargement's corner and nothing to pull. It is stored as
+small lock in the enlargement's corner and nothing to pull. Picked with other marks, it
+stays out of their drag. A copy of it pastes unlocked, to be placed. It is stored as
 `locked: true` on the inset, absent when it is not, so an older proof reads unlocked.
 
 **The order they stack in.** The Layout tab's **Elements** list runs front-first,
