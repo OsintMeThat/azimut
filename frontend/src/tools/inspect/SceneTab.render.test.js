@@ -58,10 +58,28 @@ const type = (input, text) => {
 const key = (node, k, extra = {}) => node.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, ...extra }));
 
 describe('the list of scenes', () => {
-  it('says what to do when the clip has none', () => {
-    const root = render(SceneTab, { scenes: [] });
-    expect(root.textContent).toContain('Press S where a place shows');
-    expect(root.textContent).toContain('Shift+S');
+  it('asks one place or several when the clip has no scene, each choice its own press', () => {
+    const onwhole = vi.fn();
+    const onseveral = vi.fn();
+    const root = render(SceneTab, { scenes: [], onwhole, onseveral });
+    const choice = root.querySelector('[data-testid="scene-choice"]');
+    expect(choice.textContent).toContain('One place or several?');
+    const whole = button(choice, 'The whole video: one place');
+    const several = [...choice.querySelectorAll('button')].find((b) => b.textContent.includes('Several places: mark them as you watch'));
+    expect(whole.getAttribute('title')).toBe('One scene about the whole video, with no timecode');
+    expect(several.getAttribute('title')).toBe('Press S where each place shows as the video plays');
+    expect(several.querySelector('kbd').textContent).toBe('S');
+    whole.click();
+    expect(onwhole).toHaveBeenCalledOnce();
+    several.click();
+    expect(onseveral).toHaveBeenCalledOnce();
+    // nothing to remember: no Not now
+    expect(button(choice, 'Not now')).toBeUndefined();
+  });
+
+  it('waits for the clip\'s list before asking, so a proof resting on it never sees the question flash', () => {
+    const root = render(SceneTab, { scenes: [], read: false });
+    expect(root.querySelector('[data-testid="scene-choice"]')).toBeNull();
   });
 
   it('writes each closed scene\'s name, kind and time, in clip order, the whole video first', () => {
@@ -381,11 +399,13 @@ describe('giving up on a scene', () => {
     expect(root.querySelector('[data-testid="scene-row-abandoned"]').classList.contains('lit')).toBe(true);
   });
 
-  it('keeps the word about S off a clip holding only abandoned scenes', () => {
+  it('asks again on a clip holding only abandoned scenes, and not once one is live', () => {
     const one = sceneList([], [{ id: 'sc_1', start: 60, end: null, label: '' }]);
     const root = render(SceneTab, { scenes: abandoned(one, 'sc_1', '') });
-    expect(root.textContent).not.toContain('Press S where a place shows');
+    expect(root.querySelector('[data-testid="scene-choice"]')).not.toBeNull();
     expect(button(root, 'Abandoned (1)')).toBeDefined();
+    const live = render(SceneTab, { scenes: one });
+    expect(live.querySelector('[data-testid="scene-choice"]')).toBeNull();
   });
 });
 

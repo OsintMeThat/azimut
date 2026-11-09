@@ -41,6 +41,11 @@
   // another scene holding passages, a scene still to prove is not offered the whole
   // video, greyed with why. A proof is an answer and keeps it.
   //
+  // A video with no live scene asks whether it is one place or several, once its list
+  // is read (`read`): **The whole video: one place** keeps one scene about all of it
+  // (`onwhole`), **Several places: mark them as you watch** says how S marks them
+  // (`onseveral`). The question stays while the clip holds no live scene.
+  //
   // A picture (`picture`) is marked whole, once, from here: its row has no time, and
   // once a proof lays the picture out, the proof's row takes its place.
   //
@@ -56,8 +61,11 @@
     // `{ key, n }`: the row to bring into view and light a moment, `n` counting asks
     focus = null,
     picture = false,
+    read = true,
     onopen,
     onmark,
+    onwhole,
+    onseveral,
     onplay,
     ongo,
     onlabel,
@@ -360,10 +368,18 @@
       {/if}
     {/each}
   {:else}
-    {#if !scenes.length}
-      <div class="none">
+    {#if read && !listed.length}
+      <div class="choose" role="group" aria-labelledby="scene-choose-ask" data-testid="scene-choice">
         <span class="none-mark" aria-hidden="true"><Icon name="pin" size={15} /></span>
-        <p class="note">Press S where a place shows to find it on the map, and Shift+S where it ends.</p>
+        <div class="choose-body">
+          <p class="choose-ask" id="scene-choose-ask">One place or several?</p>
+          <button class="btn btn-sm choice" onclick={() => onwhole?.()} title={INSPECT_HELP.inviteWhole}>
+            <Icon name="video" size={13} /> <span class="choice-words"><span class="part">The whole video:</span> <span class="part">one place</span></span>
+          </button>
+          <button class="btn btn-sm choice several" onclick={() => onseveral?.()} title={INSPECT_HELP.inviteSeveral}>
+            <Icon name="pin" size={13} /> <span class="choice-words"><span class="part">Several places:</span> <span class="part">mark them as you watch</span></span> <kbd>S</kbd>
+          </button>
+        </div>
       </div>
     {/if}
     {#each listed as sc (sc.key)}
@@ -576,12 +592,61 @@
     font-size: 11.5px;
     line-height: 1.45;
   }
-  /* Nothing marked yet: a word about S, quiet, the pin it leaves on the bar beside it. */
-  .none {
+  /* No live scene yet: one place or several, the pin a scene leaves on the bar beside it. */
+  .choose {
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    padding: 10px 4px;
+    padding: 8px 4px 10px;
+  }
+  .choose-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .choose-ask {
+    margin: 4px 0 2px;
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+  }
+  /* each choice whole, its words wrapping on a narrow panel rather than cut */
+  .choice {
+    justify-content: flex-start;
+    gap: 7px;
+    min-width: 0;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    text-align: left;
+    white-space: normal;
+  }
+  .choice :global(svg) {
+    flex: none;
+    color: var(--text-2);
+  }
+  .choice.several :global(svg) {
+    color: var(--accent);
+  }
+  .choice-words {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.35;
+  }
+  /* a narrow panel breaks a choice between its two halves, never inside one */
+  .choice-words .part {
+    white-space: nowrap;
+  }
+  .choice kbd {
+    flex: none;
+    padding: 0 4px;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    opacity: 0.6;
   }
   .none-mark {
     flex-shrink: 0;

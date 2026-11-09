@@ -733,10 +733,10 @@ describe('the collages of the clip', () => {
   });
 });
 
-describe('the empty strip', () => {
-  const invite = () => target.querySelector('[data-testid="scene-invite"]');
+describe('one place or several', () => {
+  const choice = () => target.querySelector('[data-scene-panel] [data-testid="scene-choice"]');
 
-  it('asks on a video with nothing marked once the list is read, and goes at the first scene', async () => {
+  it('asks in the Scenes tab of a video with no live scene once the list is read, and goes at the first scene', async () => {
     let answer;
     const reading = new Promise((resolve) => (answer = resolve));
     const plain = get.getMockImplementation();
@@ -747,79 +747,115 @@ describe('the empty strip', () => {
     await start();
     await openFile('Convoy clip');
     // a clip that may have proofs resting on it is not asked yet
-    expect(invite()).toBeNull();
-    expect(target.querySelector('.strip').textContent).toContain('Frames you capture are kept with this video.');
+    expect(choice()).toBeNull();
     answer();
     await settle(5);
     get.mockImplementation(plain);
 
-    expect(invite().textContent).toContain('One place or several?');
-    expect([...invite().querySelectorAll('.btn')].map((b) => b.textContent.replace(/\s+/g, ' ').trim())).toEqual([
+    expect(choice().textContent).toContain('One place or several?');
+    expect([...choice().querySelectorAll('.btn')].map((b) => b.textContent.replace(/\s+/g, ' ').trim())).toEqual([
       'The whole video: one place',
       'Several places: mark them as you watch S',
     ]);
+    // the strip says what it always did: the question is the tab's
+    expect(target.querySelector('[data-testid="scene-invite"]')).toBeNull();
+    expect(target.querySelector('.strip').textContent).toContain('Frames you capture are kept with this video.');
     playheadAt(3);
     press('s');
     await settle();
-    expect(invite()).toBeNull();
+    expect(choice()).toBeNull();
     expect(rows()).toHaveLength(1);
   });
 
-  it('says how S marks several places, marks nothing, and stops asking on that file', async () => {
+  it('says how S marks several places, marks nothing, and asks again on the next visit', async () => {
     await start();
     await openFile('Walk clip');
-    inside(invite(), 'Several places').click();
+    inside(choice(), 'Several places').click();
     await settle();
-    expect(invite()).toBeNull();
     expect(rows()).toHaveLength(0);
     expect(toasts('Press S where a place shows')).toHaveLength(1);
-    expect(target.querySelector('.strip').textContent).toContain('Frames you capture are kept with this video.');
+    expect(choice()).not.toBeNull();
 
     target.querySelector('.tool-header .btn').click();
     await settle(10);
     await openFile('Walk clip');
-    expect(invite()).toBeNull();
-    localStorage.clear();
+    expect(choice()).not.toBeNull();
   });
 
   it('keeps the whole video from its first press', async () => {
     await start();
     await openFile('Convoy clip');
-    inside(invite(), 'The whole video').click();
+    inside(choice(), 'The whole video').click();
     await settle();
-    expect(invite()).toBeNull();
+    expect(choice()).toBeNull();
     await afterQuiet();
     expect(lastSpec().scenes).toEqual([{ id: expect.any(String), start: null, end: null, label: '' }]);
   });
 
-  it('asks nothing of a clip with a proof resting on it, frames in it, or an abandoned scene', async () => {
+  it('asks nothing of a clip with a proof resting on it, and asks again once its scenes are all abandoned', async () => {
     listed[CLIP] = { scenes: [proofRow('Depot')] };
     await start();
     await openFile('Convoy clip');
-    expect(invite()).toBeNull();
+    expect(choice()).toBeNull();
 
-    listed[CLIP] = { scenes: [] };
     work(CLIP, [kept('sc_1', 1, null, '')]);
     listed[CLIP] = { scenes: [row('sc_1', 1, null, '', { state: 'abandoned', abandoned: { reason: '', at: 't' } })] };
     target.querySelector('.tool-header .btn').click();
     await settle(10);
     await openFile('Convoy clip');
-    expect(invite()).toBeNull();
+    expect(choice()).not.toBeNull();
   });
+});
 
-  it('remembers Not now for that file, and says what it said before', async () => {
+describe('an instant marked', () => {
+  const stripFrames = () => [...target.querySelectorAll('.strip .pick')];
+
+  it('keeps its frame in the strip, as Capture frame cuts one, unfiled', async () => {
     await start();
     await openFile('Convoy clip');
-    inside(invite(), 'Not now').click();
+    playheadAt(3);
+    press('s');
     await settle();
-    expect(invite()).toBeNull();
-    expect(target.querySelector('.strip').textContent).toContain('Frames you capture are kept with this video.');
+    expect(rows()).toHaveLength(1);
+    expect(stripFrames()).toHaveLength(1);
+    expect(stripFrames()[0].getAttribute('aria-label')).toBe('Frame 1 at 0:03.0');
+    expect(target.querySelector('.strip .mark.filed')).toBeNull();
+    // a work frame: in the work, not filed to the case
+    await afterQuiet();
+    expect(lastSpec().frames.map((f) => [f.time, f.filed ?? null])).toEqual([[3, null]]);
+    expect(post.mock.calls.filter(([path]) => path.includes('save-frames'))).toHaveLength(0);
+  });
 
-    target.querySelector('.tool-header .btn').click();
-    await settle(10);
+  it('cuts none twice, and none for a passage', async () => {
+    await start();
     await openFile('Convoy clip');
-    expect(invite()).toBeNull();
-    localStorage.clear();
+    playheadAt(3);
+    press('c');
+    await settle();
+    expect(stripFrames()).toHaveLength(1);
+    // the instant marked on a frame the strip holds already
+    press('s');
+    await settle();
+    expect(rows()).toHaveLength(1);
+    expect(stripFrames()).toHaveLength(1);
+    // the scene ended further on: a passage, which takes no frame of its own
+    playheadAt(6);
+    press('S', { shiftKey: true });
+    await settle();
+    expect(stripFrames()).toHaveLength(1);
+  });
+
+  it('keeps its frame when the scene about the whole video takes it', async () => {
+    work(CLIP, [kept('sc_all', null, null, 'Which town?')]);
+    listed[CLIP] = { scenes: [row('sc_all', null, null, 'Which town?')] };
+    await start();
+    await openFile('Convoy clip');
+    expect(stripFrames()).toHaveLength(0);
+    playheadAt(4);
+    press('s');
+    await settle();
+    expect(rows()).toHaveLength(1);
+    expect(stripFrames().map((b) => b.getAttribute('aria-label'))).toEqual(['Frame 1 at 0:04.0']);
   });
 });
 

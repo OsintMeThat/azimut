@@ -1842,12 +1842,19 @@ screen, a scene's parts are its **passages**, each an instant or a stretch; the 
 tab keeps the word moment for its marks. A scene that states no time is about the **whole video** and prints no timecode anywhere. The bar draws each one in its
 colour, a pin at an instant and a band over a passage, named on hover. A click on a pin
 opens the Scenes tab on its scene from any tab; a click on a band does so on the Scenes
-tab only, and elsewhere just moves the clip. The empty strip of a video with no scene and
-no proof asks *One place or several?* with **The whole video: one place**, which keeps one
-scene about all of it, **Several places: mark them as you watch S**, which only says in a
-toast how S and Shift+S mark them, and Not now. Several places and Not now are remembered
-per file in this browser, and the first scene ends the question. It keeps the strip's
-height: on a short strip the question goes first, then the choices take a line each. The first scene ever kept points once, in this
+tab only, and elsewhere just moves the clip. The Scenes tab of a video with no live scene,
+none or only abandoned ones and no proof resting on it, asks *One place or several?* once
+its list is read, with **The whole video: one place**, which keeps one scene about all of
+it, and **Several places: mark them as you watch S**, which only says in a toast how S and
+Shift+S mark them. The question stays while the clip holds no live scene and goes at the
+first; nothing of it is remembered. The strip says only that the frames captured are kept
+with the video.
+**An instant always keeps its frame.** One marked in Inspect (S, Mark to geolocate's
+press, the instant the scene about the whole video takes, one added or moved on a scene's
+open row and applied) puts the frame at that time in the strip, as Capture frame does,
+unless one within half a frame of it is there already. It is a work frame: filed to the
+case once a proof uses it, as Make the proof files the frames it takes. A passage gets
+none, and an Undo of the scene leaves the frame in the strip. The first scene ever kept points once, in this
 browser, at where it waits: a small bubble with an arrow, *Your scenes wait here*, with
 **Show** to open the To-do and ✕. It hangs under the sidebar's toggle while the sidebar is
 closed, or under its To-do tab while another view is shown; with the To-do on screen it

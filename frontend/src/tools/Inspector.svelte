@@ -26,7 +26,7 @@
     sceneFootage, scenesAt,
   } from '../lib/sceneFrames.js';
   import { createSceneOffer } from '../lib/sceneOffer.js';
-  import { declineInvite, inviteDeclined, todoHintDue } from '../lib/sceneHints.js';
+  import { todoHintDue } from '../lib/sceneHints.js';
   import { SceneEdit } from '../lib/sceneEdit.svelte.js';
   import { retimed } from '../lib/sceneRetime.svelte.js';
   import { panelWidth } from '../lib/panelWidth.js';
@@ -55,7 +55,6 @@
   import InfoPanel from './inspect/InfoPanel.svelte';
   import MomentsPanel from './inspect/MomentsPanel.svelte';
   import MarkScene from './inspect/MarkScene.svelte';
-  import SceneInvite from './inspect/SceneInvite.svelte';
   import SceneTab from './inspect/SceneTab.svelte';
   import ProofFrames from './inspect/ProofFrames.svelte';
   import SaveToCase from './inspect/SaveToCase.svelte';
@@ -361,7 +360,6 @@
       savedSignature = signature();
       clipHistory.reset(clipSnapshot());
       if (item.kind === 'video') loadOverview(run);
-      inviteOff = inviteDeclined(caseId, item.path);
       loadScenes(run);
     } catch (e) {
       if (run === openRun) {
@@ -1131,6 +1129,7 @@
     if (whole) return takeWhole(whole, stretch, { reveal });
     const scene = newScene(stretch);
     work.scenes.push(scene);
+    frameInstants(sceneMoments({ kind: 'draft', ...scene }));
     sceneOffer.quiet();
     clipChanged(message(scene), { kept: true });
     if (reveal) touchScene(scene.id);
@@ -1146,11 +1145,30 @@
     if (!draft) return null;
     const moments = [{ start: stretch.start, end: isStretch(stretch) ? stretch.end : null }];
     setDraftTime(draft, moments);
+    frameInstants(moments);
     sceneOffer.quiet();
     const label = (draft.label ?? '').trim();
     clipChanged(`${label ? `“${label}”` : 'Scene'} now ${timeWords(moments)}, no longer the whole video`);
     if (reveal) touchScene(draft.id);
     return draft;
+  }
+
+  /**
+   * An instant always keeps its frame. One marked here (S, Mark to geolocate's press,
+   * the instant the scene about the whole video takes, one added or moved on a scene's
+   * open row) puts the frame at that time into the strip, as Capture frame does, unless
+   * one within half a frame of it is there already. It is a work frame, filed to the
+   * case once a proof uses it, as Make the proof files the frames it takes. An instant
+   * the scene held before is left as it is, and a passage gets no frame.
+   */
+  function frameInstants(moments, before = []) {
+    if (!isVideo) return;
+    for (const m of moments) {
+      if (m.end != null || !Number.isFinite(m.start)) continue;
+      if (before.some((b) => b.end == null && sameTime(b.start, m.start))) continue;
+      if (work.frames.some((f) => f.time != null && Math.abs(f.time - m.start) <= frameDur / 2)) continue;
+      capture(m.start);
+    }
   }
 
   /** A scene at the frame on screen (S, or Mark to geolocate). */
@@ -1605,8 +1623,10 @@
     }
     const draft = work.scenes.find((sc) => sc.id === scene.id);
     if (!draft) return;
+    const before = sceneMoments({ kind: 'draft', ...draft });
     const moments = sceneMoments({ kind: 'draft', ...time });
     setDraftTime(draft, moments);
+    frameInstants(moments, before);
     clipChanged(`Scene now ${timeWords(moments)}`);
   }
 
@@ -1882,20 +1902,12 @@
     } else if (markablePicture(item)) tabs.frame = 'scenes';
   }
 
-  // -- the strip's invitation ----------------------------------------------------------
-  // A video with nothing marked in it asks, in its empty strip, whether it holds several
-  // places (`lib/sceneHints.js`). The first scene ends it, and Not now keeps it quiet.
-  let inviteOff = $state(false);
-  const inviting = $derived(isVideo && scenesRead && !scenes.length && !inviteOff);
+  // -- one place or several -------------------------------------------------------------
+  // A video with no live scene asks, in its Scenes tab, whether it is one place or several:
+  // the whole video keeps one scene about all of it, several says how S marks them.
 
-  function notNow() {
-    inviteOff = true;
-    declineInvite(work.caseId, work.source.path);
-  }
-
-  /** Several places: the strip says how S marks them, and stops asking on this file. */
+  /** Several places: a word on how S and Shift+S mark them as the video plays. */
   function severalPlaces() {
-    notNow();
     toast('Press S where a place shows as the video plays, and Shift+S where it ends', 'info', 8000);
   }
 
@@ -2054,10 +2066,6 @@
 
 <svelte:window onkeydown={onWindowKeydown} onkeyup={onWindowKeyup} onblur={() => (holdOriginal = false)} {onpagehide} />
 
-{#snippet stripInvite()}
-  <SceneInvite onwhole={keepWholeVideo} onseveral={severalPlaces} onlater={notNow} />
-{/snippet}
-
 <div class="tool">
   {#if work.source}
     <div class="tool-header">
@@ -2188,7 +2196,6 @@
             onsaveall={saveAllFrames}
             dots={frameDots}
             uses={frameUsed}
-            invite={inviting ? stripInvite : undefined}
           />
         {/if}
       </div>
@@ -2260,6 +2267,9 @@
                 open={openRow?.key ?? null}
                 focus={sceneFocus}
                 picture={!isVideo}
+                read={scenesRead}
+                onwhole={keepWholeVideo}
+                onseveral={severalPlaces}
                 onopen={pickScene}
                 onmark={markPicture}
                 onplay={playScene}

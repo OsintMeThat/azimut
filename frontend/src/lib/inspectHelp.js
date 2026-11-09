@@ -58,7 +58,6 @@ export const INSPECT_HELP = {
   markPicture: 'Keep the whole picture as a place to geolocate',
   inviteWhole: 'One scene about the whole video, with no timecode',
   inviteSeveral: 'Press S where each place shows as the video plays',
-  inviteLater: 'Stop asking on this video',
   sceneOpen: 'Open this scene',
   sceneLabel: 'What to find in this scene',
   scenePlay: 'Play this scene on a loop',
