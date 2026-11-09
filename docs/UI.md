@@ -4398,8 +4398,8 @@ video, else the one before, else the home.
 
 **Overlays.** Ctrl+V, a drop on the canvas, or `+ Add overlay` put an image
 straight into the proof. Ctrl+V answers to two clipboards, and the rule is which
-copy came last: an annotation copied here wins, until leaving the window and
-coming back hands the chord back to the system clipboard. It lands in the `Overlays` section of the Layout tab,
+copy came last (see Copy and paste): marks copied here paste as marks, an image copied
+since pastes as an overlay. It lands in the `Overlays` section of the Layout tab,
 sits above the panels and the legend, and is moved,
 resized from its corners and framed like anything else on the canvas — you can
 annotate it too. It claims no source: no media is filed, no entity, no
@@ -4692,10 +4692,11 @@ picture: it would cover what is being annotated.
 
 **The canvas has its own right-click.** It never opens the browser's menu. On a
 mark it picks it, if it was not picked, and offers Bring to front, Bring forward,
-Send backward, Send to back, Duplicate, Copy and Delete, with **Lock position** on a
-zoom inset; on an overlay, or a panel
-in free layout, the same stacking, Crop and Remove; on the page, Fit view and a
-Paste when a mark was copied; on a caption or the footer, the editor. With a drawing tool in hand the right button stays
+Send backward, Send to back, Duplicate, Copy and Delete, for every mark picked, with
+**Lock position** on a zoom inset; on an overlay, or a panel
+in free layout, the same stacking, Crop and Remove, and on any panel or overlay a
+**Paste** onto it once marks are copied; on the page, Fit view and a Paste where the
+marks were; on a caption or the footer, the editor. With a drawing tool in hand the right button stays
 silent, as it neither draws nor drops a pick. **Ctrl+↑ and Ctrl+↓** step the picked
 marks forward and back, with Shift all the way; a step passes the next mark of the
 same picture, the only one it can cover.
@@ -4763,7 +4764,8 @@ it holds; an end let go over a picture holds there and one let go in a margin co
 free, for a handle and for the whole line dragged alike, and both ends on one
 picture make it that picture's mark again. The Elements row says
 what it ties, `P1→P2`. A picture that is removed lets go of the ends it held,
-where they were; a copy is a free line, stepped aside.
+where they were. A copy keeps holding to both pictures, stepped aside on each, while
+both are in the proof, and is a free line where it stood otherwise.
 
 **Panel and overlay transforms.** Selecting either image shows a round knob on a
 short stem above it — the one Collage turns its pieces by — for a free turn, with
@@ -4971,9 +4973,33 @@ page picks everything it touches, and in grid layout it can be dragged across a
 panel too, since the grid decides where a panel sits and the drag cannot be
 moving it. In free layout that same drag moves the panel, so the rectangle starts
 on the page around it. What a family answers to: colour, stroke width, fill,
-arrow keys, Delete, and a drag from any one of them, which carries the rest.
-Resizing, rotating and copying still want one element, and the handles say so —
-several picked at once show the border and no anchors.
+arrow keys, Delete, Duplicate, Copy, and a drag from any one of them, which
+carries the rest. Resizing and rotating still want one element, and the handles say
+so: several picked at once show the border and no anchors.
+
+**Copy and paste.** Ctrl+C (Cmd+C on a Mac) copies the marks picked, Ctrl+V pastes
+them as one step, picked, and Ctrl+D duplicates them without touching the clipboard.
+Every kind copies, a model keeping its view and a marker its number. Where a paste
+lands (`lib/proofClipboard.js`):
+
+- **A picture picked, or under the pointer**: the marks are set at the same places on
+  it, measured from its edges, each one's lines and boxes sized with the picture and
+  its ink kept on the page. This is the pairs workflow: 1, 2, 3 drawn on the frame,
+  copied, pasted on the satellite capture, then each moved onto its point.
+- **No picture**: back on the pictures they were copied from, stepped down and right.
+- **Another proof or slide**: the copy waits in memory through a switch, and lands on
+  the picture in the same place (panel 2 on panel 2), else on the first one.
+- A mark free on the page stays free; a line holding to two pictures keeps holding
+  while both are there; the marks over a copied zoom inset ride on its copy. A blur,
+  a callout, a cone or an inset never goes on an inset.
+
+A paste that would cover what it copies, or the paste before it, steps on by one more
+step. The copy is also written to the system clipboard as a marked text, which is how
+Ctrl+V tells it from an image copied since, from any tab: the marked text pastes the
+marks, an image pastes an overlay. Where the page may not write there, the copy stays
+in memory and a copy made without leaving the window counts as the last one. Nothing
+is pasted into a field being typed in, or behind a dialog, and words selected on the
+page copy as words.
 
 **The gestures.** Escape unwinds one level per press: the draft in hand first,
 then whatever is picked, and only with nothing left to drop does it put the pen

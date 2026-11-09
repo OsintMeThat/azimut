@@ -3,7 +3,7 @@ import {
   PAD, PANEL_H, GAP, ROW_GAP,
   layoutPanels, layoutPanelsFree, freeNormalizeDelta, panelsBottom,
   panelsBlockHeight, panelHeight, panelScale, captionBand, legendLineHeight, footerBand,
-  docSize, legendColumns, legendRowCount, toSpec, offsetShape, copyShapeSpec, autoLayoutRows, TWEET_GUIDES,
+  docSize, legendColumns, legendRowCount, toSpec, autoLayoutRows, TWEET_GUIDES,
   autoAimed, autoCoords, formatCoords, resolveSourceUrls, autoSource, autoSourceUrls,
   normalizeSources, statedSources,
   proofCoordsText, proofSource, orderedFeatureColors, legendLines,
@@ -636,61 +636,6 @@ describe('autoLayoutRows — magic tweet fit', () => {
     });
     expect(tight).toEqual([0, 1, 1]);
     expect(wide).toEqual([0, 0, 1]);
-  });
-});
-
-describe('copyShapeSpec — clipboard copy of any shape kind', () => {
-  it('strips the id from the copy', () => {
-    const out = copyShapeSpec({ id: 's1', kind: 'rect', panel: 'p1', color: '#fff', x: 1, y: 2, w: 3, h: 4 });
-    expect(out).not.toHaveProperty('id');
-    expect(out).toEqual({ kind: 'rect', panel: 'p1', color: '#fff', x: 1, y: 2, w: 3, h: 4 });
-  });
-
-  // The regression: line/arrow/curve/freehand keep their geometry in a `points` array, so
-  // the copy must carry the full array (a shallow spread once left it proxied and
-  // the browser refused to clone it, silently breaking copy for those kinds).
-  it('copies the whole points array of line / arrow / curve / freehand kinds', () => {
-    for (const kind of ['line', 'arrow', 'curve', 'freehand']) {
-      const out = copyShapeSpec({ id: 's', kind, panel: 'p1', color: '#fff', points: [0, 0, 10, 20, 30, 40] });
-      expect(out).toEqual({ kind, panel: 'p1', color: '#fff', points: [0, 0, 10, 20, 30, 40] });
-    }
-  });
-
-  it('detaches deeply — mutating the source leaves the copy untouched', () => {
-    const src = { id: 's', kind: 'arrow', panel: 'p1', color: '#fff', points: [0, 0, 5, 5] };
-    const out = copyShapeSpec(src);
-    src.points[0] = 999;
-    src.color = '#000';
-    expect(out.points[0]).toBe(0);
-    expect(out.color).toBe('#fff');
-  });
-});
-
-describe('offsetShape — copy / paste / duplicate', () => {
-  it('nudges x/y kinds (box, ellipse, text) down-right and drops the id', () => {
-    const rect = { id: 's1', kind: 'rect', panel: 'p1', color: '#fff', x: 10, y: 20, w: 5, h: 5 };
-    const out = offsetShape(rect, 26);
-    expect(out).not.toHaveProperty('id');
-    expect(out).toMatchObject({ x: 36, y: 46, w: 5, h: 5, panel: 'p1' });
-  });
-
-  it('shifts every vertex of points-based kinds', () => {
-    const line = { id: 's2', kind: 'line', panel: 'p1', color: '#fff', points: [0, 0, 100, 40] };
-    const out = offsetShape(line, 10);
-    expect(out.points).toEqual([10, 10, 110, 50]);
-  });
-
-  it('takes a step per axis, for a page step read on a turned panel', () => {
-    const line = { kind: 'line', panel: 'p1', points: [0, 0, 100, 40] };
-    expect(offsetShape(line, 3, -2).points).toEqual([3, -2, 103, 38]);
-    expect(offsetShape({ kind: 'rect', x: 1, y: 1 }, 3, -2)).toMatchObject({ x: 4, y: -1 });
-  });
-
-  it('deep-clones so the source is untouched', () => {
-    const src = { id: 's3', kind: 'curve', panel: 'p1', points: [1, 2, 3, 4] };
-    const out = offsetShape(src, 5);
-    out.points[0] = 999;
-    expect(src.points[0]).toBe(1);
   });
 });
 

@@ -475,8 +475,13 @@ describe('Proof Composer pasted images', () => {
 
   it('decides that chord on which copy came last', () => {
     // Ctrl+C on a rectangle then Ctrl+V pasted whatever screenshot the system
-    // clipboard was holding, because the system one was read first.
-    expect(source).toContain('if (clipboard && (shapeCopyFresh || !item))');
+    // clipboard was holding, because the system one was read first. The marks are
+    // written there as marked text, which then says which copy came last.
+    const body = bodyOfFn('onPaste');
+    expect(body).toContain("const marked = readClip(e.clipboardData?.getData?.('text/plain') ?? '');");
+    expect(body).toContain('} else if (clipboard && (!item || (shapeCopyFresh && !clipOnSystem))) {');
+    expect(body.indexOf('if (marked)')).toBeLessThan(body.indexOf('addPastedImage'));
+    expect(source).toContain('await navigator.clipboard.writeText(clipText(copy));');
     expect(source).toContain('shapeCopyFresh = true;');
   });
 

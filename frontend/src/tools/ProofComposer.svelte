@@ -62,14 +62,14 @@
     CAPTION_SIZE, LEGEND_SIZE, FOOTER_SIZE,
     BG, TEXT_MAIN, normSpace, textColors,
     layoutPanels, panelsBottom, panelScale, freeNormalizeDelta, legendLineHeight, footerBand,
-    attributionLine, creditLine, footerLine, imageryCredits, docSize, offsetShape, autoLayoutRows,
+    attributionLine, creditLine, footerLine, imageryCredits, docSize, autoLayoutRows,
     autoCoords, formatCoords, autoSourceUrls, proofSource, statedSources, openableSource,
     specPoints, statePanelPoint, pointProposed, uncheckedPoints, footerLines, coordsPostLines, proofCoordsLines, MAX_POINTS,
     normalizeMaterial, resolveSourceUrls,
     toSpec, newId, loadImage, orderedFeatureColors, notesFromShapes,
     templateFromProof, applyProofStyle, normalizeProofStyle, newSignatureText,
     anchoredPos, anchoredOffset, SIG_TEXT_SIZE,
-    copyShapeSpec, dedupeBySrc, satPanelInput, mediaPanelInput,
+    dedupeBySrc, satPanelInput, mediaPanelInput,
     SIG_ANCHORS, SIG_SCALE, newSignature, signatureBox, signatureOffset, signaturePairPositions,
     groupNeighborIndex, hasGroupNeighbor,
     denseRowValues, clampPanelScale, trimClosingDuplicate, freehandShape,
@@ -153,6 +153,7 @@
     pictureUnder, nudgedLink, letGoOf, shiftedTies, markBounds, freeExtent,
   } from '../lib/freeMarks.js';
   import { INSET, goingWith, insetSurfaces, isLocked, reframedInsetMarks } from '../lib/insetMarks.js';
+  import { clipText, makeCopy, pasteShapes, readClip } from '../lib/proofClipboard.js';
   import { pollWhile } from '../lib/poll.js';
   import { carriesOutsideFiles } from '../lib/drag.js';
   import ProofSlides from './proof/ProofSlides.svelte';
@@ -1234,6 +1235,8 @@
     clearTimeout(histTimer);
     history.reset(docSnapshot());
     syncHist();
+    // another proof, or a fresh one: a paste of marks copied before lands as into another proof
+    docKey += 1;
   }
 
   $effect(() => {
@@ -2641,21 +2644,25 @@
   /**
    * One place decides what Ctrl+V means, and the rule is which copy came last.
    *
-   * Two clipboards answer one chord: the system's, which may hold a screenshot from
-   * an hour ago, and this composer's, which holds the annotation just copied. Only
-   * one of them is visible to this page, so freshness cannot be compared directly —
-   * what can be is whether the analyst left. A copy made here without leaving the
-   * window is necessarily the more recent of the two, so it wins; going somewhere
-   * else and coming back is the only way an outside copy could have happened, and
-   * that hands the chord back to the system clipboard. Without this, Ctrl+C on a
-   * rectangle followed by Ctrl+V pasted whatever image was in the clipboard.
+   * Two clipboards answer one chord: the system's, which may hold a screenshot,
+   * and this composer's, which holds the marks just copied. A copy made here is
+   * written to the system clipboard too, as a marked text (lib/proofClipboard.js),
+   * so the system clipboard says which came last: the marked text pastes the
+   * marks, from this tab or another, and an image there means it was copied since.
+   * When the copy could not be written there, the older rule stands: a copy made
+   * here without leaving the window wins, and leaving it hands the chord back.
+   * Nothing is pasted into a field being typed in, nor behind a dialog.
    */
   function onPaste(e) {
-    if (uiState.tool !== 'proof' || isTextTarget(e.target) || middleClickPaste()) return;
+    if (uiState.tool !== 'proof' || modalOpen || isTextTarget(e.target) || middleClickPaste()) return;
+    const marked = readClip(e.clipboardData?.getData?.('text/plain') ?? '');
     const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith('image/'));
-    if (clipboard && (shapeCopyFresh || !item)) {
+    if (marked) {
       e.preventDefault();
-      pasteShape();
+      pasteClip(marked.id === clipboard?.id ? clipboard : marked);
+    } else if (clipboard && (!item || (shapeCopyFresh && !clipOnSystem))) {
+      e.preventDefault();
+      pasteClip(clipboard);
     } else if (item) {
       e.preventDefault();
       addPastedImage(item.getAsFile());
@@ -4936,8 +4943,8 @@
         ...(at.shape.kind === 'zoom' && !many
           ? [{ label: 'Lock position', icon: 'lock', run: () => setLocked(at.shape, true) }, 'sep']
           : []),
-        { label: 'Duplicate', icon: 'copy', keys: keys('Ctrl+D'), run: () => duplicateShape(), disabled: many },
-        { label: 'Copy', icon: 'clipboard', keys: keys('Ctrl+C'), run: () => copyShape(), disabled: many },
+        { label: 'Duplicate', icon: 'copy', keys: keys('Ctrl+D'), run: () => duplicateSelection() },
+        { label: 'Copy', icon: 'clipboard', keys: keys('Ctrl+C'), run: () => copySelection() },
         'sep',
         { label: 'Delete', icon: 'trash', keys: 'Del', danger: true, run: deleteSelected },
       ];
@@ -4970,6 +4977,8 @@
           'sep',
         ] : []),
         { label: 'Crop', icon: 'crop', run: () => beginSurfaceCrop(item) },
+        // what was copied, set at the same place on this picture
+        ...(clipboard ? [{ label: 'Paste', icon: 'clipboard', keys: keys('Ctrl+V'), run: () => pasteClip(clipboard, item.id) }] : []),
         'sep',
         {
           label: at.panel ? 'Remove panel' : 'Remove overlay', icon: 'trash', danger: true,
@@ -4978,7 +4987,7 @@
       ];
     } else {
       items = [
-        ...(clipboard ? [{ label: 'Paste', icon: 'clipboard', keys: keys('Ctrl+V'), run: pasteShape }, 'sep'] : []),
+        ...(clipboard ? [{ label: 'Paste', icon: 'clipboard', keys: keys('Ctrl+V'), run: () => pasteClip(clipboard, null) }, 'sep'] : []),
         { label: 'Fit view', icon: 'eye', keys: 'F', run: fit },
       ];
     }
@@ -6224,22 +6233,45 @@
 
   // ---- shape ops from the side panel -----------------------------------------------------
 
-  // ---- clipboard (copy / paste / duplicate of a single element) ---------------
-  let clipboard = null; // detached deep copy of a shape spec (no id)
-  let clipboardFrame = null; // where it sat on the page when it was copied
+  // ---- clipboard (copy / paste / duplicate of the picked marks) ----------------
+  // What is copied, where a paste puts it and how it steps on: lib/proofClipboard.js.
+  let clipboard = null; // the last copy made here
+  let clipOnSystem = false; // whether that copy reached the system clipboard
   /** Whether that copy is the last one the analyst made without leaving the window.
-   *  What lets Ctrl+V tell a shape just copied here from an older screenshot sitting
-   *  in the system clipboard (see `onPaste`). */
+   *  What lets Ctrl+V tell marks just copied here from an older screenshot sitting
+   *  in the system clipboard, when the copy could not be written there (see `onPaste`). */
   let shapeCopyFresh = false;
+  // How many times the copy was pasted, by proof and by where, so each paste steps
+  // on from the last; and where the last paste went, which the next one follows.
+  let pasteRuns = new Map();
+  let lastPaste = null;
+  // Which proof is open: bumped as each one opens (see anchorHistory).
+  let docKey = 0;
+  // Whether the pointer is over the canvas, so a paste can go on the picture under it.
+  let pointerOnCanvas = false;
 
-  function copyShape(id = selectedId) {
-    const s = proof.shapes.find((x) => x.id === id);
-    if (!s) return;
-    // A copy of a line that holds to pictures is a free one, where it stood: a
-    // copy stepped aside would otherwise be pulled straight back over it.
-    clipboard = copyShapeSpec(s.ends ? { ...s, points: linkPoints(s, frameOf), ends: undefined } : s);
-    clipboardFrame = frameOf(s.panel);
+  /** A copy of these marks, with what their pictures showed: the marks over a picked inset come along. */
+  const copyOf = (ids) => makeCopy(proof.shapes, ids, { surfaces: surfacesOf(), frameOf, docKey, id: newId('c') });
+
+  /** Copy the picked marks: kept here, and written to the system clipboard as marked text. */
+  function copySelection(ids = selectedIds) {
+    const copy = copyOf(ids);
+    if (!copy) return;
+    clipboard = copy;
+    clipOnSystem = false;
     shapeCopyFresh = true;
+    pasteRuns = new Map();
+    lastPaste = null;
+    writeSystemClip(copy);
+  }
+
+  async function writeSystemClip(copy) {
+    try {
+      await navigator.clipboard.writeText(clipText(copy));
+      if (clipboard === copy) clipOnSystem = true;
+    } catch {
+      // refused or not offered: the copy here stands, under the older rule (see onPaste)
+    }
   }
 
   // The composer only ever hears about its own copies, so losing focus is the one
@@ -6250,34 +6282,65 @@
     return () => window.removeEventListener('blur', release);
   });
 
-  // Paste the clipboard as a fresh element, stepped down-right on the page so it
-  // doesn't hide the original. It lands on the surface it was copied from, panel
-  // or overlay alike; once that surface is gone, on the first panel, unchanged on
-  // the page. Points-based kinds shift every vertex.
-  function pasteShape() {
-    if (!clipboard) return;
-    let spec = clipboard;
-    let frame = frameOf(clipboard.panel);
-    if (!frame) {
-      const target = proof.panels[0]?.id;
-      frame = target ? frameOf(target) : null;
-      if (!frame || !clipboardFrame) return;
-      spec = { ...moveShapeToSurface(clipboard, clipboardFrame, frame), panel: target };
+  $effect(() => {
+    if (!containerEl) return;
+    const enter = () => (pointerOnCanvas = true);
+    const leave = () => (pointerOnCanvas = false);
+    containerEl.addEventListener('pointerenter', enter);
+    containerEl.addEventListener('pointerleave', leave);
+    return () => {
+      containerEl.removeEventListener('pointerenter', enter);
+      containerEl.removeEventListener('pointerleave', leave);
+    };
+  });
+
+  /**
+   * The picture a paste goes on: the panel or overlay picked, else the picture or
+   * inset under the pointer, else where the last paste of this copy went in this
+   * proof. Null for where each mark was copied from.
+   */
+  function pasteTarget() {
+    if (selectedPanelId) return selectedPanelId;
+    if (selectedPasteId) return selectedPasteId;
+    if (pointerOnCanvas && stage?.getPointerPosition()) {
+      const hit = surfaceHitTest(surfacesOf().filter((x) => x.id !== PAGE), docPoint());
+      if (hit) return hit.id;
     }
-    const step = pageStepOnSurface(PASTE_STEP, PASTE_STEP, frame);
-    const s = { ...offsetShape(spec, step.dx, step.dy), id: newId('s'), panel: spec.panel };
-    proof.shapes.push(s);
-    selectedIds = [s.id];
-    // cascade further pastes so repeated Ctrl+V steps down-right
-    clipboard = offsetShape(s, 0);
-    clipboardFrame = frame;
+    return lastPaste?.docKey === docKey ? lastPaste.target : null;
+  }
+
+  /**
+   * Add a copy's marks to the proof as one step, picked: on `target`, or where
+   * each was copied from (lib/proofClipboard.pasteShapes). `runs` counts the
+   * pastes so far, so a second one steps on from the first.
+   */
+  function pasteClip(copy = clipboard, target = pasteTarget(), runs = pasteRuns) {
+    if (!copy) return;
+    if (!hasProofCanvasContent(proof)) {
+      toast('Add a panel before pasting marks', 'warn', 5000);
+      return;
+    }
+    const added = pasteShapes(copy, {
+      surfaces: surfacesOf(), frameOf, target, docKey, runs, newId: () => newId('s'), step: PASTE_STEP,
+    });
+    if (!added.length) return;
+    if (runs === pasteRuns) lastPaste = { docKey, target };
+    proof.shapes.push(...added);
+    tool = 'select';
+    selectedIds = added.map((s) => s.id);
+    selectedPanelId = null;
+    selectedPasteId = null;
+    selectedSig = null;
     dirty = true;
   }
 
-  function duplicateShape(id = selectedId) {
-    copyShape(id);
-    pasteShape();
+  /** The picked marks again, stepped down and right of them, without touching the clipboard. */
+  function duplicateSelection(ids = selectedIds) {
+    const copy = copyOf(ids);
+    if (copy) pasteClip(copy, null, new Map());
   }
+
+  const duplicateShape = (id) => duplicateSelection(id ? [id] : selectedIds);
 
   /**
    * Delete these annotations, and drop the legend notes left with nothing. A zoom
@@ -6423,7 +6486,7 @@
     // the tool on the canvas behind it, and its Escape closes the dialog — that
     // is not also a reason to put the pen down underneath.
     if (modalOpen) return;
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+    if (isTextTarget(e.target)) return;
     // Alt+←/→ go from slide to slide wherever the strip shows, and never reach the
     // browser, whose Back they are on Windows and Linux.
     if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && stripShown) {
@@ -6463,11 +6526,12 @@
     if (e.ctrlKey || e.metaKey) {
       const k = e.key.toLowerCase();
       // Ctrl+V is deliberately absent: the paste event decides between an image
-      // in the system clipboard and a copied annotation (see onPaste).
-      // Copying and duplicating stay open to a drawing tool: they read the last
-      // element rather than changing it, and what they add lands in plain sight.
-      if (k === 'c' && selectedId) { e.preventDefault(); copyShape(); }
-      else if (k === 'd' && selectedId) { e.preventDefault(); duplicateShape(); }
+      // in the system clipboard and copied marks (see onPaste).
+      // Copying and duplicating stay open to a drawing tool: they read the picked
+      // marks rather than changing them, and what they add lands in plain sight.
+      // Words selected on the page are the browser's to copy.
+      if (k === 'c' && selectedIds.length && !window.getSelection()?.toString()) { e.preventDefault(); copySelection(); }
+      else if (k === 'd' && selectedIds.length) { e.preventDefault(); duplicateSelection(); }
       // the stacking order: a step with the arrow, all the way with Shift too
       else if ((k === 'arrowup' || k === 'arrowdown') && editableShapes.length) {
         e.preventDefault();

@@ -1724,36 +1724,6 @@ export function applyProofStyle(proof, style, available = {}) {
 }
 
 /**
- * Detached, plain deep copy of a shape spec (id stripped) for the clipboard.
- * A shape is pure JSON data, so a JSON round-trip both unwraps any reactive
- * proxy — `structuredClone` of a live proxy throws in the browser, and a shallow
- * spread leaves points-based shapes with a proxied `points` array,
- * which silently broke copy for those kinds — and fully detaches the copy.
- */
-export function copyShapeSpec(shape) {
-  const clone = JSON.parse(JSON.stringify(shape));
-  delete clone.id;
-  return clone;
-}
-
-/**
- * Copy of a shape spec moved by (`dx`, `dy`) of its surface's pixels, for
- * paste/duplicate. Points-based kinds shift every vertex; box/ellipse/text
- * shift their x/y. The returned spec carries no id — the caller assigns one.
- */
-export function offsetShape(shape, dx, dy = dx) {
-  const s = structuredClone(shape);
-  delete s.id;
-  if (Array.isArray(s.points)) {
-    s.points = s.points.map((v, i) => v + (i % 2 === 0 ? dx : dy));
-  } else {
-    s.x = (s.x ?? 0) + dx;
-    s.y = (s.y ?? 0) + dy;
-  }
-  return s;
-}
-
-/**
  * Panel input for a satellite capture. The caption is provider · coordinates,
  * dated with the imagery acquisition date (when the satellite scene was shot,
  * NOT when we fetched the tiles) — the date part is simply omitted when the
