@@ -1,0 +1,62 @@
+/**
+ * The saved proofs as Geo Proof lists them: its home (Continue, the search) and the Open
+ * proof list. The rows are `GET /cases/{id}/proofs`, newest first; a proof resting on a
+ * video says which and where it stands among that video's slides (`video`, `order`,
+ * `slide` of `slides`, `engine/scenes.proof_slides`), and a proof on photos says nothing
+ * of the kind, so it reads exactly as it always did.
+ */
+import { matchesTerms } from './folderBrowse.js';
+import { videoName } from './proofScene.js';
+import { sceneColorAt } from './scenes.js';
+
+/** How many proofs the home's Continue shows. */
+export const CONTINUE_SHOWN = 6;
+
+/** Whether a listed proof is a slide of a video. */
+export const onVideo = (entry) => typeof entry?.video === 'string' && !!entry.video && Number.isInteger(entry.slide);
+
+/**
+ * The small coloured line a proof of a video carries, or null for one on photos:
+ * `clip.mp4 · 2/4` where room is short, `clip.mp4 · slide 2 of 4` in the list. Its colour
+ * is the one Inspect's bar and the strip give the proof's scene.
+ */
+export function slideTag(entry, { short = false } = {}) {
+  if (!onVideo(entry)) return null;
+  const where = short ? `${entry.slide}/${entry.slides}` : `slide ${entry.slide} of ${entry.slides}`;
+  return { text: `${videoName(entry.video)} · ${where}`, color: sceneColorAt(entry.order) };
+}
+
+/** The proofs the home's Continue shows: the last ones saved. */
+export const recentProofs = (entries, shown = CONTINUE_SHOWN) => (entries ?? []).slice(0, shown);
+
+/** The proofs a search by name finds, in the list's order. */
+export function findProofs(entries, query) {
+  if (!String(query ?? '').trim()) return [];
+  return (entries ?? []).filter((entry) => matchesTerms([entry.title, entry.name].filter(Boolean).join('\n'), query));
+}
+
+/**
+ * The videos the listed proofs rest on, for the Open list's filter: each with its name
+ * and how many proofs, by name. `none` counts the proofs on photos.
+ */
+export function proofVideos(entries) {
+  const counts = new Map();
+  let none = 0;
+  for (const entry of entries ?? []) {
+    if (onVideo(entry)) counts.set(entry.video, (counts.get(entry.video) ?? 0) + 1);
+    else none += 1;
+  }
+  const videos = [...counts].map(([video, count]) => ({ video, name: videoName(video), count }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.video.localeCompare(b.video));
+  return { videos, none };
+}
+
+/** The filter's value for the proofs on no video. */
+export const NO_VIDEO = '\u0000photos';
+
+/** Whether a listed proof passes the video filter: '' for every proof. */
+export function inVideo(entry, filter) {
+  if (!filter) return true;
+  if (filter === NO_VIDEO) return !onVideo(entry);
+  return onVideo(entry) && entry.video === filter;
+}

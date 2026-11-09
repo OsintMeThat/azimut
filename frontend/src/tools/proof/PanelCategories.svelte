@@ -1,7 +1,7 @@
 <script>
-  // The All / Satellite captures / Other images chips shared by the two panel
-  // pickers (Create proof and Add a panel). Counts are of the whole set, so a
-  // chip says how much it would bring back before it is pressed.
+  // The All / Satellite captures / Other images chips of the Add a panel picker.
+  // Counts are of the whole set, so a chip says how much it would bring back
+  // before it is pressed.
   let { items, category, onpick } = $props();
 
   const CATEGORIES = [

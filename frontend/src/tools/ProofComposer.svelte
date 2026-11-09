@@ -30,6 +30,7 @@
   import SearchInput from '../components/SearchInput.svelte';
   import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import FloatingMenu from '../components/FloatingMenu.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
   import ProofToolbar from './proof/ProofToolbar.svelte';
@@ -39,6 +40,7 @@
   import '../lib/proofFontFaces.js';
   import { PROOF_FONTS, DEFAULT_PROOF_FONT, fontStack, loadProofFont } from '../lib/proofFonts.js';
   import NewProofDialog from './proof/NewProofDialog.svelte';
+  import ProofHome from './proof/ProofHome.svelte';
   import ImportProofDialog from './proof/ImportProofDialog.svelte';
   import PointMapDialog from './proof/PointMapDialog.svelte';
   import PanelCategories from './proof/PanelCategories.svelte';
@@ -46,7 +48,7 @@
   import ProofSideTabs from './proof/ProofSideTabs.svelte';
   import { needsWords, proofNeeds, shownTab, sideTabs } from './proof/sideTabs.js';
   import { ProofScene } from './proof/proofScene.svelte.js';
-  import { panelFrames, readHandoff, readStatedScene, sceneBadges, sceneColor } from '../lib/proofScene.js';
+  import { frameOrigin, panelFrames, readHandoff, readStatedScene, sceneBadges, sceneColor, videoName } from '../lib/proofScene.js';
   import { PROOF_SCENE_HELP } from '../lib/proofSceneHelp.js';
   import { buildFrameOps, frameSaveName, sliderFilters, sourceStem } from '../lib/inspect.js';
   import { preciseClock } from '../lib/inspectPlayer.js';
@@ -153,14 +155,20 @@
   import ProofSlides from './proof/ProofSlides.svelte';
   import DraftPage from './proof/DraftPage.svelte';
   import ProofFrames from './inspect/ProofFrames.svelte';
-  import { neighbour, resumeAt, slideStyle, slideTiles, switchPlan } from '../lib/proofSlides.js';
+  import { neighbour, resumeAt, slideAfterDelete, slideStyle, slideTiles, switchPlan } from '../lib/proofSlides.js';
   import { defaultProofTemplate } from '../lib/proofTemplates.js';
   import { addMark, newAzimutMark } from '../lib/proofMark.js';
   import { PROOF_TEMPLATE_HELP } from '../lib/proofTemplateHelp.js';
   import MarkShowChoice from '../components/MarkShowChoice.svelte';
   import { onEvent } from '../lib/events.js';
-  import { abandonProof, abandonScene, geolocateScene, restoreProof, restoreScene } from '../lib/geolocating.svelte.js';
-  import { collagesOfScene, proofHandoff } from '../lib/sceneFrames.js';
+  import {
+    abandonProof, abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneQueue, readSceneQueue, restoreProof, restoreScene,
+    sceneQueue,
+  } from '../lib/geolocating.svelte.js';
+  import { sceneMaterial, scenesToProve } from '../lib/newProof.js';
+  import { openScenes, queueColor } from '../lib/sceneQueue.js';
+  import { NO_VIDEO, inVideo, proofVideos, slideTag } from '../lib/proofList.js';
+  import { collagesOfScene, pictureHandoff, proofHandoff } from '../lib/sceneFrames.js';
   import { sceneMoments, sceneStart } from '../lib/scenes.js';
 
   const SCALE_STEP = 0.05;
@@ -489,7 +497,7 @@
   let slidesRun = 0;
   let slidesTimer = null;
   let slidesStale = false;
-  // `{ tile, scene, frames, filedIds, captures, collages, capture }` while Make this slide chooses.
+  // `{ video, row, look, navigate, scene, frames, filedIds, captures, collages, capture }` while Make the proof chooses.
   let slideChooser = $state(null);
   let chooserBusy = $state(false);
   let chooserUrls = [];
@@ -744,6 +752,14 @@
       uiState.tool = 'inspect';
       return;
     }
+    if (action === 'delete') {
+      askDelete({ name: tile.name, title: tile.title, video });
+      return;
+    }
+    if (action === 'rename') {
+      await renameSlide(tile, extra);
+      return;
+    }
     if (action === 'make') {
       if (!pageTile || pageTile.key !== tile.key) {
         if (!(await switchSlide(tile))) return;
@@ -783,6 +799,31 @@
   }
 
   /**
+   * Rename a slide from its menu, the way the name field renames a proof. The slide open
+   * takes the name as if typed there, and its next save moves its files; another slide is
+   * saved under it at once, its picture moving with it, as Map plate renames a plate.
+   */
+  async function renameSlide(tile, title) {
+    const caseId = caseState.current?.id;
+    const name = String(title ?? '').trim();
+    if (!caseId || !name || name === tile.title || tile.kind !== 'proof') return;
+    if (tile.current && proofStarted) {
+      proof.title = name;
+      dirty = true;
+      return;
+    }
+    try {
+      const loaded = await api.get(`/api/cases/${caseId}/proofs/${encodeURIComponent(tile.name)}`);
+      const saved = await api.post(`/api/cases/${caseId}/proofs`, { title: name, spec: loaded, rename_from: tile.name });
+      toast(`Renamed to ${saved?.title ?? name}`, 'ok', 1800);
+      await reloadCase();
+    } catch (e) {
+      toast(e.status === 409 ? 'Another proof already uses that name' : e.message, 'danger');
+    }
+    readSlides();
+  }
+
+  /**
    * Export the slides: every proved slide's saved picture copied into one new folder in
    * the destination saved for proofs, numbered in clip order. Nothing is drawn again, so
    * the slide on screen is saved first when it holds changes.
@@ -809,47 +850,67 @@
   /** What a case file is called in the chooser. */
   const fileTitle = (path) => caseMedia.find((one) => one.path === path)?.title || String(path).split('/').pop();
 
+  // ---- a scene's material, as Make the proof reads it -----------------------------------
+  // Read once here for every surface of Geo Proof that makes the proof of a scene still to
+  // prove: Make this slide on the strip, a chip of the home's To prove, and a scene picked
+  // in New proof. Its frames come from the video's Inspect work, read and never written
+  // (`GET /scenes/{draft}/frames`); a frame not in the case yet is drawn from the video for
+  // the choice, and filed on the way.
+
   /**
-   * Make this slide: the scene's frames chosen as Inspect's Make the proof chooses them,
-   * here in Geo Proof. Its frames come from the video's Inspect work, read and never
-   * written (`GET /scenes/{draft}/frames`); a frame not in the case yet is drawn from the
-   * video for the choice, and filed on the way.
+   * What Make the proof offers of a scene: `{ frames, filedIds, captures, collages, capture }`,
+   * the frames in clip order, the collages of the video holding one of its moments
+   * (`collages`, the video's as `GET /scenes?video=` lists them), the captures it gathered,
+   * and the frame to capture at its start when it holds no frame and no collage.
    */
-  async function chooseSlideFrames(tile) {
-    const caseId = caseState.current?.id;
-    const video = slides.video;
-    if (!caseId || !video || tile.kind !== 'draft') return;
-    let frames = [];
-    try {
-      const query = new URLSearchParams({ video });
-      ({ frames = [] } = await api.get(`/api/cases/${caseId}/scenes/${encodeURIComponent(tile.id)}/frames?${query}`));
-    } catch (e) {
-      // the scene or its video went meanwhile: the strip says what is left
-      toast(e.status === 404 ? 'That scene is no longer in this video' : e.message, 'warn');
-      readSlides();
-      return;
-    }
+  async function readSceneMaterial(caseId, video, row, collages) {
+    const query = new URLSearchParams({ video });
+    const { frames = [] } = await api.get(`/api/cases/${caseId}/scenes/${encodeURIComponent(row.id)}/frames?${query}`);
     const shown = frames
       .filter((f) => Number.isFinite(f?.time))
       .sort((a, b) => a.time - b.time)
       .map((f) => ({ id: String(f.id), time: f.time, path: f.path ?? null, edits: f.edits ?? {}, url: f.thumb || f.path ? fileUrl(caseId, f.thumb || f.path) : '' }));
-    const collages = collagesOfScene(tile.row, (slides.answer?.collages ?? []).filter((c) => c.export), 0).map((c) => ({
+    const mine = collagesOfScene(row, (collages ?? []).filter((c) => c.export), 0).map((c) => ({
       path: c.export, url: fileUrl(caseId, thumbOf(c.export) || c.export), title: c.title, start: c.start, current: c.current,
     }));
-    const moments = sceneMoments(tile.row);
-    slideChooser = {
-      tile,
-      scene: { ...tile.row, color: tile.color },
+    const moments = sceneMoments(row);
+    return {
       frames: shown,
       filedIds: new Set(shown.filter((f) => f.path).map((f) => f.id)),
-      captures: (tile.row.captures ?? []).map((path) => ({ path, url: fileUrl(caseId, thumbOf(path) || path), title: fileTitle(path) })),
-      collages,
-      capture: shown.length || collages.length ? null : {
-        time: sceneStart(tile.row) ?? 0,
+      captures: (row.captures ?? []).map((path) => ({ path, url: fileUrl(caseId, thumbOf(path) || path), title: fileTitle(path) })),
+      collages: mine,
+      capture: shown.length || mine.length ? null : {
+        time: sceneStart(row) ?? 0,
         why: moments.length === 1 && moments[0].end == null ? 'instant' : 'start',
       },
     };
-    void drawUnfiledFrames(caseId, video, shown);
+  }
+
+  /**
+   * Make this slide, or a chip of the home: the scene's frames chosen as Inspect's Make the
+   * proof chooses them. `look` is the look the proof made keeps (the slide's before it), and
+   * `navigate` whether opening it is a step Back retraces.
+   */
+  async function chooseSceneFrames({ video, row, color, collages, look = null, navigate = false }) {
+    const caseId = caseState.current?.id;
+    if (!caseId || !video || row?.kind !== 'draft') return;
+    let material;
+    try {
+      material = await readSceneMaterial(caseId, video, row, collages);
+    } catch (e) {
+      // the scene or its video went meanwhile: the strip says what is left
+      toast(e.status === 404 ? 'That scene is no longer in this video' : e.message, 'warn');
+      if (slides.video === video) readSlides();
+      return;
+    }
+    slideChooser = { video, row, look, navigate, scene: { ...row, color }, ...material };
+    void drawUnfiledFrames(caseId, video, material.frames, () => slideChooser?.frames);
+  }
+
+  /** Make this slide, from a tile of the strip or the page of its scene. */
+  function chooseSlideFrames(tile) {
+    if (tile.kind !== 'draft') return;
+    return chooseSceneFrames({ video: slides.video, row: tile.row, color: tile.color, collages: slides.answer?.collages, look: lastLook });
   }
 
   // Inspect's sliders, read once: a frame the case does not hold yet is drawn and filed
@@ -861,8 +922,11 @@
     return buildFrameOps(frameFilters, edits);
   }
 
-  /** The frames the case does not hold yet, drawn from the video for the chooser, a few at a time. */
-  async function drawUnfiledFrames(caseId, video, frames) {
+  /**
+   * The frames the case does not hold yet, drawn from the video for a choice, a few at a
+   * time. `held()` is the list shown now, whose frames take their picture as it comes.
+   */
+  async function drawUnfiledFrames(caseId, video, frames, held) {
     for (const frame of frames.filter((f) => !f.url).slice(0, 24)) {
       try {
         const res = await fetch(`/api/cases/${caseId}/inspect/render-preview`, {
@@ -870,53 +934,62 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: video, time: frame.time, ops: await frameOps(frame.edits), format: 'jpeg' }),
         });
-        if (!res.ok || !slideChooser) return;
+        const shown = held();
+        if (!res.ok || !shown) return;
         const url = URL.createObjectURL(await res.blob());
         chooserUrls.push(url);
-        const held = slideChooser?.frames.find((f) => f.id === frame.id);
-        if (held) held.url = url;
+        const one = held()?.find((f) => f.id === frame.id);
+        if (one) one.url = url;
       } catch {
         return;
       }
     }
   }
 
-  function closeSlideChooser() {
-    slideChooser = null;
+  /** The frames of a video the case does not hold yet, filed as Inspect saves them; each takes its path. */
+  async function fileFrames(caseId, video, frames) {
+    const unfiled = frames.filter((f) => !f.path);
+    if (!unfiled.length) return;
+    const title = caseMedia.find((one) => one.path === video)?.title;
+    const items = [];
+    for (const f of unfiled) {
+      items.push({ path: video, time: f.time, ops: await frameOps(f.edits), label: frameSaveName(sourceStem({ path: video, title }), f.time) });
+    }
+    const res = await api.post(`/api/cases/${caseId}/inspect/save-frames`, { items });
+    unfiled.forEach((f, i) => { f.path = res?.saved?.[i]?.item?.path ?? null; });
+    if (!frames.every((f) => f.path)) throw new Error('A frame could not be saved to the case');
+  }
+
+  /** Let go of the frames drawn for a choice, once nothing shows them. */
+  function dropDrawnFrames() {
     for (const url of chooserUrls) URL.revokeObjectURL(url);
     chooserUrls = [];
   }
+
+  function closeSlideChooser() {
+    slideChooser = null;
+    dropDrawnFrames();
+  }
   onDestroy(() => { for (const url of chooserUrls) URL.revokeObjectURL(url); });
 
-  /** The frames chosen: the ones not in the case filed, then the slide made of them, in the look of the slide left. */
+  /** The frames chosen: the ones not in the case filed, then the proof made of them, in clip order. */
   async function confirmSlideFrames(ids, capturePaths = [], collagePaths = []) {
     const chooser = slideChooser;
     const caseId = caseState.current?.id;
-    const video = slides.video;
-    if (!chooser || chooserBusy || !caseId || !video) return;
+    if (!chooser || chooserBusy || !caseId) return;
     chooserBusy = true;
     try {
       const frames = chooser.capture
         ? [{ id: 'start', time: chooser.capture.time, path: null }]
         : chooser.frames.filter((f) => ids.includes(f.id)).map((f) => ({ ...f }));
-      const unfiled = frames.filter((f) => !f.path);
-      if (unfiled.length) {
-        const title = caseMedia.find((one) => one.path === video)?.title;
-        const items = [];
-        for (const f of unfiled) {
-          items.push({ path: video, time: f.time, ops: await frameOps(f.edits), label: frameSaveName(sourceStem({ path: video, title }), f.time) });
-        }
-        const res = await api.post(`/api/cases/${caseId}/inspect/save-frames`, { items });
-        unfiled.forEach((f, i) => { f.path = res?.saved?.[i]?.item?.path ?? null; });
-      }
-      if (!frames.every((f) => f.path)) throw new Error('A frame could not be saved to the case');
+      await fileFrames(caseId, chooser.video, frames);
       const collages = chooser.collages.filter((c) => collagePaths.includes(c.path));
       const panels = [
         ...frames.map((f) => ({ at: f.time, path: f.path })),
         ...collages.map((c) => ({ at: c.start, path: c.path })),
       ].sort((a, b) => a.at - b.at).map((p) => p.path);
       closeSlideChooser();
-      await makeSceneProof(proofHandoff(chooser.tile.row, video, [...panels, ...capturePaths]), { look: lastLook, navigate: false });
+      await makeSceneProof(proofHandoff(chooser.row, chooser.video, [...panels, ...capturePaths]), { look: chooser.look, navigate: chooser.navigate });
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
@@ -983,19 +1056,25 @@
    * facts being what is left to do, its player ready on the Scene tab where it starts.
    * A picture marked to geolocate states no time: its proof lays out the picture and
    * the captures gathered for it, and that alone proves it.
+   *
+   * `template` is the house style New proof chose for it ('' for none), in place of the
+   * look of the slide before or the default. True once the proof is open.
    */
-  async function makeSceneProof(handoff, { look = null, navigate = true } = {}) {
+  async function makeSceneProof(handoff, { look = null, navigate = true, template = undefined } = {}) {
     const made = readHandoff(handoff);
-    if (!made) return;
+    if (!made) return false;
     // On the video of the slide open, that slide is saved as moving to the next one saves
     // it; any other proof with changes asks first, as it always did.
     const onSlides = proofStarted && !!made.scene?.video && made.scene.video === scene.star;
     // a new slide of the same video keeps the look of the slide before it, wherever it was asked
-    look ??= onSlides ? slideStyle(proof) : null;
-    if (!(await (onSlides ? settleSlide() : mayLeave()))) return;
+    look ??= onSlides && template === undefined ? slideStyle(proof) : null;
+    if (!(await (onSlides ? settleSlide() : mayLeave()))) return false;
     resetDoc();
     proofStarted = true;
-    if (look) applyLook(look);
+    if (template !== undefined) {
+      const chosen = templatesState.proof.find((t) => t.id === template);
+      if (chosen) applyTemplate(chosen, { notify: false });
+    } else if (look) applyLook(look);
     else applyDefaultTemplate();
     pickSideTab('proof');
     settlePlace('proof', place(), { navigate });
@@ -1008,6 +1087,7 @@
     anchorHistory();
     if (made.scene) scene.show(made.scene.video);
     requestAnimationFrame(fit);
+    return true;
   }
 
   // Panels whose media was deleted: the image already drawn stays on the canvas,
@@ -1047,15 +1127,13 @@
   // `{ row, view }` while one point is being moved on the map, else null.
   let pointMap = $state(null);
   let newProofTemplateId = $state('');
-  let newProofPanelPaths = $state([]);
-  let newProofQuery = $state('');
-  let newProofCategory = $state('all');
   let newProofLoading = $state(false);
   let creatingProof = $state(false);
   let replaceWithNewConfirm = $state(false);
-  const filteredNewProofItems = $derived(
-    filterProofPanelItems(pickerItems, newProofQuery, newProofCategory)
-  );
+  // What New proof asked for, held while the replace question is answered: `{ keys, empty }`.
+  let newProofPlan = null;
+  // The scene picked in New proof, `{ entry, material }`, its material read as Make the proof reads it.
+  let newProofScene = $state(null);
   const proofHasContent = $derived(hasProofCanvasContent(proof));
   // Both pickers below follow the Inspect rule: a flat list until it passes six
   // entries, then a search box and a "…" that swaps in the read-only folder
@@ -1078,9 +1156,13 @@
   let proofBrowserOpen = $state(false);
   let proofBrowsePath = $state('');
   let proofBrowseSelection = $state(null);
-  const visibleProofs = $derived((openList ?? []).filter((entry) => matchesProofQuery(entry, proofQuery)));
+  // The video the list is narrowed to, '' for every proof (`lib/proofList.js`).
+  let proofVideo = $state('');
+  const listVideos = $derived(proofVideos(openList ?? []));
+  const visibleProofs = $derived((openList ?? []).filter((entry) => inVideo(entry, proofVideo) && matchesProofQuery(entry, proofQuery)));
   const proofBrowserEntries = $derived(
-    (openList ?? []).map((entry) => ({ ...entry, id: entry.name, attrs: { folder: entry.folder ?? '' } }))
+    (openList ?? []).filter((entry) => inVideo(entry, proofVideo))
+      .map((entry) => ({ ...entry, id: entry.name, attrs: { folder: entry.folder ?? '' } }))
   );
   let saving = $state(false);
   let proofFor = $state(undefined);
@@ -1925,6 +2007,9 @@
     // exactly when the Media Library does (isSatelliteMedia), so a Street View
     // grab reads the same on both screens.
     const captured = new Set(sats.map((s) => s.path));
+    // Where each picture comes from, for New proof's sources (`lib/newProof.js`): a frame
+    // or a collage of one video knows the video and the instant, read as the server reads it.
+    const byPath = new Map(media.map((m) => [m.path, m]));
     // Newest first, across both halves at once. Each list arrives in that order
     // already, so concatenating them filed every capture above every photo — the
     // picker is opened for the frame cut a minute ago, and a proof of a strike is
@@ -1936,6 +2021,9 @@
           label: `${fmtCoords(s.lat, s.lon)} · z${s.zoom}`,
           ...panelPreview(s),
           kind: isSatelliteMedia(s) ? 'satellite' : 'media',
+          sourceType: s.source?.type ?? 'satellite',
+          origin: null,
+          collage: false,
           folder: s.folder ?? '',
           added_at: s.added_at ?? s.fetched_at ?? '',
         })),
@@ -1946,6 +2034,9 @@
             label: m.title || m.filename,
             ...panelPreview(m),
             kind: 'media',
+            sourceType: m.source?.type ?? '',
+            origin: frameOrigin(m, byPath),
+            collage: m.source?.op === 'collage',
             folder: m.folder ?? '',
             added_at: m.added_at ?? '',
           })),
@@ -1957,12 +2048,13 @@
   async function openNewProofDialog() {
     // the default template, preselected while it still exists
     newProofTemplateId = defaultProofTemplate(templatesState.proof, prefs.proofTemplate)?.id ?? '';
-    newProofPanelPaths = [];
-    newProofQuery = '';
-    newProofCategory = 'all';
+    newProofScene = null;
     pickerItems = [];
     newProofOpen = true;
     newProofLoading = true;
+    // the scenes still to prove, listed under the sources when the case has some
+    const caseId = caseState.current?.id;
+    if (caseId) void ensureSceneQueue(caseId);
     try {
       pickerItems = await fetchPanelItems();
     } catch (e) {
@@ -1972,14 +2064,130 @@
     }
   }
 
-  function toggleNewProofPanel(src) {
-    newProofPanelPaths = newProofPanelPaths.includes(src)
-      ? newProofPanelPaths.filter((path) => path !== src)
-      : [...newProofPanelPaths, src];
+  function closeNewProof() {
+    newProofOpen = false;
+    newProofScene = null;
+    dropDrawnFrames();
   }
 
-  function requestNewProofCreation() {
+  // The queue is kept in step while New proof or the home shows its scenes.
+  $effect(() => {
+    if (!newProofOpen && !(homeShown && uiState.tool === 'proof')) return;
+    return holdSceneQueue();
+  });
+  const queueFiles = $derived(sceneQueue.caseId === caseState.current?.id ? sceneQueue.files ?? [] : []);
+  const live = $derived(geolocating.caseId === caseState.current?.id ? geolocating.scene : null);
+  const newProofScenes = $derived(scenesToProve(queueFiles, live));
+
+  // ---- the home: what Geo Proof shows with no proof open ---------------------------------
+  // The last proofs saved, the search, and the scenes still to prove (`proof/ProofHome.svelte`).
+  // It opens on the list read last while one read brings it up to date (`GET /proofs`, the
+  // list Open proof reads too), read again when the case moves.
+  const homeShown = $derived(!proofStarted && !draftShown);
+  let homeProofs = $state(null);
+  let homeFor = null;
+  let homeRun = 0;
+  const homeFiles = $derived(openScenes(queueFiles));
+  $effect(() => {
+    const id = caseState.current?.id;
+    void caseState.rev;
+    if (!homeShown || uiState.tool !== 'proof') return;
+    untrack(() => {
+      if (!id) {
+        homeProofs = [];
+        return;
+      }
+      if (homeFor !== id) homeProofs = null;
+      homeFor = id;
+      void ensureSceneQueue(id);
+      readHomeProofs(id);
+    });
+  });
+
+  async function readHomeProofs(caseId) {
+    const run = ++homeRun;
+    try {
+      const list = await api.get(`/api/cases/${caseId}/proofs`);
+      if (run === homeRun && homeFor === caseId) homeProofs = list;
+    } catch {
+      if (run === homeRun && homeFor === caseId) homeProofs ??= [];
+    }
+  }
+
+  /**
+   * A chip of the home's To prove: Make the proof of that scene, as from Inspect. A video's
+   * scene chooses its frames first; a picture's proof lays the picture and its captures out.
+   */
+  async function makeFromHome(file, row) {
+    const caseId = caseState.current?.id;
+    if (!caseId) return;
+    if (file.kind === 'image' || row.file_kind === 'image') {
+      await makeSceneProof(pictureHandoff(row, file.video, row.captures ?? []));
+      return;
+    }
+    let collages = [];
+    try {
+      collages = (await api.get(`/api/cases/${caseId}/scenes?video=${encodeURIComponent(file.video)}`))?.collages ?? [];
+    } catch {
+      // its collages are only offered: the frames are read below, and say if the scene went
+    }
+    await chooseSceneFrames({ video: file.video, row: { ...row, video: file.video }, color: queueColor(row), collages, navigate: true });
+  }
+
+  /**
+   * A scene picked in New proof: its material, read as Make the proof reads it, the
+   * frames not in the case yet drawn for the choice. A picture marked to geolocate brings
+   * itself and the captures gathered for it.
+   */
+  async function readNewProofScene(entry) {
+    const caseId = caseState.current?.id;
+    if (!caseId) return null;
+    newProofScene = { entry, material: null };
+    const captured = (paths) => (paths ?? []).map((path) => ({ path, url: fileUrl(caseId, thumbOf(path) || path), title: fileTitle(path) }));
+    try {
+      let material;
+      if (entry.picture) {
+        const [picture] = captured([entry.video]);
+        material = { picture, frames: [], collages: [], captures: captured(entry.row.captures), capture: null };
+      } else {
+        const answer = await api.get(`/api/cases/${caseId}/scenes?video=${encodeURIComponent(entry.video)}`);
+        material = await readSceneMaterial(caseId, entry.video, entry.row, answer?.collages);
+        if (material.capture) material.startFrame = { id: 'start', time: material.capture.time, path: null, url: '' };
+      }
+      if (newProofScene?.entry.key !== entry.key) return null;
+      newProofScene.material = material;
+      const held = () => {
+        const now = newProofScene?.entry.key === entry.key ? newProofScene.material : null;
+        return now ? (now.startFrame ? [now.startFrame] : now.frames) : null;
+      };
+      const drawn = held();
+      if (drawn) void drawUnfiledFrames(caseId, entry.video, drawn, held);
+      return newProofScene.material;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Create proof, from New proof: `keys` the pictures in panel order, `scene` the one it takes up. */
+  function requestNewProofCreation({ keys = [], scene: entry = null } = {}) {
     if (creatingProof) return;
+    // a proof of a scene asks through Make the proof's own question, or saves the slide open
+    if (entry) {
+      void createSceneProof(keys, entry);
+      return;
+    }
+    newProofPlan = { keys };
+    if (proofStarted && dirty) {
+      replaceWithNewConfirm = true;
+      return;
+    }
+    createNewProof();
+  }
+
+  /** Start empty, from New proof: no panel, in the template chosen. */
+  function requestEmptyProof() {
+    if (creatingProof) return;
+    newProofPlan = { keys: [] };
     if (proofStarted && dirty) {
       replaceWithNewConfirm = true;
       return;
@@ -1991,7 +2199,7 @@
     if (creatingProof) return;
     creatingProof = true;
     const template = templatesState.proof.find((t) => t.id === newProofTemplateId);
-    const selectedItems = newProofPanelPaths
+    const selectedItems = (newProofPlan?.keys ?? [])
       .map((path) => pickerItems.find((item) => item.src === path))
       .filter(Boolean);
     try {
@@ -2003,9 +2211,39 @@
       for (const item of selectedItems) await addPanel(item);
       dirty = true;
       anchorHistory();
-      newProofOpen = false;
+      closeNewProof();
       replaceWithNewConfirm = false;
+      newProofPlan = null;
       if (proof.panels.length) requestAnimationFrame(fit);
+    } finally {
+      creatingProof = false;
+    }
+  }
+
+  /**
+   * The proof of a scene picked in New proof: the frames not in the case filed, then the
+   * proof made as Make the proof makes it, of the pictures in the order picked, in the
+   * template chosen.
+   */
+  async function createSceneProof(keys, entry) {
+    const caseId = caseState.current?.id;
+    const held = newProofScene;
+    if (!caseId || !held?.material || held.entry.key !== entry.key) return;
+    creatingProof = true;
+    try {
+      const byKey = new Map(sceneMaterial(held.material).map((one) => [one.key, one]));
+      const unfiled = keys
+        .filter((key) => byKey.get(key)?.frame && !byKey.get(key).frame.path)
+        .map((key) => ({ ...byKey.get(key).frame, key }));
+      await fileFrames(caseId, entry.video, unfiled);
+      const filed = new Map(unfiled.map((f) => [f.key, f.path]));
+      const panels = keys.map((key) => filed.get(key) ?? key);
+      const handoff = entry.picture
+        ? { ...pictureHandoff(entry.row, entry.video), panels }
+        : proofHandoff(entry.row, entry.video, panels);
+      if (await makeSceneProof(handoff, { template: newProofTemplateId, navigate: true })) closeNewProof();
+    } catch (e) {
+      toast(e.message, 'danger');
     } finally {
       creatingProof = false;
     }
@@ -6534,6 +6772,7 @@
    *  refreshes through openProofList instead, which keeps them. */
   function openProofDialog() {
     proofQuery = '';
+    proofVideo = '';
     proofBrowserOpen = false;
     proofBrowsePath = '';
     proofBrowseSelection = null;
@@ -6597,18 +6836,63 @@
     if (entry) requestOpenProof(entry);
   }
 
-  let deleteEntry = $state(null); // open-list entry pending deletion
+  // ---- deleting a saved proof ---------------------------------------------------------------
+  // From the Open list, the header's ⋯ for the proof open, or a slide's menu: one question,
+  // which for a proof of a video also asks what becomes of its scene. By default it goes back
+  // to To geolocate, as a delete always gave it back; or it is removed with the proof. Either
+  // way the proof goes to the Trash and comes back from there.
+  let deleteTarget = $state(null); // `{ name, title, video }` pending deletion
+  let deleteScene = $state('keep');
+  let deleting = $state(false);
+
+  function askDelete({ name, title, video = null }) {
+    if (!name) return;
+    deleteScene = 'keep';
+    deleteTarget = { name, title: title || name, video: video || null };
+  }
+
+  /** Delete the proof asked about. The proof open goes to the next slide of its video, else home. */
   async function deleteSavedProof() {
-    const entry = deleteEntry;
-    deleteEntry = null;
+    const target = deleteTarget;
+    const caseId = caseState.current?.id;
+    if (!target || !caseId || deleting) return;
+    deleting = true;
+    const open = proofStarted && savedName === target.name;
+    // where to go once it is gone, read off the strip as it stands
+    const current = open ? shownSlide : null;
+    const next = current ? slideAfterDelete(strip, current.key) : null;
     try {
-      const caseId = caseState.current.id;
-      const result = await api.del(`/api/cases/${caseId}/proofs/${encodeURIComponent(entry.name)}`);
-      await Promise.all([openProofList(), reloadCase()]);
-      deletedToast(caseId, result, entry.title);
+      const scene = target.video && deleteScene === 'drop' ? '?scene=drop' : '';
+      const result = await api.del(`/api/cases/${caseId}/proofs/${encodeURIComponent(target.name)}${scene}`);
+      deleteTarget = null;
+      if (open) {
+        // gone on purpose: no word that the saved proof was deleted behind the composer
+        savedName = null;
+        dirty = false;
+        if (next) await openSlide(next);
+        else resetDoc();
+      } else if (slides.video) {
+        readSlides();
+      }
+      deletedToast(caseId, result, target.title);
+      await Promise.all([openList !== null ? openProofList() : null, reloadCase()]);
+      if (sceneQueue.caseId === caseId && sceneQueue.files) readSceneQueue(caseId);
     } catch (e) {
       toast(e.message, 'danger');
+    } finally {
+      deleting = false;
     }
+  }
+
+  // The header's ⋯ for the proof open, and the menu it holds.
+  let proofMenu = $state(null);
+
+  /** Show the proof open in Inspect, on its passage: what a slide's menu does. */
+  function showInInspect() {
+    proofMenu = null;
+    if (!scene.star || !savedName) return;
+    uiState.inspectScene = { video: scene.star, slide: savedName };
+    uiState.tool = 'inspect';
   }
 
   // Bumped by every open, so panels still streaming in for a proof the analyst
@@ -6751,7 +7035,7 @@
   const modalOpen = $derived(
     picker || newProofOpen || importOpen || openList !== null || discardConfirm
       || replaceWithNewConfirm || exportPicker || overwritePrompt !== null
-      || placeOffer !== null || orphanOffer !== null || deleteEntry !== null
+      || placeOffer !== null || orphanOffer !== null || deleteTarget !== null
       || sourcePick !== null || pointMap !== null || checking !== null || leaving !== null
       || slideChooser !== null
   );
@@ -7171,6 +7455,12 @@
   {/if}
 {/snippet}
 
+<!-- Geo Proof's home, in place of the canvas while no proof is open. -->
+{#snippet homeView()}
+  <ProofHome caseId={caseState.current?.id ?? ''} proofs={homeProofs} files={homeFiles} {live} {thumbOf}
+    onnew={openNewProofDialog} onopen={requestOpenProof} onall={openProofDialog} onscene={makeFromHome} />
+{/snippet}
+
 <div class="tool">
   <!-- Narrower than its row (the case panel open on a laptop), the header shows the
        secondary buttons as icons rather than cut off Save and To Post. It is measured on
@@ -7184,6 +7474,12 @@
         oninput={() => (dirty = true)}
       />
       {#if dirty}<span class="badge">unsaved</span>{/if}
+      {#if savedName}
+        <button class="btn btn-ghost btn-sm proof-more" aria-label="More for this proof" title="More for this proof"
+          aria-haspopup="menu" aria-expanded={!!proofMenu} onclick={(event) => (proofMenu = proofMenu ? null : event.currentTarget)}>
+          <Icon name="more" size={14} stroke={2.4} />
+        </button>
+      {/if}
     {/if}
     <div class="spacer"></div>
     {#if caseState.current}
@@ -7249,6 +7545,19 @@
       <Icon name="post" size={14} /> To Post
     </button>
   </div>
+
+  {#if proofMenu}
+    <FloatingMenu anchor={proofMenu} width={220} label="This proof" onclose={() => (proofMenu = null)}>
+      {#if scene.star}
+        <button type="button" class="fm-item" title="Open its video in Inspect on its passage" onclick={showInInspect}>
+          <Icon name="inspect" size={14} /><span class="fm-grow">Show in Inspect</span></button>
+        <div class="fm-sep"></div>
+      {/if}
+      <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored"
+        onclick={() => { proofMenu = null; askDelete({ name: savedName, title: savedTitle(proofEntities, 'proof', savedName) || proof.title, video: scene.star }); }}>
+        <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
+    </FloatingMenu>
+  {/if}
 
   {#if kinWords}
     <!-- What the save just joined: the site this point shares with other geolocations,
@@ -7334,10 +7643,9 @@
         {focusSelect}
         {commitTextEdit}
         {proofHasContent}
-        {proofStarted}
         {openPicker}
-        {openNewProofDialog}
         page={pageTile ? scenePage : null}
+        home={homeShown ? homeView : null}
       />
       {#if openingTitle}
         <p class="opening" role="status" dir="auto">Opening {openingTitle}…</p>
@@ -8006,19 +8314,19 @@
 {#if newProofOpen}
   <NewProofDialog
     bind:templateId={newProofTemplateId}
-    bind:panelPaths={newProofPanelPaths}
-    bind:query={newProofQuery}
-    bind:category={newProofCategory}
     templates={templatesState.proof}
     items={pickerItems}
-    filteredItems={filteredNewProofItems}
+    scenes={newProofScenes}
     loading={newProofLoading}
     creating={creatingProof}
-    caseId={caseState.current?.id}
-    togglePanel={toggleNewProofPanel}
-    requestCreation={requestNewProofCreation}
-    startImport={() => { newProofOpen = false; importOpen = true; }}
-    close={() => (newProofOpen = false)}
+    caseId={caseState.current?.id ?? ''}
+    titleOf={fileTitle}
+    {thumbOf}
+    readScene={readNewProofScene}
+    oncreate={requestNewProofCreation}
+    onempty={requestEmptyProof}
+    onimport={() => { closeNewProof(); importOpen = true; }}
+    onclose={closeNewProof}
   />
 {/if}
 
@@ -8063,7 +8371,7 @@
     tone="danger"
     icon="plus"
     onconfirm={() => { replaceWithNewConfirm = false; createNewProof(); }}
-    oncancel={() => (replaceWithNewConfirm = false)}
+    oncancel={() => { replaceWithNewConfirm = false; newProofPlan = null; }}
   />
 {/if}
 
@@ -8174,19 +8482,32 @@
   />
 {/if}
 
-{#if deleteEntry}
+{#if deleteTarget}
   <ConfirmDialog
     title="Delete this proof?"
-    message={`“${deleteEntry.title}” will be removed from the case.`}
+    message={`“${deleteTarget.title}” will be removed from the case.`}
     detail="Moves the PNG and editable proof to the case trash."
-    impact={{ caseId: caseState.current?.id, paths: [deleteEntry.spec_path] }}
+    impact={{ caseId: caseState.current?.id, paths: [specPath('proof', deleteTarget.name)] }}
     restorable={RESTORABLE}
     confirmLabel="Delete"
     tone="default"
     icon="trash"
+    busy={deleting}
     onconfirm={deleteSavedProof}
-    oncancel={() => (deleteEntry = null)}
-  />
+    oncancel={() => (deleteTarget = null)}
+  >
+    {#snippet children()}
+      {#if deleteTarget.video}
+        <!-- A proof of a video: its scene goes back to geolocate, as a delete always gave
+             it back, or goes with it. -->
+        <fieldset class="scene-choice">
+          <legend>Its scene in {videoName(deleteTarget.video)}</legend>
+          <label><input type="radio" name="proof-scene" value="keep" bind:group={deleteScene} /> Goes back to To geolocate</label>
+          <label><input type="radio" name="proof-scene" value="drop" bind:group={deleteScene} /> Is removed with it</label>
+        </fieldset>
+      {/if}
+    {/snippet}
+  </ConfirmDialog>
 {/if}
 
 {#if picker}
@@ -8293,14 +8614,28 @@
       <div class="empty"><p>No saved proofs in this case yet.</p></div>
     {:else}
       <div class="picker-stack">
-        {#if proofBrowserOpen || openList.length > PICKER_SEARCH_MIN}
+        {#if proofBrowserOpen || openList.length > PICKER_SEARCH_MIN || listVideos.videos.length}
           <div class="picker-search">
-            <SearchInput bind:value={proofQuery} placeholder="Search proofs…" width="100%" />
-            <button
-              class="btn btn-ghost btn-sm browse-btn"
-              title={proofBrowserOpen ? 'Show every proof' : 'Browse folders'}
-              onclick={toggleProofBrowser}
-            >…</button>
+            {#if proofBrowserOpen || openList.length > PICKER_SEARCH_MIN}
+              <SearchInput bind:value={proofQuery} placeholder="Search proofs…" width="100%" />
+            {/if}
+            {#if listVideos.videos.length}
+              <!-- The proofs of one video, or those on photos: a series is found as a series. -->
+              <select class="input video-filter" aria-label="Video" title="Only the proofs of one video" bind:value={proofVideo}>
+                <option value="">Every video</option>
+                {#each listVideos.videos as one (one.video)}
+                  <option value={one.video}>{one.name} · {one.count}</option>
+                {/each}
+                {#if listVideos.none}<option value={NO_VIDEO}>On no video · {listVideos.none}</option>{/if}
+              </select>
+            {/if}
+            {#if proofBrowserOpen || openList.length > PICKER_SEARCH_MIN}
+              <button
+                class="btn btn-ghost btn-sm browse-btn"
+                title={proofBrowserOpen ? 'Show every proof' : 'Browse folders'}
+                onclick={toggleProofBrowser}
+              >…</button>
+            {/if}
           </div>
         {/if}
         {#if proofBrowserOpen}
@@ -8334,10 +8669,14 @@
                   {/if}
                   <div class="open-meta">
                     <span class="open-title">{entry.title}</span>
-                    <span class="open-sub">{entry.panels} panels · {entry.shapes} annotations · {entry.updated_at?.slice(0, 10)}</span>
+                    <span class="open-sub">{entry.panels === 1 ? '1 panel' : `${entry.panels} panels`} · {entry.shapes === 1 ? '1 annotation' : `${entry.shapes} annotations`} · {entry.updated_at?.slice(0, 10)}</span>
+                    {#if slideTag(entry)}
+                      {@const tag = slideTag(entry)}
+                      <span class="open-slide" style:--scene={tag.color}><span class="open-dot" aria-hidden="true"></span>{tag.text}</span>
+                    {/if}
                   </div>
                 </button>
-                <button class="btn btn-ghost btn-sm open-del" title="Delete this saved proof" onclick={() => (deleteEntry = entry)}>
+                <button class="btn btn-ghost btn-sm open-del" title="Delete this saved proof" onclick={() => askDelete(entry)}>
                   <Icon name="trash" size={13} />
                 </button>
               </div>
@@ -8362,6 +8701,11 @@
      line of text and stands level with Save and To Post. */
   .tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }
   .spacer { flex: 1; }
+  .proof-more { align-self: center; padding-inline: 5px; color: var(--text-2); }
+  .scene-choice { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
+  .scene-choice legend { margin-bottom: 4px; padding: 0; color: var(--text-2); font-weight: 600; }
+  .scene-choice label { display: flex; align-items: center; gap: 8px; color: var(--text-1); cursor: pointer; }
+  .scene-choice input { margin: 0; accent-color: var(--accent); }
   .export-split {
     position: relative;
     display: flex;
@@ -8762,6 +9106,14 @@
   .open-meta { display: flex; flex-direction: column; gap: 2px; }
   .open-title { font-weight: 600; font-size: var(--fs-sm); }
   .open-sub { font-size: var(--fs-xs); color: var(--text-3); }
+  /* a proof of a video: its video and its place among the slides, in its scene's colour */
+  .open-slide {
+    display: inline-flex; align-items: center; gap: 5px; margin-top: 1px;
+    color: color-mix(in srgb, var(--scene) 72%, var(--text-1)); font-size: var(--fs-xs); font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .open-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--scene); }
+  .video-filter { flex: none; width: auto; max-width: 220px; }
   .kin {
     display: flex; align-items: center; gap: 8px; padding: 5px 14px;
     border-bottom: 1px solid var(--border); background: var(--accent-soft);

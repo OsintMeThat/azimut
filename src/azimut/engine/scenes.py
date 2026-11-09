@@ -646,6 +646,61 @@ def read_proofs(case: Case) -> tuple[list[tuple[str, dict[str, Any]]], dict[str,
     return specs, frame_origins(case, [src for _name, spec in specs for src in _panel_sources(spec)])
 
 
+def proof_slides(case: Case, specs: list[tuple[str, dict[str, Any]]]) -> dict[str, dict[str, Any]]:
+    """Where each proof resting on a video of the case stands among that video's scenes,
+    for a list of every proof: the video, its place among the video's scenes, drafts
+    included (``order``, the colour Inspect's bar gives it), and its place among the
+    video's proofs as Geo Proof's strip lays them out (``slide`` of ``slides``: clip
+    order, the abandoned ones last). A proof on photos is left out.
+
+    One pass for the whole list: the frames looked up in batches, the works and the
+    proofs' entities read once, so the list of 300 proofs does not ask per row.
+    """
+    origins = frame_origins(case, [src for _name, spec in specs for src in _panel_sources(spec)])
+    scenes = {name: scene for name, spec in specs if (scene := proof_scene(spec, origins)) is not None}
+    wanted = sorted({scene["video"] for scene in scenes.values()})
+    videos: set[str] = set()
+    for at in range(0, len(wanted), LOOKUP_BATCH):
+        videos |= {
+            item["path"] for item in case.media_items_by_paths(wanted[at : at + LOOKUP_BATCH])
+            if item.get("kind") == "video" and isinstance(item.get("path"), str)
+        }
+    if not videos:
+        return {}
+    places = scene_places(case, sorted(videos), (specs, origins), inspectwork.subject_specs(case))
+    entities = _by_attr(case, "proof", "spec")
+    by_video: dict[str, list[tuple[bool, tuple[float, float], str]]] = {}
+    for name, spec in specs:
+        scene = scenes.get(name)
+        if scene is None or scene["video"] not in videos:
+            continue
+        attrs = (entities.get(layout.proof_spec_rel(name)) or {}).get("attrs") or {}
+        state, _abandoned = proof_state(states_place(spec), attrs)
+        by_video.setdefault(scene["video"], []).append((state == ABANDONED, _order({"kind": "proof", **scene}), name))
+    out: dict[str, dict[str, Any]] = {}
+    for video, rows in by_video.items():
+        rows.sort(key=lambda row: (row[0], row[1]))
+        for at, (_left, _when, name) in enumerate(rows):
+            out[name] = {
+                "video": video,
+                "order": places.get((video, f"proof:{name}"), 0),
+                "slide": at + 1,
+                "slides": len(rows),
+            }
+    return out
+
+
+def scenes_cited(case: Case, rel: str) -> tuple[str | None, set[str]]:
+    """The video a proof rests on and the scenes to prove it cites, by its spec's path:
+    what goes with it when its delete takes its scene too (`api/proofs.delete_proof`)."""
+    try:
+        spec = _read_proof(case.resolve_inside(rel))
+    except (UnknownProof, CaseError):
+        return None, set()
+    video, _moments = star_video(case, spec)
+    return video, cited_drafts(stated_scene(spec))
+
+
 def video_scenes(
     case: Case,
     video: str,

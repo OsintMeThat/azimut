@@ -38,7 +38,7 @@ def get_case(case_id: str) -> Case:
     except CaseError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-def delete_entities_deep(case: Case, entity_ids: list[str]) -> dict[str, Any]:
+def delete_entities_deep(case: Case, entity_ids: list[str], *, give_back: bool = True) -> dict[str, Any]:
     """Delete one UI action and everything that cannot outlive its targets.
 
     The one door every delete goes through — sidebar, Media Library, a tool's
@@ -53,6 +53,9 @@ def delete_entities_deep(case: Case, entity_ids: list[str]) -> dict[str, Any]:
     cascade back together or not at all. The graph rows are still hard-deleted:
     what is kept is the recipe, not a hidden state every other query would have
     to filter out.
+
+    ``give_back`` False keeps a proof's scene from going back to its video's work:
+    Geo Proof's delete asked to remove the scene with the proof (`api/proofs.delete_proof`).
     """
     with case.lock:
         going_by_id: dict[str, dict[str, Any]] = {}
@@ -108,7 +111,7 @@ def delete_entities_deep(case: Case, entity_ids: list[str]) -> dict[str, Any]:
         # before its file moves: a timecode is knowledge about the video, and the Trash
         # must not take it with the proof (`scenes.give_back`).
         for entity in going:
-            if entity.get("type") == "proof":
+            if give_back and entity.get("type") == "proof":
                 scene_engine.give_back(case, entity, set(going_by_id))
 
         group = trash_engine.send(case, going, scars)
@@ -152,10 +155,10 @@ def delete_entities_deep(case: Case, entity_ids: list[str]) -> dict[str, Any]:
             "trash": group["id"],
         }
 
-def delete_entity_deep(case: Case, entity_id: str) -> dict[str, Any]:
-    return delete_entities_deep(case, [entity_id])
+def delete_entity_deep(case: Case, entity_id: str, *, give_back: bool = True) -> dict[str, Any]:
+    return delete_entities_deep(case, [entity_id], give_back=give_back)
 
-def delete_by_path(case: Case, rel_path: str) -> dict[str, Any]:
+def delete_by_path(case: Case, rel_path: str, *, give_back: bool = True) -> dict[str, Any]:
     """Chokepoint entry for a tool that knows its artifact by path, not by id.
 
     Returns an empty ``deleted`` when no entity claims the path: the artifact was
@@ -165,7 +168,7 @@ def delete_by_path(case: Case, rel_path: str) -> dict[str, Any]:
     entity = entity_at(case, rel_path)
     if entity is None:
         return {"status": "deleted", "deleted": [], "tombstoned": []}
-    return delete_entity_deep(case, entity["id"])
+    return delete_entity_deep(case, entity["id"], give_back=give_back)
 
 
 def entity_at(case: Case, rel_path: str) -> dict[str, Any] | None:

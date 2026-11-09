@@ -23,7 +23,7 @@ async function openTwoPanels(page) {
     route.fulfill({ contentType: 'image/svg+xml', body: LARGE_SVG }));
   await page.goto('/#proof');
   await page.getByRole('button', { name: 'New proof' }).first().click();
-  await expect(page.getByRole('heading', { name: 'Create proof' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'New proof' })).toBeVisible();
   await page.locator('.selectable-pick').nth(0).click();
   await page.locator('.selectable-pick').nth(1).click();
   await page.getByRole('button', { name: 'Create proof' }).click();

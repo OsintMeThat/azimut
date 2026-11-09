@@ -29,6 +29,9 @@ export const PROOF_SLIDES_HELP = {
   dirty: 'Changed since it was saved',
 
   // what a tile's menu does
+  rename: 'Give this slide another name',
+  name: 'The slide\'s new name, its file following it',
+  delete: 'Send this proof to the Trash, asking about its scene',
   inspect: 'Open the video in Inspect on this scene',
   unplaced: 'This slide states no place yet',
   make: 'Make the proof of this scene from its frames',

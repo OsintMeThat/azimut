@@ -17,8 +17,6 @@
     path = '',
     rootLabel,
     selectedId = null,
-    isSelected = (entry) => selectedId != null && entry.id === selectedId,
-    mark = false, // tick the selected rows (the multi-select pickers)
     matches = () => true,
     emptyText = 'Nothing here.',
     icon = () => 'file',
@@ -51,13 +49,11 @@
     <button
       type="button"
       class="browser-row"
-      class:selected={isSelected(entry)}
-      aria-pressed={mark ? isSelected(entry) : undefined}
+      class:selected={selectedId != null && entry.id === selectedId}
       onclick={() => onselect?.(entry)}
       ondblclick={() => onconfirm?.(entry)}
     >
       <Icon name={icon(entry)} size={18} /><span>{label(entry)}</span>
-      {#if mark && isSelected(entry)}<Icon name="check" size={14} />{/if}
     </button>
   {/each}
   {#if view.children.length === 0 && files.length === 0}

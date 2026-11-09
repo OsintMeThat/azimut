@@ -4306,9 +4306,56 @@ pass date, detector, area and run id. Exported layers survive deletion of their 
 A proof is composed of panels: case images, each carrying its source. Two things
 in the composer are not panels.
 
+**With no proof open, Geo Proof shows its home** in place of the canvas, and the side
+column and the toolbar wait for a proof. On top, a large **New proof** and a search that
+finds a proof by name, Enter opening the first. **Continue** holds the last six proofs saved
+as large thumbnails with their name and how long ago, a proof of a video tagged
+*clip.mp4 · 2/4* in its scene's colour, and *All N proofs* opens the Open proof list. **To
+prove** shows only when the case has scenes still to prove: a card per video with its
+thumbnail and its scenes as chips, each with its colour, name, time and where it stands. A
+chip is Make the proof: the frames of the scene chosen as from the strip, or for a picture
+the proof of it and its captures. A case holding nothing shows the button and one sentence.
+The home opens on the list it read last and reads it again behind (`GET /proofs`, one read),
+the scenes coming from the queue the app already keeps. A scene of the strip still shows its
+page in place of the canvas, as before.
+
+**New proof** opens a window of the case's pictures. On the left, where they come from:
+**All**, then **Satellite**, **Videos**, **Collages**, **Screenshots** and **Photos**, each
+with its count and left out when the case holds none (`lib/newProof.js`). A frame or a
+collage Inspect cut from one video is under Videos, the collage under Collages too; a map
+grab, a Compare render or a Horizon view is a screenshot; the rest is a photo. The case's
+folders follow, then **Scenes to prove** when the queue holds some, each with its colour
+dot, its name, its time and its file. On the right, the pictures as large thumbnails: a
+press adds one and its number says its place among the panels, and under Videos each video
+is a block of its frames in clip order and its collages. **A scene pressed shows only its
+material, all ticked**: the frames inside its passages, the collages holding one and the
+captures gathered for it, read as Make the proof reads them. The proof made of it takes the
+scene up and opens on the Proof tab, the frames not in the case filed on the way, and the
+scene stays named at the foot with a × that lets it go. The foot holds the pictures picked
+in panel order (dragged, or Alt+←/→, to reorder, Delete or × to take one out), the template
+with the default preselected, **Create proof** and a quiet **Start empty**. All is where it
+opens and the search is focused, so a proof is still New proof, a picture, Create proof;
+Enter creates and Escape closes. A case with no scene shows no scene anywhere.
+
 **Open proof** shows its list on the press, its rows following when the case answers. A
 pick closes it at once, and a small tag over the canvas names the proof while its pictures
-load.
+load. A proof of a video carries a small line in its scene's colour, *clip.mp4 · slide 2 of
+4*: its place among that video's proofs in clip order, the abandoned last, and a select
+beside the search narrows the list to one video or to the proofs on no video. A proof on
+photos reads as it always did. The list says it for every proof in one pass on the server
+(`GET /cases/{id}/proofs`, `engine/scenes.proof_slides`): about 140 ms for 300 proofs on
+three videos, 50 of them for the slides.
+
+**Delete** is in the header's ⋯ once the proof open is saved, with **Show in Inspect** for
+a proof of a video, in a slide's menu, and on each row of the Open list. It asks one question everywhere,
+the delete preview listing what it touches, and the proof goes to the Trash, from where it
+comes back. A proof of a video also asks what becomes of its scene: by default it **goes
+back to To geolocate**, as a delete always gave it back, or it **is removed with it**
+(`DELETE /cases/{id}/proofs/{name}?scene=drop`): the scenes to prove it took up or gave back
+leave its video's Inspect work and none is given back, in one go under the case's lock, the
+scenes put back if the delete fails. Restored, the proof states its passages as it did, and
+deleted again it gives a scene of them back. The proof open goes to the next proof of its
+video, else the one before, else the home.
 
 **Overlays.** Ctrl+V, a drop on the canvas, or `+ Add overlay` put an image
 straight into the proof. Ctrl+V answers to two clipboards, and the rule is which
@@ -4544,8 +4591,13 @@ slide and says why. A slide never started, with no panel and nothing typed, goes
 a save; one holding only typed words asks first. Presses during the save only move where
 it heads, so three fast Alt+→ go three slides on with one save. A switch rewrites the
 step it is on, so Back leaves the series at once. With the strip focused, ←/→ walk the
-tiles and Enter opens one. A proved tile's ⋯ has **Show in Inspect**, which opens the
-video on that slide's scene.
+tiles and Enter opens one. **A slide's menu** comes up on its ⋯, a right-click, or the
+context-menu key and Shift+F10 on a focused tile, its first item focused: for a proof
+**Rename**, **Show in Inspect** (the video on that slide's passage), **Abandon…** while it
+states no place, and **Delete…**, the question the header asks; a scene still to prove keeps
+Make this slide, Geolocate and Abandon…. Rename holds the name in the menu: the slide open
+takes it as if typed in its name field, saved with it, and another slide is saved under it
+at once, its picture moving with it.
 
 **A scene still to prove shows its page** in place of the canvas, and landing on it
 starts nothing: its label or time, where it stands, the captures it gathered, and
@@ -4871,7 +4923,7 @@ underneath it.
 ### Import
 
 **Import** is the third way into the tool, beside composing a proof and opening a
-saved one, and it lives at the foot of the **Create proof** dialog. Paste the address of a post and the picture is downloaded, its text
+saved one, and it lives at the foot of the New proof window's left column. Paste the address of a post and the picture is downloaded, its text
 read for a position and for the links it points at. Both fill the form and say
 where they came from; neither is applied on its own, and a post that spells
 nothing out leaves the fields empty for you to type into. **Use an image** skips

@@ -151,6 +151,21 @@ export function neighbour(tiles, key, step) {
   return list[at + step] ?? null;
 }
 
+/**
+ * Where the composer goes once the slide `key` is deleted: the next proof of the video,
+ * else the one before it, else nowhere (null), and Geo Proof's home shows.
+ */
+export function slideAfterDelete(tiles, key) {
+  const list = tiles ?? [];
+  const at = list.findIndex((t) => t.key === key);
+  if (at < 0) return null;
+  const find = (from, step) => {
+    for (let i = from; i >= 0 && i < list.length; i += step) if (list[i].kind === 'proof') return list[i];
+    return null;
+  };
+  return find(at + 1, 1) ?? find(at - 1, -1);
+}
+
 /** The tiles a search in the list keeps: by title, label, time or state. */
 export function findTiles(tiles, query) {
   const words = String(query ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
