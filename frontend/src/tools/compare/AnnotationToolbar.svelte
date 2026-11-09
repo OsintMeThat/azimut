@@ -1,6 +1,7 @@
 <script>
   import Icon from '../../components/Icon.svelte';
   import ProofGlyph from '../../components/ProofGlyph.svelte';
+  import StampPicker from '../proof/StampPicker.svelte';
   import { PROOF_ICONS, isSolidIcon } from '../../lib/proofIcons.js';
   import { STAMPED, canFill, ANNOTATION_TOOLS } from '../../lib/map/compareAnnotations.js';
   import { shortcut } from '../../lib/keys.js';
@@ -65,6 +66,18 @@
     opener = open ? event.currentTarget : null;
     if (!open) return;
     const box = event.currentTarget.getBoundingClientRect();
+    if (name === 'glyph') {
+      // The picker is tall, so it is kept on-screen rather than grown either
+      // way: level with its button, moved up only as far as it has to, and
+      // scrolling once the window is shorter than it (Proof Maker's rule).
+      const height = Math.min(560, window.innerHeight - 40);
+      flyout = {
+        left: `${box.right + 6}px`,
+        top: `${Math.max(12, Math.min(box.top, window.innerHeight - 28 - height))}px`,
+        height: `${height}px`,
+      };
+      return;
+    }
     flyout = box.top > window.innerHeight / 2
       ? { left: `${box.right + 6}px`, bottom: `${window.innerHeight - box.bottom}px` }
       : { left: `${box.right + 6}px`, top: `${box.top}px` };
@@ -189,16 +202,12 @@
 </div>
 
 {#if open === 'glyph'}
-  <div class="flyout glyphs" bind:this={flyoutEl} style:left={flyout.left} style:top={flyout.top} style:bottom={flyout.bottom}>
-    {#each PROOF_ICONS as entry (entry.name)}
-      <button
-        class="glyph-button"
-        class:active={glyph === entry.name}
-        title={entry.label}
-        aria-label={entry.label}
-        onclick={() => { setGlyph(entry.name); open = ''; }}
-      ><ProofGlyph name={entry.name} size={20} /></button>
-    {/each}
+  <!-- Geo Proof's own picker, every symbol it can stamp under the same five
+       groups. The maps are seen from above, so its models are too and its View
+       switch stays away. -->
+  <div class="flyout glyphs" bind:this={flyoutEl} style:left={flyout.left} style:top={flyout.top}>
+    <StampPicker iconName={glyph} views={false} maxHeight={flyout.height}
+      pick={(name) => { setGlyph(name); open = ''; }} />
   </div>
 {:else if open === 'colour'}
   <div class="flyout colours" bind:this={flyoutEl} style:left={flyout.left} style:top={flyout.top} style:bottom={flyout.bottom}>
@@ -371,19 +380,6 @@
     box-shadow: var(--shadow-2);
   }
   .colours { display: grid; grid-template-columns: repeat(3, 28px); gap: 7px; }
-  .glyphs { display: grid; grid-template-columns: repeat(5, 30px); gap: 4px; }
-  .glyph-button {
-    width: 30px;
-    height: 30px;
-    display: grid;
-    place-items: center;
-    border: 1px solid transparent;
-    border-radius: var(--r-sm);
-    color: var(--text-2);
-    cursor: pointer;
-  }
-  .glyph-button:hover { border-color: var(--border); color: var(--text-1); }
-  .glyph-button.active { border-color: var(--accent); color: var(--text-1); background: var(--bg-3); }
   .colour-button { width: 28px; height: 28px; border: 2px solid transparent; border-radius: 50%; }
   .colour-button.active { border-color: #fff; box-shadow: 0 0 0 1px var(--accent); }
   .colour-button.custom { position: relative; display: grid; place-items: center; color: white; cursor: pointer; }

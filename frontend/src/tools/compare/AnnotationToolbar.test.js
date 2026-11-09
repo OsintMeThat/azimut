@@ -4,7 +4,10 @@ import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import AnnotationToolbar from './AnnotationToolbar.svelte';
+import ProofGlyph from '../../components/ProofGlyph.svelte';
 import { ANNOTATION_COLOURS, ANNOTATION_TOOLS } from '../../lib/map/compareAnnotations.js';
+import { loadModels } from '../../lib/icons/loadModels.svelte.js';
+import { setStampView } from '../../lib/icons/stampView.svelte.js';
 
 // Read off the project root: under happy-dom `import.meta.url` is an http URL.
 const source = readFileSync(resolve('src/tools/compare/AnnotationToolbar.svelte'), 'utf8');
@@ -133,10 +136,33 @@ describe('the two stamps the rail gained', () => {
 
     const grid = document.querySelector('.flyout.glyphs');
     expect(grid).not.toBeNull();
-    grid.querySelectorAll('.glyph-button')[1].click();
+    grid.querySelector('button[aria-label="Fire"]').click();
     flushSync();
-    expect(setGlyph).toHaveBeenCalledTimes(1);
+    expect(setGlyph).toHaveBeenCalledWith('badge-flame');
     expect(document.querySelector('.flyout.glyphs')).toBeNull();
+  });
+
+  it("opens Geo Proof's picker, seen from above with no view to choose", async () => {
+    stage({ glyph: 'model-tank' });
+    trigger('Symbol (S)').click();
+    flushSync();
+    const grid = document.querySelector('.flyout.glyphs');
+    expect([...grid.querySelectorAll('h3')].map((h) => h.textContent))
+      .toEqual(['Marks', 'Vehicles', 'Events', 'Places', 'People']);
+    expect(grid.querySelector('button[aria-label="Tank"]').classList.contains('active')).toBe(true);
+    expect(grid.querySelector('[role="radiogroup"]')).toBeNull();
+    // the view Geo Proof has in hand is its own: Compare's tiles stay top views
+    setStampView('side');
+    flushSync();
+    await loadModels();
+    const tile = grid.querySelector('button[aria-label="Tank"]');
+    await vi.waitFor(() => expect(tile.querySelector('svg path')).not.toBeNull());
+    const shown = tile.querySelector('svg').getAttribute('viewBox');
+    unmount(live);
+    live = mount(ProofGlyph, { target, props: { name: 'model-tank', size: 32, view: 'top' } });
+    flushSync();
+    expect(target.querySelector('svg').getAttribute('viewBox')).toBe(shown);
+    setStampView('top');
   });
 
   it('puts the tool down when the button it is on is pressed again', () => {

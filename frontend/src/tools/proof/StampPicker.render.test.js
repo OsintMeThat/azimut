@@ -68,4 +68,19 @@ describe('the stamp picker', () => {
     expect(tile.innerHTML).not.toBe(top);
     expect(target.querySelector('[role="radio"][aria-checked="true"]').textContent).toBe('Angled');
   });
+
+  it('leaves the view out for a map seen from above, drawing its models from the top', async () => {
+    setStampView('side');
+    await loadModels();
+    const target = show({ iconName: 'point', views: false });
+    expect(target.querySelector('[role="radiogroup"]')).toBeNull();
+    const tile = named(target, 'Helicopter');
+    await vi.waitFor(() => expect(tile.querySelector('svg path')).not.toBeNull());
+    const fromAbove = tile.innerHTML;
+    unmount(shown);
+    setStampView('top');
+    const top = show({ iconName: 'point' });
+    await vi.waitFor(() => expect(named(top, 'Helicopter').querySelector('svg path')).not.toBeNull());
+    expect(named(top, 'Helicopter').innerHTML).toBe(fromAbove);
+  });
 });
