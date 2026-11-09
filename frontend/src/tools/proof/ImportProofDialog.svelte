@@ -10,6 +10,10 @@
    * The prefill never decides. A position read out of the post's text fills the
    * field and says where it came from; the analyst's save is what confirms it,
    * exactly as it is for coordinates they typed themselves.
+   *
+   * The published picture becomes the proof as it was published, with no frame of
+   * Azimut's round it, and it is kept with the proof rather than added to Media. The
+   * footage the post points at is material, and that is filed.
    */
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
@@ -33,8 +37,8 @@
   let picker = $state(null); // several attachments: pick before anything downloads
   let authPrompt = $state(null); // a login wall, with the same answer Media offers
 
-  /** The pictures the proof composes, in the order they were published. A list because a
-   *  post publishing a set published one proof of several panels. */
+  /** The pictures that become the proof, in the order they were published. A list because
+   *  a post publishing a set published one proof, and its pictures are stacked. */
   let panels = $state([]);
   const panel = $derived(panels[0] ?? null);
   /** The staged material, each entry stamped with the address it was fetched for. A
@@ -84,7 +88,7 @@
     [
       ...panels.map((staged, at) => ({
         slot: 'panel',
-        label: panels.length > 1 ? `Panel ${at + 1}` : 'Proof',
+        label: panels.length > 1 ? `Picture ${at + 1}` : 'Proof',
         staged,
       })),
       ...sourceFiles.map((staged, at) => ({
@@ -385,9 +389,9 @@
     }
   }
 
-  //: What each slot has somewhere to put. A proof is composed of **pictures**: the
-  //: composer lays panels out on a canvas and a video has nothing to lay out, so a clip
-  //: ticked for the picture slot was a refusal waiting two screens away at the preview.
+  //: What each slot has somewhere to put. The proof is the published **picture**, and a
+  //: video is not one, so a clip ticked for the picture slot was a refusal waiting two
+  //: screens away at the preview.
   //: The material takes anything that was recorded — a still photographed on the spot is
   //: material as much as the clip beside it.
   const SLOT_KINDS = { panel: ['image'], source: ['image', 'video', 'audio'] };
@@ -463,7 +467,8 @@
           placeholder="https://…"
           onkeydown={(e) => e.key === 'Enter' && fetchPost()}
         />
-        <small>The picture is downloaded and the text is read for a position and a source.</small>
+        <small>The picture is downloaded and the text is read for a position and a source.
+          The picture becomes the proof as it was published, and is not added to Media.</small>
       </label>
       <div class="import-actions">
         <button class="btn btn-primary" onclick={fetchPost} disabled={busy || !postUrl.trim()}>
@@ -504,10 +509,9 @@
             {/if}
           </div>
           {#if panels.length > 1}
-            <!-- What the proof will compose, in the order it will compose it. Not the
-                 render — laying panels out is the composer's canvas — but the set, which
-                 is the part an analyst is checking before they press Create. -->
-            <div class="import-strip" aria-label="The pictures this proof composes">
+            <!-- The pictures the proof will be, in the order they are stacked: the part an
+                 analyst is checking before they press Create. -->
+            <div class="import-strip" aria-label="The pictures this proof is made of">
               {#each held.filter((entry) => entry.slot === 'panel') as entry, at (entry.staged.filename)}
                 <button class="import-strip-one" class:on={held[shownAt] === entry}
                         title={entry.staged.filename} onclick={() => (shownIndex = at)}>
@@ -516,7 +520,7 @@
               {/each}
             </div>
             <p class="import-note">
-              One proof of {panels.length} panels, in this order.
+              One proof of {panels.length} pictures, stacked in this order.
             </p>
           {/if}
           <div class="import-view-bar">
@@ -527,7 +531,7 @@
             {/if}
             <p class="import-note">
               <b>{shown.label}:</b>
-              {shown.staged.filename}
+              {shown.slot === 'panel' ? 'as published, not added to Media' : shown.staged.filename}
               {#if held.length > 1}<span class="import-count">
                   {shownAt + 1}/{held.length}
                 </span>{/if}
@@ -719,7 +723,7 @@
     <p class="import-note">
       This link has {picker.items.length} attachments.
       {#if picker.slot === 'panel'}
-        Ticked ones become the panels of one proof.
+        Ticked ones become one proof, stacked as published.
       {:else}
         Ticked ones become the material it rests on.
       {/if}
@@ -735,7 +739,7 @@
                   disabled={!usable(picker.slot, item.kind)}
                   title={usable(picker.slot, item.kind)
                     ? undefined
-                    : 'A proof is composed of pictures'}
+                    : 'Only a picture can be the proof'}
                   aria-pressed={picker.picked?.includes(item.index)}
                   onclick={() => tick(item.index)}>
             <span class="import-pick-thumb">
@@ -757,7 +761,7 @@
       <button class="btn btn-primary" disabled={!picker.picked?.length} onclick={pick}>
         {#if picker.picked?.length > 1}
           {picker.slot === 'panel'
-            ? `Compose ${picker.picked.length} panels`
+            ? `Stack ${picker.picked.length} pictures`
             : `Take ${picker.picked.length} files`}
         {:else}
           Take it

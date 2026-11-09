@@ -188,7 +188,7 @@ answer by omission (`tests/test_entities.py`).
 | `media` | collected | subject | ✅ | media-library | `path`, `sha256`, `source_url?`; a figure filed for a note also `plate_spec`/`plate_day`/`plate_step` (a Map plate page, sidecar source `map-plate`) or `analysis_view`/`analysis_surface` (a Timeline or Graph reading, source `analysis-view`), and `view_key` for reuse | yes (+ sidecar) |
 | `capture` | collected | attestation | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path`, `geo?` | yes (image) |
 | `place` | place | subject | ✅ | satellite, ingest, enrich, map layers | `aliases?`, `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, `layer_origin?`, plus the precision fields below | no (a point) |
-| `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png), `imagery_credits` (read-only, written by each save), `posted_url` (where the analyst published it; a report links the proof there) | yes |
+| `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png), `imagery_credits` (read-only, written by each save), `posted_url` (where the analyst published it; a report links the proof there), `published_url` (read-only: the post an imported proof's picture came from) | yes |
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | document | annex | ✅ | inspect | `spec` (json), one per file | yes |
 | `collage` | document | annex | ✅ | collage | `spec` (json) | yes |
@@ -1069,20 +1069,20 @@ chain.
 
 **An imported proof is filed by the same rules** (`engine/proofimport.py`). A
 post that publishes a geolocation is a proof and its material written in prose,
-so the import files every file the post points at as `media`, each picture it
-published as a `media` that proof composes, and writes their spec through the
-composer's own save route — one panel per published picture, since a post
-publishing a set published one geolocation. **Both halves are plural, and for
-opposite reasons**: a set of published pictures is one composition, while a thread
-states one point and hangs the photos and the clips it rests on off several posts.
+so the import files every file the post points at as `media` and writes the proof
+through the composer's own save route. **The picture it published is the proof, as
+it was published**: no panel, no background, margins or footer, and no `media` either.
+Its bytes live with the proof in `proofs/.meta/<name>.assets/`, the way a pasted overlay
+does, under the spec's `published` list, which also keeps the post each picture came
+from; the proof mirrors that post as `published_url`. A post publishing a set is one
+proof whose pictures are stacked as published. Proofs imported before this rule keep
+their panels and the media they composed.
 
-**The proof is the node they all hang off.** It composes the pictures and rests on the
-material, and both are its own `derived-from` edges — the same shape the composer writes
-by hand, and the reading somebody opening the graph is after, since the proof is the
-finding and a published picture is one file among the several it was read from. Hanging
-the material off the *picture* instead made a media node the centre of a geolocation and
-left the proof a leaf beside it. It also asked the import to say which photo of four a
-composite was laid out from, which is not something a post says.
+**The proof is the node the material hangs off.** It rests on the material through its
+own `derived-from` edges — the same shape the composer writes by hand, and the reading
+somebody opening the graph is after, since the proof is the finding. Hanging the material
+off a *picture* instead made a media node the centre of a geolocation and left the proof
+a leaf beside it.
 
 Nothing about the vocabulary changes: the proof `depicts`, the material takes the verb
 POV picks, and the point deduplicates on `COORD_KEY` like any other. The material reaches

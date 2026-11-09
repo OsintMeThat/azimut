@@ -79,6 +79,8 @@
     tweetGuides,
     panelCount,
     applyMagic,
+    // A picture as published has no layout to choose: only the tweet crops stay.
+    asPublished = false,
   } = $props();
 
   // Colour + size only matter while drawing or when something is selected. When
@@ -325,7 +327,7 @@
       class="tb-btn"
       class:active={overflowOpen || layout === 'free' || !!guide}
       data-guide="proof.layout"
-      title="Layout, tweet crops & repack"
+      title={asPublished ? 'Tweet crops' : 'Layout, tweet crops & repack'}
       onclick={() => toggle('overflow')}
       bind:this={overflowBtn}
     >
@@ -338,6 +340,7 @@
       style:top={overflowPos.top}
       style:bottom={overflowPos.bottom}
     >
+      {#if !asPublished}
       <div class="flyout-row">
         <button
           class="tb-btn"
@@ -356,6 +359,7 @@
           <Icon name="layers" size={18} />
         </button>
       </div>
+      {/if}
       <div class="flyout-row">
         {#each Object.keys(tweetGuides) as entry (entry)}
           <button
@@ -365,6 +369,7 @@
             onclick={() => (guide = guide === entry ? null : entry)}
           >{entry}</button>
         {/each}
+        {#if !asPublished}
         <button
           class="tb-btn tb-magic"
           title={`Repack panels toward ${guide ?? '16:9'} and reset panel sizes`}
@@ -373,6 +378,7 @@
         >
           <Icon name="wand" size={18} />
         </button>
+        {/if}
       </div>
     </div>
   </div>

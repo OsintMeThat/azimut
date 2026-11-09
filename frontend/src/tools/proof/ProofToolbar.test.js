@@ -144,6 +144,15 @@ describe('ProofToolbar document controls (overflow flyout)', () => {
     const { body } = render(ProofToolbar, { props: props({ panelCount: 0 }) });
     expect(body).toMatch(/title="Repack panels[^"]*"[^>]*disabled/);
   });
+
+  it('keeps only the tweet crops for a picture as published, which has no layout', () => {
+    const { body } = render(ProofToolbar, { props: props({ panelCount: 0, asPublished: true }) });
+    expect(body).not.toContain('Grid layout');
+    expect(body).not.toContain('Free layout');
+    expect(body).not.toContain('Repack panels');
+    expect(body).toContain('>16:9<');
+    expect(body).toContain('title="Tweet crops"');
+  });
 });
 
 describe('the symbol picker', () => {

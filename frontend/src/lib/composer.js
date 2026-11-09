@@ -160,9 +160,47 @@ export function panelPreview(item) {
   };
 }
 
-/** A proof has nothing to render until it contains at least one panel. */
+/** A proof has nothing to render until it holds a panel or a published picture. */
 export function hasProofCanvasContent(proof) {
-  return Array.isArray(proof?.panels) && proof.panels.length > 0;
+  return (Array.isArray(proof?.panels) && proof.panels.length > 0) || isPublishedProof(proof);
+}
+
+// ---- a proof that is a published picture ------------------------------------
+
+/**
+ * Whether a proof is somebody's published picture, imported as it was published: its
+ * spec lists the pictures under `published` and holds no panel. Such a proof has no
+ * background, margins, footer, legend or layout: the page is the pictures.
+ */
+export function isPublishedProof(proof) {
+  return Array.isArray(proof?.published) && proof.published.length > 0;
+}
+
+/**
+ * Where each published picture sits on the page: stacked top to bottom in the order
+ * they were published, each at its own size, centred on the widest, with no margin.
+ * Boxes in the shape `layoutPanels` gives, so a mark binds to one as to a panel.
+ * Mirrors `published_page` in `engine/proofimport.py`, which writes the same page.
+ */
+export function publishedBoxes(published) {
+  const list = published ?? [];
+  const width = Math.max(0, ...list.map((p) => p.natural[0]));
+  let top = 0;
+  return list.map((p) => {
+    const [w, h] = p.natural;
+    const box = { x: Math.floor((width - w) / 2), y: top, w, h, scale: 1, baseScale: 1, row: 0 };
+    top += h;
+    return box;
+  });
+}
+
+/** The page of a published proof: as wide as its widest picture, as tall as all of them. */
+export function publishedPage(published) {
+  const list = published ?? [];
+  return {
+    width: Math.max(0, ...list.map((p) => p.natural[0])),
+    height: list.reduce((sum, p) => sum + p.natural[1], 0),
+  };
 }
 
 export const CAPTION_SIZE = 20; // default caption font size (px, editable per proof)
@@ -1216,11 +1254,15 @@ export function pasteBoxes(pastes) {
 export function surfaces(proof) {
   const panels = proof?.panels ?? [];
   const pastes = proof?.pastes ?? [];
+  const published = proof?.published ?? [];
   const panelBox = layoutPanels(panels, proof?.captionSize, proof?.layout, proof?.space);
   const pasteBox = pasteBoxes(pastes);
+  const publishedBox = publishedBoxes(published);
   return [
     ...pastes.map((item, index) => ({ id: item.id, kind: 'paste', item, box: pasteBox[index], index })),
     ...panels.map((item, index) => ({ id: item.id, kind: 'panel', item, box: panelBox[index], index })),
+    // A published picture is the page itself, so it lies behind everything.
+    ...published.map((item, index) => ({ id: item.id, kind: 'published', item, box: publishedBox[index], index })),
   ];
 }
 
@@ -1531,6 +1573,17 @@ export function toSpec(proof) {
       frame: normalizeFrame(p.frame),
       ...surfaceGeometry(p),
     })),
+    // The pictures a published proof is, as they were published, each in the proof's
+    // assets folder like an overlay. Written only for such a proof, so every other spec
+    // saves exactly as it did.
+    ...(isPublishedProof(proof) ? {
+      published: proof.published.map((p) => ({
+        id: p.id,
+        asset: p.asset,
+        natural: p.sourceNatural ?? p.natural,
+        ...(p.url ? { url: p.url } : {}),
+      })),
+    } : {}),
     shapes: proof.shapes.map((s) => ({ ...s })),
   };
 }
@@ -1838,12 +1891,15 @@ export function autoLayoutRows(
   return best.rows;
 }
 
-/** Safe canvas export settings for a measured proof document. */
-export function proofExportOptions(width, height) {
+/**
+ * Safe canvas export settings for a measured proof document. `native` keeps the page at
+ * its own pixels: a published picture is exported at the size it was published.
+ */
+export function proofExportOptions(width, height, { native = false } = {}) {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     throw new RangeError('Proof dimensions are invalid.');
   }
-  const pixelRatio = Math.min(Math.max(1800 / width, 0.75), 2);
+  const pixelRatio = native ? 1 : Math.min(Math.max(1800 / width, 0.75), 2);
   const outputWidth = Math.ceil(width * pixelRatio);
   const outputHeight = Math.ceil(height * pixelRatio);
   if (

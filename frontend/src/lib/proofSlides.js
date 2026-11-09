@@ -205,7 +205,7 @@ export const SLIDE_LOOK = [
   'palette',
 ];
 export const SLIDE_CONTENT = [
-  'title', 'panels', 'pastes', 'shapes', 'notes', 'legendOrder', 'points', 'sources', 'material',
+  'title', 'panels', 'pastes', 'published', 'shapes', 'notes', 'legendOrder', 'points', 'sources', 'material',
   'when', 'whenZone', 'description',
 ];
 

@@ -4,6 +4,7 @@
   import { iconByName } from '../../lib/proofIcons.js';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { shortcut } from '../../lib/keys.js';
+  import { isPublishedProof } from '../../lib/composer.js';
 
   let {
     proof,
@@ -78,10 +79,14 @@
   const surfaceNames = $derived.by(() => {
     const names = new Map([['page', 'Page']]);
     proof.panels.forEach((panel, at) => names.set(panel.id, `P${at + 1}`));
+    // a published proof has no panel, so its pictures take the same numbers
+    (proof.published ?? []).forEach((picture, at) => names.set(picture.id, `P${at + 1}`));
     proof.pastes.forEach((paste, at) => names.set(paste.id, `I${at + 1}`));
     return names;
   });
   const manySurfaces = $derived(new Set(proof.shapes.map((shape) => shape.panel)).size > 1);
+  // A picture as published: no panel to add, lay out or caption, and no legend.
+  const asPublished = $derived(isPublishedProof(proof));
 
   /** What a row is on: its picture, the page, or for a line the pictures its ends hold to. */
   function onWhat(shape) {
@@ -167,6 +172,29 @@
   </div>
 {/snippet}
 
+{#if asPublished}
+<!-- The proof is the picture as it was published, so it has nothing to lay out. -->
+<div class="side-title-row" data-guide="proof.panels">
+  <span class="side-title">
+    <span>{proof.published.length > 1 ? 'Published pictures' : 'Published picture'}
+      {#if proof.published.length > 1}<span class="count">{proof.published.length}</span>{/if}</span>
+  </span>
+</div>
+<div class="none">Shown as it was published: no panels, captions or legend.</div>
+{#each proof.published as picture (picture.id)}
+  <div class="panel-row card published-row">
+    {#if picture.img}<img src={picture.img.src} alt="" />{/if}
+    <div class="published-facts">
+      <span>{picture.sourceNatural?.[0] ?? picture.natural[0]} × {picture.sourceNatural?.[1] ?? picture.natural[1]} px</span>
+      {#if picture.url}
+        <a href={picture.url} target="_blank" rel="noreferrer" title="Open the post that published it">
+          <Icon name="external" size={12} /> Post
+        </a>
+      {/if}
+    </div>
+  </div>
+{/each}
+{:else}
 <div class="side-title-row" data-guide="proof.panels">
   <button class="side-title collapsible" onclick={() => (collapsed.panels = !collapsed.panels)}>
     <span>
@@ -252,6 +280,7 @@
     </div>
   {/each}
 {/if}
+{/if}
 
 <!-- Overlays: images this proof owns, laid over the composition. They are not
      panels, so they never join a row, claim no source, and stay out of the case. -->
@@ -304,6 +333,7 @@
   {/each}
 {/if}
 
+{#if !asPublished}
 <button
   class="side-title collapsible spaced"
   onclick={() => (collapsed.annotations = !collapsed.annotations)}
@@ -338,6 +368,7 @@
       />
     </div>
   {/each}
+{/if}
 {/if}
 
 <button
@@ -553,6 +584,15 @@
     font-variant-numeric: tabular-nums;
   }
   .none { font-size: var(--fs-xs); color: var(--text-3); padding: 2px 2px 8px; }
+  .published-facts {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .published-facts a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); }
   .anno-row {
     display: flex;
     align-items: center;

@@ -42,8 +42,10 @@ const READY_PREVIEW = {
   entities: [
     { slot: 'place', type: 'place', label: '10°23′N', state: 'new', detail: '' },
     { slot: 'source', type: 'media', label: 'reel.mp4', state: 'new', detail: 'video · 2.4 MB' },
-    { slot: 'panel', type: 'media', label: 'panel.png', state: 'new', detail: 'image · 0.4 MB' },
-    { slot: 'proof', type: 'proof', label: 'Hoyo de la Puerta', state: 'new', detail: '' },
+    {
+      slot: 'proof', type: 'proof', label: 'Hoyo de la Puerta', state: 'new',
+      detail: 'the picture as published, not added to Media',
+    },
   ],
   links: [
     { from: 'source', to: 'place', type: 'located-at', label: 'was recorded at' },
@@ -149,6 +151,21 @@ describe('fetching a post', () => {
     });
     const image = target.querySelector('img');
     expect(image.getAttribute('src')).toContain('media/.dl/0123456789ab/panel.png');
+  });
+
+  it('says the picture becomes the proof as published and is not added to Media', async () => {
+    const target = open();
+    expect(target.textContent).toContain(
+      'The picture becomes the proof as it was published, and is not added to Media.',
+    );
+
+    fetchAnswers({ slot: 'panel', staged: STAGED, post: POST_TEXT });
+    type(target.querySelector('input.input'), 'https://x.com/a/1');
+    press(target, 'Fetch');
+    await settle();
+    // The picture is shown whole beside the form, named for what it becomes.
+    expect(target.querySelector('.import-view img')).not.toBeNull();
+    expect(target.querySelector('.import-view-bar').textContent).toContain('Proof: as published, not added to Media');
   });
 });
 
@@ -571,7 +588,7 @@ describe('a post with several attachments', () => {
   });
 
   /** Answer the picker: tick what is wanted, then take it. The confirm button says how
-   *  many panels it is composing, so it is found by its role rather than its words. */
+   *  many pictures it is stacking, so it is found by its role rather than its words. */
   async function take(target, ...ticks) {
     for (const at of ticks) {
       [...target.querySelectorAll('.import-pick')][at].click();
@@ -589,7 +606,7 @@ describe('a post with several attachments', () => {
     // clip is the source is not something a rule knows.
     expect(rows[0].getAttribute('aria-pressed')).toBe('true');
     expect(rows[1].getAttribute('aria-pressed')).toBe('false');
-    expect(target.textContent).toContain('become the panels of one proof');
+    expect(target.textContent).toContain('become one proof, stacked as published');
   });
 
   it('counts a picked source as tried, so the preview does not fetch it twice', async () => {
@@ -705,12 +722,12 @@ describe('a post with several attachments', () => {
 
     const strip = target.querySelector('.import-strip');
     expect(strip.querySelectorAll('.import-strip-one')).toHaveLength(3);
-    expect(target.textContent).toContain('One proof of 3 panels');
+    expect(target.textContent).toContain('One proof of 3 pictures, stacked in this order.');
     // And each is reachable on its own, which is what the stepper was for.
-    expect(target.textContent).toContain('Panel 1');
+    expect(target.textContent).toContain('Picture 1');
   });
 
-  it('composes several ticked pictures as the panels of one proof', async () => {
+  it('stacks several ticked pictures into one proof', async () => {
     // A published geolocation is often a set — the overhead, the ground shot, the match.
     // Keeping the first of three keeps a third of what was published.
     post.mockImplementation((path) => {
@@ -736,7 +753,7 @@ describe('a post with several attachments', () => {
     press(target, 'Fetch');
     await settle();
 
-    expect(target.textContent).toContain('Compose 2 panels');
+    expect(target.textContent).toContain('Stack 2 pictures');
     get.mockResolvedValue({
       status: 'done',
       progress: {},

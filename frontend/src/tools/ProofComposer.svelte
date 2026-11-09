@@ -80,6 +80,7 @@
     pasteInsertScale, newPaste, newFrame, normalizeFrame, FRAME_WIDTH_MAX, FRAME_COLOR,
     PASTE_SCALE_MIN, PASTE_SCALE_MAX,
     filterProofPanelItems, hasProofCanvasContent, proofExportOptions, panelPreview,
+    isPublishedProof, publishedBoxes, publishedPage,
   } from '../lib/composer.js';
   import {
     canFill,
@@ -203,6 +204,9 @@
   // images remain local to this proof.
   const proof = $state({
     title: '', panels: [], pastes: [], shapes: [], notes: {}, legendOrder: [],
+    // The pictures of a proof imported as published, top to bottom: the page itself, with
+    // no background, margins or footer. Empty for every other proof.
+    published: [],
     templateId: null, // selected saved house style; its values remain copied below
     // What the proof concludes on, one row per point, the first one the conclusion.
     // Always at least one row: an empty one reads as the coordinates the panels
@@ -609,7 +613,7 @@
   async function settleSlide() {
     const plan = switchPlan({
       started: proofStarted, dirty, saved: !!savedName,
-      panels: proof.panels.length, pastes: proof.pastes.length, facts: typedFacts(),
+      panels: proof.panels.length + proof.published.length, pastes: proof.pastes.length, facts: typedFacts(),
     });
     if (plan === 'open' || plan === 'drop') return true;
     if (plan === 'ask') return mayLeave();
@@ -832,7 +836,7 @@
     const caseId = caseState.current?.id;
     const video = slides.video;
     if (!caseId || !video || switching) return;
-    if (proofStarted && dirty && proof.panels.length && !(await saveSlide())) return;
+    if (proofStarted && dirty && hasProofCanvasContent(proof) && !(await saveSlide())) return;
     try {
       const done = await api.post(`/api/cases/${caseId}/proofs/series-export`, { video });
       const count = done.files?.length ?? 0;
@@ -1289,6 +1293,7 @@
     proof.pastes = (spec.pastes ?? []).map((p) => {
       return hydratedSurface(p, pasteAssets.get(p.asset)?.img ?? null);
     });
+    proof.published = (spec.published ?? []).map((p) => hydratedSurface(p, pasteAssets.get(p.asset)?.img ?? null));
     proof.shapes = spec.shapes ?? [];
     // a panel image missing from the cache (shouldn't happen) reloads async
     for (const p of proof.panels.filter((x) => !x.img)) {
@@ -1646,6 +1651,7 @@
         p.asset, p.x, p.y, p.scale, p.frame,
         p.crop, p.cut, p.rotation, p.natural, !!p.img,
       ]),
+      proof.published.map((p) => [p.asset, p.natural, !!p.img]),
       proof.shapes,
       proof.notes,
       proof.legendOrder,
@@ -1748,10 +1754,16 @@
     });
   });
 
-  const measureDoc = () => docSize(
-    proof.panels, proof.shapes, proof.notes, textOpts(), proof.legendOrder, proof.layout, proof.space,
-    freeExtent(proof.shapes, inkHelpers),
-  );
+  // A published picture is the page, at its own size: no legend, footer or margin grows it.
+  const measureDoc = () => (isPublishedProof(proof)
+    ? { ...publishedPage(proof.published), legend: [], cols: 1 }
+    : docSize(
+      proof.panels, proof.shapes, proof.notes, textOpts(), proof.legendOrder, proof.layout, proof.space,
+      freeExtent(proof.shapes, inkHelpers),
+    ));
+  // Whether the open proof is a picture as published, which the side column and the
+  // toolbar read to leave out what cannot apply to it.
+  const asPublished = $derived(isPublishedProof(proof));
 
   // What sizing a free mark takes: a label's words measured in the proof's face,
   // and the frames of the pictures a line's ends hold to. Read off the pictures
@@ -1775,6 +1787,7 @@
     proof.title = freshTitle();
     proof.panels = [];
     proof.pastes = [];
+    proof.published = [];
     discardSurfaceCrop();
     proof.shapes = [];
     proof.notes = {};
@@ -2316,6 +2329,12 @@
   }
 
   async function addPanel(item) {
+    // A picture as published is the whole page: a panel beside it would put a frame
+    // round somebody else's proof again. A new proof takes it instead.
+    if (isPublishedProof(proof)) {
+      toast('A proof kept as published takes no panels. Start a new proof for this one', 'warn', 5200);
+      return;
+    }
     try {
       // the first panel of a proof not started yet starts a new one, on Layout, from the default
       if (!proofStarted) pickSideTab('layout');
@@ -2541,9 +2560,9 @@
   }
 
   async function addPastedImage(file) {
-    // A paste sits on top of a proof; the panels are what give the document its
-    // size, so there has to be one before an image has anywhere to land.
-    if (!proof.panels.length) {
+    // A paste sits on top of a proof; the panels, or a published picture, are what
+    // give the document its size, so there has to be one before an image can land.
+    if (!hasProofCanvasContent(proof)) {
       toast('Add a panel before adding an overlay', 'warn', 5000);
       return;
     }
@@ -3806,9 +3825,31 @@
     const bgFill = proof.bg ?? BG;
     const tc = textColors(bgFill); // caption/legend/footer colours track the bg
 
-    docLayer.add(
-      new Konva.Rect({ name: 'bg', x: 0, y: 0, width, height, fill: bgFill })
-    );
+    const published = isPublishedProof(proof);
+    // A published picture has no background of its own: the picture is the page.
+    if (!published) {
+      docLayer.add(
+        new Konva.Rect({ name: 'bg', x: 0, y: 0, width, height, fill: bgFill })
+      );
+    }
+
+    // The published pictures, as they were published: behind everything, never moved,
+    // cropped or turned. A press on one is a press on the page, so a marquee picks the
+    // marks drawn on it; a drawing tool finds it under the pointer like any picture.
+    const publishedBox = publishedBoxes(proof.published);
+    for (let i = proof.published.length - 1; i >= 0; i--) {
+      const picture = proof.published[i];
+      const box = publishedBox[i];
+      const { node, group, image } = surfaceNodes(picture, box, false);
+      group.add(new Konva.Rect({
+        name: 'bg', x: 0, y: 0, width: image[0], height: image[1], fill: 'transparent', listening: true,
+      }));
+      if (picture.img) group.add(surfaceImageNode(picture, image));
+      for (const s of proof.shapes.filter((x) => x.panel === picture.id && !isPageMark(x))) {
+        addSurfaceShape(group, s, box, picture);
+      }
+      docLayer.add(node);
+    }
 
     // Drawn back→front: array order is front→back, so Z1 (the first panel in
     // the side list) is the foreground panel where free-mode panels overlap.
@@ -3985,8 +4026,9 @@
       : null;
 
     // signature — last, so the logo sits over everything it overlaps. Drawn into
-    // docLayer (not the UI layer) because it's part of the published image.
-    if (proof.signature && sigImg) {
+    // docLayer (not the UI layer) because it's part of the published image. Somebody
+    // else's published picture is not signed.
+    if (proof.signature && sigImg && !published) {
       const box = pair?.logo ?? baseLogoBox;
       const node = new Konva.Image({
         id: 'sig-logo',
@@ -4026,7 +4068,7 @@
     // Account handle laid over the panels. Positioned
     // by anchor + drag like the logo, so it survives a document resize; drag it
     // anywhere with the select tool.
-    if (st && pendingHandleNode) {
+    if (st && pendingHandleNode && !published) {
       const node = pendingHandleNode;
       const tw = node.width();
       const th = node.height();
@@ -4050,7 +4092,9 @@
     }
 
     // the Azimut mark, when asked, beside the logo and the handle (lib/proofMark.js)
-    addMark(Konva, docLayer, proof, { width, height, pad, footerLines: proof.panels.length ? printed.length : 0 });
+    if (!published) {
+      addMark(Konva, docLayer, proof, { width, height, pad, footerLines: proof.panels.length ? printed.length : 0 });
+    }
 
     docLayer.batchDraw();
     refreshCanvasUi(boxes, width, height);
@@ -4352,7 +4396,7 @@
   function drawGuide(width, height) {
     guideGroup.destroyChildren();
     const aspect = guide ? TWEET_GUIDES[guide] : null;
-    if (!aspect || !proof.panels.length) return;
+    if (!aspect || !hasProofCanvasContent(proof)) return;
     let w = width, h = width / aspect;
     if (h > height) { h = height; w = height * aspect; }
     const gx = (width - w) / 2;
@@ -4946,6 +4990,7 @@
   /** What a surface is called on the canvas, the way the side lists number them. */
   function surfaceLabel(entry) {
     if (entry.id === PAGE) return 'Free on the page';
+    if (entry.kind === 'published') return proof.published.length > 1 ? `Picture ${entry.index + 1}` : 'Picture';
     return entry.kind === 'paste' ? `Overlay ${entry.index + 1}` : `Panel ${entry.index + 1}`;
   }
 
@@ -6399,7 +6444,8 @@
       rebuild();
     }
     const { width, height } = measureDoc();
-    const { pixelRatio } = proofExportOptions(width, height);
+    // a published picture is exported at the size it was published
+    const { pixelRatio } = proofExportOptions(width, height, { native: isPublishedProof(proof) });
     const prevScale = stage.scale();
     const prevPos = stage.position();
     const prevSize = { w: stage.width(), h: stage.height() };
@@ -6423,7 +6469,7 @@
   // chat before publishing, without hunting the file in the case folder.
   let copying = $state(false);
   async function copyPng() {
-    if (!proof.panels.length || copying) return;
+    if (!hasProofCanvasContent(proof) || copying) return;
     copying = true;
     try {
       await fontReady;
@@ -6649,7 +6695,7 @@
   );
 
   async function save({ andPost = false, checked = false, then = null } = {}) {
-    if (!proof.panels.length || saving) return;
+    if (!hasProofCanvasContent(proof) || saving) return;
     // A point the imagery proposed is the middle of a capture until somebody looks.
     // A save files it on the case map and a post publishes it, so each one is shown
     // on the map first. `then` is what asked for the save, resumed once it lands.
@@ -6689,7 +6735,7 @@
 
   /** Save the proof; true once it is saved. */
   async function performSave(andPost = false) {
-    if (!proof.panels.length || saving) return false;
+    if (!hasProofCanvasContent(proof) || saving) return false;
     saving = true;
     // a slide saved on the way to another says so in a word, and what it kept off the map
     const slide = switching;
@@ -6966,6 +7012,8 @@
       // folder up found nothing and read as an overlay the case had lost, on a
       // proof whose file was there the whole time.
       ...(spec.pastes ?? []).map((p) => loadImage(fileUrl(caseId, `proofs/.meta/${entry.name}.assets/${p.asset}`)).catch(() => null)),
+      // A published picture is kept in the same folder, the same way.
+      ...(spec.published ?? []).map((p) => loadImage(fileUrl(caseId, `proofs/.meta/${entry.name}.assets/${p.asset}`)).catch(() => null)),
     ]);
     if (run !== openRun) return;
     spec.panels.forEach((p, i) => {
@@ -6990,7 +7038,16 @@
       pasteAssets.set(p.asset, { img, data: null, pending: false });
       proof.pastes.push(hydratedSurface({ ...p, id: p.id ?? newId('x') }, img));
     });
-    const validSurfaces = new Set([...proof.panels, ...proof.pastes].map((s) => s.id).concat(PAGE));
+    // Kept even when its picture does not load: it is the whole proof, and a save that
+    // dropped it would leave an empty one behind.
+    const before = spec.panels.length + (spec.pastes ?? []).length;
+    (spec.published ?? []).forEach((p, i) => {
+      const img = pictures[before + i];
+      if (img) pasteAssets.set(p.asset, { img, data: null, pending: false });
+      else toast('The published picture of this proof is missing', 'warn');
+      proof.published.push(hydratedSurface({ ...p }, img ?? null));
+    });
+    const validSurfaces = new Set([...proof.panels, ...proof.pastes, ...proof.published].map((s) => s.id).concat(PAGE));
     proof.shapes = (spec.shapes ?? []).filter((s) => validSurfaces.has(s.panel));
     // legend text lives in `notes` (per color); migrate old per-shape comments
     proof.notes = spec.notes ?? notesFromShapes(proof.shapes);
@@ -7632,6 +7689,7 @@
       tweetGuides={TWEET_GUIDES}
       panelCount={proof.panels.length}
       {applyMagic}
+      {asPublished}
     />
     {/if}
 
@@ -7775,7 +7833,7 @@
                   index={i}
                   coords={i === 0 ? displayedCoords : point.coords}
                   proposed={pointProposed(proof.points, i, proof.panels)}
-                  canSave={proof.panels.length > 0}
+                  canSave={proofHasContent}
                   unsaved={dirty || !savedName}
                   busy={pointLayers.busy || saving}
                   caseId={caseState.current?.id ?? null}
@@ -8001,6 +8059,11 @@
 
         <!-- The look: the house style, then the words, the footer and the signature. -->
         <div class="side-scroll" role="tabpanel" id="proof-pane-style" aria-labelledby="proof-tab-style" hidden={sideShown !== 'style'}>
+          <!-- A picture as published keeps its own look: only the words of the marks
+               drawn on it take a style. -->
+          {#if asPublished}
+            <div class="side-hint published-hint">Shown as it was published, so it has no background, margins, footer or signature.</div>
+          {:else}
           <!-- House style stays independent from content. A new proof can keep a
                selected template while its canvas remains empty until panels land. -->
           <div class="meta-field">
@@ -8044,6 +8107,7 @@
               </p>
             {/if}
           </div>
+          {/if}
 
           <div class="meta-field">
             <div class="meta-head">
@@ -8071,6 +8135,7 @@
               />
               <span>Labels, callouts and tags in bold</span>
             </label>
+            {#if !asPublished}
             <label class="sig-check">
               <input
                 type="checkbox"
@@ -8109,8 +8174,10 @@
                 <div class="side-hint">The proof is about the whole video, which has no time to print.</div>
               {/if}
             {/if}
+            {/if}
           </div>
 
+          {#if !asPublished}
           <div class="meta-field">
             <div class="meta-head">
               <Icon name="alignBottom" size={13} />
@@ -8308,6 +8375,7 @@
               />
             {/if}
           </div>
+          {/if}
         </div>
       </aside>
     {/if}
@@ -8987,6 +9055,7 @@
     font-family: inherit;
   }
   .side-hint { font-size: 11px; color: var(--text-3); margin-top: 5px; }
+  .published-hint { margin: 0 0 12px; line-height: 1.45; }
   .sig-check {
     display: flex;
     align-items: center;

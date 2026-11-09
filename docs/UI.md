@@ -4368,8 +4368,8 @@ resized from its corners and framed like anything else on the canvas — you can
 annotate it too. It claims no source: no media is filed, no entity, no
 `derived-from` edge. The file lives in `proofs/.meta/<name>.assets/` under its own
 content hash, travels with a rename, and goes when the proof does. A proof needs
-a panel first, since the panels are what give the document its size — moving an
-overlay never resizes the export.
+a panel first, or a picture imported as published, since those are what give the
+document its size — moving an overlay never resizes the export.
 
 **The side column is four tabs**: **Proof** (coordinates, source, description and
 date, the facts filled once), **Scene** (only for a proof built on a video), **Layout**
@@ -4934,8 +4934,8 @@ asks which one, each shown with the poster frame its extractor reported and its
 kind — nothing has been downloaded at that point, so the picture is chosen by
 looking at it. The **pictures arrive ticked and several can be**: a post publishing a
 geolocation as a set — the overhead, the ground shot, the match — published one proof,
-and keeping the first of three keeps a third of it. They become the panels of one
-composition, which is what a proof already is. The footage slot stays single: which
+and keeping the first of three keeps a third of it. They become one proof, stacked as
+published. The footage slot stays single: which
 clip is the source is not something a rule knows. A login wall gives the Media
 Library's cookie prompt — including the one X gives, which reads as a tombstone
 (*Unavailable*) rather than as a refusal, and used to be read as a plain failure, so the
@@ -4950,10 +4950,12 @@ session already stored is then *used*, on a wall, without the question coming ba
 a still-walled line means is therefore one of two things, and it says which: no session
 named, or the named one refused.
 
-The left of the dialog shows **the set the proof will compose**, in order, as a strip
-above the file being looked at. Not the render — laying panels out is the composer's
-canvas — but what is going in, which is the part worth checking before pressing Create.
-The footage sits in that list as its own entry rather than as a page of the proof.
+The left of the dialog shows **the picture whole**, labelled *Proof: as published, not
+added to Media*, and a set as a strip above it in the order it will be stacked, which is
+the part worth checking before pressing Create. The link field says the same thing before
+anything is fetched: the picture becomes the proof as it was published, and is not added
+to Media. The footage sits in that list as its own entry rather than as a page of the
+proof.
 
 The proof's picture is **asked for as a picture**. The video extractor reads a post
 for its footage, so a post that publishes a geolocation beside a quoted clip hands
@@ -4975,35 +4977,46 @@ Pressing **Preview** downloads what the boxes point at — the left of the dialo
 holds every file, the proof picture and the material, with arrows to step between
 them and a video playable before anything is filed — and lists what the import would
 write: each entity marked new or reused, the edges between them, and whatever is
-worth saying first — a point already on the map, a picture the case already holds,
-this post imported before, or a file whose own metadata sits more than 150 m from the
-coordinates entered. A source that could not be downloaded is a warning, not a
+worth saying first — a point already on the map, a picture the case already holds
+(in Media, or kept with another proof), this post imported before, or a file whose own
+metadata sits more than 150 m from the coordinates entered. The proof's own row says its
+picture is kept as published and not added to Media. A picture over 20 MB, one that
+cannot be read or is past the pixel clamp, and a set too large to stack into one page
+the composer can export are refused there. A source that could not be downloaded is a warning, not a
 blockage: the proof is created without that file and the address stays on it. An
 address taken off the list leaves its download behind rather than filing it.
 **Create** appears only once the preview comes back clean, and editing a field
 withdraws it.
 
-**The proof is what everything hangs off.** It composes the pictures and rests on the
-material, and both are its own edges, so the graph draws one node for the geolocation
-rather than a media node with the rest strung from it. Which photo of four a composite
-was laid out from is not something a post says, and a guessed pairing would state one
-edge right and the rest wrong.
+**The proof is what everything hangs off.** It rests on the material through its own
+edges, so the graph draws one node for the geolocation rather than a media node with
+the rest strung from it.
 
-**One picture exports itself; a set waits for the composer.** A published panel is
-already a rendered proof, so a single-picture import files it as `proofs/<name>.png`
-and is done. Several panels have no render — laying them out is the composer's canvas,
-in the browser — and a second renderer on the server would drift from it at the first
-change to a layout. So a set is filed **without an export**, borrowing the first
-picture's thumbnail so the proof still draws in the graph rather than being the only
-blank node of its own constellation, and the first save in the composer writes the real
-one. Until then it has nothing to export and nothing to carry into a bundle, which is
-the honest cost of a composition nobody composed.
+**The picture is the proof, as it was published.** It is somebody else's finished
+work, so it gets no background, margins, footer or panel layout of Azimut's round it,
+and it is **not filed in Media**: it lives with the proof in
+`proofs/.meta/<name>.assets/`, like a pasted overlay, under the spec's `published` list,
+which also keeps the post it came from. The footage the post points at is material to
+analyse, so that one is filed as media. A set is one proof whose pictures are stacked
+top to bottom as published, each at its own size, centred on the widest, with no margin;
+the page is transparent where a narrower picture leaves it bare. The export is the
+picture itself: a PNG byte for byte, any other format the same pixels in a PNG, and a set
+the stacked page. A save with nothing drawn on it keeps that export whatever the browser
+redrew, and a mark or an overlay makes it the picture and the marks at the picture's own
+size.
 
 Until then nothing is in the case. Both downloads wait in a staging directory
 under `media/.dl/`, which bundles skip and the Doctor ignores; closing the dialog
 deletes it, and one left behind goes when the next import opens. What Create
-writes is a normal proof: it lists, travels in a bundle, and reopens in the
-composer as a composition to annotate — one panel per picture taken.
+writes is a normal proof: it lists, travels in a bundle, goes to the Trash with its
+picture, and reopens in Geo Proof showing the picture whole, with its coordinates,
+source, description and date on the Proof tab. Marks and overlays draw over it as over
+any picture. Layout lists the picture, its size and a link to its post in place of
+panels, and has no legend; Style keeps only the font of the marks' words and says the
+rest does not apply; the toolbar keeps the tweet crops and drops the layout modes. It
+takes no panel: Add panel is not offered, and a picture sent to it from elsewhere is
+refused with a toast. A proof imported before this kept its picture as a panel and as
+media, and stays as it was.
 
 ## Geo Proof templates
 
@@ -5665,7 +5678,9 @@ says what it is checking.
   Three columns and a note say what a row is, and how much of that the row holds decides what
   it becomes: coordinates alone pin a place, coordinates and the footage pose that media on
   its ground, and all three write the whole constellation a hand-made proof import writes —
-  the two files, the proof composed of the published picture, and the point they all state.
+  the footage, the proof that is the published picture as published (kept with the proof,
+  not in Media), and the point they all state. The proof address's cell points at that
+  proof, and the note becomes its description.
   `derived-from` is honest here and only here: the app fetched the bytes and composed the
   proof, so it observed the derivation. A proof with no footage is **refused**, stricter than
   importing one post by hand, because a binder holds dozens of those and nobody re-reads them
@@ -5686,8 +5701,8 @@ says what it is checking.
     shape here — a published geolocation is a picture and the post carries the material
     beside it — so a picker would fire on nearly every row, and a hundred rows cannot each
     raise one. Each slot takes **everything it can use and the extractor vouches for**:
-    the proof takes every picture, since a post publishing a set published one proof of
-    several panels, and the material takes every picture, clip and recording, since a post
+    the proof takes every picture, since a post publishing a set published one proof,
+    stacked as published, and the material takes every picture, clip and recording, since a post
     carrying two photos of the scene carries two things that were shot there. Keeping the
     first of them keeps half. What is *not* vouched for is left: the video extractor reads
     a post's media and the media of the post it quotes into one list, and past the first it

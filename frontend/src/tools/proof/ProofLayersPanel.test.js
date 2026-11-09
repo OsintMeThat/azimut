@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { render } from 'svelte/server';
+import ProofLayersPanel from './ProofLayersPanel.svelte';
 
 const source = readFileSync(new URL('./ProofLayersPanel.svelte', import.meta.url), 'utf8');
 
@@ -62,5 +64,38 @@ describe('panel and overlay transforms', () => {
   it('thumbs the overlay from its own image, which is now the untouched source', () => {
     expect(source).toContain('<img src={paste.img?.src} alt="" />');
     expect(source).not.toContain('sourceImg');
+  });
+});
+
+describe('a proof kept as published', () => {
+  it('lists its pictures in place of panels, with nothing to add, lay out or caption', () => {
+    const noop = () => {};
+    const { body } = render(ProofLayersPanel, {
+      props: {
+        proof: {
+          panels: [], pastes: [], shapes: [], notes: {}, layout: 'grid',
+          published: [{ id: 'u1', asset: 'a.png', natural: [1200, 675], sourceNatural: [1200, 675],
+            url: 'https://x.com/a/1', img: { src: 'blob:pic' } }],
+        },
+        collapsed: { panels: false, overlays: false, annotations: false, elements: false },
+        gonePanels: [], selectedPanelId: null, selectedPasteId: null, selectedIds: [], selectionLive: true,
+        selectShape: noop, selectPanelRow: noop, selectPasteRow: noop, activeColor: '#ff5252', caseId: 'c1',
+        scaleMin: 0.25, scaleMax: 2.5, scaleStep: 0.05, openPicker: noop, movePanelZ: noop, scalePanel: noop,
+        openCrop: noop, resetCrop: noop, removePanel: noop, movePasteZ: noop, removePaste: noop,
+        pickImageFile: noop, featureList: ['#ff5252'], moveLegendColor: noop, setColor: noop,
+        moveShapeTo: noop, kindIcon: {}, kindLabel: {}, duplicateShape: noop, deleteShape: noop, markDirty: noop,
+      },
+    });
+    expect(body).toContain('Published picture');
+    expect(body).toContain('Shown as it was published: no panels, captions or legend.');
+    expect(body).toContain('1200 × 675 px');
+    expect(body).toContain('href="https://x.com/a/1"');
+    expect(body).not.toContain('Add panel');
+    expect(body).not.toContain('Caption…');
+    // the legend it would never print is not offered either
+    expect(body).not.toContain('Feature 1 legend');
+    // overlays and marks still are
+    expect(body).toContain('Add overlay');
+    expect(body).toContain('Elements');
   });
 });

@@ -157,7 +157,7 @@ proof for publication.
 | ✅ **A family of sheets** | Files a workbook one sheet per tab, forks a sheet, moves ticked rows under a column mapping, and confirms a reload or an overwrite when the file changed on disk. |
 | ✅ **A sheet into the case, both ways** | Promotes a declared sheet into entities, places, vocabularies, row edges and dated Claims in one planned transaction, and builds a worklist back out of the case. |
 | ✅ **Geolocation index** | Lays the case's proofs out one per row with their media, place and coordinates, and builds one proof per row back out of two address columns and a coordinate column, as a stoppable job. |
-| ✅ **Imported proofs** | Turns a published post into a composed proof, every picture a panel and its text read for a position, with nothing filed before the preview is approved. |
+| ✅ **Imported proofs** | Turns a published post into a proof that is its picture as published, kept with the proof rather than in Media, its text read for a position, with nothing filed before the preview is approved. |
 | ✅ **Import origin** | States one origin for a whole import, offers it to a batch that landed without one, and corrects any file later from Details. |
 | ✅ **Drawing on a proof** | Stamps a fixed set of marks, fills boxes and ellipses at a chosen opacity, keeps every shape tool in hand, and recolours, restyles, nudges, drags or deletes a picked family at once. |
 | ✅ **Proof image transforms** | Turns a panel or proof-owned overlay and crops it square to the page without changing its source, while keeping attached annotations on the same pixels. |

@@ -459,8 +459,8 @@ describe('Proof Composer pasted images', () => {
     expect(source).not.toContain('/api/cases/${c.id}/media');
   });
 
-  it('needs a panel before an image has anywhere to land', () => {
-    expect(source).toContain('if (!proof.panels.length) {');
+  it('needs a panel, or a published picture, before an image has anywhere to land', () => {
+    expect(source).toContain('if (!hasProofCanvasContent(proof)) {');
     expect(source).toContain('Add a panel before adding an overlay');
   });
 
@@ -512,7 +512,7 @@ describe('Proof Composer pasted images', () => {
     expect(source).toContain('proofs/.meta/${entry.name}.assets/${p.asset}');
     expect(source).toContain("pasteAssets.set(p.asset, { img, data: null, pending: false })");
     // annotations bound to a paste survive the reload with it
-    expect(source).toContain('const validSurfaces = new Set([...proof.panels, ...proof.pastes]');
+    expect(source).toContain('const validSurfaces = new Set([...proof.panels, ...proof.pastes, ...proof.published]');
   });
 
   it('never lets a pasted image change the size of the document', () => {
