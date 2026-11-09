@@ -42,6 +42,8 @@
     kindLabel,
     duplicateShape,
     deleteShape,
+    // `(shape, on)`: hold a zoom inset in place, or let it go
+    setLocked,
     markDirty,
   } = $props();
 
@@ -82,6 +84,8 @@
     // a published proof has no panel, so its pictures take the same numbers
     (proof.published ?? []).forEach((picture, at) => names.set(picture.id, `P${at + 1}`));
     proof.pastes.forEach((paste, at) => names.set(paste.id, `I${at + 1}`));
+    // the marks drawn over a zoom inset's enlargement are on it, Z1, Z2, in the stack's order
+    proof.shapes.filter((shape) => shape.kind === 'zoom').forEach((inset, at) => names.set(inset.id, `Z${at + 1}`));
     return names;
   });
   const manySurfaces = $derived(new Set(proof.shapes.map((shape) => shape.panel)).size > 1);
@@ -92,7 +96,11 @@
   function onWhat(shape) {
     if (!shape.ends?.some(Boolean)) {
       const name = surfaceNames.get(shape.panel) ?? '–';
-      return { short: name, long: shape.panel === 'page' ? 'Free on the page' : `Drawn on ${name}` };
+      const inset = proof.shapes.some((other) => other.id === shape.panel);
+      return {
+        short: name,
+        long: shape.panel === 'page' ? 'Free on the page' : inset ? `Drawn on zoom inset ${name.slice(1)}` : `Drawn on ${name}`,
+      };
     }
     const names = shape.ends.map((tie) => (tie ? surfaceNames.get(tie.panel) ?? '–' : 'Page'));
     return { short: names.join('→'), long: `From ${names[0]} to ${names[1]}` };
@@ -452,6 +460,16 @@
              the list rather than the array underneath it. -->
         <span class="el-label">{rowLabel(shape)} <span class="el-id">#{seat + 1}</span></span>
       {/if}
+      {#if shape.kind === 'zoom'}
+        <!-- Held in place: no press or drag on the canvas moves it, and the marks over it stay on it. -->
+        <button
+          class="btn btn-ghost btn-sm lock"
+          class:on={shape.locked === true}
+          title={shape.locked === true ? 'Unlock position' : 'Lock position'}
+          aria-pressed={shape.locked === true}
+          onclick={(event) => { event.stopPropagation(); setLocked(shape, shape.locked !== true); }}
+        ><Icon name={shape.locked === true ? 'lock' : 'unlock'} size={13} /></button>
+      {/if}
       <button
         class="btn btn-ghost btn-sm"
         title={shortcut('Duplicate (Ctrl+D)')}
@@ -664,6 +682,10 @@
   .shape-row.landing { box-shadow: inset 0 -2px 0 var(--accent); }
   .shape-row.landing.from-below { box-shadow: inset 0 2px 0 var(--accent); }
   .chip { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  /* An unlocked inset's lock waits for the hover; a locked one keeps it, in the accent. */
+  .lock { opacity: 0; }
+  .shape-row:hover .lock, .shape-row:focus-within .lock, .lock:focus-visible { opacity: 0.7; }
+  .lock.on { opacity: 1; color: var(--accent); }
   .on-what {
     flex-shrink: 0;
     padding: 0 4px;

@@ -4692,7 +4692,8 @@ picture: it would cover what is being annotated.
 
 **The canvas has its own right-click.** It never opens the browser's menu. On a
 mark it picks it, if it was not picked, and offers Bring to front, Bring forward,
-Send backward, Send to back, Duplicate, Copy and Delete; on an overlay, or a panel
+Send backward, Send to back, Duplicate, Copy and Delete, with **Lock position** on a
+zoom inset; on an overlay, or a panel
 in free layout, the same stacking, Crop and Remove; on the page, Fit view and a
 Paste when a mark was copied; on a caption or the footer, the editor. With a drawing tool in hand the right button stays
 silent, as it neither draws nor drops a pick. **Ctrl+↑ and Ctrl+↓** step the picked
@@ -4742,15 +4743,16 @@ stroke, a label, a symbol or a marker belongs to where it is let go. On a pictur
 it follows that picture; **dragged out into a margin it comes free**: it stays where
 it is when a panel moves, and it is drawn over every picture, in one stack with the
 callouts and the insets. **Put back on a picture, it is anchored to it again.** A
-mark drawn in a margin is free, and so is one drawn over a zoom inset, so it lands
-on the inset it annotates rather than under it. A free mark out in a margin can
+mark drawn in a margin is free. One drawn or let go over a zoom inset's enlargement
+belongs to that inset (see Zoom insets). A free mark out in a margin can
 still follow a picture: the right-click **pins it to the nearest one**, and it stays
 pinned while it is moved about out there. While a mark is dragged, the picture or
 the page it will belong to is outlined and named. **The
 page grows** right and down to hold a free mark put past its edge, background
 and all, with the footer kept under it; it never grows up or left, so a mark taken
 past those edges comes back to them. Blur boxes, insets, callouts and cones stay
-on their pictures, since they only mean something on its pixels.
+on their pictures, since they only mean something on its pixels, and never go on
+an inset.
 
 **Lines that hold to two pictures.** A line or an arrow drawn from one picture to
 another holds by each end to the pixel it was pressed or let go on, and follows
@@ -4934,6 +4936,26 @@ corner handles. The enlargement drags and resizes from its corners on its own,
 keeps the frame's proportions and turns with a turned picture. It is drawn from the
 picture's pixels and from the blur boxes over them, so a redaction holds in the
 enlargement too.
+
+**A mark drawn over an enlargement belongs to it**, as a mark belongs to its picture:
+a box, an ellipse, a line, a curve, a stroke, a label, a symbol or a marker drawn or
+let go there is the inset's, and the Elements row says `Z1`. Moved or resized, the
+enlargement carries its marks along, and its selection frame still hugs it alone.
+When its frame is moved or reshaped on its picture, the marks keep to the pixels they
+were drawn on; carried onto another picture, they keep their place in the
+enlargement. Dragged off it, a mark lands on the picture or the margin it is let go
+over. An end of a line can hold to an enlargement as it holds to a picture. Deleting
+the inset, or the picture under its frame, deletes its marks with it. A proof saved
+before this kept such marks free on the page, and they stay free where they are.
+
+**An inset can be locked in place**, from the lock on its Elements row or its
+right-click, **Lock position**. Locked, neither its frame nor its enlargement moves or
+resizes by pointer or arrow key: a press on the enlargement draws, picks the marks
+over it or opens a marquee there, and a press on the frame reaches the picture under
+it. A marquee never catches it, and a right-click on it offers **Unlock** and Delete.
+It stays editable from its row, where the lock stays lit, and picked there it shows a
+small lock in the enlargement's corner and nothing to pull. It is stored as
+`locked: true` on the inset, absent when it is not, so an older proof reads unlocked.
 
 **The order they stack in.** The Layout tab's **Elements** list runs front-first,
 the way the Panels list above it does: the row on top is the mark on top of the

@@ -541,7 +541,8 @@ describe('Proof Composer pasted images', () => {
   });
 
   it('drops a pasted image with its annotations, and only one thing is selected', () => {
-    expect(source).toContain('proof.shapes.filter((s) => s.panel !== paste.id)');
+    // its marks go, and those drawn over the insets on it (lib/insetMarks.goingWith)
+    expect(source).toContain('const going = goingWith(proof.shapes, [paste.id]);');
     expect(source).toContain('selectedPasteId = null');
     expect(source).toContain('removePaste(proof.pastes.findIndex((p) => p.id === selectedPasteId))');
   });
