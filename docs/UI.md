@@ -4857,7 +4857,9 @@ the top of the arc, to the side, at the bottom. A label reads the heading and th
 tilt. The turn moves in 5° steps and the tilt settles on the offered views; Shift
 frees both, and a drag is one undo. The frame's own turn knob still turns the stamp
 on the page, to match a picture's horizon. A model's size is its length on the
-page, so turning it never resizes it, and the stamp stores its `heading` and `tilt`.
+page, so turning it never resizes it, and the stamp stores its `heading` and `tilt`,
+written from the View as it is stamped. A model saved without them draws from above,
+its nose up, whatever View the picker holds.
 
 An old proof opens with every stamp in its place, at its size, colour and turn, and
 draws the new drawing; the names on disk did not change, and a view cone keeps its

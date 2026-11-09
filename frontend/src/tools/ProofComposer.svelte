@@ -132,6 +132,7 @@
   import { isModel } from '../lib/icons/catalog.js';
   import { drawModelRing } from '../lib/proofModelRing.js';
   import { stampNodes } from '../lib/proofStamp.js';
+  import { pickedModelView } from '../lib/proofModelNode.js';
   import {
     assetName, base64Of, PASTE_TYPES, MAX_PASTES, MAX_PASTE_BYTES,
   } from '../lib/pasteAsset.js';
@@ -3193,6 +3194,8 @@
         x: hit.nx, y: hit.ny, size: ICON_SIZE_DEFAULT,
         ...(isSolidIcon(entry.name) ? {} : { strokeWidth: strokeW }),
         ...(fillOpacity > 0 ? { fillOpacity } : {}),
+        // a model is laid down at the picker's View, written on it at once
+        ...pickedModelView(entry.name),
       };
       proof.shapes.push(s);
       selectedIds = [s.id];

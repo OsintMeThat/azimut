@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MODEL_VIEWS } from './icons/modelMeta.js';
 import { setStampView } from './icons/stampView.svelte.js';
 import { STAMP_CUT, STAMP_HALO } from './proofIcons.js';
-import { modelHalo, modelLine, modelPaint } from './proofModelNode.js';
+import { modelHalo, modelLine, modelPaint, pickedModelView } from './proofModelNode.js';
 import { glyphOps, paintGlyph, stampNodes } from './proofStamp.js';
 
 /** Konva's constructors as records of what they were asked to draw. */
@@ -136,17 +136,25 @@ describe('a layer glyph on a proof', () => {
 });
 
 describe('a vehicle model on a proof', () => {
-  it('takes the picker\'s view when fresh from the tool, and never again', () => {
+  it('is given the picker\'s view where the tool makes it, and only a model is', () => {
     setStampView('angled');
-    const fresh = { kind: 'icon', name: 'model-tank', color: '#ff5252', size: 56 };
-    stampNodes(Konva, fresh, box(56));
     const angled = MODEL_VIEWS.find((v) => v.id === 'angled');
-    expect(fresh.tilt).toBe(angled.tilt);
-    expect(fresh.heading).toBe(angled.heading);
+    expect(pickedModelView('model-tank')).toEqual({ heading: angled.heading, tilt: angled.tilt });
+    expect(pickedModelView('tank')).toEqual({});
+    expect(pickedModelView('point')).toEqual({});
+    setStampView('top');
+    expect(pickedModelView('model-tank')).toEqual({ heading: 0, tilt: 0 });
+  });
 
+  it('draws a stamp saved without a view from above, nose up, whatever the picker holds', () => {
     setStampView('side');
-    stampNodes(Konva, fresh, box(56));
-    expect(fresh.tilt).toBe(angled.tilt);
+    const old = { kind: 'icon', name: 'model-tank', color: '#ff5252', size: 56 };
+    const [shape] = stampNodes(Konva, old, box(56));
+    // drawing writes nothing on the stamp
+    expect('tilt' in old).toBe(false);
+    expect('heading' in old).toBe(false);
+    expect(shape.viewHeading).toBe(0);
+    expect(shape.viewTilt).toBe(0);
     setStampView('top');
   });
 

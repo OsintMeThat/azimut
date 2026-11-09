@@ -26,15 +26,15 @@ export const modelLine = (placed) => clamp(placed * 0.009, 0.35, 3);
 export const modelHalo = (placed) => clamp(placed * 0.022, 1, 6);
 
 /**
- * A model stamp fresh from the tool has no view yet and takes the picker's. Every
- * model stamp writes both fields from then on, so a saved or an undone one never
- * reads as fresh.
+ * The view a model stamp is made with: the picker's View in hand, heading and tilt,
+ * written onto the stamp as the tool lays it down. Any other symbol takes none.
+ * A stamp is never given a view afterwards, so one saved without the fields keeps
+ * drawing as it always did, from above with its nose up.
  */
-export function applyPickedView(s) {
-  if (s.kind !== 'icon' || !isModel(s.name) || 'tilt' in s) return;
+export function pickedModelView(name) {
+  if (!isModel(name)) return {};
   const view = stampView();
-  s.heading = view.heading;
-  s.tilt = view.tilt;
+  return { heading: view.heading, tilt: view.tilt };
 }
 
 /** How a model stamp is painted, in the surface's own pixels. */
