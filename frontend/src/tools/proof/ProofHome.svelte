@@ -166,7 +166,6 @@
     position: absolute;
     inset: 0;
     overflow-y: auto;
-    z-index: 2;
     background:
       radial-gradient(circle at 1px 1px, rgba(148, 163, 196, 0.07) 1px, transparent 0) 0 0 / 22px 22px,
       var(--bg-0);

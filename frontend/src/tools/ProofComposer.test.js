@@ -142,7 +142,7 @@ describe('Proof Composer pickers', () => {
     expect(source).not.toContain('>Back</button>');
   });
 
-  it('filters panels by satellite / other images, like the Create proof dialog', () => {
+  it('filters the panels Add a panel offers by satellite / other images', () => {
     expect(source).toContain("import PanelCategories from './proof/PanelCategories.svelte'");
     expect(source).toContain('<PanelCategories items={pickerItems} category={panelCategory} onpick={setPanelCategory} />');
     expect(source).toContain("filterProofPanelItems(pickerItems, '', panelCategory)");

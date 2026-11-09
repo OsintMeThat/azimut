@@ -960,10 +960,15 @@
     if (!frames.every((f) => f.path)) throw new Error('A frame could not be saved to the case');
   }
 
-  function closeSlideChooser() {
-    slideChooser = null;
+  /** Let go of the frames drawn for a choice, once nothing shows them. */
+  function dropDrawnFrames() {
     for (const url of chooserUrls) URL.revokeObjectURL(url);
     chooserUrls = [];
+  }
+
+  function closeSlideChooser() {
+    slideChooser = null;
+    dropDrawnFrames();
   }
   onDestroy(() => { for (const url of chooserUrls) URL.revokeObjectURL(url); });
 
@@ -2062,6 +2067,7 @@
   function closeNewProof() {
     newProofOpen = false;
     newProofScene = null;
+    dropDrawnFrames();
   }
 
   // The queue is kept in step while New proof or the home shows its scenes.

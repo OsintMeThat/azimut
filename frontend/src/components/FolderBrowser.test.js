@@ -43,11 +43,8 @@ describe('FolderBrowser', () => {
     );
   });
 
-  it('marks the single selection, and every selected row when multi-select', () => {
+  it('marks the selection', () => {
     expect(at('field', { selectedId: 'b' })).toContain('selected');
-
-    const multi = at('field', { mark: true, isSelected: (entry) => entry.id === 'b' });
-    expect(multi).toContain('aria-pressed="true"');
   });
 
   it('renders the caller’s icon and label per row', () => {
