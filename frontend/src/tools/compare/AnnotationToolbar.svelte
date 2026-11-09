@@ -69,10 +69,12 @@
     if (name === 'glyph') {
       // The picker is tall, so it is kept on-screen rather than grown either
       // way: level with its button, moved up only as far as it has to, and
-      // scrolling once the window is shorter than it (Proof Maker's rule).
+      // scrolling once the window is shorter than it (Proof Maker's rule). It
+      // is wide too, so it opens past the rail rather than over its tools.
       const height = Math.min(560, window.innerHeight - 40);
+      const rail = event.currentTarget.closest('.annotation-toolbar')?.getBoundingClientRect() ?? box;
       flyout = {
-        left: `${box.right + 6}px`,
+        left: `${rail.right + 6}px`,
         top: `${Math.max(12, Math.min(box.top, window.innerHeight - 28 - height))}px`,
         height: `${height}px`,
       };
