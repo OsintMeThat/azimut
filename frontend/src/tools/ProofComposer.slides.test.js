@@ -87,15 +87,19 @@ describe('moving between slides', () => {
 
   it('saves a slide of the same video when Inspect hands a scene over, and asks about any other', () => {
     const make = bodyOfFn('makeSceneProof');
-    expect(make).toContain('if (!(await (onSlides ? settleSlide() : mayLeave()))) return;');
+    expect(make).toContain('if (!(await (onSlides ? settleSlide() : mayLeave()))) return false;');
     expect(make.indexOf('if (look) applyLook(look);')).toBeLessThan(make.indexOf('await addPanelsFromPaths(made.panels);'));
-    // the pill's Make the proof on the same video keeps the open slide's look, read before it is reset
-    expect(make.indexOf('look ??= onSlides ? slideStyle(proof) : null;')).toBeLessThan(make.indexOf('resetDoc();'));
+    // the pill's Make the proof on the same video keeps the open slide's look, read before it is reset,
+    // unless New proof chose a template for it
+    expect(make.indexOf('look ??= onSlides && template === undefined ? slideStyle(proof) : null;')).toBeLessThan(make.indexOf('resetDoc();'));
   });
 
   it('files a frame Inspect never saved through the edits Inspect keeps for it', () => {
     expect(bodyOfFn('drawUnfiledFrames')).toContain('ops: await frameOps(frame.edits)');
-    expect(bodyOfFn('confirmSlideFrames')).toContain('ops: await frameOps(f.edits)');
+    expect(bodyOfFn('fileFrames')).toContain('ops: await frameOps(f.edits)');
+    // the strip's chooser and New proof file them through the one function
+    expect(bodyOfFn('confirmSlideFrames')).toContain('await fileFrames(caseId, chooser.video, frames);');
+    expect(bodyOfFn('createSceneProof')).toContain('await fileFrames(caseId, entry.video, unfiled);');
     expect(bodyOfFn('frameOps')).toContain('buildFrameOps(frameFilters, edits)');
   });
 

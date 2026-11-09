@@ -64,7 +64,7 @@ test('a template picked from a start becomes the default, and New proof starts w
 
   await page.goto('/#proof');
   await page.getByRole('button', { name: 'New proof' }).first().click();
-  const create = page.getByRole('dialog', { name: 'Create proof' });
+  const create = page.getByRole('dialog', { name: 'New proof' });
   await expect(create.locator('select')).toHaveValue('pf_1');
   await create.locator('.selectable-pick').click();
   await create.getByRole('button', { name: 'Create proof' }).click();
@@ -147,7 +147,7 @@ test('a default template that was deleted leaves New proof on no template, witho
 
   await page.goto('/#proof');
   await page.getByRole('button', { name: 'New proof' }).first().click();
-  const create = page.getByRole('dialog', { name: 'Create proof' });
+  const create = page.getByRole('dialog', { name: 'New proof' });
   await expect(create.locator('select')).toHaveValue('');
   fixture.expectNoUnexpectedRequests();
 });

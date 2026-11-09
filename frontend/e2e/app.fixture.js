@@ -2429,7 +2429,7 @@ export async function openProofWithPanel(page) {
   await page.goto('/#proof');
   await expect(page.locator('.tool-header').getByRole('button', { name: 'New proof', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'New proof' }).first().click();
-  await expect(page.getByRole('heading', { name: 'Create proof' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'New proof' })).toBeVisible();
   await page.locator('.selectable-pick').click();
   await page.getByRole('button', { name: 'Create proof' }).click();
   await expect(page.locator('.konva canvas')).toHaveCount(2);

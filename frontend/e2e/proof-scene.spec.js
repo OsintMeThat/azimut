@@ -79,7 +79,7 @@ async function openCase(page) {
 /** A new proof of these pictures, through the Create proof dialog. */
 async function newProof(page, titles) {
   await page.locator('.tool-header').getByRole('button', { name: 'New proof', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Create proof' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'New proof' })).toBeVisible();
   for (const title of titles) await page.locator('.selectable-pick', { hasText: title }).click();
   await page.getByRole('button', { name: 'Create proof' }).click();
   await expect(page.locator('.panel-row')).toHaveCount(titles.length);

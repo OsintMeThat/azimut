@@ -4279,6 +4279,24 @@ pass date, detector, area and run id. Exported layers survive deletion of their 
 A proof is composed of panels: case images, each carrying its source. Two things
 in the composer are not panels.
 
+**New proof** opens a window of the case's pictures. On the left, where they come from:
+**All**, then **Satellite**, **Videos**, **Collages**, **Screenshots** and **Photos**, each
+with its count and left out when the case holds none (`lib/newProof.js`). A frame or a
+collage Inspect cut from one video is under Videos, the collage under Collages too; a map
+grab, a Compare render or a Horizon view is a screenshot; the rest is a photo. The case's
+folders follow, then **Scenes to prove** when the queue holds some, each with its colour
+dot, its name, its time and its file. On the right, the pictures as large thumbnails: a
+press adds one and its number says its place among the panels, and under Videos each video
+is a block of its frames in clip order and its collages. **A scene pressed shows only its
+material, all ticked**: the frames inside its passages, the collages holding one and the
+captures gathered for it, read as Make the proof reads them. The proof made of it takes the
+scene up and opens on the Proof tab, the frames not in the case filed on the way, and the
+scene stays named at the foot with a × that lets it go. The foot holds the pictures picked
+in panel order (dragged, or Alt+←/→, to reorder, Delete or × to take one out), the template
+with the default preselected, **Create proof** and a quiet **Start empty**. All is where it
+opens and the search is focused, so a proof is still New proof, a picture, Create proof;
+Enter creates and Escape closes. A case with no scene shows no scene anywhere.
+
 **Open proof** shows its list on the press, its rows following when the case answers. A
 pick closes it at once, and a small tag over the canvas names the proof while its pictures
 load.
@@ -4843,7 +4861,7 @@ underneath it.
 ### Import
 
 **Import** is the third way into the tool, beside composing a proof and opening a
-saved one, and it lives at the foot of the **Create proof** dialog. Paste the address of a post and the picture is downloaded, its text
+saved one, and it lives at the foot of the New proof window's left column. Paste the address of a post and the picture is downloaded, its text
 read for a position and for the links it points at. Both fill the form and say
 where they came from; neither is applied on its own, and a post that spells
 nothing out leaves the fields empty for you to type into. **Use an image** skips
