@@ -193,7 +193,8 @@
           onclick={() => (previewWith = 'sample')}>Sample</button>
         <button type="button" class="pv-opt" class:on={useOpen} aria-pressed={useOpen}
           disabled={!openFields}
-          title={openFields ? 'Fill it with the post open in the composer' : 'No post is open in the composer'}
+          title={openFields ? 'Fill it with the post open in the composer'
+            : postDraftState.fields ? 'The post open in the composer is another kind' : 'No post is open in the composer'}
           onclick={() => (previewWith = 'open')}>Open post</button>
       </div>
       <pre>{preview}</pre>

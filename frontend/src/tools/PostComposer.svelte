@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { fetchAllEntities, lookupEntity, fetchDerivation } from '../lib/catalog.js';
@@ -1538,6 +1538,44 @@
     openGuide('extension');
   }
 
+  // ---- a header that fits ---------------------------------------------------------
+  // What the header holds changes its width: the way back, the quiet line, a reply.
+  // Each time, it is laid out whole first and measured; only when that overflows do
+  // the secondary buttons fold to their icons, and they open again once the header is
+  // as wide as it needed. All of it before the frame is drawn.
+  let headerEl = $state(null);
+  let headerW = $state(0);
+  let compact = $state(false);
+  let wideNeed = 0;
+  const headerHolds = $derived([
+    homeShown, homeAvailable, hasContent, !!replyTo, windowPutAway && extensionMissing,
+    kind, !!draftName, targetInfo.label, !!caseState.current,
+  ].join('|'));
+
+  function fitHeader() {
+    if (!headerEl) return;
+    if (!compact) {
+      if (headerEl.scrollWidth > headerEl.clientWidth + 1) {
+        wideNeed = headerEl.scrollWidth;
+        compact = true;
+      }
+    } else if (headerEl.clientWidth >= wideNeed) {
+      compact = false;
+      tick().then(fitHeader);
+    }
+  }
+  $effect(() => {
+    void headerHolds;
+    untrack(() => {
+      compact = false;
+      tick().then(fitHeader);
+    });
+  });
+  $effect(() => {
+    void headerW;
+    untrack(fitHeader);
+  });
+
   // ---- the home and New post -------------------------------------------------------
   let galleryOpen = $state(false);
 
@@ -1593,7 +1631,10 @@
 </script>
 
 <div class="tool">
-  <div class="tool-header">
+  <!-- Narrower than what it holds (the case panel open on a laptop, a reply beside
+       Publish), the header shows its secondary buttons as icons rather than cut off
+       Publish, as Geo Proof's does. Wide enough, it is the header it always was. -->
+  <div class="tool-header" class:compact bind:this={headerEl} bind:clientWidth={headerW}>
     {#if !homeShown}
       <!-- the way back to the posts of the case, once it has some to list -->
       {#if homeAvailable}
@@ -1609,12 +1650,12 @@
     <div class="head-actions">
       {#if windowPutAway && extensionMissing}
         <span class="ext-quiet" title="The capture extension fills the thread in the site's composer">
-          Extension not connected · <button type="button" class="ext-install" onclick={howToInstall}>Install</button>
+          {compact ? 'No extension' : 'Extension not connected'} · <button type="button" class="ext-install" onclick={howToInstall}>Install</button>
         </span>
       {/if}
       {#if caseState.current}
         <button class="btn btn-sm" onclick={openDraftList} title="Reopen a saved draft">
-          <Icon name="folderOpen" size={14} /> Open
+          <Icon name="folderOpen" size={14} /> <span class="words">Open</span>
         </button>
       {/if}
       {#if homeShown}
@@ -1624,22 +1665,23 @@
       {:else}
         {#if hasContent}
           <button class="btn btn-sm" onclick={() => (discardConfirm = true)} title="Clear this draft">
-            <Icon name="reset" size={14} /> Discard
+            <Icon name="reset" size={14} /> <span class="words">Discard</span>
           </button>
         {/if}
         <button class="btn btn-sm" onclick={saveDraft} disabled={saving || !postName.trim()} title="Keep this thread to reopen and edit here">
-          <Icon name="save" size={14} /> {draftName ? 'Save draft' : 'Save as draft'}
+          <Icon name="save" size={14} /> <span class="words">{draftName ? 'Save draft' : 'Save as draft'}</span>
         </button>
         <button class="btn btn-ok btn-sm" data-guide="post.report" onclick={openSaveReport} disabled={!hasContent || reportSaving} title="Write the finding up as a Notebook note">
-          <Icon name="file" size={14} /> Save report
+          <Icon name="file" size={14} /> <span class="words">Save report</span>
         </button>
         <button class="btn btn-info btn-sm" data-guide="post.publish" onclick={publish} disabled={!tweet1.trim() || publishing} title={`Copy posts and open ${targetInfo.label}`}>
           <Icon name="post" size={14} /> Publish on {targetInfo.label}
         </button>
         {#if replyTo}
           <button class="btn btn-info btn-sm" data-guide="post.reply" onclick={replyUnderSource} disabled={!tweet1.trim() || publishing}
+            aria-label="Reply under the source"
             title={`Open the reply box under the source post on ${replySite}${replyVariant === 'keep-source' ? '' : ', without the Source line'}`}>
-            <Icon name="undo" size={14} /> Reply under the source
+            <Icon name="undo" size={14} /> {compact ? 'Reply' : 'Reply under the source'}
           </button>
         {/if}
       {/if}
@@ -2435,6 +2477,8 @@
     font-size: var(--fs-xs);
     white-space: nowrap;
   }
+  .tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }
+  .tool-header.compact .title-input { width: min(200px, 18vw); }
   .ext-install {
     color: var(--text-2);
     font: inherit;
