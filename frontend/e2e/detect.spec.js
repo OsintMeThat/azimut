@@ -507,6 +507,38 @@ test('review adds a manual point and uses the standard pin dialog', async ({ pag
   expect(errors).toEqual([]);
 });
 
+test('a pin goes To Post with its picture, and the run offers its pins too', async ({ page }) => {
+  const { errors, run } = await openDetect(page, true);
+  // the first candidate was pinned: its place holds the picture the pin filed
+  Object.assign(run.results[0], { review: 'kept', entity_id: 'place-1', title: 'Burnt hangar', description: 'Scorched roof' });
+  await page.route('**/api/cases/*/entities/place-1/chain', (route) => route.fulfill({ json: {
+    entity: { id: 'place-1', type: 'place', label: 'Burnt hangar', attrs: { evidence: 'media/Burnt hangar.png' } }, links: [] } }));
+  await page.route('**/files/*/media/Burnt*', (route) => route.fulfill({ contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200"><rect width="100%" height="100%" fill="#30352b"/></svg>' }));
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
+  await page.getByRole('button', { name: /^North site pass/ }).click();
+  const foot = page.locator('.review-actions');
+  await expect(foot).toContainText('Kept as a pin in this case');
+  // the run's head carries its pins too, saying how many
+  await expect(page.locator('.run-acts').getByRole('button', { name: 'To Post' })).toHaveAttribute('title', 'A free post with the pinned picture');
+  await foot.getByRole('button', { name: 'To Post' }).click();
+  await expect(page.locator('.kind-chip')).toHaveText('Free post');
+  await expect(page.locator('.first-media .attach-chip a')).toHaveText('Burnt hangar.png');
+  await expect(page.locator('#pc-desc')).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
+test('a run with nothing pinned says so, and has no picture to post', async ({ page }) => {
+  const { errors, run } = await openDetect(page, true);
+  run.results[0].review = 'noted';
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
+  await page.getByRole('button', { name: /^North site pass/ }).click();
+  const button = page.locator('.run-acts').getByRole('button', { name: 'To Post' });
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveAttribute('title', 'Only a pin files a picture: pin a candidate first');
+  expect(errors).toEqual([]);
+});
+
 const R = 6378137;
 const WORLD = 2 * Math.PI * R;
 const mercator = (lon, lat) => [R * (lon * Math.PI) / 180, R * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360))];

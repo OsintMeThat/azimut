@@ -300,8 +300,8 @@ export const uiState = $state({
   // cross-tool handoffs (the workbench glue):
   composeQueue: [], // media paths queued for the Proof Composer
   postProof: null, // proof spec handed to the Post Composer
-  // A post to start in Post, `{ kind, media }`: a kind of lib/post.js POST_KINDS and
-  // the case files it carries (tools/post/start.js `startPost`).
+  // A post to start in Post, `{ kind, media, about }`: a kind of lib/post.js POST_KINDS,
+  // the case files it carries and what they show (tools/post/start.js `startPost`).
   postStart: null,
   openProof: null, // proof name to load in the Proof Composer
   // A scene of Inspect to make a proof of: { video, moments, draft, panels, label },

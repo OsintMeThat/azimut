@@ -37,6 +37,23 @@ describe('a plate out of the tab', () => {
     expect(path).toBe('/api/cases/case 1/map-plates/export');
     expect(body.getAll('frames')).toHaveLength(1);
     expect([body.get('format'), body.get('width_mm'), body.has('staged'), body.has('beats')]).toEqual(['png', '297', false, false]);
+    // written out, it says nothing of the case
+    expect(['into', 'plate', 'kind', 'attribution'].some((field) => body.has(field))).toBe(false);
+  });
+
+  it('files an export in the case for a post, naming its plate, what it shows and its credits', async () => {
+    const post = vi.fn(async () => ({ path: 'media/Front.png' }));
+    await postExport('c', { format: 'png', frames: [new Blob(['a'], { type: 'image/png' })], filename: 'Front', widthMm: 297, heightMm: 210,
+      filed: { plate: 'Front', kind: 'page', day: '2026-10-12', step: '', attribution: 'Esri · Made with Azimut' } }, post);
+    const [, body] = post.mock.calls[0];
+    expect([body.get('into'), body.get('plate'), body.get('kind'), body.get('day'), body.has('step'), body.get('attribution')])
+      .toEqual(['case', 'Front', 'page', '2026-10-12', false, 'Esri · Made with Azimut']);
+    // a played plate's export names it too, after its pictures
+    const server = { post: vi.fn(async (path, form) => (path.endsWith('/export') ? { form } : { staged: 'token' })), del: vi.fn() };
+    const pictures = stagedPictures('c', server);
+    await pictures.add('frames', new Blob(['f'], { type: 'image/jpeg' }));
+    const { form } = await pictures.finish({ format: 'mp4', filename: 'Front', widthMm: 297, heightMm: 210, filed: { plate: 'Front' } });
+    expect([form.get('into'), form.get('plate'), form.get('staged'), form.has('kind')]).toEqual(['case', 'Front', 'token', false]);
   });
 
   /** A server keeping what each batch brings, as `api/mapplates.stage_pictures` does. */

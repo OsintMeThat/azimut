@@ -126,6 +126,8 @@
   import { offerNote, offerPuts, pairOffers, withdrawNote } from '../lib/noteHere.svelte.js';
   import PutInNote from '../components/PutInNote.svelte';
   import { NOTE_FRAME_HINT, nearestPlace, pairName, pairOffer, sheetOffer } from './compare/pairNote.js';
+  import { comparePostAbout, postCredits } from './compare/comparePost.js';
+  import { startPost } from './post/start.js';
   import { createNoteFrame } from './compare/noteFrame.svelte.js';
   import { holdsUnsaved } from '../lib/backButton.js';
   import { changeInterval, formatTemporalValue } from '../lib/timeline.js';
@@ -2205,15 +2207,7 @@
    */
   async function keepExport(caseId, format, imageA, imageB = null) {
     if (!keepInCase || !openedSession) return '';
-    const form = new FormData();
-    form.append('image_a', imageA, 'comparison-a.png');
-    if (imageB) form.append('image_b', imageB, 'comparison-b.png');
-    form.append('format', format);
-    form.append('interval', String(blinkInterval));
-    if (format !== 'png') form.append('keep', gifKeepColours({ signed: signExport }));
-    form.append('filename', exportName());
-    form.append('spec', JSON.stringify(sessionSpec()));
-    for (const [field, value] of pictureDateFields(pictureDates())) form.append(field, value);
+    const form = keptForm(format, imageA, imageB);
     try {
       await api.post(
         `/api/cases/${caseId}/compare/sessions/${encodeURIComponent(openedSession.name)}/images`,
@@ -2225,6 +2219,20 @@
       toast(`Exported, but not kept in the case: ${error.message}`, 'warn', 7000);
       return '';
     }
+  }
+
+  /** What `/images` keeps of the export on screen: its pictures, the reading on screen and its dates. */
+  function keptForm(format, imageA, imageB = null) {
+    const form = new FormData();
+    form.append('image_a', imageA, 'comparison-a.png');
+    if (imageB) form.append('image_b', imageB, 'comparison-b.png');
+    form.append('format', format);
+    form.append('interval', String(blinkInterval));
+    if (format !== 'png') form.append('keep', gifKeepColours({ signed: signExport }));
+    form.append('filename', exportName());
+    form.append('spec', JSON.stringify(sessionSpec()));
+    for (const [field, value] of pictureDateFields(pictureDates())) form.append(field, value);
+    return form;
   }
 
   // -- into the note pinned beside -----------------------------------------------
@@ -2318,13 +2326,34 @@
       const dates = pictureDates();
       await saveForNote(owner, dates);
       if (controller.signal.aborted) throw new DOMException('Stopped', 'AbortError');
-      const { sheet, shown } = await drawEvolution('sheet', pictures, controller.signal);
-      const form = new FormData();
+      const { kept, label } = await keepEvolution(owner, 'sheet', pictures, controller.signal);
+      await reloadCase();
+      return { entity: { id: kept.entity }, label, fresh: !kept.reused };
+    } finally {
+      if (evolution !== WAYBACK_ID) imagery.refreshUsage();
+      if (evolutionAbort === controller) evolutionAbort = null;
+      outputBusy = '';
+      evolutionProgress = null;
+    }
+  }
+
+  /**
+   * An evolution of the ticked pictures drawn and kept in the case under the saved
+   * comparison: the sheet as one of its images (`/images`), the GIF as its own
+   * (`/evolution`). Answers what was kept, its label and its days (`evolutionDays`).
+   */
+  async function keepEvolution(owner, kind, pictures, signal) {
+    const { frames, sheet, shown, played } = await drawEvolution(kind, pictures, signal);
+    const name = comparisonFilename(openedSession.title, { a: pictures[0].date, b: pictures.at(-1).date });
+    const label = `${openedSession.title}, evolution ${pictures[0].date} to ${pictures.at(-1).date}`;
+    const form = new FormData();
+    form.append('filename', `${name} evolution`);
+    form.append('spec', JSON.stringify({ ...sessionSpec(), mode: 'side', difference: false }));
+    form.append('reuse', 'true');
+    const session = `/api/cases/${owner.id}/compare/sessions/${encodeURIComponent(openedSession.name)}`;
+    if (kind === 'sheet') {
       form.append('image_a', sheet, 'evolution.png');
       form.append('format', 'png');
-      const label = `${openedSession.title}, evolution ${pictures[0].date} to ${pictures.at(-1).date}`;
-      form.append('filename', comparisonFilename(openedSession.title, { a: pictures[0].date, b: pictures.at(-1).date }) + ' evolution');
-      form.append('spec', JSON.stringify({ ...sessionSpec(), mode: 'side', difference: false }));
       // the sheet's own days, not the two sides on screen
       if (shown.days.length >= 2) {
         form.append('evolution', JSON.stringify(shown));
@@ -2334,20 +2363,15 @@
         form.append('imagery_b', last.day);
         if (!last.exact) form.append('imagery_b_exact', 'false');
       }
-      form.append('reuse', 'true');
-      const kept = await api.post(
-        `/api/cases/${owner.id}/compare/sessions/${encodeURIComponent(openedSession.name)}/images`,
-        form,
-        { signal: controller.signal },
-      );
-      await reloadCase();
-      return { entity: { id: kept.entity }, label, fresh: !kept.reused };
-    } finally {
-      if (evolution !== WAYBACK_ID) imagery.refreshUsage();
-      if (evolutionAbort === controller) evolutionAbort = null;
-      outputBusy = '';
-      evolutionProgress = null;
+      return { kept: await api.post(`${session}/images`, form, { signal }), label, shown };
     }
+    // a picture for each day that came back, which the GIF plays in order
+    if (frames.length !== played.days.length) throw new Error('a picture came back without its day');
+    frames.forEach((blob, index) => form.append('frames', blob, `evolution-${index + 1}.png`));
+    form.append('interval', String(evolutionInterval));
+    form.append('keep', gifColours(annotations.filter((mark) => mark.side === 'both'), { signed: signExport }));
+    form.append('evolution', JSON.stringify(played));
+    return { kept: await api.post(`${session}/evolution`, form, { signal }), label, shown: played };
   }
 
   /** The sheet is offered while the export panel holds one ticked: it needs the pictures chosen there. */
@@ -2386,16 +2410,23 @@
     }
   }
 
+  /** The two pictures a Blink or a Slide GIF is made of, as the export reads them. */
+  async function gifFrames() {
+    const renderChangeMap = await exportedChange();
+    const sources = await exportSources();
+    const blink = { renderMode: 'blink', renderChangeMap, renderSigned: signExport };
+    return [
+      await canvasBlob(compose(sources, { ...blink, renderBlinkB: false })),
+      await canvasBlob(compose(sources, { ...blink, renderBlinkB: true })),
+    ];
+  }
+
   async function exportGif(animation) {
     if (outputBusy) return;
     outputBusy = 'gif';
     try {
       const owner = await ensureCase();
-      const renderChangeMap = await exportedChange();
-      const sources = await exportSources();
-      const blink = { renderMode: 'blink', renderChangeMap, renderSigned: signExport };
-      const frameA = await canvasBlob(compose(sources, { ...blink, renderBlinkB: false }));
-      const frameB = await canvasBlob(compose(sources, { ...blink, renderBlinkB: true }));
+      const [frameA, frameB] = await gifFrames();
       const form = new FormData();
       form.append('image_a', frameA, 'comparison-a.png');
       form.append('image_b', frameB, 'comparison-b.png');
@@ -2478,7 +2509,8 @@
   /**
    * Draw what an evolution is made of, from the pictures ticked: a GIF's frames, or a
    * sheet's one picture. `signal` stops it. A sheet answers its pictures' days too,
-   * `{ provider, days: [{ day, exact }] }`, which a note's annex credits it by.
+   * `{ provider, days: [{ day, exact }] }`, which a note's annex credits it by, and
+   * `played` the days of the frames drawn, a repeated or an empty picture left out.
    */
   async function drawEvolution(kind, pictures, signal) {
     const plan = evolutionPlan(kind, pictures.length);
@@ -2499,6 +2531,7 @@
     const positions = timelinePositions(pictures.map((entry) => entry.date));
     const frames = [];
     const cells = [];
+    const drawn = [];
     const tally = await drawPictures({
       entries: pictures,
       frame: plan.frame,
@@ -2509,6 +2542,7 @@
       onprogress: (done, total) => (evolutionProgress = { done, total }),
       onpicture: async ({ entry, picture, index }) => {
         const date = pictureLabel(archiveId, entry);
+        drawn.push(entry);
         if (kind === 'sheet') cells.push({ picture, date });
         else frames.push(await canvasBlob(composeEvolutionFrame({ ...common, picture, date, current: index, positions })));
       },
@@ -2516,7 +2550,7 @@
     if (tally.drawn < 2) throw new Error(`fewer than two distinct pictures of this ground came back${leftOut(tally)}`);
     const span = `${pictures[0].date} to ${pictures.at(-1).date}`;
     const sheet = kind === 'sheet' ? await canvasBlob(composeEvolutionSheet({ ...common, cells, span })) : null;
-    return { frames, sheet, tally, archiveId, shown: evolutionDays(archiveId, pictures) };
+    return { frames, sheet, tally, archiveId, shown: evolutionDays(archiveId, pictures), played: evolutionDays(archiveId, drawn) };
   }
 
   async function exportEvolution(kind) {
@@ -2565,6 +2599,66 @@
       else outputError('Evolution export failed', error);
     } finally {
       if (archiveId !== WAYBACK_ID) imagery.refreshUsage();
+      if (evolutionAbort === controller) evolutionAbort = null;
+      outputBusy = '';
+      evolutionProgress = null;
+    }
+  }
+
+  /**
+   * To Post: the export picked, kept in the case under the comparison (saved first when
+   * it is not, named after its place and days, as for a note) and handed to Post as a
+   * free post carrying it. One file each, a GIF counting as X's one video.
+   */
+  async function exportToPost() {
+    if (outputBusy || sessionBusy) return;
+    const kind = exportKind;
+    const pictures = [...evolutionChosen];
+    if (evolutionKind && (!evolution || pictures.length < 2 || pictures.length > MAX_EVOLUTION_FRAMES)) {
+      toast(`Tick 2 to ${MAX_EVOLUTION_FRAMES} pictures first`, 'warn');
+      return;
+    }
+    if (evolutionKind && !evolutionPlan(kind, pictures.length)) {
+      toast('Open a map before exporting', 'warn');
+      return;
+    }
+    const controller = new AbortController();
+    if (evolutionKind) {
+      evolutionAbort = controller;
+      evolutionProgress = { done: 0, total: pictures.length };
+    }
+    outputBusy = 'post';
+    const archiveId = evolution;
+    try {
+      const owner = await ensureCase();
+      const dates = pictureDates();
+      await saveForNote(owner, dates);
+      if (controller.signal.aborted) throw new DOMException('Stopped', 'AbortError');
+      let kept;
+      let about;
+      if (evolutionKind) {
+        const done = await keepEvolution(owner, kind, pictures, controller.signal);
+        kept = done.kept;
+        const provider = imagery.find(archiveId);
+        const days = done.shown.days.map((entry) => entry.day);
+        about = comparePostAbout({ title: openedSession.title, days, credits: normaliseAttribution(provider?.attribution, days) });
+      } else {
+        const [imageA, imageB] = kind === 'png' ? [await comparisonBlob({ signed: signExport }), null] : await gifFrames();
+        const form = keptForm(kind, imageA, imageB);
+        form.append('reuse', 'true');
+        kept = await api.post(`/api/cases/${owner.id}/compare/sessions/${encodeURIComponent(openedSession.name)}/images`, form);
+        about = comparePostAbout({ title: openedSession.title, pair: dates, credits: postCredits(
+          normaliseAttribution(shownA.provider?.attribution, shownA.id), normaliseAttribution(shownB.provider?.attribution, shownB.id)) });
+      }
+      await reloadCase();
+      rightPanel = null;
+      toast(`${kept.path.split('/').pop()} ${kept.reused ? 'was already in the case' : 'kept in the case'}`, 'ok', 2400);
+      startPost('free', [kept.path], about);
+    } catch (error) {
+      if (error?.name === 'AbortError') toast('Stopped; nothing went to Post', 'info');
+      else outputError('Could not send it to Post', error);
+    } finally {
+      if (evolutionKind && archiveId !== WAYBACK_ID) imagery.refreshUsage();
       if (evolutionAbort === controller) evolutionAbort = null;
       outputBusy = '';
       evolutionProgress = null;
@@ -3194,7 +3288,7 @@
         </div>
 
         {#if evolutionKind}
-          <p class="panel-note"><Icon name="info" size={13} /> An evolution is written out only, not kept in the case.</p>
+          <p class="panel-note"><Icon name="info" size={13} /> Export writes an evolution out only; To Post keeps it in the case.</p>
         {:else}
           <label class="keep-choice">
             <input type="checkbox" bind:checked={keepInCase} />
@@ -3229,11 +3323,22 @@
           <button class="btn" disabled={!!outputBusy} onclick={copyComparison}>
             <Icon name="copy" size={13} /> {outputBusy === 'copy' ? 'Copying…' : 'Copy current PNG'}
           </button>
-          {#if outputBusy === 'evolution'}
+          {#if outputBusy === 'evolution' || (outputBusy === 'post' && evolutionProgress)}
             <button class="btn" onclick={() => evolutionAbort?.abort()}>
               <Icon name="x" size={13} /> Stop
             </button>
           {/if}
+          <button class="btn" onclick={exportToPost} title="Keeps it in the case and opens a free post carrying it"
+            disabled={!!outputBusy || (evolutionKind && (evolutionChosen.length < 2 || evolutionChosen.length > MAX_EVOLUTION_FRAMES))}>
+            <Icon name="post" size={13} />
+            {#if outputBusy === 'post'}
+              {evolutionProgress && evolutionProgress.done < evolutionProgress.total
+                ? `Drawing ${evolutionProgress.done + 1} of ${evolutionProgress.total}…`
+                : 'Keeping…'}
+            {:else}
+              To Post
+            {/if}
+          </button>
           <button class="btn btn-primary" onclick={runExport}
             disabled={!!outputBusy || (evolutionKind && (evolutionChosen.length < 2 || evolutionChosen.length > MAX_EVOLUTION_FRAMES))}>
             <Icon name="download" size={13} />

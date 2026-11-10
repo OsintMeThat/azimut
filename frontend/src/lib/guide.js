@@ -754,7 +754,7 @@ export const PAGES = {
       {
         anchor: 'plate.export',
         title: 'Export',
-        text: 'A PNG, a PDF, or a video of the plate’s days.',
+        text: 'A PNG, a PDF, or a video of the plate’s days. To Post carries it into Post.',
         opens: {
           shot: 'plate-made',
           lead: 'A ready plate on the case’s own layer, in one of the looks, as it leaves the app.',

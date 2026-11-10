@@ -106,9 +106,13 @@ const pictureName = (blob, stem) => `${stem}.${blob.type === 'image/jpeg' ? 'jpg
  * `staged` token its pictures were sent under (`stagedPictures`). A plate played
  * through its steps sends `beats`, one per frame (how long it holds, the clips running
  * over it and what stands over them, the transition it opens on).
+ *
+ * `filed` files it in the case instead of the folder saved for views, for a post to
+ * carry: `{ plate, kind, day, step, attribution }`, the saved plate's name, `page` or
+ * `sheet`, the day and step a page shows and the credits its face carries.
  */
 export function postExport(caseId, { format, frames = [], filename, widthMm, heightMm, interval = 900, transparent = false, beats = null, staged = '',
-  signal = undefined }, post = api.post) {
+  filed = null, signal = undefined }, post = api.post) {
   const body = new FormData();
   frames.forEach((blob, index) => body.append('frames', blob, pictureName(blob, index)));
   if (staged) body.append('staged', staged);
@@ -119,6 +123,14 @@ export function postExport(caseId, { format, frames = [], filename, widthMm, hei
   body.append('height_mm', String(heightMm));
   body.append('interval', String(interval));
   if (transparent) body.append('transparent', 'true');
+  if (filed) {
+    body.append('into', 'case');
+    body.append('plate', filed.plate);
+    if (filed.kind) body.append('kind', filed.kind);
+    if (filed.day) body.append('day', filed.day);
+    if (filed.step) body.append('step', filed.step);
+    if (filed.attribution) body.append('attribution', filed.attribution);
+  }
   return post(`/api/cases/${caseId}/map-plates/export`, body, signal ? { signal } : undefined);
 }
 

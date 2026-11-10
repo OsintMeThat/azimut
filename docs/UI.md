@@ -2393,7 +2393,13 @@ Difference was a view of its own reopens side by side with Difference on. Export
 shared Views destination, named by the comparison and its two pictures' dates, and
 never over an earlier file. **Also keep it in this case** files the same image in My
 work under the comparison, stamped with the reading on screen and never replaced by a
-later save; asked on a comparison never saved, it asks for a name first. An optional
+later save; asked on a comparison never saved, it asks for a name first. **To Post**,
+beside Export copy, keeps the export picked in the case the same way, one file each
+(the PNG, the Blink or Slide GIF, the evolution's GIF or its sheet), and opens Post on
+a free post carrying it, told the comparison's name, each picture's date (an
+evolution's first and last day) and the credits under the image. A comparison never
+saved is saved first, named after its place and days as for a note, and the same image
+kept before is cited again. An optional
 ground-anchored frame cuts any export to the
 chosen area, while Full view remains the default. The frame keeps the bearing it was
 drawn at: turning the camera turns it with the ground rather than reshaping it, and
@@ -2422,8 +2428,10 @@ footer, the last one held three times as long, at the pace chosen; a sheet lays 
 pictures out in rows under one scale bar. Only the marks set on both sides are drawn,
 reference layers and the Difference stay out, and the tones are the archive's. A
 picture with no imagery, or with the same pixels as the one before, is left out and
-the toast counts it. **Stop** ends it between two tiles. An evolution is written to the
-Views destination only, never kept in the case. Tile captures wait
+the toast counts it. **Stop** ends it between two tiles. Export copy writes an
+evolution to the Views destination only; To Post keeps it in the case under the
+comparison (`POST /compare/sessions/{name}/evolution` for the GIF), with the days it
+plays. Tile captures wait
 for loaded frames and reject incomplete tiles. Google Maps JS uses the
 user-triggered Azimut Capture extension and retains its on-map credits.
 
@@ -4341,7 +4349,12 @@ point's coordinates and the imagery's credit with the year of its passes, so the
 file still reads after the run is gone. The same dates reach the case's time. The PNG carries them on its
 Time tab, and a claim at the place, citing the picture, says what the sweep read: a
 change `occurred` between the two passes, a thing on one pass was `observed` on it.
-The place itself carries no date, and the claim no confidence. Undo sends those
+The place itself carries no date, and the claim no confidence. **To Post** beside a
+pin opens Post on a free post carrying its picture, told the pin's name, its
+description and the days of its passes. The run's own **To Post**, once something was
+kept, carries its pins' pictures in the queue's order, four at most as one post holds.
+A candidate only kept here has no picture and none is made for it, so a run of those
+says so on the button and posts nothing. Undo sends those
 copies to Trash, the claim with them unless something was added to it. Evidence is enlarged
 by a whole-number factor with no interpolation, so a candidate a dozen pixels
 across can be read without pretending to detail the sensor never recorded. The
@@ -5279,9 +5292,13 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   the fields their layout uses. **Video thread** says *Coming next* until it is built.
   A draft or a template says its `kind` only when it is not a geolocation, so every
   draft and template from before reads as one. Another tool starts a post through
-  `tools/post/start.js` (`startPost(kind, media)`): what Post holds is saved first, as
-  for a proof sent with **To Post**, and the media land on the first post, or after a
-  geolocation's proof.
+  `tools/post/start.js` (`startPost(kind, media, about)`): what Post holds is saved
+  first, as for a proof sent with **To Post**, and the media land on the first post, or
+  after a geolocation's proof. `about` says what the media show: the name of what they
+  came from, its own sentence when it has one, the days they show and the credit line
+  on their face (`startFields` gives the post's name, `#description`, `#date` and
+  `#credits` from it). Map plate's export starts a Map plate post this way, and
+  Compare's export and Detect's pins a free post.
 - **The extension window** says once, on arriving in Post without the capture
   extension, why it is worth having here: it fills the whole thread in X or Bluesky,
   pictures included, and can reply under the source post or capture it into the case.
@@ -6516,6 +6533,13 @@ transition into it a time of its own (0.2 to 3 seconds). Play goes through the
 transitions as the video will, for as long: the map flies, what leaves fades, what is
 new fades in or is drawn, then the day or step holds its own seconds, and the dialog
 counts each transition's own time in what the video runs. Everything goes into the folder saved for views.
+**To Post**, beside Export for a PNG, a sheet, a GIF or an MP4 (never a PDF), makes the
+same file and files it in the case instead, naming its plate, the day and step a page
+shows, and the credits on its face (`POST /map-plates/export` with `into=case`); the same
+file filed from the plate before is cited again. Post then opens on a Map plate post
+carrying it, told the plate's title, the day shown or the first and last days played,
+and those credits. An analyst who went to another tool meanwhile is offered **Open in
+Post** on the toast instead.
 **Export** closes the dialog and the export goes on behind: the plate holds still under
 a veil saying what is drawn and how far, the top bar says **Plate export** with its
 share from any tool (a press goes back to the plate), and the other tools can be used

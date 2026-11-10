@@ -109,3 +109,29 @@ describe('exporting a plate', () => {
   });
 
 });
+
+describe('a plate To Post', () => {
+  const toPost = () => [...document.body.querySelectorAll('.acts .btn')].find((node) => node.textContent.trim() === 'To Post');
+
+  it('sends what Export would, to be filed in the case, and closes', async () => {
+    const onpost = vi.fn(async () => {});
+    const { onexport, onclose } = show({ moments: ['2026-09-01', '2026-09-15', '2026-10-01'], onpost });
+    expect(document.body.querySelector('.note:last-of-type').textContent).toContain('To Post files it in the case instead');
+    radio('gif').click(); flushSync();
+    toPost().click(); await settle();
+    expect(onpost).toHaveBeenCalledWith(expect.objectContaining({ format: 'gif', days: ['2026-09-01', '2026-09-15', '2026-10-01'], filename: 'Map plate' }));
+    expect(onexport).not.toHaveBeenCalled();
+    expect(onclose).toHaveBeenCalledOnce();
+  });
+
+  it('leaves a PDF an export, and is not offered where the tool gives no road', () => {
+    show({ moments: [], onpost: vi.fn() });
+    expect(toPost()).toBeDefined();
+    radio('pdf').click(); flushSync();
+    expect(toPost()).toBeUndefined();
+    expect(document.body.textContent).not.toContain('To Post files it');
+    unmount(held); held = null; document.body.innerHTML = '';
+    show({ moments: [] });
+    expect(toPost()).toBeUndefined();
+  });
+});

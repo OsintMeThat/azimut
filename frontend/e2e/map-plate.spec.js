@@ -19,7 +19,13 @@ async function plateFixture(page, store = { plates: new Map(), saves: [], export
     const path = new URL(request.url()).pathname;
     const tail = path.split('/map-plates')[1];
     if (tail === '/export') {
-      store.exports.push(request.postDataBuffer()?.toString('latin1') ?? '');
+      const body = request.postDataBuffer()?.toString('latin1') ?? '';
+      store.exports.push(body);
+      // To Post files it in the case, as a media file of its own
+      if (body.includes('name="into"\r\n\r\ncase')) {
+        const format = body.match(/name="format"\r\n\r\n(\w+)/)?.[1] ?? 'png';
+        return route.fulfill({ json: { file: `Front.${format}`, path: `media/Front.${format}`, entity: 'e-front', format } });
+      }
       return route.fulfill({ json: { file: 'Map plate.png', path: '/tmp/views', format: 'png' } });
     }
     // a played plate's pictures come first, in batches as they are drawn
@@ -417,6 +423,58 @@ test('an export goes on behind: the plate holds still, the top bar says it, and 
   await expect(pill).toHaveCount(0);
   await pill.or(page.locator('.tabstrip').getByRole('button', { name: 'Map plate', exact: true })).first().click();
   await expect(page.locator('.export-card')).toHaveCount(0);
+});
+
+test('To Post files the page in the case and opens Post on a Map plate post carrying it', async ({ page }) => {
+  const store = await plateFixture(page);
+  await page.route(`**/files/${CASE_ID}/media/Front.png`, (route) => route.fulfill({ contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200"><rect width="100%" height="100%" fill="#2f5d7c"/></svg>' }));
+  await page.goto('/#plate');
+  await newPlate(page);
+  const title = page.getByLabel('Plate name', { exact: true });
+  await title.fill('Front, October');
+  await title.press('Enter');
+  await expect.poll(() => lastSave(store)?.title).toBe('Front, October');
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export the plate' });
+  await expect(dialog.getByText('To Post files it in the case instead.')).toBeVisible();
+  // a PDF is a document to print, not something a post carries
+  await dialog.locator('input[value="pdf"]').check();
+  await expect(dialog.getByRole('button', { name: 'To Post', exact: true })).toHaveCount(0);
+  await dialog.locator('input[value="png"]').check();
+  await dialog.getByLabel('Picture width').selectOption('1080');
+  await dialog.getByRole('button', { name: 'To Post', exact: true }).click();
+  await expect.poll(() => store.exports.length, { timeout: 30_000 }).toBe(1);
+  const sent = store.exports[0];
+  expect(sent).toContain('name="into"\r\n\r\ncase');
+  expect(sent).toContain('name="plate"\r\n\r\nFront, October');
+  expect(sent).toContain('name="kind"\r\n\r\npage');
+  // the credits its face carries travel with it
+  expect(sent).toMatch(/name="attribution"\r\n\r\n[^\r]*OpenStreetMap contributors/);
+  // Post opens on a Map plate post, the page on its first post
+  await expect(page.locator('.kind-chip')).toHaveText('Map plate');
+  await expect(page.locator('.first-media .attach-chip a')).toHaveText('Front.png');
+  await expect(page.locator('.first-pics img')).toHaveCount(1);
+});
+
+test('a played plate goes To Post as its video', async ({ page }) => {
+  const store = await plateFixture(page);
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  await addOnPage(page, 'Step');
+  await expect(page.locator('.steps [role="option"]')).toHaveCount(2);
+  await expect.poll(() => lastSave(store)?.spec.steps?.now?.length ?? 0).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export the plate' });
+  await dialog.locator('input[value="mp4"]').check();
+  await dialog.getByRole('button', { name: 'To Post', exact: true }).click();
+  await expect.poll(() => store.exports.length, { timeout: 60_000 }).toBe(1);
+  expect(store.exports[0]).toContain('name="into"\r\n\r\ncase');
+  expect(store.exports[0]).not.toContain('name="kind"');
+  await expect(page.locator('.kind-chip')).toHaveText('Map plate');
+  await expect(page.locator('.first-media .attach-chip a')).toHaveText('Front.mp4');
+  await expect(page.locator('.first-media .media-tabs .btn-primary')).toHaveText('Video');
 });
 
 test('a plate kept as a template starts the next one', async ({ page }) => {

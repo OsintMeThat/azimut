@@ -56,6 +56,8 @@
   import { myLogoUrl } from '../lib/myLogo.js';
   import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
   import { faceCredits, figureName, figureScale, pageOffer, sheetOffer, sheetRefusal } from './plate/plateNote.js';
+  import { plateFiled, platePostAbout } from './plate/platePost.js';
+  import { startPost } from './post/start.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { touchesNothing } from '../lib/deleteImpact.js';
   import { RESTORABLE } from '../lib/trash.js';
@@ -1643,11 +1645,23 @@
 
   /** The export under way, which Cancel stops between two pictures and on its way to the server. */
   let exportRun = null;
+  /** The days a played export drew, for what the post is told of them. */
+  let shownDays = [];
   const stopped = () => Object.assign(new Error('The export was stopped'), { stopped: true });
 
-  async function runExport({ format, quality, side, days, filename, pixels = 0, transparent = false }) {
+  async function runExport({ format, quality, side, days, filename, pixels = 0, transparent = false, post = false }) {
+    if (post) {
+      // what goes To Post is filed in the case under the plate, which the server reads as saved
+      await autosave.flush();
+      if (!plate?.name || plate.template) { toast('The plate is not saved yet. Try again in a moment', 'warn'); return; }
+    }
     const { width: widthMm, height: heightMm } = pageSize(spec.page);
     const name = filename || plate.title;
+    const owed = post ? faceCredits(credits, plateCredits(spec, creditSources)) : '';
+    // the day and step shown now, before an export of the days moves them
+    const shownAt = at ?? '';
+    const filed = post ? plateFiled({ name: plate.name, format, day: shownAt, step: stepId ?? '', credits: owed }) : null;
+    shownDays = [];
     const run = new AbortController();
     exportRun = run;
     startExport(name, plate.caseId ?? caseId ?? '', () => run.abort());
@@ -1668,13 +1682,14 @@
         release(canvas);
         answer = await postExport(caseId, { format, frames: [page], widthMm, heightMm, transparent: format === 'png' && transparent,
           filename: name === plate.title ? [name, spec.time.at?.replace('T', ' ').replaceAll(':', 'h'), stepIndex >= 0 ? stepName(stepIndex) : '']
-            .filter(Boolean).join(' ') : name, signal: run.signal });
+            .filter(Boolean).join(' ') : name, filed, signal: run.signal });
       } else {
         const picked = playable ? days.slice(0, 120) : [at];
         legendDays = picked;
+        shownDays = picked;
         if (format === 'sheet') {
           const drawn = await drawSheet(picked, check);
-          answer = await postExport(caseId, { format: 'png', frames: [drawn], widthMm, heightMm, filename: `${name} evolution`, signal: run.signal });
+          answer = await postExport(caseId, { format: 'png', frames: [drawn], widthMm, heightMm, filename: `${name} evolution`, filed, signal: run.signal });
         } else {
           // each day, then each of its steps, each held its own seconds; a step's clips run over its picture in an MP4
           const scale = videoSize(spec, side).width / widthMm;
@@ -1732,8 +1747,13 @@
           // beats all held alike and nothing else to say go out as one interval; otherwise each beat says its own
           const held = sent[0]?.seconds ?? 1;
           const alike = !stepped && !pictures.count('tweens') && sent.every((beat) => beat.seconds === held) && held >= 0.15 && held <= 6;
-          answer = await pictures.finish({ format, widthMm, heightMm, interval: Math.round(held * 1000), filename: name, beats: alike ? null : sent });
+          answer = await pictures.finish({ format, widthMm, heightMm, interval: Math.round(held * 1000), filename: name, beats: alike ? null : sent, filed });
         }
+      }
+      if (post) {
+        await reloadCase();
+        toPost(answer, platePostAbout({ title: plate.title, caseName: caseState.current?.name ?? '', format, at: shownAt, days: shownDays, credits: owed }));
+        return;
       }
       const show = { label: 'Show', onClick: () => revealPlates(caseId).catch((error) => toast(error.message, 'warn')) };
       if (tilesMissing) toast(`${answer.file} written, but some map tiles had not loaded: a map may have blank patches. Export again once the map is drawn`, 'warn', 9000, show);
@@ -1750,6 +1770,22 @@
       exportStep = null;
       legendDays = null;
       endExport();
+    }
+  }
+
+  /**
+   * The export filed in the case goes on in Post, as a Map plate post carrying it. An
+   * analyst who went to another tool while it was drawn is asked rather than taken there.
+   */
+  function toPost(answer, about) {
+    const go = () => startPost('plate', [answer.path], about);
+    const warned = tilesMissing ? ', but some map tiles had not loaded: a map may have blank patches' : '';
+    const said = `${answer.file} ${answer.reused ? 'was already in the case' : 'filed in the case'}${warned}`;
+    if (uiState.tool === 'plate') {
+      toast(said, warned ? 'warn' : 'ok', warned ? 9000 : 2400);
+      go();
+    } else {
+      toast(said, warned ? 'warn' : 'ok', 9000, { label: 'Open in Post', onClick: go });
     }
   }
 
@@ -2121,6 +2157,7 @@
 
 {#if exporting}
   <PlateExportDialog moments={videoPlayed} {stepped} {runtime} past={pastBox} name={plate?.title ?? 'Map plate'} preview={exportPreview} transparent={!!spec?.page?.transparent}
+    onpost={(options) => runExport({ ...options, post: true })}
     page={spec?.page} hold={spec ? plateSeconds(spec) : 1} onhold={holdPlate}
     {notePage} {noteSheet} onexport={runExport} oncopy={copyImage} onclose={() => (exporting = false)} />
 {/if}

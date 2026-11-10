@@ -89,6 +89,7 @@ class BulkBodyLimit:
         ("POST", ("compare", "sequence"), "compare", "MAX_SEQUENCE_BODY_BYTES"),
         ("POST", ("compare", "sessions", "*", "preview"), "compare", "MAX_GIF_BODY_BYTES"),
         ("POST", ("compare", "sessions", "*", "images"), "compare", "MAX_GIF_BODY_BYTES"),
+        ("POST", ("compare", "sessions", "*", "evolution"), "compare", "MAX_SEQUENCE_BODY_BYTES"),
         ("POST", ("proofs",), "proofs", "MAX_PROOF_BODY_BYTES"),
         ("POST", ("sheets",), "sheets", "MAX_SHEET_BODY_BYTES"),
         ("POST", ("sheets", "import"), "sheets", "MAX_SHEET_BODY_BYTES"),

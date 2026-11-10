@@ -15,6 +15,7 @@ const PROVIDERS = [
   {
     id: 'esri-wayback',
     label: 'Esri Wayback',
+    attribution: 'Esri, World Imagery Wayback',
     imagery: true,
     max_zoom: 19,
     tile_size: 256,
@@ -108,6 +109,9 @@ const post = vi.fn(async (path) => {
   if (path === '/api/cases/case-a/compare/sessions') {
     return { name: 'Comparison', title: 'Comparison', spec_path: 'comparisons/.meta/Comparison.json' };
   }
+  // kept in the case under the comparison, as To Post asks
+  if (path.endsWith('/evolution')) return { path: 'media/Comparison evolution.gif', entity: 'kept-gif' };
+  if (path.endsWith('/images')) return { path: 'media/Comparison evolution.png', entity: 'kept-png' };
   return { file: 'comparison.png', path: '' };
 });
 vi.mock('../lib/api.js', () => ({
@@ -937,7 +941,7 @@ describe('Compare', () => {
     choice.click();
     await settle();
     expect(get.mock.calls.filter(([path]) => path.includes('/wayback/changes'))).toHaveLength(1);
-    expect(dialog.textContent).toContain('An evolution is written out only');
+    expect(dialog.textContent).toContain('Export writes an evolution out only; To Post keeps it in the case');
     expect(dialog.textContent).not.toContain('Also keep it in this case');
     const rows = [...dialog.querySelectorAll('.cards li')];
     expect(rows.map((row) => row.querySelector('.mono').textContent)).toEqual([
@@ -992,6 +996,45 @@ describe('Compare', () => {
     const [, body] = post.mock.calls.find(([path]) => path === '/api/cases/case-a/plates');
     expect(body).toMatchObject({ format: 'png', overwrite: false });
     expect(body.filename).toMatch(/2014-02-20_2026-09-01 evolution$/);
+  });
+
+  it('sends an evolution To Post as its GIF, kept under the comparison it saves first', async () => {
+    const dialog = await openThenAndNow();
+    dialog.querySelector('input[value="evolution"]').click();
+    await settle();
+    button('To Post', dialog).click();
+    await settle();
+    // the pair was not saved: it is, before anything is kept under it
+    expect(post.mock.calls.some(([path]) => path === '/api/cases/case-a/compare/sessions')).toBe(true);
+    const [, form] = post.mock.calls.find(([path]) => path === '/api/cases/case-a/compare/sessions/Comparison/evolution');
+    expect(form.getAll('frames')).toHaveLength(2);
+    expect(JSON.parse(form.get('evolution'))).toEqual({ provider: 'esri-wayback',
+      days: [{ day: '2025-06-01', exact: false }, { day: '2026-09-01', exact: false }] });
+    expect(form.get('reuse')).toBe('true');
+    // never written out
+    expect(post.mock.calls.some(([path]) => path.endsWith('/compare/sequence'))).toBe(false);
+    expect(uiState.tool).toBe('post');
+    expect(uiState.postStart).toEqual({ kind: 'free', media: ['media/Comparison evolution.gif'], about: {
+      title: 'Comparison', description: '', dates: ['2025-06-01', '2026-09-01'], credits: 'Esri, World Imagery Wayback' } });
+    expect(document.querySelector('[role="dialog"][aria-label="Export a copy"]')).toBeNull();
+    uiState.postStart = null;
+  });
+
+  it('sends an evolution sheet To Post as the one picture it is', async () => {
+    const dialog = await openThenAndNow();
+    dialog.querySelector('input[value="sheet"]').click();
+    await settle();
+    button('All', dialog.querySelector('.presets')).click();
+    flushSync();
+    button('To Post', dialog).click();
+    await settle();
+    const [, form] = post.mock.calls.find(([path]) => path === '/api/cases/case-a/compare/sessions/Comparison/images');
+    expect([form.get('format'), form.get('imagery_a'), form.get('imagery_b'), form.get('reuse')])
+      .toEqual(['png', '2014-02-20', '2026-09-01', 'true']);
+    expect(post.mock.calls.some(([path]) => path === '/api/cases/case-a/plates')).toBe(false);
+    expect(uiState.postStart).toMatchObject({ kind: 'free', media: ['media/Comparison evolution.png'],
+      about: { dates: ['2014-02-20', '2026-09-01'] } });
+    uiState.postStart = null;
   });
 
   it('frames an export on the ground and keeps the frame with the comparison', async () => {
