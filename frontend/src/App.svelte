@@ -24,6 +24,7 @@
     HOME_WORKSPACE,
     WORKSPACES,
     TOOL_LABELS,
+    TOOL_HOVERS,
     sidebarOpenForWorkspace,
     workspaceOf,
     toolFromHash,
@@ -558,6 +559,7 @@
               data-guide="start.tabs"
               class:active={uiState.tool === toolId}
               aria-current={uiState.tool === toolId ? 'page' : undefined}
+              title={TOOL_HOVERS[toolId]}
               onclick={() => (uiState.tool = toolId)}
             >
               {toolLabel(toolId)}

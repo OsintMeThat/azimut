@@ -5,8 +5,8 @@
  * tab and the editor to a hover text.
  */
 export const PUBLISHING_HELP = {
-  mention: 'The handle a new Geo Report draft is addressed to',
-  platform: 'The site a new Geo Report draft is written for',
+  mention: 'The handle a new post is addressed to',
+  platform: 'The site a new post is written for',
   prefill: 'Let the capture extension type the thread and attach the proof',
   handle: 'Your handle, printed on proofs that turn on Add account handle',
   logo: 'Your logo: on signed proofs, Map plates, and in notes with / and Your logo',

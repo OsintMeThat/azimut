@@ -72,10 +72,18 @@ export const TOOL_LABELS = {
   horizon: 'Horizon',
   coordinates: 'Coords & Sky',
   proof: 'Geo Proof',
-  post: 'Geo Report',
+  post: 'Post',
   plate: 'Map plate',
   notebook: 'Notebook',
   settings: 'Settings',
+};
+
+/**
+ * A tab's hover, where its name needs one. Post was Geo Report until 0.3.4, so its tab
+ * says so for the release that renamed it.
+ */
+export const TOOL_HOVERS = {
+  post: 'Formerly Geo Report',
 };
 
 export function workspaceOf(tool) {

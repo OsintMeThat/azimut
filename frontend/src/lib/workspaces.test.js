@@ -5,6 +5,7 @@ import {
   HOME_WORKSPACE,
   WORKSPACES,
   TOOL_LABELS,
+  TOOL_HOVERS,
   sidebarOpenForWorkspace,
   workspaceOf,
   toolFromHash,
@@ -71,10 +72,12 @@ describe('workspaceOf', () => {
 });
 
 describe('product-facing labels', () => {
-  it('uses the Sources, Geo Proof and Geo Report names', () => {
+  it('uses the Sources, Geo Proof and Post names', () => {
     expect(WORKSPACES.find((w) => w.id === 'collect').label).toBe('Sources');
     expect(TOOL_LABELS.proof).toBe('Geo Proof');
-    expect(TOOL_LABELS.post).toBe('Geo Report');
+    expect(TOOL_LABELS.post).toBe('Post');
+    // the release that renamed it says what it was called
+    expect(TOOL_HOVERS.post).toBe('Formerly Geo Report');
     expect(TOOL_LABELS.timeline).toBe('Timeline');
     // the tab is the overview; "Home" is the workspace the mark opens
     expect(TOOL_LABELS.overview).toBe('Overview');
