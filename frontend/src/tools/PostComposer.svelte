@@ -16,7 +16,7 @@
     isDefaultName, nextName, savedSlugs, savedTitles, slugify, specAttr, specPath,
   } from '../lib/naming.js';
   import { filingName, planProofHandoff } from './post/handoff.js';
-  import { startPost } from './post/start.js';
+  import { startFields, startPost } from './post/start.js';
   import { extensionWindowPutAway, putExtensionWindowAway } from './post/extensionWindow.js';
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
@@ -336,21 +336,28 @@
   });
 
   /** As a proof sent over does, a start files what is on screen first and makes way. */
-  async function adoptStart({ kind: wanted, media }) {
+  async function adoptStart({ kind: wanted, media, about }) {
     if (hasContent) {
       if (!(await fileCurrentDraft())) return;
     }
-    beginPost(wanted, media);
+    beginPost(wanted, media, about);
   }
 
   /**
    * Open a blank post of this kind, on that kind's default template (or its first start
-   * when it has none), with these case files placed (`startMediaPlan`). A Geolocation
-   * post opens exactly as a blank composer always has.
+   * when it has none), with these case files placed (`startMediaPlan`) and the words
+   * the sending tool gave (`startFields`). A Geolocation post opens exactly as a blank
+   * composer always has.
    */
-  function beginPost(wanted, media = []) {
+  function beginPost(wanted, media = [], about = null) {
     resetDraft(normalizePostKind(wanted));
     postOpen = true;
+    const said = startFields(about);
+    if (said.description) description = said.description;
+    if (said.date) date = said.date;
+    // The sending tool's name for it, unless another post holds that name: the
+    // fresh number stays then, so the first save never meets another draft.
+    if (said.name && !nameTaken(said.name)) postName = postTitle = said.name;
     const plan = startMediaPlan(kind, media, (path) => kindByPath.get(path));
     if (plan.first) {
       firstMedia = plan.first.mediaPaths;
@@ -367,6 +374,14 @@
       tweet.mediaPaths = group.mediaPaths;
       extraTweets.push(tweet);
     }
+    if (said.description || said.date) regenerate();
+  }
+
+  /** Whether a saved post other than the open one already holds this name. */
+  function nameTaken(name) {
+    const own = (draftName ?? '').toLowerCase();
+    const slug = slugify(name, 'draft').toLowerCase();
+    return [...savedSlugs(draftEntities, 'draft')].some((one) => one.toLowerCase() === slug && one.toLowerCase() !== own);
   }
 
   /** What the composer holds is written before something else takes its place: it
@@ -1140,10 +1155,7 @@
       return;
     }
     if (typed === postTitle) return;
-    const own = (draftName ?? '').toLowerCase();
-    const slug = slugify(typed, 'draft').toLowerCase();
-    const taken = [...savedSlugs(draftEntities, 'draft')].some((one) => one.toLowerCase() === slug && one.toLowerCase() !== own);
-    if (taken) {
+    if (nameTaken(typed)) {
       toast(`Another post is already named “${typed}”`, 'warn');
       postName = postTitle;
       return;

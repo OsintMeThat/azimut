@@ -74,7 +74,7 @@ function answer(path) {
   // every file the case holds is found again, so nothing reads as deleted
   if (path.includes('/entities/lookup')) return { entity: { id: 'e1', type: 'proof' } };
   if (path.includes('/derivation')) return { entities: [], links: [] };
-  if (path.includes('/entities')) return { items: [], next: null };
+  if (path.includes('/entities')) return { items: lists.entities, next: null };
   return [];
 }
 
@@ -110,7 +110,7 @@ const toasts = () => uiState.toasts.map((t) => t.message);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  lists = { drafts: [], proofs: [], media: [], saved: {}, specs: {} };
+  lists = { drafts: [], proofs: [], media: [], saved: {}, specs: {}, entities: [] };
   api.get.mockImplementation(async (path) => answer(path));
   api.post.mockImplementation(async (path, body) => {
     if (path === '/api/geo/parse') return GEO;
@@ -422,6 +422,31 @@ describe('startPost — the entry every To Post shares', () => {
     await saved();
     const state = draftWrites().at(-1)[1].state;
     expect(state).toMatchObject({ kind: 'free', firstMedia: ['media/a.png'], firstMediaType: 'images', mediaPaths: ['media/clip.mp4'] });
+  });
+
+  it('fills the name, description and date the sending tool gave', async () => {
+    lists.media = [{ path: 'media/Front, October.png', kind: 'image' }];
+    await mountPost();
+    startPost('plate', ['media/Front, October.png'], {
+      title: 'Front, October', description: 'Shelling along the river', dates: ['2026-10-14', '2026-10-01'],
+    });
+    await settle();
+
+    expect(header().querySelector('.title-input').value).toBe('Front, October');
+    expect(target.querySelector('#pc-desc').value).toBe('Shelling along the river');
+    await saved();
+    const write = draftWrites().at(-1)[1];
+    expect(write.title).toBe('Front, October');
+    expect(write.state).toMatchObject({ kind: 'plate', description: 'Shelling along the river', date: '2026-10-01 to 2026-10-14' });
+  });
+
+  it('keeps a fresh number when another post already holds the name given', async () => {
+    lists.entities = [{ id: 'd1', type: 'post', label: 'Front, October', attrs: { draft: '.drafts/Front, October.json' } }];
+    await mountPost();
+    startPost('plate', [], { title: 'Front, October', description: 'Shelling along the river' });
+    await settle();
+    expect(header().querySelector('.title-input').value).not.toBe('Front, October');
+    expect(target.querySelector('#pc-desc').value).toBe('Shelling along the river');
   });
 
   it('files the post on screen first, as a proof sent over does', async () => {

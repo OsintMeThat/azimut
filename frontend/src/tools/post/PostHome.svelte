@@ -363,7 +363,9 @@
   .ph-card-words { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 9px; min-width: 0; }
   .ph-title { overflow: hidden; color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .ph-said { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-3); font-size: var(--fs-xs); }
-  .ph-line { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* a block, so a long line ends in an ellipsis instead of being cut mid-word */
+  .ph-line { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ph-line :global(svg) { vertical-align: -2px; margin-right: 4px; }
   .ph-when { flex: none; color: var(--text-3); font-size: var(--fs-xs); margin-left: auto; }
   .ghost .ph-pic { background: var(--bg-2); }
   .ph-bar { width: 60%; height: 10px; border-radius: 3px; background: var(--bg-3); }
