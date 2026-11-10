@@ -4349,7 +4349,12 @@ point's coordinates and the imagery's credit with the year of its passes, so the
 file still reads after the run is gone. The same dates reach the case's time. The PNG carries them on its
 Time tab, and a claim at the place, citing the picture, says what the sweep read: a
 change `occurred` between the two passes, a thing on one pass was `observed` on it.
-The place itself carries no date, and the claim no confidence. Undo sends those
+The place itself carries no date, and the claim no confidence. **To Post** beside a
+pin opens Post on a free post carrying its picture, told the pin's name, its
+description and the days of its passes. The run's own **To Post**, once something was
+kept, carries its pins' pictures in the queue's order, four at most as one post holds.
+A candidate only kept here has no picture and none is made for it, so a run of those
+says so on the button and posts nothing. Undo sends those
 copies to Trash, the claim with them unless something was added to it. Evidence is enlarged
 by a whole-number factor with no interpolation, so a candidate a dozen pixels
 across can be read without pretending to detail the sensor never recorded. The
@@ -5269,7 +5274,7 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   came from, its own sentence when it has one, the days they show and the credit line
   on their face (`startFields` gives the post's name, `#description`, `#date` and
   `#credits` from it). Map plate's export starts a Map plate post this way, and
-  Compare's a free post.
+  Compare's export and Detect's pins a free post.
 - **The extension window** says once, on arriving in Post without the capture
   extension, why it is worth having here: it fills the whole thread in X or Bluesky,
   pictures included, and can reply under the source post or capture it into the case.

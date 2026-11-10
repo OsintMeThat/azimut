@@ -2,7 +2,8 @@
   /**
    * What one run found, with individual review and Keep all. Pinning is the only
    * act that creates case evidence; dismissing deletes the candidate. A
-   * run still working shows how far it got and can be stopped from here.
+   * run still working shows how far it got and can be stopped from here. A pin's
+   * picture, or the run's pins, go To Post as a free post (`pinPost.js`).
    */
   import { onDestroy, untrack } from 'svelte';
   import { api } from '../../lib/api.js';
@@ -25,6 +26,8 @@
   import PutInNote from '../../components/PutInNote.svelte';
   import { pinCaption, pinOffer } from './pinNote.js';
   import { keptOffer, keptRows } from './keptTable.js';
+  import { pinPostAbout, pinsPostHint, postablePins } from './pinPost.js';
+  import { startPost } from '../post/start.js';
 
   let {
     caseId,
@@ -246,14 +249,39 @@
   // what the run measured. A candidate still in the queue offers nothing.
   const pinned = $derived(candidate?.review === 'kept' && candidate?.entity_id ? candidate : null);
 
+  /** The picture a pin filed, by the place it pinned: `{ path, label }`. */
+  async function evidenceOf(row) {
+    const chain = await api.get(`/api/cases/${caseId}/entities/${encodeURIComponent(row.entity_id)}/chain`);
+    const place = chain?.entity;
+    return { path: place?.attrs?.evidence ?? '', label: place?.label || row.title || row.phenomenon };
+  }
+
   async function pinEvidence() {
     const row = pinned;
     if (!row) throw new Error('Pin the candidate first');
-    const chain = await api.get(`/api/cases/${caseId}/entities/${encodeURIComponent(row.entity_id)}/chain`);
-    const place = chain?.entity;
-    const path = place?.attrs?.evidence;
+    const { path, label } = await evidenceOf(row);
     const entity = path ? await lookupEntity(caseId, 'path', path) : null;
-    return { entity, label: place?.label || row.title || row.phenomenon };
+    return { entity, label };
+  }
+
+  // -- To Post -----------------------------------------------------------------------
+  // A pin's picture, or the run's pins as many as one post holds, on a free post. A
+  // candidate only kept here has no picture, and none is made for it.
+  const pinnedRows = $derived(ordered.filter((row) => row.review === 'kept' && row.entity_id));
+  const posted = $derived(postablePins(pinnedRows));
+
+  async function toPost(rows, title) {
+    await act(async () => {
+      const pictures = await Promise.all(rows.map(evidenceOf));
+      const media = pictures.map((picture) => picture.path).filter(Boolean);
+      if (!media.length) throw new Error('The pin’s picture is no longer in the case');
+      startPost('free', media, pinPostAbout({
+        title: rows.length === 1 ? pictures[0].label : title,
+        description: rows.length === 1 ? rows[0].description : '',
+        pairs: rows.map((row) => candidatePair(row, run)),
+        single: !!recipeCapability(run.input.recipe, methods).single,
+      }));
+    });
   }
 
   const notePin = pinOffer({
@@ -314,12 +342,16 @@
   {#if sweptNote(run.swept)}<p class="warn">{sweptNote(run.swept)}</p>{/if}
   {#if run.status === 'ready' && !all.length}<p class="hint">Nothing passed these thresholds.</p>{/if}
   {#if run.status === 'ready'}
-    <div class="row"><button class="btn btn-sm" onclick={() => {
+    <div class="row run-acts"><button class="btn btn-sm" onclick={() => {
       adding = !adding;
       manualArea = candidate?.area_id ?? run.area_runs?.find((p) => p.status === 'ready')?.area_id ?? run.input.zones[0]?.id ?? '';
     }}>Add candidate</button>
       <button class="btn btn-sm" onclick={onexport}>Export as layer</button>
-      {#if hasKept}<PutInNote offer={noteKept} class="btn btn-sm" role="button" named />{/if}
+      {#if hasKept}
+        <PutInNote offer={noteKept} class="btn btn-sm" role="button" named />
+        <button class="btn btn-sm" disabled={busy || !posted.length} title={pinsPostHint(posted.length, pinnedRows.length)}
+          onclick={() => toPost(posted, run.title)}><Icon name="post" size={13} /> To Post</button>
+      {/if}
       <span class="map-acts">
         <OverlayDisplay bind:markers bind:outlines bind:hidden={bare}
           what="the candidates and areas" shortcut="H" />
@@ -399,7 +431,11 @@
     <div class="review-status">
       {#if candidate?.review === 'kept'}
         <p class="verdict kept"><Icon name="check" size={13} /> Kept as a pin in this case</p>
-        <PutInNote offer={notePin} class="btn btn-sm" role="button" />
+        <div class="pin-acts">
+          <PutInNote offer={notePin} class="btn btn-sm" role="button" />
+          <button class="btn btn-sm" disabled={busy || !pinned} title="A free post with this pin's picture"
+            onclick={() => toPost([pinned], pinned.title)}><Icon name="post" size={13} /> To Post</button>
+        </div>
         <button class="link" disabled={busy} onclick={() => act(undoKeep)}>Undo and send the pin to Trash</button>
       {:else if candidate?.review === 'noted'}
         <p class="verdict noted"><Icon name="bookmark" size={13} /> Kept in this detection</p>
@@ -480,6 +516,9 @@
   .chip.on .n { color: inherit; }
   .order { margin-left: auto; }
   .map-acts { display: flex; gap: 2px; margin-left: auto; }
+  /* the run's buttons wrap on a narrow dock rather than run past it */
+  .run-acts { flex-wrap: wrap; row-gap: 6px; }
+  .pin-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .compare { justify-self: start; }
   .facts { margin: 0; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.55; }
   .strength { margin: 0; font-size: var(--fs-xs); font-weight: 600; color: var(--text-1); }
