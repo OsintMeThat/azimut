@@ -180,6 +180,49 @@ test.describe('the home in three parts', () => {
   });
 });
 
+test.describe('Open', () => {
+  test('lists every post with its picture, kind, platform and state, filters them, and deletes one with Undo', async ({ page }) => {
+    const ALL = {
+      ...DRAFTS,
+      'Gone out': draft('Gone out', {
+        target: 'x', proofPng: 'proofs/bridge.png',
+        publish: { site: 'x', url: 'https://x.com/desk/status/1850000000000000009', posted_at: '2026-11-10T09:05:00Z', mark: 'm', changed: false },
+      }),
+    };
+    const fixture = await installAppFixture(page, { drafts: ALL, proofList: PROOFS, lookupEntities: lookups });
+    await postRoutes(page);
+    await page.goto('/#post');
+    await page.locator('.tool-header').getByRole('button', { name: 'Open' }).click();
+    const list = page.getByRole('dialog', { name: 'Open a post' });
+    const titles = list.locator('.ol-title');
+    await expect(titles).toHaveText(['Bridge thread', 'Harbour words', 'Gone out']);
+    await expect(list.locator('.ol-sub')).toHaveText([/^Geolocation · Bluesky · /, /^Free post · X · /, /^Geolocation · X · /]);
+    await expect(list.locator('.ol-pill')).toHaveText(['Draft', 'Draft', 'Posted']);
+    await expect(list.locator('.ol-row').first().locator('img')).toHaveAttribute('src', /proofs\/terminal\.png/);
+
+    await list.getByRole('combobox', { name: 'Kind' }).selectOption('geolocation');
+    await expect(titles).toHaveText(['Bridge thread', 'Gone out']);
+    await list.getByRole('combobox', { name: 'State' }).selectOption('posted');
+    await expect(titles).toHaveText(['Gone out']);
+    await list.getByRole('combobox', { name: 'Kind' }).selectOption('');
+    await list.getByRole('combobox', { name: 'State' }).selectOption('');
+    await list.getByPlaceholder('Search posts…').fill('harbour');
+    await expect(titles).toHaveText(['Harbour words']);
+    await list.getByPlaceholder('Search posts…').fill('');
+
+    await list.getByRole('button', { name: 'Delete Bridge thread' }).click();
+    await page.getByRole('alertdialog', { name: 'Delete this post?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(titles).toHaveText(['Harbour words', 'Gone out']);
+    await page.locator('.toast', { hasText: 'Deleted “Bridge thread”' }).getByRole('button', { name: 'Undo' }).click();
+    await expect(list.locator('.ol-row', { hasText: 'Bridge thread' })).toHaveCount(1);
+
+    await list.locator('.ol-open', { hasText: 'Harbour words' }).click();
+    await expect(list).toHaveCount(0);
+    await expect(page.getByRole('textbox', { name: 'Post name' })).toHaveValue('Harbour words');
+    fixture.expectNoUnexpectedRequests();
+  });
+});
+
 test.describe('a post saves itself', () => {
   test('files nothing for a blank post, then saves as it is written, the header saying so', async ({ page }) => {
     const fixture = await installAppFixture(page);

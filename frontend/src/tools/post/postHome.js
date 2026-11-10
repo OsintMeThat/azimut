@@ -13,7 +13,7 @@ import { matchesTerms } from '../../lib/folderBrowse.js';
 import { onVideo } from '../../lib/proofList.js';
 import { videoName } from '../../lib/proofScene.js';
 import {
-  normalizePostKind, postKind, postStateLabel, postTarget, STARTABLE_POST_KINDS,
+  normalizePostKind, POST_KINDS, POST_STATES, postKind, postStateLabel, postTarget, STARTABLE_POST_KINDS,
 } from '../../lib/post.js';
 
 /** How many drafts the home lists before "All N drafts". */
@@ -122,4 +122,30 @@ export function draftPicture(draft, proofs, media = new Map()) {
   const item = media.get(path);
   if (!item) return null;
   return item.thumbnail ?? (item.kind === 'image' ? path : null);
+}
+
+/**
+ * What the Open list can narrow by, from the posts it lists: the kinds and the states
+ * they hold, each with how many, in the order New post and the pills give them.
+ */
+export function postFacets(drafts) {
+  const count = (key) => {
+    const counts = new Map();
+    for (const draft of drafts ?? []) counts.set(key(draft), (counts.get(key(draft)) ?? 0) + 1);
+    return counts;
+  };
+  const kinds = count((draft) => normalizePostKind(draft?.kind));
+  const states = count(draftState);
+  return {
+    kinds: POST_KINDS.filter((kind) => kinds.has(kind.id)).map((kind) => ({ id: kind.id, label: kind.label, count: kinds.get(kind.id) })),
+    states: POST_STATES.filter((state) => states.has(state.id)).map((state) => ({ id: state.id, label: state.label, count: states.get(state.id) })),
+  };
+}
+
+/** The posts the Open list shows: those of the kind and the state picked ('' for every one) a search finds. */
+export function filterPosts(drafts, { query = '', kind = '', state = '' } = {}) {
+  return (drafts ?? []).filter((draft) =>
+    (!kind || normalizePostKind(draft?.kind) === kind)
+    && (!state || draftState(draft) === state)
+    && (!String(query).trim() || matchesTerms([draft.title, draft.name].filter(Boolean).join('\n'), query)));
 }

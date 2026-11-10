@@ -46,6 +46,7 @@
   import NewPostGallery from './post/NewPostGallery.svelte';
   import ExtensionWindow from './post/ExtensionWindow.svelte';
   import ReplyDialog from './post/ReplyDialog.svelte';
+  import PostOpenList from './post/PostOpenList.svelte';
 
   let coordsText = $state('');
   let geo = $state(null); // {lat, lon, dms, plus_code}
@@ -1160,14 +1161,37 @@
     }
   }
 
+  // Open: the dialog stands on the press, its rows following when the case answers. The
+  // proofs are read with them when the home has not, for the pictures of the rows.
+  let openListLoading = $state(false);
   async function openDraftList() {
-    if (!caseState.current) return;
+    const caseId = caseState.current?.id;
+    if (!caseId) return;
+    openList ??= [];
+    openListLoading = true;
     try {
-      openList = await api.get(`/api/cases/${caseState.current.id}/drafts`);
+      const [drafts, proofs] = await Promise.all([
+        api.get(`/api/cases/${caseId}/drafts`),
+        caseProofs ?? api.get(`/api/cases/${caseId}/proofs`).catch(() => null),
+      ]);
+      // closed while it was read: it stays closed
+      if (openList === null || caseState.current?.id !== caseId) return;
+      openList = drafts;
+      if (!caseProofs && Array.isArray(proofs) && listsFor === caseId) caseProofs = proofs;
+      else if (!caseProofs && Array.isArray(proofs)) openProofs = proofs;
     } catch (e) {
-      toast(e.message, 'danger');
+      openList = null;
+      toast(`The posts could not be read: ${e.message}`, 'warn');
+    } finally {
+      openListLoading = false;
     }
   }
+  let openProofs = $state(null); // the proofs, read by Open when the home had not
+  // Read again while it is up when the case moves: a delete, an Undo, a restore elsewhere.
+  $effect(() => {
+    caseState.rev;
+    if (untrack(() => openList) !== null) untrack(() => openDraftList());
+  });
 
   // ---- deleting a post ------------------------------------------------------------
   // From the header's ⋯ for the post open, a card on the home or the Open list: one
@@ -1197,7 +1221,7 @@
         resetDraft();
       }
       deletedToast(caseId, result, entry.title);
-      await Promise.all([openList !== null ? openDraftList() : null, reloadCase()]);
+      await reloadCase(); // the home and an Open list up read the case again
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
@@ -2470,27 +2494,9 @@
 {/if}
 
 {#if openList}
-  <Modal title="Open a saved draft" onclose={() => (openList = null)} width="560px">
-    {#if !openList.length}
-      <div class="empty"><p>No saved drafts in this case yet.</p></div>
-    {:else}
-      <div class="open-list">
-        {#each openList as entry (entry.name)}
-          <div class="open-row-wrap">
-            <button class="open-row" onclick={() => requestLoadDraft(entry.name)}>
-              <div class="open-meta">
-                <span class="open-title">{entry.title}</span>
-                <span class="open-sub">{entry.updated_at?.slice(0, 10)}</span>
-              </div>
-            </button>
-            <button class="btn btn-ghost btn-sm open-del" title="Delete this saved draft" onclick={() => (deleteEntry = entry)}>
-              <Icon name="trash" size={13} />
-            </button>
-          </div>
-        {/each}
-      </div>
-    {/if}
-  </Modal>
+  <PostOpenList caseId={caseState.current?.id ?? ''} drafts={openList} loading={openListLoading}
+    proofs={caseProofs ?? openProofs} media={mediaByPath}
+    onopen={(draft) => requestLoadDraft(draft.name)} ondelete={askDelete} onclose={() => (openList = null)} />
 {/if}
 
 {#if deleteEntry}
@@ -2986,23 +2992,4 @@
     white-space: nowrap;
   }
   .modal-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
-  .open-list { display: flex; flex-direction: column; gap: 8px; }
-  .open-row-wrap { display: flex; align-items: center; gap: 4px; }
-  .open-row-wrap .open-row { flex: 1; min-width: 0; }
-  .open-del { color: var(--danger); flex-shrink: 0; }
-  .open-row {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    padding: 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    background: var(--bg-2);
-    cursor: pointer;
-    text-align: left;
-  }
-  .open-row:hover { border-color: var(--accent); }
-  .open-meta { display: flex; flex-direction: column; gap: 2px; }
-  .open-title { font-weight: 600; font-size: var(--fs-sm); }
-  .open-sub { font-size: var(--fs-xs); color: var(--text-3); }
 </style>

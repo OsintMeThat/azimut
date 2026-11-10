@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  draftLine, draftPicture, draftPill, draftState, findDrafts, homeDrafts, postsWords, readyToPost, recentDrafts, shortLink,
+  draftLine, draftPicture, draftPill, draftState, filterPosts, findDrafts, homeDrafts, postFacets, postsWords, readyToPost,
+  recentDrafts, shortLink,
 } from './postHome.js';
 
 const proof = (name, extra = {}) => ({ name, title: name, png: `proofs/${name}.png`, thumb: null, video: null, ...extra });
@@ -95,5 +96,31 @@ describe('where each post stands', () => {
     expect(progress.map((d) => d.name)).toEqual(['d', 'o', 'c']);
     expect(posted.map((d) => d.name)).toEqual(['p2', 'p1']);
     expect(shortLink('https://x.com/a/status/1')).toBe('x.com/a/status/1');
+  });
+});
+
+describe('the Open list', () => {
+  const drafts = [
+    { name: 'a', title: 'Convoy east', kind: 'geolocation', state: 'posted' },
+    { name: 'b', title: 'Depot fire', kind: 'free', state: 'draft' },
+    { name: 'c', title: 'Convoy west', state: 'opened' },
+    { name: 'd', title: 'Front plate', kind: 'plate', state: 'posted' },
+  ];
+
+  it('offers the kinds and the states its posts hold, counted, in their own order', () => {
+    expect(postFacets(drafts)).toEqual({
+      kinds: [{ id: 'geolocation', label: 'Geolocation', count: 2 }, { id: 'plate', label: 'Map plate', count: 1 }, { id: 'free', label: 'Free post', count: 1 }],
+      states: [{ id: 'draft', label: 'Draft', count: 1 }, { id: 'opened', label: 'Opened', count: 1 }, { id: 'posted', label: 'Posted', count: 2 }],
+    });
+    expect(postFacets([])).toEqual({ kinds: [], states: [] });
+  });
+
+  it('narrows by kind, by state and by words, together', () => {
+    const names = (filter) => filterPosts(drafts, filter).map((d) => d.name);
+    expect(names({})).toEqual(['a', 'b', 'c', 'd']);
+    expect(names({ kind: 'geolocation' })).toEqual(['a', 'c']);
+    expect(names({ state: 'posted' })).toEqual(['a', 'd']);
+    expect(names({ kind: 'geolocation', state: 'posted' })).toEqual(['a']);
+    expect(names({ query: 'convoy', state: 'opened' })).toEqual(['c']);
   });
 });

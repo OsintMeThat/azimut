@@ -824,7 +824,8 @@ export async function installAppFixture(page, options = {}) {
   const savedIndexDelays = options.savedIndexDelays ?? {};
   const caseDelays = options.caseDelays ?? {};
   const graphDelays = options.graphDelays ?? {};
-  const fixtureDrafts = options.drafts ?? {};
+  // its own copy: Post saves itself, and a spec's drafts must not carry one test's saves into the next
+  const fixtureDrafts = structuredClone(options.drafts ?? {});
   // What Post wrote (it saves itself) and what a restore puts back, by trash group.
   const draftWrites = [];
   const restorable = new Map();

@@ -276,6 +276,89 @@ describe('the home in three parts', () => {
   });
 });
 
+describe('Open', () => {
+  const row = (name, extra = {}) => ({
+    name, title: name, updated_at: '2026-11-09T10:00:00Z', target: 'x', kind: 'geolocation', posts: 1, proof: null, video: null,
+    state: 'draft', site: null, posted: null, picture: null, ...extra,
+  });
+  const list = () => dialog('Open a post');
+  const rows = () => [...list().querySelectorAll('.ol-title')].map((t) => t.textContent);
+  const pick = (label, value) => {
+    const select = list().querySelector(`select[aria-label="${label}"]`);
+    select.value = value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+  };
+
+  beforeEach(() => {
+    lists.drafts = [
+      row('Convoy east', { state: 'posted', site: 'x', posted: { url: 'https://x.com/a/status/1', site: 'x', at: '2026-11-10T08:00:00Z' }, picture: 'proofs/east.png' }),
+      row('Depot words', { kind: 'free', target: 'bluesky', picture: 'media/depot.png' }),
+      row('Convoy west', { state: 'opened', site: 'x' }),
+    ];
+    lists.proofs = [{ name: 'east', title: 'east', png: 'proofs/east.png', thumb: 'proofs/.thumbs/east.webp', video: null }];
+    lists.media = [{ path: 'media/depot.png', kind: 'image', thumbnail: 'media/.thumbs/depot.webp' }];
+  });
+
+  it('lists every post with its picture, kind, platform, state and date', async () => {
+    await mountPost();
+    button(header(), 'Open').click();
+    await settle();
+    expect(rows()).toEqual(['Convoy east', 'Depot words', 'Convoy west']);
+    const subs = [...list().querySelectorAll('.ol-sub')].map((t) => t.textContent.trim());
+    expect(subs).toEqual(['Geolocation · X · 2026-11-09', 'Free post · Bluesky · 2026-11-09', 'Geolocation · X · 2026-11-09']);
+    expect([...list().querySelectorAll('.ol-pill')].map((t) => t.textContent)).toEqual(['Posted', 'Draft', 'Opened in X']);
+    const pictures = [...list().querySelectorAll('.ol-pic img')].map((img) => img.getAttribute('src'));
+    expect(pictures[0]).toContain('proofs/.thumbs/east.webp');
+    expect(pictures[1]).toContain('media/.thumbs/depot.webp');
+    expect(list().querySelectorAll('.ol-pic img')).toHaveLength(2);
+  });
+
+  it('narrows by words, by kind and by state', async () => {
+    await mountPost();
+    button(header(), 'Open').click();
+    await settle();
+    expect([...list().querySelectorAll('select[aria-label="Kind"] option')].map((o) => o.textContent))
+      .toEqual(['Every kind', 'Geolocation · 2', 'Free post · 1']);
+    expect([...list().querySelectorAll('select[aria-label="State"] option')].map((o) => o.textContent))
+      .toEqual(['Every state', 'Draft · 1', 'Opened · 1', 'Posted · 1']);
+    pick('Kind', 'geolocation');
+    expect(rows()).toEqual(['Convoy east', 'Convoy west']);
+    pick('State', 'opened');
+    expect(rows()).toEqual(['Convoy west']);
+    pick('Kind', '');
+    pick('State', '');
+    const search = list().querySelector('input');
+    search.value = 'depot';
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(rows()).toEqual(['Depot words']);
+  });
+
+  it('opens the post pressed, and deletes one with the preview and Undo', async () => {
+    lists.saved = { 'Depot words': { title: 'Depot words', state: { kind: 'free', description: 'Depot', tweet1: 'Depot', tweet1Edited: true } } };
+    api.del.mockImplementation(async () => ({ status: 'deleted', deleted: ['d1'], trash: 'trash-1' }));
+    await mountPost();
+    button(header(), 'Open').click();
+    await settle();
+    list().querySelector('button[aria-label="Delete Convoy west"]').click();
+    await settle();
+    const ask = document.querySelector('[role="alertdialog"]');
+    expect(ask.textContent).toContain('“Convoy west” will be removed from the case.');
+    button(ask, 'Delete').click();
+    await settle();
+    expect(api.del).toHaveBeenCalledWith('/api/cases/case-1/drafts/Convoy%20west');
+    expect(uiState.toasts.at(-1)).toMatchObject({ message: 'Deleted “Convoy west”', action: { label: 'Undo' } });
+    // the list stays open, read again
+    expect(list()).not.toBeNull();
+
+    [...list().querySelectorAll('.ol-open')].find((b) => b.textContent.includes('Depot words')).click();
+    await settle();
+    expect(list()).toBeNull();
+    expect(header().querySelector('input[aria-label="Post name"]').value).toBe('Depot words');
+  });
+});
+
 describe('New post', () => {
   beforeEach(() => {
     lists.drafts = [{ name: 'Old', title: 'Old', target: 'x', kind: 'geolocation', posts: 1 }];

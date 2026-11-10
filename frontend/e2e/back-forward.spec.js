@@ -245,7 +245,7 @@ const DRAFTS = {
 
 async function openDraft(page, title) {
   await page.locator('.tool-header').getByRole('button', { name: 'Open' }).click();
-  await page.locator('.open-row', { hasText: title }).click();
+  await page.getByRole('dialog', { name: 'Open a post' }).locator('.ol-open', { hasText: title }).click();
   await expect(page.getByRole('textbox', { name: 'Post name' })).toHaveValue(title);
 }
 

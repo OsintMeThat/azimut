@@ -5253,6 +5253,12 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   shows, all read off the file it opens anyway), so a draft sent to the Trash gives its
   proof back at once. A case with neither keeps the composer it always opened on.
   **‹ Posts**, first in the header, goes back to the home.
+- **Open**, in the header, lists every post of the case as Geo Proof's Open proof does:
+  each row with its picture, name, kind, platform, state pill and the day it was last
+  saved, newest first. A search and a filter by kind and by state (each counted, shown
+  once the posts hold more than one) narrow it, and the bin on a row deletes it with
+  the delete preview and Undo; the list reads the case again after a delete or an Undo.
+  It reads only `GET /drafts`, and `GET /proofs` for the pictures when the home has not.
 - **A post saves itself**, as Inspect's work does: once something is typed, picked or
   attached, it is written when the typing stops, and the header says *Saving…*, then
   *Saved*, or *Not saved* with **Retry**. An untouched blank post files nothing, and
