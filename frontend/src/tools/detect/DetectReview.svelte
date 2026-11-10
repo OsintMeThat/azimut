@@ -430,12 +430,13 @@
   <footer class="cmp-dock-foot review-actions" aria-label="Candidate review">
     <div class="review-status">
       {#if candidate?.review === 'kept'}
-        <p class="verdict kept"><Icon name="check" size={13} /> Kept as a pin in this case</p>
-        <div class="pin-acts">
-          <PutInNote offer={notePin} class="btn btn-sm" role="button" />
+        <!-- To Post rides on the verdict's line, so the status keeps its height -->
+        <div class="pin-line">
+          <p class="verdict kept"><Icon name="check" size={13} /> Kept as a pin in this case</p>
           <button class="btn btn-sm" disabled={busy || !pinned} title="A free post with this pin's picture"
             onclick={() => toPost([pinned], pinned.title)}><Icon name="post" size={13} /> To Post</button>
         </div>
+        <PutInNote offer={notePin} class="btn btn-sm" role="button" />
         <button class="link" disabled={busy} onclick={() => act(undoKeep)}>Undo and send the pin to Trash</button>
       {:else if candidate?.review === 'noted'}
         <p class="verdict noted"><Icon name="bookmark" size={13} /> Kept in this detection</p>
@@ -518,7 +519,8 @@
   .map-acts { display: flex; gap: 2px; margin-left: auto; }
   /* the run's buttons wrap on a narrow dock rather than run past it */
   .run-acts { flex-wrap: wrap; row-gap: 6px; }
-  .pin-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .pin-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+  .pin-line .verdict { min-width: 0; }
   .compare { justify-self: start; }
   .facts { margin: 0; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.55; }
   .strength { margin: 0; font-size: var(--fs-xs); font-weight: 600; color: var(--text-1); }
