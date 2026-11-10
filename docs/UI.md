@@ -5264,14 +5264,17 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   **How to install** opens the guide on the extension's install page; **Not now** puts
   it away in this browser. While the extension is still missing, the header keeps
   *Extension not connected · Install*. Copy and Publish work without it.
-- **Reply under the source** sits beside Publish when a geolocation's source is an X
-  or a Bluesky post. Its first post leaves the Source line out, since it sits under the
-  source, unless the template keeps it. With the extension (as new as the app), the
-  source post's own page opens, its reply is pressed and the reply box filled with the
-  thread and its pictures. Without it, X opens its reply page (`intent/post` with
-  `in_reply_to`) with the first post typed, the proof on the clipboard to paste
-  (*Picture copied: paste it with Ctrl+V.*); Bluesky has no such page, so it says so
-  and copies the post and opens the source to paste it under.
+- **Post as a reply under the source** is a box under the Source field, shown when a
+  geolocation's source is an X or a Bluesky post. Checked, the main action becomes
+  **Reply under the source** and the first post loses its link to the source, shown so
+  in the post, since the reply sits right under it; a link typed back in goes out as
+  typed. Unchecked, Publish works as it always did. The draft keeps the choice
+  (`reply: true`), and a template can start its posts checked. With the extension (as
+  new as the app), the source post's own page opens, its reply is pressed and the reply
+  box filled with the thread and its pictures. Without it, X opens its reply page
+  (`intent/post` with `in_reply_to`) with the first post typed, the proof on the
+  clipboard to paste (*Picture copied: paste it with Ctrl+V.*); Bluesky has no such
+  page, so it says so and copies the post and opens the source to paste it under.
 - **A narrow header** gives way a step at a time, measured rather than guessed: the
   name field narrows and the quiet line and Reply say less, then Open, Discard, Save
   and Save report fold to their icons. Wide enough, it is the header it always was.
@@ -5300,8 +5303,10 @@ stays text.
   Text and source. Video thread's come with the video thread. The editor then offers
   that kind's **Start from**, each replacing the body and nothing else. A copy does not
   offer it, and keeps its kind.
-- **In a reply under the source**, on a geolocation template, keeps the Source line or
-  leaves it out (the default). A template that says nothing leaves it out.
+- **Reply under the source by default**, on a geolocation template, starts its posts
+  with *Post as a reply under the source* checked whenever their source is an X or
+  Bluesky post (`reply: true`, written only when checked). A template from the first
+  0.3.4 builds, which said `keep-source` or `drop-source` there, reads as unchecked.
 - **Duplicate** is on every template, proof or post, and opens an unsaved copy named
   "… copy". Nothing is stored until Save; the 50-per-kind cap answers there.
 - **The preview** fills the layout with a sample of its kind or with **Open post**, the

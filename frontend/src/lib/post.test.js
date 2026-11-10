@@ -11,7 +11,7 @@ import {
   POST_TEMPLATE_STARTERS, bodyTokens, fixMisspelledToken, misspelledTokens,
   POST_KINDS, STARTABLE_POST_KINDS, normalizePostKind, statedPostKind, postKind, tokensForKind,
   videoTitle, postTemplateKind, postStarters, defaultPostTemplate, templatesOfKind,
-  startMediaPlan, replyTarget, replyIntentUrl, replyPostText, replyKeepsSource,
+  startMediaPlan, replyTarget, replyIntentUrl, replyPostText, replyByDefault,
 } from './post.js';
 
 const full = {
@@ -800,11 +800,15 @@ describe('the new tokens', () => {
 });
 
 describe('post templates per kind', () => {
-  it('writes the kind and the reply variant only when they say something', () => {
+  it('writes the kind and the reply default only when they say something', () => {
     expect(templateFromPost({ body: '#place', kind: 'geolocation' })).not.toHaveProperty('kind');
-    expect(templateFromPost({ body: '#place', kind: 'free', reply: 'keep-source' }))
-      .toMatchObject({ kind: 'free', reply: 'keep-source' });
-    expect(templateFromPost({ body: '#place', reply: 'sometimes' })).not.toHaveProperty('reply');
+    expect(templateFromPost({ body: '#place', kind: 'free', reply: true }))
+      .toMatchObject({ kind: 'free', reply: true });
+    for (const none of [false, 'keep-source', 'drop-source', 'sometimes']) {
+      expect(templateFromPost({ body: '#place', reply: none })).not.toHaveProperty('reply');
+      expect(normPostTemplate({ body: '#place', reply: none })).not.toHaveProperty('reply');
+    }
+    expect(normPostTemplate({ body: '#place', reply: true }).reply).toBe(true);
     expect(normPostTemplate({ body: '#place', kind: 'plate' }).kind).toBe('plate');
     expect(postTemplateKind({ body: '#place' })).toBe('geolocation');
   });
@@ -887,13 +891,18 @@ describe('reply under the source', () => {
   const fields = { ...full, source: 'https://x.com/a/status/1' };
   const written = buildTweet1(DEFAULT_TWEET_BODY, fields);
 
-  it('leaves the source line out unless the template keeps it', () => {
+  it('leaves the source line out of a reply', () => {
     const reply = replyPostText({ text: written, body: DEFAULT_TWEET_BODY, fields });
     expect(reply).not.toContain('Source:');
     expect(reply).toBe(buildTweet1(DEFAULT_TWEET_BODY, { ...fields, source: '' }));
-    expect(replyPostText({ text: written, body: DEFAULT_TWEET_BODY, fields, keepSource: true })).toBe(written);
-    expect(replyKeepsSource({ reply: 'keep-source' })).toBe(true);
-    expect(replyKeepsSource({})).toBe(false);
+  });
+
+  it('replies by default only where the template says so', () => {
+    expect(replyByDefault({ reply: true })).toBe(true);
+    // the two words a template of the first 0.3.4 builds said are no default
+    for (const data of [{}, null, { reply: 'keep-source' }, { reply: 'drop-source' }, { reply: false }]) {
+      expect(replyByDefault(data)).toBe(false);
+    }
   });
 
   it('keeps what else a source line said in a post it rebuilds', () => {

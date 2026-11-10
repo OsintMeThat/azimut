@@ -397,54 +397,102 @@ describe('the extension window', () => {
 });
 
 describe('Reply under the source', () => {
-  const sendProof = async () => {
-    uiState.postProof = { ...PROOF };
+  const sendProof = async (extra = {}) => {
+    uiState.postProof = { ...PROOF, ...extra };
     await settle();
   };
   const reply = () => button(header(), 'Reply under the source');
-
-  it('is offered only when the source is an X or Bluesky post', async () => {
-    await mountPost();
-    uiState.postProof = { ...PROOF, source: 'https://instagram.com/p/abc' };
+  const publishButton = () => button(header(), 'Publish on X');
+  const replyBox = () => target.querySelector('.reply-check input[type="checkbox"]');
+  const check = async (on = true) => {
+    if (replyBox().checked !== on) replyBox().click();
     await settle();
-    expect(reply()).toBeUndefined();
+  };
+  const REPLY_POST = CLASSIC_FIRST_POST.replace(`\n\nSource: ${SOURCE_X}`, '');
+
+  it('is a box under the source, offered only when the source is an X or Bluesky post', async () => {
+    await mountPost();
+    await sendProof({ source: 'https://instagram.com/p/abc' });
+    expect(replyBox()).toBeNull();
     const source = target.querySelector('#pc-source');
     source.value = SOURCE_X;
     source.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
-    expect(reply()).toBeTruthy();
+    expect(replyBox().closest('label').textContent.trim()).toBe('Post as a reply under the source');
+    expect(replyBox().checked).toBe(false);
+    // unchecked, Publish is the main action as it always was
+    expect(publishButton()).toBeTruthy();
+    expect(reply()).toBeUndefined();
   });
 
-  it('opens X\'s reply page without the source line, the proof on the clipboard', async () => {
+  it('checked, makes Reply the main action and takes the source line out of the post', async () => {
+    await mountPost();
+    await sendProof();
+    expect(firstPost().value).toBe(CLASSIC_FIRST_POST);
+    await check();
+    expect(reply()).toBeTruthy();
+    expect(publishButton()).toBeUndefined();
+    expect(firstPost().value).toBe(REPLY_POST);
+    // unchecked, the post and Publish come back
+    await check(false);
+    expect(firstPost().value).toBe(CLASSIC_FIRST_POST);
+    expect(publishButton()).toBeTruthy();
+  });
+
+  it('takes the source line out of a rewritten post, and puts it back while untouched', async () => {
+    await mountPost();
+    await sendProof();
+    const rewritten = `My words\n\nSource: ${SOURCE_X}\n\n@GeoConfirmed`;
+    firstPost().value = rewritten;
+    firstPost().dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await check();
+    expect(firstPost().value).toBe('My words\n\n@GeoConfirmed');
+    await check(false);
+    expect(firstPost().value).toBe(rewritten);
+  });
+
+  it('opens X\'s reply page with the post as shown, the proof on the clipboard', async () => {
     const write = vi.fn(async () => {});
     vi.stubGlobal('navigator', { ...navigator, platform: 'Linux x86_64', clipboard: { write, writeText: vi.fn(async () => {}) } });
     vi.stubGlobal('ClipboardItem', class { constructor(items) { this.items = items; } });
     vi.stubGlobal('fetch', vi.fn(async () => ({ blob: async () => new Blob(['png'], { type: 'image/png' }) })));
     await mountPost();
     await sendProof();
+    await check();
     reply().click();
     await settle();
 
-    const text = CLASSIC_FIRST_POST.replace(`\n\nSource: ${SOURCE_X}`, '');
     expect(opened).toHaveBeenCalledWith(
-      `https://x.com/intent/post?in_reply_to=1850000000000000000&text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer',
+      `https://x.com/intent/post?in_reply_to=1850000000000000000&text=${encodeURIComponent(REPLY_POST)}`, '_blank', 'noopener,noreferrer',
     );
     expect(write).toHaveBeenCalledTimes(1);
     expect(write.mock.invocationCallOrder[0]).toBeLessThan(opened.mock.invocationCallOrder[0]);
     expect(toasts()).toContain('Picture copied: paste it with Ctrl+V.');
   });
 
-  it('keeps the source line when the template says so', async () => {
-    templatesState.post = [{ id: 'po_k', name: 'Keep', data: { body: '#place - #pluscode\n\n#description\n\n#coordinates\n\n#mention\n\nSource: #source', reply: 'keep-source' } }];
-    prefs.postTemplate = 'po_k';
-    vi.stubGlobal('navigator', { ...navigator, clipboard: { write: vi.fn(async () => {}), writeText: vi.fn(async () => {}) } });
-    vi.stubGlobal('ClipboardItem', class {});
-    vi.stubGlobal('fetch', vi.fn(async () => ({ blob: async () => new Blob(['png'], { type: 'image/png' }) })));
+  it('starts checked on a template that replies by default, and the draft keeps the choice', async () => {
+    templatesState.post = [{ id: 'po_r', name: 'Replies', data: { body: '#place - #pluscode\n\n#description\n\n#coordinates\n\n#mention\n\nSource: #source', reply: true } }];
+    prefs.postTemplate = 'po_r';
     await mountPost();
     await sendProof();
-    reply().click();
+    expect(replyBox().checked).toBe(true);
+    expect(firstPost().value).toBe(REPLY_POST);
+    button(header(), 'Save as draft').click();
     await settle();
-    expect(decodeURIComponent(opened.mock.calls[0][0])).toContain(`Source: ${SOURCE_X}`);
+    const state = api.post.mock.calls.findLast(([path]) => path.endsWith('/drafts'))[1].state;
+    expect(state.reply).toBe(true);
+    expect(state.tweet1).toBe(REPLY_POST);
+  });
+
+  it('opens a draft that replies with its box checked', async () => {
+    lists.drafts = [{ name: 'Under', title: 'Under', target: 'x', posts: 1 }];
+    lists.saved = { Under: { title: 'Under', state: { source: SOURCE_X, description: 'D', tweet1: 'D', tweet1Edited: true, reply: true } } };
+    await mountPost();
+    home().querySelector('.ph-card').click();
+    await settle();
+    expect(replyBox().checked).toBe(true);
+    expect(reply()).toBeTruthy();
   });
 
   it('hands the reply to the extension, which opens the source post', async () => {
@@ -453,12 +501,13 @@ describe('Reply under the source', () => {
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: vi.fn(async () => {}) } });
     await mountPost();
     await sendProof();
+    await check();
     reply().click();
     await settle();
     const [message] = bridge.handOffPost.mock.calls[0];
     expect(message.reply_to).toBe(SOURCE_X);
     expect(message.url).toBe(SOURCE_X);
-    expect(message.posts[0].text).not.toContain('Source:');
+    expect(message.posts[0].text).toBe(REPLY_POST);
     expect(message.posts[0].files).toEqual([PROOF.png]);
     expect(opened).not.toHaveBeenCalled();
   });
@@ -471,6 +520,7 @@ describe('Reply under the source', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ blob: async () => new Blob(['png'], { type: 'image/png' }) })));
     await mountPost();
     await sendProof();
+    await check();
     reply().click();
     await settle();
     expect(bridge.handOffPost).not.toHaveBeenCalled();
@@ -481,8 +531,8 @@ describe('Reply under the source', () => {
     const writeText = vi.fn(async () => {});
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
     await mountPost();
-    uiState.postProof = { ...PROOF, source: 'https://bsky.app/profile/someone.bsky.social/post/3kabc' };
-    await settle();
+    await sendProof({ source: 'https://bsky.app/profile/someone.bsky.social/post/3kabc' });
+    await check();
     reply().click();
     await settle();
     const ask = dialog('Reply on Bluesky');

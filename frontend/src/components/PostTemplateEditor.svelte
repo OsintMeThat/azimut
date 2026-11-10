@@ -12,10 +12,10 @@
    *
    * A template is for one kind of post (`data.kind`, none for a geolocation), chosen
    * when it is made: its tokens, its starts and its sample follow that kind, and a
-   * geolocation also says whether a reply under the source keeps the source line.
+   * geolocation also says whether its posts reply under their source by default.
    */
   import {
-    TWEET_TOKENS, DEFAULT_TWEET_BODY, POST_TARGETS, REPLY_VARIANTS, buildTweet1,
+    TWEET_TOKENS, DEFAULT_TWEET_BODY, POST_TARGETS, buildTweet1,
     fixMisspelledToken, misspelledTokens, postCharacterCount, postKind, postStarters,
     postTemplateKind, tokensForKind,
   } from '../lib/post.js';
@@ -49,6 +49,12 @@
       el.focus();
       el.setSelectionRange(caret, caret);
     });
+  }
+
+  // Written only when it says yes, so a template that never replies keeps its shape.
+  function setReply(on) {
+    if (on) data.reply = true;
+    else delete data.reply;
   }
 
   function addExtra() {
@@ -159,15 +165,9 @@
       </label>
 
       {#if kind === 'geolocation'}
-        <label class="fld">
-          <span>In a reply under the source</span>
-          <select class="reply" value={data.reply ?? 'drop-source'}
-            onchange={(event) => (data.reply = event.currentTarget.value)}>
-            {#each REPLY_VARIANTS as variant (variant.id)}
-              <option value={variant.id}>{variant.label}</option>
-            {/each}
-          </select>
-          <p class="hint">The post sits right under the source there, so the Source line can go.</p>
+        <label class="chk reply" title="When the source is an X or Bluesky post. The link to it leaves the text, since the reply sits under it.">
+          <input type="checkbox" checked={data.reply === true} onchange={(event) => setReply(event.currentTarget.checked)} />
+          Reply under the source by default
         </label>
       {/if}
 

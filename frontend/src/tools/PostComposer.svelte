@@ -26,7 +26,7 @@
     postTarget, templateUsesPostField, togglePostMedia, pointLines,
     handoffThread, postHandoffUrl, postDate,
     defaultPostTemplate, normalizePostKind, postKind, postStarters, normPostTemplate,
-    replyIntentUrl, replyKeepsSource, replyPostText, replyTarget, startMediaPlan,
+    replyByDefault, replyIntentUrl, replyPostText, replyTarget, startMediaPlan,
     statedPostKind, templatesOfKind, videoTitle,
   } from '../lib/post.js';
   import { extensionOutdated, extensionVersion, handOffPost } from '../lib/extBridge.js';
@@ -439,8 +439,9 @@
     }
   }
 
+  // A reply under the source leaves the line naming it, and the post shows it so.
   function buildTweet1() {
-    return buildTweet1Lines(body, tokenFields());
+    return buildTweet1Lines(body, replying ? { ...tokenFields(), source: '' } : tokenFields());
   }
 
   /** The draft's facts as the tokens read them (lib/post.js `tweetFields`). */
@@ -508,7 +509,7 @@
       mention,
       body,
       mediaEnabled,
-      replyVariant,
+      replyChosen,
       extraTweets: extraTweets.map((e) => ({
         text: e.text,
         mediaPaths: [...e.mediaPaths],
@@ -529,7 +530,7 @@
     mention = norm.mention;
     body = norm.body;
     mediaEnabled = norm.mediaEnabled;
-    replyVariant = replyKeepsSource(t.data) ? 'keep-source' : 'drop-source';
+    replyChosen = replyByDefault(t.data);
     extraTweets = norm.extraTweets.map((e) => ({ id: ++extraSeq, ...e }));
     appliedPostTemplate = { name: t.name, prev };
     if (quiet) return;
@@ -577,7 +578,7 @@
     mention = p.mention;
     body = p.body;
     mediaEnabled = p.mediaEnabled;
-    replyVariant = p.replyVariant ?? 'drop-source';
+    replyChosen = p.replyChosen === true;
     extraTweets = p.extraTweets.map((e) => ({
       id: ++extraSeq,
       text: e.text,
@@ -968,8 +969,8 @@
       ...(statedPostKind(kind)
         ? { kind, firstMedia: [...firstMedia], firstMediaType }
         : {}),
-      // a template that keeps the source in a reply says so on the post it shaped
-      ...(replyVariant === 'keep-source' ? { reply: 'keep-source' } : {}),
+      // written only for a post that goes out as a reply under its source
+      ...(replyChosen ? { reply: true } : {}),
     };
   }
 
@@ -1059,7 +1060,7 @@
         : [];
       firstMediaType = own && ['video', 'images'].includes(s.firstMediaType) ? s.firstMediaType : 'none';
       postOpen = true;
-      replyVariant = s.reply === 'keep-source' ? 'keep-source' : 'drop-source';
+      replyChosen = s.reply === true;
       description = s.description ?? '';
       coordsText = s.coordsText ?? '';
       place = s.place ?? '';
@@ -1127,7 +1128,8 @@
     firstMedia = [];
     firstMediaType = 'none';
     postOpen = false;
-    replyVariant = 'drop-source';
+    replyChosen = false;
+    beforeReply = null;
     description = '';
     coordsText = '';
     geo = null;
@@ -1423,19 +1425,36 @@
 
   // ---- reply under the source --------------------------------------------------
   // A geolocation whose source line is an X or a Bluesky post can go out as a reply
-  // under it. Its first post leaves the line naming the source out, unless the template
-  // says to keep it (`replyVariant`). Nothing is posted: the reply box opens filled.
+  // under it: one box under the source says so, and the main action becomes Reply
+  // under the source. Its first post leaves the line naming the source, shown so in
+  // the post, since it sits right under it; a link typed back in goes out as typed. A
+  // template can start its posts replying (`reply`), and the draft keeps the choice.
+  // Nothing is posted: the reply box opens filled.
   const replyTo = $derived(geolocation ? replyTarget(source) : null);
   const replySite = $derived(replyTo ? postTarget(replyTo.site).label : '');
-  let replyVariant = $state('drop-source');
+  let replyChosen = $state(false);
+  const replying = $derived(!!replyTo && replyChosen);
+  // A rewritten post loses its source lines on the way into a reply, and gets them back
+  // on the way out while it was not touched in between.
+  let beforeReply = null; // { text, reply }
   let replyDialog = $state(false);
   const pasteKeys = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '') ? '⌘V' : 'Ctrl+V';
 
-  function replyText() {
-    return replyPostText({
-      text: tweet1, edited: tweet1Edited, body, fields: tokenFields(),
-      keepSource: replyVariant === 'keep-source',
-    });
+  function setReplying(on) {
+    replyChosen = on;
+    if (!tweet1.trim()) return;
+    if (!tweet1Edited) {
+      regenerate();
+      return;
+    }
+    if (on) {
+      const text = replyPostText({ text: tweet1, edited: true, body, fields: tokenFields() });
+      beforeReply = { text: tweet1, reply: text };
+      tweet1 = text;
+    } else if (beforeReply && beforeReply.reply === tweet1) {
+      tweet1 = beforeReply.text;
+    }
+    if (!on) beforeReply = null;
   }
 
   /**
@@ -1465,8 +1484,8 @@
     if (publishing || !replyTo) return;
     publishing = true;
     try {
-      const text = bidiSafe(replyText());
-      await copyAll(false, text);
+      const text = bidiSafe(tweet1);
+      await copyAll(false);
       if (await tryReplyHandOff(text)) return;
       if (replyTo.site !== 'x') {
         // Bluesky has no page that opens a reply with words in it
@@ -1500,7 +1519,7 @@
   /** Bluesky without the extension: the reply copied, and the source post opened to paste it under. */
   async function copyReplyAndOpen() {
     replyDialog = false;
-    await copyText(bidiSafe(replyText()), { said: 'Post copied' });
+    await copyText(bidiSafe(tweet1), { said: 'Post copied' });
     if (replyTo) window.open(replyTo.url, '_blank', 'noopener,noreferrer');
   }
 
@@ -1550,7 +1569,7 @@
   const compact = $derived(fold >= 2);
   let needs = [0, 0];
   const headerHolds = $derived([
-    homeShown, homeAvailable, hasContent, !!replyTo, windowPutAway && extensionMissing,
+    homeShown, homeAvailable, hasContent, replying, windowPutAway && extensionMissing,
     kind, !!draftName, targetInfo.label, !!caseState.current,
   ].join('|'));
 
@@ -1676,14 +1695,15 @@
         <button class="btn btn-ok btn-sm" data-guide="post.report" onclick={openSaveReport} disabled={!hasContent || reportSaving} title="Write the finding up as a Notebook note">
           <Icon name="file" size={14} /> <span class="words">Save report</span>
         </button>
-        <button class="btn btn-info btn-sm" data-guide="post.publish" onclick={publish} disabled={!tweet1.trim() || publishing} title={`Copy posts and open ${targetInfo.label}`}>
-          <Icon name="post" size={14} /> Publish on {targetInfo.label}
-        </button>
-        {#if replyTo}
-          <button class="btn btn-info btn-sm" data-guide="post.reply" onclick={replyUnderSource} disabled={!tweet1.trim() || publishing}
-            aria-label="Reply under the source"
-            title={`Open the reply box under the source post on ${replySite}${replyVariant === 'keep-source' ? '' : ', without the Source line'}`}>
+        {#if replying}
+          <!-- the main action, while the post goes out under its source -->
+          <button class="btn btn-info btn-sm" data-guide="post.publish" onclick={replyUnderSource} disabled={!tweet1.trim() || publishing}
+            aria-label="Reply under the source" title={`Open the reply box under the source post on ${replySite}`}>
             <Icon name="undo" size={14} /> {narrow ? 'Reply' : 'Reply under the source'}
+          </button>
+        {:else}
+          <button class="btn btn-info btn-sm" data-guide="post.publish" onclick={publish} disabled={!tweet1.trim() || publishing} title={`Copy posts and open ${targetInfo.label}`}>
+            <Icon name="post" size={14} /> Publish on {targetInfo.label}
           </button>
         {/if}
       {/if}
@@ -1891,6 +1911,16 @@
             disabled={fieldDisabledByTemplate('source')}
           ></textarea>
         </div>
+        {/if}
+
+        {#if replyTo}
+          <!-- Beside the source rather than inside its field, so a layout leaving the
+               source out never greys it. -->
+          <label class="reply-check" data-guide="post.reply"
+            title={`The post goes out under the source post on ${replySite}, without the link to it`}>
+            <input type="checkbox" checked={replyChosen} onchange={(event) => setReplying(event.currentTarget.checked)} />
+            Post as a reply under the source
+          </label>
         {/if}
 
       </div>
@@ -2577,6 +2607,16 @@
     line-height: 1.4;
   }
   .field-note { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--text-3); }
+  .reply-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: -6px;
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+  }
+  .reply-check input { margin: 0; accent-color: var(--accent); }
   .field.template-disabled {
     opacity: 0.48;
     cursor: not-allowed;

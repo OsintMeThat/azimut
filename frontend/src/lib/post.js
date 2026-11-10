@@ -182,14 +182,13 @@ export function replyIntentUrl(id, text) {
 }
 
 /**
- * The first post as it goes out under the source. Kept whole when the template says
- * so; otherwise the line naming the source is left out, since the post sits right under
- * it. An untouched post is rebuilt without its source, so a line holding the source and
- * something else keeps the rest; one the analyst rewrote loses only the lines that hold
- * one of the source's addresses.
+ * The first post as it goes out under the source: the line naming the source leaves,
+ * since the post sits right under it. An untouched post is rebuilt without its source,
+ * so a line holding the source and something else keeps the rest; one the analyst
+ * rewrote loses only the lines that hold one of the source's addresses. The composer
+ * shows what this gives, so a link typed back in afterwards goes out as typed.
  */
-export function replyPostText({ text, edited = false, body, fields = {}, keepSource = false } = {}) {
-  if (keepSource) return String(text ?? '');
+export function replyPostText({ text, edited = false, body, fields = {} } = {}) {
   if (!edited) return buildTweet1(body, { ...fields, source: '' });
   const urls = sourceUrls(fields.source);
   if (!urls.length) return String(text ?? '');
@@ -621,16 +620,11 @@ export function postStarters(kind) {
 }
 
 /**
- * Whether a reply under the source keeps the line that names the source. The post sits
- * right under it there, so a template that says nothing leaves it out.
+ * Whether a post of this template goes out as a reply under its source by default,
+ * when that source is an X or a Bluesky post. A template that says nothing does not.
  */
-export const REPLY_VARIANTS = Object.freeze([
-  { id: 'drop-source', label: 'Leave the source out' },
-  { id: 'keep-source', label: 'Keep the source' },
-]);
-
-export function replyKeepsSource(templateData) {
-  return templateData?.reply === 'keep-source';
+export function replyByDefault(templateData) {
+  return templateData?.reply === true;
 }
 
 /** What separates a point's name from its coordinates, on the one line it gets. */
@@ -941,12 +935,12 @@ export function templateFromPost({
   };
 }
 
-/** The kind and the reply variant, each only when it says something (`api/templates.py`). */
+/** The kind and the reply default, each only when it says something (`api/templates.py`). */
 function stated(kind, reply) {
   const known = statedPostKind(kind);
   return {
     ...(known ? { kind: known } : {}),
-    ...(REPLY_VARIANTS.some((one) => one.id === reply) ? { reply } : {}),
+    ...(reply === true ? { reply: true } : {}),
   };
 }
 

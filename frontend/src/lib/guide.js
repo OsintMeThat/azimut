@@ -726,7 +726,7 @@ export const PAGES = {
       { title: 'Drafts', text: 'Save as draft keeps the thread to reopen and edit here.' },
       { title: 'The home', text: 'With no post open, Post lists its drafts and the proofs with no post yet. One press on a proof writes its geolocation.' },
       { title: 'New post', text: 'Geolocation is the composer it always was. Map plate and Free post carry their own pictures on the first post.' },
-      { title: 'Reply under the source', text: 'When the source is an X or Bluesky post, the post can go out as a reply under it, without the Source line unless the template keeps it.' },
+      { title: 'Reply under the source', text: 'When the source is an X or Bluesky post, a box under it sends the post as a reply there, without the link to the source.' },
       { title: 'Thread styles', text: 'Settings, Templates holds the structures a post can follow, for each kind of post.' },
       { title: 'Counted for the site', text: 'Each post counts its characters against the limit of the site picked.' },
       { title: 'The point, every way', text: 'The geolocation post gives the point in decimal, DMS and plus code, with links to the maps.' },

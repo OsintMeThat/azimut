@@ -228,25 +228,34 @@ test.describe('the extension window', () => {
 });
 
 test.describe('Reply under the source', () => {
-  test('opens X\'s reply page without the source line, the proof on the clipboard', async ({ page }) => {
+  test('one box under the source makes Reply the main action, the source line out of the post', async ({ page }) => {
     await catchWhatLeaves(page);
     const fixture = await installAppFixture(page, { proofList: [PROOFS[0]], lookupEntities: lookups });
     await postRoutes(page);
     await page.goto('/#post');
     await page.getByTestId('post-home').locator('.ph-card').first().click();
-    await expect(page.locator('.tweet-block textarea').first()).toHaveValue(FIRST_POST);
+    const first = page.locator('.tweet-block textarea').first();
+    await expect(first).toHaveValue(FIRST_POST);
 
+    const box = page.getByRole('checkbox', { name: 'Post as a reply under the source' });
+    await expect(box).not.toBeChecked();
+    await expect(page.getByRole('button', { name: 'Reply under the source' })).toHaveCount(0);
+    await box.check();
+    const text = FIRST_POST.replace(`\n\nSource: ${SOURCE_X}`, '');
+    await expect(first).toHaveValue(text);
+    await expect(page.getByRole('button', { name: 'Publish on X' })).toHaveCount(0);
     const reply = page.getByRole('button', { name: 'Reply under the source' });
-    await expect(reply).toHaveAttribute('title', /on X, without the Source line/);
+    await expect(reply).toHaveAttribute('title', 'Open the reply box under the source post on X');
     await reply.click();
     await expect(page.locator('.toast', { hasText: 'Picture copied: paste it with Ctrl+V.' })).toBeVisible();
 
     const opened = await page.evaluate(() => window.__opened);
-    const text = FIRST_POST.replace(`\n\nSource: ${SOURCE_X}`, '');
     expect(opened).toEqual([`https://x.com/intent/post?in_reply_to=1850000000000000000&text=${encodeURIComponent(text)}`]);
     const clipboard = await page.evaluate(() => window.__clipboard);
     expect(clipboard.at(-1)).toEqual({ types: ['image/png'] });
-    // and Publish opens the composer it always opened, with the source in it
+    // unchecked, Publish opens the composer it always opened, with the source in it
+    await box.uncheck();
+    await expect(first).toHaveValue(FIRST_POST);
     await page.getByRole('button', { name: 'Publish on X' }).click();
     await expect.poll(() => page.evaluate(() => window.__opened.at(-1)))
       .toBe(`https://x.com/intent/post?text=${encodeURIComponent(FIRST_POST)}`);
@@ -256,10 +265,11 @@ test.describe('Reply under the source', () => {
   test('is not offered for a source that is not an X or Bluesky post', async ({ page }) => {
     const fixture = await installAppFixture(page);
     await page.goto('/#post');
+    const box = page.getByRole('checkbox', { name: 'Post as a reply under the source' });
     await page.locator('#pc-source').fill('https://instagram.com/p/abc');
-    await expect(page.getByRole('button', { name: 'Reply under the source' })).toHaveCount(0);
+    await expect(box).toHaveCount(0);
     await page.locator('#pc-source').fill('https://bsky.app/profile/someone.bsky.social/post/3kabc');
-    await expect(page.getByRole('button', { name: 'Reply under the source' })).toBeVisible();
+    await expect(box).toBeVisible();
     fixture.expectNoUnexpectedRequests();
   });
 });
@@ -308,7 +318,7 @@ test.describe('post templates per kind', () => {
     const editor = page.locator('.tpl-modal');
     await expect(editor.locator('.pe-kind')).toHaveText('Map plate');
     await expect(editor.locator('textarea.body')).toHaveValue('#description\n\n#credits\n\n#mention');
-    await expect(editor.locator('select.reply')).toHaveCount(0);
+    await expect(editor.locator('label.reply')).toHaveCount(0);
     await editor.locator('.tpl-title').fill('Plate post');
     await editor.getByRole('button', { name: 'Save template' }).click();
     await expect(editor).toHaveCount(0);
