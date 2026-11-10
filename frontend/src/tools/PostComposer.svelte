@@ -552,19 +552,17 @@
   const kindTemplates = $derived(templatesOfKind(templatesState.post, kind));
 
   function startFromDefaultTemplate() {
-    const t = defaultTemplate();
-    if (t) {
-      applyPostTemplate(t, { quiet: true });
-      return;
-    }
-    // Another kind with no template of its own starts on its first layout, unnamed,
-    // so a free post is not written as a geolocation.
+    // Another kind stands on its first layout, unnamed, so a free post is not written
+    // as a geolocation, and its default's Remove comes back to that rather than to the
+    // classic geolocation.
     const [starter] = kind === 'geolocation' ? [] : postStarters(kind);
     if (starter) {
       const norm = normPostTemplate({ body: starter.body, mediaEnabled: starter.mediaEnabled, mention });
       body = norm.body;
       mediaEnabled = norm.mediaEnabled;
     }
+    const t = defaultTemplate();
+    if (t) applyPostTemplate(t, { quiet: true });
   }
 
   function applyPostFromSelect(e) {
@@ -1540,13 +1538,17 @@
 
   // ---- a header that fits ---------------------------------------------------------
   // What the header holds changes its width: the way back, the quiet line, a reply.
-  // Each time, it is laid out whole first and measured; only when that overflows do
-  // the secondary buttons fold to their icons, and they open again once the header is
-  // as wide as it needed. All of it before the frame is drawn.
+  // Each time, it is laid out whole first and measured, and only what overflows gives
+  // way, a step at a time: first the name field narrows and the quiet line and Reply
+  // say less (`narrow`), then the secondary buttons fold to their icons (`compact`),
+  // as Geo Proof's do. Each opens again once the header is as wide as it needed, all
+  // of it before the frame is drawn.
   let headerEl = $state(null);
   let headerW = $state(0);
-  let compact = $state(false);
-  let wideNeed = 0;
+  let fold = $state(0); // 0 whole, 1 narrow, 2 compact
+  const narrow = $derived(fold >= 1);
+  const compact = $derived(fold >= 2);
+  let needs = [0, 0];
   const headerHolds = $derived([
     homeShown, homeAvailable, hasContent, !!replyTo, windowPutAway && extensionMissing,
     kind, !!draftName, targetInfo.label, !!caseState.current,
@@ -1554,20 +1556,20 @@
 
   function fitHeader() {
     if (!headerEl) return;
-    if (!compact) {
-      if (headerEl.scrollWidth > headerEl.clientWidth + 1) {
-        wideNeed = headerEl.scrollWidth;
-        compact = true;
-      }
-    } else if (headerEl.clientWidth >= wideNeed) {
-      compact = false;
+    if (fold < 2 && headerEl.scrollWidth > headerEl.clientWidth + 1) {
+      needs[fold] = headerEl.scrollWidth;
+      fold += 1;
+      tick().then(fitHeader);
+    } else if (fold > 0 && headerEl.clientWidth >= needs[fold - 1]) {
+      fold -= 1;
       tick().then(fitHeader);
     }
   }
   $effect(() => {
     void headerHolds;
     untrack(() => {
-      compact = false;
+      fold = 0;
+      needs = [0, 0];
       tick().then(fitHeader);
     });
   });
@@ -1634,7 +1636,7 @@
   <!-- Narrower than what it holds (the case panel open on a laptop, a reply beside
        Publish), the header shows its secondary buttons as icons rather than cut off
        Publish, as Geo Proof's does. Wide enough, it is the header it always was. -->
-  <div class="tool-header" class:compact bind:this={headerEl} bind:clientWidth={headerW}>
+  <div class="tool-header" class:narrow class:compact bind:this={headerEl} bind:clientWidth={headerW}>
     {#if !homeShown}
       <!-- the way back to the posts of the case, once it has some to list -->
       {#if homeAvailable}
@@ -1650,7 +1652,7 @@
     <div class="head-actions">
       {#if windowPutAway && extensionMissing}
         <span class="ext-quiet" title="The capture extension fills the thread in the site's composer">
-          {compact ? 'No extension' : 'Extension not connected'} · <button type="button" class="ext-install" onclick={howToInstall}>Install</button>
+          {narrow ? 'No extension' : 'Extension not connected'} · <button type="button" class="ext-install" onclick={howToInstall}>Install</button>
         </span>
       {/if}
       {#if caseState.current}
@@ -1681,7 +1683,7 @@
           <button class="btn btn-info btn-sm" data-guide="post.reply" onclick={replyUnderSource} disabled={!tweet1.trim() || publishing}
             aria-label="Reply under the source"
             title={`Open the reply box under the source post on ${replySite}${replyVariant === 'keep-source' ? '' : ', without the Source line'}`}>
-            <Icon name="undo" size={14} /> {compact ? 'Reply' : 'Reply under the source'}
+            <Icon name="undo" size={14} /> {narrow ? 'Reply' : 'Reply under the source'}
           </button>
         {/if}
       {/if}
@@ -2138,12 +2140,14 @@
         {/each}
 
         <div class="thread-actions" data-guide="post.more">
-          {#if !mediaEnabled}
+          <!-- a post of another kind starts with no media post under it, so its first
+               one is post 2 itself rather than a post 2 "restored" -->
+          {#if !mediaEnabled && geolocation}
             <button class="btn btn-ghost btn-sm" onclick={() => (mediaEnabled = true)}>
               <Icon name="plus" size={13} /> Restore post 2
             </button>
           {/if}
-          <button class="btn btn-ghost btn-sm" onclick={addMediaTweet}>
+          <button class="btn btn-ghost btn-sm" onclick={() => (!mediaEnabled && !geolocation ? (mediaEnabled = true) : addMediaTweet())}>
             <Icon name="plus" size={13} /> Add media post
           </button>
           <button class="btn btn-ghost btn-sm" onclick={addExtraTweet}>
@@ -2478,7 +2482,7 @@
     white-space: nowrap;
   }
   .tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }
-  .tool-header.compact .title-input { width: min(200px, 18vw); }
+  .tool-header.narrow .title-input { width: min(200px, 18vw); }
   .ext-install {
     color: var(--text-2);
     font: inherit;

@@ -494,3 +494,29 @@ describe('Reply under the source', () => {
     expect(opened).toHaveBeenCalledWith('https://bsky.app/profile/someone.bsky.social/post/3kabc', '_blank', 'noopener,noreferrer');
   });
 });
+
+describe('a kind\'s default template', () => {
+  it('starts that kind, and its Remove goes back to the kind\'s own layout', async () => {
+    templatesState.post = [
+      { id: 'po_geo', name: 'Geo house', data: { body: '#coordinates' } },
+      { id: 'po_free', name: 'Free house', data: { body: '#description\n\nBy the desk', kind: 'free', mediaEnabled: false } },
+    ];
+    prefs.postTemplate = 'po_geo';
+    prefs.postKindTemplates = { free: 'po_free' };
+    await mountPost();
+    expect(target.querySelector('.tpl-loaded-name').textContent.trim()).toBe('Geo house');
+
+    startPost('free');
+    await settle();
+    expect(target.querySelector('.tpl-loaded-name').textContent.trim()).toBe('Free house');
+    // a free post lists only the templates of its kind
+    target.querySelector('.tpl-remove').click();
+    await settle();
+    expect([...target.querySelectorAll('#pc-tpl option')].map((o) => o.textContent)).toEqual(['Apply a template…', 'Free house']);
+    target.querySelector('#pc-desc').value = 'Smoke';
+    target.querySelector('#pc-desc').dispatchEvent(new Event('input', { bubbles: true }));
+    target.querySelector('#pc-desc').dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(firstPost().value).toBe('Smoke\n\n@GeoConfirmed');
+  });
+});

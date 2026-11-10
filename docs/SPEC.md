@@ -121,7 +121,7 @@ proof for publication.
 | ✅ **Media Library & Inspect** | Imports or downloads case media with metadata, provenance and hashes, then reviews images and video closely. |
 | ✅ **Satellite** | Saves places and attributed map captures from free or optional keyed imagery, including dated Sentinel-2 passes and usage controls. |
 | ✅ **Geo Proof** | Composes annotated panels, files their coordinates as places and exports an editable PNG proof. |
-| ✅ **Geo Report** | Prepares sourced proof threads and saved drafts without posting automatically. |
+| ✅ **Post** (formerly Geo Report) | Prepares sourced proof threads and saved drafts without posting automatically. |
 | ✅ **Case navigation** | Searches, groups and files case work through the sidebar, Saved views, folders, notes and synchronized deletion. |
 | ✅ **Capture extension** | Files user-requested screenshots with their source details, saves map points and bookmarks pages. |
 | ✅ **Distribution** | Ships the browser UI, hardened local launcher, locked cross-platform builds, ffmpeg and browser interaction tests. |
@@ -205,6 +205,7 @@ proof for publication.
 | ✅ **Report editions** | Marks passages internal, prints a report as an internal or a public edition that never carries one, and keeps every PDF it wrote with its fingerprint, listed and checked from the note. |
 | ✅ **From the case** | Writes a note of a period's geolocations from the Notebook home, a figure each or a table, dated by what they show or when they were geolocated. |
 | ✅ **Report covers and signature** | Writes a first page of one's own above a cover line, fills the title, day, name, role and organisation when the PDF is made, prints the Azimut logo, the analyst's logo (rounded, framed or set on a disc in Settings) and a handwritten signature, and starts a template from anything. |
+| ✅ **Post** | Geo Report renamed: a home of drafts and proofs with no post yet, New post (Geolocation, Map plate, Free post), templates and defaults per kind, a window saying once why the extension helps, and a reply under the source post on X or Bluesky. |
 
 ---
 
@@ -219,7 +220,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | Tool | What it does |
 |------|--------------|
 | **One-click update** (urgent, 0.3.4) | The binary installs the next release in one press: it downloads beside itself, checks an Ed25519 signature made outside GitHub, starts the new binary once, swaps by renaming, restarts and keeps the old one to fall back on. Any failure leaves the installed version untouched and links to the release page; a pip install is told its command. Rehearsed on a pre-release before 0.3.5 relies on it. |
-| **Long videos, several geolocations** (0.3.4) | One clip holds several scenes, each one a proof: Inspect keeps the scenes still to geolocate, an instant, a passage or several where one place shows again, and lists the proofs resting on the clip, Geo Proof states a scene's period and walks a clip's scenes as slides, and Geo Report threads them in one of four orders with the whole video or the cut. Nothing about a proof without a period changes. |
+| **Long videos, several geolocations** (0.3.4) | One clip holds several scenes, each one a proof: Inspect keeps the scenes still to geolocate, an instant, a passage or several where one place shows again, and lists the proofs resting on the clip, Geo Proof states a scene's period and walks a clip's scenes as slides, and Post threads them in one of four orders with the whole video or the cut. Nothing about a proof without a period changes. |
 | **Vehicle models on map layers** (after 0.3.4) | The small vehicle models Geo Proof and Compare stamp, offered in My layers' Style palette: seen from above and turned to the marker's bearing on every map, the globe and plates, exported to KMZ with their heading. Today's pictograms keep their pixels. |
 | **Fires on the globe** | Draws active fires on the globe within their allowance. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
@@ -324,8 +325,8 @@ stops making sense.
 - No rebuilding specialized OSINT services; Azimut orchestrates them.
 - No block-evasion scraping. User session cookies are in scope; third-party
   downloader proxies are not because they re-encode media and expose targets.
-- No auto-posting by default. An optional, opt-in X/Twitter API key (Settings,
-  with quota shown) may enable Geo Report publishing. Core features never
+- No auto-posting. Every post ends on the site's own Post button, pressed by the
+  analyst, and no API key posts for them (owner, 2026-11-10). Core features never
   require a paid API.
 
 ## 9. Architecture
@@ -401,7 +402,10 @@ stops making sense.
   risk rather than an oversight: Lens redirects `lens.google.com` to the search
   home page and draws its uploader there, so the grant has to cover wherever that
   redirect lands. It buys nothing beyond that — the extension injects only into a
-  tab it opened itself, at a URL the app handed it, and reads nothing back.
+  tab it opened itself, at a URL the app handed it, and reads nothing back. A reply
+  under the source is the one hand-off that opens a page it did not prepare: the source
+  post's own address, taken only when it is an X status or a Bluesky post, where it
+  finds that post's reply button, presses it and fills the box it opens.
   Accepted risk (owner's choice, 2026-11-06): the notes panel's Add may ask for
   every site (`optional_host_permissions: <all_urls>`), since a press in a side
   panel opens no tab to an extension. It is optional, asked the first time Add

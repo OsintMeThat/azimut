@@ -24,7 +24,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect, Collage | Edit Provenance, OCR, Image Compare, Hints, Sky Clock, audio |
 | **Map** | Satellite, Compare, Detect, Coords & Sky | Event layers, Ground Imagery, OSM Query, Map Board |
-| **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
+| **Compose** | Geo Proof, Post, Map plate, Notebook | Report Builder, GIF maker |
 
 **Support sits at the foot of the rail, above the theme switch, and is not a workspace.**
 It opens one small dialog: a tip on Ko-fi, a form to vote or suggest an idea, and a
@@ -4744,7 +4744,7 @@ caption or on the footer's credit line opens the editor over the words, one line
 each; a footer emptied goes back to *Composed with Azimut*, and a long line wraps.
 The imagery credits of the panels it shows (each panel's capture already carries its
 own on its face) are kept with the proof rather than printed under it: in its Details,
-in the exported PNG's metadata, in what it hands Geo Report, and under it in a note.
+in the exported PNG's metadata, in what it hands Post, and under it in a note.
 **Imagery credits**, off by default, adds them after the footer's line, for a crop
 that cut a capture's own credit band. A press on a caption
 picks its panel, and a press on the footer picks it, framed with nothing to pull:
@@ -5216,12 +5216,62 @@ The export draws it with the canvas's own code, so the saved picture, and the PD
 prints it in, carry it as the page shows it.
 The footer's *Composed with Azimut* line is separate and stays as it is.
 
-## Geo Report templates
+## Post
 
-Settings → Templates lists the thread layouts, made there and nowhere else: the
-composer offers no "save as template". A layout is a body of tokens (`#place`,
-`#pluscode`, `#coordinates`, `#description`, `#mention`, `#source`, `#date`) and
-plain text. A token with no value drops its line. `#date` is the date the proof
+Geo Report until 0.3.4, and the same tool: its tab says *Formerly Geo Report* on hover
+for that release. It writes a post or a thread and opens the site to publish it; it
+never posts, and pressing Post on X or Bluesky stays the analyst's.
+
+- **The home** stands where an empty composer would, once the case holds a draft or a
+  proof: **New post** and a search that finds a draft by name (Enter opens the first);
+  **Drafts**, the last six saved, each with its platform, its kind when it is not a
+  geolocation, and how many posts it holds; and **Ready to post**, the proofs no draft
+  names yet, a proof of a video listed under its video with the slides that wait. One
+  press on a proof writes its geolocation, as Attach a proof does. A proof *has a post*
+  when a draft names its picture, read off the drafts list (`GET /drafts` carries each
+  draft's `kind`, `posts`, `proof` and `video`), so a draft sent to the Trash gives its
+  proof back at once. A case with neither keeps the composer it always opened on.
+  **‹ Posts**, first in the header, goes back to the home and asks first when the post
+  is not saved.
+- **New post** offers four starts. **Geolocation** is the composer as it always was:
+  the same fields, the same first post, the same Publish. **Map plate** and **Free post**
+  carry their own pictures, or a video, on the first post (`firstMedia`) and show only
+  the fields their layout uses. **Video thread** says *Coming next* until it is built.
+  A draft or a template says its `kind` only when it is not a geolocation, so every
+  draft and template from before reads as one. Another tool starts a post through
+  `tools/post/start.js` (`startPost(kind, media)`): what Post holds is saved first, as
+  for a proof sent with **To Post**, and the media land on the first post, or after a
+  geolocation's proof.
+- **The extension window** says once, on arriving in Post without the capture
+  extension, why it is worth having here: it fills the whole thread in X or Bluesky,
+  pictures included, and can reply under the source post or capture it into the case.
+  **How to install** opens the guide on the extension's install page; **Not now** puts
+  it away in this browser. While the extension is still missing, the header keeps
+  *Extension not connected · Install*. Copy and Publish work without it.
+- **Reply under the source** sits beside Publish when a geolocation's source is an X
+  or a Bluesky post. Its first post leaves the Source line out, since it sits under the
+  source, unless the template keeps it. With the extension (as new as the app), the
+  source post's own page opens, its reply is pressed and the reply box filled with the
+  thread and its pictures. Without it, X opens its reply page (`intent/post` with
+  `in_reply_to`) with the first post typed, the proof on the clipboard to paste
+  (*Picture copied: paste it with Ctrl+V.*); Bluesky has no such page, so it says so
+  and copies the post and opens the source to paste it under.
+- **A narrow header** gives way a step at a time, measured rather than guessed: the
+  name field narrows and the quiet line and Reply say less, then Open, Discard, Save
+  and Save report fold to their icons. Wide enough, it is the header it always was.
+
+## Post templates
+
+Settings → Templates lists the post layouts, made there and nowhere else: the
+composer offers no "save as template". Each is for one kind of post, listed under it:
+Geolocation (every template from before kinds), Video thread, Map plate or Free post. A
+layout is a body of tokens (`#place`, `#pluscode`, `#coordinates`, `#description`,
+`#mention`, `#source`, `#date`, `#video`, `#timecode`, `#scenes`, `#credits`) and
+plain text, the editor offering the tokens of its kind. A token with no value drops
+its line. `#video` is the title Media gives the video the post is about, never its file
+name. `#timecode`, `#scenes` and `#credits` are known to the layout and its typo check
+and stay empty, their line dropped, until the video thread and the credits fill them.
+`#date` is the date the proof
 states, and the composer shows its Date field only when the layout uses it. It is
 filled from the proof as the case stores it (`2024-03-12`, `2024-03~`), the same in
 any language; a time says its clock as an offset on that day
@@ -5229,20 +5279,26 @@ any language; a time says its clock as an offset on that day
 line drops. A token ends where its word does, so a `#dates` or `#placement` hashtag
 stays text.
 
-- **New** offers **Start from**: Classic, Coordinates only, Short, With date. Each
-  replaces the body and nothing else. A copy does not offer it.
+- **New post template** is a menu of kinds, each with its starts: Geolocation's
+  Classic, Coordinates only, Short and With date, a Map plate's Plate, a Free post's
+  Text and source. Video thread's come with the video thread. The editor then offers
+  that kind's **Start from**, each replacing the body and nothing else. A copy does not
+  offer it, and keeps its kind.
+- **In a reply under the source**, on a geolocation template, keeps the Source line or
+  leaves it out (the default). A template that says nothing leaves it out.
 - **Duplicate** is on every template, proof or post, and opens an unsaved copy named
   "… copy". Nothing is stored until Save; the 50-per-kind cap answers there.
-- **The preview** fills the layout with a sample or with **Open post**, the post in
-  the composer (off while it is empty). The template's own mention wins in both, and
-  no mention drops the line. Under it, one count per platform, X and Bluesky, red
-  past the limit.
+- **The preview** fills the layout with a sample of its kind or with **Open post**, the
+  post in the composer when it is of that kind (off otherwise). The template's own
+  mention wins in both, and no mention drops the line. Under it, one count per
+  platform, X and Bluesky, red past the limit.
 - **A word one edit from a token** (`#coordinate`) would go out as text, so it is
   named under the layout with **Fix**, which mends every copy of it.
-- **Default** is the bookmark button on a post row. A blank composer opens on that
-  template without a toast, and its **Remove** goes back to the classic layout for
-  that draft only. Pressing the bookmark again clears it; deleting the template does
-  too. It is a setting, so the Settings backup carries it.
+- **Default** is the bookmark button on a post row, one for each kind: Geolocation's is
+  `post_template`, the others' `post_kind_templates`. A blank post of that kind opens on
+  it without a toast, and its **Remove** goes back to the kind's own layout for that
+  draft only. Pressing the bookmark again clears it; deleting the template does too.
+  They are settings, so the Settings backup carries every one.
 
 ## Sheet
 
@@ -6830,7 +6886,7 @@ words are filled when it prints. The ready Geolocation report opens on its own c
 page with the Azimut logo on a line of its own and ends with a signature block, both
 removable.
 
-**A report's author.** Settings › Publishing groups *Geo Report*, **In reports** and
+**A report's author.** Settings › Publishing groups *Post*, **In reports** and
 *On proofs* (the account handle). *In reports* holds the **Logo** (the picture the proof
 composer and the Map plate already use), **Name**, **Role** and **Organisation** (one
 line each, 80 characters at most) and the **Signature**, a PNG of a handwritten

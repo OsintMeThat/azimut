@@ -83,7 +83,7 @@ to fix a point on the map.*
 | **Detect** | Sweeps drawn areas of Sentinel-2 and Sentinel-1 radar for vessels, fires, construction, burn scars, floods and other changes, and only a candidate you keep becomes a case pin. |
 | **Coords & Sky** | Converts coordinate formats, opens map links, and reads the sun and moon at that point on a date, computed offline. |
 | **Geo Proof** | Composes annotated case panels into a proof, from a house style or a published post, and exports `proof.png` plus a re-editable spec. |
-| **Geo Report** | Turns a proof into a prepared thread for X or Bluesky, with coordinates, attribution, character counts, media and a Markdown case note. |
+| **Post** (formerly Geo Report) | Turns a proof into a prepared thread for X or Bluesky, with coordinates, attribution, character counts, media and a Markdown case note, or a reply under the source post; also a map plate or a free post with its own pictures. |
 | **Map plate** | Lays a page out round the case's maps, with a legend, scale, north, inset, labels and credits, and exports it as a PNG, a print PDF, or a layer followed over time played through its days as a video. |
 | **Notebook** | Notes written in place, citing the case with @ and adding blocks with /, callouts and tasks, pinned to the side of any tool or in a tab of their own, found by their words, started from templates, and exported to PDF. |
 
@@ -274,8 +274,8 @@ A browser extension (Chrome/Edge and Firefox) captures external map sites
 straight into a case: Google Maps & Earth, Bing, Yandex, OSM, Apple Maps,
 Zoom Earth, Copernicus Browser and Satellites.pro, one screenshot per click
 with coordinates parsed from the URL. It also powers the Capture button on
-the Google (Maps JS) basemap, fills a composer with a thread Geo Report
-prepared, and opens a reverse-image engine with a picture from the case.
+the Google (Maps JS) basemap, fills a composer with a thread Post
+prepared, or the reply box under its source, and opens a reverse-image engine with a picture from the case.
 
 On a 2D map it can draw Azimut's own tools over the site: measure, the case's
 saved points, sun and moon, a search grid that opens in the app afterwards, and
