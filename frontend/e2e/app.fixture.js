@@ -2126,6 +2126,7 @@ export async function installAppFixture(page, options = {}) {
           video: draft.state?.video ?? null,
           // whether it went out, and the picture its card shows
           state: posted ? (publish.changed ? 'changed' : 'posted') : publish?.opened_at ? 'opened' : 'draft',
+          site: posted?.site ?? publish?.site ?? null,
           posted,
           picture: draft.state?.proofPng ?? draft.state?.firstMedia?.[0] ?? draft.state?.mediaPaths?.[0] ?? null,
         };

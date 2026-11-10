@@ -29,6 +29,7 @@
     defaultPostTemplate, normalizePostKind, postKind, postStarters, normPostTemplate,
     replyByDefault, replyIntentUrl, replyPostText, replyTarget, startMediaPlan,
     statedPostKind, templatesOfKind, videoTitle,
+    postedAddress, postFingerprint, postState,
   } from '../lib/post.js';
   import { extensionOutdated, extensionVersion, handOffPost } from '../lib/extBridge.js';
   import { bidiSafe } from '../lib/bidi.js';
@@ -249,12 +250,15 @@
   // titles ride along for `#video`, which says a video's title and never its file name.
   let kindByPath = $state(new Map());
   let titleByPath = $state(new Map());
+  // and the rows themselves, for the picture a post card shows (their thumbnails)
+  let mediaByPath = $state(new Map());
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev;
     if (!id) {
       kindByPath = new Map();
       titleByPath = new Map();
+      mediaByPath = new Map();
       return;
     }
     let live = true;
@@ -264,11 +268,13 @@
         if (!live) return;
         kindByPath = new Map(items.map((it) => [it.path, it.kind]));
         titleByPath = new Map(items.map((it) => [it.path, videoTitle(it)]));
+        mediaByPath = new Map(items.map((it) => [it.path, it]));
       })
       .catch(() => {
         if (!live) return;
         kindByPath = new Map();
         titleByPath = new Map();
+        mediaByPath = new Map();
       });
     return () => { live = false; };
   });
@@ -937,7 +943,14 @@
 
   // ---- draft persistence --------------------------------------------------
 
+  /** What a save keeps: the thread, and whether it went out (`publish`) once that says something. */
   function snapshot() {
+    const state = threadState();
+    if (publishState) state.publish = publishRecord(state);
+    return state;
+  }
+
+  function threadState() {
     return {
       description,
       coordsText,
@@ -972,6 +985,65 @@
       // written only for a post that goes out as a reply under its source
       ...(replyChosen ? { reply: true } : {}),
     };
+  }
+
+  // ---- whether it went out --------------------------------------------------------
+  // `publishState` is the draft's `publish` record (lib/post.js `postState`): when Publish,
+  // Reply or the extension opened the site with it, and once the analyst pasted its link,
+  // where it went out and when, with a print of the post as it was then (`mark`), so an
+  // edit after it reads as changed since posted. Nothing of it is written before then.
+  let publishState = $state(null);
+  // The quiet line under the header: asking whether it went out, or taking its link.
+  let wentOut = $state(null); // null | 'ask' | 'paste'
+  let pastedLink = $state('');
+  let pasteError = $state('');
+
+  // What the post says and carries, as its print reads it: its platform and a first
+  // post rebuilt from the fields are not what changed.
+  function postPrint(state = threadState()) {
+    const words = { ...state, tweet1: tweet1Edited ? tweet1 : null };
+    delete words.target;
+    return postFingerprint(JSON.stringify(words));
+  }
+
+  function publishRecord(state) {
+    const record = { ...publishState };
+    if (record.url) record.changed = postPrint(state) !== record.mark;
+    return record;
+  }
+
+  const liveState = $derived(postState(publishState?.url ? publishRecord(threadState()) : publishState));
+  const postedSite = $derived(publishState?.url ? postTarget(postedAddress(publishState.url)?.site).label : '');
+
+  /** The site opened with the post: it is asked, quietly, whether it went out. */
+  function markOpened(site) {
+    const now = new Date().toISOString();
+    publishState = publishState?.url ? { ...publishState, opened_at: now } : { ...(publishState ?? {}), opened_at: now, site };
+    wentOut = 'ask';
+    pastedLink = '';
+    pasteError = '';
+  }
+
+  /** The analyst's word that it went out, with the link it went out at. */
+  function markPosted() {
+    const found = postedAddress(pastedLink);
+    if (!found) {
+      pasteError = 'That is not the address of an X or Bluesky post.';
+      return;
+    }
+    publishState = {
+      ...(publishState ?? {}), site: found.site, url: found.url,
+      posted_at: new Date().toISOString(), mark: postPrint(),
+    };
+    wentOut = null;
+    pastedLink = '';
+    pasteError = '';
+  }
+
+  function cancelPaste() {
+    wentOut = liveState === 'opened' ? 'ask' : null;
+    pastedLink = '';
+    pasteError = '';
   }
 
   // The note is titled after the post it is written from, so the two read as one piece
@@ -1151,6 +1223,11 @@
       firstMediaType = own && ['video', 'images'].includes(s.firstMediaType) ? s.firstMediaType : 'none';
       postOpen = true;
       replyChosen = s.reply === true;
+      publishState = s.publish && typeof s.publish === 'object' ? publishFrom(s.publish) : null;
+      // a post opened on the site and never said to have gone out is asked about again
+      wentOut = postState(publishState) === 'opened' ? 'ask' : null;
+      pastedLink = '';
+      pasteError = '';
       description = s.description ?? '';
       coordsText = s.coordsText ?? '';
       place = s.place ?? '';
@@ -1217,6 +1294,20 @@
     }
   }
 
+  /** A saved `publish` record as this build reads it: what it does not know is left out. */
+  function publishFrom(saved) {
+    const text = (value) => (typeof value === 'string' && value ? value : undefined);
+    const found = postedAddress(saved.url);
+    const record = Object.fromEntries(Object.entries({
+      opened_at: text(saved.opened_at),
+      site: ['x', 'bluesky'].includes(saved.site) ? saved.site : undefined,
+      url: found?.url,
+      posted_at: found ? text(saved.posted_at) : undefined,
+      mark: found ? text(saved.mark) : undefined,
+    }).filter(([, value]) => value !== undefined));
+    return Object.keys(record).length ? record : null;
+  }
+
   /** A blank post: Geolocation unless a start names another kind. */
   function resetDraft(next = 'geolocation') {
     kind = normalizePostKind(next);
@@ -1225,6 +1316,10 @@
     postOpen = false;
     replyChosen = false;
     beforeReply = null;
+    publishState = null;
+    wentOut = null;
+    pastedLink = '';
+    pasteError = '';
     description = '';
     coordsText = '';
     geo = null;
@@ -1390,6 +1485,7 @@
       description,
       source,
       attachments: reportAttachmentPaths(),
+      posted: publishState?.url ? { url: publishState.url, at: publishState.posted_at } : null,
       ...evidence,
     });
   }
@@ -1497,6 +1593,7 @@
     if (!posts.length) return false;
     try {
       await handOffPost({ url, caseId: caseState.current.id, posts });
+      markOpened(target);
       // What it manages is the extension's to report — it is still filling while
       // this runs. What is said here is what is already true.
       const left = dropped ? ` ${dropped} file${dropped > 1 ? 's' : ''} over the per-post limit stayed behind.` : '';
@@ -1564,6 +1661,7 @@
     if (!posts.length) return false;
     try {
       await handOffPost({ url: replyTo.url, caseId: caseState.current.id, posts, reply_to: replyTo.url });
+      markOpened(replyTo.site);
       const left = dropped ? ` ${dropped} file${dropped > 1 ? 's' : ''} over the per-post limit stayed behind.` : '';
       toast(`${replySite} is opening the reply under the source.${left} Nothing was posted.`, 'info', 4200);
       return true;
@@ -1599,6 +1697,7 @@
         }
       }
       window.open(replyIntentUrl(replyTo.id, text), '_blank', 'noopener,noreferrer');
+      markOpened('x');
       const more = threadParts(text).length > 1 ? ' The next posts are here to copy.' : '';
       toast(
         pictured ? `Picture copied: paste it with ${pasteKeys}.${more}` : `Opened ${replySite} under the source post.${more}`,
@@ -1614,7 +1713,10 @@
   async function copyReplyAndOpen() {
     replyDialog = false;
     await copyText(bidiSafe(tweet1), { said: 'Post copied' });
-    if (replyTo) window.open(replyTo.url, '_blank', 'noopener,noreferrer');
+    if (replyTo) {
+      window.open(replyTo.url, '_blank', 'noopener,noreferrer');
+      markOpened(replyTo.site);
+    }
   }
 
   // ---- the extension window ------------------------------------------------------
@@ -1734,6 +1836,7 @@
       if (await tryHandOff()) return;
       const url = postComposeUrl(target, bidiSafe(tweet1));
       window.open(url, '_blank', 'noopener,noreferrer');
+      markOpened(target);
       toast(
         copied ? `Opened ${targetInfo.label}. Posts copied for replies.` : `Opened ${targetInfo.label}. Copy the replies from here.`,
         'info',
@@ -1822,10 +1925,39 @@
     </FloatingMenu>
   {/if}
 
+  {#if !homeShown && (wentOut || liveState === 'posted' || liveState === 'changed')}
+    <!-- Whether the post went out: asked quietly once the site was opened with it, and
+         said once it is known. Nothing is ever posted from here. -->
+    <div class="went" class:asking={wentOut} role="status">
+      {#if wentOut === 'ask'}
+        <Icon name="post" size={13} />
+        <span class="went-words">It went out?</span>
+        <button class="btn btn-ghost btn-xs" onclick={() => (wentOut = 'paste')}>Yes, paste its link</button>
+        <button class="btn btn-ghost btn-xs" onclick={() => (wentOut = null)}>Not yet</button>
+      {:else if wentOut === 'paste'}
+        <Icon name="link" size={13} />
+        <form class="went-paste" onsubmit={(event) => { event.preventDefault(); markPosted(); }}>
+          <!-- svelte-ignore a11y_autofocus -->
+          <input class="input" bind:value={pastedLink} oninput={() => (pasteError = '')} autofocus
+            placeholder="https://x.com/you/status/…" aria-label="The post's address" aria-invalid={!!pasteError}
+            title="The address of the post on X or Bluesky, as the browser shows it" />
+          <button class="btn btn-primary btn-xs" disabled={!pastedLink.trim()}>Mark as posted</button>
+          <button type="button" class="btn btn-ghost btn-xs" onclick={cancelPaste}>Cancel</button>
+        </form>
+        {#if pasteError}<span class="went-error">{pasteError}</span>{/if}
+      {:else}
+        <Icon name={liveState === 'changed' ? 'edit' : 'check'} size={13} />
+        <span class="went-words">{`${liveState === 'changed' ? 'Changed since posted on' : 'Posted on'} ${postedSite}`}{publishState?.posted_at ? ` · ${publishState.posted_at.slice(0, 10)}` : ''}</span>
+        <a class="went-link" href={publishState.url} target="_blank" rel="noreferrer" title="Open the post">{publishState.url.replace(/^https:\/\//, '')}</a>
+        <button class="btn btn-ghost btn-xs" onclick={() => (wentOut = 'paste')}>Change link</button>
+      {/if}
+    </div>
+  {/if}
+
   {#if homeShown}
   <div class="tool-body home-body">
-    <PostHome caseId={caseState.current?.id ?? ''} drafts={caseDrafts} proofs={caseProofs}
-      onnew={openGallery} onopen={openFromHome} onall={openDraftList} onproof={postProofFromHome} />
+    <PostHome caseId={caseState.current?.id ?? ''} drafts={caseDrafts} proofs={caseProofs} media={mediaByPath}
+      onnew={openGallery} onopen={openFromHome} onall={openDraftList} onproof={postProofFromHome} ondelete={askDelete} />
   </div>
   {:else}
   <div class="tool-body">
@@ -2593,6 +2725,36 @@
   }
   .save-status.error { color: var(--danger); }
   .modal-lead { margin: 0 0 14px; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.5; }
+  /* the quiet line under the header: whether the post went out */
+  .went {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    min-width: 0;
+    padding: 6px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-1);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+  .went.asking { background: color-mix(in srgb, var(--accent) 7%, var(--bg-1)); }
+  .went > :global(svg) { flex: none; color: var(--text-3); }
+  .went.asking > :global(svg) { color: var(--accent); }
+  .went-words { flex: none; color: var(--text-1); font-weight: 600; }
+  .went-link {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-2);
+    font-family: var(--font-mono);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .went-link:hover { color: var(--accent); }
+  .went-paste { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; max-width: 620px; }
+  .went-paste .input { flex: 1; min-width: 0; height: 26px; font-size: var(--fs-xs); font-family: var(--font-mono); }
+  .went-paste .input[aria-invalid='true'] { border-color: var(--danger); }
+  .went-error { flex: none; color: var(--danger); }
   .ext-quiet {
     color: var(--text-3);
     font-size: var(--fs-xs);

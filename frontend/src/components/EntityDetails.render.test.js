@@ -133,6 +133,26 @@ describe('EntityDetails coordinates', () => {
   });
 });
 
+describe('a proof that went out', () => {
+  const PLACE = { ...entity, attrs: { ...entity.attrs } };
+  afterEach(() => Object.assign(entity, PLACE, { attrs: { ...PLACE.attrs } }));
+
+  it('says where and when, with the link, and nothing for a link that is no post', async () => {
+    Object.assign(entity, {
+      id: 'pr1', type: 'proof', label: 'Bridge',
+      attrs: { path: 'proofs/Bridge.png', posted: [
+        { url: 'https://x.com/desk/status/185', site: 'x', at: '2026-11-10T10:05:00Z' },
+        { url: 'javascript:alert(1)', site: 'x', at: '2026-11-10T10:05:00Z' },
+      ] },
+    });
+    const target = await open({ entityId: 'pr1' });
+    const rows = [...target.querySelectorAll('.info-row.posted')];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent.replace(/\s+/g, ' ').trim()).toBe('Posted on X · 2026-11-10 · x.com/desk/status/185');
+    expect(rows[0].querySelector('a').getAttribute('href')).toBe('https://x.com/desk/status/185');
+  });
+});
+
 describe('EntityDetails field seeding', () => {
   it('carries the stored values when the registry lands after the panel opened', async () => {
     let dirty = false;

@@ -289,3 +289,102 @@ def test_a_first_posts_own_pictures_are_what_the_post_is_made_from(client):
         json={"title": "Shape", "state": {"firstMedia": "media/a.png"}},
     )
     assert (too_many.status_code, unsafe.status_code, shape.status_code) == (422, 422, 422)
+
+
+# -- whether a post went out ---------------------------------------------------------
+
+POSTED_X = "https://x.com/someone/status/1850000000000000001"
+
+
+def _proof_entity(cid, png):
+    return next(e for e in graph_read.entities(cid) if e["type"] == "proof" and e["attrs"].get("path") == png)
+
+
+def test_the_list_says_whether_each_post_went_out_and_the_picture_its_card_shows(client):
+    """Post's home splits its drafts by where they stand and shows each one's picture,
+    read off the drafts the list opens anyway."""
+    cid = client.post("/api/cases", json={"name": "States"}).json()["id"]
+    states = {
+        "Plain": {"proofPng": "proofs/a.png"},
+        "Opened": {"publish": {"opened_at": "2026-11-10T10:00:00Z", "site": "x"}, "firstMedia": ["media/b.png"]},
+        "Out": {"publish": {"opened_at": "2026-11-10T10:00:00Z", "site": "x", "url": POSTED_X,
+                            "posted_at": "2026-11-10T10:05:00Z", "mark": "abc", "changed": False}},
+        "Edited": {"publish": {"site": "bluesky", "url": "https://bsky.app/profile/me.bsky.social/post/3kabc",
+                               "posted_at": "2026-11-09T09:00:00Z", "mark": "abc", "changed": True},
+                   "mediaPaths": ["media/c.mp4"]},
+    }
+    for title, state in states.items():
+        saved = client.post(f"/api/cases/{cid}/drafts", json={"title": title, "state": state})
+        assert saved.status_code == 200, saved.text
+    rows = {row["title"]: row for row in client.get(f"/api/cases/{cid}/drafts").json()}
+
+    assert {title: row["state"] for title, row in rows.items()} == {
+        "Plain": "draft", "Opened": "opened", "Out": "posted", "Edited": "changed",
+    }
+    assert rows["Out"]["posted"] == {"url": POSTED_X, "site": "x", "at": "2026-11-10T10:05:00Z"}
+    assert [rows[t]["site"] for t in ("Plain", "Opened", "Out", "Edited")] == [None, "x", "x", "bluesky"]
+    assert rows["Edited"]["posted"]["site"] == "bluesky"
+    assert rows["Plain"]["posted"] is None and rows["Opened"]["posted"] is None
+    assert [rows[t]["picture"] for t in ("Plain", "Opened", "Out", "Edited")] == [
+        "proofs/a.png", "media/b.png", None, "media/c.mp4",
+    ]
+
+
+def test_a_draft_from_before_reads_as_a_draft(client):
+    cid = client.post("/api/cases", json={"name": "Old"}).json()["id"]
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Old", "state": STATE})
+    (row,) = client.get(f"/api/cases/{cid}/drafts").json()
+    assert row["state"] == "draft" and row["posted"] is None
+
+
+@pytest.mark.parametrize("publish", [
+    "posted",
+    {"url": "https://x.com/someone"},
+    {"url": "https://evil.example/x.com/a/status/1"},
+    {"url": "http://x.com/a/status/1"},
+    {"url": "https://x.com/a/status/1?s=20"},
+    {"site": "mastodon"},
+    {"opened_at": "x" * 65},
+    {"changed": "yes"},
+    {"unknown": 1},
+])
+def test_a_publishing_record_is_refused_unless_it_is_what_the_composer_writes(client, publish):
+    cid = client.post("/api/cases", json={"name": "Edge"}).json()["id"]
+    res = client.post(f"/api/cases/{cid}/drafts", json={"title": "Bad", "state": {"publish": publish}})
+    assert res.status_code == 422, res.text
+    assert client.get(f"/api/cases/{cid}/drafts").json() == []
+
+
+def test_a_posted_link_goes_on_the_proof_and_follows_the_draft(client):
+    """The proof a post is about keeps where it went out (not as a source: it is no
+    evidence). A link changed on the draft replaces it, and a delete of the draft leaves
+    it, since the post did go out."""
+    cid = client.post("/api/cases", json={"name": "Posted"}).json()["id"]
+    path = mediafixture._upload(client, cid, "pic.png")
+    mediafixture._save_proof(client, cid, "Bridge", [path])
+    png = "proofs/Bridge.png"
+    state = {"proofPng": png, "publish": {"opened_at": "2026-11-10T10:00:00Z", "site": "x"}}
+    saved = client.post(f"/api/cases/{cid}/drafts", json={"title": "Bridge post", "state": state}).json()
+    assert not _proof_entity(cid, png)["attrs"].get("posted")
+
+    out = dict(state, publish={**state["publish"], "url": POSTED_X, "posted_at": "2026-11-10T10:05:00Z", "mark": "m1"})
+    client.post(f"/api/cases/{cid}/drafts", json={"rename_from": saved["name"], "title": "Bridge post", "state": out})
+    assert _proof_entity(cid, png)["attrs"]["posted"] == [{"url": POSTED_X, "site": "x", "at": "2026-11-10T10:05:00Z"}]
+    # saving again with the same link records it once
+    client.post(f"/api/cases/{cid}/drafts", json={"rename_from": saved["name"], "title": "Bridge post", "state": out})
+    assert len(_proof_entity(cid, png)["attrs"]["posted"]) == 1
+    # the proof gains no source from it
+    proof = _proof_entity(cid, png)
+    assert not [link for link in graph_read.links(cid, "derived-from") if link["from"] == proof["id"] and link["to"] != _media_id(cid, path)]
+
+    fixed = "https://x.com/someone/status/1850000000000000002"
+    moved = dict(out, publish={**out["publish"], "url": fixed})
+    client.post(f"/api/cases/{cid}/drafts", json={"rename_from": saved["name"], "title": "Bridge post", "state": moved})
+    assert [one["url"] for one in _proof_entity(cid, png)["attrs"]["posted"]] == [fixed]
+
+    assert client.delete(f"/api/cases/{cid}/drafts/{saved['name']}").status_code == 200
+    assert [one["url"] for one in _proof_entity(cid, png)["attrs"]["posted"]] == [fixed]
+
+
+def _media_id(cid, path):
+    return next(e["id"] for e in graph_read.entities(cid) if e["type"] == "media" and e["attrs"].get("path") == path)

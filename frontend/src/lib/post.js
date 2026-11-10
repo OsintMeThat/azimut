@@ -159,18 +159,73 @@ const BLUESKY_POST = /^https:\/\/bsky\.app\/profile\/([^/?#\s]+)\/post\/([A-Za-z
  */
 export function replyTarget(sourceLine) {
   for (const raw of sourceUrls(sourceLine)) {
-    const address = raw.replace(/[),.;]+$/, '');
-    const x = X_POST.exec(address);
-    if (x) return { site: 'x', id: x[2], url: `https://x.com/${x[1]}/status/${x[2]}` };
-    const bluesky = BLUESKY_POST.exec(address);
-    if (bluesky) {
-      return {
-        site: 'bluesky', id: bluesky[2],
-        url: `https://bsky.app/profile/${bluesky[1]}/post/${bluesky[2]}`,
-      };
-    }
+    const found = postAddress(raw.replace(/[),.;]+$/, ''));
+    if (found) return found;
   }
   return null;
+}
+
+/** One address as an X or Bluesky post, canonical, or null. */
+function postAddress(address) {
+  const x = X_POST.exec(address);
+  if (x) return { site: 'x', id: x[2], url: `https://x.com/${x[1]}/status/${x[2]}` };
+  const bluesky = BLUESKY_POST.exec(address);
+  if (bluesky) {
+    return { site: 'bluesky', id: bluesky[2], url: `https://bsky.app/profile/${bluesky[1]}/post/${bluesky[2]}` };
+  }
+  return null;
+}
+
+/**
+ * The address the analyst pasted for a post that went out: an X status or a Bluesky
+ * post, written the one way the server keeps it (`api/drafts.py` POSTED_URL), or null.
+ * Pasted as the browser shows it, so a missing `https://` and a share's `?s=20` pass.
+ */
+export function postedAddress(text) {
+  let address = String(text ?? '').trim().replace(/[),.;]+$/, '');
+  if (/^http:\/\//i.test(address)) address = `https://${address.slice(7)}`;
+  else if (!/^https:\/\//i.test(address)) address = `https://${address}`;
+  const found = postAddress(address);
+  return found ? { site: found.site, url: found.url } : null;
+}
+
+/**
+ * Where a post stands, from its draft's `publish` record: a **draft** written here, one
+ * **opened** on the site (Publish, Reply or the extension's hand-off), one **posted** once
+ * the analyst pasted its link, or **changed** since. A draft from before says nothing,
+ * and is a draft. `api/drafts.py` reads the same record for the list.
+ */
+export function postState(publish) {
+  if (!publish || typeof publish !== 'object') return 'draft';
+  if (postedAddress(publish.url)) return publish.changed === true ? 'changed' : 'posted';
+  return typeof publish.opened_at === 'string' && publish.opened_at ? 'opened' : 'draft';
+}
+
+/** The words a state goes by, on a card's pill and in the Open list's filter. */
+export const POST_STATES = Object.freeze([
+  { id: 'draft', label: 'Draft' },
+  { id: 'opened', label: 'Opened' },
+  { id: 'posted', label: 'Posted' },
+  { id: 'changed', label: 'Changed since posted' },
+].map((state) => Object.freeze(state)));
+
+/** A state as a pill says it: *Opened in X* names the site it was opened on. */
+export function postStateLabel(state, site) {
+  if (state === 'opened') return `Opened in ${postTarget(site).label}`;
+  return (POST_STATES.find((one) => one.id === state) ?? POST_STATES[0]).label;
+}
+
+/**
+ * A short fingerprint of what a post says and carries, kept when it is marked posted, so
+ * an edit after that reads as *Changed since posted* (and going back reads as posted).
+ */
+export function postFingerprint(text) {
+  let hash = 0x811c9dc5;
+  for (const char of String(text ?? '')) {
+    hash ^= char.codePointAt(0);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
 }
 
 /**
@@ -248,6 +303,7 @@ export function postReportMarkdown({
   attachments = [],
   proofEntity = null,
   mediaEntities = [],
+  posted = null,
 } = {}) {
   const clean = (value) => String(value ?? '').trim();
   const cell = (value) => clean(value).replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
@@ -295,6 +351,12 @@ export function postReportMarkdown({
   }
   if (clean(description)) sections.push(`## Assessment\n\n${clean(description)}`);
   if (clean(source)) sections.push(`## Source\n\n${sourceSection(source)}`);
+  // where the post went out, once the analyst said it did
+  const out = postedAddress(posted?.url);
+  if (out) {
+    const day = /^\d{4}-\d{2}-\d{2}/.exec(clean(posted.at))?.[0];
+    sections.push(`## Posted\n\n[On ${postTarget(out.site).label}${day ? `, ${day}` : ''}](${out.url})`);
+  }
   const mediaByPath = new Map(
     mediaEntities
       .filter((entity) => entity?.id && entity?.attrs?.path)

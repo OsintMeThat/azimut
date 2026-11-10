@@ -209,7 +209,7 @@ describe('the home', () => {
     lists.proofs = [proof('waiting')];
     lists.specs = { waiting: { description: PROOF.description, points: [{ lat: GEO.lat, lon: GEO.lon }], source: SOURCE_X } };
     await mountPost();
-    home().querySelector('.ph-card').click();
+    home().querySelector('.ph-open, button.ph-card').click();
     await settle();
 
     expect(home()).toBeNull();
@@ -330,7 +330,7 @@ describe('a post saves itself', () => {
     lists.drafts = [{ name: 'Depot', title: 'Depot', target: 'x', posts: 1 }];
     lists.saved = { Depot: { title: 'Depot', state: { description: 'Depot fire', tweet1: 'Depot fire', tweet1Edited: true } } };
     await mountPost();
-    home().querySelector('.ph-card').click();
+    home().querySelector('.ph-open, button.ph-card').click();
     await saved();
     expect(draftWrites()).toEqual([]);
     expect(header().querySelector('.save-status').textContent.trim()).toBe('Saved');
@@ -425,7 +425,7 @@ describe('the header ⋯', () => {
     lists.saved = { Depot: { title: 'Depot', state: { description: 'Depot fire', tweet1: 'Depot fire', tweet1Edited: true } } };
     api.del.mockImplementation(async () => ({ status: 'deleted', deleted: ['d1'], trash: 'trash-1' }));
     await mountPost();
-    home().querySelector('.ph-card').click();
+    home().querySelector('.ph-open, button.ph-card').click();
     await settle();
     more().click();
     flushSync();
@@ -446,6 +446,112 @@ describe('the header ⋯', () => {
     flushSync();
     expect(button(menu(), 'Delete…')).toBeUndefined();
     expect(button(menu(), 'Add to notes…').disabled).toBe(true);
+  });
+});
+
+describe('whether a post went out', () => {
+  const went = () => target.querySelector('.went');
+  const words = () => went()?.textContent.replace(/\s+/g, ' ').trim() ?? '';
+  const POSTED = 'https://x.com/desk/status/1850000000000000009';
+  const publishNow = async () => {
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: vi.fn(async () => {}) } });
+    button(header(), 'Publish on X').click();
+    await settle();
+  };
+  const paste = async (link) => {
+    button(went(), 'Yes, paste its link').click();
+    flushSync();
+    const field = went().querySelector('input[aria-label="The post\'s address"]');
+    field.value = link;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    button(went(), 'Mark as posted').click();
+    await settle();
+  };
+
+  it('asks quietly once Publish opened the site, and the draft says it was opened', async () => {
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(went()).toBeNull();
+    await publishNow();
+    expect(words()).toBe('It went out? Yes, paste its link Not yet');
+    await saved();
+    expect(draftWrites().at(-1)[1].state.publish).toMatchObject({ site: 'x', opened_at: expect.any(String) });
+    button(went(), 'Not yet').click();
+    flushSync();
+    expect(went()).toBeNull();
+  });
+
+  it('takes the post\'s link, refusing one that is no X or Bluesky post, and says it is posted', async () => {
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    await publishNow();
+    await paste('https://example.com/not-a-post');
+    expect(words()).toContain('That is not the address of an X or Bluesky post.');
+    const field = went().querySelector('input');
+    field.value = `${POSTED}?s=20`;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    button(went(), 'Mark as posted').click();
+    await settle();
+    expect(words()).toMatch(/^Posted on X · \d{4}-\d{2}-\d{2} x\.com\/desk\/status\/1850000000000000009 Change link$/);
+    expect(went().querySelector('a').getAttribute('href')).toBe(POSTED);
+    await saved();
+    expect(draftWrites().at(-1)[1].state.publish).toMatchObject({ url: POSTED, site: 'x', changed: false, mark: expect.any(String) });
+  });
+
+  it('reads as changed since posted after an edit, and as posted again once it is undone', async () => {
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    await publishNow();
+    await paste(POSTED);
+    type(target.querySelector('#pc-desc'), 'Twelve helicopters, not thirteen');
+    await settle();
+    expect(words()).toMatch(/^Changed since posted on X/);
+    await saved();
+    expect(draftWrites().at(-1)[1].state.publish.changed).toBe(true);
+    type(target.querySelector('#pc-desc'), PROOF.description);
+    await settle();
+    expect(words()).toMatch(/^Posted on X/);
+  });
+
+  it('asks again on opening a post that was opened and never said to have gone out', async () => {
+    lists.drafts = [{ name: 'Out', title: 'Out', target: 'x', posts: 1, state: 'opened' }];
+    lists.saved = { Out: { title: 'Out', state: { description: 'D', tweet1: 'D', tweet1Edited: true, publish: { opened_at: '2026-11-10T10:00:00Z', site: 'x' } } } };
+    await mountPost();
+    home().querySelector('.ph-open, button.ph-card').click();
+    await settle();
+    expect(words()).toContain('It went out?');
+  });
+
+  it('marks a hand-off to the extension as opened too', async () => {
+    bridge.installed = '0.3.3';
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    await publishNow();
+    expect(bridge.handOffPost).toHaveBeenCalledTimes(1);
+    expect(words()).toContain('It went out?');
+  });
+
+  it('writes where it went out into the note Add to notes makes', async () => {
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    await publishNow();
+    await paste(POSTED);
+    header().querySelector('button[aria-label="More for this post"]').click();
+    flushSync();
+    button(document.querySelector('.float-menu'), 'Add to notes…').click();
+    flushSync();
+    button(dialog('Add to notes'), 'Add to notes').click();
+    await settle();
+    const [, note] = api.post.mock.calls.find(([path]) => path.endsWith('/notes'));
+    expect(note.content).toContain(`## Posted\n\n[On X, `);
+    expect(note.content).toContain(`](${POSTED})`);
   });
 });
 
@@ -478,7 +584,7 @@ describe('the geolocation road, unchanged', () => {
       target: 'x', mediaEnabled: true, mediaType: 'none', mediaText: '', mediaPath: null, extraTweets: [],
     } } };
     await mountPost();
-    home().querySelector('.ph-card').click();
+    home().querySelector('.ph-open, button.ph-card').click();
     await settle();
     expect(target.querySelector('.kind-chip')).toBeNull();
     expect(firstPost().value).toBe(CLASSIC_FIRST_POST);
@@ -644,7 +750,7 @@ describe('Reply under the source', () => {
     lists.drafts = [{ name: 'Under', title: 'Under', target: 'x', posts: 1 }];
     lists.saved = { Under: { title: 'Under', state: { source: SOURCE_X, description: 'D', tweet1: 'D', tweet1Edited: true, reply: true } } };
     await mountPost();
-    home().querySelector('.ph-card').click();
+    home().querySelector('.ph-open, button.ph-card').click();
     await settle();
     expect(replyBox().checked).toBe(true);
     expect(reply()).toBeTruthy();

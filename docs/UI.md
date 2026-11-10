@@ -5245,8 +5245,9 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   names yet, a proof of a video listed under its video with the slides that wait. One
   press on a proof writes its geolocation, as Attach a proof does. A proof *has a post*
   when a draft names its picture, read off the drafts list (`GET /drafts` carries each
-  draft's `kind`, `posts`, `proof` and `video`), so a draft sent to the Trash gives its
-  proof back at once. A case with neither keeps the composer it always opened on.
+  draft's `kind`, `posts`, `proof` and `video`, and whether it went out: `state`,
+  `site`, `posted`, with the `picture` its card shows), so a draft sent to the Trash
+  gives its proof back at once. A case with neither keeps the composer it always opened on.
   **‹ Posts**, first in the header, goes back to the home.
 - **A post saves itself**, as Inspect's work does: once something is typed, picked or
   attached, it is written when the typing stops, and the header says *Saving…*, then
@@ -5288,6 +5289,22 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   (`intent/post` with `in_reply_to`) with the first post typed, the proof on the
   clipboard to paste (*Picture copied: paste it with Ctrl+V.*); Bluesky has no such
   page, so it says so and copies the post and opens the source to paste it under.
+- **Whether it went out.** A post is a **Draft**, **Opened in X** (or Bluesky) once
+  Publish, Reply or the extension's hand-off opened the site with it, **Posted** once
+  the analyst gave its link, or **Changed since posted** when it was edited after
+  (`publish` on the draft: `opened_at`, `site`, `url`, `posted_at`, a print of the post
+  as it went out in `mark`, and `changed`; written only once there is something to say,
+  so a draft from before reads as a draft). After Publish or Reply, a quiet line under
+  the header asks *It went out?* with **Yes, paste its link** and **Not yet**; it asks
+  again on opening a post that was opened and never said to have gone out. The field
+  takes the post's address as the browser shows it and refuses anything that is not an
+  X status or a Bluesky post. Posted, the line says *Posted on X · date* with the link
+  and **Change link**. The link and date also go on the proof the post is about, as its
+  `posted` record (one per post, the latest twenty): a record of the post, not a
+  source, since it is no evidence. A changed link replaces the old one there, and
+  deleting the draft leaves it, since the post did go out. The proof's Details show
+  *Posted on X · date · link*, and Add to notes writes a *Posted* section. Nothing is
+  read from the site: the analyst says it went out.
 - **A narrow header** gives way a step at a time, measured rather than guessed: the
   name field narrows and the quiet line and Reply say less, then Open folds to its
   icon. Wide enough, it is the header it always was.

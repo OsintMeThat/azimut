@@ -187,6 +187,41 @@ test.describe('a post saves itself', () => {
   });
 });
 
+test.describe('whether it went out', () => {
+  test('Publish asks quietly, and the link pasted marks it posted on the draft', async ({ page }) => {
+    await catchWhatLeaves(page);
+    const fixture = await installAppFixture(page, { proofList: [PROOFS[0]], lookupEntities: lookups });
+    await postRoutes(page);
+    await page.goto('/#post');
+    await page.getByTestId('post-home').locator('.ph-card').first().click();
+    await expect(page.locator('.tweet-block textarea').first()).toHaveValue(FIRST_POST);
+
+    const went = page.locator('.went');
+    await expect(went).toHaveCount(0);
+    await page.getByRole('button', { name: 'Publish on X' }).click();
+    await expect(went).toHaveText(/It went out\?\s*Yes, paste its link\s*Not yet/);
+    await went.getByRole('button', { name: 'Yes, paste its link' }).click();
+    const field = went.getByRole('textbox', { name: 'The post\'s address' });
+    await expect(field).toBeFocused();
+    await field.fill('https://example.com/elsewhere');
+    await field.press('Enter');
+    await expect(went).toContainText('That is not the address of an X or Bluesky post.');
+    await field.fill('https://x.com/desk/status/1850000000000000009?s=20');
+    await went.getByRole('button', { name: 'Mark as posted' }).click();
+    await expect(went).toContainText(/Posted on X · \d{4}-\d{2}-\d{2}/);
+    await expect(went.getByRole('link')).toHaveAttribute('href', 'https://x.com/desk/status/1850000000000000009');
+    await expect.poll(() => fixture.draftWrites.at(-1)?.state.publish).toMatchObject({
+      site: 'x', url: 'https://x.com/desk/status/1850000000000000009', changed: false,
+    });
+
+    // an edit after it went out says so
+    await page.locator('#pc-desc').fill('A second look at the bridge');
+    await expect(went).toContainText('Changed since posted on X');
+    await expect.poll(() => fixture.draftWrites.at(-1)?.state.publish.changed).toBe(true);
+    fixture.expectNoUnexpectedRequests();
+  });
+});
+
 test.describe('New post', () => {
   test('offers four starts, and each built one opens its own post', async ({ page }) => {
     const fixture = await installAppFixture(page, { drafts: DRAFTS, proofList: PROOFS, lookupEntities: lookups });
