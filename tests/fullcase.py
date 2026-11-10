@@ -95,6 +95,7 @@ class FullCase:
     analyzer_run: str = ""
     proof: str = ""
     proof_asset: str = ""
+    post_clip: str = ""  # the clip cut for the proof's post, which its scene keeps
     published_proof: str = ""  # a proof imported as published: its picture is the proof
     published_asset: str = ""  # that picture, kept in the proof's assets folder
     draft: str = ""
@@ -444,6 +445,9 @@ def build_full_case(
         assert stated.status_code == 200, f"{verb}: {stated.text}"
 
     # -- proof: one panel from the case, one pasted image ---------------------
+    # The clip cut for its post. The full case holds no video, so a picture stands in
+    # for the file `postclips` would cut, as one stands in for the video below.
+    full.post_clip = upload("clip.png", _png(color=(90, 30, 160), size=(64, 36)))
     pasted = _png(size=(40, 30), color=(220, 220, 40))
     asset_name = f"{hashlib.sha256(pasted).hexdigest()[:16]}.png"
     proof = client.post(
@@ -460,7 +464,8 @@ def build_full_case(
                             "x": 10, "y": 10, "scale": 1}],
                 # When in its clip the proof happens. The full case holds no video, so
                 # a picture the proof does not compose stands in for one.
-                "scene": {"video": full.piece, "moments": [{"start": 1.0, "end": 2.5}], "draft": None},
+                "scene": {"video": full.piece, "moments": [{"start": 1.0, "end": 2.5}], "draft": None,
+                          "clip": {"path": full.post_clip, "start": 1.0, "end": 2.5}},
             },
             "assets": [{"name": asset_name, "data": base64.b64encode(pasted).decode()}],
         },

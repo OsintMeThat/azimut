@@ -73,7 +73,7 @@ async function openCase(page) {
   await page.goto('/#proof');
   // a fresh dev server compiles the app on this first visit
   await expect(page.locator('.tool-header').getByRole('button', { name: 'New proof', exact: true })).toBeVisible({ timeout: 15_000 });
-  return { fixture, scenePuts, frameSaves };
+  return { fixture, scenePuts, frameSaves, media };
 }
 
 /** A new proof of these pictures, through the Create proof dialog. */
@@ -567,3 +567,116 @@ test('names the scene of an older proof made by hand, and writes nothing until i
   await expect.poll(() => scenePuts.length).toBe(1);
   expect(scenePuts[0]).toEqual({ proof: 'lookout', body: { moments: [{ start: 0.1, end: 1 }], video: VIDEO, draft: 's1' } });
 });
+
+/**
+ * The Cut for the post line on a saved proof's passage, against a server that cuts:
+ * its job answers how far it got until `cut.release()`, then the clip, filed in Media.
+ * `SCENE_SHOTS` names a folder for pictures of the line before, during and after.
+ */
+async function serveClips(page, media) {
+  const CLIP_PATH = 'media/Steps 0m00s–0m01s.mp4';
+  const cut = {
+    clip: null, posts: [], deletes: [], released: false,
+    release() { this.released = true; },
+  };
+  const clipped = { path: CLIP_PATH, start: 0.2, end: 1, size: 1_258_291, title: 'Steps 0m00s–0m01s' };
+  const item = {
+    path: CLIP_PATH, filename: 'Steps 0m00s–0m01s.mp4', title: 'Steps 0m00s–0m01s', kind: 'video', size: clipped.size,
+    source: { type: 'inspect', op: 'clip', from: VIDEO, start: 0.2, end: 1 }, thumbnail: null, folder: '',
+  };
+  await page.route('**/*', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const json = (body) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+    if (url.pathname === `/api/cases/${CASE_ID}/proofs/browser-proof/clip`) {
+      if (request.method() === 'GET') return json({ proof: 'browser-proof', video: VIDEO, clip: cut.clip });
+      cut.posts.push(request.postDataJSON());
+      return json(cut.clip ? { clip: cut.clip } : { job_id: 'clip-job' });
+    }
+    if (url.pathname === '/api/jobs/clip-job') {
+      if (!cut.released) return json({ id: 'clip-job', status: 'running', progress: { percent: 45 } });
+      cut.clip = clipped;
+      if (!media.some((one) => one.path === CLIP_PATH)) media.push(item);
+      return json({ id: 'clip-job', status: 'done', result: { clip: clipped } });
+    }
+    if (url.pathname === `/api/cases/${CASE_ID}/media/item`) return json(item);
+    if (url.pathname === `/api/cases/${CASE_ID}/media/page`) {
+      // as the server holds back what the case made itself while the switch is on
+      const made = (one) => ['inspect', 'satellite', 'screenshot', 'compare', 'horizon'].includes(one.source?.type);
+      const listed = media.map((one) => ({ sha256: '0'.repeat(64), thumb_state: 'ready', enrich_state: 'ready', notes: '', ...one }));
+      const items = url.searchParams.get('collected_only') === 'true' ? listed.filter((one) => !made(one)) : listed;
+      return json({
+        items, next_cursor: null, total: items.length,
+        facets: { category_counts: {}, folder_counts: {}, gps_count: 0, thumbnail_pending: 0, made_here_count: media.filter(made).length },
+      });
+    }
+    if (url.pathname === `/api/cases/${CASE_ID}/delete-impact`) {
+      return json({
+        blocking: [], cascade: [], tombstone: [],
+        touched: [{ id: 'browser-proof-entity', type: 'proof', label: 'browser-proof', path: 'proofs/.meta/browser-proof.json', how: ['keeps it as the clip for its post'] }],
+        counts: { blocking: 0, cascade: 0, tombstone: 0, touched: 1 },
+      });
+    }
+    if (url.pathname === `/api/cases/${CASE_ID}/media` && request.method() === 'DELETE') {
+      cut.deletes.push(url.searchParams.get('path'));
+      cut.clip = null;
+      media.splice(media.findIndex((one) => one.path === CLIP_PATH), 1);
+      return json({ status: 'deleted', deleted: ['e_clip'], tombstoned: [], trash: 'trash-1' });
+    }
+    return route.fallback();
+  });
+  return { cut, clipped, CLIP_PATH };
+}
+
+test('cuts a passage for the post, says how far it got, then shows the clip, shows it in Media and removes it', async ({ page }) => {
+  test.setTimeout(60_000);
+  const shots = process.env.SCENE_SHOTS;
+  const { fixture, scenePuts, media } = await openCase(page);
+  const { cut, CLIP_PATH } = await serveClips(page, media);
+  await newProof(page, ['Frame A']);
+  await saveProof(page, fixture, 1);
+  await showProofTab(page, 'Scene');
+  const block = sceneBlock(page);
+  const line = block.getByTestId('scene-clip');
+  // the whole video has nothing to cut
+  await expect(line).toHaveCount(0);
+
+  // a passage stated: one quiet line offers its cut
+  await block.getByRole('button', { name: 'Time of the scene, Whole video' }).click();
+  await block.getByRole('radio', { name: 'Passage' }).click();
+  await block.locator('input[aria-label="Scene start"]').fill('0:00.2');
+  await block.locator('input[aria-label="Scene end"]').fill('0:01');
+  await block.getByRole('button', { name: 'Apply' }).click();
+  await expect.poll(() => scenePuts.length).toBe(1);
+  await expect(line).toHaveText(/^\s*Cut for the post\s*$/);
+  if (shots) await page.screenshot({ path: `${shots}/scene-cut-${await theme(page)}-1-offered.png` });
+
+  await line.getByRole('button', { name: 'Cut for the post' }).click();
+  await expect(line).toContainText('Cutting 0:00–0:01… 45%');
+  expect(cut.posts).toEqual([{ start: 0.2, end: 1 }]);
+  if (shots) await page.screenshot({ path: `${shots}/scene-cut-${await theme(page)}-2-cutting.png` });
+  cut.release();
+  await expect(line).toContainText('Clip · 1 s · 1.2 MB');
+  await expect(line.getByRole('button', { name: 'Show in Media' })).toBeVisible();
+  if (shots) await page.screenshot({ path: `${shots}/scene-cut-${await theme(page)}-3-clip.png` });
+
+  // Remove: the preview names the proof that keeps it, and the file goes to the trash
+  await line.getByRole('button', { name: 'Remove' }).click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('Remove the clip?');
+  await expect(dialog).toContainText('keeps it as the clip for its post');
+  await dialog.getByRole('button', { name: 'Remove' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(cut.deletes).toEqual([CLIP_PATH]);
+  await expect(line).toHaveText(/^\s*Cut for the post\s*$/);
+
+  // cut again, then shown in Media, through the switch that holds working files back
+  await line.getByRole('button', { name: 'Cut for the post' }).click();
+  await expect(line).toContainText('Clip · 1 s');
+  await line.getByRole('button', { name: 'Show in Media' }).click();
+  const card = page.locator(`.media-card[data-path="${CLIP_PATH}"]`);
+  await expect(card).toBeVisible();
+  await expect(card).toHaveClass(/focused/);
+});
+
+const theme = (page) => page.evaluate(() => document.documentElement.dataset.theme || 'dark');

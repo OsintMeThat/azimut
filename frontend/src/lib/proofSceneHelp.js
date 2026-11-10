@@ -19,6 +19,11 @@ export const PROOF_SCENE_HELP = {
   onlyScene: 'The one scene of this video to geolocate, which the save takes up',
   notThisScene: 'Keep this proof apart from that scene',
 
+  // the clip for the post
+  cut: 'Cut this passage into a short video for the post, filed in Media',
+  clipShow: 'Show the clip in Media',
+  clipRemove: 'Move the clip to the case trash',
+
   // the player
   play: 'Play or pause (Space)',
   frameBack: 'Back one frame (←), one second with Shift',

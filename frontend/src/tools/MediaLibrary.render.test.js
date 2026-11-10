@@ -638,3 +638,45 @@ describe('the Unused switch', () => {
     });
   });
 });
+
+describe('Show in Media, from another tool', () => {
+  const CLIP = 'media/clip 0m01s–0m02s.mp4';
+
+  afterEach(() => {
+    uiState.focusMedia = null;
+    get.mockImplementation(async (url) => {
+      if (url.includes('/media/page')) return page;
+      if (url.includes('/entity-types')) return [];
+      return {};
+    });
+  });
+
+  it('lets a file the case made itself through the working-files switch, so the highlight finds it', async () => {
+    get.mockImplementation(async (url) => {
+      if (url.includes('/media/page')) return page;
+      if (url.includes('/media/item')) return { path: CLIP, kind: 'video', source: { type: 'inspect', op: 'clip' } };
+      return [];
+    });
+    uiState.focusMedia = CLIP;
+    await open();
+    await settle();
+
+    expect(get).toHaveBeenCalledWith(`/api/cases/case-a/media/item?path=${encodeURIComponent(CLIP)}`);
+    expect(get.mock.calls.at(-1)[0]).toContain('/media/page');
+    expect(get.mock.calls.at(-1)[0]).not.toContain('collected_only=true');
+  });
+
+  it('leaves the switch alone for a file the case collected', async () => {
+    get.mockImplementation(async (url) => {
+      if (url.includes('/media/page')) return page;
+      if (url.includes('/media/item')) return { path: 'media/quai.jpg', kind: 'image', source: { type: 'upload' } };
+      return [];
+    });
+    uiState.focusMedia = 'media/quai.jpg';
+    await open();
+    await settle();
+
+    const pages = get.mock.calls.map(([url]) => url).filter((url) => url.includes('/media/page'));
+    expect(pages.every((url) => url.includes('collected_only=true'))).toBe(true);
+  });
+});

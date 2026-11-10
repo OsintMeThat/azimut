@@ -4624,6 +4624,22 @@ left of each ★ panel, the passage that panel's frame shows in. It is drawn on 
 A proof about the whole video has no time to print, and the house style leaves it to
 each proof.
 
+**Cut for the post** sits on one quiet line under the video's field of a saved proof that
+states a passage, one press per passage when it states several; an instant has nothing to
+cut. It cuts the passage into a video of its own, filed in Media as Inspect's files are
+(`clip 2m10s–2m38s`, after the video's title), and the proof's scene keeps it for its
+post. The line says *Cutting 2:10–2:38… 40%* while it runs, then *Clip · 28 s · 4.2 MB*,
+its passage named when the proof states several, with **Show in Media**, which lets the working file through Media's switch, and
+**Remove**, which moves it to the case trash after the usual preview names the proof.
+The cut is re-encoded rather than copied, so it starts on the frame asked for and plays
+on X and Bluesky: H.264 and AAC, 1920 on the long side at most, 60 frames a second at
+most, under 3.5 Mb/s, the source's metadata left behind. A passage runs half a second to
+ten minutes, inside the video. The same passage pressed again answers the clip already
+cut, never a second copy, and one cut runs at a time
+(`POST /cases/{id}/proofs/{name}/clip`, read back at `GET` on the same path). The clip
+stays while the ★ does, through a change of time, and is let go when the ★ moves to
+another video; its file stays in Media.
+
 **A proof made by hand finds its scene by its frames.** When it states no scene and
 every frame of the ★ video among its panels (each piece of a collage of it included) falls
 in one scene still to prove, and in no other scene of the video, by the rule Inspect's

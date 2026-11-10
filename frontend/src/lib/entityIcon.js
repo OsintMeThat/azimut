@@ -79,6 +79,7 @@ const MADE_AS = {
   adjust: 'Adjusted image',
   collage: 'Collage',
   'enhance-video': 'Enhanced video',
+  clip: 'Clip for a post',
 };
 
 /** What one node was **made here** as, or null for material the case collected.

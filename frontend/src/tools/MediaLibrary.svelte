@@ -433,9 +433,23 @@
     }
     focusedPath = uiState.focusMedia;
     uiState.focusMedia = null;
+    // A file the case made itself (a frame, a clip cut for a post) is held back by the
+    // working-files switch, which would leave the highlight on nothing.
+    if (collectedOnly && caseState.current) revealMadeHere(caseState.current.id, focusedPath);
     clearTimeout(focusTimer);
     focusTimer = setTimeout(() => (focusedPath = null), 3000);
   });
+
+  async function revealMadeHere(caseId, path) {
+    try {
+      const item = await api.get(`/api/cases/${caseId}/media/item?path=${encodeURIComponent(path)}`);
+      if (caseState.current?.id !== caseId || !collectedOnly || !isMadeHere(item)) return;
+      collectedOnly = false;
+      pl.reload();
+    } catch {
+      // a file gone meanwhile: the highlight simply finds nothing
+    }
+  }
 
   // Scroll the focused card into view once it's actually in the rendered grid
   // (items may still be loading when the handoff arrives).

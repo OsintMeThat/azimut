@@ -23,7 +23,8 @@ Past the chain:
 
 - a plate's picture or video, a collage's pieces, the photo laid over a Horizon view
   or on Horizon's bench, the photo a Horizon search is for, the video a proof states
-  its scene in, the captures a scene to geolocate gathered: by media path;
+  its scene in and the clip cut from it for its post, the captures a scene to
+  geolocate gathered: by media path;
 - a personal layer's marker following an entity, a sheet's link, vocabulary word or
   attached file: by entity id;
 - an entity's photo chosen from Media (`entity_images`);
@@ -139,6 +140,11 @@ def _proof(data: dict[str, Any]) -> Iterator[Lean]:
     video = scene.get("video") if isinstance(scene, dict) else None
     if isinstance(video, str) and video:
         yield Lean(video, "geolocates a scene of it")
+    # the clip cut for its post (`postclips`): kept for a thread, so its delete says so
+    clip = scene.get("clip") if isinstance(scene, dict) else None
+    path = clip.get("path") if isinstance(clip, dict) else None
+    if isinstance(path, str) and path:
+        yield Lean(path, "keeps it as the clip for its post")
 
 
 def _work(data: dict[str, Any]) -> Iterator[Lean]:

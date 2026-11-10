@@ -1,10 +1,17 @@
 <script>
   import { untrack } from 'svelte';
+  import ConfirmDialog from '../../components/ConfirmDialog.svelte';
   import Icon from '../../components/Icon.svelte';
   import SceneTimeEditor from '../../components/SceneTimeEditor.svelte';
   import ScenePlayer from './ScenePlayer.svelte';
-  import { sceneTime } from '../../lib/scenes.js';
+  import { api } from '../../lib/api.js';
+  import { onEvent } from '../../lib/events.js';
+  import { clipWords, cuttable } from '../../lib/postClip.js';
+  import { sceneTime, spanLabel } from '../../lib/scenes.js';
+  import { uiState } from '../../lib/state.svelte.js';
+  import { RESTORABLE, deletedToast } from '../../lib/trash.js';
   import { PROOF_SCENE_HELP as HELP, PROOF_TIME_HELP, PROOF_TIME_TIPS } from '../../lib/proofSceneHelp.js';
+  import { SceneClip } from './sceneClip.svelte.js';
 
   // Where in its video the proof happens: the Scene tab of the side column. It is
   // there only for a proof built on a video, either through a panel Inspect cut from
@@ -19,6 +26,13 @@
   //
   // `active` is whether the tab is shown. A hidden tab keeps its player where it
   // stood, paused, so coming back finds the same frame.
+  //
+  // **Cut for the post** sits on one quiet line under the fields, for a saved proof that
+  // states a passage: it cuts that passage into a video of its own in Media, which the
+  // proof's scene keeps for its post (`sceneClip.svelte.js`). The line then says the
+  // clip's length and size, its passage too when the proof states several, with Show in
+  // Media and Remove, the case trash's road. One clip a proof: another passage is cut
+  // once this one is removed.
   let { scene, caseId, color = 'var(--accent)', active = true, onaddframe } = $props();
 
   let player = $state(null);
@@ -71,6 +85,62 @@
   function nudge(which, direction, wholeSecond, index) {
     const shown = scene.edit.nudge(which, direction, wholeSecond, index);
     if (shown != null) player?.show(shown);
+  }
+
+  // -- the clip for the post ------------------------------------------------------------
+  const clips = new SceneClip({ api });
+  const named = $derived(scene.where().name ?? null);
+  // the stretches the proof states, while its time is not being changed: never an
+  // instant, and never the time of a scene its frames found, which is not stated yet
+  const passages = $derived(editing || scene.match ? [] : scene.moments.filter(cuttable));
+  const clip = $derived(clips.clip);
+  // the clip's passage goes without saying when it is the proof's one passage
+  const clipPassage = $derived(
+    !!clip && !(passages.length === 1 && Math.abs(passages[0].start - clip.start) < 1e-3 && Math.abs(passages[0].end - clip.end) < 1e-3),
+  );
+  const cutting = $derived(clips.cutting);
+  let removing = $state(null);
+  let removeBusy = $state(false);
+
+  $effect(() => {
+    if (!active) return;
+    const id = caseId, name = named;
+    untrack(() => clips.read(id, name));
+  });
+  // a clip taken back from the trash, or cut from another tab
+  $effect(() => {
+    const again = (event) => {
+      if (active && named && event.case_id === caseId) clips.read(caseId, named);
+    };
+    const offSaved = onEvent('saved', again);
+    const offScenes = onEvent('scenes', again);
+    return () => {
+      offSaved();
+      offScenes();
+    };
+  });
+
+  function showInMedia() {
+    if (!clip) return;
+    uiState.focusMedia = clip.path;
+    uiState.tool = 'media';
+  }
+
+  async function removeClip() {
+    const target = removing;
+    if (!target || removeBusy) return;
+    removeBusy = true;
+    try {
+      const result = await api.del(`/api/cases/${caseId}/media?path=${encodeURIComponent(target.path)}`);
+      clips.removed();
+      removing = null;
+      deletedToast(caseId, result, target.title ?? target.path);
+    } catch (e) {
+      clips.error = e.message;
+      removing = null;
+    } finally {
+      removeBusy = false;
+    }
   }
 </script>
 
@@ -136,6 +206,31 @@
     </p>
   {/if}
 
+  {#if named && (clip || cutting || passages.length)}
+    <!-- Cut for the post: one quiet line, the clip once cut. -->
+    <div class="post-clip" data-testid="scene-clip">
+      <Icon name="scissors" size={12} />
+      {#if cutting}
+        <span class="clip-what" role="status">Cutting {spanLabel(cutting.start, cutting.end)}… {Math.round(cutting.percent)}%</span>
+        <span class="clip-bar" aria-hidden="true"><span style:width={`${Math.round(cutting.percent)}%`}></span></span>
+      {:else if clip}
+        <span class="clip-what" title={clip.title}>Clip · {clipWords(clip, { passage: clipPassage })}</span>
+        <button class="link" onclick={showInMedia} title={HELP.clipShow}>Show in Media</button>
+        <button class="link" onclick={() => (removing = clip)} title={HELP.clipRemove}>Remove</button>
+      {:else if passages.length === 1}
+        <button class="link" onclick={() => clips.cut(caseId, named, passages[0])} title={HELP.cut}>Cut for the post</button>
+      {:else}
+        <span class="clip-what">Cut for the post</span>
+        {#each passages as m (m.start)}
+          <button class="link time-pick" onclick={() => clips.cut(caseId, named, m)} title={HELP.cut}>{spanLabel(m.start, m.end)}</button>
+        {/each}
+      {/if}
+    </div>
+    {#if clips.error}
+      <p class="clip-error" role="alert">{clips.error}</p>
+    {/if}
+  {/if}
+
   {#if view}
     <div class="under">
       {#key view.video}
@@ -171,6 +266,21 @@
     </div>
   {/if}
 </div>
+
+{#if removing}
+  <ConfirmDialog
+    title="Remove the clip?"
+    message={`“${removing.title ?? removing.path}” leaves Media and the proof's scene.`}
+    detail="Moves the clip to the case trash. The video it was cut from stays."
+    impact={{ caseId, paths: [removing.path] }}
+    restorable={RESTORABLE}
+    confirmLabel="Remove"
+    tone="default"
+    busy={removeBusy}
+    onconfirm={removeClip}
+    oncancel={() => (removing = null)}
+  />
+{/if}
 
 <style>
   .meta-head {
@@ -305,6 +415,53 @@
   }
   .link:hover {
     color: var(--accent);
+  }
+  /* Cut for the post: as quiet as the line under a field. */
+  .post-clip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    margin: 6px 0 0;
+    padding: 0 0 0 8px;
+    font-size: var(--fs-xs);
+    line-height: 1.4;
+    color: var(--text-2);
+  }
+  .post-clip :global(svg) {
+    flex-shrink: 0;
+    color: var(--text-3);
+  }
+  .clip-what {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .time-pick {
+    font-family: var(--font-mono);
+  }
+  .clip-bar {
+    flex: 1 1 60px;
+    max-width: 120px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--bg-3);
+    overflow: hidden;
+  }
+  .clip-bar span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.3s ease;
+  }
+  .clip-error {
+    margin: 4px 0 0;
+    padding: 0 0 0 8px;
+    font-size: var(--fs-xs);
+    line-height: 1.4;
+    color: var(--danger, #e5534b);
   }
   .under {
     display: flex;

@@ -18,6 +18,10 @@ proof made before scenes existed joins its video's list, with nothing written to
 writes ``spec["scene"]`` and nothing else. Taking them all back returns the proof to
 its frames, and a proof that then states nothing its frames do not say keeps no scene.
 
+**A scene may hold the clip cut for its post** (``clip``, `engine/postclips.py`): a case
+file of its own, cut from a passage of the ★ video. It stays with the scene while the ★
+does, and a scene holding one is never taken back to the frames.
+
 **The video is found through the graph.** A frame's own record keeps the path of
 the clip as it was when the frame was cut. The ``derived-from`` edge follows a
 rename, so it is read first and the recorded path is only the fallback.
@@ -106,11 +110,23 @@ def _moment_order(moment: dict[str, Any]) -> tuple[float, float]:
     return (moment["start"], moment["end"] if moment["end"] is not None else moment["start"])
 
 
+def read_clip(value: Any) -> dict[str, Any] | None:
+    """The clip a scene holds for its post, ``{path, start, end}``, or None when it does
+    not read as one: a case path and the passage it was cut from, in seconds."""
+    if not isinstance(value, dict):
+        return None
+    path = value.get("path")
+    start, end = _seconds(value.get("start")), _seconds(value.get("end"))
+    if not isinstance(path, str) or not path or start is None or end is None or end <= start:
+        return None
+    return {"path": path, "start": start, "end": end}
+
+
 def read_scene(scene: Any) -> dict[str, Any] | None:
     """A stated scene in its one shape, ``{video, moments, draft}``, or None when it
     names no video. ``gave`` joins it when the proof once gave its scene back to the
-    video's work (`give_back`), and only then, so a proof that never did keeps the
-    bytes it had.
+    video's work (`give_back`), and ``clip`` when a clip was cut for its post
+    (`read_clip`), each only then, so a proof that holds neither keeps the bytes it had.
 
     A moment that does not read as one, an end with no start or an end before the
     start, is left out rather than guessed at. The shape before moments, one
@@ -135,6 +151,9 @@ def read_scene(scene: Any) -> dict[str, Any] | None:
     }
     if gave:
         read["gave"] = list(dict.fromkeys(gave))[:MAX_GIVEN]
+    clip = read_clip(scene.get("clip"))
+    if clip:
+        read["clip"] = clip
     return read
 
 
@@ -411,13 +430,16 @@ def proof_scene(
     instants = sorted({
         at for src in sources if src in origins and origins[src][0] == video and (at := origins[src][1]) is not None
     })
-    return {
+    read: dict[str, Any] = {
         "video": video,
         "moments": stated["moments"] if stated else [],
         "at": instants,
         "stated": stated is not None,
         "draft": stated["draft"] if stated else None,
     }
+    if stated and stated.get("clip"):
+        read["clip"] = stated["clip"]
+    return read
 
 
 def proof_specs(case: Case) -> list[tuple[str, dict[str, Any]]]:
@@ -502,6 +524,24 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def clip_file(case: Case, clip: Any) -> dict[str, Any] | None:
+    """A scene's clip as a row gives it while its file is in the case: ``{path, start,
+    end, size, title}``, the size and title as Media holds them. None once the file is
+    gone, sent to the Trash or never filed: the clip comes back with it."""
+    read = read_clip(clip)
+    if read is None or _existing(case, read["path"]) is None:
+        return None
+    items = case.media_items_by_paths([read["path"]])
+    if not items:
+        return None
+    size = items[0].get("size")
+    return {
+        **read,
+        "size": size if isinstance(size, int) and not isinstance(size, bool) else None,
+        "title": file_title(items[0], read["path"]),
+    }
+
+
 def _proof_row(lookup: _Lookup, name: str, spec: dict[str, Any], scene: dict[str, Any]) -> dict[str, Any]:
     case = lookup.case
     proof = lookup.proof(layout.proof_spec_rel(name))
@@ -513,6 +553,9 @@ def _proof_row(lookup: _Lookup, name: str, spec: dict[str, Any], scene: dict[str
     thumb = _existing(case, _text(spec.get("thumb"))) or _existing(case, _text(attrs.get("thumb")))
     points = _points(lookup, spec)
     state, abandoned = proof_state(states_place(spec), attrs)
+    # the clip cut for its post, while its file is in the case, with its size
+    clip = clip_file(case, scene.get("clip"))
+    scene = {key: value for key, value in scene.items() if key != "clip"} | ({"clip": clip} if clip else {})
     return {
         "kind": "proof",
         "proof": name,
@@ -1126,7 +1169,8 @@ def state_proof_scene(
     ``spec["scene"]`` is written: the video it names, the moments, and the draft it
     came from. The video is the one asked for, else the one the proof states, else
     the one its frames were cut from. ``draft`` is the Inspect scene the proof takes
-    up, given once: a proof that already took up another one refuses it. A proof that
+    up, given once: a proof that already took up another one refuses it. The clip cut
+    for its post stays while the video does, and is let go when the ★ moves. A proof that
     ends up stating nothing its frames do not say keeps no scene at all, exactly the
     proof it was before.
     """
@@ -1152,11 +1196,14 @@ def state_proof_scene(
             raise CaseError("this proof already takes up another scene")
         draft_id = wanted_draft or held
         gave = (stated or {}).get("gave")
-        if not stated_moments and draft_id is None and not gave and target == traced:
+        # the clip cut for the post stays while the proof is about the video it came from
+        clip = (stated or {}).get("clip") if (stated or {}).get("video") == target else None
+        if not stated_moments and draft_id is None and not gave and not clip and target == traced:
             spec.pop("scene", None)
         else:
             spec["scene"] = {
-                "video": target, "moments": stated_moments, "draft": draft_id, **({"gave": gave} if gave else {}),
+                "video": target, "moments": stated_moments, "draft": draft_id,
+                **({"gave": gave} if gave else {}), **({"clip": clip} if clip else {}),
             }
         media_engine.write_json_atomic(path, spec)
     # It names a video either way: the one stated, else the one its frames were cut from.
@@ -1216,11 +1263,13 @@ def give_back(case: Case, proof: dict[str, Any], leaving: set[str]) -> list[str]
         added = inspectwork.add_scenes(case, video, [{**time, "label": title}])
         if not added:
             return []
+        clip = (stated or {}).get("clip") if (stated or {}).get("video") == video else None
         spec["scene"] = {
             "video": video,
             "moments": moments,
             "draft": stated["draft"] if stated else None,
             "gave": added,
+            **({"clip": clip} if clip else {}),
         }
         media_engine.write_json_atomic(path, spec)
         return added

@@ -70,6 +70,8 @@ describe('madeHereLabel / madeHereBy', () => {
     expect(mod.madeHereLabel({ origin: 'inspect', op: 'collage' })).toBe('Collage');
     expect(mod.madeHereLabel({ origin: 'inspect', op: 'adjust' })).toBe('Adjusted image');
     expect(mod.madeHereLabel({ origin: 'inspect', op: 'enhance-video' })).toBe('Enhanced video');
+    // a passage cut from a video for a post (`engine/postclips.py`)
+    expect(mod.madeHereLabel({ origin: 'inspect', op: 'clip' })).toBe('Clip for a post');
   });
 
   it('says nothing about material the case collected', () => {
