@@ -279,14 +279,34 @@ describe('post templates', () => {
     prefs.postTemplate = '';
   });
 
+  const startMenu = () => document.querySelector('.float-menu[aria-label="New post template"]');
+  const pickStart = (label) => click([...startMenu().querySelectorAll('.fm-item')].find((b) => b.textContent.trim() === label));
+
   it('offers starting layouts for a new template, and not for one that exists', () => {
-    click(pane().querySelectorAll('.group')[1].querySelector(':scope > button'));
+    click(pane().querySelector('[data-new-post-template]'));
+    pickStart('Classic');
     expect(startFrom()).not.toBeNull();
     click(editor().querySelector('.btn-ghost:not(.btn-sm)')); // Cancel
 
     click(inRow('Classic', 'Edit'));
     expect(editor()).not.toBeNull();
     expect(startFrom()).toBeNull();
+  });
+
+  it('starts a template of the kind picked, on that kind\'s layout, and saves it with its kind', async () => {
+    click(pane().querySelector('[data-new-post-template]'));
+    pickStart('Text and source');
+    expect(editor().querySelector('.pe-kind').textContent.trim()).toBe('Free post');
+    expect(editor().querySelector('textarea.body').value).toBe('#description\n\n#mention\n\nSource: #source');
+    editor().querySelector('.tpl-title').value = 'Free one';
+    editor().querySelector('.tpl-title').dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    click([...editor().querySelectorAll('button')].find((b) => b.textContent.includes('Save template')));
+    await settle();
+    expect(api.post).toHaveBeenCalledWith('/api/templates/post', expect.objectContaining({
+      name: 'Free one',
+      data: expect.objectContaining({ kind: 'free', mediaEnabled: false }),
+    }));
   });
 
   it('opens a copy of a template under its own name, to be saved as a new one', async () => {

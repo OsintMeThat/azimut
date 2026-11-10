@@ -30,6 +30,7 @@ export const prefs = $state({
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
   postTarget: 'x', // social composer a fresh post draft starts with
   postTemplate: '', // id of the post template a fresh draft starts with; '' = classic
+  postKindTemplates: {}, // { video?, plate?, free? }: each other kind's default template id
   proofTemplate: '', // id of the proof template New proof starts with; '' = none
   postPrefill: true, // let the capture extension fill that composer on Publish
   reversePrefill: true, // let it hand the image to the engine on Reverse Search
@@ -118,6 +119,7 @@ export function applyPrefs(s) {
   if (s.post_mention !== undefined) prefs.postMention = s.post_mention; // '' = none
   if (s.post_target !== undefined) prefs.postTarget = s.post_target;
   if (s.post_template !== undefined) prefs.postTemplate = s.post_template; // '' = none
+  if (s.post_kind_templates !== undefined) prefs.postKindTemplates = s.post_kind_templates ?? {};
   if (s.proof_template !== undefined) prefs.proofTemplate = s.proof_template; // '' = none
   if (s.post_prefill !== undefined) prefs.postPrefill = s.post_prefill;
   if (s.reverse_prefill !== undefined) prefs.reversePrefill = s.reverse_prefill;
@@ -298,6 +300,9 @@ export const uiState = $state({
   // cross-tool handoffs (the workbench glue):
   composeQueue: [], // media paths queued for the Proof Composer
   postProof: null, // proof spec handed to the Post Composer
+  // A post to start in Post, `{ kind, media }`: a kind of lib/post.js POST_KINDS and
+  // the case files it carries (tools/post/start.js `startPost`).
+  postStart: null,
   openProof: null, // proof name to load in the Proof Composer
   // A scene of Inspect to make a proof of: { video, moments, draft, panels, label },
   // the panels its saved frames' paths, or { picture, panels, label } for a picture
@@ -729,6 +734,7 @@ export async function promoteCase(name) {
 function clearCaseHandoffs() {
   uiState.composeQueue = [];
   uiState.postProof = null;
+  uiState.postStart = null;
   uiState.openProof = null;
   uiState.proofScene = null;
   uiState.geolocateRef = null;

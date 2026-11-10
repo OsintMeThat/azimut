@@ -3,10 +3,13 @@
    * Reusable proof styles and report structures, shared across cases.
    *
    * Content-free presets: a template carries house style, never a case's
-   * material. Plate and note templates are edited in their own tools. Editing or duplicating one opens the parent's editor modal. One
-   * post template can be the one new posts start with (`post_template`), and one
-   * proof template the one New proof starts with (`proof_template`). A proof template
-   * is shown by a sketch of its page and its layout in words.
+   * material. Plate and note templates are edited in their own tools. Editing or duplicating one opens the parent's editor modal.
+   * A post template belongs to a kind of post (`lib/post.js` POST_KINDS), listed under
+   * it, and each kind has the one it starts with: Geolocation's is `post_template`, the
+   * others' `post_kind_templates`. New post template starts one of a kind from one of
+   * that kind's layouts. One proof template is the one New proof starts with
+   * (`proof_template`). A proof template is shown by a sketch of its page and its
+   * layout in words.
    *
    * A Notebook template starts from anything, under one New template menu: blank,
    * a ready one, one of the analyst's own (a copy), or a note of the open case,
@@ -24,15 +27,36 @@
   import { readTemplateFile, templateFile } from '../../lib/plate/templateFile.js';
   import { readLook, styleLabel, templateLook } from '../../lib/notes/look.js';
   import { CASE_NOTES, noteEndpoint, openCopy } from '../../lib/notes/noteDoc.svelte.js';
+  import { POST_KINDS, postStarters, STARTABLE_POST_KINDS, templatesOfKind } from '../../lib/post.js';
   import { READY_NOTES } from '../../lib/notes/ready.js';
   import { noteTemplateFile, noteTemplateFileName, readNoteTemplateFile } from '../../lib/notes/templateFile.js';
 
   let { newTemplate, editTemplate, duplicateTemplate, savePrefs, deleteTpl = $bindable() } = $props();
 
   // Pressing the template that is already the default clears it, which brings
-  // back the classic layout, or no template for a proof.
-  function toggleDefault(id) {
-    savePrefs({ post_template: prefs.postTemplate === id ? '' : id });
+  // back the classic layout, or no template for a proof. Each kind of post has its own.
+  const isPostDefault = (kind, id) => (kind === 'geolocation'
+    ? prefs.postTemplate === id
+    : prefs.postKindTemplates?.[kind] === id);
+  function toggleDefault(kind, id) {
+    if (kind === 'geolocation') {
+      savePrefs({ post_template: prefs.postTemplate === id ? '' : id });
+      return;
+    }
+    const next = { ...(prefs.postKindTemplates ?? {}) };
+    if (next[kind] === id) delete next[kind];
+    else next[kind] = id;
+    savePrefs({ post_kind_templates: next });
+  }
+  // the post kinds that hold a template, in the order New post offers them
+  const postGroups = $derived(
+    POST_KINDS.map((kind) => ({ kind, list: templatesOfKind(templatesState.post, kind.id) })).filter((group) => group.list.length)
+  );
+  // New post template: a kind, then one of its layouts
+  let postNewAnchor = $state(null);
+  function startPostTemplate(kind, starter) {
+    postNewAnchor = null;
+    newTemplate('post', { kind, starter });
   }
   function toggleProofDefault(id) {
     savePrefs({ proof_template: prefs.proofTemplate === id ? '' : id });
@@ -184,44 +208,68 @@
 </section>
 
 <section class="group" data-guide="settings.report-templates">
-  <h3>Geo Report templates</h3>
+  <h3>Post templates</h3>
   <p class="note">
-    Reusable thread structures for new Geo Reports.
+    Reusable post structures, for each kind of post. The bookmark marks the one each kind starts with.
   </p>
-  <div class="tpl-list">
-    {#each templatesState.post as t (t.id)}
-      {@const isDefault = prefs.postTemplate === t.id}
-      <div class="tpl-row">
-        <span class="tpl-label">
-          <span class="tpl-name">{t.name}</span>
-          {#if isDefault}<span class="tpl-tag">Default</span>{/if}
-        </span>
-        <div class="tpl-actions">
-          <button class="btn btn-sm" class:on={isDefault} aria-pressed={isDefault}
-            title="Start new posts with this template" onclick={() => toggleDefault(t.id)}>
-            <Icon name="bookmark" size={13} />
-          </button>
-          <button class="btn btn-sm" onclick={() => editTemplate('post', t)}>
-            <Icon name="edit" size={13} /> Edit
-          </button>
-          <button class="btn btn-sm" onclick={() => duplicateTemplate('post', t)}>
-            <Icon name="copy" size={13} /> Duplicate
-          </button>
-          <button class="btn btn-sm" title="Delete"
-            onclick={() => (deleteTpl = { kind: 'post', id: t.id, name: t.name })}>
-            <Icon name="trash" size={13} />
-          </button>
+  {#each postGroups as group (group.kind.id)}
+    <h4 class="tpl-kind"><Icon name={group.kind.icon} size={12} /> {group.kind.label}</h4>
+    <div class="tpl-list">
+      {#each group.list as t (t.id)}
+        {@const isDefault = isPostDefault(group.kind.id, t.id)}
+        <div class="tpl-row">
+          <span class="tpl-label">
+            <span class="tpl-name">{t.name}</span>
+            {#if isDefault}<span class="tpl-tag">Default</span>{/if}
+          </span>
+          <div class="tpl-actions">
+            <button class="btn btn-sm" class:on={isDefault} aria-pressed={isDefault}
+              title={group.kind.id === 'geolocation' ? 'Start new posts with this template' : `Start new ${group.kind.many} with this template`}
+              onclick={() => toggleDefault(group.kind.id, t.id)}>
+              <Icon name="bookmark" size={13} />
+            </button>
+            <button class="btn btn-sm" onclick={() => editTemplate('post', t)}>
+              <Icon name="edit" size={13} /> Edit
+            </button>
+            <button class="btn btn-sm" onclick={() => duplicateTemplate('post', t)}>
+              <Icon name="copy" size={13} /> Duplicate
+            </button>
+            <button class="btn btn-sm" title="Delete"
+              onclick={() => (deleteTpl = { kind: 'post', id: t.id, name: t.name })}>
+              <Icon name="trash" size={13} />
+            </button>
+          </div>
         </div>
-      </div>
-    {/each}
-    {#if !templatesState.post.length}
-      <p class="empty">No post templates yet.</p>
-    {/if}
-  </div>
-  <button class="btn btn-sm" onclick={() => newTemplate('post')}>
-    <Icon name="plus" size={13} /> New post template
+      {/each}
+    </div>
+  {/each}
+  {#if !templatesState.post.length}
+    <div class="tpl-list"><p class="empty">No post templates yet.</p></div>
+  {/if}
+  <button class="btn btn-sm" aria-haspopup="menu" aria-expanded={Boolean(postNewAnchor)} data-new-post-template
+    title="Start a template for one kind of post, from one of its layouts"
+    onclick={(event) => (postNewAnchor = postNewAnchor ? null : event.currentTarget)}>
+    <Icon name="plus" size={13} /> New post template <Icon name="chevronDown" size={12} />
   </button>
 </section>
+
+{#if postNewAnchor}
+  <FloatingMenu anchor={postNewAnchor} width={300} label="New post template" onclose={() => (postNewAnchor = null)}>
+    {#each POST_KINDS as kind, i (kind.id)}
+      {#if i}<div class="fm-sep"></div>{/if}
+      <div class="fm-head"><Icon name={kind.icon} size={13} /> {kind.label}</div>
+      {#each postStarters(kind.id) as starter (starter.id)}
+        <button type="button" class="fm-item ready-item" onclick={() => startPostTemplate(kind.id, starter)}>
+          <span class="fm-grow">{starter.label}</span>
+        </button>
+      {:else}
+        <button type="button" class="fm-item" disabled title={STARTABLE_POST_KINDS.includes(kind.id) ? '' : 'Its layouts come with the video thread'}>
+          <span class="fm-grow">Coming next</span>
+        </button>
+      {/each}
+    {/each}
+  </FloatingMenu>
+{/if}
 
 <section class="group" data-guide="settings.note-templates">
   <h3>Notebook templates</h3>
@@ -367,6 +415,24 @@
   .tpl-said {
     color: var(--text-3);
     font-size: var(--fs-xs);
+  }
+
+  .tpl-kind {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 12px 0 -4px;
+    color: var(--text-3);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .fm-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .note-row,

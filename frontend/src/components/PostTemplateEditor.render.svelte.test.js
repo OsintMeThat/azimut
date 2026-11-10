@@ -7,6 +7,9 @@
  * itself in one click, and starting layouts that appear for a new template only.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
 import PostTemplateEditor from './PostTemplateEditor.svelte';
 import { postDraftState } from '../lib/state.svelte.js';
@@ -217,5 +220,74 @@ describe('starting points', () => {
     expect(data.mention).toBe('@House');
     expect(data.mediaEnabled).toBe(false);
     expect(preview()).toBe(`${sample('#place')}\n48.850000, 2.350000\n\nSource: ${sample('#source')}`);
+  });
+});
+
+describe('a template of a kind', () => {
+  const tokenTags = () => [...target.querySelectorAll('.tokens .tok')].map((b) => b.textContent.trim());
+
+  it('says its kind, and a template from before is a geolocation', () => {
+    open();
+    expect(target.querySelector('.pe-kind').textContent.trim()).toBe('Geolocation');
+    unmount(app);
+    open({ kind: 'plate', body: '#description' });
+    expect(target.querySelector('.pe-kind').textContent.trim()).toBe('Map plate');
+  });
+
+  it('offers the tokens and the starts of its kind', () => {
+    open({ kind: 'free', fresh: true, body: '#description' });
+    expect(tokenTags()).not.toContain('#coordinates');
+    expect(tokenTags()).toEqual(expect.arrayContaining(['#description', '#source', '#credits']));
+    expect([...target.querySelectorAll('.starters button')].map((b) => b.textContent.trim())).toEqual(['Text and source']);
+    unmount(app);
+    open({ kind: 'video', fresh: true });
+    expect(tokenTags()).toEqual(expect.arrayContaining(['#timecode', '#scenes', '#video']));
+    expect(target.querySelector('.starters')).toBeNull(); // its starts come with the video thread
+  });
+
+  it('previews with a sample of its kind', () => {
+    open({ kind: 'free', body: '#description\n#coordinates' });
+    expect(preview()).toBe('Smoke over the port at dusk, seen from three angles');
+    unmount(app);
+    open({ kind: 'video', body: '#video\nAt #timecode' });
+    expect(preview()).toBe(`${sample('#video')}\nAt ${sample('#timecode')}`);
+  });
+
+  it('previews with the open post only when it is of that kind', () => {
+    postDraftState.fields = { description: 'A free one', kind: 'free' };
+    open({ body: '#description' });
+    expect(optionButton('Open post').disabled).toBe(true);
+    unmount(app);
+    open({ kind: 'free', body: '#description' });
+    expect(optionButton('Open post').disabled).toBe(false);
+  });
+
+  it('lets a geolocation say whether a reply under the source keeps the source line', () => {
+    const data = open();
+    const select = target.querySelector('select.reply');
+    expect(select.value).toBe('drop-source');
+    select.value = 'keep-source';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(data.reply).toBe('keep-source');
+    unmount(app);
+    open({ kind: 'free', body: '#description' });
+    expect(target.querySelector('select.reply')).toBeNull();
+  });
+});
+
+describe('the post templates 0.3.3 wrote', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const stored = JSON.parse(readFileSync(join(here, '../../../tests/fixtures/post-templates-0.3.3.json'), 'utf8'));
+
+  it('open as geolocations and are left as they were by an editor that only looks', () => {
+    for (const record of stored.post) {
+      const data = open({ ...structuredClone(record.data) });
+      expect(target.querySelector('.pe-kind').textContent.trim()).toBe('Geolocation');
+      expect(JSON.parse(JSON.stringify(data))).toEqual({ ...record.data });
+      unmount(app);
+      app = null;
+      target.remove();
+    }
   });
 });

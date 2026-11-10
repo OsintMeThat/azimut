@@ -9,6 +9,9 @@ import {
   templateFromPost, templateUsesPostField, togglePostMedia,
   pointLines, postCoordinates, splitPointLine, postDate,
   POST_TEMPLATE_STARTERS, bodyTokens, fixMisspelledToken, misspelledTokens,
+  POST_KINDS, STARTABLE_POST_KINDS, normalizePostKind, statedPostKind, postKind, tokensForKind,
+  videoTitle, postTemplateKind, postStarters, defaultPostTemplate, templatesOfKind,
+  startMediaPlan, replyTarget, replyIntentUrl, replyPostText, replyKeepsSource,
 } from './post.js';
 
 const full = {
@@ -85,6 +88,7 @@ describe('buildTweet1 — token ordering + line control', () => {
   it('exposes the insertable token palette', () => {
     expect(TWEET_TOKENS.map((t) => t.tag)).toEqual([
       '#place', '#pluscode', '#coordinates', '#description', '#mention', '#source', '#date',
+      '#video', '#timecode', '#scenes', '#credits',
     ]);
     for (const t of TWEET_TOKENS) expect(t.sample).toBeTruthy();
   });
@@ -708,3 +712,199 @@ describe('postDate — the stored value, in no language, with its clock', () => 
   });
 });
 
+
+// -- Post: kinds, the new tokens, the reply under the source -----------------------
+
+describe('the geolocation road, pinned', () => {
+  // What a proof sent with To Post has always written with the classic layout. Kinds,
+  // new tokens and replies are layered over this; none of them may move a character.
+  const proof = {
+    place: 'Los Anacuos, Miranda, Venezuela',
+    plusCode: '76XH+8F5',
+    description: 'A formation of 13 helicopters was spotted heading East',
+    lat: 10.303315, lon: -66.874095,
+    coordsText: '10.303315, -66.874095\nCamera — 10.3031, -66.8745',
+    mention: '@GeoConfirmed',
+    source: 'https://x.com/someone/status/1850000000000000000',
+    date: '2025-10-24 14:30 UTC+3',
+  };
+
+  it('writes the same first post as before', () => {
+    expect(buildTweet1(DEFAULT_TWEET_BODY, proof)).toBe([
+      'Los Anacuos, Miranda, Venezuela - 76XH+8F5',
+      '',
+      'A formation of 13 helicopters was spotted heading East',
+      '',
+      '10.303315, -66.874095',
+      'Camera — 10.3031, -66.8745',
+      '',
+      '@GeoConfirmed',
+      '',
+      'Source: https://x.com/someone/status/1850000000000000000',
+    ].join('\n'));
+  });
+
+  it('opens the same pages as before', () => {
+    expect(postComposeUrl('x', 'A')).toBe('https://x.com/intent/post?text=A');
+    expect(postHandoffUrl('x', 'A')).toBe('https://x.com/compose/post?text=A');
+  });
+});
+
+describe('POST_KINDS — what a post is made from', () => {
+  it('offers four starts, Geolocation first, and opens the three that are built', () => {
+    expect(POST_KINDS.map((k) => k.id)).toEqual(['geolocation', 'video', 'plate', 'free']);
+    expect(STARTABLE_POST_KINDS).toEqual(['geolocation', 'plate', 'free']);
+    for (const k of POST_KINDS) expect(k.label && k.icon && k.text).toBeTruthy();
+  });
+
+  it('reads anything unknown or absent as a geolocation, and writes a geolocation as nothing', () => {
+    for (const odd of [undefined, null, '', 'telegram', 3]) expect(normalizePostKind(odd)).toBe('geolocation');
+    expect(normalizePostKind('free')).toBe('free');
+    expect(statedPostKind('geolocation')).toBeUndefined();
+    expect(statedPostKind('nonsense')).toBeUndefined();
+    expect(statedPostKind('plate')).toBe('plate');
+    expect(postKind('video').label).toBe('Video thread');
+  });
+
+  it('offers each kind the tokens it can fill', () => {
+    expect(tokensForKind('free').map((t) => t.tag)).not.toContain('#coordinates');
+    expect(tokensForKind('video').map((t) => t.tag)).toEqual(expect.arrayContaining(['#timecode', '#scenes', '#video']));
+    expect(tokensForKind(undefined).map((t) => t.tag)).toContain('#coordinates');
+    expect(tokensForKind('geolocation').map((t) => t.tag)).not.toContain('#timecode');
+  });
+});
+
+describe('the new tokens', () => {
+  it('fill #video with the title, never the file name', () => {
+    expect(videoTitle({ title: '  Convoy at dawn ', filename: 'clip.mp4' })).toBe('Convoy at dawn');
+    expect(videoTitle({ filename: 'clip.mp4' })).toBe('');
+    expect(buildTweet1('#video\n\n#coordinates', { ...full, video: 'Convoy at dawn' }))
+      .toBe('Convoy at dawn\n\n48.850000, 2.350000');
+  });
+
+  it('drop their line while nothing fills them, so a template can name them today', () => {
+    const body = '#description\nAt #timecode\n#scenes\nImagery: #credits\nFrom #video';
+    expect(buildTweet1(body, full)).toBe('Rooftop match');
+    expect(buildTweet1(body, { ...full, timecode: '0:00–0:07', credits: 'Copernicus Sentinel-2' }))
+      .toBe('Rooftop match\nAt 0:00–0:07\nImagery: Copernicus Sentinel-2');
+  });
+
+  it('are known to the typo check, like the tokens before them', () => {
+    expect(bodyTokens('#credits #timecode #scenes #video')).toEqual(['#credits', '#timecode', '#scenes', '#video']);
+    expect(misspelledTokens('#credit and #timecodes and #vide')).toEqual([
+      { written: '#credit', meant: '#credits' },
+      { written: '#timecodes', meant: '#timecode' },
+      { written: '#vide', meant: '#video' },
+    ]);
+  });
+});
+
+describe('post templates per kind', () => {
+  it('writes the kind and the reply variant only when they say something', () => {
+    expect(templateFromPost({ body: '#place', kind: 'geolocation' })).not.toHaveProperty('kind');
+    expect(templateFromPost({ body: '#place', kind: 'free', reply: 'keep-source' }))
+      .toMatchObject({ kind: 'free', reply: 'keep-source' });
+    expect(templateFromPost({ body: '#place', reply: 'sometimes' })).not.toHaveProperty('reply');
+    expect(normPostTemplate({ body: '#place', kind: 'plate' }).kind).toBe('plate');
+    expect(postTemplateKind({ body: '#place' })).toBe('geolocation');
+  });
+
+  it('starts Geolocation on the four layouts it had, and the plate and the free post on one each', () => {
+    expect(postStarters('geolocation')).toBe(POST_TEMPLATE_STARTERS);
+    expect(postStarters('plate').map((s) => s.id)).toEqual(['plate']);
+    expect(postStarters('free').map((s) => s.id)).toEqual(['free']);
+    expect(postStarters('video')).toEqual([]);
+    for (const starter of [...postStarters('plate'), ...postStarters('free')]) {
+      expect(misspelledTokens(starter.body)).toEqual([]);
+      expect(starter.mediaEnabled).toBe(false);
+    }
+  });
+
+  const templates = [
+    { id: 'geo', name: 'Geo', data: { body: '#place' } },
+    { id: 'free', name: 'Free', data: { body: '#description', kind: 'free' } },
+    { id: 'plate', name: 'Plate', data: { body: '#description', kind: 'plate' } },
+  ];
+
+  it('finds each kind its default, Geolocation through the bookmark it always had', () => {
+    const prefs = { geolocation: 'geo', byKind: { free: 'free', plate: 'geo' } };
+    expect(defaultPostTemplate(templates, 'geolocation', prefs)?.id).toBe('geo');
+    expect(defaultPostTemplate(templates, 'free', prefs)?.id).toBe('free');
+    // an id that now names another kind's template is no default for this one
+    expect(defaultPostTemplate(templates, 'plate', prefs)).toBeNull();
+    expect(defaultPostTemplate(templates, 'geolocation', { geolocation: 'gone' })).toBeNull();
+    expect(defaultPostTemplate(templates, 'video', prefs)).toBeNull();
+  });
+
+  it('lists a post only the templates of its kind', () => {
+    expect(templatesOfKind(templates, 'geolocation').map((t) => t.id)).toEqual(['geo']);
+    expect(templatesOfKind(templates, 'free').map((t) => t.id)).toEqual(['free']);
+  });
+});
+
+describe('startMediaPlan — where a started post puts its media', () => {
+  const kindOf = (path) => (path.endsWith('.mp4') ? 'video' : 'image');
+
+  it('leaves a geolocation its first post for the proof', () => {
+    const plan = startMediaPlan('geolocation', ['media/a.png', 'media/b.png'], kindOf);
+    expect(plan.first).toBeNull();
+    expect(plan.media).toEqual({ mediaType: 'images', mediaPaths: ['media/a.png', 'media/b.png'] });
+  });
+
+  it('puts another kind\'s first group on its first post, and the rest after it', () => {
+    const plan = startMediaPlan('free', ['media/a.png', 'media/clip.mp4', 'media/b.png'], kindOf);
+    expect(plan.first).toEqual({ mediaType: 'images', mediaPaths: ['media/a.png', 'media/b.png'] });
+    expect(plan.media).toEqual({ mediaType: 'video', mediaPaths: ['media/clip.mp4'] });
+    expect(plan.more).toEqual([]);
+  });
+
+  it('reads a file the media list does not know by its extension, and drops what is not a path', () => {
+    const plan = startMediaPlan('plate', ['exports/plate.mp4', null, 'exports/plate.mp4', 3], () => undefined);
+    expect(plan.first).toEqual({ mediaType: 'video', mediaPaths: ['exports/plate.mp4'] });
+    expect(startMediaPlan('free', [], kindOf)).toEqual({ first: null, media: null, more: [] });
+  });
+});
+
+describe('reply under the source', () => {
+  it('finds the X or Bluesky post a source line points at, and nothing else', () => {
+    expect(replyTarget('https://twitter.com/Some_one/status/185?s=20')).toEqual({
+      site: 'x', id: '185', url: 'https://x.com/Some_one/status/185',
+    });
+    expect(replyTarget('https://instagram.com/p/1 · https://x.com/a/status/9')).toMatchObject({ site: 'x', id: '9' });
+    expect(replyTarget('https://bsky.app/profile/someone.bsky.social/post/3kabc')).toEqual({
+      site: 'bluesky', id: '3kabc', url: 'https://bsky.app/profile/someone.bsky.social/post/3kabc',
+    });
+    for (const none of ['', 'https://x.com/someone', 'https://x.com/a/status/abc', 'http://x.com/a/status/9',
+      'https://evil.example/x.com/a/status/9', 'https://bsky.app/profile/a', 'seen on x.com/a/status/9']) {
+      expect(replyTarget(none)).toBeNull();
+    }
+  });
+
+  it('opens X\'s own reply page with the words in it', () => {
+    expect(replyIntentUrl('185', 'Bakhmut & co')).toBe('https://x.com/intent/post?in_reply_to=185&text=Bakhmut%20%26%20co');
+  });
+
+  const fields = { ...full, source: 'https://x.com/a/status/1' };
+  const written = buildTweet1(DEFAULT_TWEET_BODY, fields);
+
+  it('leaves the source line out unless the template keeps it', () => {
+    const reply = replyPostText({ text: written, body: DEFAULT_TWEET_BODY, fields });
+    expect(reply).not.toContain('Source:');
+    expect(reply).toBe(buildTweet1(DEFAULT_TWEET_BODY, { ...fields, source: '' }));
+    expect(replyPostText({ text: written, body: DEFAULT_TWEET_BODY, fields, keepSource: true })).toBe(written);
+    expect(replyKeepsSource({ reply: 'keep-source' })).toBe(true);
+    expect(replyKeepsSource({})).toBe(false);
+  });
+
+  it('keeps what else a source line said in a post it rebuilds', () => {
+    const reply = replyPostText({ body: '#description · #source', fields });
+    expect(reply).toBe('Rooftop match');
+  });
+
+  it('takes only the lines naming the source out of a post the analyst rewrote', () => {
+    const text = 'My own words\n\nVia https://x.com/a/status/1\n\n@GeoConfirmed';
+    expect(replyPostText({ text, edited: true, body: DEFAULT_TWEET_BODY, fields }))
+      .toBe('My own words\n\n@GeoConfirmed');
+    expect(replyPostText({ text, edited: true, body: DEFAULT_TWEET_BODY, fields: { ...fields, source: '' } })).toBe(text);
+  });
+});

@@ -358,3 +358,58 @@ describe('the template New proof starts with', () => {
     expect(rowOf('House proof').textContent).toContain('Side by side · ');
   });
 });
+
+describe('post templates per kind', () => {
+  const FREE = { id: 'po_f', name: 'Free words', data: { body: '#description', kind: 'free' } };
+  const PLATE = { id: 'po_p', name: 'Plate credits', data: { body: '#credits', kind: 'plate' } };
+  const kinds = () => [...target.querySelectorAll('[data-guide="settings.report-templates"] .tpl-kind')]
+    .map((h) => h.textContent.trim());
+
+  beforeEach(() => {
+    templatesState.post = [CLASSIC, FREE, SHORT, PLATE];
+    prefs.postKindTemplates = {};
+  });
+  afterEach(() => {
+    prefs.postKindTemplates = {};
+  });
+
+  it('lists them under their kind, the ones from before under Geolocation', () => {
+    open();
+    expect(target.querySelector('[data-guide="settings.report-templates"] h3').textContent).toBe('Post templates');
+    expect(kinds()).toEqual(['Geolocation', 'Map plate', 'Free post']);
+    expect(toggle('Free words').getAttribute('title')).toBe('Start new free posts with this template');
+  });
+
+  it('keeps a default for each kind, Geolocation\'s where it always was', () => {
+    prefs.postTemplate = 'po_1';
+    prefs.postKindTemplates = { free: 'po_f' };
+    open();
+    expect(toggle('Classic').getAttribute('aria-pressed')).toBe('true');
+    expect(toggle('Free words').getAttribute('aria-pressed')).toBe('true');
+    expect(toggle('Plate credits').getAttribute('aria-pressed')).toBe('false');
+    expect(target.querySelectorAll('.tpl-tag')).toHaveLength(2);
+
+    toggle('Plate credits').click();
+    expect(props.savePrefs).toHaveBeenLastCalledWith({ post_kind_templates: { free: 'po_f', plate: 'po_p' } });
+    toggle('Free words').click();
+    expect(props.savePrefs).toHaveBeenLastCalledWith({ post_kind_templates: {} });
+    toggle('Short').click();
+    expect(props.savePrefs).toHaveBeenLastCalledWith({ post_template: 'po_2' });
+  });
+
+  it('starts a new one from a kind\'s layouts, and says the video thread\'s come next', () => {
+    open();
+    target.querySelector('[data-new-post-template]').click();
+    flushSync();
+    const menu = document.querySelector('.float-menu[aria-label="New post template"]');
+    const items = [...menu.querySelectorAll('.fm-item')];
+    expect(items.map((b) => b.textContent.trim())).toEqual([
+      'Classic', 'Coordinates only', 'Short', 'With date', 'Coming next', 'Plate', 'Text and source',
+    ]);
+    expect(items.find((b) => b.textContent.trim() === 'Coming next').disabled).toBe(true);
+    items.find((b) => b.textContent.trim() === 'Plate').click();
+    flushSync();
+    expect(props.newTemplate).toHaveBeenCalledWith('post', expect.objectContaining({ kind: 'plate', starter: expect.objectContaining({ id: 'plate' }) }));
+    expect(document.querySelector('.float-menu[aria-label="New post template"]')).toBeNull();
+  });
+});
