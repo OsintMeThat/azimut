@@ -1,21 +1,26 @@
 <script>
   /**
    * Where Post opens with no post open, in place of the composer, in the manner of Geo
-   * Proof's home: **New post** and a search that finds a draft by name and opens it;
-   * **Drafts**, the last ones saved, each with its platform and how many posts it holds;
-   * and **Ready to post**, the proofs no draft names yet and the videos whose slides wait,
-   * one press starting the right post (`postHome.js` says what has a post yet).
+   * Proof's home: **New post** and a search that finds a draft by name and opens it, then
+   * three parts. **In progress**, the drafts not gone out yet or changed since, each with
+   * its platform and how many posts it holds; **Ready to post**, the proofs no draft names
+   * yet and the videos whose slides wait, one press starting the right post; and
+   * **Posted**, the latest to go out, with their link (`postHome.js`). Every post card
+   * wears its state as a pill, and its ⋯ or a right-click opens and deletes it.
    *
    * The composer decides when this shows: a case holding no draft and no proof keeps the
    * composer as it always was. Both lists arrive from the composer, null while read.
    */
   import Icon from '../../components/Icon.svelte';
+  import FloatingMenu from '../../components/FloatingMenu.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { timeAgo } from '../../lib/analysisViews.js';
   import { slideTag } from '../../lib/proofList.js';
   import { sceneColorAt } from '../../lib/scenes.js';
   import { postKind, STARTABLE_POST_KINDS } from '../../lib/post.js';
-  import { draftLine, draftPicture, findDrafts, readyToPost, recentDrafts } from './postHome.js';
+  import {
+    draftLine, draftPicture, draftPill, findDrafts, homeDrafts, readyToPost, recentDrafts, shortLink,
+  } from './postHome.js';
 
   let {
     caseId = '',
@@ -23,6 +28,8 @@
     drafts = null,
     /** The case's proofs as `GET /proofs` lists them, or null before the first read. */
     proofs = null,
+    /** The case's media by path (`kind`, `thumbnail`), for the pictures of posts that carry no proof. */
+    media = new Map(),
     onnew,
     /** `(draft)`: open this draft. */
     onopen,
@@ -30,12 +37,16 @@
     onall,
     /** `(row)`: start a Geolocation post of this proof. */
     onproof,
+    /** `(draft)`: ask to delete this post (the composer holds the dialog). */
+    ondelete,
   } = $props();
 
   let query = $state('');
 
   const loading = $derived(drafts === null || proofs === null);
-  const recent = $derived(recentDrafts(drafts ?? []));
+  const parts = $derived(homeDrafts(drafts ?? []));
+  const recent = $derived(recentDrafts(parts.progress));
+  const posted = $derived(recentDrafts(parts.posted));
   const found = $derived(findDrafts(drafts ?? [], query).slice(0, 8));
   const ready = $derived(readyToPost(proofs ?? [], drafts ?? []));
   const threads = STARTABLE_POST_KINDS.includes('video');
@@ -46,7 +57,23 @@
     if (found[0]) onopen?.(found[0]);
   }
 
-  const picture = (draft) => draftPicture(draft, proofs);
+  const picture = (draft) => draftPicture(draft, proofs, media);
+
+  // A card's ⋯, under it or at the pointer for a right-click.
+  let menu = $state(null); // { draft, anchor?, at? }
+  function openMenu(draft, anchor) {
+    menu = menu?.draft === draft ? null : { draft, anchor };
+  }
+  function context(event, draft) {
+    event.preventDefault();
+    menu = { draft, at: { x: event.clientX, y: event.clientY } };
+  }
+  function act(what) {
+    const { draft } = menu;
+    menu = null;
+    if (what === 'open') onopen?.(draft);
+    else if (what === 'delete') ondelete?.(draft);
+  }
 </script>
 
 {#snippet draftPic(draft)}
@@ -56,6 +83,31 @@
   {:else}
     <Icon name={postKind(draft.kind).icon} size={24} />
   {/if}
+{/snippet}
+
+{#snippet postCard(draft)}
+  {@const pill = draftPill(draft)}
+  <div class="ph-card post-card" role="presentation" oncontextmenu={(event) => context(event, draft)}>
+    <button type="button" class="ph-open" onclick={() => onopen?.(draft)} title={`Open ${draft.title}`}>
+      <span class="ph-pic">
+        {@render draftPic(draft)}
+        <span class="ph-pill {pill.state}">{pill.label}</span>
+      </span>
+      <span class="ph-card-words">
+        <span class="ph-title" dir="auto">{draft.title}</span>
+        <span class="ph-said"><span class="ph-line">{draftLine(draft)}</span><span class="ph-when">{timeAgo(pill.state === 'posted' ? draft.posted?.at ?? draft.updated_at : draft.updated_at)}</span></span>
+      </span>
+    </button>
+    {#if draft.posted?.url}
+      <a class="ph-out" href={draft.posted.url} target="_blank" rel="noreferrer" title="Open the post">
+        <Icon name="external" size={11} /><span>{shortLink(draft.posted.url)}</span>
+      </a>
+    {/if}
+    <button type="button" class="ph-more" aria-label={`More for ${draft.title}`} title="Open or delete this post" aria-haspopup="menu"
+      aria-expanded={menu?.draft === draft} onclick={(event) => openMenu(draft, event.currentTarget)}>
+      <Icon name="more" size={13} stroke={2.6} />
+    </button>
+  </div>
 {/snippet}
 
 <div class="ph" data-testid="post-home">
@@ -78,6 +130,7 @@
             title={i === 0 ? `Open ${draft.title} (Enter)` : `Open ${draft.title}`}>
             <span class="ph-hit-pic">{@render draftPic(draft)}</span>
             <span class="ph-hit-title" dir="auto">{draft.title}</span>
+            <span class="ph-pill flat {draftPill(draft).state}">{draftPill(draft).label}</span>
             <span class="ph-said">{draftLine(draft)}</span>
             <span class="ph-when">{timeAgo(draft.updated_at)}</span>
           </button>
@@ -88,24 +141,16 @@
     {:else}
       {#if recent.length}
         <div class="ph-head">
-          <h4>Drafts</h4>
-          {#if (drafts?.length ?? 0) > recent.length}
-            <button type="button" class="ph-link" onclick={() => onall?.()}>All {drafts.length} drafts</button>
+          <h4>In progress</h4>
+          {#if parts.progress.length > recent.length}
+            <button type="button" class="ph-link" onclick={() => onall?.()}>All {parts.progress.length} in progress</button>
           {/if}
         </div>
-        <div class="ph-cards">
-          {#each recent as draft (draft.name)}
-            <button type="button" class="ph-card" onclick={() => onopen?.(draft)} title={`Open ${draft.title}`}>
-              <span class="ph-pic">{@render draftPic(draft)}</span>
-              <span class="ph-card-words">
-                <span class="ph-title" dir="auto">{draft.title}</span>
-                <span class="ph-said"><span class="ph-line">{draftLine(draft)}</span><span class="ph-when">{timeAgo(draft.updated_at)}</span></span>
-              </span>
-            </button>
-          {/each}
+        <div class="ph-cards" data-part="progress">
+          {#each recent as draft (draft.name)}{@render postCard(draft)}{/each}
         </div>
       {:else if loading}
-        <div class="ph-head"><h4>Drafts</h4></div>
+        <div class="ph-head"><h4>In progress</h4></div>
         <div class="ph-cards" aria-busy="true">
           {#each [0, 1, 2] as n (n)}<span class="ph-card ghost"><span class="ph-pic"></span><span class="ph-card-words"><span class="ph-bar"></span></span></span>{/each}
         </div>
@@ -164,9 +209,38 @@
           </div>
         {/if}
       {/if}
+
+      {#if posted.length}
+        <div class="ph-head">
+          <h4>Posted</h4>
+          {#if parts.posted.length > posted.length}
+            <button type="button" class="ph-link" onclick={() => onall?.()}>All {parts.posted.length} posted</button>
+          {:else}
+            <span class="ph-count">The latest first</span>
+          {/if}
+        </div>
+        <div class="ph-cards" data-part="posted">
+          {#each posted as draft (draft.name)}{@render postCard(draft)}{/each}
+        </div>
+      {/if}
     {/if}
   </div>
 </div>
+
+{#if menu}
+  {@const draft = menu.draft}
+  <FloatingMenu anchor={menu.anchor ?? null} at={menu.at ?? null} width={220} label={draft.title} onclose={() => (menu = null)}>
+    <p class="fm-head" dir="auto">{draft.title}</p>
+    <button type="button" class="fm-item" onclick={() => act('open')}><Icon name="folderOpen" size={14} /><span class="fm-grow">Open</span></button>
+    {#if draft.posted?.url}
+      <a class="fm-item" href={draft.posted.url} target="_blank" rel="noreferrer" onclick={() => (menu = null)}>
+        <Icon name="external" size={14} /><span class="fm-grow">See the post</span></a>
+    {/if}
+    <div class="fm-sep"></div>
+    <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored" onclick={() => act('delete')}>
+      <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
+  </FloatingMenu>
+{/if}
 
 <style>
   .ph {
@@ -221,6 +295,61 @@
   }
   .ph-card:not(.ghost):hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow-2); }
   .ph-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* a post card: the press that opens it, its link once posted, and its ⋯ */
+  .post-card { position: relative; }
+  .ph-open { display: flex; flex-direction: column; min-width: 0; padding: 0; text-align: left; }
+  .ph-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--r-lg); }
+  .ph-more {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--r-sm);
+    background: color-mix(in srgb, var(--bg-0) 72%, transparent);
+    color: var(--text-1);
+    opacity: 0;
+    transition: opacity 0.12s var(--ease);
+  }
+  .post-card:hover .ph-more, .ph-more:focus-visible, .ph-more[aria-expanded='true'] { opacity: 1; }
+  .ph-more:hover { background: var(--bg-3); }
+  @media (hover: none) { .ph-more { opacity: 1; } }
+  .ph-out {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    margin: -3px 10px 9px;
+    color: var(--text-2);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+  .ph-out span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ph-out:hover { color: var(--accent); }
+  .ph-out :global(svg) { flex: none; }
+  .ph-pic { position: relative; }
+  .ph-pill {
+    position: absolute;
+    top: 7px;
+    left: 7px;
+    max-width: calc(100% - 44px);
+    overflow: hidden;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg-0) 82%, transparent);
+    color: var(--text-2);
+    font-size: 10.5px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    box-shadow: 0 0 0 1px var(--border);
+  }
+  .ph-pill.flat { position: static; flex: none; box-shadow: none; background: var(--bg-3); }
+  .ph-pill.opened { background: color-mix(in srgb, var(--accent) 22%, var(--bg-0)); color: var(--accent); box-shadow: none; }
+  .ph-pill.posted { background: color-mix(in srgb, var(--ok) 22%, var(--bg-0)); color: var(--ok); box-shadow: none; }
+  .ph-pill.changed { background: color-mix(in srgb, var(--warn) 24%, var(--bg-0)); color: var(--warn); box-shadow: none; }
   .ph-pic {
     display: grid;
     place-items: center;

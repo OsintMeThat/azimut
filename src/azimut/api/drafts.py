@@ -10,6 +10,7 @@ human publishes it (spec §6 non-goals).
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
@@ -36,6 +37,19 @@ MAX_ARTIFACT_PATH_LENGTH = 512
 #: What a post is made from (frontend `lib/post.js` POST_KINDS). A draft that says
 #: nothing is a Geolocation one, as every draft was before kinds.
 POST_KINDS = ("geolocation", "video", "plate", "free")
+
+#: Whether a post went out, as its draft's ``state.publish`` says (frontend
+#: `lib/post.js` ``postState``): when the composer opened the site, and once the analyst
+#: pasted its link, where it was posted and when. A draft that says nothing is a draft.
+PUBLISH_KEYS = frozenset({"opened_at", "site", "url", "posted_at", "mark", "changed"})
+PUBLISH_SITES = ("x", "bluesky")
+#: A post's own address, as the composer writes it once it went out (`postedAddress`).
+POSTED_URL = {
+    "x": re.compile(r"^https://x\.com/[A-Za-z0-9_]{1,15}/status/\d{1,25}$"),
+    "bluesky": re.compile(r"^https://bsky\.app/profile/[^/?#\s]{1,253}/post/[A-Za-z0-9]{1,64}$"),
+}
+#: How many posts a proof keeps a record of, the latest last.
+MAX_POSTED_PER_PROOF = 20
 
 
 class DraftIn(BaseModel):
@@ -125,6 +139,101 @@ def _draft_source_paths(state: dict[str, Any]) -> list[str]:
     return unique
 
 
+def _publish(state: dict[str, Any]) -> dict[str, Any] | None:
+    """The draft's ``publish`` record, refused at the edge unless it is what the composer
+    writes: bounded strings, a known site, and a link that is an X or Bluesky post."""
+    publish = state.get("publish")
+    if publish is None:
+        return None
+    if not isinstance(publish, dict) or not set(publish) <= PUBLISH_KEYS:
+        raise HTTPException(status_code=422, detail="state.publish must be a publishing record")
+    for key in ("opened_at", "posted_at", "mark"):
+        value = publish.get(key)
+        if value is not None and (not isinstance(value, str) or len(value) > 64):
+            raise HTTPException(status_code=422, detail=f"state.publish.{key} must be a short string")
+    site = publish.get("site")
+    if site is not None and site not in PUBLISH_SITES:
+        raise HTTPException(status_code=422, detail="state.publish.site must be x or bluesky")
+    url = publish.get("url")
+    if url is not None and not (
+        isinstance(url, str) and any(rule.match(url) for rule in POSTED_URL.values())
+    ):
+        raise HTTPException(
+            status_code=422, detail="state.publish.url must be the address of an X or Bluesky post"
+        )
+    if publish.get("changed") is not None and not isinstance(publish.get("changed"), bool):
+        raise HTTPException(status_code=422, detail="state.publish.changed must be true or false")
+    return publish
+
+
+def _posted(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Where and when the post went out, or None: read off a record already on disk, so
+    one that does not pass is no post rather than an error."""
+    publish = state.get("publish")
+    if not isinstance(publish, dict):
+        return None
+    url = publish.get("url")
+    if not isinstance(url, str):
+        return None
+    site = next((name for name, rule in POSTED_URL.items() if rule.match(url)), None)
+    if site is None:
+        return None
+    at = publish.get("posted_at")
+    return {"url": url, "site": site, "at": at if isinstance(at, str) else None}
+
+
+def _post_state(state: dict[str, Any]) -> str:
+    """``draft``, ``opened`` (the site opened with it), ``posted``, or ``changed`` (edited
+    since it went out), as `lib/post.js` ``postState`` reads the same record."""
+    publish = state.get("publish")
+    if _posted(state):
+        return "changed" if isinstance(publish, dict) and publish.get("changed") is True else "posted"
+    if isinstance(publish, dict) and isinstance(publish.get("opened_at"), str):
+        return "opened"
+    return "draft"
+
+
+def _site(state: dict[str, Any]) -> str | None:
+    """The site the post was opened on or went out on, when it says."""
+    posted = _posted(state)
+    if posted:
+        return str(posted["site"])
+    publish = state.get("publish")
+    site = publish.get("site") if isinstance(publish, dict) else None
+    return site if site in PUBLISH_SITES else None
+
+
+def _picture(state: dict[str, Any]) -> str | None:
+    """The case file a card shows for the draft: its proof, else the first file it carries.
+    Named off the state already read; the card finds its thumbnail in the lists it has."""
+    if isinstance(state.get("proofPng"), str):
+        return str(state["proofPng"])
+    for key in ("firstMedia", "mediaPaths"):
+        paths = state.get(key)
+        if isinstance(paths, list) and paths and isinstance(paths[0], str):
+            return str(paths[0])
+    return None
+
+
+def _proof_posts(case: Any, png: str, *, drop: str | None = None, add: dict[str, Any] | None = None) -> None:
+    """Keep the proof's ``posted`` record in step with the post about it: the link the
+    post went out at, its site and its date. It is a record of the post, not a source of
+    the proof, so it lives on the proof's entity rather than in its sources."""
+    entity = case.find_entity(attr="path", value=png)
+    if not entity or entity.get("type") != "proof":
+        return
+    held = entity.get("attrs", {}).get("posted")
+    posts = [
+        one for one in (held if isinstance(held, list) else [])
+        if isinstance(one, dict) and one.get("url") not in {drop, (add or {}).get("url")}
+    ]
+    if add:
+        posts.append(add)
+    posts = posts[-MAX_POSTED_PER_PROOF:]
+    if posts != held:
+        case.update_entity(entity["id"], {"attrs": {"posted": posts or None}})
+
+
 def _post_count(state: dict[str, Any]) -> int:
     """How many posts a draft's thread holds, as the composer copies it: the first one,
     the media post when it is on and chosen, and each later post that says or carries
@@ -175,6 +284,12 @@ def list_drafts(case_id: str) -> list[dict[str, Any]]:
                 "posts": _post_count(state),
                 "proof": state.get("proofPng") if isinstance(state.get("proofPng"), str) else None,
                 "video": state.get("video") if isinstance(state.get("video"), str) else None,
+                # Whether it went out, and where, for the home's parts and the Open list;
+                # and the file its card shows. All read off the state already open.
+                "state": _post_state(state),
+                "site": _site(state),
+                "posted": _posted(state),
+                "picture": _picture(state),
             }
         )
     drafts.sort(key=lambda d: d.get("updated_at") or "", reverse=True)
@@ -199,6 +314,7 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
     name = slugify(body.title, "Post")
     case.subdir(layout.DRAFTS_DIR)  # born on first save, so the folder exists
     source_paths = _draft_source_paths(body.state)
+    _publish(body.state)
     rel = layout.draft_rel(name)
     path = case.resolve_inside(rel)
 
@@ -221,6 +337,15 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
         if source.is_file():
             path = source.with_name(PurePosixPath(rel).name)
             media_engine.rename_path(source, path)
+
+    # What the post said of its going out before this save, so the proof it is about
+    # follows a link pasted, changed or taken back.
+    before_path = case.resolve_inside(layout.draft_rel(old or name))
+    try:
+        before = json.loads(before_path.read_text(encoding="utf-8")).get("state")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        before = None
+    before = before if isinstance(before, dict) else {}
 
     data = {
         "azimut_draft": DRAFT_MARKER,
@@ -264,7 +389,24 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
         by="post-composer",
     )
 
+    _follow_posted(case, before, body.state)
     return {"name": name, "title": name, "draft": rel}
+
+
+def _follow_posted(case: Any, before: dict[str, Any], after: dict[str, Any]) -> None:
+    """Write the post's link on the proof it is about, and take back the one it replaced."""
+    def record(state: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+        posted = _posted(state)
+        proof = state.get("proofPng")
+        return (proof, posted) if posted and isinstance(proof, str) else None
+
+    old, new = record(before), record(after)
+    if old == new:
+        return
+    if old and (not new or old[0] != new[0] or old[1]["url"] != new[1]["url"]):
+        _proof_posts(case, old[0], drop=old[1]["url"])
+    if new:
+        _proof_posts(case, new[0], add=new[1])
 
 
 def draft_spec(name: str) -> str:

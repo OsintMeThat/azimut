@@ -478,12 +478,21 @@ def build_full_case(
     if published_proof:
         _plant_published_proof(client, case_id, full)
 
-    # -- post: derived from the proof and the photo ---------------------------
+    # -- post: derived from the proof and the photo, and gone out on X --------
+    # Its link goes on the proof as a `posted` record (`api/drafts.py`), which names no
+    # case file: a record of the post, never a source of the proof.
     draft = client.post(
         f"/api/cases/{case_id}/drafts",
         json={
             "title": "Thread draft",
-            "state": {"proofPng": proof.json()["png"], "mediaPaths": [full.photo]},
+            "state": {
+                "proofPng": proof.json()["png"], "mediaPaths": [full.photo],
+                "publish": {
+                    "opened_at": "2026-11-10T10:00:00Z", "site": "x",
+                    "url": "https://x.com/desk/status/1850000000000000009",
+                    "posted_at": "2026-11-10T10:05:00Z", "mark": "1a2b3c", "changed": False,
+                },
+            },
         },
     )
     assert draft.status_code == 200, draft.text

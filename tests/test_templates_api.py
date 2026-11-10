@@ -348,18 +348,30 @@ def test_post_templates_from_before_read_and_save_back_as_written(client):
     assert [json.dumps(t["data"]) for t in on_disk] == [json.dumps(t["data"]) for t in stored["post"]]
 
 
-def test_a_post_template_can_say_its_kind_and_its_reply_variant(client):
+def test_a_post_template_can_say_its_kind_and_to_reply_by_default(client):
     plate = client.post(
         "/api/templates/post",
-        json={"name": "Plate", "data": {"body": "#description\n\n#credits", "kind": "plate", "reply": "keep-source"}},
+        json={"name": "Plate", "data": {"body": "#description\n\n#credits", "kind": "plate", "reply": True}},
     )
     assert plate.status_code == 200, plate.text
     assert plate.json()["data"]["kind"] == "plate"
-    assert plate.json()["data"]["reply"] == "keep-source"
+    assert plate.json()["data"]["reply"] is True
 
-    # Geolocation is what saying nothing means, so it has the one spelling
-    geo = client.post("/api/templates/post", json={"name": "Geo", "data": {"kind": "geolocation"}}).json()
-    assert "kind" not in geo["data"]
+    # Geolocation is what saying nothing means, so it has the one spelling; so is no reply
+    geo = client.post("/api/templates/post", json={"name": "Geo", "data": {"kind": "geolocation", "reply": False}}).json()
+    assert "kind" not in geo["data"] and "reply" not in geo["data"]
 
-    for bad in ({"kind": "telegram"}, {"reply": "maybe"}):
+    for bad in ({"kind": "telegram"}, {"reply": "maybe"}, {"reply": 1}):
         assert client.post("/api/templates/post", json={"name": "Bad", "data": bad}).status_code == 422
+
+
+def test_a_template_from_the_first_reply_builds_still_lists(client):
+    """The first 0.3.4 builds stored whether a reply kept its source line. Neither word
+    asks for a reply, so the template lists, reads as no default, and saves back without it."""
+    config.save_templates({"schema": 1, "proof": [], "map": [], "note": [], "post": [
+        {"id": "po_keep", "name": "Keep", "data": {"body": "#place", "reply": "keep-source"}},
+        {"id": "po_drop", "name": "Drop", "data": {"body": "#place", "reply": "drop-source"}},
+    ]})
+    listed = client.get("/api/templates").json()["post"]
+    assert [t["id"] for t in listed] == ["po_keep", "po_drop"]
+    assert all("reply" not in t["data"] for t in listed)

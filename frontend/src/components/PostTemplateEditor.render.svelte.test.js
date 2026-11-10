@@ -262,17 +262,20 @@ describe('a template of a kind', () => {
     expect(optionButton('Open post').disabled).toBe(false);
   });
 
-  it('lets a geolocation say whether a reply under the source keeps the source line', () => {
+  it('lets a geolocation reply under the source by default, written only when it does', () => {
     const data = open();
-    const select = target.querySelector('select.reply');
-    expect(select.value).toBe('drop-source');
-    select.value = 'keep-source';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
+    const box = target.querySelector('label.reply input[type="checkbox"]');
+    expect(box.closest('label').textContent.trim()).toBe('Reply under the source by default');
+    expect(box.checked).toBe(false);
+    box.click();
     flushSync();
-    expect(data.reply).toBe('keep-source');
+    expect(data.reply).toBe(true);
+    box.click();
+    flushSync();
+    expect(data).not.toHaveProperty('reply');
     unmount(app);
     open({ kind: 'free', body: '#description' });
-    expect(target.querySelector('select.reply')).toBeNull();
+    expect(target.querySelector('label.reply')).toBeNull();
   });
 });
 

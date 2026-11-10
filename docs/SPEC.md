@@ -205,7 +205,7 @@ proof for publication.
 | ✅ **Report editions** | Marks passages internal, prints a report as an internal or a public edition that never carries one, and keeps every PDF it wrote with its fingerprint, listed and checked from the note. |
 | ✅ **From the case** | Writes a note of a period's geolocations from the Notebook home, a figure each or a table, dated by what they show or when they were geolocated. |
 | ✅ **Report covers and signature** | Writes a first page of one's own above a cover line, fills the title, day, name, role and organisation when the PDF is made, prints the Azimut logo, the analyst's logo (rounded, framed or set on a disc in Settings) and a handwritten signature, and starts a template from anything. |
-| ✅ **Post** | Geo Report renamed: a home of drafts and proofs with no post yet, New post (Geolocation, Map plate, Free post), templates and defaults per kind, a window saying once why the extension helps, and a reply under the source post on X or Bluesky. |
+| ✅ **Post** | Geo Report renamed: saves itself; a home in three parts (in progress, ready to post, posted); New post (Geolocation, Map plate, Free post); templates and defaults per kind; a window saying once why the extension helps; a reply under the source post on X or Bluesky; whether a post went out, its link kept on its proof; an Open list with filters. |
 
 ---
 

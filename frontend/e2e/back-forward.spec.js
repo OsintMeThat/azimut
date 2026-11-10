@@ -245,11 +245,11 @@ const DRAFTS = {
 
 async function openDraft(page, title) {
   await page.locator('.tool-header').getByRole('button', { name: 'Open' }).click();
-  await page.locator('.open-row', { hasText: title }).click();
+  await page.getByRole('dialog', { name: 'Open a post' }).locator('.ol-open', { hasText: title }).click();
   await expect(page.getByRole('textbox', { name: 'Post name' })).toHaveValue(title);
 }
 
-test('Back between drafts asks before leaving an edited post', async ({ page }) => {
+test('Back between drafts saves the edited post on the way, and asks nothing', async ({ page }) => {
   const fixture = await installAppFixture(page, {
     drafts: DRAFTS,
     // Found again, as the case would: otherwise the composer reads each as deleted.
@@ -262,16 +262,16 @@ test('Back between drafts asks before leaving an edited post', async ({ page }) 
   await description.fill('Smoke over the depot, east side');
 
   await page.goBack();
-  const ask = page.getByRole('alertdialog', { name: 'Leave this post?' });
-  await expect(ask).toBeVisible();
-  await ask.getByRole('button', { name: 'Keep editing' }).click();
-  await expect(description).toHaveValue('Smoke over the depot, east side');
-  await expect.poll(() => hashOf(page)).toBe('#post?draft=thread-b');
-
-  await page.goBack();
-  await ask.getByRole('button', { name: 'Leave without saving' }).click();
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: 'Post name' })).toHaveValue('Thread A');
   await expect(description).toHaveValue('Convoy at the gate');
+  await expect.poll(() => hashOf(page)).toBe('#post?draft=thread-a');
+  // what was typed in Thread B went to its file before it made way
+  expect(fixture.draftWrites.at(-1)).toMatchObject({ rename_from: 'thread-b', title: 'Thread B' });
+  expect(fixture.draftWrites.at(-1).state.description).toBe('Smoke over the depot, east side');
+
+  await page.goForward();
+  await expect(description).toHaveValue('Smoke over the depot, east side');
   fixture.expectNoUnexpectedRequests();
 });
 

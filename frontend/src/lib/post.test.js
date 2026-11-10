@@ -11,7 +11,8 @@ import {
   POST_TEMPLATE_STARTERS, bodyTokens, fixMisspelledToken, misspelledTokens,
   POST_KINDS, STARTABLE_POST_KINDS, normalizePostKind, statedPostKind, postKind, tokensForKind,
   videoTitle, postTemplateKind, postStarters, defaultPostTemplate, templatesOfKind,
-  startMediaPlan, replyTarget, replyIntentUrl, replyPostText, replyKeepsSource,
+  startMediaPlan, replyTarget, replyIntentUrl, replyPostText, replyByDefault,
+  postedAddress, postState, postStateLabel, postFingerprint, POST_STATES,
 } from './post.js';
 
 const full = {
@@ -800,11 +801,15 @@ describe('the new tokens', () => {
 });
 
 describe('post templates per kind', () => {
-  it('writes the kind and the reply variant only when they say something', () => {
+  it('writes the kind and the reply default only when they say something', () => {
     expect(templateFromPost({ body: '#place', kind: 'geolocation' })).not.toHaveProperty('kind');
-    expect(templateFromPost({ body: '#place', kind: 'free', reply: 'keep-source' }))
-      .toMatchObject({ kind: 'free', reply: 'keep-source' });
-    expect(templateFromPost({ body: '#place', reply: 'sometimes' })).not.toHaveProperty('reply');
+    expect(templateFromPost({ body: '#place', kind: 'free', reply: true }))
+      .toMatchObject({ kind: 'free', reply: true });
+    for (const none of [false, 'keep-source', 'drop-source', 'sometimes']) {
+      expect(templateFromPost({ body: '#place', reply: none })).not.toHaveProperty('reply');
+      expect(normPostTemplate({ body: '#place', reply: none })).not.toHaveProperty('reply');
+    }
+    expect(normPostTemplate({ body: '#place', reply: true }).reply).toBe(true);
     expect(normPostTemplate({ body: '#place', kind: 'plate' }).kind).toBe('plate');
     expect(postTemplateKind({ body: '#place' })).toBe('geolocation');
   });
@@ -887,13 +892,18 @@ describe('reply under the source', () => {
   const fields = { ...full, source: 'https://x.com/a/status/1' };
   const written = buildTweet1(DEFAULT_TWEET_BODY, fields);
 
-  it('leaves the source line out unless the template keeps it', () => {
+  it('leaves the source line out of a reply', () => {
     const reply = replyPostText({ text: written, body: DEFAULT_TWEET_BODY, fields });
     expect(reply).not.toContain('Source:');
     expect(reply).toBe(buildTweet1(DEFAULT_TWEET_BODY, { ...fields, source: '' }));
-    expect(replyPostText({ text: written, body: DEFAULT_TWEET_BODY, fields, keepSource: true })).toBe(written);
-    expect(replyKeepsSource({ reply: 'keep-source' })).toBe(true);
-    expect(replyKeepsSource({})).toBe(false);
+  });
+
+  it('replies by default only where the template says so', () => {
+    expect(replyByDefault({ reply: true })).toBe(true);
+    // the two words a template of the first 0.3.4 builds said are no default
+    for (const data of [{}, null, { reply: 'keep-source' }, { reply: 'drop-source' }, { reply: false }]) {
+      expect(replyByDefault(data)).toBe(false);
+    }
   });
 
   it('keeps what else a source line said in a post it rebuilds', () => {
@@ -906,5 +916,50 @@ describe('reply under the source', () => {
     expect(replyPostText({ text, edited: true, body: DEFAULT_TWEET_BODY, fields }))
       .toBe('My own words\n\n@GeoConfirmed');
     expect(replyPostText({ text, edited: true, body: DEFAULT_TWEET_BODY, fields: { ...fields, source: '' } })).toBe(text);
+  });
+});
+
+describe('whether a post went out', () => {
+  it('takes the address of an X or Bluesky post as the browser shows it, written one way', () => {
+    expect(postedAddress('https://x.com/Desk/status/1850000000000000001')).toEqual({ site: 'x', url: 'https://x.com/Desk/status/1850000000000000001' });
+    expect(postedAddress(' twitter.com/Desk/status/9?s=20 ')).toEqual({ site: 'x', url: 'https://x.com/Desk/status/9' });
+    expect(postedAddress('http://mobile.x.com/Desk/status/9/photo/1')).toEqual({ site: 'x', url: 'https://x.com/Desk/status/9' });
+    expect(postedAddress('https://bsky.app/profile/desk.bsky.social/post/3kabc')).toEqual({
+      site: 'bluesky', url: 'https://bsky.app/profile/desk.bsky.social/post/3kabc',
+    });
+    for (const none of ['', null, 'https://x.com/Desk', 'https://x.com/Desk/status/abc', 'https://evil.example/x.com/a/status/1',
+      'https://bsky.app/profile/desk', 'Posted it!', 'https://instagram.com/p/abc']) {
+      expect(postedAddress(none), String(none)).toBeNull();
+    }
+  });
+
+  it('reads a draft, an opened post, a posted one and one changed since', () => {
+    expect(postState(undefined)).toBe('draft');
+    expect(postState({})).toBe('draft');
+    expect(postState({ opened_at: '2026-11-10T10:00:00Z', site: 'x' })).toBe('opened');
+    expect(postState({ opened_at: '2026-11-10T10:00:00Z', url: 'https://x.com/a/status/1' })).toBe('posted');
+    expect(postState({ url: 'https://x.com/a/status/1', changed: true })).toBe('changed');
+    // a link that is no post is no posted post
+    expect(postState({ url: 'https://example.com', opened_at: '2026-11-10T10:00:00Z' })).toBe('opened');
+  });
+
+  it('names each state, an opened one by its site', () => {
+    expect(POST_STATES.map((one) => one.id)).toEqual(['draft', 'opened', 'posted', 'changed']);
+    expect(postStateLabel('opened', 'bluesky')).toBe('Opened in Bluesky');
+    expect(postStateLabel('opened')).toBe('Opened in X');
+    expect(postStateLabel('changed')).toBe('Changed since posted');
+    expect(postStateLabel('nonsense')).toBe('Draft');
+  });
+
+  it('fingerprints what a post says, the same words the same print', () => {
+    expect(postFingerprint('{"a":1}')).toBe(postFingerprint('{"a":1}'));
+    expect(postFingerprint('{"a":1}')).not.toBe(postFingerprint('{"a":2}'));
+    expect(postFingerprint('')).toMatch(/^[0-9a-z]+$/);
+  });
+
+  it('says where it went out in the note Add to notes writes', () => {
+    const note = postReportMarkdown({ title: 'T', posted: { url: 'https://x.com/a/status/1', at: '2026-11-10T10:05:00Z' } });
+    expect(note).toContain('## Posted\n\n[On X, 2026-11-10](https://x.com/a/status/1)');
+    expect(postReportMarkdown({ title: 'T' })).not.toContain('## Posted');
   });
 });

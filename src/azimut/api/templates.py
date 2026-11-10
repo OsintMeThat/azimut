@@ -193,13 +193,28 @@ class PostTemplateData(CanonicalModel):
     # template was before kinds, and "geolocation" is read as that same None so the
     # kind has one spelling.
     kind: PostKind | None = None
-    # Whether a reply under the source keeps the line naming it. None leaves it out.
-    reply: Literal["keep-source", "drop-source"] | None = None
+    # Whether a post of this template goes out as a reply under its source by default,
+    # when the source is an X or a Bluesky post. None is no, the one spelling of it.
+    reply: StrictBool | None = None
 
     @field_validator("kind")
     @classmethod
     def geolocation_says_nothing(cls, kind: str | None) -> str | None:
         return None if kind == "geolocation" else kind
+
+    @field_validator("reply", mode="before")
+    @classmethod
+    def reply_is_yes_or_unsaid(cls, reply: Any) -> Any:
+        # The first 0.3.4 builds said whether a reply kept its source line, never
+        # whether to reply. Neither word says to, so a template saved by them reads on.
+        if reply in ("keep-source", "drop-source"):
+            return None
+        return reply
+
+    @field_validator("reply")
+    @classmethod
+    def no_is_unsaid(cls, reply: bool | None) -> bool | None:
+        return True if reply else None
 
     @model_serializer(mode="wrap")
     def _unstated_stays_unwritten(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:

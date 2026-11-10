@@ -27,14 +27,18 @@ afterEach(() => {
 });
 
 describe('Post actions', () => {
-  it('offers Save report and removes the old Copy report action', () => {
+  it('keeps Add to notes in the header\'s ⋯, and no Save button: a post saves itself', () => {
     caseState.current = { id: 'case-1', folders: [], entities: [] };
 
     const { body } = render(PostComposer);
 
-    expect(body).toContain('Save report');
+    expect(body).toContain('aria-label="More for this post"');
     expect(body).toContain('Publish on');
+    expect(body).not.toContain('Save report');
+    expect(body).not.toContain('Save as draft');
     expect(body).not.toContain('Copy report');
+    expect(source).toContain('Add to notes…');
+    expect(source).toContain("createAutosave({ write: () => writeDraft() })");
   });
 
   it('files the report note against what it was written from', () => {
@@ -45,11 +49,9 @@ describe('Post actions', () => {
     expect(source).toContain("...(draftName ? [specPath('draft', draftName)] : []),");
   });
 
-  it('says what each save produces', () => {
-    caseState.current = { id: 'case-1', folders: [], entities: [] };
-    const { body } = render(PostComposer);
-    expect(body).toContain('title="Keep this thread to reopen and edit here"');
-    expect(body).toContain('title="Write the finding up as a Notebook note"');
+  it('says what Add to notes produces', () => {
+    expect(source).toContain('title="Write this post into a new case note, with its proof and media"');
+    expect(source).toContain('Writes this post into a new case note: its place, its source and its pictures. The post stays as it is.');
   });
 
   it('labels the map links from the verified table rather than printing site ids', () => {
@@ -78,14 +80,14 @@ describe('Proof handoff', () => {
   });
 
   it('keeps the outgoing thread when its save fails, rather than losing it', () => {
-    expect(source).toContain('const saved = await performDraftSave(`Post saved: ${postName.trim()}`);');
-    expect(source).toContain('if (!saved) return false;');
+    expect(source).toContain('async function fileCurrentDraft() {\n    return letGo();');
+    expect(source).toContain("toast('The post could not be saved, so it stays open', 'warn');");
   });
 });
 
 describe('Post naming', () => {
   it('names the draft in the header, like Inspect and the Proof Composer', () => {
-    expect(source).toContain('<input class="input title-input" bind:value={postName}');
+    expect(source).toContain('<input class="input title-input" bind:value={postName} onblur={commitName}');
     expect(source).toContain('aria-label="Post name"');
   });
 
@@ -95,14 +97,13 @@ describe('Post naming', () => {
   });
 
   it('renames in place: saving sends the bound slug so the backend moves the file', () => {
-    expect(source).toContain('rename_from: draftName,');
-    expect(source).toContain('title: postName.trim(),');
-    expect(source).toContain('postName = r.title;');
+    expect(source).toContain('payload: { rename_from: draftName, title, state }');
+    expect(source).toContain('postTitle = r.title;');
   });
 
-  it('asks before an unbound draft takes a name another draft holds', () => {
-    expect(source).toContain("if (!draftName && savedSlugs(draftEntities, 'draft').has(slugify(title, 'draft')))");
-    expect(source).toContain('title="Overwrite this draft?"');
+  it('never writes an unbound post over a draft that holds its name', () => {
+    expect(source).toContain('takenSlugs: savedSlugs(draftEntities, \'draft\'),');
+    expect(source).toContain("toast(`Another post is already named “${typed}”`, 'warn');");
   });
 
   it('does not carry an auto-assigned proof name into the post text', () => {

@@ -129,9 +129,180 @@ test.describe('the home', () => {
     await expect(home).toHaveCount(0);
     await expect(page.locator('.tweet-block textarea').first()).toHaveValue(FIRST_POST);
     await expect(page.getByText('Geolocation post', { exact: true })).toBeVisible();
+    // it saved itself on the way: back home, nothing is asked and it is a draft now
     await page.locator('.tool-header').getByRole('button', { name: 'Posts' }).click();
-    await page.getByRole('alertdialog', { name: 'Leave this post?' }).getByRole('button', { name: 'Leave without saving' }).click();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
     await expect(home).toBeVisible();
+    expect(fixture.draftWrites.at(-1).state.proofPng).toBe('proofs/bridge.png');
+    fixture.expectNoUnexpectedRequests();
+  });
+});
+
+test.describe('the home in three parts', () => {
+  const PARTS = {
+    ...DRAFTS,
+    'Opened one': draft('Opened one', { target: 'x', proofPng: 'proofs/port-1.png', publish: { opened_at: '2026-11-10T09:00:00Z', site: 'x' } }),
+    'Gone out': draft('Gone out', {
+      target: 'x', proofPng: 'proofs/port-2.png',
+      publish: { opened_at: '2026-11-10T09:00:00Z', site: 'x', url: 'https://x.com/desk/status/1850000000000000009', posted_at: '2026-11-10T09:05:00Z', mark: 'm', changed: false },
+    }),
+  };
+
+  test('In progress, Ready to post and Posted, each card wearing its state, and a card deletes with Undo', async ({ page }) => {
+    const fixture = await installAppFixture(page, { drafts: PARTS, proofList: PROOFS, lookupEntities: lookups });
+    await postRoutes(page);
+    await page.goto('/#post');
+    const home = page.getByTestId('post-home');
+    await expect(home.locator('h4')).toHaveText(['In progress', 'Ready to post', 'Posted']);
+    await expect(home.getByRole('button', { name: 'New post' })).toBeVisible();
+    const progress = home.locator('[data-part="progress"]');
+    await expect(progress.locator('.ph-title')).toHaveText(['Bridge thread', 'Harbour words', 'Opened one']);
+    await expect(progress.locator('.ph-pill')).toHaveText(['Draft', 'Draft', 'Opened in X']);
+    const posted = home.locator('[data-part="posted"]');
+    await expect(posted.locator('.ph-title')).toHaveText(['Gone out']);
+    await expect(posted.locator('.ph-pill')).toHaveText(['Posted']);
+    await expect(posted.getByRole('link')).toHaveAttribute('href', 'https://x.com/desk/status/1850000000000000009');
+
+    // a right-click and the ⋯ open the same menu
+    await progress.locator('.post-card', { hasText: 'Harbour words' }).click({ button: 'right' });
+    const menu = page.locator('.float-menu[aria-label="Harbour words"]');
+    await expect(menu.locator('.fm-item')).toHaveText(['Open', 'Delete…']);
+    await page.keyboard.press('Escape');
+    await progress.locator('.post-card', { hasText: 'Harbour words' }).hover();
+    await progress.getByRole('button', { name: 'More for Harbour words' }).click();
+    await menu.getByRole('button', { name: 'Delete…' }).click();
+    await page.getByRole('alertdialog', { name: 'Delete this post?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(progress.locator('.ph-title')).toHaveText(['Bridge thread', 'Opened one']);
+    await page.locator('.toast', { hasText: 'Deleted “Harbour words”' }).getByRole('button', { name: 'Undo' }).click();
+    await expect(progress.locator('.post-card', { hasText: 'Harbour words' })).toHaveCount(1);
+    await expect(progress.locator('.post-card')).toHaveCount(3);
+    fixture.expectNoUnexpectedRequests();
+  });
+});
+
+test.describe('Open', () => {
+  test('lists every post with its picture, kind, platform and state, filters them, and deletes one with Undo', async ({ page }) => {
+    const ALL = {
+      ...DRAFTS,
+      'Gone out': draft('Gone out', {
+        target: 'x', proofPng: 'proofs/bridge.png',
+        publish: { site: 'x', url: 'https://x.com/desk/status/1850000000000000009', posted_at: '2026-11-10T09:05:00Z', mark: 'm', changed: false },
+      }),
+    };
+    const fixture = await installAppFixture(page, { drafts: ALL, proofList: PROOFS, lookupEntities: lookups });
+    await postRoutes(page);
+    await page.goto('/#post');
+    await page.locator('.tool-header').getByRole('button', { name: 'Open' }).click();
+    const list = page.getByRole('dialog', { name: 'Open a post' });
+    const titles = list.locator('.ol-title');
+    await expect(titles).toHaveText(['Bridge thread', 'Harbour words', 'Gone out']);
+    await expect(list.locator('.ol-sub')).toHaveText([/^Geolocation · Bluesky · /, /^Free post · X · /, /^Geolocation · X · /]);
+    await expect(list.locator('.ol-pill')).toHaveText(['Draft', 'Draft', 'Posted']);
+    await expect(list.locator('.ol-row').first().locator('img')).toHaveAttribute('src', /proofs\/terminal\.png/);
+
+    await list.getByRole('combobox', { name: 'Kind' }).selectOption('geolocation');
+    await expect(titles).toHaveText(['Bridge thread', 'Gone out']);
+    await list.getByRole('combobox', { name: 'State' }).selectOption('posted');
+    await expect(titles).toHaveText(['Gone out']);
+    await list.getByRole('combobox', { name: 'Kind' }).selectOption('');
+    await list.getByRole('combobox', { name: 'State' }).selectOption('');
+    await list.getByPlaceholder('Search posts…').fill('harbour');
+    await expect(titles).toHaveText(['Harbour words']);
+    await list.getByPlaceholder('Search posts…').fill('');
+
+    await list.getByRole('button', { name: 'Delete Bridge thread' }).click();
+    await page.getByRole('alertdialog', { name: 'Delete this post?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(titles).toHaveText(['Harbour words', 'Gone out']);
+    await page.locator('.toast', { hasText: 'Deleted “Bridge thread”' }).getByRole('button', { name: 'Undo' }).click();
+    await expect(list.locator('.ol-row', { hasText: 'Bridge thread' })).toHaveCount(1);
+
+    await list.locator('.ol-open', { hasText: 'Harbour words' }).click();
+    await expect(list).toHaveCount(0);
+    await expect(page.getByRole('textbox', { name: 'Post name' })).toHaveValue('Harbour words');
+    fixture.expectNoUnexpectedRequests();
+  });
+});
+
+test.describe('a post saves itself', () => {
+  test('files nothing for a blank post, then saves as it is written, the header saying so', async ({ page }) => {
+    const fixture = await installAppFixture(page);
+    await page.goto('/#post');
+    const header = page.locator('.tool-header');
+    await expect(page.getByText('Geolocation post', { exact: true })).toBeVisible();
+    await page.waitForTimeout(1200);
+    expect(fixture.draftWrites).toEqual([]);
+    await expect(header.locator('.save-status')).toHaveCount(0);
+    await expect(header.getByRole('button', { name: /Save/ })).toHaveCount(0);
+
+    await page.locator('#pc-desc').fill('Smoke over the depot');
+    await expect(header.locator('.save-status')).toHaveText('Saved');
+    expect(fixture.draftWrites).toHaveLength(1);
+    expect(fixture.draftWrites[0]).toMatchObject({ rename_from: null, title: 'Post 1' });
+
+    // renamed when the field is left, the file moved with it
+    const name = page.getByRole('textbox', { name: 'Post name' });
+    await name.fill('Depot smoke');
+    await name.press('Enter');
+    await expect.poll(() => fixture.draftWrites.at(-1)).toMatchObject({ rename_from: 'Post 1', title: 'Depot smoke' });
+    await expect(header.locator('.save-status')).toHaveText('Saved');
+    fixture.expectNoUnexpectedRequests();
+  });
+
+  test('deletes the post open from its ⋯, back home, and Undo brings it back', async ({ page }) => {
+    const fixture = await installAppFixture(page, { drafts: DRAFTS, proofList: PROOFS, lookupEntities: lookups });
+    await postRoutes(page);
+    await page.goto('/#post');
+    const home = page.getByTestId('post-home');
+    await home.locator('.ph-card', { hasText: 'Harbour words' }).click();
+    await expect(page.getByRole('textbox', { name: 'Post name' })).toHaveValue('Harbour words');
+
+    await page.getByRole('button', { name: 'More for this post' }).click();
+    const menu = page.locator('.float-menu[aria-label="This post"]');
+    await expect(menu.locator('.fm-item')).toHaveText(['Add to notes…', 'Delete…']);
+    await menu.getByRole('button', { name: 'Delete…' }).click();
+    const ask = page.getByRole('alertdialog', { name: 'Delete this post?' });
+    await ask.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(home).toBeVisible();
+    await expect(home.locator('.ph-card', { hasText: 'Harbour words' })).toHaveCount(0);
+
+    await page.locator('.toast', { hasText: 'Deleted “Harbour words”' }).getByRole('button', { name: 'Undo' }).click();
+    await expect(home.locator('.ph-card', { hasText: 'Harbour words' })).toHaveCount(1);
+    expect(fixture.trashWrites).toEqual([{ kind: 'restore', groupId: 'trash-draft-1' }]);
+    fixture.expectNoUnexpectedRequests();
+  });
+});
+
+test.describe('whether it went out', () => {
+  test('Publish asks quietly, and the link pasted marks it posted on the draft', async ({ page }) => {
+    await catchWhatLeaves(page);
+    const fixture = await installAppFixture(page, { proofList: [PROOFS[0]], lookupEntities: lookups });
+    await postRoutes(page);
+    await page.goto('/#post');
+    await page.getByTestId('post-home').locator('.ph-card').first().click();
+    await expect(page.locator('.tweet-block textarea').first()).toHaveValue(FIRST_POST);
+
+    const went = page.locator('.went');
+    await expect(went).toHaveCount(0);
+    await page.getByRole('button', { name: 'Publish on X' }).click();
+    await expect(went).toHaveText(/It went out\?\s*Yes, paste its link\s*Not yet/);
+    await went.getByRole('button', { name: 'Yes, paste its link' }).click();
+    const field = went.getByRole('textbox', { name: 'The post\'s address' });
+    await expect(field).toBeFocused();
+    await field.fill('https://example.com/elsewhere');
+    await field.press('Enter');
+    await expect(went).toContainText('That is not the address of an X or Bluesky post.');
+    await field.fill('https://x.com/desk/status/1850000000000000009?s=20');
+    await went.getByRole('button', { name: 'Mark as posted' }).click();
+    await expect(went).toContainText(/Posted on X · \d{4}-\d{2}-\d{2}/);
+    await expect(went.getByRole('link')).toHaveAttribute('href', 'https://x.com/desk/status/1850000000000000009');
+    await expect.poll(() => fixture.draftWrites.at(-1)?.state.publish).toMatchObject({
+      site: 'x', url: 'https://x.com/desk/status/1850000000000000009', changed: false,
+    });
+
+    // an edit after it went out says so
+    await page.locator('#pc-desc').fill('A second look at the bridge');
+    await expect(went).toContainText('Changed since posted on X');
+    await expect.poll(() => fixture.draftWrites.at(-1)?.state.publish.changed).toBe(true);
     fixture.expectNoUnexpectedRequests();
   });
 });
@@ -228,25 +399,34 @@ test.describe('the extension window', () => {
 });
 
 test.describe('Reply under the source', () => {
-  test('opens X\'s reply page without the source line, the proof on the clipboard', async ({ page }) => {
+  test('one box under the source makes Reply the main action, the source line out of the post', async ({ page }) => {
     await catchWhatLeaves(page);
     const fixture = await installAppFixture(page, { proofList: [PROOFS[0]], lookupEntities: lookups });
     await postRoutes(page);
     await page.goto('/#post');
     await page.getByTestId('post-home').locator('.ph-card').first().click();
-    await expect(page.locator('.tweet-block textarea').first()).toHaveValue(FIRST_POST);
+    const first = page.locator('.tweet-block textarea').first();
+    await expect(first).toHaveValue(FIRST_POST);
 
+    const box = page.getByRole('checkbox', { name: 'Post as a reply under the source' });
+    await expect(box).not.toBeChecked();
+    await expect(page.getByRole('button', { name: 'Reply under the source' })).toHaveCount(0);
+    await box.check();
+    const text = FIRST_POST.replace(`\n\nSource: ${SOURCE_X}`, '');
+    await expect(first).toHaveValue(text);
+    await expect(page.getByRole('button', { name: 'Publish on X' })).toHaveCount(0);
     const reply = page.getByRole('button', { name: 'Reply under the source' });
-    await expect(reply).toHaveAttribute('title', /on X, without the Source line/);
+    await expect(reply).toHaveAttribute('title', 'Open the reply box under the source post on X');
     await reply.click();
     await expect(page.locator('.toast', { hasText: 'Picture copied: paste it with Ctrl+V.' })).toBeVisible();
 
     const opened = await page.evaluate(() => window.__opened);
-    const text = FIRST_POST.replace(`\n\nSource: ${SOURCE_X}`, '');
     expect(opened).toEqual([`https://x.com/intent/post?in_reply_to=1850000000000000000&text=${encodeURIComponent(text)}`]);
     const clipboard = await page.evaluate(() => window.__clipboard);
     expect(clipboard.at(-1)).toEqual({ types: ['image/png'] });
-    // and Publish opens the composer it always opened, with the source in it
+    // unchecked, Publish opens the composer it always opened, with the source in it
+    await box.uncheck();
+    await expect(first).toHaveValue(FIRST_POST);
     await page.getByRole('button', { name: 'Publish on X' }).click();
     await expect.poll(() => page.evaluate(() => window.__opened.at(-1)))
       .toBe(`https://x.com/intent/post?text=${encodeURIComponent(FIRST_POST)}`);
@@ -256,10 +436,11 @@ test.describe('Reply under the source', () => {
   test('is not offered for a source that is not an X or Bluesky post', async ({ page }) => {
     const fixture = await installAppFixture(page);
     await page.goto('/#post');
+    const box = page.getByRole('checkbox', { name: 'Post as a reply under the source' });
     await page.locator('#pc-source').fill('https://instagram.com/p/abc');
-    await expect(page.getByRole('button', { name: 'Reply under the source' })).toHaveCount(0);
+    await expect(box).toHaveCount(0);
     await page.locator('#pc-source').fill('https://bsky.app/profile/someone.bsky.social/post/3kabc');
-    await expect(page.getByRole('button', { name: 'Reply under the source' })).toBeVisible();
+    await expect(box).toBeVisible();
     fixture.expectNoUnexpectedRequests();
   });
 });
@@ -308,7 +489,7 @@ test.describe('post templates per kind', () => {
     const editor = page.locator('.tpl-modal');
     await expect(editor.locator('.pe-kind')).toHaveText('Map plate');
     await expect(editor.locator('textarea.body')).toHaveValue('#description\n\n#credits\n\n#mention');
-    await expect(editor.locator('select.reply')).toHaveCount(0);
+    await expect(editor.locator('label.reply')).toHaveCount(0);
     await editor.locator('.tpl-title').fill('Plate post');
     await editor.getByRole('button', { name: 'Save template' }).click();
     await expect(editor).toHaveCount(0);

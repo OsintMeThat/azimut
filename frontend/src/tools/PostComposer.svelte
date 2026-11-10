@@ -7,12 +7,13 @@
   import { copyText } from '../lib/clipboard.js';
   import { templatesState, postDraftState } from '../lib/state.svelte.js';
   import { holdsUnsaved, onBackForward, settlePlace } from '../lib/backButton.js';
+  import { createAutosave } from '../lib/autosave.svelte.js';
   import { createNote } from '../lib/notes.js';
   import { openGuide, openNotebook } from '../lib/navigate.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { proofCoordsText, proofSource } from '../lib/composer.js';
   import {
-    isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify, specAttr, specPath,
+    isDefaultName, nextName, savedSlugs, savedTitles, slugify, specAttr, specPath,
   } from '../lib/naming.js';
   import { filingName, planProofHandoff } from './post/handoff.js';
   import { startPost } from './post/start.js';
@@ -26,8 +27,9 @@
     postTarget, templateUsesPostField, togglePostMedia, pointLines,
     handoffThread, postHandoffUrl, postDate,
     defaultPostTemplate, normalizePostKind, postKind, postStarters, normPostTemplate,
-    replyIntentUrl, replyKeepsSource, replyPostText, replyTarget, startMediaPlan,
+    replyByDefault, replyIntentUrl, replyPostText, replyTarget, startMediaPlan,
     statedPostKind, templatesOfKind, videoTitle,
+    postedAddress, postFingerprint, postState,
   } from '../lib/post.js';
   import { extensionOutdated, extensionVersion, handOffPost } from '../lib/extBridge.js';
   import { bidiSafe } from '../lib/bidi.js';
@@ -38,11 +40,13 @@
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
+  import FloatingMenu from '../components/FloatingMenu.svelte';
   import BackButton from '../components/BackButton.svelte';
   import PostHome from './post/PostHome.svelte';
   import NewPostGallery from './post/NewPostGallery.svelte';
   import ExtensionWindow from './post/ExtensionWindow.svelte';
   import ReplyDialog from './post/ReplyDialog.svelte';
+  import PostOpenList from './post/PostOpenList.svelte';
 
   let coordsText = $state('');
   let geo = $state(null); // {lat, lon, dms, plus_code}
@@ -156,11 +160,13 @@
       && (caseDrafts === null || caseProofs === null || caseDrafts.length > 0 || caseProofs.length > 0)
   );
 
-  // Draft persistence. The name in the header is the draft's filename: saving
-  // writes under it, and renaming a saved draft moves its file (the backend
-  // does the move). `draftName` is the slug it is currently bound to, or null
-  // before the first save.
-  let postName = $state('');
+  // Draft persistence. A post saves itself, as Inspect's work does, once something is
+  // typed, picked or attached: an untouched blank post files nothing. The name in the
+  // header is the draft's filename. It is taken when the field is left (`postTitle`),
+  // and renaming a saved draft moves its file (the backend does the move). `draftName`
+  // is the slug it is bound to, or null before the first save.
+  let postName = $state(''); // the field
+  let postTitle = $state(''); // the name it is saved under, the field's once left
   let draftName = $state(null);
 
   // Every draft already saved in this case: the slugs to catch a name already
@@ -180,7 +186,11 @@
         draftEntities = list;
         // The name was assigned before the case's drafts were known. Renumber it
         // now rather than letting a fresh thread collide on its first save.
-        if (!draftName && isDefaultName(postName, 'draft')) postName = freshPostName();
+        if (!draftName && isDefaultName(postTitle, 'draft')) {
+          const fresh = freshPostName();
+          if (postName.trim() === postTitle) postName = fresh;
+          postTitle = fresh;
+        }
       })
       .catch(() => { if (live) draftEntities = []; });
     return () => { live = false; };
@@ -205,8 +215,12 @@
       if (draft) {
         const bound = await lookupEntity(id, specAttr('draft'), specPath('draft', draft));
         if (live && !bound && draftName === draft) {
+          // what is on screen stays, as it is: an edit is what files it again
           draftName = null;
-          toast('The saved draft was deleted. Saving now creates a new one', 'warn');
+          writtenKey = null;
+          blankKey = contentKey();
+          autosave.cancel();
+          toast('This post was deleted. An edit saves it again', 'warn');
         }
       }
       if (proof) {
@@ -221,10 +235,9 @@
       live = false;
     };
   });
-  let saving = $state(false);
-  let reportModal = $state(null); // { title, folder }
+  let reportModal = $state(null); // { title, folder }: Add to notes
+  let postMenu = $state(null); // the header's ⋯, by the button that opened it
   let reportSaving = $state(false);
-  let discardConfirm = $state(false);
   let openList = $state(null); // list of saved drafts, null = closed
 
   // Media picker modal
@@ -238,12 +251,15 @@
   // titles ride along for `#video`, which says a video's title and never its file name.
   let kindByPath = $state(new Map());
   let titleByPath = $state(new Map());
+  // and the rows themselves, for the picture a post card shows (their thumbnails)
+  let mediaByPath = $state(new Map());
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev;
     if (!id) {
       kindByPath = new Map();
       titleByPath = new Map();
+      mediaByPath = new Map();
       return;
     }
     let live = true;
@@ -253,11 +269,13 @@
         if (!live) return;
         kindByPath = new Map(items.map((it) => [it.path, it.kind]));
         titleByPath = new Map(items.map((it) => [it.path, videoTitle(it)]));
+        mediaByPath = new Map(items.map((it) => [it.path, it]));
       })
       .catch(() => {
         if (!live) return;
         kindByPath = new Map();
         titleByPath = new Map();
+        mediaByPath = new Map();
       });
     return () => { live = false; };
   });
@@ -268,13 +286,18 @@
 
   let postFor = $state(undefined); // id of the case the form's content belongs to
 
-  // reset the draft form when the case changes (close/switch/one-shot)
+  // reset the draft form when the case changes (close/switch/one-shot). A save still
+  // pending goes to the case the post was written in, as it stood.
   $effect(() => {
     const id = caseState.current?.id;
-    if (id !== postFor) {
+    if (id === postFor) return;
+    untrack(() => {
+      const pending = autosave.pending ? draftBody() : null;
+      autosave.cancel();
       postFor = id;
       resetDraft();
-    }
+      if (pending) writeDraft(pending).catch((e) => toast(`Post not saved: ${e.message}`, 'danger'));
+    });
   });
 
   // Ingest a proof handed over by the Proof Composer
@@ -346,26 +369,10 @@
     }
   }
 
-  /** Save what the composer holds under its own name, before something else
-   *  takes its place. Answers whether the thread is safely on disk. */
+  /** What the composer holds is written before something else takes its place: it
+   *  saves itself, so this only waits for what is pending. Answers whether it is on disk. */
   async function fileCurrentDraft() {
-    if (!caseState.current) return true;
-    const title = postName.trim();
-    if (!title) return true;
-    postName = filingName({
-      title,
-      bound: !!draftName,
-      takenSlugs: savedSlugs(draftEntities, 'draft'),
-      slug: slugify(title, 'draft'),
-      fresh: freshPostName(),
-    });
-    const saved = await performDraftSave(`Post saved: ${postName.trim()}`);
-    if (!saved) return false;
-    // The name for the next thread has to count past the one just written,
-    // which the case-wide list does not know about yet.
-    draftEntities = await fetchAllEntities(caseState.current.id, { types: ['post'] })
-      .catch(() => draftEntities);
-    return true;
+    return letGo();
   }
 
   function applyProof(p) {
@@ -439,8 +446,9 @@
     }
   }
 
+  // A reply under the source leaves the line naming it, and the post shows it so.
   function buildTweet1() {
-    return buildTweet1Lines(body, tokenFields());
+    return buildTweet1Lines(body, replying ? { ...tokenFields(), source: '' } : tokenFields());
   }
 
   /** The draft's facts as the tokens read them (lib/post.js `tweetFields`). */
@@ -508,7 +516,7 @@
       mention,
       body,
       mediaEnabled,
-      replyVariant,
+      replyChosen,
       extraTweets: extraTweets.map((e) => ({
         text: e.text,
         mediaPaths: [...e.mediaPaths],
@@ -529,7 +537,7 @@
     mention = norm.mention;
     body = norm.body;
     mediaEnabled = norm.mediaEnabled;
-    replyVariant = replyKeepsSource(t.data) ? 'keep-source' : 'drop-source';
+    replyChosen = replyByDefault(t.data);
     extraTweets = norm.extraTweets.map((e) => ({ id: ++extraSeq, ...e }));
     appliedPostTemplate = { name: t.name, prev };
     if (quiet) return;
@@ -577,7 +585,7 @@
     mention = p.mention;
     body = p.body;
     mediaEnabled = p.mediaEnabled;
-    replyVariant = p.replyVariant ?? 'drop-source';
+    replyChosen = p.replyChosen === true;
     extraTweets = p.extraTweets.map((e) => ({
       id: ++extraSeq,
       text: e.text,
@@ -936,7 +944,14 @@
 
   // ---- draft persistence --------------------------------------------------
 
+  /** What a save keeps: the thread, and whether it went out (`publish`) once that says something. */
   function snapshot() {
+    const state = threadState();
+    if (publishState) state.publish = publishRecord(state);
+    return state;
+  }
+
+  function threadState() {
     return {
       description,
       coordsText,
@@ -968,88 +983,260 @@
       ...(statedPostKind(kind)
         ? { kind, firstMedia: [...firstMedia], firstMediaType }
         : {}),
-      // a template that keeps the source in a reply says so on the post it shaped
-      ...(replyVariant === 'keep-source' ? { reply: 'keep-source' } : {}),
+      // written only for a post that goes out as a reply under its source
+      ...(replyChosen ? { reply: true } : {}),
     };
   }
 
-  // The saved report is titled after the thread it documents, so the two read as
-  // one piece of work. The report dialog leaves it editable.
-  const draftTitle = () => postName.trim() || 'Untitled post';
+  // ---- whether it went out --------------------------------------------------------
+  // `publishState` is the draft's `publish` record (lib/post.js `postState`): when Publish,
+  // Reply or the extension opened the site with it, and once the analyst pasted its link,
+  // where it went out and when, with a print of the post as it was then (`mark`), so an
+  // edit after it reads as changed since posted. Nothing of it is written before then.
+  let publishState = $state(null);
+  // The quiet line under the header: asking whether it went out, or taking its link.
+  let wentOut = $state(null); // null | 'ask' | 'paste'
+  let pastedLink = $state('');
+  let pasteError = $state('');
 
-  // Saving writes under the name in the header. A bound draft writes back over
-  // itself, and renaming it moves the file — the backend refuses a rename onto a
-  // name another draft holds. An unbound draft landing on a saved name is the
-  // one case that can go either way, so it asks first.
-  let overwritePrompt = $state(null);
-
-  async function saveDraft() {
-    if (!caseState.current) {
-      toast('Open a case to save a draft', 'warn');
-      return;
-    }
-    const title = postName.trim();
-    if (!title || saving) return;
-    if (!draftName && savedSlugs(draftEntities, 'draft').has(slugify(title, 'draft'))) {
-      overwritePrompt = { slug: slugify(title, 'draft') };
-      return;
-    }
-    return performDraftSave();
+  // What the post says and carries, as its print reads it: its platform and a first
+  // post rebuilt from the fields are not what changed.
+  function postPrint(state = threadState()) {
+    const words = { ...state, tweet1: tweet1Edited ? tweet1 : null };
+    delete words.target;
+    return postFingerprint(JSON.stringify(words));
   }
 
-  async function performDraftSave(message = 'Draft saved') {
-    saving = true;
-    // What was sent is what is saved: an edit typed while the save is on its way
-    // still counts as unsaved.
-    const sent = contentState();
-    try {
-      const r = await api.post(`/api/cases/${caseState.current.id}/drafts`, {
-        rename_from: draftName,
-        title: postName.trim(),
-        state: snapshot(),
-      });
-      draftName = r.name;
-      postName = r.title;
-      savedKey = contentKey(sent, r.title);
-      await reloadCase(); // surface the post entity in the sidebar
-      toast(message, 'ok', 1600);
-      return true;
-    } catch (e) {
-      toast(`Draft not saved: ${e.message}`, 'danger');
-      return false;
-    } finally {
-      saving = false;
-      overwritePrompt = null;
+  function publishRecord(state) {
+    const record = { ...publishState };
+    if (record.url) record.changed = postPrint(state) !== record.mark;
+    return record;
+  }
+
+  const liveState = $derived(postState(publishState?.url ? publishRecord(threadState()) : publishState));
+  const postedSite = $derived(publishState?.url ? postTarget(postedAddress(publishState.url)?.site).label : '');
+
+  /** The site opened with the post: it is asked, quietly, whether it went out. */
+  function markOpened(site) {
+    const now = new Date().toISOString();
+    publishState = publishState?.url ? { ...publishState, opened_at: now } : { ...(publishState ?? {}), opened_at: now, site };
+    wentOut = 'ask';
+    pastedLink = '';
+    pasteError = '';
+  }
+
+  /** The analyst's word that it went out, with the link it went out at. */
+  function markPosted() {
+    const found = postedAddress(pastedLink);
+    if (!found) {
+      pasteError = 'That is not the address of an X or Bluesky post.';
+      return;
+    }
+    publishState = {
+      ...(publishState ?? {}), site: found.site, url: found.url,
+      posted_at: new Date().toISOString(), mark: postPrint(),
+    };
+    wentOut = null;
+    pastedLink = '';
+    pasteError = '';
+  }
+
+  function cancelPaste() {
+    wentOut = liveState === 'opened' ? 'ask' : null;
+    pastedLink = '';
+    pasteError = '';
+  }
+
+  // The note is titled after the post it is written from, so the two read as one piece
+  // of work. The dialog leaves it editable.
+  const draftTitle = () => postTitle.trim() || 'Untitled post';
+
+  // ---- saving itself ----------------------------------------------------------
+  // `blankKey` is the post as it was opened or reset: a post that is still that saves
+  // nothing. `writtenKey` is what the last write sent (or the draft as it was loaded),
+  // so a write runs only when there is something new to keep. `postRun` counts the
+  // posts opened, so a write that lands after another post took the screen binds nothing.
+  let blankKey = $state(null);
+  let writtenKey = null;
+  let postRun = 0;
+  let opening = $state(false); // a saved draft is being laid out: nothing to write yet
+
+  const saveKey = (state, title) => JSON.stringify({ state, title });
+
+  /** What a write would send now, or null when there is nothing to keep. */
+  function draftBody() {
+    const caseId = postFor;
+    if (!caseId || opening) return null;
+    if (!draftName && contentKey() === blankKey) return null;
+    const state = snapshot();
+    const typed = postTitle.trim() || freshPostName();
+    // An unbound post whose name another draft took files under a fresh one rather
+    // than write over it: there is nobody to ask, and nothing is ever written over.
+    const title = filingName({
+      title: typed,
+      bound: !!draftName,
+      takenSlugs: savedSlugs(draftEntities, 'draft'),
+      slug: slugify(typed, 'draft'),
+      fresh: freshPostName(),
+    });
+    const key = saveKey(state, title);
+    if (key === writtenKey) return null;
+    return { caseId, run: postRun, key, payload: { rename_from: draftName, title, state } };
+  }
+
+  async function writeDraft(body = draftBody(), opts = undefined) {
+    if (!body) return;
+    const r = await api.post(`/api/cases/${body.caseId}/drafts`, body.payload, opts);
+    if (body.run !== postRun) return; // another post took the screen meanwhile
+    const first = !draftName;
+    draftName = r.name;
+    if (postName.trim() === postTitle.trim() || postName.trim() === body.payload.title) postName = r.title;
+    postTitle = r.title;
+    writtenKey = saveKey(body.payload.state, r.title);
+    if (first) {
+      // the sidebar and the next name count it now
+      reloadCase();
+      draftEntities = await fetchAllEntities(body.caseId, { types: ['post'] }).catch(() => draftEntities);
     }
   }
 
+  const autosave = createAutosave({ write: () => writeDraft() });
+
+  // Any change to a post that holds something is written once the typing stops.
+  $effect(() => {
+    const key = saveKey(snapshot(), postTitle.trim());
+    if (!caseState.current || opening || blankKey === null) return;
+    if (!draftName && contentKey() === blankKey) return;
+    if (key === writtenKey) return;
+    autosave.schedule();
+  });
+
+  // Leaving the tool is a moment to write rather than wait.
+  $effect(() => {
+    if (uiState.tool !== 'post') untrack(() => autosave.flush());
+  });
+  $effect(() => () => autosave.flush());
+
+  function onpagehide() {
+    if (autosave.pending) writeDraft(draftBody(), { keepalive: true }).catch(() => {});
+  }
+
+  /** The header's word on it: nothing for a post that holds nothing yet. */
+  const saveStatus = $derived.by(() => {
+    if (autosave.state.status === 'error') return 'error';
+    if (autosave.state.status === 'pending' || autosave.state.status === 'saving') return 'saving';
+    return draftName ? 'saved' : '';
+  });
+
+  /**
+   * The name field is taken when it is left, as Inspect's is: renaming moves the file,
+   * so it moves once rather than at every letter. A name another post holds is
+   * refused, and a blank one goes back to the name it had.
+   */
+  function commitName() {
+    const typed = postName.trim();
+    if (!typed) {
+      postName = postTitle;
+      return;
+    }
+    if (typed === postTitle) return;
+    const own = (draftName ?? '').toLowerCase();
+    const slug = slugify(typed, 'draft').toLowerCase();
+    const taken = [...savedSlugs(draftEntities, 'draft')].some((one) => one.toLowerCase() === slug && one.toLowerCase() !== own);
+    if (taken) {
+      toast(`Another post is already named “${typed}”`, 'warn');
+      postName = postTitle;
+      return;
+    }
+    postTitle = typed;
+  }
+
+  function nameKey(event) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      event.currentTarget.blur();
+    } else if (event.key === 'Escape') {
+      postName = postTitle;
+      event.currentTarget.blur();
+    }
+  }
+
+  // Open: the dialog stands on the press, its rows following when the case answers. The
+  // proofs are read with them when the home has not, for the pictures of the rows.
+  let openListLoading = $state(false);
   async function openDraftList() {
-    if (!caseState.current) return;
+    const caseId = caseState.current?.id;
+    if (!caseId) return;
+    openList ??= [];
+    openListLoading = true;
     try {
-      openList = await api.get(`/api/cases/${caseState.current.id}/drafts`);
+      const [drafts, proofs] = await Promise.all([
+        api.get(`/api/cases/${caseId}/drafts`),
+        caseProofs ?? api.get(`/api/cases/${caseId}/proofs`).catch(() => null),
+      ]);
+      // closed while it was read: it stays closed
+      if (openList === null || caseState.current?.id !== caseId) return;
+      openList = drafts;
+      if (!caseProofs && Array.isArray(proofs) && listsFor === caseId) caseProofs = proofs;
+      else if (!caseProofs && Array.isArray(proofs)) openProofs = proofs;
     } catch (e) {
-      toast(e.message, 'danger');
+      openList = null;
+      toast(`The posts could not be read: ${e.message}`, 'warn');
+    } finally {
+      openListLoading = false;
     }
   }
+  let openProofs = $state(null); // the proofs, read by Open when the home had not
+  // Read again while it is up when the case moves: a delete, an Undo, a restore elsewhere.
+  $effect(() => {
+    caseState.rev;
+    if (untrack(() => openList) !== null) untrack(() => openDraftList());
+  });
 
-  let deleteEntry = $state(null); // open-list entry pending deletion
+  // ---- deleting a post ------------------------------------------------------------
+  // From the header's ⋯ for the post open, a card on the home or the Open list: one
+  // question with what the delete touches, the draft to the Trash, and Undo in the
+  // toast. The post open goes back home once it is gone.
+  let deleteEntry = $state(null); // { name, title } pending deletion
+  let deleting = $state(false);
+
+  function askDelete(entry) {
+    if (entry?.name) deleteEntry = { name: entry.name, title: entry.title || entry.name };
+  }
+
   async function deleteSavedDraft() {
     const entry = deleteEntry;
-    deleteEntry = null;
+    const caseId = caseState.current?.id;
+    if (!entry || !caseId || deleting) return;
+    deleting = true;
+    const open = draftName === entry.name;
     try {
-      const caseId = caseState.current.id;
+      // what is pending is written first, so the Trash keeps the post as it was left
+      if (open) await autosave.flush();
       const result = await api.del(`/api/cases/${caseId}/drafts/${encodeURIComponent(entry.name)}`);
-      await Promise.all([openDraftList(), reloadCase()]);
+      deleteEntry = null;
+      if (open && draftName === entry.name) {
+        // gone on purpose: no word that the post was deleted behind the composer
+        autosave.cancel();
+        resetDraft();
+      }
       deletedToast(caseId, result, entry.title);
+      await reloadCase(); // the home and an Open list up read the case again
     } catch (e) {
       toast(e.message, 'danger');
+    } finally {
+      deleting = false;
     }
   }
 
   async function loadDraft(name) {
     if (!caseState.current) return;
+    const run = ++postRun;
+    opening = true;
     try {
       const doc = await api.get(`/api/cases/${caseState.current.id}/drafts/${encodeURIComponent(name)}`);
+      if (run !== postRun) return;
+      autosave.cancel();
       const s = doc.state ?? {};
       // a draft from before kinds says none, and is the geolocation it always was
       kind = normalizePostKind(s.kind);
@@ -1059,7 +1246,12 @@
         : [];
       firstMediaType = own && ['video', 'images'].includes(s.firstMediaType) ? s.firstMediaType : 'none';
       postOpen = true;
-      replyVariant = s.reply === 'keep-source' ? 'keep-source' : 'drop-source';
+      replyChosen = s.reply === true;
+      publishState = s.publish && typeof s.publish === 'object' ? publishFrom(s.publish) : null;
+      // a post opened on the site and never said to have gone out is asked about again
+      wentOut = postState(publishState) === 'opened' ? 'ask' : null;
+      pastedLink = '';
+      pasteError = '';
       description = s.description ?? '';
       coordsText = s.coordsText ?? '';
       place = s.place ?? '';
@@ -1099,6 +1291,7 @@
       draftName = name;
       settlePlace('post', where(), { navigate: true });
       postName = doc.title || name;
+      postTitle = postName;
       appliedPostTemplate = null;
       // restore geo facts from the coordinates, then honor any manual tweet edits
       if (s.coordsText?.trim()) {
@@ -1110,15 +1303,33 @@
       } else {
         geo = null;
       }
+      if (run !== postRun) return;
       tweet1 = s.tweet1 ?? buildTweet1();
       tweet1Edited = s.tweet1Edited ?? false;
       target = normalizePostTarget(s.target);
       openList = null;
-      savedKey = contentKey();
-      toast('Draft loaded', 'ok', 1400);
+      // as it was saved: opening it writes nothing
+      blankKey = contentKey();
+      writtenKey = saveKey(snapshot(), postTitle.trim());
     } catch (e) {
-      toast(`Could not load draft: ${e.message}`, 'danger');
+      toast(`Could not open the post: ${e.message}`, 'danger');
+    } finally {
+      if (run === postRun) opening = false;
     }
+  }
+
+  /** A saved `publish` record as this build reads it: what it does not know is left out. */
+  function publishFrom(saved) {
+    const text = (value) => (typeof value === 'string' && value ? value : undefined);
+    const found = postedAddress(saved.url);
+    const record = Object.fromEntries(Object.entries({
+      opened_at: text(saved.opened_at),
+      site: ['x', 'bluesky'].includes(saved.site) ? saved.site : undefined,
+      url: found?.url,
+      posted_at: found ? text(saved.posted_at) : undefined,
+      mark: found ? text(saved.mark) : undefined,
+    }).filter(([, value]) => value !== undefined));
+    return Object.keys(record).length ? record : null;
   }
 
   /** A blank post: Geolocation unless a start names another kind. */
@@ -1127,7 +1338,12 @@
     firstMedia = [];
     firstMediaType = 'none';
     postOpen = false;
-    replyVariant = 'drop-source';
+    replyChosen = false;
+    beforeReply = null;
+    publishState = null;
+    wentOut = null;
+    pastedLink = '';
+    pasteError = '';
     description = '';
     coordsText = '';
     geo = null;
@@ -1148,51 +1364,49 @@
     extraTweets = [];
     draftName = null;
     postName = freshPostName();
+    postTitle = postName;
     appliedPostTemplate = null;
     defaultDeclined = false;
-    discardConfirm = false;
+    postRun += 1;
+    opening = false;
+    writtenKey = null;
     startFromDefaultTemplate();
-    savedKey = contentKey();
+    blankKey = contentKey();
   }
 
-  // ---- what is not saved yet ------------------------------------------------
-  // What a save would keep, to tell work from the composer as it was opened, reset
-  // or last saved. The platform follows Settings on a blank post, an untouched first
-  // tweet is rebuilt from the fields and a numbered name is renumbered once the case's
-  // drafts are known, so none of them counts as work on its own.
+  // ---- what counts as work ---------------------------------------------------------
+  // What a save would keep, to tell work from the post as it was opened or reset. The
+  // platform follows Settings on a blank post, an untouched first post is rebuilt from
+  // the fields and a numbered name is renumbered once the case's drafts are known, so
+  // none of them counts as work on its own.
   function contentState() {
     const state = snapshot();
     delete state.target;
     delete state.tweet1;
     return { ...state, tweet1: tweet1Edited ? tweet1 : null };
   }
-  function contentKey(state = contentState(), title = postName) {
+  function contentKey(state = contentState(), title = postTitle) {
     const named = String(title ?? '').trim();
     return JSON.stringify({ ...state, title: isDefaultName(named, 'draft') ? '' : named });
   }
-  let savedKey = $state(null);
-  const unsaved = $derived(savedKey !== null && contentKey() !== savedKey);
   $effect(() => {
-    if (savedKey === null) untrack(() => (savedKey = contentKey()));
+    if (blankKey === null) untrack(() => (blankKey = contentKey()));
   });
 
-  // Opening another draft, from the list, the sidebar or Back, asks first when this
-  // post has changes not saved, so nothing is dropped without the analyst saying so.
-  let leaving = $state(null); // { answer(ok) }
-  function mayLeave() {
-    if (!unsaved) return Promise.resolve(true);
-    leaving?.answer(false);
-    return new Promise((resolve) => {
-      leaving = {
-        answer: (ok) => {
-          leaving = null;
-          resolve(ok);
-        },
-      };
-    });
+  /**
+   * Before the post on screen makes way (another draft, Back, the home, New post):
+   * what is pending is written and waited for. A post whose save failed stays open,
+   * where the header says so and offers Retry, rather than be dropped.
+   */
+  async function letGo() {
+    await tick(); // a change made a moment ago reaches the autosave first
+    await autosave.flush();
+    if (!autosave.unsaved) return true;
+    toast('The post could not be saved, so it stays open', 'warn');
+    return false;
   }
   async function requestLoadDraft(name) {
-    if (await mayLeave()) await loadDraft(name);
+    if (await letGo()) await loadDraft(name);
   }
 
   // Where the composer is, in the address: the saved draft open, or none. Opening a
@@ -1203,12 +1417,13 @@
   onDestroy(onBackForward('post', async (to) => {
     const target = to.draft ?? null;
     if (target === draftName) return true;
-    if (!(await mayLeave())) return false;
+    if (!(await letGo())) return false;
     if (target) await loadDraft(target);
     else resetDraft();
     return true;
   }));
-  onDestroy(holdsUnsaved('post', () => unsaved));
+  // only a save that failed holds anything the page could lose
+  onDestroy(holdsUnsaved('post', () => autosave.unsaved));
 
   const hasContent = $derived(
     !!(draftName || description.trim() || coordsText.trim() || date.trim() || mediaPaths.length ||
@@ -1232,7 +1447,7 @@
     if (t) {
       untrack(() => {
         applyPostTemplate(t, { quiet: true });
-        savedKey = contentKey();
+        blankKey = contentKey();
       });
     }
   });
@@ -1294,13 +1509,14 @@
       description,
       source,
       attachments: reportAttachmentPaths(),
+      posted: publishState?.url ? { url: publishState.url, at: publishState.posted_at } : null,
       ...evidence,
     });
   }
 
   function openSaveReport() {
     if (!caseState.current) {
-      toast('Open a case to save a report', 'warn');
+      toast('Open a case to add the post to its notes', 'warn');
       return;
     }
     reportModal = { title: draftTitle(), folder: '' };
@@ -1330,12 +1546,12 @@
       });
       await reloadCase();
       reportModal = null;
-      toast('Report saved as a note', 'ok', 6000, {
+      toast('Added to notes', 'ok', 6000, {
         label: 'OPEN',
         onClick: () => openNotebook(note.id),
       });
     } catch (error) {
-      toast(`Report not saved: ${error.message}`, 'danger');
+      toast(`Not added to notes: ${error.message}`, 'danger');
     } finally {
       reportSaving = false;
     }
@@ -1401,6 +1617,7 @@
     if (!posts.length) return false;
     try {
       await handOffPost({ url, caseId: caseState.current.id, posts });
+      markOpened(target);
       // What it manages is the extension's to report — it is still filling while
       // this runs. What is said here is what is already true.
       const left = dropped ? ` ${dropped} file${dropped > 1 ? 's' : ''} over the per-post limit stayed behind.` : '';
@@ -1423,19 +1640,36 @@
 
   // ---- reply under the source --------------------------------------------------
   // A geolocation whose source line is an X or a Bluesky post can go out as a reply
-  // under it. Its first post leaves the line naming the source out, unless the template
-  // says to keep it (`replyVariant`). Nothing is posted: the reply box opens filled.
+  // under it: one box under the source says so, and the main action becomes Reply
+  // under the source. Its first post leaves the line naming the source, shown so in
+  // the post, since it sits right under it; a link typed back in goes out as typed. A
+  // template can start its posts replying (`reply`), and the draft keeps the choice.
+  // Nothing is posted: the reply box opens filled.
   const replyTo = $derived(geolocation ? replyTarget(source) : null);
   const replySite = $derived(replyTo ? postTarget(replyTo.site).label : '');
-  let replyVariant = $state('drop-source');
+  let replyChosen = $state(false);
+  const replying = $derived(!!replyTo && replyChosen);
+  // A rewritten post loses its source lines on the way into a reply, and gets them back
+  // on the way out while it was not touched in between.
+  let beforeReply = null; // { text, reply }
   let replyDialog = $state(false);
   const pasteKeys = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '') ? '⌘V' : 'Ctrl+V';
 
-  function replyText() {
-    return replyPostText({
-      text: tweet1, edited: tweet1Edited, body, fields: tokenFields(),
-      keepSource: replyVariant === 'keep-source',
-    });
+  function setReplying(on) {
+    replyChosen = on;
+    if (!tweet1.trim()) return;
+    if (!tweet1Edited) {
+      regenerate();
+      return;
+    }
+    if (on) {
+      const text = replyPostText({ text: tweet1, edited: true, body, fields: tokenFields() });
+      beforeReply = { text: tweet1, reply: text };
+      tweet1 = text;
+    } else if (beforeReply && beforeReply.reply === tweet1) {
+      tweet1 = beforeReply.text;
+    }
+    if (!on) beforeReply = null;
   }
 
   /**
@@ -1451,6 +1685,7 @@
     if (!posts.length) return false;
     try {
       await handOffPost({ url: replyTo.url, caseId: caseState.current.id, posts, reply_to: replyTo.url });
+      markOpened(replyTo.site);
       const left = dropped ? ` ${dropped} file${dropped > 1 ? 's' : ''} over the per-post limit stayed behind.` : '';
       toast(`${replySite} is opening the reply under the source.${left} Nothing was posted.`, 'info', 4200);
       return true;
@@ -1465,8 +1700,8 @@
     if (publishing || !replyTo) return;
     publishing = true;
     try {
-      const text = bidiSafe(replyText());
-      await copyAll(false, text);
+      const text = bidiSafe(tweet1);
+      await copyAll(false);
       if (await tryReplyHandOff(text)) return;
       if (replyTo.site !== 'x') {
         // Bluesky has no page that opens a reply with words in it
@@ -1486,6 +1721,7 @@
         }
       }
       window.open(replyIntentUrl(replyTo.id, text), '_blank', 'noopener,noreferrer');
+      markOpened('x');
       const more = threadParts(text).length > 1 ? ' The next posts are here to copy.' : '';
       toast(
         pictured ? `Picture copied: paste it with ${pasteKeys}.${more}` : `Opened ${replySite} under the source post.${more}`,
@@ -1500,8 +1736,11 @@
   /** Bluesky without the extension: the reply copied, and the source post opened to paste it under. */
   async function copyReplyAndOpen() {
     replyDialog = false;
-    await copyText(bidiSafe(replyText()), { said: 'Post copied' });
-    if (replyTo) window.open(replyTo.url, '_blank', 'noopener,noreferrer');
+    await copyText(bidiSafe(tweet1), { said: 'Post copied' });
+    if (replyTo) {
+      window.open(replyTo.url, '_blank', 'noopener,noreferrer');
+      markOpened(replyTo.site);
+    }
   }
 
   // ---- the extension window ------------------------------------------------------
@@ -1550,7 +1789,7 @@
   const compact = $derived(fold >= 2);
   let needs = [0, 0];
   const headerHolds = $derived([
-    homeShown, homeAvailable, hasContent, !!replyTo, windowPutAway && extensionMissing,
+    homeShown, homeAvailable, hasContent, replying, windowPutAway && extensionMissing, saveStatus,
     kind, !!draftName, targetInfo.label, !!caseState.current,
   ].join('|'));
 
@@ -1583,7 +1822,7 @@
 
   /** New post: the gallery of starts, once the post on screen may make way. */
   async function openGallery() {
-    if (!(await mayLeave())) return;
+    if (!(await letGo())) return;
     galleryOpen = true;
   }
 
@@ -1605,9 +1844,9 @@
     await requestLoadDraft(draft.name);
   }
 
-  /** Back to the home, asking first when the post holds changes not saved. */
+  /** Back to the home, once what is pending is written. */
   async function backToHome() {
-    if (!(await mayLeave())) return;
+    if (!(await letGo())) return;
     resetDraft();
   }
 
@@ -1621,6 +1860,7 @@
       if (await tryHandOff()) return;
       const url = postComposeUrl(target, bidiSafe(tweet1));
       window.open(url, '_blank', 'noopener,noreferrer');
+      markOpened(target);
       toast(
         copied ? `Opened ${targetInfo.label}. Posts copied for replies.` : `Opened ${targetInfo.label}. Copy the replies from here.`,
         'info',
@@ -1632,6 +1872,8 @@
   }
 </script>
 
+<svelte:window {onpagehide} />
+
 <div class="tool">
   <!-- Narrower than what it holds (the case panel open on a laptop, a reply beside
        Publish), the header shows its secondary buttons as icons rather than cut off
@@ -1640,10 +1882,23 @@
     {#if !homeShown}
       <!-- the way back to the posts of the case, once it has some to list -->
       {#if homeAvailable}
-        <BackButton label="Posts" title="Back to the drafts and what is ready to post" onclick={backToHome} guide="post.home" />
+        <BackButton label="Posts" title="Back to the posts of this case" onclick={backToHome} guide="post.home" />
       {/if}
       {#if caseState.current}
-        <input class="input title-input" bind:value={postName} maxlength="200" aria-label="Post name" />
+        <input class="input title-input" bind:value={postName} onblur={commitName} onkeydown={nameKey}
+          maxlength="200" aria-label="Post name" title="Rename the post" />
+        <button class="btn btn-ghost btn-sm post-more" data-guide="post.report" aria-label="More for this post" title="More for this post"
+          aria-haspopup="menu" aria-expanded={!!postMenu} onclick={(event) => (postMenu = postMenu ? null : event.currentTarget)}>
+          <Icon name="more" size={14} stroke={2.4} />
+        </button>
+        {#if saveStatus === 'saving'}
+          <span class="save-status">Saving…</span>
+        {:else if saveStatus === 'saved'}
+          <span class="save-status" title="This post saves itself as you write"><Icon name="check" size={12} /> Saved</span>
+        {:else if saveStatus === 'error'}
+          <span class="save-status error" title={autosave.state.error}><Icon name="alert" size={12} /> Not saved</span>
+          <button class="btn btn-ghost btn-xs" onclick={() => autosave.flush()}>Retry</button>
+        {/if}
       {/if}
       {#if !geolocation}
         <span class="kind-chip" title="What this post is made from"><Icon name={postKind(kind).icon} size={12} /> {postKind(kind).label}</span>
@@ -1656,7 +1911,7 @@
         </span>
       {/if}
       {#if caseState.current}
-        <button class="btn btn-sm" onclick={openDraftList} title="Reopen a saved draft">
+        <button class="btn btn-sm" onclick={openDraftList} title="Open a post of this case">
           <Icon name="folderOpen" size={14} /> <span class="words">Open</span>
         </button>
       {/if}
@@ -1665,35 +1920,68 @@
           <Icon name="plus" size={14} /> New post
         </button>
       {:else}
-        {#if hasContent}
-          <button class="btn btn-sm" onclick={() => (discardConfirm = true)} title="Clear this draft">
-            <Icon name="reset" size={14} /> <span class="words">Discard</span>
-          </button>
-        {/if}
-        <button class="btn btn-sm" onclick={saveDraft} disabled={saving || !postName.trim()} title="Keep this thread to reopen and edit here">
-          <Icon name="save" size={14} /> <span class="words">{draftName ? 'Save draft' : 'Save as draft'}</span>
-        </button>
-        <button class="btn btn-ok btn-sm" data-guide="post.report" onclick={openSaveReport} disabled={!hasContent || reportSaving} title="Write the finding up as a Notebook note">
-          <Icon name="file" size={14} /> <span class="words">Save report</span>
-        </button>
-        <button class="btn btn-info btn-sm" data-guide="post.publish" onclick={publish} disabled={!tweet1.trim() || publishing} title={`Copy posts and open ${targetInfo.label}`}>
-          <Icon name="post" size={14} /> Publish on {targetInfo.label}
-        </button>
-        {#if replyTo}
-          <button class="btn btn-info btn-sm" data-guide="post.reply" onclick={replyUnderSource} disabled={!tweet1.trim() || publishing}
-            aria-label="Reply under the source"
-            title={`Open the reply box under the source post on ${replySite}${replyVariant === 'keep-source' ? '' : ', without the Source line'}`}>
+        {#if replying}
+          <!-- the main action, while the post goes out under its source -->
+          <button class="btn btn-info btn-sm" data-guide="post.publish" onclick={replyUnderSource} disabled={!tweet1.trim() || publishing}
+            aria-label="Reply under the source" title={`Open the reply box under the source post on ${replySite}`}>
             <Icon name="undo" size={14} /> {narrow ? 'Reply' : 'Reply under the source'}
+          </button>
+        {:else}
+          <button class="btn btn-info btn-sm" data-guide="post.publish" onclick={publish} disabled={!tweet1.trim() || publishing} title={`Copy posts and open ${targetInfo.label}`}>
+            <Icon name="post" size={14} /> Publish on {targetInfo.label}
           </button>
         {/if}
       {/if}
     </div>
   </div>
 
+  {#if postMenu}
+    <FloatingMenu anchor={postMenu} width={230} label="This post" onclose={() => (postMenu = null)}>
+      <button type="button" class="fm-item" disabled={!hasContent} title="Write this post into a new case note, with its proof and media"
+        onclick={() => { postMenu = null; openSaveReport(); }}>
+        <Icon name="file" size={14} /><span class="fm-grow">Add to notes…</span></button>
+      {#if draftName}
+        <div class="fm-sep"></div>
+        <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored"
+          onclick={() => { postMenu = null; askDelete({ name: draftName, title: postTitle }); }}>
+          <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
+      {/if}
+    </FloatingMenu>
+  {/if}
+
+  {#if !homeShown && (wentOut || liveState === 'posted' || liveState === 'changed')}
+    <!-- Whether the post went out: asked quietly once the site was opened with it, and
+         said once it is known. Nothing is ever posted from here. -->
+    <div class="went" class:asking={wentOut} role="status">
+      {#if wentOut === 'ask'}
+        <Icon name="post" size={13} />
+        <span class="went-words">It went out?</span>
+        <button class="btn btn-ghost btn-xs" onclick={() => (wentOut = 'paste')}>Yes, paste its link</button>
+        <button class="btn btn-ghost btn-xs" onclick={() => (wentOut = null)}>Not yet</button>
+      {:else if wentOut === 'paste'}
+        <Icon name="link" size={13} />
+        <form class="went-paste" onsubmit={(event) => { event.preventDefault(); markPosted(); }}>
+          <!-- svelte-ignore a11y_autofocus -->
+          <input class="input" bind:value={pastedLink} oninput={() => (pasteError = '')} autofocus
+            placeholder="https://x.com/you/status/…" aria-label="The post's address" aria-invalid={!!pasteError}
+            title="The address of the post on X or Bluesky, as the browser shows it" />
+          <button class="btn btn-primary btn-xs" disabled={!pastedLink.trim()}>Mark as posted</button>
+          <button type="button" class="btn btn-ghost btn-xs" onclick={cancelPaste}>Cancel</button>
+        </form>
+        {#if pasteError}<span class="went-error">{pasteError}</span>{/if}
+      {:else}
+        <Icon name={liveState === 'changed' ? 'edit' : 'check'} size={13} />
+        <span class="went-words">{`${liveState === 'changed' ? 'Changed since posted on' : 'Posted on'} ${postedSite}`}{publishState?.posted_at ? ` · ${publishState.posted_at.slice(0, 10)}` : ''}</span>
+        <a class="went-link" href={publishState.url} target="_blank" rel="noreferrer" title="Open the post">{publishState.url.replace(/^https:\/\//, '')}</a>
+        <button class="btn btn-ghost btn-xs" onclick={() => (wentOut = 'paste')}>Change link</button>
+      {/if}
+    </div>
+  {/if}
+
   {#if homeShown}
   <div class="tool-body home-body">
-    <PostHome caseId={caseState.current?.id ?? ''} drafts={caseDrafts} proofs={caseProofs}
-      onnew={openGallery} onopen={openFromHome} onall={openDraftList} onproof={postProofFromHome} />
+    <PostHome caseId={caseState.current?.id ?? ''} drafts={caseDrafts} proofs={caseProofs} media={mediaByPath}
+      onnew={openGallery} onopen={openFromHome} onall={openDraftList} onproof={postProofFromHome} ondelete={askDelete} />
   </div>
   {:else}
   <div class="tool-body">
@@ -1891,6 +2179,16 @@
             disabled={fieldDisabledByTemplate('source')}
           ></textarea>
         </div>
+        {/if}
+
+        {#if replyTo}
+          <!-- Beside the source rather than inside its field, so a layout leaving the
+               source out never greys it. -->
+          <label class="reply-check" data-guide="post.reply"
+            title={`The post goes out under the source post on ${replySite}, without the link to it`}>
+            <input type="checkbox" checked={replyChosen} onchange={(event) => setReplying(event.currentTarget.checked)} />
+            Post as a reply under the source
+          </label>
         {/if}
 
       </div>
@@ -2177,9 +2475,10 @@
 {/if}
 
 {#if reportModal}
-  <Modal title="Save report as note" onclose={() => (reportModal = null)} width="580px">
-    <label class="modal-label" for="report-note-title">Title</label>
-    <input id="report-note-title" class="input" placeholder="Report title…" bind:value={reportModal.title} />
+  <Modal title="Add to notes" onclose={() => (reportModal = null)} width="580px">
+    <p class="modal-lead">Writes this post into a new case note: its place, its source and its pictures. The post stays as it is.</p>
+    <label class="modal-label" for="report-note-title">Note title</label>
+    <input id="report-note-title" class="input" placeholder="Note title…" bind:value={reportModal.title} />
 
     <span class="modal-label" style="margin-top:10px">Folder</span>
     <FolderSelect bind:value={reportModal.folder} folders={caseState.current?.folders ?? []} emptyLabel="Unfiled" fresh />
@@ -2188,87 +2487,31 @@
       <div style="flex:1"></div>
       <button class="btn" onclick={() => (reportModal = null)}>Cancel</button>
       <button class="btn btn-primary" onclick={saveReport} disabled={reportSaving}>
-        {reportSaving ? 'Saving…' : 'Save report'}
+        {reportSaving ? 'Adding…' : 'Add to notes'}
       </button>
     </div>
   </Modal>
 {/if}
 
 {#if openList}
-  <Modal title="Open a saved draft" onclose={() => (openList = null)} width="560px">
-    {#if !openList.length}
-      <div class="empty"><p>No saved drafts in this case yet.</p></div>
-    {:else}
-      <div class="open-list">
-        {#each openList as entry (entry.name)}
-          <div class="open-row-wrap">
-            <button class="open-row" onclick={() => requestLoadDraft(entry.name)}>
-              <div class="open-meta">
-                <span class="open-title">{entry.title}</span>
-                <span class="open-sub">{entry.updated_at?.slice(0, 10)}</span>
-              </div>
-            </button>
-            <button class="btn btn-ghost btn-sm open-del" title="Delete this saved draft" onclick={() => (deleteEntry = entry)}>
-              <Icon name="trash" size={13} />
-            </button>
-          </div>
-        {/each}
-      </div>
-    {/if}
-  </Modal>
+  <PostOpenList caseId={caseState.current?.id ?? ''} drafts={openList} loading={openListLoading}
+    proofs={caseProofs ?? openProofs} media={mediaByPath}
+    onopen={(draft) => requestLoadDraft(draft.name)} ondelete={askDelete} onclose={() => (openList = null)} />
 {/if}
 
 {#if deleteEntry}
   <ConfirmDialog
-    title="Delete this draft?"
+    title="Delete this post?"
     message={`“${deleteEntry.title}” will be removed from the case.`}
-    detail="Moves the saved draft to the case trash."
+    detail="Moves the post to the case trash."
     impact={{ caseId: caseState.current?.id, named: [{ tool: 'draft', name: deleteEntry.name }] }}
     restorable={RESTORABLE}
     confirmLabel="Delete"
     tone="default"
     icon="trash"
+    busy={deleting}
     onconfirm={deleteSavedDraft}
     oncancel={() => (deleteEntry = null)}
-  />
-{/if}
-
-{#if leaving}
-  <ConfirmDialog
-    title="Leave this post?"
-    message="Its changes are not saved."
-    confirmLabel="Leave without saving"
-    cancelLabel="Keep editing"
-    tone="danger"
-    icon="reset"
-    onconfirm={() => leaving.answer(true)}
-    oncancel={() => leaving.answer(false)}
-  />
-{/if}
-
-{#if discardConfirm}
-  <ConfirmDialog
-    title="Discard this draft?"
-    message="This clears the current post."
-    detail={draftName ? 'This does not delete the saved draft, only the unsaved changes here.' : 'Anything not saved yet will be lost.'}
-    confirmLabel="Discard"
-    tone="danger"
-    icon="reset"
-    onconfirm={() => resetDraft()}
-    oncancel={() => (discardConfirm = false)}
-  />
-{/if}
-
-{#if overwritePrompt}
-  <ConfirmDialog
-    title="Overwrite this draft?"
-    message={`“${savedTitle(draftEntities, 'draft', overwritePrompt.slug)}” is already saved in this case.`}
-    detail="Saving replaces its thread. Rename this draft to keep both."
-    confirmLabel="Overwrite"
-    tone="danger"
-    icon="check"
-    onconfirm={performDraftSave}
-    oncancel={() => (overwritePrompt = null)}
   />
 {/if}
 
@@ -2476,6 +2719,48 @@
     font-weight: 600;
     white-space: nowrap;
   }
+  .post-more { flex: none; padding-inline: 5px; color: var(--text-2); }
+  .save-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: none;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+  }
+  .save-status.error { color: var(--danger); }
+  .modal-lead { margin: 0 0 14px; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.5; }
+  /* the quiet line under the header: whether the post went out */
+  .went {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    min-width: 0;
+    padding: 6px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-1);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+  .went.asking { background: color-mix(in srgb, var(--accent) 7%, var(--bg-1)); }
+  .went > :global(svg) { flex: none; color: var(--text-3); }
+  .went.asking > :global(svg) { color: var(--accent); }
+  .went-words { flex: none; color: var(--text-1); font-weight: 600; }
+  .went-link {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-2);
+    font-family: var(--font-mono);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .went-link:hover { color: var(--accent); }
+  .went-paste { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; max-width: 620px; }
+  .went-paste .input { flex: 1; min-width: 0; height: 26px; font-size: var(--fs-xs); font-family: var(--font-mono); }
+  .went-paste .input[aria-invalid='true'] { border-color: var(--danger); }
+  .went-error { flex: none; color: var(--danger); }
   .ext-quiet {
     color: var(--text-3);
     font-size: var(--fs-xs);
@@ -2577,6 +2862,16 @@
     line-height: 1.4;
   }
   .field-note { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--text-3); }
+  .reply-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: -6px;
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+  }
+  .reply-check input { margin: 0; accent-color: var(--accent); }
   .field.template-disabled {
     opacity: 0.48;
     cursor: not-allowed;
@@ -2697,23 +2992,4 @@
     white-space: nowrap;
   }
   .modal-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
-  .open-list { display: flex; flex-direction: column; gap: 8px; }
-  .open-row-wrap { display: flex; align-items: center; gap: 4px; }
-  .open-row-wrap .open-row { flex: 1; min-width: 0; }
-  .open-del { color: var(--danger); flex-shrink: 0; }
-  .open-row {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    padding: 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    background: var(--bg-2);
-    cursor: pointer;
-    text-align: left;
-  }
-  .open-row:hover { border-color: var(--accent); }
-  .open-meta { display: flex; flex-direction: column; gap: 2px; }
-  .open-title { font-weight: 600; font-size: var(--fs-sm); }
-  .open-sub { font-size: var(--fs-xs); color: var(--text-3); }
 </style>
