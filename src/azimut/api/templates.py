@@ -177,11 +177,37 @@ class PostExtraTweet(CanonicalModel):
     text: str = Field(default="", max_length=4_000)
 
 
+#: What a post is made from, as New post offers it (frontend `lib/post.js` POST_KINDS).
+PostKind = Literal["geolocation", "video", "plate", "free"]
+#: A post template's keys that a template from before them never had. Unset, they stay
+#: unwritten, so a 0.3.3 template reads and saves back byte for byte.
+POST_UNSTATED_WHEN_NONE = ("kind", "reply")
+
+
 class PostTemplateData(CanonicalModel):
     mention: str = Field(default="@GeoConfirmed", max_length=280)
     body: str = Field(default=DEFAULT_POST_BODY, min_length=1, max_length=16_000)
     mediaEnabled: StrictBool = True
     extraTweets: list[PostExtraTweet] = Field(default_factory=list, max_length=MAX_POST_TWEETS)
+    # The kind of post it shapes. None is a Geolocation one, which is what every
+    # template was before kinds, and "geolocation" is read as that same None so the
+    # kind has one spelling.
+    kind: PostKind | None = None
+    # Whether a reply under the source keeps the line naming it. None leaves it out.
+    reply: Literal["keep-source", "drop-source"] | None = None
+
+    @field_validator("kind")
+    @classmethod
+    def geolocation_says_nothing(cls, kind: str | None) -> str | None:
+        return None if kind == "geolocation" else kind
+
+    @model_serializer(mode="wrap")
+    def _unstated_stays_unwritten(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = dict(handler(self))
+        for key in POST_UNSTATED_WHEN_NONE:
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
 
     @model_validator(mode="before")
     @classmethod

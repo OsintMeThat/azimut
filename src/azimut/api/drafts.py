@@ -30,8 +30,12 @@ router = APIRouter(prefix="/api", tags=["drafts"])
 DRAFT_MARKER = 1
 MAX_MEDIA_PER_POST = 4
 MAX_EXTRA_POSTS = 20
-MAX_DRAFT_ATTACHMENTS = 1 + MAX_MEDIA_PER_POST * (1 + MAX_EXTRA_POSTS)
+# the proof, or the first post's own pictures, then the media post and the later ones
+MAX_DRAFT_ATTACHMENTS = 1 + MAX_MEDIA_PER_POST * (2 + MAX_EXTRA_POSTS)
 MAX_ARTIFACT_PATH_LENGTH = 512
+#: What a post is made from (frontend `lib/post.js` POST_KINDS). A draft that says
+#: nothing is a Geolocation one, as every draft was before kinds.
+POST_KINDS = ("geolocation", "video", "plate", "free")
 
 
 class DraftIn(BaseModel):
@@ -66,23 +70,25 @@ def _artifact_path(value: Any, field: str) -> str | None:
     return value
 
 
-def _media_paths(state: dict[str, Any], field: str) -> list[str]:
-    current = state.get("mediaPaths")
-    if current is None:
+def _media_paths(state: dict[str, Any], field: str, key: str = "mediaPaths") -> list[str]:
+    current = state.get(key)
+    if current is None and key == "mediaPaths":
         current = [] if state.get("mediaPath") is None else [state.get("mediaPath")]
+    if current is None:
+        current = []
     if not isinstance(current, list):
-        raise HTTPException(status_code=422, detail=f"{field}.mediaPaths must be an array")
+        raise HTTPException(status_code=422, detail=f"{field}.{key} must be an array")
     if len(current) > MAX_MEDIA_PER_POST:
         raise HTTPException(
             status_code=422,
-            detail=f"{field}.mediaPaths allows at most {MAX_MEDIA_PER_POST} paths",
+            detail=f"{field}.{key} allows at most {MAX_MEDIA_PER_POST} paths",
         )
     paths = []
     for index, value in enumerate(current):
-        path = _artifact_path(value, f"{field}.mediaPaths[{index}]")
+        path = _artifact_path(value, f"{field}.{key}[{index}]")
         if path is None:
             raise HTTPException(
-                status_code=422, detail=f"{field}.mediaPaths[{index}] must be a path string"
+                status_code=422, detail=f"{field}.{key}[{index}] must be a path string"
             )
         paths.append(path)
     return paths
@@ -93,6 +99,9 @@ def _draft_source_paths(state: dict[str, Any]) -> list[str]:
     proof = _artifact_path(state.get("proofPng"), "state.proofPng")
     if proof:
         paths.append(proof)
+    # The pictures on the first post of a post that is not a geolocation, where the
+    # proof would be on one that is.
+    paths.extend(_media_paths(state, "state", "firstMedia"))
     paths.extend(_media_paths(state, "state"))
 
     extra = state.get("extraTweets", [])
@@ -116,6 +125,27 @@ def _draft_source_paths(state: dict[str, Any]) -> list[str]:
     return unique
 
 
+def _post_count(state: dict[str, Any]) -> int:
+    """How many posts a draft's thread holds, as the composer copies it: the first one,
+    the media post when it is on and chosen, and each later post that says or carries
+    something."""
+    def said(value: Any) -> bool:
+        return isinstance(value, str) and bool(value.strip())
+
+    def carried(post: dict[str, Any]) -> bool:
+        paths = post.get("mediaPaths")
+        return isinstance(paths, list) and bool(paths)
+
+    count = 1
+    if state.get("mediaEnabled", True) is not False and state.get("mediaType", "none") != "none":
+        count += 1
+    extra = state.get("extraTweets")
+    for post in extra if isinstance(extra, list) else []:
+        if isinstance(post, dict) and (said(post.get("text")) or carried(post)):
+            count += 1
+    return count
+
+
 @router.get("/cases/{case_id}/drafts")
 def list_drafts(case_id: str) -> list[dict[str, Any]]:
     case = get_case(case_id)
@@ -128,6 +158,7 @@ def list_drafts(case_id: str) -> list[dict[str, Any]]:
         if data.get("azimut_draft") != DRAFT_MARKER:
             continue
         state = data.get("state")
+        state = state if isinstance(state, dict) else {}
         drafts.append(
             {
                 "name": path.stem,
@@ -136,7 +167,14 @@ def list_drafts(case_id: str) -> list[dict[str, Any]]:
                 "created_at": data.get("created_at"),
                 # The Saved map popup uses this small listing to identify the
                 # destination without loading every full draft state.
-                "target": state.get("target") if isinstance(state, dict) else None,
+                "target": state.get("target"),
+                # What Post's home says of each draft without opening it: its kind,
+                # how many posts it holds, and the proof or the video it posts, which
+                # is also how the home knows what has a post already.
+                "kind": state.get("kind") if state.get("kind") in POST_KINDS else "geolocation",
+                "posts": _post_count(state),
+                "proof": state.get("proofPng") if isinstance(state.get("proofPng"), str) else None,
+                "video": state.get("video") if isinstance(state.get("video"), str) else None,
             }
         )
     drafts.sort(key=lambda d: d.get("updated_at") or "", reverse=True)

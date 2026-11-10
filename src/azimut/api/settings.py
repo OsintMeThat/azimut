@@ -59,6 +59,7 @@ DEFAULT_HOME_VIEW = config.DEFAULT_SETTINGS["home_view"]
 DEFAULT_POST_MENTION = config.DEFAULT_SETTINGS["post_mention"]
 DEFAULT_POST_TARGET = config.DEFAULT_SETTINGS["post_target"]
 DEFAULT_POST_TEMPLATE = config.DEFAULT_SETTINGS["post_template"]
+TEMPLATE_ID = r"^[A-Za-z0-9_-]{1,64}$"
 DEFAULT_PROOF_TEMPLATE = config.DEFAULT_SETTINGS["proof_template"]
 DEFAULT_SIGNATURE_HANDLE = config.DEFAULT_SETTINGS["signature_handle"]
 REPORT_KEYS = ("report_name", "report_role", "report_organisation")
@@ -67,6 +68,20 @@ REPORT_KEYS = ("report_name", "report_role", "report_organisation")
 def _one_line(value: Any) -> Any:
     """Who signs, on one line: runs of spaces and line breaks become one space."""
     return " ".join(value.split()) if isinstance(value, str) else value
+
+
+def _kind_templates(value: Any) -> dict[str, str]:
+    """Each kind's default post template, the readable ones only: a kind this build
+    does not keep, or an id no template can carry, reads as none rather than failing."""
+    if not isinstance(value, dict):
+        return {}
+    return {
+        kind: template_id
+        for kind, template_id in value.items()
+        if kind in config.POST_TEMPLATE_KINDS
+        and isinstance(template_id, str)
+        and re.fullmatch(TEMPLATE_ID, template_id)
+    }
 
 
 class KeysIn(BaseModel):
@@ -132,6 +147,11 @@ class PrefsIn(BaseModel):
     post_target: str | None = None  # social composer a new post draft starts with
     # id of the post template a new draft starts with; "" is the classic layout
     post_template: str | None = Field(default=None, pattern=r"^$|^[A-Za-z0-9_-]{1,64}$")
+    # the template each other kind of post starts with, by kind; a kind left out has none
+    post_kind_templates: dict[
+        Literal["video", "plate", "free"],
+        Annotated[str, Field(pattern=r"^$|^[A-Za-z0-9_-]{1,64}$")],
+    ] | None = None
     # id of the proof template New proof starts with; "" is none
     proof_template: str | None = Field(default=None, pattern=r"^$|^[A-Za-z0-9_-]{1,64}$")
     post_prefill: bool | None = None  # let the extension fill that composer
@@ -205,6 +225,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "post_mention": settings.get("post_mention", DEFAULT_POST_MENTION),
         "post_target": settings.get("post_target", DEFAULT_POST_TARGET),
         "post_template": settings.get("post_template", DEFAULT_POST_TEMPLATE),
+        "post_kind_templates": _kind_templates(settings.get("post_kind_templates")),
         "proof_template": settings.get("proof_template", DEFAULT_PROOF_TEMPLATE),
         "post_prefill": bool(settings.get("post_prefill", True)),
         "reverse_prefill": bool(settings.get("reverse_prefill", True)),
@@ -377,6 +398,9 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["post_target"] = body.post_target
     if body.post_template is not None:
         settings["post_template"] = body.post_template
+    if body.post_kind_templates is not None:
+        # the whole map, as Settings holds it: a kind cleared is a kind left out
+        settings["post_kind_templates"] = _kind_templates(body.post_kind_templates)
     if body.proof_template is not None:
         settings["proof_template"] = body.proof_template
     if body.post_prefill is not None:
@@ -833,6 +857,7 @@ class ImportedSettings(BaseModel):
     post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=280)
     post_target: str = DEFAULT_POST_TARGET
     post_template: str = DEFAULT_POST_TEMPLATE
+    post_kind_templates: dict[str, Any] = Field(default_factory=dict, max_length=16)
     proof_template: str = DEFAULT_PROOF_TEMPLATE
     post_prefill: bool = True
     reverse_prefill: bool = True
@@ -935,6 +960,12 @@ class ImportedSettings(BaseModel):
     def readable_template_id(cls, value: str) -> str:
         """An id no template carries reads as none rather than failing the backup."""
         return value if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value) else ""
+
+    @field_validator("post_kind_templates", mode="before")
+    @classmethod
+    def readable_kind_templates(cls, value: Any) -> dict[str, str]:
+        """Each kind's default read as the live route reads it, the unreadable left out."""
+        return _kind_templates(value)
 
 
 class ImportedIcon(BaseModel):

@@ -319,3 +319,47 @@ def test_a_style_can_carry_the_azimut_mark(client):
 )
 def test_unreadable_scene_keys_and_marks_are_refused(client, data):
     assert client.post("/api/templates/proof", json={"name": "Bad", "data": data}).status_code == 422
+
+
+# -- post templates: a kind, a reply variant, and the ones from before --------------
+
+POST_FIXTURE = Path(__file__).parent / "fixtures" / "post-templates-0.3.3.json"
+
+
+def test_post_templates_from_before_read_and_save_back_as_written(client):
+    """A 0.3.3 thread layout has no kind and no reply variant: it lists as written, saves
+    back byte for byte, and gains neither key on the way (a Geolocation one, unchanged)."""
+    stored = json.loads(POST_FIXTURE.read_text(encoding="utf-8"))
+    config.save_templates(stored)
+
+    listed = client.get("/api/templates").json()["post"]
+    assert [t["data"] for t in listed] == [t["data"] for t in stored["post"]]
+
+    for record in stored["post"]:
+        saved = client.post(
+            "/api/templates/post",
+            json={"id": record["id"], "name": record["name"], "data": record["data"]},
+        )
+        assert saved.status_code == 200, saved.text
+        assert json.dumps(saved.json()["data"]) == json.dumps(record["data"])
+        assert "kind" not in saved.json()["data"] and "reply" not in saved.json()["data"]
+
+    on_disk = json.loads(config.templates_path().read_text(encoding="utf-8"))["post"]
+    assert [json.dumps(t["data"]) for t in on_disk] == [json.dumps(t["data"]) for t in stored["post"]]
+
+
+def test_a_post_template_can_say_its_kind_and_its_reply_variant(client):
+    plate = client.post(
+        "/api/templates/post",
+        json={"name": "Plate", "data": {"body": "#description\n\n#credits", "kind": "plate", "reply": "keep-source"}},
+    )
+    assert plate.status_code == 200, plate.text
+    assert plate.json()["data"]["kind"] == "plate"
+    assert plate.json()["data"]["reply"] == "keep-source"
+
+    # Geolocation is what saying nothing means, so it has the one spelling
+    geo = client.post("/api/templates/post", json={"name": "Geo", "data": {"kind": "geolocation"}}).json()
+    assert "kind" not in geo["data"]
+
+    for bad in ({"kind": "telegram"}, {"reply": "maybe"}):
+        assert client.post("/api/templates/post", json={"name": "Bad", "data": bad}).status_code == 422

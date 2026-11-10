@@ -489,6 +489,38 @@ def test_a_backup_with_an_unreadable_template_id_still_restores(client, key):
     assert body["post_mention"] == "@kept"
 
 
+def test_every_kind_of_posts_default_travels_with_the_backup(client):
+    client.put("/api/settings/prefs", json={"post_template": "tpl_geo"})
+    client.put("/api/settings/prefs", json={"post_kind_templates": {"free": "tpl_free", "plate": "tpl_plate"}})
+    blob = client.get("/api/settings/export").json()
+    assert blob["settings"]["post_kind_templates"] == {"free": "tpl_free", "plate": "tpl_plate"}
+
+    client.put("/api/settings/prefs", json={"post_template": "", "post_kind_templates": {}})
+    res = client.post("/api/settings/import", json=blob)
+    assert res.status_code == 200, res.text
+    assert {"post_template", "post_kind_templates"} <= set(res.json()["imported"])
+    body = client.get("/api/settings").json()
+    assert body["post_template"] == "tpl_geo"
+    assert body["post_kind_templates"] == {"free": "tpl_free", "plate": "tpl_plate"}
+
+
+def test_a_backup_with_unreadable_kind_defaults_keeps_the_readable_ones(client):
+    res = client.post(
+        "/api/settings/import",
+        json={"settings": {
+            "post_kind_templates": {"free": "tpl_ok", "plate": "../bad", "telegram": "x"},
+            "post_mention": "@kept",
+        }},
+    )
+    assert res.status_code == 200, res.text
+    body = client.get("/api/settings").json()
+    assert body["post_kind_templates"] == {"free": "tpl_ok"}
+    assert body["post_mention"] == "@kept"
+    odd = client.post("/api/settings/import", json={"settings": {"post_kind_templates": "free"}})
+    assert odd.status_code == 200, odd.text
+    assert client.get("/api/settings").json()["post_kind_templates"] == {}
+
+
 def test_a_backup_naming_detect_layers_still_imports(client):
     # Detect's layers were a setting until they moved to the browser, per case.
     res = client.post(

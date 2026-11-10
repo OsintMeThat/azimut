@@ -1073,6 +1073,24 @@ def test_each_default_template_is_its_own_setting(client, key):
     assert client.put("/api/settings/prefs", json={key: ""}).json()[key] == ""
 
 
+def test_each_kind_of_post_keeps_a_default_template_of_its_own(client):
+    """Geolocation's stays `post_template`; the other kinds share one map of their own,
+    sent whole by Settings, so a kind left out is a kind with no default."""
+    body = client.get("/api/settings").json()
+    assert body["post_kind_templates"] == {}
+
+    saved = client.put("/api/settings/prefs", json={"post_kind_templates": {"free": "tpl_free", "plate": ""}})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["post_kind_templates"] == {"free": "tpl_free"}
+    assert saved.json()["post_template"] == ""
+    client.put("/api/settings/prefs", json={"post_template": "tpl_geo"})
+    assert client.get("/api/settings").json()["post_kind_templates"] == {"free": "tpl_free"}
+
+    for bad in ({"geolocation": "tpl"}, {"telegram": "tpl"}, {"free": "../x"}, ["free"]):
+        assert client.put("/api/settings/prefs", json={"post_kind_templates": bad}).status_code == 422, bad
+    assert client.put("/api/settings/prefs", json={"post_kind_templates": {}}).json()["post_kind_templates"] == {}
+
+
 def test_extension_hand_off_switches_default_on_and_round_trip(client):
     """Both are on out of the box, because with no extension installed neither
     changes anything: Publish opens the intent page and a Reverse Search button
