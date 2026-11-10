@@ -138,6 +138,48 @@ test.describe('the home', () => {
   });
 });
 
+test.describe('the home in three parts', () => {
+  const PARTS = {
+    ...DRAFTS,
+    'Opened one': draft('Opened one', { target: 'x', proofPng: 'proofs/port-1.png', publish: { opened_at: '2026-11-10T09:00:00Z', site: 'x' } }),
+    'Gone out': draft('Gone out', {
+      target: 'x', proofPng: 'proofs/port-2.png',
+      publish: { opened_at: '2026-11-10T09:00:00Z', site: 'x', url: 'https://x.com/desk/status/1850000000000000009', posted_at: '2026-11-10T09:05:00Z', mark: 'm', changed: false },
+    }),
+  };
+
+  test('In progress, Ready to post and Posted, each card wearing its state, and a card deletes with Undo', async ({ page }) => {
+    const fixture = await installAppFixture(page, { drafts: PARTS, proofList: PROOFS, lookupEntities: lookups });
+    await postRoutes(page);
+    await page.goto('/#post');
+    const home = page.getByTestId('post-home');
+    await expect(home.locator('h4')).toHaveText(['In progress', 'Ready to post', 'Posted']);
+    await expect(home.getByRole('button', { name: 'New post' })).toBeVisible();
+    const progress = home.locator('[data-part="progress"]');
+    await expect(progress.locator('.ph-title')).toHaveText(['Bridge thread', 'Harbour words', 'Opened one']);
+    await expect(progress.locator('.ph-pill')).toHaveText(['Draft', 'Draft', 'Opened in X']);
+    const posted = home.locator('[data-part="posted"]');
+    await expect(posted.locator('.ph-title')).toHaveText(['Gone out']);
+    await expect(posted.locator('.ph-pill')).toHaveText(['Posted']);
+    await expect(posted.getByRole('link')).toHaveAttribute('href', 'https://x.com/desk/status/1850000000000000009');
+
+    // a right-click and the ⋯ open the same menu
+    await progress.locator('.post-card', { hasText: 'Harbour words' }).click({ button: 'right' });
+    const menu = page.locator('.float-menu[aria-label="Harbour words"]');
+    await expect(menu.locator('.fm-item')).toHaveText(['Open', 'Delete…']);
+    await page.keyboard.press('Escape');
+    await progress.locator('.post-card', { hasText: 'Harbour words' }).hover();
+    await progress.getByRole('button', { name: 'More for Harbour words' }).click();
+    await menu.getByRole('button', { name: 'Delete…' }).click();
+    await page.getByRole('alertdialog', { name: 'Delete this post?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(progress.locator('.ph-title')).toHaveText(['Bridge thread', 'Opened one']);
+    await page.locator('.toast', { hasText: 'Deleted “Harbour words”' }).getByRole('button', { name: 'Undo' }).click();
+    await expect(progress.locator('.post-card', { hasText: 'Harbour words' })).toHaveCount(1);
+    await expect(progress.locator('.post-card')).toHaveCount(3);
+    fixture.expectNoUnexpectedRequests();
+  });
+});
+
 test.describe('a post saves itself', () => {
   test('files nothing for a blank post, then saves as it is written, the header saying so', async ({ page }) => {
     const fixture = await installAppFixture(page);

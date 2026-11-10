@@ -12,7 +12,9 @@
 import { matchesTerms } from '../../lib/folderBrowse.js';
 import { onVideo } from '../../lib/proofList.js';
 import { videoName } from '../../lib/proofScene.js';
-import { normalizePostKind, postKind, postTarget, STARTABLE_POST_KINDS } from '../../lib/post.js';
+import {
+  normalizePostKind, postKind, postStateLabel, postTarget, STARTABLE_POST_KINDS,
+} from '../../lib/post.js';
 
 /** How many drafts the home lists before "All N drafts". */
 export const DRAFTS_SHOWN = 6;
@@ -33,6 +35,32 @@ export function draftLine(draft) {
 
 /** The drafts the home shows: the last ones saved. */
 export const recentDrafts = (drafts, shown = DRAFTS_SHOWN) => (drafts ?? []).slice(0, shown);
+
+/** Where a listed draft stands, as `GET /drafts` says (`api/drafts.py`): a draft when it says nothing. */
+export function draftState(draft) {
+  return ['opened', 'posted', 'changed'].includes(draft?.state) ? draft.state : 'draft';
+}
+
+/** The pill a card wears: its state, an opened one naming the site it was opened on. */
+export function draftPill(draft) {
+  const state = draftState(draft);
+  return { state, label: postStateLabel(state, draft?.site ?? draft?.target) };
+}
+
+/**
+ * The home's two parts of drafts: **in progress**, what has not gone out or was changed
+ * since, newest first as the list gives them; and **posted**, the latest to go out first.
+ */
+export function homeDrafts(drafts) {
+  const progress = [];
+  const posted = [];
+  for (const draft of drafts ?? []) (draftState(draft) === 'posted' ? posted : progress).push(draft);
+  posted.sort((a, b) => String(b.posted?.at ?? b.updated_at ?? '').localeCompare(String(a.posted?.at ?? a.updated_at ?? '')));
+  return { progress, posted };
+}
+
+/** A posted link as a card prints it: the address without its scheme. */
+export const shortLink = (url) => String(url ?? '').replace(/^https?:\/\//, '');
 
 /** The drafts a search by name finds, in the list's order. */
 export function findDrafts(drafts, query) {
@@ -78,9 +106,20 @@ export function readyToPost(proofs, drafts, { threads = STARTABLE_POST_KINDS.inc
   return { photos, videos: waiting };
 }
 
-/** The picture a draft card shows: its proof's thumbnail when the case still lists it. */
-export function draftPicture(draft, proofs) {
-  if (!draft?.proof) return null;
-  const row = (proofs ?? []).find((one) => one.png === draft.proof);
-  return row ? row.thumb ?? row.png : null;
+/**
+ * The picture a draft card shows, read off the lists the app already has: its proof's
+ * thumbnail when the case still lists the proof, else the thumbnail of the first file it
+ * carries (`picture`, from `GET /drafts`), or that file itself when it is an image. A
+ * video with no thumbnail yet, or a file the case no longer lists, shows the kind's icon.
+ *
+ * `media` maps a case path to its `/media` row (`kind`, `thumbnail`).
+ */
+export function draftPicture(draft, proofs, media = new Map()) {
+  const path = draft?.picture ?? draft?.proof;
+  if (!path) return null;
+  const row = (proofs ?? []).find((one) => one.png === path);
+  if (row) return row.thumb ?? row.png;
+  const item = media.get(path);
+  if (!item) return null;
+  return item.thumbnail ?? (item.kind === 'image' ? path : null);
 }

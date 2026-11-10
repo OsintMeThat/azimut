@@ -5239,15 +5239,19 @@ for that release. It writes a post or a thread and opens the site to publish it;
 never posts, and pressing Post on X or Bluesky stays the analyst's.
 
 - **The home** stands where an empty composer would, once the case holds a draft or a
-  proof: **New post** and a search that finds a draft by name (Enter opens the first);
-  **Drafts**, the last six saved, each with its platform, its kind when it is not a
-  geolocation, and how many posts it holds; and **Ready to post**, the proofs no draft
-  names yet, a proof of a video listed under its video with the slides that wait. One
-  press on a proof writes its geolocation, as Attach a proof does. A proof *has a post*
-  when a draft names its picture, read off the drafts list (`GET /drafts` carries each
-  draft's `kind`, `posts`, `proof` and `video`, and whether it went out: `state`,
-  `site`, `posted`, with the `picture` its card shows), so a draft sent to the Trash
-  gives its proof back at once. A case with neither keeps the composer it always opened on.
+  proof: **New post** and a search that finds a draft by name (Enter opens the first),
+  then three parts. **In progress**, the last six drafts not gone out yet or changed
+  since, each with its platform, its kind when it is not a geolocation, and how many
+  posts it holds; **Ready to post**, the proofs no draft names yet, a proof of a video
+  listed under its video with the slides that wait; and **Posted**, the latest six to go
+  out, each with its link. Every post card wears its state as a pill (*Draft*, *Opened
+  in X*, *Posted*, *Changed since posted*), and its ⋯ or a right-click offers **Open**,
+  **See the post** once posted, and **Delete…**. One press on a proof writes its
+  geolocation, as Attach a proof does. A proof *has a post* when a draft names its
+  picture, read off the drafts list (`GET /drafts` carries each draft's `kind`,
+  `posts`, `proof`, `video`, `state`, `site`, `posted` and the `picture` its card
+  shows, all read off the file it opens anyway), so a draft sent to the Trash gives its
+  proof back at once. A case with neither keeps the composer it always opened on.
   **‹ Posts**, first in the header, goes back to the home.
 - **A post saves itself**, as Inspect's work does: once something is typed, picked or
   attached, it is written when the typing stops, and the header says *Saving…*, then

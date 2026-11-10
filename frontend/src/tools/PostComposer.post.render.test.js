@@ -224,6 +224,58 @@ describe('the home', () => {
   });
 });
 
+describe('the home in three parts', () => {
+  const row = (name, state, extra = {}) => ({
+    name, title: name, updated_at: '2026-11-09T10:00:00Z', target: 'x', kind: 'geolocation', posts: 1, proof: null, video: null,
+    state, site: state === 'draft' ? null : 'x', posted: null, picture: null, ...extra,
+  });
+  const part = (name) => home().querySelector(`[data-part="${name}"]`);
+  const titles = (root) => [...(root?.querySelectorAll('.ph-title') ?? [])].map((t) => t.textContent);
+  const pills = (root) => [...(root?.querySelectorAll('.ph-pill') ?? [])].map((t) => t.textContent);
+
+  it('splits the drafts from what went out, each card wearing its state', async () => {
+    lists.drafts = [
+      row('Fresh', 'draft'),
+      row('Sent', 'opened'),
+      row('Out', 'posted', { posted: { url: 'https://x.com/desk/status/1', site: 'x', at: '2026-11-10T08:00:00Z' } }),
+      row('Edited', 'changed', { posted: { url: 'https://x.com/desk/status/2', site: 'x', at: '2026-11-08T08:00:00Z' } }),
+    ];
+    lists.proofs = [{ name: 'waiting', title: 'waiting', png: 'proofs/waiting.png', thumb: null, video: null, updated_at: '2026-11-08T10:00:00Z' }];
+    await mountPost();
+    expect([...home().querySelectorAll('h4')].map((h) => h.textContent)).toEqual(['In progress', 'Ready to post', 'Posted']);
+    expect(titles(part('progress'))).toEqual(['Fresh', 'Sent', 'Edited']);
+    expect(pills(part('progress'))).toEqual(['Draft', 'Opened in X', 'Changed since posted']);
+    expect(titles(part('posted'))).toEqual(['Out']);
+    expect(pills(part('posted'))).toEqual(['Posted']);
+    const link = part('posted').querySelector('a.ph-out');
+    expect(link.getAttribute('href')).toBe('https://x.com/desk/status/1');
+    expect(link.textContent.trim()).toBe('x.com/desk/status/1');
+    // New post stays at the top
+    expect(home().querySelector('.ph-start .ph-new').textContent.trim()).toBe('New post');
+  });
+
+  it('deletes a post from its card\'s ⋯ or a right-click, with Undo', async () => {
+    lists.drafts = [row('Fresh', 'draft'), row('Other', 'draft')];
+    api.del.mockImplementation(async () => ({ status: 'deleted', deleted: ['d1'], trash: 'trash-1' }));
+    await mountPost();
+    home().querySelector('button[aria-label="More for Fresh"]').click();
+    flushSync();
+    const menu = document.querySelector('.float-menu[aria-label="Fresh"]');
+    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Open', 'Delete…']);
+    button(menu, 'Delete…').click();
+    await settle();
+    button(document.querySelector('[role="alertdialog"]'), 'Delete').click();
+    await settle();
+    expect(api.del).toHaveBeenCalledWith('/api/cases/case-1/drafts/Fresh');
+    expect(uiState.toasts.at(-1)).toMatchObject({ message: 'Deleted “Fresh”', action: { label: 'Undo' } });
+
+    const card = [...home().querySelectorAll('.post-card')].find((c) => c.textContent.includes('Other'));
+    card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
+    flushSync();
+    expect(document.querySelector('.float-menu[aria-label="Other"]')).not.toBeNull();
+  });
+});
+
 describe('New post', () => {
   beforeEach(() => {
     lists.drafts = [{ name: 'Old', title: 'Old', target: 'x', kind: 'geolocation', posts: 1 }];
