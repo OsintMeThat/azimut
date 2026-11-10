@@ -81,7 +81,8 @@
   const RELAYS = {
     // screen pixels for the Google basemap's Capture button
     capture: { send: () => ({ type: "capture-tab" }), reply: "capture-result" },
-    // Geo Report's Publish: the thread, as paths and text. The worker reads the
+    // Post's Publish and Reply under the source: the thread, as paths and text, and
+    // for a reply the source post's address. The worker reads the
     // files from the app itself, so nothing of the case and nothing of the
     // pairing token passes through here.
     "post-handoff": {

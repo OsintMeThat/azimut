@@ -62,6 +62,10 @@ async function notTheApp(tab) {
 // Where the app's hand-offs may take a tab: the posting sites and the reverse image
 // engines it offers. Anything else in a hand-off is refused, whoever asked.
 const HANDOFF_HOSTS = new Set(["x.com", "bsky.app", "lens.google.com", "yandex.com", "www.bing.com", "tineye.com"]);
+// A post's own page on a posting site, the one a reply under it opens: an X status
+// or a Bluesky post, as the app writes their address (lib/post.js `replyTarget`).
+const REPLY_PAGE =
+  /^https:\/\/(?:x\.com\/[A-Za-z0-9_]{1,15}\/status\/\d{1,25}|bsky\.app\/profile\/[^/?#\s]{1,253}\/post\/[A-Za-z0-9]{1,64})$/;
 const handOffAllowed = (url) => {
   try {
     const parsed = new URL(url);
@@ -352,8 +356,18 @@ function tabLoaded(tabId, timeoutMs = 20000) {
 async function handOff(payload) {
   const { backendUrl, token } = await settings();
   if (!token) throw new Error("not paired");
-  if (!handOffAllowed(payload.url)) throw new Error("not a site Azimut posts to");
-  fillComposer(payload, backendUrl, token).catch((e) =>
+  // A reply under the source opens that post's own page rather than a new post, and
+  // presses its reply there (handoff.js). A message without one is the thread it
+  // always was, opened where it always opened.
+  let target = payload;
+  if (payload.reply_to !== undefined) {
+    if (typeof payload.reply_to !== "string" || !REPLY_PAGE.test(payload.reply_to)) {
+      throw new Error("not a post Azimut replies under");
+    }
+    target = { ...payload, url: payload.reply_to, reply: true };
+  }
+  if (!handOffAllowed(target.url)) throw new Error("not a site Azimut posts to");
+  fillComposer(target, backendUrl, token).catch((e) =>
     notify("Azimut hand-off", `${e.message} The thread is on your clipboard.`)
   );
   return { ok: true, accepted: true };
@@ -387,7 +401,7 @@ async function fillComposer(payload, backendUrl, token) {
     func: (thread) => {
       window.__AZIMUT_HANDOFF__ = thread;
     },
-    args: [{ posts }],
+    args: [payload.reply ? { posts, reply: true } : { posts }],
   });
 
   let skipped = 0;

@@ -33,9 +33,9 @@ It supports seven flows:
   Alt+Shift+N opens it from any page, and the map panel's note button from a map.
 - On Azimut's Google basemap, the in-app Capture button requests the current
   tab image without a screen-share prompt.
-- When Geo Report publishes, it can open X or Bluesky with the thread already
-  typed and the proof attached. It never presses Post: the composer is left
-  filled, and publishing stays a human act.
+- When Post publishes, it can open X or Bluesky with the thread already
+  typed and the proof attached, or open the reply box under the source post. It
+  never presses Post: the composer is left filled, and publishing stays a human act.
 - When Reverse Search opens an engine, it can hand the picture to the engine's
   own uploader, so the search runs on the press you already made.
 
@@ -389,9 +389,16 @@ Settings to revoke existing pairings.
 
 ## Fill the composer
 
-Geo Report's **Publish** opens the site's full composer, types each post of the
+Post's **Publish** opens the site's full composer, types each post of the
 thread and attaches its pictures. Nothing is posted: the composer is left filled
 and the button is yours.
+
+**Reply under the source** opens the source post's own page instead, presses its
+reply button and fills the reply box that opens, the thread under it. Only an X
+status or a Bluesky post address is taken, and nothing on the page is read but
+where that button is. Without the extension, X still opens its own reply page with
+the first post typed and the proof on your clipboard; Bluesky has no such page, so
+there the post is copied for you to paste.
 
 There is one switch and it is in the app: **Settings → Publishing → Let the
 extension fill the composer**, on by default. Nothing to set here.
