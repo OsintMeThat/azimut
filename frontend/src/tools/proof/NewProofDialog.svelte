@@ -554,8 +554,10 @@
   .np-tile:hover { border-color: var(--border-strong); transform: translateY(-1px); }
   .np-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .np-tile.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-  .np-pic { position: relative; display: block; aspect-ratio: 16 / 10; background: var(--bg-3); }
-  .np-pic img { width: 100%; height: 100%; object-fit: cover; }
+  /* every tile the same height: a phone's tall picture is cut to the box rather than
+     stretching it, since a ratio box otherwise grows to its content */
+  .np-pic { position: relative; display: block; aspect-ratio: 16 / 10; overflow: hidden; background: var(--bg-3); }
+  .np-pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .np-none { display: grid; place-items: center; width: 100%; height: 100%; color: var(--text-3); }
   .np-time {
     position: absolute;

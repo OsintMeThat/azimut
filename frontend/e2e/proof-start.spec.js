@@ -48,7 +48,7 @@ async function openCase(page, { empty = false, scenes = true, gate = null } = {}
     { path: VIDEO, filename: 'clip.webm', title: TITLE, kind: 'video', entity_id: 'e_clip', size: STEPS_WEBM.length, sha256: '1'.repeat(64),
       source: { type: 'upload' }, thumbnail: null, folder: '' },
     frame('frame-a', 0.2), frame('frame-b', 0.5), frame('frame-d', 0.64),
-    image('media/photo.png', 'Harbour photo', { type: 'upload' }, { folder: 'field' }),
+    image('media/photo.png', 'Harbour photo', { type: 'upload' }, { folder: 'field', thumbnail: 'media/.thumbs/photo.webp' }),
   ];
   const satCaptures = empty ? [] : [{
     ...image('captures/sat.png', 'Capture', { type: 'satellite' }), lat: 48.8584, lon: 2.2945, zoom: 17, provider_label: 'Esri',
@@ -199,12 +199,21 @@ async function openNewProof(page) {
 
 test('New proof the old way: a picture and Create proof, in three presses', async ({ page }) => {
   const { fixture } = await openCase(page, { scenes: false });
+  // the photo as a phone takes it: four times taller than it is wide
+  await page.route('**/files/**/photo.webp', (route) => route.fulfill({
+    contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="360" height="1440"><rect width="360" height="1440" fill="#678"/></svg>',
+  }));
   await openNewProof(page);
   const dialog = newProof(page);
   // All is where it opens, every source the case holds counted, and no scene in a case with none
   await expect(dialog.locator('.np-row.on')).toContainText('All');
   await expect(dialog.locator('.np-from .np-row')).toHaveText([/All\s*5/, /Satellite\s*1/, /Videos\s*3/, /Photos\s*1/, /field/]);
   await expect(dialog.getByText('Scenes to prove')).toHaveCount(0);
+  // a phone's tall picture is cut to its tile, every tile of a row the same height
+  const tall = dialog.locator('.selectable-pick', { hasText: 'Harbour photo' }).locator('img');
+  await expect.poll(() => tall.evaluate((img) => img.complete && img.naturalHeight)).toBe(1440);
+  const heights = await dialog.locator('.np-pic').evaluateAll((pics) => pics.map((pic) => Math.round(pic.getBoundingClientRect().height)));
+  expect(new Set(heights).size).toBe(1);
 
   await dialog.locator('.selectable-pick', { hasText: 'Harbour photo' }).click();
   await dialog.locator('.selectable-pick', { hasText: 'z17' }).click();
