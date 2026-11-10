@@ -170,7 +170,9 @@ def _posted(state: dict[str, Any]) -> dict[str, Any] | None:
     """Where and when the post went out, or None: read off a record already on disk, so
     one that does not pass is no post rather than an error."""
     publish = state.get("publish")
-    url = publish.get("url") if isinstance(publish, dict) else None
+    if not isinstance(publish, dict):
+        return None
+    url = publish.get("url")
     if not isinstance(url, str):
         return None
     site = next((name for name, rule in POSTED_URL.items() if rule.match(url)), None)
