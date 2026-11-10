@@ -61,6 +61,8 @@ let lists;
 let opened;
 
 function answer(path) {
+  // the case read again after a first save is the same case
+  if (path === `/api/cases/${CASE.id}`) return CASE;
   if (path.endsWith('/drafts')) return lists.drafts;
   if (path.endsWith('/proofs')) return lists.proofs;
   if (path.endsWith('/media')) return lists.media;
@@ -78,6 +80,18 @@ function answer(path) {
 
 const settle = async () => {
   for (let i = 0; i < 6; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+};
+// past the autosave's pause, so what was typed is written
+const saved = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 850));
+  await settle();
+};
+const draftWrites = () => api.post.mock.calls.filter(([path]) => path.endsWith('/drafts'));
+const type = (node, value) => {
+  node.value = value;
+  node.dispatchEvent(new Event('input', { bubbles: true }));
+  node.dispatchEvent(new Event('change', { bubbles: true }));
   flushSync();
 };
 const mountPost = async () => {
@@ -171,9 +185,9 @@ describe('the home', () => {
     expect(series.textContent).toContain('Convoy');
     expect([...series.querySelectorAll('.ph-chip')].map((chip) => chip.querySelector('.ph-chip-name').textContent)).toEqual(['slide-1', 'slide-2']);
     expect(button(series, 'Video thread Coming next').disabled).toBe(true);
-    // the header waits for a post: nothing to save or publish from here
+    // the header waits for a post: nothing to act on from here
     expect(button(header(), 'New post')).toBeTruthy();
-    expect(button(header(), 'Save as draft')).toBeUndefined();
+    expect(header().querySelector('.post-more')).toBeNull();
   });
 
   it('finds a draft by name, and Enter opens the first', async () => {
@@ -203,9 +217,9 @@ describe('the home', () => {
     expect(target.querySelector('.attach-chip').textContent).toContain('waiting.png');
     button(header(), 'Posts').click();
     await settle();
-    // it asks first, since the post is not saved
-    button(document.querySelector('[role="alertdialog"]'), 'Leave without saving').click();
-    await settle();
+    // nothing to ask: the post is written on the way, its proof attached
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(draftWrites().at(-1)[1].state.proofPng).toBe('proofs/waiting.png');
     expect(home()).not.toBeNull();
   });
 });
@@ -269,13 +283,10 @@ describe('startPost — the entry every To Post shares', () => {
     const thread = [...target.querySelectorAll('.tweet-block')];
     expect(thread[1].textContent).toContain('clip.mp4');
 
-    target.querySelector('.tweet-block textarea').value = 'Smoke over the port';
-    target.querySelector('.tweet-block textarea').dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-    button(header(), 'Save as draft').click();
-    await settle();
-    const saved = api.post.mock.calls.find(([path]) => path.endsWith('/drafts'))[1].state;
-    expect(saved).toMatchObject({ kind: 'free', firstMedia: ['media/a.png'], firstMediaType: 'images', mediaPaths: ['media/clip.mp4'] });
+    type(target.querySelector('.tweet-block textarea'), 'Smoke over the port');
+    await saved();
+    const state = draftWrites().at(-1)[1].state;
+    expect(state).toMatchObject({ kind: 'free', firstMedia: ['media/a.png'], firstMediaType: 'images', mediaPaths: ['media/clip.mp4'] });
   });
 
   it('files the post on screen first, as a proof sent over does', async () => {
@@ -291,6 +302,153 @@ describe('startPost — the entry every To Post shares', () => {
   });
 });
 
+describe('a post saves itself', () => {
+  it('never files an untouched blank post, and files one once something is typed', async () => {
+    await mountPost();
+    await saved();
+    expect(draftWrites()).toEqual([]);
+    expect(header().querySelector('.save-status')).toBeNull();
+
+    type(target.querySelector('#pc-desc'), 'Smoke over the depot');
+    await settle();
+    expect(header().querySelector('.save-status').textContent.trim()).toBe('Saving…');
+    await saved();
+    expect(draftWrites()).toHaveLength(1);
+    const [, sent] = draftWrites()[0];
+    expect(sent).toMatchObject({ rename_from: null, title: 'Post 1' });
+    expect(sent.state.description).toBe('Smoke over the depot');
+    expect(header().querySelector('.save-status').textContent.trim()).toBe('Saved');
+
+    // the next edit writes back over the same draft
+    type(target.querySelector('#pc-desc'), 'Smoke over the depot, east side');
+    await saved();
+    expect(draftWrites()).toHaveLength(2);
+    expect(draftWrites()[1][1].rename_from).toBe('Post 1');
+  });
+
+  it('opens a saved draft without writing it, and writes it once it changes', async () => {
+    lists.drafts = [{ name: 'Depot', title: 'Depot', target: 'x', posts: 1 }];
+    lists.saved = { Depot: { title: 'Depot', state: { description: 'Depot fire', tweet1: 'Depot fire', tweet1Edited: true } } };
+    await mountPost();
+    home().querySelector('.ph-card').click();
+    await saved();
+    expect(draftWrites()).toEqual([]);
+    expect(header().querySelector('.save-status').textContent.trim()).toBe('Saved');
+    type(firstPost(), 'Depot fire at night');
+    await saved();
+    expect(draftWrites()).toHaveLength(1);
+    expect(draftWrites()[0][1]).toMatchObject({ rename_from: 'Depot', title: 'Depot' });
+  });
+
+  it('takes the name when the field is left, and refuses one another post holds', async () => {
+    api.get.mockImplementation(async (path, opts) => {
+      if (path.includes('/entities') && !path.includes('lookup') && !path.includes('derivation')) {
+        return { items: [{ id: 'p9', type: 'post', label: 'Harbour', attrs: { draft: '.drafts/Harbour.json' } }], next: null };
+      }
+      return answer(path, opts);
+    });
+    await mountPost();
+    type(target.querySelector('#pc-desc'), 'Smoke');
+    await saved();
+    const name = header().querySelector('input[aria-label="Post name"]');
+    name.value = 'Harbour';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    name.dispatchEvent(new FocusEvent('blur'));
+    await settle();
+    expect(name.value).toBe('Post 1');
+    expect(toasts()).toContain('Another post is already named “Harbour”');
+
+    name.value = 'Smoke at the port';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    await saved();
+    // typing alone renames nothing
+    expect(draftWrites().at(-1)[1].title).toBe('Post 1');
+    name.dispatchEvent(new FocusEvent('blur'));
+    await saved();
+    expect(draftWrites().at(-1)[1]).toMatchObject({ rename_from: 'Post 1', title: 'Smoke at the port' });
+  });
+
+  it('says when a save failed, keeps the post open, and Retry writes it', async () => {
+    lists.drafts = [{ name: 'Old', title: 'Old', target: 'x', posts: 1 }];
+    let fail = true;
+    api.post.mockImplementation(async (path, body) => {
+      if (path === '/api/geo/parse') return GEO;
+      if (path.endsWith('/drafts')) {
+        if (fail) throw new Error('disk full');
+        return { name: body.title, title: body.title, draft: `.drafts/${body.title}.json` };
+      }
+      return {};
+    });
+    await mountPost();
+    button(home(), 'New post').click();
+    await settle();
+    dialog('New post').querySelector('.np-card').click();
+    await settle();
+    type(target.querySelector('#pc-desc'), 'Smoke');
+    await saved();
+    expect(header().querySelector('.save-status.error').textContent.trim()).toBe('Not saved');
+    button(header(), 'Posts').click();
+    await settle();
+    expect(home()).toBeNull();
+    expect(toasts()).toContain('The post could not be saved, so it stays open');
+    fail = false;
+    button(header(), 'Retry').click();
+    await settle();
+    expect(header().querySelector('.save-status').textContent.trim()).toBe('Saved');
+  });
+});
+
+describe('the header ⋯', () => {
+  const more = () => header().querySelector('button[aria-label="More for this post"]');
+  const menu = () => document.querySelector('.float-menu[aria-label="This post"]');
+
+  it('adds the post to the notes, and says so plainly', async () => {
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    more().click();
+    flushSync();
+    button(menu(), 'Add to notes…').click();
+    flushSync();
+    const ask = dialog('Add to notes');
+    expect(ask.textContent).toContain('Writes this post into a new case note');
+    button(ask, 'Add to notes').click();
+    await settle();
+    const [, note] = api.post.mock.calls.find(([path]) => path.endsWith('/notes'));
+    expect(note.content).toContain('## Location');
+    expect(note.sources).toContain(PROOF.png);
+    expect(toasts()).toContain('Added to notes');
+  });
+
+  it('deletes the post open to the Trash, with Undo, and goes back home', async () => {
+    lists.drafts = [{ name: 'Depot', title: 'Depot', target: 'x', posts: 1 }];
+    lists.saved = { Depot: { title: 'Depot', state: { description: 'Depot fire', tweet1: 'Depot fire', tweet1Edited: true } } };
+    api.del.mockImplementation(async () => ({ status: 'deleted', deleted: ['d1'], trash: 'trash-1' }));
+    await mountPost();
+    home().querySelector('.ph-card').click();
+    await settle();
+    more().click();
+    flushSync();
+    button(menu(), 'Delete…').click();
+    await settle(); // the dialog reads what the delete touches first
+    const ask = document.querySelector('[role="alertdialog"]');
+    expect(ask.textContent).toContain('Delete this post?');
+    button(ask, 'Delete').click();
+    await settle();
+    expect(api.del).toHaveBeenCalledWith('/api/cases/case-1/drafts/Depot');
+    expect(uiState.toasts.at(-1)).toMatchObject({ message: 'Deleted “Depot”', action: { label: 'Undo' } });
+    expect(home()).not.toBeNull();
+  });
+
+  it('offers no Delete before the post was ever saved', async () => {
+    await mountPost();
+    more().click();
+    flushSync();
+    expect(button(menu(), 'Delete…')).toBeUndefined();
+    expect(button(menu(), 'Add to notes…').disabled).toBe(true);
+  });
+});
+
 describe('the geolocation road, unchanged', () => {
   it('writes the same first post from a proof sent with To Post', async () => {
     await mountPost();
@@ -302,10 +460,8 @@ describe('the geolocation road, unchanged', () => {
   it('saves a draft in the shape Geo Report saved, with no kind', async () => {
     await mountPost();
     uiState.postProof = { ...PROOF };
-    await settle();
-    button(header(), 'Save as draft').click();
-    await settle();
-    const state = api.post.mock.calls.find(([path]) => path.endsWith('/drafts'))[1].state;
+    await saved();
+    const state = draftWrites().at(-1)[1].state;
     expect(Object.keys(state)).toEqual([
       'description', 'coordsText', 'place', 'mention', 'source', 'date', 'proofPng', 'tweet1', 'tweet1Edited',
       'target', 'body', 'mediaEnabled', 'mediaType', 'mediaText', 'mediaTextIncludesPrefix', 'mediaPaths',
@@ -478,9 +634,8 @@ describe('Reply under the source', () => {
     await sendProof();
     expect(replyBox().checked).toBe(true);
     expect(firstPost().value).toBe(REPLY_POST);
-    button(header(), 'Save as draft').click();
-    await settle();
-    const state = api.post.mock.calls.findLast(([path]) => path.endsWith('/drafts'))[1].state;
+    await saved();
+    const state = draftWrites().at(-1)[1].state;
     expect(state.reply).toBe(true);
     expect(state.tweet1).toBe(REPLY_POST);
   });

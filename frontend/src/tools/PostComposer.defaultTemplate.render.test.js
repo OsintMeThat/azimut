@@ -13,15 +13,18 @@ vi.mock('konva', () => ({ default: {} }));
 
 vi.mock('../lib/api.js', () => ({
   api: {
-    get: vi.fn(async () => []),
+    // the case read again after a first save is the case open
+    get: vi.fn(async (path) => (/^\/api\/cases\/[^/]+$/.test(path) ? { id: path.split('/').pop(), folders: [], entities: [] } : [])),
     put: vi.fn(async () => ({})),
-    post: vi.fn(async () => ({})),
+    // a post saves itself: the draft comes back under the name it was sent with
+    post: vi.fn(async (path, body) => (path.endsWith('/drafts') ? { name: body.title, title: body.title } : {})),
     del: vi.fn(async () => ({})),
   },
 }));
 
 const { caseState, postDraftState, prefs, templatesState, uiState } = await import('../lib/state.svelte.js');
 const { default: PostComposer } = await import('./PostComposer.svelte');
+const { startPost } = await import('./post/start.js');
 
 const HOUSE = {
   id: 'po_1',
@@ -65,6 +68,7 @@ afterEach(() => {
   if (app) unmount(app);
   target?.remove();
   app = null;
+  uiState.tool = 'overview';
   prefs.postTemplate = '';
   templatesState.post = [];
   caseState.current = null;
@@ -181,22 +185,19 @@ describe('a composer that holds a post', () => {
     expect(description().value).toBe('A rooftop');
   });
 
-  it('starts the next draft on the default once it is discarded', async () => {
+  it('starts the next post on the default once this one makes way', async () => {
     templatesState.post = [HOUSE];
     prefs.postTemplate = 'po_1';
+    uiState.tool = 'post';
     mountComposer();
+    removeButton().click();
+    await settle();
     description().value = 'A rooftop';
     description().dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
 
-    const discard = [...target.querySelectorAll('.head-actions button')]
-      .find((b) => b.textContent.trim() === 'Discard');
-    discard.click();
-    flushSync();
-    const confirm = [...document.querySelectorAll('[role="alertdialog"] button')]
-      .find((b) => b.textContent.trim() !== 'Cancel');
-    confirm.click();
-    await settle();
+    startPost('geolocation');
+    for (let i = 0; i < 6; i += 1) await settle();
 
     expect(description().value).toBe('');
     expect(chip()).toBe('House style');

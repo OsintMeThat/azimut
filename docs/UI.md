@@ -5247,8 +5247,21 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   when a draft names its picture, read off the drafts list (`GET /drafts` carries each
   draft's `kind`, `posts`, `proof` and `video`), so a draft sent to the Trash gives its
   proof back at once. A case with neither keeps the composer it always opened on.
-  **‹ Posts**, first in the header, goes back to the home and asks first when the post
-  is not saved.
+  **‹ Posts**, first in the header, goes back to the home.
+- **A post saves itself**, as Inspect's work does: once something is typed, picked or
+  attached, it is written when the typing stops, and the header says *Saving…*, then
+  *Saved*, or *Not saved* with **Retry**. An untouched blank post files nothing, and
+  opening a saved one writes nothing until it changes. The name field names the draft
+  and is taken when it is left (Enter does too): renaming moves the file once, a name
+  another post holds is refused, and an unsaved post whose name was taken meanwhile
+  files under a fresh one rather than write over it. Going home, opening another
+  post, Back, New post, a proof sent with **To Post**, another case or the tab closing
+  each writes what is pending first; a post whose save failed stays open and says so.
+- **The header's ⋯**, beside the name, holds **Add to notes…**, which writes the post
+  into a new case note (its place, points, assessment, source and pictures, linked to
+  the proof, the media and the draft), and **Delete…** once the post is saved: the
+  draft goes to the Trash with the delete preview and **Undo** in the toast, and the
+  composer goes back home.
 - **New post** offers four starts. **Geolocation** is the composer as it always was:
   the same fields, the same first post, the same Publish. **Map plate** and **Free post**
   carry their own pictures, or a video, on the first post (`firstMedia`) and show only
@@ -5276,8 +5289,8 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   clipboard to paste (*Picture copied: paste it with Ctrl+V.*); Bluesky has no such
   page, so it says so and copies the post and opens the source to paste it under.
 - **A narrow header** gives way a step at a time, measured rather than guessed: the
-  name field narrows and the quiet line and Reply say less, then Open, Discard, Save
-  and Save report fold to their icons. Wide enough, it is the header it always was.
+  name field narrows and the quiet line and Reply say less, then Open folds to its
+  icon. Wide enough, it is the header it always was.
 
 ## Post templates
 

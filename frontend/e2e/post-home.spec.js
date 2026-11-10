@@ -129,9 +129,60 @@ test.describe('the home', () => {
     await expect(home).toHaveCount(0);
     await expect(page.locator('.tweet-block textarea').first()).toHaveValue(FIRST_POST);
     await expect(page.getByText('Geolocation post', { exact: true })).toBeVisible();
+    // it saved itself on the way: back home, nothing is asked and it is a draft now
     await page.locator('.tool-header').getByRole('button', { name: 'Posts' }).click();
-    await page.getByRole('alertdialog', { name: 'Leave this post?' }).getByRole('button', { name: 'Leave without saving' }).click();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
     await expect(home).toBeVisible();
+    expect(fixture.draftWrites.at(-1).state.proofPng).toBe('proofs/bridge.png');
+    fixture.expectNoUnexpectedRequests();
+  });
+});
+
+test.describe('a post saves itself', () => {
+  test('files nothing for a blank post, then saves as it is written, the header saying so', async ({ page }) => {
+    const fixture = await installAppFixture(page);
+    await page.goto('/#post');
+    const header = page.locator('.tool-header');
+    await expect(page.getByText('Geolocation post', { exact: true })).toBeVisible();
+    await page.waitForTimeout(1200);
+    expect(fixture.draftWrites).toEqual([]);
+    await expect(header.locator('.save-status')).toHaveCount(0);
+    await expect(header.getByRole('button', { name: /Save/ })).toHaveCount(0);
+
+    await page.locator('#pc-desc').fill('Smoke over the depot');
+    await expect(header.locator('.save-status')).toHaveText('Saved');
+    expect(fixture.draftWrites).toHaveLength(1);
+    expect(fixture.draftWrites[0]).toMatchObject({ rename_from: null, title: 'Post 1' });
+
+    // renamed when the field is left, the file moved with it
+    const name = page.getByRole('textbox', { name: 'Post name' });
+    await name.fill('Depot smoke');
+    await name.press('Enter');
+    await expect.poll(() => fixture.draftWrites.at(-1)).toMatchObject({ rename_from: 'Post 1', title: 'Depot smoke' });
+    await expect(header.locator('.save-status')).toHaveText('Saved');
+    fixture.expectNoUnexpectedRequests();
+  });
+
+  test('deletes the post open from its ⋯, back home, and Undo brings it back', async ({ page }) => {
+    const fixture = await installAppFixture(page, { drafts: DRAFTS, proofList: PROOFS, lookupEntities: lookups });
+    await postRoutes(page);
+    await page.goto('/#post');
+    const home = page.getByTestId('post-home');
+    await home.locator('.ph-card', { hasText: 'Harbour words' }).click();
+    await expect(page.getByRole('textbox', { name: 'Post name' })).toHaveValue('Harbour words');
+
+    await page.getByRole('button', { name: 'More for this post' }).click();
+    const menu = page.locator('.float-menu[aria-label="This post"]');
+    await expect(menu.locator('.fm-item')).toHaveText(['Add to notes…', 'Delete…']);
+    await menu.getByRole('button', { name: 'Delete…' }).click();
+    const ask = page.getByRole('alertdialog', { name: 'Delete this post?' });
+    await ask.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(home).toBeVisible();
+    await expect(home.locator('.ph-card', { hasText: 'Harbour words' })).toHaveCount(0);
+
+    await page.locator('.toast', { hasText: 'Deleted “Harbour words”' }).getByRole('button', { name: 'Undo' }).click();
+    await expect(home.locator('.ph-card', { hasText: 'Harbour words' })).toHaveCount(1);
+    expect(fixture.trashWrites).toEqual([{ kind: 'restore', groupId: 'trash-draft-1' }]);
     fixture.expectNoUnexpectedRequests();
   });
 });

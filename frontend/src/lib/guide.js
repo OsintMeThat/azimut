@@ -719,11 +719,11 @@ export const PAGES = {
       { anchor: 'post.ingredients', title: 'What goes in', text: 'Where to publish, the thread style, the description, the point, the place, a mention and the source.' },
       { anchor: 'post.first', title: 'The geolocation post', text: 'Written from those fields, counted against the site’s limit, with the proof attached.' },
       { anchor: 'post.more', title: 'More posts', text: 'Add the media post and context posts, or copy the whole thread.' },
-      { anchor: 'post.report', title: 'Save report', text: 'Writes the finding up as a Notebook note.' },
+      { anchor: 'post.report', title: 'More', text: 'Add to notes writes the post into a case note. Delete sends it to the Trash.' },
       { anchor: 'post.publish', title: 'Publish', text: 'Copies the posts and opens the site. With the extension it fills the composer box by box, and pressing Post stays yours.' },
     ],
     tips: [
-      { title: 'Drafts', text: 'Save as draft keeps the thread to reopen and edit here.' },
+      { title: 'It saves itself', text: 'Once it holds something, a post is saved as you write. Its name is the draft’s.' },
       { title: 'The home', text: 'With no post open, Post lists its drafts and the proofs with no post yet. One press on a proof writes its geolocation.' },
       { title: 'New post', text: 'Geolocation is the composer it always was. Map plate and Free post carry their own pictures on the first post.' },
       { title: 'Reply under the source', text: 'When the source is an X or Bluesky post, a box under it sends the post as a reply there, without the link to the source.' },

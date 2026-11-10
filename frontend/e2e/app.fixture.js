@@ -825,6 +825,9 @@ export async function installAppFixture(page, options = {}) {
   const caseDelays = options.caseDelays ?? {};
   const graphDelays = options.graphDelays ?? {};
   const fixtureDrafts = options.drafts ?? {};
+  // What Post wrote (it saves itself) and what a restore puts back, by trash group.
+  const draftWrites = [];
+  const restorable = new Map();
   const fixtureSettings = {
     ...settings,
     ...(options.settings ?? {}),
@@ -1867,6 +1870,8 @@ export async function installAppFixture(page, options = {}) {
       const kind = trashMatch[2] ? 'restore' : 'purge';
       trashWrites.push({ kind, groupId });
       trashGroups.splice(index, 1);
+      if (kind === 'restore') restorable.get(groupId)?.();
+      restorable.delete(groupId);
       return json(route, kind === 'restore' ? { status: 'restored' } : { status: 'purged' });
     }
     if (caseId && path === `/api/cases/${caseId}/bundle/export` && request.method() === 'POST') {
@@ -2073,22 +2078,63 @@ export async function installAppFixture(page, options = {}) {
     // the geo index the Map panel groups. Both are needed — a picker whose
     // shelf 404s shows no panels at all.
     if (path === `/api/cases/${CASE_ID}/satellite`) return json(route, options.satCaptures ?? []);
+    if (path === `/api/cases/${CASE_ID}/drafts` && request.method() === 'POST') {
+      // as `api/drafts.py` saves one: under its title, moved from the name it was bound to
+      const body = request.postDataJSON();
+      draftWrites.push(body);
+      // a spec's draft may be filed under a name other than its title: kept, unless renamed
+      const kept = body.rename_from && fixtureDrafts[body.rename_from]?.title === body.title;
+      const name = kept ? body.rename_from : body.title;
+      if (body.rename_from && body.rename_from !== name) {
+        delete fixtureDrafts[body.rename_from];
+        delete fixtureLookupEntities[`.drafts/${body.rename_from}.json`];
+      }
+      fixtureDrafts[name] = { title: body.title, updated_at: new Date().toISOString(), state: body.state };
+      fixtureLookupEntities[`.drafts/${name}.json`] ??= { id: `d-${name}`, type: 'post' };
+      return json(route, { name, title: body.title, draft: `.drafts/${name}.json` });
+    }
+    if (path.startsWith(`/api/cases/${CASE_ID}/drafts/`) && request.method() === 'DELETE') {
+      // to the Trash, as one group a restore puts back
+      const name = decodeURIComponent(path.slice(path.lastIndexOf('/') + 1));
+      const draft = fixtureDrafts[name];
+      if (!draft) return json(route, { detail: 'Draft not found' }, 404);
+      const lookup = fixtureLookupEntities[`.drafts/${name}.json`];
+      delete fixtureDrafts[name];
+      delete fixtureLookupEntities[`.drafts/${name}.json`];
+      const group = `trash-draft-${trashGroups.length + restorable.size + 1}`;
+      trashGroups.push({ id: group, item_count: 1, size_bytes: 0, deleted_at: new Date().toISOString(), labels: [draft.title] });
+      restorable.set(group, () => {
+        fixtureDrafts[name] = draft;
+        if (lookup) fixtureLookupEntities[`.drafts/${name}.json`] = lookup;
+      });
+      return json(route, { status: 'deleted', deleted: [`d-${name}`], tombstoned: [], trash: group });
+    }
     if (path === `/api/cases/${CASE_ID}/drafts`) {
       // as `api/drafts.py` lists them: what Post's home says of each without opening it
-      return json(route, Object.entries(fixtureDrafts).map(([name, draft]) => ({
-        name,
-        title: draft.title,
-        updated_at: draft.updated_at,
-        target: draft.state?.target,
-        kind: draft.state?.kind ?? 'geolocation',
-        posts: 1 + (draft.state?.mediaType && draft.state.mediaType !== 'none' ? 1 : 0)
-          + (draft.state?.extraTweets ?? []).filter((post) => post.text?.trim() || post.mediaPaths?.length).length,
-        proof: draft.state?.proofPng ?? null,
-        video: draft.state?.video ?? null,
-      })));
+      const listed = Object.entries(fixtureDrafts).map(([name, draft]) => {
+        const publish = draft.state?.publish;
+        const posted = publish?.url ? { url: publish.url, site: publish.site ?? 'x', at: publish.posted_at ?? null } : null;
+        return {
+          name,
+          title: draft.title,
+          updated_at: draft.updated_at,
+          target: draft.state?.target,
+          kind: draft.state?.kind ?? 'geolocation',
+          posts: 1 + (draft.state?.mediaType && draft.state.mediaType !== 'none' ? 1 : 0)
+            + (draft.state?.extraTweets ?? []).filter((post) => post.text?.trim() || post.mediaPaths?.length).length,
+          proof: draft.state?.proofPng ?? null,
+          video: draft.state?.video ?? null,
+          // whether it went out, and the picture its card shows
+          state: posted ? (publish.changed ? 'changed' : 'posted') : publish?.opened_at ? 'opened' : 'draft',
+          posted,
+          picture: draft.state?.proofPng ?? draft.state?.firstMedia?.[0] ?? draft.state?.mediaPaths?.[0] ?? null,
+        };
+      });
+      // newest first, as the server sorts them
+      return json(route, listed.sort((a, b) => String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? ''))));
     }
     if (path.startsWith(`/api/cases/${CASE_ID}/drafts/`)) {
-      const name = path.slice(path.lastIndexOf('/') + 1);
+      const name = decodeURIComponent(path.slice(path.lastIndexOf('/') + 1));
       const draft = fixtureDrafts[name];
       return draft ? json(route, draft) : json(route, { detail: 'Draft not found' }, 404);
     }
@@ -2352,6 +2398,7 @@ export async function installAppFixture(page, options = {}) {
     },
     sheetOnDisk: (id) => fixtureSheets.get(id),
     trashWrites,
+    draftWrites,
     bundleCalls,
     geoQueries,
     settingsWrites,
