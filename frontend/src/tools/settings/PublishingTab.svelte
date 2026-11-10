@@ -4,31 +4,71 @@
    * signed proofs carry.
    *
    * The logo and the signature picture live beside settings.json and reach a
-   * case only inside what is exported (a proof PNG, a plate, a note's PDF);
-   * `sigBust` re-fetches the logo past the cache after a replacement. In reports,
-   * a note prints your name, role and organisation where it says `{name}`,
-   * `{role}` and `{organisation}` (`lib/notes/reportParts.js`), as its Signature
-   * block does. The hover texts live in `lib/publishingHelp.js`.
+   * case only inside what is exported (a proof PNG, a plate, a note's PDF), and
+   * every tool reads the logo at `myLogoUrl()`, which changes with it. A logo picked
+   * opens the logo editor first, and Edit… opens it again on the picture as picked
+   * (`LogoEditor.svelte`). In reports, a note prints your name, role and
+   * organisation where it says `{name}`, `{role}` and `{organisation}`
+   * (`lib/notes/reportParts.js`), as its Signature block does. The hover texts
+   * live in `lib/publishingHelp.js`.
    */
   import { POST_TARGETS } from '../../lib/post.js';
   import { api } from '../../lib/api.js';
   import { prefs, toast } from '../../lib/state.svelte.js';
-  import { PUBLISHING_HELP as HELP, REPORT_FIELD_MAX, SIGNATURE_MAX_MB } from '../../lib/publishingHelp.js';
+  import { LOGO_MAX_BYTES, PUBLISHING_HELP as HELP, REPORT_FIELD_MAX, SIGNATURE_MAX_MB } from '../../lib/publishingHelp.js';
+  import { myLogoUrl } from '../../lib/myLogo.js';
+  import LogoEditor from './LogoEditor.svelte';
 
   let {
     signature,
-    sigBust,
+    logoLook = null,
     savePrefs,
     removeSignature,
-    uploadSignature,
+    saveLogo,
     mention = $bindable(),
     postTarget = $bindable(),
     postPrefill = $bindable(),
     signatureHandle = $bindable(),
-    sigInput = $bindable(),
   } = $props();
 
   let handInput = $state(null);
+  let logoInput = $state(null);
+  // The picture the logo editor works on and the look it opens with, while it is open.
+  let editing = $state.raw(null);
+
+  const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+  async function pickLogo(event) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = ''; // the same file can be picked again
+    if (!file) return;
+    if (file.size > LOGO_MAX_BYTES) {
+      toast('The logo must be under 2 MB', 'danger');
+      return;
+    }
+    const head = new Uint8Array(await file.slice(0, PNG_MAGIC.length).arrayBuffer());
+    if (!PNG_MAGIC.every((byte, index) => head[index] === byte)) {
+      toast('The logo must be a PNG picture', 'danger');
+      return;
+    }
+    editing = { picture: file, look: null };
+  }
+
+  /** Open the editor on the picture as picked: the original of a framed logo, or the logo itself. */
+  async function editLogo() {
+    try {
+      const path = logoLook ? '/api/settings/logo-original.png' : '/api/settings/signature.png';
+      const { data } = await api.get(path, { bytes: true, cache: 'no-store' });
+      editing = { picture: new Blob([data], { type: 'image/png' }), look: logoLook };
+    } catch (error) {
+      toast(`Could not open the logo: ${error.message}`, 'danger');
+    }
+  }
+
+  async function saveEdited({ logo, look }) {
+    await saveLogo({ logo, original: editing.picture, look });
+    editing = null;
+  }
 
   /** A line of who signs, saved once the field is left. */
   function saveLine(key, value) {
@@ -130,10 +170,13 @@
     </div>
     <div class="sig-side">
       {#if signature}
-        <img class="sig-preview" src={`/api/settings/signature.png?v=${sigBust}`} alt="Your logo" />
+        <img class="sig-preview" src={myLogoUrl()} alt="Your logo" />
       {/if}
       <div class="sig-buttons">
-        <button class="btn btn-sm" title={HELP.logo} onclick={() => sigInput?.click()}>
+        {#if signature}
+          <button class="btn btn-sm" title={HELP.logoEdit} onclick={editLogo}>Edit…</button>
+        {/if}
+        <button class="btn btn-sm" title={HELP.logo} onclick={() => logoInput?.click()}>
           {signature ? 'Replace…' : 'Choose PNG…'}
         </button>
         {#if signature}
@@ -142,14 +185,17 @@
       </div>
     </div>
     <input
-      bind:this={sigInput}
+      bind:this={logoInput}
       class="sig-file"
       type="file"
       accept="image/png"
       title={HELP.logo}
-      onchange={uploadSignature}
+      onchange={pickLogo}
     />
   </div>
+  {#if editing}
+    <LogoEditor picture={editing.picture} look={editing.look} onsave={saveEdited} onclose={() => (editing = null)} />
+  {/if}
   <label class="row" title={HELP.name}>
     <span class="row-label">
       <span>Name</span>

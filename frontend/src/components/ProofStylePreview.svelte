@@ -5,6 +5,7 @@
   import { SAMPLE_SCENE, loadSamplePictures, sampleProof } from '../lib/proofSample.js';
   import { sceneBadges } from '../lib/proofScene.js';
   import { prefs } from '../lib/state.svelte.js';
+  import { myLogoUrl } from '../lib/myLogo.js';
   import { loadProofFont } from '../lib/proofFonts.js';
   import '../lib/proofFontFaces.js';
 
@@ -16,7 +17,7 @@
   }
   /** The analyst's logo as it stands now, or null: one added since the last look shows. */
   export function signatureLogo() {
-    return loadImage('/api/settings/signature.png').catch(() => null);
+    return loadImage(myLogoUrl()).catch(() => null);
   }
   /**
    * A template drawn still on the sample, `width` pixels wide: the card of a start.

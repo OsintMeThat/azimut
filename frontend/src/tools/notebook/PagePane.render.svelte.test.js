@@ -246,6 +246,23 @@ describe('the way back, and a source', () => {
     expect(asked.length).toBe(before + 1);
     expect(asked.at(-1).text).toBe(TEXT);
   });
+
+  it('draw the pages again when Settings changes who signs: a new logo, a signature or a name', async () => {
+    const { prefs } = await import('../../lib/state.svelte.js');
+    const kept = { picturesRev: prefs.picturesRev, logoRev: prefs.logoRev, reportName: prefs.reportName };
+    await pane({ text: TEXT, entities: ENTITIES });
+    const before = asked.length;
+    prefs.picturesRev += 1;
+    flushSync();
+    expect(asked.length).toBe(before + 1);
+    prefs.logoRev = '1700000000000000000';
+    flushSync();
+    prefs.reportName = 'A. Analyst';
+    flushSync();
+    expect(asked.length).toBe(before + 3);
+    expect(asked.at(-1).text).toBe(TEXT);
+    Object.assign(prefs, kept);
+  });
 });
 
 describe('what the page warns about', () => {

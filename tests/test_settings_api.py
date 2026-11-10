@@ -1,6 +1,7 @@
 """Settings API: API keys management, key tests, usage counters (all offline)."""
 
 import json
+import os
 
 import httpx
 import pytest
@@ -1192,6 +1193,114 @@ def test_signature_rejects_oversized(client):
     body = client.post("/api/settings/signature", files={"file": ("logo.png", huge, "image/png")})
     assert body.status_code == 413
     assert client.get("/api/settings").json()["signature"] is False
+
+
+# ---- the logo editor: a framed logo keeps the picture it was drawn from -------
+
+ORIGINAL = config.PNG_MAGIC + b"\x00 the logo as picked"
+LOOK = {"shape": "circle", "radius": 0.2, "border": 0.05, "colour": "#e8a33d", "fill": "#ffffff",
+        "padding": 0.1, "zoom": 1.5, "x": 0.25, "y": -0.1}
+
+
+def frame(client, look=LOOK, original=ORIGINAL):
+    files = {"file": ("logo.png", PNG, "image/png")}
+    if original is not None:
+        files["original"] = ("original.png", original, "image/png")
+    return client.post("/api/settings/signature", files=files, data={"look": json.dumps(look)})
+
+
+def test_a_logo_saved_before_the_editor_reads_as_it_always_did(client):
+    """A settings.json without logo_look and a bare signature.png: the logo as picked."""
+    config.write_private(config.signature_path(), ORIGINAL)
+
+    def forget(settings):
+        settings.pop("logo_look", None)
+
+    config.update_settings(forget)
+    body = client.get("/api/settings").json()
+    assert body["signature"] is True
+    assert body["logo_look"] is None
+    assert client.get("/api/settings/signature.png").content == ORIGINAL
+    assert client.get("/api/settings/logo-original.png").status_code == 404
+
+
+def test_a_plain_logo_keeps_no_original_and_no_frame(client):
+    client.post("/api/settings/signature", files={"file": ("logo.png", PNG, "image/png")})
+    assert client.get("/api/settings").json()["logo_look"] is None
+    assert client.get("/api/settings/logo-original.png").status_code == 404
+    assert not config.logo_original_path().exists()
+
+
+def test_a_framed_logo_keeps_its_original_and_its_frame(client):
+    assert frame(client).json() == {"signature": True}
+    assert client.get("/api/settings/signature.png").content == PNG
+    assert client.get("/api/settings/logo-original.png").content == ORIGINAL
+    assert client.get("/api/settings").json()["logo_look"] == LOOK
+
+
+def test_picking_a_new_plain_logo_forgets_the_frame(client):
+    frame(client)
+    other = config.PNG_MAGIC + b"\x00 another logo"
+    client.post("/api/settings/signature", files={"file": ("b.png", other, "image/png")})
+    assert client.get("/api/settings").json()["logo_look"] is None
+    assert not config.logo_original_path().exists()
+    assert client.get("/api/settings/signature.png").content == other
+
+
+def test_removing_the_logo_removes_its_original_and_frame(client):
+    frame(client)
+    client.delete("/api/settings/signature")
+    assert not config.logo_original_path().exists()
+    assert config.load_settings()["logo_look"] is None
+
+
+@pytest.mark.parametrize(
+    "look",
+    [
+        {**LOOK, "shape": "star"},
+        {**LOOK, "border": 0.5},
+        {**LOOK, "colour": "red"},
+        {**LOOK, "fill": "#fff"},
+        {**LOOK, "zoom": 10},
+        {**LOOK, "x": 3},
+    ],
+)
+def test_a_frame_out_of_bounds_is_refused_and_nothing_changes(client, look):
+    client.post("/api/settings/signature", files={"file": ("logo.png", ORIGINAL, "image/png")})
+    assert frame(client, look).status_code == 422
+    assert client.get("/api/settings/signature.png").content == ORIGINAL
+    assert client.get("/api/settings").json()["logo_look"] is None
+
+
+def test_a_frame_without_its_original_is_refused(client):
+    assert frame(client, original=None).status_code == 422
+    assert client.get("/api/settings").json()["signature"] is False
+
+
+def test_an_original_that_is_no_png_is_refused(client):
+    assert frame(client, original=b"GIF89a...").status_code == 422
+    assert client.get("/api/settings").json()["signature"] is False
+    assert not config.logo_original_path().exists()
+
+
+def test_the_logo_is_never_kept_stale_by_the_browser(client):
+    """A proof drew the logo a browser read first, long after it was framed."""
+    assert client.get("/api/settings").json()["logo_rev"] == ""
+    frame(client)
+    first = client.get("/api/settings").json()["logo_rev"]
+    assert first
+    for path in ("/api/settings/signature.png", "/api/settings/logo-original.png"):
+        assert client.get(path).headers["cache-control"] == "no-cache"
+    old = config.signature_path().stat()
+    os.utime(config.signature_path(), ns=(old.st_atime_ns, old.st_mtime_ns - 10_000_000_000))
+    assert client.get("/api/settings").json()["logo_rev"] != first
+
+
+def test_a_frame_whose_original_went_missing_is_not_handed_back(client):
+    """The editor would draw a second frame over the first."""
+    frame(client)
+    config.logo_original_path().unlink()
+    assert client.get("/api/settings").json()["logo_look"] is None
 
 
 # ---- download cookies: the login session gated media needs -------------------

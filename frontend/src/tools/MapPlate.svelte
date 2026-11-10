@@ -53,6 +53,7 @@
   import { api } from '../lib/api.js';
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { caseState, deleteTemplate, prefs, reloadCase, saveTemplate, toast, uiState } from '../lib/state.svelte.js';
+  import { myLogoUrl } from '../lib/myLogo.js';
   import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
   import { faceCredits, figureName, figureScale, pageOffer, sheetOffer, sheetRefusal } from './plate/plateNote.js';
   import { fileUrl } from '../lib/fileUrl.js';
@@ -1485,9 +1486,9 @@
   const sources = new Map();
   $effect(() => {
     const wanted = elements.filter((element) => element.kind === 'image' && (element.src || element.data))
-      .map((element) => [pictureKey(element), element.data ? element.data : element.src === SIGNATURE ? '/api/settings/signature.png' : caseId ? fileUrl(caseId, element.src) : null]);
+      .map((element) => [pictureKey(element), element.data ? element.data : element.src === SIGNATURE ? myLogoUrl() : caseId ? fileUrl(caseId, element.src) : null]);
     if (spec?.page?.background?.kind === 'image' && spec.page.background.data) wanted.push(['data:background', spec.page.background.data]);
-    if (elements.some((element) => element.kind === 'signature')) wanted.push(['@signature', '/api/settings/signature.png']);
+    if (elements.some((element) => element.kind === 'signature')) wanted.push(['@signature', myLogoUrl()]);
     // a video's frame where its clip starts, which an export draws under the running clip
     const posters = caseId ? elements.filter((element) => element.kind === 'video' && element.src) : [];
     untrack(() => {

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import httpx
-from fastapi import APIRouter, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -237,6 +237,10 @@ def get_settings() -> dict[str, Any]:
         # whether a logo is on disk — the proof composer's signature control is
         # dead until one is, so it needs to know without fetching the pixels
         "signature": config.signature_path().is_file(),
+        # changes with the logo, so every tool asks for the one on disk now
+        "logo_rev": _logo_rev(),
+        # how the logo editor framed it, or None for the picture as picked
+        "logo_look": _logo_look(settings),
         # whether a handwritten signature is on disk, for Settings and the note picker
         "report_signature": config.report_signature_path().is_file(),
         # whether an exported cookies.txt is on disk — Settings shows the file
@@ -629,8 +633,9 @@ def export_settings() -> Response:
     """Download everything app-wide that isn't a case, so another machine can be
     set up identically (POST /settings/import).
 
-    Five things in one: portable settings, templates.json, the signature logo and
-    the handwritten signature reports print, each base64-encoded, and the icon
+    Five things in one: portable settings, templates.json, the signature logo (with
+    the picture a framed one was drawn from) and the handwritten signature reports
+    print, each base64-encoded, and the icon
     library, each icon's PNG base64-encoded. It carries the user's own API keys by
     design — it's a local download of secrets that already live in their workspace.
 
@@ -659,6 +664,8 @@ def export_settings() -> Response:
         "settings": portable_settings,
         "templates": config.load_templates(),
         "signature_png": _signature_b64(),
+        # the picture a framed logo was drawn from, so it can be framed again there
+        "logo_original_png": _signature_b64(config.logo_original_path()),
         "report_signature_png": _signature_b64(config.report_signature_path(), config.REPORT_SIGNATURE_MAX_BYTES),
         "icons": iconlibrary.backup(),
     }
@@ -758,6 +765,30 @@ class ImportedDownloadCookies(BaseModel):
         return self
 
 
+HexColour = Annotated[str, Field(pattern=r"^#[0-9a-f]{6}$")]
+
+
+class LogoLook(BaseModel):
+    """How the logo editor framed the logo (``frontend/src/lib/logoLook.js``).
+
+    The browser draws it, the server only keeps it. Radius, border and padding are
+    shares of the drawn logo's short side; zoom and the offsets count in the
+    picture's own box.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    shape: Literal["rectangle", "rounded", "circle"] = "rectangle"
+    radius: float = Field(default=0.2, ge=0, le=0.5)
+    border: float = Field(default=0, ge=0, le=0.15)
+    colour: HexColour = "#ffffff"
+    fill: str = Field(default="", pattern=r"^$|^#[0-9a-f]{6}$")
+    padding: float = Field(default=0, ge=0, le=0.25)
+    zoom: float = Field(default=1, ge=0.5, le=4)
+    x: float = Field(default=0, ge=-1, le=1)
+    y: float = Field(default=0, ge=-1, le=1)
+
+
 class ImportedSettings(BaseModel):
     """Validated, canonical subset of a settings backup.
 
@@ -816,6 +847,18 @@ class ImportedSettings(BaseModel):
     whats_new_seen: str = Field(default="", max_length=64)
     find_beta_seen: bool = False
     download_cookies: ImportedDownloadCookies = Field(default_factory=ImportedDownloadCookies)
+    logo_look: LogoLook | None = None
+
+    @field_validator("logo_look", mode="before")
+    @classmethod
+    def readable_logo_look(cls, value: Any) -> Any:
+        """A look this build cannot read leaves the logo plain rather than failing the backup."""
+        if value is None:
+            return None
+        try:
+            return LogoLook.model_validate(value)
+        except ValueError:
+            return None
 
     @field_validator("analyzers", mode="before")
     @classmethod
@@ -921,6 +964,8 @@ class ImportIn(BaseModel):
     # megabytes-long field only to reject it is work an untrusted body shouldn't
     # get. The decoded bytes then face config.valid_signature().
     signature_png: str = Field(default="", max_length=SIGNATURE_B64_MAX_CHARS)
+    #: The picture a framed logo was drawn from, bounded and gated as the logo.
+    logo_original_png: str = Field(default="", max_length=SIGNATURE_B64_MAX_CHARS)
     #: The handwritten signature reports print, bounded and gated the same way.
     report_signature_png: str = Field(default="", max_length=REPORT_SIGNATURE_B64_MAX_CHARS)
     #: The icon library, each picture re-encoded as an import would be (`iconlibrary.restore`).
@@ -934,6 +979,8 @@ def import_settings(body: ImportIn) -> dict[str, Any]:
     # would unpair this one, and its extension would stop with no word why.
     if not canonical.get("ingest_token"):
         canonical.pop("ingest_token", None)
+    # The logo's frame travels with the logo it drew, below, never on its own.
+    logo_look = canonical.pop("logo_look", None)
     applied = sorted(canonical)
 
     def apply(settings: dict[str, Any]) -> None:
@@ -962,6 +1009,13 @@ def import_settings(body: ImportIn) -> dict[str, Any]:
     # restore: the keys and presets are the valuable part, and the user can
     # re-upload a PNG.
     signature = _restore_picture(body.signature_png, config.signature_path(), config.SIGNATURE_MAX_BYTES)
+    if signature:
+        # A backup without the original holds a logo as picked: this machine's
+        # original and frame belong to the logo just replaced.
+        original = _restore_picture(body.logo_original_png, config.logo_original_path(), config.SIGNATURE_MAX_BYTES)
+        if not original:
+            config.logo_original_path().unlink(missing_ok=True)
+        _set_logo_look(logo_look if original else None)
     report_signature = _restore_picture(
         body.report_signature_png, config.report_signature_path(), config.REPORT_SIGNATURE_MAX_BYTES
     )
@@ -1071,17 +1125,29 @@ def _wmts_error(body: str) -> str:
 # ---- signature: the analyst's logo, stamped onto proofs they choose to sign ---
 
 
+# The logo changes at a fixed address: without this, a browser keeps the one it
+# read first for a while, and a proof or a plate goes on drawing it.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+def _logo_rev() -> str:
+    """A token that changes whenever the logo does, for the address tools read it at."""
+    try:
+        return str(config.signature_path().stat().st_mtime_ns)
+    except OSError:
+        return ""
+
+
 @router.get("/settings/signature.png")
 def get_signature() -> FileResponse:
     path = config.signature_path()
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no signature saved")
-    return FileResponse(path, media_type="image/png")
+    return FileResponse(path, media_type="image/png", headers=NO_CACHE)
 
 
-@router.post("/settings/signature")
-async def put_signature(file: UploadFile) -> dict[str, Any]:
-    """Replace the stored logo. PNG only, and small — see config.PNG_MAGIC."""
+async def _read_logo(file: UploadFile) -> bytes:
+    """A logo picture's bytes: PNG only, and small — see config.PNG_MAGIC."""
     data = await file.read(config.SIGNATURE_MAX_BYTES + 1)
     if len(data) > config.SIGNATURE_MAX_BYTES:
         raise HTTPException(
@@ -1091,13 +1157,78 @@ async def put_signature(file: UploadFile) -> dict[str, Any]:
     # sniff the bytes rather than trust the filename or the browser's content-type
     if not config.valid_signature(data):
         raise HTTPException(status_code=422, detail="signature must be a PNG image")
+    return data
+
+
+def _logo_look(settings: dict[str, Any]) -> dict[str, Any] | None:
+    """The look the logo was framed with, while its original is still kept.
+
+    Without the original there is nothing to frame again, and handing the look
+    back would have the editor draw a second frame over the first.
+    """
+    raw = settings.get("logo_look")
+    if not raw or not config.logo_original_path().is_file():
+        return None
+    try:
+        return LogoLook.model_validate(raw).model_dump()
+    except ValueError:
+        return None
+
+
+def _set_logo_look(look: dict[str, Any] | None) -> None:
+    def apply(settings: dict[str, Any]) -> None:
+        settings["logo_look"] = look
+
+    config.update_settings(apply)
+
+
+@router.post("/settings/signature")
+async def put_signature(
+    file: UploadFile,
+    original: UploadFile | None = None,
+    look: str | None = Form(default=None, max_length=2000),
+) -> dict[str, Any]:
+    """Replace the stored logo.
+
+    With a ``look``, ``file`` is the logo the editor drew and ``original`` the
+    picture it was drawn from, kept so the next edit starts from it again rather
+    than framing the frame. Without one, the logo is the picture as picked and no
+    original is kept.
+    """
+    data = await _read_logo(file)
+    framed: LogoLook | None = None
+    source: bytes | None = None
+    if look is not None:
+        try:
+            framed = LogoLook.model_validate_json(look)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="the logo's frame does not read") from None
+        if original is None:
+            raise HTTPException(status_code=422, detail="a framed logo needs the picture it was drawn from")
+        source = await _read_logo(original)
+    if source is not None:
+        config.write_private(config.logo_original_path(), source)
+    else:
+        config.logo_original_path().unlink(missing_ok=True)
     config.write_private(config.signature_path(), data)
+    _set_logo_look(framed.model_dump() if framed else None)
     return {"signature": True}
+
+
+@router.get("/settings/logo-original.png")
+def get_logo_original() -> FileResponse:
+    """The picture a framed logo was drawn from, for the logo editor to start again."""
+    path = config.logo_original_path()
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="the logo is not framed")
+    return FileResponse(path, media_type="image/png", headers=NO_CACHE)
 
 
 @router.delete("/settings/signature")
 def delete_signature() -> dict[str, Any]:
     config.signature_path().unlink(missing_ok=True)
+    config.logo_original_path().unlink(missing_ok=True)
+    _set_logo_look(None)
     return {"signature": False}
 
 

@@ -64,7 +64,7 @@ describe('Backup', () => {
 
   it('reloads what a restore can change, logo included', () => {
     expect(shell).toContain('await loadTemplates()');
-    expect(shell).toContain('sigBust += 1');
+    expect(shell).toContain('prefs.picturesRev += 1; // the logo and the signature changed on disk');
   });
 
   it('says what the file holds, and what it leaves behind', () => {

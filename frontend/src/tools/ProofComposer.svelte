@@ -23,6 +23,7 @@
   import { kinSentence } from '../lib/proposalReview.js';
   import { caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords } from '../lib/state.svelte.js';
   import { templatesState } from '../lib/state.svelte.js';
+  import { myLogoUrl } from '../lib/myLogo.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import DateField from '../components/DateField.svelte';
@@ -251,16 +252,18 @@
     palette: [...ANNO_COLORS], // ordered drawing colours, most preferred first
   });
 
-  // Load the app-wide signature once per session; null disables the control.
+  // The app-wide logo, read again whenever Settings saves a new one; null disables
+  // the control. The canvas redraws when it lands.
   let sigImg = $state(null);
-
-  async function loadSignature() {
-    try {
-      sigImg = await loadImage('/api/settings/signature.png');
-    } catch {
-      sigImg = null; // No saved logo.
-    }
-  }
+  $effect(() => {
+    const url = myLogoUrl();
+    let live = true;
+    loadImage(url).then(
+      (picture) => { if (live) sigImg = picture; },
+      () => { if (live) sigImg = null; }, // no saved logo
+    );
+    return () => { live = false; };
+  });
   let collapsed = $state({ panels: false, overlays: false, annotations: false, elements: false });
   let cropSurfaceId = $state(null);
   let cropDraft = $state(null); // the box the crop marks frame, upright, from the source's middle
@@ -1372,7 +1375,6 @@
   let textEdit = $state(null); // {id, value, left, top, size} — inline text editor
 
   onMount(() => {
-    loadSignature(); // async: the canvas redraws when it lands
     stage = new Konva.Stage({ container: containerEl, width: 100, height: 100 });
     canvasRenderGate = createCanvasRenderGate(
       requestAnimationFrame,

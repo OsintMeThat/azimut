@@ -39,6 +39,7 @@ export const prefs = $state({
   reportRole: '',
   reportOrganisation: '',
   logoSet: false, // the logo of Settings › Publishing is on disk (azimut:my-logo)
+  logoRev: '', // changes with the logo on disk, so its address does too (lib/myLogo.js)
   signatureSet: false, // the handwritten signature picture is on disk (azimut:my-signature)
   picturesRev: 0, // bumped when either picture changes, so what shows them asks again
   updateCheckOnStart: true, // ask GitHub for a newer release when the page loads
@@ -125,6 +126,7 @@ export function applyPrefs(s) {
   if (s.report_role !== undefined) prefs.reportRole = s.report_role;
   if (s.report_organisation !== undefined) prefs.reportOrganisation = s.report_organisation;
   if (s.signature !== undefined) prefs.logoSet = Boolean(s.signature);
+  if (s.logo_rev !== undefined) prefs.logoRev = s.logo_rev;
   if (s.report_signature !== undefined) prefs.signatureSet = Boolean(s.report_signature);
   if (s.update_check_on_start !== undefined) prefs.updateCheckOnStart = s.update_check_on_start;
   if (s.update_dismissed_version !== undefined)

@@ -204,7 +204,7 @@ proof for publication.
 | ✅ **One-press extension** | The toolbar button opens what the page is for: the map panel over a map, Capture first and the scenes to geolocate listed, the note beside any other page with Save this page; a pairing popup only until paired. |
 | ✅ **Report editions** | Marks passages internal, prints a report as an internal or a public edition that never carries one, and keeps every PDF it wrote with its fingerprint, listed and checked from the note. |
 | ✅ **From the case** | Writes a note of a period's geolocations from the Notebook home, a figure each or a table, dated by what they show or when they were geolocated. |
-| ✅ **Report covers and signature** | Writes a first page of one's own above a cover line, fills the title, day, name, role and organisation when the PDF is made, prints the Azimut logo, the analyst's logo and a handwritten signature, and starts a template from anything. |
+| ✅ **Report covers and signature** | Writes a first page of one's own above a cover line, fills the title, day, name, role and organisation when the PDF is made, prints the Azimut logo, the analyst's logo (rounded, framed or set on a disc in Settings) and a handwritten signature, and starts a template from anything. |
 
 ---
 

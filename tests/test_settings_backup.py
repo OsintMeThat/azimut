@@ -7,6 +7,7 @@ drift gate), and machine-bound paths never travel.
 """
 
 import base64
+import json
 
 import pytest
 
@@ -124,6 +125,62 @@ def test_import_restores_templates_and_the_signature(client):
     assert res["signature"] is True
     assert [t["name"] for t in client.get("/api/templates").json()["post"]] == ["Thread"]
     assert config.signature_path().read_bytes() == PNG
+
+
+ORIGINAL = config.PNG_MAGIC + b"the logo as picked"
+LOOK = {"shape": "rounded", "radius": 0.25, "border": 0.04, "colour": "#112233", "fill": "",
+        "padding": 0.05, "zoom": 1.0, "x": 0.0, "y": 0.0}
+
+
+def frame_logo(client, look=LOOK):
+    client.post(
+        "/api/settings/signature",
+        files={"file": ("logo.png", PNG, "image/png"), "original": ("original.png", ORIGINAL, "image/png")},
+        data={"look": json.dumps(look)},
+    )
+
+
+def test_a_framed_logo_travels_with_its_original_and_frame(client):
+    frame_logo(client)
+    blob = bundle_of(client)
+    assert base64.b64decode(blob["logo_original_png"]) == ORIGINAL
+    assert blob["settings"]["logo_look"] == LOOK
+
+    client.delete("/api/settings/signature")
+    res = client.post("/api/settings/import", json=blob).json()
+    assert res["signature"] is True
+    assert config.signature_path().read_bytes() == PNG
+    assert config.logo_original_path().read_bytes() == ORIGINAL
+    assert client.get("/api/settings").json()["logo_look"] == LOOK
+
+
+def test_a_backup_of_a_plain_logo_drops_the_frame_made_here(client):
+    """An older backup, or one of a logo as picked: this machine's frame was for another logo."""
+    frame_logo(client)
+    res = client.post("/api/settings/import", json={"signature_png": base64.b64encode(PNG).decode()}).json()
+    assert res["signature"] is True
+    assert not config.logo_original_path().exists()
+    assert client.get("/api/settings").json()["logo_look"] is None
+
+
+def test_a_backup_without_a_logo_leaves_the_frame_here_alone(client):
+    frame_logo(client)
+    client.post("/api/settings/import", json={"settings": {"units": "imperial", "logo_look": None}})
+    assert config.logo_original_path().read_bytes() == ORIGINAL
+    assert client.get("/api/settings").json()["logo_look"] == LOOK
+
+
+def test_a_frame_that_does_not_read_restores_the_logo_plain(client):
+    blob = {
+        "settings": {"units": "imperial", "logo_look": {"shape": "star"}},
+        "signature_png": base64.b64encode(PNG).decode(),
+        "logo_original_png": base64.b64encode(ORIGINAL).decode(),
+    }
+    res = client.post("/api/settings/import", json=blob)
+    assert res.status_code == 200
+    assert res.json()["imported"] == ["units"]
+    assert config.signature_path().read_bytes() == PNG
+    assert config.load_settings()["logo_look"] is None
 
 
 def test_export_leaves_the_login_session_behind(client):

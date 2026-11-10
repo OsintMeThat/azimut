@@ -19,6 +19,7 @@ asks the question — every path is built from :func:`workspace_root`.
         └── settings/
             ├── cookies.txt
             ├── icons/        # the icon library: icons.json + one PNG per icon
+            ├── logo-original.png     # the logo as picked, kept while it is framed
             ├── report-signature.png  # the handwritten signature reports print
             ├── signature.png # the analyst's logo
             ├── settings.json
@@ -164,6 +165,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # The handle stamped onto proofs when a proof/template enables it. Empty
     # means no account-handle slot can render.
     "signature_handle": "",
+    # How Settings › Publishing framed the logo: {"shape", "radius", "border",
+    # "colour", "fill", "padding", "zoom", "x", "y"}, drawn from
+    # logo-original.png into signature.png (frontend/src/lib/logoLook.js). None
+    # means the logo is the picture as picked, and no original is kept.
+    "logo_look": None,
     # Who signs a report: filled into a note's {name}, {role} and {organisation}
     # when it prints (engine/notefill.py). One line each; empty prints nothing.
     "report_name": "",
@@ -456,6 +462,16 @@ def signature_path() -> Path:
     party (api/settings.py export/import).
     """
     return settings_dir() / "signature.png"
+
+
+def logo_original_path() -> Path:
+    """The logo as the analyst picked it, kept while Settings frames it.
+
+    ``signature.png`` is what everything prints; this is what the logo editor
+    starts from again, so a second frame never lands on the first. Absent when
+    the logo is the picture as picked. Under the logo's rule otherwise.
+    """
+    return settings_dir() / "logo-original.png"
 
 
 def report_signature_path() -> Path:

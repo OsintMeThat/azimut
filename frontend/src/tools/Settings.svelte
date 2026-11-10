@@ -348,11 +348,11 @@
   // a card of the Imagery tab asked for from elsewhere, opened and scrolled to
   let focusCard = $state('');
   // The app-wide logo lives beside settings.json and reaches cases only in proof PNGs.
-  // `sigBust` refreshes the preview after replacement.
+  // `logoLook` is how the logo editor framed it, null for the picture as picked;
+  // every tool reads the logo at `myLogoUrl()`, which changes with it.
   let signature = $state(false);
   let signatureHandle = $state('');
-  let sigBust = $state(0);
-  let sigInput = $state(null);
+  let logoLook = $state.raw(null);
 
   // Move the app's own state between machines: the export writes one JSON file
   // holding settings, templates and the signature logo; the import merges it
@@ -398,8 +398,7 @@
       await load();
       await loadTemplates();
       if (r.icons) iconLibrary.load(true);
-      sigBust += 1; // the logo changed on disk; re-fetch it past the cache
-      prefs.picturesRev += 1; // and what notes show of it and of the signature
+      prefs.picturesRev += 1; // the logo and the signature changed on disk: ask for them again
     } catch (e) {
       toast(`Could not import the backup: ${e.message}`, 'danger');
     } finally {
@@ -527,6 +526,7 @@
   async function load() {
     const s = await api.get('/api/settings');
     signature = !!s.signature;
+    logoLook = s.logo_look ?? null;
     signatureHandle = s.signature_handle ?? '';
     keys = perProvider((k) => s.api_keys[k.id] ?? '');
     usage = s.usage;
@@ -581,28 +581,31 @@
     }
   }
 
-  async function uploadSignature(event) {
-    const file = event.currentTarget.files?.[0];
-    if (!file) return;
+  /**
+   * Save what the logo editor made: the logo to print and, when it framed it, the
+   * picture it drew it from and how, so the next edit starts from that picture.
+   * A failure is thrown back for the editor to show, which stays open.
+   */
+  async function saveLogo({ logo, original, look }) {
     const body = new FormData();
-    body.append('file', file);
-    try {
-      await api.post('/api/settings/signature', body);
-      signature = true;
-      prefs.logoSet = true;
-      sigBust++;
-      prefs.picturesRev += 1;
-      toast('Logo saved', 'ok');
-    } catch (e) {
-      toast(`Could not save the logo: ${e.message}`, 'danger');
+    body.append('file', logo, 'logo.png');
+    if (look) {
+      body.append('original', original, 'original.png');
+      body.append('look', JSON.stringify(look));
     }
-    if (sigInput) sigInput.value = ''; // let the same file be picked again
+    await api.post('/api/settings/signature', body);
+    signature = true;
+    logoLook = look;
+    prefs.logoSet = true;
+    prefs.picturesRev += 1;
+    toast('Logo saved', 'ok');
   }
 
   async function removeSignature() {
     try {
       await api.del('/api/settings/signature');
       signature = false;
+      logoLook = null;
       prefs.logoSet = false;
       prefs.picturesRev += 1;
       toast('Logo removed', 'ok');
@@ -920,15 +923,14 @@
       {#if tab === 'publishing'}
         <PublishingTab
           {signature}
-          {sigBust}
+          {logoLook}
           {savePrefs}
           {removeSignature}
-          {uploadSignature}
+          {saveLogo}
           bind:mention
           bind:postTarget
           bind:postPrefill
           bind:signatureHandle
-          bind:sigInput
         />
       {/if}
 

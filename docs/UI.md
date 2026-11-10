@@ -6837,6 +6837,17 @@ line each, 80 characters at most) and the **Signature**, a PNG of a handwritten
 signature up to 1 MB, a transparent one recommended; each field says what it takes and
 where it prints. The settings backup carries them all.
 
+**The logo editor.** A picked logo opens *Edit logo* before it is saved, and **Edit…**
+opens it again. It cuts the logo to a rectangle, rounded corners or a circle, draws a
+frame along that shape in a colour of its own, fills the inside with a background or
+leaves it transparent, and sets a margin and a zoom; dragging a preview, or the arrow
+keys, moves the logo inside its shape. Two previews show it on paper and over a
+picture. Save draws the result into the logo itself (`lib/logoLook.js`), so proofs,
+plates and notes print it as any picture, and keeps the picture as picked
+(`logo-original.png`) with the look, so the next edit starts from it rather than
+framing the frame. A logo left plain is saved byte for byte, with no original kept;
+one saved before the editor existed opens as it is.
+
 ## Visual language (UI)
 
 Tokens live in `frontend/src/app.css`. The interface follows the dense, flat

@@ -27,6 +27,7 @@
    * public pages are seen before they are written. A template keeps it for the visit.
    */
   import { onDestroy, untrack } from 'svelte';
+  import { prefs } from '../../lib/state.svelte.js';
   import { createPreview, pageLine } from '../../lib/notes/preview.js';
   import {
     CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, pictureAt, pictureLine, rovingToolbar, sizeWidth,
@@ -192,10 +193,15 @@
   // What the case says of a picture, which prints under it: where it comes from and
   // where it was posted. Stated here, in the note or in Details, the pages are drawn
   // again at once, as no text changed to ask for them.
-  const stated = $derived(entities
-    .filter((entity) => entity.attrs?.source_url || entity.attrs?.posted_url)
-    .map((entity) => `${entity.id}=${entity.attrs.source_url ?? ''}|${entity.attrs.posted_url ?? ''}`)
-    .join(','));
+  // Who signs prints too: a logo, a signature or a name changed in Settings is drawn
+  // again at once, the note beside it untouched.
+  const stated = $derived([
+    entities
+      .filter((entity) => entity.attrs?.source_url || entity.attrs?.posted_url)
+      .map((entity) => `${entity.id}=${entity.attrs.source_url ?? ''}|${entity.attrs.posted_url ?? ''}`)
+      .join(','),
+    prefs.picturesRev, prefs.logoRev, prefs.reportName, prefs.reportRole, prefs.reportOrganisation,
+  ].join('\n'));
   let lastStated = null;
   $effect(() => {
     const key = stated;

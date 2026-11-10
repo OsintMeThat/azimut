@@ -152,7 +152,7 @@ export const PAGES = {
     shot: 'settings-publishing',
     marks: [
       { anchor: 'settings.report-defaults', title: 'Geo Report', text: 'The mention and the site a new thread starts with, and whether the extension may fill the composer.' },
-      { anchor: 'settings.signature', title: 'In reports', text: 'Your logo, name, role and signature, which a note prints where it says so.' },
+      { anchor: 'settings.signature', title: 'In reports', text: 'Your logo, rounded or framed with Edit, and your name, role and signature, which a note prints where it says so.' },
     ],
     tips: [{ title: 'Posting stays yours', text: 'Even with the extension, the composer is filled and Post is left to you.' }],
   },
