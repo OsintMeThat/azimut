@@ -2393,7 +2393,13 @@ Difference was a view of its own reopens side by side with Difference on. Export
 shared Views destination, named by the comparison and its two pictures' dates, and
 never over an earlier file. **Also keep it in this case** files the same image in My
 work under the comparison, stamped with the reading on screen and never replaced by a
-later save; asked on a comparison never saved, it asks for a name first. An optional
+later save; asked on a comparison never saved, it asks for a name first. **To Post**,
+beside Export copy, keeps the export picked in the case the same way, one file each
+(the PNG, the Blink or Slide GIF, the evolution's GIF or its sheet), and opens Post on
+a free post carrying it, told the comparison's name, each picture's date (an
+evolution's first and last day) and the credits under the image. A comparison never
+saved is saved first, named after its place and days as for a note, and the same image
+kept before is cited again. An optional
 ground-anchored frame cuts any export to the
 chosen area, while Full view remains the default. The frame keeps the bearing it was
 drawn at: turning the camera turns it with the ground rather than reshaping it, and
@@ -2422,8 +2428,10 @@ footer, the last one held three times as long, at the pace chosen; a sheet lays 
 pictures out in rows under one scale bar. Only the marks set on both sides are drawn,
 reference layers and the Difference stay out, and the tones are the archive's. A
 picture with no imagery, or with the same pixels as the one before, is left out and
-the toast counts it. **Stop** ends it between two tiles. An evolution is written to the
-Views destination only, never kept in the case. Tile captures wait
+the toast counts it. **Stop** ends it between two tiles. Export copy writes an
+evolution to the Views destination only; To Post keeps it in the case under the
+comparison (`POST /compare/sessions/{name}/evolution` for the GIF), with the days it
+plays. Tile captures wait
 for loaded frames and reject incomplete tiles. Google Maps JS uses the
 user-triggered Azimut Capture extension and retains its on-map credits.
 
@@ -5260,7 +5268,8 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   after a geolocation's proof. `about` says what the media show: the name of what they
   came from, its own sentence when it has one, the days they show and the credit line
   on their face (`startFields` gives the post's name, `#description`, `#date` and
-  `#credits` from it). Map plate's export starts a Map plate post this way.
+  `#credits` from it). Map plate's export starts a Map plate post this way, and
+  Compare's a free post.
 - **The extension window** says once, on arriving in Post without the capture
   extension, why it is worth having here: it fills the whole thread in X or Bluesky,
   pictures included, and can reply under the source post or capture it into the case.

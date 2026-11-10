@@ -456,6 +456,53 @@ test('changes run in the worker and export a composed PNG', async ({ page }) => 
   expect(errors).toEqual([]);
 });
 
+/** Compare's To Post, its kept image answered as the server files it in the case. */
+async function keptToPost(page) {
+  const kept = [];
+  const opened = await openCompare(page, 'Esri Wayback', { routes: async (route) => {
+    await route.route('**/api/cases/*/compare/sessions/*/images', async (request) => {
+      const body = request.request().postDataBuffer().toString('latin1');
+      kept.push(body);
+      const format = body.match(/name="format"\r\n\r\n(\w+)/)?.[1];
+      await request.fulfill({ json: { path: format === 'png' ? 'media/Comparison.png' : `media/Comparison ${format}.gif`, entity: 'kept-1' } });
+    });
+    await route.route(`**/files/${CASE_ID}/media/Comparison*`, (request) => request.fulfill({ contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200"><rect width="100%" height="100%" fill="#6b5b3e"/></svg>' }));
+  } });
+  return { ...opened, kept };
+}
+
+test('To Post keeps the comparison in the case and opens a free post carrying it', async ({ page }) => {
+  const { errors, kept, saved } = await keptToPost(page);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export a copy' });
+  await dialog.getByRole('button', { name: 'To Post', exact: true }).click();
+  await expect.poll(() => kept.length).toBe(1);
+  // the pair is saved first, then its PNG kept under it, never written out
+  expect(saved).toHaveLength(1);
+  expect(kept[0]).toContain('name="format"\r\n\r\npng');
+  expect(kept[0]).toContain('name="reuse"\r\n\r\ntrue');
+  await expect(page.locator('.kind-chip')).toHaveText('Free post');
+  await expect(page.locator('.first-media .attach-chip a')).toHaveText('Comparison.png');
+  await expect(page.locator('.first-pics img')).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
+test('a Blink GIF goes To Post alone, as the one video a post holds', async ({ page }) => {
+  const { errors, kept } = await keptToPost(page);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export a copy' });
+  await dialog.getByRole('radio', { name: /GIF · Blink/ }).check();
+  await dialog.getByRole('button', { name: 'To Post', exact: true }).click();
+  await expect.poll(() => kept.length).toBe(1);
+  expect(kept[0]).toContain('name="format"\r\n\r\nblink');
+  expect(kept[0]).toContain('name="image_b"');
+  await expect(page.locator('.kind-chip')).toHaveText('Free post');
+  await expect(page.locator('.first-media .attach-chip')).toHaveCount(1);
+  await expect(page.locator('.first-media .attach-chip a')).toHaveText('Comparison blink.gif');
+  expect(errors).toEqual([]);
+});
+
 test('a Difference GIF sends the visible palette and annotation colour to the encoder', async ({ page }) => {
   const { errors } = await openCompare(page, 'Esri Wayback');
   const canvas = page.getByLabel('Annotations on imagery A', { exact: true });

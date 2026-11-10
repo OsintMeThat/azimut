@@ -22,7 +22,7 @@ They are named by those dates, so two comparisons of one pair would share a name
 and none ever overwrites another. An export may also be kept in the case: it is then
 a media file of its own, stamped with the reading it shows and never replaced
 (`engine/comparisons.py`). An evolution, the dated pictures of one archive played
-in order, is only ever a finished copy.
+in order, is a finished copy, or kept in the case as its GIF when a post carries it.
 
 A saved comparison stands on the map as saved work, at its frame's centre or its
 view's, and is listed with the captures in the Saved panel.
@@ -753,14 +753,7 @@ async def keep_image(
     written over another file.
     """
     case = get_case(case_id)
-    canonical = slugify(name, "Comparison")
-    spec_rel = layout.compare_session_rel(canonical)
-    if _read_session(case, canonical) is None or case.find_entity(attr="spec", value=spec_rel) is None:
-        raise HTTPException(status_code=404, detail="save the comparison before keeping its images")
-    try:
-        reading = _validated_spec(CompareSpec.model_validate_json(spec))
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="that is not a comparison this image could show") from exc
+    spec_rel, reading = _kept_reading(case, name, spec)
 
     shown: Evolution | None = None
     if evolution:
@@ -793,13 +786,23 @@ async def keep_image(
         b = await _read_png(image_b, "B")
         data, suffix = _gif_bytes(a, b, format_, interval, _kept_colours(keep)), ".gif"
 
+    return _file_kept(case, spec_rel, reading, data, suffix, filename, state_key,
+                      animation=None if format_ == "png" else format_, shown=shown,
+                      imagery=((imagery_a, imagery_a_exact), (imagery_b, imagery_b_exact)))
+
+
+def _file_kept(case: Case, spec_rel: str, reading: dict[str, Any], data: bytes, suffix: str, filename: str,
+               state_key: str, *, animation: str | None, shown: Evolution | None,
+               imagery: tuple[tuple[str, bool], tuple[str, bool]]) -> dict[str, Any]:
+    """File an image kept from a comparison: stamped with the reading it shows, its
+    point, the date of each picture and, for an evolution, every day it shows."""
     placed = comparisons.placement(reading)
     source: dict[str, Any] = {
         "type": SOURCE_TYPE,
         "session": spec_rel,
         "kept": True,
         "mode": reading["mode"],
-        "animation": None if format_ == "png" else format_,
+        "animation": animation,
         "providers": {"a": reading["a"]["provider"], "b": reading["b"]["provider"]},
         "lat": placed["lat"],
         "lon": placed["lon"],
@@ -812,8 +815,7 @@ async def keep_image(
     }
     if shown:
         source["evolution"] = shown.model_dump()
-    for key, value, exact in (("imagery_a", imagery_a, imagery_a_exact),
-                              ("imagery_b", imagery_b, imagery_b_exact)):
+    for key, (value, exact) in zip(("imagery_a", "imagery_b"), imagery):
         if value:
             source[key] = value
             if not exact:
@@ -828,6 +830,60 @@ async def keep_image(
         raise HTTPException(status_code=409, detail=f"could not keep the image: {errors.explain(exc)}") from exc
     saved_changed(case)
     return {"path": filed["item"]["path"], "entity": filed["entity"]["id"]}
+
+
+def _kept_reading(case: Case, name: str, spec: str) -> tuple[str, dict[str, Any]]:
+    """The saved comparison an image is kept under, and the reading it shows."""
+    canonical = slugify(name, "Comparison")
+    spec_rel = layout.compare_session_rel(canonical)
+    if _read_session(case, canonical) is None or case.find_entity(attr="spec", value=spec_rel) is None:
+        raise HTTPException(status_code=404, detail="save the comparison before keeping its images")
+    try:
+        return spec_rel, _validated_spec(CompareSpec.model_validate_json(spec))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="that is not a comparison this image could show") from exc
+
+
+@router.post("/cases/{case_id}/compare/sessions/{name}/evolution")
+async def keep_evolution(
+    case_id: str,
+    name: str,
+    frames: list[UploadFile] = File(),
+    interval: int = Form(default=800, ge=200, le=4000),
+    keep: str = Form(default="", pattern=_KEPT_COLOURS),
+    filename: str = Form(min_length=1, max_length=120),
+    spec: str = Form(min_length=2, max_length=MAX_SPEC_CHARS),
+    evolution: str = Form(min_length=2, max_length=8000),
+    reuse: bool = Form(default=False),
+) -> dict[str, Any]:
+    """Keep an evolution in the case as its GIF, the pictures of one archive in order.
+
+    The finished copy of an evolution is written out only; this is the copy a post
+    carries (Compare's To Post). It is kept like the comparison's other images, under
+    the saved comparison, stamped with every day it shows, its first and last as the
+    dates of its pictures. The same days, view, pace and size kept before are cited
+    again.
+    """
+    case = get_case(case_id)
+    spec_rel, reading = _kept_reading(case, name, spec)
+    try:
+        shown = Evolution.model_validate_json(evolution)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="that is not an evolution this image could show") from exc
+    if len(frames) != len(shown.days):
+        raise HTTPException(status_code=422, detail="an evolution sends one picture for each of its days")
+    pictures = await _evolution_frames(frames, _kept_colours(keep))
+    state_key = snapshots.view_key(
+        "compare", session=spec_rel, reading=reading, format="evolution", interval=interval, keep=keep,
+        evolution=shown.model_dump(), size=list(pictures[0].size),
+    )
+    if reuse and (filed_before := snapshots.filed_view(case, state_key)) is not None:
+        attrs_before = filed_before.get("attrs") or {}
+        return {"path": attrs_before.get("path"), "entity": filed_before["id"], "reused": True}
+    data = _sequence_bytes(pictures, interval)
+    first, last = shown.days[0], shown.days[-1]
+    return _file_kept(case, spec_rel, reading, data, ".gif", filename, state_key, animation="evolution", shown=shown,
+                      imagery=((first.day, first.exact), (last.day, last.exact)))
 
 
 def session_spec(name: str) -> str:
@@ -952,26 +1008,17 @@ def _sequence_bytes(frames: list[Image.Image], interval: int) -> bytes:
     return buf.getvalue()
 
 
-@router.post("/cases/{case_id}/compare/sequence")
-async def export_sequence(
-    case_id: str,
-    frames: list[UploadFile] = File(),
-    interval: int = Form(default=800, ge=200, le=4000),
-    keep: str = Form(default="", pattern=_KEPT_COLOURS),
-    filename: str = Form(default="comparison", min_length=1, max_length=120),
-) -> dict[str, Any]:
-    """Write an evolution, several dated pictures of one point in order, as a GIF.
+async def _evolution_frames(frames: list[UploadFile], kept: list[tuple[int, int, int]]) -> list[Image.Image]:
+    """An evolution's pictures, read and quantized one by one, each at the first one's size.
 
-    Each frame is quantized as soon as it is read, so the pictures wait at one byte
-    a pixel rather than three. Every frame takes the first one's size.
+    Each frame is quantized as soon as it is read, so the pictures wait at one byte a
+    pixel rather than three.
     """
-    case = get_case(case_id)
     if not 2 <= len(frames) <= MAX_SEQUENCE_FRAMES:
         raise HTTPException(
             status_code=422,
             detail=f"an evolution holds 2 to {MAX_SEQUENCE_FRAMES} pictures",
         )
-    kept = _kept_colours(keep)
     shown: list[Image.Image] = []
     size: tuple[int, int] | None = None
     for index, upload in enumerate(frames, start=1):
@@ -986,6 +1033,23 @@ async def export_sequence(
             frame = frame.resize(size, Image.Resampling.LANCZOS)
         size = frame.size
         shown.append(_quantize(frame, kept))
+    return shown
+
+
+@router.post("/cases/{case_id}/compare/sequence")
+async def export_sequence(
+    case_id: str,
+    frames: list[UploadFile] = File(),
+    interval: int = Form(default=800, ge=200, le=4000),
+    keep: str = Form(default="", pattern=_KEPT_COLOURS),
+    filename: str = Form(default="comparison", min_length=1, max_length=120),
+) -> dict[str, Any]:
+    """Write an evolution, several dated pictures of one point in order, as a GIF.
+
+    Every frame takes the first one's size (`_evolution_frames`).
+    """
+    case = get_case(case_id)
+    shown = await _evolution_frames(frames, _kept_colours(keep))
     data = _sequence_bytes(shown, interval)
     name = f"{layout.slugify(filename, 'comparison')}-evolution.gif"
     try:

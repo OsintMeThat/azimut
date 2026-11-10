@@ -174,6 +174,59 @@ def test_an_evolution_is_a_still(client):
     assert both.status_code == 422
 
 
+def _keep_evolution(client, cid, name, colours, shown, **extra):
+    from test_compare_api import _png as picture
+
+    return client.post(
+        f"/api/cases/{cid}/compare/sessions/{name}/evolution",
+        files=[("frames", (f"{index}.png", picture(colour), "image/png")) for index, colour in enumerate(colours)],
+        data={"filename": extra.pop("filename", f"{name} evolution"), "spec": json.dumps(_spec()), "evolution": shown,
+              "interval": "600", **extra},
+    )
+
+
+def test_an_evolution_for_a_post_is_kept_as_its_gif_with_every_day_and_cited_once(client):
+    from PIL import Image
+
+    from azimut.engine import notesources
+
+    cid = _case(client, "Kept evolution")
+    _save(client, cid, "Harbour reading")
+    shown = _evolution(("2021-05-03", False), ("2023-01-20", True), ("2024-05-03", True))
+    colours = [(220, 30, 30), (30, 220, 30), (20, 40, 220)]
+    first = _keep_evolution(client, cid, "Harbour reading", colours, shown, reuse="true")
+    assert first.status_code == 200, first.text
+    case = Case.open(cid)
+    item = media.read_item(case, first.json()["path"])
+    assert first.json()["path"].endswith(".gif") and item["kind"] == "image"
+    source = item["source"]
+    assert (source["type"], source["kept"], source["animation"]) == ("compare", True, "evolution")
+    assert (source["imagery_a"], source["imagery_a_exact"], source["imagery_b"]) == ("2021-05-03", False, "2024-05-03")
+    assert "imagery_b_exact" not in source and len(source["evolution"]["days"]) == 3
+    with Image.open(case.resolve_inside(first.json()["path"])) as gif:
+        assert gif.n_frames == 3
+    # it is one of the comparison's kept images, and the same evolution again is that one
+    entity = case.find_entity(attr="path", value=first.json()["path"])
+    assert entity["attrs"][comparisons.SESSION_ATTR] == ".compare/Harbour reading.json"
+    again = _keep_evolution(client, cid, "Harbour reading", colours, shown, reuse="true")
+    assert again.json()["reused"] is True and again.json()["entity"] == first.json()["entity"]
+    assert _keep_evolution(client, cid, "Harbour reading", colours, shown, reuse="true", interval="900").json().get("reused") is None
+    # its annex credits the archive and every day, as the sheet's does
+    credit = notesources.Reader(Case.open(cid)).entity(first.json()["entity"]).credit()
+    assert credit == notesources.Credit("Imagery", "Esri Wayback, about 3 May 2021, 20 January 2023 and 3 May 2024")
+
+
+def test_an_evolution_for_a_post_needs_a_saved_comparison_and_a_picture_for_each_day(client):
+    cid = _case(client, "Refused evolution")
+    shown = _evolution(("2024-05-03", True), ("2024-06-01", True))
+    two = [(0, 0, 0), (9, 9, 9)]
+    assert _keep_evolution(client, cid, "Nothing here", two, shown).status_code == 404
+    _save(client, cid, "Harbour reading")
+    assert _keep_evolution(client, cid, "Harbour reading", two[:1] * 3, shown).status_code == 422
+    assert _keep_evolution(client, cid, "Harbour reading", two, "not json").status_code == 422
+    assert _keep_evolution(client, cid, "Harbour reading", two[:1], _evolution(("2024-05-03", True))).status_code == 422
+
+
 def test_kept_images_follow_a_renamed_comparison_and_outlive_a_deleted_one(client):
     cid = _case(client, "Kept follow")
     _save(client, cid, "Harbour reading")
