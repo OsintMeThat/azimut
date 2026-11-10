@@ -11,13 +11,15 @@ paper size, or the page played through its days as a GIF or an MP4. A played
 plate's pictures come first, in batches as they are drawn, and are kept on disk
 until its export names them. A plate with steps sends its sequence too: how long
 each picture holds, and the clips of the case's videos that run over it, which are
-read here from the case itself.
+read here from the case itself. An export a post carries is filed in the case
+instead, as a media file naming its plate.
 """
 
 from __future__ import annotations
 
 import asyncio
 import atexit
+import hashlib
 import json
 import secrets
 import shutil
@@ -435,6 +437,10 @@ def delete_plate(case_id: str, name: str) -> dict[str, Any]:
     return result
 
 
+#: The words a figure's credits take at most, as the plate's face wrote them.
+FIGURE_CREDIT_MAX = 2000
+
+
 @router.post("/cases/{case_id}/map-plates/export")
 async def export_plate(
     case_id: str,
@@ -447,8 +453,14 @@ async def export_plate(
     transparent: bool = Form(default=False),
     beats: str = Form(default="", max_length=400_000),
     staged: str = Form(default="", max_length=64),
+    into: Literal["views", "case"] = Form(default="views"),
+    plate: str = Form(default="", max_length=200),
+    kind: Literal["page", "sheet"] = Form(default="page"),
+    day: str = Form(default="", max_length=40),
+    step: str = Form(default="", max_length=64),
+    attribution: str = Form(default="", max_length=FIGURE_CREDIT_MAX),
 ) -> dict[str, Any]:
-    """Write one export of a plate into the folder saved for views.
+    """Write one export of a plate into the folder saved for views, or file it in the case.
 
     A PNG or a PDF is one page, sent with it. A GIF or an MP4 is the page on each of
     its days, two to `MAX_FRAMES` of them, each shown `interval` milliseconds: its
@@ -460,6 +472,10 @@ async def export_plate(
     its box in pixels) and which of the see-through pictures stands over them. A
     clip's file is found inside the case, and must be a video. An MP4's beat can open
     on its transition, frames of the transitions' series played before it holds.
+
+    `into=case` files it in the case instead (`_file_export`), for a post to carry: the
+    saved `plate` it shows, a page's `day` and `step` or an evolution `sheet`, and the
+    credits its face carries. A PDF is a document to print and stays out of it.
     """
     case = get_case(case_id)
     played = format in ("gif", "mp4")
@@ -467,6 +483,14 @@ async def export_plate(
         raise HTTPException(status_code=422, detail="a played plate sends its pictures before it")
     if not played and (len(frames) != 1 or staged):
         raise HTTPException(status_code=422, detail="a page is one picture")
+    rel = ""
+    if into == "case":
+        if format == "pdf":
+            raise HTTPException(status_code=422, detail="a PDF is written out, not filed in the case")
+        stem = slugify(plate, mapplates.FALLBACK)
+        rel = layout.map_plate_rel(stem)
+        if not plate.strip() or _read(case, stem) is None or case.find_entity(attr="spec", value=rel) is None:
+            raise HTTPException(status_code=404, detail="save the plate before filing what it exports")
     try:
         if played:
             stage = _staged_for(case_id, staged)
@@ -487,6 +511,10 @@ async def export_plate(
                 data = await run_in_threadpool(mapplates.png_bytes, page)
     except mapplates.ExportError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if into == "case":
+        shows = "played" if played else kind
+        return _file_export(case, rel, data, filename, format, shows=shows, attribution=attribution,
+                            day=day if shows == "page" else "", step=step if shows == "page" else "")
     name = f"{layout.slugify(filename, mapplates.FALLBACK)}.{format}"
     try:
         destination = exportdir.destination("views", case.path)
@@ -496,9 +524,44 @@ async def export_plate(
     return {"file": path.name, "path": str(destination), "format": format}
 
 
+def _file_export(case: Case, rel: str, data: bytes, filename: str, format: str, *, shows: str,
+                 attribution: str, day: str, step: str) -> dict[str, Any]:
+    """File an export of the saved plate `rel` in the case, as a media file that names it.
 
-#: The words a figure's credits take at most, as the plate's face wrote them.
-FIGURE_CREDIT_MAX = 2000
+    What a post carries goes in through here (Map plate's To Post): the page as a PNG,
+    its days side by side, or its days played as a GIF or an MP4. Like a figure it
+    names its plate, a page's day and step, and the credits its face carries, so it
+    opens its plate again from a note and a rename of the plate carries it along. The
+    same bytes filed from this plate before are cited again rather than kept twice.
+    """
+    digest = hashlib.sha256(data).hexdigest()
+    before = case.find_entity(attr="sha256", value=digest)
+    if before is not None and (before.get("attrs") or {}).get(mapplates.FIGURE_ATTR) == rel:
+        kept = str((before.get("attrs") or {}).get("path") or "")
+        return {"file": PurePosixPath(kept).name, "path": kept, "entity": before["id"], "format": format, "reused": True}
+    source: dict[str, Any] = {
+        "type": mapplates.SOURCE_TYPE,
+        "plate": rel,
+        "kind": shows,
+        "rendered_at": _now(),
+        # the plate's face carries its credits
+        "attribution_burned": True,
+    }
+    attrs: dict[str, Any] = {mapplates.FIGURE_ATTR: rel}
+    if day:
+        source["day"] = attrs["plate_day"] = day
+    if step:
+        source["step"] = attrs["plate_step"] = step
+    if attribution.strip():
+        source["attribution"] = attribution.strip()
+    try:
+        filed = media_engine.import_rendered_bytes(case, data, filename, f".{format}", source, by=mapplates.PRODUCER,
+                                                   extra_attrs=attrs)
+    except (OSError, ValueError, CaseError) as exc:
+        raise HTTPException(status_code=409, detail=f"could not file the export: {errors.explain(exc)}") from exc
+    path = filed["item"]["path"]
+    return {"file": PurePosixPath(path).name, "path": path, "entity": filed["entity"]["id"], "format": format}
+
 
 
 @router.post("/cases/{case_id}/map-plates/{name}/figure")

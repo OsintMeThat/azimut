@@ -11,13 +11,16 @@
    * seconds here are the plate's, for every day that says nothing of its own. The
    * format and the sizes picked last are kept on this computer for the next export.
    * Export closes the dialog: the export goes on behind, the top bar says how far, and
-   * the plate holds still until it is done or stopped.
+   * the plate holds still until it is done or stopped. To Post goes the same way, files
+   * what it made in the case instead, and opens Post on a Map plate post carrying it; a
+   * PDF stays an export.
    */
   import { timecode } from '../../lib/plate/clip.js';
   import Modal from '../../components/Modal.svelte';
   import { momentLabel } from '../../lib/map/layerHistory.js';
   import { QUALITIES, VIDEO_SIDES, videoSize } from '../../lib/plate/exportPlate.js';
   import PutInNote from '../../components/PutInNote.svelte';
+  import { POST_FORMATS } from './platePost.js';
 
   let {
     /** The moments the plate's tracked layers change at, sorted; empty when it has none. */
@@ -28,6 +31,8 @@
     runtime = null,
     /** `({ format, quality, side, days, filename, pixels, transparent })`, which goes on once the dialog is closed. */
     onexport,
+    /** The same, filed in the case and opened in Post (`platePost.js`); absent where a plate cannot go To Post. */
+    onpost = null,
     /** The picture of the page copied to the clipboard. */
     oncopy = null,
     /** The file's name, before it is changed here. */
@@ -88,9 +93,10 @@
   const seconds = $derived(played && format !== 'sheet' && runtime ? runtime(days, format) : 0);
   const sizeOf = (value) => (page ? videoSize({ page }, value) : { width: value, height: Math.round((value * 9) / 16) });
 
-  function run() {
+  const postable = $derived(!!onpost && POST_FORMATS.includes(format));
+  function run(to = onexport) {
     // the tool says when it is written, what went wrong, or that it was stopped
-    onexport({ format, quality, side, days: played ? days : null, filename: filename.trim(),
+    to({ format, quality, side, days: played ? days : null, filename: filename.trim(),
       pixels: format === 'png' ? pixels : 0, transparent: format === 'png' && see })?.catch?.(() => {});
     onclose();
   }
@@ -177,14 +183,15 @@
     {/if}
   {/if}
 
-  <p class="note">Written to the folder saved for views, like the analysis plates.</p>
+  <p class="note">Written to the folder saved for views, like the analysis plates.{postable ? ' To Post files it in the case instead.' : ''}</p>
   <div class="acts">
     {#if oncopy && format === 'png'}<button class="btn" disabled={busy} title="The page as a picture, to paste elsewhere" onclick={copy}>{copied || 'Copy image'}</button>{/if}
     {#if notePage && format === 'png'}<PutInNote offer={notePage} class="btn" role="button" icon={false} onput={onclose} />{/if}
     {#if noteSheet && format === 'sheet' && ready}<PutInNote offer={noteSheet(days)} class="btn" role="button" icon={false} onput={onclose} />{/if}
     <span class="grow"></span>
     <button class="btn" title="Close without exporting" onclick={onclose}>Cancel</button>
-    <button class="btn btn-primary" disabled={busy || !ready} title="Goes on behind: the top bar says how far" onclick={run}>Export</button>
+    {#if postable}<button class="btn" disabled={busy || !ready} title="Files it in the case and opens a Map plate post" onclick={() => run(onpost)}>To Post</button>{/if}
+    <button class="btn btn-primary" disabled={busy || !ready} title="Goes on behind: the top bar says how far" onclick={() => run()}>Export</button>
   </div>
 </Modal>
 

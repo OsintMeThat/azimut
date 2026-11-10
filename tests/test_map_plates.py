@@ -1076,3 +1076,62 @@ def test_the_pixels_a_figure_is_drawn_at_stay_under_what_the_server_takes():
     found = re.search(r"MAX_FIGURE_PIXELS = ([\d_]+);", source)
     assert found, "plateNote.js no longer names MAX_FIGURE_PIXELS"
     assert int(found.group(1).replace("_", "")) <= mapplates.MAX_PAGE_PIXELS
+
+
+# -- an export filed in the case, for a post to carry ---------------------------------------
+
+
+def test_an_export_for_a_post_is_filed_in_the_case_naming_its_plate_and_never_written_out(client, owner):
+    save(client, owner)
+    filed = export(client, owner, "png", [png()], into="case", plate="Situation", day="2026-03-02", step="step1",
+                   attribution="Esri, Maxar · Made with Azimut")
+    assert filed.status_code == 200, filed.text
+    answer = filed.json()
+    assert answer["path"].startswith("media/") and answer["file"] == "Front line.png"
+    case = Case.open(owner)
+    entity = case.find_entity(attr="path", value=answer["path"])
+    assert entity["id"] == answer["entity"]
+    assert (entity["attrs"]["plate_spec"], entity["attrs"]["plate_day"], entity["attrs"]["plate_step"]) == (
+        ".mapplates/Situation.json", "2026-03-02", "step1")
+    source = media_engine.read_item(case, answer["path"])["source"]
+    assert (source["type"], source["plate"], source["kind"], source["attribution"]) == (
+        "map-plate", ".mapplates/Situation.json", "page", "Esri, Maxar · Made with Azimut")
+    # nothing went to the folder saved for views
+    assert not (case.path / "exports" / "Front line.png").exists()
+    # the same picture again is the file filed before
+    again = export(client, owner, "png", [png()], into="case", plate="Situation")
+    assert again.json()["reused"] is True and again.json()["entity"] == answer["entity"]
+    assert export(client, owner, "png", [png(colour=(0, 0, 0))], into="case", plate="Situation").json().get("reused") is None
+
+
+def test_a_played_plate_for_a_post_is_filed_as_its_gif_with_no_day_of_its_own(client, owner):
+    save(client, owner)
+    answer = played(client, owner, "gif", [png(colour=(200, 0, 0)), png(colour=(0, 0, 200))], into="case", plate="Situation",
+                    day="2026-03-02")
+    assert answer.status_code == 200, answer.text
+    case = Case.open(owner)
+    item = media_engine.read_item(case, answer.json()["path"])
+    assert item["kind"] == "image" and answer.json()["path"].endswith(".gif")
+    assert item["source"]["kind"] == "played" and "day" not in item["source"]
+    with Image.open(case.resolve_inside(answer.json()["path"])) as gif:
+        assert gif.n_frames == 2
+    # an evolution sheet says so
+    sheet = export(client, owner, "png", [png((800, 300))], into="case", plate="Situation", kind="sheet", day="2026-03-02")
+    assert media_engine.read_item(case, sheet.json()["path"])["source"]["kind"] == "sheet"
+    assert "plate_day" not in case.find_entity(attr="path", value=sheet.json()["path"])["attrs"]
+
+
+def test_an_export_for_a_post_needs_a_saved_plate_and_leaves_a_pdf_out(client, owner):
+    assert export(client, owner, "png", [png()], into="case", plate="Nothing").status_code == 404
+    assert export(client, owner, "png", [png()], into="case").status_code == 404
+    save(client, owner)
+    assert export(client, owner, "pdf", [png()], into="case", plate="Situation").status_code == 422
+    assert export(client, owner, "png", [png()], into="elsewhere", plate="Situation").status_code == 422
+
+
+def test_an_export_filed_for_a_post_follows_its_plate_to_a_new_name(client, owner):
+    save(client, owner)
+    filed = export(client, owner, "png", [png()], into="case", plate="Situation")
+    renamed = save(client, owner, title="Front, October", rename_from="Situation")
+    entity = Case.open(owner).find_entity(attr="path", value=filed.json()["path"])
+    assert entity["attrs"]["plate_spec"] == layout.map_plate_rel(renamed.json()["name"])

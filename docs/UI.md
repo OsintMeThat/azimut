@@ -5255,9 +5255,12 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   the fields their layout uses. **Video thread** says *Coming next* until it is built.
   A draft or a template says its `kind` only when it is not a geolocation, so every
   draft and template from before reads as one. Another tool starts a post through
-  `tools/post/start.js` (`startPost(kind, media)`): what Post holds is saved first, as
-  for a proof sent with **To Post**, and the media land on the first post, or after a
-  geolocation's proof.
+  `tools/post/start.js` (`startPost(kind, media, about)`): what Post holds is saved
+  first, as for a proof sent with **To Post**, and the media land on the first post, or
+  after a geolocation's proof. `about` says what the media show: the name of what they
+  came from, its own sentence when it has one, the days they show and the credit line
+  on their face (`startFields` gives the post's name, `#description`, `#date` and
+  `#credits` from it). Map plate's export starts a Map plate post this way.
 - **The extension window** says once, on arriving in Post without the capture
   extension, why it is worth having here: it fills the whole thread in X or Bluesky,
   pictures included, and can reply under the source post or capture it into the case.
@@ -6471,6 +6474,13 @@ transition into it a time of its own (0.2 to 3 seconds). Play goes through the
 transitions as the video will, for as long: the map flies, what leaves fades, what is
 new fades in or is drawn, then the day or step holds its own seconds, and the dialog
 counts each transition's own time in what the video runs. Everything goes into the folder saved for views.
+**To Post**, beside Export for a PNG, a sheet, a GIF or an MP4 (never a PDF), makes the
+same file and files it in the case instead, naming its plate, the day and step a page
+shows, and the credits on its face (`POST /map-plates/export` with `into=case`); the same
+file filed from the plate before is cited again. Post then opens on a Map plate post
+carrying it, told the plate's title, the day shown or the first and last days played,
+and those credits. An analyst who went to another tool meanwhile is offered **Open in
+Post** on the toast instead.
 **Export** closes the dialog and the export goes on behind: the plate holds still under
 a veil saying what is drawn and how far, the top bar says **Plate export** with its
 share from any tool (a press goes back to the plate), and the other tools can be used
