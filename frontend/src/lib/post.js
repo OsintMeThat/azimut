@@ -11,17 +11,62 @@
 
 import { entityReference, mediaReference } from './markdown.js';
 
+/**
+ * What a post is made from, as New post offers it. A draft or a template that says
+ * nothing is a Geolocation one, which is what every post was before kinds existed,
+ * so the kind is written only when it is another (`statedPostKind`).
+ */
+export const POST_KINDS = Object.freeze([
+  { id: 'geolocation', label: 'Geolocation', many: 'geolocations', icon: 'crosshair', text: 'A proof, its point and its source, as Post has always written it.' },
+  { id: 'video', label: 'Video thread', many: 'video threads', icon: 'video', text: 'The proofs of one video, in the order you pick.' },
+  { id: 'plate', label: 'Map plate', many: 'plate posts', icon: 'plate', text: 'A plate’s picture or video, its legend and its credits.' },
+  { id: 'free', label: 'Free post', many: 'free posts', icon: 'edit', text: 'Your own words and up to four pictures or a video per post.' },
+].map((kind) => Object.freeze(kind)));
+
+/** The kinds New post can start today. Video thread arrives with its own screen. */
+export const STARTABLE_POST_KINDS = Object.freeze(['geolocation', 'plate', 'free']);
+
+/** A known kind, or Geolocation for anything else: an old draft, a hand-edited one. */
+export function normalizePostKind(kind) {
+  return POST_KINDS.some((one) => one.id === kind) ? kind : 'geolocation';
+}
+
+/** The kind as a draft or a template writes it: absent for Geolocation, so neither changes shape. */
+export function statedPostKind(kind) {
+  const known = normalizePostKind(kind);
+  return known === 'geolocation' ? undefined : known;
+}
+
+/** A kind's row in POST_KINDS. */
+export function postKind(kind) {
+  return POST_KINDS.find((one) => one.id === normalizePostKind(kind));
+}
+
 // The tokens an analyst can drop into a thread body. `sample` feeds the editor
-// preview so the layout reads before any real draft exists.
+// preview so the layout reads before any real draft exists; `kinds` are the
+// templates whose editor offers it. Every token is known to every body, so a line
+// holding one with nothing to say drops wherever it is written.
+// `#timecode` and `#scenes` are filled by the video thread; `#credits` by the
+// imagery credits of the post's media. Until then they are empty and drop their line.
 export const TWEET_TOKENS = [
-  { tag: '#place', label: 'Place', sample: 'Bakhmut, Donetsk, Ukraine' },
-  { tag: '#pluscode', label: 'Plus code', sample: '8FPGXXXX+XX' },
-  { tag: '#coordinates', label: 'Coordinates', sample: '48.850000, 2.350000' },
-  { tag: '#description', label: 'Description', sample: 'Rooftop match against the reference imagery' },
-  { tag: '#mention', label: 'Mention', sample: '@GeoConfirmed' },
-  { tag: '#source', label: 'Source', sample: 'https://x.com/example/status/1' },
-  { tag: '#date', label: 'Date', sample: '2025-10-24 14:30 UTC+3' },
+  { tag: '#place', label: 'Place', sample: 'Bakhmut, Donetsk, Ukraine', kinds: ['geolocation', 'video'] },
+  { tag: '#pluscode', label: 'Plus code', sample: '8FPGXXXX+XX', kinds: ['geolocation', 'video'] },
+  { tag: '#coordinates', label: 'Coordinates', sample: '48.850000, 2.350000', kinds: ['geolocation', 'video'] },
+  { tag: '#description', label: 'Description', sample: 'Rooftop match against the reference imagery', kinds: ['geolocation', 'video', 'plate', 'free'] },
+  { tag: '#mention', label: 'Mention', sample: '@GeoConfirmed', kinds: ['geolocation', 'video', 'plate', 'free'] },
+  { tag: '#source', label: 'Source', sample: 'https://x.com/example/status/1', kinds: ['geolocation', 'video', 'free'] },
+  { tag: '#date', label: 'Date', sample: '2025-10-24 14:30 UTC+3', kinds: ['geolocation', 'video', 'plate', 'free'] },
+  { tag: '#video', label: 'Video title', sample: 'Convoy on the coast road', kinds: ['geolocation', 'video'] },
+  { tag: '#timecode', label: 'Timecode', sample: '0:00–0:07 · 1:05–1:12', kinds: ['video'] },
+  { tag: '#scenes', label: 'Scenes', sample: '1. Port gate 0:00\n2. Coast road 1:05', kinds: ['video'] },
+  { tag: '#credits', label: 'Credits', sample: 'Imagery: Copernicus Sentinel-2', kinds: ['geolocation', 'video', 'plate', 'free'] },
 ];
+
+/** The tokens a kind's template editor offers. */
+export function tokensForKind(kind) {
+  const known = normalizePostKind(kind);
+  return TWEET_TOKENS.filter((token) => token.kinds.includes(known));
+}
 
 export const MAX_POST_MEDIA = 4;
 
@@ -99,6 +144,64 @@ export function postHandoffUrl(target, text) {
   return normalizePostTarget(target) === 'bluesky'
     ? `https://bsky.app/intent/compose?text=${encoded}`
     : `https://x.com/compose/post?text=${encoded}`;
+}
+
+// A post's own address on each site. X answers to its old name and its mobile host too;
+// a Bluesky post is a profile (handle or did) and a record key.
+const X_POST = /^https:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,25})(?:[/?#].*)?$/i;
+const BLUESKY_POST = /^https:\/\/bsky\.app\/profile\/([^/?#\s]+)\/post\/([A-Za-z0-9]{1,64})(?:[/?#].*)?$/i;
+
+/**
+ * The post the source line points at, when it is one Post can reply under: the first
+ * address of the line that is an X or a Bluesky post. `url` is its canonical address,
+ * the page the extension opens; `id` is X's status id, what its reply intent takes.
+ * Null for any other source, so the action is never offered for a page it cannot answer.
+ */
+export function replyTarget(sourceLine) {
+  for (const raw of sourceUrls(sourceLine)) {
+    const address = raw.replace(/[),.;]+$/, '');
+    const x = X_POST.exec(address);
+    if (x) return { site: 'x', id: x[2], url: `https://x.com/${x[1]}/status/${x[2]}` };
+    const bluesky = BLUESKY_POST.exec(address);
+    if (bluesky) {
+      return {
+        site: 'bluesky', id: bluesky[2],
+        url: `https://bsky.app/profile/${bluesky[1]}/post/${bluesky[2]}`,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * X's own reply page: the reply box under the post `id`, with the text filled in. The
+ * one road to a reply that needs no extension; Bluesky has no such page.
+ */
+export function replyIntentUrl(id, text) {
+  return `https://x.com/intent/post?in_reply_to=${encodeURIComponent(String(id))}&text=${encodeURIComponent(String(text ?? ''))}`;
+}
+
+/**
+ * The first post as it goes out under the source. Kept whole when the template says
+ * so; otherwise the line naming the source is left out, since the post sits right under
+ * it. An untouched post is rebuilt without its source, so a line holding the source and
+ * something else keeps the rest; one the analyst rewrote loses only the lines that hold
+ * one of the source's addresses.
+ */
+export function replyPostText({ text, edited = false, body, fields = {}, keepSource = false } = {}) {
+  if (keepSource) return String(text ?? '');
+  if (!edited) return buildTweet1(body, { ...fields, source: '' });
+  const urls = sourceUrls(fields.source);
+  if (!urls.length) return String(text ?? '');
+  const kept = String(text ?? '').split('\n').filter((line) => !urls.some((url) => line.includes(url)));
+  const collapsed = [];
+  for (const line of kept) {
+    if (line.trim() === '' && collapsed[collapsed.length - 1]?.trim() === '') continue;
+    collapsed.push(line);
+  }
+  while (collapsed.length && collapsed[0].trim() === '') collapsed.shift();
+  while (collapsed.length && collapsed[collapsed.length - 1].trim() === '') collapsed.pop();
+  return collapsed.join('\n');
 }
 
 /** What one post may carry: four images, or one video, is every site's rule. */
@@ -352,6 +455,26 @@ export function groupPostMedia(mediaPaths, kindForPath) {
   return groups;
 }
 
+/** A video by its extension, for a path the case's media list does not hold (a plate's export). */
+const VIDEO_FILE = /\.(mp4|webm|mov|m4v|mkv)$/i;
+
+/**
+ * Where the media a post starts with go (`startPost`). A Geolocation post keeps its
+ * first post for the proof, so they fill the media post and the ones after it, as a
+ * proof's source media always did. Every other kind puts the first group on its first
+ * post, a picture post being what a plate or a free post is. Groups follow
+ * `groupPostMedia`: four pictures or one kind per post.
+ */
+export function startMediaPlan(kind, paths, kindOf = () => 'image') {
+  const known = (paths ?? []).filter((path) => typeof path === 'string' && path);
+  const groups = groupPostMedia([...new Set(known)], (path) => {
+    const said = kindOf(path);
+    return said === 'video' || (!said && VIDEO_FILE.test(path)) ? 'video' : 'image';
+  });
+  const first = normalizePostKind(kind) === 'geolocation' ? null : groups.shift() ?? null;
+  return { first, media: groups.shift() ?? null, more: groups };
+}
+
 // token → the field key it pulls its value from (see tweetFields)
 const TOKEN_FIELD = {
   '#place': 'place',
@@ -361,6 +484,10 @@ const TOKEN_FIELD = {
   '#mention': 'mention',
   '#source': 'source',
   '#date': 'date',
+  '#video': 'video',
+  '#timecode': 'timecode',
+  '#scenes': 'scenes',
+  '#credits': 'credits',
 };
 
 // A template can omit a draft field by leaving its token out of the body.
@@ -472,6 +599,40 @@ export const POST_TEMPLATE_STARTERS = Object.freeze([
   },
 ].map((starter) => Object.freeze(starter)));
 
+/**
+ * The starts New template offers, per kind. Geolocation keeps the four above. A plate
+ * post and a free post get one each, with no media post scaffolded under them: their
+ * pictures ride on the first post. Video thread starts come with the video thread.
+ */
+export const POST_KIND_STARTERS = Object.freeze({
+  geolocation: POST_TEMPLATE_STARTERS,
+  video: Object.freeze([]),
+  plate: Object.freeze([
+    Object.freeze({ id: 'plate', label: 'Plate', body: '#description\n\n#credits\n\n#mention', mediaEnabled: false }),
+  ]),
+  free: Object.freeze([
+    Object.freeze({ id: 'free', label: 'Text and source', body: '#description\n\n#mention\n\nSource: #source', mediaEnabled: false }),
+  ]),
+});
+
+/** A kind's starts. */
+export function postStarters(kind) {
+  return POST_KIND_STARTERS[normalizePostKind(kind)];
+}
+
+/**
+ * Whether a reply under the source keeps the line that names the source. The post sits
+ * right under it there, so a template that says nothing leaves it out.
+ */
+export const REPLY_VARIANTS = Object.freeze([
+  { id: 'drop-source', label: 'Leave the source out' },
+  { id: 'keep-source', label: 'Keep the source' },
+]);
+
+export function replyKeepsSource(templateData) {
+  return templateData?.reply === 'keep-source';
+}
+
 /** What separates a point's name from its coordinates, on the one line it gets. */
 export const POINT_SEPARATOR = ' — ';
 
@@ -518,7 +679,9 @@ export function postCoordinates(text, { lat, lon } = {}) {
 /** Resolve the live draft into the string each token stands for ('' when absent). */
 export function tweetFields({
   place, plusCode, description, lat, lon, coordsText, mention, source, date,
+  video, timecode, scenes, credits,
 } = {}) {
+  const text = (value) => (typeof value === 'string' ? value.trim() : '');
   return {
     place: place?.trim() ?? '',
     // Place and plus code are one point's address, and that point is the
@@ -529,7 +692,21 @@ export function tweetFields({
     mention: mention?.trim() ?? '',
     source: source?.trim() ?? '',
     date: date?.trim() ?? '',
+    // the media's title as the case names it, never its file name (`videoTitle`)
+    video: text(video),
+    timecode: text(timecode),
+    scenes: text(scenes),
+    credits: text(credits),
   };
+}
+
+/**
+ * What `#video` says: the title Media gives the video, or nothing. A file name is
+ * what the analyst's disk calls it, not what a reader should, so a video without a
+ * title leaves the token empty and its line drops.
+ */
+export function videoTitle(item) {
+  return typeof item?.title === 'string' ? item.title.trim() : '';
 }
 
 const STAMP = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})?$/;
@@ -752,13 +929,30 @@ function bodyFromLegacy(data) {
  * the mention, the token body, whether a media tweet is scaffolded, and any
  * boilerplate extra tweets (their text, no ids).
  */
-export function templateFromPost({ mention = '@GeoConfirmed', body = DEFAULT_TWEET_BODY, mediaEnabled = true, extraTweets = [] } = {}) {
+export function templateFromPost({
+  mention = '@GeoConfirmed', body = DEFAULT_TWEET_BODY, mediaEnabled = true, extraTweets = [], kind, reply,
+} = {}) {
   return {
     mention: mention ?? '',
     body: typeof body === 'string' && body.trim() ? body : DEFAULT_TWEET_BODY,
     mediaEnabled: mediaEnabled !== false,
     extraTweets: (extraTweets ?? []).map((e) => ({ text: e.text ?? '' })),
+    ...stated(kind, reply),
   };
+}
+
+/** The kind and the reply variant, each only when it says something (`api/templates.py`). */
+function stated(kind, reply) {
+  const known = statedPostKind(kind);
+  return {
+    ...(known ? { kind: known } : {}),
+    ...(REPLY_VARIANTS.some((one) => one.id === reply) ? { reply } : {}),
+  };
+}
+
+/** The kind a template is for: Geolocation when it says nothing. */
+export function postTemplateKind(data) {
+  return normalizePostKind(data?.kind);
 }
 
 /**
@@ -778,7 +972,26 @@ export function normPostTemplate(data = {}) {
         text: typeof e?.text === 'string' ? e.text.slice(0, 4_000) : '',
       }))
       : [],
+    ...stated(source.kind, source.reply),
   };
+}
+
+/**
+ * The template a new post of this kind starts with: the one Settings marks as that
+ * kind's default, while it still exists and is still of that kind. Geolocation's is
+ * `post_template`, the setting it always was; the others are `post_kind_templates`.
+ */
+export function defaultPostTemplate(templates, kind, { geolocation = '', byKind = {} } = {}) {
+  const known = normalizePostKind(kind);
+  const id = known === 'geolocation' ? geolocation : byKind?.[known];
+  if (!id) return null;
+  return (templates ?? []).find((t) => t.id === id && postTemplateKind(t.data) === known) ?? null;
+}
+
+/** The templates a post of this kind can apply, in their stored order. */
+export function templatesOfKind(templates, kind) {
+  const known = normalizePostKind(kind);
+  return (templates ?? []).filter((t) => postTemplateKind(t.data) === known);
 }
 
 /** Apply a post-template skeleton while dropping all current attachments. */

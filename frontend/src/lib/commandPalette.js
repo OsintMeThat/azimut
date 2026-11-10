@@ -1,5 +1,5 @@
 import { foldTerms, foldText } from './textFold.js';
-import { workspaceOf } from './workspaces.js';
+import { TOOL_HOVERS, workspaceOf } from './workspaces.js';
 import { HORIZON_GROUPS, HORIZON_SETTINGS } from './horizon/panelIndex.js';
 import { isPicture, openScenes, queueName } from './sceneQueue.js';
 
@@ -47,7 +47,8 @@ export function matchRuns(label, query) {
   return runs;
 }
 
-/** Find tools by their displayed name, workspace or stable id. */
+/** Find tools by their displayed name, workspace or stable id, and a renamed one by
+ *  the name its hover says it had (Post is found as Geo Report). */
 export function paletteTools(tools, query) {
   const terms = foldTerms(query);
   return tools.map(({ id, label }) => {
@@ -58,7 +59,7 @@ export function paletteTools(tools, query) {
       icon: workspace?.icon ?? 'settings',
     };
   }).filter((row) => {
-    const text = foldText(`${row.label} ${row.detail} ${row.id}`);
+    const text = foldText(`${row.label} ${row.detail} ${row.id} ${TOOL_HOVERS[row.id] ?? ''}`);
     return terms.every((term) => text.includes(term));
   }).sort((a, b) => {
     const queryText = foldText(query.trim());

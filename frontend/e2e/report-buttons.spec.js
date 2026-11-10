@@ -48,9 +48,9 @@ for (const theme of ['dark', 'light']) {
     await page.waitForTimeout(200);
     const publishHover = await buttonStyle(toPost);
 
-    await page.getByRole('button', { name: 'Geo Report', exact: true }).click();
+    await page.locator('.tabstrip').getByRole('button', { name: 'Post', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Save as draft', exact: true })).toBeVisible();
-    await expect(page.locator('.tabstrip').getByRole('button', { name: 'Geo Report', exact: true })).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('.tabstrip').getByRole('button', { name: 'Post', exact: true })).toHaveAttribute('aria-current', 'page');
     await page.mouse.move(0, 0);
     const actions = header.locator('.head-actions');
     const draft = actions.getByRole('button', { name: 'Save as draft', exact: true });

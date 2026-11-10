@@ -67,6 +67,16 @@
         'input[data-testid="fileInput"]',
         'input[type="file"]',
       ],
+      // The source post's own reply button, for a reply under it. The page holds the
+      // posts it answers above it and may quote another inside it, so the post is the
+      // one whose time links to the address the tab was opened on.
+      reply: () => {
+        const id = /\/status\/(\d+)/.exec(location.pathname ?? "")?.[1];
+        const posts = [...document.querySelectorAll('article[data-testid="tweet"]')];
+        const source = (id && posts.find((post) => post.querySelector(`a[href$="/status/${id}"] time`)))
+          || posts.find((post) => post.getAttribute("tabindex") === "-1");
+        return source?.querySelector('[data-testid="reply"]') ?? null;
+      },
     },
     {
       match: /(^|\.)bsky\.app$/,
@@ -87,6 +97,14 @@
       // clicks and throws away. See `drop` below for the door it does leave open.
       files: [],
       dropOnBody: true,
+      // The post the page is about is scrolled to the top, the ones it answers above
+      // it: its reply prompt when the page draws one, else the first reply in sight.
+      reply: () =>
+        document.querySelector('[data-testid="replyPromptBtn"]') ??
+        [...document.querySelectorAll('[data-testid="replyBtn"]')].find(
+          (button) => button.getBoundingClientRect().bottom > 0
+        ) ??
+        null,
     },
   ];
 
@@ -504,13 +522,40 @@
     return after.find((one) => !holdsText(one)) ?? null;
   }
 
+  /**
+   * Open the reply box under the post this tab shows, and say whether it opened.
+   *
+   * A reply is handed over on the source post's own page. Its reply button opens the
+   * site's full composer as a reply, over the page, and that dialog is the one that
+   * threads: the box drawn under the post takes a single post. Nothing is pressed but
+   * that button, and the dialog it opens is filled like any other.
+   */
+  async function openReply(site) {
+    if (!site.reply) return false;
+    const button = await waitFor(() => {
+      try {
+        return site.reply();
+      } catch {
+        return null;
+      }
+    });
+    if (!button) return false;
+    press(button);
+    const inDialog = site.editors.filter((selector) => selector.startsWith('[role="dialog"]'));
+    return Boolean(await waitFor(() => found(inDialog, editable)[0] ?? null, 8000));
+  }
+
   async function run() {
     const site = SITES.find((one) => one.match.test(location.hostname));
     if (!site) return { filled: 0, error: "Azimut does not know this composer." };
 
-    const posts = window.__AZIMUT_HANDOFF__?.posts;
+    const thread = window.__AZIMUT_HANDOFF__;
+    const posts = thread?.posts;
     delete window.__AZIMUT_HANDOFF__; // the page keeps nothing of the case
     if (!posts?.length) return { filled: 0 };
+    if (thread.reply === true && !(await openReply(site))) {
+      return { filled: 0, error: "Could not open the reply box under the source post." };
+    }
 
     const opened = await waitFor(() => {
       const nodes = boxes(site);

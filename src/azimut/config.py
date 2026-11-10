@@ -146,6 +146,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # classic layout. An id whose template has since been deleted is ignored
     # where it is read, so nothing here needs cleaning up after a delete.
     "post_template": "",
+    # The template each other kind of post starts with, by kind and id: {"video": id,
+    # "plate": id, "free": id}. `post_template` above stays Geolocation's, the setting it
+    # always was. A kind left out, or an id whose template is gone or is another kind's,
+    # starts that kind on its own layout, so nothing here needs cleaning after a delete.
+    "post_kind_templates": {},
     # The proof template New proof starts with, by id, read the same way: empty
     # means none, and an id whose template is gone reads as none.
     "proof_template": "",
@@ -224,6 +229,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 COORD_FORMATS = ("dd", "dms", "mgrs")
 UNIT_SYSTEMS = ("metric", "imperial")
 POST_TARGETS = ("x", "bluesky")
+# The kinds of post that keep a default template of their own (`post_kind_templates`);
+# Geolocation's is `post_template`.
+POST_TEMPLATE_KINDS = ("video", "plate", "free")
 
 # Documented monthly free allowances per meter, in billed requests (verified
 # 2026-07: Google 2D Map Tiles 100k then $0.60/1k, and ≤15k/day; Mapbox Static

@@ -747,10 +747,20 @@
   let savingTpl = $state(false);
   let deleteTpl = $state(null); // { kind, id, name } pending confirmation
 
-  function newTemplate(kind) {
+  /** A new template; a post one starts as a kind of post, from one of that kind's layouts. */
+  function newTemplate(kind, { kind: postKind = 'geolocation', starter = null } = {}) {
     editing = kind === 'proof'
       ? { kind, id: null, name: '', data: null, fresh: true, choosing: true }
-      : { kind, id: null, name: '', data: templateFromPost({}), fresh: true };
+      : {
+        kind,
+        id: null,
+        name: '',
+        data: templateFromPost({
+          kind: postKind,
+          ...(starter ? { body: starter.body, mediaEnabled: starter.mediaEnabled !== false } : {}),
+        }),
+        fresh: true,
+      };
   }
 
   /** A start picked: the editor opens on a copy of it, named after it unless it is the blank one. */
@@ -819,6 +829,11 @@
       await deleteTemplate(t.kind, t.id);
       if (editing?.kind === t.kind && editing?.id === t.id) editing = null;
       if (t.kind === 'post' && prefs.postTemplate === t.id) await savePrefs({ post_template: '' });
+      if (t.kind === 'post' && Object.values(prefs.postKindTemplates ?? {}).includes(t.id)) {
+        await savePrefs({
+          post_kind_templates: Object.fromEntries(Object.entries(prefs.postKindTemplates).filter(([, id]) => id !== t.id)),
+        });
+      }
       if (t.kind === 'proof' && prefs.proofTemplate === t.id) await savePrefs({ proof_template: '' });
       toast(`Deleted "${t.name}"`, 'info');
     } catch (e) {

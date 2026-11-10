@@ -151,7 +151,7 @@ export const PAGES = {
     lead: 'What a new thread starts with, and how your reports and proofs are signed.',
     shot: 'settings-publishing',
     marks: [
-      { anchor: 'settings.report-defaults', title: 'Geo Report', text: 'The mention and the site a new thread starts with, and whether the extension may fill the composer.' },
+      { anchor: 'settings.report-defaults', title: 'Post', text: 'The mention and the site a new thread starts with, and whether the extension may fill the composer.' },
       { anchor: 'settings.signature', title: 'In reports', text: 'Your logo, rounded or framed with Edit, and your name, role and signature, which a note prints where it says so.' },
     ],
     tips: [{ title: 'Posting stays yours', text: 'Even with the extension, the composer is filled and Post is left to you.' }],
@@ -174,7 +174,7 @@ export const PAGES = {
     shot: 'settings-templates',
     marks: [
       { anchor: 'settings.proof-templates', title: 'Geo Proof templates', text: 'House styles for proofs, each started from a ready one and shown on a sample. New proof starts with the one marked as the default.' },
-      { anchor: 'settings.report-templates', title: 'Geo Report templates', text: 'The structures a thread can follow, with words that fill themselves.' },
+      { anchor: 'settings.report-templates', title: 'Post templates', text: 'The structures a post can follow, for each kind of post, with words that fill themselves.' },
       { anchor: 'settings.plate-templates', title: 'Map plate templates', text: 'A plate’s layout, paper and colours without its ground, to share as a file.' },
     ],
     tips: [{ title: 'From a plate', text: 'Keep as template, in a plate, files its layout here.' }],
@@ -700,7 +700,7 @@ export const PAGES = {
       { anchor: 'proof.coords', title: 'The point', text: 'Filled from a satellite panel or typed. Each place can be named, and one can be the camera.' },
       { anchor: 'proof.meta', title: 'Source, description, date', text: 'Several sources, a description, and a date read on a clock, at the point or in UTC.' },
       { anchor: 'proof.tabs', title: 'Tabs', text: 'Proof holds the facts, Layout the pictures and their marks, Style the look. A proof on a video adds Scene.' },
-      { anchor: 'proof.save', title: 'Save and post', text: 'Saves the PNG with its spec, so it reopens and edits. To Post carries it into Geo Report.' },
+      { anchor: 'proof.save', title: 'Save and post', text: 'Saves the PNG with its spec, so it reopens and edits. To Post carries it into Post.' },
     ],
     tips: [
       { title: 'A blur hides for real', text: 'A blur box redraws the picture under it, so what is hidden is hidden in the exported file.' },
@@ -724,7 +724,10 @@ export const PAGES = {
     ],
     tips: [
       { title: 'Drafts', text: 'Save as draft keeps the thread to reopen and edit here.' },
-      { title: 'Thread styles', text: 'Settings, Templates holds the structures a thread can follow.' },
+      { title: 'The home', text: 'With no post open, Post lists its drafts and the proofs with no post yet. One press on a proof writes its geolocation.' },
+      { title: 'New post', text: 'Geolocation is the composer it always was. Map plate and Free post carry their own pictures on the first post.' },
+      { title: 'Reply under the source', text: 'When the source is an X or Bluesky post, the post can go out as a reply under it, without the Source line unless the template keeps it.' },
+      { title: 'Thread styles', text: 'Settings, Templates holds the structures a post can follow, for each kind of post.' },
       { title: 'Counted for the site', text: 'Each post counts its characters against the limit of the site picked.' },
       { title: 'The point, every way', text: 'The geolocation post gives the point in decimal, DMS and plus code, with links to the maps.' },
     ],
@@ -1064,7 +1067,7 @@ export const EXTENSION_SITES = {
     { view: 'Any other page', cells: ['Saved as a bookmark', 'no', 'no'] },
   ],
   elsewhere: [
-    { where: 'X and Bluesky', text: 'When Geo Report publishes, it fills the composer with the thread and the proof. Posting stays yours.' },
+    { where: 'X and Bluesky', text: 'When Post publishes, it fills the composer with the thread and the proof, or the reply box under the source post. Posting stays yours.' },
     { where: 'Google Lens, Bing, Yandex, TinEye', text: 'When Reverse Search opens an engine, it hands the picture to the engine’s uploader.' },
   ],
 };

@@ -95,7 +95,7 @@ The wording lives once a side: `engine/copernicus_credit.py` and
 - **A proof keeps its imagery's credits.** Each panel's capture carries its credit on
   its face; the proof's footer stays *Composed with Azimut* unless the analyst writes
   their own. The panels' credits, read as the notice where they are Copernicus, are
-  kept with the proof (its Details, the PNG's metadata, Geo Report, a note's credit
+  kept with the proof (its Details, the PNG's metadata, Post, a note's credit
   line and Sources). A crop that cuts a capture's credit band leaves the proof without
   a visible credit: the footer's **Imagery credits** box adds them after its line.
 - **Older pictures keep their words.** Captures filed with "© Copernicus Sentinel data

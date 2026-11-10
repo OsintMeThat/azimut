@@ -3,6 +3,7 @@
 import pytest
 
 import graph_read
+import mediafixture
 
 STATE = {
     "description": "A formation of 13 helicopters was spotted heading East",
@@ -221,3 +222,70 @@ def test_two_drafts_differing_only_by_case_cannot_both_be_saved(client):
     again = client.post(f"/api/cases/{cid}/drafts", json={"title": "thread", "state": STATE})
 
     assert again.status_code == 409
+
+
+# -- what Post's home reads off the list ------------------------------------------
+
+
+def test_the_list_says_each_drafts_kind_posts_and_what_it_posts(client):
+    """Post's home lists drafts without opening them, and knows a proof has a post from a
+    draft naming it, so the list carries the kind, the count and the proof or video."""
+    cid = client.post("/api/cases", json={"name": "Home"}).json()["id"]
+    old = dict(STATE, proofPng="proofs/strike.png")
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Old shape", "state": old})
+    client.post(
+        f"/api/cases/{cid}/drafts",
+        json={
+            "title": "Free one",
+            "state": {
+                "kind": "free", "tweet1": "Words", "firstMedia": ["media/a.png"],
+                "mediaEnabled": False, "mediaType": "none", "extraTweets": [],
+            },
+        },
+    )
+    client.post(
+        f"/api/cases/{cid}/drafts",
+        json={"title": "Odd", "state": {"kind": "telegram", "video": 3, "proofPng": None}},
+    )
+    rows = {row["title"]: row for row in client.get(f"/api/cases/{cid}/drafts").json()}
+
+    # a draft from before kinds is a Geolocation one, its proof named, its three posts counted
+    assert rows["Old shape"]["kind"] == "geolocation"
+    assert rows["Old shape"]["proof"] == "proofs/strike.png"
+    assert rows["Old shape"]["posts"] == 3
+    assert rows["Old shape"]["video"] is None
+    assert rows["Free one"]["kind"] == "free"
+    assert rows["Free one"]["posts"] == 1
+    # what this build does not know reads as nothing rather than as itself
+    assert rows["Odd"]["kind"] == "geolocation"
+    assert rows["Odd"]["video"] is None and rows["Odd"]["proof"] is None
+
+
+def test_a_first_posts_own_pictures_are_what_the_post_is_made_from(client):
+    """A free or plate post carries its pictures on post 1 (`firstMedia`): they link the
+    post to them as the proof does, and they face the same path and count checks."""
+    cid = client.post("/api/cases", json={"name": "First media"}).json()["id"]
+    path = mediafixture._upload(client, cid, "pic.png")
+    saved = client.post(
+        f"/api/cases/{cid}/drafts",
+        json={"title": "Plate post", "state": {"kind": "plate", "firstMedia": [path]}},
+    )
+    assert saved.status_code == 200, saved.text
+    post = next(e for e in graph_read.entities(cid) if e["type"] == "post")
+    media = next(e for e in graph_read.entities(cid) if e.get("attrs", {}).get("path") == path)
+    links = [link for link in graph_read.links(cid, "derived-from") if link["from"] == post["id"]]
+    assert [link["to"] for link in links] == [media["id"]]
+
+    too_many = client.post(
+        f"/api/cases/{cid}/drafts",
+        json={"title": "Five", "state": {"firstMedia": [f"media/{i}.png" for i in range(5)]}},
+    )
+    unsafe = client.post(
+        f"/api/cases/{cid}/drafts",
+        json={"title": "Out", "state": {"firstMedia": ["../outside.png"]}},
+    )
+    shape = client.post(
+        f"/api/cases/{cid}/drafts",
+        json={"title": "Shape", "state": {"firstMedia": "media/a.png"}},
+    )
+    assert (too_many.status_code, unsafe.status_code, shape.status_code) == (422, 422, 422)

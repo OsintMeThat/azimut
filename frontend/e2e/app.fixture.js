@@ -1070,11 +1070,17 @@ export async function installAppFixture(page, options = {}) {
     };
   };
 
-  await page.addInitScript(({ caseId }) => {
+  await page.addInitScript(({ caseId, postWindow }) => {
     if (caseId) localStorage.setItem('azimut:lastCase', caseId);
     localStorage.setItem('azimut:theme', 'dark');
+    // Post's extension window is put away, as one Not now does, unless a spec is about it
+    // (`postExtensionWindow: true`): it would stand over every spec that opens Post.
+    if (!postWindow && localStorage.getItem('azimut:post-extension') === null) {
+      localStorage.setItem('azimut:post-extension', 'not-now');
+    }
   }, {
     caseId: options.lastCase === undefined ? CASE_ID : options.lastCase,
+    postWindow: options.postExtensionWindow === true,
   });
 
   await page.route('**/*', async (route) => {
@@ -2068,11 +2074,17 @@ export async function installAppFixture(page, options = {}) {
     // shelf 404s shows no panels at all.
     if (path === `/api/cases/${CASE_ID}/satellite`) return json(route, options.satCaptures ?? []);
     if (path === `/api/cases/${CASE_ID}/drafts`) {
+      // as `api/drafts.py` lists them: what Post's home says of each without opening it
       return json(route, Object.entries(fixtureDrafts).map(([name, draft]) => ({
         name,
         title: draft.title,
         updated_at: draft.updated_at,
         target: draft.state?.target,
+        kind: draft.state?.kind ?? 'geolocation',
+        posts: 1 + (draft.state?.mediaType && draft.state.mediaType !== 'none' ? 1 : 0)
+          + (draft.state?.extraTweets ?? []).filter((post) => post.text?.trim() || post.mediaPaths?.length).length,
+        proof: draft.state?.proofPng ?? null,
+        video: draft.state?.video ?? null,
       })));
     }
     if (path.startsWith(`/api/cases/${CASE_ID}/drafts/`)) {

@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { fetchAllEntities, lookupEntity, fetchDerivation } from '../lib/catalog.js';
@@ -8,13 +8,15 @@
   import { templatesState, postDraftState } from '../lib/state.svelte.js';
   import { holdsUnsaved, onBackForward, settlePlace } from '../lib/backButton.js';
   import { createNote } from '../lib/notes.js';
-  import { openNotebook } from '../lib/navigate.js';
+  import { openGuide, openNotebook } from '../lib/navigate.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { proofCoordsText, proofSource } from '../lib/composer.js';
   import {
     isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify, specAttr, specPath,
   } from '../lib/naming.js';
   import { filingName, planProofHandoff } from './post/handoff.js';
+  import { startPost } from './post/start.js';
+  import { extensionWindowPutAway, putExtensionWindowAway } from './post/extensionWindow.js';
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
     extraPostTweetText, groupPostMedia, MAX_POST_MEDIA, mediaTweetText,
@@ -23,6 +25,9 @@
     normalizePostTarget, POST_TARGETS, postCharacterCount, postComposeUrl, postReportMarkdown,
     postTarget, templateUsesPostField, togglePostMedia, pointLines,
     handoffThread, postHandoffUrl, postDate,
+    defaultPostTemplate, normalizePostKind, postKind, postStarters, normPostTemplate,
+    replyIntentUrl, replyKeepsSource, replyPostText, replyTarget, startMediaPlan,
+    statedPostKind, templatesOfKind, videoTitle,
   } from '../lib/post.js';
   import { extensionOutdated, extensionVersion, handOffPost } from '../lib/extBridge.js';
   import { bidiSafe } from '../lib/bidi.js';
@@ -33,6 +38,11 @@
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
+  import BackButton from '../components/BackButton.svelte';
+  import PostHome from './post/PostHome.svelte';
+  import NewPostGallery from './post/NewPostGallery.svelte';
+  import ExtensionWindow from './post/ExtensionWindow.svelte';
+  import ReplyDialog from './post/ReplyDialog.svelte';
 
   let coordsText = $state('');
   let geo = $state(null); // {lat, lon, dms, plus_code}
@@ -74,6 +84,77 @@
   // Extra context tweets (3, 4, …)
   let extraSeq = 0;
   let extraTweets = $state([]); // [{ id, text, mediaPaths, mediaType }]
+
+  // What the post is made from (lib/post.js POST_KINDS). A Geolocation post is the
+  // composer as it always was, its first post carrying the proof. Any other kind
+  // carries its own pictures or video on its first post instead (`firstMedia`), and
+  // shows only the fields its layout uses.
+  let kind = $state('geolocation');
+  const geolocation = $derived(kind === 'geolocation');
+  let firstMedia = $state([]);
+  let firstMediaType = $state('none'); // 'none' | 'video' | 'images'
+
+  // Whether a post is open: a draft, a proof sent over, a start picked. Without one a
+  // case that holds drafts or proofs shows the home instead of an empty composer.
+  let postOpen = $state(false);
+
+  // The case's drafts and proofs as their lists give them (`GET /drafts`, `GET /proofs`),
+  // for the home and for what a proof rests on. Null while read; read again when the
+  // case moves, while Post is the tool in front.
+  let caseDrafts = $state(null);
+  let caseProofs = $state(null);
+  let listsFor = $state(null); // the case they were asked for
+  let listsRun = 0;
+  let listsAsked = ''; // what the last read was for, so one reason reads once
+  $effect(() => {
+    const id = caseState.current?.id;
+    const rev = caseState.rev;
+    if (uiState.tool !== 'post') return;
+    // Read for the home while no post is open, and for a proof the list does not hold
+    // yet (one just saved and sent over), never on each save of a post being written.
+    const idle = !postOpen && !hasContent;
+    const unknown = proofPng && !(caseProofs ?? []).some((row) => row.png === proofPng) ? proofPng : '';
+    if (!id) {
+      untrack(() => {
+        caseDrafts = null;
+        caseProofs = null;
+        listsFor = null;
+        listsAsked = '';
+      });
+      return;
+    }
+    if (!idle && !unknown) return;
+    const reason = `${id}|${rev}|${idle ? '' : unknown}`;
+    untrack(() => {
+      if (reason === listsAsked) return;
+      listsAsked = reason;
+      if (listsFor !== id) {
+        caseDrafts = null;
+        caseProofs = null;
+      }
+      listsFor = id;
+      readLists(id);
+    });
+  });
+
+  async function readLists(caseId) {
+    const run = ++listsRun;
+    const [drafts, proofs] = await Promise.all([
+      api.get(`/api/cases/${caseId}/drafts`).catch(() => null),
+      api.get(`/api/cases/${caseId}/proofs`).catch(() => null),
+    ]);
+    if (run !== listsRun || listsFor !== caseId) return;
+    caseDrafts = Array.isArray(drafts) ? drafts : (caseDrafts ?? []);
+    caseProofs = Array.isArray(proofs) ? proofs : (caseProofs ?? []);
+  }
+
+  // The home stands in for an empty composer once the case's lists are asked for, its
+  // cards breathing while they come, and gives way to the composer it always opened on
+  // when the case turns out to hold neither a draft nor a proof.
+  const homeAvailable = $derived(
+    !!caseState.current && listsFor === caseState.current.id
+      && (caseDrafts === null || caseProofs === null || caseDrafts.length > 0 || caseProofs.length > 0)
+  );
 
   // Draft persistence. The name in the header is the draft's filename: saving
   // writes under it, and renaming a saved draft moves its file (the backend
@@ -149,26 +230,35 @@
   // Media picker modal
   let pickerOpen = $state(false);
   let mediaLibrary = $state([]);
-  let mediaPickerTarget = $state(null); // null = tweet 2; an id = a later media tweet
+  let mediaPickerTarget = $state(null); // null = tweet 2; 'first' = post 1 of a non-geolocation; an id = a later media tweet
   let pickerQuery = $state(''); // search box, shown once the picker holds >6 items
 
   // path → media kind, from our own /media shelf, so attach chips can label a
-  // video without scanning the whole entity graph. Refreshed on case change.
+  // video without scanning the whole entity graph. Refreshed on case change. The
+  // titles ride along for `#video`, which says a video's title and never its file name.
   let kindByPath = $state(new Map());
+  let titleByPath = $state(new Map());
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev;
     if (!id) {
       kindByPath = new Map();
+      titleByPath = new Map();
       return;
     }
     let live = true;
     api
       .get(`/api/cases/${id}/media`)
       .then((items) => {
-        if (live) kindByPath = new Map(items.map((it) => [it.path, it.kind]));
+        if (!live) return;
+        kindByPath = new Map(items.map((it) => [it.path, it.kind]));
+        titleByPath = new Map(items.map((it) => [it.path, videoTitle(it)]));
       })
-      .catch(() => { if (live) kindByPath = new Map(); });
+      .catch(() => {
+        if (!live) return;
+        kindByPath = new Map();
+        titleByPath = new Map();
+      });
     return () => { live = false; };
   });
 
@@ -207,8 +297,53 @@
     if (plan === 'file-then-apply') {
       if (!(await fileCurrentDraft())) return;
       resetDraft();
+    } else if (!geolocation) {
+      // a blank post of another kind: the proof starts a geolocation, on its own template
+      resetDraft();
     }
     applyProof(p);
+  }
+
+  // A post started from the gallery, the home or another tool's To Post (`post/start.js`).
+  $effect(() => {
+    const start = uiState.postStart;
+    if (!start) return;
+    uiState.postStart = null;
+    untrack(() => adoptStart(start));
+  });
+
+  /** As a proof sent over does, a start files what is on screen first and makes way. */
+  async function adoptStart({ kind: wanted, media }) {
+    if (hasContent) {
+      if (!(await fileCurrentDraft())) return;
+    }
+    beginPost(wanted, media);
+  }
+
+  /**
+   * Open a blank post of this kind, on that kind's default template (or its first start
+   * when it has none), with these case files placed (`startMediaPlan`). A Geolocation
+   * post opens exactly as a blank composer always has.
+   */
+  function beginPost(wanted, media = []) {
+    resetDraft(normalizePostKind(wanted));
+    postOpen = true;
+    const plan = startMediaPlan(kind, media, (path) => kindByPath.get(path));
+    if (plan.first) {
+      firstMedia = plan.first.mediaPaths;
+      firstMediaType = plan.first.mediaType;
+    }
+    if (plan.media) {
+      mediaEnabled = true;
+      mediaText = retargetMediaTweetText(mediaText, mediaType, plan.media.mediaType, 2);
+      mediaType = plan.media.mediaType;
+      mediaPaths = plan.media.mediaPaths;
+    }
+    for (const group of plan.more) {
+      const tweet = newPostMediaTweet(++extraSeq, extraTweets.length + 3, group.mediaType);
+      tweet.mediaPaths = group.mediaPaths;
+      extraTweets.push(tweet);
+    }
   }
 
   /** Save what the composer holds under its own name, before something else
@@ -234,6 +369,7 @@
   }
 
   function applyProof(p) {
+    postOpen = true;
     // The proof's own sentence is what this field is for. A title is a filename,
     // and most of them are the number the composer handed out, so it only stands
     // in when the analyst renamed the proof and wrote no description.
@@ -304,7 +440,12 @@
   }
 
   function buildTweet1() {
-    return buildTweet1Lines(body, {
+    return buildTweet1Lines(body, tokenFields());
+  }
+
+  /** The draft's facts as the tokens read them (lib/post.js `tweetFields`). */
+  function tokenFields() {
+    return {
       place,
       plusCode: geo?.plus_code,
       description,
@@ -314,8 +455,27 @@
       mention,
       source,
       date,
-    });
+      video: postVideoTitle,
+    };
   }
+
+  // The video the post is about, for `#video`: the one its proof rests on, else the
+  // first video it carries. Its title as Media gives it, or nothing.
+  const postVideoPath = $derived(
+    (proofPng && caseProofs?.find((row) => row.png === proofPng)?.video)
+      || (firstMediaType === 'video' ? firstMedia[0] : null)
+      || (mediaType === 'video' ? mediaPaths[0] : null)
+      || null
+  );
+  const postVideoTitle = $derived(postVideoPath ? titleByPath.get(postVideoPath) ?? '' : '');
+  // The title can land after the post was written from its fields: an untouched post
+  // whose layout says `#video` is written again with it.
+  $effect(() => {
+    void postVideoTitle;
+    untrack(() => {
+      if (!tweet1Edited && tweet1.trim() && /#video(?![\p{L}\p{N}_])/iu.test(body)) regenerate();
+    });
+  });
 
   function regenerate() {
     tweet1 = buildTweet1();
@@ -336,12 +496,19 @@
     return !!appliedPostTemplate && !templateUsesPostField(body, field);
   }
 
+  // A geolocation shows every field, as it always has. Another kind shows the fields
+  // its layout uses, so a free post is not asked for coordinates.
+  function fieldShown(field) {
+    return geolocation || templateUsesPostField(body, field);
+  }
+
   // The four structural fields a template swaps, snapshotted for a clean restore.
   function snapshotPostStructure() {
     return {
       mention,
       body,
       mediaEnabled,
+      replyVariant,
       extraTweets: extraTweets.map((e) => ({
         text: e.text,
         mediaPaths: [...e.mediaPaths],
@@ -362,6 +529,7 @@
     mention = norm.mention;
     body = norm.body;
     mediaEnabled = norm.mediaEnabled;
+    replyVariant = replyKeepsSource(t.data) ? 'keep-source' : 'drop-source';
     extraTweets = norm.extraTweets.map((e) => ({ id: ++extraSeq, ...e }));
     appliedPostTemplate = { name: t.name, prev };
     if (quiet) return;
@@ -375,15 +543,30 @@
   // draft starts on it again.
   let defaultDeclined = false;
 
-  const defaultTemplate = () => templatesState.post.find((x) => x.id === prefs.postTemplate);
+  // This kind's default, Geolocation's being the bookmark it always was (lib/post.js).
+  const defaultTemplate = () => defaultPostTemplate(templatesState.post, kind, {
+    geolocation: prefs.postTemplate,
+    byKind: prefs.postKindTemplates,
+  });
+  // The templates this post can take: a kind's own, so a geolocation lists what it always did.
+  const kindTemplates = $derived(templatesOfKind(templatesState.post, kind));
 
   function startFromDefaultTemplate() {
+    // Another kind stands on its first layout, unnamed, so a free post is not written
+    // as a geolocation, and its default's Remove comes back to that rather than to the
+    // classic geolocation.
+    const [starter] = kind === 'geolocation' ? [] : postStarters(kind);
+    if (starter) {
+      const norm = normPostTemplate({ body: starter.body, mediaEnabled: starter.mediaEnabled, mention });
+      body = norm.body;
+      mediaEnabled = norm.mediaEnabled;
+    }
     const t = defaultTemplate();
     if (t) applyPostTemplate(t, { quiet: true });
   }
 
   function applyPostFromSelect(e) {
-    const t = templatesState.post.find((x) => x.id === e.target.value);
+    const t = kindTemplates.find((x) => x.id === e.target.value);
     e.target.value = '';
     if (t) applyPostTemplate(t);
   }
@@ -394,6 +577,7 @@
     mention = p.mention;
     body = p.body;
     mediaEnabled = p.mediaEnabled;
+    replyVariant = p.replyVariant ?? 'drop-source';
     extraTweets = p.extraTweets.map((e) => ({
       id: ++extraSeq,
       text: e.text,
@@ -459,8 +643,8 @@
     await copyText(bidiSafe(value));
   }
 
-  function threadParts() {
-    const parts = [tweet1];
+  function threadParts(first = tweet1) {
+    const parts = [first];
     if (mediaEnabled && mediaType !== 'none') parts.push(tweet2Text());
     for (let i = 0; i < extraTweets.length; i += 1) {
       const tweet = extraTweets[i];
@@ -470,8 +654,8 @@
     return parts.filter((part) => part.trim());
   }
 
-  async function copyAll(showToast = true) {
-    const parts = threadParts();
+  async function copyAll(showToast = true, first = tweet1) {
+    const parts = threadParts(first);
     return copyText(parts.map(bidiSafe).join('\n\n---\n\n'), { said: 'All posts copied', quiet: !showToast });
   }
 
@@ -484,7 +668,7 @@
     }
     try {
       mediaLibrary = await api.get(`/api/cases/${caseState.current.id}/media`);
-      mediaPickerTarget = normalizePostMediaPickerTarget(target);
+      mediaPickerTarget = target === 'first' ? 'first' : normalizePostMediaPickerTarget(target);
       pickerQuery = '';
       pickerOpen = true;
     } catch (e) {
@@ -493,6 +677,7 @@
   }
 
   function pickerTweet() {
+    if (mediaPickerTarget === 'first') return { mediaPaths: firstMedia, mediaType: firstMediaType };
     return mediaPickerTarget === null
       ? { mediaPaths, mediaType }
       : extraTweets.find((tweet) => tweet.id === mediaPickerTarget);
@@ -528,7 +713,10 @@
       toast(`A post can hold up to ${MAX_POST_MEDIA} media files`, 'warn');
       return;
     }
-    if (mediaPickerTarget === null) {
+    if (mediaPickerTarget === 'first') {
+      firstMedia = selection.mediaPaths;
+      firstMediaType = selection.mediaType;
+    } else if (mediaPickerTarget === null) {
       mediaText = retargetMediaTweetText(mediaText, mediaType, selection.mediaType, 2);
       mediaPaths = selection.mediaPaths;
       mediaType = selection.mediaType;
@@ -540,6 +728,16 @@
 
   function clearMedia(path) {
     mediaPaths = mediaPaths.filter((entry) => entry !== path);
+  }
+
+  function clearFirstMedia(path) {
+    firstMedia = firstMedia.filter((entry) => entry !== path);
+  }
+
+  function setFirstMediaType(type) {
+    if (firstMediaType === type) return;
+    firstMedia = [];
+    firstMediaType = type;
   }
 
   function clearExtraMedia(id, path) {
@@ -701,14 +899,18 @@
   /** Copy an image into the clipboard for the selected social composer. */
   async function copyImage(url) {
     try {
-      const res = await fetch(url);
-      let blob = await res.blob();
-      if (blob.type !== 'image/png') blob = await toPngBlob(blob);
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      await putImageOnClipboard(url);
       toast(`Image copied. Paste it into ${targetInfo.label}.`, 'ok', 2400);
     } catch (e) {
       toast(`Could not copy image: ${e.message}`, 'danger');
     }
+  }
+
+  async function putImageOnClipboard(url) {
+    const res = await fetch(url);
+    let blob = await res.blob();
+    if (blob.type !== 'image/png') blob = await toPngBlob(blob);
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
   }
 
   function triggerMediaDownload(url, path) {
@@ -761,6 +963,13 @@
         isMediaTweet: t.isMediaTweet === true,
         mediaTextIncludesPrefix: t.mediaTextIncludesPrefix === true,
       })),
+      // Written only for a post that is not a geolocation, so a geolocation draft keeps
+      // the shape every draft before kinds had.
+      ...(statedPostKind(kind)
+        ? { kind, firstMedia: [...firstMedia], firstMediaType }
+        : {}),
+      // a template that keeps the source in a reply says so on the post it shaped
+      ...(replyVariant === 'keep-source' ? { reply: 'keep-source' } : {}),
     };
   }
 
@@ -842,6 +1051,15 @@
     try {
       const doc = await api.get(`/api/cases/${caseState.current.id}/drafts/${encodeURIComponent(name)}`);
       const s = doc.state ?? {};
+      // a draft from before kinds says none, and is the geolocation it always was
+      kind = normalizePostKind(s.kind);
+      const own = kind !== 'geolocation';
+      firstMedia = own && Array.isArray(s.firstMedia)
+        ? s.firstMedia.filter((path) => typeof path === 'string').slice(0, MAX_POST_MEDIA)
+        : [];
+      firstMediaType = own && ['video', 'images'].includes(s.firstMediaType) ? s.firstMediaType : 'none';
+      postOpen = true;
+      replyVariant = s.reply === 'keep-source' ? 'keep-source' : 'drop-source';
       description = s.description ?? '';
       coordsText = s.coordsText ?? '';
       place = s.place ?? '';
@@ -903,7 +1121,13 @@
     }
   }
 
-  function resetDraft() {
+  /** A blank post: Geolocation unless a start names another kind. */
+  function resetDraft(next = 'geolocation') {
+    kind = normalizePostKind(next);
+    firstMedia = [];
+    firstMediaType = 'none';
+    postOpen = false;
+    replyVariant = 'drop-source';
     description = '';
     coordsText = '';
     geo = null;
@@ -988,8 +1212,11 @@
 
   const hasContent = $derived(
     !!(draftName || description.trim() || coordsText.trim() || date.trim() || mediaPaths.length ||
-      proofPng || extraTweets.length || tweet1.trim())
+      proofPng || extraTweets.length || tweet1.trim() || firstMedia.length)
   );
+
+  // The home stands where an empty composer would, while the case has something to list.
+  const homeShown = $derived(homeAvailable && !postOpen && !hasContent);
 
   // Preferences can arrive after this tool mounts. A blank composer follows the
   // preferred platform, while a selected or saved draft keeps its own target.
@@ -1016,7 +1243,7 @@
     postDraftState.fields = hasContent
       ? {
         place, plusCode: geo?.plus_code, description, lat: geo?.lat, lon: geo?.lon,
-        coordsText, mention, source, date,
+        coordsText, mention, source, date, video: postVideoTitle, kind,
       }
       : null;
     return () => (postDraftState.fields = null);
@@ -1025,6 +1252,7 @@
   function reportAttachmentPaths() {
     return [
       proofPng,
+      ...firstMedia,
       ...mediaPaths,
       ...extraTweets.flatMap((tweet) => tweet.mediaPaths),
     ].filter(Boolean);
@@ -1120,9 +1348,9 @@
    * to attach to each post. Paths only — the extension reads the bytes from the
    * app with its own pairing token, so no case file passes through the page.
    */
-  function handoffPayload() {
+  function handoffPayload(firstText = tweet1) {
     return handoffThread([
-      { text: bidiSafe(tweet1), files: proofPng ? [proofPng] : [] },
+      { text: bidiSafe(firstText), files: firstFiles() },
       ...(mediaEnabled && mediaType !== 'none'
         ? [{ text: bidiSafe(tweet2Text()), files: mediaPaths }]
         : []),
@@ -1185,7 +1413,203 @@
     }
   }
 
+  /** The files on the first post: a geolocation's proof, or any other kind's own media. */
+  function firstFiles() {
+    if (kind !== 'geolocation') return firstMedia;
+    return proofPng ? [proofPng] : [];
+  }
+
   let publishing = $state(false);
+
+  // ---- reply under the source --------------------------------------------------
+  // A geolocation whose source line is an X or a Bluesky post can go out as a reply
+  // under it. Its first post leaves the line naming the source out, unless the template
+  // says to keep it (`replyVariant`). Nothing is posted: the reply box opens filled.
+  const replyTo = $derived(geolocation ? replyTarget(source) : null);
+  const replySite = $derived(replyTo ? postTarget(replyTo.site).label : '');
+  let replyVariant = $state('drop-source');
+  let replyDialog = $state(false);
+  const pasteKeys = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '') ? '⌘V' : 'Ctrl+V';
+
+  function replyText() {
+    return replyPostText({
+      text: tweet1, edited: tweet1Edited, body, fields: tokenFields(),
+      keepSource: replyVariant === 'keep-source',
+    });
+  }
+
+  /**
+   * Hand the reply to the extension: it opens the source post, presses its reply and
+   * fills the thread there. Only an extension as new as the app knows a reply; an
+   * older one would open a new post, so the app keeps the reply for itself then.
+   */
+  async function tryReplyHandOff(text) {
+    const installed = extensionVersion();
+    if (!prefs.postPrefill || !installed || !caseState.current || !replyTo) return false;
+    if (extensionOutdated(installed, updatesState.extensionBundled)) return false;
+    const { posts, dropped } = handoffPayload(text);
+    if (!posts.length) return false;
+    try {
+      await handOffPost({ url: replyTo.url, caseId: caseState.current.id, posts, reply_to: replyTo.url });
+      const left = dropped ? ` ${dropped} file${dropped > 1 ? 's' : ''} over the per-post limit stayed behind.` : '';
+      toast(`${replySite} is opening the reply under the source.${left} Nothing was posted.`, 'info', 4200);
+      return true;
+    } catch (e) {
+      const excuse = handOffExcuse(e);
+      if (excuse) toast(excuse, 'warn', 6000);
+      return false;
+    }
+  }
+
+  async function replyUnderSource() {
+    if (publishing || !replyTo) return;
+    publishing = true;
+    try {
+      const text = bidiSafe(replyText());
+      await copyAll(false, text);
+      if (await tryReplyHandOff(text)) return;
+      if (replyTo.site !== 'x') {
+        // Bluesky has no page that opens a reply with words in it
+        replyDialog = true;
+        return;
+      }
+      // X's reply page takes the words. The proof goes on the clipboard, as Copy image
+      // puts it there, for one paste in the box; the copy is made first, while this
+      // tab still has the focus a clipboard asks for.
+      let pictured = false;
+      if (proofHref) {
+        try {
+          await putImageOnClipboard(proofHref);
+          pictured = true;
+        } catch {
+          /* the reply still opens; the picture is one Copy image away */
+        }
+      }
+      window.open(replyIntentUrl(replyTo.id, text), '_blank', 'noopener,noreferrer');
+      const more = threadParts(text).length > 1 ? ' The next posts are here to copy.' : '';
+      toast(
+        pictured ? `Picture copied: paste it with ${pasteKeys}.${more}` : `Opened ${replySite} under the source post.${more}`,
+        'info',
+        5200,
+      );
+    } finally {
+      publishing = false;
+    }
+  }
+
+  /** Bluesky without the extension: the reply copied, and the source post opened to paste it under. */
+  async function copyReplyAndOpen() {
+    replyDialog = false;
+    await copyText(bidiSafe(replyText()), { said: 'Post copied' });
+    if (replyTo) window.open(replyTo.url, '_blank', 'noopener,noreferrer');
+  }
+
+  // ---- the extension window ------------------------------------------------------
+  // Arriving in Post without the capture extension, a window says once why it is worth
+  // having here. Not now puts it away in this browser (post/extensionWindow.js), and the
+  // header then keeps a quiet line while it is still missing. It never stands in front
+  // of the welcome, the tour or the guide, and Copy and Publish work without it.
+  let extensionWindow = $state(false);
+  let extensionWindowSaid = false;
+  let windowPutAway = $state(extensionWindowPutAway());
+  // read once: the bridge marks the page before the app mounts (lib/extBridge.js)
+  const extensionMissing = globalThis.document ? !extensionVersion() : true;
+
+  $effect(() => {
+    if (uiState.tool !== 'post' || uiState.onboarding || uiState.guide) return;
+    untrack(() => {
+      if (extensionWindowSaid || windowPutAway || !extensionMissing) return;
+      extensionWindowSaid = true;
+      extensionWindow = true;
+    });
+  });
+
+  function extensionLater() {
+    putExtensionWindowAway();
+    windowPutAway = true;
+    extensionWindow = false;
+  }
+
+  function howToInstall() {
+    extensionLater();
+    replyDialog = false;
+    openGuide('extension');
+  }
+
+  // ---- a header that fits ---------------------------------------------------------
+  // What the header holds changes its width: the way back, the quiet line, a reply.
+  // Each time, it is laid out whole first and measured, and only what overflows gives
+  // way, a step at a time: first the name field narrows and the quiet line and Reply
+  // say less (`narrow`), then the secondary buttons fold to their icons (`compact`),
+  // as Geo Proof's do. Each opens again once the header is as wide as it needed, all
+  // of it before the frame is drawn.
+  let headerEl = $state(null);
+  let headerW = $state(0);
+  let fold = $state(0); // 0 whole, 1 narrow, 2 compact
+  const narrow = $derived(fold >= 1);
+  const compact = $derived(fold >= 2);
+  let needs = [0, 0];
+  const headerHolds = $derived([
+    homeShown, homeAvailable, hasContent, !!replyTo, windowPutAway && extensionMissing,
+    kind, !!draftName, targetInfo.label, !!caseState.current,
+  ].join('|'));
+
+  function fitHeader() {
+    if (!headerEl) return;
+    if (fold < 2 && headerEl.scrollWidth > headerEl.clientWidth + 1) {
+      needs[fold] = headerEl.scrollWidth;
+      fold += 1;
+      tick().then(fitHeader);
+    } else if (fold > 0 && headerEl.clientWidth >= needs[fold - 1]) {
+      fold -= 1;
+      tick().then(fitHeader);
+    }
+  }
+  $effect(() => {
+    void headerHolds;
+    untrack(() => {
+      fold = 0;
+      needs = [0, 0];
+      tick().then(fitHeader);
+    });
+  });
+  $effect(() => {
+    void headerW;
+    untrack(fitHeader);
+  });
+
+  // ---- the home and New post -------------------------------------------------------
+  let galleryOpen = $state(false);
+
+  /** New post: the gallery of starts, once the post on screen may make way. */
+  async function openGallery() {
+    if (!(await mayLeave())) return;
+    galleryOpen = true;
+  }
+
+  /** A start picked: the same road a To Post from another tool takes (`post/start.js`). */
+  function pickStart(wanted) {
+    galleryOpen = false;
+    // what was on screen was let go when New post was pressed
+    resetDraft();
+    startPost(wanted);
+  }
+
+  /** A proof waiting on the home: its geolocation post, as Attach a proof writes it. */
+  async function postProofFromHome(row) {
+    beginPost('geolocation');
+    await pickProof(row);
+  }
+
+  async function openFromHome(draft) {
+    await requestLoadDraft(draft.name);
+  }
+
+  /** Back to the home, asking first when the post holds changes not saved. */
+  async function backToHome() {
+    if (!(await mayLeave())) return;
+    resetDraft();
+  }
 
   async function publish() {
     if (publishing) return;
@@ -1209,33 +1633,69 @@
 </script>
 
 <div class="tool">
-  <div class="tool-header">
-    {#if caseState.current}
-      <input class="input title-input" bind:value={postName} maxlength="200" aria-label="Post name" />
+  <!-- Narrower than what it holds (the case panel open on a laptop, a reply beside
+       Publish), the header shows its secondary buttons as icons rather than cut off
+       Publish, as Geo Proof's does. Wide enough, it is the header it always was. -->
+  <div class="tool-header" class:narrow class:compact bind:this={headerEl} bind:clientWidth={headerW}>
+    {#if !homeShown}
+      <!-- the way back to the posts of the case, once it has some to list -->
+      {#if homeAvailable}
+        <BackButton label="Posts" title="Back to the drafts and what is ready to post" onclick={backToHome} guide="post.home" />
+      {/if}
+      {#if caseState.current}
+        <input class="input title-input" bind:value={postName} maxlength="200" aria-label="Post name" />
+      {/if}
+      {#if !geolocation}
+        <span class="kind-chip" title="What this post is made from"><Icon name={postKind(kind).icon} size={12} /> {postKind(kind).label}</span>
+      {/if}
     {/if}
     <div class="head-actions">
+      {#if windowPutAway && extensionMissing}
+        <span class="ext-quiet" title="The capture extension fills the thread in the site's composer">
+          {narrow ? 'No extension' : 'Extension not connected'} · <button type="button" class="ext-install" onclick={howToInstall}>Install</button>
+        </span>
+      {/if}
       {#if caseState.current}
         <button class="btn btn-sm" onclick={openDraftList} title="Reopen a saved draft">
-          <Icon name="folderOpen" size={14} /> Open
+          <Icon name="folderOpen" size={14} /> <span class="words">Open</span>
         </button>
       {/if}
-      {#if hasContent}
-        <button class="btn btn-sm" onclick={() => (discardConfirm = true)} title="Clear this draft">
-          <Icon name="reset" size={14} /> Discard
+      {#if homeShown}
+        <button class="btn btn-sm" data-guide="post.new" onclick={openGallery} title="Start a post: a geolocation, a map plate or your own words">
+          <Icon name="plus" size={14} /> New post
         </button>
+      {:else}
+        {#if hasContent}
+          <button class="btn btn-sm" onclick={() => (discardConfirm = true)} title="Clear this draft">
+            <Icon name="reset" size={14} /> <span class="words">Discard</span>
+          </button>
+        {/if}
+        <button class="btn btn-sm" onclick={saveDraft} disabled={saving || !postName.trim()} title="Keep this thread to reopen and edit here">
+          <Icon name="save" size={14} /> <span class="words">{draftName ? 'Save draft' : 'Save as draft'}</span>
+        </button>
+        <button class="btn btn-ok btn-sm" data-guide="post.report" onclick={openSaveReport} disabled={!hasContent || reportSaving} title="Write the finding up as a Notebook note">
+          <Icon name="file" size={14} /> <span class="words">Save report</span>
+        </button>
+        <button class="btn btn-info btn-sm" data-guide="post.publish" onclick={publish} disabled={!tweet1.trim() || publishing} title={`Copy posts and open ${targetInfo.label}`}>
+          <Icon name="post" size={14} /> Publish on {targetInfo.label}
+        </button>
+        {#if replyTo}
+          <button class="btn btn-info btn-sm" data-guide="post.reply" onclick={replyUnderSource} disabled={!tweet1.trim() || publishing}
+            aria-label="Reply under the source"
+            title={`Open the reply box under the source post on ${replySite}${replyVariant === 'keep-source' ? '' : ', without the Source line'}`}>
+            <Icon name="undo" size={14} /> {narrow ? 'Reply' : 'Reply under the source'}
+          </button>
+        {/if}
       {/if}
-      <button class="btn btn-sm" onclick={saveDraft} disabled={saving || !postName.trim()} title="Keep this thread to reopen and edit here">
-        <Icon name="save" size={14} /> {draftName ? 'Save draft' : 'Save as draft'}
-      </button>
-      <button class="btn btn-ok btn-sm" data-guide="post.report" onclick={openSaveReport} disabled={!hasContent || reportSaving} title="Write the finding up as a Notebook note">
-        <Icon name="file" size={14} /> Save report
-      </button>
-      <button class="btn btn-info btn-sm" data-guide="post.publish" onclick={publish} disabled={!tweet1.trim() || publishing} title={`Copy posts and open ${targetInfo.label}`}>
-        <Icon name="post" size={14} /> Publish on {targetInfo.label}
-      </button>
     </div>
   </div>
 
+  {#if homeShown}
+  <div class="tool-body home-body">
+    <PostHome caseId={caseState.current?.id ?? ''} drafts={caseDrafts} proofs={caseProofs}
+      onnew={openGallery} onopen={openFromHome} onall={openDraftList} onproof={postProofFromHome} />
+  </div>
+  {:else}
   <div class="tool-body">
     <div class="layout">
       <!-- left column: ingredients -->
@@ -1280,10 +1740,10 @@
                 <Icon name="x" size={12} />
               </button>
             </div>
-          {:else if templatesState.post.length}
+          {:else if kindTemplates.length}
             <select id="pc-tpl" class="input" onchange={applyPostFromSelect}>
               <option value="">Apply a template…</option>
-              {#each templatesState.post as t (t.id)}
+              {#each kindTemplates as t (t.id)}
                 <option value={t.id}>{t.name}</option>
               {/each}
             </select>
@@ -1335,6 +1795,7 @@
           </div>
         {/if}
 
+        {#if fieldShown('coordinates')}
         <div
           class="field"
           class:template-disabled={fieldDisabledByTemplate('coordinates')}
@@ -1371,7 +1832,9 @@
             </div>
           {/if}
         </div>
+        {/if}
 
+        {#if fieldShown('place')}
         <div
           class="field"
           class:template-disabled={fieldDisabledByTemplate('place')}
@@ -1389,7 +1852,9 @@
             disabled={fieldDisabledByTemplate('place')}
           />
         </div>
+        {/if}
 
+        {#if fieldShown('mention')}
         <div
           class="field"
           class:template-disabled={fieldDisabledByTemplate('mention')}
@@ -1405,7 +1870,9 @@
             disabled={fieldDisabledByTemplate('mention')}
           />
         </div>
+        {/if}
 
+        {#if fieldShown('source')}
         <div
           class="field"
           class:template-disabled={fieldDisabledByTemplate('source')}
@@ -1424,6 +1891,7 @@
             disabled={fieldDisabledByTemplate('source')}
           ></textarea>
         </div>
+        {/if}
 
       </div>
 
@@ -1431,10 +1899,11 @@
       <div class="col">
 
         <!-- Post 1: geolocation -->
+        <!-- or the first post of another kind, carrying its own media -->
         <div class="tweet-block card" data-guide="post.first">
           <div class="tweet-head">
             <span class="tweet-num">1</span>
-            <span class="label" style="margin:0">Geolocation post</span>
+            <span class="label" style="margin:0">{geolocation ? 'Geolocation post' : 'First post'}</span>
             {#if tweet1Edited}
               <button class="btn btn-ghost btn-sm" onclick={regenerate} title="Rebuild from the fields">
                 <Icon name="compass" size={13} /> regenerate
@@ -1455,7 +1924,48 @@
           <!-- The proof is this post's attachment, so it rides on this card the way
                every other post carries its media. Read across the column, the thread
                is what will be published, picture by picture. -->
-          {#if caseState.current}
+          {#if caseState.current && !geolocation}
+            <!-- its own pictures or video, chosen like any media post's -->
+            <div class="media-attach first-media">
+              <div class="media-tabs">
+                <button class="btn btn-sm" class:btn-primary={firstMediaType === 'video'} class:btn-ghost={firstMediaType !== 'video'}
+                  onclick={() => setFirstMediaType('video')}>Video</button>
+                <button class="btn btn-sm" class:btn-primary={firstMediaType === 'images'} class:btn-ghost={firstMediaType !== 'images'}
+                  onclick={() => setFirstMediaType('images')}>Image</button>
+              </div>
+              {#if firstMediaType !== 'none'}
+                <button class="btn btn-ghost btn-sm" onclick={() => openPicker('first')}>
+                  <Icon name="media" size={13} /> {firstMedia.length ? 'Edit media' : 'Add media'}
+                </button>
+              {/if}
+              {#each firstMedia as path (path)}
+                {@const href = mediaHref(path)}
+                <span class="attach-chip">
+                  <a href={href} target="_blank" rel="noreferrer" title={path}>{path.replace(/^media\//, '')}</a>
+                  <button class="chip-x" onclick={() => clearFirstMedia(path)} title="Remove this media">
+                    <Icon name="x" size={11} />
+                  </button>
+                </span>
+                {#if firstMediaType === 'images'}
+                  <button class="btn btn-ghost btn-sm" onclick={() => copyImage(href)} title="Copy this image">
+                    <Icon name="copy" size={13} /> Copy image
+                  </button>
+                {/if}
+              {/each}
+              {#if firstMedia.length}
+                <button class="btn btn-ghost btn-sm" onclick={() => downloadPostMedia(firstMedia)} title="Download this post's media">
+                  <Icon name="download" size={13} /> {firstMedia.length > 1 ? `Download all (${firstMedia.length})` : 'Download'}
+                </button>
+              {/if}
+            </div>
+            {#if firstMediaType === 'images' && firstMedia.length}
+              <div class="first-pics">
+                {#each firstMedia as path (path)}
+                  <img src={mediaHref(path)} alt="" loading="lazy" />
+                {/each}
+              </div>
+            {/if}
+          {:else if caseState.current}
             <div class="media-attach">
               {#if proofPng}
                 <span class="attach-chip">
@@ -1630,12 +2140,14 @@
         {/each}
 
         <div class="thread-actions" data-guide="post.more">
-          {#if !mediaEnabled}
+          <!-- a post of another kind starts with no media post under it, so its first
+               one is post 2 itself rather than a post 2 "restored" -->
+          {#if !mediaEnabled && geolocation}
             <button class="btn btn-ghost btn-sm" onclick={() => (mediaEnabled = true)}>
               <Icon name="plus" size={13} /> Restore post 2
             </button>
           {/if}
-          <button class="btn btn-ghost btn-sm" onclick={addMediaTweet}>
+          <button class="btn btn-ghost btn-sm" onclick={() => (!mediaEnabled && !geolocation ? (mediaEnabled = true) : addMediaTweet())}>
             <Icon name="plus" size={13} /> Add media post
           </button>
           <button class="btn btn-ghost btn-sm" onclick={addExtraTweet}>
@@ -1649,7 +2161,20 @@
       </div>
     </div>
   </div>
+  {/if}
 </div>
+
+{#if galleryOpen}
+  <NewPostGallery onpick={pickStart} onclose={() => (galleryOpen = false)} />
+{/if}
+
+{#if extensionWindow}
+  <ExtensionWindow oninstall={howToInstall} onlater={extensionLater} />
+{/if}
+
+{#if replyDialog}
+  <ReplyDialog oncopy={copyReplyAndOpen} oninstall={howToInstall} onclose={() => (replyDialog = false)} />
+{/if}
 
 {#if reportModal}
   <Modal title="Save report as note" onclose={() => (reportModal = null)} width="580px">
@@ -1729,7 +2254,7 @@
     confirmLabel="Discard"
     tone="danger"
     icon="reset"
-    onconfirm={resetDraft}
+    onconfirm={() => resetDraft()}
     oncancel={() => (discardConfirm = false)}
   />
 {/if}
@@ -1767,10 +2292,7 @@
       {/if}
       <div class="picker-grid">
         {#each (caseState.current ? visiblePickerItems() : []) as item (item.path)}
-          {@const targetTweet = mediaPickerTarget === null
-            ? null
-            : extraTweets.find((tweet) => tweet.id === mediaPickerTarget)}
-          {@const selected = targetTweet ? targetTweet.mediaPaths.includes(item.path) : mediaPaths.includes(item.path)}
+          {@const selected = (pickerTweet()?.mediaPaths ?? []).includes(item.path)}
           <button
             class="picker-item"
             class:selected={selected}
@@ -1938,6 +2460,49 @@
   /* header actions */
   .tool-header {
     gap: 16px;
+  }
+  /* the home lays its own scroll over the whole body */
+  .home-body { position: relative; }
+  .kind-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: none;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .ext-quiet {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+  }
+  .tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }
+  .tool-header.narrow .title-input { width: min(200px, 18vw); }
+  .ext-install {
+    color: var(--text-2);
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+  }
+  .ext-install:hover { color: var(--accent); }
+  .first-pics {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 6px;
+  }
+  .first-pics img {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border-radius: var(--r-sm);
+    background: var(--bg-2);
   }
   .head-actions {
     margin-left: auto;

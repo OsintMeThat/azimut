@@ -575,6 +575,51 @@ describe('handOff: filling a composer the app prepared', () => {
     );
   });
 
+  it('opens the source post\'s own page for a reply under it, and says so to the filler', async () => {
+    const chrome = fillingChrome();
+    const { handOff } = load({ chrome, fetchImpl: vi.fn(async () => attachment()) });
+    chrome.scripting.executeScript = vi.fn(async () => [{ result: { filled: 1 } }]);
+    const source = 'https://x.com/someone/status/1850000000000000000';
+
+    await expect(handOff({ ...payload, url: source, reply_to: source })).resolves.toEqual({ ok: true, accepted: true });
+    await settle(() =>
+      expect(chrome.scripting.executeScript).toHaveBeenCalledWith(expect.objectContaining({ files: ['handoff.js'] }))
+    );
+    expect(chrome.tabs.create).toHaveBeenCalledWith({ url: source, active: true });
+    const setter = chrome.scripting.executeScript.mock.calls.map(([one]) => one).find((call) => call.args?.[0]?.posts);
+    expect(setter.args[0].reply).toBe(true);
+  });
+
+  it('leaves a thread without a reply exactly as it always handed it over', async () => {
+    const chrome = fillingChrome();
+    const { handOff } = load({ chrome, fetchImpl: vi.fn(async () => attachment()) });
+    chrome.scripting.executeScript = vi.fn(async () => [{ result: { filled: 2 } }]);
+    await handOff(payload);
+    await settle(() =>
+      expect(chrome.scripting.executeScript).toHaveBeenCalledWith(expect.objectContaining({ files: ['handoff.js'] }))
+    );
+    const setter = chrome.scripting.executeScript.mock.calls.map(([one]) => one).find((call) => call.args?.[0]?.posts);
+    expect(Object.keys(setter.args[0])).toEqual(['posts']);
+    expect(chrome.tabs.create).toHaveBeenCalledWith({ url: payload.url, active: true });
+  });
+
+  it('replies only under a post of a site it posts to', async () => {
+    for (const reply_to of [
+      'https://x.com/someone', 'https://evil.example/someone/status/1', 'http://x.com/a/status/1',
+      'https://bsky.app/profile/a', 'https://x.com/a/status/1/photo/1', 7,
+    ]) {
+      const chrome = fillingChrome();
+      const { handOff } = load({ chrome });
+      await expect(handOff({ ...payload, reply_to })).rejects.toThrow(/replies under/);
+      expect(chrome.tabs.create).not.toHaveBeenCalled();
+    }
+    const chrome = fillingChrome();
+    const { handOff } = load({ chrome, fetchImpl: vi.fn(async () => attachment()) });
+    chrome.scripting.executeScript = vi.fn(async () => [{ result: { filled: 1 } }]);
+    const bluesky = 'https://bsky.app/profile/someone.bsky.social/post/3kabc';
+    await expect(handOff({ ...payload, url: bluesky, reply_to: bluesky })).resolves.toEqual({ ok: true, accepted: true });
+  });
+
   it('refuses a hand-off asked for by anything but the local app', async () => {
     const { handle } = load({ chrome: fillingChrome() });
     const res = await handle(

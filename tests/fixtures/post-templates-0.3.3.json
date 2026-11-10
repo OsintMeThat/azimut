@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "proof": [],
+  "post": [
+    {
+      "id": "c0ffee0123456789",
+      "name": "Desk thread",
+      "data": {
+        "mention": "@DeskOne @DeskTwo",
+        "body": "#place - #pluscode\n\n#description\n\nFilmed: #date\n\n#coordinates\n\n#mention\n\nSource: #source",
+        "mediaEnabled": false,
+        "extraTweets": [
+          {
+            "text": "Method: shadows and the ridge line."
+          },
+          {
+            "text": "Follow for more."
+          }
+        ]
+      },
+      "updated_at": "2026-10-28T09:12:44Z"
+    },
+    {
+      "id": "beef00aa11bb22cc",
+      "name": "Bare coordinates",
+      "data": {
+        "mention": "",
+        "body": "#coordinates",
+        "mediaEnabled": true,
+        "extraTweets": []
+      },
+      "updated_at": "2026-10-30T18:01:02Z"
+    }
+  ],
+  "map": [],
+  "note": []
+}

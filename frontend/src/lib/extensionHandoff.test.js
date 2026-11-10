@@ -92,7 +92,7 @@ const PNG = { name: 'proof.png', type: 'image/png', data: btoa('\x89PNG') };
  * do — `takesPaste: false` and `canType: false` are how a test closes a road.
  */
 function run({
-  hostname = 'x.com', posts, html,
+  hostname = 'x.com', pathname = '/', posts, html, reply = false,
   canType = true, takesPaste = true, gecko = false,
   onPaste, onAttach, onType, onReady,
 }) {
@@ -148,7 +148,7 @@ function run({
   }
   document.body.addEventListener('drop', (e) => dropped.push(e.dataTransfer.files));
   onReady?.(document);
-  window.__AZIMUT_HANDOFF__ = { posts };
+  window.__AZIMUT_HANDOFF__ = reply ? { posts, reply } : { posts };
   // No `fetch` in scope on purpose — see the CSP test at the bottom.
   return new Function(
     'location',
@@ -160,7 +160,7 @@ function run({
     // `return` with a line break after it returns nothing at all
     `const report = ${source}\n; return report;`
   )(
-    { hostname },
+    { hostname, pathname },
     FakeDataTransfer,
     gecko ? GeckoClipboardEvent : FakeClipboardEvent,
     FakeDragEvent,
@@ -688,5 +688,63 @@ describe('filling a thread', () => {
 
     expect(report.filled).toBe(2);
     expect(clicked).toEqual(['addButton']); // and never tweetButton
+  });
+});
+
+describe('a reply under the source', () => {
+  // X's status page: the post it answers above, the source post, and the box drawn
+  // under it. Its reply opens the full composer as a dialog, which is what threads.
+  const POST = (id, own) => `<article data-testid="tweet" tabindex="${own ? '-1' : '0'}">
+    <a href="/someone/status/${id}"><time datetime="2026-11-01">Nov 1</time></a>
+    <button data-testid="reply" data-post="${id}"></button></article>`;
+  const PAGE = `${POST('100', false)}${POST('200', true)}${BOX('inline')}`;
+  const opensDialog = (doc, pressed) => {
+    for (const button of doc.querySelectorAll('[data-testid="reply"]')) {
+      button.addEventListener('click', () => {
+        pressed.push(button.dataset.post);
+        const dialog = doc.createElement('div');
+        dialog.setAttribute('role', 'dialog');
+        dialog.innerHTML = `${BOX(0)}${FILE_INPUT(0)}`;
+        doc.body.append(dialog);
+        const box = dialog.querySelector('[contenteditable]');
+        box.addEventListener('paste', (e) => { box.textContent += e.clipboardData.text; });
+      });
+    }
+  };
+
+  it('presses the source post\'s reply, never the one above it, and fills the box it opens', async () => {
+    const pressed = [];
+    const report = await run({
+      pathname: '/someone/status/200', reply: true, html: PAGE,
+      posts: [{ text: 'Geolocated.', files: [PNG] }],
+      onReady: (doc) => opensDialog(doc, pressed),
+    });
+    expect(pressed).toEqual(['200']);
+    expect(report.filled).toBe(1);
+    expect(report.error).toBeUndefined();
+    expect(document.querySelector('[role="dialog"] [contenteditable]').textContent).toBe('Geolocated.');
+    // the box drawn under the post is left alone
+    expect(document.querySelector('[data-testid="tweetTextarea_inline"]').textContent).toBe('');
+  });
+
+  it('says so, and fills nothing, when the reply box does not open', async () => {
+    const report = await run({
+      pathname: '/someone/status/200', reply: true, html: PAGE,
+      posts: [{ text: 'Geolocated.', files: [] }],
+    });
+    expect(report.filled).toBe(0);
+    expect(report.error).toBe('Could not open the reply box under the source post.');
+    expect(document.querySelector('[data-testid="tweetTextarea_inline"]').textContent).toBe('');
+  }, 20000);
+
+  it('fills a thread without a reply where it always did, the reply buttons untouched', async () => {
+    const pressed = [];
+    const report = await run({
+      html: `${BOX(0)}${POST('200', true)}`,
+      posts: [{ text: 'Geolocated.', files: [] }],
+      onReady: (doc) => opensDialog(doc, pressed),
+    });
+    expect(pressed).toEqual([]);
+    expect(report.filled).toBe(1);
   });
 });

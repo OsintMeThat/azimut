@@ -337,6 +337,8 @@ async function run() {
     await context.addInitScript(({ caseId }) => {
       localStorage.setItem('azimut:lastCase', caseId);
       localStorage.setItem('azimut:theme', 'dark');
+      // Post's extension window put away, as Not now does, so it covers no picture
+      localStorage.setItem('azimut:post-extension', 'not-now');
     }, { caseId: demo.caseId });
     const page = await context.newPage();
     page.setDefaultTimeout(20_000);

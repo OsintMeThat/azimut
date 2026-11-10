@@ -45,6 +45,10 @@ describe('tool search', () => {
     { id: 'settings', label: 'Settings' },
   ];
 
+  it('finds a renamed tool by the name it had', () => {
+    expect(paletteTools([...tools, { id: 'post', label: 'Post' }], 'geo report').map((row) => row.id)).toEqual(['post']);
+  });
+
   it('finds a workspace as well as an individual tool, with folded text', () => {
     expect(paletteTools(tools, 'MÁP').map((row) => row.id)).toEqual(['satellite', 'compare']);
     expect(paletteTools(tools, 'compose proof').map((row) => row.id)).toEqual(['proof']);

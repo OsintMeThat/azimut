@@ -22,7 +22,7 @@ test('keeps app settings in focused sections', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: 'Coordinates' })).toBeVisible();
   await rail.getByRole('button', { name: 'Publishing' }).click();
-  await expect(page.getByRole('heading', { name: 'Geo Report' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Post', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'In reports' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'On proofs' })).toBeVisible();
 
@@ -169,6 +169,8 @@ test('a new post template starts from a layout, counts each platform and mends a
   await page.getByRole('navigation', { name: 'Settings sections' })
     .getByRole('button', { name: 'Templates' }).click();
   await page.getByRole('button', { name: 'New post template' }).click();
+  // a kind first, then one of its layouts: Geolocation's Classic is where it always started
+  await page.locator('.float-menu[aria-label="New post template"]').getByRole('button', { name: 'Classic' }).click();
 
   const editor = page.locator('.tpl-modal');
   const body = editor.locator('textarea.body');

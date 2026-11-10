@@ -1,6 +1,6 @@
 <script>
   /**
-   * What a new Geo Report starts from, who a report is from, and the handle
+   * What a new post starts from, who a report is from, and the handle
    * signed proofs carry.
    *
    * The logo and the signature picture live beside settings.json and reach a
@@ -105,7 +105,7 @@
 </script>
 
 <section class="group" data-guide="settings.report-defaults">
-  <h3>Geo Report</h3>
+  <h3>Post</h3>
   <div class="row">
     <div class="row-label" title={HELP.mention}>
       <span>Default mention</span>
@@ -123,7 +123,7 @@
   <div class="row">
     <div class="row-label" title={HELP.platform}>
       <span>Preferred platform</span>
-      <span class="row-hint">Used for new Geo Report drafts.</span>
+      <span class="row-hint">Used for new posts.</span>
     </div>
     <div class="seg" role="group" aria-label="Preferred platform">
       {#each Object.values(POST_TARGETS) as option (option.id)}

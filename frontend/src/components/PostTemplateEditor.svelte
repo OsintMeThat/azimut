@@ -9,10 +9,15 @@
    *
    * `data` is the template blob (bindable); the parent owns save/delete. `fresh`
    * marks a new template, which offers starting layouts to begin from.
+   *
+   * A template is for one kind of post (`data.kind`, none for a geolocation), chosen
+   * when it is made: its tokens, its starts and its sample follow that kind, and a
+   * geolocation also says whether a reply under the source keeps the source line.
    */
   import {
-    TWEET_TOKENS, DEFAULT_TWEET_BODY, POST_TARGETS, POST_TEMPLATE_STARTERS, buildTweet1,
-    fixMisspelledToken, misspelledTokens, postCharacterCount,
+    TWEET_TOKENS, DEFAULT_TWEET_BODY, POST_TARGETS, REPLY_VARIANTS, buildTweet1,
+    fixMisspelledToken, misspelledTokens, postCharacterCount, postKind, postStarters,
+    postTemplateKind, tokensForKind,
   } from '../lib/post.js';
   import { postDraftState } from '../lib/state.svelte.js';
   import { bidiSafe } from '../lib/bidi.js';
@@ -25,6 +30,10 @@
   if (!Array.isArray(data.extraTweets)) data.extraTweets = [];
 
   let bodyEl = $state(null);
+
+  const kind = $derived(postTemplateKind(data));
+  const tokens = $derived(tokensForKind(kind));
+  const starters = $derived(postStarters(kind));
 
   // Insert a token at the caret (or over the selection), keeping focus so the
   // analyst can keep typing/inserting without reaching for the mouse.
@@ -54,11 +63,11 @@
   const misspelled = $derived(misspelledTokens(data.body));
 
   // Live preview of the first tweet, so the effect of the token layout reads
-  // without leaving Settings. It fills the tokens with placeholder facts, or with
-  // the post open in the composer when there is one. The template's own mention
-  // wins either way: applying the template is what sets it on a post.
+  // without leaving Settings. It fills the tokens with placeholder facts of the
+  // template's kind, or with the post open in the composer when it is of that kind.
+  // The template's own mention wins either way: applying the template is what sets it.
   const SAMPLE = Object.fromEntries(TWEET_TOKENS.map((t) => [t.tag.slice(1), t.sample]));
-  const SAMPLE_FIELDS = {
+  const GEOLOCATION_SAMPLE = {
     place: SAMPLE.place,
     plusCode: SAMPLE.pluscode,
     description: SAMPLE.description,
@@ -66,9 +75,30 @@
     lon: 2.35,
     source: SAMPLE.source,
     date: SAMPLE.date,
+    video: SAMPLE.video,
+    credits: SAMPLE.credits,
   };
+  const SAMPLES = {
+    geolocation: GEOLOCATION_SAMPLE,
+    video: { ...GEOLOCATION_SAMPLE, timecode: SAMPLE.timecode, scenes: SAMPLE.scenes },
+    plate: {
+      description: 'Front line around Kupiansk, 1 to 30 October',
+      date: '2025-10-01/2025-10-30',
+      credits: SAMPLE.credits,
+    },
+    free: {
+      description: 'Smoke over the port at dusk, seen from three angles',
+      source: SAMPLE.source,
+      date: SAMPLE.date,
+      credits: SAMPLE.credits,
+    },
+  };
+  const SAMPLE_FIELDS = $derived(SAMPLES[kind]);
   let previewWith = $state('sample'); // 'sample' | 'open'
-  const openFields = $derived(postDraftState.fields);
+  // the post in the composer, when it is one this template could shape
+  const openFields = $derived(postDraftState.fields && (postDraftState.fields.kind ?? 'geolocation') === kind
+    ? postDraftState.fields
+    : null);
   // The composer can be emptied while this is open, which takes its post away.
   const useOpen = $derived(previewWith === 'open' && !!openFields);
   const built = $derived(
@@ -87,6 +117,7 @@
 <div class="post-editor">
   <div class="pe-grid">
     <div class="pe-fields">
+      <p class="pe-kind"><Icon name={postKind(kind).icon} size={13} /> {postKind(kind).label}</p>
       <label class="fld">
         <span>Mention</span>
         <input type="text" placeholder="@GeoConfirmed" maxlength="280" bind:value={data.mention} />
@@ -96,10 +127,10 @@
         <span>First post layout</span>
         <p class="hint">Arrange the tokens in the order you want, add line breaks and
           your own text. A token with no value drops its line.</p>
-        {#if fresh}
+        {#if fresh && starters.length}
           <div class="starters" role="group" aria-label="Start from">
             <span class="starters-label">Start from</span>
-            {#each POST_TEMPLATE_STARTERS as starter (starter.id)}
+            {#each starters as starter (starter.id)}
               <button type="button" class="tok starter" onclick={() => (data.body = starter.body)}>
                 {starter.label}
               </button>
@@ -107,7 +138,7 @@
           </div>
         {/if}
         <div class="tokens">
-          {#each TWEET_TOKENS as tok}
+          {#each tokens as tok (tok.tag)}
             <button type="button" class="tok" title={`Insert ${tok.tag}`}
               onclick={() => insertToken(tok.tag)}>{tok.tag}</button>
           {/each}
@@ -126,6 +157,19 @@
       <label class="chk">
         <input type="checkbox" bind:checked={data.mediaEnabled} /> Include a media post
       </label>
+
+      {#if kind === 'geolocation'}
+        <label class="fld">
+          <span>In a reply under the source</span>
+          <select class="reply" value={data.reply ?? 'drop-source'}
+            onchange={(event) => (data.reply = event.currentTarget.value)}>
+            {#each REPLY_VARIANTS as variant (variant.id)}
+              <option value={variant.id}>{variant.label}</option>
+            {/each}
+          </select>
+          <p class="hint">The post sits right under the source there, so the Source line can go.</p>
+        </label>
+      {/if}
 
       <fieldset class="fld">
         <span>Boilerplate extra posts</span>
@@ -149,7 +193,8 @@
           onclick={() => (previewWith = 'sample')}>Sample</button>
         <button type="button" class="pv-opt" class:on={useOpen} aria-pressed={useOpen}
           disabled={!openFields}
-          title={openFields ? 'Fill it with the post open in the composer' : 'No post is open in the composer'}
+          title={openFields ? 'Fill it with the post open in the composer'
+            : postDraftState.fields ? 'The post open in the composer is another kind' : 'No post is open in the composer'}
           onclick={() => (previewWith = 'open')}>Open post</button>
       </div>
       <pre>{preview}</pre>
@@ -162,6 +207,15 @@
 <style>
   .pe-grid { display: grid; grid-template-columns: 1fr 240px; gap: 16px; align-items: start; }
   .pe-fields { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .pe-kind {
+    display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin: 0;
+    padding: 2px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent);
+    font-size: 11px; font-weight: 600;
+  }
+  .reply {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text-1); padding: 5px 8px; font: inherit; align-self: flex-start;
+  }
   .fld { display: flex; flex-direction: column; gap: 6px; border: 0; margin: 0; padding: 0; }
   .fld > span { font-size: 12px; color: var(--text-2); font-weight: 600; }
   .hint { margin: 0; font-size: 11px; color: var(--text-3); line-height: 1.4; }

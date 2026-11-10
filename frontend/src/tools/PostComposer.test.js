@@ -26,7 +26,7 @@ afterEach(() => {
   uiState.postProof = null;
 });
 
-describe('Geo Report actions', () => {
+describe('Post actions', () => {
   it('offers Save report and removes the old Copy report action', () => {
     caseState.current = { id: 'case-1', folders: [], entities: [] };
 
@@ -150,7 +150,10 @@ describe('handing the thread to the extension', () => {
   const publish = source.slice(source.indexOf('function handoffPayload'), source.indexOf('<div class="tool">'));
 
   it('sends paths, never files: the extension reads the bytes from the app itself', () => {
-    expect(publish).toContain('files: proofPng ? [proofPng] : []');
+    // the proof on a geolocation's first post, a post of another kind's own media
+    expect(publish).toContain('files: firstFiles()');
+    expect(publish).toContain('return proofPng ? [proofPng] : [];');
+    expect(publish).toContain("if (kind !== 'geolocation') return firstMedia;");
     expect(publish).toContain('files: mediaPaths');
     expect(publish).toContain('files: tweet.mediaPaths');
     expect(publish).toContain('caseId: caseState.current.id');
@@ -236,7 +239,7 @@ describe('the date a proof states', () => {
     const snap = source.slice(source.indexOf('function snapshot()'), source.indexOf('function snapshot()') + 400);
     expect(snap).toContain('date,');
     expect(source).toContain("date = typeof s.date === 'string' ? s.date : '';");
-    const reset = source.slice(source.indexOf('function resetDraft()'));
+    const reset = source.slice(source.indexOf('function resetDraft('));
     expect(reset.slice(0, reset.indexOf('}\n'))).toContain("date = '';");
   });
 });
