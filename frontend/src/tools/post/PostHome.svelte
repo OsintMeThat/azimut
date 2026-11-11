@@ -321,7 +321,7 @@
   }
   .ph-card:not(.ghost):hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow-2); }
   .ph-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  /* a post card: the press that opens it, its link once posted, and its ⋯ */
+  /* a card with a menu, a post's or a waiting proof's: its press, a post's link once posted, and its ⋯ */
   .post-card { position: relative; }
   .ph-open { display: flex; flex-direction: column; min-width: 0; padding: 0; text-align: left; }
   .ph-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--r-lg); }

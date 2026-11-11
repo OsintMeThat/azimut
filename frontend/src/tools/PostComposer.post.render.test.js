@@ -879,6 +879,15 @@ describe('a post already out, from the home', () => {
     expect(write.state.publish.opened_at).toBeUndefined();
   });
 
+  it('offers it on a waiting slide\'s chip too, by a right-click', async () => {
+    lists.proofs = [{ name: 'slide-1', title: 'slide-1', png: 'proofs/slide-1.png', thumb: null, video: 'media/clip.mp4', video_title: 'Convoy', slide: 1, slides: 1, order: 0 }];
+    await mountPost();
+    home().querySelector('.ph-chip').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
+    flushSync();
+    const menu = document.querySelector('.float-menu[aria-label="slide-1"]');
+    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Write its post', 'Already posted…']);
+  });
+
   it('opens the same menu from a waiting card\'s ⋯, Write its post doing what a press does', async () => {
     await mountPost();
     home().querySelector('button[aria-label="More for waiting"]').click();
