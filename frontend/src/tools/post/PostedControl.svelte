@@ -7,7 +7,9 @@
    * post, copies its link, adds or changes the link, or takes it back (**Not posted**).
    * After Publish, Reply or the extension's hand-off, the button wears a soft accent until
    * the post is marked or closed. A link the extension caught for this post stands here
-   * as a proposal, never kept by itself: **Keep** or **Not this one**.
+   * as a proposal, never kept by itself: **Link caught**, its card open under it with the
+   * link to check, **Keep** and **Not this one**. A press elsewhere folds the card away
+   * and the proposal waits, so the header never grows with it.
    *
    * At the header's narrowest step (`iconOnly`) it shows its icon, its words in the hover.
    */
@@ -39,6 +41,15 @@
   let opener = $state(null);
   let asking = $state(false);
   let menu = $state(false);
+  let caughtEl = $state(null);
+  let caughtOpen = $state(false);
+  // a link newly caught opens its card, once
+  let caughtSeen = null;
+  $effect(() => {
+    const link = proposal?.url ?? null;
+    if (link && link !== caughtSeen) caughtOpen = true;
+    caughtSeen = link;
+  });
 
   /** Open the popover, for a proof the home says is posted already. */
   export function ask() {
@@ -64,12 +75,11 @@
 </script>
 
 {#if proposal}
-  <span class="pc-caught" role="group" aria-label="Link caught" title={proposal.url}>
-    <Icon name="link" size={12} />
-    <span class="pc-caught-said">{#if iconOnly}Link caught{:else}Link caught: <span class="pc-caught-url">{shortLink(proposal.url)}</span>{/if}</span>
-    <button type="button" class="btn btn-primary btn-xs" title="Mark this post posted at that link" onclick={() => onkeep?.()}>Keep</button>
-    <button type="button" class="btn btn-ghost btn-xs" title="Leave that link out" onclick={() => ondismiss?.()}>Not this one</button>
-  </span>
+  <button type="button" class="btn btn-sm pc-caught" bind:this={caughtEl} aria-haspopup="dialog" aria-expanded={caughtOpen}
+    aria-label="Link caught" title={iconOnly ? 'Link caught' : 'The extension caught a link for this post'}
+    onclick={() => (caughtOpen = !caughtOpen)}>
+    <Icon name="link" size={13} />{#if !iconOnly}<span>Link caught</span>{/if}
+  </button>
 {:else if !posted}
   <button type="button" class="btn btn-sm pc-mark" class:accent bind:this={opener}
     aria-haspopup="dialog" aria-expanded={asking} aria-label="Mark as posted"
@@ -96,6 +106,19 @@
     <div class="fm-sep"></div>
     <button type="button" class="fm-item" title="Back to Draft, for a post marked posted by mistake" onclick={() => act('unmark')}>
       <Icon name="undo" size={14} /><span class="fm-grow">Not posted</span></button>
+  </FloatingMenu>
+{/if}
+
+{#if proposal && caughtOpen && caughtEl}
+  <FloatingMenu anchor={caughtEl} width={320} role="dialog" label="Link caught" onclose={() => (caughtOpen = false)}>
+    <div class="pc-card">
+      <p class="pc-card-said">Link caught: <a class="pc-card-url" href={proposal.url} target="_blank" rel="noreferrer"
+        title="Open it to check it is this post">{shortLink(proposal.url)}</a></p>
+      <div class="pc-card-row">
+        <button type="button" class="btn btn-primary btn-sm" title="Mark this post posted at that link" onclick={() => onkeep?.()}>Keep</button>
+        <button type="button" class="btn btn-ghost btn-sm" title="Leave that link out" onclick={() => ondismiss?.()}>Not this one</button>
+      </div>
+    </div>
   </FloatingMenu>
 {/if}
 
@@ -128,24 +151,11 @@
   :global(:root[data-theme='light']) .pc-pill.changed { color: color-mix(in srgb, var(--warn) 60%, var(--text-1)); }
   .pc-pill:hover { filter: brightness(1.12); }
   .pc-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .pc-caught {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex: 0 1 auto;
-    min-width: 0;
-    height: 26px;
-    padding: 0 3px 0 9px;
-    border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
-    border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--text-1);
-    font-size: var(--fs-xs);
-    white-space: nowrap;
-  }
-  .pc-caught > :global(svg) { flex: none; color: var(--accent); }
-  .pc-caught-said { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .pc-caught-url { font-family: var(--font-mono); }
-  .pc-caught .btn { flex: none; }
-  .pc-caught .btn-xs { border-radius: 999px; }
+  .pc-caught { flex: none; gap: 5px; border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--accent-soft); color: var(--accent); }
+  :global(:root[data-theme='light']) .pc-caught { color: color-mix(in srgb, var(--accent) 60%, var(--text-1)); }
+  .pc-card { display: flex; flex-direction: column; gap: 8px; padding: 6px; }
+  .pc-card-said { margin: 0; color: var(--text-1); font-size: var(--fs-sm); line-height: 1.45; overflow-wrap: anywhere; }
+  .pc-card-url { color: var(--text-1); font-family: var(--font-mono); font-size: var(--fs-xs); }
+  .pc-card-url:hover { color: var(--accent); }
+  .pc-card-row { display: flex; gap: 6px; }
 </style>

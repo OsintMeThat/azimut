@@ -957,7 +957,8 @@ describe('a link the extension caught', () => {
   const caught = (extra = {}) => ({
     caseId: CASE.id, draft: 'Post 1', url: NINTH_MARCH, site: 'x', at: '2026-11-11T09:00:00Z', ...extra,
   });
-  const proposal = () => header().querySelector('[role="group"][aria-label="Link caught"]');
+  const chip = () => header().querySelector('button[aria-label="Link caught"]');
+  const proposal = () => document.querySelector('.float-menu[role="dialog"][aria-label="Link caught"]');
   const pill = () => header().querySelector('.pc-pill');
   const writeOpen = async () => {
     uiState.postProof = { ...PROOF };
@@ -970,13 +971,23 @@ describe('a link the extension caught', () => {
     const name = await writeOpen();
     bridge.caught(caught({ draft: name }));
     flushSync();
+    // its card opens under the header's chip, the link there to check
+    expect(chip().textContent.trim()).toBe('Link caught');
     expect(proposal().textContent.replace(/\s+/g, ' ').trim())
       .toBe(`Link caught: ${NINTH_MARCH.replace('https://', '')} Keep Not this one`);
+    expect(proposal().querySelector('a').getAttribute('href')).toBe(NINTH_MARCH);
     await saved();
     expect(draftWrites().at(-1)[1].state.publish).toBeUndefined();
+    // a press elsewhere folds the card, and the proposal waits under the chip
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    flushSync();
+    expect(proposal()).toBeNull();
+    chip().click();
+    flushSync();
     button(proposal(), 'Keep').click();
     await settle();
     expect(proposal()).toBeNull();
+    expect(chip()).toBeNull();
     expect(pill().textContent.trim()).toBe('Posted · 9 Mar 2025');
     await saved();
     expect(draftWrites().at(-1)[1].state.publish).toMatchObject({ url: NINTH_MARCH, site: 'x', changed: false });
@@ -990,6 +1001,7 @@ describe('a link the extension caught', () => {
     button(proposal(), 'Not this one').click();
     flushSync();
     expect(proposal()).toBeNull();
+    expect(chip()).toBeNull();
     expect(header().querySelector('button[aria-label="Mark as posted"]')).not.toBeNull();
     await saved();
     expect(draftWrites().at(-1)[1].state.publish).toBeUndefined();
@@ -1025,7 +1037,7 @@ describe('a link the extension caught', () => {
     bridge.caught(caught({ caseId: 'case-2', draft: name }));
     bridge.caught(caught({ draft: 'Nowhere' }));
     flushSync();
-    expect(proposal()).toBeNull();
+    expect(chip()).toBeNull();
     expect(uiState.toasts).toHaveLength(before);
   });
 

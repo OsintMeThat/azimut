@@ -1136,8 +1136,10 @@
       if (link.url !== publishState?.url) caughtLink = { url: link.url, site: link.site };
       return;
     }
-    if (!savedSlugs(draftEntities, 'draft').has(link.draft)) return;
-    const title = (caseDrafts ?? []).find((row) => row.name === link.draft)?.title ?? link.draft;
+    // a post of this case, as its entities or its list know it
+    const listed = (caseDrafts ?? []).find((row) => row.name === link.draft);
+    if (!listed && !savedSlugs(draftEntities, 'draft').has(link.draft)) return;
+    const title = listed?.title ?? link.draft;
     toast(`Link caught for “${title}”`, 'info', 0, [
       { label: 'Keep', onClick: () => markSavedPost({ name: link.draft }, link.url) },
       { label: 'Not this one', onClick: () => {} },

@@ -5361,8 +5361,10 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   draft's name, written first so it exists). A link the extension caught once the post
   went out (`post-link-caught`, a post's link on X or Bluesky only) is proposed, never
   kept by itself, since it can be the wrong post of a thread: on the post open, the
-  header says *Link caught: x.com/desk/status/…* with **Keep** (marks it posted at that
-  link) and **Not this one**; for another post of the case, a toast says *Link caught
+  header's control becomes **Link caught**, its card open under it with *Link caught:
+  x.com/desk/status/…* (the link opens, to check it), **Keep** (marks it posted at that
+  link) and **Not this one**, and a press elsewhere folds the card while the proposal
+  waits under the chip; for another post of the case, a toast says *Link caught
   for “Post 38”* with the same two, Keep writing it through that post's route; one for
   another case is ignored. A hand-off that went wrong (`post-handoff-report`) shows its
   one sentence in a warning toast with **Copy report**, which copies the extension's
