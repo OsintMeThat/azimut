@@ -11,14 +11,16 @@
  * after its first save lands.
  *
  * What the proof states is `stated`, `{ video, moments, draft }`, or null while the
- * scene is read off the panels (`lib/proofScene.js`).
+ * scene is read off the panels (`lib/proofScene.js`). The whole video asked for is
+ * stated, with no moments; only the Undo of a first time takes the proof back to its
+ * frames (`traced`).
  *
  * A proof made by hand states nothing, yet its frames may all fall in one scene of
- * Inspect still to prove. That scene is its `match`: the time reads the scene's, the
- * tab names it, and the next save takes it up as Make the proof's first save does.
+ * Inspect still to prove. A proof never saved takes it as its `match`: the time reads
+ * the scene's, the tab names it, and the first save takes it up as Make the proof's
+ * does. A saved proof is what is on disk, as Inspect shows it: the scene is its
+ * `proposal`, named under the field, and nothing is written until **Take it up**.
  * **Not this scene** keeps the proof apart from it for the session, and writes nothing.
- * A time taken back to the whole video, here or in Inspect, is the analyst's answer: the
- * scene its frames then find is kept apart the same way, so it reads as the whole video.
  *
  * **Inspect writes the same scene** from its Scenes tab. Geo Proof reads it again when it
  * comes back to the front and when the server says a scene moved (`reread`, `follow`),
@@ -64,11 +66,11 @@ export class ProofScene {
   edit;
 
   /**
-   * The scene still to prove the proof's frames all fall in, which its next save takes
-   * up (`lib/proofScene.sceneOfFrames`), or null. Only while the proof states no scene:
-   * none at all, or only the video a slide started with + New scene holds.
+   * The scene still to prove the proof's frames all fall in (`lib/proofScene.sceneOfFrames`),
+   * or null. Only while the proof states no scene: none at all, or only the video a slide
+   * started with + New scene holds.
    */
-  match = $derived.by(() => {
+  #found = $derived.by(() => {
     const stated = this.stated;
     if (stated && !(this.held && !stated.draft && !stated.moments.length)) return null;
     const star = this.star;
@@ -77,6 +79,12 @@ export class ProofScene {
     const found = sceneOfFrames(this.frames(), star, this.listed(), { own: this.#listedAs, frame });
     return found && !this.refused.includes(found.id) ? found : null;
   });
+
+  /** The scene found, for a proof never saved: its time is the proof's, and the first save takes it up. */
+  match = $derived(this.#listedAs === null ? this.#found : null);
+
+  /** The scene found, for a saved proof: named under the field, written only by Take it up. */
+  proposal = $derived(this.#listedAs === null ? null : this.#found);
 
   /**
    * `where()` answers `{ caseId, name }`, the name null until the first save;
@@ -144,18 +152,21 @@ export class ProofScene {
 
   /** Not this scene: the proof stays apart from the scene its frames found. Nothing is written. */
   refuse() {
-    if (!this.#keepApart()) return;
-    // a time printed on the picture now reads the whole video
-    this.onstated();
-  }
-
-  /** Keep the proof apart from the scene its frames find, for the session. Answers whether one was. */
-  #keepApart() {
-    const found = this.match;
-    if (!found) return false;
+    const found = this.#found;
+    if (!found) return;
+    const read = !!this.match;
     this.refused = [...this.refused, found.id];
     this.#keepRefusals();
-    return true;
+    // a time printed on the picture now reads the whole video
+    if (read) this.onstated();
+  }
+
+  /** Take it up: the scene proposed becomes the proof's, its time and the scene itself, written at once. */
+  async takeUp() {
+    const found = this.proposal;
+    if (!found) return false;
+    this.edit.close();
+    return this.write({ video: this.star, moments: found.moments }, { draft: found.id });
   }
 
   #refusalKey() {
@@ -202,10 +213,7 @@ export class ProofScene {
     const fresh = readStatedScene(spec?.scene);
     if (sameStated(this.stated, fresh)) return;
     const star = this.star;
-    // taken back to the whole video meanwhile: it reads as the whole video here too
-    const taken = !!this.stated && !fresh;
     this.stated = fresh;
-    if (taken) this.#keepApart();
     this.#restart(star);
     this.onstated();
   }
@@ -304,22 +312,28 @@ export class ProofScene {
     await this.write({ video: this.star, moments: [...this.moments, ...fresh.map((start) => ({ start, end: null }))] });
   }
 
-  /** Make another of the proof's videos the one it is about. Its time starts as the whole video. */
+  /**
+   * Make another of the proof's videos the one it is about. Its time starts as the whole
+   * video; back on the video its first panel was cut from, the proof is read off its
+   * frames again, as it was before it stated anything.
+   */
   async makeStar(video) {
     if (!video || video === this.star) return;
     this.edit.close();
-    await this.write({ video, moments: [] });
+    await this.write({ video, moments: [] }, { traced: video === this.frames()[0]?.video });
   }
 
   // -- writing --------------------------------------------------------------------------
 
   /**
    * State the proof's video and moments. A saved proof writes them at once and its toast
-   * takes them back; a proof never saved holds them for its first save.
+   * takes them back; a proof never saved holds them for its first save. `draft` is the
+   * scene Take it up takes; `traced` takes a saved proof back to its frames, the Undo of
+   * its first time.
    */
-  async write({ video, moments }, { undoable = true } = {}) {
+  async write({ video, moments }, { undoable = true, draft = null, traced = false } = {}) {
     // a time stated for the scene its frames found states that scene too, as Make the proof's does
-    const taking = !this.stated?.draft && video === this.star ? this.match?.id ?? null : null;
+    const taking = draft ?? (!this.stated?.draft && video === this.star ? this.match?.id ?? null : null);
     const next = { video, moments: sortMoments(plain(moments)), draft: this.stated?.draft ?? taking };
     const { caseId, name } = this.where();
     this.behind = false;
@@ -329,8 +343,8 @@ export class ProofScene {
       this.onstated();
       return true;
     }
-    // what the tab showed, a found scene's time included, which the Undo gives back
-    const before = { video: this.star, moments: plain(this.moments) };
+    // what it stated, or that it stated nothing, which the Undo gives back
+    const before = { video: this.star, moments: plain(this.moments), traced: !this.stated };
     this.#epoch += 1;
     let res;
     try {
@@ -338,6 +352,7 @@ export class ProofScene {
         moments: next.moments,
         video,
         ...(taking ? { draft: taking } : {}),
+        ...(traced ? { traced: true } : {}),
       });
     } catch (e) {
       this.toast(e.message, 'danger');
@@ -345,8 +360,6 @@ export class ProofScene {
     }
     if (this.where().name !== name) return false;
     this.#take(res);
-    // the whole video asked for: a scene its frames find is not read in its place
-    if (!next.moments.length && !this.stated) this.#keepApart();
     this.onstated();
     const now = { video: this.star, moments: plain(this.moments) };
     const words = before.video !== now.video
@@ -357,7 +370,7 @@ export class ProofScene {
       // only while nothing has moved it since, and on the proof it was said of
       onClick: () => {
         if (this.where().name === name && this.star === now.video && sameMoments(this.moments, now.moments)) {
-          this.write(before, { undoable: false });
+          this.write(before, { undoable: false, traced: before.traced && !before.moments.length });
         }
       },
     } : null);
