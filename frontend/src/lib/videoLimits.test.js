@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { CLIP_AUDIO_KBPS, CLIP_MAX_SECONDS, CLIP_MIN_SECONDS, CLIP_VIDEO_KBPS } from './postClip.js';
-import { PLATFORMS, VIDEO_LIMITS, clipBytesAtMost, overOn, passageFits, videoFits } from './videoLimits.js';
+import { PLATFORMS, VIDEO_LIMITS, clipBytesAtMost, overOn, overWords, passageFits, videoFits } from './videoLimits.js';
 
 /** What X and Bluesky take, checked on a date, and whether a video fits. */
 
@@ -61,5 +61,26 @@ describe('the cut, as the server makes it', () => {
     expect(Number(value('MIN_SECONDS'))).toBe(CLIP_MIN_SECONDS);
     expect(Number(value('MAXRATE'))).toBe(CLIP_VIDEO_KBPS);
     expect(Number(value('AUDIO_RATE'))).toBe(CLIP_AUDIO_KBPS);
+  });
+});
+
+describe('what a composer says of a video over the limit', () => {
+  it('says how long it runs and what the platform takes, a free account\'s where there is a paid tier', () => {
+    const long = { seconds: 24 * 60 + 10, bytes: 400 * 1000 ** 2 };
+    expect(overWords('x', videoFits('x', long), long)).toBe('This video runs 24:10, and X takes 20 minutes from a free account.');
+    expect(overWords('bluesky', videoFits('bluesky', long), long)).toBe('This video runs 24:10, and Bluesky takes 10 minutes.');
+  });
+
+  it('says how big it is when the size is what is over', () => {
+    const big = { seconds: 120, bytes: 400 * 1000 ** 2 };
+    expect(overWords('bluesky', videoFits('bluesky', big), big)).toBe('This video is 400 MB, and Bluesky takes 300 MB.');
+    const huge = { seconds: 120, bytes: 9.25 * 1000 ** 3 };
+    expect(overWords('x', videoFits('x', huge), huge)).toBe('This video is 9.3 GB, and X takes 8 GB from a free account.');
+  });
+
+  it('says nothing of a video that fits or a platform it does not know', () => {
+    const short = { seconds: 30, bytes: 1000 };
+    expect(overWords('x', videoFits('x', short), short)).toBe('');
+    expect(overWords('mastodon', { fits: false, over: ['seconds'] }, short)).toBe('');
   });
 });

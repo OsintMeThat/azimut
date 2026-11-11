@@ -159,6 +159,7 @@
   import { pollWhile } from '../lib/poll.js';
   import { carriesOutsideFiles } from '../lib/drag.js';
   import ProofSlides from './proof/ProofSlides.svelte';
+  import { startPost } from './post/start.js';
   import DraftPage from './proof/DraftPage.svelte';
   import ProofFrames from './inspect/ProofFrames.svelte';
   import { neighbour, resumeAt, slideAfterDelete, slideStyle, slideTiles, switchPlan } from '../lib/proofSlides.js';
@@ -892,6 +893,17 @@
     } catch (e) {
       toast(`The slides were not exported: ${e.message}`, 'danger', 6000);
     }
+  }
+
+  /**
+   * Post this video's slides: the placed slides as one video thread in Post, read from
+   * what they saved, so the slide on screen is saved first when it holds changes.
+   */
+  async function postSlides() {
+    const video = slides.video;
+    if (!caseState.current?.id || !video || switching) return;
+    if (proofStarted && dirty && hasProofCanvasContent(proof) && !(await saveSlide())) return;
+    startPost('video', [video]);
   }
 
   /** A case file's title in Media, or '' when the case does not say one. */
@@ -7017,6 +7029,8 @@
           // The date and the clock the save read it on, for a post template with #date.
           when: proof.when,
           whenZone: result.when_zone ?? null,
+          // the times it states in its video, for a post template with #timecode
+          moments: scene.star ? scene.moments.map(({ start, end }) => ({ start, end: end ?? null })) : [],
           // every point, one per line: the post cites the first and carries the rest
           coordsText: coordsPostLines(proofCoordsLines(proof, prefs.coordFormat)).join('\n'),
           source: displayedSource,
@@ -7948,6 +7962,7 @@
           onvideo={() => { if (proofStarted && scene.star) pickSideTab('scene'); }}
           onaction={slideAction}
           onexport={exportSlides}
+          onpost={postSlides}
         />
       {/if}
     </div>

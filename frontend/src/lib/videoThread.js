@@ -1,7 +1,7 @@
 /**
  * A video thread as plain data: the posts that put the proofs of one long video online,
- * in one of four orders. Post (wave 2) turns each piece into a post through its
- * templates; nothing here writes a word of the post itself.
+ * in one of four orders. Post turns each piece into a post through its templates
+ * (`lib/videoPost.js`); nothing here writes a word of the post itself.
  *
  * **What goes in.** A video's slides, its proofs in clip order as the strip reads them
  * (`GET /cases/{id}/scenes?video=`, `lib/proofSlides.js`). A scene still to prove is no
@@ -17,17 +17,19 @@
  *   { role, proof?: { name, id, title }, tokens: { '#video', '#timecode'?, '#scenes'? },
  *     media: [{ kind: 'video', path } | { kind: 'picture', path, proof } | { kind: 'sheet' }] }
  *
- * `{ kind: 'sheet' }` is the contact sheet (`lib/proofSheet.js`), built in the browser
- * when the post is made, so it has no path yet. Neither X nor Bluesky puts a video and
- * pictures in one post (`lib/videoLimits.js`), so the recap's contact sheet follows its
- * video in a post of its own (`role: 'sheet'`) where the platform says so.
+ * `{ kind: 'sheet' }` is the contact sheet (`lib/proofSheet.js`), drawn in the browser
+ * and filed in the case when the thread is made, so it has no path here. Neither X nor
+ * Bluesky puts a video and pictures in one post (`lib/videoLimits.js`), so the sheet
+ * and the video always go in posts of their own: Recap first opens on the sheet with
+ * `#scenes`, both numbering the places the same way, and the video follows.
  *
- * **The time.** `#timecode` is a proof's passages, `0:00–0:07 · 1:05–1:12`, and nothing
- * for a proof about the whole video: no passage, no timecode, anywhere. `#scenes` is
- * the video's places, one a line, `0:00–0:07 Road bridge`, the title alone for the whole
- * video. The words are `lib/scenes.js`'s, never written here.
+ * **The time.** One formatter for every time a post prints (`timecode`): an instant
+ * `[0:15]`, a passage `[0:00–0:07]`, several side by side `[0:00–0:07] [1:05–1:12]`, and
+ * nothing for a proof about the whole video. `#scenes` is the video's places, one a
+ * line and numbered as the sheet numbers them, `1. [0:00–0:07] Road bridge`, the title
+ * alone for the whole video. The clock is `lib/scenes.js`'s, never written here.
  */
-import { compactTime, isAbandoned, isStretch, momentTime, sceneList, sceneMoments, sceneTitle, unplaced } from './scenes.js';
+import { isAbandoned, momentTime, sceneList, sceneMoments, sceneTitle, sortMoments, unplaced } from './scenes.js';
 import { VIDEO_LIMITS } from './videoLimits.js';
 
 /** The four orders, the default first: one template start each. */
@@ -40,14 +42,13 @@ export const ORDER_NAMES = Object.freeze({
   proof: 'Proof first',
   all: 'All in one',
 });
-
-/**
- * Whether an instant prints its time. An open question for the owner, settled on a
- * sample thread: `plain` prints it as any time is printed (`0:03`), `none` prints only
- * the passages, so a proof of instants alone has no timecode.
- */
-export const INSTANT_TIMES = Object.freeze(['plain', 'none']);
-export const DEFAULT_INSTANTS = 'plain';
+/** What each order puts where, in a line under its name. */
+export const ORDER_WORDS = Object.freeze({
+  recap: 'The places on the contact sheet, then the video, then a post per place',
+  video: 'The video, then a post per place',
+  proof: 'The first place, then the video, then the other places',
+  all: 'One post with the places and their pictures',
+});
 
 /** Why a proof of the video is no post of the thread. */
 export const LEFT_WHY = Object.freeze({
@@ -57,43 +58,43 @@ export const LEFT_WHY = Object.freeze({
 });
 
 /** The most pictures one post holds, on both platforms. */
-const PICTURES_PER_POST = Math.min(...Object.values(VIDEO_LIMITS).map((t) => t.pictures));
+export const PICTURES_PER_POST = Math.min(...Object.values(VIDEO_LIMITS).map((t) => t.pictures));
 
-/**
- * The moments a timecode prints, by the instants rule.
- * @param {Array<{start: number, end: number|null}>} moments
- */
-function printed(moments, instants = DEFAULT_INSTANTS) {
-  const all = moments ?? [];
-  return instants === 'none' ? all.filter(isStretch) : all;
+/** The moments of a list that are times, in clip order. */
+function timed(moments) {
+  return sortMoments((Array.isArray(moments) ? moments : []).filter((m) => Number.isFinite(m?.start)));
 }
 
-/** `#timecode`: every passage of a proof, `0:00–0:07 · 1:05–1:12`, or '' for the whole video. */
-export function timecode(moments, { instants = DEFAULT_INSTANTS } = {}) {
-  return printed(moments, instants).map(momentTime).join(' · ');
+/** One moment as a post prints it: `[0:15]` for an instant, `[0:00–0:07]` for a passage. */
+export const bracketTime = (moment) => `[${momentTime(moment)}]`;
+
+/** `#timecode`: every moment of a proof, `[0:00–0:07] [1:05–1:12]`, or '' for the whole video. */
+export function timecode(moments) {
+  return timed(moments).map(bracketTime).join(' ');
 }
 
-/** A timecode where room is short, a contact sheet's cell: the first time, the rest counted, `0:00–0:07 +1`. */
-export function shortTimecode(moments, { instants = DEFAULT_INSTANTS } = {}) {
-  const shown = printed(moments, instants);
-  return shown.length ? compactTime({ kind: 'proof', moments: shown }) : '';
+/** A timecode where room is short, a contact sheet's cell: the first time, the rest counted, `[0:00–0:07] +1`. */
+export function shortTimecode(moments) {
+  const shown = timed(moments);
+  if (!shown.length) return '';
+  return shown.length > 1 ? `${bracketTime(shown[0])} +${shown.length - 1}` : bracketTime(shown[0]);
 }
 
-/** One line of `#scenes`: the time and the title, or the title alone. */
-export function sceneLine(slide, options = {}) {
-  const time = timecode(slide.moments, options);
-  return time ? `${time} ${slide.title}` : slide.title;
+/** One line of `#scenes`: its number, the time and the title, or the number and the title alone. */
+export function sceneLine(slide, number) {
+  const time = timecode(slide.moments);
+  return `${number}. ${time ? `${time} ` : ''}${slide.title}`;
 }
 
-/** `#scenes`: the places of the thread with their times, one a line. */
-export function scenesText(slides, options = {}) {
-  return (slides ?? []).map((slide) => sceneLine(slide, options)).join('\n');
+/** `#scenes`: the places of the thread with their times, one a line, numbered from 1. */
+export function scenesText(slides) {
+  return (slides ?? []).map((slide, i) => sceneLine(slide, i + 1)).join('\n');
 }
 
 /**
  * The slides a thread posts, out of what `GET /scenes?video=` answered: the proofs in
- * the strip's clip order, each `{ name, id, title, moments, png, row }`, and `left`, the
- * proofs it does not post with why (`LEFT_WHY`).
+ * the strip's clip order, each `{ name, id, title, moments, png, clip, row }`, and `left`,
+ * the proofs it does not post with why (`LEFT_WHY`).
  */
 export function videoSlides(answer) {
   const listed = (answer?.scenes ?? []).filter((s) => s?.kind === 'proof');
@@ -120,14 +121,20 @@ export function videoSlides(answer) {
   return { video: answer?.video ?? null, slides, left };
 }
 
+/** Whether a thread of `count` places in this order carries the contact sheet. */
+export function usesSheet(order, count) {
+  if (count < 1) return false;
+  return order === 'recap' || (order === 'all' && count > PICTURES_PER_POST);
+}
+
 const proofOf = (slide) => ({ name: slide.name, id: slide.id ?? null, title: slide.title });
 
 /** A post about one place: its picture, and its time. */
-function proofPiece(slide, video, options) {
+function proofPiece(slide, video) {
   return {
     role: 'proof',
     proof: proofOf(slide),
-    tokens: { '#video': video.title, '#timecode': timecode(slide.moments, options) },
+    tokens: { '#video': video.title, '#timecode': timecode(slide.moments) },
     media: slide.png ? [{ kind: 'picture', path: slide.png, proof: slide.name }] : [],
   };
 }
@@ -138,38 +145,28 @@ function proofPiece(slide, video, options) {
  * - `video`: `{ path, title }`, the video the slides are of, its title as Media gives it.
  * - `slides`: what `videoSlides` keeps, in the order to post them.
  * - `clip`: a case path to post in place of the whole video (a cut, `lib/postClip.js`), or null.
- * - `platform`: `x` or `bluesky`, for whether a video and pictures share a post.
- * - `instants`: whether an instant prints its time (`INSTANT_TIMES`).
+ * - `link`: the video goes out as its link rather than a file, so its post carries none.
  */
-export function videoThread({ video, slides, order = DEFAULT_ORDER, clip = null, platform = 'x', instants = DEFAULT_INSTANTS }) {
+export function videoThread({ video, slides, order = DEFAULT_ORDER, clip = null, link = false }) {
   if (!ORDERS.includes(order)) throw new Error(`no thread order ${order}`);
-  const options = { instants };
   const named = { path: video?.path ?? null, title: video?.title ?? '' };
   const list = slides ?? [];
-  const mix = Boolean(VIDEO_LIMITS[platform]?.mix);
-  const footage = clip || named.path ? [{ kind: 'video', path: clip || named.path }] : [];
-  const scenes = scenesText(list, options);
-  const each = list.map((slide) => proofPiece(slide, named, options));
+  const footage = !link && (clip || named.path) ? [{ kind: 'video', path: clip || named.path }] : [];
+  const scenes = scenesText(list);
+  const each = list.map((slide) => proofPiece(slide, named));
+  const lead = { role: 'video', tokens: { '#video': named.title, '#scenes': scenes }, media: footage };
 
   if (order === 'all') {
-    const shown = list.slice(0, PICTURES_PER_POST);
-    return [{
-      role: 'all',
-      tokens: { '#video': named.title, '#scenes': scenes },
-      media: shown.filter((s) => s.png).map((s) => ({ kind: 'picture', path: s.png, proof: s.name })),
-      // the places the text names that no picture shows
-      unpictured: list.slice(PICTURES_PER_POST).map(proofOf),
-    }];
+    // past four places, the sheet shows every one of them where four pictures could not
+    const media = usesSheet('all', list.length)
+      ? [{ kind: 'sheet' }]
+      : list.filter((s) => s.png).map((s) => ({ kind: 'picture', path: s.png, proof: s.name }));
+    return [{ role: 'all', tokens: { '#video': named.title, '#scenes': scenes }, media }];
   }
   if (order === 'recap') {
-    const recap = { role: 'recap', tokens: { '#video': named.title, '#scenes': scenes }, media: footage };
-    if (!list.length) return [recap];
-    const sheet = [{ kind: 'sheet' }];
-    // the sheet with the video where the platform takes both in one post, else just after it
-    if (mix || !footage.length) return [{ ...recap, media: [...footage, ...sheet] }, ...each];
-    return [recap, { role: 'sheet', tokens: { '#video': named.title }, media: sheet }, ...each];
+    if (!list.length) return [lead];
+    return [{ role: 'recap', tokens: { '#video': named.title, '#scenes': scenes }, media: [{ kind: 'sheet' }] }, lead, ...each];
   }
-  const lead = { role: 'video', tokens: { '#video': named.title }, media: footage };
   if (order === 'video') return [lead, ...each];
   // proof first: the strongest place, then the video it comes from, then the rest
   const [first, ...rest] = each;

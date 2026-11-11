@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   draftLine, draftPicture, draftPill, draftState, filterPosts, findDrafts, homeDrafts, isPosted, postedOn, postFacets, postsWords,
-  readyToPost, recentDrafts, shortLink,
+  readyToPost, recentDrafts, shortLink, threadVideos,
 } from './postHome.js';
 
 // An X status id for a known moment, as X makes them.
@@ -67,13 +67,45 @@ describe('readyToPost — what has no post yet', () => {
   });
 
   it('keeps a video whose slides all have a post only while its thread can still be started', () => {
-    const proofs = [slide('s1', 1)];
-    const drafts = [{ proof: 'proofs/s1.png' }];
+    const proofs = [slide('s1', 1), slide('s2', 2)];
+    const drafts = [{ proof: 'proofs/s1.png' }, { proof: 'proofs/s2.png' }];
     expect(readyToPost(proofs, drafts, { threads: false }).videos).toEqual([]);
     expect(readyToPost(proofs, drafts, { threads: true }).videos).toHaveLength(1);
     // a video thread naming the video is its post
     const threaded = [...drafts, { kind: 'video', video: 'media/clip.mp4' }];
     expect(readyToPost(proofs, threaded, { threads: true }).videos).toEqual([]);
+  });
+
+  it('offers a video\'s thread for two proofs to post or more, its slides still one by one', () => {
+    const two = readyToPost([slide('s1', 1), slide('s2', 2)], [], { threads: true }).videos[0];
+    expect([two.thread, two.postable, two.slides.length]).toEqual([true, 2, 2]);
+    // one proof is a geolocation of its own: no thread, and its slide still waits
+    const one = readyToPost([slide('s1', 1)], [], { threads: true }).videos[0];
+    expect([one.thread, one.slides.length]).toEqual([false, 1]);
+    // nothing to offer and nothing waiting: the video is not listed
+    expect(readyToPost([slide('s1', 1)], [{ proof: 'proofs/s1.png' }], { threads: true }).videos).toEqual([]);
+    // a proof still geolocated or given up on is no post of the thread
+    const unplaced = readyToPost([slide('s1', 1), slide('s2', 2, { postable: false })], [], { threads: true }).videos[0];
+    expect([unplaced.thread, unplaced.postable, unplaced.count]).toEqual([false, 1, 2]);
+    // a thread already in the case is not offered twice; its slides wait on their own
+    const held = readyToPost([slide('s1', 1), slide('s2', 2)], [{ kind: 'video', video: 'media/clip.mp4' }], { threads: true }).videos[0];
+    expect([held.thread, held.slides.length]).toEqual([false, 2]);
+  });
+});
+
+describe('threadVideos — what New post → Video thread lists', () => {
+  it('lists the videos with two proofs to post or more, with the first slide\'s picture', () => {
+    const proofs = [
+      slide('s2', 2, { thumb: 'proofs/.thumbs/s2.webp' }), slide('s1', 1, { thumb: 'proofs/.thumbs/s1.webp' }),
+      slide('o1', 1, { video: 'media/other.mp4', video_title: 'Other' }),
+      slide('u1', 1, { video: 'media/third.mp4', video_title: 'Third' }), slide('u2', 2, { video: 'media/third.mp4', video_title: 'Third', postable: false }),
+      proof('photo'),
+    ];
+    expect(threadVideos(proofs, [])).toEqual([
+      { video: 'media/clip.mp4', title: 'Convoy', count: 2, threaded: false, thumb: 'proofs/.thumbs/s1.webp' },
+    ]);
+    expect(threadVideos(proofs, [{ kind: 'video', video: 'media/clip.mp4' }])[0].threaded).toBe(true);
+    expect(threadVideos([], [])).toEqual([]);
   });
 });
 

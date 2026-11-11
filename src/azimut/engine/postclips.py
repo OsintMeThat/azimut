@@ -1,4 +1,5 @@
-"""The clip cut for a post: one passage of a proof's ★ video, as a case file of its own.
+"""What a video thread files for its posts: the clip cut for a post, one passage of a
+proof's ★ video as a case file of its own, and the thread's contact sheet.
 
 A video thread posts the video a proof is about, and a long clip is past what a
 platform takes, or simply too long to watch for one place. The analyst cuts the
@@ -21,10 +22,15 @@ sound, not the GPS of the phone that filmed it.
 **One clip per passage.** Cutting again a passage the case already holds a clip of
 answers that file (`held`), so a second press never makes a second copy, and only one
 ffmpeg runs at a time, however many cuts are asked for.
+
+**The contact sheet** (`file_sheet`) is drawn in the browser from the proofs' saved
+pictures (frontend `lib/proofSheet.js`) and filed here in Media, made from its video as
+a clip is. The same picture filed twice is one file.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import math
 import os
@@ -32,10 +38,13 @@ import subprocess
 import tempfile
 import threading
 import uuid
+import warnings
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
+
+from PIL import Image
 
 from .. import layout
 from ..workspace import CaseError
@@ -74,6 +83,12 @@ SCALE = (
     "crop=trunc(iw/2)*2:trunc(ih/2)*2:0:0,setsar=1"
 )
 NO_FFMPEG = "cutting a clip needs ffmpeg; the release binaries bring it, a pip install needs it on PATH"
+#: The contact sheet: a JPEG (or a PNG) of 1600 × 900 under 1 MB as the browser draws it,
+#: with room either side, and its record beside a clip's.
+SHEET_OP = "sheet"
+SHEET_MAX_BYTES = 2_000_000
+SHEET_MAX_SIDE = 3200
+SHEET_FORMATS = {"JPEG": ".jpg", "PNG": ".png"}
 
 #: One ffmpeg at a time, whichever proof asks.
 _one_at_a_time = threading.Lock()
@@ -326,3 +341,45 @@ def run(case: Case, cut: Cut, set_progress: Callable[[dict[str, Any]], None]) ->
     clip = {"path": filed["item"]["path"], "start": cut.start, "end": cut.end}
     record(case, cut.proof, cut.video, clip)
     return {"clip": scene_engine.clip_file(case, clip)}
+
+
+def _sheet_picture(data: bytes) -> str:
+    """The suffix a contact sheet is filed with, once its bytes read as one: a JPEG or a
+    PNG of a sheet's size, refused past the pixel clamp before it is decoded."""
+    if len(data) > SHEET_MAX_BYTES:
+        raise BadClip("a contact sheet is under 2 MB")
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as picture:
+                kind, size = picture.format, picture.size
+                picture.verify()
+    except (Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
+        raise BadClip("the contact sheet is too large a picture") from exc
+    except Exception as exc:
+        raise BadClip("the contact sheet is not a readable picture") from exc
+    if kind not in SHEET_FORMATS or max(size) > SHEET_MAX_SIDE:
+        raise BadClip("a contact sheet is a JPEG or a PNG of 1600 by 900")
+    return SHEET_FORMATS[kind]
+
+
+def file_sheet(case: Case, video: str, data: bytes) -> dict[str, Any]:
+    """File a video thread's contact sheet in Media, named after the video and made from
+    it. Answers its path, the one already in the case when the same picture was filed."""
+    entity = case.find_entity(attr="path", value=video)
+    items = case.media_items_by_paths([video]) if entity and entity.get("type") == "media" else []
+    if not items or items[0].get("kind") != "video":
+        raise BadClip("that file is not a video of the case")
+    suffix = _sheet_picture(data)
+    title = f"{scene_engine.file_title(items[0], video)} contact sheet"
+    source = {
+        "type": SOURCE_TYPE, "op": SHEET_OP, "from": video,
+        "from_sha256": (entity or {}).get("attrs", {}).get("sha256"), "at": _now(),
+    }
+    temporary = case.subdir("media") / f".sheet-{uuid.uuid4().hex}{suffix}"
+    try:
+        temporary.write_bytes(data)
+        filed = media_engine.import_produced_file(case, temporary, f"{title}{suffix}", source, by="post")
+    finally:
+        temporary.unlink(missing_ok=True)
+    return {"path": filed["item"]["path"]}

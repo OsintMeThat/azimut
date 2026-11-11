@@ -4763,6 +4763,10 @@ is left out and named in the toast. A second export lands in `clip (2)`, never o
 first, and a copy that fails takes the whole set back
 (`POST /cases/{id}/proofs/series-export`).
 
+**Post this video's slides**, in the same ⋯ once two slides state a place on a picture,
+saves the slide on screen and opens Post on the video's thread (see Post). A video with
+one such slide offers none: that proof is a geolocation of its own.
+
 **The toolbar is two columns.** In one it stood taller than a laptop window, and the
 colour, width and layout controls sat under the fold behind a scrollbar nobody looks
 for. The separators still mark the groups: history, the drawing tools, then fit and
@@ -5290,7 +5294,8 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   since, each with its platform, its kind when it is not a geolocation, and how many
   posts it holds when they are several; **Ready to post**, under its line *Proofs with
   no post yet*, the proofs no draft names yet, a proof of a video listed under its
-  video with the slides that wait; and **Posted**, the latest six to go out by the
+  video with the slides that wait, and **Video thread** beside a video whose two proofs
+  or more state a place and that has no thread yet; and **Posted**, the latest six to go out by the
   post's own day (read off its link, else the moment it was marked), each with that day
   and its link when it has one. Every post card wears its state as a pill (*Draft*,
   *Posted*, *Changed since posted*), and its ⋯ or a right-click offers **Open**, **Mark
@@ -5338,6 +5343,14 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   clip cut for its post (Geo Proof's **Cut for the post**) goes on the media post in
   place of the whole video it came from, which **Edit media** still offers. A clip whose
   file left the case gives the video back.
+- **The time a proof states** in its video goes in its geolocation (`#timecode`): an
+  instant `[0:15]`, a passage `[0:00–0:07]`, several side by side `[0:00–0:07]
+  [1:05–1:12]`, read off its stated scene, the composer showing a **Timecode** field
+  then. A proof of a photo or of the whole video states none, the line drops and its
+  post is the one it always was. The draft keeps it (`timecode`) only when there is one.
+  The built-in Classic, With date and Short layouts print it on its own line, right
+  under the description (Short under the coordinates); a template of the analyst's own
+  takes it once its layout says `#timecode`.
 - **Add to notes**, a note icon beside Open, writes the post into a new case note (its
   place, points, assessment, source and pictures, linked to the proof, the media and
   the draft). **The header's ⋯**, beside the name once the post is saved, holds
@@ -5348,8 +5361,9 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   **Map plate**, **Compare** and **Free post** carry their own pictures, or a video, on
   the first post (`firstMedia`) and show only the fields their layout uses. **Compare**
   is a before and after: its layout says the description, the dates, the imagery
-  credits and the mention, with no media post under it. **Video thread** says *Coming
-  next* until it is built.
+  credits and the mention, with no media post under it. **Video thread** asks which
+  video, listing those with two proofs or more to post (one already threaded says so),
+  and opens its thread.
   A draft or a template says its `kind` only when it is not a geolocation, so every
   draft and template from before reads as one. Another tool starts a post through
   `tools/post/start.js` (`startPost(kind, media, about)`): what Post holds is saved
@@ -5369,6 +5383,34 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   with the credit line a Compare or Map plate start hands over and edited like any
   other. The draft keeps it (`credits`, written only when there is one), and an empty
   field drops the line.
+- **A video thread** posts the placed proofs of one video together: an extra choice,
+  never the only way, since each proof still goes out on its own. It is offered for a
+  video of two such proofs or more, from New post, from the home's series card and from
+  Geo Proof's strip (**Post this video's slides**); a proof abandoned, still geolocated
+  or never exported is left out and named. Its column says the video, its places and
+  the **Order**, four choices: **Recap first** (the default: the places numbered with
+  their times on the contact sheet, then the video, then a post per place), **Video
+  first**, **Proof first** (the first place, then the video naming every place) and
+  **All in one** (one post: up to four pictures, the contact sheet past four places).
+  Each post is labelled (*Recap*, *Video*, the place's title) and carries its files: a
+  place's proof picture, the video, the sheet. A place's post says its sentence, its time
+  and its points, the same in every order; changing the order keeps the words written on
+  a post, while the recap and the video's post take the order's own start. The mention
+  and the Source field (the video's link) are the only fields; the places bring theirs.
+  The contact sheet is drawn in the browser from the places' saved pictures, 1600 × 900,
+  numbered as `#scenes` numbers the places, and filed in Media as made from the video
+  (`POST /cases/{id}/scenes/sheet`; the same picture is one file). The thread is named
+  after the video, a thread holds 21 posts and says how many places it leaves out, and
+  the kind's default template gives its order and words. **When the video is over the
+  platform's limit** (`lib/videoLimits.js`: *This video runs 24:10, and X takes 20 minutes
+  from a free account.*), the column offers the clip a place cut for its post, one per
+  thread on the video's post, else its link (with **Cut for the post** named as the way
+  to make one); **Post the whole video** goes back. Nothing is cut or re-encoded there.
+  The draft keeps `kind: 'video'`, `video`, `order`, the texts beside `body` (`posts`),
+  `first`, and the `sheet`, `clip` or `link` it uses, each post its `key`
+  (`video`, `place:<proof>`) and `edited`. It saves itself, opens, is marked posted,
+  deleted with Undo and handed to the extension, its files on each post, like any
+  thread. It goes out with Publish only: Reply under the source is a geolocation's.
 - **The extension window** says once, on arriving in Post without the capture
   extension, why it is worth having here: it fills the whole thread in X or Bluesky,
   pictures included, and can reply under the source post or capture it into the case.
@@ -5461,9 +5503,10 @@ layout is a body of tokens (`#place`, `#pluscode`, `#coordinates`, `#description
 `#mention`, `#source`, `#date`, `#video`, `#timecode`, `#scenes`, `#credits`) and
 plain text, the editor offering the tokens of its kind. A token with no value drops
 its line. `#video` is the title Media gives the video the post is about, never its file
-name. `#timecode` and `#scenes` are known to the layout and its typo check and stay
-empty, their line dropped, until the video thread fills them. `#credits` is the
-composer's Credits field.
+name. `#timecode` is the time a proof states in its video, `[0:15]` or `[0:00–0:07]`,
+for a geolocation and each place of a video thread; `#scenes` a thread's places, one a
+line and numbered, `1. [0:00–0:07] Road bridge`. `#credits` is the composer's Credits
+field.
 `#date` is the date the proof
 states, and the composer shows its Date field only when the layout uses it. It is
 filled from the proof as the case stores it (`2024-03-12`, `2024-03~`), the same in
@@ -5474,12 +5517,21 @@ stays text.
 
 - **New post template** is a menu of kinds, each with its starts: Geolocation's
   Classic, Coordinates only, Short and With date, a Map plate's Plate, Compare's Before
-  and after and Dates first, a Free post's Text and source. Video thread's come with the video thread. The editor then offers
-  that kind's **Start from**, each replacing the body and nothing else. A copy does not
+  and after and Dates first, a Free post's Text and source, a Video thread's Recap first,
+  Video first, Proof first and All in one. The editor then offers
+  that kind's **Start from**, each replacing the body and nothing else (a video thread's,
+  its order and texts too). A copy does not
   offer it, and keeps its kind. The same starts are in the composer's **Thread style**,
   under **Built-in** below the analyst's own templates of the open kind (alone when there
   are none, with the link to Settings → Templates kept): applying one changes the body
   only, and its **Remove** goes back to the layout the post had.
+- **A video thread's template** is several posts: its **Order**, its **Recap post**
+  (`body`: Recap first's first post, All in one's only one), its **Video post** and
+  **Each place** (`posts`, a text per role), each taking the token the analyst presses
+  into the one last written in. Its preview is the whole thread on three sample places
+  (a passage, an instant, the whole video), each post counted per platform. It has no
+  media post: each post carries its own files. A template that says no order or no
+  texts starts on Recap first's.
 - **Reply under the source by default**, on a geolocation template, starts its posts
   with *Post as a reply under the source* checked whenever their source is an X or
   Bluesky post (`reply: true`, written only when checked). A template from the first

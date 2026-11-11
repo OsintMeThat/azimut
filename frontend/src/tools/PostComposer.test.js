@@ -223,8 +223,8 @@ describe('Post Composer — the sentence the proof carries', () => {
 });
 
 describe('the date a proof states', () => {
-  it('shows a Date field only when the template holds #date', () => {
-    const field = source.slice(source.indexOf("{#if templateUsesPostField(body, 'date')}"));
+  it('shows a Date field only when the template holds #date, and none in a video thread, whose places bring theirs', () => {
+    const field = source.slice(source.indexOf("{#if !thread && templateUsesPostField(body, 'date')}"));
     expect(field).toContain('id="pc-date"');
     expect(field).toContain('This proof has no date. Leave it empty and the line drops.');
   });

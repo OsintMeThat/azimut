@@ -401,18 +401,25 @@ describe('post templates per kind', () => {
     expect(props.savePrefs).toHaveBeenLastCalledWith({ post_template: 'po_2' });
   });
 
-  it('starts a new one from a kind\'s layouts, and says the video thread\'s come next', () => {
+  it('starts a new one from a kind\'s layouts, a video thread from one of its four orders', () => {
     open();
     target.querySelector('[data-new-post-template]').click();
     flushSync();
     const menu = document.querySelector('.float-menu[aria-label="New post template"]');
     const items = [...menu.querySelectorAll('.fm-item')];
     expect(items.map((b) => b.textContent.trim())).toEqual([
-      'Classic', 'Coordinates only', 'Short', 'With date', 'Coming next', 'Plate', 'Before and after', 'Dates first',
-      'Text and source',
+      'Classic', 'Coordinates only', 'Short', 'With date', 'Recap first', 'Video first', 'Proof first', 'All in one',
+      'Plate', 'Before and after', 'Dates first', 'Text and source',
     ]);
-    expect(items.find((b) => b.textContent.trim() === 'Coming next').disabled).toBe(true);
-    items.find((b) => b.textContent.trim() === 'Plate').click();
+    expect(items.every((b) => !b.disabled)).toBe(true);
+    items.find((b) => b.textContent.trim() === 'Proof first').click();
+    flushSync();
+    expect(props.newTemplate).toHaveBeenCalledWith('post', expect.objectContaining({
+      kind: 'video', starter: expect.objectContaining({ id: 'proof', order: 'proof' }),
+    }));
+    target.querySelector('[data-new-post-template]').click();
+    flushSync();
+    [...document.querySelectorAll('.float-menu[aria-label="New post template"] .fm-item')].find((b) => b.textContent.trim() === 'Plate').click();
     flushSync();
     expect(props.newTemplate).toHaveBeenCalledWith('post', expect.objectContaining({ kind: 'plate', starter: expect.objectContaining({ id: 'plate' }) }));
     expect(document.querySelector('.float-menu[aria-label="New post template"]')).toBeNull();

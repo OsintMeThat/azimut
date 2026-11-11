@@ -19,6 +19,7 @@ export const PROOF_SLIDES_HELP = {
   more: 'More for this slide',
   series: 'More for the slides of this video',
   export: 'Copy every slide\'s saved picture into one folder, numbered in clip order',
+  post: 'Post the placed slides of this video as one thread, in Post',
 
   // a tile
   current: 'The slide on screen',

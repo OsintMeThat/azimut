@@ -7,6 +7,7 @@ of that file wherever the case asks what leans on it.
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import threading
@@ -391,6 +392,62 @@ def test_a_proof_sent_to_the_trash_keeps_its_clip_when_restored(client, tmp_path
 
 
 # -- the pieces, without ffmpeg ---------------------------------------------------
+
+
+# -- the contact sheet ------------------------------------------------------------------
+
+
+def _sheet_bytes(size=(1600, 900), kind="JPEG", color=(20, 23, 28)) -> bytes:
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", size, color).save(out, kind)
+    return out.getvalue()
+
+
+def _file_sheet(client, cid, video, data, name="sheet.jpg"):
+    return client.post(
+        f"/api/cases/{cid}/scenes/sheet", data={"video": video}, files={"image": (name, io.BytesIO(data), "image/jpeg")},
+    )
+
+
+@needs_ffmpeg
+def test_a_contact_sheet_is_filed_in_media_made_from_its_video(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path, "convoy.mp4")
+
+    res = _file_sheet(client, cid, video, _sheet_bytes())
+
+    assert res.status_code == 200, res.text
+    path = res.json()["path"]
+    assert path == "media/convoy contact sheet.jpg"
+    item = media_engine.read_item(Case.open(cid), path)
+    assert item["kind"] == "image"
+    assert (item["source"]["type"], item["source"]["op"], item["source"]["from"]) == ("inspect", "sheet", video)
+    case = Case.open(cid)
+    sheet = case.find_entity(attr="path", value=path)
+    made_from = [link["to"] for link in case.links_of(sheet["id"]) if link["type"] == "derived-from" and link["from"] == sheet["id"]]
+    assert made_from == [case.find_entity(attr="path", value=video)["id"]]
+
+    # the same picture again is the same file
+    again = _file_sheet(client, cid, video, _sheet_bytes())
+    assert again.json()["path"] == path
+    assert len([one for one in case.list_media_items() if "contact sheet" in one["path"]]) == 1
+
+
+@needs_ffmpeg
+def test_a_contact_sheet_is_refused_unless_it_is_a_sheet_of_a_video_of_the_case(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path, "convoy.mp4")
+    photo = _upload_png(client, cid)
+
+    assert _file_sheet(client, cid, photo, _sheet_bytes()).status_code == 422
+    assert _file_sheet(client, cid, "media/none.mp4", _sheet_bytes()).status_code == 422
+    assert _file_sheet(client, cid, video, b"not a picture").status_code == 422
+    assert _file_sheet(client, cid, video, _sheet_bytes(size=(4000, 900))).status_code == 422
+    assert _file_sheet(client, cid, video, _sheet_bytes(kind="GIF")).status_code == 422
+    assert _file_sheet(client, cid, video, b"x" * (clip_engine.SHEET_MAX_BYTES + 1)).status_code == 413
+    assert not [one for one in Case.open(cid).list_media_items() if "contact sheet" in one["path"]]
 
 
 def test_progress_reads_microseconds_off_either_key():

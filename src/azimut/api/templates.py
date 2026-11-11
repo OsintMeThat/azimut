@@ -50,8 +50,10 @@ TextSize = Annotated[FiniteFloat, Field(ge=8, le=80)]
 Offset = Annotated[FiniteFloat, Field(ge=-100_000, le=100_000)]
 Ratio = Annotated[FiniteFloat, Field(ge=0, le=1)]
 
+#: The classic layout (frontend `lib/post.js` DEFAULT_TWEET_BODY), for a template whose
+#: body is blank: a proof of a video prints its time under its description.
 DEFAULT_POST_BODY = (
-    "#place - #pluscode\n\n#description\n\n#coordinates\n\n#mention\n\nSource: #source"
+    "#place - #pluscode\n\n#description\n#timecode\n\n#coordinates\n\n#mention\n\nSource: #source"
 )
 
 
@@ -179,9 +181,19 @@ class PostExtraTweet(CanonicalModel):
 
 #: What a post is made from, as New post offers it (frontend `lib/post.js` POST_KINDS).
 PostKind = Literal["geolocation", "video", "plate", "compare", "free"]
+#: The order a video thread posts in (frontend `lib/videoThread.js` ORDERS).
+VideoOrder = Literal["recap", "video", "proof", "all"]
 #: A post template's keys that a template from before them never had. Unset, they stay
 #: unwritten, so a 0.3.3 template reads and saves back byte for byte.
-POST_UNSTATED_WHEN_NONE = ("kind", "reply")
+POST_UNSTATED_WHEN_NONE = ("kind", "reply", "order", "posts")
+
+
+class PostRoleText(CanonicalModel):
+    """The text of one kind of post in a video thread, beside the template's ``body``: the
+    post carrying the video, and the one each place gets."""
+
+    role: Literal["video", "place"]
+    body: str = Field(default="", max_length=4_000)
 
 
 class PostTemplateData(CanonicalModel):
@@ -196,6 +208,11 @@ class PostTemplateData(CanonicalModel):
     # Whether a post of this template goes out as a reply under its source by default,
     # when the source is an X or a Bluesky post. None is no, the one spelling of it.
     reply: StrictBool | None = None
+    # A video thread's order, and the texts of its other posts: ``body`` is its recap
+    # (Recap first's first post, All in one's one post), these the video's and each
+    # place's. None for any other kind.
+    order: VideoOrder | None = None
+    posts: list[PostRoleText] | None = Field(default=None, max_length=4)
 
     @field_validator("kind")
     @classmethod
@@ -215,6 +232,25 @@ class PostTemplateData(CanonicalModel):
     @classmethod
     def no_is_unsaid(cls, reply: bool | None) -> bool | None:
         return True if reply else None
+
+    @field_validator("posts")
+    @classmethod
+    def one_text_a_role(cls, posts: list[PostRoleText] | None) -> list[PostRoleText] | None:
+        if posts is None:
+            return None
+        # the first text of each role is the one a thread reads
+        kept: dict[str, PostRoleText] = {}
+        for one in posts:
+            kept.setdefault(one.role, one)
+        return list(kept.values()) or None
+
+    @model_validator(mode="after")
+    def thread_parts_are_a_video_threads(self) -> "PostTemplateData":
+        # the order and the texts per post shape a video thread, and say nothing to the rest
+        if self.kind != "video":
+            self.order = None
+            self.posts = None
+        return self
 
     @model_serializer(mode="wrap")
     def _unstated_stays_unwritten(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:

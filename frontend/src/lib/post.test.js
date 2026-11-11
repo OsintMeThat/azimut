@@ -8,7 +8,7 @@ import {
   sourceSection, sourceUrls,
   templateFromPost, templateUsesPostField, togglePostMedia,
   pointLines, postCoordinates, splitPointLine, postDate,
-  POST_TEMPLATE_STARTERS, bodyTokens, fixMisspelledToken, misspelledTokens,
+  POST_TEMPLATE_STARTERS, VIDEO_THREAD_STARTERS, bodyTokens, fixMisspelledToken, misspelledTokens,
   POST_KINDS, STARTABLE_POST_KINDS, normalizePostKind, statedPostKind, postKind, tokensForKind,
   videoTitle, postTemplateKind, postStarters, defaultPostTemplate, templatesOfKind,
   startMediaPlan, replyTarget, replyIntentUrl, replyPostText, replyByDefault,
@@ -47,6 +47,40 @@ describe('buildTweet1 — the default body', () => {
       '@GeoConfirmed\n\n' +
       'Source: https://x.com/a/1'
     );
+  });
+});
+
+describe('#timecode — the time a proof of a video states', () => {
+  const timed = { ...full, timecode: '[0:00–0:07]' };
+
+  it('prints on its own line right under the description in the classic layout', () => {
+    expect(buildTweet1(DEFAULT_TWEET_BODY, timed)).toBe(
+      'Bakhmut, Donetsk, Ukraine - 8FPGXXXX+XX\n\n' +
+      'Rooftop match\n[0:00–0:07]\n\n' +
+      '48.850000, 2.350000\n\n' +
+      '@GeoConfirmed\n\n' +
+      'Source: https://x.com/a/1'
+    );
+  });
+
+  it('drops its line for a photo or the whole video, so that post is as it always was', () => {
+    expect(buildTweet1(DEFAULT_TWEET_BODY, { ...full, timecode: '' })).toBe(buildTweet1(DEFAULT_TWEET_BODY, full));
+  });
+
+  it('is in the Classic, With date and Short layouts, and not in Coordinates only', () => {
+    const byId = Object.fromEntries(POST_TEMPLATE_STARTERS.map((one) => [one.id, one]));
+    for (const id of ['classic', 'dated', 'short']) expect(bodyTokens(byId[id].body), id).toContain('#timecode');
+    expect(bodyTokens(byId.coordinates.body)).not.toContain('#timecode');
+    expect(buildTweet1(byId.dated.body, { ...timed, date: '2025-10-24' })).toContain('Rooftop match\n[0:00–0:07]\n\nFilmed: 2025-10-24');
+    expect(buildTweet1(byId.short.body, timed)).toBe('Bakhmut, Donetsk, Ukraine\n48.850000, 2.350000\n[0:00–0:07]\n\nSource: https://x.com/a/1');
+  });
+
+  it('is offered to a geolocation template as well as a video thread', () => {
+    expect(tokensForKind('geolocation').map((t) => t.tag)).toContain('#timecode');
+    expect(tokensForKind('video').map((t) => t.tag)).toContain('#timecode');
+    expect(tokensForKind('free').map((t) => t.tag)).not.toContain('#timecode');
+    expect(templateUsesPostField(DEFAULT_TWEET_BODY, 'timecode')).toBe(true);
+    expect(templateUsesPostField('#coordinates', 'timecode')).toBe(false);
   });
 });
 
@@ -773,9 +807,9 @@ describe('the geolocation road, pinned', () => {
 });
 
 describe('POST_KINDS — what a post is made from', () => {
-  it('offers five starts, Geolocation first, and opens the four that are built', () => {
+  it('offers five starts, Geolocation first, and opens every one of them', () => {
     expect(POST_KINDS.map((k) => k.id)).toEqual(['geolocation', 'video', 'plate', 'compare', 'free']);
-    expect(STARTABLE_POST_KINDS).toEqual(['geolocation', 'plate', 'compare', 'free']);
+    expect(STARTABLE_POST_KINDS).toEqual(['geolocation', 'video', 'plate', 'compare', 'free']);
     expect(postKind('compare')).toMatchObject({ label: 'Compare', icon: 'compare' });
     for (const k of POST_KINDS) expect(k.label && k.icon && k.text).toBeTruthy();
   });
@@ -797,7 +831,7 @@ describe('POST_KINDS — what a post is made from', () => {
     expect(tokensForKind('compare').map((t) => t.tag)).toEqual(['#description', '#mention', '#source', '#date', '#credits']);
     expect(tokensForKind('video').map((t) => t.tag)).toEqual(expect.arrayContaining(['#timecode', '#scenes', '#video']));
     expect(tokensForKind(undefined).map((t) => t.tag)).toContain('#coordinates');
-    expect(tokensForKind('geolocation').map((t) => t.tag)).not.toContain('#timecode');
+    expect(tokensForKind('geolocation').map((t) => t.tag)).not.toContain('#scenes');
   });
 });
 
@@ -812,8 +846,8 @@ describe('the new tokens', () => {
   it('drop their line while nothing fills them, so a template can name them today', () => {
     const body = '#description\nAt #timecode\n#scenes\nImagery: #credits\nFrom #video';
     expect(buildTweet1(body, full)).toBe('Rooftop match');
-    expect(buildTweet1(body, { ...full, timecode: '0:00–0:07', credits: 'Copernicus Sentinel-2' }))
-      .toBe('Rooftop match\nAt 0:00–0:07\nImagery: Copernicus Sentinel-2');
+    expect(buildTweet1(body, { ...full, timecode: '[0:00–0:07]', credits: 'Copernicus Sentinel-2' }))
+      .toBe('Rooftop match\nAt [0:00–0:07]\nImagery: Copernicus Sentinel-2');
   });
 
   it('are known to the typo check, like the tokens before them', () => {
@@ -846,10 +880,41 @@ describe('post templates per kind', () => {
     expect(postStarters('free').map((s) => s.id)).toEqual(['free']);
     expect(postStarters('compare').map((s) => s.label)).toEqual(['Before and after', 'Dates first']);
     expect(postStarters('compare')[0].body).toBe('#description\n\n#date\n\n#credits\n\n#mention');
-    expect(postStarters('video')).toEqual([]);
     for (const starter of [...postStarters('plate'), ...postStarters('free'), ...postStarters('compare')]) {
       expect(misspelledTokens(starter.body)).toEqual([]);
       expect(starter.mediaEnabled).toBe(false);
+    }
+  });
+
+  it('starts a video thread on one layout per order, each with its recap, its video post and its place post', () => {
+    expect(postStarters('video')).toBe(VIDEO_THREAD_STARTERS);
+    expect(VIDEO_THREAD_STARTERS.map((s) => [s.order, s.label])).toEqual([
+      ['recap', 'Recap first'], ['video', 'Video first'], ['proof', 'Proof first'], ['all', 'All in one'],
+    ]);
+    for (const starter of VIDEO_THREAD_STARTERS) {
+      expect(starter.posts.map((one) => one.role)).toEqual(['video', 'place']);
+      for (const text of [starter.body, ...starter.posts.map((one) => one.body)]) expect(misspelledTokens(text), starter.id).toEqual([]);
+      expect(starter.mediaEnabled).toBe(false);
+      expect(Object.isFrozen(starter) && Object.isFrozen(starter.posts)).toBe(true);
+    }
+    // each place says its time; the recap names the places
+    expect(VIDEO_THREAD_STARTERS.every((s) => bodyTokens(s.posts[1].body).includes('#timecode'))).toBe(true);
+    expect(bodyTokens(VIDEO_THREAD_STARTERS[0].body)).toContain('#scenes');
+  });
+
+  it('keeps a video thread template\'s order and texts, and only a video thread\'s', () => {
+    const posts = [{ role: 'video', body: 'Source: #source' }, { role: 'place', body: '#timecode' }];
+    const made = templateFromPost({ kind: 'video', body: '#scenes', mediaEnabled: false, order: 'all', posts });
+    expect(made).toEqual({ mention: '@GeoConfirmed', body: '#scenes', mediaEnabled: false, extraTweets: [], kind: 'video', order: 'all', posts });
+    expect(normPostTemplate(made)).toEqual(made);
+    // a role said twice, an unknown role, an order that is none: the first and the known kept
+    const odd = normPostTemplate({ kind: 'video', body: '#scenes', order: 'random', posts: [...posts, { role: 'place', body: 'x' }, { role: 'recap', body: 'y' }] });
+    expect(odd).not.toHaveProperty('order');
+    expect(odd.posts).toEqual(posts);
+    // another kind has none of it
+    for (const kind of [undefined, 'free']) {
+      expect(templateFromPost({ kind, body: '#place', order: 'all', posts })).not.toHaveProperty('posts');
+      expect(normPostTemplate({ kind, body: '#place', order: 'all', posts })).not.toHaveProperty('order');
     }
   });
 

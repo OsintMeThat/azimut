@@ -31,8 +31,9 @@ router = APIRouter(prefix="/api", tags=["drafts"])
 DRAFT_MARKER = 1
 MAX_MEDIA_PER_POST = 4
 MAX_EXTRA_POSTS = 20
-# the proof, or the first post's own pictures, then the media post and the later ones
-MAX_DRAFT_ATTACHMENTS = 1 + MAX_MEDIA_PER_POST * (2 + MAX_EXTRA_POSTS)
+# the proof, a video thread's video, sheet and clip, then the first post's own pictures,
+# the media post and the later ones
+MAX_DRAFT_ATTACHMENTS = 1 + 3 + MAX_MEDIA_PER_POST * (2 + MAX_EXTRA_POSTS)
 MAX_ARTIFACT_PATH_LENGTH = 512
 #: What a post is made from (frontend `lib/post.js` POST_KINDS). A draft that says
 #: nothing is a Geolocation one, as every draft was before kinds.
@@ -123,6 +124,14 @@ def _draft_source_paths(state: dict[str, Any]) -> list[str]:
     proof = _artifact_path(state.get("proofPng"), "state.proofPng")
     if proof:
         paths.append(proof)
+    # A video thread is made from its video, and names the contact sheet and the clip it
+    # made or picked for it, posted or not in the order it is in. Another kind's draft
+    # never had these, and what it holds under them is not read.
+    if state.get("kind") == "video":
+        for key in ("video", "sheet", "clip"):
+            named = _artifact_path(state.get(key), f"state.{key}")
+            if named:
+                paths.append(named)
     # The pictures on the first post of a post that is not a geolocation, where the
     # proof would be on one that is.
     paths.extend(_media_paths(state, "state", "firstMedia"))

@@ -4,7 +4,9 @@
    * Proof's home: **New post** and a search that finds a draft by name and opens it, then
    * three parts. **In progress**, the drafts not gone out yet or changed since, each with
    * its platform and how many posts it holds; **Ready to post**, the proofs no draft names
-   * yet and the videos whose slides wait, one press starting the right post; and
+   * yet and the videos whose slides wait, one press starting the right post: a slide's
+   * geolocation, or, for a video of two proofs or more with no thread yet, its **Video
+   * thread**; and
    * **Posted**, the latest to go out, with their link (`postHome.js`). Every post card
    * wears its state as a pill (Draft, Posted, Changed since posted), and its ⋯ or a
    * right-click opens it, marks it posted (**Mark as posted…**, with its link or without,
@@ -23,7 +25,7 @@
   import { timeAgo } from '../../lib/analysisViews.js';
   import { slideTag } from '../../lib/proofList.js';
   import { sceneColorAt } from '../../lib/scenes.js';
-  import { postKind, STARTABLE_POST_KINDS } from '../../lib/post.js';
+  import { postKind } from '../../lib/post.js';
   import MarkPosted from './MarkPosted.svelte';
   import {
     draftLine, draftPicture, draftPill, findDrafts, homeDrafts, isPosted, postedOn, readyToPost, recentDrafts, shortLink,
@@ -44,6 +46,8 @@
     onall,
     /** `(row)`: start a Geolocation post of this proof. */
     onproof,
+    /** `(series)`: start the video thread of this video's proofs. */
+    onthread,
     /** `(row)`: start it the same way, for a post already out, the header's Mark as posted open. */
     onposted,
     /** `(draft, url)`: mark this post posted, with this link or none (null). */
@@ -64,7 +68,6 @@
   const posted = $derived(recentDrafts(parts.posted));
   const found = $derived(findDrafts(drafts ?? [], query).slice(0, 8));
   const ready = $derived(readyToPost(proofs ?? [], drafts ?? []));
-  const threads = STARTABLE_POST_KINDS.includes('video');
 
   function find(event) {
     if (event.key !== 'Enter') return;
@@ -223,11 +226,12 @@
                   <span class="ph-video-icon"><Icon name="video" size={15} /></span>
                   <h5 dir="auto">{series.title}</h5>
                   <span class="ph-count">{series.count} {series.count === 1 ? 'slide' : 'slides'}</span>
-                  <button type="button" class="btn btn-sm ph-series" disabled={!threads}
-                    title={threads ? `Post the slides of ${series.title} as one thread` : 'The video thread comes in the next update'}>
-                    <Icon name="video" size={13} /> Video thread
-                    {#if !threads}<span class="ph-soon">Coming next</span>{/if}
-                  </button>
+                  {#if series.thread}
+                    <button type="button" class="btn btn-sm ph-series" onclick={() => onthread?.(series)}
+                      title={`Post the ${series.postable} proofs of ${series.title} as one thread`}>
+                      <Icon name="video" size={13} /> Video thread
+                    </button>
+                  {/if}
                 </div>
                 {#if series.slides.length}
                   <div class="ph-chips">
@@ -453,14 +457,6 @@
   .ph-video-icon { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
   h5 { margin: 0; min-width: 0; overflow: hidden; color: var(--text-1); font-size: var(--fs-sm); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
   .ph-series { margin-left: auto; flex: none; gap: 6px; }
-  .ph-soon {
-    padding: 1px 7px;
-    border-radius: 999px;
-    background: var(--bg-3);
-    color: var(--text-2);
-    font-size: 10.5px;
-    font-weight: 600;
-  }
   .ph-chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .ph-chip {
     display: inline-flex;

@@ -77,19 +77,30 @@ export function findDrafts(drafts, query) {
   return (drafts ?? []).filter((draft) => matchesTerms([draft.title, draft.name].filter(Boolean).join('\n'), query));
 }
 
+/** The fewest proofs a video thread is offered for: one proof is a geolocation of its own. */
+export const THREAD_MIN = 2;
+
+/** Whether a thread posts this proof of a video: its picture is saved and it states a place (`postable`). */
+export const postable = (row) => !!row?.png && row.postable !== false;
+
+/** The videos a draft of a video thread names. */
+const threadedVideos = (drafts) => new Set(
+  (drafts ?? []).filter((draft) => normalizePostKind(draft.kind) === 'video' && draft.video).map((draft) => draft.video)
+);
+
 /**
  * What waits for a post: the proofs on photos no draft names yet, newest first, and the
  * videos whose proofs make a series, each with its slides no draft names yet, in slide
- * order. A video stays while one of its slides waits or, where a video thread can be
- * started (`threads`), while its series has no thread yet: a series is never offered
- * twice and never lost while a slide still waits. A proof with no picture saved cannot
- * be posted and is left out.
+ * order. A video whose thread can be started (`threads`) and has none yet offers one
+ * (`thread`) once it holds two proofs to post (`THREAD_MIN`); every slide stays one press
+ * from its own geolocation all the same, since a thread is never the only way. A video
+ * stays while one of its slides waits or while it offers its thread: a series is never
+ * offered twice and never lost while a slide still waits. A proof with no picture saved
+ * cannot be posted and is left out.
  */
 export function readyToPost(proofs, drafts, { threads = STARTABLE_POST_KINDS.includes('video') } = {}) {
   const posted = new Set((drafts ?? []).map((draft) => draft.proof).filter(Boolean));
-  const threaded = new Set(
-    (drafts ?? []).filter((draft) => normalizePostKind(draft.kind) === 'video' && draft.video).map((draft) => draft.video)
-  );
+  const threaded = threadedVideos(drafts);
   const photos = [];
   const videos = new Map();
   for (const row of proofs ?? []) {
@@ -103,16 +114,44 @@ export function readyToPost(proofs, drafts, { threads = STARTABLE_POST_KINDS.inc
       title: videoName(row.video, row.video_title),
       slides: [],
       count: 0,
+      postable: 0,
       threaded: threaded.has(row.video),
     };
     series.count += 1;
+    if (postable(row)) series.postable += 1;
     if (!posted.has(row.png)) series.slides.push(row);
     videos.set(row.video, series);
   }
   const waiting = [...videos.values()]
-    .filter((series) => series.slides.length || (threads && !series.threaded))
-    .map((series) => ({ ...series, slides: series.slides.sort((a, b) => a.slide - b.slide) }));
+    .map((series) => ({
+      ...series,
+      thread: threads && !series.threaded && series.postable >= THREAD_MIN,
+      slides: series.slides.sort((a, b) => a.slide - b.slide),
+    }))
+    .filter((series) => series.slides.length || series.thread);
   return { photos, videos: waiting };
+}
+
+/**
+ * The videos New post → Video thread lists: those holding two proofs to post or more,
+ * in the order of their latest proof, each with its count, the picture of its first
+ * slide and whether a thread of it is in the case already.
+ */
+export function threadVideos(proofs, drafts) {
+  const threaded = threadedVideos(drafts);
+  const videos = new Map();
+  for (const row of proofs ?? []) {
+    if (!onVideo(row) || !postable(row)) continue;
+    const series = videos.get(row.video) ?? {
+      video: row.video, title: videoName(row.video, row.video_title), count: 0, first: null, threaded: threaded.has(row.video),
+    };
+    series.count += 1;
+    if (!series.first || row.slide < series.first.slide) series.first = row;
+    videos.set(row.video, series);
+  }
+  return [...videos.values()]
+    .filter((series) => series.count >= THREAD_MIN)
+    .map(({ first, ...series }) => ({ ...series, thumb: first?.thumb ?? first?.png ?? null }));
 }
 
 /**
