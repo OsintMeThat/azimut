@@ -82,11 +82,12 @@
     source: SAMPLE.source,
     date: SAMPLE.date,
     video: SAMPLE.video,
+    timecode: SAMPLE.timecode,
     credits: SAMPLE.credits,
   };
   const SAMPLES = {
     geolocation: GEOLOCATION_SAMPLE,
-    video: { ...GEOLOCATION_SAMPLE, timecode: SAMPLE.timecode, scenes: SAMPLE.scenes },
+    video: { ...GEOLOCATION_SAMPLE, scenes: SAMPLE.scenes },
     plate: {
       description: 'Front line around Kupiansk, 1 to 30 October',
       date: '2025-10-01/2025-10-30',

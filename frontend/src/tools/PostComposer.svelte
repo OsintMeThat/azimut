@@ -17,6 +17,7 @@
   } from '../lib/naming.js';
   import { filingName, planProofHandoff, proofPosts } from './post/handoff.js';
   import { startFields, startPost } from './post/start.js';
+  import { timecode } from '../lib/videoThread.js';
   import { extensionWindowPutAway, putExtensionWindowAway } from './post/extensionWindow.js';
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
@@ -70,6 +71,11 @@
   // Set when the attached proof was read and states no date, so the empty field
   // says why rather than looking forgotten.
   let proofUndated = $state(false);
+  // The time the proof states in its video, as a post prints it (`[0:00–0:07]`,
+  // lib/videoThread.js), for `#timecode`. A photo's proof and a proof about the whole
+  // video state none, and the line drops. Its field shows once a proof gave one.
+  let timecodeText = $state('');
+  let timecodeKnown = $state(false);
   let proofPng = $state(null);
   let proofVer = $state(0); // cache-buster: bumped whenever proofPng is (re)assigned
   let tweet1 = $state('');
@@ -438,6 +444,7 @@
       : (isDefaultName(p.title, 'proof') ? '' : (p.title ?? ''));
     date = postDate(p.when, p.whenZone);
     proofUndated = !date;
+    setTimecode(p.moments);
     const proofSourceUrl = p.source ?? p.sources?.[0] ?? '';
     source = proofSourceUrl;
     setProof(p.png ?? null);
@@ -519,7 +526,14 @@
       source,
       date,
       video: postVideoTitle,
+      timecode: timecodeText,
     };
+  }
+
+  /** The proof's stated moments as `#timecode` prints them; none for a photo or the whole video. */
+  function setTimecode(moments) {
+    timecodeText = timecode(moments);
+    timecodeKnown = !!timecodeText;
   }
 
   // The video the post is about, for `#video`: the one its proof rests on, else the
@@ -961,6 +975,7 @@
       // clock of the place and a day stays that place's day.
       date = postDate(spec.when, spec.whenZoneStated ?? spec.whenZone);
       proofUndated = !date;
+      setTimecode(spec.scene?.moments);
       const src = proofSource(spec);
       if (src) source = src;
       await preloadProofMedia(item.png, src);
@@ -1068,6 +1083,8 @@
       mention,
       source,
       date,
+      // written only for a proof that states a time, so a photo's draft keeps its shape
+      ...(timecodeText ? { timecode: timecodeText } : {}),
       proofPng,
       tweet1,
       tweet1Edited,
@@ -1448,6 +1465,8 @@
       source = s.source ?? '';
       date = typeof s.date === 'string' ? s.date : '';
       proofUndated = false;
+      timecodeText = typeof s.timecode === 'string' ? s.timecode : '';
+      timecodeKnown = !!timecodeText;
       setProof(s.proofPng ?? null);
       mediaEnabled = s.mediaEnabled ?? true;
       mediaType = s.mediaType ?? 'none';
@@ -1546,6 +1565,8 @@
     source = '';
     date = '';
     proofUndated = false;
+    timecodeText = '';
+    timecodeKnown = false;
     setProof(null);
     tweet1 = '';
     tweet1Edited = false;
@@ -1652,7 +1673,7 @@
     postDraftState.fields = hasContent
       ? {
         place, plusCode: geo?.plus_code, description, lat: geo?.lat, lon: geo?.lon,
-        coordsText, mention, source, date, video: postVideoTitle, kind,
+        coordsText, mention, source, date, video: postVideoTitle, timecode: timecodeText, kind,
       }
       : null;
     return () => (postDraftState.fields = null);
@@ -2307,6 +2328,14 @@
             {#if proofUndated && !date.trim()}
               <p class="field-note">This proof has no date. Leave it empty and the line drops.</p>
             {/if}
+          </div>
+        {/if}
+
+        {#if geolocation && timecodeKnown && templateUsesPostField(body, 'timecode')}
+          <div class="field">
+            <label class="label" for="pc-timecode">Timecode</label>
+            <input id="pc-timecode" class="input mono" placeholder="[0:00–0:07]" title="The time the proof states in its video"
+              bind:value={timecodeText} onchange={regenerate} />
           </div>
         {/if}
 

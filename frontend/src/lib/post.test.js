@@ -50,6 +50,40 @@ describe('buildTweet1 — the default body', () => {
   });
 });
 
+describe('#timecode — the time a proof of a video states', () => {
+  const timed = { ...full, timecode: '[0:00–0:07]' };
+
+  it('prints on its own line right under the description in the classic layout', () => {
+    expect(buildTweet1(DEFAULT_TWEET_BODY, timed)).toBe(
+      'Bakhmut, Donetsk, Ukraine - 8FPGXXXX+XX\n\n' +
+      'Rooftop match\n[0:00–0:07]\n\n' +
+      '48.850000, 2.350000\n\n' +
+      '@GeoConfirmed\n\n' +
+      'Source: https://x.com/a/1'
+    );
+  });
+
+  it('drops its line for a photo or the whole video, so that post is as it always was', () => {
+    expect(buildTweet1(DEFAULT_TWEET_BODY, { ...full, timecode: '' })).toBe(buildTweet1(DEFAULT_TWEET_BODY, full));
+  });
+
+  it('is in the Classic, With date and Short layouts, and not in Coordinates only', () => {
+    const byId = Object.fromEntries(POST_TEMPLATE_STARTERS.map((one) => [one.id, one]));
+    for (const id of ['classic', 'dated', 'short']) expect(bodyTokens(byId[id].body), id).toContain('#timecode');
+    expect(bodyTokens(byId.coordinates.body)).not.toContain('#timecode');
+    expect(buildTweet1(byId.dated.body, { ...timed, date: '2025-10-24' })).toContain('Rooftop match\n[0:00–0:07]\n\nFilmed: 2025-10-24');
+    expect(buildTweet1(byId.short.body, timed)).toBe('Bakhmut, Donetsk, Ukraine\n48.850000, 2.350000\n[0:00–0:07]\n\nSource: https://x.com/a/1');
+  });
+
+  it('is offered to a geolocation template as well as a video thread', () => {
+    expect(tokensForKind('geolocation').map((t) => t.tag)).toContain('#timecode');
+    expect(tokensForKind('video').map((t) => t.tag)).toContain('#timecode');
+    expect(tokensForKind('free').map((t) => t.tag)).not.toContain('#timecode');
+    expect(templateUsesPostField(DEFAULT_TWEET_BODY, 'timecode')).toBe(true);
+    expect(templateUsesPostField('#coordinates', 'timecode')).toBe(false);
+  });
+});
+
 describe('buildTweet1 — token ordering + line control', () => {
   it('honours a custom order', () => {
     const body = '#coordinates\n#mention\n#place';
@@ -797,7 +831,7 @@ describe('POST_KINDS — what a post is made from', () => {
     expect(tokensForKind('compare').map((t) => t.tag)).toEqual(['#description', '#mention', '#source', '#date', '#credits']);
     expect(tokensForKind('video').map((t) => t.tag)).toEqual(expect.arrayContaining(['#timecode', '#scenes', '#video']));
     expect(tokensForKind(undefined).map((t) => t.tag)).toContain('#coordinates');
-    expect(tokensForKind('geolocation').map((t) => t.tag)).not.toContain('#timecode');
+    expect(tokensForKind('geolocation').map((t) => t.tag)).not.toContain('#scenes');
   });
 });
 
@@ -812,8 +846,8 @@ describe('the new tokens', () => {
   it('drop their line while nothing fills them, so a template can name them today', () => {
     const body = '#description\nAt #timecode\n#scenes\nImagery: #credits\nFrom #video';
     expect(buildTweet1(body, full)).toBe('Rooftop match');
-    expect(buildTweet1(body, { ...full, timecode: '0:00–0:07', credits: 'Copernicus Sentinel-2' }))
-      .toBe('Rooftop match\nAt 0:00–0:07\nImagery: Copernicus Sentinel-2');
+    expect(buildTweet1(body, { ...full, timecode: '[0:00–0:07]', credits: 'Copernicus Sentinel-2' }))
+      .toBe('Rooftop match\nAt [0:00–0:07]\nImagery: Copernicus Sentinel-2');
   });
 
   it('are known to the typo check, like the tokens before them', () => {

@@ -1,6 +1,7 @@
 /**
  * The contact sheet of a video's series: one picture of its slides for the recap post,
- * a grid of the proofs' saved pictures, each with its number, title and passage time.
+ * a grid of the proofs' saved pictures, each with its number, title and time, the same
+ * number `#scenes` gives the place and the same `[0:15]` a post prints (`lib/videoThread.js`).
  *
  * Drawn in the browser from the PNGs each slide already saved, one picture decoded at
  * a time and at the size of its cell (`createImageBitmap` with a resize), then let go,
@@ -15,7 +16,7 @@
  * Nothing is drawn for a whole-video proof's time: no passage, no timecode.
  */
 import { fileUrl } from './fileUrl.js';
-import { shortTimecode, timecode, DEFAULT_INSTANTS } from './videoThread.js';
+import { shortTimecode, timecode } from './videoThread.js';
 
 export const SHEET_MAX = 48;
 export const SHEET_WIDTH = 1600;
@@ -41,14 +42,14 @@ const FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-
  * numbered as the thread posts them, and how many more there were.
  * A slide is `{ title, moments, png }`, as `videoThread.videoSlides` keeps it.
  */
-export function sheetTiles(slides, { instants = DEFAULT_INSTANTS } = {}) {
+export function sheetTiles(slides) {
   const all = slides ?? [];
   const tiles = all.slice(0, SHEET_MAX).map((slide, i) => ({
     number: i + 1,
     title: String(slide.title ?? ''),
-    time: timecode(slide.moments, { instants }),
+    time: timecode(slide.moments),
     // what a narrow cell says instead: the first time, the rest counted
-    short: shortTimecode(slide.moments, { instants }),
+    short: shortTimecode(slide.moments),
     png: slide.png ?? null,
   }));
   return { tiles, more: Math.max(0, all.length - SHEET_MAX) };
@@ -192,7 +193,6 @@ function drawTile(ctx, cell, tile, picture, unit) {
 export async function buildProofSheet(slides, {
   caseId = null,
   video = '',
-  instants = DEFAULT_INSTANTS,
   width = SHEET_WIDTH,
   height = SHEET_HEIGHT,
   type = SHEET_TYPE,
@@ -200,7 +200,7 @@ export async function buildProofSheet(slides, {
   loadPicture = (path, w) => loadCasePicture(caseId, path, w),
   makeCanvas = defaultCanvas,
 } = {}) {
-  const { tiles, more } = sheetTiles(slides, { instants });
+  const { tiles, more } = sheetTiles(slides);
   const layout = sheetLayout(tiles.length, { width, height });
   const canvas = makeCanvas(width, height);
   const ctx = canvas.getContext('2d');

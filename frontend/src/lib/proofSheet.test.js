@@ -54,15 +54,14 @@ function pictures() {
 }
 
 describe('the tiles', () => {
-  it('number the slides as the thread posts them, the time beside each, none for the whole video', () => {
+  it('number the slides as the thread posts them, the time beside each as a post prints it, none for the whole video', () => {
     const { tiles, more } = sheetTiles([slide(1), slide(2, { moments: [] }), slide(3, { moments: [{ start: 3.2, end: null }] })]);
     expect(more).toBe(0);
     expect(tiles).toEqual([
-      { number: 1, title: 'Place 1', time: '0:10–0:15', short: '0:10–0:15', png: 'proofs/p1.png' },
+      { number: 1, title: 'Place 1', time: '[0:10–0:15]', short: '[0:10–0:15]', png: 'proofs/p1.png' },
       { number: 2, title: 'Place 2', time: '', short: '', png: 'proofs/p2.png' },
-      { number: 3, title: 'Place 3', time: '0:03', short: '0:03', png: 'proofs/p3.png' },
+      { number: 3, title: 'Place 3', time: '[0:03]', short: '[0:03]', png: 'proofs/p3.png' },
     ]);
-    expect(sheetTiles([slide(3, { moments: [{ start: 3.2, end: null }] })], { instants: 'none' }).tiles[0].time).toBe('');
   });
 
   it('stop at 48', () => {
@@ -117,9 +116,9 @@ describe('the sheet', () => {
     const [canvas] = made;
     expect([canvas.width, canvas.height]).toEqual([1600, 900]);
     const texts = canvas.calls.filter((c) => c.op === 'fillText').map((c) => c.text);
-    expect(texts).toEqual(expect.arrayContaining(['Convoy', '2 places', '1', '2', 'Place 1', 'Place 2', '0:10–0:15']));
+    expect(texts).toEqual(expect.arrayContaining(['Convoy', '2 places', '1', '2', 'Place 1', 'Place 2', '[0:10–0:15]']));
     // the whole-video proof prints no time
-    expect(texts.filter((t) => /\d:\d\d/.test(t))).toEqual(['0:10–0:15']);
+    expect(texts.filter((t) => /\d:\d\d/.test(t))).toEqual(['[0:10–0:15]']);
     // the page is the sheet's own colour, whatever the app's theme
     expect(canvas.calls[0]).toMatchObject({ op: 'fillRect', args: [0, 0, 1600, 900], fill: SHEET_COLORS.page });
   });
@@ -158,8 +157,8 @@ describe('the sheet', () => {
     const many = Array.from({ length: 48 }, (_, i) => slide(i + 1, { moments: [{ start: 0, end: 7 }, { start: 185, end: 192 }] }));
     await buildProofSheet(many, { makeCanvas, loadPicture: pics.loadPicture });
     const texts = made[0].calls.filter((c) => c.op === 'fillText').map((c) => c.text);
-    expect(texts).toContain('0:00–0:07 +1');
-    expect(texts).not.toContain('0:00–0:07 · 3:05–3:12');
+    expect(texts).toContain('[0:00–0:07] +1');
+    expect(texts).not.toContain('[0:00–0:07] [3:05–3:12]');
   });
 
   it('says No picture in a cell whose picture will not load, and goes on', async () => {

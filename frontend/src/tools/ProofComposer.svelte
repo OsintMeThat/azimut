@@ -7004,6 +7004,8 @@
           // The date and the clock the save read it on, for a post template with #date.
           when: proof.when,
           whenZone: result.when_zone ?? null,
+          // the times it states in its video, for a post template with #timecode
+          moments: scene.star ? scene.moments.map(({ start, end }) => ({ start, end: end ?? null })) : [],
           // every point, one per line: the post cites the first and carries the rest
           coordsText: coordsPostLines(proofCoordsLines(proof, prefs.coordFormat)).join('\n'),
           source: displayedSource,

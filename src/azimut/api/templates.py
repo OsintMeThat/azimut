@@ -50,8 +50,10 @@ TextSize = Annotated[FiniteFloat, Field(ge=8, le=80)]
 Offset = Annotated[FiniteFloat, Field(ge=-100_000, le=100_000)]
 Ratio = Annotated[FiniteFloat, Field(ge=0, le=1)]
 
+#: The classic layout (frontend `lib/post.js` DEFAULT_TWEET_BODY), for a template whose
+#: body is blank: a proof of a video prints its time under its description.
 DEFAULT_POST_BODY = (
-    "#place - #pluscode\n\n#description\n\n#coordinates\n\n#mention\n\nSource: #source"
+    "#place - #pluscode\n\n#description\n#timecode\n\n#coordinates\n\n#mention\n\nSource: #source"
 )
 
 

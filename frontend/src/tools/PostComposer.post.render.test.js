@@ -1535,6 +1535,65 @@ describe('the geolocation road, unchanged', () => {
   });
 });
 
+describe('#timecode, for a proof of a video', () => {
+  const timed = (...lines) => CLASSIC_FIRST_POST.replace(PROOF.description, [PROOF.description, ...lines].join('\n'));
+
+  it('prints the passage the proof states right under its description, and keeps it in the draft', async () => {
+    await mountPost();
+    uiState.postProof = { ...PROOF, moments: [{ start: 0, end: 7.4 }] };
+    await saved();
+    expect(firstPost().value).toBe(timed('[0:00–0:07]'));
+    expect(target.querySelector('#pc-timecode').value).toBe('[0:00–0:07]');
+    const state = draftWrites().at(-1)[1].state;
+    expect(state.timecode).toBe('[0:00–0:07]');
+    expect(Object.keys(state).slice(5, 8)).toEqual(['date', 'timecode', 'proofPng']);
+  });
+
+  it('prints an instant and several moments in the one format', async () => {
+    await mountPost();
+    uiState.postProof = { ...PROOF, moments: [{ start: 65, end: 72 }, { start: 15.2, end: null }] };
+    await settle();
+    expect(firstPost().value).toBe(timed('[0:15] [1:05–1:12]'));
+  });
+
+  it('prints nothing for a proof about the whole video, which looks like a photo\'s', async () => {
+    await mountPost();
+    uiState.postProof = { ...PROOF, moments: [] };
+    await saved();
+    expect(firstPost().value).toBe(CLASSIC_FIRST_POST);
+    expect(target.querySelector('#pc-timecode')).toBeNull();
+    expect('timecode' in draftWrites().at(-1)[1].state).toBe(false);
+  });
+
+  it('reads the time off the proof\'s stated scene when a proof is attached from the case', async () => {
+    lists.proofs = [{ name: 'gate', title: 'Port gate', png: 'proofs/gate.png', video: 'media/convoy.mp4', video_title: 'Convoy', slide: 1, slides: 1, order: 0 }];
+    lists.specs = { gate: {
+      title: 'Port gate', description: PROOF.description, coordsText: PROOF.coordsText, source: SOURCE_X,
+      scene: { video: 'media/convoy.mp4', moments: [{ start: 15, end: null }], draft: null },
+    } };
+    await mountPost();
+    home().querySelector('.ph-chip').click();
+    await settle();
+    expect(firstPost().value).toBe(timed('[0:15]'));
+  });
+
+  it('opens a saved draft with its timecode, and edits it like any field', async () => {
+    lists.drafts = [{ name: 'Gate', title: 'Gate', target: 'x', posts: 1 }];
+    lists.saved = { Gate: { title: 'Gate', state: {
+      description: PROOF.description, coordsText: PROOF.coordsText, place: 'Los Anacuos, Miranda, Venezuela',
+      mention: '@GeoConfirmed', source: SOURCE_X, date: '', timecode: '[0:15]', proofPng: PROOF.png,
+      tweet1: timed('[0:15]'), tweet1Edited: false, target: 'x', mediaEnabled: true, mediaType: 'none', mediaText: '', extraTweets: [],
+    } } };
+    await mountPost();
+    home().querySelector('.ph-open').click();
+    await settle();
+    expect(firstPost().value).toBe(timed('[0:15]'));
+    type(target.querySelector('#pc-timecode'), '[0:14]');
+    await settle();
+    expect(firstPost().value).toBe(timed('[0:14]'));
+  });
+});
+
 describe('the extension window', () => {
   beforeEach(() => localStorage.removeItem(EXTENSION_WINDOW_KEY));
 

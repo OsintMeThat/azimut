@@ -47,8 +47,9 @@ export function postKind(kind) {
 // preview so the layout reads before any real draft exists; `kinds` are the
 // templates whose editor offers it. Every token is known to every body, so a line
 // holding one with nothing to say drops wherever it is written.
-// `#timecode` and `#scenes` are filled by the video thread; `#credits` by the
-// imagery credits of the post's media. Until then they are empty and drop their line.
+// `#timecode` is the time the proof states in its video, `[0:00–0:07]` (lib/videoThread.js),
+// for a geolocation and for each place of a video thread; `#scenes` the places of a video
+// thread; `#credits` the imagery credits of the post's media. Empty, each drops its line.
 export const TWEET_TOKENS = [
   { tag: '#place', label: 'Place', sample: 'Bakhmut, Donetsk, Ukraine', kinds: ['geolocation', 'video'] },
   { tag: '#pluscode', label: 'Plus code', sample: '8FPGXXXX+XX', kinds: ['geolocation', 'video'] },
@@ -58,8 +59,8 @@ export const TWEET_TOKENS = [
   { tag: '#source', label: 'Source', sample: 'https://x.com/example/status/1', kinds: ['geolocation', 'video', 'compare', 'free'] },
   { tag: '#date', label: 'Date', sample: '2025-10-24 14:30 UTC+3', kinds: ['geolocation', 'video', 'plate', 'compare', 'free'] },
   { tag: '#video', label: 'Video title', sample: 'Convoy on the coast road', kinds: ['geolocation', 'video'] },
-  { tag: '#timecode', label: 'Timecode', sample: '0:00–0:07 · 1:05–1:12', kinds: ['video'] },
-  { tag: '#scenes', label: 'Scenes', sample: '1. Port gate 0:00\n2. Coast road 1:05', kinds: ['video'] },
+  { tag: '#timecode', label: 'Timecode', sample: '[0:00–0:07]', kinds: ['geolocation', 'video'] },
+  { tag: '#scenes', label: 'Scenes', sample: '1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n3. Hilltop village', kinds: ['video'] },
   { tag: '#credits', label: 'Credits', sample: 'Imagery: Copernicus Sentinel-2', kinds: ['geolocation', 'video', 'plate', 'compare', 'free'] },
 ];
 
@@ -621,6 +622,7 @@ const FIELD_TOKENS = {
   mention: ['#mention'],
   source: ['#source'],
   date: ['#date'],
+  timecode: ['#timecode'],
 };
 
 // A token ends where the word does: `#placement` is text, not `#place` and "ment",
@@ -679,11 +681,13 @@ function editDistance(a, b) {
 
 // The classic GeoConfirmed thread, as a token body. Place + plus code on the
 // first line, then description, decimal coordinates, mention, and a labelled
-// source — each separated by a blank line.
+// source — each separated by a blank line. The time a proof of a video states sits
+// right under its description; a photo's proof has none and the line drops.
 export const DEFAULT_TWEET_BODY = [
   '#place - #pluscode',
   '',
   '#description',
+  '#timecode',
   '',
   '#coordinates',
   '',
@@ -700,7 +704,7 @@ export const DEFAULT_TWEET_BODY = [
 export const POST_TEMPLATE_STARTERS = Object.freeze([
   { id: 'classic', label: 'Classic', body: DEFAULT_TWEET_BODY },
   { id: 'coordinates', label: 'Coordinates only', body: '#coordinates\n\n#mention' },
-  { id: 'short', label: 'Short', body: '#place\n#coordinates\n\nSource: #source' },
+  { id: 'short', label: 'Short', body: '#place\n#coordinates\n#timecode\n\nSource: #source' },
   {
     id: 'dated',
     label: 'With date',
@@ -708,6 +712,7 @@ export const POST_TEMPLATE_STARTERS = Object.freeze([
       '#place - #pluscode',
       '',
       '#description',
+      '#timecode',
       '',
       'Filmed: #date',
       '',

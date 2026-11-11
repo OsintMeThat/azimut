@@ -219,7 +219,7 @@ describe('starting points', () => {
     expect(target.querySelector('textarea.body').value).toBe(short.body);
     expect(data.mention).toBe('@House');
     expect(data.mediaEnabled).toBe(false);
-    expect(preview()).toBe(`${sample('#place')}\n48.850000, 2.350000\n\nSource: ${sample('#source')}`);
+    expect(preview()).toBe(`${sample('#place')}\n48.850000, 2.350000\n${sample('#timecode')}\n\nSource: ${sample('#source')}`);
   });
 });
 
