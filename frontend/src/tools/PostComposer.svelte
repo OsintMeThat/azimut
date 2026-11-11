@@ -3008,7 +3008,7 @@
                   <img src={mediaHref(path)} alt="" loading="lazy" />
                 {/each}
               </div>
-              {#if altOn}<AltTexts paths={firstMedia} texts={altTexts} {target} href={mediaHref} onedit={editAlt} oncopy={copyAlt} />{/if}
+              {#if altOn}<AltTexts paths={firstMedia} texts={altTexts} {target} href={mediaHref} thumbs={firstMedia.length > 1} onedit={editAlt} oncopy={copyAlt} />{/if}
             {/if}
           {:else if caseState.current}
             <div class="media-attach">

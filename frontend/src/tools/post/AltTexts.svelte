@@ -19,6 +19,18 @@
 
   const limit = $derived(altLimit(target));
   const fileName = (path) => String(path ?? '').split('/').pop();
+
+  /** One line until the text needs more, up to a few, then it scrolls. */
+  function grow(node, _text) {
+    const fit = () => {
+      node.style.height = 'auto';
+      node.style.height = `${Math.min(node.scrollHeight + 2, 96)}px`;
+    };
+    // measured once the text is in the box: a text set from outside lands after this runs
+    const later = () => requestAnimationFrame(fit);
+    later();
+    return { update: later };
+  }
 </script>
 
 <div class="alt-texts">
@@ -31,7 +43,7 @@
       {/if}
       <textarea class="textarea alt-input" rows="1" maxlength={ALT_MAX} dir="auto" placeholder="Alt text"
         aria-label={`Alt text for ${fileName(path)}`} title="What this picture shows, for a screen reader"
-        value={text} oninput={(event) => onedit(path, event.currentTarget.value)}></textarea>
+        value={text} oninput={(event) => onedit(path, event.currentTarget.value)} use:grow={text}></textarea>
       <span class="alt-count" class:over={used > limit.limit} title={`${limit.name} takes ${limit.limit} characters`}>{used}/{limit.limit}</span>
       <button class="btn btn-ghost btn-xs" onclick={() => oncopy(text)} disabled={!text.trim()} title="Copy this alt text">
         <Icon name="copy" size={12} /> Copy
@@ -66,6 +78,8 @@
     min-width: 0;
     min-height: 28px;
     padding: 4px 8px;
+    resize: none;
+    overflow-y: auto;
     font-size: var(--fs-xs);
     line-height: 1.4;
   }
