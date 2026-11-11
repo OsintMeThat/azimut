@@ -180,6 +180,21 @@ test.describe('the home in three parts', () => {
     await expect(progress.locator('.post-card')).toHaveCount(3);
     fixture.expectNoUnexpectedRequests();
   });
+
+  test('a card about a proof opens that proof in Geo Proof', async ({ page }) => {
+    const fixture = await installAppFixture(page, { drafts: DRAFTS, proofList: PROOFS, lookupEntities: lookups });
+    await postRoutes(page);
+    await page.goto('/#post');
+    const home = page.getByTestId('post-home');
+    await home.locator('.post-card', { hasText: 'Harbour words' }).click({ button: 'right' });
+    await expect(page.locator('.float-menu[aria-label="Harbour words"]').getByRole('button', { name: 'Open the proof' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await home.locator('.post-card', { hasText: 'Bridge thread' }).click({ button: 'right' });
+    await page.locator('.float-menu[aria-label="Bridge thread"]').getByRole('button', { name: 'Open the proof' }).click();
+    await expect(page.locator('.tabstrip').getByRole('button', { name: 'Geo Proof', exact: true })).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('post-home')).toBeHidden();
+    fixture.expectNoUnexpectedRequests();
+  });
 });
 
 test.describe('Open', () => {
@@ -343,7 +358,7 @@ test.describe('Mark as posted', () => {
     await card.hover();
     await card.getByRole('button', { name: 'More for Vincent Thomas Bridge' }).click();
     const menu = page.locator('.float-menu[aria-label="Vincent Thomas Bridge"]');
-    await expect(menu.locator('.fm-item')).toHaveText(['Write its post', 'Mark as posted…']);
+    await expect(menu.locator('.fm-item')).toHaveText(['Write its post', 'Open the proof', 'Mark as posted…']);
     await menu.getByRole('button', { name: 'Mark as posted…' }).click();
 
     await expect(home).toHaveCount(0);

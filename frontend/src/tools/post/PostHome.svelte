@@ -10,7 +10,8 @@
    * right-click opens it, marks it posted (**Mark as posted…**, with its link or without,
    * in a popover on the card) or not, copies its link once posted and deletes it. A proof
    * waiting has one too, for a post already out (**Mark as posted…**: its post started as
-   * a press does, then the header's popover).
+   * a press does, then the header's popover). A card about a proof the case still lists
+   * opens it in Geo Proof (**Open the proof**).
    *
    * The composer decides when this shows: a case holding no draft and no proof keeps the
    * composer as it always was. Both lists arrive from the composer, null while read.
@@ -51,6 +52,8 @@
     onunmark,
     /** `(draft)`: ask to delete this post (the composer holds the dialog). */
     ondelete,
+    /** `(name)`: open this proof in Geo Proof. */
+    onproofopen,
   } = $props();
 
   let query = $state('');
@@ -70,6 +73,8 @@
   }
 
   const picture = (draft) => draftPicture(draft, proofs, media);
+  // The proof a post's card is about, while the case still lists it.
+  const draftProof = (draft) => (draft?.proof ? (proofs ?? []).find((row) => row.png === draft.proof)?.name ?? null : null);
 
   // A card's ⋯, under it or at the pointer for a right-click: a post's, or a waiting proof's.
   let menu = $state(null); // { draft?, proof?, anchor?, at? }
@@ -93,6 +98,7 @@
     else if (what === 'unmark') onunmark?.(draft);
     else if (what === 'write') onproof?.(proof);
     else if (what === 'posted') onposted?.(proof);
+    else if (what === 'proof') onproofopen?.(draft ? draftProof(draft) : proof.name);
   }
 
   function mark(url) {
@@ -265,6 +271,10 @@
   <FloatingMenu anchor={menu.anchor ?? null} at={menu.at ?? null} width={220} label={draft.title} onclose={() => (menu = null)}>
     <p class="fm-head" dir="auto">{draft.title}</p>
     <button type="button" class="fm-item" onclick={() => act('open')}><Icon name="folderOpen" size={14} /><span class="fm-grow">Open</span></button>
+    {#if draftProof(draft)}
+      <button type="button" class="fm-item" title="Open its proof in Geo Proof" onclick={() => act('proof')}>
+        <Icon name="proof" size={14} /><span class="fm-grow">Open the proof</span></button>
+    {/if}
     {#if !isPosted(draft)}
       <button type="button" class="fm-item" title="Say it went out, with its link if you have it" onclick={() => act('mark')}>
         <Icon name="check" size={14} /><span class="fm-grow">Mark as posted…</span></button>
@@ -286,6 +296,8 @@
   <FloatingMenu anchor={menu.anchor ?? null} at={menu.at ?? null} width={220} label={proof.title} onclose={() => (menu = null)}>
     <p class="fm-head" dir="auto">{proof.title}</p>
     <button type="button" class="fm-item" onclick={() => act('write')}><Icon name="post" size={14} /><span class="fm-grow">Write its post</span></button>
+    <button type="button" class="fm-item" title="Open it in Geo Proof" onclick={() => act('proof')}>
+      <Icon name="proof" size={14} /><span class="fm-grow">Open the proof</span></button>
     <button type="button" class="fm-item" title="Start its post and say it went out" onclick={() => act('posted')}>
       <Icon name="check" size={14} /><span class="fm-grow">Mark as posted…</span></button>
   </FloatingMenu>

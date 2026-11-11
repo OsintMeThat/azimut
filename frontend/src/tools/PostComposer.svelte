@@ -1986,6 +1986,13 @@
     postedControl?.ask();
   }
 
+  /** Open the proof: in Geo Proof, as every other tool opens one. */
+  function openProofInGeoProof(name) {
+    if (!name) return;
+    uiState.openProof = name;
+    uiState.tool = 'proof';
+  }
+
   async function openFromHome(draft) {
     await requestLoadDraft(draft.name);
   }
@@ -2108,7 +2115,7 @@
     <PostHome caseId={caseState.current?.id ?? ''} drafts={caseDrafts} proofs={caseProofs} media={mediaByPath}
       onnew={openGallery} onopen={openFromHome} onall={openDraftList} onproof={postProofFromHome} onposted={postedFromHome}
       onmark={(draft, url) => markSavedPost(draft, url)} onunmark={(draft) => markSavedPost(draft, null, { posted: false })}
-      ondelete={askDelete} />
+      ondelete={askDelete} onproofopen={openProofInGeoProof} />
   </div>
   {:else}
   <div class="tool-body">

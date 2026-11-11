@@ -5268,7 +5268,9 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   its geolocation, as Attach a proof does; its ⋯ or a right-click (a slide's chip takes
   the right-click) offers **Write its post** and **Mark as posted…**, for a post that
   went out from elsewhere: the same post starts, and the header's popover opens once the
-  proof has filled it in. The home reads the case's drafts and proofs once each time it
+  proof has filled it in. Every card about a proof the case still lists, a waiting
+  slide's chip included, also offers **Open the proof**, which opens it in Geo Proof.
+  The home reads the case's drafts and proofs once each time it
   is shown: back from a post, after a delete or an Undo, after a mark. A card's picture
   sits whole on a dark ground in both themes, as Geo Proof's home and the Open list show
   theirs, since a proof is drawn on its own dark one. A proof *has a post* when a draft names its

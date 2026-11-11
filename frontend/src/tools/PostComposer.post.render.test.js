@@ -1063,7 +1063,7 @@ describe('a post already out, from the home', () => {
     card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
     flushSync();
     const menu = document.querySelector('.float-menu[aria-label="waiting"]');
-    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Write its post', 'Mark as posted…']);
+    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Write its post', 'Open the proof', 'Mark as posted…']);
     button(menu, 'Mark as posted…').click();
     await settle();
 
@@ -1085,7 +1085,7 @@ describe('a post already out, from the home', () => {
     home().querySelector('.ph-chip').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
     flushSync();
     const menu = document.querySelector('.float-menu[aria-label="slide-1"]');
-    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Write its post', 'Mark as posted…']);
+    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Write its post', 'Open the proof', 'Mark as posted…']);
   });
 
   it('opens the same menu from a waiting card\'s ⋯, Write its post doing what a press does', async () => {
@@ -1097,6 +1097,50 @@ describe('a post already out, from the home', () => {
     expect(home()).toBeNull();
     expect(target.querySelector('.attach-chip').textContent).toContain('waiting.png');
     expect(popover()).toBeNull();
+  });
+
+  it('opens a card\'s proof in Geo Proof, on every card that has one the case still lists', async () => {
+    lists.proofs = [
+      { name: 'waiting', title: 'waiting', png: 'proofs/waiting.png', thumb: null, video: null },
+      { name: 'bridge', title: 'Bridge', png: 'proofs/bridge.png', thumb: null, video: null },
+      { name: 'slide-1', title: 'slide-1', png: 'proofs/slide-1.png', thumb: null, video: 'media/clip.mp4', video_title: 'Convoy', slide: 1, slides: 1, order: 0 },
+    ];
+    lists.drafts = [
+      row('Bridge post', { proof: 'proofs/bridge.png' }),
+      row('Out', { proof: 'proofs/bridge.png', state: 'posted', posted: { url: null, site: 'x', at: '2026-11-10T08:00:00Z' } }),
+      row('Gone', { proof: 'proofs/deleted.png' }),
+      row('Words', { kind: 'free' }),
+    ];
+    await mountPost();
+    const items = (name) => {
+      home().querySelector(`button[aria-label="More for ${name}"]`).click();
+      flushSync();
+      const menu = document.querySelector(`.float-menu[aria-label="${name}"]`);
+      const said = [...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim());
+      home().querySelector(`button[aria-label="More for ${name}"]`).click();
+      flushSync();
+      return said;
+    };
+    expect(items('Bridge post')).toEqual(['Open', 'Open the proof', 'Mark as posted…', 'Delete…']);
+    expect(items('Out')).toEqual(['Open', 'Open the proof', 'Not posted', 'Delete…']);
+    // a post whose proof is gone, and a free post, have none to open
+    expect(items('Gone')).not.toContain('Open the proof');
+    expect(items('Words')).not.toContain('Open the proof');
+    expect(items('waiting')).toEqual(['Write its post', 'Open the proof', 'Mark as posted…']);
+    home().querySelector('.ph-chip').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
+    flushSync();
+    expect([...document.querySelector('.float-menu[aria-label="slide-1"]').querySelectorAll('.fm-item')].map((b) => b.textContent.trim()))
+      .toContain('Open the proof');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSync();
+
+    home().querySelector('button[aria-label="More for Bridge post"]').click();
+    flushSync();
+    button(document.querySelector('.float-menu[aria-label="Bridge post"]'), 'Open the proof').click();
+    flushSync();
+    expect(uiState.openProof).toBe('bridge');
+    expect(uiState.tool).toBe('proof');
+    uiState.openProof = null;
   });
 
   it('marks a post in progress from its card, in a popover on the card, and the home reads it again', async () => {
