@@ -5289,7 +5289,8 @@ for that release. It writes a post or a thread and opens the site to publish it;
 never posts, and pressing Post on X or Bluesky stays the analyst's.
 
 - **The home** stands where an empty composer would, once the case holds a draft or a
-  proof: **New post** and a search that finds a draft by name (Enter opens the first),
+  proof: **New post** and a search that finds a post by name, or by its link pasted
+  (Enter opens the first),
   then three parts. **In progress**, the last six drafts not gone out yet or changed
   since, each with its platform, its kind when it is not a geolocation, and how many
   posts it holds when they are several; **Ready to post**, under its line *Proofs with
@@ -5318,9 +5319,11 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   proof back at once. A case with neither keeps the composer it always opened on.
   **‹ Posts**, first in the header, goes back to the home.
 - **Open**, in the header, lists every post of the case as Geo Proof's Open proof does:
-  each row with its picture, name, kind, platform, state pill and the day it was last
-  saved, newest first. A search and a filter by kind and by state (each counted, shown
-  once the posts hold more than one) narrow it, a posted row's buttons copy its link
+  each row with its picture, name, kind, platform, state pill and its day, newest first:
+  the day a post went out (its link's own, else the day it was marked), a post not gone
+  out its last change. A search and a filter by kind and by state (each counted, shown
+  once the posts hold more than one) narrow it; a post's link pasted in the search
+  finds that post, by its own link or by the id its name holds, a posted row's buttons copy its link
   and open it (**↗**, a row with no link keeping their room so the pills line up), and
   the bin on a row deletes it with the delete preview and Undo; the list reads the case
   again after a delete or an Undo. It reads `GET /drafts` and `GET /proofs` each time it

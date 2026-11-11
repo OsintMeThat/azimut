@@ -13,7 +13,8 @@ import { matchesTerms } from '../../lib/folderBrowse.js';
 import { onVideo } from '../../lib/proofList.js';
 import { videoName } from '../../lib/proofScene.js';
 import {
-  normalizePostKind, POST_KINDS, POST_STATES, postedDay, postedWhen, postKind, postStateLabel, postTarget, STARTABLE_POST_KINDS,
+  normalizePostKind, POST_KINDS, POST_STATES, postedAddress, postedDay, postedWhen, postKind, postStateLabel, postTarget,
+  STARTABLE_POST_KINDS,
 } from '../../lib/post.js';
 
 /** How many drafts the home lists before "All N drafts". */
@@ -52,6 +53,33 @@ export function draftPill(draft) {
 /** When a listed post went out: its link's own date, else when it was marked (`postedWhen`). */
 const wentOut = (draft) => postedWhen(draft?.posted) ?? draft?.updated_at ?? '';
 
+/**
+ * The date a listed post goes by: the day it went out (its link's own, else when it was
+ * marked), and for one that has not, its last change.
+ */
+export const listedWhen = (draft) => wentOut(draft);
+
+/** The posts newest first by `listedWhen`, an equal date keeping the order given. */
+export function byListedDate(drafts) {
+  return [...(drafts ?? [])].sort((a, b) => String(listedWhen(b)).localeCompare(String(listedWhen(a))));
+}
+
+/** The status or record id at the end of a post's link, or ''. */
+const linkId = (url) => (postedAddress(url)?.url ?? '').split('/').pop();
+
+/**
+ * Whether a post answers a search: its name's words, or, for a post's link pasted, that
+ * post, found by its own link or by the id its name holds.
+ */
+function answersSearch(draft, query) {
+  const pasted = postedAddress(query);
+  if (pasted) {
+    const id = linkId(pasted.url);
+    return linkId(draft?.posted?.url) === id || [draft?.title, draft?.name].some((text) => String(text ?? '').includes(id));
+  }
+  return matchesTerms([draft?.title, draft?.name].filter(Boolean).join('\n'), query);
+}
+
 /** The day a posted card says, *9 Nov*, read off its link when it can be. */
 export const postedOn = (draft, now = new Date()) => postedDay(wentOut(draft), now);
 
@@ -74,7 +102,7 @@ export const shortLink = (url) => String(url ?? '').replace(/^https?:\/\//, '');
 /** The drafts a search by name finds, in the list's order. */
 export function findDrafts(drafts, query) {
   if (!String(query ?? '').trim()) return [];
-  return (drafts ?? []).filter((draft) => matchesTerms([draft.title, draft.name].filter(Boolean).join('\n'), query));
+  return (drafts ?? []).filter((draft) => answersSearch(draft, query));
 }
 
 /** The fewest proofs a video thread is offered for: one proof is a geolocation of its own. */
@@ -195,5 +223,5 @@ export function filterPosts(drafts, { query = '', kind = '', state = '' } = {}) 
   return (drafts ?? []).filter((draft) =>
     (!kind || normalizePostKind(draft?.kind) === kind)
     && (!state || draftState(draft) === state)
-    && (!String(query).trim() || matchesTerms([draft.title, draft.name].filter(Boolean).join('\n'), query)));
+    && (!String(query).trim() || answersSearch(draft, query)));
 }

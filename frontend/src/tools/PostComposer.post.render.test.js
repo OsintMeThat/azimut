@@ -206,7 +206,7 @@ describe('the home', () => {
     lists.drafts = [draft('Convoy east'), draft('Depot')];
     lists.saved = { Depot: { title: 'Depot', state: { description: 'Depot fire', tweet1: 'Depot fire' } } };
     await mountPost();
-    const find = home().querySelector('input[aria-label="Find a draft by name"]');
+    const find = home().querySelector('input[aria-label="Find a post by name or link"]');
     find.value = 'dep';
     find.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
@@ -355,10 +355,11 @@ describe('Open', () => {
     await mountPost();
     button(header(), 'Open').click();
     await settle();
-    expect(rows()).toEqual(['Convoy east', 'Depot words', 'Convoy west']);
+    // newest first by the day each went out, a draft by its last change
+    expect(rows()).toEqual(['Convoy east', 'Convoy west', 'Depot words']);
     const subs = [...list().querySelectorAll('.ol-sub')].map((t) => t.textContent.trim());
-    expect(subs).toEqual(['Geolocation · X · 2026-11-09', 'Free post · Bluesky · 2026-11-09', 'Geolocation · X · 2026-11-09']);
-    expect([...list().querySelectorAll('.ol-pill')].map((t) => t.textContent)).toEqual(['Posted', 'Draft', 'Changed since posted']);
+    expect(subs).toEqual(['Geolocation · X · 2026-11-10', 'Geolocation · X · 2026-11-10', 'Free post · Bluesky · 2026-11-09']);
+    expect([...list().querySelectorAll('.ol-pill')].map((t) => t.textContent)).toEqual(['Posted', 'Changed since posted', 'Draft']);
     const pictures = [...list().querySelectorAll('.ol-pic img')].map((img) => img.getAttribute('src'));
     expect(pictures[0]).toContain('proofs/.thumbs/east.webp');
     expect(pictures[1]).toContain('media/.thumbs/depot.webp');

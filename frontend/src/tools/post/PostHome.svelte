@@ -155,7 +155,7 @@
       <button type="button" class="btn btn-primary ph-new" onclick={() => onnew?.()}><Icon name="plus" size={14} /> New post</button>
       <label class="ph-find">
         <Icon name="search" size={15} />
-        <input bind:value={query} onkeydown={find} placeholder="Find a draft by name…" aria-label="Find a draft by name" />
+        <input bind:value={query} onkeydown={find} placeholder="Find a post by name or link…" aria-label="Find a post by name or link" />
         {#if query}
           <button type="button" class="ph-clear" aria-label="Clear search" title="Clear search" onclick={() => (query = '')}><Icon name="x" size={12} /></button>
         {/if}

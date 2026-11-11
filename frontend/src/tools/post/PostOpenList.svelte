@@ -13,7 +13,7 @@
   import { copyText } from '../../lib/clipboard.js';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { postKind, postTarget } from '../../lib/post.js';
-  import { draftPicture, draftPill, filterPosts, postFacets } from './postHome.js';
+  import { byListedDate, draftPicture, draftPill, filterPosts, listedWhen, postFacets } from './postHome.js';
 
   let {
     caseId = '',
@@ -35,7 +35,8 @@
   let state = $state('');
 
   const facets = $derived(postFacets(drafts));
-  const shown = $derived(filterPosts(drafts, { query, kind, state }));
+  // newest first by the day a post went out, else its last change (`listedWhen`)
+  const shown = $derived(byListedDate(filterPosts(drafts, { query, kind, state })));
   // a filter whose last post went (a delete) lets go, rather than show nothing
   $effect(() => {
     if (kind && !facets.kinds.some((one) => one.id === kind)) kind = '';
@@ -54,7 +55,7 @@
   {:else}
     {#if narrowing}
       <div class="ol-filters">
-        <SearchInput bind:value={query} placeholder="Search posts…" width="100%" />
+        <SearchInput bind:value={query} placeholder="Search posts, or paste a post's link…" width="100%" />
         {#if facets.kinds.length > 1}
           <select class="input" aria-label="Kind" title="Only the posts of one kind" value={kind} onchange={(event) => (kind = event.currentTarget.value)}>
             <option value="">Every kind</option>
@@ -87,7 +88,7 @@
               </span>
               <span class="ol-words">
                 <span class="ol-title" dir="auto">{draft.title}</span>
-                <span class="ol-sub">{postKind(draft.kind).label} · {postTarget(draft.target).label} · {draft.updated_at?.slice(0, 10) ?? ''}</span>
+                <span class="ol-sub">{postKind(draft.kind).label} · {postTarget(draft.target).label} · {String(listedWhen(draft)).slice(0, 10)}</span>
               </span>
               <span class="ol-pill {pill.state}">{pill.label}</span>
             </button>

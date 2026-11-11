@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  draftLine, draftPicture, draftPill, draftState, filterPosts, findDrafts, homeDrafts, isPosted, postedOn, postFacets, postsWords,
+  byListedDate, draftLine, draftPicture, draftPill, draftState, filterPosts, findDrafts, homeDrafts, isPosted, listedWhen, postedOn,
+  postFacets, postsWords,
   readyToPost, recentDrafts, shortLink, threadVideos,
 } from './postHome.js';
 
@@ -169,5 +170,30 @@ describe('the Open list', () => {
     expect(names({ query: 'convoy', state: 'changed' })).toEqual(['c']);
     // an earlier build's opened post is a draft, and filters as one
     expect(filterPosts([{ name: 'o', title: 'Old', state: 'opened' }], { state: 'draft' }).map((d) => d.name)).toEqual(['o']);
+  });
+
+  it('dates a post by the day it went out, its link first, and a draft by its last change', () => {
+    const out = { name: 'x', state: 'posted', updated_at: '2026-11-11T09:00:00Z', posted: { url: `https://x.com/desk/status/${snowflake('2026-10-02T08:00:00Z')}`, at: '2026-11-11T09:00:00Z' } };
+    const marked = { name: 'm', state: 'posted', updated_at: '2026-11-11T09:00:00Z', posted: { url: null, at: '2026-10-20T10:00:00Z' } };
+    const draft = { name: 'd', state: 'draft', updated_at: '2026-10-25T12:00:00Z', posted: null };
+    expect(listedWhen(out).slice(0, 10)).toBe('2026-10-02');
+    expect(listedWhen(marked)).toBe('2026-10-20T10:00:00Z');
+    expect(listedWhen(draft)).toBe('2026-10-25T12:00:00Z');
+    expect(byListedDate([out, marked, draft]).map((d) => d.name)).toEqual(['d', 'm', 'x']);
+  });
+
+  it('finds a post by its link pasted, by its own link or the id its name holds', () => {
+    const id = snowflake('2026-10-02T08:00:00Z');
+    const posts = [
+      { name: 'p1', title: 'Bridge', state: 'posted', posted: { url: `https://x.com/desk/status/${id}` } },
+      { name: id, title: id, state: 'draft', posted: null },
+      { name: 'p3', title: 'Other', state: 'posted', posted: { url: 'https://x.com/desk/status/1850000000000000001' } },
+    ];
+    const names = (query) => filterPosts(posts, { query }).map((d) => d.name);
+    expect(names(`https://x.com/Desk/status/${id}?s=20`)).toEqual(['p1', id]);
+    expect(names(`x.com/desk/status/${id}`)).toEqual(['p1', id]);
+    expect(findDrafts(posts, `https://x.com/desk/status/${id}`).map((d) => d.name)).toEqual(['p1', id]);
+    // words still search the names
+    expect(names('bridge')).toEqual(['p1']);
   });
 });
