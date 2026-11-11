@@ -475,6 +475,20 @@ def test_a_missing_file_relinked_by_the_doctor_carries_its_post(client):
     assert _state(client, cid, post["name"])["mediaPaths"] == ["media/found again.png"]
 
 
+def test_the_doctor_names_a_post_whose_proof_is_gone(client):
+    cid = _case(client)
+    saved = _proof(client, cid, "Bridge")
+    _draft(client, cid, "Kept", {"proofPng": saved["png"]})
+    _draft(client, cid, "Strike", {"proofPng": "proofs/Gone.png"})
+
+    report = client.get(f"/api/cases/{cid}/doctor").json()
+
+    issues = [issue for issue in report["issues"] if issue["kind"] == "post-proof-missing"]
+    assert [(issue["title"], issue["path"]) for issue in issues] == [("The proof of Strike is missing", "proofs/Gone.png")]
+    # told, never repaired: which proof the post is about is the analyst's to say
+    assert issues[0]["actions"] == []
+
+
 # -- the whole case, renamed through every route ------------------------------------------
 
 

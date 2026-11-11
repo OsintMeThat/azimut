@@ -20,6 +20,7 @@ MEDIA_MISSING = "media-missing"
 MEDIA_UNKNOWN = "media-unknown"
 TEMPORAL_INDEX_STALE = "temporal-index-stale"
 REDIRECT_DANGLING = "redirect-dangling"
+POST_PROOF_MISSING = "post-proof-missing"
 
 
 def _media_files(case: Case) -> Iterator[Path]:
@@ -144,6 +145,19 @@ def scan(case: Case) -> dict[str, Any]:
                 }
             )
 
+    for post in _posts_missing_their_proof(case):
+        issues.append(
+            {
+                "id": f"{POST_PROOF_MISSING}:{post['draft']}",
+                "kind": POST_PROOF_MISSING,
+                "severity": "warning",
+                "title": f"The proof of {post['title']} is missing",
+                "detail": post["proof"],
+                "path": post["proof"],
+                "actions": [],
+            }
+        )
+
     for redirect in _dangling_redirects(case):
         issues.append(
             {
@@ -170,6 +184,30 @@ def scan(case: Case) -> dict[str, Any]:
             }
         )
     return _report(case, manifest, issues)
+
+
+def _posts_missing_their_proof(case: Case) -> list[dict[str, str]]:
+    """Each saved post naming a proof picture the case no longer holds: a proof deleted
+    since, or one renamed before a rename carried its post along. Told, never repaired:
+    which proof the post was about is the analyst's to say again."""
+    folder = case.tool_root / layout.DRAFTS_DIR
+    posts = []
+    for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        state = data.get("state") if isinstance(data, dict) else None
+        proof = state.get("proofPng") if isinstance(state, dict) else None
+        if not isinstance(proof, str) or not proof:
+            continue
+        try:
+            here = case.resolve_inside(proof).is_file()
+        except CaseError:
+            here = False
+        if not here:
+            posts.append({"draft": layout.draft_rel(path.stem), "title": path.stem, "proof": proof})
+    return posts
 
 
 def _dangling_redirects(case: Case) -> list[dict[str, str]]:
