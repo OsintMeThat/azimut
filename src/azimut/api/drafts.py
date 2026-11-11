@@ -16,7 +16,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 from ..engine import artifacts as artifact_engine
 from ..engine import links as link_engine
@@ -39,8 +39,10 @@ MAX_ARTIFACT_PATH_LENGTH = 512
 POST_KINDS = ("geolocation", "video", "plate", "free")
 
 #: Whether a post went out, as its draft's ``state.publish`` says (frontend
-#: `lib/post.js` ``postState``): when the composer opened the site, and once the analyst
-#: pasted its link, where it was posted and when. A draft that says nothing is a draft.
+#: `lib/post.js` ``postState``): once the analyst marked it posted, where and when, and
+#: its link when they gave one. A draft that says nothing is a draft. ``opened_at`` is
+#: what an earlier build wrote when it opened the site: still taken, so a tab running it
+#: saves, and read as nothing.
 PUBLISH_KEYS = frozenset({"opened_at", "site", "url", "posted_at", "mark", "changed"})
 PUBLISH_SITES = ("x", "bluesky")
 #: A post's own address, as the composer writes it once it went out (`postedAddress`).
@@ -50,6 +52,14 @@ POSTED_URL = {
 }
 #: How many posts a proof keeps a record of, the latest last.
 MAX_POSTED_PER_PROOF = 20
+
+
+class PublishIn(BaseModel):
+    """A post marked posted from outside its composer, a card on Post's home or a link
+    the extension caught for it: posted with this link or none, or not posted after all."""
+
+    posted: StrictBool
+    url: str | None = Field(default=None, max_length=300)
 
 
 class DraftIn(BaseModel):
@@ -166,41 +176,42 @@ def _publish(state: dict[str, Any]) -> dict[str, Any] | None:
     return publish
 
 
+def _link_site(url: Any) -> str | None:
+    """The site an X or Bluesky post's address is on, or None for anything else."""
+    if not isinstance(url, str):
+        return None
+    return next((name for name, rule in POSTED_URL.items() if rule.match(url)), None)
+
+
 def _posted(state: dict[str, Any]) -> dict[str, Any] | None:
     """Where and when the post went out, or None: read off a record already on disk, so
-    one that does not pass is no post rather than an error."""
+    one that does not pass is no post rather than an error. A post is out once it has its
+    link, or once it was marked posted without one (``posted_at``); its site is its link's,
+    else the one it was marked on, else its draft's platform."""
     publish = state.get("publish")
     if not isinstance(publish, dict):
         return None
     url = publish.get("url")
-    if not isinstance(url, str):
-        return None
-    site = next((name for name, rule in POSTED_URL.items() if rule.match(url)), None)
-    if site is None:
-        return None
+    linked = _link_site(url)
     at = publish.get("posted_at")
-    return {"url": url, "site": site, "at": at if isinstance(at, str) else None}
+    at = at if isinstance(at, str) and at else None
+    if url is not None and not linked:
+        return None
+    if not linked and not at:
+        return None
+    site = linked or next(
+        (one for one in (publish.get("site"), state.get("target")) if one in PUBLISH_SITES), "x"
+    )
+    return {"url": url if linked else None, "site": site, "at": at}
 
 
 def _post_state(state: dict[str, Any]) -> str:
-    """``draft``, ``opened`` (the site opened with it), ``posted``, or ``changed`` (edited
-    since it went out), as `lib/post.js` ``postState`` reads the same record."""
+    """``draft``, ``posted``, or ``changed`` (edited since it went out), as `lib/post.js`
+    ``postState`` reads the same record."""
     publish = state.get("publish")
     if _posted(state):
         return "changed" if isinstance(publish, dict) and publish.get("changed") is True else "posted"
-    if isinstance(publish, dict) and isinstance(publish.get("opened_at"), str):
-        return "opened"
     return "draft"
-
-
-def _site(state: dict[str, Any]) -> str | None:
-    """The site the post was opened on or went out on, when it says."""
-    posted = _posted(state)
-    if posted:
-        return str(posted["site"])
-    publish = state.get("publish")
-    site = publish.get("site") if isinstance(publish, dict) else None
-    return site if site in PUBLISH_SITES else None
 
 
 def _picture(state: dict[str, Any]) -> str | None:
@@ -215,20 +226,35 @@ def _picture(state: dict[str, Any]) -> str | None:
     return None
 
 
-def _proof_posts(case: Any, png: str, *, drop: str | None = None, add: dict[str, Any] | None = None) -> None:
+def _proof_entry(posted: dict[str, Any]) -> dict[str, Any]:
+    """A post as its proof keeps it: its site and date, and its link when it has one."""
+    return {key: value for key, value in posted.items() if value is not None}
+
+
+def _proof_posts(
+    case: Any, png: str, *, drop: dict[str, Any] | None = None, add: dict[str, Any] | None = None
+) -> None:
     """Keep the proof's ``posted`` record in step with the post about it: the link the
-    post went out at, its site and its date. It is a record of the post, not a source of
-    the proof, so it lives on the proof's entity rather than in its sources."""
+    post went out at when it has one, its site and its date. It is a record of the post,
+    not a source of the proof, so it lives on the proof's entity rather than in its
+    sources. An entry is the post's own: the one it held is dropped, and so is any other
+    naming the link it now has."""
     entity = case.find_entity(attr="path", value=png)
     if not entity or entity.get("type") != "proof":
         return
     held = entity.get("attrs", {}).get("posted")
-    posts = [
-        one for one in (held if isinstance(held, list) else [])
-        if isinstance(one, dict) and one.get("url") not in {drop, (add or {}).get("url")}
-    ]
+    links = {one.get("url") for one in (drop, add) if one and one.get("url")}
+
+    def kept(one: Any) -> bool:
+        if not isinstance(one, dict):
+            return False
+        if drop and one == _proof_entry(drop):
+            return False
+        return not (one.get("url") and one.get("url") in links)
+
+    posts = [one for one in (held if isinstance(held, list) else []) if kept(one)]
     if add:
-        posts.append(add)
+        posts.append(_proof_entry(add))
     posts = posts[-MAX_POSTED_PER_PROOF:]
     if posts != held:
         case.update_entity(entity["id"], {"attrs": {"posted": posts or None}})
@@ -287,7 +313,6 @@ def list_drafts(case_id: str) -> list[dict[str, Any]]:
                 # Whether it went out, and where, for the home's parts and the Open list;
                 # and the file its card shows. All read off the state already open.
                 "state": _post_state(state),
-                "site": _site(state),
                 "posted": _posted(state),
                 "picture": _picture(state),
             }
@@ -393,6 +418,57 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
     return {"name": name, "title": name, "draft": rel}
 
 
+@router.put("/cases/{case_id}/drafts/{name}/publish")
+def mark_draft_posted(case_id: str, name: str, body: PublishIn) -> dict[str, Any]:
+    """Mark a saved post posted, or not, without opening it: only its ``publish`` record
+    and the proof it is about change. A post already out keeps its date and its print and
+    takes the link given, or loses the one it had; one not out yet is posted now, its
+    print left for the composer to take when it next opens it."""
+    case = get_case(case_id)
+    try:
+        path = case.resolve_inside(layout.draft_rel(name))
+    except CaseError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="draft not found")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="draft could not be read") from exc
+    if not isinstance(data, dict) or data.get("azimut_draft") != DRAFT_MARKER:
+        raise HTTPException(status_code=422, detail="not a post draft")
+    held_state = data.get("state")
+    before: dict[str, Any] = held_state if isinstance(held_state, dict) else {}
+    state = dict(before)
+    linked = _link_site(body.url) if body.url is not None else None
+    if body.url is not None and not linked:
+        raise HTTPException(status_code=422, detail="url must be the address of an X or Bluesky post")
+
+    if not body.posted:
+        state.pop("publish", None)
+    else:
+        out = _posted(before)
+        was = before.get("publish")
+        held: dict[str, Any] = was if out and isinstance(was, dict) else {}
+        record: dict[str, Any] = {key: held[key] for key in ("posted_at", "mark", "changed") if key in held}
+        record.setdefault("posted_at", _now())
+        record.setdefault("changed", False)
+        target = state.get("target")
+        record["site"] = linked or (out["site"] if out else None) or (
+            target if target in PUBLISH_SITES else "x"
+        )
+        if body.url is not None:
+            record["url"] = body.url
+        state["publish"] = record
+    _publish(state)
+
+    data["state"] = state
+    data["updated_at"] = _now()
+    media_engine.write_json_atomic(path, data)
+    _follow_posted(case, before, state)
+    return {"name": path.stem, "state": _post_state(state), "posted": _posted(state)}
+
+
 def _follow_posted(case: Any, before: dict[str, Any], after: dict[str, Any]) -> None:
     """Write the post's link on the proof it is about, and take back the one it replaced."""
     def record(state: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
@@ -403,10 +479,10 @@ def _follow_posted(case: Any, before: dict[str, Any], after: dict[str, Any]) -> 
     old, new = record(before), record(after)
     if old == new:
         return
-    if old and (not new or old[0] != new[0] or old[1]["url"] != new[1]["url"]):
-        _proof_posts(case, old[0], drop=old[1]["url"])
+    if old and (not new or old[0] != new[0]):
+        _proof_posts(case, old[0], drop=old[1])
     if new:
-        _proof_posts(case, new[0], add=new[1])
+        _proof_posts(case, new[0], drop=old[1] if old and old[0] == new[0] else None, add=new[1])
 
 
 def draft_spec(name: str) -> str:

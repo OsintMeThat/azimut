@@ -318,12 +318,13 @@ def test_the_list_says_whether_each_post_went_out_and_the_picture_its_card_shows
         assert saved.status_code == 200, saved.text
     rows = {row["title"]: row for row in client.get(f"/api/cases/{cid}/drafts").json()}
 
+    # a post an earlier build opened the site with and that never went out is a draft
     assert {title: row["state"] for title, row in rows.items()} == {
-        "Plain": "draft", "Opened": "opened", "Out": "posted", "Edited": "changed",
+        "Plain": "draft", "Opened": "draft", "Out": "posted", "Edited": "changed",
     }
     assert rows["Out"]["posted"] == {"url": POSTED_X, "site": "x", "at": "2026-11-10T10:05:00Z"}
-    assert [rows[t]["site"] for t in ("Plain", "Opened", "Out", "Edited")] == [None, "x", "x", "bluesky"]
     assert rows["Edited"]["posted"]["site"] == "bluesky"
+    assert "site" not in rows["Out"]
     assert rows["Plain"]["posted"] is None and rows["Opened"]["posted"] is None
     assert [rows[t]["picture"] for t in ("Plain", "Opened", "Out", "Edited")] == [
         "proofs/a.png", "media/b.png", None, "media/c.mp4",
@@ -406,7 +407,7 @@ def test_a_link_taken_back_leaves_the_proof(client):
     client.post(f"/api/cases/{cid}/drafts", json={"rename_from": saved["name"], "title": "Bridge post", "state": back})
     assert [one["url"] for one in _proof_entity(cid, png)["attrs"]["posted"]] == [other]
     row = next(r for r in client.get(f"/api/cases/{cid}/drafts").json() if r["name"] == saved["name"])
-    assert row["state"] == "opened" and row["posted"] is None
+    assert row["state"] == "draft" and row["posted"] is None
 
     # a post never opened, posted from elsewhere, and taken back says nothing at all
     client.post(f"/api/cases/{cid}/drafts", json={"rename_from": saved["name"], "title": "Bridge post", "state": out})
@@ -418,3 +419,118 @@ def test_a_link_taken_back_leaves_the_proof(client):
 
 def _media_id(cid, path):
     return next(e["id"] for e in graph_read.entities(cid) if e["type"] == "media" and e["attrs"].get("path") == path)
+
+
+POSTED_BSKY = "https://bsky.app/profile/desk.bsky.social/post/3kabc2defgh22"
+
+
+def _row(client, cid, name):
+    return next(r for r in client.get(f"/api/cases/{cid}/drafts").json() if r["name"] == name)
+
+
+def test_a_post_marked_posted_without_its_link_is_posted_and_its_proof_says_so(client):
+    """Posted with no link: the list reads it out on the site it was marked on, and its
+    proof keeps where and when with no link. A link given later replaces that entry, and
+    Not posted takes it off the proof."""
+    cid = client.post("/api/cases", json={"name": "No link"}).json()["id"]
+    path = mediafixture._upload(client, cid, "pic.png")
+    mediafixture._save_proof(client, cid, "Bridge", [path])
+    png = "proofs/Bridge.png"
+    out = {"site": "bluesky", "posted_at": "2026-11-09T09:00:00Z", "mark": "m1", "changed": False}
+    state = {"proofPng": png, "target": "bluesky", "publish": out}
+    saved = client.post(f"/api/cases/{cid}/drafts", json={"title": "Bridge post", "state": state})
+    assert saved.status_code == 200, saved.text
+    row = _row(client, cid, "Bridge post")
+    assert row["state"] == "posted"
+    assert row["posted"] == {"url": None, "site": "bluesky", "at": "2026-11-09T09:00:00Z"}
+    assert _proof_entity(cid, png)["attrs"]["posted"] == [{"site": "bluesky", "at": "2026-11-09T09:00:00Z"}]
+
+    linked = dict(state, publish={**out, "url": POSTED_BSKY})
+    client.post(f"/api/cases/{cid}/drafts", json={"rename_from": "Bridge post", "title": "Bridge post", "state": linked})
+    assert _proof_entity(cid, png)["attrs"]["posted"] == [
+        {"url": POSTED_BSKY, "site": "bluesky", "at": "2026-11-09T09:00:00Z"},
+    ]
+
+    client.post(f"/api/cases/{cid}/drafts", json={"rename_from": "Bridge post", "title": "Bridge post", "state": dict(state, publish=None)})
+    assert not _proof_entity(cid, png)["attrs"].get("posted")
+    assert _row(client, cid, "Bridge post")["state"] == "draft"
+
+
+def test_a_post_marked_without_a_site_goes_out_on_its_platform(client):
+    cid = client.post("/api/cases", json={"name": "Platform"}).json()["id"]
+    state = {"target": "bluesky", "publish": {"posted_at": "2026-11-09T09:00:00Z"}}
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Out", "state": state})
+    assert _row(client, cid, "Out")["posted"]["site"] == "bluesky"
+
+
+def test_the_publish_route_marks_a_saved_post_posted_with_or_without_its_link(client):
+    """The home marks a post without opening it: only its record and its proof change."""
+    cid = client.post("/api/cases", json={"name": "Route"}).json()["id"]
+    path = mediafixture._upload(client, cid, "pic.png")
+    mediafixture._save_proof(client, cid, "Bridge", [path])
+    png = "proofs/Bridge.png"
+    # a post saved by Geo Report in 0.3.3: no kind and no publish
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Old", "state": {**STATE, "proofPng": png, "target": "x"}})
+    before = client.get(f"/api/cases/{cid}/drafts/Old").json()
+
+    res = client.put(f"/api/cases/{cid}/drafts/Old/publish", json={"posted": True})
+    assert res.status_code == 200, res.text
+    assert res.json()["state"] == "posted"
+    after = client.get(f"/api/cases/{cid}/drafts/Old").json()
+    publish = after["state"].pop("publish")
+    assert publish == {"site": "x", "posted_at": publish["posted_at"], "changed": False}
+    # nothing else of the post moved
+    assert after["state"] == before["state"] and after["created_at"] == before["created_at"]
+    assert _proof_entity(cid, png)["attrs"]["posted"] == [{"site": "x", "at": publish["posted_at"]}]
+
+    # a link given later keeps the day it was marked, and the proof's entry takes it
+    res = client.put(f"/api/cases/{cid}/drafts/Old/publish", json={"posted": True, "url": POSTED_X})
+    assert res.json()["posted"] == {"url": POSTED_X, "site": "x", "at": publish["posted_at"]}
+    assert _proof_entity(cid, png)["attrs"]["posted"] == [{"url": POSTED_X, "site": "x", "at": publish["posted_at"]}]
+
+    # posted with no link after all: still posted, the link gone
+    res = client.put(f"/api/cases/{cid}/drafts/Old/publish", json={"posted": True, "url": None})
+    assert res.json()["posted"] == {"url": None, "site": "x", "at": publish["posted_at"]}
+    assert _proof_entity(cid, png)["attrs"]["posted"] == [{"site": "x", "at": publish["posted_at"]}]
+
+    # Not posted: a draft again, its proof's entry gone
+    res = client.put(f"/api/cases/{cid}/drafts/Old/publish", json={"posted": False})
+    assert res.json() == {"name": "Old", "state": "draft", "posted": None}
+    assert "publish" not in client.get(f"/api/cases/{cid}/drafts/Old").json()["state"]
+    assert not _proof_entity(cid, png)["attrs"].get("posted")
+
+
+def test_the_publish_route_keeps_what_the_composer_marked(client):
+    """A post the composer marked keeps its print and its changed flag: a link caught
+    for it later only adds the link, on the link's own site."""
+    cid = client.post("/api/cases", json={"name": "Kept"}).json()["id"]
+    out = {"site": "x", "posted_at": "2026-11-09T09:00:00Z", "mark": "m1", "changed": True}
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Out", "state": {"target": "x", "publish": out}})
+    res = client.put(f"/api/cases/{cid}/drafts/Out/publish", json={"posted": True, "url": POSTED_BSKY})
+    assert res.status_code == 200, res.text
+    assert client.get(f"/api/cases/{cid}/drafts/Out").json()["state"]["publish"] == {
+        "posted_at": "2026-11-09T09:00:00Z", "mark": "m1", "changed": True, "site": "bluesky", "url": POSTED_BSKY,
+    }
+    assert res.json()["state"] == "changed"
+
+
+@pytest.mark.parametrize("body", [
+    {"posted": True, "url": "https://example.com/a/status/1"},
+    {"posted": True, "url": "x.com/desk/status/1"},
+    {"posted": True, "url": "https://x.com/desk/status/1?s=20"},
+    {"posted": True, "url": "https://x.com/desk/status/" + "1" * 300},
+    {"posted": "yes"},
+    {"url": POSTED_X},
+])
+def test_the_publish_route_refuses_what_is_no_post_and_changes_nothing(client, body):
+    cid = client.post("/api/cases", json={"name": "Refused"}).json()["id"]
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Plain", "state": STATE})
+    before = client.get(f"/api/cases/{cid}/drafts/Plain").json()
+    res = client.put(f"/api/cases/{cid}/drafts/Plain/publish", json=body)
+    assert res.status_code == 422, res.text
+    assert client.get(f"/api/cases/{cid}/drafts/Plain").json() == before
+
+
+def test_the_publish_route_answers_404_for_a_post_that_is_not_there(client):
+    cid = client.post("/api/cases", json={"name": "Missing"}).json()["id"]
+    assert client.put(f"/api/cases/{cid}/drafts/Gone/publish", json={"posted": True}).status_code == 404
