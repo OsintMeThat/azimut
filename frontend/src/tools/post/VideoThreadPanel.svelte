@@ -19,6 +19,8 @@
     threadTitle = '',
     /** `(text)`: the thread's title typed. */
     ontitle,
+    /** Recap first's picture, its choice and its map (`RecapMap.svelte`), shown under the orders. */
+    recap = null,
     /** The places the thread posts, `{ name, label, clip }`, null while read. */
     places = null,
     /** The proofs it leaves out, `{ label, why }`. */
@@ -85,6 +87,8 @@
       </button>
     {/each}
   </div>
+
+  {#if order === 'recap' && recap}{@render recap()}{/if}
 
   {#if sheet === 'making'}
     <p class="vt-note" role="status">Drawing the contact sheet…</p>

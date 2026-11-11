@@ -21,7 +21,10 @@
   import { threadPostLabel, videoLayout, videoLink, videoPosts } from '../lib/videoPost.js';
   import { overWords, videoFits } from '../lib/videoLimits.js';
   import { videoName } from '../lib/proofScene.js';
-  import { fileThreadSheet } from './post/threadSheet.js';
+  import { fileRecapMap, fileThreadSheet } from './post/threadSheet.js';
+  import RecapMap from './post/RecapMap.svelte';
+  import { mapOptions, recapFit, recapPlaces } from '../lib/recapMap.js';
+  import { defaultProofTemplate } from '../lib/proofTemplates.js';
   import { postLabel, THREAD_MIN } from './post/postHome.js';
   import { extensionWindowPutAway, putExtensionWindowAway } from './post/extensionWindow.js';
   import {
@@ -469,6 +472,10 @@
       title: '',
       video, order: layout.order, texts: { video: layout.video, place: layout.place }, first: null, extra: [],
       sheet: null, clip: null, link: false, slides: null, left: [], seconds: null, facts: {}, cut: 0, sheetState: '',
+      // Recap first's picture: the proofs sheet, as every thread had before, or the places
+      // on a map (`lib/recapMap.js`), its choices and its file once made. `mapLive` is
+      // whether its tiles may be asked for, never saved: the analyst pressed for the map.
+      recap: 'sheet', map: null, mapOptions: mapOptions(), mapLive: false,
       // the recap and the video's text each order was left with in this post, and the
       // words of each post the analyst rewrote, kept through an order that has no such post
       byOrder: {},
@@ -483,6 +490,9 @@
     return {
       ...newThread(path(s.video)),
       title: typeof s.title === 'string' ? s.title : null,
+      recap: s.recap === 'map' ? 'map' : 'sheet',
+      map: path(s.map),
+      mapOptions: mapOptions(s.mapOptions),
       order: layout.order,
       texts: { video: layout.video, place: layout.place },
       first: typeof s.first === 'string' ? s.first : null,
@@ -503,6 +513,8 @@
       ...(thread.first ? { first: thread.first } : {}),
       ...(thread.extra.length ? { extra: thread.extra.map((one) => ({ text: one.text })) } : {}),
       ...(thread.sheet ? { sheet: thread.sheet } : {}),
+      ...(thread.recap === 'map' ? { recap: 'map', mapOptions: { ...thread.mapOptions } } : {}),
+      ...(thread.map ? { map: thread.map } : {}),
       ...(thread.clip ? { clip: thread.clip } : {}),
       ...(thread.link ? { link: true } : {}),
     };
@@ -540,9 +552,46 @@
       return;
     }
     Object.assign(thread, read);
+    // the places on a map when they stand far enough apart, signed as the analyst's proofs are
+    thread.recap = recapFit(recapPlaces(read.slides)).ok ? 'map' : 'sheet';
+    const style = defaultProofTemplate(templatesState.proof, prefs.proofTemplate)?.data ?? null;
+    thread.mapOptions = mapOptions({ signature: !!(style?.signature || style?.signatureText), mark: !!style?.azimutMark });
     source = videoLink(mediaByPath.get(video));
     layoutThread();
     await Promise.all([fileSheetIfShown(), readPlaceFacts()]);
+  }
+
+  /** The recap's picture: the map or the proofs sheet. Picking the map asks for its tiles. */
+  function setRecap(kind) {
+    if (!thread) return;
+    thread.recap = kind === 'map' ? 'map' : 'sheet';
+    if (thread.recap === 'map') thread.mapLive = true;
+    layoutThread();
+    fileSheetIfShown();
+  }
+
+  /** A choice of the map changed: the map made before is no longer it, and is made again. */
+  function setMapOptions(patch) {
+    if (!thread) return;
+    thread.mapOptions = mapOptions({ ...thread.mapOptions, ...patch });
+    // a ground picked is a press for the map
+    if ('background' in patch) thread.mapLive = true;
+    if (thread.map) {
+      thread.map = null;
+      layoutThread();
+    }
+  }
+
+  /** The map made, filed in Media as made from the video: the recap carries it. */
+  async function placeRecapMap(blob) {
+    const caseId = caseState.current?.id;
+    if (!thread || !caseId) return;
+    const run = postRun;
+    const path = await fileRecapMap(caseId, { video: thread.video, blob });
+    if (run !== postRun || !thread) return;
+    thread.map = path;
+    thread.mapLive = true;
+    layoutThread();
   }
 
   /** What `#video` says: the thread's title, or an older draft's video title in Media. */
@@ -567,6 +616,8 @@
       link: thread.link,
       facts: thread.facts,
       extra: thread.extra,
+      recap: thread.recap,
+      map: thread.map,
     };
   }
 
@@ -676,7 +727,7 @@
   /** The contact sheet, drawn and filed once the order shows one and none is filed yet. */
   async function fileSheetIfShown() {
     if (!thread?.slides || thread.sheet || thread.sheetState === 'making') return;
-    if (!usesSheet(thread.order, thread.slides.length)) return;
+    if (!usesSheet(thread.order, thread.slides.length, thread.recap)) return;
     const caseId = caseState.current?.id;
     if (!caseId) return;
     const run = postRun;
@@ -2664,8 +2715,12 @@
         {#if thread}
           <!-- the video, its places, the order, and what goes when the video is too long -->
           <div class="field">
+            {#snippet recapPicture()}
+              <RecapMap slides={thread.slides} recap={thread.recap} options={thread.mapOptions} live={thread.mapLive} made={thread.map}
+                onrecap={setRecap} onoptions={setMapOptions} onlive={() => (thread.mapLive = true)} onmake={placeRecapMap} />
+            {/snippet}
             <VideoThreadPanel title={thread.video ? videoName(thread.video, titleByPath.get(thread.video)) : ''}
-              threadTitle={threadTitle()} ontitle={setThreadTitle}
+              threadTitle={threadTitle()} ontitle={setThreadTitle} recap={recapPicture}
               places={thread.slides} left={thread.left} cut={thread.cut} order={thread.order} onorder={setThreadOrder}
               sheet={thread.sheetState} onsheet={fileSheetIfShown} over={threadOver} clip={thread.clip} link={thread.link}
               href={source.trim()} onclip={setThreadClip} onlink={setThreadLink} />

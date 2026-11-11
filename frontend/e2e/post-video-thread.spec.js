@@ -4,17 +4,18 @@ import { CASE_ID, installAppFixture } from './app.fixture.js';
 
 /**
  * A video thread in Post, in a browser: offered for a video of two proofs or more and
- * for no other, laid out Recap first with its contact sheet drawn by the browser and
- * filed in the case, saved, and opened again as it was. A geolocation of a proof of a
- * video prints the time the proof states.
+ * for no other, laid out Recap first with its recap map previewed and made, or its
+ * contact sheet, each drawn by the browser and filed in the case, saved, and opened again
+ * as it was. A geolocation of a proof of a video prints the time the proof states.
  *
- * Nothing leaves the machine: the sheet's filing and every read are answered here.
+ * Nothing leaves the machine: the tiles, the filing and every read are answered here.
  */
 
 const PHOTOS = ['container_yard', 'bridge_channel', 'wando_terminal'].map((name) =>
   readFileSync(new URL(`../guide/photos/${name}.jpg`, import.meta.url)));
 const VIDEO = 'media/convoy.mp4';
 const SHEET = 'media/Convoy on the coast road contact sheet.jpg';
+const MAP = 'media/Convoy on the coast road recap map.jpg';
 const SOURCE = 'https://x.com/example/status/1';
 
 const slideRow = (name, title, slide, extra = {}) => ({
@@ -47,9 +48,29 @@ const MEDIA = [
 // no title until the analyst gives one: the recap opens on its places
 const RECAP = '1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n\n@GeoConfirmed';
 
-/** The reads a thread makes beyond the shared fixture, and the sheet it files. */
+/** A tile of one colour, as the app's tile route would answer one. */
+const TILE = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGOQUOAGAACpADOjlmHJAAAAAElFTkSuQmCC', 'base64');
+
+/** The reads a thread makes beyond the shared fixture, and the sheet and the map it files. */
 async function threadRoutes(page) {
   const sheets = [];
+  const maps = [];
+  const tiles = [];
+  await page.route('**/api/tiles/**', (route) => {
+    tiles.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ contentType: 'image/png', body: TILE });
+  });
+  await page.route('**/api/satellite/providers', (route) => route.fulfill({ json: [
+    { id: 'esri-world-imagery', label: 'Esri World Imagery', attribution: 'Esri, Vantor, Earthstar Geographics, and the GIS User Community', max_zoom: 19 },
+    { id: 'osm', label: 'OpenStreetMap', attribution: '© OpenStreetMap contributors, openstreetmap.org/copyright', max_zoom: 19 },
+  ] }));
+  await page.route('**/api/settings/signature.png**', (route) => route.fulfill({ status: 404, body: '' }));
+  await page.route(`**/api/cases/${CASE_ID}/scenes/map`, async (route) => {
+    const body = route.request().postDataBuffer();
+    maps.push({ size: body?.length ?? 0, jpeg: body?.includes(Buffer.from([0xff, 0xd8, 0xff])) ?? false });
+    return route.fulfill({ json: { path: MAP } });
+  });
   await page.route(`**/files/${CASE_ID}/**`, (route) => {
     const path = decodeURIComponent(new URL(route.request().url()).pathname);
     const at = ['bridge', 'gate', 'lone'].findIndex((name) => path.includes(name));
@@ -65,7 +86,7 @@ async function threadRoutes(page) {
     sheets.push({ size: body?.length ?? 0, jpeg: body?.includes(Buffer.from([0xff, 0xd8, 0xff])) ?? false });
     return route.fulfill({ json: { path: SHEET } });
   });
-  return sheets;
+  return Object.assign(sheets, { maps, tiles });
 }
 
 const home = (page) => page.getByTestId('post-home');
@@ -88,6 +109,40 @@ test('a video of one proof is offered no thread, and its proof still waits for i
   fixture.expectNoUnexpectedRequests();
 });
 
+test('Recap first opens on a map previewed with no tile asked, shows it on a press, and files it once made', async ({ page }) => {
+  const fixture = await installAppFixture(page, { proofList: PROOFS, media: MEDIA, lookupEntities: lookups });
+  const sheets = await threadRoutes(page);
+  await page.goto('/#post');
+  await home(page).getByRole('button', { name: 'New post' }).click();
+  await page.getByRole('dialog', { name: 'New post' }).locator('.np-card', { hasText: 'Video thread' }).click();
+  await page.getByRole('dialog', { name: 'Video thread' }).locator('.vp-row', { hasText: 'Convoy on the coast road' }).click();
+
+  const recap = page.getByTestId('recap-picture');
+  await expect(recap.getByRole('radiogroup', { name: 'Recap picture' }).getByRole('radio', { name: 'Map' })).toHaveAttribute('aria-checked', 'true');
+  await expect(recap.locator('.rm-preview img')).toHaveAttribute('src', /^blob:/);
+  // drawn on a plain ground: not one tile asked before the press
+  expect(sheets.tiles).toEqual([]);
+  await recap.getByRole('button', { name: 'Show the map' }).click();
+  await expect.poll(() => sheets.tiles.length).toBeGreaterThan(0);
+  expect(sheets.tiles.every((path) => path.startsWith('/api/tiles/esri-world-imagery/'))).toBe(true);
+  // a ground picked asks that ground's tiles
+  await recap.getByRole('radiogroup', { name: 'Background' }).getByRole('radio', { name: 'Map' }).click();
+  await expect.poll(() => sheets.tiles.some((path) => path.startsWith('/api/tiles/osm/'))).toBe(true);
+  await recap.getByText('Line in video order').click();
+
+  await recap.getByRole('button', { name: 'Make the map' }).click();
+  await expect(recap.getByTestId('recap-made')).toHaveText(/On the recap/);
+  expect(sheets.maps).toHaveLength(1);
+  expect(sheets.maps[0].jpeg).toBe(true);
+  expect(sheets).toHaveLength(0);
+  await expect(posts(page).first().locator('.first-pics img')).toHaveAttribute('src', /recap%20map\.jpg/);
+  await expect.poll(() => fixture.draftWrites.at(-1)?.state?.map).toBe(MAP);
+  expect(fixture.draftWrites.at(-1).state).toMatchObject({
+    recap: 'map', firstMedia: [MAP], mapOptions: { background: 'map', line: true },
+  });
+  fixture.expectNoUnexpectedRequests();
+});
+
 test('New post → Video thread lays out Recap first with its sheet, saves it, and opens it again as it was', async ({ page }) => {
   const fixture = await installAppFixture(page, { proofList: PROOFS, media: MEDIA, lookupEntities: lookups });
   const sheets = await threadRoutes(page);
@@ -95,6 +150,7 @@ test('New post → Video thread lays out Recap first with its sheet, saves it, a
   await home(page).getByRole('button', { name: 'New post' }).click();
   await page.getByRole('dialog', { name: 'New post' }).locator('.np-card', { hasText: 'Video thread' }).click();
   await page.getByRole('dialog', { name: 'Video thread' }).locator('.vp-row', { hasText: 'Convoy on the coast road' }).click();
+  await page.getByTestId('recap-picture').getByRole('radio', { name: 'Proofs sheet' }).click();
 
   // a video thread's own column: the header may fold the kind's name to its icon
   await expect(page.getByTestId('video-thread')).toBeVisible();
@@ -124,7 +180,23 @@ test('New post → Video thread lays out Recap first with its sheet, saves it, a
   await expect(posts(page).locator('.tweet-head .label')).toHaveText(['Recap', 'Video', 'Road bridge', 'Port gate']);
   await expect(posts(page).first().locator('textarea')).toHaveValue(RECAP);
   await expect(page.getByTestId('video-thread').locator('.vt-order.on .vt-order-name')).toHaveText('Recap first');
+  await expect(page.getByTestId('recap-picture').getByRole('radio', { name: 'Proofs sheet' })).toHaveAttribute('aria-checked', 'true');
   expect(sheets).toHaveLength(1);
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('places too close together for a map leave the proofs sheet on the recap, and the column says so', async ({ page }) => {
+  const near = { ...SCENES[VIDEO], scenes: SCENES[VIDEO].scenes.map((row) => ({ ...row, points: [{ lat: 48.85, lon: 2.35, coords: '48.850000, 2.350000', label: '' }] })) };
+  const fixture = await installAppFixture(page, { proofList: PROOFS, media: MEDIA, lookupEntities: lookups });
+  const sheets = await threadRoutes(page);
+  await page.route((url) => url.pathname === `/api/cases/${CASE_ID}/scenes`, (route) => route.fulfill({ json: near }));
+  await page.goto('/#post');
+  await home(page).locator('.ph-video', { hasText: 'Convoy on the coast road' }).getByRole('button', { name: 'Video thread' }).click();
+  const recap = page.getByTestId('recap-picture');
+  await expect(recap.getByTestId('recap-fallback')).toHaveText('These places are too close together for a map, so the recap shows the proofs sheet.');
+  await expect(recap.getByRole('radiogroup', { name: 'Recap picture' }).getByRole('radio', { name: 'Map' })).toBeDisabled();
+  await expect(posts(page).first().locator('.first-pics img')).toHaveAttribute('src', /contact%20sheet\.jpg/);
+  expect(sheets.tiles).toEqual([]);
   fixture.expectNoUnexpectedRequests();
 });
 

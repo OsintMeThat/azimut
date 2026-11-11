@@ -99,6 +99,8 @@ const typeOf = (media) => (media.some((one) => one.kind === 'video') ? 'video' :
  * - `layout`: `videoLayout`'s; `common`: `{ mention, source }`, the source being the
  *   video's link (`videoLink`), and `#video` the thread's title, the analyst's.
  * - `sheet`: the contact sheet's case path once filed, else its post waits for it.
+ * - `recap`: what Recap first's recap carries, `map` or `sheet`; `map`: the recap map's
+ *   case path once made, else the recap waits for it.
  * - `clip`: a clip to post in place of the whole video; `link`: the video goes as its link.
  * - `facts`: each place's address by proof name, once read (`placeFields`).
  * - `extra`: the template's boilerplate posts, texts after the thread.
@@ -107,14 +109,16 @@ const typeOf = (media) => (media.some((one) => one.kind === 'video') ? 'video' :
  */
 export function videoPosts({
   video, slides = [], layout = videoLayout(), common = {}, sheet = null, clip = null, link = false, facts = {}, extra = [],
+  recap = 'sheet', map = null,
 }) {
   const named = { path: video?.path ?? null, title: video?.title ?? '' };
   const shared = { video: named.title, mention: common.mention ?? '', source: common.source ?? '' };
-  const pieces = videoThread({ video: named, slides, order: layout.order, clip, link });
+  const pieces = videoThread({ video: named, slides, order: layout.order, clip, link, recap });
   const byName = new Map(slides.map((slide) => [slide.name, slide]));
   const posts = pieces.map((piece) => {
     const media = piece.media.flatMap((one) => {
       if (one.kind === 'sheet') return sheet ? [{ kind: 'picture', path: sheet }] : [];
+      if (one.kind === 'map') return map ? [{ kind: 'picture', path: map }] : [];
       return one.path ? [one] : [];
     });
     const files = { mediaType: typeOf(media), mediaPaths: media.map((one) => one.path).slice(0, 4) };

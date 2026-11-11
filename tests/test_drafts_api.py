@@ -297,15 +297,17 @@ def test_a_first_posts_own_pictures_are_what_the_post_is_made_from(client):
 
 
 def test_a_video_thread_is_made_from_its_video_and_lists_as_one(client):
-    """A video thread draft names its video, its contact sheet and the clip it picked:
-    each links the post to the file as a posted picture does, so a delete of one warns,
-    and the home knows the video's series has its thread."""
+    """A video thread draft names its video, its contact sheet, its recap map and the clip
+    it picked: each links the post to the file as a posted picture does, so a delete of
+    one warns, and the home knows the video's series has its thread."""
     cid = client.post("/api/cases", json={"name": "Thread"}).json()["id"]
     video = mediafixture._upload(client, cid, "convoy.png", color=(10, 90, 10))
     sheet = mediafixture._upload(client, cid, "sheet.png", color=(90, 10, 10))
+    recap_map = mediafixture._upload(client, cid, "map.png", color=(90, 90, 10))
     clip = mediafixture._upload(client, cid, "clip.png", color=(10, 10, 90))
     state = {
-        "kind": "video", "video": video, "order": "recap", "sheet": sheet, "clip": clip,
+        "kind": "video", "video": video, "order": "recap", "sheet": sheet, "map": recap_map, "clip": clip,
+        "recap": "map", "mapOptions": {"background": "satellite", "line": True, "signature": False, "mark": False},
         "posts": [{"role": "video", "body": "Source: #source"}, {"role": "place", "body": "#description"}],
         "tweet1": "1. [0:00–0:07] Road bridge", "firstMedia": [sheet], "firstMediaType": "images",
         "mediaEnabled": False, "mediaType": "none", "first": "recap",
@@ -325,7 +327,7 @@ def test_a_video_thread_is_made_from_its_video_and_lists_as_one(client):
     post = next(e for e in graph_read.entities(cid) if e["type"] == "post")
     paths = {e["id"]: e["attrs"].get("path") for e in graph_read.entities(cid)}
     made_from = {paths[link["to"]] for link in graph_read.links(cid, "derived-from") if link["from"] == post["id"]}
-    assert made_from == {video, sheet, clip}
+    assert made_from == {video, sheet, recap_map, clip}
 
     unsafe = client.post(
         f"/api/cases/{cid}/drafts", json={"title": "Out", "state": {"kind": "video", "video": "../outside.mp4"}},
