@@ -5515,18 +5515,30 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   corner; the signature needs a logo or a handle, and says to set them in Settings →
   Publishing.
   **Local first**: the preview is drawn on a plain ground, no tile asked, until the
-  analyst presses **Show the map**, picks Map or picks a ground. **Make the map** draws
-  it whole and files it in Media as made from the video (`POST
-  /cases/{id}/scenes/map`, *convoy recap map.jpg*; the same picture is one file), and the
-  recap carries it (*On the recap*). A choice changed after takes it off the recap until
-  it is made again. A thread saved before the map opens on its sheet. **When the video is over the
+  analyst presses **Show the map**, picks Map or picks a ground. The preview is what goes
+  out, and there is no button to make the map: it is drawn whole and filed in Media as
+  made from the video (`POST /cases/{id}/scenes/map`, *convoy recap map.jpg*) when the
+  thread needs its picture and no map made matches its choices, on **Publish** (before
+  the hand-off to the extension), the recap's **Copy**, **Copy all** and the recap's
+  **Download**. Until then the recap shows *Recap map* with Download, then *Making the
+  map…*, and the action goes on with the map on the recap. The words of a Copy are
+  copied first, while the browser still lets the page write the clipboard; Publish
+  without the extension opens the platform once the map is made, or asks for one more
+  press when the browser no longer lets the page open a tab. A map that cannot be drawn
+  whole (a tile that did not load leaves a hole) stops the action with one sentence
+  (*The recap map could not be made, so X was not opened.*) and **Copy report**:
+  nothing is opened or handed over without it. A choice changed files nothing: the
+  recap waits for a map made for it, and gets the one made before back when the choice
+  is undone; the same choices made again are one file. A draft keeps the `map` only
+  while it is the one its choices draw. A thread saved before the map opens on its
+  sheet. **When the video is over the
   platform's limit** (`lib/videoLimits.js`: *This video runs 24:10, and X takes 20 minutes
   from a free account.*), the column offers the clip a place cut for its post, one per
   thread on the video's post, else its link (with **Cut for the post** named as the way
   to make one); **Post the whole video** goes back. Nothing is cut or re-encoded there.
   The draft keeps `kind: 'video'`, `video`, `title`, `order`, the texts beside `body`
   (`posts`), `first`, and the `sheet`, `clip` or `link` it uses, `recap: 'map'` with its
-  `mapOptions` (`background`, `line`, `signature`, `mark`) and the `map` once made,
+  `mapOptions` (`background`, `line`, `signature`, `mark`) and the `map` made for them,
   each post its `key`
   (`video`, `place:<proof>`) and `edited`. It saves itself, opens, is marked posted,
   deleted with Undo and handed to the extension, its files on each post, like any

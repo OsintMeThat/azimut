@@ -2,10 +2,10 @@
   /**
    * Recap first's picture, in the thread's column: the places on a map (`lib/recapMap.js`)
    * or the proofs sheet. The map takes a few choices, each redrawn at once on a small
-   * preview: its ground (Satellite or Map), a dashed line joining the places in the
-   * video's order, and the signature and the Azimut mark, as the analyst's default proof
-   * style has them. **Make the map** draws it whole and files it in Media, and the recap
-   * carries it.
+   * preview of what goes out: its ground (Satellite or Map), a dashed line joining the
+   * places in the video's order, and the signature and the Azimut mark, as the analyst's
+   * default proof style has them. The composer draws it whole and files it when the
+   * thread needs its picture (`post/threadSheet.js` `makeRecapMap`), never on a choice.
    *
    * Local first: the preview is drawn on a plain ground until the analyst asks for the
    * map (`live`): Show the map, a pick of Map or of a ground. Places too close together
@@ -19,7 +19,7 @@
   import { myLogoUrl } from '../../lib/myLogo.js';
   import { defaultProofTemplate } from '../../lib/proofTemplates.js';
   import {
-    BACKGROUNDS, BACKGROUND_NAMES, buildRecapMap, loadAppTile, mapOptions, recapFit, recapMapPreview, recapPlaces,
+    BACKGROUNDS, BACKGROUND_NAMES, loadAppTile, mapOptions, recapFit, recapMapPreview, recapPlaces,
   } from '../../lib/recapMap.js';
   import { prefs, templatesState } from '../../lib/state.svelte.js';
 
@@ -32,19 +32,14 @@
     options = {},
     /** Whether the map's tiles may be asked for: the analyst pressed for the map. */
     live = false,
-    /** The map filed for the recap, a case path, or null while it is to make. */
-    made = null,
     /** `(kind)`: the recap carries the map or the sheet. */
     onrecap,
     /** `(patch)`: a choice changed. */
     onoptions,
     /** Ask for the map's tiles. */
     onlive,
-    /** `(blob)`: file the map made, answering its path. */
-    onmake,
-    /** Draws for the tests, `lib/recapMap.js`'s by default. */
+    /** The preview's drawing, `lib/recapMap.js`'s by default. */
     preview = recapMapPreview,
-    build = buildRecapMap,
   } = $props();
 
   const places = $derived(recapPlaces(slides ?? []));
@@ -83,7 +78,7 @@
     drawing = true;
     (async () => {
       try {
-        await document.fonts?.load?.('600 16px Inter');
+        await Promise.all([document.fonts?.load?.('600 16px Inter'), document.fonts?.load?.('700 16px Inter')]);
         const next = await preview(ask.places, ask.fit, ask.wanted, {
           providers: ask.providers, loadTile: ask.live ? loadAppTile : null, style: ask.style, logo: ask.logo, handle: ask.handle,
         });
@@ -98,19 +93,6 @@
     })();
   });
   $effect(() => () => shown?.revoke());
-
-  let making = $state('');
-  async function make() {
-    making = 'making';
-    try {
-      await document.fonts?.load?.('600 16px Inter');
-      const { blob } = await build(places, fit, wanted, { providers, loadTile: loadAppTile, style, logo, handle });
-      await onmake?.(blob);
-      making = '';
-    } catch {
-      making = 'failed';
-    }
-  }
 
   const choose = (patch) => onoptions?.(patch);
 </script>
@@ -169,18 +151,6 @@
         Azimut mark
       </label>
     </div>
-
-    <div class="rm-make">
-      {#if made}
-        <span class="rm-made" data-testid="recap-made"><Icon name="check" size={13} /> On the recap</span>
-      {:else}
-        <button type="button" class="btn btn-sm btn-primary" disabled={making === 'making'} onclick={make}
-          title="Draws the map whole and files it in Media, made from the video">
-          {making === 'making' ? 'Making the map…' : 'Make the map'}
-        </button>
-        {#if making === 'failed'}<span class="rm-note warn" role="status">The map could not be made.</span>{/if}
-      {/if}
-    </div>
   {/if}
 </div>
 
@@ -190,7 +160,6 @@
   .rm-row .label { margin: 0; }
   .rm-seg { display: flex; gap: 4px; }
   .rm-note { margin: 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; }
-  .rm-note.warn { color: var(--warn); }
   .rm-preview {
     position: relative;
     display: grid;
@@ -216,6 +185,4 @@
   .rm-checks { display: flex; flex-wrap: wrap; gap: 4px 16px; }
   .rm-check { display: inline-flex; align-items: center; gap: 7px; color: var(--text-2); font-size: var(--fs-sm); cursor: pointer; }
   .rm-check:has(input:disabled) { color: var(--text-3); cursor: default; }
-  .rm-make { display: flex; align-items: center; gap: 10px; }
-  .rm-made { display: inline-flex; align-items: center; gap: 5px; color: var(--ok); font-size: var(--fs-xs); font-weight: 600; }
 </style>
