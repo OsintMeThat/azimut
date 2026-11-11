@@ -2396,7 +2396,7 @@ work under the comparison, stamped with the reading on screen and never replaced
 later save; asked on a comparison never saved, it asks for a name first. **To Post**,
 beside Export copy, keeps the export picked in the case the same way, one file each
 (the PNG, the Blink or Slide GIF, the evolution's GIF or its sheet), and opens Post on
-a free post carrying it, told the comparison's name, each picture's date (an
+a Compare post carrying it, told the comparison's name, each picture's date (an
 evolution's first and last day) and the credits under the image. A comparison never
 saved is saved first, named after its place and days as for a note, and the same image
 kept before is cited again. An optional
@@ -5301,10 +5301,13 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   the draft). **The header's ⋯**, beside the name once the post is saved, holds
   **Delete…**: the draft goes to the Trash with the delete preview and **Undo** in the
   toast, and the composer goes back home.
-- **New post** offers four starts. **Geolocation** is the composer as it always was:
-  the same fields, the same first post, the same Publish. **Map plate** and **Free post**
-  carry their own pictures, or a video, on the first post (`firstMedia`) and show only
-  the fields their layout uses. **Video thread** says *Coming next* until it is built.
+- **New post** offers five starts, Geolocation across the top. **Geolocation** is the
+  composer as it always was: the same fields, the same first post, the same Publish.
+  **Map plate**, **Compare** and **Free post** carry their own pictures, or a video, on
+  the first post (`firstMedia`) and show only the fields their layout uses. **Compare**
+  is a before and after: its layout says the description, the dates, the imagery
+  credits and the mention, with no media post under it. **Video thread** says *Coming
+  next* until it is built.
   A draft or a template says its `kind` only when it is not a geolocation, so every
   draft and template from before reads as one. Another tool starts a post through
   `tools/post/start.js` (`startPost(kind, media, about)`): what Post holds is saved
@@ -5312,8 +5315,9 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   after a geolocation's proof. `about` says what the media show: the name of what they
   came from, its own sentence when it has one, the days they show and the credit line
   on their face (`startFields` gives the post's name, `#description`, `#date` and
-  `#credits` from it). Map plate's export starts a Map plate post this way, and
-  Compare's export and Detect's pins a free post.
+  `#credits` from it). Map plate's export starts a Map plate post this way, Compare's
+  export a Compare post and Detect's pins a free post. A draft saved as a free post
+  from Compare before the Compare kind stays a free post.
 - **The extension window** says once, on arriving in Post without the capture
   extension, why it is worth having here: it fills the whole thread in X or Bluesky,
   pictures included, and can reply under the source post or capture it into the case.
@@ -5415,7 +5419,8 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
 
 Settings → Templates lists the post layouts, made there and nowhere else: the
 composer offers no "save as template". Each is for one kind of post, listed under it:
-Geolocation (every template from before kinds), Video thread, Map plate or Free post. A
+Geolocation (every template from before kinds), Video thread, Map plate, Compare or Free
+post. A
 layout is a body of tokens (`#place`, `#pluscode`, `#coordinates`, `#description`,
 `#mention`, `#source`, `#date`, `#video`, `#timecode`, `#scenes`, `#credits`) and
 plain text, the editor offering the tokens of its kind. A token with no value drops
@@ -5431,8 +5436,8 @@ line drops. A token ends where its word does, so a `#dates` or `#placement` hash
 stays text.
 
 - **New post template** is a menu of kinds, each with its starts: Geolocation's
-  Classic, Coordinates only, Short and With date, a Map plate's Plate, a Free post's
-  Text and source. Video thread's come with the video thread. The editor then offers
+  Classic, Coordinates only, Short and With date, a Map plate's Plate, Compare's Before
+  and after and Dates first, a Free post's Text and source. Video thread's come with the video thread. The editor then offers
   that kind's **Start from**, each replacing the body and nothing else. A copy does not
   offer it, and keeps its kind. The same starts are in the composer's **Thread style**,
   under **Built-in** below the analyst's own templates of the open kind (alone when there

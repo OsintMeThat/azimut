@@ -752,15 +752,19 @@ describe('the geolocation road, pinned', () => {
 });
 
 describe('POST_KINDS — what a post is made from', () => {
-  it('offers four starts, Geolocation first, and opens the three that are built', () => {
-    expect(POST_KINDS.map((k) => k.id)).toEqual(['geolocation', 'video', 'plate', 'free']);
-    expect(STARTABLE_POST_KINDS).toEqual(['geolocation', 'plate', 'free']);
+  it('offers five starts, Geolocation first, and opens the four that are built', () => {
+    expect(POST_KINDS.map((k) => k.id)).toEqual(['geolocation', 'video', 'plate', 'compare', 'free']);
+    expect(STARTABLE_POST_KINDS).toEqual(['geolocation', 'plate', 'compare', 'free']);
+    expect(postKind('compare')).toMatchObject({ label: 'Compare', icon: 'compare' });
     for (const k of POST_KINDS) expect(k.label && k.icon && k.text).toBeTruthy();
   });
 
   it('reads anything unknown or absent as a geolocation, and writes a geolocation as nothing', () => {
     for (const odd of [undefined, null, '', 'telegram', 3]) expect(normalizePostKind(odd)).toBe('geolocation');
     expect(normalizePostKind('free')).toBe('free');
+    expect(normalizePostKind('compare')).toBe('compare');
+    expect(normalizePostKind('Compare')).toBe('geolocation');
+    expect(statedPostKind('compare')).toBe('compare');
     expect(statedPostKind('geolocation')).toBeUndefined();
     expect(statedPostKind('nonsense')).toBeUndefined();
     expect(statedPostKind('plate')).toBe('plate');
@@ -769,6 +773,7 @@ describe('POST_KINDS — what a post is made from', () => {
 
   it('offers each kind the tokens it can fill', () => {
     expect(tokensForKind('free').map((t) => t.tag)).not.toContain('#coordinates');
+    expect(tokensForKind('compare').map((t) => t.tag)).toEqual(['#description', '#mention', '#source', '#date', '#credits']);
     expect(tokensForKind('video').map((t) => t.tag)).toEqual(expect.arrayContaining(['#timecode', '#scenes', '#video']));
     expect(tokensForKind(undefined).map((t) => t.tag)).toContain('#coordinates');
     expect(tokensForKind('geolocation').map((t) => t.tag)).not.toContain('#timecode');
@@ -814,12 +819,14 @@ describe('post templates per kind', () => {
     expect(postTemplateKind({ body: '#place' })).toBe('geolocation');
   });
 
-  it('starts Geolocation on the four layouts it had, and the plate and the free post on one each', () => {
+  it('starts Geolocation on the four layouts it had, the plate and the free post on one each, and Compare on two', () => {
     expect(postStarters('geolocation')).toBe(POST_TEMPLATE_STARTERS);
     expect(postStarters('plate').map((s) => s.id)).toEqual(['plate']);
     expect(postStarters('free').map((s) => s.id)).toEqual(['free']);
+    expect(postStarters('compare').map((s) => s.label)).toEqual(['Before and after', 'Dates first']);
+    expect(postStarters('compare')[0].body).toBe('#description\n\n#date\n\n#credits\n\n#mention');
     expect(postStarters('video')).toEqual([]);
-    for (const starter of [...postStarters('plate'), ...postStarters('free')]) {
+    for (const starter of [...postStarters('plate'), ...postStarters('free'), ...postStarters('compare')]) {
       expect(misspelledTokens(starter.body)).toEqual([]);
       expect(starter.mediaEnabled).toBe(false);
     }
@@ -829,6 +836,7 @@ describe('post templates per kind', () => {
     { id: 'geo', name: 'Geo', data: { body: '#place' } },
     { id: 'free', name: 'Free', data: { body: '#description', kind: 'free' } },
     { id: 'plate', name: 'Plate', data: { body: '#description', kind: 'plate' } },
+    { id: 'cmp', name: 'Before after', data: { body: '#description\n\n#date', kind: 'compare' } },
   ];
 
   it('finds each kind its default, Geolocation through the bookmark it always had', () => {
@@ -839,11 +847,18 @@ describe('post templates per kind', () => {
     expect(defaultPostTemplate(templates, 'plate', prefs)).toBeNull();
     expect(defaultPostTemplate(templates, 'geolocation', { geolocation: 'gone' })).toBeNull();
     expect(defaultPostTemplate(templates, 'video', prefs)).toBeNull();
+    // Compare keeps a default of its own, and never takes the free post's
+    expect(defaultPostTemplate(templates, 'compare', { byKind: { compare: 'cmp' } })?.id).toBe('cmp');
+    expect(defaultPostTemplate(templates, 'compare', { byKind: { compare: 'free' } })).toBeNull();
+    expect(defaultPostTemplate(templates, 'compare', prefs)).toBeNull();
   });
 
   it('lists a post only the templates of its kind', () => {
     expect(templatesOfKind(templates, 'geolocation').map((t) => t.id)).toEqual(['geo']);
     expect(templatesOfKind(templates, 'free').map((t) => t.id)).toEqual(['free']);
+    expect(templatesOfKind(templates, 'compare').map((t) => t.id)).toEqual(['cmp']);
+    // a template of a kind this build does not know reads as a geolocation one, as before
+    expect(templatesOfKind([{ id: 'odd', data: { body: '#place', kind: 'telegram' } }], 'geolocation').map((t) => t.id)).toEqual(['odd']);
   });
 });
 
@@ -861,6 +876,8 @@ describe('startMediaPlan — where a started post puts its media', () => {
     expect(plan.first).toEqual({ mediaType: 'images', mediaPaths: ['media/a.png', 'media/b.png'] });
     expect(plan.media).toEqual({ mediaType: 'video', mediaPaths: ['media/clip.mp4'] });
     expect(plan.more).toEqual([]);
+    expect(startMediaPlan('compare', ['media/Comparison blink.gif'], () => 'image').first)
+      .toEqual({ mediaType: 'images', mediaPaths: ['media/Comparison blink.gif'] });
   });
 
   it('reads a file the media list does not know by its extension, and drops what is not a path', () => {

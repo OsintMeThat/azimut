@@ -414,15 +414,15 @@ describe('New post', () => {
     lists.drafts = [{ name: 'Old', title: 'Old', target: 'x', kind: 'geolocation', posts: 1 }];
   });
 
-  it('offers four starts, Geolocation first, and the video thread comes next', async () => {
+  it('offers five starts, Geolocation first, and the video thread comes next', async () => {
     await mountPost();
     button(home(), 'New post').click();
     await settle();
     const gallery = dialog('New post');
     const cards = [...gallery.querySelectorAll('.np-card')];
     expect(cards.map((card) => card.querySelector('.np-name').textContent.replace(/\s+/g, ' ').trim()))
-      .toEqual(['Geolocation Usual', 'Video thread Coming next', 'Map plate', 'Free post']);
-    expect(cards.map((card) => card.disabled)).toEqual([false, true, false, false]);
+      .toEqual(['Geolocation Usual', 'Video thread Coming next', 'Map plate', 'Compare', 'Free post']);
+    expect(cards.map((card) => card.disabled)).toEqual([false, true, false, false, false]);
   });
 
   it('opens Geolocation on the composer it always was', async () => {
@@ -444,7 +444,7 @@ describe('New post', () => {
     await mountPost();
     button(home(), 'New post').click();
     await settle();
-    [...dialog('New post').querySelectorAll('.np-card')][3].click();
+    [...dialog('New post').querySelectorAll('.np-card')][4].click();
     await settle();
     expect(target.querySelector('.kind-chip').textContent.trim()).toBe('Free post');
     expect(target.querySelector('#pc-coords')).toBeNull();
@@ -453,6 +453,52 @@ describe('New post', () => {
     expect(target.querySelector('.tweet-head .label').textContent).toBe('First post');
     expect(button(target, 'Attach a proof')).toBeUndefined();
     expect(target.querySelector('.first-media')).not.toBeNull();
+  });
+});
+
+describe('a Compare post', () => {
+  beforeEach(() => {
+    lists.drafts = [{ name: 'Old', title: 'Old', target: 'x', kind: 'geolocation', posts: 1 }];
+  });
+
+  it('opens from the gallery on its before and after layout, its pictures chosen as a free post\'s are', async () => {
+    await mountPost();
+    button(home(), 'New post').click();
+    await settle();
+    const card = [...dialog('New post').querySelectorAll('.np-card')].find((one) => one.textContent.includes('Compare'));
+    expect(card.querySelector('.np-icon svg')).not.toBeNull();
+    card.click();
+    await settle();
+    expect(target.querySelector('.kind-chip').textContent.trim()).toBe('Compare');
+    expect(target.querySelector('#pc-coords')).toBeNull();
+    expect(target.querySelector('#pc-desc')).not.toBeNull();
+    expect(target.querySelector('.first-media')).not.toBeNull();
+    expect(button(target, 'Attach a proof')).toBeUndefined();
+    // no media post under it: its picture rides on the first post
+    expect(target.querySelectorAll('.tweet-block')).toHaveLength(1);
+  });
+
+  it('starts on its own default template, never on the free post\'s', async () => {
+    templatesState.post = [
+      { id: 'po_free', name: 'Free house', data: { body: '#description\n\nBy the desk', kind: 'free', mediaEnabled: false } },
+      { id: 'po_cmp', name: 'Before after', data: { body: '#date\n#description\n\nVia Compare', kind: 'compare', mediaEnabled: false } },
+    ];
+    prefs.postKindTemplates = { free: 'po_free', compare: 'po_cmp' };
+    lists.media = [{ path: 'media/Comparison.png', kind: 'image' }];
+    await mountPost();
+    startPost('compare', ['media/Comparison.png'], { title: 'Depot', dates: ['2025-03-14', '2025-03-02'] });
+    await settle();
+    expect(firstPost().value).toBe('2025-03-02 to 2025-03-14\n\nVia Compare');
+    await saved();
+    expect(draftWrites().at(-1)[1].state).toMatchObject({ kind: 'compare', firstMedia: ['media/Comparison.png'] });
+  });
+
+  it('opens a draft saved as a free post from Compare as the free post it was', async () => {
+    lists.saved = { Depot: { title: 'Depot', state: { kind: 'free', description: 'Depot', firstMedia: ['media/Comparison.png'], firstMediaType: 'images' } } };
+    await mountPost();
+    uiState.openDraft = 'Depot';
+    await settle();
+    expect(target.querySelector('.kind-chip').textContent.trim()).toBe('Free post');
   });
 });
 

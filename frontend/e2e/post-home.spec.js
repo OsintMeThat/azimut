@@ -430,7 +430,7 @@ test.describe('Mark as posted', () => {
 });
 
 test.describe('New post', () => {
-  test('offers four starts, and each built one opens its own post', async ({ page }) => {
+  test('offers five starts, and each built one opens its own post', async ({ page }) => {
     const fixture = await installAppFixture(page, { drafts: DRAFTS, proofList: PROOFS, lookupEntities: lookups });
     await postRoutes(page);
     await page.goto('/#post');
@@ -438,10 +438,12 @@ test.describe('New post', () => {
 
     const gallery = page.getByRole('dialog', { name: 'New post' });
     const cards = gallery.locator('.np-card');
-    await expect(cards).toHaveCount(4);
+    await expect(cards).toHaveCount(5);
     await expect(cards.nth(0)).toContainText('Geolocation');
     await expect(cards.nth(1)).toContainText('Coming next');
     await expect(cards.nth(1)).toBeDisabled();
+    await expect(cards.nth(3)).toContainText('Compare');
+    await expect(cards.nth(3)).toBeEnabled();
 
     await cards.nth(0).click();
     await expect(gallery).toHaveCount(0);
@@ -606,7 +608,9 @@ test.describe('post templates per kind', () => {
 
     await section.getByRole('button', { name: 'New post template' }).click();
     const menu = page.locator('.float-menu[aria-label="New post template"]');
-    await expect(menu.locator('.fm-item')).toHaveText(['Classic', 'Coordinates only', 'Short', 'With date', 'Coming next', 'Plate', 'Text and source']);
+    await expect(menu.locator('.fm-item')).toHaveText([
+      'Classic', 'Coordinates only', 'Short', 'With date', 'Coming next', 'Plate', 'Before and after', 'Dates first', 'Text and source',
+    ]);
     await menu.getByRole('button', { name: 'Plate' }).click();
     const editor = page.locator('.tpl-modal');
     await expect(editor.locator('.pe-kind')).toHaveText('Map plate');

@@ -149,7 +149,7 @@ class PrefsIn(BaseModel):
     post_template: str | None = Field(default=None, pattern=r"^$|^[A-Za-z0-9_-]{1,64}$")
     # the template each other kind of post starts with, by kind; a kind left out has none
     post_kind_templates: dict[
-        Literal["video", "plate", "free"],
+        Literal["video", "plate", "compare", "free"],
         Annotated[str, Field(pattern=r"^$|^[A-Za-z0-9_-]{1,64}$")],
     ] | None = None
     # id of the proof template New proof starts with; "" is none

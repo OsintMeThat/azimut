@@ -20,11 +20,12 @@ export const POST_KINDS = Object.freeze([
   { id: 'geolocation', label: 'Geolocation', many: 'geolocations', icon: 'crosshair', text: 'A proof, its point and its source, as Post has always written it.' },
   { id: 'video', label: 'Video thread', many: 'video threads', icon: 'video', text: 'The proofs of one video, in the order you pick.' },
   { id: 'plate', label: 'Map plate', many: 'plate posts', icon: 'plate', text: 'A plate’s picture or video, its legend and its credits.' },
+  { id: 'compare', label: 'Compare', many: 'compare posts', icon: 'compare', text: 'A before and after from Compare, with its dates and its credits.' },
   { id: 'free', label: 'Free post', many: 'free posts', icon: 'edit', text: 'Your own words and up to four pictures or a video per post.' },
 ].map((kind) => Object.freeze(kind)));
 
 /** The kinds New post can start today. Video thread arrives with its own screen. */
-export const STARTABLE_POST_KINDS = Object.freeze(['geolocation', 'plate', 'free']);
+export const STARTABLE_POST_KINDS = Object.freeze(['geolocation', 'plate', 'compare', 'free']);
 
 /** A known kind, or Geolocation for anything else: an old draft, a hand-edited one. */
 export function normalizePostKind(kind) {
@@ -52,14 +53,14 @@ export const TWEET_TOKENS = [
   { tag: '#place', label: 'Place', sample: 'Bakhmut, Donetsk, Ukraine', kinds: ['geolocation', 'video'] },
   { tag: '#pluscode', label: 'Plus code', sample: '8FPGXXXX+XX', kinds: ['geolocation', 'video'] },
   { tag: '#coordinates', label: 'Coordinates', sample: '48.850000, 2.350000', kinds: ['geolocation', 'video'] },
-  { tag: '#description', label: 'Description', sample: 'Rooftop match against the reference imagery', kinds: ['geolocation', 'video', 'plate', 'free'] },
-  { tag: '#mention', label: 'Mention', sample: '@GeoConfirmed', kinds: ['geolocation', 'video', 'plate', 'free'] },
-  { tag: '#source', label: 'Source', sample: 'https://x.com/example/status/1', kinds: ['geolocation', 'video', 'free'] },
-  { tag: '#date', label: 'Date', sample: '2025-10-24 14:30 UTC+3', kinds: ['geolocation', 'video', 'plate', 'free'] },
+  { tag: '#description', label: 'Description', sample: 'Rooftop match against the reference imagery', kinds: ['geolocation', 'video', 'plate', 'compare', 'free'] },
+  { tag: '#mention', label: 'Mention', sample: '@GeoConfirmed', kinds: ['geolocation', 'video', 'plate', 'compare', 'free'] },
+  { tag: '#source', label: 'Source', sample: 'https://x.com/example/status/1', kinds: ['geolocation', 'video', 'compare', 'free'] },
+  { tag: '#date', label: 'Date', sample: '2025-10-24 14:30 UTC+3', kinds: ['geolocation', 'video', 'plate', 'compare', 'free'] },
   { tag: '#video', label: 'Video title', sample: 'Convoy on the coast road', kinds: ['geolocation', 'video'] },
   { tag: '#timecode', label: 'Timecode', sample: '0:00–0:07 · 1:05–1:12', kinds: ['video'] },
   { tag: '#scenes', label: 'Scenes', sample: '1. Port gate 0:00\n2. Coast road 1:05', kinds: ['video'] },
-  { tag: '#credits', label: 'Credits', sample: 'Imagery: Copernicus Sentinel-2', kinds: ['geolocation', 'video', 'plate', 'free'] },
+  { tag: '#credits', label: 'Credits', sample: 'Imagery: Copernicus Sentinel-2', kinds: ['geolocation', 'video', 'plate', 'compare', 'free'] },
 ];
 
 /** The tokens a kind's template editor offers. */
@@ -721,14 +722,19 @@ export const POST_TEMPLATE_STARTERS = Object.freeze([
 
 /**
  * The starts New template offers, per kind. Geolocation keeps the four above. A plate
- * post and a free post get one each, with no media post scaffolded under them: their
- * pictures ride on the first post. Video thread starts come with the video thread.
+ * post and a free post get one each and a compare post two, with no media post
+ * scaffolded under them: their pictures ride on the first post. Video thread starts
+ * come with the video thread.
  */
 export const POST_KIND_STARTERS = Object.freeze({
   geolocation: POST_TEMPLATE_STARTERS,
   video: Object.freeze([]),
   plate: Object.freeze([
     Object.freeze({ id: 'plate', label: 'Plate', body: '#description\n\n#credits\n\n#mention', mediaEnabled: false }),
+  ]),
+  compare: Object.freeze([
+    Object.freeze({ id: 'compare', label: 'Before and after', body: '#description\n\n#date\n\n#credits\n\n#mention', mediaEnabled: false }),
+    Object.freeze({ id: 'compare-dates', label: 'Dates first', body: '#date\n\n#description\n\n#credits\n\n#mention', mediaEnabled: false }),
   ]),
   free: Object.freeze([
     Object.freeze({ id: 'free', label: 'Text and source', body: '#description\n\n#mention\n\nSource: #source', mediaEnabled: false }),

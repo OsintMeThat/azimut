@@ -36,7 +36,7 @@ MAX_DRAFT_ATTACHMENTS = 1 + MAX_MEDIA_PER_POST * (2 + MAX_EXTRA_POSTS)
 MAX_ARTIFACT_PATH_LENGTH = 512
 #: What a post is made from (frontend `lib/post.js` POST_KINDS). A draft that says
 #: nothing is a Geolocation one, as every draft was before kinds.
-POST_KINDS = ("geolocation", "video", "plate", "free")
+POST_KINDS = ("geolocation", "video", "plate", "compare", "free")
 
 #: Whether a post went out, as its draft's ``state.publish`` says (frontend
 #: `lib/post.js` ``postState``): once the analyst marked it posted, where and when, and

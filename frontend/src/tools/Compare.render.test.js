@@ -1014,7 +1014,7 @@ describe('Compare', () => {
     // never written out
     expect(post.mock.calls.some(([path]) => path.endsWith('/compare/sequence'))).toBe(false);
     expect(uiState.tool).toBe('post');
-    expect(uiState.postStart).toEqual({ kind: 'free', media: ['media/Comparison evolution.gif'], about: {
+    expect(uiState.postStart).toEqual({ kind: 'compare', media: ['media/Comparison evolution.gif'], about: {
       title: 'Comparison', description: '', dates: ['2025-06-01', '2026-09-01'], credits: 'Esri, World Imagery Wayback' } });
     expect(document.querySelector('[role="dialog"][aria-label="Export a copy"]')).toBeNull();
     uiState.postStart = null;
@@ -1032,7 +1032,7 @@ describe('Compare', () => {
     expect([form.get('format'), form.get('imagery_a'), form.get('imagery_b'), form.get('reuse')])
       .toEqual(['png', '2014-02-20', '2026-09-01', 'true']);
     expect(post.mock.calls.some(([path]) => path === '/api/cases/case-a/plates')).toBe(false);
-    expect(uiState.postStart).toMatchObject({ kind: 'free', media: ['media/Comparison evolution.png'],
+    expect(uiState.postStart).toMatchObject({ kind: 'compare', media: ['media/Comparison evolution.png'],
       about: { dates: ['2014-02-20', '2026-09-01'] } });
     uiState.postStart = null;
   });

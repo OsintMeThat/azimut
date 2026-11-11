@@ -2084,7 +2084,7 @@
         </button>
       {/if}
       {#if homeShown}
-        <button class="btn btn-sm" data-guide="post.new" onclick={openGallery} title="Start a post: a geolocation, a map plate or your own words">
+        <button class="btn btn-sm" data-guide="post.new" onclick={openGallery} title="Start a post: a geolocation, a map plate, a comparison or your own words">
           <Icon name="plus" size={14} /> New post
         </button>
       {:else}
