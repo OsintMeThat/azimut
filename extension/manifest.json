@@ -19,7 +19,7 @@
   ],
   "background": {
     "service_worker": "background.js",
-    "scripts": ["notesmsg.js", "mapsites.js", "background.js"]
+    "scripts": ["notesmsg.js", "mapsites.js", "postlink.js", "background.js"]
   },
   "action": {
     "default_title": "Azimut: the tools on a map, the case note anywhere else",

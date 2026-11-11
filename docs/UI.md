@@ -5322,6 +5322,18 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   (`intent/post` with `in_reply_to`) with the first post typed, the proof on the
   clipboard to paste (*Picture copied: paste it with Ctrl+V.*); Bluesky has no such
   page, so it says so and copies the post and opens the source to paste it under.
+- **After the extension's hand-off.** X's reply box takes one post, so a reply of
+  several goes out one press per post: the extension fills post 1 (*Post 1 of 3 is
+  ready. Press Reply, then Azimut opens the next under it.*), and each Reply the
+  analyst presses opens that reply's page with the next post filled under it (*Post
+  2 of 3 is ready under your reply.*). A reply box that offers a next post takes the
+  whole thread. Once a post is sent, the extension reads its link off the site's toast
+  (the account signed in, made in the last five minutes) and hands it to the app as
+  `post-link-caught`, once per hand-off: a thread's first post, a reply's first reply.
+  The app only offers it. A hand-off that stops (no reply in 10 minutes, the tab closed
+  or gone elsewhere, a step that failed) says why in a notification and sends the app
+  a `post-handoff-report`: the step and what the extension's selectors found there,
+  never a word of the page.
 - **Link to your post** is the first field of every post, whatever its kind and a
   draft from before kinds included (*Paste it once it's posted*). A post is a **Draft**,
   **Opened in X** (or Bluesky) once Publish, Reply or the extension's hand-off opened

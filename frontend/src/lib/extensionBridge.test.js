@@ -357,3 +357,52 @@ describe('a press on the toolbar button, told to the app', () => {
     expect(told({ type: 'app-pairing' })).toEqual([{ channel: CHANNEL, type: 'open-pairing' }]);
   });
 });
+
+describe('what a hand-off to X or Bluesky tells the app', () => {
+  const CAUGHT = {
+    type: 'post-link-caught',
+    caseId: 'case-1',
+    draft: 'depot-strike',
+    url: 'https://x.com/desk/status/2120000000000000000',
+    site: 'x',
+    at: '2026-11-11T09:30:00.000Z',
+  };
+  const REPORT = {
+    type: 'post-handoff-report',
+    caseId: 'case-1',
+    draft: null,
+    error: 'Could not add the next post to the thread.',
+    report: 'Azimut Capture 0.3.4 on x.com\nStep: add-2',
+  };
+
+  /** What the bridge posts when the worker tells it `msg`, and what it answers. */
+  function told(msg) {
+    const chrome = makeChrome();
+    inject(chrome);
+    const listeners = chrome.runtime.onMessage.addListener.mock.calls.map(([cb]) => cb);
+    const posted = [];
+    const answers = [];
+    const spy = vi.spyOn(window, 'postMessage').mockImplementation((d) => posted.push(d));
+    for (const cb of listeners) cb(msg, {}, (answer) => answers.push(answer));
+    spy.mockRestore();
+    return { posted, answers };
+  }
+
+  it('posts the link caught and the report to the page, named fields only', () => {
+    for (const msg of [CAUGHT, REPORT]) {
+      const { posted, answers } = told({ ...msg, token: 'tok-123', extra: 'dropped' });
+      expect(posted).toEqual([{ channel: CHANNEL, ...msg }]);
+      expect(answers).toEqual([{ ok: true }]);
+    }
+  });
+
+  it('takes them from the worker only: a page posting them reaches nothing', async () => {
+    const sendMessage = vi.fn(async () => ({ ok: true }));
+    inject(makeChrome(sendMessage));
+    for (const msg of [CAUGHT, REPORT]) {
+      const posted = await fromPage(msg);
+      expect(posted).toEqual([]);
+    }
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+});

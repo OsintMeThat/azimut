@@ -36,6 +36,7 @@ It supports seven flows:
 - When Post publishes, it can open X or Bluesky with the thread already
   typed and the proof attached, or open the reply box under the source post. It
   never presses Post: the composer is left filled, and publishing stays a human act.
+  Once you have sent it, it offers Azimut the link of your post.
 - When Reverse Search opens an engine, it can hand the picture to the engine's
   own uploader, so the search runs on the press you already made.
 
@@ -395,10 +396,31 @@ and the button is yours.
 
 **Reply under the source** opens the source post's own page instead, presses its
 reply button and fills the reply box that opens, the thread under it. Only an X
-status or a Bluesky post address is taken, and nothing on the page is read but
-where that button is. Without the extension, X still opens its own reply page with
-the first post typed and the proof on your clipboard; Bluesky has no such page, so
-there the post is copied for you to paste.
+status or a Bluesky post address is taken. Without the extension, X still opens its
+own reply page with the first post typed and the proof on your clipboard; Bluesky
+has no such page, so there the post is copied for you to paste.
+
+X's reply box takes one post, so a reply of several goes out one press per post.
+The extension fills post 1 and says *Post 1 of 3 is ready*. You press Reply; it
+opens the reply you just sent, presses its reply button and fills post 2 under it,
+and so on to the last. It stops, and says so, if no reply comes within 10 minutes,
+if the tab is closed or leaves the site, or if a step fails; the posts not yet sent
+are on your clipboard. Where a reply box does offer a next post, the whole thread
+goes into that one box.
+
+**The link of what you sent.** After you press Post or Reply, X says so in a toast
+whose View links to your post. The extension reads that link on the tab it opened,
+and takes it only when its handle is the account signed in on that page and its id
+says it was made in the last five minutes. Azimut then offers it for the post's
+link, and keeps it only if you say so. For a thread it is the first post's link,
+for a reply the first reply's. On Bluesky this works only where the page shows a
+link to the post and names your account; otherwise nothing is sent.
+
+**Where it stopped.** When a hand-off stops short, the notification says why, and
+Azimut gets a short report to paste into a bug report: the extension version and the site,
+the step (`open-reply`, `fill-1`, `add-2`, `catch-link`), how many nodes each of the
+extension's selectors found there, and the test ids of the buttons in the dialog. It
+holds no word of the page, no handle, no post and no address beyond the site.
 
 There is one switch and it is in the app: **Settings → Publishing → Let the
 extension fill the composer**, on by default. Nothing to set here.
@@ -440,11 +462,11 @@ image is on your clipboard either way.
 | `activeTab` | Reads the current URL and captures the tab only after you click the extension. |
 | `scripting` | Shows the area-selection overlay, draws the map tools panel, fills a composer you allowed, and hands an image to an engine you opened. |
 | `storage` | Stores the local app URL, pairing token and last-used case. |
-| `notifications` | Reports an area capture once it is filed, and says why the tools or the note could not open. |
+| `notifications` | Reports an area capture once it is filed, says how far a hand-off to X or Bluesky got, and why the tools or the note could not open. |
 | `contextMenus` | Adds Cite, Quote and Capture to the right-click menu while a note is open in the panel. Firefox reads it as `menus`. |
 | `sidePanel` | Shows the notes panel in Chrome. Firefox has its own key for it, `sidebar_action`, and each browser ignores the other's with a warning. |
 | `http://127.0.0.1/*`, `http://localhost/*` | Connects to the local Azimut app. |
-| `https://x.com/*`, `https://twitter.com/*`, `https://bsky.app/*` | Types a prepared thread into the composer, when Azimut asks. Never reads those pages, never posts. |
+| `https://x.com/*`, `https://twitter.com/*`, `https://bsky.app/*` | Types a prepared thread into the composer, when Azimut asks, then reads the link of the post you sent on that tab. Never posts. |
 | `https://lens.google.com/*`, `https://www.google.com/*`, `https://yandex.com/*`, `https://www.bing.com/*`, `https://tineye.com/*` | Gives a prepared image to the engine's uploader, when Azimut asks. Never reads those pages. `www.google.com` is there because Lens redirects to it. |
 
 The in-app Capture button may require one initial toolbar click for a new tab.
