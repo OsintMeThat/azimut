@@ -8,15 +8,20 @@ Inspect and has not proved yet.
 **A proof's scene is stated or traced.** ``spec["scene"]`` holds what the analyst
 declared: the starred video and the moments the place shows in it, since one place
 often comes back in several extracts of one clip. A moment is an instant (a start)
-or a passage (a start and a later end), and a proof that states none is about the
+or a passage (a start and a later end), and a stated scene with none is about the
 whole video: it prints no timecode anywhere. Without it the scene is read off the
 panels: the first panel Inspect cut from a video names that video, and the instants
 its frames were cut at say where in the clip the proof looks. That is how every
 proof made before scenes existed joins its video's list, with nothing written to it.
+A traced proof is about the whole video too, but it said nothing: Geo Proof may still
+propose the scene still to prove its frames fall in, where a stated whole video is the
+analyst's answer and is never offered another.
 
 **Its moments are stated through one narrow route** (`state_proof_scene`), which
-writes ``spec["scene"]`` and nothing else. Taking them all back returns the proof to
-its frames, and a proof that then states nothing its frames do not say keeps no scene.
+writes ``spec["scene"]`` and nothing else. The whole video asked for is kept as
+``{"video", "moments": [], "draft"}``. Only ``traced`` takes the proof back to its
+frames, the Undo of its first time: the scene it took up goes back to geolocate, and a
+proof that then states nothing its frames do not say keeps no scene.
 
 **A scene may hold the clip cut for its post** (``clip``, `engine/postclips.py`): a case
 file of its own, cut from a passage of the ★ video. It stays with the scene while the ★
@@ -1160,23 +1165,28 @@ def _wanted_draft(value: Any) -> str | None:
 
 
 def state_proof_scene(
-    case: Case, name: str, moments: Any, video: Any = None, draft: Any = None
+    case: Case, name: str, moments: Any, video: Any = None, draft: Any = None, traced: bool = False
 ) -> dict[str, Any]:
     """Say when in its video a proof happens, and answer with its scene as now read.
 
-    ``moments`` are the instants and passages the place shows in; none takes the time
-    back, so the proof sits at the frames it was built on again. Only
-    ``spec["scene"]`` is written: the video it names, the moments, and the draft it
-    came from. The video is the one asked for, else the one the proof states, else
-    the one its frames were cut from. ``draft`` is the Inspect scene the proof takes
-    up, given once: a proof that already took up another one refuses it. The clip cut
-    for its post stays while the video does, and is let go when the ★ moves. A proof that
-    ends up stating nothing its frames do not say keeps no scene at all, exactly the
-    proof it was before.
+    ``moments`` are the instants and passages the place shows in; none is the whole
+    video, stated as such. Only ``spec["scene"]`` is written: the video it names, the
+    moments, and the draft it came from. The video is the one asked for, else the one
+    the proof states, else the one its frames were cut from. ``draft`` is the Inspect
+    scene the proof takes up, given once: a proof that already took up another one
+    refuses it. The clip cut for its post stays while the video does, and is let go
+    when the ★ moves.
+
+    ``traced`` takes the proof back to the frames it was built on, the Undo of its
+    first time: no moments, and the scene it took up let go, which Inspect then lists
+    again. A proof that ends up stating nothing its frames do not say keeps no scene at
+    all, exactly the proof it was before.
     """
     stated_moments = _stated_moments(moments)
     wanted = _wanted_video(video)
     wanted_draft = _wanted_draft(draft)
+    if traced and (stated_moments or wanted_draft is not None):
+        raise BadScene("a proof taken back to its frames states no time and takes up no scene")
 
     path = case.resolve_inside(layout.proof_spec_rel(name))
     # The clip is measured before the case is locked: ffprobe has the time it needs,
@@ -1189,16 +1199,16 @@ def state_proof_scene(
 
     with case.lock:
         spec = _read_proof(path)
-        target, traced, origins = _scene_video(case, spec, wanted)
+        target, traced_video, origins = _scene_video(case, spec, wanted)
         stated = stated_scene(spec)
         held = stated["draft"] if stated else None
         if wanted_draft is not None and held not in (None, wanted_draft):
             raise CaseError("this proof already takes up another scene")
-        draft_id = wanted_draft or held
+        draft_id = None if traced else wanted_draft or held
         gave = (stated or {}).get("gave")
         # the clip cut for the post stays while the proof is about the video it came from
         clip = (stated or {}).get("clip") if (stated or {}).get("video") == target else None
-        if not stated_moments and draft_id is None and not gave and not clip and target == traced:
+        if traced and not gave and not clip and target == traced_video:
             spec.pop("scene", None)
         else:
             spec["scene"] = {

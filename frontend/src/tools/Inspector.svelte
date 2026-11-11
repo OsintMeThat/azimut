@@ -1791,12 +1791,20 @@
     sceneEdit.close();
   }
 
-  async function timeProof(scene, moments, undoable = true) {
+  /**
+   * Write a proof's moments: none is the whole video, kept as said. `traced` takes it back
+   * to its frames instead, the Undo of the first time a proof that stated none was given.
+   */
+  async function timeProof(scene, moments, undoable = true, { traced = false } = {}) {
     const run = openRun;
     const before = (scene.moments ?? []).map(({ start, end }) => ({ start, end: end ?? null }));
+    const wasTraced = !scene.stated;
     let res;
     try {
-      res = await api.put(`/api/cases/${work.caseId}/proofs/${encodeURIComponent(scene.proof)}/scene`, { moments });
+      res = await api.put(`/api/cases/${work.caseId}/proofs/${encodeURIComponent(scene.proof)}/scene`, {
+        moments,
+        ...(traced ? { traced: true } : {}),
+      });
     } catch (e) {
       if (run === openRun) toast(e.message, 'danger');
       return;
@@ -1811,7 +1819,9 @@
       onClick: () => {
         const now = listedScenes.find(ours);
         // only while nothing has moved it since
-        if (run === openRun && now && sameMoments(now.moments, res.moments)) timeProof(now, before, false);
+        if (run === openRun && now && sameMoments(now.moments, res.moments)) {
+          timeProof(now, before, false, { traced: wasTraced && !before.length });
+        }
       },
     } : null);
     loadScenes(run);
