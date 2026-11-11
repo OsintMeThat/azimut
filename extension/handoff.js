@@ -4,9 +4,10 @@
  * Injected into the composer tab by the background worker after the app's
  * Publish button asked for it: once for a thread, and once per post for a reply
  * the site lets out one post at a time (`background.js`, "a reply in several
- * posts"). It writes and attaches; it never submits. The button that publishes
- * is the analyst's, exactly as it is when they paste the thread by hand — which
- * is still what happens whenever this script gives up.
+ * posts"). It writes, attaches and describes the pictures it was given a text
+ * for; it never submits. The button that publishes is the analyst's, exactly as it
+ * is when they paste the thread by hand — which is still what happens whenever this
+ * script gives up.
  *
  * **Runs in the page's own world**, which is the only place this works. An
  * extension's scripts live in a separate world by default: the events they make
@@ -81,6 +82,18 @@
           || posts.find((post) => post.getAttribute("tabindex") === "-1");
         return source?.querySelector('[data-testid="reply"]') ?? null;
       },
+      // A picture's description (`describe`): the "Add description" its thumbnail wears,
+      // by the test id of its label and else by the media editor it links to, the
+      // description box that opens, and the editor's Save. Read off X's web composer
+      // as other tools describe it, never checked against the live page here.
+      alt: {
+        open: [
+          '[data-testid="attachments"] [data-testid="altTextLabel"]',
+          '[data-testid="attachments"] a[href$="/media"]',
+        ],
+        input: ['textarea[data-testid="altTextInput"]', '[role="dialog"] textarea', "textarea"],
+        save: ['[data-testid="endEditingButton"]'],
+      },
     },
     {
       match: /(^|\.)bsky\.app$/,
@@ -109,6 +122,15 @@
           (button) => button.getBoundingClientRect().bottom > 0
         ) ??
         null,
+      // Each picture's ALT button (its test id in the app's source), the dialog's text
+      // box, and no Save to look for: the dialog keeps the text as it closes, so
+      // Escape is the one language-free way out that saves.
+      alt: {
+        open: ['[data-testid="altTextButton"]'],
+        input: ['[role="dialog"] textarea', "textarea"],
+        save: [],
+        closeSaves: true,
+      },
     },
   ];
 
@@ -559,6 +581,8 @@
     };
     const selectors = {};
     for (const role of ["editors", "add", "files"]) selectors[role] = (site[role] ?? []).map(count);
+    // the descriptions' controls, counted only for a thread that gave a description
+    if (site.alt && describing) selectors.alt = site.alt.open.map(count);
     let reply = 0;
     try {
       reply = site.reply?.() ? 1 : 0;
@@ -604,6 +628,128 @@
     return Boolean(await waitFor(() => found(inDialog, editable)[0] ?? null, 8000));
   }
 
+  /**
+   * The part of the composer that is this post's: the box and what hangs under it (its
+   * pictures), up to where another post's box begins, and never past the dialog.
+   */
+  function postScope(site, box) {
+    const others = boxes(site).filter((one) => one !== box);
+    let scope = box;
+    for (let up = box.parentElement; up && up !== document.body; up = up.parentElement) {
+      if (others.some((one) => up.contains(one))) break;
+      scope = up;
+      if (up.getAttribute?.("role") === "dialog") break;
+    }
+    return scope;
+  }
+
+  /** The nodes under `scope` the first selector that finds any finds, in document order. */
+  const foundIn = (scope, selectors) => {
+    for (const selector of selectors) {
+      let nodes = [];
+      try {
+        nodes = [...scope.querySelectorAll(selector)];
+      } catch {
+        continue;
+      }
+      if (nodes.length) return nodes;
+    }
+    return [];
+  };
+
+  /**
+   * Write into a plain text box the way its framework hears it: the value through the
+   * element's own setter, then the input event. Answers whether it holds the text.
+   */
+  function putText(field, text) {
+    field.focus?.();
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), "value")?.set;
+    if (setter) setter.call(field, text);
+    else field.value = text;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    return field.value === text;
+  }
+
+  /** Escape, pressed on this node, the way a keyboard does. */
+  function escape(node) {
+    for (const kind of ["keydown", "keyup"]) {
+      node.dispatchEvent(
+        new KeyboardEvent(kind, { key: "Escape", code: "Escape", keyCode: 27, bubbles: true, cancelable: true })
+      );
+    }
+  }
+
+  /**
+   * One picture's description: open its editor, write the text, save, and see it close.
+   * A step that does not answer closes what it opened and says no, so the composer is
+   * never left behind a dialog. Nothing here sends: the only button pressed is the one
+   * that keeps the description.
+   */
+  async function describeOne(site, control, text) {
+    const before = new Set(found(site.alt.input));
+    press(control.closest?.('a, button, [role="button"], [role="link"]') ?? control);
+    const field = await waitFor(() => found(site.alt.input).find((one) => !before.has(one)) ?? null, 5000);
+    if (!field) return false;
+    if (!putText(field, text)) {
+      escape(field);
+      return false;
+    }
+    await sleep(150);
+    const save = site.alt.save.length ? await waitFor(() => found(site.alt.save, pressable).at(-1) ?? null, 3000) : null;
+    if (save) press(save);
+    else {
+      escape(field);
+      if (!site.alt.closeSaves) return false;
+    }
+    return Boolean(await waitFor(() => !field.isConnected, 3000));
+  }
+
+  /**
+   * Give the pictures of one post their descriptions, once the thread is in. Each
+   * picture is found by its place among the post's own: a post whose pictures do not
+   * each offer one control is left as it is. Answers whether every text went in.
+   */
+  async function describe(site, box, files) {
+    const scope = () => postScope(site, box);
+    const controls =
+      (await waitFor(() => {
+        const nodes = foundIn(scope(), site.alt.open);
+        return nodes.length >= files.length ? nodes : null;
+      }, 3000)) ?? foundIn(scope(), site.alt.open);
+    if (controls.length !== files.length) return false;
+    for (let i = 0; i < files.length; i += 1) {
+      if (!files[i].alt) continue;
+      // read again each time: the composer may draw its thumbnails anew after a dialog
+      const control = foundIn(scope(), site.alt.open)[i];
+      if (!control || !(await describeOne(site, control, files[i].alt))) return false;
+    }
+    return true;
+  }
+
+  /**
+   * The descriptions of every post filled here that carries one. A post the page would
+   * not describe is named (`alt-2`) and the rest goes on: the descriptions are an extra
+   * the composer can still be given by hand, never a reason to stop.
+   */
+  async function describeAll(site, written) {
+    const missed = [];
+    for (const { box, post, number } of written) {
+      if (!site.alt || !(post.files ?? []).some((file) => file.alt)) continue;
+      step = `alt-${number}`;
+      let done = false;
+      try {
+        done = await describe(site, box, post.files);
+      } catch {
+        done = false;
+      }
+      if (!done) missed.push(`alt-${number}`);
+    }
+    return missed;
+  }
+
+  // Whether a picture of this thread carries a description, which `probe` then counts for.
+  let describing = false;
+
   // The step this run is on, named the way the report names it: `open-reply`,
   // `open-composer`, `fill-2`, `add-3`. Kept out here so that a throw still says
   // where it happened.
@@ -626,7 +772,9 @@
    *
    * What comes back says `filled`, the posts filled, and `through`, how many of
    * these posts went in one after the other from the first before anything went
-   * wrong: the worker tells the app the post the rest starts from.
+   * wrong: the worker tells the app the post the rest starts from. A post whose
+   * pictures carry a description (`alt` on a file) is described once every post is
+   * in, and `missed` names the posts the page would not describe (`alt-2`).
    */
   async function run() {
     const site = SITES.find((one) => one.match.test(location.hostname));
@@ -639,6 +787,7 @@
     if (!posts?.length) return { filled: 0 };
     const number = Number.isInteger(thread.number) && thread.number > 0 ? thread.number : 1;
     const more = thread.more === true;
+    describing = posts.some((post) => (post.files ?? []).some((file) => file?.alt));
     // Boxes already in the composer ahead of these posts, for the file input of each.
     const offset = more ? number - 1 : 0;
 
@@ -648,16 +797,28 @@
     // third line still beats a composer holding nothing.
     const notes = [];
     let troubleStep = null;
+    // The posts filled here, for their pictures' descriptions once the thread is in.
+    const written = [];
+    // What the descriptions missed, named only when something was.
+    const described = async () => {
+      const missed = await describeAll(site, written);
+      return missed.length ? { missed } : {};
+    };
     // Stopping is not a reason to drop what went wrong on the way here: a post
     // left empty is why a composer refuses to open the next one, and the stop
     // on its own reads like the markup moved.
-    const stop = (reason) => ({
-      filled,
-      through,
-      error: [...notes, reason].join(" "),
-      step,
-      probe: probe(site),
-    });
+    const stop = async (reason) => {
+      const at = step;
+      const missed = await described();
+      return {
+        filled,
+        through,
+        error: [...notes, reason].join(" "),
+        step: at,
+        probe: probe(site),
+        ...missed,
+      };
+    };
 
     step = thread.reply === true ? "open-reply" : "open-composer";
     if (thread.reply === true && !(await openReply(site))) {
@@ -705,6 +866,7 @@
       step = `fill-${number + i}`;
       if (!box) return stop("Lost the composer while filling it.");
       const trouble = await fill(site, box, { ...posts[i], number: number + i }, offset + i);
+      written.push({ box, post: posts[i], number: number + i });
       if (trouble) {
         notes.push(trouble);
         troubleStep ??= step;
@@ -713,10 +875,13 @@
         filled += 1;
       }
     }
-    if (notes.length) return { filled, through, error: notes.join(" "), step: troubleStep, probe: probe(site) };
+    const missed = await described();
+    if (notes.length) return { filled, through, error: notes.join(" "), step: troubleStep, probe: probe(site), ...missed };
+    // Whatever was missed, the page is described to the report beside it.
+    const seen = missed.missed ? { probe: probe(site) } : {};
     // Nothing is pressed to find out more: the worker decides what follows.
-    if (thread.ask === true) return { filled, through, add: await offersNext(site) };
-    return { filled, through };
+    if (thread.ask === true) return { filled, through, add: await offersNext(site), ...missed, ...seen };
+    return { filled, through, ...missed, ...seen };
   }
 
   // The value the injection hands back to the worker, which is what says whether

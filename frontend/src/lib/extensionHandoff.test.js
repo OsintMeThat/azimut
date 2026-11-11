@@ -892,3 +892,131 @@ describe('a reply the site lets out one post at a time', () => {
     expect(report).toMatchObject({ filled: 1, add: true });
   }, 20000);
 });
+
+/**
+ * A picture's description, once the thread is in. The markup below is what tools that
+ * read X's and Bluesky's composers describe, never the live page: X's thumbnail wears
+ * an "Add description" link whose label carries a test id and opens a dialog holding
+ * the description box and Save; Bluesky's wears an ALT button whose dialog keeps the
+ * text as it closes. What is pinned is the rule: each text goes to its own picture,
+ * nothing that sends is pressed, and a page that does not offer the control costs
+ * that post its descriptions and nothing else.
+ */
+describe('describing the pictures', () => {
+  const X_PICTURES = (n) => `<div data-testid="attachments">${Array.from({ length: n }, (_, i) =>
+    `<div role="group"><div role="link" aria-label="Add description" data-picture="${i}">`
+    + '<span data-testid="altTextLabel">Add description</span></div></div>').join('')}</div>`;
+  const CELL = (i, pictures = 0) => `<div class="cell">${BOX(i)}${pictures ? X_PICTURES(pictures) : ''}</div>`;
+  const SEND = '<button data-testid="tweetButton">Post</button>';
+
+  /** X's media editor behind each "Add description": Save keeps the text, Escape drops it. */
+  function xEditor(described, { save = true } = {}) {
+    return (doc) => {
+      for (const link of doc.querySelectorAll('[data-picture]')) {
+        link.addEventListener('click', () => {
+          const dialog = doc.createElement('div');
+          dialog.setAttribute('role', 'dialog');
+          dialog.innerHTML = '<textarea data-testid="altTextInput" maxlength="1000"></textarea>'
+            + (save ? '<button data-testid="endEditingButton">Save</button>' : '');
+          doc.body.append(dialog);
+          dialog.querySelector('[data-testid="endEditingButton"]')?.addEventListener('click', () => {
+            described.push({ picture: link.dataset.picture, text: dialog.querySelector('textarea').value });
+            dialog.remove();
+          });
+          dialog.addEventListener('keydown', (e) => { if (e.key === 'Escape') dialog.remove(); });
+        });
+      }
+      doc.querySelector('[data-testid="tweetButton"]')?.addEventListener('click', () => described.push('SENT'));
+    };
+  }
+
+  it('gives each picture its own text once the thread is in, and presses nothing that sends', async () => {
+    const described = [];
+    const report = await run({
+      posts: [
+        { text: 'Geolocated.', files: [{ ...PNG, name: 'bridge.png', alt: 'A road bridge over a canal' }, { ...PNG, name: 'gate.png' }, { ...PNG, name: 'yard.png', alt: 'A container yard' }] },
+        { text: 'Context.', files: [] },
+      ],
+      html: `${CELL(0, 3)}${FILE_INPUT(0)}${CELL(1)}${FILE_INPUT(1)}<button data-testid="addButton"></button>${SEND}`,
+      onReady: xEditor(described),
+    });
+    expect(report.filled).toBe(2);
+    expect(report.error).toBeUndefined();
+    expect(report.missed).toBeUndefined();
+    // the picture with no text was never opened
+    expect(described).toEqual([
+      { picture: '0', text: 'A road bridge over a canal' },
+      { picture: '2', text: 'A container yard' },
+    ]);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  }, 20000);
+
+  it('names a post whose pictures offer no description, fills the rest, and stops nowhere', async () => {
+    const described = [];
+    const report = await run({
+      posts: [
+        { text: 'Geolocated.', files: [{ ...PNG, alt: 'A road bridge' }] },
+        { text: 'Context.', files: [{ ...PNG, name: 'yard.png', alt: 'A container yard' }] },
+      ],
+      // post 1's thumbnail wears no control; post 2's does
+      html: `${CELL(0)}${FILE_INPUT(0)}${CELL(1, 1)}${FILE_INPUT(1)}<button data-testid="addButton"></button>${SEND}`,
+      onReady: xEditor(described),
+    });
+    expect(report).toMatchObject({ filled: 2, through: 2, missed: ['alt-1'] });
+    expect(report.error).toBeUndefined();
+    expect(report.landed.map((one) => one.text)).toEqual(['Geolocated.', 'Context.']);
+    expect(described).toEqual([{ picture: '0', text: 'A container yard' }]);
+    // what the page held, for the report beside it
+    expect(report.probe.selectors.alt).toEqual([1, 0]);
+  }, 20000);
+
+  it('closes an editor it could not save from, and names the post', async () => {
+    const described = [];
+    const report = await run({
+      posts: [{ text: 'Geolocated.', files: [{ ...PNG, alt: 'A road bridge' }] }],
+      html: `${CELL(0, 1)}${FILE_INPUT(0)}${SEND}`,
+      onReady: xEditor(described, { save: false }),
+    });
+    expect(report).toMatchObject({ filled: 1, missed: ['alt-1'] });
+    expect(described).toEqual([]);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  }, 20000);
+
+  it('describes a picture on Bluesky through its ALT button, its dialog keeping the text as it closes', async () => {
+    const described = [];
+    const report = await run({
+      hostname: 'bsky.app',
+      posts: [{ text: 'Geolocated.', files: [{ ...PNG, alt: 'A road bridge over a canal' }] }],
+      html: '<div class="post"><div class="ProseMirror" contenteditable="true"></div>'
+        + '<div><div role="button" data-testid="altTextButton" aria-label="Ajouter un texte alternatif">ALT</div></div></div>'
+        + '<button aria-label="Publier">Publier</button>',
+      onReady: (doc) => {
+        doc.querySelector('[data-testid="altTextButton"]').addEventListener('click', () => {
+          const dialog = doc.createElement('div');
+          dialog.setAttribute('role', 'dialog');
+          dialog.innerHTML = '<textarea aria-label="Texte alternatif"></textarea>';
+          doc.body.append(dialog);
+          const field = dialog.querySelector('textarea');
+          field.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            described.push(field.value);
+            dialog.remove();
+          });
+        });
+        doc.querySelector('[aria-label="Publier"]').addEventListener('click', () => described.push('SENT'));
+      },
+    });
+    expect(report.filled).toBe(1);
+    expect(report.missed).toBeUndefined();
+    expect(described).toEqual(['A road bridge over a canal']);
+  }, 20000);
+
+  it('leaves a thread without descriptions exactly as it always filled it', async () => {
+    const report = await run({
+      posts: [{ text: 'Geolocated.', files: [PNG] }],
+      html: `${CELL(0, 1)}${FILE_INPUT(0)}`,
+    });
+    expect(Object.keys(report).filter((key) => !['landed', 'typed', 'pastes', 'attached', 'dropped'].includes(key)))
+      .toEqual(['filled', 'through']);
+  });
+});

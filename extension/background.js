@@ -380,6 +380,25 @@ async function handOff(payload) {
   return { ok: true, accepted: true };
 }
 
+/** The longest description a picture is handed (the app's `lib/postAlt.js` ALT_MAX). */
+const MAX_ALT = 2000;
+
+/**
+ * A post's pictures' descriptions, as the app hands them (`alt`, a file's path to its
+ * text): a bounded text for a file the post carries, and nothing else. A post without
+ * one is handed over as it always was.
+ */
+function altTexts(post, files) {
+  const given = post?.alt;
+  if (!given || typeof given !== "object" || Array.isArray(given)) return {};
+  const alt = {};
+  for (const path of files) {
+    const text = Object.hasOwn(given, path) ? given[path] : null;
+    if (typeof text === "string" && text.trim()) alt[path] = text.trim().slice(0, MAX_ALT);
+  }
+  return Object.keys(alt).length ? { alt } : {};
+}
+
 /**
  * Open the composer and fill it. Never throws: every way this ends is told to the
  * analyst in a notification and, when it stops short, to the app in a report.
@@ -399,10 +418,10 @@ async function fillComposer(payload, backendUrl, token) {
     host: hostOf(payload.url),
     caseId: typeof payload.caseId === "string" ? payload.caseId : null,
     draft: payload.draft ?? null,
-    posts: (payload.posts ?? []).map((post) => ({
-      text: String(post?.text ?? ""),
-      files: Array.isArray(post?.files) ? post.files.filter((path) => typeof path === "string") : [],
-    })),
+    posts: (payload.posts ?? []).map((post) => {
+      const files = Array.isArray(post?.files) ? post.files.filter((path) => typeof path === "string") : [];
+      return { text: String(post?.text ?? ""), files, ...altTexts(post, files) };
+    }),
     reply: payload.reply === true,
     chain: false, // the posts go out one reply at a time
     done: 0, // posts filled so far
@@ -491,6 +510,7 @@ async function fillPosts(hand, posts, thread, backendUrl, token) {
         name: path.split("/").pop(),
         type: "application/octet-stream",
         parts: [],
+        ...(post.alt?.[path] ? { alt: post.alt[path] } : {}),
       };
     }),
   }));
@@ -524,7 +544,26 @@ async function fillPosts(hand, posts, thread, backendUrl, token) {
     world: "MAIN",
     files: ["handoff.js"],
   });
-  return done?.result ?? {};
+  const result = done?.result ?? {};
+  // A thread that went in with a description missed goes on; a stop says it in its report.
+  if (!result.error && Array.isArray(result.missed) && result.missed.length) await tellMissed(hand, result);
+  return result;
+}
+
+/**
+ * Say which pictures' descriptions did not go in, while the thread itself did: a
+ * notification for the analyst, and a report for the app naming the steps missed.
+ */
+async function tellMissed(hand, { missed, probe = null }) {
+  const steps = missed.filter((one) => /^alt-\d{1,3}$/.test(String(one)));
+  if (!steps.length) return;
+  const numbers = steps.map((one) => one.slice(4));
+  const which = numbers.length === 1 ? `post ${numbers[0]}` : `posts ${numbers.slice(0, -1).join(", ")} and ${numbers.at(-1)}`;
+  const sentence = `The picture descriptions of ${which} did not go in. Copy each one from Post into the composer.`;
+  notify("Azimut hand-off", sentence);
+  const report = handOffReport(hand, { step: steps[0], probe, missed: steps });
+  console.info(`Azimut hand-off: ${sentence}\n${report}`);
+  await tellApp({ type: "post-handoff-report", caseId: hand.caseId, draft: hand.draft, error: sentence, report, from: null });
 }
 
 const hostOf = (url) => {
@@ -565,7 +604,7 @@ async function tabGone(tabId) {
 const WATCH_KEY = "postWatches";
 const WATCH_MS = 10 * 60 * 1000;
 /** The steps a report may name. */
-const REPORT_STEP = /^(?:open-tab|inject|open-reply|open-composer|catch-link|(?:fill|add)-\d{1,3})$/;
+const REPORT_STEP = /^(?:open-tab|inject|open-reply|open-composer|catch-link|(?:fill|add|alt)-\d{1,3})$/;
 /** A test id the report may carry: one plain word, never an avatar's with a handle in it. */
 const REPORT_TEST_ID = /^[A-Za-z][A-Za-z0-9_]{0,48}$/;
 
@@ -889,14 +928,18 @@ function plainError(error) {
  * Counts and test ids only, each checked here, since the page's world wrote them.
  * Never a word of the page, a handle, a post or an address beyond the host.
  */
-function handOffReport(hand, { step, stopped, probe, link }) {
+function handOffReport(hand, { step, stopped, probe, link, missed }) {
   const count = (value) => (Number.isInteger(value) && value >= -1 && value < 100000 ? value : 0);
   const lines = [`Azimut Capture ${api.runtime.getManifest().version} on ${hand.host || "an unknown host"}`];
   lines.push(`Step: ${REPORT_STEP.test(String(step)) ? step : "unknown"}`);
   if (stopped) lines.push(`Stopped: ${stopped}`);
+  const skipped = (Array.isArray(missed) ? missed : []).filter((one) => REPORT_STEP.test(String(one))).slice(0, 25);
+  if (skipped.length) lines.push(`Missed: ${skipped.join(", ")}`);
   const selectors = probe?.selectors;
   if (selectors && typeof selectors === "object") {
-    const roles = ["editors", "add", "files", "reply"].map((role) => {
+    // the picture descriptions' controls, counted by a filler that looks for them
+    const looked = Array.isArray(selectors.alt) ? ["alt"] : [];
+    const roles = ["editors", "add", "files", "reply", ...looked].map((role) => {
       const counts = Array.isArray(selectors[role]) ? selectors[role].slice(0, 8).map(count) : [];
       return `${role} ${counts.length ? counts.join("+") : "none"}`;
     });
@@ -932,7 +975,7 @@ function handOffReport(hand, { step, stopped, probe, link }) {
  * chain's count of them unless the step that stopped says otherwise.
  */
 async function failHandOff(hand, stop) {
-  const { step, error, probe = null, link = null, stopped = null, gone = false, keep = false } = stop;
+  const { step, error, probe = null, link = null, stopped = null, gone = false, keep = false, missed = null } = stop;
   const handed = stop.handed ?? (hand.chain ? hand.done : null);
   const sentence = plainError(error);
   if (!keep) endWatch(hand, { gone });
@@ -945,7 +988,7 @@ async function failHandOff(hand, stop) {
     clip = first === last ? `Post ${last} is on your clipboard.` : `Posts ${first} to ${last} are on your clipboard.`;
   }
   notify("Azimut hand-off", `${sentence} ${clip}`);
-  const report = handOffReport(hand, { step, stopped, probe, link });
+  const report = handOffReport(hand, { step, stopped, probe, link, missed });
   // Also where about:debugging's Inspect shows it, for an app that does not show reports.
   console.info(`Azimut hand-off stopped: ${sentence}\n${report}`);
   const from = Number.isInteger(handed) && handed >= 0 && handed < hand.posts.length ? handed + 1 : null;

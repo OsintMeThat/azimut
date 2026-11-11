@@ -5502,7 +5502,12 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   or gone elsewhere, a step that failed) says why in a notification and sends the app
   a `post-handoff-report`: the step and what the extension's selectors found there,
   never a word of the page, and `from`, the first post not handed over, when the posts
-  before it all went in.
+  before it all went in. With Alt text on, each post handed over carries its pictures'
+  texts (`alt`, a file's path to its text); once the thread is in, the extension opens
+  each picture's description (X's *Add description*, Bluesky's *ALT*), types the text
+  and saves it, pressing nothing that sends. A post whose pictures offer no such control
+  keeps no description, the rest goes on, and the app gets a `post-handoff-report`
+  naming the step missed (`alt-2`, the report's *Missed:* line).
 - **A narrow header** gives way a step at a time, measured rather than guessed: the
   name field narrows and the quiet line and Reply say less, then Open folds to its
   icon, then the quiet line keeps only **Install**, the kind its icon and Publish its
