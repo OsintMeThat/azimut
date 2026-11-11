@@ -2236,6 +2236,12 @@ export async function installAppFixture(page, options = {}) {
     // The saved proofs, which Geo Proof's home and Open proof list: none, unless a spec
     // names them (`proofList`) or routes its own over this one.
     if (path === `/api/cases/${CASE_ID}/proofs` && request.method() === 'GET') return json(route, options.proofList ?? []);
+    // Geo Proof reads a saved proof's scene back when the case moves (`ProofScene.reread`).
+    // The fixture keeps no scene a spec wrote, so it answers that it has none to read, and
+    // the re-read keeps what the tab holds. A spec that tests the re-read routes its own.
+    if (path === `/api/cases/${CASE_ID}/proofs/browser-proof` && request.method() === 'GET' && proofSaves.length) {
+      return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'not kept by the fixture' }) });
+    }
     if (path === `/api/cases/${CASE_ID}/proofs` && request.method() === 'POST') {
       const payload = request.postDataJSON();
       proofSaves.push(payload);

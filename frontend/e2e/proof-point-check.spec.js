@@ -51,7 +51,11 @@ test('a save stops on the capture point until it is checked', async ({ page }) =
 });
 
 test('Later saves the proof and keeps the point unchecked', async ({ page }) => {
-  const fixture = await installAppFixture(page, { satCaptures: [framed] });
+  const fixture = await installAppFixture(page, {
+    satCaptures: [framed],
+    // the case holds the proof once saved, so the composer never reads it as deleted
+    lookupEntities: { 'proofs/.meta/browser-proof.json': { id: 'browser-proof-entity', type: 'proof' } },
+  });
   await openProofWithPanel(page);
 
   await page.getByRole('button', { name: 'Save proof', exact: true }).click();
