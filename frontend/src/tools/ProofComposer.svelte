@@ -175,7 +175,7 @@
   import { openScenes, queueColor } from '../lib/sceneQueue.js';
   import { NO_VIDEO, inVideo, proofVideos, slideTag } from '../lib/proofList.js';
   import { collagesOfScene, pictureHandoff, proofHandoff } from '../lib/sceneFrames.js';
-  import { sceneMoments, sceneStart } from '../lib/scenes.js';
+  import { sceneMoments, sceneStart, sceneTime } from '../lib/scenes.js';
 
   const SCALE_STEP = 0.05;
   // Canvas handles are drawn, not styled, so the one accent has to be spelled
@@ -509,7 +509,6 @@
   let savedThumb = $state(null);
   let slidesRun = 0;
   let slidesTimer = null;
-  let slidesStale = false;
   // `{ video, row, look, navigate, scene, frames, filedIds, captures, collages, capture }` while Make the proof chooses.
   let slideChooser = $state(null);
   let chooserBusy = $state(false);
@@ -568,29 +567,49 @@
     }
   }
 
-  /** A nudge about scenes or the scene geolocated: read again, once for a burst, when it is this video's. */
-  function slidesNudged(event, video) {
+  /**
+   * A nudge about scenes or the scene geolocated: read again, once for a burst, when it is
+   * this video's, and the open proof's scene with it when a scene moved. Geo Proof behind
+   * another tool reads both when it comes back to the front, so it lets the nudge go.
+   */
+  function slidesNudged(event, video, { moved = false } = {}) {
     if (!slides.video || event.case_id !== caseState.current?.id) return;
     if (video && video !== slides.video) return;
-    if (uiState.tool !== 'proof') {
-      slidesStale = true;
-      return;
-    }
+    if (uiState.tool !== 'proof') return;
     clearTimeout(slidesTimer);
-    slidesTimer = setTimeout(() => readSlides(), 400);
+    slidesTimer = setTimeout(() => (moved ? rereadScenes() : readSlides()), 400);
   }
-  onDestroy(onEvent('scenes', (event) => slidesNudged(event, event.video ?? null)));
+  onDestroy(onEvent('scenes', (event) => slidesNudged(event, event.video ?? null, { moved: true })));
   onDestroy(onEvent('geolocating', (event) => {
     // an end names no video: it matters to the strip only while it shows a scene geolocated
     if (event.video == null && !slides.answer?.geolocating) return;
     slidesNudged(event, event.video ?? null);
   }));
   onDestroy(() => clearTimeout(slidesTimer));
-  // back in Geo Proof after a nudge heard elsewhere: the strip reads again
+
+  // ---- read again: what Inspect, or another window, changed meanwhile ---------------------
+  // Inspect's Scenes tab writes a proof's time through the route the Scene tab writes it
+  // through. Each time Geo Proof comes back to the front, when the case moves, and on a
+  // nudge, the strip and the open proof's scene are read again (`ProofScene.reread`); a
+  // proof never saved follows the scene it was made from (`ProofScene.follow`). The player
+  // and the tab stay where they stand, and nothing is written. A time in hand with a change
+  // stays; the read is made again once it is applied or dropped.
+  function rereadScenes() {
+    readSlides();
+    if (proofStarted) scene.reread();
+  }
   $effect(() => {
-    if (uiState.tool !== 'proof' || !slidesStale) return;
-    slidesStale = false;
-    untrack(() => readSlides());
+    void caseState.rev;
+    if (uiState.tool !== 'proof') return;
+    untrack(rereadScenes);
+  });
+  $effect(() => {
+    if (scene.edit.scene || !scene.behind || uiState.tool !== 'proof') return;
+    untrack(rereadScenes);
+  });
+  $effect(() => {
+    void slides.answer;
+    untrack(() => scene.follow());
   });
 
   const thumbOf = (path) => shelfThumbs.get(path) ?? null;
@@ -600,6 +619,8 @@
     title: proof.title,
     draft: scene.draft,
     thumb: savedThumb?.name === savedName ? savedThumb.thumb : null,
+    // what its Scene tab reads, which its tile says too
+    time: sceneTime({ kind: 'proof', moments: scene.moments }),
     page: draftShown?.id ?? null,
   });
   const strip = $derived(slides.video && slides.answer?.video === slides.video

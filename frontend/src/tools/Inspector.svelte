@@ -1105,6 +1105,23 @@
     }),
   );
 
+  // A proof's time written from Geo Proof can land after the list was read on the way
+  // back here: its first save taking up a scene, a time applied as the tab was left. The
+  // server says so, and the list is read again, once for a burst.
+  let scenesTimer = null;
+  onDestroy(
+    onEvent('scenes', (event) => {
+      if (event.case_id !== work.caseId || (event.video && event.video !== work.source?.path)) return;
+      if (uiState.tool !== 'inspect' || !hasScenes || opening) return;
+      clearTimeout(scenesTimer);
+      const run = openRun;
+      scenesTimer = setTimeout(() => {
+        if (uiState.tool === 'inspect' && hasScenes && !opening) loadScenes(run);
+      }, 300);
+    }),
+  );
+  onDestroy(() => clearTimeout(scenesTimer));
+
   /**
    * Record the clip as it now stands, and say how to take this step back. The first
    * scene ever kept here (`kept`) asks the app to point once at the To-do, where it

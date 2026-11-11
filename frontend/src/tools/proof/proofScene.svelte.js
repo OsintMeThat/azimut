@@ -17,14 +17,26 @@
  * Inspect still to prove. That scene is its `match`: the time reads the scene's, the
  * tab names it, and the next save takes it up as Make the proof's first save does.
  * **Not this scene** keeps the proof apart from it for the session, and writes nothing.
+ * A time taken back to the whole video, here or in Inspect, is the analyst's answer: the
+ * scene its frames then find is kept apart the same way, so it reads as the whole video.
+ *
+ * **Inspect writes the same scene** from its Scenes tab. Geo Proof reads it again when it
+ * comes back to the front and when the server says a scene moved (`reread`, `follow`),
+ * the player left where it stands and nothing written. A time in hand with a change is
+ * the analyst's and stays; `behind` says a read waits for it to be put away.
  */
 import { SceneEdit } from '../../lib/sceneEdit.svelte.js';
-import { sameMoments, sortMoments, timeWords } from '../../lib/scenes.js';
+import { sameMoments, sceneMoments, sortMoments, timeWords } from '../../lib/scenes.js';
 import {
   outsideFrames, proofVideos, readStatedScene, sceneOfFrames, starVideo, statedMoments, videoName,
 } from '../../lib/proofScene.js';
 
 const plain = (moments) => (moments ?? []).map(({ start, end }) => ({ start, end: end ?? null }));
+
+/** Whether two stated scenes say the same: their video, their moments and the scene they took up. */
+const sameStated = (a, b) => (!a || !b
+  ? !a === !b
+  : a.video === b.video && (a.draft ?? null) === (b.draft ?? null) && sameMoments(sortMoments(a.moments), sortMoments(b.moments)));
 
 export class ProofScene {
   /** What the proof states, or null while its panels say it all. */
@@ -39,10 +51,16 @@ export class ProofScene {
   adding = $state(false);
   /** The scenes refused with Not this scene for the proof open, by id. */
   refused = $state([]);
+  /** Whether a read of the scene waits for the time in hand to be applied or dropped. */
+  behind = $state(false);
   /** The name the open proof is listed under in its video's scenes, whose row is its own. */
   #listedAs = $state(null);
   /** What Not this scene refused, by case and proof, for the session only. */
   #refusals = new Map();
+  /** Moved by every open, write and read, so an answer that crossed one is dropped. */
+  #epoch = 0;
+  /** The held scene's time as Inspect last listed it (`follow`), or null before a read. */
+  #listedTime = null;
   edit;
 
   /**
@@ -109,7 +127,10 @@ export class ProofScene {
     this.held = false;
     this.view = null;
     this.refused = [];
+    this.behind = false;
     this.#listedAs = null;
+    this.#listedTime = null;
+    this.#epoch += 1;
     this.edit.close();
   }
 
@@ -123,12 +144,18 @@ export class ProofScene {
 
   /** Not this scene: the proof stays apart from the scene its frames found. Nothing is written. */
   refuse() {
-    const found = this.match;
-    if (!found) return;
-    this.refused = [...this.refused, found.id];
-    this.#keepRefusals();
+    if (!this.#keepApart()) return;
     // a time printed on the picture now reads the whole video
     this.onstated();
+  }
+
+  /** Keep the proof apart from the scene its frames find, for the session. Answers whether one was. */
+  #keepApart() {
+    const found = this.match;
+    if (!found) return false;
+    this.refused = [...this.refused, found.id];
+    this.#keepRefusals();
+    return true;
   }
 
   #refusalKey() {
@@ -146,6 +173,86 @@ export class ProofScene {
     this.reset();
     this.stated = readStatedScene(scene);
     this.held = !!this.stated;
+    // where Inspect stood when it was handed over, when the strip read its video already
+    this.#listedTime = this.#draftListed();
+  }
+
+  // -- read again ---------------------------------------------------------------------
+
+  /**
+   * Read again what the saved proof states, as Inspect's Scenes tab or another window may
+   * have changed it since it opened. The player and the tab stay where they are, and
+   * nothing is written. A time open with no change starts again from the time read; one
+   * with a change waits (`behind`). A proof whose first save is still to write its held
+   * scene reads nothing: what it holds goes in with the next save.
+   */
+  async reread() {
+    const { caseId, name } = this.where();
+    if (!caseId || !name || this.held) return;
+    const epoch = ++this.#epoch;
+    let spec;
+    try {
+      spec = await this.api.get(`/api/cases/${caseId}/proofs/${encodeURIComponent(name)}`);
+    } catch {
+      return; // a proof gone meanwhile: the composer says so on its own
+    }
+    const now = this.where();
+    if (epoch !== this.#epoch || now.caseId !== caseId || now.name !== name || this.held) return;
+    if (this.#inHand()) return;
+    const fresh = readStatedScene(spec?.scene);
+    if (sameStated(this.stated, fresh)) return;
+    const star = this.star;
+    // taken back to the whole video meanwhile: it reads as the whole video here too
+    const taken = !!this.stated && !fresh;
+    this.stated = fresh;
+    if (taken) this.#keepApart();
+    this.#restart(star);
+    this.onstated();
+  }
+
+  /**
+   * A proof never saved, made from a scene still to prove, holds that scene's time for its
+   * first save. While it holds the time Inspect listed, it follows a change made there
+   * (`listed()`, read by the strip), so the save writes the scene's time as it now stands.
+   * A time stated here is the analyst's and stays. The first reading only says where
+   * Inspect stood, which may be behind the scene handed over a moment ago.
+   */
+  follow() {
+    const stated = this.stated;
+    if (!this.held || !stated?.draft) return;
+    const listed = this.#draftListed();
+    if (!listed) return;
+    const before = this.#listedTime;
+    if (before && sameMoments(before, listed)) return;
+    if (this.#inHand()) return;
+    this.#listedTime = listed;
+    if (!before || !sameMoments(stated.moments, before)) return;
+    const star = this.star;
+    this.stated = { ...stated, moments: listed };
+    this.#restart(star);
+    this.onstated();
+  }
+
+  /** The held draft's moments as the strip last read them, or null when it lists none. */
+  #draftListed() {
+    const stated = this.stated;
+    const answer = this.listed();
+    if (!stated?.draft || answer?.video !== stated.video) return null;
+    const row = (answer.scenes ?? []).find((s) => s?.kind === 'draft' && s.id === stated.draft);
+    return row ? sortMoments(plain(sceneMoments(row))) : null;
+  }
+
+  /** Whether a time with a change is in hand: a read then waits for it (`behind`). */
+  #inHand() {
+    this.behind = !!this.edit.scene && this.edit.changed;
+    return this.behind;
+  }
+
+  /** The time open with no change in it, started again on the time read, or closed with its video. */
+  #restart(star) {
+    if (!this.edit.scene) return;
+    if (this.star === star) this.#beginTime();
+    else this.edit.close();
   }
 
   /** Open the player on `video`: at a frame, paused, or running through the scene. */
@@ -160,10 +267,17 @@ export class ProofScene {
   openTime() {
     const star = this.star;
     if (!star) return;
+    const at = this.#beginTime();
+    this.show(star, { at: this.moments[0]?.start ?? at[0] ?? 0 });
+  }
+
+  /** The time editor on the ★ video's moments as they stand, its frames pinned. Answers them. */
+  #beginTime() {
+    const star = this.star;
     // a collage that kept no instant pins nothing on the bar
     const at = this.frames().filter((f) => f.video === star && Number.isFinite(f.time)).map((f) => f.time).sort((a, b) => a - b);
     this.edit.begin({ kind: 'proof', key: 'proof', moments: this.moments, at });
-    this.show(star, { at: this.moments[0]?.start ?? at[0] ?? 0 });
+    return at;
   }
 
   async applyTime() {
@@ -208,13 +322,16 @@ export class ProofScene {
     const taking = !this.stated?.draft && video === this.star ? this.match?.id ?? null : null;
     const next = { video, moments: sortMoments(plain(moments)), draft: this.stated?.draft ?? taking };
     const { caseId, name } = this.where();
+    this.behind = false;
     if (!name) {
       this.stated = next;
       this.held = true;
       this.onstated();
       return true;
     }
-    const before = { video: this.star, moments: plain(statedMoments(this.stated, this.star)) };
+    // what the tab showed, a found scene's time included, which the Undo gives back
+    const before = { video: this.star, moments: plain(this.moments) };
+    this.#epoch += 1;
     let res;
     try {
       res = await this.api.put(`/api/cases/${caseId}/proofs/${encodeURIComponent(name)}/scene`, {
@@ -228,6 +345,8 @@ export class ProofScene {
     }
     if (this.where().name !== name) return false;
     this.#take(res);
+    // the whole video asked for: a scene its frames find is not read in its place
+    if (!next.moments.length && !this.stated) this.#keepApart();
     this.onstated();
     const now = { video: this.star, moments: plain(this.moments) };
     const words = before.video !== now.video
@@ -262,6 +381,7 @@ export class ProofScene {
     this.#keepRefusals();
     if (!this.held || !this.stated) return;
     const { video, moments, draft } = this.stated;
+    this.#epoch += 1;
     try {
       const res = await this.api.put(`/api/cases/${caseId}/proofs/${encodeURIComponent(name)}/scene`, {
         moments: plain(moments),
@@ -278,6 +398,7 @@ export class ProofScene {
 
   /** The scene as the server now reads it. */
   #take(res) {
+    this.#epoch += 1;
     this.held = false;
     this.stated = res?.stated
       ? { video: res.video, moments: sortMoments(plain(res.moments)), draft: res.draft ?? null }

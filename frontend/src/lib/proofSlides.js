@@ -86,10 +86,11 @@ function draftTile(row, geolocating, thumbOf) {
  * open here when the server does not list it yet, then the abandoned ones.
  *
  * `answer` is what `/scenes` answered, or null. `open` is the slide on screen:
- * `{ started, name, title, draft, thumb, page }`, `name` the saved proof's (null before
- * its first save), `draft` the scene the slide takes up (made from it, or found by its
- * frames), whose place it stands in while the server still lists that scene, and
- * `page` the scene whose page is shown in place of a proof.
+ * `{ started, name, title, draft, thumb, time, page }`, `name` the saved proof's (null
+ * before its first save), `draft` the scene the slide takes up (made from it, or found by
+ * its frames), whose place it stands in while the server still lists that scene, `time`
+ * the time its Scene tab reads, which its tile says rather than the server's older one,
+ * and `page` the scene whose page is shown in place of a proof.
  * `thumbOf(path)` is a case file's thumbnail, for a scene's first capture.
  *
  * Each tile: `{ key, kind, state, title, time, words, thumb, color, number, current }`,
@@ -131,16 +132,22 @@ export function slideTiles(answer, open = {}, { thumbOf = null } = {}) {
   return [...live, ...left].map((tile, i) => ({ ...tile, number: i + 1 }));
 }
 
-/** The saved slide open: its row's tile, else the one its save answered, in `color`. */
+/**
+ * The saved slide open: its row's tile, else the one its save answered, in `color`. Its
+ * time is the one its Scene tab reads, a scene its frames found included, as the server
+ * lists it only once that is written.
+ */
 function savedTile(open, row, color) {
   const tile = row
     ? proofTile(row)
     : { key: `proof:${open.name}`, kind: 'proof', name: open.name, state: PROVED, title: open.name, time: '', words: '', thumb: null };
-  return { ...tile, current: true, thumb: open.thumb || tile.thumb, title: open.title || tile.title, color };
+  const time = open.time ?? tile.time;
+  const words = tile.words === tile.time ? time : tile.words;
+  return { ...tile, time, words, current: true, thumb: open.thumb || tile.thumb, title: open.title || tile.title, color };
 }
 
 function newTile(open, color, key) {
-  return { key, kind: 'new', state: NEW, title: open.title || 'New slide', time: '', words: WORDS[NEW], thumb: null, color, current: true };
+  return { key, kind: 'new', state: NEW, title: open.title || 'New slide', time: open.time ?? '', words: WORDS[NEW], thumb: null, color, current: true };
 }
 
 /** The slide `step` tiles from `key`, or null past either end. With no slide shown, the first or the last. */
