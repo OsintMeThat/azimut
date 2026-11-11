@@ -229,6 +229,17 @@ _WINDOWS_RESERVED = frozenset(
 )
 
 
+#: What a proof and a post are called until the analyst names them (frontend
+#: `lib/naming.js` NAME_PREFIX): "Proof 3", "Post 41". A name of that shape is the
+#: file's, never shown as the item's name, which reads as its label instead.
+DEFAULT_PREFIX = {"proof": "Proof", "draft": "Post"}
+
+
+def is_default_name(name: str | None, kind: str) -> bool:
+    """Whether `name` is one the app gave rather than one the analyst typed."""
+    return re.fullmatch(rf"{DEFAULT_PREFIX[kind]} \d+", (name or "").strip()) is not None
+
+
 def slugify(text: str | None, fallback: str, *, limit: int = MAX_SLUG) -> str:
     """A human-readable, cross-platform filename stem.
 

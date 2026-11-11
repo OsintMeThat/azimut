@@ -58,9 +58,9 @@ describe('the tiles', () => {
     const { tiles, more } = sheetTiles([slide(1), slide(2, { moments: [] }), slide(3, { moments: [{ start: 3.2, end: null }] })]);
     expect(more).toBe(0);
     expect(tiles).toEqual([
-      { number: 1, title: 'Place 1', time: '[0:10–0:15]', short: '[0:10–0:15]', png: 'proofs/p1.png' },
-      { number: 2, title: 'Place 2', time: '', short: '', png: 'proofs/p2.png' },
-      { number: 3, title: 'Place 3', time: '[0:03]', short: '[0:03]', png: 'proofs/p3.png' },
+      { number: 1, time: '[0:10–0:15]', short: '[0:10–0:15]', png: 'proofs/p1.png' },
+      { number: 2, time: '', short: '', png: 'proofs/p2.png' },
+      { number: 3, time: '[0:03]', short: '[0:03]', png: 'proofs/p3.png' },
     ]);
   });
 
@@ -106,17 +106,18 @@ describe('the layout', () => {
 });
 
 describe('the sheet', () => {
-  it('is a JPEG under Bluesky\'s picture size, in fixed colours, numbered, titled and timed', async () => {
+  it('is a JPEG under Bluesky\'s picture size, in fixed colours, numbered and timed, with no title', async () => {
     const { made, makeCanvas } = recorder();
     const pics = pictures();
-    const blob = await buildProofSheet([slide(1), slide(2, { moments: [] })], { video: 'Convoy', makeCanvas, loadPicture: pics.loadPicture });
+    const blob = await buildProofSheet([slide(1), slide(2, { moments: [] })], { makeCanvas, loadPicture: pics.loadPicture });
 
     expect(blob.type).toBe('image/jpeg');
     expect(blob.size).toBeLessThanOrEqual(SHEET_MAX_BYTES);
     const [canvas] = made;
     expect([canvas.width, canvas.height]).toEqual([1600, 900]);
     const texts = canvas.calls.filter((c) => c.op === 'fillText').map((c) => c.text);
-    expect(texts).toEqual(expect.arrayContaining(['Convoy', '2 places', '1', '2', 'Place 1', 'Place 2', '[0:10–0:15]']));
+    // the numbers and the time, and nothing else: `#scenes` is the legend
+    expect(texts).toEqual(['1', '[0:10–0:15]', '2']);
     // the whole-video proof prints no time
     expect(texts.filter((t) => /\d:\d\d/.test(t))).toEqual(['[0:10–0:15]']);
     // the page is the sheet's own colour, whatever the app's theme
@@ -152,7 +153,7 @@ describe('the sheet', () => {
   });
 
   it('says the first time and counts the rest in a cell too narrow for them all', async () => {
-    const { made, makeCanvas } = recorder({ charWidth: 5 });
+    const { made, makeCanvas } = recorder({ charWidth: 9 });
     const pics = pictures();
     const many = Array.from({ length: 48 }, (_, i) => slide(i + 1, { moments: [{ start: 0, end: 7 }, { start: 185, end: 192 }] }));
     await buildProofSheet(many, { makeCanvas, loadPicture: pics.loadPicture });
@@ -173,13 +174,13 @@ describe('the sheet', () => {
     expect(made[0].calls.filter((c) => c.op === 'drawImage')).toHaveLength(1);
   });
 
-  it('says how many places there are when it shows the first 48', async () => {
+  it('shows the first 48 places and draws no more', async () => {
     const { made, makeCanvas } = recorder();
     const pics = pictures();
     await buildProofSheet(Array.from({ length: 50 }, (_, i) => slide(i + 1)), { makeCanvas, loadPicture: pics.loadPicture });
     expect(pics.log).toHaveLength(48);
     const texts = made[0].calls.filter((c) => c.op === 'fillText').map((c) => c.text);
-    expect(texts).toContain('50 places, the first 48 shown');
+    expect(texts.filter((t) => /^\d+$/.test(t)).at(-1)).toBe('48');
   });
 
   it('lowers the quality a step at a time until the picture is small enough', async () => {

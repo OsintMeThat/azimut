@@ -1,5 +1,6 @@
 """What a video thread files for its posts: the clip cut for a post, one passage of a
-proof's ★ video as a case file of its own, and the thread's contact sheet.
+proof's ★ video as a case file of its own, and the thread's recap picture, its contact
+sheet or its recap map.
 
 A video thread posts the video a proof is about, and a long clip is past what a
 platform takes, or simply too long to watch for one place. The analyst cuts the
@@ -25,7 +26,8 @@ ffmpeg runs at a time, however many cuts are asked for.
 
 **The contact sheet** (`file_sheet`) is drawn in the browser from the proofs' saved
 pictures (frontend `lib/proofSheet.js`) and filed here in Media, made from its video as
-a clip is. The same picture filed twice is one file.
+a clip is. The same picture filed twice is one file. **The recap map** (frontend
+`lib/recapMap.js`, the places on a map) is filed the same way, as a picture of its own.
 """
 
 from __future__ import annotations
@@ -86,6 +88,10 @@ NO_FFMPEG = "cutting a clip needs ffmpeg; the release binaries bring it, a pip i
 #: The contact sheet: a JPEG (or a PNG) of 1600 × 900 under 1 MB as the browser draws it,
 #: with room either side, and its record beside a clip's.
 SHEET_OP = "sheet"
+#: The recap map, filed as the sheet is, under the same bounds.
+MAP_OP = "map"
+#: What each recap picture is called after its video's name in Media.
+RECAP_WORDS = {SHEET_OP: "contact sheet", MAP_OP: "recap map"}
 SHEET_MAX_BYTES = 2_000_000
 SHEET_MAX_SIDE = 3200
 SHEET_FORMATS = {"JPEG": ".jpg", "PNG": ".png"}
@@ -343,11 +349,11 @@ def run(case: Case, cut: Cut, set_progress: Callable[[dict[str, Any]], None]) ->
     return {"clip": scene_engine.clip_file(case, clip)}
 
 
-def _sheet_picture(data: bytes) -> str:
-    """The suffix a contact sheet is filed with, once its bytes read as one: a JPEG or a
+def _sheet_picture(data: bytes, words: str = RECAP_WORDS[SHEET_OP]) -> str:
+    """The suffix a recap picture is filed with, once its bytes read as one: a JPEG or a
     PNG of a sheet's size, refused past the pixel clamp before it is decoded."""
     if len(data) > SHEET_MAX_BYTES:
-        raise BadClip("a contact sheet is under 2 MB")
+        raise BadClip(f"a {words} is under 2 MB")
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -355,28 +361,30 @@ def _sheet_picture(data: bytes) -> str:
                 kind, size = picture.format, picture.size
                 picture.verify()
     except (Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
-        raise BadClip("the contact sheet is too large a picture") from exc
+        raise BadClip(f"the {words} is too large a picture") from exc
     except Exception as exc:
-        raise BadClip("the contact sheet is not a readable picture") from exc
+        raise BadClip(f"the {words} is not a readable picture") from exc
     if kind not in SHEET_FORMATS or max(size) > SHEET_MAX_SIDE:
-        raise BadClip("a contact sheet is a JPEG or a PNG of 1600 by 900")
+        raise BadClip(f"a {words} is a JPEG or a PNG of 1600 by 900")
     return SHEET_FORMATS[kind]
 
 
-def file_sheet(case: Case, video: str, data: bytes) -> dict[str, Any]:
-    """File a video thread's contact sheet in Media, named after the video and made from
-    it. Answers its path, the one already in the case when the same picture was filed."""
+def file_sheet(case: Case, video: str, data: bytes, op: str = SHEET_OP) -> dict[str, Any]:
+    """File a video thread's recap picture in Media, its contact sheet or (``op`` "map")
+    its recap map, named after the video and made from it. Answers its path, the one
+    already in the case when the same picture was filed."""
+    words = RECAP_WORDS[op]
     entity = case.find_entity(attr="path", value=video)
     items = case.media_items_by_paths([video]) if entity and entity.get("type") == "media" else []
     if not items or items[0].get("kind") != "video":
         raise BadClip("that file is not a video of the case")
-    suffix = _sheet_picture(data)
-    title = f"{scene_engine.file_title(items[0], video)} contact sheet"
+    suffix = _sheet_picture(data, words)
+    title = f"{scene_engine.file_title(items[0], video)} {words}"
     source = {
-        "type": SOURCE_TYPE, "op": SHEET_OP, "from": video,
+        "type": SOURCE_TYPE, "op": op, "from": video,
         "from_sha256": (entity or {}).get("attrs", {}).get("sha256"), "at": _now(),
     }
-    temporary = case.subdir("media") / f".sheet-{uuid.uuid4().hex}{suffix}"
+    temporary = case.subdir("media") / f".{op}-{uuid.uuid4().hex}{suffix}"
     try:
         temporary.write_bytes(data)
         filed = media_engine.import_produced_file(case, temporary, f"{title}{suffix}", source, by="post")

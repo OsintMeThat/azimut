@@ -278,14 +278,15 @@ test('starts a new scene in the look of the slide left, with no panel, point or 
   await openProof(page, 'bridge', 'Road bridge');
 
   await slides(page).getByRole('button', { name: 'New scene' }).click();
-  await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue('Proof 1');
+  // a new slide has no name: it files under a technical one the header never shows
+  await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue('');
   await expect(page.locator('.panel-row')).toHaveCount(0);
   // the Scene tab, its player on the video, is where the next step is
   await expect(page.getByRole('tablist', { name: 'Proof settings' }).getByRole('tab', { name: 'Scene' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('scene-player')).toBeVisible();
   // the strip shows it, not saved, after the live scenes and before the abandoned one
   await expect(tiles(page)).toHaveCount(6);
-  await expect(tiles(page).nth(4)).toHaveText(/Proof 1\s*Not saved/);
+  await expect(tiles(page).nth(4)).toHaveText(/New slide\s*Not saved/);
   await expect(tiles(page).nth(4)).toHaveAttribute('aria-selected', 'true');
   // nothing was owed: the bridge had no change
   expect(saves).toHaveLength(0);
@@ -453,7 +454,8 @@ test('posts this video\'s slides as one thread in Post: Recap first, saved, and 
   await expect(page.getByTestId('video-thread')).toBeVisible();
   const labels = page.locator('.tweet-block .tweet-head .label');
   await expect(labels).toHaveText(['Recap', 'Video', 'Road bridge', 'Market', 'Square']);
-  await expect(page.locator('.tweet-block textarea').first()).toHaveValue(/^Clip\n\n1\. \[0:00–0:00\] Road bridge\n2\. Market\n3\. Square\n\n@GeoConfirmed$/);
+  // no title until the analyst gives one: the recap opens on its places
+  await expect(page.locator('.tweet-block textarea').first()).toHaveValue(/^1\. \[0:00–0:00\] Road bridge\n2\. Market\n3\. Square\n\n@GeoConfirmed$/);
   await expect(page.getByTestId('video-thread').locator('.vt-order.on .vt-order-name')).toHaveText('Recap first');
   await expect.poll(() => fixture.draftWrites.at(-1)?.state?.sheet).toBe('media/Clip contact sheet.jpg');
   expect(sheets).toHaveLength(1);
@@ -465,7 +467,7 @@ test('posts this video\'s slides as one thread in Post: Recap first, saved, and 
   await page.locator('.tool-header').getByRole('button', { name: 'Open' }).click();
   const list = page.getByRole('dialog', { name: 'Open a post' });
   await expect(list.locator('.ol-sub')).toHaveText([/^Video thread · X · /]);
-  await list.locator('.ol-open', { hasText: 'Clip' }).click();
+  await list.locator('.ol-open').first().click();
   await expect(labels).toHaveText(['Recap', 'Video', 'Road bridge', 'Market', 'Square']);
   await expect(page.getByTestId('video-thread').locator('.vt-order.on .vt-order-name')).toHaveText('Recap first');
   await expect(page.locator('.tweet-block .first-pics img')).toHaveAttribute('src', /Clip%20contact%20sheet\.jpg/);

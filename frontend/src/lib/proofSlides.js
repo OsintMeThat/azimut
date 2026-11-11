@@ -12,6 +12,8 @@
  * keeps of the one before it: the look, never the content.
  */
 import { templateFromProof } from './composer.js';
+import { ownName } from './naming.js';
+import { proofLabel } from './proofList.js';
 import { countWords } from './sceneCounts.js';
 import { isAbandoned, sceneColorAt, sceneList, sceneMoments, sceneTime, sceneTitle, unplaced } from './scenes.js';
 
@@ -47,7 +49,9 @@ function proofTile(row) {
     name: row.proof,
     state,
     unplaced: open,
-    title: sceneTitle(row),
+    // its label (`proofLabel`), and the name the analyst gave it, '' for none, for Rename
+    title: proofLabel(row),
+    own: ownName(sceneTitle(row), 'proof'),
     time: sceneTime(row),
     words: state === ABANDONED ? WORDS[ABANDONED] : !picture ? WORDS[NO_PICTURE] : open ? WORDS.unplaced : sceneTime(row),
     thumb: row.thumb || null,
@@ -140,14 +144,17 @@ export function slideTiles(answer, open = {}, { thumbOf = null } = {}) {
 function savedTile(open, row, color) {
   const tile = row
     ? proofTile(row)
-    : { key: `proof:${open.name}`, kind: 'proof', name: open.name, state: PROVED, title: open.name, time: '', words: '', thumb: null };
+    : { key: `proof:${open.name}`, kind: 'proof', name: open.name, state: PROVED, title: proofLabel({ title: open.name }), own: '', time: '', words: '', thumb: null };
   const time = open.time ?? tile.time;
   const words = tile.words === tile.time ? time : tile.words;
-  return { ...tile, time, words, current: true, thumb: open.thumb || tile.thumb, title: open.title || tile.title, color };
+  // the name in the header as it is typed, else the label the case gives it
+  const own = ownName(open.title, 'proof');
+  return { ...tile, time, words, current: true, thumb: open.thumb || tile.thumb, title: own || tile.title, own, color };
 }
 
 function newTile(open, color, key) {
-  return { key, kind: 'new', state: NEW, title: open.title || 'New slide', time: open.time ?? '', words: WORDS[NEW], thumb: null, color, current: true };
+  const own = ownName(open.title, 'proof');
+  return { key, kind: 'new', state: NEW, title: own || 'New slide', own, time: open.time ?? '', words: WORDS[NEW], thumb: null, color, current: true };
 }
 
 /** The slide `step` tiles from `key`, or null past either end. With no slide shown, the first or the last. */

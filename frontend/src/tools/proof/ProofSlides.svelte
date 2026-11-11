@@ -251,7 +251,8 @@
   }
 
   async function askName() {
-    rename = menu.tile.title;
+    // the name the analyst gave it, else nothing: a label is no name to keep
+    rename = menu.tile.own ?? menu.tile.title;
     menu = { ...menu, renaming: true };
     await tick();
     document.querySelector('.slide-name input')?.select();
@@ -428,7 +429,7 @@
         </form>
       {:else if menu.renaming}
         <form class="slide-name" onsubmit={(event) => { event.preventDefault(); if (rename.trim()) act('rename', rename.trim()); }}>
-          <input class="input" aria-label="New name" maxlength="200" dir="auto" title={HELP.name} bind:value={rename} />
+          <input class="input" aria-label="New name" maxlength="200" dir="auto" title={HELP.name} placeholder="Name" bind:value={rename} />
           <button class="btn btn-xs" disabled={!rename.trim()}>Rename</button>
         </form>
       {:else}

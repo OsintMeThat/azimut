@@ -1,7 +1,8 @@
 <script>
   /**
    * A video thread's own column in the composer, above the mention and the source: the
-   * video it posts and its places (with the proofs it leaves out, and why), the order
+   * video it posts and its places (with the proofs it leaves out, and why), the thread's
+   * title (`#video`, the analyst's own words, empty unless they give some), the order
    * the posts go out in, the contact sheet while it is made, and, when the video is over
    * the platform's limit, what can go in its place: the clip a proof cut for its post
    * (Cut for the post, Geo Proof's Scene tab), else the video's link. Nothing is cut or
@@ -12,11 +13,17 @@
   import { LEFT_WHY, ORDER_NAMES, ORDER_WORDS, ORDERS } from '../../lib/videoThread.js';
 
   let {
-    /** The video's title as Media gives it, or its file name. */
+    /** The video's title as Media gives it, or its file name: which video this is. */
     title = '',
-    /** The places the thread posts, `{ name, title, clip }`, null while read. */
+    /** The thread's title, `#video`: the analyst's, '' for none. */
+    threadTitle = '',
+    /** `(text)`: the thread's title typed. */
+    ontitle,
+    /** Recap first's picture, its choice and its map (`RecapMap.svelte`), shown under the orders. */
+    recap = null,
+    /** The places the thread posts, `{ name, label, clip }`, null while read. */
     places = null,
-    /** The proofs it leaves out, `{ title, why }`. */
+    /** The proofs it leaves out, `{ label, why }`. */
     left = [],
     /** How many places a thread could not hold. */
     cut = 0,
@@ -55,9 +62,15 @@
       </span>
     </span>
   </div>
+  <label class="vt-field">
+    <span class="label">Thread title</span>
+    <input class="input" value={threadTitle} maxlength="200" placeholder="Optional, e.g. Convoy on the coast road"
+      title="The thread's first line, #video in its texts. Left empty, its line drops"
+      oninput={(event) => ontitle?.(event.currentTarget.value)} />
+  </label>
   {#if left.length}
-    <p class="vt-note" title={left.map((one) => `${one.title}: ${LEFT_WHY[one.why]}`).join('\n')}>
-      Left out: {left.map((one) => `${one.title} (${LEFT_WHY[one.why].toLowerCase()})`).join(', ')}
+    <p class="vt-note" title={left.map((one) => `${one.label}: ${LEFT_WHY[one.why]}`).join('\n')}>
+      Left out: {left.map((one) => `${one.label} (${LEFT_WHY[one.why].toLowerCase()})`).join(', ')}
     </p>
   {/if}
   {#if cut}
@@ -75,6 +88,8 @@
     {/each}
   </div>
 
+  {#if order === 'recap' && recap}{@render recap()}{/if}
+
   {#if sheet === 'making'}
     <p class="vt-note" role="status">Drawing the contact sheet…</p>
   {:else if sheet === 'failed'}
@@ -84,7 +99,7 @@
 
   {#if clip || link}
     <p class="vt-note" data-testid="video-instead">
-      {#if chosen}The video's post carries the clip of {chosen.title} ({clipWords(chosen.clip)}).{:else if clip}The video's post carries a clip of it.{:else}The video's post carries its link.{/if}
+      {#if chosen}The video's post carries the clip of {chosen.label} ({clipWords(chosen.clip)}).{:else if clip}The video's post carries a clip of it.{:else}The video's post carries its link.{/if}
       <button type="button" class="vt-link" onclick={() => (link ? onlink?.(false) : onclip?.(null))}>Post the whole video</button>
     </p>
   {:else if over}
@@ -94,8 +109,8 @@
         <p class="vt-over-said">Post the clip a place cut instead:</p>
         {#each clips as one (one.name)}
           <button type="button" class="btn btn-sm vt-choice" onclick={() => onclip?.(one.clip.path)}
-            title={`The clip of ${one.title}, cut for its post`}>
-            <Icon name="video" size={13} /> {one.title} · {clipWords(one.clip)}
+            title={`The clip of ${one.label}, cut for its post`}>
+            <Icon name="video" size={13} /> {one.label} · {clipWords(one.clip)}
           </button>
         {/each}
       {:else}
@@ -126,6 +141,7 @@
   .vt-words { display: flex; flex-direction: column; min-width: 0; }
   .vt-title { overflow: hidden; color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .vt-said { color: var(--text-3); font-size: var(--fs-xs); }
+  .vt-field { display: flex; flex-direction: column; gap: 4px; }
   .vt-note { margin: 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; }
   .vt-note.warn { color: var(--warn); }
   .vt-orders { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }

@@ -25,9 +25,18 @@ vi.mock('../lib/extBridge.js', () => ({
   onPostHandoffReport: () => () => {},
 }));
 
-// the sheet is drawn by the browser's canvas, which happy-dom has not: its filing is the subject here
-const sheets = vi.hoisted(() => ({ file: null }));
-vi.mock('./post/threadSheet.js', () => ({ fileThreadSheet: (...args) => sheets.file(...args) }));
+// the sheet and the map are drawn by the browser's canvas, which happy-dom has not: what is
+// asked of them, and their filing, are the subject here
+const sheets = vi.hoisted(() => ({ file: null, map: null, preview: null, build: null }));
+vi.mock('./post/threadSheet.js', () => ({
+  fileThreadSheet: (...args) => sheets.file(...args),
+  fileRecapMap: (...args) => sheets.map(...args),
+}));
+vi.mock('../lib/recapMap.js', async (original) => ({
+  ...(await original()),
+  recapMapPreview: (...args) => sheets.preview(...args),
+  buildRecapMap: (...args) => sheets.build(...args),
+}));
 
 const { caseState, prefs, templatesState, uiState } = await import('../lib/state.svelte.js');
 const { default: PostComposer } = await import('./PostComposer.svelte');
@@ -37,6 +46,7 @@ const { VIDEO_THREAD_STARTERS } = await import('../lib/post.js');
 const CASE = { id: 'case-1', folders: [], entities: [] };
 const VIDEO = 'media/convoy.mp4';
 const SHEET = 'media/Convoy on the coast road contact sheet.jpg';
+const MAP = 'media/Convoy on the coast road recap map.jpg';
 const CLIP = 'media/Convoy on the coast road 0m00s–0m07s.mp4';
 const SOURCE = 'https://x.com/example/status/1';
 
@@ -64,7 +74,8 @@ const MEDIA = [
   { path: VIDEO, kind: 'video', title: 'Convoy on the coast road', size: 48_000_000, source: { type: 'download', url: SOURCE, webpage_url: SOURCE } },
   { path: 'media/lone.mp4', kind: 'video', title: 'Lone clip', size: 1_000_000, source: { type: 'upload' } },
 ];
-const RECAP = 'Convoy on the coast road\n\n1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n3. Hilltop village\n\n@GeoConfirmed';
+// a thread opens with no title: the analyst gives one, or its line drops
+const RECAP = '1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n3. Hilltop village\n\n@GeoConfirmed';
 const PLACES = [
   'The convoy crosses the road bridge south of the port\n[0:00–0:07]\n\n48.850000, 2.350000',
   'Port gate\n[0:15]\n\n48.860000, 2.360000',
@@ -115,6 +126,23 @@ const posts = () => [...target.querySelectorAll('.tweet-block')].map((block) => 
   text: block.querySelector('textarea')?.value ?? '',
 }));
 const toasts = () => uiState.toasts.map((t) => t.message);
+const titleField = () => panel().querySelector('.vt-field input');
+const recapPicture = () => panel().querySelector('[data-testid="recap-picture"]');
+/** Recap first's picture: the proofs sheet, filed as the thread's recap carries it. */
+async function pickSheet() {
+  button(recapPicture(), 'Proofs sheet').click();
+  await settle();
+}
+/** Make the map, filed for the recap. */
+async function makeMap() {
+  button(recapPicture(), 'Make the map').click();
+  await settle();
+}
+function typeTitle(text) {
+  titleField().value = text;
+  titleField().dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
 
 /** New post → Video thread → this video. */
 async function startFromGallery(title = 'Convoy on the coast road') {
@@ -146,6 +174,9 @@ beforeEach(() => {
     return {};
   });
   sheets.file = vi.fn(async () => SHEET);
+  sheets.map = vi.fn(async () => MAP);
+  sheets.preview = vi.fn(async () => ({ url: 'blob:preview', missing: 0, revoke: vi.fn() }));
+  sheets.build = vi.fn(async () => ({ blob: new Blob(['map'], { type: 'image/jpeg' }), missing: 0 }));
   bridge.installed = null;
   bridge.handOffPost = vi.fn(async () => true);
   prefs.postTemplate = '';
@@ -154,6 +185,9 @@ beforeEach(() => {
   prefs.postTarget = 'x';
   prefs.postPrefill = true;
   templatesState.post = [];
+  templatesState.proof = [];
+  prefs.proofTemplate = '';
+  prefs.signatureHandle = '';
   uiState.toasts.splice(0);
   uiState.tool = 'post';
   uiState.postProof = null;
@@ -224,9 +258,10 @@ describe('where a thread is offered', () => {
 });
 
 describe('Recap first, as it opens', () => {
-  it('lays out the places on the sheet, the video with its link, then a post per place', async () => {
+  it('lays out the places on a map, the video with its link, then a post per place', async () => {
     await startFromGallery();
-    expect(target.querySelector('.title-input').value).toBe('Convoy on the coast road');
+    // named after neither the video nor a place: no name until the analyst gives one
+    expect(target.querySelector('.title-input').value).toBe('');
     expect(panel().querySelector('.vt-title').textContent).toBe('Convoy on the coast road');
     expect(panel().querySelector('.vt-said').textContent.trim()).toBe('3 places');
     expect(panel().querySelector('.vt-order.on .vt-order-name').textContent).toBe('Recap first');
@@ -237,6 +272,23 @@ describe('Recap first, as it opens', () => {
       { num: '4', label: 'Port gate', text: PLACES[1] },
       { num: '5', label: 'Hilltop village', text: PLACES[2] },
     ]);
+    // places that stand apart: the map, previewed, made on a press; no sheet filed meanwhile
+    expect(recapPicture().querySelector('[role="radio"][aria-checked="true"]').textContent).toBe('Map');
+    expect(sheets.file).not.toHaveBeenCalled();
+    expect(target.querySelector('.first-pics img')).toBeNull();
+    await makeMap();
+    expect(sheets.map).toHaveBeenCalledWith(CASE.id, { video: VIDEO, blob: expect.any(Blob) });
+    expect(target.querySelector('.first-pics img').getAttribute('src')).toContain(encodeURIComponent('recap map'));
+    expect(recapPicture().querySelector('[data-testid="recap-made"]').textContent).toContain('On the recap');
+    // the fields a geolocation asks for are the places' own here
+    for (const id of ['#pc-desc', '#pc-coords', '#pc-place', '#pc-date']) expect(target.querySelector(id), id).toBeNull();
+    expect(target.querySelector('#pc-mention').value).toBe('@GeoConfirmed');
+    expect(target.querySelector('#pc-source').value).toBe(SOURCE);
+  });
+
+  it('files the proofs sheet for the recap once it is picked', async () => {
+    await startFromGallery();
+    await pickSheet();
     // the sheet is filed for the recap, from the places in clip order
     expect(sheets.file).toHaveBeenCalledTimes(1);
     const [caseId, asked] = sheets.file.mock.calls[0];
@@ -244,19 +296,17 @@ describe('Recap first, as it opens', () => {
     expect(asked.video).toBe(VIDEO);
     expect(asked.slides.map((one) => one.name)).toEqual(['bridge', 'gate', 'village']);
     expect(target.querySelector('.first-pics img').getAttribute('src')).toContain(encodeURIComponent('contact sheet'));
-    // the fields a geolocation asks for are the places' own here
-    for (const id of ['#pc-desc', '#pc-coords', '#pc-place', '#pc-date']) expect(target.querySelector(id), id).toBeNull();
-    expect(target.querySelector('#pc-mention').value).toBe('@GeoConfirmed');
-    expect(target.querySelector('#pc-source').value).toBe(SOURCE);
   });
 
   it('saves itself as a video thread, each post carrying its files', async () => {
     await startFromGallery();
+    await makeMap();
     await saved();
     const state = draftWrites().at(-1)[1].state;
     expect(state).toMatchObject({
-      kind: 'video', video: VIDEO, order: 'recap', first: 'recap', sheet: SHEET, mediaEnabled: false,
-      firstMedia: [SHEET], firstMediaType: 'images', tweet1: RECAP,
+      kind: 'video', video: VIDEO, order: 'recap', first: 'recap', recap: 'map', map: MAP, mediaEnabled: false,
+      mapOptions: { background: 'satellite', line: false, signature: false, mark: false },
+      firstMedia: [MAP], firstMediaType: 'images', tweet1: RECAP,
       posts: VIDEO_THREAD_STARTERS[0].posts.map((one) => ({ ...one })),
     });
     expect(state.extraTweets.map((one) => [one.key, one.mediaType, one.mediaPaths])).toEqual([
@@ -265,12 +315,13 @@ describe('Recap first, as it opens', () => {
       ['place:gate', 'images', ['proofs/gate.png']],
       ['place:village', 'images', ['proofs/village.png']],
     ]);
-    expect('clip' in state || 'link' in state).toBe(false);
+    expect('clip' in state || 'link' in state || 'sheet' in state).toBe(false);
   });
 
   it('hands the whole thread to the extension, each post with its files', async () => {
     bridge.installed = '0.3.4';
     await startFromGallery();
+    await pickSheet();
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: vi.fn(async () => {}) } });
     target.querySelector('[data-guide="post.publish"]').click();
     await settle();
@@ -310,6 +361,54 @@ describe('Recap first, as it opens', () => {
   });
 });
 
+describe('the thread\'s title', () => {
+  it('is empty until the analyst gives one, never the video\'s name, and its line comes and goes with it', async () => {
+    await startFromGallery();
+    expect(titleField().value).toBe('');
+    expect(titleField().placeholder).toMatch(/^Optional/);
+    expect(posts()[0].text).toBe(RECAP);
+    typeTitle('Convoy at dawn');
+    expect(posts()[0].text).toBe(`Convoy at dawn\n\n${RECAP}`);
+    await saved();
+    expect(draftWrites().at(-1)[1].state.title).toBe('Convoy at dawn');
+    // cleared, its line drops again
+    typeTitle('');
+    expect(posts()[0].text).toBe(RECAP);
+    await saved();
+    expect(draftWrites().at(-1)[1].state.title).toBe('');
+  });
+
+  it('a thread saved before it had one says the video\'s title, as it did', async () => {
+    lists.drafts = [{ name: 'Convoy', title: 'Convoy', target: 'x', kind: 'video', video: VIDEO, posts: 2 }];
+    lists.saved = { Convoy: { title: 'Convoy', state: {
+      kind: 'video', video: VIDEO, order: 'video', first: 'video', posts: VIDEO_THREAD_STARTERS[1].posts,
+      body: VIDEO_THREAD_STARTERS[1].body, mention: '@GeoConfirmed', source: SOURCE, target: 'x',
+      tweet1: `Convoy on the coast road\n\n@GeoConfirmed\n\nSource: ${SOURCE}`, tweet1Edited: false,
+      firstMedia: [VIDEO], firstMediaType: 'video', mediaEnabled: false, mediaType: 'none',
+      extraTweets: [{ text: PLACES[1], mediaPaths: ['proofs/gate.png'], mediaType: 'images', isMediaTweet: true, mediaTextIncludesPrefix: true, key: 'place:gate' }],
+    } } };
+    await mountPost();
+    home().querySelector('.ph-open').click();
+    await settle();
+    expect(titleField().value).toBe('Convoy on the coast road');
+    expect(posts()[0].text).toBe(`Convoy on the coast road\n\n@GeoConfirmed\n\nSource: ${SOURCE}`);
+    await saved();
+    expect(draftWrites()).toHaveLength(0);
+  });
+
+  it('prints on no picture: the sheet and the map are asked for with the places alone', async () => {
+    await startFromGallery();
+    typeTitle('Convoy at dawn');
+    await makeMap();
+    const [places, , options, deps] = sheets.build.mock.calls[0];
+    expect(places.map((one) => one.number)).toEqual([1, 2, 3]);
+    expect(JSON.stringify([places, options, Object.keys(deps)])).not.toContain('Convoy at dawn');
+    await pickSheet();
+    const [, asked] = sheets.file.mock.calls[0];
+    expect(Object.keys(asked).sort()).toEqual(['slides', 'video']);
+  });
+});
+
 describe('the order', () => {
   it('changes where each post goes and keeps the words written on one', async () => {
     await startFromGallery();
@@ -320,14 +419,14 @@ describe('the order', () => {
     button(panel(), 'Video first The video, then a post per place').click();
     await settle();
     expect(posts().map((p) => p.label)).toEqual(['Video', 'Road bridge', 'Port gate', 'Hilltop village']);
-    expect(posts()[0].text).toBe(`Convoy on the coast road\n\n@GeoConfirmed\n\nSource: ${SOURCE}`);
+    expect(posts()[0].text).toBe(`@GeoConfirmed\n\nSource: ${SOURCE}`);
     expect(posts()[2].text).toBe('The gate, as I say it');
     button(panel(), 'All in one One post with the places and their pictures').click();
     await settle();
     expect(posts()).toHaveLength(1);
     expect(posts()[0].text).toBe(`${RECAP}\n\nSource: ${SOURCE}`);
     // back where it started: the recap's words, and the place's as written
-    button(panel(), 'Recap first The places on the contact sheet, then the video, then a post per place').click();
+    button(panel(), 'Recap first The places on a map or the proofs sheet, then the video, then a post per place').click();
     await settle();
     expect(posts().map((p) => p.text)).toEqual([RECAP, `Source: ${SOURCE}`, PLACES[0], 'The gate, as I say it', PLACES[2]]);
   });
@@ -339,9 +438,121 @@ describe('the order', () => {
     } }];
     prefs.postKindTemplates = { video: 'po_v' };
     await startFromGallery();
+    typeTitle('Convoy on the coast road');
     expect(posts().map((p) => p.text)).toEqual([
       'Convoy on the coast road by @Desk', '[0:00–0:07]', '[0:15]', '', 'Follow for more',
     ]);
+  });
+});
+
+describe('the recap map', () => {
+  const radios = (name) => [...recapPicture().querySelectorAll(`[role="radiogroup"][aria-label="${name}"] [role="radio"]`)];
+  const lastPreview = () => sheets.preview.mock.calls.at(-1);
+  const check = (name) => [...recapPicture().querySelectorAll('label.rm-check')].find((one) => one.textContent.trim() === name).querySelector('input');
+
+  it('is previewed on a plain ground, no tile asked for, until the analyst asks for the map', async () => {
+    const fetchSpy = vi.fn(async () => new Response(new Blob()));
+    vi.stubGlobal('fetch', fetchSpy);
+    await startFromGallery();
+    expect(sheets.preview).toHaveBeenCalled();
+    const [places, fit, options, deps] = lastPreview();
+    // numbered as #scenes numbers them, each in its scene's colour, all of them framed
+    expect(places.map((one) => [one.number, one.name])).toEqual([[1, 'bridge'], [2, 'gate'], [3, 'village']]);
+    expect(new Set(places.map((one) => one.colour)).size).toBe(3);
+    expect(fit.ok).toBe(true);
+    expect(options).toEqual({ background: 'satellite', line: false, signature: false, mark: false });
+    expect(deps.loadTile).toBeNull();
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('/api/tiles'))).toBe(false);
+    expect(recapPicture().querySelector('.rm-preview img').getAttribute('src')).toBe('blob:preview');
+
+    button(recapPicture(), 'Show the map').click();
+    await settle();
+    expect(typeof lastPreview()[3].loadTile).toBe('function');
+    expect(button(recapPicture(), 'Show the map')).toBeUndefined();
+  });
+
+  it('redraws the preview as a choice changes, and a map made before is made again', async () => {
+    await startFromGallery();
+    await makeMap();
+    expect(posts()[0].text).toBe(RECAP);
+    expect(target.querySelector('.first-pics img')).not.toBeNull();
+    check('Line in video order').click();
+    await settle();
+    expect(lastPreview()[2]).toMatchObject({ line: true, background: 'satellite' });
+    // the map on the recap was another: it is made again before it goes out
+    expect(target.querySelector('.first-pics img')).toBeNull();
+    expect(button(recapPicture(), 'Make the map')).toBeTruthy();
+    radios('Background').find((one) => one.textContent === 'Map').click();
+    await settle();
+    expect(lastPreview()[2]).toMatchObject({ line: true, background: 'map' });
+    // picking a ground is a press for the map
+    expect(typeof lastPreview()[3].loadTile).toBe('function');
+    await makeMap();
+    expect(sheets.build.mock.calls.at(-1)[2]).toMatchObject({ line: true, background: 'map' });
+    await saved();
+    expect(draftWrites().at(-1)[1].state).toMatchObject({ recap: 'map', map: MAP, mapOptions: { line: true, background: 'map' } });
+  });
+
+  it('signs as the analyst\'s default proof style does', async () => {
+    templatesState.proof = [{ id: 'pt_1', name: 'House', data: {
+      signatureText: { anchor: 'bl', size: 28, color: '#ffffff' }, azimutMark: { anchor: 'bl', show: 'both', size: 28 },
+    } }];
+    prefs.proofTemplate = 'pt_1';
+    prefs.signatureHandle = '@desk';
+    await startFromGallery();
+    expect(lastPreview()[2]).toMatchObject({ signature: true, mark: true });
+    expect(lastPreview()[3]).toMatchObject({ handle: '@desk', style: templatesState.proof[0].data });
+    check('Azimut mark').click();
+    await settle();
+    expect(lastPreview()[2]).toMatchObject({ signature: true, mark: false });
+  });
+
+  it('falls back to the proofs sheet for places too close together, and says so', async () => {
+    lists.scenes[VIDEO] = { ...SCENES, scenes: SCENES.scenes.map((row) => ({
+      ...row, points: [{ lat: 48.85, lon: 2.35, coords: '48.850000, 2.350000', label: '' }],
+    })) };
+    await startFromGallery();
+    expect(recapPicture().querySelector('[data-testid="recap-fallback"]').textContent)
+      .toBe('These places are too close together for a map, so the recap shows the proofs sheet.');
+    expect(button(recapPicture(), 'Map').disabled).toBe(true);
+    expect(sheets.file).toHaveBeenCalledTimes(1);
+    expect(target.querySelector('.first-pics img').getAttribute('src')).toContain(encodeURIComponent('contact sheet'));
+    expect(recapPicture().querySelector('.rm-preview')).toBeNull();
+    await saved();
+    expect('recap' in draftWrites().at(-1)[1].state).toBe(false);
+  });
+
+  it('opens a thread saved with its map on the map, and one saved before maps on its sheet', async () => {
+    const stateOf = (name, extra) => ({ title: name, state: {
+      kind: 'video', video: VIDEO, order: 'recap', first: 'recap', posts: VIDEO_THREAD_STARTERS[0].posts, body: VIDEO_THREAD_STARTERS[0].body,
+      mention: '@GeoConfirmed', source: SOURCE, target: 'x', tweet1: RECAP, tweet1Edited: false, mediaEnabled: false, mediaType: 'none',
+      extraTweets: [], ...extra,
+    } });
+    lists.drafts = [
+      { name: 'Mapped', title: 'Mapped', target: 'x', kind: 'video', video: VIDEO, posts: 1, updated_at: '2026-11-10T10:00:00Z' },
+      { name: 'Older', title: 'Older', target: 'x', kind: 'video', video: VIDEO, posts: 1, updated_at: '2026-11-09T10:00:00Z' },
+    ];
+    lists.saved = {
+      Mapped: stateOf('Mapped', { recap: 'map', map: MAP, mapOptions: { background: 'map', line: true }, firstMedia: [MAP], firstMediaType: 'images' }),
+      Older: stateOf('Older', { sheet: SHEET, firstMedia: [SHEET], firstMediaType: 'images' }),
+    };
+    await mountPost();
+    [...home().querySelectorAll('.ph-open')][0].click();
+    await settle();
+    expect(recapPicture().querySelector('[data-testid="recap-made"]')).not.toBeNull();
+    expect(target.querySelector('.first-pics img').getAttribute('src')).toContain(encodeURIComponent('recap map'));
+    expect(lastPreview()[2]).toEqual({ background: 'map', line: true, signature: false, mark: false });
+    // reopened, its tiles wait for a press again
+    expect(lastPreview()[3].loadTile).toBeNull();
+
+    target.querySelector('.tool-header').querySelector('button[title="Back to the posts of this case"]').click();
+    await settle();
+    [...home().querySelectorAll('.ph-open')][1].click();
+    await settle();
+    expect(radios('Recap picture').find((one) => one.getAttribute('aria-checked') === 'true').textContent).toBe('Proofs sheet');
+    expect(target.querySelector('.first-pics img').getAttribute('src')).toContain(encodeURIComponent('contact sheet'));
+    await saved();
+    expect(draftWrites()).toHaveLength(0);
   });
 });
 

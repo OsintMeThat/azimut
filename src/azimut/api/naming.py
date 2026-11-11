@@ -16,9 +16,27 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..layout import MAX_SLUG, slugify
+from ..layout import DEFAULT_PREFIX, MAX_SLUG, is_default_name, slugify
 
-__all__ = ["MAX_SLUG", "slugify", "read_created_at", "holders", "case_only"]
+__all__ = [
+    "MAX_SLUG", "slugify", "read_created_at", "holders", "case_only", "is_default_name", "technical_name",
+]
+
+
+def technical_name(folder: Path, kind: str, source: str | None = None) -> str:
+    """The name an item files under when the analyst gives it none, or clears theirs.
+
+    One it holds already of that shape stays, so clearing an unnamed item moves
+    nothing; else the lowest number free in `folder`, judged without case as
+    `holders` judges a name, so the gaps deletes leave are taken first.
+    """
+    if source and is_default_name(source, kind):
+        return source
+    taken = {path.stem.casefold() for path in folder.glob("*.json")} if folder.is_dir() else set()
+    number = 1
+    while f"{DEFAULT_PREFIX[kind]} {number}".casefold() in taken:
+        number += 1
+    return f"{DEFAULT_PREFIX[kind]} {number}"
 
 
 def holders(folder: Path, name: str, *, source: str | None = None) -> list[str]:

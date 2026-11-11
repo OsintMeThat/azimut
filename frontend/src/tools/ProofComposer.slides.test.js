@@ -62,7 +62,7 @@ describe('moving between slides', () => {
   it('says a refused save keeps the slide, and a landed one in a word', () => {
     const perform = bodyOfFn('performSave');
     expect(perform).toContain("toast(`Save failed: ${e.message}${slide ? '. Still on this slide' : ''}`, 'danger', 6000);");
-    expect(perform).toContain("else toast(`Saved ${result.title}`, 'info', 1600);");
+    expect(perform).toContain("else toast(`Saved ${ownName(result.title, 'proof') || 'the slide'}`, 'info', 1600);");
     expect(perform).toContain('still to check, kept off the map');
     expect(perform).toContain("if (!slide) toast(`Proof saved: ${result.png}`, 'ok');");
   });

@@ -16,7 +16,12 @@ const proof = (name, title, hoursAgo, extra = {}) => ({
 const PROOFS = [
   proof('market', 'Market', 2, { video: 'media/clip.mp4', video_title: 'Harbour run', order: 1, slide: 2, slides: 4 }),
   proof('holiday', 'Holiday', 5),
-  ...Array.from({ length: 6 }, (_, i) => proof(`p${i}`, `Proof ${i}`, 30 + i)),
+  // never named: each reads as its label, where and when it is, else its point, else Untitled
+  proof('p0', 'Proof 0', 30, { place: 'Al Jawf, Yemen', when: '2024-03-05 06:40', points: [{ lat: 16.1, lon: 44.8 }] }),
+  proof('p1', 'Proof 1', 31, { points: [{ lat: 15.47123, lon: 45.32211 }], created_at: '2024-03-06T12:00:00Z' }),
+  proof('p2', 'Proof 2', 32),
+  proof('p3', 'Proof 3', 33, { place: 'Marib, Yemen' }),
+  ...Array.from({ length: 2 }, (_, i) => proof(`p${i + 4}`, `Proof ${i + 4}`, 34 + i)),
 ];
 const FILES = [{
   video: 'media/clip.mp4', title: 'clip.mp4', kind: 'video', scenes: [
@@ -49,13 +54,15 @@ describe('the home of a case with proofs', () => {
     const { onnew } = open();
     button('New proof').click();
     expect(onnew).toHaveBeenCalledOnce();
-    expect(home().querySelector('input[aria-label="Find a proof by name"]')).not.toBeNull();
+    expect(home().querySelector('input[aria-label="Find a proof by name or place"]')).not.toBeNull();
   });
 
   it('continues from the last six proofs, a proof of a video tagged by its title in its scene\'s colour', () => {
     const { onopen, onall } = open();
     const cards = [...home().querySelectorAll('.ph-card')];
-    expect(cards.map((c) => c.querySelector('.ph-title').textContent)).toEqual(['Market', 'Holiday', 'Proof 0', 'Proof 1', 'Proof 2', 'Proof 3']);
+    expect(cards.map((c) => c.querySelector('.ph-title').textContent)).toEqual([
+      'Market', 'Holiday', 'Al Jawf, Yemen · 5 Mar 2024', '15.4712, 45.3221 · 6 Mar 2024', 'Untitled proof', 'Marib, Yemen',
+    ]);
     const tag = cards[0].querySelector('.ph-tag');
     expect(tag.textContent).toBe('Harbour run · 2/4');
     expect(tag.getAttribute('style')).toContain(`--scene: ${sceneColorAt(1)}`);
@@ -68,20 +75,25 @@ describe('the home of a case with proofs', () => {
     expect(onall).toHaveBeenCalledOnce();
   });
 
-  it('finds a proof by its name and opens the first on Enter', () => {
+  it('finds a proof by its name or its place and opens the first on Enter', () => {
     const { onopen } = open();
-    const input = home().querySelector('input[aria-label="Find a proof by name"]');
-    input.value = 'proof 4';
+    const input = home().querySelector('input[aria-label="Find a proof by name or place"]');
+    input.value = 'holiday';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
-    expect([...home().querySelectorAll('.ph-hit-title')].map((t) => t.textContent)).toEqual(['Proof 4']);
+    expect([...home().querySelectorAll('.ph-hit-title')].map((t) => t.textContent)).toEqual(['Holiday']);
+    // a proof with no name of its own, found by where it is
+    input.value = 'jawf';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect([...home().querySelectorAll('.ph-hit-title')].map((t) => t.textContent)).toEqual(['Al Jawf, Yemen · 5 Mar 2024']);
     expect(home().querySelector('.ph-card')).toBeNull();
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(onopen).toHaveBeenCalledWith(PROOFS[6]);
+    expect(onopen).toHaveBeenCalledWith(PROOFS[2]);
     input.value = 'nothing like it';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
-    expect(home().textContent).toContain('No proof by that name.');
+    expect(home().textContent).toContain('No proof by that name or place.');
   });
 
   it('shows no To prove in a case with no scene', () => {

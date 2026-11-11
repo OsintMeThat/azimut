@@ -450,6 +450,41 @@ def test_a_contact_sheet_is_refused_unless_it_is_a_sheet_of_a_video_of_the_case(
     assert not [one for one in Case.open(cid).list_media_items() if "contact sheet" in one["path"]]
 
 
+@needs_ffmpeg
+def test_a_recap_map_is_filed_in_media_made_from_its_video_as_the_sheet_is(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path, "convoy.mp4")
+
+    res = client.post(
+        f"/api/cases/{cid}/scenes/map", data={"video": video},
+        files={"image": ("map.jpg", io.BytesIO(_sheet_bytes(color=(30, 60, 30))), "image/jpeg")},
+    )
+
+    assert res.status_code == 200, res.text
+    path = res.json()["path"]
+    assert path == "media/convoy recap map.jpg"
+    item = media_engine.read_item(Case.open(cid), path)
+    assert (item["kind"], item["source"]["op"], item["source"]["from"]) == ("image", "map", video)
+    case = Case.open(cid)
+    made_from = [
+        link["to"] for link in case.links_of(case.find_entity(attr="path", value=path)["id"])
+        if link["type"] == "derived-from"
+    ]
+    assert made_from == [case.find_entity(attr="path", value=video)["id"]]
+    # the same picture again is the same file, and a refused one files nothing
+    again = client.post(
+        f"/api/cases/{cid}/scenes/map", data={"video": video},
+        files={"image": ("map.jpg", io.BytesIO(_sheet_bytes(color=(30, 60, 30))), "image/jpeg")},
+    )
+    assert again.json()["path"] == path
+    big = client.post(
+        f"/api/cases/{cid}/scenes/map", data={"video": video},
+        files={"image": ("map.png", io.BytesIO(_sheet_bytes(size=(4000, 900), kind="PNG")), "image/png")},
+    )
+    assert big.status_code == 422 and "recap map" in big.json()["detail"]
+    assert len([one for one in case.list_media_items() if "recap map" in one["path"]]) == 1
+
+
 def test_progress_reads_microseconds_off_either_key():
     assert clip_engine._progress_at("out_time_us=1500000\n") == 1.5
     assert clip_engine._progress_at("out_time_ms=2000000") == 2.0

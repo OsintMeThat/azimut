@@ -859,6 +859,19 @@ def test_a_proof_with_no_place_is_still_in_progress_and_stays_in_the_to_do(clien
 
 
 @needs_ffmpeg
+def test_a_proof_with_no_name_of_its_own_shows_in_the_to_do_by_its_time(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save_work(client, cid, video, [{"id": "s1", "start": 1, "end": 2, "label": "Bridge"}, {"id": "s2", "start": 3, "end": 4}])
+    unnamed = _scene_proof(client, cid, video, "s1", title="")
+    named = _scene_proof(client, cid, video, "s2", title="Depot")
+    assert unnamed == "Proof 1"
+    # a name the app gave is no label: the To-do says the proof's time instead
+    proofs = {row["proof"]: row["label"] for row in _queue(client, cid)["files"][0]["proofs"]}
+    assert proofs == {"Proof 1": "", named: "Depot"}
+
+
+@needs_ffmpeg
 def test_a_proof_with_no_place_is_abandoned_with_a_word_restored_and_a_proved_one_refused(client, tmp_path, monkeypatch):
     cid = _case(client)
     video = _video(client, cid, tmp_path)

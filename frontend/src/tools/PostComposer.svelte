@@ -13,7 +13,7 @@
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { proofCoordsText, proofSource } from '../lib/composer.js';
   import {
-    isDefaultName, nextName, savedSlugs, savedTitles, slugify, specAttr, specPath,
+    isDefaultName, itemLabel, nextName, ownName, savedSlugs, savedTitles, slugify, specAttr, specPath,
   } from '../lib/naming.js';
   import { filingName, planProofHandoff, proofPosts } from './post/handoff.js';
   import { spanNote, startFields, startPost } from './post/start.js';
@@ -21,8 +21,11 @@
   import { threadPostLabel, videoLayout, videoLink, videoPosts } from '../lib/videoPost.js';
   import { overWords, videoFits } from '../lib/videoLimits.js';
   import { videoName } from '../lib/proofScene.js';
-  import { fileThreadSheet } from './post/threadSheet.js';
-  import { THREAD_MIN } from './post/postHome.js';
+  import { fileRecapMap, fileThreadSheet } from './post/threadSheet.js';
+  import RecapMap from './post/RecapMap.svelte';
+  import { mapOptions, recapFit, recapPlaces } from '../lib/recapMap.js';
+  import { defaultProofTemplate } from '../lib/proofTemplates.js';
+  import { postLabel, THREAD_MIN } from './post/postHome.js';
   import { extensionWindowPutAway, putExtensionWindowAway } from './post/extensionWindow.js';
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
@@ -208,8 +211,10 @@
   // typed, picked or attached: an untouched blank post files nothing. The name in the
   // header is the draft's filename. It is taken when the field is left (`postTitle`),
   // and renaming a saved draft moves its file (the backend does the move). `draftName`
-  // is the slug it is bound to, or null before the first save.
-  let postName = $state(''); // the field
+  // is the slug it is bound to, or null before the first save. A post the analyst gave
+  // no name files under a technical one, "Post 3", which the field never shows: it
+  // stays empty, and the lists show the post's label (`postHome.postLabel`).
+  let postName = $state(''); // the field: the analyst's name, '' for none
   let postTitle = $state(''); // the name it is saved under, the field's once left
   let draftName = $state(null);
 
@@ -230,19 +235,17 @@
         draftEntities = list;
         // The name was assigned before the case's drafts were known. Renumber it
         // now rather than letting a fresh thread collide on its first save.
-        if (!draftName && isDefaultName(postTitle, 'draft')) {
-          const fresh = freshPostName();
-          if (postName.trim() === postTitle) postName = fresh;
-          postTitle = fresh;
-        }
+        if (!draftName && isDefaultName(postTitle, 'draft')) postTitle = freshPostName();
       })
       .catch(() => { if (live) draftEntities = []; });
     return () => { live = false; };
   });
 
   // Numbered past the drafts already in the case, so two never-renamed threads
-  // read apart. Assigned on mount and on discard.
+  // file apart. Assigned on mount and on discard.
   const freshPostName = () => nextName('draft', savedTitles(draftEntities, 'draft'));
+  // A name cleared: the technical one the post holds already, else a fresh one.
+  const technicalPostName = () => (draftName && isDefaultName(draftName, 'draft') ? draftName : freshPostName());
 
   // Kept in step with deletes made anywhere else in the app: a draft deleted
   // from the sidebar must not be resurrected by the next Save under its old
@@ -467,8 +470,15 @@
   function newThread(video = null) {
     const layout = videoLayout();
     return {
+      // `#video`: the analyst's title for the thread, empty until they give one. An older
+      // draft holds none (null), and its `#video` says the video's title in Media as it did.
+      title: '',
       video, order: layout.order, texts: { video: layout.video, place: layout.place }, first: null, extra: [],
       sheet: null, clip: null, link: false, slides: null, left: [], seconds: null, facts: {}, cut: 0, sheetState: '',
+      // Recap first's picture: the proofs sheet, as every thread had before, or the places
+      // on a map (`lib/recapMap.js`), its choices and its file once made. `mapLive` is
+      // whether its tiles may be asked for, never saved: the analyst pressed for the map.
+      recap: 'sheet', map: null, mapOptions: mapOptions(), mapLive: false,
       // the recap and the video's text each order was left with in this post, and the
       // words of each post the analyst rewrote, kept through an order that has no such post
       byOrder: {},
@@ -482,6 +492,10 @@
     const path = (value) => (typeof value === 'string' && value ? value : null);
     return {
       ...newThread(path(s.video)),
+      title: typeof s.title === 'string' ? s.title : null,
+      recap: s.recap === 'map' ? 'map' : 'sheet',
+      map: path(s.map),
+      mapOptions: mapOptions(s.mapOptions),
       order: layout.order,
       texts: { video: layout.video, place: layout.place },
       first: typeof s.first === 'string' ? s.first : null,
@@ -496,11 +510,14 @@
   function threadRecord() {
     return {
       video: thread.video,
+      ...(thread.title !== null ? { title: thread.title } : {}),
       order: thread.order,
       posts: [{ role: 'video', body: thread.texts.video }, { role: 'place', body: thread.texts.place }],
       ...(thread.first ? { first: thread.first } : {}),
       ...(thread.extra.length ? { extra: thread.extra.map((one) => ({ text: one.text })) } : {}),
       ...(thread.sheet ? { sheet: thread.sheet } : {}),
+      ...(thread.recap === 'map' ? { recap: 'map', mapOptions: { ...thread.mapOptions } } : {}),
+      ...(thread.map ? { map: thread.map } : {}),
       ...(thread.clip ? { clip: thread.clip } : {}),
       ...(thread.link ? { link: true } : {}),
     };
@@ -538,17 +555,62 @@
       return;
     }
     Object.assign(thread, read);
-    const named = videoName(video, titleByPath.get(video));
-    if (named && !nameTaken(named)) postName = postTitle = named;
+    // the places on a map when they stand far enough apart, signed as the analyst's proofs are
+    thread.recap = recapFit(recapPlaces(read.slides)).ok ? 'map' : 'sheet';
+    const style = defaultProofTemplate(templatesState.proof, prefs.proofTemplate)?.data ?? null;
+    thread.mapOptions = mapOptions({ signature: !!(style?.signature || style?.signatureText), mark: !!style?.azimutMark });
     source = videoLink(mediaByPath.get(video));
     layoutThread();
     await Promise.all([fileSheetIfShown(), readPlaceFacts()]);
   }
 
+  /** The recap's picture: the map or the proofs sheet. Picking the map asks for its tiles. */
+  function setRecap(kind) {
+    if (!thread) return;
+    thread.recap = kind === 'map' ? 'map' : 'sheet';
+    if (thread.recap === 'map') thread.mapLive = true;
+    layoutThread();
+    fileSheetIfShown();
+  }
+
+  /** A choice of the map changed: the map made before is no longer it, and is made again. */
+  function setMapOptions(patch) {
+    if (!thread) return;
+    thread.mapOptions = mapOptions({ ...thread.mapOptions, ...patch });
+    // a ground picked is a press for the map
+    if ('background' in patch) thread.mapLive = true;
+    if (thread.map) {
+      thread.map = null;
+      layoutThread();
+    }
+  }
+
+  /** The map made, filed in Media as made from the video: the recap carries it. */
+  async function placeRecapMap(blob) {
+    const caseId = caseState.current?.id;
+    if (!thread || !caseId) return;
+    const run = postRun;
+    const path = await fileRecapMap(caseId, { video: thread.video, blob });
+    if (run !== postRun || !thread) return;
+    thread.map = path;
+    thread.mapLive = true;
+    layoutThread();
+  }
+
+  /** What `#video` says: the thread's title, or an older draft's video title in Media. */
+  const threadTitle = () => thread.title ?? titleByPath.get(thread.video) ?? '';
+
+  /** The thread's title typed: the posts not rewritten by hand say it at once. */
+  function setThreadTitle(text) {
+    if (!thread) return;
+    thread.title = text;
+    rewriteThread();
+  }
+
   /** The thread as `lib/videoPost.js` writes it, from what the composer holds. */
   function threadInput() {
     return {
-      video: { path: thread.video, title: titleByPath.get(thread.video) ?? '' },
+      video: { path: thread.video, title: threadTitle() },
       slides: thread.slides ?? [],
       layout: { order: thread.order, recap: body, video: thread.texts.video, place: thread.texts.place },
       common: { mention, source },
@@ -557,6 +619,8 @@
       link: thread.link,
       facts: thread.facts,
       extra: thread.extra,
+      recap: thread.recap,
+      map: thread.map,
     };
   }
 
@@ -666,13 +730,13 @@
   /** The contact sheet, drawn and filed once the order shows one and none is filed yet. */
   async function fileSheetIfShown() {
     if (!thread?.slides || thread.sheet || thread.sheetState === 'making') return;
-    if (!usesSheet(thread.order, thread.slides.length)) return;
+    if (!usesSheet(thread.order, thread.slides.length, thread.recap)) return;
     const caseId = caseState.current?.id;
     if (!caseId) return;
     const run = postRun;
     thread.sheetState = 'making';
     try {
-      const path = await fileThreadSheet(caseId, { video: thread.video, title: titleByPath.get(thread.video) ?? '', slides: thread.slides });
+      const path = await fileThreadSheet(caseId, { video: thread.video, slides: thread.slides });
       if (run !== postRun || !thread) return;
       thread.sheet = path;
       thread.sheetState = '';
@@ -706,7 +770,7 @@
   function threadLabel(key, type) {
     const [role, ...rest] = String(key ?? '').split(':');
     const proof = rest.join(':');
-    const titles = new Map((thread?.slides ?? []).map((slide) => [slide.name, slide.title]));
+    const titles = new Map((thread?.slides ?? []).map((slide) => [slide.name, slide.label ?? slide.title]));
     return threadPostLabel({ role: role || null, proof, mediaType: type }, titles);
   }
 
@@ -1639,7 +1703,7 @@
     // a post of this case, as its entities or its list know it
     const listed = (caseDrafts ?? []).find((row) => row.name === link.draft);
     if (!listed && !savedSlugs(draftEntities, 'draft').has(link.draft)) return;
-    const title = listed?.title ?? link.draft;
+    const title = listed ? postLabel(listed, caseProofs ?? []) : link.draft;
     toast(`Link caught for “${title}”`, 'info', 0, [
       { label: 'Keep', onClick: () => markSavedPost({ name: link.draft }, link.url) },
       { label: 'Not this one', onClick: () => {} },
@@ -1673,8 +1737,8 @@
   }
 
   // The note is titled after the post it is written from, so the two read as one piece
-  // of work. The dialog leaves it editable.
-  const draftTitle = () => postTitle.trim() || 'Untitled post';
+  // of work: its name, else its label. The dialog leaves it editable.
+  const draftTitle = () => itemLabel('draft', postTitle, { place, when: [date], coords: geo ? [geo.lat, geo.lon] : null });
 
   // ---- saving itself ----------------------------------------------------------
   // `blankKey` is the post as it was opened or reset: a post that is still that saves
@@ -1715,7 +1779,7 @@
     if (body.run !== postRun) return; // another post took the screen meanwhile
     const first = !draftName;
     draftName = r.name;
-    if (postName.trim() === postTitle.trim() || postName.trim() === body.payload.title) postName = r.title;
+    if (!postName.trim() || postName.trim() === postTitle.trim() || postName.trim() === body.payload.title) postName = ownName(r.title, 'draft');
     postTitle = r.title;
     writtenKey = saveKey(body.payload.state, r.title);
     if (first) {
@@ -1756,18 +1820,19 @@
   /**
    * The name field is taken when it is left, as Inspect's is: renaming moves the file,
    * so it moves once rather than at every letter. A name another post holds is
-   * refused, and a blank one goes back to the name it had.
+   * refused. Cleared, the post goes back to a technical name and reads as its label.
    */
   function commitName() {
     const typed = postName.trim();
     if (!typed) {
-      postName = postTitle;
+      postName = '';
+      if (!isDefaultName(postTitle, 'draft')) postTitle = technicalPostName();
       return;
     }
     if (typed === postTitle) return;
     if (nameTaken(typed)) {
       toast(`Another post is already named “${typed}”`, 'warn');
-      postName = postTitle;
+      postName = ownName(postTitle, 'draft');
       return;
     }
     postTitle = typed;
@@ -1778,7 +1843,7 @@
       event.preventDefault();
       event.currentTarget.blur();
     } else if (event.key === 'Escape') {
-      postName = postTitle;
+      postName = ownName(postTitle, 'draft');
       event.currentTarget.blur();
     }
   }
@@ -1826,7 +1891,7 @@
   let deleting = $state(false);
 
   function askDelete(entry) {
-    if (entry?.name) deleteEntry = { name: entry.name, title: entry.title || entry.name, proof: entry.proof ?? null };
+    if (entry?.name) deleteEntry = { name: entry.name, title: entry.label || entry.title || entry.name, proof: entry.proof ?? null };
   }
 
   // A post deleted gives its proof back to Ready to post, unless another post names it:
@@ -1930,8 +1995,8 @@
       altSeen = new Set(keptAlt ? altPictures : []);
       draftName = name;
       settlePlace('post', where(), { navigate: true });
-      postName = doc.title || name;
-      postTitle = postName;
+      postTitle = doc.title || name;
+      postName = ownName(postTitle, 'draft');
       appliedPostTemplate = null;
       // restore geo facts from the coordinates, then honor any manual tweet edits
       if (s.coordsText?.trim()) {
@@ -2025,8 +2090,8 @@
     altTexts = {};
     altSeen = new Set();
     draftName = null;
-    postName = freshPostName();
-    postTitle = postName;
+    postTitle = freshPostName();
+    postName = '';
     appliedPostTemplate = null;
     defaultDeclined = false;
     postRun += 1;
@@ -2607,7 +2672,8 @@
       {/if}
       {#if caseState.current}
         <input class="input title-input" bind:value={postName} onblur={commitName} onkeydown={nameKey}
-          maxlength="200" aria-label="Post name" title="Rename the post" />
+          maxlength="200" aria-label="Post name" placeholder="Name (optional)"
+          title="Name the post. Left empty, it is listed by its place and date" />
         {#if draftName}
           <button class="btn btn-ghost btn-sm post-more" aria-label="More for this post" title="More for this post"
             aria-haspopup="menu" aria-expanded={!!postMenu} onclick={(event) => (postMenu = postMenu ? null : event.currentTarget)}>
@@ -2675,7 +2741,7 @@
   {#if postMenu && draftName}
     <FloatingMenu anchor={postMenu} width={200} label="This post" onclose={() => (postMenu = null)}>
       <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored"
-        onclick={() => { postMenu = null; askDelete({ name: draftName, title: postTitle, proof: geolocation ? proofPng : null }); }}>
+        onclick={() => { postMenu = null; askDelete({ name: draftName, title: draftTitle(), proof: geolocation ? proofPng : null }); }}>
         <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
     </FloatingMenu>
   {/if}
@@ -2765,7 +2831,12 @@
         {#if thread}
           <!-- the video, its places, the order, and what goes when the video is too long -->
           <div class="field">
+            {#snippet recapPicture()}
+              <RecapMap slides={thread.slides} recap={thread.recap} options={thread.mapOptions} live={thread.mapLive} made={thread.map}
+                onrecap={setRecap} onoptions={setMapOptions} onlive={() => (thread.mapLive = true)} onmake={placeRecapMap} />
+            {/snippet}
             <VideoThreadPanel title={thread.video ? videoName(thread.video, titleByPath.get(thread.video)) : ''}
+              threadTitle={threadTitle()} ontitle={setThreadTitle} recap={recapPicture}
               places={thread.slides} left={thread.left} cut={thread.cut} order={thread.order} onorder={setThreadOrder}
               sheet={thread.sheetState} onsheet={fileSheetIfShown} over={threadOver} clip={thread.clip} link={thread.link}
               href={source.trim()} onclip={setThreadClip} onlink={setThreadLink} />

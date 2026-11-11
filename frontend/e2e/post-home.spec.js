@@ -121,9 +121,9 @@ test.describe('the home', () => {
     await expect(series.locator('.ph-chip')).toHaveCount(2);
     await expect(series.getByRole('button', { name: /Video thread/ })).toBeEnabled();
 
-    await home.getByLabel('Find a post by name or link').fill('harb');
+    await home.getByLabel('Find a post by name, place or link').fill('harb');
     await expect(home.locator('.ph-hit')).toHaveCount(1);
-    await home.getByLabel('Find a post by name or link').fill('');
+    await home.getByLabel('Find a post by name, place or link').fill('');
 
     await ready.click();
     await expect(home).toHaveCount(0);
@@ -223,9 +223,9 @@ test.describe('Open', () => {
     await expect(titles).toHaveText(['Gone out']);
     await list.getByRole('combobox', { name: 'Kind' }).selectOption('');
     await list.getByRole('combobox', { name: 'State' }).selectOption('');
-    await list.getByPlaceholder('Search posts, or paste a post\'s link…').fill('harbour');
+    await list.getByPlaceholder('Search by name or place, or paste a post\'s link…').fill('harbour');
     await expect(titles).toHaveText(['Harbour words']);
-    await list.getByPlaceholder('Search posts, or paste a post\'s link…').fill('');
+    await list.getByPlaceholder('Search by name or place, or paste a post\'s link…').fill('');
 
     await list.getByRole('button', { name: 'Delete Bridge thread' }).click();
     await page.getByRole('alertdialog', { name: 'Delete this post?' }).getByRole('button', { name: 'Delete', exact: true }).click();

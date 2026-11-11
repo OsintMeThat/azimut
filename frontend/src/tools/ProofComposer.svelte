@@ -138,7 +138,7 @@
     assetName, base64Of, PASTE_TYPES, MAX_PASTES, MAX_PASTE_BYTES,
   } from '../lib/pasteAsset.js';
   import {
-    nextName, savedSlugs, savedTitles, savedTitle, slugify, specAttr, specPath,
+    isDefaultName, nextName, ownName, savedSlugs, savedTitles, savedTitle, slugify, specAttr, specPath,
   } from '../lib/naming.js';
   import { createHistory } from '../lib/history.js';
   import { shortcut } from '../lib/keys.js';
@@ -174,7 +174,7 @@
   } from '../lib/geolocating.svelte.js';
   import { sceneMaterial, scenesToProve } from '../lib/newProof.js';
   import { openScenes, queueColor } from '../lib/sceneQueue.js';
-  import { NO_VIDEO, inVideo, proofVideos, slideTag } from '../lib/proofList.js';
+  import { NO_VIDEO, inVideo, proofLabel, proofVideos, slideTag } from '../lib/proofList.js';
   import { collagesOfScene, pictureHandoff, proofHandoff } from '../lib/sceneFrames.js';
   import { sceneMoments, sceneStart, sceneTime } from '../lib/scenes.js';
 
@@ -854,7 +854,7 @@
   async function renameSlide(tile, title) {
     const caseId = caseState.current?.id;
     const name = String(title ?? '').trim();
-    if (!caseId || !name || name === tile.title || tile.kind !== 'proof') return;
+    if (!caseId || !name || name === (tile.row?.title ?? tile.title) || tile.kind !== 'proof') return;
     if (tile.current && proofStarted) {
       proof.title = name;
       dirty = true;
@@ -1651,7 +1651,7 @@
     if (!(await mayLeave())) return;
     const mine = ++openingRun;
     openList = null;
-    openingTitle = entry.title || entry.name;
+    openingTitle = proofLabel(entry);
     try {
       await openProof(entry);
     } catch (e) {
@@ -6800,9 +6800,26 @@
   const savedProofNames = () => savedSlugs(proofEntities, 'proof');
   const savedProofTitles = () => savedTitles(proofEntities, 'proof');
 
-  // Default name for a fresh proof, numbered past those already in the case so
-  // the top-of-screen name reads apart ("Proof 2"). Called on reset.
+  // The technical name a fresh proof files under, numbered past those already in the
+  // case so two never clash ("Proof 2"). The header never shows it: its field stays
+  // empty until the analyst names the proof, and the lists show its label. Called on reset.
   const freshTitle = () => nextName('proof', savedProofTitles());
+  // A name cleared: the technical one the proof holds already, else a fresh one.
+  const technicalTitle = () => (savedName && isDefaultName(savedName, 'proof') ? savedName : freshTitle());
+
+  /** The header's field typed: the analyst's name, or, emptied, a technical one again. */
+  function nameProof(text) {
+    proof.title = text.trim() ? text : technicalTitle();
+    dirty = true;
+  }
+
+  /** What the proof open is called where it is asked about: its name, else its label in the case's lists. */
+  function openLabel() {
+    const own = ownName(proof.title, 'proof');
+    if (own) return own;
+    const entry = [...(homeProofs ?? []), ...(openList ?? [])].find((one) => one.name === savedName);
+    return entry ? proofLabel(entry) : 'this proof';
+  }
 
   let overwritePrompt = $state(null); // { slug, andPost, then } when a save hits a named proof
   // { name, lat, lon } — the point a save carried, where the setting says to ask
@@ -7004,8 +7021,8 @@
       await reloadCase();
       savedThumb = { name: result.name, thumb: result.thumb ?? null };
       if (!slide) toast(`Proof saved: ${result.png}`, 'ok');
-      else if (unchecked) toast(`Saved ${result.title} · ${unchecked === 1 ? '1 point' : `${unchecked} points`} still to check, kept off the map`, 'warn', 5200);
-      else toast(`Saved ${result.title}`, 'info', 1600);
+      else if (unchecked) toast(`Saved ${ownName(result.title, 'proof') || 'the slide'} · ${unchecked === 1 ? '1 point' : `${unchecked} points`} still to check, kept off the map`, 'warn', 5200);
+      else toast(`Saved ${ownName(result.title, 'proof') || 'the slide'}`, 'info', 1600);
       void readKin(c.id, result.id, result.name);
       // The points this proof carries. Filed already, or a question — the server
       // answers with nothing at all when the case already holds them, so
@@ -7088,7 +7105,8 @@
   }
 
   function matchesProofQuery(entry, query) {
-    return matchesTerms([entry.title, entry.name, entry.folder].filter(Boolean).join('\n'), query);
+    // by its label, the name given or the place, and its folder: a technical name finds nothing
+    return matchesTerms([proofLabel(entry), entry.folder].filter(Boolean).join('\n'), query);
   }
 
   function toggleProofBrowser() {
@@ -7759,11 +7777,14 @@
        its own width, so the unsaved badge coming and going never moves the canvas. -->
   <div class="tool-header" class:compact={headerW > 0 && headerW < HEADER_COMPACT} bind:clientWidth={headerW}>
     {#if proofStarted}
+      <!-- the analyst's name, empty for none: a technical name never shows here -->
       <input
         class="input title-input"
         aria-label="Proof name"
-        bind:value={proof.title}
-        oninput={() => (dirty = true)}
+        placeholder="Name (optional)"
+        title="Name the proof. Left empty, it is listed by its place and date"
+        value={ownName(proof.title, 'proof')}
+        oninput={(event) => nameProof(event.currentTarget.value)}
       />
       {#if dirty}<span class="badge">unsaved</span>{/if}
       {#if savedName}
@@ -7849,7 +7870,7 @@
         <div class="fm-sep"></div>
       {/if}
       <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored"
-        onclick={() => { proofMenu = null; askDelete({ name: savedName, title: savedTitle(proofEntities, 'proof', savedName) || proof.title, video: scene.star }); }}>
+        onclick={() => { proofMenu = null; askDelete({ name: savedName, title: openLabel(), video: scene.star }); }}>
         <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
     </FloatingMenu>
   {/if}
@@ -8956,7 +8977,7 @@
             matches={(entry) => matchesProofQuery(entry, proofQuery)}
             emptyText="This folder has no matching proofs."
             icon={() => 'proof'}
-            label={(entry) => entry.title}
+            label={(entry) => proofLabel(entry)}
             onnavigate={openProofFolder}
             onselect={(entry) => selectProofBrowser(entry)}
             onconfirm={(entry) => selectProofBrowser(entry, true)}
@@ -8977,7 +8998,7 @@
                     <img src={fileUrl(caseState.current.id, entry.thumb ?? entry.png)} alt="" loading="lazy" decoding="async" />
                   {/if}
                   <div class="open-meta">
-                    <span class="open-title">{entry.title}</span>
+                    <span class="open-title">{proofLabel(entry)}</span>
                     <span class="open-sub">{entry.panels === 1 ? '1 panel' : `${entry.panels} panels`} · {entry.shapes === 1 ? '1 annotation' : `${entry.shapes} annotations`} · {entry.updated_at?.slice(0, 10)}</span>
                     {#if slideTag(entry)}
                       {@const tag = slideTag(entry)}
@@ -8985,7 +9006,7 @@
                     {/if}
                   </div>
                 </button>
-                <button class="btn btn-ghost btn-sm open-del" title="Delete this saved proof" onclick={() => askDelete(entry)}>
+                <button class="btn btn-ghost btn-sm open-del" title="Delete this saved proof" onclick={() => askDelete({ ...entry, title: proofLabel(entry) })}>
                   <Icon name="trash" size={13} />
                 </button>
               </div>

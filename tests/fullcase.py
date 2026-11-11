@@ -101,6 +101,7 @@ class FullCase:
     draft: str = ""
     thread_draft: str = ""  # a video thread: made from its video, naming its contact sheet and clip
     thread_sheet: str = ""  # that sheet, a picture filed in Media
+    thread_map: str = ""  # its recap map, a picture filed in Media the same way
     note_id: str = ""
     note: str = ""  # its case-relative path
     sheet_id: str = ""
@@ -502,16 +503,19 @@ def build_full_case(
 
     # -- a video thread: the proof's places, on its contact sheet, then its clip --------
     # The full case holds no video, so the pictures stand in for the video and the sheet
-    # the thread files (`api/postclips.file_sheet`).
+    # and the recap map the thread files (`api/postclips.file_sheet`).
     full.thread_sheet = upload("thread-sheet.png", _png(color=(20, 23, 28), size=(64, 36)))
+    full.thread_map = upload("thread-map.png", _png(color=(40, 70, 40), size=(64, 36)))
     thread = client.post(
         f"/api/cases/{case_id}/drafts",
         json={
             "title": "Video thread draft",
             "state": {
                 "kind": "video", "video": full.piece, "order": "recap", "sheet": full.thread_sheet, "clip": full.post_clip,
+                "title": "Convoy at dawn", "recap": "map", "map": full.thread_map,
+                "mapOptions": {"background": "satellite", "line": True, "signature": False, "mark": False},
                 "posts": [{"role": "video", "body": "Source: #source"}, {"role": "place", "body": "#description"}],
-                "tweet1": "1. Convoy proof", "firstMedia": [full.thread_sheet], "firstMediaType": "images",
+                "tweet1": "1. Convoy proof", "firstMedia": [full.thread_map], "firstMediaType": "images",
                 "mediaEnabled": False, "mediaType": "none", "first": "recap",
                 "extraTweets": [
                     {"text": "", "mediaPaths": [full.post_clip], "mediaType": "video", "key": "video"},

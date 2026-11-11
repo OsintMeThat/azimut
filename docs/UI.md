@@ -4393,8 +4393,8 @@ in the composer are not panels.
 
 **With no proof open, Geo Proof shows its home** in place of the canvas, and the side
 column and the toolbar wait for a proof. On top, **New proof** and a search that
-finds a proof by name, Enter opening the first. **Continue** holds the last proofs saved
-as large thumbnails with their name and how long ago, six at most and as many as make whole
+finds a proof by name or by place, Enter opening the first. **Continue** holds the last proofs saved
+as large thumbnails with their label and how long ago, six at most and as many as make whole
 rows, a proof of a video tagged *Harbour run · 2/4* in its scene's colour (a video's only
 slide says just its name), and *All N proofs* opens the Open proof list. A video is named by
 the title Media gives it, else by its file name without the extension, here and wherever a
@@ -4427,9 +4427,23 @@ with the default preselected, **Create proof** and a quiet **Start empty**. All 
 opens and the search is focused, so a proof is still New proof, a picture, Create proof;
 Enter creates and Escape closes. A case with no scene shows no scene anywhere.
 
+**A proof's name is the analyst's.** A new proof has none: the header's field is empty,
+*Name (optional)*, and the proof files under a technical name, *Proof 3*, that is never
+shown. Everywhere a proof is listed (the home, Open proof, the slides strip, the To-do,
+the search) it reads as its **label**: its name when it has one, else where it stands
+and its day, *Al Jawf, Yemen · 9 Nov* (the region and the country the case filed for its
+first point's place, `engine/satellite.place_words`, and its date, else the day it was
+made), else its point, *15.4712, 45.3221*, else *Untitled proof* (`lib/naming.js`
+`itemLabel`, `lib/proofList.js` `proofLabel`). The To-do shows an unnamed proof by its
+time, as a scene. A name typed wins and becomes the file's, as before; emptying the
+field takes the proof back to a technical name (`POST /cases/{id}/proofs` with
+`"title": ""`, or only spaces, which keeps a technical name it holds, else takes the
+lowest free one). A proof saved as *Proof 3* before reads as its label with nothing
+renamed. `GET /proofs` gives each its `place`, `when` and `created_at` for it.
+
 **Open proof** shows its list on the press, its rows following when the case answers. A
 pick closes it at once, and a small tag over the canvas names the proof while its pictures
-load. A proof of a video carries a small line in its scene's colour, *Harbour run · slide 2
+load. Its search finds a proof by its label: its name, or its place. A proof of a video carries a small line in its scene's colour, *Harbour run · slide 2
 of 4*: its place among that video's proofs in clip order, the abandoned last, or just its name
 when it is that video's only one. A long name gives way and the place stays. A select
 beside the search narrows the list to one video or to the proofs on no video. A proof on
@@ -4723,7 +4737,8 @@ the spec's or else its entity's, never the exported PNG.
 **Moving to another slide saves the one left.** A press on a tile, **Alt+←** and
 **Alt+→** (never the browser's Back), the arrows of the folded line and the list all go
 through the save Save proof runs. Points nobody checked are saved as *Later*, kept off
-the case map, and the toast says so beside *Saved Road bridge*. A refused save keeps the
+the case map, and the toast says so beside *Saved Road bridge* (*Saved the slide* for one
+with no name). A refused save keeps the
 slide and says why. A slide never started, with no panel and nothing typed, goes without
 a save; one holding only typed words asks first. Presses during the save only move where
 it heads, so three fast Alt+→ go three slides on with one save. A switch rewrites the
@@ -4732,9 +4747,10 @@ tiles and Enter opens one. **A slide's menu** comes up on its ⋯, a right-click
 context-menu key and Shift+F10 on a focused tile, its first item focused: for a proof
 **Rename**, **Show in Inspect** (the video on that slide's scene), **Abandon…** while it
 states no place, and **Delete…**, the question the header asks; a scene still to prove keeps
-Make this slide, Geolocate and Abandon…. Rename holds the name in the menu: the slide open
-takes it as if typed in its name field, saved with it, and another slide is saved under it
-at once, its picture moving with it.
+Make this slide, Geolocate and Abandon…. Rename holds the name in the menu (empty for a
+slide with none): the slide open takes it as if typed in its name field, saved with it, and
+another slide is saved under it at once, its picture moving with it. A tile reads as the
+proof's label, and a new slide with no name as *New slide*.
 
 **A scene still to prove shows its page** in place of the canvas, and landing on it
 starts nothing: its label or time, where it stands, the captures it gathered, and
@@ -5289,14 +5305,17 @@ for that release. It writes a post or a thread and opens the site to publish it;
 never posts, and pressing Post on X or Bluesky stays the analyst's.
 
 - **The home** stands where an empty composer would, once the case holds a draft or a
-  proof: **New post** and a search that finds a post by name, or by its link pasted
-  (Enter opens the first),
+  proof: **New post** and a search that finds a post by its name or its place, or by its
+  link pasted (Enter opens the first),
   then three parts. **In progress**, the last six drafts not gone out yet or changed
   since, each with its platform, its kind when it is not a geolocation, and how many
   posts it holds when they are several; **Ready to post**, under its line *Proofs with
   no post yet*, the proofs no draft names yet, a proof of a video listed under its
-  video with the slides that wait, and **Video thread** beside a video whose two proofs
-  or more state a place and that has no thread yet; and **Posted**, the latest six to go out by the
+  video with the slides that wait, and **Video thread** beside a video while two of its
+  proofs or more that state a place have no post at all, neither their own nor a thread.
+  Once a thread of a video is in the case, its proofs leave Ready to post; New post →
+  Video thread and the strip still offer one for any video of two proofs or more. Then
+  **Posted**, the latest six to go out by the
   post's own day (read off its link, else the moment it was marked), each with that day
   and its link when it has one. Every post card wears its state as a pill (*Draft*,
   *Posted*, *Changed since posted*), and its ⋯ or a right-click offers **Open**, **Mark
@@ -5318,12 +5337,26 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   shows, all read off the file it opens anyway), so a draft sent to the Trash gives its
   proof back at once. A case with neither keeps the composer it always opened on.
   **‹ Posts**, first in the header, goes back to the home.
+- **A post's name is the analyst's.** A new post has none: the header's field is empty,
+  *Name (optional)*, and the draft files under a technical name, *Post 41*, that is never
+  shown; a thread is named after neither its video nor a place. Everywhere a post is
+  listed (the home's cards, Open, the search, a toast) it reads as its **label**
+  (`postHome.postLabel`): its name when it has one, else its place and its day, *Al
+  Jawf, Yemen · 9 Nov*: the place its `#place` says, else its proof's (a thread's, its
+  video's first place), and the day of its `#date`, else of its proof, else the day it
+  went out, else the day it was made; else its point; else *Untitled post*. A waiting
+  proof on Ready to post reads as its own label. A name typed wins and becomes the
+  file's, as before; emptying the field and leaving it takes the post back to a
+  technical name. `GET /drafts` gives each its `place`, `when`, `coords` and
+  `created_at` for it. A post saved as *Post 41* before reads as its label with nothing
+  renamed. A post started from a plate, a comparison or a pin still takes that work's
+  name, which the analyst gave it.
 - **Open**, in the header, lists every post of the case as Geo Proof's Open proof does:
-  each row with its picture, name, kind, platform, state pill and its day, newest first:
+  each row with its picture, label, kind, platform, state pill and its day, newest first:
   the day a post went out (its link's own, else the day it was marked), a post not gone
   out its last change. A search and a filter by kind and by state (each counted, shown
-  once the posts hold more than one) narrow it; a post's link pasted in the search
-  finds that post, by its own link or by the id its name holds, a posted row's buttons copy its link
+  once the posts hold more than one) narrow it; the search reads the label, a name or a
+  place, and a post's link pasted in it finds that post, by its own link or by the id its name holds, a posted row's buttons copy its link
   and open it (**↗**, a row with no link keeping their room so the pills line up), and
   the bin on a row deletes it with the delete preview and Undo; the list reads the case
   again after a delete or an Undo. It reads `GET /drafts` and `GET /proofs` each time it
@@ -5333,8 +5366,11 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   *Saved*, or *Not saved* with **Retry**. An untouched blank post files nothing, and
   opening a saved one writes nothing until it changes. The name field names the draft
   and is taken when it is left (Enter does too): renaming moves the file once, a name
-  another post holds is refused, and an unsaved post whose name was taken meanwhile
-  files under a fresh one rather than write over it. Going home, opening another
+  another post holds is refused, emptying it goes back to a technical name, and an
+  unsaved post whose name was taken meanwhile files under a fresh one rather than write
+  over it. `POST /cases/{id}/drafts` with `"title": ""` (or only spaces) and
+  `rename_from` clears a name the same way: a technical name it holds is kept, else the
+  lowest free one is taken. Going home, opening another
   post, Back, New post, a proof sent with **To Post**, another case or the tab closing
   each writes what is pending first; a post whose save failed stays open and says so.
 - **A proof sent with To Post** fills a geolocation: its sentence, its date, its points
@@ -5407,27 +5443,57 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   never the only way, since each proof still goes out on its own. It is offered for a
   video of two such proofs or more, from New post, from the home's series card and from
   Geo Proof's strip (**Post this video's slides**); a proof abandoned, still geolocated
-  or never exported is left out and named. Its column says the video, its places and
-  the **Order**, four choices: **Recap first** (the default: the places numbered with
-  their times on the contact sheet, then the video, then a post per place), **Video
-  first**, **Proof first** (the first place, then the video naming every place) and
-  **All in one** (one post: up to four pictures, the contact sheet past four places).
-  Each post is labelled (*Recap*, *Video*, the place's title) and carries its files: a
-  place's proof picture, the video, the sheet. A place's post says its sentence, its time
-  and its points, the same in every order; changing the order keeps the words written on
-  a post, while the recap and the video's post take the order's own start. The mention
-  and the Source field (the video's link) are the only fields; the places bring theirs.
-  The contact sheet is drawn in the browser from the places' saved pictures, 1600 × 900,
-  numbered as `#scenes` numbers the places, and filed in Media as made from the video
-  (`POST /cases/{id}/scenes/sheet`; the same picture is one file). The thread is named
-  after the video, a thread holds 21 posts and says how many places it leaves out, and
-  the kind's default template gives its order and words. **When the video is over the
+  or never exported is left out and named. Its column says the video, its places, the
+  **Thread title** and the **Order**. The thread title is `#video`, the analyst's own
+  words: empty by default (*Optional, e.g. Convoy on the coast road*), never the video's
+  name, and its line drops while it is empty; a thread saved before it existed keeps
+  saying the video's title in Media, as it did, the field showing it. The order has four
+  choices: **Recap first** (the default: the places numbered with their times on a map
+  or the proofs sheet, then the video, then a post per place), **Video first**, **Proof
+  first** (the first place, then the video naming every place) and **All in one** (one
+  post: up to four pictures, the contact sheet past four places). Each post is labelled
+  (*Recap*, *Video*, the place's name, else where it stands) and carries its files: a
+  place's proof picture, the video, the recap's picture. `#scenes` calls a place the
+  same way: its proof's name, else its region and country, else its point, never a
+  technical *Proof 3*. A place's post says its sentence, its time and its points, the
+  same in every order; changing the order keeps the words written on a post, while the
+  recap and the video's post take the order's own start. The mention and the Source
+  field (the video's link) are the only fields; the places bring theirs. **No picture
+  prints a title**: the sheet and the map show numbers (the sheet its times too), and
+  `#scenes` is their legend. The contact sheet is drawn in the browser from the places'
+  saved pictures, 1600 × 900, numbered as `#scenes` numbers the places, and filed in
+  Media as made from the video (`POST /cases/{id}/scenes/sheet`; the same picture is
+  one file). A thread holds 21 posts and says how many places it leaves out, and the
+  kind's default template gives its order and words.
+- **The recap picture.** Under Recap first, **Recap picture** picks **Map** or **Proofs
+  sheet**. Map is the default when the places stand apart: two places or more, more than
+  30 m apart; else the sheet stays, and the column says *These places are too close
+  together for a map, so the recap shows the proofs sheet.* The map (`lib/recapMap.js`)
+  is 1600 × 900, framed by itself on every place, each a numbered pin in the number and
+  the colour `#scenes` and the strip give it, with a scale bar, a north arrow and the
+  imagery's credit, always, and no title. It is drawn as Map plate draws a page
+  (`lib/plate/draw.js` `drawPage`, its credits from `lib/plate/credits.js`), the ground
+  laid from the app's tiles (`/api/tiles`, five at a time). Its choices, each redrawn at
+  once on a small preview (480 × 270, a dozen tiles or so): **Background**, Satellite
+  (Esri World Imagery, the app's default basemap) or Map (OpenStreetMap); **Line in
+  video order**, a dashed line from place to place, off by default; **Signature** and
+  **Azimut mark**, on when the analyst's default proof style carries them, drawn where
+  that style puts them (the north and the scale move to the corners they leave); the
+  signature needs a logo or a handle, and says to set them in Settings → Publishing.
+  **Local first**: the preview is drawn on a plain ground, no tile asked, until the
+  analyst presses **Show the map**, picks Map or picks a ground. **Make the map** draws
+  it whole and files it in Media as made from the video (`POST
+  /cases/{id}/scenes/map`, *convoy recap map.jpg*; the same picture is one file), and the
+  recap carries it (*On the recap*). A choice changed after takes it off the recap until
+  it is made again. A thread saved before the map opens on its sheet. **When the video is over the
   platform's limit** (`lib/videoLimits.js`: *This video runs 24:10, and X takes 20 minutes
   from a free account.*), the column offers the clip a place cut for its post, one per
   thread on the video's post, else its link (with **Cut for the post** named as the way
   to make one); **Post the whole video** goes back. Nothing is cut or re-encoded there.
-  The draft keeps `kind: 'video'`, `video`, `order`, the texts beside `body` (`posts`),
-  `first`, and the `sheet`, `clip` or `link` it uses, each post its `key`
+  The draft keeps `kind: 'video'`, `video`, `title`, `order`, the texts beside `body`
+  (`posts`), `first`, and the `sheet`, `clip` or `link` it uses, `recap: 'map'` with its
+  `mapOptions` (`background`, `line`, `signature`, `mark`) and the `map` once made,
+  each post its `key`
   (`video`, `place:<proof>`) and `edited`. It saves itself, opens, is marked posted,
   deleted with Undo and handed to the extension, its files on each post, like any
   thread. It goes out with Publish only: Reply under the source is a geolocation's.
@@ -5482,7 +5548,7 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   x.com/desk/status/…* (the link opens, to check it), **Keep** (marks it posted at that
   link) and **Not this one**, and a press elsewhere folds the card while the proposal
   waits under the chip; for another post of the case, a toast says *Link caught
-  for “Post 38”* with the same two, Keep writing it through that post's route; one for
+  for “Kherson, Ukraine · 9 Nov”*, the post's label, with the same two, Keep writing it through that post's route; one for
   another case is ignored. A hand-off that went wrong (`post-handoff-report`) shows its
   one sentence in a warning toast with **Copy report**, which copies the extension's
   short plain-text report. When it stopped part way through the post open and says

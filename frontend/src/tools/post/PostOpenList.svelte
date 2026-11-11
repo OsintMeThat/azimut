@@ -13,7 +13,7 @@
   import { copyText } from '../../lib/clipboard.js';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { postKind, postTarget } from '../../lib/post.js';
-  import { byListedDate, draftPicture, draftPill, filterPosts, listedWhen, postFacets } from './postHome.js';
+  import { byListedDate, draftPicture, draftPill, filterPosts, labelledDrafts, listedWhen, postFacets } from './postHome.js';
 
   let {
     caseId = '',
@@ -35,8 +35,10 @@
   let state = $state('');
 
   const facets = $derived(postFacets(drafts));
+  // each with its label, its name or where and when it is about (`postLabel`)
+  const labelled = $derived(labelledDrafts(drafts, proofs ?? []));
   // newest first by the day a post went out, else its last change (`listedWhen`)
-  const shown = $derived(byListedDate(filterPosts(drafts, { query, kind, state })));
+  const shown = $derived(byListedDate(filterPosts(labelled, { query, kind, state })));
   // a filter whose last post went (a delete) lets go, rather than show nothing
   $effect(() => {
     if (kind && !facets.kinds.some((one) => one.id === kind)) kind = '';
@@ -55,7 +57,7 @@
   {:else}
     {#if narrowing}
       <div class="ol-filters">
-        <SearchInput bind:value={query} placeholder="Search posts, or paste a post's link…" width="100%" />
+        <SearchInput bind:value={query} placeholder="Search by name or place, or paste a post's link…" width="100%" />
         {#if facets.kinds.length > 1}
           <select class="input" aria-label="Kind" title="Only the posts of one kind" value={kind} onchange={(event) => (kind = event.currentTarget.value)}>
             <option value="">Every kind</option>
@@ -78,7 +80,7 @@
           {@const picture = draftPicture(draft, proofs, media)}
           {@const pill = draftPill(draft)}
           <div class="ol-row">
-            <button type="button" class="ol-open" onclick={() => onopen?.(draft)} title={`Open ${draft.title}`}>
+            <button type="button" class="ol-open" onclick={() => onopen?.(draft)} title={`Open ${draft.label}`}>
               <span class="ol-pic dark-surface">
                 {#if picture}
                   <img src={fileUrl(caseId, picture)} alt="" loading="lazy" decoding="async" />
@@ -87,25 +89,25 @@
                 {/if}
               </span>
               <span class="ol-words">
-                <span class="ol-title" dir="auto">{draft.title}</span>
+                <span class="ol-title" dir="auto">{draft.label}</span>
                 <span class="ol-sub">{postKind(draft.kind).label} · {postTarget(draft.target).label} · {String(listedWhen(draft)).slice(0, 10)}</span>
               </span>
               <span class="ol-pill {pill.state}">{pill.label}</span>
             </button>
             {#if draft.posted?.url}
-              <button type="button" class="btn btn-ghost btn-sm ol-act" aria-label={`Copy the link of ${draft.title}`} title="Copy the post's link"
+              <button type="button" class="btn btn-ghost btn-sm ol-act" aria-label={`Copy the link of ${draft.label}`} title="Copy the post's link"
                 onclick={() => copyText(draft.posted.url, { said: 'Link copied' })}>
                 <Icon name="copy" size={13} />
               </button>
               <a class="btn btn-ghost btn-sm ol-act" href={draft.posted.url} target="_blank" rel="noreferrer"
-                aria-label={`Open the post of ${draft.title}`} title="Open the post">
+                aria-label={`Open the post of ${draft.label}`} title="Open the post">
                 <Icon name="external" size={13} />
               </a>
             {:else if links}
               <span class="ol-act" aria-hidden="true"></span>
               <span class="ol-act" aria-hidden="true"></span>
             {/if}
-            <button type="button" class="btn btn-ghost btn-sm ol-act ol-del" aria-label={`Delete ${draft.title}`} title="Delete this post"
+            <button type="button" class="btn btn-ghost btn-sm ol-act ol-del" aria-label={`Delete ${draft.label}`} title="Delete this post"
               onclick={() => ondelete?.(draft)}>
               <Icon name="trash" size={13} />
             </button>

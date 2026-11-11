@@ -1,7 +1,8 @@
 /**
  * The contact sheet of a video's series: one picture of its slides for the recap post,
- * a grid of the proofs' saved pictures, each with its number, title and time, the same
- * number `#scenes` gives the place and the same `[0:15]` a post prints (`lib/videoThread.js`).
+ * a grid of the proofs' saved pictures, each with its number and time, the same number
+ * `#scenes` gives the place and the same `[0:15]` a post prints (`lib/videoThread.js`).
+ * It prints no title, the video's nor a place's: the post's `#scenes` is its legend.
  *
  * Drawn in the browser from the PNGs each slide already saved, one picture decoded at
  * a time and at the size of its cell (`createImageBitmap` with a resize), then let go,
@@ -38,15 +39,14 @@ export const SHEET_COLORS = Object.freeze({
 const FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 /**
- * The tiles of a sheet: `{ number, title, time, png }` for the first `SHEET_MAX` slides,
+ * The tiles of a sheet: `{ number, time, png }` for the first `SHEET_MAX` slides,
  * numbered as the thread posts them, and how many more there were.
- * A slide is `{ title, moments, png }`, as `videoThread.videoSlides` keeps it.
+ * A slide is `{ moments, png }`, as `videoThread.videoSlides` keeps it.
  */
 export function sheetTiles(slides) {
   const all = slides ?? [];
   const tiles = all.slice(0, SHEET_MAX).map((slide, i) => ({
     number: i + 1,
-    title: String(slide.title ?? ''),
     time: timecode(slide.moments),
     // what a narrow cell says instead: the first time, the rest counted
     short: shortTimecode(slide.moments),
@@ -56,15 +56,14 @@ export function sheetTiles(slides) {
 }
 
 /**
- * Where each tile goes on a page of `width` × `height`: a header band for the video's
- * name, then the grid whose pictures come out the largest. Each cell holds a picture box
- * and a caption line under it.
+ * Where each tile goes on a page of `width` × `height`: the grid whose pictures come out
+ * the largest. Each cell holds a picture box and a caption line under it, for its time.
  */
 export function sheetLayout(count, { width = SHEET_WIDTH, height = SHEET_HEIGHT } = {}) {
   const unit = width / SHEET_WIDTH;
   const margin = Math.round(28 * unit);
   const gap = Math.round(14 * unit);
-  const header = Math.round(64 * unit);
+  const header = 0;
   const areaW = width - margin * 2;
   const areaH = height - margin * 2 - header;
   const n = Math.max(1, count);
@@ -162,37 +161,27 @@ function drawTile(ctx, cell, tile, picture, unit) {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, cell.box.x + padX, cell.box.y + badgeH / 2);
-  // the caption: the title, and the time at the right
+  // the caption: the time, whole when it fits, else its first moment and the rest counted
   const line = cell.caption;
   const textSize = Math.max(10, Math.round(line.h * 0.5));
-  const mid = line.y + line.h / 2;
-  let room = line.w;
   if (tile.time) {
-    ctx.font = `${textSize}px ${FONT}`;
-    const full = ctx.measureText(tile.time).width <= line.w * 0.55 ? tile.time : tile.short || tile.time;
-    const time = fitText(ctx, full, line.w * 0.55);
-    const timeW = ctx.measureText(time).width;
-    ctx.fillStyle = SHEET_COLORS.muted;
-    ctx.textAlign = 'right';
-    ctx.fillText(time, line.x + line.w, mid);
-    room = line.w - timeW - Math.round(textSize * 0.8);
+    ctx.font = `600 ${textSize}px ${FONT}`;
+    const full = ctx.measureText(tile.time).width <= line.w ? tile.time : tile.short || tile.time;
+    ctx.fillStyle = SHEET_COLORS.text;
+    ctx.textAlign = 'left';
+    ctx.fillText(fitText(ctx, full, line.w), line.x, line.y + line.h / 2);
   }
-  ctx.font = `600 ${textSize}px ${FONT}`;
-  ctx.fillStyle = SHEET_COLORS.text;
-  ctx.textAlign = 'left';
-  if (room > textSize) ctx.fillText(fitText(ctx, tile.title, room), line.x, mid);
 }
 
 /**
  * Draw the sheet of `slides` and answer it as a Blob.
  *
- * `video` is its title, written in the header. `caseId` finds the pictures; or give
- * `loadPicture(path, width)` to decode them another way. `makeCanvas(width, height)` is
- * there for the tests, as are `width` and `height` for the preview.
+ * `caseId` finds the pictures; or give `loadPicture(path, width)` to decode them another
+ * way. `makeCanvas(width, height)` is there for the tests, as are `width` and `height`
+ * for the preview.
  */
 export async function buildProofSheet(slides, {
   caseId = null,
-  video = '',
   width = SHEET_WIDTH,
   height = SHEET_HEIGHT,
   type = SHEET_TYPE,
@@ -200,27 +189,13 @@ export async function buildProofSheet(slides, {
   loadPicture = (path, w) => loadCasePicture(caseId, path, w),
   makeCanvas = defaultCanvas,
 } = {}) {
-  const { tiles, more } = sheetTiles(slides);
+  const { tiles } = sheetTiles(slides);
   const layout = sheetLayout(tiles.length, { width, height });
   const canvas = makeCanvas(width, height);
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = SHEET_COLORS.page;
   ctx.fillRect(0, 0, width, height);
-
-  // the header: the video's name, and how many places the sheet holds
-  const headSize = Math.round(26 * layout.unit);
-  const headY = layout.margin + layout.header / 2 - Math.round(6 * layout.unit);
-  const count = `${tiles.length + more} ${tiles.length + more === 1 ? 'place' : 'places'}${more ? `, the first ${tiles.length} shown` : ''}`;
   ctx.textBaseline = 'middle';
-  ctx.font = `${Math.round(headSize * 0.7)}px ${FONT}`;
-  ctx.fillStyle = SHEET_COLORS.muted;
-  ctx.textAlign = 'right';
-  ctx.fillText(count, width - layout.margin, headY);
-  const countW = ctx.measureText(count).width;
-  ctx.font = `700 ${headSize}px ${FONT}`;
-  ctx.fillStyle = SHEET_COLORS.text;
-  ctx.textAlign = 'left';
-  ctx.fillText(fitText(ctx, String(video ?? ''), width - layout.margin * 2 - countW - headSize), layout.margin, headY);
 
   // one picture at a time, decoded at its cell's size and let go before the next
   for (let i = 0; i < tiles.length; i += 1) {

@@ -3,10 +3,10 @@
    * Where Post opens with no post open, in place of the composer, in the manner of Geo
    * Proof's home: **New post** and a search that finds a draft by name and opens it, then
    * three parts. **In progress**, the drafts not gone out yet or changed since, each with
-   * its platform and how many posts it holds; **Ready to post**, the proofs no draft names
-   * yet and the videos whose slides wait, one press starting the right post: a slide's
-   * geolocation, or, for a video of two proofs or more with no thread yet, its **Video
-   * thread**; and
+   * its platform and how many posts it holds; **Ready to post**, the proofs with no post
+   * yet (a video's leave once a thread of it is in the case) and the videos whose slides
+   * wait, one press starting the right post: a slide's geolocation, or, while two of a
+   * video's proofs or more have no post at all, its **Video thread**; and
    * **Posted**, the latest to go out, with their link (`postHome.js`). Every post card
    * wears its state as a pill (Draft, Posted, Changed since posted), and its ⋯ or a
    * right-click opens it, marks it posted (**Mark as posted…**, with its link or without,
@@ -23,12 +23,13 @@
   import { copyText } from '../../lib/clipboard.js';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { timeAgo } from '../../lib/analysisViews.js';
-  import { slideTag } from '../../lib/proofList.js';
+  import { proofLabel, slideTag } from '../../lib/proofList.js';
   import { sceneColorAt } from '../../lib/scenes.js';
   import { postKind } from '../../lib/post.js';
   import MarkPosted from './MarkPosted.svelte';
   import {
-    draftLine, draftPicture, draftPill, findDrafts, homeDrafts, isPosted, postedOn, readyToPost, recentDrafts, shortLink,
+    draftLine, draftPicture, draftPill, findDrafts, homeDrafts, isPosted, labelledDrafts, postedOn, readyToPost, recentDrafts,
+    shortLink,
   } from './postHome.js';
 
   let {
@@ -63,10 +64,12 @@
   let query = $state('');
 
   const loading = $derived(drafts === null || proofs === null);
-  const parts = $derived(homeDrafts(drafts ?? []));
+  // each post with its label: its name, or where and when it is about (`postLabel`)
+  const labelled = $derived(labelledDrafts(drafts ?? [], proofs ?? []));
+  const parts = $derived(homeDrafts(labelled));
   const recent = $derived(recentDrafts(parts.progress));
   const posted = $derived(recentDrafts(parts.posted));
-  const found = $derived(findDrafts(drafts ?? [], query).slice(0, 8));
+  const found = $derived(findDrafts(labelled, query).slice(0, 8));
   const ready = $derived(readyToPost(proofs ?? [], drafts ?? []));
 
   function find(event) {
@@ -123,13 +126,13 @@
 {#snippet postCard(draft)}
   {@const pill = draftPill(draft)}
   <div class="ph-card post-card" role="presentation" oncontextmenu={(event) => context(event, { draft })}>
-    <button type="button" class="ph-open" onclick={() => onopen?.(draft)} title={`Open ${draft.title}`}>
+    <button type="button" class="ph-open" onclick={() => onopen?.(draft)} title={`Open ${draft.label}`}>
       <span class="ph-pic dark-surface">
         {@render draftPic(draft)}
         <span class="ph-pill {pill.state}">{pill.label}</span>
       </span>
       <span class="ph-card-words">
-        <span class="ph-title" dir="auto">{draft.title}</span>
+        <span class="ph-title" dir="auto">{draft.label}</span>
         <span class="ph-said"><span class="ph-line">{draftLine(draft)}</span><span class="ph-when">{pill.state === 'posted' ? postedOn(draft) : timeAgo(draft.updated_at)}</span></span>
       </span>
     </button>
@@ -138,7 +141,7 @@
         <Icon name="external" size={11} /><span>{shortLink(draft.posted.url)}</span>
       </a>
     {/if}
-    <button type="button" class="ph-more" aria-label={`More for ${draft.title}`} title="Open, mark or delete this post" aria-haspopup="menu"
+    <button type="button" class="ph-more" aria-label={`More for ${draft.label}`} title="Open, mark or delete this post" aria-haspopup="menu"
       aria-expanded={!!menuFor(draft)} onclick={(event) => openMenu({ draft }, event.currentTarget)}>
       <Icon name="more" size={13} stroke={2.6} />
     </button>
@@ -155,7 +158,7 @@
       <button type="button" class="btn btn-primary ph-new" onclick={() => onnew?.()}><Icon name="plus" size={14} /> New post</button>
       <label class="ph-find">
         <Icon name="search" size={15} />
-        <input bind:value={query} onkeydown={find} placeholder="Find a post by name or link…" aria-label="Find a post by name or link" />
+        <input bind:value={query} onkeydown={find} placeholder="Find a post by name, place or link…" aria-label="Find a post by name, place or link" />
         {#if query}
           <button type="button" class="ph-clear" aria-label="Clear search" title="Clear search" onclick={() => (query = '')}><Icon name="x" size={12} /></button>
         {/if}
@@ -166,15 +169,15 @@
       <div class="ph-found" role="group" aria-label="Drafts found">
         {#each found as draft, i (draft.name)}
           <button type="button" class="ph-hit" class:first={i === 0} onclick={() => onopen?.(draft)}
-            title={i === 0 ? `Open ${draft.title} (Enter)` : `Open ${draft.title}`}>
+            title={i === 0 ? `Open ${draft.label} (Enter)` : `Open ${draft.label}`}>
             <span class="ph-hit-pic">{@render draftPic(draft)}</span>
-            <span class="ph-hit-title" dir="auto">{draft.title}</span>
+            <span class="ph-hit-title" dir="auto">{draft.label}</span>
             <span class="ph-pill flat {draftPill(draft).state}">{draftPill(draft).label}</span>
             <span class="ph-said">{draftLine(draft)}</span>
             <span class="ph-when">{timeAgo(draft.updated_at)}</span>
           </button>
         {:else}
-          <p class="ph-none">No draft by that name.</p>
+          <p class="ph-none">No post by that name or place.</p>
         {/each}
       </div>
     {:else}
@@ -203,14 +206,14 @@
           <div class="ph-cards">
             {#each ready.photos as row (row.name)}
               <div class="ph-card post-card" role="presentation" oncontextmenu={(event) => context(event, { proof: row })}>
-                <button type="button" class="ph-open" onclick={() => onproof?.(row)} title={`Write the geolocation post of ${row.title}`}>
+                <button type="button" class="ph-open" onclick={() => onproof?.(row)} title={`Write the geolocation post of ${proofLabel(row)}`}>
                   <span class="ph-pic dark-surface">{@render proofPic(row)}</span>
                   <span class="ph-card-words">
-                    <span class="ph-title" dir="auto">{row.title}</span>
+                    <span class="ph-title" dir="auto">{proofLabel(row)}</span>
                     <span class="ph-said"><span class="ph-line"><Icon name="crosshair" size={11} /> Geolocation</span><span class="ph-when">{timeAgo(row.updated_at)}</span></span>
                   </span>
                 </button>
-                <button type="button" class="ph-more" aria-label={`More for ${row.title}`} title="Write its post, or mark it posted" aria-haspopup="menu"
+                <button type="button" class="ph-more" aria-label={`More for ${proofLabel(row)}`} title="Write its post, or mark it posted" aria-haspopup="menu"
                   aria-expanded={!!menuFor(row)} onclick={(event) => openMenu({ proof: row }, event.currentTarget)}>
                   <Icon name="more" size={13} stroke={2.6} />
                 </button>
@@ -238,10 +241,10 @@
                     {#each series.slides as row (row.name)}
                       {@const tag = slideTag(row, { short: true })}
                       <button type="button" class="ph-chip" style:--scene={sceneColorAt(row.order)} onclick={() => onproof?.(row)}
-                        oncontextmenu={(event) => context(event, { proof: row })} title={`Write the geolocation post of ${row.title}`}>
+                        oncontextmenu={(event) => context(event, { proof: row })} title={`Write the geolocation post of ${proofLabel(row)}`}>
                         <span class="ph-chip-pic">{#if row.thumb || row.png}<img src={fileUrl(caseId, row.thumb ?? row.png)} alt="" loading="lazy" decoding="async" />{/if}</span>
                         <span class="ph-dot" aria-hidden="true"></span>
-                        <span class="ph-chip-name" dir="auto">{row.title}</span>
+                        <span class="ph-chip-name" dir="auto">{proofLabel(row)}</span>
                         {#if tag?.where}<span class="ph-chip-time">{tag.where}</span>{/if}
                       </button>
                     {/each}
@@ -272,8 +275,8 @@
 
 {#if menu?.draft}
   {@const draft = menu.draft}
-  <FloatingMenu anchor={menu.anchor ?? null} at={menu.at ?? null} width={220} label={draft.title} onclose={() => (menu = null)}>
-    <p class="fm-head" dir="auto">{draft.title}</p>
+  <FloatingMenu anchor={menu.anchor ?? null} at={menu.at ?? null} width={220} label={draft.label} onclose={() => (menu = null)}>
+    <p class="fm-head" dir="auto">{draft.label}</p>
     <button type="button" class="fm-item" onclick={() => act('open')}><Icon name="folderOpen" size={14} /><span class="fm-grow">Open</span></button>
     {#if draftProof(draft)}
       <button type="button" class="fm-item" title="Open its proof in Geo Proof" onclick={() => act('proof')}>
@@ -297,8 +300,8 @@
   </FloatingMenu>
 {:else if menu?.proof}
   {@const proof = menu.proof}
-  <FloatingMenu anchor={menu.anchor ?? null} at={menu.at ?? null} width={220} label={proof.title} onclose={() => (menu = null)}>
-    <p class="fm-head" dir="auto">{proof.title}</p>
+  <FloatingMenu anchor={menu.anchor ?? null} at={menu.at ?? null} width={220} label={proofLabel(proof)} onclose={() => (menu = null)}>
+    <p class="fm-head" dir="auto">{proofLabel(proof)}</p>
     <button type="button" class="fm-item" onclick={() => act('write')}><Icon name="post" size={14} /><span class="fm-grow">Write its post</span></button>
     <button type="button" class="fm-item" title="Open it in Geo Proof" onclick={() => act('proof')}>
       <Icon name="proof" size={14} /><span class="fm-grow">Open the proof</span></button>

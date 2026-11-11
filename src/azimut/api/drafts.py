@@ -19,11 +19,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, StrictBool
 
 from ..engine import artifacts as artifact_engine
+from ..engine import geo as geo_engine
 from ..engine import links as link_engine
 from ..engine import media as media_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
-from .naming import case_only, holders, read_created_at, slugify
+from .naming import case_only, holders, read_created_at, slugify, technical_name
 from .. import layout
 
 router = APIRouter(prefix="/api", tags=["drafts"])
@@ -31,9 +32,9 @@ router = APIRouter(prefix="/api", tags=["drafts"])
 DRAFT_MARKER = 1
 MAX_MEDIA_PER_POST = 4
 MAX_EXTRA_POSTS = 20
-# the proof, a video thread's video, sheet and clip, then the first post's own pictures,
-# the media post and the later ones
-MAX_DRAFT_ATTACHMENTS = 1 + 3 + MAX_MEDIA_PER_POST * (2 + MAX_EXTRA_POSTS)
+# the proof, a video thread's video, sheet, map and clip, then the first post's own
+# pictures, the media post and the later ones
+MAX_DRAFT_ATTACHMENTS = 1 + 4 + MAX_MEDIA_PER_POST * (2 + MAX_EXTRA_POSTS)
 MAX_ARTIFACT_PATH_LENGTH = 512
 #: What a post is made from (frontend `lib/post.js` POST_KINDS). A draft that says
 #: nothing is a Geolocation one, as every draft was before kinds.
@@ -70,9 +71,11 @@ class DraftIn(BaseModel):
     # The filename always follows the title, so renaming a saved draft moves its
     # file. ``rename_from`` is the stem the composer is currently bound to
     # (absent on a first save); a save that lands elsewhere renames that file in
-    # place instead of leaving a copy behind under the old name.
+    # place instead of leaving a copy behind under the old name. An empty title is
+    # no name: the draft files under a technical one, "Post 3" (`technical_name`),
+    # which is how a name is cleared.
     rename_from: str | None = None
-    title: str = Field(min_length=1, max_length=200)
+    title: str = Field(default="", max_length=200)
     state: dict[str, Any]  # opaque Post Composer state (fields + tweets)
 
 
@@ -127,11 +130,11 @@ def _draft_source_paths(state: dict[str, Any]) -> list[str]:
     proof = _artifact_path(state.get("proofPng"), "state.proofPng")
     if proof:
         paths.append(proof)
-    # A video thread is made from its video, and names the contact sheet and the clip it
-    # made or picked for it, posted or not in the order it is in. Another kind's draft
-    # never had these, and what it holds under them is not read.
+    # A video thread is made from its video, and names the contact sheet, the recap map
+    # and the clip it made or picked for it, posted or not in the order it is in. Another
+    # kind's draft never had these, and what it holds under them is not read.
     if state.get("kind") == "video":
-        for key in ("video", "sheet", "clip"):
+        for key in ("video", "sheet", "map", "clip"):
             named = _artifact_path(state.get(key), f"state.{key}")
             if named:
                 paths.append(named)
@@ -289,6 +292,21 @@ def _proof_posts(
         case.update_entity(entity["id"], {"attrs": {"posted": posts or None}})
 
 
+def _said(value: Any) -> str | None:
+    """A field's words, or None for nothing said."""
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _first_point(text: Any) -> list[float] | None:
+    """The post's first coordinates, ``[lat, lon]``, from its coordinates field: the
+    point its place and its plus code are about. A name before them is left aside."""
+    if not isinstance(text, str):
+        return None
+    line = next((one.strip() for one in text.splitlines() if one.strip()), "")
+    found = geo_engine.parse_coords(line.split(" — ", 1)[-1]) if line else None
+    return [round(found[0], 6), round(found[1], 6)] if found else None
+
+
 def _post_count(state: dict[str, Any]) -> int:
     """How many posts a draft's thread holds, as the composer copies it: the first one,
     the media post when it is on and chosen, and each later post that says or carries
@@ -344,6 +362,11 @@ def list_drafts(case_id: str) -> list[dict[str, Any]]:
                 "state": _post_state(state),
                 "posted": _posted(state),
                 "picture": _picture(state),
+                # What a post with no name of its own is labelled by (frontend
+                # `postHome.postLabel`): its place, its date and its point, as it says them.
+                "place": _said(state.get("place")),
+                "when": _said(state.get("date")),
+                "coords": _first_point(state.get("coordsText")),
             }
         )
     drafts.sort(key=lambda d: d.get("updated_at") or "", reverse=True)
@@ -365,8 +388,9 @@ def load_draft(case_id: str, name: str) -> dict[str, Any]:
 @router.post("/cases/{case_id}/drafts")
 def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
     case = get_case(case_id)
-    name = slugify(body.title, "Post")
-    case.subdir(layout.DRAFTS_DIR)  # born on first save, so the folder exists
+    folder = case.subdir(layout.DRAFTS_DIR)  # born on first save, so the folder exists
+    bound = slugify(body.rename_from, "draft") if body.rename_from else None
+    name = slugify(body.title, "Post") if body.title.strip() else technical_name(folder, "draft", bound)
     source_paths = _draft_source_paths(body.state)
     _publish(body.state)
     _alt_texts(body.state)
@@ -379,7 +403,7 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
     # a same-named draft — there the analyst is updating that one.
     # Taken is judged without case, the draft being saved excepted: two names that
     # differ only by case are one file on Windows and macOS.
-    old = slugify(body.rename_from, "draft") if body.rename_from else None
+    old = bound
     old_rel = layout.draft_rel(old) if old and old != name else None
     if holders(path.parent, name, source=old if old_rel else name):
         raise HTTPException(status_code=409, detail="another draft already uses that name")

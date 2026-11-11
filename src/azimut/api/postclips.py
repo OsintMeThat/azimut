@@ -6,8 +6,8 @@ Inspect's scan. A passage the case already holds a clip of answers that clip at 
 and a cut already running for it answers the same job, so a second press never makes a
 second copy.
 
-The contact sheet: the picture of a video's places the browser draws for the thread,
-filed in Media.
+The recap pictures: the contact sheet and the recap map of a video's places, which the
+browser draws for the thread, filed in Media.
 """
 
 from __future__ import annotations
@@ -91,6 +91,17 @@ def cut_clip(case_id: str, name: str, body: ClipIn) -> dict[str, Any]:
     return {"job_id": job_id}
 
 
+async def _file_recap(case_id: str, video: str, image: UploadFile, op: str) -> dict[str, Any]:
+    case = get_case(case_id)
+    data = await image.read(clip_engine.SHEET_MAX_BYTES + 1)
+    if len(data) > clip_engine.SHEET_MAX_BYTES:
+        raise HTTPException(status_code=413, detail=f"a {clip_engine.RECAP_WORDS[op]} is under 2 MB")
+    try:
+        return clip_engine.file_sheet(case, video, data, op)
+    except (clip_engine.BadClip, CaseError) as exc:
+        raise _refused(exc) from exc
+
+
 @router.post("/cases/{case_id}/scenes/sheet")
 async def file_sheet(
     case_id: str,
@@ -98,11 +109,15 @@ async def file_sheet(
     image: UploadFile = File(),
 ) -> dict[str, Any]:
     """File the contact sheet of a video's thread in Media. Answers ``{path}``."""
-    case = get_case(case_id)
-    data = await image.read(clip_engine.SHEET_MAX_BYTES + 1)
-    if len(data) > clip_engine.SHEET_MAX_BYTES:
-        raise HTTPException(status_code=413, detail="a contact sheet is under 2 MB")
-    try:
-        return clip_engine.file_sheet(case, video, data)
-    except (clip_engine.BadClip, CaseError) as exc:
-        raise _refused(exc) from exc
+    return await _file_recap(case_id, video, image, clip_engine.SHEET_OP)
+
+
+@router.post("/cases/{case_id}/scenes/map")
+async def file_recap_map(
+    case_id: str,
+    video: str = Form(min_length=1, max_length=512),
+    image: UploadFile = File(),
+) -> dict[str, Any]:
+    """File the recap map of a video's thread in Media, as its contact sheet is. Answers
+    ``{path}``."""
+    return await _file_recap(case_id, video, image, clip_engine.MAP_OP)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONTINUE_SHOWN, NO_VIDEO, continueShown, findProofs, inVideo, onVideo, proofVideos, recentProofs, slideTag } from './proofList.js';
+import { CONTINUE_SHOWN, NO_VIDEO, continueShown, findProofs, inVideo, onVideo, proofLabel, proofVideos, recentProofs, slideTag } from './proofList.js';
 import { sceneColorAt } from './scenes.js';
 
 const ROWS = [
@@ -72,5 +72,28 @@ describe('the Open list\'s filter by video', () => {
     expect(ROWS.filter((r) => inVideo(r, '')).length).toBe(5);
     expect(ROWS.filter((r) => inVideo(r, 'media/clip.mp4')).map((r) => r.name)).toEqual(['market', 'bridge']);
     expect(ROWS.filter((r) => inVideo(r, NO_VIDEO)).map((r) => r.name)).toEqual(['holiday', 'old']);
+  });
+});
+
+describe('what a listed proof is called', () => {
+  const now = new Date(2026, 10, 11);
+
+  it('is its name, else where it stands and its day, else its point, else Untitled', () => {
+    expect(proofLabel({ title: 'Rooftop', place: 'Al Jawf, Yemen' }, now)).toBe('Rooftop');
+    // a proof saved as Proof N, before or after names were hidden, reads as its label with nothing renamed
+    expect(proofLabel({ name: 'Proof 3', title: 'Proof 3', place: 'Al Jawf, Yemen', when: '2026-11-09T09:00:00', created_at: '2026-11-01T09:00:00' }, now))
+      .toBe('Al Jawf, Yemen · 9 Nov');
+    expect(proofLabel({ title: 'Proof 3', place: 'Al Jawf, Yemen', when: null, created_at: '2025-06-01T12:00:00' }, now)).toBe('Al Jawf, Yemen · 1 Jun 2025');
+    expect(proofLabel({ title: 'Proof 3', place: '', points: [{ coords: 'text' }, { lat: 15.47123, lon: 45.32211 }] }, now)).toBe('15.4712, 45.3221');
+    expect(proofLabel({ title: 'Proof 3', place: '', points: [] }, now)).toBe('Untitled proof');
+    expect(proofLabel({ name: 'Proof 9' }, now)).toBe('Untitled proof');
+  });
+
+  it('is found by its place as well as by its name', () => {
+    const rows = [{ name: 'Proof 1', title: 'Proof 1', place: 'Al Jawf, Yemen' }, { name: 'Rooftop', title: 'Rooftop' }];
+    expect(findProofs(rows, 'jawf').map((row) => row.name)).toEqual(['Proof 1']);
+    expect(findProofs(rows, 'rooftop').map((row) => row.name)).toEqual(['Rooftop']);
+    // a technical name, never shown, finds nothing
+    expect(findProofs(rows, 'proof 1')).toEqual([]);
   });
 });

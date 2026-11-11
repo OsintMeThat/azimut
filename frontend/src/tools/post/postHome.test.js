@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   byListedDate, draftLine, draftPicture, draftPill, draftState, filterPosts, findDrafts, homeDrafts, isPosted, listedWhen, postedOn,
   postFacets, postsWords,
-  readyToPost, recentDrafts, shortLink, threadVideos,
+  labelledDrafts, postLabel, readyToPost, recentDrafts, shortLink, threadVideos,
 } from './postHome.js';
 
 // An X status id for a known moment, as X makes them.
@@ -67,30 +67,41 @@ describe('readyToPost — what has no post yet', () => {
     expect(ready.videos[0].slides.map((row) => row.name)).toEqual(['s1', 's3']);
   });
 
-  it('keeps a video whose slides all have a post only while its thread can still be started', () => {
+  it('leaves out a video whose slides all have a post, its thread unoffered', () => {
     const proofs = [slide('s1', 1), slide('s2', 2)];
     const drafts = [{ proof: 'proofs/s1.png' }, { proof: 'proofs/s2.png' }];
     expect(readyToPost(proofs, drafts, { threads: false }).videos).toEqual([]);
-    expect(readyToPost(proofs, drafts, { threads: true }).videos).toHaveLength(1);
-    // a video thread naming the video is its post
-    const threaded = [...drafts, { kind: 'video', video: 'media/clip.mp4' }];
-    expect(readyToPost(proofs, threaded, { threads: true }).videos).toEqual([]);
+    expect(readyToPost(proofs, drafts, { threads: true }).videos).toEqual([]);
   });
 
-  it('offers a video\'s thread for two proofs to post or more, its slides still one by one', () => {
+  it('offers a video\'s thread while two of its proofs or more have no post at all, its slides still one by one', () => {
     const two = readyToPost([slide('s1', 1), slide('s2', 2)], [], { threads: true }).videos[0];
     expect([two.thread, two.postable, two.slides.length]).toEqual([true, 2, 2]);
     // one proof is a geolocation of its own: no thread, and its slide still waits
     const one = readyToPost([slide('s1', 1)], [], { threads: true }).videos[0];
     expect([one.thread, one.slides.length]).toEqual([false, 1]);
-    // nothing to offer and nothing waiting: the video is not listed
+    // nothing waiting: the video is not listed
     expect(readyToPost([slide('s1', 1)], [{ proof: 'proofs/s1.png' }], { threads: true }).videos).toEqual([]);
     // a proof still geolocated or given up on is no post of the thread
     const unplaced = readyToPost([slide('s1', 1), slide('s2', 2, { postable: false })], [], { threads: true }).videos[0];
     expect([unplaced.thread, unplaced.postable, unplaced.count]).toEqual([false, 1, 2]);
-    // a thread already in the case is not offered twice; its slides wait on their own
-    const held = readyToPost([slide('s1', 1), slide('s2', 2)], [{ kind: 'video', video: 'media/clip.mp4' }], { threads: true }).videos[0];
-    expect([held.thread, held.slides.length]).toEqual([false, 2]);
+  });
+
+  it('stops offering the thread once only one proof of three is left without a post', () => {
+    const proofs = [slide('s1', 1), slide('s2', 2), slide('s3', 3)];
+    const ready = readyToPost(proofs, [{ proof: 'proofs/s1.png' }, { proof: 'proofs/s3.png' }], { threads: true }).videos[0];
+    expect([ready.thread, ready.slides.map((row) => row.name)]).toEqual([false, ['s2']]);
+    // two still without one: offered
+    expect(readyToPost(proofs, [{ proof: 'proofs/s1.png' }], { threads: true }).videos[0].thread).toBe(true);
+  });
+
+  it('takes a video\'s proofs off the list once a thread of it is in the case', () => {
+    const proofs = [slide('s1', 1), slide('s2', 2), proof('photo')];
+    const ready = readyToPost(proofs, [{ kind: 'video', video: 'media/clip.mp4' }], { threads: true });
+    expect(ready.videos).toEqual([]);
+    expect(ready.photos.map((row) => row.name)).toEqual(['photo']);
+    // a thread of another video leaves this one as it is
+    expect(readyToPost(proofs, [{ kind: 'video', video: 'media/other.mp4' }], { threads: true }).videos[0].thread).toBe(true);
   });
 });
 
@@ -195,5 +206,43 @@ describe('the Open list', () => {
     expect(findDrafts(posts, `https://x.com/desk/status/${id}`).map((d) => d.name)).toEqual(['p1', id]);
     // words still search the names
     expect(names('bridge')).toEqual(['p1']);
+  });
+});
+
+describe('what a listed post is called', () => {
+  const now = new Date(2026, 10, 11);
+  const row = (extra = {}) => ({ name: 'Post 41', title: 'Post 41', kind: 'geolocation', created_at: '2026-10-01T12:00:00', ...extra });
+  const proofs = [
+    proof('p1', { place: 'Al Jawf, Yemen', when: '2026-11-09T06:40:00', points: [{ lat: 16.1, lon: 44.8 }] }),
+    slide('s2', 2, { place: 'Marib, Yemen', when: null, points: [{ lat: 15.4, lon: 45.3 }] }),
+    slide('s1', 1, { place: 'Sanaa, Yemen', when: '2026-11-05T09:00:00', points: [{ lat: 15.3, lon: 44.2 }] }),
+  ];
+
+  it('is the name the analyst gave it', () => {
+    expect(postLabel(row({ title: 'Harbour strike', place: 'Kherson, Ukraine' }), proofs, now)).toBe('Harbour strike');
+  });
+
+  it('is its #place and its #date, else its proof\'s place and date', () => {
+    expect(postLabel(row({ place: 'Kherson, Ukraine', when: '2026-11-08 06:40 UTC+2' }), proofs, now)).toBe('Kherson, Ukraine · 8 Nov');
+    expect(postLabel(row({ proof: 'proofs/p1.png' }), proofs, now)).toBe('Al Jawf, Yemen · 9 Nov');
+    // a video thread says its video's first place
+    expect(postLabel(row({ kind: 'video', video: 'media/clip.mp4' }), proofs, now)).toBe('Sanaa, Yemen · 5 Nov');
+  });
+
+  it('dates by the day it went out, else when it was made, when nothing says the event\'s', () => {
+    const out = { url: null, site: 'x', at: '2026-11-10T08:00:00' };
+    expect(postLabel(row({ place: 'Kherson, Ukraine', posted: out }), [], now)).toBe('Kherson, Ukraine · 10 Nov');
+    expect(postLabel(row({ place: 'Kherson, Ukraine' }), [], now)).toBe('Kherson, Ukraine · 1 Oct');
+  });
+
+  it('falls back to its point, else Untitled post', () => {
+    expect(postLabel(row({ coords: [15.47123, 45.32211] }), [], now)).toBe('15.4712, 45.3221 · 1 Oct');
+    expect(postLabel(row({ kind: 'free' }), [], now)).toBe('Untitled post');
+  });
+
+  it('is found by its label: a post with no name, by its place', () => {
+    const drafts = labelledDrafts([row({ place: 'Kherson, Ukraine' }), row({ name: 'Harbour', title: 'Harbour' })], [], now);
+    expect(findDrafts(drafts, 'kherson').map((one) => one.name)).toEqual(['Post 41']);
+    expect(filterPosts(drafts, { query: 'harb' }).map((one) => one.name)).toEqual(['Harbour']);
   });
 });

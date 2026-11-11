@@ -5,11 +5,12 @@
  * (`GET /cases/{id}/proofs`, a proof of a video saying which video and which slide).
  *
  * **What has a post yet** is read off the drafts alone: a proof has one when a draft
- * names its picture, and a video's series when a video-thread draft names the video.
+ * names its picture, or when a video-thread draft names its video.
  * The drafts list reads every draft file anyway, so this costs no read of its own, and
  * a post deleted to the Trash gives its proof back to Ready to post at once.
  */
 import { matchesTerms } from '../../lib/folderBrowse.js';
+import { itemLabel } from '../../lib/naming.js';
 import { onVideo } from '../../lib/proofList.js';
 import { videoName } from '../../lib/proofScene.js';
 import {
@@ -68,8 +69,40 @@ export function byListedDate(drafts) {
 const linkId = (url) => (postedAddress(url)?.url ?? '').split('/').pop();
 
 /**
- * Whether a post answers a search: its name's words, or, for a post's link pasted, that
- * post, found by its own link or by the id its name holds.
+ * The proof a post is about, from the proofs the case lists: a geolocation's own, or the
+ * first slide of a video thread's video. Null for a post about none.
+ */
+function aboutProof(draft, proofs) {
+  const rows = proofs ?? [];
+  if (draft?.proof) return rows.find((row) => row.png === draft.proof) ?? null;
+  if (normalizePostKind(draft?.kind) !== 'video' || !draft?.video) return null;
+  return rows.filter((row) => row.video === draft.video).sort((a, b) => (a.slide ?? 0) - (b.slide ?? 0))[0] ?? null;
+}
+
+/**
+ * What a listed post is called (`naming.itemLabel`): its name when the analyst gave it
+ * one; else its place (its `#place`, else its proof's) and its day (its `#date`, else
+ * its proof's, else the day it went out, else when it was made); else its point.
+ * `proofs` is `GET /proofs`, for what a post's proof says where the post says nothing.
+ */
+export function postLabel(draft, proofs = [], now = new Date()) {
+  const about = aboutProof(draft, proofs);
+  const point = (about?.points ?? []).find((one) => Number.isFinite(one?.lat) && Number.isFinite(one?.lon));
+  return itemLabel('draft', draft?.title ?? draft?.name, {
+    place: draft?.place || about?.place || '',
+    when: [draft?.when, about?.when, postedWhen(draft?.posted), draft?.created_at],
+    coords: draft?.coords ?? point ?? null,
+  }, now);
+}
+
+/** The posts as the lists show them, each with its `label` (`postLabel`). */
+export const labelledDrafts = (drafts, proofs = [], now = new Date()) =>
+  (drafts ?? []).map((draft) => ({ ...draft, label: postLabel(draft, proofs, now) }));
+
+/**
+ * Whether a post answers a search: its label's words (the name the analyst gave, or its
+ * place), or, for a post's link pasted, that post, found by its own link or by the id
+ * its name holds.
  */
 function answersSearch(draft, query) {
   const pasted = postedAddress(query);
@@ -77,7 +110,8 @@ function answersSearch(draft, query) {
     const id = linkId(pasted.url);
     return linkId(draft?.posted?.url) === id || [draft?.title, draft?.name].some((text) => String(text ?? '').includes(id));
   }
-  return matchesTerms([draft?.title, draft?.name].filter(Boolean).join('\n'), query);
+  // by its label alone: a technical name, never shown, finds nothing
+  return matchesTerms(draft?.label ?? postLabel(draft), query);
 }
 
 /** The day a posted card says, *9 Nov*, read off its link when it can be. */
@@ -119,12 +153,12 @@ const threadedVideos = (drafts) => new Set(
 /**
  * What waits for a post: the proofs on photos no draft names yet, newest first, and the
  * videos whose proofs make a series, each with its slides no draft names yet, in slide
- * order. A video whose thread can be started (`threads`) and has none yet offers one
- * (`thread`) once it holds two proofs to post (`THREAD_MIN`); every slide stays one press
- * from its own geolocation all the same, since a thread is never the only way. A video
- * stays while one of its slides waits or while it offers its thread: a series is never
- * offered twice and never lost while a slide still waits. A proof with no picture saved
- * cannot be posted and is left out.
+ * order. A proof has a post once a draft names it or once a video thread of its video
+ * is in the case, so a video with a thread leaves the list whole. A video whose thread
+ * can be started (`threads`) offers one (`thread`) while two of its proofs to post or
+ * more (`THREAD_MIN`) have no post at all; every slide stays one press from its own
+ * geolocation all the same, since a thread is never the only way. A video stays while
+ * one of its slides waits. A proof with no picture saved cannot be posted and is left out.
  */
 export function readyToPost(proofs, drafts, { threads = STARTABLE_POST_KINDS.includes('video') } = {}) {
   const posted = new Set((drafts ?? []).map((draft) => draft.proof).filter(Boolean));
@@ -137,26 +171,31 @@ export function readyToPost(proofs, drafts, { threads = STARTABLE_POST_KINDS.inc
       if (!posted.has(row.png)) photos.push(row);
       continue;
     }
+    // the thread of its video is its post
+    if (threaded.has(row.video)) continue;
     const series = videos.get(row.video) ?? {
       video: row.video,
       title: videoName(row.video, row.video_title),
       slides: [],
       count: 0,
       postable: 0,
-      threaded: threaded.has(row.video),
+      waiting: 0,
     };
     series.count += 1;
     if (postable(row)) series.postable += 1;
-    if (!posted.has(row.png)) series.slides.push(row);
+    if (!posted.has(row.png)) {
+      series.slides.push(row);
+      if (postable(row)) series.waiting += 1;
+    }
     videos.set(row.video, series);
   }
   const waiting = [...videos.values()]
     .map((series) => ({
       ...series,
-      thread: threads && !series.threaded && series.postable >= THREAD_MIN,
+      thread: threads && series.waiting >= THREAD_MIN,
       slides: series.slides.sort((a, b) => a.slide - b.slide),
     }))
-    .filter((series) => series.slides.length || series.thread);
+    .filter((series) => series.slides.length);
   return { photos, videos: waiting };
 }
 

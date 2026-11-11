@@ -206,7 +206,7 @@ describe('the home', () => {
     lists.drafts = [draft('Convoy east'), draft('Depot')];
     lists.saved = { Depot: { title: 'Depot', state: { description: 'Depot fire', tweet1: 'Depot fire' } } };
     await mountPost();
-    const find = home().querySelector('input[aria-label="Find a post by name or link"]');
+    const find = home().querySelector('input[aria-label="Find a post by name, place or link"]');
     find.value = 'dep';
     find.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
@@ -681,11 +681,14 @@ describe('a post saves itself', () => {
     type(target.querySelector('#pc-desc'), 'Smoke');
     await saved();
     const name = header().querySelector('input[aria-label="Post name"]');
+    // a post never named shows no name: it files under a technical one
+    expect([name.value, name.placeholder]).toEqual(['', 'Name (optional)']);
+    expect(draftWrites().at(-1)[1].title).toBe('Post 1');
     name.value = 'Harbour';
     name.dispatchEvent(new Event('input', { bubbles: true }));
     name.dispatchEvent(new FocusEvent('blur'));
     await settle();
-    expect(name.value).toBe('Post 1');
+    expect(name.value).toBe('');
     expect(toasts()).toContain('Another post is already named “Harbour”');
 
     name.value = 'Smoke at the port';
@@ -696,6 +699,15 @@ describe('a post saves itself', () => {
     name.dispatchEvent(new FocusEvent('blur'));
     await saved();
     expect(draftWrites().at(-1)[1]).toMatchObject({ rename_from: 'Post 1', title: 'Smoke at the port' });
+    expect(name.value).toBe('Smoke at the port');
+
+    // cleared: back to a technical name, the field empty again
+    name.value = '';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    name.dispatchEvent(new FocusEvent('blur'));
+    await saved();
+    expect(draftWrites().at(-1)[1]).toMatchObject({ rename_from: 'Smoke at the port', title: 'Post 1' });
+    expect(name.value).toBe('');
   });
 
   it('says when a save failed, keeps the post open, and Retry writes it', async () => {
@@ -1152,12 +1164,13 @@ describe('a link the extension caught', () => {
 
   it('asks in a toast for another post of the case, and Keep writes it through its own route', async () => {
     lists.entities = [{ id: 'p38', type: 'post', label: 'Post 38', attrs: { draft: '.drafts/Post 38.json' } }];
-    lists.drafts = [{ name: 'Post 38', title: 'Post 38', target: 'x', posts: 1, state: 'draft' }];
+    lists.drafts = [{ name: 'Post 38', title: 'Post 38', target: 'x', posts: 1, state: 'draft', place: 'Kherson, Ukraine' }];
     await mountPost();
     bridge.caught(caught({ draft: 'Post 38' }));
     flushSync();
     const ask = uiState.toasts.at(-1);
-    expect(ask.message).toBe('Link caught for “Post 38”');
+    // named by its label, never by its technical name
+    expect(ask.message).toBe('Link caught for “Kherson, Ukraine”');
     expect(ask.action.map((one) => one.label)).toEqual(['Keep', 'Not this one']);
     expect(api.put).not.toHaveBeenCalled();
     ask.action[0].onClick();

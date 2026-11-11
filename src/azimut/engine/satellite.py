@@ -92,6 +92,18 @@ def save_place(
     return case.add_entity("place", label, attrs=attrs, by=by, status=status)
 
 
+def place_words(place: dict[str, Any] | None) -> str:
+    """Where a place stands, as a label says it: its region and its country, in English
+    where the case has them, "Al Jawf, Yemen". Read off the geography the Locate pass
+    files (`attrs.geo`), so nothing is looked up here, and "" until it is known."""
+    geo = ((place or {}).get("attrs") or {}).get("geo")
+    if not isinstance(geo, dict) or geo.get("state") != "ok":
+        return ""
+    region = str(geo.get("region_en") or geo.get("region") or "").strip()
+    country = countries.name_for(geo.get("country_code")) or str(geo.get("country") or "").strip()
+    return ", ".join(part for part in (region, country) if part)
+
+
 #: Which attribute holds the rounded point two places are considered one at.
 #: Five decimals is about a metre. The name is import enrichment's, which wrote
 #: the key first, and it is **shared rather than copied**: a photo's EXIF point

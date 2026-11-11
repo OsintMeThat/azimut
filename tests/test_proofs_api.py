@@ -2205,3 +2205,53 @@ def test_series_export_refuses_what_has_no_slides(client, tmp_path):
     assert _series(client, cid, photo).status_code == 422
     assert _series(client, cid, "media/never.mp4").status_code == 400
     assert client.post(f"/api/cases/{cid}/proofs/series-export", json={"video": ""}).status_code == 422
+
+
+# -- a proof with no name of its own (`naming.technical_name`) --------------------
+
+
+def test_a_proof_saved_with_no_name_files_under_a_technical_one_and_clears_back_to_one(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    first = client.post(f"/api/cases/{cid}/proofs", json={"title": "", "spec": SPEC, "png_base64": _png_b64()}).json()
+    assert first["name"] == "Proof 1"
+    named = client.post(
+        f"/api/cases/{cid}/proofs", json={"title": "Rooftop angle", "spec": SPEC, "png_base64": _png_b64()}
+    ).json()
+    entity = [e for e in graph_read.entities(cid) if e["label"] == "Rooftop angle"][0]
+
+    # cleared: a fresh technical name, its spec, its picture and its entity along
+    cleared = client.post(
+        f"/api/cases/{cid}/proofs", json={"rename_from": named["name"], "title": "  ", "spec": SPEC}
+    ).json()
+    assert cleared["name"] == "Proof 2"
+    assert client.get(f"/files/{cid}/proofs/Rooftop angle.png").status_code == 404
+    assert client.get(f"/files/{cid}/proofs/Proof 2.png").status_code == 200
+    after = [e for e in graph_read.entities(cid) if e["id"] == entity["id"]][0]
+    assert (after["label"], after["attrs"]["spec"]) == ("Proof 2", "proofs/.meta/Proof 2.json")
+    # a proof with no name keeps the one it has
+    again = client.post(f"/api/cases/{cid}/proofs", json={"rename_from": "Proof 1", "title": "", "spec": SPEC}).json()
+    assert again["name"] == "Proof 1"
+
+
+def test_the_list_gives_what_a_proof_with_no_name_is_labelled_by(client):
+    from azimut.engine import satellite as satellite_engine
+
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _save(client, cid, "", {**_with_coords("15.4712, 45.3221"), "when": "2025-11-09T06:40:00Z"})
+    _save(client, cid, "", _panels("media/frame.png"))
+    rows = {row["name"]: row for row in client.get(f"/api/cases/{cid}/proofs").json()}
+    # the place known only once the Locate pass filed its geography
+    assert rows["Proof 1"]["place"] == ""
+    assert rows["Proof 1"]["when"] == "2025-11-09T06:40:00Z"
+    assert rows["Proof 1"]["created_at"]
+    place = _places(cid)[0]
+    satellite_engine.set_geo(Case.open(cid), place["id"], {
+        "state": "ok", "country_code": "ye", "country": "اليمن", "region": "محافظة الجوف", "region_en": "Al Jawf",
+    })
+    rows = {row["name"]: row for row in client.get(f"/api/cases/{cid}/proofs").json()}
+    assert rows["Proof 1"]["place"] == "Al Jawf, Yemen"
+    assert (rows["Proof 2"]["place"], rows["Proof 2"]["when"]) == ("", None)
+    # the date Details holds wins over the spec's, blank included
+    proof = [e for e in graph_read.entities(cid) if e["label"] == "Proof 1"][0]
+    client.patch(f"/api/cases/{cid}/entities/{proof['id']}", json={"attrs": {"when": ""}})
+    assert {row["name"]: row for row in client.get(f"/api/cases/{cid}/proofs").json()}["Proof 1"]["when"] is None

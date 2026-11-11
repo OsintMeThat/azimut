@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_ORDER, ORDERS, ORDER_NAMES, ORDER_WORDS, PICTURES_PER_POST, scenesText, shortTimecode, timecode, usesSheet,
+  DEFAULT_ORDER, ORDERS, ORDER_NAMES, ORDER_WORDS, PICTURES_PER_POST, placeLabel, scenesText, shortTimecode, timecode, usesSheet,
   videoSlides, videoThread, videoThreads,
 } from './videoThread.js';
+import { sceneColorAt } from './scenes.js';
 
 /**
  * A video thread as plain data: the slides of one video, the four orders, and the
@@ -39,14 +40,30 @@ describe('the slides a thread posts', () => {
   it('leaves out a scene still to prove, and names each proof it leaves out with why', () => {
     const { left } = videoSlides(ANSWER);
     expect(left).toEqual([
-      { name: 'depot', title: 'Depot', why: 'abandoned' },
-      { name: 'mast', title: 'Mast', why: 'unplaced' },
-      { name: 'shed', title: 'Shed', why: 'nopicture' },
+      { name: 'depot', title: 'Depot', label: 'Depot', why: 'abandoned' },
+      { name: 'mast', title: 'Mast', label: 'Mast', why: 'unplaced' },
+      { name: 'shed', title: 'Shed', label: 'Shed', why: 'nopicture' },
     ]);
   });
 
   it('is empty for no answer', () => {
     expect(videoSlides(null)).toEqual({ video: null, slides: [], left: [] });
+  });
+
+  it('colours each place as the strip and Inspect\'s bar do, the scenes still to prove counted', () => {
+    // clip order: bridge 0:00, square 0:03, the scene to prove 0:20, then the rest
+    const { slides } = videoSlides(ANSWER);
+    expect(slides.map((one) => one.row.color)).toEqual([sceneColorAt(0), sceneColorAt(1), sceneColorAt(5), sceneColorAt(7)]);
+  });
+
+  it('calls a place by its name, else where it stands, else its point, else its time: never Proof 3', () => {
+    const row = (extra) => ({ kind: 'proof', proof: 'Proof 3', title: 'Proof 3', moments: [{ start: 15, end: null }], ...extra });
+    expect(placeLabel(row({ title: 'Road bridge', place: 'Al Jawf, Yemen' }))).toBe('Road bridge');
+    expect(placeLabel(row({ place: 'Al Jawf, Yemen', points: [{ lat: 1, lon: 2 }] }))).toBe('Al Jawf, Yemen');
+    expect(placeLabel(row({ place: '', points: [{ lat: 15.47123, lon: 45.32211 }] }))).toBe('15.4712, 45.3221');
+    expect(placeLabel(row({ points: [] }))).toBe('0:15');
+    const unnamed = { ...ANSWER, scenes: [row({ proof: 'Proof 3', png: 'proofs/p3.png', state: 'proved', place: 'Marib, Yemen', points: [{ lat: 1, lon: 2 }] })] };
+    expect(scenesText(videoSlides(unnamed).slides)).toBe('1. [0:15] Marib, Yemen');
   });
 });
 

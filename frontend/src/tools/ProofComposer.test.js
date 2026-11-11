@@ -25,7 +25,7 @@ describe('Proof Composer empty state', () => {
     const { body } = render(ProofComposer);
 
     expect(body).toContain('data-testid="proof-home"');
-    expect(body).toContain('Find a proof by name');
+    expect(body).toContain('Find a proof by name or place');
     expect(body).not.toContain('No panels yet');
     expect(body).not.toContain('Freehand (d)');
     expect(body).not.toContain('title-input');
@@ -188,7 +188,7 @@ describe('Proof Composer pickers', () => {
     expect(bodyOfFn('openProofDialog')).toContain('openList ??= [];');
     const pick = bodyOfFn('requestOpenProof');
     expect(pick.indexOf('openList = null;')).toBeLessThan(pick.indexOf('await openProof(entry);'));
-    expect(pick).toContain('openingTitle = entry.title || entry.name;');
+    expect(pick).toContain('openingTitle = proofLabel(entry);');
   });
 });
 
@@ -431,8 +431,13 @@ describe('Proof naming', () => {
     expect(source).not.toContain('Untitled proof');
   });
 
-  it('names the proof in the header and nowhere else', () => {
-    expect(source).toContain('<input\n        class="input title-input"\n        aria-label="Proof name"\n        bind:value={proof.title}');
+  it('names the proof in the header and nowhere else, a technical name never shown there', () => {
+    expect(source).toContain('<input\n        class="input title-input"\n        aria-label="Proof name"\n        placeholder="Name (optional)"');
+    expect(source).toContain("value={ownName(proof.title, 'proof')}");
+    expect(source).toContain('oninput={(event) => nameProof(event.currentTarget.value)}');
+    // emptied, the proof goes back to the technical name it had, else a fresh one
+    expect(bodyOfFn('nameProof')).toContain('proof.title = text.trim() ? text : technicalTitle();');
+    expect(source).toContain("const technicalTitle = () => (savedName && isDefaultName(savedName, 'proof') ? savedName : freshTitle());");
     expect(source).not.toContain('newProofName');
   });
 
@@ -1719,7 +1724,7 @@ describe('Proof Composer — deleting a saved proof', () => {
     expect(bodyOfFn('askDelete')).toContain("deleteScene = 'keep';");
     expect(bodyOfFn('deleteSavedProof')).toContain("target.video && deleteScene === 'drop' ? '?scene=drop' : ''");
     // the Open list, the header's ⋯ and a slide's menu all ask through it
-    expect(source).toContain('onclick={() => askDelete(entry)}');
+    expect(source).toContain('onclick={() => askDelete({ ...entry, title: proofLabel(entry) })}');
     expect(source.match(/askDelete\(\{/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
