@@ -11,7 +11,9 @@
  * over the quarter of each child in view not held yet it is drawn in that
  * child's place (`quarters`, a bit a child): the ground sharpens where it
  * stands, a quarter at a time, and a coarse tile never covers more than the
- * ground still waiting for a finer one. The asks go coarse first,
+ * ground still waiting for a finer one. Such a tile says how many levels
+ * coarser than wanted it stands in (`over`), which is how much wider than
+ * drawn a line laid on it would look. The asks go coarse first,
  * the frame's own before its margin, and a tile that will be split as soon as
  * it comes has its children asked with it, a few levels down, so a deep zoom
  * does not wait one level after another.
@@ -62,6 +64,14 @@ const AHEAD = 3;
 /** The finest ground kept known out of view, and the frames an orbit's ground is kept known for. */
 const KNOWN_Z = 16;
 const KNOWN_FRAMES = 600;
+/**
+ * ms before a tile whose mesh could not be built is asked again, one a try,
+ * as Horizon's ground does. A failed tile holds back all the ground under it,
+ * so it may not stay failed for good.
+ */
+export const TRY_AGAIN_MS = [1000, 4000, 12000];
+/** …and past those, once a frame asks for it at least this long after the last try. */
+export const TRY_LATER_MS = 30000;
 
 const keyOf = (z, x, y) => `${z}/${x}/${y}`;
 
@@ -73,12 +83,26 @@ const keyOf = (z, x, y) => `${z}/${x}/${y}`;
  * @param {number} [o.budget] meshes held at most
  * @param {number} [o.inFlight] meshes asked and not back yet, at most
  * @param {number} [o.round] the same for the ground all round the eye (`ROUND_SHARPNESS`)
+ * @param {() => number} [o.now] the clock failed tiles are asked again by, in ms
  */
-export function createTree({ request, release, budget = 700, inFlight = 48, maxZ = MAX_Z, sharpness = SHARPNESS, round: roundSharpness = ROUND_SHARPNESS }) {
+export function createTree({ request, release, budget = 700, inFlight = 48, maxZ = MAX_Z, sharpness = SHARPNESS, round: roundSharpness = ROUND_SHARPNESS, now = () => performance.now() }) {
   const nodes = new Map();
   let loading = 0;
   let frameNo = 0;
   let held = 0;
+  // the tiles whose mesh could not be built, each asked again once its `again` comes
+  const failed = new Set();
+
+  /** Failed tiles whose time has come, asked again by this frame like any other. */
+  function revive() {
+    if (!failed.size) return;
+    const at = now();
+    for (const n of failed) {
+      if (n.again > at) continue;
+      failed.delete(n);
+      if (n.state === 'failed') n.state = 'idle';
+    }
+  }
 
   function node(z, x, y, parent = null) {
     const key = keyOf(z, x, y);
@@ -102,6 +126,10 @@ export function createTree({ request, release, budget = 700, inFlight = 48, maxZ
         lon0: tileLon(x, z),
         lon1: tileLon(x + 1, z),
         bound: null,
+        tries: 0,
+        again: 0,
+        quarters: 0,
+        over: 0,
       };
       nodes.set(key, n);
     }
@@ -233,6 +261,7 @@ export function createTree({ request, release, budget = 700, inFlight = 48, maxZ
    */
   function frame(camera, size, { exaggeration = 1, limit = maxZ, sharp = sharpness } = {}) {
     frameNo += 1;
+    revive();
     const v = viewOf(camera, size, exaggeration);
     const ceiling = Math.min(limit, maxZ);
     const drawn = [];
@@ -258,8 +287,9 @@ export function createTree({ request, release, budget = 700, inFlight = 48, maxZ
         if (c.state !== 'failed') ahead(c, depth + 1);
       }
     };
-    const draw = (n, quarters) => {
+    const draw = (n, quarters, over = 0) => {
       n.quarters = quarters;
+      n.over = over;
       drawn.push(n);
     };
     const visit = (n) => {
@@ -268,9 +298,10 @@ export function createTree({ request, release, budget = 700, inFlight = 48, maxZ
         draw(n, ALL);
         return;
       }
-      // each child in view is drawn once held; until then, and for good where
-      // it could not be built, this tile is drawn over its quarter alone
+      // each child in view is drawn once held; until then, and while it could
+      // not be built (it is asked again, `TRY_AGAIN_MS`), this tile is drawn over its quarter alone
       let quarters = 0;
+      let finest = 0;
       kidsOf(n).forEach((c, q) => {
         c.used = frameNo;
         if (!seen(c, v)) return;
@@ -279,13 +310,16 @@ export function createTree({ request, release, budget = 700, inFlight = 48, maxZ
           return;
         }
         quarters |= 1 << q;
+        const { pixels, d } = pixelsOf(c, v);
+        finest = Math.max(finest, pixels);
         if (c.state === 'idle') {
-          want(c, pixelsOf(c, v).d, true);
+          want(c, d, true);
           waiting += 1;
         } else if (c.state === 'loading') waiting += 1;
         if (c.state !== 'failed') ahead(c, 1);
       });
-      if (quarters) draw(n, quarters);
+      // how many levels coarser than wanted it stands in, over the quarters it covers (its pixels twice a child's)
+      if (quarters) draw(n, quarters, Math.max(0, Math.log2((2 * finest) / sharp)));
     };
     for (const r of roots) {
       r.used = frameNo;
@@ -450,18 +484,28 @@ export function createTree({ request, release, budget = 700, inFlight = 48, maxZ
     knowGround(lat, lon, radius) {
       kept.push({ lat, lon, radius, until: frameNo + KNOWN_FRAMES });
     },
-    /** A mesh a worker built (null when it could not be), with its heights. */
+    /**
+     * A mesh a worker built (null when it could not be), with its heights.
+     * Returns, for one that could not be, the ms before it is asked again by
+     * itself: a frame is wanted then. Null when no frame needs to come for it.
+     */
     arrived(key, built) {
       const n = nodes.get(key);
       loading = Math.max(0, loading - 1);
       if (!n || n.state !== 'loading') {
         if (built?.mesh) release({ mesh: built.mesh });
-        return;
+        return null;
       }
       if (!built) {
         n.state = 'failed';
-        return;
+        n.tries += 1;
+        const wait = TRY_AGAIN_MS[n.tries - 1];
+        // past the timed tries, a frame that comes anyway asks it again, never a timer alone
+        n.again = now() + (wait ?? TRY_LATER_MS);
+        failed.add(n);
+        return wait ?? null;
       }
+      n.tries = 0;
       held += 1;
       n.state = 'ready';
       n.mesh = built.mesh;
@@ -473,14 +517,19 @@ export function createTree({ request, release, budget = 700, inFlight = 48, maxZ
       // the children measured against this tile's range know it better now
       for (const c of n.kids ?? []) c.bound = null;
     },
-    /** Tiles that failed are asked again (the app was not reached). */
+    /** Tiles that failed are asked again now, their tries counted afresh (the app was not reached). */
     retry() {
-      for (const n of nodes.values()) if (n.state === 'failed') n.state = 'idle';
+      for (const n of failed) {
+        n.tries = 0;
+        if (n.state === 'failed') n.state = 'idle';
+      }
+      failed.clear();
     },
     /** Everything let go. */
     dispose() {
       for (const n of nodes.values()) if (n.state === 'ready') release(n);
       nodes.clear();
+      failed.clear();
       held = 0;
     },
     get loading() {

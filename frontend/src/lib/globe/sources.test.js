@@ -44,9 +44,40 @@ describe('the flat map’s sources, fetched for the globe', () => {
     expect(await sources.get(BORDERS, { z: 1, x: 0, y: 0 })).toBeNull();
     await sources.get(BORDERS, { z: 1, x: 0, y: 0 });
     expect(fetch).toHaveBeenCalledTimes(3);
+    expect(sources.failed(BORDERS, { z: 1, x: 0, y: 0 })).toBe(true);
+    // none is not a failure: the tile was read, and has nothing
+    expect(sources.failed(BORDERS, { z: 2, x: 0, y: 0 })).toBe(false);
     now = 60000;
     await sources.get(BORDERS, { z: 1, x: 0, y: 0 });
     expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it('gives a tile up once it has taken too long, though the server never answers, and asks it again later', async () => {
+    vi.useFakeTimers();
+    try {
+      let now = 0;
+      const signals = [];
+      // a server that holds the connection open, and a fetch that would wait for it for good
+      const fetch = vi.fn((url, signal) => {
+        signals.push(signal);
+        return new Promise(() => {});
+      });
+      const sources = createTileSources({ fetch, now: () => now, timeout: 1000 });
+      const tile = { z: 3, x: 4, y: 5 };
+      const read = sources.get(BORDERS, tile);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(sources.failed(BORDERS, tile)).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await read).toBeNull();
+      expect(sources.failed(BORDERS, tile)).toBe(true);
+      // the request itself is let go, not left open beside the answer
+      expect(signals[0].aborted).toBe(true);
+      now = 60000;
+      sources.get(BORDERS, tile);
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reads a vector tile’s features and their geometry once, whoever asks', () => {

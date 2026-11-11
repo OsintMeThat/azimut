@@ -159,6 +159,7 @@ function lookOf(candidate, zoom) {
  *   written; null when it cannot be measured this frame (`waiting` again).
  *   Without it each name's picture is asked for before it is weighed.
  * @param {(icon: object) => ({ image: any, width: number, height: number } | null)} assets.icon
+ *   an icon's picture, or null while the flat map does not hold it: the list then says `iconsMissing`
  * @returns the marks placed, each `{ candidate, x, y, circle?, icon?, label?, boxes }`, top first.
  *   A dot that paints nothing (a layer's click target) is placed `unseen`: it
  *   answers a click and is never drawn.
@@ -183,6 +184,7 @@ export function placeStanding(candidates, view, assets) {
   const collisions = createCollisions();
   const placed = [];
   placed.waiting = false;
+  placed.iconsMissing = false;
   for (const { candidate, look, x, y } of seen) {
     if (look.circle) {
       const c = look.circle;
@@ -205,7 +207,7 @@ export function placeStanding(candidates, view, assets) {
         const turn = look.icon.rotate - (look.icon.onMap ? view.bearing ?? 0 : 0);
         icon = { ...look.icon, picture, cx, cy, w, h, turn };
         iconBox = boxAround(cx, cy, w, h);
-      }
+      } else placed.iconsMissing = true;
     }
     let label = null;
     let labelBox = null;

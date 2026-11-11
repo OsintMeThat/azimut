@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { cameraFor } from './camera.js';
-import { ALL, ROOT_Z, createTree } from './tree.js';
+import { ALL, ROOT_Z, TRY_AGAIN_MS, TRY_LATER_MS, createTree } from './tree.js';
 import { SEG } from './mesh.js';
 
 const SIZE = { width: 1280, height: 720 };
@@ -181,6 +181,79 @@ describe('the tiles of the globe', () => {
     // asked again once the app is back
     tree.retry();
     expect(tree.node(children[0].key).state).toBe('idle');
+  });
+
+  it('says how many levels coarser than wanted a tile stands in, and none once the ground is in', () => {
+    const { tree, asked, settle } = harness();
+    const camera = cameraFor({ lat: 16.01, lon: 45.47, zoom: 15, pitch: 70, elevation: 1000 }, SIZE);
+    const built = () => ({ mesh: {}, heights: new Float32Array((SEG + 1) ** 2), centre: [0, 0, 0], low: 0, high: 0 });
+    tree.frame(camera, SIZE);
+    const first = asked.splice(0);
+    for (const t of first) if (t.z === ROOT_Z) tree.arrived(t.key, built());
+    // the roots alone, near an eye a kilometre up: a line laid on them would be kilometres wide
+    const { drawn: early } = tree.frame(camera, SIZE);
+    expect(Math.max(...early.map((n) => n.over))).toBeGreaterThan(10);
+    for (const t of [...first.filter((a) => a.z !== ROOT_Z), ...asked.splice(0)]) tree.arrived(t.key, built());
+    const { drawn } = settle(camera);
+    expect(drawn.every((n) => n.over === 0)).toBe(true);
+  });
+
+  it('asks a tile that could not be built again by itself, so the ground under it is not held back for good', () => {
+    let clock = 0;
+    const asked = [];
+    const tree = createTree({ request: (list) => asked.push(...list), release: vi.fn(), now: () => clock });
+    const camera = cameraFor({ lat: 46.56, lon: 7.91, zoom: 4 }, SIZE);
+    const ok = (key) => tree.arrived(key, { mesh: {}, heights: new Float32Array((SEG + 1) ** 2), centre: [0, 0, 0], low: 0, high: 0 });
+    tree.frame(camera, SIZE);
+    // the roots' children are asked with them, since they will surely be split
+    const first = asked.splice(0);
+    const child = first.find((t) => t.z === ROOT_Z + 1);
+    for (const t of first) if (t.key !== child.key) ok(t.key);
+    // whether a frame asked for the tile again, every other ask answered
+    const askedFor = () => {
+      let found = false;
+      for (const t of asked.splice(0)) {
+        if (t.key === child.key) found = true;
+        else ok(t.key);
+      }
+      return found;
+    };
+
+    // each failure says when a frame should come to ask it again
+    const waits = [];
+    for (const wait of TRY_AGAIN_MS) {
+      waits.push(tree.arrived(child.key, null));
+      clock += wait - 1;
+      // meanwhile its parent stands in over its quarter
+      const { drawn: meanwhile } = tree.frame(camera, SIZE);
+      expect(meanwhile.some((n) => n.key === tree.node(child.key).parent.key && n.quarters)).toBe(true);
+      expect(askedFor()).toBe(false);
+      clock += 1;
+      tree.frame(camera, SIZE);
+      expect(askedFor()).toBe(true);
+    }
+    expect(waits).toEqual(TRY_AGAIN_MS);
+    // past the timed tries no timer is wanted, yet a frame that comes later asks it once more
+    expect(tree.arrived(child.key, null)).toBeNull();
+    clock += TRY_LATER_MS - 1;
+    tree.frame(camera, SIZE);
+    expect(askedFor()).toBe(false);
+    clock += 1;
+    tree.frame(camera, SIZE);
+    expect(askedFor()).toBe(true);
+    // built at last: the ground under it is drawn from its own tiles, and its tries start again from the first
+    ok(child.key);
+    let drawn = tree.frame(camera, SIZE).drawn;
+    for (let i = 0; i < 10 && asked.length; i += 1) {
+      askedFor();
+      drawn = tree.frame(camera, SIZE).drawn;
+    }
+    const under = (n) => {
+      for (let at = n; at; at = at.parent) if (at.key === child.key) return true;
+      return false;
+    };
+    expect(drawn.some(under)).toBe(true);
+    expect(tree.node(child.key).tries).toBe(0);
   });
 });
 

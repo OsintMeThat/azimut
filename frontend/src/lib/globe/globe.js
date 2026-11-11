@@ -41,7 +41,7 @@ import {
   viewOf,
 } from './camera.js';
 import { EARTH, add, dot, ecef, geodetic, haversine, length, localFrame, metresPerPixel, normalize, raySphere, scale, sub, wrapLon } from './earth.js';
-import { createDrapes, UPLOADS_PER_FRAME as DRAPE_UPLOADS } from './drapes.js';
+import { createDrapes, STAND_IN_LEVELS, UPLOADS_PER_FRAME as DRAPE_UPLOADS } from './drapes.js';
 import { createPictures } from './pictures.js';
 import { createRenderer, groundUniforms, toneUniforms } from './renderer.js';
 import { createTree } from './tree.js';
@@ -134,8 +134,11 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {},
   });
   worker.onmessage = ({ data }) => {
     if (destroyed || data.type !== 'mesh') return;
-    if (data.failed) tree.arrived(data.key, null);
-    else {
+    if (data.failed) {
+      // asked again by itself in a while, by a frame that must come though the view stands still
+      const again = tree.arrived(data.key, null);
+      if (again != null) setTimeout(schedule, again);
+    } else {
       if (data.fallback) fallbackRelief = true;
       tree.arrived(data.key, { ...data, mesh: renderer.createMesh(data.vertices) });
     }
@@ -669,12 +672,15 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {},
     const tiles = [];
     for (const n of drawn) {
       const distance = n.bound ? length(sub(n.bound.mid, camera.eye)) : 0;
+      // a tile standing in far coarser than wanted lays nothing: its lines would be bands
+      // wider than a field, so they wait for the finer ground, as a borrowed picture does
+      const laidHere = laid && draping && n.over <= STAND_IN_LEVELS;
       tiles.push({
         mesh: n.mesh,
         centre: n.centre,
         quarters: n.quarters,
         picture: pictures.pictureFor(n, n.z * 1e9 + distance),
-        drape: laid && draping ? drapes.drapeFor(n, n.z * 1e9 + distance) : null,
+        drape: laidHere ? drapes.drapeFor(n, n.z * 1e9 + distance, STAND_IN_LEVELS - n.over) : null,
       });
     }
     lastDrawn = drawn;

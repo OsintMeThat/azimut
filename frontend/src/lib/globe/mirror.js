@@ -30,7 +30,7 @@ import { featureFilter } from '@maplibre/maplibre-gl-style-spec';
 import { DRAPE_SIZE, paintTile } from './drape.js';
 import { tileBounds, overlaps } from './drapes.js';
 import { createGlyphs } from './glyphs.js';
-import { coveringTile, createTileSources, describeSource, readOnce } from './sources.js';
+import { RETRY_MS, coveringTile, createTileSources, describeSource, readOnce } from './sources.js';
 import { drawStanding, markedAt, placeStanding, shiftMark, shiftStanding } from './standing.js';
 import { DRAPED, STANDING, compileLayer, evaluable } from './style.js';
 
@@ -52,6 +52,20 @@ const READ_KEPT = 24;
 const HANDLERS = ['dragPan', 'scrollZoom', 'boxZoom', 'dragRotate', 'keyboard', 'doubleClickZoom', 'touchZoomRotate', 'touchPitch'];
 
 const RAD = Math.PI / 180;
+
+/**
+ * What `promise` answers, unless `signal` gives up first: a tile painted no
+ * more stops waiting for a source tile others may still be waiting for.
+ */
+function unlessDropped(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(new DOMException('dropped', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    const drop = () => reject(new DOMException('dropped', 'AbortError'));
+    signal.addEventListener('abort', drop, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', drop));
+  });
+}
 
 /** A box of degrees grown by a share of its size each way. */
 function grown(b, share) {
@@ -172,6 +186,8 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
   const sourcePoints = new Map(); // geojson source id → { version, points } its standing layers share
   const readTiles = new Map(); // vector tile → its features read once, the most recently used last
   let placed = [];
+  // a mark was placed without its icon, which the flat map did not hold yet
+  let iconsMissing = false;
   // the unseen dots (click targets) left where they were placed while the view moved
   let unseenBehind = false;
   let dirty = true;
@@ -276,7 +292,11 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
       sync();
     });
   }
-  const onStyle = () => queueSync();
+  const onStyle = () => {
+    // an image the flat map takes says so as a style change: a mark placed without its icon is placed again
+    if (iconsMissing) dirty = true;
+    queueSync();
+  };
   const onSource = (event) => {
     const id = event?.sourceId;
     if (!id) return;
@@ -318,6 +338,22 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
     return read;
   }
 
+  // the ground painted without a source tile that could not be read, painted
+  // again once that tile may be asked anew (`RETRY_MS`): one wait at a time
+  let unread = null;
+  let repaintTimer = null;
+  function repaintLater(cover) {
+    unread = union(unread, tileBounds(cover));
+    repaintTimer ??= setTimeout(() => {
+      repaintTimer = null;
+      const where = unread;
+      unread = null;
+      if (destroyed || !where) return;
+      globe.invalidate(where);
+      globe.redraw();
+    }, RETRY_MS + 500);
+  }
+
   /** One tile's picture of what lies on its ground, or null when nothing does. */
   async function compose(tile, signal) {
     const zoom = tile.z - 1;
@@ -337,9 +373,12 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
       const cover = description && coveringTile(description, tile.z, tile.x, tile.y);
       if (!cover) continue;
       if (!fetched.has(layer.source)) fetched.set(layer.source, tiles.get(description, cover));
-      const value = await fetched.get(layer.source);
+      const value = await unlessDropped(fetched.get(layer.source), signal);
       if (signal?.aborted) throw new DOMException('dropped', 'AbortError');
-      if (!value) continue;
+      if (!value) {
+        if (tiles.failed?.(description, cover)) repaintLater(cover);
+        continue;
+      }
       prepared.push(layer.type === 'raster' ? { layer, image: value, from: cover } : { layer, vector: readOf(value), from: cover });
     }
     if (!prepared.length || destroyed) return null;
@@ -517,6 +556,7 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
         { project, zoomAt: (lat, d) => globe.zoomAt(lat, d), width, height, bearing: globe.heading() },
         glyphs
       );
+      iconsMissing = placed.iconsMissing;
       unseenBehind = false;
       // names still to be written are placed again next frame, a share each frame
       if (placed.waiting) {
@@ -709,6 +749,7 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
     destroy() {
       destroyed = true;
       clearTimeout(placeLater);
+      clearTimeout(repaintTimer);
       offPointer();
       container?.removeEventListener('wheel', onWheel);
       map.off('styledata', onStyle);

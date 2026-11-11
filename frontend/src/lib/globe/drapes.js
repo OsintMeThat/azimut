@@ -15,6 +15,15 @@ export const UPLOADS_PER_FRAME = 8;
 const IN_FLIGHT = 8;
 /** Changes remembered one by one; past this they fold into one that touches everything. */
 const CHANGES_KEPT = 48;
+/**
+ * Levels up a tile may borrow an ancestor's picture while its own is painted.
+ * A line keeps its width in the pixels of the tile it was painted on, so each
+ * level up doubles it: two levels make a 2 px line 8 px wide, while five make
+ * the lines of a dense layer one solid sheet over the ground near the eye.
+ */
+export const STAND_IN_LEVELS = 2;
+/** Asks for tiles that show nothing meanwhile go before every other. */
+const BARE_FIRST = 1e12;
 
 const keyOf = (z, x, y) => `${z}/${x}/${y}`;
 
@@ -129,30 +138,41 @@ export function createDrapes({ compose, upload, release, budget = 128 * 1024 * 1
     }
   }
 
+  /** The picture tile `t` is drawn with now: its own, the part of one `climb` levels up at most, or null. */
+  function laidOn(t, e, climb) {
+    if (e.handle) return { handle: e.handle, box: [1, 1, 0, 0] };
+    if (e.state === 'none' && !stale(e)) return null;
+    for (let z = t.z - 1; z >= 0; z -= 1) {
+      const up = t.z - z;
+      const above = held.get(keyOf(z, t.x >> up, t.y >> up));
+      if (!above) continue;
+      if (above.handle) {
+        // further up, its lines would stand in as bands far wider than they are drawn
+        if (up > climb) return null;
+        above.used = frameNo;
+        const s = 1 / 2 ** up;
+        return { handle: above.handle, box: [s, s, (t.x - (t.x >> up) * 2 ** up) * s, (t.y - (t.y >> up) * 2 ** up) * s] };
+      }
+      // a painted ancestor with nothing on it says this tile has nothing either
+      if (above.state === 'none' && !stale(above)) return null;
+    }
+    return null;
+  }
+
   return {
     /**
      * What tile `t` is draped with now: `{ handle, box }`, the box the part of
-     * the picture it reads (an ancestor's while its own is not in), or null.
+     * the picture it reads (a near ancestor's while its own is not in), or null.
+     * `climb` is how many levels up it may borrow: fewer for a tile that is
+     * itself drawn coarser than wanted. A tile left with nothing meanwhile is
+     * painted first.
      */
-    drapeFor(t, priority) {
+    drapeFor(t, priority, climb = STAND_IN_LEVELS) {
       const e = entry(t);
       e.used = frameNo;
-      if (e.state !== 'loading' && stale(e)) asked.push({ e, priority });
-      if (e.handle) return { handle: e.handle, box: [1, 1, 0, 0] };
-      if (e.state === 'none' && !stale(e)) return null;
-      for (let z = t.z - 1; z >= 0; z -= 1) {
-        const up = t.z - z;
-        const above = held.get(keyOf(z, t.x >> up, t.y >> up));
-        if (!above) continue;
-        if (above.handle) {
-          above.used = frameNo;
-          const s = 1 / 2 ** up;
-          return { handle: above.handle, box: [s, s, (t.x - (t.x >> up) * 2 ** up) * s, (t.y - (t.y >> up) * 2 ** up) * s] };
-        }
-        // a painted ancestor with nothing on it says this tile has nothing either
-        if (above.state === 'none' && !stale(above)) return null;
-      }
-      return null;
+      const drape = laidOn(t, e, climb);
+      if (e.state !== 'loading' && stale(e)) asked.push({ e, priority: drape ? priority : priority - BARE_FIRST });
+      return drape;
     },
     begin() {
       frameNo += 1;

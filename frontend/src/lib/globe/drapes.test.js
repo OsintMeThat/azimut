@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createDrapes, overlaps, tileBounds } from './drapes.js';
+import { createDrapes, overlaps, STAND_IN_LEVELS, tileBounds } from './drapes.js';
 
 /** A drape store whose tiles the test paints by hand. */
 function harness() {
@@ -86,6 +86,48 @@ describe('what the globe lays over its imagery, a tile at a time', () => {
     frame(drapes, [parent]);
     const [child] = frame(drapes, [T]);
     expect(child).toEqual({ handle: expect.objectContaining({ texture: 't1' }), box: [0.5, 0.5, 0, 0.5] });
+  });
+
+  it('borrows an ancestor only a few levels up, where its lines are still lines', async () => {
+    const { drapes, pending } = harness();
+    const parent = { z: 9, x: 266, y: 180 };
+    frame(drapes, [parent]);
+    pending[0].resolve({});
+    await flush();
+    frame(drapes, [parent]);
+    const near = { z: 9 + STAND_IN_LEVELS, x: 266 << STAND_IN_LEVELS, y: 180 << STAND_IN_LEVELS };
+    const far = { z: 10 + STAND_IN_LEVELS, x: 266 << (STAND_IN_LEVELS + 1), y: 180 << (STAND_IN_LEVELS + 1) };
+    const [borrowed, bare] = frame(drapes, [near, far]);
+    const s = 1 / 2 ** STAND_IN_LEVELS;
+    expect(borrowed).toEqual({ handle: expect.objectContaining({ texture: 't1' }), box: [s, s, 0, 0] });
+    // a dense layer's 2 px lines, five levels up, were one sheet of colour over the ground near the eye
+    expect(bare).toBeNull();
+    // a tile itself drawn a level coarser than wanted may climb one level less
+    drapes.begin();
+    expect(drapes.drapeFor(near, 0, STAND_IN_LEVELS - 1)).toBeNull();
+    expect(drapes.drapeFor({ z: 10, x: 532, y: 360 }, 0, STAND_IN_LEVELS - 1)).not.toBeNull();
+    drapes.end();
+  });
+
+  it('paints first the tiles left with nothing meanwhile, before those a near ancestor covers', async () => {
+    const { drapes, pending, compose } = harness();
+    const parent = { z: 9, x: 266, y: 180 };
+    const lone = { z: 10, x: 10, y: 10 };
+    const coarse = { z: 5, x: 0, y: 0 };
+    frame(drapes, [parent, coarse]);
+    pending.forEach((p) => p.resolve({}));
+    await flush();
+    frame(drapes, [parent, coarse]);
+    const covered = [];
+    for (let x = 0; x < 4; x += 1) for (let y = 0; y < 3; y += 1) covered.push({ z: 11, x: 1064 + x, y: 720 + y });
+    drapes.begin();
+    for (const t of covered) expect(drapes.drapeFor(t, 11e9)).not.toBeNull();
+    // asked last and with the worst rank, yet painted in the first round
+    expect(drapes.drapeFor(lone, 20e9)).toBeNull();
+    drapes.end();
+    const sent = compose.mock.calls.slice(2).map(([tile]) => `${tile.z}/${tile.x}/${tile.y}`);
+    expect(sent[0]).toBe('10/10/10');
+    expect(sent.length).toBeLessThan(covered.length + 1);
   });
 
   it('counts the tiles still to be painted', async () => {

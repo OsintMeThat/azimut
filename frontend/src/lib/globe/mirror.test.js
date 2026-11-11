@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
 import { boundsOf, changedBounds, createMirror, featuresOf } from './mirror.js';
+import { tileBounds } from './drapes.js';
+import { RETRY_MS } from './sources.js';
 
 const line = (coordinates, properties = {}) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates }, properties });
 
@@ -269,6 +271,96 @@ describe('the globe draws what the flat map holds', () => {
     const hits = map.queryRenderedFeatures([200, 200]);
     expect(hits.map((f) => [f.layer.id, f.properties.name])).toEqual([['dot', 'pin'], ['line', 'road']]);
     expect(map.queryRenderedFeatures([200, 200], { layers: ['line'] }).map((f) => f.layer.id)).toEqual(['line']);
+    mirror.destroy();
+  });
+});
+
+describe('the globe never waits for good on what the flat map lays', () => {
+  const BORDERS = { type: 'vector', tiles: ['https://t/{z}/{x}/{y}.pbf'], maxzoom: 14 };
+  /** Tiles that answer as the test says: `answer` per address, a pending read until it does. */
+  function stubTiles() {
+    const failures = new Set();
+    return {
+      reads: [],
+      failures,
+      get(description, tile) {
+        let settle;
+        const read = new Promise((resolve) => (settle = resolve));
+        this.reads.push({ tile, settle });
+        return read;
+      },
+      failed: (description, tile) => failures.has(`${tile.z}/${tile.x}/${tile.y}`),
+      peek: () => undefined,
+      dispose() {},
+    };
+  }
+
+  it('lets a tile it paints no more go at once, though the source tile it waits for has not come', async () => {
+    const map = stubMap();
+    map.sources.set('borders', BORDERS);
+    map.addLayer({ id: 'b', type: 'line', source: 'borders', 'source-layer': 'boundary' });
+    const globe = stubGlobe();
+    const tiles = stubTiles();
+    const mirror = createMirror(map, globe, { canvas: makeCanvas(), makeCanvas, tiles });
+    await settle();
+    const drop = new AbortController();
+    const painted = globe.laid.compose({ z: 10, x: 532, y: 361 }, drop.signal);
+    const outcome = painted.then(() => 'painted', (error) => error.name);
+    await settle();
+    drop.abort();
+    expect(await outcome).toBe('AbortError');
+    // the source tile itself is still read, for the tiles that wait for it
+    expect(tiles.reads).toHaveLength(1);
+    mirror.destroy();
+  });
+
+  it('paints a tile again once a source tile that could not be read may be asked anew', async () => {
+    const map = stubMap();
+    map.sources.set('borders', BORDERS);
+    map.addLayer({ id: 'b', type: 'line', source: 'borders', 'source-layer': 'boundary' });
+    const globe = stubGlobe();
+    const tiles = stubTiles();
+    const mirror = createMirror(map, globe, { canvas: makeCanvas(), makeCanvas, tiles });
+    await settle();
+    vi.useFakeTimers();
+    try {
+      const painted = globe.laid.compose({ z: 10, x: 532, y: 361 });
+      await vi.advanceTimersByTimeAsync(0);
+      const cover = tiles.reads[0].tile;
+      tiles.failures.add(`${cover.z}/${cover.x}/${cover.y}`);
+      tiles.reads[0].settle(null);
+      expect(await painted).toBeNull();
+      const before = globe.invalidated.length;
+      await vi.advanceTimersByTimeAsync(RETRY_MS);
+      expect(globe.invalidated.length).toBe(before);
+      await vi.advanceTimersByTimeAsync(500);
+      // the ground of the source tile that failed, and nothing more
+      expect(globe.invalidated.slice(before)).toEqual([tileBounds(cover)]);
+    } finally {
+      vi.useRealTimers();
+      mirror.destroy();
+    }
+  });
+
+  it('places a mark again once the icon it waited for is in the flat map, though the view stands still', async () => {
+    const map = stubMap();
+    const pin = { type: 'Feature', geometry: { type: 'Point', coordinates: [20, 20] }, properties: {} };
+    map.sources.set('pins', { type: 'geojson', getData: async () => ({ type: 'FeatureCollection', features: [pin] }) });
+    map.addLayer({ id: 'pic', type: 'symbol', source: 'pins', layout: { 'icon-image': 'site' } });
+    let image = null;
+    map.getImage = (name) => (name === 'site' ? image : null);
+    const globe = stubGlobe();
+    const mirror = createMirror(map, globe, { canvas: makeCanvas(), makeCanvas });
+    await settle();
+    globe.laid.frame({ moved: true });
+    expect(mirror.placed).toHaveLength(0);
+    // the layer's icons come off the case folder after its features
+    image = { data: { width: 2, height: 2, data: new Uint8Array(16).fill(255) } };
+    map.emit('styledata');
+    await settle();
+    globe.laid.frame({ moved: false });
+    expect(mirror.placed).toHaveLength(1);
+    expect(mirror.placed[0].icon).toBeTruthy();
     mirror.destroy();
   });
 });

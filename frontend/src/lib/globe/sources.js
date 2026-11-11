@@ -9,7 +9,7 @@
  * enlarged, as the flat map overzooms it.
  *
  * What came back is kept, the least recently read let go past a count; a tile
- * that failed is asked again after a while, never in a loop.
+ * that failed, or never answered, is asked again after a while, never in a loop.
  */
 import { VectorTile } from '@mapbox/vector-tile';
 import { PbfReader } from 'pbf';
@@ -17,7 +17,13 @@ import { PbfReader } from 'pbf';
 /** Tiles kept, the least recently read let go first. */
 const KEEP = 160;
 /** ms before a tile that failed is asked again. */
-const RETRY_MS = 30000;
+export const RETRY_MS = 30000;
+/**
+ * ms a tile may take to come, its body read, before it counts as failed. A
+ * server that never answers would otherwise hold every tile painted from it,
+ * and the few the globe paints at once, for good.
+ */
+export const TILE_TIMEOUT_MS = 15000;
 
 /**
  * Where one source's tiles are fetched from, read off the engine's source:
@@ -98,6 +104,7 @@ export function createTileSources({
   decodeVector = (buffer) => new VectorTile(new PbfReader(new Uint8Array(buffer))),
   now = () => Date.now(),
   keep = KEEP,
+  timeout = TILE_TIMEOUT_MS,
 } = {}) {
   // url → { promise, value, failedAt, used }
   const held = new Map();
@@ -111,12 +118,25 @@ export function createTileSources({
     for (const [url] of settled.slice(0, held.size - keep)) held.delete(url);
   }
 
-  async function load(url, kind) {
-    const answer = await get(url);
+  async function read(url, kind, signal) {
+    const answer = await get(url, signal);
     if (answer.status === 204 || answer.status === 404) return null;
     if (!answer.ok) throw new Error(`tile answered ${answer.status}`);
     if (kind === 'raster') return decodeImage(await answer.blob());
     return decodeVector(await answer.arrayBuffer());
+  }
+
+  /** A tile read, or a failure once it has taken `timeout` ms, whether or not the fetch hears its signal. */
+  function load(url, kind) {
+    const controller = new AbortController();
+    let timer = null;
+    const late = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error('tile took too long'));
+      }, timeout);
+    });
+    return Promise.race([read(url, kind, controller.signal), late]).finally(() => clearTimeout(timer));
   }
 
   return {
@@ -148,6 +168,10 @@ export function createTileSources({
       }
       e.used = ++clock;
       return e.promise;
+    },
+    /** Whether the tile's last read failed: what was painted from it lacks it until it is read again. */
+    failed(description, tile) {
+      return held.get(tileUrl(description, tile))?.failedAt != null;
     },
     /** A tile already held, or undefined. */
     peek(description, tile) {
