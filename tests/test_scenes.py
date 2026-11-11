@@ -18,6 +18,7 @@ from PIL import Image
 from azimut import layout
 from azimut.engine import media as media_engine
 from azimut.engine import scenes as scenes_engine
+from azimut.engine import satellite as satellite_engine
 from azimut.workspace import Case
 
 needs_ffmpeg = pytest.mark.skipif(not media_engine.ffmpeg_available(), reason="ffmpeg not installed")
@@ -218,6 +219,10 @@ def test_a_proof_built_on_a_frame_joins_its_video_with_nothing_written(client, t
     assert (point["lat"], point["lon"]) == (48.51203, 35.04122)
     place = Case.open(cid).get_entity(point["place_id"])
     assert place["type"] == "place"
+    # where it stands, as a proof's label says it, once the case knows its geography
+    assert scene["place"] == ""
+    satellite_engine.set_geo(Case.open(cid), place["id"], {"state": "ok", "country_code": "ua", "country": "Україна", "region": "Dnipropetrovsk Oblast"})
+    assert _scenes(client, cid, video)["scenes"][0]["place"] == "Dnipropetrovsk Oblast, Ukraine"
     # reading is reading: the proof on disk is byte for byte what the save wrote
     assert spec_path.read_bytes() == before
 

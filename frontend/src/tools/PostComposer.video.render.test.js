@@ -233,7 +233,8 @@ describe('where a thread is offered', () => {
 describe('Recap first, as it opens', () => {
   it('lays out the places on the sheet, the video with its link, then a post per place', async () => {
     await startFromGallery();
-    expect(target.querySelector('.title-input').value).toBe('Convoy on the coast road');
+    // named after neither the video nor a place: no name until the analyst gives one
+    expect(target.querySelector('.title-input').value).toBe('');
     expect(panel().querySelector('.vt-title').textContent).toBe('Convoy on the coast road');
     expect(panel().querySelector('.vt-said').textContent.trim()).toBe('3 places');
     expect(panel().querySelector('.vt-order.on .vt-order-name').textContent).toBe('Recap first');

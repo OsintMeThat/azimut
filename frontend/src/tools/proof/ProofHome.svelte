@@ -1,7 +1,8 @@
 <script>
   /**
    * Where Geo Proof opens with no proof open, in place of the canvas: **New proof**
-   * and a search that finds a proof by name and opens it; **Continue**, the last proofs
+   * and a search that finds a proof by name or place and opens it, each proof called by
+   * its label (`proofList.proofLabel`); **Continue**, the last proofs
    * saved as large thumbnails, a proof of a video tagged `clip.mp4 · 2/4` in its scene's
    * colour; and **To prove**, only when the case has scenes still to prove, one card per
    * video with its scenes as chips, each with its two counts (`components/SceneCounts`):
@@ -15,7 +16,7 @@
   import SceneCounts from '../../components/SceneCounts.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { timeAgo } from '../../lib/analysisViews.js';
-  import { continueShown, findProofs, recentProofs, slideTag } from '../../lib/proofList.js';
+  import { continueShown, findProofs, proofLabel, recentProofs, slideTag } from '../../lib/proofList.js';
   import { queueColor, queueName, queueTime, waitingWords } from '../../lib/sceneQueue.js';
 
   let {
@@ -76,7 +77,7 @@
         <button type="button" class="btn btn-primary ph-new" onclick={() => onnew?.()}><Icon name="plus" size={14} /> New proof</button>
         <label class="ph-find">
           <Icon name="search" size={15} />
-          <input bind:value={query} onkeydown={find} placeholder="Find a proof by name…" aria-label="Find a proof by name" />
+          <input bind:value={query} onkeydown={find} placeholder="Find a proof by name or place…" aria-label="Find a proof by name or place" />
           {#if query}
             <button type="button" class="ph-clear" aria-label="Clear search" title="Clear search" onclick={() => (query = '')}><Icon name="x" size={12} /></button>
           {/if}
@@ -87,14 +88,14 @@
         <div class="ph-found" role="group" aria-label="Proofs found">
           {#each found as entry, i (entry.name)}
             <button type="button" class="ph-hit" class:first={i === 0} onclick={() => onopen?.(entry)}
-              title={i === 0 ? `Open ${entry.title} (Enter)` : `Open ${entry.title}`}>
+              title={i === 0 ? `Open ${proofLabel(entry)} (Enter)` : `Open ${proofLabel(entry)}`}>
               <span class="ph-hit-pic">{#if entry.thumb || entry.png}<img src={fileUrl(caseId, entry.thumb ?? entry.png)} alt="" loading="lazy" decoding="async" />{/if}</span>
-              <span class="ph-hit-title" dir="auto">{entry.title}</span>
+              <span class="ph-hit-title" dir="auto">{proofLabel(entry)}</span>
               {@render tag(entry, false)}
               <span class="ph-when">{timeAgo(entry.updated_at)}</span>
             </button>
           {:else}
-            <p class="ph-none">No proof by that name.</p>
+            <p class="ph-none">No proof by that name or place.</p>
           {/each}
         </div>
       {:else}
@@ -107,7 +108,7 @@
           </div>
           <div class="ph-cards" bind:clientWidth={cardsWidth}>
             {#each recent as entry (entry.name)}
-              <button type="button" class="ph-card" onclick={() => onopen?.(entry)} title={`Open ${entry.title}`}>
+              <button type="button" class="ph-card" onclick={() => onopen?.(entry)} title={`Open ${proofLabel(entry)}`}>
                 <!-- dark in both themes: a proof is drawn on its own dark ground, and a grey
                      band beside it read as a frame in the light one -->
                 <span class="ph-pic dark-surface">
@@ -118,7 +119,7 @@
                   {/if}
                 </span>
                 <span class="ph-card-words">
-                  <span class="ph-title" dir="auto">{entry.title}</span>
+                  <span class="ph-title" dir="auto">{proofLabel(entry)}</span>
                   <span class="ph-said">{@render tag(entry, true)}<span class="ph-when">{timeAgo(entry.updated_at)}</span></span>
                 </span>
               </button>

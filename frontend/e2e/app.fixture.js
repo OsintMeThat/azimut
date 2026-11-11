@@ -2092,7 +2092,8 @@ export async function installAppFixture(page, options = {}) {
         delete fixtureDrafts[body.rename_from];
         delete fixtureLookupEntities[`.drafts/${body.rename_from}.json`];
       }
-      fixtureDrafts[name] = { title: body.title, updated_at: new Date().toISOString(), state: body.state };
+      const born = fixtureDrafts[body.rename_from ?? name]?.created_at ?? new Date().toISOString();
+      fixtureDrafts[name] = { title: body.title, created_at: born, updated_at: new Date().toISOString(), state: body.state };
       fixtureLookupEntities[`.drafts/${name}.json`] ??= { id: `d-${name}`, type: 'post' };
       return json(route, { name, title: body.title, draft: `.drafts/${name}.json` });
     }
@@ -2134,6 +2135,12 @@ export async function installAppFixture(page, options = {}) {
       return json(route, { status: 'deleted', deleted: [`d-${name}`], tombstoned: [], trash: group });
     }
     if (path === `/api/cases/${CASE_ID}/drafts`) {
+      // a post's first decimal point, as `api/drafts._first_point` reads its coordinates
+      const firstPoint = (text) => {
+        const line = String(text ?? '').split('\n').map((one) => one.trim()).find(Boolean) ?? '';
+        const [lat, lon] = line.split(' — ').at(-1).split(',').map(Number);
+        return Number.isFinite(lat) && Number.isFinite(lon) && line.includes(',') ? [lat, lon] : null;
+      };
       // as `api/drafts.py` lists them: what Post's home says of each without opening it
       const listed = Object.entries(fixtureDrafts).map(([name, draft]) => {
         const publish = draft.state?.publish;
@@ -2155,6 +2162,11 @@ export async function installAppFixture(page, options = {}) {
           state: posted ? (publish.changed ? 'changed' : 'posted') : 'draft',
           posted,
           picture: draft.state?.proofPng ?? draft.state?.firstMedia?.[0] ?? draft.state?.mediaPaths?.[0] ?? null,
+          // what a post with no name is labelled by: its place, its date, its first point
+          created_at: draft.created_at ?? null,
+          place: draft.state?.place?.trim() || null,
+          when: draft.state?.date?.trim() || null,
+          coords: firstPoint(draft.state?.coordsText),
         };
       });
       // newest first, as the server sorts them

@@ -50,7 +50,7 @@ from . import events
 from .cases import delete_by_path, get_case
 from .cases.common import delete_entity_deep
 from .inspect import say_geolocating
-from .naming import case_only, holders, read_created_at, slugify
+from .naming import case_only, holders, read_created_at, slugify, technical_name
 from .satellite import locate_on_save
 from .. import layout
 
@@ -97,9 +97,11 @@ class ProofIn(BaseModel):
     # The filename always follows the title, so renaming a saved proof moves its
     # spec and its export. ``rename_from`` is the stem the composer is currently
     # bound to (absent on a first save); a save that lands elsewhere renames
-    # those files in place instead of leaving a copy under the old name.
+    # those files in place instead of leaving a copy under the old name. An empty
+    # title is no name: the proof files under a technical one, "Proof 3"
+    # (`technical_name`), which is how a name is cleared.
     rename_from: str | None = None
-    title: str = Field(min_length=1, max_length=200)
+    title: str = Field(default="", max_length=200)
     spec: dict[str, Any]
     # The rendered export, as the data URL's body. Bounded twice: the whole request by
     # `server.BulkBodyLimit`, and the decoded picture by `MAX_EXPORT_BYTES` below.
@@ -434,6 +436,8 @@ def list_proofs(case_id: str) -> list[dict[str, Any]]:
     case = get_case(case_id)
     proofs = []
     specs: list[tuple[str, dict[str, Any]]] = []
+    # each proof's entity and each point's place, read once for the whole list
+    lookup = scene_engine.Lookup(case)
     for spec_path in sorted(case.subdir("proofs").joinpath(layout.META_DIR).glob("*.json")):
         try:
             spec = json.loads(spec_path.read_text(encoding="utf-8"))
@@ -455,16 +459,26 @@ def list_proofs(case_id: str) -> list[dict[str, Any]]:
                 _write_spec(spec_path, spec)
             except OSError:
                 pass  # a read-only case still lists; it just re-renders next time
+        points = satellite_engine.spec_points(spec)
+        attrs = (lookup.proof(layout.proof_spec_rel(name)) or {}).get("attrs") or {}
+        # the date Details holds wins over the spec's, blank included (`load_proof`)
+        when = attrs["when"] if "when" in attrs else spec.get("when")
         proofs.append(
             {
                 "name": name,
                 "title": spec.get("title", name),
                 "updated_at": spec.get("updated_at"),
+                "created_at": spec.get("created_at"),
                 "panels": len(spec.get("panels", [])),
                 "shapes": len(spec.get("shapes", [])),
                 # the points the proof states for itself, read before its
                 # derivation so it keeps them when the capture is deleted
-                "points": satellite_engine.spec_points(spec),
+                "points": points,
+                # What a proof with no name of its own is labelled by (frontend
+                # `proofList.proofLabel`): its date, and where its conclusion stands
+                # as the case knows it.
+                "when": when if isinstance(when, str) and when.strip() else None,
+                "place": satellite_engine.place_words(lookup.place(points[0]["lat"], points[0]["lon"])) if points else "",
                 "png": layout.proof_export_rel(png.stem) if png.exists() else None,
                 "thumb": thumb,
                 "spec_path": layout.proof_spec_rel(spec_path.stem),
@@ -618,8 +632,11 @@ def reveal_proof_exports(case_id: str) -> dict[str, str]:
 @router.post("/cases/{case_id}/proofs")
 def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     case = get_case(case_id)
-    name = slugify(body.title, "Proof")
     case.subdir("proofs")  # born on first save, so the visible folder exists
+    bound = slugify(body.rename_from, "proof") if body.rename_from else None
+    name = slugify(body.title, "Proof") if body.title.strip() else technical_name(
+        case.subdir("proofs").joinpath(layout.META_DIR), "proof", bound
+    )
     rel = layout.proof_spec_rel(name)
     spec_path = case.resolve_inside(rel)
 
@@ -629,7 +646,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     # a same-named proof — there the analyst is updating that one.
     # Taken is judged without case, the proof being saved excepted: two names that
     # differ only by case are one file on Windows and macOS.
-    old = slugify(body.rename_from, "proof") if body.rename_from else None
+    old = bound
     old_rel = layout.proof_spec_rel(old) if old and old != name else None
     if holders(spec_path.parent, name, source=old if old_rel else name):
         raise HTTPException(status_code=409, detail="another proof already uses that name")

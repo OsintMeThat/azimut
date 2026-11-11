@@ -6,6 +6,7 @@
  * and a proof on photos says nothing of the kind, so it reads exactly as it always did.
  */
 import { matchesTerms } from './folderBrowse.js';
+import { itemLabel } from './naming.js';
 import { videoName } from './proofScene.js';
 import { sceneColorAt } from './scenes.js';
 
@@ -42,10 +43,27 @@ export function continueShown(columns, shown = CONTINUE_SHOWN) {
 /** The proofs the home's Continue shows: the last ones saved. */
 export const recentProofs = (entries, shown = CONTINUE_SHOWN) => (entries ?? []).slice(0, shown);
 
-/** The proofs a search by name finds, in the list's order. */
+/**
+ * What a listed proof is called (`naming.itemLabel`): its name when the analyst gave it
+ * one; else where its conclusion stands as the case knows it (`place`, `GET /proofs` and
+ * the scenes' rows) and its day (its date, else when it was made); else its point.
+ */
+export function proofLabel(entry, now = new Date()) {
+  const point = (entry?.points ?? []).find((one) => Number.isFinite(one?.lat) && Number.isFinite(one?.lon));
+  return itemLabel('proof', entry?.title ?? entry?.name, {
+    place: entry?.place,
+    when: [entry?.when, entry?.created_at],
+    coords: point ?? null,
+  }, now);
+}
+
+/**
+ * The proofs a search finds by their label, in the list's order: by the name the analyst
+ * gave, or by where one with none stands. A technical name, never shown, finds nothing.
+ */
 export function findProofs(entries, query) {
   if (!String(query ?? '').trim()) return [];
-  return (entries ?? []).filter((entry) => matchesTerms([entry.title, entry.name].filter(Boolean).join('\n'), query));
+  return (entries ?? []).filter((entry) => matchesTerms(proofLabel(entry), query));
 }
 
 /**

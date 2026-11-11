@@ -58,6 +58,62 @@ export function isDefaultName(name, kind) {
   return new RegExp(`^${NAME_PREFIX[kind]} \\d+$`).test((name ?? '').trim());
 }
 
+/**
+ * A name as the header's field shows it: the analyst's own, or '' for one the app gave.
+ * "Post 41" and "Proof 3" are the files' names, technical, never shown as the item's:
+ * the item reads as its label instead (`itemLabel`).
+ */
+export const ownName = (name, kind) => (isDefaultName(name, kind) ? '' : String(name ?? '').trim());
+
+/** What an item says for a label when it has no name, no place and no point. */
+export const UNTITLED = { proof: 'Untitled proof', draft: 'Untitled post' };
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * A day as a label says it, *9 Nov*, the year added outside this one, or '' for none.
+ * A date written out (`2025-11-09 06:40 UTC+3`, a post's `#date`) is its own day as
+ * written; an instant (`2026-11-09T21:40:00Z`, when a file was made) is this machine's day.
+ */
+export function labelDay(value, now = new Date()) {
+  const text = String(value ?? '').trim();
+  const written = /^(\d{4})-(\d{2})-(\d{2})(?![\dT])/.exec(text);
+  let year;
+  let month;
+  let day;
+  if (written) {
+    [year, month, day] = [Number(written[1]), Number(written[2]) - 1, Number(written[3])];
+  } else {
+    const at = /^\d{4}-\d{2}-\d{2}T/.test(text) ? new Date(text) : null;
+    if (!at || Number.isNaN(at.getTime())) return '';
+    [year, month, day] = [at.getFullYear(), at.getMonth(), at.getDate()];
+  }
+  if (!(month >= 0 && month < 12) || !(day >= 1 && day <= 31)) return '';
+  return year === now.getFullYear() ? `${day} ${MONTHS[month]}` : `${day} ${MONTHS[month]} ${year}`;
+}
+
+/** A point as a label says it: `15.4712, 45.3221`, about ten metres. '' for none. */
+export function labelCoords(point) {
+  const [lat, lon] = Array.isArray(point) ? point : [point?.lat, point?.lon];
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return '';
+  return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+}
+
+/**
+ * What a proof or a post is called wherever it is listed: the name the analyst gave it;
+ * else where it is and its day, `Al Jawf, Yemen · 9 Nov`; else its point and its day;
+ * else Untitled. `when` is the dates to read the day from, the first that says one
+ * winning (the event's, then a post's day out, then when it was made).
+ */
+export function itemLabel(kind, name, { place = '', when = [], coords = null } = {}, now = new Date()) {
+  const own = ownName(name, kind);
+  if (own) return own;
+  const day = (Array.isArray(when) ? when : [when]).map((one) => labelDay(one, now)).find(Boolean) ?? '';
+  const where = String(place ?? '').trim() || labelCoords(coords);
+  if (!where) return UNTITLED[kind];
+  return day ? `${where} · ${day}` : where;
+}
+
 // Where each kind's spec lives, and the entity attribute that points at it.
 // These mirror `layout.collage_rel` / `proof_spec_rel` / `draft_rel` — the
 // specs are hidden inside the case folder, so a spec path is not the visible

@@ -476,7 +476,7 @@ def _by_attr(case: Case, entity_type: str, attr: str) -> dict[Any, dict[str, Any
             return found
 
 
-class _Lookup:
+class Lookup:
     """Each proof's entity by its spec and each place by its point, read in one pass
     the first time a row asks. `find_entity` scans every entity of the case, and the
     rows of a video with 150 proofs asked it 300 times. A point no place answers is
@@ -499,7 +499,7 @@ class _Lookup:
         return found if found is not None else satellite_engine.place_at(self.case, lat, lon)
 
 
-def _points(lookup: _Lookup, spec: dict[str, Any]) -> list[dict[str, Any]]:
+def _points(lookup: Lookup, spec: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     for point in satellite_engine.spec_points(spec):
         place = lookup.place(point["lat"], point["lon"])
@@ -547,7 +547,7 @@ def clip_file(case: Case, clip: Any) -> dict[str, Any] | None:
     }
 
 
-def _proof_row(lookup: _Lookup, name: str, spec: dict[str, Any], scene: dict[str, Any]) -> dict[str, Any]:
+def _proof_row(lookup: Lookup, name: str, spec: dict[str, Any], scene: dict[str, Any]) -> dict[str, Any]:
     case = lookup.case
     proof = lookup.proof(layout.proof_spec_rel(name))
     attrs = (proof or {}).get("attrs") or {}
@@ -557,6 +557,7 @@ def _proof_row(lookup: _Lookup, name: str, spec: dict[str, Any], scene: dict[str
     # thirty slides would load whole, and never one made here, since this is a read.
     thumb = _existing(case, _text(spec.get("thumb"))) or _existing(case, _text(attrs.get("thumb")))
     points = _points(lookup, spec)
+    first = points[0] if points else None
     state, abandoned = proof_state(states_place(spec), attrs)
     # the clip cut for its post, while its file is in the case, with its size
     clip = clip_file(case, scene.get("clip"))
@@ -568,6 +569,8 @@ def _proof_row(lookup: _Lookup, name: str, spec: dict[str, Any], scene: dict[str
         "title": spec.get("title") or name,
         **scene,
         "points": points,
+        # where its conclusion stands as the case knows it, for a proof's label
+        "place": satellite_engine.place_words(lookup.place(first["lat"], first["lon"])) if first else "",
         "state": state,
         "abandoned": abandoned,
         "png": _existing(case, layout.proof_export_rel(name)),
@@ -628,7 +631,7 @@ def unplaced_proofs(
     a proof that states its scene: an older proof traced to a video by its frames was
     never asked to be one of its places."""
     specs, origins = proofs
-    lookup = _Lookup(case)
+    lookup = Lookup(case)
     out: dict[str, list[dict[str, Any]]] = {}
     for name, spec in specs:
         if states_place(spec):
@@ -644,7 +647,8 @@ def unplaced_proofs(
             "id": f"proof:{name}",
             "proof": name,
             "video": scene["video"],
-            "label": str(spec.get("title") or name),
+            # a name the app gave says nothing: the To-do shows its time instead
+            "label": "" if layout.is_default_name(spec.get("title") or name, "proof") else str(spec.get("title") or name),
             # every moment, as a proof's row says them; the first also as a scene's, for its mark
             "moments": scene["moments"],
             "start": first.get("start"),
@@ -772,7 +776,7 @@ def _image_scenes(
     the app marks it, all proved by any proof that lays the picture out, which then
     lists in their place. A picture has no time to order them by."""
     laid = laid_out_by(specs, image)
-    lookup = _Lookup(case)
+    lookup = Lookup(case)
     scenes = [_proof_row(lookup, name, spec, {"video": image, "moments": [], "at": []}) for name, spec in laid]
     drafts = [d for d in _drafts_of(case, image, works) if isinstance(d.get("id"), str)]
     hidden = sorted(d["id"] for d in drafts) if laid else []
@@ -921,7 +925,7 @@ def video_scenes(
     scenes: list[dict[str, Any]] = []
     taken: set[str] = set()
     used: dict[str, list[dict[str, str]]] = {}
-    lookup = _Lookup(case)
+    lookup = Lookup(case)
     for name, spec in specs:
         for src in dict.fromkeys(_panel_sources(spec)):
             if src in origins and origins[src][0] == video:

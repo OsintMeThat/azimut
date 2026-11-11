@@ -576,3 +576,50 @@ def test_the_publish_route_refuses_what_is_no_post_and_changes_nothing(client, b
 def test_the_publish_route_answers_404_for_a_post_that_is_not_there(client):
     cid = client.post("/api/cases", json={"name": "Missing"}).json()["id"]
     assert client.put(f"/api/cases/{cid}/drafts/Gone/publish", json={"posted": True}).status_code == 404
+
+
+# -- a post with no name of its own (`naming.technical_name`) ------------------------
+
+
+def test_a_draft_saved_with_no_name_files_under_a_technical_one(client):
+    cid = client.post("/api/cases", json={"name": "Drafts"}).json()["id"]
+    first = client.post(f"/api/cases/{cid}/drafts", json={"title": "", "state": STATE}).json()
+    assert first["name"] == "Post 1"
+    # the title left out, or only spaces, is no name either
+    assert client.post(f"/api/cases/{cid}/drafts", json={"state": STATE}).json()["name"] == "Post 2"
+    assert client.post(f"/api/cases/{cid}/drafts", json={"title": "   ", "state": STATE}).json()["name"] == "Post 3"
+
+
+def test_clearing_a_drafts_name_moves_it_to_a_technical_name_and_keeps_one_entity(client):
+    cid = client.post("/api/cases", json={"name": "Drafts"}).json()["id"]
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Post 1", "state": STATE})
+    named = client.post(f"/api/cases/{cid}/drafts", json={"title": "Bridge strike", "state": STATE}).json()
+    before = [e for e in graph_read.entities(cid) if e["label"] == "Bridge strike"][0]
+
+    cleared = client.post(
+        f"/api/cases/{cid}/drafts", json={"rename_from": named["name"], "title": "", "state": STATE}
+    ).json()
+    # the lowest number free, the name the analyst gave gone with its file
+    assert cleared["name"] == "Post 2"
+    assert client.get(f"/api/cases/{cid}/drafts/Bridge strike").status_code == 404
+    assert client.get(f"/api/cases/{cid}/drafts/Post 2").json()["state"]["place"] == STATE["place"]
+    after = [e for e in graph_read.entities(cid) if e["id"] == before["id"]][0]
+    assert (after["label"], after["attrs"]["draft"]) == ("Post 2", ".drafts/Post 2.json")
+    # clearing a post with no name moves nothing
+    again = client.post(f"/api/cases/{cid}/drafts", json={"rename_from": "Post 2", "title": "", "state": STATE}).json()
+    assert again["name"] == "Post 2"
+    assert sorted(d["name"] for d in client.get(f"/api/cases/{cid}/drafts").json()) == ["Post 1", "Post 2"]
+
+
+def test_the_list_gives_what_a_post_with_no_name_is_labelled_by(client):
+    cid = client.post("/api/cases", json={"name": "Drafts"}).json()["id"]
+    state = {**STATE, "date": "2025-11-09 06:40 UTC+3", "coordsText": "Gate — 15.471200, 45.322100\n15.48, 45.33"}
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "", "state": state})
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Bare", "state": {"tweet1": "Words"}})
+    rows = {row["name"]: row for row in client.get(f"/api/cases/{cid}/drafts").json()}
+    assert {key: rows["Post 1"][key] for key in ("place", "when", "coords")} == {
+        "place": "Los Anacuos, Miranda, Venezuela",
+        "when": "2025-11-09 06:40 UTC+3",
+        "coords": [15.4712, 45.3221],
+    }
+    assert {key: rows["Bare"][key] for key in ("place", "when", "coords")} == {"place": None, "when": None, "coords": None}

@@ -30,7 +30,8 @@
  * line and numbered as the sheet numbers them, `1. [0:00–0:07] Road bridge`, the title
  * alone for the whole video. The clock is `lib/scenes.js`'s, never written here.
  */
-import { isAbandoned, momentTime, sceneList, sceneMoments, sceneTitle, sortMoments, unplaced } from './scenes.js';
+import { labelCoords, ownName } from './naming.js';
+import { isAbandoned, momentTime, sceneList, sceneMoments, sceneTime, sceneTitle, sortMoments, unplaced } from './scenes.js';
 import { VIDEO_LIMITS } from './videoLimits.js';
 
 /** The four orders, the default first: one template start each. */
@@ -81,10 +82,20 @@ export function shortTimecode(moments) {
   return shown.length > 1 ? `${bracketTime(shown[0])} +${shown.length - 1}` : bracketTime(shown[0]);
 }
 
-/** One line of `#scenes`: its number, the time and the title, or the number and the title alone. */
+/**
+ * What `#scenes`, a post's heading and the thread's column call a place of the video:
+ * the proof's name when the analyst gave it one, else where it stands as the case knows
+ * it (`place`), else its point, else its time. Never "Proof 3", a name the app gave.
+ */
+export function placeLabel(row) {
+  const point = (row?.points ?? []).find((one) => Number.isFinite(one?.lat) && Number.isFinite(one?.lon));
+  return ownName(sceneTitle(row ?? {}), 'proof') || String(row?.place ?? '').trim() || labelCoords(point) || sceneTime(row ?? {});
+}
+
+/** One line of `#scenes`: its number, the time and the place, or the number and the place alone. */
 export function sceneLine(slide, number) {
   const time = timecode(slide.moments);
-  return `${number}. ${time ? `${time} ` : ''}${slide.title}`;
+  return `${number}. ${time ? `${time} ` : ''}${slide.label ?? slide.title}`;
 }
 
 /** `#scenes`: the places of the thread with their times, one a line, numbered from 1. */
@@ -94,25 +105,30 @@ export function scenesText(slides) {
 
 /**
  * The slides a thread posts, out of what `GET /scenes?video=` answered: the proofs in
- * the strip's clip order, each `{ name, id, title, moments, png, clip, row }`, and `left`,
- * the proofs it does not post with why (`LEFT_WHY`).
+ * the strip's clip order, each `{ name, id, title, label, moments, png, clip, row }`,
+ * `title` its name and `label` what the thread calls it (`placeLabel`), and `left`, the
+ * proofs it does not post with why (`LEFT_WHY`). Each row keeps the colour Inspect's bar
+ * and the strip give its scene, the scenes still to prove counted.
  */
 export function videoSlides(answer) {
-  const listed = (answer?.scenes ?? []).filter((s) => s?.kind === 'proof');
-  const ordered = sceneList(listed, [], answer?.taken ?? []);
+  const scenes = (answer?.scenes ?? []).filter((s) => s?.kind === 'proof' || s?.kind === 'draft');
+  const ordered = sceneList(scenes, scenes.filter((s) => s.kind === 'draft'), answer?.taken ?? [])
+    .filter((row) => row.kind === 'proof');
   const slides = [];
   const left = [];
   for (const row of ordered) {
     const title = sceneTitle(row);
+    const label = placeLabel(row);
     const why = isAbandoned(row) ? 'abandoned' : unplaced(row) ? 'unplaced' : !row.png ? 'nopicture' : null;
     if (why) {
-      left.push({ name: row.proof, title, why });
+      left.push({ name: row.proof, title, label, why });
       continue;
     }
     slides.push({
       name: row.proof,
       id: row.proof_id ?? null,
       title,
+      label,
       moments: sceneMoments(row),
       png: row.png,
       clip: row.clip ?? null,

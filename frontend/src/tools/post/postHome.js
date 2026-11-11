@@ -10,6 +10,7 @@
  * a post deleted to the Trash gives its proof back to Ready to post at once.
  */
 import { matchesTerms } from '../../lib/folderBrowse.js';
+import { itemLabel } from '../../lib/naming.js';
 import { onVideo } from '../../lib/proofList.js';
 import { videoName } from '../../lib/proofScene.js';
 import {
@@ -68,8 +69,40 @@ export function byListedDate(drafts) {
 const linkId = (url) => (postedAddress(url)?.url ?? '').split('/').pop();
 
 /**
- * Whether a post answers a search: its name's words, or, for a post's link pasted, that
- * post, found by its own link or by the id its name holds.
+ * The proof a post is about, from the proofs the case lists: a geolocation's own, or the
+ * first slide of a video thread's video. Null for a post about none.
+ */
+function aboutProof(draft, proofs) {
+  const rows = proofs ?? [];
+  if (draft?.proof) return rows.find((row) => row.png === draft.proof) ?? null;
+  if (normalizePostKind(draft?.kind) !== 'video' || !draft?.video) return null;
+  return rows.filter((row) => row.video === draft.video).sort((a, b) => (a.slide ?? 0) - (b.slide ?? 0))[0] ?? null;
+}
+
+/**
+ * What a listed post is called (`naming.itemLabel`): its name when the analyst gave it
+ * one; else its place (its `#place`, else its proof's) and its day (its `#date`, else
+ * its proof's, else the day it went out, else when it was made); else its point.
+ * `proofs` is `GET /proofs`, for what a post's proof says where the post says nothing.
+ */
+export function postLabel(draft, proofs = [], now = new Date()) {
+  const about = aboutProof(draft, proofs);
+  const point = (about?.points ?? []).find((one) => Number.isFinite(one?.lat) && Number.isFinite(one?.lon));
+  return itemLabel('draft', draft?.title ?? draft?.name, {
+    place: draft?.place || about?.place || '',
+    when: [draft?.when, about?.when, postedWhen(draft?.posted), draft?.created_at],
+    coords: draft?.coords ?? point ?? null,
+  }, now);
+}
+
+/** The posts as the lists show them, each with its `label` (`postLabel`). */
+export const labelledDrafts = (drafts, proofs = [], now = new Date()) =>
+  (drafts ?? []).map((draft) => ({ ...draft, label: postLabel(draft, proofs, now) }));
+
+/**
+ * Whether a post answers a search: its label's words (the name the analyst gave, or its
+ * place), or, for a post's link pasted, that post, found by its own link or by the id
+ * its name holds.
  */
 function answersSearch(draft, query) {
   const pasted = postedAddress(query);
@@ -77,7 +110,8 @@ function answersSearch(draft, query) {
     const id = linkId(pasted.url);
     return linkId(draft?.posted?.url) === id || [draft?.title, draft?.name].some((text) => String(text ?? '').includes(id));
   }
-  return matchesTerms([draft?.title, draft?.name].filter(Boolean).join('\n'), query);
+  // by its label alone: a technical name, never shown, finds nothing
+  return matchesTerms(draft?.label ?? postLabel(draft), query);
 }
 
 /** The day a posted card says, *9 Nov*, read off its link when it can be. */

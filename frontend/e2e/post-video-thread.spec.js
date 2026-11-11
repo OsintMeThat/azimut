@@ -22,7 +22,8 @@ const slideRow = (name, title, slide, extra = {}) => ({
   video: VIDEO, video_title: 'Convoy on the coast road', slide, slides: 2, order: slide - 1, postable: true, ...extra,
 });
 const PROOFS = [
-  slideRow('bridge', 'Road bridge', 1), slideRow('gate', 'Port gate', 2),
+  slideRow('bridge', 'Road bridge', 1, { place: 'Al Jawf, Yemen', when: '2026-11-09', points: [{ lat: 48.85, lon: 2.35 }] }),
+  slideRow('gate', 'Port gate', 2),
   slideRow('lone', 'Lone place', 1, { video: 'media/lone.mp4', video_title: 'Lone clip', slides: 1 }),
 ];
 const sceneRow = (proof, title, moments, coords, extra = {}) => ({
@@ -97,7 +98,8 @@ test('New post → Video thread lays out Recap first with its sheet, saves it, a
 
   // a video thread's own column: the header may fold the kind's name to its icon
   await expect(page.getByTestId('video-thread')).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Post name' })).toHaveValue('Convoy on the coast road');
+  // named after neither the video nor its places: no name until the analyst gives one
+  await expect(page.getByRole('textbox', { name: 'Post name' })).toHaveValue('');
   await expect(posts(page).locator('.tweet-head .label')).toHaveText(['Recap', 'Video', 'Road bridge', 'Port gate']);
   await expect(posts(page).first().locator('textarea')).toHaveValue(RECAP);
   await expect(posts(page).nth(1).locator('textarea')).toHaveValue(`Source: ${SOURCE}`);
@@ -115,7 +117,8 @@ test('New post → Video thread lays out Recap first with its sheet, saves it, a
   // back home, the series has its thread, and its card opens it as it was
   await page.locator('.tool-header').getByRole('button', { name: 'Posts' }).click();
   await expect(home(page).locator('.ph-video', { hasText: 'Convoy on the coast road' }).getByRole('button', { name: 'Video thread' })).toHaveCount(0);
-  const card = home(page).locator('.post-card', { hasText: 'Convoy on the coast road' });
+  // a thread with no name of its own reads as its first place and its day
+  const card = home(page).locator('.post-card', { hasText: 'Al Jawf, Yemen · 9 Nov' });
   await expect(card.locator('.ph-line')).toHaveText('X · Video thread · 4 posts');
   await card.locator('.ph-open').click();
   await expect(posts(page).locator('.tweet-head .label')).toHaveText(['Recap', 'Video', 'Road bridge', 'Port gate']);

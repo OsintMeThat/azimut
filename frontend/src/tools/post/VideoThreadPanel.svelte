@@ -19,9 +19,9 @@
     threadTitle = '',
     /** `(text)`: the thread's title typed. */
     ontitle,
-    /** The places the thread posts, `{ name, title, clip }`, null while read. */
+    /** The places the thread posts, `{ name, label, clip }`, null while read. */
     places = null,
-    /** The proofs it leaves out, `{ title, why }`. */
+    /** The proofs it leaves out, `{ label, why }`. */
     left = [],
     /** How many places a thread could not hold. */
     cut = 0,
@@ -67,8 +67,8 @@
       oninput={(event) => ontitle?.(event.currentTarget.value)} />
   </label>
   {#if left.length}
-    <p class="vt-note" title={left.map((one) => `${one.title}: ${LEFT_WHY[one.why]}`).join('\n')}>
-      Left out: {left.map((one) => `${one.title} (${LEFT_WHY[one.why].toLowerCase()})`).join(', ')}
+    <p class="vt-note" title={left.map((one) => `${one.label}: ${LEFT_WHY[one.why]}`).join('\n')}>
+      Left out: {left.map((one) => `${one.label} (${LEFT_WHY[one.why].toLowerCase()})`).join(', ')}
     </p>
   {/if}
   {#if cut}
@@ -95,7 +95,7 @@
 
   {#if clip || link}
     <p class="vt-note" data-testid="video-instead">
-      {#if chosen}The video's post carries the clip of {chosen.title} ({clipWords(chosen.clip)}).{:else if clip}The video's post carries a clip of it.{:else}The video's post carries its link.{/if}
+      {#if chosen}The video's post carries the clip of {chosen.label} ({clipWords(chosen.clip)}).{:else if clip}The video's post carries a clip of it.{:else}The video's post carries its link.{/if}
       <button type="button" class="vt-link" onclick={() => (link ? onlink?.(false) : onclip?.(null))}>Post the whole video</button>
     </p>
   {:else if over}
@@ -105,8 +105,8 @@
         <p class="vt-over-said">Post the clip a place cut instead:</p>
         {#each clips as one (one.name)}
           <button type="button" class="btn btn-sm vt-choice" onclick={() => onclip?.(one.clip.path)}
-            title={`The clip of ${one.title}, cut for its post`}>
-            <Icon name="video" size={13} /> {one.title} · {clipWords(one.clip)}
+            title={`The clip of ${one.label}, cut for its post`}>
+            <Icon name="video" size={13} /> {one.label} · {clipWords(one.clip)}
           </button>
         {/each}
       {:else}

@@ -402,7 +402,7 @@ test('the home continues from the last proofs, finds one by name, and makes the 
   await expect(chip).toHaveText(/Water tower\?\s*0:00–0:00\s*In progress: 1 map capture/);
 
   // the search opens the first proof found on Enter
-  await home(page).getByRole('textbox', { name: 'Find a proof by name' }).fill('mark');
+  await home(page).getByRole('textbox', { name: 'Find a proof by name or place' }).fill('mark');
   await expect(home(page).locator('.ph-hit-title')).toHaveText(['Market']);
   await page.keyboard.press('Enter');
   await expect(proofName(page)).toHaveValue('Market');

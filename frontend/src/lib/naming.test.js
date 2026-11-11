@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   MAX_SLUG, NAME_PREFIX, slugify, nextName, isDefaultName,
   savedEntities, savedSlugs, savedTitles, savedTitle, specAttr, specPath,
+  itemLabel, labelCoords, labelDay, ownName,
 } from './naming.js';
 
 describe('slugify — mirrors the backend api/naming.slugify', () => {
@@ -123,5 +124,42 @@ describe('every kind names its work the same way', () => {
     // Notes joined the convention: their file is named after the title too,
     // so a fresh one is 'Note 1' the way a fresh collage is 'Collage 1'.
     expect(Object.keys(NAME_PREFIX).sort()).toEqual(['collage', 'draft', 'note', 'proof']);
+  });
+});
+
+describe('a label, for an item with no name of its own', () => {
+  const now = new Date(2026, 10, 11, 10, 0);
+
+  it('reads a technical name as no name, and keeps the analyst\'s', () => {
+    expect(['Post 41', 'Proof 3', ' Post 2 ', 'Post', 'Post 4b', 'Harbour'].map((name) => ownName(name, name.includes('Proof') ? 'proof' : 'draft')))
+      .toEqual(['', '', '', 'Post', 'Post 4b', 'Harbour']);
+    expect(ownName('Proof 3', 'draft')).toBe('Proof 3');
+  });
+
+  it('says a day as a card does, the year added outside this one, a written date as written', () => {
+    expect(labelDay('2026-11-09', now)).toBe('9 Nov');
+    expect(labelDay('2025-10-24 14:30 UTC+3', now)).toBe('24 Oct 2025');
+    // an instant is this machine's day
+    const instant = new Date(2026, 1, 3, 23, 30).toISOString();
+    expect(labelDay(instant, now)).toBe('3 Feb');
+    expect(['', null, 'yesterday', '24/10/2025', '2026-13-01'].map((value) => labelDay(value, now))).toEqual(['', '', '', '', '']);
+  });
+
+  it('says a point in four decimals', () => {
+    expect(labelCoords([15.471234, 45.322109])).toBe('15.4712, 45.3221');
+    expect(labelCoords({ lat: -3.5, lon: 120 })).toBe('-3.5000, 120.0000');
+    expect(labelCoords(null)).toBe('');
+  });
+
+  it('is the name given, else the place and the day, else the point, else Untitled', () => {
+    const facts = { place: 'Al Jawf, Yemen', when: [null, '2026-11-09'], coords: [15.47, 45.32] };
+    expect(itemLabel('proof', 'Rooftop angle', facts, now)).toBe('Rooftop angle');
+    expect(itemLabel('proof', 'Proof 3', facts, now)).toBe('Al Jawf, Yemen · 9 Nov');
+    // the first date that says a day wins
+    expect(itemLabel('draft', 'Post 41', { ...facts, when: ['not a date', '2025-01-02', '2026-11-09'] }, now)).toBe('Al Jawf, Yemen · 2 Jan 2025');
+    expect(itemLabel('draft', 'Post 41', { ...facts, place: '' }, now)).toBe('15.4700, 45.3200 · 9 Nov');
+    expect(itemLabel('draft', 'Post 41', { place: 'Marib, Yemen' }, now)).toBe('Marib, Yemen');
+    expect(itemLabel('draft', 'Post 41', { when: ['2026-11-09'] }, now)).toBe('Untitled post');
+    expect(itemLabel('proof', '', {}, now)).toBe('Untitled proof');
   });
 });

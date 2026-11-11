@@ -13,7 +13,7 @@
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { proofCoordsText, proofSource } from '../lib/composer.js';
   import {
-    isDefaultName, nextName, savedSlugs, savedTitles, slugify, specAttr, specPath,
+    isDefaultName, itemLabel, nextName, ownName, savedSlugs, savedTitles, slugify, specAttr, specPath,
   } from '../lib/naming.js';
   import { filingName, planProofHandoff, proofPosts } from './post/handoff.js';
   import { spanNote, startFields, startPost } from './post/start.js';
@@ -22,7 +22,7 @@
   import { overWords, videoFits } from '../lib/videoLimits.js';
   import { videoName } from '../lib/proofScene.js';
   import { fileThreadSheet } from './post/threadSheet.js';
-  import { THREAD_MIN } from './post/postHome.js';
+  import { postLabel, THREAD_MIN } from './post/postHome.js';
   import { extensionWindowPutAway, putExtensionWindowAway } from './post/extensionWindow.js';
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
@@ -205,8 +205,10 @@
   // typed, picked or attached: an untouched blank post files nothing. The name in the
   // header is the draft's filename. It is taken when the field is left (`postTitle`),
   // and renaming a saved draft moves its file (the backend does the move). `draftName`
-  // is the slug it is bound to, or null before the first save.
-  let postName = $state(''); // the field
+  // is the slug it is bound to, or null before the first save. A post the analyst gave
+  // no name files under a technical one, "Post 3", which the field never shows: it
+  // stays empty, and the lists show the post's label (`postHome.postLabel`).
+  let postName = $state(''); // the field: the analyst's name, '' for none
   let postTitle = $state(''); // the name it is saved under, the field's once left
   let draftName = $state(null);
 
@@ -227,19 +229,17 @@
         draftEntities = list;
         // The name was assigned before the case's drafts were known. Renumber it
         // now rather than letting a fresh thread collide on its first save.
-        if (!draftName && isDefaultName(postTitle, 'draft')) {
-          const fresh = freshPostName();
-          if (postName.trim() === postTitle) postName = fresh;
-          postTitle = fresh;
-        }
+        if (!draftName && isDefaultName(postTitle, 'draft')) postTitle = freshPostName();
       })
       .catch(() => { if (live) draftEntities = []; });
     return () => { live = false; };
   });
 
   // Numbered past the drafts already in the case, so two never-renamed threads
-  // read apart. Assigned on mount and on discard.
+  // file apart. Assigned on mount and on discard.
   const freshPostName = () => nextName('draft', savedTitles(draftEntities, 'draft'));
+  // A name cleared: the technical one the post holds already, else a fresh one.
+  const technicalPostName = () => (draftName && isDefaultName(draftName, 'draft') ? draftName : freshPostName());
 
   // Kept in step with deletes made anywhere else in the app: a draft deleted
   // from the sidebar must not be resurrected by the next Save under its old
@@ -540,8 +540,6 @@
       return;
     }
     Object.assign(thread, read);
-    const named = videoName(video, titleByPath.get(video));
-    if (named && !nameTaken(named)) postName = postTitle = named;
     source = videoLink(mediaByPath.get(video));
     layoutThread();
     await Promise.all([fileSheetIfShown(), readPlaceFacts()]);
@@ -718,7 +716,7 @@
   function threadLabel(key, type) {
     const [role, ...rest] = String(key ?? '').split(':');
     const proof = rest.join(':');
-    const titles = new Map((thread?.slides ?? []).map((slide) => [slide.name, slide.title]));
+    const titles = new Map((thread?.slides ?? []).map((slide) => [slide.name, slide.label ?? slide.title]));
     return threadPostLabel({ role: role || null, proof, mediaType: type }, titles);
   }
 
@@ -1554,7 +1552,7 @@
     // a post of this case, as its entities or its list know it
     const listed = (caseDrafts ?? []).find((row) => row.name === link.draft);
     if (!listed && !savedSlugs(draftEntities, 'draft').has(link.draft)) return;
-    const title = listed?.title ?? link.draft;
+    const title = listed ? postLabel(listed, caseProofs ?? []) : link.draft;
     toast(`Link caught for “${title}”`, 'info', 0, [
       { label: 'Keep', onClick: () => markSavedPost({ name: link.draft }, link.url) },
       { label: 'Not this one', onClick: () => {} },
@@ -1588,8 +1586,8 @@
   }
 
   // The note is titled after the post it is written from, so the two read as one piece
-  // of work. The dialog leaves it editable.
-  const draftTitle = () => postTitle.trim() || 'Untitled post';
+  // of work: its name, else its label. The dialog leaves it editable.
+  const draftTitle = () => itemLabel('draft', postTitle, { place, when: [date], coords: geo ? [geo.lat, geo.lon] : null });
 
   // ---- saving itself ----------------------------------------------------------
   // `blankKey` is the post as it was opened or reset: a post that is still that saves
@@ -1630,7 +1628,7 @@
     if (body.run !== postRun) return; // another post took the screen meanwhile
     const first = !draftName;
     draftName = r.name;
-    if (postName.trim() === postTitle.trim() || postName.trim() === body.payload.title) postName = r.title;
+    if (!postName.trim() || postName.trim() === postTitle.trim() || postName.trim() === body.payload.title) postName = ownName(r.title, 'draft');
     postTitle = r.title;
     writtenKey = saveKey(body.payload.state, r.title);
     if (first) {
@@ -1671,18 +1669,19 @@
   /**
    * The name field is taken when it is left, as Inspect's is: renaming moves the file,
    * so it moves once rather than at every letter. A name another post holds is
-   * refused, and a blank one goes back to the name it had.
+   * refused. Cleared, the post goes back to a technical name and reads as its label.
    */
   function commitName() {
     const typed = postName.trim();
     if (!typed) {
-      postName = postTitle;
+      postName = '';
+      if (!isDefaultName(postTitle, 'draft')) postTitle = technicalPostName();
       return;
     }
     if (typed === postTitle) return;
     if (nameTaken(typed)) {
       toast(`Another post is already named “${typed}”`, 'warn');
-      postName = postTitle;
+      postName = ownName(postTitle, 'draft');
       return;
     }
     postTitle = typed;
@@ -1693,7 +1692,7 @@
       event.preventDefault();
       event.currentTarget.blur();
     } else if (event.key === 'Escape') {
-      postName = postTitle;
+      postName = ownName(postTitle, 'draft');
       event.currentTarget.blur();
     }
   }
@@ -1741,7 +1740,7 @@
   let deleting = $state(false);
 
   function askDelete(entry) {
-    if (entry?.name) deleteEntry = { name: entry.name, title: entry.title || entry.name, proof: entry.proof ?? null };
+    if (entry?.name) deleteEntry = { name: entry.name, title: entry.label || entry.title || entry.name, proof: entry.proof ?? null };
   }
 
   // A post deleted gives its proof back to Ready to post, unless another post names it:
@@ -1840,8 +1839,8 @@
       });
       draftName = name;
       settlePlace('post', where(), { navigate: true });
-      postName = doc.title || name;
-      postTitle = postName;
+      postTitle = doc.title || name;
+      postName = ownName(postTitle, 'draft');
       appliedPostTemplate = null;
       // restore geo facts from the coordinates, then honor any manual tweet edits
       if (s.coordsText?.trim()) {
@@ -1929,8 +1928,8 @@
     body = DEFAULT_TWEET_BODY;
     extraTweets = [];
     draftName = null;
-    postName = freshPostName();
-    postTitle = postName;
+    postTitle = freshPostName();
+    postName = '';
     appliedPostTemplate = null;
     defaultDeclined = false;
     postRun += 1;
@@ -2506,7 +2505,8 @@
       {/if}
       {#if caseState.current}
         <input class="input title-input" bind:value={postName} onblur={commitName} onkeydown={nameKey}
-          maxlength="200" aria-label="Post name" title="Rename the post" />
+          maxlength="200" aria-label="Post name" placeholder="Name (optional)"
+          title="Name the post. Left empty, it is listed by its place and date" />
         {#if draftName}
           <button class="btn btn-ghost btn-sm post-more" aria-label="More for this post" title="More for this post"
             aria-haspopup="menu" aria-expanded={!!postMenu} onclick={(event) => (postMenu = postMenu ? null : event.currentTarget)}>
@@ -2574,7 +2574,7 @@
   {#if postMenu && draftName}
     <FloatingMenu anchor={postMenu} width={200} label="This post" onclose={() => (postMenu = null)}>
       <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored"
-        onclick={() => { postMenu = null; askDelete({ name: draftName, title: postTitle, proof: geolocation ? proofPng : null }); }}>
+        onclick={() => { postMenu = null; askDelete({ name: draftName, title: draftTitle(), proof: geolocation ? proofPng : null }); }}>
         <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
     </FloatingMenu>
   {/if}

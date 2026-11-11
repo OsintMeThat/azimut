@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   byListedDate, draftLine, draftPicture, draftPill, draftState, filterPosts, findDrafts, homeDrafts, isPosted, listedWhen, postedOn,
   postFacets, postsWords,
-  readyToPost, recentDrafts, shortLink, threadVideos,
+  labelledDrafts, postLabel, readyToPost, recentDrafts, shortLink, threadVideos,
 } from './postHome.js';
 
 // An X status id for a known moment, as X makes them.
@@ -206,5 +206,43 @@ describe('the Open list', () => {
     expect(findDrafts(posts, `https://x.com/desk/status/${id}`).map((d) => d.name)).toEqual(['p1', id]);
     // words still search the names
     expect(names('bridge')).toEqual(['p1']);
+  });
+});
+
+describe('what a listed post is called', () => {
+  const now = new Date(2026, 10, 11);
+  const row = (extra = {}) => ({ name: 'Post 41', title: 'Post 41', kind: 'geolocation', created_at: '2026-10-01T12:00:00', ...extra });
+  const proofs = [
+    proof('p1', { place: 'Al Jawf, Yemen', when: '2026-11-09T06:40:00', points: [{ lat: 16.1, lon: 44.8 }] }),
+    slide('s2', 2, { place: 'Marib, Yemen', when: null, points: [{ lat: 15.4, lon: 45.3 }] }),
+    slide('s1', 1, { place: 'Sanaa, Yemen', when: '2026-11-05T09:00:00', points: [{ lat: 15.3, lon: 44.2 }] }),
+  ];
+
+  it('is the name the analyst gave it', () => {
+    expect(postLabel(row({ title: 'Harbour strike', place: 'Kherson, Ukraine' }), proofs, now)).toBe('Harbour strike');
+  });
+
+  it('is its #place and its #date, else its proof\'s place and date', () => {
+    expect(postLabel(row({ place: 'Kherson, Ukraine', when: '2026-11-08 06:40 UTC+2' }), proofs, now)).toBe('Kherson, Ukraine · 8 Nov');
+    expect(postLabel(row({ proof: 'proofs/p1.png' }), proofs, now)).toBe('Al Jawf, Yemen · 9 Nov');
+    // a video thread says its video's first place
+    expect(postLabel(row({ kind: 'video', video: 'media/clip.mp4' }), proofs, now)).toBe('Sanaa, Yemen · 5 Nov');
+  });
+
+  it('dates by the day it went out, else when it was made, when nothing says the event\'s', () => {
+    const out = { url: null, site: 'x', at: '2026-11-10T08:00:00' };
+    expect(postLabel(row({ place: 'Kherson, Ukraine', posted: out }), [], now)).toBe('Kherson, Ukraine · 10 Nov');
+    expect(postLabel(row({ place: 'Kherson, Ukraine' }), [], now)).toBe('Kherson, Ukraine · 1 Oct');
+  });
+
+  it('falls back to its point, else Untitled post', () => {
+    expect(postLabel(row({ coords: [15.47123, 45.32211] }), [], now)).toBe('15.4712, 45.3221 · 1 Oct');
+    expect(postLabel(row({ kind: 'free' }), [], now)).toBe('Untitled post');
+  });
+
+  it('is found by its label: a post with no name, by its place', () => {
+    const drafts = labelledDrafts([row({ place: 'Kherson, Ukraine' }), row({ name: 'Harbour', title: 'Harbour' })], [], now);
+    expect(findDrafts(drafts, 'kherson').map((one) => one.name)).toEqual(['Post 41']);
+    expect(filterPosts(drafts, { query: 'harb' }).map((one) => one.name)).toEqual(['Harbour']);
   });
 });
