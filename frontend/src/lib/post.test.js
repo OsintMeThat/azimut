@@ -12,7 +12,7 @@ import {
   POST_KINDS, STARTABLE_POST_KINDS, normalizePostKind, statedPostKind, postKind, tokensForKind,
   videoTitle, postTemplateKind, postStarters, defaultPostTemplate, templatesOfKind,
   startMediaPlan, replyTarget, replyIntentUrl, replyPostText, replyByDefault,
-  postedAddress, postedDay, postLinkLine, postState, postStateLabel, postFingerprint, POST_STATES, unpostedRecord,
+  postedAddress, postedDay, postedWhen, postLinkDate, postState, postStateLabel, postFingerprint, POST_STATES,
 } from './post.js';
 
 const full = {
@@ -933,43 +933,78 @@ describe('whether a post went out', () => {
     }
   });
 
-  it('reads a draft, an opened post, a posted one and one changed since', () => {
+  it('reads a draft, a posted one with or without its link, and one changed since', () => {
     expect(postState(undefined)).toBe('draft');
     expect(postState({})).toBe('draft');
-    expect(postState({ opened_at: '2026-11-10T10:00:00Z', site: 'x' })).toBe('opened');
+    // what an earlier build wrote on opening the site: never posted, so a draft
+    expect(postState({ opened_at: '2026-11-10T10:00:00Z', site: 'x' })).toBe('draft');
     expect(postState({ opened_at: '2026-11-10T10:00:00Z', url: 'https://x.com/a/status/1' })).toBe('posted');
+    expect(postState({ site: 'x', posted_at: '2026-11-10T10:00:00Z', mark: 'm' })).toBe('posted');
     expect(postState({ url: 'https://x.com/a/status/1', changed: true })).toBe('changed');
+    expect(postState({ site: 'bluesky', posted_at: '2026-11-10T10:00:00Z', changed: true })).toBe('changed');
     // a link that is no post is no posted post
-    expect(postState({ url: 'https://example.com', opened_at: '2026-11-10T10:00:00Z' })).toBe('opened');
+    expect(postState({ url: 'https://example.com', posted_at: '2026-11-10T10:00:00Z' })).toBe('draft');
   });
 
-  it('names each state, an opened one by its site', () => {
-    expect(POST_STATES.map((one) => one.id)).toEqual(['draft', 'opened', 'posted', 'changed']);
-    expect(postStateLabel('opened', 'bluesky')).toBe('Opened in Bluesky');
-    expect(postStateLabel('opened')).toBe('Opened in X');
+  it('names the three states', () => {
+    expect(POST_STATES.map((one) => one.id)).toEqual(['draft', 'posted', 'changed']);
+    expect(postStateLabel('posted')).toBe('Posted');
     expect(postStateLabel('changed')).toBe('Changed since posted');
+    expect(postStateLabel('opened')).toBe('Draft');
     expect(postStateLabel('nonsense')).toBe('Draft');
   });
 
-  it('says under the link field where the post stands, nothing for a draft', () => {
-    const out = { opened_at: '2026-11-10T10:00:00Z', site: 'x', url: 'https://bsky.app/profile/desk.bsky.social/post/3kabc', posted_at: '2026-11-11T09:30:00Z' };
-    expect(postLinkLine('draft', null)).toBe('');
-    expect(postLinkLine('opened', { site: 'bluesky' })).toBe("Opened in Bluesky · paste its link here once it's posted");
-    // the site is the link's own, whatever was opened
-    expect(postLinkLine('posted', out)).toBe('Posted on Bluesky · 11 Nov 2026');
-    expect(postLinkLine('posted', { url: 'https://x.com/a/status/1' })).toBe('Posted on X');
-    expect(postLinkLine('changed', out)).toBe('Changed since posted');
-    expect(postedDay('2026-01-02T23:59:00Z')).toBe('2 Jan 2026');
-    expect(postedDay('soon')).toBe('');
-    expect(postedDay(undefined)).toBe('');
+  it('says a post\'s day, the year only outside this one', () => {
+    const now = new Date(2026, 10, 11, 12);
+    expect(postedDay('2026-11-09T12:00:00Z', now)).toBe('9 Nov');
+    expect(postedDay('2025-01-02T12:00:00Z', now)).toBe('2 Jan 2025');
+    expect(postedDay('soon', now)).toBe('');
+    expect(postedDay(undefined, now)).toBe('');
   });
 
-  it('takes a wrong link back to an opened post, or to nothing', () => {
-    const out = { opened_at: '2026-11-10T10:00:00Z', site: 'x', url: 'https://x.com/a/status/1', posted_at: '2026-11-10T10:05:00Z', mark: 'm', changed: true };
-    expect(unpostedRecord(out)).toEqual({ opened_at: '2026-11-10T10:00:00Z', site: 'x' });
-    expect(unpostedRecord({ ...out, opened_at: undefined })).toBeNull();
-    expect(unpostedRecord({ opened_at: '2026-11-10T10:00:00Z', site: 'nowhere' })).toEqual({ opened_at: '2026-11-10T10:00:00Z' });
-    expect(unpostedRecord(null)).toBeNull();
+  describe('the day a post went out, read off its link', () => {
+    // ids made here for known moments, as each site makes them
+    const snowflake = (ms, low = 4095n) => (((BigInt(ms) - 1288834974657n) << 22n) | low).toString();
+    const tid = (ms, clock = 7n) => {
+      const alphabet = '234567abcdefghijklmnopqrstuvwxyz';
+      let value = ((BigInt(ms) * 1000n + 321n) << 10n) | clock;
+      let key = '';
+      for (let i = 0; i < 13; i += 1) {
+        key = alphabet[Number(value & 31n)] + key;
+        value >>= 5n;
+      }
+      return key;
+    };
+    const NINTH = Date.UTC(2026, 10, 9, 8, 30, 15, 250);
+    const FIRST_X = Date.UTC(2013, 2, 1, 0, 0, 0);
+
+    it('reads an X status id as a snowflake, to the millisecond', () => {
+      expect(postLinkDate(`https://x.com/desk/status/${snowflake(NINTH)}`)).toBe('2026-11-09T08:30:15.250Z');
+      expect(postLinkDate(`https://twitter.com/desk/status/${snowflake(FIRST_X, 0n)}?s=20`)).toBe('2013-03-01T00:00:00.000Z');
+    });
+
+    it('reads a Bluesky record key as a TID', () => {
+      expect(tid(NINTH)).toMatch(/^[2-7a-z]{13}$/);
+      expect(postLinkDate(`https://bsky.app/profile/desk.bsky.social/post/${tid(NINTH)}`)).toBe('2026-11-09T08:30:15.250Z');
+    });
+
+    it('answers nothing for a link that holds no day', () => {
+      for (const none of [
+        '', null, 'https://example.com/a/status/1', 'https://x.com/desk',
+        // an id from before the snowflakes, and one from after tomorrow
+        'https://x.com/desk/status/20', `https://x.com/desk/status/${snowflake(Date.UTC(2099, 0, 1))}`,
+        // a record key that is no TID: too short, a capital, its top bit set
+        'https://bsky.app/profile/desk.bsky.social/post/3kabc', `https://bsky.app/profile/desk.bsky.social/post/${tid(NINTH).toUpperCase()}`,
+        'https://bsky.app/profile/desk.bsky.social/post/zzzzzzzzzzzzz',
+      ]) expect(postLinkDate(none), String(none)).toBeNull();
+    });
+
+    it('is the post\'s date, else the moment it was marked', () => {
+      expect(postedWhen({ url: `https://x.com/desk/status/${snowflake(NINTH)}`, at: '2026-11-10T00:00:00Z' })).toBe('2026-11-09T08:30:15.250Z');
+      expect(postedWhen({ url: null, at: '2026-11-10T00:00:00Z' })).toBe('2026-11-10T00:00:00Z');
+      expect(postedWhen({ url: 'https://bsky.app/profile/desk.bsky.social/post/3kabc', at: '2026-11-10T00:00:00Z' })).toBe('2026-11-10T00:00:00Z');
+      expect(postedWhen(null)).toBeNull();
+    });
   });
 
   it('fingerprints what a post says, the same words the same print', () => {
@@ -981,6 +1016,11 @@ describe('whether a post went out', () => {
   it('says where it went out in the note Add to notes writes', () => {
     const note = postReportMarkdown({ title: 'T', posted: { url: 'https://x.com/a/status/1', at: '2026-11-10T10:05:00Z' } });
     expect(note).toContain('## Posted\n\n[On X, 2026-11-10](https://x.com/a/status/1)');
+    // marked posted with no link: where and when, nothing to follow
+    expect(postReportMarkdown({ title: 'T', posted: { url: null, site: 'bluesky', at: '2026-11-09T10:05:00Z' } }))
+      .toContain('## Posted\n\nOn Bluesky, 2026-11-09');
+    expect(postReportMarkdown({ title: 'T', posted: { url: 'https://example.com', site: 'x', at: '2026-11-09T10:05:00Z' } }))
+      .not.toContain('## Posted');
     expect(postReportMarkdown({ title: 'T' })).not.toContain('## Posted');
   });
 });

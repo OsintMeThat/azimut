@@ -190,60 +190,87 @@ export function postedAddress(text) {
 }
 
 /**
- * Where a post stands, from its draft's `publish` record: a **draft** written here, one
- * **opened** on the site (Publish, Reply or the extension's hand-off), one **posted** once
- * the analyst pasted its link, or **changed** since. A draft from before says nothing,
- * and is a draft. `api/drafts.py` reads the same record for the list.
+ * Where a post stands, from its draft's `publish` record: a **draft**, one **posted**
+ * once the analyst marked it so (with its link or without, `posted_at`), or **changed**
+ * since. A draft from before says nothing and is a draft, and so is one an earlier build
+ * only opened the site with (`opened_at`). `api/drafts.py` reads the same record.
  */
 export function postState(publish) {
   if (!publish || typeof publish !== 'object') return 'draft';
-  if (postedAddress(publish.url)) return publish.changed === true ? 'changed' : 'posted';
-  return typeof publish.opened_at === 'string' && publish.opened_at ? 'opened' : 'draft';
+  const linked = postedAddress(publish.url);
+  if (publish.url != null && !linked) return 'draft';
+  const marked = typeof publish.posted_at === 'string' && publish.posted_at;
+  if (!linked && !marked) return 'draft';
+  return publish.changed === true ? 'changed' : 'posted';
 }
 
 /** The words a state goes by, on a card's pill and in the Open list's filter. */
 export const POST_STATES = Object.freeze([
   { id: 'draft', label: 'Draft' },
-  { id: 'opened', label: 'Opened' },
   { id: 'posted', label: 'Posted' },
   { id: 'changed', label: 'Changed since posted' },
 ].map((state) => Object.freeze(state)));
 
-/** A state as a pill says it: *Opened in X* names the site it was opened on. */
-export function postStateLabel(state, site) {
-  if (state === 'opened') return `Opened in ${postTarget(site).label}`;
+/** A state as a pill says it. */
+export function postStateLabel(state) {
   return (POST_STATES.find((one) => one.id === state) ?? POST_STATES[0]).label;
+}
+
+// X's ids count milliseconds from its own epoch in their top bits (a snowflake), and a
+// Bluesky record key is a TID: base32-sortable, microseconds since 1970 in its top bits.
+const X_EPOCH = 1288834974657n;
+const TID_ALPHABET = '234567abcdefghijklmnopqrstuvwxyz';
+// Before the first snowflake an id says nothing of its day; after tomorrow it is no post's.
+const FIRST_DAY = Date.UTC(2010, 10, 5);
+
+/**
+ * The moment a post went out, read off its own link with no network: an X status id or a
+ * Bluesky TID holds it. An ISO string, or null for a link that holds none (a Bluesky
+ * record key that is no TID, an id from before X's snowflakes, anything else).
+ */
+export function postLinkDate(url, now = Date.now()) {
+  const found = postAddress(String(url ?? ''));
+  if (!found) return null;
+  let ms = null;
+  if (found.site === 'x') {
+    ms = Number((BigInt(found.id) >> 22n) + X_EPOCH);
+  } else if (/^[2-7a-z]{13}$/.test(found.id) && TID_ALPHABET.indexOf(found.id[0]) < 16) {
+    let value = 0n;
+    for (const char of found.id) value = (value << 5n) | BigInt(TID_ALPHABET.indexOf(char));
+    ms = Number((value >> 10n) / 1000n);
+  }
+  if (ms === null || ms < FIRST_DAY || ms > now + 86_400_000) return null;
+  return new Date(ms).toISOString();
+}
+
+/** When a post went out: its link's own date, else the moment it was marked posted. */
+export function postedWhen(posted) {
+  return postLinkDate(posted?.url) ?? (typeof posted?.at === 'string' && posted.at ? posted.at : null);
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** The day a post went out, as its line says it (*11 Nov 2026*), or '' when it says none. */
-export function postedDay(iso) {
+/** A post's day as its pill and its card say it, on this machine's clock: *9 Nov*, the year added outside this one. '' when it says none. */
+export function postedDay(iso, now = new Date()) {
   const at = new Date(String(iso ?? ''));
   if (!iso || Number.isNaN(at.getTime())) return '';
-  return `${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]} ${at.getUTCFullYear()}`;
+  const day = `${at.getDate()} ${MONTHS[at.getMonth()]}`;
+  return at.getFullYear() === now.getFullYear() ? day : `${day} ${at.getFullYear()}`;
 }
 
 /**
- * The quiet line under a post's link field, from where it stands (`postState`): nothing
- * for a draft, the site it was opened in while its link is awaited, where and when it
- * went out, or that it changed since.
+ * A proof's `posted` record (`api/drafts.py`) as its Details list it: each post's site, its
+ * day and its link when it has one. An entry whose link is no post is left out.
  */
-export function postLinkLine(state, publish) {
-  if (state === 'opened') return `Opened in ${postTarget(publish?.site).label} · paste its link here once it's posted`;
-  if (state === 'changed') return 'Changed since posted';
-  if (state !== 'posted') return '';
-  const day = postedDay(publish?.posted_at);
-  return `Posted on ${postTarget(postedAddress(publish?.url)?.site).label}${day ? ` · ${day}` : ''}`;
-}
-
-/**
- * A `publish` record once its link is taken back, the link having been wrong: opened
- * again when the site was opened with it, else nothing at all.
- */
-export function unpostedRecord(publish) {
-  if (typeof publish?.opened_at !== 'string' || !publish.opened_at) return null;
-  return { opened_at: publish.opened_at, ...(Object.hasOwn(POST_TARGETS, publish.site) ? { site: publish.site } : {}) };
+export function proofPostLines(entries, now = new Date()) {
+  return (Array.isArray(entries) ? entries : []).flatMap((one) => {
+    if (!one || typeof one !== 'object') return [];
+    const out = postedAddress(one.url);
+    if (one.url != null && !out) return [];
+    const site = out?.site ?? (Object.hasOwn(POST_TARGETS, one.site) ? one.site : null);
+    if (!site) return [];
+    return [{ site, url: out?.url ?? null, day: postedDay(postedWhen({ url: out?.url, at: one.at }), now) }];
+  });
 }
 
 /**
@@ -382,11 +409,12 @@ export function postReportMarkdown({
   }
   if (clean(description)) sections.push(`## Assessment\n\n${clean(description)}`);
   if (clean(source)) sections.push(`## Source\n\n${sourceSection(source)}`);
-  // where the post went out, once the analyst said it did
+  // where the post went out, once the analyst said it did, its link when they gave one
   const out = postedAddress(posted?.url);
-  if (out) {
-    const day = /^\d{4}-\d{2}-\d{2}/.exec(clean(posted.at))?.[0];
-    sections.push(`## Posted\n\n[On ${postTarget(out.site).label}${day ? `, ${day}` : ''}](${out.url})`);
+  if (out || (posted && posted.url == null && Object.hasOwn(POST_TARGETS, posted.site))) {
+    const day = /^\d{4}-\d{2}-\d{2}/.exec(clean(postedWhen(posted)))?.[0];
+    const said = `On ${postTarget(out?.site ?? posted.site).label}${day ? `, ${day}` : ''}`;
+    sections.push(`## Posted\n\n${out ? `[${said}](${out.url})` : said}`);
   }
   const mediaByPath = new Map(
     mediaEntities

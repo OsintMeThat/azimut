@@ -13,7 +13,7 @@ import { matchesTerms } from '../../lib/folderBrowse.js';
 import { onVideo } from '../../lib/proofList.js';
 import { videoName } from '../../lib/proofScene.js';
 import {
-  normalizePostKind, POST_KINDS, POST_STATES, postKind, postStateLabel, postTarget, STARTABLE_POST_KINDS,
+  normalizePostKind, POST_KINDS, POST_STATES, postedDay, postedWhen, postKind, postStateLabel, postTarget, STARTABLE_POST_KINDS,
 } from '../../lib/post.js';
 
 /** How many drafts the home lists before "All N drafts". */
@@ -37,24 +37,34 @@ export const recentDrafts = (drafts, shown = DRAFTS_SHOWN) => (drafts ?? []).sli
 
 /** Where a listed draft stands, as `GET /drafts` says (`api/drafts.py`): a draft when it says nothing. */
 export function draftState(draft) {
-  return ['opened', 'posted', 'changed'].includes(draft?.state) ? draft.state : 'draft';
+  return ['posted', 'changed'].includes(draft?.state) ? draft.state : 'draft';
 }
 
-/** The pill a card wears: its state, an opened one naming the site it was opened on. */
+/** Whether a listed post went out, changed since or not: what Not posted is for. */
+export const isPosted = (draft) => draftState(draft) !== 'draft';
+
+/** The pill a card wears: its state. */
 export function draftPill(draft) {
   const state = draftState(draft);
-  return { state, label: postStateLabel(state, draft?.site ?? draft?.target) };
+  return { state, label: postStateLabel(state) };
 }
+
+/** When a listed post went out: its link's own date, else when it was marked (`postedWhen`). */
+const wentOut = (draft) => postedWhen(draft?.posted) ?? draft?.updated_at ?? '';
+
+/** The day a posted card says, *9 Nov*, read off its link when it can be. */
+export const postedOn = (draft, now = new Date()) => postedDay(wentOut(draft), now);
 
 /**
  * The home's two parts of drafts: **in progress**, what has not gone out or was changed
- * since, newest first as the list gives them; and **posted**, the latest to go out first.
+ * since, newest first as the list gives them; and **posted**, the latest to go out first,
+ * by the date its link holds, else the moment it was marked.
  */
 export function homeDrafts(drafts) {
   const progress = [];
   const posted = [];
   for (const draft of drafts ?? []) (draftState(draft) === 'posted' ? posted : progress).push(draft);
-  posted.sort((a, b) => String(b.posted?.at ?? b.updated_at ?? '').localeCompare(String(a.posted?.at ?? a.updated_at ?? '')));
+  posted.sort((a, b) => String(wentOut(b)).localeCompare(String(wentOut(a))));
   return { progress, posted };
 }
 

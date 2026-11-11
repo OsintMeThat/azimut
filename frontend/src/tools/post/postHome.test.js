@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  draftLine, draftPicture, draftPill, draftState, filterPosts, findDrafts, homeDrafts, postFacets, postsWords, readyToPost,
-  recentDrafts, shortLink,
+  draftLine, draftPicture, draftPill, draftState, filterPosts, findDrafts, homeDrafts, isPosted, postedOn, postFacets, postsWords,
+  readyToPost, recentDrafts, shortLink,
 } from './postHome.js';
+
+// An X status id for a known moment, as X makes them.
+const snowflake = (iso) => (((BigInt(Date.parse(iso)) - 1288834974657n) << 22n) | 9n).toString();
 
 const proof = (name, extra = {}) => ({ name, title: name, png: `proofs/${name}.png`, thumb: null, video: null, ...extra });
 const slide = (name, slideAt, extra = {}) => proof(name, { video: 'media/clip.mp4', video_title: 'Convoy', slide: slideAt, slides: 3, order: slideAt - 1, ...extra });
@@ -77,26 +80,34 @@ describe('readyToPost — what has no post yet', () => {
 describe('where each post stands', () => {
   const at = (name, state, extra = {}) => ({ name, title: name, state, target: 'x', ...extra });
 
-  it('reads a state the list gives, and a draft for anything else', () => {
+  it('reads a state the list gives, and a draft for anything else, an opened one included', () => {
     expect(['draft', 'opened', 'posted', 'changed', undefined, 'gone'].map((state) => draftState({ state })))
-      .toEqual(['draft', 'opened', 'posted', 'changed', 'draft', 'draft']);
+      .toEqual(['draft', 'draft', 'posted', 'changed', 'draft', 'draft']);
+    expect(['draft', 'posted', 'changed'].map((state) => isPosted({ state }))).toEqual([false, true, true]);
   });
 
-  it('wears a pill, an opened post naming the site it was opened on', () => {
-    expect(draftPill(at('a', 'opened', { site: 'bluesky' }))).toEqual({ state: 'opened', label: 'Opened in Bluesky' });
-    expect(draftPill(at('a', 'opened'))).toEqual({ state: 'opened', label: 'Opened in X' });
+  it('wears one of three pills, and never an Opened one', () => {
+    expect(draftPill(at('a', 'opened', { site: 'bluesky' }))).toEqual({ state: 'draft', label: 'Draft' });
+    expect(draftPill(at('a', 'posted')).label).toBe('Posted');
     expect(draftPill(at('a', 'changed')).label).toBe('Changed since posted');
     expect(draftPill({}).label).toBe('Draft');
   });
 
-  it('splits in progress from posted, the latest to go out first', () => {
+  it('splits in progress from posted, the latest to go out first by the day its link holds', () => {
     const drafts = [
-      at('d', 'draft'), at('p1', 'posted', { posted: { at: '2026-11-08T10:00:00Z' } }), at('o', 'opened'),
-      at('p2', 'posted', { posted: { at: '2026-11-10T10:00:00Z' } }), at('c', 'changed'),
+      at('d', 'draft'),
+      // marked last, but its link says it went out first
+      at('p1', 'posted', { posted: { url: `https://x.com/desk/status/${snowflake('2025-01-05T10:00:00Z')}`, at: '2026-11-10T10:00:00Z' } }),
+      at('o', 'opened'),
+      at('p2', 'posted', { posted: { url: null, site: 'x', at: '2026-11-08T10:00:00Z' } }),
+      at('p3', 'posted', { posted: { url: `https://x.com/desk/status/${snowflake('2026-02-01T10:00:00Z')}`, at: '2026-02-03T10:00:00Z' } }),
+      at('c', 'changed'),
     ];
     const { progress, posted } = homeDrafts(drafts);
     expect(progress.map((d) => d.name)).toEqual(['d', 'o', 'c']);
-    expect(posted.map((d) => d.name)).toEqual(['p2', 'p1']);
+    expect(posted.map((d) => d.name)).toEqual(['p2', 'p3', 'p1']);
+    const now = new Date(2026, 10, 11, 12);
+    expect(posted.map((d) => postedOn(d, now))).toEqual(['8 Nov', '1 Feb', '5 Jan 2025']);
     expect(shortLink('https://x.com/a/status/1')).toBe('x.com/a/status/1');
   });
 });
@@ -105,14 +116,14 @@ describe('the Open list', () => {
   const drafts = [
     { name: 'a', title: 'Convoy east', kind: 'geolocation', state: 'posted' },
     { name: 'b', title: 'Depot fire', kind: 'free', state: 'draft' },
-    { name: 'c', title: 'Convoy west', state: 'opened' },
+    { name: 'c', title: 'Convoy west', state: 'changed' },
     { name: 'd', title: 'Front plate', kind: 'plate', state: 'posted' },
   ];
 
   it('offers the kinds and the states its posts hold, counted, in their own order', () => {
     expect(postFacets(drafts)).toEqual({
       kinds: [{ id: 'geolocation', label: 'Geolocation', count: 2 }, { id: 'plate', label: 'Map plate', count: 1 }, { id: 'free', label: 'Free post', count: 1 }],
-      states: [{ id: 'draft', label: 'Draft', count: 1 }, { id: 'opened', label: 'Opened', count: 1 }, { id: 'posted', label: 'Posted', count: 2 }],
+      states: [{ id: 'draft', label: 'Draft', count: 1 }, { id: 'posted', label: 'Posted', count: 2 }, { id: 'changed', label: 'Changed since posted', count: 1 }],
     });
     expect(postFacets([])).toEqual({ kinds: [], states: [] });
   });
@@ -123,6 +134,8 @@ describe('the Open list', () => {
     expect(names({ kind: 'geolocation' })).toEqual(['a', 'c']);
     expect(names({ state: 'posted' })).toEqual(['a', 'd']);
     expect(names({ kind: 'geolocation', state: 'posted' })).toEqual(['a']);
-    expect(names({ query: 'convoy', state: 'opened' })).toEqual(['c']);
+    expect(names({ query: 'convoy', state: 'changed' })).toEqual(['c']);
+    // an earlier build's opened post is a draft, and filters as one
+    expect(filterPosts([{ name: 'o', title: 'Old', state: 'opened' }], { state: 'draft' }).map((d) => d.name)).toEqual(['o']);
   });
 });

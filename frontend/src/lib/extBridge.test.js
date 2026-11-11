@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   extensionVersion, extensionOutdated, captureTab, handOffPost, handOffReverse, onActivated,
   extensionState, pingExtensions, reloadExtension, onBridgeHello, mapLinkRelay, onSceneProof, sceneHandoff,
-  onPairingAsked,
+  onPairingAsked, onPostLinkCaught, onPostHandoffReport, MAX_REPORT_ERROR, MAX_REPORT_TEXT,
 } from './extBridge.js';
 
 // The bridge protocol is the app's only path to widget pixels, so what these
@@ -510,5 +510,95 @@ describe('onSceneProof', () => {
     for (const scene of [null, 'x', { ...SCENE, caseId: null }, { ...SCENE, video: 'v'.repeat(1025) }, { ...SCENE, draft: {} }]) {
       expect(sceneHandoff(scene)).toBe(null);
     }
+  });
+});
+
+// What the extension's bridge posts about a thread it handed out: forged here, each the
+// way a page or another extension could post it, so only the bridge's own shape passes.
+function forged(message, { origin = window.location.origin, channel = 'azimut-capture-ext' } = {}) {
+  window.dispatchEvent(new MessageEvent('message', { data: { channel, ...message }, origin }));
+}
+
+describe('onPostLinkCaught', () => {
+  const CAUGHT = {
+    type: 'post-link-caught', caseId: 'case-1', draft: 'Post 38',
+    url: 'https://x.com/desk/status/1850000000000000009', site: 'x', at: '2026-11-11T09:00:00Z',
+  };
+  let heard;
+  let off;
+  afterEach(() => off?.());
+  const listen = () => {
+    heard = [];
+    off = onPostLinkCaught((link) => heard.push(link));
+  };
+
+  it('passes on a post\'s link, written the one way, with the case and the draft it names', () => {
+    listen();
+    forged(CAUGHT);
+    forged({ ...CAUGHT, url: 'https://twitter.com/desk/status/1850000000000000009?s=20' });
+    forged({ ...CAUGHT, url: 'https://bsky.app/profile/desk.bsky.social/post/3kabc', site: 'bluesky', at: 1762851600000 });
+    expect(heard).toEqual([
+      { caseId: 'case-1', draft: 'Post 38', url: CAUGHT.url, site: 'x', at: CAUGHT.at },
+      { caseId: 'case-1', draft: 'Post 38', url: CAUGHT.url, site: 'x', at: CAUGHT.at },
+      { caseId: 'case-1', draft: 'Post 38', url: 'https://bsky.app/profile/desk.bsky.social/post/3kabc', site: 'bluesky', at: 1762851600000 },
+    ]);
+  });
+
+  it('hears nothing from another origin, another channel, or once unsubscribed', () => {
+    listen();
+    forged(CAUGHT, { origin: 'https://evil.example' });
+    forged(CAUGHT, { channel: 'someone-else' });
+    off();
+    forged(CAUGHT);
+    expect(heard).toEqual([]);
+  });
+
+  it('drops a message of the wrong shape, and a link that is no post', () => {
+    listen();
+    for (const bad of [
+      { url: 'https://example.com/desk/status/1' },
+      { url: 'https://x.com/desk' },
+      { url: 'javascript:alert(1)' },
+      { url: 42 },
+      { url: `https://x.com/desk/status/1?${'a'.repeat(400)}` },
+      { site: 'bluesky' },
+      { site: 'mastodon' },
+      { caseId: '' },
+      { caseId: 7 },
+      { draft: null },
+      { draft: 'd'.repeat(201) },
+      { type: 'post-link' },
+    ]) forged({ ...CAUGHT, ...bad });
+    expect(heard).toEqual([]);
+  });
+});
+
+describe('onPostHandoffReport', () => {
+  const REPORT = { type: 'post-handoff-report', caseId: 'case-1', draft: 'Post 38', error: 'The composer did not open.', report: 'tab 3: no composer after 20 s' };
+  let heard;
+  let off;
+  afterEach(() => off?.());
+  const listen = () => {
+    heard = [];
+    off = onPostHandoffReport((report) => heard.push(report));
+  };
+
+  it('passes on the sentence and the report, each cut to its bound', () => {
+    listen();
+    forged(REPORT);
+    forged({ ...REPORT, error: 'e'.repeat(MAX_REPORT_ERROR + 50), report: 'r'.repeat(MAX_REPORT_TEXT + 50), draft: undefined });
+    expect(heard[0]).toEqual({ caseId: 'case-1', draft: 'Post 38', error: REPORT.error, report: REPORT.report });
+    expect(heard[1].error).toHaveLength(MAX_REPORT_ERROR);
+    expect(heard[1].error.endsWith('…')).toBe(true);
+    expect(heard[1].report).toHaveLength(MAX_REPORT_TEXT);
+    expect(heard[1].draft).toBeNull();
+  });
+
+  it('hears nothing from another origin or channel, nor a report of the wrong shape', () => {
+    listen();
+    forged(REPORT, { origin: 'https://evil.example' });
+    forged(REPORT, { channel: 'someone-else' });
+    for (const bad of [{ error: '' }, { error: '  ' }, { error: 3 }, { report: { text: 'x' } }, { caseId: null }]) forged({ ...REPORT, ...bad });
+    expect(heard).toEqual([]);
   });
 });
