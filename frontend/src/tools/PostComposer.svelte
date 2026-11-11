@@ -464,6 +464,9 @@
   function newThread(video = null) {
     const layout = videoLayout();
     return {
+      // `#video`: the analyst's title for the thread, empty until they give one. An older
+      // draft holds none (null), and its `#video` says the video's title in Media as it did.
+      title: '',
       video, order: layout.order, texts: { video: layout.video, place: layout.place }, first: null, extra: [],
       sheet: null, clip: null, link: false, slides: null, left: [], seconds: null, facts: {}, cut: 0, sheetState: '',
       // the recap and the video's text each order was left with in this post, and the
@@ -479,6 +482,7 @@
     const path = (value) => (typeof value === 'string' && value ? value : null);
     return {
       ...newThread(path(s.video)),
+      title: typeof s.title === 'string' ? s.title : null,
       order: layout.order,
       texts: { video: layout.video, place: layout.place },
       first: typeof s.first === 'string' ? s.first : null,
@@ -493,6 +497,7 @@
   function threadRecord() {
     return {
       video: thread.video,
+      ...(thread.title !== null ? { title: thread.title } : {}),
       order: thread.order,
       posts: [{ role: 'video', body: thread.texts.video }, { role: 'place', body: thread.texts.place }],
       ...(thread.first ? { first: thread.first } : {}),
@@ -542,10 +547,20 @@
     await Promise.all([fileSheetIfShown(), readPlaceFacts()]);
   }
 
+  /** What `#video` says: the thread's title, or an older draft's video title in Media. */
+  const threadTitle = () => thread.title ?? titleByPath.get(thread.video) ?? '';
+
+  /** The thread's title typed: the posts not rewritten by hand say it at once. */
+  function setThreadTitle(text) {
+    if (!thread) return;
+    thread.title = text;
+    rewriteThread();
+  }
+
   /** The thread as `lib/videoPost.js` writes it, from what the composer holds. */
   function threadInput() {
     return {
-      video: { path: thread.video, title: titleByPath.get(thread.video) ?? '' },
+      video: { path: thread.video, title: threadTitle() },
       slides: thread.slides ?? [],
       layout: { order: thread.order, recap: body, video: thread.texts.video, place: thread.texts.place },
       common: { mention, source },
@@ -669,7 +684,7 @@
     const run = postRun;
     thread.sheetState = 'making';
     try {
-      const path = await fileThreadSheet(caseId, { video: thread.video, title: titleByPath.get(thread.video) ?? '', slides: thread.slides });
+      const path = await fileThreadSheet(caseId, { video: thread.video, slides: thread.slides });
       if (run !== postRun || !thread) return;
       thread.sheet = path;
       thread.sheetState = '';
@@ -2650,6 +2665,7 @@
           <!-- the video, its places, the order, and what goes when the video is too long -->
           <div class="field">
             <VideoThreadPanel title={thread.video ? videoName(thread.video, titleByPath.get(thread.video)) : ''}
+              threadTitle={threadTitle()} ontitle={setThreadTitle}
               places={thread.slides} left={thread.left} cut={thread.cut} order={thread.order} onorder={setThreadOrder}
               sheet={thread.sheetState} onsheet={fileSheetIfShown} over={threadOver} clip={thread.clip} link={thread.link}
               href={source.trim()} onclip={setThreadClip} onlink={setThreadLink} />

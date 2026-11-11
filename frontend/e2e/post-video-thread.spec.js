@@ -43,7 +43,8 @@ const MEDIA = [
   { path: 'media/lone.mp4', filename: 'lone.mp4', title: 'Lone clip', kind: 'video', size: 1_000_000, sha256: '2'.repeat(64),
     source: { type: 'upload' }, thumbnail: null, folder: '' },
 ];
-const RECAP = 'Convoy on the coast road\n\n1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n\n@GeoConfirmed';
+// no title until the analyst gives one: the recap opens on its places
+const RECAP = '1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n\n@GeoConfirmed';
 
 /** The reads a thread makes beyond the shared fixture, and the sheet it files. */
 async function threadRoutes(page) {

@@ -21,7 +21,8 @@
  * and filed in the case when the thread is made, so it has no path here. Neither X nor
  * Bluesky puts a video and pictures in one post (`lib/videoLimits.js`), so the sheet
  * and the video always go in posts of their own: Recap first opens on the sheet with
- * `#scenes`, both numbering the places the same way, and the video follows.
+ * `#scenes`, both numbering the places the same way, and the video follows. The sheet
+ * prints numbers and times, never a title: `#scenes` is its legend.
  *
  * **The time.** One formatter for every time a post prints (`timecode`): an instant
  * `[0:15]`, a passage `[0:00–0:07]`, several side by side `[0:00–0:07] [1:05–1:12]`, and
@@ -142,7 +143,8 @@ function proofPiece(slide, video) {
 /**
  * The thread of one video in one order, as pieces.
  *
- * - `video`: `{ path, title }`, the video the slides are of, its title as Media gives it.
+ * - `video`: `{ path, title }`, the video the slides are of, and the thread's title (`#video`),
+ *   the analyst's own words, '' for none.
  * - `slides`: what `videoSlides` keeps, in the order to post them.
  * - `clip`: a case path to post in place of the whole video (a cut, `lib/postClip.js`), or null.
  * - `link`: the video goes out as its link rather than a file, so its post carries none.

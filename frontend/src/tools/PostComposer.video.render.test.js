@@ -64,7 +64,8 @@ const MEDIA = [
   { path: VIDEO, kind: 'video', title: 'Convoy on the coast road', size: 48_000_000, source: { type: 'download', url: SOURCE, webpage_url: SOURCE } },
   { path: 'media/lone.mp4', kind: 'video', title: 'Lone clip', size: 1_000_000, source: { type: 'upload' } },
 ];
-const RECAP = 'Convoy on the coast road\n\n1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n3. Hilltop village\n\n@GeoConfirmed';
+// a thread opens with no title: the analyst gives one, or its line drops
+const RECAP = '1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n3. Hilltop village\n\n@GeoConfirmed';
 const PLACES = [
   'The convoy crosses the road bridge south of the port\n[0:00–0:07]\n\n48.850000, 2.350000',
   'Port gate\n[0:15]\n\n48.860000, 2.360000',
@@ -115,6 +116,12 @@ const posts = () => [...target.querySelectorAll('.tweet-block')].map((block) => 
   text: block.querySelector('textarea')?.value ?? '',
 }));
 const toasts = () => uiState.toasts.map((t) => t.message);
+const titleField = () => panel().querySelector('.vt-field input');
+function typeTitle(text) {
+  titleField().value = text;
+  titleField().dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
 
 /** New post → Video thread → this video. */
 async function startFromGallery(title = 'Convoy on the coast road') {
@@ -310,6 +317,49 @@ describe('Recap first, as it opens', () => {
   });
 });
 
+describe('the thread\'s title', () => {
+  it('is empty until the analyst gives one, never the video\'s name, and its line comes and goes with it', async () => {
+    await startFromGallery();
+    expect(titleField().value).toBe('');
+    expect(titleField().placeholder).toMatch(/^Optional/);
+    expect(posts()[0].text).toBe(RECAP);
+    typeTitle('Convoy at dawn');
+    expect(posts()[0].text).toBe(`Convoy at dawn\n\n${RECAP}`);
+    await saved();
+    expect(draftWrites().at(-1)[1].state.title).toBe('Convoy at dawn');
+    // cleared, its line drops again
+    typeTitle('');
+    expect(posts()[0].text).toBe(RECAP);
+    await saved();
+    expect(draftWrites().at(-1)[1].state.title).toBe('');
+  });
+
+  it('a thread saved before it had one says the video\'s title, as it did', async () => {
+    lists.drafts = [{ name: 'Convoy', title: 'Convoy', target: 'x', kind: 'video', video: VIDEO, posts: 2 }];
+    lists.saved = { Convoy: { title: 'Convoy', state: {
+      kind: 'video', video: VIDEO, order: 'video', first: 'video', posts: VIDEO_THREAD_STARTERS[1].posts,
+      body: VIDEO_THREAD_STARTERS[1].body, mention: '@GeoConfirmed', source: SOURCE, target: 'x',
+      tweet1: `Convoy on the coast road\n\n@GeoConfirmed\n\nSource: ${SOURCE}`, tweet1Edited: false,
+      firstMedia: [VIDEO], firstMediaType: 'video', mediaEnabled: false, mediaType: 'none',
+      extraTweets: [{ text: PLACES[1], mediaPaths: ['proofs/gate.png'], mediaType: 'images', isMediaTweet: true, mediaTextIncludesPrefix: true, key: 'place:gate' }],
+    } } };
+    await mountPost();
+    home().querySelector('.ph-open').click();
+    await settle();
+    expect(titleField().value).toBe('Convoy on the coast road');
+    expect(posts()[0].text).toBe(`Convoy on the coast road\n\n@GeoConfirmed\n\nSource: ${SOURCE}`);
+    await saved();
+    expect(draftWrites()).toHaveLength(0);
+  });
+
+  it('prints on no picture: the sheet is asked for with the places alone', async () => {
+    await startFromGallery();
+    typeTitle('Convoy at dawn');
+    const [, asked] = sheets.file.mock.calls[0];
+    expect(Object.keys(asked).sort()).toEqual(['slides', 'video']);
+  });
+});
+
 describe('the order', () => {
   it('changes where each post goes and keeps the words written on one', async () => {
     await startFromGallery();
@@ -320,7 +370,7 @@ describe('the order', () => {
     button(panel(), 'Video first The video, then a post per place').click();
     await settle();
     expect(posts().map((p) => p.label)).toEqual(['Video', 'Road bridge', 'Port gate', 'Hilltop village']);
-    expect(posts()[0].text).toBe(`Convoy on the coast road\n\n@GeoConfirmed\n\nSource: ${SOURCE}`);
+    expect(posts()[0].text).toBe(`@GeoConfirmed\n\nSource: ${SOURCE}`);
     expect(posts()[2].text).toBe('The gate, as I say it');
     button(panel(), 'All in one One post with the places and their pictures').click();
     await settle();
@@ -339,6 +389,7 @@ describe('the order', () => {
     } }];
     prefs.postKindTemplates = { video: 'po_v' };
     await startFromGallery();
+    typeTitle('Convoy on the coast road');
     expect(posts().map((p) => p.text)).toEqual([
       'Convoy on the coast road by @Desk', '[0:00–0:07]', '[0:15]', '', 'Follow for more',
     ]);

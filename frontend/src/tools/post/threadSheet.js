@@ -7,9 +7,9 @@
 import { api } from '../../lib/api.js';
 import { buildProofSheet } from '../../lib/proofSheet.js';
 
-/** Draw and file the sheet of `slides`, titled with the video's name. Answers its case path. */
-export async function fileThreadSheet(caseId, { video, title = '', slides = [] }, { build = buildProofSheet, post = api.post } = {}) {
-  const blob = await build(slides, { caseId, video: title });
+/** Draw and file the sheet of `slides`, made from `video`. Answers its case path. */
+export async function fileThreadSheet(caseId, { video, slides = [] }, { build = buildProofSheet, post = api.post } = {}) {
+  const blob = await build(slides, { caseId });
   const form = new FormData();
   form.append('video', video);
   form.append('image', blob, 'contact-sheet.jpg');

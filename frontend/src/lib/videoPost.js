@@ -97,7 +97,7 @@ const typeOf = (media) => (media.some((one) => one.kind === 'video') ? 'video' :
  *
  * - `video`: `{ path, title }`; `slides`: the places to post, in order (`videoSlides`).
  * - `layout`: `videoLayout`'s; `common`: `{ mention, source }`, the source being the
- *   video's link (`videoLink`), and `#video` the title.
+ *   video's link (`videoLink`), and `#video` the thread's title, the analyst's.
  * - `sheet`: the contact sheet's case path once filed, else its post waits for it.
  * - `clip`: a clip to post in place of the whole video; `link`: the video goes as its link.
  * - `facts`: each place's address by proof name, once read (`placeFields`).
