@@ -8,12 +8,14 @@ const proof = (name, extra = {}) => ({ name, title: name, png: `proofs/${name}.p
 const slide = (name, slideAt, extra = {}) => proof(name, { video: 'media/clip.mp4', video_title: 'Convoy', slide: slideAt, slides: 3, order: slideAt - 1, ...extra });
 
 describe('what a draft card says', () => {
-  it('names its platform, its kind when it is not a geolocation, and its posts', () => {
+  it('names its platform, its kind when it is not a geolocation, and its posts when there are several', () => {
     expect(draftLine({ target: 'bluesky', kind: 'geolocation', posts: 3 })).toBe('Bluesky · 3 posts');
-    expect(draftLine({ target: 'x', kind: 'free', posts: 1 })).toBe('X · Free post · 1 post');
+    expect(draftLine({ target: 'x', kind: 'geolocation', posts: 2 })).toBe('X · 2 posts');
+    expect(draftLine({ target: 'bluesky', kind: 'free', posts: 1 })).toBe('Bluesky · Free post');
+    expect(draftLine({ target: 'x', kind: 'plate', posts: 4 })).toBe('X · Map plate · 4 posts');
     // a draft from before the list said these reads as an X geolocation of one post
-    expect(draftLine({})).toBe('X · 1 post');
-    expect(postsWords(0)).toBe('1 post');
+    expect(draftLine({})).toBe('X');
+    expect([0, 1, 2, 1.5, '3'].map(postsWords)).toEqual(['', '', '2 posts', '', '']);
   });
 
   it('shows its proof\'s thumbnail while the case lists that proof', () => {

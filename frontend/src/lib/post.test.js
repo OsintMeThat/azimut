@@ -12,7 +12,7 @@ import {
   POST_KINDS, STARTABLE_POST_KINDS, normalizePostKind, statedPostKind, postKind, tokensForKind,
   videoTitle, postTemplateKind, postStarters, defaultPostTemplate, templatesOfKind,
   startMediaPlan, replyTarget, replyIntentUrl, replyPostText, replyByDefault,
-  postedAddress, postState, postStateLabel, postFingerprint, POST_STATES,
+  postedAddress, postedDay, postLinkLine, postState, postStateLabel, postFingerprint, POST_STATES, unpostedRecord,
 } from './post.js';
 
 const full = {
@@ -949,6 +949,27 @@ describe('whether a post went out', () => {
     expect(postStateLabel('opened')).toBe('Opened in X');
     expect(postStateLabel('changed')).toBe('Changed since posted');
     expect(postStateLabel('nonsense')).toBe('Draft');
+  });
+
+  it('says under the link field where the post stands, nothing for a draft', () => {
+    const out = { opened_at: '2026-11-10T10:00:00Z', site: 'x', url: 'https://bsky.app/profile/desk.bsky.social/post/3kabc', posted_at: '2026-11-11T09:30:00Z' };
+    expect(postLinkLine('draft', null)).toBe('');
+    expect(postLinkLine('opened', { site: 'bluesky' })).toBe("Opened in Bluesky · paste its link here once it's posted");
+    // the site is the link's own, whatever was opened
+    expect(postLinkLine('posted', out)).toBe('Posted on Bluesky · 11 Nov 2026');
+    expect(postLinkLine('posted', { url: 'https://x.com/a/status/1' })).toBe('Posted on X');
+    expect(postLinkLine('changed', out)).toBe('Changed since posted');
+    expect(postedDay('2026-01-02T23:59:00Z')).toBe('2 Jan 2026');
+    expect(postedDay('soon')).toBe('');
+    expect(postedDay(undefined)).toBe('');
+  });
+
+  it('takes a wrong link back to an opened post, or to nothing', () => {
+    const out = { opened_at: '2026-11-10T10:00:00Z', site: 'x', url: 'https://x.com/a/status/1', posted_at: '2026-11-10T10:05:00Z', mark: 'm', changed: true };
+    expect(unpostedRecord(out)).toEqual({ opened_at: '2026-11-10T10:00:00Z', site: 'x' });
+    expect(unpostedRecord({ ...out, opened_at: undefined })).toBeNull();
+    expect(unpostedRecord({ opened_at: '2026-11-10T10:00:00Z', site: 'nowhere' })).toEqual({ opened_at: '2026-11-10T10:00:00Z' });
+    expect(unpostedRecord(null)).toBeNull();
   });
 
   it('fingerprints what a post says, the same words the same print', () => {

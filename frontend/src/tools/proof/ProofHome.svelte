@@ -108,7 +108,9 @@
           <div class="ph-cards" bind:clientWidth={cardsWidth}>
             {#each recent as entry (entry.name)}
               <button type="button" class="ph-card" onclick={() => onopen?.(entry)} title={`Open ${entry.title}`}>
-                <span class="ph-pic">
+                <!-- dark in both themes: a proof is drawn on its own dark ground, and a grey
+                     band beside it read as a frame in the light one -->
+                <span class="ph-pic dark-surface">
                   {#if entry.thumb || entry.png}
                     <img src={fileUrl(caseId, entry.thumb ?? entry.png)} alt="" loading="lazy" decoding="async" />
                   {:else}

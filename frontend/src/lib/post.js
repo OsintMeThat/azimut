@@ -215,6 +215,37 @@ export function postStateLabel(state, site) {
   return (POST_STATES.find((one) => one.id === state) ?? POST_STATES[0]).label;
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** The day a post went out, as its line says it (*11 Nov 2026*), or '' when it says none. */
+export function postedDay(iso) {
+  const at = new Date(String(iso ?? ''));
+  if (!iso || Number.isNaN(at.getTime())) return '';
+  return `${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]} ${at.getUTCFullYear()}`;
+}
+
+/**
+ * The quiet line under a post's link field, from where it stands (`postState`): nothing
+ * for a draft, the site it was opened in while its link is awaited, where and when it
+ * went out, or that it changed since.
+ */
+export function postLinkLine(state, publish) {
+  if (state === 'opened') return `Opened in ${postTarget(publish?.site).label} · paste its link here once it's posted`;
+  if (state === 'changed') return 'Changed since posted';
+  if (state !== 'posted') return '';
+  const day = postedDay(publish?.posted_at);
+  return `Posted on ${postTarget(postedAddress(publish?.url)?.site).label}${day ? ` · ${day}` : ''}`;
+}
+
+/**
+ * A `publish` record once its link is taken back, the link having been wrong: opened
+ * again when the site was opened with it, else nothing at all.
+ */
+export function unpostedRecord(publish) {
+  if (typeof publish?.opened_at !== 'string' || !publish.opened_at) return null;
+  return { opened_at: publish.opened_at, ...(Object.hasOwn(POST_TARGETS, publish.site) ? { site: publish.site } : {}) };
+}
+
 /**
  * A short fingerprint of what a post says and carries, kept when it is marked posted, so
  * an edit after that reads as *Changed since posted* (and going back reads as posted).

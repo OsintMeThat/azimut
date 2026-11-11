@@ -4,11 +4,13 @@
    * row shows its picture, its name, its kind, its platform, where it stands and when it
    * was last saved; a search and a filter by kind and by state narrow it once it holds
    * more than one of either (`postHome.js` `postFacets`, `filterPosts`). A press opens a
-   * post, and the bin asks to delete it, the composer holding the dialog.
+   * post, a posted one's copy button copies its link, and the bin asks to delete it, the
+   * composer holding the dialog.
    */
   import Modal from '../../components/Modal.svelte';
   import Icon from '../../components/Icon.svelte';
   import SearchInput from '../../components/SearchInput.svelte';
+  import { copyText } from '../../lib/clipboard.js';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { postKind, postTarget } from '../../lib/post.js';
   import { draftPicture, draftPill, filterPosts, postFacets } from './postHome.js';
@@ -40,6 +42,8 @@
     if (state && !facets.states.some((one) => one.id === state)) state = '';
   });
   const narrowing = $derived(drafts.length > 1);
+  // a posted row's copy button keeps its place on every row, so the pills line up
+  const copies = $derived(shown.some((draft) => draft.posted?.url));
 </script>
 
 <Modal title="Open a post" width="640px" {onclose}>
@@ -74,7 +78,7 @@
           {@const pill = draftPill(draft)}
           <div class="ol-row">
             <button type="button" class="ol-open" onclick={() => onopen?.(draft)} title={`Open ${draft.title}`}>
-              <span class="ol-pic">
+              <span class="ol-pic dark-surface">
                 {#if picture}
                   <img src={fileUrl(caseId, picture)} alt="" loading="lazy" decoding="async" />
                 {:else}
@@ -87,7 +91,15 @@
               </span>
               <span class="ol-pill {pill.state}">{pill.label}</span>
             </button>
-            <button type="button" class="btn btn-ghost btn-sm ol-del" aria-label={`Delete ${draft.title}`} title="Delete this post"
+            {#if draft.posted?.url}
+              <button type="button" class="btn btn-ghost btn-sm ol-act" aria-label={`Copy the link of ${draft.title}`} title="Copy the post's link"
+                onclick={() => copyText(draft.posted.url, { said: 'Link copied' })}>
+                <Icon name="copy" size={13} />
+              </button>
+            {:else if copies}
+              <span class="ol-act" aria-hidden="true"></span>
+            {/if}
+            <button type="button" class="btn btn-ghost btn-sm ol-act ol-del" aria-label={`Delete ${draft.title}`} title="Delete this post"
               onclick={() => ondelete?.(draft)}>
               <Icon name="trash" size={13} />
             </button>
@@ -130,7 +142,8 @@
     background: color-mix(in srgb, var(--bg-0) 70%, #000);
     color: var(--text-3);
   }
-  .ol-pic img { width: 100%; height: 100%; object-fit: cover; }
+  /* a picture as Post's and Geo Proof's homes show it: whole, on dark in both themes */
+  .ol-pic img { width: 100%; height: 100%; object-fit: contain; }
   .ol-words { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
   .ol-title { overflow: hidden; color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .ol-sub { overflow: hidden; color: var(--text-3); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
@@ -147,5 +160,6 @@
   .ol-pill.opened { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
   .ol-pill.posted { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
   .ol-pill.changed { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
-  .ol-del { flex: none; color: var(--danger); }
+  .ol-act { flex: none; justify-content: center; width: 28px; padding-inline: 0; color: var(--text-2); }
+  .ol-del { color: var(--danger); }
 </style>

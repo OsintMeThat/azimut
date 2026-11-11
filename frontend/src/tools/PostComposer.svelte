@@ -29,7 +29,7 @@
     defaultPostTemplate, normalizePostKind, postKind, postStarters, normPostTemplate,
     replyByDefault, replyIntentUrl, replyPostText, replyTarget, startMediaPlan,
     statedPostKind, templatesOfKind, videoTitle,
-    postedAddress, postFingerprint, postState,
+    postedAddress, postFingerprint, postLinkLine, postState, unpostedRecord,
   } from '../lib/post.js';
   import { extensionOutdated, extensionVersion, handOffPost } from '../lib/extBridge.js';
   import { bidiSafe } from '../lib/bidi.js';
@@ -433,7 +433,6 @@
     try {
       geo = await api.post('/api/geo/parse', { text: value });
       regenerate();
-      lookupPlace();
     } catch {
       // The old point does not survive text that no longer resolves to it.
       // Leaving it in place kept the facts card, the tweet, the copy buttons and
@@ -441,7 +440,10 @@
       geo = null;
       regenerate();
       toast('Could not parse coordinates', 'danger');
+      return;
     }
+    // waited for, so a post filled from a proof is whole when this returns
+    await lookupPlace();
   }
 
   async function lookupPlace() {
@@ -1003,16 +1005,17 @@
     };
   }
 
-  // ---- whether it went out --------------------------------------------------------
+  // ---- its link, once it is posted -------------------------------------------------
   // `publishState` is the draft's `publish` record (lib/post.js `postState`): when Publish,
   // Reply or the extension opened the site with it, and once the analyst pasted its link,
   // where it went out and when, with a print of the post as it was then (`mark`), so an
   // edit after it reads as changed since posted. Nothing of it is written before then.
   let publishState = $state(null);
-  // The quiet line under the header: asking whether it went out, or taking its link.
-  let wentOut = $state(null); // null | 'ask' | 'paste'
-  let pastedLink = $state('');
-  let pasteError = $state('');
+  // The link field at the top of every post: what it holds while it is written, taken
+  // on a paste, Enter or leaving it. Its text alone is never saved.
+  let linkText = $state('');
+  let linkError = $state('');
+  let linkEl = $state(null);
 
   // What the post says and carries, as its print reads it: its platform and a first
   // post rebuilt from the fields are not what changed.
@@ -1029,37 +1032,71 @@
   }
 
   const liveState = $derived(postState(publishState?.url ? publishRecord(threadState()) : publishState));
-  const postedSite = $derived(publishState?.url ? postTarget(postedAddress(publishState.url)?.site).label : '');
+  const linkLine = $derived(postLinkLine(liveState, publishState));
 
-  /** The site opened with the post: it is asked, quietly, whether it went out. */
+  /** The site opened with the post: the link field waits for its link. */
   function markOpened(site) {
     const now = new Date().toISOString();
     publishState = publishState?.url ? { ...publishState, opened_at: now } : { ...(publishState ?? {}), opened_at: now, site };
-    wentOut = 'ask';
-    pastedLink = '';
-    pasteError = '';
   }
 
-  /** The analyst's word that it went out, with the link it went out at. */
-  function markPosted() {
-    const found = postedAddress(pastedLink);
-    if (!found) {
-      pasteError = 'That is not the address of an X or Bluesky post.';
+  /**
+   * The link field taken: the analyst's word that the post went out, at the link it went
+   * out at. Another link replaces the one it held, an emptied field takes it back, and
+   * a link that is no X or Bluesky post is said so and kept nowhere.
+   */
+  function commitLink() {
+    const typed = linkText.trim();
+    if (!typed) {
+      linkError = '';
+      if (publishState?.url) clearLink({ focus: false });
       return;
     }
+    const found = postedAddress(typed);
+    if (!found) {
+      linkError = 'That is not the link of an X or Bluesky post.';
+      return;
+    }
+    linkError = '';
+    linkText = found.url;
+    if (found.url === publishState?.url) return;
     publishState = {
       ...(publishState ?? {}), site: found.site, url: found.url,
       posted_at: new Date().toISOString(), mark: postPrint(),
     };
-    wentOut = null;
-    pastedLink = '';
-    pasteError = '';
   }
 
-  function cancelPaste() {
-    wentOut = liveState === 'opened' ? 'ask' : null;
-    pastedLink = '';
-    pasteError = '';
+  /** × : the link was wrong. The post is opened again, or a draft, and its proof lets the link go. */
+  function clearLink({ focus = true } = {}) {
+    publishState = unpostedRecord(publishState);
+    linkText = '';
+    linkError = '';
+    if (focus) linkEl?.focus();
+  }
+
+  function linkKey(event) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitLink();
+    } else if (event.key === 'Escape') {
+      linkText = publishState?.url ?? '';
+      linkError = '';
+    }
+  }
+
+  /** A paste is taken at once, once the browser has put it in the field. */
+  function linkPasted() {
+    setTimeout(commitLink, 0);
+  }
+
+  function copyLink() {
+    if (publishState?.url) copyText(publishState.url, { said: 'Link copied' });
+  }
+
+  /** Focus the link field, for a post the analyst says is out already. */
+  async function focusLink() {
+    await tick();
+    linkEl?.focus();
   }
 
   // The note is titled after the post it is written from, so the two read as one piece
@@ -1260,10 +1297,8 @@
       postOpen = true;
       replyChosen = s.reply === true;
       publishState = s.publish && typeof s.publish === 'object' ? publishFrom(s.publish) : null;
-      // a post opened on the site and never said to have gone out is asked about again
-      wentOut = postState(publishState) === 'opened' ? 'ask' : null;
-      pastedLink = '';
-      pasteError = '';
+      linkText = publishState?.url ?? '';
+      linkError = '';
       description = s.description ?? '';
       coordsText = s.coordsText ?? '';
       place = s.place ?? '';
@@ -1353,9 +1388,8 @@
     replyChosen = false;
     beforeReply = null;
     publishState = null;
-    wentOut = null;
-    pastedLink = '';
-    pasteError = '';
+    linkText = '';
+    linkError = '';
     description = '';
     coordsText = '';
     geo = null;
@@ -1852,6 +1886,15 @@
     await pickProof(row);
   }
 
+  /**
+   * Already posted…: the same post, then the link field, once the proof has filled it in,
+   * so the link pasted is kept against the post as it went out.
+   */
+  async function postedFromHome(row) {
+    await postProofFromHome(row);
+    await focusLink();
+  }
+
   async function openFromHome(draft) {
     await requestLoadDraft(draft.name);
   }
@@ -1961,45 +2004,45 @@
     </FloatingMenu>
   {/if}
 
-  {#if !homeShown && (wentOut || liveState === 'posted' || liveState === 'changed')}
-    <!-- Whether the post went out: asked quietly once the site was opened with it, and
-         said once it is known. Nothing is ever posted from here. -->
-    <div class="went" class:asking={wentOut} role="status">
-      {#if wentOut === 'ask'}
-        <Icon name="post" size={13} />
-        <span class="went-words">It went out?</span>
-        <button class="btn btn-ghost btn-xs" onclick={() => (wentOut = 'paste')}>Yes, paste its link</button>
-        <button class="btn btn-ghost btn-xs" onclick={() => (wentOut = null)}>Not yet</button>
-      {:else if wentOut === 'paste'}
-        <Icon name="link" size={13} />
-        <form class="went-paste" onsubmit={(event) => { event.preventDefault(); markPosted(); }}>
-          <!-- svelte-ignore a11y_autofocus -->
-          <input class="input" bind:value={pastedLink} oninput={() => (pasteError = '')} autofocus
-            placeholder="https://x.com/you/status/…" aria-label="The post's address" aria-invalid={!!pasteError}
-            title="The address of the post on X or Bluesky, as the browser shows it" />
-          <button class="btn btn-primary btn-xs" disabled={!pastedLink.trim()}>Mark as posted</button>
-          <button type="button" class="btn btn-ghost btn-xs" onclick={cancelPaste}>Cancel</button>
-        </form>
-        {#if pasteError}<span class="went-error">{pasteError}</span>{/if}
-      {:else}
-        <Icon name={liveState === 'changed' ? 'edit' : 'check'} size={13} />
-        <span class="went-words">{`${liveState === 'changed' ? 'Changed since posted on' : 'Posted on'} ${postedSite}`}{publishState?.posted_at ? ` · ${publishState.posted_at.slice(0, 10)}` : ''}</span>
-        <a class="went-link" href={publishState.url} target="_blank" rel="noreferrer" title="Open the post">{publishState.url.replace(/^https:\/\//, '')}</a>
-        <button class="btn btn-ghost btn-xs" onclick={() => (wentOut = 'paste')}>Change link</button>
-      {/if}
-    </div>
-  {/if}
-
   {#if homeShown}
   <div class="tool-body home-body">
     <PostHome caseId={caseState.current?.id ?? ''} drafts={caseDrafts} proofs={caseProofs} media={mediaByPath}
-      onnew={openGallery} onopen={openFromHome} onall={openDraftList} onproof={postProofFromHome} ondelete={askDelete} />
+      onnew={openGallery} onopen={openFromHome} onall={openDraftList} onproof={postProofFromHome} onposted={postedFromHome}
+      ondelete={askDelete} />
   </div>
   {:else}
   <div class="tool-body">
     <div class="layout">
       <!-- left column: ingredients -->
       <div class="col" data-guide="post.ingredients">
+        <!-- Its link once it is posted, on every post: the analyst's word that it went
+             out, since nothing is read from the site. -->
+        <div class="field">
+          <label class="label" for="pc-link">Link to your post</label>
+          <div class="field-with-act post-link" class:awaited={liveState === 'opened' && !linkError} class:invalid={!!linkError}>
+            <input id="pc-link" class="input" bind:this={linkEl} bind:value={linkText}
+              oninput={() => (linkError = '')} onpaste={linkPasted} onkeydown={linkKey} onblur={commitLink}
+              placeholder="Paste it once it's posted" spellcheck="false" autocomplete="off"
+              aria-invalid={!!linkError} aria-describedby={linkError || linkLine ? 'pc-link-said' : undefined} />
+            {#if publishState?.url}
+              <button type="button" class="link-clear" aria-label="Clear the link" title="Clear the link" onclick={() => clearLink()}>
+                <Icon name="x" size={12} />
+              </button>
+              <button type="button" class="field-act" aria-label="Copy the link" title="Copy the link" onclick={copyLink}>
+                <Icon name="copy" size={13} />
+              </button>
+              <a class="field-act link-open" href={publishState.url} target="_blank" rel="noreferrer" aria-label="Open the post" title="Open the post">
+                <Icon name="external" size={13} />
+              </a>
+            {/if}
+          </div>
+          {#if linkError}
+            <p class="field-note link-said invalid" id="pc-link-said" role="alert">{linkError}</p>
+          {:else if linkLine}
+            <p class="field-note link-said" class:changed={liveState === 'changed'} id="pc-link-said">{linkLine}</p>
+          {/if}
+        </div>
+
         <div class="field">
           <span class="label">Publish target</span>
           <div class="target-tabs" aria-label="Publish target">
@@ -2743,36 +2786,6 @@
   }
   .save-status.error { color: var(--danger); }
   .modal-lead { margin: 0 0 14px; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.5; }
-  /* the quiet line under the header: whether the post went out */
-  .went {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: none;
-    min-width: 0;
-    padding: 6px 20px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-1);
-    color: var(--text-2);
-    font-size: var(--fs-xs);
-  }
-  .went.asking { background: color-mix(in srgb, var(--accent) 7%, var(--bg-1)); }
-  .went > :global(svg) { flex: none; color: var(--text-3); }
-  .went.asking > :global(svg) { color: var(--accent); }
-  .went-words { flex: none; color: var(--text-1); font-weight: 600; }
-  .went-link {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--text-2);
-    font-family: var(--font-mono);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .went-link:hover { color: var(--accent); }
-  .went-paste { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; max-width: 620px; }
-  .went-paste .input { flex: 1; min-width: 0; height: 26px; font-size: var(--fs-xs); font-family: var(--font-mono); }
-  .went-paste .input[aria-invalid='true'] { border-color: var(--danger); }
-  .went-error { flex: none; color: var(--danger); }
   .ext-quiet {
     color: var(--text-3);
     font-size: var(--fs-xs);
@@ -2874,6 +2887,24 @@
     line-height: 1.4;
   }
   .field-note { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--text-3); }
+  /* the link field: waiting in the accent once the site was opened, red on a wrong link */
+  .post-link.awaited { border-color: var(--accent); }
+  .post-link.invalid { border-color: var(--danger); }
+  .post-link .input { text-overflow: ellipsis; }
+  .link-clear {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 24px;
+    color: var(--text-3);
+  }
+  .link-clear:hover { color: var(--text-1); }
+  .post-link .field-act { border-radius: 0; }
+  .post-link .field-act:last-child { border-radius: 0 3px 3px 0; }
+  .link-open { text-decoration: none; }
+  .link-said { color: var(--text-2); }
+  .link-said.changed { color: var(--warn); }
+  .link-said.invalid { color: var(--danger); }
   .reply-check {
     display: flex;
     align-items: center;

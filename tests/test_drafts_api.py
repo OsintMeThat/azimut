@@ -386,5 +386,35 @@ def test_a_posted_link_goes_on_the_proof_and_follows_the_draft(client):
     assert [one["url"] for one in _proof_entity(cid, png)["attrs"]["posted"]] == [fixed]
 
 
+def test_a_link_taken_back_leaves_the_proof(client):
+    """Clearing the link field means the link was wrong: the draft goes back to opened (or
+    says nothing), and its link leaves the proof's record while another post's stays."""
+    cid = client.post("/api/cases", json={"name": "Taken back"}).json()["id"]
+    path = mediafixture._upload(client, cid, "pic.png")
+    mediafixture._save_proof(client, cid, "Bridge", [path])
+    png = "proofs/Bridge.png"
+    other = "https://x.com/someone/status/1850000000000000003"
+    first = {"proofPng": png, "publish": {"site": "x", "url": other, "posted_at": "2026-11-09T09:00:00Z", "mark": "m0"}}
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Other post", "state": first})
+
+    opened = {"opened_at": "2026-11-10T10:00:00Z", "site": "x"}
+    out = {"proofPng": png, "publish": {**opened, "url": POSTED_X, "posted_at": "2026-11-10T10:05:00Z", "mark": "m1"}}
+    saved = client.post(f"/api/cases/{cid}/drafts", json={"title": "Bridge post", "state": out}).json()
+    assert [one["url"] for one in _proof_entity(cid, png)["attrs"]["posted"]] == [other, POSTED_X]
+
+    back = {"proofPng": png, "publish": opened}
+    client.post(f"/api/cases/{cid}/drafts", json={"rename_from": saved["name"], "title": "Bridge post", "state": back})
+    assert [one["url"] for one in _proof_entity(cid, png)["attrs"]["posted"]] == [other]
+    row = next(r for r in client.get(f"/api/cases/{cid}/drafts").json() if r["name"] == saved["name"])
+    assert row["state"] == "opened" and row["posted"] is None
+
+    # a post never opened, posted from elsewhere, and taken back says nothing at all
+    client.post(f"/api/cases/{cid}/drafts", json={"rename_from": saved["name"], "title": "Bridge post", "state": out})
+    client.post(f"/api/cases/{cid}/drafts", json={"rename_from": saved["name"], "title": "Bridge post", "state": {"proofPng": png}})
+    assert [one["url"] for one in _proof_entity(cid, png)["attrs"]["posted"]] == [other]
+    row = next(r for r in client.get(f"/api/cases/{cid}/drafts").json() if r["name"] == saved["name"])
+    assert row["state"] == "draft"
+
+
 def _media_id(cid, path):
     return next(e["id"] for e in graph_read.entities(cid) if e["type"] == "media" and e["attrs"].get("path") == path)

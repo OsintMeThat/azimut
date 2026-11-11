@@ -716,7 +716,7 @@ export const PAGES = {
     lead: 'Writes the sourced thread that publishes a finding. Pressing Post is left to you.',
     shot: 'post',
     marks: [
-      { anchor: 'post.ingredients', title: 'What goes in', text: 'Where to publish, the thread style, the description, the point, the place, a mention and the source.' },
+      { anchor: 'post.ingredients', title: 'What goes in', text: 'Its link once posted, where to publish, the thread style, the description, the point, the place, a mention and the source.' },
       { anchor: 'post.first', title: 'The geolocation post', text: 'Written from those fields, counted against the site’s limit, with the proof attached.' },
       { anchor: 'post.more', title: 'More posts', text: 'Add the media post and context posts, or copy the whole thread.' },
       { anchor: 'post.report', title: 'More', text: 'Add to notes writes the post into a case note. Delete sends it to the Trash.' },
@@ -725,7 +725,7 @@ export const PAGES = {
     tips: [
       { title: 'It saves itself', text: 'Once it holds something, a post is saved as you write. Its name is the draft’s.' },
       { title: 'The home', text: 'With no post open, Post shows what is in progress, the proofs with no post yet, and what went out. One press on a proof writes its geolocation.' },
-      { title: 'It went out?', text: 'After Publish, paste the post’s link: the post reads as posted, and its proof keeps the link.' },
+      { title: 'Its link', text: 'Once it is posted, paste its link at the top of the post. It reads as posted, and its proof keeps the link.' },
       { title: 'New post', text: 'Geolocation is the composer it always was. Map plate and Free post carry their own pictures on the first post.' },
       { title: 'Reply under the source', text: 'When the source is an X or Bluesky post, a box under it sends the post as a reply there, without the link to the source.' },
       { title: 'Thread styles', text: 'Settings, Templates holds the structures a post can follow, for each kind of post.' },

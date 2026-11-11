@@ -609,100 +609,228 @@ describe('the header ⋯', () => {
   });
 });
 
-describe('whether a post went out', () => {
-  const went = () => target.querySelector('.went');
-  const words = () => went()?.textContent.replace(/\s+/g, ' ').trim() ?? '';
+describe('the link to the post', () => {
+  const field = () => target.querySelector('#pc-link');
+  const said = () => target.querySelector('.link-said')?.textContent.trim() ?? '';
+  const box = () => field().closest('.post-link');
   const POSTED = 'https://x.com/desk/status/1850000000000000009';
+  const writeText = vi.fn(async () => {});
   const publishNow = async () => {
-    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: vi.fn(async () => {}) } });
     button(header(), 'Publish on X').click();
     await settle();
   };
-  const paste = async (link) => {
-    button(went(), 'Yes, paste its link').click();
+  const fill = (text) => {
+    field().value = text;
+    field().dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
-    const field = went().querySelector('input[aria-label="The post\'s address"]');
-    field.value = link;
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-    button(went(), 'Mark as posted').click();
+  };
+  // what a paste does: the text lands in the field, and the field takes it at once
+  const paste = async (text) => {
+    fill(text);
+    field().dispatchEvent(new Event('paste', { bubbles: true }));
+    await settle();
+  };
+  const enter = async (text) => {
+    fill(text);
+    field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+  };
+  const sendProof = async () => {
+    uiState.postProof = { ...PROOF };
     await settle();
   };
 
-  it('asks quietly once Publish opened the site, and the draft says it was opened', async () => {
-    await mountPost();
-    uiState.postProof = { ...PROOF };
-    await settle();
-    expect(went()).toBeNull();
-    await publishNow();
-    expect(words()).toBe('It went out? Yes, paste its link Not yet');
-    await saved();
-    expect(draftWrites().at(-1)[1].state.publish).toMatchObject({ site: 'x', opened_at: expect.any(String) });
-    button(went(), 'Not yet').click();
-    flushSync();
-    expect(went()).toBeNull();
+  beforeEach(() => {
+    writeText.mockClear();
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
   });
 
-  it('takes the post\'s link, refusing one that is no X or Bluesky post, and says it is posted', async () => {
+  it('is the first field of every kind, empty and quiet on a draft', async () => {
     await mountPost();
-    uiState.postProof = { ...PROOF };
-    await settle();
+    for (const kind of ['geolocation', 'plate', 'free']) {
+      startPost(kind);
+      await settle();
+      const first = target.querySelector('.col .field');
+      expect(first.querySelector('.label').textContent).toBe('Link to your post');
+      expect(first.querySelector('#pc-link').getAttribute('placeholder')).toBe("Paste it once it's posted");
+      expect(field().value).toBe('');
+      expect(target.querySelector('.link-said')).toBeNull();
+      expect(target.querySelector('.went')).toBeNull();
+    }
+  });
+
+  it('says it was opened after Publish, its border waiting, and the draft keeps it', async () => {
+    await mountPost();
+    await sendProof();
     await publishNow();
-    await paste('https://example.com/not-a-post');
-    expect(words()).toContain('That is not the address of an X or Bluesky post.');
-    const field = went().querySelector('input');
-    field.value = `${POSTED}?s=20`;
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-    button(went(), 'Mark as posted').click();
-    await settle();
-    expect(words()).toMatch(/^Posted on X · \d{4}-\d{2}-\d{2} x\.com\/desk\/status\/1850000000000000009 Change link$/);
-    expect(went().querySelector('a').getAttribute('href')).toBe(POSTED);
+    expect(said()).toBe("Opened in X · paste its link here once it's posted");
+    expect(box().classList.contains('awaited')).toBe(true);
     await saved();
-    expect(draftWrites().at(-1)[1].state.publish).toMatchObject({ url: POSTED, site: 'x', changed: false, mark: expect.any(String) });
+    expect(draftWrites().at(-1)[1].state.publish).toEqual({ site: 'x', opened_at: expect.any(String) });
+  });
+
+  it('marks the post posted on a paste of its link, written the one way', async () => {
+    await mountPost();
+    await sendProof();
+    await publishNow();
+    await paste(`${POSTED.replace('https://', '')}?s=20`);
+    expect(field().value).toBe(POSTED);
+    expect(said()).toMatch(/^Posted on X · \d{1,2} [A-Z][a-z]{2} \d{4}$/);
+    expect(box().classList.contains('awaited')).toBe(false);
+    await saved();
+    expect(draftWrites().at(-1)[1].state.publish).toMatchObject({
+      site: 'x', url: POSTED, opened_at: expect.any(String), posted_at: expect.any(String), mark: expect.any(String), changed: false,
+    });
+  });
+
+  it('refuses a link that is no X or Bluesky post, and keeps nothing of it', async () => {
+    await mountPost();
+    await sendProof();
+    await saved();
+    const before = draftWrites().length;
+    await enter('https://example.com/not-a-post');
+    expect(said()).toBe('That is not the link of an X or Bluesky post.');
+    expect(field().getAttribute('aria-invalid')).toBe('true');
+    expect(target.querySelector('button[aria-label="Copy the link"]')).toBeNull();
+    await saved();
+    expect(draftWrites()).toHaveLength(before);
+    // typing again clears the sentence
+    fill('https://x.com/desk');
+    expect(target.querySelector('.link-said')).toBeNull();
+  });
+
+  it('copies the link and opens it once set', async () => {
+    await mountPost();
+    await sendProof();
+    await enter(POSTED);
+    target.querySelector('button[aria-label="Copy the link"]').click();
+    await settle();
+    expect(writeText).toHaveBeenCalledWith(POSTED);
+    expect(toasts()).toContain('Link copied');
+    const open = target.querySelector('a[aria-label="Open the post"]');
+    expect(open.getAttribute('href')).toBe(POSTED);
+    expect(open.getAttribute('target')).toBe('_blank');
+  });
+
+  it('takes the link back with ×, to Opened after a Publish and to a draft without one', async () => {
+    await mountPost();
+    await sendProof();
+    await publishNow();
+    await enter(POSTED);
+    target.querySelector('button[aria-label="Clear the link"]').click();
+    await settle();
+    expect(field().value).toBe('');
+    expect(said()).toMatch(/^Opened in X/);
+    await saved();
+    expect(draftWrites().at(-1)[1].state.publish).toEqual({ site: 'x', opened_at: expect.any(String) });
+
+    startPost('free');
+    await settle();
+    type(firstPost(), 'Smoke over the port');
+    await enter('https://bsky.app/profile/desk.bsky.social/post/3kabc');
+    expect(said()).toMatch(/^Posted on Bluesky/);
+    target.querySelector('button[aria-label="Clear the link"]').click();
+    await settle();
+    expect(target.querySelector('.link-said')).toBeNull();
+    await saved();
+    expect(draftWrites().at(-1)[1].state.publish).toBeUndefined();
+  });
+
+  it('replaces the link with another, and an emptied field takes it back', async () => {
+    await mountPost();
+    await sendProof();
+    await enter(POSTED);
+    const other = 'https://x.com/desk/status/1850000000000000010';
+    await enter(other);
+    expect(field().value).toBe(other);
+    await saved();
+    expect(draftWrites().at(-1)[1].state.publish.url).toBe(other);
+    fill('');
+    field().dispatchEvent(new FocusEvent('blur'));
+    await saved();
+    expect(draftWrites().at(-1)[1].state.publish).toBeUndefined();
   });
 
   it('reads as changed since posted after an edit, and as posted again once it is undone', async () => {
     await mountPost();
-    uiState.postProof = { ...PROOF };
-    await settle();
-    await publishNow();
-    await paste(POSTED);
+    await sendProof();
+    await enter(POSTED);
     type(target.querySelector('#pc-desc'), 'Twelve helicopters, not thirteen');
     await settle();
-    expect(words()).toMatch(/^Changed since posted on X/);
+    expect(said()).toBe('Changed since posted');
+    expect(target.querySelector('.link-said').classList.contains('changed')).toBe(true);
     await saved();
     expect(draftWrites().at(-1)[1].state.publish.changed).toBe(true);
     type(target.querySelector('#pc-desc'), PROOF.description);
     await settle();
-    expect(words()).toMatch(/^Posted on X/);
+    expect(said()).toMatch(/^Posted on X/);
   });
 
-  it('asks again on opening a post that was opened and never said to have gone out', async () => {
-    lists.drafts = [{ name: 'Out', title: 'Out', target: 'x', posts: 1, state: 'opened' }];
-    lists.saved = { Out: { title: 'Out', state: { description: 'D', tweet1: 'D', tweet1Edited: true, publish: { opened_at: '2026-11-10T10:00:00Z', site: 'x' } } } };
+  it('files nothing for a blank post while typed in, and files it once its link is set', async () => {
     await mountPost();
-    home().querySelector('.ph-open, button.ph-card').click();
+    fill('x.com/desk');
+    field().dispatchEvent(new FocusEvent('blur'));
+    await saved();
+    expect(draftWrites()).toEqual([]);
+    await enter(POSTED);
+    await saved();
+    expect(draftWrites()).toHaveLength(1);
+    expect(draftWrites()[0][1].state.publish).toMatchObject({ url: POSTED, site: 'x' });
+  });
+
+  it('opens a post opened and never posted saying so, and a posted one with its link', async () => {
+    lists.drafts = [{ name: 'Sent', title: 'Sent', target: 'x', posts: 1, state: 'opened' }, { name: 'Out', title: 'Out', target: 'x', posts: 1, state: 'posted' }];
+    lists.saved = {
+      Sent: { title: 'Sent', state: { description: 'D', tweet1: 'D', tweet1Edited: true, publish: { opened_at: '2026-11-10T10:00:00Z', site: 'bluesky' } } },
+      Out: { title: 'Out', state: { description: 'D', tweet1: 'D', tweet1Edited: true, publish: { site: 'x', url: POSTED, posted_at: '2026-11-10T10:05:00Z', mark: 'x', changed: true } } },
+    };
+    await mountPost();
+    [...home().querySelectorAll('.ph-open')].find((b) => b.textContent.includes('Sent')).click();
     await settle();
-    expect(words()).toContain('It went out?');
+    expect(field().value).toBe('');
+    expect(said()).toMatch(/^Opened in Bluesky/);
+    button(header(), 'Posts').click();
+    await settle();
+    [...home().querySelectorAll('.ph-open')].find((b) => b.textContent.includes('Out')).click();
+    await settle();
+    expect(field().value).toBe(POSTED);
+    // its print is recomputed on opening: a mark that is not this post's reads as changed
+    expect(said()).toBe('Changed since posted');
+  });
+
+  it('takes the link of a draft Geo Report saved, with no kind and no publish', async () => {
+    lists.drafts = [{ name: 'Old', title: 'Old', target: 'x', posts: 1 }];
+    lists.saved = { Old: { title: 'Old', state: {
+      description: PROOF.description, coordsText: PROOF.coordsText, place: 'Los Anacuos, Miranda, Venezuela',
+      mention: '@GeoConfirmed', source: SOURCE_X, proofPng: PROOF.png, tweet1: CLASSIC_FIRST_POST, tweet1Edited: false,
+      target: 'x', mediaEnabled: true, mediaType: 'none', mediaText: '', mediaPath: null, extraTweets: [],
+    } } };
+    await mountPost();
+    home().querySelector('.ph-open').click();
+    await settle();
+    expect(field().value).toBe('');
+    await paste(POSTED);
+    expect(said()).toMatch(/^Posted on X/);
+    await saved();
+    const write = draftWrites().at(-1)[1];
+    expect(write).toMatchObject({ rename_from: 'Old', title: 'Old' });
+    expect(write.state.publish).toMatchObject({ url: POSTED, site: 'x', changed: false });
+    expect(write.state.kind).toBeUndefined();
   });
 
   it('marks a hand-off to the extension as opened too', async () => {
     bridge.installed = '0.3.3';
     await mountPost();
-    uiState.postProof = { ...PROOF };
-    await settle();
+    await sendProof();
     await publishNow();
     expect(bridge.handOffPost).toHaveBeenCalledTimes(1);
-    expect(words()).toContain('It went out?');
+    expect(said()).toMatch(/^Opened in X/);
   });
 
   it('writes where it went out into the note Add to notes makes', async () => {
     await mountPost();
-    uiState.postProof = { ...PROOF };
-    await settle();
-    await publishNow();
-    await paste(POSTED);
+    await sendProof();
+    await enter(POSTED);
     header().querySelector('button[aria-label="More for this post"]').click();
     flushSync();
     button(document.querySelector('.float-menu'), 'Add to notes…').click();
@@ -712,6 +840,79 @@ describe('whether a post went out', () => {
     const [, note] = api.post.mock.calls.find(([path]) => path.endsWith('/notes'));
     expect(note.content).toContain(`## Posted\n\n[On X, `);
     expect(note.content).toContain(`](${POSTED})`);
+  });
+});
+
+describe('a post already out, from the home', () => {
+  const POSTED = 'https://x.com/desk/status/1850000000000000009';
+  const row = (name, extra = {}) => ({
+    name, title: name, updated_at: '2026-11-09T10:00:00Z', target: 'x', kind: 'geolocation', posts: 1, proof: null, video: null,
+    state: 'draft', site: null, posted: null, picture: null, ...extra,
+  });
+
+  beforeEach(() => {
+    lists.proofs = [{ name: 'waiting', title: 'waiting', png: 'proofs/waiting.png', thumb: null, video: null, updated_at: '2026-11-08T10:00:00Z' }];
+    lists.specs = { waiting: { description: PROOF.description, points: [{ lat: GEO.lat, lon: GEO.lon }], source: SOURCE_X } };
+  });
+
+  it('starts a waiting proof\'s post from Already posted…, the link field waiting, and its link files it', async () => {
+    await mountPost();
+    const card = home().querySelector('.post-card');
+    card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
+    flushSync();
+    const menu = document.querySelector('.float-menu[aria-label="waiting"]');
+    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Write its post', 'Already posted…']);
+    button(menu, 'Already posted…').click();
+    await settle();
+
+    expect(home()).toBeNull();
+    expect(target.querySelector('#pc-desc').value).toBe(PROOF.description);
+    expect(document.activeElement).toBe(target.querySelector('#pc-link'));
+    const field = target.querySelector('#pc-link');
+    field.value = POSTED;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('paste', { bubbles: true }));
+    await saved();
+    const write = draftWrites().at(-1)[1];
+    expect(write.state.proofPng).toBe('proofs/waiting.png');
+    expect(write.state.publish).toMatchObject({ url: POSTED, site: 'x', changed: false });
+    expect(write.state.publish.opened_at).toBeUndefined();
+  });
+
+  it('opens the same menu from a waiting card\'s ⋯, Write its post doing what a press does', async () => {
+    await mountPost();
+    home().querySelector('button[aria-label="More for waiting"]').click();
+    flushSync();
+    button(document.querySelector('.float-menu[aria-label="waiting"]'), 'Write its post').click();
+    await settle();
+    expect(home()).toBeNull();
+    expect(target.querySelector('.attach-chip').textContent).toContain('waiting.png');
+    expect(document.activeElement).not.toBe(target.querySelector('#pc-link'));
+  });
+
+  it('copies a posted post\'s link from its card\'s menu and from Open', async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    lists.drafts = [row('Out', { state: 'posted', site: 'x', posted: { url: POSTED, site: 'x', at: '2026-11-10T08:00:00Z' } }), row('Fresh')];
+    await mountPost();
+    home().querySelector('button[aria-label="More for Out"]').click();
+    flushSync();
+    const menu = document.querySelector('.float-menu[aria-label="Out"]');
+    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Open', 'See the post', 'Copy link', 'Delete…']);
+    button(menu, 'Copy link').click();
+    await settle();
+    expect(writeText).toHaveBeenLastCalledWith(POSTED);
+    expect(toasts()).toContain('Link copied');
+
+    button(header(), 'Open').click();
+    await settle();
+    const copies = dialog('Open a post').querySelectorAll('button[title="Copy the post\'s link"]');
+    expect(copies).toHaveLength(1);
+    expect(copies[0].getAttribute('aria-label')).toBe('Copy the link of Out');
+    copies[0].click();
+    await settle();
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(writeText).toHaveBeenLastCalledWith(POSTED);
   });
 });
 

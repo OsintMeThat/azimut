@@ -110,8 +110,8 @@ test.describe('the home', () => {
 
     const drafts = home.locator('.ph-cards').first().locator('.ph-card');
     await expect(drafts).toHaveCount(2);
-    await expect(drafts.nth(0)).toContainText('Bluesky · 3 posts');
-    await expect(drafts.nth(1)).toContainText('X · Free post · 1 post');
+    // the posts are counted only when there are several
+    await expect(drafts.locator('.ph-line')).toHaveText(['Bluesky · 3 posts', 'X · Free post']);
     // the terminal's proof has its draft; the bridge waits, and the video's slides under it
     const ready = home.locator('.ph-cards').nth(1).locator('.ph-card');
     await expect(ready).toHaveCount(1);
@@ -272,8 +272,8 @@ test.describe('a post saves itself', () => {
   });
 });
 
-test.describe('whether it went out', () => {
-  test('Publish asks quietly, and the link pasted marks it posted on the draft', async ({ page }) => {
+test.describe('the link to the post', () => {
+  test('waits after Publish, refuses what is no post, and the link pasted marks it posted', async ({ page }) => {
     await catchWhatLeaves(page);
     const fixture = await installAppFixture(page, { proofList: [PROOFS[0]], lookupEntities: lookups });
     await postRoutes(page);
@@ -281,28 +281,72 @@ test.describe('whether it went out', () => {
     await page.getByTestId('post-home').locator('.ph-card').first().click();
     await expect(page.locator('.tweet-block textarea').first()).toHaveValue(FIRST_POST);
 
-    const went = page.locator('.went');
-    await expect(went).toHaveCount(0);
+    const field = page.getByRole('textbox', { name: 'Link to your post' });
+    const said = page.locator('.link-said');
+    await expect(field).toHaveAttribute('placeholder', "Paste it once it's posted");
+    await expect(said).toHaveCount(0);
     await page.getByRole('button', { name: 'Publish on X' }).click();
-    await expect(went).toHaveText(/It went out\?\s*Yes, paste its link\s*Not yet/);
-    await went.getByRole('button', { name: 'Yes, paste its link' }).click();
-    const field = went.getByRole('textbox', { name: 'The post\'s address' });
-    await expect(field).toBeFocused();
+    await expect(said).toHaveText("Opened in X · paste its link here once it's posted");
+
     await field.fill('https://example.com/elsewhere');
     await field.press('Enter');
-    await expect(went).toContainText('That is not the address of an X or Bluesky post.');
-    await field.fill('https://x.com/desk/status/1850000000000000009?s=20');
-    await went.getByRole('button', { name: 'Mark as posted' }).click();
-    await expect(went).toContainText(/Posted on X · \d{4}-\d{2}-\d{2}/);
-    await expect(went.getByRole('link')).toHaveAttribute('href', 'https://x.com/desk/status/1850000000000000009');
+    await expect(said).toHaveText('That is not the link of an X or Bluesky post.');
+    await field.fill('x.com/desk/status/1850000000000000009?s=20');
+    await field.press('Enter');
+    await expect(field).toHaveValue('https://x.com/desk/status/1850000000000000009');
+    await expect(said).toHaveText(/^Posted on X · \d{1,2} [A-Z][a-z]{2} \d{4}$/);
+    await expect(page.getByRole('link', { name: 'Open the post' })).toHaveAttribute('href', 'https://x.com/desk/status/1850000000000000009');
+    await page.getByRole('button', { name: 'Copy the link' }).click();
+    await expect(page.locator('.toast', { hasText: 'Link copied' })).toBeVisible();
+    expect((await page.evaluate(() => window.__clipboard)).at(-1)).toEqual({ text: 'https://x.com/desk/status/1850000000000000009' });
     await expect.poll(() => fixture.draftWrites.at(-1)?.state.publish).toMatchObject({
       site: 'x', url: 'https://x.com/desk/status/1850000000000000009', changed: false,
     });
 
     // an edit after it went out says so
     await page.locator('#pc-desc').fill('A second look at the bridge');
-    await expect(went).toContainText('Changed since posted on X');
+    await expect(said).toHaveText('Changed since posted');
     await expect.poll(() => fixture.draftWrites.at(-1)?.state.publish.changed).toBe(true);
+
+    // a wrong link taken back: opened again, the link gone from the draft
+    await page.getByRole('button', { name: 'Clear the link' }).click();
+    await expect(field).toHaveValue('');
+    await expect(field).toBeFocused();
+    await expect(said).toHaveText(/^Opened in X/);
+    await expect.poll(() => fixture.draftWrites.at(-1)?.state.publish).toEqual({ site: 'x', opened_at: expect.any(String) });
+    fixture.expectNoUnexpectedRequests();
+  });
+
+  test('Already posted… on a waiting proof starts its post, and its link files it as posted', async ({ page }) => {
+    const fixture = await installAppFixture(page, { proofList: [PROOFS[0], PROOFS[1]], lookupEntities: lookups });
+    await postRoutes(page);
+    await page.goto('/#post');
+    const home = page.getByTestId('post-home');
+    const card = home.locator('.post-card', { hasText: 'Vincent Thomas Bridge' });
+    await card.hover();
+    await card.getByRole('button', { name: 'More for Vincent Thomas Bridge' }).click();
+    const menu = page.locator('.float-menu[aria-label="Vincent Thomas Bridge"]');
+    await expect(menu.locator('.fm-item')).toHaveText(['Write its post', 'Already posted…']);
+    await menu.getByRole('button', { name: 'Already posted…' }).click();
+
+    await expect(home).toHaveCount(0);
+    await expect(page.locator('.tweet-block textarea').first()).toHaveValue(FIRST_POST);
+    const field = page.getByRole('textbox', { name: 'Link to your post' });
+    await expect(field).toBeFocused();
+    // the text lands as a paste puts it there, and the paste alone takes it: no Enter, no leaving
+    await field.fill('https://x.com/desk/status/1850000000000000009');
+    await field.dispatchEvent('paste');
+    await expect(page.locator('.link-said')).toHaveText(/^Posted on X/);
+    await expect.poll(() => fixture.draftWrites.at(-1)?.state).toMatchObject({
+      proofPng: 'proofs/bridge.png', publish: { site: 'x', url: 'https://x.com/desk/status/1850000000000000009', changed: false },
+    });
+
+    await page.locator('.tool-header').getByRole('button', { name: 'Posts' }).click();
+    const posted = home.locator('[data-part="posted"]');
+    await expect(posted.locator('.ph-pill')).toHaveText(['Posted']);
+    // the proof has its post now, and only the other one waits
+    await expect(home.locator('.post-card', { hasText: 'Vincent Thomas Bridge' })).toHaveCount(0);
+    await expect(home.locator('.post-card', { hasText: 'Container terminal' })).toHaveCount(1);
     fixture.expectNoUnexpectedRequests();
   });
 });

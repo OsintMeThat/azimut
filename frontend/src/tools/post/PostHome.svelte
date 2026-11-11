@@ -6,13 +6,16 @@
    * its platform and how many posts it holds; **Ready to post**, the proofs no draft names
    * yet and the videos whose slides wait, one press starting the right post; and
    * **Posted**, the latest to go out, with their link (`postHome.js`). Every post card
-   * wears its state as a pill, and its ⋯ or a right-click opens and deletes it.
+   * wears its state as a pill, and its ⋯ or a right-click opens it, copies its link once
+   * posted and deletes it. A proof waiting has one too, for a post already out
+   * (**Already posted…**: its post started as a press does, then its link field).
    *
    * The composer decides when this shows: a case holding no draft and no proof keeps the
    * composer as it always was. Both lists arrive from the composer, null while read.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
+  import { copyText } from '../../lib/clipboard.js';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { timeAgo } from '../../lib/analysisViews.js';
   import { slideTag } from '../../lib/proofList.js';
@@ -37,6 +40,8 @@
     onall,
     /** `(row)`: start a Geolocation post of this proof. */
     onproof,
+    /** `(row)`: start it the same way, for a post already out, its link field waiting. */
+    onposted,
     /** `(draft)`: ask to delete this post (the composer holds the dialog). */
     ondelete,
   } = $props();
@@ -59,20 +64,24 @@
 
   const picture = (draft) => draftPicture(draft, proofs, media);
 
-  // A card's ⋯, under it or at the pointer for a right-click.
-  let menu = $state(null); // { draft, anchor?, at? }
-  function openMenu(draft, anchor) {
-    menu = menu?.draft === draft ? null : { draft, anchor };
+  // A card's ⋯, under it or at the pointer for a right-click: a post's, or a waiting proof's.
+  let menu = $state(null); // { draft?, proof?, anchor?, at? }
+  const menuFor = (one) => menu && (menu.draft === one || menu.proof === one);
+  function openMenu(item, anchor) {
+    menu = menuFor(item.draft ?? item.proof) ? null : { ...item, anchor };
   }
-  function context(event, draft) {
+  function context(event, item) {
     event.preventDefault();
-    menu = { draft, at: { x: event.clientX, y: event.clientY } };
+    menu = { ...item, at: { x: event.clientX, y: event.clientY } };
   }
   function act(what) {
-    const { draft } = menu;
+    const { draft, proof } = menu;
     menu = null;
     if (what === 'open') onopen?.(draft);
+    else if (what === 'copy') copyText(draft.posted.url, { said: 'Link copied' });
     else if (what === 'delete') ondelete?.(draft);
+    else if (what === 'write') onproof?.(proof);
+    else if (what === 'posted') onposted?.(proof);
   }
 </script>
 
@@ -87,9 +96,9 @@
 
 {#snippet postCard(draft)}
   {@const pill = draftPill(draft)}
-  <div class="ph-card post-card" role="presentation" oncontextmenu={(event) => context(event, draft)}>
+  <div class="ph-card post-card" role="presentation" oncontextmenu={(event) => context(event, { draft })}>
     <button type="button" class="ph-open" onclick={() => onopen?.(draft)} title={`Open ${draft.title}`}>
-      <span class="ph-pic">
+      <span class="ph-pic dark-surface">
         {@render draftPic(draft)}
         <span class="ph-pill {pill.state}">{pill.label}</span>
       </span>
@@ -104,10 +113,14 @@
       </a>
     {/if}
     <button type="button" class="ph-more" aria-label={`More for ${draft.title}`} title="Open or delete this post" aria-haspopup="menu"
-      aria-expanded={menu?.draft === draft} onclick={(event) => openMenu(draft, event.currentTarget)}>
+      aria-expanded={!!menuFor(draft)} onclick={(event) => openMenu({ draft }, event.currentTarget)}>
       <Icon name="more" size={13} stroke={2.6} />
     </button>
   </div>
+{/snippet}
+
+{#snippet proofPic(row)}
+  {#if row.thumb || row.png}<img src={fileUrl(caseId, row.thumb ?? row.png)} alt="" loading="lazy" decoding="async" />{:else}<Icon name="proof" size={26} />{/if}
 {/snippet}
 
 <div class="ph" data-testid="post-home">
@@ -164,15 +177,19 @@
         {#if ready.photos.length}
           <div class="ph-cards">
             {#each ready.photos as row (row.name)}
-              <button type="button" class="ph-card" onclick={() => onproof?.(row)} title={`Write the geolocation post of ${row.title}`}>
-                <span class="ph-pic">
-                  {#if row.thumb || row.png}<img src={fileUrl(caseId, row.thumb ?? row.png)} alt="" loading="lazy" decoding="async" />{:else}<Icon name="proof" size={26} />{/if}
-                </span>
-                <span class="ph-card-words">
-                  <span class="ph-title" dir="auto">{row.title}</span>
-                  <span class="ph-said"><span class="ph-line"><Icon name="crosshair" size={11} /> Geolocation</span><span class="ph-when">{timeAgo(row.updated_at)}</span></span>
-                </span>
-              </button>
+              <div class="ph-card post-card" role="presentation" oncontextmenu={(event) => context(event, { proof: row })}>
+                <button type="button" class="ph-open" onclick={() => onproof?.(row)} title={`Write the geolocation post of ${row.title}`}>
+                  <span class="ph-pic dark-surface">{@render proofPic(row)}</span>
+                  <span class="ph-card-words">
+                    <span class="ph-title" dir="auto">{row.title}</span>
+                    <span class="ph-said"><span class="ph-line"><Icon name="crosshair" size={11} /> Geolocation</span><span class="ph-when">{timeAgo(row.updated_at)}</span></span>
+                  </span>
+                </button>
+                <button type="button" class="ph-more" aria-label={`More for ${row.title}`} title="Write its post, or say it is posted already" aria-haspopup="menu"
+                  aria-expanded={!!menuFor(row)} onclick={(event) => openMenu({ proof: row }, event.currentTarget)}>
+                  <Icon name="more" size={13} stroke={2.6} />
+                </button>
+              </div>
             {/each}
           </div>
         {/if}
@@ -195,7 +212,7 @@
                     {#each series.slides as row (row.name)}
                       {@const tag = slideTag(row, { short: true })}
                       <button type="button" class="ph-chip" style:--scene={sceneColorAt(row.order)} onclick={() => onproof?.(row)}
-                        title={`Write the geolocation post of ${row.title}`}>
+                        oncontextmenu={(event) => context(event, { proof: row })} title={`Write the geolocation post of ${row.title}`}>
                         <span class="ph-chip-pic">{#if row.thumb || row.png}<img src={fileUrl(caseId, row.thumb ?? row.png)} alt="" loading="lazy" decoding="async" />{/if}</span>
                         <span class="ph-dot" aria-hidden="true"></span>
                         <span class="ph-chip-name" dir="auto">{row.title}</span>
@@ -227,7 +244,7 @@
   </div>
 </div>
 
-{#if menu}
+{#if menu?.draft}
   {@const draft = menu.draft}
   <FloatingMenu anchor={menu.anchor ?? null} at={menu.at ?? null} width={220} label={draft.title} onclose={() => (menu = null)}>
     <p class="fm-head" dir="auto">{draft.title}</p>
@@ -235,10 +252,19 @@
     {#if draft.posted?.url}
       <a class="fm-item" href={draft.posted.url} target="_blank" rel="noreferrer" onclick={() => (menu = null)}>
         <Icon name="external" size={14} /><span class="fm-grow">See the post</span></a>
+      <button type="button" class="fm-item" onclick={() => act('copy')}><Icon name="copy" size={14} /><span class="fm-grow">Copy link</span></button>
     {/if}
     <div class="fm-sep"></div>
     <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored" onclick={() => act('delete')}>
       <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
+  </FloatingMenu>
+{:else if menu?.proof}
+  {@const proof = menu.proof}
+  <FloatingMenu anchor={menu.anchor ?? null} at={menu.at ?? null} width={220} label={proof.title} onclose={() => (menu = null)}>
+    <p class="fm-head" dir="auto">{proof.title}</p>
+    <button type="button" class="fm-item" onclick={() => act('write')}><Icon name="post" size={14} /><span class="fm-grow">Write its post</span></button>
+    <button type="button" class="fm-item" title="Start its post and paste the link it went out at" onclick={() => act('posted')}>
+      <Icon name="link" size={14} /><span class="fm-grow">Already posted…</span></button>
   </FloatingMenu>
 {/if}
 

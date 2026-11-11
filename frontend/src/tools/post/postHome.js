@@ -19,13 +19,12 @@ import {
 /** How many drafts the home lists before "All N drafts". */
 export const DRAFTS_SHOWN = 6;
 
-/** "1 post", "3 posts". */
+/** "3 posts" for a thread, and nothing for a single post: one goes without saying. */
 export function postsWords(count) {
-  const n = Number.isInteger(count) && count > 0 ? count : 1;
-  return `${n} ${n === 1 ? 'post' : 'posts'}`;
+  return Number.isInteger(count) && count > 1 ? `${count} posts` : '';
 }
 
-/** The line under a draft's name: its platform, and its kind when it is not a geolocation. */
+/** The line under a draft's name: its platform, its kind when it is not a geolocation, and its posts when they are several. */
 export function draftLine(draft) {
   const kind = normalizePostKind(draft?.kind);
   return [postTarget(draft?.target).label, kind === 'geolocation' ? '' : postKind(kind).label, postsWords(draft?.posts)]
