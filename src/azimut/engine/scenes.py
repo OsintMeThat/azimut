@@ -31,6 +31,16 @@ does, and a scene holding one is never taken back to the frames.
 the clip as it was when the frame was cut. The ``derived-from`` edge follows a
 rename, so it is read first and the recorded path is only the fallback.
 
+**A panel made from the footage ties the proof to it too** (`panel_ties`). A capture
+Horizon or Satellite made over a frame, over a collage of the video's frames, or over
+another such capture, is walked up ``derived-from`` to that footage, a bounded number of
+steps and each file once: it carries the frame's instant, or every piece's. A capture
+a scene gathered while it was geolocated (``captures``) points at that scene. Such a
+panel is no frame, so it pins nothing and its proof is not traced to the video: Geo Proof
+offers the scene, and the tie is written as Make the proof's is, ``scene.draft`` through
+`state_proof_scene`, which accepts the video it is tied to. From then on the proof is
+read back like any other, and the To-do no longer lists the scene.
+
 **A scene still to prove lives in the video's Inspect work**, one instant, one
 stretch, several of them where the place shows again (``more``, `inspectwork.scene_moments`)
 or the whole video, until a proof cites it (``scene.draft``). From then on the proof's own
@@ -403,6 +413,146 @@ def collage_times(case: Case) -> dict[str, list[list[float]]]:
 def traced_video(spec: dict[str, Any], origins: Origins) -> str | None:
     """The video the first panel Inspect cut from one names, or None."""
     return next((origins[src][0] for src in _panel_sources(spec) if src in origins), None)
+
+
+# -- what ties a panel to a video's scene without being cut from it -------------------
+
+#: How far up ``derived-from`` a panel is followed to the footage it was made from: a
+#: capture of a straightened collage is three steps from the frames, four from the video.
+TIE_DEPTH = 6
+#: The most panels one read of their ties takes (`panel_ties`).
+MAX_TIE_PANELS = 200
+
+
+def _footage_of(trace: _Trace, path: str) -> tuple[str, list[float]] | None:
+    """The video a case file is footage of, with the instants it shows: a frame Inspect
+    cut, at its instant; a collage of one video's frames, at every piece's; the video
+    itself, at none. None for any other file."""
+    item = trace.items([path]).get(path)
+    if item is None:
+        return None
+    if item.get("kind") == "video":
+        return path, []
+    cut = _cut_frames(trace.case, [item], trace.parents)
+    if path in cut:
+        return cut[path][0], [cut[path][1]]
+    pieces = _composed_pieces(trace, item)
+    return _collage_video(trace, pieces, 0) if pieces else None
+
+
+def _made_from(trace: _Trace, path: str) -> list[str]:
+    """What a case file was made from: its ``derived-from`` edges, which follow a rename,
+    else the files its producer recorded (`media._source_paths`)."""
+    item = trace.items([path]).get(path) or {}
+    entity_id = item.get("entity_id")
+    parents: list[str] = []
+    if isinstance(entity_id, str) and entity_id:
+        for link in trace.case.links_of(entity_id):
+            if link["type"] != link_engine.DERIVED_FROM or link["from"] != entity_id:
+                continue
+            parent = trace.case.get_entity(link["to"])
+            rel = link_engine.artifact_path(parent) if parent else None
+            if rel:
+                parents.append(rel)
+    if parents:
+        return parents
+    source = item.get("source")
+    if not isinstance(source, dict):
+        return []
+    recorded = [source.get("from"), *(source.get("sources") or [])]
+    return [p for p in recorded if isinstance(p, str) and p]
+
+
+def _composed(trace: _Trace, path: str) -> bool:
+    """Whether a case file is a picture Inspect composed from pieces (`COLLAGE_OP`)."""
+    source = (trace.items([path]).get(path) or {}).get("source")
+    return isinstance(source, dict) and source.get("type") == "inspect" and source.get("op") == COLLAGE_OP
+
+
+def _footage_up(trace: _Trace, path: str) -> dict[str, set[float]]:
+    """The footage a picture was made from, walked up ``derived-from`` breadth first, at
+    most `TIE_DEPTH` steps and each file once, so a loop ends: each video reached, with the
+    instants shown. A branch stops at the first footage it meets, and at a collage of
+    several videos' pieces, which is a picture of its own."""
+    found: dict[str, set[float]] = {}
+    seen = {path}
+    frontier = [path]
+    for _step in range(TIE_DEPTH):
+        further: list[str] = []
+        for current in frontier:
+            for parent in _made_from(trace, current):
+                if parent in seen:
+                    continue
+                seen.add(parent)
+                footage = _footage_of(trace, parent)
+                if footage is not None:
+                    found.setdefault(footage[0], set()).update(footage[1])
+                elif not _composed(trace, parent):
+                    further.append(parent)
+        if not further:
+            break
+        frontier = further
+    return found
+
+
+def _gathered(case: Case, trace: _Trace, wanted: set[str]) -> dict[str, list[tuple[str, str]]]:
+    """For each of these files a scene of a video gathered on the map (``captures``), that
+    video and that scene's id, in the order the works list them."""
+    out: dict[str, list[tuple[str, str]]] = {}
+    for subject, spec in inspectwork.subject_specs(case).items():
+        for draft in (spec or {}).get("scenes") or []:
+            if not isinstance(draft, dict) or not isinstance(draft.get("id"), str):
+                continue
+            for path in draft.get("captures") or []:
+                if path in wanted and (subject, draft["id"]) not in out.get(path, []):
+                    out.setdefault(path, []).append((subject, draft["id"]))
+    # a picture's scenes are proved by laying the picture out, never by a capture of it
+    subjects = trace.items([subject for held in out.values() for subject, _id in held])
+    videos = {path for path, item in subjects.items() if item.get("kind") == "video"}
+    return {path: [(video, d) for video, d in held if video in videos] for path, held in out.items()}
+
+
+def panel_ties(case: Case, paths: Sequence[str]) -> list[dict[str, Any]]:
+    """What ties each of these panels to a video's scene without being cut from it, in the
+    panels' order: ``{src, video, times, scene}`` per video, and per scene pointed at.
+
+    A frame or a collage of one video is read off the panel itself (`frame_origins`), so
+    it is left out, and so is a collage of several videos, a picture of its own. Any other
+    panel is walked up ``derived-from`` to the footage it was made from (`_footage_up`): a
+    capture made over a frame gives that frame's instant, one made over a collage the
+    instants of every piece. A capture a scene of a video gathered on the map
+    (``captures`` in the video's Inspect work) points at that scene (``scene``), whatever
+    it was made from. Which scene the proof then takes up is Geo Proof's to say, by the
+    rule its frames follow (`lib/proofScene.sceneOffer`). A read: nothing is written.
+    """
+    unique = [p for p in dict.fromkeys(paths) if isinstance(p, str) and p][:MAX_TIE_PANELS]
+    if not unique:
+        return []
+    trace = _Trace(case)
+    trace.items(unique)
+    # footage itself is read off the panel; a collage of several videos is a picture of its own
+    own = [p for p in unique if _footage_of(trace, p) is None and not _composed(trace, p)]
+    gathered = _gathered(case, trace, set(own)) if own else {}
+    walked = {path: _footage_up(trace, path) for path in own}
+    # only a video still in the case is offered
+    present = trace.items([v for found in walked.values() for v in found])
+    ties: list[dict[str, Any]] = []
+    for path in own:
+        found = {
+            video: times for video, times in walked[path].items() if (present.get(video) or {}).get("kind") == "video"
+        }
+        pointed = gathered.get(path, [])
+        for video in [*found, *dict.fromkeys(v for v, _id in pointed if v not in found)]:
+            times = sorted(found.get(video, set()))
+            scenes: list[str | None] = [d for v, d in pointed if v == video]
+            for scene in scenes or [None]:
+                ties.append({"src": path, "video": video, "times": times, "scene": scene})
+    return ties
+
+
+def tied_videos(case: Case, spec: dict[str, Any]) -> list[str]:
+    """The videos a proof's panels are tied to without being cut from them, first first."""
+    return list(dict.fromkeys(tie["video"] for tie in panel_ties(case, _panel_sources(spec))))
 
 
 def star_video(case: Case, spec: dict[str, Any]) -> tuple[str | None, list[dict[str, Any]]]:
@@ -1131,19 +1281,30 @@ def _scene_video(
     case: Case, spec: dict[str, Any], wanted: str | None = None
 ) -> tuple[str, str | None, Origins]:
     """The video a proof's time is in: the one asked for, else the one it states while
-    the case holds it, else the one its frames were cut from. With the traced one, and
-    the frames' origins.
+    the case holds it, else the one its frames were cut from, else the one its panels
+    are tied to (`panel_ties`). With the traced one, and the frames' origins.
 
-    A video asked for is one of the case that a panel was cut from, or the one the
-    proof already states: the ★ moves between the videos the proof shows, never to a
-    clip it has nothing from.
+    A video asked for is one of the case that a panel was cut from or is tied to, or the
+    one the proof already states: the ★ moves between the videos the proof shows, never
+    to a clip it has nothing from.
     """
     origins = frame_origins(case, _panel_sources(spec))
-    traced = traced_video(spec, origins)
     stated = stated_scene(spec)
+    tied: list[str] | None = None
+
+    def tied_to() -> list[str]:
+        nonlocal tied
+        if tied is None:
+            tied = tied_videos(case, spec)
+        return tied
+
+    # a proof whose panels were made from the footage without being cut from it reads
+    # back to the first video they are tied to, as one cut from it reads back to its frames
+    traced = traced_video(spec, origins) or next(iter(tied_to()), None)
     if wanted is not None:
         cut_from = {origin for origin, _time in origins.values()}
-        if not _case_video(case, wanted) or (wanted not in cut_from and wanted != (stated or {}).get("video")):
+        known = wanted in cut_from or wanted == (stated or {}).get("video") or wanted in tied_to()
+        if not _case_video(case, wanted) or not known:
             raise BadScene("that video is not one this proof's frames were cut from")
         return wanted, traced, origins
     video = stated["video"] if stated and _case_video(case, stated["video"]) else traced
