@@ -5360,6 +5360,10 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   this way, Compare's export a Compare post and Detect's pins a free post, whose Text
   and source layout carries `#date` for them. A draft saved as a free post from Compare
   before the Compare kind stays a free post.
+- **Credits** is a field of the composer shown when the layout uses `#credits`, filled
+  with the credit line a Compare or Map plate start hands over and edited like any
+  other. The draft keeps it (`credits`, written only when there is one), and an empty
+  field drops the line.
 - **The extension window** says once, on arriving in Post without the capture
   extension, why it is worth having here: it fills the whole thread in X or Bluesky,
   pictures included, and can reply under the source post or capture it into the case.
@@ -5450,8 +5454,9 @@ layout is a body of tokens (`#place`, `#pluscode`, `#coordinates`, `#description
 `#mention`, `#source`, `#date`, `#video`, `#timecode`, `#scenes`, `#credits`) and
 plain text, the editor offering the tokens of its kind. A token with no value drops
 its line. `#video` is the title Media gives the video the post is about, never its file
-name. `#timecode`, `#scenes` and `#credits` are known to the layout and its typo check
-and stay empty, their line dropped, until the video thread and the credits fill them.
+name. `#timecode` and `#scenes` are known to the layout and its typo check and stay
+empty, their line dropped, until the video thread fills them. `#credits` is the
+composer's Credits field.
 `#date` is the date the proof
 states, and the composer shows its Date field only when the layout uses it. It is
 filled from the proof as the case stores it (`2024-03-12`, `2024-03~`), the same in
@@ -6646,7 +6651,7 @@ same file and files it in the case instead, naming its plate, the day and step a
 shows, and the credits on its face (`POST /map-plates/export` with `into=case`); the same
 file filed from the plate before is cited again. Post then opens on a Map plate post
 carrying it, told the plate's title, the day shown or the first and last days played
-(`2026-10-01 → 2026-10-14`), and those credits. An analyst who went to another tool meanwhile is offered **Open in
+(`2026-10-01 → 2026-10-14`), and those credits, which fill the post's Credits field. An analyst who went to another tool meanwhile is offered **Open in
 Post** on the toast instead.
 **Export** closes the dialog and the export goes on behind: the plate holds still under
 a veil saying what is drawn and how far, the top bar says **Plate export** with its

@@ -72,6 +72,9 @@
   let proofUndated = $state(false);
   // A before and after with a side still `?` says which one under the field (`spanNote`).
   const dateNote = $derived(spanNote(date));
+  // The credit line `#credits` prints: what a Compare or Map plate start hands over, as
+  // the analyst leaves it. Shown, like the date, only when the layout holds its token.
+  let credits = $state('');
   let proofPng = $state(null);
   let proofVer = $state(0); // cache-buster: bumped whenever proofPng is (re)assigned
   let tweet1 = $state('');
@@ -395,6 +398,7 @@
     const said = startFields(about);
     if (said.description) description = said.description;
     if (said.date) date = said.date;
+    if (said.credits) credits = said.credits;
     // The sending tool's name for it, unless another post holds that name: the
     // fresh number stays then, so the first save never meets another draft.
     if (said.name && !nameTaken(said.name)) postName = postTitle = said.name;
@@ -414,7 +418,7 @@
       tweet.mediaPaths = group.mediaPaths;
       extraTweets.push(tweet);
     }
-    if (said.description || said.date) regenerate();
+    if (said.description || said.date || said.credits) regenerate();
   }
 
   /** Whether a saved post other than the open one already holds this name. */
@@ -520,6 +524,7 @@
       mention,
       source,
       date,
+      credits,
       video: postVideoTitle,
     };
   }
@@ -1096,6 +1101,8 @@
         : {}),
       // written only for a post that goes out as a reply under its source
       ...(replyChosen ? { reply: true } : {}),
+      // written only when there is a credit line, so a draft without one keeps its shape
+      ...(credits.trim() ? { credits } : {}),
     };
   }
 
@@ -1450,6 +1457,7 @@
       source = s.source ?? '';
       date = typeof s.date === 'string' ? s.date : '';
       proofUndated = false;
+      credits = typeof s.credits === 'string' ? s.credits : '';
       setProof(s.proofPng ?? null);
       mediaEnabled = s.mediaEnabled ?? true;
       mediaType = s.mediaType ?? 'none';
@@ -1548,6 +1556,7 @@
     source = '';
     date = '';
     proofUndated = false;
+    credits = '';
     setProof(null);
     tweet1 = '';
     tweet1Edited = false;
@@ -1622,7 +1631,7 @@
   onDestroy(holdsUnsaved('post', () => autosave.unsaved));
 
   const hasContent = $derived(
-    !!(draftName || description.trim() || coordsText.trim() || date.trim() || mediaPaths.length ||
+    !!(draftName || description.trim() || coordsText.trim() || date.trim() || credits.trim() || mediaPaths.length ||
       proofPng || extraTweets.length || tweet1.trim() || firstMedia.length)
   );
 
@@ -1654,7 +1663,7 @@
     postDraftState.fields = hasContent
       ? {
         place, plusCode: geo?.plus_code, description, lat: geo?.lat, lon: geo?.lon,
-        coordsText, mention, source, date, video: postVideoTitle, kind,
+        coordsText, mention, source, date, credits, video: postVideoTitle, kind,
       }
       : null;
     return () => (postDraftState.fields = null);
@@ -2311,6 +2320,19 @@
             {:else if dateNote}
               <p class="field-note">{dateNote}</p>
             {/if}
+          </div>
+        {/if}
+
+        {#if templateUsesPostField(body, 'credits')}
+          <div class="field">
+            <label class="label" for="pc-credits">Credits</label>
+            <input
+              id="pc-credits"
+              class="input"
+              placeholder="Imagery: Copernicus Sentinel-2"
+              bind:value={credits}
+              onchange={regenerate}
+            />
           </div>
         {/if}
 

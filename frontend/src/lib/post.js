@@ -621,6 +621,7 @@ const FIELD_TOKENS = {
   mention: ['#mention'],
   source: ['#source'],
   date: ['#date'],
+  credits: ['#credits'],
 };
 
 // A token ends where the word does: `#placement` is text, not `#place` and "ment",
