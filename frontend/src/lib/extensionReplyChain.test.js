@@ -302,6 +302,32 @@ afterEach(() => {
   delete globalThis.AzimutPostLink;
 });
 
+describe('a picture\'s description the reply box does not offer', () => {
+  it('fills the reply all the same, and tells the app which post kept no description', async () => {
+    const b = browser();
+    const described = [{ ...POSTS[0], alt: { 'proofs/depot.png': 'A depot north of the bridge' } }, ...POSTS.slice(1)];
+    await b.worker.handOff({ ...payload, posts: described });
+
+    await heard(b.notes, 'The picture descriptions of post 1 did not go in. Copy each one from Post into the composer.');
+    await heard(b.notes, 'Post 1 of 3 is ready. Press Reply, then Azimut opens the next under it.');
+    expect(b.box()).toBe(POSTS[0].text);
+    expect(b.sends).toEqual([]);
+    const report = b.told.find((msg) => msg.type === 'post-handoff-report');
+    expect(report).toMatchObject({
+      caseId: 'case-1', draft: 'depot-strike', from: null,
+      error: 'The picture descriptions of post 1 did not go in. Copy each one from Post into the composer.',
+    });
+    expect(report.report.split('\n')).toEqual([
+      'Azimut Capture 9.9.9 on x.com',
+      'Step: alt-1',
+      'Missed: alt-1',
+      'Selectors: editors 1+1, add 0+0, files 1+1+1, reply 1, alt 0+0',
+      expect.stringMatching(/^Buttons in the dialog: /),
+    ]);
+    expect(report.report).not.toMatch(/depot|bridge/i);
+  }, 30000);
+});
+
 describe('a reply in several posts, where the reply box offers no next post', () => {
   it('fills post 1, then each next post under the reply the analyst sent, pressing nothing that sends', async () => {
     const b = browser();

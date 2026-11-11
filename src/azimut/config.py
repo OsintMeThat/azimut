@@ -164,6 +164,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # lives. On, because with no extension installed it changes nothing — the app
     # opens the intent page as it always did.
     "post_prefill": True,
+    # Whether Post shows an Alt text field under each picture of a post, for its
+    # description. Off by default; the box in the composer sets it, and a new post
+    # starts the way the last one left it.
+    "post_alt_text": False,
     # Whether a Reverse Search engine button hands the picture to the extension,
     # which opens the engine with it already in the uploader. Unlike the
     # composer above, an engine searches the moment it holds a picture — which is

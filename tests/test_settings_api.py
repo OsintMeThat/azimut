@@ -379,6 +379,19 @@ def test_the_play_buttons_on_video_panels_are_kept_and_travel_with_the_backup(cl
     assert client.get("/api/settings").json()["proof_scene_plays"] is False
 
 
+def test_posts_alt_text_box_is_off_kept_once_ticked_and_travels_with_the_backup(client):
+    assert client.get("/api/settings").json()["post_alt_text"] is False
+    assert client.put("/api/settings/prefs", json={"post_alt_text": True}).json()["post_alt_text"] is True
+    client.put("/api/settings/prefs", json={"units": "imperial"})
+    assert client.get("/api/settings").json()["post_alt_text"] is True
+    assert client.put("/api/settings/prefs", json={"post_alt_text": "maybe"}).status_code == 422
+    blob = client.get("/api/settings/export").json()
+    assert blob["settings"]["post_alt_text"] is True
+    client.put("/api/settings/prefs", json={"post_alt_text": False})
+    client.post("/api/settings/import", json=blob)
+    assert client.get("/api/settings").json()["post_alt_text"] is True
+
+
 def test_the_3d_quality_is_this_computers_and_stays_behind_in_the_backup(client):
     assert client.get("/api/settings").json()["quality_3d"] == "full"
     assert client.put("/api/settings/prefs", json={"quality_3d": "light"}).json()["quality_3d"] == "light"

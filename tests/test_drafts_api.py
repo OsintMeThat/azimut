@@ -398,6 +398,29 @@ def test_a_publishing_record_is_refused_unless_it_is_what_the_composer_writes(cl
     assert client.get(f"/api/cases/{cid}/drafts").json() == []
 
 
+def test_a_drafts_alt_texts_are_kept_by_picture(client):
+    cid = client.post("/api/cases", json={"name": "Alt"}).json()["id"]
+    alt = {"proofs/bridge.png": "A road bridge over a canal", "media/after.png": "é" * 2000}
+    state = {**STATE, "proofPng": "proofs/bridge.png", "alt": alt}
+    saved = client.post(f"/api/cases/{cid}/drafts", json={"title": "Described", "state": state}).json()
+    assert client.get(f"/api/cases/{cid}/drafts/{saved['name']}").json()["state"]["alt"] == alt
+
+
+@pytest.mark.parametrize("alt", [
+    ["proofs/bridge.png"],
+    {"../outside.png": "A bridge"},
+    {"/etc/passwd": "A bridge"},
+    {"proofs/bridge.png": 3},
+    {"proofs/bridge.png": "x" * 2001},
+    {f"media/{i}.png": "A bridge" for i in range(200)},
+])
+def test_a_drafts_alt_texts_are_refused_unless_bounded_pictures_and_words(client, alt):
+    cid = client.post("/api/cases", json={"name": "Edge"}).json()["id"]
+    res = client.post(f"/api/cases/{cid}/drafts", json={"title": "Bad", "state": {**STATE, "alt": alt}})
+    assert res.status_code == 422, res.text
+    assert client.get(f"/api/cases/{cid}/drafts").json() == []
+
+
 def test_a_posted_link_goes_on_the_proof_and_follows_the_draft(client):
     """The proof a post is about keeps where it went out (not as a source: it is no
     evidence). A link changed on the draft replaces it, and a delete of the draft leaves

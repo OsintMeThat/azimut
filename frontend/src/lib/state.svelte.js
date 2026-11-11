@@ -34,6 +34,7 @@ export const prefs = $state({
   proofTemplate: '', // id of the proof template New proof starts with; '' = none
   proofScenePlays: true, // Geo Proof's canvas shows a ▶ on each panel cut from a video
   postPrefill: true, // let the capture extension fill that composer on Publish
+  postAltText: false, // Post shows an Alt text field under each picture (lib/postAlt.js)
   reversePrefill: true, // let it hand the image to the engine on Reverse Search
   signatureHandle: '', // account handle stamped onto proofs that opt into it
   // who signs a report: what a note's {name}, {role} and {organisation} print
@@ -124,6 +125,7 @@ export function applyPrefs(s) {
   if (s.proof_template !== undefined) prefs.proofTemplate = s.proof_template; // '' = none
   if (s.proof_scene_plays !== undefined) prefs.proofScenePlays = s.proof_scene_plays;
   if (s.post_prefill !== undefined) prefs.postPrefill = s.post_prefill;
+  if (s.post_alt_text !== undefined) prefs.postAltText = s.post_alt_text;
   if (s.reverse_prefill !== undefined) prefs.reversePrefill = s.reverse_prefill;
   if (s.signature_handle !== undefined) prefs.signatureHandle = s.signature_handle; // '' = none
   if (s.report_name !== undefined) prefs.reportName = s.report_name;

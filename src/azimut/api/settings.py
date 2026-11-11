@@ -157,6 +157,7 @@ class PrefsIn(BaseModel):
     # a play button on each of Geo Proof's panels cut from a video
     proof_scene_plays: bool | None = None
     post_prefill: bool | None = None  # let the extension fill that composer
+    post_alt_text: bool | None = None  # an Alt text field under each picture of a post
     reverse_prefill: bool | None = None  # let it open an engine with the image
     signature_handle: str | None = None  # account handle stamped on opted-in proofs
     # who signs a report: filled into a note's {name}, {role} and {organisation}
@@ -231,6 +232,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "proof_template": settings.get("proof_template", DEFAULT_PROOF_TEMPLATE),
         "proof_scene_plays": bool(settings.get("proof_scene_plays", True)),
         "post_prefill": bool(settings.get("post_prefill", True)),
+        "post_alt_text": bool(settings.get("post_alt_text", False)),
         "reverse_prefill": bool(settings.get("reverse_prefill", True)),
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
         **{key: _report_text(settings, key) for key in REPORT_KEYS},
@@ -410,6 +412,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["proof_scene_plays"] = bool(body.proof_scene_plays)
     if body.post_prefill is not None:
         settings["post_prefill"] = bool(body.post_prefill)
+    if body.post_alt_text is not None:
+        settings["post_alt_text"] = bool(body.post_alt_text)
     if body.reverse_prefill is not None:
         settings["reverse_prefill"] = bool(body.reverse_prefill)
     if body.signature_handle is not None:
@@ -866,6 +870,7 @@ class ImportedSettings(BaseModel):
     proof_template: str = DEFAULT_PROOF_TEMPLATE
     proof_scene_plays: bool = True
     post_prefill: bool = True
+    post_alt_text: bool = False
     reverse_prefill: bool = True
     signature_handle: str = Field(default=DEFAULT_SIGNATURE_HANDLE, max_length=64)
     report_name: str = Field(default="", max_length=REPORT_TEXT_MAX)

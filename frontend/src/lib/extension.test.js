@@ -575,6 +575,41 @@ describe('handOff: filling a composer the app prepared', () => {
     );
   });
 
+  it('hands each picture\'s description beside its file, trimmed and bounded, and nothing for another file', async () => {
+    const chrome = fillingChrome();
+    const { handOff } = load({ chrome, fetchImpl: vi.fn(async () => attachment()) });
+    chrome.scripting.executeScript = vi.fn(async () => [{ result: { filled: 2 } }]);
+    await handOff({
+      ...payload,
+      posts: [
+        { text: 'Geolocated', files: ['proofs/strike.png'], alt: { 'proofs/strike.png': ` A depot ${'x'.repeat(2100)}`, 'media/elsewhere.png': 'Not here' } },
+        { text: 'Context', files: [], alt: ['A list is no description'] },
+      ],
+    });
+    await settle(() =>
+      expect(chrome.scripting.executeScript).toHaveBeenCalledWith(expect.objectContaining({ files: ['handoff.js'] }))
+    );
+    const setter = chrome.scripting.executeScript.mock.calls.map(([one]) => one).find((call) => call.args?.[0]?.posts);
+    const [{ posts }] = setter.args;
+    expect(posts[0].files).toEqual([
+      expect.objectContaining({ id: '0:0', name: 'strike.png', alt: expect.stringMatching(/^A depot x+$/) }),
+    ]);
+    expect(posts[0].files[0].alt).toHaveLength(2000);
+    expect(posts[1]).toEqual({ text: 'Context', files: [] });
+  });
+
+  it('hands a thread without descriptions over with no word of them', async () => {
+    const chrome = fillingChrome();
+    const { handOff } = load({ chrome, fetchImpl: vi.fn(async () => attachment()) });
+    chrome.scripting.executeScript = vi.fn(async () => [{ result: { filled: 2 } }]);
+    await handOff({ ...payload, posts: [{ text: 'Geolocated', files: ['proofs/strike.png'], alt: { 'proofs/strike.png': '   ' } }] });
+    await settle(() =>
+      expect(chrome.scripting.executeScript).toHaveBeenCalledWith(expect.objectContaining({ files: ['handoff.js'] }))
+    );
+    const setter = chrome.scripting.executeScript.mock.calls.map(([one]) => one).find((call) => call.args?.[0]?.posts);
+    expect(Object.keys(setter.args[0].posts[0].files[0])).toEqual(['id', 'name', 'type', 'parts']);
+  });
+
   it('opens the source post\'s own page for a reply under it, and says so to the filler', async () => {
     const chrome = fillingChrome();
     const { handOff } = load({ chrome, fetchImpl: vi.fn(async () => attachment()) });

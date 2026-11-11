@@ -34,7 +34,8 @@ It supports seven flows:
 - On Azimut's Google basemap, the in-app Capture button requests the current
   tab image without a screen-share prompt.
 - When Post publishes, it can open X or Bluesky with the thread already
-  typed and the proof attached, or open the reply box under the source post. It
+  typed, the proof attached and the pictures described when you wrote their alt
+  text, or open the reply box under the source post. It
   never presses Post: the composer is left filled, and publishing stays a human act.
   Once you have sent it, it offers Azimut the link of your post.
 - When Reverse Search opens an engine, it can hand the picture to the engine's
@@ -394,6 +395,15 @@ Post's **Publish** opens the site's full composer, types each post of the
 thread and attaches its pictures. Nothing is posted: the composer is left filled
 and the button is yours.
 
+**Pictures' descriptions.** When Post's **Alt text** box is ticked, each picture
+goes with its text. Once every post is in, the extension opens each picture's
+description (X's *Add description*, Bluesky's *ALT*), types the text and saves it.
+The only button it presses there is the one that keeps the description. If a
+picture offers no such control, its post keeps no description, the rest of the
+thread goes in all the same, and Azimut is told which post was missed (`alt-2`).
+Post's **Copy** beside each text is there for those, and for posting by hand. On X,
+the only trace of a description once posted is the small *ALT* badge on the picture.
+
 **Reply under the source** opens the source post's own page instead, presses its
 reply button and fills the reply box that opens, the thread under it. Only an X
 status or a Bluesky post address is taken. Without the extension, X still opens its
@@ -416,9 +426,11 @@ link, and keeps it only if you say so. For a thread it is the first post's link,
 for a reply the first reply's. On Bluesky this works only where the page shows a
 link to the post and names your account; otherwise nothing is sent.
 
-**Where it stopped.** When a hand-off stops short, the notification says why, and
+**Where it stopped.** When a hand-off stops short, or a picture's description did
+not go in, the notification says why, and
 Azimut gets a short report to paste into a bug report: the extension version and the site,
-the step (`open-reply`, `fill-1`, `add-2`, `catch-link`), how many nodes each of the
+the step (`open-reply`, `fill-1`, `add-2`, `alt-1`, `catch-link`), the posts whose
+pictures kept no description (`Missed: alt-1`), how many nodes each of the
 extension's selectors found there, and the test ids of the buttons in the dialog. It
 holds no word of the page, no handle, no post and no address beyond the site. The
 same lines go to the extension's console (`about:debugging` → This Firefox → Inspect).
